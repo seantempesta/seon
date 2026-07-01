@@ -105,6 +105,11 @@
 ;; loud marker, so the safety cap still fires for UNFLAGGED huge dumps; the
 ;; flag only bypasses it. A shared shape referenced by every clip site.
 (schema/register! :seon.render/full? :boolean)
+;; The citable result-body render cap (tokens) an eval row is clipped to —
+;; selected per-eval by AGE from the transcript block's `::result-decay`
+;; levels (config-driven agent-init CP-3 move 4). Absent → the fixed
+;; [[seon.agent.ctx/result-body-render-cap]] default.
+(schema/register! :seon.render/result-body-cap [:int {:min 0}])
 (schema/register! :seon.render/children
   [:vector {:seon.db/component true} :seon.db/ref])      ;; OPTIONAL authored nesting; derived sections query instead
 

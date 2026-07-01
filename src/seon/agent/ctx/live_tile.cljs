@@ -32,6 +32,23 @@
                                 [?e :seon.fn/source ?src]]
                :seon.db/args  [(str sym)]}))))
 
+(defn- block-content
+  "The MEANINGFUL canvas content on agent `id`'s `:live-tile` BLOCK entity
+   (config-driven agent-init CP-3 move 11) — the block's decoded
+   `:seon.render.live-tile/content` when it is a real value (a fn symbol or
+   literal hiccup), or nil when the block is absent or carries the `:none`
+   default. Reactive config-on-record: root-context seeds root's block with
+   `system-view`; a non-root agent's block defaults `:none`, so the caller
+   falls back to the agent-entity datom (byte-parity). Values arrive
+   pr-str-encoded from the mixed-:or bridge → decode on read."
+  [db id]
+  (let [blk (some (fn [b] (when (= :live-tile (:seon.agent.ctx/name b)) b))
+                  (:seon.agent/ctx
+                    (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]})))
+        c   (some->> (:seon.render.live-tile/content blk)
+                     (db/decode-edn-value :seon.render.live-tile/content))]
+    (when (and (some? c) (not= :none c)) c)))
+
 (defn live-tile-block
   "The `:live-tile` awareness section — what your human currently
    sees. Invokes the agent's wired tile value against THIS TURN's db
@@ -101,11 +118,26 @@
         ;; defensive fluff). `wired-content` needs a map; never a nil.
         (let [ent   (if (contains? (db/installed-schema db)
                                    :seon.render.live-tile/content)
-                      (or (db/pull {:seon.db/db db
-                                    :seon.db/pull-pattern
-                                    '[:seon.render.live-tile/content]
-                                    :seon.db/ref [:seon.agent/id id]})
-                          {})
+                      (let [agent-content
+                            (or (db/pull {:seon.db/db db
+                                          :seon.db/pull-pattern
+                                          '[:seon.render.live-tile/content]
+                                          :seon.db/ref [:seon.agent/id id]})
+                                {})
+                            ;; CP-3 move 11: the canvas content is READ off the
+                            ;; agent's `:live-tile` BLOCK entity (root-context's
+                            ;; mechanism — root's block carries `system-view`).
+                            ;; A meaningful block content (not `:none`/absent)
+                            ;; wins; otherwise FALL BACK to the agent-entity
+                            ;; datom (today's behavior) so a non-root agent's
+                            ;; welcome-wired tile is byte-identical. The
+                            ;; hardcoded root branch (client.cljs) still writes
+                            ;; the agent entity too until CP-4 — both carry
+                            ;; `system-view`, so reading either is identical.
+                            blk-content (block-content db id)]
+                        (if (some? blk-content)
+                          {:seon.render.live-tile/content blk-content}
+                          agent-content))
                       {})
               wired (live-tile/wired-content {:seon.render/entity ent})
               ;; The body is a render twin (:ai text, or hiccup pr-str, or

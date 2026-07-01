@@ -244,10 +244,19 @@
                        (str "open-run!: no agent " (pr-str id)
                             " — create the agent first.")}}
       (let [now        (js/Date.)
-            turn-limit (or tl (:seon.agent/default-turn-limit a)
+            ;; Run-bound SEED (config-driven agent-init, move 9): the new
+            ;; agent-level config datoms `:seon.agent.run/default-turn-limit`
+            ;; / `::default-deadline-ms` (CP-1 defaults 20 / 600000 = the live
+            ;; consts) are the reactive config-on-record source; the legacy
+            ;; runtime attr + the const remain fallbacks so a no-config agent
+            ;; reads byte-identically to today.
+            turn-limit (or tl
+                           (:seon.agent.run/default-turn-limit a)
+                           (:seon.agent/default-turn-limit a)
                            (config/default-turn-limit) default-turn-limit)
             deadline   (or dl (js/Date. (+ (.getTime now)
-                                           (or (:seon.agent/default-deadline-ms a)
+                                           (or (::default-deadline-ms a)
+                                               (:seon.agent/default-deadline-ms a)
                                                default-deadline-ms))))
             run-id     (db/new-id!)
             run-row    (cond-> {:db/id                     "run"

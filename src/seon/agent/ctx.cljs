@@ -360,6 +360,31 @@
     (or (some-> (js/Intl.DateTimeFormat.) .resolvedOptions .-timeZone) "UTC")
     (catch :default _ "UTC")))
 
+(defn escape-clipping?
+  "Whether this agent's authored blocks render FULL past the per-value clip
+   cap (#43) — READ off the agent entity's `:seon.agent.ctx/escape-clipping?`
+   datom (reactive config-on-record, CP-3 move 8), the sole source. Absent →
+   the schema default `true`.
+
+   CP-3 PARITY NOTE: this reader is the wired READ; today blocks are NOT
+   escape-clipped (the per-value clip gate [[clip-or-full]] still fires for
+   unflagged content). Routing this flag into `:seon.render/full?` is the #43
+   INTENDED behavior change — deferred to CP-5, which only has to flip the
+   DEFAULT/config, since the read already lands here. So CP-3 keeps bytes
+   identical: the value is read, not yet applied at the clip."
+  {:malli/schema [:function
+                  [:=> [:cat] :boolean]
+                  [:=> [:catn [::agent-id :string]] :boolean]]}
+  ([] (escape-clipping? (db/current-agent-id)))
+  ([agent-id]
+   (let [db (some-> db/*conn* deref)]
+     (if (and db agent-id
+              (contains? (db/installed-schema db) ::escape-clipping?))
+       (let [v (:seon.agent.ctx/escape-clipping?
+                 (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]}))]
+         (if (boolean? v) v true))
+       true))))
+
 (defn- clip-or-full
   "THE authored-content clip gate — the SINGLE place a display cap is
    applied, so the `:seon.render/full?` no-clip opt-out lives in ONE spot.
@@ -664,7 +689,13 @@
      err-data   :seon.eval/error-data
      eid        :seon.eval/id
      narr       :seon.eval/narration
-     full?      :seon.render/full?}
+     full?      :seon.render/full?
+     ;; CP-3 move 4: the citable RESULT-BODY cap, selected by the eval's AGE
+     ;; from the transcript block's `::result-decay` levels — computed by the
+     ;; transcript converter (which reads the block) and threaded in here.
+     ;; ABSENT (every non-transcript caller: gym, tests, direct calls) →
+     ;; `result-body-render-cap` (16384) = byte-identical to today.
+     result-body-cap :seon.render/result-body-cap}
     prior?]
    (let [envelope    (read-error-envelope err-data)
          ;; `:seon.render/full?` (the no-clip opt-out, pinned on this eval
@@ -705,7 +736,7 @@
            ;; stored ≤16384 result renders WHOLE (#53). It is the one
            ;; component that is row-capped upstream AND dereferenceable
            ;; via result/<id>, so it earns the larger cap.
-           (let [body-cap result-body-render-cap
+           (let [body-cap (or result-body-cap result-body-render-cap)
                  raw     (str (seval/sanitize-result-edn (or res "nil")))
                  full    (count raw)
                  ;; `full?` (the no-clip opt-out) renders the body WHOLE, so

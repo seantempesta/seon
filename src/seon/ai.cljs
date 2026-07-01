@@ -115,8 +115,9 @@
 ;; ------------------------------------------------------------
 
 (defn parse-retry-after-ms
-  "Parse an HTTP `Retry-After` header value to MILLISECONDS, or nil. The
-   header is either delta-seconds (e.g. \"30\") or an HTTP-date (e.g.
+  "Parse an HTTP `Retry-After` header value to MILLISECONDS, or nil.
+
+   The header is either delta-seconds (e.g. \"30\") or an HTTP-date (e.g.
    \"Wed, 21 Oct 2026 07:28:00 GMT\"); a date resolves to the delay from
    now (clamped non-negative). Blank/unparseable → nil."
   {:malli/schema [:=> [:catn [::header [:maybe :string]]] [:maybe :int]]}
@@ -140,10 +141,11 @@
       (or (aget headers k) (aget headers (str/lower-case k))))))
 
 (defn error-retry-after-ms
-  "The `Retry-After` (ms) carried by an SDK APIError's response headers,
-   or nil. Reads the header off the error's `.headers` (a `Headers`
-   instance on the official SDKs) and parses via [[parse-retry-after-ms]].
-   `e` is a third-party SDK error object (`:any` boundary)."
+  "The `Retry-After` (ms) carried by an SDK APIError's headers, or nil.
+
+   Reads the header off the error's `.headers` (a `Headers` instance on the
+   official SDKs) and parses via [[parse-retry-after-ms]]. `e` is a
+   third-party SDK error object (`:any` boundary)."
   {:malli/schema [:=> [:catn [::error-obj :any]] [:maybe :int]]}
   [e]
   (parse-retry-after-ms (header-get (some-> e .-headers) "retry-after")))
@@ -307,8 +309,9 @@
    ::extra-body-edn ["SEON_AI_EXTRA_BODY" parse-extra-body-edn]})
 
 (defn env-row
-  "The LLM-config attrs present in the environment — `::row`-shaped,
-   only the keys whose SEON_AI_* var is set, non-blank, and parseable.
+  "The LLM-config attrs present in the environment, `::row`-shaped.
+
+   Only the keys whose SEON_AI_* var is set, non-blank, and parseable.
    An unparseable value logs LOUDLY and is skipped."
   {:malli/schema [:=> [:cat] ::row]}
   []
@@ -346,8 +349,9 @@
             config-attrs))))
 
 (defn current
-  "The config row's set attrs — `::row`-shaped, possibly {}. Adapters
-   call this PER CALL (reactive-context — no cache) and apply their
+  "The config row's set attrs — `::row`-shaped, possibly {}.
+
+   Adapters call this PER CALL (reactive-context — no cache) and apply their
    own defaults for absent keys: explicit request opt > config row >
    adapter default. 0-arity reads the ambient `seon.db/*conn*` and
    NEVER throws ({} on the conn-not-up boot edge); 1-arity takes an
@@ -360,10 +364,76 @@
           {}))
   ([db] (or (row db) {})))
 
+;; The per-agent LLM override attrs (each `:inherit` by default) mapped to the
+;; GLOBAL config-row attr they override (config-driven agent-init, move 10).
+;; `:inherit` (the default) → use the global row's value = byte-parity for a
+;; no-override agent.
+(def ^:private agent-override-attrs
+  {::agent-provider    ::provider
+   ::agent-model       ::model
+   ::agent-temperature ::temperature
+   ::agent-max-tokens  ::max-tokens
+   ::agent-thinking    ::thinking})
+
+(schema/register! ::agent-id [:string {:min 1}])
+(schema/register! ::effective-config-request [:map [::agent-id ::agent-id]])
+
+(defn effective-config-for
+  "The EFFECTIVE LLM config for agent `id` — global row + its overrides.
+
+   The global `::config` row ([[current]]) with the agent's own `::agent-*`
+   override datoms laid over it, `:inherit` (the default) meaning \"use the
+   global value\" (move 10).
+   So a no-override agent resolves EXACTLY the global row = byte-parity;
+   an agent that transacts e.g. `::agent-model \"x\"` overrides just that key.
+   `::agent-max-retries` rides through untouched (`:inherit` → the env
+   default at the retry site). Reactive: read per call, no cache. Never
+   throws — `{}`-safe on the conn-not-up boot edge."
+  {:malli/schema [:=> [:cat ::effective-config-request] ::row]}
+  [{::keys [agent-id]}]
+  (let [global    (current)
+        db        (some-> db/*conn* deref)
+        installed (when db (db/installed-schema db))
+        agent     (when (and db agent-id) ; per-attr install gate below
+                    (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]}))]
+    (reduce-kv
+      (fn [m agent-attr global-attr]
+        ;; The `::agent-*` overrides are MIXED-`:or` schemas → stored pr-str'd
+        ;; by the bridge; decode on read. Querying a never-installed attr
+        ;; THROWS on datahike-cljs, so gate each attr by the installed schema.
+        (let [v (when (and agent (contains? installed agent-attr))
+                  (some->> (get agent agent-attr)
+                           (db/decode-edn-value agent-attr)))]
+          (if (or (nil? v) (= :inherit v))
+            m
+            (assoc m global-attr v))))
+      global
+      agent-override-attrs)))
+
+(defn agent-max-retries
+  "The per-agent LLM retry COUNT for agent `id`.
+
+   The agent's `::agent-max-retries` datom when set to an int, else
+   `default-n` (`:inherit`, the default, → the env/const default =
+   byte-parity). REPLACES the `SEON_AI_MAX_RETRIES` env read at the sole
+   retry site (move 10)."
+  {:malli/schema [:=> [:catn [::agent-id [:maybe :string]] [::default-n :int]] :int]}
+  [agent-id default-n]
+  (let [db (some-> db/*conn* deref)
+        ;; `::agent-max-retries` is a MIXED-`:or` schema → stored pr-str'd by
+        ;; the bridge; decode on read. `:inherit` (the default) → `default-n`.
+        v  (when (and db agent-id
+                      (contains? (db/installed-schema db) ::agent-max-retries))
+             (some->> (:seon.ai/agent-max-retries
+                        (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id agent-id]}))
+                      (db/decode-edn-value ::agent-max-retries)))]
+    (if (int? v) v default-n)))
+
 (defn config-extra-body
-  "The `:seon.ai/extra-body` map from the config row's `::extra-body-edn`
-   (env SEON_AI_EXTRA_BODY) — the DATA-ONLY door for the agent turn loop,
-   which builds the adapter with no request opts. `{}` when unset or
+  "The `:seon.ai/extra-body` map from the config row's `::extra-body-edn`.
+
+   Sourced from env SEON_AI_EXTRA_BODY — the DATA-ONLY door for the agent
+   turn loop, which builds the adapter with no request opts. `{}` when unset or
    unreadable (a direct transact of a non-map / malformed EDN is swallowed
    here, not surfaced as a crash). Adapters merge a non-empty result into
    the wire body; a per-call `:seon.ai/extra-body` opt still wins."
@@ -377,8 +447,9 @@
   [:or :boolean [:string {:min 1}]])
 
 (defn thinking-mode
-  "Parse a `::row` map's `::thinking` string to the value adapters
-   consume: absent or \"false\" → false (off — the default),
+  "Parse a `::row` map's `::thinking` string to the adapter value.
+
+   Adapters consume: absent or \"false\" → false (off — the default),
    \"true\" → true, anything else → the string itself (a
    reasoning-effort level like \"high\"/\"max\")."
   {:malli/schema [:=> [:catn [::row ::row]] ::thinking-value]}
@@ -389,7 +460,9 @@
     thinking))
 
 (defn provider
-  "The active LLM provider: the DB-owned config row's `::provider` (read
+  "The active LLM provider — config row `::provider`, else env, else default.
+
+   The DB-owned config row's `::provider` (read
    per call via [[current]]), else `SEON_AI_PROVIDER` env (the initial
    seed source, and the only one readable on the pre-conn boot edge where
    [[current]] returns `{}`), else `:deepseek`. ROW-FIRST now that the DB
@@ -402,8 +475,10 @@
       :deepseek))
 
 (defn dg-backend
-  "The active DiffusionGemma backend — consulted ONLY when [[provider]]
-   is `:diffusiongemma`: the DB-owned config row's `::dg-backend` (read
+  "The active DiffusionGemma backend — only when provider is `:diffusiongemma`.
+
+   Consulted only when [[provider]] is `:diffusiongemma`: the DB-owned
+   config row's `::dg-backend` (read
    per call via [[current]]), else `SEON_DG_BACKEND` env, else
    `:control` (the transformers worker with the per-step seam). `:vllm`
    routes the diffusiongemma provider through the OpenAI-compatible
@@ -449,7 +524,9 @@
    [::system-prompt {:optional true} ::system-prompt]])
 
 (defn effective-system-prompt
-  "The system message content for a call: the request's explicit
+  "The system message content for a call.
+
+   The request's explicit
    `:seon.ai/system-prompt` override when given, else the HARDCODED
    system-specific seon mechanics (`seon.agent.ctx/system-text` — byte-stable,
    the same for every agent and turn, so it caches as the system block).
@@ -460,7 +537,9 @@
   (or system-prompt ctx/system-text))
 
 (defn debug-full-prompt
-  "The FULL prompt as the agent sees it — the hardcoded system block
+  "The FULL prompt as the agent sees it.
+
+   The hardcoded system block
    ([[effective-system-prompt]]), a boundary, then the assembled context
    (block 2). THE single source both the inspector preview
    (`seon.agent.inspect/ctx-preview`) and the persisted per-turn log use,
@@ -481,11 +560,11 @@
 (schema/register! ::provider-label [:string {:min 1}])
 
 (defn log-error!
-  "ERROR-log an LLM failure with the live agent + turn identity (read
-   from the ALS scopes seon.agent establishes around each turn) so a
-   timed-out/failed call is NEVER silent in logs/pod.log.
-   `provider-label` names the provider (\"DeepSeek\"/\"Anthropic\").
-   Best-effort — never throws."
+  "ERROR-log an LLM failure with the live agent + turn identity.
+
+   Read from the ALS scopes seon.agent establishes around each turn, so a
+   timed-out/failed call is NEVER silent in logs/pod.log. `provider-label`
+   names the provider (\"DeepSeek\"/\"Anthropic\"). Best-effort — never throws."
   {:malli/schema [:=> [:catn [::provider-label ::provider-label]
                        [::error ::error]]
                   :nil]}
@@ -508,8 +587,9 @@
 ;; ============================================================
 
 (defn sync-tx-data
-  "Tx-data SEEDING the config row from the environment, ONCE (pure —
-   both inputs passed in). SEED-ONCE → THE DB OWNS:
+  "Tx-data SEEDING the config row from the environment, ONCE.
+
+   Pure — both inputs passed in. SEED-ONCE → THE DB OWNS:
      - `existing` row already configured (≥1 config attr) → `[]`
        (the DB owns it; env is ignored and runtime switches are kept);
      - row unconfigured (nil / `{}`) AND env carries config → ONE upsert
@@ -528,9 +608,10 @@
         []))))
 
 (defn ^:async sync!
-  "SEED the config row on the ambient `seon.db/*conn*` from the SEON_AI_*
-   env vars — once, only when the row is unconfigured (see ns doc: env
-   SEEDS, the DB OWNS). Called from `seon.client/start-agent!` at boot;
+  "SEED the config row on the ambient conn from the SEON_AI_* env vars.
+
+   Once, only when the row is unconfigured (see ns doc: env SEEDS, the DB
+   OWNS). Called from `seon.client/start-agent!` at boot;
    idempotent — a boot with an already-configured row transacts nothing,
    so runtime switches persist. Failures log LOUDLY and resolve
    `{::synced? false}` — LLM config must never take the boot down."

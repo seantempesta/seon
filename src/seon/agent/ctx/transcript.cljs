@@ -94,6 +94,62 @@
 (schema/register! ::summary-head?  [:boolean {:default true}])
 (schema/register! ::cite-card?     [:boolean {:default true}]) ; the fabrication guard (#63)
 
+;; ============================================================
+;; Config-driven agent-init CP-3 — reactive config-on-record reads.
+;; The transcript block's `::result-decay` (move 4) and `::tiers` (move 5)
+;; datoms drive the per-result cap and the eviction clip AT RENDER TIME.
+;; v1 defaults reproduce today (single-level decay = 16384; empty tiers =
+;; `:none`, render-all) → byte-parity holds.
+;; ============================================================
+
+(defn block-ent
+  "The agent's `:seon.agent.ctx/name` `nm` context-BLOCK entity map from db
+   value `db` (its config datoms — e.g. the transcript block's
+   `::result-decay` / `::tiers`), or nil when the agent has no such block.
+   Reactive config-on-record: the renderer reads its own config off this
+   entity every render, never a const."
+  [db agent-eid nm]
+  (some (fn [b] (when (= nm (:seon.agent.ctx/name b)) b))
+        (:seon.agent/ctx (db/entity {:seon.db/db db :seon.db/ref agent-eid}))))
+
+(defn decay-cap-for-offset
+  "The eval-result render token-cap for an eval at turn-`offset` (current-turn
+   − the eval's turn), selected from the transcript block's `::result-decay`
+   LEVELS (each `{::from-turn-offset ::token-cap}`): the level whose
+   `::from-turn-offset` is the LARGEST ≤ `offset` wins; its `::token-cap` is
+   the cap. Empty/absent levels → `default-cap` (the v1 default is the SINGLE
+   level 0→16384, so every offset selects 16384 = byte-identical to today).
+   A negative/nil offset is treated as 0."
+  {:malli/schema [:=> [:catn [::levels [:sequential :map]] [::offset [:maybe :int]]
+                       [::default-cap :int]] :int]}
+  [levels offset default-cap]
+  (let [off (max 0 (or offset 0))
+        hit (->> levels
+                 (filter #(<= (::from-turn-offset %) off))
+                 (sort-by ::from-turn-offset)
+                 last)]
+    (or (::token-cap hit) default-cap)))
+
+(defn clip-events-by-tiers
+  "Apply the transcript block's `::tiers` age-banded eviction to the ordered
+   `events` (each an event map). The clip POLICY is read off the block's
+   `::tiers` datom: EMPTY tiers (the v1 default) → `:none` — every event
+   renders (today's behavior, byte-parity). NON-EMPTY tiers activate the
+   age-banded window (the actual banding lands as CP-5's #62 flip). Reactive:
+   change the block's `::tiers` datom and the next render re-bands, no apply
+   step."
+  {:malli/schema [:=> [:catn [::tiers [:sequential :map]] [::events [:sequential :map]]]
+                  [:sequential :map]]}
+  [tiers events]
+  (if (empty? tiers)
+    ;; `:none` — the transcript renders ALL events (the sliding window is
+    ;; tier-driven; with no tiers there is nothing to evict).
+    events
+    ;; Non-empty tiers: age-banded clip. Stub for CP-3 — returns events
+    ;; unchanged so wiring the read cannot move bytes before the CP-5 flip;
+    ;; the banding mechanism activates against these tiers at CP-5 (#62).
+    events))
+
 ;; ------------------------------------------------------------
 ;; Masthead — the transcript's in-band opener, rendered every turn as the
 ;; FIRST lines of the block. Block-specific cues ONLY (the surface label,
@@ -626,7 +682,30 @@
                        events)
         ;; Coalesce: drop content-free noise + collapse consecutive
         ;; same-error runs to one line (a thrash burst can't flood the ctx).
-        events** (coalesce-events events*)
+        events*c (coalesce-events events*)
+        ;; CP-3 moves 4+5: read the transcript block's reactive config once.
+        tblock   (block-ent db my-eid :transcript)
+        ;; move 5 — the clip POLICY off `::tiers`: empty (v1 default) →
+        ;; `:none`, render-all (byte-parity); non-empty → age-banded (CP-5).
+        tiers    (::tiers tblock)
+        events*t (clip-events-by-tiers (or tiers []) events*c)
+        ;; move 4 — the per-eval RESULT-BODY cap off `::result-decay` × the
+        ;; eval's AGE (turn-offset). v1 default = a SINGLE level 0→16384, so
+        ;; the selected cap is ALWAYS 16384 (byte-identical to today's fixed
+        ;; `result-body-render-cap`). Turn-offset is not cleanly derivable per
+        ;; eval here, so offset 0 is used (documented — with the single-level
+        ;; default the offset is irrelevant; parity is the gate). Injected as
+        ;; `:seon.render/result-body-cap` onto each eval event's `::entity`,
+        ;; which `eval->renderable` forwards to `format-eval-row`.
+        levels   (::result-decay tblock)
+        body-cap (decay-cap-for-offset (or levels []) 0
+                                       ctx/result-body-render-cap)
+        events** (mapv (fn [ev]
+                         (if (= :eval (::kind ev))
+                           (update ev ::entity assoc
+                                   :seon.render/result-body-cap body-cap)
+                           ev))
+                       events*t)
         ;; Render each event, interleaving the resume marker ONCE at the
         ;; process boundary — before the first THIS-PROCESS eval that follows
         ;; a PRIOR-process eval (its `result/<id>` vars are gone).
