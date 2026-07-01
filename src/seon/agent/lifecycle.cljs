@@ -50,9 +50,10 @@
          "(it is not currently running).")}})
 
 (defn ^:async wait
-  "Park the calling agent: close its open run `:waited` → derived `:idle`,
-   the single wakeable parked state (a new message opens a fresh run). The
-   `note` is informational only — WHY it parked is the run's `:waited`
+  "Park the calling agent: close its open run `:waited` → derived `:idle`.
+
+   `:idle` is the single wakeable parked state (a new message opens a fresh
+   run). The `note` is informational only — WHY it parked is the run's `:waited`
    closed-reason. Returns `:idle` on success, a loud error envelope on a
    failed transact, no agent in scope, or no open run."
   {:malli/schema [:=> [:catn [::note :string]]
@@ -68,8 +69,9 @@
     (internal/no-agent-error "wait")))
 
 (defn ^:async complete
-  "Finish the calling agent's work: close its open run `:completed` → derived
-   `:idle` (a new message opens a fresh run). If `:seon.agent/parent` is set,
+  "Finish the calling agent's work: close its open run `:completed`.
+
+   Derived `:idle` (a new message opens a fresh run). If `:seon.agent/parent` is set,
    send the result to the parent (which wakes it via the normal inbound gate);
    no parent → the result is for the human (already said via message/user).
    The result is a MESSAGE, not a state — so it is REPORT=DATA, MESSAGE=POINTER:
@@ -98,8 +100,9 @@
     (internal/no-agent-error "complete")))
 
 (defn ^:async pause
-  "Hold the calling agent WITHOUT killing it: stamp its open run `paused-at`
-   (→ derived `:paused`) and bank the remaining wall-clock budget. `resume`
+  "Hold the calling agent WITHOUT killing it — stamp its run `paused-at`.
+
+   Derived `:paused`; banks the remaining wall-clock budget. `resume`
    re-extends the deadline by it. Returns `:paused` on success, the error
    envelope on a failed transact, no agent in scope, or no open run."
   {:malli/schema [:=> [:catn] [:or :seon.derive/state :seon.db/transact-response]]}
@@ -113,7 +116,9 @@
     (internal/no-agent-error "pause")))
 
 (defn ^:async resume
-  "Wake a paused run: clear `paused-at` (→ derived `:running`), re-extend the
+  "Wake a paused run: clear `paused-at` and re-enter the drive loop.
+
+   Derived `:running`; re-extend the
    deadline by the banked remaining-ms (a long pause never instantly blows the
    clock bound), and RE-ENTER the drive loop on the still-open run — the loop
    EXITED on :pause, so resume must re-drive or the run is derived `:running`
@@ -134,9 +139,10 @@
     (internal/no-agent-error "resume")))
 
 (defn ^:async terminate
-  "Kill an agent: set `:seon.agent/terminated-at` (presence ⇒ derived
-   `:terminated`, the one UNWAKEABLE state) and close any open run
-   `:terminated`. Orchestrator-only; an agent does not terminate itself.
+  "Kill an agent: set `:seon.agent/terminated-at`, close any open run.
+
+   Presence ⇒ derived `:terminated`, the one UNWAKEABLE state; the open run
+   closes `:terminated`. Orchestrator-only; an agent does not terminate itself.
    Returns `:terminated` on success, the error envelope on a failed transact."
   {:malli/schema [:=> [:catn [::id :seon.agent/id]]
                   [:or :seon.derive/state :seon.db/transact-response]]}

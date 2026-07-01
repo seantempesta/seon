@@ -26,7 +26,6 @@
     [clojure.string :as str]
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
-    [seon.config :as config]
     [seon.retry :as retry]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.relevant :as ctx-relevant]
@@ -121,8 +120,9 @@
 ;; ============================================================
 
 (defn turn-index
-  "The agent's NEXT turn number — `count` of every `:seon.agent.turn` the
-   agent owns (walked agent → runs → turns). Used for debug-capture file
+  "The agent's NEXT turn number — count of every turn it owns.
+
+   Walked agent → runs → turns. Used for debug-capture file
    names + log lines (uniqueness, not run-position). Derived, not persisted."
   {:malli/schema [:=> [:catn [:seon.agent/id :seon.agent/id]] :int]}
   [agent-id]
@@ -133,8 +133,9 @@
 ;; ============================================================
 
 (defn render-prompt
-  "Sync — the agent's full LLM context, rendered as a bare String. Thin
-   delegate to [[seon.agent.ctx/render-context]] (the SINGLE producer the human
+  "The agent's full LLM context, rendered as a bare String (sync).
+
+   Thin delegate to [[seon.agent.ctx/render-context]] (the SINGLE producer the human
    inspector `seon.agent.inspect/ctx-preview` also routes through, so the
    debug view and the model's prompt are byte-identical by construction).
    Renders against the frozen `db` value the loop pinned for this TURN (the
@@ -148,8 +149,9 @@
    (ctx/render-context {:seon.agent/id agent-id :seon.db/db db})))
 
 (defn embed-retrieval-on?
-  "True when embedding-retrieval is enabled — the env var `SEON_EMBED` is
-   PRESENT (any value). The SAME single switch the wire-server reads, so one
+  "True when embedding-retrieval is enabled — `SEON_EMBED` is present.
+
+   Present = any value. The SAME single switch the wire-server reads, so one
    env var gates the feature across both processes. UNSET ⇒ the prefetch
    never fires and `render-prompt` runs the byte-identical-OFF path."
   {:malli/schema [:=> [:cat] :boolean]}
@@ -157,8 +159,9 @@
   (some? (.. js/process -env -SEON_EMBED)))
 
 (defn ^:async prefetch-and-render-prompt!
-  "Render this turn's prompt over the frozen `db` value (the basis-t the loop
-   pinned for the turn), OPTIONALLY prefetching embedding-retrieval hits first.
+  "Render this turn's prompt, optionally prefetching retrieval hits.
+
+   Renders over the frozen `db` value (the basis-t the loop pinned for the turn).
    DEFAULT-OFF (byte-identical): when [[embed-retrieval-on?]] is false this is
    exactly `(render-prompt agent-id db)`. When ON: derive the query from the
    frozen db's latest live inbound, KNN over the WHOLE embedding index
@@ -198,7 +201,9 @@
 (declare close-turn!)
 
 (defn ^:async open-turn!
-  "Open a STANDALONE `:seon.agent.turn` entity with `prompt-text` attached and
+  "Open a STANDALONE `:seon.agent.turn`, run `body-fn`, close it.
+
+   `prompt-text` is attached and
    the agent's current run STAMPED on `:seon.agent.turn/run` (the run's
    derived current-turn count counts it). Awaits `body-fn` (a 0-arg thunk
    returning Promise<map>) via `close-turn!`. Returns whatever `body-fn`
@@ -335,13 +340,16 @@
 
 (defn- llm-retry-strategy
   "The backoff strategy for an LLM provider retry: exponential (base ×2),
-   jittered, per-wait-clamped, capped at `SEON_AI_MAX_RETRIES` retries and
-   a total-duration ceiling."
-  []
+   jittered, per-wait-clamped, capped at the agent's effective max-retries and
+   a total-duration ceiling. The retry COUNT is READ per agent via
+   [[seon.ai/agent-max-retries]] (config-driven agent-init, move 10) —
+   `::agent-max-retries :inherit` (the default) → `llm-retry-default-n` (4),
+   the same value the old `SEON_AI_MAX_RETRIES` env read produced = parity."
+  [id]
   (-> (retry/multiplicative-strategy llm-retry-base-ms llm-retry-factor)
       (retry/randomize-strategy llm-retry-jitter)
       (retry/clamp-delay llm-retry-max-delay-ms)
-      (retry/max-retries (config/env-int "SEON_AI_MAX_RETRIES" llm-retry-default-n))
+      (retry/max-retries (ai/agent-max-retries id llm-retry-default-n))
       (retry/max-duration llm-retry-total-cap-ms)))
 
 (defn ^:async ^:private call-llm!
@@ -359,7 +367,7 @@
         (await
           (retry/with-retry!
             {:seon.retry/thunk    (fn [] (llm-fn prompt-text))
-             :seon.retry/strategy (llm-retry-strategy)
+             :seon.retry/strategy (llm-retry-strategy id)
              :seon.retry/retry?   llm-retryable?
              :seon.retry/override (fn [resp]
                                     (some-> (get-in resp [:seon.ai/error
@@ -374,7 +382,9 @@
       (pos? retries) (assoc :seon.agent.turn/llm-retries retries))))
 
 (defn ^:async ask-and-eval!
-  "Body of `open-turn!`. Calls the LLM (via [[call-llm!]]), parses the reply,
+  "Call the LLM, parse the reply, eval-batch the forms (turn body).
+
+   The body of `open-turn!`: calls the LLM (via [[call-llm!]]), parses the reply,
    eval-batches the forms (each as a `:seon.agent.turn/evals` component), and
    returns `{:seon.agent/eval-count n}` (plus optional telemetry) for
    `open-turn!` to fold into the close-tx. An LLM-call failure

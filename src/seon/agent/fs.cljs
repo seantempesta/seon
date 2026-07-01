@@ -159,8 +159,9 @@
 ;; ============================================================
 
 (defn configure!
-  "Replace the active fs grant. Merges over current state — pass only the
-   keys you want to change.
+  "Replace the active fs grant, merging over current state.
+
+   Pass only the keys you want to change.
 
      (configure! {:seon.agent.fs/allowed-roots [\"/Users/me/work\"]
                   :seon.agent.fs/read-only?    false})
@@ -185,7 +186,9 @@
       (assoc next :seon.agent.fs/ok? true))))
 
 (defn grants
-  "What am I allowed to touch? Returns the CONFIGURED grant — the exact
+  "What am I allowed to touch?
+
+   Returns the CONFIGURED grant — the exact
    truth every fs op enforces:
 
      (seon.agent.fs/grants)
@@ -211,7 +214,9 @@
 ;; ============================================================
 
 (defn read-file
-  "Read a file (sync). Returns:
+  "Read a file (sync).
+
+   Returns:
      {:seon.agent.fs/ok? true  :seon.agent.fs/path <p> :seon.agent.fs/content <s>}    ; ok
      {:seon.agent.fs/ok? false :seon.agent.fs/path <p> :seon.agent.fs/error   <s>}    ; fail
 
@@ -300,14 +305,17 @@
     :wasi (int/wasi-pending path "stat")))
 
 (defn file-exists?
-  "True/false convenience — checks via stat, soft-fails to false on any
-   error. Named to avoid shadowing `cljs.core/exists?`."
+  "True/false convenience — checks via stat, false on any error.
+
+   Soft-fails to false. Named to avoid shadowing `cljs.core/exists?`."
   {:malli/schema [:=> [:cat :seon.agent.fs/stat-request] :boolean]}
   [req]
   (:seon.agent.fs/ok? (stat req)))
 
 (defn home-dir
-  "The user's home directory as a string. :node only; throws with a
+  "The user's home directory as a string.
+
+   :node only; throws with a
    legible message on :wasi or when neither HOME nor USERPROFILE is set
    (absent = error, never nil)."
   {:malli/schema [:=> [:cat] :string]}

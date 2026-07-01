@@ -57,8 +57,9 @@
                {:seon.agent.inspect/error :no-agent-id}))))
 
 (defn ctx-preview
-  "Return the FULL prompt the agent would see on its next render — the
-   EXACT bytes the LLM receives: the HARDCODED system block FIRST, then
+  "Return the FULL prompt the agent would see on its next render.
+
+   The EXACT bytes the LLM receives: the HARDCODED system block FIRST, then
    the assembled context. The system block is read via the SAME fn the
    adapters call (`seon.ai/effective-system-prompt` — the system-specific
    seon mechanics, NOT the soul/any file; explicit-override logic), so

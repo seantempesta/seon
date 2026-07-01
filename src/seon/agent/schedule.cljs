@@ -51,8 +51,9 @@
    [:seon.agent.schedule/concurrency-policy {:optional true} :seon.agent.schedule/concurrency-policy]])
 
 (defn host-timezone
-  "The host process's IANA timezone string (the default for a schedule with
-   no explicit `:timezone`)."
+  "The host process's IANA timezone string.
+
+   The default for a schedule with no explicit `:timezone`."
   {:malli/schema [:=> [:cat] :seon.agent.schedule/timezone]}
   []
   (.. (js/Intl.DateTimeFormat) (resolvedOptions) -timeZone))
@@ -128,10 +129,11 @@
 (schema/register! ::parse-request [:map [:seon.agent.schedule/cron :seon.agent.schedule/cron]])
 
 (defn parse
-  "Parse a 5-field cron string into `{::ok? true ::minute #{…} ::hour #{…}
-   ::day-of-month #{…} ::month #{…} ::day-of-week #{…}}`. An invalid string
-   (wrong field count / bad field) returns `{::ok? false ::error \"…\"}` —
-   never throws."
+  "Parse a 5-field cron string into per-field sets of allowed ints.
+
+   → `{::ok? true ::minute #{…} ::hour #{…} ::day-of-month #{…} ::month #{…}
+   ::day-of-week #{…}}`. An invalid string (wrong field count / bad field)
+   returns `{::ok? false ::error \"…\"}` — never throws."
   {:malli/schema [:=> [:cat ::parse-request] :seon.agent.schedule/parsed]}
   [{cron :seon.agent.schedule/cron}]
   (let [fields (-> cron str/trim (str/split #"\s+"))]
@@ -184,8 +186,9 @@
    [:seon.agent.schedule/now  :inst]])
 
 (defn due?
-  "Does `now` (truncated to the minute by the field sets) match `cron`? An
-   unparseable cron is never due (false)."
+  "Does `now` (truncated to the minute) match `cron`?
+
+   An unparseable cron is never due (false)."
   {:malli/schema [:=> [:cat ::due-request] :boolean]}
   [{cron :seon.agent.schedule/cron now :seon.agent.schedule/now}]
   (let [p (parse {:seon.agent.schedule/cron cron})]
@@ -202,8 +205,9 @@
    [:seon.agent.schedule/after :inst]])
 
 (defn next-fire-at
-  "The next instant STRICTLY AFTER `after` that matches `cron` (scanning
-   minute-by-minute, seconds zeroed), or nil if none within ~366 days / the
+  "The next instant STRICTLY AFTER `after` that matches `cron`.
+
+   Scans minute-by-minute, seconds zeroed; nil if none within ~366 days or the
    cron is unparseable."
   {:malli/schema [:=> [:cat ::next-fire-at-request] [:maybe :inst]]}
   [{cron :seon.agent.schedule/cron after :seon.agent.schedule/after}]
@@ -317,7 +321,9 @@
              :seon.db/args [id]}))
 
 (defn ^:async fire-due-schedules!
-  "Open a `:schedule` run for every :idle agent that has a schedule `due?` at
+  "Open, run, and drive a `:schedule` run for every due :idle agent.
+
+   For every :idle agent with a schedule `due?` at
    `now` (respecting the double-fire guard), RUN the due schedules' fns on the
    opened run via the injected `:seon.agent.schedule/exec-fn!` (the ticker passes
    [[seon.agent.loop/exec-scheduled-fns!]] — eval-batched as a schedule-fire turn

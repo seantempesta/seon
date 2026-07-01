@@ -201,10 +201,12 @@
              (internal/write-result "add!" id))))))
 
 (defn ^:async plan!
-  "Author a WHOLE plan in ONE transact. `:children` nests (`:parent` edges);
-   `:ref` labels a node; `:after` names labels it runs after (`depends-on`
-   edges). `:after` may name any label, defined earlier OR later. → {::ok? true
-   ::root <root-id> ::ids <label→id>} or a fail envelope."
+  "Author a WHOLE plan in ONE transact — nested children + deps.
+
+   `:children` nests (`:parent` edges); `:ref` labels a node; `:after` names
+   labels it runs after (`depends-on` edges). `:after` may name any label,
+   defined earlier OR later. → {::ok? true ::root <root-id> ::ids <label→id>}
+   or a fail envelope."
   {:malli/schema [:=> [:cat ::plan-request] ::plan-response]}
   [{::keys [title children]}]
   (let [owner (internal/scoped-owner nil)]
@@ -226,8 +228,10 @@
                                   (get-in env [:seon.db/error :seon.error/message]))))))))))
 
 (defn ^:async done!
-  "Mark a leaf done (stamps ::completed-at); may unblock its dependents next
-   turn. Already-done is idempotent success; unknown id → fail envelope."
+  "Mark a leaf done; may unblock its dependents next turn.
+
+   Stamps `::completed-at`. Already-done is idempotent success; unknown id →
+   fail envelope."
   {:malli/schema [:=> [:cat ::id-request] ::write-response]}
   [{::keys [id]}]
   (case (internal/status-of id)
@@ -241,8 +245,9 @@
          (internal/write-result "done!" id))))
 
 (defn ^:async reopen!
-  "Flip a done todo back to open; ::completed-at is explicitly retracted (absent
-   means absent, nil is never stored)."
+  "Flip a done todo back to open; retract its `::completed-at`.
+
+   Absent means absent — nil is never stored."
   {:malli/schema [:=> [:cat ::id-request] ::write-response]}
   [{::keys [id]}]
   (case (internal/status-of id)
@@ -255,8 +260,10 @@
          (internal/write-result "reopen!" id))))
 
 (defn ^:async depends!
-  "Add dependency edge(s) — the todo now runs after each :on ref (cardinality-
-   many). Remove one via `[:db/retract id :seon.agent.todo/depends-on dep]`."
+  "Add dependency edge(s) — the todo now runs after each `:on` ref.
+
+   Cardinality-many. Remove one via
+   `[:db/retract id :seon.agent.todo/depends-on dep]`."
   {:malli/schema [:=> [:cat ::depends-request] ::write-response]}
   [{::keys [id on]}]
   (case (internal/status-of id)
@@ -267,8 +274,9 @@
          (internal/write-result "depends!" id))))
 
 (defn ^:async move!
-  "Re-parent a node — `:parent` is cardinality-one, so the new parent replaces
-   the old. Identity, status, and deps unchanged."
+  "Re-parent a node — the new parent replaces the old.
+
+   `:parent` is cardinality-one. Identity, status, and deps unchanged."
   {:malli/schema [:=> [:cat ::move-request] ::write-response]}
   [{::keys [id parent]}]
   (case (internal/status-of id)
@@ -277,16 +285,19 @@
          (internal/write-result "move!" id))))
 
 (defn ^:async drop!
-  "Retract a node AND its whole subtree (plain `parent` ref ⇒ no cascade, so it
-   walks descendants). History keeps them (undo via db/as-of). → {::ok? true
-   ::dropped <count>} or a fail envelope."
+  "Retract a node AND its whole subtree.
+
+   Plain `parent` ref ⇒ no cascade, so it walks descendants. History keeps
+   them (undo via db/as-of). → {::ok? true ::dropped <count>} or a fail
+   envelope."
   {:malli/schema [:=> [:cat ::id-request] ::drop-response]}
   [{::keys [id]}]
   (await (internal/retract-subtree! id rules)))
 
 (defn next
-  "Your focus queue: READY leaves (open, unblocked) for the calling agent,
-   oldest first — the work to act on now. [] outside an agent scope."
+  "Your focus queue: READY leaves (open, unblocked), oldest first.
+
+   For the calling agent — the work to act on now. [] outside an agent scope."
   {:malli/schema [:=> [:cat :map] [:vector ::todo-ref]]}
   [_]
   (if-let [owner (internal/scoped-owner nil)]
@@ -297,9 +308,11 @@
     []))
 
 (defn tree
-  "The plan as nested EDN (children under `:seon.agent.todo/_parent`, dep ids
-   inline). {::root? id} → that subtree; {::all? true} → every owner's forest;
-   default → the calling agent's forest. The structural read you re-plan over."
+  "The plan as nested EDN — the structural read you re-plan over.
+
+   Children under `:seon.agent.todo/_parent`, dep ids inline. {::root? id} →
+   that subtree; {::all? true} → every owner's forest; default → the calling
+   agent's forest."
   {:malli/schema [:=> [:cat ::tree-request] ::tree-response]}
   [{::keys [root? all?]}]
   (let [db @db/*conn*]
@@ -313,17 +326,20 @@
               []))))
 
 (defn status
-  "Derived view of one node: done? (subtree complete), blocked? (a dependency
-   has open work), ready? (open unblocked leaf), and the {::done ::total}
-   subtree roll-up. Pass ::id."
+  "Derived view of one node — done/blocked/ready + subtree roll-up.
+
+   done? (subtree complete), blocked? (a dependency has open work), ready?
+   (open unblocked leaf), and the {::done ::total} subtree roll-up. Pass
+   ::id."
   {:malli/schema [:=> [:cat ::id-request] ::status-response]}
   [{::keys [id]}]
   (internal/status-view @db/*conn* id rules))
 
 (defn list-open
-  "Open todos, oldest first, scoped to ::owner (default: the calling agent);
-   {::all? true} lists every owner's. Flat — includes parents and blocked items
-   (use `next` for the ready-leaf focus queue)."
+  "Open todos, oldest first, scoped to `::owner` (default: caller).
+
+   {::all? true} lists every owner's. Flat — includes parents and blocked
+   items (use `next` for the ready-leaf focus queue)."
   {:malli/schema [:=> [:cat ::list-request] ::list-response]}
   [{::keys [owner all?]}]
   (let [owner (internal/scoped-owner owner)]

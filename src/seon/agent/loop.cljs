@@ -91,8 +91,9 @@
    :terminated {}})
 
 (defn transition
-  "The single transition function: `(state, event) → next-state`. An event
-   that is not in `state`'s row leaves the state unchanged (e.g. `:resume`
+  "The single transition function: `(state, event) → next-state`.
+
+   An event that is not in `state`'s row leaves the state unchanged (e.g. `:resume`
    while `:running`, or anything while `:terminated`)."
   {:malli/schema [:=> [:catn [:seon.derive/state :seon.derive/state]
                              [:seon.agent.loop/event :seon.agent.loop/event]]
@@ -181,8 +182,9 @@
       :else :turn-ok)))
 
 (defn ^:async run-loop!
-  "Drive agentic turns for `run-id` until the FSM leaves :running. `input`
-   carries `:seon.agent/id` / `:seon.agent/llm-fn` / `:seon.agent/compile-state`.
+  "Drive agentic turns for `run-id` until the FSM leaves :running.
+
+   `input` carries `:seon.agent/id` / `:seon.agent/llm-fn` / `:seon.agent/compile-state`.
    A fold of [[seon.agent.transition]] over [[next-event]]: :turn-ok beats
    + runs a turn; the loop closes the run on the bounds it owns (:turn-limit /
    :deadline / :error / :no-forms); verb closes (:wait/:complete/:terminate)
@@ -309,7 +311,9 @@
 ;; ============================================================
 
 (defn wake-handler
-  "Return the tx-listener handler for `input`'s agent. On an inbound datom
+  "Return the tx-listener handler for `input`'s agent.
+
+   On an inbound datom
    that passes [[seon.agent/inbound-msg-datom?]], derive the agent's state
    from the local db snapshot; if :idle → open a `:message` run (cause = the
    waking message) and start `run-loop!`; if :running → `renew!` the open
@@ -415,7 +419,9 @@
 ;; ============================================================
 
 (defn drive-run!
-  "Re-enter [[run-loop!]] for `id`'s CURRENTLY-OPEN run — the re-drive entry
+  "Re-enter [[run-loop!]] for `id`'s CURRENTLY-OPEN run.
+
+   The re-drive entry
    shared by RESUME (paused-at cleared) and any future external kick. Looks up
    the loop `input` this process armed the wake trigger with (refreshed on
    every [[install-wake-trigger!]], so as fresh as the live wake handler),
@@ -472,8 +478,9 @@
    [:seon.agent.schedule/fns :seon.agent.schedule/fns]])
 
 (defn ^:async exec-scheduled-fns!
-  "Run the due schedule `fns` for `id` as ONE schedule-fire turn on the agent's
-   currently-open run — each fn invocation eval-batched in the agent's scope and
+  "Run the due schedule `fns` for `id` as ONE schedule-fire turn.
+
+   On the agent's currently-open run — each fn invocation eval-batched in the agent's scope and
    recorded as a `:seon.eval` (with a `;` narration noting the schedule fired).
    The turn is stamped `:seon.agent.turn/scheduled? true` so it RENDERS in the
    transcript (run-stamped) yet does NOT count toward turn-limit
@@ -516,7 +523,9 @@
                                    id turn-id run-id)))))))))))))))
 
 (defn install-wake-trigger!
-  "Register the inbound-message trigger for this agent — wakes a run via
+  "Register the inbound-message wake trigger for this agent.
+
+   Wakes a run via
    [[wake-handler]] when a message lands with to ∋ me AND from ≠ me AND a
    waking origin. Idempotent: unlistens any prior handler for the same
    agent-id first, so hot-reload doesn't leave stale closures wired to the
@@ -582,7 +591,9 @@
                   (str "tick failed (timer continues): " (or (.-message e) e)))))))
 
 (defn install-ticker!
-  "Install the ONE periodic ticker (idempotent, single instance): clear any
+  "Install the ONE periodic ticker (idempotent, single instance).
+
+   Clear any
    prior interval, then `setInterval` [[run-tick!]] every SEON_TICK_MS ms
    (default [[default-tick-ms]]). Returns the interval id. Wired at client
    boot beside [[install-wake-trigger!]]; safe to re-run on hot reload — it
@@ -598,8 +609,9 @@
     id))
 
 (defn uninstall-ticker!
-  "Stop the periodic ticker (clearInterval + drop the stored id). For tests +
-   clean reload."
+  "Stop the periodic ticker (clearInterval + drop the stored id).
+
+   For tests + clean reload."
   {:malli/schema [:=> [:catn] :any]}
   []
   (when-let [id @!ticker]
@@ -628,8 +640,9 @@
   [:map [:seon.agent.loop/entries [:vector :seon.agent.loop/activity-entry]]])
 
 (defn activity-log
-  "Return the agent's activity log — the DERIVED timeline of its RUNS, ordered
-   by `:seon.agent.run/started-at`. Map-in, map-out.
+  "Return the agent's activity log — a DERIVED timeline of its RUNS.
+
+   Ordered by `:seon.agent.run/started-at`. Map-in, map-out.
 
    Each entry: `:seon.agent.loop/at` (the run's started-at), `:seon.agent/state`
    (the run's projected state via [[seon.derive/state-from-primitives]] —

@@ -346,8 +346,10 @@
 (schema/register! ::armable-agent-ids-response [:vector :seon.agent/id])
 
 (defn armable-agent-ids
-  "Agent ids whose DERIVED state is `:idle` — not `:terminated` AND with no
-   OPEN run. These are the agents a trigger can WAKE (open a fresh run for);
+  "Agent ids whose DERIVED state is `:idle` — the ones a trigger can WAKE.
+
+   `:idle` = not `:terminated` AND with no OPEN run. Open a fresh run for one;
+
    a running/paused agent is mid-run, a terminated agent is dead. The boot
    resume roster + the wake re-arm both read this. Map-in `:seon.db/db` adapter
    over [[seon.derive/armable-agent-ids]] (the one filter-over-derive-state
@@ -376,7 +378,9 @@
 ;; ============================================================
 
 (defn inbound-msg-datom?
-  "True iff this added `:seon.agent.message/to` datom targets `my-eid` from a
+  "True iff this datom is a waking inbound message for `my-eid`.
+
+   An added `:seon.agent.message/to` targeting `my-eid` from a
    DIFFERENT sender with a WAKING origin (∈ {:human :agent}). The to-check is
    load-bearing: every agent installs the wake listener, so without it ONE
    message wakes EVERY agent's loop. The from/origin rule is the shared
@@ -412,8 +416,10 @@
    :seon.db/transact-response])
 
 (defn ^:async create!
-  "Allocate an agent entity (just its `:seon.agent/id` — state is DERIVED, a
-   fresh agent with no open run is `:idle`). Idempotent: re-calling with the
+  "Allocate an agent entity — just its `:seon.agent/id`.
+
+   State is DERIVED: a fresh agent with no open run is `:idle`. Idempotent:
+   re-calling with the
    same id is a no-op upsert that NEVER re-seeds — a resumed agent keeps its
    own purpose and its own edited/removed ctx blocks. A GENUINELY NEW entity
    gets `:seon.agent/purpose` ONLY when the human stated one; otherwise the
@@ -493,8 +499,9 @@
 (defonce !arm-child-fn (atom nil))
 
 (defn ^:async start!
-  "Spawn a child agent. The capability-gated lifecycle verb (the spawn
-   counterpart of `seon.agent.lifecycle/terminate`). An alias of `create!`
+  "Spawn a child agent — the capability-gated spawn lifecycle verb.
+
+   The spawn counterpart of `seon.agent.lifecycle/terminate`. An alias of `create!`
    that ALSO writes `:seon.agent/parent` = the CALLING agent (read from the
    ALS scope via `db/current-agent-id`). That parent write IS the activation
    of `:seon.agent/parent` — no separate writer. Mints a fresh 14-char child
@@ -570,8 +577,9 @@
    [:seon.agent/default-turn-limit  {:optional true} :any]])
 
 (defn ^:async delegate!
-  "Spawn a child AND hand it its task in ONE call — the ergonomic spawn→message
-   combinator. Because `start!` is `^:async`, the inline
+  "Spawn a child AND hand it its task in ONE call.
+
+   The ergonomic spawn→message combinator. Because `start!` is `^:async`, the inline
    `(let [c (start! …)] (message/agent (:seon.agent/id c) …))` recipe reads a
    `nil` id (the Promise hasn't resolved) and spawns an ORPHAN. delegate!
    awaits `start!` internally so the child id is REAL, then sends the child
@@ -713,7 +721,9 @@
     [::error ::error]]])
 
 (defn ^:async set-purpose!
-  "Pin or update why you exist — sugar over a one-attr transact to
+  "Pin or update why you exist.
+
+   Sugar over a one-attr transact to
    your own entity (`:seon.agent/purpose`, rendered every turn in your
    entity section). Equivalent to the lookup-ref transact the creation
    tutorial demonstrates."

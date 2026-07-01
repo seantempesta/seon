@@ -120,8 +120,9 @@
 ;; callers): lives here, the message-data owner, not in `.internal`.
 
 (defn waking-inbound?
-  "True iff message map `m` (a pull with its `from` ref carrying `:db/id`)
-   is a WAKING inbound for the agent whose eid is `my-eid`:
+  "True iff message map `m` is a WAKING inbound for agent `my-eid`.
+
+   `m` is a pull with its `from` ref carrying `:db/id`. Waking means:
      from ≠ me        — an agent's own writes never re-wake it
      origin ∉ {:core} — a substrate nudge never wakes an idle agent
                         (absent origin = legacy human/agent ⇒ waking).
@@ -135,8 +136,9 @@
        (not= :core (:seon.agent.message/origin m))))
 
 (defn hop-live?
-  "True iff message map `m`'s hop count is still under `seon.warn/hop-cap`
-   (absent hops = 0 ⇒ live). The ping-pong guard, factored out of
+  "True iff message `m`'s hop count is under `seon.warn/hop-cap`.
+
+   Absent hops = 0 ⇒ live. The ping-pong guard, factored out of
    [[waking-inbound?]] so the wake side can keep the loud hop-exhausted
    refusal while the transcript composes `(and (waking-inbound? …)
    (hop-live? …))` to drop a dead-chain message from the rendered log."
@@ -267,8 +269,10 @@
                     :seon.agent.message/to      [user-ref]})))
 
 (defn ^:async agent
-  "Send a message to a PEER agent by id — `message!` with `to` :=
-   `[[:seon.agent/id agent-id]]`. `from` is you (the ALS agent). Returns
+  "Send a message to a PEER agent by id.
+
+   `message!` with `to` := `[[:seon.agent/id agent-id]]`. `from` is you
+   (the ALS agent). Returns
    `message!`'s concise envelope. The peer must already exist — find live
    ids with `(db/query '[:find [?id ...] :where [?e :seon.agent/id ?id]])`:
 
