@@ -63,7 +63,21 @@ Full live state + plans = the auto-loaded memory `project-diffusion-overnight-lo
     (6 cases, REAL bb+node oracles): def-not-defn/undeclared FAIL eval→no-stop; off-by-one mean RUNS but
     behav FAILS→no-stop; correct mean → validated → STOP iter 0. (Proof self-caught a CLJS no-Ratio
     expectation bug — `(/ 10 4)`=2.5 not 5/2.) **T3 is the literal "who cares about probability" gate.**
+  - **PHASED GRAMMAR GATE** (commit `47d1cdf2`) — the owner's schemas-only→functions-only idea, T1 generalized.
+    `seon.diffusion.oracle` `phase-grammars` + `phase-violation?`, wired into `refine` as a 4th renoise source
+    behind optional `::phase`. `:schemas` allows ns+register! (rejects def/defn); `:functions` allows ns+defn
+    (rejects register!/bare-def). Name-based head match (register!/seon.schema/register!/bare all = "register!").
+    Live-proven exact vs the parser; regression test `phase-grammar-gate` green (suite 876/4043, 0 errors).
   - Found+filed: #50 — the #42 `:minimal` config-profile is a no-op (lean==full tokens), pre-existing, separate lane.
+
+  **▸ OFFLINE CONTROL SURFACE IS NOW COMPLETE.** The oracle has 5 tiers (parse / structural-lint /
+  phase-grammar / eval / behavioral) + retrieval, all renoise/clamp/inject-capable, mechanism-proven with
+  the REAL bb+node oracles. What remains is NOT more oracle features (that would be un-measured machinery —
+  against the north-star's empirical principle) but **GPU measurement**: deploy the co-location image, wire
+  the bb `op:"refine"` so the worker's in-loop `refine_loop` reaches the phase/structural tiers (today it
+  only calls bb `parse-raw`), and measure the ladder's LIFT + compose with §3 over-commit. That's owner-gated.
+  Remaining owner phased-constraint sub-directions (lower priority until GPU proof): `;; PLAN:` clamp tokens,
+  best-of-N renoise, context-as-target embedding search.
 - **Speed levers ranked:** (1) **exp D entropy_bound/tokens-per-forward — FREE on A100, prepped, UNRUN,
   ~2-3×, DO FIRST.** (2) TPU v5e via the existing JAX DiffusionGemma (port-light; de-risk = one ~$5 v5e-4 spike).
   (3) Triton MoE kernel to unblock compile (#49). Co-location prep tasks #44-#47 DONE + offline-proven.
