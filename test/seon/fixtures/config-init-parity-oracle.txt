@@ -1,0 +1,1935 @@
+;;; ┌─ skills-catalog ─
+; SKILLS — loadable knowledge. Each costs nothing here until you load
+; its body. Load one with (my.skills/load :name); its full body then
+; rides your context showing its token cost — (my.skills/unload :name)
+; to drop what you're done with. ● loaded · ○ available.
+; - :clojurescript  ○ — ClojureScript semantics for the Seon CLJS pod. Use when writing or debugging .cljs in the pod, when agent-eval'd forms behave unexpectedly, when working with ^:async / await / js/Promise, when a Promise leaks into agent output, when defs don't persist across eval-str, when instrumentation throws :malli.core/invalid-output on a Promise, or when reaching for core.async in the pod. Use when you see cljs.js, seon.eval, the bootstrap compile-state, or self-host compilation.
+; - :data-modeling  ○ — Designing a data model in Seon — schema design IS database design, ONE act. Use when modeling a new domain, deciding an attribute's type, choosing identity vs ref vs component-ref vs cardinality-many, picking optional vs required, writing a fn spec over your data, or driving generative tests from a schema. Use when you catch yourself reaching for a :type/:kind field, a 'table' of records, a [:maybe X], a stored nil, or an inline-duplicated constraint. This skill owns DESIGN (what shape to register and why); the datahike skill owns the resulting query/transact/pull mechanics — cross-linked, not duplicated.
+; - :data-oriented-clojure  ○ — Foundational mindset for writing Clojure/ClojureScript the Seon way — data-oriented, immutable, schema-first, EAV, errors-as-values, derive-don't-store. Use this BEFORE writing or reviewing ANY seon .clj/.cljs, designing a data model, or implementing an agent verb, AND whenever you catch an imperative/OO reflex: a mutable accumulator loop, a :type/:kind discriminator, a 'table' of records, bare (non-namespaced) map keys, a thrown exception in an agent-facing fn, :pre/:post or hand-rolled validation, stored/cached derived state or a 'mark-as-seen' flag, threading a db/conn through call sites, a bare top-level await, or a foo-v2/parallel namespace to 'house a fix'. Use when you're about to guess a library's behavior from memory instead of reading reference-code/. For EAV query syntax see the datahike skill; for ^:async/self-host see the clojurescript skill — this is the mindset that links them.
+; - :datahike  ○ — Seon database patterns. Use when writing Datalog queries, transacting data, debugging empty/unexpected results, designing a schema, or working with seon.db / seon.schema. Use for schema/register!, db/transact!, db/query, db/pull, db/entity, db/store-inventory, lookup-refs, refs/components/identity, upsert, retract, cardinality-many, CAS fences, as-of/since history, listen!/triggers, or any 'where do I put this data / how do I read it back' question in the CLJS pod.
+; - :repl  ● loaded — How the Seon REPL reads, repairs, and evaluates the Clojure forms you write. Use when an eval fails to parse, when your form comes back as a :read error, when a value you typed didn't run, when you're unsure whether to write a `(` form vs `;` prose vs a `{}` map, when a paren/bracket is unbalanced, or when you want your forms to land correctly on the first try.
+; - :ui-live-tiles  ○ — Show your human a live VIEW, don't just message them. Use this BEFORE you reply to your human with a wall of text — when you have data, a query result, a table, a plan, a status, a recommendation, or progress to convey; when you want to build a tile / dashboard / canvas / chart / view for your human to SEE; when you're about to dump a result map or a list as prose; when you catch yourself narrating numbers you could render; when you want a button / form / input the human can click or type into. Your human watches your CANVAS (the focal tile on your /agent/{id} page), not a chat log — render to it. Covers wiring :seon.render.live-tile/content (literal hiccup OR a tile fn returning {:seon.render/hiccup … :seon.render/ai …}), the my.ui (static) / my.tile (INTERACTIVE controls) / my.data (aggregation) toolkit, semantic-hiccup styling, the safelisted utility vocabulary, compact/expanded faces, and seon.render/block for typed data. Cross-links data-oriented-clojure (derive-don't-store) + datahike (the data you'd show).
+;;; └─ end skills-catalog ─
+
+;;; ┌─ repl ─
+; # REPL — how your forms are read, repaired, and run
+;
+; Every reply you write is split into top-level forms by a **real reader**
+; (rewrite-clj), not string-splitting. Knowing how it segments and repairs your
+; text lets you write forms that land on the first try. The segmenter is
+; `seon.repl.internal/parse-forms`; the repair layer is `seon.repair`.
+;
+; ## What EVALUATES vs what is DROPPED (forms-and-prose-only)
+;
+; The reader keeps exactly one thing as a runnable form: a **list** `(…)` (and the
+; list-shaped reader macros `'x` `@x` `#(…)` `` `(…) `` `#'x`). Everything else is
+; prose.
+;
+; - `(db/transact! …)` `(message/user "hi")` `(let [x 1] …)` → **evaluated**.
+; - A bare atom / number / string / keyword / sentence → **dropped** (not echoed).
+; - A top-level **data literal** `{…}` / `[…]` / `#{…}` → **dropped** with one
+;   warning. If you mean to RUN a value, wrap it in a call: `(db/transact! :seon
+;   [{…}])`, not a bare `{…}`.
+;
+; **Comment levels carry meaning** (your context renders as eval'able Clojure):
+; `;` = prose to your human, `;;` = a code comment above a form, `;;;` = runtime
+; structure (don't author these). Write your reasoning as `;` lines — never type
+; `;;` when you actually mean data.
+;
+; ## What the REPL AUTO-FIXES for you (don't sweat these)
+;
+; A delimiter mistake is repaired in place via parinfer indent-mode and then
+; re-validated before it runs — so these recover automatically:
+;
+; - a **missing trailing closer**: `(defn mean [xs] (/ (reduce + xs) (count xs))`
+;   → the `)` is added.
+; - a **surplus closer**: `(foo))` → the extra `)` is dropped.
+; - a **wrong closer type** indent makes obvious: `]` where a `)` was meant.
+;
+; Keep your indentation honest — it's the signal parinfer uses. A pure orphan
+; closer on its own line (`}` / `]`) is treated as recovery noise and dropped, so
+; one stray delimiter never shreds your whole block.
+;
+; ## What the REPL does NOT guess — you must fix these
+;
+; When the fix would require guessing your intent, the form comes back as a
+; `:read` error showing your broken text, and you correct it next turn. These are
+; NOT auto-repaired:
+;
+; - **invalid token**: `3x`, a lone `:` — `(map inc [1 2 3x])` is wrong; did you
+;   mean `3`? `30`? The REPL won't guess.
+; - **odd map**: `{:a 1 :b}` — a value is missing; only you know what.
+; - **bad metadata**: `^123 (foo)` — metadata must be a map/keyword/symbol/string.
+;
+; These are exactly the cases where checking a fn/arg name against the codebase
+; (query the program graph) before re-writing pays off — the reader can flag the
+; shape, but not the right name.
+;
+; ## How a failure reaches you
+;
+; A broken form records a `:read` eval whose value is your own text plus the
+; parser message — you see it on your next turn's transcript and self-correct.
+; Forms BEFORE and AFTER a broken one still run; one mistake doesn't abort the
+; batch. An incomplete final form (EOF mid-form, e.g. `(db/transact! :seon [{:a
+; 1}` with no closer) is ONE honest error, not a cascade.
+;
+; ## Write forms that land
+;
+; 1. **One form, then read the result.** An eval returns the envelope; read it —
+;    an eval can succeed yet carry `:seon.db/ok? false`. Don't batch ten forms
+;    blind.
+; 2. **Balanced delimiters matter less than honest indentation** — parinfer closes
+;    what your indentation implies, but a misleading indent fixes the wrong thing.
+; 3. **Wrap values you mean to run** — a bare `{…}` is dropped; `(do {…})` or the
+;    call that consumes it runs.
+; 4. **Reasoning is `;` prose**, data is data — never `;;`-disguise a value.
+; ── repl skill · ~863 tok
+;    done? (my.skills/unload :repl) ──
+;;; └─ end repl ─
+
+;;; ┌─ namespaces ─
+; The loaded namespaces below, ordered by recency (most-recently-modified last).
+
+;;; ┌─ namespace seon.agent.lifecycle ─
+(ns seon.agent.lifecycle
+  "The agent's run-lifecycle verbs — `wait` / `complete` / `pause` / `resume`
+   / `terminate`.
+
+   State is DERIVED from the run, so each verb is a RUN mutation, not a stored
+   state flip:
+     - `wait`      closes the open run `:waited`      → derived `:idle`
+     - `complete`  closes the open run `:completed`   → derived `:idle`
+     - `pause`     stamps the open run `:paused-at`   → derived `:paused`
+     - `resume`    clears `:paused-at` + re-extends   → derived `:running`
+     - `terminate` sets `:seon.agent/terminated-at` + closes any open run
+                   `:terminated`                      → derived `:terminated`
+
+   Each returns the new DERIVED state keyword (the value the transcript shows:
+   `:idle` for wait/complete, `:paused`/`:running` for pause/resume,
+   `:terminated` for terminate), or a loud error envelope on a failed transact
+   / no agent in scope / no open run (errors are values — never a throw). The
+   REASON a run closed lives on the run (`:seon.agent.run/closed-reason`), not
+   a separate note. No verb ever writes a self→self message.
+
+   `wait` / `complete` / `pause` / `resume` default to the calling agent, read
+   from the ALS scope via `(seon.db/current-agent-id)` — call them inside
+   `(seon.db/with-agent id …)`. `terminate` takes an explicit id (it is
+   orchestrator-only; an agent does not terminate itself).
+
+   The run mutations live in [[seon.agent.run]]; the shared
+   no-agent-in-scope envelope in [[seon.agent.internal]].
+
+   `^:async` fns aren't runtime-instrumented — the `:malli/schema` is the
+   contract."
+  (:require
+    [seon.agent.internal :as internal]
+    [seon.agent.loop :as loop]
+    [seon.agent.message :as msg]
+    [seon.agent.run :as run]
+    [seon.db :as db]
+    [seon.schema :as schema]))
+
+(schema/register! ::note   :string)
+(schema/register! ::result :string)
+
+(defn- no-open-run-error
+  "The error envelope a verb returns when the agent has no OPEN run to act on
+   (e.g. `wait` called while already idle)."
+  [verb id]
+  {:seon.db/ok? false
+   :seon.db/error
+   {:seon.error/message
+    (str verb ": agent " (pr-str id) " has no open run to act on "
+         "(it is not currently running).")}})
+
+(defn ^:async wait
+  "Park the calling agent: close its open run `:waited` → derived `:idle`,
+   the single wakeable parked state (a new message opens a fresh run). The
+   `note` is informational only — WHY it parked is the run's `:waited`
+   closed-reason. Returns `:idle` on success, a loud error envelope on a
+   failed transact, no agent in scope, or no open run."
+  {:malli/schema [:=> [:catn [::note :string]]
+                  [:or :seon.derive/state :seon.db/transact-response]]}
+  [note]
+  (if-let [id (db/current-agent-id)]
+    (if-let [r (run/current-run {:seon.agent/id id})]
+      (let [env (await (run/close-run!
+                         {:seon.agent.run/id            (:seon.agent.run/id r)
+                          :seon.agent.run/closed-reason :waited}))]
+        (if (:seon.db/ok? env) :idle env))
+      (no-open-run-error "wait" id))
+    (internal/no-agent-error "wait")))
+
+(defn ^:async complete
+  "Finish the calling agent's work: close its open run `:completed` → derived
+   `:idle` (a new message opens a fresh run). If `:seon.agent/parent` is set,
+   send the result to the parent (which wakes it via the normal inbound gate);
+   no parent → the result is for the human (already said via message/user).
+   The result is a MESSAGE, not a state — so it is REPORT=DATA, MESSAGE=POINTER:
+   `result` is a SHORT pointer (the stored entity id + a one-line summary), not
+   a long report inline (a multi-line result truncates mid-string and never
+   sends). Store the findings as data first, then complete with the pointer;
+   the parent QUERIES the stored data. Returns `:idle` on success, the error
+   envelope on a failed transact, no agent in scope, or no open run."
+  {:malli/schema [:=> [:catn [::result :string]]
+                  [:or :seon.derive/state :seon.db/transact-response]]}
+  [result]
+  (if-let [id (db/current-agent-id)]
+    (if-let [r (run/current-run {:seon.agent/id id})]
+      (let [ent    (db/entity {:seon.db/ref [:seon.agent/id id]})
+            parent (:db/id (:seon.agent/parent ent))
+            env    (await (run/close-run!
+                            {:seon.agent.run/id            (:seon.agent.run/id r)
+                             :seon.agent.run/closed-reason :completed}))]
+        (if (:seon.db/ok? env)
+          (do (when parent
+                (await (msg/message! {:seon.agent.message/content result
+                                      :seon.agent.message/to      [parent]})))
+              :idle)
+          env))
+      (no-open-run-error "complete" id))
+    (internal/no-agent-error "complete")))
+
+(defn ^:async pause
+  "Hold the calling agent WITHOUT killing it: stamp its open run `paused-at`
+   (→ derived `:paused`) and bank the remaining wall-clock budget. `resume`
+   re-extends the deadline by it. Returns `:paused` on success, the error
+   envelope on a failed transact, no agent in scope, or no open run."
+  {:malli/schema [:=> [:catn] [:or :seon.derive/state :seon.db/transact-response]]}
+  []
+  (if-let [id (db/current-agent-id)]
+    (if-let [r (run/current-run {:seon.agent/id id})]
+      (let [env (await (run/pause! {:seon.agent/id     id
+                                    :seon.agent.run/id (:seon.agent.run/id r)}))]
+        (if (:seon.db/ok? env) :paused env))
+      (no-open-run-error "pause" id))
+    (internal/no-agent-error "pause")))
+
+(defn ^:async resume
+  "Wake a paused run: clear `paused-at` (→ derived `:running`), re-extend the
+   deadline by the banked remaining-ms (a long pause never instantly blows the
+   clock bound), and RE-ENTER the drive loop on the still-open run — the loop
+   EXITED on :pause, so resume must re-drive or the run is derived `:running`
+   with nothing folding turns. Returns `:running` on success, the error
+   envelope on a failed transact (incl. a not-actually-paused run), no agent in
+   scope, or no open run."
+  {:malli/schema [:=> [:catn] [:or :seon.derive/state :seon.db/transact-response]]}
+  []
+  (if-let [id (db/current-agent-id)]
+    (if-let [r (run/current-run {:seon.agent/id id})]
+      (let [env (await (run/resume! {:seon.agent/id     id
+                                     :seon.agent.run/id (:seon.agent.run/id r)}))]
+        (if (:seon.db/ok? env)
+          (do (loop/drive-run! {:seon.agent/id id})
+              :running)
+          env))
+      (no-open-run-error "resume" id))
+    (internal/no-agent-error "resume")))
+
+(defn ^:async terminate
+  "Kill an agent: set `:seon.agent/terminated-at` (presence ⇒ derived
+   `:terminated`, the one UNWAKEABLE state) and close any open run
+   `:terminated`. Orchestrator-only; an agent does not terminate itself.
+   Returns `:terminated` on success, the error envelope on a failed transact."
+  {:malli/schema [:=> [:catn [::id :seon.agent/id]]
+                  [:or :seon.derive/state :seon.db/transact-response]]}
+  [id]
+  (let [r   (run/current-run {:seon.agent/id id})
+        env (await (db/transact!
+                     {:seon.db/tx-data [{:seon.agent/id             id
+                                         :seon.agent/terminated-at (js/Date.)}]}))]
+    (if (:seon.db/ok? env)
+      (do (when r
+            (await (run/close-run!
+                     {:seon.agent.run/id            (:seon.agent.run/id r)
+                      :seon.agent.run/closed-reason :terminated})))
+          :terminated)
+      env)))
+;;; └─ end namespace seon.agent.lifecycle ─
+
+;;; ┌─ namespace seon.agent.message ─
+(ns seon.agent.message
+  "Message model — THE single write path for `:seon.agent.message` rows.
+   The keyword namespace matches the code namespace. Owns:
+     - the `:seon.agent.message/*` attr + entity-kind schemas
+     - the `:seon.user` entity schema + `user-ref` (the default `to`
+       target — seeded at boot by seon.client)
+     - `message!` — fully-formed storage, boundary defaulting, the
+       blank-content refusal, hop derivation (`outbound-hops`), the
+       concise success envelope
+     - the two agent-facing verbs, thin wrappers over `message!` — the
+       agent reaches them through the `message/` alias on its home ns
+       (`(message/user …)` / `(message/agent …)`):
+         `user`  — from = me (the ALS agent), to = the one human user
+         `agent` — from = me, to = [agent-id]; REFUSES `to = me` (loud
+                   error, no row). No self→self messaging, ever.
+
+   The WAKE side (the inbound-message trigger + the hop-cap refusal at
+   wake) stays in `seon.agent` — it drives the loop and would cycle
+   here. `seon.agent` re-exports `message!`/`user-ref` on the face."
+  (:require
+    [clojure.string :as str]
+    [seon.agent.message.internal :as internal]
+    [seon.db :as db]
+    [seon.schema :as schema]
+    [seon.warn :as warn]))
+
+;; Every stored message is FULLY FORMED — from + to + content + at + id
+;; + hops. Identity is the ref (`:seon.agent.message/from` points at the
+;; sender entity — a `:seon.user/id` or `:seon.agent/id` entity).
+;; "My conversation" is DERIVED: from = me OR to ∋ me.
+(schema/register! :seon.agent.message/id      [:and {:seon.db/identity true} :seon.db/id])
+(schema/register! :seon.agent.message/content :string)
+(schema/register! :seon.agent.message/from    :seon.db/ref)
+(schema/register! :seon.agent.message/to      [:vector :seon.db/ref])
+(schema/register! :seon.agent.message/at      :inst)
+;; Ping-pong guard: 0 from the user; an agent send carries the SAME
+;; {me,peer}-pair's prior depth + 1 (per-peer, reset at each human
+;; message — see `internal/outbound-hops`); the wake trigger refuses
+;; past `seon.warn/hop-cap`.
+(schema/register! :seon.agent.message/hops    :int)
+;; Provenance for the wake gate: :human / :agent / :core (a substrate
+;; nudge that must never wake an idle agent). Derived in message!.
+(schema/register! :seon.agent.message/origin  [:enum :human :agent :core])
+
+;; The user is a REAL entity — ONE `:seon.user/id` row seeded at boot
+;; (identity upsert, idempotent — same pattern as agent entities). All
+;; message refs are uniform; later home for user prefs/memory.
+(schema/register! :seon.user/id         [:string {:seon.db/identity true}])
+
+(schema/register! :seon.user
+  [:map {:seon.db/entity true}
+   [:seon.user/id :seon.user/id]])
+
+(def user-ref
+  "Lookup ref of THE user entity (one human for now). Seeded at boot by
+   seon.client; the default `:seon.agent.message/to` target."
+  [:seon.user/id "user"])
+
+;; Entity-kind :map schema — required attrs reflect what message!
+;; (the single writer) populates unconditionally. See the entity-kind
+;; block comment in seon.agent for the discovery/render mechanism.
+(schema/register! :seon.agent.message
+  [:map {:seon.db/entity   true
+         :seon.render/ai   'seon.handlers.message/render-ai
+         :seon.render/html 'seon.handlers.message/render-html}
+   [:seon.agent.message/id      :seon.agent.message/id]
+   [:seon.agent.message/from    :seon.agent.message/from]
+   [:seon.agent.message/to      :seon.agent.message/to]
+   [:seon.agent.message/content :seon.agent.message/content]
+   [:seon.agent.message/at      :seon.agent.message/at]
+   [:seon.agent.message/hops    :seon.agent.message/hops]
+   [:seon.agent.message/origin  :seon.agent.message/origin]])
+
+;; ============================================================
+;; message! — the SINGLE write entry point for messages (the verbs
+;; `user`/`agent` below are thin wrappers over it). Presence of
+;; attributes IS the intent; the DB holds only FULLY-FORMED messages
+;; (from + to + content + at + id + hops). All defaulting is a
+;; message!-boundary liberty, never a storage shape.
+;; ============================================================
+
+(schema/register! ::message-request
+  [:map
+   [:seon.agent.message/content :seon.agent.message/content]
+   ;; from defaults to the calling agent's ref via the ALS scope
+   ;; ((seon.db/current-agent-id)); the HTTP adapter passes the user
+   ;; ref explicitly.
+   [:seon.agent.message/from {:optional true} :seon.agent.message/from]
+   ;; to accepts ONE ref or a vector of refs (fan-out); defaults to
+   ;; THE user. Storage is always the normalized vector.
+   [:seon.agent.message/to {:optional true}
+    [:or :seon.db/ref [:vector :seon.db/ref]]]
+   ;; Provenance override. Absent ⇒ DERIVED from `from` (user ⇒ :human,
+   ;; else :agent). A substrate-originated nudge (tile recovery) passes
+   ;; :core explicitly so it can't wake an idle agent. The HTTP/user
+   ;; adapter relies on the derived :human; agent sends on the derived
+   ;; :agent.
+   [:seon.agent.message/origin {:optional true} :seon.agent.message/origin]])
+
+;; Concise success / standard error envelope: the raw transact tx-report
+;; is OFF the agent surface — it taught nothing and carried a misdirected
+;; "narrow your query" hint. Success answers the three things a sender
+;; can act on: did it store, which message, at what hop depth. Failure
+;; stays the core-standard error envelope (errors are values).
+(schema/register! ::message-response
+  [:or
+   [:map
+    [:seon.agent.message/ok?  [:= true]]
+    [:seon.agent.message/id   :seon.agent.message/id]
+    [:seon.agent.message/hops :seon.agent.message/hops]]
+   [:map
+    [:seon.db/ok?   [:= false]]
+    [:seon.db/error :seon.db/error]]])
+
+;; The waking-inbound RULE — ONE source of truth for "this message wakes
+;; (and renders as an inbound) for the agent whose eid is `my-eid`". Both
+;; the wake gate ([[seon.agent/inbound-msg-datom?]]) and the transcript
+;; head-render ([[seon.agent.ctx.transcript]]) call these so a message wakes
+;; under exactly the rule it renders under — no drift. PUBLIC (cross-ns
+;; callers): lives here, the message-data owner, not in `.internal`.
+
+(defn waking-inbound?
+  "True iff message map `m` (a pull with its `from` ref carrying `:db/id`)
+   is a WAKING inbound for the agent whose eid is `my-eid`:
+     from ≠ me        — an agent's own writes never re-wake it
+     origin ∉ {:core} — a substrate nudge never wakes an idle agent
+                        (absent origin = legacy human/agent ⇒ waking).
+   The to-check (to ∋ me) is the CALLER's job. The HOP-CAP guard is NOT
+   folded in here on purpose: the wake side needs hop-exhausted messages
+   to still pass so it can refuse LOUDLY; the transcript adds the hop-cap
+   clause itself. See [[hop-live?]]."
+  {:malli/schema [:=> [:catn [::m :map] [::my-eid :int]] :boolean]}
+  [m my-eid]
+  (and (not= my-eid (:db/id (:seon.agent.message/from m)))
+       (not= :core (:seon.agent.message/origin m))))
+
+(defn hop-live?
+  "True iff message map `m`'s hop count is still under `seon.warn/hop-cap`
+   (absent hops = 0 ⇒ live). The ping-pong guard, factored out of
+   [[waking-inbound?]] so the wake side can keep the loud hop-exhausted
+   refusal while the transcript composes `(and (waking-inbound? …)
+   (hop-live? …))` to drop a dead-chain message from the rendered log."
+  {:malli/schema [:=> [:catn [::m :map]] :boolean]}
+  [m]
+  (< (or (:seon.agent.message/hops m) 0) warn/hop-cap))
+
+(defn ^:async message!
+  "Send a message — THE single entry point for `:seon.agent.message` writes.
+   Map-in / map-out; returns a CONCISE envelope, never the raw
+   tx-report:
+     {:seon.agent.message/ok? true :seon.agent.message/id _ :seon.agent.message/hops _}
+     {:seon.db/ok? false :seon.db/error …}   ; failure (errors are values)
+
+   Defaulting (boundary liberties — the STORED row is always full):
+     :seon.agent.message/from — defaults to [:seon.agent/id (current-agent-id)]
+                          from the ALS turn scope. No scope + no explicit
+                          from → error envelope.
+     :seon.agent.message/to   — single ref or vector; defaults to the user.
+     hops               — 0 when from = the user; otherwise this
+                          {me,recipient}-pair's prior depth + 1 (per-peer
+                          ping-pong guard, reset at each human message —
+                          `internal/outbound-hops`; distinct delegation
+                          rounds do NOT accumulate). The wake trigger
+                          refuses past `seon.warn/hop-cap`.
+
+   Blank content is REJECTED with an error envelope — an empty message
+   carries nothing; since every message write routes through here, the
+   guard kills the class.
+
+   A message ALWAYS transacts and is delivered — there is no same-turn
+   refusal. Errors are values: if a sibling form in the same turn
+   returned a `{*/ok? false}` envelope the agent may over-claim, but that
+   is visible in the transcript and a human follow-up re-wakes the agent.
+   Nothing here blocks a send."
+  {:malli/schema [:=> [:cat ::message-request] ::message-response]}
+  [{:seon.agent.message/keys [content from to origin]}]
+  (let [agent-id (db/current-agent-id)
+        from     (or from (when agent-id [:seon.agent/id agent-id]))
+        to       (cond
+                   (nil? to)             [user-ref]
+                   (and (vector? to)
+                        (vector? (first to))) to        ; vector of lookup refs
+                   (and (vector? to)
+                        (keyword? (first to))) [to]     ; single lookup ref
+                   (vector? to)          to             ; vector of eids
+                   :else                 [to])]         ; single eid
+    (cond
+      (or (nil? content) (str/blank? content))
+      {:seon.db/ok? false
+       :seon.db/error
+       {:seon.error/message
+        (str "message!: blank :seon.agent.message/content refused — a message "
+             "with nothing to say must not be stored. Compose the text "
+             "first, then send.")}}
+
+      (nil? from)
+      {:seon.db/ok? false
+       :seon.db/error
+       {:seon.error/message
+        (str "message!: no :seon.agent.message/from and no agent-id in scope — "
+             "pass from explicitly or call inside (seon.db/with-agent …).")}}
+
+      :else
+      (let [from-user? (internal/user-entity? from)
+            hops   (if from-user?
+                     0
+                     (inc (internal/outbound-hops agent-id to)))
+            ;; Provenance: explicit :origin wins (a :core nudge);
+            ;; otherwise derived — a user-ref send is :human, every
+            ;; other send is :agent. Never stored as nil.
+            origin (or origin (if from-user? :human :agent))
+            msg-id (db/new-id!)
+            row    {:seon.agent.message/id      msg-id
+                    :seon.agent.message/from    from
+                    :seon.agent.message/to      to
+                    :seon.agent.message/content content
+                    :seon.agent.message/at      (js/Date.)
+                    :seon.agent.message/hops    hops
+                    :seon.agent.message/origin  origin}
+            ;; The message ↔ todo safety net (WRITE half): a :human inbound
+            ;; auto-mints ONE address-todo per AGENT recipient, ATOMIC in
+            ;; this same tx (no listener, no cascade). The todo carries a
+            ;; clipped preview + a back-ref to this message's identity —
+            ;; same-tx lookup-refs resolve. "Addressed" is DERIVED from the
+            ;; todo's completion; there is no stored handled? flag.
+            agent-tos (when (= origin :human)
+                        (filter #(and (vector? %) (= :seon.agent/id (first %))) to))
+            todos  (mapv (fn [agent-ref]
+                           {:seon.agent.todo/id         (db/new-id!)
+                            :seon.agent.todo/title      (internal/clip-title content)
+                            :seon.agent.todo/status     :open
+                            :seon.agent.todo/created-at (js/Date.)
+                            :seon.agent.todo/owner      agent-ref
+                            :seon.agent.todo/from       from
+                            :seon.agent.todo/message    [:seon.agent.message/id msg-id]})
+                         agent-tos)
+            env    (await (db/transact! {:seon.db/tx-data (into [row] todos)}))]
+        (if (:seon.db/ok? env)
+          ;; concise success — the tx-report stays off the agent
+          ;; surface; the id is the durable handle
+          ;; ([:seon.agent.message/id msg-id]).
+          {:seon.agent.message/ok?  true
+           :seon.agent.message/id   msg-id
+           :seon.agent.message/hops hops}
+          env)))))
+
+;; ============================================================
+;; The two agent-facing verbs. Thin wrappers over `message!` — `from`
+;; defaults to the ALS agent inside `message!`, so these only fix `to`.
+;; The agent reaches them through the `message/` alias on its home ns:
+;; `(message/user "…")` / `(message/agent id "…")`. No self→self
+;; messaging, ever: `agent` refuses `to = me` (the wake gate already
+;; ignores `from = me`; this makes it a hard prohibition at the verb).
+;; `^:async` fns are not runtime-instrumented, so the `:malli/schema` is
+;; the only contract — both reuse `::message-response`.
+;; ============================================================
+
+(defn ^:async user
+  "Send a message to your human — `message!` with `to` := THE one user.
+   `from` is you (the ALS agent). Returns `message!`'s concise envelope.
+   This is how you say something to the human watching your REPL:
+
+     (message/user \"done — stored 2 rows\")"
+  {:malli/schema [:=> [:catn [::content :string]] ::message-response]}
+  [content]
+  (await (message! {:seon.agent.message/content content
+                    :seon.agent.message/to      [user-ref]})))
+
+(defn ^:async agent
+  "Send a message to a PEER agent by id — `message!` with `to` :=
+   `[[:seon.agent/id agent-id]]`. `from` is you (the ALS agent). Returns
+   `message!`'s concise envelope. The peer must already exist — find live
+   ids with `(db/query '[:find [?id ...] :where [?e :seon.agent/id ?id]])`:
+
+     (message/agent <peer-agent-id> \"heads up: foo depends on qux\")
+
+   REFUSES sending to YOURSELF (the ALS agent in scope): a self-message
+   returns a loud error envelope and transacts NO row — an agent's
+   notes-to-itself are `;;` comments in its turn, never a stored
+   self→self message. Errors are values — branch on `:seon.db/ok?`."
+  {:malli/schema [:=> [:catn [::to-id :string] [::content :string]]
+                  ::message-response]}
+  [to-id content]
+  (let [me (db/current-agent-id)]
+    (if (and me (= to-id me))
+      {:seon.db/ok? false
+       :seon.db/error
+       {:seon.error/message
+        (str "message/agent: refused — you cannot message YOURSELF ("
+             (pr-str to-id) "). No self→self messages exist anywhere; a "
+             "note to yourself is a ;; comment in your turn. To message a "
+             "PEER, pass that agent's id; to say something to your human, "
+             "use (message/user \"…\").")}}
+      (await (message! {:seon.agent.message/content content
+                        :seon.agent.message/to      [[:seon.agent/id to-id]]})))))
+;;; └─ end namespace seon.agent.message ─
+
+;;; ┌─ namespace seon.agent.todo ─
+(ns seon.agent.todo
+  "Your plan + work queue as a TREE. A todo is one `:seon.agent.todo` entity; a
+   `:seon.agent.todo/parent` ref makes a PLAN (top = milestones, leaves =
+   actions); a `:seon.agent.todo/depends-on` ref SEQUENCES work (B depends-on A
+   = do B after A). Progress, blocked-ness, and what's-next are DERIVED from the
+   leaf `:open`/`:done` facts every turn — nothing derivable is stored. THE
+   EXEMPLAR store/retrieve ns: `schema/register!` per attr, map-in/map-out fns,
+   errors as `:seon.agent.todo/ok?` value envelopes (never throws), derived views.
+
+   Use it for any task of two+ steps: mint the steps up front, `done!` each as it
+   lands. Add one at a time (sequencing is a dependency), or author a whole plan
+   in one `plan!` (`:children` nests; `:ref` labels a node; `:after` names labels
+   it runs after):
+
+     (seon.agent.todo/add! {:seon.agent.todo/title \"write brief\"
+                            :seon.agent.todo/depends-on [[:seon.agent.todo/id \"a\"]]})
+     (seon.agent.todo/plan!
+       {:seon.agent.todo/title \"Process inbox → KB\"
+        :seon.agent.todo/children
+        [{:seon.agent.todo/title \"notes-a\" :seon.agent.todo/ref \"a\"}
+         {:seon.agent.todo/title \"synthesize\" :seon.agent.todo/after [\"a\"]}]})
+
+   Run the loop off `next` (READY leaves only); `tree`/`status` are derived read
+   views. Open items also render every turn in the open-todos section — an empty
+   section is the done-signal."
+  (:refer-clojure :exclude [next])
+  (:require
+    [clojure.string :as str]
+    [seon.agent.todo.internal :as internal]
+    [seon.db :as db]
+    [seon.schema :as schema]))
+
+;; --- Attribute schemas — one register! per attr; shared shapes referenced, never inlined.
+
+(schema/register! ::id [:and {:seon.db/identity true} :seon.db/id])
+(schema/register! ::title [:string {:min 1}])
+(schema/register! ::description :string)
+(schema/register! ::status [:enum :open :done])
+(schema/register! ::created-at :inst)
+(schema/register! ::completed-at :inst)
+(schema/register! ::owner :seon.db/ref)   ; SCOPE ref — the agent this item belongs to
+(schema/register! ::from :seon.db/ref)     ; who asked
+(schema/register! ::message :seon.db/ref)  ; the inbound message an address-todo tracks
+(schema/register! ::parent :seon.db/ref)            ; TREE edge — plain ref, no cascade
+(schema/register! ::depends-on [:vector :seon.db/ref]) ; DAG edges — cardinality-many
+
+;; --- Work-queue semantics: ONE rule set, plain data you can read AND extend
+;; --- (pass it as `%`). The queue is pure Datalog over the two refs.
+
+(def rules
+  "Datalog rules over the two refs — read AND extend them:
+   descendant (transitive tree closure, cycle-safe), leaf (no children),
+   open-work (open leaf in the subtree), blocked (a dependency has open-work),
+   ready (open unblocked leaf — work to do now). Negations (`leaf`, `not blocked`)
+   only FILTER bound tuples, so bind the entity positively BEFORE invoking these."
+  '[[(descendant ?a ?n) [?n :seon.agent.todo/parent ?a]]
+    [(descendant ?a ?n) [?m :seon.agent.todo/parent ?a] (descendant ?m ?n)]
+    [(leaf ?t) (not-join [?t] [?c :seon.agent.todo/parent ?t])]
+    [(open-work ?t) [?t :seon.agent.todo/status :open] (leaf ?t)]
+    [(open-work ?t) (descendant ?t ?l) [?l :seon.agent.todo/status :open] (leaf ?l)]
+    [(blocked ?t) [?t :seon.agent.todo/depends-on ?d] (open-work ?d)]
+    [(ready ?t) [?t :seon.agent.todo/status :open] (leaf ?t) (not (blocked ?t))]])
+
+;; --- Request/response schemas. ::ok? discriminates the envelope; failures
+;; --- carry a guiding ::error (errors are values — branch, don't catch).
+
+(schema/register! ::ok? :boolean)
+(schema/register! ::error :string)
+(schema/register! ::all? :boolean)
+(schema/register! ::dropped :int)
+(schema/register! ::on [:vector :seon.db/ref])      ; depends! edge targets
+(schema/register! ::done? :boolean)
+(schema/register! ::blocked? :boolean)
+(schema/register! ::ready? :boolean)
+(schema/register! ::progress [:map [::done :int] [::total :int]])
+
+(schema/register! ::write-response
+  [:map
+   [::ok?   ::ok?]
+   [::id    {:optional true} ::id]
+   [::error {:optional true} ::error]])
+
+(schema/register! ::id-request [:map [::id ::id]])
+
+(schema/register! ::add-request
+  [:map
+   [::title       ::title]
+   [::description {:optional true} ::description]
+   [::owner       {:optional true} :seon.db/ref]   ; default: the ALS agent
+   [::from        {:optional true} :seon.db/ref]
+   [::parent      {:optional true} ::parent]
+   [::depends-on  {:optional true} ::depends-on]])
+
+;; plan! shape — recursive: each child may carry its own :children.
+(schema/register! ::plan-node
+  [:schema {:registry {::node [:map
+                               [::title ::title]
+                               [::ref        {:optional true} :string]
+                               [::after      {:optional true} [:vector :string]]
+                               [::children   {:optional true} [:vector [:ref ::node]]]]}}
+   [:ref ::node]])
+
+(schema/register! ::plan-request
+  [:map
+   [::title    ::title]
+   [::children {:optional true} [:vector ::plan-node]]])
+
+(schema/register! ::ids [:map-of :any ::id])   ; author-label / :root → minted id
+
+(schema/register! ::plan-response
+  [:map
+   [::ok?   ::ok?]
+   [::root  {:optional true} ::id]
+   [::ids   {:optional true} ::ids]
+   [::error {:optional true} ::error]])
+
+(schema/register! ::depends-request [:map [::id ::id] [::on ::on]])
+(schema/register! ::move-request    [:map [::id ::id] [::parent ::parent]])
+
+(schema/register! ::drop-response
+  [:map
+   [::ok?      ::ok?]
+   [::dropped  {:optional true} ::dropped]
+   [::error    {:optional true} ::error]])
+
+(schema/register! ::status-response
+  [:map
+   [::id       ::id]
+   [::done?    ::done?]
+   [::blocked? ::blocked?]
+   [::ready?   ::ready?]
+   [::progress ::progress]])
+
+(schema/register! ::todo-ref
+  [:map [::id ::id] [::title ::title] [::created-at ::created-at]])
+
+(schema/register! ::tree-request
+  [:map
+   [::root? {:optional true} ::id]
+   [::all?  {:optional true} ::all?]])
+
+;; root? → one subtree map; else → a vector of root subtrees; nil when nothing.
+(schema/register! ::tree-response [:maybe [:or :map [:vector :map]]])
+
+;; --- The stored entity kind. `{:seon.db/entity true}` DECLARES that rows of
+;; --- this shape live in the DB (puts the kind in the catalog).
+
+(schema/register! ::todo
+  [:map {:seon.db/entity true}
+   [::id          ::id]
+   [::title       ::title]
+   [::created-at  ::created-at]
+   [::description {:optional true} ::description]
+   [::message     {:optional true} ::message]
+   [::parent      {:optional true} ::parent]
+   [::depends-on  {:optional true} ::depends-on]])
+
+(schema/register! ::todos [:vector ::todo])
+
+(schema/register! ::list-request
+  [:map
+   [::owner {:optional true} :seon.db/ref]   ; default: the ALS agent
+   [::all?  {:optional true} ::all?]])       ; true = every owner's items
+
+(schema/register! ::list-response
+  [:map
+   [::ok?   ::ok?]
+   [::todos {:optional true} ::todos]
+   [::error {:optional true} ::error]])
+
+;; --- Public API
+
+(defn ^:async add!
+  "Mint one OPEN work item (owner = calling agent; blank title refused).
+   `:parent`/`:depends-on` lookup-refs place it in the tree/DAG, both optional.
+   → {::ok? true ::id _} or a fail envelope."
+  {:malli/schema [:=> [:cat ::add-request] ::write-response]}
+  [{::keys [title description owner from parent depends-on]}]
+  (let [owner (internal/scoped-owner owner)]
+    (cond
+      (or (nil? title) (str/blank? title))
+      (internal/fail "add!: blank :seon.agent.todo/title refused — say what the work item is.")
+
+      (nil? owner)
+      (internal/fail (str "add!: no :seon.agent.todo/owner and no agent in scope — pass an "
+                          "owner ref or call inside (db/with-agent …)."))
+
+      :else
+      (let [id (db/new-id!)]
+        (->> (await (db/transact!
+                      {:seon.db/tx-data
+                       [(cond-> {::id         id
+                                 ::title      title
+                                 ::status     :open
+                                 ::created-at (js/Date.)
+                                 ::owner      owner}
+                          description       (assoc ::description description)
+                          from              (assoc ::from from)
+                          parent            (assoc ::parent parent)
+                          (seq depends-on)  (assoc ::depends-on depends-on))]}))
+             (internal/write-result "add!" id))))))
+
+(defn ^:async plan!
+  "Author a WHOLE plan in ONE transact. `:children` nests (`:parent` edges);
+   `:ref` labels a node; `:after` names labels it runs after (`depends-on`
+   edges). `:after` may name any label, defined earlier OR later. → {::ok? true
+   ::root <root-id> ::ids <label→id>} or a fail envelope."
+  {:malli/schema [:=> [:cat ::plan-request] ::plan-response]}
+  [{::keys [title children]}]
+  (let [owner (internal/scoped-owner nil)]
+    (cond
+      (or (nil? title) (str/blank? title))
+      (internal/fail "plan!: blank :seon.agent.todo/title refused — name the plan.")
+
+      (nil? owner)
+      (internal/fail (str "plan!: no agent in scope — call inside (db/with-agent …)."))
+
+      :else
+      (let [{:keys [tx labels root-id error]} (internal/compile-plan owner title children)]
+        (if error
+          (internal/fail error)
+          (let [env (await (db/transact! {:seon.db/tx-data tx}))]
+            (if (:seon.db/ok? env)
+              {::ok? true ::root root-id ::ids labels}
+              (internal/fail (str "plan!: store failed — "
+                                  (get-in env [:seon.db/error :seon.error/message]))))))))))
+
+(defn ^:async done!
+  "Mark a leaf done (stamps ::completed-at); may unblock its dependents next
+   turn. Already-done is idempotent success; unknown id → fail envelope."
+  {:malli/schema [:=> [:cat ::id-request] ::write-response]}
+  [{::keys [id]}]
+  (case (internal/status-of id)
+    nil   (internal/fail (str "done!: no todo " (pr-str id)
+                              " — (seon.agent.todo/list-open {}) shows the open ids."))
+    :done {::ok? true ::id id}
+    (->> (await (db/transact!
+                  {:seon.db/tx-data [{::id           id
+                                      ::status       :done
+                                      ::completed-at (js/Date.)}]}))
+         (internal/write-result "done!" id))))
+
+(defn ^:async reopen!
+  "Flip a done todo back to open; ::completed-at is explicitly retracted (absent
+   means absent, nil is never stored)."
+  {:malli/schema [:=> [:cat ::id-request] ::write-response]}
+  [{::keys [id]}]
+  (case (internal/status-of id)
+    nil   (internal/fail (str "reopen!: no todo " (pr-str id) "."))
+    :open {::ok? true ::id id}
+    (->> (await (db/transact!
+                  {:seon.db/tx-data
+                   [{::id id ::status :open}
+                    [:db/retract [::id id] ::completed-at]]}))
+         (internal/write-result "reopen!" id))))
+
+(defn ^:async depends!
+  "Add dependency edge(s) — the todo now runs after each :on ref (cardinality-
+   many). Remove one via `[:db/retract id :seon.agent.todo/depends-on dep]`."
+  {:malli/schema [:=> [:cat ::depends-request] ::write-response]}
+  [{::keys [id on]}]
+  (case (internal/status-of id)
+    nil (internal/fail (str "depends!: no todo " (pr-str id) "."))
+    (->> (await (db/transact!
+                  {:seon.db/tx-data
+                   (mapv (fn [ref] [:db/add [::id id] ::depends-on ref]) on)}))
+         (internal/write-result "depends!" id))))
+
+(defn ^:async move!
+  "Re-parent a node — `:parent` is cardinality-one, so the new parent replaces
+   the old. Identity, status, and deps unchanged."
+  {:malli/schema [:=> [:cat ::move-request] ::write-response]}
+  [{::keys [id parent]}]
+  (case (internal/status-of id)
+    nil (internal/fail (str "move!: no todo " (pr-str id) "."))
+    (->> (await (db/transact! {:seon.db/tx-data [{::id id ::parent parent}]}))
+         (internal/write-result "move!" id))))
+
+(defn ^:async drop!
+  "Retract a node AND its whole subtree (plain `parent` ref ⇒ no cascade, so it
+   walks descendants). History keeps them (undo via db/as-of). → {::ok? true
+   ::dropped <count>} or a fail envelope."
+  {:malli/schema [:=> [:cat ::id-request] ::drop-response]}
+  [{::keys [id]}]
+  (await (internal/retract-subtree! id rules)))
+
+(defn next
+  "Your focus queue: READY leaves (open, unblocked) for the calling agent,
+   oldest first — the work to act on now. [] outside an agent scope."
+  {:malli/schema [:=> [:cat :map] [:vector ::todo-ref]]}
+  [_]
+  (if-let [owner (internal/scoped-owner nil)]
+    (let [db @db/*conn*]
+      (if-let [oe (internal/owner-eid db owner)]
+        (internal/ready-leaves db oe rules)
+        []))
+    []))
+
+(defn tree
+  "The plan as nested EDN (children under `:seon.agent.todo/_parent`, dep ids
+   inline). {::root? id} → that subtree; {::all? true} → every owner's forest;
+   default → the calling agent's forest. The structural read you re-plan over."
+  {:malli/schema [:=> [:cat ::tree-request] ::tree-response]}
+  [{::keys [root? all?]}]
+  (let [db @db/*conn*]
+    (cond
+      root? (internal/pull-subtree db root?)
+      all?  (mapv #(internal/pull-subtree db %) (internal/all-root-ids db))
+      :else (if-let [owner (internal/scoped-owner nil)]
+              (if-let [oe (internal/owner-eid db owner)]
+                (mapv #(internal/pull-subtree db %) (internal/root-ids db oe))
+                [])
+              []))))
+
+(defn status
+  "Derived view of one node: done? (subtree complete), blocked? (a dependency
+   has open work), ready? (open unblocked leaf), and the {::done ::total}
+   subtree roll-up. Pass ::id."
+  {:malli/schema [:=> [:cat ::id-request] ::status-response]}
+  [{::keys [id]}]
+  (internal/status-view @db/*conn* id rules))
+
+(defn list-open
+  "Open todos, oldest first, scoped to ::owner (default: the calling agent);
+   {::all? true} lists every owner's. Flat — includes parents and blocked items
+   (use `next` for the ready-leaf focus queue)."
+  {:malli/schema [:=> [:cat ::list-request] ::list-response]}
+  [{::keys [owner all?]}]
+  (let [owner (internal/scoped-owner owner)]
+    (cond
+      (nil? db/*conn*)
+      (internal/fail "list-open: no conn bound — runs inside an agent's universe.")
+
+      (and (nil? owner) (not all?))
+      (internal/fail (str "list-open: no :seon.agent.todo/owner and no agent in scope — pass "
+                          "an owner ref, {::all? true}, or use (db/with-agent …)."))
+
+      :else
+      (let [db @db/*conn*]
+        {::ok?   true
+         ::todos (if all?
+                   (internal/open-todos db nil)
+                   (if-let [oe (:db/id (db/entity db owner))]
+                     (internal/open-todos db oe)
+                     []))}))))   ; unknown owner = no items, derived view
+;;; └─ end namespace seon.agent.todo ─
+
+;;; ┌─ namespace my.data ─
+(ns my.data
+  "Turn stored rows into the number your human asked for — SUM, argMAX,
+   group-then-sum — WITHOUT hand-rolling a datalog aggregate. Datalog's
+   aggregates have two traps these verbs make unreachable:
+
+     - the `(sum ?x)` DEDUP collapse — an aggregate runs over the
+       deduplicated projected tuples, so two rows of 5 sum to 5, not 10,
+       unless you remember `:with ?e` (see the old my.kb/source-stats
+       warning). Here you reduce over MAPS with plain Clojure, which never
+       dedups — the footgun is structurally gone.
+     - the argMAX value-vs-entity trap — `(max ?c)` gives you 45, NOT the
+       entity that costs 45, so you need a second join to recover the name.
+       [[max-by]] returns the ROW, so 'which one is biggest' is one call.
+
+   THE PIPELINE — two PRODUCERS emit a `:seon.items/*` envelope (a vector of
+   self-describing entity maps + a count), two REDUCERS consume those items
+   plus a `:my.data/key` and emit a scalar / a row:
+
+     PRODUCE  rows        :my.data/attr      → :seon.items/* envelope
+              group-sum   items + group-key  → :seon.items/* envelope
+     REDUCE   sum-by      items + key        → number
+              max-by      items + key        → the winning row (or nil)
+
+   The universal arrow is `(reducer (merge (producer …) {:my.data/key k}))`:
+   a producer's envelope already carries `:seon.items/items`, so merging in
+   the key gives a valid reducer request. All four verbs are SYNC (reads
+   only — no `^:async`, no Promise to trip on) and map-in/map-out.
+
+   NB rows does NOT clip — aggregation needs every row, so a truncated
+   collection would silently corrupt a sum."
+  (:refer-clojure :exclude [key])
+  (:require
+    ;; the shared `:seon.items/*` collection envelope + `:seon.result/ok?`
+    ;; discriminator live in `seon.items` (which pulls `seon.result`) — Core
+    ;; owns them; my.data REFERENCES, never re-registers. Required for load
+    ;; order so those register! calls run before my.data's schemas below.
+    [seon.items]
+    [seon.db :as db]
+    [seon.schema :as schema]))
+
+;;; FIELD SHAPES — attr names are keywords; a grouped value is domain data
+;;; (`:any`); a sum is numeric.
+
+(schema/register! ::attr      :keyword)             ; rows: the presence attr to scan
+(schema/register! ::key       :keyword)             ; reducers: the numeric field to aggregate
+(schema/register! ::group-key :keyword)             ; group-sum: the field to group BY
+(schema/register! ::group     :any)                 ; output: a grouped value (e.g. :dining)
+(schema/register! ::total     number?)              ; output: a per-group sum
+
+(schema/register! ::group-row [:map [::group ::group] [::total ::total]])
+
+(schema/register! ::rows-request   [:map [::attr ::attr]])
+(schema/register! ::reduce-request  ; sum-by / max-by — items + the field
+  [:map [:seon.items/items :seon.items/items] [::key ::key]])
+(schema/register! ::group-request
+  [:map [:seon.items/items :seon.items/items] [::group-key ::group-key] [::key ::key]])
+
+(defn rows
+  "Every entity carrying ATTR, pulled to a vector of self-describing maps —
+   attribute-presence as DATA (there are no kinds; you find a set by the
+   attr it asserts). The root of every analysis pipeline: once rows are
+   MAPS you reduce with plain Clojure, so the datalog `:with` dedup trap
+   can't happen.
+
+   ;; the worked chain — 'biggest spending category, and how much?':
+   (let [exp    (rows {:my.data/attr :my.expense/amount-usd})
+         totals (group-sum (merge exp {:my.data/group-key :my.expense/category
+                                       :my.data/key       :my.expense/amount-usd}))]
+     (max-by (merge totals {:my.data/key :my.data/total})))
+   ;; => {:my.data/group :dining :my.data/total 106}"
+  {:malli/schema [:=> [:cat ::rows-request] :seon.items/envelope]}
+  [{::keys [attr]}]
+  (let [items (vec (db/query '[:find [(pull ?e [*]) ...] :in $ ?a :where [?e ?a]] attr))]
+    {:seon.result/ok?  true
+     :seon.items/items items
+     :seon.items/count (count items)}))
+
+(defn sum-by
+  "Total of KEY across the given item maps. Reduces over MAPS, so the
+   datalog `(sum ?x)`/`:with` dedup collapse cannot happen — two rows of 5
+   stay 5+5=10. Rows missing KEY are skipped (matching `(sum ?x)` over only
+   the entities that assert the attr).
+
+   ;; (merge a producer envelope with the key, then reduce):
+   (sum-by (merge (rows {:my.data/attr :my.subscription/name})
+                  {:my.data/key :my.subscription/monthly-usd}))  ;=> 101"
+  {:malli/schema [:=> [:cat ::reduce-request] ::total]}
+  [{::keys [key] :seon.items/keys [items]}]
+  (reduce + 0 (keep key items)))
+
+(defn max-by
+  "The item MAP whose KEY is largest — returns the ENTITY, not the value,
+   so 'which one is biggest' is one call, not a `(max ?x)`+rejoin. Ties:
+   the FIRST row at the max wins (strict `>`); nil when no items.
+
+   ;; the priciest subscription ENTITY (read its name off the row):
+   (:my.subscription/name
+     (max-by (merge (rows {:my.data/attr :my.subscription/name})
+                    {:my.data/key :my.subscription/monthly-usd})))  ;=> \"Adobe CC\""
+  {:malli/schema [:=> [:cat ::reduce-request] [:maybe :map]]}
+  [{::keys [key] :seon.items/keys [items]}]
+  (when (seq items)
+    (reduce (fn [best it] (if (> (key it) (key best)) it best))
+            (first items) (rest items))))
+
+(defn group-sum
+  "Sum KEY within each distinct value of GROUP-KEY → a `:seon.items/*`
+   envelope of `{:my.data/group <value> :my.data/total <sum>}` rows. The
+   reusable generalization of x3's filter-then-sum and source-stats'
+   per-topic tallies. Emits an envelope (not a bare map) so it threads
+   straight into [[max-by]] — group, THEN argmax over the groups:
+
+   (max-by (merge (group-sum (merge (rows {:my.data/attr :my.expense/amount-usd})
+                                    {:my.data/group-key :my.expense/category
+                                     :my.data/key       :my.expense/amount-usd}))
+                  {:my.data/key :my.data/total}))
+   ;; => {:my.data/group :dining :my.data/total 106}"
+  {:malli/schema [:=> [:cat ::group-request] :seon.items/envelope]}
+  [{::keys [group-key key] :seon.items/keys [items]}]
+  (let [rows (->> items
+                  (reduce (fn [m it] (update m (group-key it) (fnil + 0) (or (key it) 0)))
+                          {})
+                  (mapv (fn [[g t]] {::group g ::total t})))]
+    {:seon.result/ok?  true
+     :seon.items/items rows
+     :seon.items/count (count rows)}))
+;;; └─ end namespace my.data ─
+
+;;; ┌─ namespace my.kb ─
+(ns my.kb
+  "Your knowledge base IS the database — schema'd data, never a text blob.
+   The fns below are runnable RECIPES (every form compiles and is exercised
+   by my.kb-test, so they can't bit-rot): copy a body, swap in your own
+   `:my.<domain>/*` attrs. seon.db's own docstrings are the full reference.
+
+   THE MODEL — datahike entities have NO type, class, or kind. An entity is
+   just an id with a set of attributes. A thing 'is a source' because it
+   carries `:my.kb.source/*` attrs, and 'is authored by' another entity
+   because a REF connects them — never because of a `:kind`/`:type` field
+   (don't add one). So:
+     - RECORD by ADDING fully-namespaced attrs to an entity and LINKING
+       entities with refs ([[remember-sources!]]).
+     - IDENTIFY one entity by a `:db.unique/identity` attr — also how
+       transact UPSERTS: same id ⇒ update in place, no duplicate.
+     - FIND a set by ATTRIBUTE PRESENCE — `[?e :my.kb.source/id]` enumerates
+       every source. There is no 'list all of kind K'.
+     - SCOPE / provenance with `:seon.db/origin` on the tx + the shared
+       `:my.kb/*` attrs, registered ONCE and referenced everywhere.
+
+   Design one `my.kb.<domain>` schema per thing you learn (the same skill as
+   modelling your human's data); never default to a memory-markdown blob.
+   Your store starts EMPTY — `(db/store-inventory)` is the truth; the sample
+   `:my.kb.source/*` rows exist only once YOU run a recipe (my.kb-test uses
+   its own throwaway db), so never report them as real data.
+
+   Async: reads (`db/query`/`db/pull`/`db/entity`) are SYNC and omit the conn
+   (auto-injected); `db/transact!` returns a Promise — `(await …)` it inside
+   a fn (the REPL top level auto-awaits)."
+  (:require
+    [my.data :as data]
+    [seon.db :as db]
+    [seon.schema :as schema]))
+
+;;; SHARED PROVENANCE — registered ONCE, referenced by every domain (never
+;;; fork your own). A line RANGE is two ints, never a "10-20" string.
+
+(schema/register! ::source-path :string)       ; file the fact was read from
+(schema/register! ::source-line :int)          ; 1-based line (FIRST line of a range)
+(schema/register! ::source-line-end :int)      ; inclusive last line; omit if single-line
+(schema/register! ::verified-at :inst)         ; when last verified
+(schema/register! ::confidence  [:enum :verified :inferred])
+
+;; The CLAIM itself — a shared content attr (the fact, in any domain), and
+;; the natural identity of a single-claim finding so the same claim UPSERTS
+;; (re-grades) instead of duplicating. The [[remember]] one-call fast path
+;; writes it; multi-field domains design their own my.kb.<domain> schema.
+(schema/register! ::claim [:string {:seon.db/identity true}])
+
+;; [[remember]]'s map-in / map-out. `::source` is an ERGONOMIC input only
+;; (a "file:line" / "file" / url string that [[remember]] PARSES into the
+;; shared `::source-path` + `::source-line`) — it is never itself stored.
+;; `::confidence` references the shared enum (no inline fork). The grade is
+;; REQUIRED so a guess can't be persisted as a bare fact.
+(schema/register! ::source :string)
+(schema/register!
+  ::remember-request
+  [:map
+   [::claim      ::claim]
+   [::source     ::source]
+   [::confidence ::confidence]])
+
+;; Returns the live handle to the stored row, or the transact failure
+;; envelope (errors are values) when the write didn't land.
+(schema/register! ::id :int)                    ; the stored finding's eid
+(schema/register! ::remembered [:map [::id ::id]])
+(schema/register! ::remember-response [:or ::remembered :seon.db/transact-response])
+
+;; The map-out shape [[source-stats]] returns — itself a registered schema,
+;; so the renderer and instrumentation can see it.
+(schema/register!
+  ::source-summary
+  [:map
+   [::count        :int]
+   [::rating-total :int]
+   [::topic-counts [:map-of :keyword :int]]])
+
+;;; SCHEMA — register the attr; the system DERIVES datahike storage, and the
+;;; FIRST transact! using an attr installs it (lazy). Inside a fn so reading
+;;; this manual never registers the sample domain.
+
+(defn- register-kb-schema!
+  "Register the sample `:my.kb.source/*` domain — the shapes you reuse: an
+   `:seon.db/identity` natural key, scalars, a cardinality-many `:vector`, a
+   PLAIN ref (author) and a COMPONENT ref (findings, owned by their source,
+   reusing the shared `:my.kb/*` provenance attrs)."
+  []
+  (schema/register! :my.kb.source/id     [:string {:seon.db/identity true}]) ; natural key
+  (schema/register! :my.kb.source/title  :string)
+  (schema/register! :my.kb.source/rating :int)                               ; how useful, 1-5
+  (schema/register! :my.kb.source/topics [:vector :keyword])                 ; cardinality-many
+  (schema/register! :my.kb.source/author :seon.db/ref)                       ; plain ref → entity
+  (schema/register! :my.kb.source/findings                                   ; component ref (many)
+                    [:vector {:seon.db/component true} :seon.db/ref])
+  (schema/register! :my.kb.author/id   [:string {:seon.db/identity true}])
+  (schema/register! :my.kb.author/name :string)
+  (schema/register! :my.kb.finding/id   [:string {:seon.db/identity true}])
+  (schema/register! :my.kb.finding/text :string))
+
+;;; WRITES — transact! returns the envelope Promise (await it in a fn).
+;;; ALWAYS read it: an eval can succeed yet `:seon.db/ok? false`.
+
+(defn remember-sources!
+  "ADD source entities, linking two refs the idiomatic way:
+
+   - SAME-TX link (author not committed yet): give the author a `:db/id`
+     TEMPID and put that SAME tempid in the source's `:my.kb.source/author`
+     slot — datahike resolves both to one entity. To link an ALREADY
+     committed author, use a lookup-ref `[:my.kb.author/id \"mccarthy\"]` —
+     never a bare value (a lookup-ref won't resolve forward to an entity
+     defined later in the same tx).
+   - COMPONENT child (`:my.kb.source/findings`): built from the nested map,
+     no tempid; each finding REUSES the shared `:my.kb/*` provenance attrs."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (db/transact!
+    {::db/tx-data
+     [{:db/id "author-mccarthy" :my.kb.author/id "mccarthy" :my.kb.author/name "John McCarthy"}
+      {:db/id "author-okasaki"  :my.kb.author/id "okasaki"  :my.kb.author/name "Chris Okasaki"}
+      {:my.kb.source/id "s1" :my.kb.source/title "Recursive Functions of Symbolic Expressions"
+       :my.kb.source/rating 5 :my.kb.source/topics [:lisp :foundations]
+       :my.kb.source/author "author-mccarthy"                ; the author's TEMPID (same tx)
+       :my.kb.source/findings [{:my.kb.finding/id "f1"
+                                :my.kb.finding/text "Code and data share one representation."
+                                ::source-path "papers/mccarthy-1960.pdf"
+                                ::confidence  :verified}]}
+      {:my.kb.source/id "s2" :my.kb.source/title "LISP 1.5 Programmer's Manual"
+       :my.kb.source/rating 4 :my.kb.source/topics [:lisp :reference]
+       :my.kb.source/author "author-mccarthy"}
+      {:my.kb.source/id "s3" :my.kb.source/title "Purely Functional Data Structures"
+       :my.kb.source/rating 5 :my.kb.source/topics [:functional :data-structures]
+       :my.kb.source/author "author-okasaki"}]}))
+
+(defn ^:async remember
+  "Store ONE finding as a durable, provenance-stamped knowledge row — the
+   one-call way to persist what you verified, with NO schema design, NO
+   register!, NO hand-written transact. GENERAL: any domain claim, not just
+   code. The grade is REQUIRED, so a guess can't masquerade as a fact.
+
+   Three keys, all required (map-in):
+     ::claim       the fact, one sentence.
+     ::source      where you verified it — \"file:line\", \"file\", or a url.
+     ::confidence  :verified (you saw it) | :inferred (you reasoned it).
+
+   Resolves to `{::id <eid>}` — the live handle: point a message/complete at
+   it (REPORT=DATA, MESSAGE=POINTER) or `(seon.db/pull '[*] <eid>)` it back.
+   IDEMPOTENT — the same claim UPSERTS (re-grades), never a duplicate. The
+   row reuses the shared `::source-path`/`::source-line`/`::confidence`
+   provenance attrs, so it renders in the NEXT agent's stored-findings block
+   and answers their question without a re-research. Store each claim the
+   MOMENT you verify it; don't batch to the end of a task you may not reach.
+
+     (my.kb/remember
+       {::claim \"transact! Malli-validates every entity value before the tx reaches datahike\"
+        ::source \"src/seon/db/internal.cljs:694\"
+        ::confidence :verified})
+     ;=> {:my.kb/id 1234}
+
+   For a multi-field DOMAIN model (linked refs, component children, your own
+   identity key) design a my.kb.<domain> schema instead — see
+   [[remember-sources!]]. `remember` is the fast path for a single claim."
+  {:malli/schema [:=> [:cat ::remember-request] ::remember-response]}
+  [{::keys [claim source confidence]}]
+  (let [[_ path line] (re-matches #"(.+):(\d+)" source)
+        prov          (if path
+                        {::source-path path ::source-line (js/parseInt line 10)}
+                        {::source-path source})
+        row           (merge {:db/id       "finding"
+                              ::claim      claim
+                              ::confidence confidence
+                              ::verified-at (js/Date.)}
+                            prov)
+        {::db/keys [ok? tempids] :as env} (await (db/transact! {::db/tx-data [row]}))]
+    (if ok?
+      {::id (get tempids "finding")}
+      env)))
+
+(defn retitle-source!
+  "UPSERT by identity: the same `:my.kb.source/id` updates in place — no
+   duplicate. Omitted keys are left unchanged (absent ≠ retract)."
+  {:malli/schema [:=> [:catn [::id :string] [::new-title :string]] :any]}
+  [id new-title]
+  (db/transact! {::db/tx-data [{:my.kb.source/id id :my.kb.source/title new-title}]}))
+
+(defn clear-rating!
+  "Clear ONE attr — retraction is EXPLICIT. `[:db/retract ref attr]` (no
+   value) removes the current value (omitting a key only leaves it unchanged)."
+  {:malli/schema [:=> [:catn [::id :string]] :any]}
+  [id]
+  (db/transact! {::db/tx-data [[:db/retract [:my.kb.source/id id] :my.kb.source/rating]]}))
+
+(defn replace-topics!
+  "Replace a cardinality-many attr. Transacting topics only ADDS to the set;
+   to REPLACE, retract every current value first — `[:db/retract ref attr]`
+   (no value) — bundled BEFORE the add-map in ONE ordered tx."
+  {:malli/schema [:=> [:catn [::id :string] [::topics [:vector :keyword]]] :any]}
+  [id topics]
+  (db/transact!
+    {::db/tx-data [[:db/retract [:my.kb.source/id id] :my.kb.source/topics]
+                   {:my.kb.source/id id :my.kb.source/topics topics}]}))
+
+(defn forget-source!
+  "Delete the whole entity — component children (findings) cascade with it."
+  {:malli/schema [:=> [:catn [::id :string]] :any]}
+  [id]
+  (db/transact! {::db/tx-data [[:db.fn/retractEntity [:my.kb.source/id id]]]}))
+
+;;; QUERY — Datalog (db auto-injects; `:in` inputs come AFTER the query). The
+;;; :find shape picks the result: bare relation = SET of tuples; `[?x ...]` =
+;;; one column as a vector; `?x .` = a single scalar.
+
+(defn titles
+  "FIND by attribute presence: every entity asserting `:my.kb.source/title`.
+   Collection find `[?t ...]` → one column as a vector."
+  {:malli/schema [:=> [:cat] [:vector :string]]}
+  []
+  (db/query '[:find [?t ...] :where [?e :my.kb.source/title ?t]]))
+
+(defn title+rating
+  "Relation find — a SET of `[title rating]` tuples, JOINING two attrs on one
+   entity (`?e` binds both clauses)."
+  {:malli/schema [:=> [:cat] [:set [:tuple :string :int]]]}
+  []
+  (db/query '[:find ?title ?rating
+              :where [?e :my.kb.source/title ?title] [?e :my.kb.source/rating ?rating]]))
+
+(defn titles-by-author
+  "`:in`-bound input + REF-JOIN. A ref stores an EID — match the author by
+   NAME by JOINING through `:my.kb.source/author`, never by putting the name
+   in the ref slot."
+  {:malli/schema [:=> [:catn [::author-name :string]] [:vector :string]]}
+  [author-name]
+  (db/query '[:find [?title ...] :in $ ?name
+              :where [?a :my.kb.author/name ?name]
+                     [?s :my.kb.source/author ?a]
+                     [?s :my.kb.source/title ?title]]
+            author-name))
+
+(defn source-stats
+  "Aggregate toward a question — the analysis you build ON TOP of stored
+   data. Delegates to my.data, so you never hand-roll a datalog aggregate:
+   `rows` pulls each source to a MAP, then `sum-by` totals the ratings and a
+   plain `frequencies` tallies the (cardinality-many) topics. Pulling to
+   maps first makes the `(sum ?r)`/`:with` dedup collapse structurally
+   impossible — two sources rated 5 stay 5+5=10."
+  {:malli/schema [:=> [:cat] ::source-summary]}
+  []
+  (let [sources (data/rows {:my.data/attr :my.kb.source/id})
+        items   (:seon.items/items sources)]
+    {::count        (:seon.items/count sources)
+     ::rating-total (data/sum-by {:seon.items/items items
+                                  :my.data/key :my.kb.source/rating})
+     ::topic-counts (frequencies (mapcat :my.kb.source/topics items))}))
+
+;;; PULL / ENTITY — read one entity by lookup-ref `[identity-attr value]`,
+;;; which IS the "by name" addressing.
+
+(defn source-detail
+  "Pull by LOOKUP-REF. `[*]` inlines every attr; a COMPONENT child comes back
+   as a nested map, a PLAIN ref as `{:db/id N}` until you NAME it with a
+   sub-pattern to pull its fields."
+  {:malli/schema [:=> [:catn [::id :string]] :any]}
+  [id]
+  (db/pull '[* {:my.kb.source/author [:my.kb.author/name]}]
+           [:my.kb.source/id id]))
+
+(defn source-entity
+  "Look up an entity by lookup-ref — a touched map (`:db/id` + every attr),
+   nil if unresolved. A ref reads back as `{:db/id N}`; drill in with a
+   follow-up `entity`/`pull`."
+  {:malli/schema [:=> [:catn [::id :string]] :any]}
+  [id]
+  (db/entity [:my.kb.source/id id]))
+
+;;; INVENTORY — CONSULT before researching: lists every ATTRIBUTE NAMESPACE
+;;; with live rows, so you can datalog those exact attrs (and REUSE a shape
+;;; instead of re-registering one).
+
+(defn inventory
+  "Discovery call: which attribute namespaces hold data, with per-attr counts
+   — NOT a list of entity 'types' (there are none). Returns the
+   `db/store-inventory` map."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  (db/store-inventory))
+
+;;; WORKFLOW — store data, then build fns that turn it into answers: switch
+;;; into a domain, register its schema, transact rows, run your analysis fn.
+
+(defn ^:async build-kb-example!
+  "End-to-end: register the schema, seed rows, run [[source-stats]] over them.
+   `^:async` because it AWAITS the write before reading. Resolves to the stats
+   summary, or the failure envelope if rejected. Run it once, then build your
+   OWN domain the same way."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (register-kb-schema!)
+  (let [{::db/keys [ok?] :as envelope} (await (remember-sources!))]
+    (if ok?
+      (source-stats)
+      envelope)))
+;;; └─ end namespace my.kb ─
+
+;;; ┌─ namespace my.tile ─
+(ns my.tile
+  "INTERACTIVE canvas pieces — the sibling of `my.ui` (static). Where
+   `my.ui` gives you read-only status lines and tables, `my.tile` gives
+   you CONTROLS the human can click/type into that call one of YOUR OWN
+   fns back. Same dual-render contract: DATA in, the
+   `:seon.render/html-response` envelope out —
+
+     {:seon.render/hiccup […]   ; the HUMAN's styled, safelisted control
+      :seon.render/ai    \"…\"}    ; YOUR view — \"[button: …] → my.fn\"
+
+   so the two can't drift: the human gets a real button, you read the
+   compact line describing WHICH of your fns it's wired to.
+
+   ## How a control calls you back (the whole mechanism)
+
+   A control's action is a fn YOU defined in your home ns — nothing else
+   is invocable (the `/agent/<id>/call` gate authorizes only your own
+   `:seon.fn` set). You never write a URL or a Datastar string; you pass
+   a fn-CALL or a fn-REF and the render rewrites it:
+
+   - fn-CALL — `(list 'approve! order-id)` — the args are captured NOW,
+     when the tile renders (use for a row's id). They arrive as positional
+     args, DATA-ONLY.
+   - fn-REF — `'save-note!` (a bare symbol) — no render-time args; the
+     human's typed/picked field signals POST as the body and land as ONE
+     map argument `{:field val …}` (use for forms/inputs).
+
+   ## Worked example — a counter button + a note form
+
+     ;; 1. eval your handler fns ONCE (they become granted :seon.fn rows).
+     ;;    register any new attr first, else db/transact! refuses it.
+     (seon.schema/register! :my.agent.me/counter :int)
+     (defn ^:async bump! [_]
+       (let [id (seon.db/current-agent-id)
+             n  (or (some-> (seon.db/pull
+                              {:seon.db/db @seon.db/*conn*
+                               :seon.db/pull-pattern '[:my.agent.me/counter]
+                               :seon.db/ref [:seon.agent/id id]})
+                            :my.agent.me/counter) 0)]
+         (seon.db/transact! {:seon.db/tx-data
+                             [{:seon.agent/id id :my.agent.me/counter (inc n)}]})))
+
+     ;; 2. wire a LIVE tile fn that re-derives every render — the click's
+     ;;    effect shows up with no extra wiring (the feed re-renders on tx).
+     (defn my-tile [{:keys [seon.db/db]}]
+       (let [n (or (:my.agent.me/counter
+                    (seon.db/pull {:seon.db/db db
+                                   :seon.db/pull-pattern '[:my.agent.me/counter]
+                                   :seon.db/ref [:seon.agent/id (seon.db/current-agent-id)]}))
+                   0)]
+         (my.ui/section
+           {:my.ui/title \"Counter\"
+            :my.ui/blocks
+            [(my.ui/status-line {:my.ui/label \"count\" :my.ui/value (str n)})
+             (my.tile/button {:my.tile/label \"+1\" :my.tile/action 'bump!})]})))
+     (seon.db/transact! {:seon.db/tx-data
+                         [{:seon.agent/id (seon.db/current-agent-id)
+                           :seon.render.live-tile/content 'my.agent.me/my-tile}]})
+
+   A note FORM that messages you instead:
+
+     (defn ^:async save-note! [{:keys [note]}]        ; signals → one map arg
+       (seon.agent/reply! {…}))   ; or transact a :my.note/* entity
+     (my.tile/form
+       {:my.tile/submit 'save-note!
+        :my.tile/label  \"Save\"
+        :my.tile/fields [(my.tile/input {:my.tile/field \"note\"
+                                         :my.tile/label \"Note\"})]})
+
+   All helpers emit ONLY safelisted classes (`resources/public/css/input.css`)
+   and are SYNC pure data. The action MUST be a fn-symbol or a fn-call —
+   never a raw string (a string can't name your fn, and the gate would
+   refuse it anyway)."
+  (:require
+    [clojure.string :as str]
+    [seon.schema :as schema]))
+
+;; ── SHARED FIELD SHAPES — registered once, referenced by every helper ──
+;; A control is a LABEL/FIELD + a fn ACTION; the output is always the
+;; `:seon.render/html-response` dual-render envelope (registered in
+;; seon.render — referenced, never re-declared).
+
+(schema/register! ::label :string)
+;; The signal name a field binds to (Datastar `data-bind`); the form's
+;; submit posts every bound signal as one map arg keyed by these.
+(schema/register! ::field :string)
+(schema/register! ::placeholder :string)
+;; A control ACTION is a fn the agent defined in its home ns — either a
+;; fn-REF (bare/qualified symbol, args from click-time signals) or a
+;; fn-CALL (a seq with a symbol head, args captured at render time). A
+;; raw string is intentionally NOT accepted — only a fn the gate grants.
+(schema/register! ::action [:or :symbol [:sequential :any]])
+;; A select option — `["pro" "Pro"]` = [value label].
+(schema/register! ::option  [:tuple :string :string])
+(schema/register! ::options [:vector ::option])
+;; Child field envelopes `form` stacks — each already a dual render.
+(schema/register! ::fields  [:vector :seon.render/html-response])
+
+;; ── safelisted control classes (extend input.css @source inline) ──
+(def ^:private btn-class
+  "px-2 py-1 rounded border border-base-700 bg-base-850 text-xs text-text-100 cursor-pointer select-none hover:bg-base-800 hover:text-text-50 focus:outline-none focus-visible:border-amber-400 disabled:opacity-50")
+(def ^:private field-class
+  "w-full px-2 py-1 rounded border border-base-700 bg-base-900 text-xs text-text-100 focus:outline-none focus-visible:border-amber-400 placeholder:text-text-500")
+(def ^:private field-label-class "text-2xs text-text-400 uppercase tracking-wider")
+(def ^:private field-wrap-class "flex flex-col gap-1")
+
+(defn- action-fn-sym
+  "The fn symbol an action names — the head of a fn-CALL seq, or the
+   symbol itself for a fn-REF."
+  [action]
+  (if (seq? action) (first action) action))
+
+(defn- action-arg-desc
+  "A `\" arg1 arg2\"` suffix describing a fn-CALL's render-time args, or
+   nil for a fn-REF / arg-less call."
+  [action]
+  (when (seq? action)
+    (let [args (rest action)]
+      (when (seq args)
+        (str " " (str/join " " (map pr-str args)))))))
+
+;; ── button ───────────────────────────────────────────────────────────
+(schema/register! ::button-request
+  [:map
+   [::label  ::label]
+   [::action ::action]])
+
+(defn button
+  "A clickable button wired to one of YOUR fns. `action` is a fn-REF
+   (`'submit!` — click-time signals become its one map arg) or a fn-CALL
+   (`(list 'approve! id)` — render-time args become positional args).
+
+     (button {:my.tile/label \"Approve\" :my.tile/action (list 'approve! \"o-7\")})
+     ;; human: a styled clickable button (data-on:click @post → /call)
+     ;; ai:    \"[button: \\\"Approve\\\" → approve! \\\"o-7\\\"]\""
+  {:malli/schema [:=> [:cat ::button-request] :seon.render/html-response]}
+  [{::keys [label action]}]
+  {:seon.render/hiccup
+   [:button {:on-click action :class btn-class} label]
+   :seon.render/ai
+   (str "[button: \"" label "\" → " (action-fn-sym action)
+        (or (action-arg-desc action) "") "]")})
+
+;; ── input ────────────────────────────────────────────────────────────
+(schema/register! ::input-request
+  [:map
+   [::field       ::field]
+   [::label       {:optional true} ::label]
+   [::placeholder {:optional true} ::placeholder]])
+
+(defn input
+  "A labelled text field BOUND to a signal (`data-bind`). Its value posts
+   with the form submit (or any fn-REF button) as `{:<field> value}`.
+
+     (input {:my.tile/field \"note\" :my.tile/label \"Note\" :my.tile/placeholder \"…\"})"
+  {:malli/schema [:=> [:cat ::input-request] :seon.render/html-response]}
+  [{::keys [field label placeholder]}]
+  {:seon.render/hiccup
+   [:label {:class field-wrap-class}
+    (when label [:span {:class field-label-class} label])
+    [:input (cond-> {:type "text" :data-bind field :class field-class}
+              placeholder (assoc :placeholder placeholder))]]
+   :seon.render/ai
+   (str "[input: " (or label field) " → signal \"" field "\"]")})
+
+;; ── select ───────────────────────────────────────────────────────────
+(schema/register! ::select-request
+  [:map
+   [::field   ::field]
+   [::options ::options]
+   [::label   {:optional true} ::label]])
+
+(defn select
+  "A labelled dropdown BOUND to a signal. `options` is `[[value label] …]`.
+
+     (select {:my.tile/field \"tier\"
+              :my.tile/options [[\"free\" \"Free\"] [\"pro\" \"Pro\"]]})"
+  {:malli/schema [:=> [:cat ::select-request] :seon.render/html-response]}
+  [{::keys [field options label]}]
+  {:seon.render/hiccup
+   [:label {:class field-wrap-class}
+    (when label [:span {:class field-label-class} label])
+    (into [:select {:data-bind field :class field-class}]
+          (for [[value opt-label] options]
+            [:option {:value value} opt-label]))]
+   :seon.render/ai
+   (str "[select: " (or label field) " → signal \"" field "\" | options: "
+        (str/join ", " (map second options)) "]")})
+
+;; ── toggle ───────────────────────────────────────────────────────────
+(schema/register! ::toggle-request
+  [:map
+   [::field ::field]
+   [::label {:optional true} ::label]])
+
+(defn toggle
+  "A labelled checkbox BOUND to a boolean signal.
+
+     (toggle {:my.tile/field \"live\" :my.tile/label \"Live updates\"})"
+  {:malli/schema [:=> [:cat ::toggle-request] :seon.render/html-response]}
+  [{::keys [field label]}]
+  {:seon.render/hiccup
+   [:label {:class "flex flex-row gap-2 items-center cursor-pointer select-none"}
+    [:input {:type "checkbox" :data-bind field :class "cursor-pointer accent-amber-400"}]
+    (when label [:span {:class "text-xs text-text-200"} label])]
+   :seon.render/ai
+   (str "[toggle: " (or label field) " → signal \"" field "\"]")})
+
+;; ── form ─────────────────────────────────────────────────────────────
+(schema/register! ::form-request
+  [:map
+   [::submit ::action]
+   [::label  ::label]
+   [::fields ::fields]])
+
+(defn form
+  "COMPOSE fields into a submitting form. On submit, every field's bound
+   signal POSTs to your `submit` fn as ONE map argument `{:<field> val …}`
+   (a fn-REF). Stacks the child field envelopes (dual render holds through
+   nesting), then appends the submit button.
+
+     (form {:my.tile/submit 'save-note!
+            :my.tile/label  \"Save\"
+            :my.tile/fields [(input  {:my.tile/field \"note\"  :my.tile/label \"Note\"})
+                             (select {:my.tile/field \"tier\" :my.tile/options […]})]})"
+  {:malli/schema [:=> [:cat ::form-request] :seon.render/html-response]}
+  [{::keys [submit label fields]}]
+  {:seon.render/hiccup
+   (into [:form {:on-submit submit :class "flex flex-col gap-2"}]
+         (conj (mapv :seon.render/hiccup fields)
+               [:button {:type "submit" :class btn-class} label]))
+   :seon.render/ai
+   (str "[form → " (action-fn-sym submit) "]"
+        (when (seq fields)
+          (str "\n" (str/join "\n" (keep :seon.render/ai fields))))
+        "\n[submit: \"" label "\"]")})
+;;; └─ end namespace my.tile ─
+
+;;; ┌─ namespace my.ui ─
+(ns my.ui
+  "COMPOSE your canvas from small dual-render pieces — don't hand-roll a
+   `[:div …]` from scratch. Every helper here takes DATA and returns the
+   `:seon.render/html-response` envelope your live tile wants:
+
+     {:seon.render/hiccup […]   ; the HUMAN's view — styled, safelisted
+      :seon.render/ai    \"…\"}    ; YOUR view — the SAME info, compact text
+
+   The two are mirrored from ONE input, so they CAN'T drift: the agent
+   reasons over the lean `:seon.render/ai` line it sees every turn (the
+   `; Your live tile` section renders it), while the human gets the
+   beautiful HTML. Neither lies about the other.
+
+   THE MOVE — set your canvas by COMPOSING, then wire the result. Build
+   pieces, stack them in a `section`, transact the section's hiccup:
+
+     (let [s (section
+               {:my.ui/title \"Subscriptions\"
+                :my.ui/blocks
+                [(status-line {:my.ui/label \"Total\" :my.ui/value \"$101/mo\"
+                               :my.ui/tone :signal})
+                 (kv-table {:my.ui/rows [[\"Adobe CC\" \"$45\"]
+                                         [\"Netflix\" \"$18\"]]})]})]
+       (seon.db/transact!
+         {:seon.db/tx-data
+          [{:seon.agent/id (seon.db/current-agent-id)
+            :seon.render.live-tile/content (:seon.render/hiccup s)}]}))
+
+   For a LIVE tile that re-derives every render, wrap a `section` call in a
+   home-ns fn and wire its SYMBOL instead (see the `ui-live-tiles` skill).
+
+   All helpers emit ONLY safelisted classes (`resources/public/css/input.css`)
+   — anything else is invisible — and are SYNC pure data (no `^:async`).
+   `section` COMPOSES child envelopes: it stacks their hiccup and joins
+   their `:seon.render/ai`, so the mirror holds through nesting."
+  (:require
+    [clojure.string :as str]
+    [seon.schema :as schema]))
+
+;; SHARED FIELD SHAPES — registered once, referenced by every helper.
+;; A canvas piece is label/value text + an optional Phosphor tone; the
+;; output is always the `:seon.render/html-response` dual-render envelope
+;; (registered in seon.render — referenced, never re-declared).
+
+(schema/register! ::label :string)
+(schema/register! ::value :string)
+(schema/register! ::title :string)
+;; The safelisted accent palette — maps to a `text-*` class. Absent =
+;; plain cream text. (One shape; every helper that tints text uses it.)
+(schema/register! ::tone
+  [:enum :signal :success :error :warning :info])
+;; A key/value row pair — `["Adobe CC" "$45"]`.
+(schema/register! ::row   [:tuple :string :string])
+(schema/register! ::rows  [:vector ::row])
+;; Child envelopes `section` stacks — each already a dual-render result.
+(schema/register! ::blocks [:vector :seon.render/html-response])
+;; A bulleted list is just its strings.
+(schema/register! ::items [:vector :string])
+;; A progress reading is `current` of `total` — one shared number shape.
+(schema/register! ::number  [:or :int :double])
+(schema/register! ::current ::number)
+(schema/register! ::total   ::number)
+;; A table column is `[row-key header]`; cells are already strings (caller
+;; formats, exactly like `kv-table` rows), so the dual render stays pure text.
+(schema/register! ::column     [:tuple :keyword :string])
+(schema/register! ::columns    [:vector ::column])
+(schema/register! ::table-data [:vector [:map-of :keyword :string]])
+
+(def ^:private tone->class
+  "Tone keyword → safelisted accent class. Default cream when untoned."
+  {:signal  "text-signal"
+   :success "text-success"
+   :error   "text-error"
+   :warning "text-warning"
+   :info    "text-info"})
+
+(defn- tone->var
+  "Tone keyword → the `var(--color-…)` the @theme defines (signal/success/
+   error/warning/info all exist), for an inline-styled fill where no `bg-*`
+   class is safelisted. Default :signal."
+  [tone]
+  (str "var(--color-" (name (or tone :signal)) ")"))
+
+;; ── status-line ─────────────────────────────────────────────────────
+(schema/register! ::status-line-request
+  [:map
+   [::label ::label]
+   [::value ::value]
+   [::tone {:optional true} ::tone]])
+
+(defn status-line
+  "One labelled status line — `label: value`, value tinted by `tone`.
+   The dual render of a single fact.
+
+     (status-line {:my.ui/label \"Status\" :my.ui/value \"All systems go\"
+                   :my.ui/tone :success})
+     ;; human: a flex row  ·  ai: \"Status: All systems go\""
+  {:malli/schema [:=> [:cat ::status-line-request] :seon.render/html-response]}
+  [{::keys [label value tone]}]
+  {:seon.render/hiccup
+   [:div {:class "flex flex-row gap-2 items-center"}
+    [:span {:class "text-xs text-text-400"} label]
+    [:span {:class (str "text-xs font-semibold "
+                        (get tone->class tone "text-text-100"))}
+     value]]
+   :seon.render/ai (str label ": " value)})
+
+;; ── kv-table ────────────────────────────────────────────────────────
+(schema/register! ::kv-table-request
+  [:map
+   [::title {:optional true} ::title]
+   [::rows  ::rows]])
+
+(defn kv-table
+  "A two-column key/value table from `rows` (`[[k v] …]`), with an optional
+   `title`. The dual render of a small breakdown — a styled table for the
+   human, aligned `k: v` lines for you.
+
+     (kv-table {:my.ui/title \"Costs\"
+                :my.ui/rows [[\"Adobe\" \"$45\"] [\"Netflix\" \"$18\"]]})"
+  {:malli/schema [:=> [:cat ::kv-table-request] :seon.render/html-response]}
+  [{::keys [title rows]}]
+  {:seon.render/hiccup
+   (into (if title
+           [:div {:class "flex flex-col gap-1"}
+            [:h3 {:class "text-xs font-bold text-text-200"} title]]
+           [:div {:class "flex flex-col gap-1"}])
+         [(into [:table]
+                (for [[k v] rows]
+                  [:tr
+                   [:td {:class "text-xs text-text-400"} k]
+                   [:td {:class "text-xs text-text-100 tabular-nums"} v]]))])
+   :seon.render/ai
+   (str (when title (str title "\n"))
+        (str/join "\n" (for [[k v] rows] (str k ": " v))))})
+
+;; ── badge ───────────────────────────────────────────────────────────
+(schema/register! ::badge-request
+  [:map
+   [::label ::label]
+   [::tone {:optional true} ::tone]])
+
+(defn badge
+  "A small status pill — `label` tinted by `tone` (default :info). The dual
+   render of one labelled state: a bordered pill for the human, `[tone] label`
+   for you.
+
+     (badge {:my.ui/label \"passing\" :my.ui/tone :success})
+     ;; human: a green-text pill  ·  ai: \"[success] passing\""
+  {:malli/schema [:=> [:cat ::badge-request] :seon.render/html-response]}
+  [{::keys [label tone]}]
+  (let [tone (or tone :info)]
+    {:seon.render/hiccup
+     [:span {:class (str "px-2 py-1 rounded text-2xs font-semibold "
+                         "bg-base-850 border border-base-700 "
+                         (get tone->class tone "text-text-100"))}
+      label]
+     :seon.render/ai (str "[" (name tone) "] " label)}))
+
+;; ── bullets ─────────────────────────────────────────────────────────
+(schema/register! ::bullets-request
+  [:map
+   [::title {:optional true} ::title]
+   [::items ::items]])
+
+(defn bullets
+  "A bulleted list from `items`, with an optional `title`. The dual render of
+   a simple list — a semantic `[:ul]` for the human, `- item` lines for you.
+
+     (bullets {:my.ui/title \"Next\" :my.ui/items [\"deploy\" \"verify\"]})"
+  {:malli/schema [:=> [:cat ::bullets-request] :seon.render/html-response]}
+  [{::keys [title items]}]
+  {:seon.render/hiccup
+   (into (if title
+           [:div {:class "flex flex-col gap-1"}
+            [:h3 {:class "text-xs font-bold text-text-200"} title]]
+           [:div {:class "flex flex-col gap-1"}])
+         [(into [:ul] (for [item items] [:li item]))])
+   :seon.render/ai
+   (str (when title (str title "\n"))
+        (str/join "\n" (for [item items] (str "- " item))))})
+
+;; ── progress ────────────────────────────────────────────────────────
+(schema/register! ::progress-request
+  [:map
+   [::label   ::label]
+   [::current ::current]
+   [::total   ::total]
+   [::tone {:optional true} ::tone]])
+
+(defn progress
+  "A labelled progress bar — `current` of `total`, the fill tinted by `tone`
+   (default :signal). The dual render of a ratio: a filled bar for the human,
+   `label: current/total (pct%)` for you.
+
+     (progress {:my.ui/label \"Steps\" :my.ui/current 7 :my.ui/total 10})
+     ;; human: a 70%-filled bar  ·  ai: \"Steps: 7/10 (70%)\""
+  {:malli/schema [:=> [:cat ::progress-request] :seon.render/html-response]}
+  [{::keys [label current total tone]}]
+  (let [pct (if (pos? total) (js/Math.round (* 100.0 (/ current total))) 0)]
+    {:seon.render/hiccup
+     [:div {:class "flex flex-col gap-1"}
+      [:div {:class "flex flex-row justify-between"}
+       [:span {:class "text-xs text-text-400"} label]
+       [:span {:class "text-xs text-text-200 tabular-nums"}
+        (str current "/" total " (" pct "%)")]]
+      [:div {:class "w-full bg-base-800 rounded overflow-hidden"
+             :style {:height "6px"}}
+       [:div {:class "h-full"
+              :style {:width (str pct "%")
+                      :background-color (tone->var tone)}}]]]
+     :seon.render/ai
+     (str label ": " current "/" total " (" pct "%)")}))
+
+;; ── table ───────────────────────────────────────────────────────────
+(schema/register! ::table-request
+  [:map
+   [::title {:optional true} ::title]
+   [::columns    ::columns]
+   [::table-data ::table-data]])
+
+(defn table
+  "A multi-column table — `columns` is `[[row-key header] …]`, `table-data` a
+   seq of maps keyed by those row-keys (cells already strings, like `kv-table`).
+   Generalises `kv-table` to N columns. The dual render of a grid: a styled
+   table for the human, monospace-aligned text rows for you.
+
+     (table {:my.ui/columns [[:name \"Name\"] [:cost \"Cost\"]]
+             :my.ui/table-data [{:name \"Adobe\" :cost \"$45\"}
+                                {:name \"Netflix\" :cost \"$18\"}]})
+     ;; ai:
+     ;;   Name     Cost
+     ;;   Adobe    $45
+     ;;   Netflix  $18"
+  {:malli/schema [:=> [:cat ::table-request] :seon.render/html-response]}
+  [{::keys [title columns table-data]}]
+  (let [ks      (map first columns)
+        headers (map second columns)
+        cell    (fn [row k] (str (get row k)))
+        text-rows (cons (vec headers)
+                        (for [row table-data] (mapv #(cell row %) ks)))
+        widths    (vec (for [i (range (count columns))]
+                         (apply max (map #(count (nth % i)) text-rows))))
+        pad-row   (fn [cells]
+                    (str/trimr
+                      (str/join "  "
+                        (map (fn [c w] (str c (apply str (repeat (- w (count c)) " "))))
+                             cells widths))))]
+    {:seon.render/hiccup
+     (into (if title
+             [:div {:class "flex flex-col gap-1"}
+              [:h3 {:class "text-xs font-bold text-text-200"} title]]
+             [:div {:class "flex flex-col gap-1"}])
+           [(into [:table
+                   (into [:tr] (for [h headers]
+                                 [:th {:class "text-xs text-text-400 text-left"} h]))]
+                  (for [row table-data]
+                    (into [:tr] (for [k ks]
+                                  [:td {:class "text-xs text-text-100 tabular-nums"}
+                                   (cell row k)]))))])
+     :seon.render/ai
+     (str (when title (str title "\n"))
+          (str/join "\n" (map pad-row text-rows)))}))
+
+;; ── section ─────────────────────────────────────────────────────────
+(schema/register! ::section-request
+  [:map
+   [::title  ::title]
+   [::blocks ::blocks]])
+
+(defn section
+  "COMPOSE child envelopes under one titled container — the combinator that
+   keeps the dual render mirrored through nesting. Stacks every block's
+   `:seon.render/hiccup` and joins every block's `:seon.render/ai`, so the
+   composed result is itself a faithful `:seon.render/html-response` you can
+   transact onto your canvas (or return from a tile fn).
+
+     (section {:my.ui/title \"Subscriptions\"
+               :my.ui/blocks [(status-line {…}) (kv-table {…})]})"
+  {:malli/schema [:=> [:cat ::section-request] :seon.render/html-response]}
+  [{::keys [title blocks]}]
+  {:seon.render/hiccup
+   (into [:div {:class "p-3 flex flex-col gap-2"}
+          [:h2 {:class "text-sm font-bold text-signal"} title]]
+         (map :seon.render/hiccup blocks))
+   :seon.render/ai
+   (str title "\n"
+        (str/join "\n" (keep :seon.render/ai blocks)))})
+;;; └─ end namespace my.ui ─
+;;; └─ end namespaces ─
+
+; ──── ctx cache boundary — everything above this line is the byte-stable prefix; everything below changes per turn ────
+
+;;; ┌─ live-tile ─
+; Your live tile — what your human currently sees (as-of this
+; turn's render; the human's view live-updates between turns).
+; Wired: seon.render.system/system-view (a fn on your entity)
+;
+; ; SYSTEM VIEW — your fleet at a glance (root)
+; ; 1 agents: 1 idle · 0 running · 0 paused · 0 terminated
+; ; 0 turns · 0 evals · no activity yet · embeddings on
+; ; AGENTS
+; ; - ★ root [idle] 0 turns
+; ;
+; ; STORE — which attrs hold data, grouped by namespace (see (seon.db/store-inventory))
+; ; 4 namespaces · 7 attrs · 34 datoms
+; ; - :seon.agent: ctx(1) id(1)
+; ; - :seon.agent.ctx: name(10) priority(10)
+; ; - :seon.render: ai(10) html(1)
+; ; - :seon.render.live-tile: content(1)
+; ;
+; ; RECENT ACTIVITY (every agent — unfiltered)
+;
+; Source driving your canvas (redefine it to change what
+; your human sees):
+; (defn system-view
+;   "Root's live-tile content (`:seon.render.live-tile/content` symbol). Called
+;    by `render/render-agent-tile` with the render input map (carrying the db
+;    value); returns the `:seon.render/html-response` envelope — the system
+;    dashboard hiccup for the human card + root's fleet understanding for its
+;    prompt. Reads the db EXPLICITLY (purity); composes [[fleet-summary]],
+;    the agent grid, [[store-summary]], and [[recent-activity]]."
+;   {:malli/schema [:=> [:cat ::view-input] :seon.render/html-response]}
+;   [{:seon.db/keys [db]}]
+;   (let [db       (or db @db/*conn*)
+;         fleet    (fleet-summary db)
+;         store    (store-summary db)
+;         activity (recent-activity db)]
+;     {:seon.render/hiccup
+;      [:div {:class "seon-tile flex flex-col bg-base-950 text-text-200"}
+;       (vitals-hiccup fleet)
+;       (grid-hiccup db fleet)
+;       (store-hiccup store)
+;       (activity-hiccup activity)]
+;      :seon.render/ai
+;      (str/join "\n;\n" [(fleet-ai fleet) (store-ai store) (activity-ai activity)])}))
+;
+; ── THIS canvas is your PRIMARY surface ── your human WATCHES
+; this tile; messages are backup narration that scrolls away.
+; Anything worth seeing at a glance — a status, a plan, goals, a
+; checklist, a recommendation, a data breakdown, a result table,
+; progress — belongs HERE as a board/view, not recited in a
+; paragraph: a PLANNING / GOAL / STATUS ask answered only in prose
+; (or only as todos) leaves this canvas blank — render the board
+; FIRST, then narrate. Set it with ONE transact of either literal
+; hiccup (instant) or a qualified tile-FN symbol (re-derives
+; every render, so a live count/query stays current):
+;
+;   (seon.db/transact!
+;     {:seon.db/tx-data
+;      [{:seon.agent/id (seon.db/current-agent-id)
+;        :seon.render.live-tile/content
+;        <hiccup-vector  OR  'my.agent.root/your-tile-fn>}]})
+;
+; COMPOSE it from the toolkit instead of hand-rolling [:div …]:
+;   my.ui   — dual-render status-line / kv-table / section (static)
+;   my.tile — INTERACTIVE button / input / select / toggle / form
+;             (controls that call YOUR fns back — buttons WORK)
+;   my.data — sum-by / max-by / group-sum over stored rows
+; A tile fn returns {:seon.render/hiccup … :seon.render/ai …}: the
+; human sees the hiccup, YOU see the :ai twin (above). The
+; `ui-live-tiles` skill is the full cookbook + the CSS safelist
+; (only safelisted classes exist at runtime; classless semantic
+; hiccup — [:table] [:ul] [:h2] [:p] [:pre [:code …]] — is styled
+; for free). Evolve YOUR fn; never edit the shared core welcome tile.
+;;; └─ end live-tile ─
+

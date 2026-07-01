@@ -1,0 +1,43 @@
+;; CP-0 PARITY ORACLE — config-driven-agent-init (spec §7.1 CP-0).
+;;
+;; Captured from a FRESH-WORLD no-override boot (`bin/seon cluster reset
+;; default`) on the pre-refactor code (before CP-1), root agent, empty
+;; transcript — deterministic. This is the BYTE-PARITY GATE fixture: after the
+;; v3 config-driven refactor a no-override boot must reproduce this block TREE
+;; (set + priorities + render syms) EXACTLY (CP-2 gate), and the rendered
+;; static-prefix text (config-init-parity-oracle.txt, the render-context output
+;; with the runtime-variable :transcript block sliced off) must match byte-for-
+;; byte EXCEPT the two intended changes (escape-clipping? true #43 + transcript
+;; tiers on #62 — CP-5).
+;;
+;; Provenance: commit BEFORE CP-1 on feature/agent-fsm. Baseline manifest =
+;; config/system.edn as of this commit (:seon.config/skills {:load [:repl]},
+;; :seon.config/namespaces :always = the 7-ns toolkit+verb list).
+{:seon.config/parity-oracle
+ {;; root agent's :seon.agent/ctx block set, sorted by priority.
+  ;; [name priority render-ai-symbol]
+  :blocks
+  [[:shared-instructions 10 my.kb.shared/instructions-block]
+   [:skills-catalog      12 my.skills/catalog-block]
+   [:skill/repl          16 my.skills/skill-block]
+   [:namespaces          20 seon.agent.ctx.namespaces/namespaces-block]
+   [:live-tile           35 seon.agent.ctx.live-tile/live-tile-block]
+   [:warnings            40 seon.agent.ctx.warnings/warnings-block]
+   [:open-todos          45 seon.agent.todo.internal/open-todos-block]
+   [:relevant-source     48 seon.agent.ctx.relevant/relevant-source-block]
+   [:findings            97 seon.agent.ctx.findings/findings-block]
+   [:transcript         100 seon.agent.ctx.transcript/transcript-block]]
+
+  ;; root's canvas — the hardcoded (when (= "root" aid) …) branch
+  ;; (client.cljs 2367-2379), to be replaced by root-context's :live-tile block.
+  :root-canvas seon.render.system/system-view
+
+  ;; the no-override namespaces render policy (seon.config/namespaces-policy).
+  :ns-policy
+  {:seon.config/always     #{:my.ui :my.tile :seon.agent.lifecycle :my.kb
+                             :seon.agent.todo :seon.agent.message :my.data}
+   :seon.config/current-ns :full}
+
+  ;; rendered static-prefix byte count (config-init-parity-oracle.txt).
+  :prefix-bytes 96487
+  :prefix-chars 94202}}
