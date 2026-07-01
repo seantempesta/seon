@@ -244,7 +244,7 @@
    (serve's handlers) + the directly-required `call` leaf handler."
   [h]
   (let [{::keys [sse static chat stop resume clear log create-agent
-                 complete]} h]
+                 complete solve]} h]
     [["/css/{*path}" {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
      ["/js/{*path}"  {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
      ["/sse"         {:get {:handler (fn [r] (sse (node-req r) (node-res r)) hijacked)}}]
@@ -268,6 +268,10 @@
      ["/clear"       {:post {:middleware [:seon.route/same-origin] :handler (post-handler clear)}}]
      ["/log"         {:post {:middleware [:seon.route/same-origin] :handler (post-handler log)}}]
      ["/agents/new"  {:post {:middleware [:seon.route/same-origin] :handler (post-handler create-agent)}}]
+     ;; The external-eval-harness boundary door (inspect-ai): mint a fresh
+     ;; scratch agent, run its OWN FSM to idle on the injected input, return
+     ;; the final reply + metadata as JSON. same-origin-gated like the others.
+     ["/solve"       {:post {:middleware [:seon.route/same-origin] :handler (post-handler solve)}}]
      ;; The flat `/call` (back-compat this unit) hands the raw (req,res) to the
      ;; unchanged capability gate; the per-agent `/agent/{id}/call` is the
      ;; SEEDED core door (db->routes) → the same gate.

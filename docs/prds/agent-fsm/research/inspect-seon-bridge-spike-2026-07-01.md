@@ -445,6 +445,164 @@ sandbox's `python`; standalone, to local `python`. Same contract, adapter swaps
 the backend — the `my.*`-fn-plus-adapter pattern above. (Bitter-Lesson: pass the
 LANGUAGE through, don't hand-craft a tool schema per interpreter.)
 
+## 5f. `/solve` correctness audit — verifier findings + the greeting root-cause
+
+The productionized `POST /solve` handler (`src/seon/web/serve.cljs` `handle-solve!`
+/ `solve-once!`) was audited by an independent `seon-verifier` against the gym's
+battle-tested `agent-reply-text` + the real FSM source. It returns a green 200 but
+was **recording garbage** — the exact "if we don't record correctly we're fucked"
+failure. Ranked defects (all confirmed live — a drive returned the bootstrap
+greeting twice as the "reply", `closed_reason :waited`):
+
+| # | Defect | Severity | Root |
+|---|---|---|---|
+| 1 | **Reply query includes the bootstrap greeting** + uses the datahike-cljs banned double-identity-join shape (`serve.cljs:486`). Returns the greeting as the benchmark answer. | **CRITICAL** | the greeting exists (see below) |
+| 3 | **Timeout reports a false `closed_reason`** — reads `last-closed-reason` of a PRIOR run → `:completed`/`:waited` when the task actually timed out (`serve.cljs:495`). | **HIGH** | no timeout discrimination |
+| 2 | **Split-snapshot race** — `derive-state` and `latest-run-start-ms` deref `@db/*conn*` independently (two snapshots) (`serve.cljs:471`). NB the verifier CORRECTED the earlier hypothesis: `derive-state` CANNOT return `:idle` mid-run (a run stays `:open` between turns per `loop.cljs:200-284` / `run.cljs:212-268`) — so the risk is the split snapshot + the boot-greeting run, not inter-turn idle. | **MEDIUM** | two derefs |
+| 4 | **Turn/eval counts are agent-wide** → inflated by the greeting run's +1 turn + its evals (`serve.cljs:477-485`). | **LOW-MED** | the greeting run exists |
+
+**The unifying root cause (owner's diagnosis): the bootstrap greeting.** Defects
+1, 4, and half of 2 all stem from `seon.client/bootstrap-turn!` (`client.cljs:2224`)
+eval'ing `(message/user "Hi — I'm up …")` as turn 0 of every minted agent. That
+greeting is a chat-UX artifact welded into the CREATION mechanism — it does ZERO
+wire-up (compile-state + seed run before turn 0; standing context is derived every
+turn — the docstring says so), nothing depends on it (the gym has to work AROUND it,
+`driver.cljs:1558`), and the UI already renders `● idle` from `derive-state` without
+it. The only functional piece of turn 0 is the `(wait …)` park → `:idle`.
+
+**Decision (owner-directed): remove the greeting at the root, don't band-aid the
+reader.** `bootstrap-turn!` → park-only (`(wait "awaiting first task")`), no
+`message/user` hello. Then a fresh agent's message log is EMPTY until a real message
+arrives → `/solve` reply extraction needs NO `q-from` filter, defect 1 + 4 vanish,
+and the gym drops its turn-0 workarounds. This is a **Core change** (`seon.client`),
+verified separately (resume + gym suite + UI idle render stay green). Open sub-choice
+(owner): keep the eval'd park-turn-0 (agent sees "I parked" in its own transcript —
+self-context continuity + the `:waited` run close) vs drop turn 0 entirely (set
+`:idle` with no turn). Recommendation: **keep-park-drop-hello** (minimal, preserves
+self-context).
+
+**Still needed regardless of the greeting** (independent of the root fix): defect 3
+(emit `closed_reason:"timeout"` + a `timed_out` bool on the clock-exit path) and
+defect 2 (take ONE `@db/*conn*` snapshot per poll, pass it to both reads). Fix all
+three before the endpoint records a real benchmark.
+
+**Live falsification (orchestrator, on the pod after the implementer's guard
+landed):**
+
+- Happy path CORRECT: `{"input":"…remember launch date 1969-07-20…","timeout_ms":180000}`
+  → `{"turns":3,"evals":9,"closed_reason":":completed","reply":"The launch date is
+  1969-07-20."}`. The `latest-run-start-ms` guard successfully skips the greeting
+  idle → the reply is the ANSWER, not the greeting. So the happy path records
+  truthfully.
+- **Timeout path LIES (defects 1 + 3 confirmed):** same task with `timeout_ms:2000`
+  → `{"turns":1,"evals":2,"closed_reason":":waited","reply":"Hi — I'm up and
+  connected to the shared store…"}`. The task did NOT complete — the clock cut it —
+  but the endpoint reports the GREETING run's `:waited` close and the GREETING as
+  the reply. A scorer reads this as a legit termination with a (wrong) answer =
+  **benchmark-corrupting false success.** Plus the real task run kept executing
+  orphaned after the response (token burn). This is the exact "record incorrectly →
+  fucked" failure; the greeting removal + a `timed_out` flag both fix it.
+
+## 5h. Blast radius of deleting turn 0 — verified: production is already zero-run-safe
+
+An independent Explore pass mapped every site that might assume "≥1 run/turn exists"
+for a minted agent. **Verdict: the derived-state architecture already treats a
+zero-run agent as a first-class valid `:idle` state** (`agent.cljs:414` documents "a
+fresh agent with no open run is `:idle`"). No HARD breaks in production
+render/derive/wake. The only HARD sites are test/gym + one HTTP heuristic:
+
+| Layer | Verdict | Detail |
+|---|---|---|
+| **derive.cljs** (current-run, derive-state, run/agent-turn-count, last-closed-reason, derive-status, armable-agent-ids) | **nil-safe by design** | zero-run → `:idle`, counts → 0, reason → nil. No NPE. |
+| **Wake / resume** (`agent.cljs:378` gate, `loop.cljs` wake-handler `:idle`→`open-run!` CAS) | **works** | a zero-run agent is `:idle` → first message opens run #1 exactly as it opens run #2 today. Wake trigger install is SEPARATE from `bootstrap-turn!` (`client.cljs:2447`). |
+| **Transcript** (ai + html twins) | **SOFT** | explicit empty placeholder ("no events yet…"); "nil when the agent has not acted yet". Renders clean. |
+| **Inspector / UI** (`render/default`, `web/debug`, `ui/world`, `ui/header`, `web/datastar`) | **nil-safe** | count-based, placeholders, derive in try/catch. |
+| **Gym** (`driver.cljs` cause-scoping at 760/803/809/860/886 + `agent-reply-text` q-from) | **SOFT** | turn-0 exclusion keyed on `:seon.agent.run/cause` (bootstrap run has none) — becomes vacuous, stays correct; simplifiable. |
+| **`driver.cljs:1642` `ensure-agent!` calls `bootstrap-turn!`** | **HARD (compile)** | unresolved symbol if deleted → must remove the call. |
+| **`driver_test.cljs:992` `[:count 2]` greeting+reply pin** | **HARD (test)** | asserts b sends EXACTLY 2 user msgs (greeting+reply). Without turn 0 → 1. Re-express to `[:count 1]` (it's the double-identity-join regression pin — re-key, don't delete). |
+| **`serve.cljs:433-473` `/solve` boot-idle heuristic** | **HARD/SOFT** | `latest-run-start-ms` + the "skip the boot idle" rationale become moot (a zero-run agent has `latest-run-start-ms = 0 < injected-at`, guard still correct). Simplify + fix the stale comments; re-verify timing. |
+
+**The per-agent ns + require wiring is REAL and REQUIRED — but it already lives
+OUTSIDE the boot turn (verified).** A new agent DOES need `(ns my.agent.<id>
+(:require [seon.agent.message :as message] [seon.agent :as agent]
+[seon.agent.lifecycle :refer [wait complete pause resume terminate]]
+[seon.schema :as schema] [seon.db :as db] [seon.agent.todo :as todo]))` evaluated
+into its home namespace so its reflexive `(message/user …)` / `(wait …)` /
+`(db/query …)` forms resolve. That is `seon.eval/setup-agent-ns!` (`eval.cljs:1388`),
+called by **`boot-one-agent!` (`client.cljs:2065`)** — the per-agent boot slice that
+ALSO does `agent/boot!` (entity/DB state), arms the wake trigger, and hosts the id.
+`bootstrap-turn!` is a SEPARATE, LATER call (`client.cljs:2448`) doing ONLY the
+greeting + park. **So deleting `bootstrap-turn!` leaves ALL ns/require wiring +
+entity state + trigger arming intact** — the deterministic setup already lives in
+`boot-one-agent!`; the boot turn adds nothing to it. This is the crux: the wiring the
+owner rightly insisted on is NOT in the turn.
+
+**The change (surgical, for owner sign-off):**
+1. `seon.client`: DELETE `bootstrap-turn!`, `hello-source`, `park-source`; remove the
+   call in `start-agent!` (`client.cljs:2447`). Minting = transact the agent's
+   `:seon.agent/*` datoms + arm the wake trigger → `:idle`, zero runs, ready.
+2. `test/seon/gym/driver.cljs`: remove the `bootstrap-turn!` call in `ensure-agent!`;
+   the cause-scoping + `agent-reply-text` q-from filter can stay (vacuous) or be
+   simplified — keep them for now to minimize churn.
+3. `test/seon/gym/driver_test.cljs:992`: re-express the `[:count 2]` pin to `[:count 1]`
+   (still pins the double-identity-join direction bug, just without the greeting).
+4. `serve.cljs` `/solve`: simplify the boot-idle heuristic (now solving a non-problem)
+   + apply the timeout-honesty (defect 3) + single-snapshot (defect 2) fixes.
+
+**Verification bar before commit:** resume (parked agent wakes on a new message), the
+full gym suite (`bin/test-cljs`), the UI idle/parked render, and the `/solve` smoke
+incl. the 2s-timeout case reporting an HONEST timeout. Live-prove each.
+
+## 5i. Duplicate init paths → ONE configurable `init-agent!` (owner-directed cleanup)
+
+Agent init is smeared across THREE places with overlapping steps and no single
+configurable entry — a "one mechanism" violation:
+
+| Fn | Steps | Called by |
+|---|---|---|
+| `boot-one-agent!` (`client.cljs:2053`) | `setup-agent-ns!` → `agent/boot!` (entity) → `install-wake-trigger!` → `runtime-id/host!` | `start-agent!` (boot + `/agents/new`) |
+| `arm-agent!` (`client.cljs:1985`) | `runtime-id/host!` → `setup-agent-ns!` → `install-wake-trigger!` | `rearm-wake-triggers!` (hot-reload) + spawn hook `!arm-child-fn` |
+| `bootstrap-turn!` (`client.cljs:2224`) | open run → eval greeting + park → close `:waited` | `start-agent!`, once, after boot-one-agent! |
+
+**The duplication:** `boot-one-agent!` and `arm-agent!` both do
+`setup-agent-ns!` + `install-wake-trigger!` + `runtime-id/host!` in DIFFERENT order;
+`boot-one-agent!` adds `agent/boot!`. `arm-agent!`'s docstring even says "Same order
+as the re-arm loop: host → setup-ns → install-trigger" — two hand-synced copies of
+the same wiring (drift risk). `bootstrap-turn!` is a vestigial mint-only third step.
+The ONLY real difference between mint and re-arm is whether the ENTITY is created.
+
+**The fix: ONE `init-agent!`, map-in, deterministic, configurable via args.**
+
+```clojure
+(schema/register! ::init-agent-request
+  [:map [:seon.agent/id ...] [:seon.agent/mint? {:optional true} :boolean]
+        [:seon.agent/purpose {:optional true} ...] [:seon.agent/parent {:optional true} ...]
+        [:seon.agent/llm-fn {:optional true} ...] [:seon.agent/compile-state {:optional true} ...]])
+
+(defn ^:async init-agent!
+  "The ONE way an agent comes to life or re-arms. Deterministic: wire the home
+   ns (requires), ensure the entity (mint? only), arm the wake trigger, host the
+   id. NO turn-0 ceremony. Ready = :idle, zero runs, fully wired."
+  {:malli/schema [:=> [:cat ::init-agent-request] ::agent-ready]}
+  [{:seon.agent/keys [id purpose parent llm-fn compile-state mint?]}] …)
+```
+
+Fixed step order: ensure compile-state → `setup-agent-ns!` (require wiring) →
+*(mint?)* `agent/boot!` (entity + purpose/parent) → `install-wake-trigger!` →
+`runtime-id/host!`. `boot-one-agent!`, `arm-agent!`, and the spawn hook collapse
+into this one call with different args; `bootstrap-turn!` is DELETED. `/agents/new`
+AND `/solve` both call it with `mint? true` + `purpose` — HTTP mint and harness mint
+share ONE init, zero divergence. This is the proper landing for the greeting removal:
+the required wiring becomes the body of one configurable fn, the ceremony is gone,
+and mint-vs-rearm is a single arg not two hand-synced copies.
+
+**Scope note:** this is a slightly bigger Core change than "delete the greeting"
+(unify 2-3 fns), but it's the CORRECT one — and it's the owner's explicit ask ("one
+proper way to init the agent with proper args"). Needs the same verification bar
+(resume/hot-reload re-arm, gym suite, UI idle-render, `/solve` incl. timeout) PLUS a
+hot-reload re-arm live-proof (the `arm-agent!` path must still work through the
+unified fn). `rearm-wake-triggers!` calls it with `mint? false`.
+
 ## 6. Blockers / caveats
 
 - **No blockers to case-1.** The one honest caveat: the smoke's `/solve` door was a

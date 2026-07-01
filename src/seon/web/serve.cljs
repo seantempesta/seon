@@ -49,6 +49,7 @@
     [seon.agent.lifecycle :as lifecycle]
     [seon.agent.run :as run]
     [seon.db :as db]
+    [seon.derive :as derive]
     [seon.log :as log]
     [seon.platform :as platform]
     [seon.web.router :as router]))
@@ -417,6 +418,108 @@
                 (write-status! res 500 "text/plain; charset=utf-8"
                                (str "complete failed: " err))))))
 
+;; ============================================================
+;; POST /solve — the external-eval-harness boundary door (inspect-ai). Mint a
+;; FRESH agent (per-sample isolation = a clean per-agent namespace
+;; `my.agent.<id>`), inject `input` as a user message via the REAL wake path
+;; (message!, from = user-ref — identical to /chat), then POLL the DERIVED agent
+;; state to :idle (the agent's OWN multi-turn FSM decides turns, NOT the harness)
+;; or until timeout_ms. Read back the final reply text + turn/eval/closed-reason
+;; metadata and return JSON. NO agent-loop/FSM/context/eval code is touched — a
+;; boundary add only. No Malli schema (opaque node req/res, same as the sibling
+;; handlers). Body is application/json `{"input": "<task>", "timeout_ms": <int?>}`.
+;; ============================================================
+
+(defn- latest-run-start-ms
+  "Wall-clock ms of the agent's MOST-RECENTLY-STARTED run (open or closed), or 0
+   when none. The /solve poll uses this to skip the agent's transient BOOT idle:
+   a freshly-minted agent auto-runs a greeting turn that parks `:idle` BEFORE our
+   injected message wakes a task run, so `:idle` alone is ambiguous — we only
+   accept an idle whose latest run started at/after the injection."
+  [aid]
+  (->> (db/query {:seon.db/query '[:find ?started :in $ ?aid :where
+                                   [?a :seon.agent/id ?aid]
+                                   [?r :seon.agent.run/agent ?a]
+                                   [?r :seon.agent.run/started-at ?started]]
+                  :seon.db/args [aid]})
+       (map (fn [[^js started]] (.getTime started)))
+       (reduce max 0)))
+
+(defn- ^:async solve-once!
+  "Mint a fresh scratch agent via the injected boot path `create` (the same
+   closure /agents/new uses; call `(create nil)` — no purpose), inject `input`
+   via the REAL wake path (message!, from = user-ref), poll the DERIVED state to
+   :idle OF THE RUN OUR MESSAGE WOKE (see [[latest-run-start-ms]] — the boot
+   greeting run parks :idle first) or `timeout-ms`, then read back the final
+   reply + turn/eval/closed-reason metadata. The pod's OWN FSM manages turns —
+   the harness never does. Returns a Promise of the result map."
+  [create input timeout-ms]
+  (let [start   (js/Date.now)
+        started (await (create nil))
+        aid     (:seon.agent/id started)]
+    (log/info-console! "seon.web.serve" "POST /solve — minted scratch agent"
+                       {:agent aid :tokens (tokens/estimate (str input))})
+    (await (agent/message!
+             {:seon.agent.message/from    agent/user-ref
+              :seon.agent.message/to      [[:seon.agent/id aid]]
+              :seon.agent.message/content input}))
+    ;; `injected-at` = the instant our message landed. The run that PROCESSES it
+    ;; starts at/after this; the boot greeting run started before. Accept idle
+    ;; only once the latest run began after injection (the task run is reached).
+    (loop [injected-at (js/Date.now)]
+      (await (js/Promise. (fn [r] (js/setTimeout r 1500))))
+      (let [st      (derive/derive-state @db/*conn* aid)
+            elapsed (- (js/Date.now) start)]
+        (if (or (and (= :idle st) (>= (latest-run-start-ms aid) injected-at))
+                (> elapsed timeout-ms))
+          (let [agent-eid (:db/id (db/entity {:seon.db/ref [:seon.agent/id aid]}))
+                user-eid  (:db/id (db/entity {:seon.db/ref [:seon.user/id "user"]}))
+                turns (->> (db/query {:seon.db/query '[:find ?t :in $ ?ag :where
+                                                       [?r :seon.agent.run/agent ?ag]
+                                                       [?t :seon.agent.turn/run ?r]]
+                                      :seon.db/args [agent-eid]}) count)
+                evals (->> (db/query {:seon.db/query '[:find ?e :in $ ?ag :where
+                                                       [?r :seon.agent.run/agent ?ag]
+                                                       [?t :seon.agent.turn/run ?r]
+                                                       [?t :seon.agent.turn/evals ?e]]
+                                      :seon.db/args [agent-eid]}) count)
+                reply (->> (db/query {:seon.db/query '[:find ?f ?to ?at ?c :where
+                                                       [?m :seon.agent.message/from ?f]
+                                                       [?m :seon.agent.message/to ?to]
+                                                       [?m :seon.agent.message/at ?at]
+                                                       [?m :seon.agent.message/content ?c]]})
+                           (filter (fn [[from to _ _]] (and (= from agent-eid) (= to user-eid))))
+                           (sort-by (fn [[_ _ at _]] (.getTime ^js at)))
+                           (map (fn [[_ _ _ c]] c)) last)]
+            {:agent_id aid :turns turns :evals evals
+             :closed_reason (str (derive/last-closed-reason @db/*conn* aid))
+             :reply (or reply "") :elapsed_ms elapsed})
+          (recur injected-at))))))
+
+(defn- handle-solve! [req res]
+  (let [create @!create-agent-fn]
+    (if (nil? create)
+      (write-status! res 503 "application/json; charset=utf-8"
+                     (js/JSON.stringify #js {:error "pod still booting (agent creation not wired)"}))
+      (-> (read-body req)
+          (.then (fn [body]
+                   (let [parsed     (js->clj (js/JSON.parse body))
+                         input      (get parsed "input")
+                         timeout-ms (or (get parsed "timeout_ms") 300000)]
+                     (solve-once! create input timeout-ms))))
+          (.then (fn [result]
+                   (log/info-console! "seon.web.serve" "POST /solve OK"
+                                      {:agent      (:agent_id result)
+                                       :turns      (:turns result)
+                                       :evals      (:evals result)
+                                       :elapsed-ms (:elapsed_ms result)})
+                   (write-status! res 200 "application/json; charset=utf-8"
+                                  (js/JSON.stringify (clj->js result)))))
+          (.catch (fn [err]
+                    (log/error-console! "seon.web.serve" "/solve threw" err)
+                    (write-status! res 500 "application/json; charset=utf-8"
+                                   (js/JSON.stringify #js {:error (str err)}))))))))
+
 (defn- handle-chat! [req res]
   ;; Agent-id resolution (audit P1 — 2026-05-24): query param wins,
   ;; else `(db/current-agent-id)`, else 400 — no silent "seon" fallback.
@@ -607,6 +710,7 @@
    :seon.web.router/log           handle-log!
    :seon.web.router/create-agent  handle-create-agent!
    :seon.web.router/complete      handle-complete-agent!
+   :seon.web.router/solve         handle-solve!
    :seon.web.router/same-origin?  same-origin?})
 
 ;; ============================================================

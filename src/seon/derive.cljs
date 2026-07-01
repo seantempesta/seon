@@ -318,9 +318,12 @@
            (sort-by #(.getTime ^js %))
            last))))
 
-(defn- last-closed-reason
+(defn last-closed-reason
   "The `closed-reason` of the agent's most-recently-STARTED closed run, or nil
    when none. Gated on the attr being installed."
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+                             [:seon.agent/id :seon.agent/id]]
+                  [:maybe :seon.agent.run/closed-reason]]}
   [db id]
   (when (contains? (db/installed-schema db) :seon.agent.run/closed-reason)
     (->> (db/query {:seon.db/db db
