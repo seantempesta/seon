@@ -312,7 +312,9 @@
 ;; ============================================================
 
 (defn agent-registered-attrs
-  "PUBLIC: the `seon.agent.ctx/context-model` classifier consumes this as its
+  "Attr keywords an AGENT registered — tx lacks a `:core-seed` origin.
+
+   PUBLIC: the `seon.agent.ctx/context-model` classifier consumes this as its
    `:seon.agent.ctx/agent-attrs` leg — ONE provenance query for the attr
    surface, shared by domain-attrs and the classifier.
 
@@ -349,7 +351,9 @@
                        :where [?s :seon.schema/key ?k ?tx]]}))))
 
 (defn domain-attrs
-  "Every DOMAIN attr installed on `db` — the db's datahike schema attrs
+  "Every DOMAIN attr installed on `db` — agent-registered, not core.
+
+   The db's datahike schema attrs
    intersected with [[agent-registered-attrs]] (provenance: the attr's
    `:seon.schema/key` row was asserted OUTSIDE the boot seed). These
    are the attrs agents registered for the human's data — INCLUDING
@@ -396,8 +400,10 @@
                     :seon.db/query [:find '?e :where ['?e attr '_]]})))
 
 (defn check-parallel-attr
-  "DOMAIN attrs in the SAME keyword namespace naming the SAME quantity
-   in DIFFERENT units — e.g. a registered :workout/duration-minutes
+  "DOMAIN attrs naming the SAME quantity in DIFFERENT units.
+
+   Detected within the SAME keyword namespace — e.g. a registered
+   :workout/duration-minutes
    beside the existing :workout/duration-seconds (same ns, shared stem
    'duration', both unit-ish suffixes). GLOBAL — keyword namespaces are
    data domains, not code nses, so :seon.warn/ns is ignored. Within a
@@ -484,7 +490,9 @@
        (sort-by str)))
 
 (defn check-unmarked-entity-kinds
-  "BEHAVIORAL entity-marker check: identity attrs that HAVE stored
+  "Identity attrs with stored datoms but no `{:seon.db/entity true}` map.
+
+   BEHAVIORAL entity-marker check: identity attrs that HAVE stored
    datoms but NO registered `:map` schema marked `{:seon.db/entity
    true}` declaring them as a kind. Replaces the register!-time warn,
    which was a false-positive generator by construction — at
@@ -619,8 +627,9 @@
   "Lookup ref attribute should be marked as :db/unique")
 
 (defn check-failed-evals
-  "Failed evals since the latest user message — anywhere in the system
-   (cross-agent). Excludes bad-ref failures (check-bad-ref owns those).
+  "Failed evals since the latest user message, anywhere (cross-agent).
+
+   Excludes bad-ref failures (check-bad-ref owns those).
    Vanishes when the next user msg lands and subsequent evals succeed."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
   [{:seon.db/keys [db]}]
@@ -640,8 +649,9 @@
    :seon.warn/example "(result :<eval-id>)"})
 
 (defn check-bad-ref
-  "Failed evals whose error is datahike's cryptic lookup-ref message —
-   translated into the real fix: the target attr needs
+  "Failed evals whose error is datahike's cryptic lookup-ref message.
+
+   Translated into the real fix: the target attr needs
    {:seon.db/identity true}, or the referenced entity doesn't exist."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
   [{:seon.db/keys [db]}]
@@ -722,8 +732,9 @@
          (map (fn [[eid edn _]] [eid (fs-denial-text edn)])))))
 
 (defn check-fs-denied
-  "fs calls DENIED by the capability allowlist since the latest user
-   message — the grant-mismatch shape where an agent INFERRED its grant
+  "fs calls DENIED by the capability allowlist since the last user msg.
+
+   The grant-mismatch shape where an agent INFERRED its grant
    from a CWD listing (wrongly — the granted root was an ancestor)
    instead of reading the configured truth via
    `(seon.agent.fs/grants)`. DERIVED from the eval log at render time;
@@ -751,7 +762,9 @@
         ";;     :seon.agent.fs/read-only?    false}")})
 
 (defn check-hop-exhausted
-  "DEAD-LETTER surface — messages whose `:seon.agent.message/hops` reached
+  "Messages dropped at the hop cap since the last user message.
+
+   DEAD-LETTER surface — messages whose `:seon.agent.message/hops` reached
    [[hop-cap]] SINCE the latest user message. Each is a wake the trigger
    REFUSED (a same-pair agent↔agent reply chain hit the ping-pong guard
    and was dropped on the floor — the recipient NEVER ran, and the sender
@@ -802,10 +815,11 @@
      "(seon.agent/message! {:seon.agent.message/content \"summary for you — …\"})  ; to defaults to the user"}))
 
 (defn check-record-errors
-  "Evals whose RECORDING partially failed (`:seon.eval/record-error`,
-   stamped by seon.eval/record-eval! when the program-graph tee rows
-   were dropped and only the bare eval row could be recovered) since
-   the latest user message. Each one is a registration/def that will
+  "Evals whose RECORDING partially failed since the last user message.
+
+   Stamped `:seon.eval/record-error` by seon.eval/record-eval! when the
+   program-graph tee rows were dropped and only the bare eval row could
+   be recovered. Each one is a registration/def that will
    NOT survive a pod restart — the transcript alone looks fine, which
    is exactly the dishonest-record class this check makes loud.
    DERIVED at render; scoped out by the next user message. GLOBAL —
@@ -843,8 +857,9 @@
           "               :seon.db/ref [:seon.eval/id \"<eval-id>\"]})")}))
 
 (defn check-slow-evals
-  "Evals over the slow threshold in the last hour, anywhere. Stops
-   surfacing when new evals are fast and the offenders age out."
+  "Evals over the slow threshold in the last hour, anywhere.
+
+   Stops surfacing when new evals are fast and the offenders age out."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
   [{:seon.db/keys [db]}]
   (let [cutoff (js/Date. (- (js/Date.now) (* 60 60 1000)))]
@@ -901,7 +916,8 @@
    "(seon.test.runner/run-vars {:seon.test.runner/vars ['my.ns/my-test]})"})
 
 (defn check-tile-unresolved
-  "Live tiles pointing at a fn symbol that ISN'T loaded in the runtime —
+  "Live tiles pointing at a fn symbol not loaded in the runtime.
+
    `:seon.render.live-tile/content` names a qualified fn symbol that
    `seon.eval/lookup-value` can't resolve, so the human sees a calm
    \"preparing this view…\" placeholder instead of the real view. Literal
@@ -1001,8 +1017,9 @@
                               "(" nm " {:seon.db/db (deref seon.db/*conn*)})")}))
 
 (defn run-checks
-  "Run every registered check against the request; return only the
-   non-clean responses (those with at least one affected entry). A
+  "Run every registered check; return the non-clean responses.
+
+   Only responses with at least one affected entry are returned. A
    check that THROWS becomes its own `:warn-check-error` cluster — the
    remaining checks still run and render (degrade per-check, loudly)."
   {:malli/schema [:=> [:cat ::check-request] [:vector ::check-response]]}
@@ -1051,8 +1068,9 @@
        "moment you do."))
 
 (defn render-warnings
-  "Run the registry and render the non-clean checks as a single
-   comment-block: a single-`;` `WARNINGS`
+  "Render the non-clean checks as a single WARNINGS comment-block.
+
+   Run the registry and render the non-clean checks: a single-`;` `WARNINGS`
    heading, then one `;` cluster per kind. URGENT clusters
    (`:seon.warn/urgent? true`) render FIRST with a louder template; the
    remaining clusters follow in registry order. Empty string when clean.
