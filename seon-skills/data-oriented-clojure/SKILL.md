@@ -91,6 +91,18 @@ startup) — express optionality with `{:optional true}` in the `:map`, never
 `[:maybe X]`. The one exception: a genuine third-party boundary where the value
 is whatever an external lib hands back and there's no honest tighter type.
 
+### Docstring line 1 is a complete ≤72-char sentence — it renders as the summary
+
+A public fn's docstring FIRST LINE is the summary shown wherever the fn renders
+compactly (the compact namespace card shows ONLY line 1). So make it a *complete
+standalone sentence*, ≤72 chars (78 hard cap), ending in terminal punctuation —
+never a mid-sentence hard-wrap. State the action + data effect, not the mechanism
+(mechanism → the body, after a blank line). Imperative for side-effecting verbs
+(`Store…`, `Mint…`), noun-phrase for pure queries (`Agent ids whose…`); backtick
+identifiers. `seon.dev.docstring` (dev hook, warn-only) flags a line 1 that's
+missing, >78 chars, or lacks terminal punctuation. Full rule + example:
+`docs/conventions.md` "Function Docstrings".
+
 ### Agent-facing verbs return error envelopes — they never throw
 
 ```clojure
