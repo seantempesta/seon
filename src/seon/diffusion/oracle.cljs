@@ -77,6 +77,10 @@
 
 (schema/register! ::legs [:vector [:enum :parse :retrieve :eval]])
 
+;; The ORDERED generation phase whose grammar `refine` enforces (optional —
+;; absent = no phase gate, all heads allowed).
+(schema/register! ::phase [:enum :schemas :functions])
+
 (schema/register!
   ::checkpoint
   [:map
@@ -85,6 +89,7 @@
    [::aliases {:optional true} :seon.diffusion.retrieval/aliases]
    [::k {:optional true} :seon.diffusion.retrieval/k]
    [::eval-verdicts {:optional true} [:vector ::eval-verdict]]
+   [::phase {:optional true} ::phase]
    [::db {:optional true} :seon.embed/db]])
 
 (schema/register!
@@ -129,6 +134,37 @@
              (and (= n 3) (not (string? (second args))))))))
 
 ;; ============================================================
+;; Phased grammar gate — the generalization of the structural tier. Generation
+;; runs in ORDERED phases; each phase ALLOWS a set of top-level form heads and
+;; renoises everything else. Lock data-modeling to schemas FIRST (no premature
+;; `defn` body), then unlock functions once the contract is fixed. Matching is
+;; by the head symbol's NAME (namespace-agnostic), so `schema/register!`,
+;; `seon.schema/register!`, and a bare `register!` all read as "register!".
+;; ============================================================
+
+(def ^:private phase-grammars
+  {:schemas   {:allow #{"ns" "register!" "comment"}
+               :intent "schemas only — register! the data shape before any fn body"}
+   :functions {:allow #{"ns" "defn" "comment"}
+               :intent "functions only — defn with specs; the schema contract is locked"}})
+
+(defn- head-name
+  "The NAME of a form's head symbol (namespace stripped), or nil if the form is
+   not a `(head …)` list led by a symbol."
+  [form]
+  (let [h (and (seq? form) (first form))]
+    (when (symbol? h) (name h))))
+
+(defn- phase-violation?
+  "True when `form` is a top-level call whose head is NOT allowed in `phase`.
+   A non-call form (a bare literal/vector) has no head → not a violation here
+   (the parse/structural tiers own those)."
+  [phase form]
+  (when-let [allow (get-in phase-grammars [phase :allow])]
+    (when-let [h (head-name form)]
+      (not (contains? allow h)))))
+
+;; ============================================================
 ;; The unified dispatcher
 ;; ============================================================
 
@@ -140,14 +176,16 @@
 
    - `::clamps` = good form spans NOT overlapping an injection or a renoise span.
    - `::renoise-spans` = parse-error spans + STRUCTURAL-lint spans (a form that
-     reads clean but has a wrong shape the AST proves, e.g. def-vs-defn) + any
-     eval-bad form NOT already covered by an injection (retrieval's correction
-     supersedes a re-noise). The structural tier is ~free — it catches shape
-     mistakes WITHOUT paying the out-of-process eval bundle.
+     reads clean but has a wrong shape the AST proves, e.g. def-vs-defn) +
+     PHASE-grammar spans (when `::phase` is supplied — a form whose head is not
+     allowed in the current generation phase, e.g. a `defn` during the :schemas
+     phase) + any eval-bad form NOT already covered by an injection (retrieval's
+     correction supersedes a re-noise). The structural + phase tiers are ~free —
+     they catch shape/phase mistakes WITHOUT paying the out-of-process eval bundle.
    - `::injections` = retrieval's hallucinated-symbol corrections.
    - `::legs` = `[:parse :retrieve]`, plus `:eval` when verdicts were folded."
   {:malli/schema [:=> [:cat ::checkpoint] ::control-set]}
-  [{::keys [canvas-text aliases k eval-verdicts db]}]
+  [{::keys [canvas-text aliases k eval-verdicts phase db]}]
   (let [entries  (internal/parse-forms canvas-text {:strip-fences? false})
         forms    (filter #(= :form (:kind %)) entries)
         reads    (filter #(= :read (:kind %)) entries)
@@ -172,6 +210,18 @@
                                       {::span span ::error-kind :def-vs-defn
                                        ::source source})))
                             vec)
+        ;; PHASE-grammar renoise spans — a form whose head is not ALLOWED in the
+        ;; current generation phase (e.g. a `defn` body during the :schemas phase).
+        ;; Only active when `phase` is supplied. Renoises the disallowed form so
+        ;; the model regenerates within the phase grammar.
+        phase-renoise (if phase
+                        (->> forms
+                             (keep (fn [{:keys [span source form]}]
+                                     (when (and span (phase-violation? phase form))
+                                       {::span span ::error-kind :phase-violation
+                                        ::source source})))
+                             vec)
+                        [])
         ;; EVAL fold — a bad verdict becomes a renoise span UNLESS retrieval
         ;; already named the real API for that span (injection supersedes).
         eval-renoise  (->> eval-verdicts
@@ -182,7 +232,10 @@
                                    {::span span
                                     ::error-kind (or error-kind :throw)
                                     ::source (subs canvas-text (first span) (second span))})))
-        renoise-spans (into (into parse-renoise struct-renoise) eval-renoise)
+        renoise-spans (-> parse-renoise
+                          (into struct-renoise)
+                          (into phase-renoise)
+                          (into eval-renoise))
         bad-spans     (into inj-spans (map ::span renoise-spans))
         ;; CLAMPS — good forms that carry no hallucination and are not broken.
         clamps        (->> forms

@@ -184,6 +184,49 @@
       done)))
 
 ;; ---------------------------------------------------------------------------
+;; PHASE grammar gate — ordered generation phases. :schemas allows ns+register!
+;; (rejects def/defn); :functions allows ns+defn (rejects register!/bare-def).
+;; A disallowed head renoises; an allowed one clamps.
+;; ---------------------------------------------------------------------------
+
+(def ^:private phase-canvas
+  (str "(ns my.work)\n"                                   ; allowed in BOTH
+       "(schema/register! ::id :string)\n"                ; schemas-only
+       "(defn mean [v] (/ (reduce + v) (count v)))\n"     ; functions-only
+       "(def x 5)"))                                       ; allowed in NEITHER
+
+(deftest phase-grammar-gate
+  (async done
+    (with-db
+      (fn [db]
+        (letfn [(run [phase]
+                  (let [cs (oracle/refine
+                             (cond-> {::oracle/canvas-text phase-canvas ::oracle/db db}
+                               phase (assoc ::oracle/phase phase)))]
+                    {:violations (->> (::oracle/renoise-spans cs)
+                                      (filter #(= :phase-violation (::oracle/error-kind %)))
+                                      (map ::oracle/source) set)
+                     :clamps (set (map ::oracle/source (::oracle/clamps cs)))}))]
+
+          (testing ":schemas phase — ns + register! clamp; defn + def renoised"
+            (let [{:keys [violations clamps]} (run :schemas)]
+              (is (contains? violations "(defn mean [v] (/ (reduce + v) (count v)))"))
+              (is (contains? violations "(def x 5)"))
+              (is (contains? clamps "(ns my.work)"))
+              (is (contains? clamps "(schema/register! ::id :string)"))))
+
+          (testing ":functions phase — ns + defn clamp; register! + def renoised"
+            (let [{:keys [violations clamps]} (run :functions)]
+              (is (contains? violations "(schema/register! ::id :string)"))
+              (is (contains? violations "(def x 5)"))
+              (is (contains? clamps "(ns my.work)"))
+              (is (contains? clamps "(defn mean [v] (/ (reduce + v) (count v)))"))))
+
+          (testing "no phase supplied — the gate is inert (no :phase-violation spans)"
+            (is (empty? (:violations (run nil)))))))
+      done)))
+
+;; ---------------------------------------------------------------------------
 ;; EVAL FOLD — a syntactically-clean form retrieval cannot fix (the symbol has
 ;; no near candidate in the graph) is a CLAMP, until an eval verdict (`:compile`
 ;; — undeclared var) demotes it to a renoise span. The verdict is span-keyed, so
