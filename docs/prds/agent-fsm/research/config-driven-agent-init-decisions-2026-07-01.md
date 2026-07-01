@@ -129,6 +129,82 @@ tweaking other state.
 - #74 (todo signature-trim) is MOOT — signatures retired; `todo` is just a
   member of the namespaces include-set.
 
+## v3 reframe (owner iteration) — the two-level entity model
+
+The v2 flat-agent-only model didn't match how per-block / per-namespace config
+should work. Refined:
+
+13. **Two-level entity model.** The context is the AGENT entity + a set of
+    component-ref'd BLOCK entities. AGENT-level config (model, turn-limit,
+    home-requires, toolkit, origin-scope, wake, capabilities) = attrs on the
+    agent entity. Per-BLOCK config = attrs ON EACH BLOCK entity, colocated with
+    that block's render code. "Which blocks I want" = which block entities exist
+    on `:seon.agent.ctx/blocks`; "a block's config" = that block's datoms. More
+    datom-native than v2; matches "each block has its own config".
+
+14. **Per-namespace render map (folds in third-party + views).** The namespaces
+    block's config is `:seon.agent.ctx.namespaces/render` = a `:map-of` ns-kw →
+    aspect-set (`#{:source :tests :signatures}`), with a special `:current` key
+    for the current ns. REPLACES the v2 global `third-party?` bool + the separate
+    `view`/`current-ns-view`/`view-overrides` keys — a third-party ns is just an
+    entry; per-ns aspects are the value. `include-referred-local?` stays a
+    namespaces-block bool that auto-adds local-require nses to the render map.
+
+15. **`enabled?` bools dissolve.** A block's PRESENCE is its "on"; dropping the
+    block entity is its "off". Removes the scattered findings/warnings/inventory/
+    relevant `enabled?` keys — add/remove the block instead.
+
+16. **Loading = component-ref nested transaction.** `:seon.agent.ctx/blocks` is a
+    COMPONENT ref (`:db/isComponent`, cardinality-many). Pipeline: aero reads a
+    SPARSE manifest (namespaced block maps) → `resolve-agent-context` merges
+    (agent-context ← root-context ← per-mint override) then `m/decode` through
+    `default-value-transformer {::mt/add-optional-keys true}` (RECURSES — fills
+    agent AND per-block defaults, so sparse block maps get their config) → ONE
+    `db/transact!` of the nested map → datahike auto-creates each block entity +
+    wires the refs. Changing config later = transact (retractEntity a block, add
+    a block map, or assoc a block's config attr) → reactive re-render.
+
+17. **Block identity is not a `:kind`.** `:seon.agent.ctx/name` is an
+    identity/ordering handle (upsert-by-name, sort) — NOT a kind stamp. What a
+    block DOES follows from its attributes (a block with
+    `:seon.agent.ctx.namespaces/render` is what the namespaces renderer picks up).
+    The spec must nail the discriminator so no `:kind` sneaks in.
+
+## Build decisions (owner, 2026-07-01)
+
+18. **Sequencing: INTERLEAVE.** The config refactor is the main build focus; the
+    inspect-bridge benchmark (#86) finishes in the background (different lane). #85
+    memory-evolution comes after. Neither stalls the other.
+
+19. **Build shape: builder's-choice ORDER, but with hard discipline** (the owner
+    has repeatedly been told "done" only to find it partial — this is the #1
+    constraint):
+    - **Proper git-commit CHECKPOINTS** at every stable step (so a clean break is
+      always available + we can bisect breakage).
+    - **A completeness LEDGER** — every deletion, every renderer→datom move, every
+      schema registration, every wire-up is a tracked item verified to done. "Done"
+      = every box checked + gym-green + byte-parity proven + a live drive. NO early
+      victory, NO "declare done while partial".
+    - **Clean-break-then-find-all-breakage:** make the structural change, checkpoint,
+      then systematically sweep for EVERY breakage (compile errors, test failures,
+      grep the ripped symbols to zero, live drive) and drive it to zero — rather
+      than fragile keep-green-at-every-micro-step.
+    - **SIMPLIFY / CONVERGE, never redo 3 ways.** The entire point is ONE config
+      path. At each step collapse duplicated paths; never leave a `foo`/`foo-v2`.
+    - **Byte-identical gym parity** is the gate: a no-override boot reproduces
+      today's context exactly; only escape-clipping true + transcript tiers change.
+
+20. **Decay is CONFIGURABLE too** — the eval-result decay schedule is a config key
+    (`result-decay`) with a sensible default, NOT hardcoded. (Same for the per-tier
+    caps generally: levels are data, tunable per-agent + gym-tuned at build.)
+
+21. **PARK ≠ FORGET.** These net-new keys are DEFERRED to a later pass but stay in
+    the spec as explicit "deferred / phase-2" items (registered-or-documented so
+    they are not lost): `persona`, `auto-terminate?`, per-agent `fs/roots`,
+    per-agent `llm/context-window`, `schedule/seed`, `origin-scope`. The core
+    net-new mechanisms STAY IN v1: per-agent LLM (provider/model/temp/etc.),
+    namespace views + the tests aspect, and the configurable eval-result decay.
+
 ## Open (agent to resolve in the spec, owner reviews)
 
 - The ~8 colocation homes flagged in decision 3.
