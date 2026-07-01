@@ -44,6 +44,7 @@
    on-demand `render-namespace` path). So the full rows here are always
    real file source, never a reconstructed stub."
   (:require
+    [cljs.reader :as edn]
     [clojure.string :as str]
     [seon.agent.ctx :as ctx]
     [seon.config :as config]
@@ -403,3 +404,147 @@
     (if (seq blocks)
       (str namespaces-header "\n\n" (str/join "\n\n" blocks))
       "")))
+
+;; ============================================================
+;; The COMPACT card renderer — a SIBLING detail-level to
+;; [[seon.agent.ctx/render-one-ns-ai]]'s full-source block, NOT a
+;; replacement. A card is 3–5× smaller than full source: it keeps the
+;; whole `register!` data model + every public fn's `:malli/schema`
+;; I/O contract + its arglist, and elides only the fn BODY (`…`) and
+;; the deep multiline prose (all but docstring line 1). This is the
+;; coverage lever — for the budget of ~11 full nses the agent instead
+;; sees its ENTIRE verb surface as cards.
+;;
+;; It reads INDEXED ROWS ONLY (`:seon.fn/_ns`, `:seon.schema/_ns`),
+;; never a file read — code-as-data, the boot indexer is the one reader.
+;; Every helper is errors-as-values: a bad row degrades one line, never
+;; throws into the render.
+;;
+;; NOT yet wired into [[namespaces-block]]'s full-vs-compact selection —
+;; that step is gated on the config lane's block-entity presence-sets
+;; (`::full-source` / `::with-tests`) landing.
+;; ============================================================
+
+(defn- abbrev-ns-kws
+  "Rewrite every fully-qualified keyword whose namespace is `ns-str`
+   (`:my.kb/claim`) to its `::`-abbreviated form (`::claim`) in string
+   `s`. A literal prefix replace of `\":<ns>/\"` → `\"::\"`: the trailing
+   `/` means a SIBLING namespace (`:my.kb.source/rating`) is left intact.
+   No regex — the ns dots are literal."
+  [s ns-str]
+  (str/replace s (str ":" ns-str "/") "::"))
+
+(defn- soft-clip
+  "Return `s` unchanged when ≤ `n` chars, else clipped to `n` chars with a
+   trailing `…` (the last char is the ellipsis). Interim guard until the
+   corpus's docstring line 1 reliably complies with the ≤78 convention."
+  [s n]
+  (if (> (count s) n) (str (subs s 0 (dec n)) "…") s))
+
+(defn- compact-schema-line
+  "One `(register! <key> <form>)` line for a schema row the ns OWNS.
+   `<form>` is the LIVE registry definition ([[seon.schema/schema-definition]]),
+   falling back to the persisted `:seon.schema/source`, then a `<not
+   registered>` note — kept VERBATIM (real runnable `register!`), with
+   ns-local keywords abbreviated to `::`. Errors-as-values: a lookup that
+   throws degrades to the source/`<not registered>` fallback."
+  [ns-str {:seon.schema/keys [key source]}]
+  (let [key-str (if (= (namespace key) ns-str)
+                  (str "::" (name key))
+                  (pr-str key))
+        def     (when (keyword? key)
+                  (try (schema/schema-definition key) (catch :default _ nil)))
+        form    (cond
+                  (some? def)               (pr-str def)
+                  (not (str/blank? source)) (str/trim source)
+                  :else                     "<not registered>")]
+    (str "(register! " key-str " " (abbrev-ns-kws form ns-str) ")")))
+
+(defn- compact-arities
+  "The arity portion of a compact `defn` head, derived from the stored
+   `:seon.fn/arglists` string (`\"([{:my.kb/keys [a]}])\"`). Single arity →
+   `[args] …`; multi-arity → `([a] …) ([a b] …)`. Errors-as-values: an
+   unreadable arglists string falls back to its raw text (outer parens
+   stripped) with an elided body."
+  [arglists]
+  (let [parsed (try (edn/read-string arglists) (catch :default _ nil))]
+    (cond
+      (and (seq? parsed) (seq parsed) (every? vector? parsed))
+      (if (= 1 (count parsed))
+        (str (pr-str (first parsed)) " …")
+        (str/join " " (map (fn [v] (str "(" (pr-str v) " …)")) parsed)))
+      :else
+      (let [s (str/trim (or arglists ""))
+            inner (if (and (str/starts-with? s "(") (str/ends-with? s ")"))
+                    (subs s 1 (dec (count s)))
+                    s)]
+        (str inner " …")))))
+
+(defn- compact-fn-head
+  "One public fn condensed to a single-line `defn` HEAD: `(defn name
+   \"<doc line 1>\" {:malli/schema <spec>} [args] …)` — real Clojure, body
+   elided with `…`. Docstring line 1 is soft-clipped at 78; a fn with no
+   docstring omits the string; a fn with no `:malli/schema` omits the
+   metadata map; ns-local keywords in the spec + arglist abbreviate to
+   `::`. Multi-arity specs/arglists pass through unchanged."
+  [ns-str {:seon.fn/keys [sym arglists doc spec]}]
+  (let [nm      (if-let [i (str/index-of sym "/")] (subs sym (inc i)) sym)
+        doc-1   (when (and doc (not (str/blank? doc)))
+                  (soft-clip (str/trim (first (str/split-lines doc))) 78))
+        docpart (if doc-1 (str " " (pr-str doc-1)) "")
+        specpart (if (and spec (not (str/blank? spec)))
+                   (str " {:malli/schema " spec "}")
+                   "")
+        arities (compact-arities arglists)
+        head    (str "(defn " nm docpart specpart " " arities ")")]
+    (abbrev-ns-kws head ns-str)))
+
+(schema/register! ::render-one-ns-compact-request
+  [:map
+   [:seon.ns/name :seon.ns/name]
+   [:seon.db/db   :seon.db/db]])
+
+(defn render-one-ns-compact
+  "Render ONE namespace as a COMPACT CARD string — the ns's `register!`
+   schema block (KEPT verbatim) plus every PUBLIC fn condensed to a
+   one-line `defn` head with the body elided (`…`), inside the standard
+   `;;; ┌─/└─` demarcation ([[seon.agent.ctx/ns-demarc]]).
+
+   Reads INDEXED ROWS ONLY (`:seon.schema/_ns` / `:seon.fn/_ns` off the
+   `:seon.ns/name` entity) — NEVER a file read (code-as-data). A sibling
+   detail-level to [[seon.agent.ctx/render-one-ns-ai]]'s full block, ~3–5×
+   smaller. Errors-as-values: a ns with no `:seon.ns` entity renders a
+   one-line note; a bad row degrades one line, never throws.
+
+   Map-in: `{:seon.ns/name <keyword> :seon.db/db <db-value>}`. Returns the
+   card string."
+  {:malli/schema [:=> [:cat ::render-one-ns-compact-request] :string]}
+  [{ns-kw :seon.ns/name db :seon.db/db}]
+  (let [ns-str (name ns-kw)]
+    (if-not (db/entity-lazy {:seon.db/db db :seon.db/ref [:seon.ns/name ns-kw]})
+      (ctx/ns-demarc ns-kw "; (not in db — not indexed)")
+      (let [pull    (db/pull
+                      {:seon.db/db db
+                       :seon.db/ref [:seon.ns/name ns-kw]
+                       :seon.db/pull-pattern
+                       '[{:seon.fn/_ns     [:seon.fn/sym :seon.fn/arglists
+                                            :seon.fn/doc :seon.fn/spec
+                                            :seon.fn/private?]
+                          :seon.schema/_ns [:seon.schema/key :seon.schema/source]}]})
+            schemas (->> (:seon.schema/_ns pull)
+                         (filter (fn [{:seon.schema/keys [key]}]
+                                   (= (namespace key) ns-str)))
+                         (sort-by (comp str :seon.schema/key)))
+            fns     (->> (:seon.fn/_ns pull)
+                         (remove :seon.fn/private?)
+                         (sort-by :seon.fn/sym))
+            reg-lines (map #(compact-schema-line ns-str %) schemas)
+            fn-lines  (map #(compact-fn-head ns-str %) fns)
+            parts (cond-> []
+                    (seq reg-lines) (into reg-lines)
+                    (and (seq reg-lines) (seq fn-lines)) (conj "" "; fns (body elided):")
+                    (seq fn-lines)  (into fn-lines))
+            body  (if (seq parts)
+                    (str/join "\n" parts)
+                    "; (nothing indexed)")]
+        (ctx/ns-demarc ns-kw body)))))
