@@ -1959,9 +1959,24 @@
 (schema/register! ::mint?         :boolean)
 (schema/register! ::llm-fn        fn?)
 (schema/register! ::compile-state :any)
-;; Config-driven agent-init CP-1 — arm the message wake trigger at init
-;; (agent-level). Nothing reads it yet (purely additive).
+;; Config-driven agent-init — arm the message wake trigger at init
+;; (agent-level, default true). Seeded onto the agent by seed-default-ctx! and
+;; READ here by [[wake-armed?]] to gate the trigger install.
 (schema/register! ::wake? [:boolean {:default true}])
+
+(defn- wake-armed?
+  "Whether agent `id` should have its message wake trigger installed — its
+   `:seon.client/wake?` datom (default true = today's unconditional arm). A
+   guarded read: nil db / never-installed attr / non-bool → true (byte-parity).
+   `wake? false` (config or a live transact) means the agent does NOT auto-wake
+   on a message — a human-driven or externally-stepped agent."
+  [id]
+  (let [db (some-> db/*conn* deref)]
+    (if (and db id (contains? (db/installed-schema db) ::wake?))
+      (let [v (:seon.client/wake?
+                (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))]
+        (if (boolean? v) v true))
+      true)))
 (schema/register! ::init-agent-request
   [:map
    [:seon.agent/id      :seon.agent/id]
@@ -2020,11 +2035,16 @@
                   boot-res)
               (do
                 ;; 4. arm the wake trigger (MUST be last-of-wiring — install
-                ;;    unlistens any prior key). 5. host the id for MCP.
-                (agent-loop/install-wake-trigger!
-                  {:seon.agent/id            id
-                   :seon.agent/llm-fn        llm
-                   :seon.agent/compile-state cs})
+                ;;    unlistens any prior key) — GATED on the agent's
+                ;;    `:seon.client/wake?` datom (default true = today). A
+                ;;    `wake? false` agent is wired + hosted but does NOT
+                ;;    auto-wake on a message (human-/externally-driven).
+                ;;    5. host the id for MCP (independent of wake).
+                (when (wake-armed? id)
+                  (agent-loop/install-wake-trigger!
+                    {:seon.agent/id            id
+                     :seon.agent/llm-fn        llm
+                     :seon.agent/compile-state cs}))
                 (runtime-id/host! id)
                 (if mint? boot-res {:seon.agent/id id})))))))))
 

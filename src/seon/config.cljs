@@ -163,19 +163,38 @@
     ;; the CP-0 oracle inventory (:seon.render html(1)).
     :seon.render/html 'seon.agent.ctx.transcript/transcript-block-html}])
 
-;; The agent-context map — agent-level config keys (all `{:optional true}` with
-;; a `:default`) + the `:seon.agent/ctx` block vector (its `:default` = the full
-;; tree). Every key optional ⇒ `{}` validates ⇒ the transformer fills the whole
-;; thing. Agent-level scalars are carried for CP-3 (nothing reads them yet); the
-;; CP-2 byte-parity gate is the BLOCK TREE.
+;; The agent-context map — agent-level config keys (all `{:optional true}`,
+;; carrying their `:default`) + the `:seon.agent/ctx` block vector (its
+;; `:default` = the full tree). Every key optional ⇒ `{}` validates ⇒ the
+;; recursive decode fills the whole thing.
+;;
+;; TWO CLASSES of agent-level key:
+;;   (a) CONSUMED-INTO-BLOCKS at seed, NOT persisted as an agent datom —
+;;       `:my.skills/load` (expanded into `:skill/<name>` blocks; block presence
+;;       is its truth). Dropped before the scalar transact by `seed-default-ctx!`.
+;;   (b) PERSISTED as an agent-entity datom, read reactively by its consumer —
+;;       `:seon.client/wake?` (gates the wake trigger at init),
+;;       `:seon.eval/home-requires` (the home-ns require list). These are
+;;       declared HERE (referencing their owning ns's registered shape) so the
+;;       recursive decode fills the default AND `seed-default-ctx!` transacts
+;;       them onto the entity. Default = today's value ⇒ byte-parity.
+;; (The per-agent LLM / capabilities / toolkit / transcript-scalar keys are the
+;; owner's pending three-fates call — added here the same way once decided.)
+;; The persisted agent-level dials (`:seon.client/wake?`, `:seon.eval/home-requires`)
+;; carry NO schema `:default` here — their DEFAULT lives ONCE at the CONSUMER
+;; (`seon.client/wake-armed?` → true; `seon.eval/home-requires-for` → the
+;; `home-ns-require-specs` const). So a no-config agent never gets the datom
+;; (the consumer's fallback = byte-parity), and the manifest sets the key ONLY to
+;; OVERRIDE. Declared LEAF-shaped (NOT a keyword ref — `seon.config` is a leaf
+;; that loads before `seon.eval`/`seon.client`, and the full shape is validated
+;; downstream at `transact!`, the same rule the block vector uses).
 (schema/register! :seon.config/agent-context
   [:map
-   ;; the always-on skill BODIES — a presence-set expanded into `:skill/<name>`
-   ;; blocks at seed (default `[:repl]` = byte-parity today). Declared HERE (not
-   ;; just in my.skills) so the recursive decode fills the default when the
-   ;; manifest omits it. Leaf `:keyword` shape (my.skills owns the full
-   ;; `:my.skills/name` identity validation).
-   [:my.skills/load {:optional true :default [:repl]} [:vector :keyword]]
+   ;; (a) consumed-into-blocks at seed (leaf `:keyword`; my.skills owns identity)
+   [:my.skills/load          {:optional true :default [:repl]} [:vector :keyword]]
+   ;; (b) persisted agent datoms — override-only (no default; consumer owns it)
+   [:seon.client/wake?       {:optional true} :boolean]
+   [:seon.eval/home-requires {:optional true} [:vector :any]]
    [:seon.agent/ctx {:optional true :default default-ctx-blocks} [:vector :map]]])
 
 ;; The ROOT override — a SPARSE agent-context merged over `:seon.config/agent-context`

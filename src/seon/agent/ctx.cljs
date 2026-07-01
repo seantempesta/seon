@@ -1951,22 +1951,50 @@
                         (:seon.error/message (:seon.db/error res)))}
           {::ok? true ::names [nm]})))))
 
+(def ^:private seed-consumed-keys
+  "Agent-context keys CONSUMED at seed rather than persisted as an agent datom,
+   so [[seed-default-ctx!]] drops them from the scalar transact:
+     - `:seon.agent/ctx`   — `install!` owns the block-tree transact.
+     - `:my.skills/load`   — already expanded into `:skill/<name>` blocks by the
+                             loader; block presence is its persisted truth."
+  #{:seon.agent/ctx :my.skills/load})
+
 (defn ^:async seed-default-ctx!
-  "SEED-COPY the default block set ([[default-seed-blocks]]) into the agent in
-   scope — the creation-time copy that gives a fresh agent its COMPLETE
-   :seon.agent/ctx so render needs no default fallback. Idempotent via
-   install!'s upsert-by-name; `seon.agent/create!` calls it ONLY for a
-   genuinely new entity (a resumed agent keeps its own edited/removed blocks).
+  "SEED-COPY the resolved agent-context into the agent in scope — the
+   creation-time copy that gives a fresh agent its COMPLETE `:seon.agent/ctx`
+   block set AND its agent-level config datoms, so render and every
+   config-on-record consumer read ONE place. Idempotent via install!'s
+   upsert-by-name; `seon.agent/create!` calls it ONLY for a genuinely new entity
+   (a resumed agent keeps its own edited config/blocks).
 
    The seed is shaped by the OPTIONAL config manifest via the GENERIC loader
    ([[seon.config/resolve-agent-context]]) selected by the scoped agent's IDENTITY
    (root gets the root-context canvas override) — config absent → the schema's
-   default block tree (byte-identical to today); present → whatever the manifest
-   specifies. `install!` does the component-ref upsert-by-name transact."
+   defaults (byte-identical to today); present → whatever the manifest specifies.
+
+   TWO seed writes: (1) `install!` upserts the block tree; (2) the surviving
+   AGENT-LEVEL keys (everything except [[seed-consumed-keys]]) are transacted
+   onto the agent ENTITY as its reactive config-on-record — so a consumer reads
+   the datom off the agent (e.g. `:seon.client/wake?`, `:seon.eval/home-requires`).
+   Defaults land as data ⇒ byte-identical behavior for a no-config agent; a
+   manifest override lands its non-default value, which the consumer then reads.
+   GENERIC — it carries WHATEVER agent-level keys the resolved config holds, so a
+   newly-activated dial needs no change here (only its schema key + its reader)."
   {:malli/schema [:=> [:cat] ::result]}
   []
-  (let [id (db/current-agent-id)]
-    (install! (:seon.agent/ctx (config/resolve-agent-context id nil)))))
+  (let [id       (db/current-agent-id)
+        resolved (config/resolve-agent-context id nil)
+        scalars  (apply dissoc resolved seed-consumed-keys)
+        blk-res  (await (install! (:seon.agent/ctx resolved)))]
+    (if (or (empty? scalars) (false? (::ok? blk-res)))
+      blk-res
+      (let [res (await (db/transact!
+                         {:seon.db/tx-data [(assoc scalars :seon.agent/id id)]}))]
+        (if (false? (:seon.db/ok? res))
+          {::ok? false
+           ::error (str "seed-default-ctx! scalar transact failed: "
+                        (:seon.error/message (:seon.db/error res)))}
+          blk-res)))))
 
 ;; ============================================================
 ;; Render pipeline — the agent's OWN block set, decoded + priority-sorted,

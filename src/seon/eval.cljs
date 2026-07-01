@@ -1379,18 +1379,39 @@
                 (str (name (nth spec 2)) "/" short-name))))
           home-ns-require-specs)))
 
+(defn home-requires-for
+  "The require specs for agent `id`'s home ns — its `:seon.eval/home-requires`
+   config (via `seon.config/resolve-agent-context`, read at SETUP time so it
+   works before the persisted datom is written on a mint), else the
+   [[home-ns-require-specs]] const default (= byte-parity for a no-config
+   agent). The const is the DEFAULT VALUE only; the config is the source."
+  {:malli/schema [:=> [:catn [::id [:maybe :string]]] [:vector :any]]}
+  [id]
+  (or (when id
+        (let [reqs (:seon.eval/home-requires (config/resolve-agent-context id nil))]
+          (when (seq reqs) (vec reqs))))
+      home-ns-require-specs))
+
 (defn home-ns-form
-  "The exact `(ns <home> (:require …))` SOURCE wired into every agent's home
+  "The exact `(ns <home> (:require …))` SOURCE wired into an agent's home
    namespace — the one form [[setup-agent-ns!]] evaluates AND the one the
-   workspace block renders verbatim. Built from [[home-ns-require-specs]] so
-   there is a SINGLE source of truth for what an agent's home ns requires,
-   with every alias/refer visible (no bare-name reconstruction). `home-ns` is
-   the home-ns symbol/string/keyword (e.g. `my.agent.<id>`)."
-  {:malli/schema [:=> [:catn [::home-ns [:or :symbol :string :keyword]]] :string]}
-  [home-ns]
-  (str "(ns " (name home-ns) "\n  (:require "
-       (str/join "\n            " (map pr-str home-ns-require-specs))
-       "))"))
+   workspace block renders verbatim, with every alias/refer visible (no
+   bare-name reconstruction). `home-ns` is the home-ns symbol/string/keyword
+   (e.g. `my.agent.<id>`).
+
+   Two arities: the 1-arg renders the DEFAULT [[home-ns-require-specs]] (the
+   stub/preview shape); the 2-arg takes the resolved `specs` for a specific
+   agent ([[home-requires-for]]) — `setup-agent-ns!` passes the per-agent list
+   so a `:seon.eval/home-requires` override actually wires the agent's ns."
+  {:malli/schema [:function
+                  [:=> [:catn [::home-ns [:or :symbol :string :keyword]]] :string]
+                  [:=> [:catn [::home-ns [:or :symbol :string :keyword]]
+                              [::specs [:vector :any]]] :string]]}
+  ([home-ns] (home-ns-form home-ns home-ns-require-specs))
+  ([home-ns specs]
+   (str "(ns " (name home-ns) "\n  (:require "
+        (str/join "\n            " (map pr-str specs))
+        "))")))
 
 (def authored-ns-require-nses
   "The [[home-ns-require-specs]] NAMESPACES whose short alias an agent's
@@ -1461,8 +1482,8 @@
    toolkit ns gone) and throws."
   {:malli/schema
    [:=> [:catn [::compile-state :any] [::agent-ns-sym :any] [::agent-id :any]] :any]}
-  [compile-state agent-ns-sym _agent-id]
-  (let [setup-src (home-ns-form agent-ns-sym)
+  [compile-state agent-ns-sym agent-id]
+  (let [setup-src (home-ns-form agent-ns-sym (home-requires-for agent-id))
         r (await (eval compile-state setup-src
                        {:ns 'cljs.user :analyze-deps? true}))]
     (when-not (:ok r)

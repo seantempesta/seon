@@ -65,6 +65,25 @@
         (is (= 'my.skills/skill-block (:seon.render/ai blk)))
         (is (= 16 (:seon.agent.ctx/priority blk)))))))
 
+;;; Persisted agent-level dials — `:seon.client/wake?` / `:seon.eval/home-requires`
+;;; carry NO schema default (the CONSUMER owns the default), so a no-config agent
+;;; gets NO datom (byte-parity) and the manifest sets the key only to OVERRIDE.
+
+(deftest agent-level-dials-are-override-only
+  (with-redefs [config/load-manifest (fn [] {})]
+    (testing "a default agent-context carries NEITHER wake? nor home-requires (consumer owns the default)"
+      (let [ctx (config/resolve-agent-context "worker-x" nil)]
+        (is (not (contains? ctx :seon.client/wake?))
+            "no wake? datom on a default agent → seed transacts nothing → parity")
+        (is (not (contains? ctx :seon.eval/home-requires))
+            "no home-requires datom on a default agent → home-requires-for uses the const")))
+    (testing "a per-mint override carries the key so seed-default-ctx! transacts it"
+      (let [ctx (config/resolve-agent-context "worker-x"
+                                              {:seon.client/wake? false
+                                               :seon.eval/home-requires '[[seon.db :as db]]})]
+        (is (false? (:seon.client/wake? ctx)))
+        (is (= '[[seon.db :as db]] (:seon.eval/home-requires ctx)))))))
+
 (deftest route-removes
   (testing "a route spec drops the named seeded routes"
     (let [m {:seon.config/routes [{:seon.config/removes [:seon.route/world]}]}]
