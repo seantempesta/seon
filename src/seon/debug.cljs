@@ -63,7 +63,9 @@
 (schema/register! :seon.debug/override [:enum :on :off :env])
 
 (defn set-override!
-  "Force capture ON, OFF, or back to env-driven (`:env`) for THIS
+  "Force capture ON, OFF, or back to env-driven (`:env`).
+
+   For THIS
    process. Returns the value set. Used by the gym driver to enable
    capture around a scenario run (so its prompt-blob predicates keep
    reading what the agent saw) and restore it after."
@@ -73,7 +75,9 @@
   v)
 
 (defn enabled?
-  "True when per-turn debug capture should run. The process override
+  "True when per-turn debug capture should run.
+
+   The process override
    wins when set; otherwise the `SEON_DEBUG_CAPTURE` env var decides
    (truthy → on; unset/blank/`0`/`off`/`false`/`no` → off)."
   {:malli/schema [:=> [:cat] :boolean]}
@@ -86,15 +90,18 @@
           (not (contains? off-values (str/lower-case (.trim v)))))))))
 
 (defn capture-dir
-  "The output base dir: `SEON_DEBUG_CAPTURE_DIR` when set, else the
+  "The output base dir for debug captures.
+
+   `SEON_DEBUG_CAPTURE_DIR` when set, else the
    default `logs/turns`. Always CWD-relative (a DATA path)."
   {:malli/schema [:=> [:cat] :string]}
   []
   (config/debug-capture-dir))
 
 (defn turn-dir
-  "The per-turn directory path (not created): `<base>/<agent-id>/
-   <turn-idx>-<turn-id>`. Pure — string math only."
+  "The per-turn directory path (not created).
+
+   `<base>/<agent-id>/<turn-idx>-<turn-id>`. Pure — string math only."
   {:malli/schema
    [:=> [:cat [:catn
                [:seon.debug/agent-id :string]
@@ -123,7 +130,9 @@
             candidate))))))
 
 (defn write-turn-artifact!
-  "Write ONE per-turn debug artifact (best-effort, never throws). Creates
+  "Write ONE per-turn debug artifact (best-effort, never throws).
+
+   Creates
    `<base>/<agent-id>/<turn-idx>-<turn-id>/` and writes `filename` there
    with `content`. REFUSES TO OVERWRITE — an existing file is preserved
    and the new one is suffixed (`response-2.txt`). Returns the path
@@ -154,8 +163,9 @@
         nil))))
 
 (defn capture-prompt!
-  "Write the turn's verbatim assembled input prompt to `prompt.txt`
-   under the per-turn dir. Best-effort. Returns the path written (so the
+  "Write the turn's verbatim assembled input prompt to `prompt.txt`.
+
+   Under the per-turn dir. Best-effort. Returns the path written (so the
    turn datom can point `:seon.agent.turn/prompt-file` at it), or nil
    when disabled / on failure. Replaces the old always-on
    `persist-prompt!` — same blob, now gated."
@@ -170,7 +180,9 @@
   (write-turn-artifact! agent-id turn-idx turn-id "prompt.txt" text))
 
 (defn capture-response!
-  "Write the turn's VERBATIM raw LLM reply. Writes `response.txt` (the
+  "Write the turn's VERBATIM raw LLM reply.
+
+   Writes `response.txt` (the
    visible text, EVEN WHEN BLANK — a blank reply must be visible in the
    capture, not silently absent) and `response.edn` (the response map
    `pr-str`'d — text/usage/provider-fields — round-trips into a test
@@ -195,7 +207,9 @@
     (turn-dir agent-id turn-idx turn-id)))
 
 (defn prune!
-  "Maintenance: delete debug dirs for `agent-id` keeping only the last
+  "Maintenance: delete old debug dirs for `agent-id`.
+
+   Keeps only the last
    `keep-n` turns (by turn-idx). Best-effort, never throws; a no-op when
    the agent's dir doesn't exist. Returns the count of dirs removed."
   {:malli/schema

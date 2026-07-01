@@ -139,8 +139,9 @@
 (declare valid-hiccup?)
 
 (defn valid-hiccup-elem?
-  "True if `x` is a valid hiccup ELEMENT — string, int, nil, or a
-   nested vector that starts with a keyword."
+  "True if `x` is a valid hiccup ELEMENT.
+
+   String, int, nil, or a nested vector that starts with a keyword."
   {:malli/schema [:=> [:catn [::elem :any]] :boolean]}
   [x]
   (or (string? x)
@@ -149,7 +150,9 @@
       (valid-hiccup? x)))
 
 (defn valid-hiccup?
-  "True if `x` is a valid hiccup VECTOR: starts with a keyword tag,
+  "True if `x` is a valid hiccup VECTOR.
+
+   Starts with a keyword tag,
    optional second-position attrs map, zero or more children where
    each child is a valid hiccup element. Non-recursive Malli idiom —
    handles arbitrary-depth nesting without
@@ -287,7 +290,9 @@
     :else nil))
 
 (defn hiccup-structure-error
-  "Serializer-faithful structural check for a tile's hiccup. Returns
+  "Serializer-faithful structural check for a tile's hiccup.
+
+   Returns
    nil when `seon.ui.html/->string` would serialize `x` cleanly, or
    `{::structure-path […] ::structure-message \"…\"}` locating the
    FIRST fatal defect (e.g. a vector-of-vectors child). A PLAIN fn at
@@ -385,8 +390,9 @@
       {::source ::welcome ::value welcome-sym})))
 
 (defn wired-label
-  "The awareness-section header identity for a [[wired-content]]
-   result — the wired fn's fully-qualified name (its source is one
+  "The awareness-section header identity for a [[wired-content]] result.
+
+   The wired fn's fully-qualified name (its source is one
    `:seon.fn`/catalog lookup away) or \"literal hiccup on your
    entity\", with provenance (legacy slot / core default), so
    the agent reading the section always sees HOW to change the
@@ -407,8 +413,9 @@
 ;; ============================================================
 
 (defn greeting
-  "Time-of-day greeting for `hour` (0-23): morning 5-11,
-   afternoon 12-16, evening 17-21, night otherwise."
+  "Time-of-day greeting for `hour` (0-23).
+
+   Morning 5-11, afternoon 12-16, evening 17-21, night otherwise."
   {:malli/schema [:=> [:catn [::hour ::hour]] :string]}
   [hour]
   (cond
@@ -418,8 +425,10 @@
     :else           "Good night"))
 
 (defn user-name
-  "The human's name, when the store carries one (`:seon.user/name` on
-   the user entity). Returns `{::user-name \"Sean\"}` or `{}` —
+  "The human's name, when the store carries one.
+
+   From `:seon.user/name` on
+   the user entity. Returns `{::user-name \"Sean\"}` or `{}` —
    gracefully generic when the attr was never installed (querying an
    attr datahike has never seen THROWS, so the `seon.db/installed-schema`
    gate is load-bearing, not defensive fluff)."
@@ -549,7 +558,9 @@
 ;; ============================================================
 
 (defn wiring-source
-  "The creation-time wiring eval SOURCE for agent `agent-id`: tutorial
+  "The creation-time wiring eval SOURCE for agent `agent-id`.
+
+   Tutorial
    `;;` comments + ONE form that transacts [[welcome-sym]] onto the
    agent's OWN entity by its `:seon.agent/id` lookup ref (identity-attr
    upsert — the same 'transact to my own lookup ref' move the agent
@@ -585,7 +596,9 @@
 ;; ============================================================
 
 (defn default-error-tile
-  "The core default html render of a `:seon/error` value — the ONE error
+  "The core default html render of a `:seon/error` value.
+
+   The ONE error
    tile shared by the error-tile surfaces (entity render, slot, a render
    failure). Reads only the shared error core (message + optional
    where/symbol/hint), so it renders ANY error. Override the whole look by
@@ -610,7 +623,9 @@
   default-error-tile)
 
 (defn error-response
-  "Build the html-response for a tile fn that THREW. THE HUMAN sees a calm,
+  "Build the html-response for a tile fn that THREW.
+
+   THE HUMAN sees a calm,
    nicely-formatted 'updating this tile' placeholder — never a scary error
    (NO failure text leaks to the human card), never a blank (vanish is
    indistinguishable from unwired, banned). THE AGENT is told

@@ -99,7 +99,9 @@
    [::embedding?      :boolean]])
 
 (defn fleet-summary
-  "DERIVE the fleet pulse from db `db`: one [[agent-line]] per agent (id,
+  "DERIVE the fleet pulse from db `db`.
+
+   One [[agent-line]] per agent (id,
    derived state, turn count, purpose, root?), the state-count breakdown,
    total turns + evals across the cluster, the last-activity instant, and
    whether semantic embeddings are on (`SEON_EMBED`). Pure read."
@@ -143,7 +145,9 @@
 ;; ============================================================
 
 (defn store-summary
-  "The cluster's `seon.db/store-inventory` over db `db` — which attrs hold
+  "The cluster's `seon.db/store-inventory` over db `db`.
+
+   Which attrs hold
    data RIGHT NOW (the concise map-out: `:seon.db/attr-groups` rows,
    namespace/attr/datom counts). Consumed DEFENSIVELY by key. Pure read."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]] :map]}
@@ -216,7 +220,9 @@
                     ::text  (truncate (:seon.agent.message/content m) 80)}))))))
 
 (defn recent-activity
-  "The UNFILTERED cross-agent event stream over db `db` — messages + evals
+  "The UNFILTERED cross-agent event stream over db `db`.
+
+   Messages + evals
    from EVERY agent UNIONed, newest-first, capped at `n` (default 12). The
    reactive-context property made literal: a query that doesn't filter by
    `:seon.agent/id` sees the whole cluster. Each event links to its agent.
@@ -425,7 +431,9 @@
    [:seon.agent/id {:optional true} :string]])
 
 (defn system-view
-  "Root's live-tile content (`:seon.render.live-tile/content` symbol). Called
+  "Root's live-tile content (`:seon.render.live-tile/content` symbol).
+
+   Called
    by `render/render-agent-tile` with the render input map (carrying the db
    value); returns the `:seon.render/html-response` envelope — the system
    dashboard hiccup for the human card + root's fleet understanding for its

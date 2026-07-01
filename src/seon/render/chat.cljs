@@ -113,7 +113,8 @@
   50)
 
 (defn message-kind
-  "Classify a `recent-messages` direction label into a bubble kind:
+  "Classify a `recent-messages` direction label into a bubble kind.
+
    `\"user\"` → `::human`, `\"assistant\"` (this agent → the human) →
    `::agent`, anything else (`\"agent-<id>\"` incoming peer,
    `\"→ agent-<id>\"` outgoing peer, `\"unknown\"`) → `::peer`."
@@ -157,7 +158,8 @@
         (provider-failure-rows db id)))
 
 (defn conversation
-  "The agent's conversation as bubble messages, oldest-first —
+  "The agent's conversation as bubble messages, oldest-first.
+
    DERIVED from the message log via
    `seon.render.default/recent-messages` (from = me OR to ∋ me;
    nothing stored), merged with the turn log's provider-failure
@@ -193,9 +195,11 @@
   [:map [::last-reply {:optional true} ::last-reply]])
 
 (defn last-reply
-  "The agent's most recent REPLY — the newest `::agent` (label
+  "The agent's most recent REPLY, as readable text.
+
+   The newest `::agent` (label
    `\"assistant\"`: from = me AND to ∋ the user) message in
-   [[conversation]] — as readable text. Transcript self-narration and
+   [[conversation]]. Transcript self-narration and
    outgoing peer sends never count (direction-classified upstream).
    Returns `{}` when the agent has never replied (optional = absent).
 
@@ -223,7 +227,7 @@
     ""))
 
 (defn bubble
-  "Render ONE conversation message as a chat bubble:
+  "Render ONE conversation message as a chat bubble.
 
    - `::human` — right-aligned, amber-tinted, markdown-rendered.
    - `::agent` — left-aligned, markdown-rendered.
@@ -275,7 +279,9 @@
         [:div {:class "text-[10px] font-mono text-text-500 mt-0.5"} time]]])))
 
 (defn bubble-stream
-  "Render the whole conversation as a bubble column — the left pane of
+  "Render the whole conversation as a bubble column.
+
+   The left pane of
    the consumer agent view. Returns the standard
    `:seon.render/html-response`. Empty conversation renders an
    invitation, not a blank."

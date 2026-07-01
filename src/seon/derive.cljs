@@ -48,8 +48,9 @@
    [:seon.agent.run/paused-at {:optional true} :inst]])
 
 (defn state-from-primitives
-  "THE state rule (pure): project the three primitives onto the derived state
-   keyword. The caller reads the primitives from a db and hands them in;
+  "THE state rule (pure): project primitives onto the derived state.
+
+   The caller reads the primitives from a db and hands them in;
    `:seon.agent/terminated-at` present ⇒ :terminated; no open run ⇒ :idle; an
    open run with `:seon.agent.run/paused-at` ⇒ :paused; else :running."
   {:malli/schema [:=> [:catn [:seon.derive/primitives :seon.derive/primitives]]
@@ -68,9 +69,11 @@
 ;; ============================================================
 
 (defn current-run
-  "The agent's CURRENT open run as a plain touched map (the `:seon.agent/run`
+  "The agent's CURRENT open run as a plain touched map, or nil.
+
+   The `:seon.agent/run`
    pointer, resolved to its run entity, returned only when that run is
-   `:open`), or nil. Drill its refs via follow-up reads."
+   `:open`. Drill its refs via follow-up reads."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
                              [:seon.agent/id :seon.agent/id]]
                   [:maybe :map]]}
@@ -82,8 +85,10 @@
         (when (= :open (:seon.agent.run/status r)) r)))))
 
 (defn derive-state
-  "The agent's DERIVED FSM state (:idle/:running/:paused/:terminated) over the
-   db value `db` — reads `terminated-at`, whether it has an OPEN run
+  "The agent's DERIVED FSM state over the db value `db`.
+
+   One of :idle/:running/:paused/:terminated. Reads `terminated-at`,
+   whether it has an OPEN run
    ([[current-run]]), and that run's `paused-at`, then applies
    [[state-from-primitives]]. The ONE reader the readline / inspector / loop /
    wake gate share."
@@ -101,8 +106,9 @@
                                                (:seon.agent.run/paused-at run))))))
 
 (defn run-turn-count
-  "How many WORK turns are stamped with the run identified by `run-id` (the
-   run's derived current-turn — the WORK budget the loop checks against
+  "How many WORK turns are stamped with run `run-id`.
+
+   The run's derived current-turn — the WORK budget the loop checks against
    turn-limit). Counts `:seon.agent.turn/run` datoms over the explicit db value
    but EXCLUDES schedule-fire turns (`:seon.agent.turn/scheduled? true`): a cron
    fire opens a turn so its eval RENDERS in the transcript, yet it is not an LLM
@@ -124,7 +130,9 @@
       0))
 
 (defn agent-turn-count
-  "Turn count for an agent across ALL its runs — agent ← run
+  "Turn count for an agent across ALL its runs.
+
+   agent ← run
    (`:seon.agent.run/agent`) ← turn (`:seon.agent.turn/run`), counted over the
    explicit db value. Query-based (not reverse-ref nav) so it works on a plain
    pulled/touched agent map and on a FilteredDB."
@@ -143,8 +151,9 @@
       0))
 
 (defn last-beat
-  "The run's heartbeat instant (`:seon.agent.run/last-beat-at`) over `db`, or
-   nil when the run never beat / doesn't resolve."
+  "The run's heartbeat instant over `db`, or nil.
+
+   `:seon.agent.run/last-beat-at`; nil when the run never beat / doesn't resolve."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
                              [:seon.agent.run/id :seon.agent.run/id]]
                   [:maybe :inst]]}
@@ -153,7 +162,9 @@
     (db/entity {:seon.db/db db :seon.db/ref [:seon.agent.run/id run-id]})))
 
 (defn agent-idle?
-  "Is the agent DERIVED `:idle` (wakeable — not terminated, no open run)? A
+  "Is the agent DERIVED `:idle` (wakeable)?
+
+   Not terminated, no open run. A
    FILTER over [[derive-state]], never a re-encoding of the rule."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
                              [:seon.agent/id :seon.agent/id]]
@@ -230,8 +241,9 @@
        (mapv (fn [[_ ok _]] (boolean ok)))))
 
 (defn error-storm
-  "nil, or an `:seon.derive/error-storm` map when agent `agent-id` is
-   thrashing: among its last [[error-storm-window]] REAL evals MORE THAN HALF
+  "nil, or an `:seon.derive/error-storm` map for agent `agent-id`.
+
+   Non-nil when thrashing: among its last [[error-storm-window]] REAL evals MORE THAN HALF
    failed (and ≥[[error-storm-min-fail]] absolute), OR its last
    [[error-storm-consec]]+ real evals ALL failed. Pure read of the recent
    eval log — self-heals as soon as new evals succeed."
@@ -253,7 +265,9 @@
        :seon.derive/consec consec})))
 
 (defn error-storms
-  "Every agent currently in an error storm, as `:seon.derive/error-storm`
+  "Every agent currently in an error storm.
+
+   As `:seon.derive/error-storm`
    maps (empty when the fleet is healthy) — ONE derived read shared by the
    human header signal and the agent-facing warn check. No stored counters:
    a storm clears itself the moment the agent's evals recover."
@@ -319,8 +333,9 @@
            last))))
 
 (defn last-closed-reason
-  "The `closed-reason` of the agent's most-recently-STARTED closed run, or nil
-   when none. Gated on the attr being installed."
+  "The `closed-reason` of the agent's latest closed run, or nil.
+
+   Its most-recently-STARTED closed run; nil when none. Gated on the attr being installed."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
                              [:seon.agent/id :seon.agent/id]]
                   [:maybe :seon.agent.run/closed-reason]]}
@@ -375,7 +390,9 @@
    [:seon.agent.message/last-human-at {:optional true} :inst]])
 
 (defn derive-status
-  "The agent's full DERIVED status in one map (map-in / map-out). A pure
+  "The agent's full DERIVED status in one map (map-in / map-out).
+
+   A pure
    DERIVED READ — no writes. State comes from [[state-from-primitives]] over
    the primitives; run/turn/todo fields derive from cheap queries against ONE
    threaded db value. Run-scoped fields are present only while there IS an open

@@ -176,7 +176,9 @@
     :else value))
 
 (defn project-plain
-  "Recursively project VALUE into reader-safe PLAIN DATA: every non-plain
+  "Recursively project VALUE into reader-safe PLAIN DATA.
+
+   Every non-plain
    node (datahike DB/Datom/Entity, record, JS object, fn) becomes a compact
    marker map; plain scalars (incl. #inst/#uuid) and collections survive,
    walked element-wise. Unbounded — the full structure is preserved, only
@@ -423,7 +425,9 @@
     (str body hint)))
 
 (defn render-ai
-  "Agent-facing TEXT for an eval value. `eval-id` names the live var the
+  "Agent-facing TEXT for an eval value.
+
+   `eval-id` names the live var the
    agent drills. A small value renders VERBATIM (like a REPL — full nesting,
    so the agent navigates its own stored data correctly next turn); a large /
    deep / opaque value renders as a bounded structural skeleton + ONE trailing
@@ -462,7 +466,9 @@
 ;; ============================================================
 
 (defn render-html-data
-  "DATA CONTRACT the interactive HTML value-browser consumes. Returns:
+  "DATA CONTRACT the interactive HTML value-browser consumes.
+
+   Returns:
 
      {:seon.render.value/eval-id    <id-string>     ; live-var handle
       :seon.render.value/summary    <\"map 12 keys\">  ; one-line header

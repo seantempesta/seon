@@ -680,7 +680,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn find-page-renderer
-  "Find a page render function whose input spec keys overlap most with ns-data keys.
+  "Find the page renderer whose input keys overlap most with `ns-data`.
 
    Uses functions-with-output-key to find HTML renderers via ref join.
    The function with the MOST key overlap wins.

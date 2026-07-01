@@ -64,8 +64,9 @@
   (repeat delay-ms))
 
 (defn additive-strategy
-  "An infinite strategy starting at `initial-ms`, growing by `increment-ms`
-   each step (linear backoff)."
+  "An infinite strategy from `initial-ms`, linear backoff.
+
+   Grows by `increment-ms` each step."
   {:malli/schema [:=> [:catn [:seon.retry/initial-ms :seon.retry/delay-ms]
                        [:seon.retry/increment-ms :seon.retry/delay-ms]]
                   :seon.retry/strategy]}
@@ -73,8 +74,9 @@
   (iterate #(+ % increment-ms) initial-ms))
 
 (defn multiplicative-strategy
-  "An infinite strategy starting at `initial-ms`, multiplied by `factor`
-   each step (exponential backoff: 500, 1000, 2000, … for factor 2)."
+  "An infinite strategy from `initial-ms`, exponential backoff.
+
+   Multiplied by `factor` each step (500, 1000, 2000, … for factor 2)."
   {:malli/schema [:=> [:catn [:seon.retry/initial-ms :seon.retry/delay-ms]
                        [:seon.retry/factor :seon.retry/factor]]
                   :seon.retry/strategy]}
@@ -94,8 +96,9 @@
     (max 0 (js/Math.round (+ delay-ms d)))))
 
 (defn randomize-strategy
-  "Jitter each delay by ± `factor` (0.0–1.0) — spreads retries so a fleet
-   doesn't thunder-herd a recovering provider."
+  "Jitter each delay by ± `factor` (0.0–1.0).
+
+   Spreads retries so a fleet doesn't thunder-herd a recovering provider."
   {:malli/schema [:=> [:catn [:seon.retry/strategy :seon.retry/strategy]
                        [:seon.retry/jitter :seon.retry/jitter]]
                   :seon.retry/strategy]}
@@ -119,8 +122,9 @@
   (take n strategy))
 
 (defn max-duration
-  "Keep delays while their CUMULATIVE sum stays within `total-ms` — a
-   total-backoff ceiling so the executor never waits longer than this in
+  "Keep delays while their CUMULATIVE sum stays within `total-ms`.
+
+   A total-backoff ceiling so the executor never waits longer than this in
    aggregate (the run loop never hangs)."
   {:malli/schema [:=> [:catn [:seon.retry/strategy :seon.retry/strategy]
                        [:seon.retry/total-ms :seon.retry/delay-ms]]
@@ -165,8 +169,10 @@
    [:seon.retry/retries :seon.retry/count]])
 
 (defn ^:async with-retry!
-  "Run `:seon.retry/thunk` (a `() -> Promise<result>`) against
-   `:seon.retry/strategy`, retrying while `:seon.retry/retry?` says the
+  "Run `:seon.retry/thunk` against `:seon.retry/strategy`, with retries.
+
+   `:seon.retry/thunk` is a `() -> Promise<result>`. Retries while
+   `:seon.retry/retry?` says the
    result is transient AND the strategy has delays left. Errors are
    VALUES: the thunk never throws, and on exhaustion (or a non-retryable
    result) the LAST result is returned as-is — the caller surfaces its

@@ -84,14 +84,17 @@
   250)
 
 (defn bounding-enabled?
-  "Layer-1 SCI bounding is ON unless `SEON_TILE_SCI=0` (independently
-   shippable + reversible — PRD migration step 2)."
+  "Layer-1 SCI bounding is ON unless `SEON_TILE_SCI=0`.
+
+   Independently shippable + reversible — PRD migration step 2."
   {:malli/schema [:=> [:cat] :boolean]}
   []
   (not= "0" (config/env-string "SEON_TILE_SCI")))
 
 (defn agent-authored-sym?
-  "True when `sym` names an AGENT-authored fn — any agent-authored
+  "True when `sym` names an AGENT-authored fn.
+
+   Any agent-authored
    render/layout/handler (a tile fn, a context-block render, a layout, a
    `/call` handler) gets the SCI wrapper; the core
    (`seon.*`/`clojure.*`/`cljs.*`) compiled path does not. Core renders and
@@ -336,7 +339,9 @@
     (map? r)))
 
 (defn invoke-bounded
-  "Invoke an AGENT-authored render fn `sym` under SCI with a wall-clock
+  "Invoke an AGENT-authored render fn `sym` under SCI, time-bounded.
+
+   A wall-clock
    deadline (`budget-ms`), passing `input` by reference. `view` selects the
    slot semantics (`:seon.render/ai` → a bare String result;
    `:seon.render/html` (default) → an html-response map) — one extra arg,
@@ -470,8 +475,9 @@
        "renders a query, not one that computes."))
 
 (defn recover-hung-tile!
-  "Reset agent `agent-id`'s hung tile to the core welcome (retract
-   `:seon.render.live-tile/content`) and post the agent a force'd message
+  "Reset agent `agent-id`'s hung tile to the core welcome.
+
+   Retracts `:seon.render.live-tile/content` and posts the agent a force'd message
    explaining what happened. Async + deduped; returns nil."
   {:malli/schema [:=> [:catn [::agent-id :string] [::sym :symbol] [::budget-ms :int]]
                   :nil]}

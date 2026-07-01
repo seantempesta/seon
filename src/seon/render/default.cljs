@@ -39,8 +39,9 @@
   {:seon.render/ai (pr-str input)})
 
 (defn pretty-html
-  "Universal HTML-side fallback. Wraps an edn dump in a monospace
-   container so the user at least sees the data structure."
+  "Universal HTML-side fallback — wraps an edn dump in monospace.
+
+   The container ensures the user at least sees the data structure."
   {:malli/schema [:=> [:cat :map] :seon.render/html-response]}
   [input]
   {:seon.render/hiccup
@@ -48,7 +49,9 @@
     (pr-str input)]})
 
 (defn pending-html
-  "Calm IN-PROGRESS placeholder for a live tile whose content symbol
+  "Calm IN-PROGRESS placeholder for a live tile still loading.
+
+   Its content symbol
    names an agent-authored render fn that ISN'T loaded in the runtime
    right now (`seon.eval/lookup-value` returned nil). Mirrors the
    `seon.render.live-tile/welcome` tile shape (compact + expanded,
@@ -83,8 +86,9 @@
 
 
 (defn ^:no-doc recent-messages
-  "Return the most-recent `n` messages of agent `id`'s conversation
-   (DERIVED: from = me OR to ∋ me — nothing stored per-agent),
+  "Return the most-recent `n` messages of agent `id`'s conversation.
+
+   DERIVED (from = me OR to ∋ me — nothing stored per-agent),
    oldest-first. Each row is `[at label content]`; the label resolves
    by DIRECTION (from-ref kind × to-ref kinds):
 
@@ -181,8 +185,9 @@
           (take-last n)))))
 
 (defn ^:no-doc recent-errors
-  "Return the most-recent `n` `:seon.log/level :error` entries for
-   agent `id`, newest-first. Reads the active `seon.log` file
+  "Return the most-recent `n` `:error` log entries for agent `id`.
+
+   Newest-first, reading the active `seon.log` file
    (NOT the DB — log entries are no longer persisted as datoms; see
    seon.log ns docstring). Returns `()` when none."
   {:malli/schema [:function
@@ -207,7 +212,9 @@
 ;; ============================================================
 
 (defn view
-  "Default :seon.render/html renderer. System fn → takes system input
+  "Default `:seon.render/html` renderer for an agent tile.
+
+   System fn → takes system input
    shape (`:seon.db/db` + `:seon.agent/id`). Pulls the entity, renders
    a tile with status, turn count, recent-errors banner, last 5 messages.
    Returns `{:seon.render/hiccup [...]}`."

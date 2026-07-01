@@ -323,8 +323,9 @@
     (str rand-str "-" time-str)))
 
 (defn id->time-str
-  "Extract the YYMMDDHHmm portion of an id for time sorting /
-   comparison. Returns nil if the id doesn't match the expected shape."
+  "The YYMMDDHHmm portion of an id, for time sorting/comparison.
+
+   Returns nil if the id doesn't match the expected shape."
   {:malli/schema [:=> [:catn [::id [:maybe :string]]] [:maybe :string]]}
   [id]
   (when (and (string? id) (= 14 (count id)) (= \- (nth id 3)))
@@ -352,8 +353,9 @@
   nil)
 
 (defn current-tx-context
-  "The active tx-context map, or nil outside a [[with-tx-context]]
-   scope. Fiber-local across awaits (AsyncLocalStorage), safe under
+  "The active tx-context map, or nil outside [[with-tx-context]].
+
+   Fiber-local across awaits (AsyncLocalStorage), safe under
    concurrent agents. Auto-merged into every `transact!`'s `:tx-meta`;
    explicit call-site `:tx-meta` keys win per-key."
   {:malli/schema [:=> [:cat] [:maybe :map]]}
@@ -377,8 +379,9 @@
 (schema/register! ::tx-context :map)
 
 (defn with-agent
-  "Establish an agent-id scope for the dynamic extent of `f` (a 0-arg
-   fn). Inside `f` — including across `await`s and any Promises it
+  "Establish an agent-id scope for the dynamic extent of `f`.
+
+   `f` is a 0-arg fn. Inside `f` — including across `await`s and any Promises it
    returns — `(current-agent-id)` returns `agent-id`. Nesting: the
    inner scope wins, the outer restores on exit. The loop sets this for
    you; you rarely call it — your own writes are already tagged.
@@ -390,8 +393,9 @@
   (internal/run-with-agent agent-id f))
 
 (defn with-tx-context
-  "Establish a tx-context for the dynamic extent of `f` (a 0-arg fn);
-   nested calls MERGE. Returns whatever `f` returns (context propagates
+  "Establish a tx-context for the dynamic extent of `f`.
+
+   `f` is a 0-arg fn; nested calls MERGE. Returns whatever `f` returns (context propagates
    across `await` points). Keys are typically the 7 `:seon.db/*`
    tx-meta attrs registered above; any registered scalar attr works.
 
@@ -412,8 +416,9 @@
 (schema/register! ::cas-op    [:vector :any])
 
 (defn cas-assert
-  "Build a no-op compare-and-swap op (pure DATA) asserting `ref`'s `attr` is
-   STILL `value` — `old == new == value`. LEAD a work-tx with this and the tx
+  "Build a no-op compare-and-swap op asserting `ref`'s `attr` is `value`.
+
+   Pure DATA; `old == new == value`. LEAD a work-tx with this and the tx
    commits IFF the assertion holds; if `attr` moved to another value or was
    retracted the WHOLE tx aborts (`:transact/cas`) and the bundled work is
    rejected — surfacing as the `{::ok? false …}` envelope (errors are values).
@@ -435,7 +440,9 @@
   [:db.fn/cas ref attr value value])
 
 (defn ^:async transact!
-  "Commit tx-data. Two call shapes:
+  "Commit tx-data — forwarded to the JVM writer, returns an envelope.
+
+   Two call shapes:
 
    - map-in / map-out (preferred):
        (db/transact! {::db/tx-data [{::name \"A\"}]
@@ -537,7 +544,9 @@
 (declare assert-known-query-attrs!)
 
 (defn query
-  "Run a Datalog query. Two call shapes:
+  "Run a Datalog query, returning the result set.
+
+   Two call shapes:
 
    - map-in:  (db/query {::db/query '[:find ?n :where [?e ::name ?n]]
                          ::db/db <db> | ::db/conn <conn>   ; default *conn*
@@ -625,8 +634,9 @@
             (apply d/q q db inputs)))))))
 
 (defn installed-schema
-  "The datahike schema map actually INSTALLED on `db` — attrs the conn
-   has seen, keyed by ident keyword. FilteredDB-safe and nil-safe.
+  "The datahike schema map actually INSTALLED on `db`.
+
+   Attrs the conn has seen, keyed by ident keyword. FilteredDB-safe and nil-safe.
 
    THE TRAP this fn exists to gate: datahike installs an attr's schema
    lazily, at the attr's FIRST `transact!` — `seon.schema/register!`
@@ -877,8 +887,9 @@
           (d/pull db pattern' ref))))))
 
 (defn pull
-  "Pull an entity by ref using a pull pattern. Sync. Returns the pulled
-   map, or nil if the ref doesn't resolve.
+  "Pull an entity by ref using a pull pattern (sync).
+
+   Returns the pulled map, or nil if the ref doesn't resolve.
 
    - map-in:     (db/pull {::db/pull-pattern '[*] ::db/ref eid})
    - positional, mirroring datahike: (db/pull <db> selector eid)
@@ -927,8 +938,9 @@
    (guarded-pull db selector eid)))
 
 (defn entity-lazy
-  "INTERNAL: look up an entity and return the RAW datahike Entity (lazy,
-   map-like). Ref attrs navigate lazily to nested Entities — the render
+  "INTERNAL: return the RAW datahike Entity for a ref (lazy, map-like).
+
+   Ref attrs navigate lazily to nested Entities — the render
    hot-path (`seon.agent.ctx.transcript/session-turns` walks agent → sessions →
    turns → evals) depends on this lazy traversal, so it MUST NOT touch.
 
@@ -959,8 +971,9 @@
     (into {:db/id (:db/id e)} e)))
 
 (defn entity
-  "Look up an entity by eid or lookup-ref. Sync. Returns a PLAIN MAP —
-   `:db/id` plus every attr on the entity (a TOUCHED snapshot), nil if the
+  "Look up an entity by eid or lookup-ref, as a plain map (sync).
+
+   Returns `:db/id` plus every attr on the entity (a TOUCHED snapshot), nil if the
    ref doesn't resolve. The agent reads data, never a lazy datahike handle
    — a raw Entity prints opaquely and re-reads as `[object Object]`. Drill
    into a ref attr with a follow-up `entity`/`pull` on its
@@ -1000,8 +1013,9 @@
 (schema/register! ::time-point :any)
 
 (defn history
-  "A db value spanning ALL of time — every assertion AND retraction ever,
-   not just the now-true view. Read it with a 5-tuple `:where` so the tx and
+  "A db value spanning ALL of time — assertions and retractions.
+
+   Every datom ever, not just the now-true view. Read it with a 5-tuple `:where` so the tx and
    the add/retract flag bind. The db is injected from your one connection;
    omit it:
 
@@ -1017,8 +1031,9 @@
   ([db] (d/history db)))
 
 (defn as-of
-  "A db value as it was AT `t` (a tx-id, Date, or txInstant) — time-travel
-   for reads. query/pull/entity against it see only what was true then:
+  "A db value as it was AT `t` — time-travel for reads.
+
+   `t` is a tx-id, Date, or txInstant. query/pull/entity against it see only what was true then:
 
      (db/query '[:find ?title :where [?e ::doc-id \"d1\"] [?e ::title ?title]]
                (db/as-of last-week-tx))    ; db omitted ⇒ your *conn* at t
@@ -1031,8 +1046,9 @@
   ([db t] (d/as-of db t)))
 
 (defn since
-  "The complement of [[as-of]]: a db value reflecting only datoms added
-   AFTER `t`. Diff \"what changed since\" a tx you remembered:
+  "The complement of [[as-of]] — a db value of datoms added after `t`.
+
+   Diff \"what changed since\" a tx you remembered:
 
      (db/query '[:find ?e :where [?e ::status :done]] (db/since last-seen-tx))
 
@@ -1054,8 +1070,9 @@
   origin-t dconst/tx0)
 
 (defn basis-t
-  "The basis tx-id of a db value — the latest tx it reflects, the \"now\" end
-   of a time-travel domain. Omit db ⇒ your `*conn*`'s current basis. A
+  "The basis tx-id of a db value — the latest tx it reflects.
+
+   The \"now\" end of a time-travel domain. Omit db ⇒ your `*conn*`'s current basis. A
    [[time-point]] usable directly with `as-of`/`since`."
   {:malli/schema [:function
                   [:=> [:cat] ::time-point]
@@ -1068,8 +1085,9 @@
 ;; ---------------------------------------------------------------------------
 
 (defn listen!
-  "Install a tx-listener. SAFE BY DEFAULT — handler throws / rejections
-   are caught and logged, never crash the pod. `::db/handler` is a fn
+  "Install a tx-listener — safe by default, never crashes the pod.
+
+   Handler throws / rejections are caught and logged. `::db/handler` is a fn
    of one map:
 
      {:seon.db/tx-report   <raw datahike report — escape hatch>
@@ -1102,8 +1120,9 @@
   (listen! request))
 
 (defn unlisten!
-  "Remove a listener by key. Returns `{:seon.db/ok? true}`. Idempotent —
-   unknown keys are a silent no-op."
+  "Remove a listener by key; returns `{:seon.db/ok? true}`.
+
+   Idempotent — unknown keys are a silent no-op."
   {:malli/schema [:=> [:cat ::unlisten-request] ::unlisten-response]}
   [{::keys [key conn] :or {conn *conn*}}]
   (let [c (internal/resolve-conn conn)]
@@ -1129,8 +1148,9 @@
   (internal/tx-meta-datahike-schema))
 
 (defn decode-edn-value
-  "Read-side inverse of the bridge's mixed-`:or` EDN-string storage
-   (see `seon.db.internal/encode-edn-slot-values`): attrs whose Malli
+  "Read-side inverse of the bridge's mixed-`:or` EDN-string storage.
+
+   See `seon.db.internal/encode-edn-slot-values`: attrs whose Malli
    form is a mixed-type `:or` (the render slots `:seon.render/ai` /
    `:seon.render/html`) store as pr-str'd EDN strings; this decodes a
    pulled value back to its real shape. Values of other attrs — and
@@ -1143,8 +1163,10 @@
     v))
 
 (defn assert-preconditions!
-  "Validate boot preconditions (conn has `:keep-history? true`; tx-meta
-   attrs registered). Throws ex-info on failure. Called at agent boot."
+  "Validate boot preconditions; throws ex-info on failure.
+
+   Conn must have `:keep-history? true` and tx-meta attrs registered.
+   Called at agent boot."
   {:malli/schema
    [:function
     [:=> [:cat] :boolean]
@@ -1233,8 +1255,9 @@
      ::pairs          (into #{} (map (fn [[e a _]] [e a])) triples)}))
 
 (defn bootstrap-row-ids
-  "Entity ids whose IDENTITY datom (the entity's first assertion) was
-   transacted under a tx carrying a managed-core origin —
+  "Entity ids whose first assertion carries a managed-core origin.
+
+   The IDENTITY datom was transacted under a tx whose origin is
    `:core-seed` (the program-graph `:seon.fn`/`:seon.schema`/`:seon.test`/
    `:seon.ns` index + the kb seed) or `:config` (the reconcile-managed
    declarative set: routes + skills) — the rows the boot minted.
@@ -1268,7 +1291,9 @@
    [::conn        {:optional true} ::conn]])
 
 (defn managed-identities
-  "Map of `managed-eid → #{[identity-attr identity-value] …}`: every entity
+  "Map of `managed-eid → #{[identity-attr identity-value] …}`.
+
+   Every entity
    whose FIRST-assertion (min-tx) origin is in `:seon.db/managed-scope`,
    paired with the `:db.unique/identity` datom(s) it carries. PURE
    PROVENANCE — ONE `[?e ?a ?v ?tx]` scan + a min-tx-origin reduce (the same
@@ -1301,8 +1326,9 @@
             {} triples)))
 
 (defn core-attr-namespaces
-  "Attr namespaces (keywords) whose `:seon.schema/key` row is a
-   BOOTSTRAP row ([[bootstrap-row-ids]]) — the namespaces the compiled
+  "Attr namespaces whose `:seon.schema/key` row is a bootstrap row.
+
+   ([[bootstrap-row-ids]].) The namespaces the compiled
    core's boot index registered, as opposed to agent-registered ones.
    Used by [[store-inventory]] for its user-domain-first ordering. The
    2-arity takes a precomputed bootstrap set so one scan can serve
@@ -1321,8 +1347,9 @@
                  ::query '[:find ?s ?k :where [?s :seon.schema/key ?k]]}))))
 
 (defn store-inventory
-  "Discovery call: WHICH ATTRIBUTES HOLD DATA in this cluster's store
-   RIGHT NOW, so you know what you can query for. Entities have no kind;
+  "Discovery call: which attributes hold data in this store right now.
+
+   So you know what you can query for. Entities have no kind;
    this groups the live attributes BY THEIR NAMESPACE. Returns a map:
 
      {:seon.db/attr-groups   [{:seon.db/attr-ns :my.kb        ; the attr namespace

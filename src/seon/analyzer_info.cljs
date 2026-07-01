@@ -93,8 +93,9 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn snapshot-defs
-  "Snapshot of `{ns-sym → {def-sym → digest-hash}}` in the analyzer's
-   current `:cljs.analyzer/namespaces` map. The digest covers the
+  "Snapshot of `{ns-sym → {def-sym → digest-hash}}` for the analyzer.
+
+   From the current `:cljs.analyzer/namespaces` map. The digest covers the
    semantically-meaningful fields of each var-map (see `var-digest`),
    so a re-def with changed doc/arglists/etc. produces a different
    digest — which is what `defs-since` keys off of (B1)."
@@ -117,7 +118,9 @@
                              [sym (var-digest var-map)]))])))
 
 (defn defs-since
-  "Seq of `{:ns :sym :var-map}` for every def present now whose digest
+  "Seq of `{:ns :sym :var-map}` for defs changed since a snapshot.
+
+   Every def present now whose digest
    differs from `before-snapshot` — i.e. brand-new defs AND re-defs
    whose load-bearing var-map fields changed (B1).
 
@@ -156,7 +159,9 @@
       {:ns ns-sym :sym sym :var-map var-map})))
 
 (defn remove-phantom-defs!
-  "Failure-path counterpart to [[defs-since]]: drop the PHANTOM def
+  "Failure-path counterpart to [[defs-since]].
+
+   Drops the PHANTOM def
    registrations a FAILED eval left in `ns-sym`'s `:defs`, and return the
    removed simple-symbol seq.
 
@@ -217,7 +222,9 @@
         (disj ns-sym))))
 
 (defn ns-deps
-  "Set of agent-ns syms `ns-sym` depends on, intersected with
+  "Set of agent-ns syms `ns-sym` depends on.
+
+   Intersected with
    `known-ns-set` (so cljs.core / clojure.* / bootstrap nses drop
    out). Reads the analyzer's `:requires` + `:uses` + `:require-macros`
    maps directly. Excludes self. Used by Phase D bulk-load resume for
@@ -229,8 +236,9 @@
   (set/intersection (raw-ns-deps compile-state ns-sym) known-ns-set))
 
 (defn ns-requires
-  "The UNFILTERED dependency-edge set for `ns-sym` as ns-name KEYWORDS,
-   read from the analyzer (no source parsing). This is what the tee
+  "The UNFILTERED dependency-edge set for `ns-sym`, as keywords.
+
+   Read from the analyzer (no source parsing). This is what the tee
    stores as `:seon.ns/requires` so the DB-layer load can topo-sort by
    requires (the one unblocking fix — see the db-is-the-running-system
    PRD). Unlike [[ns-deps]] it is NOT intersected with a known-set: the

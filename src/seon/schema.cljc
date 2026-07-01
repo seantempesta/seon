@@ -37,8 +37,9 @@
    (mr/mutable-registry *schemas)))
 
 (defn relink-registry!
-  "(Re)point malli's process-global default registry at [[seon-registry]]
-   (malli's default schemas + seon's mutable `*schemas`). Idempotent;
+  "(Re)point malli's global default registry at [[seon-registry]].
+
+   Combines malli's default schemas + seon's mutable `*schemas`. Idempotent;
    registered schemas live in `*schemas` and survive the relink.
 
    Re-callable, not just load-time init: `malli.core` runs
@@ -170,8 +171,9 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn identity-attr?
-  "True when the registered attr schema for `attr-key` carries
-   `{:seon.db/identity true}`. Covers the three identity shapes Seon uses
+  "True when the attr schema for `attr-key` carries `{:seon.db/identity true}`.
+
+   Covers the three identity shapes Seon uses
    (plain `:string`/`:keyword` with the prop, and the `:and` id wrap).
    PUBLIC: the single identity-attr predicate — callers (the inventory
    section, etc.) reuse it rather than re-deriving the props lookup."
@@ -180,8 +182,9 @@
   (internal/identity-attr? @*schemas attr-key))
 
 (defn enum-members
-  "The members of a registered `:enum` attr schema; an EMPTY vector when
-   the attr is not an enum (absence = empty, never nil). Reads the schema
+  "Members of a registered `:enum` attr schema, or an empty vector.
+
+   Empty when the attr is not an enum (absence = empty, never nil). Reads the schema
    form directly — NO db query. PUBLIC: low-cardinality value surfaces
    (the inventory section) reuse it. Members are Malli-form contents
    (keywords/strings/ints) — a third-party-structure boundary, hence `:any`."
@@ -211,9 +214,10 @@
   (atom nil))
 
 (defn set-tee-fn!
-  "Install the registration self-tee hook — called once at load by the
-   conn-owning side (seon.eval). `f` is `(fn [k form] …)`; it must never
-   throw (a tee/durability failure must not fail the in-memory
+  "Install the registration self-tee hook — called once at load.
+
+   The conn-owning side (seon.eval) installs it. `f` is `(fn [k form] …)`;
+   it must never throw (a tee/durability failure must not fail the in-memory
    registration). Idempotent."
   {:malli/schema [:=> [:cat fn?] :nil]}
   [f]
@@ -264,15 +268,18 @@
   k)
 
 (defn current-keys
-  "Snapshot of all currently-registered schema keywords. Used by
-   detect-and-tee in eval-batch! for atom-diff schema detection (before vs
+  "Snapshot of all currently-registered schema keywords.
+
+   Used by detect-and-tee in eval-batch! for atom-diff schema detection (before vs
    after an eval reveals what the form registered)."
   {:malli/schema [:=> [:cat] [:set :keyword]]}
   []
   (set (keys @*schemas)))
 
 (defn discard-registrations!
-  "Drop `ks` from the in-memory registry — the schema analog of
+  "Drop `ks` from the in-memory registry.
+
+   The schema analog of
    `analyzer-info/remove-phantom-defs!`. A FAILED eval that ran
    `register!` must define NOTHING: the DB self-tee already DEFERS to
    the gated detect-and-tee (so nothing persisted), and this removes the
@@ -289,8 +296,9 @@
   nil)
 
 (defn register-all!
-  "Register multiple schemas at once, given pairs of keyword and schema
-   definition. Returns the set of registered keywords. Throws if an odd
+  "Register multiple schemas at once from keyword/definition pairs.
+
+   Returns the set of registered keywords. Throws if an odd
    number of arguments is provided.
 
    Example:
@@ -329,8 +337,9 @@
 (defonce *schema-required-counts (atom {}))
 
 (defn entity-schema-tx-data
-  "Return the tx-data vector (one :db/add per required-attr, plus the
-   key/id-attr/render-fn datoms) for one entity-shape `:map` schema.
+  "Return the tx-data vector for one entity-shape `:map` schema.
+
+   One `:db/add` per required-attr, plus the key/id-attr/render-fn datoms.
    Caller transacts via `seon.db/transact!`. Side-effect: caches the
    required-count in `*schema-required-counts`. Returns `nil` when `k`
    does not refer to an entity-shape :map (no id-attr derivable)."
@@ -361,8 +370,9 @@
                                 reqs))))))))
 
 (defn entity-schema-keys
-  "Snapshot of every registered keyword pointing at an entity-shape `:map`
-   schema (one with a derived `:seon.entity/id-attr`), sorted. Used by
+  "Every registered keyword pointing at an entity-shape `:map` schema.
+
+   Sorted, one per entity with a derived `:seon.entity/id-attr`. Used by
    `seon.client/start-agent!` to seed `:seon.schema` entities at boot."
   {:malli/schema [:=> [:cat] [:vector :keyword]]}
   []
@@ -384,7 +394,9 @@
   (into [] (mapcat entity-schema-tx-data) (entity-schema-keys)))
 
 (defn schema-required-count
-  "The cached required-attr count for `k`, or nil if `k` was never
+  "The cached required-attr count for `k`, or nil.
+
+   Nil when `k` was never
    decomposed (e.g. not an entity-shape :map). Populated as a side-effect
    of `entity-schema-tx-data`."
   {:malli/schema [:=> [:catn [::registry-key ::registry-key]] :any]}
@@ -414,8 +426,9 @@
   (get @*schemas k))
 
 (defn schemas-in-namespace
-  "The {keyword definition} map of schemas registered under namespace
-   `ns-name` (a string, e.g. \"seon.ai.gemini\")."
+  "The `{keyword definition}` map of schemas registered under `ns-name`.
+
+   `ns-name` is a string, e.g. \"seon.ai.gemini\"."
   {:malli/schema [:=> [:catn [::namespace-name ::namespace-name]] :map]}
   [ns-name]
   (into {}

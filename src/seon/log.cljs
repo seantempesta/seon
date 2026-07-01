@@ -134,7 +134,9 @@
   (boolean (some #(str/starts-with? ns-str %) quiet-ns-prefixes)))
 
 (defn quiet-library-logs!
-  "Install a trove log-fn that drops `:trace`/`:debug` calls from the
+  "Install a trove log-fn that quiets the replikativ stack.
+
+   Drops `:trace`/`:debug` calls from the
    replikativ stack (datahike, konserve, superv, hitchhiker) while
    passing everything else to the default console backend. Idempotent;
    call once at pod boot (seon.client/-main)."
@@ -149,7 +151,9 @@
   nil)
 
 (defn error-console!
-  "stderr log line — boot errors, request failures, anything you want
+  "Emit a stderr log line, bypassing the structured file.
+
+   Boot errors, request failures, anything you want
    in `logs/pod.log` but NOT in the structured file (this skips
    [[error!]] entirely)."
   {:malli/schema [:=> [:cat :any :any [:* :any]] :any]}
@@ -157,12 +161,15 @@
   (apply console! :error source msg extra))
 
 (defn warn-console!
+  "Emit a `:warn` stderr console line (see [[error-console!]])."
   {:malli/schema [:=> [:cat :any :any [:* :any]] :any]}
   [source msg & extra] (apply console! :warn  source msg extra))
 (defn info-console!
+  "Emit an `:info` stderr console line (see [[error-console!]])."
   {:malli/schema [:=> [:cat :any :any [:* :any]] :any]}
   [source msg & extra] (apply console! :info  source msg extra))
 (defn debug-console!
+  "Emit a `:debug` stderr console line (see [[error-console!]])."
   {:malli/schema [:=> [:cat :any :any [:* :any]] :any]}
   [source msg & extra] (apply console! :debug source msg extra))
 
@@ -230,7 +237,9 @@
          :seon.log/keep     3}))
 
 (defn configure!
-  "Merge `updates` into the active log config. Recognized keys:
+  "Merge `updates` into the active log config.
+
+   Recognized keys:
      :seon.log/file     — path to the active log file. Default
                           `\"logs/pod-events.log\"`; the WASI sidecar
                           will set this to `\"/logs/pod-events.log\"`
@@ -338,7 +347,9 @@
 ;; ============================================================
 
 (defn error!
-  "Emit a `:seon.log/level :error` entry. Required: `:seon.log/source`
+  "Emit a `:seon.log/level :error` entry.
+
+   Required: `:seon.log/source`
    (keyword) and `:seon.log/message` (string). Optional:
    `:seon.log/agent`, `:seon.log/stack`, `:seon.log/data`.
 
@@ -356,12 +367,15 @@
   [data] (log! :error data))
 
 (defn warn!
+  "Emit a `:seon.log/level :warn` entry (see [[error!]])."
   {:malli/schema [:=> [:cat :map] :any]}
   [data] (log! :warn data))
 (defn info!
+  "Emit a `:seon.log/level :info` entry (see [[error!]])."
   {:malli/schema [:=> [:cat :map] :any]}
   [data] (log! :info data))
 (defn debug!
+  "Emit a `:seon.log/level :debug` entry (see [[error!]])."
   {:malli/schema [:=> [:cat :map] :any]}
   [data] (log! :debug data))
 
@@ -393,8 +407,9 @@
     (try (edn/read-string line) (catch :default _ nil))))
 
 (defn tail
-  "Return the most-recent log entries from the active log file
-   (`:seon.log/file` in [[!config]]), newest first. Reads the file
+  "Return the most-recent log entries from the active log file.
+
+   From `:seon.log/file` in [[!config]], newest first. Reads the file
    each call — there is no in-memory buffer.
 
    Filter opts (all optional):

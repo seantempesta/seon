@@ -81,8 +81,9 @@
     ['seon.db 'transact!]})
 
 (defn skip?
-  "True when `[ns-sym fn-sym]` is opted out of instrumentation — either its
-   whole ns is in [[skip-syms]] or the specific pair is."
+  "True when `[ns-sym fn-sym]` is opted out of instrumentation.
+
+   Either its whole ns is in [[skip-syms]] or the specific pair is."
   {:malli/schema [:=> [:cat :symbol :symbol] :boolean]}
   [ns-sym fn-sym]
   (or (contains? skip-syms ns-sym)
