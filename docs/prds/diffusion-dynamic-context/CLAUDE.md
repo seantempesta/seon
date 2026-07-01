@@ -70,12 +70,15 @@ Full live state + plans = the auto-loaded memory `project-diffusion-overnight-lo
     Live-proven exact vs the parser; regression test `phase-grammar-gate` green (suite 876/4043, 0 errors).
   - Found+filed: #50 — the #42 `:minimal` config-profile is a no-op (lean==full tokens), pre-existing, separate lane.
 
-  **▸ OFFLINE CONTROL SURFACE IS NOW COMPLETE.** The oracle has 5 tiers (parse / structural-lint /
+  **▸ OFFLINE CONTROL SURFACE IS COMPLETE + WIRED ON-WORKER.** The oracle has 5 tiers (parse / structural-lint /
   phase-grammar / eval / behavioral) + retrieval, all renoise/clamp/inject-capable, mechanism-proven with
-  the REAL bb+node oracles. What remains is NOT more oracle features (that would be un-measured machinery —
-  against the north-star's empirical principle) but **GPU measurement**: deploy the co-location image, wire
-  the bb `op:"refine"` so the worker's in-loop `refine_loop` reaches the phase/structural tiers (today it
-  only calls bb `parse-raw`), and measure the ladder's LIFT + compose with §3 over-commit. That's owner-gated.
+  the REAL bb+node oracles. **#51 DONE (commit `47527a33`):** the T1/phase predicates now live in the shared
+  dependency-free `seon.diffusion.grammar.cljc` that BOTH the pod oracle AND babashka load, and bb
+  `op:"refine"` folds structural+phase renoise natively — LIVE-PROVEN on bb (def-vs-defn + phase-violation
+  spans), so the worker reaches the cheap ladder mid-denoise (no pod round-trip, no drift). What remains is
+  NOT more oracle features (un-measured machinery, against the north-star's empirical principle) but **GPU
+  measurement**: deploy the co-location image, point the worker `refine_loop` at bb `op:"refine"` (was
+  `parse-raw`), and measure the ladder's LIFT + compose with §3 over-commit. Owner-gated.
   Remaining owner phased-constraint sub-directions (lower priority until GPU proof): `;; PLAN:` clamp tokens,
   best-of-N renoise, context-as-target embedding search.
 - **Speed levers ranked:** (1) **exp D entropy_bound/tokens-per-forward — FREE on A100, prepped, UNRUN,
