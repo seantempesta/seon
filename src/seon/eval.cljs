@@ -169,17 +169,37 @@
 ;; resolved eval value.
 (defonce ^:private timeout-sentinel #js {:_seon_eval_timeout true})
 
-(defn ^:async ^:private race-timeout
-  "Race `inner` (a Promise) against a wall-clock timer of `ms`. If
-   `inner` settles first, returns its resolved value. If the timer
-   fires first, returns `timeout-sentinel`. Even when the timer wins,
-   the underlying eval keeps running — JS has no preemptive
-   cancellation. Caller MUST identity-check the sentinel."
+(defn timed-out?
+  "True when `v` is [[race-timeout]]'s timeout sentinel (identity check)."
+  {:malli/schema [:=> [:catn [::value :any]] :boolean]}
+  [v]
+  (identical? v timeout-sentinel))
+
+(defn ^:async race-timeout
+  "Race `inner` (a Promise) against a wall-clock timer of `ms`.
+
+   THE one async wall-clock bound (eval, the test runner's mirror, the
+   agent loop's per-turn bound, `call-llm!`'s per-attempt bound all sit
+   on this shape — never a second racer). If `inner` settles first,
+   returns its resolved value and CLEARS the pending timer (no dangling
+   timer on a fast settle). If the timer fires first, returns the
+   timeout sentinel — check via [[timed-out?]]. The timeout does NOT
+   cancel the underlying work (JS has no preemptive cancellation, one
+   event loop): it frees the AWAITER; a late settler's run-scoped
+   writes are aborted by the in-tx CAS work-fence."
+  {:malli/schema [:=> [:catn [::inner :any] [::ms :int]] :any]}
   [inner ms]
-  (let [timer (js/Promise.
-                (fn [resolve _]
-                  (js/setTimeout (fn [] (resolve timeout-sentinel)) ms)))]
-    (await (js/Promise.race #js [inner timer]))))
+  (let [!timer (volatile! nil)
+        timer  (js/Promise.
+                 (fn [resolve _]
+                   (vreset! !timer
+                            (js/setTimeout (fn [] (resolve timeout-sentinel)) ms))))]
+    (try
+      (await (js/Promise.race #js [inner timer]))
+      (finally
+        ;; `inner` won (value or throw) → clear the still-pending timer.
+        ;; When the TIMER won this is a no-op (clearing a fired timer).
+        (js/clearTimeout @!timer)))))
 
 ;; ============================================================
 ;; Bootstrap init — load cljs.core + cljs.core$macros from the
@@ -2017,7 +2037,9 @@
                "it DEFINED NOTHING and sent NOTHING. Don't try to re-emit the "
                "whole thing: STORE the long content as data (a my.kb.* entity "
                "or a :seon.items envelope), then send a SHORT pointer — the id "
-               "+ a one-line summary. Report = data, message = pointer.")
+               "+ a one-line summary. Report = data, message = pointer. For "
+               "large LITERAL text, my.blob/put! it in ~2K-token chunks, then "
+               "my.blob/concat! the chunk hashes into ONE canonical blob.")
           (str "This form did not parse, so it DEFINED NOTHING — do not "
                "call or wire anything that depended on it; it does not "
                "exist. Fix the delimiter and re-eval the whole form."))]

@@ -614,6 +614,28 @@
   []
   (env-int "SEON_TEST_TIMEOUT_MS" 15000))
 
+(defn llm-attempt-timeout-ms
+  "Wall-clock cap in ms on ONE LLM adapter attempt.
+
+   `SEON_LLM_ATTEMPT_TIMEOUT_MS`, default 120000 (2 min). The inner bound
+   [[seon.agent.turn/call-llm!]] races each attempt against — independent
+   of the adapter's own `:seon.ai/timeout-ms` (which may be unset/huge), so
+   a single attempt can never park the turn."
+  {:malli/schema [:=> [:cat] :int]}
+  []
+  (env-int "SEON_LLM_ATTEMPT_TIMEOUT_MS" 120000))
+
+(defn turn-timeout-ms
+  "Per-step wall-clock bound in ms for the agent loop's awaits.
+
+   `SEON_TURN_TIMEOUT_MS`, default 900000 (15 min) — comfortably above the
+   worst-case bounded LLM retry ladder (≤5 capped attempts + backoff), so it
+   only fires on a genuinely hung step. The run DEADLINE stays the outer
+   bound; this is the INNER bound that frees a parked [[seon.agent.loop/run-loop!]]."
+  {:malli/schema [:=> [:cat] :int]}
+  []
+  (env-int "SEON_TURN_TIMEOUT_MS" 900000))
+
 (defn debug-capture
   "Raw `SEON_DEBUG_CAPTURE` string, or nil.
 
