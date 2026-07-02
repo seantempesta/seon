@@ -23,6 +23,14 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
+# Fail-loud render dial (seon.config/render-strict?): ON by default in the
+# test harness so a swallowed render/converter failure SCREAMS (throws with
+# the offending block + the full malli explain) the moment it happens,
+# instead of hiding behind a one-line "⚠ … render failed" guard. The live
+# prod pod boots WITHOUT this var → graceful guard-and-continue (a prod
+# agent must not hard-crash on one bad block). Respect an explicit override.
+export SEON_RENDER_STRICT="${SEON_RENDER_STRICT:-1}"
+
 BUILD=1
 
 for arg in "$@"; do

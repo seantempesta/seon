@@ -17,7 +17,7 @@
    — NEVER the live pod conn."
   (:require
     [cljs.reader :as reader]
-    [cljs.test :refer [deftest is testing async]]
+    [cljs.test :as t :refer [deftest is testing async]]
     [clojure.string :as str]
     [malli.core :as m]
     [seon.agent :as agent]
@@ -28,6 +28,15 @@
     [seon.repl.internal :as repl.internal]
     [seon.schema :as schema]
     [seon.ui.html :as html]))
+
+;; The render-agent-tile degradation tests assert the graceful PROD fallback
+;; (throw / broken hiccup → calm banner, never a crash). Under the harness
+;; strict default (SEON_RENDER_STRICT=1) those renders THROW by design, so
+;; force the fail-loud dial OFF for this ns (process-global env, async-safe —
+;; a scoped with-redefs would restore before an async body runs).
+(t/use-fixtures :once
+  {:before (fn [] (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT) "0"))
+   :after  (fn [] (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT) "1"))})
 
 ;; ============================================================
 ;; greeting — pure time-of-day boundaries.

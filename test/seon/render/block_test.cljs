@@ -17,6 +17,14 @@
 
 (defn- s [hiccup] (html/->string hiccup))
 
+;; `block-throwing-delegate-yields-error-card` asserts the graceful PROD
+;; fallback (throw → error card, never an exception). Under the harness
+;; strict default (SEON_RENDER_STRICT=1) that render THROWS by design, so
+;; force the fail-loud dial OFF for this ns (process-global env, async-safe).
+(t/use-fixtures :once
+  {:before (fn [] (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT) "0"))
+   :after  (fn [] (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT) "1"))})
+
 ;; ============================================================
 ;; clj->hiccup — the server-side Clojure highlighter.
 ;; ============================================================

@@ -635,10 +635,18 @@
    `:seon.eval/source` — BEFORE [[format-eval-row]] composes the row.
    Real result lines (`=> <value> ;; result/<id>`) are appended by the
    composer itself AFTER this rewrite and never pass through it, so the
-   bare-`=>` rule can never touch a genuine runtime-written result line."
-  {:malli/schema [:=> [:cat :string] :string]}
+   bare-`=>` rule can never touch a genuine runtime-written result line.
+
+   Input is `:any`, not `:string`, ON PURPOSE: this is the sanitizer for
+   UNTRUSTED model-authored content, fed straight from a stored
+   `:seon.eval/narration` / `:seon.eval/source`. An off-shape row (a
+   non-string value that slipped past the write boundary) must be
+   NEUTRALIZED, not thrown on — a strict `:string` input turned a bad
+   datom into a whole-transcript render failure. Coerce with `(str s)`
+   at the boundary: nil→\"\", any value → its printed form."
+  {:malli/schema [:=> [:cat :any] :string]}
   [s]
-  (-> s
+  (-> (str s)
       (str/replace bare-result-claim-re unverified-narration-marker)
       (str/replace result-claim-re unverified-narration-marker)))
 

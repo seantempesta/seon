@@ -532,6 +532,29 @@
   {:malli/schema [:=> [:cat] :int]} []
   (get (render-config) :seon.config.render/value-width 72))
 
+(defn render-strict?
+  "The FAIL-LOUD render dial. When ON, a render/converter failure THROWS
+   (naming the offending block + the full malli `explain`) instead of being
+   swallowed by the graceful guard; when OFF, today's guard-and-continue
+   (a live prod agent must not hard-crash on one bad block).
+
+   Read from env `SEON_RENDER_STRICT` (`1`/`true`/`on`/`yes` → ON; anything
+   else / unset → OFF). DEFAULT OFF: a bare pod boot (the live prod agent) is
+   graceful. Turned ON explicitly in dev / test / gym / benchmark contexts
+   (`bin/test-cljs` exports it; a gym/bench driver sets it per run) so a
+   silent render failure SCREAMS the moment it happens instead of hiding in a
+   one-line `⚠ … render failed` guard. This is the config seam the
+   `seon.render` guards + the transcript converter route their swallow through
+   ([[seon.render/render]] / [[seon.render/slot]] / [[seon.render/render-value]]).
+
+   An explicit env dial (not a build `goog.DEBUG` guess) BECAUSE the live
+   `:client` pod is itself a `:devtools`-enabled dev build — build flags cannot
+   tell the prod pod from a test process, but an env var can."
+  {:malli/schema [:=> [:cat] :boolean]}
+  []
+  (contains? #{"1" "true" "on" "yes"}
+             (some-> (env "SEON_RENDER_STRICT") clojure.string/lower-case)))
+
 ;;; --- Agent + test bounds (not render caps — kept on their own prefixes).
 
 (defn tick-ms

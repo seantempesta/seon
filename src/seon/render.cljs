@@ -29,8 +29,10 @@
     [cljs.pprint :as pprint]
     [clojure.string :as str]
     [datahike.api :as d]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.error :as err]
+    [seon.error.instrument :as einstrument]
     [seon.eval :as eval]
     [seon.render.default :as default]
     [seon.render.live-tile :as live-tile]
@@ -361,6 +363,48 @@
       (get r k)
       r)))
 
+;; ============================================================
+;; Fail-loud render dial — the ONE place every render swallow-guard routes
+;; its caught exception. When `seon.config/render-strict?` is ON (dev / test
+;; / gym / benchmark), a render/converter failure RE-THROWS with the
+;; offending block name + the full malli explain (a silent render failure
+;; SCREAMS the moment it happens); when OFF (a live prod agent), it returns
+;; nil so the caller falls back to today's graceful guard — no block ever
+;; hard-crashes a prod turn. See `seon.config/render-strict?` for the policy.
+;; ============================================================
+
+(defn loud-explain
+  "A LOUD, human-legible one-string diagnosis of a caught render exception
+   `e` for block `where`: the offending block name + the exception message
+   + (when `e` is a Malli instrumentation envelope) the FULL humanized
+   `explain`. The string the strict-mode throw carries and the graceful
+   guard would otherwise hide behind a bare `:malli.core/invalid-input`."
+  {:malli/schema [:=> [:catn [::where :any] [::e :any]] :string]}
+  [where e]
+  (let [data (ex-data e)
+        malli? (einstrument/instrument-error? data)
+        detail (when malli?
+                 (try (einstrument/render-malli-error data)
+                      (catch :default _ nil)))]
+    (str "[" (name (or where :unnamed)) "] render failed: " (err/->message e)
+         (when detail (str "\n" detail)))))
+
+(defn strict-fail!
+  "Route a caught render exception through the [[seon.config/render-strict?]]
+   dial. STRICT ON → throw an ex-info naming `where` + carrying the full
+   [[loud-explain]] (so ANY render failure screams, never a swallowed
+   one-liner). STRICT OFF → return nil, signalling the caller to fall back
+   to its graceful guard (a live prod agent must not hard-crash on one bad
+   block). The single seam every render swallow-guard calls."
+  {:malli/schema [:=> [:catn [::where :any] [::e :any]] [:maybe :nil]]}
+  [where e]
+  (when (config/render-strict?)
+    (throw (ex-info (loud-explain where e)
+                    {:seon.render/strict?     true
+                     :seon.render/where       where
+                     :seon.render/cause-message (err/->message e)})))
+  nil)
+
 (defn render-entity-html
   "Render `entity` to hiccup via its resolved `:seon.render/html` symbol.
    Per-entity override wins; else falls back to the entity's primary
@@ -393,6 +437,8 @@
           ;; the ONE shared path so every renderer obeys one contract.
           (unwrap-response :seon.render/html r))
         (catch :default e
+          ;; STRICT dial: dev/test/gym → re-throw LOUD; prod → graceful guard.
+          (strict-fail! sym e)
           (live-tile/error-tile
             {:seon.error/message (str sym " threw: " (or (.-message e) (str e)))
              :seon.error/symbol  sym}))))))
@@ -600,6 +646,8 @@
         (live-tile/valid-hiccup? x) (hiccup-text x)
         :else              (value/render-ai "inline" x)))
     (catch :default e
+      ;; STRICT dial: dev/test/gym → re-throw LOUD; prod → graceful guard.
+      (strict-fail! :block e)
       (let [msg (str "block render failed: " (err/->message e))]
         (case view
           :html (live-tile/error-tile {:seon.error/message msg :seon.error/where :block})
@@ -739,6 +787,9 @@
               (html/->string hiccup))
             resp)
           (catch :default e
+            ;; STRICT dial: dev/test/gym → re-throw LOUD (catch a broken tile
+            ;; the moment it renders); prod → the calm derived banner below.
+            (strict-fail! :live-tile e)
             ;; A broken tile must never crash the render and never show the
             ;; human a scary error: return the calm 'updating this tile' placeholder
             ;; for the human. The agent is NOT actively pushed a message (#43 /
@@ -776,6 +827,8 @@
         ;; agent reading its context sees its own renderer is broken
         ;; (mirror of the html banner above / the tile's error render).
         (catch :default e
+          ;; STRICT dial: dev/test/gym → re-throw LOUD; prod → legible line.
+          (strict-fail! sym e)
           (str "[render error — " sym " threw: "
                (or (.-message e) (str e)) "]"))))))
 
@@ -928,6 +981,9 @@
       (try
         (unwrap-response view (f in))           ;; bare OR html-response envelope
         (catch :default e
+          ;; STRICT dial: dev/test/gym → re-throw LOUD (block name + full
+          ;; malli explain); prod → fall through to the graceful guard below.
+          (strict-fail! (renderable-id node) e)
           (if (= view :seon.render/ai)
             (str ";; ⚠ [" (renderable-id node) "] render failed: " (ex-message e))
             (live-tile/error-tile
@@ -995,6 +1051,8 @@
                 (try
                   (render :seon.render/html (assoc ctx :seon.db/db db) block)
                   (catch :default e
+                    ;; STRICT dial: dev/test/gym → re-throw LOUD; prod → guard.
+                    (strict-fail! block-name e)
                     (live-tile/error-tile
                       {:seon.error/message (str block-name " render failed: "
                                                 (err/->message e))

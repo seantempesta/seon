@@ -16,7 +16,9 @@
      (cljs.test/run-tests 'seon.render-test)"
   (:require
     [cljs.test :as t :refer [deftest is testing async]]
+    [seon.agent.ctx :as ctx]
     [seon.client :as client]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.eval :as eval]
     [seon.render :as render]
@@ -24,6 +26,25 @@
     [seon.render.live-tile :as live-tile]
     [seon.schema :as schema]
     [seon.ui.html :as html]))
+
+;; The graceful-guard tests below (throwing-renderer → banner / legible line)
+;; assert the PROD fallback, so they must run with the fail-loud dial OFF —
+;; under strict (the harness default, SEON_RENDER_STRICT=1) those same renders
+;; THROW by design. Force env off for the whole ns (process-global, async-safe
+;; — a scoped `with-redefs` restores before an async body runs). The dedicated
+;; `render-strict-dial-screams-vs-guards` test pins the dial via its own inner
+;; `with-redefs`, so it is immune to this fixture.
+(defonce ^:private prior-strict-env
+  (atom nil))
+
+(t/use-fixtures :once
+  {:before (fn []
+             (reset! prior-strict-env
+                     (.. js/globalThis -process -env -SEON_RENDER_STRICT))
+             (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT) "0"))
+   :after  (fn []
+             (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT)
+                   (or @prior-strict-env "")))})
 
 ;; ============================================================
 ;; html-render — literal hiccup short-circuits, unresolvable qualified
@@ -401,3 +422,56 @@
                   "the welcome envelope's hiccup actually renders into the slot"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ============================================================
+;; Fail-loud render dial (seon.config/render-strict?) — a render/converter
+;; failure SCREAMS under strict (throws with the offending block + the full
+;; malli explain), guards gracefully in prod. Plus the specific transcript
+;; root-cause fix: neutralize-result-claims tolerates an off-shape (non-
+;; string) stored narration/source instead of throwing invalid-input.
+;; ============================================================
+
+(defn ^:no-doc boom-ai-render
+  "A converter that throws — the induced render failure for the dial tests."
+  [_] (throw (js/Error. "boom-detail-XYZ")))
+
+(deftest neutralize-tolerates-off-shape-rows
+  (testing "neutralize-result-claims coerces any value → string (the transcript
+            root-cause fix: an off-shape stored narration/source must be
+            NEUTRALIZED, not throw invalid-input and sink the whole transcript)"
+    (is (= "" (ctx/neutralize-result-claims nil)) "nil → empty string")
+    (is (= "42" (ctx/neutralize-result-claims 42)) "number → its printed form")
+    (is (= ":x" (ctx/neutralize-result-claims :x)) "keyword → its printed form")
+    (is (re-find #"unverified narration"
+                 (ctx/neutralize-result-claims "; note\n=> 5"))
+        "still rewrites a real bare result-claim on strings"))
+  (testing "the previously-failing eval-row shape (non-string narration) now
+            renders instead of throwing"
+    (let [row (ctx/format-eval-row {:seon.eval/source "(+ 1 2)"
+                                    :seon.eval/ok? true
+                                    :seon.eval/result-edn "3"
+                                    :seon.eval/id "e1"
+                                    :seon.eval/narration 5}
+                                   false)]
+      (is (string? row))
+      (is (re-find #"result/e1" row) "the eval row renders whole"))))
+
+(deftest render-strict-dial-screams-vs-guards
+  (let [node {:seon.render/ai        'seon.render-test/boom-ai-render
+              :seon.agent.ctx/name   :demoblock}]
+    (testing "STRICT OFF → graceful one-line guard, no throw (prod behavior)"
+      (with-redefs [config/render-strict? (constantly false)]
+        (let [out (render/render :seon.render/ai {} node)]
+          (is (string? out))
+          (is (re-find #"⚠ \[:demoblock\] render failed" out)
+              "the graceful guard renders the calm one-liner"))))
+    (testing "STRICT ON → THROWS loud, naming the offending block"
+      (with-redefs [config/render-strict? (constantly true)]
+        (let [caught (try (render/render :seon.render/ai {} node) ::no-throw
+                          (catch :default e e))]
+          (is (not= ::no-throw caught) "strict mode re-throws, never swallows")
+          (is (re-find #"\[demoblock\] render failed: boom-detail-XYZ"
+                       (ex-message caught))
+              "the throw names the block + carries the failure detail")
+          (is (true? (:seon.render/strict? (ex-data caught))))
+          (is (= :demoblock (:seon.render/where (ex-data caught)))))))))
