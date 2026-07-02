@@ -304,6 +304,9 @@ doc; this one stays pure target.
 - [[toolkit]] — the `my.*` verb catalog over the protected `seon.*` floor.
 - [[observability]] — turn replay (basis-t + prompt blob + reply), `inspect/turn` /
   `turn-diff`, the blob store, the forensic agent, the `/solve` door.
+- [[laws]] — the drive-measured empirical laws (render-prominence,
+  cache-stability, canvas-first, pass^k, keep-iff-lifts-battery) that
+  constrain every design above. Not principles — measurements.
 - [[roadmap]] — we-are-here → the gap → the migration checklist + the final gate.
 - [[datahike-primer]] — the source-grounded "work in datahike's grain" mindset (db is
   a value, only values cross the wire, CAS-as-assertion, basis-t caching). Read before
