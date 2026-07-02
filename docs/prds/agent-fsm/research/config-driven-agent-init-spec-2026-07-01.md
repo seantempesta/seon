@@ -901,12 +901,40 @@ ripped symbol to ZERO:
 **C. Renderer→datom moves (CP-3, the 11 of §3.0)** — VERIFY = the renderer reads the
 datom (live) + parity holds:
 
-- `[ ]` `default-seed-blocks`→agent's `:seon.agent/ctx` `[ ]` `namespaces-block`→
-  block presence-sets `[ ]` `render-namespace` detail→block presence `[ ]`
-  `format-eval-row`→`::result-decay`×age `[ ]` `transcript-block` clip→`::tiers` `[ ]`
-  skill seed→`::load` `[ ]` soul→block file-path `[ ]` clip gate→`escape-clipping?`
-  `[ ]` run bounds→`default-turn-limit` `[ ]` LLM→`effective-config-for` `[ ]` root
+- `[x]` `default-seed-blocks`→agent's `:seon.agent/ctx` (CP-2, agent reads own block set) `[ ]` `namespaces-block`→
+  block presence-sets (namespace-display lane) `[ ]` `render-namespace` detail→block presence (namespace-display lane) `[x]`
+  `format-eval-row`→`::result-decay`×age `[x]` `transcript-block` clip→`::tiers` `[ ]`
+  skill seed→`::load` (CP-2) `[x]` soul→block file-path (CP-2 seed-copy) `[~]` clip gate→`escape-clipping?`
+  (READ wired; effect deferred to CP-5 — flip would break parity) `[x]` run bounds→`default-turn-limit` `[x]` LLM→`effective-config-for` `[x]` root
   canvas→root-context.
+
+  CP-3 (this checkpoint) VERIFIED live 2026-07-01 (fresh reset, root):
+  - move 4 `format-eval-row`→`::result-decay`×age: `decay-cap-for-offset`
+    selects 16384 (single-level default / offset 0 = parity), 800 for an
+    old eval (offset 5) under a 2-level schedule; `format-eval-row` clips at
+    the threaded cap (absent→16384=today). Reactive: transacting a 2-level
+    decay onto the transcript block is read back + applied.
+  - move 5 `transcript-block` clip→`::tiers`: `clip-events-by-tiers` reads the
+    block's `::tiers`; empty (default)→render-all (`:none`, byte-parity);
+    non-empty→stub no-op (CP-5 activates the banding).
+  - move 8 clip gate→`escape-clipping?`: `escape-clipping?` reader reads the
+    agent datom (default true; reactive false-after-transact). PARITY-SAFE:
+    NOT yet routed into `:seon.render/full?` — routing default-true would FLIP
+    (#43 is the CP-5 intended change). CP-5 only flips the default/config.
+  - move 9 run bounds→`:seon.agent.run/default-turn-limit`: `open-run!`
+    consults the new datom (+ `::default-deadline-ms`) ahead of the const;
+    no-config→20/600000 (=live consts, parity); datom→its value.
+  - move 10 LLM→`effective-config-for`: `seon.ai/effective-config-for`
+    overlays per-agent `::agent-*` over the global row (`:inherit`→global =
+    parity); `seon.ai/agent-max-retries` replaces the `SEON_AI_MAX_RETRIES`
+    read at `seon.agent.turn/llm-retry-strategy` (`:inherit`→4=parity).
+    Per-agent PROVIDER/MODEL selection is RESOLVED but not yet threaded into
+    the adapters — a parity-safe follow-on (`:inherit`=today; see note below).
+  - move 11 root canvas→root-context: `live-tile-block` reads
+    `:seon.render.live-tile/content` off the `:live-tile` BLOCK (root's block
+    carries `system-view` via root-context), falling back to the agent-entity
+    datom when the block is `:none`/absent (non-root welcome = parity). For
+    root the block-read == agent-entity-read == `system-view` (byte-neutral).
 
 **D. Wire-ups (CP-2/3)** — VERIFY = the path runs end-to-end live:
 

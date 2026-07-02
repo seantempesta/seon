@@ -97,6 +97,93 @@ runs against a `fresh-conn` that PRE-installs its attrs via a hardcoded
 brand-new attr, asserts it is NOT pre-installed, transacts, and asserts the attr
 becomes installed AND the datom queries back — the exact split-state the drive saw.
 
+### Task #92 code-read — `discard-registrations!` rollback hypothesis REJECTED (2026-07-02)
+
+The remaining suspect was: a same-batch error (e.g. the reader-error `:O(1)`)
+triggers the eval error-rollback `discard-registrations!` and UNDOES a
+successful earlier `schema/register!` — producing exactly the drive's
+register-`:ok`-but-not-installed split state. **Read the eval path; that
+hypothesis does NOT hold.** Root cause of the split state is elsewhere (and the
+normal path is sound — see the follow-up above). Evidence, file:line:
+
+**1. `discard-registrations!` is PER-FORM, scoped to THIS form's own new keys.**
+`src/seon/eval.cljs:3059-3069` (`eval-form-entry!`): the rollback fires only
+`(when-not (:ok result))` for the *same form's* result, and removes only
+`(set/difference (schema/current-keys) schemas-before)` where `schemas-before`
+was snapshotted at the START of THAT form (`:2988`). A `register!` in an
+EARLIER, successful form is not in that diff, so it is never dropped. The
+docstring at `src/seon/schema.cljc:288-291` states the same contract ("`ks` is
+the keys NEWLY registered during the failed eval … a pre-existing key is never
+in `ks`").
+
+**2. The batch is a sequential per-form fold, one `with-tx-context` + `eval-id`
+per form, each `await`ed to completion before the next.** `eval-batch!`'s
+`doseq` (`src/seon/eval.cljs:3452-3457`) mints a fresh `eval-id` and opens a
+per-form `db/with-tx-context` per entry; `dispatch-eval-entry!` →
+`eval-form-entry!` → `record-eval!` are all `await`ed. So form N's register +
+its DB tee complete before form N+1 (the error form) even parses. There is no
+per-BATCH rollback of prior forms.
+
+**3. The register! DB write is committed per-form, not deferrable by a later
+error.** Inside a batch the eager self-tee is intentionally DEFERRED (the
+tx-context carries an `:seon.db/eval-id`, so `tee-registered-schema!` no-ops —
+`src/seon/eval.cljs:2320-2329`); the durable write is done by the GATED
+detect-and-tee (`build-tee-entities` in `record-eval!`) which runs **only on a
+successful eval** (`:3127`) and rides that form's own atomic `record-eval!` tx
+(`:3177-3186`). A successful `register!`+`transact!` form therefore commits its
+`:seon.schema` row and its data in its own tx, which is fully awaited before the
+later error form runs. The datahike attr install (`ensure-datahike-attrs!`,
+schema-before-data) likewise already ran during that successful form.
+
+**4. A reader error does not reach the rollback at all.** `discard-
+registrations!` lives ONLY in `eval-form-entry!`. A reader error (`:O(1)`) is
+segmented into its OWN isolated `:kind :read` entry — parse-forms records the
+bad span alone and "Forms BEFORE and AFTER the failure still parse"
+(`src/seon/repl/internal.cljc:70-76`). A `:read` entry routes to the repair /
+sharpened-read-error path in the `doseq`, NEVER to `eval-form-entry!` unless
+repaired — so it triggers no `discard-registrations!` and cannot touch a prior
+form's registry keys or DB rows.
+
+**Verdict:** `discard-registrations!` is correctly scoped (per-form, this-form's
+own new keys, in-memory Malli registry only — it never touches datahike, so
+there is no split-state it could even create). It is NOT the culprit. The drive
+symptom is explained by the follow-up above (the drive's store was since reset;
+the normal register→install→transact→query path re-proves sound end-to-end
+against the real wire store; the real fix was the closed test-coverage hole).
+The interleaved reader-errors in that drive are agent-OWN errors surfaced
+correctly, not a mechanism that reverts good registrations.
+
+**Repro to run LATER (after the benchmark frees the pod)** — the exact sequence
+this task named, to CONFIRM no split state. Run against a fresh child agent via
+`mcp__seon_cljs__eval`; the three forms in ONE batch (one reply / one
+`eval-batch!` call):
+
+```clojure
+;; form 1 — succeeds
+(seon.schema/register! :my.probe92/name :string)
+;; form 2 — succeeds (installs the datahike attr + lands the datom)
+(seon.db/transact! {:seon.db/tx-data [{:my.probe92/name "hello-92"}]})
+;; form 3 — reader error in the SAME batch (`:O(1)` breaks the reader)
+(count :O(1))
+```
+
+Then, in a LATER eval (so the earlier tx is fully committed), assert the good
+registration SURVIVED the same-batch reader error:
+
+```clojure
+;; in-memory Malli registry still has the attr
+(contains? (seon.schema/current-keys) :my.probe92/name)   ; => true expected
+;; datahike attr installed + datom queryable back
+(seon.db/query '[:find ?n :where [_ :my.probe92/name ?n]]
+               @seon.db/*conn*)                            ; => #{["hello-92"]}
+```
+
+Confirm on the JVM wire REPL (7891, `nc`) that `:my.probe92/name` has a
+`:db.type/string` schema AND the datom is in the store. Expected: BOTH present —
+the reader error in form 3 leaves form 1/2 fully intact. If (contrary to this
+read) the attr is missing after the reader error, that would reopen the
+rollback-scope question; the code says it will be present.
+
 ## Planning + RESUME across restart — VERIFIED (the strongest result)
 
 `bin/seon restart pod` mid-task → roster `:resumed ["djy-…" "kXL-…" "root"]`,
