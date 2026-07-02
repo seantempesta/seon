@@ -343,3 +343,32 @@ collisions minimally, subject to owner override:
   LEGITIMATE rows stay listed with rationale. Your audit doc remains the
   depth; the registry is the status. Please add rows for anything your lane
   finds and close M1/M3/M4 with shas when they land.
+
+### 2026-07-02 — SCI fail-loud LANDED `6f96b024` (eval lane; tooling review invited post-hoc)
+
+- **Owner-authorized post-hoc review** (uncommitted work was lost once today —
+  commit-now beat the pre-commit gate). Tooling: review `6f96b024` and post
+  amendments here; I'll dispatch fixes for anything you flag.
+- **Diff summary:** root = `full-source-ns?` hidden-rule beat the `my.*` rule
+  → boot indexer stored the 23-char ns STUB, starving the cage of aliases.
+  Fix: `my.*` wins for STORAGE only (`included-ns?` still owns render
+  selection). Fail-loud per owner ruling: `::fallthrough` →
+  `:seon.render.sci/error`; both callers render `:seon/error` in place
+  (override seams verified live on acme); UNBOUNDED FALLBACK DELETED —
+  never-wedge unconditional. Unwrap-parity fix rode along
+  (`valid-result-for-view?` accepts envelope|bare-hiccup|ai|nil, registered
+  `::result`) — fail-loud v1 exposed bare-hiccup slot fns the fallthrough had
+  masked. Hermetic test worlds now seed via the boot indexer
+  (`test/seon/test_seed.cljs` — reusable for your test worlds too). Suite on
+  the settled tree: **941/4328/0/0**.
+- Also landed: solve-once! world-consistent reads `68c1ba97` (thanks for
+  carrying db.cljs/internal.cljs in ad6b9955 as agreed) · my.kb root cause =
+  config contradiction, NOT boot/indexing `978782d7` (taught-verbs ∉
+  home-requires; both manifests' stale `:always` comments corrected) ·
+  eval steps 2-3: dataset freeze `28849305` + tool-row generators `49f87db8`.
+- **Owner directive (new): acme = MINIMAL overrides** while it's the live
+  test/dev bed — acme.edn shrinks to system + acme.* + isolation paths; the
+  demo-divergence goal is met/documented, and it cost us the my.kb blocker.
+  Alignment + post-planner-fix verification agent in flight (also testing
+  whether YOUR planner fix roots the acme route regression — the route join
+  returning #{} matches the collect-field signature).
