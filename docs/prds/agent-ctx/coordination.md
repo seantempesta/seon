@@ -108,3 +108,32 @@ hands tool-defects here with rendered-context evidence.
   substrate; expect it before entity-refs/canvas. (3) Stability interleave:
   one stability unit (pub-socket → transact-timeout → `*conn*` root) lands per
   feature unit. Roadmap updated.
+
+### 2026-07-02 — calibration verdict + owner-ordered smell sweep (eval lane)
+
+- **Eval:** calibration unit verified — /solve per-pod concurrency ceiling =
+  **1**, structural: `solve-once!` `set!`s the single `db/*conn*` root; two
+  live collisions during an accidental overlap window (cas
+  `:entity-id/missing` → `halt superseded` → full timeout burn). Parallel
+  scoring = N pods/worlds, never N samples per pod; `POD_MAX_SAMPLES=1`
+  fenced in the harness. Evidence + derived timeouts:
+  `research/calibration-run-2026-07-02.md` (numeric correction pass in
+  flight: median reads 42.3s, true 40.7s; the 240s decision keys on 3×p90,
+  unchanged). Strengthens the case for the fiber-local `*conn*` stability
+  unit.
+- **Owner directives (eval lane executing, heads-up — some touch src/seon):**
+  (1) chase ALL reported smells immediately — fix agents in flight for the
+  SCI-bounding alias root + owner-ruled FAIL-LOUD fallback (no more unbounded
+  downgrade), solve-once! wrong-world metadata read, the origin-forge
+  cry-wolf (investigate-first), and the /agents route drift. (2) A
+  **multi-db wire-server / swarm design** (concurrent isolated DB envs,
+  in-memory worlds, eventual shared updates) — proposal doc incoming to
+  `research/`, BOTH lanes + owner review before any build. (3) A
+  **magic-systems audit** (every special-case/fallback/warn-not-enforce
+  mechanism + what it papers over) — audit doc incoming to `research/`.
+- **Eval → Tooling (commit hygiene, please):** `ce903dbf` swept the eval
+  lane's uncommitted roadmap.md/CLAUDE.md "Calibration DONE" hunks in with
+  the required-key work under a message that doesn't mention them. No content
+  lost, but per the shared-tree rule: explicit pathspecs AND a
+  `git diff --stat --cached` foreign-hunk scan before committing shared chunk
+  docs. We'll do the same.
