@@ -21,7 +21,8 @@
     [seon.agent.ctx.namespaces :as nss]
     [seon.ai.tokens :as tokens]
     [seon.client :as client]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.eval :as seval]))
 
 ;; A valid agent id (`:seon.agent/id` is a strict shape) and its home ns —
 ;; a fresh agent's current ns falls back to `(home-ns id)`.
@@ -123,6 +124,34 @@
                               :seon.render/text)]
               (is (< (tokens/estimate compact) (tokens/estimate full))
                   "a compact card is smaller than the full render of the same ns"))))
+        (.then (fn [_] (done)) (fn [e] (is false (str "threw: " (.-message e))) (done))))))
+
+(deftest workspace-stub-reflects-configured-requires-not-const
+  ;; Turn-0 regression: a FRESH agent (no home-ns source yet) renders the
+  ;; workspace stub. Its `(ns … (:require …))` prose must reflect THIS agent's
+  ;; CONFIG-RESOLVED requires ([[seon.eval/home-requires-for]]), NOT the const
+  ;; default ([[seon.eval/home-ns-require-specs]]) the old 1-arg call used.
+  (async done
+    (-> (client/open-agent-conn!)
+        (.then (fn [conn]
+                 (binding [db/*conn* conn]
+                   (let [fresh "tst-cfg-2606260000"
+                         home  :my.agent.tst-cfg-2606260000]
+                     (-> (db/transact! {:seon.db/tx-data [{:seon.agent/id fresh}]})
+                         (.then (fn [_]
+                                  (let [out       (nss/namespaces-block
+                                                    {:seon.db/db @conn :seon.agent/id fresh})
+                                        resolved  (seval/home-requires-for fresh)
+                                        cfg-form  (seval/home-ns-form home resolved)
+                                        const-form (seval/home-ns-form home)]
+                                    (is (contains? (section-nses out) "my.agent.tst-cfg-2606260000")
+                                        "the fresh agent's home ns renders (the workspace stub)")
+                                    (is (str/includes? out cfg-form)
+                                        "stub prose is built from the config-resolved requires")
+                                    ;; Only meaningful when config actually diverges from the const.
+                                    (when (not= cfg-form const-form)
+                                      (is (not (str/includes? out const-form))
+                                          "stub prose is NOT the stale const default"))))))))))
         (.then (fn [_] (done)) (fn [e] (is false (str "threw: " (.-message e))) (done))))))
 
 (deftest compact-of-unindexed-ns-does-not-throw

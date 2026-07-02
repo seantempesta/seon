@@ -311,11 +311,13 @@
    `:seon.ns/requires`. No hidden aliasing: the agent reads the form and knows
    `message/user`, `db/transact!`, `schema/register!`, `wait`, `complete`
    exist and how to call them. `nm` is a ns-name keyword whose `:seon.ns/name`
-   row the caller already matched (an included, current-ns row)."
-  [_db nm]
+   row the caller already matched (an included, current-ns row). `id` is the
+   agent id, threaded so the stub prose shows THIS agent's actual configured
+   requires ([[seon.eval/home-requires-for]]) — not the const default."
+  [_db nm id]
   (ctx/ns-demarc
     nm
-    (str (seval/home-ns-form nm) "\n"
+    (str (seval/home-ns-form nm (seval/home-requires-for id)) "\n"
          "; (your workspace — nothing defined here yet; define schemas + fns and they appear here)")))
 
 (defn- render-one
@@ -331,12 +333,13 @@
    brand-new agent whose home ns was never indexed;
    [[seon.agent.ctx/render-namespace]] throws on the missing entity, so
    short-circuit to the stub). Every OTHER ns with nothing real to show is
-   omitted (nil)."
-  [db nm cur-ns]
+   omitted (nil). `id` threads through to the workspace stub so its prose
+   reflects THIS agent's configured requires."
+  [db nm cur-ns id]
   (if-not (db/entity-lazy {:seon.db/db db :seon.db/ref [:seon.ns/name nm]})
     ;; No `:seon.ns/name` entity — the current ns still keeps its promise via
     ;; the workspace stub; any other row with no entity is omitted.
-    (when (= nm cur-ns) (cur-ns-workspace-stub db nm))
+    (when (= nm cur-ns) (cur-ns-workspace-stub db nm id))
     (let [txt    (-> (ctx/render-namespace
                        {:seon.ns/name       nm
                         :seon.render/depth  0
@@ -353,7 +356,7 @@
                      (str/includes? txt "(no recorded source/fns/schemas)")
                      (str/includes? txt "(not in db)"))]
       (cond
-        (= nm cur-ns) (if empty? (cur-ns-workspace-stub db nm) txt)
+        (= nm cur-ns) (if empty? (cur-ns-workspace-stub db nm id) txt)
         empty?        nil
         :else         txt))))
 
@@ -474,7 +477,7 @@
         ;; indexed. Append the ns's indexed test source when it is in tests-set.
         render-row (fn [[nm full? _phase]]
                      (when-let [block-txt (if full?
-                                            (render-one db nm cur-ns)
+                                            (render-one db nm cur-ns id)
                                             (compact-block db nm))]
                        (str block-txt
                             (when (contains? tests-set nm)
