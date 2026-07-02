@@ -1,0 +1,258 @@
+(ns seon.agent.web-test
+  "Envelope-contract tests for `seon.agent.web/fetch`.
+
+   The contract under test — every outcome RESOLVES to a
+   :seon.agent.web/fetch-response (errors are values, never a throw):
+
+   1. HTML → markdown extraction: full text lands in a blob (my.blob),
+      the response carries the projection + a TOKEN-capped preview with
+      HONEST totals (total-tokens > preview-tokens), links, and the
+      blob-hash pages the WHOLE doc via my.blob/text.
+   2. SSRF: a loopback/private-range URL is refused BEFORE any transport;
+      a redirect that LANDS on a private range is refused on that hop.
+   3. A non-2xx status is an error value (the server was reached but did
+      not succeed).
+   4. Binary content is a legible refusal naming the content-type.
+   5. An oversized body is read up to the byte cap with :truncated? true.
+
+   Hermetic: the transport (int/!fetch-impl) and DNS resolver
+   (int/!lookup-impl) are FAKED — no network. Blobs go to a pid-scoped
+   tmp dir; each test runs against a fresh :memory conn root-set! as
+   db/*conn* (the my.blob-test pattern). SEON_WEB is granted for the run
+   and restored after."
+  (:require
+    ["node:fs" :as nfs]
+    ["node:path" :as npath]
+    [cljs.test :refer [deftest is async use-fixtures]]
+    [clojure.string :as str]
+    [datahike.api :as d]
+    [my.blob :as blob]
+    [seon.agent.web :as web]
+    [seon.agent.web.internal :as int]
+    [seon.ai.tokens :as tokens]
+    [seon.client :as client]
+    [seon.db :as db]))
+
+;; ---------------------------------------------------------------------------
+;; Fixtures — pid-scoped blob dir, SEON_WEB grant, faked transport/DNS.
+;; ---------------------------------------------------------------------------
+
+(def ^:private fixture-dir
+  (.resolve npath (str "tmp/web-test-" (.-pid js/process))))
+
+(defonce ^:private !saved-dir (atom nil))
+(defonce ^:private !saved-env (atom nil))
+
+(use-fixtures :once
+  {:before (fn []
+             (reset! !saved-dir @blob/!dir)
+             (reset! blob/!dir fixture-dir)
+             (.rmSync nfs fixture-dir #js {:recursive true :force true})
+             (reset! !saved-env (aget (.-env js/process) "SEON_WEB"))
+             (aset (.-env js/process) "SEON_WEB" "1"))
+   :after  (fn []
+             (reset! blob/!dir @!saved-dir)
+             (.rmSync nfs fixture-dir #js {:recursive true :force true})
+             (if-some [v @!saved-env]
+               (aset (.-env js/process) "SEON_WEB" v)
+               (js-delete (.-env js/process) "SEON_WEB")))})
+
+(use-fixtures :each
+  {:after (fn []
+            (reset! int/!fetch-impl nil)
+            (reset! int/!lookup-impl nil))})
+
+(defn- fresh-conn []
+  (let [cfg {:store              {:backend :memory :id (random-uuid)}
+             :schema-flexibility :write
+             :keep-history?      true}]
+    (-> (d/create-database cfg)
+        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then (fn [conn]
+                 (-> (d/transact! conn {:tx-data (into (db/malli->datahike-schema
+                                                         client/agent-bootstrap-attrs)
+                                                       (db/tx-meta-datahike-schema))})
+                     (.then (fn [_] conn))))))))
+
+(defn- with-conn [body]
+  (-> (fresh-conn)
+      (.then (fn [conn]
+               (let [orig db/*conn*]
+                 (set! db/*conn* conn)
+                 (-> (js/Promise.resolve (body conn))
+                     (.finally (fn [] (set! db/*conn* orig)))))))))
+
+(defn- run-test [chain done]
+  (-> (with-conn (fn [conn] (chain conn)))
+      (.then (fn [_] (done)))
+      (.catch (fn [e] (is false (str "threw — " e)) (done)))))
+
+;; A public-IP DNS answer so a hostname passes the SSRF guard in tests.
+(defn- public-dns [] (fn [_host] (js/Promise.resolve #js [#js {:address "93.184.216.34"}])))
+
+;; A faked transport: a (url -> js/Response) dispatcher.
+(defn- fake-fetch [url->resp]
+  (fn [url _init] (js/Promise.resolve (url->resp url))))
+
+(defn- html-response [html]
+  (js/Response. html #js {:status 200 :headers #js {"content-type" "text/html; charset=utf-8"}}))
+
+;; ---------------------------------------------------------------------------
+;; 1. HTML → markdown + blob + capped preview with honest totals.
+;; ---------------------------------------------------------------------------
+
+(def ^:private sample-html
+  (str "<!doctype html><html><head><title>Hello Title</title></head><body>"
+       "<article><h1>Main Heading</h1>"
+       (apply str (repeat 40 "<p>This is a paragraph of real body content that readability keeps. </p>"))
+       "<p>See <a href=\"/next\">the next page</a> for more.</p>"
+       "</article></body></html>"))
+
+(deftest html-extracts-blobs-and-previews-honestly
+  (async done
+    (reset! int/!lookup-impl (public-dns))
+    (reset! int/!fetch-impl (fake-fetch (fn [_] (html-response sample-html))))
+    (run-test
+      (fn [conn]
+        (-> (web/fetch {:seon.agent.web/url                "https://example.com/page"
+                        :seon.agent.web/max-preview-tokens 5})
+            (.then (fn [{ok?     :seon.agent.web/ok?
+                         status  :seon.agent.web/status
+                         title   :seon.agent.web/title
+                         extr    :seon.agent.web/extractor
+                         preview :seon.agent.web/preview
+                         ptok    :seon.agent.web/preview-tokens
+                         total   :seon.agent.web/total-tokens
+                         hash    :seon.agent.web/blob-hash
+                         links   :seon.agent.web/links
+                         trunc?  :seon.agent.web/truncated?}]
+                     (set! db/*conn* conn)
+                     (is (true? ok?))
+                     (is (= 200 status))
+                     (is (= "Hello Title" title) "the <title> rode through extraction")
+                     (is (contains? #{:readability :raw} extr) "honest extractor provenance")
+                     (is (some? (re-matches #"[0-9a-f]{64}" hash)) "full text lands in a content-addressed blob")
+                     (is (false? trunc?) "body was well under the byte cap")
+                     ;; honest totals — the preview is a SMALL slice, never the whole
+                     (is (> total ptok) "total-tokens exceeds the capped preview")
+                     (is (<= ptok 6) "preview honors max-preview-tokens (+ellipsis)")
+                     (is (str/ends-with? preview "…") "the preview cut is marked")
+                     (is (seq links) "extracted links are carried")
+                     (is (some #(str/includes? (:seon.agent.web/href %) "/next") links)
+                         "the in-page link was absolutized + kept")
+                     ;; the blob pages the FULL document, honestly
+                     (let [g (blob/get {:my.blob/hash hash})]
+                       (is (= total (tokens/estimate (:my.blob/content g)))
+                           "blob content == the full extracted markdown")
+                       (is (str/includes? (:my.blob/content g) "Main Heading")))
+                     (let [t (blob/text {:my.blob/hash hash})]
+                       (is (true? (:my.blob/ok? t)) "my.blob/text pages the stored doc")))))
+        )
+      done)))
+
+;; ---------------------------------------------------------------------------
+;; 2a. Private-range URL — refused before any transport.
+;; ---------------------------------------------------------------------------
+
+(deftest loopback-url-is-blocked
+  (async done
+    ;; a fetch impl that would THROW if called — proves we refuse pre-transport
+    (reset! int/!fetch-impl (fn [_ _] (throw (js/Error. "transport must not run for a blocked host"))))
+    (run-test
+      (fn [_]
+        (-> (web/fetch {:seon.agent.web/url "http://127.0.0.1:7891/store"})
+            (.then (fn [{ok? :seon.agent.web/ok?
+                         msg :seon.error/message}]
+                     (is (false? ok?))
+                     (is (re-find #"(?i)private|blocked" msg) "names the SSRF refusal")
+                     (is (str/includes? msg "127.0.0.1") "names the offending address")))))
+      done)))
+
+;; ---------------------------------------------------------------------------
+;; 2b. Redirect that LANDS on a private range — refused on that hop.
+;; ---------------------------------------------------------------------------
+
+(deftest redirect-to-private-range-is-blocked
+  (async done
+    (reset! int/!lookup-impl (public-dns)) ; example.com resolves public
+    (reset! int/!fetch-impl
+            (fake-fetch (fn [url]
+                          (if (str/includes? url "example.com")
+                            (js/Response. nil #js {:status 302
+                                                   :headers #js {"location" "http://127.0.0.1/admin"}})
+                            (throw (js/Error. "must not fetch the private redirect target"))))))
+    (run-test
+      (fn [_]
+        (-> (web/fetch {:seon.agent.web/url "https://example.com/start"})
+            (.then (fn [{ok? :seon.agent.web/ok?
+                         msg :seon.error/message}]
+                     (is (false? ok?))
+                     (is (re-find #"(?i)private|blocked" msg) "the redirect hop was SSRF-checked")
+                     (is (str/includes? msg "127.0.0.1"))))))
+      done)))
+
+;; ---------------------------------------------------------------------------
+;; 3. Non-2xx — an error value, the server was reached but failed.
+;; ---------------------------------------------------------------------------
+
+(deftest non-2xx-is-an-error-value
+  (async done
+    (reset! int/!lookup-impl (public-dns))
+    (reset! int/!fetch-impl
+            (fake-fetch (fn [_] (js/Response. "not found" #js {:status 404
+                                                               :headers #js {"content-type" "text/html"}}))))
+    (run-test
+      (fn [_]
+        (-> (web/fetch {:seon.agent.web/url "https://example.com/missing"})
+            (.then (fn [{ok? :seon.agent.web/ok?
+                         msg :seon.error/message}]
+                     (is (false? ok?))
+                     (is (str/includes? msg "404") "the status is named")))))
+      done)))
+
+;; ---------------------------------------------------------------------------
+;; 4. Binary content — legible refusal naming the content-type.
+;; ---------------------------------------------------------------------------
+
+(deftest binary-content-is-refused-legibly
+  (async done
+    (reset! int/!lookup-impl (public-dns))
+    (reset! int/!fetch-impl
+            (fake-fetch (fn [_] (js/Response. " PNGDATA" #js {:status 200
+                                                                  :headers #js {"content-type" "image/png"}}))))
+    (run-test
+      (fn [_]
+        (-> (web/fetch {:seon.agent.web/url "https://example.com/logo.png"})
+            (.then (fn [{ok? :seon.agent.web/ok?
+                         msg :seon.error/message}]
+                     (is (false? ok?))
+                     (is (re-find #"(?i)binary" msg))
+                     (is (str/includes? msg "image/png") "names the refused content-type")))))
+      done)))
+
+;; ---------------------------------------------------------------------------
+;; 5. Oversized body — read up to the byte cap, :truncated? true.
+;; ---------------------------------------------------------------------------
+
+(deftest oversized-body-truncates-honestly
+  (async done
+    (reset! int/!lookup-impl (public-dns))
+    (reset! int/!fetch-impl
+            (fake-fetch (fn [_] (js/Response. (apply str (repeat 5000 "A"))
+                                              #js {:status 200
+                                                   :headers #js {"content-type" "text/plain"}}))))
+    (run-test
+      (fn [conn]
+        (-> (web/fetch {:seon.agent.web/url       "https://example.com/big.txt"
+                        :seon.agent.web/max-bytes 64})
+            (.then (fn [{ok?    :seon.agent.web/ok?
+                         extr   :seon.agent.web/extractor
+                         trunc? :seon.agent.web/truncated?
+                         hash   :seon.agent.web/blob-hash}]
+                     (set! db/*conn* conn)
+                     (is (true? ok?) "a text/plain body is passthrough-extracted")
+                     (is (= :text extr))
+                     (is (true? trunc?) "the body hit the byte cap")
+                     (is (<= (count (:my.blob/content (blob/get {:my.blob/hash hash}))) 70)
+                         "only the capped bytes were stored")))))
+      done)))

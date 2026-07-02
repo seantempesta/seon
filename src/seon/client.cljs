@@ -182,6 +182,11 @@
     ;; agent can call (seon.agent.shell/run ...) / (seon.agent.shell/py-run
     ;; ...) from bootstrap-CLJS eval and so the core seed indexes it.
     [seon.agent.shell]
+    ;; Fetch + extract web pages — undici transport, readability→markdown,
+    ;; blob-stored, SSRF-gated behind the SEON_WEB host grant. Required so
+    ;; the agent can call (seon.agent.web/fetch ...) from bootstrap-CLJS
+    ;; eval and so the core seed indexes it.
+    [seon.agent.web]
     ;; Work items (user→agent asks + agent notes-to-self) — required so
     ;; its register! calls run before the boot install of :seon.agent.todo/*.
     [seon.agent.todo]
