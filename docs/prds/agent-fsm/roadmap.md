@@ -39,10 +39,13 @@ closes by a replace-in-place or a delete, never a `-v2`.**
 - **Transcript.** Age-band eviction + eval `result-decay`
   (transcript.cljs:62-84), byte-frozen aged clips, dials per cluster
   (system.edn:172; acme.edn:89-91).
-- **Namespace context.** Full-real-source rendering with **curation, not
-  compression**: presence-sets `::full-source`/`::with-tests`
-  (namespaces.cljs:70-71,157-167) select WHICH nses render, wired to
-  `:seon.config/namespaces` + per-agent DB pins.
+- **Namespace context.** Three render tiers in `namespaces-block`
+  (namespaces.cljs:375-439): FULL real source = the current ns + per-agent
+  `::full-source` pins; COMPACT CARD = the current ns's `:require`s;
+  DROPPED = the rest. The signature-whitelist mode was killed; presence-sets
+  (`::full-source`/`::with-tests`) + `:seon.config/namespaces` are the
+  curation dials (`:always` is boot-storage selection, NOT render
+  selection).
 - **Web.** reitit router derived from `:seon.route/*` datoms
   (router.cljs), the gzip whole-element morph channel + time-travel bar
   (datastar.cljs), `/agent/{id}/debug` via `inspect/ctx-preview`.
@@ -69,11 +72,12 @@ Stated once so nobody re-asserts them:
   (serve.cljs:206-218); the all-agents roster is a dedicated `world-view`
   (datastar.cljs:94), not the root agent's page. The target ("/ IS the
   root agent's world", [[ui]]) is OPEN work — see W3.
-- **Compact namespace cards were KILLED, not implemented.** Owner decision:
-  full-source-everywhere, budget bound by curation
-  (config.cljs:65-71; coordination 2026-07-01). The
-  `compact-namespace-cards-spec` render mode is superseded; the surviving
-  artifacts are the presence-sets and the ≤72-char docstring convention.
+- **"Compact cards were killed" and "everything renders full" are BOTH
+  wrong.** The SIGNATURE-whitelist mode was killed; compact cards are LIVE
+  and the default for the current ns's requires (namespaces.cljs:375-439,
+  commits 164db342 + 2eeb3bd9). Beware: comments in config.cljs:65-71 and
+  system.edn:26-33 still describe the older full-everywhere story — stale
+  in-file comments, W6.
 - **The `my.*` toolkit rename is mostly unbuilt.** Only
   `my.kb/data/ui/tile/skills` exist; `my.files`/`my.search`/`my.shell`/
   `my.todo`/`my.test`/`my.blob` do not — verbs live under `seon.agent.*`.
@@ -146,10 +150,14 @@ in place or re-target [[toolkit]] to the `seon.agent.*` names. One pass,
 no aliases left behind.
 
 **W6 — Truth sweep.** Fix over-claiming docstrings (`start!`, `state.cljs`,
-`render/value.cljs`), purge `SEON_PROFILE` from runbooks, delete the stale
-loadout comment; skills: rewrite `seon-context-config` (stale-MAJOR),
-2-line `datahike` `:kind` fix, author the observability skill when W1
-lands.
+`render/value.cljs`, `db.cljs:668,1390` "kind" vocabulary), stale comments
+(config.cljs:65-71 + system.edn:26-33 "renders full" story,
+client.cljs:2182 loadout), purge `SEON_PROFILE` from runbooks + dead
+plumbing (`bin/seon:136-144`, `bin/test-cljs:10-13`, agent-fsm
+CLAUDE.md:98-99,214), declare the `:seon.ai/agent-*` overlay keys in the
+`:seon.config/agent-context` schema (open-map typo hazard); skills:
+`seon-context-config` rewrite + `datahike` fix DONE (6a0a2077); author the
+observability skill when W1 lands.
 
 **W7 — Data-model moves.** `:my.agent/purpose` + `:my.todo/agent` scoping.
 

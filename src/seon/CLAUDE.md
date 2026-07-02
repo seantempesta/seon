@@ -23,7 +23,7 @@ existing one needs strengthening IN PLACE.
 | Rendering | `seon.render` — one guarded walker, ai + html views | a second projection path; renders are NEVER stored |
 | Errors | `:seon/error` value (`seon.error`), errors-as-values | throwing into the agent loop; a new error shape |
 | State seeding/reset | `seon.state/reconcile!` (provenance-scoped diff) | ad-hoc seed/override/restore code paths |
-| Config | ONE manifest `config/system.edn` via `seon.config` (`SEON_CONFIG`/`SEON_PROFILE`) | env-var reads, per-feature config files |
+| Config | ONE manifest `config/system.edn` via `seon.config` (`SEON_CONFIG` picks the file; a variant = a SEPARATE file — `SEON_PROFILE` is inert) | env-var reads, per-feature config files |
 | Literal search | `seon.agent.search` (`grep` files, `grep-graph` DB) | a new scan/query helper per caller |
 | Semantic search | `seon.embed` — ONE `:seon/embedding` attr + Proximum index (wire-server) | a second index or embedder |
 | Token counts | `seon.ai.tokens/estimate` — sizes shown to anyone are TOKENS | printing char counts; a second estimator |
