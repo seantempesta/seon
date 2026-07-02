@@ -68,6 +68,13 @@ Tool defects queued for the tooling lane (with rendered-context evidence — eva
 
 Tooling-lane build issues:
 
+- **SCI-bounding fallback on `my.plan.internal/plan-block`** (eval lane,
+  evidence attached 2026-07-02): fresh boot logs "Unable to resolve symbol:
+  db/*conn*" under SCI bounding → the tile renders on the UNBOUNDED compiled
+  path (a hang there would wedge the pod). Candidate root: `:seon.ns/source`
+  require aliases not stored. Issue:
+  `docs/seon/orchestrator/issues/sci-bounding-fallback-plan-block.md`.
+
 - **`my.plan` verbs are in `seon.instrument/skip-syms`** → they get no wrapper
   and no required-key resolution. Resolve first (remove from skip-syms, or read
   `db/current-agent-id` in-body) before the auto-run work. (tooling lane)

@@ -39,6 +39,64 @@ local data processing. A threaded db *value* is location-agnostic; the work-fenc
 arbitrated at the single writer; `since-t` replay is the network-blip recovery
 primitive.
 
+## The core ideas
+
+The thesis, unpacked into the ideas everything else serves. Each is backed by
+a mechanism — a principle without a code anchor is a slogan. When designing
+anything, ask: which of these does it serve, and which existing primitive
+already expresses it? (A new noun is a parallel-system risk — map every
+concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
+
+1. **Everything is data in one graph.** One bitemporal db; every moving part —
+   the loop, the prompt, a tile, the plan, the code itself — is a function of a
+   frozen db snapshot. Replay, debugging, diffing, and time-travel are queries,
+   not archaeology. Entities are attributes + refs (no kinds); provenance rides
+   the tx entity. Anchors: `seon.db` (sole API), the single writer, [[data-model]].
+2. **The language is the harness.** No hand-crafted tool catalog: agents act by
+   writing Clojure against fully-specced fns over namespaced data. Every fn's
+   in/out is schema'd in the program graph, so "what can process what I'm
+   holding" is a Datalog join — relevance is computed, not curated. Prose only
+   for what cannot execute. Anchors: `schema/register!` + `:malli/schema`,
+   `:seon.fn`/`:seon.ns`, [[toolkit]]. (Trajectory, bounded by the measured
+   present: always-on context beats loadable skills, and composition verbs
+   render FULL — [[laws]].)
+3. **The agent authors its own environment.** A `defn` returning
+   `:seon.render/ai` and/or `:seon.render/html` is a block and/or tile —
+   writing a function IS authoring context, tools, and UI at once. Both keys =
+   twins: agent and human look at ONE derived value; shared situational
+   awareness is structural, not messaged (canvas-first mitigates fabrication —
+   prose is where agents lie, [[laws]]). Every specced fn an agent writes
+   teaches the system when to surface it. Anchors: the render twins,
+   `install!`/`remove!`, current-ns auto-run — [[context]].
+4. **Perpetual motion = plan + location + window.** Grounding that survives
+   forever: purpose + the `my.plan` anchor (WHAT I'm doing) + current-ns
+   (WHERE I am) + the sliding transcript window (what I'm doing RIGHT NOW). A
+   1000-turn agent behaves like a turn-3 agent because context is derived,
+   windowed, and cache-stable — never accumulated. (The claim under test: the
+   plan-survives-restart bench is its measurement.) Anchors: [[context]] §order.
+5. **Measured, not asserted.** The context/tool surface is a fitness landscape:
+   every dial is config data, so contexts are A/B'd and selected against frozen
+   benchmarks (`pass^k`, the eval ledger). The laws in [[laws]] are
+   measurements, not opinions. Every scorer check must be stated in the agent's
+   context, or the bench measures prompt-omission. Endgame: the agent adjusts
+   its own initial-context config and the loop selects what works.
+6. **Never crash, always surface; isolate by process, share only data.** The
+   operational spine that keeps 1–5 alive: every failure is a `:seon/error`
+   value in a derived surface; units share *data, never memory*; one writer
+   arbitrates total order; late writes die on the CAS work-fence. Nothing
+   wedges, nothing lies about wedging. Anchors: the cross-cutting principles
+   below, [[agent-runtime]] isolation tiers.
+7. **One human, one bond.** The runtime serves ONE human; the canvas is the
+   shared value the pair looks at together. Infrastructure choices answer to
+   that relationship — on-device privacy, honest termination, the agent's own
+   code as the compounding asset serving its human. Anchors: the root agent,
+   `docs/seon/vision/` (the Seon premise).
+8. **The horizon: think in Clojure, translate out.** Index ANY codebase into
+   the same graph (LSP); plan/solve in Clojure and translate into the client's
+   language — the Clojure artifact is the executable spec; seon-writes-seon
+   behind the tests-and-validations publish gate. Vision tier:
+   `docs/seon/vision/think-in-clojure.md`.
+
 ## Glossary
 
 One vocabulary, each name grounded in a namespace + a schema/fn.

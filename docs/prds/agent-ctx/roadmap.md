@@ -21,25 +21,39 @@ consolidated architecture docs. The eval harness (`src-inspect-ai/`) is built +
 pytest-green but **not yet running** a standing suite. The context-composition
 work (required-key resolution) is designed + Phase-1-built (held as a patch).
 
-## Tooling lane — the ordered path
+## Tooling lane — the ordered path (ratified with owner 2026-07-02)
 
-1. **Required-key resolution** (Phase 1 built, patch in
-   `scratchpad/agent-scope-carryover/`) — a fn declares `:seon.db/db`,
-   `:seon.agent/id`, `:seon.render/at` as optional request keys; the eval
-   boundary resolves absent ones from context. Apply the patch; register
-   `:seon.render/at`; resolve the `my.plan` **skip-syms** blocker.
+**Interleave rule (owner call): one stability unit lands per feature unit** —
+the P-stability queue burns down continuously without stalling the flywheel.
+Feature order (turn-capture pulled forward — it is the eval lane's attribution
+substrate):
+
+1. **Required-key resolution** — ✅ Phase 1 landed (`a6362630`; suite green
+   937/4310 after `e0f63c05`). Remaining: register `:seon.render/at`; resolve
+   the `my.plan` **skip-syms** blocker.
 2. **Current-ns render-fn auto-run** — query the program graph for the current
    ns's render-typed fns, run through the same wrapper → block/tile twins,
    positioned after the stable code. (design: [[research/explicit-deps-injection-2026-07-02]])
-3. **`my.*` as namespace-scribed entities** — the agent entity refs a `my.plan`
+3. **Observability turn-capture** (pulled forward from "still open") —
+   `:seon.agent.turn/rendered-as-of` + prompt/reply blobs + `inspect/turn` /
+   `turn-diff`; gives the eval lane rendered-context evidence per row.
+4. **`my.*` as namespace-scribed entities** — the agent entity refs a `my.plan`
    entity whose schema is scribed in the `my.plan` ns; scope declared by
    signature. `my.plan` the worked example.
-4. **Canvas = last-updated tile** (derived default, pin to override) — the code
+5. **Canvas = last-updated tile** (derived default, pin to override) — the code
    for the ui.md decision.
-5. **Queued tool defects** — fresh-world `my.kb` empty render; turn-6 recall
-   visibility (+ the `*conn*` single-root / fiber-local lever).
-6. **Post-merge de-flake** — the pub-socket feed migration + the transact-timeout
-   ambiguity (`docs/seon/orchestrator/issues/tx-feed-pump-timeouts.md`).
+6. **Queued tool defects** — fresh-world `my.kb` empty render; turn-6 recall
+   visibility; SCI-bounding fallback on `my.plan.internal/plan-block`
+   (`docs/seon/orchestrator/issues/sci-bounding-fallback-plan-block.md` —
+   unresolvable `db/*conn*` alias drops the tile onto the UNBOUNDED path).
+
+Stability queue (interleaved, one per feature unit above): **pub-socket feed
+migration** → **transact-timeout semantics**
+(`docs/seon/orchestrator/issues/tx-feed-pump-timeouts.md`) → **`*conn*`
+single-dynamic-root / fiber-local** (likely shares a root with the SCI alias
+defect and turn-6 recall). Also queued: dev-hook writes `logs/`/`tmp/`
+relative to the edited file's tree (litters submodules); boot warn
+"agent-scoped tx claims `:seon.db/origin :core-seed`" ×3 on fresh reset.
 
 ## Eval lane — the ordered path
 

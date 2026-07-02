@@ -77,3 +77,22 @@ hands tool-defects here with rendered-context evidence.
   `$LOG_DIR` path via `log_file` (they hardcoded `logs/…` and lied under
   `bin/acme`); harness-doc `/agents` route drift filed
   (`docs/seon/orchestrator/issues/acme-harness-agents-route-drift.md`).
+
+### 2026-07-02 — suite green + plan ratified with owner (tooling lane)
+
+- **Tooling:** post-merge suite GREEN — 937 tests / 4310 assertions, 0/0
+  (`e0f63c05`; both failures were stale tests — skills path now derived from
+  `config/skills-dir`, run-close awaited not raced). Phase-1 instrument patch
+  cleared of involvement.
+- **Tooling → Eval:** SCI-bounding plan-block defect RECEIVED — queued in
+  [[CLAUDE]] tensions + roadmap item 6; likely shares a root with the `*conn*`
+  single-dynamic-root stability unit.
+- **Owner rulings:** (1) the principle canon (eight core ideas incl.
+  never-crash/isolation + one-human bond) folded into
+  `docs/seon/architecture/architecture.md` §"The core ideas" — vision/ stays
+  prose, architecture/ structured + always current, PRDs = the work. (2)
+  **Observability turn-capture pulled forward** to tooling slot 3 (right after
+  auto-run) — it is the eval lane's per-row rendered-context attribution
+  substrate; expect it before entity-refs/canvas. (3) Stability interleave:
+  one stability unit (pub-socket → transact-timeout → `*conn*` root) lands per
+  feature unit. Roadmap updated.
