@@ -47,8 +47,9 @@ export SEON_PORT_FILE=tmp/seon-port-acme    # own pod port file (the live defaul
                                             # writes tmp/seon-port; a single shared
                                             # file would cross-talk in status/ready)
 
-# --- embeddings: default OFF (opt-in); .env.acme sets SEON_EMBED=1 for this
-#     cluster. Export GEMINI_API_KEY for KNN when enabled. SEON_EMBED is a
+# --- embeddings: default OFF (opt-in; owner-disabled in our configs
+#     2026-07-02 — .env.acme carries SEON_EMBED=0). Export GEMINI_API_KEY for
+#     KNN when enabled. SEON_EMBED is a
 #     PRESENCE gate in code (any value — even ""/"0" — counts as ON), so
 #     empty/"0" is translated to UNSET here; bin/seon repeats the same
 #     translation after sourcing the main .env. ---
