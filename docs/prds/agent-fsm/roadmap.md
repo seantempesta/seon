@@ -169,15 +169,17 @@ roles = grant-sets queried at the gate; THEN make the docstrings honest.
 in place or re-target [[toolkit]] to the `seon.agent.*` names. One pass,
 no aliases left behind.
 
-**W5.5 — Staleness-on-change class (two verified instances, 2026-07-02).**
-Persisted derived state doesn't refresh when its source changes: (a) the
-boot seed refreshed `:seon.fn/source` but not `:seon.fn/spec` on the shell
-key-rename (fix in flight — both live drives failed identically on the
-stale card); (b) existing agents' home-ns requires don't pick up a changed
-config `:seon.eval/home-requires` (root has no `my.blob` card; fresh
-children do). One rule: every re-seed/reconcile refreshes EVERY derived
-field, and config-driven per-agent state re-reconciles on manifest change
-— extend `reconcile!`, no parallel refresh paths.
+**W5.5 — Staleness-on-change class (2026-07-02).** Persisted derived state
+didn't refresh when its source changed. (a) **FIXED (`f9c8686c`):** the boot
+re-seed deduped `:seon.fn` rows on symbol alone, so changed derived fields
+(spec/source/doc/arglists) never refreshed — both shell drives failed
+identically on the stale card. Now dedups on the full field set with a
+`:core-seed` provenance guard; boot healed 110 drifted rows, sweep shows 0
+remaining. (b) **OPEN:** existing agents' home-ns requires don't pick up a
+changed config `:seon.eval/home-requires` (root has no `my.blob`/`shell`
+card; fresh children do) — config-driven per-agent state must re-reconcile
+on manifest change. One rule, `reconcile!`-extended, no parallel refresh
+paths.
 
 **W6 — Truth sweep.** Fix over-claiming docstrings (`start!`, `state.cljs`,
 `render/value.cljs`, `db.cljs:668,1390` "kind" vocabulary), stale comments
