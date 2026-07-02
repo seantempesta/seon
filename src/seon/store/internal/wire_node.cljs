@@ -302,31 +302,16 @@
                          opts))
        (then (fn [resp] (if (:seon.store.wire/ok resp) (:seon.store.wire/result resp) resp))))))
 
-;; ---------- raw tx feed (subscribe-tx / next-tx-event / unsubscribe-tx) ----------
-
-(defn subscribe-tx
-  "Open a raw tx-feed subscription. `opts` may carry `:since-t` (a basis-t):
-   when present the wire-server replays every committed tx with basis-t >
-   since-t — in commit order, ahead of live events — so a RECONNECTING
-   subscriber recovers the gap instead of dropping a wake (DE-2). A fresh
-   subscriber omits it. Returns a promise of the reply map (carries
-   :seon.store.wire/ok + :seon.store.wire/handle, plus :seon.store.wire/replayed
-   when a since-t replay ran)."
-  ([] (subscribe-tx default-req-sock {}))
-  ([sock opts]
-   (-> (rpc sock (routed (cond-> {:seon.store.wire/op "subscribe-tx"}
-                           (:since-t opts) (assoc :seon.store.wire/since-t (:since-t opts)))
-                         opts))
-       (then (fn [resp] resp)))))
+;; ---------- tx-feed gap recovery (replay-tx) ----------
 
 (defn replay-tx
   "Fetch every committed tx event with basis-t > `:since-t` DIRECTLY in one
-   reply (the push-feed sibling of subscribe-tx's queued replay). The reply
-   carries `:seon.store.wire/events` (live-shaped `tx` events, ascending
-   commit order), `:seon.store.wire/db-name` (the resolved cluster the caller
-   should filter pub frames by), and `:seon.store.wire/replayed`. Used by the
-   pub-socket feed on every (re)connect. `:since-t` is REQUIRED. A large gap
-   can make the reply big, so the timeout accepts an override via `opts`."
+   reply. The reply carries `:seon.store.wire/events` (live-shaped `tx`
+   events, ascending commit order), `:seon.store.wire/db-name` (the resolved
+   cluster the caller should filter pub frames by), and
+   `:seon.store.wire/replayed`. Used by the pub-socket feed on every
+   (re)connect (DE-2 lossless wake). `:since-t` is REQUIRED. A large gap can
+   make the reply big, so the timeout accepts an override via `opts`."
   ([opts] (replay-tx default-req-sock opts))
   ([sock {:keys [since-t timeout-ms] :as opts}]
    (rpc sock
@@ -334,19 +319,6 @@
                  :seon.store.wire/since-t since-t}
                 opts)
         {:timeout-ms (or timeout-ms 30000)})))
-
-(defn next-tx-event
-  "Poll one raw tx event for `handle`. Resolves to the event map (keyword keys)
-   or a not-ok map with :seon.store.wire/error \"no-event\" on the bounded-wait
-   timeout."
-  ([handle] (next-tx-event default-req-sock handle))
-  ([sock handle] (rpc sock {:seon.store.wire/op "next-tx-event"
-                            :seon.store.wire/handle handle})))
-
-(defn unsubscribe-tx
-  ([handle] (unsubscribe-tx default-req-sock handle))
-  ([sock handle] (rpc sock {:seon.store.wire/op "unsubscribe-tx"
-                            :seon.store.wire/handle handle})))
 
 ;; ---------- main ----------
 

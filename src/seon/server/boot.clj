@@ -15,12 +15,12 @@
    multimethod) and `reactive`/`broadcast` (the pure fns + the pub fanout), so
    defining them here keeps `wire.clj` decoupled. Two families of ops live here:
 
-   1. RAW TX FEED (the guest `listen!` model — `seon.client-runtime.db/listen!`
-      → `wit/subscribe-tx-call` / `next-tx-event-call`): `subscribe-tx`,
-      `next-tx-event`, `unsubscribe-tx`. A subscription is a per-DB
-      `broadcast/subscribe!` callback feeding a bounded queue; `next-tx-event`
-      drains it with a short bounded wait. This is what the live two-pane
-      webview's `listen!` loop polls.
+   1. TX-FEED GAP RECOVERY: `replay-tx` — the req-socket sibling of the
+      pub-socket push feed (`broadcast/start-pub-server!`). The pod's feed
+      adapter calls it on every (re)connect with its last-applied basis-t
+      watermark and gets every missed tx back DIRECTLY in the reply (DE-2
+      lossless wake). Live delivery itself is push-only over the pub socket;
+      there is no polled per-subscriber queue.
 
    2. QUERY SUBSCRIPTIONS (the reactive engine — changed query rows):
       `register-subscription` / `unregister-subscription`, delegating to
@@ -52,45 +52,21 @@
             [seon.server.broadcast :as bcast]
             [seon.server.reactive :as reactive]
             [taoensso.timbre :as log])
-  (:import [java.util.concurrent ConcurrentLinkedQueue]
-           [java.util.concurrent.atomic AtomicInteger])
   (:gen-class))
 
 ;; ---------------------------------------------------------------------------
-;; Raw tx-feed subscriptions (the guest `listen!` model)
+;; Tx-feed gap recovery (replay-tx) — the req-socket side of the push feed.
 ;;
-;; A `subscribe-tx` opens a per-handle bounded queue and a `broadcast/subscribe!`
-;; callback for the target db-name; every committed tx for that db-name (emitted
-;; by the conn's `::raw-broadcast` listener) is enqueued. `next-tx-event` drains
-;; one event with a short bounded wait — exactly the bounded-poll contract the
-;; guest's loop expects (it swallows the `no-event` timeout and re-loops).
-;;
-;; The event delivered is the SAME map `seon.server.wire`'s broadcaster builds
-;; (`ok-event-from-report`): `:seon.store.wire/*` keyword keys, `tx-data` as
-;; native 5-vectors [e a v t op], `tx-meta`/`write-id` carried through.
+;; Live tx events ride the pub socket (`broadcast/start-pub-server!`, fed by
+;; the conn's `::raw-broadcast` listener). Each event is the SAME map
+;; `seon.server.wire`'s broadcaster builds (`ok-event-from-report`):
+;; `:seon.store.wire/*` keyword keys, `tx-data` as native 5-vectors
+;; [e a v t op], `tx-meta`/`write-id` carried through. `replay-tx` returns the
+;; missed range of exactly-that-shaped events for a reconnecting subscriber.
 ;; ---------------------------------------------------------------------------
 
-;; handle -> {:db-name str :sub-id <bcast-sub-id> :queue ConcurrentLinkedQueue
-;;            :qsize AtomicInteger :replay-queue ConcurrentLinkedQueue?}
-;; :replay-queue is present only for a since-t (reconnect) subscribe — it holds
-;; the missed-tx replay, drained by next-tx-event ahead of the live :queue.
-(defonce ^:private !tx-subs (atom {}))
-(defonce ^:private !tx-sub-counter (atom 0))
-
-;; A bounded LIVE queue so a guest that never drains can't grow memory without
-;; limit. When full, the oldest event is dropped. For RENDERING that is
-;; harmless (the guest catches up via basis-t on its next read). For the WAKE
-;; edge it is NOT — a dropped wake leaves an idle agent with unread mail. The
-;; primary cure is the per-subscriber `since-t` replay on (re)subscribe
-;; (`wire/replay-tx-events`): a reconnecting subscriber recovers every missed
-;; tx from the tx-log, so a feed gap no longer drops a wake. This live cap
-;; remains the backstop for a subscriber that stays connected but stops
-;; draining; if it ever bites the same since-t replay recovers on the next
-;; reconnect.
-(def ^:private max-queued-events 1024)
-
 (defn- db-name-for-req
-  "The broadcast db-name a `subscribe-tx` should listen on, derived the SAME way
+  "The broadcast db-name a feed op should resolve to, derived the SAME way
    request routing resolves a conn: agent-id → registry db-name, else explicit
    db-name, else the ambient conn's db-name. Returns the db-name STRING the
    `::raw-broadcast` listener tags events with (keyword db-names are stringified
@@ -108,80 +84,9 @@
       ;; ::unresolved? (neither key) → ambient conn's db-name
       :else (wire/ambient-db-name))))
 
-(defmethod wire/handle-op "subscribe-tx" [conn req]
-  (let [db-name (db-name-for-req req)
-        ;; Optional per-subscriber `since-t` (last-applied basis-t): when present
-        ;; we replay every tx committed after it (DE-2 lossless wake). The
-        ;; reconnecting subscriber gets its gap back; a fresh subscriber omits it.
-        since-t (:seon.store.wire/since-t req)
-        queue   (ConcurrentLinkedQueue.)
-        ;; Track size in an AtomicInteger — ConcurrentLinkedQueue.size() is
-        ;; O(n) (it traverses the queue); this callback runs on EVERY commit
-        ;; for the db-name, so an O(n) size check per event is real overhead.
-        qsize   (AtomicInteger. 0)
-        handle  (swap! !tx-sub-counter inc)
-        ;; Attach the LIVE callback FIRST, then snapshot the replay range. No tx
-        ;; can slip the gap between snapshot and going-live: anything ≤ the
-        ;; replay basis-t is in the replay, anything after is in this queue. The
-        ;; overlap (a tx that committed between attach and the replay snapshot)
-        ;; is delivered by BOTH paths at the SAME basis-t — the subscriber's
-        ;; basis-t idempotency applies it at-most-once.
-        sub-id  (bcast/subscribe!
-                 db-name
-                 (fn [event]
-                   ;; Bounded: drop oldest when full (basis-t lets the guest
-                   ;; recover a missed intermediate frame). O(1) size via the
-                   ;; AtomicInteger counter.
-                   (when (>= (.get qsize) max-queued-events)
-                     (when (.poll queue) (.decrementAndGet qsize)))
-                   (.offer queue event)
-                   (.incrementAndGet qsize)))
-        ;; since-t replay: missed txs, in commit order, drained by next-tx-event
-        ;; AHEAD of live events so the subscriber recovers its gap monotonically.
-        replay  (when (and since-t (pos? (long since-t)))
-                  (wire/replay-tx-events conn db-name since-t))
-        replay-q (when (seq replay)
-                   (ConcurrentLinkedQueue. ^java.util.Collection replay))]
-    (swap! !tx-subs assoc handle
-           (cond-> {:db-name db-name :sub-id sub-id :queue queue :qsize qsize}
-             replay-q (assoc :replay-queue replay-q)))
-    ;; handle is an int; db-name a string. Uniform Transit, keyword keys.
-    (cond-> {:seon.store.wire/ok true
-             :seon.store.wire/handle handle
-             :seon.store.wire/db-name db-name}
-      since-t (assoc :seon.store.wire/since-t  since-t
-                     :seon.store.wire/replayed (count (or replay []))))))
-
-(defmethod wire/handle-op "next-tx-event" [_conn req]
-  (let [handle (long (:seon.store.wire/handle req))]
-    (if-let [{:keys [^ConcurrentLinkedQueue queue ^ConcurrentLinkedQueue replay-queue]}
-             (get @!tx-subs handle)]
-      ;; Replayed gap events (since-t reconnect) drain FIRST, in commit order,
-      ;; ahead of live events — so the subscriber applies the whole stream
-      ;; monotonically by basis-t. Once the replay queue empties, poll resolves
-      ;; to nil and we fall through to the live queue.
-      (if-let [rev (some-> replay-queue .poll)]
-        (assoc rev :seon.store.wire/ok true)
-        ;; Bounded wait: poll up to ~50ms for an event so the guest's loop
-        ;; doesn't hot-spin. On timeout, a typed "no-event" protocol error —
-        ;; the guest swallows it (see seon.client-runtime.db/ensure-listener-loop!).
-        (let [deadline (+ (System/currentTimeMillis) 50)]
-          (loop []
-            (if-let [ev (.poll queue)]
-              (assoc ev :seon.store.wire/ok true)
-              (if (< (System/currentTimeMillis) deadline)
-                (do (Thread/sleep 5) (recur))
-                {:seon.store.wire/ok false
-                 :seon.store.wire/error "no-event"
-                 :seon.store.wire/error-kind "not-found"})))))
-      {:seon.store.wire/ok false
-       :seon.store.wire/error (str "unknown tx-sub handle: " handle)
-       :seon.store.wire/error-kind "not-found"})))
-
 (defmethod wire/handle-op "replay-tx" [conn req]
-  ;; The PUSH-feed sibling of subscribe-tx's since-t replay: return the missed
-  ;; txs DIRECTLY in the reply instead of queueing them behind a poll handle.
-  ;; The pod's pub-socket feed calls this on every (re)connect with its
+  ;; DE-2 lossless wake: return the missed txs DIRECTLY in the reply. The
+  ;; pod's pub-socket feed calls this on every (re)connect with its
   ;; last-applied basis-t watermark; the reply's events are applied ahead of
   ;; buffered live pub frames (overlap deduped by the subscriber's watermark).
   ;; Also carries the resolved db-name — the pub socket is db-agnostic (every
@@ -198,15 +103,6 @@
          :seon.store.wire/since-t  since-t
          :seon.store.wire/events   events
          :seon.store.wire/replayed (count events)}))))
-
-(defmethod wire/handle-op "unsubscribe-tx" [_conn req]
-  (let [handle (long (:seon.store.wire/handle req))]
-    (when-let [{:keys [db-name sub-id]} (get @!tx-subs handle)]
-      (bcast/unsubscribe! db-name sub-id)
-      (swap! !tx-subs dissoc handle))
-    {:seon.store.wire/ok true
-     :seon.store.wire/handle handle
-     :seon.store.wire/unsubscribed true}))
 
 ;; ---------------------------------------------------------------------------
 ;; Query subscriptions (the reactive engine) — register/unregister + the
@@ -311,7 +207,7 @@
 ;; ---------------------------------------------------------------------------
 
 (defn -main
-  "Boot the wire-server. Loading this ns registered the raw tx-feed +
+  "Boot the wire-server. Loading this ns registered the tx-feed `replay-tx` +
    query-subscription `handle-op` defmethods, the reactive `::reactive`
    on-ensure-db hook, and both reactive + raw-broadcast schemas.
 

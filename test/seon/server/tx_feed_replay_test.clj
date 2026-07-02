@@ -1,13 +1,13 @@
 (ns seon.server.tx-feed-replay-test
-  "DE-2 lossless wake: `subscribe-tx` with a per-subscriber `:seon.store.wire/since-t`
+  "DE-2 lossless wake: `replay-tx` with a per-subscriber `:seon.store.wire/since-t`
    replays every committed tx after that basis-t, shaped EXACTLY like a live
-   `tx` event, in commit order, ahead of live events — so a reconnecting feed
-   subscriber recovers a gap instead of dropping a wake.
+   `tx` event, in commit order — so a reconnecting pub-socket feed subscriber
+   recovers a gap instead of dropping a wake.
 
    Two layers:
    - the pure replay (`wire/replay-tx-events`) over an isolated in-memory conn;
-   - the boot wiring (`subscribe-tx` → `next-tx-event`) drains replay first,
-     then live, exactly once."
+   - the boot wiring (the `replay-tx` handle-op) returns the gap directly in
+     the reply, tagged with the resolved db-name."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as d]
             [seon.server.boot]                 ; registers the raw tx-feed ops
@@ -103,9 +103,9 @@
         "the retraction datom keeps its NEGATIVE tx — byte-identical to a live datom->wire")))
 
 ;; ---------------------------------------------------------------------------
-;; Layer 2 — boot wiring: subscribe-tx (since-t) → next-tx-event drains replay
-;; before live, exactly once. Driven through wire/handle-op directly (the
-;; in-process harness style of wire_request_id_test).
+;; Layer 2 — boot wiring: the `replay-tx` handle-op returns the gap directly
+;; in the reply. Driven through wire/handle-op directly (the in-process
+;; harness style of wire_request_id_test).
 ;; ---------------------------------------------------------------------------
 
 (def ^:dynamic *conn* nil)
@@ -116,7 +116,7 @@
     (let [conn    (mem-conn)
           ambient (str "replay-wire-" (System/nanoTime))]
       ;; Pin wire's ambient-db-name + install ::raw-broadcast under it, so a
-      ;; subscribe-tx with no agent-id/db-name resolves to the same db-name the
+      ;; replay-tx with no agent-id/db-name resolves to the same db-name the
       ;; commit broadcasts under (mirrors a cold wire-server boot).
       (reset! @#'wire/state {:conn conn :ambient-db-name ambient})
       (d/listen conn :seon.server.wire/raw-broadcast
@@ -124,44 +124,9 @@
       (registry/run-on-ensure-db-hooks! conn ambient)
       (binding [*conn* conn *ambient* ambient] (tfn)))))
 
-(defn- subscribe! [extra]
-  (wire/handle-op *conn* (merge {:seon.store.wire/op "subscribe-tx"} extra)))
-
-(defn- next-ev! [handle]
-  (wire/handle-op *conn* {:seon.store.wire/op "next-tx-event"
-                          :seon.store.wire/handle handle}))
-
-(defn- drain
-  "Collect up to `n` real events for `handle`, tolerating the async
-   broadcast latency on live events (bounded retries)."
-  [handle n]
-  (loop [acc [] tries 0]
-    (if (or (>= (count acc) n) (>= tries 80))
-      acc
-      (let [ev (next-ev! handle)]
-        (if (:seon.store.wire/ok ev)
-          (recur (conj acc ev) (inc tries))
-          (do (Thread/sleep 5) (recur acc (inc tries))))))))
-
-(deftest subscribe-with-since-t-replays-gap-then-live-once
-  (let [t0 (commit! *conn* [{:db/ident :u/n :db/valueType :db.type/string
-                             :db/cardinality :db.cardinality/one}])
-        t1 (commit! *conn* [{:u/n "a"}])
-        t2 (commit! *conn* [{:u/n "b"}])
-        sub (subscribe! {:seon.store.wire/since-t t0})
-        h   (:seon.store.wire/handle sub)]
-    (is (true? (:seon.store.wire/ok sub)))
-    (is (= 2 (:seon.store.wire/replayed sub)) "the two missed txs are queued for replay")
-    ;; a live tx AFTER subscribe — its basis-t must arrive after the replay, once.
-    (let [t3   (commit! *conn* [{:u/n "c"}])
-          bts  (mapv :seon.store.wire/basis-t (drain h 3))]
-      (is (= [t1 t2 t3] bts)
-          "replay (t1,t2) drains before live (t3), each basis-t exactly once, in order"))))
-
 (deftest replay-tx-op-returns-gap-directly
-  ;; The push-feed sibling of subscribe-tx's queued replay: the pod's
-  ;; pub-socket adapter calls "replay-tx" on every (re)connect and applies the
-  ;; reply's events ahead of buffered live frames.
+  ;; The pod's pub-socket adapter calls "replay-tx" on every (re)connect and
+  ;; applies the reply's events ahead of buffered live frames.
   (let [t0   (commit! *conn* [{:db/ident :u3/n :db/valueType :db.type/string
                                :db/cardinality :db.cardinality/one}])
         t1   (commit! *conn* [{:u3/n "a"}])
@@ -181,16 +146,3 @@
   (let [resp (wire/handle-op *conn* {:seon.store.wire/op "replay-tx"})]
     (is (false? (:seon.store.wire/ok resp)))
     (is (= "protocol" (:seon.store.wire/error-kind resp)))))
-
-(deftest subscribe-without-since-t-replays-nothing
-  (let [_  (commit! *conn* [{:db/ident :u2/n :db/valueType :db.type/string
-                             :db/cardinality :db.cardinality/one}])
-        _  (commit! *conn* [{:u2/n "old-1"}])
-        _  (commit! *conn* [{:u2/n "old-2"}])
-        sub (subscribe! {})
-        h   (:seon.store.wire/handle sub)]
-    (is (true? (:seon.store.wire/ok sub)))
-    (is (nil? (:seon.store.wire/replayed sub)) "no since-t → no replay key")
-    (let [t-live (commit! *conn* [{:u2/n "live"}])
-          bts    (mapv :seon.store.wire/basis-t (drain h 1))]
-      (is (= [t-live] bts) "only the post-subscribe live tx is delivered — no backlog"))))

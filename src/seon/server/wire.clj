@@ -314,11 +314,11 @@
 
 ;; ---------- since-t replay (the DE-2 lossless-wake fix) ----------
 ;;
-;; The tx FEED is a polled per-handle bounded queue: a dropped/missed event is
+;; The tx FEED is a push over the pub socket: a dropped/missed event is
 ;; harmless for RENDERING (the subscriber re-reads latest) but FATAL for the
 ;; WAKE edge (the event IS the trigger to act — drop it and an idle agent sits
-;; with unread mail). On UDS reconnect the old subscription handle is gone, so
-;; the gap is lost. `replay-tx-events` makes the wake edge lossless: a
+;; with unread mail). Live frames in a disconnect gap are simply never
+;; delivered. `replay-tx-events` makes the wake edge lossless: a
 ;; reconnecting subscriber passes its last-applied basis-t as `since-t`, and the
 ;; writer replays every tx committed after it — reconstructed from the
 ;; bitemporal tx-log — shaped EXACTLY like a live `tx` event. Per-subscriber by
@@ -327,7 +327,7 @@
 ;; recover their OWN gap. No pod-singleton assumption.
 
 (def ^:private max-replay-txs
-  "Upper bound on how many missed txs one `subscribe-tx` replay materializes. A
+  "Upper bound on how many missed txs one `replay-tx` reply materializes. A
    reconnect gap is normally a few txs; this caps a pathological gap (a
    subscriber gone a very long time) so one replay can't build an unbounded
    event list. On overflow only the most RECENT `max-replay-txs` are replayed
@@ -727,8 +727,8 @@
 
 (defn ambient-db-name
   "The db-name string the ambient conn broadcasts under (the same value
-   `ensure-db!` passed to its `::raw-broadcast` listener). The raw tx-feed
-   subscribe ops (`seon.server.boot`) use this to route a `subscribe-tx` with
+   `ensure-db!` passed to its `::raw-broadcast` listener). The tx-feed ops
+   (`seon.server.boot`) use this to route a `replay-tx` with
    no agent-id/db-name to the ambient conn's pub events. Defaults to
    \"default\" when not yet booted (matches `ensure-db!`'s fallback)."
   []
@@ -764,7 +764,7 @@
     (reset! state {:conn conn :req-server req-server :pub-server pub-server
                    :repl-server repl-server
                    ;; same db-name ensure-db! gave the ambient ::raw-broadcast
-                   ;; listener — the raw tx-feed subscribe ops route to it.
+                   ;; listener — the tx-feed replay op routes to it.
                    :ambient-db-name (or (:name cfg) "default")})
     (println "[writer] ready. PID=" (.pid (java.lang.ProcessHandle/current)))
     (.. (Thread/currentThread) join)))
