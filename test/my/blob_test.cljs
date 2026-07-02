@@ -9,9 +9,12 @@
      3. PAGING HONESTY — text windows are 1-based with honest
         total-lines/lines-returned; an unpaged read is capped at
         default-max-lines, never the whole blob.
-     4. ERRORS ARE VALUES — a well-formed-but-absent hash and a malformed
-        hash both return error envelopes (get/text) or exists? false
-        (stat); nothing throws.
+     4. CONCAT — chunked put!s assemble into ONE canonical blob whose
+        hash equals put! of the joined string (content-addressing), with
+        honest whole-doc totals, seam-spanning pages, and idempotence.
+     5. ERRORS ARE VALUES — a well-formed-but-absent hash and a malformed
+        hash both return error envelopes (get/text/concat!, naming the
+        offending hash) or exists? false (stat); nothing throws.
 
    Hermetic: blobs go to a pid-scoped tmp dir (my.blob/!dir is re-pointed
    for the run and restored after — a shared dir would let a concurrent
@@ -197,7 +200,69 @@
       done)))
 
 ;; ---------------------------------------------------------------------------
-;; 4. Errors are values — absent + malformed hashes.
+;; 4. concat! — chunked put!s assemble into ONE canonical blob.
+;; ---------------------------------------------------------------------------
+
+(def ^:private chunk-1 "part one line 1\npart one line 2\n")
+(def ^:private chunk-2 "part two line 1\npart two line 2\n")
+(def ^:private chunk-3 "part three line 1")
+(def ^:private joined  (str chunk-1 chunk-2 chunk-3))
+
+(deftest concat-yields-the-canonical-hash-with-honest-totals
+  (async done
+    (run-test
+      (fn [conn]
+        (let [!hashes (atom [])
+              !concat (atom nil)
+              stash!  (fn [next] (fn [{h :my.blob/hash}]
+                                   (swap! !hashes conj h) (next)))]
+          (-> (blob/put! {:my.blob/content chunk-1})
+              (.then (pinned conn (stash! #(blob/put! {:my.blob/content chunk-2}))))
+              (.then (pinned conn (stash! #(blob/put! {:my.blob/content chunk-3}))))
+              (.then (pinned conn (stash! #(blob/concat! {:my.blob/hashes @!hashes}))))
+              (.then (pinned conn
+                       (fn [{:my.blob/keys [ok? hash tokens]}]
+                         (is (true? ok?) "concat! resolves ok")
+                         (reset! !concat hash)
+                         (is (not (contains? (set @!hashes) hash))
+                             "the whole is a NEW blob, not one of the chunks")
+                         (is (= joined (:my.blob/content
+                                        (blob/get {:my.blob/hash hash})))
+                             "content is the exact in-order concatenation")
+                         (is (= (tokens/estimate joined) tokens)
+                             "tokens cover the WHOLE, from the one estimator")
+                         ;; honest totals + a window spanning a chunk seam
+                         (let [t (blob/text {:my.blob/hash hash})]
+                           (is (= 5 (:my.blob/total-lines t))
+                               "total-lines spans every chunk"))
+                         (let [t (blob/text {:my.blob/hash hash
+                                             :my.blob/from-line 2
+                                             :my.blob/max-lines 2})]
+                           (is (= "part one line 2\npart two line 1"
+                                  (:my.blob/content t))
+                               "a page reads straight across the seam"))
+                         ;; content-addressing proof: put! of the joined
+                         ;; string IS the same blob — same hash, still one row
+                         (blob/put! {:my.blob/content joined}))))
+              (.then (pinned conn
+                       (fn [{h :my.blob/hash}]
+                         (is (= @!concat h)
+                             "concat! hash == put! of the joined string")
+                         ;; idempotent double-concat — same hash again
+                         (blob/concat! {:my.blob/hashes @!hashes}))))
+              (.then (pinned conn
+                       (fn [{h :my.blob/hash ok? :my.blob/ok?}]
+                         (is (true? ok?))
+                         (is (= @!concat h) "double-concat is a no-op success")
+                         (is (= 1 (count (db/query
+                                           '[:find ?e :in $ ?h
+                                             :where [?e :my.blob/hash ?h]]
+                                           h)))
+                             "identity upsert — ONE row for the whole")))))))
+      done)))
+
+;; ---------------------------------------------------------------------------
+;; 5. Errors are values — absent + malformed hashes.
 ;; ---------------------------------------------------------------------------
 
 (def ^:private absent-hash (apply str (repeat 64 "0")))
@@ -222,4 +287,24 @@
           (is (str/includes? (:my.blob/error g) "sha-256")
               "a malformed hash is refused BEFORE any path is built"))
         js/undefined)
+      done)))
+
+(deftest concat-of-a-missing-hash-names-that-hash
+  (async done
+    (run-test
+      (fn [conn]
+        (-> (blob/put! {:my.blob/content "the one real chunk"})
+            (.then (pinned conn
+                     (fn [{h :my.blob/hash}]
+                       (blob/concat! {:my.blob/hashes [h absent-hash]}))))
+            (.then (pinned conn
+                     (fn [env]
+                       (is (false? (:my.blob/ok? env)))
+                       (is (= absent-hash (:my.blob/hash env))
+                           "the envelope carries the OFFENDING hash")
+                       (is (str/includes? (:my.blob/error env) absent-hash)
+                           "the error names WHICH hash is missing")
+                       (is (= 1 (count (db/query
+                                         '[:find ?e :where [?e :my.blob/hash _]])))
+                           "nothing was written — only the seed chunk exists"))))))
       done)))

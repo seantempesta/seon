@@ -29,6 +29,7 @@ Current: `data` (aggregation), `ui` (static hiccup), `tile` (interactive
 controls wired to agent-defined handlers), `kb` (the DB-memory worked
 manual), `skills` (the skill catalog blocks), `blob` (the content-addressed
 disk tier — SHA-256-named files under `<cluster>/blobs/`, paged reads; see
-`docs/seon/architecture/observability.md`). `my.blob` is NOT yet required
-into the boot build (`client.cljs`) or `home-requires` — wire it there
-before expecting it in agent context.
+`docs/seon/architecture/observability.md`). `my.blob` IS required into the
+boot build (`client.cljs`) and aliased as `blob` in `home-requires`. A
+single eval form carries only ~2K tokens of literal content — `put!` in
+chunks, then `concat!` the hashes into ONE canonical blob.

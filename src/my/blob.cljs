@@ -18,6 +18,8 @@
      (await (my.blob/put! {:my.blob/content big-report
                            :my.blob/media   :markdown}))
      ;=> {:my.blob/ok? true :my.blob/hash \"9f86d0…\" :my.blob/tokens 812}
+     (await (my.blob/concat! {:my.blob/hashes [h1 h2 h3]}))
+     ;=> chunked put!s → ONE canonical hash with honest whole-doc totals
      (my.blob/stat {:my.blob/hash h})   ; DB projection — no disk touched
      (my.blob/text {:my.blob/hash h :my.blob/from-line 41
                     :my.blob/max-lines 40})  ; paged page, honest totals
@@ -65,6 +67,13 @@
    [::hash   ::hash]
    [::tokens {:optional true} ::tokens]
    [::error  {:optional true} ::error]])
+
+(schema/register! ::hashes [:vector {:min 1} ::hash])
+
+(schema/register! ::concat-request
+  [:map
+   [::hashes ::hashes]
+   [::media  {:optional true} ::media]])
 
 (schema/register! ::get-request
   [:map [::hash ::hash]])
@@ -182,6 +191,10 @@
    Serialize data yourself first (`pr-str` for edn); an optional
    `:my.blob/media` keyword hints what the bytes are (:markdown :edn …).
 
+   One eval form reliably carries only ~2K tokens (~100 lines) of
+   literal content — larger pastes truncate mid-form. For big content,
+   put! it in chunks, then [[concat!]] the hashes into ONE canonical blob.
+
    Resolves to `{:my.blob/ok? true :my.blob/hash h :my.blob/tokens n}` —
    store the HASH on your own entity (a ref-by-value pointer); never
    re-carry the content in datoms."
@@ -232,6 +245,24 @@
          ::tokens  (tokens/estimate content)})
       (catch :default e
         {::ok? false ::hash hash ::error (or (some-> e .-message) (str e))}))))
+
+(defn ^:async concat!
+  "Join stored blobs, in order, into ONE new canonical blob.
+
+   Takes `:my.blob/hashes` — existing put! hashes, in order — reads
+   them, and stores their concatenation as a NEW content-addressed blob,
+   so `:my.blob/tokens` and [[text]]'s `:my.blob/total-lines` are honest
+   for the WHOLE document after content had to land as [[put!]] chunks.
+   Idempotent like put!: same chunk set ⇒ same hash. A missing or
+   malformed hash returns an error value NAMING that hash; nothing is
+   written. The source chunks stay stored (append-only, no GC)."
+  {:malli/schema [:=> [:cat ::concat-request] ::put-response]}
+  [{::keys [hashes media]}]
+  (let [reads (mapv (fn [h] (get {::hash h})) hashes)]
+    (if-let [bad (first (remove ::ok? reads))]
+      (select-keys bad [::ok? ::hash ::error])
+      (await (put! (cond-> {::content (apply str (map ::content reads))}
+                     media (assoc ::media media)))))))
 
 (defn text
   "A paged line window of a blob (sync) — honest totals, never the lot.
