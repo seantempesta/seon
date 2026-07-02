@@ -9,126 +9,50 @@ tags: [vision, diffusion, agent]
 > The dream, stated plainly: **every piece of an agent's context earns its place by
 > measured lift on generation correctness.** Skills, namespace code, context
 > sections — each is A/B-tested against the diffusion model and kept, refined, or
-> cut based on whether it makes generation *more correct*. The agent reliably
-> writes correct, fully-spec'd, map-in/map-out Seon code because its context is not
-> guessed — it is **empirically optimal**.
+> cut based on whether it makes generation *more correct*. And the verified canvas makes
+> this LIVE: **the same oracle that gates context BEFORE generation steers and
+> TERMINATES it DURING** — renoising the spans it proves wrong between denoise
+> steps and stopping the moment the code is proven correct (parses + runs +
+> returns the right answer), phase by phase, not when the model feels confident.
+> The agent reliably writes correct, fully-spec'd, map-in/map-out Seon code
+> because its context is **empirically optimal** AND its generation is **held to
+> a ground-truth oracle** end to end.
 
-## ▸ OWNER HANDOFF — overnight loop (read first)
+## ▸ OWNER HANDOFF — where the loop left it (operational state lives in [[roadmap]])
 
-The autonomous loop runs the no-GPU build/research surface to the floor, then hands
-the GPU/image-deploy wins to the owner. A second no-GPU pass (this cycle) cleared the
-renoise-fence item, built the KV-cache keying half, wired the closed loop, root-caused
-find_spec, and hardened the now-load-bearing parser.
+The autonomous loop ran the no-GPU build/research surface to the floor — every
+buildable half is BUILT, offline-proven with the real bb+node oracles, and wired
+on-worker. **The single operational we-are-here is [[roadmap]] "▸ WE ARE HERE"; the
+ordered GPU session is [[owner-gpu-runbook]].** This section keeps only the proven
+headline + what superseded the older handoff inventory.
 
 **PROVEN (fingerprint-verified, committed):** context lifts generation **0→100% on
-6/6 skills** (the deep finding: context overrides confident-wrong priors); the buzzsaw
+6/6 skills** (the deep finding: context overrides confident-wrong priors); the canvas control
 primitives (clamp, infill, spec-slot, denoise_to_step, resume_renoise); the
 **short-circuit closed loop** (denoise→K → local oracle → stop, ~67% steps saved);
-the **eval gate** catches the def-vs-defn parse misses; **prefill = 62% of latency at
-9k ctx** (KV-caching is essential, exact full-prefix caching is feasible — encoder is
-causal). torchao INT8 = dead end (MoE experts skipped).
+the **full validation ladder** (T0 parse → T1 structural lint → phase grammar → T2
+eval → T3 behavioral) with **validation-as-early-stop** as the loop's termination
+criterion; **prefill = 62% of latency at 9k ctx** (KV-caching is essential, exact
+full-prefix caching is feasible — encoder is causal). torchao INT8 = dead end (MoE
+experts skipped). And the E1 kill-gate run: guided generation enforces STRUCTURE
+(parse/structural 1.0 vs naked, live-oracle-scored), but its behavioral zeros
+were **VOIDED — a proven dead-eval-bundle defect**
+([[research/e1-behavioral-zero-audit-2026-07-02]]); the harness is fixed
+(fail-loud oracle-liveness gate, sample persistence) and the ~$0.50 re-run is
+queued after exp D ([[roadmap]] P1). The lesson is the vision restated: **the
+oracle must prove its own liveness before its verdict counts.**
 
-**BUILT + deploy-ready (your move):**
-1. **Co-located oracle** — `bin/oracle-server` (bb parse, 0.05ms) + `seon.worker-eval`
-   (cljs.js eval, 2.6ms). Complete + offline-proven. Now also exposes a **no-fence
-   `parse-raw` op** (`324fe25f`) so parse `:span`s index the worker's raw `canvas_text`
-   / `offset_map` basis — the renoise-fence item is DONE, not pending.
-2. **Co-location image layer** — Dockerfile layer + spawn-wiring (`co-location-image-build`
-   doc) ready to bundle onto the worker image.
-3. **KV-cache keying half** (`14e8acb0`) — `seon.agent.ctx/block-chain-keys`: pure
-   `(blocks, agent-id) → per-block chain-hashes`, mirrors vLLM's chain-hash
-   (`kv_cache_utils.py:577-603/703-728`), constant chain-root (survives restarts),
-   per-agent salt. 3 invariant tests + full cljs suite green (803/3632). The
-   **worker-integration contract** (LRU `{chain_hash → cropped encoder cache}`, walk
-   hashes → longest prefix → `crop(L)` → prefill only `[L:]`) is written into
-   `kv-section-caching-design` §6 — a drop-in once the image is deployed.
-4. **Closed-loop renoise driver** (`44c8d635`) — wired to `parse-raw` + `canvas_text`,
-   offline-proven (the 11-char fence shift removed; renoise now targets the bad-form
-   tokens, not the fence). `verify_fresh`-gated, ready to run on GPU.
-5. **Three-arm kill-gate E1 driver** (`801211ee`) — guided-infill vs naked vs
-   naked+post-hoc-oracle, scored on faithfulness (parse-raw + structural + vacuity +
-   eval); offline-mock-proven (both verdicts fire: arm1>arm3+0.10 → EARNS, tie → KILL).
-   One-liner: `e1_kill_gate.py celsius 6`.
-6. **batched_mm compiled-path knob + probe** (`08734908`, worker_sha `c65c68e5cfae`) —
-   `experts_impl` payload knob; `batched_mm_experts_forward` (`moe.py:118-179`) never
-   calls `_can_use_grouped_mm`, so it clears find_spec AND the CUDA-graphs wall with no
-   rebuild/dep-bump. The $0 one-drive compiled-path probe — **run it FIRST** next session.
-7. **Eval tier** (`2ef4eb8c`) — the `seon.worker-eval` cljs.js self-host eval is ALIVE
-   (the earlier "dead" symptom was a STALE deployed bundle, not a source bug); fixed a
-   latent empty/garbage false-pass. 4 proofs green incl. **def-vs-defn caught** + budget
-   interrupt. Needs rebuild (`clj -M:cljs compile worker-oracle-eval`) + redeploy; then
-   flip the kill-gate's `EVAL_ENABLED` on.
-8. **Owner GPU-session runbook** (`3efa5980`) — [[owner-gpu-runbook]]: the ordered,
-   verify_fresh-gated checklist (cheapest decisive probe first). START HERE next session.
-9. **Retrieval leg — the buzzsaw's THIRD control signal** (`76544f58`) —
-   `seon.diffusion.retrieval`: detect an unresolved/hallucinated symbol in the canvas
-   (reusing the parse tier) → retrieve the real candidate (Levenshtein over `:seon.fn/sym`
-   + semantic KNN when `SEON_EMBED`) → emit the clamp injection descriptor
-   `{op,span,replacement,spec_text}` mapped to the worker contract. Offline-proven
-   (`transct!`→`seon.db/transact!`); 6/37 tests, suite 814/3708. parse+eval+retrieval
-   now ALL built Seon-side; only the worker's encoder-KV injection (W1–W3) awaits GPU.
-10. **acme diffusion-gym adoption** (`37e5ac5b`) — `bin/acme gym-diffusion <scenario>` +
-    acme-authored `.edn` scenarios, scored through the oracle with ZERO `src/seon` edits;
-    offline-proven both verdicts. (Flagged seam: eval tier is pod-decoupled → consumer
-    pod-coupled code is parse-scorable not eval-scorable — design call, task #23.)
-11. **Eval-tier `:kind` granularity** (`bb5338b2`) — undeclared-var / def-vs-defn now
-    classify `:kind compile` (was `throw`); genuine runtime throw stays `:kind throw` —
-    correctly split (rebuild + redeploy the bundle).
-12. **`:defn-with-specs` MVP scaffold** (`61b1d8c8`) — `seon.diffusion.scaffold/build-scaffold`:
-    `{fn-name,ns,intent}` → the clamp FRAME (register! request/response + defn + `:malli/schema`)
-    with `infill-spans` (spec slots, arglist, body) + `clamp-spans` (fixed structure) that
-    tile `[0,len)` exactly. Spec slots infill FIRST so the contract is fixed before the body.
-13. **BPE token-boundary alignment — MEASURED** (`2e1982db`) — a CPU tokenizer ($0, no model)
-    found 4 straddled scaffold boundaries (the `]]` closers merge to one token); fixed with a
-    newline nudge → all 11 scaffold + retrieval spans now land on token edges. The span-based
-    control primitives SURVIVE real BPE tokenization. (GPU note: P0 canvas-length probe still
-    confirms the frame fits one canvas.)
-14. **Generative/property tests at the boundaries** (`7db4fb5f`) — 9 props (100 cases each)
-    over `block-chain-keys` (prefix-share/salt invariants), retrieval (no false-positive,
-    near-miss retrieved, in-bounds injection), and the `parse-forms` strip-fences arm.
-15. **Unified mid-denoise oracle** (`75668147`) — `seon.diffusion.oracle/refine`: ONE call
-    `{canvas-text,offset-map}` → `{clamps, renoise-spans, injections}` partitioning the canvas
-    (parse=good/broken spans, retrieve=hallucinations, eval folds bad verdicts to renoise unless
-    an injection supersedes). `bin/oracle-server op:"refine"` covers the parse tier in one bb
-    call; injections need the pod graph, eval needs the node bundle. THE buzzsaw orchestrator
-    — the worker calls it once per checkpoint K.
-16. **End-to-end control LOOP** (`2bcf42b4`) — `seon.diffusion.loop`: `checkpoint-policy`
-    (CONVERGED / GIVE-UP[budget+no-progress] / CONTINUE) + the `dry-run` loop +
-    `apply-control-set` mock worker. Offline-proven: convergence (renoise 1→0→0, inj 1→1→0),
-    clean-canvas detection, and guaranteed TERMINATION on an unfixable canvas. Caught + fixed a
-    real retrieval bug (`canvas-aliases` JS-`===` keyword mismatch dropped every `:as` alias).
-    Suite 837/3836. The orchestration is built; only the span→text fn differs on GPU.
-17. **Worker-side python — KV reuse + injection-apply BUILT** (docs `b8f1cad0`/`fd20a750`;
-    worker gitignored, sha→`63c09beb`). KV reuse: LRU `{chain-hash→cropped cache}` + longest-prefix
-    walk + crop + **suffix-forward** (corrected the §6 contract: feed `full_ids[:,L:]`, not the
-    full prompt) — 13 pure units. Injection-apply: span→replacement clamp + W1/W2/W3 KV-extend
-    (W2 re-prefill = safe Phase-1 default) — 13 pure units. Both source-grounded to transformers
-    `cache_utils`/`generation_diffusion_gemma`, py_compile-clean, compose with each other.
-
-**AWAITS OWNER ACTION (the remaining big wins):**
-- **Deploy the co-location image** → unlocks the KV-cache 62% win + the per-step renoise/inject
-  loop. The keying (`14e8acb0`) AND the worker reuse+inject python (`b8f1cad0`/`fd20a750`) are
-  now BUILT — deploy is what lets the worker hold a `Cache` across the checkpoint (it can't ride
-  the JSON payload). THE highest-value next step; runbook steps 2-3 carry the live commands.
-- **Compiled path (~1000 tok/s)** → the redeploy plan changed. The torch-2.10 +
-  transformers-5.12 bump is **NO-GO** (`957f0a7b`): the `grouped_mm→batched_mm` decode
-  auto-switch (`_optimize_model_for_decode`, already in 5.11.0, not a 5.12 feature)
-  never fires for DiffusionGemma's override-generate, so the bump only trades find_spec
-  for the standing CUDA-graphs wall. **The cheap lever the find_spec dig missed:** force
-  `experts_implementation="batched_mm"` on the EXISTING 5.11.0/torch-2.9 worker
-  (`gpu_worker.py:55-62`) — `batched_mm` never calls `_can_use_grouped_mm` (clears
-  find_spec, no torch bump) and is CUDA-graph-clean per the HF compat table (clears the
-  `reduce-overhead` wall, no transformers bump). One-line, no image rebuild. **Being
-  built as a payload knob** so the owner can A/B grouped vs batched on the live EP. The
-  one GPU-only unknown: does CUDA-graph `batched_mm` net-beat eager `grouped_mm` (or OOM)
-  on the whole-canvas forward (S = canvas_length × top_k) — a $0-rebuild single-drive
-  probe. If batched_mm doesn't win, KV-cache reuse stays the only A100 lever.
-- **Live-measure on first GPU run:** residual-#3 (piecewise `canvas_text` vs joint parse
-  fidelity — `▁`/space artifacts) is a characterization item, not a wiring bug.
-
-**Deploy note:** `flash undeploy --all` OSErrors here — use `flash undeploy <name>
---force` + `flash deploy`; always `python3 verify_fresh.py` → `FRESH ✓` before measuring.
-The A100 endpoint was UNDEPLOYED at wind-down ($0); redeploy when you pick this up.
+**Superseded from earlier handoffs (so this file stops contradicting itself):**
+the "run the batched_mm probe FIRST" advice — it RAN (clears find_spec, then a
+CUDA device-side assert; the assert is now root-cause-hypothesized as
+static-cache under-sizing with a $0 payload probe, and the compiled path itself
+was never actually measured — [[research/compile-control-ceiling-2026-07-02]];
+exp D is first); the
+"eval tier needs rebuild/redeploy" gap — the tier was revived and is proven as the
+ladder's T2; the "pivot the sweep to eval-tier next" queue item — done and
+exceeded: the whole ladder is built, T3 behavioral included. The 17-item
+built-inventory this section used to carry is landed history — the durable record
+is the commits + [[roadmap]] "PROVEN".
 
 ## Why this is now possible (the unlock)
 
@@ -185,12 +109,14 @@ correctness metric.
 **▸ SWEEP COMPLETE — 6/6 skills, ALL ~0→100% structural.** The north-star's
 structural thesis is proven: context takes this model from ~0% correct (confidently
 hallucinating) to ~100% structural correctness, in every domain (schema, queries,
-async, parser-explanation, data-mindset, UI). **Next: the structural ceiling is hit —
-pivot to (1) the EVAL-TIER oracle (does the generated code RUN / give the right
-answer?), (2) closing the eval-renoise buzzsaw loop, (3) measuring the required-API
-feature's lift to justify its 2.9k tok.**
+async, parser-explanation, data-mindset, UI). The pivot this called for HAPPENED:
+the eval tier and the full ladder above it (T3 behavioral — does it give the RIGHT
+answer?) are built and are the `refine_loop` gate; the eval-renoise loop is closed
+on-worker. Still open in the ledger: the required-API render's lift (must justify
+its ~2.9k tok or trim the cap) and the ladder's own measured lift on GPU
+([[roadmap]] "The GPU-measurement path").
 
-### Capability — the buzzsaw eval-renoise loop (PRIMITIVES PROVEN, GPU-verified)
+### Capability — the verified-canvas eval-renoise loop (PRIMITIVES PROVEN, GPU-verified)
 
 Round-trip test on the live worker (`33d2`, fingerprint-verified):
 - **`denoise_to_step` fires PRECISELY at K** (`denoise_steps_fired: 24`). The
@@ -216,19 +142,21 @@ Round-trip test on the live worker (`33d2`, fingerprint-verified):
   persistent server is 0.05ms — the demo spawned fresh each call.) Renoise path not yet exercised
   (all partials parsed clean — needs a delimiter-error case).
 
-**MEASURED SPEED REALITY (falsified an estimate — record it):** a custom-stopping
-short-circuit is NOT faster — it's ~4× SLOWER. `mean` fn: full 48-step COMPILED path
-`gen_s 0.57s`; `denoise_to_step` K=24 (custom Python `StepCountStopping`) `gen_s 2.32s`.
-**The custom stopping criterion forfeits `torch.compile`** (critique F1, now measured) →
-eager fallback → eager-at-24 ≫ compiled-at-48. So: **`denoise_to_step`/`resume_renoise`
-are for CORRECTNESS (the buzzsaw fixes errors), NOT speed.** For SPEED, the control must
-be compile-COMPATIBLE: the model's BUILT-IN early-stop (`stability_threshold` +
-`confidence_threshold` in the sampler config) stops near the converged step WITHOUT
-forfeiting compile — that is the real dynamic-step speed lever, untested. Validation
-itself is cheap (parse-forms = **366 µs**, ~30× faster than a ~12ms step) — the cost is
-the internet hop (~100ms), which CO-LOCATION (the `:worker-validator` CLJS target, in
-build) removes. Architecture split: **compiled built-in early-stop for speed +
-co-located validator for correctness (sparse renoise on oracle-flagged spans only).**
+**MEASURED SPEED REALITY — since RE-ATTRIBUTED
+([[research/compile-control-ceiling-2026-07-02]]):** the `mean`-fn delta (full
+48-step run `gen_s 0.57s` vs `denoise_to_step` K=24 `gen_s 2.32s`) was originally
+recorded as "custom stopping forfeits `torch.compile` → ~4× compile tax". That
+attribution is WRONG: `is_compiling` gates purely on a static cache, which wasn't
+working then — BOTH runs were eager, and the delta is FORWARD-COUNT (the built-in
+early-stop converged in ~4 forwards ≈ 0.57s at ~140 ms/forward; forcing K=24 paid
+24). The compiled path was never actually measured. What stands: fewer forwards
+IS the speed lever (early-stop / over-commit), `denoise_to_step`/`resume_renoise`
+are for CORRECTNESS, and only a custom Python StoppingCriteria conflicts with
+compile — the per-step clamp is compile-COMPATIBLE. Validation itself is cheap
+(parse-forms = **366 µs** vs a ~140 ms forward) — the cost was the internet hop
+(~100 ms), which co-location removes. Architecture split unchanged: **built-in
+early-stop / oracle-proof termination for speed + co-located validator for
+correctness (sparse renoise on oracle-flagged spans only).**
 
 **CO-LOCATION VALIDATOR BUILT + measured (`18c600f5`):** a 50KB standalone CLJS bundle
 (`:worker-validator` shadow target, `src/seon/worker_validator.cljs`) runs `parse-forms`
@@ -251,7 +179,7 @@ plausible-but-wrong answer the model already "knows" — JSON/XML for "parser," 
 model's strong wrong priors** and redirecting them to Seon's actual reality. This is
 *why* dynamic context is load-bearing for THIS model: a small, capable model has
 confident defaults, and the right context is what reroutes them. (Implication for
-the buzzsaw: the per-step parse/eval/renoise control signal is doing the same job
+the verified canvas: the per-step parse/eval/renoise control signal is doing the same job
 *during* generation that the skill does *before* it — overriding a wrong commit.)
 
 **Read of the data so far (3/3 skills, all ~0→100%):** without context the model knows
@@ -285,7 +213,7 @@ surprising metric against the raw sample before recording it — falsify, don't 
   CI-style, a change that drops generation quality fails the gate.
 - **Self-justifying context**: nothing renders into an agent's prompt that hasn't earned
   it on the measured-lift ledger (this is the reactive-context principle made empirical).
-- **Reliable capabilities**: the buzzsaw loop (denoise → parse/eval → renoise) and the
+- **Reliable capabilities**: the verified-canvas loop (denoise → parse/eval → renoise) and the
   modes are gated on passing their kill-experiments, not on hope.
 - The agent **builds software in convergent, quality-gated passes** ([[architecture]],
   [[roadmap]]) — and we trust it because each rung is measured.
@@ -336,7 +264,7 @@ When iterating autonomously (e.g. overnight), each cycle:
 
 - **Engine: stay on raw transformers INDEFINITELY as the control backend** (`pytorch-vs-vllm-roadmap`).
   vLLM's diffusion sampler is sealed, AND its custom-logits-processor API has the WRONG SHAPE —
-  `apply(logits: (num_requests, vocab_size))`, **no canvas/position axis**; the buzzsaw needs
+  `apply(logits: (num_requests, vocab_size))`, **no canvas/position axis**; the verified canvas needs
   `(req, canvas_len, vocab)`. vLLM physically can't address canvas positions. And on A100 **BF16**
   vLLM = **375 tok/s** vs our compiled **~450** — vLLM's win is **FP8+Hopper, not the engine**.
   vLLM = a SERVING-only second endpoint, gated on 3 triggers (thesis-cleared + serving-scale-bound +
@@ -347,7 +275,7 @@ When iterating autonomously (e.g. overnight), each cycle:
   DiffusionGemma (`diffusion_gemma.py` causal encoder writes KV; APC on) → it gives the shared-skill
   prefix-cache win FOR FREE, but **serving-only (no control)**. So: **serving-without-control → vLLM APC**
   (likely nets ahead on our repeated-context workload despite 375<450 raw BF16); **control+caching (the
-  buzzsaw path) → CUSTOM KV caching on transformers** (the `kv-section-caching-design` work) — the only
+  verified-canvas path) → CUSTOM KV caching on transformers** (the `kv-section-caching-design` work) — the only
   way to get both the caching win AND per-step control. **GREEN LIGHT (source-proven):** the prompt
   encoder is CAUSAL (incremental KV append, `modeling_diffusion_gemma.py:281`), so **exact full-prefix
   caching is feasible with ZERO accuracy loss** — the position-dependence worry doesn't apply to the
@@ -386,7 +314,11 @@ When iterating autonomously (e.g. overnight), each cycle:
   <frozen importlib.util>` under `fullgraph=True` (a lazy importlib lookup in the compiled region
   torch.compile won't trace). So the ~1000 tok/s compiled path has TWO blockers (args [fixed] + the
   find_spec graph-break [deep, uncertain]) → **NOT a quick win → owner/upstream torch.compile-compat
-  territory.** KV-cache (62%) is the primary remaining A100 speed lever. (3) **`past_key_values` / `QuantizedCache` reuse** (transformers-native
+  territory.** KV-cache (62%) is the primary remaining A100 speed lever. *(Since ROOT-CAUSED —
+  the find_spec break is a 2-line worker-side monkeypatch, the shipped `assume_constant_result`
+  patch being inert under Dynamo's lru_cache unwrap; the device-assert has a $0
+  static-cache-sizing probe; the compiled path was never actually measured.
+  [[research/compile-control-ceiling-2026-07-02]].)* (3) **`past_key_values` / `QuantizedCache` reuse** (transformers-native
   prefix/skill KV reuse, composes with the per-block `kv-section-caching` design); (4) **Fast-dLLM
   DualCache** (NVIDIA, training-free in-loop suffix-KV, control-compatible) for extra headroom. The control
   worker's speed comes from COMPOSING these, not a custom engine. (`pytorch-vs-vllm-roadmap` §5b.)
@@ -414,7 +346,7 @@ When iterating autonomously (e.g. overnight), each cycle:
 
 ## Pointers
 
-- [[architecture]] — the buzzsaw system + the modes this serves.
+- [[architecture]] — the verified-canvas system + the modes this serves.
 - [[roadmap]] — the kill-gate-first build path (this loop executes its NEXT items).
 - [[grounding]] — every mechanism cited to `reference-code/`.
 - The proven A/B: the `data-modeling` skill, 0→100% (the loop's existence proof).

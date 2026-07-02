@@ -4,19 +4,22 @@ status: active
 tags: [architecture, agent, schema, flow]
 ---
 
-# The buzzsaw — diffusion dynamic-context architecture
+# The verified canvas — diffusion dynamic-context architecture
 
-> **The map** (present tense — the system as it is). The **Seon-side buzzsaw is
-> BUILT + offline-proven** in `src/seon/diffusion/*` + `seon.worker-eval` + the
-> parse-span change (no GPU, no embeddings; full cljs suite green) — the three
-> control legs, the unified `refine` dispatcher, and the `:defn-with-specs`
-> scaffold are real code, source-cited in [[grounding]] and detailed in
-> [[research/unified-control-oracle-2026-06-29]]. What still **AWAITS GPU** (the
-> worker's mid-denoise encoder-KV injection W1–W3 + the end-to-end loop) is marked
-> inline. What is PROVEN on the live A100 vs. ON TRIAL, and the gated path between,
-> live in [[roadmap]]. The **mode engine, op-axis, and multi-pass convergence are
-> designed, not built** — CUT from the MVP until one forced infill beats arm 3
-> ([[roadmap]] "CUT from the MVP"); their sections below are marked not-yet-built.
+> **The map** (present tense — the system as it is). The **verified canvas is
+> BUILT on both sides**: the Seon control surface (`src/seon/diffusion/*` +
+> `seon.worker-eval` + the shared `seon.diffusion.grammar.cljc`) and the worker
+> (`gpu_worker.py` `refine_loop` over co-located persistent bb+node oracles) —
+> the validation ladder, the unified `refine` dispatcher, validation-as-early-stop,
+> and the phased grammar gate are real, proven code, source-cited in [[grounding]].
+> What **AWAITS GPU is MEASUREMENT** (the ladder's lift, the over-commit×renoise
+> curve, KV bit-exactness, the E1 re-run), not wiring. The kill-gate status + the
+> measurement path live in [[roadmap]]. The **mode engine, op-axis, and
+> multi-pass convergence stay CUT** — E1's whole-scaffold behavioral measurement
+> was VOIDED by a proven harness defect (a dead eval bundle;
+> [[research/e1-behavioral-zero-audit-2026-07-02]]), so no valid behavioral
+> number exists yet; their sections below are the shape steering WOULD take if
+> the E1 re-run or the phased-constraint experiment earns it.
 
 This is the map. The thesis, the one vocabulary, the worker, the unified `refine`
 oracle, the scaffold, the mode abstraction, and the staged convergent build — one
@@ -25,21 +28,38 @@ orienting pass per piece, each with a pointer to its depth.
 ## Thesis
 
 A strong **autoregressive** model (Opus) sets DIRECTION; a **diffusion** model
-(DiffusionGemma) is the **buzzsaw** that refines whole blocks of Clojure *fast*,
-taking feedback **between denoise steps**. The control signal is Seon itself —
+(DiffusionGemma) drives **the verified canvas** — guided, verified generation
+that refines whole blocks of Clojure *fast*, taking feedback **between denoise
+steps**. The control signal is Seon itself —
 its **parser**, its **eval cage**, and its **program-graph retrieval** — fed back
 into the generation loop, not waited on after it. AR completion is left-to-right
 and blind to what comes after the cursor; a diffusion canvas is **bidirectional
 and revisable in place**, so Seon can pin the good spans, re-noise the bad ones,
-and inject the right fn-spec mid-generation. The unit the buzzsaw works on is a
+and inject the right fn-spec mid-generation. The unit the loop works on is a
 **block/form** — a Seon context block becomes the encoder prompt, the 256-token
 canvas becomes the form being shaped.
 
 The bet is narrow and explicit: this apparatus earns its keep on **NOISY**
 generation (a diffusion model's per-step commits, a weak model), NOT on a capable
 AR model that already writes clean Clojure — both strong-model A/Bs were null
-(see [[grounding]] "oracle"). The diffusion arm is the part on trial; the path
-that tests it is [[roadmap]].
+(see [[grounding]] "oracle").
+
+**The division of labor (E1 + the free-gen capstone):** clamping demonstrably
+enforces STRUCTURE (parse 1.0 / structural 1.0 vs naked, live-oracle-scored),
+and free generation produces the correct MATH with hygiene-only errors
+(def-vs-defn — structurally caught by T1). Structure vs behavioral correctness
+is still an OPEN measurement: E1's behavioral zeros were voided by a proven
+harness defect — a dead eval bundle that would have zeroed a known-correct
+submission too ([[research/e1-behavioral-zero-audit-2026-07-02]]) — and that
+failure itself argues the design: **the oracle must be held to the same
+fail-loud standard as the code it judges** (the liveness gate now enforces
+this). The oracle's role is the thesis: it gates context before generation (the
+measured-lift ledger, [[north-star]]), it steers generation mid-denoise
+(renoise the flagged spans), and it TERMINATES generation
+(validation-as-early-stop — stop when the code is proven to parse, run, and
+return the right answer, not when the model feels confident). Whole-scaffold
+clamping is SHELVED pending the E1 re-run on the fixed harness; the live
+steering direction is the **phased-constraint gate** below. ([[roadmap]] P1.)
 
 ## Glossary
 
@@ -66,7 +86,7 @@ One vocabulary, each name grounded in an artifact.
 - **span-renoise** — on a failed gate, map a parser/eval `:span` `[start end]` to
   canvas positions (`span_to_positions`/`build_offset_map`,
   `diffgemma_common.py:184-222`) and DROP those from the clamp set so the entropy
-  bound re-decides only them. The buzzsaw's revise-in-place dial. BUILT Seon-side:
+  bound re-decides only them. The loop's revise-in-place dial. BUILT Seon-side:
   `parse-forms` now emits `:span` on every `:form` (not just `:read`) so good and
   broken spans share one basis (`seon.repl.internal`).
 - **refine (the unified oracle call)** — `seon.diffusion.oracle/refine`
@@ -82,9 +102,28 @@ One vocabulary, each name grounded in an artifact.
   (`seon.diffusion.retrieval`, hallucinated-symbol → real-API injection), **eval**
   (`seon.worker-eval`, a separate node self-host bundle whose verdicts arrive as
   span-keyed data). BUILT.
-- **the gate (quality ladder)** — the four-rung oracle a generation must clear:
-  **parse → eval → instrument → generative-test**. A mode names the prefix it
-  must clear; a stage cannot complete until its gate passes. [[grounding]] "oracle".
+- **the validation ladder** — the tiered oracle a generation climbs, cheapest
+  decisive tier first: **T0 parse** (bb, ~0.05 ms — well-formed?) → **T1
+  structural lint** (~free — AST shape: `malformed-def?` def-vs-defn) → **the
+  phased grammar gate** (per-phase allowed heads) → **T2 eval** (node cljs.js,
+  ~2.6 ms — does it RUN? the only tier that resolves symbols) → **T3 behavioral**
+  (`[{call,expect}]` — does it return the RIGHT answer?). Each tier's failures
+  become renoise spans; passing every applicable tier is PROOF. The
+  persistence-side rungs (**instrument → generative-test**) are the same ladder
+  continued at the DB boundary when code lands as `:seon.fn` entities. [[grounding]].
+- **validation-as-early-stop** — the loop's termination criterion: STOP when the
+  canvas is oracle-proven (parse-clean AND eval-clean AND behavioral-clean), not
+  when entropy/step-count says the model is confident. The model's probability is
+  irrelevant once the code is proven to run. `refine_loop`'s gate, `gpu_worker.py`.
+- **the phased grammar gate** — per-phase grammar enforcement as a renoise
+  source: `::phase :schemas` allows `ns`+`register!` (rejects `def`/`defn`);
+  `::phase :functions` allows `ns`+`defn` (rejects `register!`/bare `def`).
+  `phase-grammars`/`phase-violation?` in the shared grammar ns. The live
+  steering direction while whole-scaffold clamping awaits its E1 re-run.
+- **`seon.diffusion.grammar.cljc`** — the ONE dependency-free definition of the
+  T1/phase predicates, loaded by BOTH the pod oracle and babashka; bb
+  `op:"refine"` folds structural + phase renoise natively, so the worker reaches
+  the cheap tiers mid-denoise with no pod round-trip and no drift.
 - **mode** — a `:seon.dg.mode` entity: a clamped-scaffold template + named infill
   slots + dynamic-context section-fns + a gate-rung prefix + a re-noise policy +
   an allowed-vocab set + an op (`:create`/`:upsert`/`:retract`). Data, not code —
@@ -106,8 +145,8 @@ One vocabulary, each name grounded in an artifact.
 - **the control worker** — the RunPod transformers `@Endpoint` (`gpu_worker.py` +
   `diffgemma_common.py`) that keeps the per-step `LogitsProcessor`/sampler seam.
   Modes: `probe`, `introspect`, `generate`, `clamp_smoke`, `infill`,
-  `denoise_to_step`, `resume_renoise`. Every response carries a `worker_sha`
-  source fingerprint.
+  `denoise_to_step`, `resume_renoise`, `inject`, `refine_loop` (+ the `kv_reuse`
+  payload path). Every response carries a `worker_sha` source fingerprint.
 - **the vLLM endpoint** — the fast serving backend that genuinely runs the
   block-diffusion decode but seals the sampler shut (no per-step hook): SPEED, no
   CONTROL. The two ride behind one Seon provider.
@@ -127,7 +166,7 @@ The whole thesis rests on one fact, source-verified against transformers v5.11.0
 step**, at `generation_diffusion_gemma.py:1034`, BEFORE the built-in temperature
 schedule. A custom `LogitsProcessor` (our `ClampLogitsProcessor`) therefore gets a
 per-step vote on every position, every step. That is the between-step control
-surface the buzzsaw needs, and it is a **supported public seam**, no fork of
+surface the verified canvas needs, and it is a **supported public seam**, no fork of
 `generate()`.
 
 Two corollaries that are easy to get wrong (both grounded, [[grounding]]):
@@ -159,15 +198,24 @@ the wire. Its modes lower the architecture onto the proven primitives:
   real N-step schedule at step K via an external `StepCountStopping`, hand the
   partial canvas to Seon to parse/eval, clamp the GOOD spans + free the BAD span,
   resume. Built, not yet GPU-tested. See [[grounding]], `eval-renoise-worker-build`.
-- `refine` (the unified op, **AWAITS GPU**) — at each checkpoint K the worker calls
-  Seon's `seon.diffusion.oracle/refine` ONCE with the current `canvas_text` (+ its
-  `offset_map`) and applies the ONE combined control set in a single pass: **clamp**
-  the good-form spans, **steer** each retrieval injection (force its span toward
-  `replacement`, append `spec_text` to the encoder KV), **re-noise** the broken /
-  eval-bad spans, then resume at K+1. The Seon side is built + offline-proven; the
-  worker's encoder-KV injection seam (W1–W3) + the end-to-end loop are the remaining
-  GPU step ([[research/unified-control-oracle-2026-06-29]],
+- `refine` (the unified op) — at each checkpoint K the worker calls the oracle
+  ONCE with the current `canvas_text` (+ its `offset_map`) and applies the ONE
+  combined control set in a single pass: **clamp** the good-form spans, **steer**
+  each retrieval injection (force its span toward `replacement`, append
+  `spec_text` to the encoder KV via W1/W2/W3), **re-noise** the broken /
+  lint-flagged / phase-violating / eval-bad spans, then resume at K+1. The cheap
+  tiers (parse + structural + phase) answer from the CO-LOCATED persistent bb
+  server's `op:"refine"` (~0.05 ms, no pod round-trip); injections need the pod
+  graph, eval the node bundle ([[research/unified-control-oracle-2026-06-29]],
   [[research/retrieval-denoising-experiment-plan-2026-06-28]]).
+- `refine_loop` (the in-worker closed loop) — the whole
+  denoise-to-K → oracle → renoise → resume loop runs SERVER-SIDE over the
+  persistent oracle pipe (0.05 ms warm vs ~21 ms spawn — the round-trip was the
+  bottleneck, [[colocation-performance-plan]]), with
+  **validation-as-early-stop as its gate**: parse → eval → behavioral
+  (`eval_gate` default on; `behavioral` = `[{call,expect}]`), stopping at the
+  cheapest tier that proves the canvas correct. Wired + proven with the real
+  bb+node oracles; what awaits the A100 is the MEASUREMENT of its lift.
 
 **Deployment discipline (load-bearing):** a warm worker keeps serving OLD code
 after a plain `flash deploy` until it scales to zero — so every response carries a
@@ -198,7 +246,14 @@ control set out:
   `parse-raw` path, `{:strip-fences? false}`). It now emits a `:span [start end]` on
   every `:kind :form` entry, not just `:read` entries — the load-bearing change that
   lets GOOD-form spans (clamp candidates) and BROKEN-syntax spans (renoise) share
-  one authoritative basis (the loop's `offset` + the token `:end`).
+  one authoritative basis (the loop's `offset` + the token `:end`). Over the good
+  forms, the parse leg then runs the CHEAP ladder tiers from the shared
+  `seon.diffusion.grammar.cljc`: **T1 structural lint** (`malformed-def?` — a
+  `(def name [args] body)` is unambiguously a defn typo → renoise its span) and,
+  when `::phase` is supplied, **the phased grammar gate** (`phase-violation?` —
+  a `defn` in the `:schemas` phase, a `register!` in the `:functions` phase →
+  renoise). Because the predicates are the SAME ns bb loads, bb `op:"refine"`
+  answers all of parse+structural+phase in one ~0.05 ms call.
 - **RETRIEVE** — `seon.diffusion.retrieval/retrieve-for-canvas` reads
   `:seon.fn/sym` from the program graph and yields the hallucinated-symbol
   injections (`{::span ::replacement ::spec-text}`) — a confidently-wrong name
@@ -228,9 +283,11 @@ parse call + the node eval call + a pod retrieve call).
 **Offline-proven, no GPU.** `test/seon/diffusion/oracle_test.cljs` feeds one canvas
 carrying BOTH a syntax error AND a `db/transct!` hallucination and asserts the
 combined set: the eof renoise span, the `db/transct! → db/transact!` injection, and
-clamp spans for the clean forms ONLY — plus disjointness and the wire object. Full
-suite green. The remaining end-to-end step is the worker calling `refine`
-mid-denoise on the live A100 (see "The worker", AWAITS GPU above).
+clamp spans for the clean forms ONLY — plus disjointness and the wire object; the
+`structural-def-vs-defn` and `phase-grammar-gate` regressions pin the cheap tiers.
+Full suite green. The worker side is WIRED (`refine_loop` over the persistent bb
+`op:"refine"`); the remaining step is MEASURING its lift on the live A100
+([[roadmap]] "The GPU-measurement path").
 
 **Char-span → token-position is the worker's job, via `offset_map`.** Every span
 Seon emits — clamp, renoise, injection, scaffold infill — is absolute CHAR offsets
@@ -276,9 +333,12 @@ arm 3 are the remaining steps ([[roadmap]] P2).
 
 > The `:seon.dg.mode` row, the `run-mode!` engine, the op-axis, and the
 > `mode/enter` sentinel are the GENERALIZATION layer above the built scaffold +
-> `refine` oracle. They are CUT from the MVP until one forced-spec infill beats arm
-> 3 ([[roadmap]] "CUT from the MVP"). This section is the target shape, not current
-> code; the built realization of `:defn-with-specs` is the scaffold above.
+> `refine` oracle. E1's whole-scaffold behavioral measurement was voided (dead
+> eval bundle, [[roadmap]] P1) — no valid lift number exists yet — so they STAY
+> CUT; this section is the shape steering would take if the E1 re-run or the
+> phased-constraint experiment earns it. The built realization of
+> `:defn-with-specs` is the scaffold above — a tested primitive, not a build
+> target.
 
 A **mode is data** — a `:seon.dg.mode` row carrying six things: a clamped
 **scaffold** template, named **slots**, a list of **context-fn** symbols, a
@@ -356,7 +416,7 @@ run-mode!(mode, op, target):                                 ; ENGINE: not yet b
   scaffold = build-scaffold(fn-name, ns, intent)             ; BUILT — frame_text + clamp/infill spans
   ctx      = render(mode.context-fns, db, mode-state)        ; §reactive, re-queried
   for attempt in 0 .. mode.renoise.max-retries:
-    for K in checkpoints:                                    ; AWAITS GPU — worker drives the denoise
+    for K in checkpoints:                                    ; the built refine_loop drives this
       canvas   = control-worker.denoise_to_step(prompt=ctx, clamp=scaffold, K)
       ctrl     = refine({canvas_text canvas, offset_map})    ; BUILT — one call, the three legs fold
       control-worker.apply(ctrl)                             ; clamp / steer injections / renoise spans
@@ -368,45 +428,91 @@ run-mode!(mode, op, target):                                 ; ENGINE: not yet b
 
 The SAFE parser classes (`:eof`/`:unmatched-delimiter`, the bulk of corruptions)
 are repaired in place by `seon.repair` with NO model round-trip; only the FLAG
-classes and eval-tier failures actually re-noise. The clamp/scaffold half is the
-part on trial — the gate that decides whether it beats plain `prompt + the same
-post-hoc oracle loop` is [[roadmap]]'s front kill-gate.
+classes and eval-tier failures actually re-noise. The kill-gate on the
+clamp/scaffold half RAN but its behavioral result was voided ([[roadmap]] P1) —
+this lowering is retained as the shape the E1 re-run or phased-constraint
+steering would generalize into, nothing more.
 
-## The oracle loop — quality by construction (and its honest limit)
+## The validation ladder — one oracle, mid-denoise control AND persistence gate
 
-The gate is the four-rung ladder, each rung a real Seon mechanism with MEASURED
-economics (full table + method in [[grounding]] "oracle",
-[[research/parser-as-generation-oracle-2026-06-28]]):
+The ladder is ONE tiered oracle, climbed cheapest-decisive-tier-first. Its lower
+tiers run MID-DENOISE (each failure is a renoise span; passing every applicable
+tier TERMINATES the loop); its upper rungs run at the PERSISTENCE boundary when
+code lands in the DB. Same ladder, two duty stations:
 
-| Rung | Check | Measured |
-|---|---|---|
-| **parse** | `parse-forms` → no `:read` entries (the `refine` PARSE leg) | 92.7% of corruptions detected, no model call |
-| **eval** | does the form RUN? — `{:ok true}` (the `refine` EVAL leg) | 62.5% caught reference-free / 91.5% with a comparator |
-| **instrument** | `:malli/schema` registers + a probe call doesn't throw | always-on Malli in/out/arity |
-| **generative-test** | `deftest` passes on N `mg/sample` inputs | property-level |
+| Tier | Check | Cost / measured | Runs |
+|---|---|---|---|
+| **T0 parse** | well-formed? `parse-forms` → no `:read` entries | ~0.05 ms (bb, co-located); 92.7% of corruptions detected | every checkpoint |
+| **T1 structural lint** | AST shape: `malformed-def?` (def-vs-defn) | ~free, same bb call | every checkpoint |
+| **phase grammar** | allowed heads for the current `::phase` (`phase-violation?`) | ~free, same bb call | every checkpoint (when phased) |
+| **T2 eval** | does it RUN? `{:ok true}` — the only tier that resolves symbols | ~2.6 ms (node cljs.js); 62.5% free / 91.5% w/ comparator | at the gate, `eval_gate` on |
+| **T3 behavioral** | does it return the RIGHT answer? `[{call,expect}]` | low-ms; the ground-truth proof | at the gate, when tests supplied |
+| **instrument** | `:malli/schema` registers + always-on Malli in/out/arity | persistence-side | when code lands as `:seon.fn` |
+| **generative-test** | `deftest` passes on N `mg/sample` inputs | persistence-side | the publish gate |
 
-The first two rungs are now the BUILT `refine` legs. Parse is `parse-forms` (the
-measured 92.7%). The eval rung's CO-LOCATED realization is `seon.worker-eval`
-(cljs.js self-host, NOT the pod's SCI `seon.eval` — the worker emits
-`^:async`/interop CLJS that SCI mis-evaluates), returning
-`{ok? error{kind:compile|throw|interrupt}}`; the measured numbers above are the
-pod-SCI oracle's, the co-located bundle answers the same "does it RUN?" question on
-the worker image. The factual/retrieval residual (the AUROC-0.471 wrong-name class)
-is the `refine` RETRIEVE leg's job.
+Each tier catches what the tier below structurally cannot: T1 catches def-vs-defn
+WITHOUT paying for eval (it's AST-catchable — eval is the wrong motivator for it);
+T2 catches undeclared vars no AST can resolve; T3 catches the off-by-one body that
+runs fine (the live-pod lesson: `instrumentable ≠ correct` — a semantically wrong
+transducer body defined AND instrumented cleanly). And the ladder polices ITSELF:
+a dead tier must fail loud, never silently zero (the voided-E1 lesson — the
+`assert_oracle_live` golden-sample gate). **Termination is
+validation-as-early-stop:** the `refine_loop` gate is parse → eval → behavioral,
+and the loop stops the moment the canvas is PROVEN — proven by
+`eval_gate_earlystop_proof.py` with the real bb+node oracles (won't stop on
+parses-but-fails-eval, won't stop on runs-but-wrong, stops at iter 0 on correct).
 
-Parse+eval together catch 93.5% of meaning-altering corruptions; the residual is
-dead-data mutation + wrong-name, the retrieval tier's job. A stage cannot advance
-until its gate is green, and the artifact sits in the DB as proof (a `:seon.fn/spec`
-set, a passing `:seon.deftest`), live-provable by query.
+The co-located realization: T0/T1/phase answer from the persistent bb server
+(`op:"refine"`, the shared `grammar.cljc` predicates); T2 is `seon.worker-eval`
+(cljs.js self-host, NOT SCI — the worker emits `^:async`/interop CLJS that SCI
+mis-evaluates), returning `{ok? error{kind:compile|throw|interrupt}}`. The
+factual/retrieval residual (the AUROC-0.471 wrong-name class) is the `refine`
+RETRIEVE leg's job. A persisted artifact sits in the DB as proof (a
+`:seon.fn/spec` set, a passing `:seon.deftest`), live-provable by query. Full
+economics: [[grounding]] "oracle", [[research/parser-as-generation-oracle-2026-06-28]].
 
-**The honest limit (load-bearing for the roadmap).** The 93.5% number measured
-DETECTING corruptions of known-good code; it does NOT certify that a from-scratch
-generated spec is a faithful contract. Clamping the `:malli/schema` frame
-guarantees a spec is PRESENT, not that it is non-vacuous — `[:map]` parses, evals,
-and instruments. "Quality by construction" forces presence; faithfulness is a
-separate, oracle-blind axis the generative-test rung only indirectly pressures.
-This is why the roadmap's kill-gate scores *faithfulness*, not just
-instrumentability.
+**The honest limit (measured, load-bearing).** Detection numbers were measured on
+corruptions of known-good code; they do not certify a from-scratch spec is a
+faithful contract — `[:map]` parses, evals, and instruments; a live-pod check
+caught a semantically wrong body that defined and instrumented cleanly. E1's
+attempt to quantify structure-vs-correctness was VOIDED by a dead eval bundle
+([[research/e1-behavioral-zero-audit-2026-07-02]]; re-run pending on the fixed
+harness — [[roadmap]] P1). The principle stands: T3 behavioral tops the
+mid-denoise ladder — "who cares about probability" — the generative-test rung
+guards the publish gate, and every tier must prove its OWN liveness before its
+verdict counts. Faithfulness pressure comes from ground truth, not from shape.
+
+## Speed — over-commit + free-oracle renoise, not a faster kernel
+
+The forward is **MoE-bound (~85-92%)** and every fast grouped-expert kernel
+(deepgemm FP8, sonicmoe, the Triton persistent grouped-GEMM) is **Hopper
+SM90-gated** — on the A100 the experts run BF16 on a cuBLAS-per-group fallback
+that already sits near the SM80 ceiling. There is no KERNEL lever on the control
+card ([[research/forward-speedup-levers-2026-06-30]],
+[[research/fastest-tok-per-dollar-hardware-2026-06-30]]).
+
+The compile ceiling is characterized, not closed
+([[research/compile-control-ceiling-2026-07-02]]): the find_spec graph-break is a
+2-line worker-side monkeypatch away (the shipped `assume_constant_result` patch
+is inert — Dynamo unwraps the `@lru_cache` wrapper past the mark; a transformers
+bump does NOT fix it); the batched_mm device-side assert is most plausibly
+static-cache under-sizing on multi-canvas runs (probe: `max_length=288`,
+payload-only); and the per-step `ClampLogitsProcessor` is compile-COMPATIBLE (it
+runs eager between compiled units) — only a custom Python StoppingCriteria
+forfeits compile, so a compiled refine shape exists without forking the sampler.
+The compiled path has never actually been measured; it is a $0-rebuild probe
+chain on the measurement path, not a settled wall.
+
+The verified-canvas speed lever is sampler-side and UNIQUE to a diffusion canvas with a
+free oracle: **crank `entropy_bound` (over-commit — more tokens per forward, 2-3×
+fewer forwards) and let the ~0.05 ms co-located oracle renoise exactly the wrong
+spans.** An AR model cannot un-commit position 47 and keep the other 200; the
+canvas + the free oracle give us that primitive. Net win iff forwards saved by
+over-commit exceed forwards spent re-denoising flagged spans — the §3 three-arm
+sweep is the measurement. The hardware ranking: A100-BF16 sampler-tuned is the
+control path today; TPU v5e via the native JAX DiffusionGemma (whose
+`_early_stopping.py` IS validation-as-early-stop) is the high-ceiling bet,
+de-risked by one ~$5 spike; H100-FP8 is a serving number without the control seam.
 
 ## The staged convergent build (designed, NOT YET BUILT)
 
@@ -435,11 +541,7 @@ downstream fn whose instrumentation only throws when CALLED), bounded by a
 monotonicity guard and gated by the roadmap's E6. Full frame + the scorecard:
 [[research/mode-driven-guided-generation-2026-06-28]] §1.4, §5.3.
 
-## The Seon interface (designed, NOT YET BUILT — roadmap P3)
-
-> The `:diffusiongemma` provider + the two-endpoint adapter + the gym predicates
-> are designed, not wired — they land after the kill-gate ([[roadmap]] P3). Target
-> shape below.
+## The Seon interface (WIRED — roadmap P3)
 
 DiffusionGemma slots into Seon as one provider, `:diffusiongemma`, with two
 backends behind `SEON_DG_BACKEND`: `vllm` (fast demo, no control) reuses the
@@ -457,9 +559,12 @@ consumer drives the gym against THEIR config/provider via `SEON_CONFIG` +
 
 ## Cross-cutting principles
 
-- **AR guides, diffusion refines.** The strong model sets direction; the buzzsaw
-  iterates blocks as fast as Seon can parse/eval/retrieve. The value is on noisy
-  generation; the clamp/scaffold half is on trial against prompt+oracle.
+- **AR guides, diffusion refines, the ORACLE decides.** The strong model sets
+  direction; the canvas loop iterates blocks as fast as Seon can
+  parse/lint/eval/test. The oracle carries the thesis — it gates context
+  before generation, renoises the wrong spans during it, terminates it on
+  proof, and proves its OWN liveness first. Steering is on trial: phased
+  constraints live, whole-scaffold shelved pending the E1 re-run.
 - **Modes are data, overridable.** Modes seed-copy into a cluster like context
   blocks; a consumer adds or reshapes a mode with `install!`/`remove!` and zero
   `src/seon` edits.
@@ -475,15 +580,18 @@ consumer drives the gym against THEIR config/provider via `SEON_CONFIG` +
 
 ## Detail docs
 
-- [[roadmap]] — the single "we are here" + the dependency-ordered, kill-gate-first
-  path (canvas-length probe → three-arm E1 → eval-renoise live → the MVP mode → E2–E6).
+- [[roadmap]] — the single "we are here" (offline surface complete + wired
+  on-worker) + the GPU-measurement path (exp D → ladder lift → over-commit×renoise
+  → KV) + the executed kill-gate history.
 - [[grounding]] — every load-bearing claim → its `reference-code/…:LINE` cite (the
   transformers seams, the parser oracle, the malli→datahike bridge, the flash source).
 - [[research/unified-control-oracle-2026-06-29]] — THE built mechanism: the
-  `refine` dispatcher, the three legs folding into the `{clamps, renoise-spans,
-  injections}` partition, the offline proof, the AWAITS-GPU mid-denoise integration.
+  `refine` dispatcher, the legs folding into the `{clamps, renoise-spans,
+  injections}` partition, the offline proof (mid-denoise integration since wired
+  as `refine_loop`; its LIFT is the pending measurement).
 - [[research/retrieval-denoising-experiment-plan-2026-06-28]] — the retrieve leg
-  (built) + the GPU-side encoder-KV injection W1–W3 (the AWAITS-GPU half).
+  + the worker's encoder-KV injection W1–W3 (both built; W2 re-prefill is the
+  default route).
 - [[research/mode-driven-guided-generation-2026-06-28]] — THE design: the mode
   abstraction, the four modes, the convergent-pass frame, the experiment ladder.
 - [[research/mode-design-critique-2026-06-28]] — the adversarial review that shapes

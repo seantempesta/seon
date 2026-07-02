@@ -6,8 +6,8 @@ tags: [orchestrator, diffusion, agent]
 
 # Owner GPU-session runbook — execute top-to-bottom on A100 redeploy
 
-> **we-are-here: A100 undeployed ($0); start at step 0.** This is the single ordered
-> checklist the no-GPU loop built toward. Run it top-to-bottom — every step is
+> **we-are-here: A100 undeployed ($0); the offline surface is complete — this
+> session is PURE MEASUREMENT.** Run it top-to-bottom — every step is
 > `verify_fresh`-gated and the order is **cheapest decisive probe first**
 > (value per GPU-minute). The depth lives in the linked docs; this is the runbook,
 > not the explanation. Every command runs from `tmp/flash-diffgemma` with `.env`
@@ -17,222 +17,177 @@ tags: [orchestrator, diffusion, agent]
 > per batch; keep-warm (min worker 1) = **~$1.19/hr** continuous A100 — owner's call
 > once iterating. Do NOT set `(1,1)` and walk away.
 
-**Why this order (value per GPU-minute):** step 0 is the non-negotiable gate
-(a number on an unverified worker is worthless). Step 1 is a **$0, no-rebuild,
-one-drive** lever that may 7× throughput — decisive either way (find_spec gone? tok/s
-up? or OOM?), so it runs FIRST. Step 2 is the largest *measured* win (62% of latency
-at 9k ctx) but needs an image deploy, so it follows the free probe. Steps 3–4 are the
-thesis kill-gates (correctness, not speed) — they decide what gets BUILT, so they come
-before the remaining incremental A/B measurements in step 5.
+**Why this order (value per GPU-minute):** step 0 is the non-negotiable gate (a
+number on an unverified worker is worthless) and deploys the CO-LOCATION image,
+which every later step rides. Step 1 (exp D) is the free ~2-3× sampler knob —
+payload-only, decisive either way. Step 2 is the $0-rebuild compile-ceiling probe
+chain. Step 3 re-runs E1 on the fixed harness (the original run is voided — dead
+eval bundle). Step 4 is THE thesis measurement — the validation ladder's lift.
+Steps 5-6 are the speed frontier and the KV win.
+
+**Executed in prior sessions (do not re-run as-is):** the batched_mm compiled-path
+probe (RAN — clears find_spec, then a CUDA device-side assert; step 2 carries the
+root-cause probes); the E1 three-arm kill-gate (RAN — behavioral 0.0 on ALL arms,
+**VOIDED: proven dead-eval-bundle defect**,
+[[research/e1-behavioral-zero-audit-2026-07-02]]; step 3 is the re-run on the
+fixed harness); the closed-loop renoise + injection live drives (RAN in the
+battery — renoise reduces errors, injections hold); the canvas-length probe
+(fits, token-aligned).
 
 ---
 
-## 0. Deploy + verify (NOTHING measured before FRESH ✓)
+## 0. Deploy the CO-LOCATION image + verify (NOTHING measured before FRESH ✓)
 
-`flash undeploy --all` OSErrors here — use the per-name force form. Then the
-fingerprint gate.
+The image bundles the persistent bb parse server + the node eval bundle beside
+the model, so `refine_loop` runs the ladder in-container (0.05 ms warm, no
+internet hop). Owner-only step first: build+push the amd64 image (`docker login`,
+then `REGISTRY=docker.io/seantempesta TAG=cu128-v2-oracle ./build-image.sh`).
 
 ```bash
 cd tmp/flash-diffgemma
 set -a; . ./.env; set +a
-flash undeploy diffgemma --force && flash deploy     # recycle the warm worker
+./deploy-colocation.sh                      # parks drivers, deploys, prints A/B/C/D
+# (manual fallback: export FLASH_GPU_IMAGE=docker.io/seantempesta/diffgemma-worker:cu128-v2-oracle
+#  && .venv/bin/flash deploy)
 export DIFFGEMMA_EP=<ep-from-deploy-output>
-python3 verify_fresh.py                               # asserts worker_sha == local
+python3 verify_fresh.py                     # asserts worker_sha == local
 ```
 
-- **Win condition:** `verify_fresh.py` prints **`FRESH ✓`**. If it refuses, the warm
-  worker is serving OLD code — bump `FLASH_GPU_IMAGE` to a new tag (structural →
-  forces recreation) and re-deploy. Measure nothing until FRESH ✓.
-- **Depth:** [[CLAUDE]] "Deployment stability"; [[research/flash-deployment-stability-2026-06-28]].
+- **Win condition:** `verify_fresh.py` prints **`FRESH ✓`**. If it refuses, the
+  warm worker is serving OLD code — bump `FLASH_GPU_IMAGE` to a new tag
+  (structural → forces recreation) and re-deploy. Measure nothing until FRESH ✓.
+- **Depth:** [[CLAUDE]] "Deployment stability"; [[research/flash-deployment-stability-2026-06-28]];
+  [[colocation-performance-plan]] §4 (the A-D plan this session executes).
 
-## 1. batched_mm compiled-path probe — the $0, no-rebuild lever (run FIRST)
+## 1. exp D — the entropy_bound / tokens-per-forward sweep (run FIRST)
 
-The cheap lever the find_spec dig missed: force `experts_implementation="batched_mm"`
-on the EXISTING 5.11.0 / torch-2.9 worker. `batched_mm` never calls
-`_can_use_grouped_mm` (clears the find_spec graph-break, **no torch bump**) and is
-CUDA-graph-clean per the HF compat table (clears the `reduce-overhead` wall, **no
-transformers bump**). One-line change, no image rebuild for deps. May unlock the
-~1000 tok/s compiled path.
-
-BUILT (2026-06-29): `experts_impl` is now a **payload field**, no source edit, no
-image rebuild — `_load(tok, experts_impl=...)` passes the `experts_implementation=`
-from_pretrained kwarg; flipping the backend reloads (evict-first, single 50GB copy).
-Worker CODE changed → `worker_sha` is `c65c68e5cfae` → **force-recycle** (a plain
-`flash deploy` keeps serving old code on a warm worker).
+The free raw-speed lever: the forward costs ~130-140 ms regardless of how many
+positions commit (~17 at the 0.1 default); a higher bound commits more per
+forward → fewer forwards → higher tok/s, until the quality knee. Payload-only,
+prepped in `battery.py` (`D` alias), scored through the local oracle.
 
 ```bash
-cd tmp/flash-diffgemma && set -a; . ./.env; set +a
-# 1) worker code changed → undeploy --force then deploy (recycles the warm worker):
-.venv/bin/flash undeploy diffgemma --force && .venv/bin/flash deploy
-export DIFFGEMMA_EP=<ep> && python3 verify_fresh.py        # FRESH ✓ (expects sha c65c68e5cfae) first
-# 2a) full A/B probe (eager grouped / compiled grouped / compiled batched + #15 VERDICT):
-python3 compile_test.py
-# 2b) OR the single decisive drive — force batched on the compiled path:
+python3 battery.py D --param entropy_bound=0.05,0.1,0.2,0.3,0.5
+```
+
+- **Win condition:** the `entropy_bound × tokens_per_forward × tok_per_s ×
+  faithful_rate` curve + its knee — a MOVED number per setting, `worker_sha` on
+  every scorecard line. Expected ~2-3× before the knee.
+- **Depth:** [[colocation-performance-plan]] §4-D;
+  [[research/forward-speedup-levers-2026-06-30]] §3a-b.
+
+## 2. Compile-ceiling payload probes ($0 rebuild, one chain)
+
+The batched_mm device-side assert and the find_spec break are both root-cause
+hypothesized with cheap discriminating probes — the compiled path has never
+actually been measured ([[research/compile-control-ceiling-2026-07-02]]).
+
+```bash
+# a) static-cache under-sizing hypothesis: single-canvas budget → no assert?
+python3 battery.py 1 --param max_length=288
+# b) the 2-line find_spec monkeypatch (worker-side, no image rebuild) + compile on:
 TORCH_LOGS="graph_breaks,recompiles" python -u client.py \
-  '{"mode":"generate","prompt":"Write a Clojure mean over a vector.","compile":true,"max_length":512,"experts_impl":"batched_mm"}'
+  '{"mode":"generate","prompt":"Write a Clojure mean over a vector.","compile":true,"max_length":288}'
 ```
 
-- **Win condition:** clean compile (no find_spec break, no CUDA-graphs error) **AND**
-  steady-state `tok_per_s` (the SECOND identical call — discard call-1 warmup) ≥ ~1.8×
-  the eager baseline. Fail = `tok_per_s ≤ eager` or **OOM** (batched_mm duplicates
-  expert params over the whole-canvas forward S = `canvas_length × top_k`) → compiled
-  path is dead for this model shape; KV-cache reuse (step 2) is the only A100 speed lever.
-- **Proof fields:** result carries `experts_impl` (read from `model.config`, want
-  `batched_mm`) + `compiled` + `gen_error` (find_spec gone => None); the probe's
-  `#15 VERDICT` block emits WIN/marginal/NO-WIN/OOM directly.
-- **Cost:** one drive (~$0.05 warm), $0 rebuild. Decisive in a single call.
-- **Depth:** [[research/torch-compile-speed-worker-2026-06-28]] §15 (+ §8 corrected
-  call, §9 find_spec root-cause).
+- **Win condition (a):** `max_length=288` (one canvas) runs clean where 512
+  asserted → the assert is cache sizing, not the MoE. **(b):** graph-break log
+  clean of find_spec → steady-state compiled `tok_per_s` vs eager is the FIRST
+  real compiled-path number.
+- **Depth:** [[research/compile-control-ceiling-2026-07-02]] §2-3.
 
-## 2. KV-cache 62% win — deploy co-location image, wire worker-reuse half
+## 3. Re-run E1 on the FIXED harness (~$0.50 — the first meaningful behavioral numbers)
 
-The largest measured win: prefill = **62% of latency at 9k ctx**, exact full-prefix
-caching is feasible (encoder is causal, zero accuracy loss). The keying half is BUILT
-(`seon.agent.ctx/block-chain-keys`, `14e8acb0`) — a pure `(blocks, agent-id) →
-per-block chain-hashes`. **The worker-reuse half is now BUILT too** (code,
-`py_compile`-clean, walk/LRU unit-proven off-GPU) — `kv_reuse` payload path in
-`tmp/flash-diffgemma/gpu_worker.py` (`_kv_reuse_generate`) over `KVPrefixCache` +
-`longest_prefix_hit` in `diffgemma_common.py`. It still needs the co-location image
-(the `Cache` can't ride a JSON payload) + this GPU measurement to GREENLIGHT.
+The original run is VOIDED: it scored against a DEAD eval bundle (rebuilt only
+after the scorecard; threw on every input — a dead-tier simulation reproduces
+the recorded arm means to the third decimal; a known-correct submission would
+also have scored 0). The harness is fixed: the `assert_oracle_live`
+golden-sample fail-loud gate (a known-correct body MUST score 1.0 before any
+arm runs), `e1_samples.jsonl` raw-generation persistence, and prompts that
+STATE the map-in/map-out contract (the old prompts never did — naked arms
+couldn't pass by construction).
 
 ```bash
-cd tmp/flash-diffgemma; set -a; . ./.env; set +a
-# 0) sanity off-GPU (no deploy): the walk + LRU + py_compile
-python3 -m py_compile gpu_worker.py diffgemma_common.py && python3 test_kv_walk.py
-
-# 1) deploy the co-location image (Dockerfile layer + spawn-wiring, co-location-image-build doc)
-export FLASH_GPU_IMAGE=docker.io/seantempesta/diffgemma-worker:cu128-vNEXT  # bump tag => recreate
-.venv/bin/flash deploy && python3 verify_fresh.py            # MUST print FRESH ✓ (worker_sha shifted — kv_reuse code is new)
-
-# 2) WORKER-REUSE half is wired — drive it. Payload: kv_reuse + blocks (prompt-order
-#    ctx block texts) + chain_hashes (parallel, from block-chain-keys). The worker
-#    tokenizes, walks ::chain-hashes top→down → longest hit = boundary L, crops a
-#    CLONE of the cached cache, feeds generate the SUFFIX full_ids[:, L:] so the
-#    encoder prefills ONLY [L:], then writes back every block boundary.
-export DIFFGEMMA_EP=<from deploy>
-#  request 1 (COLD — fills the LRU, kv_hit_block=null, kv_reused_tokens=0):
-python -u client.py '{"mode":"generate","kv_reuse":true,
-  "blocks":["<soul…namespaces static head>","<volatile tail A>"],
-  "chain_hashes":["<h0>","<h1>"],"max_new_tokens":64}'
-#  request 2 (WARM — same static head, new tail; expect kv_hit_block=0,
-#  kv_reused_tokens≈len(head), kv_reuse_frac high, kv_suffix_tokens small):
-python -u client.py '{"mode":"generate","kv_reuse":true,
-  "blocks":["<same static head>","<volatile tail B>"],
-  "chain_hashes":["<h0>","<h2>"],"max_new_tokens":64}'
-```
-
-- **Win condition (the two assertions):**
-  1. **Bit-exact** (§5 risk #2, GPU-only): for a FIXED seed, request-2's `sequences`
-     (cache-hit suffix path) == the same prompt run with `kv_reuse:false` (full
-     re-encode). If they diverge, it's the sliding layers — switch the store to
-     full-attention-layers-only + recompute sliding (the deferred §1.4 refinement).
-  2. **Prefill drop:** request-2 `gen_s` materially < request-1 `gen_s` (request-2
-     prefills only `kv_suffix_tokens`, not the full `prompt_tokens`). Report the
-     fields: `kv_hit_block`, `kv_reused_tokens`, `kv_reuse_frac`, `kv_suffix_tokens`,
-     `kv_blocks_written`, `kv_cache_size`.
-- **Result fields added:** `kv_reuse`, `kv_hit_block`, `kv_reused_tokens`,
-  `kv_reuse_frac`, `kv_suffix_tokens`, `kv_blocks_written`, `kv_blocks_evicted`,
-  `kv_cache_size`, `block_ends`. Default (`kv_reuse` unset) = stock generate, unchanged.
-- **Depth:** [[research/kv-section-caching-design-2026-06-28]] §6 (the BUILT contract +
-  the two source corrections), §5 (Phase 0 measure `X` first), §1 (causal-encoder
-  grounding).
-
-## 3. Closed-loop renoise + INJECTION-apply live drive — span-aligned (#13)
-
-The wired driver (`scratchpad/closed_loop.py`, `44c8d635`) is offline-proven: it reads
-`canvas_text` (NOT `partial_text`) and parses with `op:"parse-raw"` so the returned
-`:span`s index the same basis the worker's `offset_map` was built over (the 11-char
-fence shift removed). `verify_fresh`-gated, ready to run on GPU.
-
-**NEW (built this loop): the worker INJECTION-apply half** — the worker now consumes
-the unified oracle's `::injections` ({span, replacement, spec_text}). `mode="inject"`
-(standalone) clamps each span toward the real `replacement` (reusing
-`ClampLogitsProcessor`) AND extends the encoder KV with `spec_text` via the W1/W2/W3
-routes; `mode="resume_renoise"` now also accepts `injections` (clamp-good +
-steer-injections + re-noise-bad in one pass). Worker CODE changed → `worker_sha`
-≈`63c09bebadad` → **force-recycle + verify_fresh first**. Default (no `injections`) =
-the renoise path unchanged. `py_compile`-clean; the span→position→replacement-clamp +
-route selection are pure-unit-proven (`python3 test_inject_apply.py`, 13 green, no torch).
-
-```bash
-# from tmp/flash-diffgemma, .env sourced + DIFFGEMMA_EP exported, after verify_fresh → FRESH ✓
-# 0) off-GPU sanity (no deploy): py_compile + the pure inject unit
-python3 -m py_compile gpu_worker.py diffgemma_common.py && python3 test_inject_apply.py
-
-# A) span-aligned renoise closed loop (unchanged):
-python3 <session-scratchpad>/closed_loop.py
-
-# B) injection-apply smoke — seeded hallucination → real symbol (W3 default,
-#    no held cache over JSON; force W1/W2 with "kv_route"):
-python -u gpu_worker.py inject
-#    OR drive directly: denoise_to_step → take offset_map+argmax_per_position →
-#    mode:"inject" with injections:[{span,replacement,spec_text}] → assert
-#    injections_held:true (the canvas committed `replacement`, not the hallucination).
-```
-
-- **Win condition (renoise):** `errors_before > 0` at the stop step → span-targeted
-  renoise → `errors_after < errors_before` with the good (non-span) tokens **held**
-  (`good_held: true`). Renoise must be ORACLE-DRIVEN — only re-noise spans
-  `parse-forms` flags, never a correct span.
-- **Win condition (injection):** a seeded hallucinated symbol (e.g. `db/transct!`) +
-  its `refine` injection (`replacement` `db/transact!` + `spec_text`) → the resumed
-  canvas commits `replacement` over the hallucination (`injections_held: true`), the
-  good tokens held. Result carries `route` (W1/W2/W3), `route_reason`, `n_injections`,
-  `injections_held`, the per-span `got_text`.
-- **Depth:** [[research/closed-loop-span-alignment-2026-06-28]] (the basis + corrected
-  orchestration); [[research/eval-renoise-worker-build-2026-06-28]] (the worker);
-  [[research/unified-control-oracle-2026-06-29]] "Worker mid-denoise integration"
-  (the built injection-apply + the W1/W2/W3 routes).
-
-## 4. Three-arm kill-gate E1 — does guided-gen beat prompt+fix? (#14)
-
-THE decision: is the clamp/scaffold half of the thesis worth building at all? The
-driver (`scratchpad/e1_kill_gate.py`, `801211ee`) runs all three arms — (1) forced-spec
-infill + post-hoc oracle, (2) free completion, (3) plain prompt + the IDENTICAL post-hoc
-oracle loop — scored on FAITHFULNESS, with the shared oracle/repair loop so the only
-variable under test is the clamp.
-
-```bash
-# from tmp/flash-diffgemma, .env sourced + DIFFGEMMA_EP exported, after verify_fresh → FRESH ✓
+# after verify_fresh → FRESH ✓; the liveness gate aborts the run if any tier is dead
 python3 <session-scratchpad>/e1_kill_gate.py celsius 6
 ```
 
-- **Win condition:** arm 1 BEATS arm 3 on `faithful_rate` by **≥ 0.10** → guided-gen
-  EARNS its place; build P2 (`:defn-with-specs` MVP). If arm 1 ≈ arm 3 → the driver
-  says **KILL** plainly: cut the clamp/scaffold apparatus, keep only the dynamic-context
-  half. Watch the F2 vacuity check (>30% `[:map]`/over-permissive specs = "quality by
-  construction" is hollow).
-- **Known gap:** the eval tier (`out/worker-oracle-eval/main.js`) currently throws on
-  every input; the scorer rests on parse + structural + vacuity until the bundle is
-  fixed (`EVAL_ENABLED` flips it back on).
-- **Depth:** [[roadmap]] P1 (the three metrics + decision rule); the `e1_kill_gate.py`
-  note.
+- **Win condition:** the liveness gate passes, raw samples persist, and the arms
+  produce non-degenerate behavioral rates — THIS run, not the voided one,
+  decides the whole-scaffold question (arm 1 vs arm 3, Δ ≥ 0.10 = EARNS).
+- **Depth:** [[research/e1-behavioral-zero-audit-2026-07-02]] (the void proof +
+  fixes); [[roadmap]] P1 (status + decision rule).
 
-## 5. Skill-lift sweep + required-API render lift — remaining A/B measurements
+## 4. THE LADDER-LIFT MEASUREMENT — refine_loop on bb op:"refine"
 
-The structural skill sweep is DONE (6/6 skills, ~0→100%). Two measurements remain:
-pivot the skill sweep from structural to the **EVAL-tier** oracle (does the generated
-code RUN / return the right answer?), and measure the `seon.*` required-API render's
-lift to justify its ~2.9k tok/turn (or trim the cap).
+The thesis number: does the validation ladder, steering + terminating the loop
+mid-denoise, LIFT behavioral correctness (and at what step cost)? The worker's
+`refine_loop` gate is parse→eval→behavioral (`eval_gate` dflt on) and its renoise
+source is bb `op:"refine"` — parse + structural (`malformed-def?`) + phase
+(`phase-violation?`) in one ~0.05 ms call, the shared `grammar.cljc` predicates.
 
 ```bash
-# each A/B: control = task alone; treatment = artifact + task; N=8/arm; score through
-#   the real oracle (parse + structural + EVAL-tier). ~16 gens, ~80s warm, ~$0.03/skill.
-# after verify_fresh → FRESH ✓; reuse skill_lift.py / score_ab.py paths.
+# ladder ON (bb op:"refine", eval gate, behavioral tests) vs ladder OFF (free gen):
+python -u client.py '{"mode":"refine_loop","prompt":"<task>","max_iters":6,
+  "eval_gate":true,"behavioral":[{"call":"(c2f 100)","expect":"212"},{"call":"(c2f 0)","expect":"32"}]}'
+python -u client.py '{"mode":"generate","prompt":"<same task>"}'   # the OFF arm
+# then the phased variant: payload "phase":"schemas" → "functions"
 ```
 
-- **Win condition:** each artifact's measured lift is recorded in the north-star ledger.
-  Big lift → keep + lock as a regression gate; zero/negative → refine or cut. The
-  required-API render must show lift or its 2.9k-tok cap gets trimmed.
-- **Depth:** [[north-star]] "Work queue" + the measured-lifts ledger.
+- **Win condition:** ladder-ON behavioral pass-rate > ladder-OFF at comparable
+  wall-clock (report per-iteration `errors_before/after`, `oracle_ms`,
+  `tok_per_s`, the stop tier). Early-stop must fire on oracle-proof, not step
+  exhaustion. This is the "same oracle gates, steers, and terminates" claim,
+  measured.
+- **Depth:** [[architecture]] "The validation ladder"; [[colocation-performance-plan]]
+  §4-A/B (oracle_ms + the before/after network contrast).
+
+## 5. The §3 over-commit × free-renoise Pareto sweep
+
+The verified canvas's unique speed×quality move: commit aggressively (high
+`entropy_bound` from step 1's knee), let the ~free oracle renoise exactly the
+wrong spans. Three arms — A baseline (eb 0.1, no renoise), B over-commit naked,
+C over-commit + oracle renoise.
+
+- **Win condition:** arm C Pareto-dominates arm A on (behavioral pass-rate,
+  wall-clock) — the free oracle buys back the quality the over-commit spent, net
+  faster. Scorecard per `(scenario × git-sha × config)`.
+- **Depth:** [[research/forward-speedup-levers-2026-06-30]] §3c-d.
+
+## 6. KV-cache test C — bit-exactness + the prefill drop
+
+The 62%-of-latency win. Both halves are built (`block-chain-keys` Seon-side;
+`_kv_reuse_generate` + `KVPrefixCache` worker-side); the mechanism is CPU-proven
+bit-exact; only the DiffusionGemma HYBRID cache case is GPU-only.
+
+```bash
+# request 1 (COLD — fills the LRU) then request 2 (WARM — same static head, new tail):
+python -u client.py '{"mode":"generate","kv_reuse":true,"blocks":["<static head>","<tail A>"],
+  "chain_hashes":["<h0>","<h1>"],"max_new_tokens":64}'
+python -u client.py '{"mode":"generate","kv_reuse":true,"blocks":["<static head>","<tail B>"],
+  "chain_hashes":["<h0>","<h2>"],"max_new_tokens":64}'
+```
+
+- **Win condition:** (1) **bit-exact** — request-2's `sequences` == the same
+  prompt with `kv_reuse:false` at fixed seed (divergence → the sliding layers:
+  store full-attention layers only + recompute sliding); (2) **prefill drop** —
+  request-2 `gen_s` materially lower, `kv_reuse_frac` high. Report `kv_hit_block`,
+  `kv_reused_tokens`, `kv_suffix_tokens`.
+- **Depth:** [[research/kv-section-caching-design-2026-06-28]] §6/§6a;
+  [[colocation-performance-plan]] §4-C.
 
 ---
 
 ## Entry points (depth)
 
-- [[north-star]] — the ▸ OWNER HANDOFF (PROVEN / BUILT-deploy-ready / AWAITS-OWNER) +
-  the measured-lift ledger this runbook feeds.
-- [[roadmap]] — the we-are-here → kill-gate-first sequence (P0–P5).
+- [[roadmap]] — the single we-are-here + the GPU-measurement path this runbook
+  executes + the executed kill-gate history.
+- [[north-star]] — the vision (oracle gates context before, steers + terminates
+  during) + the measured-lift ledger the results feed.
+- [[colocation-performance-plan]] — the A-D test plan, the persistent-oracle
+  architecture, the offline-prep table (O1-O6, all done).
 - [[CLAUDE]] — the index + the copy-pasteable run/deploy loop + deployment stability.
-- [[research/torch-compile-speed-worker-2026-06-28]] · [[research/kv-section-caching-design-2026-06-28]] ·
-  [[research/closed-loop-span-alignment-2026-06-28]] — the per-step depth.
+- [[research/compile-control-ceiling-2026-07-02]] ·
+  [[research/forward-speedup-levers-2026-06-30]] ·
+  [[research/fastest-tok-per-dollar-hardware-2026-06-30]] ·
+  [[research/kv-section-caching-design-2026-06-28]] — the per-step depth.

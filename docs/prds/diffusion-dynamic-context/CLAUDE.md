@@ -6,20 +6,23 @@ tags: [orchestrator, agent]
 
 # Diffusion dynamic-context — auto-loaded index (one-stop shop)
 
-> The buzzsaw: a diffusion LLM (DiffusionGemma) as a LIVE-CONTEXT interface that
-> refines whole blocks of Clojure fast, taking feedback BETWEEN denoise steps, with
-> Seon's parser+eval+retrieval as the control signal. This file is the INDEX +
-> runbook; the forward-looking spine carries the depth. Keep it tight + current.
+> **The verified canvas** — guided, verified generation on a diffusion canvas: a
+> diffusion LLM (DiffusionGemma) refines whole blocks of Clojure fast while Seon's
+> oracle (parse/lint/eval/behavioral + retrieval) steers generation BETWEEN denoise
+> steps and terminates it on proof. This file is the INDEX + runbook; the
+> forward-looking spine carries the depth. Keep it tight + current. (The earlier
+> working name "buzzsaw" is retired — same system, this name.)
 
 ## The spine (read these first)
 
-- [[architecture]] — the target buzzsaw: the thesis, the glossary, the control
-  seam, the worker, the **mode abstraction**, the oracle loop, the staged
-  convergent build, the Seon interface. Present-tense target, NO hedges.
-- [[roadmap]] — the single **we-are-here** → the kill-gate-first path. What's
-  PROVEN (clamp, infill, spec-slot, the 0→100% data-modeling A/B, deploy
-  stability) vs NEXT (canvas-length probe → three-arm E1 → eval-renoise live → the
-  `:defn-with-specs` MVP → E2–E6) + the CUT list (sentinel, op-axis, multi-pass).
+- [[architecture]] — the target verified canvas: the thesis, the glossary, the control
+  seam, the worker (`refine`/`refine_loop`), the **validation ladder** +
+  validation-as-early-stop, the phased grammar gate, the speed levers, the Seon
+  interface. Present-tense target, NO hedges.
+- [[roadmap]] — the single **we-are-here** (offline surface complete + wired
+  on-worker) → the GPU-measurement path (exp D → compile probes → the E1 re-run
+  → ladder lift → over-commit×renoise → KV) + the voided-kill-gate history + the
+  CUT list (sentinel, op-axis, multi-pass).
 - [[grounding]] — every load-bearing claim → its `reference-code/…:LINE` cite (the
   transformers v5.11.0 seams, the parser oracle, the malli→datahike bridge, the
   Flash source).
@@ -30,75 +33,63 @@ tags: [orchestrator, agent]
   `tmp/flash-diffgemma/deploy-colocation.sh` → A/B/C/D). **Run exp D (entropy_bound sweep) FIRST —
   free ~4-5× on A100.** + [[research/fastest-tok-per-dollar-hardware-2026-06-30]] (FP8=Hopper-only →
   L40S/A6000 DEAD; A100 cheapest BF16; **TPU JAX DiffusionGemma EXISTS — port-light, has `_early_stopping.py`**)
-  + [[research/forward-speedup-levers-2026-06-30]] (Triton MoE, in flight).
+  + [[research/forward-speedup-levers-2026-06-30]] (MoE-bound; over-commit×renoise
+  is the lever, Triton kernel = Hopper-only) +
+  [[research/compile-control-ceiling-2026-07-02]] (find_spec = 2-line monkeypatch;
+  device-assert = static-cache-sizing hypothesis + $0 probe; clamp is
+  compile-compatible — the compiled path was never measured).
 
-## ▸ CONTINUATION (2026-06-30) — post-compaction, SPEED FOCUS
+## ▸ Current state (2026-07-02) — offline surface COMPLETE + wired on-worker; next = GPU measurement
 
-Full live state + plans = the auto-loaded memory `project-diffusion-overnight-loop-2026-06-28`
-"▸ CONTINUATION (2026-06-30)" block. TL;DR:
-- **Thesis (real GPU data):** buzzsaw guarantees SHAPE not CORRECTNESS → the ORACLE/eval half is
-  the value. Free-gen = correct MATH + only hygiene errors (def-vs-defn, `9/5` ratio). Owner:
-  scaffold-infill was NOT fairly tested → PHASED-constraint direction (schemas-only → functions-only
-  phase; reject `def` when data-modeling; `;; PLAN:` tokens; best-of-N renoise; context-as-target+embed-search).
-- **★ VALIDATION-AS-EARLY-STOP — BUILT + offline-proven (2026-06-30).** "As soon as it parses +
-  runs, STOP; the model's probability is irrelevant once it's proven to RUN." `refine_loop` gate is
-  now **parse-clean AND eval-clean** (`eval_gate` payload flag, dflt on; `gpu_worker.py`). Proven with
-  the REAL bb parse + node cljs.js eval over the persistent shim — `eval_gate_earlystop_proof.py`
-  (4 cases): def-not-defn & undeclared-var PARSE clean but FAIL eval → loop refuses to stop; eval_gate
-  OFF stops (wrong); correct defn → validated → stop at iter 0. Pairs with §3 over-commit + JAX `_early_stopping.py`.
-- **★ VALIDATION LADDER (owner refinement — push errors DOWN to the cheap tier):** owner noted
-  def-vs-defn is structurally catchable ("detect `def` forms + scramble those tokens") — so eval is
-  the WRONG motivator for it. The honest tiering, cheapest-decisive-first:
-  **T0 parse** (0.05ms, well-formed) · **T1 structural lint** (~free, AST shape: def-vs-defn, missing
-  `:malli/schema`, bare/un-namespaced keys → renoise the span) · **T2 eval** (2.6ms, won't-RUN:
-  undeclared var, arity — eval's UNIQUE job, no AST can resolve symbols) · **T3 behavioral test**
-  (runs-but-WRONG: off-by-one — the real correctness proof).
-  **STATUS: the WHOLE ladder is BUILT + proven (2026-06-30):**
-  - **T1** — `seon.diffusion.oracle/malformed-def?` wired into `refine` as a third renoise source
-    (commit `d5d80fad`; `def` valid only name+init/name+"doc"+init, so `(def mean [v] body)` is
-    unambiguously a defn typo; `(def xs [1 2 3])` stays a valid clamp). Live-proven vs the parser
-    (5/5) + regression test `structural-def-vs-defn` (suite green).
-  - **T2+T3** — `refine_loop` gate is parse→eval→behavioral (`behavioral` payload = `[{call,expect}]`,
-    `eval_gate` flag), stopping at the cheapest decisive tier (`gpu_worker.py`). `eval_gate_earlystop_proof.py`
-    (6 cases, REAL bb+node oracles): def-not-defn/undeclared FAIL eval→no-stop; off-by-one mean RUNS but
-    behav FAILS→no-stop; correct mean → validated → STOP iter 0. (Proof self-caught a CLJS no-Ratio
-    expectation bug — `(/ 10 4)`=2.5 not 5/2.) **T3 is the literal "who cares about probability" gate.**
-  - **PHASED GRAMMAR GATE** (commit `47d1cdf2`) — the owner's schemas-only→functions-only idea, T1 generalized.
-    `seon.diffusion.oracle` `phase-grammars` + `phase-violation?`, wired into `refine` as a 4th renoise source
-    behind optional `::phase`. `:schemas` allows ns+register! (rejects def/defn); `:functions` allows ns+defn
-    (rejects register!/bare-def). Name-based head match (register!/seon.schema/register!/bare all = "register!").
-    Live-proven exact vs the parser; regression test `phase-grammar-gate` green (suite 876/4043, 0 errors).
-  - Found+filed: #50 — the #42 `:minimal` config-profile is a no-op (lean==full tokens), pre-existing, separate lane.
+**A100 UNDEPLOYED ($0).** Every buildable no-GPU half is BUILT, offline-proven with
+the REAL bb+node oracles, and wired on-worker (suite 876/4043 green):
 
-  **▸ OFFLINE CONTROL SURFACE IS COMPLETE + WIRED ON-WORKER.** The oracle has 5 tiers (parse / structural-lint /
-  phase-grammar / eval / behavioral) + retrieval, all renoise/clamp/inject-capable, mechanism-proven with
-  the REAL bb+node oracles. **#51 DONE (commit `47527a33`):** the T1/phase predicates now live in the shared
-  dependency-free `seon.diffusion.grammar.cljc` that BOTH the pod oracle AND babashka load, and bb
-  `op:"refine"` folds structural+phase renoise natively — LIVE-PROVEN on bb (def-vs-defn + phase-violation
-  spans), so the worker reaches the cheap ladder mid-denoise (no pod round-trip, no drift). What remains is
-  NOT more oracle features (un-measured machinery, against the north-star's empirical principle) but **GPU
-  measurement**: deploy the co-location image, point the worker `refine_loop` at bb `op:"refine"` (was
-  `parse-raw`), and measure the ladder's LIFT + compose with §3 over-commit. Owner-gated.
-  Remaining owner phased-constraint sub-directions (lower priority until GPU proof): `;; PLAN:` clamp tokens,
-  best-of-N renoise, context-as-target embedding search.
-- **Speed levers ranked:** (1) **exp D entropy_bound/tokens-per-forward — FREE on A100, prepped, UNRUN,
-  ~2-3×, DO FIRST.** (2) TPU v5e via the existing JAX DiffusionGemma (port-light; de-risk = one ~$5 v5e-4 spike).
-  (3) Triton MoE kernel to unblock compile (#49). Co-location prep tasks #44-#47 DONE + offline-proven.
+- **The validation LADDER, cheapest-decisive-tier-first:** T0 parse (bb ~0.05ms) →
+  T1 structural lint (`oracle/malformed-def?` — def-vs-defn is AST-catchable) →
+  the PHASED GRAMMAR GATE (`phase-grammars`/`phase-violation?`, `:schemas` →
+  `:functions`) → T2 eval (node cljs.js ~2.6ms — the only tier that resolves
+  symbols) → T3 behavioral (`[{call,expect}]` — the right ANSWER) + the retrieval
+  leg. **Validation-as-early-stop** is `refine_loop`'s termination criterion
+  (parse→eval→behavioral, `eval_gate` dflt on; proven by
+  `eval_gate_earlystop_proof.py`, 6 cases). **#51:** the T1/phase predicates live
+  in the shared dependency-free `seon.diffusion.grammar.cljc` loaded by BOTH the
+  pod oracle and babashka — bb `op:"refine"` folds structural+phase renoise
+  natively, so the worker reaches the cheap tiers mid-denoise, no pod round-trip.
+- **E1 kill-gate RAN (N=6): behavioral 0.0 on ALL arms — VOIDED, a PROVEN
+  harness defect** ([[research/e1-behavioral-zero-audit-2026-07-02]]): the run
+  scored against a DEAD eval bundle (rebuilt only after the scorecard; threw on
+  every input; a dead-tier simulation reproduces the arm means to 3 decimals —
+  a known-correct submission would also have scored 0). Harness FIXED
+  (`assert_oracle_live` fail-loud gate, `e1_samples.jsonl` persistence,
+  contract-stating prompts) → **re-run next GPU session (~$0.50), after exp D.**
+  Surviving: guided's STRUCTURAL win (parse/struct 1.0 vs naked); behavioral
+  claims from that run carry no evidence either way. Whole-scaffold steering
+  SHELVED pending the re-run; PHASED-constraint = the parallel retry. Free-gen
+  capstone: correct MATH, hygiene-only errors (def-vs-defn — a cheap-tier catch;
+  the `9/5`-ratio claim was FALSIFIED by live test 2026-07-02: node eval gives
+  1.8, ok:true).
+- **Speed:** the forward is MoE-bound; every fast grouped-expert kernel is
+  Hopper-gated → NO kernel lever on the A100. The free lever is **exp D
+  (entropy_bound sweep — prepped, UNRUN, ~2-3×)** + the §3 over-commit ×
+  free-renoise sweep. Compile ceiling characterized, not closed: find_spec = a
+  2-line worker monkeypatch (transformers bump does NOT fix it); the batched_mm
+  device-assert has a $0 `max_length=288` probe; the compiled path was never
+  measured ([[research/compile-control-ceiling-2026-07-02]]). Hardware: FP8 =
+  Hopper-only → L40S/A6000 dead; A100-BF16 = the control card; TPU-JAX =
+  port-light high-ceiling bet (JAX impl exists incl. `_early_stopping.py`),
+  de-risk = one ~$5 v5e-4 spike.
+- **Co-location prep DONE (O1-O6):** persistent bb+node oracles 0.05ms vs ~21-26ms
+  spawn; in-worker `mode:"refine_loop"`. KV-reuse + injection-apply worker halves
+  built; KV mechanism CPU-de-risked bit-exact. Owner step: build+push the image
+  (amd64), `./deploy-colocation.sh`.
 
-## Current state (2026-06-29)
-
-**A100 is UNDEPLOYED ($0)** — the no-GPU build/research/fix surface is exhausted; every
-remaining win is owner-gated. **START at [[owner-gpu-runbook]]** next session (ordered,
-verify_fresh-gated, cheapest decisive probe first). The model is **PROVEN running** when
-deployed (A100, ~66 s load) and the **control primitives are PROVEN**: clamp holds,
-infill holds both ends, the `:malli/schema` spec-slot infills, the dynamic-context half
-is validated (data-modeling A/B **0→100%**, 6/6 skills). The mechanism is
-**source-corrected** — NOT an absorbing-mask diffuser; commit is emergent low-entropy
-persistence and clamp is a custom `LogitsProcessor` (see [[grounding]]). BUILT +
-deploy-ready this loop: no-fence `parse-raw` oracle, KV-cache keying half, closed-loop
-renoise driver, three-arm kill-gate E1, the batched_mm compiled-path knob+probe, the
-revived eval tier — full breakdown in [[north-star]] "▸ OWNER HANDOFF". **NEXT** (owner):
-the batched_mm $0 probe → KV-cache image → the kill-gates ([[owner-gpu-runbook]]).
+**NEXT (owner-gated, ordered — [[owner-gpu-runbook]]):** deploy the co-location
+image → `verify_fresh` → **exp D FIRST** → the compile-ceiling payload probes →
+the E1 RE-RUN (fixed harness, ~$0.50) → the LADDER-LIFT measurement (`refine_loop` at bb
+`op:"refine"`) → the §3 Pareto sweep → KV test C. Deferred behind the GPU proof:
+`;; PLAN:` clamp tokens, best-of-N renoise, context-as-target embedding search;
+the TPU spike is the separate high-ceiling de-risk. Open flag: #50 (`:minimal`
+config-profile no-op — UI/config lane, not diffusion).
 
 ## How to run it
 
@@ -202,7 +193,11 @@ The spine links the depth inline; this table is the full map — one line per fi
 
 | Research file | What it covers |
 |---|---|
-| `unified-control-oracle` | **THE built mechanism** — `seon.diffusion.oracle/refine`: the three legs (parse/retrieve/eval) folding into the `{clamps, renoise-spans, injections}` partition, offline-proven, AWAITS-GPU mid-denoise integration |
+| `unified-control-oracle` | **THE built mechanism** — `seon.diffusion.oracle/refine`: the legs (parse/structural/phase/retrieve/eval) folding into the `{clamps, renoise-spans, injections}` partition, offline-proven, wired on-worker; awaits GPU MEASUREMENT |
+| `compile-control-ceiling` | the find_spec + batched_mm walls root-caused — the inert `assume_constant_result` patch (2-line monkeypatch fix), the static-cache-sizing assert hypothesis ($0 probe), clamp = compile-compatible, the mis-attributed "4× compile tax" corrected |
+| `e1-behavioral-zero-audit` | why E1 scored 0.0 everywhere — the dead eval bundle proof (arm means reproduced to 3 decimals), the unstated-contract secondary defect, the harness fixes (liveness gate, sample persistence); the run is VOID, re-run queued |
+| `fastest-tok-per-dollar-hardware` | the hardware ranking — FP8/fast-MoE = Hopper-only (L40S/A6000 dead), A100-BF16 = the control card, TPU-JAX port-light (the ~$5 v5e spike) |
+| `forward-speedup-levers` | forward is MoE-bound (~85-92%); no kernel lever on SM80; the §3 over-commit × free-renoise joint sweep design |
 | `mode-driven-guided-generation` | **THE design** — the mode abstraction, the four modes, the convergent-pass frame, E0–E6 |
 | `mode-design-critique` | the adversarial review the roadmap's sequencing is built on (missing arm-3, vacuity, canvas gating, cut-list) |
 | `transformers-diffusion-source-grounding` | the real v5.11.0 mechanism — per-step seam `:1034`, stopping ABC `:466`/`:1207`, temp ramp `:311`, streamer verdict |

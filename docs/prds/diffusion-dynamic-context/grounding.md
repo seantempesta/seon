@@ -21,6 +21,9 @@ tags: [reference, agent, schema, flow]
 | **clamp / infill / span-renoise** | `tmp/flash-diffgemma/diffgemma_common.py:35-78` (Clamp), `:184-222` (offset_map/span); `transformers .../generation_diffusion_gemma.py:1034` | the per-step apply site + the clamp/offset primitives |
 | **stop-at-step-K / eval-renoise** | `generation_diffusion_gemma.py:466,1207` (stopping ABC), `:751,786` (loops), `:311` (temp ramp) | the external-stop pattern + the temperature-compression trap |
 | **the quality gate (parse/eval)** | `src/seon/repl/internal.cljc:561-677` (`parse-forms`, `:span`/`:error-kind`/`:source`); `src/seon/eval.cljs` | the syntactic + semantic oracle the gate runs |
+| **the validation ladder (T1 lint / phase gate)** | `src/seon/diffusion/grammar.cljc:16` (`malformed-def?`), `:36` (`phase-grammars`), `:57` (`phase-violation?`); `src/seon/diffusion/oracle.cljs:122-173` (`refine` folds them); `bin/oracle-server:74-116` (`refine-parse` — bb loads the SAME ns) | one definition, pod + bb, no drift |
+| **refine_loop / validation-as-early-stop** | `tmp/flash-diffgemma/gpu_worker.py:1145-1321` (the gate: parse → eval (`eval_gate`, dflt on) → behavioral `[{call,expect}]`; per-iteration `oracle_ms`) | the loop stops on PROOF, not confidence |
+| **the FP8/fast-MoE Hopper gate (speed)** | `reference-code/transformers/.../integrations/moe.py:287-288` (`_can_use_grouped_mm` bf16-only under compile), `deepgemm.py:19-24` (FP8 experts require SM90+), `sonicmoe.py:62-68` (raises below SM90) | why there is no kernel lever on the A100 |
 | **forced-spec / missing-spec detector** | `src/seon/agent.cljs:210,215`; `src/seon/eval.cljs:1357` | `:seon.fn/spec` present + no `:seon.fn/schema-error` = the detector |
 | **the mode schema / malli shapes** | `src/seon/db/internal.cljs:147-360` (the malli→datahike bridge); `src/seon/schema.cljc:193` | what each registered attr bridges to; `register!` ≠ bridge |
 | **the `:diffusiongemma` provider** | `src/seon/ai/openai_compat.cljs:322,415`; `src/seon/ai.cljs:160`; `src/seon/agent/turn.cljs:330-357`; `src/seon/retry.cljs:167` | the two-backend dispatch + the free transport-retry |
@@ -114,6 +117,34 @@ Full measurement: [[research/parser-as-generation-oracle-2026-06-28]].
   is faithful — a vacuous `[:map]` parses, evals, AND instruments. The
   strong-model A/Bs (gemini-flash, DeepSeek-on-acme) were NULL: the collar's value is
   on NOISY generation, not capable AR output.
+
+## The validation ladder — shared predicates, worker gate
+
+- **`seon.diffusion.grammar.cljc`** — the dependency-free T1/phase predicates:
+  `malformed-def?` (`:16` — `def` is valid only name+init / name+"doc"+init, so
+  `(def mean [v] body)` is unambiguously a defn typo; `(def xs [1 2 3])` stays a
+  clamp), `phase-grammars` (`:36`) + `phase-violation?` (`:57` — name-based head
+  match, so `register!` / `seon.schema/register!` / the bare sym all count).
+  Loaded by BOTH `seon.diffusion.oracle` (`oracle.cljs:115-116` "No copy here;
+  drift is impossible") AND babashka (`bin/oracle-server:47`).
+- **bb `op:"refine"`** (`bin/oracle-server:74-116,144`) — `refine-parse` returns
+  the CHEAP tiers of the unified control set (clamps + renoise spans from parse +
+  structural + phase) in one warm ~0.05 ms call; injections/eval stay pod/node-side.
+- **The worker gate** (`gpu_worker.py:1145-1321`, `mode:"refine_loop"`) — the
+  ladder as termination: `_validate` runs parse (T0/T1/phase via the bb pipe) →
+  eval (`eval_gate`, default on) → behavioral (`[{call,expect}]`); "validated" =
+  parse-clean AND runs AND behavioral-clean — the docstring's own words: "the
+  model's probability is irrelevant once we have PROOF it executes." Proven
+  offline by `eval_gate_earlystop_proof.py` (6 cases, real bb+node oracles).
+- **Live-test correction (2026-07-02):** the ratio literal `9/5` is NOT a CLJS
+  eval error — the real node eval tier returns 1.8, ok:true (bb parse accepts it
+  too). def-vs-defn IS real (eval: "Too many arguments to def"; T1 catches it
+  structurally, cheaper). Don't cite the ratio as an oracle catch.
+- **Oracle liveness is load-bearing:** E1's behavioral zeros were produced by a
+  DEAD eval bundle, not the model — proven in
+  [[research/e1-behavioral-zero-audit-2026-07-02]] (dead-tier simulation
+  reproduces the arm means to 3 decimals). A tier's verdict counts only after
+  its golden-sample liveness gate passes (`assert_oracle_live`).
 
 ## The program-graph spec detector — `src/seon/`
 
