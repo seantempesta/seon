@@ -1,23 +1,40 @@
 ---
 type: prd
-status: draft
+status: completed
 tags: [prd, agent, flow]
 ---
 
 # Compact namespace cards + the one-line docstring convention
 
-> **Target design** (present tense — the system as it is when built). Current
-> code state + migration live in [[roadmap]]. Grounded in a live-corpus audit
-> of the `default` cluster (671 documented fns) — see "What the audit found".
+> **SHIPPED** (2026-07-02). The `:namespaces` section render is live in
+> `src/seon/agent/ctx/namespaces.cljs`; the docstring convention is enforced by
+> `seon.dev.docstring`. Commits: `2eeb3bd9` (the compact-everything-except-current
+> model), `48cae8c1` (requires drive the card set), `010aa1f5` (turn-0 + root),
+> `a07dab78` (acme override-proof), `b2d4cd86` (stub). This doc now describes the
+> SHIPPED reality; the corpus-cleanup sweep is the remaining follow-on. Grounded
+> in a live-corpus audit of the `default` cluster (671 documented fns) — see
+> "What the audit found".
 
-The agent's context renders each namespace at one of two detail levels, and a
-single docstring convention is the seam between them:
+The `:namespaces` section renders on **three rules**, with a single docstring
+convention as the seam between the two detail levels:
 
-- **`:compact`** — a CARD: the namespace's `register!` schema block plus every
-  public fn condensed to a one-line head — `(defn name "<line-1 doc>" {:malli/schema …} [args] …)`
-  with the body elided (`…`). This is what the agent sees for most namespaces.
-- **`:full`** — the REAL full file source, unchanged: multiline docstrings, full
-  bodies, tips, fix-comments, everything. The exemplars + the agent's own ns.
+- **FULL** — the REAL full file source, unchanged (multiline docstrings, full
+  bodies, tips, fix-comments): **the agent's CURRENT ns** plus any ns pinned in
+  the per-agent `::full-source` set. Nothing else renders full.
+- **COMPACT CARD** — the namespace's `register!` schema block plus every public
+  fn condensed to a one-line head — `(defn name "<line-1 doc>" {:malli/schema …} [args] …)`
+  with the body elided (`…`). This is what the agent sees for **every ns the
+  current ns `:require`s** (and only those).
+- **DROPPED** — everything else. Still indexed + grep-able + full on demand via
+  `render-namespace`, just not resident in the section.
+
+**Inclusion is driven by `:require`, not an allow-list.** There is no `:always`
+set, no `compact-worthy?` predicate, and no hardcoded `my.*` pinning in the
+render — write a real `(:require [x …])` on the current ns and `x` joins as a
+card; drop the require and it vanishes (self-healing on the `:seon.ns/requires`
+edges). The DEFAULT verb surface is therefore config: `:seon.eval/home-requires`
+in the manifest (`config/system.edn` agent-context + root-context) is what a
+fresh agent's home ns requires, so it IS what renders as cards.
 
 The convention that makes this clean: **a fn's docstring first line is a
 complete, ≤72-char sentence that fully describes it.** The compact card shows
@@ -143,40 +160,49 @@ Worked card (`my.kb`, ~664 tokens vs 3719 full):
 ;;; └─ end my.kb ─
 ```
 
-## The rendering functions (code workstream)
+## The rendering functions (SHIPPED — `seon.agent.ctx.namespaces`)
 
-The compact/full split is expressed in the **config-driven-agent-init** model as
-datahike-native **attribute-presence sets** on the namespaces block entity — NOT a
-map-of value and NOT a density enum (datahike has no map value type; a `{ns → set}`
-would only serialize, killing per-ns reactivity). See decision 13/16 +
-[[config-driven-agent-init-namespaces-additions-2026-07-01]]. This extends the
-existing `:seon.agent.ctx/render-namespaces` (`[:vector :keyword]`) pattern.
+Everything lives in `src/seon/agent/ctx/namespaces.cljs`. The full-vs-compact
+axis is expressed in the **config-driven-agent-init** model as datahike-native
+**attribute-presence sets** on the namespaces block entity — NOT a map-of value
+and NOT a density enum (datahike has no map value type; a `{ns → set}` would only
+serialize, killing per-ns reactivity). See
+[[config-driven-agent-init-namespaces-additions-2026-07-01]].
 
+- **The include set = current ns ∪ its `:require`s ∪ `::full-source` pins**
+  (`namespaces-block`, `required-ns-set`). Everything else is DROPPED. This is
+  the load-bearing change from the earlier design: WHICH nses render is driven by
+  the current ns's requires, not a curated allow-list.
+- **`full?`** is ONE rule (no second full control):
+  `full? ⇔ (nm = current-ns ∧ ::current-full?) ∨ (nm ∈ ::full-source)`. Every
+  other included ns — i.e. the current ns's requires — renders as a compact card.
 - **Two cardinality-many attrs on the namespaces block** (colocated in
   `seon.agent.ctx.namespaces`): `::full-source` (`[:vector :seon.ns/name]`,
   default `[]`) and `::with-tests` (same). **Presence = config; compact = absence.**
-  A ns in `::full-source` renders full; in neither → the card; in `::with-tests` →
-  its tests append (composes with either density). No `:compact` token exists, so
-  the `#{:full :compact}` conflict is unrepresentable. Current ns = two scalar
-  bools (`::current-full?`/`::current-tests?`, default true). Reify to
-  component-ref'd entry entities ONLY when a per-ns facet carries a VALUE (token
-  cap, weight) — not for booleans.
-- **`render-one-ns-compact`** (`seon.agent.ctx`) builds the card from indexed rows
+  A ns in `::full-source` renders full; in `::with-tests` → its tests append
+  (composes with either density). No `:compact` token exists, so the
+  `#{:full :compact}` conflict is unrepresentable. Current ns = two scalar bools
+  (`::current-full?`/`::current-tests?`, default true). These dials are read
+  reactively off the agent's `:namespaces` BLOCK entity, falling back to the
+  agent datom, then the malli default (`resolve-cfg`) — a `db/transact!`
+  re-derives next render, no apply step.
+- **`render-one-ns-compact`** builds the card from indexed rows
   (`:seon.schema/_ns`, `:seon.fn/_ns` with `:seon.fn/spec`/`:seon.fn/doc`/
   `:seon.fn/arglists`) — NEVER a file read (code-as-data: the boot indexer is the
   one reader).
   - Docstring line 1 = `(first (str/split-lines doc))`. The renderer trusts the
-    convention; the doc-lint enforces it. No clip is needed once the corpus
-    complies (interim: soft-clip at 78 with `…`).
+    convention; `seon.dev.docstring` enforces it. Interim soft-clip at 78 with `…`.
   - `::` abbreviation for keys whose namespace is the rendered ns.
-- **The namespaces section** (`seon.agent.ctx.namespaces/namespaces-block`) reads
-  the two presence-sets (`db/pull` → membership check per ns): in `::full-source`
-  → full; else → card; `::with-tests` appends tests. Selection of WHICH nses render
-  stays config-driven (#42); this adds the full-vs-compact axis as presence sets.
-- **On-demand expansion.** `render-namespace` / `render-member` already give the
-  agent a full drill of any compact ns or one of its fns. A compact card is never
-  a dead end — the full source (with all the multiline prose) is one call away.
-  This is the "expand to see tips/tricks/fix-comments" affordance.
+- **Ordering.** Stable `seon.*` required cards render FIRST (name-sorted, a cache
+  PREFIX); then the agent's churning `my.*` / current ns BODY, recency-ordered so
+  the current ns sits nearest the tail — a stable prompt-cache prefix.
+- **The current ns always renders**, even empty: a fresh home ns (`my.agent.<id>`)
+  with no indexed source becomes a `cur-ns-workspace-stub` showing the real
+  `(ns … (:require …))` form it was installed with (GI-2 — the "YOUR OWN namespace
+  renders in full" promise holds on turn 0).
+- **On-demand expansion.** `render-namespace` / `render-member` give the agent a
+  full drill of any compact or dropped ns. A card is never a dead end — the full
+  source (with all the multiline prose) is one call away.
 
 ## Enforcement
 
@@ -237,10 +263,11 @@ judgment, not a mechanical script. Sweep ordering: knock out
 
 ## Open questions
 
-- **Include-set axis.** Presence in `::full-source` sets DETAIL, not inclusion.
-  Whether "compact-everywhere for the long tail" broadens the include set to all
-  indexed nses (true coverage) or stays a curated set — an owner-gated flip AFTER
-  the live A/B drive, decided with the config lane.
+- **Include-set axis — RESOLVED (shipped).** The long tail is DROPPED, not
+  compact-everywhere: the include set is `current ns ∪ its :requires ∪
+  ::full-source`, and `:require` (config via `:seon.eval/home-requires`) is the
+  inclusion lever. Presence in `::full-source` sets DETAIL (full vs card) for an
+  already-included ns. Broadening to all-indexed-nses is not the model.
 - **`register!` map noise.** `[::k ::k]` entries could collapse to `{::k ::k? …}`
   (bare keys, `?` = optional) to shrink the block ~40% — but then it is no longer
   literal runnable `register!`. Default: keep verbatim; revisit if the block

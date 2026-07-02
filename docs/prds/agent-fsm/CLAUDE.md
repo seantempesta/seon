@@ -44,7 +44,21 @@ the truth; tests and inference are not. Concretely:
   actual diff; don't write big directive notes at work they're already doing. A
   one-line pointer + the evidence in your commit message is plenty.
 
-## Current state (2026-06-29)
+## Current state (2026-07-02)
+
+**Namespaces-render SHIPPED.** The `:namespaces` section
+(`src/seon/agent/ctx/namespaces.cljs`) now renders the agent's CURRENT ns FULL,
+its `:require`s as COMPACT CARDS (`register!` block + one-line `defn` heads, body
+elided), and DROPS everything else. Inclusion is `:require`-driven — no `:always`
+allow-list, no `compact-worthy?`, no hardcoded `my.*` pinning (all retired) — so
+the default verb surface is CONFIG: `:seon.eval/home-requires` in the manifest.
+Per-ns detail rides presence-sets (`::full-source`/`::with-tests`/
+`::current-full?`/`::current-tests?`) on the `:namespaces` block entity, read
+reactively. Third-party OVERRIDE-PROVEN: `config/acme.edn` picks its own
+home-requires + full-source set (loading `acme.*` code as cards) with zero
+`src/seon` edits. Commits `2eeb3bd9`/`48cae8c1`/`010aa1f5`/`a07dab78`/`b2d4cd86`.
+Docs: [[compact-namespace-cards-spec]] (now SHIPPED) +
+[[namespaces-render]].
 
 **Config-driven agent-init is COMPLETE (CP-4 → CP-5.5, 2026-07-01).** ONE manifest
 (`config/system.edn`, `SEON_CONFIG` override) drives the whole agent context via
