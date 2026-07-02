@@ -37,7 +37,12 @@ indexes are materialized once per cluster, all writes forwarded to the one write
 (total order). A **local "system" cluster** does system work; **user clusters** do
 local data processing. A threaded db *value* is location-agnostic; the work-fence is
 arbitrated at the single writer; `since-t` replay is the network-blip recovery
-primitive.
+primitive. A client cluster is a **trailing applier**: bootstrap the indexes ONCE,
+then each pushed tx is an incremental index update (persistent structures — never a
+rebuild), so a client applying the writer's stream in order is deterministically
+identical to the writer at that t. Open design point (decide when a device cluster
+is real): initial index state = full-log replay, or index-root snapshot + `since-t`
+(the device answer), or lazy follow-the-store reads (LAN-only).
 
 ## The core ideas
 
