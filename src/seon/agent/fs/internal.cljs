@@ -31,6 +31,7 @@
     ["node:fs" :as fs]
     ["node:path" :as np]
     [clojure.string :as str]
+    [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.platform :as platform]))
 
@@ -168,6 +169,125 @@
      :seon.agent.fs/from-line      from
      :seon.agent.fs/lines-returned (- end start)
      :seon.agent.fs/total-lines    total}))
+
+;; ============================================================
+;; edit-file plumbing — pure line/string surgery over file content.
+;; ============================================================
+
+(def edit-context-lines
+  "Lines of surrounding context returned around an in-place edit."
+  3)
+
+(def edit-context-max-tokens
+  "Token cap on the edit-result context window (seon.ai.tokens/estimate)."
+  200)
+
+(defn content->lines
+  "Split file `content` into [lines trailing-newline?] — the trailing
+   \"\" pseudo-line a final newline produces is dropped, so `lines`
+   counts what an editor shows (same convention as [[page-lines]])."
+  [content]
+  (let [raw       (str/split content #"\n" -1)
+        trailing? (and (seq raw) (= "" (peek raw)) (pos? (count content)))]
+    [(if trailing? (pop raw) raw) trailing?]))
+
+(defn replacement->lines
+  "Replacement text as a vector of lines — empty string means DELETE
+   (zero lines); a trailing newline doesn't add a phantom blank line."
+  [replacement]
+  (if (= "" replacement)
+    []
+    (let [ls (str/split replacement #"\n" -1)]
+      (if (and (> (count ls) 1) (= "" (peek ls))) (pop ls) ls))))
+
+(defn edit-context-window
+  "A capped window of `lines` around the changed 1-based inclusive
+   [from to] range — enough for the agent to SEE the edit landed
+   without a full re-read. Token-capped via [[edit-context-max-tokens]]."
+  [lines from to]
+  (let [total (count lines)]
+    (if (zero? total)
+      {:seon.agent.fs/context           ""
+       :seon.agent.fs/context-from-line 1
+       :seon.agent.fs/truncated?        false}
+      (let [from  (min (max 1 from) total)
+            to    (min (max from to) total)
+            start (max 1 (- from edit-context-lines))
+            end   (min total (+ to edit-context-lines))
+            s     (str/join "\n" (subvec lines (dec start) end))
+            over? (> (tokens/estimate s) edit-context-max-tokens)]
+        {:seon.agent.fs/context           (if over?
+                                            (str (subs s 0 (tokens/estimate-chars edit-context-max-tokens)) "…")
+                                            s)
+         :seon.agent.fs/context-from-line start
+         :seon.agent.fs/truncated?        over?}))))
+
+(defn line-range-edit
+  "Replace 1-based inclusive lines [from to] of `content` with
+   `replacement`. Returns {:seon.agent.fs/error <s>} when the range is
+   out of bounds, else the new content + the changed-range facts."
+  [content from to replacement]
+  (let [[lines trailing?] (content->lines content)
+        total             (count lines)]
+    (cond
+      (< from 1)
+      {:seon.agent.fs/error (str "from-line must be >= 1 (got " from ")")}
+
+      (< to from)
+      {:seon.agent.fs/error (str "to-line " to " is before from-line " from
+                                 " (range is 1-based INCLUSIVE)")}
+
+      (> to total)
+      {:seon.agent.fs/error (str "to-line " to " is past the end — the file has "
+                                 total " lines; re-read it and retry")}
+
+      :else
+      (let [new-lines (replacement->lines replacement)
+            spliced   (-> (subvec lines 0 (dec from))
+                          (into new-lines)
+                          (into (subvec lines to)))]
+        {:seon.agent.fs/new-content    (cond-> (str/join "\n" spliced)
+                                         trailing? (str "\n"))
+         :seon.agent.fs/new-lines      spliced
+         :seon.agent.fs/from-line      from
+         :seon.agent.fs/lines-replaced (inc (- to from))
+         :seon.agent.fs/lines-inserted (count new-lines)}))))
+
+(defn count-matches
+  "Occurrences of `s` in `content` plus the first match index —
+   [n first-idx]. Non-overlapping, exact."
+  [content s]
+  (loop [idx 0 n 0 first-idx nil]
+    (if-let [i (str/index-of content s idx)]
+      (recur (+ i (count s)) (inc n) (or first-idx i))
+      [n first-idx])))
+
+(defn match-edit
+  "Replace the UNIQUE exact occurrence of `old-string` in `content`
+   with `new-string`. 0 or >1 matches → {:seon.agent.fs/error <s>}
+   (the safe editor primitive: never guess which match was meant)."
+  [content old-string new-string]
+  (if (= "" old-string)
+    {:seon.agent.fs/error "old-string must be non-empty"}
+    (let [[n idx] (count-matches content old-string)]
+      (case n
+        0 {:seon.agent.fs/error
+           (str "old-string not found (0 matches) — read the file and copy "
+                "the EXACT text, including whitespace")}
+        1 (let [new-content (str (subs content 0 idx)
+                                 new-string
+                                 (subs content (+ idx (count old-string))))
+                from        (inc (count (re-seq #"\n" (subs content 0 idx))))
+                [new-lines _] (content->lines new-content)]
+            {:seon.agent.fs/new-content    new-content
+             :seon.agent.fs/new-lines      new-lines
+             :seon.agent.fs/from-line      from
+             :seon.agent.fs/lines-replaced (inc (count (re-seq #"\n" old-string)))
+             :seon.agent.fs/lines-inserted (inc (count (re-seq #"\n" new-string)))})
+        {:seon.agent.fs/error
+         (str "old-string is AMBIGUOUS (" n " matches) — include more "
+              "surrounding context to make it unique, or use the "
+              "from-line/to-line range mode")}))))
 
 (defn walk-dir-recursive!
   "Depth-first recursive walk (sync). Mutates `!out` (vector of matching

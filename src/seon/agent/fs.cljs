@@ -25,6 +25,9 @@
      (seon.agent.fs/read-file  {:seon.agent.fs/path \"/Users/me/work-folder/notes.md\"})
      (seon.agent.fs/write-file {:seon.agent.fs/path \"/Users/me/work-folder/out.txt\"
                                 :seon.agent.fs/content \"hello\"})
+     (seon.agent.fs/edit-file  {:seon.agent.fs/path \"/Users/me/work-folder/out.txt\"
+                                :seon.agent.fs/old-string \"hello\"
+                                :seon.agent.fs/new-string \"hi\"})
      (seon.agent.fs/list-dir   {:seon.agent.fs/path \"/Users/me/work-folder\"})
      (seon.agent.fs/walk-dir   {:seon.agent.fs/path \"/Users/me/work-folder\"
                                 :seon.agent.fs/match-ext \".md\"})
@@ -106,6 +109,38 @@
    [:seon.agent.fs/ok?     :boolean]
    [:seon.agent.fs/path    :string]
    [:seon.agent.fs/error   {:optional true} :string]])
+
+;; edit-file — in-place edits: line-range OR unique exact-match replace.
+(schema/register! :seon.agent.fs/to-line           :int)
+(schema/register! :seon.agent.fs/old-string        :string)
+(schema/register! :seon.agent.fs/new-string        :string)
+(schema/register! :seon.agent.fs/lines-replaced    :int)
+(schema/register! :seon.agent.fs/lines-inserted    :int)
+(schema/register! :seon.agent.fs/context           :string)
+(schema/register! :seon.agent.fs/context-from-line :int)
+
+(schema/register! :seon.agent.fs/edit-request
+  [:map
+   [:seon.agent.fs/path       :string]
+   [:seon.agent.fs/from-line  {:optional true} :int]
+   [:seon.agent.fs/to-line    {:optional true} :int]
+   [:seon.agent.fs/content    {:optional true} :string]
+   [:seon.agent.fs/old-string {:optional true} :string]
+   [:seon.agent.fs/new-string {:optional true} :string]
+   [:seon.agent.fs/encoding   {:optional true} :string]])
+
+(schema/register! :seon.agent.fs/edit-response
+  [:map
+   [:seon.agent.fs/ok?               :boolean]
+   [:seon.agent.fs/path              :string]
+   [:seon.agent.fs/from-line         {:optional true} :int]
+   [:seon.agent.fs/lines-replaced    {:optional true} :int]
+   [:seon.agent.fs/lines-inserted    {:optional true} :int]
+   [:seon.agent.fs/total-lines       {:optional true} :int]
+   [:seon.agent.fs/context           {:optional true} :string]
+   [:seon.agent.fs/context-from-line {:optional true} :int]
+   [:seon.agent.fs/truncated?        {:optional true} :boolean]
+   [:seon.agent.fs/error             {:optional true} :string]])
 
 (schema/register! :seon.agent.fs/list-request
   [:map
@@ -270,6 +305,90 @@
                      :seon.agent.fs/path path}
                     (catch :default e (int/->err path e))))
     :wasi (int/wasi-pending path "write-file")))
+
+(defn- apply-edit
+  "Read `path`, run `edit-fn` (content → new-content facts or error
+   envelope keys), write the result, return the shared edit envelope."
+  [path encoding edit-fn]
+  (try
+    (let [content (.readFileSync fs path encoding)
+          r       (edit-fn content)]
+      (if (:seon.agent.fs/error r)
+        (int/denied path (:seon.agent.fs/error r))
+        (let [{:seon.agent.fs/keys [new-content new-lines from-line
+                                    lines-replaced lines-inserted]} r
+              to (if (pos? lines-inserted)
+                   (dec (+ from-line lines-inserted))
+                   from-line)]
+          (.writeFileSync fs path new-content encoding)
+          (merge {:seon.agent.fs/ok?            true
+                  :seon.agent.fs/path           path
+                  :seon.agent.fs/from-line      from-line
+                  :seon.agent.fs/lines-replaced lines-replaced
+                  :seon.agent.fs/lines-inserted lines-inserted
+                  :seon.agent.fs/total-lines    (count new-lines)}
+                 (int/edit-context-window new-lines from-line to)))))
+    (catch :default e (int/->err path e))))
+
+(defn edit-file
+  "Edit a file in place: line-range or unique exact-match replace.
+
+   Two modes, ONE result envelope — pass exactly one:
+
+   Line range — replace 1-based INCLUSIVE lines [from-line to-line]
+   with `:seon.agent.fs/content` (empty string = delete the range):
+
+     (seon.agent.fs/edit-file {:seon.agent.fs/path \"/Users/me/work/f.clj\"
+                               :seon.agent.fs/from-line 12
+                               :seon.agent.fs/to-line   14
+                               :seon.agent.fs/content   \"(def x 2)\"})
+
+   Exact match — replace old-string with new-string; old-string must
+   match EXACTLY ONCE (0 or >1 matches → a guiding error, no write —
+   the safe editor primitive):
+
+     (seon.agent.fs/edit-file {:seon.agent.fs/path \"/Users/me/work/f.clj\"
+                               :seon.agent.fs/old-string \"(def x 1)\"
+                               :seon.agent.fs/new-string \"(def x 2)\"})
+
+   Success returns where the edit landed (`from-line`, `lines-replaced`
+   → `lines-inserted`, new `total-lines`) plus a token-capped `context`
+   window of the RESULT (starting at `context-from-line`) — verify from
+   that, no full re-read needed. Same write gate as [[write-file]]:
+   path must be under a granted root and `read-only?` false."
+  {:malli/schema [:=> [:cat :seon.agent.fs/edit-request] :seon.agent.fs/edit-response]}
+  [{:seon.agent.fs/keys [path from-line to-line content old-string new-string encoding]
+    :or {encoding "utf-8"}}]
+  (let [line-mode?  (or (some? from-line) (some? to-line) (some? content))
+        match-mode? (or (some? old-string) (some? new-string))]
+    (case (platform/host)
+      :node (cond
+              (int/read-only?)         (int/denied path "filesystem is read-only (:seon.agent.fs/read-only? true)")
+              (int/out-of-scope? path) (int/scope-denied path)
+
+              (and line-mode? match-mode?)
+              (int/denied path (str "pass ONE mode: from-line/to-line/content "
+                                    "(line range) OR old-string/new-string (exact match)"))
+
+              (and line-mode? (not (and from-line to-line content)))
+              (int/denied path (str "line-range mode needs all of :seon.agent.fs/from-line, "
+                                    ":seon.agent.fs/to-line (1-based inclusive) and "
+                                    ":seon.agent.fs/content"))
+
+              (and match-mode? (not (and old-string new-string)))
+              (int/denied path (str "exact-match mode needs both :seon.agent.fs/old-string "
+                                    "and :seon.agent.fs/new-string"))
+
+              line-mode?
+              (apply-edit path encoding #(int/line-range-edit % from-line to-line content))
+
+              match-mode?
+              (apply-edit path encoding #(int/match-edit % old-string new-string))
+
+              :else
+              (int/denied path (str "no edit given — pass from-line/to-line/content "
+                                    "(line range) or old-string/new-string (exact match)")))
+      :wasi (int/wasi-pending path "edit-file"))))
 
 (defn list-dir
   "List directory entries (filenames only, no recursion) — sync."

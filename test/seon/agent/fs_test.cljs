@@ -24,10 +24,15 @@
      (require 'seon.agent.fs-test :reload)
      (cljs.test/run-tests 'seon.agent.fs-test)"
   (:require
+    ["node:fs" :as nfs]
+    ["node:path" :as npath]
     [clojure.string :as str]
     [cljs.test :refer [deftest is testing use-fixtures]]
     [seon.agent.fs :as fs]
     [seon.agent.fs.internal :as fs-int]))
+
+(def ^:private edit-dir
+  (.resolve npath (str "tmp/fs-edit-test-" (.-pid js/process))))
 
 (def ^:private !saved (atom nil))
 (def ^:private !saved-lock (atom nil))
@@ -45,7 +50,8 @@
              (set-lock-env! nil))
    :after  (fn []
              (reset! fs-int/!config @!saved)
-             (set-lock-env! @!saved-lock))})
+             (set-lock-env! @!saved-lock)
+             (.rmSync nfs edit-dir #js {:recursive true :force true}))})
 
 (deftest grants-returns-the-configured-truth
   (fs/configure! {:seon.agent.fs/allowed-roots ["/Users/grantee/work"
@@ -154,3 +160,139 @@
       (is (= "" (:seon.agent.fs/content page)))
       (is (pos? (:seon.agent.fs/total-lines page))
           "total-lines still reports the real file size"))))
+
+;; ============================================================
+;; edit-file — in-place line-range + unique exact-match edits.
+;; Hermetic: pid-scoped tmp dir, granted writable per test.
+;; ============================================================
+
+(defn- edit-fixture!
+  "Fresh pid-scoped tmp file with `content`; grants the dir writable.
+   Returns the file's absolute path."
+  [content]
+  (.rmSync nfs edit-dir #js {:recursive true :force true})
+  (.mkdirSync nfs edit-dir #js {:recursive true})
+  (let [path (.join npath edit-dir "target.txt")]
+    (.writeFileSync nfs path content "utf-8")
+    (fs/configure! {:seon.agent.fs/allowed-roots [edit-dir]
+                    :seon.agent.fs/read-only?    false})
+    path))
+
+(defn- file-content [path]
+  (.readFileSync nfs path "utf-8"))
+
+(deftest edit-file-line-range-lands-exactly-with-context
+  (let [path (edit-fixture! "l1\nl2\nl3\nl4\nl5\nl6\nl7\nl8\nl9\nl10\n")
+        r    (fs/edit-file {:seon.agent.fs/path path
+                            :seon.agent.fs/from-line 4
+                            :seon.agent.fs/to-line   5
+                            :seon.agent.fs/content   "NEW-A\nNEW-B\nNEW-C"})]
+    (is (true? (:seon.agent.fs/ok? r)))
+    (is (= "l1\nl2\nl3\nNEW-A\nNEW-B\nNEW-C\nl6\nl7\nl8\nl9\nl10\n"
+           (file-content path))
+        "1-based INCLUSIVE range [4 5] replaced; trailing newline preserved")
+    (is (= 4  (:seon.agent.fs/from-line r)))
+    (is (= 2  (:seon.agent.fs/lines-replaced r)))
+    (is (= 3  (:seon.agent.fs/lines-inserted r)))
+    (is (= 11 (:seon.agent.fs/total-lines r)))
+    (is (= 1 (:seon.agent.fs/context-from-line r))
+        "context window starts 3 lines above the edit (clamped to 1)")
+    (is (= "l1\nl2\nl3\nNEW-A\nNEW-B\nNEW-C\nl6\nl7\nl8"
+           (:seon.agent.fs/context r))
+        "the context SHOWS the landed edit — new lines + 3 lines each side")
+    (is (false? (:seon.agent.fs/truncated? r)))))
+
+(deftest edit-file-line-range-out-of-range-is-an-error-value
+  (let [path (edit-fixture! "a\nb\nc\n")
+        r    (fs/edit-file {:seon.agent.fs/path path
+                            :seon.agent.fs/from-line 2
+                            :seon.agent.fs/to-line   9
+                            :seon.agent.fs/content   "x"})]
+    (is (false? (:seon.agent.fs/ok? r)))
+    (is (str/includes? (:seon.agent.fs/error r) "3 lines")
+        "the error names the file's REAL line count")
+    (is (= "a\nb\nc\n" (file-content path)) "no write on error")))
+
+(deftest edit-file-exact-match-replaces-the-unique-occurrence
+  (let [path (edit-fixture! "(def x 1)\n(def y 2)\n(def z 3)\n")
+        r    (fs/edit-file {:seon.agent.fs/path path
+                            :seon.agent.fs/old-string "(def y 2)"
+                            :seon.agent.fs/new-string "(def y 42)"})]
+    (is (true? (:seon.agent.fs/ok? r)))
+    (is (= "(def x 1)\n(def y 42)\n(def z 3)\n" (file-content path)))
+    (is (= 2 (:seon.agent.fs/from-line r)) "edit landed on line 2")
+    (is (str/includes? (:seon.agent.fs/context r) "(def y 42)")
+        "context shows the NEW text")))
+
+(deftest edit-file-zero-and-ambiguous-matches-are-distinct-errors
+  (testing "0 matches"
+    (let [path (edit-fixture! "alpha\nbeta\n")
+          r    (fs/edit-file {:seon.agent.fs/path path
+                              :seon.agent.fs/old-string "gamma"
+                              :seon.agent.fs/new-string "delta"})]
+      (is (false? (:seon.agent.fs/ok? r)))
+      (is (str/includes? (:seon.agent.fs/error r) "not found"))
+      (is (= "alpha\nbeta\n" (file-content path)) "no write")))
+  (testing ">1 matches"
+    (let [path (edit-fixture! "same\nother\nsame\n")
+          r    (fs/edit-file {:seon.agent.fs/path path
+                              :seon.agent.fs/old-string "same"
+                              :seon.agent.fs/new-string "diff"})]
+      (is (false? (:seon.agent.fs/ok? r)))
+      (is (str/includes? (:seon.agent.fs/error r) "AMBIGUOUS"))
+      (is (str/includes? (:seon.agent.fs/error r) "2 matches")
+          "the error counts the matches")
+      (is (= "same\nother\nsame\n" (file-content path)) "no write"))))
+
+(deftest edit-file-respects-the-write-gate
+  (testing "ungranted path → allowlist denial"
+    (edit-fixture! "a\n")
+    (let [r (fs/edit-file {:seon.agent.fs/path "/somewhere/else/f.txt"
+                           :seon.agent.fs/old-string "a"
+                           :seon.agent.fs/new-string "b"})]
+      (is (false? (:seon.agent.fs/ok? r)))
+      (is (str/includes? (:seon.agent.fs/error r) "allowed-roots"))))
+  (testing "read-only grant refuses, same as write-file"
+    (let [path (edit-fixture! "a\n")]
+      (fs/configure! {:seon.agent.fs/allowed-roots [edit-dir]
+                      :seon.agent.fs/read-only?    true})
+      (let [r (fs/edit-file {:seon.agent.fs/path path
+                             :seon.agent.fs/old-string "a"
+                             :seon.agent.fs/new-string "b"})]
+        (is (false? (:seon.agent.fs/ok? r)))
+        (is (str/includes? (:seon.agent.fs/error r) "read-only"))
+        (is (= "a\n" (file-content path)) "no write")))))
+
+(deftest edit-file-mode-selection-errors-guide-the-caller
+  (let [path (edit-fixture! "a\nb\n")]
+    (testing "both modes at once"
+      (let [r (fs/edit-file {:seon.agent.fs/path path
+                             :seon.agent.fs/from-line 1
+                             :seon.agent.fs/to-line 1
+                             :seon.agent.fs/content "x"
+                             :seon.agent.fs/old-string "a"
+                             :seon.agent.fs/new-string "x"})]
+        (is (false? (:seon.agent.fs/ok? r)))
+        (is (str/includes? (:seon.agent.fs/error r) "ONE mode"))))
+    (testing "neither mode"
+      (let [r (fs/edit-file {:seon.agent.fs/path path})]
+        (is (false? (:seon.agent.fs/ok? r)))
+        (is (str/includes? (:seon.agent.fs/error r) "no edit given"))))
+    (testing "incomplete line mode"
+      (let [r (fs/edit-file {:seon.agent.fs/path path
+                             :seon.agent.fs/from-line 1})]
+        (is (false? (:seon.agent.fs/ok? r)))
+        (is (str/includes? (:seon.agent.fs/error r) "line-range mode"))))
+    (is (= "a\nb\n" (file-content path)) "no write on any mode error")))
+
+(deftest edit-file-empty-content-deletes-the-range
+  (let [path (edit-fixture! "keep1\ndrop1\ndrop2\nkeep2\n")
+        r    (fs/edit-file {:seon.agent.fs/path path
+                            :seon.agent.fs/from-line 2
+                            :seon.agent.fs/to-line   3
+                            :seon.agent.fs/content   ""})]
+    (is (true? (:seon.agent.fs/ok? r)))
+    (is (= "keep1\nkeep2\n" (file-content path)))
+    (is (= 2 (:seon.agent.fs/lines-replaced r)))
+    (is (= 0 (:seon.agent.fs/lines-inserted r)))
+    (is (= 2 (:seon.agent.fs/total-lines r)))))
