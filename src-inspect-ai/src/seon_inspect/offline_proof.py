@@ -18,9 +18,9 @@ import sys
 
 from inspect_ai import eval as inspect_eval
 
-from e1_spec_fn_task import e1_spec_fn
-from ladder_lift_task import ladder_lift
-from skill_lift_task import skill_lift
+from seon_inspect.tasks.e1_spec_fn import e1_spec_fn
+from seon_inspect.tasks.ladder_lift import ladder_lift
+from seon_inspect.tasks.skill_lift import skill_lift
 
 RUNS = [
     ("E1 arm1 guided_refine", lambda: e1_spec_fn(arm="arm1_guided_refine",

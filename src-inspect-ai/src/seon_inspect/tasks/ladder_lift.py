@@ -23,17 +23,13 @@ GPU: -T endpoint=runpod (after verify_fresh — runbook step 0).
 from __future__ import annotations
 
 import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
 from inspect_ai import Epochs, Task, task
 from inspect_ai.dataset import MemoryDataset, Sample
 from inspect_ai.scorer import pass_at
 from inspect_ai.solver import Generate, TaskState, solver
 
-from oracle_scorers import assert_oracle_live, ladder_scorer
-from worker_endpoints import resolve_endpoint
+from seon_inspect.oracle_scorers import assert_oracle_live, ladder_scorer
+from seon_inspect.worker_endpoints import resolve_endpoint
 
 TASKS = [
     {

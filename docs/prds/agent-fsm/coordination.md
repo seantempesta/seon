@@ -1366,3 +1366,17 @@ forward-written target-design set, joined by the new sixth design doc
 **`roadmap.md` STAYS here** — it is the sole "we-are-here" doc and lives with
 the PRD, as does `research/`. The read-path is unchanged in spirit: **read
 [[architecture]] (the map) FIRST** — the wikilinks resolve to the new home.
+
+## 2026-07-02 — inspect-ai code has a canonical packaged home: `src-inspect-ai/`
+
+Owner directive: inspect-ai is core, maintained code — it no longer lives in
+research dirs. The `/solve` solver (`seon_pod_solver` + `timeout_honesty`) is
+PROMOTED into the package as `seon_inspect.solver`, and the diffusion
+measurement tasks (E1 three-arm / skill-lift / ladder-lift) ship beside it
+with oracle-backed scorers, a fail-loud oracle-liveness gate, and pass^k
+epochs (pytest 15/15 + an offline proof, all against the REAL bb+node
+oracles). **`docs/prds/agent-fsm/research/inspect-bridge-spike/` is historical
+— do not extend it; future bench work goes in the package** (`uv venv && uv
+pip install -e ".[test]"`; inspect-ai installs from the vendored
+`reference-code/inspect-ai` source). Run matrix + parity map:
+`src-inspect-ai/README.md`.

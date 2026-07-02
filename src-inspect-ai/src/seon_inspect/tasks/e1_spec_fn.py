@@ -16,34 +16,31 @@ Scored by `ladder_scorer` (parse -> structural -> eval -> BEHAVIORAL -> vacuity;
 CORRECT iff faithful). Epochs give pass^k. The oracle-liveness gate runs at task
 construction and refuses a dead/lenient oracle stack.
 
-RUN (offline, canned worker, REAL oracles):
-    .venv/bin/inspect eval e1_spec_fn_task.py@e1_spec_fn \
+RUN (offline, canned worker, REAL oracles — from src-inspect-ai/, package installed):
+    inspect eval seon_inspect/tasks/e1_spec_fn.py@e1_spec_fn \
       -T arm=arm1_guided_refine -T endpoint=mock:guided_wins \
       --model mockllm/model --display plain
 GPU: -T endpoint=runpod (env DIFFGEMMA_EP + RUNPOD_API_KEY; verify_fresh first —
-runbook step 0). Raw generations persist to e1_inspect_samples.jsonl (auditable).
+runbook step 0). Raw generations persist to $SEON_E1_SAMPLES (default
+./e1_inspect_samples.jsonl — auditable).
 """
 
 from __future__ import annotations
 
 import json
 import os
-import sys
 import time
-
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from inspect_ai import Epochs, Task, task
 from inspect_ai.dataset import MemoryDataset, Sample
 from inspect_ai.scorer import pass_at
 from inspect_ai.solver import Generate, TaskState, solver
 
-from oracle_scorers import (assert_oracle_live, evalsrv, fn_form, ladder_scorer,
-                            oracle_parse, strip_fence)
-from worker_endpoints import resolve_endpoint
+from seon_inspect.oracle_scorers import (assert_oracle_live, evalsrv, fn_form,
+                                         ladder_scorer, oracle_parse, strip_fence)
+from seon_inspect.worker_endpoints import resolve_endpoint
 
-SAMPLES_LOG = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           "e1_inspect_samples.jsonl")
+SAMPLES_LOG = os.environ.get("SEON_E1_SAMPLES", "e1_inspect_samples.jsonl")
 REFINE_K = 28
 REFINE_MAX_ITERS = 4
 RENOISE_STEPS = 12

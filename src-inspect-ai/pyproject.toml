@@ -1,0 +1,28 @@
+[project]
+name = "seon-inspect"
+version = "0.1.0"
+description = "Seon benchmarks on the inspect-ai standard harness: /solve pod solver, oracle-backed scorers, diffusion measurement tasks"
+requires-python = ">=3.10"
+# inspect-ai: proven against the vendored dev build 0.1.dev1+g92dd737b9
+# (reference-code/inspect-ai). `uv sync` installs it from that source path so
+# the version we run is the version we proved; anyio rides in with it (the
+# solvers use anyio.to_thread + stdlib urllib — no extra HTTP client).
+dependencies = [
+    "inspect-ai",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8"]
+
+[tool.uv.sources]
+inspect-ai = { path = "../reference-code/inspect-ai" }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/seon_inspect"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -59,7 +59,7 @@ class CallableEndpoint:
 def resolve_endpoint(spec: str):
     """Turn a task-parameter endpoint spec into a .call()-able endpoint."""
     if spec.startswith("mock:"):
-        from worker_mock import make_mock_endpoint
+        from seon_inspect.worker_mock import make_mock_endpoint
         return CallableEndpoint(make_mock_endpoint(spec.split(":", 1)[1]))
     if spec == "runpod":
         return RunPodEndpoint()
