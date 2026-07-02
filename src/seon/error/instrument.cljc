@@ -48,6 +48,7 @@
    [clojure.walk :as walk]
    [malli.core :as m]
    [malli.error :as me]
+   [seon.ai.tokens :as tokens]
    [seon.schema :as schema]))
 
 ;; ============================================================
@@ -139,14 +140,6 @@
        :cljs (try (.. v -constructor -name)
                   (catch :default _ "unknown")))))
 
-(defn- truncate-pr
-  "pr-str + middle-ellipsize at `limit` chars. Keeps the start and end
-   visible, ellipsis in the middle — most useful for big maps."
-  [v limit]
-  (let [s (pr-str v)]
-    (if (> (count s) limit)
-      (str (subs s 0 (- limit 3)) "...")
-      s)))
 
 ;; ============================================================
 ;; Hint inference
@@ -225,14 +218,14 @@
                         :seon.error.malli/path (vec (:in first-leaf))
                         :seon.error.malli/explain-path (vec (:path first-leaf))
                         :seon.error.malli/leaf-type (:type first-leaf)
-                        :seon.error.malli/expected (truncate-pr (m/form (:schema first-leaf)) 200)
-                        :seon.error.malli/got-edn (truncate-pr leaf-value 200)
+                        :seon.error.malli/expected (tokens/bounded-pr-str (m/form (:schema first-leaf)) 50)
+                        :seon.error.malli/got-edn (tokens/bounded-pr-str leaf-value 50)
                         :seon.error.malli/got-type (got-type leaf-value))
       humanized  (assoc :seon.error.malli/humanized humanized)
       (seq leafs) (assoc :seon.error.malli/errors (mapv #(into {} %) leafs))
       arg-index  (assoc :seon.error.malli/arg-index arg-index)
       (= kind :seon.error.kind/malli-instrument-output)
-      (assoc :seon.error.malli/return-value-edn (truncate-pr value 200))
+      (assoc :seon.error.malli/return-value-edn (tokens/bounded-pr-str value 50))
       (= kind :seon.error.kind/malli-instrument-arity)
       (cond->
         arity   (assoc :seon.error.malli/arity arity)

@@ -33,6 +33,7 @@
   (:require
     [clojure.string :as str]
     [seon.agent.turn :as turn]
+    [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.render :as render]
@@ -61,10 +62,10 @@
     ""))
 
 (defn- truncate
-  "One-line clamp of `s` to `n` chars (newlines → spaces), with an ellipsis."
-  [s n]
-  (let [s (-> (str s) (str/replace #"\s+" " ") str/trim)]
-    (if (> (count s) n) (str (subs s 0 (max 0 (dec n))) "…") s)))
+  "One-line clamp of `s` to a token `budget` (newlines → spaces, ellipsis)."
+  [s budget]
+  (-> (str s) (str/replace #"\s+" " ") str/trim
+      (tokens/clip-str budget)))
 
 (defn- all-agent-ids
   "Every agent id in the store (root + children), root FIRST then the rest
@@ -181,7 +182,7 @@
             [?ev :seon.eval/at ?at]
             [(get-else $ ?ev :seon.eval/source "") ?src]]})
        (keep (fn [[at aid src]]
-               (let [text (truncate src 80)]
+               (let [text (truncate src 20)]
                  ;; Skip blank-source rows (a bare `}` / whitespace-only form
                  ;; split out of a multi-line eval) — noise in a glance feed.
                  (when-not (str/blank? text)
@@ -218,7 +219,7 @@
                     ::kind  :message
                     ::label label
                     ::href  (str "/agent/" aid)
-                    ::text  (truncate (:seon.agent.message/content m) 80)}))))))
+                    ::text  (truncate (:seon.agent.message/content m) 20)}))))))
 
 (defn recent-activity
   "The UNFILTERED cross-agent event stream over db `db`.
@@ -401,7 +402,7 @@
       (for [{:keys [seon.agent/id seon.agent/purpose]
              ::keys [turns root?] state :seon.derive/state} agents]
         (str "; - " (when root? "★ ") id " [" (name state) "] " turns " turns"
-             (when purpose (str " — " (truncate purpose 60))))))))
+             (when purpose (str " — " (truncate purpose 15))))))))
 
 (defn- store-ai [{:seon.db/keys [attr-groups attr-ns-count attr-count datom-count]}]
   (str/join

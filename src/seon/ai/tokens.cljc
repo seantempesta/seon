@@ -50,3 +50,46 @@
   {:malli/schema [:=> [:catn [::tokens ::tokens]] ::chars]}
   [n]
   (* n chars-per-token))
+
+;; ============================================================
+;; Bounded print — the ONE clip helper (dual-code-paths registry C2).
+;; The API speaks TOKENS (Token Reporting rule); char math is internal.
+;; ============================================================
+
+(schema/register! ::budget [:int {:min 0}])
+;; (fn [budget-tokens total-tokens] -> string) appended at the cut — a
+;; caller's LOUD marker (e.g. seon.agent.ctx's truncation guides).
+(schema/register! ::marker-fn [:fn fn?])
+
+(defn- ellipsis-marker
+  "The default cut marker — a bare ellipsis."
+  [_budget _total]
+  "…")
+
+(defn clip-str
+  "Clip string `s` to a token `budget`, marking the cut (default `…`).
+
+   A fitting `s` is returned unchanged. Otherwise it is cut at the
+   budget's char equivalent and `(marker budget total-tokens)` is
+   appended, so a caller can surface a loud, token-denominated
+   truncation notice. Nil-safe (`nil` → `\"\"`)."
+  {:malli/schema [:function
+                  [:=> [:catn [::text :any] [::budget ::budget]] ::text]
+                  [:=> [:catn [::text :any] [::budget ::budget]
+                        [::marker-fn ::marker-fn]] ::text]]}
+  ([s budget] (clip-str s budget ellipsis-marker))
+  ([s budget marker]
+   (let [s     (str s)
+         limit (estimate-chars budget)]
+     (if (> (count s) limit)
+       (str (subs s 0 limit) (marker budget (estimate s)))
+       s))))
+
+(defn bounded-pr-str
+  "`pr-str` of `v` clipped to a token `budget` (`…` marks the cut).
+
+   The one bounded-print for quoting a value in an error message or a
+   glance surface without dumping the whole structure."
+  {:malli/schema [:=> [:catn [::value :any] [::budget ::budget]] ::text]}
+  [v budget]
+  (clip-str (pr-str v) budget))

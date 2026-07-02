@@ -139,18 +139,18 @@
 
       (record? x)
       {:seon.eval/opaque (or (some-> (type x) pr-str) "record")
-       :seon.eval/summary (let [s (pr-str x)] (subs s 0 (min 80 (count s))))}
+       :seon.eval/summary (tokens/clip-str (pr-str x) 20)}
 
       (fn? x)
       {:seon.eval/opaque "fn"}
 
       (object? x)
       {:seon.eval/opaque "js/Object"
-       :seon.eval/summary (let [s (pr-str x)] (subs s 0 (min 80 (count s))))}
+       :seon.eval/summary (tokens/clip-str (pr-str x) 20)}
 
       :else
       {:seon.eval/opaque "unknown"
-       :seon.eval/summary (let [s (str x)] (subs s 0 (min 80 (count s))))})
+       :seon.eval/summary (tokens/clip-str (str x) 20)})
     (catch :default _
       {:seon.eval/opaque "unknown" :seon.eval/summary "<unprintable>"})))
 

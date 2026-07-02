@@ -18,6 +18,7 @@
     [datahike.api :as d]
     [datahike.db.interface :as dbi]
     [malli.core :as m]
+    [seon.ai.tokens :as tokens]
     [seon.db :as-alias db]
     [seon.error :as error]
     [seon.schema :as schema]))
@@ -512,14 +513,14 @@
                        :seon.error/kind      :user-input})))))
 
 (defn truncate-value
-  "Truncate a value's `pr-str` representation to 100 chars for error
-   messages — keeps error payloads readable when a malformed value is
-   large (e.g. a stringified pull pattern)."
+  "Bounded `pr-str` of `v` (~25 tokens) for quoting in error messages.
+
+   `seon.ai.tokens/bounded-pr-str` with this file's error-payload budget —
+   keeps error payloads readable when a malformed value is large (e.g. a
+   stringified pull pattern)."
+  {:malli/schema [:=> [:catn [::value :any]] :string]}
   [v]
-  (let [s (pr-str v)]
-    (if (> (count s) 100)
-      (str (subs s 0 97) "...")
-      s)))
+  (tokens/bounded-pr-str v 25))
 
 (defn normalize-entity-ref-keys
   "Rewrite the taught entity-identity shorthand — an entity map keyed by

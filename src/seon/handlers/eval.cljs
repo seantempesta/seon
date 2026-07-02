@@ -32,18 +32,13 @@
    readable thing the agent wrote."
   (:require
     [clojure.string :as str]
+    [seon.ai.tokens :as tokens]
     [seon.render :as render]))
 
-(def ^:private source-truncate 800)
-(def ^:private result-summary-truncate 80)
-(def ^:private error-summary-truncate 120)
-
-(defn- truncate
-  [s n]
-  (let [s (str s)]
-    (if (> (count s) n)
-      (str (subs s 0 n) " …")
-      s)))
+;; Display budgets, in TOKENS (clipped via seon.ai.tokens/clip-str).
+(def ^:private source-truncate 200)
+(def ^:private result-summary-truncate 20)
+(def ^:private error-summary-truncate 30)
 
 (defn- short-result
   "One-line summary of a successful eval's `:seon.eval/result-edn`. The
@@ -54,7 +49,7 @@
   (when result-edn
     (let [s (str result-edn)
           first-line (or (first (str/split-lines s)) "")]
-      (truncate first-line result-summary-truncate))))
+      (tokens/clip-str first-line result-summary-truncate))))
 
 (defn- short-error
   "One-line summary of a failed eval's `:seon.eval/error` (a `pr-str`
@@ -68,7 +63,7 @@
           msg (when-let [m (re-find #":seon\.error/message\s+\"((?:[^\"\\]|\\.)*)\"" s)]
                 (second m))
           line (or msg (first (str/split-lines s)) s)]
-      (truncate line error-summary-truncate))))
+      (tokens/clip-str line error-summary-truncate))))
 
 (defn render-ai
   "One eval row for the LLM ctx.
@@ -98,7 +93,7 @@
                     (and narration (not (str/blank? narration)))
                     (conj (str ";; " (str/trim narration)))
                     true (conj header)
-                    true (conj (truncate (str/trim src) source-truncate))
+                    true (conj (tokens/clip-str (str/trim src) source-truncate))
                     tail (conj tail))]
     (str/join "\n" lines)))
 

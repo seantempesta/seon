@@ -60,6 +60,7 @@
   (:require
     [clojure.string :as str]
     [cljs.reader :as edn]
+    [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.db :as db]
     [seon.error.instrument :as einstrument]
@@ -442,19 +443,20 @@
    applied, so the `:seon.render/full?` no-clip opt-out lives in ONE spot.
    Returns `s` UNCUT when `full?` (a block / value / eval-row pinned
    `:seon.render/full? true` to keep its content whole past the cap) OR
-   when `s` already fits `limit`. Otherwise truncates to `limit` chars and
-   appends `(marker limit total-chars)` — the call site's LOUD marker, so a
+   when `s` already fits `limit`. Otherwise the cut is
+   `seon.ai.tokens/clip-str` at the limit's token equivalent and the call
+   site's LOUD `(marker budget-tokens total-tokens)` is appended, so a
    clipped display can never pass for complete content. The safety cap thus
    still fires for UNFLAGGED, genuinely-huge dumps; the flag only bypasses
-   it. Nil-safe."
+   it. `limit` is CHARS (the ctx cap plumbing — `seon.config` render caps);
+   markers speak TOKENS (Token Reporting rule). Nil-safe."
   {:malli/schema [:=> [:catn [::s :any] [::limit :int]
                        [::full? :boolean] [::marker [:fn fn?]]] :string]}
   [s limit full? marker]
-  (let [s (str s)
-        n (count s)]
-    (if (or full? (<= n limit))
+  (let [s (str s)]
+    (if (or full? (<= (count s) limit))
       s
-      (str (subs s 0 limit) (marker limit n)))))
+      (tokens/clip-str s (tokens/chars->tokens limit) marker))))
 
 (defn truncate-edn
   "pr-str a value and truncate to ~2 KB for the eval log.
@@ -470,8 +472,8 @@
   ([v limit] (truncate-edn v limit false))
   ([v limit full?]
    (clip-or-full (pr-str v) limit full?
-     (fn [limit n]
-       (str " …⟨⚠ TRUNCATED at " limit " of " n " chars — display clip, "
+     (fn [budget total]
+       (str " …⟨⚠ TRUNCATED at " budget " of " total " tokens — display clip, "
             "the underlying value is complete⟩")))))
 
 (defn message-label
@@ -534,7 +536,7 @@
 (defn cap-result
   "Truncate a rendered eval-result string to `eval-render-cap`.
 
-   Appends a LOUD truncation marker (shown of full chars) so a
+   Appends a LOUD truncation marker (shown of full tokens) so a
    clipped display can never pass for complete content — the observed
    failure mode is an agent summarizing INVENTED content from a
    silently-clipped render. Operates on the ALREADY-stringified result
@@ -548,8 +550,8 @@
   ([s limit] (cap-result s limit false))
   ([s limit full?]
    (clip-or-full s limit full?
-     (fn [limit n]
-       (str " …⟨⚠ TRUNCATED at " limit " of " n " chars — the DISPLAY is "
+     (fn [budget total]
+       (str " …⟨⚠ TRUNCATED at " budget " of " total " tokens — the DISPLAY is "
             "clipped, the underlying data is complete; do not summarize "
             "or quote beyond what is shown⟩")))))
 
@@ -596,12 +598,12 @@
   ([s limit eid] (cap-result-body s limit eid false))
   ([s limit eid full?]
    (clip-or-full s limit full?
-     (fn [limit n]
+     (fn [budget total]
        (let [ref (if eid (str "result/" eid) "result/<id>")]
-         (str " …⟨⚠ TRUNCATED at " limit " of " n " chars — the DISPLAY "
+         (str " …⟨⚠ TRUNCATED at " budget " of " total " tokens — the DISPLAY "
               "is clipped, the live value is COMPLETE⟩"
-              "\n; Never summarize or quote beyond the shown " limit
-              " chars — bind and process the value with code: " ref
+              "\n; Never summarize or quote beyond the shown " budget
+              " tokens — bind and process the value with code: " ref
               " holds it whole; (count " ref "), subs, get-in/filter, or "
               "paged take/drop. To get less next time: a :find aggregate, "
               "a tighter :where, or pull fewer attrs."))))))

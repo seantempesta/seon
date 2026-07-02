@@ -93,10 +93,6 @@
                                      :where [?e :seon.agent/id ?id]]
                     :seon.db/args  [agent-id]}))))
 
-(defn- truncate-val [v n]
-  (let [s (pr-str v)]
-    (if (> (count s) n) (str (subs s 0 n) " …") s)))
-
 ;; ============================================================
 ;; Context bar — the per-section token + cache-line audit instrument.
 ;; DISPLAY-ONLY, all DERIVED at render time: per-section estimated tokens
@@ -826,7 +822,7 @@
                          (map (fn [c]
                                 [:td {:class "pr-3 py-0.5 text-text-100 break-all"}
                                  (if (contains? row c)
-                                   (truncate-val (get row c) 120)
+                                   (tokens/bounded-pr-str (get row c) 30)
                                    "")]))
                          cols)))
             rows)]]))

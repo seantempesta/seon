@@ -100,6 +100,7 @@
    tile must never silently vanish (vanish = indistinguishable from
    unwired; banned)."
   (:require
+    [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.render.chat :as chat]
     [seon.schema :as schema]
@@ -195,13 +196,6 @@
    [::structure-path    ::structure-path]
    [::structure-message ::structure-message]])
 
-(defn- pr-str-bounded
-  "pr-str `x` clipped to ~120 chars — error messages quote the
-   offending node without dumping a whole hiccup tree."
-  [x]
-  (let [s (pr-str x)]
-    (if (> (count s) 120) (str (subs s 0 120) "…") s)))
-
 (defn- structure-error-at
   "Walk `x` the way seon.ui.html renders it; return the first fatal
    structural defect as {::structure-path ::structure-message}, or
@@ -232,7 +226,7 @@
          ::structure-message
          (str "vector-of-vectors child — the element at this path is a "
               "vector whose first slot is itself a vector ("
-              (pr-str-bounded tag) "). Splice the children into the "
+              (tokens/bounded-pr-str tag 30) "). Splice the children into the "
               "parent vector, or emit them as a seq — "
               "(list [:div …] [:div …]) — never a nested vector of "
               "elements.")}
@@ -241,7 +235,7 @@
         {::structure-path path
          ::structure-message
          (str "invalid tag — must be a keyword, symbol, or string; got "
-              (pr-str-bounded tag))}
+              (tokens/bounded-pr-str tag 30))}
 
         :else
         (let [body      (rest x)
@@ -274,7 +268,7 @@
              (str "misplaced attrs map — the attrs map must be the SECOND "
                   "element (immediately after the tag), before any children; "
                   "got a map at child index " misplaced-i " ("
-                  (pr-str-bounded (nth children misplaced-i))
+                  (tokens/bounded-pr-str (nth children misplaced-i) 30)
                   "). Move it to the second slot, e.g. [" (pr-str (nth x 0))
                   " {…} child …], or drop it if it was meant as content.")}
             (some identity
