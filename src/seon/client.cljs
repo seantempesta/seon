@@ -422,9 +422,9 @@
    :seon.render/ai
    :seon.render/html
 
-   ;; --- Ctx section entities (seon.agent.ctx; self-context spec 2026-06-10).
-   ;; :seon.agent.ctx/fn is DEAD — the one slot attr is :seon.render/ai
-   ;; (above), string-or-symbol via the bridge's EDN-string encoding. ---
+   ;; --- Ctx section entities (seon.agent.ctx) — the one slot attr is
+   ;; :seon.render/ai (above), string-or-symbol via the bridge's
+   ;; EDN-string encoding. ---
    :seon.agent.ctx/name
    :seon.agent.ctx/priority
    ;; per-agent live-DB render override (cardinality-many ns-name keywords) —

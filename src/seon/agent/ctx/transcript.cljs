@@ -84,11 +84,7 @@
                                                      {::from-turn-offset 5 ::token-cap 200}]}
                                   :seon.db/ref]) ; of ::decay-level entities
 
-;; scalars on the transcript block. `::turns-retained` is wired in CP-5 (the
-;; transcript window). `::summary-head?` + `::cite-card?` were registered but had
-;; NO consumer (the summary head + cite-card render unconditionally) — REMOVED as
-;; inert per the "no dangling code" rule (the cite-card fabrication guard #63 is
-;; unconditionally on, which is the intended behavior; no toggle needed).
+;; The transcript window (turns kept verbatim before eviction into summaries).
 (schema/register! ::turns-retained [:int {:default 8 :min 0}])
 
 ;; ============================================================
