@@ -72,15 +72,19 @@
 (defrecord ^:no-doc Raw [s])
 
 (defn raw
-  "Wrap a string so the renderer emits it without escaping. Use for
+  "Wrap a string so the renderer emits it without escaping.
+
+   Use for
    pre-serialized HTML, inline `<script>` bodies, inline `<style>`,
    etc. ANY caller-supplied content wrapped in `raw` becomes an XSS
    surface — the wrapping signals 'I have escaped this myself'."
+  {:malli/schema [:=> [:cat :any] :any]}
   [s]
   (->Raw (str s)))
 
 (defn raw?
   "True iff `x` was produced by `raw`."
+  {:malli/schema [:=> [:cat :any] :boolean]}
   [x]
   (instance? Raw x))
 
@@ -106,6 +110,7 @@
 
 (defn ^:no-doc escape-html
   "Escape the five HTML-special characters in `s`. Returns a string."
+  {:malli/schema [:=> [:cat :any] :string]}
   [s]
   (str/escape (str s) text-escapes))
 
@@ -285,8 +290,11 @@
 (declare render-element)
 
 (defn ^:no-doc render-content
-  "Render a single child node OR seq-of-children. Returns the
+  "Render a single child node OR seq-of-children.
+
+   Returns the
    HTML-string fragment."
+  {:malli/schema [:=> [:cat :any] :string]}
   [x]
   (cond
     (or (nil? x) (false? x))  ""
@@ -294,6 +302,13 @@
     (vector? x)               (render-element x)
     (seq? x)                  (apply str (map render-content x))
     (string? x)               (escape-html x)
+    ;; A bare map is NEVER a valid hiccup child (an attrs map only belongs in
+    ;; element position 2). Elide it — never pr-str it as page text — so a
+    ;; malformed tile (e.g. an agent that puts `:seon.render/ai` INSIDE its
+    ;; `:seon.render/hiccup` instead of as a sibling key) can't leak raw EDN into
+    ;; the human view. (Fail-loud rejection of such tiles is `valid-hiccup?`'s job
+    ;; at the render boundary — flagged to R; this is the serializer backstop.)
+    (map? x)                  ""
     :else                     (escape-html (str x))))
 
 (defn- attrs-map?
@@ -306,6 +321,7 @@
 
 (defn ^:no-doc render-element
   "Render a single hiccup vector to an HTML string."
+  {:malli/schema [:=> [:cat :any] :string]}
   [[tag & body]]
   (let [parsed             (parse-tag tag)
         [attrs children]   (if (attrs-map? (first body))

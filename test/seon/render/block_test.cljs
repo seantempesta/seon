@@ -1,0 +1,137 @@
+(ns seon.render.block-test
+  "Behavioral tests for the typed-block keystone — `seon.render/block`
+   (dispatch on value-kind) + `seon.ui.clojure/clj->hiccup` (the pure
+   server-side highlighter).
+
+   We pin MECHANISM, not exact strings (classes/markup will iterate): the
+   right delegate fires per kind, malformed source degrades, and a throwing
+   input yields an error card — never an exception."
+  (:require
+    [cljs.test :as t :refer [deftest is testing]]
+    [clojure.string :as str]
+    [seon.render :as render]
+    [seon.render.value :as rv]
+    [seon.ui.clojure :as cljhl]
+    [seon.ui.html :as html]
+    [seon.ui.markdown :as md]))
+
+(defn- s [hiccup] (html/->string hiccup))
+
+;; `block-throwing-delegate-yields-error-card` asserts the graceful PROD
+;; fallback (throw → error card, never an exception). Under the harness
+;; strict default (SEON_RENDER_STRICT=1) that render THROWS by design, so
+;; force the fail-loud dial OFF for this ns (process-global env, async-safe).
+(t/use-fixtures :once
+  {:before (fn [] (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT) "0"))
+   :after  (fn [] (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT) "1"))})
+
+;; ============================================================
+;; clj->hiccup — the server-side Clojure highlighter.
+;; ============================================================
+
+(deftest highlighter-emits-hljs-spans
+  (testing "well-formed source tokenizes to the shared .hljs-* palette"
+    (let [out (s (cljhl/clj->hiccup "(defn f [x]\n  ;; note\n  (* x 2 :kw nil \"str\"))"))]
+      (is (str/includes? out "language-clojure hljs") "the code class is the eval-card shape")
+      (is (str/includes? out "hljs-keyword")  "def-form → keyword")
+      (is (str/includes? out "hljs-comment")  "; comment")
+      (is (str/includes? out "hljs-number")   "number")
+      (is (str/includes? out "hljs-symbol")   ":keyword → symbol")
+      (is (str/includes? out "hljs-literal")  "nil → literal")
+      (is (str/includes? out "hljs-string")   "string"))))
+
+(deftest highlighter-degrades-on-malformed-source
+  (testing "partial / malformed source never throws and keeps the text"
+    (doseq [src ["(foo } ]] :bad \"unterminated"
+                 "}"
+                 "(defn"
+                 "\\( \\newline"
+                 ""]]
+      (let [h   (cljhl/clj->hiccup src)
+            out (s h)]                       ; serializes without throwing
+        (is (vector? h) (str "still hiccup for: " (pr-str src)))
+        (is (str/includes? out "language-clojure hljs"))))))
+
+(deftest highlighter-preserves-text
+  (testing "every source char survives into the rendered text (escaped)"
+    (let [out (s (cljhl/clj->hiccup "(map inc coll)"))]
+      (is (str/includes? out "map"))
+      (is (str/includes? out "inc"))
+      (is (str/includes? out "coll")))))
+
+;; ============================================================
+;; block — dispatch on value-kind (html view).
+;; ============================================================
+
+(deftest block-message-kind
+  (testing "a :seon.render/markdown tag → md->hiccup"
+    (let [out (s (render/block :html {:seon.render/markdown "## Hi\n\n**bold**"}))]
+      (is (str/includes? out "<h2"))
+      (is (str/includes? out "<strong")))))
+
+(deftest block-source-kind
+  (testing "a :seon.render/source tag → clj->hiccup (highlighted)"
+    (let [out (s (render/block :html {:seon.render/source "(defn f [] :ok)"}))]
+      (is (str/includes? out "language-clojure hljs"))
+      (is (str/includes? out "hljs-keyword")))))
+
+(deftest block-data-kind
+  (testing "a render-html-data projection → the collapsible value panel"
+    (let [proj (rv/render-html-data "e1" {:a 1 :nested {:b [1 2 3]}})
+          out  (s (render/block :html proj))]
+      (is (str/includes? out "<details"))
+      (is (str/includes? out "value-node"))
+      (is (str/includes? out ":nested")))))
+
+(deftest block-error-kind
+  (testing "a :seon/error value → the error-tile seam"
+    (let [out (s (render/block :html {:seon.error/message "kaboom" :seon.error/where :probe}))]
+      (is (str/includes? out "render error"))
+      (is (str/includes? out "kaboom")))))
+
+(deftest block-hiccup-passthrough
+  (testing "a literal hiccup vector passes through unchanged"
+    (let [h [:div {:class "x"} "literal"]]
+      (is (= h (render/block :html h))))))
+
+(deftest block-fallback-projects-anything
+  (testing "an unknown raw value falls through to the data panel — never throws"
+    (let [out (s (render/block :html {:raw "value" :n 42 :list [9 8 7]}))]
+      (is (str/includes? out "<details"))
+      (is (str/includes? out ":raw")))
+    (is (string? (s (render/block :html 42))))
+    (is (string? (s (render/block :html "plain string"))))))
+
+;; ============================================================
+;; block — ai view returns prompt Strings.
+;; ============================================================
+
+(deftest block-ai-view-returns-strings
+  (testing "every kind renders to a String for the agent prompt"
+    (is (= "## hi" (render/block :ai {:seon.render/markdown "## hi"})))
+    (is (= "(+ 1 2)" (render/block :ai {:seon.render/source "(+ 1 2)"})))
+    (is (string? (render/block :ai (rv/render-html-data "e1" {:a (range 100)}))))
+    (is (= "broke" (render/block :ai {:seon.error/message "broke"})))
+    (is (string? (render/block :ai [:div "literal " [:b "text"]])))
+    (is (string? (render/block :ai {:k 1})))))
+
+;; ============================================================
+;; block — the never-throw guard (generalizes render-entity-html).
+;; ============================================================
+
+(deftest block-throwing-delegate-yields-error-card
+  (testing "a throwing delegate becomes an error card (html) / error text (ai), not an exception"
+    (with-redefs [md/md->hiccup (fn [& _] (throw (js/Error. "boom")))]
+      (let [out (s (render/block :html {:seon.render/markdown "hi"}))]
+        (is (str/includes? out "render error"))
+        (is (str/includes? out "block render failed"))))))
+
+(deftest block-serializes-without-throwing
+  (testing "every kind's html output serializes cleanly"
+    (doseq [x [{:seon.render/markdown "# h"}
+               {:seon.render/source "(inc 1)"}
+               (rv/render-html-data "e" {:a 1})
+               {:seon.error/message "e"}
+               [:div "h"]
+               {:unknown true}]]
+      (is (string? (s (render/block :html x))) (str "serialized: " (pr-str x))))))

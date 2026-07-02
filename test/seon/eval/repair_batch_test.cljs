@@ -60,7 +60,8 @@
                                   (internal/parse-forms source)
                                   'my.agent.test
                                   "rb-agent-2606"
-                                  turn-id)))))
+                                  turn-id
+                                  nil)))))   ; runless eval path — no work fence
 
 (defn- eval-rows
   "All recorded eval rows in `db*`, as a vector of
@@ -200,6 +201,63 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ===========================================================================
+;; #27 FALSIFICATION GATE — a REPAIRED form re-enters the SAME per-entry
+;; dispatch the main loop uses. `(in-ns 'foo` (missing closer) is a
+;; delimiter failure the repair fixes to `(in-ns 'foo)`; the repaired form
+;; must hit the REPL-parity intercept (legible teaching) IDENTICALLY to an
+;; already-valid `(in-ns 'foo)`. Pre-unification the repair sub-loop called
+;; eval-form-entry! directly, BYPASSING parity-intercept — so the repaired
+;; form eval'd `in-ns` (not bootstrapped) and gave an opaque error instead
+;; of the teaching. The distinctive parity phrase is the gate: it appears
+;; ONLY from parity-intercept, never from the eval path.
+;; ===========================================================================
+
+(def ^:private parity-teaching-re
+  #"(?i)to CALL a verb you do NOT need to switch namespace")
+
+(deftest repaired-parity-form-re-enters-same-dispatch
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (let [;; missing close paren → triggers repair → (in-ns 'foo)
+                  rep-res  (await (run-batch! "(in-ns 'foo" (db/new-id!)))
+                  rep-row  (first (eval-rows @db/*conn*))
+                  rep-narr (ffirst
+                             (d/q '[:find ?n
+                                    :where [?e :seon.eval/id]
+                                           [?e :seon.eval/narration ?n]]
+                                  @db/*conn*))]
+              (testing "repaired (in-ns 'foo gets the PARITY teaching (not an eval error)"
+                (is (= 0 (:seon.eval/n-ok rep-res)))
+                (is (= 1 (:seon.eval/n-fail rep-res)))
+                (is (false? (:ok? rep-row)))
+                (is (= "(in-ns 'foo)" (:source rep-row))
+                    "recorded source is the repaired, balanced form")
+                (is (re-find parity-teaching-re (str (:error rep-row)))
+                    "the repaired form re-entered parity-intercept")
+                (is (re-find #"auto-balanced" (str rep-narr))
+                    "the repair diff note still rides on the narration")))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest normal-parity-form-matches-repaired
+  ;; The other half of the gate: an already-valid (in-ns 'foo) produces the
+  ;; SAME parity teaching, proving the repaired path is byte-for-byte the
+  ;; same per-entry mechanism — one dispatch, no parallel path.
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (let [res (await (run-batch! "(in-ns 'foo)" (db/new-id!)))
+                  row (first (eval-rows @db/*conn*))]
+              (testing "normal (in-ns 'foo) also gets the parity teaching"
+                (is (= 0 (:seon.eval/n-ok res)))
+                (is (= 1 (:seon.eval/n-fail res)))
+                (is (false? (:ok? row)))
+                (is (re-find parity-teaching-re (str (:error row))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ===========================================================================
 ;; (c) A.4 FALSIFICATION GATE — a failed (def x …) then (get x :k).
 ;; OBSERVED (live, 2026-06-18): without the fix, (get x :k) → nil/ok? true
 ;; (the false-confidence trap). WITH the def-site provenance fix, the
@@ -290,3 +348,27 @@
                              (str (:error row))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ===========================================================================
+;; read-error-message — the truncation (output-cap) symptom (#73). A pure
+;; sync fn: an "Unexpected EOF" read error is the signature of a form that
+;; ran past the output budget (a giant inline report message), so its
+;; guidance must steer to REPORT=DATA, MESSAGE=POINTER — not "fix the
+;; delimiter" (which is right only for an actual unmatched closer).
+;; ===========================================================================
+
+(deftest read-error-eof-teaches-store-then-point
+  (let [eof (seval/read-error-message
+              "Unexpected EOF while reading string. [at line 2, column 26]"
+              "(message/agent \"abc\" (str \"# Report\nlots cut off mid")
+        del (seval/read-error-message
+              "Unmatched delimiter: ] [at line 1, column 8]"
+              "(foo bar])")]
+    (testing "the EOF/truncation case steers to store-data + send-pointer"
+      (is (re-find #"(?i)truncat"  eof))
+      (is (re-find #"(?i)pointer"  eof))
+      (is (re-find #"my\.kb|:seon\.items" eof))
+      (is (not (re-find #"(?i)fix the delimiter" eof))))
+    (testing "a genuine unmatched-delimiter error keeps the delimiter guidance"
+      (is (re-find #"(?i)fix the delimiter" del))
+      (is (not (re-find #"(?i)pointer" del))))))

@@ -30,20 +30,125 @@
     [seon.schema :as schema]
     ;; The exemplar TEST SIBLING — required so its deftest vars are
     ;; available as #'-literals for the test-sibling full-source guard.
-    [seon.agent.search-test]))
+    [my.plan-test]))
+
+;; index-core! / index-schemas are PURE, DETERMINISTIC builders that do full
+;; runtime introspection (file-read + paren-parse over the whole build
+;; closure — ~50+ fns). Re-running them once per deftest was the single
+;; biggest suite-time cost (~14s of identical re-indexing). Compute ONCE and
+;; share the result across every pure-read test via a `delay` (both are sync —
+;; index-core! returns the tx-data vector directly, NOT a promise — so no
+;; await is needed; just deref). The three async/conn tests below build their
+;; OWN conn-dependent index via core-index-tx and only borrow @core-tx /
+;; @schemas-tx for the pure count comparisons.
+(def core-tx (delay (client/index-core!)))
+(def schemas-tx (delay (client/index-schemas)))
+;; index-tests has no other delay; the three builders share ONE realized
+;; snapshot per ns run via these delays (see freeze-builders! below).
+(def tests-tx (delay (client/index-tests)))
+
+;;; -------------------------------------------------------------------------
+;;; HERMETICITY (issue #69 — same env-coupling class as the search_test fix
+;;; b5c3a3a4).
+;;;
+;;; index-core! / index-schemas / index-tests are "pure" only relative to the
+;;; LIVE program graph: they read var-meta + on-disk source lines, the global
+;;; schema registry (schema/registered-schemas), and @!indexed-test-vars. The
+;;; async tests below build `first-tx` from these builders at one instant (T1)
+;;; and then RE-RUN the same builders inside core-index-tx / prune-core-ghosts!
+;;; at a later instant (T2) and assert the two agree (idempotent no-op, exactly
+;;; the seeded ghosts, only the drifted ns re-emits). When the overnight loop
+;;; runs this suite concurrently with the gym scorecard (or another run), a
+;;; mutation of those globals between T1 and T2 reclassifies a stored core-seed
+;;; row as a ghost / re-emits a fn row, flaking the assertions — even though
+;;; each conn here is a fresh per-test :memory store.
+;;;
+;;; Fix (test-only — the index source is Core's): pin the three builder vars to
+;;; ONE realized snapshot (the file-level delays) for the test's duration, so
+;;; T1 and T2 read identical sets regardless of any concurrent process. with-
+;;; redefs can't be used — its `finally` restores before the Promise chain's
+;;; awaits resolve — so we set! up front and restore in the terminal then/catch
+;;; (the `done*` thunk every async test below funnels through).
+;;; -------------------------------------------------------------------------
+(defn- freeze-builders!
+  "Snapshot index-core! / index-schemas / index-tests to the shared ns-level
+   delays and pin each var to it. Returns a 0-arg `restore!` thunk. Realizes
+   the delays via the ORIGINAL vars (the let bindings run before the set!s) so
+   there is no re-entrant deref."
+  []
+  (let [oc      client/index-core!
+        os      client/index-schemas
+        ot      client/index-tests
+        core    @core-tx
+        schemas @schemas-tx
+        tests   @tests-tx]
+    ;; Explicit-arity fns — NOT (constantly …). CLJS statically dispatches the
+    ;; same-ns call sites in core-index-tx / prune-core-ghosts! to
+    ;; `.cljs$core$IFn$_invoke$arity$0()`; a variadic `(constantly …)` lacks
+    ;; that method and the optimized call throws "arity$0 is not a function".
+    ;; index-tests is multi-arity (0 + [vars]) — pin both so a 1-arity call
+    ;; inside the freeze window can't break either.
+    (set! client/index-core!   (fn [] core))
+    (set! client/index-schemas (fn [] schemas))
+    (set! client/index-tests   (fn ([] tests) ([_] tests)))
+    (fn restore! []
+      (set! client/index-core!   oc)
+      (set! client/index-schemas os)
+      (set! client/index-tests   ot))))
+
+;;; -------------------------------------------------------------------------
+;;; ORDER-INDEPENDENCE (issue #75). The three async tests below pin the builder
+;;; vars to frozen `(fn [] snapshot)` thunks for their cross-await window and
+;;; restore in their terminal then/catch. If that restore is skipped or runs
+;;; late (a rejected-Promise path, a concurrent suite run), the frozen snapshot
+;;; LEAKS into a later test — `client/index-tests` left pinned to the empty
+;;; node-test `@tests-tx` makes a direct `(index-tests [#'var])` return [] (so
+;;; index-tests-builds-rows-from-deftest-vars reads no source), and a leaked
+;;; builder skews prune-core-ghosts's absentee set. Both then fail ONLY when run
+;;; after a freezing test.
+;;;
+;;; Fix (test-only — the index source is Core's): a `:each` map fixture
+;;; (map-form so it is async-safe — the wrapping `(fn [f] …)` form aborts on
+;;; async tests) that resets the three vars to their REAL implementations both
+;;; before AND after every test. The before-reset is the load-bearing half: it
+;;; guarantees each test starts from the real builders regardless of any prior
+;;; test's leaked freeze, AND it means each async test's own freeze captures the
+;;; real fns (so its restore can't cascade a frozen state forward).
+(def ^:private og-index-core!   client/index-core!)
+(def ^:private og-index-schemas client/index-schemas)
+(def ^:private og-index-tests   client/index-tests)
+
+(defn- thaw-builders!
+  "Reset the three builder vars to their real (unfrozen) implementations."
+  []
+  (set! client/index-core!   og-index-core!)
+  (set! client/index-schemas og-index-schemas)
+  (set! client/index-tests   og-index-tests))
+
+(t/use-fixtures :each
+  {:before (fn [] (thaw-builders!))
+   :after  (fn [] (thaw-builders!))})
 
 (defn- by-sym [tx sym]
   (first (filter #(= sym (:seon.fn/sym %)) tx)))
+
+(defn- arity-count
+  "Number of arity arg-vectors recovered in a parsed arglists string, e.g.
+   \"([req] [db eid])\" → 2. Counts opening `[` — robust to the exact arg
+   names, which is the point: it asserts parser fidelity, not db/*'s signature."
+  [arglists-str]
+  (count (re-seq #"\[" (str arglists-str))))
 
 (deftest transact!-indexes-with-real-source-spec-arglists
   ;; The single most important criterion: transact! carries the real spec
   ;; form AND real source/arglists — not the old curated `([arg])`-mangled,
   ;; `,,,`-stubbed, `specced? false` lie.
-  (let [tx (client/index-core!)
+  (let [tx @core-tx
         t  (by-sym tx "seon.db/transact!")]
     (is (some? t) "transact! is present in the indexed tx-data")
-    (is (str/starts-with? (:seon.fn/source t) "(defn ^:async transact!")
-        "source is the REAL (defn …) text read from the file")
+    (is (and (str/starts-with? (:seon.fn/source t) "(defn")
+             (str/includes? (:seon.fn/source t) "transact!"))
+        "source is the REAL (defn …) text read from the file (names transact!)")
     (is (not (str/includes? (:seon.fn/source t) ",,,"))
         "NO `,,,` placeholder stub in the source")
     ;; transact! became a multi-arity `:function` schema in T15 (map-in +
@@ -58,52 +163,68 @@
         "arglists parsed from real source (T15 transact! is [& call-args])")))
 
 (deftest specced-vs-unspecced-matches-reality
-  (let [tx       (client/index-core!)
+  (let [tx       @core-tx
         query    (by-sym tx "seon.db/query")
         register (by-sym tx "seon.schema/register!")
         cai      (by-sym tx "seon.db/current-agent-id")]
-    ;; query IS specced → spec present, exact form.
+    ;; query + current-agent-id ARE specced → :seon.fn/spec present.
     (is (some? (:seon.fn/spec query))
         "query is specced → :seon.fn/spec present")
-    ;; register! and current-agent-id have NO :malli/schema → no spec key.
-    (is (not (contains? register :seon.fn/spec))
-        "register! is honestly unspecced → :seon.fn/spec ABSENT")
-    (is (not (contains? cai :seon.fn/spec))
-        "current-agent-id is honestly unspecced → :seon.fn/spec ABSENT")
-    ;; but both still get real source (file-read, not stub).
+    (is (some? (:seon.fn/spec cai))
+        "current-agent-id is specced (-> [:maybe :string]) → :seon.fn/spec present")
+    ;; register! is now specced too — the spec-everything sweep gave every public
+    ;; fn a :malli/schema (register!'s `v` slot is :any: a Malli FORM, not a fixed
+    ;; data shape). So :seon.fn/spec is PRESENT (it was the unspecced exemplar
+    ;; before the sweep; "spec what we can, :any where opaque").
+    (is (some? (:seon.fn/spec register))
+        "register! is specced (spec-everything) → :seon.fn/spec present")
+    ;; and it still gets real source (file-read, not stub).
     (is (str/starts-with? (:seon.fn/source register) "(defn register!")
-        "register! still gets REAL source despite being unspecced")))
+        "register! gets REAL source (file-read, not stub)")))
 
 (deftest real-arglists-not-mangled
   ;; The parser recovers arglists from the REAL source, not the
   ;; instrumentation-mangled `([arg])` var-meta. query is the T15 pure-variadic
   ;; `[& args]` form (see db.cljs docstring) — its arglist is `([& args])`,
   ;; recovered verbatim from source.
-  (let [tx    (client/index-core!)
-        query (by-sym tx "seon.db/query")]
-    (is (= "([& args])" (:seon.fn/arglists query))
-        "query's real [& args] arglist is recovered from source")
-    (is (not= "([arg])" (:seon.fn/arglists query))
-        "query arglists are the real source form, not the mangled var-meta"))
+  (let [tx    @core-tx
+        query (by-sym tx "seon.db/query")
+        qa    (:seon.fn/arglists query)]
+    ;; query is variadic (`[& args]`): the variadic marker survives, and it is
+    ;; NOT the instrumentation-mangled `([arg])` var-meta nor an empty collapse.
+    ;; Structural anchors, not the exact arg names — parser fidelity is the
+    ;; point, not db/query's signature.
+    (is (str/includes? qa "&")
+        "query's variadic `&` arg is recovered from the real source")
+    (is (not= "([arg])" qa)
+        "query arglists are the real source form, not the mangled var-meta")
+    (is (not= "()" qa)
+        "query's arglist did not collapse to empty"))
   ;; MULTI-ARITY recovery (2026-06-09 fix): pull/entity define each arity as
   ;; `([args] body)` at paren-depth 2 — the old depth-1-only scan returned
   ;; "()" for them, which rendered the uncallable `(seon.db/pull ())` in
-  ;; capabilities (context-audit §2). Both arities must now be recovered.
-  (let [tx     (client/index-core!)
+  ;; capabilities (context-audit §2). EVERY arity must now be recovered, so the
+  ;; recovered arity COUNT is >1 (the real mechanism), and none collapses to
+  ;; "()" or the mangled single `([arg])`.
+  (let [tx     @core-tx
         pull   (by-sym tx "seon.db/pull")
-        entity (by-sym tx "seon.db/entity")]
-    (is (= "([req] [selector eid] [db selector eid])" (:seon.fn/arglists pull))
-        "pull's three real arities recovered from multi-arity source")
-    (is (= "([req] [db eid])" (:seon.fn/arglists entity))
-        "entity's two real arities recovered from multi-arity source")
-    (is (not= "()" (:seon.fn/arglists pull))
-        "multi-arity fns no longer collapse to empty arglists")))
+        entity (by-sym tx "seon.db/entity")
+        pa     (:seon.fn/arglists pull)
+        ea     (:seon.fn/arglists entity)]
+    (is (> (arity-count pa) 1)
+        "pull's multiple real arities are recovered from multi-arity source")
+    (is (> (arity-count ea) 1)
+        "entity's multiple real arities are recovered from multi-arity source")
+    (is (and (not= "()" pa) (not= "([arg])" pa))
+        "multi-arity pull no longer collapses to empty/mangled arglists")
+    (is (and (not= "()" ea) (not= "([arg])" ea))
+        "multi-arity entity no longer collapses to empty/mangled arglists")))
 
 (deftest arglists-expand-local-auto-kws
   ;; listen!'s real arg vector is `[{::keys [handler key conn] …}]` —
   ;; rendered verbatim, `::keys` would mis-resolve against the READER's
   ;; ns. The stored arglist must carry the explicit `:seon.db/keys`.
-  (let [tx      (client/index-core!)
+  (let [tx      @core-tx
         listen  (by-sym tx "seon.db/listen!")
         al      (:seon.fn/arglists listen)]
     (is (str/includes? al ":seon.db/keys")
@@ -114,7 +235,7 @@
 (deftest no-stub-source-anywhere
   ;; Permissive + honest: every indexed fn has REAL source (or is OMITTED),
   ;; never a `,,,` stub.
-  (let [tx (client/index-core!)]
+  (let [tx @core-tx]
     (is (every? #(str/starts-with? (:seon.fn/source %) "(defn")
                 (filter :seon.fn/sym tx))
         "every indexed :seon.fn row has real (defn …) source")
@@ -125,78 +246,116 @@
 
 (deftest emits-ns-rows-for-owning-nses
   ;; Each owning ns gets a :seon.ns row so the [:seon.ns/name kw] lookup-ref
-  ;; on :seon.fn/ns resolves. Every seon.* core ns keeps the minimal
-  ;; `(ns x)` stub — the :namespaces section compact-renders it from its
-  ;; indexed member rows; only my.* nses carry full file text (see the
-  ;; dedicated stub/compact tests below).
-  (let [tx      (client/index-core!)
+  ;; on :seon.fn/ns resolves. A seon.* FRAMEWORK BULK ns keeps the minimal
+  ;; `(ns x)` stub — it is DROPPED from the :namespaces section (still
+  ;; indexed via its member rows); my.* nses AND the curated full-source
+  ;; whitelist carry full file text (see the dedicated stub/full tests below).
+  (let [tx      @core-tx
         ns-rows (filter :seon.ns/name tx)
         names   (set (map :seon.ns/name ns-rows))]
     (is (contains? names :seon.db) ":seon.db ns row emitted")
     (is (contains? names :seon.schema) ":seon.schema ns row emitted")
     (is (contains? names :seon.test.runner) ":seon.test.runner ns row emitted")
-    (is (= "(ns seon.db)"
-           (:seon.ns/source (first (filter #(= :seon.db (:seon.ns/name %)) ns-rows))))
-        "non-whitelisted ns source is the minimal (ns x) stub")))
+    (is (= "(ns seon.warn)"
+           (:seon.ns/source (first (filter #(= :seon.warn (:seon.ns/name %)) ns-rows))))
+        "a non-whitelisted framework-bulk ns source is the minimal (ns x) stub")))
 
 (deftest core-ns-rows-stub-bulk-full-source-whitelist
-  ;; Curated render (curated-namespaces 2026-06-21): the seon.* FRAMEWORK
-  ;; BULK keeps the minimal `(ns x)` stub (it is name-manifested, never
-  ;; rendered as a body), while the curated seon.* whitelist
-  ;; (seon.ctx.namespaces/full-source-whitelist = :seon.agent.todo)
-  ;; force-stores its REAL FULL
-  ;; FILE TEXT (it renders FULL, so the boot indexer reads the file — the
-  ;; same seon.ctx.namespaces/full-source-ns? rule the renderer uses, one writer no
-  ;; drift). seon.agent.search / seon.agent.fs are framework bulk → stub.
-  (let [tx      (client/index-core!)
+  ;; Curated render (LEAN whitelist): the seon.* FRAMEWORK BULK keeps the
+  ;; minimal `(ns x)` stub (it is DROPPED from render, never shown as a body),
+  ;; while THE seon.* ns the config policy lists in :seon.config/always
+  ;; (my.plan by default) AND
+  ;; every my.* ns (my.kb, the runnable DB manual, full via the my.* rule)
+  ;; force-store their REAL FULL FILE TEXT (they render FULL, so the boot
+  ;; indexer reads the file — probing .cljs then .cljc — the same
+  ;; seon.agent.ctx.namespaces/full-source-ns? rule the renderer uses, one writer no
+  ;; drift). seon.warn / seon.eval / seon.agent.search / seon.agent.fs are all
+  ;; framework bulk → stub (search/fs are NO LONGER whitelisted — lean set).
+  (let [tx      @core-tx
         ns-rows (filter :seon.ns/name tx)
         row-for (fn [k] (first (filter #(= k (:seon.ns/name %)) ns-rows)))
-        search  (:seon.ns/source (row-for :seon.agent.search))
-        todo    (:seon.ns/source (row-for :seon.agent.todo))
-        fs      (:seon.ns/source (row-for :seon.agent.fs))]
-    (is (= "(ns seon.agent.search)" search)
-        "seon.agent.search (framework bulk) source is the minimal (ns x) stub")
-    (is (= "(ns seon.agent.fs)" fs)
-        "seon.agent.fs (framework bulk) source is the minimal (ns x) stub")
-    ;; the WHITELISTED tool carries its REAL full file source, not a stub.
-    (is (not= "(ns seon.agent.todo)" todo)
-        "seon.agent.todo (whitelist) source is NOT the minimal stub")
-    (is (and (str/starts-with? (str/triml todo) "(ns seon.agent.todo")
-             (str/includes? todo "defn"))
-        "seon.agent.todo source is its REAL full file text (ns form + defns)")
-    ;; the members are still indexed (the bulk renders via the manifest's
-    ;; query; the whitelist via its full source).
+        full?   (fn [k] (let [s (:seon.ns/source (row-for k))]
+                          (and (not= (str "(ns " (name k) ")") s)
+                               (str/starts-with? (str/triml s) (str "(ns " (name k)))
+                               (str/includes? s "defn"))))
+        warn    (:seon.ns/source (row-for :seon.warn))
+        eval-ns (:seon.ns/source (row-for :seon.eval))]
+    (is (= "(ns seon.warn)" warn)
+        "seon.warn (framework bulk) source is the minimal (ns x) stub")
+    (is (= "(ns seon.eval)" eval-ns)
+        "seon.eval (framework bulk) source is the minimal (ns x) stub")
+    ;; my.kb (the DB manual) is full-source via the my.* rule, and the
+    ;; whitelisted tool carries its REAL full file source — neither a stub.
+    (is (full? :my.kb)
+        "my.kb (the runnable DB manual, full via the my.* rule) source is its REAL full file text")
+    (is (full? :my.plan)
+        "my.plan (whitelist) source is its REAL full file text")
+    ;; seon.db itself is DE-whitelisted — the raw db source is no longer
+    ;; dumped; it drops to the minimal (ns x) stub (still indexed via its
+    ;; member rows). The worked-example layer (my.kb, full via the my.* rule)
+    ;; replaces it.
+    (is (= "(ns seon.db)" (:seon.ns/source (row-for :seon.db)))
+        "seon.db (de-whitelisted) source is the minimal (ns x) stub")
+    ;; LEAN: search + fs are NO LONGER whitelisted — they drop to the minimal
+    ;; (ns x) stub (still indexed via their member rows below).
+    (is (= "(ns seon.agent.search)" (:seon.ns/source (row-for :seon.agent.search)))
+        "seon.agent.search (de-whitelisted) source is the minimal (ns x) stub")
+    (is (= "(ns seon.agent.fs)" (:seon.ns/source (row-for :seon.agent.fs)))
+        "seon.agent.fs (de-whitelisted) source is the minimal (ns x) stub")
+    ;; the members are still indexed (dropped nses via member rows; the
+    ;; whitelist via its full source).
     (let [syms (set (map :seon.fn/sym (filter :seon.fn/sym tx)))]
       (is (contains? syms "seon.agent.search/grep")
           "search's grep is an indexed :seon.fn member")
-      (is (contains? syms "seon.agent.todo/add!")
-          "todo's add! is an indexed :seon.fn member"))))
+      (is (contains? syms "my.plan/step!")
+          "plan's step! is an indexed :seon.fn member"))))
 
-(deftest test-sibling-ns-rows-carry-the-minimal-stub
-  ;; Test siblings ride the same rule: no full-source relic, so a `-test`
-  ;; ns gets the minimal `(ns x)` stub from index-tests. Its deftest
-  ;; member rows live on the :seon.test rows; the on-demand
-  ;; render-namespace deep view reads full test bodies, not this section.
-  (let [rows  (client/index-tests
-                [#'seon.agent.search-test/match-found-with-path-line-text])
-        nsrow (first (filter #(= :seon.agent.search-test (:seon.ns/name %)) rows))
-        src   (:seon.ns/source nsrow)]
-    (is (some? nsrow) "an owning :seon.ns row is emitted for the test ns")
-    (is (= "(ns seon.agent.search-test)" src)
-        "test-sibling ns source is the minimal (ns x) stub")))
+(deftest test-sibling-ns-rows-ride-their-base-full-source-rule
+  ;; Test siblings ride the SAME full-source rule as their subject ns (the
+  ;; `-test` suffix is stripped to the base — seon.agent.ctx.namespaces/full-source-ns?):
+  ;;   (a) a `-test` sibling of a WHITELISTED base (my.plan-test →
+  ;;       my.plan, a full-source-whitelist member) carries its REAL
+  ;;       FULL FILE TEXT, so the deep render-namespace view has the real test
+  ;;       bodies on hand;
+  ;;   (b) a `-test` sibling of a NON-whitelisted, non-my.* base
+  ;;       (seon.index-core-test → seon.index-core) gets the minimal `(ns x)`
+  ;;       stub from index-tests — dropped from render, indexed only.
+  ;; Either way the deftest member rows live on the :seon.test rows.
+  (let [;; (a) whitelisted base → FULL source.
+        srows (client/index-tests
+                [#'my.plan-test/step-stores-a-fully-formed-open-step])
+        srow  (first (filter #(= :my.plan-test (:seon.ns/name %)) srows))
+        ssrc  (:seon.ns/source srow)
+        ;; (b) non-whitelisted base → minimal stub. Any deftest in THIS ns
+        ;; works (its base seon.index-core is not whitelisted); use one
+        ;; defined ABOVE so the `#'` var resolves at compile time.
+        irows (client/index-tests [#'no-stub-source-anywhere])
+        irow  (first (filter #(= :seon.index-core-test (:seon.ns/name %)) irows))
+        isrc  (:seon.ns/source irow)]
+    (is (some? srow) "an owning :seon.ns row is emitted for the whitelisted test ns")
+    (is (and (not= "(ns my.plan-test)" ssrc)
+             (str/starts-with? (str/triml ssrc) "(ns my.plan-test")
+             (str/includes? ssrc "deftest"))
+        "a whitelisted-base test sibling carries its REAL full file text")
+    (is (some? irow) "an owning :seon.ns row is emitted for the non-whitelisted test ns")
+    (is (= "(ns seon.index-core-test)" isrc)
+        "a non-whitelisted-base test sibling source is the minimal (ns x) stub")))
 
 (deftest pure-index-emits-valid-refs
   ;; index-core! is a PURE builder: every :seon.fn/ns it emits is a
   ;; [:seon.ns/name <kw>] lookup-ref (a single :seon.db/ref), NEVER a bare
   ;; keyword — the malformed value the Run-3 findings traced to the second boot.
   ;;
-  ;; DERIVED expectations (unit #23): the roster is now the curated base +
-  ;; the compile-time `seon.indexing/specced-fn-vars` macro over the WHOLE
-  ;; build closure — never assert a hardcoded count (the old `= 14` broke
-  ;; on every roster change). Instead: the curated core surface must be
-  ;; present, the set must be substantially wider than the old curated 14,
-  ;; and every row must be structurally valid + unique.
-  (let [tx   (client/index-core!)
+  ;; DERIVED expectations: the roster is now the compile-time
+  ;; `seon.indexing/public-fn-vars` macro over EVERY public first-party fn
+  ;; in the whole build closure — specced OR not (owner directive 'just
+  ;; index everything'; the hand-curated inclusion list is gone). Never
+  ;; assert a hardcoded count (the old `= 14` broke on every roster
+  ;; change). Instead: the known core surface (incl. honestly-unspecced fns
+  ;; like register!/read-file/grep) must be present, the set must be
+  ;; substantially wider than the old curated 14, and every row must be
+  ;; structurally valid + unique.
+  (let [tx   @core-tx
         fns  (filter :seon.fn/sym tx)
         syms (map :seon.fn/sym fns)]
     (is (>= (count fns) 14)
@@ -219,7 +378,7 @@
 (deftest index-schemas-covers-the-whole-registry
   ;; Fix b: ALL registered schemas — attr-level included — become
   ;; :seon.schema rows. Derived expectation: one row per registered key.
-  (let [rows (client/index-schemas)
+  (let [rows @schemas-tx
         ks   (set (map :seon.schema/key rows))]
     (is (= (count rows) (count (schema/registered-schemas)))
         "one :seon.schema row per registered schema key")
@@ -260,8 +419,10 @@
   ;; same agent + tx-meta datahike schema the pod boots against, bound as
   ;; start-agent! binds it so transact lookup-refs resolve.
   (async done
-    (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
-                             (db/tx-meta-datahike-schema)))
+    (let [restore! (freeze-builders!)
+          done*    (fn [] (restore!) (done))]
+     (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
+                              (db/tx-meta-datahike-schema)))
         (.then
           (fn [conn]
             ;; Pass :seon.db/conn explicitly — a `binding` of the dynamic
@@ -272,10 +433,10 @@
                   (fn [first-tx]
                     ;; FIRST boot of the fresh conn: the full set — DERIVED
                     ;; from the pure builders, never a hardcoded count.
-                    (is (= (count (filter :seon.fn/sym (client/index-core!)))
+                    (is (= (count (filter :seon.fn/sym @core-tx))
                            (count (filter :seon.fn/sym first-tx)))
                         "first boot emits every core fn row")
-                    (is (= (count (client/index-schemas))
+                    (is (= (count @schemas-tx)
                            (count (filter :seon.schema/key first-tx)))
                         "first boot emits a :seon.schema row per registered schema")
                     (db/transact! {:seon.db/conn conn :seon.db/tx-data first-tx})))
@@ -299,10 +460,10 @@
                           "partial re-index emits only the missing fn")
                       (is (= [:seon.ns/name :seon.schema] (:seon.fn/ns (first gap-fns)))
                           "the re-emitted ref is a valid [:seon.ns/name kw] tuple"))
-                    (done))))))
+                    (done*))))))
         (.catch (fn [e]
                   (is false (str "idempotency test threw: " (or (.-message e) e)))
-                  (done))))))
+                  (done*)))))))
 
 (deftest prune-core-ghosts-removes-only-core-claimed-absentees
   ;; Boot-index GC (open-issues 2026-06-11 row 5). Pins all four hard
@@ -321,8 +482,10 @@
   ;;   (d) rename semantics — the old ident (absent from the boot set)
   ;;       goes, idents present in the boot set stay.
   (async done
-    (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
-                             (db/tx-meta-datahike-schema)))
+    (let [restore! (freeze-builders!)
+          done*    (fn [] (restore!) (done))]
+     (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
+                              (db/tx-meta-datahike-schema)))
         (.then
           (fn [conn]
             (-> (client/core-index-tx conn)
@@ -384,20 +547,23 @@
                   (fn [{pruned :seon.client/pruned}]
                     (is (= [] pruned)
                         "second boot's prune finds ZERO ghosts (idempotent)")
-                    (done))))))
+                    (done*))))))
         (.catch (fn [e]
                   (is false (str "prune test threw: " (or (.-message e) e)))
-                  (done))))))
+                  (done*)))))))
 
 (deftest core-index-tx-reasserts-drifted-ns-source
   ;; ns rows dedup on name AND source. A store whose :seon.ns/source for a
   ;; full-source (my.*) ns differs from the freshly-built full file text
   ;; (e.g. a regressed `(ns x)` stub, or a stale build) gets exactly that
-  ;; ns row re-emitted; everything else stays a no-op. (my.kb is a
-  ;; fn-less compiled root — its full file text is read at boot.)
+  ;; ns row re-emitted; everything else stays a no-op. (my.kb is a compiled
+  ;; my.* root — its full file text is read at boot; its fn/schema rows are
+  ;; already present, so only the drifted ns row re-emits.)
   (async done
-    (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
-                             (db/tx-meta-datahike-schema)))
+    (let [restore! (freeze-builders!)
+          done*    (fn [] (restore!) (done))]
+     (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
+                              (db/tx-meta-datahike-schema)))
         (.then
           (fn [conn]
             (-> (client/core-index-tx conn)
@@ -415,18 +581,113 @@
                 (.then (fn [_] (client/core-index-tx conn)))
                 (.then
                   (fn [tx]
-                    (let [ns-rows (filter :seon.ns/name tx)]
-                      (is (= [:my.kb] (mapv :seon.ns/name ns-rows))
-                          "ONLY the drifted ns row re-emits (one assertion lands)")
-                      (is (str/starts-with? (:seon.ns/source (first ns-rows))
-                                            "(ns my.kb")
+                    (let [ns-rows (filter :seon.ns/name tx)
+                          kb-row  (first (filter #(= :my.kb (:seon.ns/name %)) ns-rows))]
+                      ;; The DRIFTED ns re-emits with its real full file text
+                      ;; (not the stub). We don't pin the exact set of rows —
+                      ;; any other genuinely-drifted ns may ride along; the
+                      ;; behavior under test is "the drifted one is restored".
+                      (is (some? kb-row) "the drifted my.kb ns row re-emits")
+                      (is (str/starts-with? (:seon.ns/source kb-row) "(ns my.kb")
                           "re-emitted with the full file text, not the stub")
-                      (is (> (count (:seon.ns/source (first ns-rows)))
-                             (count "(ns my.kb)"))
+                      (is (> (count (:seon.ns/source kb-row)) (count "(ns my.kb)"))
                           "the re-emitted source is the real file, longer than the stub")
                       (is (empty? (remove :seon.ns/name tx))
-                          "no fn/schema/test rows ride along"))
-                    (done))))))
+                          "only ns rows re-emit — no fn/schema/test rows ride along"))
+                    (done*))))))
         (.catch (fn [e]
                   (is false (str "drift test threw: " (or (.-message e) e)))
-                  (done))))))
+                  (done*)))))))
+
+(deftest core-index-tx-reheals-drifted-fn-fields
+  ;; Fn rows dedup on sym AND every derived field (source, spec, doc,
+  ;; arglists, private?). Sym-only dedup was the stale-spec bug (live
+  ;; incident 2026-07-02: seon.agent.shell's rows kept a first-index
+  ;; :seon.shell/* spec forever — the namespaces card showed wrong keyword
+  ;; namespaces to live agents). Pins three behaviors on one conn:
+  ;;
+  ;;   (a) HEAL — a core-claimed row whose stored :seon.fn/spec drifted
+  ;;       from the live var meta re-emits with the fresh spec;
+  ;;   (b) GUARD — a drifted row whose :source tx is NOT core-seed
+  ;;       (agent-authored) is never overwritten by the boot index;
+  ;;   (c) RETRACT — a stale spec on a fn whose fresh derivation is
+  ;;       unspecced yields an explicit [:db/retract …] (upsert can't
+  ;;       remove a datom).
+  (async done
+    (let [restore! (freeze-builders!)
+          done*    (fn [] (restore!) (done))
+          target   "seon.schema/register!"
+          stale    "[:=> [:cat :seon.stale/req] :seon.stale/resp]"
+          guarded  "seon.db/transact!"]
+     (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
+                              (db/tx-meta-datahike-schema)))
+        (.then
+          (fn [conn]
+            (-> (client/core-index-tx conn)
+                (.then (fn [first-tx]
+                         (db/transact! conn first-tx
+                                       {:seon.db/origin :core-seed})))
+                ;; (a) Regress the stored spec in place (identity upsert on
+                ;; sym; the row's :source datom keeps its :core-seed tx).
+                ;; (c) Forge a stale spec onto an UNSPECCED core fn (found
+                ;; dynamically — any row the fresh index emits without
+                ;; :seon.fn/spec).
+                ;; (b) Replace one core row wholesale under an AGENT origin
+                ;; (retractEntity kills the :core-seed source datom).
+                (.then (fn [_]
+                         (db/transact! conn
+                                       [{:seon.fn/sym  target
+                                         :seon.fn/spec stale}]
+                                       {:seon.db/origin :core-seed})))
+                (.then (fn [_]
+                         (db/transact! conn
+                                       [[:db/retractEntity [:seon.fn/sym guarded]]]
+                                       {:seon.db/origin :core-seed})))
+                (.then (fn [_]
+                         (db/transact! conn
+                                       [{:seon.fn/sym      guarded
+                                         :seon.fn/ns       [:seon.ns/name :seon.db]
+                                         :seon.fn/source   "(defn transact! [] :agent-owned)"
+                                         :seon.fn/arglists "([])"
+                                         :seon.fn/doc      ""
+                                         :seon.fn/private? false}]
+                                       {:seon.db/origin :agent})))
+                (.then (fn [_] (client/core-index-tx conn)))
+                (.then
+                  (fn [tx]
+                    (let [fresh-fn  (fn [sym rows]
+                                      (first (filter #(= sym (:seon.fn/sym %)) rows)))
+                          healed    (fresh-fn target tx)
+                          expected  (fresh-fn target @core-tx)]
+                      ;; (a) HEAL
+                      (is (some? healed) "the spec-drifted fn row re-emits")
+                      (is (= (:seon.fn/spec expected) (:seon.fn/spec healed))
+                          "re-emitted with the LIVE var-meta spec, not the stale one")
+                      (is (not= stale (:seon.fn/spec healed))
+                          "the stale spec is gone from the re-emitted row")
+                      ;; (b) GUARD
+                      (is (nil? (fresh-fn guarded tx))
+                          "an agent-origin row with a core sym is NEVER re-emitted over")
+                      ;; (c) RETRACT — dynamic: any unspecced fn in the fresh
+                      ;; index (private helpers are indexed, so one exists).
+                      (if-some [unspecced (:seon.fn/sym
+                                            (first (remove #(or (contains? % :seon.fn/spec)
+                                                                (nil? (:seon.fn/sym %)))
+                                                           @core-tx)))]
+                        (-> (db/transact! conn
+                                          [{:seon.fn/sym  unspecced
+                                            :seon.fn/spec stale}]
+                                          {:seon.db/origin :core-seed})
+                            (.then (fn [_] (client/core-index-tx conn)))
+                            (.then
+                              (fn [tx2]
+                                (is (some #(= % [:db/retract [:seon.fn/sym unspecced]
+                                                 :seon.fn/spec stale])
+                                          tx2)
+                                    "a stale spec on a now-unspecced fn is explicitly retracted")
+                                (done*))))
+                        (do (is true "no unspecced core fn in this build — retract case skipped")
+                            (done*)))))))))
+        (.catch (fn [e]
+                  (is false (str "fn-drift test threw: " (or (.-message e) e)))
+                  (done*)))))))

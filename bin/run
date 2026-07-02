@@ -7,8 +7,8 @@
 # Starts Datalevin, nREPL, HTTP server, Tailwind watcher, and Caddy proxy (via Integrant).
 # Ctrl+C to stop cleanly.
 
-export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
-export PATH="$JAVA_HOME/bin:$PATH"
+# Pin the JDK via the shared resolver (single source of truth).
+source "$(dirname "$0")/_java-home-resolver"
 
 # Ensure classpath is fresh (stale .cpcache causes missing-dep errors)
 if [ -f .cpcache/*/classpath ]; then
@@ -18,4 +18,4 @@ if [ -f .cpcache/*/classpath ]; then
     fi
 fi
 
-exec clj -M:dev:run "$@"
+exec clj -M:fork-deps:dev:run "$@"

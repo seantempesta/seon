@@ -15,6 +15,8 @@
          '[cheshire.core :as json]
          '[clojure.edn :as edn]
          '[clojure.java.io :as io]
+         '[clojure.string :as str]
+         '[babashka.process :as process]
 
          '[edamame.core :as edamame])
 
@@ -25,6 +27,18 @@
 (def orchestrator-port 7888)
 (def config-path ".claude/seon-hook.edn")
 (def backup-dir "tmp/hook-backup")
+
+;; bb-direct Gemini review (runtime-independent — needs no JVM, no pod):
+;; the conventions rubric + a file-based rate-limit timestamp.
+(def conventions-path "docs/conventions.md")
+(def last-review-path "tmp/.last-review")
+;; Batch accumulator: absolute file-paths edited since the last review, one per
+;; line, deduped. A review covers this whole batch then clears it. bb is a fresh
+;; process per invocation, so this lives on disk (no in-memory atom possible).
+(def pending-review-path "tmp/.pending-review")
+;; Hard cap so a permanently-failing agy call can't grow the batch unbounded:
+;; when the pending list exceeds this, the oldest entries are dropped.
+(def max-pending-files 50)
 
 (def protected-files
   "Files that are critical to the hook system."
@@ -118,22 +132,11 @@
         session-id))
     session-id))
 
-(defn- get-port-for-session [session-id]
-  (let [seon-session-id (lookup-seon-session session-id)]
-    (if (or (nil? seon-session-id)
-            (= seon-session-id "orchestrator")
-            (= seon-session-id ""))
-      orchestrator-port
-      (let [code (format
-                  "(do (require 'seon.orchestrator.session)
-                       (:seon.orchestrator.session/nrepl-port
-                         (seon.orchestrator.session/get-session-port
-                           {:seon.orchestrator.session/node (user/xtdb-node)
-                            :seon.orchestrator.session/id %s})))"
-                  (pr-str seon-session-id))
-            result (nrepl-eval orchestrator-port code)]
-        (or (when result (try (edn/read-string result) (catch Exception _ nil)))
-            orchestrator-port)))))
+(defn- get-port-for-session [_session-id]
+  ;; All sessions route to the single Seon nREPL. The per-session multi-port
+  ;; routing (seon.orchestrator.session/get-session-port) was XTDB-era
+  ;; JVM-orchestrator machinery and has been retired — there is one nREPL.
+  orchestrator-port)
 
 ;;; ---------------------------------------------------------------------------
 ;;; Response Formatting
@@ -306,6 +309,271 @@
 
 
 ;;; ---------------------------------------------------------------------------
+;;; bb-direct Gemini review (runtime-independent)
+;;; ---------------------------------------------------------------------------
+;;;
+;;; A code review is an LLM call over the edited source + the conventions
+;;; rubric. It needs NO Clojure REPL and NO JVM. We shell to the project's
+;;; `agy` Gemini CLI directly from bb, so the review fires for .clj, .cljs,
+;;; .cljc, .bb, .edn AND .md uniformly — including when the JVM nREPL (port
+;;; 7888) is down, which is the normal state on the CLJS-pod track.
+;;;
+;;; Double-review avoidance: the JVM PostToolUse pipeline (process-via-nrepl!)
+;;; ALSO runs a Gemini review, but ONLY for JVM-loadable .clj/.cljc files AND
+;;; ONLY when the JVM nREPL is actually reachable. So we skip the bb review for
+;;; a .clj/.cljc file when the JVM is up (let the in-JVM path own it); for
+;;; everything else (.cljs/.md, or .clj with the JVM down) the bb review runs.
+
+(defn- reviewable-file?
+  "True for source/test/markdown files worth an AI review."
+  [file-path]
+  (when file-path
+    (let [lower (str/lower-case file-path)]
+      (or (clojure-file? file-path)
+          (str/ends-with? lower ".md")))))
+
+(defn- jvm-clj-file?
+  "True for .clj/.cljc files the JVM nREPL pipeline can itself review."
+  [file-path]
+  (when file-path
+    (let [lower (str/lower-case file-path)]
+      (or (str/ends-with? lower ".clj")
+          (str/ends-with? lower ".cljc")))))
+
+(defn- jvm-reachable?
+  "Quick socket probe of the JVM nREPL. Used only to avoid double-reviewing
+   .clj/.cljc files when the in-JVM review pipeline is alive."
+  []
+  (try
+    (with-open [sock (java.net.Socket.)]
+      (.connect sock (java.net.InetSocketAddress. "localhost" ^int orchestrator-port) 300)
+      true)
+    (catch Exception _ false)))
+
+(defn- review-rate-limited?
+  "File-based interval gate. bb is a fresh process per invocation, so the
+   last-review timestamp lives on disk (tmp/.last-review). Returns true if a
+   review happened within interval-seconds."
+  [interval-seconds]
+  (let [f (io/file last-review-path)]
+    (and (.exists f)
+         (try
+           (let [last-ms (Long/parseLong (str/trim (slurp f)))
+                 elapsed (- (System/currentTimeMillis) last-ms)]
+             (< elapsed (* 1000 interval-seconds)))
+           (catch Exception _ false)))))
+
+(defn- touch-last-review! []
+  (try
+    (let [f (io/file last-review-path)]
+      (when-not (.exists (.getParentFile f)) (.mkdirs (.getParentFile f)))
+      (spit f (str (System/currentTimeMillis))))
+    (catch Exception _ nil)))
+
+(defn- read-pending
+  "Read the pending-review accumulator as a vector of absolute paths (in edit
+   order, deduped on write). Never throws — returns [] on any problem."
+  []
+  (try
+    (let [f (io/file pending-review-path)]
+      (if (.exists f)
+        (->> (str/split-lines (slurp f))
+             (map str/trim)
+             (remove str/blank?)
+             (vec))
+        []))
+    (catch Exception _ [])))
+
+(defn- write-pending!
+  "Overwrite the accumulator with `paths` (already deduped/ordered)."
+  [paths]
+  (try
+    (let [f (io/file pending-review-path)]
+      (when-not (.exists (.getParentFile f)) (.mkdirs (.getParentFile f)))
+      (spit f (str (str/join "\n" paths) (when (seq paths) "\n"))))
+    (catch Exception _ nil)))
+
+(defn- accumulate-pending!
+  "Append `file-path` to the pending-review accumulator, deduped, preserving
+   edit order (an existing path moves to the most-recent position so the latest
+   edit isn't the one dropped under the cap). Drops oldest entries beyond
+   max-pending-files. Wrapped so a failure here NEVER blocks the edit."
+  [file-path]
+  (try
+    (when (seq file-path)
+      (let [current (vec (remove #(= % file-path) (read-pending)))
+            appended (conj current file-path)
+            capped (if (> (count appended) max-pending-files)
+                     (let [dropped (- (count appended) max-pending-files)]
+                       (log! "REVIEW_PENDING_CAP" (str "dropped=" dropped))
+                       (vec (drop dropped appended)))
+                     appended)]
+        (write-pending! capped)))
+    (catch Exception e
+      (log! "REVIEW_PENDING_ERROR" (.getMessage e))
+      nil)))
+
+(defn- clear-pending! []
+  (try
+    (let [f (io/file pending-review-path)]
+      (when (.exists f) (.delete f)))
+    (catch Exception _ nil)))
+
+(defn- load-conventions
+  "Load the conventions rubric, truncated."
+  [max-len]
+  (let [f (io/file conventions-path)]
+    (when (.exists f)
+      (let [s (slurp f)]
+        (if (> (count s) max-len)
+          (str (subs s 0 max-len) "\n[truncated]")
+          s)))))
+
+(defn- file-lang
+  [file-path]
+  (if (str/ends-with? (str/lower-case file-path) ".md") "markdown" "clojure"))
+
+(defn- render-file-block
+  "Render one delimited, fenced file block for the review prompt, truncating the
+   content to `max-code-length`."
+  [{:keys [path content]} max-code-length]
+  (let [code (if (> (count content) max-code-length)
+               (str (subs content 0 max-code-length) "\n[truncated]")
+               content)]
+    (str "=== EDITED FILE: " path " ===\n"
+         "```" (file-lang path) "\n" code "\n```\n")))
+
+(defn- build-review-prompt
+  "Build the Gemini review prompt: instruction + conventions rubric (once) + one
+   delimited, fenced block per edited file. `files` is a seq of {:path :content}.
+   The conventions rubric is emitted once at the top; each file is truncated to
+   max-code-length, and the whole batch is bounded to roughly max-code-length
+   total — once the running total is exceeded, remaining (oldest-first) files are
+   dropped with a log line so the batch can't blow the context.
+
+   Single-file arity [path content opts] delegates to the batch arity."
+  ([file-path content opts]
+   (build-review-prompt [{:path file-path :content content}] opts))
+  ([files {:keys [max-code-length max-conventions-length]
+           ;; The conventions rubric is the STANDARD being checked — the review
+           ;; must see ALL of it (a conformance check on 13% of the rules is
+           ;; useless). gemini-3.5-flash has a huge context window, so send the
+           ;; whole doc; the cap is pure safety headroom over its current ~30K.
+           :or {max-code-length 12000 max-conventions-length 60000}}]
+   (let [conventions (load-conventions max-conventions-length)
+         files (vec files)
+         ;; Keep the most-recent files (tail) when the batch overflows the total
+         ;; cap; drop oldest. Walk newest-first; once the running total would
+         ;; exceed max-code-length, stop and count the rest as dropped. Always
+         ;; keep at least the newest block.
+         {:keys [kept]}
+         (reduce (fn [{:keys [kept total]} f]
+                   (let [block-len (count (render-file-block f max-code-length))]
+                     (if (or (empty? kept) (<= (+ total block-len) max-code-length))
+                       {:kept (conj kept f) :total (+ total block-len)}
+                       (reduced {:kept kept :total total}))))
+                 {:kept [] :total 0}
+                 (reverse files))
+         dropped (- (count files) (count kept))
+         ordered (reverse kept)]
+     (when (pos? dropped)
+       (log! "REVIEW_BATCH_TRUNCATED" (str "dropped-oldest=" dropped)))
+     (str "You are a code reviewer for the Seon project. Review the edited "
+          "file(s) below for CORRECTNESS and CONVENTION CONFORMANCE. Be terse "
+          "and high-signal: point out only real issues (bugs, schema/spec gaps, "
+          "convention violations), not style preferences. Review each file "
+          "separately, naming it. If a file is fine, say so in one line.\n\n"
+          (when conventions
+            (str "=== PROJECT CONVENTIONS (rubric) ===\n" conventions "\n\n"))
+          (str/join "\n" (map #(render-file-block % max-code-length) ordered))))))
+
+(defn- call-agy
+  "Shell to the `agy` Gemini CLI, prompt via stdin. Bounded by timeout-ms;
+   returns review text on success, nil on failure/timeout. NEVER throws."
+  [prompt timeout-ms]
+  (try
+    (let [proc (process/process ["agy" "-p" ""]
+                                {:in prompt :out :string :err :string})
+          finished (deref proc timeout-ms ::timeout)]
+      (if (= finished ::timeout)
+        (do (process/destroy-tree proc)
+            (log! "REVIEW_TIMEOUT" (str timeout-ms "ms"))
+            nil)
+        (let [{:keys [exit out]} finished]
+          (if (and (zero? exit) (seq (str/trim (or out ""))))
+            (str/trim out)
+            (do (log! "REVIEW_AGY_FAIL" (str "exit=" exit)) nil)))))
+    (catch Exception e
+      (log! "REVIEW_AGY_EXCEPTION" (.getMessage e))
+      nil)))
+
+(defn- bb-review!
+  "bb-direct Gemini review (PostToolUse). Accumulates the just-edited file into
+   the pending-review batch, then — if not rate-limited — reviews the WHOLE batch
+   (every reviewable file edited since the last review) in ONE agy call.
+
+   Batch semantics: every reviewable edit appends to tmp/.pending-review (deduped,
+   bounded by max-pending-files). When the interval has elapsed, the pending list
+   is re-slurped (latest content) and reviewed as one prompt; on a SUCCESSFUL
+   review the accumulator is cleared. Rate-limited edits stay pending. A
+   timeout/failure leaves the batch pending (retried next interval) so no edit is
+   lost; the max-pending-files cap prevents a permatimeout from growing it
+   unbounded.
+
+   Honors :review config (enabled, interval-seconds, max lengths) and the
+   :feedback :max-length cap. Returns a feedback string or nil. Advisory — never
+   blocks the edit, never throws out."
+  [event config]
+  (try
+    (let [review-cfg (:review config)
+          file-path (get-file-path event)]
+      (when (and (= (:hook_event_name event) "PostToolUse")
+                 (get review-cfg :enabled true)
+                 (reviewable-file? file-path)
+                 ;; let the in-JVM pipeline own .clj/.cljc review when it's live
+                 (not (and (jvm-clj-file? file-path) (jvm-reachable?))))
+        ;; 1. Accumulate BEFORE the rate-limit check — never lose an edit.
+        (accumulate-pending! file-path)
+        (let [interval (get review-cfg :interval-seconds 60)]
+          (if (review-rate-limited? interval)
+            (do (log! "REVIEW_RATE_LIMITED"
+                      (str "interval=" interval "s")
+                      (str "pending=" (count (read-pending))))
+                nil)
+            ;; 2. Not rate-limited → review the whole accumulated batch.
+            (let [pending (read-pending)
+                  files (->> pending
+                             (keep (fn [p]
+                                     (when-let [c (try (slurp p) (catch Exception _ nil))]
+                                       (when (seq c) {:path p :content c}))))
+                             (vec))]
+              (when (seq files)
+                (let [max-code (get review-cfg :max-code-length 12000)
+                      max-out (get-in config [:feedback :max-length] 1000)
+                      timeout-ms 60000
+                      prompt (build-review-prompt files {:max-code-length max-code})]
+                  (log! "REVIEW_BATCH"
+                        (str "count=" (count files))
+                        (str "files=" (str/join "," (map #(last (str/split (:path %) #"/")) files))))
+                  ;; Stamp BEFORE the (slow) call so concurrent edits within the
+                  ;; interval don't all fire reviews (they accumulate instead).
+                  (touch-last-review!)
+                  (let [text (call-agy prompt timeout-ms)]
+                    (if (seq text)
+                      (do
+                        ;; Clear ONLY on a successful review.
+                        (clear-pending!)
+                        (let [capped (if (> (count text) max-out)
+                                       (str (subs text 0 max-out) "\n[truncated]")
+                                       text)
+                              names (str/join ", " (map #(last (str/split (:path %) #"/")) files))]
+                          (str "Gemini review (" names "):\n" capped)))
+                      nil)))))))))
+    (catch Exception e
+      (log! "REVIEW_ERROR" (.getMessage e))
+      nil)))
+
+;;; ---------------------------------------------------------------------------
 ;;; Fast Path (skip nREPL for non-Clojure files)
 ;;; ---------------------------------------------------------------------------
 
@@ -325,7 +593,9 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- process-via-nrepl!
-  "Send event to Seon server via nREPL for full processing."
+  "Send event to Seon server via nREPL for full processing.
+   Returns the response map (does NOT output) so the caller can merge in
+   bb-direct review feedback before emitting a single JSON object."
   [event]
   (let [config (load-config)
         claude-session-id (:session_id event)
@@ -361,7 +631,22 @@
                   (or (:decision response) "continue")
                   (get-in response [:hookSpecificOutput :additionalContext]))
 
-      (output! response))))
+      response)))
+
+(defn- merge-review-feedback
+  "Merge a bb-direct review string into the (possibly nil) JVM response.
+   If the JVM blocked, leave the block untouched (review is advisory).
+   Otherwise append the review to additionalContext."
+  [response review-text]
+  (cond
+    (nil? review-text) (or response {:continue true})
+    (= (:decision response) "block") response
+    :else
+    (let [existing (get-in response [:hookSpecificOutput :additionalContext])
+          combined (if (seq existing) (str existing "\n\n" review-text) review-text)]
+      {:continue true
+       :hookSpecificOutput {:hookEventName "PostToolUse"
+                            :additionalContext combined}})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Main Entry Point
@@ -391,21 +676,29 @@
             (str "session=" (or (:session_id event) "orchestrator"))
             (str "file=" (or file-path "unknown")))
 
-      ;; Fast path: skip nREPL for non-Clojure, non-docs-markdown files
-      (if (should-skip-nrepl? event)
-        (do
-          (log! "SKIP_NON_CLJ" (or file-path "unknown"))
-          (continue!))
-
-        ;; Clojure file: validate syntax before allowing edit
-        (if-let [block-response (or (validate-clojure-edit event)
-                                    (validate-critical-edit event))]
+      (let [config (load-config)]
+        ;; Fast path: skip nREPL for non-Clojure, non-docs-markdown files.
+        ;; The bb-direct review is runtime-independent, so it STILL fires here
+        ;; for reviewable files (e.g. a non-docs .md like SOUL.md/README).
+        (if (should-skip-nrepl? event)
           (do
-            (log! "CLOJURE_BLOCK" (:reason block-response))
-            (output! block-response))
+            (log! "SKIP_NON_CLJ" (or file-path "unknown"))
+            (let [review (bb-review! event config)]
+              (output! (merge-review-feedback nil review))))
 
-          ;; Valid edit: proceed with nREPL processing
-          (process-via-nrepl! event))))
+          ;; Clojure file: validate syntax before allowing edit
+          (if-let [block-response (or (validate-clojure-edit event)
+                                      (validate-critical-edit event))]
+            (do
+              (log! "CLOJURE_BLOCK" (:reason block-response))
+              (output! block-response))
+
+            ;; Valid edit: JVM pipeline (reload/test for .clj/.cljc; no-op for
+            ;; .cljs/.md when the JVM is down) + bb-direct Gemini review, merged
+            ;; into a single response.
+            (let [response (process-via-nrepl! event)
+                  review (bb-review! event config)]
+              (output! (merge-review-feedback response review)))))))
 
     (catch Exception e
       (log! "ERROR" (.getMessage e))

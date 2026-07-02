@@ -122,10 +122,11 @@
     :else (throw (ex-info "seon.embed: *conn* is unbound and no :seon.embed/db was provided" {}))))
 
 (defn where->eids
-  "Resolve datalog `:where` clauses to a SET of entity-ids on `db` (the LOCAL
-   pod db value). The clauses bind `?e`; we wrap them in a `[:find ?e :where …]`
-   query. Returns the matched eids (possibly empty). This is the type-scope the
-   wire-server restricts KNN to."
+  "Resolve datalog `:where` clauses to a SET of entity-ids on `db`.
+
+   The LOCAL pod db value. The clauses bind `?e`; we wrap them in a
+   `[:find ?e :where …]` query. Returns the matched eids (possibly empty).
+   This is the type-scope the wire-server restricts KNN to."
   {:malli/schema [:=> [:catn [:db ::db] [:where ::where]] ::eids]}
   [db where]
   (into #{} (map first) (db/query (into '[:find ?e :where] where) db)))
@@ -135,7 +136,9 @@
 ;; ---------------------------------------------------------------------------
 
 (defn ^:async search
-  "Embedding KNN search (P2-C). Resolves `:seon.embed/where` (datalog clauses
+  "Embedding KNN search (P2-C).
+
+   Resolves `:seon.embed/where` (datalog clauses
    binding `?e`) to an eid type-scope on the LOCAL db, then sends the query TEXT
    + `k` + the eid scope over the wire — the wire-server embeds the query (with
    the retrieval instruction) and runs KNN, returning the nearest eids. The pod
@@ -171,9 +174,11 @@
       (seq ent) (assoc ::entity ent))))
 
 (defn ^:async search-pull
-  "Like [[search]] but ENRICHES each hit with the full entity pulled from the
-   LOCAL db (reads are local lazy db values). This is the agent-facing
-   convenience — one call from NL query to ranked, source-bearing hits.
+  "Like [[search]] but ENRICHES each hit with the full pulled entity.
+
+   Pulled from the LOCAL db (reads are local lazy db values). This is the
+   agent-facing convenience — one call from NL query to ranked,
+   source-bearing hits.
 
    `:seon.embed/pull-pattern` overrides `default-pull-pattern` (the `[*]`
    wildcard — kind-agnostic, covers whatever attrs a hit carries). Resolves to

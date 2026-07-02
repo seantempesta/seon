@@ -3,15 +3,19 @@
 
    Two verbs:
      - `ctx-preview` — the FULL prompt the agent would receive on its
-       next render: the live SOUL system block FIRST (read via the SAME
-       fn the adapters call, `seon.ai/effective-system-prompt`), then
-       the assembled AI-context (`seon.ctx/assemble-context`). The
+       next render: the HARDCODED system block FIRST (read via the SAME
+       fn the adapters call, `seon.ai/effective-system-prompt` — the
+       system-specific mechanics, NOT the soul/any file), then the
+       assembled AI-context via `seon.agent.ctx/render-context` — the SINGLE
+       producer the loop's prompt path (`seon.agent.turn/render-prompt`)
+       also routes through, over the SAME unfiltered `@*conn*`. The
        `:seon.render/text` is byte-identical to what the LLM receives
        (system message + context), with an explicit boundary between
-       them. Per-section texts (left pane) lead with the soul block;
+       them. Per-section texts (left pane) lead with the system block;
        the per-section html twins (right pane) mirror the context
-       sections only. Soul + context derive from the same sources the
-       real call uses, so divergence is impossible.
+       sections only (which now include the SOUL.md / AGENTS.md
+       file-sections). System block + context derive from the same
+       sources the real call uses, so divergence is impossible.
      - `handlers` — the live handler registry visible to the agent
        (core + per-agent).
 
@@ -19,11 +23,10 @@
    `(seon.db/current-agent-id)` so REPL calls from inside an agent
    scope work with no argument."
   (:require
-    [seon.agent-view :as agent-view]
     [seon.ai :as ai]
-    [seon.ctx :as ctx]
+    [seon.ai.tokens :as tokens]
+    [seon.agent.ctx :as ctx]
     [seon.db :as db]
-    [seon.handler :as handler]
     [seon.schema :as schema]))
 
 (schema/register! :seon.agent.inspect/request
@@ -35,18 +38,15 @@
 ;; instead of re-showing the full static bulk on every view.
 (schema/register! :seon.agent.inspect/section-text
   [:map
-   [:seon.ctx/name :seon.ctx/name]
+   [:seon.agent.ctx/name :seon.agent.ctx/name]
    [:seon.render/text :string]])
 
 (schema/register! :seon.agent.inspect/ctx-response
   [:map
    [:seon.render/text :string]
    [:seon.render/section-texts [:vector :seon.agent.inspect/section-text]]
-   [:seon.render/section-html [:vector :seon.ctx/section-html]]
+   [:seon.render/section-html [:vector :seon.agent.ctx/block-html]]
    [:seon.render/token-estimate :int]])
-
-(schema/register! :seon.agent.inspect/handlers-response
-  [:map [:seon.handler/list [:vector :map]]])
 
 (defn- resolve-id
   [id]
@@ -57,51 +57,57 @@
                {:seon.agent.inspect/error :no-agent-id}))))
 
 (defn ctx-preview
-  "Return the FULL prompt the agent would see on its next render — the
-   EXACT bytes the LLM receives: the live SOUL system block FIRST, then
-   the assembled context. The soul is read via the SAME fn the adapters
-   call (`seon.ai/effective-system-prompt` — live SOUL.md/AGENTS.md read
-   plus the no-identity fallback / explicit-override logic), so the
-   debug text is byte-identical to the real system message; the context
-   comes from the ONE composer `seon.ctx/assemble-context`. Divergence
-   is impossible — both surfaces derive from the same sources the real
-   call uses. `:seon.render/text` = soul + boundary + context.
-   `:seon.render/section-texts` leads with a `:soul-system` section (left
-   pane shows the soul too); `:seon.render/section-html` mirrors the
-   context section twins only (the soul is the system message, not a
-   context section). `:seon.render/token-estimate` counts the WHOLE
-   prompt (soul included). Reads from the agent's filtered view so
-   cross-agent tx are hidden."
+  "Return the FULL prompt the agent would see on its next render.
+
+   The EXACT bytes the LLM receives: the HARDCODED system block FIRST, then
+   the assembled context. The system block is read via the SAME fn the
+   adapters call (`seon.ai/effective-system-prompt` — the system-specific
+   seon mechanics, NOT the soul/any file; explicit-override logic), so
+   the debug text is byte-identical to the real system message; the
+   context comes from `seon.agent.ctx/context-root` → render (and now CARRIES
+   the SOUL.md / AGENTS.md file-sections). Divergence is impossible — both
+   surfaces derive from the same sources the real call uses.
+   `:seon.render/text` = system + boundary + context.
+   `:seon.render/section-texts` leads with a `:system` section (left pane
+   shows the system message too); `:seon.render/section-html` mirrors the
+   context section twins only (the system block is the system message,
+   not a context section). `:seon.render/token-estimate` counts the WHOLE
+   prompt (system included). Renders against the live `@*conn*` — the SAME
+   unfiltered db value the loop renders the prompt over — so the two are
+   byte-identical (no per-agent `d/filter` divergence)."
   {:malli/schema [:=> [:cat :seon.agent.inspect/request] :seon.agent.inspect/ctx-response]}
   [{:seon.agent/keys [id]}]
-  (let [id (resolve-id id)
-        {:seon.db/keys [db]} (agent-view/agent-view {:seon.agent/id id})
-        {:seon.render/keys [text section-texts section-html]}
-        (ctx/assemble-context {:seon.agent/id id :seon.db/db db})
-        ;; Block 1 — the live soul system message, via the EXACT fn the
+  (let [id  (resolve-id id)
+        ;; THE SAME db the prompt path renders against — the live cluster
+        ;; conn, UNFILTERED. The loop renders the prompt over `@*conn*`
+        ;; ([[seon.agent.ctx/render-context]] / `render-prompt`); the inspector
+        ;; must use the SAME db value or it would not be byte-identical (and
+        ;; the old per-agent `d/filter` actively DROPPED inbound peer-message
+        ;; content whose datom lived in the peer's tx — the inspector lied).
+        db  @db/*conn*
+        ctx {:seon.agent/id id :seon.db/db db}
+        ;; THE SAME single producer the prompt path uses — both route
+        ;; through `seon.agent.ctx/render-context`, so the LLM prompt and this
+        ;; human inspector are byte-identical by construction.
+        text          (ctx/render-context ctx)
+        ;; Per-section breakdown for the panes, derived from the SAME root +
+        ;; render (left pane folds per section; right pane one html card per
+        ;; renderable).
+        {:seon.render/keys [section-texts section-html]} (ctx/ctx-sections ctx)
+        ;; Block 1 — the hardcoded system message, via the EXACT fn the
         ;; adapters call (no re-implementation, no drift). No override is
-        ;; passed, so this returns the live SOUL.md/AGENTS.md text (or the
-        ;; no-identity fallback) — the normal call's system message.
-        soul          (ai/effective-system-prompt {})
-        ;; The FULL prompt via the ONE shared composer — same bytes the
-        ;; persisted per-turn log uses, so the two debug surfaces can't
-        ;; drift (boundary + assembly live in seon.ai now).
+        ;; passed, so this returns the system-specific seon mechanics —
+        ;; the normal call's system message.
+        system        (ai/effective-system-prompt {})
+        ;; The FULL prompt = system + boundary + context, via the SAME fn
+        ;; the adapters call so the two debug surfaces can't drift.
         full-text     (ai/debug-full-prompt {:seon.ai/ctx text})]
     {:seon.render/text            full-text
-     :seon.render/section-texts   (into [{:seon.ctx/name     :soul-system
-                                          :seon.render/text  soul}]
+     :seon.render/section-texts   (into [{:seon.agent.ctx/name     :system
+                                          :seon.render/text  system}]
                                         section-texts)
      :seon.render/section-html    section-html
      ;; Estimate over the WHOLE prompt — same units as the composer
-     ;; (~4 chars/token), so the count grows by the soul length.
-     :seon.render/token-estimate  (quot (count full-text) 4)}))
-
-(defn handlers
-  "Return the live handler registry visible to the agent (core
-   handlers + the agent's own, if any), sorted by priority desc."
-  {:malli/schema [:=> [:cat :seon.agent.inspect/request] :seon.agent.inspect/handlers-response]}
-  [{:seon.agent/keys [id]}]
-  (let [id (resolve-id id)
-        {:seon.db/keys [db]} (agent-view/agent-view {:seon.agent/id id})
-        hs (handler/query-handlers {:seon.agent/id id :seon.db/db db})]
-    {:seon.handler/list hs}))
+     ;; (~4 chars/token, via seon.ai.tokens), so the count grows by the
+     ;; system-block length.
+     :seon.render/token-estimate  (tokens/estimate full-text)}))

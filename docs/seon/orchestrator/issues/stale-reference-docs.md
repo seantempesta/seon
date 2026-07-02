@@ -1,6 +1,7 @@
 ---
 type: issue
 status: open
+severity: cleanup
 tags: [issue, reference]
 ---
 # Partially-Stale Reference Docs Need Updates

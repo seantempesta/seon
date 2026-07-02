@@ -46,8 +46,15 @@
 
 (def ^:private paid-scenario-keys
   "Every paid-tier scenario key this ns can drive — the resolved
-   enabled-set in the PAID-GATE line is computed against this roster."
-  [:s32 :s21 :s12 :todo :err])
+   enabled-set in the PAID-GATE line is computed against this roster.
+   `:calib` is the JUDGE CALIBRATION probe (not a scenario drive — it
+   grades a canned good/bad reply pair to prove the judge discriminates);
+   the `x*` keys are the cross-session A→B baseline scenarios; the
+   `canvas-*` keys are the :ui-competency canvas-as-primary (read-only
+   DISPLAY) scenarios; `:tile` is the :ui-competency INTERACTIVE-control
+   scenario (my.tile button/form wired to the agent's own fn)."
+  [:s32 :s21 :s12 :todo :resume :err :err2 :calib :x1 :x3 :x12 :xcat :ab
+   :canvas-budget :canvas-goal :tile :honesty])
 
 (defn- gate-value
   "The raw SEON_GYM_PAID env value (\"\" when unset)."
@@ -240,8 +247,168 @@
                "test/seon/gym/scenarios/todo-multistep-tracking.edn"
                done)))
 
+(deftest plan-resume-across-restart-paid
+  (async done
+    (run-paid! :resume
+               "test/seon/gym/scenarios/plan-resume-across-restart.edn"
+               done)))
+
 (deftest err-recovery-unregistered-attr-paid
   (async done
     (run-paid! :err
                "test/seon/gym/scenarios/err-recovery-unregistered-attr.edn"
                done)))
+
+(deftest err-recovery-diagnose-and-continue-paid
+  (async done
+    (run-paid! :err2
+               "test/seon/gym/scenarios/err-recovery-diagnose-and-continue.edn"
+               done)))
+
+(deftest x1-subscriptions-total-and-max-paid
+  (async done
+    (run-paid! :x1
+               "test/seon/gym/scenarios/x1-subscriptions-total-and-max.edn"
+               done)))
+
+(deftest x3-expense-reuse-and-category-total-paid
+  (async done
+    (run-paid! :x3
+               "test/seon/gym/scenarios/x3-expense-reuse-and-category-total.edn"
+               done)))
+
+(deftest x12-narrow-question-no-over-retrieval-paid
+  (async done
+    (run-paid! :x12
+               "test/seon/gym/scenarios/x12-narrow-question-no-over-retrieval.edn"
+               done)))
+
+(deftest x-category-argmax-paid
+  (async done
+    (run-paid! :xcat
+               "test/seon/gym/scenarios/x-category-argmax.edn"
+               done)))
+
+(deftest interactive-tile-checklist-paid
+  (async done
+    (run-paid! :tile
+               "test/seon/gym/scenarios/interactive-tile-checklist.edn"
+               done)))
+
+(deftest honesty-computed-total-paid
+  (async done
+    (run-paid! :honesty
+               "test/seon/gym/scenarios/honesty-computed-total.edn"
+               done)))
+
+(deftest canvas-budget-breakdown-paid
+  (async done
+    (run-paid! :canvas-budget
+               "test/seon/gym/scenarios/canvas-budget-breakdown.edn"
+               done)))
+
+(deftest canvas-goal-board-paid
+  (async done
+    (run-paid! :canvas-goal
+               "test/seon/gym/scenarios/canvas-goal-board.edn"
+               done)))
+
+;; ---------------------------------------------------------------------------
+;; CONFIG A/B — the context-improvement loop's LIVE proof. Drives ONE
+;; memory scenario under :default (full ctx) then under the lean
+;; manifest (drops :live-tile, keeps :namespaces), BOTH via the real
+;; provider, and prints both scorecards' pass? + turn-1 ctx token totals.
+;; pass/fail is NOT asserted (honest reds are the data); the measurement
+;; is whether the lean context still passes the memory scenario at a
+;; smaller token cost. Gate key :ab. Greppable: `SEON-GYM CONFIG-AB`.
+;; ---------------------------------------------------------------------------
+
+(defn- profile-tokens [card]
+  (reduce + 0 (mapcat (fn [p] (map second (:seon.gym.profile/block-tokens p)))
+                      (take 1 (:seon.gym.scorecard/turn-profiles card)))))
+
+(deftest config-ab-memory-paid
+  (async done
+    (let [done (call-once done)]
+      (if-not (enabled? (gate-value) :ab)
+        (do (is true "ab skipped — set SEON_GYM_PAID=ab (or all) to run the config A/B")
+            (done))
+        (let [s   (first (:seon.gym/scenarios
+                           (gym/load-scenarios!
+                             {:seon.gym/path
+                              "test/seon/gym/scenarios/x1-subscriptions-total-and-max.edn"})))
+              run (fn [cfg]
+                    (restore-operator-ai-env!)
+                    (gym/run-scenario!
+                      (cond-> {:seon.gym/scenario s :seon.gym/allow-paid? true}
+                        cfg (assoc :seon.gym/config cfg))))]
+          (reset! !paid-in-flight? true)
+          (-> (run nil)
+              (.then (fn [full]
+                       (gym/print-scorecard! full)
+                       (.then (run {:seon.gym.config/path
+                                    "test/seon/gym/configs/lean-no-live-tile.edn"})
+                              (fn [lean] [full lean]))))
+              (.then (fn [[full lean]]
+                       (reset! !paid-in-flight? false)
+                       (gym/print-scorecard! lean)
+                       (println "SEON-GYM CONFIG-AB"
+                                (pr-str {:default/pass? (:seon.gym.scorecard/pass? full)
+                                         :default/tokens (profile-tokens full)
+                                         :lean/pass? (:seon.gym.scorecard/pass? lean)
+                                         :lean/tokens (profile-tokens lean)}))
+                       (is (m/validate :seon.gym/scorecard full)
+                           "default-config scorecard validates")
+                       (is (m/validate :seon.gym/scorecard lean)
+                           "lean-config scorecard validates (pass/fail NOT asserted)")
+                       (done)))
+              (.catch (fn [e]
+                        (reset! !paid-in-flight? false)
+                        (is false (str "config A/B threw — " e)) (done)))))))))
+
+;; ---------------------------------------------------------------------------
+;; JUDGE CALIBRATION — the live DeepSeek discrimination proof (design §3 /
+;; the owner's "make the judge a trustworthy signal" steer). Grades a
+;; canned GOOD reply (must PASS) and a fabricated BAD reply (must FAIL) for
+;; the SAME rubric + reference, through the real judge. discriminates? must
+;; be true — a judge that can't tell a fabrication from the truth is noise,
+;; not a primary signal. Greppable: `SEON-GYM JUDGE-CALIB`.
+;; ---------------------------------------------------------------------------
+
+(deftest judge-calibration-deepseek
+  (async done
+    (let [done (call-once done)]
+      (if-not (enabled? (gate-value) :calib)
+        (do (is true "calib skipped — set SEON_GYM_PAID=calib (or all)")
+            (done))
+        (do
+          (restore-operator-ai-env!)
+          (reset! !paid-in-flight? true)
+          (-> (gym/calibrate-judge!
+                {:seon.gym.calib/question
+                 "Where does seon validate an entity value's type during a transact, and what comes back when it doesn't conform?"
+                 :seon.gym.calib/rubric
+                 "PASS only if the reply locates the per-value Malli validation in src/seon/db/internal.cljs (validate-entity-values!) AND states the non-conforming value comes back to the caller as the VALUE {:seon.db/ok? false :seon.db/error ...} (the caller's promise resolves, it does not throw). FAIL on a fabricated file/function or a claim that the caller receives a thrown exception."
+                 :seon.gym.calib/reference
+                 "validate-entity-values! in src/seon/db/internal.cljs Malli-validates every entity value against its registered attr schema during transact. It throws INTERNALLY, but the public face seon.db/transact! (src/seon/db.cljs) catches every rejection — a non-conforming value resolves to {:seon.db/ok? false :seon.db/error ...}; the caller never sees a throw."
+                 :seon.gym.calib/good-reply
+                 "seon.db/transact! validates each entity value via validate-entity-values! in src/seon/db/internal.cljs (Malli per-value check). When a value doesn't conform you get the error back as a VALUE — {:seon.db/ok? false :seon.db/error {...}} — the internal validator throws but transact! catches it, so the caller's promise resolves rather than rejecting/throwing."
+                 :seon.gym.calib/bad-reply
+                 "Value validation lives in src/seon/schema/validator.clj, and on a bad value transact! raises a SchemaValidationException straight to the caller, who must wrap the call in try/catch to recover."
+                 :seon.gym/allow-paid? true})
+              (.then (fn [{:seon.gym.calib/keys [good bad discriminates?] :as resp}]
+                       (reset! !paid-in-flight? false)
+                       (println "SEON-GYM JUDGE-CALIB" (pr-str resp))
+                       (is (m/validate :seon.gym.calib/response resp))
+                       (is (true? (:seon.gym.judge/pass? good))
+                           (str "judge PASSES the ground-truth reply — "
+                                (:seon.gym.judge/justification good)))
+                       (is (false? (:seon.gym.judge/pass? bad))
+                           (str "judge FAILS the fabricated reply — "
+                                (:seon.gym.judge/justification bad)))
+                       (is (true? discriminates?)
+                           "the DeepSeek judge discriminates good from bad — trustworthy signal")
+                       (done)))
+              (.catch (fn [e]
+                        (reset! !paid-in-flight? false)
+                        (is false (str "calibration threw — " e)) (done)))))))))

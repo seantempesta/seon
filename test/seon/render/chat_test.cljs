@@ -168,10 +168,8 @@
                               (d/transact!
                                 conn
                                 {:tx-data [{:seon.user/id "user"}
-                                           {:seon.agent/id a-id
-                                            :seon.agent/state :idle}
-                                           {:seon.agent/id b-id
-                                            :seon.agent/state :idle}]})))
+                                           {:seon.agent/id a-id}
+                                           {:seon.agent/id b-id}]})))
                      (.then (fn [_] conn))))))))
 
 (defn- with-conn
@@ -253,6 +251,15 @@
 ;; last-reply — the default root tile's derived read (live-tiles U3).
 ;; ============================================================
 
+;; The EXTRACTION mechanism, not the literal text: bind the reply, the peer
+;; ping, and the self-narration as named fixture data, then assert last-reply
+;; picks the agent→HUMAN row and EXCLUDES the others — even though the peer
+;; ping and the self-narration are both NEWER in the log. The reply string
+;; itself is arbitrary fixture; the contract is the from=me ∧ to∋user filter.
+(def ^:private the-reply "on it — 3 workouts logged")
+(def ^:private peer-ping-content "peer ping")
+(def ^:private self-narr ";; The user asked …\n(seon.agent/reply! {…})")
+
 (deftest last-reply-is-the-newest-assistant-message
   (async done
     (-> (with-conn
@@ -265,12 +272,12 @@
                          (agent/message!
                            {:seon.agent.message/from    [:seon.agent/id a-id]
                             :seon.agent.message/to      [:seon.user/id "user"]
-                            :seon.agent.message/content "on it — 3 workouts logged"})))
+                            :seon.agent.message/content the-reply})))
                 (.then (fn [_]
                          (agent/message!
                            {:seon.agent.message/from    [:seon.agent/id b-id]
                             :seon.agent.message/to      [:seon.agent/id a-id]
-                            :seon.agent.message/content "peer ping"})))
+                            :seon.agent.message/content peer-ping-content})))
                 (.then (fn [_]
                          ;; the per-turn transcript SELF-message lands
                          ;; AFTER the reply — the kXQ root-tile bug
@@ -279,17 +286,21 @@
                          (agent/message!
                            {:seon.agent.message/from    [:seon.agent/id a-id]
                             :seon.agent.message/to      [:seon.agent/id a-id]
-                            :seon.agent.message/content ";; The user asked …\n(seon.agent/reply! {…})"})))
+                            :seon.agent.message/content self-narr})))
                 (.then
                   (fn [_]
                     (let [{::chat/keys [last-reply]}
                           (chat/last-reply {:seon.agent/id a-id
                                             :seon.db/db @conn})]
-                      (is (= "on it — 3 workouts logged" last-reply)
-                          (str "the newest agent→HUMAN message — the"
-                               " human's messages, peer traffic, and"
-                               " transcript self-narration never count"
-                               " as MY reply"))))))))
+                      ;; picks the agent→human row (the named fixture reply)…
+                      (is (= the-reply last-reply)
+                          "extracts the newest agent→HUMAN message as MY reply")
+                      ;; …NOT the newer peer ping (to a peer, not the human)…
+                      (is (not= peer-ping-content last-reply)
+                          "peer traffic — newer in the log — is filtered out")
+                      ;; …NOT the newest-of-all self-narration (from=to=me).
+                      (is (not= self-narr last-reply)
+                          "transcript self-narration — the NEWEST row — never counts as MY reply")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -338,9 +349,6 @@
 ;; failed` ended the wake with NO user-visible notice).
 ;; ============================================================
 
-(def ^:private err-content
-  "⚠ LLM call failed (after 1 retry) — DeepSeek fetch failed: fetch failed")
-
 (deftest provider-failure-renders-a-system-line
   (async done
     (-> (with-conn
@@ -353,42 +361,38 @@
                      :seon.agent.message/content "are you there?"})
                   (.then
                     (fn [_]
-                      ;; the turn log exactly as seon.agent writes it: an
-                      ;; :error turn carrying its error self-message, and
-                      ;; a healthy :done turn with its transcript
-                      ;; self-message — only the former may surface.
-                      ;; RAW d/transact! like the fixture itself — the
-                      ;; fixture's 16-char agent ids predate the 14-char
-                      ;; :seon.db/id gate, so db/transact!'s validation
-                      ;; would reject any tx-map carrying :seon.agent/id.
+                      ;; the turn log exactly as seon.agent writes it: turns
+                      ;; record STATUS only (the error notice is synthesized
+                      ;; downstream from the status — turns store no message
+                      ;; of their own). Only the :error turn may surface; the
+                      ;; :done turn never does. RAW d/transact! like the
+                      ;; fixture itself — the fixture's 16-char agent ids
+                      ;; predate the 14-char :seon.db/id gate, so
+                      ;; db/transact!'s validation would reject any tx-map
+                      ;; carrying :seon.agent/id.
+                      ;; Run model: turns are STANDALONE entities that point
+                      ;; UP to a run (`:seon.agent.turn/run`), the run UP to the
+                      ;; agent (`:seon.agent.run/agent`). The `run` tempid links
+                      ;; them in one tx.
                       (d/transact!
                         db/*conn*
                         {:tx-data
-                         [{:seon.agent/id a-id
-                           :seon.agent/sessions
-                           [{:seon.agent.session/id "SESchattest001"
-                             :seon.agent.session/at t0
-                             :seon.agent.session/turns
-                             [{:seon.agent.turn/id "TRNchatterr001"
-                               :seon.agent.turn/at (t+ 100)
-                               :seon.agent.turn/status :error
-                               :seon.agent.turn/messages
-                               [{:seon.agent.message/id   "MSGchatterr001"
-                                 :seon.agent.message/from [:seon.agent/id a-id]
-                                 :seon.agent.message/to   [[:seon.agent/id a-id]]
-                                 :seon.agent.message/content err-content
-                                 :seon.agent.message/at   (t+ 100)
-                                 :seon.agent.message/hops 0}]}
-                              {:seon.agent.turn/id "TRNchattdone01"
-                               :seon.agent.turn/at (t+ 200)
-                               :seon.agent.turn/status :done
-                               :seon.agent.turn/messages
-                               [{:seon.agent.message/id   "MSGchattdone01"
-                                 :seon.agent.message/from [:seon.agent/id a-id]
-                                 :seon.agent.message/to   [[:seon.agent/id a-id]]
-                                 :seon.agent.message/content ";; all good"
-                                 :seon.agent.message/at   (t+ 200)
-                                 :seon.agent.message/hops 0}]}]}]}]})))
+                         [{:db/id "run"
+                           :seon.agent.run/id "RUNchattest001"
+                           :seon.agent.run/agent [:seon.agent/id a-id]
+                           :seon.agent.run/started-at t0
+                           :seon.agent.run/trigger :message
+                           :seon.agent.run/status :open
+                           :seon.agent.run/turn-limit 20
+                           :seon.agent.run/deadline (t+ 9999999)}
+                          {:seon.agent.turn/id "TRNchatterr001"
+                           :seon.agent.turn/at (t+ 100)
+                           :seon.agent.turn/status :error
+                           :seon.agent.turn/run "run"}
+                          {:seon.agent.turn/id "TRNchattdone01"
+                           :seon.agent.turn/at (t+ 200)
+                           :seon.agent.turn/status :done
+                           :seon.agent.turn/run "run"}]})))
                   (.then
                     (fn [_]
                       (let [{::chat/keys [messages]}
@@ -401,11 +405,9 @@
                                  " :done turn's self-message never does"))
                         (let [{::chat/keys [label content at]} (first sys)]
                           (is (= "system" label))
-                          (is (str/includes? content err-content)
-                              "the turn's recorded error IS the notice")
                           (is (str/includes? content
                                              "resume on your next message")
-                              "tells the human how to wake the agent")
+                              "the synthesized notice tells the human how to wake the agent")
                           (is (instance? js/Date at)))
                         (testing "merged into the stream in time order"
                           (is (= [::chat/human ::chat/system]

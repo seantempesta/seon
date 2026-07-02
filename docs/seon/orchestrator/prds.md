@@ -3,45 +3,60 @@ type: orchestrator
 tags: [index, prd]
 status: active
 ---
+
 # PRD Index
 
-All feature specifications live in `docs/prds/`. Each directory contains a `prd.md` (or `design.md`), optional `decisions.md`, `notes.md`, and `research/`.
+All feature specifications live in `docs/prds/`. Each active PRD folder carries a
+`CLAUDE.md` (the always-in-context runbook), a roadmap or prd, and `research/`.
+The **canonical target-design docs** (architecture, data-model, agent-runtime,
+ui, toolkit, library-grounding, observability) live in
+`docs/seon/architecture/` — PRD folders own the "we-are-here" roadmaps, not the
+target design.
 
-## Active PRDs
+## Active tracks
 
-| PRD | Status | Summary | Components |
-|-----|--------|---------|------------|
-| [[prds/agent-repl-interface/prd]] | design | Agent REPL-only development with composable `*ctx*` atom | [[components/agent-system]] |
-| [[prds/refinement/prd]] | active | Unified end-to-end system: flow topology, agent runtime, MCP REPL, Observatory (~98% done, auto-proxy pending) | [[components/flow-topology]], [[components/agent-system]] |
-| [[prds/startup-reliability/prd]] | active | Zero-issue startup: fix cascading failures, agent OOM, MCP blocking | [[components/flow-topology]], [[components/agent-system]], [[components/database]] |
-| [[prds/namespace-ui/prd]] | active | Namespace-as-app UI: introspection, renderers, Observatory, dashboard | [[components/web-layer]], [[components/renderer]] |
-| [[prds/render-pipeline/prd]] | active | Wire spec-driven rendering end-to-end, replace manual renderer registration | [[components/renderer]], [[components/code-graph]] |
-| [[prds/test-infrastructure/design]] | design | Unified test fixtures, data isolation, generative testing with shrinking | [[components/testing]] |
-| [[prds/mcp-resilience/prd]] | active | MCP server resilience: async request processing (Phase 1 done, remaining paused) | [[components/agent-system]] |
-| [[prds/datahike-migration/prd]] | active | Replace Datalevin with embedded Datahike: per-namespace DBs, file backend default, single in-process writer, git-friendly time-travel. **Phases 1+2 shipped, Phase 3 in flight.** See [[orchestrator/active]] for status. |  [[components/database]], [[components/schema-system]] |
-| [[prds/datahike-migration/phase-3-harness-migration]] | active | Phase 3 core: agent JVM as playground, `:seon.session` registry, harness DI, rendered LLM context. Demo target shipped 2026-04-25. | [[components/database]], [[components/agent-system]] |
-| [[prds/agent-runtime/substrate-asks-batch-2026-06-16]], [[prds/agent-runtime/overridable-substrate-2026-06-17]], [[prds/agent-runtime/research/simplification-audit-2026-06-17]], [[prds/agent-runtime/research/27-28-architecture-2026-06-16]] | active | Recent core-track PRDs + research on branch `feature/overridable-substrate`. | [[components/agent-system]] |
-| [[prds/agent-runtime/embeddings-fn-retrieval-prd-2026-06-18]] | draft | Embedding-based retrieval of full `:seon.fn` source into agent context via a Proximum vector secondary index on the wire-server. Phase 1 (datahike sync to upstream + Java 22) shipped; Phase 2 specced. | [[components/agent-system]], [[components/database]] |
+| Track | Status | Summary | Entry points |
+|-------|--------|---------|--------------|
+| agent-fsm | active | The core program: config-driven agent init, the data-FSM loop, blocks/renders/tiles, the `my.*` toolkit. Target design is the canonical set in `docs/seon/architecture/`; the sole "we-are-here" doc is the roadmap. | [[prds/agent-fsm/CLAUDE]], [[prds/agent-fsm/roadmap]], [[architecture]] |
+| diffusion-dynamic-context | active | Diffusion LLM as a dynamic-context provider: unified `refine` oracle, control loop, worker clamp/infill/renoise/KV-reuse. Offline-proven both sides; deploy+measure remain (owner-driven). | [[prds/diffusion-dynamic-context/CLAUDE]], [[prds/diffusion-dynamic-context/north-star]] |
+| embeddings | dormant | Semantic recall on Vertex `gemini-embedding-2` + Proximum HNSW on the wire-server. Gated behind `SEON_EMBED`. | [[prds/embeddings/vertex-usage-reference-2026-06-25]] |
+| gym-v2 | active | Agent exercise harness: long-term planning + database-memory drives, scored without coaching. | [[prds/gym-v2/design]] |
+| inspect.ai bridge | research | Benchmark bridge driving seon agents from Inspect AI; spike lives under agent-fsm research. | [[prds/agent-fsm/research/inspect-bridge-spike/init-agent-unification-spec-2026-07-01]] |
 
-## Completed PRDs
+## Paused (JVM-track era)
 
-| PRD | Status | Summary | Components |
-|-----|--------|---------|------------|
-| [[prds/schema-unification/design]] | complete | Malli as single schema source: validation gate, pipeline tests, Nippy serialization, bridge | [[components/schema-system]], [[components/database]] |
-| [[prds/graph-cleanup/prd]] | complete | Remove derived attrs from graph, unify resolution via Datalog queries | [[components/code-graph]] |
-| [[prds/unified-flow/design]] | complete | core.async.flow as routing backbone: process isolation, inject/ping, topology | [[components/flow-topology]] |
-| [[prds/flow-datalevin-writer/prd]] | complete | Single-writer flow for Datalevin writes via topology, separate JVM isolation | [[components/flow-topology]], [[components/database]] |
-| [[prds/datalevin-migration/prd]] | complete | Datalevin database platform: server, connection manager, multi-DB isolation | [[components/database]] |
-| [[prds/super-repl/prd]] | complete | Federated agent runtime with JVM pool (evolved into unified-flow + seon.repl) | [[components/agent-system]] |
-| [[prds/stability-improvements/prd]] | complete | Health checks, error boundaries, automated cleanup for agent sessions | [[components/agent-system]] |
+The embedded-datahike JVM main app is the paused track; its PRDs resume with it.
 
-## Stalled / Not Started PRDs
+| PRD | Status | Summary |
+|-----|--------|---------|
+| [[prds/refinement/prd]] | paused | Unified end-to-end JVM system: flow topology, agent runtime, MCP REPL, Observatory (~98% done when paused). |
+| [[prds/startup-reliability/prd]] | paused | Zero-issue JVM startup: cascading failures, agent OOM, MCP blocking. |
+| [[prds/namespace-ui/prd]] | paused | Namespace-as-app UI on the JVM track. The design system (Phosphor Terminal) remains the live UI reference. |
+| [[prds/render-pipeline/prd]] | paused | Spec-driven rendering on the JVM track; superseded in spirit by the block/render model in [[ui]]. |
+| [[prds/mcp-resilience/prd]] | paused | MCP server resilience (Phase 1 done). |
+| [[prds/agent-repl-interface/prd]] | paused | Agent REPL-only development with composable `*ctx*` atom. |
+| [[prds/test-infrastructure/design]] | paused | Unified JVM test fixtures + generative testing. |
 
-| PRD | Status | Summary | Components |
-|-----|--------|---------|------------|
-| [[prds/spec-driven-rendering/prd]] | abandoned | Absorbed into render-pipeline and graph-cleanup PRDs | [[components/code-graph]], [[components/renderer]] |
-| [[prds/logging-system/prd]] | not started | Agent-safe log functions + web UI log viewer | [[components/web-layer]] |
-| [[prds/data-viewer/prd]] | not started | Expand/collapse interaction for nested Clojure data in browser | [[components/web-layer]] |
-| [[prds/schema-viewer/prd]] | not started | Web-based Malli schema browser with navigation | [[components/web-layer]], [[components/schema-system]] |
-| [[prds/dashboard-polish/prd]] | not started | Information-dense terminal-style dashboard (Phosphor Terminal theme) | [[components/web-layer]] |
-| [[prds/test-coverage-audit/findings]] | superseded | Audit findings from ml-options era — references `dsl/primitives.clj` which no longer exists | [[components/testing]] |
+## Completed
+
+| PRD | Status | Summary |
+|-----|--------|---------|
+| [[prds/datahike-migration/prd]] | complete | Datalevin → embedded Datahike; Phase 3 demo shipped 2026-04-25. |
+| [[prds/schema-unification/design]] | complete | Malli as single schema source: validation gate, Nippy serialization, bridge. |
+| [[prds/graph-cleanup/prd]] | complete | Removed derived attrs from the graph; resolution via Datalog. |
+| [[prds/unified-flow/design]] | complete | core.async.flow as the JVM routing backbone (superseded on the pod — see ADR 005 banner). |
+| [[prds/flow-datalevin-writer/prd]] | complete | Single-writer flow for Datalevin writes (Datalevin since removed). |
+| [[prds/datalevin-migration/prd]] | complete | Datalevin platform (since replaced by Datahike). |
+| [[prds/super-repl/prd]] | complete | Federated agent runtime with JVM pool (evolved into unified-flow + seon.repl; separate-JVM isolation superseded — see ADR 006 banner). |
+| [[prds/stability-improvements/prd]] | complete | Health checks, error boundaries, session cleanup. |
+
+## Abandoned / superseded
+
+| PRD | Status | Summary |
+|-----|--------|---------|
+| [[prds/spec-driven-rendering/prd]] | abandoned | Absorbed into render-pipeline and graph-cleanup. |
+| [[prds/test-coverage-audit/findings]] | superseded | ml-options-era audit; references code that no longer exists. |
+| [[prds/logging-system/prd]] | not started | Agent-safe log fns + web log viewer. |
+| [[prds/data-viewer/prd]] | not started | Expand/collapse for nested Clojure data in browser. |
+| [[prds/schema-viewer/prd]] | not started | Web-based Malli schema browser. |
+| [[prds/dashboard-polish/prd]] | not started | Terminal-style dashboard polish. |

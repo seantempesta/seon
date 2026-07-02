@@ -909,9 +909,10 @@
                                                infos)))))
         full-text (str "Markdown lint: " (count violations) " issue(s)\n"
                        (str/join "\n" parts))]
-    {::formatted (if (> (count full-text) max-len)
-                   (str (subs full-text 0 (- max-len 15)) "\n... (truncated)")
-                   full-text)}))
+    {::formatted (let [suffix "\n... (truncated)"]
+                   (if (> (count full-text) max-len)
+                     (str (subs full-text 0 (max 0 (- max-len (count suffix)))) suffix)
+                     full-text))}))
 
 (defn fix
   "Auto-fix safe formatting issues in markdown content.

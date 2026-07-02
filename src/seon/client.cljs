@@ -47,18 +47,31 @@
     ;; `:seon.fn/spec` string in index-core! (the runtime-introspection
     ;; core indexer — coherent-bootstrap-indexing Step 2).
     [malli.core :as m]
-    ;; Phase A item 7 — seon-native collector that walks the analyzer
-    ;; at compile time for :malli/schema metadata and registers with
-    ;; malli.core/-function-schemas*. Bridges the JVM/CLJS gap where
-    ;; mi/collect! is JVM-only.
+    ;; Instrumentation. `instrument-from-db!` (called in start-agent! after
+    ;; the core is indexed) reads the program graph to wrap every fn; the
+    ;; eval path instruments newly-defined fns inline.
     [seon.instrument :as instrument]
     ;; Pull in the agent's required namespaces at compile time so all
     ;; schemas are registered before start-agent! runs.
     [seon.agent :as agent]
-    [seon.ctx]
+    ;; Lifecycle verbs (wait/complete/terminate) — host-bundled so the agent
+    ;; home ns can `:refer` them; required here so the build includes the ns.
+    [seon.agent.lifecycle]
+    ;; The agent loop + wake trigger: the client boot path ARMS the wake
+    ;; trigger (seon.agent does NOT, to stay acyclic).
+    [seon.agent.loop :as agent-loop]
+    ;; The run lifecycle — the bootstrap turn-0 opens a run for its turn.
+    [seon.agent.run :as run]
+    ;; Cron-as-data — required so its `:seon.agent.schedule/*` register! calls
+    ;; run before `agent-bootstrap-attrs` installs them, and so the ticker's
+    ;; `fire-due-schedules!` is in the build.
+    [seon.agent.schedule]
+    [seon.agent.ctx]
     [seon.ai :as ai]
+    [seon.ai.tokens :as tokens]
     [seon.ai.anthropic :as anthropic]
     [seon.ai.openai-compat :as openai]
+    [seon.ai.diffusiongemma :as diffusiongemma]
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.log :as log]
@@ -68,14 +81,26 @@
     ;; needed.
     [seon.render]
     [seon.render.default]
-    ;; The canonical creation-time tile wiring form (live-tiles U4) —
-    ;; `creation-evals!` evals live-tile/wiring-source AS the new agent.
-    [seon.render.live-tile :as live-tile]
+    ;; Live-tile render namespace — required so the build includes it.
+    [seon.render.live-tile]
+    ;; Root's SYSTEM VIEW — the `/` dashboard = root's live-tile content.
+    ;; Required so the build includes it and `system-view`'s symbol resolves
+    ;; via eval/lookup-value when render-agent-tile renders root.
+    [seon.render.system]
+    ;; Routing-as-data — the `:seon.route/*` schema + the seeded core route
+    ;; set; boot-seed! transacts (route/core-routes-tx). Required here so the
+    ;; schema register! calls run and the build includes the seed builder.
+    [seon.route :as route]
     ;; Iteration surface — owns the canonical `!compile-state`
     ;; defonce (in `seon.repl`). start-agent! reads through
     ;; `seon.repl/ensure-bootstrap!` rather than holding a second
     ;; copy here. See compile-state-lifecycle research note.
     [seon.repl :as repl]
+    ;; One-node source extraction (`form-source-at`) for the program-graph
+    ;; source capture below — rewrite-clj parses EXACTLY one top-level form,
+    ;; so char/regex/string-literal parens are balanced correctly (a raw
+    ;; depth counter truncates such a form). Same parser `parse-forms` uses.
+    [seon.repl.internal :as repl-internal]
     ;; Schemas-as-queryable-data (research file
     ;; schemas-as-queryable-data-2026-05-26.md). At boot,
     ;; start-agent! decomposes every entity-shape :map schema into
@@ -91,9 +116,9 @@
     ;; Pod HTTP+SSE server — A-5. Required here so the build includes
     ;; it; start-agent! calls (web.serve/start!) at boot.
     [seon.web.serve :as web.serve]
-    ;; Per-agent inspector UI (/agent/<id>) — installs its own
-    ;; tx-listener that pushes morphs to that page's SSE stream.
-    [seon.web.inspector]
+    ;; Operator dev tools (/data + /agent/<id>/debug) — installs its own
+    ;; tx-listener that pushes morphs to those pages' SSE streams.
+    [seon.web.debug]
     ;; Default :seon.render/ai + :seon.render/html for :seon.agent.message
     ;; entities. Referenced by symbol from message tx data.
     [seon.handlers.message]
@@ -105,24 +130,44 @@
     [seon.handlers.fn]
     [seon.handlers.schema]
     [seon.handlers.ns]
+    ;; Shared envelope shapes — the `:seon.result/ok?` discriminator and
+    ;; the `:seon.items/*` self-describing-collection envelope. Required
+    ;; here (before the my.* scaffold) so their register! calls run before
+    ;; any consumer (`my.data` et al.) registers shapes that reference them.
+    [seon.items]
     ;; The my.* scaffold — shared provenance shapes (my.kb) + the
-    ;; system-wide instruction singleton (my.kb.system) that
+    ;; system-wide instruction singleton (my.kb.shared) that
     ;; `seed-core!` below transacts. Required here so their
     ;; register! calls run before the boot install of :my.kb/* attrs.
     [my.kb]
-    [my.kb.system]
-    ;; The agent's identity (my.soul/system-prompt-text — SOUL.md /
-    ;; AGENTS.md read LIVE every turn, never stored). Required so the ns
-    ;; is in the build closure and its :seon.ns row indexes for the
-    ;; namespaces section.
-    [my.soul]
-    ;; Core handler registration — `wake-on-message`. Required so
-    ;; start-agent! can call `handler/register!` + `wake/bootstrap-schema!`
-    ;; at boot. Without this, the inspector header shows "0 handlers"
-    ;; and the core has no wake-on-message responder beyond the
-    ;; per-agent `install-user-trigger!` already wired by agent/boot!.
-    [seon.handler :as h]
-    [seon.handlers.wake :as wake]
+    [my.kb.shared]
+    ;; Loadable skills — the `:my.skills/*` schema + the corpus scanner
+    ;; `boot-seed!` transacts (`my.skills/seed-skills-tx-data`) and the
+    ;; catalog/skill-block render fns `seon.config/default-ctx-blocks` wires by symbol.
+    ;; Required here so its register! calls run and the build includes it.
+    [my.skills]
+    ;; The live-tile/canvas TOOLKIT — the aggregation (`my.data`) + static
+    ;; (`my.ui`) + interactive (`my.tile`) verbs the agent composes its
+    ;; canvas from. Required here so they BUILD + INDEX at boot (their
+    ;; `:seon.fn` rows render full in the `:namespaces` block — the worked
+    ;; examples, not `(no public fns indexed yet)`). They reference the
+    ;; `:seon.items/*` envelope required above.
+    [my.data]
+    [my.ui]
+    [my.tile]
+    ;; Content-addressed blob store — the disk tier (big text lives behind
+    ;; a :my.blob/hash ref, never as datoms). Required so it builds +
+    ;; indexes at boot and turn-capture/web-fetch can compose on it.
+    [my.blob]
+    ;; Config-driven context — the OPTIONAL manifest (`config/system.edn`)
+    ;; that shapes the agent-context, routes, and global render bounds.
+    ;; Absent → byte-identical to a no-config boot. `boot-seed!` loads it
+    ;; ONCE and threads it to the route + skill-corpus seed steps.
+    [seon.config :as config]
+    ;; Holistic declarative-state reconcile — `boot-seed!` routes its
+    ;; desired-set steps (routes + skills) through `seon.state/reconcile!`
+    ;; so a manifest that DROPS a route/skill retracts the stale datom.
+    [seon.state :as state]
     ;; Local-machine capability surface — A-9. Required so the agent
     ;; can call (seon.agent.fs/read-file ...) + (seon.platform/host) from
     ;; bootstrap-CLJS eval.
@@ -132,27 +177,32 @@
     ;; (seon.agent.search/grep ...) from bootstrap-CLJS eval and so the
     ;; core-vars seed below can index it.
     [seon.agent.search]
+    ;; Run real commands / Python — argv `execFile` over the fs cwd gate,
+    ;; default-deny behind the SEON_SHELL host grant. Required so the
+    ;; agent can call (seon.agent.shell/run ...) / (seon.agent.shell/py-run
+    ;; ...) from bootstrap-CLJS eval and so the core seed indexes it.
+    [seon.agent.shell]
+    ;; Fetch + extract web pages — undici transport, readability→markdown,
+    ;; blob-stored, SSRF-gated behind the SEON_WEB host grant. Required so
+    ;; the agent can call (seon.agent.web/fetch ...) from bootstrap-CLJS
+    ;; eval and so the core seed indexes it.
+    [seon.agent.web]
     ;; Work items (user→agent asks + agent notes-to-self) — required so
-    ;; its register! calls run before the boot install of :seon.agent.todo/*.
-    [seon.agent.todo]
-    ;; The <turns> countdown section (core-default-ctx :turns) —
-    ;; required so the build includes it; seon.ctx references it by
-    ;; symbol only (late lookup-value resolution, no require cycle).
-    [seon.agent.turns]
-    ;; The per-section ctx namespaces (ctx-sections-split-2026-06-18):
-    ;; each owns one section fn (+ html twin) that core-default-ctx
+    ;; its register! calls run before the boot install of :my.plan/*.
+    [my.plan]
+    ;; The per-block ctx namespaces (ctx-sections-split-2026-06-18):
+    ;; each owns one block fn (+ html twin) that seon.config/default-ctx-blocks
     ;; wires by SYMBOL — required here so the build includes them and
     ;; their munged symbols resolve via seon.eval/lookup-value at
-    ;; render time (no require cycle: the section nses require seon.ctx
-    ;; for the shared read API, seon.ctx names them only as symbols).
-    [seon.ctx.namespaces :as nss]
-    [seon.ctx.your-entity]
-    [seon.ctx.live-tile]
-    [seon.ctx.warnings]
-    [seon.ctx.transcript]
-    [seon.ctx.inventory]
-    [seon.ctx.relevant]
-    [seon.ctx.prompt]
+    ;; render time (no require cycle: the section nses require seon.agent.ctx
+    ;; for the shared read API, seon.agent.ctx names them only as symbols).
+    [seon.agent.ctx.namespaces :as nss]
+    [seon.agent.ctx.live-tile]
+    [seon.agent.ctx.warnings]
+    [seon.agent.ctx.transcript]
+    [seon.agent.ctx.inventory]
+    [seon.agent.ctx.findings]
+    [seon.agent.ctx.relevant]
     [seon.platform]
     ;; Phase B item 9 — shared read-side wrapper over the analyzer
     ;; state. Required here so the build includes it; item 10's
@@ -166,11 +216,11 @@
     ;; the pod `host!`s every agent id it resumes/mints/re-arms so
     ;; `mcp__seon_cljs__eval agent_id=<id>` pins THIS runtime.
     [seon.dev.runtime-id :as runtime-id])
-  ;; Compile-time enumeration of the build's specced public fns —
-  ;; `core-vars` below = curated unspecced base + this macro's
-  ;; whole-closure roster (unit #23 fix b: index the WHOLE package
-  ;; surface, never hand-list hundreds of vars).
-  (:require-macros [seon.indexing :refer [specced-fn-vars]]))
+  ;; Compile-time enumeration of the build's PUBLIC fns — `core-vars`
+  ;; below IS this macro's whole-closure roster: every public first-party
+  ;; fn the build loads, specced or not (owner directive — 'just index
+  ;; everything'; never hand-list vars).
+  (:require-macros [seon.indexing :refer [public-fn-vars]]))
 
 ;; ---------------------------------------------------------------------------
 ;; Process-lifetime state. `defonce` so reloads don't reset it.
@@ -185,6 +235,7 @@
   "Holds the Node event loop open with a minute-cadence heartbeat. The
    real V0 client will keep the loop alive via pending agent-loop work;
    for now this is the simplest 'process stays open' contract."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (let [id (js/setInterval
              (fn []
@@ -192,28 +243,42 @@
              60000)]
     (swap! !state assoc :heartbeat-id id)))
 
-(defn stop-heartbeat! []
+(defn stop-heartbeat!
+  {:malli/schema [:=> [:cat] :any]}
+  []
   (when-let [id (:heartbeat-id @!state)]
     (js/clearInterval id)
     (swap! !state assoc :heartbeat-id nil)))
 
-(defn ^:dev/before-load before-reload []
+(defn ^:dev/before-load before-reload
+  {:malli/schema [:=> [:cat] :any]}
+  []
   (log/info-console! "seon.client" "reloading…")
   (stop-heartbeat!))
 
-(declare rearm-user-triggers!)
+(declare rearm-wake-triggers!)
+(declare register-arm-hook!)
 
-(defn ^:dev/after-load after-reload []
+(defn ^:dev/after-load after-reload
+  {:malli/schema [:=> [:cat] :any]}
+  []
   (swap! !state update :reload-count inc)
   (log/info-console! "seon.client"
                      (str "reload #" (:reload-count @!state)
                           " — booted " (:boot-at @!state)))
-  ;; Hot-reload hygiene: re-install the per-agent user-message
-  ;; triggers so tx-listener closures run the just-reloaded code.
+  ;; Hot-reload hygiene: re-install the per-agent wake trigger so
+  ;; tx-listener closures run the just-reloaded code.
   ;; Async fire-and-forget — logs the re-armed ids / errors.
-  ;; (seon.web.inspector re-arms its own ::inspector listener via its
+  ;; (seon.web.debug re-arms its own ::debug listener via its
   ;; own ^:dev/after-load — not duplicated here.)
-  (rearm-user-triggers!)
+  (rearm-wake-triggers!)
+  ;; Re-point the spawn ARM hook (#30) at the just-reloaded init-agent! so a
+  ;; live pod arms freshly-spawned children with current code (boot registers
+  ;; it once; a hot reload doesn't re-run boot).
+  (register-arm-hook!)
+  ;; Re-arm the ONE ticker so a hot reload doesn't stack timers and the tick
+  ;; body runs just-reloaded code (idempotent — clears the prior interval).
+  (agent-loop/install-ticker!)
   (start-heartbeat!))
 
 ;; ---------------------------------------------------------------------------
@@ -251,6 +316,7 @@
 
    REPL usage:
      (.then (datahike-smoke-test!) println)"
+  {:malli/schema [:=> [:cat] :any]}
   []
   (let [cfg {:store              {:backend :memory
                                   :id (random-uuid)}
@@ -276,6 +342,9 @@
 (defn ^:async mem-db
   "REPL convenience — open a fresh :memory datahike-cljs DB with optional
    schema. Returns a Promise resolving to a conn atom."
+  {:malli/schema [:function
+                  [:=> [:cat] :any]
+                  [:=> [:catn [::schema :any]] :any]]}
   ([] (mem-db []))
   ([schema]
    (let [cfg {:store              {:backend :memory
@@ -298,7 +367,7 @@
 ;; at the var root, and hands off to seon.agent/boot!.
 ;;
 ;; Idempotent: re-calling start-agent! reuses the existing conn (stored in
-;; !agent-conn) and overwrites the kick listener. Useful during dev hot-
+;; !agent-conn) and re-arms the wake trigger. Useful during dev hot-
 ;; reload where the watcher rebuilds client.cljs.
 ;; ---------------------------------------------------------------------------
 
@@ -325,38 +394,61 @@
   "The full set of registered seon attr keywords whose datahike schema the
    agent conn needs. Public so tests can build an isolated `:memory` conn with
    the same schema the pod boots against (see index-core-test)."
-  [;; --- Agent ---
+  [;; --- Agent (state is DERIVED — no stored :seon.agent/state) ---
    ;; :seon.agent/current-ns deleted 2026-05-23 — derived from the
    ;; latest successful eval's :seon.eval/ns. See
    ;; docs/seon/concepts/reactive-context.
    :seon.agent/id
-   :seon.agent/state
-   ;; lifecycle end-stamp (P3.5/#31) — absent = active; boot resumes
-   ;; only agents WITHOUT it (see seon.agent/complete!).
-   :seon.agent/completed-at
-   :seon.agent/sessions
-   :seon.agent/turns-cap
+   ;; Derived-state primitives: the CURRENT run pointer (fencing token +
+   ;; spine of derived state) and the terminate marker. Plus the run-bound
+   ;; seeds (the :seon.agent.run/default-turn-limit config datom, default 20)
+   ;; and the self-managed cron vector. The agent's section overrides.
+   :seon.agent/run
+   :seon.agent/terminated-at
+   :seon.agent/default-turn-limit
+   :seon.agent/default-deadline-ms
+   :seon.agent/schedules
    :seon.agent/ctx
+
+   ;; --- Schedule (seon.agent.schedule — the cron maps an agent owns via
+   ;; :seon.agent/schedules; the ticker's fire-due-schedules! reads these) ---
+   :seon.agent.schedule/id
+   :seon.agent.schedule/cron
+   :seon.agent.schedule/fn
+   :seon.agent.schedule/timezone
+   :seon.agent.schedule/concurrency-policy
 
    ;; --- Render slots (A-6) — symbol-only at storage. ---
    :seon.render/ai
    :seon.render/html
 
-   ;; --- Ctx section entities (seon.ctx; self-context spec 2026-06-10).
-   ;; :seon.ctx/fn is DEAD — the one slot attr is :seon.render/ai
+   ;; --- Ctx section entities (seon.agent.ctx; self-context spec 2026-06-10).
+   ;; :seon.agent.ctx/fn is DEAD — the one slot attr is :seon.render/ai
    ;; (above), string-or-symbol via the bridge's EDN-string encoding. ---
-   :seon.ctx/name
-   :seon.ctx/priority
+   :seon.agent.ctx/name
+   :seon.agent.ctx/priority
+   ;; per-agent live-DB render override (cardinality-many ns-name keywords) —
+   ;; the namespaces section unions these onto the curated full set at render
+   ;; time (seon.agent.ctx.namespaces/db-render-set). Boot-installed so an
+   ;; agent can pin/unpin a ns into its always-on view by transact/retract.
+   :seon.agent.ctx/render-namespaces
 
-   ;; --- Session (v1.md §2.1) ---
-   ;; turns-since-inbound is DERIVED from the count of :seon.agent.turn
-   ;; entities with :seon.agent.turn/at > the latest inbound message's :at.
-   ;; See seon.agent/turns-since-inbound.
-   :seon.agent.session/id
-   :seon.agent.session/at
-   :seon.agent.session/turns
+   ;; --- Run (seon.agent.run — the wake-episode grouping; turns point UP
+   ;; to it via :seon.agent.turn/run, it points UP to the agent) ---
+   :seon.agent.run/id
+   :seon.agent.run/agent
+   :seon.agent.run/started-at
+   :seon.agent.run/trigger
+   :seon.agent.run/cause
+   :seon.agent.run/turn-limit
+   :seon.agent.run/deadline
+   :seon.agent.run/last-beat-at
+   :seon.agent.run/paused-at
+   :seon.agent.run/remaining-ms
+   :seon.agent.run/status
+   :seon.agent.run/closed-reason
 
-   ;; --- Turn (v1.md §2.1) ---
+   ;; --- Turn (a standalone entity that points UP to its run) ---
    :seon.agent.turn/id
    :seon.agent.turn/at
    :seon.agent.turn/status
@@ -366,8 +458,9 @@
    ;; silently cap-edn-truncated at 16,406 chars — useless evidence).
    :seon.agent.turn/prompt-chars
    :seon.agent.turn/prompt-file
-   :seon.agent.turn/woken-by
-   :seon.agent.turn/messages
+   ;; The run this turn belongs to (its derived current-turn = count turns
+   ;; with this run).
+   :seon.agent.turn/run
    :seon.agent.turn/evals
 
    ;; --- Message (from/to refs since unit 1.5 — role/agent retired) ---
@@ -381,17 +474,32 @@
    ;; --- User (ONE human entity, seeded at boot) ---
    :seon.user/id
 
-   ;; --- Todo (work items — user→agent asks + agent notes-to-self;
-   ;; --- installed at boot so a RESUMING agent can list-open before
-   ;; --- any todo tx has lazily installed the attrs) ---
-   :seon.agent.todo/id
-   :seon.agent.todo/title
-   :seon.agent.todo/description
-   :seon.agent.todo/status
-   :seon.agent.todo/created-at
-   :seon.agent.todo/completed-at
-   :seon.agent.todo/owner
-   :seon.agent.todo/from
+   ;; --- Plan (the per-agent planning graph — user→agent asks + the agent's
+   ;; --- own steps; installed at boot so a RESUMING agent can list-open and
+   ;; --- the plan block can pull before any step tx has lazily installed
+   ;; --- the attrs) ---
+   :my.plan/id
+   :my.plan/title
+   :my.plan/description
+   :my.plan/status
+   :my.plan/created-at
+   :my.plan/completed-at
+   :my.plan/agent
+   :my.plan/from
+   ;; Back-ref to the inbound :human message an address-step tracks
+   ;; (auto-minted in message!; the render half links id+age+title).
+   :my.plan/message
+   ;; The plan TREE edge (parent, plain ref) + the dependency DAG edges
+   ;; (needs, plain cardinality-many ref). Boot-installed so the derived
+   ;; work-queue rules (next/blocked/ready) query them before any tx has
+   ;; lazily installed them on a fresh world.
+   :my.plan/parent
+   :my.plan/needs
+   ;; The goal/expect/pace narrative attrs — boot-installed so the windowed
+   ;; plan render can read them on any node from turn one.
+   :my.plan/goal
+   :my.plan/expect
+   :my.plan/pace
 
    ;; --- Eval ---
    ;; Evals are component-many on :seon.agent.turn/evals — no standalone
@@ -452,19 +560,20 @@
    ;; --- my.kb (knowledge-base scaffold, 2026-06-10). ---
    ;; The shared provenance shapes (registered in my.kb) installed at
    ;; boot so agent-designed my.kb.<domain> schemas can reference them
-   ;; before any kb tx lands, plus the my.kb.system system-wide
+   ;; before any kb tx lands, plus the my.kb.shared system-wide
    ;; instruction singleton (empty entity seeded by seed-core!;
    ;; rows are appended at runtime by agents and the user).
    :my.kb/source-path
    :my.kb/source-line
    :my.kb/verified-at
    :my.kb/confidence
-   :my.kb.system/id
-   :my.kb.system/instructions
-   :my.kb.system/text
-   :my.kb.system/at
-   ;; (No :my.soul/* attrs — the agent's identity is read LIVE from
-   ;; SOUL.md / AGENTS.md every turn, never stored. See my.soul.)
+   :my.kb.shared/id
+   :my.kb.shared/instructions
+   :my.kb.shared/text
+   :my.kb.shared/at
+   ;; (No identity attrs — the agent's identity is read LIVE from
+   ;; SOUL.md / AGENTS.md every turn as file-sections, never stored. See
+   ;; seon.agent.ctx/file-block.)
 
    ;; --- Test (Phase 2 — test capture as data) ---
    :seon.test/sym
@@ -508,6 +617,7 @@
    boots on the shared cluster store via [[open-cluster-conn!]].
    Isolated-by-construction: tests that build agents on this conn can
    never touch the cluster store."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (let [cfg {:store              {:backend :memory
                                   :id      (random-uuid)}
@@ -531,7 +641,8 @@
         THE WIRE to the JVM writer; idempotent `:db/ident` upserts, so
         re-booting against the populated store re-asserts no-ops.
      4. listen adapter — foreign writers' txs fire this conn's native
-        listeners (user-message triggers + inspector SSE)."
+        listeners (wake triggers + inspector SSE)."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (await (store.wire/ping!))
   (let [conn (await (d/connect (store.wire/cluster-config)))]
@@ -574,7 +685,7 @@
 (declare core-ns-set)
 
 ;; Forward decls: the SEON_EXTRA_SRC scanning helpers are defined far below
-;; (alongside `extra-src-env`, after the form/arglist parsers they reuse), but
+;; (alongside `config/extra-src`, after the form/arglist parsers they reuse), but
 ;; `core-ns-set`/`ns-row`/`index-core!` reference them. Fn-body references
 ;; resolve at call time; the declare silences the compile-time :undeclared-var
 ;; warning.
@@ -585,6 +696,7 @@
    `:seon.ns/name` row whose ns is NOT in `(core-ns-set)`. Core nses are
    COMPILED (present in the bundle, indexed for DISPLAY only); only the
    agent-authored DB layer is LOADED on boot. Read against the db value."
+  {:malli/schema [:=> [:catn [::db :any]] :any]}
   [db]
   (let [all (into #{}
                   (map first)
@@ -600,6 +712,7 @@
    are satisfied on-demand by the compiled bundle via the DB load-fn
    (`seon.eval/guarded-load`) DURING each ns's eval. An agent ns with no
    stored requires (or only core deps) has an empty edge set."
+  {:malli/schema [:=> [:catn [::db :any] [::agent-nses :any]] :any]}
   [db agent-nses]
   (into {}
         (map (fn [ns-kw]
@@ -622,6 +735,7 @@
    is skipped) so this always terminates; cljs.js then detects the actual
    circular dep and errors that ns during its per-ns eval (user
    directive: broken input just errors that ns and moves on)."
+  {:malli/schema [:=> [:catn [::edges :any]] :any]}
   [edges]
   (let [!order   (volatile! [])
         !seen    (volatile! #{})
@@ -647,6 +761,7 @@
    …)` tee) — boot-indexed shape literals are rebuilt from the registry.
    Returns each fully-qualified registration call; eval'd from
    `cljs.user` (the key carries its own namespace)."
+  {:malli/schema [:=> [:catn [::db :any]] :any]}
   [db]
   (->> (db/query '[:find ?src
                    :where
@@ -686,6 +801,7 @@
        (last)))
 
 (defn ^:async ^:private log-replay-failure!
+  {:malli/schema [:=> [:catn [::agent-id :any] [::ns-kw :any] [::err-map :any]] :any]}
   [agent-id ns-kw {:keys [error stack]}]
   (await
     (log/warn! {:seon.log/source  ::log-replay-failure!
@@ -702,6 +818,7 @@
    message ([[error-chain-message]]); `:stack` the deepest cause's stack
    — chosen so a load-failure warn names the actual defect, not cljs.js's
    \"ERROR\" wrapper."
+  {:malli/schema [:=> [:catn [::err :any]] :any]}
   [err]
   {:error (or (some-> err error-chain-message not-empty)
               (some-> err .-message)
@@ -746,6 +863,7 @@
      - Boot path in start-agent!, before per-agent setup.
      - REPL probe via the same-pod-session test pattern — see
        research/resume-findings-2026-05-23.md §'Same-pod-session test'."
+  {:malli/schema [:=> [:catn [::args :any]] :any]}
   [{:keys [conn compile-state agent-id]}]
   (db/with-tx-context
     {:seon.db/origin   :replay
@@ -799,14 +917,14 @@
 ;;
 ;; Per docs/prds/agent-runtime/mvp-completion-plan-2026-05-27.md §Phase 2
 ;; + research/repl-session-context-template-2026-05-26.md §5: the core
-;; transacts the user entity + the my.kb.system instruction singleton plus an
+;; transacts the user entity + the my.kb.shared instruction singleton plus an
 ;; introspection-indexed set of core fns at boot, BEFORE any agent turn —
 ;; so replay-from-tx-0 starts on a fully-seeded core, not mid-air.
 ;;
 ;; Tx-ordering at boot (in start-agent!):
 ;;   1. Entity-schema decomposition (schema/all-entity-schemas-tx-data)
 ;;      — already shipped, Item 4 commit 35035d8.
-;;   2. seed-core!    — user entity + my.kb.system singleton
+;;   2. seed-core!    — user entity + my.kb.shared singleton
 ;;   3. index-core!   — :seon.ns + :seon.fn rows from REAL runtime
 ;;                           introspection (var meta + source file-read)
 ;;
@@ -816,22 +934,23 @@
 
 (defn seed-core!
   "Tx-data for THE user entity plus the EMPTY system-wide instruction
-   singleton (`my.kb.system/seed-tx-data` — context-v4 §2.2 home 3;
-   agents and the user APPEND rows at runtime, read back via
-   `(my.kb.system/instructions)` in the creation-turn tutorial).
+   singleton (`my.kb.shared/seed-tx-data`); agents and the user APPEND
+   rows at runtime, read back via `(my.kb.shared/instructions)` in the
+   bootstrap turn.
 
    The user row is the ONE `:seon.user/id` entity every
    `:seon.agent.message/from`/`to` user-ref resolves to (identity upsert,
    idempotent — same pattern as agent entities; one human for now).
-   The instruction singleton identity-upserts on `:my.kb.system/id`
+   The instruction singleton identity-upserts on `:my.kb.shared/id`
    carrying NO rows — re-running asserts zero new datoms and never
    clobbers runtime appends.
 
    Pure fn. Caller transacts via `db/transact!` with
    `:seon.db/origin :core-seed`."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (into [{:seon.user/id "user"}]
-        (my.kb.system/seed-tx-data)))
+        (my.kb.shared/seed-tx-data)))
 
 ;; ---------------------------------------------------------------------------
 ;; index-core! — runtime introspection of compiled core fns
@@ -854,47 +973,22 @@
 ;;
 ;; This produces a `:seon.fn` row IDENTICAL in shape to a detect-and-tee row
 ;; (eval.cljs/build-tee-entities) — downstream readers never branch on origin.
-;; The agent extends the indexed surface by transacting its own fns; grow
-;; `core-vars` to widen the seeded set.
+;; The agent extends the indexed surface by transacting its own fns; the core
+;; surface auto-widens — `core-vars` is the `public-fn-vars` macro roster, so
+;; a new public first-party defn is seeded the moment the build loads it.
 ;; ---------------------------------------------------------------------------
 
-(def ^:private curated-core-vars
-  "Hand-curated `#'`-literal vars indexed REGARDLESS of `:malli/schema` —
-   the honestly-unspecced core surface (`register!`, `current-agent-id`,
-   the fs read fns) that the auto roster below can't see. MUST be
-   `#'`-literals (self-host `resolve` is a compile-time macro)."
-  [#'db/transact!
-   #'db/query
-   #'db/pull
-   #'db/entity
-   #'db/listen!
-   #'db/current-agent-id
-   #'schema/register!
-   ;; Read surface on the user's machine (allowlist-gated, see seon.agent.fs).
-   ;; Indexed so the functions catalog teaches the SEARCH→READ recipe.
-   #'seon.agent.fs/read-file
-   #'seon.agent.fs/list-dir
-   #'seon.agent.fs/stat
-   #'seon.agent.fs/walk-dir
-   #'seon.agent.fs/home-dir
-   #'seon.agent.search/grep
-   #'seon.test.runner/run!])
-
 (def ^:private core-vars
-  "Every var indexed into the corpus at boot: the curated unspecced base
-   PLUS the compile-time roster of every PUBLIC `:malli/schema`-carrying fn
-   across the build's whole `seon.*` require closure
-   (`seon.indexing/specced-fn-vars` — unit #23 fix b: 'all of the schemas,
-   functions and tests in the cljs package should be present in the
-   database'). Deduped by fully-qualified sym, curated entries first."
-  (->> (into curated-core-vars (specced-fn-vars))
-       (reduce (fn [[seen out] v]
-                 (let [k (str (:ns (meta v)) "/" (:name (meta v)))]
-                   (if (contains? seen k)
-                     [seen out]
-                     [(conj seen k) (conj out v)])))
-               [#{} []])
-       second))
+  "Every var indexed into the corpus at boot: the compile-time roster of
+   EVERY public first-party fn across the build's whole require closure
+   (`seon.indexing/public-fn-vars` — owner directive 'just index
+   everything': all functions in the cljs package become `:seon.fn` rows,
+   specced or not). No hand-curated inclusion list — the macro IS the
+   roster; a new public fn is indexed the moment it loads. Each var's
+   spec/doc/source is read by [[var->fn-row]]; an unspecced fn simply omits
+   `:seon.fn/spec` (honestly unspecced). Macro output is already
+   sym-unique, so no dedup pass is needed."
+  (public-fn-vars))
 
 ;; Deftest vars the pod build loads, populated at load time by
 ;; `seon.dev.test-preload` (the ONE ns whose require closure contains the
@@ -911,7 +1005,7 @@
 ;;
 ;;   (reset! client/!extra-core-vars
 ;;           (filterv #(str/starts-with? (str (:ns (meta %))) "acme.")
-;;                    (seon.indexing/specced-fn-vars)))
+;;                    (seon.indexing/public-fn-vars)))
 ;;
 ;; The boot indexers consume it alongside `core-vars`: fn-rows +
 ;; FULL-SOURCE ns-rows in [[index-core!]], replay-skip membership in
@@ -920,7 +1014,7 @@
 
 (defn- extra-core-vars*
   "The registered extra vars MINUS any whose fully-qualified sym is
-   already in `core-vars` — a downstream entry's `specced-fn-vars`
+   already in `core-vars` — a downstream entry's `public-fn-vars`
    expansion sees the seon surface its require closure pulls in, and
    those must dedup away silently (no duplicate rows, no reserved-prefix
    refusal) rather than double-index."
@@ -976,7 +1070,7 @@
    they must join [[core-ns-set]] (replay-skip: re-evaling their
    shipped source would re-run register! forms) and get an
    [[index-core!]] ns-row even though no fn-row names them."
-  #{"my.kb" "my.soul"})
+  #{"my.kb"})
 
 (defn core-ns-set
   "The set of namespace keywords owned by the COMPILED core, derived
@@ -996,6 +1090,7 @@
    of the indexed vars. [[fn-less-compiled-roots]] joins explicitly
    because a fn-less compiled root (`my.kb`) owns an indexed full-source
    `:seon.ns` row without owning any var."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (into (into (into #{} (map keyword) fn-less-compiled-roots)
               ;; Whole-downstream-surface (SEON_EXTRA_SRC): every scanned
@@ -1022,11 +1117,8 @@
    can't be read."
   [file]
   (let [fs    (js/require "fs")
-        extra (let [v (some-> (.. js/globalThis -process)
-                              (.-env)
-                              (aget "SEON_EXTRA_SRC"))]
-                (when (and (string? v) (not= v ""))
-                  [(str v "/src") (str v "/test")]))]
+        extra (when-let [v (config/extra-src)]
+                [(str v "/src") (str v "/test")])]
     (some (fn [root]
             (try
               (.readFileSync fs (str root "/" file) "utf8")
@@ -1034,44 +1126,27 @@
           (concat (map seon.platform/artifact-path ["src" "test" "guest-cljs/src"])
                   extra))))
 
-(defn- extract-form-from-string
-  "Return the exact text of the top-level form that begins at the FIRST `(` in
-   `start` by paren-balancing (reader-free, so `::kw` / `#js` / reader-
-   conditionals pass through verbatim). Tracks string + escape state so
-   docstring parens don't unbalance. Returns nil if no `(` opens before EOF."
-  [start]
-  (let [n (count start)]
-    (loop [i 0 depth 0 in-str? false esc? false started? false]
-      (if (>= i n)
-        (when started? start)
-        (let [c (nth start i)]
-          (cond
-            esc?                   (recur (inc i) depth in-str? false started?)
-            (and in-str? (= c \\)) (recur (inc i) depth in-str? true  started?)
-            in-str?                (recur (inc i) depth (not (= c \")) false started?)
-            (= c \")               (recur (inc i) depth true false started?)
-            (= c \()               (recur (inc i) (inc depth) in-str? false true)
-            (= c \))               (let [d (dec depth)]
-                                     (if (and started? (zero? d))
-                                       (subs start 0 (inc i))
-                                       (recur (inc i) d in-str? false started?)))
-            :else                  (recur (inc i) depth in-str? false started?)))))))
-
 (defn- extract-form-at-line
   "Return the exact text of the top-level form beginning at `line-1based` in
-   `txt`. Reader-free paren-balancing (see [[extract-form-from-string]])."
+   `txt`. Delegates to `seon.repl.internal/form-source-at` — rewrite-clj's
+   one-node parse, so char/regex/string-literal parens are balanced
+   correctly (a `)` inside `\\)` or `#\"…)…\"` no longer truncates the form).
+   Any leading indentation on the target line is dropped (a `defn` nested in
+   a `#?(:cljs …)` reader conditional still yields source starting at
+   `(defn`)."
   [txt line-1based]
   (let [lines (vec (str/split-lines txt))
         idx   (dec line-1based)]
     (when (and (nat-int? idx) (< idx (count lines)))
-      (extract-form-from-string (str/join "\n" (subvec lines idx))))))
+      (repl-internal/form-source-at (str/join "\n" (subvec lines idx)) 0))))
 
 (defn- extract-form-at-index
   "Return the exact text of the top-level form beginning at char `idx` in
-   `txt` (`idx` must point AT a `(`). Reader-free paren-balancing."
+   `txt` (`idx` must point AT a `(`). Delegates to
+   `seon.repl.internal/form-source-at` (see [[extract-form-at-line]])."
   [txt idx]
   (when (and (nat-int? idx) (< idx (count txt)))
-    (extract-form-from-string (subs txt idx))))
+    (repl-internal/form-source-at txt idx)))
 
 (defn- ghost-var?
   "True when var-meta `txt`/`line` is the signature of a GHOST var: the file
@@ -1086,22 +1161,33 @@
        (or (not (pos-int? line))
            (>= (dec line) (count (str/split-lines txt))))))
 
-(defn- ns-file-path
-  "Classpath-relative source file for a namespace name string —
-   `seon.agent.search` → `seon/agent/search.cljs`, `seon.agent.search-test` →
-   `seon/agent/search_test.cljs` (munged like the compiler: dots → dirs,
-   dashes → underscores). `read-src-file` probes the source roots
-   (src, test, guest-cljs/src), so test siblings resolve too."
+(defn- ns-file-paths
+  "Classpath-relative source file CANDIDATES for a namespace name string,
+   most-specific extension first — `seon.agent.search` →
+   [\"seon/agent/search.cljs\" \"seon/agent/search.cljc\"],
+   `seon.agent.search-test` → [\"seon/agent/search_test.cljs\" …] (munged
+   like the compiler: dots → dirs, dashes → underscores). Both `.cljs` and
+   `.cljc` are probed so portable `.cljc` nses (e.g. `seon.schema`) resolve
+   to their REAL source, not the stub. `read-src-file` probes the source
+   roots (src, test, guest-cljs/src) per candidate, so test siblings and
+   `.cljc` nses both resolve."
   [ns-sym-str]
-  (str (-> ns-sym-str
-           (str/replace "." "/")
-           (str/replace "-" "_"))
-       ".cljs"))
+  (let [base (-> ns-sym-str
+                 (str/replace "." "/")
+                 (str/replace "-" "_"))]
+    [(str base ".cljs") (str base ".cljc")]))
+
+(defn- read-ns-source
+  "Read the REAL full source for a full-source ns name string, probing the
+   `.cljs` then `.cljc` candidate ([[ns-file-paths]]). Returns the file
+   text or nil if no candidate is readable under any source root."
+  [ns-sym-str]
+  (some read-src-file (ns-file-paths ns-sym-str)))
 
 (defn- ns-row
   "Build the `:seon.ns` row for an owning ns name string.
 
-   FULL-SOURCE nses (`seon.ctx.namespaces/full-source-ns?` — all `my.*`, test
+   FULL-SOURCE nses (`seon.agent.ctx.namespaces/full-source-ns?` — all `my.*`, test
    siblings included) carry the REAL FULL FILE TEXT as
    `:seon.ns/source`: the boot indexer is the ONE file-reader; the
    `:namespaces` context section (and anything else downstream) renders
@@ -1112,10 +1198,10 @@
    logs fail-loud — the corpus stays honest.
 
    All OTHER core nses keep the minimal `(ns x)` stub — the
-   `:namespaces` section compact-renders them from their indexed
-   `:seon.fn`/`:seon.schema` member rows (API surface, bodies elided),
-   and the stub keeps the no-replay invariant trivially cheap to reason
-   about."
+   `:namespaces` section no longer renders these (only the curated full
+   set is shown); the stub keeps the `:seon.ns/name` row + lookup-ref
+   target for indexed members and the on-demand `render-namespace` path,
+   and keeps the no-replay invariant trivially cheap to reason about."
   [ns-sym-str]
   (let [stub (str "(ns " ns-sym-str ")")
         ;; Extra-core nses (downstream SEON_EXTRA_SRC code) are
@@ -1124,11 +1210,11 @@
         src  (if (or (nss/full-source-ns? ns-sym-str)
                      (contains? (extra-core-ns-strs) ns-sym-str)
                      (contains? (extra-src-ns-strs) ns-sym-str))
-               (or (read-src-file (ns-file-path ns-sym-str))
+               (or (read-ns-source ns-sym-str)
                    (do (log/error-console!
                          "seon.client/ns-row"
                          (str "full-source ns " ns-sym-str " source file "
-                              (pr-str (ns-file-path ns-sym-str))
+                              (pr-str (ns-file-paths ns-sym-str))
                               " unreadable — falling back to the (ns x) stub"))
                        stub))
                stub)]
@@ -1236,7 +1322,8 @@
                          nil)))
         txt     (read-src-file (:file m))
         src     (when txt (extract-form-at-line txt (:line m)))]
-    (if (nil? src)
+    (cond
+      (nil? src)
       (do (if (ghost-var? txt (:line m))
             (log/warn!
               {:seon.log/source  ::var->fn-row
@@ -1250,6 +1337,16 @@
               (str "could not read real source for " sym
                    " (file " (pr-str (:file m)) " line " (:line m) ") — OMITTING")))
           nil)
+
+      ;; Not a plain `(defn …)`: a `defrecord`/`deftype`-generated factory
+      ;; fn (`->X` / `map->X`) or other synthesized fn-var whose `:line`
+      ;; points at the type form, not a hand-written function. OMIT — the
+      ;; corpus stays "real defns only" (the no-stub-source-anywhere
+      ;; invariant). Expected (every record yields factories), so silent.
+      (not (str/starts-with? src "(defn"))
+      nil
+
+      :else
       (cond-> {:seon.fn/sym        sym
                :seon.fn/ns         [:seon.ns/name ns-kw]
                :seon.fn/source     src
@@ -1263,20 +1360,13 @@
         ;; PRESENT ⇒ specced (exact contract in corpus); ABSENT ⇒ unspecced.
         (some? spec) (assoc :seon.fn/spec spec)))))
 
-(defn- extra-src-env
-  "The `SEON_EXTRA_SRC` env value, or nil when unset/empty. Read the SAME way
-   `read-src-file` does (off `js/globalThis.process.env`) so the warn keys on
-   the EXACT signal that joins acme's source onto the build classpath."
-  []
-  (let [v (some-> (.. js/globalThis -process) (.-env) (aget "SEON_EXTRA_SRC"))]
-    (when (and (string? v) (not= v "")) v)))
 
 ;; --- WHOLE-DOWNSTREAM-SURFACE INDEXING (SEON_EXTRA_SRC) ---------------------
 ;;
 ;; The var-derived `:seon.fn` rows above come from the SPECCED vars a consumer
 ;; registered into `!extra-core-vars`. That leaves two gaps for a third party's
 ;; OWN code: (a) an UNSPECCED public fn gets no `:seon.fn` row (so the
-;; `<namespace>` renderer — which lists member rows — never shows it), and
+;; namespace renderer — which lists member rows — never shows it), and
 ;; (b) a downstream ns owning ZERO specced fns gets no `:seon.ns` row at all
 ;; (silently invisible to context + retrieval). A third party wants its WHOLE
 ;; surface readable by its agents, not just the specced slice. So when
@@ -1450,7 +1540,7 @@
    THIS is the authoritative downstream ns set — independent of which fns are
    specced, so an unspecced-only ns (`acme.notes`) is included."
   []
-  (if-let [root (extra-src-env)]
+  (if-let [root (config/extra-src)]
     (let [fs    (js/require "fs")
           files (mapcat list-cljs-files [(str root "/src") (str root "/test")])]
       (reduce
@@ -1478,7 +1568,7 @@
    surface counterpart to the specced-only var-derived rows: this is what
    makes an unspecced helper (`acme.helpers/format-count`) and an
    unspecced-only ns's fns (`acme.notes/*`) appear as indexed members in the
-   `<namespace>` render. `now` is the shared `:seon.fn/created-at` instant.
+   namespace render. `now` is the shared `:seon.fn/created-at` instant.
 
    Each ns's file is read once; its defns parsed by [[defn-rows-from-source]].
    Specced downstream fns ALSO get a var-derived row (with the real
@@ -1503,7 +1593,7 @@
    `:seon.log` warn naming SEON_EXTRA_SRC + the exact one-liner the entry ns
    must run. Observability only — does NOT change indexing. Returns nil."
   [extra]
-  (when-let [src (extra-src-env)]
+  (when-let [src (config/extra-src)]
     (when (empty? extra)
       (log/warn!
         {:seon.log/source  ::index-core!
@@ -1515,10 +1605,10 @@
               "  (reset! seon.client/!extra-core-vars\n"
               "          (filterv #(clojure.string/starts-with? "
               "(str (:ns (meta %))) \"<prefix>.\")\n"
-              "                   (specced-fn-vars)))\n"
+              "                   (public-fn-vars)))\n"
               "where <prefix> is your source root prefix (e.g. \"acme\"), and "
               "the entry ns needs "
-              "(:require-macros [seon.indexing :refer [specced-fn-vars]]) "
+              "(:require-macros [seon.indexing :refer [public-fn-vars]]) "
               "so the macro expands in YOUR ns (whose require closure sees your "
               "vars — a seon-side helper could not).")})))
   nil)
@@ -1553,6 +1643,7 @@
    Fns whose source can't be read are OMITTED, not stubbed — the corpus stays
    honest. Returns the tx-data vector; caller transacts under
    `:seon.db/origin :core-seed`."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (let [now     (js/Date.)
         ;; Downstream extra-core vars join the roster after the
@@ -1605,6 +1696,7 @@
    keys already present on the conn, so an agent's own
    `(seon.schema/register! …)` tee row (whose :source is the replayable
    call form) is NEVER overwritten by the boot index."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (let [now (js/Date.)]
     (into []
@@ -1659,6 +1751,9 @@
    every deftest the pod build loads). Same shape the detect-and-tee path
    writes, so downstream readers never branch on origin. Pure tx-data
    builder; [[core-index-tx]] dedups against the conn."
+  {:malli/schema [:function
+                  [:=> [:cat] :any]
+                  [:=> [:catn [::vars :any]] :any]]}
   ([] (index-tests @!indexed-test-vars))
   ([vars]
    (let [now     (js/Date.)
@@ -1675,18 +1770,71 @@
    full set; on the SECOND and Nth boot (a second `start-agent!` on the shared
    `*conn*`, or a reconnect to a persistent store that already holds the
    core index) it returns ONLY rows whose `:seon.fn/sym` / `:seon.ns/name`
-   identity is absent — typically `[]`.
+   identity is absent or whose stored fields have DRIFTED from the freshly
+   derived ones — typically `[]`.
 
    Querying the conn's CURRENT identity set and emitting only the gap means a
    re-index never re-transacts a core row against the populated store —
    removing the re-seed interaction that the Run-3 findings traced to a
-   malformed `:seon.fn/ns` value. Returns a Promise of the tx-data vector."
+   malformed `:seon.fn/ns` value.
+
+   DRIFT-HEALING is uniform across every row kind: a stored row re-emits
+   whenever ANY freshly-derived field differs from what the store holds —
+   `:seon.ns/source`, `:seon.schema/source`, `:seon.test/source`, and for
+   `:seon.fn` rows the WHOLE derived set (source, spec, doc, arglists,
+   private?). Identity upsert re-asserts the changed datoms in place; a
+   spec that DISAPPEARED from the live var meta is explicitly retracted
+   (upsert can't remove a datom). Fn/test re-emits are provenance-guarded
+   the same way [[prune-core-ghosts!]] is: only rows whose `:source`
+   datom's tx carries `:seon.db/origin :core-seed` are overwritten — an
+   agent-authored row (detect-and-tee, runner) with a core sym is NEVER
+   clobbered by the boot index. Returns a Promise of the tx-data vector."
+  {:malli/schema [:=> [:catn [::conn :any]] :any]}
   [conn]
   (let [all       (concat (index-core!)
                           (index-schemas)
                           (index-tests))
         db        (await (d/db conn))
-        have-fns  (into #{} (map first) (d/q '[:find ?sym :where [?f :seon.fn/sym ?sym]] db))
+        ;; Fn rows dedup on sym AND every derived field. Sym-only dedup was
+        ;; the stale-spec bug (live incident 2026-07-02: seon.agent.shell's
+        ;; rows kept a first-index :seon.shell/* spec forever because the
+        ;; changed row was dropped whenever the sym already existed). The
+        ;; "" sentinel marks an absent :seon.fn/spec — a real pr-str'd
+        ;; Malli form is never empty.
+        fn-fields (fn [row]
+                    {:seon.fn/source   (:seon.fn/source row)
+                     :seon.fn/spec     (get row :seon.fn/spec "")
+                     :seon.fn/doc      (:seon.fn/doc row)
+                     :seon.fn/arglists (:seon.fn/arglists row)
+                     :seon.fn/private? (:seon.fn/private? row)})
+        have-fns  (into {}
+                        (map (fn [[sym src spec doc args priv]]
+                               [sym {:seon.fn/source   src
+                                     :seon.fn/spec     spec
+                                     :seon.fn/doc      doc
+                                     :seon.fn/arglists args
+                                     :seon.fn/private? priv}]))
+                        (d/q '[:find ?sym ?src ?spec ?doc ?args ?priv
+                               :where
+                               [?f :seon.fn/sym ?sym]
+                               [?f :seon.fn/source ?src]
+                               [(get-else $ ?f :seon.fn/spec "") ?spec]
+                               [(get-else $ ?f :seon.fn/doc "") ?doc]
+                               [(get-else $ ?f :seon.fn/arglists "") ?args]
+                               [(get-else $ ?f :seon.fn/private? false) ?priv]]
+                             db))
+        ;; The core-claimed syms — rows whose :source datom's tx carries the
+        ;; boot-index provenance. Only these may be drift-overwritten.
+        core-syms (into #{} (map first)
+                        (d/q '[:find ?sym
+                               :where
+                               (or-join [?sym ?tx]
+                                 (and [?f :seon.fn/sym ?sym]
+                                      [?f :seon.fn/source _ ?tx])
+                                 (and [?f :seon.test/sym ?sym]
+                                      [?f :seon.test/source _ ?tx]))
+                               [?tx :seon.db/origin :core-seed]]
+                             db))
         ;; ns rows dedup on name AND source: a `:seon.ns` row re-emits when
         ;; its stored `:seon.ns/source` differs from the freshly-built one —
         ;; this keeps the stored source tracking the build (e.g. a my.*
@@ -1713,17 +1861,41 @@
                                   [?s :seon.schema/key ?k]
                                   [?s :seon.schema/source ?src]]
                                 db))
-        have-tsts (into #{} (map first) (d/q '[:find ?t :where [?e :seon.test/sym ?t]] db))]
-    (vec (remove (fn [row]
-                   (or (contains? have-fns  (:seon.fn/sym row))
-                       (and (contains? row :seon.ns/name)
-                            (= (get have-nses (:seon.ns/name row))
-                               (:seon.ns/source row)))
-                       (when-some [stored (get have-schs (:seon.schema/key row))]
-                         (or (= stored (:seon.schema/source row))
-                             (seval/registration-call-source? stored)))
-                       (contains? have-tsts (:seon.test/sym row))))
-                 all))))
+        ;; Test rows dedup on sym AND source (same drift rule as ns rows).
+        have-tsts (into {} (d/q '[:find ?t ?src
+                                  :where
+                                  [?e :seon.test/sym ?t]
+                                  [?e :seon.test/source ?src]]
+                                db))
+        kept      (vec (remove
+                         (fn [row]
+                           (or (when-some [stored (get have-fns (:seon.fn/sym row))]
+                                 (or (= stored (fn-fields row))
+                                     (not (contains? core-syms (:seon.fn/sym row)))))
+                               (and (contains? row :seon.ns/name)
+                                    (= (get have-nses (:seon.ns/name row))
+                                       (:seon.ns/source row)))
+                               (when-some [stored (get have-schs (:seon.schema/key row))]
+                                 (or (= stored (:seon.schema/source row))
+                                     (seval/registration-call-source? stored)))
+                               (when-some [stored (get have-tsts (:seon.test/sym row))]
+                                 (or (= stored (:seon.test/source row))
+                                     (not (contains? core-syms (:seon.test/sym row)))))))
+                         all))
+        ;; A drifted fn row whose FRESH derivation is unspecced while the
+        ;; stored row carries a spec: identity upsert re-asserts the other
+        ;; fields but can't REMOVE a datom — retract the stale spec
+        ;; explicitly so PRESENT ⇒ specced stays honest.
+        retracts  (into []
+                        (keep (fn [row]
+                                (when-some [sym (:seon.fn/sym row)]
+                                  (let [stored-spec (get-in have-fns [sym :seon.fn/spec])]
+                                    (when (and (not (contains? row :seon.fn/spec))
+                                               (seq stored-spec))
+                                      [:db/retract [:seon.fn/sym sym]
+                                       :seon.fn/spec stored-spec])))))
+                        kept)]
+    (into kept retracts)))
 
 (defn ^:async prune-core-ghosts!
   "Boot-index GC (open-issues 2026-06-11, agent-reported row 5): retract
@@ -1766,6 +1938,7 @@
    Idempotent: pruned rows are gone, so the second boot finds zero
    candidates. Loud: one `:seon.log` info names every pruned row and why.
    Returns a Promise of `{:seon.client/pruned [[kind ident] …]}`."
+  {:malli/schema [:=> [:catn [::conn :any]] :any]}
   [conn]
   (let [idx    (index-core!)
         tsts   (index-tests)
@@ -1827,37 +2000,47 @@
 
 (defn- stub-llm
   "A fake LLM that demonstrates the REPL-as-harness response shape: a
-   `;; narration` line then a real `seon.agent/reply!` form. The
-   loop's reply-landed stop policy
-   (`seon.agent/unanswered-live-inbound?`, #35) ends the wake after this
-   turn — the old extra `:seon.agent/state :idle` transact taught a
-   non-mechanism (the loop never read mid-turn state) and burned turns
-   to the cap (#22). Returns a Promise of {:text \"...\"}."
+   `;; narration` line then a real `(message/user …)` form — the verb
+   that says something to the human. The FSM halt policy ends the wake
+   when no actionable forms remain. Returns a Promise of {:text \"...\"}."
   [ctx]
   (let [text (str
                ";; stub LLM here — the real one needs DEEPSEEK_API_KEY\n"
-               ";; reply to whoever woke this turn — replying ends the wake\n"
-               "(seon.agent/reply!\n"
-               "  {:seon.agent.message/content "
+               ";; say hello to your human via the message/user verb\n"
+               "(message/user\n"
+               "  "
                (pr-str (str "hello from the stub LLM — saw "
-                            (count ctx) " chars of ctx"))
-               "})\n")]
+                            (tokens/estimate ctx) " tokens of ctx"))
+               ")\n")]
     (.then (.resolve js/Promise nil) (fn [_] {:text text}))))
 
-(defn- current-llm-fn
-  "The llm-fn for this pod process: the provider the `:seon.ai/config`
-   row / SEON_AI_PROVIDER selects (`seon.ai/provider` — default
-   :deepseek, C-20) when its API key is set, else the stub. Single
-   selection point — `-main` and the hot-reload re-arm both call it.
-   Rebuilt FRESH at each call (not cached) so a hot reload of the
-   adapter ns takes effect on re-armed listeners; a registry of
-   boot-time llm-fn closures would pin agents to pre-reload adapter
-   code, defeating the re-arm."
+(defn- select-adapter
+  "Pick the llm-fn for the CURRENT effective provider — the adapter whose
+   wire path matches `(seon.ai/provider)`, gated on its API key (else the
+   stub). Read PER CALL (not cached) so it reflects the effective config at
+   the moment of the call: inside an agent turn scope ([[seon.agent.turn/run-turn!]]
+   wraps the call in `db/with-agent id`), `(seon.ai/provider)` resolves that
+   agent's `:seon.ai/agent-provider` overlay — so an agent whose provider
+   differs from the cluster default routes to ITS adapter. `:inherit` (the
+   default) and no-override agents resolve the global provider = byte-parity.
+   Outside an agent scope (boot smoke, gym render) it is the global provider."
   []
   (case (ai/provider)
-    :anthropic     (if (.. js/process -env -ANTHROPIC_API_KEY)
+    :anthropic     (if (config/anthropic-api-key)
                      (anthropic/agent-adapter)
                      stub-llm)
+    ;; DiffusionGemma — ONE provider, two backends (seon.ai/dg-backend,
+    ;; env SEON_DG_BACKEND). :control = the transformers RunPod worker
+    ;; (the per-step seam); :vllm = an OpenAI-compatible serving endpoint
+    ;; (falls through to the openai adapter, like :openai-compat). Each
+    ;; backend gates on its own key, else the stub.
+    :diffusiongemma (case (ai/dg-backend)
+                      :control (if (diffusiongemma/api-configured?)
+                                 (diffusiongemma/agent-adapter)
+                                 stub-llm)
+                      (if (openai/api-key-configured?)
+                        (openai/agent-adapter)
+                        stub-llm))
     ;; :openai-compat rides the SAME adapter as :deepseek (the wire
     ;; format is OpenAI's) — endpoint + key resolve per call from the
     ;; :seon.ai/config row / SEON_AI_* env (see seon.ai.openai-compat's
@@ -1867,51 +2050,142 @@
       (openai/agent-adapter)
       stub-llm)))
 
-(defn- live-agent-ids
-  "Agent ids whose `:seon.agent/state` is `:idle` or `:running` AND
-   that are not completed (`:seon.agent/completed-at` absent = active —
-   see `seon.agent/complete!`) — the agents whose user-message triggers
-   must exist. Derived from the DB at call time (reactive-context: no
-   stored agent registry)."
-  [db]
-  (->> (db/query {:seon.db/query '[:find ?aid
-                                   :where
-                                   [?a :seon.agent/id ?aid]
-                                   [?a :seon.agent/state ?state]
-                                   [(contains? #{:idle :running} ?state)]
-                                   (not [?a :seon.agent/completed-at _])]
-                  :seon.db/db db})
-       (mapv first)))
+(defn- current-llm-fn
+  "The llm-fn for this pod process: a DISPATCHING closure that selects the
+   provider adapter PER CALL via [[select-adapter]]. Single selection point —
+   `-main`, the hot-reload re-arm, and the HTTP endpoints all call this.
+   Because the adapter is chosen at CALL time (not at re-arm), a per-agent
+   `:seon.ai/agent-provider` overlay routes that agent's turn to a different
+   provider than the cluster default (the call runs inside
+   [[seon.agent.turn/run-turn!]]'s `db/with-agent id` scope, so
+   `(seon.ai/provider)` resolves the effective per-agent provider). Choosing
+   per call also means a hot reload of an adapter ns takes effect on re-armed
+   listeners; a boot-time-baked closure would pin agents to pre-reload
+   adapter code. Adapter construction is a trivial closure ((agent-adapter)
+   returns (fn [ctx] …)); the real config resolves inside it via
+   `seon.ai/current`."
+  []
+  (fn [ctx-text] ((select-adapter) ctx-text)))
 
-(defn resumable-agent-ids
-  "Agent ids a booting pod RESUMES: every `:seon.agent/id` entity in db
-   value `db` WITHOUT `:seon.agent/completed-at` (absent = active — see
-   `seon.agent/complete!`). Sorted asc for deterministic boot logs.
-   Empty = genuine first boot → `start-agent!` mints a fresh agent."
-  {:malli/schema [:=> [:catn [:seon.db/db-val :seon.db/db-val]]
-                  [:vector :seon.db/id]]}
-  [db]
-  (->> (db/query {:seon.db/query '[:find ?aid
-                                   :where
-                                   [?a :seon.agent/id ?aid]
-                                   (not [?a :seon.agent/completed-at _])]
-                  :seon.db/db db})
-       (map first)
-       sort
-       vec))
+;; `seon.agent/armable-agent-ids` (state ≠ :terminated) is the single
+;; source of truth for "this agent can still be woken".
 
-(defn- rearm-user-triggers!
-  "Hot-reload hygiene (work-plan 1.2): re-install the per-agent
-   user-message trigger for every live agent so handler fixes take
-   effect on hot reload. Without this, the registered tx-listener
-   closures keep running pre-reload code (observed live 2026-06-09:
-   the trigger-scoping fix in seon.agent/user-msg-for-agent? did not
-   reach live agents until a manual install-user-trigger! per agent).
+(schema/register! ::mint?         :boolean)
+(schema/register! ::llm-fn        fn?)
+(schema/register! ::compile-state :any)
+;; Config-driven agent-init — arm the message wake trigger at init
+;; (agent-level, default true). Seeded onto the agent by seed-default-ctx! and
+;; READ here by [[wake-armed?]] to gate the trigger install.
+(schema/register! ::wake? [:boolean {:default true}])
+
+(defn- wake-armed?
+  "Whether agent `id` should have its message wake trigger installed — its
+   `:seon.client/wake?` datom (default true = today's unconditional arm). A
+   guarded read: nil db / never-installed attr / non-bool → true (byte-parity).
+   `wake? false` (config or a live transact) means the agent does NOT auto-wake
+   on a message — a human-driven or externally-stepped agent."
+  [id]
+  (let [db (some-> db/*conn* deref)]
+    (if (and db id (contains? (db/installed-schema db) ::wake?))
+      (let [v (:seon.client/wake?
+                (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))]
+        (if (boolean? v) v true))
+      true)))
+(schema/register! ::init-agent-request
+  [:map
+   [:seon.agent/id      :seon.agent/id]
+   [::mint?             {:optional true} ::mint?]          ; default false = re-arm existing
+   [:seon.agent/purpose {:optional true} :seon.agent/purpose] ; mint-only (create! gates on fresh?)
+   [::llm-fn            {:optional true} ::llm-fn]          ; omitted → (current-llm-fn)
+   [::compile-state     {:optional true} ::compile-state]]) ; omitted → (repl/ensure-bootstrap!)
+
+;; success = boot!'s {:seon.agent/id _ :seon.agent/ns _} (mint?) OR {:seon.agent/id id} (re-arm);
+;; a FAILED create (mint?) returns the db error envelope as-is (errors are values).
+(schema/register! ::init-agent-response
+  [:or [:map [:seon.agent/id :seon.agent/id]] :seon.db/transact-response])
+
+(defn ^:async init-agent!
+  "THE ONE way an agent comes to life or re-arms IN-PROCESS. Deterministic, no
+   turn-0 ceremony. Steps (fixed order):
+     1. resolve cs = compile-state | (ensure-bootstrap!), llm = llm-fn | (current-llm-fn)
+     2. setup-agent-ns!  — wire the home ns requires (the reflexive-verb wiring)
+     3. (mint?) agent/boot! — create the entity (+ purpose); on FAILURE do NOT
+        arm/host, return the error envelope (no ghost agent, task #21 stance)
+     4. install-wake-trigger! {id llm cs}
+     5. runtime-id/host! id
+   Runs in a (db/with-agent id …) scope so every transact carries the id.
+   Ready = :idle, zero runs, fully wired, wakeable.
+
+   `mint? true` creates the entity (the `/agents/new` + first-boot path);
+   `mint? false` (default) re-arms an EXISTING entity — the hot-reload
+   (`rearm-wake-triggers!`) + spawn (`!arm-child-fn`) path. `setup-agent-ns!`
+   and `install-wake-trigger!` are idempotent (the trigger unlistens its prior
+   key), so re-running per hot reload is safe. llm-fn is re-derived fresh via
+   `current-llm-fn` when omitted so arming never wires a stale adapter."
+  {:malli/schema [:=> [:cat ::init-agent-request] ::init-agent-response]}
+  [{:seon.agent/keys [id purpose] ::keys [mint? llm-fn compile-state]}]
+  (await
+    (db/with-agent id
+      (fn ^:async init! []
+        (let [cs  (or compile-state (await (repl/ensure-bootstrap!)))
+              llm (or llm-fn (current-llm-fn))]
+          ;; 2. wire the home ns FIRST (both mint + re-arm need it before
+          ;;    anything that assumes the ns exists).
+          (await (seval/setup-agent-ns! cs (agent/home-ns id) id))
+          ;; 3. MINT ONLY: create the entity. On a FAILED create the db error
+          ;;    envelope propagates as-is (task #21): NO entity → do NOT arm a
+          ;;    trigger or host the id (no ghost on the roster).
+          (let [boot-res (when mint?
+                           (await (agent/boot!
+                                    (cond-> {:seon.agent/id id}
+                                      (some? purpose)
+                                      (assoc :seon.agent/purpose purpose)))))]
+            (if (and mint? (false? (:seon.db/ok? boot-res)))
+              (do (log/error-console!
+                    "seon.client/init-agent!"
+                    (str "agent/boot! FAILED for " id
+                         " — no entity; propagating the error envelope")
+                    boot-res)
+                  boot-res)
+              (do
+                ;; 4. arm the wake trigger (MUST be last-of-wiring — install
+                ;;    unlistens any prior key) — GATED on the agent's
+                ;;    `:seon.client/wake?` datom (default true = today). A
+                ;;    `wake? false` agent is wired + hosted but does NOT
+                ;;    auto-wake on a message (human-/externally-driven).
+                ;;    5. host the id for MCP (independent of wake).
+                (when (wake-armed? id)
+                  (agent-loop/install-wake-trigger!
+                    {:seon.agent/id            id
+                     :seon.agent/llm-fn        llm
+                     :seon.agent/compile-state cs}))
+                (runtime-id/host! id)
+                (if mint? boot-res {:seon.agent/id id})))))))))
+
+(defn- register-arm-hook!
+  "Point `seon.agent/start!`'s spawn ARM injection (`!arm-child-fn`) at
+   `init-agent!` (#30). Called at boot AND on every hot reload, so the running
+   pod arms each freshly-spawned child IN-PROCESS with live code — without it,
+   `start!` mints an UNARMED child and a message to it strands. Idempotent
+   (resets the defonce'd atom). The closure resolves `init-agent!` at call time,
+   so it always runs the latest code. The child ENTITY already exists (`start!`/
+   `create!` made it), so this re-arms (`mint? false`), never mints."
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (reset! agent/!arm-child-fn
+          (fn ^:async arm-child! [child-id]
+            (init-agent! {:seon.agent/id child-id ::mint? false}))))
+
+(defn- rearm-wake-triggers!
+  "Hot-reload hygiene: re-install the per-agent wake trigger for every
+   armable agent so handler fixes take effect on hot reload. Without
+   this, the registered tx-listener closures keep running pre-reload
+   code.
 
    Everything is derived, nothing stored: agent ids from the DB
-   (`live-agent-ids`), compile-state from the idempotent
+   (`seon.agent/armable-agent-ids`), compile-state from the idempotent
    `repl/ensure-bootstrap!`, llm-fn rebuilt via `current-llm-fn`.
-   `agent/install-user-trigger!` is itself idempotent (unlistens the
+   `agent-loop/install-wake-trigger!` is itself idempotent (unlistens the
    prior key), so re-running per reload is safe.
 
    Fire-and-forget from `after-reload` (which is sync): returns a
@@ -1928,61 +2202,28 @@
       (set! db/*conn* conn)
       (-> (repl/ensure-bootstrap!)
           (.then
-            (fn [compile-state]
-              (let [ids    (live-agent-ids @conn)
-                    llm-fn (current-llm-fn)]
+            (fn ^:async rearm! [compile-state]
+              (let [ids (agent/armable-agent-ids {:seon.db/db @conn})]
                 (doseq [id ids]
-                  ;; Re-host so a hot-reloaded pod stays MCP-addressable
-                  ;; for every agent it re-arms (runtime-id is defonce'd,
-                  ;; but re-hosting is idempotent and keeps the two
-                  ;; rosters trivially in sync).
-                  (runtime-id/host! id)
-                  (agent/install-user-trigger!
-                    {:seon.agent/id            id
-                     :seon.agent/llm-fn        llm-fn
-                     :seon.agent/compile-state compile-state}))
+                  ;; One init mechanism: `init-agent!` (re-arm, mint? false)
+                  ;; replays the home-ns wiring into the (possibly freshly
+                  ;; rebuilt) compile-state BEFORE installing the trigger —
+                  ;; killing the install-timing race — re-derives llm-fn, and
+                  ;; re-hosts the id (MCP). Pass the already-bootstrapped state
+                  ;; so it isn't re-derived per id.
+                  (await (init-agent! {:seon.agent/id       id
+                                       ::mint?              false
+                                       ::compile-state      compile-state})))
                 (log/info-console! "seon.client"
-                                   "reload: user-message triggers re-armed"
+                                   "reload: wake triggers re-armed"
                                    {:seon.client/reinstalled ids})
                 ids)))
           (.catch
             (fn [err]
               (log/error-console! "seon.client"
-                                  "reload: user-message trigger re-arm FAILED"
+                                  "reload: wake trigger re-arm FAILED"
                                   err)))))
     (js/Promise.resolve [])))
-
-(defn- ^:async boot-one-agent!
-  "The per-agent slice of the boot path: prime the agent's home
-   namespace (atoms + accessors), create/refresh its entity + arm the
-   kick listener (`agent/boot!`), and `runtime-id/host!` the id so
-   `mcp__seon_cljs__eval agent_id=<id>` pins this pod. Runs inside its
-   own `with-agent` scope so every transact carries the right agent-id.
-   Returns boot!'s `{:seon.agent/id _ :seon.agent/ns _}`."
-  [{:seon.agent/keys [id llm-fn compile-state purpose]}]
-  (await
-    (db/with-agent id
-      (fn ^:async boot-agent! []
-        (await (seval/setup-agent-ns! compile-state (agent/home-ns id) id))
-        (let [res (await (agent/boot!
-                           (cond->
-                             {:seon.agent/id            id
-                              :seon.agent/llm-fn        llm-fn
-                              :seon.agent/compile-state compile-state}
-                             (some? purpose)
-                             (assoc :seon.agent/purpose purpose))))]
-          ;; boot! propagates create!'s db error envelope (task #21 —
-          ;; errors are values). A failed create means NO agent entity:
-          ;; don't host the id for MCP addressing, hand the envelope up.
-          (if (false? (:seon.db/ok? res))
-            (do (log/error-console!
-                  "seon.client/boot-one-agent!"
-                  (str "agent/boot! FAILED for " id
-                       " — no entity; propagating the error envelope")
-                  res)
-                res)
-            (do (runtime-id/host! id)
-                res)))))))
 
 (schema/register! ::seeded? [:= true])
 (schema/register! ::boot-seed-request  [:map [:seon.db/conn :seon.db/conn]])
@@ -1993,35 +2234,38 @@
    world a pod boots into', shared verbatim by `start-agent!` (live
    boot) and the gym's `seed-scenario-world!` (scratch worlds), so the
    two can never drift again (the gym hand-mirrored this sequence and
-   drifted twice). The agent's identity is NOT seeded — it is read LIVE
-   from SOUL.md / AGENTS.md on every LLM call (my.soul/system-prompt-text),
-   so gym and live prompts get the same identity with no seed step.
+   drifted twice). The agent's identity is NOT seeded — SOUL.md /
+   AGENTS.md are read LIVE as context sections every render
+   (`seon.agent.ctx/file-block`), so gym and live prompts get the same
+   identity with no seed step.
 
-   Steps, in boot order:
-     1. Core handler SCHEMA — `h/bootstrap-schema!` +
-        `wake/bootstrap-schema!` (raw `:db/ident` attr rows; never
-        counted as data).
-     2. Under ONE `{:seon.db/origin :core-seed}` tx-context, four
-        transacts (each its own tx so the core prefix stays a
-        stable sequence of tx-times):
-          :wake-handler    — the ONE `:wake/on-message` handler entity
-                             (idempotent upsert; data-only — registering
-                             arms no dispatcher). INSIDE the seed
-                             context so its row carries `:core-seed`
-                             provenance — a fresh world boots with
-                             FACTS=0 (machinery rows are never the
-                             cluster's data; demo-polish fix
-                             2026-06-12).
+   Steps, in boot order. TWO provenance layers:
+
+   APPEND-ONLY (origin `:core-seed`) — introspection, never a desired
+   set, never retracted (three transacts, each its own tx so the core
+   prefix stays a stable sequence of tx-times):
           :entity-schemas  — `schema/all-entity-schemas-tx-data`.
           :core-seed  — `seed-core!` (user entity +
-                             my.kb.system instruction singleton).
+                             my.kb.shared instruction singleton).
           :core-index — `core-index-tx` (`:seon.ns` /
                              `:seon.fn` / `:seon.schema` / `:seon.test`
                              rows, conn-deduped so an Nth boot on the
                              same store re-seeds nothing).
 
-   Pins the root `db/*conn*` to `conn` for the duration (the handler
-   bootstrap fns read it), restoring in `finally`. ENVELOPE CONTRACT
+   DECLARATIVE DESIRED SET (origin `:config`) — the routes
+   (`route/core-routes-tx`, curated by the manifest) + the skills corpus
+   (`my.skills/seed-skills-tx-data`, curated by the manifest) are the ONE
+   managed declarative population, synced through
+   `seon.state/reconcile!` (scope `#{:config}`). reconcile UPSERTS each
+   desired row by its own `:db.unique/identity` (`:seon.route/name` /
+   `:my.skills/name`) AND RETRACTS any managed row absent from the desired
+   set — so dropping a route from the manifest, or a skill from disk,
+   removes the stale datom (it can no longer persist across boots). The
+   `:core-seed` introspection above is NOT in this scope and is never
+   touched.
+
+   Pins the root `db/*conn*` to `conn` for the duration, restoring in
+   `finally`. ENVELOPE CONTRACT
    (A4): `db/transact!` never rejects, so every step checks the
    envelope and THROWS (surface-errors-loudly) — a silent partial seed
    is far worse than a crashed boot."
@@ -2030,9 +2274,11 @@
   (let [prev-conn db/*conn*]
     (set! db/*conn* conn)
     (try
-      (await (h/bootstrap-schema!))
-      (await (wake/bootstrap-schema!))
       (let [index-tx (await (core-index-tx conn))
+            ;; The OPTIONAL loadout manifest, read ONCE and threaded to the
+            ;; route + skills steps below ({} when config/system.edn is absent
+            ;; ⇒ every resolve-* is the identity ⇒ byte-identical seed).
+            manifest (config/load-manifest)
             check!   (fn [step {ok?   :seon.db/ok?
                                 error :seon.db/error}]
                        (when-not ok?
@@ -2042,20 +2288,12 @@
                                        (:seon.error/message error))
                                   {:seon.client/seed-step step
                                    :seon.db/error error}))))]
+        ;; APPEND-ONLY core (origin :core-seed): introspection that is not a
+        ;; desired set, never retracted.
         (await
           (db/with-tx-context
             {:seon.db/origin :core-seed}
             (fn ^:async seed! []
-              (let [{registered? :seon.handler/registered?}
-                    (await (h/register!
-                             {:seon.handler/name      :wake/on-message
-                              :seon.handler/match     {:seon.handler.match/attr
-                                                       :seon.agent.message/to}
-                              :seon.handler/fn        'seon.handlers.wake/wake-on-message
-                              :seon.handler/on-origin #{:user :agent}}))]
-                (when-not registered?
-                  (throw (ex-info "boot seed transact failed at :wake-handler"
-                                  {:seon.client/seed-step :wake-handler}))))
               (check! :entity-schemas
                       (await (db/transact!
                                {:seon.db/conn conn
@@ -2066,123 +2304,60 @@
                                {:seon.db/conn conn
                                 :seon.db/tx-data (seed-core!)})))
               ;; No soul seed: the agent's identity is read LIVE from
-              ;; SOUL.md / AGENTS.md on every LLM call (my.soul/system-prompt-text),
-              ;; never seeded into the store.
+              ;; SOUL.md / AGENTS.md as context sections every render
+              ;; (seon.agent.ctx/file-block), never seeded into the store.
               (check! :core-index
                       (await (db/transact!
                                {:seon.db/conn conn
-                                :seon.db/tx-data index-tx})))))))
+                                :seon.db/tx-data index-tx}))))))
+        ;; DECLARATIVE DESIRED SET (origin :config): the routes
+        ;; (`:seon.route/*`, identity `:seon.route/name`) + the scanned skills
+        ;; corpus (`:my.skills/*`, identity `:my.skills/name`), curated by the
+        ;; manifest, are ONE managed population synced through reconcile! —
+        ;; upsert-by-identity (idempotent on an Nth boot) AND retract-stale, so
+        ;; a route dropped from the manifest or a skill removed from disk is
+        ;; RETRACTED (it cannot persist). Scope `#{:config}` excludes the
+        ;; :core-seed introspection above. reconcile! never rejects; its
+        ;; error-value is checked + thrown (surface-errors-loudly).
+        (let [desired (into (vec (config/resolve-routes (route/core-routes-tx)
+                                                        manifest))
+                            ;; the scanned skill corpus is the desired set as-is
+                            ;; (no include/exclude curation — the env-dir scan IS
+                            ;; the corpus; always-on bodies are the agent-context's
+                            ;; :my.skills/load presence-set).
+                            (my.skills/seed-skills-tx-data))
+              recon   (await
+                        (db/with-tx-context
+                          {:seon.db/origin :config}
+                          (fn ^:async reconcile-declarative! []
+                            (state/reconcile!
+                              {:seon.state/desired    desired
+                               :seon.db/managed-scope #{:config}
+                               :seon.db/conn          conn}))))]
+          (when (false? (:seon.state/ok? recon))
+            (throw (ex-info
+                     (str "boot seed reconcile (routes+skills) failed: "
+                          (:seon.state/error recon))
+                     {:seon.client/seed-step :core-declarative
+                      :seon.state/error      (:seon.state/error recon)})))))
       {::seeded? true}
       (finally
         (set! db/*conn* prev-conn)))))
 
-(def inventory-read-source
-  "The creation-turn `store-inventory` eval (context-v4 §2.4/§3.1,
-   V4-3): the catalogs died as sections; the inventory is a core
-   fn the creation turn demonstrably RUNS — the fn's source is visible
-   in the rendered `seon.db` namespace tag, the CALL is visible here,
-   the RESULT is the value line, and re-running the fn is how you get
-   fresh numbers. The `;;` comments ride as the eval's narration."
-  (str
-    ";; What's already in the shared store? Other agents stored knowledge\n"
-    ";; here before me — checking BEFORE researching is how I avoid paying\n"
-    ";; for answers that already exist. (An ordinary query; I re-run it\n"
-    ";; whenever I need current numbers.)\n"
-    "(seon.db/store-inventory)\n"))
-
-(def instructions-read-source
-  "The creation-turn READ of the system-wide instructions (context-v4
-   PRD §3.1 tutorial register, V4-0): the fn's source is visible in
-   the rendered `my.kb.system` namespace, the CALL is visible in the
-   transcript, the RESULT is the value line — and re-running the fn is
-   how the agent gets the current set. The `;;` comments ride as the
-   eval's narration via `parse-forms`."
-  (str
-    ";; Next: the system-wide instructions — standing guidance for ALL\n"
-    ";; agents in this cluster. Anyone (my human, another agent, me) can\n"
-    ";; append a row; I re-read when I want the current set.\n"
-    "(my.kb.system/instructions)\n"))
-
-(defn ^:async creation-evals!
-  "The startup eval block a NEWLY MINTED agent runs as its first
-   logged act (live-tiles PRD 2026-06-11 §6 U4 + context-v4 §3.1):
-   real evals, AS the agent, through the same `eval-batch!` path every
-   turn uses — (1) the tile welcome wiring
-   (`seon.render.live-tile/wiring-source`), whose tutorial `;;`
-   comments ride as the eval's narration, and (2) the
-   `(my.kb.system/instructions)` read ([[instructions-read-source]],
-   V4-0) so the system-wide instruction rows land in the transcript as
-   a demonstrated query. The wiring eval transacts
-   `:seon.render.live-tile/content` onto the agent's own entity by
-   lookup ref; the datom is durable, so a pod restart resumes the
-   wiring with no re-seed. CREATION ONLY — resumed agents are never
-   retro-wired (their unwired state falls back to welcome at render
-   via `seon.render.live-tile/wired-content`).
-
-   Opens the agent's first session + a creation turn so the eval
-   lands where every eval lands (sessions → turns → evals) and the
-   agent re-reads it in its own transcript. Returns the eval-batch!
-   summary map; failures are logged LOUDLY but never abort the boot —
-   a missing wiring datom only means the welcome fallback."
-  [{:seon.agent/keys [id compile-state]}]
-  (await
-    (db/with-agent id
-      (fn ^:async run-creation-evals! []
-        (try
-          (let [session    (await (agent/ensure-session! id))
-                session-id (:seon.agent.session/id session)
-                turn-id    (db/new-id!)
-                source     (str (live-tile/wiring-source id)
-                                "\n"
-                                inventory-read-source
-                                "\n"
-                                instructions-read-source)
-                batch
-                (await
-                  (db/with-tx-context
-                    {:seon.db/agent-id   id
-                     :seon.db/session-id session-id
-                     :seon.db/turn-id    turn-id
-                     :seon.db/origin     :system}
-                    (fn []
-                      (agent/with-turn!
-                        {:seon.agent/id                    id
-                         :seon.agent.session/id-of-session session-id
-                         :seon.agent.turn/id-of-turn       turn-id
-                         :seon.agent.turn/prompt-text      ""}
-                        (fn ^:async creation-turn-body! []
-                          (await (seval/eval-batch!
-                                   compile-state
-                                   (repl/parse-forms source)
-                                   (agent/home-ns id)
-                                   id turn-id)))))))]
-            (when (pos? (or (:seon.eval/n-fail batch) 0))
-              (log/error-console!
-                "seon.client/creation-evals!"
-                "creation wiring eval FAILED — tile falls back to welcome at render"
-                {:seon.agent/id id :seon.eval/batch batch}))
-            batch)
-          (catch :default e
-            (log/error-console!
-              "seon.client/creation-evals!"
-              "creation eval block THREW — tile falls back to welcome at render"
-              e)
-            {:seon.eval/ids [] :seon.eval/n-ok 0 :seon.eval/n-fail 1}))))))
-
 (defn ^:async start-agent!
   "Bring up the pod's agents: open conn, init bootstrap-CLJS, then
-   RESUME every active agent in the cluster store — the agent entities
-   WITHOUT `:seon.agent/completed-at` (see `seon.agent/complete!`) —
-   re-arming each one's user-message trigger. A fresh agent is minted
-   ONLY when the store has zero resumable agents (genuine first boot)
-   or on the explicit create path (`:mint? true` — POST /agents/new).
+   RESUME every armable agent in the cluster store — the agents whose
+   DERIVED state is `:idle` (not terminated, no open run — `armable-agent-ids`)
+   — arming each one's wake trigger. A fresh agent is minted ONLY when
+   the store has zero armable agents (genuine first boot) or on the
+   explicit create path (`:mint? true` — POST /agents/new).
    Identity is durable: restarting the pod does NOT accumulate agents.
 
      :llm-fn — fn of ctx-string returning a Promise of {:text \"...\"}.
                Optional; defaults to stub-llm for verification without
                an API key. Pass (seon.ai.openai-compat/agent-adapter)
                for the real thing.
-     :mint?  — force-mint a NEW agent even when resumable agents exist
+     :mint?  — force-mint a NEW agent even when armable agents exist
                (they are already armed from boot). The /agents/new path.
 
    Returns a Promise resolving to
@@ -2192,12 +2367,14 @@
       :seon.client/minted-ids  [...]
       :seon.web/port _ :seon.web/port-file _}.
    Subsequent (seon.agent/message! …) calls (or POST /chat) drive the
-   loop via the kick listener."
+   loop via the wake trigger."
+  {:malli/schema [:=> [:cat [:* :any]] :any]}
   [& [{:keys [llm-fn mint? purpose] :or {llm-fn stub-llm}}]]
-  (let [conn          (or @!agent-conn (await (open-cluster-conn!)))
+  (let [existing-conn @!agent-conn
+        conn          (or existing-conn (await (open-cluster-conn!)))
         _             (reset! !agent-conn conn)
         ;; Bind the conn as the root *conn* so seon.db calls + the
-        ;; kick listener resolve without per-call threading.
+        ;; wake trigger resolve without per-call threading.
         _             (set! db/*conn* conn)
         ;; v1.md §7.1 boot preconditions. Throws cleanly if the conn
         ;; was opened without :keep-history? OR if the seon.db tx-meta
@@ -2205,6 +2382,24 @@
         ;; registries before the agent starts writing txs that would
         ;; silently lose their causality bundle.
         _             (db/assert-preconditions! {:seon.db/conn conn})
+        ;; CRASH RECOVERY (Gemini #4): close any run orphaned by a prior pod
+        ;; crash — an :open run + :seon.agent/run pointer with no loop
+        ;; driving it (derived :running, so unwakeable). MUST run BEFORE
+        ;; armable-agent-ids below: a recovered agent then reads :idle and
+        ;; JOINS the resume roster (else it's derived :running → never armed
+        ;; → permanent deadlock). Gated on GENUINE BOOT (nil existing-conn):
+        ;; NEVER on a /agents/new mint in a LIVE process (that would close
+        ;; currently-RUNNING agents' open runs). Idempotent + a no-op when
+        ;; no runs are open.
+        _             (when (nil? existing-conn)
+                        (let [{closed :seon.agent.run/closed}
+                              (await (run/recover-crashed-runs!))]
+                          (when (seq closed)
+                            (log/info-console!
+                              "seon.client/start-agent!"
+                              (str "crash recovery: closed " (count closed)
+                                   " orphaned run(s) :crashed")
+                              {:seon.agent.run/closed closed}))))
         ;; Bootstrap-CLJS init via the shared iteration-surface atom.
         ;; Version-stamped — a hot-reload of seon.eval rotates the
         ;; gensym so the next call rebuilds the state. Idempotent
@@ -2212,8 +2407,14 @@
         compile-state (await (repl/ensure-bootstrap!))
         ;; RESUME, DON'T MINT (P3.5/#31): the store is the identity
         ;; source. Mint only on genuine first boot or explicit create.
-        resumed-ids   (if mint? [] (resumable-agent-ids @conn))
-        minted-ids    (if (empty? resumed-ids) [(db/new-id!)] [])
+        resumed-ids   (if mint? [] (agent/armable-agent-ids {:seon.db/db @conn}))
+        ;; First boot mints the orchestrator-root ("root", no parent — the
+        ;; spawn-recursion base case); `mint?` (`/agents/new`) mints a normal
+        ;; 14-char child id instead.
+        minted-ids    (cond
+                        mint?                [(db/new-id!)]
+                        (empty? resumed-ids) ["root"]
+                        :else                [])
         agent-ids     (into resumed-ids minted-ids)
         ;; The PRIMARY agent (return-shape + shared-boot tx scope):
         ;; the minted one when minting, else the first resumed.
@@ -2224,7 +2425,20 @@
     (await
       (db/with-agent primary
         (fn ^:async boot-with-agent! []
-          (let [;; Boot-index GC — MUST run before replay: a DELETED
+          (let [;; THE core boot seed — handlers + the four seed
+                ;; transacts, extracted to [[boot-seed!]] so the gym's
+                ;; scenario worlds run the boot's OWN code path (one
+                ;; mechanism — the hand-mirrored copy drifted twice).
+                ;; MUST run BEFORE the per-agent init: seeding first means
+                ;; the user entity + core schema exist before any agent wakes
+                ;; and a message resolves against them.
+                ;; Safe to run before prune/replay: the freshly-seeded
+                ;; `:core-seed` rows are all in prune's freshly-built `fresh`
+                ;; set (same pure builders), so prune never treats them as
+                ;; ghosts; replay excludes (core-ns-set), so it never touches
+                ;; them either. boot-seed! pins its own *conn* and tx-context.
+                _             (await (boot-seed! {:seon.db/conn conn}))
+                ;; Boot-index GC — MUST run before replay: a DELETED
                 ;; core ns falls out of (core-ns-set), so its
                 ;; ghost rows would be misclassified as agent corpus and
                 ;; replayed back into the live compile-state (the
@@ -2251,33 +2465,46 @@
                 _             (log/info-console!
                                 "seon.client/start-agent!"
                                 (str "replay: " (pr-str replay-stats)))
-                ;; Per-agent boots — home ns + entity + kick listener +
-                ;; MCP hosting, one at a time (boot transacts must not
-                ;; interleave). The primary's result feeds the return map.
+                ;; Install Malli instrumentation from the PROGRAM GRAPH —
+                ;; the DB now holds every core fn (index-core! via boot-seed!)
+                ;; plus every replayed agent fn, each with its `:seon.fn/spec`.
+                ;; This is the complete, ordering-independent source (issue
+                ;; instrumentation-collect-clean-build-empty). Agent fns were
+                ;; already wrapped inline by the eval-tee during replay; this
+                ;; adds the compiled core fns. ONCE per process — a 2nd pass
+                ;; (a later POST /agents/new) would re-read the wrapper vars,
+                ;; mis-detect async, and wedge the pod (see instrument-from-db-once!).
+                instr-stats   (instrument/instrument-from-db-once! (await (d/db conn)))
+                _             (log/info-console!
+                                "seon.client/start-agent!"
+                                (str "instrumentation: " (pr-str instr-stats)))
+                ;; Per-agent init — home ns + (mint only) entity + wake
+                ;; trigger + MCP hosting via the ONE `init-agent!`, one at a
+                ;; time (init transacts must not interleave). No turn 0: a
+                ;; freshly-minted agent is `:idle` with zero runs the moment
+                ;; its entity + trigger exist, wakeable on the first message.
+                ;; The primary's result feeds the return map.
                 results       (let [!acc (volatile! [])]
                                 (doseq [aid agent-ids]
                                   (vswap! !acc conj
-                                          (await (boot-one-agent!
+                                          (await (init-agent!
                                                    (cond->
-                                                     {:seon.agent/id            aid
-                                                      :seon.agent/llm-fn        llm-fn
-                                                      :seon.agent/compile-state compile-state}
+                                                     {:seon.agent/id       aid
+                                                      ::mint?              (boolean (some #{aid} minted-ids))
+                                                      ::compile-state      compile-state}
+                                                     ;; ::llm-fn is optional (init-agent!
+                                                     ;; falls back to current-llm-fn) — only
+                                                     ;; pass a REAL fn, never nil (fn? schema).
+                                                     (fn? llm-fn)
+                                                     (assoc ::llm-fn llm-fn)
                                                      ;; The stated purpose seeds
                                                      ;; ONLY a minted agent
                                                      ;; (create! never re-seeds
                                                      ;; an existing entity).
                                                      (some #{aid} minted-ids)
-                                                     (assoc :seon.agent/purpose purpose)))))
-                                  ;; U4: the startup eval block —
-                                  ;; CREATION ONLY (a resumed agent is
-                                  ;; never retro-wired; unwired falls
-                                  ;; back to welcome at render).
-                                  (when (some #{aid} minted-ids)
-                                    (await (creation-evals!
-                                             {:seon.agent/id            aid
-                                              :seon.agent/compile-state compile-state}))))
+                                                     (assoc :seon.agent/purpose purpose))))))
                                 @!acc)
-                ;; Task #21: a boot-one-agent! that came back as an
+                ;; Task #21: an init-agent! that came back as an
                 ;; error envelope means an agent with NO entity —
                 ;; destructuring :seon.agent/id below would thread nil
                 ;; through the whole boot. Same stance as boot-seed!'s
@@ -2295,18 +2522,24 @@
                 ;; this for the dev iteration loop.
                 {:seon.web/keys [port port-file]}
                 (await (web.serve/start!))
-                ;; THE core boot seed — handlers + the four seed
-                ;; transacts, extracted to [[boot-seed!]] so the gym's
-                ;; scenario worlds run the boot's OWN code path (one
-                ;; mechanism — the hand-mirrored copy drifted twice).
-                _ (await (boot-seed! {:seon.db/conn conn}))
                 ;; C-18: sync the :seon.ai/config row to the SEON_AI_*
                 ;; env vars (env owns the row across boots). Fire-and-
                 ;; forget — sync! never rejects, logs its own failures.
                 _ (ai/sync!)
-                ;; Install the per-agent inspector tx-listener. Pushes
-                ;; morphs for the agent-view inspector page (/agent/<id>).
-                _ (seon.web.inspector/install!)]
+                ;; Install the dev-tools tx-listener. Pushes morphs for
+                ;; the /data browser + the per-agent /agent/<id>/debug page.
+                _ (seon.web.debug/install!)
+                ;; The ONE ticker — the only active machinery (deadline
+                ;; watchdog + schedule firing). Single instance + idempotent;
+                ;; re-armed on hot reload (after-reload above).
+                _ (agent-loop/install-ticker!)
+                ;; Register the spawn ARM hook (#30): `seon.agent/start!` arms
+                ;; the child it mints by invoking this (injection — seon.agent
+                ;; can't require seon.client). So a parent that spawns then
+                ;; messages a child IN ONE TURN actually wakes it, no
+                ;; out-of-band re-arm sweep. Re-registered on hot reload via
+                ;; `after-reload`.
+                _ (register-arm-hook!)]
             (log/info-console! "seon.client" "agents started"
                                {:resumed resumed-ids :minted minted-ids
                                 :port port :port-file port-file})
@@ -2320,12 +2553,14 @@
 (defn start-agent-with-stub!
   "Bring up the V0 agent with the canned stub LLM. Useful for verifying
    the full loop without a deepseek API key. Returns a channel."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (start-agent!))
 
 (defn start-agent-with-deepseek!
   "Bring up the V0 agent against the real deepseek API. Requires
    DEEPSEEK_API_KEY in process.env. Returns a channel."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (start-agent! {:llm-fn (openai/agent-adapter)}))
 
@@ -2340,6 +2575,25 @@
   (fn [& [{purpose :seon.agent/purpose}]]
     (start-agent! (cond-> {:llm-fn (current-llm-fn) :mint? true}
                     (some? purpose) (assoc :purpose purpose)))))
+
+;; /solve runs each request in its OWN fresh core-seeded scratch store (per-
+;; sample isolation — no cross-sample contamination). serve.cljs can't require
+;; this ns (cycle), so inject the three scratch-store builders:
+;;   :open-conn   open-agent-conn! — fresh :memory conn w/ the full schema.
+;;   :boot-seed   boot-seed!       — seed the core into it (instruction rows +
+;;                                    the :seon.ns/:seon.fn program-graph).
+;;   :mint-agent  init-agent!      — THE per-agent wiring (create! + wake
+;;                                    trigger) AGAINST THE CURRENT *conn* (the
+;;                                    scratch conn), NOT start-agent! (which
+;;                                    re-`set!`s *conn* to the cluster store —
+;;                                    that would defeat isolation and drive the
+;;                                    scratch agent's turns against the wire).
+;;                                    Same path start-agent! uses per agent.
+;; Same injection seam + hot-reload behavior as set-create-agent-fn! above.
+(web.serve/set-solve-deps!
+  {:open-conn   open-agent-conn!
+   :boot-seed   boot-seed!
+   :mint-agent  init-agent!})
 
 ;; ---------------------------------------------------------------------------
 ;; Entry point
@@ -2371,7 +2625,9 @@
          (log/error-console! "seon.client" "uncaught exception"
                              (or (.-message err) err)))))
 
-(defn -main [& _args]
+(defn -main
+  {:malli/schema [:=> [:cat [:* :any]] :any]}
+  [& _args]
   ;; FIRST: gate datahike-cljs/konserve trace+debug (per-index-node
   ;; `:datahike/index-access` traces flooded pod.log to 813 MB on one
   ;; cold-store inspector render, 2026-06-09). Must run before the
@@ -2379,18 +2635,11 @@
   (log/quiet-library-logs!)
   (install-process-safety-net!)
   (log/info-console! "seon.client" "-main boot" {:boot-at (:boot-at @!state)})
-  ;; Phase A item 7+8 — install Malli instrumentation. Collects every
-  ;; seon.* fn with :malli/schema metadata, registers with
-  ;; -function-schemas*, and wraps each var with input+output
-  ;; validation (Sean's decision #7). Runs after all seon.* nses have
-  ;; loaded (CLJS module-load is eager and happens before -main fires)
-  ;; and before any agent eval that would call them.
-  (try
-    (let [stats (instrument/install!)]
-      (log/info-console! "seon.client" "instrumentation installed" stats))
-    (catch :default e
-      (log/error-console! "seon.client" "instrumentation install failed"
-                          {:msg (.-message e)})))
+  ;; Malli instrumentation is installed from the PROGRAM GRAPH inside
+  ;; `start-agent!` (`instrument/instrument-from-db!`), AFTER the core is
+  ;; indexed — the DB is the complete, ordering-independent source of every
+  ;; fn + spec (issue instrumentation-collect-clean-build-empty). The
+  ;; eval-tee path instruments newly-defined fns inline between boots.
   (-> (datahike-smoke-test!)
       (.then (fn [result]
                (case (:status result)
@@ -2403,11 +2652,11 @@
   ;; A-5: auto-boot the V0 agent + HTTP server unless SEON_NO_AUTO_BOOT.
   ;; Cheap default for dev iteration — browser hits the loopback port,
   ;; no REPL needed. Disable when running the bare smoke test alone.
-  (when-not (.. js/process -env -SEON_NO_AUTO_BOOT)
+  (when-not (config/no-auto-boot?)
     (let [llm-fn   (current-llm-fn)
           provider (ai/provider)
           key-set? (case provider
-                     :anthropic (boolean (.. js/process -env -ANTHROPIC_API_KEY))
+                     :anthropic (boolean (config/anthropic-api-key))
                      (openai/api-key-configured?))]
       (log/info-console! "seon.client"
                          (if key-set?

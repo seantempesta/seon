@@ -3,7 +3,7 @@
      - request-body defaults: model claude-opus-4-8, max_tokens 16000,
        system TOP-LEVEL (:system, not a messages entry) as a
        content-block ARRAY with cache_control {:type \"ephemeral\"}
-       breakpoints; a ctx carrying seon.ctx's in-band stable-boundary
+       breakpoints; a ctx carrying seon.agent.ctx's in-band stable-boundary
        (task #34) splits — system = [soul block, stable-ctx block],
        BOTH with breakpoints, messages = volatile tail ONLY; a
        boundary-less ctx degrades to the pre-split shape (one system
@@ -30,7 +30,7 @@
     [seon.ai :as ai]
     [seon.ai.anthropic :as anthropic]
     [seon.ai.openai-compat :as openai]
-    [seon.ctx :as ctx]
+    [seon.agent.ctx :as ctx]
     [seon.db :as db]))
 
 ;; ============================================================
@@ -161,7 +161,7 @@
 
 ;; ============================================================
 ;; Prompt caching (task #34) — the ctx's in-band stable boundary
-;; splits the wire body: system = [soul block, stable-ctx block],
+;; splits the wire body: system = [system-prompt block, stable-ctx block],
 ;; BOTH cache_control breakpoints (2 of the allowed 4); messages =
 ;; the volatile tail ONLY. A boundary-less ctx (tests, stub prompts)
 ;; degrades to the pre-split shape. Wire-shape pins, no live call.
@@ -201,7 +201,7 @@
               (is (= {:type "text" :text "sys"
                       :cache_control {:type "ephemeral"}}
                      soul-block)
-                  "block 1 = the soul/system prompt, breakpoint kept")
+                  "block 1 = the system prompt (hardcoded mechanics / override), breakpoint kept")
               (is (= {:type "text" :text stable
                       :cache_control {:type "ephemeral"}}
                      stable-block)

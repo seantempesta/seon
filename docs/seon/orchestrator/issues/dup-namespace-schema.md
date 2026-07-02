@@ -3,7 +3,7 @@ type: issue
 status: open
 severity: friction
 milestone: M2
-tags: [issue, schema, architecture]
+tags: [issue, schema, architecture, jvm-track, paused]
 ---
 # Duplication: ::namespace Schema Registered 20+ Times
 
@@ -25,3 +25,5 @@ tags: [issue, schema, architecture]
 ## Related
 
 - [[components/schema-system]]
+
+## Status (2026-06-28 audit): valid but JVM-track is paused — defer until that track resumes.

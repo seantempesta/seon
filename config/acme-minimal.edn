@@ -1,0 +1,16 @@
+;; The Acme harness's LEAN config variant — replaces the deleted
+;; `#profile :minimal []`. A SEPARATE file (one file, one shape — no #profile):
+;;
+;;   SEON_CONFIG=config/acme-minimal.edn bin/acme restart pod
+;;
+;; Tight context control: NO always-on skill bodies, and the namespaces render
+;; policy trimmed to just the toolkit KB (the rest render compact). Everything
+;; else falls to the byte-parity defaults.
+{:seon.config/agent-context
+ {;; no always-on skill body (the old :minimal empty loadout)
+  :my.skills/load []}
+
+ ;; lean: only the toolkit KB full-source, the rest compact
+ :seon.config/namespaces
+ {:seon.config/always     [my.kb]
+  :seon.config/current-ns :full}}

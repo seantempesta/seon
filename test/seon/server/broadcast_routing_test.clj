@@ -2,10 +2,11 @@
   "P1 per-DB broadcast routing tests for `seon.server.broadcast`.
 
    The in-process per-DB subscriber API (`subscribe!`/`unsubscribe!`) routes by
-   the event's `\"db-name\"`: a subscriber to cluster A NEVER receives cluster
-   B's events. These tests drive `broadcast!` directly with db-name-tagged
-   events (the same events the wire `::raw-broadcast` listener emits) and assert
-   the isolation invariant under load + interleaving, including a generative
+   the event's `:seon.store.wire/db-name`: a subscriber to cluster A NEVER
+   receives cluster B's events. These tests drive `broadcast!` directly with
+   db-name-tagged events (the same namespaced-keyword-keyed events the wire
+   `::raw-broadcast` listener emits via `ok-event-from-report`) and assert the
+   isolation invariant under load + interleaving, including a generative
    K-clusters x random-tx check.
 
    The socket-subscriber path (`start-pub-server!`) is exercised by
@@ -27,9 +28,13 @@
 (use-fixtures :each clean-subs)
 
 (defn- ev
-  "A db-name-tagged tx event, shaped like the wire ::raw-broadcast emits."
+  "A db-name-tagged tx event, shaped like the wire ::raw-broadcast emits —
+   namespaced-keyword keys, exactly what `ok-event-from-report` produces and
+   `broadcast!` routes on."
   [db-name basis-t]
-  {"event" "tx" "db-name" db-name "basis-t" basis-t})
+  {:seon.store.wire/event "tx"
+   :seon.store.wire/db-name db-name
+   :seon.store.wire/basis-t basis-t})
 
 ;;; --- Basic routing ---------------------------------------------------------
 
@@ -41,8 +46,8 @@
       (bcast/broadcast! (ev "cluster-a" 1))
       (bcast/broadcast! (ev "cluster-b" 2))
       (bcast/broadcast! (ev "cluster-a" 3))
-      (is (= [1 3] (mapv #(get % "basis-t") @a)) "A saw only A's events, in order")
-      (is (= [2]   (mapv #(get % "basis-t") @b)) "B saw only B's events"))))
+      (is (= [1 3] (mapv :seon.store.wire/basis-t @a)) "A saw only A's events, in order")
+      (is (= [2]   (mapv :seon.store.wire/basis-t @b)) "B saw only B's events"))))
 
 (deftest unsubscribe-stops-delivery
   (testing "after unsubscribe!, no further events arrive"
@@ -51,13 +56,13 @@
       (bcast/broadcast! (ev "c" 1))
       (bcast/unsubscribe! "c" id)
       (bcast/broadcast! (ev "c" 2))
-      (is (= [1] (mapv #(get % "basis-t") @a))))))
+      (is (= [1] (mapv :seon.store.wire/basis-t @a))))))
 
 (deftest event-without-db-name-routes-nowhere
-  (testing "an event missing \"db-name\" reaches no per-DB subscriber"
+  (testing "an event missing :seon.store.wire/db-name reaches no per-DB subscriber"
     (let [a (atom [])]
       (bcast/subscribe! "c" #(swap! a conj %))
-      (bcast/broadcast! {"event" "tx" "basis-t" 1})    ; no db-name
+      (bcast/broadcast! {:seon.store.wire/event "tx" :seon.store.wire/basis-t 1})  ; no db-name
       (is (empty? @a)))))
 
 (deftest many-subscribers-one-db
@@ -79,7 +84,7 @@
           names    (mapv #(str "cluster-" %) (range k))
           captured (into {} (map (fn [n] [n (atom [])])) names)]
       (doseq [n names]
-        (bcast/subscribe! n (fn [e] (swap! (captured n) conj (get e "basis-t")))))
+        (bcast/subscribe! n (fn [e] (swap! (captured n) conj (:seon.store.wire/basis-t e)))))
       ;; interleave: shuffle a monotonic basis-t per cluster
       (let [events (shuffle (for [n names t (range 1 (inc per))] [n t]))]
         (doseq [[n t] events]
@@ -109,7 +114,7 @@
          captured (into {} (map (fn [i] [i (atom [])])) clusters)]
      (doseq [i clusters]
        (bcast/subscribe! (names i)
-                         (fn [e] (swap! (captured i) conj (get e "basis-t")))))
+                         (fn [e] (swap! (captured i) conj (:seon.store.wire/basis-t e)))))
      (doseq [[i t] plan]
        (bcast/broadcast! (ev (names i) t)))
      (let [expected (reduce (fn [m [i t]] (update m i (fnil conj []) t)) {} plan)]

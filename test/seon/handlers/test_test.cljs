@@ -44,8 +44,21 @@
       ":seon.test is registered as an entity-shape :map schema")
   (is (contains? (set (schema/entity-schema-keys)) :seon.test)
       ":seon.test appears in entity-schema-keys")
-  (is (= 1 (schema/schema-required-count :seon.test))
-      "only :seon.test/sym is required (count 1)"))
+  ;; Required-attrs count: only :seon.test/sym is non-optional. Assert it
+  ;; from the DETERMINISTIC decomposition (entity-schema-tx-data, the same
+  ;; builder the boot seed runs) rather than the lazy *schema-required-counts
+  ;; cache — the cache is a side-effect of decomposition, so reading it
+  ;; cold (the pristine :node-test build, where nothing pre-decomposed
+  ;; :seon.test) returns nil. Decomposing here both populates the cache and
+  ;; gives the authoritative required-attr list to count.
+  (let [txd  (schema/entity-schema-tx-data :seon.test)
+        reqs (->> txd
+                  (filter (fn [[_ _ a _]] (= a :seon.schema/required-attrs)))
+                  (mapv (fn [[_ _ _ v]] v)))]
+    (is (= [:seon.test/sym] reqs)
+        "only :seon.test/sym is a required attr in the decomposition")
+    (is (= 1 (schema/schema-required-count :seon.test))
+        "required-count is 1 once the kind is decomposed")))
 
 ;; ---------------------------------------------------------------------------
 ;; Handler renders a seeded entity — synchronous, the handler reads only
@@ -68,19 +81,30 @@
    :seon.test/source "(deftest t-none (is true))"})
 
 (deftest render-ai-shows-sym-source-and-status
-  (let [pass (:seon.render/ai (h-test/render-ai {:seon.render/entity ent-pass}))
-        fail (:seon.render/ai (h-test/render-ai {:seon.render/entity ent-fail}))
-        none (:seon.render/ai (h-test/render-ai {:seon.render/entity ent-none}))]
-    (is (str/includes? pass "[test demo.ns/t-pass]") "header carries the sym")
+  ;; The handler is a CONVERTER now — render-ai returns a BARE String
+  ;; (keystone), called with the entity under :seon.render/node.
+  (let [pass (h-test/render-ai {:seon.render/node ent-pass})
+        fail (h-test/render-ai {:seon.render/node ent-fail})
+        none (h-test/render-ai {:seon.render/node ent-none})]
+    (is (str/includes? pass "demo.ns/t-pass") "header carries the sym")
     (is (str/includes? pass "(deftest t-pass") "source rendered")
-    (is (str/includes? pass "✓ test passing") "passing glyph for a passed run")
-    (is (str/includes? fail "✗ test failing") "failing glyph for a failed run")
-    (is (str/includes? fail "expected 1, got 2") "failure summary shown")
-    (is (str/includes? none "• test (no run recorded)")
-        "no-run glyph when no last-* present")))
+    ;; The three run-states render DISTINCTLY — anchor on the run-state STEM
+    ;; (passing / failing / no run), the shared status contract, NOT the
+    ;; decorative glyph (✓/✗/•) + exact phrase (a render surface).
+    (is (str/includes? pass "passing") "passed run renders the passing state")
+    (is (str/includes? fail "failing") "failed run renders the failing state")
+    (is (str/includes? none "no run") "no recorded run renders the no-run state")
+    ;; …and the three states are mutually distinct (a pass is never shown as
+    ;; a fail, etc.) — the behavior the glyphs used to stand in for.
+    (is (and (not (str/includes? pass "failing"))
+             (not (str/includes? fail "passing"))
+             (not= pass fail) (not= fail none) (not= pass none))
+        "the three run-states are mutually distinct")
+    (is (str/includes? fail "expected 1, got 2") "failure summary shown")))
 
 (deftest render-html-is-valid-card
-  (let [hiccup (:seon.render/hiccup (h-test/render-html {:seon.render/entity ent-fail}))]
+  ;; render-html returns BARE hiccup now (keystone), node under :seon.render/node.
+  (let [hiccup (h-test/render-html {:seon.render/node ent-fail})]
     (is (vector? hiccup) "html form is a hiccup vector")
     (is (= :div (first hiccup)) "outer container is a :div")
     (is (tile/valid-hiccup? hiccup) "passes valid-hiccup?")
@@ -115,8 +139,16 @@
                             (db/transact!
                               {:seon.db/conn conn
                                :seon.db/tx-data
+                               ;; A REALISTIC full-file source — a body form
+                               ;; PAST the (ns …) head, NOT the bare
+                               ;; `(ns demo.ns)` the indexer writes as the STUB
+                               ;; for a non-full-source ns. render-namespace's
+                               ;; GI-1 member-suppression fires only for REAL
+                               ;; full source (≠ the bare stub); a stub-shaped
+                               ;; source instead renders the member blocks so a
+                               ;; dropped framework ns's API survives on demand.
                                [{:seon.ns/name :demo.ns
-                                 :seon.ns/source "(ns demo.ns)"}
+                                 :seon.ns/source "(ns demo.ns)\n\n(defn demo-fn []\n  :ok)"}
                                 {:seon.test/sym "demo.ns/t-attached"
                                  :seon.test/ns [:seon.ns/name :demo.ns]
                                  :seon.test/source
@@ -139,7 +171,7 @@
                   html (render/render-entity-html
                          {:seon.db/db db :seon.render/entity ent})]
               (is (string? ai) "render-entity-ai resolved the :seon.test kind")
-              (is (str/includes? ai "[test demo.ns/t-attached]") "ai shows the sym")
+              (is (str/includes? ai "demo.ns/t-attached") "ai shows the sym")
               (is (vector? html) "render-entity-html resolved the :seon.test kind")
               (is (= :div (first html)) "html is a card div"))))
         (.then (fn [_] (done)))
@@ -149,27 +181,45 @@
 ;; render-namespace shows a ns's tests under that ns.
 ;; ---------------------------------------------------------------------------
 
-(deftest render-namespace-shows-tests-under-the-ns
+(deftest render-namespace-ai-surfaces-failing-tests-under-full-source
+  ;; GI-1 (AI path): under a full-source ns the FILE SOURCE is the
+  ;; authoritative body, so per-member blocks are NOT re-emitted. The one
+  ;; member fact NOT visible in the source and worth the agent's attention is
+  ;; a FAILING test — it surfaces as a compact one-line ⚠ note. A PASSING test
+  ;; is omitted (nothing actionable; the inspector HTML view below still shows
+  ;; full pass/fail status). The seed attaches a passing `t-attached`; here we
+  ;; add a failing `t-broken` to the same full-source ns.
   (async done
     (-> (with-test-kind-conn
           (fn [conn]
-            (let [db   @conn
-                  text (:seon.render/text
-                         (agent/render-namespace
-                           {:seon.db/db db :seon.ns/name :demo.ns
-                            :seon.render/depth 0 :seon.render/format :ai}))]
-              (is (str/includes? text "<namespace name=\"demo.ns\">")
-                  "the ns renders")
-              (is (str/includes? text "[test demo.ns/t-attached]")
-                  "the test is rendered under its ns")
-              ;; AC3 (AI path): render-namespace must show the test's status
-              ;; glyph, NOT just the sym+source. `t-attached` has a
-              ;; :last-passed-at seeded so it must render as ✓ passing, via
-              ;; the SHARED `h-test/status-line` helper (single glyph source).
-              (is (str/includes? text "✓ test passing")
-                  "the test's status glyph (✓) is shown in render-namespace AI")
-              (is (str/includes? text "(deftest t-attached")
-                  "the test source is in view"))))
+            (-> (db/transact!
+                  {:seon.db/conn conn
+                   :seon.db/tx-data
+                   [{:seon.test/sym "demo.ns/t-broken"
+                     :seon.test/ns [:seon.ns/name :demo.ns]
+                     :seon.test/source "(deftest t-broken (is (= 4 5)))"
+                     :seon.test/last-failed-at (js/Date.)
+                     :seon.test/last-failure-summary "expected 4 got 5"}]})
+                (.then
+                  (fn [_]
+                    (let [text (:seon.render/text
+                                 (agent/render-namespace
+                                   {:seon.db/db @conn :seon.ns/name :demo.ns
+                                    :seon.render/depth 0 :seon.render/format :ai
+                                    :seon.render/detail :full}))]
+                      (is (str/includes? text "(ns demo.ns")
+                          "the ns source is the authoritative body")
+                      ;; the FAILING test surfaces as a compact ⚠ note …
+                      (is (str/includes? text "demo.ns/t-broken")
+                          "a failing test surfaces under the full-source ns")
+                      (is (str/includes? text "failing")
+                          "the failing run-state is shown")
+                      ;; … but the PASSING test is omitted, and no full
+                      ;; [test …] member block is re-emitted (source is authoritative).
+                      (is (not (str/includes? text "demo.ns/t-attached"))
+                          "a passing test is omitted under full source")
+                      (is (not (str/includes? text "[test "))
+                          "no full [test …] member block under full source")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

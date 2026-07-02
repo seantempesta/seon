@@ -47,8 +47,13 @@ bin/acme restart pod        # rebuild loop: bin/acme build && bin/acme restart p
 
 Everything `bin/seon` does, `bin/acme` does for the acme cluster (it just
 exports the isolated env block, then `exec bin/seon "$@"`) — `start`,
-`stop <name>`, `status`, `tail`, `restart`, `cluster reset`. PLUS the three
-cluster-level convenience verbs `bin/acme` adds on top:
+`stop <name>`, `status`, `tail`, `restart`, `cluster reset`. `bin/acme cluster
+reset acme` now bounces ACME's own pod + wire-server: the supervisor gates the
+process restart on `store_dir == $SEON_CLUSTER_DIR/store` (the cluster THIS
+invocation manages), not the literal name `default`. It wipes
+`data/clusters/acme/store` and race-safely restarts acme (wait_ready's the
+wire-server before the pod), and can never touch the live default cluster. PLUS
+the three cluster-level convenience verbs `bin/acme` adds on top:
 
 | verb | what it does |
 |---|---|
@@ -65,6 +70,7 @@ cluster-level convenience verbs `bin/acme` adds on top:
 | store | `data/clusters/default` | **`data/clusters/acme`** |
 | req/pub sockets | `tmp/seon-cluster-default-*.sock` | **`tmp/acme-cluster-*.sock`** |
 | supervisor pid/lock | `tmp/proc` | **`tmp/proc-acme`** |
+| pod port file | `tmp/seon-port` | **`tmp/seon-port-acme`** |
 | logs | `logs/` | **`logs/acme/`** |
 | pod bundle | `out/client/main.js` | **`out-acme/client/main.js`** |
 
@@ -81,10 +87,10 @@ NEVER `bin/seon start/stop/restart` it or write to its store. Use **only**
 - `bin/acme` exports the isolated env + the downstream wiring, then delegates
   to `bin/seon`. The env knobs (all read by `bin/seon`): `SEON_PORT`,
   `SEON_WRITER_REPL_PORT`, `SEON_CLUSTER_DIR`, `SEON_REQ_SOCK`,
-  `SEON_PUB_SOCK`, `SEON_PROC_DIR`, `SEON_LOG_DIR`, `SEON_CLIENT_OUT`,
-  `SEON_EXTRA_SRC`, `SEON_EXTRA_PRELOAD`, `SEON_BRAND_NAME/TAGLINE/CSS`,
-  `SEON_EMBED`. All default to today's values when unset, so seon's own usage
-  is byte-identical.
+  `SEON_PUB_SOCK`, `SEON_PROC_DIR`, `SEON_LOG_DIR`, `SEON_PORT_FILE`,
+  `SEON_CLIENT_OUT`, `SEON_EXTRA_SRC`, `SEON_EXTRA_PRELOAD`,
+  `SEON_BRAND_NAME/TAGLINE/CSS`, `SEON_EMBED`. All default to today's values
+  when unset, so seon's own usage is byte-identical.
 - `SEON_EXTRA_SRC=acme/` is injected as a `:local/root` dep so `acme/src`
   joins the build classpath; `acme.*` compiles INTO the pod bundle.
 - The acme pod runs its OWN bundle (`out-acme/client/main.js`) from the
@@ -169,9 +175,6 @@ bin/acme restart pod          # acme pod picks it up
   between the two starts. After a bare `start pod` always poll
   `curl -s 127.0.0.1:7980/agents` to HTTP 200 (the start command returns
   before the pod is actually ready).
-- `tmp/seon-port` is a single shared path; an acme pod overwrites it, so
-  `bin/seon status` may show the acme port until the live pod rewrites it
-  (cosmetic; the live pod stays bound to 7890).
 - Acme's 7980/7981 were chosen because 7990/7991 collided with another
   deployment on the dev machine; override with `SEON_PORT=… bin/acme …` if
   needed.

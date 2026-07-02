@@ -35,6 +35,7 @@
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.repl :as repl]
+    [seon.repl.internal :as repl-internal]
     [seon.schema :as schema]
     [seon.warn :as warn]))
 
@@ -219,6 +220,36 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
+;; A nil :seon.eval/source must NEVER drop the row. A comment-only / repaired
+;; entry can hand record-eval! a nil source; the attr is registered :string,
+;; so a nil would fail Malli and sink the WHOLE tx — the exact data loss
+;; observed in live-drive-validation-2026-06-28 (3 eval rows vanished from
+;; turn 1, "DATA LOSS — bare eval row … source: null"). record-eval! coerces
+;; nil→"" at the write boundary so the row always lands.
+;; ---------------------------------------------------------------------------
+
+(deftest nil-source-still-records-the-eval-row
+  (async done
+    (-> (fresh-conn)
+        (.then
+          (fn [conn]
+            (let [eval-id (db/new-id!)]
+              ;; nil source + empty tee = the "bare eval row, no tee rows to
+              ;; drop" path that silently dropped rows pre-fix.
+              (-> (record! conn (eval-args eval-id (db/new-id!) nil []))
+                  (.then
+                    (fn [_]
+                      (let [db* @conn]
+                        (testing "the eval row landed despite a nil source"
+                          (is (= #{[eval-id ""]}
+                                 (d/q '[:find ?id ?src :in $ ?id
+                                        :where [?e :seon.eval/id ?id]
+                                               [?e :seon.eval/source ?src]]
+                                      db* eval-id)))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
 ;; HONEST RECORDS (task #24 symptom 3): when the tee tx fails and only the
 ;; bare eval row could be recovered, the eval row carries
 ;; :seon.eval/record-error and seon.warn/check-record-errors derives a
@@ -351,6 +382,152 @@
                       (is (= ["probe.teefn/tee-probe-fn"]
                              (mapv :seon.fn/sym (filter :seon.fn/sym tee))))
                       (is (= [] (vec (filter :seon.test/sym tee))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Detect-and-tee body-retry loss (live-proven 2026-06-27): a defn an agent
+;; DEBUGS — define → fail in the body → fix the BODY keeping the SAME
+;; signature → redefine — works in-session but SILENTLY does not persist.
+;;
+;; Mechanism: under `:def-emits-var true`, `cljs.analyzer`'s `parse 'def`
+;; registers the var-map into `:defs` BEFORE analyzing the body and never
+;; rolls it back. A body that analyzes cleanly but FAILS the eval (here a
+;; warning-promoted `:undeclared-var` — the same failure mode the agent hit
+;; with a bad query) leaves the FULL var-map (incl. `:fn-var`), whose
+;; [[seon.analyzer-info/var-digest]] EQUALS what a successful same-signature
+;; retry produces. That collision makes the retry's `defs-before` already
+;; hold the digest, so `defs-since` sees no change and the tee SKIPS the
+;; `:seon.fn` row — the fn resolves + is callable but vanishes on the next
+;; restart (the program graph is what boot reconstitutes from).
+;;
+;; The cure: `eval-form-entry!` calls `analyzer-info/remove-phantom-defs!` on
+;; the failure path, dropping the syms THIS form newly registered, so the
+;; retry is genuinely-new and tees. A UNIQUE ns per run keeps the assertion
+;; deterministic on the process-shared bootstrap compile-state. Without the
+;; fix the final assertion is `#{}` (no row); with it, the row lands.
+;; ---------------------------------------------------------------------------
+
+(deftest failed-body-defn-then-same-signature-retry-tees
+  (async done
+    ;; open-agent-conn! (NOT fresh-conn): eval-batch! opens a tx-context with
+    ;; the causality bundle (:seon.db/agent-id/eval-id/origin), so record-eval!
+    ;; auto-tags the tx with those tx-meta attrs — they must be in the conn's
+    ;; schema. open-agent-conn! installs pod-full-schema (entity + tx-meta);
+    ;; fresh-conn here installs only entity attrs.
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+        (.then
+          (fn [res]
+            (let [cs    (aget res 0)
+                  conn  (aget res 1)
+                  prev  db/*conn*
+                  uniq  (str "probe.teeretry" (rand-int 1000000000))
+                  fq    (str uniq "/recover")
+                  ;; membership probe: #{[fq]} when the row exists, else #{}.
+                  rows  (fn [] (d/q '[:find ?s :in $ ?s
+                                      :where [?f :seon.fn/sym ?s]]
+                                    @conn fq))
+                  ;; one full eval-batch! per attempt (run-id nil → no fence),
+                  ;; exercising eval-form-entry!'s failure-path cleanup wiring.
+                  batch (fn [src] (seval/eval-batch! cs (repl/parse-forms src)
+                                                     (symbol uniq) "tee-retry-test"
+                                                     (db/new-id!) nil))]
+              ;; set! (not binding) so *conn* spans the async eval-batch!
+              ;; internals (record-eval! reads it post-await), mirroring how
+              ;; the live pod root-set!s the conn. Restored in .finally.
+              (set! db/*conn* conn)
+              (-> (seval/eval cs (str "(ns " uniq ")")
+                              {:ns 'cljs.user :analyze-deps? false})
+                  (.then (fn [_] (batch "(defn recover [x] (zzz-undeclared-probe x))")))
+                  (.then
+                    (fn [b1]
+                      (testing "the body-undeclared defn's eval FAILS (errors-are-values)"
+                        (is (= 1 (:seon.eval/n-fail b1)))
+                        (is (= 0 (:seon.eval/n-ok b1))))
+                      (testing "a failed eval tees nothing"
+                        (is (= #{} (rows))))
+                      (batch "(defn recover [x] (inc x))")))
+                  (.then
+                    (fn [b2]
+                      (testing "the same-signature retry SUCCEEDS"
+                        (is (= 1 (:seon.eval/n-ok b2)))
+                        (is (= 0 (:seon.eval/n-fail b2))))
+                      (testing "and NOW tees a :seon.fn row (the fix; #{} without it)"
+                        (is (= #{[fq]} (rows))))))
+                  (.finally (fn [] (set! db/*conn* prev)))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; #39: the eval is the transaction boundary — a `schema/register!` inside a
+;; FAILED form persists NOTHING (neither a :seon.schema row NOR an in-memory
+;; registry entry), and a subsequent SUCCESSFUL register! of the same key
+;; tees normally.
+;;
+;; Mechanism: `register!`'s self-tee DEFERS its DB write when a `:seon.db/
+;; eval-id` is in the tx-context (every eval-batch! per-form scope), because
+;; the GATED detect-and-tee (build-tee-entities in record-eval!) owns the
+;; :seon.schema row and writes it ONLY on success. On the failure path
+;; eval-form-entry! also calls `schema/discard-registrations!` over the form's
+;; newly-registered keys, the schema analog of remove-phantom-defs!. Without
+;; the fix the eager self-tee wrote the row mid-eval and the registry kept the
+;; key, so `(do (register! …) (broken))` registered the schema anyway.
+;; ---------------------------------------------------------------------------
+
+(deftest register-in-failed-form-persists-nothing-then-success-tees
+  (async done
+    ;; open-agent-conn! (like the body-retry test): eval-batch! tx-meta-tags
+    ;; with the causality bundle, so the conn needs pod-full-schema.
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+        (.then
+          (fn [res]
+            (let [cs    (aget res 0)
+                  conn  (aget res 1)
+                  prev  db/*conn*
+                  uniq  (str "probe.tee39" (rand-int 1000000000))
+                  ;; a unique DATA attr key per run (process-shared registry):
+                  ;; multi-segment ns so register! accepts it; never collides.
+                  attr  (keyword (str uniq ".dom") "metric")
+                  ;; membership probe in the DB: #{[attr]} when a :seon.schema
+                  ;; row exists, else #{}.
+                  rows  (fn [] (d/q '[:find ?k :in $ ?k
+                                      :where [?s :seon.schema/key ?k]]
+                                    @conn attr))
+                  reg?  (fn [] (contains? (schema/current-keys) attr))
+                  batch (fn [src] (seval/eval-batch! cs (repl/parse-forms src)
+                                                     (symbol uniq) "tee39-test"
+                                                     (db/new-id!) nil))
+                  ;; the failed form: register! RUNS, then a deliberate throw
+                  ;; fails the whole `do` (errors-are-values → :ok false).
+                  fail-src (str "(do (seon.schema/register! " attr " :int)"
+                                "    (throw (js/Error. \"deliberate #39 probe\")))")
+                  ok-src   (str "(seon.schema/register! " attr " :int)")]
+              (set! db/*conn* conn)
+              (-> (seval/eval cs (str "(ns " uniq ")")
+                              {:ns 'cljs.user :analyze-deps? false})
+                  (.then (fn [_] (batch fail-src)))
+                  (.then
+                    (fn [b1]
+                      (testing "the register!+throw form FAILS (errors-are-values)"
+                        (is (= 1 (:seon.eval/n-fail b1)))
+                        (is (= 0 (:seon.eval/n-ok b1))))
+                      (testing "no :seon.schema row persisted — the self-tee deferred"
+                        (is (= #{} (rows))))
+                      (testing "and the in-memory registry rolled the key back"
+                        (is (false? (reg?))))
+                      (batch ok-src)))
+                  (.then
+                    (fn [b2]
+                      (testing "the standalone register! SUCCEEDS"
+                        (is (= 1 (:seon.eval/n-ok b2)))
+                        (is (= 0 (:seon.eval/n-fail b2))))
+                      (testing "NOW the :seon.schema row is teed (detect-and-tee, no regression)"
+                        (is (= #{[attr]} (rows))))
+                      (testing "and the registry holds the key"
+                        (is (true? (reg?))))))
+                  (.finally (fn []
+                              (set! db/*conn* prev)
+                              (unregister! attr)))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -768,3 +945,42 @@
       (is (some? (some vector? out))))
     (testing "empty blocked set is a no-op identity"
       (is (= tee (seval/reject-core-overrides tee #{}))))))
+
+;; ---------------------------------------------------------------------------
+;; #26 half (b) — the eval-reader multi-form behavior is CORRECT, not buggy.
+;;
+;; A multi-form SOURCE STRING is two distinct concerns:
+;;   1. EVAL: `cljs.js/eval-str` runs EVERY top-level form in the string and
+;;      returns the LAST form's value — nothing is silently dropped, the
+;;      return value is well-defined (live-proven: "(def aaa 1)(def bbb 2)(+
+;;      aaa bbb)" => 3 with aaa+bbb both bound).
+;;   2. PERSISTENCE: the strict-head tee gate `defn-form?` is TRUE only for a
+;;      lone single `(defn …)`; a multi-form source is FALSE → it RUNS as
+;;      scratch but is never teed/replayed. Correct: re-evaling on boot can
+;;      never re-fire a multi-form's side effects (#29 class).
+;;
+;; These don't conflict because the AGENT path never feeds a multi-form
+;; string to one tee gate: `seon.repl.internal/parse-forms` SPLITS the
+;; submission into one `:kind :form` entry PER top-level form, and
+;; eval-batch! classifies EACH entry's single-form source — so every
+;; individual `(defn …)` in a multi-defn submission DOES persist.
+;; ---------------------------------------------------------------------------
+
+(deftest multi-form-source-reader-behavior-is-correct
+  (testing "read-all-forms returns ALL top-level forms (nothing dropped)"
+    (is (= 3 (count (#'seval/read-all-forms
+                      "(def a 1) (def b 2) (+ a b)")))))
+  (testing "defn-form? tee gate: TRUE for a lone defn, FALSE for multi-form"
+    (is (true?  (seval/defn-form? "(defn f [] 1)")))
+    (is (false? (seval/defn-form? "(defn f [] 1) (defn g [] 2)")))
+    (is (false? (seval/defn-form? "(def x 1) (def y 2)"))))
+  (testing "the AGENT path splits multi-form so each defn tees individually:
+            parse-forms yields one single-form entry per top-level form, and
+            each lone (defn …) entry passes the same defn-form? tee gate"
+    (let [entries (repl-internal/parse-forms
+                    "(defn f1 [] 1)\n(defn f2 [] 2)\n(+ 1 2)")]
+      (is (= 3 (count entries)))
+      (is (= [:form :form :form] (mapv :kind entries)))
+      (is (= [true true false]
+             (mapv #(seval/defn-form? (:source %)) entries))
+          "both defns tee; the trailing expr does not — single-lane resume"))))

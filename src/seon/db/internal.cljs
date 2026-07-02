@@ -517,12 +517,12 @@
 (defn normalize-entity-ref-keys
   "Rewrite the taught entity-identity shorthand — an entity map keyed by
    `:seon.db/ref` (`{:seon.db/ref [:seon.agent/id \"…\"] :attr v}`, the
-   <your-entity> transact pattern) — into datahike's native `:db/id`
+   transact-onto-your-own-entity pattern) — into datahike's native `:db/id`
    slot, recursively through nested entity maps and tx vectors.
 
-   WHY (fix-everything A1, 2026-06-11): `:seon.db/ref` is a registered
-   Malli SHAPE, not an installed datahike attribute. Left in the entity
-   map it reaches the store as a junk attr — the wire store rejects the
+   `:seon.db/ref` is a registered Malli SHAPE, not an installed datahike
+   attribute. Left in the entity map it reaches the store as a junk attr
+   — the wire store rejects the
    whole tx (\"Bad entity attribute :seon.db/ref …\"), and a conn that
    somehow had it installed would silently assert a junk datom on a
    junk entity. Datahike already resolves eids / tempids / lookup-refs
@@ -612,7 +612,7 @@
 ;; keyword-typed identity attrs the registry holds (today `:seon.ns/name`
 ;; and `:seon.schema/key`), never for string-identity attrs (`:seon.fn/sym`),
 ;; ref-identity attrs (`:seon.agent/id` → `:seon.db/id`), or non-identity
-;; keyword attrs (`:seon.ctx/name`). The KEYWORD stays the stored canonical
+;; keyword attrs (`:seon.agent.ctx/name`). The KEYWORD stays the stored canonical
 ;; value — we coerce on the way IN and never loosen the stored schema — so
 ;; datahike lookup-refs / identity resolution keep working.
 ;;
@@ -864,7 +864,15 @@
    `datahike.db.interface/IDB`. The read-path positional arities use this
    to tell an explicit `db` argument apart from a Datalog `:in` input, so
    the db can be auto-injected from `*conn*` when omitted (the read-side
-   sibling of `conn?`)."
+   sibling of `conn?`).
+
+   The STRICT runtime face of the `:seon.db/db-val` schema (db.cljs):
+   that schema is `'map?` (the only clean pure-data form, and enough at a
+   positional :db slot where the arity already guarantees a db); THIS
+   predicate is `satisfies? IDB`, which additionally rejects a plain
+   request/input map (`map?`-true but not a db) — needed where db and
+   input are disambiguated at runtime. `satisfies?` is not expressible as
+   a clean malli form, so the two faces are intentionally distinct."
   [x]
   (satisfies? dbi/IDB x))
 
@@ -906,7 +914,7 @@
       a0
 
       ;; 1-arg tx-data shape: `(transact! [{…} …])` — the taught
-      ;; <your-entity> form. The conn defaults to `*conn*` at the face.
+      ;; transact form. The conn defaults to `*conn*` at the face.
       ;; Unambiguous: tx-data is sequential, a conn is a non-map IDeref,
       ;; a request map is `map?` — no shape collides.
       (and (= 1 (count args)) (sequential? a0))
@@ -1035,9 +1043,9 @@
 ;; ---------------------------------------------------------------------------
 ;; Origin-forge guard (verifier rec, 2026-06-09). An AGENT-scoped tx that
 ;; claims `:seon.db/origin :core-seed` is forging core
-;; provenance — `seon.agent-view` trusts that origin to widen the tx's
-;; visibility across EVERY agent's filtered view, so a forging agent
-;; could inject context into all of its peers.
+;; provenance — the inspector's `on-tx` fan-out trusts that origin to
+;; push the tx to EVERY watching agent's pane, so a forging agent could
+;; spuriously wake all of its peers' renders.
 ;;
 ;; The intended enforcement is to OVERRIDE the origin to `:agent` (the
 ;; honest value) and log. But TODAY the legitimate boot-seed path
@@ -1278,11 +1286,11 @@
       (await (d/transact! conn (vec entries))))))
 
 (defn transact-success-envelope
-  "Build the agent-visible success envelope from a raw datahike tx-report
-   (#40). COMPACT BY DEFAULT: the agent sees a small data summary, never
-   the raw report's `:db-before`/`:db-after` db-value echo or the full
-   per-datom `:tx-data` (a bulk seed = thousands of datoms — dumping them
-   into the eval value bloats every `<past-evals>` render).
+  "Build the agent-visible success envelope from a raw datahike tx-report.
+   COMPACT BY DEFAULT: the agent sees a small data summary, never the raw
+   report's `:db-before`/`:db-after` db-value echo or the full per-datom
+   `:tx-data` (a bulk seed = thousands of datoms — dumping them into the
+   eval value bloats every past-eval render).
 
      {:seon.db/ok? true
       :seon.db/tempids   <report :tempids>   ; LOAD-BEARING — tempid→eid
@@ -1291,9 +1299,18 @@
       :seon.db/added     <datoms added>
       :seon.db/retracted <datoms retracted>}
 
-   The wire success report's shape (confirmed live 2026-06-21): `:db-after`
+   The wire success report's shape: `:db-after`
    (a datahike DB value whose `:max-tx` IS the committed tx id), `:tx-data`
-   (a vector of Datoms, each `:added` true/false), `:tempids`, `:tx-meta`.
+   (a vector of Datoms, each `:added` true/false), `:tempids`, `:tx-meta`,
+   and — on the wire path — `:datoms-added` / `:datoms-retracted`, the
+   honest add/retract split the sole writer computed over the REAL `:added`
+   flags (`seon.server.wire/tx-report->ok-map`).
+
+   The counts are taken from `:datoms-added` / `:datoms-retracted` when the
+   report carries them (the wire path), else counted directly off the
+   datoms' `:added` flags. NEVER inferred by `tx-count - added`
+   subtraction — a single `[:db/retract …]` adds tx-meta datoms whose count
+   masks the retraction, so subtraction reports retracted 0 (#16).
 
    The FULL raw report is included at `:seon.db/tx-report` ONLY when the
    caller passes `:seon.db/return-report? true` (escape hatch for code that
@@ -1301,14 +1318,17 @@
    project off the raw report independently via [[build-handler-input]],
    and the wire's `tx-report->ok-map` stays on the raw report."
   [report return-report?]
-  (let [datoms (:tx-data report)
-        added  (count (filter :added datoms))]
+  (let [datoms    (:tx-data report)
+        added     (or (:datoms-added report)
+                      (count (filter :added datoms)))
+        retracted (or (:datoms-retracted report)
+                      (count (remove :added datoms)))]
     (cond-> {::db/ok?        true
              ::db/tempids    (or (:tempids report) {})
              ::db/tx         (:max-tx (:db-after report))
              ::db/tx-count   (count datoms)
              ::db/added      added
-             ::db/retracted  (- (count datoms) added)}
+             ::db/retracted  retracted}
       return-report? (assoc ::db/tx-report report))))
 
 (defn ^:async transact!*

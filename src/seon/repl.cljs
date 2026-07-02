@@ -85,7 +85,9 @@
 (defonce !conn (atom nil))
 
 (defn ^:async ensure-bootstrap!
-  "Lazy-init the bootstrap-CLJS compile-state. Returns the state
+  "Lazy-init the bootstrap-CLJS compile-state.
+
+   Returns the state
    (not a Promise of the state once cached). Public so
    `seon.client/start-agent!` can share the same atom — there's
    one compile-state in the pod, owned here.
@@ -95,6 +97,7 @@
    init runs. That solves KI-2 — hot-reloads of `seon.eval` rotate
    the version, so the core-iteration loop doesn't have to
    manually nil the atom."
+  {:malli/schema [:=> [:cat] :any]}
   []
   (if (and @!compile-state
            (identical? @!init-version seval/init-version))
@@ -120,7 +123,9 @@
           conn))))
 
 (defn ^:async dev-init!
-  "Idempotent dev bring-up. Returns a Promise resolving to
+  "Idempotent dev bring-up.
+
+   Returns a Promise resolving to
    `{:compile-state <state> :conn <conn>}`. Safe to call on every
    MCP eval — second + subsequent calls are O(atom-deref)."
   {:malli/schema [:=> [:cat] :any]}

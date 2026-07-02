@@ -24,7 +24,8 @@
     [cljs.test :refer [deftest is async]]
     [datahike.api :as d]
     [seon.db :as db]
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    [seon.test.async :refer [settle!]]))
 
 ;; ---------------------------------------------------------------------------
 ;; Test schemas — isolated under this ns's keyword namespace.
@@ -99,7 +100,7 @@
                    (is (= {::pet {::pet-name "Rex"}}
                           (db/pull dbv [{::pet [::pet-name]}] eid))
                        "nested map-spec over installed attrs"))))
-        (.then done))))
+        (settle! done))))
 
 ;; ---------------------------------------------------------------------------
 ;; 2. Registered-but-uninstalled attrs are filtered, never thrown.
@@ -131,7 +132,7 @@
                                    [::name {::pet [::pet-name ::never-transacted]}]
                                    eid))
                        "uninstalled attr filtered inside nested subpattern"))))
-        (.then done))))
+        (settle! done))))
 
 ;; ---------------------------------------------------------------------------
 ;; 3. Unregistered attrs (typos) throw a LEGIBLE error.
@@ -160,7 +161,7 @@
                        (is (= :user-input
                               (:seon.error/kind (:seon.error/data data)))
                            "ex-data carries the envelope-shaped error map"))))))
-        (.then done))))
+        (settle! done))))
 
 ;; ---------------------------------------------------------------------------
 ;; 4. installed-schema reflects install state; nil-safe.
@@ -177,4 +178,4 @@
                        "registered-but-never-transacted attr is NOT installed")
                    (is (= {} (db/installed-schema nil))
                        "nil-safe: {} for a nil db"))))
-        (.then done))))
+        (settle! done))))

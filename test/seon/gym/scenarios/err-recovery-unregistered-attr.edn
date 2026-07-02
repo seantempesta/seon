@@ -19,6 +19,7 @@
  :seon.gym.scenario/doc    "Seeded :my.books rows; the user asks to record a rating + finish date on an existing book. Both attrs are unregistered — a naive transact returns the error envelope. Bar: the new data eventually lands ON the seeded entity (no fork), at least one agent register! eval ran, one honest reply, idle under cap. Whether the agent hit the envelope first or registered up front is recorded by the eval log, not gated."
  :seon.gym.scenario/tier   :paid
  :seon.gym.scenario/status :active
+ :seon.gym.scenario/competency :error-recovery
  :seon.gym.scenario/axes   [:models-work-directed :reuses-schemas
                             :replies-honestly :terminates]
  :seon.gym.scenario/schema-registrations
@@ -70,7 +71,11 @@
    :seon.gym.predicate/axis   :terminates
    :seon.gym.predicate/query  [:find ?a
                                :where
-                               [?a :seon.agent/state :idle]]
+                               [?a :seon.agent/id _]
+                              (not [?a :seon.agent/terminated-at _])
+                              (not-join [?a]
+                                [?r :seon.agent.run/agent ?a]
+                                [?r :seon.agent.run/status :open])]
    :seon.gym.predicate/expect :non-empty}
   {:seon.gym.predicate/id     :terminates-under-cap
    :seon.gym.predicate/kind   :datalog

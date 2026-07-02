@@ -3,7 +3,7 @@ type: issue
 status: open
 severity: cleanup
 milestone: M5
-tags: [issue, architecture]
+tags: [issue, architecture, jvm-track, paused]
 ---
 # Dead Code: repl/graduate.clj
 
@@ -29,3 +29,5 @@ File still exists. Has no production callers. However, `test/seon/repl/graduate_
 ## Related
 
 - [[components/agent-system]]
+
+## Status (2026-06-28 audit): valid but JVM-track is paused — defer until that track resumes.

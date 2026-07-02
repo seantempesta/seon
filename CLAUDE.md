@@ -2,6 +2,8 @@
 
 **Every Claude instance reads this file** — orchestrator, seon agents, and Claude Code subagents. Keep it universal. Role-specific instructions live in `ORCHESTRATOR.md` and `AGENT.md`.
 
+**If you were spawned as a subagent (via the Task/Agent tool), you EXECUTE your assigned task directly — you do NOT launch, delegate to, or spawn other agents.** Only the single top-level orchestrator delegates. If your task is too large, report back to the orchestrator to re-scope; never decompose by spawning sub-agents. (This prevents runaway multi-level agent recursion. Guidance below about "delegating" / "launching agents" / research-agent policy is ORCHESTRATOR-only.)
+
 ## Current focus — two tracks, the CLJS pod is active
 
 **The active work is the CLJS pod + datahike-on-JVM (the `wire-server`
@@ -23,8 +25,10 @@ paused world are tagged **[JVM track — paused]**.
   (`./bin/run`, nREPL 7888 / HTTP 8080, `(user/run-tests)`, core.async
   flow). Still runnable, but NOT the current focus.
 
-Live status + work queue: `docs/seon/orchestrator/prds.md` (PRD index) plus
-the active PRD on the current branch.
+The idealized system: `docs/seon/architecture/` (read `architecture.md`
+first). Live status: the active PRD's `roadmap.md` on the current branch —
+each roadmap chunk is its OWN PRD folder + branch, finished and merged to
+main before the next.
 
 Settled (do not re-litigate): NO WASM; per-CLUSTER DBs; messaging = from/to
 refs + hop-cap; the CLJS sandbox is NOT a security boundary (it catches LLM
@@ -40,6 +44,32 @@ consumer-specific references in `src/`, `docs/`, or `pod-host/`.
 ## Agent Model Policy
 
 **Never use haiku for coding tasks.** Only use haiku for quick file reads or context gathering. All implementation, bug fixes, and verification that involves writing code must use opus (the default coding model).
+
+---
+
+## Token Reporting
+
+**ALL size/length information shown to a human — logs, UI, headers, hover cards,
+reports, debug output, EVERYWHERE — is in estimated TOKENS, NEVER raw characters.**
+Characters don't help the reader; tokens are the unit that matters. This is not a
+preference, it is a hard rule: never surface a `chars` / `char-count` / `text-len`
+count to a human or agent. If you are about to print `(count s)` as a size, print
+`(tokens/estimate s)` instead.
+
+The estimate is `chars / 4` — the `:seon.render/token-estimate` convention. There is
+**ONE estimator**, do NOT invent a second: `seon.ai.tokens/estimate` (string → tokens)
+in the CLJS pod (the leaf ns that owns the `chars/4` heuristic; reused by
+`seon.ctx` / `seon.agent.inspect` / `seon.web.debug`). There is **no dedicated tokenizer
+dependency**; if one is ever added it goes behind that one ns — update this note and
+nothing else.
+
+The code now EMITS tokens at every reporting site (turn-open log, POST /chat log,
+context-bar, agent-log hover cards). Storage-tier datoms may still be measured in chars
+(e.g. `:seon.agent.turn/prompt-chars`) — that is the persisted projection, not a display;
+when such a value is shown, convert it (`(quot chars 4)`) at the display layer.
+
+The `seon.ai` config row carries `::max-tokens` (the LLM *output* cap) — a *context-window*
+limit is a separate concern. Applies to all size reporting, everywhere.
 
 ---
 
@@ -63,22 +93,62 @@ The exception is genuinely independent topics (e.g., "audit datahike capabilitie
 
 ## System Documentation
 
-All documentation lives in `docs/` — markdown files under version control. Use Read, Glob, and Grep to navigate.
+Two kinds of docs, one rule each. Do NOT create a third doc system.
 
-- **Start here:** `docs/seon/_dashboard.md` — system map, milestones, protocols
-- **What exists:** `docs/seon/components/` — one note per component (always current)
-- **Patterns:** `docs/seon/concepts/` — patterns spanning components
-- **What we're building:** `docs/seon/vision/` — thesis and desired capabilities
-- **Active work:** `docs/seon/orchestrator/active.md` — pipeline and recovery
-- **Issues:** `docs/seon/orchestrator/issues/` — one note per problem
-- **PRD index:** `docs/seon/orchestrator/prds.md` — all PRDs with status
-- **How it works:** `docs/seon/architecture/overview.md` — narrative guide
-- **Decisions:** `docs/seon/architecture/decisions/` — settled ADRs
-- **All PRDs:** `docs/prds/` — feature specifications
-- **Conventions:** `docs/conventions.md` — API design patterns
-- **Vision:** `docs/seon/vision/index.md` — project thesis
+- **The idealized system — `docs/seon/architecture/`** is the SINGLE,
+  always-current, target-written description of how Seon works when built.
+  **Read `architecture.md` FIRST** (the map: thesis, one vocabulary, the
+  cross-cutting principles), then the domain doc for your area:
+  - `context.md` — context = functions applied to the db (blocks/tiles/twins,
+    current-ns, required-keys, the cache gradient)
+  - `data-model.md` — every entity/attr/ref, the `my.*` schemas, `:seon/error`
+  - `agent-runtime.md` — loop/run/turn/FSM, lifecycle, isolation, "nothing wedges"
+  - `ui.md` — blocks/renders/tiles/slots/pages, the live channel
+  - `observability.md` — turn replay, the blob store, the forensic agent, `/solve`
+  - `toolkit.md` — the agent verb surface
+  - `laws.md` — drive-measured empirical laws · `library-grounding.md` — the
+    `reference-code/…:LINE` read-map · `decisions/` — settled ADRs
+  This is where the ideal is kept current as it changes — ONE place, present
+  tense, no parallel narratives.
+- **The work — `docs/prds/<chunk>/`** is a roadmap chunk on its OWN branch.
+  Each carries an auto-loaded `CLAUDE.md` (runbook + settled/open + entry
+  points) and a `roadmap.md` (the WE-ARE-HERE for that chunk: what's built, the
+  gap, the ordered path). PRDs are focused, finish-and-merge work — NOT a
+  second doc system. The `research/` files are dated evidence/depth.
 
-**After making code changes**, update the relevant component note to reflect new reality. See `docs/seon/_dashboard.md` for the full protocol.
+Supporting: `docs/conventions.md` (API/schema patterns), `docs/seon/vision/`
+(thesis + aspirational capabilities incl. `think-in-clojure.md`),
+`docs/seon/components/` (per-component notes).
+
+**After a change:** update the architecture doc it touches (the ideal stays
+current) AND the active PRD's `roadmap.md` (the we-are-here stays honest) — same
+discipline as code. The `src/seon/CLAUDE.md` ONE-mechanism table auto-loads on
+any `src/` edit; check it before building a second version of anything.
+
+### PRD folder context — auto-loaded `CLAUDE.md`
+
+**Every active PRD folder (`docs/prds/<project>/`) carries a `CLAUDE.md`.** Claude
+Code auto-reads nested `CLAUDE.md` files when working in that tree, so this is the
+ALWAYS-IN-CONTEXT orientation for anyone (agent or human) touching that PRD — the
+must-know that would otherwise be lost in the sea of dated research files. Keep
+it **tight and current** (it loads into context every time you work there). The
+goal is a ONE-STOP SHOP to get up to speed — typically:
+
+- **Current state** — where the work actually is right now (one short paragraph).
+- **How to run it** — the actual commands (build/deploy/drive/test/check-status),
+  copy-pasteable, with the live ids/paths. So nobody re-derives how to operate it.
+- **Load-bearing findings + gotchas** — the corrections that cost cycles to learn
+  (e.g. "torch 2.9.1 works, the saga was a hallucinated symbol").
+- **Current issues / blockers** — what's open right now (link the issue notes).
+- **Settled — do NOT re-litigate** — decisions made, so they're not reopened.
+- **Plans + next steps** — the ordered path forward, so it's not lost.
+- **Entry points** — the few docs to read for depth (link them; don't duplicate).
+
+The dated research files stay as the depth; the folder `CLAUDE.md` is the index +
+the hard-won context + the runbook. Update it as the PRD's reality changes — same
+discipline as component notes. It takes YAML frontmatter like any `docs/**/*.md`
+(the linter validates it); use `type: orchestrator`.
+`docs/prds/diffusion-dynamic-context/CLAUDE.md` is the worked example.
 
 ### Markdown Standards
 
@@ -112,7 +182,7 @@ tags: [component, database]
 
 Seon is **infrastructure for AI agents to write reliable software**.
 
-The personal domains (trading, health, finance) are test cases, not the point. The real product is a codebase architecture where AI agents can own and evolve code responsibly - with contracts they can discover, history they can learn from, and isolation that prevents conflicts.
+The personal domains (trading, health, finance) are eventual product domains, not the point — and NOT the scenarios we use to exercise agents (see "Exercising agents" below). The real product is a codebase architecture where AI agents can own and evolve code responsibly - with contracts they can discover, history they can learn from, and isolation that prevents conflicts.
 
 ### Core Infrastructure
 
@@ -128,6 +198,29 @@ The personal domains (trading, health, finance) are test cases, not the point. T
 - **Homoiconicity** - Code is data. Agents can manipulate programs as data structures.
 - **REPL-driven** - Interactive development matches how agents work (try something, see result, iterate).
 - **Immutable by default** - No spooky action at a distance. Function outputs depend only on inputs.
+
+---
+
+## Exercising agents — long-term planning + database memory (NOT "workouts")
+
+**When you test or drive an agent, use scenarios that exercise two capabilities —
+long-term planning and database-backed memory — NOT the old health / "workout" /
+trading toy domains.** Don't hardcode the verbs to call here; the API moves and
+the agent discovers it from its own context (the todo namespace and the `my.kb`
+manual ns are self-describing). What stays fixed is the SHAPE of a good drive:
+
+- **Long-term planning** — a task with several steps that must survive
+  interruption. The agent should break the work into durable plan items up front
+  and close them as each lands, so a mid-task `bin/seon restart pod` lets it
+  RESUME from what's still open without re-planning. Win condition: continuity
+  across turns and restarts, not finishing in one shot.
+
+- **Database memory — store then retrieve** — the agent designs a real schema for
+  what it learns, writes facts (with provenance), and in a LATER turn queries them
+  back to answer a question. Knowledge is schema'd data in the DB, never a
+  memory-text blob. Win condition: recall that survives turns and restarts — and,
+  with `SEON_EMBED`, semantic recall over embeddings. `my.kb` is the worked manual
+  the agent reads for the current patterns.
 
 ---
 
@@ -151,7 +244,7 @@ The whole repo is on a feature branch. Atomic refactors are the cheap option, no
 
 1. **Observe the live system.** Query the REPL. Establish current state with actual data, not assumptions.
 2. **Define what failure looks like.** If you can't articulate how you'd know your change is broken, you don't understand the problem well enough to fix it.
-3. **Read the source.** Read the existing code you're modifying. Read library source in `reference-code/` (Datahike, Malli, Integrant, core.async — they're all there as git submodules). Agents that guess instead of reading produce confident, wrong answers. **Never unzip deployed packages** to inspect a dep — `reference-code/` has the same source already, checked out and grep-able.
+3. **Read the source — it flips your mindset.** Read the existing code you're modifying, AND the actual library source in `reference-code/` (Datahike, Malli, Integrant, core.async, SCI, Datastar — vendored submodules) for any task that *uses* a library's behavior, not just one that modifies the library. The default failure is writing Clojure from training-memory in the wrong mindset — reasoning in place/mutable terms and *guessing* library semantics (how a `:seon.db/ref` validates, what `:db.fn/cas` does, how `equiv` walks an index) — which produces confident, wrong code. Ground in the source FIRST, naming the concept→file (e.g. for a `:malli/schema`: read malli's validator in `reference-code/malli/` + the datahike-ref bridge `seon.db/malli->datahike-schema`). Agents that guess instead of reading produce confident, wrong answers. **Never unzip deployed packages** to inspect a dep — `reference-code/` has the same source already, checked out and grep-able.
 4. **Test assumptions in the REPL.** Before building a function that queries the graph, try the query manually. Before wrapping a library call, call it directly and see what it returns. A 30-second experiment prevents hours of debugging.
 5. **Ask Gemini when stuck.** Two functions, both in the `user` namespace:
    - `(user/search "question" :files ["relevant/file.clj"])` — Gemini with **web access**. Include `:files` so it sees your actual code.
@@ -216,6 +309,13 @@ The corollary: don't re-parse source with rewrite-clj when the analyzer already 
 
 Full principle + the five mechanisms + cross-agent publish gate + recursive-bootstrap use case: [[docs/seon/concepts/code-as-data-runtime]].
 
+**Comment levels carry meaning** (the context renders as eval'able Clojure):
+**`;` (single) = prose** — rendered agent-facing prose blocks AND inline code
+comments; **`;;` (double) = code block comments** standing above a form;
+**`;;;` (triple) = runtime-structure demarcation** (section brackets, transcript
+event lines). Prose → `;`, block-comment-before-code → `;;`, inline → `;`. Full
+rule in `docs/conventions.md` "Comment levels — prose vs code".
+
 ---
 
 ## Architecture
@@ -251,9 +351,43 @@ seon/
 
 See `docs/conventions.md` "Database Access" for patterns.
 
+### Embeddings / Semantic Search (Vertex)
+
+Semantic search runs on Google **Vertex AI** `gemini-embedding-2` (GA, natively
+multimodal — text/image/audio/video/PDF into ONE unified vector space; 3072-dim
+default, Matryoshka-truncatable to 1536 to match the HNSW index). The wire-server
+calls the **global** endpoint with `:embedContent` (NOT a region, NOT the legacy
+`:predict`). Governed: inputs are **not used to train Google's models** (Cloud
+Service Terms §17).
+
+Auth is **ADC via a service account** — no token code (the GenAI SDK +
+`google-auth-library`, already on the classpath, fetch and auto-refresh the OAuth2
+token). Wire it via env; **never hardcode or commit credentials or the project id**:
+
+```
+GOOGLE_GENAI_USE_VERTEXAI=true
+GOOGLE_CLOUD_PROJECT=<your-gcp-project-id>
+GOOGLE_CLOUD_LOCATION=global              # gemini-embedding-2 is Global, not a region
+GOOGLE_APPLICATION_CREDENTIALS=<path to the SA key JSON, OUTSIDE the repo>
+# unset GEMINI_API_KEY so the SDK can't fall back to the consumer endpoint
+```
+
+The service-account key lives outside the repo (e.g. `~/.config/gcloud/`) and is
+git-ignored by location; it is never committed. The whole feature is gated by
+`SEON_EMBED`. Full verified usage, pricing, and the content-addressed cache/archive
+design: `docs/prds/embeddings/vertex-usage-reference-2026-06-25.md`.
+
 ### Flow Topology (routing backbone) `[JVM track — paused]`
 
 In the JVM app, all cross-boundary calls — namespace function calls, database writes, REPL eval — route through `topology/request!` (core.async.flow): register promise → inject → step-fn → reply-router → deliver promise. See `docs/prds/unified-flow/design.md`. The **pod is core.async-free** — it uses native CLJS `^:async`/`await` instead.
+
+### CLJS `^:async`/`await` (pod eval path)
+
+New CLJS surface that keeps tripping people — read the source before changing it: `docs/prds/agent-fsm/research/cljs-async-await-2026-06-28.md` + `reference-code/clojurescript/` (the `await` macro + `cljs/js.cljs` self-host).
+
+- **Await only inside a `^:async` fn — never a bare top-level `(await x)`.** Self-host (the pod's bootstrap compiler that evals agent forms) is conditional: a `^:async` fn with an internal `(await …)` works (returns a native `js/Promise`); a top-level `(await x)` throws "await can only be used in async contexts" (the macro asserts `(:async &env)`, false at top level). Resolve a stashed Promise by **re-reference**, not `await`.
+- **Agents get data, not Promises.** `seon.eval/maybe-await-value` auto-awaits a returned Promise, so quick `^:async` verbs (`db/transact!`, `todo/add!`) read as synchronous; a long/timed-out Promise lands in `result/<id>` and resolves on re-reference.
+- **`async-fn?` (ctor name == `"AsyncFunction"`) mis-detects an already-instrumented malli wrapper** — a plain `Function` that still returns a Promise — routing it through the SYNC output validator. This is why instrumentation runs ONCE per process.
 
 ---
 
@@ -286,6 +420,18 @@ Promote a file to `.cljc` only when it's genuinely platform-portable (e.g. `seon
 ## Data Rules
 
 All data flowing through Seon must be safe at every boundary: Malli validation, core.async channels, Nippy serialization, Datahike transact/pull.
+
+**There are NO entity "kinds" — an entity is its attributes + connections.** Datahike/Datomic
+has no entity type, class, or kind. An entity is just an entity-id with a set of datoms; **what it
+*is* — "what you're looking at" — is determined by which attributes are present/absent and how it
+connects to other entities via refs.** Schema attaches to ATTRIBUTES (valueType / cardinality /
+unique), never to entities. So never model, branch, iterate, or design "per kind": to FIND entities
+query by **attribute presence** (scan the attr's index), to IDENTIFY one use its
+`:db.unique/identity` **attribute**, to RELATE/remove follow **refs** (component refs cascade).
+`:seon.entity/id-attr` is attribute-presence enumeration, NOT a kind stamp — there is deliberately
+no per-row `:seon.entity/kind`. If you catch yourself writing "for each kind" or a kind taxonomy,
+stop: reframe in attributes + connections. Mindset primer (read it):
+`docs/prds/agent-fsm/research/datahike-primer.md` + the `/datahike` skill.
 
 **Maps with namespaced keywords. Every key. No exceptions.** This is the load-bearing rule the rest of the system depends on:
 
@@ -343,10 +489,16 @@ The same rule applies to id shapes, length constraints, enum values, and any oth
 
 | Skill | Invoke When |
 |-------|-------------|
-| `/datahike` | Writing Datalog queries, transacting data, debugging empty results, working with `d/q` against the Datahike-backed `seon.db` |
-| `/datastar-web-ui` | SSE handlers, `data-*` attributes, streaming responses |
-| `/browser-automation` | Testing UI in browser, debugging frontend issues |
-| `/clojure-testing` | Test patterns: mocking, generators, fixtures, debugging failures |
+| `/data-oriented-clojure` | BEFORE writing/reviewing ANY seon `.clj`/`.cljs` — the data-oriented, errors-as-values, derive-don't-store mindset; catches imperative/OO reflexes |
+| `/data-modeling` | Designing a data model — what shape to `register!` and why (identity vs ref vs component, optional vs required, no `:kind`) |
+| `/datahike` | Datalog queries, transacting, debugging empty results, `seon.db`/`seon.schema`; tx-meta provenance, as-of/history |
+| `/clojurescript` | Pod CLJS semantics: `^:async`/`await`, self-host eval (agent forms compile via `cljs.js`, NOT the JVM), Promise auto-await, async instrumentation wedge |
+| `/repl` | How the REPL reads/repairs/evals the forms you write; parse errors, unbalanced forms |
+| `/seon-context-config` | `config/system.edn`/`acme.edn`, manifest sections, which skills/blocks/nses an agent sees, render caps |
+| `/ui-live-tiles` | Show your human a live VIEW not prose — `:seon.render.live-tile/content`, `my.ui`/`my.tile`/`my.data`, the canvas |
+| `/datastar-web-ui` | SSE handlers, `data-*` attributes, the gzip-morph channel, the `seon.render/block` + slot renderer |
+| `/browser-automation` | Verifying the pod's OWN web UI in a browser (note: browser 503s long-lived SSE — verify feeds server-side) |
+| `/clojure-testing` | Pod-first `.cljs` test patterns: fixtures, `cljs.test/async`, hermetic in-memory conns |
 
 ---
 
@@ -449,7 +601,7 @@ Key rules: density over whitespace (`p-3` not `p-6`), small text (`text-xs` prim
 1. **One file per namespace** - Don't split prematurely
 2. **DB parameter** - Functions receive `db` as first parameter
 3. **Schema-first** - Define Malli schemas before implementation
-4. **Namespaced IDs** - `:seon.trading/position`, `:seon.health/workout`
+4. **Namespaced IDs** - `:my.plan/id`, `:my.kb.source/rating`
 
 See `docs/conventions.md` for full patterns.
 
@@ -477,6 +629,12 @@ Public functions fully spec and validate every argument and the return. Two shap
 ```
 
 Instrumentation is managed by Integrant (`:seon.dev/instrumentation`), survives `(user/reset)`, and picks up schema changes automatically on reload.
+
+---
+
+## Docstrings (they render into agent context)
+
+A public fn's docstring **first line is a complete, standalone sentence, ≤72 chars (78 hard cap), ending in terminal punctuation** (`.`/`?`/`!`) — it is the summary shown wherever the fn renders compactly (the compact namespace card shows ONLY line 1). State the **action + data effect, not the mechanism** (mechanism → the body, after a blank line, which renders in the full view). Imperative for side-effecting verbs, noun-phrase for pure queries; backtick-quote identifiers. Enforced by `seon.dev.docstring` (warn-only, dev hook). Full rule + examples: `docs/conventions.md` "Function Docstrings".
 
 ---
 
@@ -570,10 +728,10 @@ Application: `logs/app.log` (Timbre). Errors: `logs/error.log` (logback). Boot: 
 
 | Document | Purpose |
 |----------|---------|
-| `docs/seon/vision/index.md` | Project thesis and aspirational capabilities |
+| `docs/seon/architecture/architecture.md` | **The idealized system — read FIRST** (map + vocabulary + principles) |
+| `docs/prds/<chunk>/roadmap.md` | The we-are-here for the active branch's chunk |
 | `docs/conventions.md` | Malli schemas, API design patterns |
+| `docs/seon/vision/index.md` | Project thesis and aspirational capabilities |
 | `ORCHESTRATOR.md` | Orchestrator-specific instructions (launching agents, system management) |
 | `AGENT.md` | Subagent-specific instructions (investigation workflow, reporting) |
-| `docs/seon/orchestrator/issues/` | Open problems — one note per issue |
-| `docs/seon/reference/datastar-quick-reference.md` | Web UI attributes |
 | `docs/prds/namespace-ui/design-system.md` | UI colors, typography, spacing |

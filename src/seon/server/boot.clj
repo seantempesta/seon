@@ -50,7 +50,6 @@
             ;; derive from the post-write db. Registration order = fire order.
             [seon.embed]
             [seon.server.broadcast :as bcast]
-            [seon.server.transit :as transit]
             [seon.server.reactive :as reactive]
             [taoensso.timbre :as log])
   (:import [java.util.concurrent ConcurrentLinkedQueue]
@@ -67,19 +66,27 @@
 ;; guest's loop expects (it swallows the `no-event` timeout and re-loops).
 ;;
 ;; The event delivered is the SAME map `seon.server.wire`'s broadcaster builds
-;; (`ok-event-from-report`): string keys, `tx-data` as [e a-transit v-transit
-;; t op], `tx-meta`/`request-id` carried through. The guest decodes the Transit
-;; a/v fields itself.
+;; (`ok-event-from-report`): `:seon.store.wire/*` keyword keys, `tx-data` as
+;; native 5-vectors [e a v t op], `tx-meta`/`write-id` carried through.
 ;; ---------------------------------------------------------------------------
 
-;; handle -> {:db-name str :sub-id <bcast-sub-id> :queue ConcurrentLinkedQueue}
+;; handle -> {:db-name str :sub-id <bcast-sub-id> :queue ConcurrentLinkedQueue
+;;            :qsize AtomicInteger :replay-queue ConcurrentLinkedQueue?}
+;; :replay-queue is present only for a since-t (reconnect) subscribe — it holds
+;; the missed-tx replay, drained by next-tx-event ahead of the live :queue.
 (defonce ^:private !tx-subs (atom {}))
 (defonce ^:private !tx-sub-counter (atom 0))
 
-;; A bounded queue so a guest that never drains can't grow memory without
-;; limit. When full, the oldest event is dropped (the guest catches up via
-;; basis-t on its next read; a dropped raw event is not a correctness hazard —
-;; it only means the listener missed an intermediate frame).
+;; A bounded LIVE queue so a guest that never drains can't grow memory without
+;; limit. When full, the oldest event is dropped. For RENDERING that is
+;; harmless (the guest catches up via basis-t on its next read). For the WAKE
+;; edge it is NOT — a dropped wake leaves an idle agent with unread mail. The
+;; primary cure is the per-subscriber `since-t` replay on (re)subscribe
+;; (`wire/replay-tx-events`): a reconnecting subscriber recovers every missed
+;; tx from the tx-log, so a feed gap no longer drops a wake. This live cap
+;; remains the backstop for a subscriber that stays connected but stops
+;; draining; if it ever bites the same since-t replay recovers on the next
+;; reconnect.
 (def ^:private max-queued-events 1024)
 
 (defn- db-name-for-req
@@ -89,8 +96,8 @@
    `::raw-broadcast` listener tags events with (keyword db-names are stringified
    without the leading colon, matching `raw-broadcast-listener-fn`)."
   [req]
-  (let [agent-id (let [a (get req "agent-id")] (when (and a (not= "" a)) a))
-        db-name  (some-> (get req "db-name") keyword)
+  (let [agent-id (let [a (:seon.store.wire/agent-id req)] (when (and a (not= "" a)) a))
+        db-name  (some-> (:seon.store.wire/db-name req) keyword)
         kw->str  (fn [kw] (if (keyword? kw) (subs (str kw) 1) (str kw)))
         resolved (registry/resolve-conn
                   (cond-> {}
@@ -101,14 +108,24 @@
       ;; ::unresolved? (neither key) → ambient conn's db-name
       :else (wire/ambient-db-name))))
 
-(defmethod wire/handle-op "subscribe-tx" [_conn req]
+(defmethod wire/handle-op "subscribe-tx" [conn req]
   (let [db-name (db-name-for-req req)
+        ;; Optional per-subscriber `since-t` (last-applied basis-t): when present
+        ;; we replay every tx committed after it (DE-2 lossless wake). The
+        ;; reconnecting subscriber gets its gap back; a fresh subscriber omits it.
+        since-t (:seon.store.wire/since-t req)
         queue   (ConcurrentLinkedQueue.)
         ;; Track size in an AtomicInteger — ConcurrentLinkedQueue.size() is
         ;; O(n) (it traverses the queue); this callback runs on EVERY commit
         ;; for the db-name, so an O(n) size check per event is real overhead.
         qsize   (AtomicInteger. 0)
         handle  (swap! !tx-sub-counter inc)
+        ;; Attach the LIVE callback FIRST, then snapshot the replay range. No tx
+        ;; can slip the gap between snapshot and going-live: anything ≤ the
+        ;; replay basis-t is in the replay, anything after is in this queue. The
+        ;; overlap (a tx that committed between attach and the replay snapshot)
+        ;; is delivered by BOTH paths at the SAME basis-t — the subscriber's
+        ;; basis-t idempotency applies it at-most-once.
         sub-id  (bcast/subscribe!
                  db-name
                  (fn [event]
@@ -118,33 +135,57 @@
                    (when (>= (.get qsize) max-queued-events)
                      (when (.poll queue) (.decrementAndGet qsize)))
                    (.offer queue event)
-                   (.incrementAndGet qsize)))]
-    (swap! !tx-subs assoc handle {:db-name db-name :sub-id sub-id
-                                  :queue queue :qsize qsize})
-    ;; The wire control envelope is plain CBOR; handle is an int.
-    {"ok" true "handle" handle "db-name" db-name}))
+                   (.incrementAndGet qsize)))
+        ;; since-t replay: missed txs, in commit order, drained by next-tx-event
+        ;; AHEAD of live events so the subscriber recovers its gap monotonically.
+        replay  (when (and since-t (pos? (long since-t)))
+                  (wire/replay-tx-events conn db-name since-t))
+        replay-q (when (seq replay)
+                   (ConcurrentLinkedQueue. ^java.util.Collection replay))]
+    (swap! !tx-subs assoc handle
+           (cond-> {:db-name db-name :sub-id sub-id :queue queue :qsize qsize}
+             replay-q (assoc :replay-queue replay-q)))
+    ;; handle is an int; db-name a string. Uniform Transit, keyword keys.
+    (cond-> {:seon.store.wire/ok true
+             :seon.store.wire/handle handle
+             :seon.store.wire/db-name db-name}
+      since-t (assoc :seon.store.wire/since-t  since-t
+                     :seon.store.wire/replayed (count (or replay []))))))
 
 (defmethod wire/handle-op "next-tx-event" [_conn req]
-  (let [handle (long (get req "handle"))]
-    (if-let [{:keys [^ConcurrentLinkedQueue queue]} (get @!tx-subs handle)]
-      ;; Bounded wait: poll up to ~50ms for an event so the guest's loop
-      ;; doesn't hot-spin. On timeout, a typed "no-event" protocol error —
-      ;; the guest swallows it (see seon.client-runtime.db/ensure-listener-loop!).
-      (let [deadline (+ (System/currentTimeMillis) 50)]
-        (loop []
-          (if-let [ev (.poll queue)]
-            (assoc ev "ok" true)
-            (if (< (System/currentTimeMillis) deadline)
-              (do (Thread/sleep 5) (recur))
-              {"ok" false "error" "no-event" "error-kind" "not-found"}))))
-      {"ok" false "error" (str "unknown tx-sub handle: " handle) "error-kind" "not-found"})))
+  (let [handle (long (:seon.store.wire/handle req))]
+    (if-let [{:keys [^ConcurrentLinkedQueue queue ^ConcurrentLinkedQueue replay-queue]}
+             (get @!tx-subs handle)]
+      ;; Replayed gap events (since-t reconnect) drain FIRST, in commit order,
+      ;; ahead of live events — so the subscriber applies the whole stream
+      ;; monotonically by basis-t. Once the replay queue empties, poll resolves
+      ;; to nil and we fall through to the live queue.
+      (if-let [rev (some-> replay-queue .poll)]
+        (assoc rev :seon.store.wire/ok true)
+        ;; Bounded wait: poll up to ~50ms for an event so the guest's loop
+        ;; doesn't hot-spin. On timeout, a typed "no-event" protocol error —
+        ;; the guest swallows it (see seon.client-runtime.db/ensure-listener-loop!).
+        (let [deadline (+ (System/currentTimeMillis) 50)]
+          (loop []
+            (if-let [ev (.poll queue)]
+              (assoc ev :seon.store.wire/ok true)
+              (if (< (System/currentTimeMillis) deadline)
+                (do (Thread/sleep 5) (recur))
+                {:seon.store.wire/ok false
+                 :seon.store.wire/error "no-event"
+                 :seon.store.wire/error-kind "not-found"})))))
+      {:seon.store.wire/ok false
+       :seon.store.wire/error (str "unknown tx-sub handle: " handle)
+       :seon.store.wire/error-kind "not-found"})))
 
 (defmethod wire/handle-op "unsubscribe-tx" [_conn req]
-  (let [handle (long (get req "handle"))]
+  (let [handle (long (:seon.store.wire/handle req))]
     (when-let [{:keys [db-name sub-id]} (get @!tx-subs handle)]
       (bcast/unsubscribe! db-name sub-id)
       (swap! !tx-subs dissoc handle))
-    {"ok" true "handle" handle "unsubscribed" true}))
+    {:seon.store.wire/ok true
+     :seon.store.wire/handle handle
+     :seon.store.wire/unsubscribed true}))
 
 ;; ---------------------------------------------------------------------------
 ;; Query subscriptions (the reactive engine) — register/unregister + the
@@ -212,39 +253,39 @@
                     :state state
                     :emit! (fn [ev]
                              ;; tag the changed-summaries event with the
-                             ;; db-name for pub routing, ship the body as
-                             ;; a Transit-JSON payload (it carries
-                             ;; keywords/rows that CBOR can't represent).
+                             ;; db-name for pub routing; the reactive map
+                             ;; (keywords/rows) rides natively under the
+                             ;; uniform Transit frame — no inner encode.
                              (bcast/broadcast!
-                              {"event"   "changed-summaries"
-                               "db-name" db-name-str
-                               "basis-t" (:seon.server.reactive/basis-t ev)
-                               "payload" (transit/write-str ev)}))}
+                              {:seon.store.wire/event   "changed-summaries"
+                               :seon.store.wire/db-name db-name-str
+                               :seon.store.wire/basis-t (:seon.server.reactive/basis-t ev)
+                               :seon.store.wire/payload ev}))}
                    report)))))})
 
 (defmethod wire/handle-op "register-subscription" [conn req]
-  (let [sub-id (get req "sub-id")
-        query  (get req "query")            ; SOURCE STRING (code-as-data)
+  (let [sub-id (:seon.store.wire/sub-id req)
+        query  (:seon.store.wire/query req)   ; SOURCE STRING (code-as-data)
         db-name (db-name-for-req req)
         state   (engine-for db-name)
         resp    (reactive/register-subscription
                  state conn
                  {:seon.server.reactive/sub-id sub-id
                   :seon.server.reactive/query  query})]
-    {"ok" true
-     "sub-id"  (:seon.subscription/id resp)
-     "basis-t" (:seon.server.reactive/basis-t resp)
-     "payload" (transit/write-str resp)}))
+    {:seon.store.wire/ok true
+     :seon.store.wire/sub-id  (:seon.subscription/id resp)
+     :seon.store.wire/basis-t (:seon.server.reactive/basis-t resp)
+     :seon.store.wire/payload resp}))
 
 (defmethod wire/handle-op "unregister-subscription" [conn req]
-  (let [sub-id (get req "sub-id")
+  (let [sub-id (:seon.store.wire/sub-id req)
         db-name (db-name-for-req req)
         state   (engine-for db-name)
         resp    (reactive/unregister-subscription
                  state conn {:seon.server.reactive/sub-id sub-id})]
-    {"ok" true
-     "sub-id" (:seon.subscription/id resp)
-     "payload" (transit/write-str resp)}))
+    {:seon.store.wire/ok true
+     :seon.store.wire/sub-id (:seon.subscription/id resp)
+     :seon.store.wire/payload resp}))
 
 ;; ---------------------------------------------------------------------------
 

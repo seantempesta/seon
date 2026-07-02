@@ -29,10 +29,12 @@
     [seon.db-test]
     [seon.render-test]
     [seon.boot.preconditions-test]
-    ;; T7 clip guardrail: store-cap + row-count guard (memory-safety) and
-    ;; the display-surface guiding-message tests (agent-context).
+    ;; T7 clip guardrail: store-cap + row-count guard (memory-safety).
+    ;; (seon.agent-context-test DELETED — agent-fsm redesign 2026-06-23,
+    ;; U5: pinned the old turn shape (the per-turn wake anchor, now
+    ;; :seon.agent.turn/wake) + XML transcript; the transcript is rewritten
+    ;; in U6 with fresh tests after.)
     [seon.eval.memory-safety-test]
-    [seon.agent-context-test]
     ;; Run-4 root-cause fix (2026-06-09): data-ns schema tee upsert +
     ;; record-eval! never silently loses the eval row.
     [seon.eval.record-eval-tee-test]
@@ -55,15 +57,16 @@
     [seon.ai.openai-compat-test]
     [seon.ai.anthropic-test]
     ;; my.kb scaffold (V3-B, 2026-06-10): provenance shapes registered
-    ;; once + my.kb.system seed/append/read contract (V4-0).
+    ;; once + my.kb.shared seed/append/read contract (V4-0).
     ;; Required here so the deftest-vars roster carries my.kb-test and
     ;; its full source renders as the exemplar test sibling.
     [my.kb-test]
-    ;; my.soul (2026-06-11): the store-resident system prompt —
-    ;; seed-from-SOUL.md, seed-only-if-absent (edits survive reboot),
-    ;; LLM call path reads the store. NOT a my.kb child (and so not an
-    ;; exemplar test sibling) — see the my.soul ns doc.
-    [my.soul-test]
+    ;; UI lane (agent-fsm): the /world datastar streamer framing + the
+    ;; view=f(db) roster (appear/vanish, determinism, never-crash) and the
+    ;; /call capability gate. Required here so seon.test.runner can drive
+    ;; them against the live pod (the munged ns object must be in the build).
+    [seon.web.datastar-test]
+    [seon.web.reactive.call-test]
     ;; Boot-time test indexing (unit #23 fix b): this preload's require
     ;; closure IS the pod's test roster, so the deftest-vars macro below
     ;; can see every deftest var — seon.client (compiled before the test

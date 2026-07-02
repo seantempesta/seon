@@ -1,19 +1,19 @@
 (ns seon.server.broadcast
   "Pub fanout, per-DB routed. The writer's `d/listen!` `::raw-broadcast`
    callback calls `(broadcast! event)` after every committed transact. Each
-   event carries its committing conn's real `\"db-name\"` (no more hardcoded
-   \"default\").
+   event carries its committing conn's real `:seon.store.wire/db-name` (no
+   more hardcoded \"default\").
 
    Two delivery channels, both fed by one `broadcast!`:
 
    - **Socket subscribers** (via `start-pub-server!`): every connected
-     OutputStream receives EVERY event — the single tagged stream the Rust
-     host demuxes by `\"db-name\"` (design §7). Stays db-agnostic so the
-     existing in-process test fixture (`start-pub-collector!`) sees all events.
+     OutputStream receives EVERY event — a single tagged stream a consumer
+     demuxes by `:seon.store.wire/db-name`. Stays db-agnostic so the existing
+     in-process test fixture (`start-pub-collector!`) sees all events.
    - **In-process per-DB subscribers** (via `subscribe!`): keyed by db-name.
      A subscriber registered for cluster A is invoked ONLY for events whose
-     `\"db-name\"` is A — zero cross-bleed. This is the reactive engine's /
-     in-JVM consumer's routing path.
+     `:seon.store.wire/db-name` is A — zero cross-bleed. This is the reactive
+     engine's / in-JVM consumer's routing path.
 
    Multi-threaded: the socket accept loop runs on its own thread; `broadcast!`
    is called from the writer thread inside the `::raw-broadcast` listener."
@@ -37,7 +37,8 @@
 
 (defn subscribe!
   "Register an in-process subscriber for ONE db-name. `f` is invoked with the
-   event map on every `broadcast!` whose event `\"db-name\"` equals `db-name`.
+   event map on every `broadcast!` whose event `:seon.store.wire/db-name`
+   equals `db-name`.
    Returns an opaque sub-id for `unsubscribe!`. A subscriber to cluster A never
    sees cluster B's events."
   [db-name f]
@@ -65,9 +66,10 @@
 
 (defn broadcast!
   "Fan one event out to (a) every socket subscriber and (b) every in-process
-   subscriber registered for the event's `\"db-name\"`. Dead socket subscribers
-   (write failure) are dropped. The event's `\"db-name\"` drives the per-DB
-   routing; socket delivery is db-agnostic (host demuxes)."
+   subscriber registered for the event's `:seon.store.wire/db-name`. Dead
+   socket subscribers (write failure) are dropped. The event's
+   `:seon.store.wire/db-name` drives the per-DB routing; socket delivery is
+   db-agnostic (the consumer demuxes)."
   [event]
   ;; (a) socket subscribers — every one gets every (tagged) event.
   (let [snap @socket-subscribers
@@ -81,7 +83,7 @@
       (swap! socket-subscribers #(reduce disj % @dead))))
   ;; (b) in-process per-DB subscribers — only those keyed by this event's
   ;; db-name. A nil/absent db-name routes to no per-DB subscriber.
-  (when-let [db-name (get event "db-name")]
+  (when-let [db-name (:seon.store.wire/db-name event)]
     (doseq [[_ f] (get @db-subscribers db-name)]
       (try (f event) (catch Throwable _))))
   nil)

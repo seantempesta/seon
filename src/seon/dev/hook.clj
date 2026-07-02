@@ -28,6 +28,7 @@
             [seon.dev.codebase :as codebase]
             [seon.dev.compliance :as compliance]
             [seon.dev.context :as context]
+            [seon.dev.docstring :as docstring]
             [seon.dev.lint :as lint]
             [seon.dev.markdown :as markdown]
             [seon.dev.repair :as repair]
@@ -100,6 +101,10 @@
                    [:enabled {:optional true} :boolean]
                    [:block {:optional true} :boolean]])
 
+(schema/register! ::docstring-lint-config
+                  [:map {:description "Public-fn docstring lint configuration (WARN-ONLY — never blocks)"}
+                   [:enabled {:optional true} :boolean]])
+
 (schema/register! ::lint-config
                   [:map {:description "PreToolUse lint validation configuration"}
                    [:enabled {:optional true} :boolean]])
@@ -119,6 +124,7 @@
                      [:generative {:optional true} ::gen-test-config]]]
                    [:review {:optional true} ::review-config]
                    [:compliance {:optional true} ::compliance-config]
+                   [:docstring-lint {:optional true} ::docstring-lint-config]
                    [:feedback {:optional true} ::feedback-config]])
 
 ;; Request/Response schemas
@@ -160,6 +166,7 @@
             :max-output-length 500}
    :compliance {:enabled true
                 :block false}
+   :docstring-lint {:enabled false}  ; WARN-ONLY; enabled via .claude/seon-hook.edn
    :feedback {:dense true
               :max-length 1000}})
 
@@ -194,11 +201,27 @@
   (or (:file_path tool-input)
       (:filePath tool-input)))
 
-(defn- seon-source-file?
-  "Check if file is a Seon source or test file (in src/seon/ or test/seon/)."
+(defn- jvm-loadable?
+  "True only for files the JVM can actually require/reload/test: .clj and .cljc.
+
+   .cljs is the CLJS-pod track — the JVM cannot load it, and its .clj sibling
+   (if any) is a DIFFERENT namespace owned by the JVM track. Running the JVM
+   reload/test/review pipeline on a .cljs edit would reload+test the wrong
+   sibling and spuriously block. CLJS files are handled by cljs-watch +
+   bin/test-cljs; the bb-side PreToolUse syntax gate still covers their syntax."
   [file-path]
-  (and file-path
-       (codebase/clojure-file? {::codebase/file-path file-path})
+  (boolean
+   (and file-path
+        (let [lower (str/lower-case file-path)]
+          (or (str/ends-with? lower ".clj")
+              (str/ends-with? lower ".cljc"))))))
+
+(defn- seon-source-file?
+  "Check if file is a JVM-loadable Seon source or test file
+   (.clj/.cljc under src/seon/ or test/seon/). Gates the PostToolUse
+   reload/test/review pipeline, which is JVM-only — .cljs is excluded."
+  [file-path]
+  (and (jvm-loadable? file-path)
        (or (str/includes? file-path "src/seon/")
            (str/includes? file-path "test/seon/"))))
 
@@ -400,6 +423,23 @@
           {:compliant? false
            :formatted (::compliance/formatted formatted)
            :violation-count (count (::compliance/violations result))})))))
+
+(defn- stage-docstring-lint
+  "Run the WARN-ONLY public-fn docstring lint on the edited file.
+
+   Returns the formatted warning STRING when a public fn's docstring line
+   1 is missing, over the hard cap, or lacks terminal punctuation — else
+   nil. NEVER blocks: the caller only appends the string to feedback, so an
+   edit always proceeds regardless of findings. Gated by
+   `:docstring-lint {:enabled ...}`; disabled ⇒ nil (no-op)."
+  [file-path config]
+  (when (get-in config [:docstring-lint :enabled])
+    (let [res (docstring/check-file {:seon.dev.docstring/file-path file-path})]
+      (when-not (:seon.dev.docstring/clean? res)
+        (::docstring/formatted
+         (docstring/format-findings
+          {:seon.dev.docstring/findings (:seon.dev.docstring/findings res)
+           :seon.dev.docstring/max-length (get-in config [:feedback :max-length] 800)}))))))
 
 (defn- stage-record-edit
   "Record the edit event with observability data."
@@ -618,6 +658,9 @@
                                     _ (when (and compliance-result
                                                  (not (:compliant? compliance-result)))
                                         (swap! feedback conj (:formatted compliance-result)))
+                                    ;; 3b. Docstring lint — WARN-ONLY (never blocks)
+                                    _ (when-let [ds (stage-docstring-lint file-path config)]
+                                        (swap! feedback conj ds))
                                     compliance-should-block (and compliance-result
                                                                  (not (:compliant? compliance-result))
                                                                  (get-in config [:compliance :block]))]
@@ -727,6 +770,9 @@
       (let [compliance-result (stage-compliance ns-sym config)
             _ (when (and compliance-result (not (:compliant? compliance-result)))
                 (swap! feedback conj (:formatted compliance-result)))
+            ;; Docstring lint — WARN-ONLY (never blocks)
+            _ (when-let [ds (stage-docstring-lint file-path config)]
+                (swap! feedback conj ds))
             compliance-block? (and compliance-result (not (:compliant? compliance-result))
                                    (get-in config [:compliance :block]))]
         (if compliance-block?

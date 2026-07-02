@@ -1,17 +1,18 @@
 ---
 type: issue
 status: open
-tags: [issue, schema]
+severity: cleanup
+tags: [issue, schema, jvm-track, paused]
 ---
 # [:maybe] Convention Violation in session.clj
 
 ## Problem
 
-`src/seon/orchestrator/session.clj` uses `[:maybe ...]` in 4 schema registrations. Project convention bans `[:maybe X]` — use `{:optional true} X` instead.
+`src/seon/session.clj` uses `[:maybe ...]` in 4 schema registrations. Project convention bans `[:maybe X]` — use `{:optional true} X` instead.
 
 ## File Refs
 
-- `src/seon/orchestrator/session.clj` — grep for `[:maybe`
+- `src/seon/session.clj` — grep for `[:maybe`
 
 ## Acceptance Criteria
 
@@ -30,3 +31,5 @@ cleanup
 ## Milestone
 
 [[vision/m3-convention-uniformity]]
+
+## Status (2026-06-28 audit): valid but JVM-track is paused — defer until that track resumes.

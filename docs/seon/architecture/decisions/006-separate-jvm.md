@@ -7,6 +7,10 @@ tags: [decision, architecture, database, flow]
 
 # ADR 006: Separate JVM Processes for Agent Isolation
 
+> **SUPERSEDED.** Isolation tiers in the active design are worker_threads +
+> SCI for ordinary agents and a microVM for the hard boundary (see
+> [[agent-runtime]]) — not one JVM per agent. Historical record below.
+
 ## Context
 
 The original agent isolation plan proposed creating namespace clones (e.g., `seon.trading.signals.a13b`) within a shared JVM, with a Super REPL that rewrites `::keywords` and manages per-instance Malli registries. Sean asked: "could an orchestrator treat it as a process it's spinning up and feeding data to?"

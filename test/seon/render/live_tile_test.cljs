@@ -8,8 +8,8 @@
        fallback DELETED, PRD §8.1) → welcome default; pr-str-encoded
        values decode
      • welcome — .seon-tile compact+expanded blocks, date, purpose,
-       panel line, :seon.render/ai twin
-     • error-response — fallback card + envelope + twin (never vanish)
+       tile line, :seon.render/ai render
+     • error-response — fallback tile + envelope + render (never vanish)
      • render-agent-tile — unwired→welcome, literal hiccup via the new
        key, throwing fn → error-response, ::content EDN roundtrip
 
@@ -17,7 +17,8 @@
    — NEVER the live pod conn."
   (:require
     [cljs.reader :as reader]
-    [cljs.test :refer [deftest is testing async]]
+    [cljs.test :as t :refer [deftest is testing async]]
+    [clojure.string :as str]
     [malli.core :as m]
     [seon.agent :as agent]
     [seon.client :as client]
@@ -27,6 +28,15 @@
     [seon.repl.internal :as repl.internal]
     [seon.schema :as schema]
     [seon.ui.html :as html]))
+
+;; The render-agent-tile degradation tests assert the graceful PROD fallback
+;; (throw / broken hiccup → calm banner, never a crash). Under the harness
+;; strict default (SEON_RENDER_STRICT=1) those renders THROW by design, so
+;; force the fail-loud dial OFF for this ns (process-global env, async-safe —
+;; a scoped with-redefs would restore before an async body runs).
+(t/use-fixtures :once
+  {:before (fn [] (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT) "0"))
+   :after  (fn [] (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT) "1"))})
 
 ;; ============================================================
 ;; greeting — pure time-of-day boundaries.
@@ -105,9 +115,10 @@
                                                :month   "long"
                                                :day     "numeric"})]
         (is (some #(re-find (re-pattern date-str) %) (hiccup-strings hiccup)))))
-    (testing "the double-duty panel line is present in BOTH twins"
-      (is (some #(= tile/panel-line %) (hiccup-strings hiccup)))
-      (is (re-find #"update this panel" ai)))))
+    (testing "the double-duty tile line is present in BOTH renders"
+      (is (some #(= tile/tile-line %) (hiccup-strings hiccup)))
+      (is (str/includes? ai tile/tile-line)
+          "the ai render surfaces the tile-line verbatim"))))
 
 (deftest welcome-uses-purpose-when-present
   (let [{:seon.render/keys [hiccup ai]}
@@ -153,18 +164,24 @@
           {:seon.db/error                 env
            :seon.render.live-tile/content 'my.ns/broken-tile})]
     (is (tile/valid-hiccup? hiccup) "human sees a card, not a blank")
-    ;; The HUMAN sees a calm 'updating this panel' placeholder — never a scary
-    ;; error (tile-isolation Layer 1: always show a nice/in-progress tile on
-    ;; problems; the agent, not the human, is the one nudged to fix it).
-    (is (some #(re-find #"Updating this panel" %) (hiccup-strings hiccup))
-        "human sees the calm 'updating' placeholder")
-    (is (not (some #(re-find #"(?i)error" %) (hiccup-strings hiccup)))
-        "the human card carries NO scary error text — that goes to the agent twin")
-    (is (= env error) "response carries the :seon.error/* envelope")
-    (is (re-find #"my\.ns/broken-tile" ai)
+    ;; ISOLATION CONTRACT (tile-isolation Layer 1), asserted as MECHANISM not
+    ;; placeholder wording: the failure is partitioned to the agent-facing
+    ;; channels (the :seon.render/ai twin + the :seon.render/error envelope)
+    ;; and NEVER leaks into the human hiccup. So the human card is structurally
+    ;; a normal .seon-tile, indistinguishable from a healthy tile, while the
+    ;; twin + envelope carry the SAME message the human never sees.
+    (let [human-strings (hiccup-strings hiccup)]
+      (is (= "seon-tile" (:class (second hiccup)))
+          "the human card is a normal .seon-tile — a failure is indistinguishable from a healthy tile")
+      (is (not-any? #(str/includes? % (:seon.error/message env)) human-strings)
+          "the wired fn's failure message is ABSENT from the human card")
+      (is (not-any? #(re-find #"(?i)error" %) human-strings)
+          "no error text leaks to the human — the error is routed to the agent twin"))
+    (is (= env error) "response carries the :seon.error/* envelope verbatim")
+    (is (str/includes? ai "my.ns/broken-tile")
         "twin names the wired value that broke")
-    (is (re-find #"boom from tile fn" ai)
-        "twin carries the exception's message")))
+    (is (str/includes? ai (:seon.error/message env))
+        "the SAME envelope message the human never sees rides the agent twin")))
 
 ;; ============================================================
 ;; hiccup-structure-error — serializer-faithful, NOT valid-hiccup?:
@@ -261,7 +278,7 @@
              :seon.render/html
              :seon.render/html-response
              :seon.render/ai-response
-             :seon.ctx/render-namespace-response
+             :seon.agent.ctx/render-namespace-response
              :seon.db/db-val
              :seon.db/listen-request]]
     (testing (str k)
@@ -313,8 +330,7 @@
                  (-> (db/transact!
                        {:seon.db/tx-data
                         (into (vec (schema/entity-schema-tx-data :seon.agent))
-                              [{:seon.agent/id    agent-id
-                                :seon.agent/state :idle}])})
+                              [{:seon.agent/id    agent-id}])})
                      (.then (fn [_] (body conn)))
                      (.finally (fn [] (set! db/*conn* orig)))))))))
 
@@ -325,10 +341,18 @@
             (let [{:seon.render/keys [hiccup ai]}
                   (render/render-agent-tile {:seon.db/db @conn
                                              :seon.agent/id "tilewlc-000001"})]
+              ;; DISPATCH MECHANISM, not the greeting prose: an unwired agent
+              ;; resolves to the welcome renderable, which ALWAYS returns the
+              ;; html-response twin pair. Assert the twin is present and
+              ;; non-blank, and that it's the WELCOME twin specifically — its
+              ;; stable contract is naming how to repoint the tile
+              ;; (:seon.render.live-tile/content), not any time-of-day wording.
               (is (= "seon-tile" (:class (second hiccup)))
-                  "unwired agent gets the core welcome")
-              (is (re-find #"Good (morning|afternoon|evening|night)" (str ai))
-                  "welcome's twin rides the response"))))
+                  "unwired agent dispatches to the core welcome renderable")
+              (is (and (string? ai) (seq ai))
+                  "the welcome twin (the ai-format string) rides the response")
+              (is (str/includes? ai ":seon.render.live-tile/content")
+                  "the welcome twin teaches HOW to repoint the tile — its stable contract"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -397,6 +421,43 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
+(deftest render-agent-tile-literal-hiccup-interactive-gets-transform
+  ;; #22 B.1 — a LITERAL-HICCUP tile with an :on-click handler is
+  ;; agent-authored too, so its handler MUST be rewritten to a Datastar
+  ;; @post pointing at the agent's OWN /call door. Before the fix the
+  ;; transform gated on `agent-authored-sym?` (a SYMBOL), so literal
+  ;; hiccup fell through untouched → a dead button.
+  (async done
+    (-> (with-agent-conn "tileint-000001"
+          (fn [conn]
+            (-> (db/transact!
+                  {:seon.db/tx-data
+                   [{:seon.agent/id "tileint-000001"
+                     :seon.render.live-tile/content
+                     [:button {:on-click (list 'bump! "row-1")} "+1"]}]})
+                (.then (fn [_]
+                         (binding [db/*conn* conn]
+                           (let [{:seon.render/keys [hiccup]}
+                                 (render/render-agent-tile
+                                   {:seon.db/db @conn
+                                    :seon.agent/id "tileint-000001"})
+                                 attrs (second hiccup)
+                                 action (:data-on:click attrs)]
+                             (is (nil? (:on-click attrs))
+                                 "the raw :on-click slot is gone — rewritten, not emitted verbatim")
+                             (is (string? action)
+                                 "a literal-hiccup :on-click becomes a Datastar @post (no dead button)")
+                             (is (str/includes?
+                                   action "@post('/agent/tileint-000001/call?fn=")
+                                 "routes to the agent's OWN /call door")
+                             (is (str/includes?
+                                   action "my.agent.tileint-000001%2Fbump!")
+                                 "the bare handler qualifies to the agent's home ns")
+                             (is (str/includes? action "args=")
+                                 "the fn-CALL render-time arg rides ?args="))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 (deftest render-agent-tile-twin-fn-carries-both-keys
   (async done
     (-> (with-agent-conn "tiletwn-000001"
@@ -435,9 +496,9 @@
                                  (render/render-agent-tile
                                    {:seon.db/db @conn
                                     :seon.agent/id "tileerr-000001"})]
-                             (is (some #(re-find #"Updating this panel" %)
+                             (is (some #(re-find #"Updating this tile" %)
                                        (hiccup-strings hiccup))
-                                 "human sees the calm placeholder card — NOT a vanish, NOT a scary error")
+                                 "human sees the calm placeholder tile — NOT a vanish, NOT a scary error")
                              (is (re-find #"deliberate tile failure"
                                           (:seon.error/message error))
                                  "response carries the error envelope")
@@ -489,9 +550,9 @@
                 (let [{:seon.render/keys [hiccup ai error]}
                       (render/render-agent-tile
                         {:seon.db/db @conn :seon.agent/id agent-id})]
-                  (is (some #(re-find #"Updating this panel" %)
+                  (is (some #(re-find #"Updating this tile" %)
                             (hiccup-strings hiccup))
-                      "human sees the calm placeholder card — the page never 500s")
+                      "human sees the calm placeholder tile — the page never 500s")
                   (is (re-find re (:seon.error/message error))
                       "envelope carries the legible structure error")
                   (is (re-find re (str ai))

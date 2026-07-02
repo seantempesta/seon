@@ -1,6 +1,7 @@
 ---
 type: issue
 status: open
+severity: cleanup
 tags: [issue, component]
 ---
 # Test Coverage Audit is Stale

@@ -39,34 +39,35 @@
 
 (defn render-ai
   "One-line summary: `[schema :ns/key] :shape <shape-snippet>`."
-  {:malli/schema [:=> [:cat :map] :seon.render/ai-response]}
-  [{:seon.render/keys [entity]}]
-  (let [k     (:seon.schema/key entity)
+  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
+  [{:seon.render/keys [node entity]}]
+  (let [entity (or node entity)
+        k     (:seon.schema/key entity)
         shape (live-shape k)
         shape-text (if shape (shape-summary shape 100) "<not registered>")]
-    {:seon.render/ai
-     (str "[schema " (pr-str k) "]  :shape " shape-text)}))
+    (str "[schema " (pr-str k) "]  :shape " shape-text)))
 
 (defn render-html
-  "Card showing the schema key, its head-type pill, and the
-   pretty-printed shape. Shape is syntax-highlighted so highlight.js
+  "Card showing the schema key, its head-type pill, and pretty-printed shape.
+
+   Shape is syntax-highlighted so highlight.js
    colorizes it like the eval cards."
-  {:malli/schema [:=> [:cat :map] :seon.render/html-response]}
-  [{:seon.render/keys [entity]}]
-  (let [k     (:seon.schema/key entity)
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-tile/hiccup]]}
+  [{:seon.render/keys [node entity]}]
+  (let [entity (or node entity)
+        k     (:seon.schema/key entity)
         shape (live-shape k)
         head  (shape-type shape)
         shape-text (if shape (pr-str shape) "<not registered>")
         anchor (str "seon-schema-" (str/replace (str k) #"[^A-Za-z0-9_-]" "_"))]
-    {:seon.render/hiccup
-     [:div {:id anchor :class "py-1"}
-      [:div {:class "flex items-baseline gap-2 flex-wrap"}
-       [:span {:class "text-xs font-mono font-semibold text-amber-400"} "schema"]
-       [:span {:class "text-xs font-mono text-text-100"} (pr-str k)]
-       [:span {:class "text-xs font-mono text-amber-300/70"} (str head)]]
-      [:pre {:class "text-xs whitespace-pre-wrap mt-0.5 rounded bg-base-900 p-1.5 overflow-x-auto"}
-       [:code {:class "language-clojure hljs"} shape-text]]
-      ;; "generate sample" deferred — no eval-against-compile-state
-      ;; route yet; see report.
-      ]}))
+    [:div {:id anchor :class "py-1"}
+     [:div {:class "flex items-baseline gap-2 flex-wrap"}
+      [:span {:class "text-xs font-mono font-semibold text-amber-400"} "schema"]
+      [:span {:class "text-xs font-mono text-text-100"} (pr-str k)]
+      [:span {:class "text-xs font-mono text-amber-300/70"} (str head)]]
+     [:pre {:class "text-xs whitespace-pre-wrap mt-0.5 rounded bg-base-900 p-1.5 overflow-x-auto"}
+      [:code {:class "language-clojure hljs"} shape-text]]
+     ;; "generate sample" deferred — no eval-against-compile-state
+     ;; route yet; see report.
+     ]))
 

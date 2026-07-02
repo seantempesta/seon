@@ -23,6 +23,13 @@
 set -euo pipefail
 SEON_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
+# --- persisted local config: a gitignored .env at the repo root holds the LLM
+#     provider/key/model + debug-capture vars so a plain `bin/acme …` picks them
+#     up without inline env on every command. `set -a` exports each VAR=value so
+#     the pod + wire-server inherit them. Keep MACHINE overrides (ports) OUT of
+#     .env — those use ${:-} below and a shell-set value still wins. ---
+if [ -f "$SEON_ROOT/.env.acme" ]; then set -a; . "$SEON_ROOT/.env.acme"; set +a; fi
+
 # --- isolation: distinct from the live default (7890/7891, data/clusters/default,
 #     tmp/seon-cluster-default-*.sock, tmp/proc, logs/). Ports use ${...:-} so a
 #     shell override (SEON_PORT=… SEON_WRITER_REPL_PORT=… bin/acme …) can dodge a
@@ -36,9 +43,31 @@ export SEON_REQ_SOCK=tmp/acme-cluster-req.sock
 export SEON_PUB_SOCK=tmp/acme-cluster-pub.sock
 export SEON_PROC_DIR=tmp/proc-acme          # own supervisor pid/lock namespace
 export SEON_LOG_DIR=logs/acme               # own logs (bin/acme tail reads here)
+export SEON_PORT_FILE=tmp/seon-port-acme    # own pod port file (the live default
+                                            # writes tmp/seon-port; a single shared
+                                            # file would cross-talk in status/ready)
 
-# --- embeddings: on by default; export GEMINI_API_KEY in your shell for KNN ---
-export SEON_EMBED="${SEON_EMBED:-1}"
+# --- embeddings: default OFF (opt-in; owner-disabled in our configs
+#     2026-07-02 — .env.acme carries SEON_EMBED=0). Export GEMINI_API_KEY for
+#     KNN when enabled. SEON_EMBED is a
+#     PRESENCE gate in code (any value — even ""/"0" — counts as ON), so
+#     empty/"0" is translated to UNSET here; bin/seon repeats the same
+#     translation after sourcing the main .env. ---
+case "${SEON_EMBED:-}" in
+  ""|0) unset SEON_EMBED ;;
+  *)    export SEON_EMBED ;;
+esac
+
+# --- capability grants (agent tools) — the DOWNSTREAM-consumer path: plain
+#     host env on the launcher, zero src/seon edits. Code defaults stay
+#     deny-when-unset; this harness (a legit bench pod AND the downstream-usage
+#     proof) grants shell + web like any consumer's launcher would. Any value
+#     but "0" grants; deny via .env.acme or the shell (SEON_SHELL=0 bin/acme
+#     restart pod). Narrowing knobs (SEON_WEB_DOMAINS / SEON_WEB_LOCK /
+#     SEON_FS_LOCK) pass through from .env.acme when set.
+#     Full gate table: docs/seon/components/capability-gates.md ---
+export SEON_SHELL="${SEON_SHELL:-1}"   # seon.agent.shell/run + py-run
+export SEON_WEB="${SEON_WEB:-1}"       # seon.agent.web/fetch (SSRF guard always-on)
 
 # --- the third-party overlay (Path B — docs/seon/components/extra-src.md) ---
 export SEON_EXTRA_SRC="$SEON_ROOT/acme"
@@ -48,6 +77,13 @@ export SEON_EXTRA_PRELOAD=acme.pod
 #     out-acme/client/main.js; SEON_CLIENT_OUT makes bin/seon's pod run THAT
 #     bundle instead of the live cluster's out/client/main.js. ---
 export SEON_CLIENT_OUT=out-acme/client/main.js
+
+# --- config seam: acme reads its OWN manifest (per-cluster loadout/routes/
+#     skills) — the same SEON_CONFIG seam bin/seon exposes, pointed at acme's
+#     file so acme curates independently of the default cluster with no src
+#     edit. A shell-set SEON_CONFIG still wins (e.g. SEON_CONFIG=config/test.edn
+#     bin/acme restart pod to prove retract-on-drop). ---
+export SEON_CONFIG="${SEON_CONFIG:-config/acme.edn}"
 
 # --- branding / CSS control (existing seon seams; no fork) ---
 export SEON_BRAND_NAME="${SEON_BRAND_NAME:-Acme}"
@@ -93,6 +129,52 @@ case "${1:-}" in
       "$SEON_ROOT/bin/seon" stop pod || true
       "$SEON_ROOT/bin/seon" stop wire-server || true
       exit 0
+    fi
+    ;;
+  gym-diffusion)
+    # Score a CONSUMER-OWNED diffusion-gym scenario (acme/gym/scenarios/*.edn)
+    # through seon's CO-LOCATED ORACLE (bin/oracle-server parse-raw + the
+    # worker-oracle-eval bundle) and emit a scorecard. HERMETIC + OFFLINE (CPU):
+    # no pod, no wire-server, no GPU — the oracle is a pure fn reached by PATH,
+    # so this is ZERO src/seon edits and never touches a live store. SEON_ROOT is
+    # exported for the driver to locate the oracle binaries. A bare scenario name
+    # resolves under acme/gym/scenarios/; a path passes through.
+    #   bin/acme gym-diffusion celsius-killgate.edn --assert
+    #   bin/acme gym-diffusion pure-mean.edn --eval --assert
+    shift
+    ARGS=()
+    for a in "$@"; do
+      case "$a" in
+        --*) ARGS+=("$a") ;;
+        /*)  ARGS+=("$a") ;;
+        */*) ARGS+=("$SEON_ROOT/$a") ;;
+        *)   ARGS+=("$SEON_ROOT/acme/gym/scenarios/$a") ;;
+      esac
+    done
+    exec env SEON_ROOT="$SEON_ROOT" bb "$SEON_ROOT/acme/gym/diffusion_gym.bb" "${ARGS[@]}"
+    ;;
+  cluster)
+    # Owner rule (2026-07-02): REBUILD before every reset. The acme bundle is
+    # NOT watched — a reset on a stale bundle boots yesterday's core, or dies
+    # outright when the seed expects a namespace the bundle predates (the
+    # my.plan boot race). Build here, then FALL THROUGH to bin/seon's
+    # race-safe cluster_reset unchanged (do NOT replace it with `down && up`:
+    # after a store wipe the wire-server's cold mint outlasts the pod's ~10s
+    # ping window and the fresh pod dies).
+    if [ "${2:-}" = "reset" ]; then
+      "$0" build
+    fi
+    ;;
+  start|restart)
+    # Same staleness rule for start/restart pod: rebuild first when any core
+    # or overlay source is newer than the bundle (compile is ~20s and
+    # idempotent; running stale code costs far more).
+    if [ "${2:-}" = "pod" ]; then
+      BUNDLE="$SEON_ROOT/$SEON_CLIENT_OUT"
+      if [ ! -f "$BUNDLE" ] || [ -n "$(find "$SEON_ROOT/src" "$SEON_ROOT/$SEON_EXTRA_SRC" \( -name '*.cljs' -o -name '*.cljc' \) -newer "$BUNDLE" -print -quit 2>/dev/null)" ]; then
+        echo "▶ acme bundle is stale vs core/overlay source — rebuilding first"
+        "$0" build
+      fi
     fi
     ;;
 esac

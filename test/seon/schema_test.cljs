@@ -20,7 +20,7 @@
     [clojure.string :as str]
     [cljs.test :refer [deftest is testing]]
     [seon.agent]
-    [seon.agent.todo]
+    [my.plan]
     [seon.schema :as schema]
     [seon.test.runner]))
 
@@ -39,8 +39,8 @@
              (:seon.schema/error (ex-data e))))
       (is (= :user-input (:seon.error/kind (ex-data e)))
           "agent-input error kind — the established register! failure mode")
-      (is (str/includes? (ex-message e) ":kb.workout/date")
-          "the error GUIDES: names a corrected multi-segment example")
+      (is (re-find #":\w+\.\w+/\w+" (ex-message e))
+          "the error GUIDES: names a corrected multi-segment keyword example")
       (is (str/includes? (ex-message e) "(seon.db/store-inventory)")
           "the error teaches reuse-first: consult the store before registering"))))
 
@@ -138,13 +138,16 @@
   (let [kinds (set (schema/entity-schema-keys))]
     (testing "the genuine entity kinds are declared and present"
       (doseq [k [:seon.agent :seon.eval :seon.agent.message :seon.fn
-                 :seon.ns :seon.schema :seon.agent.todo/todo :seon.test]]
+                 :seon.ns :seon.schema :my.plan/step :seon.test]]
         (is (contains? kinds k) (str k " is a declared entity kind"))))
     (testing "the 8 formerly-phantom request/response wrappers are gone"
-      (doseq [k [:seon.agent.todo/write-response
-                 :seon.agent.todo/reopen-request
-                 :seon.agent.todo/complete-request
-                 :seon.agent/render-namespace-request
+      ;; `reopen-request`/`complete-request` were consolidated into the single
+      ;; `::id-request` in Phase 6a; the invariant (a request/response :map is
+      ;; never an entity kind) holds for the LIVE wrappers that replaced them.
+      (doseq [k [:my.plan/write-response
+                 :my.plan/status-response
+                 :my.plan/id-request
+                 :seon.agent.ctx/render-namespace-request
                  :seon.handler/input
                  :seon.agent.inspect/request
                  :seon.render/assemble-request

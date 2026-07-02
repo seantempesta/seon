@@ -1,7 +1,8 @@
 ---
 type: issue
 status: open
-tags: [issue, schema]
+severity: cleanup
+tags: [issue, schema, jvm-track, paused]
 ---
 # render/code.clj uses invented :seon.foo/* keywords as live values
 
@@ -18,3 +19,5 @@ tags: [issue, schema]
 ## Severity
 
 cleanup
+
+## Status (2026-06-28 audit): valid but JVM-track is paused — defer until that track resumes.

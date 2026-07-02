@@ -42,8 +42,8 @@ The runtime is built on five primitives. Each has a component note in [`docs/seo
 
 - **Multi-agent shared workspace.** Multiple agents work inside the same running runtime, calling each other's functions, transacting into the same graph, and editing each other's code under capability gates. Code is organized into Clojure namespaces wired into a `core.async.flow` topology — typed message envelopes, uniform backpressure, observability — but agents aren't pinned to a single namespace. Any agent can touch any surface the capability layer permits. ([`docs/seon/concepts/namespace-as-process.md`](docs/seon/concepts/namespace-as-process.md))
 - **Schema-as-contract.** Public functions advertise Malli input/output schemas with fully namespaced keywords (`:seon.trading/position`, never `:position`). The schemas land as datoms in a Datalog graph. "Which functions accept this shape?" is a database query. ([`docs/seon/components/schema-system.md`](docs/seon/components/schema-system.md))
-- **Graph-as-source-of-truth.** Datahike (Datomic-style EAV with bitemporal history, on LMDB) holds the program graph, the data graph, and the conversation graph. The active CLJS pod does not embed datahike — it forwards writes over a Unix socket to the central `wire-server` writer (file-backed datahike at `data/clusters/default/store`) and reads local lazy db values. (The paused JVM track embeds datahike in-process — `[JVM track — paused]`.) One pull reconstructs any agent turn. Sessions survive restarts because the database is durable. ([`docs/seon/components/database.md`](docs/seon/components/database.md))
-- **REPL-as-interface.** The agent does not edit files. It evals forms in an nREPL. The pipeline validates the schema, transacts metadata into the graph, persists the source to disk, and runs the tests the schema selects. Files are a persistence format, not the source of truth. ([`docs/seon/components/dev-tools.md`](docs/seon/components/dev-tools.md))
+- **Graph-as-source-of-truth.** Datahike (Datomic-style EAV with bitemporal history) holds the program graph, the data graph, and the conversation graph. The active CLJS pod does not embed datahike — it forwards writes over a Unix socket to the central `wire-server` writer (file-backed datahike at `data/clusters/default/store`) and reads local lazy db values; the wire-server also carries a Proximum HNSW vector index for semantic search (see Status). (The paused JVM track embeds datahike in-process — `[JVM track — paused]`.) One pull reconstructs any agent turn. Sessions survive restarts because the database is durable. ([`docs/seon/components/database.md`](docs/seon/components/database.md))
+- **REPL-as-interface.** The agent does not edit files. It evals forms in a REPL. The pipeline validates the schema, transacts metadata into the graph, persists the source to disk, and runs the tests the schema selects. Files are a persistence format, not the source of truth. In the live CLJS pod this goes one step further — the agent's *whole context is a render of the database* and its *loop is a function of the database* (see Status). ([`docs/seon/components/dev-tools.md`](docs/seon/components/dev-tools.md))
 - **WASM containment.** The agent's eval surface is moving into a `wasm32-wasip2` Component embedded in a Tauri host process. The capability surface is WIT-typed: `fs`, `http`, `mcp`, `capability-prompt`, `eval`. The Rust host decides what to grant. Wasmtime enforces. ([`docs/prds/agent-runtime/platform.md`](docs/prds/agent-runtime/platform.md))
 
 The language story is open-ended. CLJS today; Python next; ultimately anything the WebAssembly Component Model can host. The runtime is language-agnostic by design — the agent's intelligence comes from the LLM, the safety from the WIT-typed boundary, the persistence from the graph. The language choice becomes a matter of "what fits this task," not a permanent commitment.
@@ -58,13 +58,32 @@ A short list of the people I'm explicitly indebted to. The longer list — Engel
 - **Neal Stephenson** (*The Diamond Age*, 1995). The Young Lady's Illustrated Primer is the design-fiction reference point for what a bonded AI ought to do for the person it serves.
 - **Rich Sutton** ("[The Bitter Lesson](http://www.incompleteideas.net/IncIdeas/BitterLesson.html)", 2019). Seventy years of AI research collapsed into one usable principle. Seon's "language, not tools" bet is one version of his thesis applied to agent harness design.
 
+## Acknowledgements
+
+Seon is built on open-source work it owes directly, across two layers.
+
+The data and language foundation:
+
+- **datahike** (the replikativ team, EPL-1.0). The open-source, Datomic-compatible Datalog database — plus the Proximum HNSW vector index — that Seon runs as its store. It implements the EAV-with-bitemporal-time data model of Datomic, on the Clojure language — both designed by **Rich Hickey**, whose deeper influence (immutable data, schemas as data, time as a queryable dimension) is credited under Inspirations above.
+
+The real-time UI:
+
+- **Datastar** (Star Federation, MIT). The hypermedia framework behind Seon's SSE-driven live tiles — declarative `data-*` attributes, one connection up, the server streams HTML and the DOM patches itself.
+- **[hyperlith](https://github.com/andersmurphy/hyperlith)** (Anders Murphy, MIT). The render-loop design Seon's live-feed layer adopts: render the view as a pure function of state, stream the compressed result, let the client apply it — no client-side state machine. Anders's "send the whole render down and diff on arrival" approach (and his poor-man's-datastar experiment) shaped how Seon builds composable feeds and interactive tiles.
+
+Resilience:
+
+- **[again](https://github.com/liwp/again)** (Lauri Pesonen, originally listora, EPL-1.0). The retry library whose **strategy-as-a-lazy-seq-of-delays** design Seon's `seon.retry` adopts — backoff is a composable sequence (`multiplicative` → `randomize` → `clamp-delay` → `max-retries` → `max-duration`), not a tangle of flags. `again` itself is JVM-only (it blocks on `Thread/sleep` and catches thrown exceptions), so Seon ports the pure combinators to the CLJS pod and pairs them with a native `async`/`await`, errors-as-values executor — the design is Lauri's, the inspiration explicit.
+
+These licenses (EPL and MIT) are permissive; where Seon ports their code, the upstream copyright and permission notices travel with it.
+
 ## Quickstart
 
 ### Requirements
 
 | Tool | Version | Why |
 |------|---------|-----|
-| **Java (JDK)** | **22+** | The wire-server (datahike writer) runs on the JVM; its Proximum vector index ships class-file 66.0 and uses the Foreign Memory API, both Java 22+ only. `bin/seon` auto-selects a 22+ JDK (macOS via `java_home`; Linux/WSL via `/usr/lib/jvm`, SDKMAN, or PATH) — or set `JAVA_HOME` yourself. |
+| **Java (JDK)** | **22+ (25 preferred)** | The wire-server (datahike writer) runs on the JVM; its Proximum vector index ships class-file 66.0 and uses the Foreign Memory API, both Java 22+ only — 22 is the hard floor. `bin/_java-home-resolver` *prefers* JDK 25 (newest that runs the fork + suite, ~7% faster, no behavior change) and falls back to any pinned JDK or to `java` on PATH with a warning. `bin/seon` keeps a `>=22` assert as the safety net; a 22-only machine still runs, just unpinned. Set `JAVA_HOME` to override. |
 | **Clojure CLI** | 1.12+ | Builds the CLJS pod and runs the wire-server. |
 | **Babashka** (`bb`) | 1.x | Dev hooks, MCP servers, and datahike's build tasks. |
 | **Node.js** + npm | 22+ (24 recommended) | The agent pod is a long-running Node process. |
@@ -74,8 +93,8 @@ A short list of the people I'm explicitly indebted to. The longer list — Engel
 Optional: **Caddy** 2.x (HTTPS reverse proxy), and the JVM dev seat
 (`bin/run`, nREPL 7888 — for development/orchestration, not needed to run
 agents). Platform: **macOS, Linux, and Windows via WSL** — the stack is all
-cross-platform (JVM, Node, Clojure, Babashka) and `bin/seon` selects a 22+
-JDK on each. The `reference-code/*` git submodules are vendored dependency
+cross-platform (JVM, Node, Clojure, Babashka) and `bin/seon` selects a JDK
+(prefers 25, floor 22) on each. The `reference-code/*` git submodules are vendored dependency
 source for reading when stuck — not needed to run, so a plain `git clone` is
 fine.
 
@@ -87,10 +106,17 @@ Run the core, talk to an agent, watch it work:
 git clone https://github.com/seantempesta/seon && cd seon
 npm install
 bin/seon prep             # one-time: clones + Java-preps the datahike fork (:writer + :cljs)
-export DEEPSEEK_API_KEY=sk-...
+cp .env.example .env      # the config surface — edit it for keys/provider/ports
+export DEEPSEEK_API_KEY=sk-...   # (env vars override .env; either works)
 bin/seon start all        # cljs build → wire-server → agent pod, ready-gated
 open http://localhost:7890/agents
 ```
+
+`.env` (gitignored) is Seon's entire config surface — there is no config
+file, every knob is an env var. `bin/seon` sources `.env` at boot with shell
+env vars taking precedence. `.env.example` documents every setting
+(`SEON_AI_PROVIDER`, `SOUL.md` path, ports, the `SEON_EMBED` flag, …); edit
+`.env`, not `.env.example`.
 
 Mint an agent on that page and talk to it: the left pane is the
 conversation, the right pane is the agent's **live tile** — the thing
@@ -139,7 +165,22 @@ This is a research project in active development, not a product. Some parts work
 
 Per-milestone evidence (which commits and branches back which status) is in [`docs/seon/lineage/milestone-prior-work.md`](docs/seon/lineage/milestone-prior-work.md).
 
-The next ship is the [v1 agent REPL specification](docs/prds/agent-runtime/v1.md): session-survival, observability, program-graph discovery against an LLM (DeepSeek today, others later). Implementation status tracked in [`docs/prds/agent-runtime/STATUS.md`](docs/prds/agent-runtime/STATUS.md).
+### Where the work has landed — the CLJS pod track (2026-06)
+
+The milestone table above frames the long arc on the original JVM runtime. Since it was written, the center of gravity moved to the **CLJS pod** — a long-running Node process that is the agent's actual home today — paired with a JVM **wire-server** over a Unix socket. Separating what works from what is designed-and-proven but still being wired in:
+
+**Working today.**
+
+- **A live ClojureScript REPL is the agent's entire surface — no fixed tool catalog.** The agent reads, computes, stores, and replies by evaluating Clojure forms against the shared database. Two properties make this tractable and are the newest load-bearing pieces: the agent's **whole context is a render of the database** (every message, eval, todo, namespace, and document is a *renderable* projected from datoms by its schema — one recursive walker, two views: text for the model, HTML for the human), and its **loop is a function of the database** (runnability is a single datom; a datahike tx-listener wakes the agent when a message lands; the stop policy is one `cond` over DB state). Context is *derived*, not accumulated — fix the underlying data and the surface heals itself, with nothing stored that needs clearing.
+- **Dual-track storage that converges at the wire.** The JVM wire-server is the sole authoritative datahike writer and carries a Proximum HNSW vector index; the pod is an on-device read replica that executes functions locally and forwards writes over the socket. Reads are local lazy database values, so **pod memory scales with the working set, not the corpus**.
+- **Measured scale.** On an isolated benchmark store, point lookups and ref-joins stay sub-millisecond and KNN vector search stays ~5 ms at **100k entities / ~28k vectors**, with the heap at ~**150 MB** after GC and storage at ~**9.5 KB/entity**. Reads scale on a `log(n)` / lazy-paging curve; the one real cost is *bulk write* throughput (HNSW insertion + file commits), a one-time, cache-mitigated batch cost that never touches the read path. Concrete evidence the foundation holds for a six-figure-entity personal corpus. Full numbers: [`docs/prds/embeddings/db-scalability-benchmark-2026-06-25.md`](docs/prds/embeddings/db-scalability-benchmark-2026-06-25.md).
+- **The gym.** An outcome + LLM-judge evaluation harness that measures whether an agent can store data and then cold-retrieve and process it — the measurement loop for context quality, so changes to what the agent sees get scored rather than guessed at.
+
+**Designed and proven against the real API, being wired in.**
+
+- **Semantic search over everything the agent knows.** The embeddings infrastructure — pod search client, JVM write/query sides, the wire path, the Proximum index, and a predictive per-turn retrieval that renders breadcrumb pointers into context — is built and merged, gated by a single `SEON_EMBED` flag (on by default in `bin/seon`, but a graceful no-op without Vertex/`GEMINI_API_KEY` credentials). The multimodal layer is verified directly against Vertex `gemini-embedding-2`: text, image, audio, video, and PDF land in **one unified vector space** (cross-modal retrieval proven; Matryoshka dimension-truncation exact to the bit), and the model is governed so inputs are **not used to train Google's models**. A **content-addressed cache** (SHA-256 of content, folded with model/dim/task) means duplicate content is never re-embedded and an index rebuild never re-pays the API. What remains is wiring the Vertex routing, the multimodal ingest, and the cache/archive into the live pipeline, plus relevance tuning — designed and empirically proven, not yet wired end-to-end on the live pod. Specs: [`docs/prds/embeddings/`](docs/prds/embeddings/).
+
+The immediate focus is converging the two tracks and activating semantic search on the live pod. The broader [v1 agent REPL specification](docs/prds/agent-runtime/v1.md) — session-survival, observability, program-graph discovery against an LLM (DeepSeek today, others later) — remains the reference target, with status in [`docs/prds/agent-runtime/STATUS.md`](docs/prds/agent-runtime/STATUS.md).
 
 API is unstable. Direction may shift unilaterally as the underlying research evolves. Treat anything you build on this as your own to maintain.
 
@@ -189,9 +230,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). All contributions are accepted under AGP
 
 ## Contact
 
-For licensing inquiries, partnership questions, or anything that doesn't fit the issue tracker: sean.tempesta@gmail.com.
+For licensing inquiries, partnership questions, contracting opportunities, or anything that doesn't fit the issue tracker: sean@tempesta.io.
 
 ---
 
-*This README is a living document. Last updated 2026-05-23.*
+*This README is a living document. Last updated 2026-06-25.*
 

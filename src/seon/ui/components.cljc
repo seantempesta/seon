@@ -43,7 +43,9 @@
    `:text` (text color), `:pulse?` (animate)."
   {:running     {:dot "bg-signal"   :text "text-signal"   :pulse? true}
    :active      {:dot "bg-info"     :text "text-info"     :pulse? true}
+   :paused      {:dot "bg-warning"  :text "text-warning"  :pulse? false}
    :idle        {:dot "bg-text-500" :text "text-text-500" :pulse? false}
+   :waiting     {:dot "bg-warning"  :text "text-warning"  :pulse? false}
    :done        {:dot "bg-success"  :text "text-success"  :pulse? false}
    :completed   {:dot "bg-success"  :text "text-success"  :pulse? false}
    :stuck       {:dot "bg-warning"  :text "text-warning"  :pulse? false}
@@ -58,8 +60,10 @@
 ;; ============================================================
 
 (defn page-header
-  "Consistent page header — title (`text-lg`) + optional subtitle
-   (`text-xs`)."
+  "Consistent page header — title plus optional subtitle.
+
+   Title is `text-lg`, subtitle `text-xs`."
+  {:malli/schema [:=> [:cat :any :any] :any]}
   [title subtitle]
   [:div {:class "mb-4"}
    [:h1 {:class "text-lg font-semibold tracking-tight"} title]
@@ -67,14 +71,17 @@
      [:p {:class "text-text-400 text-xs mt-0.5"} subtitle])])
 
 (defn section-header
-  "Uppercase section label used in dashboard cards. `text-xs`,
-   uppercase, wider letter-spacing."
+  "Uppercase section label used in dashboard cards.
+
+   `text-xs`, uppercase, wider letter-spacing."
+  {:malli/schema [:=> [:cat :any] :any]}
   [text]
   [:h2 {:class "text-xs font-semibold text-text-400 uppercase tracking-wider mb-2"}
    text])
 
 (defn card
   "Card container — `bg-base-850` with `p-3` padding, rounded corners."
+  {:malli/schema [:=> [:cat [:* :any]] :any]}
   [& children]
   (into [:div {:class "bg-base-850 rounded p-3"}] children))
 
@@ -83,11 +90,16 @@
 ;; ============================================================
 
 (defn status-dot
-  "Status indicator — 6px colored dot + text label. Active states
+  "Status indicator — 6px colored dot + text label.
+
+   Active states
    pulse. Falls back to `:unknown` styling for unrecognized statuses.
 
    status — keyword from `status-styles`
    label  — optional display override (defaults to status name)"
+  {:malli/schema [:function
+                  [:=> [:cat :any] :any]
+                  [:=> [:cat :any :any] :any]]}
   ([status] (status-dot status nil))
   ([status label]
    (let [{:keys [dot text pulse?]}
@@ -107,6 +119,9 @@
 
    text         — header text
    right-align? — align text right (for numeric columns)"
+  {:malli/schema [:function
+                  [:=> [:cat :any] :any]
+                  [:=> [:cat :any :any] :any]]}
   ([text] (table-header text false))
   ([text right-align?]
    [:th {:class (str "text-left py-1.5 px-3 text-xs font-medium "
@@ -119,6 +134,9 @@
 
    content — cell content
    opts    — `{:right-align? :mono? :muted?}`. `:mono?` defaults true."
+  {:malli/schema [:function
+                  [:=> [:cat :any] :any]
+                  [:=> [:cat :any :any] :any]]}
   ([content] (table-cell content {}))
   ([content {:keys [right-align? mono? muted?] :or {mono? true}}]
    [:td {:class (str "py-2 px-3 text-sm"
@@ -136,13 +154,16 @@
   120)
 
 (defn log-line
-  "Single log line — timestamp, type, content. Type drives the color
+  "Single log line — timestamp, type, content.
+
+   Type drives the color
    via `type-colors`. Long content (>120 chars) uses native
    `<details>` for expand/collapse; the `data-preserve-attr=\"open\"`
    tells Datastar to preserve the open-state across SSE morphs.
 
    entry — `{:timestamp :type :details}` for parsed lines, or
            `{:raw \"...\"}` for unparsed."
+  {:malli/schema [:=> [:cat :map] :any]}
   [{:keys [timestamp type details raw]}]
   (let [type-class      (or (get type-colors type) "text-text-400")
         emphasis?       (contains? #{"LAUNCH" "COMPLETE" "ERROR"} type)
@@ -168,11 +189,15 @@
        [:span {:class "text-text-400"} raw])]))
 
 (defn log-container
-  "Container for log lines — terminal styling, flex-col-reverse for
-   auto-scroll-to-bottom.
+  "Container for log lines — terminal styling, auto-scroll to bottom.
+
+   Uses flex-col-reverse for auto-scroll-to-bottom.
 
    lines      — seq of log entry maps
    max-height — CSS max-height (default \"70vh\")"
+  {:malli/schema [:function
+                  [:=> [:cat :any] :any]
+                  [:=> [:cat :any :any] :any]]}
   ([lines] (log-container lines "70vh"))
   ([lines max-height]
    [:div {:class "bg-base-900 rounded overflow-hidden"}
@@ -191,6 +216,9 @@
 
    message  — primary text
    subtitle — optional secondary text"
+  {:malli/schema [:function
+                  [:=> [:cat :any] :any]
+                  [:=> [:cat :any :any] :any]]}
   ([message] (empty-state message nil))
   ([message subtitle]
    [:div {:class "py-8 px-4 text-center text-text-500"}
@@ -208,6 +236,7 @@
    label    — button text
    active?  — currently active?
    on-click — Datastar `data-on-click` handler string"
+  {:malli/schema [:=> [:cat :any :any :any] :any]}
   [label active? on-click]
   [:button {:class (str "px-2 py-1 text-xs font-mono rounded border "
                         "transition-colors "
@@ -223,6 +252,9 @@
    label    — button text
    on-click — Datastar `data-on-click` handler string
    variant  — `:primary` | `:secondary`"
+  {:malli/schema [:function
+                  [:=> [:cat :any :any] :any]
+                  [:=> [:cat :any :any :any] :any]]}
   ([label on-click] (action-button label on-click :secondary))
   ([label on-click variant]
    (let [class (case variant

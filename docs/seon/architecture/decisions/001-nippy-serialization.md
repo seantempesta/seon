@@ -7,6 +7,10 @@ tags: [decision, architecture, schema, database, flow]
 
 # ADR-001: Nippy for Inter-JVM Serialization
 
+> **Clarification (2026-07):** the active pod↔wire-server wire speaks
+> **Transit** today; nippy remains in play at the store layer (konserve, the
+> datahike backend). The decision below covers the JVM-track inter-JVM channel.
+
 ## Context
 
 Seon's inter-JVM channel (orchestrator to agent flow messages over TCP) used length-prefixed EDN (`pr-str`/`read-string`). Three confirmed data corruption paths: `byte[]` not serializable in EDN, `Float` silently coerced to `Double`, and metadata lost on roundtrip. (The DB layer is unaffected -- on the JVM track `[JVM track — paused]` Datahike runs in-process and never crosses this channel.)

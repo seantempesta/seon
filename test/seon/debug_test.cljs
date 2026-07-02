@@ -27,6 +27,7 @@
     [cljs.test :refer [deftest is testing async use-fixtures]]
     [clojure.string :as str]
     [seon.agent :as agent]
+    [seon.agent.turn :as turn]
     [seon.client :as client]
     [seon.db :as db]
     [seon.debug :as debug]
@@ -221,7 +222,7 @@
                       turn  (await
                               (db/with-agent aid
                                 (fn []
-                                  (agent/run-turn!
+                                  (turn/run-turn!
                                     {:seon.agent/id aid
                                      :seon.agent/llm-fn
                                      (fn [_p] (js/Promise.resolve
@@ -259,7 +260,7 @@
                 (let [turn (await
                              (db/with-agent aid
                                (fn []
-                                 (agent/run-turn!
+                                 (turn/run-turn!
                                    {:seon.agent/id aid
                                     :seon.agent/llm-fn
                                     (fn [_p] (js/Promise.resolve {:text "(+ 1 1)\n"}))

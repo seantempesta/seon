@@ -20,7 +20,7 @@
    ns-scope (`:seon.warn/ns`, optional) limits the CORPUS checks
    (no-malli-schema / return-is-any / arg-is-any / uses-maybe /
    no-return-spec / no-input-spec) to one namespace —
-   the caller (seon.agent/warnings-section) defaults it to the agent's
+   the caller (seon.agent/warnings-block) defaults it to the agent's
    CURRENT ns so an agent isn't confused by other namespaces' defects.
    Omit it for the whole-core overview. The RUNTIME checks
    (failed-evals / slow-evals / failing-tests / bad-ref) and the
@@ -312,9 +312,11 @@
 ;; ============================================================
 
 (defn agent-registered-attrs
-  "PUBLIC: the `seon.ctx/context-model` classifier consumes this as its
-   `:seon.ctx/agent-attrs` leg — ONE provenance query for the attr
-   surface, shared by domain-attrs and the classifier (V3-C).
+  "Attr keywords an AGENT registered — tx lacks a `:core-seed` origin.
+
+   PUBLIC: the `seon.agent.ctx/context-model` classifier consumes this as its
+   `:seon.agent.ctx/agent-attrs` leg — ONE provenance query for the attr
+   surface, shared by domain-attrs and the classifier.
 
    The set of attr keywords whose `:seon.schema/key` row landed in a tx
    that does NOT carry `:seon.db/origin :core-seed` — i.e. attrs
@@ -326,14 +328,13 @@
    `{:seon.db/origin :core-seed}` tx-context, forge-guarded in
    `seon.db`).
 
-   This PROVENANCE rule replaces the old keyword-namespace blanket
-   `(db|seon)(\\..*)?` — which wrongly hid agent-authored `seon.*` data
-   domains (the live store's `:my.workout/*`) from the whole reuse
-   surface (gym S-21 root cause, 2026-06-10). Provenance stays correct
-   as the core grows with NO list to maintain: new core
-   registrations arrive via the boot seed (seed origin → hidden), and
-   anything an agent registers is teed in its own tx (→ visible),
-   whatever keyword namespace it picks."
+   Provenance — not a keyword-namespace pattern — is the rule, so
+   agent-authored `seon.*` data domains (e.g. `:my.workout/*`) stay
+   visible on the reuse surface. It stays correct as the core grows with
+   NO list to maintain: new core registrations arrive via the boot seed
+   (seed origin → hidden), and anything an agent registers is teed in its
+   own tx (→ visible), whatever keyword namespace it picks."
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db]] [:set :keyword]]}
   [db]
   (let [seed-txs (into #{}
                        (map first)
@@ -350,7 +351,9 @@
                        :where [?s :seon.schema/key ?k ?tx]]}))))
 
 (defn domain-attrs
-  "Every DOMAIN attr installed on `db` — the db's datahike schema attrs
+  "Every DOMAIN attr installed on `db` — agent-registered, not core.
+
+   The db's datahike schema attrs
    intersected with [[agent-registered-attrs]] (provenance: the attr's
    `:seon.schema/key` row was asserted OUTSIDE the boot seed). These
    are the attrs agents registered for the human's data — INCLUDING
@@ -397,8 +400,10 @@
                     :seon.db/query [:find '?e :where ['?e attr '_]]})))
 
 (defn check-parallel-attr
-  "DOMAIN attrs in the SAME keyword namespace naming the SAME quantity
-   in DIFFERENT units — e.g. a registered :workout/duration-minutes
+  "DOMAIN attrs naming the SAME quantity in DIFFERENT units.
+
+   Detected within the SAME keyword namespace — e.g. a registered
+   :workout/duration-minutes
    beside the existing :workout/duration-seconds (same ns, shared stem
    'duration', both unit-ish suffixes). GLOBAL — keyword namespaces are
    data domains, not code nses, so :seon.warn/ns is ignored. Within a
@@ -485,7 +490,9 @@
        (sort-by str)))
 
 (defn check-unmarked-entity-kinds
-  "BEHAVIORAL entity-marker check: identity attrs that HAVE stored
+  "Identity attrs with stored datoms but no `{:seon.db/entity true}` map.
+
+   BEHAVIORAL entity-marker check: identity attrs that HAVE stored
    datoms but NO registered `:map` schema marked `{:seon.db/entity
    true}` declaring them as a kind. Replaces the register!-time warn,
    which was a false-positive generator by construction — at
@@ -494,7 +501,7 @@
    id-attr, an undeclared kind is a real defect. Derived at render,
    self-heals the moment the kind is marked. Fires GLOBALLY across
    AGENT-authored kinds (:seon.warn/ns is ignored), but EXCLUDES
-   core-provenance kinds ([[seon.db/core-kinds]]) — agents can't and
+   core-provenance namespaces ([[seon.db/core-attr-namespaces]]) — agents can't and
    shouldn't re-register the compiled core's :map schemas, so nagging
    them about an unmarked core kind is a no-op task. (The fix for a
    core kind is to mark its :map schema {:seon.db/entity true} at
@@ -512,7 +519,7 @@
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
   [{:seon.db/keys [db]}]
   (let [marked (marked-entity-id-attrs)
-        core   (db/core-kinds db)]
+        core   (db/core-attr-namespaces db)]
     {:seon.warn/kind :unmarked-entity-kinds
      :seon.warn/dev-only? true
      :seon.warn/affected
@@ -543,7 +550,7 @@
           "   …])")}))
 
 ;; NOTE: there is deliberately NO "missing example/test" corpus check.
-;; A usage example (a `defn` with `:test` var-meta, B9) is OPT-IN — it
+;; A usage example (a `defn` with `:test` var-meta) is OPT-IN — it
 ;; is authored ONLY when the fn's `:malli/schema` + the ns's rendered
 ;; schemas don't already make the call obvious. Most well-specced fns
 ;; need NO example, so a blanket "this fn has no test" warning would nag
@@ -563,8 +570,11 @@
   "Max `:seon.agent.message/hops` before the wake trigger refuses a message
    (agent↔agent ping-pong guard). Lives here (not seon.agent) so both
    the trigger (seon.agent) and `check-hop-exhausted` read ONE value
-   without a require cycle. hops = 0 when from = the user; each
-   agent-originated send carries waking-message-hops + 1."
+   without a require cycle. hops = 0 when from = the user; an
+   agent-originated send carries the SAME {me,peer}-pair's prior depth
+   + 1 (per-peer, reset at each human message — `outbound-hops`), so a
+   genuine A↔B↔A↔B runaway trips at the cap while distinct delegation
+   rounds (parent→A then parent→B) never accumulate."
   4)
 
 (defn- latest-user-at
@@ -617,8 +627,9 @@
   "Lookup ref attribute should be marked as :db/unique")
 
 (defn check-failed-evals
-  "Failed evals since the latest user message — anywhere in the system
-   (cross-agent). Excludes bad-ref failures (check-bad-ref owns those).
+  "Failed evals since the latest user message, anywhere (cross-agent).
+
+   Excludes bad-ref failures (check-bad-ref owns those).
    Vanishes when the next user msg lands and subsequent evals succeed."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
   [{:seon.db/keys [db]}]
@@ -638,8 +649,9 @@
    :seon.warn/example "(result :<eval-id>)"})
 
 (defn check-bad-ref
-  "Failed evals whose error is datahike's cryptic lookup-ref message —
-   translated into the real fix: the target attr needs
+  "Failed evals whose error is datahike's cryptic lookup-ref message.
+
+   Translated into the real fix: the target attr needs
    {:seon.db/identity true}, or the referenced entity doesn't exist."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
   [{:seon.db/keys [db]}]
@@ -700,7 +712,7 @@
    SUCCEEDS), so this scans `:seon.eval/result-edn`, not
    `:seon.eval/error`. Marker filtering happens in Clojure, not in a
    :where predicate (datahike-cljs string predicates in :where are a
-   known trap — see the gym S-12 note in seon.agent)."
+   known trap)."
   [db]
   (let [cutoff (latest-user-at db)
         rows   (db/query
@@ -720,10 +732,11 @@
          (map (fn [[eid edn _]] [eid (fs-denial-text edn)])))))
 
 (defn check-fs-denied
-  "fs calls DENIED by the capability allowlist since the latest user
-   message — the grant-mismatch shape observed live 2026-06-11: an
-   agent INFERRED its grant from a CWD listing (wrongly — the granted
-   root was an ancestor) instead of reading the configured truth via
+  "fs calls DENIED by the capability allowlist since the last user msg.
+
+   The grant-mismatch shape where an agent INFERRED its grant
+   from a CWD listing (wrongly — the granted root was an ancestor)
+   instead of reading the configured truth via
    `(seon.agent.fs/grants)`. DERIVED from the eval log at render time;
    self-heals when a new user message lands and subsequent fs calls
    stay in scope. GLOBAL — :seon.warn/ns is ignored."
@@ -749,24 +762,34 @@
         ";;     :seon.agent.fs/read-only?    false}")})
 
 (defn check-hop-exhausted
-  "Messages whose `:seon.agent.message/hops` reached [[hop-cap]] SINCE the
-   latest user message — each one is a wake the trigger REFUSED (an
-   agent↔agent reply chain hit the ping-pong guard and was dropped on
-   the floor). A fresh human message resets the chain (hops 0) and
-   scopes these out of the surface."
+  "Messages dropped at the hop cap since the last user message.
+
+   DEAD-LETTER surface — messages whose `:seon.agent.message/hops` reached
+   [[hop-cap]] SINCE the latest user message. Each is a wake the trigger
+   REFUSED (a same-pair agent↔agent reply chain hit the ping-pong guard
+   and was dropped on the floor — the recipient NEVER ran, and the sender
+   often went `:idle` thinking it succeeded). Rendering it here, named
+   `from X → Y`, is the dead-letter: the sender, the recipient (when it
+   next renders), and the human all SEE the bounce instead of a silent
+   deadlock. GLOBAL (cross-agent) on purpose. A fresh human message resets
+   the chain and scopes these out — self-healing, nothing to clear."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
   [{:seon.db/keys [db]}]
   (let [cutoff (latest-user-at db)
         rows   (db/query
                  {:seon.db/db db
                   :seon.db/query
-                  '[:find ?mid ?hops ?at
+                  '[:find ?mid ?hops ?at ?fid ?tid
                     :in $ ?cap
                     :where
                     [?m :seon.agent.message/hops ?hops]
                     [(>= ?hops ?cap)]
                     [?m :seon.agent.message/id ?mid]
-                    [?m :seon.agent.message/at ?at]]
+                    [?m :seon.agent.message/at ?at]
+                    [?m :seon.agent.message/from ?f]
+                    [?m :seon.agent.message/to ?t]
+                    [(get-else $ ?f :seon.agent/id "user") ?fid]
+                    [(get-else $ ?t :seon.agent/id "user") ?tid]]
                   :seon.db/args [hop-cap]})]
     {:seon.warn/kind :hop-exhausted
      :seon.warn/affected
@@ -775,24 +798,28 @@
                     (or (nil? cutoff) (> (.getTime ^js at)
                                          (.getTime ^js cutoff)))))
           (sort-by first)
-          (mapv (fn [[mid hops _]]
+          (mapv (fn [[mid hops _ fid tid]]
                   {:seon.warn/sym   (str mid)
-                   :seon.warn/where (str "hops " hops "/" hop-cap
-                                         " — wake refused")})))
+                   :seon.warn/where (str "from " fid " → " tid
+                                         " — REFUSED at hops " hops "/" hop-cap
+                                         " (recipient never ran)")})))
      :seon.warn/explain
-     (str "An agent↔agent reply chain hit the hop cap (" hop-cap "): the "
-          "wake trigger REFUSED these messages, so their recipients never "
-          "ran. Two agents must not auto-bill an infinite conversation — "
-          "stop replying to replies; involve the human (message the user) "
-          "to continue the thread, which resets hops to 0.")
+     (str "DEAD-LETTER: a same-pair agent↔agent reply chain hit the hop cap ("
+          hop-cap "). The wake trigger REFUSED these messages, so their "
+          "recipients never woke and the senders may have gone idle believing "
+          "they delivered. The cap is a PING-PONG guard (one pair bouncing) — "
+          "distinct delegation rounds do not accumulate. If you are the sender, "
+          "your message did NOT land: stop replying to replies; message the "
+          "HUMAN (resets the chain to hops 0) to continue the thread.")
      :seon.warn/example
      "(seon.agent/message! {:seon.agent.message/content \"summary for you — …\"})  ; to defaults to the user"}))
 
 (defn check-record-errors
-  "Evals whose RECORDING partially failed (`:seon.eval/record-error`,
-   stamped by seon.eval/record-eval! when the program-graph tee rows
-   were dropped and only the bare eval row could be recovered) since
-   the latest user message. Each one is a registration/def that will
+  "Evals whose RECORDING partially failed since the last user message.
+
+   Stamped `:seon.eval/record-error` by seon.eval/record-eval! when the
+   program-graph tee rows were dropped and only the bare eval row could
+   be recovered. Each one is a registration/def that will
    NOT survive a pod restart — the transcript alone looks fine, which
    is exactly the dishonest-record class this check makes loud.
    DERIVED at render; scoped out by the next user message. GLOBAL —
@@ -830,8 +857,9 @@
           "               :seon.db/ref [:seon.eval/id \"<eval-id>\"]})")}))
 
 (defn check-slow-evals
-  "Evals over the slow threshold in the last hour, anywhere. Stops
-   surfacing when new evals are fast and the offenders age out."
+  "Evals over the slow threshold in the last hour, anywhere.
+
+   Stops surfacing when new evals are fast and the offenders age out."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
   [{:seon.db/keys [db]}]
   (let [cutoff (js/Date. (- (js/Date.now) (* 60 60 1000)))]
@@ -888,7 +916,8 @@
    "(seon.test.runner/run-vars {:seon.test.runner/vars ['my.ns/my-test]})"})
 
 (defn check-tile-unresolved
-  "Live tiles pointing at a fn symbol that ISN'T loaded in the runtime —
+  "Live tiles pointing at a fn symbol not loaded in the runtime.
+
    `:seon.render.live-tile/content` names a qualified fn symbol that
    `seon.eval/lookup-value` can't resolve, so the human sees a calm
    \"preparing this view…\" placeholder instead of the real view. Literal
@@ -974,7 +1003,7 @@
 (defn- check-error-cluster
   "Synthetic ::check-response for a registry check that THREW instead
    of returning a cluster — the section degrades PER CHECK, loudly,
-   instead of one broken check killing the whole <warnings> block.
+   instead of one broken check killing the whole WARNINGS block.
    Self-heals: renders only while the check keeps throwing."
   [check e]
   (let [nm (check-name check)]
@@ -988,8 +1017,9 @@
                               "(" nm " {:seon.db/db (deref seon.db/*conn*)})")}))
 
 (defn run-checks
-  "Run every registered check against the request; return only the
-   non-clean responses (those with at least one affected entry). A
+  "Run every registered check; return the non-clean responses.
+
+   Only responses with at least one affected entry are returned. A
    check that THROWS becomes its own `:warn-check-error` cluster — the
    remaining checks still run and render (degrade per-check, loudly)."
   {:malli/schema [:=> [:cat ::check-request] [:vector ::check-response]]}
@@ -1006,40 +1036,46 @@
   (if where (str sym " (" where ")") sym))
 
 (defn- render-cluster
-  "ONE cluster: [kind] explanation, ONE fix example, then the affected
-   list with specific locations. The explanation appears once per kind,
-   never once per fn."
+  "ONE cluster as a single-`;` comment-block:
+   `; [kind] explanation`, ONE fix example as `;` lines, then the
+   affected list with specific locations. Positive-framing: it names what
+   TO do (the fix), and these warnings DERIVE from current state — each
+   vanishes the moment you correct it. The explanation appears once per
+   kind, never once per fn."
   [{:seon.warn/keys [kind affected explain example]}]
-  (str "[" (name kind) "] " explain "\n"
-       "  Fix example:\n"
-       (str/join "\n" (map #(str "    " %) (str/split-lines example)))
+  (str "; [" (name kind) "] " explain "\n"
+       "; Fix it like this:\n"
+       (str/join "\n" (map #(str ";   " %) (str/split-lines example)))
        "\n"
-       "  Affecting: "
+       "; Affecting: "
        (str/join ", " (map render-affected-entry affected))
-       " (" (count affected) "). Please correct before moving on."))
+       " (" (count affected) "). Correct these and this note clears itself."))
 
 (defn- render-urgent-cluster
   "A LOUD cluster for a `:seon.warn/urgent? true` check — something the
    human is hitting THIS render (e.g. a broken live tile). Unmistakable
-   `‼ URGENT` banner, then the same explanation + fix example + affected
-   list. Rendered at the TOP of <warnings>, ahead of the ordinary
-   contract/runtime clusters."
+   `‼ URGENT` banner as a single-`;` line, then the same explanation + fix
+   example + affected list. Rendered at the TOP of the WARNINGS block,
+   ahead of the ordinary contract/runtime clusters."
   [{:seon.warn/keys [kind affected explain example]}]
-  (str "‼ URGENT [" (name kind) "] " explain "\n"
-       "  Fix example:\n"
-       (str/join "\n" (map #(str "    " %) (str/split-lines example)))
+  (str "; ‼ URGENT [" (name kind) "] " explain "\n"
+       "; Fix it like this:\n"
+       (str/join "\n" (map #(str ";   " %) (str/split-lines example)))
        "\n"
-       "  Affecting: "
+       "; Affecting: "
        (str/join ", " (map render-affected-entry affected))
-       " (" (count affected) "). FIX THIS IMMEDIATELY — it auto-resolves "
-       "the moment you do."))
+       " (" (count affected) "). Fix this now — it auto-resolves the "
+       "moment you do."))
 
 (defn render-warnings
-  "Run the registry and render the non-clean checks as a single
-   `<warnings>` block. URGENT clusters (`:seon.warn/urgent? true`) render
-   FIRST with a louder template; the remaining clusters follow in registry
-   order, one cluster per kind. Empty string when clean. Scope the corpus
-   checks with `:seon.warn/ns`; omit it for the whole-core overview.
+  "Render the non-clean checks as a single WARNINGS comment-block.
+
+   Run the registry and render the non-clean checks: a single-`;` `WARNINGS`
+   heading, then one `;` cluster per kind. URGENT clusters
+   (`:seon.warn/urgent? true`) render FIRST with a louder template; the
+   remaining clusters follow in registry order. Empty string when clean.
+   Scope the corpus checks with `:seon.warn/ns`; omit it for the
+   whole-core overview.
 
    DEV-ONLY clusters (`:seon.warn/dev-only? true`, e.g.
    [[check-unmarked-entity-kinds]]) are DROPPED unless the request carries
@@ -1055,9 +1091,8 @@
         {urgent  true
          ordinary false} (group-by (comp boolean :seon.warn/urgent?) clusters)]
     (if (seq clusters)
-      (str "<warnings>\n"
+      (str "; WARNINGS\n"
            (str/join "\n\n"
                      (concat (map render-urgent-cluster urgent)
-                             (map render-cluster ordinary)))
-           "\n</warnings>")
+                             (map render-cluster ordinary))))
       "")))

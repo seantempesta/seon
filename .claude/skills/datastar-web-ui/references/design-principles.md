@@ -70,52 +70,31 @@ Use **dot + text**, not pill badges:
 [:span {:class "px-2 py-1 bg-green-100 text-green-800 rounded-full"} "Running"]
 ```
 
-## Component Library
+## Rendering in the active pod
 
-Always use components from `src/seon/web/components.clj`:
+The pod renders hiccup in `.cljs` and serializes with `seon.ui.html/->string`
+(`src/seon/ui/html.cljc`). There is no `seon.web.components` component library on
+the active track — that is the paused JVM `.clj` web stack. Build tiles directly
+as hiccup and route content through `seon.render/block`:
 
 ```clojure
-(require '[seon.web.components :as ui])
+;; A status chip — dot + label (seon.ui.world/status-chip is the live example)
+[:span {:class "flex items-center gap-1 text-xs font-mono"}
+ [:span {:class "text-signal"} "●"]
+ [:span {:class "text-text-200"} "running"]]
 
-;; Layout
-(ui/page-header "Title" "optional subtitle")     ; [title subtitle]
-(ui/section-header "SECTION NAME")                ; [text]
-(ui/card (ui/section-header "Card") [:p "body"])  ; [& children]
-
-;; Status
-(ui/status-dot :running)                          ; [status] or [status label]
-(ui/status-dot :error "connection lost")
-
-;; Tables
-(ui/table-header "Name")                          ; [text] or [text right-align?]
-(ui/table-header "Price" true)
-(ui/table-cell "abc")                             ; [content] or [content opts]
-(ui/table-cell 42 {:right-align? true :muted? true})
-
-;; Logs
-(ui/log-line {:timestamp ts :type "TOOL" :details "ran query"})  ; [{:keys [timestamp type details raw]}]
-(ui/log-container lines)                          ; [lines] or [lines max-height]
-(ui/log-container lines "50vh")
-
-;; Buttons
-(ui/filter-button "Active" true "@post('/api/filter')")  ; [label active? on-click]
-(ui/action-button "Save" "@post('/api/save')")           ; [label on-click] or [label on-click variant]
-(ui/action-button "Go" "@post('/api/go')" :primary)
-
-;; Empty states
-(ui/empty-state "No results" "Try a different query")    ; [message] or [message subtitle]
+;; Markdown / source / data → hiccup via the ONE typed renderer
+(seon.render/block :html {:seon.render/markdown llm-reply-string})  ; → md->hiccup
+(seon.render/block :html {:seon.render/source   clj-source-string}) ; → clj->hiccup, server-side highlight
 ```
 
 ## Prose/Markdown Styling
 
-For rendered markdown content, use prose classes:
-
-```clojure
-[:div {:class "prose prose-sm max-w-none"}
- (h/raw (md/md-to-html-string content))]
-```
-
-The typography plugin provides dark-theme prose styling via CSS variables in input.css.
+LLM replies arrive as markdown and render through `seon.ui.markdown/md->hiccup`
+(a CLJS-native hand-rolled subset — the full markdown-clj lib is JVM-only), or
+via `seon.render/block` with `{:seon.render/markdown "…"}`. The Tailwind
+`@tailwindcss/typography` plugin supplies dark-theme `prose` styling via the CSS
+variables in `input.css` when a tile opts into `prose prose-sm max-w-none`.
 
 ## Anti-Patterns
 
@@ -133,5 +112,6 @@ The typography plugin provides dark-theme prose styling via CSS variables in inp
 | File | Purpose |
 |------|---------|
 | `docs/prds/namespace-ui/design-system.md` | Full design system spec |
-| `src/seon/web/components.clj` | Reusable UI components |
-| `resources/public/css/input.css` | Tailwind theme source |
+| `src/seon/ui/world.cljs` · `header.cljs` | Live Phosphor hiccup tiles + the status bar (active pod) |
+| `src/seon/render.cljs` | `block`/`slot` — the typed value renderer every tile shares |
+| `resources/public/css/input.css` | Tailwind v4 theme source (`@theme` + `@source`) |

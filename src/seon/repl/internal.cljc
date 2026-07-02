@@ -19,13 +19,25 @@
                               ; it is DROPPED (see below).
         :source string        ; BYTE-FAITHFUL — what the agent typed, char-
                               ; for-char (load-bearing for resume re-eval)
-        :form any}            ; the read sexpr value (always a list/seq)
+        :form any             ; the read sexpr value (always a list/seq)
+        :span [start end]}    ; ABSOLUTE char offsets of the form in `text`
+                              ; (same basis as the `:read` :span) — the
+                              ; closed-loop oracle's clamp-to-HOLD spans for
+                              ; good forms
 
        {:kind :read
         :ok? false
         :narration string     ; same `;;`-comment accumulation rule
         :source string        ; the bad span (offset → recovery point)
-        :error string}        ; rewrite-clj's parser message
+        :error string         ; rewrite-clj's parser message
+        :span [start end]     ; ABSOLUTE char offsets of the bad span in
+                              ; `text` — what a token-canvas re-noise step
+                              ; maps back to mask positions
+        :error-kind keyword}  ; classified failure (`classify-read-error`):
+                              ; :eof / :unmatched-delimiter / :invalid-token
+                              ; / :read — the re-noise / repair layer
+                              ; dispatches on this (tail vs point re-mask;
+                              ; :invalid-token is the embedding-lookup hook)
 
        {:kind :comment
         :narration string}    ; either trailing `;;` comment lines with NO
@@ -39,7 +51,9 @@
 
    A top-level read form is a `:kind :form` entry (EVALUATED) iff it is a
    LIST/SEQ — `(…)` plus the reader-macros that read as seqs (`@x`/`'x`/
-   `#(…)`/`` `(…) ``/`#'x`). EVERYTHING else is prose:
+   `#(…)`/`` `(…) ``/`#'x`) — OR a bare `result/<id>` symbol (a stash
+   RE-REFERENCE that self-evaluates into its prior value, #39).
+   EVERYTHING else is prose:
 
      - real `;`/`;;` comments → kept as narration (the taught reasoning
        channel — these are NOT the trap);
@@ -114,11 +128,19 @@
 ;;     `#(+ % 1)`       → :fn            → (fn* …)
 ;;     `@x`             → :deref         → (clojure.core/deref x)
 ;;     `'x`             → :quote         → (quote x)
-;;     `` `(a b) ``     → :syntax-quote  → (quote (a b))
 ;;     `#'x`            → :var           → (var x)
-;;     `~x` / `~@x`     → :unquote*      → (unquote …) / (unquote-splicing …)
 ;;
 ;;   PROSE — never evaluated:
+;;     - INLINE-BACKTICK code — a top-level `:syntax-quote`
+;;       (`` `(subs s 0 5) ``), `:unquote` (`~x`) or `:unquote-splicing`
+;;       (`~@x`): these sexpr to seqs so `seq?` alone would EVALUATE them,
+;;       but at the agent REPL a leading backtick is ALWAYS inline prose
+;;       (`I'll use \`(subs s 0 5)\` to format`) — never intentional
+;;       macro-quoting. The live damage was a "backtick cascade": one
+;;       inline `\`(form)\`` shredded into multiple junk evals plus bare
+;;       `42`-style atoms, all recorded as real `result/<id>` history
+;;       (the agent's own turn-4 message diagnosed it). Classifying the
+;;       backtick reader-macros as prose stops the cascade at its root.
 ;;     - bare ATOMS — symbols (incl. `do`/`if`), numbers, strings,
 ;;       keywords, booleans, nil, chars, AND a bare `=>`/`⇒` echo token
 ;;       (a symbol): LLM prose tokenized by the reader, or a fabricated
@@ -144,17 +166,46 @@
 ;; to wrap a value it means to run.
 ;; ============================================================
 
+(def ^:private inline-backtick-tags
+  "rewrite-clj tags whose tokens sexpr to a SEQ (so `seq?` alone would
+   EVALUATE them) but are ALWAYS inline-backtick prose at the agent REPL,
+   never intentional macro-quoting — a leading `` ` ``/`~`/`~@`. Treated as
+   prose to stop the inline-backtick cascade (see the classification
+   comment above)."
+  #{:syntax-quote :unquote :unquote-splicing})
+
+(defn- result-ref-symbol?
+  "True if `form` is a bare `result/<id>` symbol — a RE-REFERENCE to a
+   previously-stashed eval value (the documented value-reuse surface,
+   `seon.eval/result-var-ref?`). A bare symbol is normally prose, but a
+   `result/<id>` symbol SELF-EVALUATES into its stashed value, so it is a
+   genuine FORM (evaluated), NOT prose — without this, an agent that
+   refers back to a prior result (`result/abc…` on its own line) gets
+   nothing (#39). The namespace must be EXACTLY `result` (matching the
+   eval-side detector); a digit-leading id (`result/0xO-…`) is an invalid
+   token that THROWS at read time and never reaches here — it stays a
+   `:read` failure, unchanged."
+  [form]
+  (and (symbol? form) (= "result" (namespace form))))
+
 (defn- prose-token?
   "True if a parsed top-level token is PROSE (not evaluated). `form` is
    the read sexpr; `tag` is the rewrite-clj node tag. The form/prose cut
-   is `(seq? form)` — a list/seq evaluates — with ONE refinement: a
+   is `(seq? form)` — a list/seq evaluates — with THREE refinements: a
    `:reader-macro` tagged literal (`#inst`/`#uuid`/`#js`/`#?(…)`) sexprs
    to a seq (`(read-string …)`) but is a DATUM, not a form, so it is
-   prose. Everything that is not a seq (scalars, symbols, `{…}`/`[…]`/
-   `#{…}`) is prose."
+   prose; an inline-backtick reader-macro
+   ([[inline-backtick-tags]] — `` `(…) ``/`~x`/`~@x`) likewise sexprs to a
+   seq but is inline prose, not code; and a bare `result/<id>` symbol
+   ([[result-ref-symbol?]]) is a stash RE-REFERENCE that self-evaluates,
+   so it is a FORM (#39) despite being a bare symbol. Everything else
+   that is not a seq (scalars, other symbols, `{…}`/`[…]`/`#{…}`) is
+   prose."
   [form tag]
-  (or (= tag :reader-macro)
-      (not (seq? form))))
+  (and (not (result-ref-symbol? form))
+       (or (= tag :reader-macro)
+           (contains? inline-backtick-tags tag)
+           (not (seq? form)))))
 
 (defn- data-literal?
   "True if `form` is a top-level DATA LITERAL — a map, vector, or set.
@@ -215,22 +266,86 @@
 ;; a :read-failure entry.
 ;; ============================================================
 
-(defn- find-recovery-point
-  "When parsing fails starting at `offset`, scan forward in `text` for
-   the next column-0 anchor — either an open-delim (`(` / `[` / `{`)
-   OR a comment (`;`). Returns the offset of that anchor, or
-   `(count text)` if none found.
+(defn- backup-over-comment-block
+  "Move a column-0 recovery `anchor` (a genuine next-form `(`) back to the
+   start of the contiguous block of column-0 `;`-comment lines immediately
+   above it, never before `floor`. For an `:eof` (unclosed) failure those
+   comments are the preamble of the recovered next form, so they must
+   re-parse as its narration instead of being swallowed into the broken
+   `:read` span. A non-comment line (e.g. an INDENTED inner call) halts the
+   walk — it stays inside the broken span and never re-parses as a form."
+  [text floor anchor]
+  (loop [start anchor]
+    (if (<= start floor)
+      start
+      ;; text[start-1] is the '\n' just above the anchor line; the previous
+      ;; line begins right after the '\n' that precedes index (start-2).
+      (let [prev-nl    (when (>= (- start 2) 0)
+                         (str/last-index-of text "\n" (- start 2)))
+            line-start (if (and prev-nl (>= prev-nl floor)) (inc prev-nl) floor)]
+        (if (and (>= line-start floor)
+                 (< line-start start)
+                 (str/starts-with? (subs text line-start) ";"))
+          (recur line-start)
+          start)))))
 
-   Including `;` in the anchor set matters: when a LLM emits
-   `(broken-form\n;; intent for next\n(good)`, recovery should land
-   on the `;;` line so the intent attaches as narration to `(good)`,
-   not get swallowed in the bad span."
-  [text offset]
-  (let [tail (subs text offset)
-        m (re-find #"\n[;\(\[\{]" tail)]
-    (if m
-      (+ offset (str/index-of tail m) 1)  ; +1 to land on the anchor
-      (count text))))
+(defn- find-recovery-point
+  "When parsing fails starting at `offset`, return the offset to resume
+   from (or `(count text)` for EOF). `error-kind` (from
+   `classify-read-error`) gates which anchors count as a real new form.
+
+   :eof (UNCLOSED form) — everything after `offset` is INSIDE the open
+   delimiter until a genuine new top-level form, so an interior `;` is NOT
+   a boundary (anchoring there split the unclosed form and let an inner
+   call leak out as an EXECUTING top-level `:form` — silent partial
+   execution of broken code). Anchor ONLY on the next column-0 `(`, then
+   back up over the `;;` preamble directly above it so narration still
+   attaches; with NO column-0 `(` ahead the whole tail is inside the
+   unclosed form — recover at EOF, keeping it ONE `:read` whose indented
+   inner calls never run.
+
+   non-:eof (LOCALIZED failure) — keep the original column-0 `(` OR `;`
+   anchor. The `;` anchor is intentional (\"intent attaches to the next
+   form\"): `(broken\\n;; intent\\n(good)` recovers on the `;;` line so the
+   intent narrates `(good)`.
+
+   PRONG 2 (eval-segmenter): the anchor set is `(`/`;` ONLY — NOT `[`/`{`.
+   Under forms-and-prose-only only a `(`-list is a runnable FORM; a
+   column-0 `{`/`[` is almost always the BODY of the broken form above (the
+   inner maps/vectors of an unbalanced `(db/transact! [ {…} {…} ])`).
+   Anchoring on them shredded one broken block into bad-head + N
+   demoted-map `:comment`s + an orphan closer; restricting to `(`/`;` keeps
+   the broken block as ONE honest `:read` span.
+
+   Documented trade-off: a GENUINE bare top-level `{…}` written immediately
+   after a broken form is absorbed into the error span instead of emitting
+   its own demotion warning. Acceptable — a bare top-level map is
+   non-evaluated prose anyway and the agent's real signal is \"fix the
+   broken form above\" (simple-core-over-edge-cases)."
+  [text offset error-kind]
+  (let [tail      (subs text offset)
+        candidate (if (= error-kind :eof)
+                    (if-let [m (re-find #"\n\(" tail)]
+                      (backup-over-comment-block
+                        text offset (+ offset (str/index-of tail m) 1))  ; +1 lands on the `(`
+                      (count text))
+                    (if-let [m (re-find #"\n[;\(]" tail)]
+                      (+ offset (str/index-of tail m) 1)  ; +1 to land on the anchor
+                      (count text)))]
+    ;; STRICT-ADVANCE GUARD — a recovery hop MUST move past `offset` or the
+    ;; outer parse-forms loop recurs on the same span forever. The only branch
+    ;; that can fail to advance is the :eof `backup-over-comment-block` path:
+    ;; when the anchor's contiguous `;`-comment block backs all the way down to
+    ;; `offset` itself, backup returns the floor (== offset). Today that needs
+    ;; `offset` to start with `;`, which parse-forms never feeds here (a `;`
+    ;; line reads as a clean comment token, not an error) — but the parser is
+    ;; load-bearing for the diffusion oracle, so we enforce the invariant at the
+    ;; source rather than rely on that argument holding as the recovery anchors
+    ;; evolve. A non-advancing candidate bails recovery to EOF: the remaining
+    ;; tail becomes ONE honest :read span and the loop terminates.
+    (if (<= candidate offset)
+      (count text)
+      candidate)))
 
 (defn- next-newline-recovery
   "Recovery point for a PROSE-classified failing span (A.1): the offset
@@ -259,6 +374,18 @@
 ;; `{`/`[` is a broken data literal — and data literals are PROSE — so it
 ;; is DROPPED, not recorded as a `:read` failure (matching the clean-read
 ;; data-literal demotion).
+;;
+;; The other prose-side THROW is an inline-backtick span: an agent writes
+;; markdown narration into the eval channel like `` `:seon.db/id` shape ``
+;; or `` `: they're dynamic verbs… ``. The leading `` ` `` makes rewrite-clj
+;; throw `Invalid character: \` … while reading keyword` — a message
+;; `prose-error-re` deliberately does NOT match (broadening it to
+;; "character" would over-drop genuinely broken code). The precise,
+;; intent-matching signal is the LEADING BACKTICK itself
+;; (`backtick-prose-at-start?`): at the agent REPL a leading `` ` ``/`~`/`~@`
+;; is ALWAYS inline narration, never intentional macro-quoting (the same
+;; intent that makes `inline-backtick-tags` prose on the clean-read side),
+;; so a throwing backtick-led span is DROPPED as prose.
 ;; ============================================================
 
 (def ^:private prose-error-re
@@ -287,15 +414,41 @@
   [span]
   (str/starts-with? (str/triml (str span)) "("))
 
+(defn- backtick-prose-at-start?
+  "True when the TRIMMED `span` begins with an inline-backtick reader macro
+   — `` ` `` (syntax-quote), `~` (unquote), or `~@` (unquote-splicing). At the
+   agent REPL a leading backtick is ALWAYS inline markdown narration
+   (`` `:seon.db/id` shape `` — quoting a keyword in prose), never intentional
+   macro-quoting, so a span that THROWS while starting with one is PROSE — it
+   is DROPPED, not recorded as a `:read`. The clean-read counterpart lives in
+   [[prose-token?]]/[[inline-backtick-tags]]; this is the THROW-side mirror,
+   because a leading `` ` `` makes rewrite-clj throw `Invalid character: \\``
+   while reading keyword` (which `prose-error-re` deliberately does not match —
+   the leading-backtick check is the precise, intent-matching signal). The
+   `~`/`~@` cases read cleanly and normally reach [[prose-token?]], but a
+   throwing `~`-led span is narration too — drop it for the same reason."
+  [span]
+  (let [s (str/triml (str span))]
+    (or (str/starts-with? s "`")
+        (str/starts-with? s "~"))))
+
 (defn- prose-failure?
   "True when a failing span should be DROPPED rather than recorded as a
-   `:read` failure: BOTH the reader error matches the prose-token
-   signature AND the span has no LIST opener `(` at the START of its
-   trimmed first line (the opener-at-START rule). `span` is the bad text
-   from `offset` to the narrowed recovery point."
+   `:read` failure. Two intent-matching signals, either suffices:
+
+     - the trimmed span STARTS with an inline-backtick reader macro
+       (`` ` ``/`~`/`~@`) — a leading backtick at the agent REPL is ALWAYS
+       markdown narration, so a throwing backtick-led span is prose
+       ([[backtick-prose-at-start?]]); OR
+     - the reader error matches the prose-token signature AND the span has
+       no LIST opener `(` at the START of its trimmed first line (the
+       opener-at-START rule).
+
+   `span` is the bad text from `offset` to the narrowed recovery point."
   [error span]
-  (and (re-find prose-error-re (str error))
-       (not (opener-at-start? span))))
+  (or (backtick-prose-at-start? span)
+      (and (re-find prose-error-re (str error))
+           (not (opener-at-start? span)))))
 
 ;; ============================================================
 ;; Token-at-a-time scanner. rewrite-clj's parse-string parses ONE
@@ -333,7 +486,12 @@
         ;; comma is Clojure whitespace, but rewrite-clj tags it
         ;; :comma; without it here the sexpr call throws and the
         ;; comma poisons the span up to the next recovery anchor.
-        (#{:whitespace :newline :comma} tag)
+        ;; :uneval is a `#_` discard — the reader IGNORES the discarded
+        ;; form (discard family); its node has no sexpr (rcn/sexpr throws
+        ;; "unsupported operation"), so without this branch a top-level
+        ;; `#_foo` falsely reads as a :read failure. Drop it like
+        ;; whitespace (a bare top-level discard carries nothing to eval).
+        (#{:whitespace :newline :comma :uneval} tag)
         {:kind :whitespace :end end}
 
         :else
@@ -342,8 +500,101 @@
       {:kind :error :error (#?(:clj .getMessage :cljs .-message) e)})))
 
 ;; ============================================================
+;; Read-failure classification
+;; ============================================================
+
+(defn- classify-read-error
+  "Map a rewrite-clj parse-failure message to an error-kind keyword the
+   re-noise / repair layer dispatches on. The kinds, with their recovery
+   disposition (SAFE = mechanically completable, intent-preserving;
+   UNSAFE = needs the agent / a lookup — never silently rewritten):
+
+     :eof                 — unclosed delimiter/string/regex (EOF family).
+                            SAFE: parinferish closes it (`seon.repair`).
+     :unmatched-delimiter — a stray closer. SAFE: drop the surplus.
+     :odd-map             — a map literal with an odd form count
+                            (`{:a 1 :b}`). UNSAFE: a value is MISSING —
+                            guessing it is guessing intent.
+     :bad-metadata        — `^x` where x isn't a map/kw/sym/string. UNSAFE.
+     :invalid-token       — an unreadable token (`3x`, a lone `:`). UNSAFE:
+                            the natural hook for an embedding / source lookup.
+     :read                — anything else (generic broken span). UNSAFE.
+
+   Matched on rewrite-clj's FIXED wording, case-folded, not the whole
+   message. Two reasons, both found by reading rewrite-clj's source:
+     - CASING varies — `parser/core.cljc` throws `Unexpected EOF.` but
+       `reader.cljc` throws a bare lowercase `unexpected EOF`, so a
+       capital-only match misses the low-level read-helper path.
+     - STAGE varies — `:eof`/`:unmatched-delimiter` come from rewrite-clj
+       parse-stage (`reader/throw-reader`, stable wording); `:odd-map` and
+       `:invalid-token`/`:bad-metadata` surface at SEXPR-stage and are host
+       messages. Verified (adversarial review): odd-map is `No value
+       supplied for key` on BOTH CLJS and JVM — they do NOT diverge — so a
+       single match suffices and is CLJC-portable.
+   We match the fixed phrases (not a bare `eof`/`invalid`) so an
+   interpolated user token — `Invalid symbol: my-eof` — can't collide. A
+   wording drift falls through to `:read` — never throws, so an
+   unrecognized message degrades to the generic kind rather than breaking
+   the parse."
+  [msg]
+  ;; `(str msg)` guards a nil exception message (some throws carry none) —
+  ;; lower-case on nil would NPE/TypeError; an empty string falls through to
+  ;; the generic `:read` kind, which is the correct degrade.
+  (let [m (str/lower-case (str msg))]
+    (cond
+      (or (str/includes? m "unexpected eof")
+          (str/includes? m "eof while reading"))     :eof
+      (str/includes? m "unmatched delimiter")        :unmatched-delimiter
+      (str/includes? m "no value supplied for key")  :odd-map
+      (str/includes? m "metadata")                   :bad-metadata
+      (str/includes? m "invalid")                    :invalid-token
+      :else                                          :read)))
+
+(defn- closer-only?
+  "True iff a recovered bad span is ONLY whitespace + closing delimiters
+   (`)`/`]`/`}`). Such a span is an orphan-delimiter RECOVERY ARTIFACT: an
+   unbalanced form upstream already shed it and is itself recorded as a
+   :read failure, so re-emitting the lone closer is duplicate noise (one
+   broken block → a wall of `}`/`]` rows). Never matches a real form — a
+   form leads with `(`/`[`/`{` or a token — so dropping a closer-only span
+   can't hide a genuine failure. Runs on an already-FAILED :read span,
+   never on a valid form, so a `}` inside a good form's string literal is
+   never reached."
+  [s]
+  (boolean (re-matches #"[\s)\]}]+" s)))
+
+;; ============================================================
 ;; Public surface
 ;; ============================================================
+
+(defn form-source-at
+  "Byte-faithful source of the SINGLE top-level form that begins at the
+   first `(` at-or-after `offset` in `text`. Reads exactly one rewrite-clj
+   node (same one-node parse as [[try-parse-one-token]] / the program-graph
+   source capture in `seon.client`), so parens inside CHARACTER literals
+   (`\\)`), REGEX literals (`#\"…)…\"`), and strings are balanced correctly —
+   unlike a raw `(`/`)` depth counter, which truncates such a form. Any
+   leading content before that first `(` is DROPPED (so a `defn` whose
+   `:line` points at the indented inner form of a `#?(:cljs …)` reader
+   conditional still yields source starting at `(defn`).
+
+   Returns:
+
+     - the form's exact source string on success;
+     - the from-first-`(`-to-EOF substring when the chunk is genuinely
+       UNBALANCED (rewrite-clj throws `Unexpected EOF.`) — the
+       truncated-source fallback the source-capture callers rely on;
+     - nil when no `(` opens at-or-after `offset` before EOF."
+  {:malli/schema [:=> [:cat :string :int] [:maybe :string]]}
+  [text offset]
+  (when-some [idx (str/index-of text "(" offset)]
+    (try
+      (rcn/string (rcp/parse-string (subs text idx)))
+      (catch #?(:clj Exception :cljs :default) _
+        ;; Unbalanced-to-EOF (or otherwise unparseable): fall back to the
+        ;; from-`(` substring so a truncated tail still surfaces SOMETHING,
+        ;; matching the prior hand-rolled scanner's EOF fallback.
+        (subs text idx)))))
 
 (defn parse-forms
   "Read `text` top-to-bottom, pairing each evaluable form with the `;;`
@@ -352,8 +603,10 @@
 
    FORMS-AND-PROSE-ONLY (#50/#52): a top-level read form is a `:kind
    :form` entry (EVALUATED) iff it is a LIST/SEQ — `(…)` and the
-   reader-macros that read as seqs (`@x`/`'x`/`#(…)`/`` `(…) ``/`#'x`).
-   EVERYTHING else is prose and is DROPPED (NOT echoed back as a `;;`
+   reader-macros that read as seqs (`@x`/`'x`/`#(…)`/`` `(…) ``/`#'x`) —
+   or a bare `result/<id>` stash RE-REFERENCE symbol (#39, which
+   self-evaluates into its prior value). EVERYTHING else is prose and is
+   DROPPED (NOT echoed back as a `;;`
    line — that echo was the `;;`-imitation trap). Prose covers: bare
    atoms (symbols incl. `do`/`if`, numbers, strings, keywords, a bare
    `=>`/`⇒`), TAGGED literals (`#inst`/`#uuid`/`#js`/`#?(…)`), an A.1
@@ -377,9 +630,17 @@
    entry and parsing continues; a prose-token throw (`80s`) is dropped.
 
    Markdown code-fence lines (` ``` `, ` ```clojure `, ` ~~~ `, …)
-   are stripped before reading — see `strip-code-fences`."
-  [text]
-  (let [text (strip-code-fences text)]
+   are stripped before reading — see `strip-code-fences`.
+
+   `:strip-fences?` (opts, default true) controls that strip. Pass
+   `false` to keep every `:span [s e]` an ABSOLUTE char offset into the
+   EXACT input string (no fence-line removal shifting later spans). The
+   closed-loop renoise path needs this: the diffusion worker's
+   `offset_map` indexes the RAW `canvas_text`, so its parser spans must
+   share that basis — see
+   `docs/prds/diffusion-dynamic-context/research/closed-loop-span-alignment-2026-06-28.md`."
+  [text & [{:keys [strip-fences?] :or {strip-fences? true}}]]
+  (let [text (if strip-fences? (strip-code-fences text) text)]
     ;; `pending` accumulates REAL `;;` comment lines (`;` stripped) — the
     ;; taught reasoning preamble. Bare prose is DROPPED, not accumulated,
     ;; so there is no prose-run to track; `pending` carries THROUGH
@@ -411,7 +672,16 @@
                      (conj out {:kind      :form
                                 :narration (join-narration pending)
                                 :source    (:source token)
-                                :form      (:form token)}))
+                                :form      (:form token)
+                                ;; ABSOLUTE `[start end)` char span of this
+                                ;; form in `text` — the SAME basis the `:read`
+                                ;; entry carries, so the closed-loop renoise /
+                                ;; oracle layer has canvas-aligned spans for
+                                ;; the GOOD forms (clamp-to-HOLD) as well as
+                                ;; the broken ones (renoise). `offset` points
+                                ;; exactly at the form start (leading
+                                ;; whitespace was consumed as prior tokens).
+                                :span      [offset (:end token)]}))
 
               ;; A demoted DATA LITERAL (`{…}`/`[…]`/`#{…}`) — DROP the
               ;; eval, but emit ONE warning so the agent learns to wrap a
@@ -441,12 +711,24 @@
                 ;; at the next newline; carry `pending`.
                 (recur nl-recovery pending out)
                 ;; Broken code — record a :read failure; recover at the
-                ;; next column-0 anchor (form OR comment).
-                (let [recovery (find-recovery-point text offset)]
-                  (recur recovery
-                         []
-                         (conj out {:kind      :read
-                                    :ok?       false
-                                    :narration (join-narration pending)
-                                    :source    (subs text offset recovery)
-                                    :error     (:error token)})))))))))))
+                ;; next genuine top-level boundary (error-kind-aware: an
+                ;; :eof unclosed form never splits at an interior `;`).
+                (let [error-kind (classify-read-error (:error token))
+                      recovery   (find-recovery-point text offset error-kind)
+                      bad-span   (subs text offset recovery)]
+                  (if (closer-only? bad-span)
+                    ;; PRONG 1: a pure-closer span is recovery COLLATERAL
+                    ;; (the orphan delimiter an unbalanced form upstream
+                    ;; already shed). DROP it — the real error is the
+                    ;; bad-head :read already recorded — and carry pending
+                    ;; so a real `;;` preamble still lands on the next form.
+                    (recur recovery pending out)
+                    (recur recovery
+                           []
+                           (conj out {:kind       :read
+                                      :ok?        false
+                                      :narration  (join-narration pending)
+                                      :source     bad-span
+                                      :error      (:error token)
+                                      :span       [offset recovery]
+                                      :error-kind error-kind}))))))))))))

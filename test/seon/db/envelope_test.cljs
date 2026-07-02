@@ -24,7 +24,8 @@
     [datahike.api :as d]
     [seon.db :as db]
     [seon.db.internal :as internal]
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    [seon.test.async :refer [settle!]]))
 
 ;; ---------------------------------------------------------------------------
 ;; Test schemas — isolated under this ns's keyword namespace.
@@ -96,7 +97,7 @@
                         (:seon.error/kind (:seon.error/data error))))
                  (is (= :seon.db/unregistered-attrs
                         (:seon.db/error (:seon.error/data error))))))
-        (.then done))))
+        (settle! done))))
 
 ;; ---------------------------------------------------------------------------
 ;; 2. :double registers, installs, round-trips — the Run-5 trigger.
@@ -130,7 +131,7 @@
                                             :where [_ ::distance-km ?d]]
                                           :seon.db/conn conn})))
                                   ":double value round-trips"))))))
-        (.then done))))
+        (settle! done))))
 
 ;; ---------------------------------------------------------------------------
 ;; 1b. The envelope conversion is LOCAL to `internal/transact!*` (P22 #36):
@@ -156,7 +157,7 @@
                       face's catch is NOT what makes the envelope")
                  (is (= :seon.db/unregistered-attrs
                         (:seon.db/error (:seon.error/data error))))))
-        (.then done))))
+        (settle! done))))
 
 ;; ---------------------------------------------------------------------------
 ;; 3. Registered-but-unbridgeable attr → legible fail-loud envelope.
@@ -182,7 +183,7 @@
                        "error teaches the storable type list")
                    (is (re-find #"envelope-test/blob" msg)
                        "error names the offending attr"))))
-        (.then done))))
+        (settle! done))))
 
 ;; ---------------------------------------------------------------------------
 ;; 4. Cryptic datahike messages → guiding translations + raw preserved.
@@ -217,7 +218,7 @@
                                             :where [_ ::pet-name ?n]]
                                           :seon.db/conn conn})))
                                   "nested value round-trips"))))))
-        (.then done))))
+        (settle! done))))
 
 (deftest nested-only-attr-under-component-ref-installs-and-commits
   ;; The prompt-pinned variant: a FRESH attr appearing ONLY nested under
@@ -244,7 +245,7 @@
                                           '[:find ?n
                                             :where [_ ::kid-name ?n]]
                                           :seon.db/conn conn})))))))))
-        (.then done))))
+        (settle! done))))
 
 (deftest not-in-schema-error-is-translated
   ;; The e2e nested-only path that used to produce this error now
@@ -295,7 +296,7 @@
                      "guiding message names the identity fix")
                  (is (some? raw-error))
                  (is (re-find #":db/unique" raw-error))))
-        (.then done))))
+        (settle! done))))
 
 ;; ---------------------------------------------------------------------------
 ;; 4b. A1 bug 1 — the taught `{:seon.db/ref <eid|lookup-ref> …}` entity-key
@@ -339,7 +340,7 @@
                                          :seon.db/ref))
                                   "junk attr was never installed — no junk
                                    datom can exist"))))))
-        (.then done))))
+        (settle! done))))
 
 (deftest one-arg-tx-data-shape-normalizes
   ;; `(transact! [{…}])` — the exact <your-entity> header shape — must
@@ -495,7 +496,7 @@
                                     "lookup-ref by the keyword resolves the entity")
                                 (is (keyword? (:seon.ns/name ent))
                                     "the stored value is a keyword")))))))
-        (.then done))))
+        (settle! done))))
 
 (deftest ns-name-keyword-still-works-unchanged
   ;; The system's own tee always writes the keyword — that path must be
@@ -523,7 +524,7 @@
                                             :where [_ :seon.ns/name ?n]]
                                           :seon.db/conn conn})))
                                   "keyword stored verbatim"))))))
-        (.then done))))
+        (settle! done))))
 
 ;; ---------------------------------------------------------------------------
 ;; 4c. #46 — a FAILED transact! returns ONE concise envelope. The
@@ -575,7 +576,7 @@
                        "structured data still carries the expected schema")
                    (is (= :user-input (:seon.error/kind data))
                        "kind classification preserved"))))
-        (.then done))))
+        (settle! done))))
 
 (deftest huge-bad-value-stays-bounded
   ;; A multi-kb bad value must NOT balloon the envelope — :seon.db/actual-value
@@ -596,7 +597,7 @@
                                        (:seon.error/data error))))
                          110)
                      ":seon.db/actual-value is truncated, not echoed in full")))
-        (.then done))))
+        (settle! done))))
 
 (deftest translated-error-stays-compact-and-keeps-raw
   ;; Compaction runs AFTER translation: the guiding message + the raw
@@ -618,6 +619,49 @@
     (is (some? raw-error) "raw datahike text survives compaction")
     (is (not (contains? error :seon.error/stack)))
     (is (not (contains? error :seon.error/ex-data)))))
+
+;; ---------------------------------------------------------------------------
+;; 4e. #16 — a successful `[:db/retract …]` reports an HONEST add/retract
+;;     split. The bug: `retracted = tx-count - added` subtraction. A
+;;     retraction tx adds tx-meta datoms (:db/txInstant + :seon.db/request-id)
+;;     whose ADD count equals the whole tx-data count when the user's
+;;     retraction datom comes back over the wire flagged :added true — so
+;;     subtraction reported retracted 0 even though a fact was retracted.
+;;     The envelope now reads the sole writer's honest counts
+;;     (:datoms-added / :datoms-retracted on the report) when present, else
+;;     counts the datoms' :added flags directly. NEVER subtraction.
+;; ---------------------------------------------------------------------------
+
+(deftest retraction-envelope-counts-are-honest
+  (testing "wire path — JVM-supplied :datoms-added/:datoms-retracted win"
+    ;; The exact live repro: 3 datoms, ALL flagged :added true (the
+    ;; retraction's flag was lost on the wire), but the sole writer
+    ;; carried the honest split. Subtraction would give retracted 0.
+    (let [report {:tempids {} :db-after {:max-tx 9}
+                  :datoms-added 2 :datoms-retracted 1
+                  :tx-data [{:a :db/txInstant :added true}
+                            {:a :seon.db/request-id :added true}
+                            {:a ::name :added true}]}
+          env    (internal/transact-success-envelope report false)]
+      (is (= 2 (:seon.db/added env)) "added = the writer's count")
+      (is (= 1 (:seon.db/retracted env))
+          "retracted = the writer's count, NOT (tx-count - added) = 0")
+      (is (= 3 (:seon.db/tx-count env)))))
+  (testing "local path — no writer counts, count the real :added flags"
+    (let [report {:tempids {} :db-after {:max-tx 5}
+                  :tx-data [{:a :db/txInstant :added true}
+                            {:a ::name :added false}]}
+          env    (internal/transact-success-envelope report false)]
+      (is (= 1 (:seon.db/added env)))
+      (is (= 1 (:seon.db/retracted env))
+          "retracted counted off the :added false datom, not subtracted")
+      (is (= 2 (:seon.db/tx-count env)))))
+  (testing "pure-add tx — every datom added, nothing retracted"
+    (let [report {:tempids {} :db-after {:max-tx 3}
+                  :tx-data [{:added true} {:added true} {:added true}]}
+          env    (internal/transact-success-envelope report false)]
+      (is (= 3 (:seon.db/added env)))
+      (is (zero? (:seon.db/retracted env))))))
 
 ;; ---------------------------------------------------------------------------
 ;; 5. register!-time gate — invalid Malli forms fail legibly.

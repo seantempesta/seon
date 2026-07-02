@@ -82,6 +82,18 @@
       (swap! acc conj (subs text @last-end)))
     (if (empty? @acc) [text] @acc)))
 
+(defn inline
+  "Parse one markdown line `text` into a SEQ of inline hiccup children.
+
+   `**bold**`, `*italic*`, `` `code` ``, `[link](url)` — with NO block `<p>`
+   wrapper and no paragraph margins. For tight one-line surfaces (a tile title,
+   a status line). SPLICE the result into the parent element with `into`
+   (`(into [:span {…}] (inline s))`); a parent must never hold the seq as a
+   single child. Use `md->hiccup` for multi-line block content."
+  {:malli/schema [:=> [:catn [::text :string]] [:sequential :any]]}
+  [text]
+  (inline->hiccup text))
+
 ;; ============================================================
 ;; Block parsing — group lines into blocks (headings, paragraphs,
 ;; lists, code fences) then render each.
@@ -198,9 +210,13 @@
 ;; ============================================================
 
 (defn md->hiccup
-  "Render `text` as a vector of hiccup blocks. Returns a `[:div ...]`
-   wrapper so it drops into any parent layout. Pass `:wrap-class` to
-   override the outer div's classes."
+  "Render `text` as a vector of hiccup blocks.
+
+   Returns a `[:div ...]` wrapper so it drops into any parent layout. Pass
+   `:wrap-class` to override the outer div's classes."
+  {:malli/schema [:function
+                  [:=> [:cat :any] :any]
+                  [:=> [:cat :any :any] :any]]}
   ([text] (md->hiccup text nil))
   ([text {:keys [wrap-class] :or {wrap-class "text-xs"}}]
    (let [text   (or text "")

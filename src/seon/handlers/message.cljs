@@ -7,7 +7,7 @@
      :seon.render/ai   'seon.handlers.message/render-ai
      :seon.render/html 'seon.handlers.message/render-html
 
-   The transcript section's html twin (`seon.ctx/transcript-section-html`)
+   The transcript section's html twin (`seon.agent.ctx/transcript-block-html`)
    resolves these per-message symbols (via `seon.render/render-entity-html`
    / `render-entity-ai`) to render the agent's messages as right-pane cards.
 
@@ -28,7 +28,8 @@
   (:require
     [clojure.string :as str]
     [seon.agent :as agent]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.render :as render]))
 
 (defn- resolve-ref
   "Materialize a `{:db/id n}` ref into its identifying attrs. Returns
@@ -56,12 +57,12 @@
   "Format a single message as a single line of LLM-readable text.
 
    `[<from>] <content>`  — e.g. `[user] Define a fn that adds two numbers.`"
-  {:malli/schema [:=> [:cat :map] :seon.render/ai-response]}
-  [{:seon.db/keys [db] :seon.render/keys [entity] :seon.agent/keys [id]}]
-  (let [from (resolve-ref db (:seon.agent.message/from entity))
+  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
+  [{:seon.db/keys [db] :seon.render/keys [node entity] :seon.agent/keys [id]}]
+  (let [entity (or node entity)
+        from (resolve-ref db (:seon.agent.message/from entity))
         body (or (:seon.agent.message/content entity) "")]
-    {:seon.render/ai
-     (str "[" (agent/message-label from id) "] " body)}))
+    (str "[" (agent/message-label from id) "] " body)))
 
 (defn render-html
   "Chat-bubble-style hiccup card — Phosphor Terminal palette.
@@ -71,14 +72,17 @@
      `:seon.agent.message/hops` counter stays in the DATA MODEL (loop
      prevention) but is NOT displayed — it confused users
      (user-requested, 2026-06-10).
-   - Content rendered as MARKDOWN via the inspector's `[data-markdown]`
-     + marked.js mechanism. XSS-safe end-to-end: the attr value is
-     HTML-escaped by seon.ui.html at serialization, and the inspector's
-     `seonMarkdownAll` re-escapes the raw text before `marked.parse`,
-     so agent-authored inline HTML renders as visible text, never DOM."
-  {:malli/schema [:=> [:cat :map] :seon.render/html-response]}
-  [{:seon.db/keys [db] :seon.render/keys [entity] :seon.agent/keys [id]}]
-  (let [from   (resolve-ref db (:seon.agent.message/from entity))
+   - Content rendered as MARKDOWN server-side via the typed
+     `seon.render/block` renderer (`{:seon.render/markdown body}` →
+     `seon.ui.markdown/md->hiccup`). XSS-safe end-to-end: every text node
+     is HTML-escaped by seon.ui.html at serialization, so agent-authored
+     inline HTML renders as visible text, never DOM. No client-side
+     `data-markdown`/marked.js pass — the world shim loads only
+     datastar.js, so the markdown must be hiccup by the time it ships."
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-tile/hiccup]]}
+  [{:seon.db/keys [db] :seon.render/keys [node entity] :seon.agent/keys [id]}]
+  (let [entity (or node entity)
+        from   (resolve-ref db (:seon.agent.message/from entity))
         label  (agent/message-label from id)
         tos    (->> (:seon.agent.message/to entity)
                     (map #(agent/message-label (resolve-ref db %) id))
@@ -102,17 +106,16 @@
                        "mr-auto bg-base-900 border border-base-800"
                        :else
                        "mr-auto bg-base-900 border border-amber-900/50")]
-    {:seon.render/hiccup
-     [:div {:class "py-1 flex"}
-      [:div {:class (str "max-w-[85%] min-w-40 rounded px-2.5 py-1.5 "
-                         bubble-class)}
-       [:div {:class "flex items-baseline gap-2 flex-wrap"}
-        [:span {:class (str "text-xs font-mono font-semibold " from-class)}
-         label]
-        (when (seq tos)
-          [:span {:class "text-xs font-mono text-text-500"}
-           (str "→ " (str/join ", " tos))])
-        (when (instance? js/Date at)
-          [:span {:class "text-xs text-text-500"} (hh-mm-ss at)])]
-       [:div {:class "markdown mt-0.5"
-              :data-markdown (str/trim body)}]]]}))
+    [:div {:class "py-1 flex"}
+     [:div {:class (str "max-w-[85%] min-w-40 rounded px-2.5 py-1.5 "
+                        bubble-class)}
+      [:div {:class "flex items-baseline gap-2 flex-wrap"}
+       [:span {:class (str "text-xs font-mono font-semibold " from-class)}
+        label]
+       (when (seq tos)
+         [:span {:class "text-xs font-mono text-text-500"}
+          (str "→ " (str/join ", " tos))])
+       (when (instance? js/Date at)
+         [:span {:class "text-xs text-text-500"} (hh-mm-ss at)])]
+      [:div {:class "markdown mt-0.5"}
+       (render/block :html {:seon.render/markdown (str/trim body)})]]]))

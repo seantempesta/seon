@@ -15,6 +15,7 @@
  :seon.gym.scenario/doc    "'I ran this morning — 24 minutes.' must land as ONE new row reusing the established :my.workout/* attrs — zero attr forks, ideally zero register! evals (the schema already covers the message). Fully mechanical; catalog S-21."
  :seon.gym.scenario/tier   :paid
  :seon.gym.scenario/status :active
+ :seon.gym.scenario/competency :db-memory
  :seon.gym.scenario/axes   [:reuses-schemas :models-work-directed
                             :terminates :replies-honestly]
  ;; F-workout-schema — the prior agent's exact shape (catalog §3).
@@ -85,7 +86,11 @@
    :seon.gym.predicate/axis   :terminates
    :seon.gym.predicate/query  [:find ?a
                                :where
-                               [?a :seon.agent/state :idle]]
+                               [?a :seon.agent/id _]
+                              (not [?a :seon.agent/terminated-at _])
+                              (not-join [?a]
+                                [?r :seon.agent.run/agent ?a]
+                                [?r :seon.agent.run/status :open])]
    :seon.gym.predicate/expect :non-empty}
   {:seon.gym.predicate/id     :terminates-under-cap
    :seon.gym.predicate/kind   :datalog

@@ -5,7 +5,7 @@
    `test/` root so the suite needs no env var or external checkout: the
    extra-core tests register [[echo-greeting]] into
    `seon.client/!extra-core-vars` by hand, exactly what a real
-   downstream entry ns does with `(seon.indexing/specced-fn-vars)`.
+   downstream entry ns does with `(seon.indexing/public-fn-vars)`.
 
    Deliberately NOT in seon.client's require closure, so it is never in
    `core-vars` — it is only ever an EXTRA var.")

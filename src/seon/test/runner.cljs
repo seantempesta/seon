@@ -19,6 +19,7 @@
   (:refer-clojure :exclude [run!])
   (:require [cljs.test :as t]
             [clojure.string :as str]
+            [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]
             [seon.schema :as schema]))
@@ -331,6 +332,54 @@
        (or (instance? js/Promise v)
            (and (object? v) (fn? (unchecked-get v "then"))))))
 
+;; ============================================================
+;; Per-test wall-clock bound. The async driver below (`drive-test-fn!`,
+;; `run-fixture-fn!`) returns a Promise that resolves only when the body
+;; SETTLES. A never-resolving body — a `^:async` test awaiting a Promise that
+;; never resolves, or an `(async done …)` test that never calls `done` — would
+;; otherwise park `run-vars` forever, and through it the agent turn /
+;; `run-loop!` that awaits the auto-test-run (see
+;; docs/prds/agent-fsm/research/pod-wedge-root-cause-2026-06-28.md). The bound
+;; converts "parked forever" into "one timed-out `:error` event, run
+;; continues." Same no-preemption caveat as every seon timeout (seon.eval): JS
+;; is single-threaded, so the body keeps running in the background; this only
+;; frees the awaiter.
+;; ============================================================
+
+(defn- report-timeout!
+  "Emit a timeout `:error` report event (read by the active reporter via
+   `t/*current-env*`). `what` is :test or :fixture; `label` names the offending
+   sym/ns. Fired from inside `with-test-timeout`'s timer callback, which runs
+   while `run-vars` is still suspended inside its `binding [t/*current-env* …]`,
+   so the event lands in the right builder."
+  [what label ms]
+  (t/do-report
+    {:type    :error
+     :message (str (case what :test "Test" :fixture "Fixture") " `" label
+                   "` timed out after " ms "ms — its body never settled "
+                   "(a never-resolving async body, or an `(async done …)` that "
+                   "never called done). The body keeps running (JS has no "
+                   "preemption); the runner moves on so the agent turn/run-loop "
+                   "awaiting it is never parked.")
+     :expected nil
+     :actual   :seon.test/timeout}))
+
+(defn- with-test-timeout
+  "Race `make-promise` (a thunk returning a drive Promise) against a wall-clock
+   timer of `ms`. The returned Promise ALWAYS resolves nil: when the drive
+   settles first → resolve; when the timer wins → call `on-timeout` then
+   resolve. Clears the timer on settle so a fast test leaks no pending timer.
+   `make-promise` is invoked eagerly (the body starts running immediately)."
+  [ms make-promise on-timeout]
+  (js/Promise.
+    (fn [resolve _reject]
+      (let [settled (volatile! false)
+            fin     (fn [] (when-not @settled (vreset! settled true) (resolve nil)))
+            timer   (js/setTimeout (fn [] (when-not @settled (on-timeout) (fin))) ms)]
+        (-> (make-promise)
+            (.then  (fn [_] (js/clearTimeout timer) (fin)))
+            (.catch (fn [_] (js/clearTimeout timer) (fin))))))))
+
 (defn- drive-test-fn!
   "Invoke the test fn `f`; return a Promise that resolves when the test
    body (sync or async) has finished firing its `(is …)` events.
@@ -441,8 +490,9 @@
         (resolve nil)))))
 
 (defn ^:async run-vars
-  "Run the given fully-qualified test-var symbols, return events +
-   summary as data.
+  "Run the given fully-qualified test-var symbols, return data.
+
+   Returns events + summary as data.
 
    Reporter slot is bound to `::capture`; the volatile builder
    lives in the env under `::!builder` so the per-event defmethods
@@ -485,7 +535,10 @@
         ;; multi-ns batches with >8 nses will iterate nses in
         ;; non-deterministic order. Fix when a use case demands it
         ;; (reduce into a sorted-map or insertion-ordered accumulator).
-        by-ns    (group-by :ns present)]
+        by-ns    (group-by :ns present)
+        ;; Per-test/-fixture wall-clock bound — see `with-test-timeout`. Read
+        ;; once per run so a never-settling body can't park the whole run-loop.
+        ms       (config/test-timeout-ms)]
     (binding [t/*current-env* env]
       (doseq [{:keys [sym]} missing]
         (t/update-current-env! [:report-counters :test] inc)
@@ -498,25 +551,35 @@
               each-fxs (lookup-fixtures ns-sym :each)]
           ;; :once :before — once per ns, in registration order.
           (doseq [fx once-fxs]
-            (await (run-fixture-fn! fx :before ns-sym)))
+            (await (with-test-timeout ms
+                                      #(run-fixture-fn! fx :before ns-sym)
+                                      #(report-timeout! :fixture ns-sym ms))))
           (doseq [{:keys [sym fn]} ns-vars]
             ;; :each :before — registration order, before each test.
             (doseq [fx each-fxs]
-              (await (run-fixture-fn! fx :before ns-sym)))
+              (await (with-test-timeout ms
+                                        #(run-fixture-fn! fx :before ns-sym)
+                                        #(report-timeout! :fixture ns-sym ms))))
             (t/update-current-env! [:testing-vars]
                                    conj #js {:sym sym})
             (t/update-current-env! [:report-counters :test] inc)
             (t/do-report {:type :begin-test-var :var #js {:sym sym}})
-            (await (drive-test-fn! sym fn))
+            (await (with-test-timeout ms
+                                      #(drive-test-fn! sym fn)
+                                      #(report-timeout! :test sym ms)))
             (t/do-report {:type :end-test-var :var #js {:sym sym}})
             (t/update-current-env! [:testing-vars] rest)
             ;; :each :after — REVERSE registration order, after each test
             ;; (matches cljs.test's wrap-map-fixtures, which `reverse`s :after).
             (doseq [fx (reverse each-fxs)]
-              (await (run-fixture-fn! fx :after ns-sym))))
+              (await (with-test-timeout ms
+                                        #(run-fixture-fn! fx :after ns-sym)
+                                        #(report-timeout! :fixture ns-sym ms)))))
           ;; :once :after — reverse order, after all vars in the ns.
           (doseq [fx (reverse once-fxs)]
-            (await (run-fixture-fn! fx :after ns-sym)))))
+            (await (with-test-timeout ms
+                                      #(run-fixture-fn! fx :after ns-sym)
+                                      #(report-timeout! :fixture ns-sym ms))))))
       (let [counters (:report-counters (t/get-current-env))]
         (t/do-report (assoc counters :type :summary))))
     (let [events  (persistent! @!builder)
@@ -568,6 +631,7 @@
 
 (defn fetch-run
   "Look up a stashed run-result by id. Returns nil if absent."
+  {:malli/schema [:=> [:catn [::run-id :string]] :any]}
   [run-id]
   (js/Reflect.get js/globalThis (str stash-key-prefix run-id)))
 
@@ -652,8 +716,7 @@
 ;; ============================================================
 
 (defn vars-in-ns
-  "Return the vector of fully-qualified test-var symbols defined in
-   `ns-sym`.
+  "The fully-qualified test-var symbols defined in `ns-sym`.
 
    IMPLEMENTATION NOTE (per phase-1-probe-results-2026-05-25.md probe 1):
    the analyzer's `ns-interns` projection strips `:test` meta under
@@ -702,7 +765,9 @@
                     {:type ::no-selector :request req}))))
 
 (defn ^:async run!
-  "Universal entrypoint. Resolves the selector to a vector of FQ test
+  "Universal entrypoint.
+
+   Resolves the selector to a vector of FQ test
    symbols, runs them via `run-vars`, optionally records the projection
    to the DB.
 
@@ -784,8 +849,9 @@
         (first pick)))))
 
 (defn last-result
-  "Return `{::run-id ::run-result}` for the most recently recorded run
-   on this pod, or nil. Pulls the run-id from the DB projection, then
+  "The `{::run-id ::run-result}` for the most recently recorded run, or nil.
+
+   Scoped to this pod. Pulls the run-id from the DB projection, then
    fetches the full event sequence from the globalThis stash that
    `stash-run!` wrote.
 
@@ -813,9 +879,11 @@
 ;; ============================================================
 
 (defn tests-referring-to
-  "Return the vector of fully-qualified test syms whose
-   `:seon.test/source` mentions `fn-sym` (string or symbol). Pure DB
+  "The fully-qualified test syms whose `:seon.test/source` mentions `fn-sym`.
+
+   Accepts `fn-sym` as string or symbol. Pure DB
    read — safe to call inside an eval-batch! tx scope."
+  {:malli/schema [:=> [:catn [::fn-sym [:or :string :symbol]]] [:vector :symbol]]}
   [fn-sym]
   (let [needle (str fn-sym)
         rows   (db/query

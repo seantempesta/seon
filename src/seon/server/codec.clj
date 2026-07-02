@@ -1,61 +1,31 @@
 (ns seon.server.codec
-  "CBOR codec + length-framed I/O.
+  "Transit-JSON codec + length-framed I/O.
 
-   Wire format: 4-byte big-endian length + CBOR payload.
+   Wire format: 4-byte big-endian length + Transit-JSON payload.
 
-   We use jackson-cbor for a no-native-deps CBOR encoder/decoder. Jackson's
-   ObjectMapper round-trips strings/ints/floats/booleans/maps/arrays cleanly;
-   Clojure-specific types (keywords, sets, ratios) round-trip via the simple
-   strategy described in PROTOCOL.md (keywords as strings, recover on read)."
-  (:require [clojure.java.io :as io])
-  (:import [com.fasterxml.jackson.databind ObjectMapper]
-           [com.fasterxml.jackson.dataformat.cbor CBORFactory]
-           [java.io DataInputStream DataOutputStream InputStream OutputStream
-                    ByteArrayOutputStream]
-           [java.util LinkedHashMap]))
+   The WHOLE wire frame (control envelope + values) is one Transit-JSON map:
+   `:seon.store.wire/*` keyword keys and native Clojure values (keywords,
+   instants, sets, ratios, BigInts, tx-data, results) all round-trip in a
+   single encode/decode — no inner Transit strings, no keyword flattening.
+   The CLJS pod's `seon.store.internal.wire-node` mirrors this exactly with
+   `cognitect.transit` (transit-cljs). Length-prefix framing is shared,
+   transport-agnostic (UDS now, TCP later)."
+  (:require [cognitect.transit :as t])
+  (:import [java.io DataInputStream DataOutputStream InputStream OutputStream
+                    ByteArrayInputStream ByteArrayOutputStream]))
 
 (set! *warn-on-reflection* true)
 
-(defonce ^ObjectMapper mapper
-  (ObjectMapper. (CBORFactory.)))
-
-(defn- ->java
-  "Convert Clojure data to the Java types Jackson's CBORFactory accepts.
-   - keywords -> :ns/name string (caller-side encoding choice)
-   - sets     -> sorted lists
-   - everything else: maps/vectors/lists become LinkedHashMap/ArrayList through
-     Jackson's bean introspection."
-  [x]
-  (cond
-    (nil? x)     nil
-    (keyword? x) (str (when-let [n (namespace x)] (str n "/")) (name x))
-    (symbol? x)  (str x)
-    (map? x)     (let [m (LinkedHashMap.)]
-                   (doseq [[k v] x] (.put m (->java k) (->java v)))
-                   m)
-    (set? x)     (mapv ->java x)
-    (sequential? x) (mapv ->java x)
-    (or (string? x) (boolean? x) (integer? x) (float? x) (double? x)) x
-    (instance? java.util.Date x) x
-    :else (str x)))
-
-(defn- java->clj
-  "Convert Jackson's parsed objects back to Clojure data. Map keys come back
-   as strings; callers that want keyword keys pull them out by string."
-  [x]
-  (cond
-    (nil? x)                  nil
-    (instance? java.util.Map x)
-      (into {} (for [[k v] x] [(java->clj k) (java->clj v)]))
-    (instance? java.util.List x)
-      (mapv java->clj x)
-    :else x))
-
 (defn encode ^bytes [x]
-  (.writeValueAsBytes mapper (->java x)))
+  (let [out (ByteArrayOutputStream. 1024)
+        w   (t/writer out :json)]
+    (t/write w x)
+    (.toByteArray out)))
 
 (defn decode [^bytes b]
-  (java->clj (.readValue mapper b Object)))
+  (let [in (ByteArrayInputStream. b)
+        r  (t/reader in :json)]
+    (t/read r)))
 
 ;; ---------- Length-framed I/O ----------
 
@@ -68,7 +38,7 @@
     (.flush dout)))
 
 (defn read-frame
-  "Read one length-framed CBOR message. Returns nil on EOF."
+  "Read one length-framed Transit-JSON message. Returns nil on EOF."
   [^InputStream in]
   (let [din (DataInputStream. in)
         len (try (.readInt din) (catch java.io.EOFException _ nil))]

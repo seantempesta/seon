@@ -131,9 +131,9 @@
   ;; shadow runtime (the CLJ-pivot's missing transport piece). Built OUTSIDE
   ;; :client — its own :node-script build, its own :main. `:devtools {:enabled
   ;; true}` so the process registers as a shadow runtime addressable over MCP
-  ;; (`mcp__seon_cljs__eval` agent_id "proc:wire"). Reuses the SAME Transit codec
-  ;; (seon.client-runtime.transit) the WASM guest uses; CBOR framing in
-  ;; seon.store.internal.cbor.
+  ;; (`mcp__seon_cljs__eval` agent_id "proc:wire"). Uses the uniform
+  ;; Transit-JSON frame codec + length framing inlined in
+  ;; seon.store.internal.wire-node (matches seon.server.codec).
   ;;
   ;; Build:  clj -M:cljs watch wire-node
   ;; Run:    node out/wire-node/main.js --process-name wire
@@ -145,6 +145,72 @@
    :devtools         {:enabled true}
    :compiler-options {:warnings-as-errors false
                       :externs           ["externs/node_fs.js"]}}
+
+  ;; LEAN worker-side PARSE/SYNTACTIC oracle — CO-LOCATED on the diffusion
+  ;; GPU worker (diffusion-dynamic-context). The eval-renoise loop
+  ;; validates a partial canvas every checkpoint; co-located this is a
+  ;; ~0.4ms local Node call instead of a ~100ms internet round-trip.
+  ;;
+  ;; ONLY compiles seon.worker-validator + its minimal transitive deps
+  ;; (seon.repl.internal → clojure.string + rewrite-clj — pure CLJC, NO
+  ;; datahike / malli / pod state). A SINGLE standalone bundle the Python
+  ;; worker spawns as a subprocess: code on stdin → one JSON line on
+  ;; stdout. `:optimizations :simple` for a small bundle + fast cold
+  ;; start (NOT :advanced — keeps require("fs") names + skips the slow
+  ;; advanced pass; the bundle is leaf code with no live REPL runtime).
+  ;; :devtools disabled — run-to-exit subprocess, never a shadow runtime.
+  ;;
+  ;; Build:  clj -M:cljs compile worker-validator
+  ;; Run:    echo -n '(def x [)' | node out/worker-validator/main.js
+  ;; Output: out/worker-validator/main.js
+  ;;
+  ;; The running :client watcher IGNORES unwatched builds, so adding this
+  ;; block is safe for the live cluster.
+  :worker-validator
+  {:target           :node-script
+   :output-to        "out/worker-validator/main.js"
+   :main             seon.worker-validator/-main
+   :devtools         {:enabled false}
+   :compiler-options {:warnings-as-errors false
+                      :optimizations      :simple
+                      :externs            ["externs/node_fs.js"]}}
+
+  ;; EVAL/CORRECTNESS oracle — the EVAL-TIER sibling of :worker-validator,
+  ;; CO-LOCATED on the diffusion GPU worker (diffusion-dynamic-context).
+  ;; Parse asks \"is it well-formed?\"; this asks \"does it actually RUN?\"
+  ;; (compile + bounded eval → ok?/error) — the verdict that gates the
+  ;; denoise loop's short-circuit (stop-when-correct) vs renoise.
+  ;;
+  ;; SEPARATE bundle ON PURPOSE: it pulls cljs.js (the self-host CLJS
+  ;; compiler) so it can faithfully compile the CLJS the worker emits
+  ;; (^:async/await, js interop) — bb-SCI/cljs-SCI throw false negatives on
+  ;; that surface. cljs.js is HEAVY (loads the ~15MB out/bootstrap analysis
+  ;; cache at init), so it must NOT bloat the lean parse bundle. NO seon.db /
+  ;; seon.eval / pod state — leaf bundle (cljs.js + shadow bootstrap loader +
+  ;; cljs.analyzer only).
+  ;;
+  ;; Non-termination is BOUNDED via Node's vm.runInThisContext timeout (the
+  ;; compiled JS is native, so SCI's interpreter interrupt cannot fence it).
+  ;;
+  ;; :simple (not :advanced) — keeps require(\"fs\"/\"vm\"/\"readline\")
+  ;; names + the cljs.js/shadow-bootstrap runtime intact; :advanced would
+  ;; munge the self-host machinery. :devtools off — run-to-exit subprocess.
+  ;;
+  ;; Needs out/bootstrap present (clj -M:cljs compile bootstrap).
+  ;; Build:  clj -M:cljs compile worker-oracle-eval
+  ;; Run:    node out/worker-oracle-eval/main.js --serve   (or one-shot via stdin)
+  ;; Output: out/worker-oracle-eval/main.js
+  ;;
+  ;; The running :client watcher IGNORES unwatched builds, so adding this
+  ;; block is safe for the live cluster.
+  :worker-oracle-eval
+  {:target           :node-script
+   :output-to        "out/worker-oracle-eval/main.js"
+   :main             seon.worker-eval/-main
+   :devtools         {:enabled false}
+   :compiler-options {:warnings-as-errors false
+                      :optimizations      :simple
+                      :externs            ["externs/node_fs.js"]}}
 
   ;; 2.2c DIS-replica probe — Node READER side. Opens a JVM-written :file
   ;; store with a stub non-streaming writer (deref-conn follow-the-store

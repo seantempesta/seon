@@ -1,7 +1,8 @@
 ---
 type: issue
 status: open
-tags: [issue, schema]
+severity: cleanup
+tags: [issue, schema, jvm-track, paused]
 ---
 # seon.sse keyword prefix doesn't match its owning namespace
 
@@ -26,3 +27,5 @@ This is the clearest namespace-ownership mismatch in the codebase. The keywords 
 ## Severity
 
 design
+
+## Status (2026-06-28 audit): valid but JVM-track is paused — defer until that track resumes.

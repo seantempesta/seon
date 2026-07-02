@@ -6,11 +6,10 @@
    prod) can reach the agent UI without intermediate infrastructure.
 
    Routes (V0.5):
-     GET  /                  → 302 redirect to /agents (the inspector
-                               picker; the A-6 broadcast shell is unfinished)
+     GET  /                  → 302 redirect to /world (the converged human surface)
      GET  /css/output.css    → resources/public/css/output.css
      GET  /js/datastar.js    → resources/public/js/datastar.js
-     GET  /sse               → SSE stream (A-6 wires broadcast)
+     GET  /sse               → SSE stream
      POST /chat              → A-8 (user message → message! with from = the user ref)
 
    ## Port discovery
@@ -44,11 +43,18 @@
     ["node:fs" :as fs]
     ["node:path" :as path]
     [clojure.string :as str]
+    [goog.object :as gobj]
     [seon.agent :as agent]
+    [seon.ai.tokens :as tokens]
+    [seon.agent.lifecycle :as lifecycle]
+    [seon.agent.run :as run]
     [seon.db :as db]
+    [seon.derive :as derive]
     [seon.log :as log]
     [seon.platform :as platform]
-    [seon.web.inspector :as inspector]))
+    [seon.repl :as repl]
+    [seon.schema :as schema]
+    [seon.web.router :as router]))
 
 ;; ============================================================
 ;; Process-lifetime state
@@ -64,8 +70,9 @@
   !sse-connections (atom []))
 
 (defn open-sse-connections
-  "Public accessor — returns the current vector of open SSE
-   connections. A-6 will close over this via `seon.db/listen!`."
+  "The current vector of open SSE connections.
+
+   A-6 will close over this via `seon.db/listen!`."
   []
   @!sse-connections)
 
@@ -89,13 +96,53 @@
 (defonce ^:private !create-in-flight (atom false))
 
 (defn set-create-agent-fn!
-  "Inject the agent-creation closure (seon.client/start-agent! with the
-   pod's current llm-fn). Called at namespace-load time from
-   seon.client — re-runs on hot reload so the closure tracks reloaded
-   code."
+  "Inject the agent-creation closure from seon.client.
+
+   The injected fn is seon.client/start-agent! with the pod's current
+   llm-fn. Called at namespace-load time from seon.client — re-runs on hot
+   reload so the closure tracks reloaded code."
   {:malli/schema [:=> [:cat fn?] :nil]}
   [f]
   (reset! !create-agent-fn f)
+  nil)
+
+;; ============================================================
+;; /solve scratch-store deps — injected by seon.client (same reason as
+;; !create-agent-fn: serve.cljs can't require seon.client). Each /solve
+;; request runs in its OWN fresh core-seeded :memory store so sample N
+;; never sees samples 1..N-1's facts (cross-sample contamination). The
+;; three fns that build that world live in seon.client and are injected:
+;;   :open-conn   open-agent-conn! — fresh :memory conn w/ the full schema.
+;;   :boot-seed   boot-seed!       — seed the core into it (instruction rows +
+;;                                    :seon.ns/:seon.fn program-graph so the
+;;                                    agent's my.kb toolkit + blocks exist).
+;;   :mint-agent  init-agent!      — mint + arm the scratch agent AGAINST THE
+;;                                    CURRENT *conn* (the scratch conn). NOT
+;;                                    start-agent! (which re-`set!`s *conn* to
+;;                                    the cluster store — that would defeat
+;;                                    isolation, driving the scratch agent's
+;;                                    turns against the shared wire store).
+;; ============================================================
+
+(defonce ^{:doc "Map `{:open-conn <0-arity ⇒ Promise<conn>>
+                  :boot-seed <1-arity {:seon.db/conn conn} ⇒ Promise>
+                  :mint-agent <1-arity {:seon.agent/id … ::mint? … } ⇒
+                  Promise<{:seon.agent/id …}>>}` — injected by seon.client at
+                  load time. nil until the pod finishes loading (a /solve
+                  before then 503s)."}
+  !solve-deps (atom nil))
+
+(defn set-solve-deps!
+  "Inject the /solve scratch-store deps from seon.client.
+
+   `{:open-conn client/open-agent-conn! :boot-seed client/boot-seed!
+     :mint-agent client/init-agent!}` — the three seon.client fns serve.cljs
+   cannot require directly (cycle: client → serve). Called at namespace-load
+   time from seon.client; re-runs on hot reload so the closures track reloaded
+   code."
+  {:malli/schema [:=> [:cat [:map [:open-conn fn?] [:boot-seed fn?] [:mint-agent fn?]]] :nil]}
+  [deps]
+  (reset! !solve-deps deps)
   nil)
 
 ;; ============================================================
@@ -156,16 +203,21 @@
 ;; Route handlers
 ;; ============================================================
 
-(defn- serve-root! [^js res]
-  ;; The root `/` shell (`page/root-html`) is an unfinished A-6 stub: it
-  ;; opens `/sse` but nothing ever pushes a tile patch, so it sits on
-  ;; "loading…" forever (and its placeholder `#agent-seon` id doesn't even
-  ;; match live agent ids). Until A-6's broadcast lands, land the user on
-  ;; the working inspector picker (`/agents`) via a 302 redirect — that
-  ;; route lists live agents and links into the two-pane live view.
-  (.writeHead res 302 #js {"Location"      "/agents"
-                           "Cache-Control" "no-store, no-cache, must-revalidate"})
-  (.end res ""))
+(defn serve-root!
+  "GET / — 302 redirect to the world roster (/world).
+
+   A Ring handler: takes the Ring request `r`, self-extracts the node res.
+   Resolved LATE by the router (db->routes) from the seeded :seon.route/root
+   datom, so it is PUBLIC — its symbol must resolve via eval/lookup-value at
+   request time."
+  [r]
+  ;; `/world` (seon.web.datastar) is the converged human surface — the live
+  ;; agent roster + per-agent canvas/tiles/chat. The root just lands the user
+  ;; there.
+  (let [^js res (:seon.http/node-res r)]
+    (.writeHead res 302 #js {"Location"      "/world"
+                             "Cache-Control" "no-store, no-cache, must-revalidate"})
+    (.end res "")))
 
 (defn- open-sse! [^js req ^js res]
   (.writeHead res 200 #js {"Content-Type"      "text/event-stream"
@@ -191,14 +243,13 @@
                                :remaining (count @!sse-connections)})))))
 
 ;; ============================================================
-;; POST /chat — inject a :user message into the named agent's log.
-;; The agent's user-message trigger (seon.agent/install-user-trigger!)
-;; fires on the resulting tx, run-agentic-loop! starts, the LLM
-;; responds, broadcast morphs the tile via SSE.
+;; POST /chat — inject a user message into the named agent's log.
+;; The message tx wakes the agent's loop; it runs a turn, the LLM
+;; responds, and the inspector morphs the view via SSE.
 ;;
 ;; Body is application/x-www-form-urlencoded (Datastar's
 ;; `@post('/chat', {contentType:'form'})` posts FormData). `agent` is
-;; in the query string (defaults to "seon").
+;; in the query string.
 ;; ============================================================
 
 (defn- read-body
@@ -383,39 +434,207 @@
                                      (str "create agent failed: " err)))))))))
 
 (defn- handle-complete-agent!
-  "POST /agent/<id>/complete — stamp `:seon.agent/completed-at` via
-   `seon.agent/complete!` (the ONE 'done' verb). Confirm-free: it's
-   reversible by an explicit retract (see complete!'s docstring). The
-   completed agent drops out of the mission-control default grid on
-   the SSE re-morph; 200 + id on success, 404 with the envelope's
-   error for an unknown id."
+  "POST /agent/<id>/complete — external control: CLOSE the agent's open run
+   `:completed` (derived state falls to `:idle`, the single wakeable parked
+   state — a new message opens a fresh run). Same effect as the agent's own
+   `complete` verb. When the agent has no open run it is already idle → 200
+   no-op. 200 + id on success, 500 with the store error otherwise."
   [_req res agent-id]
-  (-> (agent/complete! {:seon.agent/id agent-id})
-      (.then (fn [{ok? :seon.agent/ok? id :seon.agent/id
-                   error :seon.agent/error}]
+  (-> (js/Promise.resolve
+        (if-let [r (run/current-run {:seon.agent/id agent-id})]
+          (run/close-run! {:seon.agent.run/id            (:seon.agent.run/id r)
+                           :seon.agent.run/closed-reason :completed})
+          {:seon.db/ok? true}))
+      (.then (fn [{ok? :seon.db/ok? :as env}]
                (if ok?
                  (do (log/info-console! "seon.web.serve"
                                         "POST /agent/<id>/complete OK"
-                                        {:agent id})
+                                        {:agent agent-id})
                      (write-status! res 200 "text/plain; charset=utf-8"
-                                    (str id)))
-                 (do (log/error-console! "seon.web.serve"
-                                         "/agent/<id>/complete refused" error)
-                     (write-status! res 404 "text/plain; charset=utf-8"
-                                    (str error))))))
+                                    (str agent-id)))
+                 (let [error (get-in env [:seon.db/error :seon.error/message])]
+                   (log/error-console! "seon.web.serve"
+                                       "/agent/<id>/complete refused" error)
+                   (write-status! res 500 "text/plain; charset=utf-8"
+                                  (str error))))))
       (.catch (fn [err]
                 (log/error-console! "seon.web.serve"
                                     "/agent/<id>/complete threw" err)
                 (write-status! res 500 "text/plain; charset=utf-8"
                                (str "complete failed: " err))))))
 
-(defn- complete-path->agent-id
-  "`/agent/<id>/complete` → `<id>`; nil for any other path."
-  [path]
-  (when (and (str/starts-with? path "/agent/")
-             (str/ends-with? path "/complete"))
-    (not-empty (subs path (count "/agent/")
-                     (- (count path) (count "/complete"))))))
+;; ============================================================
+;; POST /solve — the external-eval-harness boundary door (inspect-ai). Mint a
+;; FRESH agent (per-sample isolation = a clean per-agent namespace
+;; `my.agent.<id>`), inject `input` as a user message via the REAL wake path
+;; (message!, from = user-ref — identical to /chat), then POLL the DERIVED agent
+;; state to :idle (the agent's OWN multi-turn FSM decides turns, NOT the harness)
+;; or until timeout_ms. Read back the final reply text + turn/eval/closed-reason
+;; metadata and return JSON. NO agent-loop/FSM/context/eval code is touched — a
+;; boundary add only. No Malli schema (opaque node req/res, same as the sibling
+;; handlers). Body is application/json `{"input": "<task>", "timeout_ms": <int?>}`.
+;; ============================================================
+
+(defn- latest-run-start-ms
+  "Wall-clock ms of the agent's MOST-RECENTLY-STARTED run (open or closed) over
+   the db value `db`, or 0 when none. The /solve poll uses this to reject the
+   agent's PRE-INJECTION state: `:idle` alone is ambiguous (a just-minted agent
+   is idle with zero runs BEFORE our message wakes it), so we only accept an
+   idle whose latest run started at/after the injection — i.e. the run our
+   message woke has opened and closed."
+  [db aid]
+  (->> (db/query {:seon.db/db db
+                  :seon.db/query '[:find ?started :in $ ?aid :where
+                                   [?a :seon.agent/id ?aid]
+                                   [?r :seon.agent.run/agent ?a]
+                                   [?r :seon.agent.run/started-at ?started]]
+                  :seon.db/args [aid]})
+       (map (fn [[^js started]] (.getTime started)))
+       (reduce max 0)))
+
+(defn- ^:async solve-once!
+  "Run ONE /solve sample in a FRESH, CORE-SEEDED scratch `:memory` store, then
+   restore the live shared store — mirrors the gym's `run-scenario!`. This is
+   what stops cross-sample contamination: sample N gets a clean world, never
+   samples 1..N-1's facts (a benchmark scored 37.5% purely from pollution).
+
+   Isolation: save the live `*conn*` + FULL schema-registry snapshot, `set!`
+   `*conn*` to a fresh conn, seed the core into it (so the agent has its my.kb
+   toolkit + blocks — an unseeded void agent is useless), then run the existing
+   mint+message+poll+read logic against the scratch conn; the `finally` restores
+   `*conn*` + the registry. SERIAL-ONLY: the async wake path reads the ROOT
+   `@db/*conn*` binding, so this relies on the benchmark running one sample at a
+   time (`--max-samples 1`). Making the conn fiber-local is a separate future
+   item — do NOT attempt it here.
+
+   Inside the scratch store: mint + arm a fresh scratch agent via `mint-agent`
+   (seon.client/init-agent! — the SAME per-agent wiring start-agent! runs, but
+   against the current scratch *conn*; NOT start-agent! itself, which re-`set!`s
+   *conn* to the cluster store and would break isolation), inject `input` via the
+   REAL wake path (message!, from = user-ref), poll the DERIVED state to :idle OF
+   THE RUN OUR MESSAGE WOKE (see [[latest-run-start-ms]]) or `timeout-ms`, then
+   read back the final reply + turn/eval/closed-reason metadata. The pod's OWN
+   FSM manages turns — the harness never does. Returns a Promise of the result
+   map.
+
+   Timeout honesty: on a timeout exit the result carries `:closed_reason
+   \"timeout\"` + `:timed_out true` (NEVER the stale derived last-closed-reason),
+   AND the orphaned run our message woke is CLOSED (`:superseded`) so it stops
+   burning LLM tokens after we've given up on it."
+  [open-conn boot-seed mint-agent input timeout-ms]
+  (let [prev-conn      db/*conn*
+        schemas-before @schema/*schemas]
+    (try
+      (let [conn (await (open-conn))]
+        (set! db/*conn* conn)
+        ;; Boot the scratch store into THE WORLD A POD BOOTS INTO: bootstrap the
+        ;; CLJS compile-state, then seed the core (instruction rows +
+        ;; :seon.ns/:seon.fn program-graph). The seed runs inside a primary
+        ;; agent-id scope so its txs carry the live provenance shape — identical
+        ;; to the gym. (We skip the gym's fs-configure + ai/sync unless a drive
+        ;; shows /solve agents need them — minimal but correct.)
+        (let [compile-state (await (repl/ensure-bootstrap!))
+              seed-primary  (db/new-id!)
+              _             (await (db/with-agent seed-primary
+                                     (fn ^:async seed-core! []
+                                       (await (boot-seed {:seon.db/conn conn})))))
+              ;; Mint + arm the scratch agent ON THE SCRATCH conn. init-agent!
+              ;; resolves *conn* (scratch) + current-llm-fn and installs the wake
+              ;; trigger on the scratch conn, so message! below actually wakes it
+              ;; and its turns run against the scratch store — the whole point.
+              started       (await (mint-agent
+                                     {:seon.agent/id             (db/new-id!)
+                                      :seon.client/mint?         true
+                                      :seon.client/compile-state compile-state}))
+              start         (js/Date.now)
+              aid           (:seon.agent/id started)]
+          (log/info-console! "seon.web.serve" "POST /solve — minted scratch agent"
+                             {:agent aid :tokens (tokens/estimate (str input))})
+          (await (agent/message!
+                   {:seon.agent.message/from    agent/user-ref
+                    :seon.agent.message/to      [[:seon.agent/id aid]]
+                    :seon.agent.message/content input}))
+          ;; `injected-at` = the instant our message landed. The run that
+          ;; PROCESSES it starts at/after this; accept idle only once the latest
+          ;; run began after injection (the task run has run to completion).
+          (loop [injected-at (js/Date.now)]
+            (await (js/Promise. (fn [r] (js/setTimeout r 1500))))
+            ;; ONE db snapshot per poll, passed to every read below (a mid-poll
+            ;; write must not split state vs run-start vs reply reads).
+            (let [db       @db/*conn*
+                  st       (derive/derive-state db aid)
+                  elapsed  (- (js/Date.now) start)
+                  done?    (and (= :idle st) (>= (latest-run-start-ms db aid) injected-at))
+                  timeout? (> elapsed timeout-ms)]
+              (if (or done? timeout?)
+                (do
+                  ;; TIMEOUT HONESTY: close the run we woke (if still open) so it
+                  ;; stops driving turns + burning tokens after we've given up.
+                  (when timeout?
+                    (when-let [run (derive/current-run db aid)]
+                      (await (run/close-run!
+                               {:seon.agent.run/id            (:seon.agent.run/id run)
+                                :seon.agent.run/closed-reason :superseded}))))
+                  (let [agent-eid (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id aid]}))
+                        user-eid  (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.user/id "user"]}))
+                        turns (->> (db/query {:seon.db/db db
+                                              :seon.db/query '[:find ?t :in $ ?ag :where
+                                                               [?r :seon.agent.run/agent ?ag]
+                                                               [?t :seon.agent.turn/run ?r]]
+                                              :seon.db/args [agent-eid]}) count)
+                        evals (->> (db/query {:seon.db/db db
+                                              :seon.db/query '[:find ?e :in $ ?ag :where
+                                                               [?r :seon.agent.run/agent ?ag]
+                                                               [?t :seon.agent.turn/run ?r]
+                                                               [?t :seon.agent.turn/evals ?e]]
+                                              :seon.db/args [agent-eid]}) count)
+                        reply (->> (db/query {:seon.db/db db
+                                              :seon.db/query '[:find ?f ?to ?at ?c :where
+                                                               [?m :seon.agent.message/from ?f]
+                                                               [?m :seon.agent.message/to ?to]
+                                                               [?m :seon.agent.message/at ?at]
+                                                               [?m :seon.agent.message/content ?c]]})
+                                   (filter (fn [[from to _ _]] (and (= from agent-eid) (= to user-eid))))
+                                   (sort-by (fn [[_ _ at _]] (.getTime ^js at)))
+                                   (map (fn [[_ _ _ c]] c)) last)]
+                    ;; On timeout report the HONEST reason — never a stale derived
+                    ;; last-closed-reason from an unrelated earlier close.
+                    (cond-> {:agent_id aid :turns turns :evals evals
+                             :reply (or reply "") :elapsed_ms elapsed
+                             :closed_reason (if timeout?
+                                              "timeout"
+                                              (str (derive/last-closed-reason db aid)))}
+                      timeout? (assoc :timed_out true))))
+                (recur injected-at))))))
+      (finally
+        ;; Restore the live shared store + full registry — the next /solve (or
+        ;; any live agent, /chat, /world) must see the untouched world.
+        (set! db/*conn* prev-conn)
+        (reset! schema/*schemas schemas-before)))))
+
+(defn- handle-solve! [req res]
+  (let [{:keys [open-conn boot-seed mint-agent]} @!solve-deps]
+    (if (or (nil? open-conn) (nil? boot-seed) (nil? mint-agent))
+      (write-status! res 503 "application/json; charset=utf-8"
+                     (js/JSON.stringify #js {:error "pod still booting (solve deps not wired)"}))
+      (-> (read-body req)
+          (.then (fn [body]
+                   (let [parsed     (js->clj (js/JSON.parse body))
+                         input      (get parsed "input")
+                         timeout-ms (or (get parsed "timeout_ms") 300000)]
+                     (solve-once! open-conn boot-seed mint-agent input timeout-ms))))
+          (.then (fn [result]
+                   (log/info-console! "seon.web.serve" "POST /solve OK"
+                                      {:agent      (:agent_id result)
+                                       :turns      (:turns result)
+                                       :evals      (:evals result)
+                                       :elapsed-ms (:elapsed_ms result)})
+                   (write-status! res 200 "application/json; charset=utf-8"
+                                  (js/JSON.stringify (clj->js result)))))
+          (.catch (fn [err]
+                    (log/error-console! "seon.web.serve" "/solve threw" err)
+                    (write-status! res 500 "application/json; charset=utf-8"
+                                   (js/JSON.stringify #js {:error (str err)}))))))))
 
 (defn- handle-chat! [req res]
   ;; Agent-id resolution (audit P1 — 2026-05-24): query param wins,
@@ -448,10 +667,10 @@
                                   (if ok?
                                     (do
                                       (log/info-console! "seon.web.serve" "POST /chat"
-                                                         {:agent agent-id :text-len (count text)})
-                                      ;; #49 observability — a DISTINCT intake
+                                                         {:agent agent-id :tokens (tokens/estimate text)})
+                                      ;; A DISTINCT intake
                                       ;; line per accepted message (the generic
-                                      ;; POST log above only records text-len).
+                                      ;; POST log above only records token count).
                                       ;; Carries the durable message id + hops so
                                       ;; an intake can be correlated with the wake
                                       ;; (or its drain) in logs/pod.log.
@@ -476,37 +695,141 @@
                     (write-status! res 500 "text/plain; charset=utf-8" (str err))
                     (catch :default _ nil)))))))
 
-(defn- handler [req res]
-  (let [url    (or (.-url req) "/")
-        ;; Strip query string for routing match
-        path   (first (str/split url #"\?"))
-        method (or (.-method req) "GET")]
-    (try
-      (case method
-        "GET"  (cond
-                 (= path "/")                       (serve-root! res)
-                 (str/starts-with? path "/css/")    (serve-static! res path)
-                 (str/starts-with? path "/js/")     (serve-static! res path)
-                 (= path "/sse")                    (open-sse! req res)
-                 (inspector/route? path)            (inspector/handle! req res path)
-                 :else                              (write-status! res 404 "text/plain; charset=utf-8"
-                                                                   (str "Not found: " url)))
-        "POST" (cond
-                 (= path "/chat")                   (handle-chat! req res)
-                 (= path "/agents/new")             (handle-create-agent! req res)
-                 (complete-path->agent-id path)     (handle-complete-agent!
-                                                      req res
-                                                      (complete-path->agent-id path))
-                 (= path "/clear")                  (handle-clear! req res)
-                 (= path "/log")                    (handle-log! req res)
-                 :else                              (write-status! res 404 "text/plain; charset=utf-8"
-                                                                   (str "Not found: " url)))
-        (write-status! res 405 "text/plain; charset=utf-8" "Method not allowed"))
-      (catch :default e
-        (log/error-console! "seon.web.serve" "handler error" e)
-        (try
-          (write-status! res 500 "text/plain; charset=utf-8" (str "Internal error: " e))
-          (catch :default _ nil))))))
+;; ============================================================
+;; POST /stop — the graceful STOP: PAUSE the agent's open run (resumable).
+;; `run/pause!` stamps the open run `paused-at` (⇒ derived state `:paused`) and
+;; banks the remaining wall-clock budget; the drive loop reads the lost lease
+;; (the fencing CAS) and exits. No open run ⇒ already idle (204 no-op). The
+;; agent is HELD, not killed — POST /resume re-drives it.
+;; ============================================================
+
+(defn- handle-stop! [req res]
+  ;; Agent-id resolution mirrors /chat: query param wins, else the ALS scope,
+  ;; else 400 — no silent fallback.
+  (let [agent-id (or (query-param req "agent") (db/current-agent-id))]
+    (when-not agent-id
+      (write-status! res 400 "text/plain; charset=utf-8"
+                     "missing 'agent' query param (no agent-id in scope)")
+      (throw (js/Error. "handle-stop!: no agent-id resolved")))
+    (if-let [r (run/current-run {:seon.agent/id agent-id})]
+      (-> (run/pause! {:seon.agent/id     agent-id
+                       :seon.agent.run/id (:seon.agent.run/id r)})
+          (.then (fn [{ok? :seon.db/ok? error :seon.db/error}]
+                   (if ok?
+                     (do
+                       (log/info-console! "seon.web.serve" "POST /stop — paused open run"
+                                          {:agent agent-id :run (:seon.agent.run/id r)})
+                       (write-status! res 204 "text/plain; charset=utf-8" ""))
+                     (do
+                       (log/error-console! "seon.web.serve" "/stop pause! refused"
+                                           (:seon.error/message error))
+                       (write-status! res 422 "text/plain; charset=utf-8"
+                                      (str "stop refused: " (:seon.error/message error)))))))
+          (.catch (fn [err]
+                    (log/error-console! "seon.web.serve" "/stop pause! threw" err)
+                    (write-status! res 500 "text/plain; charset=utf-8"
+                                   (str "stop failed: " err)))))
+      (do
+        (log/info-console! "seon.web.serve" "POST /stop — no open run (already idle)"
+                           {:agent agent-id})
+        (write-status! res 204 "text/plain; charset=utf-8" "")))))
+
+;; ============================================================
+;; POST /resume — wake a PAUSED run. `lifecycle/resume` clears `paused-at`,
+;; re-extends the deadline by the banked budget, AND re-enters the drive loop
+;; (the loop EXITED on :pause, so resume must re-drive). It reads
+;; `(db/current-agent-id)`, so we run it inside the agent's ALS scope via
+;; `db/with-agent` (which preserves the id across the resume's awaits). It
+;; returns the derived state keyword (`:running`) on success or a loud error
+;; envelope (e.g. not paused / no open run).
+;; ============================================================
+
+(defn- handle-resume! [req res]
+  (let [agent-id (or (query-param req "agent") (db/current-agent-id))]
+    (when-not agent-id
+      (write-status! res 400 "text/plain; charset=utf-8"
+                     "missing 'agent' query param (no agent-id in scope)")
+      (throw (js/Error. "handle-resume!: no agent-id resolved")))
+    (-> (js/Promise.resolve (db/with-agent agent-id (fn [] (lifecycle/resume))))
+        (.then (fn [result]
+                 ;; success = a derived state keyword (:running); failure = the
+                 ;; `{:seon.db/ok? false …}` envelope (a map).
+                 (if (keyword? result)
+                   (do
+                     (log/info-console! "seon.web.serve" "POST /resume — re-driving"
+                                        {:agent agent-id :state result})
+                     (write-status! res 204 "text/plain; charset=utf-8" ""))
+                   (let [error (get-in result [:seon.db/error :seon.error/message])]
+                     (log/error-console! "seon.web.serve" "/resume refused" error)
+                     (write-status! res 422 "text/plain; charset=utf-8"
+                                    (str "resume refused: " error))))))
+        (.catch (fn [err]
+                  (log/error-console! "seon.web.serve" "/resume threw" err)
+                  (write-status! res 500 "text/plain; charset=utf-8"
+                                 (str "resume failed: " err)))))))
+
+;; ============================================================
+;; CSRF / same-origin guard for state-changing POSTs. Loopback BINDING is not
+;; protection — a page on any site the human visits can `no-cors` POST to
+;; 127.0.0.1. A browser attaches an `Origin` header on such cross-site
+;; requests, so we refuse any POST whose Origin is present and NOT loopback.
+;; ============================================================
+
+(def ^:private loopback-hosts
+  ;; A same-origin fetch from the pod's own loopback UI carries one of these
+  ;; hostnames; a cross-site Origin (any internet page) will not. The fallback
+  ;; allow when no Host header is available to compare against.
+  #{"127.0.0.1" "localhost" "[::1]" "::1"})
+
+(defn same-origin?
+  "Whether the request passes the same-origin (CSRF) check.
+
+   True (ALLOW) when no `Origin` header is present (curl / the agent / any
+   non-browser caller) OR the request is genuinely same-origin; false (REFUSE)
+   when an Origin IS present and is cross-site — the CSRF case.
+
+   Same-origin is decided by matching the Origin's host to the request's own
+   `Host` header (so it holds for loopback dev AND a Caddy/Tauri front that
+   preserves Host). When no Host is available we fall back to allowing loopback
+   origins only. `req` is an opaque Node IncomingMessage (Ring-style boundary,
+   no Malli schema — same as the /call, inspector, and serve handlers)."
+  [^js req]
+  (let [headers (.-headers req)
+        origin  (when headers (gobj/get headers "origin"))]
+    (boolean
+      (or (str/blank? origin)
+          (try
+            (let [o-host (.-host (js/URL. origin))            ; host[:port] of Origin
+                  h-host (when headers (gobj/get headers "host"))]
+              (or (and h-host (= o-host h-host))               ; genuine same-origin
+                  (contains? loopback-hosts (.-hostname (js/URL. origin)))))
+            (catch :default _ false))))))
+
+;; ============================================================
+;; Reitit front door — `seon.web.router` owns the route vector + the
+;; Node↔Ring adapter; serve keeps the handler fns (they touch serve-state:
+;; the SSE registry, the create-agent closure) and the same-origin? gate (a
+;; test pins it). We INJECT both into router here. This call re-runs on
+;; hot-reload, so the cached router always holds the freshly-reloaded
+;; handler fns. createServer (below) dispatches every request through
+;; `router/handle-request`.
+;; ============================================================
+
+;; `serve-root!` is NOT injected here — it is a SEEDED core route
+;; (:seon.route/root → seon.web.serve/serve-root!), resolved late by the
+;; router's db->routes. Only the non-core supplement handlers are injected.
+(router/install!
+  {:seon.web.router/sse           open-sse!
+   :seon.web.router/static        serve-static!
+   :seon.web.router/chat          handle-chat!
+   :seon.web.router/stop          handle-stop!
+   :seon.web.router/resume        handle-resume!
+   :seon.web.router/clear         handle-clear!
+   :seon.web.router/log           handle-log!
+   :seon.web.router/create-agent  handle-create-agent!
+   :seon.web.router/complete      handle-complete-agent!
+   :seon.web.router/solve         handle-solve!
+   :seon.web.router/same-origin?  same-origin?})
 
 ;; ============================================================
 ;; Lifecycle
@@ -542,8 +865,9 @@
         (if (js/Number.isNaN n) 7890 n)))))
 
 (defn start!
-  "Start the HTTP+SSE server on a loopback port. Returns a Promise
-   resolving to:
+  "Start the HTTP+SSE server on a loopback port.
+
+   Returns a Promise resolving to:
      {:seon.web/port <int> :seon.web/port-file <abs-path>}
 
    Default port is 7890 (override via $SEON_PORT; set to 0 for
@@ -564,6 +888,13 @@
   []
   (js/Promise.
     (fn [resolve reject]
+      ;; Re-derive the router from the NOW-SEEDED route datoms. The top-level
+      ;; (router/install!) ran at module load — before boot-seed! transacted
+      ;; the :seon.route/* rows and before *conn* was set — so its router held
+      ;; only the static supplement. start! runs AFTER boot-seed! (see
+      ;; seon.client/start-agent!), so the live conn now carries the six core
+      ;; routes; rebuild before the server accepts its first request.
+      (router/rebuild!)
       (if-let [live-addr (some-> @!server .address)]
         ;; Already listening — reuse (see docstring; a second
         ;; start-agent! on the same pod must NOT bounce the server).
@@ -576,13 +907,13 @@
             (try (.close old) (catch :default _ nil))
             (reset! !server nil)
             (reset! !sse-connections []))
-          (let [;; LATE-BINDING wrapper, not `handler` itself: createServer
-                ;; captures the fn OBJECT, so passing `handler` directly
-                ;; pins the server to boot-time routes forever — a
-                ;; hot-reloaded route 404s until pod restart (observed
-                ;; live 2026-06-10: /agents/new). The wrapper re-reads
-                ;; the var on every request.
-                server (.createServer http (fn [req res] (handler req res)))
+          (let [;; LATE-BINDING wrapper: createServer captures the fn OBJECT,
+                ;; so the wrapper re-reads `router/handle-request` on every
+                ;; request. `handle-request` derefs the cached reitit
+                ;; ring-handler, which `router/install!` rebuilds on every
+                ;; serve hot-reload — so a reloaded route never 404s until
+                ;; pod restart (the live 2026-06-10 /agents/new failure mode).
+                server (.createServer http (fn [req res] (router/handle-request req res)))
                 port   (requested-port)]
             (.once server "error"
                    (fn [err]

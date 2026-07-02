@@ -12,6 +12,10 @@
     #?(:clj  [clojure.test :as t :refer [deftest is testing]]
        :cljs [cljs.test    :as t :refer [deftest is testing]])
     [clojure.string :as str]
+    [clojure.test.check :as tc]
+    [clojure.test.check.generators :as gen]
+    #?(:clj  [clojure.test.check.properties :as prop]
+       :cljs [clojure.test.check.properties :as prop :include-macros true])
     [seon.repl.internal :as parse]))
 
 ;; ============================================================
@@ -63,10 +67,39 @@
                {:kind :comment :narration "afterthought"}]
     :note "trailing comment after a form → its own comment entry, form kept"}])
 
+(defn- strip-form-span
+  "Drop the `:span` key from `:form` entries so the structural corpus
+   compare stays about narration/source/form. The span itself is proven
+   behaviorally in [[form-span-indexes-source]] (no brittle magic numbers)."
+  [entries]
+  (mapv (fn [e] (if (= :form (:kind e)) (dissoc e :span) e)) entries))
+
 (deftest basic-shapes
   (doseq [{:keys [in expected note]} basic-cases]
     (testing (str note " — " (pr-str in))
-      (is (= expected (parse/parse-forms in))))))
+      (is (= expected (strip-form-span (parse/parse-forms in)))))))
+
+;; ============================================================
+;; Form `:span` is canvas-aligned — every `:kind :form` entry carries an
+;; ABSOLUTE `[start end)` char span whose substring IS its byte-faithful
+;; :source. This is the closed-loop oracle's clamp-to-HOLD basis (the same
+;; basis the :read renoise spans already use). Asserted as a MECHANISM
+;; (subs == source), not pinned offsets.
+;; ============================================================
+
+(deftest form-span-indexes-source
+  (doseq [in ["(+ 1 2)"
+              ";; narration\n(+ 1 2)"
+              "(+ 1 2)\n(+ 3 4)"
+              "(seon.db/transact!\n  {:seon.db/tx-data\n   [{:foo/bar 1}]})"
+              "prose (a)\n;; c\n(b)"]]
+    (testing (str "form :span substring == :source — " (pr-str in))
+      (doseq [e (filter #(= :form (:kind %)) (parse/parse-forms in))]
+        (let [[s end] (:span e)]
+          (is (vector? (:span e)))
+          (is (= 2 (count (:span e))))
+          (is (= (:source e) (subs in s end))
+              (str "span " (pr-str (:span e)) " must index :source for " (pr-str in))))))))
 
 ;; ============================================================
 ;; Byte-faithful :source — load-bearing for resume re-eval
@@ -243,18 +276,24 @@
                    " for " (pr-str in) " — got " (pr-str entries))))))))
 
 ;; ============================================================
-;; Reader-macro forms — `@x`/`'x`/`#(…)`/`#'x`/`` `(…) `` all read as
-;; SEQS, so they EVALUATE (`:kind :form`); they are NOT prose. This is
-;; the seq?-not-coll? cut: a list and any seq-shaped reader macro stay
-;; forms, while maps/vectors/sets are prose.
+;; Reader-macro forms — `@x`/`'x`/`#(…)`/`#'x` all read as SEQS, so they
+;; EVALUATE (`:kind :form`); they are NOT prose. This is the seq?-not-coll?
+;; cut: a list and these seq-shaped reader macros stay forms, while
+;; maps/vectors/sets are prose.
+;;
+;; The INLINE-BACKTICK reader macros — `` `(…) `` (syntax-quote), `~x`
+;; (unquote), `~@x` (unquote-splicing) — ALSO read as seqs but are now
+;; PROSE (dropped): at the agent REPL a leading backtick is always inline
+;; narration (`I'll use \`(subs s 0 5)\``), never intentional
+;; macro-quoting — the "backtick cascade" bug. See `inline-backtick-prose`
+;; below.
 ;; ============================================================
 
 (def reader-macro-cases
   [{:in "@!atom-ref"       :form '(clojure.core/deref !atom-ref)}
    {:in "'x"               :form '(quote x)}
    {:in "#(+ % 1)"         :form '(fn* [%1] (+ %1 1))}
-   {:in "#'some-var"       :form '(var some-var)}
-   {:in "`(a b)"           :form '(quote (a b))}])
+   {:in "#'some-var"       :form '(var some-var)}])
 
 (deftest reader-macros-evaluate
   (doseq [{:keys [in form]} reader-macro-cases]
@@ -267,6 +306,62 @@
         (when (not (str/starts-with? in "#("))
           (is (= form (:form (first entries)))))
         (is (seq? (:form (first entries))))))))
+
+;; ============================================================
+;; #39 — a bare `result/<id>` symbol is a stash RE-REFERENCE, NOT prose.
+;; A bare symbol is normally dropped as prose, but a `result/<id>` symbol
+;; self-evaluates into its previously-stashed eval value (the documented
+;; value-reuse surface, `seon.eval/result-var-ref?`). Before the fix it
+;; was dropped, so an agent referring back to a prior result got nothing.
+;; A digit-leading id (`result/0xO-…`) is an INVALID token that throws at
+;; read time → stays a `:read` failure (covered by `mined-real-agent-leaks`).
+;; ============================================================
+
+(deftest result-ref-is-a-form
+  (testing "a bare `result/<id>` symbol evaluates (is a :form, not dropped)"
+    (let [entries (parse/parse-forms "result/abc123def456")]
+      (is (= 1 (count entries)))
+      (is (= :form (:kind (first entries))))
+      (is (= 'result/abc123def456 (:form (first entries))))
+      ;; byte-faithful source is what the eval path re-references
+      (is (= "result/abc123def456" (:source (first entries))))))
+  (testing "a leading `;;` comment attaches as narration to the re-reference"
+    (let [entries (parse/parse-forms ";; recall the earlier value\nresult/auC2606")
+          form    (first (filter #(= :form (:kind %)) entries))]
+      (is (= 'result/auC2606 (:form form)))
+      (is (= "recall the earlier value" (:narration form)))))
+  (testing "a result-ref between two real forms — all three evaluate in order"
+    (let [forms (->> (parse/parse-forms "(+ 1 2)\nresult/xyz999\n(inc 4)")
+                     (filter #(= :form (:kind %)))
+                     (mapv :form))]
+      (is (= ['(+ 1 2) 'result/xyz999 '(inc 4)] forms))))
+  (testing "a NON-result bare symbol is still prose (dropped)"
+    (is (= [] (parse/parse-forms "other/abc123")))
+    (is (= [] (parse/parse-forms "plainsym")))))
+
+;; ============================================================
+;; Inline-backtick prose — `` `(…) ``/`~x`/`~@x` are DROPPED, never
+;; evaluated. The live "backtick cascade": one inline `` `(form) `` in
+;; LLM narration ("I'll use `(subs s 0 5)` to format") used to shred into
+;; multiple junk `:syntax-quote` evals plus bare-atom prose, all recorded
+;; as real `result/<id>` history. Classifying the backtick reader-macros
+;; as prose stops the cascade at its root.
+;; ============================================================
+
+(deftest inline-backtick-prose
+  (testing "a top-level syntax-quote is prose (dropped), not a form"
+    (is (= [] (parse/parse-forms "`(a b)"))))
+  (testing "unquote / unquote-splicing are prose (dropped)"
+    (is (= [] (parse/parse-forms "~x")))
+    (is (= [] (parse/parse-forms "~@xs"))))
+  (testing "the cascade shape: inline-backtick narration extracts NO forms"
+    (is (= [] (parse/parse-forms "I'll use `(subs s 0 5)` to format."))))
+  (testing "a real bare form after dropped backtick prose still evaluates"
+    ;; `;;` comment carries through the dropped syntax-quote to the form.
+    (let [entries (parse/parse-forms ";; using a quote\n`(noise)\n(+ 1 2)")
+          forms   (filter #(= :form (:kind %)) entries)]
+      (is (= 1 (count forms)))
+      (is (= '(+ 1 2) (:form (first forms)))))))
 
 ;; ============================================================
 ;; Multiline / indented forms are indent-safe — the reader groups a
@@ -331,10 +426,131 @@
               (str "expected kinds " (pr-str expected-kinds-contain)
                    " all present, got " (pr-str kinds))))
         ;; Every :read entry must have :ok? false + non-blank :source + :error
+        ;; + the re-noise/repair fields (:span absolute offsets, :error-kind).
         (doseq [e entries :when (= :read (:kind e))]
           (is (false? (:ok? e)))
           (is (string? (:source e)))
-          (is (string? (:error e))))))))
+          (is (string? (:error e)))
+          (is (vector? (:span e)))
+          (is (= 2 (count (:span e))))
+          (is (keyword? (:error-kind e))))))))
+
+;; ============================================================
+;; :error-kind classification — every rewrite-clj read-throw the
+;; re-noise / repair layer dispatches on. Cores grounded in
+;; tools.reader's impl/errors.clj families (cited in classify-read-error).
+;; rewrite-clj wraps some messages with a `[line L, col C]` PREFIX and
+;; others with an `[at line …]` SUFFIX — these cases pin BOTH shapes so a
+;; prefix-only matcher (the original bug) can't regress.
+;; ============================================================
+
+(def error-kind-cases
+  [{:in "(a b c"          :kind :eof                 :note "unclosed list"}
+   {:in "[1 2 3"          :kind :eof                 :note "unclosed vector"}
+   {:in "{:a 1"           :kind :eof                 :note "unclosed map"}
+   {:in "#{1 2"           :kind :eof                 :note "unclosed set"}
+   {:in "(str \"oops"     :kind :eof                 :note "unterminated string (suffix-form msg)"}
+   {:in "(map #(+ % 1"    :kind :eof                 :note "unclosed anon-fn"}
+   ;; trailing token keeps the span non-closer-only so it survives PRONG 1
+   ;; as a real :read (a pure `(a))` orphan is dropped — see prong1 tests).
+   {:in "(a)) oops"       :kind :unmatched-delimiter :note "surplus closer + trailing token"}
+   {:in "(+ 1 3x)"        :kind :invalid-token       :note "invalid number"}
+   {:in "(get m :)"       :kind :invalid-token       :note "lone colon (prefix-form msg)"}
+   {:in "{:a 1 :b}"       :kind :odd-map             :note "odd map — value MISSING (unsafe to fix)"}
+   {:in "^123 (foo)"      :kind :bad-metadata        :note "metadata not a map/kw/sym/string"}])
+
+(deftest error-kind-classification
+  (doseq [{:keys [in kind note]} error-kind-cases]
+    (testing (str note " — " (pr-str in))
+      (let [reads (filter #(= :read (:kind %)) (parse/parse-forms in))
+            ek    (:error-kind (first reads))]
+        (is (= kind ek)
+            (str "expected :error-kind " kind " got " (pr-str ek)
+                 " (msg: " (:error (first reads)) ")"))))))
+
+;; ============================================================
+;; Borrowed false-positive guard — inputs the real ClojureScript reader
+;; ACCEPTS (corpus lifted from reference-code/.../cljs/reader_test.cljs)
+;; must NEVER produce a :read failure in our parser. We don't start from
+;; zero: the reader's own accepted corpus is our regression net against
+;; mis-flagging valid Clojure as broken.
+;; ============================================================
+
+(def reader-accepted-corpus
+  ;; valid forms the cljs reader round-trips (reader_test.cljs)
+  ["1" "-1" "-1.5" "[3 4]" "\"foo\"" ":hello" "goodbye" "%" "#{1 2 3}"
+   "(7 8 9)" "foo/bar" "\\a" "^String {:a 1}" "[:a b #{c {:d [:e :f :g]}}]"
+   ":foo/bar" "nil" "true" "false" "#_nope 2" "{:a 1 :b 2 :c 3}"
+   "#js [1 2 3]" "#js {:foo \"bar\"}" "#inst \"2010-11-12T13:14:15.666-05:00\""
+   "#uuid \"550e8400-e29b-41d4-a716-446655440000\""
+   "(map #(+ % 1) [1 2 3])" "#?(:clj 1 :cljs 2)" "#'foo" "`(a ~b ~@c)"])
+
+(deftest reader-accepted-never-misflagged
+  (doseq [in reader-accepted-corpus]
+    (testing (str "valid reader input must not :read-fail — " (pr-str in))
+      (is (not-any? #(= :read (:kind %)) (parse/parse-forms in))
+          (str "mis-flagged valid input as broken: " (pr-str in))))))
+
+;; ============================================================
+;; PRONG 1 (eval-segmenter research) — a pure-closer recovery span is an
+;; orphan-delimiter artifact (the unbalanced form upstream already shed
+;; it + is itself recorded). Drop it at emit; never shred one broken
+;; block into a wall of `}`/`]` rows. Assert BEHAVIOR (kinds), not strings.
+;; ============================================================
+
+(def closer-only-cases
+  [{:in "(message/user \"hi\")\n}"   :kinds [:form] :note "trailing orphan } dropped, good form kept"}
+   {:in "(message/user \"hi\")\n]"   :kinds [:form] :note "orphan ] dropped too"}
+   {:in "(a)\n}\n}\n}"               :kinds [:form] :note "stacked orphans all dropped"}
+   {:in "(let [x 1]\n(f x)\n}"       :kinds [:read :form] :note "broken-head :read kept, trailing orphan dropped"}])
+
+(deftest prong1-closer-only-spans-dropped
+  (doseq [{:keys [in kinds note]} closer-only-cases]
+    (testing (str note " — " (pr-str in))
+      (is (= kinds (mapv :kind (parse/parse-forms in)))
+          (str "kinds: " (pr-str (mapv :kind (parse/parse-forms in))))))))
+
+;; ============================================================
+;; PRONG 2 (eval-segmenter research) — recovery anchors narrowed to `(`/`;`
+;; only (never bare `{`/`[`), so a shredded broken block collapses to ONE
+;; honest :read instead of bad-head + N demoted-map rows. Includes the
+;; documented absorption-cost case so the trade-off is visible + intentional.
+;; ============================================================
+
+(def prong2-cases
+  [{:in "(db/transact! :seon [\n{:a 1}\n{:b 2}\n}]" :kinds [:read]
+    :note "shred collapses to one honest :read (no inner-map :comment collateral)"}
+   {:in "{:a 1}" :kinds [:comment]
+    :note "clean bare map still demotes to :comment ⚠ (PRONG 2 doesn't touch clean reads)"}
+   {:in "(good)\n{:a 1}" :kinds [:form :comment]
+    :note "bare map after a GOOD form still demotes + warns"}
+   {:in "(broken [\n{:a 1}" :kinds [:read]
+    :note "ABSORPTION COST: bare map after a BROKEN form is absorbed into the :read span"}])
+
+(deftest prong2-shred-collapses-to-one-read
+  (doseq [{:keys [in kinds note]} prong2-cases]
+    (testing (str note " — " (pr-str in))
+      (is (= kinds (mapv :kind (parse/parse-forms in)))
+          (str "kinds: " (pr-str (mapv :kind (parse/parse-forms in))))))))
+
+(deftest prong1-never-hides-a-real-failure
+  ;; risk #1: a genuinely broken FORM (leading `(` + bad token) must STILL
+  ;; surface as a :read with non-blank source + :error.
+  (testing "real broken form still recorded"
+    (let [r (first (filter #(= :read (:kind %)) (parse/parse-forms "(+ 1 3x)")))]
+      (is (some? r))
+      (is (not (str/blank? (:source r))))
+      (is (string? (:error r)))))
+  ;; risk #2: incomplete final form (EOF mid-form) is ONE honest :read,
+  ;; NOT a dropped orphan (its span is the whole form, not pure closers).
+  (testing "EOF mid-form stays one honest :read"
+    (let [es (parse/parse-forms "(db/transact! :seon [{:a 1}")]
+      (is (= [:read] (mapv :kind es)))
+      (is (not (str/blank? (:source (first es)))))))
+  ;; risk #3: a closer INSIDE a string of a GOOD form is never stripped
+  ;; (closer-only? runs on failed spans only; this form reads clean).
+  (testing "closer inside a string literal is not stripped"
+    (is (= [:form] (mapv :kind (parse/parse-forms "(str \"}\")"))))))
 
 ;; ============================================================
 ;; Narration semantics on recovery — narration accumulated before a
@@ -349,6 +565,61 @@
     (is (= "about-to-fail" (:narration read-entry)))
     (is (some? form-entry))
     (is (= "about-next-good" (:narration form-entry)))))
+
+;; ============================================================
+;; :eof recovery never splits an UNCLOSED form at an interior `;`. An
+;; unclosed form with a column-0 `;;` comment + an INDENTED inner call must
+;; stay ONE broken :read span — the inner call must NEVER leak out as an
+;; executing top-level :form (silent partial execution of broken code).
+;; ============================================================
+
+(deftest eof-recovery-never-leaks-inner-form
+  (let [entries (parse/parse-forms "(defn foo []\n;; do the thing\n  (bar)")]
+    ;; the load-bearing safety property: the whole thing is ONE broken read,
+    ;; NO :form entry exists, so (bar) is never emitted as an executing form.
+    (is (= [:read] (mapv :kind entries))
+        (str "expected one broken :read, got " (pr-str (mapv :kind entries))))
+    (is (not-any? #(= :form (:kind %)) entries))
+    (let [read-entry (first entries)]
+      (is (false? (:ok? read-entry)))
+      (is (= :eof (:error-kind read-entry)))
+      ;; the inner (bar) stays INSIDE the broken span's source, not a form
+      (is (str/includes? (:source read-entry) "(bar)")))))
+
+;; ============================================================
+;; Recovery STRICTLY advances — a recovery hop must move PAST the failing
+;; `offset`, or parse-forms recurs on the same span forever (the diffusion
+;; oracle + worker-validator both drive this parser, so a non-terminating
+;; recovery is a real hang). The latent edge: in the :eof branch
+;; `backup-over-comment-block` can back the recovery anchor all the way down
+;; to the failing offset (== floor) when that offset begins a `;`-comment
+;; block — find-recovery-point then returned `offset` itself, a no-advance.
+;; The strict-advance guard bails such a candidate to EOF.
+;; ============================================================
+
+(def ^:private find-recovery-point #'parse/find-recovery-point)
+
+(deftest recovery-strictly-advances
+  (testing "the no-advance edge: :eof offset on a `;`-comment line backs to floor"
+    ;; backup-over-comment-block walks the contiguous `;` block down to floor
+    ;; (offset 0) — pre-guard this returned 0 (== offset), an infinite loop.
+    (let [text ";; a\n;; b\n(c)"]
+      (is (> (find-recovery-point text 0 :eof) 0)
+          "recovery must advance past the failing offset, never equal it")
+      ;; bailed to EOF: the whole tail becomes ONE :read span, loop terminates
+      (is (= (count text) (find-recovery-point text 0 :eof)))))
+
+  (testing "normal advancing branches are unaffected"
+    (is (= 8 (find-recovery-point "(foo \"x\n;;c\n(g)" 0 :eof)))
+    (is (= 9 (find-recovery-point "(+ 1 3x)\n(ok)" 0 :read))))
+
+  (testing "parse-forms TERMINATES on a comment-heavy unclosed form (no hang)"
+    ;; full-loop proof: an unclosed form whose only ahead-anchor sits under a
+    ;; `;`-comment block must still return a finite, clean result.
+    (let [entries (parse/parse-forms ";; lead\n(open \"unclosed\n;; mid\n(inner)")]
+      (is (vector? entries))
+      (is (some #(= :read (:kind %)) entries)
+          (str "expected a :read failure, got " (pr-str (mapv :kind entries)))))))
 
 ;; ============================================================
 ;; A.1 — prose-vs-code classification. A reader THROW on a prose token
@@ -472,3 +743,211 @@
         (is (= (mapv :narration entries) (mapv :narration reparsed))
             (str "narration drifted across round-trip — got "
                  (pr-str (mapv :narration reparsed))))))))
+
+;; ============================================================
+;; form-source-at — one-node source extraction (program-graph
+;; source capture in seon.client routes through this). The
+;; rewrite-clj one-node parse is char/regex/string-literal aware,
+;; so a `)` inside `\)` or `#"…)…"` no longer truncates the form.
+;; ============================================================
+
+(deftest form-source-at-literal-aware
+  (testing "char literal `\\)` does not miscount depth"
+    (is (= "(foo \\) bar)"
+           (parse/form-source-at "(foo \\) bar) trailing" 0))))
+
+  (testing "char literal `\\(` does not miscount depth"
+    (is (= "(foo \\( bar)"
+           (parse/form-source-at "(foo \\( bar)" 0))))
+
+  (testing "regex literal `#\"…)…\"` does not miscount depth"
+    (is (= "(re-find #\"a)b\" s)"
+           (parse/form-source-at "(re-find #\"a)b\" s) trailing" 0))))
+
+  (testing "string literal with parens does not miscount depth"
+    (is (= "(defn f \"doc with ) paren\" [x] x)"
+           (parse/form-source-at
+             "(defn f \"doc with ) paren\" [x] x)\n(defn g [])" 0))))
+
+  (testing "combined char + regex + string parens — full form, not truncated"
+    (is (= "(foo \\) #\"a)b\" \"c)d\" bar)"
+           (parse/form-source-at
+             "(foo \\) #\"a)b\" \"c)d\" bar) trailing" 0))))
+
+  ;; #52: a `)` inside a `;`-to-EOL comment must NOT close the form early
+  ;; (the classic hand-balancer bug — a naive depth counter truncates at
+  ;; the comment's `)`). rewrite-clj's one-node parse is comment-aware.
+  (testing "`)` inside a line comment does not miscount depth"
+    (is (= "(foo ; ) unbalanced comment\n  bar)"
+           (parse/form-source-at
+             "(foo ; ) unbalanced comment\n  bar)\ntrailing" 0)))))
+
+;; ============================================================
+;; Mined from the LIVE default store (`:seon.eval/source` rows) — REAL
+;; text agents wrote that leaked into the eval channel, NOT synthetic.
+;; ~9% of stored eval sources (12/128) produced a `:read`; these are the
+;; novel shapes the curated corpus above didn't already cover. Two real
+;; categories surfaced: (1) result-stash RE-REFERENCE whose stash id
+;; begins with a digit (`result/0xO-…`) — a genuine broken FORM; and
+;; (2) markdown backtick-quoted-keyword NARRATION the agent leaked into
+;; the eval channel (`` `:seon.db/id` shape `` ). Assert BEHAVIOR only —
+;; kinds / error-kind / no-spurious-form — never exact error strings.
+;; ============================================================
+
+(def mined-agent-cases
+  ;; :in (real/representative agent text), :no-form? (no evaluated :form
+  ;; leaked — the fix-stable safety invariant), optional :expected-kinds,
+  ;; optional :error-kind (of the first :read entry).
+  [{:in "(get-in result/0xO-2606281659 [:seon.render/text])"
+    :note "real mined leak: result-stash re-reference whose id begins with a digit → `result/0xO-…` is an invalid symbol; `(`-at-start so a genuinely broken FORM recorded as one :read, NOT a spurious eval (5 such rows in the store)"
+    :expected-kinds [:read]
+    :error-kind :invalid-token
+    :no-form? true}
+
+   {:in "(str (get-in result/4IU-2606281655 [:seon.render/text]))"
+    :note "real mined leak: same digit-leading stash-ref nested under (str …) — still one honest :read, no eval"
+    :expected-kinds [:read]
+    :error-kind :invalid-token
+    :no-form? true}
+
+   {:in "`:seon.db/id` shape — the 14-char generated id, not a plain string."
+    :note "real mined leak: markdown backtick-quoted-keyword narration in the eval channel. A leading backtick is ALWAYS inline narration at the agent REPL, so it is DROPPED as prose — NO :read, NO spurious eval (4 such rows)"
+    :expected-kinds []
+    :no-read? true
+    :no-form? true}
+
+   {:in "`:idle` on turn 2, but by turn 5 both verbs are undefined."
+    :note "real mined leak: same backtick-keyword markdown-narration shape — dropped as prose, no :read, no eval"
+    :expected-kinds []
+    :no-read? true
+    :no-form? true}
+
+   {:in "`: they're dynamic verbs installed at boot."
+    :note "real mined leak: backtick then lone-colon markdown narration (a distinct read-error variant) — leading backtick → dropped as prose, no :read, no eval"
+    :expected-kinds []
+    :no-read? true
+    :no-form? true}])
+
+(deftest mined-real-agent-leaks
+  (doseq [{:keys [in note expected-kinds error-kind no-read? no-form?]} mined-agent-cases]
+    (testing (str note " — " (pr-str in))
+      (let [entries (parse/parse-forms in)
+            kinds   (mapv :kind entries)
+            reads   (filter #(= :read (:kind %)) entries)]
+        (when expected-kinds
+          (is (= expected-kinds kinds)
+              (str "kinds mismatch: got " (pr-str kinds))))
+        (when error-kind
+          (is (= error-kind (:error-kind (first reads)))
+              (str "error-kind mismatch: got "
+                   (pr-str (:error-kind (first reads))))))
+        (when no-read?
+          (is (not-any? #(= :read (:kind %)) entries)
+              (str "a :read failure leaked for backtick markdown prose: "
+                   (pr-str kinds))))
+        (when no-form?
+          (is (not-any? #(= :form (:kind %)) entries)
+              (str "a spurious :form was evaluated from agent narration: "
+                   (pr-str kinds))))))))
+
+(deftest form-source-at-semantics
+  (testing "reads EXACTLY one top-level form, dropping trailing forms"
+    (is (= "(defn f [x] (+ x 1))"
+           (parse/form-source-at "(defn f [x] (+ x 1))\n(defn g [])" 0))))
+
+  (testing "skips leading indentation to the first `(` (reader-conditional)"
+    (is (= "(defn g [a] a)"
+           (parse/form-source-at "   (defn g [a] a)\nmore" 0))))
+
+  (testing "honors a non-zero offset (by-index caller)"
+    (let [txt "(a) (bee two)"]
+      (is (= "(bee two)" (parse/form-source-at txt 4)))))
+
+  (testing "no `(` at-or-after offset → nil"
+    (is (nil? (parse/form-source-at "no parens here" 0))))
+
+  (testing "unbalanced-to-EOF → from-`(` fallback (not nil, not a throw)"
+    (is (= "(foo (bar" (parse/form-source-at "(foo (bar" 0)))))
+
+;; ============================================================
+;; Generative property — the `:strip-fences?` span BASIS (renoise loop).
+;;
+;; The closed-loop renoise driver relies on a precise relationship between the
+;; two parse bases. Parsing a `form` UNFENCED with `:strip-fences? false`
+;; gives its raw span [0 L]; parsing the SAME form FENCED with the default
+;; `:strip-fences? true` must give a span shifted by EXACTLY the fence-prefix
+;; length the strip leaves before the form — a uniform shift on BOTH
+;; endpoints, nothing distorted. That is what lets the driver translate a
+;; good-form clamp span between the stripped basis and the raw `canvas_text`
+;; the worker's `offset_map` indexes.
+;;
+;; (Note the asymmetry the strip exists to absorb: a BARE ``` fence with no
+;; language tag is a syntax-quote reader-macro that swallows the form, so a
+;; raw `:strip-fences? false` parse of fenced text only recovers the form when
+;; the fence carries a lang tag — asserted CONDITIONALLY below. The default
+;; strip path always recovers it.) Proven over GENERATED forms × fence shapes,
+;; not a fixture pair — a failure shrinks to the smallest form+fence.
+;; ============================================================
+
+(def ^:private gen-atom
+  "A scalar arg token that reads as a single non-list datum."
+  (gen/one-of
+    [(gen/fmap str gen/nat)
+     (gen/elements ["foo" "bar" "x" "y" "inc" "dec" "+" "do-it" "ns/q"])
+     (gen/fmap #(str ":" %) (gen/elements ["a" "k" "kw" "ns/k"]))
+     (gen/fmap pr-str gen/string-alphanumeric)]))
+
+(def ^:private gen-form-str
+  "A single valid balanced top-level LIST form as text — varied head + atom
+   args + one level of nested list. No `;`, backtick, triple-backtick, or
+   newline, so it round-trips as exactly ONE `:kind :form` entry whose span
+   indexes the whole string."
+  (gen/let [head (gen/elements ["foo" "bar" "do-it" "inc" "+"])
+            args (gen/vector
+                   (gen/one-of
+                     [gen-atom
+                      (gen/fmap (fn [xs] (str "(" (str/join " " (cons "g" xs)) ")"))
+                                (gen/vector gen-atom 0 3))])
+                   0 4)]
+    (str "(" (str/join " " (cons head args)) ")")))
+
+(defn- only-form-span
+  "The `:span` of the SINGLE `:kind :form` entry from parsing `text`, or nil
+   when the parse yields anything other than exactly one form."
+  [text strip?]
+  (let [forms (filter #(= :form (:kind %))
+                      (parse/parse-forms text {:strip-fences? strip?}))]
+    (when (= 1 (count forms)) (:span (first forms)))))
+
+(deftest strip-fences-span-basis-property
+  (let [result
+        (tc/quick-check
+          100
+          (prop/for-all [form  gen-form-str
+                         fence (gen/elements ["```" "~~~"])
+                         lang  (gen/elements ["clojure" "clj" "cljs" "cljc" "edn" ""])]
+            (let [fenced   (str fence lang "\n" form "\n" fence)
+                  stripped (parse/strip-code-fences fenced)
+                  sp-uf    (only-form-span form false)    ; unfenced   (raw == stripped)
+                  sp-ft    (only-form-span fenced true)   ; fenced, STRIPPED basis (default)
+                  sp-ff    (only-form-span fenced false)  ; fenced, RAW basis (lang-tag only)
+                  raw-pre  (str/index-of fenced form)     ; chars before form in raw fenced
+                  str-pre  (str/index-of stripped form)]  ; chars before form after strip
+              (and (= [0 (count form)] sp-uf)
+                   (some? sp-ft) (some? str-pre)
+                   ;; the FORM text is preserved verbatim → equal span LENGTH
+                   (= (count form)
+                      (- (second sp-uf) (first sp-uf))
+                      (- (second sp-ft) (first sp-ft)))
+                   ;; THE invariant: fenced/strip-true differs from
+                   ;; unfenced/strip-false by EXACTLY the fence-prefix length the
+                   ;; strip leaves before the form — uniform on BOTH endpoints.
+                   (= sp-ft (mapv #(+ % str-pre) sp-uf))
+                   ;; CONDITIONAL raw-basis: when a lang-tagged fence lets the raw
+                   ;; (strip-false) parse still recover the form, its span is the
+                   ;; offset_map basis = unfenced shifted by the raw fence-prefix.
+                   (if sp-ff (= sp-ff (mapv #(+ % raw-pre) sp-uf)) true)))))]
+    (is (:result result)
+        (str "strip-fences span-basis property falsified — shrunk: "
+             (pr-str (-> result :shrunk :smallest))
+             " | result: " (pr-str result)))))

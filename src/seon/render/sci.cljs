@@ -65,6 +65,7 @@
     [cljs.reader :as reader]
     [sci.core :as sci]
     [sci.interrupt :as interrupt]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.log :as log]))
@@ -83,17 +84,22 @@
   250)
 
 (defn bounding-enabled?
-  "Layer-1 SCI bounding is ON unless `SEON_TILE_SCI=0` (independently
-   shippable + reversible — PRD migration step 2)."
+  "Layer-1 SCI bounding is ON unless `SEON_TILE_SCI=0`.
+
+   Independently shippable + reversible — PRD migration step 2."
   {:malli/schema [:=> [:cat] :boolean]}
   []
-  (not= "0" (some-> js/process .-env .-SEON_TILE_SCI)))
+  (not= "0" (config/env-string "SEON_TILE_SCI")))
 
 (defn agent-authored-sym?
-  "True when `sym` names an AGENT-authored fn (gets the SCI wrapper), false
-   for the core (`seon.*`/`clojure.*`/`cljs.*`) compiled path. The core
-   `welcome` and every core section fn stay on the fast compiled path; only
-   agent-chosen namespaces (e.g. `my.workouts/chart-tile`) are bounded."
+  "True when `sym` names an AGENT-authored fn.
+
+   Any agent-authored
+   render/layout/handler (a tile fn, a context-block render, a layout, a
+   `/call` handler) gets the SCI wrapper; the core
+   (`seon.*`/`clojure.*`/`cljs.*`) compiled path does not. Core renders and
+   every core block fn stay on the fast compiled path; only agent-chosen
+   namespaces (e.g. `my.workouts/chart-tile`) are bounded."
   {:malli/schema [:=> [:cat :any] :boolean]}
   [sym]
   (boolean
@@ -321,32 +327,58 @@
 ;; The bounded invocation.
 ;; ============================================================
 
+(defn- valid-result-for-view?
+  "True when SCI's eval result `r` is a USABLE value for `view`:
+     :seon.render/html (or default) — a MAP (the html-response envelope);
+     :seon.render/ai                — a STRING (the bare rendered text).
+   Anything else is a bug / partial value → the caller falls through to the
+   compiled path (SCI is never a correctness gate)."
+  [view r]
+  (case view
+    :seon.render/ai (string? r)
+    (map? r)))
+
 (defn invoke-bounded
-  "Invoke an AGENT-authored tile fn `sym` under SCI with a wall-clock
-   deadline (`budget-ms`), passing `input` by reference.
+  "Invoke an AGENT-authored render fn `sym` under SCI, time-bounded.
+
+   A wall-clock
+   deadline (`budget-ms`), passing `input` by reference. `view` selects the
+   slot semantics (`:seon.render/ai` → a bare String result;
+   `:seon.render/html` (default) → an html-response map) — one extra arg,
+   same mechanism (context-render Decision 3).
 
    Resolves `sym`'s stored `:seon.fn/source`, rebuilds its namespace's
    lexical environment (aliases + required `seon.*`/agent nses + own-ns
    helpers, all from the DB index), evaluates the source INTO a fresh SCI ctx
    (so the body is INTERPRETED → interrupt protected), and calls it.
 
-   Returns, always a map:
-   - the tile fn's html-response on success;
+   Returns, always a map OR the view's bare value:
+   - the render fn's value on success (an html-response map for `:html`, a
+     String for `:ai`);
    - `{:seon.render.sci/interrupt true}` when the deadline tripped (caller
      does fallback + recovery);
-   - `{:seon.render.sci/fallthrough true}` when SCI could not run the tile for
+   - `{:seon.render.sci/fallthrough true}` when SCI could not run the fn for
      ANY reason other than the interrupt — no stored source, an env-
      reconstruction gap (new ns this turn, unusual require), or even a genuine
-     runtime throw. The caller renders it on the compiled `html-render` path,
-     which either succeeds (the SCI env was just incomplete — a working tile
-     is never broken by bounding) or throws the real error into
-     `render-agent-tile`'s catch → the legible `error-response`. SCI is a
-     pure safety net for hangs; it is never a correctness gate."
-  {:malli/schema [:=> [:catn [::sym :symbol] [::input :map]
-                       [::budget-ms {:optional true} :int]]
-                  :map]}
-  ([sym input] (invoke-bounded sym input default-budget-ms))
-  ([sym input budget-ms]
+     runtime throw. The caller renders it on the compiled path, which either
+     succeeds (the SCI env was just incomplete — a working fn is never broken
+     by bounding) or throws the real error into the caller's catch → a legible
+     fallback. SCI is a pure safety net for hangs; it is never a correctness
+     gate."
+  ;; One `:=>` per runtime arity (idiomatic multi-arity) — a single `:=>` with
+  ;; `{:optional true}` catn slots leaves arities 2/3 loosely validated and
+  ;; trips malli's arity dispatch under instrument/unstrument cycles. The
+  ;; lower arities delegate schema-valid defaults (`:seon.render/html` keyword,
+  ;; `default-budget-ms` int), so no delegation trap.
+  {:malli/schema
+   [:function
+    [:=> [:catn [::sym :symbol] [::input :map]] [:or :map :string]]
+    [:=> [:catn [::sym :symbol] [::input :map] [::view :keyword]] [:or :map :string]]
+    [:=> [:catn [::sym :symbol] [::input :map] [::view :keyword] [::budget-ms :int]]
+         [:or :map :string]]]}
+  ([sym input] (invoke-bounded sym input :seon.render/html default-budget-ms))
+  ([sym input view] (invoke-bounded sym input view default-budget-ms))
+  ([sym input view budget-ms]
    ;; OUTER GUARD — invoke-bounded must NEVER throw (the user's hard rule: SCI
    ;; may fail but must not crash the pod). Any unexpected error (a failure in
    ;; sci/init or env reconstruction) degrades to the compiled path too.
@@ -397,12 +429,15 @@
            (vreset! !deadline (+ (js/Date.now) budget-ms))
            (try
              (let [r (sci/eval-string* c call)]
-               ;; Non-brittle: a tile that returns a NON-map under SCI (a bug,
-               ;; or a partial value) must NOT become an instrumentation throw
-               ;; on our :map return contract — fall through to the compiled
-               ;; path, which feeds the same value to the existing
-               ;; html-response handling. SCI is never a correctness gate.
-               (if (map? r) r {:seon.render.sci/fallthrough true}))
+               ;; Non-brittle: a fn that returns the wrong shape under SCI (a
+               ;; bug, or a partial value) must NOT become an instrumentation
+               ;; throw on our return contract — fall through to the compiled
+               ;; path, which feeds the same value to the existing handling.
+               ;; SCI is never a correctness gate. The valid shape is
+               ;; view-dependent (a String for :ai, a map for :html).
+               (if (valid-result-for-view? view r)
+                 r
+                 {:seon.render.sci/fallthrough true}))
              (catch :default e
                (if (interrupt-ex? e)
                  {:seon.render.sci/interrupt true}
@@ -440,8 +475,9 @@
        "renders a query, not one that computes."))
 
 (defn recover-hung-tile!
-  "Reset agent `agent-id`'s hung tile to the core welcome (retract
-   `:seon.render.live-tile/content`) and post the agent a force'd message
+  "Reset agent `agent-id`'s hung tile to the core welcome.
+
+   Retracts `:seon.render.live-tile/content` and posts the agent a force'd message
    explaining what happened. Async + deduped; returns nil."
   {:malli/schema [:=> [:catn [::agent-id :string] [::sym :symbol] [::budget-ms :int]]
                   :nil]}
@@ -480,8 +516,8 @@
 ;; FROM the user-ref with :force, indistinguishable from a human message,
 ;; so a broken tile re-armed the wake loop AND defeated the halt. There is
 ;; no active intervention now: a broken tile is a DERIVED surface. The
-;; `:seon.render/ai` twin in seon.render.live-tile/error-response carries
-;; "YOUR LIVE TILE IS BROKEN — …" and the :seon.ctx.live-tile/live-tile-
+;; `:seon.render/ai` render in seon.render.live-tile/error-response carries
+;; "YOUR LIVE TILE IS BROKEN — …" and the :seon.agent.ctx.live-tile/live-tile-
 ;; section re-derives it from the db value EVERY turn (a pure fn of state,
 ;; no stored error flag, self-healing when the tile renders clean again).
 ;; The agent learns of breakage by reading its own context, not by being

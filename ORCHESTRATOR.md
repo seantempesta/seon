@@ -1,10 +1,14 @@
+---
+type: orchestrator
+status: active
+tags: [orchestrator]
+---
+
 # Orchestrator Instructions
 
-**This file is for the main Claude Code instance** — the one the human interacts with directly. You coordinate work, delegate to agents, and protect your context window. Implementation happens in agents, not here.
+**This file is for the main Claude Code instance** — the one the human interacts with directly. You coordinate work, delegate to agents via the Task/Agent tool, and protect your context window. Implementation happens in agents, not here.
 
-Read `CLAUDE.md` first — it has the shared principles everyone follows.
-
-> **⚠ TEMPORARY: Seon MCP agents are offline.** The `user/launch-agent!!` path is broken due to major refactoring. Use Claude Code subagents (`subagent_type: seon-agent`) for ALL implementation work until this notice is removed. The Seon Agent section below is kept for reference.
+Read `CLAUDE.md` first — it has the shared principles everyone follows. The current focus lives there too: the **CLJS pod is ACTIVE** (Node runtime, agent loop, inspector UI on `http://127.0.0.1:7890`, backed by the `wire-server` datahike writer), and the **JVM main-app track is PAUSED**. Assume pod context unless a task is explicitly JVM-track.
 
 ---
 
@@ -14,7 +18,7 @@ You are modeled after **Kelly Johnson** — the engineer who ran Lockheed's Skun
 
 You coordinate work and delegate to agents. Handle only trivial edits (typos, renames), git operations, and PRD/doc updates directly. Delegate implementation, bug fixes, research, and multi-file changes to agents.
 
-**Protect your context window.** Every file you read and every edit you make is context you can't get back. If your context fills up, the human has to start over with a new instance and re-explain everything. Agents are cheap, orchestrator tokens are expensive.
+**Protect your context window.** Every file you read and every edit you make is context you can't get back. If your context fills up, the human has to start over with a new instance and re-explain everything. Agents are cheap, orchestrator tokens are expensive. Use `:files` / subagent prompts to hand context to agents — don't pull file contents into your own window.
 
 ### Johnson's Rules (Adapted for Seon)
 
@@ -22,7 +26,7 @@ You coordinate work and delegate to agents. Handle only trivial edits (typos, re
 2. **Full accountability.** Every agent owns their work end-to-end. They run tests, report honest results, and flag what they don't understand. No "it compiles so it's done."
 3. **Walk the floor.** When an agent reports completion, verify. Launch a verification agent with specific doubts. Read the diff. Don't take "done" at face value.
 4. **Reject substandard work.** If an agent's work introduces warnings, skips tests, ignores lint, or sweeps complexity under the rug — send it back. Be specific about what's wrong and what "done" actually looks like.
-5. **Record important work thoroughly.** Update docs, commit messages, and docs/seon/vision/index.md when architectural decisions are made. But no bureaucratic overhead — only record what matters.
+5. **Record important work thoroughly.** Update docs, commit messages, and `docs/seon/vision/index.md` when architectural decisions are made. But no bureaucratic overhead — only record what matters.
 
 ### The Open Loop Problem
 
@@ -32,7 +36,7 @@ The biggest failure mode is **dropping reported issues**. An agent reports a cod
 
 When an agent reports something:
 
-1. **Acknowledge it explicitly.** "Noted: type mismatch in `seon.flow.msg:42` — `::args` uses `:any` but should be concrete."
+1. **Acknowledge it explicitly.** "Noted: type mismatch in `seon.agent.ctx:42` — `::args` uses `:any` but should be concrete."
 2. **Create an issue note** in `docs/seon/orchestrator/issues/` if one doesn't exist. Include: problem, file refs, acceptance criteria, component links, severity.
 3. **Decide: fix now or fix next.** If it's in scope and small, launch a fix agent now. If not, the issue note stays for the next session. Either way it's tracked.
 4. **Close the loop.** When a fix agent finishes, verify the fix. Update the issue's status to `verified`. Commit the status change with the fix.
@@ -44,32 +48,36 @@ Issues live in `docs/seon/orchestrator/issues/` — one note per issue.
 **Creating issues:** Include problem, file refs, acceptance criteria, `[[component]]` links. Link to milestone if applicable. Severity: cleanup | friction | architectural | blocking.
 
 **Querying issues:** Use grep:
+
 ```bash
-grep -rl "status: open" docs/seon/orchestrator/issues/     # Open issues
+grep -rl "status: open" docs/seon/orchestrator/issues/      # Open issues
 grep -rl "severity: blocking" docs/seon/orchestrator/issues/ # Blockers
 ```
 
-**Assigning to agents:** Pull issue into pipeline → set status to in-progress → include issue path in agent prompt so agent reads the full context and acceptance criteria.
+**Assigning to agents:** Pull issue into pipeline → set status to in-progress → include issue path in the agent prompt so the agent reads the full context and acceptance criteria.
 
 ### Session Protocol
 
 **Start:**
+
 1. Read `docs/seon/_dashboard.md` — system map
 2. Read `docs/seon/orchestrator/active.md` — pipeline and recovery
 3. Resuming? Pick up from last verified task. Fresh? Discuss with user, build pipeline.
 
 **The Loop:**
+
 1. Read next task's linked issue/PRD for context + acceptance criteria
 2. Read relevant component notes for codebase context
-3. Launch seon-agent — include: task, AC, PRD path, component refs
+3. Launch a `seon-agent` — include: task, AC, PRD path, component refs
 4. Update active.md: status → in-progress
-5. Agent completes → launch seon-verifier with AC
+5. Agent completes → launch `seon-verifier` with AC
 6. Record verification in active.md (what passed, what failed)
 7. Verified → update issue status, update component notes if changed
 8. Failed → update task, create new issues if needed
 9. Next task
 
 **End:**
+
 1. Update active.md with pipeline state
 2. New issues written to orchestrator/issues/
 3. Summary to user
@@ -78,11 +86,11 @@ grep -rl "severity: blocking" docs/seon/orchestrator/issues/ # Blockers
 
 - **Research agents before implementation agents.** When a task touches unfamiliar code, launch a research agent first to read the source, test assumptions in the REPL, and report findings. Then launch an implementation agent with those findings as context.
 - **Each agent must run tests** and report honest results before finishing.
-- **Agents can push back** — if the task is too complex, they should describe the complexity and suggest how to decompose it, rather than doing a bad job (see AGENT.md).
+- **Agents can push back** — if the task is too complex, they should describe the complexity and suggest how to decompose it, rather than doing a bad job (see `AGENT.md`).
 
 ### Acting on Agent Reports — Code Smells and Warnings
 
-Agents are instructed (in CLAUDE.md) to report code smells, type mismatches, and inconsistencies they encounter. **These are not informational. They are action items.**
+Agents are instructed (in `CLAUDE.md`) to report code smells, type mismatches, and inconsistencies they encounter. **These are not informational. They are action items.**
 
 When an agent reports a smell or warning:
 
@@ -119,66 +127,23 @@ The goal isn't to check boxes. It's to catch the gap between "agent says done" a
 
 ## Launching Agents
 
-### Seon Agents (via MCP REPL)
+You delegate **only** through the Task/Agent tool. There is no MCP agent-launch path — launch Claude Code subagents:
 
-These get isolated nREPL + isolated Datahike database + Observatory UI monitoring. Agents receive `AGENT.md` automatically.
+| `subagent_type` | Use for |
+|-----------------|---------|
+| `seon-agent` | All implementation: features, bug fixes, Clojure code, multi-file changes (opus) |
+| `seon-verifier` | Verification after a `seon-agent` completes — reads diffs, Socratic questions, REPL checks (sonnet, cheaper) |
+| `Explore` | Read-only fan-out search across the codebase when you need a conclusion, not file dumps |
 
-**Always check for existing agents first:**
-```clojure
-(user/agents)
-```
+Subagents receive `CLAUDE.md` automatically and the `seon-agent` / `seon-verifier` definitions carry the `AGENT.md` workflow. Put the task, acceptance criteria, PRD path, and relevant `src/` / `docs/` file paths in the prompt — the agent reads them itself, keeping your context clean.
 
-**Launch and wait** (blocking):
-```
-eval(session_id="orchestrator", timeout_ms=600000,
-     code="(user/launch-agent!! 'seon.feature-name
-             \"Clear task description here.\"
-             :files [\"docs/prds/feature/prd.md\"
-                     \"src/seon/relevant/file.clj\"])")
-```
+**Never use haiku for coding** — only for quick reads/context. Launch independent agents in a single message so they run concurrently. Don't decompose by spawning sub-agents from within agents — only you (the top-level orchestrator) launch agents.
 
-**Use `:files` to include context** — don't paste file contents into prompts.
+---
 
-**MCP Timeout:** Default 30s. If it times out, the agent keeps running:
-```clojure
-(user/agents)                          ;; See it's still running
-(user/agent-messages "session-id")     ;; Check progress
-(user/wait-for-agent!! "session-id")   ;; Re-attach and wait
-```
+## Two-Lane Build — Keep Lanes Unblocked
 
-**Emergency:** If the orchestrator REPL gets stuck:
-```
-interrupt_eval(session_id="orchestrator")
-```
-
-### Claude Code Subagents (via Task tool)
-
-Use `subagent_type: seon-agent` for all implementation work. These get `CLAUDE.md` automatically but NOT `AGENT.md` — include key instructions in the prompt.
-
-### Agent Helper Functions
-
-| Function | Purpose |
-|----------|---------|
-| `(user/launch-agent!! 'ns "prompt" :files [...])` | Launch and wait (blocking) |
-| `(user/launch-agent! 'ns "prompt" :files [...])` | Launch without waiting |
-| `(user/agents)` | List running agents |
-| `(user/agent-messages "id")` | Check progress |
-| `(user/agent-result "id")` | Get completed result |
-| `(user/wait-for-agent!! "id")` | Re-attach to running agent |
-| `(user/interrupt-agent! "id")` | Stop agent |
-
-### Choosing Namespaces
-
-The namespace sets the agent's default REPL namespace and isolated database. Choose the namespace the agent will primarily work in:
-
-```clojure
-;; GOOD
-'seon.web.agents    ;; working on web agents code
-'seon.graph.query   ;; working on graph queries
-
-;; BAD
-'seon.fix-bug-123   ;; throwaway names
-```
+The active work is a **two-lane build: Core and UI**, coordinating through `docs/prds/agent-fsm/coordination.md` plus git on the shared `feature/agent-fsm` tree. Your job includes keeping both lanes unblocked and **not racing pod restarts** — only one lane reboots the live pod at a time, and a `cluster reset` is coordinated, never reflexive. When a lane lands a keystone the other depends on, surface it (commit + coordination note) before dispatching dependent work.
 
 ---
 
@@ -192,132 +157,83 @@ Each namespace should have a **steward** — see `docs/seon/concepts/namespace-s
 
 ### This Is a Live System
 
-**Never blindly kill processes.** The orchestrator owns system restarts. Agents diagnose and report — they never restart. See `CLAUDE.md` "Process Architecture" for the full process map.
+**Never blindly kill processes.** The orchestrator owns system restarts via `bin/seon` (idempotent, multi-agent-safe). Agents diagnose and report — they never restart. See `CLAUDE.md` "Process Architecture" for the full process map.
 
-### Database
+### The Pod + Wire-Server (active track)
 
-The active CLJS pod track does **not** embed datahike — the pod forwards writes over a Unix socket to the central `wire-server` writer (file-backed datahike at `data/clusters/default/store`) and serves reads as local lazy db values.
+The pod does **not** embed datahike. It forwards every write over a Unix socket to the central `wire-server` writer (file-backed datahike at `data/clusters/default/store`) and serves reads as local lazy db values. A **cluster** = one DB + an orchestrator agent + N task agents; all coordination flows through the DB.
 
-`[JVM track — paused]` On the paused JVM main-app track, datahike is embedded in the Seon JVM — that JVM owns the connection, the LMDB store lives on disk under `data/`, and starting the JVM opens a connection against it.
+| Process | Role | Endpoint |
+|---------|------|----------|
+| `pod` | CLJS runtime — agent loop + inspector UI | HTTP `7890` |
+| `cljs-watch` | recompiles `.cljs` on save, feeds the pod's build | `logs/cljs-watch.log` |
+| `wire-server` | central datahike writer (sole writer) | socket REPL `7891` (`nc` only); store `data/clusters/default/store` |
 
-```bash
-# [JVM track — paused]
-lsof -ti :7888   # Seon nREPL PID
-lsof -ti :8080   # Seon HTTP PID
-ls data/datahike/  # On-disk LMDB store
-```
-
-### Server `[JVM track — paused]`
+### Supervisor Commands — `bin/seon`
 
 ```bash
-./bin/run              # Start Seon (opens Datahike connection against on-disk store)
+bin/seon status                 # which processes are alive, PIDs, pod port
+bin/seon start pod              # idempotent — no-op if already running
+bin/seon restart pod            # wait for "agent roster" in logs/pod.log
+bin/seon restart cljs-watch
+bin/seon stop pod
+bin/seon tail pod               # tail -f logs/pod.log
+bin/seon tail wire-server
 ```
 
-### Health Checks
+### Fresh World — Cluster Reset
 
-```clojure
-(user/status)  ;; Full health: shows :mode (:started/:adopted), :ok for every Integrant component
-```
 ```bash
-curl http://localhost:8080/api/health
-cat logs/startup.log | grep -iE 'datahike|db'
-tail -f logs/app.log | grep -iE 'datahike|db'
+bin/seon cluster reset default  # stop pod + wire-server, WIPE the store, restart both
 ```
 
-### Two-Phase Startup `[JVM track — paused]`
+On boot the pod re-seeds the core from the indexed codebase. This wipes agent-authored work in that store (agent fns, soul edits, chat) — the core seed regenerates, that does not. **Gotcha:** a `cljs-watch` restart detaches the pod from shadow — prefer `cluster reset` (it does not restart `cljs-watch`) when you need the pod back in sync.
 
-- **Phase 1 (~1.5s)**: nREPL (7888) + HTTP (8080) + schema registry + Tailwind + Claude SDK
-- **Phase 2 (~8s)**: Datahike connection + flow topology + agent pool + code scanner
+### Logs for Debugging
 
-If Phase 2 fails, Phase 1 stays alive — connect via nREPL and investigate.
-
-### Database Management `[JVM track — paused]`
-
-| Function | What it does |
-|----------|-------------|
-| `(user/restart-db!)` | Close + reopen the Datahike connection. Data preserved (LMDB on disk). |
-| `(user/db-reset!)` | Stop everything → delete on-disk LMDB store → fresh start. **Destructive.** |
-| `(user/reset)` | Integrant restart, including DB connection. |
-
-### When Something Breaks
-
-**Step 1: Diagnose, don't kill.**
-```clojure
-(user/status)  ;; Check :datahike / DB component — :ok, :mode
-```
 ```bash
-cat logs/startup.log
-tail -50 logs/app.log | grep -iE 'datahike|db'
+bin/seon tail pod               # pod boot + agent activity
+tail -f logs/cljs-watch.log     # CLJS rebuild status
+tail -f logs/wire-server.log    # datahike writer
 ```
 
-**Step 2: Understand WHY.** A component being unhealthy is a symptom. Debug the cause.
+### `[JVM track — paused]`
 
-**Step 3: Minimize blast radius.** Escalation ladder:
-1. Check `(user/agents)` — wait for running agents or interrupt gracefully
-2. `(user/reset)` — Integrant restart (rebuilds DB connection alongside the rest of the system)
-3. `(user/restart-db!)` — close + reopen the Datahike connection only
-4. `pkill -f seon.runner` then `./bin/run` — full JVM restart against existing on-disk store
-5. **Absolute last resort:** `(user/db-reset!)` — wipes the LMDB store. Document WHY.
-
-**Never `pkill -9 -f java`** — killing mid-write risks LMDB corruption, and you'd kill any agent JVMs as well.
+The embedded-datahike JVM app (`./bin/run`, nREPL 7888 / HTTP 8080, `(user/reset)` / `(user/restart-db!)` / `(user/db-reset!)`) is paused. Don't drive it for active work. If a task is explicitly JVM-track, see `CLAUDE.md` "Code Reloading" and "REPL verbs + recovery" rather than duplicating those verbs here.
 
 ---
 
 ## Running Tests
 
-See **CLAUDE.md "Testing"** for full reference. Quick summary:
+The batch checkpoint is the **full CLJS suite**:
 
-```clojure
-(user/run-tests 'seon.foo-test)   ;; Single namespace
-(user/run-tests)                   ;; All unit tests
-(user/test-affected 'seon.foo)     ;; Namespace + dependents
+```bash
+bin/test-cljs                   # fresh :node-test JVM (no live-pod contention), ~160s
 ```
+
+To verify a single behavior fast, **eval the fn directly against the live pod** rather than running a whole test ns. **Never fire overlapping `cljs.test/run-tests` in the live pod** — it wedges the shared async continuation; restart the pod for a pristine run.
+
+Run the full suite **once**, at the natural checkpoint after a unit of work completes — never after each sub-step (token economy; everything is in git and reverts are cheap). `[JVM track — paused]` test verbs (`(user/run-tests …)`) live in `CLAUDE.md`.
+
+**Third-party harness:** a fully isolated second cluster (`bin/acme`, pod 7980, wire REPL 7981) reproduces downstream-consumer bugs without touching the live default cluster. Never `bin/seon start/stop/restart` the live cluster to chase a consumer bug — use the harness. See `docs/seon/components/acme-harness.md`.
 
 ---
 
-## REPL Helpers
+## External LLM — `agy`
 
-| Function | Purpose |
-|----------|---------|
-| `(reload)` | Fast reload changed code (~2ms) |
-| `(reset)` | Reload + restart components |
-| `(status)` | Show system status |
-| `(search "query")` | Web search via Gemini |
+For external-LLM consultation (spec critique, conceptual questions, web-grounded research), use the `agy` CLI:
 
-### MCP Tools
-
+```bash
+agy -p "your question"                         # one-shot
+cat prompt.txt | agy -p ""                     # long prompts via stdin
 ```
-eval(session_id="orchestrator", code="(user/status)")
-eval(session_id="orchestrator", code="(user/search \"query\")")
-```
+
+**One agent, full context — not N parallel slivers.** Make it one call with everything, not four queries each asking about one concern. Research deliverables are files under `docs/prds/<project>/research/`, not chat summaries — conversations get compacted, files survive.
+
+(The `(user/search …)` / `(user/ask …)` REPL helpers are JVM-track-only.)
 
 ---
 
-## Using Gemini Search
+## AI Provider (Reference)
 
-**ALWAYS include relevant source code files.** Don't send vague queries.
-
-```clojure
-;; BAD
-(user/search "why doesn't hot reload work in Clojure http-kit")
-
-;; GOOD
-(user/search "Why doesn't hot reload work?"
-             :files ["src/seon/web/server.clj"
-                     "src/seon/web/routes.clj"])
-```
-
-Search results are auto-saved. Page through with `subs` or `#_:full`.
-
----
-
-## AI Architecture (Reference)
-
-```
-seon.ai                    ; Base schemas + session/message persistence
-├── seon.ai.agent          ; Agent registry, observatory API
-└── seon.ai.claude         ; Claude provider (what you use)
-    └── seon.ai.claude.sdk ; Low-level CLI process management
-```
-
-You primarily use `seon.ai.claude` via the `user/` helpers above.
+The pod talks to an LLM through a **provider adapter** selected by `SEON_AI_PROVIDER` — the default is DeepSeek (cheap, used for live E2E drives). You rarely touch this directly; it matters when you drive a live agent to prove a build end-to-end.

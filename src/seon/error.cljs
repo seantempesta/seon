@@ -22,6 +22,7 @@
 
 (defn ->message
   "Best-effort human-readable message for any error-ish value."
+  {:malli/schema [:=> [:cat :any] :string]}
   [e]
   (or (when (some? e) (.-message e)) (str e)))
 
@@ -40,7 +41,9 @@
         (recur (ex-cause e) (inc depth) acc')))))
 
 (defn ->map
-  "Convert a CLJS error to an agent-inspectable map. Recursion on
+  "Convert a CLJS error to an agent-inspectable map.
+
+   Recursion on
    :cause is bounded to depth 5 to defend against cycles.
 
    The top-level `:seon.error/data` flattens the entire cause chain's
@@ -48,6 +51,9 @@
    read THIS, not walk the per-level `:seon.error/ex-data` keys, so
    useful info like `:seon.eval/warning-type` surfaces regardless of
    how many layers cljs.js's `wrap-error` added on top."
+  {:malli/schema [:function
+                  [:=> [:cat :any] [:maybe :map]]
+                  [:=> [:cat :any :int] [:maybe :map]]]}
   ([e] (->map e 0))
   ([e depth]
    (when (some? e)

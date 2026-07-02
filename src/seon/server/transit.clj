@@ -1,19 +1,19 @@
 (ns seon.server.transit
-  "Transit-JSON codec used for value payloads on the client-runtime wire.
+  "Transit-JSON string codec helpers.
 
-   The wire control envelope is CBOR (see seon.server.codec). Inside the
-   envelope, every field that carries a CLOJURE VALUE (query results,
-   tempids, tx-meta, datom v/a fields, query args, tx-data, selectors)
-   is a Transit-JSON STRING.
+   The pod↔wire-server wire is uniform Transit-JSON: `seon.server.codec`
+   encodes the WHOLE frame (envelope + native values) in one Transit pass,
+   so the wire no longer wraps individual values in Transit STRINGS. These
+   two helpers remain for the few sites that still need a standalone
+   Transit-JSON string of a Clojure value (e.g. persisting a query as a
+   source string is unrelated — that uses pr-str).
 
-   Why Transit-JSON for values:
+   Why Transit-JSON:
    - First-class fidelity for keywords, symbols, sets, instants, ratios,
      BigInts, doubles vs ints — types that EDN-string-via-pr-str either
      mangles or requires a custom reader for.
    - Cognitect-blessed, both sides stable (transit-clj 1.x, transit-cljs
-     0.8.x).
-   - The Rust host never parses values — it forwards Transit-JSON strings
-     between the JVM writer and the CLJS guest as opaque blobs.
+     0.8.x), and the Cognitect sibling of datahike's Fressian persistence.
 
    Float-vs-int caveat: JS Numbers don't distinguish 1 from 1.0. Schema-
    driven coercion happens JVM-side in handle-op 'transact' (see

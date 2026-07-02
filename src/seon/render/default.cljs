@@ -9,15 +9,11 @@
    - `view` — the default `:seon.render/html` agent tile (status dot,
      turn count, error banner, recent messages). Agents repoint their
      tile by transacting a different symbol onto the slot.
-   - Read helpers (`recent-messages`, `recent-errors`,
-     `all-running-agents`) used by `view` and the inspector.
+   - Read helpers (`recent-messages`, `recent-errors`) used by `view`
+     and the inspector.
 
-   The agent's PROMPT is NOT composed here: the live default
-   `:seon.render/ai` path is `seon.agent/assemble-context`, whose
-   section layout is `seon.agent/core-default-ctx`. The old `ctx`
-   composer and its fragment helpers were deleted 2026-06-09 (unit 1.3)
-   after their teaching content was folded into the live sections
-   (`seon.agent/system-section`, `seon.agent/prompt-section`).
+   This namespace renders the tile and reads the message log; it does
+   NOT compose the agent's prompt (that is `seon.agent.ctx`'s job).
 
    ## Independent of seon.agent
 
@@ -27,6 +23,7 @@
    arrow; we do not close it."
   (:require
     [seon.db :as db]
+    [seon.derive :as derive]
     [seon.log :as log]
     [seon.ui.components :as comp]))
 
@@ -42,8 +39,9 @@
   {:seon.render/ai (pr-str input)})
 
 (defn pretty-html
-  "Universal HTML-side fallback. Wraps an edn dump in a monospace
-   container so the user at least sees the data structure."
+  "Universal HTML-side fallback — wraps an edn dump in monospace.
+
+   The container ensures the user at least sees the data structure."
   {:malli/schema [:=> [:cat :map] :seon.render/html-response]}
   [input]
   {:seon.render/hiccup
@@ -51,7 +49,9 @@
     (pr-str input)]})
 
 (defn pending-html
-  "Calm IN-PROGRESS placeholder for a live tile whose content symbol
+  "Calm IN-PROGRESS placeholder for a live tile still loading.
+
+   Its content symbol
    names an agent-authored render fn that ISN'T loaded in the runtime
    right now (`seon.eval/lookup-value` returned nil). Mirrors the
    `seon.render.live-tile/welcome` tile shape (compact + expanded,
@@ -84,19 +84,11 @@
 ;; when present, else fall back to `@seon.db/*conn*`.
 ;; ============================================================
 
-(defn- pulled-agent
-  "Pull the agent entity for `id`. Returns nil if missing."
-  [db id]
-  (let [entity (if db
-                 (db/entity {:seon.db/db db
-                             :seon.db/ref [:seon.agent/id id]})
-                 (db/entity {:seon.db/ref [:seon.agent/id id]}))]
-    (when (:seon.agent/id entity)
-      entity)))
 
 (defn ^:no-doc recent-messages
-  "Return the most-recent `n` messages of agent `id`'s conversation
-   (DERIVED: from = me OR to ∋ me — nothing stored per-agent),
+  "Return the most-recent `n` messages of agent `id`'s conversation.
+
+   DERIVED (from = me OR to ∋ me — nothing stored per-agent),
    oldest-first. Each row is `[at label content]`; the label resolves
    by DIRECTION (from-ref kind × to-ref kinds):
 
@@ -106,11 +98,10 @@
    - `→ agent-<id>`   — this agent → a peer (outgoing peer)
 
    Rows from me whose `to` contains NEITHER the user NOR another agent
-   (i.e. agent → self) are the per-turn transcript SELF-messages — raw
-   LLM output logged for the turn record, not conversation — and are
-   EXCLUDED here (observed live 2026-06-11, kXQ root tile: a self
-   row of raw eval source rendered as the agent's \"last reply\"
-   because the pre-fix query ignored `to` entirely)."
+   (i.e. agent → self) are not conversation and are EXCLUDED here."
+  {:malli/schema [:function
+                  [:=> [:cat :any :string] :any]
+                  [:=> [:cat :any :string :int] :any]]}
   ([db id] (recent-messages db id 20))
   ([db id n]
    (let [;; All reads via QUERY, not d/entity — the inspector hands
@@ -130,10 +121,8 @@
          ;; The from-ref's KIND resolves in Clojure against these two
          ;; eid→id maps, NOT via datalog `get-else` — on datahike-cljs
          ;; get-else's default branch never fires (rows whose ?f lacks
-         ;; the attr are DROPPED, not defaulted), which silently
-         ;; filtered every agent-from message out of the conversation
-         ;; (observed live 2026-06-11, live-tiles U2: assistant replies
-         ;; existed in the store but never rendered).
+         ;; the attr are DROPPED, not defaulted), which would silently
+         ;; filter every agent-from message out of the conversation.
          users  (into {} (q '[:find ?f ?uid :where [?f :seon.user/id ?uid]]))
          agents (into {} (q '[:find ?f ?aid :where [?f :seon.agent/id ?aid]]))
          rows   (when my-eid
@@ -150,8 +139,8 @@
          ;; to-refs per message eid — `to` is cardinality-many, so this
          ;; query yields one row per (message, to-ref); fold into sets.
          ;; Direction needs it: from=me alone can't tell a real reply
-         ;; (to ∋ user) from transcript self-narration (to = [me]) from
-         ;; an outgoing peer send (to ∋ other agent).
+         ;; (to ∋ user) from an agent → self row (to = [me]) from an
+         ;; outgoing peer send (to ∋ other agent).
          tos    (when (seq rows)
                   (reduce (fn [acc [m t]] (update acc m (fnil conj #{}) t))
                           {}
@@ -196,43 +185,25 @@
           (take-last n)))))
 
 (defn ^:no-doc recent-errors
-  "Return the most-recent `n` `:seon.log/level :error` entries for
-   agent `id`, newest-first. Reads the active `seon.log` file
+  "Return the most-recent `n` `:error` log entries for agent `id`.
+
+   Newest-first, reading the active `seon.log` file
    (NOT the DB — log entries are no longer persisted as datoms; see
    seon.log ns docstring). Returns `()` when none."
+  {:malli/schema [:function
+                  [:=> [:cat :any :string] :any]
+                  [:=> [:cat :any :string :int] :any]]}
   ([_db id] (recent-errors _db id 10))
   ([_db id n]
    (log/tail {:seon.log/n     n
               :seon.log/level :error
               :seon.log/agent id})))
 
-(defn ^:no-doc agent-turn-count
-  "Derived turn count for an agent ENTITY: the number of
-   `:seon.agent.session/turns` in its most-recent session (by
-   `:seon.agent.session/at`). The stored `:seon.agent/turn-count` attr was
-   retired 2026-05-22 — this mirrors how `seon.agent/prompt-section`
-   derives `turn N` (count of current-session turns), without
-   requiring `seon.agent` (would close the dependency cycle)."
-  [ent]
-  (let [session (last (sort-by :seon.agent.session/at (:seon.agent/sessions ent)))]
-    (count (:seon.agent.session/turns session))))
-
-(defn ^:no-doc all-running-agents
-  "Return every agent entity whose `:seon.agent/state` is `:idle` or
-   `:running`. Used by the inspector to iterate live agents. Pure
-   read; safe from any thread."
-  [db]
-  (let [query '[:find ?aid
-                :in $
-                :where
-                [?a :seon.agent/id ?aid]
-                [?a :seon.agent/state ?state]
-                [(contains? #{:idle :running} ?state)]]
-        rows  (if db
-                (db/query {:seon.db/db db :seon.db/query query})
-                (db/query {:seon.db/query query}))]
-    (for [[aid] rows]
-      (pulled-agent db aid))))
+;; Turn-count + derived-state are the [[seon.derive]] leaf — `view` (and the
+;; inspector) call `seon.derive/agent-turn-count` / `seon.derive/derive-state`
+;; with the db value they hold. They were duplicated here only to dodge the
+;; seon.agent require cycle; the armable-roster lives once in
+;; `seon.derive/armable-agent-ids` (state = :idle).
 
 ;; ============================================================
 ;; VIEW — the default :seon.render/html. Agent-tile dashboard:
@@ -241,15 +212,16 @@
 ;; ============================================================
 
 (defn view
-  "Default :seon.render/html renderer. System fn → takes system input
+  "Default `:seon.render/html` renderer for an agent tile.
+
+   System fn → takes system input
    shape (`:seon.db/db` + `:seon.agent/id`). Pulls the entity, renders
    a tile with status, turn count, recent-errors banner, last 5 messages.
    Returns `{:seon.render/hiccup [...]}`."
   {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/html-response]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (let [ent   (pulled-agent db id)
-        state (or (:seon.agent/state ent) :unknown)
-        turns (agent-turn-count ent)
+  (let [state (derive/derive-state db id)
+        turns (derive/agent-turn-count db id)
         msgs  (recent-messages db id 5)
         errs  (recent-errors db id 5)]
     {:seon.render/hiccup
@@ -262,8 +234,7 @@
       ;; `(for …)` lazy seqs — `seon.render.live-tile/valid-hiccup?`
       ;; (the render-boundary validator) accepts only
       ;; string/int/nil/vector children, so a lazy-seq child makes
-      ;; instrumentation reject the whole tile (2026-06-09 inspector
-      ;; tile-missing bug).
+      ;; instrumentation reject the whole tile.
       (when (seq errs)
         (into [:section {:class "flex flex-col gap-1 border border-error/40 bg-error/10 rounded p-2"}]
               (map (fn [e]

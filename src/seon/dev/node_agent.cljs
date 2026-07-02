@@ -35,7 +35,9 @@
             :else (recur (inc i)))))
       (some-> (.. js/process -env -SEON_AGENT_ID) not-empty)))
 
-(defn -main [& args]
+(defn -main
+  "Node entry point: host the `--agent-id` from argv/env, then idle ready."
+  [& args]
   ;; shadow's :node-script main receives the post-`node script.js` argv as
   ;; `args`; also fall back to the raw process.argv (slice off node + script).
   (let [from-args (parse-agent-id args)

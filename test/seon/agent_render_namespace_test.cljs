@@ -30,7 +30,8 @@
     [seon.agent :as agent]
     [seon.client :as client]
     [seon.db :as db]
-    [seon.render.live-tile :as tile]))
+    [seon.render.live-tile :as tile]
+    [seon.repl.internal :as repl-internal]))
 
 ;; ---------------------------------------------------------------------------
 ;; Fixture — fresh conn seeded with a small ns graph:
@@ -42,8 +43,17 @@
 ;; ---------------------------------------------------------------------------
 
 (def ^:private seed-tx
+  ;; test.parent carries its REAL full file SOURCE (the shape the boot
+  ;; indexer stores for a full-rendered ns): the `(ns …)` line PLUS the
+  ;; actual `(defn greet …)` and `(register! …)` forms. The separate
+  ;; :seon.fn / :seon.schema member entities are seeded too (the analyzer
+  ;; produces both), so GI-1 can be proven: with full source present those
+  ;; member blocks are NOT re-appended (they're already in the source).
   [{:seon.ns/name :test.parent
-    :seon.ns/source "(ns test.parent)"}
+    :seon.ns/source
+    (str "(ns test.parent)\n\n"
+         "(defn greet\n  \"Greets x with a friendly prefix.\"\n  [x]\n  (str \"hi \" x))\n\n"
+         "(seon.schema/register! :test.parent/name :string)")}
    {:seon.fn/sym "test.parent/greet"
     :seon.fn/ns [:seon.ns/name :test.parent]
     :seon.fn/arglists "([x])"
@@ -79,23 +89,66 @@
 ;; :ai form — renders the ns + its members, non-blank, with the right shapes.
 ;; ---------------------------------------------------------------------------
 
-(deftest ai-render-of-ns-lists-fns-and-schemas
+(deftest full-source-ns-shows-source-not-duplicate-members
+  ;; GI-1: when an ns carries its REAL full file SOURCE, that source IS the
+  ;; authoritative body — the per-member `[fn …]` / `[schema …]` blocks are
+  ;; NOT re-appended (they're already in the source). The agent sees each
+  ;; def ONCE, in the source, not twice.
   (async done
     (-> (with-seeded-conn
           (fn [conn]
             (let [db   @conn
                   res  (agent/render-namespace
                          {:seon.db/db db :seon.ns/name :test.parent
-                          :seon.render/depth 0 :seon.render/format :ai})
+                          :seon.render/depth 0 :seon.render/format :ai
+                          :seon.render/detail :full})
                   text (:seon.render/text res)]
               (is (string? text) ":ai form is a string")
               (is (pos? (count text)) "non-blank")
-              (is (str/includes? text "test.parent/greet") "fn sym present")
-              (is (str/includes? text "(test.parent/greet [x])") "fn signature present")
-              (is (str/includes? text "Greets x") "fn doc present")
-              (is (str/includes? text ":test.parent/name") "schema key present")
-              (is (str/includes? text "<namespace name=\"test.parent\">")
-                  "ns wrapper marker present"))))
+              ;; the fn + schema appear — IN THE SOURCE.
+              (is (str/includes? text "(ns test.parent")
+                  "the ns block rendered (ns-source head present)")
+              (is (str/includes? text "(defn greet")
+                  "the fn is shown — in the rendered source")
+              (is (str/includes? text "Greets x")
+                  "the fn doc is shown — in the rendered source")
+              (is (str/includes? text ":test.parent/name")
+                  "the schema is shown — in the rendered source")
+              ;; …but NOT a second time as redundant member blocks (GI-1).
+              (is (not (str/includes? text "[fn test.parent/greet]"))
+                  "no duplicate [fn …] member block under full source")
+              (is (not (str/includes? text "[schema :test.parent/name]"))
+                  "no duplicate [schema …] member block under full source"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest sourceless-ns-lists-its-members
+  ;; The complement of GI-1: a runtime-created ns with NO stored source
+  ;; (only schema/fn member entities — e.g. a `my.*` ns built by transact)
+  ;; STILL renders its members as `[fn …]` / `[schema …]` blocks, since the
+  ;; source isn't there to carry them.
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (binding [db/*conn* conn]
+              (-> (db/transact!
+                    {:seon.db/tx-data
+                     [{:seon.ns/name :test.runtime}
+                      {:seon.fn/sym "test.runtime/go" :seon.fn/ns [:seon.ns/name :test.runtime]
+                       :seon.fn/arglists "([a])" :seon.fn/source "(defn go [a] a)"}
+                      {:seon.schema/key :test.runtime/id :seon.schema/ns [:seon.ns/name :test.runtime]
+                       :seon.schema/source "(seon.schema/register! :test.runtime/id :string)"}]})
+                  (.then
+                    (fn [_]
+                      (let [text (:seon.render/text
+                                   (agent/render-namespace
+                                     {:seon.db/db @conn :seon.ns/name :test.runtime
+                                      :seon.render/depth 0 :seon.render/format :ai
+                                      :seon.render/detail :full}))]
+                        (is (str/includes? text "[fn test.runtime/go]")
+                            "a sourceless ns lists its fn members")
+                        (is (str/includes? text "[schema :test.runtime/id]")
+                            "a sourceless ns lists its schema members"))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -132,17 +185,19 @@
                   text (:seon.render/text
                          (agent/render-namespace
                            {:seon.db/db db :seon.ns/name :test.child
-                            :seon.render/depth 1 :seon.render/format :ai}))
-                  parent-at (.indexOf text "name=\"test.parent\"")
-                  child-at  (.indexOf text "name=\"test.child\"")]
-              (is (str/includes? text "name=\"test.parent\"")
-                  "required ns rendered")
-              (is (str/includes? text "name=\"test.child\"")
-                  "requiring ns rendered")
-              (is (str/includes? text "test.parent/greet")
-                  "required ns's fn brought into view")
-              (is (and (>= parent-at 0) (< parent-at child-at))
-                  "required ns is PREPENDED before the requiring ns"))))
+                            :seon.render/depth 1 :seon.render/format :ai
+                            :seon.render/detail :full}))]
+              ;; Anchor on the rendered ns-source HEAD `(ns X` to mean "this
+              ;; ns block rendered" — distinct from a bare require mention
+              ;; (`[test.parent :as p]` contains the NAME but not `(ns `).
+              ;; Block ORDERING is not asserted (priority is numeric +
+              ;; movable, not a contract).
+              (is (str/includes? text "(ns test.parent")
+                  "required ns block rendered")
+              (is (str/includes? text "(ns test.child")
+                  "requiring ns block rendered")
+              (is (str/includes? text "(defn greet")
+                  "required ns's fn brought into view (in its source)"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -158,9 +213,10 @@
                   text (:seon.render/text
                          (agent/render-namespace
                            {:seon.db/db db :seon.ns/name :test.child
-                            :seon.render/depth 0 :seon.render/format :ai}))]
-              (is (str/includes? text "name=\"test.child\"") "the ns itself renders")
-              (is (not (str/includes? text "name=\"test.parent\""))
+                            :seon.render/depth 0 :seon.render/format :ai
+                            :seon.render/detail :full}))]
+              (is (str/includes? text "(ns test.child") "the ns itself renders")
+              (is (not (str/includes? text "(ns test.parent"))
                   "depth 0 does NOT render the required parent BLOCK")
               (is (not (str/includes? text "test.parent/greet"))
                   "depth 0 does NOT pull the parent's fns"))))
@@ -179,10 +235,11 @@
                   text (:seon.render/text
                          (agent/render-namespace
                            {:seon.db/db db :seon.ns/name :test.child
-                            :seon.render/depth 1 :seon.render/format :ai}))]
+                            :seon.render/depth 1 :seon.render/format :ai
+                            :seon.render/detail :full}))]
               (is (str/includes? text "test.missing (not in db)")
                   "a required ns with no :seon.ns entity is NOTED, not errored")
-              (is (str/includes? text "name=\"test.child\"")
+              (is (str/includes? text "(ns test.child")
                   "rendering still completes for the requiring ns"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -199,11 +256,19 @@
                   text  (:seon.render/text
                           (agent/render-namespace
                             {:seon.db/db db :seon.ns/name :cyc.a
-                             :seon.render/depth 10 :seon.render/format :ai}))
-                  ;; count whole-ns block markers
-                  occ   (fn [sub] (count (re-seq (re-pattern sub) text)))]
-              (is (= 1 (occ "name=\\\"cyc.a\\\"")) "cyc.a rendered exactly once")
-              (is (= 1 (occ "name=\\\"cyc.b\\\"")) "cyc.b rendered exactly once")
+                             :seon.render/depth 10 :seon.render/format :ai
+                             :seon.render/detail :full}))
+                  ;; count whole-ns BLOCK HEADS (the rendered `(ns X` source
+                  ;; head) — the block marker, not a bare name mention in a
+                  ;; require (`[cyc.a]` has the name but not `(ns `). Literal
+                  ;; substring count (the head contains `(`, not regex-safe).
+                  occ   (fn [sub]
+                          (loop [i 0 n 0]
+                            (if-let [j (str/index-of text sub i)]
+                              (recur (+ j (count sub)) (inc n))
+                              n)))]
+              (is (= 1 (occ "(ns cyc.a")) "cyc.a block rendered exactly once")
+              (is (= 1 (occ "(ns cyc.b")) "cyc.b block rendered exactly once")
               (is (< (count text) 2000)
                   "bounded — the cycle did not blow up the render"))))
         (.then (fn [_] (done)))
@@ -222,10 +287,126 @@
             (let [db   @conn
                   text (:seon.render/text
                          (agent/render-namespace
-                           {:seon.db/db db :seon.ns/name :test.child}))]
-              (is (str/includes? text "name=\"test.parent\"")
+                           {:seon.db/db db :seon.ns/name :test.child
+                            :seon.render/detail :full}))]
+              (is (str/includes? text "(ns test.parent")
                   "default depth 1 follows requires one level")
-              (is (str/includes? text "test.parent/greet")
-                  "the required ns's fns are in view by default"))))
+              (is (str/includes? text "(defn greet")
+                  "the required ns's fns are in view by default (in its source)"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Default detail is :full — signatures are retired. The verb returns the ns's
+;; WHOLE real source (here test.parent carries its full file source), unclipped.
+;; ---------------------------------------------------------------------------
+
+(deftest default-detail-is-full
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db   @conn
+                  text (:seon.render/text
+                         ;; NO :seon.render/detail — exercises the default (:full).
+                         (agent/render-namespace
+                           {:seon.db/db db :seon.ns/name :test.parent
+                            :seon.render/depth 0}))]
+              (is (not (str/includes? text "(signatures)"))
+                  "signatures are retired — no manifest view")
+              (is (str/includes? text "(ns test.parent")
+                  "the ns SOURCE head is shown by default (full)")
+              (is (str/includes? text "(defn greet")
+                  "the fn definition is shown by default (full)")
+              (is (str/includes? text "(str \"hi \"")
+                  "the fn BODY is shown by default (full, no clipping)"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; Member drill — :seon.ns/member names ONE fn → its FULL source, nothing
+;; else (the common case the agent re-issued render-namespace 4× to get).
+;; ---------------------------------------------------------------------------
+
+(deftest member-drill-returns-one-fns-full-source
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db   @conn
+                  text (:seon.render/text
+                         (agent/render-namespace
+                           {:seon.db/db db :seon.ns/name :test.parent
+                            :seon.ns/member "greet"}))]
+              (is (str/includes? text "(member greet)")
+                  "the member-drill block is tagged with the member name")
+              (is (str/includes? text "[fn test.parent/greet]")
+                  "the drilled fn's header is shown")
+              (is (str/includes? text "(defn greet [x] (str \"hi \" x))")
+                  "the drilled fn's FULL source is inlined (always, no threshold)"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest member-drill-accepts-qualified-name
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db   @conn
+                  text (:seon.render/text
+                         (agent/render-namespace
+                           {:seon.db/db db :seon.ns/name :test.parent
+                            ;; qualified form resolves by trailing name.
+                            :seon.ns/member "test.parent/greet"}))]
+              (is (str/includes? text "(defn greet [x] (str \"hi \" x))")
+                  "a qualified member name resolves to the same fn"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest member-drill-unknown-member-is-noted-not-errored
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db   @conn
+                  text (:seon.render/text
+                         (agent/render-namespace
+                           {:seon.db/db db :seon.ns/name :test.parent
+                            :seon.ns/member "nope"}))]
+              (is (str/includes? text "not found")
+                  "an unknown member returns a note, not a throw")
+              (is (str/includes? text "greet")
+                  "the note lists the public fns so the agent can re-issue"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; The fn HEADER is INERT — the `; [fn …]  (ns/fn [args])` documentation line is
+;; a `;` prose comment, so if an agent echoes a rendered block back into its
+;; reply, `seon.repl.internal/parse-forms` SKIPS the bare arglist call instead
+;; of EXECUTING it. Regression for #84: a rendered `(seon.schema/clear-all! [])`
+;; header once wiped the live registry when re-read from the reply. The real
+;; `(defn …)` SOURCE below it IS a form (re-eval just redefines — harmless);
+;; the guard is that the HEADER arglist is never a parsed callable form.
+;; Exercised via the member-drill (the fn-block-ai path that emits the header).
+;; ---------------------------------------------------------------------------
+
+(deftest rendered-fn-header-is-inert-documentation
+  (async done
+    (-> (with-seeded-conn
+          (fn [conn]
+            (let [db    @conn
+                  text  (:seon.render/text
+                          (agent/render-namespace
+                            {:seon.db/db db :seon.ns/name :test.parent
+                             :seon.ns/member "greet"}))
+                  ;; the parser the agent loop runs over its OWN reply — the
+                  ;; exact path that re-executed echoed render text in #84.
+                  forms (->> (repl-internal/parse-forms text)
+                             (filter #(= :form (:kind %))))]
+              (is (str/includes? text "(test.parent/greet [x])")
+                  "the fn header arglist is still SHOWN to the agent")
+              (is (not-any? #(str/includes? (str (:source %)) "(test.parent/greet [x])")
+                            forms)
+                  "the header arglist is a `;` comment — never a parsed callable form")
+              (is (some #(str/includes? (str (:source %)) "(defn greet")
+                        forms)
+                  "the real (defn) source IS a form — re-eval redefines, harmless"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

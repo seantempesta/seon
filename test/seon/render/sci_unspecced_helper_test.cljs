@@ -254,7 +254,7 @@
           (is (str/includes? (str msg) "/tmp/acme-fake-root")))
         (testing "it gives the exact reset! one-liner the entry ns must run"
           (is (str/includes? (str msg) "reset! seon.client/!extra-core-vars"))
-          (is (str/includes? (str msg) "specced-fn-vars"))
+          (is (str/includes? (str msg) "public-fn-vars"))
           (is (str/includes? (str msg) ":require-macros"))))
       (finally
         (reset! client/!extra-core-vars before-extra)

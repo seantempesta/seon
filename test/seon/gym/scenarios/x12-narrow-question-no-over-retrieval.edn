@@ -1,0 +1,90 @@
+;; X12 (gym-v2 §3 Group VI) — NEGATIVE: narrow question, no over-retrieval.
+;; The store holds two unrelated kinds (contacts + a reading list). Fresh
+;; agent B is asked a NARROW question that needs ONLY the contact kind. The
+;; precision bar: B queries the relevant kind and does NOT bulk-pull the
+;; off-kind rows. Mechanical legs: B touched :my.contact/* at least once and
+;; touched :my.book/* ZERO times (the structural analogue of the condition-B
+;; over-pull penalty). The dentist's name lives on the judge axis.
+;;
+;; PAID — refused without {:seon.gym/allow-paid? true} + the provider key.
+{:seon.gym.scenario/id     :x12-narrow-question-no-over-retrieval
+ :seon.gym.scenario/doc    "Store holds contacts + a reading list. Fresh B, asked only for the dentist's name, must query the contact kind and NOT pull the unrelated book kind. Precision negative: off-kind query count must be 0."
+ :seon.gym.scenario/tier   :paid
+ :seon.gym.scenario/status :active
+ :seon.gym.scenario/competency :over-retrieval
+ :seon.gym.scenario/axes   [:consults-findings :replies-honestly :terminates]
+ :seon.gym.scenario/schema-registrations
+ [[:my.contact/role :keyword]
+  [:my.contact/name :string]
+  [:my.contact/phone :string]
+  [:my.book/title :string]
+  [:my.book/author :string]]
+ :seon.gym.scenario/fixtures
+ [{:my.contact/role :dentist :my.contact/name "Dr. Okafor" :my.contact/phone "555-0144"}
+  {:my.contact/role :plumber :my.contact/name "Sam Reyes"  :my.contact/phone "555-0177"}
+  {:my.book/title "Dune"       :my.book/author "Herbert"}
+  {:my.book/title "Foundation" :my.book/author "Asimov"}]
+ :seon.gym.scenario/turns
+ [{:seon.gym.turn/agent   :a
+   :seon.gym.turn/message "Save a couple of contacts for me — my dentist is Dr. Okafor on 555-0144, and the plumber is Sam Reyes on 555-0177. Also jot down that I'm reading Dune and Foundation."}
+  {:seon.gym.turn/agent   :b
+   :seon.gym.turn/message "Quick one — what's my dentist's name?"}]
+ :seon.gym.scenario/predicates
+ [{:seon.gym.predicate/id     :both-kinds-seeded-visible
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :consults-findings
+   :seon.gym.predicate/query  [:find ?e :where [?e :my.contact/name _]]
+   :seon.gym.predicate/expect [:count>= 2]}
+  {:seon.gym.predicate/id      :b-discovery-reads-store-first
+   :seon.gym.predicate/kind    :first-eval-matches
+   :seon.gym.predicate/agent   :b
+   :seon.gym.predicate/axis    :consults-findings
+   :seon.gym.predicate/pattern "(?:seon\\.)?db/(query|pull|entity|store-inventory)"}
+  ;; PRECISION+: B queried the relevant (contact) kind at least once.
+  {:seon.gym.predicate/id      :b-queried-the-relevant-kind
+   :seon.gym.predicate/kind    :eval-count-matching
+   :seon.gym.predicate/agent   :b
+   :seon.gym.predicate/axis    :consults-findings
+   :seon.gym.predicate/pattern ":my\\.contact/"
+   :seon.gym.predicate/expect  [:count>= 1]}
+  ;; PRECISION−: B did NOT query the unrelated book kind. store-inventory's
+  ;; source carries no attr literals, so reading the inventory never trips
+  ;; this — only an explicit :my.book/* query does (the over-pull penalty).
+  {:seon.gym.predicate/id      :b-did-not-pull-off-kind
+   :seon.gym.predicate/kind    :eval-count-matching
+   :seon.gym.predicate/agent   :b
+   :seon.gym.predicate/axis    :consults-findings
+   :seon.gym.predicate/pattern ":my\\.book/"
+   :seon.gym.predicate/expect  [:count 0]}
+  {:seon.gym.predicate/id     :b-replied-to-the-user
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :replies-honestly
+   :seon.gym.predicate/args   [:seon.gym.agent/b]
+   :seon.gym.predicate/query  [:find ?m
+                               :in $ ?bid
+                               :where
+                               [?ag :seon.agent/id ?bid]
+                               [?m :seon.agent.message/from ?ag]
+                               [?m :seon.agent.message/hops ?h]
+                               [(pos? ?h)]]
+   :seon.gym.predicate/expect :non-empty}
+  {:seon.gym.predicate/id     :both-agents-end-idle
+   :seon.gym.predicate/kind   :datalog
+   :seon.gym.predicate/axis   :terminates
+   ;; idle is DERIVED, never a stored :seon.agent/state datom: an agent is
+   ;; idle iff not terminated and owns NO open run (the run's close retracts
+   ;; :seon.agent/run → derived :idle). Both agents idle = 2 rows.
+   :seon.gym.predicate/query  [:find ?a
+                               :where
+                               [?a :seon.agent/id _]
+                               (not [?a :seon.agent/terminated-at _])
+                               (not-join [?a]
+                                 [?r :seon.agent.run/agent ?a]
+                                 [?r :seon.agent.run/status :open])]
+   :seon.gym.predicate/expect [:count 2]}
+  {:seon.gym.predicate/id        :judge-dentist-name
+   :seon.gym.predicate/kind      :llm-judge
+   :seon.gym.predicate/agent     :b
+   :seon.gym.predicate/axis      :replies-honestly
+   :seon.gym.predicate/rubric    "PASS only if the reply names the dentist as Dr. Okafor (Okafor). FAIL if it names the plumber (Sam Reyes), a book author, or anyone else, or says it doesn't know."
+   :seon.gym.predicate/reference "The dentist contact is Dr. Okafor (the plumber is Sam Reyes; the books Dune/Foundation are unrelated). The name is knowable only by reading the stored contact row for the dentist role."}]}

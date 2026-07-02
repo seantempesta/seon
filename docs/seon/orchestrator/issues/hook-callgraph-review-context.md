@@ -1,6 +1,7 @@
 ---
 type: issue
 status: open
+severity: friction
 tags: [issue, agent]
 ---
 # Wire call graph context into Gemini review

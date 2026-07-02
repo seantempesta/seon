@@ -93,8 +93,9 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn snapshot-defs
-  "Snapshot of `{ns-sym → {def-sym → digest-hash}}` in the analyzer's
-   current `:cljs.analyzer/namespaces` map. The digest covers the
+  "Snapshot of `{ns-sym → {def-sym → digest-hash}}` for the analyzer.
+
+   From the current `:cljs.analyzer/namespaces` map. The digest covers the
    semantically-meaningful fields of each var-map (see `var-digest`),
    so a re-def with changed doc/arglists/etc. produces a different
    digest — which is what `defs-since` keys off of (B1)."
@@ -117,7 +118,9 @@
                              [sym (var-digest var-map)]))])))
 
 (defn defs-since
-  "Seq of `{:ns :sym :var-map}` for every def present now whose digest
+  "Seq of `{:ns :sym :var-map}` for defs changed since a snapshot.
+
+   Every def present now whose digest
    differs from `before-snapshot` — i.e. brand-new defs AND re-defs
    whose load-bearing var-map fields changed (B1).
 
@@ -130,7 +133,7 @@
    without this guard those would tee as bogus `:seon.fn` rows + a
    sourceless `{:seon.ns/name :result}` row (the prefix allow-list was
    the only thing hiding them — once it's gone they leak into the
-   `<namespace>` inventory)."
+   namespace inventory)."
   {:malli/schema [:=> [:cat ::defs-snapshot ::compile-state] [:sequential ::new-def]]}
   [before-snapshot compile-state]
   {:pre [(map? before-snapshot) (some? compile-state)]}
@@ -155,6 +158,51 @@
                      (not= before-digest now-digest))]
       {:ns ns-sym :sym sym :var-map var-map})))
 
+(defn remove-phantom-defs!
+  "Failure-path counterpart to [[defs-since]].
+
+   Drops the PHANTOM def
+   registrations a FAILED eval left in `ns-sym`'s `:defs`, and return the
+   removed simple-symbol seq.
+
+   Why phantoms exist: under `:def-emits-var true`, `cljs.analyzer`'s
+   `parse 'def` writes the var-map into `[::namespaces ns-sym :defs sym]`
+   BEFORE it analyzes the body (analyzer.cljc ~2112) — and it does NOT
+   roll the swap! back when the eval then fails. A body that analyzes
+   cleanly but is FAILED post-eval (a warning-promoted `:undeclared-var`,
+   or a runtime/emit throw) leaves the FULL var-map (incl. `:fn-var`),
+   whose [[var-digest]] equals what a SUCCESSFUL same-signature retry
+   would produce. That collision makes the retry's `defs-before` already
+   hold the digest, so [[defs-since]] sees no change and the detect-and-tee
+   SILENTLY SKIPS the `:seon.fn` row — the fn works in-session but never
+   persists (vanishes on the next restart).
+
+   Removing the syms present in `ns-sym`'s CURRENT `:defs` but ABSENT from
+   `before-snapshot[ns-sym]` (this form's pre-eval keyset) restores the
+   REPL invariant that a failed defn defines nothing: the retry is then
+   genuinely-new and tees. Scoped to `ns-sym` and to NEWLY-added simple
+   symbols so it can never touch a pre-existing def (its sym is in
+   `before-snapshot`), a redef of an existing fn whose body failed (its
+   PRIOR good entry is in `before-snapshot`), the fully-qualified
+   multi-arity sub-records (non-simple-symbol keys, never in the
+   snapshot), or any other namespace."
+  {:malli/schema [:=> [:cat ::compile-state ::defs-snapshot :symbol]
+                  [:sequential :symbol]]}
+  [compile-state before-snapshot ns-sym]
+  {:pre [(some? compile-state) (map? before-snapshot)]}
+  (let [before-syms (get before-snapshot ns-sym)
+        cur-defs    (get-in @compile-state
+                            [:cljs.analyzer/namespaces ns-sym :defs])
+        phantoms    (vec (for [[sym _var-map] cur-defs
+                               :when (and (simple-symbol? sym)
+                                          (not (contains? before-syms sym)))]
+                           sym))]
+    (when (seq phantoms)
+      (swap! compile-state update-in
+             [:cljs.analyzer/namespaces ns-sym :defs]
+             (fn [defs] (apply dissoc defs phantoms))))
+    phantoms))
+
 (defn- raw-ns-deps
   "The UNFILTERED set of ns-NAME symbols `ns-sym` depends on, read
    straight from the analyzer. Composes the VALUES of the analyzer's
@@ -174,7 +222,9 @@
         (disj ns-sym))))
 
 (defn ns-deps
-  "Set of agent-ns syms `ns-sym` depends on, intersected with
+  "Set of agent-ns syms `ns-sym` depends on.
+
+   Intersected with
    `known-ns-set` (so cljs.core / clojure.* / bootstrap nses drop
    out). Reads the analyzer's `:requires` + `:uses` + `:require-macros`
    maps directly. Excludes self. Used by Phase D bulk-load resume for
@@ -186,8 +236,9 @@
   (set/intersection (raw-ns-deps compile-state ns-sym) known-ns-set))
 
 (defn ns-requires
-  "The UNFILTERED dependency-edge set for `ns-sym` as ns-name KEYWORDS,
-   read from the analyzer (no source parsing). This is what the tee
+  "The UNFILTERED dependency-edge set for `ns-sym`, as keywords.
+
+   Read from the analyzer (no source parsing). This is what the tee
    stores as `:seon.ns/requires` so the DB-layer load can topo-sort by
    requires (the one unblocking fix — see the db-is-the-running-system
    PRD). Unlike [[ns-deps]] it is NOT intersected with a known-set: the

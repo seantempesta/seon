@@ -1,8 +1,8 @@
 ---
 type: issue
 status: open
-tags: [issue, agent, flow]
-severity: architectural
+tags: [issue, agent, flow, architecture]
+severity: cleanup
 ---
 
 # The context/render system has no clean-build (node-test) coverage

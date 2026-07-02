@@ -31,9 +31,14 @@
 #   status [name]      Show one or all
 #   tail <name>        tail -f logs/<name>.log
 #   logs <name> [n]    Last n lines (default 200) of logs/<name>.log
+#   logs [all] [n]     MERGED last n (default 120) across every process log,
+#                      source-tagged + time-ordered — the unified debug view
 #   adopt <name>       Register a manually-started process by PID
 #   prep               Idempotent git-dep prep for :writer/:cljs aliases
 #                      (downstream supervisors shell out to this)
+#   nuke --yes         DESTRUCTIVE full clean slate: stop everything, wipe
+#                      ALL cluster stores + transient data, clear ALL logs,
+#                      restart the default stack fresh. No undo.
 #
 # State per process: tmp/proc/<name>/{pid,cmd,started-at,lock/}
 # Logs:              logs/<name>.log (truncated on fresh start)
@@ -46,44 +51,23 @@ set -euo pipefail
 SEON_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$SEON_ROOT"
 
-# Java 22+ for every JVM process this supervisor launches. The wire-server's
-# Proximum secondary index (HNSW vector search) ships class-file 66.0 + uses
-# the Foreign Memory API, both Java 22+ only; a Java-21 runtime throws
-# UnsupportedClassVersionError. Select a 22+ JDK cross-platform (macOS, Linux,
-# and WSL — which is Linux). Honors an already-good JAVA_HOME first.
-_java_ge22() { [ -x "$1" ] && "$1" -version 2>&1 | grep -qE '"(2[2-9]|[3-9][0-9])[.+"]'; }
+# Pin the JDK for every JVM process this supervisor launches via the shared
+# resolver (single source of truth — selects JDK 25). The resolver exports
+# JAVA_HOME + JAVA_CMD and prepends $JAVA_HOME/bin to PATH (the `clojure` CLI
+# resolves the JVM from `java` on PATH, not from JAVA_HOME).
+source "$SEON_ROOT/bin/_java-home-resolver"
 
-if ! _java_ge22 "${JAVA_HOME:-}/bin/java"; then
-  _jh=""
-  if command -v /usr/libexec/java_home >/dev/null 2>&1; then
-    # macOS: java_home knows where JDKs live.
-    _jh="$(/usr/libexec/java_home -v 22 2>/dev/null || true)"
-  fi
-  if ! _java_ge22 "${_jh:-}/bin/java"; then
-    # Linux / WSL: scan common JDK install roots + SDKMAN.
-    _jh=""
-    for _c in /usr/lib/jvm/*/bin/java "$HOME"/.sdkman/candidates/java/*/bin/java /opt/*/bin/java; do
-      if _java_ge22 "$_c"; then _jh="$(cd "$(dirname "$_c")/.." && pwd)"; break; fi
-    done
-  fi
-  # Last resort: a 22+ `java` already on PATH (any platform).
-  if [ -z "${_jh:-}" ] && _java_ge22 "$(command -v java 2>/dev/null)"; then
-    _jp="$(command -v java)"; _jr="$(readlink -f "$_jp" 2>/dev/null || echo "$_jp")"
-    _jh="$(cd "$(dirname "$_jr")/.." && pwd)"
-  fi
-  if [ -n "${_jh:-}" ]; then
-    export JAVA_HOME="$_jh"
-  else
-    echo "⚠ bin/seon: no Java 22+ JDK found — JVM processes (wire-server) will fail." >&2
-    echo "  Install a JDK 22+ and/or set JAVA_HOME. macOS: brew install openjdk@22 ·" >&2
-    echo "  Debian/Ubuntu/WSL: apt install openjdk-22-jdk · or use SDKMAN: sdk install java 22-open" >&2
-  fi
-fi
-# The `clojure` CLI resolves the JVM from `java` on PATH, NOT from JAVA_HOME —
-# so prepend it (and export JAVA_CMD belt-and-braces).
-if [ -n "${JAVA_HOME:-}" ] && [ -x "${JAVA_HOME}/bin/java" ]; then
-  export PATH="${JAVA_HOME}/bin:${PATH}"
-  export JAVA_CMD="${JAVA_HOME}/bin/java"
+# Hard floor: the wire-server's Proximum secondary index (HNSW vector search)
+# ships class-file 66.0 + uses the Foreign Memory API — both Java 22+ only; a
+# Java-21 runtime throws UnsupportedClassVersionError. We SELECT 25 above, but
+# keep this >=22 assert as the safety net (e.g. resolver fell back to an old
+# `java` on PATH). Loud warning, not a hard exit, so non-JVM subcommands
+# (status/tail/logs) still work on a misconfigured box.
+_java_ge22() { [ -x "$1" ] && "$1" -version 2>&1 | grep -qE '"(2[2-9]|[3-9][0-9])[.+"]'; }
+if ! _java_ge22 "$(command -v java 2>/dev/null)"; then
+  echo "⚠ bin/seon: java on PATH is < 22 — JVM processes (wire-server) will fail." >&2
+  echo "  Proximum (class v66 + Foreign Memory API) needs Java 22+; bin/_java-home-resolver pins 25." >&2
+  echo "  Install a JDK 25. macOS: brew install openjdk@25 · Debian/WSL: apt install openjdk-25-jdk" >&2
 fi
 
 # PROC_DIR/LOG_DIR default to today's baked-in paths (byte-identical for
@@ -107,6 +91,9 @@ mkdir -p "$PROC_DIR" "$LOG_DIR"
 #   SEON_WRITER_REPL_PORT   wire-server loopback socket-REPL port
 #   SEON_PORT               pod HTTP port (read by the pod itself —
 #                           seon.web.serve; inherits through nohup)
+#   SEON_PORT_FILE          per-cluster pod port file (default tmp/seon-port);
+#                           pod writes its bound port here, supervisor reads it
+#                           in status/ready_check. Exported so the pod inherits.
 #   SEON_RUNTIME_ROOT       pod artifact root (read by the pod itself —
 #                           seon.platform/artifact-path; inherits)
 #   SEON_EXTRA_SRC          downstream CLJS source root (deps.edn project)
@@ -121,6 +108,76 @@ SEON_CLUSTER_DIR="${SEON_CLUSTER_DIR:-data/clusters/default}"
 SEON_REQ_SOCK="${SEON_REQ_SOCK:-tmp/seon-cluster-default-req.sock}"
 SEON_PUB_SOCK="${SEON_PUB_SOCK:-tmp/seon-cluster-default-pub.sock}"
 SEON_WRITER_REPL_PORT="${SEON_WRITER_REPL_PORT:-7891}"
+
+# Per-cluster pod port file. The pod (seon.web.serve/write-port-file!) writes
+# its bound HTTP port here on boot; the supervisor's ready_check/status read it.
+# A SINGLE non-namespaced file would be clobbered by a second cluster's pod
+# (bin/acme), so isolate it like the proc dir + sockets: default = tmp/seon-port
+# (byte-identical to today), acme overrides to tmp/seon-port-acme. Exported so
+# the pod inherits the SAME path it must write through nohup.
+SEON_PORT_FILE="${SEON_PORT_FILE:-tmp/seon-port}"
+export SEON_PORT_FILE
+
+# Embeddings (Proximum HNSW semantic search) — default OFF (opt-in: a fresh
+# clone runs zero embedding code, no Vertex/Gemini calls). OUR clusters run it
+# OFF too (owner call 2026-07-02: .env / .env.acme carry SEON_EMBED=0; set =1
+# to opt a cluster back in). Read by the wire-server
+# (declares the index + backfills) and the pod (per-turn predictive retrieval).
+# Recover/rebuild when re-enabled: the index is DERIVED — re-ingest.
+# Persisted local config: the main pod's gitignored .env at the repo root
+# (acme's lives in .env.acme, sourced by bin/acme). `set -a` exports each
+# VAR=value; a value already set in your shell still wins via the ${:-} below.
+if [ -f "$SEON_ROOT/.env" ]; then set -a; . "$SEON_ROOT/.env"; set +a; fi
+
+# SEON_EMBED is a PRESENCE gate in code (embed-feature-enabled? checks set-ness:
+# ANY value — even "" or "0" — counts as ON; only UNSET is OFF). The operator
+# convention everywhere else is "0" = off, so translate: empty/"0" → unset (gate
+# OFF), anything else → exported (gate ON). Our clusters carry SEON_EMBED=0
+# (disabled); a fresh clone stays genuinely OFF.
+case "${SEON_EMBED:-}" in
+  ""|0) unset SEON_EMBED ;;
+  *)    export SEON_EMBED ;;
+esac
+
+# ============================================================
+# Capability grants (agent tools) — host-owned env gates, read live
+# by the pod. CODE defaults are conservative (deny-when-unset); this
+# supervisor is OUR dev/bench deployment, so it GRANTS shell + web by
+# default. Any value but "0" grants; deny per-cluster via .env or the
+# shell (SEON_SHELL=0 bin/seon restart pod). Downstream consumers who
+# embed seon without bin/seon still get the code's default-deny.
+# Full gate table: docs/seon/components/capability-gates.md
+# ============================================================
+export SEON_SHELL="${SEON_SHELL:-1}"   # seon.agent.shell/run + py-run
+export SEON_WEB="${SEON_WEB:-1}"       # seon.agent.web/fetch (SSRF guard stays always-on)
+# Optional narrowing knobs — exported only when set (unset = open-when-granted):
+#   SEON_WEB_DOMAINS  comma-separated domain allowlist (empty/unset = all domains)
+#   SEON_WEB_LOCK     "1" locks the web allowlist against runtime configure!
+#   SEON_FS_LOCK      "1" locks the fs grant against runtime configure!
+# (SEON_FS_ROOT / SEON_FS_READ_ONLY are set on the pod command below — the pod
+# gets a durable read-only grant on the repo; shell cwd gating rides on it.)
+[ -n "${SEON_WEB_DOMAINS:-}" ] && export SEON_WEB_DOMAINS
+[ -n "${SEON_WEB_LOCK:-}" ] && export SEON_WEB_LOCK
+[ -n "${SEON_FS_LOCK:-}" ] && export SEON_FS_LOCK
+
+# ── Config manifest selection — the ONE config seam (read by seon.config) ──
+# SEON_CONFIG  = manifest path (default config/system.edn, CWD-relative to the
+#                repo root the pod runs in).
+# SEON_PROFILE = aero #profile variant (default :default).
+# Both are EXPORTED so the spawned pod inherits them; a shell-set value still
+# wins via ${:-}. A cluster customizes its loadout/routes/skills by pointing
+# these at its own manifest/profile with ZERO src edit — bin/acme points
+# SEON_CONFIG at config/acme.edn; a test run does `SEON_CONFIG=config/test.edn
+# bin/test-cljs`. Absent file ⇒ seon.config returns {} ⇒ byte-identical
+# no-config boot.
+export SEON_CONFIG="${SEON_CONFIG:-config/system.edn}"
+[ -n "${SEON_PROFILE:-}" ] && export SEON_PROFILE
+
+# Identity files: SOUL.md (+ AGENTS.md if present) load as CONTEXT blocks when
+# the file exists. The SOUL block is disabled via SEON_SOUL=false in the main
+# .env (seon.agent.ctx/soul-file-path → nil → :soul block omitted) — TEMPORARY
+# while we converge lean core-essential context (the SYSTEM.md work). Re-enable
+# with SEON_SOUL=true in .env. SEON_SOUL_FILE overrides the path when enabled.
 
 # ============================================================
 # SEON_EXTRA_SRC — downstream CLJS source roots (task #36; spec:
@@ -195,14 +252,14 @@ process_command() {
     # layout (P1); they're CLI args, not code identifiers. The --repl-port
     # opens a loopback-only socket REPL on 127.0.0.1 for diagnostics, and
     # the chosen port is written to tmp/seon-writer-repl-port.
-    wire-server) echo "clojure -M:writer --backend file --path $SEON_CLUSTER_DIR/store --req-sock $SEON_REQ_SOCK --pub-sock $SEON_PUB_SOCK --repl-port $SEON_WRITER_REPL_PORT" ;;
+    wire-server) echo "clojure -M:simd:fork-deps:writer --backend file --path $SEON_CLUSTER_DIR/store --req-sock $SEON_REQ_SOCK --pub-sock $SEON_PUB_SOCK --repl-port $SEON_WRITER_REPL_PORT" ;;
     *) return 1 ;;
   esac
 }
 
 process_ready_hint() {
   case "$1" in
-    pod)         echo "  ready: tmp/seon-port written + HTTP answers on /agents" ;;
+    pod)         echo "  ready: $SEON_PORT_FILE written + HTTP answers on /" ;;
     cljs-watch)  echo "  ready: 'Build completed' appears in logs/cljs-watch.log" ;;
     jvm)         echo "  ready: logs/app.log shows 'Server started'" ;;
     wire-server) echo "  ready: $SEON_REQ_SOCK ACCEPTING; REPL on 127.0.0.1:$SEON_WRITER_REPL_PORT (tmp/seon-writer-repl-port)" ;;
@@ -247,9 +304,14 @@ ready_check() {
       fi
       ;;
     pod)
-      [ -f tmp/seon-port ] || return 1
+      [ -f "$SEON_PORT_FILE" ] || return 1
+      # Probe `/` — the most fundamental core route (always seeded on every
+      # cluster). It's render-independent (a 302/200, no agent-page render),
+      # so this gate won't false-fail during a render hot-reload. `curl -f`
+      # passes on the 302 (<400) and on the 200 after the root=/ repoint.
+      # (Was `/agents`, removed by the db->routes routing cutover → 404.)
       curl -fsS -m 2 -o /dev/null \
-        "http://127.0.0.1:$(cat tmp/seon-port)/agents" 2>/dev/null
+        "http://127.0.0.1:$(cat "$SEON_PORT_FILE")/" 2>/dev/null
       ;;
     cljs-watch)
       # Build artifact newer than this start, or completion line in the
@@ -345,11 +407,13 @@ maybe_prep_deps() {
   local name="$1"
   local alias
   case "$name" in
-    wire-server) alias="writer" ;;
+    wire-server) alias="simd:fork-deps:writer" ;;
     cljs-watch)  alias="cljs" ;;
     *) return 0 ;;
   esac
-  local fp_file current stored
+  local fp_file current stored prep_vec
+  # Colon-joined alias GROUP → prep :aliases vector ([:simd :fork-deps :writer]).
+  prep_vec="[:${alias//:/ :}]"
   fp_file="$(state_dir "$name")/deps-fingerprint"
   current="$(deps_fingerprint)"
   stored="$(cat "$fp_file" 2>/dev/null || true)"
@@ -357,7 +421,7 @@ maybe_prep_deps() {
     return 0
   fi
   echo "  ▶ deps changed (or git libs unprepped) for $name — running"
-  echo "    clojure -X:deps prep :aliases '[:$alias]' && clojure -P -M:$alias"
+  echo "    clojure -X:deps prep :aliases '$prep_vec' && clojure -P -M:$alias"
   echo "    SYNCHRONOUSLY before spawn (a fresh git dep can take minutes)"
   echo "    progress: logs/$name.log"
   {
@@ -365,7 +429,7 @@ maybe_prep_deps() {
     # prep BEFORE -P: a prep-requiring git dep (e.g. datahike, which compiles
     # Java sources) makes `clojure -P` fail with "libs must be prepared" — so
     # prep must run first, else the && short-circuits and prep never happens.
-    clojure -X:deps prep :aliases "[:$alias]" \
+    clojure -X:deps prep :aliases "$prep_vec" \
       && clojure -P -M:"$alias" \
       && echo "== [bin/seon] auto-prep :$alias done $(date -u +%FT%TZ) =="
   } >> "$(log_file "$name")" 2>&1 || {
@@ -380,7 +444,7 @@ cmd_prep() {
   # Explicit git-dep prep verb for DOWNSTREAM supervisors (consumer ask 7):
   # after a git-dep repin, aliases that pull prep-requiring git deps
   # fail with "libs must be prepared" until
-  #   clojure -X:deps prep :aliases '[:writer]'
+  #   clojure -X:deps prep :aliases '[:simd :fork-deps :writer]'
   # runs — plain `clojure -X:deps prep` is NOT enough (the fork only
   # enters the classpath via the alias). bin/seon's auto-prep covers
   # seon's own start paths; this verb lets a downstream launcher shell
@@ -401,7 +465,7 @@ cmd_prep() {
   #     refresh), so a deps.edn edit that touches NO git-dep (a maven dep,
   #     a :paths, an alias, or a seon SHA bump that only changes source)
   #     leaves the git fingerprint unchanged while the cpcache goes STALE.
-  #     If prep no-op'd there, the downstream's `clojure -M:writer` would
+  #     If prep no-op'd there, the downstream's `clojure -M:simd:fork-deps:writer` would
   #     have to refresh the cache in its fragile pre-`exec` make-classpath2
   #     window (death there ⇒ empty wire.log, "died during startup").
   #     `-P` is a ~1s no-op on an already-warm tree but does the refresh
@@ -410,7 +474,10 @@ cmd_prep() {
   #
   # On a real git-dep prep it also refreshes the per-process fingerprints
   # so the next `start wire-server` / `start cljs-watch` skips auto-prep.
-  local prep_aliases="writer cljs"
+  # Each entry is an alias GROUP composed at the command line (colon-joined);
+  # the fork git deps live in the shared :fork-deps alias, so the wire-server
+  # group must list it for prep + warm to see them.
+  local prep_aliases="simd:fork-deps:writer cljs"
   local fp_file current stored need_git_prep
   ensure_state prep
   fp_file="$(state_dir prep)/deps-fingerprint"
@@ -424,10 +491,13 @@ cmd_prep() {
   fi
   local a
   for a in $prep_aliases; do
+    # An alias GROUP may be colon-joined (e.g. simd:fork-deps:writer); turn it
+    # into a prep :aliases vector ([:simd :fork-deps :writer]).
+    local prep_vec="[:${a//:/ :}]"
     if [ "$need_git_prep" = 1 ]; then
-      echo "▶ prepping :$a — clojure -X:deps prep :aliases '[:$a]'"
+      echo "▶ prepping :$a — clojure -X:deps prep :aliases '$prep_vec'"
       # prep first (see auto-prep note): -P fails on an unprepped prep-lib.
-      if ! clojure -X:deps prep :aliases "[:$a]"; then
+      if ! clojure -X:deps prep :aliases "$prep_vec"; then
         echo "✗ git-dep prep for :$a FAILED" >&2
         return 1
       fi
@@ -604,7 +674,26 @@ _stop_unlocked() {
 
   if kill -0 "$pid" 2>/dev/null; then
     kill -9 "$pid" 2>/dev/null || true
-    echo "○ $name killed (SIGKILL, was pid $pid)"
+    # CONFIRM the process is ACTUALLY gone before returning. `kill -9` only
+    # *sends* SIGKILL — the kernel may still be tearing the process down
+    # (the wire-server flushing LMDB, releasing its UDS socket). Callers
+    # that immediately wipe the store (cluster reset / nuke) MUST NOT race
+    # that teardown, or they rm-rf a store dir a dying writer is still
+    # writing → corruption. Block (bounded) until the pid disappears.
+    local j
+    for j in 1 2 3 4 5 6 7 8 9 10; do
+      kill -0 "$pid" 2>/dev/null || break
+      sleep 0.5
+    done
+    if kill -0 "$pid" 2>/dev/null; then
+      # Pathological — a normal JVM/node never ignores SIGKILL. Fail LOUD
+      # rather than let a caller wipe the store under a live writer.
+      echo "✗ $name (pid $pid) survived SIGKILL after 5s — NOT confirmed dead" >&2
+      echo "  a store wipe now could corrupt a live writer; investigate the pid" >&2
+      rm -f "$(pid_file "$name")"
+      return 1
+    fi
+    echo "○ $name killed (SIGKILL, confirmed dead, was pid $pid)"
   else
     echo "○ $name stopped (was pid $pid)"
   fi
@@ -690,9 +779,11 @@ cmd_status() {
       echo "○ $name  (not running)"
     fi
   done
-  # Bonus: surface the pod's port if it's been written.
-  if [ -f tmp/seon-port ]; then
-    echo "  pod port: $(cat tmp/seon-port)  →  http://127.0.0.1:$(cat tmp/seon-port)"
+  # Bonus: surface the pod's port if it's been written. Per-cluster file
+  # ($SEON_PORT_FILE) so an isolated second cluster (bin/acme) never makes
+  # this status print the OTHER cluster's port.
+  if [ -f "$SEON_PORT_FILE" ]; then
+    echo "  pod port: $(cat "$SEON_PORT_FILE")  →  http://127.0.0.1:$(cat "$SEON_PORT_FILE")"
   fi
 }
 
@@ -708,7 +799,15 @@ cmd_tail() {
 }
 
 cmd_logs() {
-  local name="${1:?logs requires a process name}"
+  # No name (or `all`) → MERGED view across every process log, source-
+  # labeled and time-sorted (the unified-logging front door for debugging:
+  # one place to read pod + wire-server + jvm + cljs-watch interleaved).
+  # `logs <name> [n]` keeps the single-process behavior.
+  if [ "$#" -eq 0 ] || [ "$1" = "all" ]; then
+    merged_logs "${2:-120}"
+    return
+  fi
+  local name="$1"
   local n="${2:-200}"
   local lf
   lf="$(log_file "$name")"
@@ -717,6 +816,23 @@ cmd_logs() {
     exit 1
   fi
   tail -n "$n" "$lf"
+}
+
+# Merge the last N lines of every process log into one stream, ordered by
+# the ISO-8601 timestamp each line leads with (lines without one inherit the
+# previous timestamp so they stay adjacent to their context). Each line is
+# tagged `[proc]`. Snapshot, not follow — built for an agent that reads
+# (not watches) and wants the cross-process causal order in one shot.
+merged_logs() {
+  local n="$1"
+  local name lf
+  for name in $(all_processes); do
+    lf="$(log_file "$name")"
+    [ -f "$lf" ] || continue
+    tail -n "$n" "$lf" | awk -v src="$name" '
+      match($0, /^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:.]+/) { ts=substr($0,RSTART,RLENGTH) }
+      { printf "%s\t%s\t%s\n", ts, src, $0 }'
+  done | sort -s -k1,1 | sed -E "s/^[^\t]*\t([^\t]*)\t/[\1] /"
 }
 
 cmd_cluster() {
@@ -754,11 +870,22 @@ cluster_reset() {
     store_dir="data/clusters/$name/store"
   fi
 
-  # Only the "default" cluster has registered processes today
-  # (wire-server's CLI args target $SEON_CLUSTER_DIR). Other names get
-  # their store wiped but no process bounce.
+  # Bounce processes when the requested cluster is the one THIS supervisor
+  # invocation MANAGES — i.e. its store IS $SEON_CLUSTER_DIR/store and its
+  # pod/wire-server live in $SEON_PROC_DIR. For seon's own usage that's
+  # name=default (unchanged: store_dir was just set to $SEON_CLUSTER_DIR/store
+  # above, so this is trivially true). For an ISOLATED second supervisor
+  # (bin/acme exports SEON_CLUSTER_DIR=data/clusters/acme +
+  # SEON_PROC_DIR=tmp/proc-acme + SEON_REQ_SOCK=tmp/acme-…), `bin/acme cluster
+  # reset acme` now resolves store_dir=data/clusters/acme/store ==
+  # $SEON_CLUSTER_DIR/store, so it bounces ACME's own pod+wire-server in acme's
+  # namespace via the race-safe restart below — NEVER the live default cluster.
+  # A name that is NOT this supervisor's cluster gets its store wiped but no
+  # bounce (we don't manage its processes). Keying off the literal "default"
+  # was the bug: under acme's env it left the wire-server holding a deleted
+  # store and printed "no processes registered for it".
   local bounce=0
-  [ "$name" = "default" ] && bounce=1
+  [ "$store_dir" = "$SEON_CLUSTER_DIR/store" ] && bounce=1
 
   echo "▶ cluster reset: $name"
 
@@ -791,6 +918,84 @@ cluster_reset() {
   else
     echo "▶ cluster $name store wiped (no processes registered for it)"
   fi
+}
+
+cmd_nuke() {
+  # DESTRUCTIVE clean slate. `cluster reset` wipes ONE cluster's store and
+  # bounces the default stack; `nuke` goes further — it tears the whole world
+  # down to bare metal: stop EVERY managed process (incl. jvm), wipe EVERY
+  # cluster store + all transient runtime data, and clear ALL logs — then
+  # bring the default stack back up fresh (pod boot re-seeds the core).
+  #
+  # What it deletes (unrecoverable — agent fns, soul edits, chat, findings,
+  # the indexed corpus all live in the cluster stores):
+  #   - data/clusters/*/store      every cluster's durable datahike store
+  #   - data/seon-pod/* data/sessions/* data/embeddings/*   transient runtime
+  #   - logs/*                     every log file + turns/agents/prompts/archive
+  #   - the default cluster's UDS sockets + its pod port file ($SEON_PORT_FILE)
+  # What it KEEPS: out*/ (CLJS build output — rebuilt incrementally anyway),
+  #   data/dev-hook (the dev hook's own tooling state, not seon runtime data),
+  #   the git tree.
+  #
+  # NOTE on acme: this wipes data/clusters/acme/store too. If a bin/acme
+  # cluster is LIVE, stop it first (bin/acme stop pod && bin/acme stop
+  # wire-server) — nuke does not manage acme's processes, only its store.
+  #
+  # Guarded: requires --yes/-y (or an interactive "yes") because there is no
+  # undo. Usage: bin/seon nuke --yes
+  local confirmed=0
+  case "${1:-}" in
+    -y|--yes) confirmed=1 ;;
+  esac
+
+  if [ "$confirmed" != 1 ]; then
+    echo "▶ bin/seon nuke — DESTRUCTIVE full reset" >&2
+    echo "  wipes ALL cluster stores, ALL transient data, and ALL logs," >&2
+    echo "  then restarts the default stack fresh. There is NO undo." >&2
+    printf "  Type 'yes' to proceed: " >&2
+    local reply
+    read -r reply || reply=""
+    [ "$reply" = "yes" ] && confirmed=1
+  fi
+  if [ "$confirmed" != 1 ]; then
+    echo "✗ aborted (nothing changed)" >&2
+    exit 1
+  fi
+
+  echo "▶ nuke: tearing the world down"
+
+  # 1. Stop every managed process (jvm included — full clean slate, unlike
+  #    `start/stop all` which excludes it). Idempotent no-ops if not running.
+  for name in pod wire-server cljs-watch jvm; do
+    cmd_stop "$name"
+  done
+
+  # 2. Drop the default cluster's stale UDS sockets + the published port file
+  #    (recreated on the fresh start).
+  rm -f "$SEON_REQ_SOCK" "$SEON_PUB_SOCK" "$SEON_PORT_FILE" 2>/dev/null || true
+
+  # 3. Wipe every cluster dir wholesale (store/ AND its siblings — the
+  #    embedding-index/ HNSW store, any future per-cluster artifacts) plus
+  #    transient runtime data. Wiping the whole dir — not just store/ — is
+  #    what makes this a true clean slate: leaving embedding-index/ behind
+  #    forces the wire-server to detect+delete it as a cluster-reset orphan
+  #    on boot (a self-heal that shouldn't be load-bearing). Gone for good:
+  #    everything agents authored lives in these dirs.
+  rm -rf data/clusters/* 2>/dev/null || true
+  rm -rf data/seon-pod/* data/sessions/* data/embeddings/* 2>/dev/null || true
+  echo "✗ wiped all cluster dirs (store + embedding-index) + transient data"
+
+  # 4. Clear ALL logs (files + subdirs: turns/, agents/, prompts/, archive/).
+  #    Recreate the bare dir; processes recreate their own logs on boot.
+  rm -rf "$LOG_DIR"/* 2>/dev/null || true
+  mkdir -p "$LOG_DIR"
+  echo "✗ cleared all logs"
+
+  # 5. Bring the default stack back up fresh — pod boot re-seeds the core
+  #    from the indexed codebase, same as `cluster reset`.
+  echo "▶ restarting the default stack fresh"
+  start_all
+  echo "▶ nuke complete — fresh world, core re-seeded on pod boot"
 }
 
 cmd_adopt() {
@@ -829,7 +1034,17 @@ case "${1:-help}" in
   # commands" invariant for the SEON_EXTRA_* knobs, and lets a downstream
   # eyeball their injected invocation.
   print-cmd) shift; process_command "${1:?print-cmd requires a process name}" ;;
+  # Print the capability/feature env a spawned process will inherit (the
+  # exports above resolved through .env + shell) WITHOUT spawning anything —
+  # the verification verb for the gate table in
+  # docs/seon/components/capability-gates.md. Unset var = code default (deny).
+  print-env)
+    for v in SEON_SHELL SEON_WEB SEON_WEB_DOMAINS SEON_WEB_LOCK \
+             SEON_FS_LOCK SEON_EMBED SEON_INSTRUMENT SEON_SOUL SEON_CONFIG; do
+      if [ -n "${!v+x}" ]; then echo "$v=${!v}"; else echo "$v (unset)"; fi
+    done ;;
   cluster) shift; cmd_cluster "$@" ;;
+  nuke)    shift; cmd_nuke "$@" ;;
   help|--help|-h|*)
     cat <<'EOF'
 Usage: bin/seon <command> [process] [args...]
@@ -860,15 +1075,24 @@ Commands:
   print-cmd <name>   Print the exact spawn command for a process (env
                      expansion included) without spawning it — pins the
                      SEON_EXTRA_* "unset = byte-identical" invariant
+  print-env          Print the capability/feature gate env a spawned
+                     process inherits (SEON_SHELL, SEON_WEB, SEON_EMBED,
+                     …) — see docs/seon/components/capability-gates.md
   cluster reset [n]  DESTRUCTIVE: stop pod+wire-server, wipe
                      data/clusters/<n>/store (default "default"),
                      restart both — fresh DB, core re-seeds
+  nuke --yes         DESTRUCTIVE (full clean slate): stop EVERY process
+                     (jvm too), wipe ALL cluster stores + transient data,
+                     clear ALL logs, restart the default stack fresh.
+                     Requires --yes (or interactive 'yes'); no undo —
+                     erases every agent fn/soul edit/chat/finding. Wipes
+                     acme's store too (stop bin/acme first if it's live).
 
 Processes (registered in script):
   pod          node out/client/main.js
   cljs-watch   clj -M:cljs watch client
   jvm          ./bin/run
-  wire-server  clojure -M:writer ... (V2 platform Host: single-DB datahike
+  wire-server  clojure -M:simd:fork-deps:writer ... (V2 platform Host: single-DB datahike
                wire-server; loopback REPL on 127.0.0.1:7891)
 
 Examples:
@@ -883,6 +1107,8 @@ Env overrides (downstream parametrization — defaults = today's values):
   SEON_PUB_SOCK           wire-server publish UDS (default tmp/seon-cluster-default-pub.sock)
   SEON_WRITER_REPL_PORT   wire-server loopback REPL port (default 7891)
   SEON_PORT               pod HTTP port (default 7890; read by the pod)
+  SEON_PORT_FILE          per-cluster pod port file (default tmp/seon-port);
+                          pod writes its bound port, status/ready_check read it
   SEON_RUNTIME_ROOT       pod artifact root (read by the pod; build/source
                           artifacts resolve against it — data stays CWD-local)
   SEON_EXTRA_SRC          downstream CLJS source root: a deps.edn project

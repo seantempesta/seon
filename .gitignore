@@ -30,6 +30,8 @@ Thumbs.db
 
 # Secrets (never commit)
 .env
+.env.*
+!.env.example
 *.secret
 credentials.json
 
@@ -87,3 +89,4 @@ docs/.obsidian/plugins/
 # Stray konserve stores (if datahike :file backend ever runs without absolute :data-root)
 *.ksv
 target/
+scratchpad/

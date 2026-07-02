@@ -34,8 +34,8 @@
      - PROMPT CACHING (task #34, 2026-06-12 — the system-block-only
        breakpoint covered just ~5.4k of ~38k input tokens because the
        ENTIRE assembled ctx rode as one user message AFTER the only
-       breakpoint): the ctx string carries seon.ctx's in-band
-       [[seon.ctx/stable-boundary]]; [[seon.ctx/split-context]]
+       breakpoint): the ctx string carries seon.agent.ctx's in-band
+       [[seon.agent.ctx/stable-boundary]]; [[seon.agent.ctx/split-context]]
        recovers the STABLE prefix (sections through :namespaces —
        byte-stable within a session) and the VOLATILE tail. :system
        becomes TWO content blocks, each with cache_control {:type
@@ -51,7 +51,7 @@
   (:require [clojure.string :as str]
             ["@anthropic-ai/sdk" :as Anthropic]
             [seon.ai :as ai]
-            [seon.ctx :as ctx]
+            [seon.agent.ctx :as ctx]
             [seon.error :as error]
             [seon.schema :as schema]))
 
@@ -73,6 +73,9 @@
    [:seon.ai/extra-body    {:optional true} :seon.ai/extra-body]])
 
 (schema/register! :seon.ai.anthropic/stop-reason :string)
+
+;; agent-adapter request-option overrides (e.g. {:seon.ai/max-tokens 2048}).
+(schema/register! :seon.ai.anthropic/opts :map)
 
 (schema/register!
   :seon.ai.anthropic/complete-response
@@ -118,8 +121,9 @@
 ;; ============================================================
 
 (defn request-params
-  "Build the Anthropic Messages API request PARAMS as a CLJ map. The
-   bare keys (:model, :messages, :system, …) are the API's wire format
+  "Build the Anthropic Messages API request PARAMS as a CLJ map.
+
+   The bare keys (:model, :messages, :system, …) are the API's wire format
    — a third-party boundary, deliberately un-namespaced. NOTE: the
    `:seon.ai/extra-body` map is NOT inlined here — [[complete]] merges
    it into these params (the SDK's 2nd-arg `:body` would REPLACE the
@@ -206,8 +210,10 @@
     :parsed_output})
 
 (defn parse-completion
-  "Map the assembled Anthropic Message OBJECT (post `.finalMessage`) to
-   a `:seon.ai.anthropic/complete-response`. `stop_reason` \"refusal\"
+  "Map an assembled Anthropic Message OBJECT to a complete-response.
+
+   Post-`.finalMessage` → a `:seon.ai.anthropic/complete-response`.
+   `stop_reason` \"refusal\"
    (Fable safety classifiers; empty content array) becomes a legible
    `:seon.ai/error` envelope — callers must never read content as a
    reply when the model declined. `:content` is an ARRAY of typed
@@ -269,8 +275,10 @@
      :seon.ai/transport? true}
 
     (instance? (.-APIError Anthropic) e)
-    {:seon.ai/msg    (str "Anthropic HTTP " (.-status e) ": " (error/->message e))
-     :seon.ai/status (.-status e)}
+    (let [ra (ai/error-retry-after-ms e)]
+      (cond-> {:seon.ai/msg    (str "Anthropic HTTP " (.-status e) ": " (error/->message e))
+               :seon.ai/status (.-status e)}
+        ra (assoc :seon.ai/retry-after-ms ra)))
 
     :else
     {:seon.ai/msg (str "Anthropic call failed: " (error/->message e))}))
@@ -294,8 +302,9 @@
          *fetch* (doto (aset "fetch" *fetch*)))))
 
 (defn ^:async complete
-  "Send a completion request to Anthropic via the official
-   `@anthropic-ai/sdk` (streamed + buffered). Returns a Promise of a
+  "Send a completion request to Anthropic via the official SDK.
+
+   The `@anthropic-ai/sdk` (streamed + buffered). Returns a Promise of a
    `:seon.ai.anthropic/complete-response` map.
 
    Request opts (only :seon.ai/ctx required):
@@ -358,14 +367,19 @@
       (:seon.ai/error resp) (assoc :seon.ai/error (:seon.ai/error resp)))))
 
 (defn agent-adapter
-  "Returns a fn-of-ctx-string suitable for
-   `seon.agent/run-turn-once!`'s `llm-fn`. Optional `opts` override
+  "A fn-of-ctx-string suitable for `seon.agent/run-turn-once!`'s `llm-fn`.
+
+   Optional `opts` override
    request defaults (e.g. `{:seon.ai/max-tokens 2048}`). The returned
    fn calls `complete` ^:async-internally and returns a Promise of
    `{:text \"…\" :seon.ai/raw <full response>}` — plus a top-level
    `:seon.ai/error` (see the `:seon.ai/error` schema) when the call
    failed (timeout, fetch error, HTTP error, unparseable body,
    refusal)."
+  {:malli/schema
+   [:function
+    [:=> [:cat] :any]
+    [:=> [:catn [::opts ::opts]] :any]]}
   ([] (agent-adapter {}))
   ([opts]
    (fn [ctx-text] (complete+wrap opts ctx-text))))

@@ -98,15 +98,13 @@
     ;; installs run on the :writer classpath.
     [seon.server.wire :as wire]
     [seon.server.registry :as registry]
-    ;; Transit-JSON value codec for the knn-search verb's value payloads
-    ;; (eids in, hits out) — same codec boot.clj's verbs use.
-    [seon.server.transit :as transit]
     [taoensso.timbre :as log])
   (:import [com.google.genai Client]
            [com.google.genai.types EmbedContentConfig EmbedContentResponse]
            [java.io File]
            [java.security MessageDigest]
-           [java.util UUID]))
+           [java.util UUID]
+           [java.util.concurrent Callable Executors Future]))
 
 ;;; --- Locked constants ------------------------------------------------------
 
@@ -658,26 +656,185 @@
 (schema/register! :seon.embed/embed-text-response
                   [:map [:seon.embed/vector :seon.embed/vector]])
 
+;;; --- Bulk embedding: batching, bounded parallelism, rate-limit backoff ------
+;;;
+;;; Gemini caps a SINGLE input at 8,192 tokens (hard) and a request at
+;;; ~250 texts / ~20k tokens (undocumented, community-observed). `embed-texts`
+;;; is therefore BULK-SAFE for an arbitrarily large input: every text is
+;;; truncated under the per-input cap, texts are packed into requests under BOTH
+;;; a count and a token budget, requests run with BOUNDED parallelism (a fixed
+;;; thread pool, so a huge bulk embed never spawns thousands of threads), and a
+;;; 429/RESOURCE_EXHAUSTED / transient-5xx request is retried with exponential
+;;; backoff + jitter (slow the embed, never lose a batch). Token counts use the
+;;; project chars/4 estimate (no tokenizer dep); over-conservative is fine.
+
+(def ^:const max-text-tokens
+  "Per-INPUT cap (Gemini's hard limit is 8,192 tokens). A text estimated over
+   this is truncated before embedding so one input never exceeds the model cap;
+   set just under 8,192 for chars/4-estimate slack."
+  8000)
+
+(def ^:const max-batch-tokens
+  "Per-REQUEST token budget (conservative < the ~20k community-observed cap). A
+   batch packs texts until adding one more would exceed this."
+  18000)
+
+(def ^:const max-batch-texts
+  "Per-REQUEST text-count budget (conservative < the ~250 community-observed
+   cap). Whichever of this and `max-batch-tokens` binds first closes a batch."
+  100)
+
+(def ^:const max-embed-concurrency
+  "Max Gemini requests in flight at once during a bulk embed. A fixed thread
+   pool of this size bounds BOTH concurrency and thread count, so embedding a
+   huge corpus never spawns thousands of threads."
+  6)
+
+(def ^:const embed-max-retries
+  "Max RETRIES for one batch request on a retryable (429 / 5xx) error before
+   surfacing a clear error. Total attempts = this + 1."
+  5)
+
+(def ^:const embed-base-backoff-ms
+  "Base delay for exponential backoff: retry `n` waits ~`base`*2^n ms + jitter."
+  500)
+
+(defn- estimate-tokens
+  "Rough token estimate for `s` — the project chars/4 convention (no tokenizer
+   dep). Slight over-estimate on dense text, the safe direction."
+  [^String s]
+  (quot (count s) 4))
+
+(defn- truncate-to-token-cap
+  "Truncate `text` so its estimated tokens never exceed `max-text-tokens` (the
+   per-input model cap). Logs when it truncates. Returns `text` unchanged when
+   already within cap."
+  [^String text]
+  (let [cap-chars (* max-text-tokens 4)]
+    (if (> (count text) cap-chars)
+      (do (log/warn "embed: truncating oversized input from" (count text)
+                    "chars (~" (estimate-tokens text) "tokens) to" cap-chars
+                    "chars (~" max-text-tokens "tokens) — exceeds per-input cap")
+          (subs text 0 cap-chars))
+      text)))
+
+(defn- plan-batches
+  "Greedy-pack `indexed-texts` (seq of `[orig-idx text]`) into batches honoring
+   BOTH `max-batch-texts` and `max-batch-tokens`. A truncated text always fits a
+   batch alone (≤ `max-text-tokens` < `max-batch-tokens`). Returns a vector of
+   batches, each a vector of `[orig-idx text]`."
+  [indexed-texts]
+  (let [{:keys [batches cur]}
+        (reduce
+         (fn [{:keys [batches cur cur-tokens]} [_ text :as it]]
+           (let [t (estimate-tokens text)]
+             (if (and (seq cur)
+                      (or (>= (count cur) max-batch-texts)
+                          (> (+ cur-tokens t) max-batch-tokens)))
+               {:batches (conj batches cur) :cur [it] :cur-tokens t}
+               {:batches batches :cur (conj cur it) :cur-tokens (+ cur-tokens t)}))
+           )
+         {:batches [] :cur [] :cur-tokens 0}
+         indexed-texts)]
+    (cond-> batches (seq cur) (conj cur))))
+
+(defn- retryable-embed-error?
+  "True iff `t` (or any cause) looks like a Gemini rate-limit (429 /
+   RESOURCE_EXHAUSTED / quota) or a transient server error (5xx / UNAVAILABLE /
+   DEADLINE_EXCEEDED) — the errors worth backing off + retrying rather than
+   losing the batch."
+  [^Throwable t]
+  (boolean
+   (loop [^Throwable e t]
+     (when e
+       (if (re-find #"(?i)429|resource[_ ]?exhausted|quota|rate.?limit|503|500|unavailable|deadline.?exceeded|internal error"
+                    (str (.getName (class e)) " " (.getMessage e)))
+         true
+         (recur (.getCause e)))))))
+
+(defn- backoff-sleep!
+  "Sleep ~`embed-base-backoff-ms`*2^attempt ms plus up to 50% jitter (capped at
+   30s) — the wait before retrying a rate-limited batch."
+  [attempt]
+  (let [base   (* embed-base-backoff-ms (long (Math/pow 2 attempt)))
+        capped (min base 30000)
+        jitter (long (* (rand) 0.5 capped))]
+    (Thread/sleep (+ capped jitter))))
+
+(defn- embed-batch!
+  "Embed ONE batch of (already-truncated) `texts` in a single Gemini request,
+   retrying retryable (429 / 5xx) errors with exponential backoff. Returns a
+   vector of normalized float vectors aligned to `texts`. Increments
+   `embed-call-count` once per successful request. Throws a clear
+   `:seon.embed/embed-request-failed` error after `embed-max-retries`."
+  [^Client client texts]
+  (let [jtexts (java.util.ArrayList. ^java.util.Collection (vec texts))]
+    (loop [attempt 0]
+      (let [outcome (try
+                      (let [^EmbedContentResponse resp
+                            (.embedContent (.models client) embedding-model
+                                           jtexts (doc-config))]
+                        (swap! embed-call-count inc)
+                        (let [embs (-> resp .embeddings .get)]
+                          {:ok (mapv (fn [i] (embedding->vec (.get embs i)))
+                                     (range (.size embs)))}))
+                      (catch Throwable t {:error t}))]
+        (if-let [vs (:ok outcome)]
+          vs
+          (let [^Throwable t (:error outcome)
+                retryable    (retryable-embed-error? t)]
+            (if (and retryable (< attempt embed-max-retries))
+              (do (log/warn "embed: retryable error on batch (attempt"
+                            (inc attempt) "of" (inc embed-max-retries) ") —"
+                            (.getMessage t) "— backing off")
+                  (backoff-sleep! attempt)
+                  (recur (inc attempt)))
+              (throw (ex-info (str "seon.embed/embed-batch!: Gemini request failed"
+                                   (when retryable
+                                     (str " after " (inc embed-max-retries) " attempts")))
+                              {:seon.embed/error      :seon.embed/embed-request-failed
+                               :seon.embed/batch-size (count texts)
+                               :seon.embed/retryable  retryable}
+                              t)))))))))
+
 (defn embed-texts
-  "Embed a batch of document strings with Gemini in ONE HTTP request. Returns
-   normalized `:seon.embed/vectors` aligned to input order (one float vector
-   per text, each L2-normalized, length `embedding-dim`). Increments
-   `embed-call-count` once for the whole batch."
+  "Embed document strings with Gemini, returning normalized `:seon.embed/vectors`
+   aligned to input order (one L2-normalized float vector per text, length
+   `embedding-dim`).
+
+   BULK-SAFE for an arbitrarily large input: each text is truncated under the
+   per-input token cap (`max-text-tokens`); texts are packed into requests
+   honoring BOTH `max-batch-texts` and `max-batch-tokens`; requests run with
+   bounded parallelism (`max-embed-concurrency`); each request retries
+   429/RESOURCE_EXHAUSTED + transient 5xx with exponential backoff. A small
+   input is still a single request. `embed-call-count` increments once per
+   underlying Gemini request."
   {:malli/schema [:=> [:cat :seon.embed/embed-texts-request]
                   :seon.embed/embed-texts-response]}
   [{:seon.embed/keys [texts]}]
   (let [client (or (gemini-client)
                    (throw (ex-info "seon.embed: embedding requested but GEMINI_API_KEY is not set"
-                                   {:seon.embed/error :seon.embed/no-api-key})))
-        jtexts (java.util.ArrayList. ^java.util.Collection (vec texts))
-        ^EmbedContentResponse resp (.embedContent (.models client)
-                                                   embedding-model
-                                                   jtexts
-                                                   (doc-config))
-        _    (swap! embed-call-count inc)
-        embs (-> resp .embeddings .get)]
-    {:seon.embed/vectors (mapv (fn [i] (embedding->vec (.get embs i)))
-                               (range (.size embs)))}))
+                                   {:seon.embed/error :seon.embed/no-api-key})))]
+    (if (empty? texts)
+      {:seon.embed/vectors []}
+      (let [truncated (mapv truncate-to-token-cap texts)
+            indexed   (vec (map-indexed vector truncated))
+            batches   (plan-batches indexed)
+            pool      (Executors/newFixedThreadPool
+                       (min max-embed-concurrency (count batches)))
+            out       (object-array (count truncated))]
+        (try
+          (let [tasks   (mapv (fn [batch]
+                                (reify Callable
+                                  (call [_] (embed-batch! client (mapv second batch)))))
+                              batches)
+                futures (vec (.invokeAll pool ^java.util.Collection tasks))]
+            (dotimes [b (count batches)]
+              (let [batch (nth batches b)
+                    vecs  (.get ^Future (nth futures b))]
+                (dorun (map (fn [[idx _] v] (aset out (int idx) v)) batch vecs)))))
+          (finally (.shutdown pool)))
+        {:seon.embed/vectors (vec out)}))))
 
 (defn embed-text
   "Embed a single document string with Gemini. Returns the normalized
@@ -869,10 +1026,11 @@
 ;;; boot (cost + latency). One batch Gemini request, one transact.
 
 (def ^:const backfill-cap
-  "Max entities embedded per backfill pass. Keeps boot bounded; the rest are
-   logged as deferred and picked up incrementally on their next write (or a
-   later backfill pass)."
-  64)
+  "Max entities embedded per backfill pass — one bulk `embed-texts` call (which
+   internally batches + parallelizes) and one transact per pass. The rest are
+   logged as deferred and picked up by `drain-backfill!`'s next pass (or on
+   their next write)."
+  256)
 
 (schema/register! :seon.embed/backfill!-response
                   [:map
@@ -1077,15 +1235,15 @@
 ;;; payloads (eids in, hits out) ride Transit-JSON like every other verb.
 
 (defmethod wire/handle-op "knn-search" [conn req]
-  (let [query (get req "query")
-        k     (long (or (get req "k") 10))
-        eids  (transit/read-str (get req "eids"))
+  (let [query (:seon.store.wire/query req)
+        k     (long (or (:seon.store.wire/k req) 10))
+        eids  (:seon.store.wire/eids req)
         db    (d/db conn)
         {:seon.embed/keys [hits]}
         (knn-search db (cond-> {:seon.embed/query query :seon.embed/k k}
                          (seq eids) (assoc :seon.embed/eids (set eids))))]
-    {"ok"     true
-     "result" (transit/write-str hits)}))
+    {:seon.store.wire/ok     true
+     :seon.store.wire/result hits}))
 
 ;;; ===========================================================================
 ;;; Write-path activation (the seams — run at ns load)

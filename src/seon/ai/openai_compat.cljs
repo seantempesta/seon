@@ -36,11 +36,12 @@
    env-seeded via SEON_AI_*, runtime-tunable by transact). Precedence:
    explicit request opt > config row > the shipped defaults below.
 
-   The system prompt's IDENTITY is read LIVE from SOUL.md / AGENTS.md on
-   every call (see `my.soul`), joined by
-   `seon.ai/effective-system-prompt` with a minimal fallback when no
-   identity file exists. The universal REPL mechanics are hardcoded in
-   the `<system>` block (`seon.ctx/system-text`).
+   The `system` role message is the HARDCODED system-specific seon
+   mechanics (`seon.agent.ctx/system-text` via
+   `seon.ai/effective-system-prompt`), byte-stable for every agent and
+   turn — NO file read, NO fallback. The agent's IDENTITY (SOUL.md /
+   AGENTS.md) rides the user-message CONTEXT as file-sections
+   (`seon.agent.ctx/file-block`), decoupled from the system message.
 
    Streaming: we ASK for a stream (`.stream` + `.finalChatCompletion`)
    and the SDK buffers it into one assembled ChatCompletion object —
@@ -52,6 +53,7 @@
   (:require [clojure.string :as str]
             ["openai" :as OpenAI]
             [seon.ai :as ai]
+            [seon.ai.tokens :as tokens]
             [seon.error :as error]
             [seon.schema :as schema]))
 
@@ -81,6 +83,9 @@
    [:seon.ai/usage                      {:optional true} :seon.ai/usage]
    [:seon.ai/tool-calls                 {:optional true} :seon.ai/tool-calls]
    [:seon.ai/provider-fields            {:optional true} :seon.ai/provider-fields]])
+
+;; agent-adapter request-option overrides (e.g. {:seon.ai/temperature 0.2}).
+(schema/register! :seon.ai.openai-compat/opts :map)
 
 ;; ============================================================
 ;; Config — the shipped defaults. The :seon.ai/config row (read per
@@ -161,16 +166,18 @@
         (env* "SEON_AI_API_KEY"))))
 
 (defn api-key-configured?
-  "Whether a bearer API key resolves for the ACTIVE provider (see the
-   ns doc's resolution order). `seon.client/current-llm-fn` uses this
+  "Whether a bearer API key resolves for the ACTIVE provider.
+
+   See the ns doc's resolution order. `seon.client/current-llm-fn` uses this
    to fall back to the stub llm-fn when no key is available."
   {:malli/schema [:=> [:cat] :boolean]}
   []
   (boolean (resolved-api-key)))
 
 (defn request-params
-  "Build the OpenAI chat-completions request PARAMS as a CLJ map. The
-   bare keys (:model, :messages, :thinking, …) are the OpenAI/DeepSeek
+  "Build the OpenAI chat-completions request PARAMS as a CLJ map.
+
+   The bare keys (:model, :messages, :thinking, …) are the OpenAI/DeepSeek
    API's wire format — a third-party boundary, deliberately
    un-namespaced. NOTE: the `:seon.ai/extra-body` map is NOT inlined
    here — [[complete]] merges it into these params (the SDK's 2nd-arg
@@ -222,8 +229,10 @@
   #{:choices :usage :id :object :created :model :system_fingerprint})
 
 (defn parse-completion
-  "Map the assembled OpenAI ChatCompletion OBJECT (post
-   `.finalChatCompletion`) to a `:seon.ai.openai-compat/complete-response`.
+  "Map an assembled OpenAI ChatCompletion OBJECT to a complete-response.
+
+   Post-`.finalChatCompletion` → a
+   `:seon.ai.openai-compat/complete-response`.
    `:seon.ai/text` from choices[0].message.content; finish_reason →
    `:seon.ai.openai-compat/finish-reason`; usage ALWAYS set;
    message.tool_calls → `:seon.ai/tool-calls` when present; the
@@ -248,8 +257,8 @@
                (pos? (count (or reasoning ""))))
       (js/console.debug
         (str "seon.ai.openai-compat: completion content EMPTY but"
-             " reasoning_content present (" (count reasoning)
-             " chars) — thinking-mode tokens landed in the reasoning"
+             " reasoning_content present (~" (tokens/estimate reasoning)
+             " tokens) — thinking-mode tokens landed in the reasoning"
              " field; dropping it (parsed as before)")))
     (cond-> {:seon.ai/text                        (or msg "")
              :seon.ai.openai-compat/finish-reason (:finish_reason choice)
@@ -286,8 +295,10 @@
      :seon.ai/transport? true}
 
     (instance? (.-APIError OpenAI) e)
-    {:seon.ai/msg    (str label " HTTP " (.-status e) ": " (error/->message e))
-     :seon.ai/status (.-status e)}
+    (let [ra (ai/error-retry-after-ms e)]
+      (cond-> {:seon.ai/msg    (str label " HTTP " (.-status e) ": " (error/->message e))
+               :seon.ai/status (.-status e)}
+        ra (assoc :seon.ai/retry-after-ms ra)))
 
     :else
     {:seon.ai/msg (str label " call failed: " (error/->message e))}))
@@ -313,8 +324,9 @@
          *fetch* (doto (aset "fetch" *fetch*)))))
 
 (defn ^:async complete
-  "Send a chat-completions request to the active provider's endpoint
-   (see the ns doc — :deepseek default or :openai-compat gateway) via
+  "Send a chat-completions request to the active provider's endpoint.
+
+   See the ns doc (:deepseek default or :openai-compat gateway); via
    the official `openai` SDK (streamed + buffered). Returns a Promise
    of a `:seon.ai.openai-compat/complete-response` map.
 
@@ -406,13 +418,18 @@
       (:seon.ai/error resp) (assoc :seon.ai/error (:seon.ai/error resp)))))
 
 (defn agent-adapter
-  "Returns a fn-of-ctx-string suitable for
-   `seon.agent/run-turn-once!`'s `llm-fn`. Optional `opts` override
+  "A fn-of-ctx-string suitable for `seon.agent/run-turn-once!`'s `llm-fn`.
+
+   Optional `opts` override
    request defaults (e.g. `{:seon.ai/temperature 0.2}`). The returned
    fn calls `complete` ^:async-internally and returns a Promise of
    `{:text \"…\" :seon.ai/raw <full response>}` — plus a top-level
    `:seon.ai/error` (see the `:seon.ai/error` schema) when the call
    failed (timeout, connection error, HTTP error, parse error)."
+  {:malli/schema
+   [:function
+    [:=> [:cat] :any]
+    [:=> [:catn [::opts ::opts]] :any]]}
   ([] (agent-adapter {}))
   ([opts]
    (fn [ctx-text] (complete+wrap opts ctx-text))))

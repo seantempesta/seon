@@ -73,7 +73,8 @@
          (finally (teardown-writer! ctx)))))
 
 (defn req!
-  "Send one request envelope over the ctx's req socket, return the response."
+  "Send one request envelope over the ctx's req socket, return the response.
+   `op` is the op string; `extra` is a map of `:seon.store.wire/*` keys."
   [op extra]
   (with-open [ch (client/connect (:req-sock *ctx*))]
-    (client/call! ch (merge {"op" op} extra))))
+    (client/call! ch (merge {:seon.store.wire/op op} extra))))

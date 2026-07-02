@@ -58,21 +58,33 @@
 ;;     checkout that owns the compiled artifacts.
 ;; ============================================================
 
+(defn env-val
+  "The `process.env` value for `var-name`, or nil when unset/blank.
+
+   Also nil when there is no Node process env at all. The ONE low-level env
+   reader — `seon.config`'s typed knob accessors sit on top of this, and
+   `runtime-root` below reads through it. (`platform` is a leaf, so it
+   cannot route through `seon.config` — config requires platform — which
+   is why this primitive lives here.)"
+  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
+  [var-name]
+  (let [v (some-> (.. js/globalThis -process) (.-env) (aget var-name))]
+    (when (and (string? v) (not= "" (.trim v))) v)))
+
 (defn- runtime-root
   "The SEON_RUNTIME_ROOT env value with any trailing slash trimmed, or
    nil when unset/blank (or when there is no Node process env at all)."
   []
-  (let [v (some-> (.. js/globalThis -process)
-                  (.-env)
-                  (aget "SEON_RUNTIME_ROOT"))]
-    (when (and (string? v) (not= v ""))
-      (if (and (> (count v) 1) (= "/" (subs v (dec (count v)))))
-        (subs v 0 (dec (count v)))
-        v))))
+  (when-let [v (env-val "SEON_RUNTIME_ROOT")]
+    (if (and (> (count v) 1) (= "/" (subs v (dec (count v)))))
+      (subs v 0 (dec (count v)))
+      v)))
 
 (defn artifact-path
-  "Resolve a BUILD/SOURCE artifact path (e.g. `\"out/bootstrap\"`,
-   `\"src\"`, `\"resources/public/css/\"`): joined under
+  "Resolve a BUILD/SOURCE artifact path under SEON_RUNTIME_ROOT.
+
+   E.g. `\"out/bootstrap\"`,
+   `\"src\"`, `\"resources/public/css/\"`: joined under
    SEON_RUNTIME_ROOT when that env var is set, else returned unchanged
    (CWD-relative — seon's own usage is byte-identical). DATA paths
    (store, logs, tmp, sockets) must NOT route through here — see the
@@ -82,13 +94,3 @@
   (if-let [root (runtime-root)]
     (str root "/" rel)
     rel))
-
-(defn env-val
-  "The `process.env` value for `var-name`, or nil when unset/blank (or
-   when there is no Node process env at all). The ONE env reader —
-   several namespaces (seon.ai, seon.debug, …) had private copies of
-   this exact body; per the shared-shape rule it lives here once."
-  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
-  [var-name]
-  (let [v (some-> (.. js/globalThis -process) (.-env) (aget var-name))]
-    (when (and (string? v) (not= "" (.trim v))) v)))

@@ -38,8 +38,6 @@
 
 (set! *warn-on-reflection* true)
 
-(defn- T [v] (transit/write-str v))
-
 (defn- check
   "Run a property `n` times and return the quick-check result map."
   [n property]
@@ -138,10 +136,10 @@
               :seon.server.store/backend :memory})]
     (when-not (d/database-exists? cfg) (d/create-database cfg))
     (let [conn (d/connect cfg)]
-      (wire/handle-op conn {"op" "transact" "tx-data" (T schema-tx)})
+      (wire/handle-op conn {:seon.store.wire/op "transact" :seon.store.wire/tx-data schema-tx})
       conn)))
 
-(defn- ok? [resp] (true? (get resp "ok")))
+(defn- ok? [resp] (true? (:seon.store.wire/ok resp)))
 
 (def gen-entity
   "One entity: a string id, a long, and a keyword tag."
@@ -164,19 +162,19 @@
    (check 50
           (prop/for-all [ents gen-entity-set]
             (let [conn (fresh-conn!)
-                  tx   (wire/handle-op conn {"op" "transact" "tx-data" (T ents)})]
+                  tx   (wire/handle-op conn {:seon.store.wire/op "transact" :seon.store.wire/tx-data ents})]
               (and (ok? tx)
                    (every?
                     (fn [{:keys [:ent/id :ent/n :ent/tag]}]
                       (let [r (wire/handle-op
                                conn
-                               {"op" "q"
-                                "query" (T '[:find ?n ?tag :in $ ?id :where
-                                             [?e :ent/id ?id]
-                                             [?e :ent/n ?n]
-                                             [?e :ent/tag ?tag]])
-                                "args" [(T id)]})
-                            rows (transit/read-str (get r "result"))]
+                               {:seon.store.wire/op "q"
+                                :seon.store.wire/query '[:find ?n ?tag :in $ ?id :where
+                                                         [?e :ent/id ?id]
+                                                         [?e :ent/n ?n]
+                                                         [?e :ent/tag ?tag]]
+                                :seon.store.wire/args [id]})
+                            rows (:seon.store.wire/result r)]
                         (and (ok? r) (= #{[n tag]} rows))))
                     ents)))))))
 
@@ -185,22 +183,22 @@
    (check 50
           (prop/for-all [ents gen-entity-set]
             (let [conn (fresh-conn!)
-                  tx   (wire/handle-op conn {"op" "transact" "tx-data" (T ents)})]
+                  tx   (wire/handle-op conn {:seon.store.wire/op "transact" :seon.store.wire/tx-data ents})]
               (and (ok? tx)
                    (every?
                     (fn [{:keys [:ent/id] :as ent}]
                       (let [pr (wire/handle-op
                                 conn
-                                {"op" "pull"
-                                 "selector" (T '[:ent/id :ent/n :ent/tag])
-                                 "eid" (T [:ent/id id])})
+                                {:seon.store.wire/op "pull"
+                                 :seon.store.wire/selector '[:ent/id :ent/n :ent/tag]
+                                 :seon.store.wire/eid [:ent/id id]})
                             ep (wire/handle-op
                                 conn
-                                {"op" "entity-pull"
-                                 "ref" (T [:ent/id id])
-                                 "selector" (T '[:ent/id :ent/n :ent/tag])})
-                            pm (transit/read-str (get pr "result"))
-                            em (transit/read-str (get ep "result"))
+                                {:seon.store.wire/op "entity-pull"
+                                 :seon.store.wire/ref [:ent/id id]
+                                 :seon.store.wire/selector '[:ent/id :ent/n :ent/tag]})
+                            pm (:seon.store.wire/result pr)
+                            em (:seon.store.wire/result ep)
                             want (select-keys ent [:ent/id :ent/n :ent/tag])]
                         (and (ok? pr) (ok? ep)
                              (= want (select-keys pm [:ent/id :ent/n :ent/tag]))
@@ -212,18 +210,18 @@
    (check 50
           (prop/for-all [ents gen-entity-set]
             (let [conn (fresh-conn!)
-                  _    (wire/handle-op conn {"op" "transact" "tx-data" (T ents)})
+                  _    (wire/handle-op conn {:seon.store.wire/op "transact" :seon.store.wire/tx-data ents})
                   eids (mapv (fn [{:keys [:ent/id]}] [:ent/id id]) ents)
                   sel  '[:ent/id :ent/n :ent/tag]
-                  many (-> (wire/handle-op conn {"op" "pull-many"
-                                                 "selector" (T sel)
-                                                 "eids" (mapv T eids)})
-                           (get "result") transit/read-str)
+                  many (-> (wire/handle-op conn {:seon.store.wire/op "pull-many"
+                                                 :seon.store.wire/selector sel
+                                                 :seon.store.wire/eids eids})
+                           :seon.store.wire/result)
                   singles (mapv (fn [eid]
-                                  (-> (wire/handle-op conn {"op" "pull"
-                                                            "selector" (T sel)
-                                                            "eid" (T eid)})
-                                      (get "result") transit/read-str))
+                                  (-> (wire/handle-op conn {:seon.store.wire/op "pull"
+                                                            :seon.store.wire/selector sel
+                                                            :seon.store.wire/eid eid})
+                                      :seon.store.wire/result))
                                 eids)]
               (= singles many))))))
 
@@ -236,8 +234,8 @@
                      prev nil]
                 (if (nil? b)
                   true
-                  (let [r  (wire/handle-op conn {"op" "transact" "tx-data" (T b)})
-                        bt (get r "basis-t")]
+                  (let [r  (wire/handle-op conn {:seon.store.wire/op "transact" :seon.store.wire/tx-data b})
+                        bt (:seon.store.wire/basis-t r)]
                     (if (and (ok? r)
                              (integer? bt)
                              (or (nil? prev) (> (long bt) (long prev))))
@@ -249,11 +247,11 @@
    (check 50
           (prop/for-all [ents gen-entity-set]
             (let [conn   (fresh-conn!)
-                  tx     (wire/handle-op conn {"op" "transact" "tx-data" (T ents)})
-                  bt-tx  (get tx "basis-t")
-                  q1     (wire/handle-op conn {"op" "q"
-                                               "query" (T '[:find ?e :where [?e :ent/id _]])})
-                  q2     (wire/handle-op conn {"op" "q"
-                                               "query" (T '[:find ?e :where [?e :ent/id _]])})]
+                  tx     (wire/handle-op conn {:seon.store.wire/op "transact" :seon.store.wire/tx-data ents})
+                  bt-tx  (:seon.store.wire/basis-t tx)
+                  q1     (wire/handle-op conn {:seon.store.wire/op "q"
+                                               :seon.store.wire/query '[:find ?e :where [?e :ent/id _]]})
+                  q2     (wire/handle-op conn {:seon.store.wire/op "q"
+                                               :seon.store.wire/query '[:find ?e :where [?e :ent/id _]]})]
               (and (ok? tx) (ok? q1) (ok? q2)
-                   (= bt-tx (get q1 "basis-t") (get q2 "basis-t"))))))))
+                   (= bt-tx (:seon.store.wire/basis-t q1) (:seon.store.wire/basis-t q2))))))))

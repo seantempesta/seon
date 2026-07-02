@@ -29,8 +29,10 @@ bin/seon status [name]      Show one or all (omitted = all)
 bin/seon tail <name>        tail -f logs/<name>.log  (Ctrl-C to exit)
 bin/seon logs <name> [n]    Last n lines (default 200)
 bin/seon adopt <name> <pid> Register a manually-started PID under <name>
-bin/seon cluster reset [n]  DESTRUCTIVE: wipe data/clusters/<n>/store,
-                            bounce wire-server + pod (fresh DB)
+bin/seon cluster reset [n]  DESTRUCTIVE: wipe data/clusters/<n>/store; bounce
+                            wire-server + pod when <n> is the cluster THIS
+                            supervisor manages (store == $SEON_CLUSTER_DIR/store),
+                            else wipe only (fresh DB)
 
 ```
 
@@ -44,7 +46,7 @@ Ready gates (`wait_ready` in the script — observed signals, not just log lines
 |---|---|---|
 | `cljs-watch` | `out/client/main.js` newer than this start, or `Build completed` in the fresh log | 300s |
 | `wire-server` | `tmp/seon-cluster-default-req.sock` ACCEPTS a connection (real `nc -U` connect — macOS `nc -z -U` is broken) + `tmp/seon-writer-repl-port` written | 180s |
-| `pod` | `tmp/seon-port` written + HTTP answers on `/agents` | 120s |
+| `pod` | `$SEON_PORT_FILE` (default `tmp/seon-port`) written + HTTP answers on `/` | 120s |
 
 On timeout or early death the wait fails LOUD, naming the log to read, and later stages are not started. `bin/seon cluster reset` shares the same `wait_ready` helper.
 
@@ -58,7 +60,7 @@ Real failure 2026-06-10: a datahike `:git/sha` bump made the first wire-server s
 
 | Name | Command | Log | Ready-when |
 |---|---|---|---|
-| `pod` | `node out/client/main.js` | `logs/pod.log` | `tmp/seon-port` written + HTTP answers on `/agents` |
+| `pod` | `node out/client/main.js` | `logs/pod.log` | `$SEON_PORT_FILE` (default `tmp/seon-port`) written + HTTP answers on `/` |
 | `cljs-watch` | `clj -M:cljs watch client` | `logs/cljs-watch.log` | "Build completed" appears in log |
 | `jvm` | `./bin/run` | `logs/jvm.log` | `logs/app.log` shows "Server started" |
 | `wire-server` | `clojure -M:writer ...` | `logs/wire-server.log` | `tmp/seon-cluster-default-req.sock` accepting + `tmp/seon-writer-repl-port` written |
@@ -113,7 +115,7 @@ Every supervised process logs to `logs/<name>.log`:
 - `bin/seon logs <name> [n]` is one-shot last-n.
 - Logs are truncated on each fresh `start` so `tail` doesn't show stale runs. Use `bin/seon logs <name>` if you need history before restart.
 
-The pod's `seon.web.serve` HTTP loopback also writes to `tmp/seon-port`; `bin/seon status` surfaces the port + reachable URL when the file exists.
+The pod's `seon.web.serve` HTTP loopback also writes its bound port to `$SEON_PORT_FILE` (default `tmp/seon-port`, per-cluster — `bin/acme` overrides it to `tmp/seon-port-acme` so a second cluster's pod can't clobber the default's file); `bin/seon status` surfaces the port + reachable URL when the file exists.
 
 ## Multi-agent patterns
 

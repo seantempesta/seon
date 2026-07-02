@@ -158,3 +158,132 @@
 	path = reference-code/sci
 	url = https://github.com/babashka/sci.git
 	ignore = dirty
+[submodule "reference-code/transit-clj"]
+	path = reference-code/transit-clj
+	url = https://github.com/cognitect/transit-clj.git
+[submodule "reference-code/transit-cljs"]
+	path = reference-code/transit-cljs
+	url = https://github.com/cognitect/transit-cljs.git
+[submodule "reference-code/transit-js"]
+	path = reference-code/transit-js
+	url = https://github.com/cognitect/transit-js.git
+[submodule "reference-code/piscina"]
+	path = reference-code/piscina
+	url = https://github.com/piscinajs/piscina
+[submodule "reference-code/tinypool"]
+	path = reference-code/tinypool
+	url = https://github.com/tinylibs/tinypool
+[submodule "reference-code/mvm"]
+	path = reference-code/mvm
+	url = https://github.com/tinylabscom/mvm.git
+[submodule "reference-code/swe-bench"]
+	path = reference-code/swe-bench
+	url = https://github.com/SWE-bench/SWE-bench
+[submodule "reference-code/swe-agent"]
+	path = reference-code/swe-agent
+	url = https://github.com/SWE-agent/SWE-agent
+[submodule "reference-code/swelancer"]
+	path = reference-code/swelancer
+	url = https://github.com/openai/SWELancer-Benchmark
+[submodule "reference-code/commit0"]
+	path = reference-code/commit0
+	url = https://github.com/commit-0/commit0
+[submodule "reference-code/terminal-bench"]
+	path = reference-code/terminal-bench
+	url = https://github.com/laude-institute/terminal-bench
+[submodule "reference-code/mle-bench"]
+	path = reference-code/mle-bench
+	url = https://github.com/openai/mle-bench
+[submodule "reference-code/aider-polyglot"]
+	path = reference-code/aider-polyglot
+	url = https://github.com/Aider-AI/polyglot-benchmark
+[submodule "reference-code/tau2-bench"]
+	path = reference-code/tau2-bench
+	url = https://github.com/sierra-research/tau2-bench
+[submodule "reference-code/gorilla-bfcl"]
+	path = reference-code/gorilla-bfcl
+	url = https://github.com/ShishirPatil/gorilla
+[submodule "reference-code/agentbench"]
+	path = reference-code/agentbench
+	url = https://github.com/THUDM/AgentBench
+[submodule "reference-code/webarena"]
+	path = reference-code/webarena
+	url = https://github.com/web-arena-x/webarena
+[submodule "reference-code/osworld"]
+	path = reference-code/osworld
+	url = https://github.com/xlang-ai/OSWorld
+[submodule "reference-code/browsergym"]
+	path = reference-code/browsergym
+	url = https://github.com/ServiceNow/BrowserGym
+[submodule "reference-code/online-mind2web"]
+	path = reference-code/online-mind2web
+	url = https://github.com/OSU-NLP-Group/Online-Mind2Web
+[submodule "reference-code/webvoyager"]
+	path = reference-code/webvoyager
+	url = https://github.com/MinorJerry/WebVoyager
+[submodule "reference-code/inspect-ai"]
+	path = reference-code/inspect-ai
+	url = https://github.com/UKGovernmentBEIS/inspect_ai
+[submodule "reference-code/inspect-evals"]
+	path = reference-code/inspect-evals
+	url = https://github.com/UKGovernmentBEIS/inspect_evals
+[submodule "reference-code/re-bench"]
+	path = reference-code/re-bench
+	url = https://github.com/METR/RE-Bench
+[submodule "reference-code/cybench"]
+	path = reference-code/cybench
+	url = https://github.com/andyzorigin/cybench
+[submodule "reference-code/openai-evals"]
+	path = reference-code/openai-evals
+	url = https://github.com/openai/evals
+[submodule "reference-code/reitit"]
+	path = reference-code/reitit
+	url = https://github.com/metosin/reitit.git
+[submodule "reference-code/bd3lms"]
+	path = reference-code/bd3lms
+	url = https://github.com/kuleshov-group/bd3lms.git
+[submodule "reference-code/flash"]
+	path = reference-code/flash
+	url = https://github.com/runpod/flash.git
+[submodule "reference-code/runpod-python"]
+	path = reference-code/runpod-python
+	url = https://github.com/runpod/runpod-python.git
+[submodule "reference-code/flash-examples"]
+	path = reference-code/flash-examples
+	url = https://github.com/runpod/flash-examples.git
+[submodule "reference-code/again"]
+	path = reference-code/again
+	url = https://github.com/liwp/again
+[submodule "reference-code/transformers"]
+	path = reference-code/transformers
+	url = https://github.com/huggingface/transformers
+[submodule "reference-code/vllm"]
+	path = reference-code/vllm
+	url = https://github.com/vllm-project/vllm
+[submodule "reference-code/Voyager"]
+	path = reference-code/Voyager
+	url = https://github.com/MineDojo/Voyager.git
+[submodule "reference-code/funsearch"]
+	path = reference-code/funsearch
+	url = https://github.com/google-deepmind/funsearch.git
+[submodule "reference-code/openevolve"]
+	path = reference-code/openevolve
+	url = https://github.com/algorithmicsuperintelligence/openevolve.git
+[submodule "reference-code/ADAS"]
+	path = reference-code/ADAS
+	url = https://github.com/ShengranHu/ADAS.git
+[submodule "reference-code/mem0"]
+	path = reference-code/mem0
+	url = https://github.com/mem0ai/mem0.git
+[submodule "reference-code/letta"]
+	path = reference-code/letta
+	url = https://github.com/letta-ai/letta.git
+[submodule "reference-code/generative_agents"]
+	path = reference-code/generative_agents
+	url = https://github.com/joonspk-research/generative_agents.git
+[submodule "reference-code/SimpleMem"]
+	path = reference-code/SimpleMem
+	url = https://github.com/aiming-lab/SimpleMem.git
+[submodule "reference-code/aero"]
+	path = reference-code/aero
+	url = https://github.com/juxt/aero.git

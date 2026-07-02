@@ -1,85 +1,95 @@
 (ns seon.schema
-  "Global Malli schema registry for Seon.
+  "Global Malli schema registry for Seon — the SINGLE SOURCE OF TRUTH for
+   every attribute schema.
 
-   Provides a centralized, mutable registry for domain schemas. All namespaces
-   register their schemas here using `register!`, making them available for:
-   - Function schema validation via `m/=>` or `:malli/schema` metadata
-   - Generative testing via `malli.generator`
-   - Runtime validation via `malli.core/validate`
+   Namespaces register their schemas here with `register!`, making them
+   available for `:malli/schema` fn validation, generative testing, and
+   runtime validation. The `::` syntax expands to the current namespace,
+   so `::user-id` in `seon.trading.core` becomes
+   `:seon.trading.core/user-id`.
 
-   Usage:
      (require '[seon.schema :as schema])
-
-     ;; Register schemas using auto-namespaced keywords
-     (schema/register! ::user-id :uuid)
+     (schema/register! ::user-id   :uuid)
      (schema/register! ::user-name [:string {:min 1 :max 200}])
 
-     ;; Or register multiple at once
-     (schema/register-all!
-       ::order-id :uuid
-       ::order-total [:double {:min 0}])
-
-   The `::` syntax expands to the current namespace, so `::user-id` in
-   `seon.trading.core` becomes `:seon.trading.core/user-id`.
-
-   This design makes it easy for LLM agents to:
-   - Parse individual `register!` forms
-   - Update single schema definitions
-   - Track which schemas are defined in which namespace"
-  (:require [clojure.string :as str]
-            [malli.core :as m]
-            [malli.registry :as mr]))
+   Form mechanics and register!-time gates live in
+   `seon.schema.internal` (kept out of agent context; grep there for the
+   Malli-form helpers)."
+  (:require [malli.core :as m]
+            [malli.registry :as mr]
+            [seon.schema.internal :as internal]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Registry Setup
 ;;; ---------------------------------------------------------------------------
 
-;; Atom holding all registered domain schemas.
-;; Use `defonce` to survive namespace reloads.
+;; All registered domain schemas. `defonce` survives namespace reloads.
 (defonce ^:private *schemas (atom {}))
 
-(defn relink-registry!
-  "(Re)point malli's process-global default registry at the composite of
-   malli's default schemas + seon's mutable `*schemas` atom. Idempotent —
-   safe to call any number of times; registered schemas live in `*schemas`
-   and survive the relink.
+;; THE one registry seon installs as malli's process-global default: malli's
+;; built-in schemas + seon's mutable `*schemas` (read live on every lookup, so
+;; this single instance always reflects current registrations). A SINGLE
+;; memoized instance — `defonce` survives reloads — so the stomp-guard watch
+;; below can `identical?`-check it cheaply.
+(defonce ^:private seon-registry
+  (mr/composite-registry
+   (m/default-schemas)
+   (mr/mutable-registry *schemas)))
 
-   Why this is a public, re-callable operation and not just load-time
-   init: `malli.core` runs `(mr/set-default-registry! …)` as a TOP-LEVEL
-   side effect of namespace load (malli/core.cljc `default-registry`).
-   In the CLJS pod, the bootstrap self-host compiler can re-execute that
-   side effect against the LIVE `malli.registry` — e.g. an agent eval of
-   `(require '[malli.core :as m])` goog.globalEvals the bootstrap
-   bundle's `malli.core$macros.js`, whose macro-mode compile of
-   malli/core.cljc still calls the live `set-default-registry!`. That
-   stomps the registry with a default-schemas-only snapshot (and
-   macro-land IntoSchema instances), severing every seon-registered
-   schema: `m/schema` of any `:seon.*` keyword throws
-   `:malli.core/invalid-schema` process-wide (live incident 2026-06-10,
-   logs/pod.log 15:21–15:22). `seon.eval`'s bootstrap `:load` wrapper
-   calls this after every load to re-assert the invariant."
+(defn relink-registry!
+  "(Re)point malli's global default registry at [[seon-registry]].
+
+   Combines malli's default schemas + seon's mutable `*schemas`. Idempotent;
+   registered schemas live in `*schemas` and survive the relink.
+
+   Re-callable, not just load-time init: `malli.core` runs
+   `(mr/set-default-registry! …)` as a TOP-LEVEL load side effect. In the
+   CLJS pod, the bootstrap self-host compiler can re-execute it (an agent
+   `(require '[malli.core :as m])` goog.globalEvals the bundle's
+   `malli.core$macros.js`), stomping the registry with a default-only
+   snapshot and severing every `:seon.*` schema process-wide
+   (`:malli.core/invalid-schema`). `seon.eval`'s bootstrap `:load` wrapper
+   calls this after every load to re-assert the invariant; in CLJS the
+   stomp-guard watch installed here makes the invariant hold even BETWEEN
+   loads — see the watch comment below.
+
+   CLOSE THE STOMP WINDOW (CLJS pod). A foreign `(mr/set-default-registry!
+   …)` — the bootstrap load of `malli.core$macros.js` re-running
+   malli.core's top-level registry init — `(reset! malli.registry/registry*
+   …)`s seon's schemas away. A watch on that atom re-asserts
+   [[seon-registry]] the INSTANT it is replaced: ClojureScript runs
+   `add-watch` fns SYNCHRONOUSLY inside the stomping `reset!`, before any
+   other form observes the severed registry — so there is no window to be
+   resilient to, no severed state to heal. The `identical?` guard makes the
+   re-assert's own `reset!` a no-op (one bounce, no recursion). Installed
+   HERE (not a top-level `defonce`) and keyed by keyword so it is idempotent
+   AND re-attaches to the live `registry*` on every relink — a stale watch
+   can never be orphaned onto a replaced atom. This is the structural form
+   of the per-load relink: the relink covers boot ordering, the watch covers
+   any stomp from a path that never routes through the `:load` wrapper."
   {:malli/schema [:=> [:cat] :boolean]}
   []
-  (mr/set-default-registry!
-   (mr/composite-registry
-    (m/default-schemas)
-    (mr/mutable-registry *schemas)))
+  (mr/set-default-registry! seon-registry)
+  #?(:cljs
+     (add-watch malli.registry/registry* ::seon-stomp-guard
+       (fn [_ _ _ new-registry]
+         (when-not (identical? new-registry seon-registry)
+           (mr/set-default-registry! seon-registry))))
+     :clj nil)
   true)
 
 ;; Initialize the global registry once at load time.
 (defonce ^:private _registry-init (relink-registry!))
 
-;; Register :inst as a keyword type (Malli only provides inst? predicate).
-;; This lets schemas use :inst instead of inst? for consistency with :string, :int, etc.
+;; :inst as a keyword type (Malli only provides the inst? predicate), for
+;; consistency with :string, :int, etc.
 (defonce ^:private _inst-type
   (swap! *schemas assoc :inst (m/-simple-schema {:type :inst :pred inst?})))
 
-;; Register :seon.flow/dynamic — a wire protocol field validated dynamically.
-;; Used for ::args, ::value, and ::payload in flow message envelopes.
-;; These fields carry data whose type depends on the target function or
-;; payload key, so static schema can only assert non-nil. Real validation
-;; happens at the message boundary via validate-fn-args!, validate-fn-value!,
-;; and validate-payload! in seon.flow.msg.
+;; :seon.flow/dynamic — a wire-protocol field validated dynamically at the
+;; message boundary (validate-fn-args!/value!/payload! in seon.flow.msg).
+;; Used for ::args, ::value, ::payload, whose type depends on the target;
+;; static schema can only assert non-nil.
 (defonce ^:private _dynamic-type
   (swap! *schemas assoc :seon.flow/dynamic
          (m/-simple-schema
@@ -89,30 +99,23 @@
                                           [:vector :int] [:map-of :keyword :string]]
                              :gen/fmap identity}})))
 
-;; Register :seon.db/namespace — the entity-namespace stamp attached by
-;; `seon.db/transact!` when routing through the datahike flow (Decision 7 of
-;; the datahike-migration PRD). Values are db-name keywords (:seon.weather,
-;; :seon.phase2.demo, etc). Registered here so the validation gate in
-;; seon.db/transact! treats it as a known attr without domain code needing
-;; to register it explicitly.
+;; :seon.db/namespace — the entity-namespace stamp seon.db/transact! attaches
+;; when routing through the datahike flow. Values are db-name keywords.
+;; Registered here so the transact! validation gate treats it as known.
 (defonce ^:private _db-namespace-type
   (swap! *schemas assoc :seon.db/namespace :keyword))
 
-;; Register :seon.db/lookup-ref-value — the value position in a lookup-ref.
-;; Datahike accepts strings, uuids, keywords, and ints as unique-attr values.
+;; :seon.db/lookup-ref-value — the value position in a lookup-ref. Datahike
+;; accepts strings, uuids, keywords, and ints as unique-attr values.
 (defonce ^:private _lookup-ref-value-type
   (swap! *schemas assoc :seon.db/lookup-ref-value
          [:or :string :uuid :keyword :int]))
 
-;; Register :seon.db/ref — an intra-DB :db.type/ref.
-;; At transact time, datahike resolves any of the supported forms to an eid:
-;;   - pos-int  : an existing entity-id
-;;   - neg-int  : a numeric tempid
-;;   - string   : a string tempid
-;;   - [k v]    : a lookup-ref against unique attribute k with value v
-;; Cross-DB handles are :uuid attrs with :seon.db/ref-to metadata; they are
-;; NEVER labeled :seon.db/ref.
-;; Reference: docs/prds/datahike-migration/ref-model-research.md.
+;; :seon.db/ref — an intra-DB :db.type/ref. At transact time datahike
+;; resolves any supported form to an eid: pos-int (existing eid), neg-int
+;; (numeric tempid), string (string tempid), or [k v] (lookup-ref on unique
+;; attr k). Cross-DB handles are :uuid attrs with :seon.db/ref-to metadata —
+;; NEVER :seon.db/ref. Reference: docs/prds/datahike-migration/ref-model-research.md.
 (defonce ^:private _ref-type
   (swap! *schemas assoc :seon.db/ref
          [:or
@@ -120,37 +123,24 @@
           :string
           [:tuple :keyword :seon.db/lookup-ref-value]]))
 
-;; Register :seon.db/id — the canonical id-string shape used by every
-;; entity identity attr and every tx-meta scalar id. Locked 2026-05-23
-;; to <3-letter-random>-<YYMMDDHHmm> (14 chars; generated by
-;; seon.db/new-id!). Single source of truth: bump this and every
-;; identity-attr length constraint updates.
-;;
-;; Reference patterns (per CLAUDE.md "Shared schema shapes"):
-;;   - Bare-keyword reference for plain scalars:
-;;       (schema/register! :seon.db/agent-id :seon.db/id)
-;;   - :and wrap for identity attrs (adds {:seon.db/identity true}):
-;;       (schema/register! :seon.agent/id [:and {:seon.db/identity true} :seon.db/id])
-;;
-;; Bridge handles both shapes today; see seon.db/malli->datahike-attr.
+;; :seon.db/id — the canonical id-string shape (<3-letter-random>-<YYMMDDHHmm>,
+;; 14 chars; generated by seon.db/new-id!) used by every entity identity attr
+;; and every tx-meta scalar id. Single source: bump this and every
+;; identity-attr length constraint updates. Reference patterns (CLAUDE.md
+;; "Shared schema shapes"):
+;;   (schema/register! :seon.db/agent-id :seon.db/id)                       ; plain scalar
+;;   (schema/register! :seon.agent/id [:and {:seon.db/identity true} :seon.db/id])  ; identity
+;; The bridge handles both; see seon.db/malli->datahike-attr.
 (defonce ^:private _id-type
   (swap! *schemas assoc :seon.db/id [:string {:min 14 :max 14}]))
 
-;; --- Schemas-as-queryable-data meta-schema (research:
-;; docs/prds/agent-runtime/research/schemas-as-queryable-data-2026-05-26.md).
-;;
-;; Every DECLARED entity-kind `:map` schema registered via `register!`
-;; (one carrying `{:seon.db/entity true}` in its own properties, which
-;; gives it a derived `:seon.entity/id-attr`) ALSO transacts a
-;; `:seon.schema` entity carrying its required-attrs set, id-attr, and
-;; the symbol naming its AI render fn. Kind-lookup in `seon.render`
-;; queries those entities via datalog — the schema registry becomes
-;; queryable core state.
-;;
-;; These attrs are leaf scalars; they have no chicken-and-egg with the
-;; entity-shape :seon.schema map (which references :seon.schema/key as
-;; an identity entry). Registered here in seon.schema so they exist
-;; before any entity ns loads.
+;; Schemas-as-queryable-data meta-schema. Every DECLARED entity-kind :map
+;; (one carrying {:seon.db/entity true} → derived :seon.entity/id-attr) ALSO
+;; transacts a :seon.schema entity carrying its required-attrs, id-attr, and
+;; render-fn symbol; render's kind-lookup queries those entities via datalog.
+;; These leaf-scalar attrs are registered here so they exist before any
+;; entity ns loads. Research:
+;; docs/prds/agent-runtime/research/schemas-as-queryable-data-2026-05-26.md.
 (defonce ^:private _schema-required-attrs
   (swap! *schemas assoc :seon.schema/required-attrs [:vector :keyword]))
 (defonce ^:private _schema-id-attr
@@ -160,238 +150,75 @@
 (defonce ^:private _schema-render-html-fn
   (swap! *schemas assoc :seon.schema/render-html-fn :symbol))
 
+;; Positional-arg slot shapes for this ns's register/introspection fns — each
+;; named-positional `:catn` slot in a `:malli/schema` below references one of
+;; these (db.cljs's `::conn`/`::tx-data` slot-schema pattern). `:seon.schema/form`
+;; (a Malli schema DEFINITION) is a recursive, heterogeneous structure —
+;; genuinely opaque, hence `:any` (the documented third-party-shape exception).
+(defonce ^:private _registry-key-type
+  (swap! *schemas assoc :seon.schema/registry-key :keyword))
+(defonce ^:private _form-type
+  (swap! *schemas assoc :seon.schema/form :any))
+(defonce ^:private _namespace-name-type
+  (swap! *schemas assoc :seon.schema/namespace-name :string))
+(defonce ^:private _kvs-type
+  (swap! *schemas assoc :seon.schema/kvs [:vector :any]))
+(defonce ^:private _discarded-keys-type
+  (swap! *schemas assoc :seon.schema/discarded-keys [:set :seon.schema/registry-key]))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Registration API
 ;;; ---------------------------------------------------------------------------
 
-(defn- attr-form-properties
-  "Extract the Malli props map from an attr-schema form. Mirrors
-   `seon.db/form-properties` (we don't depend on db.cljs from here to
-   avoid a require cycle)."
-  [form]
-  (when (vector? form)
-    (some (fn [x] (when (map? x) x)) (rest form))))
-
 (defn identity-attr?
-  "True when the registered attr schema for `attr-key` carries
-   `{:seon.db/identity true}` directly or through one keyword
-   indirection. Covers the three shapes Seon uses today:
-     [:string  {:seon.db/identity true}]
-     [:keyword {:seon.db/identity true}]
-     [:and {:seon.db/identity true} :seon.db/id]
+  "True when the attr schema for `attr-key` carries `{:seon.db/identity true}`.
+
+   Covers the three identity shapes Seon uses
+   (plain `:string`/`:keyword` with the prop, and the `:and` id wrap).
    PUBLIC: the single identity-attr predicate — callers (the inventory
    section, etc.) reuse it rather than re-deriving the props lookup."
   {:malli/schema [:=> [:cat :keyword] :boolean]}
   [attr-key]
-  (let [form (get @*schemas attr-key)]
-    (boolean (some-> form attr-form-properties :seon.db/identity))))
+  (internal/identity-attr? @*schemas attr-key))
 
 (defn enum-members
-  "The members of a registered `:enum` attr schema; an EMPTY vector when
-   the attr is not an enum (absence = empty, never nil). Reads straight
-   from the schema form — NO db query. Strips an optional leading props
-   map (`[:enum {…} :a :b]`) before taking members. PUBLIC:
-   low-cardinality value surfaces (the inventory section) reuse it. The
-   member values are Malli-form contents (keywords/strings/ints) — a
-   third-party-structure boundary, hence `:any`."
+  "Members of a registered `:enum` attr schema, or an empty vector.
+
+   Empty when the attr is not an enum (absence = empty, never nil). Reads the schema
+   form directly — NO db query. PUBLIC: low-cardinality value surfaces
+   (the inventory section) reuse it. Members are Malli-form contents
+   (keywords/strings/ints) — a third-party-structure boundary, hence `:any`."
   {:malli/schema [:=> [:cat :keyword] [:vector :any]]}
   [attr-key]
-  (let [form (get @*schemas attr-key)]
-    (if (and (vector? form) (= :enum (first form)))
-      (let [body (rest form)
-            body (if (and (seq body) (map? (first body))) (rest body) body)]
-        (vec body))
-      [])))
-
-(defn- map-shape?
-  "True if `v` looks like a Malli `:map` schema form."
-  [v]
-  (and (vector? v) (= :map (first v))))
-
-(defn- map-entries
-  "Return the entries of a `:map` schema form — vector of
-   `[entry-key (props?) entry-schema]`. Strips the head and the
-   optional schema-level props map."
-  [v]
-  (let [body (rest v)
-        body (if (and (seq body) (map? (first body))) (rest body) body)]
-    (vec body)))
-
-(defn- schema-properties
-  "Return the :map schema's properties map (the optional second slot
-   between the head and the entries), or nil."
-  [v]
-  (when (map-shape? v)
-    (let [body (rest v)]
-      (when (and (seq body) (map? (first body)))
-        (first body)))))
-
-(defn- map-identity-entry-key
-  "The first entry key of `:map` schema `v` that is itself a registered
-   attr carrying `{:seon.db/identity true}`, or nil."
-  [v]
-  (when (map-shape? v)
-    (some (fn [entry]
-            (when-let [k (and (vector? entry) (first entry))]
-              (when (identity-attr? k) k)))
-          (map-entries v))))
-
-(defn- derive-entity-id-attr
-  "If `v` is a `:map` schema DECLARED as a stored entity kind via
-   `{:seon.db/entity true}` in its own properties, return its
-   identity-attr entry key. Otherwise nil.
-
-   Entity-kind-ness is DECLARED, never inferred (user decision
-   2026-06-10): a request/response envelope that happens to carry an
-   id entry must NOT become a catalogued kind — the old
-   contains-an-id-key inference stamped eight phantom wrapper kinds
-   into the live store. Same opt-in property family as
-   `{:seon.db/identity true}`.
-
-   The derived id-attr makes a declared entity schema self-describing
-   for the renderer's discovery walk (no separate `:seon.entity/kind`
-   stamp needed — the schema's own props point at the attr that
-   identifies instances of that kind)."
-  [v]
-  (when (:seon.db/entity (schema-properties v))
-    (map-identity-entry-key v)))
-
-(defn- map-required-attrs
-  "Return the set of `[entry-key ...]` whose props do NOT carry
-   `{:optional true}`. Used by schemas-as-queryable-data to compute
-   the required-attrs index entry for an entity-shape :map. Excludes
-   the special `::m/default` Malli sentinel if it shows up."
-  [v]
-  (when (map-shape? v)
-    (into []
-          (keep (fn [entry]
-                  (when (vector? entry)
-                    (let [k     (first entry)
-                          props (let [p (second entry)]
-                                  (when (map? p) p))]
-                      (when (and (keyword? k)
-                                 (not= k :malli.core/default)
-                                 (not (:optional props)))
-                        k)))))
-          (map-entries v))))
-
-(defn- with-entity-id-attr
-  "Attach `{:seon.entity/id-attr <k>}` to a `:map` schema's properties
-   when the schema is a DECLARED entity kind (`{:seon.db/entity true}`)
-   with an identity-attr entry. Preserves any existing props (including
-   author-declared `:seon.render/ai`, etc)."
-  [v]
-  (if-let [id-attr (derive-entity-id-attr v)]
-    (let [head     (first v)
-          body     (rest v)
-          [props body] (if (and (seq body) (map? (first body)))
-                         [(first body) (rest body)]
-                         [{} body])
-          props'   (assoc props :seon.entity/id-attr id-attr)]
-      (into [head props'] body))
-    v))
-
-(defn- assert-compilable-schema!
-  "Gate (Run-5 / A4): reject invalid Malli forms AT register! time so an
-   agent never 'successfully' registers something the system can't use.
-   `:number` (not a Malli type) used to slip into the registry and only
-   explode later; `:double` IS valid but lacked datahike-bridge support
-   (now added — seon.db's bridge supplies the transact-side half of the
-   invariant: register! success ⇒ the attr is transactable).
-
-   Compiles `v` against the live registry (`m/schema`); a failure throws
-   a legible `:user-input` ex-info naming the key, the bad form, and the
-   common storable types. NOTE: this requires any registered schema a
-   form references to already be registered — which is the existing
-   load-order convention (CLAUDE.md 'Schema load ordering matters')."
-  [k v]
-  (try
-    (m/schema v)
-    nil
-    (catch #?(:clj Exception :cljs :default) e
-      (throw (ex-info
-               (str "schema/register! " k ": " (pr-str v)
-                    " is not a valid Malli schema (" (ex-message e) "). "
-                    "Common storable attr types: :string :int :double "
-                    ":float :boolean :keyword :inst :uuid :symbol "
-                    ":seon.db/ref, [:enum :a :b], or a container "
-                    "[:vector <type>] / [:set <type>]. (:number is NOT "
-                    "a type — use :int or :double.) If the form "
-                    "references another schema keyword, register that "
-                    "keyword first.")
-               {:seon.schema/error :seon.schema/invalid-schema
-                :seon.schema/key   k
-                :seon.schema/form  v
-                :seon.error/kind   :user-input}
-               e)))))
-
-(defn- assert-multi-segment-namespace!
-  "Gate (gym S-21 / run-paid finding, 2026-06-10): reject attrs whose
-   keyword NAMESPACE is single-segment (`:workout/date`) at register!
-   time, with a guiding error. Seon's rule (CLAUDE.md Data Rules):
-   keyword namespaces are DOMAINS with at least two segments — a
-   single-segment namespace collides with code-namespace roots and
-   fragments the reuse surface (`:workout/date` landed in a paid run
-   beside the established `:my.workout/date`). The fix is a
-   domain-prefixed namespace: `:kb.workout/date`,
-   `:fitness.workout/date`, or reuse the existing attr.
-
-   Same failure mode as [[assert-compilable-schema!]] — register!'s
-   established error shape is a thrown `:user-input` ex-info (the eval
-   pipeline surfaces it as an error-envelope value to the agent).
-
-   CLJS (pod) only for now: the JVM core still carries the legacy
-   single-segment `:form/*` registrations in `seon.repl` (clj) — a
-   reported smell in ANOTHER lane; enforcement goes cljc once those are
-   renamed. Every CLJS core registration is multi-segment
-   (verified by grep + the full suite, 2026-06-10)."
-  [k]
-  (let [ns-str (namespace k)]
-    (when (and ns-str (not (str/includes? ns-str ".")))
-      (throw (ex-info
-               (str "schema/register! " k ": single-segment keyword "
-                    "namespace " (pr-str ns-str) " is not allowed. "
-                    "Keyword namespaces are data DOMAINS and need ≥2 "
-                    "segments — e.g. :" ns-str "/" (name k) " → :kb."
-                    ns-str "/" (name k) " or :fitness." ns-str "/"
-                    (name k) ". FIRST run (seon.db/store-inventory): "
-                    "if an attr for this fact already exists, reuse "
-                    "its EXACT keyword instead of registering a new "
-                    "one.")
-               {:seon.schema/error :seon.schema/single-segment-namespace
-                :seon.schema/key   k
-                :seon.error/kind   :user-input})))))
+  (internal/enum-members (get @*schemas attr-key)))
 
 ;;; --- register! self-tee hook -----------------------------------------------
-;;; The registry is in-memory and dies with the process; durability for
-;;; RUNTIME registrations (agent evals, REPL-scope register! through the
-;;; MCP eval surface) comes from a `:seon.schema` program-graph row whose
-;;; `:seon.schema/source` is the replayable `(seon.schema/register! …)`
-;;; call form — the same row shape detect-and-tee writes, identity-upsert
-;;; on `:seon.schema/key` (ONE mechanism; open-issues 2026-06-12 verified
-;;; row: REPL-scope register! previously teed NOTHING, so REPL-registered
-;;; attrs went silently write-dead after a pod restart).
+;;; The registry is in-memory and dies with the process. Durability for
+;;; RUNTIME registrations (agent evals, REPL-scope register! via MCP eval)
+;;; comes from a `:seon.schema` program-graph row whose `:seon.schema/source`
+;;; is the replayable `(seon.schema/register! …)` call — the same row shape
+;;; detect-and-tee writes, identity-upsert on `:seon.schema/key`.
 ;;;
 ;;; This ns must not require seon.db (cycle: db→schema), so the tee is a
 ;;; late-bound hook: `seon.eval` installs [[set-tee-fn!]] at load. The
-;;; installed fn is conn-gated (no bound `seon.db/*conn*` → no-op) — the
-;;; ~500 boot-time register! calls from compiled-ns loads run BEFORE any
-;;; conn exists and are untouched; boot indexing (seon.client/index-schemas)
-;;; remains the owner of core rows.
+;;; installed fn is conn-gated (no bound `seon.db/*conn*` → no-op), so the
+;;; ~500 boot-time register! calls from compiled-ns loads run untouched;
+;;; boot indexing (seon.client/index-schemas) owns the core rows.
 
 (defonce ^:private !tee-fn (atom nil))
 
 (defonce !last-tee
   ;; The most recent tee invocation's return (a Promise in CLJS, nil when
-  ;; the tee skipped). register! itself stays synchronous — tests and live
-  ;; proofs `await` this to observe the row land deterministically.
+  ;; the tee skipped). register! stays synchronous — tests and live proofs
+  ;; `await` this to observe the row land deterministically.
   (atom nil))
 
 (defn set-tee-fn!
-  "Install the registration self-tee hook — called once at load by the
-   conn-owning side (seon.eval). `f` is `(fn [k form] …)`; it must never
-   throw (durability failure is ITS problem to surface loudly — a tee
-   failure must not fail the in-memory registration). Idempotent."
+  "Install the registration self-tee hook — called once at load.
+
+   The conn-owning side (seon.eval) installs it. `f` is `(fn [k form] …)`;
+   it must never throw (a tee/durability failure must not fail the in-memory
+   registration). Idempotent."
   {:malli/schema [:=> [:cat fn?] :nil]}
   [f]
   (reset! !tee-fn f)
@@ -404,20 +231,17 @@
      k - Schema keyword (use `::name` for auto-namespacing)
      v - Malli schema definition
 
-   Returns:
-     The registered schema keyword.
+   Returns the registered keyword `k`.
 
-   When `v` is a `:map` schema DECLARED as a stored entity kind via
+   When `v` is a `:map` schema DECLARED a stored entity kind via
    `{:seon.db/entity true}` in its properties (same opt-in family as
    `{:seon.db/identity true}`), the stored schema is rewritten to carry
-   `{:seon.entity/id-attr <k>}` pointing at its identity-attr entry.
-   This lets the renderer enumerate instances of a kind by walking the
-   AEVT index for that id-attr — no per-row `:seon.entity/kind` stamp
-   required. Maps WITHOUT the marker (request/response envelopes, view
-   inputs) never become catalogued kinds — register! is silent about
-   them. The nudge toward the marker lives where rows actually exist:
-   `seon.warn/check-unmarked-entity-kinds` fires when an identity attr
-   has stored datoms but no marked schema declares its kind.
+   `{:seon.entity/id-attr <k>}` pointing at its identity-attr entry — so
+   the renderer enumerates instances by walking the AEVT index for that
+   id-attr, no per-row `:seon.entity/kind` stamp. Maps WITHOUT the marker
+   (request/response envelopes, view inputs) never become catalogued kinds;
+   register! is silent about them. The nudge toward the marker lives where
+   rows exist: `seon.warn/check-unmarked-entity-kinds`.
 
    Example:
      (register! ::api-key [:string {:min 1}])
@@ -425,49 +249,67 @@
      (register! :seon.eval [:map {:seon.db/entity true
                                   :seon.render/ai 'foo}
                             [:seon.eval/id ...] ...])  ;; →
-       ;; stored with props {:seon.db/entity true
-       ;;                    :seon.render/ai 'foo
-       ;;                    :seon.entity/id-attr :seon.eval/id}"
+       ;; stored props {:seon.db/entity true
+       ;;               :seon.render/ai 'foo
+       ;;               :seon.entity/id-attr :seon.eval/id}"
+  {:malli/schema [:=> [:catn [::registry-key ::registry-key] [::form ::form]] ::registry-key]}
   [k v]
-  ;; CLJS-only until the JVM's legacy `:form/*` registrations are
-  ;; renamed — see [[assert-multi-segment-namespace!]].
-  #?(:cljs (assert-multi-segment-namespace! k)
+  ;; CLJS-only until the JVM's legacy `:form/*` registrations are renamed.
+  #?(:cljs (internal/assert-multi-segment-namespace! k)
      :clj  nil)
-  (assert-compilable-schema! k v)
-  (swap! *schemas assoc k (with-entity-id-attr v))
+  (internal/assert-compilable-schema! k v)
+  (swap! *schemas assoc k (internal/with-entity-id-attr @*schemas v))
   ;; Self-tee (durability): hand the ORIGINAL form to the hook — replay
   ;; re-derives :seon.entity/id-attr by re-running register!. No hook
-  ;; installed (JVM, pure-registry contexts, boot ns-loads before
-  ;; seon.eval) → registers exactly as before, no tee, no error.
+  ;; installed (JVM, pure-registry, boot ns-loads before seon.eval) →
+  ;; registers exactly as before, no tee, no error.
   (when-some [f @!tee-fn]
     (reset! !last-tee (f k v)))
   k)
 
 (defn current-keys
-  "Snapshot of all currently-registered schema keywords. Used by
-   detect-and-tee in eval-batch! for atom-diff schema detection
-   (compare before vs after an eval to see what the form registered)."
+  "Snapshot of all currently-registered schema keywords.
+
+   Used by detect-and-tee in eval-batch! for atom-diff schema detection (before vs
+   after an eval reveals what the form registered)."
+  {:malli/schema [:=> [:cat] [:set :keyword]]}
   []
   (set (keys @*schemas)))
 
+(defn discard-registrations!
+  "Drop `ks` from the in-memory registry.
+
+   The schema analog of
+   `analyzer-info/remove-phantom-defs!`. A FAILED eval that ran
+   `register!` must define NOTHING: the DB self-tee already DEFERS to
+   the gated detect-and-tee (so nothing persisted), and this removes the
+   in-session registry entries too, so a re-eval of the fixed form
+   registers cleanly. `ks` is the keys NEWLY registered during the
+   failed eval (post-eval `current-keys` minus the pre-eval snapshot),
+   so a pre-existing key is never in `ks`. `*schema-required-counts` is
+   left untouched — `register!` never writes it (only the boot/lifecycle
+   `entity-schema-tx-data` does), so a failed eval populated no entry to
+   clear. Returns nil."
+  {:malli/schema [:=> [:catn [::discarded-keys [:set :keyword]]] :nil]}
+  [ks]
+  (swap! *schemas #(apply dissoc % ks))
+  nil)
+
 (defn register-all!
-  "Register multiple schemas at once.
+  "Register multiple schemas at once from keyword/definition pairs.
 
-   Arguments:
-     Pairs of keyword and schema definition.
-
-   Returns:
-     Set of registered schema keywords.
-
-   Throws:
-     AssertionError if odd number of arguments provided.
+   Returns the set of registered keywords. Throws if an odd
+   number of arguments is provided.
 
    Example:
      (register-all!
-       ::user-id :uuid
-       ::user-name [:string {:min 1}]
+       ::user-id    :uuid
+       ::user-name  [:string {:min 1}]
        ::user-email [:string {:min 5}])"
+  {:malli/schema [:=> [:catn [::kvs [:* :any]]] [:set :keyword]]}
   [& kvs]
+  ;; NOTE: each kv pair is a [registry-key form] pair; the variadic slot
+  ;; can't enumerate them, hence `[:* :any]`.
   (assert (even? (count kvs)) "register-all! requires pairs of [key schema]")
   (let [pairs (partition 2 kvs)]
     (doseq [[k v] pairs]
@@ -478,51 +320,46 @@
 ;;; Schemas-as-queryable-data — entity-schema decomposition into DB datoms.
 ;;;
 ;;; Every entity-shape `:map` schema with a derived `:seon.entity/id-attr`
-;;; ALSO becomes a `:seon.schema` entity carrying:
+;;; ALSO becomes a `:seon.schema` entity:
 ;;;   :seon.schema/key            <kw>       (identity)
 ;;;   :seon.schema/required-attrs [<kw> ...] (cardinality-many keyword)
 ;;;   :seon.schema/id-attr        <kw>
 ;;;   :seon.schema/render-fn      <symbol>   (the :seon.render/ai symbol)
 ;;;
-;;; A process-local atom caches the required-count per kind for
-;;; specificity scoring in `entity-primary-kind` — derived deterministically
-;;; from the registry at decomposition time.
-;;;
-;;; This namespace MUST NOT require seon.db (cycle: db→schema). Instead,
-;;; we expose `entity-schema-tx-data` that returns the tx-data vector;
-;;; the conn-owning caller (seon.client/start-agent!) transacts via
-;;; seon.db/transact! after the conn is bound.
+;;; This ns MUST NOT require seon.db (cycle: db→schema). Instead
+;;; `entity-schema-tx-data` returns the tx-data vector; the conn-owning
+;;; caller (seon.client/start-agent!) transacts via seon.db/transact!.
 ;;; ---------------------------------------------------------------------------
 
-;; Cache of {schema-key required-attr-count} populated alongside the
-;; tx-data produced by `entity-schema-tx-data`. Read by render's
-;; kind-lookup for specificity scoring.
+;; Cache of {schema-key required-attr-count}, populated alongside the tx-data
+;; produced by `entity-schema-tx-data`. Read by render's kind-lookup for
+;; specificity scoring.
 (defonce *schema-required-counts (atom {}))
 
 (defn entity-schema-tx-data
-  "Return the tx-data vector (one :db/add per required-attr, plus the
-   key/id-attr/render-fn datoms) for one entity-shape `:map` schema.
+  "Return the tx-data vector for one entity-shape `:map` schema.
+
+   One `:db/add` per required-attr, plus the key/id-attr/render-fn datoms.
    Caller transacts via `seon.db/transact!`. Side-effect: caches the
-   required-count in `*schema-required-counts`. Returns `nil` when
-   `k` does not refer to an entity-shape :map (no id-attr derivable)."
+   required-count in `*schema-required-counts`. Returns `nil` when `k`
+   does not refer to an entity-shape :map (no id-attr derivable)."
+  {:malli/schema [:=> [:catn [::registry-key ::registry-key]] :any]}
   [k]
   (let [v (get @*schemas k)]
-    (when (and v (map-shape? v))
-      (let [props       (schema-properties v)
+    (when (and v (internal/map-shape? v))
+      (let [props       (internal/schema-properties v)
             id-attr     (:seon.entity/id-attr props)
             render-ai   (:seon.render/ai props)
             render-html (:seon.render/html props)]
         (when id-attr
-          (let [reqs (vec (remove #{id-attr} (map-required-attrs v)))
+          (let [reqs (vec (remove #{id-attr} (internal/map-required-attrs v)))
                 ;; id-attr is always required — listed separately so it's
                 ;; not duplicated when the entry has no {:optional true}.
                 reqs (vec (distinct (cons id-attr reqs)))
-                ;; FULL keyword in the tempid — (name k) alone collides
-                ;; when two kinds share a name segment (:a.b/person +
-                ;; :c.d/person → one tempid string → two upsert targets
-                ;; → boot-fatal :transact/upsert; downstream repro 2026-06-11).
-                ;; Tempids are tx-local placeholders, never stored — the
-                ;; row's identity is :seon.schema/key — so no migration.
+                ;; FULL keyword in the tempid — (name k) alone collides when
+                ;; two kinds share a name segment (:a.b/person + :c.d/person
+                ;; → one tempid → boot-fatal :transact/upsert). Tempids are
+                ;; tx-local, never stored — identity is :seon.schema/key.
                 tid  (str "schema-" k)]
             (swap! *schema-required-counts assoc k (count reqs))
             (cond-> [[:db/add tid :seon.schema/key k]
@@ -533,30 +370,36 @@
                                 reqs))))))))
 
 (defn entity-schema-keys
-  "Snapshot of every registered keyword pointing at an entity-shape
-   `:map` schema (i.e. one with a derived `:seon.entity/id-attr`).
-   Iteration order is deterministic by sort. Used by
+  "Every registered keyword pointing at an entity-shape `:map` schema.
+
+   Sorted, one per entity with a derived `:seon.entity/id-attr`. Used by
    `seon.client/start-agent!` to seed `:seon.schema` entities at boot."
+  {:malli/schema [:=> [:cat] [:vector :keyword]]}
   []
   (->> @*schemas
        (keep (fn [[k v]]
-               (when (and (map-shape? v) (:seon.entity/id-attr (schema-properties v)))
+               (when (and (internal/map-shape? v)
+                          (:seon.entity/id-attr (internal/schema-properties v)))
                  k)))
        sort
        vec))
 
 (defn all-entity-schemas-tx-data
-  "Tx-data vector for every currently-registered entity-shape :map
-   schema. Concatenates `entity-schema-tx-data` over `entity-schema-keys`.
-   Idempotent — identity-attr upsert on `:seon.schema/key` replaces
-   prior decompositions in place."
+  "Tx-data vector for every currently-registered entity-shape :map schema.
+   Concatenates `entity-schema-tx-data` over `entity-schema-keys`.
+   Idempotent — identity-attr upsert on `:seon.schema/key` replaces prior
+   decompositions in place."
+  {:malli/schema [:=> [:cat] [:vector :any]]}
   []
   (into [] (mapcat entity-schema-tx-data) (entity-schema-keys)))
 
 (defn schema-required-count
-  "Look up the cached required-attr count for `k`. Returns nil if `k`
-   was never decomposed (e.g. not an entity-shape :map). Populated as
-   a side-effect of `entity-schema-tx-data`."
+  "The cached required-attr count for `k`, or nil.
+
+   Nil when `k` was never
+   decomposed (e.g. not an entity-shape :map). Populated as a side-effect
+   of `entity-schema-tx-data`."
+  {:malli/schema [:=> [:catn [::registry-key ::registry-key]] :any]}
   [k]
   (get @*schema-required-counts k))
 
@@ -565,66 +408,51 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn registered-schemas
-  "Return a map of all registered domain schemas.
-
-   Does not include Malli's built-in schemas."
+  "A map of all registered domain schemas (Malli's built-ins excluded)."
+  {:malli/schema [:=> [:cat] :map]}
   []
   @*schemas)
 
 (defn registered?
   "Check if a schema keyword is registered."
+  {:malli/schema [:=> [:catn [::registry-key ::registry-key]] :boolean]}
   [k]
   (contains? @*schemas k))
 
 (defn schema-definition
-  "Get the raw definition for a registered schema.
-
-   Returns nil if not registered."
+  "The raw definition for a registered schema, or nil if not registered."
+  {:malli/schema [:=> [:catn [::registry-key ::registry-key]] :any]}
   [k]
   (get @*schemas k))
 
 (defn schemas-in-namespace
-  "Get all schemas registered under a specific namespace.
+  "The `{keyword definition}` map of schemas registered under `ns-name`.
 
-   Arguments:
-     ns-name - String namespace name (e.g., \"seon.ai.gemini\")
-
-   Returns:
-     Map of {keyword definition} for schemas in that namespace."
+   `ns-name` is a string, e.g. \"seon.ai.gemini\"."
+  {:malli/schema [:=> [:catn [::namespace-name ::namespace-name]] :map]}
   [ns-name]
   (into {}
-        (filter (fn [[k _]]
-                  (= (namespace k) ns-name))
-                @*schemas)))
+        (filter (fn [[k _]] (= (namespace k) ns-name)))
+        @*schemas))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Development Helpers
 ;;; ---------------------------------------------------------------------------
 
 (defn clear-all!
-  "Clear all registered schemas. USE WITH CAUTION - only for testing."
+  "Clear all registered schemas. USE WITH CAUTION — only for testing."
+  {:malli/schema [:=> [:cat] :map]}
   []
   (reset! *schemas {}))
 
 (comment
   ;; REPL exploration
-
-  ;; Register a test schema
   (register! ::test-schema [:string {:min 1}])
-
-  ;; Check what's registered
   (registered-schemas)
   (registered? ::test-schema)
-
-  ;; Get schemas for a namespace
   (schemas-in-namespace "seon.schema")
-
-  ;; Validate data against registered schema
   (m/validate ::test-schema "hello")
-  (m/validate ::test-schema "")  ; fails - min 1
-
-  ;; Generate sample data
+  (m/validate ::test-schema "")          ; fails — min 1
   (require '[malli.generator :as mg])
   (mg/generate ::test-schema)
-
   nil)

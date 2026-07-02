@@ -178,37 +178,86 @@
                      (.finally (fn [] (set! db/*conn* orig)))))))))
 
 (deftest current-empty-then-seeded-then-persists
+  ;; `max-tokens` is NOT a provider constant — it is arbitrary fixture data the
+  ;; test SEEDS via env, asserting the round-trip (env → sync-tx-data → DB →
+  ;; current) returns the SAME int. ONE binding feeds the seed AND the
+  ;; assertions, so the contract is round-trip fidelity, not a 2048 literal.
+  (let [seeded-max-tokens 2048]
+    (async done
+      (-> (with-conn
+            (fn [conn]
+              ;; 1. Empty store → {} — adapters fall back to their defaults.
+              (is (= {} (ai/current @conn))
+                  "absent env + absent row → no overrides")
+              ;; 2. "Boot with env on a fresh store": seed the row.
+              (-> (db/transact!
+                    {:seon.db/tx-data
+                     (ai/sync-tx-data
+                       {::ai/env {::ai/provider :anthropic
+                                  ::ai/thinking "true"
+                                  ::ai/max-tokens seeded-max-tokens}})})
+                  (.then (fn [{ok? :seon.db/ok?}]
+                           (is (true? ok?) "config seed transact lands")
+                           (let [c (ai/current @conn)]
+                             (is (= :anthropic (::ai/provider c)))
+                             (is (= seeded-max-tokens (::ai/max-tokens c))
+                                 "the seeded max-tokens round-trips env → DB → current")
+                             (is (true? (ai/thinking-mode c))))
+                           ;; 3. "Reboot WITHOUT env": the row is configured, so
+                           ;;    seed is a NO-OP (nothing retracted) → the config
+                           ;;    PERSISTS. The DB owns the row.
+                           (is (= [] (ai/sync-tx-data
+                                       {::ai/row {::ai/provider :anthropic
+                                                  ::ai/thinking "true"
+                                                  ::ai/max-tokens seeded-max-tokens}
+                                        ::ai/env {}}))
+                               "configured row + no env → no-op seed (no retract)")
+                           (let [c (ai/current @conn)]
+                             (is (= :anthropic (::ai/provider c))
+                                 "reboot WITHOUT env → row PERSISTS (DB owns)")
+                             (is (= seeded-max-tokens (::ai/max-tokens c))
+                                 "the persisted max-tokens survives a no-op reboot seed")))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+;; ============================================================
+;; Per-agent LLM overlay (config-driven agent-init) — effective-config-for /
+;; current lay an agent's ::agent-* overrides over the global row; :inherit /
+;; no-override → the global value (byte-parity).
+;; ============================================================
+
+(deftest per-agent-overrides-overlay-the-global-row
   (async done
     (-> (with-conn
           (fn [conn]
-            ;; 1. Empty store → {} — adapters fall back to their defaults.
-            (is (= {} (ai/current @conn))
-                "absent env + absent row → no overrides")
-            ;; 2. "Boot with env on a fresh store": seed the row.
+            ;; fresh-conn installs only the ai config attrs — add the agent-id
+            ;; identity + the ::agent-model override attr this test overlays.
             (-> (db/transact!
-                  {:seon.db/tx-data
-                   (ai/sync-tx-data
-                     {::ai/env {::ai/provider :anthropic
-                                ::ai/thinking "true"
-                                ::ai/max-tokens 2048}})})
-                (.then (fn [{ok? :seon.db/ok?}]
-                         (is (true? ok?) "config seed transact lands")
-                         (let [c (ai/current @conn)]
-                           (is (= :anthropic (::ai/provider c)))
-                           (is (= 2048 (::ai/max-tokens c)))
-                           (is (true? (ai/thinking-mode c))))
-                         ;; 3. "Reboot WITHOUT env": the row is configured, so
-                         ;;    seed is a NO-OP (nothing retracted) → the config
-                         ;;    PERSISTS. The DB owns the row.
-                         (is (= [] (ai/sync-tx-data
-                                     {::ai/row {::ai/provider :anthropic
-                                                ::ai/thinking "true"
-                                                ::ai/max-tokens 2048}
-                                      ::ai/env {}}))
-                             "configured row + no env → no-op seed (no retract)")
-                         (let [c (ai/current @conn)]
-                           (is (= :anthropic (::ai/provider c))
-                               "reboot WITHOUT env → row PERSISTS (DB owns)")
-                           (is (= 2048 (::ai/max-tokens c)))))))))
+                  {:seon.db/conn conn
+                   :seon.db/tx-data (db/malli->datahike-schema
+                                      [:seon.agent/id ::ai/agent-model])})
+                (.then (fn [_]
+                  ;; agent ids are :seon.db/id-shaped (14 chars) or "root".
+                  (db/transact!
+                    {:seon.db/tx-data
+                     [;; global row
+                      {::ai/id "config" ::ai/model "global-model" ::ai/max-tokens 100}
+                      ;; an agent that OVERRIDES the model, inherits the rest
+                      {:seon.agent/id "ovr-2607011800" :seon.ai/agent-model "agent-model"}
+                      ;; an agent with NO override (byte-parity → the global row)
+                      {:seon.agent/id "pln-2607011800"}]})))
+                (.then (fn [r]
+                         (is (true? (:seon.db/ok? r)) "seed transact lands")
+                         (let [ov    (ai/effective-config-for {::ai/agent-id "ovr-2607011800"})
+                               plain (ai/effective-config-for {::ai/agent-id "pln-2607011800"})
+                               none  (ai/effective-config-for {::ai/agent-id "abs-2607011800"})]
+                           (is (= "agent-model" (::ai/model ov))
+                               "the agent's ::agent-model overrides the global model")
+                           (is (= 100 (::ai/max-tokens ov))
+                               "an un-overridden attr inherits the global value")
+                           (is (= "global-model" (::ai/model plain))
+                               "a no-override agent = EXACTLY the global row (byte-parity)")
+                           (is (= "global-model" (::ai/model none))
+                               "an absent agent = the global row")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

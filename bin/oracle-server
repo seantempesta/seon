@@ -1,0 +1,162 @@
+#!/usr/bin/env bb
+;;; bin/oracle-server — PERSISTENT babashka parse-validator server (the
+;;; co-located oracle's PARSE tier).
+;;;
+;;; Design: docs/prds/diffusion-dynamic-context/research/
+;;;         colocated-oracle-package-design-2026-06-28.md (§2 bb-for-parse, §4 wire).
+;;;
+;;; Why bb: parse-forms is PURELY STRUCTURAL (rewrite-clj read + read-error
+;;; span classification — no semantics), so babashka's built-in rewrite-clj
+;;; reads CLJS-flavored canvas forms BIT-IDENTICALLY to the pod — zero
+;;; fidelity loss, NO shadow build, NO Node, NO pod. Same path bin/test-parser
+;;; proves (bb --classpath src on the .cljc source).
+;;;
+;;; Spawn-ONCE, reuse-forever: the diffusion worker's Python `Oracle` shim
+;;; spawns this once at warm-up and writes one request line per denoise
+;;; checkpoint. Cold start (spawn -> ready) ~10-30ms; warm per-call ~0.1ms.
+;;; A pure fn of its input — no DB, no pod, no global state.
+;;;
+;;; WIRE (one JSON object per line, both directions — design §4):
+;;;
+;;;   in :  {"op":"parse","id":42,"code":"(defn mean [v] (/ (reduce + v ..."}
+;;;   out:  {"op":"parse","id":42,"forms":0,"tier":"parse",
+;;;          "errors":[{"error-kind":"eof","span":[0,33],"source":"..."}]}
+;;;
+;;; The `forms`/`tier`/`errors[{error-kind,span,source}]` fields are
+;;; BYTE-IDENTICAL to the Node `:worker-validator` bundle's `validate-json`
+;;; output (src/seon/worker_validator.cljs `validate` + `->js`) — so the
+;;; Python shim is RUNTIME-AGNOSTIC: swap bb<->Node without changing Python.
+;;; `op`/`id` are echoed per design §4; a bare-JSON-string line (the Node
+;;; validator's current --serve framing) is also accepted, defaulting to
+;;; {op:"parse"}, so the same pipe carries either framing.
+;;;
+;;; Run:  bb --classpath src -m … is NOT used (self-contained); just:
+;;;         bin/oracle-server          # reads stdin lines, writes stdout lines
+;;;       or feed one line for a one-shot smoke:
+;;;         echo '{"op":"parse","code":"(+ 1 2)"}' | bin/oracle-server
+
+(require '[babashka.classpath :as cp]
+         '[babashka.fs :as fs])
+
+;;; Put the repo's `src/` on the classpath (relative to THIS script, not cwd)
+;;; so `seon.repl.internal` (the pure .cljc parser) loads from source — the
+;;; bin/test-parser approach, cwd-independent for the deployed image.
+(cp/add-classpath (str (fs/file (fs/parent (fs/parent (fs/absolutize *file*))) "src")))
+
+(require '[seon.repl.internal :as internal]
+         '[seon.diffusion.grammar :as grammar]        ; shared T1/phase predicates (bb + pod)
+         '[cheshire.core :as json])
+
+(defn validate
+  "Pure: code-string -> the Node-validator-IDENTICAL result map
+   {:forms n :tier \"parse\" :errors [{:error-kind name :span [s e] :source s}]}.
+   Mirrors seon.worker-validator/validate + ->js (keywords flattened to NAME
+   strings at this boundary, exactly as the Node bundle does).
+
+   `strip-fences?` (default true) controls markdown fence stripping. Pass
+   false for the CANVAS-TEXT basis: spans then index the EXACT input
+   string, aligning with the diffusion worker's `offset_map` (see the
+   `parse-raw` op below + closed-loop-span-alignment-2026-06-28.md)."
+  ([code] (validate code true))
+  ([code strip-fences?]
+  (let [entries (internal/parse-forms code {:strip-fences? strip-fences?})
+        forms   (filterv #(= :form (:kind %)) entries)
+        errors  (->> entries
+                     (filter #(= :read (:kind %)))
+                     (mapv (fn [{:keys [error-kind span source]}]
+                             {:error-kind (name error-kind)
+                              :span       span
+                              :source     source})))]
+    {:forms  (count forms)
+     :tier   "parse"
+     :errors errors})))
+
+(defn refine-parse
+  "The CHEAP TIERS of the unified `seon.diffusion.oracle/refine` control set,
+   computed on the CANVAS basis (no fence strip — spans share the worker's
+   `offset_map`). One bb call covers the tiers that need NO out-of-process help:
+
+     - `renoise_spans` — broken-syntax spans (PARSE) + def-vs-defn spans
+       (STRUCTURAL, `grammar/malformed-def?`) + phase-grammar violations
+       (when `phase` is supplied, `grammar/phase-violation?`);
+     - `clamps`        — good form spans that are NONE of the above, to HOLD.
+
+   The structural + phase predicates are the SHARED `seon.diffusion.grammar`
+   ns (identical to the pod oracle — no drift). bb still CANNOT produce
+   `injections` (the retrieve leg reads the program graph — `:seon.fn/sym` —
+   not on bb's classpath; CLJS pod oracle) nor fold eval verdicts (the node
+   self-host bundle). So `injections` is empty and `legs` is `[\"parse\"]` (plus
+   `\"phase\"` when a phase gate ran). Form `:span`s come from `parse-forms`."
+  ([code] (refine-parse code nil))
+  ([code phase]
+   (let [entries (internal/parse-forms code {:strip-fences? false})
+         forms   (filter #(= :form (:kind %)) entries)
+         reads   (filter #(= :read (:kind %)) entries)
+         ;; broken-syntax spans (PARSE tier)
+         parse-r (mapv (fn [r] {:span       (:span r)
+                                :error-kind (name (:error-kind r))
+                                :source     (:source r)})
+                       reads)
+         ;; def-vs-defn (STRUCTURAL tier) + phase violations (PHASE tier), both
+         ;; over the GOOD forms via the SHARED grammar predicates.
+         struct-r (keep (fn [f]
+                          (when (grammar/malformed-def? (:form f))
+                            {:span (:span f) :error-kind "def-vs-defn" :source (:source f)}))
+                        forms)
+         phase-r  (when phase
+                    (keep (fn [f]
+                            (when (grammar/phase-violation? phase (:form f))
+                              {:span (:span f) :error-kind "phase-violation" :source (:source f)}))
+                          forms))
+         renoise  (vec (concat parse-r struct-r phase-r))
+         bad      (set (map :span renoise))
+         clamps   (->> forms
+                       (remove #(contains? bad (:span %)))
+                       (mapv (fn [f] {:span (:span f) :source (:source f)})))]
+     {:tier          "refine"
+      :legs          (if phase ["parse" "phase"] ["parse"])
+      :note          (str "bb covers the CHEAP tiers — parse + structural (def-vs-defn) + "
+                          "phase. injections (retrieve) need the program graph (CLJS pod "
+                          "oracle); eval verdicts need the node self-host bundle.")
+      :clamps        clamps
+      :renoise_spans renoise
+      :injections    []})))
+
+(defn handle
+  "Dispatch one parsed request map (string keys, from JSON) to a response
+   map. The op-dispatch seam: `parse`/`validate` run the parse tier (fence
+   STRIPPING, the chat/LLM-reply basis); `parse-raw` runs the SAME tier
+   with NO fence strip, so spans index the EXACT input — the canvas_text
+   basis the diffusion worker's `offset_map` shares (closed-loop renoise).
+   `refine` returns the PARSE HALF of the unified oracle control set
+   (clamps + renoise_spans; see [[refine-parse]] for the bb-vs-pod boundary).
+   The `strip-fences` flag (default true) is the per-request override on
+   any parse op. Any other op returns an `unimplemented` marker (the
+   eval/retrieve tiers are the Node/pod bundle's job — design §3/§5).
+   `op`/`id` are echoed when present."
+  [req]
+  (let [req (if (string? req) {"code" req} req)   ; bare-string line -> {code}
+        op  (get req "op" "parse")
+        id  (get req "id")
+        strip-fences? (get req "strip-fences" (not= op "parse-raw"))
+        base (case op
+               ("parse" "validate" "parse-raw") (validate (get req "code" "") strip-fences?)
+               "refine"                          (refine-parse (get req "code" "")
+                                                               (some-> (get req "phase") keyword))
+               {:error {:kind "unimplemented"}})]
+    (cond-> (assoc base :op op)
+      (some? id) (assoc :id id))))
+
+(defn -main []
+  (loop []
+    (when-some [line (read-line)]
+      (let [resp (try
+                   (handle (json/parse-string line))
+                   (catch Exception e
+                     {:op "parse" :error {:kind "bad-request"
+                                          :message (.getMessage e)}}))]
+        (println (json/generate-string resp))
+        (flush))
+      (recur))))
+
+(-main)

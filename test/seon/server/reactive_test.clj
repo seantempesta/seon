@@ -155,9 +155,9 @@
     (reactive/register-sub! state conn "s1" units-query)
     (reset! emitted [])
     (d/transact conn {:tx-data [{:db/id 1 :unit/pos "y"}]
-                      :tx-meta {:seon.db/request-id "r-123"}})
+                      :tx-meta {:seon.store.wire/write-id "r-123"}})
     (is (= "r-123" (:seon.server.reactive/request-id (first @emitted)))
-        "on-tx! surfaces the tx's :seon.db/request-id on the event")))
+        "on-tx! surfaces the tx's :seon.store.wire/write-id on the event")))
 
 (deftest register-subscription-handler
   (let [{:keys [conn emitted state]} (with-engine)]

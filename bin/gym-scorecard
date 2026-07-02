@@ -1,0 +1,112 @@
+#!/usr/bin/env bash
+# bin/gym-scorecard — the gym FITNESS FUNCTION for the recursive
+# context-improvement loop.
+#
+# ONE command runs the whole competency battery, collects every axis, and
+# appends ONE git-SHA-keyed line to the scorecard log — so any later
+# change can be judged "lifted the WHOLE battery or revert" cheaply and
+# honestly (the harness never sees the answers).
+#
+# A CLJS fn can't compute the git SHA or wall-clock, so THIS wrapper
+# stamps both (`git rev-parse --short HEAD` + an ISO timestamp) and hands
+# them to the gated runner (seon.gym.scorecard-test/battery-scorecard-run,
+# a no-op unless SEON_GYM_SCORECARD is set). The runner drives
+# seon.gym.scorecard/run-battery!, prints the one greppable
+# `SEON-GYM SCORECARD-BATTERY` line, and appends the EDN to the log.
+#
+# Usage:
+#   bin/gym-scorecard                # FREE battery (no LLM spend) — every loop
+#   bin/gym-scorecard --no-build     # reuse out/test/test.js (skip compile)
+#   bin/gym-scorecard --paid         # ALSO drive the paid-tier scenarios
+#                                    # (pass-rate + judge + eval-error-rate on
+#                                    # real drives). COSTS REAL MONEY — needs
+#                                    # the active provider's API key set.
+#   bin/gym-scorecard --log=PATH     # override the scorecard log path
+#   bin/gym-scorecard --paid --k=3   # pass^k: drive each PAID scenario k
+#                                    # times and report the pass-RATE (a
+#                                    # single sample is a noisy judge —
+#                                    # variance can't masquerade as a
+#                                    # regression). k=1 = today, unchanged.
+#   bin/gym-scorecard --paid --k=3 --only=canvas-goal-board
+#                                    # FOCUS on named scenario ids (a cheap
+#                                    # targeted paid run, not the whole battery)
+#
+# Loop usage: run → make a context change → re-run → keep the change iff
+# it lifted the WHOLE battery (per-competency pass / tokens / error-rate /
+# canvas / judge), else revert. The log's SHA-keyed lines ARE the trend.
+#
+# Default log: docs/prds/agent-fsm/research/gym-scorecard-trend.edn
+#   (EDN-lines, git-TRACKED — *.log is gitignored, so the cross-SHA trend
+#    would not survive; a .edn under docs/ survives + is greppable)
+
+set -uo pipefail
+cd "$(dirname "$0")/.."
+
+BUILD=1
+ALLOW_PAID=0
+K=1
+ONLY=""
+LOG="docs/prds/agent-fsm/research/gym-scorecard-trend.edn"
+
+for arg in "$@"; do
+  case "$arg" in
+    --no-build) BUILD=0 ;;
+    --paid)     ALLOW_PAID=1 ;;
+    --k=*)      K="${arg#--k=}" ;;
+    --only=*)   ONLY="${arg#--only=}" ;;
+    --log=*)    LOG="${arg#--log=}" ;;
+    --help|-h)  sed -n '2,38p' "$0"; exit 0 ;;
+    *) echo "Unknown arg: $arg" >&2; exit 2 ;;
+  esac
+done
+
+mkdir -p tmp
+RUNLOG="tmp/gym-scorecard-latest.log"
+SHA="$(git rev-parse --short HEAD)"
+AT="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+
+# Compile the :test bundle once (mirrors bin/test-cljs's dev compile — a
+# release build flattens namespaces and breaks context rendering +
+# instrumentation). The gym scores the STOCK core, so strip the
+# SEON_EXTRA_* downstream knobs (same as bin/gym) so an operator shell
+# can't leak a downstream's source/preload roots into what's measured.
+if [ "$BUILD" = "1" ]; then
+  echo "== Compiling :test build (shadow-cljs, dev) =="
+  if ! env -u SEON_EXTRA_SRC -u SEON_EXTRA_PRELOAD -u SEON_EXTRA_NPM \
+        clojure -M:cljs compile test 2>&1 | tee "$RUNLOG"; then
+    echo "COMPILE FAIL — see $RUNLOG" >&2
+    exit 2
+  fi
+fi
+
+if [ ! -f "out/test/test.js" ]; then
+  echo "out/test/test.js missing — run without --no-build first" >&2
+  exit 2
+fi
+
+echo ""
+echo "== Running gym battery (FREE${ALLOW_PAID:+/PAID}) — sha ${SHA} k=${K}${ONLY:+ only=$ONLY} =="
+# Focus the run on the gated battery ns only (the :node-test runner's
+# --test filter). The gate vars steer seon.gym.scorecard-test's runner;
+# unset, that ns is a no-op (the normal suite never runs the battery).
+SEON_GYM_SCORECARD=1 \
+SEON_GYM_SHA="$SHA" \
+SEON_GYM_AT="$AT" \
+SEON_GYM_ALLOW_PAID="$ALLOW_PAID" \
+SEON_GYM_K="$K" \
+SEON_GYM_ONLY="$ONLY" \
+SEON_GYM_LOG="$LOG" \
+  env -u SEON_EXTRA_SRC -u SEON_EXTRA_PRELOAD -u SEON_EXTRA_NPM \
+  node out/test/test.js --test=seon.gym.scorecard-test 2>&1 | tee -a "$RUNLOG"
+STATUS=${PIPESTATUS[0]}
+
+echo ""
+echo "== AGENT-GYM battery scorecard (git sha × axes) =="
+grep -a "SEON-GYM SCORECARD-BATTERY " "$RUNLOG" | tail -1 \
+  || echo "(no battery scorecard emitted — check $RUNLOG)"
+
+echo ""
+echo "== Scorecard log tail (trend across SHAs) — ${LOG} =="
+[ -f "$LOG" ] && tail -3 "$LOG" || echo "(log not found)"
+
+exit "$STATUS"

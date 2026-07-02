@@ -1,4 +1,10 @@
-@import "tailwindcss";
+/* `source(none)` DISABLES Tailwind v4 automatic source detection. Without it,
+   v4 walks the whole project dir for content — including the 61k-file vendored
+   `reference-code/` submodule tree (NOT gitignored) — making every boot's
+   `css:build` a ~42s scan. We don't need auto-detection: the explicit `@source`
+   globs below already cover the only place classes live (`src/`), plus the
+   runtime safelist. Bounds the build to ~1s. */
+@import "tailwindcss" source(none);
 @plugin "@tailwindcss/typography";
 
 /* Scan Clojure source files for classes — .clj (JVM), .cljs (pod UI),
@@ -26,15 +32,24 @@
 /* spacing */
 @source inline("p-{0,1,2,3,4} px-{1,2,3,4} py-{1,2,3,4} mt-{1,2} mb-{1,2}");
 /* typography */
-@source inline("text-{xs,sm,base,lg} text-{left,center,right} font-mono font-semibold font-bold");
+@source inline("text-{2xs,xs,sm,base,lg} text-{left,center,right} font-mono font-semibold font-bold");
 @source inline("italic uppercase tracking-wider tabular-nums whitespace-pre-wrap truncate");
 /* color — Phosphor palette only */
-@source inline("text-text-{50,100,200,300,400,500}");
+@source inline("text-text-{50,100,200,300,400,500,600,700}");
 @source inline("text-{signal,success,error,warning,info} text-amber-{300,400,500}");
 @source inline("bg-base-{800,850,900,950}");
 /* borders + overflow */
 @source inline("border border-t border-b border-base-{700,800} rounded rounded-md");
 @source inline("divide-y divide-base-800 overflow-hidden overflow-auto overflow-x-auto");
+/* interactive controls (my.tile) — button / input / select / toggle.
+   Without these an agent-authored control is unstyled + gives no click
+   affordance. Variant classes (hover:/focus:/disabled:/placeholder:)
+   each need their OWN safelist entry — the base class alone won't emit
+   the variant. Keep tight + in sync with my.tile's class strings. */
+@source inline("cursor-pointer select-none accent-amber-400");
+@source inline("hover:bg-base-{800,850} hover:text-text-{50,100} hover:border-base-700");
+@source inline("focus:outline-none focus-visible:border-amber-400 border-amber-{300,400}");
+@source inline("disabled:opacity-50 placeholder:text-text-{400,500}");
 
 /* Custom theme tokens using Tailwind v4 @theme directive.
    Phosphor Terminal theme - warm blacks, cream text, amber accents.
@@ -42,6 +57,12 @@
 @theme {
   /* Fonts - JetBrains Mono for terminal aesthetic */
   --font-mono: 'JetBrains Mono', 'SF Mono', ui-monospace, Menlo, Monaco, 'Cascadia Mono', monospace;
+
+  /* `text-2xs` — the dense label size used ~everywhere in the tile/inspector UI.
+     Tailwind v4 has no built-in 2xs, so without this token the class generated
+     NOTHING and every `text-2xs` label silently fell back to the inherited size. */
+  --text-2xs: 0.625rem;
+  --text-2xs--line-height: 0.9rem;
 
   /* Base colors (warm blacks) */
   --color-base-950: #0d0d0c;
@@ -57,6 +78,12 @@
   --color-text-300: #b0aa9e;
   --color-text-400: #8c8578;
   --color-text-500: #6b6459;
+  /* 600/700 extend the cream ramp DARKER for dim affordances (tree carets,
+     the `▸ deeper` prune hint, value-explorer indices). Without these tokens
+     the `text-text-600/700` classes generated nothing and fell back to the
+     inherited body color — dim by luck, not intent. */
+  --color-text-600: #524c43;
+  --color-text-700: #413d38;
 
   /* Semantic colors */
   --color-signal: #f0b429;
@@ -84,6 +111,19 @@
 
 .animate-skeleton {
   animation: skeleton-pulse 1.5s ease-in-out infinite;
+}
+
+/* Value-explorer disclosure caret. The tree's <summary> is `display:flex`
+   (to lay out caret + key + type-head on one baseline), which SUPPRESSES the
+   browser's native disclosure marker — so we fold in an explicit `▸` caret and
+   rotate it to `▾` when the <details> is open. Pure CSS; no JS, survives the
+   SSE innerHTML patch. */
+.value-node > summary .vx-caret {
+  display: inline-block;
+  transition: transform 0.12s ease;
+}
+.value-node[open] > summary .vx-caret {
+  transform: rotate(90deg);
 }
 
 /* Tool call unified expand/collapse */
@@ -327,6 +367,12 @@ details.tool-call-details[open] .tool-preview {
   .seon-tile-compact { display: none; }
   .seon-tile-expanded { display: block; }
 }
+/* A HERO tile is a PRIMARY surface, not a grid-cell preview, so it always
+   shows the rich EXPANDED face — never the clamped, text-clipping compact face
+   — regardless of container width (phones included). Scoped to `.tile-hero`;
+   the container-query default above is untouched for every other tile. */
+.tile-hero .seon-tile-compact { display: none; }
+.tile-hero .seon-tile-expanded { display: block; }
 
 /* Compact-tile last reply (live-tiles U3): the default root tile
    shows the agent's last reply as readable text — clamp it so a
@@ -360,6 +406,40 @@ details.tool-call-details[open] .tool-preview {
   height: 100%;
   border: 0;
 }
+
+/* Tile-console variant: an inset panel over a DIM backdrop (the console
+   shows through the padding, so a backdrop click — the overlay element
+   itself, outside the iframe — closes it). The inspector's full-bleed
+   variant (no `.tile` class) keeps the base rule above untouched. */
+#seon-debug-overlay.tile {
+  background: rgba(8, 8, 7, 0.84);
+  padding: 2.5vh 2.5vw;
+}
+#seon-debug-overlay.tile iframe {
+  border-radius: 8px;
+  border: 1px solid var(--color-base-800, #2a2a28);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.6);
+}
+#seon-debug-close {
+  position: fixed;
+  top: calc(2.5vh - 13px);
+  right: calc(2.5vw - 13px);
+  z-index: 60;
+  width: 26px;
+  height: 26px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: var(--color-base-900, #161614);
+  color: var(--color-signal, #f5a623);
+  border: 1px solid var(--color-base-700, #3a3a37);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+#seon-debug-close:hover { background: var(--color-base-800, #2a2a28); }
 
 /* ============================================================
    BASE CONTENT LAYER — semantic HTML inside agent-rendered

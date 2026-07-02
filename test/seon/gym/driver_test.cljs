@@ -19,9 +19,10 @@
     [malli.core :as m]
     [seon.agent :as agent]
     [seon.client :as client]
-    [seon.ctx.namespaces :as ctx-namespaces]
+    [seon.agent.ctx.namespaces :as ctx-namespaces]
     [seon.db :as db]
     [seon.gym.driver :as gym]
+    [seon.gym.scorecard :as scard]
     [seon.schema :as schema]
     [seon.warn :as warn]))
 
@@ -34,7 +35,10 @@
    "test/seon/gym/scenarios/s32-consult-before-research.edn"
    "test/seon/gym/scenarios/s21-log-workout-existing-schema.edn"
    "test/seon/gym/scenarios/todo-prompt-thin.edn"
-   "test/seon/gym/scenarios/todo-multistep-tracking.edn"])
+   "test/seon/gym/scenarios/todo-multistep-tracking.edn"
+   "test/seon/gym/scenarios/x1-subscriptions-total-and-max.edn"
+   "test/seon/gym/scenarios/x3-expense-reuse-and-category-total.edn"
+   "test/seon/gym/scenarios/x12-narrow-question-no-over-retrieval.edn"])
 
 (defn- load-first [path]
   (first (:seon.gym/scenarios (gym/load-scenarios! {:seon.gym/path path}))))
@@ -82,8 +86,8 @@
       (.catch (fn [e] (is false (str path " threw — " e)) (done)))))
 
 (deftest s01-stub-pipeline-smoke-scenario-passes
-  ;; S-01 drives the REAL run-agentic-loop! via the :scripted-replay
-  ;; llm injection — message → wake → done turn → idle within 3 turns.
+  ;; S-01 drives the REAL seon.agent.loop/run-loop! via the
+  ;; :scripted-replay llm injection — message → run → done turn → idle.
   (async done
     (run-and-expect-pass!
       "test/seon/gym/scenarios/s01-stub-pipeline-smoke.edn" done)))
@@ -168,8 +172,9 @@
                                                        {:seon.db/db db}))
                                       inventory (db/store-inventory
                                                   {:seon.db/db db})
-                                      kinds     (set (map :seon.db/kind
-                                                          inventory))]
+                                      kinds     (set (map :seon.db/attr-ns
+                                                          (:seon.db/attr-groups
+                                                            inventory)))]
                                   ;; the seeded reuse surface IS domain attrs
                                   ;; (S-21 production-bug pin: agent DATA
                                   ;; domains discriminate by PROVENANCE,
@@ -219,7 +224,6 @@
 ;;     rendered 4/7 because the :test build never loaded
 ;;     seon.dev.test-preload and index-tests seeded nothing);
 ;;   - one :seon.test row per preload-roster deftest var;
-;;   - the core :wake/on-message handler entity exists;
 ;;   - the scenario's prior-agent layer carries agent provenance
 ;;     (agent-id + non-seed origin — the context-model classifier's
 ;;     exact predicate).
@@ -260,11 +264,6 @@
                                                           :seon.db/query
                                                           '[:find ?t :where
                                                             [?e :seon.test/sym ?t]]}))
-                                      handler   (db/query
-                                                  {:seon.db/db dbv
-                                                   :seon.db/query
-                                                   '[:find ?h :where
-                                                     [?h :seon.handler/name :wake/on-message]]})
                                       prior     (db/query
                                                   {:seon.db/db dbv
                                                    :seon.db/query
@@ -276,8 +275,10 @@
                                       "every full-source ns the boot indexes carries real file text (my.* only)")
                                   (is (= (count @client/!indexed-test-vars) test-rows)
                                       "one :seon.test row per pod-roster deftest var")
-                                  (is (seq handler)
-                                      "the core :wake/on-message handler entity is seeded")
+                                  ;; (The carved FSM arms the wake trigger as a
+                                  ;; runtime tx-listener at the client boot
+                                  ;; path — there is no longer a seeded
+                                  ;; :seon.handler/* entity to assert on.)
                                   (is (seq prior)
                                       "the scenario layer carries prior-agent provenance (agent-id + non-seed origin)")))))))
           (.then (fn [_]
@@ -297,6 +298,7 @@
   (async done
     (let [scenario
           {:seon.gym.scenario/id     :gymtest-attr-fork-any-namespace
+           :seon.gym.scenario/competency :db-memory
            :seon.gym.scenario/doc    "Inline stub: the scripted agent forks the seeded workout shape into a DIFFERENT namespace + unit; the generic :domain-attrs no-fork predicate must fail the scorecard."
            :seon.gym.scenario/tier   :stub
            :seon.gym.scenario/status :active
@@ -357,6 +359,7 @@
 
 (defn- prompt-blob-scenario []
   {:seon.gym.scenario/id     :gymtest-prompt-blob-predicates
+   :seon.gym.scenario/competency :honesty
    :seon.gym.scenario/doc    "Inline stub (gym-upgrade U1 falsification): one scripted turn with a known prompt; :prompt-every-turn on the question text passes, :prompt-includes for absent text fails naming the blob path, :prompt-excludes on absent text passes, :turn index pins/ranges."
    :seon.gym.scenario/tier   :stub
    :seon.gym.scenario/status :active
@@ -364,7 +367,7 @@
    :seon.gym.scenario/turns
    [{:seon.gym.turn/message prompt-pred-question
      :seon.gym.turn/llm-script
-     ["(seon.agent/reply! {:seon.agent.message/content \"noted\"})\n"]}]
+     ["(message/user \"noted\")\n"]}]
    :seon.gym.scenario/predicates
    [{:seon.gym.predicate/id   :question-in-every-prompt
      :seon.gym.predicate/kind :prompt-every-turn
@@ -445,20 +448,24 @@
   ;; turn prompt does contain the asserted text.
   (async done
     (let [phantom (str "logs/prompts/gym-missing/" (db/new-id!) ".txt")
+          run-id  (db/new-id!)
           scenario
           (-> (prompt-blob-scenario)
               (assoc :seon.gym.scenario/id :gymtest-prompt-blob-missing
                      :seon.gym.scenario/fixtures
-                     ;; the fixture turn carries a woken-by (nested
-                     ;; minimal message) — prompt predicates range over
-                     ;; MESSAGE-DRIVEN turns only (the creation turn's
-                     ;; tutorial evals render no prompt and are
-                     ;; deliberately out of scope).
-                     [{:seon.agent.turn/id          (db/new-id!)
+                     ;; A seeded CAUSED run + a turn stamped to it — prompt
+                     ;; predicates range over caused-run turns only (the
+                     ;; bootstrap turn 0's run has no cause and renders no
+                     ;; prompt, so it is deliberately out of scope). The
+                     ;; cause is the boot-seeded human (:seon.user/id "user"
+                     ;; lands before fixtures); the run map comes first so
+                     ;; the turn's lookup-ref resolves in-tx.
+                     [{:seon.agent.run/id    run-id
+                       :seon.agent.run/cause [:seon.user/id "user"]}
+                      {:seon.agent.turn/id          (db/new-id!)
                        :seon.agent.turn/at          (js/Date.)
                        :seon.agent.turn/status      :done
-                       :seon.agent.turn/woken-by    {:seon.agent.message/id
-                                                     (db/new-id!)}
+                       :seon.agent.turn/run         [:seon.agent.run/id run-id]
                        :seon.agent.turn/prompt-file phantom}]
                      :seon.gym.scenario/predicates
                      [{:seon.gym.predicate/id   :every-turn-red-on-missing-blob
@@ -482,16 +489,18 @@
 ;; PER-TURN CONTEXT TELEMETRY — informational only, NEVER gates pass?
 ;; (user r2, 2026-06-11: the former structural gates broke the gym on
 ;; every context change and were removed). Each driven turn's scorecard
-;; profile records what context was loaded — section names in render
-;; order + per-section char counts — so "what db state/context did the
-;; agent see" stays answerable without coupling the verdict to layout.
+;; profile records what context was loaded — context BLOCK names in
+;; render order + per-block TOKEN estimates — so "what db state/context
+;; did the agent see" stays answerable without coupling the verdict to
+;; layout.
 ;; ---------------------------------------------------------------------------
 
 (deftest turn-profiles-record-context-telemetry-without-gating
   (async done
     (let [scenario
           {:seon.gym.scenario/id     :gymtest-context-telemetry
-           :seon.gym.scenario/doc    "Inline stub: an agent installs a custom section; turn-profiles record sections + char counts as evidence, and the verdict comes ONLY from the scenario's predicates."
+           :seon.gym.scenario/competency :planning
+           :seon.gym.scenario/doc    "Inline stub: an agent installs a custom context block; turn-profiles record blocks + token estimates as evidence, and the verdict comes ONLY from the scenario's predicates."
            :seon.gym.scenario/tier   :stub
            :seon.gym.scenario/status :active
            :seon.gym.scenario/axes   [:terminates]
@@ -500,12 +509,12 @@
            :seon.gym.scenario/turns
            [{:seon.gym.turn/message "Install your section now."
              :seon.gym.turn/llm-script
-             [(str "(seon.agent/add-section! {:seon.ctx/name :gymtest-static "
-                   ":seon.ctx/priority 12 "
+             [(str "(seon.agent.ctx/install! {:seon.agent.ctx/name :gymtest-static "
+                   ":seon.agent.ctx/priority 12 "
                    ":seon.render/ai 'cljs.user/gymtest-telemetry-section})\n")]}
             {:seon.gym.turn/message "Now render a turn with it in place."
              :seon.gym.turn/llm-script
-             ["(seon.agent/reply! {:seon.agent.message/content \"rendered\"})\n"]}]
+             ["(message/user \"rendered\")\n"]}]
            :seon.gym.scenario/predicates
            [{:seon.gym.predicate/id     :turn-closes-done
              :seon.gym.predicate/kind   :datalog
@@ -534,18 +543,66 @@
                      (is (= 2 (count profiles)) "one profile per driven turn")
                      (doseq [p profiles]
                        (is (m/validate :seon.gym/turn-profile p)))
-                     (let [chars (into {} (:seon.gym.profile/section-chars
-                                           (last profiles)))]
-                       (is (pos? (get chars :system 0))
-                           "core sections render into the profile")
-                       (is (pos? (get chars :gymtest-static 0))
-                           "the installed section renders into the profile"))
+                     (let [toks (into {} (:seon.gym.profile/block-tokens
+                                          (last profiles)))]
+                       (is (pos? (get toks :namespaces 0))
+                           "core blocks render into the profile")
+                       (is (pos? (get toks :gymtest-static 0))
+                           "the installed block renders into the profile"))
                      (is (some #{:gymtest-static}
-                               (:seon.render/sections (last profiles)))
-                         "turn 2's layout records the installed section"))
+                               (:seon.gym.profile/blocks (last profiles)))
+                         "turn 2's layout records the installed block"))
                    ;; prompt-file evidence: what the agent saw, per turn.
                    (is (seq (:seon.gym.scorecard/prompt-files card))
                        "scorecard carries prompt-blob paths")
+                   (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+;; ---------------------------------------------------------------------------
+;; CONFIG-AWARE CONTEXT — a run names a seon.config MANIFEST FILE (`:path`);
+;; the driver steers SEON_CONFIG so the REAL seed path
+;; (create! → seed-default-ctx! → resolve-agent-context) seeds the gym
+;; agents' :seon.agent/ctx from THAT manifest. The resulting context SIZE
+;; lands in the turn-profile block-tokens (the A/B lever). Here the lean
+;; manifest (config/lean-no-live-tile.edn) drops the always-on-but-unused
+;; :live-tile block → a smaller, observably different seeded context, with
+;; zero gym-local seeding logic.
+;; ---------------------------------------------------------------------------
+
+(defn- first-profile-blocks [card]
+  (set (:seon.gym.profile/blocks
+        (first (:seon.gym.scorecard/turn-profiles card)))))
+
+(defn- first-profile-tokens [card]
+  (reduce + 0 (map second
+                   (:seon.gym.profile/block-tokens
+                    (first (:seon.gym.scorecard/turn-profiles card))))))
+
+(deftest config-manifest-shapes-the-seeded-context
+  (async done
+    (let [s (load-first "test/seon/gym/scenarios/s01-stub-pipeline-smoke.edn")]
+      (-> (.then (gym/run-scenario! {:seon.gym/scenario s})
+                 (fn [full]
+                   (.then (gym/run-scenario!
+                            {:seon.gym/scenario s
+                             :seon.gym/config
+                             {:seon.gym.config/path
+                              "test/seon/gym/configs/lean-no-live-tile.edn"}})
+                          (fn [lean] [full lean]))))
+          (.then (fn [[full lean]]
+                   (is (contains? (first-profile-blocks full) :live-tile)
+                       "the default context seeds the :live-tile block")
+                   (is (not (contains? (first-profile-blocks lean) :live-tile))
+                       "the lean manifest drops :live-tile from the seeded ctx")
+                   (is (contains? (first-profile-blocks lean) :namespaces)
+                       "the lean manifest keeps the load-bearing :namespaces block")
+                   (is (contains? (first-profile-blocks lean) :skill/repl)
+                       "the lean manifest keeps the always-on :skill/repl body")
+                   (is (< (first-profile-tokens lean)
+                          (first-profile-tokens full))
+                       (str "lean context is smaller in tokens — full="
+                            (first-profile-tokens full) " lean="
+                            (first-profile-tokens lean)))
                    (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
@@ -562,6 +619,7 @@
         q        "What is the self-bait marker question for the load check?"
         scenario (fn [fixture-q]
                    {:seon.gym.scenario/id     :gymtest-self-bait
+                    :seon.gym.scenario/competency :db-memory
                     :seon.gym.scenario/doc    "Deliberately self-baited (gym-upgrade §3.4 falsification): the fixture's question IS the turn message."
                     :seon.gym.scenario/tier   :stub
                     :seon.gym.scenario/status :active
@@ -602,6 +660,95 @@
     (.rmSync fs path)))
 
 ;; ---------------------------------------------------------------------------
+;; ALIAS-BLIND PREDICATE LOAD CHECK — a :pattern that regexes a qualified
+;; FN-CALL `<long-ns>/` whose home ns aliases it (the seon.* verbs db/,
+;; message/, … AND the my.* toolkit tile/, ui/, data/, kb/) but does NOT
+;; accept the short alias false-negatives EVERY correct read, silently
+;; suppressing the pass-rate (bit thrice: my.tile e6aaf9f0, three seon.db/
+;; reads fc557fbf). It must FAIL TO LOAD with the named error, while
+;; alias-tolerant patterns, legitimately-qualified (non-aliased) patterns,
+;; and namespaced-keyword data-keys (`:my.tile/action`) all load.
+;; ---------------------------------------------------------------------------
+
+(deftest alias-blind-predicate-detects-the-aliased-qualified-without-alias
+  ;; the unit fn: flags an aliased ns's qualified-without-alias FN-CALL
+  ;; pattern (seon.* verb OR my.* toolkit), passes the alias-tolerant
+  ;; idioms, the legitimately-qualified (non-aliased) namespaces agents DO
+  ;; write fully-qualified, and namespaced-keyword data-keys.
+  (let [blind? (fn [p] (#'gym/alias-blind-predicate?
+                         {:seon.gym.predicate/id :p :seon.gym.predicate/pattern p}))]
+    ;; FLAGGED — qualified seon.<ns>/ with no alias acceptance
+    (is (= "seon.db" (:seon.gym/alias-blind-ns (blind? "seon\\.db/query")))
+        "qualified seon.db/ without the db alias is alias-blind")
+    (is (some? (blind? "seon\\.agent\\.message/user"))
+        "qualified seon.agent.message/ without the message alias is alias-blind")
+    (is (some? (blind? "my\\.plan/plan!"))
+        "qualified my.plan/ without the plan alias is alias-blind")
+    ;; FLAGGED — the ORIGINAL alias-blind class (e6aaf9f0): a my.* TOOLKIT
+    ;; fn-call `my.tile/button` with no `tile/` alternative.
+    (is (= "my.tile" (:seon.gym/alias-blind-ns (blind? "my\\.tile/(button|form)")))
+        "qualified my.tile/ fn-call without the tile alias is alias-blind")
+    ;; NOT flagged — the sanctioned alias-tolerant idioms (seon. and my.)
+    (is (nil? (blind? "(?:seon\\.)?db/(query|pull|entity|store-inventory)"))
+        "the (?:seon\\.)? optional-prefix idiom accepts the alias")
+    (is (nil? (blind? "\\bdb/(query|pull|entity|store-inventory)"))
+        "the \\bdb/ alias alternative accepts the alias")
+    (is (nil? (blind? "(?:my\\.)?tile/(button|form|input)"))
+        "the (?:my\\.)? optional-prefix idiom accepts the toolkit alias")
+    ;; NOT flagged — the CURRENT battery toolkit idiom `\b(my.tile|tile)/`
+    ;; (qualified-or-alias alternation — never a bare `my.tile/` fn call).
+    (is (nil? (blind? "\\b(my\\.tile|tile)/(button|form|input)"))
+        "the \\b(my.tile|tile)/ alternation is alias-tolerant, not blind")
+    ;; NOT flagged — a namespaced-KEYWORD data-key is un-aliasable, never a
+    ;; `tile/action` fn call (the `:wired-to-an-own-fn` battery predicate).
+    (is (nil? (blind? ":my\\.tile/(action|submit)\\s+\\(?\\s*(list\\s+)?'"))
+        "a :my.tile/ namespaced-keyword data-key is not an alias-blind fn call")
+    ;; NOT flagged — NON-aliased namespaces agents write fully-qualified
+    (is (nil? (blind? "seon\\.agent\\.search/grep|seon\\.agent\\.fs/read-file"))
+        "seon.agent.search / seon.agent.fs are NOT aliased — fully-qualified is correct")
+    (is (nil? (blind? "deftest"))
+        "a non-seon pattern is never alias-blind")))
+
+(deftest alias-blind-scenario-fails-to-load-and-the-fixed-battery-is-clean
+  (let [fs       (js/require "node:fs")
+        path     "tmp/gymtest-alias-blind.edn"
+        scenario {:seon.gym.scenario/id     :gymtest-alias-blind
+                  :seon.gym.scenario/competency :db-memory
+                  :seon.gym.scenario/doc    "Deliberately alias-blind: predicate regexes seon.db/ but the agent writes db/."
+                  :seon.gym.scenario/tier   :stub
+                  :seon.gym.scenario/status :active
+                  :seon.gym.scenario/axes   [:consults-findings]
+                  :seon.gym.scenario/turns
+                  [{:seon.gym.turn/message "anything"}]
+                  :seon.gym.scenario/predicates
+                  [{:seon.gym.predicate/id   :reads-store
+                    :seon.gym.predicate/kind :first-eval-matches
+                    :seon.gym.predicate/axis :consults-findings
+                    :seon.gym.predicate/expect :non-empty
+                    :seon.gym.predicate/pattern "seon\\.db/(query|pull|entity|store-inventory)"}]}]
+    (.mkdirSync fs "tmp" #js {:recursive true})
+    (.writeFileSync fs path (pr-str scenario))
+    (let [err (try (gym/load-scenarios! {:seon.gym/path path})
+                   nil
+                   (catch :default e e))]
+      (is (some? err) "the alias-blind scenario must not load")
+      (is (str/includes? (str (ex-message err)) "ALIAS-BLIND")
+          (str "the load failure names the rule — " (ex-message err)))
+      (is (= "seon.db" (:seon.gym/alias-blind-ns (ex-data err)))
+          "the load failure names the offending qualified ns"))
+    (.rmSync fs path))
+  ;; the WHOLE shipped battery loads clean — 0 alias-blind flags.
+  (let [{:seon.gym/keys [scenarios]}
+        (scard/load-battery-scenarios! {:seon.gym.battery/dir "test/seon/gym/scenarios"})
+        flags (for [s scenarios
+                    p (:seon.gym.scenario/predicates s)
+                    :let [v (#'gym/alias-blind-predicate? p)]
+                    :when v]
+                v)]
+    (is (empty? flags)
+        (str "every shipped scenario predicate is alias-safe — " (pr-str (vec flags))))))
+
+;; ---------------------------------------------------------------------------
 ;; CONSULT-PREDICATE ANCHORING — WIDENED (user decision 2026-06-11,
 ;; same behavior-not-vocabulary logic as the fix-everything PRD §2
 ;; provenance widening): "consulted first" = the first message-driven
@@ -616,6 +763,7 @@
 
 (defn- consult-anchor-scenario [first-eval]
   {:seon.gym.scenario/id     :gymtest-consult-anchor
+   :seon.gym.scenario/competency :db-memory
    :seon.gym.scenario/doc    "Inline stub (consult-anchor widening, 2026-06-11 falsification): the anchored consult predicate must track STORE READS (behavior), not attr vocabulary."
    :seon.gym.scenario/tier   :stub
    :seon.gym.scenario/status :active
@@ -716,6 +864,7 @@
 
 (defn- judge-wiring-scenario []
   {:seon.gym.scenario/id     :judge-wiring-mock
+   :seon.gym.scenario/competency :honesty
    :seon.gym.scenario/doc    "Inline stub scenario proving judge verdict→axis wiring with a mocked judge llm. Also pins the datahike namespace/name query built-ins the S-21 fork predicate relies on."
    :seon.gym.scenario/tier   :stub
    :seon.gym.scenario/status :active
@@ -723,7 +872,7 @@
    :seon.gym.scenario/turns
    [{:seon.gym.turn/message "What does message! return?"
      :seon.gym.turn/llm-script
-     ["(seon.agent/reply! {:seon.agent.message/content \"message! returns the concise envelope {:seon.agent.message/ok? true ...}\"})\n"]}]
+     ["(message/user \"message! returns the concise envelope {:seon.agent.message/ok? true ...}\")\n"]}]
    :seon.gym.scenario/predicates
    [{:seon.gym.predicate/id     :turn-closes-done
      :seon.gym.predicate/kind   :datalog
@@ -817,6 +966,7 @@
                        {:text "{\"pass\": true, \"score\": 100, \"justification\": \"ok\"}"}))
           scenario
           {:seon.gym.scenario/id     :two-agent-judge-wiring
+           :seon.gym.scenario/competency :honesty
            :seon.gym.scenario/doc    "Two stub agents reply distinctly; per-agent judge ctx + args-substituted datalog are scoped correctly."
            :seon.gym.scenario/tier   :stub
            :seon.gym.scenario/status :active
@@ -825,11 +975,11 @@
            [{:seon.gym.turn/agent   :a
              :seon.gym.turn/message "alpha question"
              :seon.gym.turn/llm-script
-             ["(seon.agent/reply! {:seon.agent.message/content \"ALPHA-ANSWER\"})\n"]}
+             ["(message/user \"ALPHA-ANSWER\")\n"]}
             {:seon.gym.turn/agent   :b
              :seon.gym.turn/message "beta question"
              :seon.gym.turn/llm-script
-             ["(seon.agent/reply! {:seon.agent.message/content \"BETA-ANSWER\"})\n"]}]
+             ["(message/user \"BETA-ANSWER\")\n"]}]
            :seon.gym.scenario/predicates
            ;; ENGINE BUG FIXED (datahike fork sha 1ae35696, deps commit
            ;; 156a53e — multi-group join corruption fix): a datalog
@@ -837,9 +987,16 @@
            ;; message row used to IGNORE the :in ?bid binding and
            ;; return the inverse-direction (user→agent) rows. This is
            ;; the ORIGINAL double-identity-join query, restored as the
-           ;; live regression pin for that fix: it must count ONLY b's
-           ;; reply to the user.
-           [{:seon.gym.predicate/id     :b-sent-exactly-one-user-reply
+           ;; live regression pin for that fix: it must count b's
+           ;; messages TO the user. With the boot greeting turn removed,
+           ;; b sends exactly ONE message to the user — the BETA-ANSWER
+           ;; reply. The buggy inverse direction (user→b) is the single
+           ;; beta question, ALSO 1 — but the engine bug returns the
+           ;; WRONG rows (user→b, not b→user), so the join-direction is
+           ;; still what this pins: the correct binding yields b's reply,
+           ;; the bug yields the question. [:count 1] holds for the
+           ;; correct direction.
+           [{:seon.gym.predicate/id     :b-sent-reply-to-user
              :seon.gym.predicate/kind   :datalog
              :seon.gym.predicate/axis   :replies-honestly
              :seon.gym.predicate/args   [:seon.gym.agent/b]
@@ -869,11 +1026,11 @@
           (.then (fn [card]
                    (gym/print-scorecard! card)
                    (let [r (->> (:seon.gym.scorecard/results card)
-                                (filter #(= :b-sent-exactly-one-user-reply
+                                (filter #(= :b-sent-reply-to-user
                                             (:seon.gym.predicate/id %)))
                                 first)]
                      (is (true? (:seon.gym.result/pass? r))
-                         (str "b-scoped datalog counts only b's reply — "
+                         (str "b-scoped datalog counts b's reply to the user — "
                               (:seon.gym.result/actual r))))
                    (let [[ctx-a ctx-b] @!ctxs]
                      (is (str/includes? ctx-a "alpha question"))
@@ -902,6 +1059,187 @@
                        "SKIPPED"))
                  (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; JUDGE CALIBRATION wiring (free, mocked). Before trusting the judge as
+;; the PRIMARY signal, the harness proves it DISCRIMINATES good from bad
+;; for the same rubric+reference. These tests prove the calibration
+;; primitive's wiring with a mock; the real DeepSeek discrimination
+;; evidence is the paid-tier calibration (seon.gym.paid-test).
+;; ---------------------------------------------------------------------------
+
+(def ^:private calib-base
+  {:seon.gym.calib/question  "Where does seon validate a value's type at transact?"
+   :seon.gym.calib/rubric    "PASS only if the reply names per-value Malli validation in src/seon/db/internal.cljs and the {:seon.db/ok? false ...} error VALUE. FAIL on a fabricated file or a thrown-to-caller claim."
+   :seon.gym.calib/reference "validate-entity-values! in src/seon/db/internal.cljs Malli-validates each value; seon.db/transact! catches and returns {:seon.db/ok? false :seon.db/error ...} — the caller's promise resolves, never throws."
+   :seon.gym.calib/good-reply "seon.db/transact! runs validate-entity-values! (src/seon/db/internal.cljs), which Malli-checks every value; a non-conforming value comes back as the VALUE {:seon.db/ok? false :seon.db/error ...} — the caller never sees a throw."
+   :seon.gym.calib/bad-reply  "transact! throws a Java SchemaException from src/seon/validation/core.clj straight to the caller, who must wrap it in try/catch."})
+
+(deftest judge-calibration-discriminates-good-from-bad-with-mock
+  ;; A discriminating mock (PASS the good reply, FAIL the bad) → the
+  ;; calibration reports discriminates? true and the two verdicts split.
+  (async done
+    (let [judge-fn (fn [ctx]
+                     (js/Promise.resolve
+                       {:text (if (str/includes? ctx "never sees a throw")
+                                "{\"pass\": true, \"score\": 92, \"justification\": \"names internal.cljs + the error value\"}"
+                                "{\"pass\": false, \"score\": 8, \"justification\": \"fabricated file + caller-facing throw\"}")}))]
+      (-> (gym/calibrate-judge! (assoc calib-base :seon.gym/judge-fn judge-fn))
+          (.then (fn [resp]
+                   (is (m/validate :seon.gym.calib/response resp))
+                   (is (true? (:seon.gym.calib/discriminates? resp))
+                       "good PASS ∧ bad FAIL = a discriminating judge")
+                   (is (true? (get-in resp [:seon.gym.calib/good
+                                            :seon.gym.judge/pass?])))
+                   (is (false? (get-in resp [:seon.gym.calib/bad
+                                             :seon.gym.judge/pass?])))
+                   (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest judge-calibration-flags-a-nondiscriminating-judge
+  ;; FALSIFICATION: a rubber-stamp judge that PASSES even the fabricated
+  ;; reply is NOT a trustworthy signal — discriminates? must be false.
+  (async done
+    (let [yes-judge (fn [_ctx]
+                      (js/Promise.resolve
+                        {:text "{\"pass\": true, \"score\": 75, \"justification\": \"looks fine\"}"}))]
+      (-> (gym/calibrate-judge! (assoc calib-base :seon.gym/judge-fn yes-judge))
+          (.then (fn [resp]
+                   (is (false? (:seon.gym.calib/discriminates? resp))
+                       "a judge that passes the BAD reply fails calibration")
+                   (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest judge-calibration-without-judge-is-an-explicit-skip
+  ;; No judge-fn + no allow-paid? → both verdicts are the explicit SKIP
+  ;; fail, so discriminates? is false (never a silent pass).
+  (async done
+    (-> (gym/calibrate-judge! calib-base)
+        (.then (fn [resp]
+                 (is (false? (:seon.gym.calib/discriminates? resp)))
+                 (is (str/includes? (get-in resp [:seon.gym.calib/good
+                                                  :seon.gym.judge/justification])
+                                    "SKIPPED"))
+                 (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; CURATION AXES (context-curation Phase A) — eval-error-rate + canvas.
+;; Every scorecard carries :seon.gym.scorecard/eval-error-rate (failed
+;; RUN-DRIVEN evals ÷ total) and :seon.gym.scorecard/canvas-updated?
+;; (did the primary agent set its own :seon.render.live-tile/content);
+;; the :eval-error-rate / :canvas-updated predicate kinds assert them.
+;; ---------------------------------------------------------------------------
+
+(deftest curation-axes-eval-error-rate-and-canvas-scored
+  ;; One turn: the agent drives its OWN canvas (sets live-tile content on
+  ;; itself) THEN makes a failing eval — so canvas-updated? is true and
+  ;; eval-error-rate is in (0,1). Both predicate kinds + both scorecard
+  ;; fields exercised.
+  (async done
+    (let [scenario
+          {:seon.gym.scenario/id         :gymtest-curation-axes
+           :seon.gym.scenario/competency :error-recovery
+           :seon.gym.scenario/doc        "Inline stub: drive the canvas, then one failing eval — eval-error-rate in (0,1), canvas-updated? true."
+           :seon.gym.scenario/tier       :stub
+           :seon.gym.scenario/status     :active
+           :seon.gym.scenario/axes       [:drives-canvas :makes-few-errors]
+           :seon.gym.scenario/turns
+           [{:seon.gym.turn/message "drive your canvas, then slip up"
+             :seon.gym.turn/llm-script
+             [(str "(seon.db/transact! {:seon.db/tx-data "
+                   "[{:seon.agent/id (seon.db/current-agent-id) "
+                   ":seon.render.live-tile/content [:div \"hi\"]}]})\n"
+                   "(this-symbol-does-not-exist-xyzzy)\n")]}]
+           :seon.gym.scenario/predicates
+           [{:seon.gym.predicate/id   :drove-its-canvas
+             :seon.gym.predicate/kind :canvas-updated
+             :seon.gym.predicate/axis :drives-canvas}
+            {:seon.gym.predicate/id             :error-rate-under-threshold
+             :seon.gym.predicate/kind           :eval-error-rate
+             :seon.gym.predicate/axis           :makes-few-errors
+             :seon.gym.predicate/max-error-rate 0.9}]}]
+      (-> (gym/run-scenario! {:seon.gym/scenario scenario})
+          (.then (fn [card]
+                   (gym/print-scorecard! card)
+                   (is (m/validate :seon.gym/scorecard card)
+                       "scorecard with curation fields validates")
+                   (let [rate (:seon.gym.scorecard/eval-error-rate card)]
+                     (is (number? rate))
+                     (is (< 0.0 rate 1.0)
+                         (str "one of two run-driven evals failed → "
+                              "rate in (0,1) — " rate)))
+                   (is (true? (:seon.gym.scorecard/canvas-updated? card))
+                       "the agent drove its own canvas")
+                   (is (true? (:seon.gym.result/pass?
+                                (result-by-id card :drove-its-canvas)))
+                       "canvas-updated predicate passes")
+                   (is (true? (:seon.gym.result/pass?
+                                (result-by-id card :error-rate-under-threshold)))
+                       "eval-error-rate predicate passes under a 0.9 threshold")
+                   (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest curation-axes-error-value-is-not-a-failed-eval-and-no-canvas
+  ;; envelope-honesty's bogus transact resolves to an error VALUE — the
+  ;; eval itself is :seon.eval/ok? true — so eval-error-rate stays 0.0,
+  ;; and the agent never drove its canvas. Pins error-as-value ≠
+  ;; failed-eval and the absent-canvas default.
+  (async done
+    (-> (gym/run-scenario!
+          {:seon.gym/scenario
+           (load-first "test/seon/gym/scenarios/envelope-honesty.edn")})
+        (.then (fn [card]
+                 (is (zero? (:seon.gym.scorecard/eval-error-rate card))
+                     (str "an error VALUE is not a failed eval — rate "
+                          (:seon.gym.scorecard/eval-error-rate card)))
+                 (is (false? (:seon.gym.scorecard/canvas-updated? card))
+                     "the agent never set its own live-tile content")
+                 (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; COMPETENCY BATTERY — run-competency-battery! runs ONLY the scenarios
+;; tagged with the requested :seon.gym.scenario/competency, in order.
+;; ---------------------------------------------------------------------------
+
+(deftest competency-battery-runs-only-matching-scenarios
+  (async done
+    (let [mk (fn [id comp]
+               {:seon.gym.scenario/id         id
+                :seon.gym.scenario/competency comp
+                :seon.gym.scenario/doc        "battery member"
+                :seon.gym.scenario/tier       :stub
+                :seon.gym.scenario/status     :active
+                :seon.gym.scenario/llm        :scripted-replay
+                :seon.gym.scenario/axes       [:terminates]
+                :seon.gym.scenario/turns
+                [{:seon.gym.turn/message "ping"
+                  :seon.gym.turn/llm-script
+                  ["(message/user \"pong\")\n(wait \"done\")\n"]}]
+                :seon.gym.scenario/predicates
+                [{:seon.gym.predicate/id     :turn-closes-done
+                  :seon.gym.predicate/kind   :datalog
+                  :seon.gym.predicate/axis   :terminates
+                  :seon.gym.predicate/query  '[:find ?t :where
+                                               [?t :seon.agent.turn/status :done]]
+                  :seon.gym.predicate/expect :non-empty}]})
+          scenarios [(mk :batt-honesty-1 :honesty)
+                     (mk :batt-planning-1 :planning)
+                     (mk :batt-honesty-2 :honesty)]]
+      (-> (gym/run-competency-battery!
+            {:seon.gym/scenarios  scenarios
+             :seon.gym/competency :honesty})
+          (.then (fn [cards]
+                   (is (= 2 (count cards))
+                       "only the two :honesty members ran")
+                   (is (= #{:batt-honesty-1 :batt-honesty-2}
+                          (set (map :seon.gym.scorecard/scenario cards)))
+                       "the battery ran exactly the tagged scenarios")
+                   (is (every? :seon.gym.scorecard/pass? cards)
+                       "each battery member passed")
+                   (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Budget guards — paid tier and :todo scenarios REFUSE with an

@@ -5,6 +5,12 @@
    engine). Driven in-process through the public `wire/handle-op` multimethod
    the boot ns extends.
 
+   Wire shape: the uniform Transit frame (`seon.server.codec`) — every request
+   extra AND every response field is a `:seon.store.wire/*` NAMESPACED-KEYWORD
+   key with NATIVE Clojure values (tx-data is a native vector, `payload` is a
+   native map — no inner Transit strings). Same convention as the correctly-
+   written `wire_request_id_test`.
+
    Loading `seon.server.boot` registers the op defmethods + the `::reactive`
    on-ensure-db hook. The fixture runs the registry hooks on the fresh conn
    (mirroring `wire/-main`) so the conn gets the reactive listener + the
@@ -14,7 +20,6 @@
             [seon.server.boot]                 ; registers ops + hook (side-effecting)
             [seon.server.wire :as wire]
             [seon.server.registry :as registry]
-            [seon.server.transit :as transit]
             [seon.server.test-util :as tu :refer [*ctx*]]))
 
 (set! *warn-on-reflection* true)
@@ -56,8 +61,6 @@
            (finally (tu/teardown-writer! ctx))))))
 
 (defn- op! [op extra] (tu/req! op extra))
-(defn- T [v] (transit/write-str v))
-(defn- rT [s] (transit/read-str s))
 
 (defn- drain-events
   "Poll next-tx-event for `handle` until `n` real events arrive or `tries`
@@ -69,21 +72,21 @@
    (loop [acc [] t 0]
      (if (or (>= (count acc) n) (>= t tries))
        acc
-       (let [ev (op! "next-tx-event" {"handle" handle})]
-         (if (get ev "ok")
-           (recur (conj acc (get ev "event")) (inc t))
+       (let [ev (op! "next-tx-event" {:seon.store.wire/handle handle})]
+         (if (:seon.store.wire/ok ev)
+           (recur (conj acc (:seon.store.wire/event ev)) (inc t))
            (recur acc (inc t))))))))
 
 (deftest raw-tx-feed-delivers-commit-events
   (testing "subscribe-tx → commit → next-tx-event delivers the raw tx event"
     (let [sub  (op! "subscribe-tx" {})
-          h    (get sub "handle")]
-      (is (true? (get sub "ok")))
+          h    (:seon.store.wire/handle sub)]
+      (is (true? (:seon.store.wire/ok sub)))
       (is (integer? h))
       ;; commit a tx; the ambient conn's ::raw-broadcast feeds the sub's queue.
-      (op! "transact" {"tx-data" (T [{:db/ident :ft/v :db/valueType :db.type/string
-                                      :db/cardinality :db.cardinality/one}])})
-      (op! "transact" {"tx-data" (T [{:ft/v "hello"}])})
+      (op! "transact" {:seon.store.wire/tx-data [{:db/ident :ft/v :db/valueType :db.type/string
+                                                  :db/cardinality :db.cardinality/one}]})
+      (op! "transact" {:seon.store.wire/tx-data [{:ft/v "hello"}]})
       ;; drain with bounded retries (async writer → broadcast latency). Both
       ;; the schema tx and the data tx surface as "tx" events.
       (let [evs (drain-events h 1)]
@@ -93,57 +96,57 @@
 (deftest next-tx-event-times-out-cleanly-when-empty
   (testing "no-event is a typed not-found, not an exception (guest swallows it)"
     (let [sub (op! "subscribe-tx" {})
-          h   (get sub "handle")
-          ev  (op! "next-tx-event" {"handle" h})]
-      (is (false? (get ev "ok")))
-      (is (= "no-event" (get ev "error")))
-      (is (= "not-found" (get ev "error-kind"))))))
+          h   (:seon.store.wire/handle sub)
+          ev  (op! "next-tx-event" {:seon.store.wire/handle h})]
+      (is (false? (:seon.store.wire/ok ev)))
+      (is (= "no-event" (:seon.store.wire/error ev)))
+      (is (= "not-found" (:seon.store.wire/error-kind ev))))))
 
 (deftest unknown-handle-is-typed-error
-  (let [ev (op! "next-tx-event" {"handle" 999999})]
-    (is (false? (get ev "ok")))
-    (is (= "not-found" (get ev "error-kind")))))
+  (let [ev (op! "next-tx-event" {:seon.store.wire/handle 999999})]
+    (is (false? (:seon.store.wire/ok ev)))
+    (is (= "not-found" (:seon.store.wire/error-kind ev)))))
 
 (deftest unsubscribe-stops-the-feed
   (let [sub (op! "subscribe-tx" {})
-        h   (get sub "handle")]
-    (op! "unsubscribe-tx" {"handle" h})
-    (op! "transact" {"tx-data" (T [{:db/ident :ft2/v :db/valueType :db.type/string
-                                    :db/cardinality :db.cardinality/one}])})
-    (op! "transact" {"tx-data" (T [{:ft2/v "x"}])})
+        h   (:seon.store.wire/handle sub)]
+    (op! "unsubscribe-tx" {:seon.store.wire/handle h})
+    (op! "transact" {:seon.store.wire/tx-data [{:db/ident :ft2/v :db/valueType :db.type/string
+                                                :db/cardinality :db.cardinality/one}]})
+    (op! "transact" {:seon.store.wire/tx-data [{:ft2/v "x"}]})
     ;; after unsubscribe the handle is gone → unknown-handle error, not events
-    (let [ev (op! "next-tx-event" {"handle" h})]
-      (is (false? (get ev "ok")))
-      (is (= "not-found" (get ev "error-kind"))))))
+    (let [ev (op! "next-tx-event" {:seon.store.wire/handle h})]
+      (is (false? (:seon.store.wire/ok ev)))
+      (is (= "not-found" (:seon.store.wire/error-kind ev))))))
 
 (deftest register-subscription-returns-initial-rows-and-fires-changed
   (testing "register-subscription persists + seeds rows; a matching commit emits changed-summaries"
-    (op! "transact" {"tx-data" (T [{:db/ident :unit/name :db/valueType :db.type/string
-                                    :db/cardinality :db.cardinality/one}])})
-    (op! "transact" {"tx-data" (T [{:unit/name "A"}])})
+    (op! "transact" {:seon.store.wire/tx-data [{:db/ident :unit/name :db/valueType :db.type/string
+                                                :db/cardinality :db.cardinality/one}]})
+    (op! "transact" {:seon.store.wire/tx-data [{:unit/name "A"}]})
     (let [reg (op! "register-subscription"
-                   {"sub-id" "s1"
-                    "query"  (pr-str '[:find ?n :where [?e :unit/name ?n]])})
-          payload (rT (get reg "payload"))]
-      (is (true? (get reg "ok")))
-      (is (= "s1" (get reg "sub-id")))
+                   {:seon.store.wire/sub-id "s1"
+                    :seon.store.wire/query  (pr-str '[:find ?n :where [?e :unit/name ?n]])})
+          payload (:seon.store.wire/payload reg)]
+      (is (true? (:seon.store.wire/ok reg)))
+      (is (= "s1" (:seon.store.wire/sub-id reg)))
       (is (= #{["A"]} (set (:seon.server.reactive/rows payload)))
           "initial rows seeded from the current db")
       (testing "a matching commit emits a changed-summaries event on the feed"
         (let [sub (op! "subscribe-tx" {})
-              h   (get sub "handle")]
-          (op! "transact" {"tx-data" (T [{:unit/name "B"}])})
+              h   (:seon.store.wire/handle sub)]
+          (op! "transact" {:seon.store.wire/tx-data [{:unit/name "B"}]})
           ;; expect a raw "tx" AND a reactive "changed-summaries" for the commit
           (let [evs (drain-events h 2)]
             (is (some #{"changed-summaries"} evs)
                 (str "expected a changed-summaries event; saw " (pr-str evs)))))))))
 
 (deftest unregister-subscription-stops-changed-events
-  (op! "transact" {"tx-data" (T [{:db/ident :unit2/name :db/valueType :db.type/string
-                                  :db/cardinality :db.cardinality/one}])})
-  (op! "register-subscription" {"sub-id" "s2"
-                                "query"  (pr-str '[:find ?n :where [?e :unit2/name ?n]])})
-  (let [un (op! "unregister-subscription" {"sub-id" "s2"})
-        payload (rT (get un "payload"))]
-    (is (true? (get un "ok")))
+  (op! "transact" {:seon.store.wire/tx-data [{:db/ident :unit2/name :db/valueType :db.type/string
+                                              :db/cardinality :db.cardinality/one}]})
+  (op! "register-subscription" {:seon.store.wire/sub-id "s2"
+                                :seon.store.wire/query  (pr-str '[:find ?n :where [?e :unit2/name ?n]])})
+  (let [un (op! "unregister-subscription" {:seon.store.wire/sub-id "s2"})
+        payload (:seon.store.wire/payload un)]
+    (is (true? (:seon.store.wire/ok un)))
     (is (false? (:seon.subscription/active? payload)))))

@@ -12,6 +12,10 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
+# Pin the JDK via the shared resolver (single source of truth) so the cold
+# test JVM runs under the same JDK as the rest of the stack.
+source bin/_java-home-resolver
+
 MODE=""
 FOCUS_NS=()
 
@@ -66,7 +70,7 @@ TMPOUT="tmp/test-$(date +%Y%m%d-%H%M%S)-$$.log"
 
 START=$(date +%s)
 
-clojure -M:test -m kaocha.runner \
+clojure -M:simd:fork-deps:test -m kaocha.runner \
   --reporter kaocha.report/dots \
   --no-capture-output \
   "${KAOCHA_ARGS[@]}" 2>&1 | tee "$TMPOUT"

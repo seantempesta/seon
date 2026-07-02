@@ -6,18 +6,83 @@ tags: [reference]
 
 # Seon Code Conventions
 
+This is the agent-facing standards doc AND the rubric a code audit uses. It
+describes the system as it actually is on the current branch — a dual CLJ +
+CLJS system backed by datahike, with always-on instrumentation. If a convention
+here disagrees with the running code, the running code wins and this doc is a
+bug — flag it.
+
 ## Why These Conventions Matter
 
-These aren't arbitrary style rules. They're the foundation for **AI agents to write reliable software**.
+These aren't arbitrary style rules. They're the foundation for **AI agents to
+write reliable software**.
 
 When every function has:
 
-- **Namespaced keys** → Agents can query "what accepts `:seon.trading/position`?" instead of guessing
-- **Malli schemas** → Contracts are machine-readable. Property tests validate automatically.
-- **Map-in/map-out (preferred for APIs)** → Extensible APIs. Adding a field doesn't break callers. Positional public fns are allowed too, when every slot is named and specced via `:catn`.
-- **Registered schemas** → A queryable database of all data shapes in the system
+- **Namespaced keys** → Agents can query "what accepts `:seon.agent.search/pattern`?" instead of guessing
+- **Malli schemas** → Contracts are machine-readable. Property tests validate automatically. Every schema'd fn is instrumented at runtime.
+- **Fully spec'd args (the hard rule)** → Contracts are complete. Map-in/map-out helps API *accretion* (add an optional field without breaking callers); fully-spec'd positional (`:catn`) is often the better shape for utilities. Pick by fit; the invariant is that every arg is named, spec'd, and validated.
+- **Registered schemas** → A queryable database of all data shapes in the system. `schema/register!` derives the datahike attribute schema for free.
 
-The result: agents can discover, compose, and validate code without hallucinating interfaces.
+The result: agents can discover, compose, and validate code without
+hallucinating interfaces.
+
+---
+
+## The Dual-Track System (CLJ + CLJS)
+
+Seon is **one system split across two co-equal halves that converge at the wire
+boundary**. The current pod ↔ wire-server split is the seed of this model.
+
+- **JVM / server (`.clj`)** — the server and heavy processing. The
+  **authoritative DB writer** (today the `wire-server` process). Heavy compute,
+  durable storage, and the sole write path live here. In practice the live JVM
+  side today is **basically just the datahike writer** — most of the broader
+  `.clj` app (Integrant system, the `core.async.flow` routing backbone) is
+  **paused**, kept for when JVM core-systems integration resumes. Treat
+  `core.async.flow` as a parked JVM-track concern, not an active one.
+- **On-device / pod (`.cljs`)** — runs on device (a long-running Node process
+  today). Holds a **read-only replica of the DB** (local lazy db values; memory
+  ∝ working set) and does **local function execution** (the agent loop, eval,
+  render). It **forwards every write over a Unix socket** to the JVM writer; it
+  never writes the store directly. Uses native CLJS `^:async`/`await` for
+  Promise interop — **no `core.async` in the pod**.
+
+### Lane Discipline: `.clj` / `.cljs` / `.cljc`
+
+Surfaces use **`.cljs` files alongside `.clj` files** — the CLJS compiler reads
+`.cljs`, the CLJ compiler reads `.clj`, neither sees the other's. Choose by
+where the code runs:
+
+- **`.cljs`** — on-device code: the agent loop, `seon.eval`, `seon.ctx`,
+  `seon.render`, `seon.db` (the pod's read-local + write-forwarding face),
+  `seon.agent.*`, the inspector UI (`seon.web.inspector`/`serve`).
+- **`.clj`** — server/heavy code: the authoritative datahike writer and the
+  Integrant-managed JVM app.
+- **`.cljc`** — only genuinely platform-portable code (e.g. `seon.schema`,
+  `seon.instrument`). Don't author a `.cljc` for a namespace that has a live
+  sibling on the other track unless both sides converge on its shape.
+
+The active focus is the CLJS pod + the datahike wire-server. The broader JVM
+main-app integration is currently paused; assume CLJS-pod context unless a task
+is explicitly JVM-track.
+
+### The `.internal` namespace pattern
+
+A public namespace stays small and whitelisted so its source renders cleanly
+into agent context. **Complex plumbing moves to a sibling `<ns>.internal`
+namespace** — un-whitelisted, not rendered into context, free to be as
+intricate as it needs to be. The public ns is the discoverable contract; the
+`.internal` ns is the machinery.
+
+- `seon.db` (public, taught) ↔ `seon.db.internal` (commit machinery, arg
+  normalization, conn resolution).
+- `seon.agent.search` (public `grep`) ↔ `seon.agent.search.internal` (hard
+  caps, envelope helpers, the rg `--json` parser, the allowlist gate).
+
+Reach for `.internal` whenever a public fn's helpers would otherwise bloat the
+context the agent reads. Keep the public surface to the named request/response
+schemas plus the verb fns.
 
 ---
 
@@ -25,488 +90,456 @@ The result: agents can discover, compose, and validate code without hallucinatin
 
 All public APIs use Malli schemas for contract specification. This enables:
 
-- Automatic validation via `malli.dev/start!`
-- Generative testing via `mi/check`
+- **Always-on instrumentation** — every public fn with `:malli/schema` is validated at runtime (see [Always-On Instrumentation](#always-on-instrumentation)).
+- Generative testing via `mg/sample` + `m/validate` (JVM-track; see Testing Strategy)
 - Self-documenting APIs for agents
-- **Function discovery** - "What functions return `::trading/signal`?" is a database query
+- **Function discovery** — "What functions return `::grep-response`?" is a database query.
 
 ### Understanding `::` Keyword Syntax
 
 The `::` creates **auto-resolved namespaced keywords**:
 
 ```clojure
-;; INSIDE seon.ai.gemini namespace (library code):
-::prompt              ;; => :seon.ai.gemini/prompt
-::api-key             ;; => :seon.ai.gemini/api-key
+;; INSIDE seon.agent.search namespace:
+::pattern             ;; => :seon.agent.search/pattern
+::match               ;; => :seon.agent.search/match
 
 ;; OUTSIDE (user code with alias):
 (ns my-app.core
-  (:require [seon.ai.gemini :as gemini]))
+  (:require [seon.agent.search :as search]))
 
-::prompt              ;; => :my-app.core/prompt  (WRONG namespace!)
-::gemini/prompt       ;; => :seon.ai.gemini/prompt (correct)
-
+::pattern             ;; => :my-app.core/pattern  (WRONG namespace!)
+::search/pattern      ;; => :seon.agent.search/pattern (correct)
 ```
 
-**Inside your namespace, `::keyword` is the preferred form.** It's shorter, refactor-safe, and guarantees the keyword matches the namespace that owns it. Only use explicit `:seon.foo/bar` form in cross-namespace references or docstring examples showing external callers.
+**Inside your namespace, `::keyword` is the preferred form.** It's shorter,
+refactor-safe, and guarantees the keyword matches the namespace that owns it.
+Keyword namespaces ARE real code namespaces — `::subject` in `seon.email.message`
+is `:seon.email.message/subject`, and the schema for that data lives in that
+namespace. Only use explicit `:seon.foo/bar` form in cross-namespace references
+or docstring examples showing external callers.
 
 ### Schema Registration
 
-Register schemas using `schema/register!` with `::` auto-namespaced keywords:
+Register schemas using `schema/register!` with `::` auto-namespaced keywords.
+`schema/register!` is the **single source of truth** for all attribute schemas:
+register the Malli type and the system auto-derives the datahike attribute
+declaration. You never write datahike schema by hand.
 
 ```clojure
-(ns seon.trading.signals
+(ns seon.agent.search
   (:require [seon.schema :as schema]))
 
 ;; Each registration is a separate form for easy editing
-(schema/register! ::ticker
-                  [:string {:min 1 :max 10
-                            :description "Stock ticker symbol"}])
+(schema/register! ::pattern
+                  [:string {:min 1
+                            :description "ripgrep regex pattern"}])
 
-(schema/register! ::signal-type
-                  [:enum :buy :sell :hold])
+(schema/register! ::max-results
+                  [:int {:min 1
+                         :description "cap on matches returned"}])
 
-(schema/register! ::confidence
-                  [:double {:min 0.0 :max 1.0}])
-
+(schema/register! ::line-number
+                  [:int {:min 1}])
 ```
+
+Identity attributes are declared via `{:seon.db/identity true}` on the
+registered shape — there is **no** magic `:seon/id` key:
+
+```clojure
+(schema/register! ::doc-id [:string {:seon.db/identity true}])
+;; entities addressed by lookup-ref: [::doc-id "d1"]
+```
+
+The 14-char id shape is minted with `seon.db/new-id!` — hand-written id strings
+fail validation.
+
+### Shared schema shapes — register once, reference everywhere
+
+If the same shape appears in two or more registered schemas, the shape itself
+must be a registered schema the others reference. Inlining the same
+`[:string {:min 14 :max 14}]` across multiple `register!` calls is a smell.
+
+```clojure
+;; ONE canonical shape (lives in its owning ns)
+(schema/register! :seon.db/id [:string {:min 14 :max 14}])
+
+;; EVERY id attr references it — no inline shape
+(schema/register! ::agent-id   :seon.db/id)
+(schema/register! ::session-id :seon.db/id)
+```
+
+If the Malli→datahike bridge doesn't yet handle a reference shape you need, fix
+the bridge — never duct-tape by inlining the shape at each site.
+
+### Provenance attrs are a smell — the tx entity already records it
+
+Before registering `created-by`/`created-at`/`updated-by`/`source-turn`: every
+`db/transact!` auto-stamps the active agent/turn scope as tx-meta datoms on the
+**transaction entity** (plus `:db/txInstant`), so who/when-wrote-this is a join
+through the datom's tx, not a domain attribute. The only legitimate stored form
+is a pre-event snapshot coordinate. Full rule + join recipe: the `/datahike`
+skill, "Transaction metadata".
 
 ### Request/Response Schema Pattern
 
 Define separate schemas for requests and responses with namespaced keys:
 
 ```clojure
-;; Request schema - all required/optional fields
-(schema/register! ::analyze-request
+;; Request schema — required + optional fields
+(schema/register! ::grep-request
                   [:map
-                   [::ticker ::ticker]                              ; required
-                   [::model {:optional true} ::model]               ; optional
-                   [::timeout {:optional true} ::timeout]])
+                   [::pattern ::pattern]                          ; required
+                   [::paths {:optional true} ::paths]             ; optional
+                   [::max-results {:optional true} ::max-results]])
 
-;; Response schema - namespaced keys for outputs
-(schema/register! ::analyze-response
+;; Response schema — namespaced keys for outputs
+(schema/register! ::grep-response
                   [:map
-                   [::signal-type ::signal-type]
-                   [::confidence ::confidence]
-                   [::reasoning {:optional true} :string]])
-
+                   [::ok? ::ok?]
+                   [::matches {:optional true} ::matches]
+                   [::error {:optional true} ::error]])
 ```
 
 ### Public Function Pattern
 
-Every public function must **fully spec and validate ALL its arguments and its
-return value** via `:malli/schema`. Two argument shapes are sanctioned:
+**The hard rule: every public function must fully spec and validate ALL its
+arguments and its return value** via `:malli/schema`. That is the only
+invariant. Two argument shapes are sanctioned; choose by fit, not by default:
 
-1. **Map-in / map-out** — one namespaced-keyword map in, one out.
-   **Preferred for API-like functions** (discoverable, extensible,
-   self-documenting). Adding an optional field never breaks callers.
+1. **Map-in / map-out** — one namespaced-keyword map in, one out. Reach for it
+   when the function is an **API surface you expect to accrete** — adding an
+   optional field never breaks callers, and the named request/response schemas
+   are self-documenting and discoverable.
 2. **Named positional** — each argument is a fully-namespaced-keyword-spec'd
    slot via Malli `:catn` (named positional), inside a `:=>`/`:function`
-   schema. Fine for ordinary data-processing functions and for mimicking a
-   well-known API (e.g. datahike).
+   schema. Often the **better shape for utilities** and for mirroring a
+   well-known API (e.g. datahike). A 2-arg data transform reads more naturally
+   positional than map-wrapped.
 
-The invariant: every argument is **named, specced, and validated** — whether it
-sits in a map or in a positional slot. The violation is an *unspecced* or
-*bare-keyword* argument, NOT a positional one. The contract is completeness of
-specs, not map-wrapping.
+The invariant is **completeness of specs, not map-wrapping**: every argument is
+named, spec'd, and validated, whether it sits in a map or a positional slot.
+The violation is an *unspecced* or *bare-keyword* argument — NOT a positional
+one. Do not flag a fully-spec'd positional public fn; that is a sanctioned
+shape, not a smell.
 
-#### Shape (a): map-in / map-out — preferred for APIs
+#### Shape (a): map-in / map-out — for accreting API surfaces
 
 ```clojure
-(defn analyze
-  "Analyze a ticker and return a trading signal.
+(defn ^:async grep
+  "Search file contents under the allowed roots. Always resolves to a
+   ::grep-response envelope (never throws — errors are values).
 
    Request keys:
-     ::ticker  - Required. Stock ticker symbol
-     ::model   - Optional. Model to use
-     ::timeout - Optional. Request timeout in ms
+     ::pattern     - Required. ripgrep regex
+     ::paths       - Optional. roots to search
+     ::max-results - Optional. cap on matches
 
    Response keys:
-     ::signal-type - The trading signal (:buy, :sell, :hold)
-     ::confidence  - Confidence score (0.0-1.0)
-     ::reasoning   - Optional explanation
-
-   Example:
-     (analyze {::ticker \"AAPL\"})
-     (analyze {::ticker \"AAPL\" ::model \"advanced\"})"
-  {:malli/schema [:=> [:cat ::analyze-request] ::analyze-response]}
-  [{::keys [ticker model timeout]}]
-  (let [model (or model default-model)]
-    (analyze* ticker model timeout)))
-
+     ::ok?         - true/false
+     ::matches     - on success, the hits
+     ::error       - on failure, a guiding message"
+  {:malli/schema [:=> [:cat ::grep-request] ::grep-response]}
+  [{::keys [pattern paths max-results]}]
+  (let [max-results (or max-results in/default-max-results)]   ; explicit or, not :or
+    (try
+      (let [roots (if (seq paths) (vec paths) (in/default-roots))]
+        (cond
+          (str/blank? pattern) (in/fail "::pattern is required and non-blank")
+          (empty? roots)       (in/fail "nothing searchable — grant a root")
+          :else                (in/success-from (in/exec-rg pattern roots max-results))))
+      (catch :default e
+        (in/fail (str "search failed — " e))))))
 ```
 
 #### Shape (b): named positional via `:catn`
 
 Each positional slot gets its own fully-namespaced spec. Use this for natural
-data-processing fns or to mirror a well-known API. The slot names in the
-`:catn` document the positions; the return is still fully specced.
+data-processing fns or to mirror a well-known API (datahike does this — see
+`seon.db/pull`, `seon.db/query`). The slot names in the `:catn` document the
+positions; the return is still fully specced.
 
 ```clojure
-(schema/register! ::ticker [:string {:min 1 :max 10}])
-(schema/register! ::timeframe [:enum :day :week :month])
-(schema/register! ::confidence [:double {:min 0.0 :max 1.0}])
+(schema/register! ::attr :keyword)
 
-(defn score
-  "Score a ticker over a timeframe. Returns a confidence."
-  {:malli/schema [:=> [:catn
-                       [::ticker ::ticker]
-                       [::timeframe ::timeframe]]
-                  ::confidence]}
-  [ticker timeframe]
-  (score* ticker timeframe))
-
+(defn decode-edn-value
+  "Decode a pulled value back to its real shape."
+  {:malli/schema [:=> [:catn [::attr ::attr] [::value :any]] :any]}
+  [attr v]
+  ...)
 ```
 
 Multi-arity is allowed when **every** arity is fully specced — use a
-`:function` schema wrapping one `:=>` per arity. Prefer map-in/map-out for API
-surfaces you expect to extend.
+`:function` schema wrapping one `:=>` per arity (see `seon.db/transact!`, which
+has a map-in arity AND two datahike-shaped positional arities). Use map-in/map-out
+when you expect the surface to accrete optional fields; positional is fine — and
+often clearer — for utilities and well-known-API mirrors.
 
 ### Private Helper Pattern
 
 Private functions use positional args for internal convenience and may stay
-unspecced. (Note: positional is now also a sanctioned *public* shape — see
-shape (b) above — but public positional fns must spec every slot via `:catn`,
-whereas privates need no specs.)
+unspecced. (Positional is also a sanctioned *public* shape — see shape (b) —
+but public positional fns must spec every slot via `:catn`, whereas privates
+need no specs.)
 
 ```clojure
-(defn- analyze* [ticker model timeout]
-  ;; Implementation with positional args
-  {::signal-type :hold
-   ::confidence 0.5
-   ::reasoning "Neutral momentum"})
-
+(defn- extract-content [sdk-message]
+  ;; Implementation with positional args, no spec
+  ...)
 ```
 
 ### Handling Optional Values
 
-Use `or` for defaults since destructuring `:or` doesn't work when key is present with nil value:
+Use `or` for defaults since destructuring `:or` doesn't apply when the key is
+present with a nil value:
 
 ```clojure
-;; WRONG - :or doesn't apply when {:model nil} is passed
-(defn- impl [{:keys [model] :or {model default-model}}]
+;; WRONG - :or doesn't apply when {::model nil} is passed
+(defn- impl [{::keys [model] :or {model default-model}}]
   ...)
 
 ;; CORRECT - explicit or handles nil values
-(defn- impl [{:keys [model]}]
+(defn- impl [{::keys [model]}]
   (let [model (or model default-model)]
     ...))
-
 ```
 
-### Complete Example (from gemini.clj)
+(Remember: **optional = absent**. Never store nil. To clear a persisted field,
+retract it explicitly — omitting a key means "leave unchanged".)
+
+---
+
+## Errors Are Values (agent-facing verb boundaries)
+
+Functions an agent calls directly — the capability verbs — **return an
+envelope, they do NOT throw**. The canonical shape:
 
 ```clojure
-(ns seon.ai.gemini
-  (:require [malli.core :as m]
-            [seon.schema :as schema]))
-
-;;; Schema Registration
-
-(schema/register! ::api-key
-                  [:string {:min 1
-                            :description "Gemini API key"}])
-
-(schema/register! ::prompt
-                  [:string {:min 1
-                            :description "Text prompt"}])
-
-(schema/register! ::model
-                  [:enum "gemini-3-flash-preview" "gemini-3-pro-preview"])
-
-(schema/register! ::text
-                  [:string {:description "Generated text response"}])
-
-(schema/register! ::ask-request
-                  [:map
-                   [::prompt ::prompt]
-                   [::model {:optional true} ::model]
-                   [::api-key {:optional true} ::api-key]])
-
-(schema/register! ::response
-                  [:map
-                   [::text ::text]
-                   [::error {:optional true} [:map
-                                               [::status {:optional true} :int]
-                                               [::message {:optional true} :string]]]])
-
-;;; Private Implementation
-
-(defn- generate* [api-key prompt {:keys [model timeout]}]
-  (let [model (or model "gemini-3-flash-preview")]
-    ;; HTTP call, returns map with ::text, ::error, etc.
-    {::text "Response here"}))
-
-;;; Public API
-
-(defn ask
-  "Ask Gemini a question.
-
-   Request keys:
-     ::prompt  - Required. Question or instruction
-     ::model   - Optional. Model name
-     ::api-key - Optional. Explicit API key
-
-   Example:
-     (ask {::prompt \"What is 2+2?\"})
-     ;; From outside namespace:
-     (gemini/ask {::gemini/prompt \"What is 2+2?\"})"
-  {:malli/schema [:=> [:cat ::ask-request] ::response]}
-  [{::keys [prompt model api-key]}]
-  (let [key (resolve-api-key! api-key)]
-    (generate* key prompt {:model model})))
-
+{::ok? true  …data…}                                   ; success
+{::ok? false ::error "<guiding message>"
+             ::raw-error "<underlying detail>"}        ; failure
 ```
 
-### Development Setup
+This is a hard convention, not a style: an agent's eval must survive a bad call
+and read the failure as data, the same way `seon.db/transact!` and
+`seon.agent.search/grep` do. Two consequences:
 
-Instrumentation is **automatic**. The Integrant component `:seon.dev/instrumentation` collects all `:malli/schema` metadata and instruments every public function on startup. It uses a custom reporter (`agent-reporter`) that throws `ExceptionInfo` with rich, structured error messages. Agent JVMs self-instrument via `agent_runner.clj`.
+1. **`^:async` verbs are excluded from instrumentation's throwing validator**
+   (it would break the never-throws contract) — they're listed in
+   `seon.instrument/skip-syms`. The `:malli/schema` stays as the discoverable
+   contract; the function body's guards enforce shape and return the error
+   envelope instead.
+2. **Callers MUST read the envelope.** An eval can succeed while the write
+   didn't happen (`::ok? false`). Translate cryptic underlying errors into a
+   guiding `::error` and preserve the original at `::raw-error`.
 
-You don't need to call `mi/collect!`, `dev/start!`, or `mi/instrument!` manually. Just add `:malli/schema` to your function, reload, and it's instrumented.
+When an error is genuinely a caller bug to fix vs. a core bug to report, tag it:
+`:seon.error/data` carries `:seon.error/kind` (`:user-input` vs `:core-bug`).
 
-### Testing Strategy
+---
 
-Tests serve two purposes:
+## Always-On Instrumentation
 
-1. **Example tests** - Document intended usage, show how functions compose
-2. **Generative tests** - Find edge cases, validate schema contracts
+All public functions with `:malli/schema` metadata are **instrumented at
+runtime**. Every call validates inputs, outputs, and arity. **There is no "off"
+mode** (a `SEON_INSTRUMENT` env var is a kill-switch for debugging only,
+defaults ON).
 
-**Always write both.** Generative tests alone don't show real-world usage patterns.
+Instrumentation is **DB-driven**, not a compile-time macro. The mechanism reads
+the **program graph** — the `:seon.fn/spec` rows the analyzer persists for every
+schema'd fn — and wraps from there. Two lifecycle points:
 
-See `/clojure-testing` skill for full fixture patterns, generators, and debugging techniques.
+1. **Boot** — `seon.instrument/instrument-from-db!` walks every `:seon.fn`
+   row in the DB and instruments the live var. The DB has the COMPLETE set; a
+   compile-time `collect!` over the leaf namespace would miss most of it.
+2. **Every fn-defining eval** — when an agent evals a `defn` with a
+   `:malli/schema`, the same machinery instruments it on the spot (tee).
 
-#### Example Tests (Documentation + Integration)
+You never call `mi/collect!`, `mi/instrument!`, or `dev/start!`. Add
+`:malli/schema`, reload, and the fn is instrumented. When you see an
+instrumentation error, **read it and fix the root cause** — either you called
+the function wrong, or the schema doesn't match reality. A wrong schema is a
+bug.
 
-Show the intended workflow. These serve as executable documentation:
-
-```clojure
-(deftest session-lifecycle-test
-  (testing "Complete workflow: start -> messages -> end -> retrieve"
-    ;; with-test-datalevin binds db/*direct-mode* and *conn-manager*
-    (tu/with-test-datalevin
-      (fn []
-        ;; Start session
-        (let [{::ai/keys [session-id]} (ai/start-session!
-                                         {::ai/namespace 'seon.trading
-                                          ::ai/prompt "Analyze AAPL"})]
-          ;; Add conversation
-          (ai/add-message! {::ai/session-id session-id
-                            ::ai/role "user"
-                            ::ai/content "What's the trend?"})
-          (ai/add-message! {::ai/session-id session-id
-                            ::ai/role "assistant"
-                            ::ai/content "AAPL shows bullish momentum."
-                            ::ai/output-tokens 15})
-
-          ;; End with stats
-          (ai/end-session! {::ai/session-id session-id
-                            ::ai/status :completed
-                            ::ai/cost-usd 0.002})
-
-          ;; Verify round-trip
-          (let [messages (ai/get-messages {::ai/session-id session-id})]
-            (is (= 2 (count messages)))
-            (is (= ["user" "assistant"] (mapv ::ai/role messages)))))))))
-
-```
-
-#### Generative Tests (Contract Validation)
-
-Find edge cases the schema allows but you didn't think of:
-
-```clojure
-(deftest analyze-generative-test
-  (testing "analyze handles all valid inputs"
-    (doseq [request (mg/sample ::signals/analyze-request {:size 20})]
-      (let [response (signals/analyze request)]
-        (is (m/validate ::signals/analyze-response response))))))
-
-```
-
-#### Edge Case Tests
-
-Document tricky scenarios explicitly:
-
-```clojure
-(deftest edge-cases-test
-  (testing "get-session returns nil for non-existent session"
-    (is (nil? (ai/get-session {::ai/session-id "ses-nonexistent"}))))
-
-  (testing "handles structured content (maps, not just strings)"
-    (let [content {:type "tool_result" :tool-use-id "abc" :data {...}}]
-      ;; ... test that map content round-trips correctly
-      )))
-
-```
+**Opt-out** for the errors-as-values verbs lives in `seon.instrument/skip-syms`
+(a set of fully-qualified symbols / `[ns fn]` pairs), because the CLJS analyzer
+strips schema-prop markers from `:malli/schema` metadata.
 
 ### Schema Introspection
-
-Use the global registry for schema introspection:
 
 ```clojure
 (require '[seon.schema :as schema])
 
-;; Get all schemas for a namespace
-(schema/schemas-in-namespace "seon.ai.gemini")
+;; All schemas for a namespace
+(schema/schemas-in-namespace "seon.agent.search")
 
-;; Check if a schema is registered
-(schema/registered? ::gemini/prompt)
-
-;; See which functions are instrumented (collected automatically on startup)
-(require '[malli.core :as m])
-(keys (get (m/function-schemas) 'seon.ai.gemini))
-
+;; Is a schema registered?
+(schema/registered? ::pattern)
 ```
+
+---
 
 ## Database Access
 
-All database access goes through `seon.db`. No direct `datalevin.core` usage outside `src/seon/db/` infrastructure.
+`seon.db` is the **sole database API**. Never touch `datahike.api` directly
+outside `src/seon/db/`. Everything else uses `db/transact!`, `db/query`,
+`db/pull`, `db/entity`, `db/listen!`.
 
-See `/datalevin` skill for the full API reference, schema registration patterns, and querying guide.
+On the pod, `seon.db` is a thin face over the dual-track wire boundary:
 
-Key rule: `db/transact!` and `db/query` take a db-name keyword (`:seon.runtime`, `:seon.ai`, or namespace keywords like `:seon.trading`). All attributes must be registered with `schema/register!` before transacting.
+- **Reads are local and synchronous** — `query`/`pull`/`entity` resolve against
+  the current db value (`@*conn*`, the read-only replica). Compose them in
+  straight-line code.
+- **Writes are forwarded to the JVM writer** — `transact!` is `^:async` and
+  routes over the Unix socket to the authoritative writer. Await it (it
+  auto-awaits) and you get an **envelope**, never a throw.
+
+```clojure
+(require '[seon.db :as db]
+         '[seon.schema :as schema])
+
+;; Register before you transact — transact! refuses unregistered attrs
+(schema/register! ::name :string)
+(schema/register! ::rank :int)
+
+(db/transact! {::db/tx-data [{::name "Alpha" ::rank 1}]})
+
+(db/query {::db/query '[:find ?n :where [?e ::name ?n] [?e ::rank ?r] [(> ?r 0)]]})
+```
+
+Every map key in and out of `seon.db` is fully namespaced under `:seon.db/*` —
+that is what lets one Datalog query join the data in the DB to the functions
+that operate on it. Reactions install via `db/listen!`/`unlisten!` by key; the
+agent's own wake-up is a listener over newly-added
+`:seon.agent.message/to` datoms targeting it.
+
+See the `/datahike` skill (and the Datalog cheat sheet in the `seon.db`
+namespace docstring) for the full query idiom set, lookup-refs, upsert, and
+retraction.
 
 ---
 
 ## Schema Composition Across Namespaces
 
-Provider namespaces extend base namespaces by referencing their schemas. This is the EAV pattern: entities are bags of namespaced attributes.
+Provider namespaces extend base namespaces by referencing their schemas. This is
+the EAV pattern: entities are bags of namespaced attributes. (The `seon.ai` /
+`seon.ai.claude` example below is real **JVM-track** code — `.clj`, currently
+paused. On the active CLJS pod the provider adapters are `seon.ai.anthropic` /
+`seon.ai.openai-compat`. The schema-composition *pattern* is track-independent.)
 
 ### Base + Provider Pattern
 
 ```clojure
-;; seon.ai - base namespace defines generic schemas
-(schema/register! ::session-id [:string {:min 1}])
+;; seon.ai — base namespace defines generic schemas
+(schema/register! ::session-id :seon.db/id)
 (schema/register! ::role [:enum "user" "assistant" "system"])
 
-;; seon.ai.claude - provider extends base
+;; seon.ai.claude — provider extends base
 (ns seon.ai.claude
-  (:require [seon.ai :as ai]))
+  (:require [seon.ai :as ai]
+            [seon.schema :as schema]))
+
+(schema/register! ::message-id [:string {:seon.db/identity true}])
 
 ;; Reference base schemas in composite schemas
 (schema/register! ::message-entity
   [:map
-   [:seon/id ::ai/message-id]           ; Identity attribute
-   [::ai/role ::ai/role]                ; Reference base!
-   [::ai/content ::ai/content]          ; Reference base!
-   ;; Claude-specific attributes
-   [::message-type ::message-type]
+   [::message-id ::message-id]          ; identity attribute
+   [::ai/role ::ai/role]                ; reference base!
+   [::ai/content ::ai/content]          ; reference base!
+   [::message-type ::message-type]      ; claude-specific
    [::cache-tokens {:optional true} ::cache-tokens]])
-
 ```
 
 ### Entity-Centric Thinking (EAV Pattern)
 
-**Key insight:** In Datalevin's EAV model, an entity is a bag of namespaced attributes, not a row in a table. A single entity can have attributes from multiple namespaces:
+In datahike's EAV model, an entity is a bag of namespaced attributes, not a row
+in a table. A single entity can carry attributes from multiple namespaces:
 
 ```clojure
 ;; This is ONE entity, not separate "rows" in different "tables"
-{:seon/id "msg-abc123"
+{:seon.ai.claude/message-id "msg-abc12345678"
  ;; Base seon.ai attributes (generic to all providers)
- :seon.ai/type :message
  :seon.ai/role "assistant"
  :seon.ai/content "Hello!"
- :seon.ai/timestamp #inst "2026-01-19T..."
+ :seon.ai/timestamp #inst "2026-06-25T..."
  ;; Claude-specific attributes (only present for Claude messages)
  :seon.ai.claude/message-type "assistant"
- :seon.ai.claude/cache-tokens 150
- :seon.ai.claude/uuid "sdk-msg-xyz"}
-
+ :seon.ai.claude/cache-tokens 150}
 ```
 
 **Why this matters:**
 
 - No schema migration needed when adding provider-specific fields
 - Queries can filter by any attribute from any namespace
-- Generic code works on `:seon.ai/*` attributes, provider code adds its own
+- Generic code works on `:seon.ai/*` attributes; provider code adds its own
 
 ### When NOT to Use `:malli/schema`
 
-Some types cannot be generated for property testing. Omit `:malli/schema` metadata and document in docstrings instead:
-
-```clojure
-;; Connection managers, atoms, channels - opaque runtime objects
-(defn start-session!
-  "Start a new AI session.
-
-   Request keys:
-     ::namespace - Optional. Clojure namespace context
-     ..."
-  ;; NO :malli/schema here - runtime objects can't be generated
-  [{::keys [namespace prompt]}]
-  ...)
-
-;; Process handles, channels, atoms - runtime objects
-(defn launch-agent!
-  "Launch an agent. Returns handle with channels and atoms.
-
-   Note: No :malli/schema - involves process spawning and
-   runtime objects that cannot be property tested."
-  [{...}]
-  ...)
-
-```
-
-**Rule:** If a function takes connection managers, spawns processes, or returns channels/atoms, skip `:malli/schema`. Document the expected types in docstrings.
+Some types cannot be generated for property testing. Omit `:malli/schema` and
+document expected types in the docstring instead — connection managers, atoms,
+process handles, and other opaque runtime objects. (Prefer to keep such objects
+out of public agent-facing surfaces entirely; the pod's `*conn*` is bound for
+you, never threaded through call sites.)
 
 ### `:any` at third-party interface boundaries
 
-The no-`:any` rule is the default **for seon-authored data** — it nudges agents toward precise specs. But at a **third-party interface boundary** — where the value is whatever an external library (datahike, a JS API, etc.) hands back and we do not control its shape — `:any` is acceptable, because there is no honest tighter type.
+The no-`:any` rule is the default **for seon-authored data** — it nudges agents
+toward precise specs. But at a **third-party interface boundary** — where the
+value is whatever an external library (datahike, a JS API) hands back and we do
+not control its shape — `:any` is acceptable, because there is no honest tighter
+type.
 
 ```clojure
-;; datahike returns a result set of arbitrary-arity tuples, a pulled map of
-;; arbitrary attribute values, or an opaque Entity record. :any is honest here.
+;; datahike returns an arbitrary result set / pulled map / opaque db value.
+;; :any is honest here — this is the documented exception, not a smell.
 (defn query
-  {:malli/schema [:=> [:cat ::query-request] :any]}   ; <- sanctioned: datahike's value
+  {:malli/schema [:=> [:cat ::query-request] :any]}
   [...])
 ```
 
-**Rule:** `:any` is allowed only where the value crosses a boundary we don't own (a library's return, an opaque foreign object). For any seon-authored value, use a concrete type — `:any` there is a smell. The compliance checker (`seon.dev.compliance`) flags **all** `:any`/`:some`/`:maybe` as a non-blocking nudge; at a genuine boundary, that warning is an accepted judgment call, not a defect.
+The compliance checker flags **all** `:any`/`:some`/`:maybe` as a non-blocking
+nudge; at a genuine boundary that warning is an accepted judgment call.
 
 ### Test Code Exemptions
 
-Test namespaces (`*_test.clj`) are exempt from most conventions:
+Test namespaces (`*_test.cljs` / `*_test.clj`) are exempt from most conventions:
 
 - **No `:malli/schema`** on `deftest` or test helper functions
-- **No required arg shape** — test helpers can use positional args for brevity and need no specs at all
+- **No required arg shape** — test helpers may use bare positional args
 - **No namespace docstrings** — tests are self-documenting via test names
-- **Non-namespaced keys are fine** in test data literals (e.g. `{:name "test"}`)
+- **Non-namespaced keys are fine** in test data literals
 
 Conventions that **do** apply in tests:
 
 - **Namespaced keys when calling production functions** — match the real API
-- **Both example and generative tests** — see Testing Strategy below
-- **Meaningful test names** — `session-lifecycle-test` not `test1`
+- **Example tests at minimum** — generative tests where the schema is the unit
+  (JVM-track); see Testing Strategy
+- **Meaningful test names** — `grep-finds-matches-test`, not `test1`
+
+---
 
 ## Converter Functions (Map-In Pattern)
 
-When converting external data (like SDK messages) to internal entities, use the map-in pattern:
+When converting external data (SDK messages, raw JS payloads) to internal
+entities, the map-in pattern fits well when you expect to add optional context
+later without changing the signature:
 
 ```clojure
 (defn sdk-message->entity
-  "Convert a Claude SDK message to a seon.ai message entity.
+  "Convert an SDK message to a seon.ai message entity.
 
    Request keys:
      ::sdk-message   - Required. Raw SDK message map
      ::ai/session-id - Optional. Parent session to attach
 
-   Returns entity map with :seon/id and namespaced attributes."
+   Returns an entity map addressed by an identity attr."
   [{::keys [sdk-message] ::ai/keys [session-id]}]
-  (let [msg-type (:type sdk-message)
-        content (extract-content sdk-message)]
-    (cond-> {:seon/id (generate-id "msg")
-             ::ai/type :message
+  (let [content (extract-content sdk-message)]
+    (cond-> {::ai/message-id (db/new-id!)
              ::ai/content content}
       session-id (assoc ::ai/session-id session-id))))
-
 ```
-
-**Why prefer map-in for converters?** Converters you expect to extend benefit
-from the map-in pattern:
-
-- Extensible: Add optional context (session-id, metadata) without changing signature
-- Consistent: Same API style as other API surfaces
-- Traceable: Can add logging/debugging keys later
 
 Positional is fine when each slot is specced via `:catn`; prefer map-in for
 converters you expect to grow new optional inputs.
@@ -518,97 +551,164 @@ converters you expect to grow new optional inputs.
 ;; spec; the violation is the missing spec, not the positions.
 (defn sdk-message->entity [sdk-message session-id]
   ...)
-
 ```
+
+---
 
 ## Provider Multimethod Pattern
 
-For extensible provider systems (like AI providers), use multimethods with keyword dispatch. This allows adding new providers without modifying existing code.
+(The `seon.ai.agent` / `seon.ai.claude` multimethods shown here are real
+**JVM-track** code — `.clj`, currently paused; `:claude` is the live dispatch
+value there. The active CLJS pod uses the simpler adapter-fn shape in
+`seon.ai.anthropic` / `seon.ai.openai-compat` rather than this multimethod
+registry. The pattern is documented because it's the sanctioned way to build an
+extensible provider surface when one is needed.)
+
+For extensible provider systems (like AI providers), use multimethods with
+keyword dispatch. This allows adding new providers without modifying existing
+code.
 
 ### Defining Extension Points
-
-Define multimethods in a base namespace with sensible defaults:
 
 ```clojure
 (ns seon.ai.agent
   "Provider-agnostic agent extension points.")
 
-;; Extension points - dispatch on :provider key
+;; Dispatch on :provider key
 (defmulti normalize-message
-  "Convert provider-specific message to ::ai/message entity.
-   Dispatch on :provider keyword in request map."
-  :provider)
-
-(defmulti result-message?
-  "Check if message is the final result message.
-   Returns boolean."
+  "Convert provider-specific message to a ::ai/message entity."
   :provider)
 
 (defmulti parse-result
-  "Extract final stats from result message.
-   Returns ::parsed-result map."
+  "Extract final stats from a result message."
   :provider)
 
-;; Default implementations for unknown providers
+;; Default for unknown providers
 (defmethod normalize-message :default
   [{:keys [provider]}]
   (throw (ex-info (str "Unknown provider: " provider
                        ". Did you require the provider namespace?")
                   {:provider provider})))
-
 ```
 
 ### Implementing Providers
 
-Provider namespaces implement the multimethods:
-
 ```clojure
 (ns seon.ai.claude
-  "Claude provider implementation."
   (:require [seon.ai.agent :as agent]))
 
-;; Implement normalize-message for :claude
 (defmethod agent/normalize-message :claude
   [{:keys [message session-id]}]
-  (sdk-message->entity {::sdk-message message
-                        ::ai/session-id session-id}))
+  (sdk-message->entity {::sdk-message message ::ai/session-id session-id}))
 
-;; Implement result-message? for :claude
-(defmethod agent/result-message? :claude
-  [{:keys [message]}]
-  (= "result" (:type message)))
-
-;; Implement parse-result for :claude
 (defmethod agent/parse-result :claude
   [{:keys [message]}]
   {::status (if (= "success" (:subtype message)) :completed :failed)
-   ::cost-usd (:total_cost_usd message)
-   ;; ... other fields
-   })
-
-```
-
-### Usage Pattern
-
-```clojure
-;; Call multimethod with provider key in request
-(agent/normalize-message {:provider :claude
-                          :message sdk-msg
-                          :session-id "ses-abc"})
-
-;; Adding a new provider (e.g., Gemini) requires:
-;; 1. New namespace: seon.ai.gemini.agent
-;; 2. Implement: (defmethod agent/normalize-message :gemini ...)
-;; 3. No changes to base namespace or existing providers
-
+   ::cost-usd (:total_cost_usd message)})
 ```
 
 ### Why Multimethods Over Protocols
 
-- **Keyword dispatch** - Provider is data (:claude, :gemini), not a type
-- **No wrapper objects** - Just pass maps with :provider key
-- **Namespace loading** - (require '[seon.ai.claude]) registers implementations
-- **Extensibility** - Third parties can add providers without modifying source
+- **Keyword dispatch** — provider is data (`:claude`, `:gemini`), not a type
+- **No wrapper objects** — just pass maps with a `:provider` key
+- **Namespace loading** — `(require '[seon.ai.claude])` registers implementations
+- **Extensibility** — third parties add providers without modifying source
+
+---
+
+## Testing Strategy
+
+Tests serve two purposes:
+
+1. **Example tests** — document intended usage, show how functions compose.
+   The bread-and-butter of the active CLJS suite.
+2. **Generative tests** — find edge cases, validate schema contracts. A
+   **JVM-track** idiom today (`mg/sample` + `m/validate` in `.clj` tests); the
+   CLJS pod relies on always-on instrumentation for runtime contract checks.
+
+On the CLJS side, write example tests; reach for generative tests on the JVM
+where the schema is the unit under test. (Example tests alone don't prove the
+schema's edges; generative tests alone don't show real-world usage.)
+
+### Running tests
+
+- **CLJS suite (active track):** `bin/test-cljs` runs the full `.cljs` suite in
+  a fresh `:node-test` JVM (no live-pod contention, ~160s). Use it as the batch
+  checkpoint — **once, after a unit of work**, not after each sub-step. Never
+  fire overlapping `cljs.test/run-tests` in the live pod (it wedges the shared
+  async continuation; restart the pod for a pristine run).
+- **Live verification:** to verify a single behavior fast, eval the fn directly
+  against the live pod rather than running a whole test namespace. **Live proof,
+  not inference** — read a datom back, observe the running system.
+- **JVM track (paused):** tests run inside the running JVM via REPL verbs —
+  `(user/run-tests 'seon.foo-test)`, `(user/test-affected 'seon.foo)` — never by
+  spawning a separate process.
+
+See the `/clojure-testing` skill for fixtures, generators, and debugging.
+
+### Example Tests (Documentation + Integration)
+
+Show the intended workflow — executable documentation. For a behavior that
+doesn't touch the DB, a plain `cljs.test/async` test is enough — the
+capability verbs return Promises, so await them (`<p!` / `.then`) and read the
+envelope:
+
+```clojure
+(deftest grep-finds-matches-test
+  (testing "grep returns a matches envelope for a real pattern"
+    (async done
+      (-> (search/grep {::search/pattern "defn ^:async" ::search/max-results 5})
+          (.then (fn [{::search/keys [ok? matches]}]
+                   (is (true? ok?))
+                   (is (vector? matches))
+                   (done)))))))
+```
+
+**DB-backed CLJS tests** open a fresh **in-memory datahike** conn per test and
+`set!` it as the root `db/*conn*` (CLJS has no `binding` across async hops, so
+`set!` the root, not `binding`). There is no shared `with-test-db` fixture on
+the CLJS side — `with-test-db` / `with-test-node` live in `seon.test-utils`
+(`.clj`, JVM track). Each CLJS test ns defines a small local helper; the
+canonical shape (see `test/seon/db_test.cljs` `fresh-conn` and
+`test/seon/ctx_test.cljs`):
+
+```clojure
+(defn- fresh-conn []                                  ; returns a Promise of a conn
+  (let [cfg {:store {:backend :memory :id (random-uuid)}
+             :schema-flexibility :write}]
+    (-> (d/create-database cfg)
+        (.then (fn [_] (d/connect cfg {:sync? false}))))))
+
+(deftest reads-back-a-row-test
+  (async done
+    (-> (fresh-conn)
+        (.then (fn [conn]
+                 (set! db/*conn* conn)                ; root set!, not binding
+                 (schema/register! ::name :string)
+                 (-> (db/transact! {::db/tx-data [{::name "Alpha"}]})
+                     (.then (fn [_]
+                              (is (= #{["Alpha"]}
+                                     (db/query {::db/query '[:find ?n :where [_ ::name ?n]]})))
+                              (done)))))))))
+```
+
+### Generative Tests (Contract Validation)
+
+**JVM-track idiom.** Generative tests over registered schemas — `mg/sample`
+to enumerate valid shapes, `m/validate` to check them — run on the JVM (`.clj`
+tests); the CLJS suite doesn't currently use them. Frame contract-checking as a
+JVM-side concern and lean on always-on instrumentation for runtime validation
+on the pod.
+
+```clojure
+;; .clj test (JVM): find edge cases the schema allows but you didn't think of
+(deftest grep-request-generative-test
+  (testing "every valid request shape round-trips through the schema"
+    (doseq [request (mg/sample ::search/grep-request {:size 20})]
+      (is (m/validate ::search/grep-request request)))))
+```
+
+---
 
 ## Anti-Patterns to Avoid
 
@@ -618,57 +718,175 @@ Provider namespaces implement the multimethods:
   {:pre [(m/validate ::input x)]}
   ...)
 
-;; BAD: *unspecced* positional args in public API. Positional is fine WITH a
+;; BAD: *unspecced* positional args in a public API. Positional is fine WITH a
 ;; :catn per-slot spec on :malli/schema; bare/unspecced args are the violation.
-(defn process [ticker timeframe confidence]
+(defn process [pattern paths max-results]
   ...)
 
-;; BAD: non-namespaced keys in public API - ambiguous
-(defn process [{:keys [ticker timeframe]}]
-  {:signal :buy})
+;; BAD: non-namespaced keys in a public API - ambiguous
+(defn process [{:keys [pattern paths]}]
+  {:ok? true})
+
+;; BAD: a magic :seon/id identity key - identity is {:seon.db/identity true}
+;;      on a registered attr, addressed by lookup-ref [::doc-id "d1"]
+{:seon/id "abc" ::title "x"}
+
+;; BAD: an agent-facing verb that THROWS instead of returning an envelope
+(defn grep [req] (throw (ex-info "no match" {})))   ; must return {::ok? false …}
 
 ;; BAD: using :or in destructuring for optional API values
-(defn process [{:keys [model] :or {model "default"}}]
-  ...)  ; doesn't work when {:model nil} is passed
+(defn process [{::keys [model] :or {model "default"}}]
+  ...)  ; doesn't apply when {::model nil} is passed
 
-;; BAD: Only generative tests, no example tests
+;; BAD (JVM-track): only generative tests, no example tests
 (deftest foo-test
   (doseq [input (mg/sample ::input)]
     (is (m/validate ::output (foo input)))))
-;; Missing: tests showing intended usage patterns!
+;; Missing: example tests showing intended usage patterns!
 
+;; BAD: touching datahike.api directly outside src/seon/db/
+(d/transact conn tx-data)   ; use seon.db/transact!
 ```
+
+---
 
 ## File Organization
 
-Keep it simple - one file per namespace with schemas and functions together:
+Keep it simple — one file per namespace with schemas and functions together.
+Promote heavy plumbing to a sibling `<ns>.internal` namespace (see
+[The `.internal` namespace pattern](#the-internal-namespace-pattern)); don't
+split into `core.cljs` / `schema.cljs` prematurely.
 
 ```
 src/seon/
-├── ai/
-│   └── gemini.clj    ; seon.ai.gemini (schemas + API)
-└── trading/
-    └── signals.clj   ; seon.trading.signals
-
+├── agent/
+│   ├── search.cljs            ; seon.agent.search (public grep + schemas)
+│   └── search/internal.cljs   ; seon.agent.search.internal (plumbing)
+└── db.cljs                    ; seon.db (read-local + write-forward face)
+    db/internal.cljs           ; seon.db.internal (commit machinery)
 ```
 
-Don't split into core.clj, schema.clj, etc. prematurely. Tests go in `test/` mirroring the `src/` structure.
+Tests mirror the `src/` structure under `test/`.
+
+---
 
 ## Namespace Docstrings
 
-Every namespace should have a comprehensive docstring written by its steward agent. The docstring is a living assessment covering purpose, architecture position, consumer analysis, convention compliance, issues, and recommendations. See `docs/seon/concepts/namespace-stewardship.md` for the full format and process.
+Every namespace should have a comprehensive docstring. It is a living
+assessment — purpose, architecture position, the conventions it follows, and a
+worked example of the core move. Docstrings RENDER into agent context
+(code-as-data), so keep them current-state and concise: no dates, no issue
+refs, no changelog ("first X, now Y"). The visible Malli spec documents the
+args; don't re-explain them in prose. See
+[[docs/seon/concepts/namespace-stewardship.md]] for the full format.
+
+---
+
+## Function Docstrings
+
+Every public fn's docstring **first line is a complete, standalone sentence** —
+it is the summary shown wherever the fn renders compactly (most importantly the
+compact namespace card, which shows ONLY line 1) and the first thing every reader
+sees. The rules:
+
+- **One complete sentence, ≤ 72 chars (78 hard cap), ending in terminal
+  punctuation** (`.` / `?` / `!`) — never a mid-sentence hard-wrap.
+- **States the action + its data effect, not the mechanism.** Mechanism, gotchas,
+  and worked notes go in the BODY (after a blank line) — the body renders only in
+  the full-source view.
+- **Imperative for side-effecting verbs** (`Store…`, `Mint…`, `Retract…`);
+  **noun-phrase for pure queries** (`Agent ids whose…`, `Snapshot of…`) — the mood
+  signals purity at a glance.
+- **Backtick-quote identifiers** (`` `::owner` ``, `` `:idle` ``).
+
+```clojure
+;; BAD — line 1 hard-wraps mid-sentence (renders broken in a card)
+(defn armable-agent-ids
+  "Agent ids whose DERIVED state is `:idle` — not `:terminated` AND with no
+   OPEN run. ..."
+  ...)
+
+;; GOOD — line 1 is a complete ≤72-char sentence; detail moves to the body
+(defn armable-agent-ids
+  "Agent ids whose derived state is `:idle` — the ones a trigger can WAKE.
+
+   <mechanism / caveats continue here, rendered in the full view only>"
+  ...)
+```
+
+Promoting a clean line 1 often leaves the old continuation dangling as a
+lowercase fragment — re-open the body sentence so the full docstring still reads
+(it is a small body edit, not a pure prepend). Enforced by `seon.dev.docstring`
+(warn-only, via the dev hook): it flags a public fn whose line 1 is missing,
+> 78 chars, or lacks terminal punctuation. Namespace docstrings follow the same
+current-state discipline — see [Namespace Docstrings](#namespace-docstrings).
+
+---
+
+## Context, Render, and the System Message
+
+How agent-facing context is assembled — sections as functions of the DB at
+render time, the soul/AGENTS sections, and the LLM system message — is being
+decoupled right now (a generic file-section loader; the system message becomes
+hardcoded system-specific content; soul/AGENTS become ordinary context
+sections). For the current model see
+[[docs/prds/agent-fsm/context-render.md]] (P3). Don't pin specifics here while
+it's in flux.
+
+### Comment levels — prose vs code
+
+The rendered agent context is meant to read as one eval'able Clojure source:
+every non-form line is a comment. Which comment marker you use is NOT
+decoration — it carries meaning, and the rule is fixed:
+
+- **`;` (single)** — **prose**. Rendered agent-facing prose blocks (the
+  `system-text` body, the soul/AGENTS sections, the inventory header, warnings
+  prose, the open-todos guidance, any narrative the model reads) AND ordinary
+  trailing inline code comments. If a line is words-for-a-reader, it is a single
+  `;`.
+- **`;;` (double)** — **code block comments**. A standalone comment sitting
+  ABOVE a form in real source (the standard Clojure block-comment level). Code
+  keeps `;;` for these; do NOT downgrade real-code block comments to `;`.
+- **`;;;` (triple)** — reserved for runtime-STRUCTURE demarcation in the
+  rendered context, not for body text. Each top-level section is wrapped by a
+  start/stop bracket (`seon.ctx/section-bracket-ai`):
+
+  ```clojure
+  ;;; ┌─ <section-name> ─
+  …section body…
+  ;;; └─ end <section-name> ─
+  ```
+
+  The transcript's per-event lines (`;;; ◀` inbound / `;;; ▶` outbound) are the
+  other `;;;` runtime-structure use. Body text inside a section is never `;;;`.
+
+The practical test: **prose → `;`, block-comment-before-code → `;;`, inline
+comment → `;`.** Prose rendered into context uses single `;` precisely so it
+reads as a comment to the Clojure reader while staying visually distinct from
+real-code `;;` block comments. One shared `seon.ctx/quote-lines` primitive emits
+the prose `;` lines; don't hand-roll a `(str ";; " …)` prefixer in a section fn.
+
+---
 
 ## SSE Patterns
 
-See `/datastar-web-ui` skill for SSE patterns (direct response vs background push, buffer design, refresh triggers, handler hot reload).
+See the `/datastar-web-ui` skill for SSE patterns (direct response vs background
+push, buffer design, refresh triggers, handler hot reload). The pod's UI is
+`seon.web.inspector` + `serve` (hiccup, `.cljs`).
+
+---
 
 ## Reload Lifecycle Hooks for `defonce` State
 
-Seon is a runtime system where agents live-code and update namespaces. `defonce` atoms survive `user/reload` (clj-reload) but may hold stale references — old closures, dead channels, orphaned threads. Every `defonce` with mutable runtime state **must** have lifecycle hooks.
+**(JVM / clj-reload track.)** Seon is a runtime system where agents live-code
+and update namespaces. On the JVM track, `defonce` atoms survive `user/reload`
+(clj-reload) but may hold stale references — old closures, dead channels,
+orphaned threads. Every `defonce` with mutable runtime state **must** have
+lifecycle hooks. (On the CLJS pod, shadow hot-reload re-evaluates top-level
+forms; `defonce` guards load-bearing runtime state like `seon.db/*conn*` so a
+reload doesn't wipe the live connection.)
 
-### How It Works
-
-clj-reload calls two per-namespace hooks (0-arg functions) if they exist:
+clj-reload calls two per-namespace 0-arg hooks if they exist:
 
 | Hook | When | Use For |
 |------|------|---------|
@@ -680,113 +898,65 @@ clj-reload calls two per-namespace hooks (0-arg functions) if they exist:
 ```clojure
 (defonce my-state (atom nil))
 
-(defn before-ns-unload
-  "Cleanup before clj-reload unloads this namespace."
-  []
+(defn before-ns-unload []
   (when-let [s @my-state]
     (stop! s)
     (reset! my-state nil)))
 
-(defn after-ns-reload
-  "Re-init after clj-reload reloads this namespace."
-  []
+(defn after-ns-reload []
   (when (nil? @my-state)
     (reset! my-state (init-from-integrant-system))))
-
 ```
 
 ### Rules
 
-1. **Any `defonce` holding runtime state must have hooks.** Caches, registries, go-loops, channels, promises, schedulers — if it's mutable and not purely config, add hooks.
+1. **Any `defonce` holding runtime state must have hooks.** Caches, registries, go-loops, channels, promises, schedulers.
 2. **`before-ns-unload` must be idempotent.** It may be called when state is already nil.
-3. **`after-ns-reload` should re-derive from Integrant.** The system map is the source of truth: `@(requiring-resolve 'integrant.repl.state/system)`.
-4. **Don't add hooks for `defonce` holding immutable config.** Pure values, schema definitions, etc. are fine without hooks.
-5. **Exceptions in `before-ns-unload` are swallowed** by clj-reload. Keep it simple — don't do anything that can fail.
-
-### Existing Examples
-
-- **SSE handlers**: `seon.web.handlers/after-ns-reload` — recreates handler objects
-- **Route caches**: `seon.ns.routes/after-ns-reload` — clears stale handler cache
-- **Promise drains**: `seon.flow.topology/before-ns-unload` — delivers timeout to pending promises
-- **Flow re-wiring**: `seon.runtime/after-ns-reload` — re-registers flow handles from Integrant
+3. **`after-ns-reload` should re-derive from Integrant.** The system map is the source of truth.
+4. **Don't add hooks for `defonce` holding immutable config.** Pure values, schema definitions.
+5. **Exceptions in `before-ns-unload` are swallowed** by clj-reload. Keep it simple.
 
 ---
 
 ## Numeric Limits and Defaults
 
-Avoid arbitrary "magic numbers" that cause bugs or confusion. Every limit should have a documented source.
-
-### Categories of Limits
+Avoid arbitrary "magic numbers". Every limit should have a documented source.
 
 | Category | Example | Guideline |
 |----------|---------|-----------|
 | **External constraints** | API rate limits, protocol specs | Document the source |
-| **Domain bounds** | Percentages 0-100, IV rank 0-1 | Mathematical constraints - always add |
+| **Domain bounds** | Percentages 0-100, ratios 0-1 | Mathematical constraints — always add |
 | **Internal allocations** | Port ranges, batch sizes | Document why and how to override |
 | **Safety caps** | Max recursion, timeout | Document rationale, make configurable |
 
 ### Rule: Don't Set Arbitrary Defaults for "No Limit"
 
-**Bad - arbitrary large number to mean "unlimited":**
-
 ```clojure
-::max-turns (or max-turns 999999)  ; Magic number!
+;; BAD - arbitrary large number to mean "unlimited"
+::max-turns (or max-turns 999999)
 
-```
-
-**Good - don't pass the flag when unlimited:**
-
-```clojure
+;; GOOD - don't pass the flag when unlimited
 (cond-> base-args
   max-turns (into ["--max-turns" (str max-turns)]))
-
 ```
 
 ### Rule: Document Limit Sources in Schemas
 
 ```clojure
 ;; GOOD - source documented
-(schema/register! ::nrepl-port
-  [:int {:min 7889 :max 7999
-         :description "nREPL port for agent sessions (reserved range)"}])
-
 (schema/register! ::iv-rank
   [:double {:min 0.0 :max 1.0
-            :description "IV percentile rank (mathematical bound)"}])
+            :description "percentile rank (mathematical bound)"}])
 
 ;; BAD - arbitrary, undocumented
 (schema/register! ::timeout
   [:int {:min 1000 :max 300000}])  ; Why these numbers?
-
 ```
 
 ### When to Add `:max` Constraints
 
-Add `:max` when:
-
-- External API/protocol enforces the limit
-- Mathematical/domain constraint exists (percentages, ratios)
-- Memory/performance safety requires it (document why)
-
-Don't add `:max` when:
-
-- "Just to be safe" with no specific reason
-- The underlying system has no limit
-- To prevent hypothetical abuse (use rate limiting instead)
-
-### Pattern: Optional Unbounded Parameters
-
-When a parameter can legitimately be "unlimited":
-
-```clojure
-;; Schema: min only, no max
-(schema/register! ::max-results
-  [:int {:min 1
-         :description "Max results. Omit for unlimited."}])
-
-;; Function: handle omission gracefully
-(defn search [{::keys [max-results]}]
-  (cond-> (base-query)
-    max-results (add-limit max-results)))
-
-```
+Add `:max` when an external API/protocol enforces it, a mathematical/domain
+constraint exists, or memory/performance safety requires it (document why).
+Don't add `:max` "just to be safe", when the underlying system has no limit, or
+to prevent hypothetical abuse (use rate limiting instead). For a parameter that
+can legitimately be unlimited, set `:min` only and handle omission gracefully.

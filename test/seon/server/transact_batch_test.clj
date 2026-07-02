@@ -6,8 +6,7 @@
    Each test spawns its own JVM writer subprocess (memory backend) and
    tears it down. Same fixture pattern as protocol_extensions_test."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
-            [seon.server.test-util :as tu]
-            [seon.server.transit :as transit]))
+            [seon.server.test-util :as tu]))
 
 (set! *warn-on-reflection* true)
 
@@ -15,56 +14,56 @@
 
 (defn- req! [op extra] (tu/req! op extra))
 
-(defn- result-of [resp] (transit/read-str (get resp "result")))
-(defn- meta-of   [rep]  (transit/read-str (get rep  "tx-meta")))
+(defn- result-of [resp] (:seon.store.wire/result resp))
+(defn- meta-of   [rep]  (:seon.store.wire/tx-meta rep))
 
 (defn- install-schema! []
   (req! "transact"
-        {"tx-data"
-         "[{:db/ident :item/id
-            :db/valueType :db.type/string
-            :db/cardinality :db.cardinality/one
-            :db/unique :db.unique/identity}
-           {:db/ident :item/n
-            :db/valueType :db.type/long
-            :db/cardinality :db.cardinality/one}]"}))
+        {:seon.store.wire/tx-data
+         [{:db/ident :item/id
+           :db/valueType :db.type/string
+           :db/cardinality :db.cardinality/one
+           :db/unique :db.unique/identity}
+          {:db/ident :item/n
+           :db/valueType :db.type/long
+           :db/cardinality :db.cardinality/one}]}))
 
 (deftest test-batch-all-succeed
   (testing "transact-batch applies all entries in order and reports per-tx data"
     (install-schema!)
     (let [r (req! "transact-batch"
-                  {"tx-data-list"
-                   ["[{:item/id \"a\" :item/n 1}]"
-                    "[{:item/id \"b\" :item/n 2}]"
-                    "[{:item/id \"c\" :item/n 3}]"]})]
-      (is (= true (get r "ok")))
-      (is (= 3 (get r "applied")))
-      (is (= 3 (get r "total")))
-      (is (nil? (get r "failed-at")))
-      (let [reports (get r "reports")]
+                  {:seon.store.wire/tx-data-list
+                   [[{:item/id "a" :item/n 1}]
+                    [{:item/id "b" :item/n 2}]
+                    [{:item/id "c" :item/n 3}]]})]
+      (is (= true (:seon.store.wire/ok r)))
+      (is (= 3 (:seon.store.wire/applied r)))
+      (is (= 3 (:seon.store.wire/total r)))
+      (is (nil? (:seon.store.wire/failed-at r)))
+      (let [reports (:seon.store.wire/reports r)]
         (is (= 3 (count reports)))
-        (is (= [0 1 2] (mapv #(get % "index") reports)))
+        (is (= [0 1 2] (mapv :seon.store.wire/index reports)))
         ;; basis-t advances monotonically across the batch
-        (let [bts (mapv #(get % "basis-t") reports)]
+        (let [bts (mapv :seon.store.wire/basis-t reports)]
           (is (apply < bts) (str "basis-t should be strictly increasing: " bts)))
         ;; each report carries the wire-shape tx-data
         (doseq [rep reports]
-          (is (vector? (get rep "tx-data")))
-          (is (pos? (get rep "datoms-added"))))))))
+          (is (vector? (:seon.store.wire/tx-data rep)))
+          (is (pos? (:seon.store.wire/datoms-added rep))))))))
 
 (deftest test-batch-preserves-order-in-db
   (testing "after the batch, all entries are queryable with expected values"
     (install-schema!)
     (req! "transact-batch"
-          {"tx-data-list"
-           ["[{:item/id \"x\" :item/n 10}]"
-            "[{:item/id \"y\" :item/n 20}]"
-            "[{:item/id \"z\" :item/n 30}]"]})
-    (let [r (req! "q" {"query" "[:find ?id ?n :where [?e :item/id ?id] [?e :item/n ?n]]"
-                       "args"  []})
+          {:seon.store.wire/tx-data-list
+           [[{:item/id "x" :item/n 10}]
+            [{:item/id "y" :item/n 20}]
+            [{:item/id "z" :item/n 30}]]})
+    (let [r (req! "q" {:seon.store.wire/query '[:find ?id ?n :where [?e :item/id ?id] [?e :item/n ?n]]
+                       :seon.store.wire/args  []})
           result (result-of r)
           by-id  (into {} (mapv (fn [[id n]] [id n]) result))]
-      (is (= true (get r "ok")))
+      (is (= true (:seon.store.wire/ok r)))
       (is (= {"x" 10 "y" 20 "z" 30} by-id)))))
 
 (deftest test-batch-tx-meta-per-entry
@@ -76,11 +75,11 @@
     ;; protocol_integration_test.clj/test-tx-meta-shape.
     (install-schema!)
     (let [r (req! "transact-batch"
-                  {"tx-data-list" ["[{:item/id \"a\" :item/n 1}]"
-                                   "[{:item/id \"b\" :item/n 2}]"]})]
-      (is (= true (get r "ok")))
-      (is (nil? (get r "failed-at")))
-      (let [reports (get r "reports")
+                  {:seon.store.wire/tx-data-list [[{:item/id "a" :item/n 1}]
+                                                  [{:item/id "b" :item/n 2}]]})]
+      (is (= true (:seon.store.wire/ok r)))
+      (is (nil? (:seon.store.wire/failed-at r)))
+      (let [reports (:seon.store.wire/reports r)
             metas   (mapv meta-of reports)]
         (is (= 2 (count metas)))
         (doseq [m metas]
@@ -93,18 +92,18 @@
   (testing "entry 1 references an unknown attr — entries 0 applies, 1 fails, 2 NOT applied"
     (install-schema!)
     (let [r (req! "transact-batch"
-                  {"tx-data-list"
-                   ["[{:item/id \"good-a\" :item/n 1}]"
-                    "[{:item/id \"bad-b\" :unknown/attr 2}]"  ; bad — unknown attr
-                    "[{:item/id \"good-c\" :item/n 3}]"]})]
-      (is (= true (get r "ok")) "op succeeds even though one entry failed")
-      (is (= 1 (get r "applied")))
-      (is (= 3 (get r "total")))
-      (is (= 1 (get r "failed-at")))
-      (is (some? (get r "error")))
-      (is (= 1 (count (get r "reports"))))
+                  {:seon.store.wire/tx-data-list
+                   [[{:item/id "good-a" :item/n 1}]
+                    [{:item/id "bad-b" :unknown/attr 2}]  ; bad — unknown attr
+                    [{:item/id "good-c" :item/n 3}]]})]
+      (is (= true (:seon.store.wire/ok r)) "op succeeds even though one entry failed")
+      (is (= 1 (:seon.store.wire/applied r)))
+      (is (= 3 (:seon.store.wire/total r)))
+      (is (= 1 (:seon.store.wire/failed-at r)))
+      (is (some? (:seon.store.wire/error r)))
+      (is (= 1 (count (:seon.store.wire/reports r))))
       ;; entry 2 must NOT be in the DB
-      (let [q (req! "q" {"query" "[:find ?id :where [?e :item/id ?id]]" "args" []})
+      (let [q (req! "q" {:seon.store.wire/query '[:find ?id :where [?e :item/id ?id]] :seon.store.wire/args []})
             ids (into #{} (map first) (result-of q))]
         (is (contains? ids "good-a"))
         (is (not (contains? ids "good-c")) "entry after the failure must not be applied")
@@ -113,20 +112,20 @@
 (deftest test-batch-empty-is-a-noop
   (testing "empty batch returns applied=0 total=0 with no error"
     (install-schema!)
-    (let [r (req! "transact-batch" {"tx-data-list" []})]
-      (is (= true (get r "ok")))
-      (is (= 0 (get r "applied")))
-      (is (= 0 (get r "total")))
-      (is (nil? (get r "failed-at")))
-      (is (= [] (get r "reports"))))))
+    (let [r (req! "transact-batch" {:seon.store.wire/tx-data-list []})]
+      (is (= true (:seon.store.wire/ok r)))
+      (is (= 0 (:seon.store.wire/applied r)))
+      (is (= 0 (:seon.store.wire/total r)))
+      (is (nil? (:seon.store.wire/failed-at r)))
+      (is (= [] (:seon.store.wire/reports r))))))
 
-(deftest test-batch-request-ids-roundtrip
-  (testing "request-ids list echoes per-entry on each report"
+(deftest test-batch-write-ids-roundtrip
+  (testing "write-ids list echoes per-entry on each report"
     (install-schema!)
     (let [r (req! "transact-batch"
-                  {"tx-data-list" ["[{:item/id \"r1\" :item/n 1}]"
-                                   "[{:item/id \"r2\" :item/n 2}]"]
-                   "request-ids"  ["req-aaa" "req-bbb"]})
-          reports (get r "reports")]
-      (is (= "req-aaa" (get (first reports) "request-id")))
-      (is (= "req-bbb" (get (second reports) "request-id"))))))
+                  {:seon.store.wire/tx-data-list [[{:item/id "r1" :item/n 1}]
+                                                  [{:item/id "r2" :item/n 2}]]
+                   :seon.store.wire/write-ids  ["req-aaa" "req-bbb"]})
+          reports (:seon.store.wire/reports r)]
+      (is (= "req-aaa" (:seon.store.wire/write-id (first reports))))
+      (is (= "req-bbb" (:seon.store.wire/write-id (second reports)))))))

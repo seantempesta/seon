@@ -3,7 +3,7 @@ type: issue
 status: open
 severity: friction
 milestone: M2
-tags: [issue, schema, database, architecture]
+tags: [issue, schema, database, architecture, jvm-track, paused]
 ---
 # Duplication: ::db-name Schema Registered 14 Times
 
@@ -26,3 +26,5 @@ tags: [issue, schema, database, architecture]
 
 - [[components/database]]
 - [[components/schema-system]]
+
+## Status (2026-06-28 audit): valid but JVM-track is paused — defer until that track resumes.

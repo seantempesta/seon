@@ -99,57 +99,56 @@
           js/globalThis (str "__seon_results_" eval-id))))))
 
 ;; ---------------------------------------------------------------------------
-;; render-result-edn — T7 row-count guard. A broad query returning thousands
-;; of tuples is row-bounded into a readable preview with a PREPENDED guiding
-;; clip message, instead of a char-clipped giant set.
+;; render-result-edn — the agent-facing text. Delegates to
+;; `seon.render.value/render-ai`: a DEPTH- and BREADTH-bounded skeleton, so
+;; a broad query returning thousands of tuples never becomes a char-clipped
+;; giant blob. We pin the memory-safety MECHANISM (bounded, partial-view
+;; hint, names result/<id>), not exact skeleton strings.
 ;; ---------------------------------------------------------------------------
 
-(deftest result-row-cap-is-a-sane-positive-bound
-  (is (= 50 seval/result-row-cap))
-  (is (pos? seval/result-row-cap)))
-
-(deftest small-collection-renders-fully-with-no-row-guide
+(deftest small-collection-renders-verbatim-no-partial-hint
   (let [edn (seval/render-result-edn "ev00000001" (vec (range 5)))]
-    (is (= "[0 1 2 3 4]" edn) "small coll = ordinary pr-str")
-    (is (not (re-find #"more clipped" edn)) "no false-positive guide")))
+    (is (= "[0 1 2 3 4]" edn) "a small coll renders verbatim")
+    (is (not (str/includes? edn "partial view")) "no false-positive hint")))
 
-(deftest scalar-result-renders-verbatim-no-row-guide
-  ;; only COUNTED collections trip the row guard; a map is small here, a big
-  ;; scalar string is left to the char-based caps (cap-edn / cap-result-body).
+(deftest scalar-map-renders-verbatim-no-partial-hint
   (let [edn (seval/render-result-edn "ev00000002" {:seon.demo/x 1 :seon.demo/y 2})]
-    (is (not (re-find #"more clipped" edn)))
-    (is (re-find #":seon.demo/x" edn))))
+    (is (not (str/includes? edn "partial view")))
+    (is (str/includes? edn ":seon.demo/x"))))
 
-(deftest many-row-result-is-row-bounded-with-a-guiding-message
+(deftest many-row-result-is-bounded-and-names-the-live-var
   (let [eval-id "ev00000003"
         total   5000
         edn     (seval/render-result-edn eval-id (vec (range total)))]
-    (testing "row-count guide is PRESENT and reports totals"
-      (is (re-find (re-pattern (str total " rows")) edn))
-      (is (re-find (re-pattern (str "\\+" (- total seval/result-row-cap)
-                                    " more clipped"))
-                   edn)))
-    (testing "guide teaches narrowing and points at the live full value"
-      (is (re-find #"Narrow your query" edn))
-      (is (re-find (re-pattern (str "result/" eval-id)) edn)))
-    (testing "guide is PREPENDED so it survives the smaller display cap"
-      (is (str/starts-with? edn ";; …")))
-    (testing "only the first result-row-cap rows are previewed"
-      ;; Preview renders one element per line as "\n N"; row 49 is the last
-      ;; (followed by the closing paren), row 50 is excluded. Match the DATA
-      ;; lines, NOT a bare number — the guide text says "showing first 50".
-      (is (re-find #"\n 49\)" edn))
-      (is (not (re-find #"\n 50\b" edn))))
-    (testing "preview is BOUNDED — not a stringified 5000-element set"
-      (is (< (count edn) 2000)))))
+    (testing "output is BOUNDED — never a stringified 5000-element vector"
+      (is (< (count edn) 2000))
+      ;; the LAST shown element is far below the total — breadth-bounded
+      (is (not (str/includes? edn (str (dec total))))))
+    (testing "partial-view hint points the agent at the full live value"
+      (is (str/includes? edn "partial view"))
+      (is (str/includes? edn (str "result/" eval-id)))
+      (is (str/includes? edn "get-in")))))
 
-(deftest many-row-guide-survives-the-store-cap
+;; A datahike DB value is a record carrying :max-tx; stand in with one.
+(defrecord FakeStoreDB [max-tx max-eid])
+
+(deftest opaque-handle-result-is-a-compact-marker-not-a-blob
+  ;; A datahike-shaped handle returned by an eval must render as a compact
+  ;; marker, never a multi-KB index dump.
+  (let [edn (seval/render-result-edn "ev00000005" {:seon.demo/db (->FakeStoreDB 42 99)})]
+    (is (< (count edn) 400) "marker is compact")
+    (is (str/includes? edn "seon.demo/db"))
+    (is (str/includes? edn "datahike/DB"))))
+
+(deftest bounded-result-survives-the-store-cap
   ;; render-result-edn output still flows through cap-edn at the write site;
-  ;; the prepended guide must survive that too.
-  (let [edn    (seval/render-result-edn "ev00000004" (vec (range 9000)))
-        capped (seval/cap-edn edn)]
-    (is (str/starts-with? capped ";; …"))
-    (is (re-find #"9000 rows" capped))))
+  ;; the bounded skeleton + its hint must survive that too (a no-op here,
+  ;; since render-ai already keeps the output well under store-edn-cap).
+  (let [eval-id "ev00000004"
+        edn     (seval/render-result-edn eval-id (vec (range 9000)))
+        capped  (seval/cap-edn edn)]
+    (is (= edn capped) "bounded render is already under the store cap")
+    (is (str/includes? capped (str "result/" eval-id)))))
 
 ;; (The old `huge-prompt-is-stored-capped` test is RETIRED with the
 ;; :seon.agent.turn/prompt-text datom itself — prompts now persist whole as

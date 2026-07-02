@@ -4,11 +4,16 @@
 #
 # Usage: ./bin/run-datalevin
 #        DATALEVIN_PORT=8899 ./bin/run-datalevin
+#
+# DEAD/LEGACY: Datalevin was removed from the project — there is no datalevin
+# dep on the classpath and no src references, so this script will fail to find
+# `datalevin.main`. Kept (and JDK-aligned for consistency) as archaeology; safe
+# to delete.
 
 set -euo pipefail
 
-export JAVA_HOME=/Library/Java/JavaVirtualMachines/temurin-21.jdk/Contents/Home
-export PATH="$JAVA_HOME/bin:$PATH"
+# Pin the JDK via the shared resolver (single source of truth).
+source "$(dirname "$0")/_java-home-resolver"
 
 PORT=${DATALEVIN_PORT:-8898}
 ROOT=${DATALEVIN_ROOT:-data/datalevin}

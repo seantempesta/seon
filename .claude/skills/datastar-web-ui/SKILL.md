@@ -1,139 +1,197 @@
 ---
 name: datastar-web-ui
-description: "Patterns for Datastar SSE web UI with Tailwind CSS. Use when editing handlers, html.clj, sse.clj, or routes.clj. Use when working with data-signals, data-on-click, data-text, merge-fragment, or streaming-response. Use when building dashboards, forms, real-time updates, or improving UI design. Use when styling components or making the UI look better."
+description: "The ACTIVE pod web UI — Datastar SSE over a gzip whole-element morph, hiccup in .cljs, reitit routes from :seon.route/* datoms, the seon.render/block + slot renderer, and the Phosphor Terminal theme. Use when editing seon.web.serve / seon.web.datastar / seon.web.router / seon.web.debug, the seon.ui.* layout/tiles (world, header, markdown, clojure), or seon.render. Use when working with data-init / data-bind / data-on:submit / data-effect / data-signals / data-text signal attributes, the /world + /agent/{id} pages and their /feed SSE streams, tiles/slots, time-travel as-of feeds, or styling (warm blacks / cream / amber / monospace / dot+text status). Use when a live UI doesn't update on a tx, an SSE stream won't verify in the browser, or a human input bar loses focus on morph."
 ---
 
-# Datastar Web UI Patterns
+# Datastar Web UI — the active pod surface
 
-## Two SSE Patterns (IMPORTANT)
+The UI you edit is the **CLJS pod's** loopback web surface on
+`http://127.0.0.1:7890` — hiccup rendered in `.cljs`, streamed to the browser
+as Datastar SSE. There is ONE update model: **`view = f(db-as-of t)`** — every
+datahike commit re-renders a whole element and morphs it in place.
 
-Seon has two patterns for updating the UI. **See `docs/conventions.md` section "SSE: Direct Response vs Background Push" for the full spec.** Summary below.
+> The old `html.clj` / `sse.clj` / `routes.clj` / `components.clj` JVM web stack
+> (Ring + the `refresh-all!` broadcast channel + `data-on:click → @post`-returns-
+> HTML) is the **paused JVM track**. If a file ends in `.clj` under
+> `src/seon/web/`, you are in the wrong lane — the active surface is `.cljs`.
+>
+> Hand-offs (don't duplicate): db reads/writes inside a handler →
+> **`datahike`**; `^:async`/`await`/Promise (every handler that writes is
+> async) → **`clojurescript`**; data-oriented mindset → **`data-oriented-clojure`**;
+> verifying a page in a real browser → **`browser-automation`**.
 
-### Pattern A: Direct Response (user actions)
+## The whole model: `view = f(db)`, gzip-morphed on every tx
 
-User clicks something. Handler returns HTML. Datastar morphs the DOM from the response. No SSE channel involved.
+`seon.web.datastar` ports the hyperlith pattern into the pod. There is no
+per-fragment update, no `refresh-all!`, no signal-diffing handler-per-action:
 
-```clojure
-;; Handler — mutate state, return rendered HTML
-(defn toggle-completed-handler [_request]
-  (toggle-show-completed!)
-  {:status 200
-   :headers {"Content-Type" "text/html"}
-   :body (render-my-view)})
+1. ONE render fn produces the **whole** element (`world-view` →
+   `[:main#world …]`, or `seon.ui.world/world-layout` for `/agent/{id}`).
+2. Each page is **two routes**: a tiny **shim page** (GET) and a **separate
+   long-lived `/feed` GET** that is a gzip-compressed SSE stream. The shim's
+   `<main id="world">` opens the feed via `data-init="@get('/world/feed')"`.
+3. The feed registers in `!feeds` with its OWN bound `view-fn` thunk. A
+   `db/listen!` tx-listener (`on-tx`) fires `schedule-broadcast!` — a 50 ms
+   trailing coalesce so an agent turn's many datoms become ONE morph — which
+   re-renders each connection's `view-fn` and writes a `datastar-patch-elements`
+   event, then `gz.flush(Z_SYNC_FLUSH)` so bytes hit the wire immediately.
+4. Datastar's client-side `idiomorph` diffs the pushed whole element against the
+   live DOM and patches only what changed. Default patch mode is `outer` (morph
+   the element whose `id` matches), so a whole-element morph needs no
+   selector/mode dataline — just `data: elements <line>` per HTML line, blank
+   line terminates.
 
-;; Button — @post returns HTML, Datastar morphs it in
-[:button {:data-on:click "@post('/api/my-action')"} "Do Thing"]
-```
+The render fn is **pure of external state** and **NEVER throws** — a render
+error degrades to a visible `#world-error` tile inside the same element, because
+the morph engine must be crash-proof. Source: `src/seon/web/datastar.cljs`
+(`patch-elements`, `world-view`, `push-conn!`, `broadcast!`, `open-feed!`).
 
-**Use for:** toggles, form submissions, any user-initiated mutation.
+### Time-travel falls out for free
 
-### Pattern B: Background Push (system events)
+`view = f(db)` rendered against `(db/as-of @*conn* t)` is a PAST snapshot that
+is naturally FROZEN (re-rendering it on a later tx yields identical bytes). The
+`/agent/{id}/feed?t=<tx-id>` stream binds `view-fn` to the as-of db; the
+time-travel bar drives it with ONE `data-effect` `@get` that auto-cancels the
+prior stream so exactly one feed targets `#world`. (`open-agent-feed!`,
+`time-travel-bar-html`.)
 
-Data changed in the background. Call `refresh-all!` to notify SSE clients.
+## CRITICAL: verify the stream SERVER-SIDE, not in the browser agent
 
-```clojure
-(require '[seon.web.sse :as sse])
+The in-tool Chrome agent's network layer **503s long-lived
+`text/event-stream`** connections, so you cannot confirm a feed morphs by
+watching it in the browser MCP. Verify the wire server-side: a tiny Node client
+that GETs `/world/feed`, gunzips the response stream, and prints the
+`datastar-patch-elements` frames — plus a human eyeball on the real page. Don't
+trust "the browser agent saw nothing"; trust the gunzip client + `logs/pod.log`
+(the `FEED OPEN` / `broadcast` lines). See **`browser-automation`** for the
+browser side and its limits.
 
-;; After a Datalevin transaction
-(d/transact! conn tx-data)
-(sse/refresh-all!)
+## Human input bars live OUTSIDE the morphed element
 
-;; Or via atom watch (ctx lifecycle does this automatically)
-(add-watch my-atom ::sse-refresh
-  (fn [_ _ old new]
-    (when (not= old new)
-      (sse/refresh-all!))))
+A whole-`#world` morph **replaces** everything inside `#world` on every tx — so
+a `<form>`/`<input>` placed inside it loses focus/value mid-typing. Every human
+affordance (chat bar, new-agent bar, time-travel slider) is a **sibling of
+`<main id="world">` in `<body>`**, spliced via the shim's `extra-body`, so the
+feed never clobbers it. A fixed bottom bar + an inline-height spacer reserves
+scroll room. (`chat-form-html`, `new-agent-bar-html`, `time-travel-bar-html` in
+`datastar.cljs`.)
 
-;; SSE handler re-renders on refresh events
-(def my-sse (sse/render-handler #'my-render-fn :poll-ms 10000))
-```
+## Datastar attributes (the signal idioms actually used)
 
-**Use for:** agent progress, real-time data feeds, ctx mutations.
+Event attributes use a **colon**: `data-on:click`, `data-on:submit`,
+`data-on:change` — `data-on-click` (hyphen) is wrong and silently does nothing.
+In hiccup that needs a colon in the key, use `(keyword "data-on:submit")`.
 
-### Rule of thumb
+| Attribute | Purpose | Live example (datastar.cljs) |
+|---|---|---|
+| `data-init` | open the feed on element init | `@get('/world/feed', {retryMaxCount: Infinity, openWhenHidden: false})` |
+| `data-effect` | re-run + auto-cancel prior `@get` | the time-travel bar's sole feed opener |
+| `data-signals` | declare reactive state | `{t: <basis>, ct: <basis>, live: true}` |
+| `data-bind` | two-way bind input → signal | `data-bind "text"` on the chat input |
+| `data-on:submit` | form submit → form-mode POST | `@post('/chat?agent=<id>', {contentType:'form'}); $text=''` |
+| `data-text` | bind text content | `"$live ? '● live' : '⏸ as-of t=' + $ct"` |
+| `data-class` | toggle classes by signal | `{'text-signal': $live, 'text-warning': !$live}` |
 
-**If a user clicked something, return HTML directly. If data changed in the background, use `refresh-all!`.**
+`@post(url,{contentType:'form'})` reads the form's named fields and posts them
+`application/x-www-form-urlencoded` — exactly the shape `serve.cljs`'s handlers
+parse. A 204 reply closes the stream cleanly (no morph from the POST); the
+agent's reply transacts and the broadcast feed re-renders. Page load ships
+**only `datastar.js`** (no client highlighter) — server-rendered Clojure/markdown
+is morph-safe by construction.
 
-## CRITICAL: Attribute Syntax
+## Hiccup, in `.cljs`
 
-**Datastar uses COLONS, not hyphens** in event attributes:
-- `data-on:click` (correct)
-- `data-on-click` (WRONG - won't work!)
+Tiles are hiccup vectors built in `.cljs` and serialized by
+`seon.ui.html/->string` (`html.cljc`). The layout pieces:
 
-This applies to all event handlers: `data-on:click`, `data-on:submit`, `data-on:keydown`, etc.
+| ns | Role |
+|---|---|
+| `seon.ui.world` | `world-layout = f(db, agent-id)` — canvas (live tile) + transcript + priority-ordered tiles |
+| `seon.ui.header` | `system-header = f(db)` — the fixed fleet status bar (agents/throughput/store/health) |
+| `seon.ui.markdown` | `md->hiccup` — LLM markdown replies → styled hiccup, no client JS |
+| `seon.ui.clojure` | `clj->hiccup` — server-side Clojure syntax highlight (`.hljs-*` palette) |
 
-**Known issue:** Some existing code in `html.clj` and `components.clj` incorrectly uses `data-on-click` (hyphen). Fix these when you encounter them — do not introduce new hyphen-style attributes.
+## The render engine — `seon.render/block` and `slot`
 
-## Key Datastar Attributes
+`src/seon/render.cljs` is the typed renderer every surface shares. Two ideas:
 
-| Attribute | Purpose | Example |
-|-----------|---------|---------|
-| `data-signals` | Declare reactive state | `{:count 0}` |
-| `data-text` | Bind text content | `"$count"` |
-| `data-on:click` | Handle clicks | `"$count++"` |
-| `data-on:submit` | Form submission | `"@post('/api/submit')"` |
-| `data-model` | Two-way binding | `"$inputValue"` |
-| `data-show` | Conditional display | `"$isVisible"` |
-| `data-init` | Run JS on element init | `"@get('/api/sse')"` |
-| `data-preserve-attr` | Preserve attr across SSE morphs | `"open"` (on `<details>`) |
+- **`(block view x)`** — `view` is `:html` (→ hiccup) or `:ai` (→ prompt
+  String). It DISPATCHES ON THE VALUE'S KIND via the namespaced key the value
+  carries (the tagged-value contract — never a stored `:kind`):
+  `{:seon.render/markdown "…"}` → `md->hiccup`; `{:seon.render/source "…"}` →
+  `clj->hiccup`; a `:seon.render.value/tree` projection → the collapsible data
+  panel; a `:seon.error/message` value → an error tile; a literal hiccup vector
+  → passthrough; anything else → the data panel. GUARDED — a throwing render
+  becomes an error card, siblings intact, never an exception.
+- **`(slot ctx :name)`** — place the agent's `:seon.agent/ctx` block named
+  `:name` into a tile hole, rendered through the guarded engine and wrapped as
+  `[:div#tile-<name> {:data-slot "<name>"} …]` — a stable DOM id so idiomorph
+  anchors it across morphs. Injected into every render ctx as
+  `:seon.render/slot`, so a layout calls `((:seon.render/slot in) :canvas)`.
 
-## Hiccup with Datastar
+Renders are **functions resolved late** (`seon.eval/lookup-value` over a
+qualified symbol), never stored output — a redefine takes effect on the next
+render with no wiring. A tile that THROWS degrades to a calm "updating this
+tile" placeholder; the agent learns its tile is broken via a DERIVED context
+section (no stored error flag — self-heals on the next clean render).
 
-```clojure
-(defn render-counter []
-  [:div {:data-signals "{count: 0}"}
-   [:span {:data-text "$count"}]
-   [:button {:data-on:click "$count++"} "Increment"]])
-```
+## Routes are `:seon.route/*` datoms (reitit)
 
-## View Transitions
+`seon.web.router` derives the reitit route vector from the database:
+`db->routes` is a PURE projection of the seeded `:seon.route/*` datoms (pattern
+/ method / handler-symbol / middleware) — the six core routes (`/`, `/world`,
+`/world/feed`, `/agent/{id}`, `/agent/{id}/feed`, `/agent/{id}/call`). Handler
+symbols resolve **late** at request time via `eval/lookup-value`, so a redefine
+needs no rebuild. Routes NOT yet seeded as datoms (static assets, the secondary
+POST doors `/chat`/`/stop`/`/resume`/`/clear`/`/agents/new`, `/sse`, `/data`,
+`/debug`) live in the `static-supplement`. A socket-owning handler (SSE/static/
+gzip-feed) returns the **hijack sentinel** `{:seon.http/hijacked true}` so the
+adapter writes nothing. State-changing POSTs carry the `:seon.route/same-origin`
+middleware (loopback binding is not CSRF protection).
 
-View transitions are **disabled by default** in seon's SSE system (`render-handler`). Opt in only when needed for page-level navigations:
+To add a page: write the whole-element render fn (pure, never-throws), serve a
+shim page + a `/feed` route, and either seed a `:seon.route/*` datom or add to
+the static supplement. Don't invent a second update mechanism — reuse
+`open-feed!` + a bound `view-fn`.
 
-```clojure
-(sse/render-handler #'my-render-fn :use-view-transition? true)
-```
+## Phosphor Terminal theme (non-negotiable)
 
-## SSE Buffer Design
+Warm blacks, cream text (NOT white), amber accent; density over whitespace;
+monospace everywhere; dot+text status (`● running`), never pill badges.
 
-The broadcast channel uses a **sliding buffer of size 1**. Under load, only the most recent event is kept. Clients always converge to latest state because `render-handler` re-renders from scratch. This is why Pattern A matters for user actions.
+- Backgrounds `bg-base-950/900/850/800`; text `text-text-100/200/400/500`;
+  accent `text-signal` / `text-amber-400`; semantic `text-success/error/warning`.
+- `text-xs` is the PRIMARY size (`text-2xs` for meta); `p-3` not `p-6`; 1px
+  borders `border-base-800`; `rounded`/`rounded-md`, never `rounded-full`
+  except status dots.
+- **Never** `bg-white`, `text-white`, `text-gray-*`/`text-zinc-*`, decorative
+  shadows, AI-cliche gradients.
+- Tailwind is local (`resources/public/css/input.css`, Tailwind v4 `@theme` +
+  `@source` scanning), NOT a CDN. Only classes in the built/safelisted
+  vocabulary render — a height not in the vocab is an inline `:style`. After
+  editing `input.css`, rebuild (`npm run css:build`).
 
-## Key Files
+Full palette, type scale, density rules, component patterns, and anti-patterns:
+`references/design-principles.md` + `docs/prds/namespace-ui/design-system.md`.
+
+## Key files
 
 | File | Purpose |
-|------|---------|
-| `src/seon/web/sse.clj` | SSE core: `render-handler`, `refresh-all!` |
-| `src/seon/web/html.clj` | Hiccup components, base layout |
-| `src/seon/web/routes.clj` | Route definitions |
-| `src/seon/web/agents.clj` | Example of both Pattern A and B |
-| `src/seon/web/components.clj` | Reusable UI components |
-| `src/seon/ns/routes.clj` | Namespace page handlers, SSE |
-| `resources/public/css/input.css` | Tailwind source with theme |
-| `resources/public/css/output.css` | Built CSS (don't edit directly) |
-| `docs/conventions.md` | Ground truth for SSE patterns |
+|---|---|
+| `src/seon/web/serve.cljs` | HTTP server on 7890; POST handlers (`/chat`, `/agents/new`, `/stop`, …); same-origin gate |
+| `src/seon/web/datastar.cljs` | the gzip-morph `view=f(db)` feed: `world-view`, `open-feed!`, `broadcast!`, the human input bars, time-travel |
+| `src/seon/web/router.cljs` | reitit over `:seon.route/*` datoms; the Node↔Ring adapter + hijack sentinel |
+| `src/seon/web/debug.cljs` | operator dev tools: `/agent/{id}/debug` (the exact LLM bytes) + `/data` (datom browser) |
+| `src/seon/web/brand.cljs` | downstream brand seam (name/tagline/theme as DATA, read at render time) |
+| `src/seon/render.cljs` | `block` (typed-value renderer) + `slot` + the recursive guarded engine |
+| `src/seon/ui/world.cljs` · `header.cljs` · `markdown.cljs` · `clojure.cljs` | the layout, status bar, and content renderers |
+| `reference-code/datastar-clojure/` · `reference-code/datastar/` | datastar source — the `patch-elements`/gzip idioms (`tiny_gzip.clj`); read it, don't guess |
 
-## Tailwind Build (Local, NOT CDN)
+## When to read which reference
 
-We use local Tailwind with `@tailwindcss/typography` for prose/markdown styling.
-
-```bash
-# Build CSS once
-npm run css:build
-
-# Watch for changes during development
-npm run css:watch
-```
-
-The theme is defined in `resources/public/css/input.css` using Tailwind v4 syntax:
-- `@theme { }` block for custom colors
-- `@plugin "@tailwindcss/typography"` for prose classes
-- `@source` directive to scan Clojure files for classes
-
-**After editing input.css, rebuild the CSS.**
-
-## For More Details
-
-- **Full SSE pattern spec**: See `docs/conventions.md` section "SSE: Direct Response vs Background Push"
-- **Design system**: See `docs/prds/namespace-ui/design-system.md` for Phosphor Terminal theme
-- **Datastar attributes**: See `docs/seon/reference/datastar-quick-reference.md`
-- **Datastar deep dive**: See `docs/seon/reference/datastar-deep-dive.md`
+- `references/design-principles.md` — the full Phosphor palette, type scale,
+  density rules, status/log/table component patterns, anti-patterns.
+- `docs/prds/namespace-ui/design-system.md` — the design-system spec (philosophy,
+  Tailwind v4 `@theme`, animations).
+- `reference-code/datastar-clojure/src/dev/examples/tiny_gzip.clj` — a minimal
+  separate-GET gzip SSE stream (the shape `open-feed!` mirrors).

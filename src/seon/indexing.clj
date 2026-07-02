@@ -13,8 +13,8 @@
    analyzed, (b) loaded before the caller at runtime, and (c) warning-free
    to reference by fully-qualified symbol.
 
-     - `specced-fn-vars` in seon.client → every public specced fn the pod
-       actually loads.
+     - `public-fn-vars` in seon.client → every public fn the pod
+       actually loads (specced or not).
      - `deftest-vars` in seon.dev.test-preload → every deftest var the pod
        build pulls in (the preload IS the test-ns roster).
 
@@ -83,11 +83,17 @@
             (and (= "file" (.getProtocol url))
                  (some #(.startsWith (.getPath url) ^String %) roots))))))))
 
-(defmacro specced-fn-vars
-  "Expand to a vector of `#'`-literals: every PUBLIC fn var carrying
-   `:malli/schema` metadata, across every `seon.*` namespace in the calling
-   ns's transitive require closure. Sorted by symbol for deterministic
-   output."
+(defmacro public-fn-vars
+  "Expand to a vector of `#'`-literals: EVERY public fn var — specced or
+   not — across every first-party namespace (by [[first-party-file?]]) in
+   the calling ns's transitive require closure. Sorted by symbol for
+   deterministic output.
+
+   No `:malli/schema` gate: the program graph indexes the WHOLE public
+   first-party surface (owner directive — 'just index everything'). Whether
+   a fn carries a spec is recorded separately on its `:seon.fn/spec` row by
+   the consumer ([[seon.client/var->fn-row]]), orthogonal to whether it is
+   indexed — an unspecced fn is simply indexed without a spec."
   []
   (let [nss   (analyzer-namespaces)
         reach (transitive-requires nss (-> &env :ns :name))
@@ -97,7 +103,6 @@
                       :let  [m (def-meta d)]
                       :when (and (:fn-var m)
                                  (not (:private m))
-                                 (some? (:malli/schema m))
                                  (first-party-file? (:file m))
                                  (:line m))]
                   (:name d)))]

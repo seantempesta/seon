@@ -228,20 +228,40 @@
       "blank + duplicate messages collapse"))
 
 ;; ---------------------------------------------------------------------------
-;; Registry stomp recovery — relink-registry! restores seon-registered
-;; schema resolution after a foreign (mr/set-default-registry! …), the
-;; exact side effect a bootstrap load of malli.core$macros.js re-runs.
+;; Registry stomp guard — a foreign (mr/set-default-registry! …) is the exact
+;; side effect a bootstrap load of malli.core$macros.js re-runs, severing every
+;; seon-registered schema. relink-registry! installs a watch on malli's
+;; registry* atom that re-asserts seon's registry SYNCHRONOUSLY inside the
+;; stomping reset!, so there is no window where validation is broken.
 ;; ---------------------------------------------------------------------------
 
-(deftest relink-registry!-heals-a-default-registry-stomp
+(deftest stomp-guard-closes-the-window
+  ;; relink (re)installs the guard on the live registry* atom.
+  (is (true? (schema/relink-registry!)))
+  ;; Simulate the stomp the way malli.core's top-level (def default-registry …)
+  ;; does it — default schemas + var-registry, no seon mutable layer.
+  (mr/set-default-registry!
+   (mr/composite-registry (mr/fast-registry (m/default-schemas)) (mr/var-registry)))
+  ;; NO manual relink here. The watch must have already healed, in the same
+  ;; reset! the stomp triggered — so resolution NEVER broke.
+  (is (some? (m/schema :seon.db/conn))
+      "seon-registered keywords resolve immediately after a stomp — window closed")
+  (is (true? (m/validate :seon.db/id "abc1234567890a"))
+      "value validation against a seon schema still works post-stomp")
+  (is (false? (m/validate :seon.db/id "x"))
+      "and still rejects — the real seon schema, not a default fallthrough"))
+
+(deftest relink-registry!-restores-after-the-guard-is-removed
+  ;; With the guard detached, the stomp DOES sever — proving (a) the stomp is
+  ;; real and (b) relink-registry! heals it (and re-arms the guard).
   (try
-    ;; Simulate the stomp: default registry loses seon's mutable layer.
+    (remove-watch malli.registry/registry* :seon.schema/seon-stomp-guard)
     (mr/set-default-registry! (m/default-schemas))
     (is (thrown? js/Error (m/schema :seon.db/conn))
-        "after the stomp, seon-registered keywords no longer resolve")
+        "guard removed: the stomp severs seon-registered keywords")
     (finally
-      ;; The fn under test doubles as the cleanup — MUST heal even if
-      ;; the assertion above throws, or the rest of the suite breaks.
+      ;; relink heals AND re-installs the guard — MUST run even if the assert
+      ;; above throws, or the rest of the suite breaks.
       (is (true? (schema/relink-registry!)))))
   (is (some? (m/schema :seon.db/conn))
       "after relink-registry!, seon-registered keywords resolve again"))

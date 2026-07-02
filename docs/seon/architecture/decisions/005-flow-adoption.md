@@ -7,6 +7,10 @@ tags: [decision, architecture, database, flow]
 
 # ADR 005: Selective Adoption of core.async.flow
 
+> **SUPERSEDED.** The active CLJS pod is core.async-free; the agent loop is a
+> data FSM fold over derived events (see [[agent-runtime]]). core.async.flow
+> survives only on the paused JVM track. Historical record below.
+
 ## Context
 
 Rich Hickey released `core.async.flow` (January 2025) -- a library for building concurrent data processing pipelines with explicit topology, step function separation, and introspection. We evaluated whether it should become the foundational architecture for Seon's agent infrastructure.

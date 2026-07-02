@@ -93,7 +93,7 @@
 
 (defn- wire-datoms->datoms [wire-data]
   (mapv (fn [[e a v t added]]
-          (dd/datom e (wire/readT a) (wire/readT v) t added))
+          (dd/datom e a v t added))
         wire-data))
 
 ;; ---------------------------------------------------------------------------
@@ -150,34 +150,34 @@
               tx-data    (if (map? arg-map) (:tx-data arg-map) arg-map)
               tx-meta    (when (map? arg-map) (:tx-meta arg-map))
               request-id (str (random-uuid))
-              req        (cond-> {"op"         "transact"
-                                  "tx-data"    (wire/T tx-data)
-                                  "request-id" request-id}
-                           (seq tx-meta) (assoc "tx-meta" (wire/T tx-meta)))]
+              req        (cond-> {:seon.store.wire/op       "transact"
+                                  :seon.store.wire/tx-data  tx-data
+                                  :seon.store.wire/write-id request-id}
+                           (seq tx-meta) (assoc :seon.store.wire/tx-meta tx-meta))]
           (swap! !own-request-ids conj request-id)
           (-> (wire/rpc sock-path req {})
               (.then
                (fn [resp]
-                 (if-not (get resp "ok")
+                 (if-not (:seon.store.wire/ok resp)
                    (put! p (ex-info (str "wire transact failed: "
-                                         (get resp "error"))
-                                    {:seon.peer/error-kind (get resp "error-kind")}))
+                                         (:seon.store.wire/error resp))
+                                    {:seon.peer/error-kind (:seon.store.wire/error-kind resp)}))
                    ;; RYOW: resolve only once a local deref is at/past the
                    ;; ack'd basis-t. The synthesized report carries the
                    ;; MATERIALIZED post-tx db value, so straight-line
                    ;; transact!-then-read peer code just works.
-                   (let [bt      (get resp "basis-t")
+                   (let [bt      (:seon.store.wire/basis-t resp)
                          db      (ryow-deref! conn bt)
-                         tempids (wire/readT (get resp "tempids"))
-                         tx-meta (wire/readT (get resp "tx-meta"))]
+                         tempids (:seon.store.wire/tempids resp)
+                         tx-meta (:seon.store.wire/tx-meta resp)]
                      (put! p (cond-> {:db-after db
                                       :tx-data  (wire-datoms->datoms
-                                                 (get resp "tx-data"))
+                                                 (:seon.store.wire/tx-data resp))
                                       :tempids  (or tempids {})}
                                (some? tx-meta) (assoc :tx-meta tx-meta)
-                               (get resp "basis-t-before")
+                               (:seon.store.wire/basis-t-before resp)
                                (assoc :db-before
-                                      (d/as-of db (get resp "basis-t-before")))))))))
+                                      (d/as-of db (:seon.store.wire/basis-t-before resp)))))))))
               (.catch
                (fn [e]
                  (put! p (if (instance? js/Error e)
@@ -237,16 +237,16 @@
   [conn sock-path]
   (reset! !last-db @conn)
   (let [sub    (await (wire/subscribe-tx sock-path {}))
-        handle (get sub "handle")]
-    (when-not (get sub "ok")
+        handle (:seon.store.wire/handle sub)]
+    (when-not (:seon.store.wire/ok sub)
       (throw (ex-info "subscribe-tx failed" {:seon.peer/resp sub})))
     ((fn ^:async pump []
        (let [ev (await (wire/next-tx-event sock-path handle))]
          (cond
-           (get ev "ok")
-           (let [rid  (get ev "request-id")
+           (:seon.store.wire/ok ev)
+           (let [rid  (:seon.store.wire/write-id ev)
                  own? (boolean (and rid (contains? @!own-request-ids rid)))
-                 bt   (get ev "basis-t")]
+                 bt   (:seon.store.wire/basis-t ev)]
              (if own?
                ;; own tx already fired local listeners via writer/transact!;
                ;; still advance the consecutive-values chain.
@@ -259,13 +259,13 @@
                                 {:db        db
                                  :db-before db-before
                                  :datoms    (wire-datoms->datoms
-                                             (get ev "tx-data"))})]
+                                             (:seon.store.wire/tx-data ev))})]
                  (doseq [[k h] @!handlers]
                    (try (h input)
                         (catch :default e
                           (js/console.warn "[replica-peer adapter]" (pr-str k)
                                            "handler threw:" (str e))))))))
-           (= "no-event" (get ev "error")) nil
+           (= "no-event" (:seon.store.wire/error ev)) nil
            :else (js/console.warn "[replica-peer adapter] event error:"
                                   (pr-str ev)))
          ;; detached tail call — promise chain does not grow
@@ -294,8 +294,9 @@
     :where [?e :seon.peer/id ?id] [?e :seon.peer/name ?name]])
 
 (defn ^:async run-rw!
-  "Oracle (a): transact through the :seon-wire writer; read locally via lazy
-   deref. Reports rows from BOTH the synthesized report's :db-after and a
+  "Oracle (a): transact through the `:seon-wire` writer, read locally.
+
+   Reads locally via lazy deref. Reports rows from BOTH the synthesized report's :db-after and a
    fresh deref, RYOW evidence, own-listener firing, and io counts."
   [cfg sock-path]
   (let [t0         (js/performance.now)
@@ -335,8 +336,10 @@
       (.exit js/process 0))))
 
 (defn ^:async run-listen!
-  "Oracle (b)/(d): own tx (must be SKIPPED by the adapter), then wait for a
-   foreign tx carrying PEER_EXPECT_ID — handler must receive a db VALUE
+  "Oracle (b)/(d): own tx is skipped, then wait for a foreign tx.
+
+   Own tx must be SKIPPED by the adapter; the foreign tx carrying
+   PEER_EXPECT_ID — handler must receive a db VALUE
    containing the datom, with consecutive db/db-before."
   [cfg sock-path ^js env]
   (let [conn       (await (d/connect cfg))
@@ -379,19 +382,23 @@
                    20000)))
 
 (defn ^:async run-poke!
-  "Oracle helper: a RAW wire transact (its own wire client, NOT through any
-   conn) — 'another writer' from every peer's point of view."
+  "Oracle helper: a RAW wire transact via its own wire client.
+
+   NOT through any conn — 'another writer' from every peer's point of view."
   [sock-path ^js env]
   (let [id   (js/parseInt (.-PEER_POKE_ID env) 10)
         nm   (or (.-PEER_POKE_NAME env) (str "poke-" id))
         resp (await (wire/transact sock-path
-                                   [{:seon.peer/id id :seon.peer/name nm}]))]
+                                   [{:seon.peer/id id :seon.peer/name nm}]))
+        bt   (:seon.store.wire/basis-t resp)]
     (emit! {:seon.peer/mode    :poke
-            :seon.peer/basis-t (:basis-t resp)
-            :seon.peer/resp-ok (some? (:basis-t resp))})
-    (.exit js/process (if (:basis-t resp) 0 1))))
+            :seon.peer/basis-t bt
+            :seon.peer/resp-ok (some? bt)})
+    (.exit js/process (if bt 0 1))))
 
-(defn ^:async -main [& _]
+(defn ^:async -main
+  "Node entry point: dispatch on `PEER_MODE` to run one replica-peer oracle."
+  [& _]
   (install-read-counter!)
   (try
     (let [^js env    (.-env js/process)

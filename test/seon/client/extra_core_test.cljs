@@ -8,7 +8,7 @@
    Uses the committed `acme.extra-fixture` ns (under seon's test/ root)
    as the stand-in downstream namespace — no env var or external
    checkout needed; the registration call is exactly what a downstream
-   entry ns does with `(seon.indexing/specced-fn-vars)`.
+   entry ns does with `(seon.indexing/public-fn-vars)`.
 
    Spec: docs/prds/agent-runtime/research/extra-src-research-2026-06-12.md §d."
   (:require [acme.extra-fixture]
@@ -177,7 +177,7 @@
         (reset! client/!extra-core-vars before)))))
 
 (deftest core-overlap-dedups-silently
-  ;; A downstream entry's (specced-fn-vars) expansion sees the seon
+  ;; A downstream entry's (public-fn-vars) expansion sees the seon
   ;; surface its require closure pulls in. Those vars dedup away by
   ;; fully-qualified sym BEFORE the reserved-prefix guard runs — no
   ;; throw, no duplicate rows.

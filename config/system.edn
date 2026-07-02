@@ -1,0 +1,125 @@
+;; The consolidated pod context manifest — read by seon.config via aero
+;; (`SEON_CONFIG` overrides the path; a per-cluster variant is a SEPARATE file,
+;; not a `#profile`). ABSENT → the pod boots byte-identically to a no-config
+;; world (full env-dir skill scan + the default context tree). PRESENT → the
+;; OPTIONAL override below. Every key fully namespaced. Add a new concern = add
+;; ONE key here + a resolver in seon.config (the "add more things to it"
+;; contract).
+{;; ── SKILL CORPUS ──
+ ;; The env-dir scan (`SEON_SKILLS_DIR`, default `.claude/skills`) IS the corpus:
+ ;; every skill it finds is scanned into the catalog. The always-on skill BODIES
+ ;; are the agent-context's `:my.skills/load` presence-set (default `[:repl]`,
+ ;; seeded as the `:skill/repl` block). No include/exclude curation — a cluster
+ ;; that wants a different corpus points SEON_SKILLS_DIR at its own dir. This
+ ;; section carries only the optional `:seon.config/dirs` corpus-dir override:
+ ;;   :seon.config/skills {:seon.config/dirs ["path/to/skills"]}
+ ;; Owner rule (2026-07-02): values the manifest can own do NOT also live in
+ ;; .env (env must never shadow config) — the corpus dir moved here from
+ ;; SEON_SKILLS_DIR.
+ :seon.config/skills {:seon.config/dirs ["seon-skills"]}
+
+ ;; ── LLM PROVIDER is NOT set in this manifest ──
+ ;; The agent's LLM provider/model is its OWN env→DB surface (`seon.ai`, the
+ ;; `:seon.ai/config` row), deliberately separate from this manifest. Select the
+ ;; provider via env (e.g. in .env):
+ ;;   SEON_AI_PROVIDER=diffusiongemma            ; deepseek (default) | anthropic
+ ;;   SEON_DG_ENDPOINT=<runpod-endpoint-id>      ;   | openai-compat | diffusiongemma
+ ;;   RUNPOD_API_KEY=<key>
+ ;; A live switch is a transact: {:seon.ai/id "config" :seon.ai/provider :diffusiongemma}.
+
+ ;; ── NAMESPACES render policy — the EXPLICIT list of WHICH nses render in the
+ ;; agent prompt BODY (#42). Every rendered ns shows its REAL FULL SOURCE — the
+ ;; budget is bound by CURATION (which nses), never compression (how each):
+ ;;   :seon.config/always     → the always-present FULL-source nses
+ ;;   :seon.config/current-ns → :full (default — the agent's own ns) | :off
+ ;; The agent's current ns + the nses it :require's + third-party (acme) code
+ ;; render full ON TOP of this list. Trim `:always` to go lean. (Mirrors
+ ;; seon.config/default-namespaces-policy.)
+ :seon.config/namespaces
+ {:seon.config/always     [my.kb my.data my.ui my.tile
+                           my.plan seon.agent.message seon.agent.lifecycle]
+  :seon.config/current-ns :full}
+
+ ;; ── RENDER BOUNDS — the GLOBAL, process-wide value/eval/message DISPLAY caps
+ ;; (#46). A proper config (not scattered env reads): each cap is a plain literal
+ ;; here, read by seon.config's store-edn-cap / eval-render-cap / value-* etc.
+ ;; The value below IS the default — the accessor applies the SAME literal as its
+ ;; fallback when this section is absent, so a no-manifest boot is byte-identical.
+ ;; A cluster tunes a cap by editing the literal (then `bin/seon restart pod`).
+ ;; An env override on a SPECIFIC cap is available per-knob via aero's tags,
+ ;; e.g.:  :seon.config.render/value-width #long #or [#env SEON_RENDER_VALUE_WIDTH 72]
+ ;; — not pre-wired (env vars aren't needed when the config is the source).
+ :seon.config/render
+ {:seon.config.render/store-edn-cap      16384
+  :seon.config.render/eval-cap           1500
+  :seon.config.render/message-cap        4000
+  :seon.config.render/value-max-depth    3
+  :seon.config.render/value-max-keys     8
+  :seon.config.render/value-max-items    8
+  :seon.config.render/value-max-string   80
+  :seon.config.render/value-shape-sample 8
+  :seon.config.render/value-verbatim-cap 1500
+  :seon.config.render/value-width        72}
+
+ ;; ── AGENT-CONTEXT (v3, config-driven-agent-init) — the two-level context
+ ;; config the GENERIC loader (seon.config/resolve-agent-context) consumes. A
+ ;; sparse map: every unspecified key (incl. the whole :seon.agent/ctx block
+ ;; tree) is filled from its schema :default by the recursive
+ ;; default-value-transformer, so `{}` reproduces the byte-parity default. Add a
+ ;; key here only to DIFFER from the default (e.g. a lean block set, a per-agent
+ ;; scalar). Empty = byte-identical to the no-config default tree.
+ ;;
+ ;; `:seon.eval/home-requires` — the DEFAULT toolbelt every agent's home ns is
+ ;; wired with (OVERRIDES the `seon.eval/home-ns-require-specs` const). Since the
+ ;; namespaces block renders "the current ns's requires as compact cards", these
+ ;; ARE what a fresh agent sees as its verb surface. Each entry must match
+ ;; `seon.eval/require-spec` (`[ns :as alias]` or `[ns :refer [verbs…]]`) — a
+ ;; bare `[ns]` is rejected by the transact schema, so the `my.*` toolkit carries
+ ;; its conventional short alias (kb/data/ui/tile) even though it is called
+ ;; full-qualified. `seon.agent` (the orchestration surface) is deliberately
+ ;; NOT here — it belongs to root only (see note on :seon.config/root-context).
+ :seon.config/agent-context
+ {:seon.eval/home-requires
+  [[seon.agent.message :as message]
+   [my.plan :as plan]
+   [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
+   [seon.schema :as schema]
+   [seon.db :as db]
+   [my.kb :as kb]
+   [my.data :as data]
+   [my.ui :as ui]
+   [my.tile :as tile]
+   [my.blob :as blob]
+   [seon.agent.search :as search]
+   [seon.agent.shell :as shell]
+   [seon.agent.web :as web]]}
+
+ ;; ── ROOT-CONTEXT — a SPARSE override merged over :seon.config/agent-context
+ ;; by IDENTITY (id "root"), block upsert-by-:seon.agent.ctx/name. The :live-tile
+ ;; block sets root's canvas = the system/fleet dashboard, the config-driven
+ ;; replacement for the hardcoded client.cljs root branch.
+ ;;
+ ;; `:seon.eval/home-requires` — root gets the SHARED toolbelt PLUS
+ ;; `[seon.agent :as agent]` (the orchestration surface — start!/create!/
+ ;; delegate!/set-purpose!/armable-agent-ids), so root additionally shows the
+ ;; `seon.agent` orchestration card. `context-config-for` merges root-context's
+ ;; scalar keys over the defaulted base; the `:seon.agent/ctx` block vector below
+ ;; is upserted by name (not overwritten). Every entry must carry `:as`/`:refer`
+ ;; (bare `[ns]` is rejected by `seon.eval/require-spec`).
+ :seon.config/root-context
+ {:seon.eval/home-requires
+  [[seon.agent.message :as message]
+   [my.plan :as plan]
+   [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
+   [seon.schema :as schema]
+   [seon.db :as db]
+   [my.kb :as kb]
+   [my.data :as data]
+   [my.ui :as ui]
+   [my.tile :as tile]
+   [seon.agent.search :as search]
+   [seon.agent :as agent]]
+  :seon.agent/ctx
+  [{:seon.agent.ctx/name :live-tile :seon.agent.ctx/priority 35
+    :seon.render/ai seon.agent.ctx.live-tile/live-tile-block
+    :seon.render.live-tile/content seon.render.system/system-view}]}}

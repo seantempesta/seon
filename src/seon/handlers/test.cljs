@@ -19,7 +19,9 @@
 (def ^:private source-inline-threshold 200)
 
 (defn test-status
-  "Returns `{:ran? bool, :passing? (bool|nil), :failure-summary str|nil}`
+  "The recorded test run's `{:ran? :passing? :failure-summary}` triple.
+
+   Returns `{:ran? bool, :passing? (bool|nil), :failure-summary str|nil}`
    from the recorded `:seon.test/last-*` fields. `:ran?` false ⇒ no run
    has been recorded for this test (passing? nil = no signal).
 
@@ -27,6 +29,7 @@
    `render-ai`/`render-html` AND `seon.agent/test-block-ai`
    (whole-namespace render) derive their glyph/pill from it, so the
    `last-passed-at`/`last-failed-at` → ✓/✗/• logic lives in ONE place."
+  {:malli/schema [:=> [:cat :map] :map]}
   [{:seon.test/keys [last-passed-at last-failed-at last-failure-summary]}]
   (cond
     (and (nil? last-passed-at) (nil? last-failed-at))
@@ -41,10 +44,13 @@
     {:ran? true :passing? false :failure-summary last-failure-summary}))
 
 (defn status-glyph
-  "The single-char status glyph for a `:seon.test` entity — the ONLY
+  "The single-char status glyph for a `:seon.test` entity.
+
+   The ONLY
    place the ✓/✗/• literals are defined. `✓` last run passed, `✗` last
    run failed, `•` no run recorded. Used by this ns's renderers and by
    `seon.agent`'s whole-namespace render so the two never diverge."
+  {:malli/schema [:=> [:cat :map] :string]}
   [entity]
   (let [{:keys [ran? passing?]} (test-status entity)]
     (cond
@@ -58,6 +64,7 @@
    `;; • test (no run recorded)`. Built on `status-glyph` so the glyph
    literals stay single-sourced; shared by `render-ai` here and
    `seon.agent/test-block-ai`."
+  {:malli/schema [:=> [:cat :map] :string]}
   [entity]
   (let [{:keys [ran? passing? failure-summary]} (test-status entity)
         glyph (status-glyph entity)]
@@ -83,16 +90,17 @@
 
    The glyph is the FIRST char of line 2 so it lands in the LLM's
    peripheral vision; the agent can scan a long ctx for ✗/• quickly."
-  {:malli/schema [:=> [:cat :map] :seon.render/ai-response]}
-  [{:seon.render/keys [entity]}]
-  (let [sym      (or (:seon.test/sym entity) "?")
+  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
+  [{:seon.render/keys [node entity]}]
+  (let [entity   (or node entity)
+        sym      (or (:seon.test/sym entity) "?")
         src      (:seon.test/source entity)
         header   (str "[test " sym "]")
         src-line (when (and src (not (str/blank? src)))
                    (str/trim src))
         lines    (cond-> [header (status-line entity)]
                    src-line (conj src-line))]
-    {:seon.render/ai (str/join "\n" lines)}))
+    (str/join "\n" lines)))
 
 (defn- status-pill
   "Tri-color pill — :ok = amber dot, :warn = amber-dim dot, :err = red dot."
@@ -111,9 +119,10 @@
    The pill is `passing` (amber), `failing` (red), or `no run` (amber-dim)
    derived from the recorded `:seon.test/last-*` fields. When the last
    run failed and carries a summary, a red one-line warning is shown."
-  {:malli/schema [:=> [:cat :map] :seon.render/html-response]}
-  [{:seon.render/keys [entity]}]
-  (let [sym    (or (:seon.test/sym entity) "?")
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-tile/hiccup]]}
+  [{:seon.render/keys [node entity]}]
+  (let [entity (or node entity)
+        sym    (or (:seon.test/sym entity) "?")
         src    (or (:seon.test/source entity) "")
         long?  (> (count src) source-inline-threshold)
         anchor (str "seon-test-" (str/replace (str sym) #"[^A-Za-z0-9_-]" "_"))
@@ -122,19 +131,18 @@
                                (and ran? passing?)       {:label "passing" :kind :ok}
                                (and ran? (false? passing?)) {:label "failing" :kind :err}
                                :else                     {:label "no run"  :kind :warn})]
-    {:seon.render/hiccup
-     [:div {:id anchor :class "py-1"}
-      [:div {:class "flex items-baseline gap-2 flex-wrap"}
-       [:span {:class "text-xs font-mono font-semibold text-amber-400"} "test"]
-       [:span {:class "text-xs font-mono text-text-100"} sym]
-       (status-pill label kind)]
-      (when (and ran? (false? passing?) failure-summary
-                 (not (str/blank? failure-summary)))
-        [:div {:class "mt-1 text-xs font-mono text-error/80 rounded bg-base-900 px-1.5 py-1"}
-         (str "✗ " failure-summary)])
-      (when (not (str/blank? src))
-        [:details {:class "mt-1" :open (not long?)}
-         [:summary {:class "text-xs font-mono text-text-500 cursor-pointer"}
-          (if long? "source ▾" "source")]
-         [:pre {:class "text-xs whitespace-pre-wrap mt-0.5 rounded bg-base-900 p-1.5 overflow-x-auto"}
-          [:code {:class "language-clojure hljs"} (str/trim src)]]])]}))
+    [:div {:id anchor :class "py-1"}
+     [:div {:class "flex items-baseline gap-2 flex-wrap"}
+      [:span {:class "text-xs font-mono font-semibold text-amber-400"} "test"]
+      [:span {:class "text-xs font-mono text-text-100"} sym]
+      (status-pill label kind)]
+     (when (and ran? (false? passing?) failure-summary
+                (not (str/blank? failure-summary)))
+       [:div {:class "mt-1 text-xs font-mono text-error/80 rounded bg-base-900 px-1.5 py-1"}
+        (str "✗ " failure-summary)])
+     (when (not (str/blank? src))
+       [:details {:class "mt-1" :open (not long?)}
+        [:summary {:class "text-xs font-mono text-text-500 cursor-pointer"}
+         (if long? "source ▾" "source")]
+        [:pre {:class "text-xs whitespace-pre-wrap mt-0.5 rounded bg-base-900 p-1.5 overflow-x-auto"}
+         [:code {:class "language-clojure hljs"} (str/trim src)]]])]))

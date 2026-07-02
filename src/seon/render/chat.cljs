@@ -19,16 +19,12 @@
      (`\"→ agent-<id>\"`) — the human watches their agent confer with
      peers without leaving the conversation.
 
-   The agent's per-turn SELF-messages (raw LLM output logged for the
-   transcript: from = me, to = [me]) never reach this surface —
-   `recent-messages` excludes them at the derivation.
-
-   - `::system` — turn-level PROVIDER failures (an LLM call died and
-     the wake ended), rendered as a centered system-styled line so the
-     human is never left staring at a silently idle agent. DERIVED
-     from the turn log: the turn already records
-     `:seon.agent.turn/status :error` + its error self-message; the
-     stream renders that record — no notification row is ever stored.
+   - `::system` — turn-level failures (a turn died and the wake
+     ended), rendered as a centered system-styled line so the human is
+     never left staring at a silently idle agent. DERIVED from the turn
+     log: the turn records `:seon.agent.turn/status :error`; the stream
+     synthesizes the line from that status — no notification row is
+     ever stored.
 
    No acknowledgement state, no read markers, no per-view storage:
    the stream re-derives from the message log at every render
@@ -117,7 +113,8 @@
   50)
 
 (defn message-kind
-  "Classify a `recent-messages` direction label into a bubble kind:
+  "Classify a `recent-messages` direction label into a bubble kind.
+
    `\"user\"` → `::human`, `\"assistant\"` (this agent → the human) →
    `::agent`, anything else (`\"agent-<id>\"` incoming peer,
    `\"→ agent-<id>\"` outgoing peer, `\"unknown\"`) → `::peer`."
@@ -129,46 +126,40 @@
     :else                 ::peer))
 
 (defn- provider-failure-rows
-  "DERIVED `[at content]` rows for this agent's turns that died on a
-   provider failure: `:seon.agent.turn/status :error` AND the turn
-   carries its error self-message. The LLM-error branch of
-   `seon.agent/ask-and-eval!` writes that shape, as does the
-   empty-turn guard in `seon.agent/run-agentic-loop!` when it gives up
-   after consecutive no-visible-output completions (downstream ask 20)
-   — a catastrophic turn close stores NO message, so 'error turn with
-   a message' ≡ a failure the human should see. Renders what the turn
-   log already records — nothing stored per-view."
+  "DERIVED `[at]` rows for this agent's turns that died:
+   `:seon.agent.turn/status :error`. The turn log records the status;
+   nothing else is stored per-view. The turn carries no error message
+   of its own, so the human-facing line is synthesized downstream."
   [db id]
   (db/query
     {:seon.db/db db
      :seon.db/query
-     '[:find ?at ?content
+     '[:find ?at
        :in $ ?id
        :where
        [?me :seon.agent/id ?id]
-       [?me :seon.agent/sessions ?s]
-       [?s :seon.agent.session/turns ?t]
+       [?r :seon.agent.run/agent ?me]
+       [?t :seon.agent.turn/run ?r]
        [?t :seon.agent.turn/status :error]
-       [?t :seon.agent.turn/at ?at]
-       [?t :seon.agent.turn/messages ?m]
-       [?m :seon.agent.message/content ?content]]
+       [?t :seon.agent.turn/at ?at]]
      :seon.db/args [id]}))
 
 (defn- system-messages
-  "Provider failures as `::system` bubble messages — the stored error
-   content plus the one thing the human needs to know: the agent is
-   not gone, the next message resumes it."
+  "Failed turns as `::system` bubble messages — synthesized from the
+   turn status alone (the turn stores no error text). Tells the human
+   the one thing they need: the agent is not gone, the next message
+   resumes it."
   [db id]
-  (mapv (fn [[at content]]
+  (mapv (fn [[at]]
           {::at      at
            ::kind    ::system
            ::label   "system"
-           ::content (str "agent's turn failed: " content
-                          " — it will resume on your next message")})
+           ::content "agent's turn failed — it will resume on your next message"})
         (provider-failure-rows db id)))
 
 (defn conversation
-  "The agent's conversation as bubble messages, oldest-first —
+  "The agent's conversation as bubble messages, oldest-first.
+
    DERIVED from the message log via
    `seon.render.default/recent-messages` (from = me OR to ∋ me;
    nothing stored), merged with the turn log's provider-failure
@@ -204,9 +195,11 @@
   [:map [::last-reply {:optional true} ::last-reply]])
 
 (defn last-reply
-  "The agent's most recent REPLY — the newest `::agent` (label
+  "The agent's most recent REPLY, as readable text.
+
+   The newest `::agent` (label
    `\"assistant\"`: from = me AND to ∋ the user) message in
-   [[conversation]] — as readable text. Transcript self-narration and
+   [[conversation]]. Transcript self-narration and
    outgoing peer sends never count (direction-classified upstream).
    Returns `{}` when the agent has never replied (optional = absent).
 
@@ -234,15 +227,15 @@
     ""))
 
 (defn bubble
-  "Render ONE conversation message as a chat bubble:
+  "Render ONE conversation message as a chat bubble.
 
    - `::human` — right-aligned, amber-tinted, markdown-rendered.
    - `::agent` — left-aligned, markdown-rendered.
    - `::peer`  — inline, dimmer, smaller, labeled with the peer's id
      (`agent-<id>`) — visually subordinate to the human↔agent stream.
-   - `::system` — centered, amber-edged system line: a turn-level
-     provider failure the human must see (the agent went idle
-     mid-task; the next message resumes it).
+   - `::system` — centered, amber-edged system line: a failed turn the
+     human must see (the agent went idle mid-task; the next message
+     resumes it).
 
    Human and agent content renders markdown → hiccup SERVER-SIDE
    (`seon.ui.markdown/md->hiccup` — symmetric, escaped-by-the-
@@ -286,7 +279,9 @@
         [:div {:class "text-[10px] font-mono text-text-500 mt-0.5"} time]]])))
 
 (defn bubble-stream
-  "Render the whole conversation as a bubble column — the left pane of
+  "Render the whole conversation as a bubble column.
+
+   The left pane of
    the consumer agent view. Returns the standard
    `:seon.render/html-response`. Empty conversation renders an
    invitation, not a blank."

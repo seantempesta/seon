@@ -36,7 +36,10 @@
 (defn- register-test-schemas! []
   (schema/register! ::name :string)
   (schema/register! ::rank :int)
-  (schema/register! ::tags [:vector :keyword]))
+  (schema/register! ::tags [:vector :keyword])
+  ;; ref attr for the as-of ref-join test; `db/transact!`'s gate needs it
+  ;; registered (installation as :db.type/ref comes from `history-schema`).
+  (schema/register! ::owner :seon.db/ref))
 
 (use-fixtures :once
   {:before (fn []
@@ -186,6 +189,38 @@
                  (is (int? tx) "envelope carries the committed tx id")
                  (is (pos? tx-count) "envelope carries the datom count"))))
       done)))
+
+(deftest transact!-installs-runtime-registered-attr-then-queries-back
+  ;; REGRESSION (task #92): the agent-authored-schema → store persistence
+  ;; path. The config-init live drive hit a rough edge where an agent did
+  ;; `schema/register!` on a NEW attr (→ :ok, in the Malli registry) then
+  ;; `transact!`'d a fact with it (→ :ok) but the fact was NOT queryable
+  ;; back — the attr never reached the datahike schema. Every OTHER db_test
+  ;; pre-installs its attrs via `smoke-schema` at conn creation, so none of
+  ;; them exercise `ensure-datahike-attrs!` (the runtime installer) — this
+  ;; is the coverage hole that let the drive-found gap slip. Here the attr
+  ;; is registered ONLY in seon.schema (never in smoke-schema), so the
+  ;; transact MUST trigger the runtime install for the round-trip to work.
+  (async done
+    (let [attr :my.kb.datastructure.probe92/name]
+      ;; Registered in the Malli registry but ABSENT from the conn's
+      ;; datahike schema — the exact split-state the drive observed.
+      (schema/register! attr :string)
+      (with-conn
+        (fn [conn]
+          (is (not (contains? (db/installed-schema @conn) attr))
+              "precondition: attr not yet installed in the datahike schema")
+          (.then (tx! conn [{attr "hash-map"}])
+                 (fn [{::db/keys [ok? error]}]
+                   (is (true? ok?)
+                       (str "runtime-registered attr commits — " (pr-str error)))
+                   (is (contains? (db/installed-schema @conn) attr)
+                       "transact! installed the attr's datahike schema")
+                   (let [rows (db/query {::db/query [:find '?n :where ['?e attr '?n]]
+                                         ::db/conn  conn})]
+                     (is (= #{["hash-map"]} rows)
+                         "the stored datom is queryable back")))))
+        done))))
 
 (deftest transact!-returns-envelope-on-unregistered-attr
   ;; ENVELOPE CONTRACT: validation failures NEVER throw into the calling
@@ -440,6 +475,38 @@
                    (is (= "Alpha" (::name e)))))))
       done)))
 
+(deftest store-inventory-returns-a-map-of-attr-groups-with-data
+  ;; The discovery surface: WHICH ATTRS HOLD DATA. Returns a map (NOT a
+  ;; bare vector) so `(keys inv)` / keyword lookup work — the agent reads
+  ;; :seon.db/attr-groups (rows, grouped by attr namespace) + the headline
+  ;; counts to decide what to query. Entities have no kind; the namespace
+  ;; is a display grouping, not an entity type.
+  (async done
+    (with-conn
+      (fn [conn]
+        (.then (tx! conn [{::name "Alpha" ::rank 1}
+                          {::name "Seon"  ::rank 2}])
+               (fn [_]
+                 (let [inv (db/store-inventory {::db/conn conn})
+                       row (->> (:seon.db/attr-groups inv)
+                                (filter (fn [r] (= :seon.db-test
+                                                   (:seon.db/attr-ns r))))
+                                first)]
+                   ;; map-out: keyword access works (old vector threw on keys)
+                   (is (map? inv))
+                   (is (vector? (:seon.db/attr-groups inv)))
+                   (is (every? keyword? (keys inv)))
+                   ;; the user-domain namespace appears with its attrs + counts
+                   (is (some? row) "the :seon.db-test namespace is inventoried")
+                   (is (= 2 (get-in row [:seon.db/attrs :seon.db-test/name])))
+                   (is (= 2 (get-in row [:seon.db/attrs :seon.db-test/rank])))
+                   ;; headline counts are consistent with the rows
+                   (is (= (count (:seon.db/attr-groups inv))
+                          (:seon.db/attr-ns-count inv)))
+                   (is (pos? (:seon.db/attr-count inv)))
+                   (is (pos? (:seon.db/datom-count inv)))))))
+      done)))
+
 (deftest query-accepts-explicit-db
   ;; Caller can pass a frozen ::db/db value (e.g. :db-after from a tx-report)
   ;; instead of going through @conn — useful in listener handlers.
@@ -594,6 +661,84 @@
           (is (some? ex) "bad positional db must throw (instrumented)")
           (is (= [::db/db] (:seon.error.malli/explain-path (ex-data ex))))))
       done)))
+
+;; ---------------------------------------------------------------------------
+;; Temporal — as-of reads against a wrapper db value (AsOfDB). Regression:
+;; datahike's CLJS wrapper dbs overrode ILookup to THROW, so the query
+;; planner's `(:eavt op-db)` fast-path probe blew up ("-lookup is not
+;; supported on AsOfDB") for any query that reached it — aggregates and
+;; multi-clause ref-joins in particular — which is what the inspector's
+;; time-travel render issues. The fork now returns field-or-nil from -lookup
+;; (JVM defrecord parity: a wrapper has no :eavt field ⇒ nil ⇒ the planner
+;; routes it through the temporal/search-context path). Assert BOTH no-throw
+;; AND the correct as-of value (the t1 frame, not HEAD).
+;; ---------------------------------------------------------------------------
+
+(def ^:private history-schema
+  (conj smoke-schema
+        {:db/ident       ::owner
+         :db/cardinality :db.cardinality/one
+         :db/valueType   :db.type/ref}))
+
+(defn- fresh-history-conn
+  "Like [[fresh-conn]] but `:keep-history? true` (as-of needs history) and
+   with a ref attr (`::owner`) so the ref-join shape can be exercised."
+  []
+  (let [cfg {:store              {:backend :memory :id (random-uuid)}
+             :schema-flexibility :write
+             :keep-history?      true}]
+    (-> (d/create-database cfg)
+        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then (fn [conn]
+                 (.then (d/transact! conn history-schema)
+                        (fn [_] conn)))))))
+
+(deftest as-of-entity+aggregate-see-the-past-frame
+  ;; p starts at rank 1 (t1), changes to rank 2 (t2). An as-of-t1 db value must
+  ;; read 1 via entity AND via an aggregate/ref-join query (the shape that threw
+  ;; -lookup), while HEAD reads 2.
+  (async done
+    (-> (fresh-history-conn)
+        (.then
+          (fn [conn]
+            (.then
+              ;; t1: person p rank 1, group g owns p
+              (db/transact! {::db/tx-data [{:db/id "pp" ::name "p" ::rank 1}
+                                           {::name "g" ::owner "pp"}]
+                             ::db/conn conn})
+              (fn [r1]
+                (let [t1 (::db/tx r1)]
+                  (.then
+                    ;; t2: p rank -> 2 (upsert by identity ::name)
+                    (db/transact! {::db/tx-data [{::name "p" ::rank 2}] ::db/conn conn})
+                    (fn [_]
+                      (let [head  @conn
+                            asof1 (db/as-of head t1)]
+                        ;; entity by lookup-ref on the as-of value sees t1
+                        (is (= 1 (::rank (db/entity {::db/db asof1 ::db/ref [::name "p"]})))
+                            "as-of entity reads the t1 frame")
+                        (is (= 2 (::rank (db/entity {::db/db head ::db/ref [::name "p"]})))
+                            "HEAD entity reads the latest frame")
+                        ;; aggregate over a ref-join — the exact shape that threw
+                        ;; "-lookup is not supported on AsOfDB" before the fork fix
+                        (is (= 1 (db/query {::db/db    asof1
+                                            ::db/query '[:find (count ?m) . :in $ ?gn
+                                                         :where [?g ::name ?gn] [?g ::owner ?m]]
+                                            ::db/args  ["g"]}))
+                            "as-of aggregate ref-join no longer throws")
+                        ;; the CHANGED attr, read through the ref-join: t1 = 1
+                        (is (= 1 (db/query {::db/db    asof1
+                                            ::db/query '[:find ?r . :in $ ?gn
+                                                         :where [?g ::name ?gn] [?g ::owner ?m] [?m ::rank ?r]]
+                                            ::db/args  ["g"]}))
+                            "as-of ref-join reads the t1 frame")
+                        (is (= 2 (db/query {::db/db    head
+                                            ::db/query '[:find ?r . :in $ ?gn
+                                                         :where [?g ::name ?gn] [?g ::owner ?m] [?m ::rank ?r]]
+                                            ::db/args  ["g"]}))
+                            "HEAD ref-join reads the latest frame")))))))))
+        (.catch (fn [e] (is false (str "as-of test chain threw/rejected — " e))))
+        (.then (fn [_] (done))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Listener — handler input shape, multi-key independence, replacement
