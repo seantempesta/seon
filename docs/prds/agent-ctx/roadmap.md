@@ -118,8 +118,18 @@ repo-dev docs.
    tier discipline structural (milestone aggregate-only, test raises without
    `formal_eval=True`, canary GUID → test-sample METADATA); canary CI grep =
    `tests/test_canary_guard.py` (fail proven on a planted canary in docs/).
-3. **Tool-row generators** — shell / web-fetch (local fixtures) / file-edit;
-   goal-stated, never API-coached.
+3. ~~**Tool-row generators**~~ — ✅ DONE 2026-07-02: seeded generators
+   (`src-inspect-ai/src/seon_inspect/generators.py` — 8 templates per row,
+   rows derive from seed + procedure, byte-identical per seed) + outcome
+   oracles (`tool_scorers.py`: workspace re-read for shell/file-edit with bb
+   parse + node behavioral eval on code targets; LOCAL-fixture ground truth
+   for web-fetch via `serve_fixtures`, loopback only). Goal-stated, never
+   API-coached (test-enforced: no Seon verb names in any task text); every
+   scorer check is stated in the task text. Lock entries upgraded
+   `pending-generator` → `generated` (dev artifacts `evals/{shell_use,
+   web_fetch,file_edit}.dev.jsonl`, dev+milestone sha256s, canaries carried);
+   regenerate-with-lock verified no-op ×2 incl. artifact hashes. Live-drive
+   calibration of these rows rides step 5 (first dev pass).
 4. **Planning bench re-ground** on the redesigned `my.plan` (deps/pace/expect —
    the headline capability; plan-survives-restart stays bespoke, no public bench).
 5. **First dev pass** → `evals/scorecard.jsonl` + the `pass^k` regression alarm;

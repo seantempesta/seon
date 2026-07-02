@@ -118,13 +118,23 @@ def test_lock_records_provenance(lock):
     assert lock["sampling_procedure"]
 
 
-def test_lock_bespoke_rows_reserved(lock):
+def test_lock_bespoke_rows_reserved_or_generated(lock):
+    from seon_inspect import generators
+
     rows = lock["bespoke"]
     assert set(rows) == set(freeze.BESPOKE_ROWS)
-    for row in rows.values():
-        assert row["status"] == "pending-generator"
+    for name, row in rows.items():
         assert (row["dev_seed"], row["milestone_seed"]) == (1, 2)
         assert row["test_seed"] == "fresh-per-draw"
+        if name in generators.GENERATORS:
+            assert row["status"] == "generated"
+            assert row["generator"] == f"seon_inspect.generators:{name}"
+            assert row["artifact"] == f"evals/{name}.dev.jsonl"
+            assert len(row["dev_sha256"]) == 64
+            assert len(row["milestone_sha256"]) == 64
+            assert row["dev_sha256"] != row["milestone_sha256"]
+        else:
+            assert row["status"] == "pending-generator"
 
 
 # --- tier discipline -------------------------------------------------------

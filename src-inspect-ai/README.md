@@ -37,6 +37,10 @@ src/seon_inspect/
   solver.py              seon_pod_solver (/solve) + timeout_honesty scorer
   oracle_scorers.py      persistent bb+node oracle servers, score_code tier
                          ladder, ladder_scorer, assert_oracle_live
+  generators.py          seeded tool-row generators (shell_use / web_fetch /
+                         file_edit) + fixture server + setup/render helpers
+  tool_scorers.py        outcome oracles for the tool rows (workspace re-read,
+                         fixture ground truth; bb/node for code targets)
   worker_endpoints.py    mock:<scenario> | runpod endpoint resolution
   worker_mock.py         canned offline worker (REAL Clojure fixtures)
   offline_proof.py       python -m seon_inspect.offline_proof
@@ -45,8 +49,10 @@ src/seon_inspect/
     skill_lift.py        north-star skill A/B
     ladder_lift.py       ladder ON/OFF (runbook step 4)
 tests/                   the offline proofs as the pytest regression suite
-datasets/                (future .jsonl datasets live here, not under docs/)
 ```
+
+Generated `.jsonl` data artifacts live in `evals/` (the single dataset home,
+next to `datasets.lock`) — never under the package or docs/.
 
 ## Run matrix
 
@@ -197,8 +203,17 @@ Tier discipline is structural: milestone splits don't enumerate ids
 `tests/test_canary_guard.py` greps `src/ docs/ config/ seon-skills/
 src-inspect-ai/ test/` for any lock canary escaping `evals/` — a hit means
 answer-shaped context and fails the suite. Bespoke generator rows freeze the
-GENERATOR + seeds (dev=1, milestone=2, test=fresh-per-draw) — lock entries are
-reserved (`pending-generator`) until the generators unit lands.
+GENERATOR + seeds (dev=1, milestone=2, test=fresh-per-draw): rows with a
+generator in `seon_inspect.generators` are `"generated"` in the lock
+(dev/milestone jsonl sha256s + the dev artifact at `evals/<row>.dev.jsonl`;
+milestone rows regenerate on demand from seed 2, the test tier draws a fresh
+seed via `generators.fresh_test_rows`); the rest stay `pending-generator`
+until their generators land. Tool-row tasks are GOAL-STATED (outcomes, never
+Seon verb names) and every check their oracle makes is stated in the task
+text; scoring = `tool_scorers.workspace_scorer` (shell_use / file_edit —
+re-reads the per-run workspace; bb parse + node behavioral eval for code
+targets) and `tool_scorers.fixture_answer_scorer` (web_fetch — LOCAL fixtures
+via `generators.serve_fixtures`, ground truth computed at generation time).
 
 ### First baseline (DeepSeek, via acme /solve, 2026-07-02)
 

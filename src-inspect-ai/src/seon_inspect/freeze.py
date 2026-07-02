@@ -6,8 +6,10 @@ seed (per-source derived from the global seed so adding a source never
 reshuffles the others), stratify where labels exist (MMLU subjects), then
 slice: first dev_n = dev, next milestone_n = milestone, rest = the blind test
 reserve. Bespoke generator rows freeze the GENERATOR + seeds instead
-(dev_seed=1, milestone_seed=2, fresh seed per test draw) — placeholders here
-until the generators unit lands.
+(dev_seed=1, milestone_seed=2, fresh seed per test draw); rows whose
+generator exists (`seon_inspect.generators`) also record dev/milestone jsonl
+sha256s and write the dev artifact to `evals/<row>.dev.jsonl` — the rest stay
+`pending-generator`.
 
 The lock (`evals/datasets.lock`, JSON) records per source: the bench, the
 upstream pin (HF revision / csv sha256), the seed, the dev+milestone sample-id
@@ -117,9 +119,12 @@ EXTERNAL_SOURCES: dict[str, dict[str, Any]] = {
 
 # Bespoke generator rows (eval-design): the GENERATOR + seeds are what's
 # frozen — seed 1 = dev, seed 2 = milestone, fresh seed per draw = test, so
-# test instances are contamination-proof by construction. Placeholders until
-# the generators unit lands; each already reserves its canary GUID so the
-# CI guard covers them from day one. Sizes from eval-design "Capability rows".
+# test instances are contamination-proof by construction. Rows with a
+# generator in `seon_inspect.generators.GENERATORS` freeze for real (status
+# "generated": dev/milestone jsonl sha256s + the dev artifact at
+# evals/<row>.dev.jsonl); the rest stay "pending-generator". Every row
+# reserves its canary GUID so the CI guard covers them from day one. Sizes
+# from eval-design "Capability rows".
 BESPOKE_ROWS: dict[str, dict[str, Any]] = {
     "memory_store_recall": {"dev_n": 10, "epochs": 4},
     "long_term_planning": {"dev_n": 10, "epochs": 4},
@@ -292,10 +297,12 @@ def build_lock(existing: dict[str, Any] | None = None) -> dict[str, Any]:
             },
         }
 
+    from seon_inspect import generators
+
     bespoke: dict[str, Any] = {}
     for row, spec in BESPOKE_ROWS.items():
         canary = ex_bespoke.get(row, {}).get("canary_guid") or _new_canary()
-        bespoke[row] = {
+        entry: dict[str, Any] = {
             "status": "pending-generator",
             "dev_n": spec["dev_n"],
             "epochs": spec["epochs"],
@@ -304,6 +311,19 @@ def build_lock(existing: dict[str, Any] | None = None) -> dict[str, Any]:
             "test_seed": "fresh-per-draw",
             "canary_guid": canary,
         }
+        if row in generators.GENERATORS:
+            dev = generators.rows_jsonl_bytes(
+                generators.generate_rows(row, 1, spec["dev_n"]))
+            milestone = generators.rows_jsonl_bytes(
+                generators.generate_rows(row, 2, spec["dev_n"]))
+            entry.update({
+                "status": "generated",
+                "generator": f"seon_inspect.generators:{row}",
+                "artifact": f"evals/{row}.dev.jsonl",
+                "dev_sha256": hashlib.sha256(dev).hexdigest(),
+                "milestone_sha256": hashlib.sha256(milestone).hexdigest(),
+            })
+        bespoke[row] = entry
 
     return {
         "schema_version": LOCK_SCHEMA_VERSION,
@@ -341,11 +361,49 @@ def _diff_paths(a: Any, b: Any, path: str = "") -> list[str]:
     return []
 
 
+def write_bespoke_artifacts(lock: dict[str, Any]) -> list[Path]:
+    """Write each generated row's dev jsonl artifact (evals/<row>.dev.jsonl)."""
+    from seon_inspect import generators
+
+    written = []
+    for row, entry in lock["bespoke"].items():
+        if entry["status"] != "generated":
+            continue
+        data = generators.rows_jsonl_bytes(
+            generators.generate_rows(row, entry["dev_seed"], entry["dev_n"]))
+        path = REPO_ROOT / entry["artifact"]
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        written.append(path)
+    return written
+
+
+def _verify_bespoke_artifacts(lock: dict[str, Any]) -> list[str]:
+    """Diff strings for dev artifacts on disk vs their locked sha256s."""
+    diffs = []
+    for row, entry in lock["bespoke"].items():
+        if entry["status"] != "generated":
+            continue
+        path = REPO_ROOT / entry["artifact"]
+        if not path.is_file():
+            diffs.append(f"- {entry['artifact']} (artifact missing on disk)")
+            continue
+        got = hashlib.sha256(path.read_bytes()).hexdigest()
+        if got != entry["dev_sha256"]:
+            diffs.append(
+                f"~ {entry['artifact']}: disk sha256={got} "
+                f"locked={entry['dev_sha256']}")
+    return diffs
+
+
 def verify_lock(lock_path: Path = DEFAULT_LOCK_PATH) -> list[str]:
-    """Regenerate with canaries carried over; return diffs vs disk ([] = ok)."""
+    """Regenerate with canaries carried over; return diffs vs disk ([] = ok).
+
+    Covers the lock dict AND the generated dev artifacts (byte-identical
+    regeneration is part of the freeze contract)."""
     on_disk = read_lock(lock_path)
     rebuilt = build_lock(existing=on_disk)
-    return _diff_paths(on_disk, rebuilt)
+    return _diff_paths(on_disk, rebuilt) + _verify_bespoke_artifacts(rebuilt)
 
 
 # ---------------------------------------------------------------------------
@@ -536,6 +594,8 @@ def main(argv: list[str] | None = None) -> int:
             f"milestone={entry['milestone']['n']} test={entry['test']['n']} "
             f"(total {entry['total_n']}, seed {entry['seed']})"
         )
+    for path in write_bespoke_artifacts(lock):
+        print(f"wrote {path}")
     print(f"wrote {lock_path}")
     return 0
 

@@ -10,12 +10,16 @@
       "test_seed": "fresh-per-draw"
     },
     "file_edit": {
+      "artifact": "evals/file_edit.dev.jsonl",
       "canary_guid": "SEON-CANARY-1e699ae3-aaec-41fc-b3de-93275b26f334",
       "dev_n": 8,
       "dev_seed": 1,
+      "dev_sha256": "4d4c2ca5310f10a72aa2a0668172380f3c8e10ce46ace15556c4f67f8cb45d59",
       "epochs": 4,
+      "generator": "seon_inspect.generators:file_edit",
       "milestone_seed": 2,
-      "status": "pending-generator",
+      "milestone_sha256": "97a81ba8ff4cdb4d0995822bb62f543d9b3381f19c1bfe959a805a7b8af0daea",
+      "status": "generated",
       "test_seed": "fresh-per-draw"
     },
     "long_term_planning": {
@@ -37,12 +41,16 @@
       "test_seed": "fresh-per-draw"
     },
     "shell_use": {
+      "artifact": "evals/shell_use.dev.jsonl",
       "canary_guid": "SEON-CANARY-686a159d-802e-40ec-8249-30714e5b74fb",
       "dev_n": 8,
       "dev_seed": 1,
+      "dev_sha256": "829d5f77380ebf644a93b6d3cdce2c15d243520fc9d8fb64ca158a69a7a31bdc",
       "epochs": 4,
+      "generator": "seon_inspect.generators:shell_use",
       "milestone_seed": 2,
-      "status": "pending-generator",
+      "milestone_sha256": "6a4acad36f5bb6282d0a1df4af0018716e370185df979a8c62147e6417ba448d",
+      "status": "generated",
       "test_seed": "fresh-per-draw"
     },
     "ui_tiles": {
@@ -55,12 +63,16 @@
       "test_seed": "fresh-per-draw"
     },
     "web_fetch": {
+      "artifact": "evals/web_fetch.dev.jsonl",
       "canary_guid": "SEON-CANARY-197a6a55-8a32-40be-9ff1-98ff5313316c",
       "dev_n": 8,
       "dev_seed": 1,
+      "dev_sha256": "68c23d249c5da020d56c79a7927c225360af87606ae59c59720644eac5433b0c",
       "epochs": 4,
+      "generator": "seon_inspect.generators:web_fetch",
       "milestone_seed": 2,
-      "status": "pending-generator",
+      "milestone_sha256": "812f9e0749f2e3f4b9cfa5e26f253cdc6aec018cf1c44ad36ed0479606cb993f",
+      "status": "generated",
       "test_seed": "fresh-per-draw"
     }
   },

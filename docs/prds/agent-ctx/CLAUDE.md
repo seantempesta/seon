@@ -98,7 +98,10 @@ Eval-lane blockers before the first dev pass (from [[eval-CLAUDE-notes]]):
    `docs/seon/components/capability-gates.md`.
 2. Planning bench re-grounded on the redesigned `my.plan` (deps/pace/expect —
    the old bench references pre-rename verbs).
-3. Tool-row generators (shell / web-fixture / file-edit) authored.
+3. ~~Tool-row generators~~ — ✅ AUTHORED 2026-07-02
+   (`src-inspect-ai/src/seon_inspect/generators.py` + `tool_scorers.py`;
+   dev artifacts in `evals/`, lock entries `generated`, run wiring lands
+   with the first dev pass).
 4. Fresh-world `my.kb` empty render + turn-6 recall (the two tool defects above).
 5. ~~One calibration run~~ — ✅ DONE 2026-07-02
    ([[research/calibration-run-2026-07-02]]): per-pod `/solve` ceiling = **1**
