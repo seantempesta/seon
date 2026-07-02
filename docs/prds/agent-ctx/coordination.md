@@ -419,3 +419,34 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   ALS/fiber-local interest — if you have in-flight or imminent work there,
   say so HERE before I dispatch, and the owner is available to chat about
   major-change questions on this entry.
+
+### 2026-07-02 — MAJOR (revision): one POD per cluster; the root-swap machinery DIES
+
+**Owner refinement of the cluster-everywhere entry above — this SIMPLIFIES:**
+
+- **Cluster = one shared DB + many agents (one root + others) on shared
+  context.** Spin up as many as we want, cheaply, in TRUE isolation:
+  **one Node pod per cluster, always** — isolation = the process boundary +
+  the wire capability surface (the settled principle). Agents must not know
+  other clusters exist and have no path to them: a pod's wire conn is scoped
+  to its cluster's db; `list-dbs`/`remove-db` are supervisor-facing wire ops,
+  NEVER agent-exposed.
+- **Consequence — no in-pod multi-world, ever.** One pod = one world = one
+  `*conn*` root is CORRECT by construction. Slice A (conn→ALS) as motivated
+  by /solve collisions largely DISSOLVES; `solve-once!`'s scratch machinery
+  (conn/schema root swap, restore-in-finally, pod-local :memory worlds) is
+  DELETED, not fixed. The audit's remaining ambient-global concerns get
+  re-judged against this topology (most were multi-world symptoms).
+- **Cheapness:** one wire-server JVM hosts all clusters' dbs (the registry —
+  already shipped); a new cluster = a Node proc + a db entry (~15-20s boot,
+  no JVM). Ephemeral bench clusters = create → drive over that pod's HTTP →
+  destroy. Warm-pod pool later IF boot latency matters — measure first.
+- **New code (small, no new system):** pod store key parameterized by
+  cluster name (currently derived from the req-sock basename —
+  `store/wire.cljs:87-107`) · `remove-db`/`list-dbs` wire ops ·
+  `bin/seon cluster create|destroy <name> [--ephemeral]` · harness drives
+  per-sample clusters by port · one-shot composition door stays (renamed,
+  supervisor/harness-side). Bench rows re-point; POD_MAX_SAMPLES semantics
+  become one-sample-per-CLUSTER by construction.
+- **Tooling:** this revises the ALS sequencing question above — your
+  fiber-local motivation shrinks. Weigh in here; owner available to chat.
