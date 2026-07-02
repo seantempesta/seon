@@ -852,6 +852,22 @@
             :else
             (throw e)))))))
 
+;; ============================================================
+;; Transient eval-scaffolding ns names — the SINGLE defs. Every site
+;; that names one of these nses (the `cljs.js/eval-str` compile target,
+;; the REPL default home, the `transient-ns-syms` program-graph
+;; exclusion) references these defs, so renaming a scratch/result ns
+;; can never silently leak a transient ns into the program graph.
+;; ============================================================
+
+(def user-ns-sym
+  "The REPL default home namespace — eval's default `:ns` target."
+  'cljs.user)
+
+(def dynamic-ns-sym
+  "The reserved `cljs.js/eval-str` compilation-target namespace."
+  'seon.dynamic)
+
 (defn ^:async ^:private ensure-analyzer-ns!
   "Idempotently guarantee `ns-sym` has a COMPLETE `:cljs.analyzer/namespaces`
    entry in `compile-state` before a `def`/`defn` is evaluated into it.
@@ -881,14 +897,14 @@
    swallowed (the subsequent eval surfaces the real error)."
   [compile-state ns-sym]
   (let [entry (get-in @compile-state [:cljs.analyzer/namespaces ns-sym])]
-    (when-not (or (= 'cljs.user ns-sym)
+    (when-not (or (= user-ns-sym ns-sym)
                   (and entry (:name entry)))
       (await
         (js/Promise.
           (fn [resolve _reject]
             (try
               (cljs/eval-str compile-state (str "(ns " ns-sym ")") nil
-                {:eval cljs/js-eval :ns 'cljs.user :context :statement}
+                {:eval cljs/js-eval :ns user-ns-sym :context :statement}
                 (fn [_] (resolve nil)))
               (catch :default _ (resolve nil)))))))))
 
@@ -1032,7 +1048,7 @@
       (fn [resolve reject]
         (.run warnings-als warnings
           (fn []
-            (cljs/eval-str compile-state form-str 'seon.dynamic
+            (cljs/eval-str compile-state form-str dynamic-ns-sym
               {:eval          cljs/js-eval
                :load          (partial guarded-load compile-state)
                :ns            ns-sym
@@ -1137,7 +1153,7 @@
   ([compile-state form-str]
    (eval compile-state form-str nil))
   ([compile-state form-str {:keys [ns analyze-deps? timeout-ms]
-                            :or   {ns            'cljs.user
+                            :or   {ns            user-ns-sym
                                    analyze-deps? false}}]
    (try
      (let [ms      (or timeout-ms @!timeout-ms)
@@ -1568,7 +1584,7 @@
   [compile-state agent-ns-sym agent-id]
   (let [setup-src (home-ns-form agent-ns-sym (home-requires-for agent-id))
         r (await (eval compile-state setup-src
-                       {:ns 'cljs.user :analyze-deps? true}))]
+                       {:ns user-ns-sym :analyze-deps? true}))]
     (when-not (:ok r)
       (throw (ex-info
                (str "setup-agent-ns! failed — the home-ns require/refer did not "
@@ -2260,14 +2276,17 @@
     (vec (concat upsert retracts))))
 
 ;; Namespaces the requires-tee SKIPS — transient eval scaffolding, never
-;; a real program-graph ns: `cljs.user` (REPL default home),
-;; `seon.dynamic` (the `cljs.js/eval-str` target), and `result` (the
-;; reserved ns holding the synthetic `result/<id>` value vars from
-;; bind-result-var! — belt-and-suspenders alongside the
-;; analyzer-info/defs-since `:seon.eval/result-var?` filter). A real
-;; agent/core ns (`seon.*`, `my.*`, a data ns) gets a `:seon.ns` row;
-;; these do not.
-(def ^:private transient-ns-syms #{'cljs.user 'seon.dynamic 'result})
+;; a real program-graph ns: the REPL default home ([[user-ns-sym]]), the
+;; `cljs.js/eval-str` target ([[dynamic-ns-sym]]), and the reserved ns
+;; holding the synthetic `result/<id>` value vars from bind-result-var!
+;; ([[result-ns-sym]] — belt-and-suspenders alongside the
+;; analyzer-info/defs-since `:seon.eval/result-var?` filter). DERIVED
+;; from the single defs — never restate an ns name here — so renaming a
+;; scratch/result ns can't leak a transient ns into the program graph.
+;; A real agent/core ns (`seon.*`, `my.*`, a data ns) gets a `:seon.ns`
+;; row; these do not.
+(def ^:private transient-ns-syms
+  #{user-ns-sym dynamic-ns-sym result-ns-sym})
 
 ;; ----------------------------------------------------------------------------
 ;; Agent-no-override-core guard (db-is-the-running-system PRD; Sean: agents
