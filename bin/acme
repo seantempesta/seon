@@ -171,7 +171,13 @@ case "${1:-}" in
     # idempotent; running stale code costs far more).
     if [ "${2:-}" = "pod" ]; then
       BUNDLE="$SEON_ROOT/$SEON_CLIENT_OUT"
-      if [ ! -f "$BUNDLE" ] || [ -n "$(find "$SEON_ROOT/src" "$SEON_ROOT/$SEON_EXTRA_SRC" \( -name '*.cljs' -o -name '*.cljc' \) -newer "$BUNDLE" -print -quit 2>/dev/null)" ]; then
+      # Stale when any core/overlay source OR a dependency/build config
+      # (deps.edn, shadow-cljs.edn, acme/deps.edn — e.g. a datahike fork sha
+      # bump) is newer than the bundle: a dep change requires a re-compile
+      # just as much as a src change does.
+      if [ ! -f "$BUNDLE" ] \
+         || [ -n "$(find "$SEON_ROOT/src" "$SEON_ROOT/$SEON_EXTRA_SRC" \( -name '*.cljs' -o -name '*.cljc' \) -newer "$BUNDLE" -print -quit 2>/dev/null)" ] \
+         || [ -n "$(find "$SEON_ROOT/deps.edn" "$SEON_ROOT/shadow-cljs.edn" "$SEON_ROOT/$SEON_EXTRA_SRC/deps.edn" -newer "$BUNDLE" -print -quit 2>/dev/null)" ]; then
         echo "▶ acme bundle is stale vs core/overlay source — rebuilding first"
         "$0" build
       fi

@@ -1,112 +1,43 @@
-;; The Acme harness's OWN config manifest — proof of the per-cluster config
-;; seam: bin/acme exports SEON_CONFIG=config/acme.edn, so the acme cluster
-;; configures its whole agent context independently of the default cluster with
-;; ZERO src edit (read by seon.config via the same aero reader as system.edn).
+;; The Acme harness's config manifest — MINIMAL overrides over the default
+;; cluster's config/system.edn (owner directive 2026-07-02: acme stays ALIGNED
+;; with the default cluster while it is the live-testing/dev harness; per-cluster
+;; configurability is proven + documented, and demo divergences cost fidelity —
+;; the my.kb toolkit-trim blocker was exactly such a divergence, 978782d7).
 ;;
-;; Acme is the maximal-context downstream shape: the FULL agent skill corpus is
-;; always-on, and it demonstrates the PER-CLUSTER overrides the v3 two-level
-;; model unlocks (a per-agent LLM, a pinned full-source ns set, a custom eval
-;; decay schedule) — every dial settable from THIS file, no src/seon edit. To
-;; flip to the lean variant, point SEON_CONFIG at a SEPARATE file (no #profile):
+;; Structure: aero `#include` pulls in system.edn VERBATIM (resolved relative to
+;; this file), then `#merge` (shallow, top-level keys) applies acme's deltas.
+;; System.edn edits flow to acme automatically — there is no second copy to
+;; drift. The ONLY delta is the agent-context toolbelt: system's list PLUS the
+;; acme.* extra-src namespaces (structurally necessary — the overlay's own
+;; toolkit must appear in home-requires or its cards never render and agents
+;; can't see the verbs). Isolation (ports/store/sockets/logs/bundle) lives in
+;; bin/acme env, not here.
 ;;
-;;   bin/acme restart pod                                   ; MAX context (this file)
-;;   SEON_CONFIG=config/acme-minimal.edn bin/acme restart pod   ; lean context
-;;   SEON_CONFIG=config/test.edn bin/acme restart pod       ; the test manifest
-{;; ── LLM PROVIDER cluster default is the env→DB row (kept) ──
- ;; The cluster's default provider/model is the `seon.ai` env→DB surface
- ;; (`:seon.ai/config` row), set in .env.acme (bin/acme sources it):
- ;;   SEON_AI_PROVIDER=diffusiongemma            ; deepseek (default) | anthropic
- ;;   SEON_DG_ENDPOINT=<runpod-endpoint-id>      ;   | openai-compat | diffusiongemma
- ;;   RUNPOD_API_KEY=<key>
- ;; The per-agent `:seon.ai/agent-*` keys below DEFAULT :inherit → the global
- ;; row → .env.acme's value (the env→DB dual-default is preserved), and can
- ;; OVERRIDE per agent in the agent-context.
+;; NOTE `#merge` replaces whole top-level keys: `:seon.config/agent-context`
+;; below REPLACES system.edn's (which carries only :seon.eval/home-requires) —
+;; keep this block a superset of system's agent-context if system grows keys.
+#merge
+[#include "system.edn"
 
- ;; ── SKILL CORPUS dir — manifest-owned (owner rule 2026-07-02: env must not
- ;; shadow config; moved here from .env.acme's SEON_SKILLS_DIR). ──
- :seon.config/skills {:seon.config/dirs ["seon-skills"]}
-
- ;; ── AGENT-CONTEXT (v3) — the two-level context the generic loader consumes ──
- :seon.config/agent-context
- {;; the MAX skill corpus always-on (the old :default-load, now a presence-set
-  ;; expanded into :skill/<name> body blocks at seed).
-  :my.skills/load [:repl
-                   :data-oriented-clojure
-                   :datahike
-                   :data-modeling
-                   :clojurescript
-                   :ui-live-tiles]
-
-  ;; per-agent LLM — :inherit honors .env.acme's global row (dual-default);
-  ;; an explicit value here would OVERRIDE just that agent's setting. Shown
-  ;; :inherit to prove the seam is present + safe (byte-parity with the
-  ;; cluster default).
-  :seon.ai/agent-provider :inherit
-
-  ;; home-requires toolbelt — DELIBERATELY DIFFERENT from config/system.edn's
-  ;; default. Acme (the third party) picks its OWN agent toolset from THIS
-  ;; file, zero src/seon edits: the core verbs PLUS acme's own toolkit
-  ;; namespaces (acme.helpers, acme.notes); it drops search/shell/web/blob.
-  ;; Since the :namespaces block renders "the current ns's :require's as
-  ;; compact cards", THESE ARE the verb surface a fresh acme agent sees —
-  ;; proving per-cluster ns selection is config-driven. The `my.*` toolkit
-  ;; (kb/data/ui/tile) MUST stay in this list: the always-on instruction
-  ;; blocks + skill corpus teach `my.kb/remember` etc., and a require-less
-  ;; ns never renders a card — an agent taught verbs it cannot see burns
-  ;; turns grepping (eval blocker #4, 2026-07-02). Each entry carries
-  ;; :as/:refer (bare [ns] is rejected by :seon.eval/require-spec).
-  :seon.eval/home-requires
-  [[seon.agent.message :as message]
-   [my.plan :as plan]
-   [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
-   [seon.schema :as schema]
-   [seon.db :as db]
-   [my.kb :as kb]
-   [my.data :as data]
-   [my.ui :as ui]
-   [my.tile :as tile]
-   [acme.helpers :as helpers]
-   [acme.notes :as notes]]
-
-  ;; The FULL default block tree (mirrors seon.config/default-ctx-blocks) with
-  ;; acme's OWN eval-decay schedule on the transcript (proves a per-cluster
-  ;; decay is settable from the file — a shorter 2-band shrink). LOAD-BEARING:
-  ;; a manifest that supplies :seon.agent/ctx REPLACES the schema default tree
-  ;; wholesale (malli default-fill only fills ABSENT keys; vectors don't merge).
-  ;; So to customize ONE block (the transcript) acme must re-list EVERY default
-  ;; block it wants to keep — otherwise :namespaces (priority 20) and the rest
-  ;; silently vanish and the namespaces-render feature never fires. This is the
-  ;; per-cluster context surface: acme owns its whole block set from THIS file.
-  :seon.agent/ctx
-  [{:seon.agent.ctx/name :shared-instructions :seon.agent.ctx/priority 10
-    :seon.render/ai my.kb.shared/instructions-block}
-   {:seon.agent.ctx/name :skills-catalog :seon.agent.ctx/priority 12
-    :seon.render/ai my.skills/catalog-block}
-   {:seon.agent.ctx/name :namespaces :seon.agent.ctx/priority 20
-    :seon.render/ai seon.agent.ctx.namespaces/namespaces-block}
-   {:seon.agent.ctx/name :live-tile :seon.agent.ctx/priority 35
-    :seon.render/ai seon.agent.ctx.live-tile/live-tile-block}
-   {:seon.agent.ctx/name :warnings :seon.agent.ctx/priority 40
-    :seon.render/ai seon.agent.ctx.warnings/warnings-block}
-   {:seon.agent.ctx/name :plan :seon.agent.ctx/priority 45
-    :seon.render/ai my.plan.internal/plan-block}
-   {:seon.agent.ctx/name :relevant-source :seon.agent.ctx/priority 48
-    :seon.render/ai seon.agent.ctx.relevant/relevant-source-block}
-   {:seon.agent.ctx/name :findings :seon.agent.ctx/priority 97
-    :seon.render/ai seon.agent.ctx.findings/findings-block}
-   {:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
-    :seon.render/ai seon.agent.ctx.transcript/transcript-block
-    :seon.render/html seon.agent.ctx.transcript/transcript-block-html
-    :seon.agent.ctx.transcript/result-decay
-    [{:seon.agent.ctx.transcript/from-turn-offset 0 :seon.agent.ctx.transcript/token-cap 16384}
-     {:seon.agent.ctx.transcript/from-turn-offset 3 :seon.agent.ctx.transcript/token-cap 800}]}]}
-
- ;; ── NAMESPACES policy — :always is BOOT-STORAGE only (owner decision
- ;; 2026-07-01, 2eeb3bd9): the boot indexer stores these nses' REAL FULL file
- ;; source so a per-agent ::full-source pin CAN promote them to full. It does
- ;; NOT drive render selection — an agent renders its CURRENT ns full plus its
- ;; home-ns :require's as compact cards (the home-requires list above).
- :seon.config/namespaces
- {:seon.config/always     [my.kb my.data my.ui my.tile
-                           my.plan seon.agent.message seon.agent.lifecycle]
-  :seon.config/current-ns :full}}
+ {:seon.config/agent-context
+  {;; system.edn's default toolbelt VERBATIM + the acme.* overlay toolkit.
+   ;; WHY kept: acme.helpers / acme.notes are the SEON_EXTRA_SRC namespaces —
+   ;; the one structural acme addition. Everything else (skills corpus, render
+   ;; caps, namespaces policy, root-context, block tree, decay) inherits from
+   ;; system.edn via the #include above.
+   :seon.eval/home-requires
+   [[seon.agent.message :as message]
+    [my.plan :as plan]
+    [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
+    [seon.schema :as schema]
+    [seon.db :as db]
+    [my.kb :as kb]
+    [my.data :as data]
+    [my.ui :as ui]
+    [my.tile :as tile]
+    [my.blob :as blob]
+    [seon.agent.search :as search]
+    [seon.agent.shell :as shell]
+    [seon.agent.web :as web]
+    [acme.helpers :as helpers]
+    [acme.notes :as notes]]}}]

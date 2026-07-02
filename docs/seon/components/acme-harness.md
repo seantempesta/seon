@@ -91,6 +91,18 @@ NEVER `bin/seon start/stop/restart` it or write to its store. Use **only**
   `SEON_CLIENT_OUT`, `SEON_EXTRA_SRC`, `SEON_EXTRA_PRELOAD`,
   `SEON_BRAND_NAME/TAGLINE/CSS`, `SEON_EMBED`. All default to today's values
   when unset, so seon's own usage is byte-identical.
+- **Config = minimal overrides (owner directive 2026-07-02).**
+  `SEON_CONFIG=config/acme.edn`, and that file is now `#merge [#include
+  "system.edn" {…}]` — the default cluster's manifest verbatim plus ONE
+  delta: the agent toolbelt gains `acme.helpers`/`acme.notes` (the
+  `SEON_EXTRA_SRC` namespaces, which must be in `:seon.eval/home-requires`
+  or their cards never render). The old demo divergences (max skill corpus,
+  custom block tree + transcript decay, toolkit trims) are GONE: per-cluster
+  configurability is proven and documented, and while acme is the live
+  testing/dev harness those divergences cost fidelity (the `my.kb` trim
+  blocker was exactly such a case). This holds until acme stops being the
+  live-testing harness; system.edn edits flow to acme automatically via the
+  `#include`.
 - `SEON_EXTRA_SRC=acme/` is injected as a `:local/root` dep so `acme/src`
   joins the build classpath; `acme.*` compiles INTO the pod bundle.
 - The acme pod runs its OWN bundle (`out-acme/client/main.js`) from the

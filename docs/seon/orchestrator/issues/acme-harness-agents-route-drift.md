@@ -68,6 +68,38 @@ tx-listener"). A boot race would also explain why the default pod is fine.
 `bin/seon`'s `ready_check` cannot catch this: `curl -f /` passes on the
 302 the broken router emits.
 
+## Verdict — post-planner-fix verification (2026-07-02, fresh world on da257d38)
+
+Verified on a fresh acme world (`bin/acme cluster reset` after the datahike
+fork bump `41c1b9b2` → `da257d38`, minimal-overrides `config/acme.edn`):
+
+- **Routes serve.** `GET /` → 200, `GET /agent/root` → 200, `/agents` → 302
+  (expected). Held across the fresh boot AND a subsequent pod restart that
+  resumed root from the existing store. 4 route rows confirmed via the wire
+  REPL.
+- **The planner fix is live on acme** — proven on the wire-server with the
+  planner forced on (`binding [datahike.query/*force-legacy* false]`): the
+  previously-failing clause order (`[?e :seon.route/pattern "/"]
+  [?e :seon.route/name _ ?tx] [?tx :db/txInstant ?at]`) returns the correct
+  row, and the `pattern+name` join returns all 4 rows.
+- **BUT the 302 regression was NOT planner-rooted.** `db->routes` was (and
+  is) a SINGLE-clause query — `[:find [(pull ?e [...]) ...] :where
+  [?e :seon.route/pattern]]` — and the collect-field bug
+  ([[datahike-query-clause-order-empty-results]]) only affects multi-clause
+  probe joins (a merge-clause probe var outside the v slot). A one-clause
+  scan has no probe, so the planner bug cannot have emptied the router
+  projection. Also, the failing bundle (built Jul 2 14:00) already ran
+  `e6d196d5`; the ONLY datahike delta to the working world is the planner
+  collect fix + changelog. What the planner bug DOES explain is the
+  **diagnostic** `#{}` on the route JOIN despite 4 rows — it poisoned the
+  investigation, not the serving.
+- **Standing explanation: the boot race** (rebuild! at `start!` reading a
+  replica that didn't yet carry the route rows) remains the best hypothesis
+  for the original failure — un-falsified but NOT reproduced (2/2 boots on
+  the fresh world served routes; the failing boot's log was truncated by
+  restart, so it cannot be re-examined). There is still NO route
+  tx-listener; `rebuild!` runs once per `start!`.
+
 ## Acceptance criteria (remaining)
 
 - Root-cause why the acme pod's post-seed `rebuild!` projected zero routes
