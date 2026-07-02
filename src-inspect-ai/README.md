@@ -37,10 +37,14 @@ src/seon_inspect/
   solver.py              seon_pod_solver (/solve) + timeout_honesty scorer
   oracle_scorers.py      persistent bb+node oracle servers, score_code tier
                          ladder, ladder_scorer, assert_oracle_live
-  generators.py          seeded tool-row generators (shell_use / web_fetch /
-                         file_edit) + fixture server + setup/render helpers
+  generators.py          seeded bespoke-row generators (shell_use / web_fetch /
+                         file_edit / long_term_planning) + fixture server +
+                         setup/render helpers
   tool_scorers.py        outcome oracles for the tool rows (workspace re-read,
                          fixture ground truth; bb/node for code targets)
+  planning.py            long_term_planning two-part oracle (final answer +
+                         plan-trajectory resumption evidence) + the two-phase
+                         restart choreography (live driver = dev-pass stub)
   worker_endpoints.py    mock:<scenario> | runpod endpoint resolution
   worker_mock.py         canned offline worker (REAL Clojure fixtures)
   offline_proof.py       python -m seon_inspect.offline_proof

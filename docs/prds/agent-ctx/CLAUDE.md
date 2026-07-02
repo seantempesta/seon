@@ -105,8 +105,13 @@ Eval-lane blockers before the first dev pass (from [[eval-CLAUDE-notes]]):
 1. `SEON_SHELL`/`SEON_WEB` grants — ✅ GRANTED in both supervisors (code
    defaults stay deny-when-unset); table in
    `docs/seon/components/capability-gates.md`.
-2. Planning bench re-grounded on the redesigned `my.plan` (deps/pace/expect —
-   the old bench references pre-rename verbs).
+2. ~~Planning bench re-grounded on the redesigned `my.plan`~~ — ✅ DONE
+   2026-07-02 (roadmap eval step 4): two-phase generator + two-part oracle
+   (`seon_inspect.generators` / `seon_inspect.planning`), lock `generated`,
+   pytest 116 green. Remaining for the dev pass: the durable-world `/solve`
+   variant (agent-id reuse across the restart, planning cluster only) + the
+   plan read-back — the live driver is a documented stub
+   (`planning.pod_planning_driver`).
 3. ~~Tool-row generators~~ — ✅ AUTHORED 2026-07-02
    (`src-inspect-ai/src/seon_inspect/generators.py` + `tool_scorers.py`;
    dev artifacts in `evals/`, lock entries `generated`, run wiring lands

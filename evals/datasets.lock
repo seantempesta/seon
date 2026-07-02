@@ -23,12 +23,16 @@
       "test_seed": "fresh-per-draw"
     },
     "long_term_planning": {
+      "artifact": "evals/long_term_planning.dev.jsonl",
       "canary_guid": "SEON-CANARY-22c6919d-7697-4d0b-b8e4-96cedb1bd0c5",
       "dev_n": 10,
       "dev_seed": 1,
+      "dev_sha256": "dcd91c73a6cfb21ee83dbbb05da8ba80f6c4472794a884f461edc02628a9c1ca",
       "epochs": 4,
+      "generator": "seon_inspect.generators:long_term_planning",
       "milestone_seed": 2,
-      "status": "pending-generator",
+      "milestone_sha256": "f76ff9877339214fa5d36deaba72286b4604fc6ccb10c352f57dc90a0acc3cf2",
+      "status": "generated",
       "test_seed": "fresh-per-draw"
     },
     "memory_store_recall": {

@@ -130,8 +130,27 @@ repo-dev docs.
    web_fetch,file_edit}.dev.jsonl`, dev+milestone sha256s, canaries carried);
    regenerate-with-lock verified no-op ×2 incl. artifact hashes. Live-drive
    calibration of these rows rides step 5 (first dev pass).
-4. **Planning bench re-ground** on the redesigned `my.plan` (deps/pace/expect —
-   the headline capability; plan-survives-restart stays bespoke, no public bench).
+4. ~~**Planning bench re-ground**~~ — ✅ DONE 2026-07-02 (offline unit; the
+   headline continuity row, bespoke by design — no public bench measures
+   plan-survives-restart). Seeded TWO-PHASE generator
+   (`generators.py:long_term_planning`, 8 templates: phase 1 = partial data +
+   the full stated contract, phase 2 = remaining data to the SAME agent after
+   the pod restart; synthesis answer spans both batches). Two-part oracle
+   (`planning.py`): final answer (reuses `check_answer`) AND resumption
+   evidence from the agent's `:my.plan` step rows across the interruption
+   timestamp (durable pre-restart plan · ≥1 pre step completed post-restart ·
+   no new post-restart root = no re-plan · no pre-restart leaf left open;
+   message-minted steps excluded; open parent roots tolerated — my.plan derives
+   parent done-ness). Choreography (`run_planning_sample`) is
+   injected-callable + unit-tested; the LIVE driver is a loud stub — the dev
+   pass needs (a) a durable-world `/solve` variant that reuses an `agent_id`
+   across the restart on the ISOLATED planning cluster and (b) the plan
+   read-back (`SNAPSHOT_QUERY_NOTE`). Lock upgraded `pending-generator` →
+   `generated` (canary carried; regenerate-with-lock no-op ×2); artifact
+   `evals/long_term_planning.dev.jsonl`; goal-stated verb-scan now covers
+   phase-2 texts; pytest 95 → 116 green. Supersedes the spike
+   `docs/prds/agent-fsm/research/inspect-bridge-spike/planning_resume_bench.py`
+   (pre-rename verbs, kept as history).
 5. **First dev pass** → `evals/scorecard.jsonl` + the `pass^k` regression alarm;
    then cadence.
 6. **Ongoing** — per-row rendered-context audits (every trim is an A/B),

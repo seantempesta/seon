@@ -75,11 +75,16 @@ def test_fresh_test_draw_never_reuses_frozen_seeds():
 @pytest.mark.parametrize("row", ROWS)
 def test_task_text_is_goal_stated(row):
     for sample in all_rows(row):
-        text = sample["input"].lower()
-        for marker in COACHING_MARKERS:
-            assert marker not in text, (
-                f"{sample['id']}: task text coaches the API ({marker!r}): "
-                f"{sample['input']}")
+        # EVERY agent-visible phase text (long_term_planning delivers a
+        # second message after the restart — scan it too).
+        texts = [sample["input"],
+                 sample["metadata"].get("phase2_input", "")]
+        for text in texts:
+            low = text.lower()
+            for marker in COACHING_MARKERS:
+                assert marker not in low, (
+                    f"{sample['id']}: task text coaches the API "
+                    f"({marker!r}): {text}")
 
 
 @pytest.mark.parametrize("row", ROWS)

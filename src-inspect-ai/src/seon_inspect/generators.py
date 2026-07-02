@@ -1,4 +1,5 @@
-"""Tool-row generators — seeded bespoke datasets for shell_use / web_fetch / file_edit.
+"""Bespoke-row generators — seeded datasets for shell_use / web_fetch /
+file_edit / long_term_planning.
 
 Implements the eval-design bespoke rule: the GENERATOR + seeds are what's
 frozen (dev = seed 1, milestone = seed 2, test = fresh seed per draw), so the
@@ -26,6 +27,16 @@ Row shapes:
                re-reads the file (exact content where the task fully
                determines it; bb parse + node behavioral eval where the
                target is code).
+  long_term_planning — TWO-PHASE tasks (the headline continuity row): phase 1
+               (`input`) delivers part of the data and states the whole
+               contract (durable plan, restart survival, resume without
+               re-planning, close every step, then answer); the harness
+               restarts the pod, then delivers `metadata["phase2_input"]`
+               to the SAME agent. The final answer is a synthesis over BOTH
+               batches (only computable if both phases' work landed), and
+               the plan-entity trajectory across the restart boundary is
+               oracle input by design — this is the one row where "did the
+               plan survive" IS the capability (`seon_inspect.planning`).
 
 Placeholders: task texts carry `{workspace}` / `{fixture_url}` tokens; the
 runner materializes `metadata["setup"]` (relpath → content) into the per-run
@@ -583,6 +594,205 @@ _FILE_EDIT_TEMPLATES = [
 
 
 # ---------------------------------------------------------------------------
+# long_term_planning — two-phase continuity tasks (plan → restart → resume)
+# ---------------------------------------------------------------------------
+
+# The trajectory oracle's floor for "a durable plan existed before the
+# restart": at least this many agent-authored (non-message-minted) plan steps
+# created in phase 1. Stated in the task text as "record a durable plan …
+# broken into steps".
+MIN_PRE_STEPS = 2
+
+# The contract paragraph — EVERY check the planning oracle makes, stated in
+# the agent's own task text (the load-bearing finding). The trajectory checks
+# map 1:1: durable pre-restart plan (min_pre_steps) / survive the restart /
+# resume, never re-plan (no new post-restart root) / no pre-restart step left
+# open / the final synthesis answer.
+_LTP_CONTRACT = (
+    "Partway through this task your runtime will be restarted, and your plan "
+    "and progress must survive that restart. Before doing anything else, "
+    "record a durable plan for the WHOLE task, broken into steps, and keep it "
+    "current — mark a step done only once its outcome actually holds. Then "
+    "record the data above. After the restart you will receive the remaining "
+    "data; you must resume from the plan you already recorded — do not start "
+    "a new plan from scratch — and no step of your plan may be left open at "
+    "the end."
+)
+
+
+def _ltp_task(intro: str, batch1: list[str], batch2: list[str],
+              question: str) -> tuple[str, str]:
+    """The two phase texts for one planning sample.
+
+    Phase 1 = data batch 1 + the FULL contract + the final question; phase 2
+    (delivered to the SAME agent after the pod restart) = data batch 2 + the
+    resume restatement + the same question."""
+    phase1 = (
+        intro + " So far you have the first batch of data: "
+        + "; ".join(batch1) + ". The rest of the data arrives only after the "
+        "restart. " + _LTP_CONTRACT + " Only when every step of your plan is "
+        "done, " + question
+    )
+    phase2 = (
+        "Your runtime has been restarted. Here is the remaining data: "
+        + "; ".join(batch2) + ". Resume from the plan you recorded before the "
+        "restart — do not start a new plan from scratch. Record this data, "
+        "finish every remaining step of your plan (none may be left open), "
+        "and only when every step is done, " + question
+    )
+    return phase1, phase2
+
+
+def _ltp_row(intro: str, batch1: list[str], batch2: list[str], question: str,
+             final_oracle: dict[str, Any]) -> dict[str, Any]:
+    phase1, phase2 = _ltp_task(intro, batch1, batch2, question)
+    return {"input": phase1,
+            "phase2_input": phase2,
+            "setup": {},
+            "oracle": {"final": final_oracle,
+                       "resume": {"min_pre_steps": MIN_PRE_STEPS}},
+            "target": final_oracle["answer"]}
+
+
+def _ltp_grand_total(rng: random.Random) -> dict[str, Any]:
+    item = rng.choice(_ITEMS)
+    cities = rng.sample(_CITIES, 5)
+    qtys = rng.sample(range(12, 480), 5)
+    n1 = rng.randint(2, 3)
+    lines = [f"the {c} depot received {q} {item}"
+             for c, q in zip(cities, qtys)]
+    return _ltp_row(
+        "You are tallying a delivery ledger.",
+        lines[:n1], lines[n1:],
+        f"reply with only one integer: the total number of {item} received "
+        "across all depots, counting both batches.",
+        {"kind": "integer", "answer": str(sum(qtys)), "derived": True})
+
+
+def _ltp_net_stock(rng: random.Random) -> dict[str, Any]:
+    item = rng.choice(_ITEMS)
+    deliveries = [rng.randint(120, 400) for _ in range(3)]
+    withdrawals = [rng.randint(10, 90) for _ in range(2)]
+    names = rng.sample(_NAMES, 5)
+    batch1 = [f"{n} delivered {q} {item} to the depot"
+              for n, q in zip(names[:3], deliveries)]
+    batch2 = [f"{n} withdrew {q} {item} from the depot"
+              for n, q in zip(names[3:], withdrawals)]
+    net = sum(deliveries) - sum(withdrawals)
+    return _ltp_row(
+        "You are reconciling depot stock movements.",
+        batch1, batch2,
+        f"reply with only one integer: the number of {item} remaining in the "
+        "depot (all deliveries minus all withdrawals, starting from zero).",
+        {"kind": "integer", "answer": str(net), "derived": True})
+
+
+def _ltp_max_site(rng: random.Random) -> dict[str, Any]:
+    facs = rng.sample(_FACILITIES, 5)
+    counts = rng.sample(range(20, 900), 5)
+    winner = facs[counts.index(max(counts))]
+    lines = [f"the {f} site employs {c} people"
+             for f, c in zip(facs, counts)]
+    n1 = rng.randint(2, 3)
+    return _ltp_row(
+        "You are surveying site headcounts.",
+        lines[:n1], lines[n1:],
+        "reply with only the name of the site with the largest headcount "
+        "across both batches.",
+        {"kind": "text", "answer": winner,
+         "distractors": [f for f in facs if f != winner]})
+
+
+def _ltp_threshold_count(rng: random.Random) -> dict[str, Any]:
+    threshold = rng.choice([40, 50, 60, 70])
+    words = rng.sample(_WORDS, 6)
+    readings = [rng.choice([r for r in range(5, 100) if r != threshold])
+                for _ in range(6)]
+    lines = [f"sensor {w} read {r} units"
+             for w, r in zip(words, readings)]
+    over = sum(1 for r in readings if r > threshold)
+    return _ltp_row(
+        "You are auditing sensor readings.",
+        lines[:3], lines[3:],
+        f"reply with only one integer: how many sensors, across both "
+        f"batches, read strictly more than {threshold} units.",
+        {"kind": "integer", "answer": str(over), "derived": True})
+
+
+def _ltp_total_minutes(rng: random.Random) -> dict[str, Any]:
+    words = rng.sample(_WORDS, 5)
+    mins = [rng.randint(12, 95) for _ in range(5)]
+    lines = [f"the {w} inspection takes {m} minutes"
+             for w, m in zip(words, mins)]
+    n1 = rng.randint(2, 3)
+    return _ltp_row(
+        "You are compiling an inspection schedule.",
+        lines[:n1], lines[n1:],
+        "reply with only one integer: the total number of minutes for all "
+        "inspections in both batches combined.",
+        {"kind": "integer", "answer": str(sum(mins)), "derived": True})
+
+
+def _ltp_batch_difference(rng: random.Random) -> dict[str, Any]:
+    item = rng.choice(_ITEMS)
+    first = [rng.randint(10, 120) for _ in range(3)]
+    second = [rng.randint(130, 300) for _ in range(2)]
+    cities = rng.sample(_CITIES, 5)
+    batch1 = [f"the first convoy dropped {q} {item} at {c}"
+              for c, q in zip(cities[:3], first)]
+    batch2 = [f"the second convoy dropped {q} {item} at {c}"
+              for c, q in zip(cities[3:], second)]
+    diff = sum(second) - sum(first)
+    return _ltp_row(
+        "You are comparing two convoy manifests.",
+        batch1, batch2,
+        f"reply with only one integer: how many more {item} the second "
+        "convoy dropped in total than the first convoy.",
+        {"kind": "integer", "answer": str(diff), "derived": True})
+
+
+def _ltp_top_rated(rng: random.Random) -> dict[str, Any]:
+    names = rng.sample(_NAMES, 5)
+    ratings = rng.sample(range(10, 100), 5)
+    winner = names[ratings.index(max(ratings))]
+    lines = [f"{n} scored a rating of {r}"
+             for n, r in zip(names, ratings)]
+    n1 = rng.randint(2, 3)
+    return _ltp_row(
+        "You are ranking correspondent review scores.",
+        lines[:n1], lines[n1:],
+        "reply with only the name of the correspondent with the highest "
+        "rating across both batches.",
+        {"kind": "text", "answer": winner,
+         "distractors": [n for n in names if n != winner]})
+
+
+def _ltp_distinct_cities(rng: random.Random) -> dict[str, Any]:
+    distinct = rng.sample(_CITIES, rng.randint(3, 5))
+    visits = distinct + [rng.choice(distinct)
+                         for _ in range(rng.randint(2, 3))]
+    rng.shuffle(visits)
+    couriers = rng.sample(_NAMES, len(visits))
+    lines = [f"courier {n} passed through {c}"
+             for n, c in zip(couriers, visits)]
+    n1 = len(visits) // 2
+    return _ltp_row(
+        "You are mapping courier routes.",
+        lines[:n1], lines[n1:],
+        "reply with only one integer: how many DISTINCT cities appear across "
+        "both batches (count each city once no matter how many couriers "
+        "passed through it).",
+        {"kind": "integer", "answer": str(len(distinct)), "derived": True})
+
+
+_PLANNING_TEMPLATES = [
+    _ltp_grand_total, _ltp_net_stock, _ltp_max_site, _ltp_threshold_count,
+    _ltp_total_minutes, _ltp_batch_difference, _ltp_top_rated,
+    _ltp_distinct_cities,
+]
+
+
+# ---------------------------------------------------------------------------
 # Generation — seed + procedure → rows (no hand-maintained lists)
 # ---------------------------------------------------------------------------
 
@@ -590,6 +800,7 @@ GENERATORS: dict[str, list[Callable[[random.Random], dict[str, Any]]]] = {
     "shell_use": _SHELL_TEMPLATES,
     "web_fetch": _WEB_TEMPLATES,
     "file_edit": _FILE_EDIT_TEMPLATES,
+    "long_term_planning": _PLANNING_TEMPLATES,
 }
 
 
@@ -602,17 +813,22 @@ def generate_rows(row: str, seed: int | str, n: int) -> list[dict[str, Any]]:
     rows = []
     for i in range(n):
         made = templates[i % len(templates)](rng)
+        metadata = {
+            "row": row,
+            "generator_seed": seed,
+            "index": i,
+            "setup": made["setup"],
+            "oracle": made["oracle"],
+        }
+        # Row-specific extras ride in metadata (e.g. long_term_planning's
+        # phase2_input). Tool rows add none, so their bytes are unchanged.
+        metadata.update({k: v for k, v in made.items()
+                         if k not in ("input", "setup", "oracle", "target")})
         rows.append({
             "id": f"{row}-seed{seed}-{i:03d}",
             "input": made["input"],
             "target": made.get("target", ""),
-            "metadata": {
-                "row": row,
-                "generator_seed": seed,
-                "index": i,
-                "setup": made["setup"],
-                "oracle": made["oracle"],
-            },
+            "metadata": metadata,
         })
     return rows
 
