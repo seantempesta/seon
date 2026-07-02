@@ -30,10 +30,17 @@ A `defn` whose input accepts the db and whose output carries a render key is
 a **renderer**, and the keys present decide where it goes:
 
 - `{:seon.render/ai …}` → a **block**: its string joins the agent's prompt.
-- `{:seon.render/html …}` → a **tile**: its hiccup joins the agent's tile
-  vector, which the UI already renders on the human's page.
+- `{:seon.render/html …}` → a **tile**: its own hiccup surface on the
+  agent's page (each block has its own separate tile — not a merged vector).
 - **both keys → twins**: one value, two projections — the agent's context
   and the human's screen showing the same thing.
+
+The **canvas** is a distinct, focal tile. Default: it shows the
+**last-updated tile** — a function of the db (the block-tile whose data most
+recently changed), so the human's focus follows what the agent is actively
+doing with zero ceremony. Override: the agent pins the canvas to a specific
+tile (`:seon.render.live-tile/content`) to feature it regardless of recency.
+Derive the default, store only the pin — the same rule as everywhere else.
 
 This is the block's two renders (`:seon.render/ai` / `:seon.render/html`),
 now emitted by any in-scope `defn`, not only by seeded blocks. Its args are
