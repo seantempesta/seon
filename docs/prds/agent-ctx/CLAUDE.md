@@ -150,19 +150,22 @@ Eval-lane blockers before the first dev pass (from [[eval-CLAUDE-notes]]):
   with the swarm build. `POD_MAX_SAMPLES=1` is LOCKED — scale pod count, don't
   chase >1 sample/pod (`solve-once!` also swaps `schema/*schemas` + shares one
   compile-state). `ensure-db` backend default unifies to `:file`.
-- **Clean-environment formalization (owner-ratified 2026-07-02):** the noun is
-  **cluster, everywhere** — one DB + its agents; ephemeral (`:memory`, a bench
-  sample) or durable (`:file`, acme / the default). NO new noun. At the data
-  level a cluster = a wire-registry db entry; at the deployment level =
-  supervisor + pods + a default cluster. `/solve` is DEPRECATED as a concept:
-  it becomes explicit cluster-lifecycle + agent-verb doors (create / drive /
-  destroy — HTTP with an explicit cluster param, ALS-scoped, no root swap)
-  plus ONE renamed one-shot composition door for the QA case. "Solve(r)" is
-  harness-side vocabulary only — the pod never knows about benchmarks. Gym +
-  inspect-ai both consume the same primitives (split unchanged: gym = free
-  in-process inner loop, inspect-ai = external bench). Build: eval lane, WITH
-  Slice A (conn→ALS) so the new doors never touch the old root-swap; tooling
-  reviews post-hoc.
+- **Clean-environment formalization (owner-ratified 2026-07-02, REVISED same
+  day):** the noun is **cluster, everywhere** — one shared DB + many agents
+  (one root + others); NO new noun. **One Node pod per cluster, always** —
+  true isolation = the process boundary + the wire capability surface; agents
+  never know other clusters exist (`list-dbs`/`remove-db` are
+  supervisor-facing, never agent-exposed). One wire-server JVM hosts ALL
+  clusters' dbs (the shipped registry) — a new cluster is a Node proc + a db
+  entry, cheap. **No in-pod multi-world, ever**: one pod = one world = one
+  `*conn*` root is correct by construction, so `/solve`'s scratch root-swap
+  machinery is DELETED, not fixed (Slice A's /solve motivation dissolves).
+  `/solve` is DEPRECATED: replaced by cluster lifecycle
+  (`bin/seon cluster create|destroy`, ephemeral or durable) + the existing
+  agent verbs over each pod's own HTTP, plus ONE renamed one-shot composition
+  door (harness/supervisor-side). "Solve(r)" is harness-side vocabulary only.
+  Gym + inspect-ai both consume the same primitives (split unchanged). Build:
+  eval lane; tooling reviews post-hoc.
 
 ## The load-bearing finding (binds the whole chunk)
 
