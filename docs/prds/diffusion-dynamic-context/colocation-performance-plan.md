@@ -45,13 +45,13 @@ tags: [orchestrator, diffusion, agent, flow]
   isolated from the model. **V8 hotness:** the node eval process does a warmup eval
   at boot so JIT is hot; bb is GraalVM-native AOT already.
 - **Eval speed is NOT on the critical path; IPC + persistence is the whole game.**
-  A ~2.6 ms warm eval against a ~250 ms GPU forward is ~1 %. Optimizing eval below
+  A ~2.6 ms warm eval against a ~130-140 ms GPU forward is ~1 %. Optimizing eval below
   2.6 ms buys nothing measurable; the entire win is removing the ~20-200 ms
   round-trip. Spend the effort on persistence + co-location, not on a faster eval.
 - **Pipelining is the second-order win after co-location.** Parse is so cheap
   (0.05 ms) it just runs serially between steps — no benefit to overlapping. The
   ~2.6 ms eval and any retrieve CAN overlap the next GPU forward (async), hiding
-  under the ~250 ms step. Co-locate first (the 430×-to-4000× lever); pipeline the
+  under the ~130-140 ms step. Co-locate first (the 430×-to-4000× lever); pipeline the
   eval/retrieve checkpoint second (a ~1 % refinement).
 - **All-prep-offline GPU plan (A-D):** A. per-iteration oracle latency
   (co-located persistent pipe vs the network path); B. end-to-end refine-loop
@@ -67,7 +67,7 @@ tags: [orchestrator, diffusion, agent, flow]
 
 | Stage | Cost | Source |
 |---|---|---|
-| One GPU denoise forward | ~250 ms (≈17 tok at ~70 tok/s/forward into the ~130 tok/s aggregate) | CLAUDE.md result fields `tokens_per_forward`, `tok_per_s`; ~130-140 tok/s decode |
+| One GPU denoise forward | ~130-140 ms (≈17 tok committed/forward → the ~130 tok/s aggregate) | CLAUDE.md result fields `tokens_per_forward`, `tok_per_s`; ~130-140 tok/s decode |
 | bb parse, **persistent** warm | **0.048 ms** mean (p50 0.047, min 0.041, n=500) | measured live this session, real pipe (`oracle_shim.py` self-test) |
 | bb parse, **spawn-per-call** | **20.8 ms** mean (p50 20.7, n=15) | measured live this session (reproduced `closed_loop.py:24-30`) |
 | bb parse, cold (spawn→1st resp) | 49.4 ms once | measured live; one-time per warm worker |
@@ -80,7 +80,7 @@ ms) + oracle round-trip`. With a co-located **persistent** oracle the round-trip
 ~0.05 ms — the loop is forward-bound at ~130 tok/s. With the current driver each
 iteration adds an internet API call + a 3 s poll granularity + a 21 ms bb respawn,
 so K iterations collapse to ~3-4 tok/s effective. **The oracle computation was
-never the problem** (0.05 ms ≪ 250 ms); the round-trip and the respawn are.
+never the problem** (0.05 ms ≪ ~130-140 ms); the round-trip and the respawn are.
 
 ### 1.2 Two independent round-trips, both removable
 
@@ -166,7 +166,7 @@ transport-agnostic (`colocated-oracle-package-design §4`), so this is a transpo
 swap with ZERO handler changes. Do not reach for HTTP.
 
 **Expected per-iteration oracle latency, co-located + persistent:**
-- parse-only checkpoint: **~0.05 ms** (negligible against the 250 ms forward);
+- parse-only checkpoint: **~0.05 ms** (negligible against the ~130-140 ms forward);
 - eval checkpoint: **~2.6 ms** (~1 % of a forward);
 - vs the network path it replaces: tens-to-hundreds of ms + 3 s poll granularity.
 
@@ -194,12 +194,12 @@ swap with ZERO handler changes. Do not reach for HTTP.
     parse-per-step / eval-at-checkpoint split (`colocated-oracle-package-design
     §"DONE" step 3`), and it means the expensive tier fires rarely.
   - **Pre-compile/cache common forms?** Not worth it. The 2.6 ms includes the
-    compile, but eval is the sparse tier and 2.6 ms ≪ 250 ms. Caching compiled JS
+    compile, but eval is the sparse tier and 2.6 ms ≪ ~130-140 ms. Caching compiled JS
     by form-hash would add machinery to shave a sub-1 %-of-forward cost. Skip until
     measured to matter.
 
 **Honest bottom line on "as fast as C":** eval-speed optimization pays off NOWHERE
-on this critical path — 2.6 ms eval vs 250 ms forward. The ONLY thing that matters
+on this critical path — 2.6 ms eval vs ~130-140 ms forward. The ONLY thing that matters
 is (a) co-location (kill the network hop) and (b) persistence (kill the respawn).
 Both are about removing round-trips, not making the computation faster.
 
@@ -211,7 +211,7 @@ Both are about removing round-trips, not making the computation faster.
   loop is `forward → (oracle) → forward`; the eval verdict for step N's canvas is
   only needed to decide step N+1's renoise. So FIRE the eval async right after step
   N's forward, let it compute (~2.6 ms) WHILE step N+1's forward is already running
-  (~250 ms), and consume the verdict before step N+1 completes. The eval thus hides
+  (~130-140 ms), and consume the verdict before step N+1 completes. The eval thus hides
   entirely under the next forward — its 2.6 ms becomes free.
 - **Is the loop serial or pipelineable?** The *generate* steps are serial (each
   forward depends on the prior canvas). But the *oracle* call for step N is
@@ -408,8 +408,11 @@ was 62 % of generation latency at 9k-token context (`co-location-image-build §T
 
 **Measures:** the cheap raw-speed knob — `entropy_bound` (dflt 0.1) sets how many
 tokens commit per forward (higher ⇒ more tok/forward ⇒ fewer forwards ⇒ higher
-tok/s), traded against quality (`CLAUDE.md` TUNING KNOBS; `north-star` "4→15
-tok/forward").
+tok/s), traded against quality (`CLAUDE.md` TUNING KNOBS). NOTE an unresolved
+baseline conflict D itself settles: [[research/fastest-tok-per-dollar-hardware-2026-06-30]]
+says we commit ~4 tok/forward (→ ~4-5× headroom to the reference 15-20);
+[[research/forward-speedup-levers-2026-06-30]] says ~17 measured at eb 0.1
+(→ ~2-3× headroom). Expect ~2-5× until D reads the real `tokens_per_forward`.
 
 - **Win condition:** an `entropy_bound × tok_per_s × faithful_rate` curve that finds
   the knee — the highest tok/forward that holds the oracle faithful_rate (no quality

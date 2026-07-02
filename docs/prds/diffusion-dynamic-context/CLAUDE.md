@@ -31,7 +31,8 @@ tags: [orchestrator, agent]
 - [[colocation-performance-plan]] — **CURRENT FOCUS = SPEED (tok/$).** Co-location prep DONE
   (oracle ~free 0.05ms; loop forward-bound). GPU session = pure measure (owner builds image →
   `tmp/flash-diffgemma/deploy-colocation.sh` → A/B/C/D). **Run exp D (entropy_bound sweep) FIRST —
-  free ~4-5× on A100.** + [[research/fastest-tok-per-dollar-hardware-2026-06-30]] (FP8=Hopper-only →
+  free ~2-5× on A100 (est.; the two research docs disagree on the measured tok/forward
+  baseline — ~4 vs ~17 — and D is the measurement that settles it).** + [[research/fastest-tok-per-dollar-hardware-2026-06-30]] (FP8=Hopper-only →
   L40S/A6000 DEAD; A100 cheapest BF16; **TPU JAX DiffusionGemma EXISTS — port-light, has `_early_stopping.py`**)
   + [[research/forward-speedup-levers-2026-06-30]] (MoE-bound; over-commit×renoise
   is the lever, Triton kernel = Hopper-only) +
