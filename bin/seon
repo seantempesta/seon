@@ -346,13 +346,13 @@ wait_ready() {
     if ! is_running "$name"; then
       echo ""
       echo "✗ $name DIED while waiting for readiness — read its log:" >&2
-      echo "    bin/seon logs $name   (logs/$name.log)" >&2
+      echo "    bin/seon logs $name   ($(log_file "$name"))" >&2
       return 1
     fi
     if [ "$waited" -ge "$bound" ]; then
       echo ""
       echo "✗ $name not ready after ${bound}s — read its log:" >&2
-      echo "    bin/seon logs $name   (logs/$name.log)" >&2
+      echo "    bin/seon logs $name   ($(log_file "$name"))" >&2
       return 1
     fi
     sleep 1
@@ -423,7 +423,7 @@ maybe_prep_deps() {
   echo "  ▶ deps changed (or git libs unprepped) for $name — running"
   echo "    clojure -X:deps prep :aliases '$prep_vec' && clojure -P -M:$alias"
   echo "    SYNCHRONOUSLY before spawn (a fresh git dep can take minutes)"
-  echo "    progress: logs/$name.log"
+  echo "    progress: $(log_file "$name")"
   {
     echo "== [bin/seon] auto-prep :$alias started $(date -u +%FT%TZ) =="
     # prep BEFORE -P: a prep-requiring git dep (e.g. datahike, which compiles
@@ -648,7 +648,7 @@ _start_unlocked() {
   date -u +%FT%TZ    > "$(started_file "$name")"
 
   echo "● $name started (pid $pid)"
-  echo "  log: logs/$name.log"
+  echo "  log: $(log_file "$name")"
   process_ready_hint "$name"
 }
 

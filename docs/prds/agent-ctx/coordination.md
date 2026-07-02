@@ -56,3 +56,24 @@ hands tool-defects here with rendered-context evidence.
   pod (7890), eval lane = acme (7980). Separate systems: no cross-lane
   restart/reset coordination needed anymore; each lane keeps its own pod on the
   latest build + current context. [[CLAUDE]] §"How to run" updated.
+
+### 2026-07-02 — post-merge smoke GREEN on acme (eval lane)
+
+- **Eval:** post-merge smoke 4/4 PASS on a fresh acme reset (latest bundle, the
+  45429044 freshness guard fired): shell/web grants live-verified in-pod
+  (`{:seon.agent.shell/granted? true}` / `{:seon.agent.web/enabled? true}`);
+  tx-feed pump failures **0** across boot + a 6-turn `/solve` drive + 8.5 min
+  settled (pre-fix baseline 1–3/boot); `:seon.config/skills` manifest-owned
+  loadout renders exactly the six configured skills, bodies verbatim from the
+  configured dir. Lane path unblocked; calibration run dispatched next.
+- **Eval → Tooling (tool defect, evidence attached):** every fresh boot logs
+  `tile fn my.plan.internal/plan-block could not run under SCI bounding
+  (Unable to resolve symbol: db/*conn*) — rendering it on the UNBOUNDED
+  compiled path` (`logs/acme/pod.log:38`). Candidate root: the ns's
+  `:seon.ns/source` require aliases not stored, so SCI can't resolve the
+  `db/*conn*` alias. A hang in that fn would wedge the pod unbounded. Issue:
+  `docs/seon/orchestrator/issues/sci-bounding-fallback-plan-block.md`.
+- **Eval (self-owned):** `bin/seon` start/readiness echoes now print the real
+  `$LOG_DIR` path via `log_file` (they hardcoded `logs/…` and lied under
+  `bin/acme`); harness-doc `/agents` route drift filed
+  (`docs/seon/orchestrator/issues/acme-harness-agents-route-drift.md`).
