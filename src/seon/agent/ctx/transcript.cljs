@@ -754,7 +754,7 @@
         ;; kept within each tier's token budget).
         tiers    (::tiers tblock)
         retained (or (::turns-retained tblock) 8)
-        events*t (clip-events-by-tiers (or tiers []) retained events*c)
+        events*t (clip-events-by-tiers (mapv #(into {} %) tiers) retained events*c)
         ;; move 4 / CP-5 — the per-eval RESULT-BODY cap off `::result-decay` ×
         ;; the eval's AGE (turn-offset = newest turn − the eval's `::turn-idx`).
         ;; The v1 default is the 3-level shrink schedule [0→16384, 2→1500,
@@ -770,8 +770,9 @@
                          (if (= :eval (::kind ev))
                            (let [offset (if (neg? max-turn) 0
                                             (- max-turn (or (::turn-idx ev) max-turn)))
-                                 cap    (decay-cap-for-offset (or levels []) offset
-                                                              ctx/result-body-render-cap)]
+                                 cap    (decay-cap-for-offset
+                                          (mapv #(into {} %) levels) offset
+                                          ctx/result-body-render-cap)]
                              (update ev ::entity assoc
                                      :seon.render/result-body-cap cap))
                            ev))
