@@ -27,6 +27,8 @@ IS its worked example). That means:
 
 Current: `data` (aggregation), `ui` (static hiccup), `tile` (interactive
 controls wired to agent-defined handlers), `kb` (the DB-memory worked
-manual), `skills` (the skill catalog blocks). Planned next: `blob` (the
-content-addressed disk tier — see `docs/seon/architecture/observability.md`
-and `docs/prds/agent-fsm/research/tool-designs-eval-2026-07-02.md`).
+manual), `skills` (the skill catalog blocks), `blob` (the content-addressed
+disk tier — SHA-256-named files under `<cluster>/blobs/`, paged reads; see
+`docs/seon/architecture/observability.md`). `my.blob` is NOT yet required
+into the boot build (`client.cljs`) or `home-requires` — wire it there
+before expecting it in agent context.
