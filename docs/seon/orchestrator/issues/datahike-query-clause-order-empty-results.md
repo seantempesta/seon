@@ -7,47 +7,112 @@ tags: [issue, database]
 # Datahike fork: 3-clause query silently returns #{} on a valid clause order
 
 Found 2026-07-02 during the seon-skills live-verification pass (every example
-eval'd against the live default pod).
+eval'd against the live default pod). **Root-caused and fixed in the fork
+2026-07-02** — awaiting the sha bump + pod/wire-server restart for the live
+proof (see Status).
 
 ## Symptom
 
 A specific 3-clause combination silently returns `#{}` instead of the correct
 rows: an id-lookup clause (no tx var) placed BEFORE a wildcard-value
 tx-binding clause that a third clause joins on. Reordering the clauses returns
-the correct rows. Reproduced reliably on the live pod.
+the correct rows. Reproduced reliably on the live pod, on a hermetic
+in-memory CLJS db in the pod, and on the JVM with
+`DATAHIKE_QUERY_PLANNER=true`.
+
+```clojure
+;; FAILS (returned #{}):
+[:find ?at ?tx
+ :where [?e :src/id "src-1"]        ; id-lookup first ("most selective first")
+        [?e :src/title _ ?tx]       ; binds ?tx from the datom's tx slot
+        [?tx :db/txInstant ?at]]    ; joins on ?tx
+;; WORKS: same query with the first two clauses swapped.
+```
 
 The failing order is exactly what the documented "most selective clause first"
-performance tip recommends — so following our own guidance produces silently
+performance tip recommends — so following our own guidance produced silently
 wrong (empty) results. Wrong-empty is worse than slow.
 
-## Where it surfaced
+## Root cause
 
-The transaction-metadata worked example in
-`seon-skills/datahike/references/querying.md` — the example was fixed to the
-working clause order and a caveat added to the performance-tips section
-(commit `21be639e`). That is a WORKAROUND in docs, not a fix.
+In the fork's query-planner **direct executor**, the `emit-tuple` macro
+(`reference-code/datahike/src/datahike/query/execute.cljc:501-508` pre-fix)
+ignored `collect-datom-field` whenever the probe value came from an
+entity-group MERGE clause (`collect-merge-idx >= 0`) — it always collected the
+merge datom's **`.-v`**. For the failing shape the probe var `?tx` sits in the
+merge clause's **tx slot** (field 3), so the producer's probe-set collected
+`"Hello"` (the title value) instead of the tx id; the consumer scan
+`[?tx :db/txInstant ?at]` probed tx entities against `#{"Hello"}` → `#{}`.
 
-## Next
+Instrumented JVM evidence (planner on, pre-fix):
 
-Root-cause in the datahike fork's query planner (`reference-code/datahike`,
-seantempesta fork). Needs: a minimal repro as a test against a hermetic
-in-memory conn, then the planner fix upstream-able to the fork. Owner rule:
-0-results-on-valid-input is a correctness bug — do not tune around it.
+```
+group-direct scan= [?e :src/id src-1]        collect-field= 3 merge-idx= 0 collected= [Hello]
+group-direct scan= [?tx :db/txInstant ?at]   probe-set= [Hello]  → #{}
+```
+
+Post-fix: `collected= [536870914]` → correct row.
+
+Why only the pod saw it: `datahike.query/*force-legacy*` defaults **true on
+the JVM** (planner opt-in via `DATAHIKE_QUERY_PLANNER=true`) but **false in
+CLJS** — the pod always runs the planner. Only the collect-only probe-set
+path was affected; when the producer supplies a find-var the consumer lacks
+(e.g. `:find ?e ?tx`), the executor takes the probe-map path, which projects
+via `find-source` and was already correct — which is why the repro's
+`:find ?at ?tx` shape is load-bearing.
+
+## Fix
+
+Fork branch `fix/planner-collect-merge-datom-field` (on top of
+`sync-upstream` @ `e6d196d5`):
+
+- `22153e6f` — `emit-tuple` honors `collect-datom-field` on merge datoms
+  (mirrors the scan-datom case), + regression test
+  `datahike.test.query-planner-test/test-probe-join-on-merge-clause-tx-var`
+  pinning the exact failing clause order and find shape (verified to fail
+  pre-fix, pass post-fix).
+- `da257d38` — CHANGELOG entry.
+
+## Coordinate audit (who resolves the fork)
+
+- **wire-server**: `clojure -M:simd:fork-deps:writer` → `:fork-deps` pins
+  `seantempesta/datahike :git/sha e6d196d5` = submodule HEAD. Correct.
+  BUT the **live process (2026-07-02) was started before the last bump and
+  runs `7ef2b5de`** (one commit behind — CLJS-only diff, JVM unaffected);
+  next restart picks up the pinned sha.
+- **pod**: shadow-cljs deps-mode `:cljs` alias `:override-deps` pins the same
+  fork sha `e6d196d5`, overriding the upstream mvn `0.8.1681` in
+  `:extra-deps`. Correct.
+- `~/src/datahike` is an older working checkout of the same fork (branch
+  `fix/multi-group-direct-join`, a different planner bug whose resolution is
+  already in `sync-upstream`); nothing resolves it. It still contains this
+  bug unfixed and has stale staged WIP — candidate for cleanup.
+
+## SHA-bump procedure (orchestrator)
+
+1. Merge `fix/planner-collect-merge-datom-field` into the fork's
+   `sync-upstream` (or rebase-push) and push to
+   `github.com/seantempesta/datahike`; note the new sha.
+2. In seon `deps.edn`, replace `e6d196d5...` with the new sha in ALL FOUR
+   places: `:fork-deps`, `:cljs :override-deps`, `:replica-probe-jvm`,
+   `:replica-peer-jvm`.
+3. Bump the `reference-code/datahike` submodule pointer to the same sha
+   (deps.edn:85 — src-secondary must stay byte-aligned).
+4. `bin/seon restart wire-server` (also cures the stale-7ef2b5de process),
+   rebuild + restart the pod (`bin/seon restart cljs-watch` then pod, or
+   `bin/seon cluster reset` if a fresh world is wanted).
 
 ## Status
 
-Open — **NEXT DISPATCH** (owner-ordered 2026-07-02, held while owner
-re-authenticates; do not lose). Scope when dispatched:
+Fix landed in the fork (branch `fix/planner-collect-merge-datom-field`,
+head `da257d38`). Fork suite: query-planner ns 22 tests / 96 assertions / 0
+failures; CLJS node-test 12 tests / 67 assertions / 0 failures; full
+`clj-pss` kaocha run recorded in the dispatch report. Remaining:
 
-1. Minimal repro as a hermetic in-memory test in the fork
-   (`reference-code/datahike`, seantempesta fork on replikativ main).
-2. Root-cause + fix the planner in OUR fork; run the fork's own suite
-   (exclude the upstream channel-contract CLJS tests per the sync note).
-3. **Verify the running systems actually resolve OUR fork** — deps.edn /
-   package resolution for the pod build AND the wire-server JVM; owner: "make
-   sure our systems are using our forked and fixed issues as this has
-   happened before" — check for a stale upstream coordinate shadowing the
-   fork, and prove it live (eval the fixed query shape on the pod).
-4. Re-run the previously-failing 3-clause order live → correct rows, and
-   remove the docs workaround caveat if the fix makes the guidance
+1. Orchestrator sha-bump per procedure above, then re-run the failing clause
+   order live on the pod → correct rows.
+2. After the live proof: remove the clause-order caveat in
+   `seon-skills/datahike/references/querying.md` ("Performance tips") and the
+   "query-planner quirk" comment in `seon-skills/datahike/SKILL.md`
+   (Transaction metadata section) — the ordering guidance becomes
    unconditional again.
