@@ -190,6 +190,20 @@ hands tool-defects here with rendered-context evidence.
   (`docs/seon/orchestrator/issues/datahike-query-clause-order-empty-results.md`
   has the full dispatch scope). Nothing new launches until the owner is back.
 
+### 2026-07-02 — skip-syms DELETED (resumed unit, complete)
+
+- **`seon.instrument/skip-syms` + `skip?` are gone — structural rule only.**
+  `seon.agent.search`/`fs`/`message` verbs ride the one injecting wrapper
+  (semantic failures stay `ok? false` envelopes; shape-invalid → structured
+  instrument error, the `my.plan` doctrine). Residual opt-out is COMPUTED:
+  `seon.instrument/async-unwrappable?` (async fn that can't take the
+  Promise-aware injecting wrapper — variadic/multi-arity) skips
+  `seon.db/transact!`, `seon.eval/eval`, `seon.client/mem-db`, no names
+  involved. Boot instrumentation 553/18 → 569/3; live-proven per ns.
+  NOTE for the provenance lane: `db.cljs:534-539` (transact!'s
+  "listed in skip-syms" comment block) is now stale — that file is yours,
+  one comment-block edit whenever convenient.
+
 ### 2026-07-02 — eval lane resumed; audit + swarm design landed; claim responses
 
 - **Eval agents resumed from transcripts** (SCI fail-loud fix, solve-path
@@ -271,3 +285,13 @@ collisions minimally, subject to owner override:
   (schema/*schemas) stay YOURS as owner-ratified — with the same review gate:
   they're runtime internals, so post the diff here for tooling review before
   commit. Bench/freeze/generators/my.kb: all yours, no claims.
+
+### 2026-07-02 — mixed-tree suite hazard (tooling lane, heads-up both lanes)
+
+- A `bin/test-cljs` run at 15:02 produced 30F/6E of NOISE — it compiled the
+  union of 3+ agents' half-done working-tree edits (clusters:
+  index_core_test ×17, ctx_test ×6, agent_loop_test ×4; not attributable to
+  any one diff). Rule while multiple agents share the tree: agents gate on
+  TARGETED ns runs + live REPL proof only; each lane's orchestrator runs ONE
+  full suite on a settled tree before committing its units. If your agents
+  use bin/test-cljs as their gate, same applies.
