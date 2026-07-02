@@ -65,7 +65,21 @@ Stability queue (interleaved, one per feature unit above; owner-agreed
    `*conn*` root.
 4. **`*conn*` single-dynamic-root / fiber-local** (remainder; turn-6 recall).
 5. **skip-syms → zero** (background thread, per unit): every remaining entry
-   gets its root cause fixed or a STRUCTURAL rule; the name list dies.
+   gets its root cause fixed or a STRUCTURAL rule (ns-level marker the
+   collect macro can read — the CLJS analyzer strips fn-meta, hence the list);
+   the name list dies.
+6. **Mechanical unification sweep** (one cleanup unit, after roadmap item 1
+   lands — audit 2026-07-02): `SEON_EMBED` read ×3 → the one
+   `embed-retrieval-on?`; the ×8 pr-str+clip helpers → one bounded-print
+   (budgets in TOKENS, fixing the chars leak); `ai.*` private `env*` readers →
+   `seon.platform/env-val`; worker-eval bootstrap copies → a shared leaf ns;
+   dead `:seon.agent.ctx/fn` attr + inert-comment residue deleted; **eval
+   envelope bare `:ok`/`:error` → `:seon.eval/*`** (owner call — one envelope
+   convention everywhere).
+
+Deferred (noted so it isn't lost): fold `seon.dev.compliance`'s extra checks
+(docstrings, unregistered schema refs) into `seon.warn` when the JVM track
+retires — owner call 2026-07-02, not before.
 
 Small fixes (no unit needed): dev hook resolves `logs/`/`tmp/` from the repo
 root, not the edited file's tree (submodule litter). ✅ Skills corpora SPLIT
