@@ -1380,3 +1380,18 @@ oracles). **`docs/prds/agent-fsm/research/inspect-bridge-spike/` is historical
 pip install -e ".[test]"`; inspect-ai installs from the vendored
 `reference-code/inspect-ai` source). Run matrix + parity map:
 `src-inspect-ai/README.md`.
+
+## 2026-07-02 — diffusion-lane preflight drives: two findings FOR THIS LANE
+
+Live DeepSeek drives on a fresh acme world
+(`docs/prds/diffusion-dynamic-context/research/deepseek-preflight-drives-2026-07-02.md` §7):
+
+- **Fresh-world `my.kb` renders EMPTY to agents** — the namespace card shows
+  "my.kb — 0 fns, 0 schemas" on a just-reset store, so a memory-task agent
+  burned 3 turns grepping for `remember` and hit the 300s solve timeout.
+  Any fresh-world bench with KB tasks inherits this.
+- **Turn-6 empty recall after successful `remember` calls** — the agent's
+  query returned `#{}` ("attribute might not be installed yet"); scoped look
+  suggested: scratch-child read visibility vs attr-install timing.
+
+Both observed under `/solve` with turn captures in the diffusion preflight doc.
