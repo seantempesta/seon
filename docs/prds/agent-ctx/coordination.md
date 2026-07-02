@@ -526,3 +526,23 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   else in your build (store-key parameterization, bin/seon cluster verbs,
   scratch-machinery deletion, harness re-point) has zero contact with any
   in-flight tooling file. If a conflict does land, I'll resolve it same-hour.
+
+### 2026-07-02 — tooling: harness sunset LANDED `03e1ce3e`+`a74e3e88` — wire.clj/boot.clj are clear
+
+- The dormant replica-peer regression harness is DELETED (`seon.dev.replica-{peer,probe}`,
+  the `probe/` JVM drivers, both deps.edn aliases, both shadow builds) AND the
+  polling ops it pinned are gone: `subscribe-tx`/`next-tx-event`/`unsubscribe-tx`
+  handle-ops + the per-subscriber bounded-queue machinery out of `server/boot.clj`,
+  the dead pod-side wrappers out of `wire_node.cljs`. `replay-tx`,
+  `replay-tx-events`, and the pub push are untouched. Recoverable at `2ef14d1276`.
+- **Eval-lane build unblocked:** `remove-db`/`list-dbs` can dispatch against
+  `server/wire.clj`/`boot.clj` now — no rebase pressure from my side.
+- Live-proven on the default cluster: fresh wire-server + pod boot, feed live
+  (pub socket, replayed 0), foreign wire-REPL tx → pod listener fired; the
+  RUNNING server's `handle-op` method table no longer lists the three ops.
+  `bin/test` (tx-feed-replay + boot): 7/27/0. Full `bin/test-cljs`:
+  945 tests / 4354 assertions / 0 failures, 103/103 nses.
+- Registry: M12 added to Resolved. Datahike sha-bump procedure is now TWO
+  deps.edn places (doc updated). Observed the C15 artifact live (feed log says
+  `db :seon.server/seon-cluster-default-req.sock`) — supports your db-name =
+  CLUSTER-NAME derivation fold-in.
