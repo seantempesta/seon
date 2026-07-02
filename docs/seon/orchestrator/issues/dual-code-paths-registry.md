@@ -38,7 +38,7 @@ dual code paths — track everything and fix it"). Rules:
 | C4 | Private `env*` readers ×2 + inline lookup vs `seon.platform/env-val` | ai/{diffusiongemma,openai_compat,anthropic}.cljs | tooling | QUEUED — unification sweep |
 | C9 | Worker bootstrap-cache helpers copied from seon.eval "by design" | worker_eval.cljs:31 | tooling | QUEUED — unification sweep (shared leaf ns) |
 | C10 | Dead `:seon.agent.ctx/fn` attr + inert-comment residue | client.cljs:426, eval.cljs:1373 | tooling | QUEUED — unification sweep |
-| C11 | `transient-ns-syms` restates ns defs | eval.cljs:2270,936,1035 | tooling | IN FLIGHT — small-fix unit |
+| C14 | `build-tee-entities` mints `:seon.fn`/`:seon.ns` rows for defs in TRANSIENT nses (cljs.user scratch leaks into the program graph; `transient-ns-syms` guards only the requires-tee) | eval.cljs:~2099 | tooling | OPEN — one-line gate but a design call first: do scratch defs deserve persistence? |
 | F1 | Datahike fork: 2 pre-existing planner-ON failures (silent-`#{}` class; pod always runs planner) | fork query engine | tooling | OPEN — [[datahike-planner-on-preexisting-failures]] |
 | C8 | Two corpus linters: seon.warn (pod) vs seon.dev.compliance (JVM) | warn.cljs / dev/compliance.clj | tooling | DEFERRED by owner — merge into seon.warn when JVM track retires |
 | M5 | Dual compile worlds (4 heuristics cluster) | eval.cljs:615,782 | tooling | LEGITIMATE NOW / FIX-ROOT long-horizon (audit §5 — no fifth heuristic without reading that section) |
@@ -55,7 +55,8 @@ dual code paths — track everything and fix it"). Rules:
 | C7 | Dev hook cwd-relative litter | `8185459f` — repo-root resolution; 57 strays cleaned |
 | C12 | `~/src/datahike` duplicate checkout | verified-no-unique-work, deleted; bundle at tmp/datahike-salvage/; fork workflow rules in memory |
 | F0 | Fork planner collect-field silent `#{}` | fork `da257d38` + seon `41c1b9b2`, live-proven; skills caveats removed `556fa779` |
-| C13 | Redundant per-entry origin claims in eval.cljs | IN FLIGHT — small-fix unit (verify-then-strip) |
+| C11 | `transient-ns-syms` restated ns defs | `dada1ff9` — set derived from the single defs; value-identical, live-verified |
+| C13 | "Redundant" per-entry origin claims in eval.cljs | CLOSED AS DESIGNED (`dada1ff9` report) — live-FALSIFIED: the `:agent` claim is a load-bearing narrowing inside `run-turn!`'s `:system` context; removal flips every eval tx to `:system`. Do NOT retry |
 
 ## Legitimate — listed, rationale'd, re-audited periodically
 
