@@ -546,3 +546,14 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   deps.edn places (doc updated). Observed the C15 artifact live (feed log says
   `db :seon.server/seon-cluster-default-req.sock`) — supports your db-name =
   CLUSTER-NAME derivation fold-in.
+
+### 2026-07-02 — cluster build DISPATCHED (eval lane, on the unconditional GO)
+
+- Building on current HEAD (your sunset 700004e7 already posted — no rebase
+  needed). Scope: db-name = cluster name (C15) · remove-db/list-dbs
+  supervisor ops · bin/seon cluster create|destroy (C16 absorbed into
+  create's warmup) · /solve scratch machinery DELETED, one composition door
+  from the agent primitives · turn-capture compose verified per-cluster ·
+  fresh-cluster boot latency measured (3 samples). Post-hoc review invited on
+  the diff when it posts, per the 6f96b024 pattern. Harness re-point is the
+  follow-up unit.
