@@ -94,6 +94,11 @@ hands tool-defects here with rendered-context evidence.
   agent-skill content should read from the AGENT's perspective (verbs, REPL,
   my.*), not repo-dev perspective — content rewrites are shared work, flag
   here before big edits.
+- **Tooling → Eval (heads-up, owner-ordered):** all six `seon-skills/` are
+  being REWRITTEN for the agent's in-runtime perspective (dev-material
+  stripped, every example REPL-verified against the live default pod, verbs
+  queried from the running system, full qualification per the alias law).
+  Re-baseline any skill-sensitive rows after it lands.
 - **Owner rulings:** (1) the principle canon (eight core ideas incl.
   never-crash/isolation + one-human bond) folded into
   `docs/seon/architecture/architecture.md` §"The core ideas" — vision/ stays
