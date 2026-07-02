@@ -53,6 +53,7 @@
             [seon.ai :as ai]
             [seon.agent.ctx :as ctx]
             [seon.error :as error]
+            [seon.platform :as platform]
             [seon.schema :as schema]))
 
 ;; ============================================================
@@ -104,8 +105,7 @@
    nil — read at call time, never transacted. [[complete]] turns a nil
    into a legible config-error envelope (never a throw)."
   []
-  (let [v (some-> js/process .-env .-ANTHROPIC_API_KEY)]
-    (when (and (string? v) (seq v)) v)))
+  (platform/env-val "ANTHROPIC_API_KEY"))
 
 (defn- config-error
   "Errors-as-values envelope for a CALL-TIME config gap (no API key).

@@ -40,6 +40,7 @@
             [seon.ai :as ai]
             [seon.config :as config]
             [seon.error :as error]
+            [seon.platform :as platform]
             [seon.schema :as schema]))
 
 ;; ============================================================
@@ -128,12 +129,6 @@
 ;; synchronous unwind.
 (def ^:dynamic *fetch* nil)
 
-(defn- env*
-  "process.env value for `var-name`, or nil when unset/blank."
-  [var-name]
-  (let [v (some-> js/process .-env (aget var-name))]
-    (when (and (string? v) (seq v)) v)))
-
 (defn- endpoint-id
   "The RunPod endpoint id — `SEON_DG_ENDPOINT`, falling back to
    `DIFFGEMMA_EP` (the diffusion experiment driver's var) so ONE endpoint
@@ -154,7 +149,7 @@
    time off the var NAMED by SEON_DG_API_KEY_ENV (default RUNPOD_API_KEY).
    The key value is never transacted or logged."
   []
-  (env* (or (config/env-string "SEON_DG_API_KEY_ENV") default-key-env)))
+  (platform/env-val (or (config/env-string "SEON_DG_API_KEY_ENV") default-key-env)))
 
 (defn api-configured?
   "Whether BOTH the endpoint id and a bearer key resolve.

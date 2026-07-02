@@ -55,6 +55,7 @@
             [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
             [seon.error :as error]
+            [seon.platform :as platform]
             [seon.schema :as schema]))
 
 ;; ============================================================
@@ -113,12 +114,6 @@
 ;; field is sent ONLY when set truthy — absent/"false" sends NOTHING
 ;; (graceful no-op on gateways that don't know the field).
 
-(defn- env*
-  "process.env value for `var-name`, or nil when unset/blank."
-  [var-name]
-  (let [v (some-> js/process .-env (aget var-name))]
-    (when (and (string? v) (seq v)) v)))
-
 (defn- openai-compat?
   "Is this pod's active provider :openai-compat? Read per call
    (reactive-context) — the SAME request path serves both providers."
@@ -161,9 +156,9 @@
   []
   (let [key-env (or (:seon.ai/api-key-env (ai/current))
                     (:seon.ai/api-key-env (ai/env-row)))]
-    (or (some-> key-env env*)
-        (when-not (openai-compat?) (env* "DEEPSEEK_API_KEY"))
-        (env* "SEON_AI_API_KEY"))))
+    (or (some-> key-env platform/env-val)
+        (when-not (openai-compat?) (platform/env-val "DEEPSEEK_API_KEY"))
+        (platform/env-val "SEON_AI_API_KEY"))))
 
 (defn api-key-configured?
   "Whether a bearer API key resolves for the ACTIVE provider.
