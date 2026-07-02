@@ -138,12 +138,7 @@ that keeps the single-API rule. Do not reach around it into `datahike.api`.
 - **Batch inserts** in one `db/transact!` call, not one entity per call.
 - **Most selective clause first** — pin the entity by a known eid or a unique
   attr value so datahike picks a small AEVT/AVET slice, not a full-index scan.
-  **Caveat, proven live:** when one of your clauses BINDS a var via a wildcard
-  value slot (`[?e ::attr _ ?tx]`, binding `?tx`) that a LATER clause joins
-  on, putting an unrelated id-lookup clause BEFORE it can make the whole
-  query return empty instead of the right rows — put the var-binding clause
-  first in that case and verify the result, don't assume clause order is
-  purely a perf knob.
+  Clause order is a perf knob, never a correctness knob.
 - **Scalar form (`.`)** when expecting one result — skips the set wrapper.
 - **Prefer pull** over N follow-up queries when fetching related entities.
 - **Thread one db value** through a unit of work instead of re-deref'ing

@@ -326,13 +326,11 @@ survives the wire to the JVM writer.
 So WHO/WHAT/WHEN-wrote-this is a **join, not an attribute**:
 
 ```clojure
-;; which agent wrote this entity's title? Bind the datom's ?tx via the
-;; VALUE-BEARING clause, THEN filter by id — proven live; putting the
-;; id-lookup clause FIRST (normally the most selective) breaks this join,
-;; a query-planner quirk to route around, not a mindset issue:
+;; which agent wrote this entity's title? Bind the datom's ?tx from the
+;; value-bearing clause, then join the tx entity:
 (db/query '[:find ?agent ?tx
-            :where [?e :my.kb.source/title _ ?tx]
-                   [?e :my.kb.source/id "src-1"]
+            :where [?e :my.kb.source/id "src-1"]
+                   [?e :my.kb.source/title _ ?tx]
                    [?tx :seon.db/agent-id ?agent]])
 ;; WHEN is [?tx :db/txInstant ?at] — auto-stamped, no attr of yours needed.
 ```
