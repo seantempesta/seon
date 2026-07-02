@@ -46,6 +46,20 @@ the truth; tests and inference are not. Concretely:
 
 ## Current state (2026-06-29)
 
+**Config-driven agent-init is COMPLETE (CP-4 → CP-5.5, 2026-07-01).** ONE manifest
+(`config/system.edn`, `SEON_CONFIG` override) drives the whole agent context via
+`seon.config/resolve-agent-context` → `seed-default-ctx!`. The ~18 legacy
+mechanisms (`#profile`, `:loadouts`/`:role`/`:default-load`, `stable-priority-max`,
+the `SEON_RENDER_*_CAP` env reads) are RIPPED; render caps are a manifest section
+(#46). Every config dial is WIRED / REMOVED / PARKED-with-note — zero silently
+inert (per-agent LLM, `wake?`, `home-requires`, `:my.skills/load`→skill blocks,
+soul→config, escape-clipping-full, eval age-decay, transcript tiers). CP-5's
+intended changes (escape-clipping full + eval decay) are gym-green (no battery
+regression) and the balloon is bounded by the decay (12 big evals → 10,874 tok vs
+120k). acme migrated + LIVE override-proven (its 6 skills / per-agent LLM / own
+decay render; every dial class file-settable, zero src edits). Full per-dial
+ledger + proofs: [[research/config-driven-agent-init-closeout-2026-07-01]].
+
 The night's central deliverable is **PROVEN**: the **`my.*` toolkit**
 (`my.data`/`my.ui`/`my.tile`) went from built-but-invisible to
 **composable-and-honest**. A real DeepSeek agent now builds its tiles with the
