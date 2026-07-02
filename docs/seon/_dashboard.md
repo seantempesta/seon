@@ -9,9 +9,9 @@ status: active
 
 ## Active focus — the CLJS pod (agent-fsm)
 
-Start here: [[architecture/overview]] (how the live system works today), the
-**canonical target-design set** in `docs/seon/architecture/` ([[architecture]]
-first), and the agent-fsm PRD ([[../prds/agent-fsm/roadmap]] = "we are here",
+Start here: the **canonical target-design set** in `docs/seon/architecture/`
+([[architecture/architecture]] first), and the agent-fsm PRD
+([[../prds/agent-fsm/roadmap]] = "we are here" / how the live system works today,
 [[../prds/agent-fsm/CLAUDE]] = the runbook).
 
 Seon runs two tracks. The **active** track is the CLJS pod (Node-hosted, port
@@ -43,7 +43,7 @@ The component tables below still describe the **JVM core** (Datahike + Integrant
 + flow topology) — `[JVM track — paused]`. Those `.clj` files live under
 `src/seon/`; the live `.cljs` surfaces are documented in the CLJS-pod component
 notes (web-inspector, agent-system, reply-segmenter, loadable-skills) and in
-[[architecture/overview]].
+[[../prds/agent-fsm/roadmap]].
 
 ## How to Use This Vault
 
@@ -115,7 +115,8 @@ notes (web-inspector, agent-system, reply-segmenter, loadable-skills) and in
 
 ## Architecture
 
-- [[architecture/overview]] — How the system works today
+- [[architecture/architecture]] — The canonical target-design map
+- [[../prds/agent-fsm/roadmap]] — How the system works today ("we are here")
 - [[architecture/decisions/]] — Settled architectural decisions (001-007)
 
 ## Orchestrator

@@ -1,8 +1,12 @@
 ---
-type: prd
-status: completed
-tags: [prd, agent, flow]
+type: archive
+status: archived
+tags: [archive, agent, flow]
 ---
+
+> Superseded — settled content now in [[../../../seon/architecture/context]]
+> (compact-card render + presence-sets) and `docs/conventions.md` "Function
+> Docstrings" (the ≤72-char line-1 convention); kept as history.
 
 # Compact namespace cards + the one-line docstring convention
 

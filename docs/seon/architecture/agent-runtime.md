@@ -310,8 +310,7 @@ independent per-step seeders:
   persist across boots); the `:core-seed` introspection is outside the scope and is
   never touched. `seon.state/reconcile!` is the ONE declarative-state primitive (seed,
   config-override, reset, restore are all expressions of it); the manifest is the config
-  seam ([[data-model]] §5.6, the per-test recipe in
-  [[overview]]).
+  seam ([[data-model]] §5.6, which also holds the per-test recipe).
 
 Each agent's block loadout is shaped from the same manifest at create
 (`resolve-loadout`, the install!/seed-copy mechanism owned by [[ui]]); SOUL.md /

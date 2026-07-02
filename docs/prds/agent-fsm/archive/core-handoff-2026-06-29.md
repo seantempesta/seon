@@ -1,8 +1,12 @@
 ---
-type: orchestrator
-status: active
-tags: [orchestrator, agent, flow]
+type: archive
+status: archived
+tags: [archive, agent, flow]
 ---
+
+> Superseded — a dated status queue; the current we-are-here + open decisions live
+> in [[../roadmap]] (open owner decisions incl. #66; escape-clipping #43 shipped).
+> Kept as history.
 
 # Core handoff — context/render queue (2026-06-29)
 

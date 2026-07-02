@@ -1,8 +1,13 @@
 ---
-type: prd
-status: draft
-tags: [prd, agent, flow, web, index]
+type: archive
+status: archived
+tags: [archive, agent, flow, web, index]
 ---
+
+> Superseded — the settled base cases (root base case, `start!`, restart-to-idle,
+> converged UI) now live in [[../../../seon/architecture/agent-runtime]]; the
+> unsettled forward ideas (wake-fn-symbol router, db-filtered-view authz,
+> `SYSTEM.md`) are parked in [[../roadmap]] "Deferred forward ideas". Kept as history.
 
 # Root agent + the data-driven multi-agent OS — vision, decisions, phased plan
 

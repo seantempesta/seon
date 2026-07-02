@@ -1,8 +1,13 @@
 ---
-type: architecture
-status: active
-tags: [architecture, index]
+type: archive
+status: archived
+tags: [archive, architecture, index]
 ---
+
+> Superseded — the canonical target-design map is now
+> [[../../../seon/architecture/architecture]]; the "we-are-here" / how-it-works-today
+> narrative (and the JVM-paused convergence-target appendix) now live in
+> [[../roadmap]]. Kept as history.
 
 # Current State: How Seon Works Today
 

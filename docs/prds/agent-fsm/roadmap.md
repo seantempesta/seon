@@ -224,3 +224,83 @@ from this workstream: `:seon.agent/purpose` → `:my.agent/purpose`.
 - `/world` retirement timing (W3).
 - In-place file-editor verb (conflicts with "agents don't edit files").
 - #66-B: purge the WORD `kind` from value-enums (taste, not correctness).
+
+## Deferred forward ideas (parked — from root-os-vision)
+
+The elegant end-states the root/OS vision named but that are DEFERRED until the
+system is stable. Settled base cases (root base case, `start!`, restart-to-idle)
+already live in [[agent-runtime]]; these are the unbuilt upgrades:
+
+- **Wake-fn-symbol router.** Per-agent `:seon.agent/wake-fn` symbol + a
+  Posh-style data-driven pre-filter over the tx/wire stream (re-check only wakes
+  whose tracked datoms changed; the fn is the comprehensive check). Replaces the
+  current single wake gate ([[agent-runtime]] "Triggering + fencing") as the ONE
+  wake mechanism. Build general, upgrade later.
+- **DB-filtered-view authz.** Role enforcement by construction — an agent asking
+  for a db copy gets a FILTERED view of what its role may see. The end-state of
+  W4's roles-as-grant-sets; do NOT build enforcement until stable.
+- **`SYSTEM.md` + markdown-file content loading.** The system message (and large
+  default-block text) loaded from markdown files referenced by the manifest, so a
+  consumer swaps content by swapping files. Extends the config seam (config-driven
+  init is built; the file-content layer is the deferred addition).
+
+## Paused JVM track (convergence target)
+
+> Everything below describes the **paused** JVM main-app track (`./bin/run`,
+> nREPL 7888 / HTTP 8080, embedded in-process datahike on LMDB, core.async
+> flow). It is NOT the present — it is the convergence target the two tracks are
+> moving toward (JVM = authoritative server + DB writer, CLJS = on-device
+> replica + local fn execution). Kept here, not deleted.
+
+### How a namespace comes alive (JVM)
+
+When the system needs a namespace to be alive, [[../../seon/components/namespace-lifecycle]]
+calls `ensure-instance!`. This creates a [[../../seon/components/context]] atom (the
+namespace's mutable state container), injects it as `*ctx*` via
+`intern + .setDynamic`, and wires the page render function discovered from the
+code graph. HTTP routes are registered by `seon.ns.routes` via a `route-patterns`
+data var consumed by the web router. The [[../../seon/components/runtime]] registry tracks
+that the instance exists, its status, and when it started.
+
+### How state changes propagate (JVM)
+
+A namespace's state lives in its ctx atom. A `swap!` fires atom watches: one
+debounces and persists to Datahike via the [[../../seon/components/database]] layer,
+another triggers a global SSE broadcast (`seon.web.sse/refresh-all!`). With
+`::track-clients? true`, a third watch renders per-client fragments and pushes
+them over each http-kit channel; the browser (Datastar) swaps them in without a
+reload. The watches, persistence scheduling, and SSE push are wired
+independently in ctx.clj, not through a unified pipeline.
+
+### How cross-namespace calls work (JVM)
+
+When namespace A calls namespace B (especially a B in a separate agent JVM), the
+call routes through [[../../seon/components/flow-topology]] via `topology/request!` —
+register a promise, inject a message into the flow topology, block until reply.
+If the target is a remote agent JVM, [[../../seon/components/harness]] handles the TCP
+hop: serialize with Nippy, send over the socket, wait, deserialize. The response
+flows back through a reply-router that delivers the promise. This is the
+[[../../seon/concepts/request-reply]] pattern — one mechanism for local and remote
+invocation.
+
+### How the system boots (JVM)
+
+Startup is orchestrated by Integrant, configured via Aero, in two phases.
+**Phase 1** brings up foundational services: in-process Datahike connections
+(against the LMDB store on disk), schema registration, the runtime registry, the
+connection manager. **Phase 2** builds on it: the infrastructure flow starts
+(with a `flow/ping` sync barrier, 5 s), the runtime database initializes, the web
+server binds ports, the code-graph scanner runs its first pass in a background
+future, and function instrumentation activates. Integrant's dependency graph
+enforces the phasing — the dependency chain IS the readiness gate.
+
+### Three state tracking mechanisms (JVM)
+
+The JVM track tracks namespace state in three places: the **ctx registry** (atom
+in ctx.clj — the "live state" view: ctx atom, render fn, client set, scheduler),
+the **runtime registry** (atom + Datahike in runtime.clj — the "administrative"
+view: started-at, status, config), and **flow/ping** (the flow topology's
+"infrastructure" view of which processes run). They can disagree (running in the
+registry but no ctx atom; ctx atom but no flow process), which is the
+accumulated-state problem the live CLJS track avoids by deriving everything from
+the DB.

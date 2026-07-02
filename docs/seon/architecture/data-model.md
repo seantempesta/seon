@@ -82,6 +82,12 @@ and retracting a turn retracts its evals. The owned-children attrs:
 + our bridge `src/seon/db/internal.cljs:344-350` (the component/identity facet) —
 [[library-grounding]]. (Contrast `:my.plan/parent`, a PLAIN ref: no cascade.)
 
+To REPLACE a whole component vector (reconcile, `install!`/`remove!`) so its owned
+children match a desired set, retract the attribute with **`:db.fn/retractAttribute`**
+— only `retractAttribute` and `retractEntity` run `retract-components`; a plain
+`:db/retract` on the attribute severs the parent→child edges but leaves the child
+entities ORPHANED (`transaction.cljc:959-977`).
+
 Lookup-by-identity rides on a ref's `[:attr val]` form: `[:seon.agent/id "abc"]`
 is a valid `:seon.db/ref` value (the `[:tuple :keyword …]` arm) that datahike
 resolves to the agent's eid, so a write can reference an entity by its natural
@@ -635,8 +641,15 @@ seeding model in [[agent-runtime]]), and `resolve-loadout` shapes each agent's b
 set at create. `:seon.config/dirs` is the home for `SEON_SKILLS_DIR`; the `#env` knob
 sections (the rest of the scattered `SEON_*` reads) fold onto `seon.config` accessors
 so it is the single env surface (tracked in [[config-loader-2026-06-28]]).
-The per-test recipe (`SEON_CONFIG=config/test.edn`, `SEON_PROFILE=…`) lives in
-[[overview]].
+
+**Per-test / per-cluster recipe** — name your own manifest, zero src edits:
+
+- `SEON_CONFIG=config/test.edn bin/test-cljs` — a test run loads its own
+  loadout / routes / skills.
+- `SEON_PROFILE=minimal bin/seon restart pod` — select a `#profile` variant of
+  `config/system.edn`.
+- `bin/acme` exports `SEON_CONFIG=config/acme.edn` — the isolated cluster
+  curates independently.
 
 ## 6. The error value — base `:seon/error`, specialized only where the shape diverges
 

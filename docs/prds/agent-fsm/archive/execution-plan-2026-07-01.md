@@ -1,8 +1,13 @@
 ---
-type: orchestrator
-status: active
-tags: [orchestrator, agent, plan]
+type: archive
+status: archived
+tags: [archive, agent, plan]
 ---
+
+> Superseded — the current we-are-here + dependency-ordered workstreams live in
+> [[../roadmap]] (W1–W7). Kept as history. (Tracks A/B/C/F/G landed or are covered
+> by the workstreams; Track D self-evolving memory #85 and Track E RunPod/diffusion
+> are separate projects outside the agent-fsm roadmap.)
 
 # Execution plan — post-config-init (2026-07-01)
 

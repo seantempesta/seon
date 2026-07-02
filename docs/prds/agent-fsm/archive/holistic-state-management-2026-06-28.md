@@ -1,8 +1,12 @@
 ---
-type: prd
-status: draft
-tags: [prd, database, schema, agent, flow]
+type: archive
+status: archived
+tags: [archive, database, schema, agent, flow]
 ---
+
+> Superseded — settled content now in [[../../../seon/architecture/agent-runtime]]
+> (the `boot-seed! → reconcile!` section) and [[../../../seon/architecture/data-model]]
+> (the component cascade + provenance); kept as history.
 
 # Holistic system-state management — one reconcile, provenance-scoped
 
