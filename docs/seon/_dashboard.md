@@ -9,8 +9,10 @@ status: active
 
 ## Active focus — the CLJS pod (agent-fsm)
 
-Start here: [[architecture/overview]] (how the live system works today) and the
-PRD set under [[../prds/agent-fsm/]].
+Start here: [[architecture/overview]] (how the live system works today), the
+**canonical target-design set** in `docs/seon/architecture/` ([[architecture]]
+first), and the agent-fsm PRD ([[../prds/agent-fsm/roadmap]] = "we are here",
+[[../prds/agent-fsm/CLAUDE]] = the runbook).
 
 Seon runs two tracks. The **active** track is the CLJS pod (Node-hosted, port
 7890), backed by the `wire-server` central datahike writer (file-backed datahike
@@ -32,7 +34,8 @@ paused but not deleted, and the convergence target.
   the single "we are here".
 - **Embeddings:** designed + proven against Vertex `gemini-embedding-2`, gated
   by `SEON_EMBED` (on by default in `bin/seon`, graceful no-op without creds);
-  converging onto the live pipeline. Specs: [[../prds/embeddings/]].
+  converging onto the live pipeline. Specs:
+  [[../prds/embeddings/vertex-usage-reference-2026-06-25]].
 - **Cross-platform / WASM (later):** Tauri 2 shell + WASM containment remain the
   designed delivery path; not the current build. Design: [[../prds/agent-runtime/research/wasm-spike-2026-05-20]].
 

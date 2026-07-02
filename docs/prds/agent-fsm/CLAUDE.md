@@ -1,7 +1,7 @@
 ---
 type: orchestrator
 status: active
-tags: [orchestrator, agent, web, ui]
+tags: [orchestrator, agent, web]
 ---
 
 # agent-fsm — UI / render / routing / CONTEXT lane (auto-loaded orientation)
@@ -250,7 +250,11 @@ re-measure → keep-iff-lifts-battery. Build the interactive gym scenario that e
 - **[[research/overnight-2026-06-28]]** — the night's running report: exec summary +
   every validated landing with live-proof. The depth behind this file.
 - [[coordination]] — Core↔U channel, lane table, the live handoffs.
-- [[ui]] — the holistic routing + render + UI/UX doc.
+- **Canonical target-design docs live in `docs/seon/architecture/`** (moved
+  2026-07-02): [[architecture]] (read FIRST), [[data-model]], [[agent-runtime]],
+  [[ui]] (the holistic routing + render + UI/UX doc), [[toolkit]],
+  [[library-grounding]], [[observability]]. **[[roadmap]] stays HERE** — the sole
+  "we-are-here" doc, alongside `research/`.
 - `research/toolkit-reachable-verification-2026-06-28.md` · `research/canvas-drive-validation-2026-06-28.md` ·
   `research/namespaces-trim-validation-2026-06-28.md` · `research/facet-gaps-drive-2026-06-28.md` —
   the live-drive evidence behind the laws above.

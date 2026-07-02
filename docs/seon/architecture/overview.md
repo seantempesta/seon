@@ -175,7 +175,7 @@ append-only introspection (never a desired set, never retracted). The routes +
 skills are the ONE managed *declarative* population, written under origin
 `:config` and synced through `seon.state/reconcile!` — so a route dropped from
 the manifest, or a skill removed from disk, is RETRACTED on the next boot. The
-seeding model lives in [[../../prds/agent-fsm/agent-runtime]].
+seeding model lives in [[agent-runtime]].
 
 ---
 

@@ -15,7 +15,8 @@ worktrees (shared-tree + awareness).
 
 ## The docs are the truth — read order + follow links
 
-The design is settled and lives in six docs (all in `docs/prds/agent-fsm/`).
+The design is settled and lives in the canonical docs (design set in
+`docs/seon/architecture/`; the roadmap stays here in `docs/prds/agent-fsm/`).
 **Read [[architecture]] (the map) FIRST**, then your lane's primary doc(s), and
 **FOLLOW the `[[links]]` whenever a fact you need is owned by another doc.** Strict
 single-ownership: every fact lives in exactly ONE doc — never assume, follow the
@@ -29,7 +30,7 @@ link. This is how both lanes stay on the same page.
   bootstrap-as-seeded-forms, orchestrator-root lifecycle, isolation tiers.
   *(Core primary.)*
 - [[ui]] — block/render/tile/slot/layout, world/root/app, reitit + the capability
-  gate, the SSE `!last-tree` channel, the seed-copy + `install!`/`remove!` model.
+  gate, the gzip-morph SSE channel, the seed-copy + `install!`/`remove!` model.
   *(UI primary — the holistic routing + rendering + UI/UX view.)*
 - [[toolkit]] — the `my.*` verb catalog over the protected `seon.*` floor.
 - [[roadmap]] — **the build checklist**: current code → target, dependency-ordered,
@@ -1354,3 +1355,14 @@ the canonical docs + this plan.
 > verify live in the browser (use a browser agent to save tokens) + the pod; flag
 > cross-lane casualties as tasks with file:line. Update your _Now/Needs/Interface
 > changes_ block. Use the `seon-agent` subagent for implementation; opus only.
+
+## 2026-07-02 — design docs promoted to `docs/seon/architecture/`
+
+The five design docs + library-grounding (`architecture.md`, `data-model.md`,
+`agent-runtime.md`, `ui.md`, `toolkit.md`, `library-grounding.md`) moved with
+`git mv` to **`docs/seon/architecture/`** — now the ONE canonical,
+forward-written target-design set, joined by the new sixth design doc
+`observability.md` (turn replay, blob store, the forensic agent, `/solve`).
+**`roadmap.md` STAYS here** — it is the sole "we-are-here" doc and lives with
+the PRD, as does `research/`. The read-path is unchanged in spirit: **read
+[[architecture]] (the map) FIRST** — the wikilinks resolve to the new home.
