@@ -59,6 +59,52 @@ wire-server replays every missed tx in commit order
 (`seon.server.wire/replay-tx-events`), idempotent on the watermark. What a gap
 delayed was listener WAKES (triggers, SSE), by up to the gap length.
 
+## Follow-up: migrate the pod feed to the pub socket (push, not poll)
+
+The timeout question only exists because the feed is POLL-based: the pump
+opens a fresh UDS connection every ~55ms (~18 connections/sec per pod,
+forever), and each connection spawns a JVM handler thread
+(`seon.server.wire/start-req-server!`'s thread-per-connection accept loop).
+The wire-server already has the push channel:
+`seon.server.broadcast/start-pub-server!` maintains a pub socket that writes
+every broadcast event to each connected subscriber — the pod just doesn't use
+it (it polls the req socket via `next-tx-event`).
+
+Plan:
+
+- **Pod side** (`seon.store.wire` + `seon.store.internal.wire-node`): replace
+  the pump's poll loop with ONE persistent pub-socket connection; a streaming
+  frame reader feeds `handle-feed-event!` directly. Reconnect-on-drop keeps
+  the existing `since-t` replay for gap recovery — the DE-2 lossless-wake
+  contract is unchanged (the watermark idempotency already dedupes the
+  replay↔live overlap).
+- **Server side**: pub events go to ALL socket subscribers today (no
+  per-subscriber db-name routing on the pub socket; `broadcast!` tags each
+  event with `:seon.store.wire/db-name`), so the pod filters by db-name
+  client-side, or the pub server grows a subscribe handshake. The `since-t`
+  replay stays on the req socket (a "replay request" op) or is pushed down
+  the fresh pub connection ahead of live frames.
+- **Deletion targets**: the pump's poll loop + 2s-retry re-subscribe dance,
+  the per-poll rpc timeout semantics for the feed, the ~18 conn/sec churn and
+  its per-conn JVM handler threads, and (once no client polls) the
+  `next-tx-event` op + per-handle bounded queues + `max-queued-events`
+  drop-oldest backstop in `seon.server.boot`.
+- **Scope**: a two-sided protocol touch (pod wire layer + wire-server
+  boot/broadcast) plus reconnect/replay integration and tests on both sides —
+  roughly a focused multi-day unit, not a patch. Do it as its own task on the
+  post-merge branch.
+
+## Follow-up: transact timeout ≠ server rollback (agent-facing ambiguity)
+
+Pre-existing, surfaced during this diagnosis: a client-side `transact` rpc
+timeout (30s budget) does NOT undo the server's commit — the write can land
+while the agent sees an error. The write-id echo-suppression set prevents
+double-apply, but the agent-facing ambiguity ("my write failed" when it
+actually committed) deserves its own scoped look — e.g. a timed-out transact
+could re-check the store for its write-id before reporting failure. Separate
+mechanism from the pump; entry point: `seon.store.wire/SeonWireWriter`
+`-dispatch!` calling `seon.store.internal.wire-node/rpc`.
+
 ## Turn-6 empty recall: pump suspicion FALSIFIED
 
 The flagged flake (deepseek-preflight-drives-2026-07-02.md §7 — a `/solve`
