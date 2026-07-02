@@ -286,8 +286,8 @@ attr keyword is almost certainly misspelled (the guard below catches it).
 ;; what you can query, and which shapes to REUSE rather than fork). Default
 ;; scope = data added after the core seed.
 (db/store-inventory)
-;;=> {:seon.db/kinds [{:seon.db/kind :my.kb :seon.db/attrs {:my.kb/question 3 …}} …]
-;;    :seon.db/kind-count … :seon.db/attr-count … :seon.db/datom-count …}
+;;=> {:seon.db/attr-groups [{:seon.db/attr-ns :my.kb :seon.db/attrs {:my.kb/question 3 …}} …]
+;;    :seon.db/attr-ns-count … :seon.db/attr-count … :seon.db/datom-count … :seon.db/topology …}
 
 ;; installed-schema: EVERY attr installed on the db, including
 ;; registered-but-dataless ones store-inventory omits. Filter keyword? — the
@@ -296,8 +296,9 @@ attr keyword is almost certainly misspelled (the guard below catches it).
      (filter #(= "seon.agent.todo" (namespace %))) sort)
 ```
 
-A kind that already exists means data you can datalog (its listed attrs ARE the
-`:where` keywords) and a shape to REUSE. Check before inventing an attr.
+An attr namespace that already holds data means data you can datalog (its listed
+attrs ARE the `:where` keywords) and a shape to REUSE. Check before inventing an
+attr.
 
 ## Common errors and gotchas
 
