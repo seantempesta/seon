@@ -79,11 +79,27 @@
 
 ;; ---------- one request / one reply ----------
 
+(def ^:private rpc-tick-ms
+  "The rpc timeout's event-loop-alive tick. The budget below accumulates one
+   tick per interval FIRE, not per wall-clock elapse — Node coalesces every
+   interval fire missed during a synchronous stall into ONE, so blocked-loop
+   time costs a single tick instead of expiring the budget."
+  250)
+
 (defn rpc
   "Open a UDS connection to `sock-path`, send `req` (a CLJS map with
    `:seon.store.wire/*` keyword keys + native values), read one length-framed
    Transit-JSON reply, resolve a promise with the decoded reply map. Rejects on
-   socket error / timeout / early close."
+   socket error / timeout / early close.
+
+   `timeout-ms` is measured in event-loop-ALIVE time, not wall time: the pod is
+   single-threaded, and a long synchronous stall (self-host seed eval,
+   instrumentation, an agent-turn compile) used to expire the wall-clock timer
+   in Node's timers phase BEFORE the poll phase could deliver a reply already
+   sitting in the socket buffer — a spurious timeout that killed the tx-feed
+   pump on every heavy pod window. A stall now extends the deadline by its own
+   duration (coalesced interval, one tick), while a genuinely absent reply
+   still rejects after ~timeout-ms of live loop."
   ([req] (rpc default-req-sock req {}))
   ([sock-path req] (rpc sock-path req {}))
   ([sock-path req {:keys [timeout-ms] :or {timeout-ms 5000}}]
@@ -94,15 +110,25 @@
             !payload (atom (.alloc Buffer 0))
             !lenbuf  (atom (.alloc Buffer 0))
             !settled (atom false)
-            timer    (js/setTimeout
-                      (fn [] (when-not @!settled
-                               (reset! !settled true) (.destroy sock)
-                               (reject (js/Error. "wire rpc timeout"))))
-                      timeout-ms)
+            !alive-ms (atom 0)
+            started  (js/Date.now)
+            !timer   (atom nil)
+            _        (reset! !timer
+                             (js/setInterval
+                              (fn []
+                                (when (and (not @!settled)
+                                           (>= (swap! !alive-ms + rpc-tick-ms) timeout-ms))
+                                  (reset! !settled true)
+                                  (js/clearInterval @!timer)
+                                  (.destroy sock)
+                                  (reject (js/Error.
+                                           (str "wire rpc timeout (alive " @!alive-ms
+                                                "ms, wall " (- (js/Date.now) started) "ms)")))))
+                              rpc-tick-ms))
             done     (fn [err val]
                        (when-not @!settled
                          (reset! !settled true)
-                         (js/clearTimeout timer)
+                         (js/clearInterval @!timer)
                          (.end sock)
                          (if err (reject err) (resolve val))))]
         (.on sock "error" (fn [e] (done e nil)))
