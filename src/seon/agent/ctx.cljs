@@ -125,7 +125,9 @@
 
 ;; ============================================================
 ;; Config-driven agent-init — agent-level composer attrs.
-;;   ::escape-clipping? (#43) — read-wired; the clip EFFECT lands in CP-5.
+;;   ::escape-clipping? (#43) — WIRED (CP-5): default true frees the small
+;;                     eval source/stdout/error + message caps (render full);
+;;                     the result-body decay still governs the citable value.
 ;;   ::cache-breakpoint — WIRED (render-context-ai reads it; replaces the
 ;;                        stable-priority-max const).
 ;;
@@ -140,7 +142,7 @@
 
 (schema/register! ::capability   [:enum :grep :exec :http])          ; PARKED — register-once enum
 (schema/register! ::capabilities [:vector {:default [:grep]} ::capability]) ; PARKED (phase-2 enforcement)
-(schema/register! ::escape-clipping? [:boolean {:default true}])     ; #43 — read-wired; effect CP-5
+(schema/register! ::escape-clipping? [:boolean {:default true}])     ; #43 — WIRED (CP-5): frees the small caps
 (schema/register! ::cache-breakpoint [:int {:default 20 :min 0}])    ; WIRED — priority ≤ this = cached prefix
 
 ;; ============================================================
@@ -380,7 +382,7 @@
    identical: the value is read, not yet applied at the clip."
   {:malli/schema [:function
                   [:=> [:cat] :boolean]
-                  [:=> [:catn [::agent-id :string]] :boolean]]}
+                  [:=> [:catn [::agent-id [:maybe :string]]] :boolean]]}
   ([] (escape-clipping? (db/current-agent-id)))
   ([agent-id]
    (let [db (some-> db/*conn* deref)]
@@ -407,7 +409,7 @@
    agent/schema is absent, so a no-config agent renders byte-identically."
   {:malli/schema [:function
                   [:=> [:cat] :int]
-                  [:=> [:catn [::agent-id :string]] :int]]}
+                  [:=> [:catn [::agent-id [:maybe :string]]] :int]]}
   ([] (cache-breakpoint (db/current-agent-id)))
   ([agent-id]
    (let [db (some-> db/*conn* deref)]
@@ -738,9 +740,19 @@
          ;; row) renders every authored component WHOLE past its cap. Absent
          ;; → false → byte-identical to today's clipped render.
          full?       (boolean full?)
+         ;; CP-5 escape-clipping (#43, owner: "render the blocks in full"):
+         ;; when the agent's `:seon.agent.ctx/escape-clipping?` is on (default
+         ;; true), the SMALL fixed caps (echoed source, stdout, error bodies at
+         ;; `eval-render-cap` 1500) are freed — those components render WHOLE.
+         ;; The citable RESULT BODY is NOT freed here: it stays governed by the
+         ;; age-decay `result-body-cap` (the "start larger, shrink over time"
+         ;; safety net that keeps full rendering bounded), so escape-clipping
+         ;; and the decay are COMPLEMENTARY, not in conflict.
+         escape?     (escape-clipping?)
+         small-full? (or full? escape?)
          ;; Echoed source + stdout + error/guidance bodies cap at the
          ;; smaller `eval-render-cap` (1500); only the citable result
-         ;; body below gets `result-body-render-cap` (16384).
+         ;; body below gets its age-decayed `result-body-cap`.
          limit       eval-render-cap
          comment-only? (str/blank? (str src))
          ;; Comment-preamble — the agent's `;`/prose thinking, neutralized
@@ -751,11 +763,11 @@
          ;; The form, verbatim (or repaired) — neutralized for any inline
          ;; result-claim, capped. Omitted for a comment-only row.
          form-ln     (when-not comment-only?
-                       (cap-result (neutralize-result-claims src) limit full?))
+                       (cap-result (neutralize-result-claims src) limit small-full?))
          ;; Captured println/prn output — shown above the value like a
          ;; real REPL prints before returning. Bounded by the same cap.
          out-ln      (when (and (string? out) (not (str/blank? out)))
-                       (cap-result (str/trimr out) limit full?))
+                       (cap-result (str/trimr out) limit small-full?))
          ;; The result / error body, rendered as REPL output.
          result-ln
          (cond
@@ -801,14 +813,14 @@
 
            (einstrument/instrument-error? envelope)
            (cap-result-body
-             (error-lines (einstrument/render-malli-error envelope)) limit eid full?)
+             (error-lines (einstrument/render-malli-error envelope)) limit eid small-full?)
 
            (and (string? err) (not (str/blank? err)))
            ;; `:seon.eval/error` is stored pre-rendered + crystal-clear
            ;; (`seon.eval/render-error-string` / `read-error-message` /
            ;; the undeclared-var message) — render as a `=> ✗` failure
            ;; line, plain-clip (NOT the "narrow your query" result guide).
-           (cap-result (error-lines err) limit)
+           (cap-result (error-lines err) limit small-full?)
 
            :else ";=> ✗ <no result>")
          ;; Reactive 'won't persist' note (#7) — DERIVED from source, no

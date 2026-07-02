@@ -304,7 +304,10 @@
   {:malli/schema [:=> [:cat :map] :string]}
   [{node :seon.render/node}]
   (let [{::keys [at from-label to-labels content id new? outbound?]} node
-        body (ctx/cap-result content ctx/message-render-cap)
+        ;; CP-5 escape-clipping (#43, owner: "render the blocks in full"):
+        ;; when the agent's `:seon.agent.ctx/escape-clipping?` is on (default
+        ;; true), message content renders WHOLE past the per-message cap.
+        body (ctx/cap-result content ctx/message-render-cap (ctx/escape-clipping?))
         who  (if outbound?
                (str "▶ to " (str/join ", " to-labels))
                (str "◀ from " from-label))]
