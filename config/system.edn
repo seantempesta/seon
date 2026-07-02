@@ -85,7 +85,9 @@
    [my.data :as data]
    [my.ui :as ui]
    [my.tile :as tile]
-   [seon.agent.search :as search]]}
+   [my.blob :as blob]
+   [seon.agent.search :as search]
+   [seon.agent.shell :as shell]]}
 
  ;; ── ROOT-CONTEXT — a SPARSE override merged over :seon.config/agent-context
  ;; by IDENTITY (id "root"), block upsert-by-:seon.agent.ctx/name. The :live-tile

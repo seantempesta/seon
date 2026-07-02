@@ -155,6 +155,10 @@
     [my.data]
     [my.ui]
     [my.tile]
+    ;; Content-addressed blob store — the disk tier (big text lives behind
+    ;; a :my.blob/hash ref, never as datoms). Required so it builds +
+    ;; indexes at boot and turn-capture/web-fetch can compose on it.
+    [my.blob]
     ;; Config-driven context — the OPTIONAL manifest (`config/system.edn`)
     ;; that shapes the agent-context, routes, and global render bounds.
     ;; Absent → byte-identical to a no-config boot. `boot-seed!` loads it
