@@ -1333,3 +1333,161 @@
         ":seon.render/full? on the eval row renders the result WHOLE")
     (is (str/includes? whole big)
         "the full value is present uncut in the row")))
+
+;; ------------------------------------------------------------
+;; format-eval-row — the REPL-faithful transcript row (ported 2026-07-02
+;; from agent_context_test.cljs.disabled; assertions retargeted to the
+;; CURRENT glyphs: `;` prose preamble, `;=> value ; result/<id>` output
+;; comment, `;=> ✗ guidance` failures). These behaviors had no live
+;; coverage beyond the full?-flag clip path above.
+;; ------------------------------------------------------------
+
+(deftest eval-row-repl-faithful-stream
+  ;; success: preamble as `;` prose, form verbatim, the value as a
+  ;; `;=>` COMMENT line carrying the live ` ; result/<id>` var handle.
+  (let [row (ctx/format-eval-row
+              {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
+               :seon.eval/result-edn "3" :seon.eval/id "sm0000001a"
+               :seon.eval/narration "add 1 and 2"})
+        lines (str/split-lines row)]
+    (is (= "; add 1 and 2" (first lines))
+        "narration prose renders as a single-`;` comment line")
+    (is (some #(= "(+ 1 2)" %) lines)
+        "the form renders verbatim (re-parseable)")
+    (is (some #(str/starts-with? % ";=> ") lines)
+        "the value rides a `;=>` output-comment line")
+    (is (str/includes? row "result/sm0000001a")
+        "the success row carries the live result/<id> var handle")
+    (is (not (str/includes? row "=> (+ 1 2)"))
+        "no <ns>=> history prompt prefix on the form"))
+  ;; prior-session rows render the value WITHOUT the handle (the var
+  ;; died with the process).
+  (let [row (ctx/format-eval-row
+              {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
+               :seon.eval/result-edn "3" :seon.eval/id "sm0000001a"}
+              true)]
+    (is (str/includes? row ";=> 3") "prior rows still show the value")
+    (is (not (str/includes? row "result/"))
+        "prior-session rows carry NO result/<id> handle"))
+  ;; failures render `;=> ✗ <guidance>` — and no handle (no value).
+  (let [row (ctx/format-eval-row
+              {:seon.eval/source "(boom)" :seon.eval/ok? false
+               :seon.eval/error "kaput" :seon.eval/id "er0000001a"})]
+    (is (str/includes? row ";=> ✗ kaput")
+        "failure rows render the form then a crystal-clear `;=> ✗` line")
+    (is (not (str/includes? row "result/"))
+        "a FAILED eval gets NO result/<id> — there is no value to reuse"))
+  ;; a comment-only row (blank source) renders just its prose preamble.
+  (let [row (ctx/format-eval-row
+              {:seon.eval/source "" :seon.eval/ok? true
+               :seon.eval/id "cm0000001a"
+               :seon.eval/narration "just a trailing thought"})]
+    (is (= "; just a trailing thought" row)
+        "comment-only row → only the `;` preamble, no form, no value")))
+
+(deftest eval-row-shows-captured-print-output
+  (let [row (ctx/format-eval-row
+              {:seon.eval/source "(println \"hi\")" :seon.eval/ok? true
+               :seon.eval/result-edn "nil" :seon.eval/output "hi\n"
+               :seon.eval/id "pr0000001a"})]
+    (is (str/includes? row "(println \"hi\")\nhi\n;=> nil")
+        "captured output renders between the form and the `;=>` value,
+         REPL-style"))
+  (let [row (ctx/format-eval-row
+              {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
+               :seon.eval/result-edn "3" :seon.eval/id "pr0000002b"})]
+    (is (str/includes? row "(+ 1 2)\n;=> 3")
+        "no output attr → form then `;=>` value, no blank line injected")))
+
+(deftest eval-row-clipped-value-annotates-shown-of-full
+  ;; a clipped value appends `(N of M)` to the result/<id> handle so the
+  ;; agent knows the shown display is a partial view of a live whole
+  ;; value. The result body clips at result-body-render-cap (the store
+  ;; ceiling), so the value must exceed THAT to clip.
+  (let [full (+ ctx/result-body-render-cap 5000)
+        huge (apply str (repeat full "z"))
+        row  (ctx/format-eval-row
+               {:seon.eval/source "(big)" :seon.eval/ok? true
+                :seon.eval/result-edn huge :seon.eval/id "cp0000001a"})]
+    (is (str/includes? row (str "result/cp0000001a ("
+                                ctx/result-body-render-cap " of " full ")"))
+        "the handle carries (shown of full) so the clip is unambiguous")
+    (is (str/includes? row "holds it whole")
+        "the size guide still fires for the clipped scalar")))
+
+;; ------------------------------------------------------------
+;; neutralize-result-claims — model-authored result-claim comments are
+;; rewritten to the unverified-narration marker (two live fabrication
+;; incidents: an agent wrote `;; => …` narration that later turns
+;; trusted as a real read). Ported: the rewrite itself had no live
+;; coverage (render_test only pins off-shape tolerance).
+;; ------------------------------------------------------------
+
+(deftest neutralize-result-claims-rewrites-claim-shapes
+  ;; every claim shape is rewritten WHOLE — the claimed value (the
+  ;; poison) is dropped, not quoted.
+  (doseq [claim [";; => {:events 7}"
+                 ";; ⇒ \"all stored\""
+                 "; => 42"
+                 ";⇒ :ok"
+                 ";;=> [1 2 3]"]]
+    (let [out (ctx/neutralize-result-claims claim)]
+      (is (= ctx/unverified-narration-marker out)
+          (str (pr-str claim) " rewritten to the marker"))))
+  ;; ordinary narration / code is untouched — byte-identical.
+  (doseq [plain [";; storing the events now"
+                 "(def x 1)"
+                 ";; TODO follow up"]]
+    (is (= plain (ctx/neutralize-result-claims plain))
+        (str (pr-str plain) " passes through byte-identical"))))
+
+(deftest neutralize-result-claims-multiline-inline-idempotent
+  ;; multi-line: claim lines rewritten IN POSITION, others untouched.
+  (let [narr (str ";; reading the 7 events\n"
+                  ";; => [{:e 1} {:e 2} {:e 3}]\n"
+                  ";; all good")
+        out  (ctx/neutralize-result-claims narr)]
+    (is (= (str ";; reading the 7 events\n"
+                ctx/unverified-narration-marker "\n"
+                ";; all good")
+           out)
+        "line position preserved, only the claim line rewritten")
+    (is (not (str/includes? out "{:e 1}")) "fabricated value gone"))
+  ;; inline: code before the claim survives, the claim is replaced.
+  (is (= (str "(+ 1 2) " ctx/unverified-narration-marker)
+         (ctx/neutralize-result-claims "(+ 1 2) ;; => 99")))
+  ;; idempotent: the marker does not match the claim shape.
+  (is (= ctx/unverified-narration-marker
+         (ctx/neutralize-result-claims ctx/unverified-narration-marker)))
+  (let [once (ctx/neutralize-result-claims ";; => 1\n;; ⇒ 2")]
+    (is (= once (ctx/neutralize-result-claims once))
+        "re-applying changes nothing — no double-marking")))
+
+(deftest eval-row-neutralizes-fake-claims-keeps-real-results
+  ;; fake `;; =>` in stored narration → rewritten in the rendered row;
+  ;; the runtime-owned `;=>` value line is untouched (provenance gate:
+  ;; the composer appends it AFTER neutralize).
+  (let [row (ctx/format-eval-row
+              {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
+               :seon.eval/result-edn "3" :seon.eval/id "fk0000001a"
+               :seon.eval/narration ";; => {:fabricated 7}"})]
+    (is (str/includes? row "[unverified narration")
+        "the fake claim is neutralized to the marker")
+    (is (not (str/includes? row ":fabricated")) "claimed value absent")
+    (is (str/includes? row ";=> 3")
+        "the real runtime-owned value line is unaffected"))
+  ;; inline claim inside SOURCE is neutralized too — code survives.
+  (let [row (ctx/format-eval-row
+              {:seon.eval/source "(+ 1 2) ;; => 99" :seon.eval/ok? true
+               :seon.eval/result-edn "3" :seon.eval/id "fk0000002b"})]
+    (is (str/includes? row "(+ 1 2)") "the code survives")
+    (is (not (str/includes? row "99")) "inline claimed value absent")
+    (is (str/includes? row ";=> 3") "real value line unaffected"))
+  ;; re-render is stable: stored narration already carrying the marker
+  ;; renders it ONCE, unchanged.
+  (let [row (ctx/format-eval-row
+              {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
+               :seon.eval/result-edn "3" :seon.eval/id "id0000004d"
+               :seon.eval/narration ctx/unverified-narration-marker})]
+    (is (= 1 (count (re-seq #"\[unverified narration" row)))
+        "no double-marking on re-render")))
