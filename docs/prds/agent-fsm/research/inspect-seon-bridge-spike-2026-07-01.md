@@ -603,6 +603,43 @@ proper way to init the agent with proper args"). Needs the same verification bar
 hot-reload re-arm live-proof (the `arm-agent!` path must still work through the
 unified fn). `rearm-wake-triggers!` calls it with `mint? false`.
 
+## 5j. Phase-0 CLOSE — end-to-end honest smoke against the productionized `/solve`
+
+After the greeting removal + `/solve` timeout-honesty fix (committed `bfac6f50`),
+the full inspect→pod→scorer loop was re-run against the PRODUCTIONIZED `/solve` in
+`seon.web.serve` (not the throwaway shim). Two inspect tasks, both `status=success`:
+
+**`seon_memory_smoke` (happy path, 3 samples, host-side `includes`): accuracy 1.000.**
+Each a fresh agent running its OWN multi-turn FSM, honest recording:
+
+| sample | score | closed | turns | evals | reply |
+|--------|-------|--------|-------|-------|-------|
+| 1 | C | `:completed` | 4 | 11 | "Dana Okafor led Project Zephyr, which launched in March 2021." |
+| 2 | C | `:completed` | 5 | 10 | "The Helios reactor in Reykjavik produces **42 megawatts**." |
+| 3 | C | `:completed` | 1 | 7 | "Priya Raman commands the Orion mission, which carries 6 crew members." |
+
+**`seon_timeout_honesty` (forced 2s timeout, custom scorer): accuracy 1.000.**
+
+| sample | score | timed_out | closed | reply |
+|--------|-------|-----------|--------|-------|
+| 1 | C | **True** | **timeout** | `''` (empty — NO false answer) |
+
+The timeout scorer marks CORRECT only when `timed_out=True` AND `closed_reason`
+contains `"timeout"` — it explicitly FAILS a false success. It passed: the pod
+recorded the clock cut-off HONESTLY (not a stale `:completed`/greeting), carried
+end-to-end through inspect. **This is the anti-"we're-fucked-if-we-mis-record" proof.**
+
+**Phase-0 = DONE.** A proven, non-invasive, HONEST inspect bridge: Seon's pod agent
+runs as an inspect `@solver` via HTTP; it owns its own multi-turn loop (inspect never
+manages turns); host-side scorer + answer key stay in inspect's process; and the pod
+records truthfully on both the happy path AND under a timeout. `/solve` is
+PRODUCTIONIZED in `seon.web.serve` (schema'd handler + seeded route, commit
+`bfac6f50`), not a shim.
+
+Effort to the first REAL benchmark (niah / memory-QA): **~1–2 days** (case-1) — a
+real dataset through the same `@solver` + `pass^k` epochs + the isolation-per-sample
++ parallelism refinements (§5c/§5e). SEPARATE owner-gated step; NOT started.
+
 ## 6. Blockers / caveats
 
 - **No blockers to case-1.** The one honest caveat: the smoke's `/solve` door was a
