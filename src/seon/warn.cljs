@@ -324,9 +324,9 @@
    `:seon.schema` row by `seon.eval/build-tee-entities`, in an
    agent-origin tx), as opposed to the core's own registrations
    (boot-seeded by `seon.client/index-schemas` /
-   `all-entity-schemas-tx-data`, always inside the
-   `{:seon.db/origin :core-seed}` tx-context, forge-guarded in
-   `seon.db`).
+   `all-entity-schemas-tx-data`, always inside the unscoped
+   `{:seon.db/origin :core-seed}` tx-context — a provenance the transact
+   boundary makes unforgeable from inside an agent scope).
 
    Provenance — not a keyword-namespace pattern — is the rule, so
    agent-authored `seon.*` data domains (e.g. `:my.workout/*`) stay

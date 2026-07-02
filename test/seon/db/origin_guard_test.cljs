@@ -1,26 +1,27 @@
 (ns seon.db.origin-guard-test
-  "Origin-forge guard tests (unit #24 item 3, verifier rec 2026-06-09).
+  "Origin-stamp tests — provenance is derived at the transact boundary.
 
-   Contract under test — `seon.db.internal/warn-on-seed-origin-forge!` via the
-   public `transact!` path:
+   Contract under test — `seon.db.internal/derive-origin` via the public
+   `transact!` path: `:seon.db/origin` is STAMPED from the ambient scope
+   (`with-agent` / `with-tx-context`); callers never pass it.
 
-   1. An AGENT-scoped tx claiming `:seon.db/origin :core-seed`
-      bumps `seon.db.internal/!seed-origin-forge-count` (and console-warns).
-   2. The guard is WARN-ONLY today: the tx still commits and the
-      origin lands UNCHANGED as `:core-seed` (the boot-seed path
-      still runs inside `with-agent` — see the enforcement TODO in
-      seon.db). This test PINS the warn-only behavior so the eventual
-      flip to enforcement consciously updates it.
-   3. No agent scope + `:core-seed` origin → no count (the
-      legitimate core path).
-   4. Agent scope + non-seed origin → no count.
+   1. Agent scope + `:core-seed` tx-context claim → the committed tx
+      carries `:agent` (managed origins are unforgeable from inside an
+      agent scope).
+   2. No agent scope + `:core-seed` tx-context → `:core-seed` commits
+      (the legitimate core-writer path).
+   3. Agent scope alone (no tx-context) → `:agent` is stamped.
+   4. Agent scope + a non-managed tx-context origin (`:system`) →
+      trusted as claimed (core code narrows its own agent-scoped
+      writes).
+   5. A caller-passed `:tx-meta` `:seon.db/origin` is never consulted —
+      dropped when unscoped, overridden by the scope otherwise.
 
    Run via `seon.test.runner/run-vars` / run-block over MCP."
   (:require
     [cljs.test :as t :refer [deftest is testing async]]
     [datahike.api :as d]
     [seon.db :as db]
-    [seon.db.internal :as internal]
     [seon.schema :as schema]))
 
 (schema/register! ::name :string)
@@ -42,41 +43,41 @@
                  (-> (d/transact! conn {:tx-data (db/tx-meta-datahike-schema)})
                      (.then (fn [_] conn))))))))
 
-(defn- seed-origin-transact!
-  "Run one transact! on `conn` with `:seon.db/origin :core-seed`
-   tx-context, optionally inside a `with-agent` scope. Returns the
-   envelope promise."
-  [conn agent-id]
-  (let [run (fn []
-              (db/with-tx-context
-                {:seon.db/origin :core-seed}
-                (fn []
-                  ;; return-report? to read the raw report's :tx-data
-                  ;; (the tx eid) below — the compact envelope omits it.
-                  (db/transact! {:seon.db/tx-data        [{::name "x"}]
-                                 :seon.db/conn           conn
-                                 :seon.db/return-report? true}))))]
+(defn- tx-entity
+  "The tx ENTITY of envelope `env` (transacted with `:return-report?`)."
+  [conn env]
+  (let [report (:seon.db/tx-report env)
+        tx-eid (.-tx ^js (first (:tx-data report)))]
+    (d/entity @conn tx-eid)))
+
+(defn- scoped-transact!
+  "One `transact!` on `conn`, optionally inside `with-agent agent-id`
+   and/or a `with-tx-context ctx`. Returns the envelope promise
+   (with `:return-report?` so the tx entity is readable)."
+  [conn {:keys [agent-id ctx tx-meta]}]
+  (let [tx  (fn []
+              (db/transact! (cond-> {:seon.db/tx-data        [{::name "x"}]
+                                     :seon.db/conn           conn
+                                     :seon.db/return-report? true}
+                              tx-meta (assoc :seon.db/opts {:tx-meta tx-meta}))))
+        run (if ctx
+              (fn [] (db/with-tx-context ctx tx))
+              tx)]
     (if agent-id
       (db/with-agent agent-id run)
       (run))))
 
-(deftest agent-scoped-seed-origin-counts-but-commits-unchanged
+(deftest agent-scoped-managed-claim-stamps-agent
   (async done
     (-> (fresh-conn)
         (.then (fn [conn]
-                 (reset! internal/!seed-origin-forge-count 0)
-                 (-> (seed-origin-transact! conn "forger-agent-1")
+                 (-> (scoped-transact! conn {:agent-id "forger-agent-1"
+                                             :ctx {:seon.db/origin :core-seed}})
                      (.then (fn [env]
-                              (testing "tx still commits (warn-only)"
-                                (is (true? (:seon.db/ok? env))))
-                              (testing "forge counter bumped exactly once"
-                                (is (= 1 @internal/!seed-origin-forge-count)))
-                              (testing "origin lands UNCHANGED — warn-only, no override yet"
-                                (let [report (:seon.db/tx-report env)
-                                      tx-eid (.-tx ^js (first (:tx-data report)))
-                                      tx-ent (d/entity @conn tx-eid)]
-                                  (is (= :core-seed
-                                         (:seon.db/origin tx-ent)))
+                              (is (true? (:seon.db/ok? env)))
+                              (testing "managed origin claim from agent scope → stamped :agent"
+                                (let [tx-ent (tx-entity conn env)]
+                                  (is (= :agent (:seon.db/origin tx-ent)))
                                   (is (= "forger-agent-1"
                                          (:seon.db/agent-id tx-ent)))))
                               (done))))))
@@ -84,37 +85,76 @@
                   (is false (str "unexpected rejection: " err))
                   (done))))))
 
-(deftest core-scoped-seed-origin-does-not-count
+(deftest unscoped-managed-claim-commits-as-claimed
   (async done
     (-> (fresh-conn)
         (.then (fn [conn]
-                 (reset! internal/!seed-origin-forge-count 0)
-                 (-> (seed-origin-transact! conn nil)
+                 (-> (scoped-transact! conn {:ctx {:seon.db/origin :core-seed}})
                      (.then (fn [env]
                               (is (true? (:seon.db/ok? env)))
-                              (testing "legitimate core seed → no warn count"
-                                (is (zero? @internal/!seed-origin-forge-count)))
+                              (testing "legitimate unscoped core writer → :core-seed commits"
+                                (let [tx-ent (tx-entity conn env)]
+                                  (is (= :core-seed (:seon.db/origin tx-ent)))
+                                  (is (nil? (:seon.db/agent-id tx-ent)))))
                               (done))))))
         (.catch (fn [err]
                   (is false (str "unexpected rejection: " err))
                   (done))))))
 
-(deftest agent-scoped-non-seed-origin-does-not-count
+(deftest bare-agent-scope-stamps-agent
   (async done
     (-> (fresh-conn)
         (.then (fn [conn]
-                 (reset! internal/!seed-origin-forge-count 0)
-                 (-> (db/with-agent "honest-agent-1"
-                       (fn []
-                         (db/with-tx-context
-                           {:seon.db/origin :agent}
-                           (fn []
-                             (db/transact! {:seon.db/tx-data [{::name "y"}]
-                                            :seon.db/conn    conn})))))
+                 (-> (scoped-transact! conn {:agent-id "honest-agent-1"})
                      (.then (fn [env]
                               (is (true? (:seon.db/ok? env)))
-                              (testing "agent-origin tx in agent scope → no warn count"
-                                (is (zero? @internal/!seed-origin-forge-count)))
+                              (testing "agent scope with no tx-context → :agent stamped"
+                                (let [tx-ent (tx-entity conn env)]
+                                  (is (= :agent (:seon.db/origin tx-ent)))
+                                  (is (= "honest-agent-1"
+                                         (:seon.db/agent-id tx-ent)))))
+                              (done))))))
+        (.catch (fn [err]
+                  (is false (str "unexpected rejection: " err))
+                  (done))))))
+
+(deftest agent-scoped-non-managed-claim-is-trusted
+  (async done
+    (-> (fresh-conn)
+        (.then (fn [conn]
+                 (-> (scoped-transact! conn {:agent-id "system-agent-1"
+                                             :ctx {:seon.db/origin :system}})
+                     (.then (fn [env]
+                              (is (true? (:seon.db/ok? env)))
+                              (testing "non-managed origin (:system) survives agent scope"
+                                (is (= :system
+                                       (:seon.db/origin (tx-entity conn env)))))
+                              (done))))))
+        (.catch (fn [err]
+                  (is false (str "unexpected rejection: " err))
+                  (done))))))
+
+(deftest caller-tx-meta-origin-is-never-consulted
+  (async done
+    (-> (fresh-conn)
+        (.then (fn [conn]
+                 ;; Unscoped + caller-passed origin → dropped (no scope,
+                 ;; no stamp; the caller's claim never reaches the store).
+                 (-> (scoped-transact! conn {:tx-meta {:seon.db/origin :core-seed}})
+                     (.then (fn [env]
+                              (is (true? (:seon.db/ok? env)))
+                              (testing "unscoped caller claim → NO origin on the tx"
+                                (is (nil? (:seon.db/origin (tx-entity conn env)))))
+                              ;; Agent scope + caller-passed origin → the
+                              ;; scope's derived value wins.
+                              (scoped-transact!
+                                conn {:agent-id "forger-agent-2"
+                                      :tx-meta  {:seon.db/origin :core-seed}})))
+                     (.then (fn [env]
+                              (is (true? (:seon.db/ok? env)))
+                              (testing "agent-scoped caller claim → stamped :agent"
+                                (is (= :agent
+                                       (:seon.db/origin (tx-entity conn env)))))
                               (done))))))
         (.catch (fn [err]
                   (is false (str "unexpected rejection: " err))

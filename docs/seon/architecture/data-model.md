@@ -160,7 +160,12 @@ Datahike reifies `:tx-meta` onto the tx entity
 `:tx-meta` (`src/seon/db/internal.cljs` `merge-tx-context-into-opts`; the seven
 attrs: `:seon.db/agent-id`, `session-id`, `turn-id`, `eval-id`, `origin`,
 `replay?`, `resume-marker?`), and the stamps survive the wire to the JVM
-writer.
+writer. `:seon.db/origin` is DERIVED at that boundary
+(`seon.db.internal/derive-origin`) — callers never pass it: an agent scope
+stamps `:agent` (a tx-context claim of a non-managed origin like `:system` /
+`:test-run` / `:replay` is trusted), and the managed origins
+`:core-seed`/`:config` are only reachable from an UNSCOPED `with-tx-context`,
+so managed-core provenance cannot be forged from inside an agent scope.
 
 Consequence for modeling: WHO/WHEN-wrote-this is a **join**
 (`[?e attr _ ?tx] [?tx :seon.db/turn-id ?turn]`), never a domain attribute — a

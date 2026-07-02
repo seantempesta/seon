@@ -289,6 +289,11 @@
 (schema/register! ::session-id      :seon.db/id)
 (schema/register! ::turn-id         :seon.db/id)
 (schema/register! ::eval-id         :seon.db/id)
+;; ::origin is STAMPED BY THE TRANSACT BOUNDARY from the ambient scope
+;; (`seon.db.internal/derive-origin`) — never passed by callers. Scopes
+;; establish it via [[with-tx-context]]; inside an agent scope the
+;; managed origins (:core-seed / :config) are unreachable (stamped
+;; :agent), so managed-core provenance cannot be forged.
 (schema/register! ::origin          [:enum :user :agent :system :replay :core-seed :config :test-run])
 (schema/register! ::replay?         :boolean)
 (schema/register! ::resume-marker?  :boolean)
@@ -357,7 +362,9 @@
 
    Fiber-local across awaits (AsyncLocalStorage), safe under
    concurrent agents. Auto-merged into every `transact!`'s `:tx-meta`;
-   explicit call-site `:tx-meta` keys win per-key."
+   explicit call-site `:tx-meta` keys win per-key — except `::origin`,
+   which the transact boundary STAMPS from the ambient scope
+   (`seon.db.internal/derive-origin`); callers never pass it."
   {:malli/schema [:=> [:cat] [:maybe :map]]}
   []
   (internal/current-tx-context))
@@ -392,15 +399,38 @@
   [agent-id f]
   (internal/run-with-agent agent-id f))
 
+(defn without-agent
+  "Clear the agent-id scope for the dynamic extent of `f`.
+
+   `f` is a 0-arg fn. Inside `f` — including across `await`s —
+   `(current-agent-id)` is nil; the outer scope restores on exit. For
+   CORE writers that must not run under an inherited agent scope: the
+   boot's HTTP server is registered inside the primary agent's
+   [[with-agent]], so every request handler inherits that scope
+   (AsyncLocalStorage captures at registration) — the transact boundary
+   stamps every agent-scoped tx `::origin :agent`, so a `:core-seed`
+   write reached from a handler would otherwise lose its managed
+   provenance.
+
+     (db/without-agent
+       (fn [] (db/transact! {::db/tx-data [...]})))   ; tx carries NO agent-id"
+  {:malli/schema [:=> [:catn [::thunk ::thunk]] :any]}
+  [f]
+  (internal/run-without-agent f))
+
 (defn with-tx-context
   "Establish a tx-context for the dynamic extent of `f`.
 
    `f` is a 0-arg fn; nested calls MERGE. Returns whatever `f` returns (context propagates
    across `await` points). Keys are typically the 7 `:seon.db/*`
    tx-meta attrs registered above; any registered scalar attr works.
+   The tx-context IS the ambient scope the transact boundary stamps
+   `::origin` from — but inside an agent scope the managed origins
+   (`:core-seed` / `:config`) are unreachable: the stamp overrides them
+   to `:agent` (`seon.db.internal/derive-origin`).
 
      (db/with-tx-context
-       {::db/origin :agent ::db/agent-id agent-id}
+       {::db/turn-id turn-id}
        (fn [] (db/transact! {::db/tx-data [...]})))   ; auto-tagged"
   {:malli/schema [:=> [:catn [::tx-context ::tx-context] [::thunk ::thunk]] :any]}
   [ctx-map f]
@@ -478,7 +508,9 @@
 
    Before committing it validates shape, attrs, and values; installs
    datahike schema for any newly-registered attr; and auto-merges the
-   active [[with-tx-context]] / [[with-agent]] context into `:tx-meta`.
+   active [[with-tx-context]] / [[with-agent]] context into `:tx-meta` —
+   including the derived `::origin` stamp (provenance comes from the
+   ambient scope; an `::origin` passed in `:tx-meta` is ignored).
 
    Worked examples — REGISTER your attrs first, then transact (every key
    namespaced). NO `await`: an `^:async` call is auto-awaited for you, so
@@ -514,12 +546,12 @@
      (schema/register! ::author :seon.db/ref)
      (db/transact! {::db/tx-data [{:db/id \"p1\" ::person-id \"alice\"}
                                   {::doc-id \"d2\" ::author \"p1\"}]})"
-  ;; Opted OUT of instrumentation — listed in `seon.instrument/skip-syms`.
-  ;; SAFE BY DEFAULT means a bad invocation shape returns an error ENVELOPE
-  ;; (`assert-invocation-shape!`), never throws; an instrumentation throw on
-  ;; bad input would break that tested contract. The opt-out lives in
-  ;; skip-syms (a FQ-symbol set) because the analyzer strips schema/metadata
-  ;; markers. This schema stays the discoverable contract; guards enforce.
+  ;; Opted OUT of instrumentation — caught by the computed predicate
+  ;; `seon.instrument/async-unwrappable?` (by SHAPE: variadic + :function
+  ;; schema — not by name). SAFE BY DEFAULT means a bad invocation shape
+  ;; returns an error ENVELOPE (`assert-invocation-shape!`), never throws;
+  ;; an instrumentation throw on bad input would break that tested
+  ;; contract. This schema stays the discoverable contract; guards enforce.
   {:malli/schema
    [:function
     [:=> [:cat ::transact-request] ::transact-response]

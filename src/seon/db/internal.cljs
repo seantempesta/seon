@@ -90,6 +90,13 @@
   [agent-id f]
   (.run agent-id-als agent-id f))
 
+(defn run-without-agent
+  "Impl of `seon.db/without-agent`. Inside `f` — including across
+   `await`s and any async work `f` starts — `(current-agent-id)` is nil
+   (ALS `.exit`). The outer scope restores on return."
+  [f]
+  (.exit agent-id-als f))
+
 ;; ---------------------------------------------------------------------------
 ;; Tx-meta attrs (v1.md §2.3) — the causality bundle attached to every tx.
 ;; The attr keywords live in `:seon.db/*` and their Malli registrations
@@ -1012,15 +1019,49 @@
               :seon.error/kind  :user-input}))))
 
 ;; ---------------------------------------------------------------------------
-;; Tx-meta auto-merge + origin-forge guard.
+;; Tx-meta auto-merge + origin stamp — derive-don't-claim provenance.
+;;
+;; `:seon.db/origin` on a committed tx is STAMPED here, at the transact
+;; boundary, from the ambient scope. Caller-passed `:tx-meta` origin is
+;; never consulted: the inspector's `on-tx` fan-out trusts a managed
+;; origin to push the tx to EVERY watching agent's pane, and the
+;; managed-row machinery (`seon.state/reconcile!`, boot-index GC) trusts
+;; it to classify rows as core — a caller-claimed origin would let an
+;; agent forge core provenance. The scope IS the claim.
 ;; ---------------------------------------------------------------------------
 
-(defn merge-tx-context-into-opts
-  "Merge `(current-tx-context)` AND `(current-agent-id)` into
-   `opts.:tx-meta`. Explicit `(:tx-meta opts)` keys win per-key; the
-   tx-context fills the next layer; the agent-id ALS fills the last.
+(def managed-origins
+  "Origins reserved for UNSCOPED core writers — the boot seed
+   (`:core-seed`) and the declarative config reconcile (`:config`).
+   [[derive-origin]] never lets an agent-scoped tx carry one."
+  #{:core-seed :config})
 
-   Precedence (highest → lowest):
+(defn derive-origin
+  "The true `:seon.db/origin` for the ambient scope, or nil (no scope).
+
+   - No agent scope → the tx-context origin as established by
+     `with-tx-context` (the boot seed / reconcile run OUTSIDE any agent
+     scope and establish `:core-seed` / `:config` there).
+   - Agent scope active → the tx-context origin (`:system`,
+     `:test-run`, `:replay` … — core code narrows its own agent-scoped
+     writes), EXCEPT a managed origin, which is a forge and stamps as
+     `:agent`, the honest value. No tx-context origin → `:agent`.
+   - No scope at all → nil (the tx stays untagged)."
+  [ctx agent-id]
+  (let [claimed (get ctx ::db/origin)]
+    (cond
+      (nil? agent-id)                claimed
+      (or (nil? claimed)
+          (managed-origins claimed)) :agent
+      :else                          claimed)))
+
+(defn merge-tx-context-into-opts
+  "Merge the ambient scope into `opts.:tx-meta` and stamp the derived
+   `:seon.db/origin`. Explicit `(:tx-meta opts)` keys win per-key —
+   EXCEPT `:seon.db/origin`, which is boundary-stamped from the scope
+   ([[derive-origin]]); a caller-passed origin is dropped.
+
+   Precedence for every other key (highest → lowest):
      1. explicit `:tx-meta` keys passed by the caller
      2. `(current-tx-context)` keys
      3. `(current-agent-id)` → `:seon.db/agent-id` (audit P1 — every
@@ -1029,58 +1070,23 @@
    Returns the (possibly-updated) opts, or nil if nothing to merge AND
    nothing was passed."
   [opts]
-  (let [ctx       (current-tx-context)
-        agent-id  (current-agent-id)
-        als-meta  (cond-> {}
-                    agent-id (assoc ::db/agent-id agent-id))
-        merged    (merge als-meta ctx)]
-    (cond
-      (and (nil? opts) (empty? merged))  nil
-      (empty? merged)                    opts
-      :else                              (update (or opts {}) :tx-meta
-                                                 #(merge merged %)))))
-
-;; ---------------------------------------------------------------------------
-;; Origin-forge guard (verifier rec, 2026-06-09). An AGENT-scoped tx that
-;; claims `:seon.db/origin :core-seed` is forging core
-;; provenance — the inspector's `on-tx` fan-out trusts that origin to
-;; push the tx to EVERY watching agent's pane, so a forging agent could
-;; spuriously wake all of its peers' renders.
-;;
-;; The intended enforcement is to OVERRIDE the origin to `:agent` (the
-;; honest value) and log. But TODAY the legitimate boot-seed path
-;; (`seon.client/seed-core!`) still runs INSIDE the booting agent's
-;; `with-agent` scope (known client.cljs issue, other lane), so the
-;; override would silently re-stamp every boot-seed tx and break the
-;; cross-agent visibility the seed depends on. Until the seed moves
-;; outside agent scope this guard is WARN-ONLY: log + count, commit
-;; unchanged.
-;;
-;; TODO(after client.cljs runs seed-core! OUTSIDE with-agent —
-;; #23's lane): flip to enforcement — override the origin to :agent
-;; (keep the warn), gated on a private `*core-seed-allowed*`
-;; binding the seed path establishes.
-;; ---------------------------------------------------------------------------
-
-(defonce !seed-origin-forge-count
-  ;; Public so tests can reset/read it. Counts agent-scoped tx that
-  ;; claimed :core-seed origin since pod boot.
-  (atom 0))
-
-(defn warn-on-seed-origin-forge!
-  "WARN-ONLY guard: when an agent scope is active and the merged
-   tx-meta claims `:seon.db/origin :core-seed`, log a console
-   warning and bump `!seed-origin-forge-count`. Returns `merged-opts`
-   unchanged (see the enforcement TODO above)."
-  [merged-opts]
-  (when (and (some? (current-agent-id))
-             (= :core-seed (get-in merged-opts [:tx-meta ::db/origin])))
-    (swap! !seed-origin-forge-count inc)
-    (js/console.warn
-      "seon.db/transact!: agent-scoped tx claims :seon.db/origin :core-seed — core provenance from inside an agent scope (warn-only; see warn-on-seed-origin-forge!)"
-      #js {:agent (current-agent-id)
-           :count @!seed-origin-forge-count}))
-  merged-opts)
+  (let [ctx      (current-tx-context)
+        agent-id (current-agent-id)
+        origin   (derive-origin ctx agent-id)
+        als-meta (cond-> {}
+                   agent-id (assoc ::db/agent-id agent-id))
+        merged   (merge als-meta ctx)]
+    (if (and (empty? merged)
+             (nil? origin)
+             (not (contains? (:tx-meta opts) ::db/origin)))
+      opts
+      (let [m (merge merged (:tx-meta opts))
+            m (if (some? origin)
+                (assoc m ::db/origin origin)
+                (not-empty (dissoc m ::db/origin)))]
+        (if (nil? m)
+          (not-empty (dissoc (or opts {}) :tx-meta))
+          (assoc (or opts {}) :tx-meta m))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Error envelopes — every failure path in the write pipeline resolves to
@@ -1365,8 +1371,7 @@
           ;; (throws :user-input on a malformed ref value — caught below).
           tx-data     (normalize-entity-ref-keys tx-data)
           attrs       (extract-tx-attrs tx-data)
-          merged-opts (warn-on-seed-origin-forge!
-                        (merge-tx-context-into-opts opts))]
+          merged-opts (merge-tx-context-into-opts opts)]
       ;; Validation gate — these THROW ex-info on bad input; the outer
       ;; catch below converts every throw to the failure envelope.
       (validate-attrs! attrs)

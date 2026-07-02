@@ -1910,9 +1910,10 @@
    A stored row is a GHOST iff ALL of:
 
      1. CORE-CLAIMED — its `:source` datom's tx carries
-        `:seon.db/origin :core-seed`, the persisted provenance claim
-        every boot-index transact writes (and the origin-forge guard in
-        `seon.db.internal` protects). Agent-authored rows (detect-and-tee,
+        `:seon.db/origin :core-seed`, the provenance the boot-index
+        transacts land under (boundary-stamped from the unscoped
+        `:core-seed` tx-context — unforgeable from inside an agent
+        scope). Agent-authored rows (detect-and-tee,
         replay, runner) carry other origins and are NEVER candidates —
         even when their shape is identical and their ns is absent from
         this build.
@@ -1985,10 +1986,19 @@
                      (str/join ", " (map (fn [{:keys [kind ident]}]
                                            (str (name kind) " " (pr-str ident)))
                                          ghosts)))}))
-      (let [res (await (db/transact!
-                         conn
-                         (mapv (fn [{:keys [e]}] [:db/retractEntity e]) ghosts)
-                         {:seon.db/origin :core-seed}))]
+      ;; `:core-seed` writer → runs OUTSIDE any (inherited) agent scope,
+      ;; same writer posture as boot-seed!: the transact boundary stamps
+      ;; the origin from the ambient scope, and a managed origin is only
+      ;; reachable outside an agent scope.
+      (let [res (await (db/without-agent
+                         (fn []
+                           (db/with-tx-context
+                             {:seon.db/origin :core-seed}
+                             (fn []
+                               (db/transact!
+                                 conn
+                                 (mapv (fn [{:keys [e]}] [:db/retractEntity e])
+                                       ghosts)))))))]
         ;; Boot maintenance stays fail-loud (same posture as the seed
         ;; transacts): a silent half-prune would leave the store lying.
         (when-not (:seon.db/ok? res)
@@ -2271,78 +2281,94 @@
    is far worse than a crashed boot."
   {:malli/schema [:=> [:cat ::boot-seed-request] ::boot-seed-response]}
   [{conn :seon.db/conn}]
-  (let [prev-conn db/*conn*]
-    (set! db/*conn* conn)
-    (try
-      (let [index-tx (await (core-index-tx conn))
-            ;; The OPTIONAL loadout manifest, read ONCE and threaded to the
-            ;; route + skills steps below ({} when config/system.edn is absent
-            ;; ⇒ every resolve-* is the identity ⇒ byte-identical seed).
-            manifest (config/load-manifest)
-            check!   (fn [step {ok?   :seon.db/ok?
-                                error :seon.db/error}]
-                       (when-not ok?
-                         (throw (ex-info
-                                  (str "boot seed transact failed at "
-                                       step ": "
-                                       (:seon.error/message error))
-                                  {:seon.client/seed-step step
-                                   :seon.db/error error}))))]
-        ;; APPEND-ONLY core (origin :core-seed): introspection that is not a
-        ;; desired set, never retracted.
-        (await
-          (db/with-tx-context
-            {:seon.db/origin :core-seed}
-            (fn ^:async seed! []
-              (check! :entity-schemas
-                      (await (db/transact!
-                               {:seon.db/conn conn
-                                :seon.db/tx-data
-                                (schema/all-entity-schemas-tx-data)})))
-              (check! :core-seed
-                      (await (db/transact!
-                               {:seon.db/conn conn
-                                :seon.db/tx-data (seed-core!)})))
-              ;; No soul seed: the agent's identity is read LIVE from
-              ;; SOUL.md / AGENTS.md as context sections every render
-              ;; (seon.agent.ctx/file-block), never seeded into the store.
-              (check! :core-index
-                      (await (db/transact!
-                               {:seon.db/conn conn
-                                :seon.db/tx-data index-tx}))))))
-        ;; DECLARATIVE DESIRED SET (origin :config): the routes
-        ;; (`:seon.route/*`, identity `:seon.route/name`) + the scanned skills
-        ;; corpus (`:my.skills/*`, identity `:my.skills/name`), curated by the
-        ;; manifest, are ONE managed population synced through reconcile! —
-        ;; upsert-by-identity (idempotent on an Nth boot) AND retract-stale, so
-        ;; a route dropped from the manifest or a skill removed from disk is
-        ;; RETRACTED (it cannot persist). Scope `#{:config}` excludes the
-        ;; :core-seed introspection above. reconcile! never rejects; its
-        ;; error-value is checked + thrown (surface-errors-loudly).
-        (let [desired (into (vec (config/resolve-routes (route/core-routes-tx)
-                                                        manifest))
-                            ;; the scanned skill corpus is the desired set as-is
-                            ;; (no include/exclude curation — the env-dir scan IS
-                            ;; the corpus; always-on bodies are the agent-context's
-                            ;; :my.skills/load presence-set).
-                            (my.skills/seed-skills-tx-data))
-              recon   (await
-                        (db/with-tx-context
-                          {:seon.db/origin :config}
-                          (fn ^:async reconcile-declarative! []
-                            (state/reconcile!
-                              {:seon.state/desired    desired
-                               :seon.db/managed-scope #{:config}
-                               :seon.db/conn          conn}))))]
-          (when (false? (:seon.state/ok? recon))
-            (throw (ex-info
-                     (str "boot seed reconcile (routes+skills) failed: "
-                          (:seon.state/error recon))
-                     {:seon.client/seed-step :core-declarative
-                      :seon.state/error      (:seon.state/error recon)})))))
-      {::seeded? true}
-      (finally
-        (set! db/*conn* prev-conn)))))
+  ;; WRITER-ENFORCED scope: the whole seed runs OUTSIDE any agent scope
+  ;; (`db/without-agent`, ALS exit). Its txs establish managed origins
+  ;; (`:core-seed` / `:config`) via `with-tx-context`, and the transact
+  ;; boundary stamps `:seon.db/origin` from that ambient scope. Under an
+  ;; INHERITED agent scope — e.g. a call reached from an HTTP handler
+  ;; (the boot registers the server inside the primary agent's
+  ;; `with-agent`, so every request handler inherits that scope) — the
+  ;; stamp would override the managed origins to `:agent` and the seed
+  ;; rows would lose their core provenance.
+  (await
+    (db/without-agent
+      (fn ^:async seed-unscoped! []
+        (let [prev-conn db/*conn*]
+          (set! db/*conn* conn)
+          (try
+            (let [index-tx (await (core-index-tx conn))
+                  ;; The OPTIONAL loadout manifest, read ONCE and threaded to
+                  ;; the route + skills steps below ({} when config/system.edn
+                  ;; is absent ⇒ every resolve-* is the identity ⇒
+                  ;; byte-identical seed).
+                  manifest (config/load-manifest)
+                  check!   (fn [step {ok?   :seon.db/ok?
+                                      error :seon.db/error}]
+                             (when-not ok?
+                               (throw (ex-info
+                                        (str "boot seed transact failed at "
+                                             step ": "
+                                             (:seon.error/message error))
+                                        {:seon.client/seed-step step
+                                         :seon.db/error error}))))]
+              ;; APPEND-ONLY core (origin :core-seed): introspection that is
+              ;; not a desired set, never retracted.
+              (await
+                (db/with-tx-context
+                  {:seon.db/origin :core-seed}
+                  (fn ^:async seed! []
+                    (check! :entity-schemas
+                            (await (db/transact!
+                                     {:seon.db/conn conn
+                                      :seon.db/tx-data
+                                      (schema/all-entity-schemas-tx-data)})))
+                    (check! :core-seed
+                            (await (db/transact!
+                                     {:seon.db/conn conn
+                                      :seon.db/tx-data (seed-core!)})))
+                    ;; No soul seed: the agent's identity is read LIVE from
+                    ;; SOUL.md / AGENTS.md as context sections every render
+                    ;; (seon.agent.ctx/file-block), never seeded into the store.
+                    (check! :core-index
+                            (await (db/transact!
+                                     {:seon.db/conn conn
+                                      :seon.db/tx-data index-tx}))))))
+              ;; DECLARATIVE DESIRED SET (origin :config): the routes
+              ;; (`:seon.route/*`, identity `:seon.route/name`) + the scanned
+              ;; skills corpus (`:my.skills/*`, identity `:my.skills/name`),
+              ;; curated by the manifest, are ONE managed population synced
+              ;; through reconcile! — upsert-by-identity (idempotent on an Nth
+              ;; boot) AND retract-stale, so a route dropped from the manifest
+              ;; or a skill removed from disk is RETRACTED (it cannot
+              ;; persist). Scope `#{:config}` excludes the :core-seed
+              ;; introspection above. reconcile! never rejects; its
+              ;; error-value is checked + thrown (surface-errors-loudly).
+              (let [desired (into (vec (config/resolve-routes
+                                         (route/core-routes-tx)
+                                         manifest))
+                                  ;; the scanned skill corpus is the desired
+                                  ;; set as-is (no include/exclude curation —
+                                  ;; the env-dir scan IS the corpus; always-on
+                                  ;; bodies are the agent-context's
+                                  ;; :my.skills/load presence-set).
+                                  (my.skills/seed-skills-tx-data))
+                    recon   (await
+                              (db/with-tx-context
+                                {:seon.db/origin :config}
+                                (fn ^:async reconcile-declarative! []
+                                  (state/reconcile!
+                                    {:seon.state/desired    desired
+                                     :seon.db/managed-scope #{:config}
+                                     :seon.db/conn          conn}))))]
+                (when (false? (:seon.state/ok? recon))
+                  (throw (ex-info
+                           (str "boot seed reconcile (routes+skills) failed: "
+                                (:seon.state/error recon))
+                           {:seon.client/seed-step :core-declarative
+                            :seon.state/error      (:seon.state/error recon)})))))
+            {::seeded? true}
+            (finally
+              (set! db/*conn* prev-conn))))))))
 
 (defn ^:async start-agent!
   "Bring up the pod's agents: open conn, init bootstrap-CLJS, then
@@ -2422,35 +2448,35 @@
     (log/info-console! "seon.client/start-agent!" "agent roster"
                        {:seon.client/resumed resumed-ids
                         :seon.client/minted  minted-ids})
+    ;; THE core boot seed — handlers + the four seed transacts, extracted
+    ;; to [[boot-seed!]] so scratch worlds (/solve, the gym) run the
+    ;; boot's OWN code path (one mechanism — the hand-mirrored copy
+    ;; drifted twice). MUST run BEFORE the per-agent init: seeding first
+    ;; means the user entity + core schema exist before any agent wakes
+    ;; and a message resolves against them. Runs OUTSIDE the `with-agent`
+    ;; scope below: its txs land under the managed origins (`:core-seed`
+    ;; / `:config`), which the transact boundary only stamps outside an
+    ;; agent scope. boot-seed! pins its own *conn* and tx-context.
+    (await (boot-seed! {:seon.db/conn conn}))
+    ;; Boot-index GC — MUST run before replay: a DELETED core ns falls
+    ;; out of (core-ns-set), so its ghost rows would be misclassified as
+    ;; agent corpus and replayed back into the live compile-state (the
+    ;; my.kb.instruction dead-teachings incident). Idempotent; loud (one
+    ;; :seon.log info naming every pruned row). Also a `:core-seed`
+    ;; writer → outside agent scope, same as the seed. Safe to run right
+    ;; after the seed: the freshly-seeded `:core-seed` rows are all in
+    ;; prune's freshly-built `fresh` set (same pure builders), so prune
+    ;; never treats them as ghosts.
+    (let [prune-stats (await (prune-core-ghosts! conn))]
+      (log/info-console!
+        "seon.client/start-agent!"
+        (str "boot-index GC: "
+             (count (:seon.client/pruned prune-stats))
+             " ghost row(s) pruned")))
     (await
       (db/with-agent primary
         (fn ^:async boot-with-agent! []
-          (let [;; THE core boot seed — handlers + the four seed
-                ;; transacts, extracted to [[boot-seed!]] so the gym's
-                ;; scenario worlds run the boot's OWN code path (one
-                ;; mechanism — the hand-mirrored copy drifted twice).
-                ;; MUST run BEFORE the per-agent init: seeding first means
-                ;; the user entity + core schema exist before any agent wakes
-                ;; and a message resolves against them.
-                ;; Safe to run before prune/replay: the freshly-seeded
-                ;; `:core-seed` rows are all in prune's freshly-built `fresh`
-                ;; set (same pure builders), so prune never treats them as
-                ;; ghosts; replay excludes (core-ns-set), so it never touches
-                ;; them either. boot-seed! pins its own *conn* and tx-context.
-                _             (await (boot-seed! {:seon.db/conn conn}))
-                ;; Boot-index GC — MUST run before replay: a DELETED
-                ;; core ns falls out of (core-ns-set), so its
-                ;; ghost rows would be misclassified as agent corpus and
-                ;; replayed back into the live compile-state (the
-                ;; my.kb.instruction dead-teachings incident). Idempotent;
-                ;; loud (one :seon.log info naming every pruned row).
-                prune-stats   (await (prune-core-ghosts! conn))
-                _             (log/info-console!
-                                "seon.client/start-agent!"
-                                (str "boot-index GC: "
-                                     (count (:seon.client/pruned prune-stats))
-                                     " ghost row(s) pruned"))
-                ;; Load the agent-authored DB LAYER on top of the compiled
+          (let [;; Load the agent-authored DB LAYER on top of the compiled
                 ;; package: each agent ns's reconstituted whole source, in
                 ;; dependency order. GLOBAL (not per-agent) — runs ONCE per
                 ;; boot, before any per-agent setup. Core nses are EXCLUDED
