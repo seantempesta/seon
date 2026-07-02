@@ -190,6 +190,38 @@
                  (is (pos? tx-count) "envelope carries the datom count"))))
       done)))
 
+(deftest transact!-installs-runtime-registered-attr-then-queries-back
+  ;; REGRESSION (task #92): the agent-authored-schema → store persistence
+  ;; path. The config-init live drive hit a rough edge where an agent did
+  ;; `schema/register!` on a NEW attr (→ :ok, in the Malli registry) then
+  ;; `transact!`'d a fact with it (→ :ok) but the fact was NOT queryable
+  ;; back — the attr never reached the datahike schema. Every OTHER db_test
+  ;; pre-installs its attrs via `smoke-schema` at conn creation, so none of
+  ;; them exercise `ensure-datahike-attrs!` (the runtime installer) — this
+  ;; is the coverage hole that let the drive-found gap slip. Here the attr
+  ;; is registered ONLY in seon.schema (never in smoke-schema), so the
+  ;; transact MUST trigger the runtime install for the round-trip to work.
+  (async done
+    (let [attr :my.kb.datastructure.probe92/name]
+      ;; Registered in the Malli registry but ABSENT from the conn's
+      ;; datahike schema — the exact split-state the drive observed.
+      (schema/register! attr :string)
+      (with-conn
+        (fn [conn]
+          (is (not (contains? (db/installed-schema @conn) attr))
+              "precondition: attr not yet installed in the datahike schema")
+          (.then (tx! conn [{attr "hash-map"}])
+                 (fn [{::db/keys [ok? error]}]
+                   (is (true? ok?)
+                       (str "runtime-registered attr commits — " (pr-str error)))
+                   (is (contains? (db/installed-schema @conn) attr)
+                       "transact! installed the attr's datahike schema")
+                   (let [rows (db/query {::db/query [:find '?n :where ['?e attr '?n]]
+                                         ::db/conn  conn})]
+                     (is (= #{["hash-map"]} rows)
+                         "the stored datom is queryable back")))))
+        done))))
+
 (deftest transact!-returns-envelope-on-unregistered-attr
   ;; ENVELOPE CONTRACT: validation failures NEVER throw into the calling
   ;; agent's eval — they come back as ::db/ok? false with ::db/error

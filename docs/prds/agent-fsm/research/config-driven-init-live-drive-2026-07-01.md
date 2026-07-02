@@ -74,6 +74,29 @@ session), BUT the fact is NOT queryable back:
   reader → "did not parse, DEFINED NOTHING"); a later transact referenced an
   undefined `log32-n` symbol ("ran NOTHING").
 
+### Task #92 follow-up (2026-07-02) — mechanism PROVEN sound; test coverage hole closed
+
+Investigated the "store `:ok` but retrieve fails" rough edge. The runtime
+register→install→transact→query path is CORRECT and was re-proven live end-to-end
+against the REAL wire store (not just the pod-local view): a fresh
+`schema/register!` of a new attr, then `db/transact!`, then `db/query` returns the
+row; `seon.server.wire` (JVM socket REPL 7891) confirmed both the attr's datahike
+schema (`:db.type/string`) AND the datom landed in the store — inside a
+`with-agent` scope too. `seon.db.internal/transact!*` awaits
+`ensure-datahike-attrs!` (which derives the datahike attr-decl via the Malli
+bridge and forwards it as a schema-tx over the `:seon-wire` PWriter, schema-before-
+data) BEFORE the data tx, so the wire-server always installs schema ahead of data.
+
+The drive symptom did NOT reproduce on a clean pod (the drive's store was since
+reset, and the drive interleaved reader-error evals — `:O(1)` etc.). The REAL,
+fixable finding: the db suite had a COVERAGE HOLE — every `db_test.cljs` transact
+runs against a `fresh-conn` that PRE-installs its attrs via a hardcoded
+`smoke-schema`, so NOTHING exercised the runtime installer
+(`ensure-datahike-attrs!`). Closed with a regression test
+(`transact!-installs-runtime-registered-attr-then-queries-back`) that registers a
+brand-new attr, asserts it is NOT pre-installed, transacts, and asserts the attr
+becomes installed AND the datom queries back — the exact split-state the drive saw.
+
 ## Planning + RESUME across restart — VERIFIED (the strongest result)
 
 `bin/seon restart pod` mid-task → roster `:resumed ["djy-…" "kXL-…" "root"]`,
