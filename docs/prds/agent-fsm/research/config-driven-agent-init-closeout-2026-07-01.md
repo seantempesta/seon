@@ -42,7 +42,7 @@ silently-inert dials — every one is WIRED, REMOVED, or PARKED-with-note).
 | `:seon.config/render/*` (10 caps) | `store-edn-cap`/`value-*` etc. | manifest read; env-override hatch works (72→40) |
 | `:my.skills/load` | `expand-skill-blocks` | `[:repl]`→1 block; `[:repl :datahike]`→2; `[]`→0 |
 | `:seon.client/wake?` | `wake-armed?` gates the trigger | `false`→no auto-wake; retract→true |
-| `:seon.eval/home-requires` | `home-requires-for` → `home-ns-form` | override→2-spec ns vs 6-spec const |
+| `:seon.eval/home-requires` | `home-requires-for` → `home-ns-form` | REACTIVE: DB datom-if-present (re-arm), config-fallback-if-absent (mint), const-if-neither. LIVE: transact override→2-spec on re-arm; retract→6-spec const; fresh id→const |
 | `:seon.agent.ctx/cache-breakpoint` | `render-context-ai` | reads datom (default 20) |
 | `:seon.agent.ctx/escape-clipping?` | `format-eval-row`/`message->renderable` | `true`(default)→5000-char msg whole; `false`→clips at 4000 |
 | `:seon.agent.run/default-turn-limit`/`-deadline-ms` | `open-run!` | datom seeds run bounds |

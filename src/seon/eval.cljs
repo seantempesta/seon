@@ -1381,16 +1381,34 @@
           home-ns-require-specs)))
 
 (defn home-requires-for
-  "The require specs for agent `id`'s home ns — its `:seon.eval/home-requires`
-   config (via `seon.config/resolve-agent-context`, read at SETUP time so it
-   works before the persisted datom is written on a mint), else the
-   [[home-ns-require-specs]] const default (= byte-parity for a no-config
-   agent). The const is the DEFAULT VALUE only; the config is the source."
+  "The require specs for agent `id`'s home ns — REACTIVE config-on-record
+   (decision 2), resolved in precedence:
+
+     1. the agent's `:seon.eval/home-requires` DATOM, when present — the
+        re-arm case (the entity exists). A live
+        `(db/transact! {:seon.agent/id id :seon.eval/home-requires […]})`
+        drives the next `setup-agent-ns!`, so the dial is reactive, not
+        write-only. (Mixed-`:or` schema → stored `pr-str`'d → decode on read.)
+     2. else the `:seon.eval/home-requires` from `resolve-agent-context` — the
+        fresh-MINT case, before the datom is written (the config/manifest value).
+     3. else the [[home-ns-require-specs]] const (= byte-parity for a no-config
+        agent). The const is the DEFAULT VALUE only."
   {:malli/schema [:=> [:catn [::id [:maybe :string]]] [:vector :any]]}
   [id]
   (or (when id
+        ;; (1) the persisted datom, if the entity carries it (re-arm).
+        (let [db (some-> db/*conn* deref)]
+          (when (and db (contains? (db/installed-schema db) :seon.eval/home-requires))
+            (some->> (:seon.eval/home-requires
+                       (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))
+                     (db/decode-edn-value :seon.eval/home-requires)
+                     seq
+                     vec))))
+      ;; (2) the config/manifest value (fresh mint — datom not yet written).
+      (when id
         (let [reqs (:seon.eval/home-requires (config/resolve-agent-context id nil))]
           (when (seq reqs) (vec reqs))))
+      ;; (3) the const default.
       home-ns-require-specs))
 
 (defn home-ns-form
