@@ -1,6 +1,6 @@
 ---
 name: data-oriented-clojure
-description: "Foundational mindset for writing Clojure/ClojureScript the Seon way — data-oriented, immutable, schema-first, EAV, errors-as-values, derive-don't-store. Use this BEFORE writing or reviewing ANY seon .clj/.cljs, designing a data model, or implementing an agent verb, AND whenever you catch an imperative/OO reflex: a mutable accumulator loop, a :type/:kind discriminator, a 'table' of records, bare (non-namespaced) map keys, a thrown exception in an agent-facing fn, :pre/:post or hand-rolled validation, stored/cached derived state or a 'mark-as-seen' flag, threading a db/conn through call sites, a bare top-level await, or a foo-v2/parallel namespace to 'house a fix'. Use when you're about to guess a library's behavior from memory instead of reading reference-code/. For EAV query syntax see the datahike skill; for ^:async/self-host see the clojurescript skill — this is the mindset that links them."
+description: "Foundational mindset for writing Clojure/ClojureScript the Seon way — data-oriented, immutable, schema-first, EAV, errors-as-values, derive-don't-store. Use this BEFORE writing or reviewing ANY seon code you author, designing a data model, or implementing a verb in your own home ns, AND whenever you catch an imperative/OO reflex: a mutable accumulator loop, a :type/:kind discriminator, a 'table' of records, bare (non-namespaced) map keys, a thrown exception in an agent-facing fn, :pre/:post or hand-rolled validation, stored/cached derived state or a 'mark-as-seen' flag, threading a db/conn through call sites, a bare top-level await, or a foo-v2/parallel namespace to 'house a fix'. Use when you're about to guess a library's behavior instead of testing it live. For EAV query syntax see the datahike skill; for ^:async/self-host see the clojurescript skill — this is the mindset that links them."
 ---
 
 # Data-Oriented Clojure — the Seon mindset
@@ -11,28 +11,25 @@ instincts, those instincts will betray you here in predictable ways. This skill
 rewires the most common ones. It is mostly *why*, because once you see why the
 grain runs this direction, the right code is obvious.
 
-The deep, file:line-grounded version is
-`docs/prds/agent-fsm/research/clojure-idioms-for-agents-2026-06-28.md`. Read it
-when you want the evidence behind a claim. For the specifics this skill defers
-to: **EAV queries / data modeling → the `datahike` skill; `^:async`/`await` and
-self-host eval → the `clojurescript` skill; test patterns → `clojure-testing`.**
+For the specifics this skill defers to: **EAV queries / data modeling → the
+`datahike` skill; `^:async`/`await` and self-host eval → the `clojurescript`
+skill.** Write real `cljs.test/deftest` tests for your own `my.*` namespaces —
+see "Write a real test ns" below.
 
 ## The one habit that causes the most wrong code
 
-**Don't guess a library's behavior from training memory — read the vendored
-source in `reference-code/` and test in the REPL first.** Every dep
-(datahike, malli, clojurescript, sci, integrant, reitit, core.async) is checked
-out under `reference-code/`, grep-able, the same version we run. The default
-failure mode is writing confident Clojure in a place/mutable mindset while
-*guessing* how a `:malli/schema` validates or what `:db.fn/cas` does — and being
-wrong. Ground the concept→file first, then write. A 30-second REPL experiment
-beats hours of debugging. (`CLAUDE.md` "Slow Is Fast".)
+**Don't guess a library or fn's behavior from training memory — test it live
+in your eval first.** The default failure mode is writing confident Clojure
+in a place/mutable mindset while *guessing* how a `:malli/schema` validates
+or what `:db.fn/cas` does — and being wrong. A 30-second eval beats hours of
+debugging a downstream symptom.
 
-Memory got these wrong recently, the source set them right: an inline tx-fn
-carries a closure and can't cross the wire (use `:db.fn/cas`, pure data);
-`as-of` reports its *origin* db's basis-t, not the as-of point; `memoize` on a db
-value walks the entire index on a cache *hit*. All three in
-`datahike-primer.md`.
+Three concrete traps worth knowing up front: an inline tx-fn carries a
+closure and can't cross the write wire (use `:db.fn/cas`, pure data,
+instead); `as-of`/`since` report their *origin* db's basis-t, not the as-of
+point, so don't key a cache on basis-t alone across db shapes; comparing two
+db values with `=` walks the entire index even on a cache HIT, so don't
+`memoize` on a db value.
 
 ## The reflexes, and what to write instead
 
@@ -99,9 +96,8 @@ standalone sentence*, ≤72 chars (78 hard cap), ending in terminal punctuation 
 never a mid-sentence hard-wrap. State the action + data effect, not the mechanism
 (mechanism → the body, after a blank line). Imperative for side-effecting verbs
 (`Store…`, `Mint…`), noun-phrase for pure queries (`Agent ids whose…`); backtick
-identifiers. `seon.dev.docstring` (dev hook, warn-only) flags a line 1 that's
-missing, >78 chars, or lacks terminal punctuation. Full rule + example:
-`docs/conventions.md` "Function Docstrings".
+identifiers. This is what makes your own fns legible to YOU later — a
+namespace's compact card is only as useful as its line-1 summaries.
 
 ### Agent-facing verbs return error envelopes — they never throw
 
@@ -170,13 +166,14 @@ place-oriented tell. Reach for `into` with a transducer, `reduce` (+ `reduced`
 for early exit), or a pure recursive helper with accumulator args. State lives in
 the call, not a mutable cell — output depends only on input.
 
-### Async: CLJS native `^:async`/`await`, never core.async in the pod
+### Async: CLJS native `^:async`/`await`, never core.async
 
-`await` only works *inside* an `^:async` fn body (it's a macro asserting an async
-env); a bare top-level `(await x)` throws "await can only be used in async
-contexts". Agents get data, not Promises — the eval batch path auto-awaits. Never
-run a second instrument pass in one process (it wedges async fns). Full detail in
-the **`clojurescript`** skill — read it before touching pod async.
+`await` only works *inside* an `^:async` fn body (it's a macro asserting an
+async env); a bare top-level `(await x)` throws "await can only be used in
+async contexts" — proven live. You get data, not Promises: your eval
+auto-awaits a returned Promise, so a `^:async` verb call feels synchronous.
+Full detail in the **`clojurescript`** skill — read it before writing your
+own `^:async` fn.
 
 ### `:or` doesn't fill a present-nil key — use explicit `or`
 
@@ -198,16 +195,16 @@ shape once, reference everywhere": duplication guarantees drift.
 
 ### In a `my.*` ns you author, `:require` the aliases you use
 
-The short aliases `db/`, `todo/`, `message/`, `schema/` are wired into your
-agent's HOME ns. When you author a fn in a `my.<domain>` ns you create ("build
-your environment"), give that ns a real `(ns … (:require …))` head carrying the
-same aliases — then `db/query` etc. resolve there because they are genuinely
-required, not by magic:
+The short aliases `db/`, `plan/`, `message/`, `schema/` are wired into your
+agent's HOME ns by default. When you author a fn in a `my.<domain>` ns you
+create ("build your environment"), give that ns a real `(ns … (:require
+…))` head carrying the same aliases — then `db/query` etc. resolve there
+because they are genuinely required, not by magic:
 
 ```clojure
 (ns my.expense
   (:require [seon.db :as db]
-            [seon.agent.todo :as todo]
+            [my.plan :as plan]
             [seon.agent.message :as message]
             [seon.schema :as schema]))
 
@@ -216,12 +213,13 @@ required, not by magic:
 ```
 
 **Full-qualification is the always-correct floor** — `seon.db/transact!`,
-`seon.agent.message/user`, `my.ui/status-line` work from ANY ns with no require.
-Use it whenever you skip the require, and ALWAYS for the `my.*` toolkit
-(`my.ui/…`, `my.tile/…`, `my.data/…`, `my.kb/…`) — those are not aliased.
+`seon.agent.message/user`, `my.ui/status-line` work from ANY ns with no
+require. Use it whenever you skip the require, and ALWAYS for the `my.*`
+toolkit (`my.ui/…`, `my.tile/…`, `my.data/…`, `my.kb/…`, `my.plan/…`) —
+those are not aliased.
 
-The lifecycle verbs `wait` `complete` `pause` `resume` `terminate` are refer'd in
-your HOME ns only; call them from there, or fully-qualify
+The lifecycle verbs `wait` `complete` `pause` `resume` `terminate` are
+refer'd in your HOME ns only; call them from there, or fully-qualify
 `seon.agent.lifecycle/complete`. Do NOT switch namespaces to reach a verb.
 
 ### Write a real test ns — `cljs.test/deftest`, not inline `assert`
@@ -237,17 +235,16 @@ discoverable, re-runnable, and reports pass/fail as data:
   (is (= 101 (my.expense/total [45 18 38]))))
 ```
 
-Test patterns (async, fresh in-memory conn, awaiting capability verbs) live in
-the **`clojure-testing`** skill.
+A `^:async` verb under test resolves its Promise the same way any other
+call does — auto-await in your eval, or an explicit `await` inside an
+`^:async` test fn.
 
-## When to read which reference
+## When to read which skill
 
-| You're about to... | Read first |
+| You're about to... | Read |
 |---|---|
-| Model data, write a Datalog query, design identity/refs | the **`datahike`** skill + `docs/prds/agent-fsm/research/datahike-primer.md` |
-| Write/debug pod async, `^:async`/`await`, self-host eval | the **`clojurescript`** skill |
-| Write tests, fixtures, generators | the **`clojure-testing`** skill |
-| Confirm any library's actual behavior | the vendored source in `reference-code/<lib>/` — never guess |
-| See the file:line evidence behind every claim here | `docs/prds/agent-fsm/research/clojure-idioms-for-agents-2026-06-28.md` |
-| Full conventions (Malli shapes, `.internal`, schema composition) | `docs/conventions.md` |
+| Model data, write a Datalog query, design identity/refs | the **`datahike`** skill |
+| Write/debug `^:async`/`await`, self-host eval quirks | the **`clojurescript`** skill |
+| Wire a canvas / dashboard / interactive control | the **`ui-live-tiles`** skill |
+| Get your own form to parse and land on the first try | the **`repl`** skill |
 </content>

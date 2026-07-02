@@ -30,9 +30,9 @@ Your live tile is ONE attribute on your own agent entity:
 new value onto it — addressing yourself by your `:seon.agent/id` lookup ref (the
 same "transact to my own lookup ref" upsert you use for everything about
 yourself). The value is either a **literal hiccup vector** (instant, static) or a
-**qualified fn symbol** (dynamic, re-derived every render). Grounded in
-`src/seon/render/live_tile.cljs` (the ns docstring is the contract) and proven in
-a live drive where an agent wired its tile first-try.
+**qualified fn symbol** (dynamic, re-derived every render). Grounded in the
+`seon.render.live-tile` ns docstring (the contract) and proven live: a
+literal-hiccup write lands and reads back exactly as transacted.
 
 ### (a) Literal hiccup — instant, no fn needed
 
@@ -124,8 +124,9 @@ you static status lines and tables, `my.tile` gives you **controls the human can
 click or type into that invoke one of YOUR OWN fns**. Same dual-render contract —
 DATA in, `{:seon.render/hiccup … :seon.render/ai …}` out — so the human gets a real
 button and YOU see the compact `[button: "…" → my.fn]` line describing which fn it's
-wired to. Grounded in `src/my/tile.cljs` (the ns docstring is the contract) and
-proven end-to-end (#58: the control-action gate + render are live).
+wired to. Grounded in the `my.tile` ns docstring (the contract) and proven
+live: `my.tile/button` returns exactly `{:seon.render/hiccup [:button …]
+:seon.render/ai "[button: \"…\" → fn]"}`.
 
 The whole mechanism: a control's action is a fn YOU defined in your home ns —
 nothing else is invocable (the `/agent/<id>/call` gate authorizes only your own
@@ -205,8 +206,9 @@ PRODUCER (`my.data/rows` by attribute presence, or `my.data/group-sum`) emits a
 ;; => {:my.data/group :dining :my.data/total 106}  → feed into a my.ui/kv-table
 ```
 
-Read `src/my/data.cljs` for the full verb set. The flow is: `my.data` computes the
-numbers → `my.ui`/`my.tile` render them → wire the result onto your canvas.
+Browse `my.data`'s `ns-publics`/docstrings for the full verb set. The flow
+is: `my.data` computes the numbers → `my.ui`/`my.tile` render them → wire
+the result onto your canvas.
 
 ## You already SEE the state of your canvas every turn
 
@@ -224,7 +226,7 @@ current canvas back to you, derived from the DB at render:
 ### The two renders a tile fn carries
 
 The `{:seon.render/hiccup … :seon.render/ai …}` map is the
-`:seon.render/html-response` contract (`src/seon/render.cljs`). Two views of the
+`:seon.render/html-response` contract (`seon.render`). Two views of the
 same thing:
 
 - **`:seon.render/hiccup`** — what the HUMAN sees on the canvas.
@@ -239,8 +241,7 @@ same thing:
 Tailwind's reset strips default element styling, but the core re-styles plain
 semantic HTML inside your tile with the Phosphor theme (warm blacks, cream text,
 amber accents, monospace). So **classless semantic hiccup gets styled for free** —
-prefer it over div-soup. Grounded in the base-content layer of
-`resources/public/css/input.css`.
+prefer it over div-soup.
 
 ```clojure
 ;; RIGHT — a classless table of rows is styled (borders, header weight, striping):
@@ -293,9 +294,9 @@ Wrong vs right — the same finding:
 ### Already have a value? Hand it to `seon.render/block`
 
 If you're holding a typed value and don't want to author hiccup, tag it and let
-`seon.render/block` render it (`src/seon/render.cljs`). It dispatches on the
-namespaced key the value carries — markdown, source, a data projection, an error,
-or raw — and renders ANYTHING without throwing:
+`seon.render/block` render it. It dispatches on the namespaced key the value
+carries — markdown, source, a data projection, an error, or raw — and renders
+ANYTHING without throwing:
 
 - `{:seon.render/markdown "## heading\n- a\n- b"}` → rendered markdown
 - `{:seon.render/source "(defn f [x] x)"}` → syntax-highlighted Clojure
@@ -374,24 +375,20 @@ the message is the pointer.
 - **Static + live VIEWS:** text, tables, lists, headings, code blocks, data
   drill-downs, compact+expanded faces, the full safelisted utility palette,
   re-derived-every-render tile fns. Compose them with `my.ui`.
-- **INTERACTIVITY (now live):** real buttons, inputs, selects, toggles, and forms
-  via `my.tile` — a control invokes one of your own home-ns fns through the
+- **INTERACTIVITY:** real buttons, inputs, selects, toggles, and forms via
+  `my.tile` — a control invokes one of your own home-ns fns through the
   `/agent/<id>/call` gate (fn-CALL = render-time args, fn-REF = posted signals as
-  one map). So "a tile that lets me add a todo" is a `my.tile/form` whose submit is
-  your `add-todo!` handler — render the control, don't punt to chat. (The older
-  "no interactive buttons yet / use chat instead" guidance is OBSOLETE — #58
-  shipped the control gate + render.)
+  one map). So "a tile that lets me add a note" is a `my.tile/form` whose submit
+  is your own handler fn — render the control, don't punt to chat.
 - **Aggregation:** `my.data` (sum/argMAX/group-sum over stored rows) computes the
   numbers a tile shows, dodging the datalog `:with`-dedup trap.
 
-## Key files
+## Live namespaces to browse for the current verb set
 
-| File | What it grounds |
+| Namespace | What it gives you |
 |------|-----------------|
-| `src/seon/render/live_tile.cljs` | THE contract — ns docstring = the tile vocabulary, faces, styling, welcome example |
-| `src/seon/render.cljs` | `:seon.render/html-response`, `seon.render/block`, `render-agent-tile` |
-| `src/my/ui.cljs` | static dual-render helpers — `status-line` / `kv-table` / `section` |
-| `src/my/tile.cljs` | INTERACTIVE controls — `button` / `input` / `select` / `toggle` / `form` |
-| `src/my/data.cljs` | aggregation — `rows` / `sum-by` / `max-by` / `group-sum` |
-| `src/seon/agent/ctx/live_tile.cljs` | the per-turn "what your human sees" context section |
-| `resources/public/css/input.css` | the safelisted utility list + the semantic base-content styling |
+| `seon.render.live-tile` | THE contract — ns docstring = the tile vocabulary, faces, styling |
+| `seon.render` | `:seon.render/html-response`, `seon.render/block` |
+| `my.ui` | static dual-render helpers — `status-line` / `kv-table` / `section` / `badge` / `progress` / `bullets` / `table` |
+| `my.tile` | INTERACTIVE controls — `button` / `input` / `select` / `toggle` / `form` |
+| `my.data` | aggregation — `rows` / `sum-by` / `max-by` / `group-sum` |

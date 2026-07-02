@@ -30,7 +30,7 @@ repeated values still count:
 (db/query '[:find (sum ?r) . :with ?e :where [?e ::rating ?r]])
 ```
 
-(Live example: `my.kb/source-stats` in `src/my/kb.cljs`.)
+(Live example: `my.kb/source-stats`.)
 
 ## Order and Limit
 
@@ -63,7 +63,7 @@ alone cannot express.
           rules)
 ```
 
-`seon.agent.todo/rules` (`src/seon/agent/todo.cljs`) is the live exemplar: a
+`my.plan/rules` is the live exemplar: a
 recursive `descendant` closure, plus `leaf`/`open-work`/`blocked`/`ready`
 derived entirely from two refs — the whole work-queue is pure Datalog over the
 tree/DAG, nothing precomputed. Note its comment: negations (`leaf`, `not
@@ -138,13 +138,19 @@ that keeps the single-API rule. Do not reach around it into `datahike.api`.
 - **Batch inserts** in one `db/transact!` call, not one entity per call.
 - **Most selective clause first** — pin the entity by a known eid or a unique
   attr value so datahike picks a small AEVT/AVET slice, not a full-index scan.
+  **Caveat, proven live:** when one of your clauses BINDS a var via a wildcard
+  value slot (`[?e ::attr _ ?tx]`, binding `?tx`) that a LATER clause joins
+  on, putting an unrelated id-lookup clause BEFORE it can make the whole
+  query return empty instead of the right rows — put the var-binding clause
+  first in that case and verify the result, don't assume clause order is
+  purely a perf knob.
 - **Scalar form (`.`)** when expecting one result — skips the set wrapper.
 - **Prefer pull** over N follow-up queries when fetching related entities.
 - **Thread one db value** through a unit of work instead of re-deref'ing
-  `@*conn*` per leaf fn — in the pod each deref reconstitutes a fresh value
-  (`datahike-primer.md` §1). It's a correctness AND a perf win.
+  `@*conn*` per leaf fn — in the pod each deref reconstitutes a fresh value.
+  It's a correctness AND a perf win.
 - **Don't `memoize` on a db value** — `=` on a DB walks the whole EAVT index,
-  faulting every node in off the store on a cache HIT (`datahike-primer.md` §5).
-  Measure before caching; `:memory`/local reads are sub-ms on small datom counts.
+  faulting every node in off the store on a cache HIT. Measure before
+  caching; `:memory`/local reads are sub-ms on small datom counts.
 - **Skip history unless you need retractions** — current-db queries carry no
   history overhead; only reach for `db/history` when you want retracted datoms.
