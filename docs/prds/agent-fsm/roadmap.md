@@ -167,8 +167,9 @@ else composes with it.
    turn/agent provenance on every tx, so this is the ONE missing
    coordinate), prompt → blob, reply → datom-or-blob by size, volatile
    inputs (embedding-hit ids, referenced `result/<id>`s) recorded on the
-   turn. Retire the `SEON_DEBUG_CAPTURE` gate + the write-only
-   `logs/turns` tree.
+   turn. The `SEON_DEBUG_CAPTURE` gate + the write-only `logs/turns`
+   tree are RETIRED (2026-07-02, C17): `seon.debug` deleted, gym driver
+   reads prompts by blob hash.
 3. `inspect/turn` (one bundle: prompt, as-of re-render, reply, evals,
    usage, visible messages) + `inspect/turn-diff` (block-level render diff
    + `db/since` datom delta) + `ctx-preview` over any t.

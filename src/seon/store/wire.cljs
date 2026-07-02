@@ -57,11 +57,12 @@
 
 (schema/register! ::sock-path [:string {:min 1}])
 (schema/register! ::store-path [:string {:min 1}])
+(schema/register! ::db-name [:string {:min 1}])
 ;; The pod's datahike conn handle the listen adapter subscribes for — an
 ;; opaque runtime value (third-party boundary), hence :any.
 (schema/register! ::conn :any)
 
-(schema/register! ::store-id-request [:map [::sock-path ::sock-path]])
+(schema/register! ::store-id-request [:map [::db-name ::db-name]])
 ;; A datahike config map — third-party boundary shape.
 (schema/register! ::cluster-config-response :map)
 
@@ -83,30 +84,39 @@
    wire-server --pub-sock for the default cluster and bin/acme's export."
   wire/default-pub-sock)
 
+(def cluster-dir
+  "The cluster's data dir — `SEON_CLUSTER_DIR`, default the live cluster.
+
+   Everything per-cluster on disk (store, blobs) lives under it; the
+   launcher (`bin/seon`, `bin/acme`, `bin/seon cluster create`) exports it."
+  (or (platform/env-val "SEON_CLUSTER_DIR") "data/clusters/default"))
+
+(def cluster-name
+  "The pod's cluster name — the basename of [[cluster-dir]].
+
+   The ONE derivation (registry C15): this name IS the wire db-name every
+   pod op carries, the feed label, and the konserve store `:id` seed on
+   BOTH sides. A socket-path artifact never enters the identity."
+  (last (remove str/blank? (str/split cluster-dir #"/"))))
+
 (def default-store-path
-  "The cluster's konserve `:file` store dir. Cluster-isolation-aware: reads
-   `SEON_CLUSTER_DIR` from the pod's environment first (set+exported by an
-   isolated launcher like `bin/acme`) as `$SEON_CLUSTER_DIR/store`, falling
-   back to the live-default constant when unset/blank. Under the default
-   deployment (`bin/seon`, which does NOT export `SEON_CLUSTER_DIR`) it
-   resolves byte-identically to the old constant. Matches the wire-server's
-   `--path $SEON_CLUSTER_DIR/store`."
-  (if-let [dir (platform/env-val "SEON_CLUSTER_DIR")]
-    (str dir "/store")
-    "data/clusters/default/store"))
+  "The cluster's konserve `:file` store dir: `[[cluster-dir]]/store`.
+
+   Matches the wire-server's `--path $SEON_CLUSTER_DIR/store` under
+   `bin/seon` and the per-name path `ensure-cluster-db!` registers."
+  (str cluster-dir "/store"))
 
 (defn store-id
   "The cluster store's konserve `:id`, replicated from the JVM side.
 
    `seon.server.store/name->uuid` = `UUID/nameUUIDFromBytes` (md5
-   name-based v3 UUID) of the db-name keyword's `str`, where the
-   wire-server derives the db-name as `:seon.server/<req-sock basename>`
-   (seon.server.wire/opts->config-for-request). Verified against the
-   live wire-server's `(:id (:store (:config @conn)))`."
+   name-based v3 UUID) of the db-name keyword's `str` — so cluster
+   \"default\" hashes as \":default\". The db-name is the CLUSTER NAME on
+   both sides (the one derivation). Verified against the live
+   wire-server's `(:id (:store (:config @conn)))`."
   {:malli/schema [:=> [:cat ::store-id-request] :uuid]}
-  [{::keys [sock-path]}]
-  (let [basename (last (str/split sock-path #"/"))
-        nm       (str ":seon.server/" basename)
+  [{::keys [db-name]}]
+  (let [nm       (str ":" db-name)
         b        (-> (.createHash node-crypto "md5")
                      (.update (js/Buffer.from nm "utf8"))
                      (.digest))]
@@ -134,7 +144,7 @@
   []
   {:store               {:backend :file
                          :path    default-store-path
-                         :id      (store-id {::sock-path default-sock-path})
+                         :id      (store-id {::db-name cluster-name})
                          :config  {:lock-blob? false}}
    :keep-history?       true
    :schema-flexibility  :write
@@ -202,6 +212,32 @@
                      ::attempts  n
                      :seon.error/kind :core-bug}))))))
     1)))
+
+(defn ^:async ensure-cluster-db!
+  "Ensure this pod's cluster db is registered on the wire-server.
+
+   Sends the `ensure-db` wire op with [[cluster-name]] as the db-name,
+   backend `:file`, and [[default-store-path]] — idempotent on the
+   registry (a re-ensure returns the existing conn's basis-t), so a
+   freshly created cluster's store exists BEFORE the pod attaches its
+   DIS-peer conn. Runs at boot between the ping gate and `d/connect`.
+   Throws on a not-ok reply (fail-loud, same posture as [[ping!]])."
+  ;; Resolves to the wire-server reply map (third-party boundary) — :any.
+  {:malli/schema [:=> [:cat] :any]}
+  []
+  (let [resp (await (wire/rpc default-sock-path
+                              {:seon.store.wire/op      "ensure-db"
+                               :seon.store.wire/db-name cluster-name
+                               :seon.store.wire/backend "file"
+                               :seon.store.wire/path    default-store-path}
+                              {:timeout-ms 15000}))]
+    (when-not (:seon.store.wire/ok resp)
+      (throw (ex-info (str "seon.store.wire: ensure-db failed for cluster "
+                           cluster-name " — " (:seon.store.wire/error resp))
+                      {::db-name cluster-name
+                       ::resp resp
+                       :seon.error/kind :core-bug})))
+    resp))
 
 ;; ---------------------------------------------------------------------------
 ;; Wire datom decode — server datom shape is the native 5-vector [e a v t op]
@@ -321,7 +357,11 @@
               tx-data    (if (map? arg-map) (:tx-data arg-map) arg-map)
               tx-meta    (when (map? arg-map) (:tx-meta arg-map))
               write-id   (str (random-uuid))
+              ;; Every write is db-name-routed to THIS pod's cluster db —
+              ;; N pods can share one wire-server without ambient-conn
+              ;; cross-talk (the registry resolves the conn per request).
               req        (cond-> {:seon.store.wire/op       "transact"
+                                  :seon.store.wire/db-name  cluster-name
                                   :seon.store.wire/tx-data  tx-data
                                   :seon.store.wire/write-id write-id}
                            (seq tx-meta) (assoc :seon.store.wire/tx-meta tx-meta))]
@@ -533,7 +573,8 @@
         ;; the gap (DE-2). Frames arriving DURING the replay rpc buffer above;
         ;; the replay↔buffer overlap dedupes on the basis-t watermark.
         since-t  (:last-applied-t @!adapter)
-        resp     (await (wire/replay-tx sock-path {:since-t since-t}))]
+        resp     (await (wire/replay-tx sock-path {:since-t since-t
+                                                   :db-name cluster-name}))]
     (when-not (:seon.store.wire/ok resp)
       (try (.destroy ^js sock) (catch :default _))
       (throw (ex-info "seon.store.wire: replay-tx failed" {::resp resp})))

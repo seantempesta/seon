@@ -635,19 +635,24 @@
    Order is load-bearing:
      1. `ping!` — FAIL LOUD if the wire-server is down (no local
         fallback, no dual backend).
-     2. `d/connect` — reads go local from here; writes dispatch to the
-        `:seon-wire` writer.
-     3. schema transact — the full Malli-derived attr schema goes OVER
+     2. `ensure-cluster-db!` — register/create this cluster's db on the
+        wire-server (idempotent), so a freshly created cluster's store
+        exists before the peer attaches.
+     3. `d/connect` — reads go local from here; writes dispatch to the
+        `:seon-wire` writer (db-name-routed to this cluster).
+     4. schema transact — the full Malli-derived attr schema goes OVER
         THE WIRE to the JVM writer; idempotent `:db/ident` upserts, so
         re-booting against the populated store re-asserts no-ops.
-     4. listen adapter — foreign writers' txs fire this conn's native
+     5. listen adapter — foreign writers' txs fire this conn's native
         listeners (wake triggers + inspector SSE)."
   {:malli/schema [:=> [:cat] :any]}
   []
   (await (store.wire/ping!))
+  (await (store.wire/ensure-cluster-db!))
   (let [conn (await (d/connect (store.wire/cluster-config)))]
     (log/info-console! "seon.client/open-cluster-conn!"
-                       (str "cluster store: " store.wire/default-store-path
+                       (str "cluster " store.wire/cluster-name
+                            ": " store.wire/default-store-path
                             " (writer: " store.wire/default-sock-path ")"))
     (await (d/transact! conn (pod-full-schema)))
     (await (store.wire/start-listen-adapter! {:seon.store.wire/conn conn}))
@@ -2450,7 +2455,7 @@
                        {:seon.client/resumed resumed-ids
                         :seon.client/minted  minted-ids})
     ;; THE core boot seed — handlers + the four seed transacts, extracted
-    ;; to [[boot-seed!]] so scratch worlds (/solve, the gym) run the
+    ;; to [[boot-seed!]] so scratch worlds (the gym) run the
     ;; boot's OWN code path (one mechanism — the hand-mirrored copy
     ;; drifted twice). MUST run BEFORE the per-agent init: seeding first
     ;; means the user entity + core schema exist before any agent wakes
@@ -2603,24 +2608,13 @@
     (start-agent! (cond-> {:llm-fn (current-llm-fn) :mint? true}
                     (some? purpose) (assoc :purpose purpose)))))
 
-;; /solve runs each request in its OWN fresh core-seeded scratch store (per-
-;; sample isolation — no cross-sample contamination). serve.cljs can't require
-;; this ns (cycle), so inject the three scratch-store builders:
-;;   :open-conn   open-agent-conn! — fresh :memory conn w/ the full schema.
-;;   :boot-seed   boot-seed!       — seed the core into it (instruction rows +
-;;                                    the :seon.ns/:seon.fn program-graph).
-;;   :mint-agent  init-agent!      — THE per-agent wiring (create! + wake
-;;                                    trigger) AGAINST THE CURRENT *conn* (the
-;;                                    scratch conn), NOT start-agent! (which
-;;                                    re-`set!`s *conn* to the cluster store —
-;;                                    that would defeat isolation and drive the
-;;                                    scratch agent's turns against the wire).
-;;                                    Same path start-agent! uses per agent.
-;; Same injection seam + hot-reload behavior as set-create-agent-fn! above.
-(web.serve/set-solve-deps!
-  {:open-conn   open-agent-conn!
-   :boot-seed   boot-seed!
-   :mint-agent  init-agent!})
+;; POST /agents/run (the one-shot composition door) mints its per-task agent
+;; via init-agent! — THE per-agent wiring (create! + wake trigger) against the
+;; pod's ONE cluster conn. serve.cljs can't require this ns (cycle), so the
+;; mint closure is injected; same seam + hot-reload behavior as
+;; set-create-agent-fn! above.
+(web.serve/set-mint-agent-fn!
+  (fn [id] (init-agent! {:seon.agent/id id ::mint? true})))
 
 ;; ---------------------------------------------------------------------------
 ;; Entry point

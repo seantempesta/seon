@@ -16,7 +16,7 @@
      - `ask-and-eval!`  — LLM call + parse + eval-batch
      - `call-llm!`      — `(llm-fn prompt)` with one bounded transport retry
      - `render-prompt` / `prefetch-and-render-prompt!` — ctx assembly
-     - `turn-index`     — the agent's running turn number (debug-file naming)
+     - `turn-index`     — the agent's running turn number (logging)
 
    Dependency direction (acyclic): it references `:seon.agent.run/*` keywords
    (global registry, no require) and transacts via `seon.db` directly, so it
@@ -32,7 +32,6 @@
     [seon.agent.ctx.relevant :as ctx-relevant]
     [my.blob :as blob]
     [seon.db :as db]
-    [seon.debug :as debug]
     [seon.error :as error]
     [seon.embed :as embed]
     [seon.embed.stash :as embed-stash]
@@ -72,9 +71,15 @@
 ;; cron fire never burns a turn from the run's WORK budget (turn-limit). Absent
 ;; on every ordinary LLM turn (optional = absent); set `true` only on fires.
 (schema/register! :seon.agent.turn/scheduled?   :boolean)
-;; Three-tier storage: the datom carries the prompt's char count + a file
-;; pointer (blob tier); the full prompt is never a datom.
+;; Three-tier storage: the datom carries the prompt's char count (display
+;; converts to tokens); the full prompt is never a datom — it lives in the
+;; blob store via `:seon.agent.turn/prompt-blob` below.
 (schema/register! :seon.agent.turn/prompt-chars :int)
+;; RETIRED writer (C17, 2026-07-02): the gated seon.debug file-tree capture
+;; is deleted; nothing writes this attr anymore. The registration stays
+;; ONLY because seon.client's boot schema install list still names it
+;; (client.cljs is owned by the in-flight unification sweep) and existing
+;; stores carry historical datoms. Remove together with that install row.
 (schema/register! :seon.agent.turn/prompt-file  :string)
 ;; Observability capture — ALWAYS ON, no debug flag (observability.md).
 ;; `rendered-as-of` is the ONE coordinate tx-meta cannot provide: the
@@ -92,10 +97,8 @@
 ;; WHY the turn errored, as a bounded edn/message string — present only
 ;; on an errored turn, so capture never depends on success.
 (schema/register! :seon.agent.turn/error :string)
-;; :seon.agent.turn/debug-dir (the per-turn capture-dir pointer, absent when
-;; capture off) is registered by its writer, [[seon.debug]] (required here).
-;; Honest record of the bounded LLM transport retry (always 1 when present;
-;; ABSENT = no retry — optional-is-absent).
+;; Honest record of the bounded LLM transport retry (the retry COUNT when
+;; present; ABSENT = no retry — optional-is-absent).
 (schema/register! :seon.agent.turn/llm-retries  :int)
 ;; Tier-2 provider telemetry, EDN-stringified (:map is unbridgeable — a :map
 ;; close-tx fails the schema bridge): the usage map + the unrecognized
@@ -120,7 +123,6 @@
    [:seon.agent.turn/prompt-blob  {:optional true} :seon.agent.turn/prompt-blob]
    [:seon.agent.turn/reply-blob   {:optional true} :seon.agent.turn/reply-blob]
    [:seon.agent.turn/error        {:optional true} :seon.agent.turn/error]
-   [:seon.agent.turn/debug-dir    {:optional true} :seon.agent.turn/debug-dir]
    [:seon.agent.turn/llm-retries  {:optional true} :seon.agent.turn/llm-retries]
    [:seon.agent.turn/llm-usage    {:optional true} :seon.agent.turn/llm-usage]
    [:seon.agent.turn/llm-meta     {:optional true} :seon.agent.turn/llm-meta]
@@ -181,16 +183,16 @@
     (subs s 0 (min turn-error-max-chars (count s)))))
 
 ;; ============================================================
-;; Turn index — the agent's running turn number, for debug-file naming +
-;; logging. Derived: count of ALL the agent's turns (across every run).
-;; Monotonic + unique-per-turn; nothing stored.
+;; Turn index — the agent's running turn number, for logging. Derived:
+;; count of ALL the agent's turns (across every run). Monotonic +
+;; unique-per-turn; nothing stored.
 ;; ============================================================
 
 (defn turn-index
   "The agent's NEXT turn number — count of every turn it owns.
 
-   Walked agent → runs → turns. Used for debug-capture file
-   names + log lines (uniqueness, not run-position). Derived, not persisted."
+   Walked agent → runs → turns. Used for log lines (uniqueness, not
+   run-position). Derived, not persisted."
   {:malli/schema [:=> [:catn [:seon.agent/id :seon.agent/id]] :int]}
   [agent-id]
   (count (ctx/agent-turns agent-id nil)))
@@ -292,7 +294,7 @@
   {:malli/schema [:=> [:catn [:turn-input :map] [:body-fn :any]] :any]}
   [{:seon.agent/keys [id]
     :seon.agent.run/keys [id-of-run]
-    :seon.agent.turn/keys [id-of-turn prompt-text prompt-file scheduled?
+    :seon.agent.turn/keys [id-of-turn prompt-text scheduled?
                            rendered-as-of prompt-blob]}
    body-fn]
   (let [turn-row
@@ -301,7 +303,6 @@
            :seon.agent.turn/at           (js/Date.)
            :seon.agent.turn/status       :running
            :seon.agent.turn/prompt-chars (count (str prompt-text))}
-          prompt-file    (assoc :seon.agent.turn/prompt-file prompt-file)
           rendered-as-of (assoc :seon.agent.turn/rendered-as-of rendered-as-of)
           prompt-blob    (assoc :seon.agent.turn/prompt-blob prompt-blob)
           scheduled?  (assoc :seon.agent.turn/scheduled? true)
@@ -335,7 +336,6 @@
                                                    :seon.agent.turn/llm-retries
                                                    :seon.agent.turn/llm-usage
                                                    :seon.agent.turn/llm-meta
-                                                   :seon.agent.turn/debug-dir
                                                    :seon.agent.turn/reply-blob
                                                    :seon.agent.turn/error]))]}))]
       (when (false? (:seon.db/ok? close))
@@ -363,14 +363,11 @@
 
 (defn ^:async ^:private ask-and-eval-reply!
   "Internal — the successful-LLM-reply half of `ask-and-eval!`: parse the
-   reply and eval-batch the forms. `id` / `turn-idx` / `id-of-turn` are
-   LOCALS threaded down from `run-turn!` (captured before the LLM await), so
-   debug capture pairs this verbatim reply with the same turn's prompt. When
-   capture is ON, the returned map carries `:seon.agent.turn/debug-dir`."
-  [resp id id-of-turn turn-idx compile-state run-id]
+   reply and eval-batch the forms. `id` / `id-of-turn` are LOCALS threaded
+   down from `run-turn!` (captured before the LLM await), so the always-on
+   blob capture pairs this verbatim reply with the same turn's prompt."
+  [resp id id-of-turn compile-state run-id]
   (let [reply-text (or (:text resp) "")
-        debug-dir  (debug/capture-response! id turn-idx id-of-turn
-                                            reply-text resp)
         ;; Always-on reply capture — the raw LLM reply is not derivable
         ;; from anything, so the byte ground truth goes to the blob store
         ;; (best-effort; a lost capture never wedges the turn).
@@ -384,7 +381,6 @@
       ;; failed eval must yield a next turn that shows the error.
       {:seon.agent/eval-count (+ (:seon.eval/n-ok batch)
                                  (:seon.eval/n-fail batch))}
-      debug-dir  (assoc :seon.agent.turn/debug-dir debug-dir)
       reply-blob (assoc :seon.agent.turn/reply-blob reply-blob))))
 
 ;; LLM retry tuning. The agent loop is the SOLE retry authority (the
@@ -517,7 +513,7 @@
            ;; depend on turn success (observability.md).
            :seon.agent.turn/error  (turn-error-str err)}
           retries (assoc :seon.agent.turn/llm-retries retries)))
-      (cond-> (await (ask-and-eval-reply! resp id id-of-turn turn-idx compile-state run-id))
+      (cond-> (await (ask-and-eval-reply! resp id id-of-turn compile-state run-id))
         retries     (assoc :seon.agent.turn/llm-retries retries)
         (seq usage) (assoc :seon.agent.turn/llm-usage (pr-str usage))
         (seq pfields) (assoc :seon.agent.turn/llm-meta (pr-str pfields))))))
@@ -548,7 +544,6 @@
         turn-idx   (turn-index id)
         prompt     (await (prefetch-and-render-prompt! id db))
         full-prompt (ai/debug-full-prompt {:seon.ai/ctx prompt})
-        prompt-file (debug/capture-prompt! id turn-idx turn-id full-prompt)
         ;; Always-on observability capture: the frozen db's basis-t (the
         ;; coordinate that makes the context re-derivable via as-of) + the
         ;; assembled prompt verbatim as a blob. Both land on the turn's
@@ -573,9 +568,7 @@
                                   :seon.agent.turn/prompt-text   full-prompt
                                   :seon.agent.turn/rendered-as-of rendered-as-of}
                                  prompt-blob
-                                 (assoc :seon.agent.turn/prompt-blob prompt-blob)
-                                 prompt-file
-                                 (assoc :seon.agent.turn/prompt-file prompt-file))
+                                 (assoc :seon.agent.turn/prompt-blob prompt-blob))
                                #(ask-and-eval! {:seon.agent/id            id
                                                 :seon.agent/llm-fn        llm-fn
                                                 :seon.agent/compile-state compile-state

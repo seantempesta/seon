@@ -62,8 +62,8 @@ turn/FSM/bounds), `data-model.md` (every attr you'll touch), `observability.md`
 - Turn capture LANDED (2026-07-02): `:seon.agent.turn/rendered-as-of` (the
   PRE-turn frozen basis-t) + always-on prompt/reply blob refs +
   `:seon.agent.turn/error`; replay via `seon.agent.inspect/turn`/`turn-diff`.
-  Still open: gym driver reads the gated `seon.debug` prompt.txt tree —
-  migrate it to prompt blobs, then retire the file tree. See
+  This is the ONE capture path — the gated `seon.debug` file tree is
+  deleted (C17); the gym driver reads prompts by blob hash. See
   `observability.md`.
 - Embedding hits enter the prompt via a volatile stash (`seon.embed.stash`)
   — being made a recorded turn input.

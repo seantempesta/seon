@@ -19,10 +19,9 @@
         between two captured turns.
 
    Hermetic: blobs go to a pid-scoped tmp dir (my.blob/!dir re-pointed
-   and restored), debug file-capture is forced OFF (proving blob capture
-   is independent of the SEON_DEBUG_CAPTURE gate), and each test runs on
-   a fresh :memory conn root-set! as db/*conn* (set!, not binding — CLJS
-   dynamic bindings don't survive await; see my.blob-test)."
+   and restored), and each test runs on a fresh :memory conn root-set!
+   as db/*conn* (set!, not binding — CLJS dynamic bindings don't survive
+   await; see my.blob-test)."
   (:require
     ["node:fs" :as nfs]
     ["node:path" :as npath]
@@ -36,13 +35,12 @@
     [seon.ai.tokens :as tokens]
     [seon.client :as client]
     [seon.db :as db]
-    [seon.debug :as debug]
     [seon.eval :as seval]
     [seon.repl :as repl]
     [seon.test-seed :as test-seed]))
 
 ;; ---------------------------------------------------------------------------
-;; Fixtures — pid-scoped blob dir, debug capture OFF, fresh conn per test.
+;; Fixtures — pid-scoped blob dir, fresh conn per test.
 ;; ---------------------------------------------------------------------------
 
 (def ^:private fixture-dir
@@ -54,13 +52,9 @@
   {:before (fn []
              (reset! !saved-dir @blob/!dir)
              (reset! blob/!dir fixture-dir)
-             ;; blob capture must be ALWAYS ON — force the debug FILE gate
-             ;; off so a passing test proves independence from it.
-             (debug/set-override! :off)
              (.rmSync nfs fixture-dir #js {:recursive true :force true}))
    :after  (fn []
              (reset! blob/!dir @!saved-dir)
-             (debug/set-override! :env)
              (.rmSync nfs fixture-dir #js {:recursive true :force true}))})
 
 (defn- with-conn
@@ -122,7 +116,7 @@
           (is (= expected (:seon.agent.turn/rendered-as-of turn))
               "rendered-as-of is the basis-t BEFORE the turn's own txs")
           (is (some? (:seon.agent.turn/prompt-blob turn))
-              "the turn carries a prompt blob ref — always on, debug OFF")
+              "the turn carries a prompt blob ref — always on")
           (is (some? (:seon.agent.turn/reply-blob turn))
               "the turn carries a reply blob ref")
           ;; inspect/turn — one call reconstructs the whole bundle

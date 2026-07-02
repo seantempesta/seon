@@ -132,12 +132,13 @@ brief, a derived verdict.
 ## Build path
 
 Turn capture is LIVE (2026-07-02): every turn persists `rendered-as-of` +
-prompt/reply blob refs (always on, independent of the `SEON_DEBUG_CAPTURE`
-file gate), and `seon.agent.inspect/turn` / `turn-diff` reconstruct/compare
-turns from them. Remaining gaps — the as-of per-block re-render inside
-`inspect/turn`, the volatile prompt inputs as recorded data, grep/embedding
-targets not yet widened, the forensic seed verb, retiring the debug file
-tree once the gym driver reads prompt blobs — live in [[roadmap]].
+prompt/reply blob refs (always on), and `seon.agent.inspect/turn` /
+`turn-diff` reconstruct/compare turns from them. The blob refs are the ONE
+capture path — the old gated `seon.debug` file tree (`SEON_DEBUG_CAPTURE`,
+`logs/turns/`) is deleted; the gym driver reads prompts back by blob hash.
+Remaining gaps — the as-of per-block re-render inside `inspect/turn`, the
+volatile prompt inputs as recorded data, grep/embedding targets not yet
+widened, the forensic seed verb — live in [[roadmap]].
 Source-grounded verification of what datahike's tx metadata already provides
 (and why the pre-turn basis-t is the one thing it doesn't):
 `docs/prds/agent-fsm/research/` tx-metadata findings, 2026-07-02.

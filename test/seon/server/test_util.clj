@@ -13,9 +13,8 @@
    store `:id`, so two fixtures never collide on one process-global
    in-memory store (the bug that `wire/store-config`'s hardcoded id
    caused before consolidation)."
-  (:require [datahike.api :as d]
-            [seon.server.client :as client]
-            [seon.server.store :as store]
+  (:require [seon.server.client :as client]
+            [seon.server.registry :as registry]
             [seon.server.wire :as wire]
             [seon.server.broadcast :as bcast])
   (:import [java.io File]
@@ -47,21 +46,27 @@
   []
   (let [req-sock (unique-sock "req")
         pub-sock (unique-sock "pub")
-        cfg      (store/config-for
-                  {:seon.server.store/db-name (keyword "test" (str (gensym "wire")))
-                   :seon.server.store/backend :memory})
-        conn     (#'wire/ensure-db! cfg)
+        db-name  (keyword "test" (str (gensym "wire")))
+        ;; The registry is the ONE open mechanism (same path -main uses):
+        ;; ensure-db! creates the :memory store, connects, and fires the
+        ;; on-ensure-db hooks (::raw-broadcast + base schema).
+        entry    (registry/ensure-db!
+                  {:seon.server.registry/db-name db-name
+                   :seon.server.registry/backend :memory})
+        conn     (:seon.server.registry/conn entry)
         pub-srv  (bcast/start-pub-server! pub-sock)
         req-srv  (#'wire/start-req-server! conn req-sock)]
     (wait-for-socket! req-sock 60000)
     (wait-for-socket! pub-sock 60000)
-    {:req-sock req-sock :pub-sock pub-sock
+    {:req-sock req-sock :pub-sock pub-sock :db-name db-name
      :conn conn :req-srv req-srv :pub-srv pub-srv}))
 
-(defn teardown-writer! [{:keys [conn req-srv pub-srv req-sock pub-sock]}]
+(defn teardown-writer! [{:keys [db-name req-srv pub-srv req-sock pub-sock]}]
   (try (.close ^ServerSocketChannel req-srv) (catch Throwable _))
   (try (.close ^ServerSocketChannel pub-srv) (catch Throwable _))
-  (try (d/release conn) (catch Throwable _))
+  ;; releases the conn AND drops the registry entry (no cross-test leak).
+  (try (registry/remove-db! {:seon.server.registry/db-name db-name})
+       (catch Throwable _))
   (try (.delete (File. ^String req-sock)) (catch Throwable _))
   (try (.delete (File. ^String pub-sock)) (catch Throwable _)))
 

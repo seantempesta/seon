@@ -27,6 +27,8 @@
 
 (defonce ^:private state (atom nil))
 
+(declare ambient-db-name)
+
 ;; ---------- Configuration ----------
 
 (defn- parse-args [args]
@@ -49,22 +51,6 @@
       nil acc
       (do (println "Unknown arg:" (first xs)) (System/exit 2)))))
 
-(defn- opts->config-for-request
-  "Translate CLI opts (string backend, optional :db-name/:path) into the
-   namespaced map `seon.server.store/config-for` expects. Derives a
-   default db-name from the req-sock basename when --db-name is absent,
-   so two standalone wire-servers on different sockets get distinct
-   per-name stores. Omits ::path when nil/for :memory (the schema is
-   [:string {:min 1}], so passing nil would fail instrumentation)."
-  [{:keys [backend db-name path req-sock]}]
-  (let [db-name-kw (keyword (or db-name
-                                (str "seon.server/"
-                                     (.getName (java.io.File. ^String req-sock)))))]
-    (cond-> {:seon.server.store/db-name db-name-kw
-             :seon.server.store/backend (keyword backend)}
-      (and path (not= "memory" backend))
-      (assoc :seon.server.store/path path))))
-
 ;; ---------- DB lifecycle ----------
 
 (declare raw-broadcast-listener-fn)
@@ -84,21 +70,6 @@
   (d/transact conn [{:db/ident       :seon.store.wire/write-id
                      :db/valueType   :db.type/string
                      :db/cardinality :db.cardinality/one}]))
-
-(defn- ensure-db!
-  "Open (creating if needed) the conn for `cfg`, seed the wire base-schema,
-   and register the per-conn `::raw-broadcast` `d/listen!` that emits the raw
-   db-name-tagged tx event on every commit. db-name is derived from cfg's
-   `:name` (the single-DB / test path); the multi-DB registry path installs
-   the same listener via the on-ensure-db hook with its real db-name."
-  [cfg]
-  (when-not (d/database-exists? cfg)
-    (d/create-database cfg))
-  (let [conn    (d/connect cfg)
-        db-name (or (:name cfg) "default")]
-    (seed-base-schema! conn)
-    (d/listen conn ::raw-broadcast (raw-broadcast-listener-fn db-name))
-    conn))
 
 ;; ---------- Response helpers ----------
 
@@ -246,8 +217,9 @@
 (defmethod handle-op "ensure-db" [_conn req]
   ;; Materialize (or look up) a cluster's DB. Idempotent — a re-ensure of the
   ;; same db-name returns the existing conn's current basis-t without
-  ;; reseeding. db-name's VALUE is a string on the wire; default backend
-  ;; :memory for testability, override via :seon.store.wire/backend. On open,
+  ;; reseeding. db-name's VALUE is a string on the wire (the CLUSTER name);
+  ;; default backend :file (the settled pod-attachable default — pass
+  ;; `backend "memory"` explicitly for a JVM-side ephemeral). On open,
   ;; registry's on-ensure-db hook installs this conn's ::raw-broadcast listener
   ;; (+ any ::reactive one).
   (let [db-name (some-> (:seon.store.wire/db-name req) keyword)
@@ -257,11 +229,49 @@
       (err "protocol" "ensure-db requires :seon.store.wire/db-name")
       (let [entry (registry/ensure-db!
                    (cond-> {:seon.server.registry/db-name db-name
-                            :seon.server.registry/backend (or backend :memory)}
+                            :seon.server.registry/backend (or backend :file)}
                      path (assoc :seon.server.registry/path path)))
             conn  (:seon.server.registry/conn entry)]
         (ok {:seon.store.wire/db-name (subs (str db-name) 1)
              :seon.store.wire/basis-t (basis-t-of (d/db conn))})))))
+
+;; ---------- Supervisor-facing cluster-lifecycle ops ----------
+;;
+;; `list-dbs` / `remove-db` are SUPERVISOR/REPL-surface ops: they ride the
+;; host-local UDS req socket (and the 7891 wire REPL), and NOTHING pod-side
+;; wraps them — `seon.db` has no verb for them and the agent toolkit never
+;; sees them, so an agent's capability surface stays one-cluster by
+;; construction. `bin/seon cluster destroy` is the caller.
+
+(defmethod handle-op "list-dbs" [_conn _req]
+  (let [{:seon.server.registry/keys [sessions]} (registry/list-sessions {})]
+    (ok {:seon.store.wire/dbs
+         (mapv (fn [{:seon.server.registry/keys [db-name backend path]}]
+                 (cond-> {:seon.store.wire/db-name (subs (str db-name) 1)
+                          :seon.store.wire/backend (name backend)}
+                   path (assoc :seon.store.wire/path path)))
+               sessions)})))
+
+(defmethod handle-op "remove-db" [_conn req]
+  ;; Release the conn, drop the registry entry, and DELETE the database in
+  ;; its store (`registry/delete-db!`). The process's own ambient cluster is
+  ;; refused — removing the db under the ambient conn would wedge every
+  ;; unrouted request.
+  (let [db-name (some-> (:seon.store.wire/db-name req) keyword)]
+    (cond
+      (nil? db-name)
+      (err "protocol" "remove-db requires :seon.store.wire/db-name")
+
+      (= (name db-name) (ambient-db-name))
+      (err "protocol" (str "refusing to remove the ambient cluster db: "
+                           (name db-name)))
+
+      :else
+      (let [{:seon.server.registry/keys [removed? deleted?]}
+            (registry/delete-db! {:seon.server.registry/db-name db-name})]
+        (ok {:seon.store.wire/db-name (subs (str db-name) 1)
+             :seon.store.wire/removed removed?
+             :seon.store.wire/deleted deleted?})))))
 
 (defmethod handle-op "q" [conn req]
   (let [query   (:seon.store.wire/query req)
@@ -741,17 +751,23 @@
   ;; that never started — an empty wire.log means we died BEFORE this line.
   (println "[writer] booting pid=" (.pid (java.lang.ProcessHandle/current)))
   (let [opts (parse-args args)
-        cfg  (store/config-for (opts->config-for-request opts))
+        ;; db-name = the CLUSTER NAME (registry C15) — `--db-name` from the
+        ;; supervisor (bin/seon passes the basename of $SEON_CLUSTER_DIR),
+        ;; default "default". Never a socket-path artifact.
+        db-name-kw (keyword (or (:db-name opts) "default"))
+        db-name    (name db-name-kw)
         _    (println "[writer] starting with" opts)
-        conn (ensure-db! cfg)
-        db-name (or (:name cfg) "default")
-        ;; The ambient conn is created directly by ensure-db! (outside the
-        ;; registry), so the registry's on-ensure-db hooks never fired for it.
-        ;; Run them now so the ambient conn ALSO gets the reactive engine's
-        ;; ::reactive listener + subscription schema (boot.clj registers that
-        ;; hook). ::raw-broadcast is re-installed under the same key (datahike
-        ;; replaces, not duplicates) — idempotent.
-        _    (registry/run-on-ensure-db-hooks! conn db-name)
+        ;; The ambient conn is a REGISTRY entry like every other cluster db —
+        ;; one open mechanism. ensure-db! creates/connects and fires the
+        ;; on-ensure-db hooks (::raw-broadcast + ::reactive + schema seeds),
+        ;; and db-name-routed requests to this cluster resolve to the SAME
+        ;; conn the unrouted (ambient) path uses.
+        entry (registry/ensure-db!
+               (cond-> {:seon.server.registry/db-name db-name-kw
+                        :seon.server.registry/backend (keyword (:backend opts))}
+                 (and (:path opts) (not= "memory" (:backend opts)))
+                 (assoc :seon.server.registry/path (:path opts))))
+        conn  (:seon.server.registry/conn entry)
         _    (println "[writer] datahike ready; basis-t=" (basis-t-of (d/db conn)))
         pub-server (bcast/start-pub-server! (:pub-sock opts))
         _    (println "[writer] pub socket:" (:pub-sock opts))
@@ -763,8 +779,8 @@
                         s))]
     (reset! state {:conn conn :req-server req-server :pub-server pub-server
                    :repl-server repl-server
-                   ;; same db-name ensure-db! gave the ambient ::raw-broadcast
-                   ;; listener — the tx-feed replay op routes to it.
-                   :ambient-db-name (or (:name cfg) "default")})
+                   ;; the cluster name — the tx-feed replay op and the
+                   ;; remove-db ambient guard route/compare against it.
+                   :ambient-db-name db-name})
     (println "[writer] ready. PID=" (.pid (java.lang.ProcessHandle/current)))
     (.. (Thread/currentThread) join)))

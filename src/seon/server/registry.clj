@@ -1,35 +1,22 @@
 (ns seon.server.registry
-  "Path B cluster RUNTIME registry — atom of `{db-name -> entry}` where
-   each entry is `{::conn <datahike-conn> ::backend kw ::path str-or-nil}`.
+  "The wire-server's cluster RUNTIME registry — atom of `{db-name -> entry}`
+   where each entry is `{::conn <datahike-conn> ::backend kw ::path
+   str-or-nil}`.
 
-   Direct `datahike.api/connect`. No flow. The wire-server looks up
-   conns here on every request. Multiple sessions, one process, all
-   in-memory atoms — no coordination overhead.
-
-   ## Sibling NS: `seon.session`
-
-   `seon.session` (Wave 3a, Path A) is a SEPARATE namespace and separate
-   concern. It owns the canonical session-as-entity record + the
-   start/stop/list lifecycle that persists to the `:seon.orchestrator`
-   DB via `seon.db/transact!` (goes through `:seon.db/flow`).
-
-   - **`seon.session`** (other ns)       → entity (datoms in `:seon.orchestrator`)
-   - **`seon.server.registry`** (this ns) → runtime (atom of live conns)
-
-   Don't confuse them. Both can exist for the same logical session: the
-   ENTITY records identity + lifecycle metadata; the REGISTRY (here)
-   holds the live conn for wire-server routing.
+   ONE wire-server JVM hosts every cluster's db: a db-name here IS a
+   cluster name (`:default`, `:acme`, an ephemeral bench cluster), and
+   the wire-server resolves each request's conn from this registry. The
+   ambient conn (`wire/-main`) is a registry entry like any other —
+   there is no second open path. Direct `datahike.api/connect`, no flow;
+   one process, in-memory atoms, no coordination overhead.
 
    ## Idempotent semantics
 
    `ensure-db!` on an existing db-name returns the same entry (identical?
    conn). `remove-db!` on an absent name is a no-op returning
-   `{::removed? false}`. Concurrent ensures on the same name race
-   exactly once — losers see the winner's conn.
-
-   See `docs/prds/agent-runtime/integration-architecture-2026-05-26.md`
-   §1.5 (Path B) and §5 (session registration). Lifecycle is the
-   wire-server's per-cluster connection registry, one conn to N.
+   `{::removed? false}`. `delete-db!` additionally drops the database in
+   its store. Concurrent ensures on the same name race exactly once —
+   losers see the winner's conn.
 
    ## On-ensure-db extension point (the reactive seam)
 
@@ -74,6 +61,12 @@
 
 (schema/register! ::remove-db!-response
                   [:map [::removed? :boolean]])
+
+(schema/register! ::delete-db!-response
+                  [:map
+                   [::removed? :boolean]
+                   [::deleted? :boolean]
+                   [::error {:optional true} :string]])
 
 (schema/register! ::session-summary
                   [:map
@@ -269,10 +262,9 @@
 
 (defn run-on-ensure-db-hooks!
   "Fire every registered on-ensure-db hook for `conn`/`db-name`. `ensure-db!`
-   calls this once per newly-opened registry conn. The wire-server also calls it
-   for its AMBIENT conn (created directly by `wire/ensure-db!`, outside the
-   registry) so that conn ALSO gets the `::reactive` listener + subscription
-   schema the hooks install — not just the `::raw-broadcast` it wires itself.
+   calls this once per newly-opened registry conn (the ambient conn included —
+   `wire/-main` opens it through the registry). Test fixtures that build a
+   conn outside the registry call it directly to install the same listeners.
    A hook exception is caught so one bad hook can't wedge the caller, but it
    is LOGGED LOUDLY (never swallowed) — a failed hook means the conn is
    missing its listener/schema and downstream ops will misbehave."
@@ -344,6 +336,36 @@
                (fn [m] (into {} (remove (fn [[_ d]] (= d db-name)) m))))
         {::removed? true})
       {::removed? false})))
+
+(defn delete-db!
+  "Release `db-name`'s conn, drop its entry, and DELETE its database.
+
+   The destructive half of the cluster lifecycle (`remove-db!` +
+   `datahike.api/delete-database` over the entry's stored backend/path) —
+   `bin/seon cluster destroy` reaches this via the wire `remove-db` op or
+   the 7891 REPL; it is never agent-exposed. Idempotent: an absent name
+   returns `{::removed? false ::deleted? false}`. A delete failure after
+   a successful remove is reported in `::error`, never thrown — the
+   supervisor's directory wipe is the backstop."
+  {:malli/schema [:=> [:cat [:map [::db-name ::db-name]]]
+                  ::delete-db!-response]}
+  [{::keys [db-name]}]
+  (locking !registry
+    (if-let [{::keys [backend path]} (get @!registry db-name)]
+      (let [{::keys [removed?]} (remove-db! {::db-name db-name})
+            cfg (store/config-for
+                 (cond-> {:seon.server.store/db-name db-name
+                          :seon.server.store/backend backend}
+                   path (assoc :seon.server.store/path path)))]
+        (try
+          (d/delete-database cfg)
+          {::removed? removed? ::deleted? true}
+          (catch Throwable t
+            (log/warn t "delete-db!: delete-database failed after remove"
+                      {::db-name db-name ::path path})
+            {::removed? removed? ::deleted? false
+             ::error (str (.getMessage t))})))
+      {::removed? false ::deleted? false})))
 
 (defn get-conn
   "Return `{::conn <conn>}` if `db-name` is registered, else `{}`.

@@ -346,12 +346,13 @@
 
 ;; ---------------------------------------------------------------------------
 ;; PROMPT-BLOB PREDICATES (gym-upgrade PRD §2.1 / U1) — the referee's
-;; eyes. run-turn! persists every prompt (via seon.debug capture, forced
-;; ON for gym runs) to <debug-dir>/<agent>/<turn-idx>-<turn>/prompt.txt;
-;; the new kinds read those blobs from the post-run store. Falsification
-;; (per the PRD): the question text passes :prompt-every-turn; text NOT
-;; in any prompt fails :prompt-includes WITH the blob path in the
-;; actual; a missing/unreadable blob scores RED naming the path.
+;; eyes. run-turn!'s ALWAYS-ON observability capture persists every
+;; prompt to the content-addressed blob store; the turn datom carries a
+;; :seon.agent.turn/prompt-blob ref and the predicate kinds read those
+;; blobs back by hash from the post-run store. Falsification (per the
+;; PRD): the question text passes :prompt-every-turn; text NOT in any
+;; prompt fails :prompt-includes WITH the blob hash in the actual; a
+;; missing/unreadable blob scores RED naming the turn/hash.
 ;; ---------------------------------------------------------------------------
 
 (def ^:private prompt-pred-question
@@ -411,13 +412,13 @@
                        (str ":prompt-every-turn on the question passes — "
                             (:seon.gym.result/actual r))))
                  ;; FALSIFICATION 2 — absent text fails WITH the blob
-                 ;; path in the actual.
+                 ;; hash in the actual.
                  (let [r (result-by-id card :absent-text-fails-naming-the-blob)]
                    (is (false? (:seon.gym.result/pass? r))
                        "text not in any prompt fails :prompt-includes")
-                   (is (str/includes? (:seon.gym.result/actual r)
-                                      "logs/turns/")
-                       (str "the failing actual names the blob path — "
+                   (is (re-find #"[0-9a-f]{64}"
+                                (:seon.gym.result/actual r))
+                       (str "the failing actual names the blob hash — "
                             (:seon.gym.result/actual r))))
                  ;; :prompt-excludes is the same observation, inverted.
                  (is (true? (:seon.gym.result/pass?
@@ -433,21 +434,22 @@
                                       "out of range")))
                  ;; one deliberately-failing predicate → card fails.
                  (is (false? (:seon.gym.scorecard/pass? card)))
-                 ;; §6.6 evidence: the card carries the run's blob paths.
-                 (let [pfs (:seon.gym.scorecard/prompt-files card)]
-                   (is (seq pfs) "scorecard carries prompt-file evidence")
-                   (is (every? #(str/starts-with? % "logs/turns/") pfs)))
+                 ;; §6.6 evidence: the card carries the run's blob hashes.
+                 (let [pbs (:seon.gym.scorecard/prompt-blobs card)]
+                   (is (seq pbs) "scorecard carries prompt-blob evidence")
+                   (is (every? #(re-matches #"[0-9a-f]{64}" %) pbs)
+                       "each evidence entry is a content hash"))
                  (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 (deftest prompt-predicate-missing-blob-scores-red-naming-the-path
-  ;; FALSIFICATION 3 — a turn whose :seon.agent.turn/prompt-file points
-  ;; at a file that does not exist (seeded as a fixture turn, exactly
-  ;; what a lost/unwritten blob looks like post-run) must score RED
-  ;; naming the path — NEVER a silent pass, even though the run's REAL
-  ;; turn prompt does contain the asserted text.
+  ;; FALSIFICATION 3 — a turn whose :seon.agent.turn/prompt-blob points
+  ;; at a hash whose blob file does not exist (seeded as a fixture turn,
+  ;; exactly what a lost/unwritten blob looks like post-run) must score
+  ;; RED naming the hash — NEVER a silent pass, even though the run's
+  ;; REAL turn prompt does contain the asserted text.
   (async done
-    (let [phantom (str "logs/prompts/gym-missing/" (db/new-id!) ".txt")
+    (let [phantom (apply str (repeat 64 "0"))   ; valid hash shape, no file
           run-id  (db/new-id!)
           scenario
           (-> (prompt-blob-scenario)
@@ -466,7 +468,7 @@
                        :seon.agent.turn/at          (js/Date.)
                        :seon.agent.turn/status      :done
                        :seon.agent.turn/run         [:seon.agent.run/id run-id]
-                       :seon.agent.turn/prompt-file phantom}]
+                       :seon.agent.turn/prompt-blob {:my.blob/hash phantom}}]
                      :seon.gym.scenario/predicates
                      [{:seon.gym.predicate/id   :every-turn-red-on-missing-blob
                        :seon.gym.predicate/kind :prompt-every-turn
@@ -479,7 +481,7 @@
                      (is (false? (:seon.gym.result/pass? r))
                          "a missing blob is RED, never a silent pass")
                      (is (str/includes? (:seon.gym.result/actual r) phantom)
-                         (str "the RED actual names the missing path — "
+                         (str "the RED actual names the missing hash — "
                               (:seon.gym.result/actual r))))
                    (is (false? (:seon.gym.scorecard/pass? card)))
                    (done)))
@@ -552,9 +554,9 @@
                      (is (some #{:gymtest-static}
                                (:seon.gym.profile/blocks (last profiles)))
                          "turn 2's layout records the installed block"))
-                   ;; prompt-file evidence: what the agent saw, per turn.
-                   (is (seq (:seon.gym.scorecard/prompt-files card))
-                       "scorecard carries prompt-blob paths")
+                   ;; prompt-blob evidence: what the agent saw, per turn.
+                   (is (seq (:seon.gym.scorecard/prompt-blobs card))
+                       "scorecard carries prompt-blob hashes")
                    (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 

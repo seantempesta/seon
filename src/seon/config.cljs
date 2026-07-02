@@ -636,24 +636,6 @@
   []
   (env-int "SEON_TURN_TIMEOUT_MS" 900000))
 
-(defn debug-capture
-  "Raw `SEON_DEBUG_CAPTURE` string, or nil.
-
-   `seon.debug` applies its
-   off-values + process-override semantics on top."
-  {:malli/schema [:=> [:cat] [:maybe :string]]}
-  []
-  (env "SEON_DEBUG_CAPTURE"))
-
-(defn debug-capture-dir
-  "Debug-capture output base dir (env, else `logs/turns`).
-
-   `SEON_DEBUG_CAPTURE_DIR` when set, else the
-   default `logs/turns` (a DATA path → CWD-relative)."
-  {:malli/schema [:=> [:cat] :string]}
-  []
-  (or (env "SEON_DEBUG_CAPTURE_DIR") "logs/turns"))
-
 (defn- upsert-by-name
   "Layer `additions` over `base` by `:seon.agent.ctx/name`, MERGING an
    addition's attrs OVER the matching base block IN PLACE — so a sparse

@@ -68,6 +68,6 @@ imperative reflexes, guessed library semantics). Ground first:
 - Home-ns aliases (`db/`, `plan/`…) don't resolve in agent-authored `my.*`
   nses — agents must fully qualify there (#73).
 - Turn capture is live (`:seon.agent.turn/rendered-as-of` + prompt/reply
-  blob refs, `seon.agent.inspect/turn`/`turn-diff`); the gated
-  `seon.debug` file tree still exists for the gym driver — retire it once
-  the driver reads prompt blobs (see `observability.md`).
+  blob refs, `seon.agent.inspect/turn`/`turn-diff`) and is the ONE capture
+  path — the gated `seon.debug` file tree is deleted; the gym driver reads
+  prompts by blob hash (see `observability.md`).
