@@ -89,3 +89,4 @@ docs/.obsidian/plugins/
 # Stray konserve stores (if datahike :file backend ever runs without absolute :data-root)
 *.ksv
 target/
+scratchpad/
