@@ -273,9 +273,18 @@ called inside `db/with-agent "X"` WITHOUT them, received `{:got-id "X"
 green with the change in the build: **932 tests / 4298 assertions, 0
 failures**.
 
-Phases NOT started (move to `feature/agent-scope`): registering
-`:seon.render/at`; the `my.*` conversion (per the `skip-syms` flag —
-`my.plan` verbs currently opt OUT of instrumentation, so they get NO
-resolution and must either read `db/current-agent-id` in-body or leave
-`skip-syms` to become resolved map-in fns); the `render_fns` auto-run seed
-block; the Phase 2 live DeepSeek drive.
+LANDED on `feature/agent-ctx` (2026-07-02, roadmap item 1 remainder):
+`:seon.render/at` registered (`seon.render`, basis-t `:int` — the tx-id is
+the reproducible coordinate; wall-clock derives from `:db/txInstant`) with
+its `injectables` entry (`(some-> db/*conn* deref db/basis-t)`); the
+`my.plan` verbs REMOVED from `skip-syms` and converted to resolved map-in
+fns — request schemas declare `:seon.agent/id {:optional true}`, the
+in-body `scoped-agent` ambient read is deleted (`internal/agent-ref` just
+builds the lookup ref), and the semantic failures keep their `::ok?`
+envelopes (shape-invalid input now surfaces as the structured instrument
+error at the eval boundary). Live-proven on the default pod: `step!` with
+no id → the datom stamped `:my.plan/agent → root`; a probe declaring
+`:seon.render/at` → the live basis-t injected.
+
+Still NOT started: the `render_fns` auto-run seed block; the Phase 2 live
+DeepSeek drive.

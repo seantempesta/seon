@@ -75,9 +75,11 @@ Tooling-lane build issues:
   require aliases not stored. Issue:
   `docs/seon/orchestrator/issues/sci-bounding-fallback-plan-block.md`.
 
-- **`my.plan` verbs are in `seon.instrument/skip-syms`** → they get no wrapper
-  and no required-key resolution. Resolve first (remove from skip-syms, or read
-  `db/current-agent-id` in-body) before the auto-run work. (tooling lane)
+- ~~**`my.plan` verbs are in `seon.instrument/skip-syms`**~~ — ✅ RESOLVED
+  (2026-07-02): removed from skip-syms; the verbs ride the one injecting
+  wrapper and declare `:seon.agent/id` (the ambient `scoped-agent` read is
+  deleted; semantic failures still return `::ok?` envelopes; shape-invalid
+  input surfaces as the structured instrument error at the eval boundary).
 - **The agent↔`my.plan`-entity ref direction** — a design detail to nail during
   the entity-ref build.
 
@@ -98,7 +100,10 @@ Eval-lane blockers before the first dev pass (from [[eval-CLAUDE-notes]]):
    the old bench references pre-rename verbs).
 3. Tool-row generators (shell / web-fixture / file-edit) authored.
 4. Fresh-world `my.kb` empty render + turn-6 recall (the two tool defects above).
-5. One calibration run (pod concurrency, latency medians → timeouts).
+5. ~~One calibration run~~ — ✅ DONE 2026-07-02
+   ([[research/calibration-run-2026-07-02]]): per-pod `/solve` ceiling = **1**
+   (live conn-swap collision evidence at c=2); QA timeout 240s / default 300s
+   wired into `src-inspect-ai/src/seon_inspect/config.py`.
 
 ## Settled — do NOT re-litigate (both lanes)
 
@@ -189,8 +194,8 @@ unit; `cluster reset default` after a context/verb change.
 ## Build order
 
 - **Tooling lane:** ~~apply the Phase-1 required-key patch~~ (✅ landed
-  `a6362630` on `feature/agent-ctx`) → register
-  `:seon.render/at` + resolve `my.plan` skip-syms → current-ns render-fn
+  `a6362630` on `feature/agent-ctx`) → ~~register
+  `:seon.render/at` + resolve `my.plan` skip-syms~~ (✅ 2026-07-02) → current-ns render-fn
   auto-run (block/tile twins) → `my.*` entity-ref composition (`my.plan` worked
   example) → canvas = last-updated → then the queued tool defects (my.kb empty
   render, recall visibility) + the pub-socket migration.

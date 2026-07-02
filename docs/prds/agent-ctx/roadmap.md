@@ -28,9 +28,15 @@ the P-stability queue burns down continuously without stalling the flywheel.
 Feature order (turn-capture pulled forward — it is the eval lane's attribution
 substrate):
 
-1. **Required-key resolution** — ✅ Phase 1 landed (`a6362630`; suite green
-   937/4310 after `e0f63c05`). Remaining: register `:seon.render/at`; resolve
-   the `my.plan` **skip-syms** blocker.
+1. **Required-key resolution** — ✅ COMPLETE (2026-07-02). Phase 1 landed
+   (`a6362630`); remainder landed: `:seon.render/at` registered (basis-t
+   `:int`, owned by `seon.render`) + third `injectables` entry; the `my.plan`
+   skip-syms entries REMOVED — the verbs ride the one injecting wrapper and
+   declare `:seon.agent/id` as a request key (`internal/scoped-agent`'s
+   ambient read deleted; in-body guards keep the semantic `::ok?` envelopes).
+   Live-proven on the default pod: `step!` with no id stamps
+   `:my.plan/agent → root`; a fn declaring `:seon.render/at` gets the live
+   basis-t injected.
 2. **Current-ns render-fn auto-run** — query the program graph for the current
    ns's render-typed fns, run through the same wrapper → block/tile twins,
    positioned after the stable code. (design: [[research/explicit-deps-injection-2026-07-02]])
@@ -92,8 +98,13 @@ repo-dev docs.
 
 ## Eval lane — the ordered path
 
-1. **Calibration run** — pod `/solve` concurrency ceiling, per-row latency
-   medians → timeouts.
+1. ~~**Calibration run**~~ — ✅ DONE 2026-07-02
+   ([[research/calibration-run-2026-07-02]]): per-pod `/solve` ceiling = **1**
+   (conn-swap collisions observed live at c=2: cas write-errors + 300s burns —
+   parallelism = more pods, never more samples per pod); gsm8k median 42s /
+   p90 ~70s → `QA_SOLVE_TIMEOUT_S=240`, general default 300s, wired into
+   `src-inspect-ai/src/seon_inspect/config.py` (call-time, per-run
+   overridable). Agentic rows re-calibrate when their generators land (step 3/4).
 2. **Dataset freeze** — seeded three-way splits (dev/milestone/test),
    `datasets.lock`, canary GUIDs + CI grep.
 3. **Tool-row generators** — shell / web-fetch (local fixtures) / file-edit;

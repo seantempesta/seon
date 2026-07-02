@@ -112,6 +112,14 @@
 ;; levels (config-driven agent-init CP-3 move 4). Absent → the fixed
 ;; [[seon.agent.ctx/result-body-render-cap]] default.
 (schema/register! :seon.render/result-body-cap [:int {:min 0}])
+;; The render/turn TIME COORDINATE — the basis-t (datahike tx-id int) of the
+;; db value a render/turn is computed over ("now" = `(db/basis-t)`), replayable
+;; via `(db/as-of db at)`. An INJECTABLE: a map-in fn declaring it
+;; `{:optional true}` gets the current basis filled at the eval boundary
+;; (`seon.instrument/injectables`); explicit args win (forensic replay passes
+;; a past t). An int tx-id, NOT an inst — the tx-id is the exact reproducible
+;; coordinate; wall-clock is derivable from the tx's `:db/txInstant`.
+(schema/register! :seon.render/at [:int {:min 0}])
 (schema/register! :seon.render/children
   [:vector {:seon.db/component true} :seon.db/ref])      ;; OPTIONAL authored nesting; derived sections query instead
 

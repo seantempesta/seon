@@ -1,22 +1,56 @@
 (ns my.plan-test
   "Envelope-contract tests for my.plan — the exemplar store/retrieve ns.
-   Covers step!/done!/reopen! happy + failure paths, agent scoping (ALS
-   default + explicit), the resume property (open items persist; every list
-   re-derives from the conn), and the pure plan-body view. All on a
-   FRESH :memory conn seeded like the pod boots — never the live agent conn."
+   Covers step!/done!/reopen! happy + failure paths, agent scoping (the
+   INJECTED `:seon.agent/id` default + explicit), the resume property (open
+   items persist; every list re-derives from the conn), and the pure
+   plan-body view. All on a FRESH :memory conn seeded like the pod boots —
+   never the live agent conn.
+
+   The verbs are INSTRUMENTED for this ns (the same `register-target!` →
+   `mi/instrument!` path the pod boots with) so the declared-key injection
+   — omit `:seon.agent/id`, the wrapper fills the calling agent — is
+   exercised for real, not stubbed. Teardown unstruments."
   (:require
-    [cljs.test :refer [deftest is async]]
+    [cljs.test :refer [deftest is async use-fixtures]]
     [clojure.string :as str]
     [datahike.api :as d]
+    [malli.instrument :as mi]
     [seon.client :as client]
     [seon.db :as db]
+    [seon.instrument :as inst]
     [my.plan :as plan]
     [my.plan.internal :as plan-int]))
 
-(def ^:private a-id "plantest-agent-a")
-(def ^:private b-id "plantest-agent-b")
+;; 14-char ids — the :seon.db/id shape the :seon.agent/id schema validates.
+(def ^:private a-id "plantestagentA")
+(def ^:private b-id "plantestagentB")
 (def ^:private a-ref [:seon.agent/id a-id])
 (def ^:private b-ref [:seon.agent/id b-id])
+
+(def ^:private verb-schemas
+  "fn-sym → its :malli/schema, for every my.plan public verb."
+  {'step!     (:malli/schema (meta #'plan/step!))
+   'plan!     (:malli/schema (meta #'plan/plan!))
+   'active!   (:malli/schema (meta #'plan/active!))
+   'done!     (:malli/schema (meta #'plan/done!))
+   'reopen!   (:malli/schema (meta #'plan/reopen!))
+   'needs!    (:malli/schema (meta #'plan/needs!))
+   'move!     (:malli/schema (meta #'plan/move!))
+   'drop!     (:malli/schema (meta #'plan/drop!))
+   'next      (:malli/schema (meta #'plan/next))
+   'tree      (:malli/schema (meta #'plan/tree))
+   'status    (:malli/schema (meta #'plan/status))
+   'list-open (:malli/schema (meta #'plan/list-open))})
+
+(defn- instrument-verbs! []
+  (doseq [[fn-sym schema] verb-schemas]
+    (inst/register-target! 'my.plan fn-sym schema false))
+  (mi/instrument! {:filters [(fn [n _ _] (= n 'my.plan))]}))
+
+(defn- uninstrument-verbs! []
+  (mi/unstrument! {:filters [(fn [n _ _] (= n 'my.plan))]}))
+
+(use-fixtures :once {:before instrument-verbs! :after uninstrument-verbs!})
 
 (defn- fresh-conn
   "Promise of a fresh :memory conn with the pod's boot schema + the user
@@ -69,7 +103,7 @@
           (fn [conn]
             (-> (plan/step! {:my.plan/title "audit the schemas"
                             :my.plan/description "all of them"
-                            :my.plan/agent a-ref
+                            :seon.agent/id a-id
                             :my.plan/from  [:seon.user/id "user"]})
                 (.then
                   (fn [{ok? :my.plan/ok? id :my.plan/id}]
@@ -112,14 +146,14 @@
   (async done
     (-> (with-conn
           (fn [conn]
-            (-> (plan/step! {:my.plan/title "  " :my.plan/agent a-ref})
+            (-> (plan/step! {:my.plan/title "  " :seon.agent/id a-id})
                 (.then (fn [{ok? :my.plan/ok? error :my.plan/error}]
                          (is (false? ok?))
                          (is (re-find #"blank" error))
                          (plan/step! {:my.plan/title "orphan"}))) ; no scope
                 (.then (fn [{ok? :my.plan/ok? error :my.plan/error}]
                          (is (false? ok?))
-                         (is (re-find #"with-agent" error) "names the fix")
+                         (is (re-find #"agent turn" error) "names the fix")
                          (is (empty? (d/q '[:find ?t :where [?t :my.plan/id _]]
                                           @conn))
                              "nothing stored on either failure"))))))
@@ -130,7 +164,7 @@
   (async done
     (-> (with-conn
           (fn [conn]
-            (-> (plan/step! {:my.plan/title "first (oldest)" :my.plan/agent a-ref})
+            (-> (plan/step! {:my.plan/title "first (oldest)" :seon.agent/id a-id})
                 ;; backdate "first" so oldest-first ordering is deterministic
                 (.then (fn [{id :my.plan/id}]
                          (d/transact! conn
@@ -138,16 +172,16 @@
                                        :my.plan/created-at
                                        (js/Date. (- (js/Date.now) 120000))}]})))
                 (.then (fn [_] (plan/step! {:my.plan/title "second"
-                                           :my.plan/agent a-ref})))
+                                           :seon.agent/id a-id})))
                 (.then (fn [_] (plan/step! {:my.plan/title "b's item"
-                                           :my.plan/agent b-ref})))
+                                           :seon.agent/id b-id})))
                 (.then
                   (fn [{ok? :my.plan/ok?}]
                     (is (true? ok?))
                     ;; RESUME: everything below re-derives from the conn —
                     ;; no in-memory state survives from the adds.
                     (is (= ["first (oldest)" "second"]
-                           (open-titles (plan/list-open {:my.plan/agent a-ref})))
+                           (open-titles (plan/list-open {:seon.agent/id a-id})))
                         "agent-scoped, oldest first, b's item excluded")
                     (is (= ["first (oldest)" "second" "b's item"]
                            (open-titles (plan/list-open {:my.plan/all? true})))
@@ -155,7 +189,7 @@
                     (let [block (plan-int/plan-body @conn a-ref)
                           ids   (mapv :my.plan/id
                                       (:my.plan/steps
-                                        (plan/list-open {:my.plan/agent a-ref})))]
+                                        (plan/list-open {:seon.agent/id a-id})))]
                       (is (and (str/includes? block "my.plan/done!")
                                (str/includes? block ":my.plan/id"))
                           "header teaches the done! call — names the fn and its :my.plan/id arg")
@@ -166,7 +200,7 @@
                       (is (< (str/index-of block "first (oldest)")
                              (str/index-of block "second"))
                           "oldest first — `first (oldest)` precedes the newer `second`"))
-                    (let [id (-> (plan/list-open {:my.plan/agent a-ref})
+                    (let [id (-> (plan/list-open {:seon.agent/id a-id})
                                  :my.plan/steps first :my.plan/id)]
                       (-> (plan/done! {:my.plan/id id})
                           (.then (fn [{ok? :my.plan/ok?}]
@@ -176,7 +210,7 @@
                                        "completed-at stamped")
                                    (is (= ["second"]
                                           (open-titles
-                                            (plan/list-open {:my.plan/agent a-ref})))
+                                            (plan/list-open {:seon.agent/id a-id})))
                                        "done item left the derived view")
                                    (plan/done! {:my.plan/id id})))
                           (.then (fn [{ok? :my.plan/ok?}]
@@ -189,7 +223,7 @@
                                        "reopen! RETRACTED completed-at")
                                    (is (= ["first (oldest)" "second"]
                                           (open-titles
-                                            (plan/list-open {:my.plan/agent a-ref})))
+                                            (plan/list-open {:seon.agent/id a-id})))
                                        "reopened item is back, still oldest first"))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -226,10 +260,10 @@
     (-> (with-conn
           (fn [conn]
             (-> (plan/step! {:my.plan/title "set up KB schema"
-                            :my.plan/agent a-ref})
+                            :seon.agent/id a-id})
                 (.then (fn [{id :my.plan/id}]
                          (-> (plan/step! {:my.plan/title "write the plan"
-                                         :my.plan/agent a-ref})
+                                         :seon.agent/id a-id})
                              (.then (fn [_] (plan/done! {:my.plan/id id}))))))
                 (.then
                   (fn [_]
@@ -243,7 +277,7 @@
                       (is (str/includes? block "✓")
                           "done lines carry a ✓ marker, distinct from open lines"))
                     ;; close everything — band persists, section does NOT vanish
-                    (let [open-id (-> (plan/list-open {:my.plan/agent a-ref})
+                    (let [open-id (-> (plan/list-open {:seon.agent/id a-id})
                                       :my.plan/steps first :my.plan/id)]
                       (-> (plan/done! {:my.plan/id open-id})
                           (.then (fn [_]
@@ -269,7 +303,7 @@
     (-> (with-conn
           (fn [conn]
             (-> (plan/step! {:my.plan/title "live item"
-                            :my.plan/agent a-ref})
+                            :seon.agent/id a-id})
                 (.then
                   (fn [_]
                     (is (re-find #"live item"

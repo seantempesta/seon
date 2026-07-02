@@ -44,10 +44,14 @@
 
 (defn fail [msg] {:my.plan/ok? false :my.plan/error msg})
 
-(defn scoped-agent
-  "Explicit agent ref, else the calling agent from the ALS scope."
-  [agent]
-  (or agent (when-let [id (db/current-agent-id)] [:seon.agent/id id])))
+(defn agent-ref
+  "Lookup ref for agent id `id` — nil when no id resolved.
+
+   The id arrives as the verbs' DECLARED `:seon.agent/id` request key
+   (filled at the eval boundary when the caller omits it — see
+   `seon.instrument/injectables`); no ambient read happens here."
+  [id]
+  (when id [:seon.agent/id id]))
 
 (defn agent-eid
   "Resolve an agent ref (lookup-ref/eid) to its eid in db value `db`, or nil."

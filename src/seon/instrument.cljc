@@ -69,12 +69,14 @@
     'seon.agent.search                 ; grep
     'seon.agent.fs                     ; read-file/write-file/list-dir/stat/…
     'seon.agent.message                ; message!/user/agent
-    ;; Mixed ns — skip the envelope verbs; its plan-block/plan-body RENDER fns stay
-    ;; instrumented.
-    ['my.plan 'step!]
-    ['my.plan 'done!]
-    ['my.plan 'reopen!]
-    ['my.plan 'list-open]
+    ;; NOTE: the `my.plan` verbs were skipped here until 2026-07-02. They now
+    ;; RIDE the one injecting wrapper — required for `:seon.agent/id`
+    ;; required-key resolution (\"me\" scoping by declared key, not an in-body
+    ;; ambient read). Their in-body guards still own the SEMANTIC failures
+    ;; (blank title, no agent in scope, unknown id → `::ok? false` envelopes);
+    ;; only a shape-invalid call now trips the validator, which the eval
+    ;; boundary surfaces as a structured `:seon/error` value — still data,
+    ;; never a crash.
     ;; Safe-by-default core write — assert-invocation-shape! returns an
     ;; envelope; tested in db-test. (seon.db has many non-verb read fns
     ;; that DO stay instrumented, so this is fn-level.)
@@ -219,8 +221,12 @@
       provider yielding nil leaves the key ABSENT (never store nil — optional =
       absent). `eval-ctx` is reserved for future per-call context; today the
       providers read ALS/`*conn*` directly and it is passed `nil`."
-     {:seon.db/db    (fn [_] (some-> db/*conn* deref))
-      :seon.agent/id (fn [_] (db/current-agent-id))}))
+     {:seon.db/db     (fn [_] (some-> db/*conn* deref))
+      :seon.agent/id  (fn [_] (db/current-agent-id))
+      ;; \"now\" — the basis-t (tx-id int) of the current db value, the turn's
+      ;; reproducible time coordinate (replay = pass a past t explicitly;
+      ;; explicit wins). Schema registered in `seon.render`.
+      :seon.render/at (fn [_] (some-> db/*conn* deref db/basis-t))}))
 
 #?(:cljs
    (defn- inject-into

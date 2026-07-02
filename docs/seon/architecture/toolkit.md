@@ -360,9 +360,14 @@ open items render every turn; an empty list is the done-signal.
 an entity; the wrapper holds the verbs + the owner-scope default, the db engine
 does the durable write.
 
-Surface: `add!` → `{ok? id}` (accepts an optional `:my.plan/parent` ref),
-`complete!`/`reopen!` (idempotent), `list-open` → the `:seon.items/*` envelope.
-Map-in/map-out, never-throws, scoped per-agent by the `:my.plan/agent` ref.
+Surface: `plan!`/`step!` → `{ok? id}` (optional `:my.plan/parent` /
+`:my.plan/needs` refs), `active!`/`done!`/`reopen!` (idempotent), `next`/
+`tree`/`status`/`list-open` (derived reads), `drop!`. Map-in/map-out;
+semantic failures are `::ok?` envelopes. Per-agent scope is DECLARED:
+each scoped verb carries `:seon.agent/id {:optional true}` in its request
+schema — omitted, the eval boundary fills the calling agent (the
+required-key resolution in [[context]]); the row is stamped with the
+`:my.plan/agent` ref.
 
 **Planning IS the todo tree.** A todo's `:my.plan/parent` ref makes the work-list
 a plan tree (top = plans/milestones, leaves = actions); a parent's progress is a

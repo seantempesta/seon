@@ -39,6 +39,7 @@
   (:require
     [clojure.string :as str]
     [my.plan.internal :as internal]
+    [seon.agent]   ; load-order: request schemas reference :seon.agent/id
     [seon.db :as db]
     [seon.schema :as schema]))
 
@@ -89,13 +90,13 @@
 
 (schema/register! ::step-request
   [:map
-   [::title       ::title]
-   [::description {:optional true} ::description]
-   [::expect      {:optional true} ::expect]
-   [::agent       {:optional true} :seon.db/ref]   ; default: the ALS agent
-   [::from        {:optional true} :seon.db/ref]
-   [::parent      {:optional true} ::parent]
-   [::needs       {:optional true} ::needs]])
+   [::title         ::title]
+   [::description   {:optional true} ::description]
+   [::expect        {:optional true} ::expect]
+   [:seon.agent/id  {:optional true} :seon.agent/id]  ; injected: you (omit) — or another agent's id
+   [::from          {:optional true} :seon.db/ref]
+   [::parent        {:optional true} ::parent]
+   [::needs         {:optional true} ::needs]])
 
 ;; plan! node shape — recursive: each child may carry its own :children.
 (schema/register! ::plan-node
@@ -109,11 +110,12 @@
 
 (schema/register! ::plan-request
   [:map
-   [::title    ::title]
-   [::goal     {:optional true} ::goal]
-   [::pace     {:optional true} ::pace]
-   [::expect   {:optional true} ::expect]
-   [::children {:optional true} [:vector ::plan-node]]])
+   [::title        ::title]
+   [::goal         {:optional true} ::goal]
+   [::pace         {:optional true} ::pace]
+   [::expect       {:optional true} ::expect]
+   [:seon.agent/id {:optional true} :seon.agent/id]  ; injected: you (omit)
+   [::children     {:optional true} [:vector ::plan-node]]])
 
 (schema/register! ::ids [:map-of :any ::id])   ; author-label / :root → minted id
 
@@ -144,10 +146,14 @@
 (schema/register! ::step-ref
   [:map [::id ::id] [::title ::title] [::created-at ::created-at]])
 
+(schema/register! ::next-request
+  [:map [:seon.agent/id {:optional true} :seon.agent/id]])  ; injected: you (omit)
+
 (schema/register! ::tree-request
   [:map
-   [::root? {:optional true} ::id]
-   [::all?  {:optional true} ::all?]])
+   [::root?        {:optional true} ::id]
+   [::all?         {:optional true} ::all?]
+   [:seon.agent/id {:optional true} :seon.agent/id]])  ; injected: you (omit)
 
 ;; root? → one subtree map; else → a vector of root subtrees; nil when nothing.
 (schema/register! ::tree-response [:maybe [:or :map [:vector :map]]])
@@ -172,8 +178,8 @@
 
 (schema/register! ::list-request
   [:map
-   [::agent {:optional true} :seon.db/ref]   ; default: the ALS agent
-   [::all?  {:optional true} ::all?]])       ; true = every agent's steps
+   [:seon.agent/id {:optional true} :seon.agent/id]  ; injected: you (omit)
+   [::all?         {:optional true} ::all?]])        ; true = every agent's steps
 
 (schema/register! ::list-response
   [:map
@@ -186,19 +192,20 @@
 (defn ^:async step!
   "Mint one OPEN plan step (agent = caller; blank title refused).
 
-   `:parent`/`:needs` lookup-refs place it in the tree/DAG; `:expect`
-   states its falsifiable outcome — all optional.
+   Omit `:seon.agent/id` and the boundary fills in YOU; pass another id
+   to scope elsewhere. `:parent`/`:needs` lookup-refs place it in the
+   tree/DAG; `:expect` states its falsifiable outcome — all optional.
    → {::ok? true ::id _} or a fail envelope."
   {:malli/schema [:=> [:cat ::step-request] ::write-response]}
-  [{::keys [title description expect agent from parent needs]}]
-  (let [agent (internal/scoped-agent agent)]
+  [{::keys [title description expect from parent needs] agent-id :seon.agent/id}]
+  (let [agent (internal/agent-ref agent-id)]
     (cond
       (or (nil? title) (str/blank? title))
       (internal/fail "step!: blank :my.plan/title refused — say what the step is.")
 
       (nil? agent)
-      (internal/fail (str "step!: no :my.plan/agent and no agent in scope — pass an "
-                          "agent ref or call inside (db/with-agent …)."))
+      (internal/fail (str "step!: no :seon.agent/id resolved — pass one, or call "
+                          "from inside an agent turn (the boundary fills in you)."))
 
       :else
       (let [id (db/new-id!)]
@@ -226,14 +233,15 @@
    any node may carry `:expect`. → {::ok? true ::root <root-id>
    ::ids <label→id>} or a fail envelope."
   {:malli/schema [:=> [:cat ::plan-request] ::plan-response]}
-  [{::keys [title] :as request}]
-  (let [agent (internal/scoped-agent nil)]
+  [{::keys [title] agent-id :seon.agent/id :as request}]
+  (let [agent (internal/agent-ref agent-id)]
     (cond
       (or (nil? title) (str/blank? title))
       (internal/fail "plan!: blank :my.plan/title refused — name the plan.")
 
       (nil? agent)
-      (internal/fail (str "plan!: no agent in scope — call inside (db/with-agent …)."))
+      (internal/fail (str "plan!: no :seon.agent/id resolved — pass one, or call "
+                          "from inside an agent turn (the boundary fills in you)."))
 
       :else
       (let [{:keys [tx labels root-id error]} (internal/compile-plan agent request)]
@@ -340,11 +348,11 @@
 (defn next
   "Your focus queue: READY leaves (open, unblocked), oldest first.
 
-   For the calling agent — the work to act on now. [] outside an agent
-   scope. `active!` the one you take up."
-  {:malli/schema [:=> [:cat :map] [:vector ::step-ref]]}
-  [_]
-  (if-let [agent (internal/scoped-agent nil)]
+   Omit `:seon.agent/id` and the boundary fills in YOU — the work to act
+   on now. [] when no agent id resolves. `active!` the one you take up."
+  {:malli/schema [:=> [:cat ::next-request] [:vector ::step-ref]]}
+  [{agent-id :seon.agent/id}]
+  (if-let [agent (internal/agent-ref agent-id)]
     (let [db @db/*conn*]
       (if-let [oe (internal/agent-eid db agent)]
         (internal/ready-leaves db oe)
@@ -358,12 +366,12 @@
    subtree; {::all? true} → every agent's forest; default → the calling
    agent's forest."
   {:malli/schema [:=> [:cat ::tree-request] ::tree-response]}
-  [{::keys [root? all?]}]
+  [{::keys [root? all?] agent-id :seon.agent/id}]
   (let [db @db/*conn*]
     (cond
       root? (internal/pull-subtree db root?)
       all?  (mapv #(internal/pull-subtree db %) (internal/all-root-ids db))
-      :else (if-let [agent (internal/scoped-agent nil)]
+      :else (if-let [agent (internal/agent-ref agent-id)]
               (if-let [oe (internal/agent-eid db agent)]
                 (mapv #(internal/pull-subtree db %) (internal/root-ids db oe))
                 [])
@@ -380,21 +388,21 @@
   (internal/status-view @db/*conn* id))
 
 (defn list-open
-  "Unfinished steps (open/active/blocked), oldest first, for `::agent`.
+  "Unfinished steps (open/active/blocked), oldest first, per agent.
 
-   Default scope: the caller; {::all? true} lists every agent's. Flat —
-   includes parents and blocked steps (use `next` for the ready-leaf focus
-   queue)."
+   Omit `:seon.agent/id` and the boundary fills in YOU; {::all? true}
+   lists every agent's. Flat — includes parents and blocked steps (use
+   `next` for the ready-leaf focus queue)."
   {:malli/schema [:=> [:cat ::list-request] ::list-response]}
-  [{::keys [agent all?]}]
-  (let [agent (internal/scoped-agent agent)]
+  [{::keys [all?] agent-id :seon.agent/id}]
+  (let [agent (internal/agent-ref agent-id)]
     (cond
       (nil? db/*conn*)
       (internal/fail "list-open: no conn bound — runs inside an agent's universe.")
 
       (and (nil? agent) (not all?))
-      (internal/fail (str "list-open: no :my.plan/agent and no agent in scope — pass "
-                          "an agent ref, {::all? true}, or use (db/with-agent …)."))
+      (internal/fail (str "list-open: no :seon.agent/id resolved — pass one, "
+                          "{::all? true}, or call from inside an agent turn."))
 
       :else
       (let [db @db/*conn*]
