@@ -40,9 +40,15 @@ arbitrated at the single writer; `since-t` replay is the network-blip recovery
 primitive. A client cluster is a **trailing applier**: bootstrap the indexes ONCE,
 then each pushed tx is an incremental index update (persistent structures — never a
 rebuild), so a client applying the writer's stream in order is deterministically
-identical to the writer at that t. Open design point (decide when a device cluster
-is real): initial index state = full-log replay, or index-root snapshot + `since-t`
-(the device answer), or lazy follow-the-store reads (LAN-only).
+identical to the writer at that t. **Bootstrap (settled 2026-07-02): compressed
+full tx-log replay** — the same `since-t` machinery with watermark 0, ONE
+mechanism for bootstrap and blip recovery both. Device-scale optimization path
+(cost changes, semantics never): current-state-first (history-less replay or
+filtered snapshot, stamped with its basis-t so the trailing applier starts
+exactly there) + lazy history backfill — `as-of`/history queries route to the
+writer until backfill completes. An index-root snapshot copy (content-addressed
+konserve nodes, git-style incremental) is equally complete — a persistent value
+transferred instead of recomputed — and stays available as a later optimization.
 
 ## The core ideas
 
