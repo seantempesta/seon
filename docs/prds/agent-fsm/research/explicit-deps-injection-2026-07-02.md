@@ -4,18 +4,47 @@ status: active
 tags: [agent, flow, schema]
 ---
 
-# Explicit dependency injection at the eval boundary + auto-run
+# Resolving a fn's required keys from context + auto-run
 
-TL;DR — A tool/render fn declares the ambient things it needs (`:seon.db/db`,
-`:seon.agent/id`, `:seon.render/at`) as OPTIONAL request keys. The ONE
-instrumentation wrapper (`seon.instrument`) fills every declared-but-absent
-injectable from the eval context (`db/current-agent-id` + `@db/*conn*`) just
-BEFORE input validation. Explicit args always win. A small explicit registry
-(`injectable-key → (fn [eval-ctx] value)`) is the whole extension surface.
-Auto-run is a new seed block that finds the current ns's render fns and runs
-each through the same wrapper. ALS stays as the injection SOURCE — not ripped
-out; it becomes the one boundary of clear magic instead of leaking into
-every fn body.
+TL;DR — A tool/render fn declares the context it needs (`:seon.db/db`, the
+calling agent `:seon.agent/id`, the time `:seon.render/at`) as OPTIONAL keys
+on its request map. The ONE instrumentation wrapper (`seon.instrument`)
+RESOLVES every declared-but-absent required key from the current context
+(`db/current-agent-id` + `@db/*conn*`) just BEFORE input validation. Explicit
+caller args always win. A small explicit map `required-key → (fn [ctx]
+value)` is the whole extension surface. Auto-run is a new seed block that
+finds the current ns's render fns and runs each through the same wrapper.
+
+## Vocabulary — required keys resolved from context, NOT "injection magic"
+
+Map this to Clojure primitives (owner directive): the mechanism is a fn
+declaring its REQUIRED KEYS as optional request-map entries, and the eval
+boundary RESOLVING each absent one from context — the same way `db` read fns
+already default `conn` from `*conn*`. There is no new noun to learn:
+
+- a required key is a normal namespaced map key with a registered schema;
+- resolving it is `assoc`-ing a value the boundary reads from context before
+  Malli validates the map;
+- AsyncLocalStorage is NOT the feature — it is merely the internal SOURCE for
+  the CURRENT-agent value (`db/current-agent-id`, set once by the loop's
+  `db/with-agent`). The fn body never reads it; the boundary does, once,
+  visibly. "One boundary that resolves context keys" replaces "every fn body
+  reaches into an ambient var."
+
+### Composition — a required key resolves to an entity ref
+
+The agent's entity is the root of a small graph: it REFS a per-namespace
+entity whose schema is scribed in that namespace (e.g. a `my.plan` entity
+whose `:my.plan/*` attrs are `register!`ed in the `my.plan` ns; likewise a
+per-ns kb/tile entity). A required key like `:seon.agent/id` resolves to the
+calling agent's ref, and a fn that holds that ref reaches its per-namespace
+entity by following it (`agent → :my.plan/of-agent → the plan entity`). So
+"resolve the required keys from context" and "each ns owns its slice of the
+agent's entity graph" are the same design seen twice: the key names the ref,
+the ref names the data, the ns owning the data owns its schema. A fn
+declaring `:seon.agent/id` therefore reads/writes PER-AGENT (it scopes to the
+resolved ref); one that omits it is GLOBAL (`my.kb`). You know where data
+goes by reading the arglist — not from an invisible binding.
 
 ## Why — the problem being killed
 
@@ -211,3 +240,42 @@ per the pod's Promise rules — out of scope for v1.
 - Phase 2 live: a real DeepSeek agent authors a `defn` returning a render in
   its ns → it auto-appears as context + tile with no explicit call; it calls
   a storage fn without db/id → works, writing to ITS record.
+
+## Implementation status (as of 2026-07-02)
+
+Phase 0 (this doc) is committed on `feature/agent-fsm`. Phase 1 was BUILT and
+PROVEN but is being MOVED to the fresh `feature/agent-scope` branch (agent-fsm
+is finishing/merging); the working-tree code below is uncommitted so the
+coordinator can move it. What exists and is verified:
+
+- `src/seon/instrument.cljc` — the required-key resolution on the ONE wrapper:
+  - `injectables` — the registry (`:seon.db/db` → `@db/*conn*`,
+    `:seon.agent/id` → `db/current-agent-id`).
+  - `declared-injectables` — reads a fn's `:=>` first-arg map keys ∩ registry
+    (via `m/-function-info` → `m/deref` → `m/entries`); handles inline maps,
+    registered refs, non-map args.
+  - `injecting-fschema` — GENERALIZES the old `async-fschema`: resolves
+    declared-absent required keys into the first (map) arg before input
+    validation, then validates output synchronously (sync return) OR on
+    Promise resolution (async return). ONE wrapper, sync + async.
+  - `register-target!` — routes EVERY simple fixed-arity `:=>` fn (sync or
+    async) through `injecting-fschema`; variadic/multi-arity keep the stock
+    path (injection is the single-map-arg case only).
+- `test/seon/instrument_inject_test.cljs` — the contract unit test (resolves
+  absent keys, explicit-wins, nil-provider-leaves-absent, no-injectable
+  untouched, `declared-injectables` static reads).
+
+Live proofs (default pod, 7890): a probe map-in fn declaring both keys,
+called inside `db/with-agent "X"` WITHOUT them, received `{:got-id "X"
+:got-db true}`; called WITH a valid explicit id, kept it (`:got-id
+"OTHER…"`); called OUTSIDE a scope, left id absent (`:got-id nil`); an
+`^:async` probe injected + awaited-validated identically. Full CLJS suite
+green with the change in the build: **932 tests / 4298 assertions, 0
+failures**.
+
+Phases NOT started (move to `feature/agent-scope`): registering
+`:seon.render/at`; the `my.*` conversion (per the `skip-syms` flag —
+`my.plan` verbs currently opt OUT of instrumentation, so they get NO
+resolution and must either read `db/current-agent-id` in-body or leave
+`skip-syms` to become resolved map-in fns); the `render_fns` auto-run seed
+block; the Phase 2 live DeepSeek drive.
