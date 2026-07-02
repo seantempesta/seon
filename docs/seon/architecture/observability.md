@@ -19,12 +19,19 @@ derive-everything principle pointed backwards in time.
 
 ## The turn record
 
-Every turn persists — always on, no debug flag:
+Most of the record already rides for free on datahike's reified tx metadata:
+every seon transaction carries `:seon.db/turn-id` / `agent-id` / `origin` /
+`eval-id` as datoms ON the tx entity (preserved across the wire), so "which
+turn wrote this datom" is a join on the datom's tx field — never a stored
+back-reference. What every turn additionally persists — always on, no debug
+flag:
 
-- **`:seon.agent.turn/basis-t`** — the basis-t of the frozen db value the loop
-  threaded through the turn. This is the coordinate that makes the context
-  re-derivable: `render-prompt` over `(db/as-of db basis-t)` reproduces the
-  structured context for that turn.
+- **`:seon.agent.turn/rendered-as-of`** — the basis-t of the frozen db value
+  the prompt rendered from. This is the ONE coordinate datahike does not
+  record: the prompt renders BEFORE the turn's own tx, with other agents'
+  commits interleaving on the shared conn, so the turn's creation-tx is not
+  what the model saw. `render-prompt` over `(db/as-of conn rendered-as-of)`
+  reproduces the structured context exactly.
 - **`:seon.agent.turn/prompt-blob`** — the assembled prompt verbatim, in the
   blob store. The as-of re-render is the *structured, queryable* view; the blob
   is the byte ground truth that survives render-code changes (a re-render runs
@@ -122,6 +129,9 @@ brief, a derived verdict.
 
 ## Build path
 
-The gaps between this design and the current code — basis-t not yet stored,
-reply not persisted, blob store spec-only, grep/embedding targets not yet
-widened, the forensic seed verb — live in [[roadmap]].
+The gaps between this design and the current code — `rendered-as-of` not yet
+stored, reply not persisted, grep/embedding targets not yet widened, the
+forensic seed verb — live in [[roadmap]]. Source-grounded verification of
+what datahike's tx metadata already provides (and why the pre-turn basis-t
+is the one thing it doesn't):
+`docs/prds/agent-fsm/research/` tx-metadata findings, 2026-07-02.

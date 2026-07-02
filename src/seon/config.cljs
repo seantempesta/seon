@@ -587,13 +587,30 @@
   (or (env "SEON_DEBUG_CAPTURE_DIR") "logs/turns"))
 
 (defn- upsert-by-name
-  "Merge `additions` over `base` by `:seon.agent.ctx/name` (a re-named block
-   replaces in place) — install!'s upsert semantics. Used by
-   [[context-config-for]] to layer the root-context override over the base."
+  "Layer `additions` over `base` by `:seon.agent.ctx/name`, MERGING an
+   addition's attrs OVER the matching base block IN PLACE — so a sparse
+   override that sets ONE sub-key (e.g. root/acme's `:live-tile` setting
+   only `:seon.render.live-tile/content`) KEEPS the default block's other
+   attrs (`:seon.agent.ctx/priority`, `:seon.render/ai`, ...). This is the
+   third-party-first contract: a manifest overriding a block need only name
+   the sub-keys it changes, never re-specify the whole block. A name absent
+   from `base` is a brand-new block, appended in `additions` order. Used by
+   [[context-config-for]] to layer the root-context override over the base,
+   by [[expand-skill-blocks]], and by [[resolve-agent-context]]."
   [base additions]
-  (let [names (into #{} (map :seon.agent.ctx/name) additions)]
-    (into (filterv #(not (names (:seon.agent.ctx/name %))) base)
-          additions)))
+  (let [by-name  (into {} (map (juxt :seon.agent.ctx/name identity)) additions)
+        seen     (atom #{})
+        ;; existing blocks: merge any same-name addition over them, in place.
+        merged   (mapv (fn [b]
+                         (let [nm (:seon.agent.ctx/name b)]
+                           (if-let [add (get by-name nm)]
+                             (do (swap! seen conj nm)
+                                 (merge b add))
+                             b)))
+                       base)
+        ;; additions with no base counterpart: append in original order.
+        appended (filterv #(not (@seen (:seon.agent.ctx/name %))) additions)]
+    (into merged appended)))
 
 (defn- skill-body-block
   "The always-on body block a `:my.skills/load` skill-name expands to — the
@@ -702,7 +719,8 @@
         (-> base
             ;; merge root-context's SCALAR keys (e.g. `:seon.eval/home-requires`)
             ;; over the base — everything except the `:seon.agent/ctx` block
-            ;; vector, which is upserted by name below (not overwritten).
+            ;; vector, which is merged-by-name below ([[upsert-by-name]]): a
+            ;; sparse per-block override keeps the default block's other attrs.
             (merge (dissoc override :seon.agent/ctx))
             (assoc :seon.agent/ctx
                    (upsert-by-name (:seon.agent/ctx base)

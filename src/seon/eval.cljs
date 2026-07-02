@@ -1389,6 +1389,13 @@
         `(db/transact! {:seon.agent/id id :seon.eval/home-requires […]})`
         drives the next `setup-agent-ns!`, so the dial is reactive, not
         write-only. (Mixed-`:or` schema → stored `pr-str`'d → decode on read.)
+        The attr is NOT in the boot schema; it self-installs on that first
+        override transact (`ensure-datahike-attrs!` runs inside `transact!`),
+        so by read time the `installed-schema` gate below is TRUE whenever a
+        datom exists. The gate is not a no-op: on a fresh pod with no override
+        yet, the attr is uninstalled and querying it would THROW — the gate
+        makes the read fall to (2) instead. VERIFIED live (scratch conn):
+        transact → attr installs, value round-trips through decode.
      2. else the `:seon.eval/home-requires` from `resolve-agent-context` — the
         fresh-MINT case, before the datom is written (the config/manifest value).
      3. else the [[home-ns-require-specs]] const (= byte-parity for a no-config

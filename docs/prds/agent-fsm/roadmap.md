@@ -120,10 +120,13 @@ else composes with it.
 
 1. `my.blob` — content-addressed store + `put!`/`get`/`text` verbs on the
    fs-template envelope; blob-ref-as-data (hash + token estimate).
-2. Always-on turn capture: `:seon.agent.turn/basis-t` datom, prompt →
-   blob, reply → datom-or-blob by size, volatile inputs (embedding-hit
-   ids, referenced `result/<id>`s) recorded on the turn. Retire the
-   `SEON_DEBUG_CAPTURE` gate + the write-only `logs/turns` tree.
+2. Always-on turn capture: `:seon.agent.turn/rendered-as-of` (the PRE-turn
+   frozen basis-t — verified 2026-07-02: tx-meta already stamps
+   turn/agent provenance on every tx, so this is the ONE missing
+   coordinate), prompt → blob, reply → datom-or-blob by size, volatile
+   inputs (embedding-hit ids, referenced `result/<id>`s) recorded on the
+   turn. Retire the `SEON_DEBUG_CAPTURE` gate + the write-only
+   `logs/turns` tree.
 3. `inspect/turn` (one bundle: prompt, as-of re-render, reply, evals,
    usage, visible messages) + `inspect/turn-diff` (block-level render diff
    + `db/since` datom delta) + `ctx-preview` over any t.
