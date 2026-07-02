@@ -39,24 +39,51 @@
   ;; cluster default).
   :seon.ai/agent-provider :inherit
 
-  ;; home-requires toolbelt (mirrors config/system.edn) — the DEFAULT verb
-  ;; surface a fresh agent's home ns renders as compact cards.
+  ;; home-requires toolbelt — DELIBERATELY DIFFERENT from config/system.edn's
+  ;; 10-ns default. Acme (the third party) picks its OWN agent toolset from
+  ;; THIS file, zero src/seon edits: a trimmed core-verb subset (message/todo/
+  ;; lifecycle/schema/db — drops my.kb/my.data/my.ui/my.tile/search) PLUS acme's
+  ;; own toolkit namespaces (acme.helpers, acme.notes). Since the :namespaces
+  ;; block renders "the current ns's :require's as compact cards", THESE ARE the
+  ;; verb surface a fresh acme agent sees — proving per-cluster ns selection is
+  ;; config-driven. Each entry carries :as/:refer (bare [ns] is rejected by
+  ;; :seon.eval/require-spec).
   :seon.eval/home-requires
   [[seon.agent.message :as message]
    [seon.agent.todo :as todo]
    [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
    [seon.schema :as schema]
    [seon.db :as db]
-   [my.kb :as kb]
-   [my.data :as data]
-   [my.ui :as ui]
-   [my.tile :as tile]
-   [seon.agent.search :as search]]
+   [acme.helpers :as helpers]
+   [acme.notes :as notes]]
 
-  ;; the transcript block with acme's OWN eval-decay schedule (proves a
-  ;; per-cluster decay is settable from the file) — a shorter 2-band shrink.
+  ;; The FULL default block tree (mirrors seon.config/default-ctx-blocks) with
+  ;; acme's OWN eval-decay schedule on the transcript (proves a per-cluster
+  ;; decay is settable from the file — a shorter 2-band shrink). LOAD-BEARING:
+  ;; a manifest that supplies :seon.agent/ctx REPLACES the schema default tree
+  ;; wholesale (malli default-fill only fills ABSENT keys; vectors don't merge).
+  ;; So to customize ONE block (the transcript) acme must re-list EVERY default
+  ;; block it wants to keep — otherwise :namespaces (priority 20) and the rest
+  ;; silently vanish and the namespaces-render feature never fires. This is the
+  ;; per-cluster context surface: acme owns its whole block set from THIS file.
   :seon.agent/ctx
-  [{:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
+  [{:seon.agent.ctx/name :shared-instructions :seon.agent.ctx/priority 10
+    :seon.render/ai my.kb.shared/instructions-block}
+   {:seon.agent.ctx/name :skills-catalog :seon.agent.ctx/priority 12
+    :seon.render/ai my.skills/catalog-block}
+   {:seon.agent.ctx/name :namespaces :seon.agent.ctx/priority 20
+    :seon.render/ai seon.agent.ctx.namespaces/namespaces-block}
+   {:seon.agent.ctx/name :live-tile :seon.agent.ctx/priority 35
+    :seon.render/ai seon.agent.ctx.live-tile/live-tile-block}
+   {:seon.agent.ctx/name :warnings :seon.agent.ctx/priority 40
+    :seon.render/ai seon.agent.ctx.warnings/warnings-block}
+   {:seon.agent.ctx/name :open-todos :seon.agent.ctx/priority 45
+    :seon.render/ai seon.agent.todo.internal/open-todos-block}
+   {:seon.agent.ctx/name :relevant-source :seon.agent.ctx/priority 48
+    :seon.render/ai seon.agent.ctx.relevant/relevant-source-block}
+   {:seon.agent.ctx/name :findings :seon.agent.ctx/priority 97
+    :seon.render/ai seon.agent.ctx.findings/findings-block}
+   {:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
     :seon.render/ai seon.agent.ctx.transcript/transcript-block
     :seon.render/html seon.agent.ctx.transcript/transcript-block-html
     :seon.agent.ctx.transcript/result-decay
