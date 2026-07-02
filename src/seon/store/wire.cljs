@@ -34,10 +34,9 @@
      idempotent on the watermark (a tx ≤ it is a no-op), so the
      replay↔live overlap fires each listener at most once.
 
-   Proven off-pod by the Stage A/B regression pair
-   (`clj -M:replica-probe-jvm` 10/10, `clj -M:replica-peer-jvm` 14/14);
-   prototype: `seon.dev.replica-peer` (which stays as the harness).
-   Research: docs/prds/agent-runtime/research/datahike-native-replica-2026-06-09.md."
+   Proven off-pod by the Stage A/B replica probe/peer oracles (10/10 + 14/14;
+   harness since retired — findings + retirement note in
+   docs/prds/agent-runtime/research/datahike-native-replica-2026-06-09.md)."
   (:require
    [cljs.core.async :refer [promise-chan put!]]
    [clojure.string :as str]

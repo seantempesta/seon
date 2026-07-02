@@ -93,9 +93,11 @@ Fork branch `fix/planner-collect-merge-datom-field` (on top of
 1. Merge `fix/planner-collect-merge-datom-field` into the fork's
    `sync-upstream` (or rebase-push) and push to
    `github.com/seantempesta/datahike`; note the new sha.
-2. In seon `deps.edn`, replace `e6d196d5...` with the new sha in ALL FOUR
-   places: `:fork-deps`, `:cljs :override-deps`, `:replica-probe-jvm`,
-   `:replica-peer-jvm`.
+2. In seon `deps.edn`, replace the old sha with the new sha in BOTH
+   places: `:fork-deps` and `:cljs :override-deps`. (The
+   `:replica-probe-jvm`/`:replica-peer-jvm` aliases that used to make this
+   four places were deleted with the dormant replica-peer harness,
+   2026-07-02.)
 3. Bump the `reference-code/datahike` submodule pointer to the same sha
    (deps.edn:85 — src-secondary must stay byte-aligned).
 4. `bin/seon restart wire-server` (also cures the stale-7ef2b5de process),

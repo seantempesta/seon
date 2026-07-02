@@ -212,42 +212,6 @@
                       :optimizations      :simple
                       :externs            ["externs/node_fs.js"]}}
 
-  ;; 2.2c DIS-replica probe — Node READER side. Opens a JVM-written :file
-  ;; store with a stub non-streaming writer (deref-conn follow-the-store
-  ;; mode) and reports max-tx / query results / timings / counted blob
-  ;; reads as one PROBE-EDN line. Driven by `clj -M:replica-probe-jvm`.
-  ;; Run-to-exit probe — :devtools disabled; build in a FRESH JVM
-  ;; (`clj -M:cljs compile replica-probe`), NOT in cljs-watch.
-  ;;
-  ;; Build:  clj -M:cljs compile replica-probe
-  ;; Run:    node out/replica-probe/main.js   (env: REPLICA_STORE_PATH/_ID/_MODE)
-  :replica-probe
-  {:target           :node-script
-   :output-to        "out/replica-probe/main.js"
-   :main             seon.dev.replica-probe/-main
-   :devtools         {:enabled false}
-   :compiler-options {:warnings-as-errors false
-                      :externs           ["externs/node_fs.js"]}}
-
-  ;; 2.2d Stage B — DIS read-only-peer build (OFF-POD; :client untouched).
-  ;; A full datahike PEER on Node: lazy konserve reader on a wire-server's
-  ;; :file store + the REAL `:seon-wire` PWriter that forwards transact!
-  ;; over the existing UDS `transact` op, plus the subscribe-tx → listen!
-  ;; adapter prototype. Driven by `clj -M:replica-peer-jvm`, which also
-  ;; spawns the sha-aligned second wire-server. Run-to-exit oracle —
-  ;; :devtools disabled; build in a FRESH JVM (`clj -M:cljs compile
-  ;; replica-peer`), NOT in cljs-watch (the long-running watcher still has
-  ;; the OLD mvn konserve on its classpath — version baked at macroexpansion).
-  ;;
-  ;; Build:  clj -M:cljs compile replica-peer
-  ;; Run:    node out/replica-peer/main.js   (env: PEER_* — see the ns)
-  :replica-peer
-  {:target           :node-script
-   :output-to        "out/replica-peer/main.js"
-   :main             seon.dev.replica-peer/-main
-   :devtools         {:enabled false}
-   :compiler-options {:warnings-as-errors false
-                      :externs           ["externs/node_fs.js"]}}
   ;; Bootstrap-CLJS bundle (spec-02 §6.1). The :target :bootstrap
   ;; output is the analysis-cache + per-namespace compiled JS for
   ;; each namespace in :entries, suitable for runtime loading via
