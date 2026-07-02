@@ -1395,3 +1395,41 @@ Live DeepSeek drives on a fresh acme world
   suggested: scratch-child read visibility vs attr-install timing.
 
 Both observed under `/solve` with turn captures in the diffusion preflight doc.
+
+## 2026-07-02 — capability gates GRANTED in seon+acme supervisors (config lane)
+
+Shell + web (`SEON_SHELL`/`SEON_WEB`) are now granted by default in BOTH
+supervisors (`bin/seon` exports `${SEON_SHELL:-1}`/`${SEON_WEB:-1}` after the
+`.env` source; `bin/acme` exports the same in its own env block — the
+downstream-consumer path, zero src edits). CODE defaults stay deny-when-unset.
+Effective on the NEXT pod restart of each cluster (env is inherited at spawn;
+no rebuild). Verify without a bounce: `bin/seon print-env` / `bin/acme
+print-env` (new verb). Full gate table + downstream override path:
+`docs/seon/components/capability-gates.md`. Eval-suite blocker #1 is
+satisfied on the next restart of the bench cluster.
+
+Flags for other lanes (no src/seon edits made by this lane):
+
+- **`.env` leaks into acme** (pre-existing, now DEMONSTRATED): `bin/acme`
+  sources `.env.acme`, then delegates to `bin/seon` which sources the main
+  `.env` — plain assignments in `.env` OVERRIDE acme's values (live proof:
+  `bin/acme print-env` shows `SEON_SOUL=false`, which only the main `.env`
+  sets). Today's overlaps are harmless (same values), but a main-`.env`
+  `SEON_SHELL=0` would silently deny acme too. Proposed fix (bin-only, not
+  made mid-flight to avoid perturbing live clusters): a `SEON_ENV_FILE`
+  override — `bin/seon` sources `${SEON_ENV_FILE:-$SEON_ROOT/.env}` and
+  `bin/acme` points it at `.env.acme`.
+- **`SEON_EMBED` is a PRESENCE gate** (`some?` — even `"0"`/`""` = ON) but the
+  supervisors previously exported `SEON_EMBED="${SEON_EMBED:-0}"`, force-
+  opening the gate for every supervised cluster. Fixed at the SUPERVISOR
+  layer (both scripts translate empty/`"0"` → unset). If a value-gate
+  (`"0"` = off) is preferred in code, that's a src change across
+  `seon.embed/embed-feature-enabled?` + the three pod read sites
+  (`turn.cljs:160`, `render/system.cljs:140`, `diffusion/retrieval.cljs:592`)
+  — proposal only, this lane did not touch src.
+- **Gates are env-only by design** — there is deliberately NO
+  `:seon.config/capabilities` manifest section (grants are host-owned; the
+  manifest is pod-consumed agent-context config). Downstream granting works
+  through the launcher env alone, so no new seam is required; if a
+  manifest-carried grant is ever wanted it's the 4-step new-section contract
+  in `seon.config`.

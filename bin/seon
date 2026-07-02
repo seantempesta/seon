@@ -128,7 +128,36 @@ export SEON_PORT_FILE
 # VAR=value; a value already set in your shell still wins via the ${:-} below.
 if [ -f "$SEON_ROOT/.env" ]; then set -a; . "$SEON_ROOT/.env"; set +a; fi
 
-export SEON_EMBED="${SEON_EMBED:-0}"
+# SEON_EMBED is a PRESENCE gate in code (embed-feature-enabled? checks set-ness:
+# ANY value — even "" or "0" — counts as ON; only UNSET is OFF). The operator
+# convention everywhere else is "0" = off, so translate: empty/"0" → unset (gate
+# OFF), anything else → exported (gate ON). Our clusters opt in via .env
+# (SEON_EMBED=1); a fresh clone stays genuinely OFF.
+case "${SEON_EMBED:-}" in
+  ""|0) unset SEON_EMBED ;;
+  *)    export SEON_EMBED ;;
+esac
+
+# ============================================================
+# Capability grants (agent tools) — host-owned env gates, read live
+# by the pod. CODE defaults are conservative (deny-when-unset); this
+# supervisor is OUR dev/bench deployment, so it GRANTS shell + web by
+# default. Any value but "0" grants; deny per-cluster via .env or the
+# shell (SEON_SHELL=0 bin/seon restart pod). Downstream consumers who
+# embed seon without bin/seon still get the code's default-deny.
+# Full gate table: docs/seon/components/capability-gates.md
+# ============================================================
+export SEON_SHELL="${SEON_SHELL:-1}"   # seon.agent.shell/run + py-run
+export SEON_WEB="${SEON_WEB:-1}"       # seon.agent.web/fetch (SSRF guard stays always-on)
+# Optional narrowing knobs — exported only when set (unset = open-when-granted):
+#   SEON_WEB_DOMAINS  comma-separated domain allowlist (empty/unset = all domains)
+#   SEON_WEB_LOCK     "1" locks the web allowlist against runtime configure!
+#   SEON_FS_LOCK      "1" locks the fs grant against runtime configure!
+# (SEON_FS_ROOT / SEON_FS_READ_ONLY are set on the pod command below — the pod
+# gets a durable read-only grant on the repo; shell cwd gating rides on it.)
+[ -n "${SEON_WEB_DOMAINS:-}" ] && export SEON_WEB_DOMAINS
+[ -n "${SEON_WEB_LOCK:-}" ] && export SEON_WEB_LOCK
+[ -n "${SEON_FS_LOCK:-}" ] && export SEON_FS_LOCK
 
 # ── Config manifest selection — the ONE config seam (read by seon.config) ──
 # SEON_CONFIG  = manifest path (default config/system.edn, CWD-relative to the
@@ -1004,6 +1033,15 @@ case "${1:-help}" in
   # commands" invariant for the SEON_EXTRA_* knobs, and lets a downstream
   # eyeball their injected invocation.
   print-cmd) shift; process_command "${1:?print-cmd requires a process name}" ;;
+  # Print the capability/feature env a spawned process will inherit (the
+  # exports above resolved through .env + shell) WITHOUT spawning anything —
+  # the verification verb for the gate table in
+  # docs/seon/components/capability-gates.md. Unset var = code default (deny).
+  print-env)
+    for v in SEON_SHELL SEON_WEB SEON_WEB_DOMAINS SEON_WEB_LOCK \
+             SEON_FS_LOCK SEON_EMBED SEON_INSTRUMENT SEON_SOUL SEON_CONFIG; do
+      if [ -n "${!v+x}" ]; then echo "$v=${!v}"; else echo "$v (unset)"; fi
+    done ;;
   cluster) shift; cmd_cluster "$@" ;;
   nuke)    shift; cmd_nuke "$@" ;;
   help|--help|-h|*)
@@ -1036,6 +1074,9 @@ Commands:
   print-cmd <name>   Print the exact spawn command for a process (env
                      expansion included) without spawning it — pins the
                      SEON_EXTRA_* "unset = byte-identical" invariant
+  print-env          Print the capability/feature gate env a spawned
+                     process inherits (SEON_SHELL, SEON_WEB, SEON_EMBED,
+                     …) — see docs/seon/components/capability-gates.md
   cluster reset [n]  DESTRUCTIVE: stop pod+wire-server, wipe
                      data/clusters/<n>/store (default "default"),
                      restart both — fresh DB, core re-seeds

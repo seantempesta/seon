@@ -48,8 +48,25 @@ export SEON_PORT_FILE=tmp/seon-port-acme    # own pod port file (the live defaul
                                             # file would cross-talk in status/ready)
 
 # --- embeddings: default OFF (opt-in); .env.acme sets SEON_EMBED=1 for this
-#     cluster. Export GEMINI_API_KEY for KNN when enabled. ---
-export SEON_EMBED="${SEON_EMBED:-0}"
+#     cluster. Export GEMINI_API_KEY for KNN when enabled. SEON_EMBED is a
+#     PRESENCE gate in code (any value — even ""/"0" — counts as ON), so
+#     empty/"0" is translated to UNSET here; bin/seon repeats the same
+#     translation after sourcing the main .env. ---
+case "${SEON_EMBED:-}" in
+  ""|0) unset SEON_EMBED ;;
+  *)    export SEON_EMBED ;;
+esac
+
+# --- capability grants (agent tools) — the DOWNSTREAM-consumer path: plain
+#     host env on the launcher, zero src/seon edits. Code defaults stay
+#     deny-when-unset; this harness (a legit bench pod AND the downstream-usage
+#     proof) grants shell + web like any consumer's launcher would. Any value
+#     but "0" grants; deny via .env.acme or the shell (SEON_SHELL=0 bin/acme
+#     restart pod). Narrowing knobs (SEON_WEB_DOMAINS / SEON_WEB_LOCK /
+#     SEON_FS_LOCK) pass through from .env.acme when set.
+#     Full gate table: docs/seon/components/capability-gates.md ---
+export SEON_SHELL="${SEON_SHELL:-1}"   # seon.agent.shell/run + py-run
+export SEON_WEB="${SEON_WEB:-1}"       # seon.agent.web/fetch (SSRF guard always-on)
 
 # --- the third-party overlay (Path B — docs/seon/components/extra-src.md) ---
 export SEON_EXTRA_SRC="$SEON_ROOT/acme"

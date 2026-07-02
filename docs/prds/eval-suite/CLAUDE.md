@@ -22,7 +22,12 @@ the 8-class flake taxonomy.
 
 ## Blockers before the first dev pass
 
-1. `SEON_SHELL`/`SEON_WEB` grants in bench cluster env (default-deny today).
+1. ~~`SEON_SHELL`/`SEON_WEB` grants in bench cluster env~~ — GRANTED in both
+   supervisors (`bin/seon` + `bin/acme` export `${SEON_SHELL:-1}` /
+   `${SEON_WEB:-1}`; code defaults stay deny-when-unset). Effective on the
+   next pod restart; bench clusters cloning the acme launcher inherit the
+   grants. Mechanism + full gate table:
+   `docs/seon/components/capability-gates.md`.
 2. Planning bench re-grounded on the redesigned `my.plan` (deps/pace/expect).
 3. Tool-row generators (shell / web-fixture / file-edit) authored.
 4. Fresh-world `my.kb` empty render + turn-6 recall visibility (agent-fsm
