@@ -25,8 +25,10 @@ paused world are tagged **[JVM track — paused]**.
   (`./bin/run`, nREPL 7888 / HTTP 8080, `(user/run-tests)`, core.async
   flow). Still runnable, but NOT the current focus.
 
-Live status + work queue: `docs/seon/orchestrator/prds.md` (PRD index) plus
-the active PRD on the current branch.
+The idealized system: `docs/seon/architecture/` (read `architecture.md`
+first). Live status: the active PRD's `roadmap.md` on the current branch —
+each roadmap chunk is its OWN PRD folder + branch, finished and merged to
+main before the next.
 
 Settled (do not re-litigate): NO WASM; per-CLUSTER DBs; messaging = from/to
 refs + hop-cap; the CLJS sandbox is NOT a security boundary (it catches LLM
@@ -91,22 +93,37 @@ The exception is genuinely independent topics (e.g., "audit datahike capabilitie
 
 ## System Documentation
 
-All documentation lives in `docs/` — markdown files under version control. Use Read, Glob, and Grep to navigate.
+Two kinds of docs, one rule each. Do NOT create a third doc system.
 
-- **Start here:** `docs/seon/_dashboard.md` — system map, milestones, protocols
-- **What exists:** `docs/seon/components/` — one note per component (always current)
-- **Patterns:** `docs/seon/concepts/` — patterns spanning components
-- **What we're building:** `docs/seon/vision/` — thesis and desired capabilities
-- **Active work:** `docs/seon/orchestrator/active.md` — pipeline and recovery
-- **Issues:** `docs/seon/orchestrator/issues/` — one note per problem
-- **PRD index:** `docs/seon/orchestrator/prds.md` — all PRDs with status
-- **How it works:** `docs/seon/architecture/overview.md` — narrative guide
-- **Decisions:** `docs/seon/architecture/decisions/` — settled ADRs
-- **All PRDs:** `docs/prds/` — feature specifications
-- **Conventions:** `docs/conventions.md` — API design patterns
-- **Vision:** `docs/seon/vision/index.md` — project thesis
+- **The idealized system — `docs/seon/architecture/`** is the SINGLE,
+  always-current, target-written description of how Seon works when built.
+  **Read `architecture.md` FIRST** (the map: thesis, one vocabulary, the
+  cross-cutting principles), then the domain doc for your area:
+  - `context.md` — context = functions applied to the db (blocks/tiles/twins,
+    current-ns, required-keys, the cache gradient)
+  - `data-model.md` — every entity/attr/ref, the `my.*` schemas, `:seon/error`
+  - `agent-runtime.md` — loop/run/turn/FSM, lifecycle, isolation, "nothing wedges"
+  - `ui.md` — blocks/renders/tiles/slots/pages, the live channel
+  - `observability.md` — turn replay, the blob store, the forensic agent, `/solve`
+  - `toolkit.md` — the agent verb surface
+  - `laws.md` — drive-measured empirical laws · `library-grounding.md` — the
+    `reference-code/…:LINE` read-map · `decisions/` — settled ADRs
+  This is where the ideal is kept current as it changes — ONE place, present
+  tense, no parallel narratives.
+- **The work — `docs/prds/<chunk>/`** is a roadmap chunk on its OWN branch.
+  Each carries an auto-loaded `CLAUDE.md` (runbook + settled/open + entry
+  points) and a `roadmap.md` (the WE-ARE-HERE for that chunk: what's built, the
+  gap, the ordered path). PRDs are focused, finish-and-merge work — NOT a
+  second doc system. The `research/` files are dated evidence/depth.
 
-**After making code changes**, update the relevant component note to reflect new reality. See `docs/seon/_dashboard.md` for the full protocol.
+Supporting: `docs/conventions.md` (API/schema patterns), `docs/seon/vision/`
+(thesis + aspirational capabilities incl. `think-in-clojure.md`),
+`docs/seon/components/` (per-component notes).
+
+**After a change:** update the architecture doc it touches (the ideal stays
+current) AND the active PRD's `roadmap.md` (the we-are-here stays honest) — same
+discipline as code. The `src/seon/CLAUDE.md` ONE-mechanism table auto-loads on
+any `src/` edit; check it before building a second version of anything.
 
 ### PRD folder context — auto-loaded `CLAUDE.md`
 
@@ -472,11 +489,16 @@ The same rule applies to id shapes, length constraints, enum values, and any oth
 
 | Skill | Invoke When |
 |-------|-------------|
-| `/datahike` | Writing Datalog queries, transacting data, debugging empty results, working with `d/q` against the Datahike-backed `seon.db` |
-| `/datastar-web-ui` | SSE handlers, `data-*` attributes, streaming responses |
-| `/browser-automation` | Testing UI in browser, debugging frontend issues |
-| `/clojure-testing` | Test patterns: mocking, generators, fixtures, debugging failures |
-| `/clojurescript` | Pod CLJS semantics: `^:async`/`await`, self-host eval (agent forms compile via `cljs.js`, NOT the JVM), Promise auto-await, cross-`eval-str` def gotchas, async instrumentation wedge |
+| `/data-oriented-clojure` | BEFORE writing/reviewing ANY seon `.clj`/`.cljs` — the data-oriented, errors-as-values, derive-don't-store mindset; catches imperative/OO reflexes |
+| `/data-modeling` | Designing a data model — what shape to `register!` and why (identity vs ref vs component, optional vs required, no `:kind`) |
+| `/datahike` | Datalog queries, transacting, debugging empty results, `seon.db`/`seon.schema`; tx-meta provenance, as-of/history |
+| `/clojurescript` | Pod CLJS semantics: `^:async`/`await`, self-host eval (agent forms compile via `cljs.js`, NOT the JVM), Promise auto-await, async instrumentation wedge |
+| `/repl` | How the REPL reads/repairs/evals the forms you write; parse errors, unbalanced forms |
+| `/seon-context-config` | `config/system.edn`/`acme.edn`, manifest sections, which skills/blocks/nses an agent sees, render caps |
+| `/ui-live-tiles` | Show your human a live VIEW not prose — `:seon.render.live-tile/content`, `my.ui`/`my.tile`/`my.data`, the canvas |
+| `/datastar-web-ui` | SSE handlers, `data-*` attributes, the gzip-morph channel, the `seon.render/block` + slot renderer |
+| `/browser-automation` | Verifying the pod's OWN web UI in a browser (note: browser 503s long-lived SSE — verify feeds server-side) |
+| `/clojure-testing` | Pod-first `.cljs` test patterns: fixtures, `cljs.test/async`, hermetic in-memory conns |
 
 ---
 
@@ -579,7 +601,7 @@ Key rules: density over whitespace (`p-3` not `p-6`), small text (`text-xs` prim
 1. **One file per namespace** - Don't split prematurely
 2. **DB parameter** - Functions receive `db` as first parameter
 3. **Schema-first** - Define Malli schemas before implementation
-4. **Namespaced IDs** - `:seon.agent.todo/id`, `:my.kb.source/rating`
+4. **Namespaced IDs** - `:my.plan/id`, `:my.kb.source/rating`
 
 See `docs/conventions.md` for full patterns.
 
@@ -706,10 +728,10 @@ Application: `logs/app.log` (Timbre). Errors: `logs/error.log` (logback). Boot: 
 
 | Document | Purpose |
 |----------|---------|
-| `docs/seon/vision/index.md` | Project thesis and aspirational capabilities |
+| `docs/seon/architecture/architecture.md` | **The idealized system — read FIRST** (map + vocabulary + principles) |
+| `docs/prds/<chunk>/roadmap.md` | The we-are-here for the active branch's chunk |
 | `docs/conventions.md` | Malli schemas, API design patterns |
+| `docs/seon/vision/index.md` | Project thesis and aspirational capabilities |
 | `ORCHESTRATOR.md` | Orchestrator-specific instructions (launching agents, system management) |
 | `AGENT.md` | Subagent-specific instructions (investigation workflow, reporting) |
-| `docs/seon/orchestrator/issues/` | Open problems — one note per issue |
-| `docs/seon/reference/datastar-quick-reference.md` | Web UI attributes |
 | `docs/prds/namespace-ui/design-system.md` | UI colors, typography, spacing |
