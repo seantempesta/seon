@@ -102,8 +102,8 @@ Eval-lane blockers before the first dev pass (from [[eval-CLAUDE-notes]]):
 4. Fresh-world `my.kb` empty render + turn-6 recall (the two tool defects above).
 5. ~~One calibration run~~ — ✅ DONE 2026-07-02
    ([[research/calibration-run-2026-07-02]]): per-pod `/solve` ceiling = **1**
-   (live conn-swap collision evidence at c=2); QA timeout 240s / default 300s
-   wired into `src-inspect-ai/src/seon_inspect/config.py`.
+   (live conn-swap collision evidence at c=2); QA timeout 240s (opt-in) /
+   default 300s in `src-inspect-ai/src/seon_inspect/config.py`.
 
 ## Settled — do NOT re-litigate (both lanes)
 

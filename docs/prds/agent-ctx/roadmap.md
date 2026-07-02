@@ -101,8 +101,8 @@ repo-dev docs.
 1. ~~**Calibration run**~~ — ✅ DONE 2026-07-02
    ([[research/calibration-run-2026-07-02]]): per-pod `/solve` ceiling = **1**
    (conn-swap collisions observed live at c=2: cas write-errors + 300s burns —
-   parallelism = more pods, never more samples per pod); gsm8k median 42s /
-   p90 ~70s → `QA_SOLVE_TIMEOUT_S=240`, general default 300s, wired into
+   parallelism = more pods, never more samples per pod); gsm8k median 40.7s /
+   p90 ~70s → `QA_SOLVE_TIMEOUT_S=240` (opt-in), general default 300s, wired into
    `src-inspect-ai/src/seon_inspect/config.py` (call-time, per-run
    overridable). Agentic rows re-calibrate when their generators land (step 3/4).
 2. **Dataset freeze** — seeded three-way splits (dev/milestone/test),

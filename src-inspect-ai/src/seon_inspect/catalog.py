@@ -21,11 +21,11 @@ are the CASE-2 / mvm tier — deferred, not faked.
 from __future__ import annotations
 
 import importlib
-import os
 from typing import Any, Callable
 
 from inspect_ai import Task, eval as inspect_eval
 
+from seon_inspect import config
 from seon_inspect.solver import seon_pod_solver
 
 
@@ -63,28 +63,29 @@ def run_bench(
     limit: int | None = 5,
     epochs: int = 1,
     solve_timeout_s: int | None = None,
+    max_samples: int | None = None,
     task_kwargs: dict[str, Any] | None = None,
     **eval_kwargs: Any,
 ):
     """Run a standard bench with the Seon pod as the solver.
 
-    `solve_url` (or SEON_SOLVE_URL) selects the pod — pod-agnostic; acme is just
-    one value. `limit` keeps baselines cheap; `epochs` enables pass^k. The
-    bench's OWN scorer grades the pod's replies host-side. Returns inspect's
-    eval logs. `--model` is required by inspect but never called (the solver
-    bypasses it) — pass model="mockllm/model".
+    `solve_url` (or SEON_SOLVE_URL) selects the pod — pod-agnostic; acme is
+    just one value. `limit` keeps baselines cheap; `epochs` enables pass^k.
+    Timeouts/concurrency default from `seon_inspect.config` (calibration-
+    derived) and are overridable here per-run — but `max_samples` above
+    `config.POD_MAX_SAMPLES` (1) against a SINGLE pod corrupts samples
+    (solve-once! swaps the root conn); raise it only when the URL fronts a
+    pool of pods. The bench's OWN scorer grades the pod's replies host-side.
+    Returns inspect's eval logs. `--model` is required by inspect but never
+    called (the solver bypasses it) — pass model="mockllm/model".
     """
-    if solve_url:
-        os.environ["SEON_SOLVE_URL"] = solve_url
-    if solve_timeout_s is not None:
-        os.environ["SEON_SOLVE_TIMEOUT_S"] = str(solve_timeout_s)
     task = load_bench_task(name, **(task_kwargs or {}))
     return inspect_eval(
         task,
-        solver=seon_pod_solver(),
+        solver=seon_pod_solver(solve_url=solve_url, timeout_s=solve_timeout_s),
         model=eval_kwargs.pop("model", "mockllm/model"),
         limit=limit,
         epochs=epochs,
-        max_samples=1,  # serial: the pod's async wake path reads the root conn
+        max_samples=max_samples or config.POD_MAX_SAMPLES,
         **eval_kwargs,
     )
