@@ -92,19 +92,27 @@
  ;; block sets root's canvas = the system/fleet dashboard, the config-driven
  ;; replacement for the hardcoded client.cljs root branch.
  ;;
- ;; WANTED-BUT-BLOCKED: root SHOULD get `[seon.agent :as agent]` in its
- ;; home-requires (the orchestration surface — start!/create!/delegate!) ON TOP
- ;; of the shared toolbelt. The current loader CANNOT express this: for id
- ;; "root", `seon.config/context-config-for` merges ONLY the `:seon.agent/ctx`
- ;; BLOCK vector from root-context (an assoc of that one key), so a
- ;; `:seon.eval/home-requires` here is silently dropped — and the
- ;; `:seon.config/root-context` schema declares only `:seon.agent/ctx`. Enabling
- ;; it needs a config-lane change (add the key to the root-context schema +
- ;; merge root-context scalar keys in context-config-for), NOT a manifest edit.
- ;; Until then root falls back to the shared toolbelt above (no `agent` alias);
- ;; root can still call `seon.agent/create!` etc. fully-qualified.
+ ;; `:seon.eval/home-requires` — root gets the SHARED toolbelt PLUS
+ ;; `[seon.agent :as agent]` (the orchestration surface — start!/create!/
+ ;; delegate!/set-purpose!/armable-agent-ids), so root additionally shows the
+ ;; `seon.agent` orchestration card. `context-config-for` merges root-context's
+ ;; scalar keys over the defaulted base; the `:seon.agent/ctx` block vector below
+ ;; is upserted by name (not overwritten). Every entry must carry `:as`/`:refer`
+ ;; (bare `[ns]` is rejected by `seon.eval/require-spec`).
  :seon.config/root-context
- {:seon.agent/ctx
+ {:seon.eval/home-requires
+  [[seon.agent.message :as message]
+   [seon.agent.todo :as todo]
+   [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
+   [seon.schema :as schema]
+   [seon.db :as db]
+   [my.kb :as kb]
+   [my.data :as data]
+   [my.ui :as ui]
+   [my.tile :as tile]
+   [seon.agent.search :as search]
+   [seon.agent :as agent]]
+  :seon.agent/ctx
   [{:seon.agent.ctx/name :live-tile :seon.agent.ctx/priority 35
     :seon.render/ai seon.agent.ctx.live-tile/live-tile-block
     :seon.render.live-tile/content seon.render.system/system-view}]}}

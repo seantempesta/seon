@@ -215,6 +215,11 @@
 ;; only the MERGED result is decoded. Same loose `[:vector :map]` leaf shape.
 (schema/register! :seon.config/root-context
   [:map
+   ;; root can override its home-ns require list (e.g. add `[seon.agent :as agent]`
+   ;; so root additionally shows the orchestration card). Same leaf shape +
+   ;; override-only semantics as `:seon.config/agent-context` — merged by
+   ;; [[context-config-for]] onto the defaulted base for id "root".
+   [:seon.eval/home-requires {:optional true} [:vector :any]]
    [:seon.agent/ctx {:optional true} [:vector :map]]])
 
 (schema/register! :seon.config/manifest
@@ -671,9 +676,14 @@
                        ctx-default-transformer)]
     (if (= id "root")
       (let [override (get manifest :seon.config/root-context {})]
-        (assoc base :seon.agent/ctx
-               (upsert-by-name (:seon.agent/ctx base)
-                               (:seon.agent/ctx override))))
+        (-> base
+            ;; merge root-context's SCALAR keys (e.g. `:seon.eval/home-requires`)
+            ;; over the base — everything except the `:seon.agent/ctx` block
+            ;; vector, which is upserted by name below (not overwritten).
+            (merge (dissoc override :seon.agent/ctx))
+            (assoc :seon.agent/ctx
+                   (upsert-by-name (:seon.agent/ctx base)
+                                   (:seon.agent/ctx override)))))
       base)))
 
 (defn resolve-agent-context

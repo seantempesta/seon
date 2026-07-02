@@ -1461,6 +1461,10 @@
   []
   (str/join ", " (map (fn [spec] (name (nth spec 2))) authored-ns-require-specs)))
 
+;; Forward refs — the requires-edge tee (defined with the eval-batch machinery
+;; below) is reused here so a fresh agent records its home-ns requires at setup.
+(declare ns-requires-tx transient-ns-syms)
+
 (defn ^:async setup-agent-ns!
   "Create + initialize the agent's home namespace. Returns the agent-ns
    symbol (same as the input). Idempotent.
@@ -1512,6 +1516,19 @@
                     "(in init-bootstrap!) must declare the refer'd toolkit "
                     "defs into the compile-state.")
                {:agent-ns agent-ns-sym :result r})))
+    ;; Record the home ns's `:seon.ns/requires` edges at SETUP time, so a
+    ;; genuinely fresh agent renders its required-ns cards on turn 0 (before
+    ;; its first eval). The eval-batch path tees these on every eval, but a
+    ;; brand-new agent has no eval yet — reuse [[ns-requires-tx]] (the ONE
+    ;; requires-edge path) against the analyzer's require set for the home ns.
+    (when (and db/*conn*
+               (not (contains? transient-ns-syms agent-ns-sym)))
+      (let [req-tx (ns-requires-tx
+                     @db/*conn*
+                     (keyword (str agent-ns-sym))
+                     (analyzer-info/ns-requires compile-state agent-ns-sym))]
+        (when (seq req-tx)
+          (await (db/transact! {:seon.db/tx-data req-tx})))))
     agent-ns-sym))
 
 ;; ============================================================
