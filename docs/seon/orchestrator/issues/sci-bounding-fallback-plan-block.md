@@ -28,6 +28,16 @@ fn would wedge the pod with no bound to cut it.
 stored/replayed, so SCI can't resolve the `db/*conn*` alias when bounding the
 tile fn. Likely a seed/scribe defect, reproducible on any fresh cluster.
 
+## Design note (owner discussion, 2026-07-02)
+
+The name-based routing (`agent-authored-sym?`, `src/seon/render/sci.cljs:94`)
+is CORRECT and settled: `my.*` = agent-editable territory, bounded uniformly —
+no provenance special-casing, since agents can redefine any `my.*` fn. The
+defect is that SCI *can't* bound the seeded fn (alias resolution) and the
+fallback silently downgrades to the UNBOUNDED path. Consider whether
+fail-open is right at all — a `:seon/error` block on resolution failure
+(fail-loud) may be the safer default than an unbounded render.
+
 ## Acceptance criteria
 
 - Fresh `cluster reset` boots with ZERO "could not run under SCI bounding"
