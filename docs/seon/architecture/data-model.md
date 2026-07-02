@@ -46,9 +46,10 @@ surface.
 
 ## 2. Three relationship kinds
 
-Seon expresses relationships three ways. Conflating them is the single biggest
-data-model error, so each is pinned against the bridge (`seon.db.internal`) and
-the vendored datahike source ([[datahike-primer]]).
+Seon expresses relationships three ways — plus a fourth every datom carries for
+free (§2.4). Conflating them is the single biggest data-model error, so each is
+pinned against the bridge (`seon.db.internal`) and the vendored datahike source
+([[datahike-primer]]).
 
 ### 2.1 datahike ref (`:seon.db/ref`) and component refs
 
@@ -141,6 +142,28 @@ The render path resolves these through ONE engine: `ai-render` / `html-render`
 call `eval/lookup-value` on a qualified symbol, falling through to a
 pretty-printer on a miss. Agent-authored symbols run SCI-bounded; core symbols
 run compiled. The render engine itself is owned by [[ui]].
+
+### 2.4 tx provenance — every datom names its transaction (free, auto-stamped)
+
+The connection nobody models but everybody gets: a datom's 4th field is its
+**transaction id**, and the transaction is a real entity carrying real datoms.
+Datahike reifies `:tx-meta` onto the tx entity
+(`reference-code/datahike/src/datahike/db/transaction.cljc:802`
+`flush-tx-meta`) and auto-stamps a monotonic `:db/txInstant`. Seon's
+`transact!` auto-merges the active `with-agent`/`with-tx-context` scope into
+`:tx-meta` (`src/seon/db/internal.cljs` `merge-tx-context-into-opts`; the seven
+attrs: `:seon.db/agent-id`, `session-id`, `turn-id`, `eval-id`, `origin`,
+`replay?`, `resume-marker?`), and the stamps survive the wire to the JVM
+writer.
+
+Consequence for modeling: WHO/WHEN-wrote-this is a **join**
+(`[?e attr _ ?tx] [?tx :seon.db/turn-id ?turn]`), never a domain attribute — a
+`created-by`/`created-at`/`source-turn` attr duplicates the tx record. The one
+exception is a PRE-event snapshot coordinate: a fact about a db value observed
+*before* the entity's own tx (`:seon.agent.turn/rendered-as-of` — other agents'
+txs interleave on the shared conn, so the turn's creation-tx is not that
+coordinate). Those are genuinely underivable and ARE stored as domain attrs.
+Worked recipe: the `datahike` skill, "Transaction metadata".
 
 ## 3. Identifying an entity's kind — presence, not a stored field
 

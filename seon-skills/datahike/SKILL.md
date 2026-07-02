@@ -317,6 +317,43 @@ attr.
 - **Schema evolution** — add attrs any time; you cannot change an existing
   attr's value type, and adding uniqueness fails if duplicates exist.
 
+## Transaction metadata — provenance rides on the tx entity
+
+Every datom's 4th field names its **transaction**, and the transaction is a
+real entity: datahike turns `:tx-meta` into datoms ON the tx
+(`reference-code/datahike/src/datahike/db/transaction.cljc:802` `flush-tx-meta`)
+and auto-stamps a monotonic `:db/txInstant`. Seon **already auto-merges
+provenance into every `transact!`**: the active `with-agent`/`with-tx-context`
+scope (the agent loop sets it for you) stamps `:seon.db/agent-id`,
+`:seon.db/session-id`, `:seon.db/turn-id`, `:seon.db/eval-id`,
+`:seon.db/origin`, `:seon.db/replay?`, `:seon.db/resume-marker?` — and it
+survives the wire to the JVM writer.
+
+So WHO/WHAT/WHEN-wrote-this is a **join, not an attribute**:
+
+```clojure
+;; which agent/turn wrote this entity's title? Bind the datom's ?tx, read the tx entity:
+(db/query '[:find ?agent ?turn
+            :where [?e :my.kb.source/id "src-1"]
+                   [?e :my.kb.source/title _ ?tx]
+                   [?tx :seon.db/agent-id ?agent]
+                   [?tx :seon.db/turn-id ?turn]])
+;; WHEN is [?tx :db/txInstant ?at] — auto-stamped, no attr of yours needed.
+```
+
+**DON'T register provenance attrs on domain entities** — a
+`:my.thing/created-by-agent`, `/created-at`, `/updated-at`, or `/source-turn`
+duplicates what the tx already records (the derive-don't-store violation in
+temporal form). Custom per-tx facts (an import batch, a source label) also go
+on the tx: include `{:db/id :db/current-tx :my.ingest/source "…"}` in the
+tx-data (`references/data-modeling.md` §Transactions).
+
+**The one exception:** a PRE-event snapshot coordinate — an application fact
+about a db value observed BEFORE the entity's own tx (canonical example:
+`:seon.agent.turn/rendered-as-of`, the frozen basis-t a prompt rendered from;
+other agents' txs interleave, so the entity's creation-tx is NOT that
+coordinate). Genuinely underivable → a real domain attr.
+
 ## Temporal, listeners, triggers (brief)
 
 ```clojure

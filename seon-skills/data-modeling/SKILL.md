@@ -125,6 +125,18 @@ inline-duplicate (duplication guarantees drift). The canonical examples live in
 If the bridge can't follow a reference shape you need, FIX the bridge — don't
 duct-tape by inlining.
 
+## Provenance is NOT a domain attribute — the tx already records it
+
+Before registering a provenance-ish attr — `created-by`, `created-at`,
+`updated-by`, `source-turn` — STOP. Every `transact!` is auto-stamped with
+`:seon.db/agent-id`/`turn-id`/`origin` (+ friends) on the **transaction
+entity**, and datahike stamps `:db/txInstant`; "who/when wrote this" is a join
+through the datom's tx, not an attribute you model. Register a domain attr
+only for a **pre-event snapshot coordinate** — a fact about a db value observed
+*before* the entity's own tx (e.g. the basis-t a prompt rendered from), which
+no tx records. Join recipe + the seven stamped attrs: the **`datahike`** skill,
+"Transaction metadata".
+
 ## Composite map schemas + entity declaration
 
 A `:map` schema names a composite shape — a fn's request/response, or a declared

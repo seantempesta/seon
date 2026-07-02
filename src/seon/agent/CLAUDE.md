@@ -52,6 +52,8 @@ turn/FSM/bounds), `data-model.md` (every attr you'll touch), `observability.md`
   turn.
 - **Agents reach verbs by full qualification** in their own nses; home-ns
   aliases (`db/`, `todo/`) resolve only in the home ns (#73).
+- **Provenance is on the TX entity** — `transact!` auto-stamps agent/turn/eval
+  tx-meta; never add `created-by`/`created-at` domain attrs (datahike skill).
 - `^:async`/`await` only inside `^:async` fns (self-host asserts); returned
   Promises auto-await via `seon.eval/maybe-await-value`.
 

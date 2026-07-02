@@ -172,6 +172,15 @@ must be a registered schema the others reference. Inlining the same
 If the Malli→datahike bridge doesn't yet handle a reference shape you need, fix
 the bridge — never duct-tape by inlining the shape at each site.
 
+### Provenance attrs are a smell — the tx entity already records it
+
+Before registering `created-by`/`created-at`/`updated-by`/`source-turn`: every
+`db/transact!` auto-stamps the active agent/turn scope as tx-meta datoms on the
+**transaction entity** (plus `:db/txInstant`), so who/when-wrote-this is a join
+through the datom's tx, not a domain attribute. The only legitimate stored form
+is a pre-event snapshot coordinate. Full rule + join recipe: the `/datahike`
+skill, "Transaction metadata".
+
 ### Request/Response Schema Pattern
 
 Define separate schemas for requests and responses with namespaced keys:

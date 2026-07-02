@@ -138,6 +138,11 @@ reason to bifurcate into "stored fast path + derived slow path" — `:memory` re
 are sub-millisecond; measure before caching. Cross-agent coordination falls out
 for free: a section that doesn't filter by agent-id sees the whole cluster.
 
+The same reflex in temporal form: **storing who/when-wrote-this on a domain
+entity** (`created-by`, `created-at`, `source-turn`) — the transaction entity
+already records it (auto-stamped tx-meta + `:db/txInstant`); derive it by
+joining the datom's tx. See the **`datahike`** skill, "Transaction metadata".
+
 ### A db is a VALUE, not a place — thread it, db-first
 
 ```clojure
