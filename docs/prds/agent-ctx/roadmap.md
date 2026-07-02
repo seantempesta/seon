@@ -47,13 +47,34 @@ substrate):
    (`docs/seon/orchestrator/issues/sci-bounding-fallback-plan-block.md` —
    unresolvable `db/*conn*` alias drops the tile onto the UNBOUNDED path).
 
-Stability queue (interleaved, one per feature unit above): **pub-socket feed
-migration** → **transact-timeout semantics**
-(`docs/seon/orchestrator/issues/tx-feed-pump-timeouts.md`) → **`*conn*`
-single-dynamic-root / fiber-local** (likely shares a root with the SCI alias
-defect and turn-6 recall). Also queued: dev-hook writes `logs/`/`tmp/`
-relative to the edited file's tree (litters submodules); boot warn
-"agent-scoped tx claims `:seon.db/origin :core-seed`" ×3 on fresh reset.
+Stability queue (interleaved, one per feature unit above; owner-agreed
+2026-07-02 — each fix REUSES an existing mechanism, no new ones):
+
+1. **Provenance-at-the-boundary** — `seon.db/transact!` stamps
+   `:seon.db/origin` from the ambient scope (same boundary-resolution concept
+   as the unit-1 injectable registry); callers never pass it; DELETE
+   `warn-on-seed-origin-forge!` (the forgery becomes impossible, killing the
+   ×3 boot warning).
+2. **Pub-socket feed migration** → **transact-timeout semantics**
+   (`docs/seon/orchestrator/issues/tx-feed-pump-timeouts.md`).
+3. **SCI alias root-fix + fallback DELETION** — store the analyzer's requires
+   on `:seon.ns/source` so SCI resolves aliases (code-as-data reuse); a fn
+   that still can't run bounded renders a `:seon/error` tile
+   (never-crash-always-surface) and the unbounded compiled fallback path is
+   REMOVED. Absorbs `sci-bounding-fallback-plan-block.md` and part of the
+   `*conn*` root.
+4. **`*conn*` single-dynamic-root / fiber-local** (remainder; turn-6 recall).
+5. **skip-syms → zero** (background thread, per unit): every remaining entry
+   gets its root cause fixed or a STRUCTURAL rule; the name list dies.
+
+Small fixes (no unit needed): dev hook resolves `logs/`/`tmp/` from the repo
+root, not the edited file's tree (submodule litter). ✅ Skills corpora SPLIT
+(owner ruling, `68d73395`): `seon-skills/` (manifest-owned) = the seon agents'
+in-runtime corpus; `.claude/skills/` = Claude Code's dev corpus — real copies,
+no symlinks, free to diverge by audience perspective; convergence returns when
+seon agents write seon code. Follow-up (content, eval-lane-shared): rewrite
+agent skills from the agent's in-runtime perspective where they still read as
+repo-dev docs.
 
 ## Eval lane — the ordered path
 

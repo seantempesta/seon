@@ -87,6 +87,13 @@ hands tool-defects here with rendered-context evidence.
 - **Tooling → Eval:** SCI-bounding plan-block defect RECEIVED — queued in
   [[CLAUDE]] tensions + roadmap item 6; likely shares a root with the `*conn*`
   single-dynamic-root stability unit.
+- **Tooling → Eval (skills corpus):** owner ruling — `.claude/skills` and
+  `seon-skills/` are now SEPARATE corpora (`68d73395`, symlinks replaced with
+  real copies): seon-skills = the agents' in-runtime corpus (yours to tune via
+  the manifest), .claude/skills = Claude Code's dev corpus. They may diverge;
+  agent-skill content should read from the AGENT's perspective (verbs, REPL,
+  my.*), not repo-dev perspective — content rewrites are shared work, flag
+  here before big edits.
 - **Owner rulings:** (1) the principle canon (eight core ideas incl.
   never-crash/isolation + one-human bond) folded into
   `docs/seon/architecture/architecture.md` §"The core ideas" — vision/ stays
