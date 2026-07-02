@@ -46,7 +46,8 @@ silently-inert dials — every one is WIRED, REMOVED, or PARKED-with-note).
 | `:seon.agent.ctx/cache-breakpoint` | `render-context-ai` | reads datom (default 20) |
 | `:seon.agent.ctx/escape-clipping?` | `format-eval-row`/`message->renderable` | `true`(default)→5000-char msg whole; `false`→clips at 4000 |
 | `:seon.agent.run/default-turn-limit`/`-deadline-ms` | `open-run!` | datom seeds run bounds |
-| `:seon.ai/agent-provider/model/temperature/max-tokens/thinking` | `ai/current` overlay (ambient id) | `::agent-model` override → adapter uses it; `:inherit`→global |
+| `:seon.ai/agent-model/temperature/max-tokens/thinking` | `ai/current` overlay (ambient id) | `::agent-model` override → adapter uses it; `:inherit`→global |
+| `:seon.ai/agent-provider` | `ai/provider` overlay → `seon.client/current-llm-fn` selects the adapter PER CALL (task #88) | agent's `::agent-provider` differs from global → its turn routes to THAT adapter; `:inherit`→global adapter (byte-parity) |
 | `:seon.ai/agent-max-retries` | `agent-max-retries` @ turn.cljs | `:inherit`→env default |
 | `:seon.agent.ctx.transcript/tiers`+`/turns-retained` | `clip-events-by-tiers` | empty→render-all (parity); tier→eviction window |
 | `:seon.agent.ctx.transcript/result-decay` (+`::decay-level` reified) | `decay-cap-for-offset` × per-eval offset | 0→16384, 2→1500, 5→200; old eval 28× smaller |

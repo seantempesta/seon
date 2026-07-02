@@ -1918,15 +1918,16 @@
                ")\n")]
     (.then (.resolve js/Promise nil) (fn [_] {:text text}))))
 
-(defn- current-llm-fn
-  "The llm-fn for this pod process: the provider the `:seon.ai/config`
-   row / SEON_AI_PROVIDER selects (`seon.ai/provider` — default
-   :deepseek, C-20) when its API key is set, else the stub. Single
-   selection point — `-main` and the hot-reload re-arm both call it.
-   Rebuilt FRESH at each call (not cached) so a hot reload of the
-   adapter ns takes effect on re-armed listeners; a registry of
-   boot-time llm-fn closures would pin agents to pre-reload adapter
-   code, defeating the re-arm."
+(defn- select-adapter
+  "Pick the llm-fn for the CURRENT effective provider — the adapter whose
+   wire path matches `(seon.ai/provider)`, gated on its API key (else the
+   stub). Read PER CALL (not cached) so it reflects the effective config at
+   the moment of the call: inside an agent turn scope ([[seon.agent.turn/run-turn!]]
+   wraps the call in `db/with-agent id`), `(seon.ai/provider)` resolves that
+   agent's `:seon.ai/agent-provider` overlay — so an agent whose provider
+   differs from the cluster default routes to ITS adapter. `:inherit` (the
+   default) and no-override agents resolve the global provider = byte-parity.
+   Outside an agent scope (boot smoke, gym render) it is the global provider."
   []
   (case (ai/provider)
     :anthropic     (if (config/anthropic-api-key)
@@ -1952,6 +1953,23 @@
     (if (openai/api-key-configured?)
       (openai/agent-adapter)
       stub-llm)))
+
+(defn- current-llm-fn
+  "The llm-fn for this pod process: a DISPATCHING closure that selects the
+   provider adapter PER CALL via [[select-adapter]]. Single selection point —
+   `-main`, the hot-reload re-arm, and the HTTP endpoints all call this.
+   Because the adapter is chosen at CALL time (not at re-arm), a per-agent
+   `:seon.ai/agent-provider` overlay routes that agent's turn to a different
+   provider than the cluster default (the call runs inside
+   [[seon.agent.turn/run-turn!]]'s `db/with-agent id` scope, so
+   `(seon.ai/provider)` resolves the effective per-agent provider). Choosing
+   per call also means a hot reload of an adapter ns takes effect on re-armed
+   listeners; a boot-time-baked closure would pin agents to pre-reload
+   adapter code. Adapter construction is a trivial closure ((agent-adapter)
+   returns (fn [ctx] …)); the real config resolves inside it via
+   `seon.ai/current`."
+  []
+  (fn [ctx-text] ((select-adapter) ctx-text)))
 
 ;; `seon.agent/armable-agent-ids` (state ≠ :terminated) is the single
 ;; source of truth for "this agent can still be woken".

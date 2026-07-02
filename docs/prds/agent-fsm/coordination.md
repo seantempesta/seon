@@ -90,6 +90,41 @@ other lane's **_Needs_** and the owner makes it.
 
 ## Core — _Now / Needs / Interface changes_
 
+- **🟢 Interface — PER-AGENT PROVIDER routing LANDED (build+unit-test only; live-proof DEFERRED, pod busy w/ benchmark b0w3y06lu) (2026-07-01).**
+  Closes the config-init follow-on gap: per-agent model/temp/max-tokens/thinking already flowed per-call, but the
+  ADAPTER (which provider's HTTP path) was chosen ONCE at agent re-arm from the GLOBAL provider — so an agent could
+  NOT use a provider different from the cluster default. **Fix (`seon.client`):** `current-llm-fn` now returns a
+  DISPATCHING closure that selects the adapter PER CALL via a new private `select-adapter` (was the old
+  `current-llm-fn` body). Inside a turn the call runs in `seon.agent.turn/run-turn!`'s `db/with-agent id` scope, so
+  `(seon.ai/provider)` resolves that agent's `:seon.ai/agent-provider` overlay → routes to ITS adapter. `:inherit`
+  / no-override → the global adapter (byte-parity). No new mechanism, no v2; the per-call adapter choice ALSO keeps
+  the hot-reload re-arm property (an adapter-ns reload takes effect on live listeners). Unblocks self-evolving-memory
+  (weak local models for cold children + strong API model for the proposer = different PROVIDERS per agent).
+  - **Unit test:** `test/seon/client/provider_routing_test.cljs` — mocked adapters (no live API), proves an
+    override agent routes to its provider's adapter, a no-override agent + explicit `:inherit` route to the global.
+    `bin/test-cljs` GREEN (885 tests / 4065 assertions / 0 failures, fresh JVM).
+  - **⏳ LIVE-PROOF RECIPE (run when the pod frees — the benchmark b0w3y06lu is using the default pod; do NOT touch it):**
+    ```clojure
+    ;; In mcp__seon_cljs__eval (session "default"), pod idle. Global provider = the cluster default.
+    ;; 1. Mint two children; give one a DIFFERENT provider than the global (needs that provider's key set).
+    (require '[seon.db :as db] '[seon.ai :as ai] '[seon.agent :as agent] '[seon.client :as client])
+    (def gid "prov-a-2607011900")
+    (def hid "prov-b-2607011900")
+    ;; create idle agents (root mints children) then set their provider overlays:
+    @(db/transact!
+       {:seon.db/tx-data
+        [{:seon.agent/id gid :seon.agent/purpose "provider-A probe" :seon.ai/agent-provider :anthropic}
+         {:seon.agent/id hid :seon.agent/purpose "provider-B probe" :seon.ai/agent-provider :inherit}]})
+    ;; 2. Confirm the effective provider resolves per agent (overlay proof):
+    (db/with-agent gid (fn [] (ai/provider)))   ;=> :anthropic  (its override)
+    (db/with-agent hid (fn [] (ai/provider)))   ;=> <the global provider>  (:inherit)
+    ;; 3. ADAPTER-routing proof — confirm each agent's turn hits the RIGHT provider. Cleanest signal:
+    ;;    watch logs/pod.log while stepping each once (rearm-wake-triggers! + a message), and confirm the
+    ;;    "<Provider> call failed/succeeded" log line names anthropic for gid and the global provider for hid.
+    ;;    (If both keys are set, both succeed; the log's provider LABEL is the routing witness.)
+    ```
+    Win condition: each agent's LLM call routes to the adapter matching its OWN effective provider, not the cluster default.
+
 - **🟡 → U: `:keeps-the-repl-clean` mis-measure (your NL-parenthetical ask) — INVESTIGATED, NOT shipped, OWNER-DECISION pending (2026-06-29).**
   Don't wait on a Core commit to re-drive — there's a knob that's the owner's call. Findings: the fix CANNOT live in
   `prose-token?`/`parse-forms` (pure CLJC, no resolution context, ~15 call sites incl. your diffusion oracle's
