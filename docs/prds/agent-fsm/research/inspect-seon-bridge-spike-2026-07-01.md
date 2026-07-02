@@ -640,6 +640,44 @@ Effort to the first REAL benchmark (niah / memory-QA): **~1–2 days** (case-1) 
 real dataset through the same `@solver` + `pass^k` epochs + the isolation-per-sample
 + parallelism refinements (§5c/§5e). SEPARATE owner-gated step; NOT started.
 
+## 5k. CORRECTION + fix — `/solve` isolated the NAMESPACE, not the DATABASE
+
+**Correction to §5j / earlier claims.** The Phase-0 close claimed `/solve` "isolates
+per sample (mints a scratch child per request)." That was **namespace-only** isolation
+(fresh agent → clean `my.agent.<id>`), NOT database isolation: every request ran in the
+SHARED live `*conn*`, so sample N's agent saw samples 1..N-1's facts in `my.kb`. A
+benchmark (B2) scored 37.5% purely from cross-sample contamination (agents quoted other
+samples' facts). Fresh agent ≠ fresh store — the empty-message-log check gave a false
+sense of isolation. §5c specified the per-sample scratch-store fix; it was never
+implemented in the productionized `/solve`. Owned + fixed.
+
+**The fix (`seon.web.serve/solve-once!`, mirrors the gym's `run-scenario!`):** each
+`/solve` request now (1) saves `prev-conn` + the FULL `@schema/*schemas` snapshot, (2)
+`set!`s `*conn*` to a fresh `:memory` scratch conn (`open-agent-conn!`), (3) SEEDS the
+core into it (`boot-seed!` under a primary `with-agent` scope — so the agent has its
+schema + `my.kb` toolkit + blocks; an unseeded void is useless), (4) mints+arms the
+scratch agent via **`init-agent!`** (NOT `start-agent!` — the latter re-`set!`s `*conn*`
+back to the cluster store, which clobbers isolation and drove a scratch agent's turns
+onto the shared wire; a real CAS-fail during impl proved this), (5) runs the existing
+message→poll→read against the scratch conn, (6) `finally` restores `*conn*` + the schema
+registry. serve.cljs can't require seon.client (cycle), so `open-agent-conn!`/
+`boot-seed!`/`init-agent!` are INJECTED via `set-solve-deps!` (same seam as
+`!create-agent-fn`). **SERIAL-ONLY** — the async wake path reads root `@db/*conn*`, so
+the benchmark must run `--max-samples 1`; fiber-local conn is a separate future item.
+
+**Live-proof (orchestrator-verified, not just the implementer's report):**
+- **Within-sample store→retrieve:** one `/solve` stored WOMBAT and replied
+  `"The project codeword is WOMBAT — stored and confirmed."`, `:completed`.
+- **Isolation across samples:** a SEPARATE `/solve` asked "what is the codeword?" —
+  agent `cBW` searched its KB and NEVER surfaced WOMBAT (empty reply, hit `:turn-limit`
+  hunting a codeword absent from its fresh store). Sample 2 got a clean store.
+- **Shared store intact (my own Datalog query over the cluster):** the scratch agents
+  (`dHH`/`cBW`) are NOT in the cluster, and no codeword landed in the shared `my.kb` —
+  the `finally` restored `*conn*` to the cluster conn; scratch drives never touched it.
+
+Live-agent shared-store model (start-agent!/`/chat`/`/agents/new`) is UNCHANGED —
+this is `/solve`-only. The benchmark harness (B1) can now re-run B2 for a real baseline.
+
 ## 6. Blockers / caveats
 
 - **No blockers to case-1.** The one honest caveat: the smoke's `/solve` door was a

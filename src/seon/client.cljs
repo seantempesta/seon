@@ -2480,6 +2480,25 @@
     (start-agent! (cond-> {:llm-fn (current-llm-fn) :mint? true}
                     (some? purpose) (assoc :purpose purpose)))))
 
+;; /solve runs each request in its OWN fresh core-seeded scratch store (per-
+;; sample isolation — no cross-sample contamination). serve.cljs can't require
+;; this ns (cycle), so inject the three scratch-store builders:
+;;   :open-conn   open-agent-conn! — fresh :memory conn w/ the full schema.
+;;   :boot-seed   boot-seed!       — seed the core into it (instruction rows +
+;;                                    the :seon.ns/:seon.fn program-graph).
+;;   :mint-agent  init-agent!      — THE per-agent wiring (create! + wake
+;;                                    trigger) AGAINST THE CURRENT *conn* (the
+;;                                    scratch conn), NOT start-agent! (which
+;;                                    re-`set!`s *conn* to the cluster store —
+;;                                    that would defeat isolation and drive the
+;;                                    scratch agent's turns against the wire).
+;;                                    Same path start-agent! uses per agent.
+;; Same injection seam + hot-reload behavior as set-create-agent-fn! above.
+(web.serve/set-solve-deps!
+  {:open-conn   open-agent-conn!
+   :boot-seed   boot-seed!
+   :mint-agent  init-agent!})
+
 ;; ---------------------------------------------------------------------------
 ;; Entry point
 ;; ---------------------------------------------------------------------------
