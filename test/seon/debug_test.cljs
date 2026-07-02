@@ -32,7 +32,8 @@
     [seon.db :as db]
     [seon.debug :as debug]
     [seon.eval :as seval]
-    [seon.repl :as repl]))
+    [seon.repl :as repl]
+    [seon.test-seed :as test-seed]))
 
 (def ^:private fs (js/require "node:fs"))
 
@@ -197,7 +198,11 @@
       (.then (fn [conn]
                (let [prev db/*conn*]
                  (set! db/*conn* conn)
-                 (-> (js/Promise.resolve (body))
+                 ;; the my.* slice of the boot index — SCI bounding is
+                 ;; fail-loud, so the default ctx blocks' my.* render fns
+                 ;; need their stored source rows to render BOUNDED here.
+                 (-> (db/transact! {:seon.db/tx-data (test-seed/my-core-rows)})
+                     (.then (fn [_] (body)))
                      (.finally (fn [] (set! db/*conn* prev)))))))))
 
 (deftest run-turn!-captures-paired-prompt-and-response

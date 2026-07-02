@@ -39,7 +39,8 @@
     [seon.db :as db]
     [seon.embed.stash :as embed-stash]
     [seon.render :as render]
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    [seon.test-seed :as test-seed]))
 
 (defn- fresh-conn
   "Promise of a fresh :memory conn with the pod's boot schema."
@@ -55,6 +56,14 @@
                        {:tx-data (into (db/malli->datahike-schema
                                          client/agent-bootstrap-attrs)
                                        (db/tx-meta-datahike-schema))})
+                     ;; the my.* slice of the boot index — SCI bounding is
+                     ;; fail-loud, so the default ctx blocks' my.* render fns
+                     ;; need their stored source rows to render BOUNDED here.
+                     ;; db/transact! (not raw d/transact!) so any :seon.fn/*
+                     ;; attr missing from the bootstrap set auto-installs.
+                     (.then (fn [_] (db/transact!
+                                      {:seon.db/conn    conn
+                                       :seon.db/tx-data (test-seed/my-core-rows)})))
                      (.then (fn [_] conn))))))))
 
 (defn- with-conn
@@ -118,16 +127,24 @@
   ;; nses the config policy lists in `:seon.config/always`. The policy CONTENTS
   ;; are not mirrored here (that drifts every prune) — derive the expected set
   ;; from the source of truth so the RULE is tested, not a hand-copy.
-  (doseq [n ["my.kb" "my.kb.shared" "my.notes" "my.notes-test"]]
+  ;; my.* INCLUDING .internal: hidden keeps it out of the PROMPT
+  ;; (included-ns? above), but the boot indexer still stores its REAL
+  ;; source — the SCI cage rebuilds a my.* render fn's require aliases
+  ;; from :seon.ns/source, and a stub would strand the fn UNBOUNDED
+  ;; (the my.plan.internal/plan-block defect).
+  (doseq [n ["my.kb" "my.kb.shared" "my.notes" "my.notes-test"
+             "my.foo.internal"]]
     (is (true? (ctx-namespaces/full-source-ns? n)) (str n " is full-source")))
   (doseq [kw    (filter #(str/starts-with? (name %) "seon.")
                         (:seon.config/always (config/namespaces-policy)))
           n     [(name kw) (str (name kw) "-test")]]
     (is (true? (ctx-namespaces/full-source-ns? n))
         (str n " (an :seon.config/always seon.* ns / its -test sibling) is full-source")))
+  ;; seon.* internals stay stubs — the .internal suffix beats the config
+  ;; policy for framework nses (internal-boundary-test pins the same).
   (doseq [n ["seon.client" "seon.eval" "seon.agent" "seon.agent.ctx"
              "seon.warn" "seon.ai" "seon.agent.search" "seon.agent.fs"
-             "seon.agent.searcher" "seon.db" "my.foo.internal"]]
+             "seon.agent.searcher" "seon.db" "seon.db.internal"]]
     (is (false? (ctx-namespaces/full-source-ns? n)) (str n " is NOT full-source"))))
 
 ;; ------------------------------------------------------------

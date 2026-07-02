@@ -113,9 +113,9 @@
                         ;; now unions the compiled helper.
                         (let [r (sci/invoke-bounded 'probe.tile/dash
                                                     {:seon.db/db @conn})]
-                          (testing "invoke-bounded returns a real render map (NOT fallthrough)"
-                            (is (not (:seon.render.sci/fallthrough r))
-                                (str "fell through — the unspecced aliased helper "
+                          (testing "invoke-bounded returns a real render map (NOT an error)"
+                            (is (not (:seon.render.sci/error r))
+                                (str "bounding failed — the unspecced aliased helper "
                                      "did not resolve under SCI: " (pr-str r)))
                             (is (contains? r :seon.render/hiccup)
                                 (str "expected a :seon.render/hiccup render map, got "
@@ -210,15 +210,111 @@
                         ;; now merges the own-ns NON-fn data const.
                         (let [r (sci/invoke-bounded 'data.tile/dims
                                                     {:seon.db/db @conn})]
-                          (testing "invoke-bounded returns a real render map (NOT fallthrough)"
-                            (is (not (:seon.render.sci/fallthrough r))
-                                (str "fell through — the own-ns data const did "
+                          (testing "invoke-bounded returns a real render map (NOT an error)"
+                            (is (not (:seon.render.sci/error r))
+                                (str "bounding failed — the own-ns data const did "
                                      "not resolve under SCI: " (pr-str r)))
                             (is (contains? r :seon.render/hiccup)
                                 (str "expected a :seon.render/hiccup render map, got "
                                      (pr-str r)))
                             (is (= [:div 3] (:seon.render/hiccup r))
                                 "grounded-dims resolved under SCI → (count …) = 3"))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; BUG A-3 — a DYNAMIC var reached through a require alias (`db/*conn*`)
+;; resolves under SCI bounding. The exact my.plan.internal/plan-block shape:
+;; the ns requires [seon.db :as db], the tile fn derefs `db/*conn*`. Pre-fix
+;; this needed the ns's REAL source stored (`full-source-ns?` excluded hidden
+;; my.*.internal → a stub with no :require → no `db` alias in the cage) AND
+;; `*conn*` enumerated off the live seon.db ns object (ns-data-members).
+;; No replay needed: seon.db is compiled/live; the tile fn is interpreted
+;; from its stored source by invoke-bounded itself.
+;; ---------------------------------------------------------------------------
+
+(def ^:private conn-tile-ns-source
+  "(ns probe.conn-tile (:require [seon.db :as db]))")
+
+(def ^:private conn-dash-source
+  ;; Derefs the aliased DYNAMIC var — the exact shape that broke plan-block.
+  (str "(defn conn-dash [in]\n"
+       "  (let [d (or (:seon.db/db in) @db/*conn*)]\n"
+       "    {:seon.render/hiccup [:div (str (some? d))]\n"
+       "     :seon.render/ai \"conn dash\"}))"))
+
+(deftest sci-bounds-tile-derefing-aliased-dynamic-var
+  (async done
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+        (.then
+          (fn [res]
+            (let [conn (aget res 1)]
+              (binding [db/*conn* conn]
+                (-> (db/transact!
+                      {:seon.db/tx-data
+                       [{:seon.ns/name   :probe.conn-tile
+                         :seon.ns/source conn-tile-ns-source}
+                        {:seon.fn/sym        "probe.conn-tile/conn-dash"
+                         :seon.fn/ns         {:seon.ns/name :probe.conn-tile}
+                         :seon.fn/source     conn-dash-source
+                         :seon.fn/created-at (js/Date.)}]})
+                    (.then
+                      (fn [_]
+                        (testing "*conn* IS an enumerable NON-fn member of the live seon.db ns"
+                          (is (contains? (seval/ns-data-members "seon.db") '*conn*)
+                              "ns-data-members demunges _STAR_conn_STAR_ → *conn*"))
+                        (let [r (sci/invoke-bounded 'probe.conn-tile/conn-dash
+                                                    {:seon.db/db @conn})]
+                          (testing "the aliased dynamic var resolves — the tile runs BOUNDED"
+                            (is (not (:seon.render.sci/error r))
+                                (str "bounding failed — db/*conn* did not resolve "
+                                     "under SCI: " (pr-str r)))
+                            (is (= [:div "true"] (:seon.render/hiccup r))
+                                "@db/*conn* deref'd to a live conn under SCI"))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; FAIL-LOUD — a my.* render fn SCI cannot run yields the ::error envelope,
+;; NEVER the old fallthrough-to-the-unbounded-compiled-path (owner ruling,
+;; 2026-07-02: bounded rendering is a safety property; a fn that can't be
+;; bounded renders a :seon/error block in place). The broken fn references an
+;; alias its ns never required → SCI resolution fails → {::error …} with a
+;; legible :seon.error/message.
+;; ---------------------------------------------------------------------------
+
+(deftest sci-bounding-failure-is-fail-loud-error-not-fallthrough
+  (async done
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+        (.then
+          (fn [res]
+            (let [conn (aget res 1)]
+              (binding [db/*conn* conn]
+                (-> (db/transact!
+                      {:seon.db/tx-data
+                       [{:seon.ns/name   :probe.broken
+                         :seon.ns/source "(ns probe.broken)"}
+                        {:seon.fn/sym        "probe.broken/bad-tile"
+                         :seon.fn/ns         {:seon.ns/name :probe.broken}
+                         :seon.fn/source
+                         (str "(defn bad-tile [in]\n"
+                              "  {:seon.render/hiccup [:div (bogus/x 1)]\n"
+                              "   :seon.render/ai \"bad\"})")
+                         :seon.fn/created-at (js/Date.)}]})
+                    (.then
+                      (fn [_]
+                        (let [r (sci/invoke-bounded 'probe.broken/bad-tile
+                                                    {:seon.db/db @conn})]
+                          (testing "the failure is the ::error envelope"
+                            (is (map? (:seon.render.sci/error r))
+                                (str "expected {:seon.render.sci/error …}, got "
+                                     (pr-str r)))
+                            (is (string? (get-in r [:seon.render.sci/error
+                                                    :seon.error/message]))
+                                "the error carries a legible message"))
+                          (testing "the old fallthrough key is GONE (no unbounded path)"
+                            (is (not (contains? r :seon.render.sci/fallthrough))
+                                "fallthrough-to-compiled was removed"))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

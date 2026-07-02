@@ -28,6 +28,7 @@
     [seon.derive :as derive]
     [seon.eval :as seval]
     [seon.repl :as repl]
+    [seon.test-seed :as test-seed]
     [seon.warn :as warn]))
 
 (defn- with-conn
@@ -36,7 +37,11 @@
       (.then (fn [conn]
                (let [prev db/*conn*]
                  (set! db/*conn* conn)
-                 (-> (js/Promise.resolve (body))
+                 ;; the my.* slice of the boot index — SCI bounding is
+                 ;; fail-loud, so the default ctx blocks' my.* render fns
+                 ;; need their stored source rows to render BOUNDED here.
+                 (-> (db/transact! {:seon.db/tx-data (test-seed/my-core-rows)})
+                     (.then (fn [_] (body)))
                      (.finally (fn [] (set! db/*conn* prev)))))))))
 
 (def ^:private agent-id "AGTlooprun0001")          ; 14 chars (:seon.db/id)

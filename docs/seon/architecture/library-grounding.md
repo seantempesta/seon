@@ -159,10 +159,14 @@ Read: `src/seon/render/sci.cljs:335-430` (`invoke-bounded`), `:92`
   **capability-by-grant** (architecture / agent-runtime isolation §). ✓
 - `:interrupt-fn deadline-interrupt-fn` + the `!deadline` volatile (413-421): the
   wall-clock bounded eval IS SCI's interrupt. ✓
-- The OUTER `try` (374-377): *"invoke-bounded must NEVER throw"* → degrade to the
-  compiled path. ✓ never-crash for Phase 2e's render engine. SCI is a safety net
-  for hangs, never a correctness gate (returns `{…/interrupt true}` or
-  `{…/fallthrough true}`, caller recovers).
+- The OUTER `try`: *"invoke-bounded must NEVER throw"* → any failure becomes the
+  `{…/error <:seon.db/error>}` envelope. ✓ never-crash for the render engine.
+  Bounding is FAIL-LOUD: when SCI can't run a `my.*` render fn (missing source,
+  an alias the stored `:seon.ns/source` doesn't carry, a runtime throw), the
+  caller renders a `:seon/error` block IN PLACE — there is NO fallback to the
+  unbounded compiled path (a hang there would wedge the single-threaded pod;
+  the never-wedge property holds unconditionally). `{…/interrupt true}` still
+  signals the deadline trip (caller recovers the tile).
 - The agent ns env is reconstituted from `:seon.fn/source`/`:seon.ns/source` rows
   each call — **code-as-data: the runtime IS the database**.
 

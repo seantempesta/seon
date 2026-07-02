@@ -67,8 +67,10 @@
     [sci.interrupt :as interrupt]
     [seon.config :as config]
     [seon.db :as db]
+    [seon.error :as err]
     [seon.eval :as seval]
-    [seon.log :as log]))
+    [seon.log :as log]
+    [seon.schema :as schema]))
 
 ;; ============================================================
 ;; Config + flag
@@ -173,27 +175,41 @@
            (contains? (ex-data x) :sci.impl/interrupt)) true
       :else (recur (ex-cause x) (inc guard)))))
 
-;; Non-brittleness: a tile that runs fine on the COMPILED path must never be
-;; broken by SCI. The interpreter only resolves what we reconstruct into the
-;; ctx (aliases, required nses, own-ns helpers) — and that reconstruction can
-;; be incomplete (a brand-new ns whose `:seon.ns/source` isn't stored yet, an
-;; unusual `:require` shape, a member not in the index). When SCI can't run a
-;; tile for any reason OTHER than the deadline interrupt, we DON'T error — we
-;; fall through to the compiled `html-render` (the proven path). That tile is
-;; simply unbounded for now (re-bounds once its source/ns settle). One-time
-;; warn per sym so a persistently-unbounded tile stays visible without spam.
-(def ^:private !fallback-warned (atom #{}))
+;; FAIL-LOUD: bounded rendering is a SAFETY property, not an optimization.
+;; When SCI can't run an agent-editable fn for any reason OTHER than the
+;; deadline interrupt — a missing `:seon.fn/source`, an env-reconstruction
+;; gap (an alias the stored `:seon.ns/source` doesn't carry), or a genuine
+;; runtime throw — invoke-bounded returns `{::error <:seon.db/error map>}`
+;; and the caller renders a `:seon/error` block IN PLACE (the ONE error
+;; mechanism). It NEVER falls back to the unbounded compiled path: a
+;; non-terminating agent-editable fn must never be able to wedge the
+;; single-threaded pod, unconditionally. The error surface is derived and
+;; self-healing — fix the fn (or its ns requires) and the next render is
+;; clean. One-time warn per sym so a persistently-failing fn stays visible
+;; in the log without spam.
+(def ^:private !bounding-warned (atom #{}))
 
-(defn- warn-fallback-once! [sym e]
-  (when-not (contains? @!fallback-warned (str sym))
-    (swap! !fallback-warned conj (str sym))
+(defn- warn-bounding-failure-once! [sym msg]
+  (when-not (contains? @!bounding-warned (str sym))
+    (swap! !bounding-warned conj (str sym))
     (log/warn! {:seon.log/source  ::invoke-bounded
                 :seon.log/message
-                (str "tile fn " sym " could not run under SCI bounding ("
-                     (or (some-> e .-message) (str e))
-                     ") — rendering it on the UNBOUNDED compiled path. If it "
-                     "ever hangs it will freeze the pod; ensure its ns "
+                (str "render fn " sym " could not run under SCI bounding ("
+                     msg ") — rendering a :seon/error block in place "
+                     "(fail-loud; the unbounded compiled fallback is "
+                     "banned). Ensure the fn's :seon.fn/source and its ns "
                      ":require aliases are stored (:seon.ns/source).")})))
+
+(defn- bounding-error
+  "The fail-loud envelope for a fn SCI could not run: warn once (per sym)
+   and return `{::error <:seon.db/error map>}` for the caller to render in
+   place. `e-or-msg` is an exception or a plain message string."
+  [sym e-or-msg]
+  (let [em (if (string? e-or-msg)
+             {:seon.error/message e-or-msg}
+             (err/->map e-or-msg))]
+    (warn-bounding-failure-once! sym (:seon.error/message em))
+    {:seon.render.sci/error em}))
 
 ;; ============================================================
 ;; Lexical-environment reconstruction — aliases, requires, sources.
@@ -327,16 +343,30 @@
 ;; The bounded invocation.
 ;; ============================================================
 
+;; invoke-bounded's return: the ::interrupt/::error envelope maps, a render
+;; fn's own envelope MAP, or any bare value seon.render's unwrap tolerates —
+;; a hiccup VECTOR (:html), a STRING (:ai), or nil (renders nothing).
+(schema/register! ::result
+  [:maybe [:or :map :string [:vector :any]]])
+
 (defn- valid-result-for-view?
-  "True when SCI's eval result `r` is a USABLE value for `view`:
-     :seon.render/html (or default) — a MAP (the html-response envelope);
-     :seon.render/ai                — a STRING (the bare rendered text).
-   Anything else is a bug / partial value → the caller falls through to the
-   compiled path (SCI is never a correctness gate)."
+  "True when SCI's eval result `r` is a value the caller can consume —
+   mirrors `seon.render`'s unwrap tolerance (a render fn may return the
+   html-response MAP envelope OR the bare view value, and nil renders
+   nothing):
+     :seon.render/html (or default) — a map, a bare hiccup VECTOR, or nil;
+     :seon.render/ai                — a map, a bare STRING, or nil.
+   Anything else is a broken render fn → a `:seon/error` block in place
+   (fail-loud; re-running it on the unbounded compiled path is banned).
+   The TILE caller (`seon.render/render-agent-tile`) additionally requires
+   the map envelope and fail-louds a bare value itself — the envelope-vs-
+   bare tolerance is the caller's contract, not SCI's."
   [view r]
-  (case view
-    :seon.render/ai (string? r)
-    (map? r)))
+  (or (nil? r)
+      (map? r)
+      (case view
+        :seon.render/ai (string? r)
+        (vector? r))))
 
 (defn invoke-bounded
   "Invoke an AGENT-authored render fn `sym` under SCI, time-bounded.
@@ -357,36 +387,40 @@
      String for `:ai`);
    - `{:seon.render.sci/interrupt true}` when the deadline tripped (caller
      does fallback + recovery);
-   - `{:seon.render.sci/fallthrough true}` when SCI could not run the fn for
-     ANY reason other than the interrupt — no stored source, an env-
-     reconstruction gap (new ns this turn, unusual require), or even a genuine
-     runtime throw. The caller renders it on the compiled path, which either
-     succeeds (the SCI env was just incomplete — a working fn is never broken
-     by bounding) or throws the real error into the caller's catch → a legible
-     fallback. SCI is a pure safety net for hangs; it is never a correctness
-     gate."
+   - `{:seon.render.sci/error <:seon.db/error map>}` when SCI could not run
+     the fn for ANY reason other than the interrupt — no stored source, an
+     env-reconstruction gap (an alias the stored `:seon.ns/source` doesn't
+     carry), a genuine runtime throw, or a result of the wrong shape. The
+     caller renders a `:seon/error` block IN PLACE (fail-loud); it must
+     NEVER run the fn on the unbounded compiled path — the never-wedge
+     safety property holds unconditionally. Never throws itself."
   ;; One `:=>` per runtime arity (idiomatic multi-arity) — a single `:=>` with
   ;; `{:optional true}` catn slots leaves arities 2/3 loosely validated and
   ;; trips malli's arity dispatch under instrument/unstrument cycles. The
   ;; lower arities delegate schema-valid defaults (`:seon.render/html` keyword,
-  ;; `default-budget-ms` int), so no delegation trap.
+  ;; `default-budget-ms` int), so no delegation trap. The return is
+  ;; `::result` — the envelope maps OR any bare value `valid-result-for-view?`
+  ;; admits (a bare hiccup vector / a bare ai string / nil renders nothing),
+  ;; mirroring `seon.render`'s unwrap tolerance.
   {:malli/schema
    [:function
-    [:=> [:catn [::sym :symbol] [::input :map]] [:or :map :string]]
-    [:=> [:catn [::sym :symbol] [::input :map] [::view :keyword]] [:or :map :string]]
+    [:=> [:catn [::sym :symbol] [::input :map]] ::result]
+    [:=> [:catn [::sym :symbol] [::input :map] [::view :keyword]] ::result]
     [:=> [:catn [::sym :symbol] [::input :map] [::view :keyword] [::budget-ms :int]]
-         [:or :map :string]]]}
+         ::result]]}
   ([sym input] (invoke-bounded sym input :seon.render/html default-budget-ms))
   ([sym input view] (invoke-bounded sym input view default-budget-ms))
   ([sym input view budget-ms]
    ;; OUTER GUARD — invoke-bounded must NEVER throw (the user's hard rule: SCI
    ;; may fail but must not crash the pod). Any unexpected error (a failure in
-   ;; sci/init or env reconstruction) degrades to the compiled path too.
+   ;; sci/init or env reconstruction) becomes the ::error envelope too.
    (try
      (let [db     (:seon.db/db input)
            source (when db (fn-source db sym))]
        (if (nil? source)
-         {:seon.render.sci/fallthrough true}
+         (bounding-error
+           sym (str "no stored :seon.fn/source for " sym
+                    " — the fn cannot be interpreted (bounded)"))
          (let [agent-ns (namespace sym)
                ns-src   (ns-source db (keyword agent-ns))
                {:keys [aliases nses refers refer-all]}
@@ -429,26 +463,26 @@
            (vreset! !deadline (+ (js/Date.now) budget-ms))
            (try
              (let [r (sci/eval-string* c call)]
-               ;; Non-brittle: a fn that returns the wrong shape under SCI (a
-               ;; bug, or a partial value) must NOT become an instrumentation
-               ;; throw on our return contract — fall through to the compiled
-               ;; path, which feeds the same value to the existing handling.
-               ;; SCI is never a correctness gate. The valid shape is
-               ;; view-dependent (a String for :ai, a map for :html).
+               ;; The valid shape is view-dependent (a String for :ai, a map
+               ;; for :html). A wrong-shape result is a broken render fn → a
+               ;; :seon/error block in place (fail-loud; the fn is NOT re-run
+               ;; on the unbounded compiled path).
                (if (valid-result-for-view? view r)
                  r
-                 {:seon.render.sci/fallthrough true}))
+                 (bounding-error
+                   sym (str sym " returned an invalid "
+                            (name (or view :seon.render/html)) " result — "
+                            "expected " (if (= view :seon.render/ai)
+                                          "a string" "a map")))))
              (catch :default e
                (if (interrupt-ex? e)
                  {:seon.render.sci/interrupt true}
-                 ;; any non-interrupt SCI failure → run it on the compiled path
-                 ;; (non-brittle: SCI never breaks a tile that works compiled)
-                 (do (warn-fallback-once! sym e)
-                     {:seon.render.sci/fallthrough true})))))))
+                 ;; any non-interrupt SCI failure → a :seon/error block in
+                 ;; place (fail-loud; never the unbounded compiled path)
+                 (bounding-error sym e)))))))
      (catch :default e
-       ;; reconstruction / init failure — never crash; render compiled.
-       (warn-fallback-once! sym e)
-       {:seon.render.sci/fallthrough true}))))
+       ;; reconstruction / init failure — never crash; error in place.
+       (bounding-error sym e)))))
 
 ;; ============================================================
 ;; Recovery — reset the hung tile to welcome + inform the agent.

@@ -169,23 +169,32 @@
   "True when `ns-name` carries its REAL FULL FILE TEXT as `:seon.ns/source`.
 
    Accepts a string, symbol, or ns-name keyword. Every `my.*` ns (the
-   human's world — always inlined), including `-test` siblings (the
-   `-test` suffix is stripped to the subject ns first), AND every seon.* ns
-   the config policy lists in `:seon.config/always` ([[always-full?]] — e.g.
-   `:seon.agent.message`, so its REAL body is stored). Used by the boot indexer
-   (`seon.client/ns-row`) to decide which rows get the file read: it stores
-   source for a SUPERSET of what any one agent renders full, so a per-agent
-   `::full-source` pin (or the current ns) has real source to show. It does
-   NOT drive per-agent SELECTION — that is [[namespaces-block]]'s three-rule
-   model. Third-party (`acme`) roots are full-source too, gated separately by
+   human's world — always inlined), INCLUDING `.internal` siblings and
+   `-test` siblings (the `-test` suffix is stripped to the subject ns
+   first), AND every non-hidden seon.* ns the config policy lists in
+   `:seon.config/always` ([[always-full?]] — e.g. `:seon.agent.message`, so
+   its REAL body is stored; for seon.* the `.internal` suffix beats the
+   config policy). Used by the boot indexer (`seon.client/ns-row`) to
+   decide which rows get the file read: it stores source for a SUPERSET of
+   what any one agent renders full, so a per-agent `::full-source` pin (or
+   the current ns) has real source to show. It does NOT drive per-agent
+   SELECTION — that is [[namespaces-block]]'s three-rule model
+   ([[included-ns?]] keeps `.internal` out of the prompt regardless of what
+   is stored). `my.*.internal` MUST store real source even though it never
+   renders: its fns are agent-editable render fns
+   (`seon.render.sci/agent-authored-sym?` routes every `my.*` fn through
+   the SCI cage) and the cage rebuilds a fn's lexical environment — its
+   `:require` `:as` aliases — from the stored `:seon.ns/source`; a
+   `(ns x)` stub loses the aliases and the fn cannot run BOUNDED.
+   Third-party (`acme`) roots are full-source too, gated separately by
    `seon.client/extra-src-ns-strs` (the same file read). Every other ns gets
    the minimal `(ns x)` stub at boot (still indexed + searchable)."
   {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
   [ns-name]
   (let [s    (if (keyword? ns-name) (name ns-name) (str ns-name))
         base (base-ns-name s)]
-    (boolean (and (not (hidden-ns-name? s))
-                  (or (my-ns-name? base)
+    (boolean (or (my-ns-name? base)
+                 (and (not (hidden-ns-name? s))
                       (always-full? base))))))
 
 (defn- seon-framework-ns?

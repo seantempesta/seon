@@ -745,11 +745,32 @@
                              (do (render-sci/recover-hung-tile!
                                    id value render-sci/default-budget-ms)
                                  (html-render live-tile/welcome-sym input))
-                             ;; no stored source to interpret — use the normal
-                             ;; compiled path (no worse than today).
-                             (:seon.render.sci/fallthrough r)
-                             (html-render value input)
-                             :else r))
+                             ;; SCI could not run the fn — FAIL-LOUD: throw
+                             ;; into the guard below (strict dial → loud;
+                             ;; prod → the calm error-response + the derived
+                             ;; agent-facing truth). NEVER the unbounded
+                             ;; compiled path: a hang there would wedge the
+                             ;; single-threaded pod.
+                             (:seon.render.sci/error r)
+                             (throw (ex-info
+                                      (str "tile fn " value " could not run "
+                                           "under SCI bounding — "
+                                           (get-in r [:seon.render.sci/error
+                                                      :seon.error/message]))
+                                      {:seon/error (:seon.render.sci/error r)}))
+                             ;; the TILE contract is the html-response MAP
+                             ;; envelope (nil tolerated — renders nothing);
+                             ;; a bare value is a broken tile fn → the same
+                             ;; guard below (legible error-response), never
+                             ;; an unbounded compiled re-run.
+                             (or (nil? r) (map? r)) r
+                             :else
+                             (throw (ex-info
+                                      (str "tile fn " value " returned a bare "
+                                           "value — a tile fn must return the "
+                                           "{:seon.render/hiccup … "
+                                           ":seon.render/ai …} map envelope")
+                                      {:seon.render.live-tile/content value}))))
                          (html-render value input))
                 ;; INTERACTIVITY: rewrite agent fn-call / fn-ref handler slots
                 ;; in AGENT-authored hiccup into standard Datastar
@@ -964,13 +985,21 @@
               ;; deadline tripped → render nothing (a block never crashes
               ;; its siblings; the recovery path warns the agent).
               (and (map? r) (:seon.render.sci/interrupt r)) nil
-              ;; SCI could not run it — fall back to the COMPILED fn (the SCI
-              ;; env was just incomplete). If the symbol resolves nowhere, it
-              ;; is a genuinely-missing slot → a legible self-heal line.
-              (and (map? r) (:seon.render.sci/fallthrough r))
-              (if-let [f (eval/lookup-value slot-val)]
-                (f in)
-                (missing-render view (renderable-id node) slot-val))
+              ;; SCI could not run it — FAIL-LOUD. A symbol that resolves
+              ;; NOWHERE is a genuinely-missing slot → the legible self-heal
+              ;; line; anything else throws into the walker's guard
+              ;; (strict dial → loud; prod → the in-place ⚠ line / error
+              ;; tile). NEVER the unbounded compiled call: a hang there
+              ;; would wedge the single-threaded pod.
+              (and (map? r) (:seon.render.sci/error r))
+              (if (nil? (eval/lookup-value slot-val))
+                (missing-render view (renderable-id node) slot-val)
+                (throw (ex-info
+                         (str "render fn " slot-val " could not run under "
+                              "SCI bounding — "
+                              (get-in r [:seon.render.sci/error
+                                         :seon.error/message]))
+                         {:seon/error (:seon.render.sci/error r)})))
               :else r)))
         (let [f (eval/lookup-value slot-val)]
           (if f f (fn [_] (missing-render view (renderable-id node) slot-val)))))
