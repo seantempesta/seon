@@ -202,25 +202,93 @@
      (and (fn? f) (nil? (gobj/get f "cljs$lang$maxFixedArity")))))
 
 #?(:cljs
-   (defn async-fschema
-     "A malli function-schema OBJECT (not a form) for a single `:=>`
-      schema whose fn is `^:async`. Delegates every `Schema`/
-      `FunctionSchema` method to the real `:=>` schema EXCEPT
-      `-instrument-f`, which it overrides to await-then-validate:
+   (def injectables
+     "The injectable REGISTRY — `injectable-key → (fn [eval-ctx] value)`.
 
+      The ONE extension surface for explicit dependency injection at the eval
+      boundary (`docs/seon/architecture/context.md` §\"Explicit dependencies\").
+      A map-in fn declares an injectable as an `{:optional true}` request key;
+      [[injecting-fschema]]'s wrapper fills every DECLARED-BUT-ABSENT key from
+      the current eval context — explicit caller args always win. Adding a
+      dependency is ONE entry here + fns declaring the key.
+
+      The eval-context SOURCE is the ALS/`*conn*` the loop already establishes
+      (`seon.agent.turn/run-turn!` wraps eval in `db/with-agent id`), so the
+      fn body never reads an invisible dynamic var — the boundary does it once,
+      visibly, and the fn's spec is the honest statement of what it needs. A
+      provider yielding nil leaves the key ABSENT (never store nil — optional =
+      absent). `eval-ctx` is reserved for future per-call context; today the
+      providers read ALS/`*conn*` directly and it is passed `nil`."
+     {:seon.db/db    (fn [_] (some-> db/*conn* deref))
+      :seon.agent/id (fn [_] (db/current-agent-id))}))
+
+#?(:cljs
+   (defn- inject-into
+     "Fill each DECLARED injectable `k` ABSENT from request map `m` with its
+      [[injectables]] value from the eval context. Explicit keys WIN (a
+      present key is untouched); a provider yielding nil leaves the key
+      absent. `inj-keys` is the pre-computed declared∩registry set."
+     [m inj-keys]
+     (reduce (fn [acc k]
+               (if (contains? acc k)
+                 acc
+                 (let [v ((injectables k) nil)]
+                   (if (some? v) (assoc acc k v) acc))))
+             m inj-keys)))
+
+#?(:cljs
+   (defn declared-injectables
+     "The set of injectable request-keys a fn's `:=>` `schema-obj` DECLARES on
+      its FIRST (map) argument — the intersection of that arg map's keys with
+      the [[injectables]] registry. Computed ONCE per fn at register time
+      (rides on [[injecting-fschema]]'s closure), never per call.
+
+      Reads the arg schema via `m/-function-info` → first `:input` child →
+      `m/deref` (resolves a registered `::req` ref OR passes an inline `:map`
+      through) → `m/entries` (all entries, optional included). Empty for a fn
+      whose first arg is not a `:map` or declares no injectable key.
+      Errors-as-values: any malli mishap yields `#{}` (the fn is simply not
+      injected)."
+     {:malli/schema [:=> [:cat :any] [:set :keyword]]}
+     [schema-obj]
+     (try
+       (let [info (m/-function-info schema-obj)
+             arg0 (first (m/children (:input info)))
+             d    (when arg0 (m/deref arg0))]
+         (if (and d (= :map (m/type d)))
+           (into #{} (comp (map first) (filter injectables)) (m/entries d))
+           #{}))
+       (catch :default _ #{}))))
+
+#?(:cljs
+   (defn injecting-fschema
+     "A malli function-schema OBJECT (not a form) for a single simple
+      fixed-arity `:=>` schema — SYNC or `^:async`. Delegates every `Schema`/
+      `FunctionSchema` method to the real `:=>` schema EXCEPT `-instrument-f`,
+      which it overrides to INJECT-then-validate:
+
+        - INJECT: every DECLARED-BUT-ABSENT injectable key ([[injectables]],
+          pre-computed via [[declared-injectables]]) is filled into the first
+          (map) arg from the eval context BEFORE input validation, so the
+          filled map satisfies the `:map` and explicit caller args win;
         - input + arity validated synchronously (throws via `report`);
-        - the call's return (a Promise) gets a `.then` that validates the
-          RESOLVED value against the output schema and `report`s a
-          mismatch, re-resolving the value unchanged. A non-thenable
-          return is passed through untouched.
+        - the call's return, if a Promise, gets a `.then` validating the
+          RESOLVED value against the output schema; a non-thenable return
+          validates output synchronously (the sync path). Either way the
+          value re-resolves unchanged.
 
-      Registering this object (via `m/-register-function-schema!` with the
-      `identity` transformer) makes malli's stock `mi/instrument!` reuse
-      ALL its var-surgery and simply call this `-instrument-f` — no custom
-      registry, no var-install code of our own."
+      Replaces the older async-only wrapper: it handles BOTH sync and async
+      map-in fns (a fn declaring no injectable key is behavior-identical to
+      the stock wrapper — no injection, same input+output validation), so
+      `register-target!` routes every simple fixed-arity `:=>` fn here. This
+      is the ONE injecting boundary — no second wrapper. Registering it (via
+      `m/-register-function-schema!` with the `identity` transformer) makes
+      malli's stock `mi/instrument!` reuse ALL its var-surgery and simply call
+      this `-instrument-f`."
      {:malli/schema [:=> [:cat :any] :any]}
      [inner-form]
-     (let [s (m/schema inner-form)]
+     (let [s        (m/schema inner-form)
+           inj-keys (declared-injectables s)]
        (reify
          m/Schema
          (-validator [_] (m/-validator s))
@@ -247,7 +315,13 @@
                  wrap-in  (contains? scope :input)
                  wrap-out (contains? scope :output)]
              (fn [& args]
-               (let [args (vec args), n (count args)]
+               (let [args (vec args)
+                     ;; INJECT declared-absent deps into the request map before
+                     ;; validation; explicit args win, nil providers no-op.
+                     args (if (and (seq inj-keys) (map? (first args)))
+                            (assoc args 0 (inject-into (first args) inj-keys))
+                            args)
+                     n    (count args)]
                  (when wrap-in
                    (when-not (<= min n (or max js/Number.MAX_SAFE_INTEGER))
                      (report :malli.core/invalid-arity
@@ -264,20 +338,23 @@
                                             {:output output :value v
                                              :args args :schema s}))
                                   v))
-                     ret)))))))))) ; non-thenable return — pass through
+                     (do (when (and wrap-out (not (vout ret)))
+                           (report :malli.core/invalid-output
+                                   {:output output :value ret
+                                    :args args :schema s}))
+                         ret)))))))))))
 
 #?(:cljs
    (defn register-target!
      "Register ONE schema'd fn into malli's `:cljs` function-schema
-      registry with the wrapper that fits its shape, then return. Three
-      routes:
+      registry with the wrapper that fits its shape, then return. Routes:
 
         - fn is in [[skip-syms]] → register NOTHING (self-validating).
-        - sync fn → register the raw schema form; malli's stock wrapper
-          validates input + output synchronously (the original behavior).
-        - async fn that is a simple single-fixed-arity `:=>` → register an
-          [[async-fschema]] object so input validates synchronously and
-          output validates on Promise resolution.
+        - simple single-fixed-arity `:=>` (SYNC or `^:async`) → register an
+          [[injecting-fschema]] object: it injects declared-absent deps into
+          the request map, validates input synchronously, and validates
+          output synchronously (sync return) or on Promise resolution (async
+          return). This is the map-in case where dependency injection applies.
         - async fn that is variadic or multi-arity (e.g. a self-validating
           fn that did NOT opt out) → register the raw form with per-fn
           `{:scope #{:input}}`, so malli's stock wrapper (which correctly
@@ -285,6 +362,10 @@
           Output validation for these shapes is deferred — a wrapper that
           returns a derived Promise across malli's variadic marshalling is
           a separate piece of work.
+        - sync variadic / multi-arity (or a fn whose live var isn't
+          resolvable yet) → register the raw schema form; malli's stock
+          wrapper validates input + output synchronously (no injection —
+          injection is the single-map-arg case only).
 
       `mi/instrument!` (called once afterward) reads this registry and
       installs each wrapper in place."
@@ -292,17 +373,22 @@
      [ns-sym fn-sym schema-form async?]
      (cond
        (skip? ns-sym fn-sym) nil
-       (not async?)
-       (m/-register-function-schema! ns-sym fn-sym schema-form {} :cljs identity)
        :else
        (let [the-fn (-find-js-var ns-sym fn-sym)
              arrow? (try (= :=> (m/type (m/schema schema-form)))
                          (catch :default _ false))]
-         (if (and the-fn arrow? (-simple-fixed-arity-fn? the-fn))
-           (m/-register-function-schema! ns-sym fn-sym (async-fschema schema-form)
+         (cond
+           ;; simple fixed-arity :=> (sync OR async) → the injecting wrapper.
+           (and the-fn arrow? (-simple-fixed-arity-fn? the-fn))
+           (m/-register-function-schema! ns-sym fn-sym (injecting-fschema schema-form)
                                          {} :cljs identity)
+           ;; async variadic/multi-arity → stock wrapper, input + arity only.
+           async?
            (m/-register-function-schema! ns-sym fn-sym schema-form
-                                         {:scope #{:input}} :cljs identity))))))
+                                         {:scope #{:input}} :cljs identity)
+           ;; sync variadic/multi-arity (or unresolvable var) → stock wrapper.
+           :else
+           (m/-register-function-schema! ns-sym fn-sym schema-form {} :cljs identity))))))
 
 
 #?(:cljs
