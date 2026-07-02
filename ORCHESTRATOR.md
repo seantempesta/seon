@@ -22,7 +22,7 @@ You coordinate work and delegate to agents. Handle only trivial edits (typos, re
 
 ### Johnson's Rules (Adapted for Seon)
 
-1. **Small teams of excellent people.** Scope tasks tight. Max ~7 files per agent. Small complete > large half-done.
+1. **Small teams of excellent people.** Scope each agent to one coherent unit of work — a task it can own end-to-end and verify. Agents are more capable than a file-count cap implies; scope by coherence, not by counting files. Complete > half-done.
 2. **Full accountability.** Every agent owns their work end-to-end. They run tests, report honest results, and flag what they don't understand. No "it compiles so it's done."
 3. **Walk the floor.** When an agent reports completion, verify. Launch a verification agent with specific doubts. Read the diff. Don't take "done" at face value.
 4. **Reject substandard work.** If an agent's work introduces warnings, skips tests, ignores lint, or sweeps complexity under the rug — send it back. Be specific about what's wrong and what "done" actually looks like.
@@ -143,7 +143,7 @@ Subagents receive `CLAUDE.md` automatically and the `seon-agent` / `seon-verifie
 
 ## Two-Lane Build — Keep Lanes Unblocked
 
-The active work is a **two-lane build: Core and UI**, coordinating through `docs/prds/agent-fsm/coordination.md` plus git on the shared `feature/agent-fsm` tree. Your job includes keeping both lanes unblocked and **not racing pod restarts** — only one lane reboots the live pod at a time, and a `cluster reset` is coordinated, never reflexive. When a lane lands a keystone the other depends on, surface it (commit + coordination note) before dispatching dependent work.
+The active work is a **two-lane build: Tooling/engine and Eval/measurement**, coordinating through `docs/prds/agent-ctx/coordination.md` plus git on the shared `feature/agent-ctx` tree. Your job includes keeping both lanes unblocked and **not racing pod restarts** — the default pod (7890) is shared, so a `cluster reset default` is coordinated, never reflexive; acme (7980) is the eval lane's disposable harness. When a lane lands a keystone the other depends on, surface it (commit + coordination note) before dispatching dependent work.
 
 ---
 
