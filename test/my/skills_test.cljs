@@ -5,10 +5,10 @@
      1. SCHEMA — the three `:my.skills/*` attrs are the shapes the design
         locks (identity keyword name, non-blank description, non-blank inline
         body).
-     2. CORPUS SCAN — `seed-skills-tx-data` reads the REAL `.claude/skills`
-        dir end-to-end (frontmatter scanner + dir walk), so the scanner can't
-        bit-rot: the shipped skills appear as rows with name + file-path +
-        verbatim description.
+     2. CORPUS SCAN — `seed-skills-tx-data` reads the REAL shipped corpus
+        (`config/skills-dir`, manifest-owned) end-to-end (frontmatter scanner
+        + dir walk), so the scanner can't bit-rot: the shipped skills appear
+        as rows with name + file-path + verbatim description.
      3. LOAD / UNLOAD / LIST — load installs ONE `:skill/<name>` block, unload
         removes it, and the catalog's `::loaded?` is DERIVED from the agent's
         own blocks (no stored flag).
@@ -25,11 +25,15 @@
     [clojure.string :as str]
     [datahike.api :as d]
     [seon.client :as client]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.schema :as schema]
     [my.skills :as skills]))
 
-(def datahike-skill-path ".claude/skills/datahike/SKILL.md")
+;; Derived from the SAME source of truth the scanner uses (the manifest's
+;; :seon.config/dirs, else env, else the default) — never a pinned literal,
+;; so a corpus move can't stale this test.
+(def datahike-skill-path (str (config/skills-dir) "/datahike/SKILL.md"))
 
 ;; A valid `:seon.db/id` agent id — exactly 14 chars ("root" or a 14-char id
 ;; are the only shapes the `:seon.agent/id` schema accepts).
@@ -94,7 +98,7 @@
       "inline body is a non-blank string (agent-authored skills only)"))
 
 ;;; ───────────────────────────────────────────────────────────────────────
-;;; 2. CORPUS SCAN — the real .claude/skills dir, end to end.
+;;; 2. CORPUS SCAN — the real shipped corpus dir, end to end.
 ;;; ───────────────────────────────────────────────────────────────────────
 
 (deftest seed-scan-reads-the-shipped-skill-corpus

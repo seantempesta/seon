@@ -730,6 +730,15 @@
                                                run-id)))))]
                 (testing "the loop RETURNS at the per-turn bound and lands :idle"
                   (is (= :idle final)))
+                ;; Under suite load close-run!'s OWN awaiter can be freed by
+                ;; the same 80ms bound (the loop bounds EVERY await, close
+                ;; included) — the close tx still lands: nothing moved the
+                ;; pointer, so its CAS work-fence passes. Await the settle,
+                ;; then assert the OUTCOME, never the timing.
+                (await (wait-until
+                         #(some? (:seon.agent.run/closed-reason
+                                   (run/snapshot {:seon.agent.run/id run-id})))
+                         2000 25))
                 (testing "the run closed :error (not parked until the deadline reaper)"
                   (is (= :error (:seon.agent.run/closed-reason
                                   (run/snapshot {:seon.agent.run/id run-id})))))
