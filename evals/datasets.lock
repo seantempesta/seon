@@ -1,0 +1,287 @@
+{
+  "bespoke": {
+    "clojure_codegen_specs": {
+      "canary_guid": "SEON-CANARY-7dfe4642-8f97-4c1d-bd48-a677b1d8c60e",
+      "dev_n": 10,
+      "dev_seed": 1,
+      "epochs": 4,
+      "milestone_seed": 2,
+      "status": "pending-generator",
+      "test_seed": "fresh-per-draw"
+    },
+    "file_edit": {
+      "canary_guid": "SEON-CANARY-1e699ae3-aaec-41fc-b3de-93275b26f334",
+      "dev_n": 8,
+      "dev_seed": 1,
+      "epochs": 4,
+      "milestone_seed": 2,
+      "status": "pending-generator",
+      "test_seed": "fresh-per-draw"
+    },
+    "long_term_planning": {
+      "canary_guid": "SEON-CANARY-22c6919d-7697-4d0b-b8e4-96cedb1bd0c5",
+      "dev_n": 10,
+      "dev_seed": 1,
+      "epochs": 4,
+      "milestone_seed": 2,
+      "status": "pending-generator",
+      "test_seed": "fresh-per-draw"
+    },
+    "memory_store_recall": {
+      "canary_guid": "SEON-CANARY-54573edc-cea4-456d-9aa4-16a0af04d5d1",
+      "dev_n": 10,
+      "dev_seed": 1,
+      "epochs": 4,
+      "milestone_seed": 2,
+      "status": "pending-generator",
+      "test_seed": "fresh-per-draw"
+    },
+    "shell_use": {
+      "canary_guid": "SEON-CANARY-686a159d-802e-40ec-8249-30714e5b74fb",
+      "dev_n": 8,
+      "dev_seed": 1,
+      "epochs": 4,
+      "milestone_seed": 2,
+      "status": "pending-generator",
+      "test_seed": "fresh-per-draw"
+    },
+    "ui_tiles": {
+      "canary_guid": "SEON-CANARY-b9fffae7-9667-448f-b175-e06120f2e213",
+      "dev_n": 5,
+      "dev_seed": 1,
+      "epochs": 2,
+      "milestone_seed": 2,
+      "status": "pending-generator",
+      "test_seed": "fresh-per-draw"
+    },
+    "web_fetch": {
+      "canary_guid": "SEON-CANARY-197a6a55-8a32-40be-9ff1-98ff5313316c",
+      "dev_n": 8,
+      "dev_seed": 1,
+      "epochs": 4,
+      "milestone_seed": 2,
+      "status": "pending-generator",
+      "test_seed": "fresh-per-draw"
+    }
+  },
+  "command": "cd src-inspect-ai && .venv/bin/python -m seon_inspect.freeze",
+  "global_seed": 20260702,
+  "sampling_procedure": "per source: sort samples by str(id); shuffle with random.Random(f'{GLOBAL_SEED}:{source}'); where a stratify label exists, shuffle stratum order + within-stratum order with the same rng and interleave round-robin; slice the resulting order: first dev_n = dev, next milestone_n = milestone, remainder = blind test reserve",
+  "schema_version": 1,
+  "sources": {
+    "arc_challenge": {
+      "bench": "arc_challenge",
+      "capability_row": "science_qa",
+      "content_sha256": "89ebf51fc680c20a01a96f566f7c9b5ab5a88834197072f173bbd8ad31cff41f",
+      "dev": {
+        "n": 15,
+        "sample_ids": [
+          "Mercury_SC_405931",
+          "MEA_2010_8_1",
+          "Mercury_411732",
+          "Mercury_SC_400683",
+          "Mercury_7216248",
+          "Mercury_400803",
+          "MEA_2016_5_4",
+          "Mercury_7234378",
+          "MCAS_2013_8_29416",
+          "Mercury_7159250",
+          "Mercury_7250058",
+          "ACTAAP_2010_5_7",
+          "Mercury_SC_400324",
+          "MCAS_2003_8_29",
+          "Mercury_400699"
+        ]
+      },
+      "milestone": {
+        "n": 15,
+        "sample_ids": [
+          "MDSA_2007_8_30",
+          "NAEP_2005_4_S14+3",
+          "Mercury_SC_400383",
+          "Mercury_7026355",
+          "Mercury_403930",
+          "Mercury_LBS10131",
+          "MDSA_2009_4_1",
+          "ACTAAP_2010_7_12",
+          "NYSEDREGENTS_2012_8_42",
+          "Mercury_LBS10814",
+          "Mercury_7017045",
+          "MDSA_2009_4_34",
+          "ACTAAP_2007_7_36",
+          "TIMSS_2003_8_pg85",
+          "Mercury_SC_405726"
+        ]
+      },
+      "pin": {
+        "inspect_evals.arc.arc.ARC_DATASET_REVISION": "210d026faf9955653af8916fad021475a3f00453"
+      },
+      "seed": "20260702:arc_challenge",
+      "stratify": null,
+      "test": {
+        "canary_guid": "SEON-CANARY-1a54ea17-e564-4246-8a13-e82d33ca4072",
+        "n": 1142,
+        "sample_ids_sha256": "862f6537c8e2d676ae6976a46969770118d18d515d6dd696421353d3b83d86a2"
+      },
+      "total_n": 1172
+    },
+    "gpqa_diamond": {
+      "bench": "gpqa_diamond",
+      "capability_row": "hard_calibration",
+      "content_sha256": "203c374afd29ef6aa00e96064bd8d3012f1dfe6249db5467e80f538045ab8074",
+      "dev": {
+        "n": 10,
+        "sample_ids": [
+          "recGFNRVl1qBZGwyU",
+          "recyl3usDqb7ruXJx",
+          "recaXdGn3FAIkxLGM",
+          "reck1zKeCssmN82Ga",
+          "rec4L69T0Y1AS4AFS",
+          "reczQ4I0VpENdMtIj",
+          "recjgMJaMxz4ESDF2",
+          "recNu3MXkvWUzHZr9",
+          "recINGR1z01Fh1Z3A",
+          "recUBgVlkKzcRPDdK"
+        ]
+      },
+      "milestone": {
+        "n": 10,
+        "sample_ids": [
+          "recnTTKdBzfuoZ7w7",
+          "rec2fsnzUuvNtUYK8",
+          "recK9F5aqdaybl8bb",
+          "rec7C06XOB2h298ue",
+          "recypVp2NmPlBKVTp",
+          "reca44yABeO2fx7UB",
+          "recnjViFrqlZNL3fY",
+          "recr3VHM4zYf6dMFY",
+          "recb2M22zaD3tL6Qc",
+          "recnawZPumSCLMVgp"
+        ]
+      },
+      "pin": {
+        "inspect_evals.gpqa.gpqa.GPQA_DIAMOND_DATASET_SHA256": "41d1213cd7a4998605a26c2798500652572007161b3a92817ba46b35befcd305"
+      },
+      "seed": "20260702:gpqa_diamond",
+      "stratify": null,
+      "test": {
+        "canary_guid": "SEON-CANARY-efc705fc-3dd0-40ca-bd89-77a1fe93a0c4",
+        "n": 178,
+        "sample_ids_sha256": "890417a13d885d8b381c8fd618a47a9b56accbc90794c27269f8667b56126fb0"
+      },
+      "total_n": 198
+    },
+    "gsm8k": {
+      "bench": "gsm8k",
+      "capability_row": "reasoning",
+      "content_sha256": "d8bf2ce9eadc323db5e0ac056ec64fd4c768885fa67e341cd3604a893b8cc01e",
+      "dev": {
+        "n": 15,
+        "sample_ids": [
+          "gsm8k_90a2b650",
+          "gsm8k_a8e9303c",
+          "gsm8k_5602e6ac",
+          "gsm8k_875bab2d",
+          "gsm8k_f4e225e3",
+          "gsm8k_eb422e6a",
+          "gsm8k_6ef4718b",
+          "gsm8k_2c6abaf1",
+          "gsm8k_3e40ebb3",
+          "gsm8k_7c47c2fb",
+          "gsm8k_d1e09e8d",
+          "gsm8k_c7e0bdd1",
+          "gsm8k_4237339d",
+          "gsm8k_5757ab62",
+          "gsm8k_79fb6a0f"
+        ]
+      },
+      "milestone": {
+        "n": 15,
+        "sample_ids": [
+          "gsm8k_1b095c55",
+          "gsm8k_541c7f67",
+          "gsm8k_da754693",
+          "gsm8k_2af617d1",
+          "gsm8k_e4f8493e",
+          "gsm8k_6061e715",
+          "gsm8k_46dee388",
+          "gsm8k_76ccb2f8",
+          "gsm8k_2ea4ced0",
+          "gsm8k_f0b47b3a",
+          "gsm8k_8c590b91",
+          "gsm8k_e5f5504d",
+          "gsm8k_1df883fe",
+          "gsm8k_ea51f809",
+          "gsm8k_62f64ff5"
+        ]
+      },
+      "pin": {
+        "inspect_evals.gsm8k.gsm8k.GSM8K_DATASET_REVISION": "cc7b047b6e5bb11b4f1af84efc572db110a51b3c"
+      },
+      "seed": "20260702:gsm8k",
+      "stratify": null,
+      "test": {
+        "canary_guid": "SEON-CANARY-b08e5fa9-dea6-4859-b004-8460daf97176",
+        "n": 1289,
+        "sample_ids_sha256": "39552078251dcbd530546b0f7415b211c97eb9a7fbd44ba7d140198ad4ec7ed3"
+      },
+      "total_n": 1319
+    },
+    "mmlu_0_shot": {
+      "bench": "mmlu_0_shot",
+      "capability_row": "knowledge",
+      "content_sha256": "9faf3d2bca2e471be71311ada189333fc85be28b62c3b9db10b2b21daef3e67b",
+      "dev": {
+        "n": 15,
+        "sample_ids": [
+          "mmlu_49c090f6",
+          "mmlu_5b8e6777",
+          "mmlu_92d90ca7",
+          "mmlu_41dc895c",
+          "mmlu_e09bd1ad",
+          "mmlu_ab2bafa2",
+          "mmlu_fbc8ec71",
+          "mmlu_2b7700d0",
+          "mmlu_ee8915ef",
+          "mmlu_01d40a52",
+          "mmlu_eb19bf84",
+          "mmlu_c8ff2c7c",
+          "mmlu_066ee214",
+          "mmlu_50ed4bef",
+          "mmlu_affe19cd"
+        ]
+      },
+      "milestone": {
+        "n": 15,
+        "sample_ids": [
+          "mmlu_64081c9f",
+          "mmlu_56f8cd1f",
+          "mmlu_88842698",
+          "mmlu_374c6505",
+          "mmlu_b4f048e8",
+          "mmlu_fbb9e3bf",
+          "mmlu_d53c6174",
+          "mmlu_54383d25",
+          "mmlu_87c6cb15",
+          "mmlu_1928aa3b",
+          "mmlu_9797afa7",
+          "mmlu_5bb6d81d",
+          "mmlu_f7fe6523",
+          "mmlu_e0e06404",
+          "mmlu_6f2a7880"
+        ]
+      },
+      "pin": {
+        "inspect_evals.mmlu.mmlu.MMLU_REVISION": "c30699e8356da336a370243923dbaf21066bb9fe"
+      },
+      "seed": "20260702:mmlu_0_shot",
+      "stratify": "subject",
+      "test": {
+        "canary_guid": "SEON-CANARY-193be83b-85a5-4102-92e6-c5113d35317f",
+        "n": 13907,
+        "sample_ids_sha256": "62b1e45c0bfb9fbeb6e7e0703410cdac229265f050521e80a7b97a5a0756eac2"
+      },
+      "total_n": 13937
+    }
+  }
+}

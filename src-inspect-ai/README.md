@@ -138,7 +138,7 @@ sandbox/tool-bridge. That's what `/solve` supports today.
 | `mmlu_0_shot` | broad knowledge MC-QA | ✅ | test | choice scorer |
 | `commonsense_qa` | commonsense MC-QA | ✅ | validation | choice scorer |
 | `truthfulqa` | truthfulness MC-QA | ✅ | validation | choice scorer |
-| `gpqa_diamond` | hard graduate MC-QA | ✅ | test (gated dataset) | needs HF access token |
+| `gpqa_diamond` | hard graduate MC-QA | ✅ | test | csv from openaipublic (sha256-pinned in inspect_evals) — no HF token needed |
 | `humaneval` / `mbpp` | code generation | ❌ **case-2** | — | scorer EXECUTES model code in a sandbox → mvm tier |
 | `gaia`, `assistant_bench`, `tau2`, `theagentcompany`, `swe_bench` | agentic / **long-horizon planning** | ❌ **case-2** | — | need web/tool/repo sandboxes → mvm tier |
 
@@ -166,6 +166,39 @@ SEON_SOLVE_URL=http://127.0.0.1:7980/solve \
 `--model mockllm/model` is forced internally (inspect requires a model arg; the
 solver bypasses it — the pod owns every turn). Image/multimodal benches also
 need `pillow` (`uv pip install pillow`); the QA/math case-1 set does not.
+
+## Frozen splits — `evals/datasets.lock` (dev / milestone / test)
+
+Every A/B (context trim, skill edit, tool tune) runs against FROZEN samples —
+the ledger decides, not taste. `seon_inspect.freeze` implements the eval-design
+sampling rule (sort by id → seeded shuffle, per-source seed derived from ONE
+global seed, MMLU subject-stratified round-robin → slice dev/milestone/test)
+and records everything in `evals/datasets.lock`: upstream pin (HF revision /
+csv sha256), seed, dev+milestone id lists, blind-test size + id-digest, corpus
+content hash, and one canary GUID per test split / bespoke dataset.
+
+```bash
+.venv/bin/python -m seon_inspect.freeze          # lock present → VERIFY: no-op or loud diff (exit 1)
+.venv/bin/python -m seon_inspect.freeze --write  # deliberate re-freeze (canaries carried over)
+```
+
+Run a frozen tier (sample_id-filtered, limit off):
+
+```python
+from seon_inspect.freeze import run_split
+run_split("gsm8k", "dev", solve_url=..., epochs=2)   # per-sample iteration fine
+run_split("gsm8k", "milestone", ...)                  # AGGREGATE-only (loader enforces)
+run_split("gsm8k", "test", formal_eval=True, ...)     # blind reserve: raises without the flag;
+                                                      # canary GUID injected into sample METADATA
+```
+
+Tier discipline is structural: milestone splits don't enumerate ids
+(iteration raises), the test tier won't load without `formal_eval=True`, and
+`tests/test_canary_guard.py` greps `src/ docs/ config/ seon-skills/
+src-inspect-ai/ test/` for any lock canary escaping `evals/` — a hit means
+answer-shaped context and fails the suite. Bespoke generator rows freeze the
+GENERATOR + seeds (dev=1, milestone=2, test=fresh-per-draw) — lock entries are
+reserved (`pending-generator`) until the generators unit lands.
 
 ### First baseline (DeepSeek, via acme /solve, 2026-07-02)
 

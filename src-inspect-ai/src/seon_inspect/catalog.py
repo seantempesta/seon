@@ -65,6 +65,7 @@ def run_bench(
     solve_timeout_s: int | None = None,
     max_samples: int | None = None,
     task_kwargs: dict[str, Any] | None = None,
+    task: Task | None = None,
     **eval_kwargs: Any,
 ):
     """Run a standard bench with the Seon pod as the solver.
@@ -78,8 +79,13 @@ def run_bench(
     pool of pods. The bench's OWN scorer grades the pod's replies host-side.
     Returns inspect's eval logs. `--model` is required by inspect but never
     called (the solver bypasses it) — pass model="mockllm/model".
+
+    `task` lets a caller pass a PREBUILT catalog Task (e.g. `freeze.run_split`,
+    which injects canary metadata into the blind tier) instead of constructing
+    one from `task_kwargs` — same dataset+scorer either way.
     """
-    task = load_bench_task(name, **(task_kwargs or {}))
+    if task is None:
+        task = load_bench_task(name, **(task_kwargs or {}))
     return inspect_eval(
         task,
         solver=seon_pod_solver(solve_url=solve_url, timeout_s=solve_timeout_s),

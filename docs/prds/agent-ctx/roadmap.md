@@ -105,8 +105,14 @@ repo-dev docs.
    p90 ~70s → `QA_SOLVE_TIMEOUT_S=240` (opt-in), general default 300s, wired into
    `src-inspect-ai/src/seon_inspect/config.py` (call-time, per-run
    overridable). Agentic rows re-calibrate when their generators land (step 3/4).
-2. **Dataset freeze** — seeded three-way splits (dev/milestone/test),
-   `datasets.lock`, canary GUIDs + CI grep.
+2. ~~**Dataset freeze**~~ — ✅ DONE 2026-07-02: `seon_inspect.freeze` +
+   `evals/datasets.lock` (global seed 20260702; gsm8k/arc_challenge 15/15,
+   mmlu 15/15 subject-stratified, gpqa_diamond 10/10, rest = blind test;
+   bespoke rows reserved `pending-generator` with generator seeds 1/2/fresh).
+   Regenerate-with-lock = verify (no-op or loud diff, proven ×2 byte-identical);
+   tier discipline structural (milestone aggregate-only, test raises without
+   `formal_eval=True`, canary GUID → test-sample METADATA); canary CI grep =
+   `tests/test_canary_guard.py` (fail proven on a planted canary in docs/).
 3. **Tool-row generators** — shell / web-fetch (local fixtures) / file-edit;
    goal-stated, never API-coached.
 4. **Planning bench re-ground** on the redesigned `my.plan` (deps/pace/expect —
