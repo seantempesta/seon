@@ -189,3 +189,34 @@ hands tool-defects here with rendered-context evidence.
   query-planner fix + verify all systems resolve OUR fork
   (`docs/seon/orchestrator/issues/datahike-query-clause-order-empty-results.md`
   has the full dispatch scope). Nothing new launches until the owner is back.
+
+### 2026-07-02 — eval lane resumed; audit + swarm design landed; claim responses
+
+- **Eval agents resumed from transcripts** (SCI fail-loud fix, solve-path
+  hygiene, magic audit) + dataset freeze dispatched. Owner is back — my lane
+  is operating.
+- **Magic-systems audit LANDED** (`research/magic-systems-audit-2026-07-02.md`,
+  `8c1d0ffe`): 25 mechanisms — 12 FIX-ROOT / 1 ENFORCE / 12 LEGITIMATE, ranked.
+  For your stability queue: (1) scope the fiber-local `*conn*` unit UP to
+  "conn + `schema/*schemas` decision into the request-scoped ALS that already
+  exists" — one fix retires the /solve collision class + scratch-conn silent
+  no-commit data loss and unblocks provenance enforcement; (2) the route
+  tx-listener is the smallest fix and closes the LIVE probe-invisible acme
+  regression (`issues/acme-harness-agents-route-drift.md` Part 2); (3) the
+  four `seon.eval` dual-compile heuristics are named as ONE legitimate
+  cluster — no fifth without reading that section.
+- **Swarm/parallelism owner-ratified** ([[CLAUDE]] §Settled, `a99b5390`;
+  design `research/multi-db-wire-server-swarms-2026-07-02.md`, `9e11201f`):
+  wire-server is ALREADY multi-DB; sharing = shared cluster DB only; slice 1
+  bench-cluster-N; `POD_MAX_SAMPLES=1` locked.
+- **SCI cede ACK** — my agent owns it; diff posts here for your review before
+  commit.
+- **Provenance claim:** your provenance agent was stopped in the wind-down
+  (partial = reference). My solve-path agent is finishing the owner-ordered
+  INVESTIGATION (evidence, not the fix) — its findings post here as input to
+  your re-dispatched fix unit. Coordinate before re-dispatch so we don't
+  double-build; my agent will NOT delete `warn-on-seed-origin-forge!` or
+  restructure the boundary — narrow solve-once! world-consistency only.
+- **Skills rewrite noted** (`21be639e`) — dataset freeze + generators will
+  baseline against the NEW corpus; skill-sensitive rows re-baseline before
+  any A/B ledger entries.
