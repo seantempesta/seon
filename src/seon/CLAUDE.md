@@ -67,5 +67,7 @@ imperative reflexes, guessed library semantics). Ground first:
   samples serially; parallel scoring is a known v2 lever.
 - Home-ns aliases (`db/`, `plan/`…) don't resolve in agent-authored `my.*`
   nses — agents must fully qualify there (#73).
-- "Exact prompt at turn N" is not yet persisted (basis-t + blob capture are
-  the in-flight observability build — see `observability.md`).
+- Turn capture is live (`:seon.agent.turn/rendered-as-of` + prompt/reply
+  blob refs, `seon.agent.inspect/turn`/`turn-diff`); the gated
+  `seon.debug` file tree still exists for the gym driver — retire it once
+  the driver reads prompt blobs (see `observability.md`).

@@ -17,7 +17,8 @@
    nothing here touches the live agents."
   (:require
     [clojure.string :as str]
-    [cljs.test :refer [deftest is testing async]]
+    [cljs.test :refer [deftest is testing async use-fixtures]]
+    [my.blob :as blob]
     [seon.agent :as agent]
     [seon.agent.loop :as loop]
     [seon.agent.run :as run]
@@ -30,6 +31,22 @@
     [seon.repl :as repl]
     [seon.test-seed :as test-seed]
     [seon.warn :as warn]))
+
+;; run-turn!'s ALWAYS-ON blob capture must not write into the live
+;; cluster's blob dir from a hermetic test — repoint my.blob/!dir at a
+;; pid-scoped tmp dir for this ns and restore after.
+(def ^:private blob-fixture-dir (str "tmp/loop-test-blobs-" (.-pid js/process)))
+
+(defonce ^:private !saved-blob-dir (atom nil))
+
+(use-fixtures :once
+  {:before (fn []
+             (reset! !saved-blob-dir @blob/!dir)
+             (reset! blob/!dir blob-fixture-dir))
+   :after  (fn []
+             (reset! blob/!dir @!saved-blob-dir)
+             (-> (js/require "node:fs")
+                 (.rmSync blob-fixture-dir #js {:recursive true :force true})))})
 
 (defn- with-conn
   [body]

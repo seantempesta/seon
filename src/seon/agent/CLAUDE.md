@@ -59,10 +59,12 @@ turn/FSM/bounds), `data-model.md` (every attr you'll touch), `observability.md`
 
 ## Known gaps (in flight — check roadmap before "fixing")
 
-- Turn stores wall-clock `at` but not yet `:seon.agent.turn/rendered-as-of`
-  (the PRE-turn frozen basis-t — the one coordinate tx-meta doesn't give
-  free); prompt/reply capture is moving onto the blob store (always-on).
-  See `observability.md`.
+- Turn capture LANDED (2026-07-02): `:seon.agent.turn/rendered-as-of` (the
+  PRE-turn frozen basis-t) + always-on prompt/reply blob refs +
+  `:seon.agent.turn/error`; replay via `seon.agent.inspect/turn`/`turn-diff`.
+  Still open: gym driver reads the gated `seon.debug` prompt.txt tree —
+  migrate it to prompt blobs, then retire the file tree. See
+  `observability.md`.
 - Embedding hits enter the prompt via a volatile stash (`seon.embed.stash`)
   — being made a recorded turn input.
 - `shell.cljs` (run + py-run, `SEON_SHELL` default-deny), `my.blob`, and

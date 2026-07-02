@@ -40,9 +40,20 @@ substrate):
 2. **Current-ns render-fn auto-run** — query the program graph for the current
    ns's render-typed fns, run through the same wrapper → block/tile twins,
    positioned after the stable code. (design: [[research/explicit-deps-injection-2026-07-02]])
-3. **Observability turn-capture** (pulled forward from "still open") —
-   `:seon.agent.turn/rendered-as-of` + prompt/reply blobs + `inspect/turn` /
-   `turn-diff`; gives the eval lane rendered-context evidence per row.
+3. **Observability turn-capture** — ✅ COMPLETE (2026-07-02). Always-on:
+   every `run-turn!` persists `:seon.agent.turn/rendered-as-of` (the
+   PRE-turn basis-t of the frozen db) + `prompt-blob`/`reply-blob` refs
+   (`my.blob`, content-addressed) + `:seon.agent.turn/error` on failure —
+   capture is errors-as-values, never wedges a turn.
+   `seon.agent.inspect/turn` reconstructs {basis-t, verbatim prompt/reply,
+   tokens, tx trail}; `turn-diff` gives basis-t delta + prompt drift
+   (tokens + line multiset). Eval-lane consumption: per-row
+   rendered-context evidence = `(seon.agent.inspect/turn
+   {:seon.agent.turn/id id})` over the sample's turns. Tests:
+   `test/seon/agent/turn_capture_test.cljs` (4 tests / 26 assertions).
+   Follow-up queued: the gym driver still reads the gated `seon.debug`
+   prompt.txt file tree — migrate it to prompt blobs, then retire the
+   file tree (dual-path registry row).
 4. **`my.*` as namespace-scribed entities** — the agent entity refs a `my.plan`
    entity whose schema is scribed in the `my.plan` ns; scope declared by
    signature. `my.plan` the worked example.
@@ -162,6 +173,6 @@ Spec: [[eval-design]] · plan: [[eval-lane-plan]] · readiness:
 
 ## Still open (from agent-fsm, may land here)
 
-Root-world-at-`/`, the spawn capability gate + roles, the observability
-turn-capture build (`:seon.agent.turn/rendered-as-of` + prompt/reply blobs +
-`inspect/turn`), `:seon.agent/purpose` → `:my.agent/purpose`.
+Root-world-at-`/`, the spawn capability gate + roles,
+`:seon.agent/purpose` → `:my.agent/purpose`. (The observability
+turn-capture build landed — item 3 above.)

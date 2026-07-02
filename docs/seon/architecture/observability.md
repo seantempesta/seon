@@ -36,9 +36,11 @@ flag:
   blob store. The as-of re-render is the *structured, queryable* view; the blob
   is the byte ground truth that survives render-code changes (a re-render runs
   TODAY's render fns; the blob is what the model actually saw).
-- **`:seon.agent.turn/reply`** — the raw LLM reply. Not derivable from
-  anything, so it is stored: inline as a datom when small, a blob ref past the
-  size threshold.
+- **`:seon.agent.turn/reply-blob`** — the raw LLM reply. Not derivable from
+  anything, so it is stored: a blob ref on the turn (content-addressing makes
+  repeated replies free). An errored turn stores WHY instead —
+  `:seon.agent.turn/error`, the failure as a bounded data string — so capture
+  never depends on turn success.
 - **The volatile prompt inputs, as data** — the `:relevant-source`
   embedding-hit ids and any `result/<id>` values rendered into the prompt are
   recorded on the turn, so nothing the model saw came from an unrecorded
@@ -129,9 +131,13 @@ brief, a derived verdict.
 
 ## Build path
 
-The gaps between this design and the current code — `rendered-as-of` not yet
-stored, reply not persisted, grep/embedding targets not yet widened, the
-forensic seed verb — live in [[roadmap]]. Source-grounded verification of
-what datahike's tx metadata already provides (and why the pre-turn basis-t
-is the one thing it doesn't):
+Turn capture is LIVE (2026-07-02): every turn persists `rendered-as-of` +
+prompt/reply blob refs (always on, independent of the `SEON_DEBUG_CAPTURE`
+file gate), and `seon.agent.inspect/turn` / `turn-diff` reconstruct/compare
+turns from them. Remaining gaps — the as-of per-block re-render inside
+`inspect/turn`, the volatile prompt inputs as recorded data, grep/embedding
+targets not yet widened, the forensic seed verb, retiring the debug file
+tree once the gym driver reads prompt blobs — live in [[roadmap]].
+Source-grounded verification of what datahike's tx metadata already provides
+(and why the pre-turn basis-t is the one thing it doesn't):
 `docs/prds/agent-fsm/research/` tx-metadata findings, 2026-07-02.

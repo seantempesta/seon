@@ -26,6 +26,7 @@
     [cljs.reader :as reader]
     [cljs.test :refer [deftest is testing async use-fixtures]]
     [clojure.string :as str]
+    [my.blob :as blob]
     [seon.agent :as agent]
     [seon.agent.turn :as turn]
     [seon.client :as client]
@@ -47,6 +48,21 @@
   (if (nil? v)
     (js-delete (.. js/globalThis -process -env) k)
     (aset (.. js/globalThis -process -env) k v)))
+
+;; The turn's ALWAYS-ON blob capture (prompt/reply → my.blob) must not
+;; write into the live cluster's blob dir from a hermetic test — repoint
+;; it at a pid-scoped tmp dir for this ns and restore after.
+(def ^:private blob-fixture-dir (str "tmp/debug-test-blobs-" (.-pid js/process)))
+
+(defonce ^:private !saved-blob-dir (atom nil))
+
+(use-fixtures :once
+  {:before (fn []
+             (reset! !saved-blob-dir @blob/!dir)
+             (reset! blob/!dir blob-fixture-dir))
+   :after  (fn []
+             (reset! blob/!dir @!saved-blob-dir)
+             (.rmSync fs blob-fixture-dir #js {:recursive true :force true}))})
 
 (use-fixtures :each
   {:before (fn []

@@ -30,8 +30,10 @@
     [seon.retry :as retry]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.relevant :as ctx-relevant]
+    [my.blob :as blob]
     [seon.db :as db]
     [seon.debug :as debug]
+    [seon.error :as error]
     [seon.embed :as embed]
     [seon.embed.stash :as embed-stash]
     [seon.eval :as seval]
@@ -74,6 +76,22 @@
 ;; pointer (blob tier); the full prompt is never a datom.
 (schema/register! :seon.agent.turn/prompt-chars :int)
 (schema/register! :seon.agent.turn/prompt-file  :string)
+;; Observability capture — ALWAYS ON, no debug flag (observability.md).
+;; `rendered-as-of` is the ONE coordinate tx-meta cannot provide: the
+;; PRE-turn basis-t of the frozen db the prompt rendered from (other
+;; agents' txs interleave on the shared conn, so the turn's own
+;; creation-tx is NOT what the model saw). `(db/as-of conn t)` at this t
+;; reproduces the structured context exactly.
+(schema/register! :seon.agent.turn/rendered-as-of :int)
+;; Blob REFS to the byte ground truth (three-tier rule): the prompt blob
+;; is what the model actually SAW (survives render-code changes); the
+;; reply blob is the raw LLM reply (not derivable from anything). Refs to
+;; the `:my.blob/hash` projection entity — the text is never a datom.
+(schema/register! :seon.agent.turn/prompt-blob :seon.db/ref)
+(schema/register! :seon.agent.turn/reply-blob  :seon.db/ref)
+;; WHY the turn errored, as a bounded edn/message string — present only
+;; on an errored turn, so capture never depends on success.
+(schema/register! :seon.agent.turn/error :string)
 ;; :seon.agent.turn/debug-dir (the per-turn capture-dir pointer, absent when
 ;; capture off) is registered by its writer, [[seon.debug]] (required here).
 ;; Honest record of the bounded LLM transport retry (always 1 when present;
@@ -98,6 +116,10 @@
    [:seon.agent.turn/scheduled?   {:optional true} :seon.agent.turn/scheduled?]
    [:seon.agent.turn/prompt-chars {:optional true} :seon.agent.turn/prompt-chars]
    [:seon.agent.turn/prompt-file  {:optional true} :seon.agent.turn/prompt-file]
+   [:seon.agent.turn/rendered-as-of {:optional true} :seon.agent.turn/rendered-as-of]
+   [:seon.agent.turn/prompt-blob  {:optional true} :seon.agent.turn/prompt-blob]
+   [:seon.agent.turn/reply-blob   {:optional true} :seon.agent.turn/reply-blob]
+   [:seon.agent.turn/error        {:optional true} :seon.agent.turn/error]
    [:seon.agent.turn/debug-dir    {:optional true} :seon.agent.turn/debug-dir]
    [:seon.agent.turn/llm-retries  {:optional true} :seon.agent.turn/llm-retries]
    [:seon.agent.turn/llm-usage    {:optional true} :seon.agent.turn/llm-usage]
@@ -113,6 +135,50 @@
     (str "seon.agent.turn/" agent-id)
     (str "turn " turn-n " ▸ " stage)
     (if (= 1 (count info)) (first info) (vec info))))
+
+;; ============================================================
+;; Observability capture helpers — always-on blob capture + the error
+;; projection. Both are errors-as-values: a failed capture logs and
+;; yields nil, NEVER wedges the turn (never-crash).
+;; ============================================================
+
+(defn ^:async ^:private capture-blob!
+  "Best-effort blob capture of `content` — a turn-stampable ref or nil.
+
+   `(await (my.blob/put! …))` with the given media hint; on success
+   returns the `[:my.blob/hash h]` lookup-ref the turn entity stores
+   (`:seon.agent.turn/prompt-blob` / `reply-blob`). Any failure — disk,
+   projection tx, throw — logs a warning and returns nil so the turn
+   proceeds without the ref. Content-addressed ⇒ idempotent."
+  [content media]
+  (try
+    (let [{ok? :my.blob/ok? hash :my.blob/hash err :my.blob/error}
+          (await (blob/put! {:my.blob/content (str content)
+                             :my.blob/media   media}))]
+      (if ok?
+        [:my.blob/hash hash]
+        (do (js/console.warn
+              "[seon.agent.turn] blob capture failed (turn continues):" err)
+            nil)))
+    (catch :default e
+      (js/console.warn
+        "[seon.agent.turn] blob capture failed (turn continues):"
+        (or (some-> e .-message) (str e)))
+      nil)))
+
+(def ^:private turn-error-max-chars 4096)
+
+(defn- turn-error-str
+  "Bounded `:seon.agent.turn/error` string for any failure value.
+
+   Maps (an `:seon.ai/error`, a `:seon.db/error`) pr-str to edn; a thrown
+   error keeps its best-effort message. Truncated to ~1K tokens so the
+   datom stays a projection, never a dump."
+  [x]
+  (let [s (if (map? x)
+            (try (pr-str x) (catch :default _ (str x)))
+            (error/->message x))]
+    (subs s 0 (min turn-error-max-chars (count s)))))
 
 ;; ============================================================
 ;; Turn index — the agent's running turn number, for debug-file naming +
@@ -226,7 +292,8 @@
   {:malli/schema [:=> [:catn [:turn-input :map] [:body-fn :any]] :any]}
   [{:seon.agent/keys [id]
     :seon.agent.run/keys [id-of-run]
-    :seon.agent.turn/keys [id-of-turn prompt-text prompt-file scheduled?]}
+    :seon.agent.turn/keys [id-of-turn prompt-text prompt-file scheduled?
+                           rendered-as-of prompt-blob]}
    body-fn]
   (let [turn-row
         (cond->
@@ -234,7 +301,9 @@
            :seon.agent.turn/at           (js/Date.)
            :seon.agent.turn/status       :running
            :seon.agent.turn/prompt-chars (count (str prompt-text))}
-          prompt-file (assoc :seon.agent.turn/prompt-file prompt-file)
+          prompt-file    (assoc :seon.agent.turn/prompt-file prompt-file)
+          rendered-as-of (assoc :seon.agent.turn/rendered-as-of rendered-as-of)
+          prompt-blob    (assoc :seon.agent.turn/prompt-blob prompt-blob)
           scheduled?  (assoc :seon.agent.turn/scheduled? true)
           id-of-run  (assoc :seon.agent.turn/run [:seon.agent.run/id id-of-run]))
         open-result
@@ -266,7 +335,9 @@
                                                    :seon.agent.turn/llm-retries
                                                    :seon.agent.turn/llm-usage
                                                    :seon.agent.turn/llm-meta
-                                                   :seon.agent.turn/debug-dir]))]}))]
+                                                   :seon.agent.turn/debug-dir
+                                                   :seon.agent.turn/reply-blob
+                                                   :seon.agent.turn/error]))]}))]
       (when (false? (:seon.db/ok? close))
         (js/console.error
           (str "seon.agent.turn/close-turn!: turn close-tx FAILED for "
@@ -278,7 +349,9 @@
       (try
         (await (db/transact!
                  {:seon.db/tx-data
-                  [{:seon.agent.turn/id id-of-turn :seon.agent.turn/status :error}]}))
+                  [{:seon.agent.turn/id     id-of-turn
+                    :seon.agent.turn/status :error
+                    :seon.agent.turn/error  (turn-error-str e)}]}))
         (catch :default _ nil))
       (throw e))))
 
@@ -298,6 +371,10 @@
   (let [reply-text (or (:text resp) "")
         debug-dir  (debug/capture-response! id turn-idx id-of-turn
                                             reply-text resp)
+        ;; Always-on reply capture — the raw LLM reply is not derivable
+        ;; from anything, so the byte ground truth goes to the blob store
+        ;; (best-effort; a lost capture never wedges the turn).
+        reply-blob (await (capture-blob! reply-text :reply))
         parsed     (repl/parse-forms reply-text)
         batch      (await (seval/eval-batch! compile-state parsed
                                              (ctx/home-ns id) id id-of-turn run-id))]
@@ -307,7 +384,8 @@
       ;; failed eval must yield a next turn that shows the error.
       {:seon.agent/eval-count (+ (:seon.eval/n-ok batch)
                                  (:seon.eval/n-fail batch))}
-      debug-dir (assoc :seon.agent.turn/debug-dir debug-dir))))
+      debug-dir  (assoc :seon.agent.turn/debug-dir debug-dir)
+      reply-blob (assoc :seon.agent.turn/reply-blob reply-blob))))
 
 ;; LLM retry tuning. The agent loop is the SOLE retry authority (the
 ;; adapters ship `maxRetries 0`); these shape the exponential-backoff
@@ -434,7 +512,10 @@
                   (:seon.ai/msg err)))
         (cond->
           {:seon.agent/eval-count 0
-           :seon.agent.turn/status :error}
+           :seon.agent.turn/status :error
+           ;; Capture the failure as data — the error record must not
+           ;; depend on turn success (observability.md).
+           :seon.agent.turn/error  (turn-error-str err)}
           retries (assoc :seon.agent.turn/llm-retries retries)))
       (cond-> (await (ask-and-eval-reply! resp id id-of-turn turn-idx compile-state run-id))
         retries     (assoc :seon.agent.turn/llm-retries retries)
@@ -467,7 +548,13 @@
         turn-idx   (turn-index id)
         prompt     (await (prefetch-and-render-prompt! id db))
         full-prompt (ai/debug-full-prompt {:seon.ai/ctx prompt})
-        prompt-file (debug/capture-prompt! id turn-idx turn-id full-prompt)]
+        prompt-file (debug/capture-prompt! id turn-idx turn-id full-prompt)
+        ;; Always-on observability capture: the frozen db's basis-t (the
+        ;; coordinate that makes the context re-derivable via as-of) + the
+        ;; assembled prompt verbatim as a blob. Both land on the turn's
+        ;; open-tx; a failed blob write yields nil and the turn proceeds.
+        rendered-as-of (db/basis-t db)
+        prompt-blob    (await (capture-blob! full-prompt :prompt))]
     (log id turn-idx "open" turn-id "+" (tokens/estimate prompt) "ctx-tokens")
     (try
       (let [result (await
@@ -483,7 +570,10 @@
                                  {:seon.agent/id           id
                                   :seon.agent.run/id-of-run run-id
                                   :seon.agent.turn/id-of-turn    turn-id
-                                  :seon.agent.turn/prompt-text   full-prompt}
+                                  :seon.agent.turn/prompt-text   full-prompt
+                                  :seon.agent.turn/rendered-as-of rendered-as-of}
+                                 prompt-blob
+                                 (assoc :seon.agent.turn/prompt-blob prompt-blob)
                                  prompt-file
                                  (assoc :seon.agent.turn/prompt-file prompt-file))
                                #(ask-and-eval! {:seon.agent/id            id
