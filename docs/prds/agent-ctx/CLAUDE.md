@@ -123,6 +123,15 @@ Eval-lane blockers before the first dev pass (from [[eval-CLAUDE-notes]]):
 - **Owner rule:** no maintained code in PRD dirs (`src-inspect-ai/` is the
   precedent — a real top-level package). Env never shadows config. Uniform
   0-scores → suspect the harness/context first, not a model ceiling.
+- **Parallelism/swarms (owner-ratified 2026-07-02, design:
+  [[research/multi-db-wire-server-swarms-2026-07-02]]):** the wire-server is
+  ALREADY multi-DB — never build a second registry. Cross-agent sharing = the
+  shared cluster DB ONLY (provenance-tagged publishes + cas-fenced claims; NO
+  cross-DB merge/sync machinery). Parallel scoring = slice 1 `bench-cluster-N`
+  (N full clusters, zero src changes) now; slice 2 (N pods × one JVM) lands
+  with the swarm build. `POD_MAX_SAMPLES=1` is LOCKED — scale pod count, don't
+  chase >1 sample/pod (`solve-once!` also swaps `schema/*schemas` + shares one
+  compile-state). `ensure-db` backend default unifies to `:file`.
 
 ## The load-bearing finding (binds the whole chunk)
 
