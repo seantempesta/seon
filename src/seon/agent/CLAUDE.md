@@ -65,9 +65,10 @@ turn/FSM/bounds), `data-model.md` (every attr you'll touch), `observability.md`
   See `observability.md`.
 - Embedding hits enter the prompt via a volatile stash (`seon.embed.stash`)
   — being made a recorded turn input.
-- `shell.cljs` (run + py-run, `SEON_SHELL` default-deny) and `my.blob`
-  shipped 2026-07-02 — live-drive verification in flight. `web` fetch is
-  design-only: `docs/prds/agent-fsm/research/web-fetch-design-2026-07-02.md`.
+- `shell.cljs` (run + py-run, `SEON_SHELL` default-deny), `my.blob`, and
+  `web.cljs` (`fetch`, `SEON_WEB` default-deny, undici + readability→markdown,
+  blob-stored, SSRF-gated) shipped 2026-07-02 — live-drive verification in
+  flight. Design: `docs/prds/agent-fsm/research/web-fetch-design-2026-07-02.md`.
 
 ## Vendored grounding
 
