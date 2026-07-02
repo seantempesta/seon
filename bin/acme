@@ -135,14 +135,30 @@ case "${1:-}" in
     done
     exec env SEON_ROOT="$SEON_ROOT" bb "$SEON_ROOT/acme/gym/diffusion_gym.bb" "${ARGS[@]}"
     ;;
-  # NOTE: `bin/acme cluster reset [name]` needs NO intercept here — it
-  # `exec`s straight through to bin/seon's cluster_reset (below), which now
-  # bounces the cluster THIS supervisor invocation manages (its store IS
-  # $SEON_CLUSTER_DIR/store = data/clusters/acme). That path is RACE-SAFE
-  # (it wait_ready's the wire-server BEFORE starting the pod). Do NOT add a
-  # `down && up` intercept: after a store WIPE the wire-server's cold mint
-  # outlasts the pod's ~10s ping window, so `up`'s back-to-back start races
-  # and the fresh pod dies.
+  cluster)
+    # Owner rule (2026-07-02): REBUILD before every reset. The acme bundle is
+    # NOT watched — a reset on a stale bundle boots yesterday's core, or dies
+    # outright when the seed expects a namespace the bundle predates (the
+    # my.plan boot race). Build here, then FALL THROUGH to bin/seon's
+    # race-safe cluster_reset unchanged (do NOT replace it with `down && up`:
+    # after a store wipe the wire-server's cold mint outlasts the pod's ~10s
+    # ping window and the fresh pod dies).
+    if [ "${2:-}" = "reset" ]; then
+      "$0" build
+    fi
+    ;;
+  start|restart)
+    # Same staleness rule for start/restart pod: rebuild first when any core
+    # or overlay source is newer than the bundle (compile is ~20s and
+    # idempotent; running stale code costs far more).
+    if [ "${2:-}" = "pod" ]; then
+      BUNDLE="$SEON_ROOT/$SEON_CLIENT_OUT"
+      if [ ! -f "$BUNDLE" ] || [ -n "$(find "$SEON_ROOT/src" "$SEON_ROOT/$SEON_EXTRA_SRC" \( -name '*.cljs' -o -name '*.cljc' \) -newer "$BUNDLE" -print -quit 2>/dev/null)" ]; then
+        echo "▶ acme bundle is stale vs core/overlay source — rebuilding first"
+        "$0" build
+      fi
+    fi
+    ;;
 esac
 
 exec "$SEON_ROOT/bin/seon" "$@"
