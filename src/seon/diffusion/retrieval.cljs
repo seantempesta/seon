@@ -42,6 +42,7 @@
    semantic path is the only `^:async` surface (it awaits the wire embed)."
   (:require
     [clojure.string :as str]
+    [seon.agent.turn :as turn]
     [seon.db :as db]
     [seon.embed :as embed]
     [seon.repl.internal :as internal]
@@ -588,9 +589,6 @@
 ;; Semantic enhancement (SEON_EMBED) + wire boundary
 ;; ============================================================
 
-(defn- embed-on? []
-  (some? (some-> js/process .-env .-SEON_EMBED)))
-
 (def ^:private fn-scope
   "Type-scope KNN to program-graph FUNCTIONS only (attribute presence — the
    attribute IS the kind; no :seon/kind)."
@@ -626,7 +624,7 @@
   {:malli/schema [:=> [:cat ::retrieve-request] :any]}
   [{::keys [canvas-text] :as req}]
   (let [base (retrieve-for-canvas req)]
-    (if-not (embed-on?)
+    (if-not (turn/embed-retrieval-on?)
       base
       (try
         (let [augmented
