@@ -39,6 +39,8 @@ dual code paths — track everything and fix it"). Rules:
 | C9 | Worker bootstrap-cache helpers copied from seon.eval "by design" | worker_eval.cljs:31 | tooling | QUEUED — unification sweep (shared leaf ns) |
 | C10 | Dead `:seon.agent.ctx/fn` attr + inert-comment residue | client.cljs:426, eval.cljs:1373 | tooling | QUEUED — unification sweep |
 | C14 | `build-tee-entities` mints `:seon.fn`/`:seon.ns` rows for defs in TRANSIENT nses (cljs.user scratch leaks into the program graph; `transient-ns-syms` guards only the requires-tee) | eval.cljs:~2099 | tooling | OPEN — one-line gate but a design call first: do scratch defs deserve persistence? |
+| C15 | Server db-name demux wart: ambient path tags events WITH the leading colon, registry-resolved path strips it (docstring claims colon-free) — the two server paths disagree for a registry-routed subscriber | seon.server.wire/-main, store/config-for | tooling | OPEN (small; pod path self-consistent today) |
+| C16 | `bin/seon restart pod` right after `restart wire-server` races writer warmup → pod fail-loud-exits, needs a second start | bin/seon | tooling | OPEN (supervisor; small) |
 | F1 | Datahike fork: 2 pre-existing planner-ON failures (silent-`#{}` class; pod always runs planner) | fork query engine | tooling | OPEN — [[datahike-planner-on-preexisting-failures]] |
 | C8 | Two corpus linters: seon.warn (pod) vs seon.dev.compliance (JVM) | warn.cljs / dev/compliance.clj | tooling | DEFERRED by owner — merge into seon.warn when JVM track retires |
 | M5 | Dual compile worlds (4 heuristics cluster) | eval.cljs:615,782 | tooling | LEGITIMATE NOW / FIX-ROOT long-horizon (audit §5 — no fifth heuristic without reading that section) |
@@ -49,7 +51,7 @@ dual code paths — track everything and fix it"). Rules:
 |----|------|------------|
 | M2 | Seed-inside-agent-scope + origin-forge warn-only guard | `ad6b9955` — origin stamped at boundary (derive-don't-claim), seed runs outside agent scope, guard DELETED (forgery impossible > enforced) |
 | M7 | `skip-syms` hardcoded exemption set | `59624a9e` — def deleted; computed `async-unwrappable?` predicate (shape, not names). Known delta: eval/mem-db lost input-only wrap (documented) |
-| M11 | tx-feed poll pump + rpc timer | partial fix landed pre-merge; pub-socket migration IN FLIGHT (stability unit) |
+| M11 | tx-feed poll pump + rpc timer | rpc-timer fix `d5335667` (peer); pub-socket push migration + transact commit-or-not semantics `a24b172f` — poll pump DELETED, since-t replay via one `replay-tx` op, timeout rejections carry `:seon.store.wire/committed?`; live-proven (gap replay across SIGSTOP+server restart; both timeout branches; 9 min settled, zero failures) |
 | C5 | `warn-on-seed-origin-forge!` vestigial guard | = M2, `ad6b9955` |
 | C6 | Skills corpus dual home (.claude symlinks → seon-skills) | `68d73395` split (two audiences by owner ruling) + `21be639e` agent-perspective rewrite |
 | C7 | Dev hook cwd-relative litter | `8185459f` — repo-root resolution; 57 strays cleaned |
