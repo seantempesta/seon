@@ -25,7 +25,7 @@
     ;; reads back their publics via `ns-fn-members`; without these loaded the
     ;; `:as`-alias cases would resolve nil.
     [seon.agent.message]
-    [seon.agent.todo]
+    [my.plan]
     [seon.db]
     [seon.eval :as seval]))
 
@@ -41,17 +41,17 @@
       (is (str/includes? (:seon.error/message r) "(ns my.ns)")))))
 
 (deftest in-ns-steers-to-the-alias-not-a-destructive-switch
-  ;; The load-bearing fix (#70): an agent reaching `(in-ns 'seon.agent.todo)`
-  ;; to CALL a verb must be steered to `todo/<verb>`, NOT advised to switch
+  ;; The load-bearing fix (#70): an agent reaching `(in-ns 'my.plan)`
+  ;; to CALL a verb must be steered to `plan/<verb>`, NOT advised to switch
   ;; namespace (which strips its home-ns message/wait/complete aliases).
   (let [msg (:seon.error/message
-              (seval/parity-intercept "(in-ns 'seon.agent.todo)" 'my.agent.x))]
+              (seval/parity-intercept "(in-ns 'my.plan)" 'my.agent.x))]
     (testing "names the home-ns alias for the target ns"
-      (is (str/includes? msg "todo/")))
+      (is (str/includes? msg "plan/")))
     (testing "tells the agent NOT to switch namespace to call a verb"
       (is (str/includes? msg "do NOT need to switch namespace")))
     (testing "still names (ns …)-switch as the DEFINE-only path"
-      (is (str/includes? msg "(ns seon.agent.todo)"))
+      (is (str/includes? msg "(ns my.plan)"))
       (is (str/includes? msg "DEFINE")))
     (testing "warns the switch replaces home aliases"
       (is (str/includes? msg "REPLACES your home aliases"))))
@@ -66,7 +66,7 @@
   ;; back to the home-ns alias/refer form — derived from home-ns-require-specs,
   ;; never a hardcoded list.
   (testing "an :as-aliased library verb resolves to alias/<verb>"
-    (is (= "todo/plan!" (seval/home-ns-alias-hint "plan!")))
+    (is (= "plan/plan!" (seval/home-ns-alias-hint "plan!")))
     (is (= "message/user" (seval/home-ns-alias-hint "user")))
     (is (= "db/transact!" (seval/home-ns-alias-hint "transact!"))))
   (testing "a :refer'd lifecycle verb resolves to its fully-qualified form"

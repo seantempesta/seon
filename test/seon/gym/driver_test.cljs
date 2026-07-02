@@ -682,8 +682,8 @@
         "qualified seon.db/ without the db alias is alias-blind")
     (is (some? (blind? "seon\\.agent\\.message/user"))
         "qualified seon.agent.message/ without the message alias is alias-blind")
-    (is (some? (blind? "seon\\.agent\\.todo/plan!"))
-        "qualified seon.agent.todo/ without the todo alias is alias-blind")
+    (is (some? (blind? "my\\.plan/plan!"))
+        "qualified my.plan/ without the plan alias is alias-blind")
     ;; FLAGGED — the ORIGINAL alias-blind class (e6aaf9f0): a my.* TOOLKIT
     ;; fn-call `my.tile/button` with no `tile/` alternative.
     (is (= "my.tile" (:seon.gym/alias-blind-ns (blind? "my\\.tile/(button|form)")))

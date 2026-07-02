@@ -33,7 +33,7 @@
  ;; seon.config/default-namespaces-policy.)
  :seon.config/namespaces
  {:seon.config/always     [my.kb my.data my.ui my.tile
-                           seon.agent.todo seon.agent.message seon.agent.lifecycle]
+                           my.plan seon.agent.message seon.agent.lifecycle]
   :seon.config/current-ns :full}
 
  ;; ── RENDER BOUNDS — the GLOBAL, process-wide value/eval/message DISPLAY caps
@@ -77,7 +77,7 @@
  :seon.config/agent-context
  {:seon.eval/home-requires
   [[seon.agent.message :as message]
-   [seon.agent.todo :as todo]
+   [my.plan :as plan]
    [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
    [seon.schema :as schema]
    [seon.db :as db]
@@ -105,7 +105,7 @@
  :seon.config/root-context
  {:seon.eval/home-requires
   [[seon.agent.message :as message]
-   [seon.agent.todo :as todo]
+   [my.plan :as plan]
    [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
    [seon.schema :as schema]
    [seon.db :as db]

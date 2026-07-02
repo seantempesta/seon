@@ -51,7 +51,7 @@
     ;; :seon.ns rows (full file text) via client/index-tests, the same
     ;; mechanism the pod's preload-driven boot uses.
     [seon.agent.search-test]
-    [seon.agent.todo-test]
+    [my.plan-test]
     [my.kb-test]))
 
 ;; ---------------------------------------------------------------------------
@@ -170,7 +170,7 @@
       ;; test-sibling tags.
       (client/index-tests
         [#'seon.agent.search-test/match-found-with-path-line-text
-         #'seon.agent.todo-test/the-store-retrieve-arc-with-resume
+         #'my.plan-test/the-store-retrieve-arc-with-resume
          #'my.kb-test/system-instructions-append-by-transact]))))
 
 (defn- with-seeded-conn
@@ -228,7 +228,7 @@
               (is (pos? (count text))
                   "no :seon.agent/ctx → STILL non-empty (code default, not 0)")
               (is (= [:system :namespaces :your-entity :live-tile
-                      :warnings :open-todos
+                      :warnings :plan
                       :relevant-source :transcript
                       :turns :inventory :prompt]
                      sections)
@@ -330,7 +330,7 @@
                          (agent/assemble-context
                            {:seon.db/db db :seon.agent/id agent-id}))]
               (is (str/includes? text "<system>") "system marker present")
-              (is (str/includes? text "<namespace name=\"seon.agent.todo\">")
+              (is (str/includes? text "<namespace name=\"my.plan\">")
                   "namespace tags present")
               (is (str/includes? text "<your-entity>") "your-entity present")
               (is (str/includes? text "<past-evals>") "transcript present")
@@ -667,7 +667,7 @@
 ;; ---------------------------------------------------------------------------
 ;; (l) namespaces-section in the assembled context (CURATED render
 ;;     2026-06-21) — FULL nses (my.* + the curated seon.* whitelist
-;;     :seon.agent.todo + the current ns) render their WHOLE source as a
+;;     :my.plan + the current ns) render their WHOLE source as a
 ;;     tag, UNCLIPPED; every OTHER seon.* framework ns (seon.db,
 ;;     seon.agent.search, …) renders as a SIGNATURES tag in the manifest
 ;;     (public fn signatures — name + arglist + one-line doc, bodies elided).
@@ -680,12 +680,12 @@
             (let [db    @conn
                   input {:seon.db/db db :seon.agent/id agent-id}
                   txt   (agent/namespaces-section input)]
-              ;; FULL: the curated seon.* whitelist (:seon.agent.todo) shows
+              ;; FULL: the curated seon.* whitelist (:my.plan) shows
               ;; its WHOLE source — ns form + full bodies, unclipped.
-              (is (str/includes? txt "<namespace name=\"seon.agent.todo\">")
-                  "the whitelisted seon.agent.todo renders as a full tag")
-              (is (str/includes? txt "(defn ^:async add!")
-                  "seon.agent.todo's add! renders (full source)")
+              (is (str/includes? txt "<namespace name=\"my.plan\">")
+                  "the whitelisted my.plan renders as a full tag")
+              (is (str/includes? txt "(defn ^:async step!")
+                  "my.plan's step! renders (full source)")
               (is (not (str/includes? txt "\n  …)"))
                   "NOTHING is elided — full source, no `…)` body clip")
               ;; FULL: my.* nses render their whole source.
@@ -794,7 +794,7 @@
                   text (:seon.render/text
                          (agent/assemble-context
                            {:seon.db/db db :seon.agent/id agent-id}))]
-              (is (str/includes? text "<namespace name=\"seon.agent.todo\">")
+              (is (str/includes? text "<namespace name=\"my.plan\">")
                   "budget measured WITH the namespace payload present")
               (is (<= (count text) 250000)
                   (str "turn-0 context within the 250k budget — got "

@@ -282,7 +282,7 @@
 
 ;; ============================================================
 ;; The agent FINGERPRINT — one map of the whole derived state. A pure DERIVED
-;; READ (no writes); state via [[state-from-primitives]], run/turn/todo fields
+;; READ (no writes); state via [[state-from-primitives]], run/turn/step fields
 ;; via cheap queries. Run-scoped fields are present only while a run is open.
 ;; One `@*conn*` deref is threaded through every read so the fingerprint is
 ;; one db view.
@@ -293,24 +293,24 @@
   [db id]
   (agent-turn-count db id))
 
-(defn- open-todo-count
-  "Count of the agent's open LEAF todos — the real work still owed. With
-   `my.todo` trees, milestone PARENTS stay stored `:open` (their done-ness is
+(defn- open-step-count
+  "Count of the agent's open LEAF steps — the real work still owed. With
+   `my.plan` trees, milestone PARENTS stay stored `:open` (their done-ness is
    DERIVED — done once every child is), so a flat `:status :open` count
    over-counts them. Counting only leaves (no child names it as parent — the
-   `leaf` predicate from `seon.agent.todo/rules`, inlined to keep this ns's
+   `leaf` predicate from `my.plan/rules`, inlined to keep this ns's
    acyclic seon.db/seon.schema-only dependency) yields the actionable work.
    Blocked-but-open leaves are still owed, so they count (use `next` for the
    READY-only focus queue)."
   [db id]
   (or (db/query {:seon.db/db db
                  :seon.db/query
-                 '[:find (count ?todo) . :in $ ?aid
+                 '[:find (count ?step) . :in $ ?aid
                    :where
                    [?a :seon.agent/id ?aid]
-                   [?todo :seon.agent.todo/owner ?a]
-                   [?todo :seon.agent.todo/status :open]
-                   (not-join [?todo] [?child :seon.agent.todo/parent ?todo])]
+                   [?step :my.plan/owner ?a]
+                   [?step :my.plan/status :open]
+                   (not-join [?step] [?child :my.plan/parent ?step])]
                  :seon.db/args [id]})
       0))
 
@@ -377,7 +377,7 @@
   [:map
    [:seon.agent/state                 :seon.derive/state]   ; DERIVED enum
    [:seon.agent/total-turns           :int]
-   [:seon.agent.todo/open-count       :int]
+   [:my.plan/open-count       :int]
    [:seon.agent.run/status        {:optional true} :keyword]   ; :open/:closed
    [:seon.agent.run/trigger       {:optional true} :keyword]   ; :message/:schedule
    [:seon.agent.run/turn-limit    {:optional true} :int]
@@ -394,7 +394,7 @@
 
    A pure
    DERIVED READ — no writes. State comes from [[state-from-primitives]] over
-   the primitives; run/turn/todo fields derive from cheap queries against ONE
+   the primitives; run/turn/step fields derive from cheap queries against ONE
    threaded db value. Run-scoped fields are present only while there IS an open
    run; `:seon.agent/now` (optional) fixes the clock for `ms-remaining`."
   {:malli/schema [:=> [:cat :seon.derive/status-request] :seon.derive/status]}
@@ -413,7 +413,7 @@
         last-closed   (last-closed-reason db id)
         base          (cond-> {:seon.agent/state           state
                                :seon.agent/total-turns     (total-turns db id)
-                               :seon.agent.todo/open-count (open-todo-count db id)}
+                               :my.plan/open-count (open-step-count db id)}
                         last-human  (assoc :seon.agent.message/last-human-at last-human)
                         last-closed (assoc :seon.agent.run/closed-reason last-closed))]
     (if-not cur

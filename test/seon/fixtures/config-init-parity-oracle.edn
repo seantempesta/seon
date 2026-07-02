@@ -23,7 +23,7 @@
    [:namespaces          20 seon.agent.ctx.namespaces/namespaces-block]
    [:live-tile           35 seon.agent.ctx.live-tile/live-tile-block]
    [:warnings            40 seon.agent.ctx.warnings/warnings-block]
-   [:open-todos          45 seon.agent.todo.internal/open-todos-block]
+   [:plan          45 my.plan.internal/plan-block]
    [:relevant-source     48 seon.agent.ctx.relevant/relevant-source-block]
    [:findings            97 seon.agent.ctx.findings/findings-block]
    [:transcript         100 seon.agent.ctx.transcript/transcript-block]]
@@ -47,7 +47,7 @@
   ;; the no-override namespaces render policy (seon.config/namespaces-policy).
   :ns-policy
   {:seon.config/always     #{:my.ui :my.tile :seon.agent.lifecycle :my.kb
-                             :seon.agent.todo :seon.agent.message :my.data}
+                             :my.plan :seon.agent.message :my.data}
    :seon.config/current-ns :full}
 
   ;; rendered static-prefix byte count (config-init-parity-oracle.txt).

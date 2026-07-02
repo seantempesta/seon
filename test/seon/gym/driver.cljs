@@ -570,7 +570,7 @@
 (defn- dotted-prefix-esc
   "The regex-escaped leading PREFIX of a dotted ns name — everything up to
    and including the final dot (\"seon.db\" -> \"seon\\.\", \"my.tile\" ->
-   \"my\\.\", \"seon.agent.todo\" -> \"seon\\.agent\\.\"). Used to build the
+   \"my\\.\", \"my.plan\" -> \"my\\.\"). Used to build the
    per-ns optional-prefix idiom `(?:<prefix>)?<alias>` an alias-tolerant
    pattern may use — `(?:seon\\.)?db` for a seon verb, `(?:my\\.)?tile` for
    a toolkit verb — so the guard accepts the correct prefix for EITHER
@@ -583,7 +583,7 @@
    seon.eval/home-ns-require-specs (the single source of truth for how
    every agent's home ns is wired). Only the `:as`-aliased `seon.*`
    namespaces — these are the ones an agent writes by the seeded SHORT
-   alias (db/, message/, schema/, agent/, todo/) yet a predicate may regex
+   alias (db/, message/, schema/, agent/, plan/) yet a predicate may regex
    by the long seon.<ns>/ form. `:refer`'d lifecycle verbs (wait, complete,
    …) carry no alias and aren't a qualified/alias split, so they're out of
    scope. Derives, never hardcodes — it can't drift from the agent's prompt."
@@ -645,7 +645,7 @@
    regexes WITHOUT also accepting the short alias the agent actually writes.
 
    For each aliased ns ([[home-ns-aliases]] — the seon.* verbs db/message/
-   schema/agent/todo AND the my.* toolkit tile/ui/data/kb): if the pattern
+   schema/agent/plan AND the my.* toolkit tile/ui/data/kb): if the pattern
    references the qualified FN-CALL form `<long>\\<ns>/` (or `<long>\\b`) —
    [[qualified-fn-ref?]], which ignores un-aliasable `:<long>/…` keyword
    data-keys — it points at the long name directly; that is alias-BLIND

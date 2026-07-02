@@ -19,7 +19,7 @@
     [datahike.api :as d]
     [malli.core :as m]
     [seon.agent :as agent]
-    [seon.agent.todo :as todo]
+    [my.plan :as plan]
     [seon.client :as client]
     [seon.db :as db]
     [seon.warn :as warn]))
@@ -347,27 +347,27 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
-;; The message ↔ todo safety net (P4): a :human inbound auto-mints ONE
-;; address-todo per agent recipient, ATOMIC in the message's tx, linked via
-;; :seon.agent.todo/message. "Addressed" DERIVES from the linked todo's
+;; The message ↔ step safety net (P4): a :human inbound auto-mints ONE
+;; address-step per agent recipient, ATOMIC in the message's tx, linked via
+;; :my.plan/message. "Addressed" DERIVES from the linked step's
 ;; completion — no stored handled? flag.
 ;; ---------------------------------------------------------------------------
 
-(defn- todos-for
-  "Address-todos owned by agent `aid`, message back-ref pulled."
+(defn- steps-for
+  "Address-steps owned by agent `aid`, message back-ref pulled."
   [conn aid]
-  (->> (d/q '[:find (pull ?t [* {:seon.agent.todo/owner   [:seon.agent/id]
-                                 :seon.agent.todo/from    [:seon.user/id :seon.agent/id]
-                                 :seon.agent.todo/message [:seon.agent.message/id]}])
+  (->> (d/q '[:find (pull ?t [* {:my.plan/owner   [:seon.agent/id]
+                                 :my.plan/from    [:seon.user/id :seon.agent/id]
+                                 :my.plan/message [:seon.agent.message/id]}])
               :in $ ?aid
               :where
               [?o :seon.agent/id ?aid]
-              [?t :seon.agent.todo/owner ?o]]
+              [?t :my.plan/owner ?o]]
             @conn aid)
        (map first)
        vec))
 
-(deftest human-message-auto-mints-a-linked-address-todo
+(deftest human-message-auto-mints-a-linked-address-step
   (async done
     (-> (with-conn
           (fn [conn]
@@ -377,21 +377,21 @@
                    :seon.agent.message/content "please audit the schemas\nthen tell me what you find"})
                 (.then
                   (fn [{mid :seon.agent.message/id}]
-                    (let [ts (todos-for conn a-id)
+                    (let [ts (steps-for conn a-id)
                           t  (first ts)]
-                      (is (= 1 (count ts)) "exactly ONE address-todo minted")
-                      (is (= :open (:seon.agent.todo/status t)) "minted open")
-                      (is (= a-id (get-in t [:seon.agent.todo/owner :seon.agent/id]))
+                      (is (= 1 (count ts)) "exactly ONE address-step minted")
+                      (is (= :open (:my.plan/status t)) "minted open")
+                      (is (= a-id (get-in t [:my.plan/owner :seon.agent/id]))
                           "owned by the agent recipient")
-                      (is (= "user" (get-in t [:seon.agent.todo/from :seon.user/id]))
+                      (is (= "user" (get-in t [:my.plan/from :seon.user/id]))
                           "from = the human sender")
-                      (is (= mid (get-in t [:seon.agent.todo/message :seon.agent.message/id]))
-                          "linked to the SAME-TX message via :seon.agent.todo/message")
+                      (is (= mid (get-in t [:my.plan/message :seon.agent.message/id]))
+                          "linked to the SAME-TX message via :my.plan/message")
                       (is (= "please audit the schemas then tell me what you find"
-                             (:seon.agent.todo/title t))
+                             (:my.plan/title t))
                           "title = clipped single-line preview (newline collapsed)")
-                      (is (empty? (todos-for conn b-id))
-                          "no todo for an un-addressed agent")))))))
+                      (is (empty? (steps-for conn b-id))
+                          "no step for an un-addressed agent")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -405,13 +405,13 @@
                    :seon.agent.message/content (apply str (repeat 200 "x"))})
                 (.then
                   (fn [_]
-                    (let [title (:seon.agent.todo/title (first (todos-for conn a-id)))]
+                    (let [title (:my.plan/title (first (steps-for conn a-id)))]
                       (is (= 81 (count title)) "clipped to ~80 chars + the … glyph")
                       (is (re-find #"…$" title) "trailing ellipsis marks the cut")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest agent-message-mints-no-todo
+(deftest agent-message-mints-no-step
   (async done
     (-> (with-conn
           (fn [conn]
@@ -425,12 +425,12 @@
                     (let [[m] (filter #(= mid (:seon.agent.message/id %)) (pulled-msgs conn))]
                       (is (= :agent (:seon.agent.message/origin m))
                           "agent-originated ⇒ origin :agent"))
-                    (is (empty? (todos-for conn a-id))
-                        "agent→agent message mints NO address-todo"))))))
+                    (is (empty? (steps-for conn a-id))
+                        "agent→agent message mints NO address-step"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest addressed-derives-from-the-linked-todos-completion
+(deftest addressed-derives-from-the-linked-steps-completion
   (async done
     (-> (with-conn
           (fn [conn]
@@ -440,15 +440,15 @@
                    :seon.agent.message/content "fix the failing test"})
                 (.then
                   (fn [{mid :seon.agent.message/id}]
-                    (let [t (first (todos-for conn a-id))]
-                      (is (= :open (:seon.agent.todo/status t)) "unaddressed ⇒ linked todo open")
-                      (todo/done! {:seon.agent.todo/id (:seon.agent.todo/id t)}))))
+                    (let [t (first (steps-for conn a-id))]
+                      (is (= :open (:my.plan/status t)) "unaddressed ⇒ linked step open")
+                      (plan/done! {:my.plan/id (:my.plan/id t)}))))
                 (.then
                   (fn [_]
-                    (let [t2 (first (todos-for conn a-id))]
-                      (is (= :done (:seon.agent.todo/status t2))
-                          "completing the todo ⇒ the message is addressed (derived)")
-                      (is (string? (get-in t2 [:seon.agent.todo/message :seon.agent.message/id]))
+                    (let [t2 (first (steps-for conn a-id))]
+                      (is (= :done (:my.plan/status t2))
+                          "completing the step ⇒ the message is addressed (derived)")
+                      (is (string? (get-in t2 [:my.plan/message :seon.agent.message/id]))
                           "still linked to its message after completion")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

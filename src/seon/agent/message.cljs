@@ -219,24 +219,24 @@
                     :seon.agent.message/at      (js/Date.)
                     :seon.agent.message/hops    hops
                     :seon.agent.message/origin  origin}
-            ;; The message ↔ todo safety net (WRITE half): a :human inbound
-            ;; auto-mints ONE address-todo per AGENT recipient, ATOMIC in
-            ;; this same tx (no listener, no cascade). The todo carries a
+            ;; The message ↔ step safety net (WRITE half): a :human inbound
+            ;; auto-mints ONE address-step per AGENT recipient, ATOMIC in
+            ;; this same tx (no listener, no cascade). The step carries a
             ;; clipped preview + a back-ref to this message's identity —
             ;; same-tx lookup-refs resolve. "Addressed" is DERIVED from the
-            ;; todo's completion; there is no stored handled? flag.
+            ;; step's completion; there is no stored handled? flag.
             agent-tos (when (= origin :human)
                         (filter #(and (vector? %) (= :seon.agent/id (first %))) to))
-            todos  (mapv (fn [agent-ref]
-                           {:seon.agent.todo/id         (db/new-id!)
-                            :seon.agent.todo/title      (internal/clip-title content)
-                            :seon.agent.todo/status     :open
-                            :seon.agent.todo/created-at (js/Date.)
-                            :seon.agent.todo/owner      agent-ref
-                            :seon.agent.todo/from       from
-                            :seon.agent.todo/message    [:seon.agent.message/id msg-id]})
+            steps  (mapv (fn [agent-ref]
+                           {:my.plan/id         (db/new-id!)
+                            :my.plan/title      (internal/clip-title content)
+                            :my.plan/status     :open
+                            :my.plan/created-at (js/Date.)
+                            :my.plan/owner      agent-ref
+                            :my.plan/from       from
+                            :my.plan/message    [:seon.agent.message/id msg-id]})
                          agent-tos)
-            env    (await (db/transact! {:seon.db/tx-data (into [row] todos)}))]
+            env    (await (db/transact! {:seon.db/tx-data (into [row] steps)}))]
         (if (:seon.db/ok? env)
           ;; concise success — the tx-report stays off the agent
           ;; surface; the id is the durable handle

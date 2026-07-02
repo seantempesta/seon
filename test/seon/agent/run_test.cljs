@@ -52,7 +52,7 @@
 (defn- with-conn
   "Fresh seeded conn `set!` as the ROOT db/*conn* for `body` (conn → Promise),
    prior root restored after. Root set!, not binding (CLJS dynamic bindings
-   pop at the first await — see seon.agent.todo-test)."
+   pop at the first await — see my.plan-test)."
   [body]
   (-> (fresh-conn)
       (.then (fn [conn]

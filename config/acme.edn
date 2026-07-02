@@ -41,7 +41,7 @@
 
   ;; home-requires toolbelt — DELIBERATELY DIFFERENT from config/system.edn's
   ;; 10-ns default. Acme (the third party) picks its OWN agent toolset from
-  ;; THIS file, zero src/seon edits: a trimmed core-verb subset (message/todo/
+  ;; THIS file, zero src/seon edits: a trimmed core-verb subset (message/plan/
   ;; lifecycle/schema/db — drops my.kb/my.data/my.ui/my.tile/search) PLUS acme's
   ;; own toolkit namespaces (acme.helpers, acme.notes). Since the :namespaces
   ;; block renders "the current ns's :require's as compact cards", THESE ARE the
@@ -50,7 +50,7 @@
   ;; :seon.eval/require-spec).
   :seon.eval/home-requires
   [[seon.agent.message :as message]
-   [seon.agent.todo :as todo]
+   [my.plan :as plan]
    [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
    [seon.schema :as schema]
    [seon.db :as db]
@@ -77,8 +77,8 @@
     :seon.render/ai seon.agent.ctx.live-tile/live-tile-block}
    {:seon.agent.ctx/name :warnings :seon.agent.ctx/priority 40
     :seon.render/ai seon.agent.ctx.warnings/warnings-block}
-   {:seon.agent.ctx/name :open-todos :seon.agent.ctx/priority 45
-    :seon.render/ai seon.agent.todo.internal/open-todos-block}
+   {:seon.agent.ctx/name :plan :seon.agent.ctx/priority 45
+    :seon.render/ai my.plan.internal/plan-block}
    {:seon.agent.ctx/name :relevant-source :seon.agent.ctx/priority 48
     :seon.render/ai seon.agent.ctx.relevant/relevant-source-block}
    {:seon.agent.ctx/name :findings :seon.agent.ctx/priority 97
@@ -94,5 +94,5 @@
  ;; its acme.* third-party code proves per-cluster ns render is configurable).
  :seon.config/namespaces
  {:seon.config/always     [my.kb my.data my.ui my.tile
-                           seon.agent.todo seon.agent.message seon.agent.lifecycle]
+                           my.plan seon.agent.message seon.agent.lifecycle]
   :seon.config/current-ns :full}}

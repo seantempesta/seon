@@ -988,7 +988,7 @@
 
 ;; Defined after `home-ns-require-specs` (the single source of home-ns
 ;; aliases it derives from); declared here so `raw-eval`'s not-defined
-;; branch can append the "did you mean `todo/plan!`?" hint.
+;; branch can append the "did you mean `plan/plan!`?" hint.
 (declare home-ns-alias-hint)
 
 (defn ^:async ^:private raw-eval
@@ -1065,7 +1065,7 @@
                         ;; ran NOTHING and what to do about it.
                         ;; Alias hint: a bare verb that failed to resolve may
                         ;; be a library verb the agent should reach through a
-                        ;; home-ns alias (`plan!` → `todo/plan!`). Steer it
+                        ;; home-ns alias (`plan!` → `plan/plan!`). Steer it
                         ;; back to the alias instead of toward defining/typo —
                         ;; this is the missing hint that, absent, sent a live
                         ;; agent on a destructive ns-switch detour.
@@ -1334,7 +1334,7 @@
     [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
     [seon.schema :as schema]
     [seon.db :as db]
-    [seon.agent.todo :as todo]])
+    [my.plan :as plan]])
 
 ;; ============================================================
 ;; Config-driven agent-init CP-1 — home-ns wiring + toolkit (agent-level
@@ -1364,7 +1364,7 @@
                    [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
                    [seon.schema :as schema]
                    [seon.db :as db]
-                   [seon.agent.todo :as todo]]}
+                   [my.plan :as plan]]}
    [:vector ::require-spec]
    :symbol])
 
@@ -1375,7 +1375,7 @@
 
 (defn- home-ns-alias-names
   "Comma-joined `:as` alias names from [[home-ns-require-specs]]
-   (e.g. \"message, agent, schema, db, todo\") — the short prefixes an
+   (e.g. \"message, agent, schema, db, plan\") — the short prefixes an
    agent calls library verbs through from its home ns."
   []
   (str/join ", " (keep (fn [spec] (when (= :as (second spec)) (name (nth spec 2))))
@@ -1404,7 +1404,7 @@
 
    Given a bare verb NAME that failed to resolve (e.g. \"plan!\",
    \"user\", \"complete\") — the form the agent SHOULD have
-   written — a string like \"todo/plan!\" — or nil if no home-ns alias/refer
+   written — a string like \"plan/plan!\" — or nil if no home-ns alias/refer
    exposes that name. Derived from [[home-ns-require-specs]] (the single
    source of which aliases/refers every agent's home ns carries) so it can
    never drift from what the agent's prompt teaches:
@@ -1493,13 +1493,13 @@
 (def authored-ns-require-nses
   "The [[home-ns-require-specs]] NAMESPACES whose short alias an agent's
    AUTHORED (non-home) namespace also carries — the data + verb namespaces
-   every authored ns reaches through (`db/`, `todo/`, `message/`, `schema/`).
+   every authored ns reaches through (`db/`, `plan/`, `message/`, `schema/`).
    A SELECTION over [[home-ns-require-specs]] (the single source of the
    alias↔ns mapping) — the alias names are never re-spelled here. Excludes
    `seon.agent` (the home orchestration alias) and the lifecycle `:refer`
    verbs (home-ns only). The `my.*` toolkit stays FULL-QUALIFIED (`my.ui/…`),
    no alias."
-  '#{seon.db seon.agent.todo seon.agent.message seon.schema})
+  '#{seon.db my.plan seon.agent.message seon.schema})
 
 (def authored-ns-require-specs
   "The `(:require …)` specs merged into an agent-authored `(ns …)` form
@@ -1515,7 +1515,7 @@
 
 (defn- authored-ns-alias-names
   "Comma-joined `:as` alias names from [[authored-ns-require-specs]]
-   (e.g. \"db, todo, message, schema\") — for the real-require narration note."
+   (e.g. \"db, plan, message, schema\") — for the real-require narration note."
   []
   (str/join ", " (map (fn [spec] (name (nth spec 2))) authored-ns-require-specs)))
 
@@ -1542,7 +1542,7 @@
                  [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
                  [seon.schema :as schema]
                  [seon.db :as db]
-                 [seon.agent.todo :as todo]))
+                 [my.plan :as plan]))
 
    The home ns defs NOTHING beyond these requires: a `result` def would shadow
    the reserved `result` NAMESPACE holding the `result/<id>` value vars, so the
@@ -2883,7 +2883,7 @@
               (if alias
                 (str "Verbs in " target " are reachable from your home ns as `"
                      alias "/<verb>` (e.g. `" alias "/plan!`) — use that. ")
-                "Reach another ns's verbs through their home-ns alias (e.g. `todo/plan!`, `message/user`). ")
+                "Reach another ns's verbs through their home-ns alias (e.g. `plan/plan!`, `message/user`). ")
               "Stay in your home ns so your aliases (" (home-ns-alias-names)
               ") and refers (" (home-ns-refer-names) ") keep resolving. "
               "Only `(ns " (or target "the.target.ns") ")`-switch to DEFINE a "
@@ -2909,7 +2909,7 @@
    Real requires (#73/#56): given an agent-eval'd SOURCE that is a single
    `(ns NAME …)` form for an agent-authored namespace, return the source
    rewritten so NAME's `:require` clause carries the canonical short aliases
-   ([[authored-ns-require-specs]]) — `db`→seon.db, `todo`→seon.agent.todo,
+   ([[authored-ns-require-specs]]) — `db`→seon.db, `plan`→my.plan,
    `message`→seon.agent.message, `schema`→seon.schema. NO magic injection: the
    aliases resolve because they are REALLY `:require`d, in the source the agent
    sees, eval'd, and persisted as `:seon.ns/source`. The `my.*` toolkit stays
@@ -2917,7 +2917,7 @@
 
    The footgun this closes: those aliases are established ONLY in the agent's
    home ns ([[setup-agent-ns!]]). When the agent authors a NEW `my.*` ns and a
-   fn there reaches for the `db/`/`message/`/`todo/` aliases it SEES in its
+   fn there reaches for the `db/`/`message/`/`plan/` aliases it SEES in its
    home-ns workspace, they don't resolve (`db/transact! is not defined`).
    Writing the real requires into every agent-authored ns makes agent code
    portable across namespaces — and makes the stored `:seon.ns/source`
@@ -3045,7 +3045,7 @@
            failed-defs outer-test-run? narration source]}]
   (let [;; Real requires (#73/#56): if this is a NEW agent-authored `(ns …)`
         ;; form, write the canonical short aliases into its REAL `:require`
-        ;; clause so `db/`/`todo/`/`message/`/`schema/` resolve in the new ns
+        ;; clause so `db/`/`plan/`/`message/`/`schema/` resolve in the new ns
         ;; exactly as they do in the agent's home ns — no magic injection. A
         ;; no-op (identical source) for non-ns forms / a complete home ns.
         aug-source  (augment-ns-source source)

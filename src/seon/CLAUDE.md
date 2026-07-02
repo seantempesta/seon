@@ -65,7 +65,7 @@ imperative reflexes, guessed library semantics). Ground first:
   — hence never-crash/always-surface at every boundary.
 - `seon.db/*conn*` is a single dynamic root (not fiber-local): `/solve` runs
   samples serially; parallel scoring is a known v2 lever.
-- Home-ns aliases (`db/`, `todo/`…) don't resolve in agent-authored `my.*`
+- Home-ns aliases (`db/`, `plan/`…) don't resolve in agent-authored `my.*`
   nses — agents must fully qualify there (#73).
 - "Exact prompt at turn N" is not yet persisted (basis-t + blob capture are
   the in-flight observability build — see `observability.md`).

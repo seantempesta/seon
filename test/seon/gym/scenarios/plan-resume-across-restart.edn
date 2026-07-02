@@ -35,7 +35,7 @@
 ;;
 ;; The verbs to mint/close plan items are NOT named in the message — the
 ;; agent discovers them from its own always-on context (the standing
-;; "2+ steps → track it" teaching + the seon.agent.todo docstrings). If
+;; "2+ steps → track it" teaching + the my.plan docstrings). If
 ;; this scenario goes RED on the plan/resume predicates, that is the
 ;; SIGNAL: the always-on instructions don't yet make durable up-front
 ;; planning + read-your-open-items-on-resume the obvious path — a gap to
@@ -67,7 +67,7 @@
    :seon.gym.predicate/axis   :stores-proactively
    :seon.gym.predicate/query  [:find ?t
                                :where
-                               [?t :seon.agent.todo/owner ?a]
+                               [?t :my.plan/owner ?a]
                                [?a :seon.agent/id ?aid]]
    :seon.gym.predicate/expect [:count>= 3]}
   ;; (b) The plan did NOT balloon. A from-scratch re-plan of a 3-step task
@@ -80,7 +80,7 @@
    :seon.gym.predicate/axis   :models-work-directed
    :seon.gym.predicate/query  [:find ?t
                                :where
-                               [?t :seon.agent.todo/owner ?a]
+                               [?t :my.plan/owner ?a]
                                [?a :seon.agent/id ?aid]]
    :seon.gym.predicate/expect [:count<= 5]}
   ;; (c) A real completion happened — ≥1 item flipped to :done with a
@@ -93,21 +93,21 @@
    :seon.gym.predicate/axis   :stores-proactively
    :seon.gym.predicate/query  [:find ?t
                                :where
-                               [?t :seon.agent.todo/owner ?a]
+                               [?t :my.plan/owner ?a]
                                [?a :seon.agent/id ?aid]
-                               [?t :seon.agent.todo/status :done]
-                               [?t :seon.agent.todo/completed-at _]]
+                               [?t :my.plan/status :done]
+                               [?t :my.plan/completed-at _]]
    :seon.gym.predicate/expect :non-empty}
   ;; (d) Closed the loop — by run end NO owner-scoped item is still :open.
   ;; Staying on track across the interruption means finishing what was
-  ;; planned. (An empty open-todos block is the agent's own done-signal.)
+  ;; planned. (An empty open-steps block is the agent's own done-signal.)
   {:seon.gym.predicate/id     :closed-the-loop-no-open-items
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :stores-proactively
    :seon.gym.predicate/query  [:find ?t
                                :where
-                               [?t :seon.agent.todo/status :open]
-                               [?t :seon.agent.todo/owner ?a]
+                               [?t :my.plan/status :open]
+                               [?t :my.plan/owner ?a]
                                [?a :seon.agent/id ?aid]]
    :seon.gym.predicate/expect :empty}
   ;; The work landed: the agent designed a schema — agent-provenance

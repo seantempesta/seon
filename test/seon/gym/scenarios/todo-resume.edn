@@ -47,7 +47,7 @@
  :seon.gym.scenario/turns
  [{:seon.gym.turn/message "Track my workouts: schema, a store fn with a test, log today's run, and leave yourself a todo to verify it all after your next restart."
    :seon.gym.turn/llm-script
-   ["(ns my.workout (:require [cljs.test]))\n\n(seon.schema/register! :my.workout/date :string)\n\n(seon.schema/register! :my.workout/kind :keyword)\n\n(seon.schema/register! :my.workout/version :string)\n\n(defn add-workout!\n  \"Store one workout row.\"\n  [date kind]\n  (seon.db/transact!\n    {:seon.db/tx-data\n     [{:my.workout/date date :my.workout/kind kind :my.workout/version \"v1\"}]}))\n\n(cljs.test/deftest add-workout-test\n  (cljs.test/is (fn? my.workout/add-workout!)))\n\n(my.workout/add-workout! \"2026-06-10\" :run)\n\n(seon.agent.todo/add! {:seon.agent.todo/title \"Verify my.workout after restart\"})\n"]}
+   ["(ns my.workout (:require [cljs.test]))\n\n(seon.schema/register! :my.workout/date :string)\n\n(seon.schema/register! :my.workout/kind :keyword)\n\n(seon.schema/register! :my.workout/version :string)\n\n(defn add-workout!\n  \"Store one workout row.\"\n  [date kind]\n  (seon.db/transact!\n    {:seon.db/tx-data\n     [{:my.workout/date date :my.workout/kind kind :my.workout/version \"v1\"}]}))\n\n(cljs.test/deftest add-workout-test\n  (cljs.test/is (fn? my.workout/add-workout!)))\n\n(my.workout/add-workout! \"2026-06-10\" :run)\n\n(my.plan/step! {:my.plan/title \"Verify my.workout after restart\"})\n"]}
   ;; Upsert probe: two redefinitions — the program graph must keep ONE
   ;; current row carrying the LATEST source.
   {:seon.gym.turn/message "Improve add-workout! (twice)."
@@ -122,8 +122,8 @@
    :seon.gym.predicate/axis   :stores-proactively
    :seon.gym.predicate/query  [:find ?t
                                :where
-                               [?t :seon.agent.todo/title "Verify my.workout after restart"]
-                               [?t :seon.agent.todo/status :open]]
+                               [?t :my.plan/title "Verify my.workout after restart"]
+                               [?t :my.plan/status :open]]
    :seon.gym.predicate/expect :non-empty}
   ;; Post-restart: the boot agent's turn-0 context shows the open todo.
   ;; RED as of 2026-06-10: start-agent! mints a NEW agent-id each boot

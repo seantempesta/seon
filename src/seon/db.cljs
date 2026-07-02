@@ -669,9 +669,9 @@
    here before inventing a new attr — a kind you'd reach for may already
    exist with zero rows:
 
-     (filter #(= \"seon.agent.todo\" (namespace %))
+     (filter #(= \"my.plan\" (namespace %))
              (keys (db/installed-schema @db/*conn*)))
-     ;;=> (:seon.agent.todo/id :seon.agent.todo/title :seon.agent.todo/status …)
+     ;;=> (:my.plan/id :my.plan/title :my.plan/status …)
      ;;   — registered, queryable, just no rows yet. Reuse it; don't fork."
   {:malli/schema [:=> [:catn [::db :any]] :map]}
   [db]

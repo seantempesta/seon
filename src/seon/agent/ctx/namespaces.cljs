@@ -172,7 +172,7 @@
    human's world — always inlined), including `-test` siblings (the
    `-test` suffix is stripped to the subject ns first), AND every seon.* ns
    the config policy lists in `:seon.config/always` ([[always-full?]] — e.g.
-   `:seon.agent.todo`, so its REAL body is stored). Used by the boot indexer
+   `:seon.agent.message`, so its REAL body is stored). Used by the boot indexer
    (`seon.client/ns-row`) to decide which rows get the file read: it stores
    source for a SUPERSET of what any one agent renders full, so a per-agent
    `::full-source` pin (or the current ns) has real source to show. It does

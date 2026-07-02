@@ -17,9 +17,9 @@
     [seon.db :as db]))
 
 (defn clip-title
-  "A SHORT single-line preview of message `content` for an address-todo
+  "A SHORT single-line preview of message `content` for an address-step
    title: internal newlines collapsed to spaces, trimmed, clipped to ~80
-   chars with a trailing `…` when cut. Never blank (the todo title schema
+   chars with a trailing `…` when cut. Never blank (the step title schema
    demands min 1) — falls back to a placeholder for whitespace-only input
    (message! already refuses blank content, so this is belt-and-braces)."
   [content]

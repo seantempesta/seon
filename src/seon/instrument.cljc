@@ -69,12 +69,12 @@
     'seon.agent.search                 ; grep
     'seon.agent.fs                     ; read-file/write-file/list-dir/stat/…
     'seon.agent.message                ; message!/user/agent
-    ;; Mixed ns — skip the envelope verbs; its open-todos-* RENDER fns stay
+    ;; Mixed ns — skip the envelope verbs; its plan-block/plan-body RENDER fns stay
     ;; instrumented.
-    ['seon.agent.todo 'add!]
-    ['seon.agent.todo 'complete!]
-    ['seon.agent.todo 'reopen!]
-    ['seon.agent.todo 'list-open]
+    ['my.plan 'step!]
+    ['my.plan 'done!]
+    ['my.plan 'reopen!]
+    ['my.plan 'list-open]
     ;; Safe-by-default core write — assert-invocation-shape! returns an
     ;; envelope; tested in db-test. (seon.db has many non-verb read fns
     ;; that DO stay instrumented, so this is fn-level.)

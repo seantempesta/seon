@@ -20,7 +20,7 @@
     [clojure.string :as str]
     [cljs.test :refer [deftest is testing]]
     [seon.agent]
-    [seon.agent.todo]
+    [my.plan]
     [seon.schema :as schema]
     [seon.test.runner]))
 
@@ -138,15 +138,15 @@
   (let [kinds (set (schema/entity-schema-keys))]
     (testing "the genuine entity kinds are declared and present"
       (doseq [k [:seon.agent :seon.eval :seon.agent.message :seon.fn
-                 :seon.ns :seon.schema :seon.agent.todo/todo :seon.test]]
+                 :seon.ns :seon.schema :my.plan/step :seon.test]]
         (is (contains? kinds k) (str k " is a declared entity kind"))))
     (testing "the 8 formerly-phantom request/response wrappers are gone"
       ;; `reopen-request`/`complete-request` were consolidated into the single
       ;; `::id-request` in Phase 6a; the invariant (a request/response :map is
       ;; never an entity kind) holds for the LIVE wrappers that replaced them.
-      (doseq [k [:seon.agent.todo/write-response
-                 :seon.agent.todo/status-response
-                 :seon.agent.todo/id-request
+      (doseq [k [:my.plan/write-response
+                 :my.plan/status-response
+                 :my.plan/id-request
                  :seon.agent.ctx/render-namespace-request
                  :seon.handler/input
                  :seon.agent.inspect/request

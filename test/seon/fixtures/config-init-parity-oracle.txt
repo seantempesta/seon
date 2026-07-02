@@ -476,13 +476,13 @@
             agent-tos (when (= origin :human)
                         (filter #(and (vector? %) (= :seon.agent/id (first %))) to))
             todos  (mapv (fn [agent-ref]
-                           {:seon.agent.todo/id         (db/new-id!)
-                            :seon.agent.todo/title      (internal/clip-title content)
-                            :seon.agent.todo/status     :open
-                            :seon.agent.todo/created-at (js/Date.)
-                            :seon.agent.todo/owner      agent-ref
-                            :seon.agent.todo/from       from
-                            :seon.agent.todo/message    [:seon.agent.message/id msg-id]})
+                           {:my.plan/id         (db/new-id!)
+                            :my.plan/title      (internal/clip-title content)
+                            :my.plan/status     :open
+                            :my.plan/created-at (js/Date.)
+                            :my.plan/owner      agent-ref
+                            :my.plan/from       from
+                            :my.plan/message    [:seon.agent.message/id msg-id]})
                          agent-tos)
             env    (await (db/transact! {:seon.db/tx-data (into [row] todos)}))]
         (if (:seon.db/ok? env)
@@ -545,36 +545,36 @@
                         :seon.agent.message/to      [[:seon.agent/id to-id]]})))))
 ;;; └─ end namespace seon.agent.message ─
 
-;;; ┌─ namespace seon.agent.todo ─
-(ns seon.agent.todo
-  "Your plan + work queue as a TREE. A todo is one `:seon.agent.todo` entity; a
-   `:seon.agent.todo/parent` ref makes a PLAN (top = milestones, leaves =
-   actions); a `:seon.agent.todo/depends-on` ref SEQUENCES work (B depends-on A
+;;; ┌─ namespace my.plan ─
+(ns my.plan
+  "Your plan + work queue as a TREE. A todo is one `:my.plan` entity; a
+   `:my.plan/parent` ref makes a PLAN (top = milestones, leaves =
+   actions); a `:my.plan/depends-on` ref SEQUENCES work (B depends-on A
    = do B after A). Progress, blocked-ness, and what's-next are DERIVED from the
    leaf `:open`/`:done` facts every turn — nothing derivable is stored. THE
    EXEMPLAR store/retrieve ns: `schema/register!` per attr, map-in/map-out fns,
-   errors as `:seon.agent.todo/ok?` value envelopes (never throws), derived views.
+   errors as `:my.plan/ok?` value envelopes (never throws), derived views.
 
    Use it for any task of two+ steps: mint the steps up front, `done!` each as it
    lands. Add one at a time (sequencing is a dependency), or author a whole plan
    in one `plan!` (`:children` nests; `:ref` labels a node; `:after` names labels
    it runs after):
 
-     (seon.agent.todo/add! {:seon.agent.todo/title \"write brief\"
-                            :seon.agent.todo/depends-on [[:seon.agent.todo/id \"a\"]]})
-     (seon.agent.todo/plan!
-       {:seon.agent.todo/title \"Process inbox → KB\"
-        :seon.agent.todo/children
-        [{:seon.agent.todo/title \"notes-a\" :seon.agent.todo/ref \"a\"}
-         {:seon.agent.todo/title \"synthesize\" :seon.agent.todo/after [\"a\"]}]})
+     (my.plan/step! {:my.plan/title \"write brief\"
+                            :my.plan/depends-on [[:my.plan/id \"a\"]]})
+     (my.plan/plan!
+       {:my.plan/title \"Process inbox → KB\"
+        :my.plan/children
+        [{:my.plan/title \"notes-a\" :my.plan/ref \"a\"}
+         {:my.plan/title \"synthesize\" :my.plan/after [\"a\"]}]})
 
    Run the loop off `next` (READY leaves only); `tree`/`status` are derived read
-   views. Open items also render every turn in the open-todos section — an empty
+   views. Open items also render every turn in the open-steps section — an empty
    section is the done-signal."
   (:refer-clojure :exclude [next])
   (:require
     [clojure.string :as str]
-    [seon.agent.todo.internal :as internal]
+    [my.plan.internal :as internal]
     [seon.db :as db]
     [seon.schema :as schema]))
 
@@ -601,13 +601,13 @@
    open-work (open leaf in the subtree), blocked (a dependency has open-work),
    ready (open unblocked leaf — work to do now). Negations (`leaf`, `not blocked`)
    only FILTER bound tuples, so bind the entity positively BEFORE invoking these."
-  '[[(descendant ?a ?n) [?n :seon.agent.todo/parent ?a]]
-    [(descendant ?a ?n) [?m :seon.agent.todo/parent ?a] (descendant ?m ?n)]
-    [(leaf ?t) (not-join [?t] [?c :seon.agent.todo/parent ?t])]
-    [(open-work ?t) [?t :seon.agent.todo/status :open] (leaf ?t)]
-    [(open-work ?t) (descendant ?t ?l) [?l :seon.agent.todo/status :open] (leaf ?l)]
-    [(blocked ?t) [?t :seon.agent.todo/depends-on ?d] (open-work ?d)]
-    [(ready ?t) [?t :seon.agent.todo/status :open] (leaf ?t) (not (blocked ?t))]])
+  '[[(descendant ?a ?n) [?n :my.plan/parent ?a]]
+    [(descendant ?a ?n) [?m :my.plan/parent ?a] (descendant ?m ?n)]
+    [(leaf ?t) (not-join [?t] [?c :my.plan/parent ?t])]
+    [(open-work ?t) [?t :my.plan/status :open] (leaf ?t)]
+    [(open-work ?t) (descendant ?t ?l) [?l :my.plan/status :open] (leaf ?l)]
+    [(blocked ?t) [?t :my.plan/depends-on ?d] (open-work ?d)]
+    [(ready ?t) [?t :my.plan/status :open] (leaf ?t) (not (blocked ?t))]])
 
 ;; --- Request/response schemas. ::ok? discriminates the envelope; failures
 ;; --- carry a guiding ::error (errors are values — branch, don't catch).
@@ -718,7 +718,7 @@
 
 ;; --- Public API
 
-(defn ^:async add!
+(defn ^:async step!
   "Mint one OPEN work item (owner = calling agent; blank title refused).
    `:parent`/`:depends-on` lookup-refs place it in the tree/DAG, both optional.
    → {::ok? true ::id _} or a fail envelope."
@@ -727,10 +727,10 @@
   (let [owner (internal/scoped-owner owner)]
     (cond
       (or (nil? title) (str/blank? title))
-      (internal/fail "add!: blank :seon.agent.todo/title refused — say what the work item is.")
+      (internal/fail "step!: blank :my.plan/title refused — say what the work item is.")
 
       (nil? owner)
-      (internal/fail (str "add!: no :seon.agent.todo/owner and no agent in scope — pass an "
+      (internal/fail (str "step!: no :my.plan/owner and no agent in scope — pass an "
                           "owner ref or call inside (db/with-agent …)."))
 
       :else
@@ -746,7 +746,7 @@
                           from              (assoc ::from from)
                           parent            (assoc ::parent parent)
                           (seq depends-on)  (assoc ::depends-on depends-on))]}))
-             (internal/write-result "add!" id))))))
+             (internal/write-result "step!" id))))))
 
 (defn ^:async plan!
   "Author a WHOLE plan in ONE transact. `:children` nests (`:parent` edges);
@@ -758,7 +758,7 @@
   (let [owner (internal/scoped-owner nil)]
     (cond
       (or (nil? title) (str/blank? title))
-      (internal/fail "plan!: blank :seon.agent.todo/title refused — name the plan.")
+      (internal/fail "plan!: blank :my.plan/title refused — name the plan.")
 
       (nil? owner)
       (internal/fail (str "plan!: no agent in scope — call inside (db/with-agent …)."))
@@ -780,7 +780,7 @@
   [{::keys [id]}]
   (case (internal/status-of id)
     nil   (internal/fail (str "done!: no todo " (pr-str id)
-                              " — (seon.agent.todo/list-open {}) shows the open ids."))
+                              " — (my.plan/list-open {}) shows the open ids."))
     :done {::ok? true ::id id}
     (->> (await (db/transact!
                   {:seon.db/tx-data [{::id           id
@@ -804,7 +804,7 @@
 
 (defn ^:async depends!
   "Add dependency edge(s) — the todo now runs after each :on ref (cardinality-
-   many). Remove one via `[:db/retract id :seon.agent.todo/depends-on dep]`."
+   many). Remove one via `[:db/retract id :my.plan/depends-on dep]`."
   {:malli/schema [:=> [:cat ::depends-request] ::write-response]}
   [{::keys [id on]}]
   (case (internal/status-of id)
@@ -845,7 +845,7 @@
     []))
 
 (defn tree
-  "The plan as nested EDN (children under `:seon.agent.todo/_parent`, dep ids
+  "The plan as nested EDN (children under `:my.plan/_parent`, dep ids
    inline). {::root? id} → that subtree; {::all? true} → every owner's forest;
    default → the calling agent's forest. The structural read you re-plan over."
   {:malli/schema [:=> [:cat ::tree-request] ::tree-response]}
@@ -880,18 +880,18 @@
       (internal/fail "list-open: no conn bound — runs inside an agent's universe.")
 
       (and (nil? owner) (not all?))
-      (internal/fail (str "list-open: no :seon.agent.todo/owner and no agent in scope — pass "
+      (internal/fail (str "list-open: no :my.plan/owner and no agent in scope — pass "
                           "an owner ref, {::all? true}, or use (db/with-agent …)."))
 
       :else
       (let [db @db/*conn*]
         {::ok?   true
          ::todos (if all?
-                   (internal/open-todos db nil)
+                   (internal/open-steps db nil)
                    (if-let [oe (:db/id (db/entity db owner))]
-                     (internal/open-todos db oe)
+                     (internal/open-steps db oe)
                      []))}))))   ; unknown owner = no items, derived view
-;;; └─ end namespace seon.agent.todo ─
+;;; └─ end namespace my.plan ─
 
 ;;; ┌─ namespace my.data ─
 (ns my.data

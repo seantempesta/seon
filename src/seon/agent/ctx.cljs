@@ -2,7 +2,7 @@
   "Context generation — the ONE block renderer. The prompt IS a REPL
    session: a static system header, the loaded namespaces as the body, the
    agent's own entity as a map, what the human currently sees, the
-   reactive warnings/todos, and the comment-block transcript of past
+   reactive warnings/plan, and the comment-block transcript of past
    turns + the live readline. Layout is ordered top→bottom =
    static→volatile: everything through `:namespaces` is the
    provider-cacheable prefix.
@@ -1176,7 +1176,7 @@
     "; real source (no signatures, no clipping). What renders is CURATED: YOUR\n"
     "; CURRENT namespace (your live workspace, the most important thing here)\n"
     "; and the nses it :requires, the my.* toolkit (my.kb / my.data / my.ui /\n"
-    "; my.tile) and your core verbs (todo / message / lifecycle). Everything\n"
+    "; my.tile) and your core verbs (plan / message / lifecycle). Everything\n"
     "; else — the rest of the seon framework AND your other my.* nses — is\n"
     "; deliberately NOT dumped; it stays QUERYABLE and SEARCHABLE, one step\n"
     "; away, so you are not buried in code you don't need. Never hallucinate a\n"
@@ -1194,7 +1194,7 @@
     "; in the ns form so the short aliases resolve (no magic — using requires\n"
     "; is the right thing):\n"
     ";   (ns my.<domain>.<thing>\n"
-    ";     (:require [seon.db :as db] [seon.agent.todo :as todo]\n"
+    ";     (:require [seon.db :as db] [my.plan :as plan]\n"
     ";               [seon.agent.message :as message] [seon.schema :as schema]))\n"
     "; — design a schema (schema/register!), and COLOCATE the functions that\n"
     "; operate on that data in the same namespace. Your code is my.*, your\n"
@@ -1242,14 +1242,14 @@
     ";   (defn f {:malli/schema S :test (fn [] (assert (= 4 (f 2 2))))}\n"
     ";     [a b] ...). It is what the NEXT agent sees INSTEAD of your body, so\n"
     ";   it must be self-explanatory AND pass (a failing example surfaces).\n"
-    "; - A task with 2+ steps: mint one todo per step with\n"
-    ";   seon.agent.todo/add! BEFORE you start, and done! each id as\n"
-    ";   the step lands. Your open todos render every turn with their\n"
+    "; - A task with 2+ steps: mint one plan step per step with\n"
+    ";   my.plan/step! BEFORE you start, and done! each id as\n"
+    ";   the step lands. Your open steps render every turn with their\n"
     ";   ids; once none remain, that section vanishes — your done-signal.\n"
-    "; - When your human messages you, an address-todo (marked ✉) is\n"
-    ";   auto-minted for you. The natural turn: done! that message-todo\n"
-    ";   AND do the work AND (often) add! sub-todos from what they said —\n"
-    ";   all at once. The done-signal is the todo's completion, nothing is\n"
+    "; - When your human messages you, an address-step (marked ✉) is\n"
+    ";   auto-minted for you. The natural turn: done! that message-step\n"
+    ";   AND do the work AND (often) step! sub-steps from what they said —\n"
+    ";   all at once. The done-signal is the step's completion, nothing is\n"
     ";   destroyed.\n"
     "; - Your messages render as markdown on your human's screen — use\n"
     ";   structure when it helps (short headings, lists, code fences for\n"
@@ -1302,7 +1302,7 @@
     ";   already computed, re-storing what you already stored, restyling a\n"
     ";   tile, or re-announcing \"it works / I'm ready\" are not progress —\n"
     ";   they burn turns on a finished task. The done-signal is the GOAL\n"
-    ";   being satisfied, not your open todos or the turn cap. Ask each turn:\n"
+    ";   being satisfied, not your open steps or the turn cap. Ask each turn:\n"
     ";   \"do I already have what was asked for?\" If yes, deliver it and stop.\n"
     "; - WHEN YOU ARE DONE, say so with a verb. (complete \"result\") marks\n"
     ";   the work finished — call it the turn the goal is met, right after you\n"
@@ -1825,7 +1825,7 @@
    STABLE prefix (every section through :namespaces — byte-stable
    within a session given the deterministic rendering) and the
    VOLATILE tail (everything after: live-tile, warnings,
-   open-todos, relevant-source, inventory, transcript).
+   plan, relevant-source, inventory, transcript).
 
    In-band because the agent loop hands providers ONE assembled
    string (`llm-fn` is fn-of-ctx-string): [[split-context]] recovers

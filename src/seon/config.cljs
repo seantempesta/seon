@@ -150,8 +150,8 @@
     :seon.render/ai 'seon.agent.ctx.live-tile/live-tile-block}
    {:seon.agent.ctx/name :warnings :seon.agent.ctx/priority 40
     :seon.render/ai 'seon.agent.ctx.warnings/warnings-block}
-   {:seon.agent.ctx/name :open-todos :seon.agent.ctx/priority 45
-    :seon.render/ai 'seon.agent.todo.internal/open-todos-block}
+   {:seon.agent.ctx/name :plan :seon.agent.ctx/priority 45
+    :seon.render/ai 'my.plan.internal/plan-block}
    {:seon.agent.ctx/name :relevant-source :seon.agent.ctx/priority 48
     :seon.render/ai 'seon.agent.ctx.relevant/relevant-source-block}
    {:seon.agent.ctx/name :findings :seon.agent.ctx/priority 97
@@ -297,13 +297,13 @@
   "The SHIPPED default namespaces render policy. Everything renders FULL real
    source; this is just WHICH nses are always present: the `my.*` toolkit
    exemplars plus the core verb nses the agent calls constantly
-   (`seon.agent.todo`/`seon.agent.message`/`seon.agent.lifecycle`). The agent's
+   (`my.plan`/`seon.agent.message`/`seon.agent.lifecycle`). The agent's
    CURRENT ns and the nses it `:require`s render full on top of this (resolved
    in `seon.agent.ctx.namespaces`). `config/system.edn` mirrors this list
    verbatim for visibility; a lean cluster overrides it with a short explicit
    list (the curation lever)."
   {:seon.config/always     '[my.kb my.data my.ui my.tile
-                             seon.agent.todo seon.agent.message seon.agent.lifecycle]
+                             my.plan seon.agent.message seon.agent.lifecycle]
    :seon.config/current-ns :full})
 
 (defn- ns-sym->kw

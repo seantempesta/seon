@@ -188,8 +188,8 @@
     ;; eval and so the core seed indexes it.
     [seon.agent.web]
     ;; Work items (user→agent asks + agent notes-to-self) — required so
-    ;; its register! calls run before the boot install of :seon.agent.todo/*.
-    [seon.agent.todo]
+    ;; its register! calls run before the boot install of :my.plan/*.
+    [my.plan]
     ;; The per-block ctx namespaces (ctx-sections-split-2026-06-18):
     ;; each owns one block fn (+ html twin) that seon.config/default-ctx-blocks
     ;; wires by SYMBOL — required here so the build includes them and
@@ -476,24 +476,24 @@
 
    ;; --- Todo (work items — user→agent asks + agent notes-to-self;
    ;; --- installed at boot so a RESUMING agent can list-open before
-   ;; --- any todo tx has lazily installed the attrs) ---
-   :seon.agent.todo/id
-   :seon.agent.todo/title
-   :seon.agent.todo/description
-   :seon.agent.todo/status
-   :seon.agent.todo/created-at
-   :seon.agent.todo/completed-at
-   :seon.agent.todo/owner
-   :seon.agent.todo/from
-   ;; Back-ref to the inbound :human message an address-todo tracks
+   ;; --- any step tx has lazily installed the attrs) ---
+   :my.plan/id
+   :my.plan/title
+   :my.plan/description
+   :my.plan/status
+   :my.plan/created-at
+   :my.plan/completed-at
+   :my.plan/owner
+   :my.plan/from
+   ;; Back-ref to the inbound :human message an address-step tracks
    ;; (auto-minted in message!; the render half links id+age+title).
-   :seon.agent.todo/message
+   :my.plan/message
    ;; The plan TREE edge (parent, plain ref) + the dependency DAG edges
    ;; (depends-on, plain cardinality-many ref). Boot-installed so the derived
    ;; work-queue rules (next/blocked/ready) query them before any tx has
    ;; lazily installed them on a fresh world.
-   :seon.agent.todo/parent
-   :seon.agent.todo/depends-on
+   :my.plan/parent
+   :my.plan/depends-on
 
    ;; --- Eval ---
    ;; Evals are component-many on :seon.agent.turn/evals — no standalone

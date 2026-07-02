@@ -23,8 +23,8 @@
     :seon.render/ai seon.agent.ctx.namespaces/namespaces-block}
    {:seon.agent.ctx/name :warnings :seon.agent.ctx/priority 40
     :seon.render/ai seon.agent.ctx.warnings/warnings-block}
-   {:seon.agent.ctx/name :open-todos :seon.agent.ctx/priority 45
-    :seon.render/ai seon.agent.todo.internal/open-todos-block}
+   {:seon.agent.ctx/name :plan :seon.agent.ctx/priority 45
+    :seon.render/ai my.plan.internal/plan-block}
    {:seon.agent.ctx/name :relevant-source :seon.agent.ctx/priority 48
     :seon.render/ai seon.agent.ctx.relevant/relevant-source-block}
    {:seon.agent.ctx/name :findings :seon.agent.ctx/priority 97

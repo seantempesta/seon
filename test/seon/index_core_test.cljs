@@ -30,7 +30,7 @@
     [seon.schema :as schema]
     ;; The exemplar TEST SIBLING — required so its deftest vars are
     ;; available as #'-literals for the test-sibling full-source guard.
-    [seon.agent.todo-test]))
+    [my.plan-test]))
 
 ;; index-core! / index-schemas are PURE, DETERMINISTIC builders that do full
 ;; runtime introspection (file-read + paren-parse over the whole build
@@ -264,7 +264,7 @@
   ;; Curated render (LEAN whitelist): the seon.* FRAMEWORK BULK keeps the
   ;; minimal `(ns x)` stub (it is DROPPED from render, never shown as a body),
   ;; while THE seon.* ns the config policy lists in :seon.config/always
-  ;; (seon.agent.todo by default) AND
+  ;; (my.plan by default) AND
   ;; every my.* ns (my.kb, the runnable DB manual, full via the my.* rule)
   ;; force-store their REAL FULL FILE TEXT (they render FULL, so the boot
   ;; indexer reads the file — probing .cljs then .cljc — the same
@@ -288,8 +288,8 @@
     ;; whitelisted tool carries its REAL full file source — neither a stub.
     (is (full? :my.kb)
         "my.kb (the runnable DB manual, full via the my.* rule) source is its REAL full file text")
-    (is (full? :seon.agent.todo)
-        "seon.agent.todo (whitelist) source is its REAL full file text")
+    (is (full? :my.plan)
+        "my.plan (whitelist) source is its REAL full file text")
     ;; seon.db itself is DE-whitelisted — the raw db source is no longer
     ;; dumped; it drops to the minimal (ns x) stub (still indexed via its
     ;; member rows). The worked-example layer (my.kb, full via the my.* rule)
@@ -307,14 +307,14 @@
     (let [syms (set (map :seon.fn/sym (filter :seon.fn/sym tx)))]
       (is (contains? syms "seon.agent.search/grep")
           "search's grep is an indexed :seon.fn member")
-      (is (contains? syms "seon.agent.todo/add!")
-          "todo's add! is an indexed :seon.fn member"))))
+      (is (contains? syms "my.plan/step!")
+          "plan's step! is an indexed :seon.fn member"))))
 
 (deftest test-sibling-ns-rows-ride-their-base-full-source-rule
   ;; Test siblings ride the SAME full-source rule as their subject ns (the
   ;; `-test` suffix is stripped to the base — seon.agent.ctx.namespaces/full-source-ns?):
-  ;;   (a) a `-test` sibling of a WHITELISTED base (seon.agent.todo-test →
-  ;;       seon.agent.todo, a full-source-whitelist member) carries its REAL
+  ;;   (a) a `-test` sibling of a WHITELISTED base (my.plan-test →
+  ;;       my.plan, a full-source-whitelist member) carries its REAL
   ;;       FULL FILE TEXT, so the deep render-namespace view has the real test
   ;;       bodies on hand;
   ;;   (b) a `-test` sibling of a NON-whitelisted, non-my.* base
@@ -323,8 +323,8 @@
   ;; Either way the deftest member rows live on the :seon.test rows.
   (let [;; (a) whitelisted base → FULL source.
         srows (client/index-tests
-                [#'seon.agent.todo-test/add-stores-a-fully-formed-open-todo])
-        srow  (first (filter #(= :seon.agent.todo-test (:seon.ns/name %)) srows))
+                [#'my.plan-test/step-stores-a-fully-formed-open-step])
+        srow  (first (filter #(= :my.plan-test (:seon.ns/name %)) srows))
         ssrc  (:seon.ns/source srow)
         ;; (b) non-whitelisted base → minimal stub. Any deftest in THIS ns
         ;; works (its base seon.index-core is not whitelisted); use one
@@ -333,8 +333,8 @@
         irow  (first (filter #(= :seon.index-core-test (:seon.ns/name %)) irows))
         isrc  (:seon.ns/source irow)]
     (is (some? srow) "an owning :seon.ns row is emitted for the whitelisted test ns")
-    (is (and (not= "(ns seon.agent.todo-test)" ssrc)
-             (str/starts-with? (str/triml ssrc) "(ns seon.agent.todo-test")
+    (is (and (not= "(ns my.plan-test)" ssrc)
+             (str/starts-with? (str/triml ssrc) "(ns my.plan-test")
              (str/includes? ssrc "deftest"))
         "a whitelisted-base test sibling carries its REAL full file text")
     (is (some? irow) "an owning :seon.ns row is emitted for the non-whitelisted test ns")

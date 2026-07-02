@@ -171,7 +171,7 @@
                "; checklist, a recommendation, a data breakdown, a result table,\n"
                "; progress — belongs HERE as a board/view, not recited in a\n"
                "; paragraph: a PLANNING / GOAL / STATUS ask answered only in prose\n"
-               "; (or only as todos) leaves this canvas blank — render the board\n"
+               "; (or only as steps) leaves this canvas blank — render the board\n"
                "; FIRST, then narrate. Set it with ONE transact of either literal\n"
                "; hiccup (instant) or a qualified tile-FN symbol (re-derives\n"
                "; every render, so a live count/query stays current):\n"

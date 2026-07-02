@@ -296,7 +296,7 @@
    :seon.agent.search/grep-graph-response envelope directly. Errors are
    values — never throws.
 
-   This is NOT for arbitrary entity data (todos, kb rows, agent state) —
+   This is NOT for arbitrary entity data (steps, kb rows, agent state) —
    that is Datalog (`seon.db/query`) / `my.kb`. grep-graph is literal text
    search over CODE only.
 

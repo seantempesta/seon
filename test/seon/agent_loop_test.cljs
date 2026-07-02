@@ -138,7 +138,7 @@
 
 (defn ^:async send-inbound!
   "Transact a fully-formed inbound message row DIRECTLY (bypassing
-   `message!`'s defaulting + todo-minting, so the test controls from / hops /
+   `message!`'s defaulting + step-minting, so the test controls from / hops /
    origin). `to` is the recipient agent-id; `from` a resolving lookup-ref."
   [from to-agent-id content hops origin]
   (await (db/transact!

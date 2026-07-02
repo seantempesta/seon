@@ -1,9 +1,9 @@
 (ns seon.eval.auto-refer-test
   "Real requires (#73/#56): the canonical short aliases (`db`→seon.db,
-   `todo`→seon.agent.todo, `message`→seon.agent.message, `schema`→seon.schema)
+   `plan`→my.plan, `message`→seon.agent.message, `schema`→seon.schema)
    are established ONLY in the agent's HOME ns by `setup-agent-ns!`. When an
    agent authors a NEW `my.*` ns and a fn there reaches for the
-   `db/`/`message/`/`todo/` aliases it SEES in its home-ns workspace, those
+   `db/`/`message/`/`plan/` aliases it SEES in its home-ns workspace, those
    aliases were NOT in scope → `db/transact! is not defined` (~60 such errors
    per fn-authoring drive).
 
@@ -44,8 +44,8 @@
         "db alias is auto-required")
     (is (str/includes? out "[seon.agent.message :as message]")
         "message alias is auto-required")
-    (is (str/includes? out "[seon.agent.todo :as todo]")
-        "todo alias is auto-required")
+    (is (str/includes? out "[my.plan :as plan]")
+        "plan alias is auto-required")
     (is (str/includes? out "[seon.schema :as schema]"))
     (is (not (str/includes? out "[seon.agent :as agent]"))
         "seon.agent is HOME-only — NOT added to an authored ns")
@@ -72,7 +72,7 @@
     (is (str/includes? out "[my.kb :as db]") "agent's db alias preserved")
     (is (not (str/includes? out "[seon.db :as db]"))
         "no duplicate db alias is injected")
-    (is (str/includes? out "[seon.agent.todo :as todo]")
+    (is (str/includes? out "[my.plan :as plan]")
         "non-conflicting canonical aliases still added")))
 
 (deftest augment-is-a-no-op-on-non-agent-and-non-ns-forms

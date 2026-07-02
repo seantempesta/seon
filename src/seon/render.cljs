@@ -871,7 +871,7 @@
   [node]
   (or (:seon.agent.message/id node)
       (:seon.eval/id node)
-      (:seon.agent.todo/id node)
+      (:my.plan/id node)
       (:seon.agent.ctx/name node)
       (:db/id node)))
 
