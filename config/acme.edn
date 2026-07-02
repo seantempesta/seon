@@ -44,20 +44,27 @@
   :seon.ai/agent-provider :inherit
 
   ;; home-requires toolbelt — DELIBERATELY DIFFERENT from config/system.edn's
-  ;; 10-ns default. Acme (the third party) picks its OWN agent toolset from
-  ;; THIS file, zero src/seon edits: a trimmed core-verb subset (message/plan/
-  ;; lifecycle/schema/db — drops my.kb/my.data/my.ui/my.tile/search) PLUS acme's
-  ;; own toolkit namespaces (acme.helpers, acme.notes). Since the :namespaces
-  ;; block renders "the current ns's :require's as compact cards", THESE ARE the
-  ;; verb surface a fresh acme agent sees — proving per-cluster ns selection is
-  ;; config-driven. Each entry carries :as/:refer (bare [ns] is rejected by
-  ;; :seon.eval/require-spec).
+  ;; default. Acme (the third party) picks its OWN agent toolset from THIS
+  ;; file, zero src/seon edits: the core verbs PLUS acme's own toolkit
+  ;; namespaces (acme.helpers, acme.notes); it drops search/shell/web/blob.
+  ;; Since the :namespaces block renders "the current ns's :require's as
+  ;; compact cards", THESE ARE the verb surface a fresh acme agent sees —
+  ;; proving per-cluster ns selection is config-driven. The `my.*` toolkit
+  ;; (kb/data/ui/tile) MUST stay in this list: the always-on instruction
+  ;; blocks + skill corpus teach `my.kb/remember` etc., and a require-less
+  ;; ns never renders a card — an agent taught verbs it cannot see burns
+  ;; turns grepping (eval blocker #4, 2026-07-02). Each entry carries
+  ;; :as/:refer (bare [ns] is rejected by :seon.eval/require-spec).
   :seon.eval/home-requires
   [[seon.agent.message :as message]
    [my.plan :as plan]
    [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
    [seon.schema :as schema]
    [seon.db :as db]
+   [my.kb :as kb]
+   [my.data :as data]
+   [my.ui :as ui]
+   [my.tile :as tile]
    [acme.helpers :as helpers]
    [acme.notes :as notes]]
 
@@ -94,8 +101,11 @@
     [{:seon.agent.ctx.transcript/from-turn-offset 0 :seon.agent.ctx.transcript/token-cap 16384}
      {:seon.agent.ctx.transcript/from-turn-offset 3 :seon.agent.ctx.transcript/token-cap 800}]}]}
 
- ;; ── NAMESPACES render policy — acme pins its OWN full-source ns set (incl.
- ;; its acme.* third-party code proves per-cluster ns render is configurable).
+ ;; ── NAMESPACES policy — :always is BOOT-STORAGE only (owner decision
+ ;; 2026-07-01, 2eeb3bd9): the boot indexer stores these nses' REAL FULL file
+ ;; source so a per-agent ::full-source pin CAN promote them to full. It does
+ ;; NOT drive render selection — an agent renders its CURRENT ns full plus its
+ ;; home-ns :require's as compact cards (the home-requires list above).
  :seon.config/namespaces
  {:seon.config/always     [my.kb my.data my.ui my.tile
                            my.plan seon.agent.message seon.agent.lifecycle]

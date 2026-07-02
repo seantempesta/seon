@@ -59,8 +59,17 @@ vs content — with UI/UX presentation polish on the eval/UX side.
 
 Tool defects queued for the tooling lane (with rendered-context evidence — eval lane):
 
-- **Fresh-world `my.kb` renders "0 fns, 0 schemas"** — a boot/indexing gap; the
-  kb card is empty on a fresh cluster. Tooling lane. (eval blocker #4)
+- ~~**Fresh-world `my.kb` renders "0 fns, 0 schemas"**~~ — ✅ RESOLVED
+  (2026-07-02): NOT a boot/indexing gap — fresh-world seeding is correct (live
+  store + /solve scratch both hold my.kb's 14 fns / 12 schemas / full source,
+  verified post-reset). Root = `config/acme.edn`'s home-requires demo trim
+  dropped the `my.*` toolkit while the always-on instructions/skills still
+  teach `my.kb/remember`, and render selection = home-requires (owner decision
+  2eeb3bd9: `:seon.config/always` is boot-storage only). Fix: acme
+  home-requires carries kb/data/ui/tile again; stale `:always`-renders comments
+  in both manifests corrected. Live proof: fresh reset → my.kb card renders 12
+  register! + 14 fn heads; a /solve agent used `my.kb/remember` from context.
+  (eval blocker #4)
 - **Turn-6 recall visibility gap during `/solve`** — candidate root = the
   `seon.db/*conn*` single dynamic root (not fiber-local); documented in
   `docs/seon/orchestrator/issues/tx-feed-pump-timeouts.md`. Tooling lane +
@@ -102,7 +111,8 @@ Eval-lane blockers before the first dev pass (from [[eval-CLAUDE-notes]]):
    (`src-inspect-ai/src/seon_inspect/generators.py` + `tool_scorers.py`;
    dev artifacts in `evals/`, lock entries `generated`, run wiring lands
    with the first dev pass).
-4. Fresh-world `my.kb` empty render + turn-6 recall (the two tool defects above).
+4. ~~Fresh-world `my.kb` empty render~~ (✅ resolved above) + turn-6 recall
+   (still open, see the tool defects above).
 5. ~~One calibration run~~ — ✅ DONE 2026-07-02
    ([[research/calibration-run-2026-07-02]]): per-pod `/solve` ceiling = **1**
    (live conn-swap collision evidence at c=2); QA timeout 240s (opt-in) /

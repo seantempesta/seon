@@ -27,14 +27,13 @@
  ;;   RUNPOD_API_KEY=<key>
  ;; A live switch is a transact: {:seon.ai/id "config" :seon.ai/provider :diffusiongemma}.
 
- ;; ── NAMESPACES render policy — the EXPLICIT list of WHICH nses render in the
- ;; agent prompt BODY (#42). Every rendered ns shows its REAL FULL SOURCE — the
- ;; budget is bound by CURATION (which nses), never compression (how each):
- ;;   :seon.config/always     → the always-present FULL-source nses
- ;;   :seon.config/current-ns → :full (default — the agent's own ns) | :off
- ;; The agent's current ns + the nses it :require's + third-party (acme) code
- ;; render full ON TOP of this list. Trim `:always` to go lean. (Mirrors
- ;; seon.config/default-namespaces-policy.)
+ ;; ── NAMESPACES policy (#42) — :always is BOOT-STORAGE only (owner decision
+ ;; 2026-07-01, 2eeb3bd9): the boot indexer stores these nses' REAL FULL file
+ ;; source so a per-agent ::full-source pin CAN promote them to full. It does
+ ;; NOT drive render selection — an agent renders its CURRENT ns full
+ ;; (:seon.config/current-ns :full, default; :off → compact) plus its home-ns
+ ;; :require's as compact cards; render selection is the home-requires list
+ ;; below. (Mirrors seon.config/default-namespaces-policy.)
  :seon.config/namespaces
  {:seon.config/always     [my.kb my.data my.ui my.tile
                            my.plan seon.agent.message seon.agent.lifecycle]
