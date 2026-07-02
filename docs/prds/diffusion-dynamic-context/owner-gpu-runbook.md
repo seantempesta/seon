@@ -13,6 +13,17 @@ tags: [orchestrator, diffusion, agent]
 > not the explanation. Every command runs from `tmp/flash-diffgemma` with `.env`
 > sourced (`set -a; . ./.env; set +a`) and `DIFFGEMMA_EP` exported.
 
+> **HARD GATE (owner, 2026-07-02) — do NOT start this session until BOTH hold**
+> (garbage in = garbage out; the voided E1 is the precedent):
+> 1. **inspect-ai integration finished for the measurements below** — the E1
+>    arms, skill-lift A/Bs, and ladder-lift scoring run as inspect tasks against
+>    the `/solve` door with oracle-backed `@scorer`s + epochs (`pass^k`), gym
+>    retained only until parity. Cheap-model (DeepSeek) dry-runs of every task
+>    must be green first.
+> 2. **base harness confirmed non-garbage** — the DeepSeek preflight battery
+>    ([[research/deepseek-preflight-drives-2026-07-02]]) green, including the
+>    oracle-liveness gate and a READ of the actual rendered agent context.
+
 > **Cost reminder:** scale-to-zero (`workers=(0,1)`) = **$0 idle**, ~66 s cold load
 > per batch; keep-warm (min worker 1) = **~$1.19/hr** continuous A100 — owner's call
 > once iterating. Do NOT set `(1,1)` and walk away.
