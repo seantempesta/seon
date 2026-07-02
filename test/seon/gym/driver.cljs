@@ -1654,8 +1654,9 @@
       extraction). The seed-origin tx-context matters:
       `seon.warn/domain-attrs` discriminates core vs agent attrs
       by exactly that provenance. The caller (run-scenario!) invokes
-      this inside `(db/with-agent <:a's id>)` so the seed txs carry
-      the primary agent's id like a live boot's do. The test roster
+      this OUTSIDE any agent scope, like the live boot does — a
+      `:core-seed` claim inside an agent scope trips the
+      origin-forge guard. The test roster
       comes from the `seon.dev.test-preload` require in this ns — the
       SAME mechanism the pod build uses.
 
@@ -1828,30 +1829,30 @@
               (sfs/configure! {:seon.agent.fs/allowed-roots
                                [(str cwd "/src") (str cwd "/docs")]
                                :seon.agent.fs/read-only?    true}))
-            ;; Mint :a's id FIRST and run the boot seed inside its
-            ;; with-agent scope — the seed txs carry the PRIMARY
-            ;; agent's id alongside the :core-seed origin (the
-            ;; live store's provenance shape, which the context-model
-            ;; classifier keys on). :a's actual BOOT (create! +
+            ;; Run the boot seed OUTSIDE any agent scope — the live
+            ;; store's provenance shape: `start-agent!` seeds before
+            ;; entering its with-agent scope, because a `:core-seed`
+            ;; origin claim from inside an agent scope is what the
+            ;; origin-forge guard warns on. :a's actual BOOT (create! +
             ;; creation evals) happens AFTER the seed + fixtures, so
             ;; its creation-turn `store-inventory`/instructions evals
             ;; see the seeded world — the live mint-onto-populated-
             ;; store order (a scenario's fixtures ARE prior state).
             ;; The scenario's prior-agent layer inside
-            ;; [[seed-scenario-world!]] re-scopes itself to a synthetic
-            ;; prior-agent id (nested with-agent — inner wins).
+            ;; [[seed-scenario-world!]] scopes itself to a synthetic
+            ;; prior-agent id (its own with-agent).
             (let [primary (db/new-id!)]
+              (await (seed-scenario-world! {:seon.gym/scenario scenario
+                                            :seon.db/conn conn}))
+              ;; World-parity: a live boot syncs the :seon.ai/config
+              ;; row from the SEON_AI_* env vars (start-agent! →
+              ;; ai/sync!; env OWNS the row) inside its agent scope.
+              ;; The gym never ran the sync, so env knobs
+              ;; (SEON_AI_TIMEOUT_MS, _MODEL, _THINKING) were silently
+              ;; DEAD in gym worlds while live pods honored them.
               (await
                 (db/with-agent primary
-                  (fn ^:async seed-and-sync! []
-                    (await (seed-scenario-world! {:seon.gym/scenario scenario
-                                                  :seon.db/conn conn}))
-                    ;; World-parity: a live boot syncs the :seon.ai/config
-                    ;; row from the SEON_AI_* env vars (start-agent! →
-                    ;; ai/sync!; env OWNS the row). The gym never ran the
-                    ;; sync, so env knobs (SEON_AI_TIMEOUT_MS, _MODEL,
-                    ;; _THINKING) were silently DEAD in gym worlds while
-                    ;; live pods honored them.
+                  (fn ^:async sync-ai! []
                     (await (ai/sync!)))))
               (await (eval-fixture-sources! compile-state fixture-sources))
               (await (ensure-agent! !agents compile-state :a primary)))
@@ -2028,11 +2029,13 @@
                          [(str cwd "/src") (str cwd "/docs")]
                          :seon.agent.fs/read-only? true})
         (let [primary (db/new-id!)]
+          ;; Seed outside any agent scope (live provenance shape — see
+          ;; the origin-forge note at the run-scenario! seed site).
+          (await (seed-scenario-world! {:seon.gym/scenario scenario
+                                        :seon.db/conn conn}))
           (await
             (db/with-agent primary
-              (fn ^:async seed-and-sync! []
-                (await (seed-scenario-world! {:seon.gym/scenario scenario
-                                              :seon.db/conn conn}))
+              (fn ^:async sync-ai! []
                 (await (ai/sync!)))))
           (await (eval-fixture-sources! compile-state fixture-sources))
           (await (ensure-agent! !agents compile-state :a primary)))

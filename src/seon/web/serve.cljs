@@ -502,9 +502,13 @@
    `*conn*` to a fresh conn, seed the core into it (so the agent has its my.kb
    toolkit + blocks — an unseeded void agent is useless), then run the existing
    mint+message+poll+read logic against the scratch conn; the `finally` restores
-   `*conn*` + the registry. SERIAL-ONLY: the async wake path reads the ROOT
-   `@db/*conn*` binding, so this relies on the benchmark running one sample at a
-   time (`--max-samples 1`). Making the conn fiber-local is a separate future
+   `*conn*` + the registry. Every READ in the poll + final-metadata path
+   snapshots THIS sample's own captured `conn` — never the ambient root — so
+   the reported turns/evals/reply are world-consistent even if the root binding
+   is swapped mid-flight. SERIAL-ONLY nonetheless: the async wake path and the
+   WRITES (message!, close-run!, the agent loop itself) still read the ROOT
+   `@db/*conn*` binding, so this relies on the benchmark running one sample at
+   a time (`--max-samples 1`). Making the conn fiber-local is a separate future
    item — do NOT attempt it here.
 
    Inside the scratch store: mint + arm a fresh scratch agent via `mint-agent`
@@ -529,15 +533,15 @@
         (set! db/*conn* conn)
         ;; Boot the scratch store into THE WORLD A POD BOOTS INTO: bootstrap the
         ;; CLJS compile-state, then seed the core (instruction rows +
-        ;; :seon.ns/:seon.fn program-graph). The seed runs inside a primary
-        ;; agent-id scope so its txs carry the live provenance shape — identical
-        ;; to the gym. (We skip the gym's fs-configure + ai/sync unless a drive
-        ;; shows /solve agents need them — minimal but correct.)
+        ;; :seon.ns/:seon.fn program-graph). The seed runs OUTSIDE any agent
+        ;; scope — its txs carry `:seon.db/origin :core-seed`, and a core-seed
+        ;; claim from inside an agent scope is exactly what the origin-forge
+        ;; guard (`seon.db.internal/warn-on-seed-origin-forge!`) warns on.
+        ;; Identical to `start-agent!`'s live boot, which also seeds before
+        ;; entering its agent scope. (We skip the fs-configure + ai/sync steps
+        ;; unless a drive shows /solve agents need them — minimal but correct.)
         (let [compile-state (await (repl/ensure-bootstrap!))
-              seed-primary  (db/new-id!)
-              _             (await (db/with-agent seed-primary
-                                     (fn ^:async seed-core! []
-                                       (await (boot-seed {:seon.db/conn conn})))))
+              _             (await (boot-seed {:seon.db/conn conn}))
               ;; Mint + arm the scratch agent ON THE SCRATCH conn. init-agent!
               ;; resolves *conn* (scratch) + current-llm-fn and installs the wake
               ;; trigger on the scratch conn, so message! below actually wakes it
@@ -559,9 +563,13 @@
           ;; run began after injection (the task run has run to completion).
           (loop [injected-at (js/Date.now)]
             (await (js/Promise. (fn [r] (js/setTimeout r 1500))))
-            ;; ONE db snapshot per poll, passed to every read below (a mid-poll
-            ;; write must not split state vs run-start vs reply reads).
-            (let [db       @db/*conn*
+            ;; ONE db snapshot per poll, FROM THIS SAMPLE'S OWN conn — never the
+            ;; ambient root `db/*conn*` (a mid-flight conn swap by another
+            ;; sample would silently point every read below at the wrong world:
+            ;; the calibration run's collided sample reported turns=0 despite 3
+            ;; turns having run). Passed to every read below (a mid-poll write
+            ;; must not split state vs run-start vs reply reads either).
+            (let [db       @conn
                   st       (derive/derive-state db aid)
                   elapsed  (- (js/Date.now) start)
                   done?    (and (= :idle st) (>= (latest-run-start-ms db aid) injected-at))
