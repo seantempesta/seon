@@ -173,6 +173,11 @@
     ;; (seon.agent.search/grep ...) from bootstrap-CLJS eval and so the
     ;; core-vars seed below can index it.
     [seon.agent.search]
+    ;; Run real commands / Python — argv `execFile` over the fs cwd gate,
+    ;; default-deny behind the SEON_SHELL host grant. Required so the
+    ;; agent can call (seon.agent.shell/run ...) / (seon.agent.shell/py-run
+    ;; ...) from bootstrap-CLJS eval and so the core seed indexes it.
+    [seon.agent.shell]
     ;; Work items (user→agent asks + agent notes-to-self) — required so
     ;; its register! calls run before the boot install of :seon.agent.todo/*.
     [seon.agent.todo]
