@@ -10,13 +10,19 @@
    await/microtask), let settle! run against it, then read its
    `:report-counters` to confirm a `:fail` was recorded — and restore the
    real env before the proof test's own assertions + `done`. Same
-   root-`set!`-survives-await mechanism seon.test.runner relies on."
+   root-`set!`-survives-await mechanism seon.test.runner relies on.
+
+   The capture env carries the runner's SILENT `::runner/capture`
+   reporter (counts :fail without printing). The default reporter would
+   print the intentional failure as an anonymous `FAIL in () (:)` line —
+   which bin/test-cljs's anchored `^FAIL in \\(` grep counts as a real
+   failure, flipping the suite verdict to FAIL despite a 0/0 summary."
   (:require [cljs.test :refer [deftest is async] :as t]
-            [seon.test.async :refer [settle!]]))
+            [seon.test.async :refer [settle!]]
+            [seon.test.runner :as runner]))
 
 (defn- fresh-capture-env []
-  (assoc (t/empty-env)
-         :report-counters {:test 0 :pass 0 :fail 0 :error 0}))
+  (t/empty-env ::runner/capture))
 
 (deftest settle!-on-reject-fails-loudly-and-calls-done-once
   (async done
