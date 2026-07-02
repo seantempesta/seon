@@ -36,4 +36,18 @@ in-memory conn, then the planner fix upstream-able to the fork. Owner rule:
 
 ## Status
 
-Open — queued behind the current stability wave (tooling lane).
+Open — **NEXT DISPATCH** (owner-ordered 2026-07-02, held while owner
+re-authenticates; do not lose). Scope when dispatched:
+
+1. Minimal repro as a hermetic in-memory test in the fork
+   (`reference-code/datahike`, seantempesta fork on replikativ main).
+2. Root-cause + fix the planner in OUR fork; run the fork's own suite
+   (exclude the upstream channel-contract CLJS tests per the sync note).
+3. **Verify the running systems actually resolve OUR fork** — deps.edn /
+   package resolution for the pod build AND the wire-server JVM; owner: "make
+   sure our systems are using our forked and fixed issues as this has
+   happened before" — check for a stale upstream coordinate shadowing the
+   fork, and prove it live (eval the fixed query shape on the pod).
+4. Re-run the previously-failing 3-clause order live → correct rows, and
+   remove the docs workaround caveat if the fix makes the guidance
+   unconditional again.
