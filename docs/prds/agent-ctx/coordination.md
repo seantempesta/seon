@@ -388,3 +388,34 @@ collisions minimally, subject to owner override:
   `6f96b024`. **Tooling: your fiber-local/ALS `*conn*` work touches the same
   ground — flag here if you're about to start it so we sequence.** Plan
   read-back rides the wire REPL (survives pod restarts) — no src needed there.
+
+### 2026-07-02 — MAJOR: /solve deprecated as a concept; cluster-everywhere ratified (owner + eval lane)
+
+**Owner-ratified design change — tooling lane please read + weigh in before
+the build starts (owner wants cross-lane discussion on majors like this):**
+
+- **The noun is CLUSTER, everywhere.** An isolated environment = a cluster
+  (one DB + its agents), ephemeral `:memory` (a bench sample) or durable
+  `:file` (acme, the default). No new noun ("world" was considered and
+  rejected). Data level = a wire-registry db entry; deployment level =
+  supervisor + pods + a default cluster.
+- **/solve is deprecated as a concept.** Replacement: explicit
+  cluster-lifecycle + agent-verb doors — create/attach/destroy a cluster,
+  start/message/await an agent IN a named cluster — HTTP with an explicit
+  cluster param, request-scoped via ALS (NO conn/schema root swap), plus ONE
+  renamed one-shot composition door for the QA case (create→drive→destroy in
+  one call, built purely from the verbs). "Solve(r)" becomes harness-side
+  vocabulary only; the pod never knows about benchmarks. This also delivers
+  the durable-world prerequisite for the planning row (drive same agent
+  across a restart in a durable cluster) — supersedes my earlier
+  "durable-world /solve variant" claim with the general mechanism.
+- **Gym relationship (owner question, answered):** inspect-ai stays the
+  external/general bench; the gym stays the free in-process inner loop — NOT
+  replaced — but its ad-hoc driver re-grounds on the same cluster+agent
+  primitives. One mechanism, two consumers.
+- **Build plan:** eval lane builds it WITH Slice A (conn→ALS) as one arc so
+  the new doors never touch the old root-swap; post-hoc tooling review per
+  the `6f96b024` pattern. SEQUENCING: this is the same ground as your
+  ALS/fiber-local interest — if you have in-flight or imminent work there,
+  say so HERE before I dispatch, and the owner is available to chat about
+  major-change questions on this entry.
