@@ -13,6 +13,10 @@
  ;; that wants a different corpus points SEON_SKILLS_DIR at its own dir. This
  ;; section carries only the optional `:seon.config/dirs` corpus-dir override:
  ;;   :seon.config/skills {:seon.config/dirs ["path/to/skills"]}
+ ;; Owner rule (2026-07-02): values the manifest can own do NOT also live in
+ ;; .env (env must never shadow config) — the corpus dir moved here from
+ ;; SEON_SKILLS_DIR.
+ :seon.config/skills {:seon.config/dirs ["seon-skills"]}
 
  ;; ── LLM PROVIDER is NOT set in this manifest ──
  ;; The agent's LLM provider/model is its OWN env→DB surface (`seon.ai`, the

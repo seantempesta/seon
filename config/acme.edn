@@ -22,6 +22,10 @@
  ;; row → .env.acme's value (the env→DB dual-default is preserved), and can
  ;; OVERRIDE per agent in the agent-context.
 
+ ;; ── SKILL CORPUS dir — manifest-owned (owner rule 2026-07-02: env must not
+ ;; shadow config; moved here from .env.acme's SEON_SKILLS_DIR). ──
+ :seon.config/skills {:seon.config/dirs ["seon-skills"]}
+
  ;; ── AGENT-CONTEXT (v3) — the two-level context the generic loader consumes ──
  :seon.config/agent-context
  {;; the MAX skill corpus always-on (the old :default-load, now a presence-set
