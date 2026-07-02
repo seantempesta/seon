@@ -157,7 +157,14 @@ bin/acme restart pod          # acme pod picks it up
 
 ## Inspecting / driving the acme pod
 
-- **HTTP:** `curl -s 127.0.0.1:7980/agents`, `…/agent/<id>`, etc.
+- **HTTP:** there is NO `/agents` route (removed in the db->routes reitit
+  cutover; an unmatched path 302s to `/`). The real surface is the seeded
+  core routes — `curl -s 127.0.0.1:7980/` (root dashboard),
+  `…/agent/<id>` (agent page), `…/agent/<id>/feed` (SSE) — plus the
+  operator datom browser `curl -s 127.0.0.1:7980/data` (verified live:
+  HTTP 200). List the seeded routes from the wire REPL:
+  `[?e :seon.route/pattern]` datoms (verified live 2026-07-02: `/`,
+  `/agent/{id}`, `/agent/{id}/call`, `/agent/{id}/feed`).
 - **Wire-server REPL:** `nc -U`-style on `127.0.0.1:7981` (the loopback socket
   REPL) for writer-side queries.
 - **NOT MCP:** the `mcp__seon_cljs__*` tools only see the live `:client`
@@ -173,8 +180,10 @@ bin/acme restart pod          # acme pod picks it up
   race (the pod ping-fails in ~10s and exits if the writer socket isn't
   accepting yet). Use `bin/acme up` — it blocks on wire-server readiness
   between the two starts. After a bare `start pod` always poll
-  `curl -s 127.0.0.1:7980/agents` to HTTP 200 (the start command returns
-  before the pod is actually ready).
+  `curl -fsS -o /dev/null 127.0.0.1:7980/` until it exits 0 — the same
+  probe `bin/seon`'s `ready_check` uses (`-f` passes on 200 AND on the
+  302 an unmatched path gets, so it won't false-fail; the start command
+  returns before the pod is actually ready).
 - Acme's 7980/7981 were chosen because 7990/7991 collided with another
   deployment on the dev machine; override with `SEON_PORT=… bin/acme …` if
   needed.
