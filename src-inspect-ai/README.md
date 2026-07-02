@@ -92,6 +92,69 @@ task-wiring means). Engineering note: inspect runs epochs CONCURRENTLY — the
 oracle line-servers serialize request/response pairs with a lock, and metrics
 are read from the eval LOGS, never scraped from stdout.
 
+## Standard benchmarks (`inspect_evals` catalog) — the general path
+
+Owner directive: **test useful behaviours with established benches, not
+homemade gates.** So the primary path is running real `inspect_evals` tasks
+(their dataset + their host-side scorer, unchanged) with the Seon pod
+substituted as the solver — `seon_inspect.catalog.run_bench(name, solve_url=…)`
+uses inspect's `eval(task, solver=…)` override (verified against
+`reference-code/inspect-ai/_eval/eval.py:121`). Bespoke Seon tasks
+(`e1_spec_fn`, `skill_lift`, `ladder_lift`) stay only for Seon/Clojure codegen,
+where no standard bench measures the same thing — and they are oracle-scored,
+never invented-gate-scored.
+
+Case-1 = `input text → final answer`, host-side scorer, **no** inspect
+sandbox/tool-bridge. That's what `/solve` supports today.
+
+| Bench | Capability | Case-1 via /solve? | Split reported | Notes |
+|---|---|---|---|---|
+| `gsm8k` | grade-school math reasoning | ✅ **baselined** | test (report-only) | numeric match scorer, host-side |
+| `arc_easy` / `arc_challenge` | science MC-QA | ✅ | test | choice scorer |
+| `mmlu_0_shot` | broad knowledge MC-QA | ✅ | test | choice scorer |
+| `commonsense_qa` | commonsense MC-QA | ✅ | validation | choice scorer |
+| `truthfulqa` | truthfulness MC-QA | ✅ | validation | choice scorer |
+| `gpqa_diamond` | hard graduate MC-QA | ✅ | test (gated dataset) | needs HF access token |
+| `humaneval` / `mbpp` | code generation | ❌ **case-2** | — | scorer EXECUTES model code in a sandbox → mvm tier |
+| `gaia`, `assistant_bench`, `tau2`, `theagentcompany`, `swe_bench` | agentic / **long-horizon planning** | ❌ **case-2** | — | need web/tool/repo sandboxes → mvm tier |
+
+**Long-horizon planning (the headline capability):** no `inspect_evals` bench
+measures long-horizon planning WITHOUT a tool sandbox — the agentic ones
+(`gaia`/`tau2`/`theagentcompany`) are all case-2. So *plan-survives-restart*
+(the spike's `planning_resume` shape: build a durable plan → restart the pod →
+resume from open plan items across process death) legitimately stays a **bespoke
+Seon task** — it exercises the DB-backed `my.plan` durability that generic
+benches don't touch. Tasks state the GOAL (a durable plan that survives an
+interruption), never the API verbs — agents discover `my.plan` from their own
+context (no-coaching rule). The case-2 agentic benches become available once the
+mvm tool-bridge tier lands.
+
+Run one (pod-agnostic — `solve_url` selects ANY pod that mounts `/solve`):
+
+```bash
+# against the acme harness (the pod we drive today):
+SEON_SOLVE_URL=http://127.0.0.1:7980/solve \
+  .venv/bin/python -c "from seon_inspect.catalog import run_bench; \
+    run_bench('gsm8k', limit=5, epochs=1, solve_timeout_s=240)"
+# against any other pod: point SEON_SOLVE_URL / solve_url at it. Nothing is acme-specific.
+```
+
+`--model mockllm/model` is forced internally (inspect requires a model arg; the
+solver bypasses it — the pod owns every turn). Image/multimodal benches also
+need `pillow` (`uv pip install pillow`); the QA/math case-1 set does not.
+
+### First baseline (DeepSeek, via acme /solve, 2026-07-02)
+
+| Bench | N | accuracy | turns/sample | notes |
+|---|---|---|---|---|
+| `gsm8k` | 2 | **1.000** | 2 | closed `:completed`, 27-38 s/sample, no timeouts |
+
+This is Seon's first STANDARD-benchmark number — the baseline the diffusion
+provider and every context change compares against. Small N (a wire-proof, not
+a leaderboard); scale N + add `epochs` for `pass^k` when a real comparison is
+needed. Ran against the pre-`my.plan` bundle — gsm8k is planning-independent so
+the number stands; planning benches need a rebuilt pod (`bin/acme restart pod`).
+
 ## Parity map (the gym retires at parity)
 
 | This task | Replaces | Notes |
