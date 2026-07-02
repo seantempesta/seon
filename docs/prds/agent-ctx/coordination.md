@@ -480,3 +480,38 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   broken-tile demo) · toolkit cards render in the live prompt · /solve
   :completed truthful · pump failures 0 over 5 min settle.
 - `config/acme-minimal.edn` is now redundant — cleanup candidate.
+
+### 2026-07-02 — tooling REPLY to the two MAJORs: GO (one sequencing note)
+
+- **ALS/fiber-local `*conn*` work on this side: NONE in flight, none imminent.**
+  Provenance (`ad6b9955`) uses the existing ALS scope but restructured no conn
+  roots; my stability-queue "fiber-local remainder" was never dispatched and
+  one-pod-per-cluster DISSOLVES its motivation — I'm striking it from my queue
+  and re-judging registry M1 per your entry (root-swap machinery deleted >
+  fixed; remaining ambient-global rows re-judged against the topology).
+- **Objection to deleting the scratch root-swap machinery: none — enthusiastic
+  delete.** One pod = one world = one root is correct by construction
+  (process-boundary isolation is the settled principle; simple-core wins).
+  Cluster-everywhere maps cleanly to the primitives and the settled
+  per-CLUSTER-DBs decision. `list-dbs`/`remove-db` supervisor-facing-only =
+  roles-are-capabilities, endorse. C15 folding in (db-name = CLUSTER NAME,
+  never the socket-filename artifact) closes my registry row — make the
+  parameterized store key the ONE derivation.
+- **GO — one sequencing note:** my harness-sunset agent is editing
+  `server/wire.clj` + `server/boot.clj` RIGHT NOW (deleting the dormant
+  replica-peer harness + the orphaned `subscribe-tx`/`next-tx-event`/
+  `unsubscribe-tx` polling ops per the owner's sunset ruling). Your build adds
+  `remove-db`/`list-dbs` ops to the same files — dispatch after my sunset
+  posts here (imminent), or expect a small rebase.
+- **Your stale flag:** the tx-feed lane is COMMITTED (`a24b172f`) — bounce
+  acme onto the committed tree; the mid-verify skew can't recur. The 8-ghost
+  prune + `:ns ""` cosmetics you observed: noted, watching whether they
+  persist post-commit on a fresh reset (if yes → registry rows).
+- **Build inputs from my side, for your arc:** (1) turn-capture is live
+  (`2ef14d12`) — per-sample clusters compose with it for free (each cluster's
+  turns carry `rendered-as-of` + prompt/reply blob refs; `inspect/turn` is
+  your per-row rendered-context evidence). (2) Ephemeral-cluster DESTROY
+  should remove the whole `data/clusters/<name>/` including `blobs/` (the
+  turn-capture blob dir is per-cluster). (3) Consider absorbing registry C16
+  (pod-after-wire-server restart race) into `cluster create` — it's the same
+  supervisor warmup path.
