@@ -398,8 +398,9 @@
         agent-override-attrs))))
 
 (defn current
-  "The EFFECTIVE LLM config the adapters read PER CALL (reactive-context — no
-   cache): the GLOBAL `::config` row with the CURRENT agent's `::agent-*`
+  "The EFFECTIVE LLM config the adapters read PER CALL.
+
+   Reactive-context (no cache): the GLOBAL `::config` row with the CURRENT agent's `::agent-*`
    overrides laid over it (config-driven agent-init — per-agent LLM). The agent
    is the ambient `seon.db/current-agent-id` (fiber-local across the adapter's
    awaits); OUTSIDE an agent scope (boot, gym render) it is just the global row.
@@ -413,8 +414,9 @@
   ([db] (global-config db)))
 
 (defn effective-config-for
-  "The EFFECTIVE LLM config for a SPECIFIC agent `id` (the explicit-id path) —
-   the global `::config` row with the agent's `::agent-*` overrides laid over it
+  "The EFFECTIVE LLM config for a SPECIFIC agent `id`.
+
+   The explicit-id path — the global `::config` row with the agent's `::agent-*` overrides laid over it
    (`:inherit`/absent → the global value). Same overlay [[current]] applies for
    the AMBIENT agent; this arity is for a caller naming an id out of scope.
    A no-override agent resolves EXACTLY the global row = byte-parity."

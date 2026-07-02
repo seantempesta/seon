@@ -50,8 +50,9 @@
     (when (and (some? c) (not= :none c)) c)))
 
 (defn live-tile-block
-  "The `:live-tile` awareness section — what your human currently
-   sees. Invokes the agent's wired tile value against THIS TURN's db
+  "The `:live-tile` section — what your human currently sees.
+
+   Invokes the agent's wired tile value against THIS TURN's db
    value through `seon.render/render-agent-tile` (the ONE tile entry
    point — same resolution, same render the human surfaces use) and
    renders:

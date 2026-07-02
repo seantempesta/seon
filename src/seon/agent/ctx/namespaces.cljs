@@ -155,8 +155,9 @@
              (if (keyword? ns-name) ns-name (keyword (str ns-name)))))
 
 (defn always-full-my-nses
-  "The `my.*` members of the config `:seon.config/always` set (the toolkit
-   exemplars `my.kb`/`my.data`/`my.ui`/`my.tile` by default). DERIVED from
+  "The `my.*` members of the config `:seon.config/always` set.
+
+   The toolkit exemplars `my.kb`/`my.data`/`my.ui`/`my.tile` by default. DERIVED from
    config, never hardcoded. NOT a render-selection input (the `:namespaces`
    section no longer pins `:always`); used by the GYM harness
    (`seon.gym.driver`) to derive the toolkit aliases it seeds."
@@ -373,7 +374,9 @@
       card)))
 
 (defn namespaces-block
-  "The namespaces body. COMPACT EVERYTHING EXCEPT THE CURRENT NS — no hardcoded
+  "The namespaces body — the CURRENT ns full, its requires as cards.
+
+   COMPACT EVERYTHING EXCEPT THE CURRENT NS — no hardcoded
    list, no `my.*` pinning, no `:always` allow-list. THREE rules:
 
      - FULL — the agent's CURRENT ns + any ns in the per-agent `::full-source`

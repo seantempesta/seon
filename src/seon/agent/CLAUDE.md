@@ -59,12 +59,15 @@ turn/FSM/bounds), `data-model.md` (every attr you'll touch), `observability.md`
 
 ## Known gaps (in flight — check roadmap before "fixing")
 
-- Turn stores wall-clock `at` but not yet `basis-t`; prompt/reply capture is
-  moving onto the blob store (always-on). See `observability.md`.
+- Turn stores wall-clock `at` but not yet `:seon.agent.turn/rendered-as-of`
+  (the PRE-turn frozen basis-t — the one coordinate tx-meta doesn't give
+  free); prompt/reply capture is moving onto the blob store (always-on).
+  See `observability.md`.
 - Embedding hits enter the prompt via a volatile stash (`seon.embed.stash`)
   — being made a recorded turn input.
-- `shell` / `python` / `web` capability fns don't exist yet; designs are
-  evaluated in `docs/prds/agent-fsm/research/tool-designs-eval-2026-07-02.md`.
+- `shell.cljs` (run + py-run, `SEON_SHELL` default-deny) and `my.blob`
+  shipped 2026-07-02 — live-drive verification in flight. `web` fetch is
+  design-only: `docs/prds/agent-fsm/research/web-fetch-design-2026-07-02.md`.
 
 ## Vendored grounding
 

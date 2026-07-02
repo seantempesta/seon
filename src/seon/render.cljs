@@ -169,8 +169,10 @@
 ;; ============================================================
 
 (defn ai-render
-  "Materialize an :seon.render/ai slot. Slot is a qualified symbol;
-   if it doesn't resolve (or is nil / unqualified), fall through to
+  "Materialize an `:seon.render/ai` slot to agent-facing text.
+
+   Slot is a qualified symbol; if it doesn't resolve (or is nil /
+   unqualified), fall through to
    seon.render.default/pretty-ai so the agent always gets some ctx."
   {:malli/schema [:=> [:cat :any :map] :seon.render/ai-response]}
   [sym input-map]
@@ -178,8 +180,10 @@
     (f input-map)))
 
 (defn html-render
-  "Materialize an :seon.render/html slot. Slot is either a symbol
-   (resolved + called), a literal hiccup vector (used as-is), or
+  "Materialize an `:seon.render/html` slot to hiccup.
+
+   Slot is either a symbol (resolved + called), a literal hiccup vector
+   (used as-is), or
    anything else (pretty-printed)."
   {:malli/schema [:=> [:cat :any :map] :seon.render/html-response]}
   [slot input-map]
@@ -374,8 +378,9 @@
 ;; ============================================================
 
 (defn loud-explain
-  "A LOUD, human-legible one-string diagnosis of a caught render exception
-   `e` for block `where`: the offending block name + the exception message
+  "A LOUD one-string diagnosis of a caught render exception `e`.
+
+   For block `where`: the offending block name + the exception message
    + (when `e` is a Malli instrumentation envelope) the FULL humanized
    `explain`. The string the strict-mode throw carries and the graceful
    guard would otherwise hide behind a bare `:malli.core/invalid-input`."
@@ -390,8 +395,10 @@
          (when detail (str "\n" detail)))))
 
 (defn strict-fail!
-  "Route a caught render exception through the [[seon.config/render-strict?]]
-   dial. STRICT ON → throw an ex-info naming `where` + carrying the full
+  "Route a caught render exception through the strict-mode dial.
+
+   [[seon.config/render-strict?]]: STRICT ON → throw an ex-info naming
+   `where` + carrying the full
    [[loud-explain]] (so ANY render failure screams, never a swallowed
    one-liner). STRICT OFF → return nil, signalling the caller to fall back
    to its graceful guard (a live prod agent must not hard-crash on one bad
@@ -615,7 +622,9 @@
        str/trim))
 
 (defn block
-  "THE typed-block renderer. `(block view x)` — `view` is `:html` (→ hiccup)
+  "THE typed-block renderer for a tagged value in `:html` or `:ai`.
+
+   `(block view x)` — `view` is `:html` (→ hiccup)
    or `:ai` (→ prompt String). Dispatches on the value-KIND of `x` via the
    namespaced key the value carries (the tagged-value contract above) and
    delegates to the renderer that already owns that kind. GUARDED like
@@ -681,8 +690,9 @@
    [:seon.db/db    {:optional true} :seon.db/db]])
 
 (defn render-agent-tile
-  "Render the agent's live tile — the one HTML surface the agent
-   dynamically rewrites (by transacting a qualified fn symbol or
+  "Render the agent's live tile — the one surface it rewrites.
+
+   Dynamically rewritten by transacting a qualified fn symbol or
    literal hiccup onto `:seon.render.live-tile/content` on its own
    agent entity; see seon.render.live-tile's ns docstring for the
    full contract).
@@ -852,8 +862,10 @@
    :seon.agent.ctx/priority])
 
 (defn renderable-id
-  "A node's stable HANDLE — its own identity attr (dispatch by presence), or a
-   section's name. Shown in the transcript / inspector so the agent can
+  "A node's stable HANDLE — its identity attr, or a section name.
+
+   Dispatch by presence on its own identity attr, else the section's
+   name. Shown in the transcript / inspector so the agent can
    reference or override it. Never a stored :seon.render/id."
   {:malli/schema [:=> [:cat :any] :any]}
   [node]
@@ -864,7 +876,9 @@
       (:db/id node)))
 
 (defn renderable-inst
-  "A node's TIME for sorting + relative display — the :db/txInstant the store
+  "A node's TIME for sorting — the `:db/txInstant` it was asserted at.
+
+   The `:db/txInstant` the store
    stamped when the row was first asserted (UNIVERSAL; no per-kind :at attr).
    Per-node fallback for an arbitrary pulled entity (the events query joins it
    in once for the whole list)."
@@ -959,7 +973,9 @@
                   ((generic-default-renderer view) input))))))
 
 (defn render
-  "Render ONE node in `view`, recursively + guarded. The fn receives the full
+  "Render ONE node in `view`, recursively + guarded.
+
+   The fn receives the full
    injected context PLUS the node and a view-bound recursion handle
    (`:seon.render/render`) so a section renders its children through the same
    dispatch. A render fn may return BARE content OR the

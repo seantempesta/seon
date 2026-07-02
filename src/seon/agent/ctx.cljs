@@ -183,7 +183,9 @@
     (catch :default _ false)))
 
 (defn read-file-text
-  "Live text of file `path` (resolved against cwd), or nil when
+  "Live text of file `path` (resolved against cwd), or nil.
+
+   Nil when
    unreadable (missing file). Never throws. The ONE fresh-file read every
    file-section render routes through ([[file-block-ai]] / the my.skills
    loaded-body block both re-read here each render)."
@@ -204,7 +206,9 @@
   #"^[\s;]*(?:(?:=>|⇒)\s*)?")
 
 (defn quote-lines
-  "The ONE body-text quoter — every section routes prose/markdown/values
+  "The ONE body-text quoter every section routes text through.
+
+   Every section routes prose/markdown/values
    through it. Renders `text` as reader-valid Clojure comment lines so the
    whole prompt stays eval'able source: each non-blank line → `; <line>`
    (SINGLE semicolon — the owner-locked body convention), each blank line →
@@ -234,7 +238,9 @@
         (str/join "\n"))))
 
 (defn file-block-ai
-  "The `:seon.render/ai` slot for a file-block — the node's file read
+  "The `:seon.render/ai` slot for a file-block.
+
+   The node's file read
    FRESH and `;`-commented (via [[quote-lines]]). Blank when the file
    vanished between wiring and render (the section then renders empty and
    is dropped upstream)."
@@ -244,7 +250,9 @@
     (if (str/blank? text) "" (quote-lines text))))
 
 (defn file-block-html
-  "The `:seon.render/html` slot for a file-block — the node's file read
+  "The `:seon.render/html` slot for a file-block.
+
+   The node's file read
    FRESH and rendered as markdown hiccup. Empty `[:div]` when the file
    vanished."
   {:malli/schema [:=> [:cat :map] :seon.render.live-tile/content]}
@@ -252,7 +260,9 @@
   (md/md->hiccup (or (read-file-text path) "")))
 
 (defn file-block
-  "A renderable context SECTION backed by the markdown file at
+  "A renderable context SECTION backed by a markdown file.
+
+   At
    `:seon.agent.ctx/file-path`, named `:seon.agent.ctx/name`, ordered at
    `:seon.agent.ctx/priority` — when the file currently exists; else `nil`
    (REACTIVE, NO fallback: absent file → no section).
@@ -302,8 +312,9 @@
   "AGENTS.md")
 
 (defn identity-files-text
-  "The LIVE text of every CURRENTLY-PRESENT identity file
-   ([[soul-file-path]] then [[agents-file-path]], deduped), read FRESH on
+  "The LIVE text of every CURRENTLY-PRESENT identity file.
+
+   [[soul-file-path]] then [[agents-file-path]], deduped, read FRESH on
    each call and joined with a blank line. `\"\"` when none exist. Used by
    the teachings validator to surface + validate code blocks a user places
    in the identity files. This is NOT the LLM system message — that is the
@@ -328,7 +339,9 @@
 ;; rule). They were duplicated here only to dodge the agent→ctx→render cycle.
 
 (defn agent-turns
-  "ALL `:seon.agent.turn` entities (lazy) the agent owns, oldest-first by
+  "ALL `:seon.agent.turn` entities the agent owns, oldest-first.
+
+   Lazy, by
    `:at` — walks the agent's runs (reverse ref `:seon.agent.run/_agent`) →
    their turns (reverse ref `:seon.agent.turn/_run`). Replaces the old
    sessions→turns walk; nothing is stored. Optional `db` snapshot."
@@ -369,7 +382,9 @@
     (catch :default _ "UTC")))
 
 (defn escape-clipping?
-  "Whether this agent's authored blocks render FULL past the per-value clip
+  "Whether this agent's blocks render FULL past the per-value cap.
+
+   The per-value clip
    cap (#43) — READ off the agent entity's `:seon.agent.ctx/escape-clipping?`
    datom (reactive config-on-record, CP-3 move 8), the sole source. Absent →
    the schema default `true`.
@@ -401,7 +416,9 @@
   20)
 
 (defn cache-breakpoint
-  "The agent's cache-breakpoint priority — blocks with `:seon.agent.ctx/priority`
+  "The agent's cache-breakpoint priority.
+
+   Blocks with `:seon.agent.ctx/priority`
    ≤ this are the byte-stable cacheable PREFIX (the reactive config-on-record
    source `:seon.agent.ctx/cache-breakpoint`, default 20). REPLACES the
    `stable-priority-max` const: the renderer reads the datom off the agent it
@@ -440,8 +457,9 @@
       (str (subs s 0 limit) (marker limit n)))))
 
 (defn truncate-edn
-  "pr-str a value, truncate to ~2 KB for display in the eval log
-   (v1.md §1's three-tier storage rule: DB datoms hold projections,
+  "pr-str a value and truncate to ~2 KB for the eval log.
+
+   Display only (v1.md §1's three-tier storage rule: DB datoms hold projections,
    not full content). A `full?` (`:seon.render/full? true` pinned on the
    block/value) renders the value WHOLE past the cap."
   {:malli/schema [:function
@@ -457,8 +475,10 @@
             "the underlying value is complete⟩")))))
 
 (defn message-label
-  "Transcript label for a message's `:seon.agent.message/from` ref (a pulled
-   map carrying `:seon.user/id` / `:seon.agent/id`), resolved by REF
+  "Transcript label for a message's `:seon.agent.message/from` ref.
+
+   A pulled
+   map carrying `:seon.user/id` / `:seon.agent/id`, resolved by REF
    KIND: the user → `user`, this agent itself → `assistant`, any other
    agent → `agent-<id>`."
   {:malli/schema [:=> [:catn [::from :any] [::own-id :string]] :string]}
@@ -512,8 +532,9 @@
   16384)
 
 (defn cap-result
-  "Truncate a rendered eval-result string to `eval-render-cap`,
-   appending a LOUD truncation marker (shown of full chars) so a
+  "Truncate a rendered eval-result string to `eval-render-cap`.
+
+   Appends a LOUD truncation marker (shown of full chars) so a
    clipped display can never pass for complete content — the observed
    failure mode is an agent summarizing INVENTED content from a
    silently-clipped render. Operates on the ALREADY-stringified result
@@ -542,7 +563,9 @@
   (config/message-render-cap))
 
 (defn cap-result-body
-  "Like `cap-result`, but for an eval RESULT body specifically: when the
+  "Truncate an eval RESULT body, with a GUIDING clip message.
+
+   Like `cap-result`, but for a body: when the
    value is clipped by size, append a GUIDING clip message that teaches
    the agent how to get less/narrower output, instead of a bare elision
    marker. A clip is feedback, not a failure (errors are values the agent
@@ -618,8 +641,9 @@
   #"(?m)^[ \t]*(?:=>|⇒)[^\n]*")
 
 (defn neutralize-result-claims
-  "Rewrite every model-authored result-claim in `s` to
-   [[unverified-narration-marker]], dropping the claimed value
+  "Rewrite every model-authored result-claim in `s` to a marker.
+
+   Rewritten to [[unverified-narration-marker]], dropping the claimed value
    entirely (the claimed value is the poison: a later turn reads
    `;; => {...}` or a bare `=> 61` as a real result and trusts data that
    was never computed — two live fabrication incidents, F13/F14, plus the
@@ -675,7 +699,9 @@
           (seq (rest lines)) (str "\n" rest-body))))))
 
 (defn format-eval-row
-  "REPL-faithful render of one eval: the form's comment-preamble as
+  "REPL-faithful render of one eval.
+
+   The form's comment-preamble as
    `;` lines (via [[quote-lines]]), the form verbatim (or the
    parinfer-repaired source), captured print output, then the value as a
    `;=> <value>` COMMENTED output line trailing ` ; result/<id>` (or the
@@ -870,7 +896,9 @@
                {::error :seon.agent/no-agent-id}))))
 
 (defn messages
-  "Last N messages of MY conversation, oldest-first. The conversation
+  "Last N messages of MY conversation, oldest-first.
+
+   The conversation
    is DERIVED — `from = me OR to ∋ me` — never stored as a membership
    attr. Queries the message log DIRECTLY (standalone inbound messages
    never attach to a turn, so a turn-walk would miss them). The from/to
@@ -912,7 +940,9 @@
      (vec (take-last n msgs)))))
 
 (defn current-turn
-  "Most-recent :seon.agent.turn the agent owns — the latest by `:at`
+  "The most-recent `:seon.agent.turn` the agent owns.
+
+   The latest by `:at`
    (the one that's :running, or the last :done if no turn is open)."
   {:malli/schema [:function
                   [:=> [:cat] :any]
@@ -926,7 +956,9 @@
      (last (agent-turns id db)))))
 
 (defn session-evals
-  "ALL :seon.eval entries for `agent-id`, oldest-first across ALL its turns,
+  "ALL `:seon.eval` entries for `agent-id`, oldest-first.
+
+   Across ALL its turns,
    each tagged with its owning `:seon.agent.run/id-of-run` — the transcript's
    cross-run read (evals from a run opened by a PRIOR pod process render
    behind a resume boundary). Walks agent → runs → turns → evals. Optional
@@ -941,7 +973,9 @@
              (:seon.agent.run/id (:seon.agent.turn/run t))))))
 
 (defn evals
-  "Last N :seon.eval entries for the agent, oldest-first. Walks the agent's
+  "Last N `:seon.eval` entries for the agent, oldest-first.
+
+   Walks the agent's
    turns → :seon.agent.turn/evals. Default {:seon.agent/n 20}. Optional
    `:seon.db/db` snapshot."
   {:malli/schema [:function
@@ -960,7 +994,9 @@
      (vec (take-last n es)))))
 
 (defn current-ns
-  "The agent's current namespace — derived from the latest successful
+  "The agent's current namespace.
+
+   Derived from the latest successful
    eval's :seon.eval/ns. Falls back to (home-ns id) when no successful
    eval has run yet. Reactive: the next successful eval that switches
    ns (via `(ns …)`) shows up here on the next call. See
@@ -985,7 +1021,9 @@
      (or (:seon.eval/ns latest) (home-ns id)))))
 
 (defn ctx-entities
-  "Pull the agent's :seon.agent/ctx vector with each :seon.agent.ctx entity
+  "Pull the agent's `:seon.agent/ctx` vector, entities inlined.
+
+   Each :seon.agent.ctx entity
    inlined. Sorted by :seon.agent.ctx/priority. Useful for inspection
    and for the agent's layout-editing flow."
   {:malli/schema [:function
@@ -1454,8 +1492,9 @@
          (str "\n" (str/trim source)))))
 
 (defn ns-demarc
-  "Wrap a rendered namespace BODY in the per-ns begin/end demarcation
-   brackets — the `;;;` runtime-structure convention, nesting one level
+  "Wrap a rendered namespace BODY in begin/end demarcation brackets.
+
+   The `;;;` runtime-structure convention, nesting one level
    under the section-level `;;; ┌─/└─` brackets. A `;;; ┌─ namespace X ─`
    begin line sits above the body and a `;;; └─ end namespace X ─` end
    line below it, so every ns in the `:namespaces` section is clearly
@@ -1643,7 +1682,9 @@
    [:seon.render/hiccup {:optional true} :seon.render.live-tile/hiccup]])
 
 (defn render-namespace
-  "Render a WHOLE namespace — its `(ns …)` source plus every `:seon.fn`,
+  "Render a WHOLE namespace — its source plus every owned entity.
+
+   Its `(ns …)` source plus every `:seon.fn`,
    `:seon.schema`, and (when the kind exists) `:seon.test` it owns — in
    either `:ai` text or `:html` hiccup, recursing into the namespaces it
    `(:require …)`s.
@@ -1735,7 +1776,9 @@
                    [:seon.agent/id :string]])
 
 (defn retrieval-query
-  "Derive the text to embed for THIS turn's embedding retrieval: the latest
+  "The text to embed for THIS turn's embedding retrieval.
+
+   The latest
    LIVE inbound message's content (to ∋ me, from ≠ me, hops < `warn/hop-cap` —
    the same window the loop's cap policy uses, via [[latest-live-inbound]]),
    falling back to the most-recent message of MY conversation. Returns \"\"
@@ -1797,7 +1840,9 @@
   (str "\n\n" stable-boundary "\n\n"))
 
 (defn split-context
-  "Split an assembled ctx string at [[stable-boundary]] into the
+  "Split an assembled ctx string at [[stable-boundary]].
+
+   Into the
    stable prefix and the volatile tail. A string WITHOUT the boundary
    (hand-rolled test ctx, stub prompts) is all volatile —
    `:seon.render/stable-text` is \"\" and the input rides through
@@ -1853,7 +1898,9 @@
           [{:seon.agent/id id :seon.agent/ctx (vec blocks)}])))
 
 (defn ^:async install!
-  "Install context BLOCK(S) into the agent in scope — one block map OR a
+  "Install context BLOCK(S) into the agent in scope.
+
+   One block map OR a
    vector of block maps, idempotent UPSERT by :seon.agent.ctx/name (re-installing
    a name replaces that block, so iterating never accumulates copies). The
    target is the agent in scope (db/current-agent-id): an agent shapes its OWN
@@ -1887,7 +1934,9 @@
           {::ok? true ::names (vec new-names)})))))
 
 (defn ^:async remove!
-  "Remove ONE context block by name from the agent in scope. The block is a
+  "Remove ONE context block by name from the agent in scope.
+
+   The block is a
    component child, so dropping it from :seon.agent/ctx cascade-retracts the
    child entity. Errors are values — no agent in scope or a failed transact
    comes back as {::ok? false ::error …}. Removing an absent name is a no-op
@@ -1920,7 +1969,9 @@
   #{:seon.agent/ctx :my.skills/load})
 
 (defn ^:async seed-default-ctx!
-  "SEED-COPY the resolved agent-context into the agent in scope — the
+  "SEED-COPY the resolved agent-context into the agent in scope.
+
+   The
    creation-time copy that gives a fresh agent its COMPLETE `:seon.agent/ctx`
    block set AND its agent-level config datoms, so render and every
    config-on-record consumer read ONE place. Idempotent via install!'s
@@ -1973,7 +2024,9 @@
 ;; ============================================================
 
 (defn decode-block
-  "Decode the mixed-:or render slots of a PULLED section entity back to
+  "Decode a PULLED section entity's render slots to value shapes.
+
+   The mixed-:or slots, back to
    their value shapes (`seon.db/decode-edn-value` — the inverse of the
    bridge's EDN-string storage encoding). Code-default sections pass
    through unchanged."
@@ -1986,7 +2039,9 @@
     (update :seon.render/html #(db/decode-edn-value :seon.render/html %))))
 
 (defn agent-blocks
-  "The agent's COMPLETE set of `:seon.agent.ctx/block` maps from its pulled
+  "The agent's COMPLETE set of `:seon.agent.ctx/block` maps.
+
+   From its pulled
    entity — slot-decoded, sorted by `:seon.agent.ctx/priority` with the block
    NAME as the byte-stable tie-break (no merge, no separate default set: every
    block was seed-copied in at creation and the agent owns the whole set).
@@ -2033,7 +2088,9 @@
             :seon.db/ref [:seon.agent/id id]}))
 
 (defn context-root
-  "The ROOT renderable. Its children are the agent's OWN complete
+  "The ROOT renderable — the agent's OWN complete block set.
+
+   Its children are the agent's OWN
    `:seon.agent/ctx` block set — slot-decoded and priority-sorted by
    [[agent-blocks]], with NO render-time merge over a separate default
    catalog (every block was seed-copied into the agent at creation, so
@@ -2064,7 +2121,9 @@
    [:seon.db/db    {:optional true} :seon.db/db]])
 
 (defn render-context
-  "THE agent's full LLM context, as a bare String — the SINGLE producer
+  "THE agent's full LLM context, as a bare String.
+
+   The SINGLE producer
    the prompt path ([[seon.agent.turn/render-prompt]]) AND the human
    inspector ([[seon.agent.inspect/ctx-preview]]) both route through. Both
    render the `:seon.render/ai` side of ONE render ([[seon.render/render]])
@@ -2134,7 +2193,9 @@
        vec))
 
 (defn render-context-ai
-  "The ROOT renderable's :ai slot — the block renderer. Renders each child
+  "The ROOT renderable's `:ai` slot — the block renderer.
+
+   Renders each child
    via the injected `:seon.render/render` handle, drops blanks, brackets each
    block (self-demarcating — replaces the old `;; ── x ──` headers), and joins
    with the in-band [[stable-boundary]] inserted at the static stable→volatile
@@ -2166,7 +2227,9 @@
       :else (str stable "\n\n" stable-boundary "\n\n" volatile))))
 
 (defn render-context-html
-  "The ROOT renderable's :html slot — renders each child's html twin via the
+  "The ROOT renderable's `:html` slot — each child's html twin.
+
+   Renders each child's html twin via the
    injected handle, one card per renderable (eval cards short, per-item — NOT
    a section-level dump), in render order."
   {:malli/schema [:=> [:catn [::input :map]] :seon.render.live-tile/hiccup]}
@@ -2256,8 +2319,9 @@
   [:map [::chain-hashes ::chain-hashes]])
 
 (defn block-chain-keys
-  "Compute the per-block KV cache-key vector for a turn's ordered context
-   blocks — the Seon side of the prefix-KV-reuse contract (the worker reuses
+  "The per-block KV cache-key vector for a turn's context blocks.
+
+   The Seon side of the prefix-KV-reuse contract (the worker reuses
    cached encoder KV for any shared static prefix). PURE: a function of
    (`::blocks`, `:seon.agent/id`) only — no I/O, no GPU.
 
@@ -2289,7 +2353,9 @@
            (map-indexed vector blocks))})
 
 (defn ctx-sections
-  "Structured per-section breakdown for the INSPECTOR — one entry per
+  "Structured per-section breakdown for the INSPECTOR.
+
+   One entry per
    non-blank section, each carrying its name + the exact ai text it
    contributes (left pane, foldable) + its html twin (right pane, one card
    per renderable). Derives from the SAME `context-root` + `render` the

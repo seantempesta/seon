@@ -88,8 +88,10 @@
 (defonce ^:private !next-budget-ms (atom nil))
 
 (defn budget
-  "Override the default wall-clock timeout for the form's auto-awaited
-   return value. Use when a form does a slow async op that legitimately
+  "Override the auto-await wall-clock timeout for a slow form.
+
+   Applies to the form's auto-awaited return value. Use when a form
+   does a slow async op that legitimately
    needs more than `@!timeout-ms` (default 10000ms).
 
      ;; default 10s budget
@@ -128,8 +130,9 @@
 (deftype Deferred [promise])
 
 (defn defer
-  "Hand the eval pipeline a Promise WITHOUT auto-awaiting it — for a
-   long-running or fire-and-forget op when you want the HANDLE, not to
+  "Hand the eval pipeline a Promise WITHOUT auto-awaiting it.
+
+   For a long-running or fire-and-forget op when you want the HANDLE, not to
    block for the value. Wrap a form that returns a Promise:
 
      (seon.eval/defer (some-slow-async-op))
@@ -275,8 +278,9 @@
 (defonce ^:private !warning-dispatcher-version (atom nil))
 
 (defn install-warning-dispatcher!
-  "Idempotent: installs the per-fiber dispatcher on
-   `ana/*cljs-warning-handlers*` once per init-version. Called from
+  "Install the per-fiber CLJS-warning dispatcher (idempotent).
+
+   Installs on `ana/*cljs-warning-handlers*` once per init-version. Called from
    `init-bootstrap!` after the cljs.js loader's analyzer setup
    completes. Safe to call repeatedly; only reinstalls after a
    hot-reload (when `init-version` has rotated)."
@@ -343,7 +347,9 @@
       (apply orig xs))))
 
 (defn install-print-dispatcher!
-  "Idempotent: installs the per-fiber print dispatcher on `*print-fn*` /
+  "Install the per-fiber print dispatcher (idempotent).
+
+   Installs on `*print-fn*` /
    `*print-err-fn*` once per init-version. Called from `init-bootstrap!`.
    Captures the originals on first call only (so reinstall after a
    hot-reload reuses the real sink, not a wrapped dispatcher)."
@@ -362,7 +368,9 @@
 (declare seed-toolkit-refers!)
 
 (defn ^:async init-bootstrap!
-  "Initialize a fresh compile-state from out/bootstrap/. Returns the
+  "Initialize a fresh compile-state from out/bootstrap/.
+
+   Returns the
    compile-state, ready for `eval` / `eval-batch!`. Stores cljs.core
    on globalThis (via goog.globalEval inside shadow's loader); without
    that, find-ns-obj fails on the first macro form and eval-str
@@ -421,8 +429,10 @@
   (some? (js/goog.getObjectByName path)))
 
 (defn lookup-ns-object
-  "The live JS namespace object for `ns-name` (a dotted string like
-   \"seon.db\" / \"acme.helpers\") on `js/globalThis`, or nil. THE ONE munge
+  "The live JS namespace object for `ns-name`, or nil.
+
+   `ns-name` is a dotted string like
+   \"seon.db\" / \"acme.helpers\"; resolved on `js/globalThis`. THE ONE munge
    scheme: splits on `.`, munges each segment via `cljs.core/munge`, and walks
    `gobj/get` from `js/globalThis` — exactly the path-prefix [[lookup-value]]
    uses before its final member read, factored out so member resolution and
@@ -435,8 +445,9 @@
           (str/split ns-name #"\.")))
 
 (defn lookup-value
-  "Resolve a fully-qualified symbol to its runtime value, or nil if
-   unresolvable. The CLJS-bootstrap equivalent of JVM's
+  "Resolve a fully-qualified symbol to its runtime value, or nil.
+
+   Nil if unresolvable. The CLJS-bootstrap equivalent of JVM's
    `clojure.core/resolve`.
 
    Walks `js/globalThis` segment-by-segment, munging each ns segment
@@ -466,8 +477,10 @@
       (gobj/get ns-obj (cljs.core/munge (name sym))))))
 
 (defn ns-fn-members
-  "Enumerate the COMPILED function members of namespace `ns-name` (a string
-   like \"acme.helpers\") from its LIVE ns object on `js/globalThis`, as
+  "The COMPILED function members of namespace `ns-name`.
+
+   `ns-name` a string like \"acme.helpers\"; read from its LIVE ns object
+   on `js/globalThis`, as
    `{simple-symbol <compiled-fn>}`. The inverse of [[lookup-value]]: that walks
    the munged path to ONE member; this resolves the ns object the SAME way
    ([[lookup-ns-object]] — one munge scheme) and reads back EVERY own enumerable
@@ -538,8 +551,10 @@
                                                             (name sym))}]))))))))))
 
 (defn ns-data-members
-  "Enumerate the COMPILED NON-function members of namespace `ns-name` (a string
-   like \"acme.helpers\") from its LIVE ns object on `js/globalThis`, as
+  "The COMPILED NON-function members of namespace `ns-name`.
+
+   `ns-name` a string like \"acme.helpers\"; read from its LIVE ns object
+   on `js/globalThis`, as
    `{simple-symbol <value>}`. The data-const twin of [[ns-fn-members]]: that
    keeps own enumerable props that ARE functions; this keeps the ones that are
    NOT — a top-level `(def grounded-dims #{:a :b :c})` data constant (set, map,
@@ -667,7 +682,9 @@
   (some? (js/goog.getObjectByName (str (cljs.core/munge ns-sym)))))
 
 (defn registration-call-source?
-  "TRUE when a stored `:seon.schema/source` is an eval-able `(…)`
+  "TRUE when a stored `:seon.schema/source` is an eval-able call.
+
+   An `(…)`
    registration call (an agent's `(seon.schema/register! …)` tee row)
    rather than a boot-indexed shape literal (`[:string {…}]`, `:keyword`).
    Only call-shaped schema rows are loadable; shape literals are rebuilt
@@ -679,7 +696,9 @@
   (str/starts-with? (str/trim (str source)) "("))
 
 (defn ns-rows-in-db?
-  "TRUE when `ns-sym` (a symbol) has a `:seon.ns/name` row in `db` — the
+  "TRUE when `ns-sym` has a `:seon.ns/name` row in `db`.
+
+   `ns-sym` a symbol. The
    discriminator the DB branch of [[guarded-load]] uses to decide a
    missing ns is agent-authored (loadable from the DB) rather than
    genuinely absent. `db` is a datahike db value (third-party boundary)."
@@ -691,8 +710,9 @@
                           db (keyword ns-sym)))))
 
 (defn reconstitute-ns-source
-  "One loadable source STRING for the agent-authored namespace `ns-kw`,
-   read from the DB-layer rows (db-is-the-running-system PRD, shape A):
+  "One loadable source STRING for agent-authored namespace `ns-kw`.
+
+   Read from the DB-layer rows (db-is-the-running-system PRD, shape A):
 
      `:seon.ns/source`  — the agent's `(ns … (:require [x :as y] …))`
         form VERBATIM. We use the stored ns form (not a rebuilt one)
@@ -908,8 +928,9 @@
 (defonce ^:private !result-var-ids (atom []))
 
 (defn result-var-ref?
-  "TRUE when `form-str` is a single bare `result/<id>` symbol reference —
-   the agent reading a prior eval's value var. Used to (a) eval such a
+  "TRUE when `form-str` is a single bare `result/<id>` reference.
+
+   The agent reading a prior eval's value var. Used to (a) eval such a
    form in `:expr` context (a bare top-level var read emits NOTHING in
    the default `:statement` context — see the file's REPL-semantics
    gotcha), and (b) recognise the graceful-miss target. NOT a call, NOT
@@ -933,7 +954,9 @@
              (catch :default _ false))))))
 
 (defn result-miss-message
-  "The graceful-miss VALUE for a `result/<id>` reference whose var is no
+  "The graceful-miss VALUE for a dead `result/<id>` reference.
+
+   Its var is no
    longer live (pruned past the session cap, or from a PRIOR SESSION —
    the process that held it is gone). Errors-are-values: a miss reads
    this string instead of throwing a raw `:undeclared-var`."
@@ -1152,7 +1175,9 @@
                        (error/->message e)))))
 
 (defn lookup-result
-  "The live value of a prior eval, keyed by the id on its value line
+  "The live value of a prior eval, keyed by its `result/<id>`.
+
+   The id on its value line
    in the transcript (string or keyword). Backed by the globalThis
    stash, so any value type round-trips. INTERNAL reader — the agent's
    value-reuse surface is the `result/<id>` var (same stash backing);
@@ -1228,8 +1253,9 @@
       (catch :default _ nil))))
 
 (defn bind-result-var!
-  "Bind a successful eval's value `v` as the plain var `result/<id>`:
-   set `globalThis.result.<munged-id>` and register `<id>` in the
+  "Bind a successful eval's value `v` as the var `result/<id>`.
+
+   Sets `globalThis.result.<munged-id>` and registers `<id>` in the
    `result` ns's analyzer defs in `compile-state`, so a later bare
    `result/<id>` resolves with no undeclared-var warning. Track the id
    for the session cap and prune the oldest beyond `result-vars-cap`.
@@ -1354,8 +1380,10 @@
         home-ns-require-specs))
 
 (defn home-ns-alias-hint
-  "Given a bare verb NAME that failed to resolve (e.g. \"plan!\", \"user\",
-   \"complete\"), the correctly-aliased home-ns form the agent SHOULD have
+  "The correctly-aliased home-ns form for a bare verb that failed.
+
+   Given a bare verb NAME that failed to resolve (e.g. \"plan!\",
+   \"user\", \"complete\") — the form the agent SHOULD have
    written — a string like \"todo/plan!\" — or nil if no home-ns alias/refer
    exposes that name. Derived from [[home-ns-require-specs]] (the single
    source of which aliases/refers every agent's home ns carries) so it can
@@ -1381,7 +1409,9 @@
           home-ns-require-specs)))
 
 (defn home-requires-for
-  "The require specs for agent `id`'s home ns — REACTIVE config-on-record
+  "The require specs for agent `id`'s home ns.
+
+   REACTIVE config-on-record
    (decision 2), resolved in precedence:
 
      1. the agent's `:seon.eval/home-requires` DATOM, when present — the
@@ -1419,8 +1449,9 @@
       home-ns-require-specs))
 
 (defn home-ns-form
-  "The exact `(ns <home> (:require …))` SOURCE wired into an agent's home
-   namespace — the one form [[setup-agent-ns!]] evaluates AND the one the
+  "The exact `(ns …)` SOURCE wired into an agent's home ns.
+
+   The one form [[setup-agent-ns!]] evaluates AND the one the
    workspace block renders verbatim, with every alias/refer visible (no
    bare-name reconstruction). `home-ns` is the home-ns symbol/string/keyword
    (e.g. `my.agent.<id>`).
@@ -1473,7 +1504,9 @@
 (declare ns-requires-tx transient-ns-syms)
 
 (defn ^:async setup-agent-ns!
-  "Create + initialize the agent's home namespace. Returns the agent-ns
+  "Create + initialize the agent's home namespace.
+
+   Returns the agent-ns
    symbol (same as the input). Idempotent.
 
    Evaluates ONE `(ns <home> (:require …))` form that aliases the verb + data
@@ -1780,8 +1813,9 @@
     (catch :default _ nil)))
 
 (defn defn-form?
-  "Strict persistence gate (#7): TRUE iff `source` is exactly ONE
-   top-level form whose head is `defn`/`defn-`. A bare `(def …)`,
+  "TRUE iff `source` is exactly ONE top-level `defn`/`defn-` form.
+
+   Strict persistence gate (#7). A bare `(def …)`,
    `(def f (fn …))`, a `(do …)`-wrapped defn, a macro, or a multi-form
    source is FALSE — it RUNS as scratch but is never teed/replayed as a
    `:seon.fn` row. Read-only; fail-closed on unreadable source (false).
@@ -1907,8 +1941,9 @@
       (catch :default _ false))))
 
 (defn scratch-def-note
-  "Reactive 'won't persist' note (#7), DERIVED from an eval's source —
-   pure, no stored attr, re-computed every render so it FOLLOWS the
+  "A reactive 'won't persist' note DERIVED from an eval's source.
+
+   (#7) Pure, no stored attr, re-computed every render so it FOLLOWS the
    form. Returns a one-line `;;`-comment string when `source` is a bare
    single `(def …)` (the run-but-don't-tee scratch case the strict
    persistence policy never tees). Returns \"\" otherwise: a clean
@@ -1954,8 +1989,9 @@
     :else          (str (type form))))
 
 (defn read-error-message
-  "Sharpen a rewrite-clj read-error message (A.3) for an UNREPAIRABLE
-   form. The form did not parse, so it DEFINED NOTHING — say so, name the
+  "Sharpen a rewrite-clj read-error message for an UNREPAIRABLE form.
+
+   (A.3) The form did not parse, so it DEFINED NOTHING — say so, name the
    offending CLOSER + line:col (rewrite-clj's message carries the closer,
    NOT the unmatched opener — we do NOT promise the opener), slice the
    offending source line out and underline the column with a caret, and
@@ -2164,7 +2200,9 @@
 ;; ----------------------------------------------------------------------------
 
 (defn ns-requires-tx
-  "Diff-upsert tx ops so `:seon.ns/requires` for `ns-kw` becomes EXACTLY
+  "Diff-upsert tx ops setting `:seon.ns/requires` for `ns-kw`.
+
+   Becomes EXACTLY
    `new-req-set` (a set of ns-name keywords). Reads the ns's CURRENT
    stored requires from the `db` value and returns:
 
@@ -2222,7 +2260,9 @@
 ;; ----------------------------------------------------------------------------
 
 (defn core-origin-fn-syms
-  "Of `syms` (FQ `:seon.fn/sym` strings), the subset whose CURRENT
+  "The `syms` subset whose source is `:core-seed` origin.
+
+   FQ `:seon.fn/sym` strings whose CURRENT
    `:seon.fn/source` datom's tx carries `:seon.db/origin :core-seed` —
    i.e. compiled core/third-party fns the agent must not override. A sym
    with no `:seon.fn` row, or whose latest source was written under any
@@ -2244,7 +2284,9 @@
                     db))))
 
 (defn reject-core-overrides
-  "Filter `tee-entities` for the override guard: drop any `:seon.fn` row
+  "Drop `tee-entities` rows that override a `blocked` core sym.
+
+   The override guard: drop any `:seon.fn` row
    whose `:seon.fn/sym` is in `blocked` (a set of core-origin syms from
    [[core-origin-fn-syms]]) and, for each dropped sym, `js/console.warn`
    a specific, actionable one-liner. Non-`:seon.fn` rows (`:seon.ns`,
@@ -2403,8 +2445,9 @@
   (config/store-edn-cap))
 
 (defn cap-edn
-  "Truncate an already-stringified (pr-str'd) value to `store-edn-cap`,
-   appending an elision marker reporting how many chars were dropped.
+  "Truncate a pr-str'd value string to `store-edn-cap`.
+
+   Appends an elision marker reporting how many chars were dropped.
    Nil-safe. Mirrors `seon.agent/cap-result` but applies the larger
    store-time cap at the persistence boundary."
   {:malli/schema
@@ -2446,8 +2489,9 @@
   #{:user-input :compile :read :seon.eval/repl-parity})
 
 (defn render-error-string
-  "Produce the CRYSTAL-CLEAR, edn-SAFE string persisted as
-   `:seon.eval/error` for a failed eval — what the agent reads in the
+  "The edn-SAFE `:seon.eval/error` string for a failed eval.
+
+   CRYSTAL-CLEAR — what the agent reads in the
    transcript (rendered as `;; ⚠` lines by `seon.agent.ctx/format-eval-row`).
 
    It must tell a fresh, confused LLM the EXACT defect AND the exact next
@@ -2492,8 +2536,9 @@
   16384)
 
 (defn clip-result-body
-  "Clip a rendered result-body STRING to `result-body-render-cap`,
-   appending a one-line pointer to the full value's `result/<id>` live
+  "Clip a rendered result-body STRING to `result-body-render-cap`.
+
+   Appends a one-line pointer to the full value's `result/<id>` live
    var. Under the cap → returned unchanged. Names the id so the agent
    always knows where the untruncated value lives. Pure; nil-safe."
   {:malli/schema [:=> [:catn [::eval-id :string] [::body :string]] :string]}
@@ -2518,7 +2563,9 @@
 ;; bounded display skeleton, `project-plain` for the read-side net below).
 
 (defn sanitize-result-edn
-  "READ-SIDE net for the value projection. A row written BEFORE the
+  "READ-SIDE net for the value projection.
+
+   A row written BEFORE the
    write-side projection landed still holds a raw `#datahike/DB {…}` /
    `#datahike/Datom […]` (or other opaque-tagged) dump in its stored
    `:seon.eval/result-edn` string. Re-read it with `cljs.reader` (whose
@@ -2543,8 +2590,9 @@
     s))
 
 (defn render-result-edn
-  "Stringify an eval's success VALUE for `:seon.eval/result-edn` — the
-   agent-facing text.
+  "Stringify an eval's success VALUE for `:seon.eval/result-edn`.
+
+   The agent-facing text.
 
    Delegates to `seon.render.value/render-ai`: a DEPTH- and BREADTH-bounded
    structure-revealing SKELETON of the value. Opaque runtime handles
@@ -2574,8 +2622,9 @@
              "result/" eval-id ">")))))
 
 (defn ^:async record-eval!
-  "Transact one :seon.eval entity as a component child of its owning
-   turn (per v1.md §2.1 — `:seon.agent.turn/evals` is component-many). The
+  "Transact one `:seon.eval` as a component child of its turn.
+
+   Per v1.md §2.1 — `:seon.agent.turn/evals` is component-many. The
    nested-map shorthand creates the eval inline; datahike's component
    semantics mean a one-pull on the turn returns its evals without
    needing a back-ref query.
@@ -2786,7 +2835,9 @@
 ;; ============================================================
 
 (defn parity-intercept
-  "Form-level REPL-parity pre-check. Given a form's source string and the
+  "Form-level REPL-parity pre-check.
+
+   Given a form's source string and the
    current ns symbol, returns nil (no intercept — eval normally) or one of
 
      {:seon.eval/parity :error :seon.error/message <teaching string>}
@@ -2831,7 +2882,9 @@
     (apply hash-map (rest spec))))
 
 (defn augment-ns-source
-  "Real requires (#73/#56): given an agent-eval'd SOURCE that is a single
+  "Inject real `:require`s into an agent's `(ns …)` SOURCE.
+
+   Real requires (#73/#56): given an agent-eval'd SOURCE that is a single
    `(ns NAME …)` form for an agent-authored namespace, return the source
    rewritten so NAME's `:require` clause carries the canonical short aliases
    ([[authored-ns-require-specs]]) — `db`→seon.db, `todo`→seon.agent.todo,
@@ -3351,8 +3404,9 @@
                 :source          source})))))
 
 (defn ^:async eval-batch!
-  "Execute a sequence of parsed entries as a REPL batch. Partial-
-   failure: every entry gets its own try + record + stash; entry
+  "Execute a sequence of parsed entries as a REPL batch.
+
+   Partial-failure: every entry gets its own try + record + stash; entry
    N+1 always runs even if N failed.
 
    Per entry, three kinds (`:form` / `:read` / `:comment`, below):

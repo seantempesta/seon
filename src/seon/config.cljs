@@ -313,7 +313,9 @@
   (keyword (str s)))
 
 (defn resolve-namespaces
-  "Resolve the `:seon.config/namespaces` section of `manifest` into the policy
+  "Resolve the `:seon.config/namespaces` section into render policy.
+
+   The `manifest` section becomes the policy
    the renderer + boot indexer read (`seon.agent.ctx.namespaces`). KEY-LEVEL
    merge over [[default-namespaces-policy]]: an absent section ⇒ the
    byte-identical default; a present section overrides ONLY the keys it lists.
@@ -331,7 +333,9 @@
 (def ^:private ns-policy-cache (atom {}))
 
 (defn namespaces-policy
-  "The resolved namespaces render policy for the live manifest, memoized per
+  "The resolved namespaces render policy for the live manifest.
+
+   Memoized per
    `SEON_CONFIG` (config is process-stable; the gym steers SEON_CONFIG per run,
    so the key tracks it — a different manifest re-resolves). The ONE policy
    `seon.agent.ctx.namespaces` (renderer) and `seon.client` (boot indexer's
@@ -368,14 +372,18 @@
 ;;; ============================================================
 
 (defn env-string
-  "The raw string value of env `var-name`, or nil when unset/blank — the base
+  "The raw string value of env `var-name`, or nil when unset/blank.
+
+   The base
    typed read every named knob below sits on."
   {:malli/schema [:=> [:catn [::var-name :string]] [:maybe :string]]}
   [var-name]
   (env var-name))
 
 (defn env-int
-  "Env `var-name` parsed as a POSITIVE int, or `default` when unset / blank /
+  "Env `var-name` as a POSITIVE int, or `default` if unusable.
+
+   `default` when unset / blank /
    non-numeric / non-positive — the shared cap-knob reader."
   {:malli/schema [:=> [:catn [::var-name :string] [::default :int]] :int]}
   [var-name default]
@@ -383,7 +391,9 @@
     (if (and (number? v) (not (js/isNaN v)) (pos? v)) v default)))
 
 (defn skills-dir
-  "The skills corpus directory: the manifest's `:seon.config/skills`
+  "The skills corpus directory (manifest, else env, else default).
+
+   The manifest's `:seon.config/skills`
    `:seon.config/dirs` first entry when present, else `SEON_SKILLS_DIR`, else
    `.claude/skills` (the standard Claude-Code layout humans edit too). This is
    where `:seon.config/dirs` is finally consumed — the last hardcoded env read
@@ -395,28 +405,35 @@
       ".claude/skills"))
 
 (defn extra-src
-  "`SEON_EXTRA_SRC` — a downstream's compiled-in source root (its `/src` +
-   `/test` get probed after the seon artifact roots), or nil when unset."
+  "`SEON_EXTRA_SRC` — a downstream's compiled-in source root, or nil.
+
+   Its `/src` +
+   `/test` get probed after the seon artifact roots; nil when unset."
   {:malli/schema [:=> [:cat] [:maybe :string]]}
   []
   (env "SEON_EXTRA_SRC"))
 
 (defn no-auto-boot?
-  "True when `SEON_NO_AUTO_BOOT` is set — `-main` then skips the auto-boot of
+  "True when `SEON_NO_AUTO_BOOT` is set (skip auto-boot).
+
+   `-main` then skips the auto-boot of
    the agent + HTTP server (the bare-smoke-test switch)."
   {:malli/schema [:=> [:cat] :boolean]}
   []
   (some? (env "SEON_NO_AUTO_BOOT")))
 
 (defn anthropic-api-key
-  "`ANTHROPIC_API_KEY` (the Anthropic adapter's secret), or nil when unset —
-   the one non-`SEON_*` knob read through here; it gates adapter vs stub."
+  "`ANTHROPIC_API_KEY` — the Anthropic adapter's secret, or nil.
+
+   The one non-`SEON_*` knob read through here; it gates adapter vs stub."
   {:malli/schema [:=> [:cat] [:maybe :string]]}
   []
   (env "ANTHROPIC_API_KEY"))
 
 (defn result-vars-cap
-  "Max live `result/<id>` vars kept per session — a COUNT of retained vars,
+  "Max live `result/<id>` vars kept per session.
+
+   A COUNT of retained vars,
    not a render width, so it keeps the `SEON_EVAL_*` prefix distinct from the
    render-cap family (`SEON_EVAL_RESULT_VARS_CAP`, default 200)."
   {:malli/schema [:=> [:cat] :int]}
@@ -453,7 +470,9 @@
           m))))
 
 (defn reset-render-cache!
-  "Clear the memoized [[render-config]] read — for tests that `with-redefs`
+  "Clear the memoized [[render-config]] read.
+
+   For tests that `with-redefs`
    `load-manifest` and need the next accessor read to re-resolve."
   {:malli/schema [:=> [:cat] :nil]}
   []
@@ -461,14 +480,18 @@
   nil)
 
 (defn store-edn-cap
-  "Per-value pr-str truncation cap for stored EDN display (manifest
-   `:seon.config.render/store-edn-cap`; env `SEON_RENDER_STORE_EDN_CAP`; 16384)."
+  "Per-value pr-str truncation cap for stored EDN display.
+
+   Manifest
+   `:seon.config.render/store-edn-cap`; env `SEON_RENDER_STORE_EDN_CAP`; 16384."
   {:malli/schema [:=> [:cat] :int]}
   []
   (get (render-config) :seon.config.render/store-edn-cap 16384))
 
 (defn eval-render-cap
-  "Char cap for the echoed SOURCE + captured STDOUT of one eval row — neither
+  "Char cap for one eval row's echoed SOURCE + captured STDOUT.
+
+   Neither
    is dereferenceable via `result/<id>`, so a large one is context-wasting
    noise (manifest `:seon.config.render/eval-cap`; env `SEON_RENDER_EVAL_CAP`;
    1500)."
@@ -477,7 +500,9 @@
   (get (render-config) :seon.config.render/eval-cap 1500))
 
 (defn message-render-cap
-  "Per-message rendered-content char cap for one inbound transcript line — a
+  "Per-message rendered-content char cap for one transcript line.
+
+   A
    single pasted blob must not blow the context (manifest
    `:seon.config.render/message-cap`; env `SEON_RENDER_MESSAGE_CAP`; 4000)."
   {:malli/schema [:=> [:cat] :int]}
@@ -488,52 +513,66 @@
 ;;; (per-node depth/breadth limits of the structural eval-value skeleton).
 
 (defn value-max-depth
-  "Max nesting depth of the value skeleton (manifest
-   `:seon.config.render/value-max-depth`; env `SEON_RENDER_VALUE_MAX_DEPTH`; 3)."
+  "Max nesting depth of the value skeleton.
+
+   Manifest
+   `:seon.config.render/value-max-depth`; env `SEON_RENDER_VALUE_MAX_DEPTH`; 3."
   {:malli/schema [:=> [:cat] :int]} []
   (get (render-config) :seon.config.render/value-max-depth 3))
 
 (defn value-max-keys
-  "Max map keys shown per node (manifest `:seon.config.render/value-max-keys`;
-   env `SEON_RENDER_VALUE_MAX_KEYS`; 8)."
+  "Max map keys shown per node.
+
+   Manifest `:seon.config.render/value-max-keys`;
+   env `SEON_RENDER_VALUE_MAX_KEYS`; 8."
   {:malli/schema [:=> [:cat] :int]} []
   (get (render-config) :seon.config.render/value-max-keys 8))
 
 (defn value-max-items
-  "Max collection items shown per node (manifest
-   `:seon.config.render/value-max-items`; env `SEON_RENDER_VALUE_MAX_ITEMS`; 8)."
+  "Max collection items shown per node.
+
+   Manifest
+   `:seon.config.render/value-max-items`; env `SEON_RENDER_VALUE_MAX_ITEMS`; 8."
   {:malli/schema [:=> [:cat] :int]} []
   (get (render-config) :seon.config.render/value-max-items 8))
 
 (defn value-max-string
-  "Max chars of a string leaf before it is clipped to a length marker (manifest
+  "Max chars of a string leaf before it is clipped to a marker.
+
+   Manifest
    `:seon.config.render/value-max-string`; env `SEON_RENDER_VALUE_MAX_STRING`;
    80)."
   {:malli/schema [:=> [:cat] :int]} []
   (get (render-config) :seon.config.render/value-max-string 80))
 
 (defn value-shape-sample
-  "How many homogeneous-map elements to probe for a shared key-set shape
-   (manifest `:seon.config.render/value-shape-sample`; env
+  "How many homogeneous-map elements to probe for a shared shape.
+
+   Manifest `:seon.config.render/value-shape-sample`; env
    `SEON_RENDER_VALUE_SHAPE_SAMPLE`; 8)."
   {:malli/schema [:=> [:cat] :int]} []
   (get (render-config) :seon.config.render/value-shape-sample 8))
 
 (defn value-verbatim-cap
-  "Char budget under which an eval value prints WHOLE (REPL-style) instead of
-   being skeletonized (manifest `:seon.config.render/value-verbatim-cap`; env
+  "Char budget under which an eval value prints WHOLE (REPL-style).
+
+   Otherwise skeletonized (manifest `:seon.config.render/value-verbatim-cap`; env
    `SEON_RENDER_VALUE_VERBATIM_CAP`; 1500)."
   {:malli/schema [:=> [:cat] :int]} []
   (get (render-config) :seon.config.render/value-verbatim-cap 1500))
 
 (defn value-width
-  "Inline-vs-break width budget for the skeleton emitter (manifest
-   `:seon.config.render/value-width`; env `SEON_RENDER_VALUE_WIDTH`; 72)."
+  "Inline-vs-break width budget for the skeleton emitter.
+
+   Manifest
+   `:seon.config.render/value-width`; env `SEON_RENDER_VALUE_WIDTH`; 72."
   {:malli/schema [:=> [:cat] :int]} []
   (get (render-config) :seon.config.render/value-width 72))
 
 (defn render-strict?
-  "The FAIL-LOUD render dial. When ON, a render/converter failure THROWS
+  "The FAIL-LOUD render dial.
+
+   When ON, a render/converter failure THROWS
    (naming the offending block + the full malli `explain`) instead of being
    swallowed by the graceful guard; when OFF, today's guard-and-continue
    (a live prod agent must not hard-crash on one bad block).
@@ -558,7 +597,9 @@
 ;;; --- Agent + test bounds (not render caps — kept on their own prefixes).
 
 (defn tick-ms
-  "The `SEON_TICK_MS` ticker-cadence override (parsed POSITIVE int), or nil
+  "The `SEON_TICK_MS` ticker-cadence override, or nil.
+
+   Parsed POSITIVE int; nil
    when unset / unparseable / non-positive (the caller then uses its default)."
   {:malli/schema [:=> [:cat] [:maybe :int]]}
   []
@@ -566,21 +607,26 @@
     (when (and (number? v) (not (js/isNaN v)) (pos? v)) v)))
 
 (defn test-timeout-ms
-  "Per-test / -fixture wall-clock bound in ms (`SEON_TEST_TIMEOUT_MS`,
-   default 15000)."
+  "Per-test / -fixture wall-clock bound in ms.
+
+   `SEON_TEST_TIMEOUT_MS`, default 15000."
   {:malli/schema [:=> [:cat] :int]}
   []
   (env-int "SEON_TEST_TIMEOUT_MS" 15000))
 
 (defn debug-capture
-  "Raw `SEON_DEBUG_CAPTURE` string (or nil) — `seon.debug` applies its
+  "Raw `SEON_DEBUG_CAPTURE` string, or nil.
+
+   `seon.debug` applies its
    off-values + process-override semantics on top."
   {:malli/schema [:=> [:cat] [:maybe :string]]}
   []
   (env "SEON_DEBUG_CAPTURE"))
 
 (defn debug-capture-dir
-  "Debug-capture output base dir: `SEON_DEBUG_CAPTURE_DIR` when set, else the
+  "Debug-capture output base dir (env, else `logs/turns`).
+
+   `SEON_DEBUG_CAPTURE_DIR` when set, else the
    default `logs/turns` (a DATA path → CWD-relative)."
   {:malli/schema [:=> [:cat] :string]}
   []
@@ -669,8 +715,9 @@
                          (mapv skill-body-block (distinct load)))))
 
 (defn resolve-routes
-  "Curate the seeded `routes` (`:seon.route/*` maps) by the manifest's
-   `:seon.config/routes` specs — drop any route whose `:seon.route/name` is in a
+  "Curate the seeded `routes` by the manifest's `:seon.config/routes`.
+
+   The `:seon.route/*` maps; drop any route whose `:seon.route/name` is in a
    spec's `:removes`. No specs → `routes` unchanged."
   {:malli/schema [:=> [:catn [::routes ::routes]
                        [::manifest :seon.config/manifest]]
@@ -728,7 +775,9 @@
       base)))
 
 (defn resolve-agent-context
-  "Resolve the FULLY-DEFAULTED nested agent-context map for `id` (§3.1). Two
+  "Resolve the FULLY-DEFAULTED nested agent-context map for `id`.
+
+   §3.1 — two
    explicit key-level merge layers — `agent-context ← root-context` (in
    [[context-config-for]], by identity, already defaulted) ← per-mint `override`
    — then a final recursive `m/decode` fills any key the override left absent.

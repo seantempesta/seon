@@ -120,8 +120,10 @@
 (defonce ^:private !runs-this-process (atom #{}))
 
 (defn this-process-run?
-  "True iff `run-id` was opened by THIS pod process (its `result/<id>` eval
-   vars are live in the current runtime). False for a run reconstructed from
+  "True iff `run-id` was opened by THIS pod process.
+
+   Its `result/<id>` eval
+   vars are live in the current runtime. False for a run reconstructed from
    the store on a prior boot."
   {:malli/schema [:=> [:catn [:seon.agent.run/id :seon.agent.run/id]] :boolean]}
   [run-id]
@@ -148,8 +150,9 @@
 (schema/register! ::snapshot-request [:map [:seon.agent.run/id :seon.agent.run/id]])
 
 (defn snapshot
-  "The run's fingerprint as a plain map (or nil if the run-id doesn't
-   resolve). Ref pointers (agent/cause) are dropped — they're internal."
+  "The run's fingerprint as a plain map, or nil if unresolved.
+
+   Ref pointers (agent/cause) are dropped — they're internal."
   {:malli/schema [:=> [:cat ::snapshot-request] [:maybe :seon.agent.run/snapshot]]}
   [{run-id :seon.agent.run/id}]
   (when-let [r (db/entity {:seon.db/ref [:seon.agent.run/id run-id]})]
@@ -167,8 +170,10 @@
 (schema/register! ::current-run-request [:map [:seon.agent/id :string]])
 
 (defn current-run
-  "The agent's CURRENT open run entity (the `:seon.agent/run` pointer, if it
-   resolves to an `:open` run), or nil. A plain touched map; drill its refs
+  "The agent's CURRENT open run entity, or nil.
+
+   The `:seon.agent/run` pointer, if it
+   resolves to an `:open` run. A plain touched map; drill its refs
    via follow-up reads. A `*conn*`-reading map-in convenience over the one
    derivation leaf [[seon.derive/current-run]] — callers that already hold a
    db value call `seon.derive/current-run` directly with it."
@@ -177,7 +182,9 @@
   (derive/current-run @db/*conn* id))
 
 (defn turn-limit-reached?
-  "Work bound: has `turn-count` reached `turn-limit`? Pure — the caller
+  "Work bound: has `turn-count` reached `turn-limit`?
+
+   Pure — the caller
    passes the derived current-turn count, so this is wall-clock-free."
   {:malli/schema [:=> [:catn [:seon.agent.run/turn-count :seon.agent.run/turn-count]
                              [:seon.agent.run/turn-limit :seon.agent.run/turn-limit]]
@@ -186,7 +193,9 @@
   (>= turn-count turn-limit))
 
 (defn deadline-passed?
-  "Wall-clock bound: is `now` past `deadline`? Pure — the caller passes the
+  "Wall-clock bound: is `now` past `deadline`?
+
+   Pure — the caller passes the
    instant, so it's testable without the system clock."
   {:malli/schema [:=> [:catn [:seon.agent.run/deadline :seon.agent.run/deadline]
                              [:seon.agent.run/now :seon.agent.run/now]]
@@ -219,8 +228,10 @@
    [:seon.agent.run/deadline    {:optional true} :seon.agent.run/deadline]])
 
 (defn ^:async open-run!
-  "Open a run for an EXISTING agent and point `:seon.agent/run` at it in the
-   SAME tx — ATOMICALLY, via a compare-and-swap that asserts the agent had NO
+  "Open a run for an EXISTING agent and point `:seon.agent/run` at it.
+
+   In the SAME tx — ATOMICALLY, via a compare-and-swap that asserts the
+   agent had NO
    open run (the `:seon.agent/run` attr ABSENT). Idle→running is one
    serialized step: when two wakes (a message + a schedule fire, or two
    messages) race, the wire-server serializes the txs and the SECOND CAS sees
@@ -313,7 +324,9 @@
       [close-row])))
 
 (defn ^:async close-run!
-  "Close a run (`:status :closed` + `closed-reason`). When the agent still
+  "Close a run — `:status :closed` + `closed-reason`.
+
+   When the agent still
    OWNS this run, also retract its `:seon.agent/run` pointer so derived state
    falls to `:idle`. When it does NOT own it (a superseded run being cleaned
    up), the run is marked closed but the agent's live pointer is left
@@ -357,7 +370,9 @@
    [:seon.agent.run/deadline-extension-ms {:optional true} :int]])
 
 (defn ^:async renew!
-  "Renew the lease (the sliding window): bump `turn-limit` by +1 and push
+  "Renew the lease — the sliding turn + wall-clock window.
+
+   Bump `turn-limit` by +1 and push
    `deadline` out to now + extension. The tx LEADS with the [[run-fence]] CAS —
    a write from a superseded/timed-out run aborts at the writer and returns the
    CAS-fail envelope (no pre-read predicate). `^:async`."
@@ -383,7 +398,9 @@
    [:seon.agent.run/id :seon.agent.run/id]])
 
 (defn ^:async beat!
-  "Heartbeat: write `last-beat-at` = now. The tx LEADS with the [[run-fence]]
+  "Heartbeat: write `last-beat-at` = now.
+
+   The tx LEADS with the [[run-fence]]
    CAS, so a beat from a superseded/closed run aborts and returns the CAS-fail
    envelope — the loop reads `ok? false` as 'lost authority' and stops.
    `^:async`."
@@ -400,7 +417,8 @@
    [:seon.agent.run/id :seon.agent.run/id]])
 
 (defn ^:async pause!
-  "Pause the open run: stamp `paused-at` = now (⇒ derived state `:paused`) and
+  "Pause the open run: stamp `paused-at` = now (⇒ `:paused`).
+
    BANK the remaining wall-clock budget on `remaining-ms` (`deadline − now`,
    floored at 0). [[resume!]] re-extends `deadline` by it, so a long pause
    never instantly blows the clock bound. The tx LEADS with the [[run-fence]]
@@ -424,8 +442,9 @@
    [:seon.agent.run/id :seon.agent.run/id]])
 
 (defn ^:async resume!
-  "Resume a PAUSED run: RETRACT `paused-at` (⇒ derived state back to
-   `:running`) and re-extend `deadline` to now + the banked `remaining-ms`
+  "Resume a PAUSED run: RETRACT `paused-at` (⇒ `:running`).
+
+   Re-extend `deadline` to now + the banked `remaining-ms`
    (a long pause never instantly blows the clock bound). GUARDED on
    `paused-at`: a run that is NOT paused has no banked budget, so resume! is
    a loud no-op (the error envelope) rather than an accidental deadline
@@ -467,8 +486,9 @@
   [:map [:seon.agent.run/closed [:vector :seon.agent.run/id]]])
 
 (defn ^:async close-overdue-runs!
-  "Close every OPEN, non-PAUSED run whose `deadline` is past `now`, with
-   `:deadline-exceeded` — clearing the agent's `:seon.agent/run` pointer (via
+  "Close every OPEN, non-PAUSED run whose `deadline` is past `now`.
+
+   With `:deadline-exceeded` — clearing the agent's `:seon.agent/run` pointer (via
    [[close-run!]]'s owned-retract) so derived state falls to `:idle`. Returns
    the run-ids it closed (map-out). IDEMPOTENT: a re-run finds the now-`:closed`
    runs gone from the scan. A PAUSED run (carrying `:seon.agent.run/paused-at`)
@@ -511,8 +531,9 @@
 ;; ============================================================
 
 (defn ^:async recover-crashed-runs!
-  "Close EVERY `:open` run whose agent is NOT terminated, with `:crashed` —
-   clearing each owned agent's `:seon.agent/run` pointer (via [[close-run!]])
+  "Close EVERY `:open` run whose agent is NOT terminated.
+
+   With `:crashed` — clearing each owned agent's `:seon.agent/run` pointer (via [[close-run!]])
    so its derived state falls to `:idle` and it can be woken. The boot
    reconciliation for runs orphaned by a pod crash (an `:open` run + pointer
    with no loop driving it). Takes NO time arg: at boot nothing is driving any
