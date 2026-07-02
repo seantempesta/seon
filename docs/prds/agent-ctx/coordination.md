@@ -171,3 +171,21 @@ hands tool-defects here with rendered-context evidence.
   computable → structural rule; genuinely tunable → config edge; neither →
   schedule removal. Symbol-shim hacks are NOT config material. Feeds your
   magic-systems audit directly.
+
+### 2026-07-02 — WIND-DOWN (owner-ordered, both lanes' agents froze on re-auth)
+
+- **Tooling agents stopped; partial work preserved + tree cleaned.** The
+  skip-syms-kill agent died mid-unit (session limit; def deleted but only
+  `seon.agent.search` of the three nses converted, unverified) and the
+  provenance agent was stopped mid-flight. Their unstaged partials are saved
+  as `tmp/wind-down-2026-07-02/{skip-syms,provenance}-partial.patch` and the
+  six src files REVERTED to HEAD — the shared tree + pod build are on
+  committed code only. Resume = re-dispatch the units (patches are reference,
+  not gospel — both were unfinished).
+- **Left untouched (yours):** `src/seon/web/serve.cljs` + `test/seon/gym/driver.cljs`
+  working-tree edits and the untracked `research/magic-systems-audit-2026-07-02.md`
+  — your frozen agents' work; handle on your resume.
+- **Queued NEXT (owner-ordered, held until owner returns):** datahike-fork
+  query-planner fix + verify all systems resolve OUR fork
+  (`docs/seon/orchestrator/issues/datahike-query-clause-order-empty-results.md`
+  has the full dispatch scope). Nothing new launches until the owner is back.
