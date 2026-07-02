@@ -375,6 +375,39 @@ timeline is a function of the DB at render time, self-healing (no log to clear).
 The rendered timeline view lives in [[ui]]; this doc owns only the run-lifecycle
 facts it reads.
 
+## Nothing wedges — bounded execution through the one chokepoint
+
+Nothing can permanently wedge the pod. All execution reaches the runtime
+through **one door** (`seon.eval`, the exec service), and four existing
+mechanisms — extended, never duplicated — make every hang a value:
+
+- **One bound: `race-timeout`.** Every await self-bounds by racing the one
+  wall-clock wrapper (the same one everywhere: agent forms, auto-test runs,
+  each LLM attempt, the loop's turn await). A timeout is an **error value**
+  (`:seon/error` / `:seon.ai/error` timed-out flavor) surfaced through
+  warnings — never a throw, never a silent park. The bound frees the
+  *awaiter*; it does not pretend to cancel the work (nothing can, on one
+  event loop) — that's what the next two mechanisms absorb.
+- **One reaper: the ticker.** The run deadline + `close-overdue-runs!` on
+  the one 30s beat is the outer watchdog; per-await bounds are the inner
+  one. There is no separate supervisor process, heartbeat service, or
+  in-flight registry — in-flight work is DERIVED (open runs, pending
+  `result/<id>` stashes), queryable like everything else.
+- **One fence: the run-id CAS.** A late-settling await from a reaped or
+  superseded run cannot corrupt state — its writes lead with the work-fence
+  and abort at commit. Late results are values, absorbed or discarded.
+- **One leak-bound: the `result/<id>` stash.** A never-settling Promise is
+  retained under the capped result-var stash (oldest pruned), and dropped
+  on restart. Pending work is re-referenceable data, not a leak.
+
+The honest residual: a **synchronous CPU loop** blocks the event loop the
+watchdog itself lives on — no eval-level mechanism can preempt it. That is
+precisely the fault axis of the isolation tiers below: `eval-batch!` runs
+in a Tier-1 worker, and the deadline-watchdog's `terminate()` is the
+CPU-proof kill an in-process timer can't deliver. Chokepoint bounds handle
+every async park; the worker tier handles the sync runaway; together the
+system has no permanent-wedge class left.
+
 ## Isolation — the execution service's backend tiers
 
 Eval, render fns, and interactions are **three doors to one service** — "run an

@@ -137,6 +137,18 @@ else composes with it.
    isolation + as-of + reconstructed ctx + a debug-brief block + a
    thinking model via per-agent provider.
 
+**W1.5 — Wedge-proofing (verified 2026-07-02, fix in flight).** The
+async-park class closes by extending the EXISTING `seon.eval/race-timeout`
+to the three unbounded awaits (`call-llm!` per-attempt, `run-loop!`'s bare
+awaits) + the dangling-timer clear — no new mechanism (see
+[[agent-runtime]] "Nothing wedges"). The sync-CPU residual (a `(loop []
+(recur))` freezes the event loop incl. the watchdog; restart-only today)
+is the isolation Tier-1 worker offload — `worker_eval.cljs` already proves
+`vm.runInThisContext {timeout}` preemption but is a standalone diffusion
+bundle, NOT pod-wired. Also open: the pod has no `interrupt_eval` (JVM
+track only); `cljs.test/*current-env*` binding straddles `await`
+(runner.cljs:542) — thread env explicitly.
+
 **W2 — inspect.ai tools.** shell → python → web-fetch (design pass first);
 substrate decision (owner: pod-in-sandbox recommended by spike + review)
 before container work; fiber-local `*conn*` when parallel scoring matters.

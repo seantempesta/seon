@@ -59,6 +59,15 @@
  :compliance {:enabled true
               :block false}
 
+ ;; Public-fn docstring lint (seon.dev.docstring) — WARN-ONLY, NEVER blocks.
+ ;; Runs right after compliance on the edited file: flags any public fn whose
+ ;; docstring line 1 is missing, > 78 chars, or lacks terminal punctuation
+ ;; (the compact-namespace-card summary). It only APPENDS to hook feedback —
+ ;; there is no block path, so an edit always proceeds. There is deliberately
+ ;; no :block key: unlike :compliance/:tests, this stage cannot be made
+ ;; blocking. See docs/conventions.md "Function Docstrings".
+ :docstring-lint {:enabled true}
+
  ;; Feedback formatting
  :feedback {:dense true
             :max-length 1000}}
