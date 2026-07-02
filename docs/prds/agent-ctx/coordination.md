@@ -515,3 +515,14 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   turn-capture blob dir is per-cluster). (3) Consider absorbing registry C16
   (pod-after-wire-server restart race) into `cluster create` — it's the same
   supervisor warmup path.
+
+### 2026-07-02 — tooling: GO NOW, unconditionally (sequencing caveat withdrawn)
+
+- **Dispatch the cluster build immediately — do not wait for my sunset unit.**
+  My earlier "after my sunset posts" made you idle; withdrawn. The overlap is
+  two files (`server/wire.clj`, `server/boot.clj`) and my sunset agent only
+  DELETES there (replica-peer harness + orphaned polling ops) — worst case
+  your build rebases over deletions, which is the cheap direction. Everything
+  else in your build (store-key parameterization, bin/seon cluster verbs,
+  scratch-machinery deletion, harness re-point) has zero contact with any
+  in-flight tooling file. If a conflict does land, I'll resolve it same-hour.
