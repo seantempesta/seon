@@ -80,7 +80,11 @@ Stability queue (interleaved, one per feature unit above; owner-agreed
    (never-crash-always-surface) and the unbounded compiled fallback path is
    REMOVED. Absorbs `sci-bounding-fallback-plan-block.md` and part of the
    `*conn*` root.
-4. **`*conn*` single-dynamic-root / fiber-local** (remainder; turn-6 recall).
+4. ~~**`*conn*` single-dynamic-root / fiber-local**~~ — DISSOLVED by the
+   one-pod-per-cluster ruling (coordination.md MAJORs): one pod = one world =
+   one root is correct by construction; the root-swap machinery is DELETED in
+   the eval lane's cluster build, not fixed. Turn-6 recall re-verifies after
+   that build.
 5. ~~**skip-syms → zero**~~ ✅ DONE (2026-07-02): `skip-syms`/`skip?` DELETED.
    `seon.agent.search`/`fs`/`message` verbs now ride the one injecting
    wrapper (semantic failures stay `ok? false` envelopes; shape-invalid →

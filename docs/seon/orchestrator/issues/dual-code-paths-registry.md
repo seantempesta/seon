@@ -22,9 +22,8 @@ dual code paths — track everything and fix it"). Rules:
 
 | id | item | where | lane | status |
 |----|------|-------|------|--------|
-| M1 | `*conn*` + `schema/*schemas` + shared compile-state ambient roots (scratch-world `set!` swap) | serve.cljs, client.cljs | eval (Slice A, owner-ratified) | IN FLIGHT — diff review gate before commit |
-| M3 | SCI silent unbounded fallback (`warn-fallback-once!`) | render/sci.cljs:185,441 | eval (owner-ruled fail-loud) | IN FLIGHT — diff review gate |
-| M4 | SCI env rebuild re-parses source for aliases (requires not stored structurally) | render/sci.cljs:230 | eval (with M3) | IN FLIGHT |
+| M1 | `*conn*` + `schema/*schemas` + shared compile-state ambient roots (scratch-world `set!` swap) | serve.cljs, client.cljs | eval (cluster-everywhere build) | RE-JUDGED by one-pod-per-cluster (coordination MAJORs): the root-swap scratch machinery is DELETED in the cluster build; one root per pod = correct by construction. Remaining ambient rows re-judge after it lands |
+| M4 | SCI env rebuild re-parses source for aliases (requires not stored structurally) | render/sci.cljs:230 | eval | verify closure vs `6f96b024` (M3's fix) — confirm alias root-fix included or keep open |
 | M5b | Router serves a cached route projection, no tx-listener self-heal | web/router.cljs, serve.cljs:905 | eval (queued behind solve-path) | QUEUED |
 | M6 | `async-fn?` ctor-name detection + once-per-process instrument gate | instrument.cljc:400 | tooling | OPEN |
 | M8 | `core-ns-set` replay-skip + `fn-less-compiled-roots #{"my.kb"}` name sets (provenance, not names, should decide) | client.cljs:1067,2441 | tooling | OPEN — hand-list class |
@@ -56,6 +55,7 @@ dual code paths — track everything and fix it"). Rules:
 | C5 | `warn-on-seed-origin-forge!` vestigial guard | = M2, `ad6b9955` |
 | C6 | Skills corpus dual home (.claude symlinks → seon-skills) | `68d73395` split (two audiences by owner ruling) + `21be639e` agent-perspective rewrite |
 | C7 | Dev hook cwd-relative litter | `8185459f` — repo-root resolution; 57 strays cleaned |
+| M3 | SCI silent unbounded fallback | `6f96b024` — SCI cage bounds every my.* render fn, fail-loud, unbounded fallback GONE (eval lane) |
 | C12 | `~/src/datahike` duplicate checkout | verified-no-unique-work, deleted; bundle at tmp/datahike-salvage/; fork workflow rules in memory |
 | F0 | Fork planner collect-field silent `#{}` | fork `da257d38` + seon `41c1b9b2`, live-proven; skills caveats removed `556fa779` |
 | C11 | `transient-ns-syms` restated ns defs | `dada1ff9` — set derived from the single defs; value-identical, live-verified |
