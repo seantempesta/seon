@@ -178,6 +178,27 @@
        :seon.store.wire/error (str "unknown tx-sub handle: " handle)
        :seon.store.wire/error-kind "not-found"})))
 
+(defmethod wire/handle-op "replay-tx" [conn req]
+  ;; The PUSH-feed sibling of subscribe-tx's since-t replay: return the missed
+  ;; txs DIRECTLY in the reply instead of queueing them behind a poll handle.
+  ;; The pod's pub-socket feed calls this on every (re)connect with its
+  ;; last-applied basis-t watermark; the reply's events are applied ahead of
+  ;; buffered live pub frames (overlap deduped by the subscriber's watermark).
+  ;; Also carries the resolved db-name — the pub socket is db-agnostic (every
+  ;; subscriber gets every tagged event), so the client filters by this value.
+  (let [since-t (:seon.store.wire/since-t req)]
+    (if-not (some? since-t)
+      {:seon.store.wire/ok false
+       :seon.store.wire/error "replay-tx requires :seon.store.wire/since-t"
+       :seon.store.wire/error-kind "protocol"}
+      (let [db-name (db-name-for-req req)
+            events  (wire/replay-tx-events conn db-name (long since-t))]
+        {:seon.store.wire/ok       true
+         :seon.store.wire/db-name  db-name
+         :seon.store.wire/since-t  since-t
+         :seon.store.wire/events   events
+         :seon.store.wire/replayed (count events)}))))
+
 (defmethod wire/handle-op "unsubscribe-tx" [_conn req]
   (let [handle (long (:seon.store.wire/handle req))]
     (when-let [{:keys [db-name sub-id]} (get @!tx-subs handle)]

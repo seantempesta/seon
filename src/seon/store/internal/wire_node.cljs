@@ -77,6 +77,14 @@
   (or (platform/env-val "SEON_REQ_SOCK")
       "tmp/seon-cluster-default-req.sock"))
 
+(def default-pub-sock
+  "The cluster wire-server's UDS PUBLISH socket — the broadcast stream every
+   committed tx event is pushed down (`seon.server.broadcast/start-pub-server!`).
+   Cluster-isolation-aware like `default-req-sock`: reads `SEON_PUB_SOCK`
+   first (exported by `bin/acme`), falling back to bin/seon's default."
+  (or (platform/env-val "SEON_PUB_SOCK")
+      "tmp/seon-cluster-default-pub.sock"))
+
 ;; ---------- one request / one reply ----------
 
 (def ^:private rpc-tick-ms
@@ -121,9 +129,16 @@
                                   (reset! !settled true)
                                   (js/clearInterval @!timer)
                                   (.destroy sock)
-                                  (reject (js/Error.
+                                  ;; ex-info (still a js/Error) so the caller can
+                                  ;; DISTINGUISH the rpc-layer failure flavor: a
+                                  ;; timed-out request MAY have been applied by the
+                                  ;; server (the reply, not the request, was lost) —
+                                  ;; seon.store.wire's transact path reads this key
+                                  ;; to run its commit-or-not check.
+                                  (reject (ex-info
                                            (str "wire rpc timeout (alive " @!alive-ms
-                                                "ms, wall " (- (js/Date.now) started) "ms)")))))
+                                                "ms, wall " (- (js/Date.now) started) "ms)")
+                                           {:seon.store.wire/rpc-failure :timeout}))))
                               rpc-tick-ms))
             done     (fn [err val]
                        (when-not @!settled
@@ -148,7 +163,69 @@
                    (done nil (dec-payload (.subarray ^js @!payload 0 @!need)))
                    (catch :default e (done e nil))))))
         (.on sock "end"
-             (fn [] (when-not @!settled (done (js/Error. "wire closed before reply") nil)))))))))
+             (fn [] (when-not @!settled
+                      (done (ex-info "wire closed before reply"
+                                     {:seon.store.wire/rpc-failure :closed})
+                            nil)))))))))
+
+;; ---------- persistent pub-socket subscription (push feed) ----------
+
+(defn connect-pub
+  "Open a PERSISTENT connection to the wire-server's pub socket and stream
+   every broadcast frame to `on-event`. Resolves (with the socket) once
+   connected; rejects if the connection cannot be established. After connect,
+   any drop — socket error, close, a frame decode failure, or an `on-event`
+   throw — destroys the socket and calls `on-close` exactly ONCE with a reason
+   string (the caller owns reconnect + since-t replay).
+
+   The stream is length-framed Transit-JSON (same codec as `rpc`), but unlike
+   the one-shot rpc reader this parser is INCREMENTAL: a chunk may carry a
+   partial frame or several whole frames; frames are emitted in arrival order."
+  [sock-path {:keys [on-event on-close]}]
+  (js/Promise.
+   (fn [resolve reject]
+     (let [sock       (.createConnection net sock-path)
+           !connected (atom false)
+           !closed    (atom false)
+           !buf       (atom (.alloc Buffer 0))
+           close!     (fn [reason]
+                        (when-not @!closed
+                          (reset! !closed true)
+                          (try (.destroy sock) (catch :default _))
+                          (if @!connected
+                            (when on-close (on-close reason))
+                            (reject (js/Error. (str "pub connect failed: " reason))))))]
+       (.on sock "connect" (fn []
+                             (reset! !connected true)
+                             (resolve sock)))
+       (.on sock "error" (fn [e] (close! (or (.-message e) (str e)))))
+       (.on sock "close" (fn [] (close! "socket closed")))
+       (.on sock "data"
+            (fn [chunk]
+              (swap! !buf (fn [^js b] (.concat Buffer #js [b chunk])))
+              (loop []
+                (let [^js b @!buf]
+                  (when (and (not @!closed) (>= (.-length b) 4))
+                    (let [need (.readUInt32BE b 0)]
+                      (when (>= (.-length b) (+ 4 need))
+                        (reset! !buf (.subarray b (+ 4 need)))
+                        (let [res (try
+                                    {:ev (dec-payload (.subarray b 4 (+ 4 need)))}
+                                    (catch :default e
+                                      {:err (str "pub frame decode failed: "
+                                                 (or (.-message e) (str e)))}))]
+                          (if-let [err (:err res)]
+                            (close! err)
+                            ;; an on-event throw is a FEED failure (e.g. the
+                            ;; local store deref lagging the event) — drop the
+                            ;; connection so the caller's reconnect + since-t
+                            ;; replay recovers it, mirroring the old pump's
+                            ;; catch→re-subscribe semantics.
+                            (let [derr (try (on-event (:ev res)) nil
+                                            (catch :default e
+                                              (str "feed handler threw: "
+                                                   (or (.-message e) (str e)))))]
+                              (if derr (close! derr) (recur))))))))))))))))
 
 ;; ---------- op surface (mirrors seon.server.wire) ----------
 
@@ -241,6 +318,22 @@
                            (:since-t opts) (assoc :seon.store.wire/since-t (:since-t opts)))
                          opts))
        (then (fn [resp] resp)))))
+
+(defn replay-tx
+  "Fetch every committed tx event with basis-t > `:since-t` DIRECTLY in one
+   reply (the push-feed sibling of subscribe-tx's queued replay). The reply
+   carries `:seon.store.wire/events` (live-shaped `tx` events, ascending
+   commit order), `:seon.store.wire/db-name` (the resolved cluster the caller
+   should filter pub frames by), and `:seon.store.wire/replayed`. Used by the
+   pub-socket feed on every (re)connect. `:since-t` is REQUIRED. A large gap
+   can make the reply big, so the timeout accepts an override via `opts`."
+  ([opts] (replay-tx default-req-sock opts))
+  ([sock {:keys [since-t timeout-ms] :as opts}]
+   (rpc sock
+        (routed {:seon.store.wire/op "replay-tx"
+                 :seon.store.wire/since-t since-t}
+                opts)
+        {:timeout-ms (or timeout-ms 30000)})))
 
 (defn next-tx-event
   "Poll one raw tx event for `handle`. Resolves to the event map (keyword keys)

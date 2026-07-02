@@ -158,6 +158,30 @@
       (is (= [t1 t2 t3] bts)
           "replay (t1,t2) drains before live (t3), each basis-t exactly once, in order"))))
 
+(deftest replay-tx-op-returns-gap-directly
+  ;; The push-feed sibling of subscribe-tx's queued replay: the pod's
+  ;; pub-socket adapter calls "replay-tx" on every (re)connect and applies the
+  ;; reply's events ahead of buffered live frames.
+  (let [t0   (commit! *conn* [{:db/ident :u3/n :db/valueType :db.type/string
+                               :db/cardinality :db.cardinality/one}])
+        t1   (commit! *conn* [{:u3/n "a"}])
+        t2   (commit! *conn* [{:u3/n "b"}])
+        resp (wire/handle-op *conn* {:seon.store.wire/op "replay-tx"
+                                     :seon.store.wire/since-t t0})]
+    (is (true? (:seon.store.wire/ok resp)))
+    (is (= *ambient* (:seon.store.wire/db-name resp))
+        "carries the resolved db-name — the client-side pub demux key")
+    (is (= 2 (:seon.store.wire/replayed resp)))
+    (is (= [t1 t2] (mapv :seon.store.wire/basis-t (:seon.store.wire/events resp)))
+        "the gap comes back DIRECTLY in the reply, ascending commit order")
+    (is (every? #(= "tx" (:seon.store.wire/event %)) (:seon.store.wire/events resp))
+        "each replayed event is shaped like a live tx event")))
+
+(deftest replay-tx-op-requires-since-t
+  (let [resp (wire/handle-op *conn* {:seon.store.wire/op "replay-tx"})]
+    (is (false? (:seon.store.wire/ok resp)))
+    (is (= "protocol" (:seon.store.wire/error-kind resp)))))
+
 (deftest subscribe-without-since-t-replays-nothing
   (let [_  (commit! *conn* [{:db/ident :u2/n :db/valueType :db.type/string
                              :db/cardinality :db.cardinality/one}])
