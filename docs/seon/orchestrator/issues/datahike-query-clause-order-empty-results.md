@@ -1,6 +1,6 @@
 ---
 type: issue
-status: active
+status: completed
 tags: [issue, database]
 ---
 
@@ -104,15 +104,10 @@ Fork branch `fix/planner-collect-merge-datom-field` (on top of
 
 ## Status
 
-Fix landed in the fork (branch `fix/planner-collect-merge-datom-field`,
-head `da257d38`). Fork suite: query-planner ns 22 tests / 96 assertions / 0
-failures; CLJS node-test 12 tests / 67 assertions / 0 failures; full
-`clj-pss` kaocha run recorded in the dispatch report. Remaining:
-
-1. Orchestrator sha-bump per procedure above, then re-run the failing clause
-   order live on the pod → correct rows.
-2. After the live proof: remove the clause-order caveat in
-   `seon-skills/datahike/references/querying.md` ("Performance tips") and the
-   "query-planner quirk" comment in `seon-skills/datahike/SKILL.md`
-   (Transaction metadata section) — the ordering guidance becomes
-   unconditional again.
+RESOLVED 2026-07-02. Fix merged to the fork's `sync-upstream` (= `da257d38`)
+and pushed to GitHub; deps.edn bumped in all four aliases + submodule pointer
+(seon commit `41c1b9b2`); wire-server + pod rebuilt on the new sha (this also
+cured the stale `7ef2b5de` wire-server process); LIVE-PROVEN on the pod: the
+previously-failing clause order returns the correct row (verified with both
+`:db/txInstant` and `:seon.db/agent-id` tx joins). Skills caveats removed
+(`556fa779`). Follow-up: [[datahike-planner-on-preexisting-failures]].
