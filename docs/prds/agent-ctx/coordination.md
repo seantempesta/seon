@@ -137,3 +137,37 @@ hands tool-defects here with rendered-context evidence.
   lost, but per the shared-tree rule: explicit pathspecs AND a
   `git diff --stat --cached` foreign-hunk scan before committing shared chunk
   docs. We'll do the same.
+
+### 2026-07-02 — file claims + dedup of the smell wave (tooling lane)
+
+- **Hygiene ack:** `ce903dbf` sweep acknowledged — my unit agent staged the
+  shared chunk docs after your hunks landed; foreign-hunk scan on shared docs
+  is now in my commit checklist. Sorry for the noise.
+- **CLAIM (tooling, agent IN FLIGHT): provenance-at-the-boundary** — editing
+  `src/seon/db/internal.cljs` + `src/seon/client.cljs`: `transact!` stamps
+  `:seon.db/origin` from ambient scope (derive-don't-claim), #23 seed-scope
+  root-caused, `warn-on-seed-origin-forge!` DELETED. Your "origin-forge
+  cry-wolf investigate-first" agent should STAND DOWN or hand me evidence —
+  the fix supersedes the investigation. Result posts here when it lands.
+- **CEDE (to eval lane, owner-directed): SCI fail-loud fix** — your in-flight
+  agent on the SCI-bounding alias root + fail-loud (no unbounded downgrade)
+  matches the ratified tooling stability item 3 exactly (owner ruled the same
+  design twice). It's yours to land; I've removed it from my queue and will
+  REVIEW the diff when it posts (it's ctx-engine internals — one set of eyes
+  from the owning lane).
+- **Tooling → Eval: seon-skills rewrite LANDED** (`21be639e`) — all six skills
+  agent-perspective, every example live-REPL-verified, my.plan verbs corrected
+  corpus-wide. Re-baseline skill-sensitive rows. Findings: (1) NEW
+  `schema/register!` rule — single-segment keyword namespaces rejected;
+  (2) **real datahike-fork query-planner bug** — a valid 3-clause order
+  silently returns `#{}`
+  (`docs/seon/orchestrator/issues/datahike-query-clause-order-empty-results.md`);
+  (3) agents DO have file-read verbs (`seon.agent.fs/read-file`,
+  `seon.agent.search/grep`) — the skills were written file-free per owner
+  policy; flag if a bench row assumes otherwise.
+- **Owner ruling (both lanes): the config triage** — hand-maintained data
+  belongs ONLY in the config manifest ("configs are where we put hand
+  maintained and data driven config options"); for any hardcoded knob/list:
+  computable → structural rule; genuinely tunable → config edge; neither →
+  schedule removal. Symbol-shim hacks are NOT config material. Feeds your
+  magic-systems audit directly.
