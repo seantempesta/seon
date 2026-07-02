@@ -31,12 +31,10 @@ dual code paths — track everything and fix it"). Rules:
 | M10 | Home-ns aliases unresolvable in agent nses (#73 — "fully qualify" docs are the workaround) | eval/sci env | tooling | OPEN — related M4 |
 | M22 | Server registry legacy dual-shape snapshot reader | server/registry.clj:470 | tooling | OPEN (trivial) |
 | M23 | `seon.repl/parse-forms` compat re-export | repl.cljs:59 | tooling | OPEN (trivial delete) |
-| C1 | `SEON_EMBED` read ×3 under 3 names | turn.cljs:160, diffusion/retrieval.cljs:592, render/system.cljs:140 | tooling | QUEUED — unification sweep |
-| C2 | pr-str+clip helpers ×8 (chars, violating tokens rule) | 8 files | tooling | QUEUED — unification sweep |
-| C3 | Eval envelope bare `:ok`/`:error` vs namespaced envelope (owner ruled: → `:seon.eval/*`) | eval.cljs, client.cljs, worker_eval.cljs | tooling | QUEUED — unification sweep |
-| C4 | Private `env*` readers ×2 + inline lookup vs `seon.platform/env-val` | ai/{diffusiongemma,openai_compat,anthropic}.cljs | tooling | QUEUED — unification sweep |
-| C9 | Worker bootstrap-cache helpers copied from seon.eval "by design" | worker_eval.cljs:31 | tooling | QUEUED — unification sweep (shared leaf ns) |
-| C10 | Dead `:seon.agent.ctx/fn` attr + inert-comment residue | client.cljs:426, eval.cljs:1373 | tooling | QUEUED — unification sweep |
+| C19 | `seon.eval/clip-result-body` — one more inline clip, char-denominated marker ("… +N chars clipped") not on C2's helper | eval.cljs:~2580 | tooling | OPEN — C2 sibling, found during the sweep |
+| C20 | `seon.repl` parse-entry envelope is bare-keyed (`:kind`/`:ok?`/`:source`/`:error`) | repl internals; consumer eval.cljs read-entry branch | tooling | OPEN — C3 sibling, owned by seon.repl |
+| C21 | Bare-keyed internal opts maps around the eval path: `record-eval!` opts (`:eval-id`/`:result`/`:ns`/…), `seon.eval/eval` opts (`:ns`/`:analyze-deps?`/`:timeout-ms`), client `load-error->log` `{:error :stack}` | eval.cljs, client.cljs | tooling | OPEN — C3 residue (the result envelope itself is fixed) |
+| C22 | JVM-lane `truncate-value` copy (C2 fixed the pod lane; paused track keeps a chars copy) | db.clj:107 | tooling | OPEN — fold onto seon.ai.tokens (.cljc, already reachable) when the JVM track resumes |
 | C14 | `build-tee-entities` mints `:seon.fn`/`:seon.ns` rows for defs in TRANSIENT nses (cljs.user scratch leaks into the program graph; `transient-ns-syms` guards only the requires-tee) | eval.cljs:~2099 | tooling | OPEN — one-line gate but a design call first: do scratch defs deserve persistence? |
 | C15 | Server db-name demux wart: ambient path tags events WITH the leading colon, registry-resolved path strips it (docstring claims colon-free) — the two server paths disagree for a registry-routed subscriber | seon.server.wire/-main, store/config-for | tooling | OPEN (small; pod path self-consistent today) |
 | C16 | `bin/seon restart pod` right after `restart wire-server` races writer warmup → pod fail-loud-exits, needs a second start | bin/seon | tooling | OPEN (supervisor; small) |
@@ -62,6 +60,12 @@ dual code paths — track everything and fix it"). Rules:
 | H1 | Dormant replica-peer harness pinning dead polling ops | `03e1ce3e`+`a74e3e88` — Stage A/B harness (replica-peer/probe nses, probe/ drivers, 2 deps.edn aliases, 2 shadow builds) DELETED and the subscribe-tx/next-tx-event/unsubscribe-tx handle-ops + bounded-queue machinery it was the last consumer of removed; pub-socket push + `replay-tx` is the ONE feed; findings preserved in datahike-native-replica-2026-06-09.md; recoverable at `2ef14d1276` |
 | C11 | `transient-ns-syms` restated ns defs | `dada1ff9` — set derived from the single defs; value-identical, live-verified |
 | C13 | "Redundant" per-entry origin claims in eval.cljs | CLOSED AS DESIGNED (`dada1ff9` report) — live-FALSIFIED: the `:agent` claim is a load-bearing narrowing inside `run-turn!`'s `:system` context; removal flips every eval tx to `:system`. Do NOT retry |
+| C1 | `SEON_EMBED` read ×3 under 3 names | `e6075961` — `seon.agent.turn/embed-retrieval-on?` is the one pod-side reader; retrieval's private copy deleted, render/system inline read routed through it; live-verified consistent |
+| C2 | pr-str+clip helpers ×8 (chars, violating tokens rule) | `9a56d2bd` — ONE bounded-print in `seon.ai.tokens` (promoted .cljc): `clip-str` (string + TOKEN budget [+ marker fn]) / `bounded-pr-str`; 7 copies deleted, `seon.agent.ctx/clip-or-full` keeps its char-cap + `full?` contract but delegates the cut and its loud markers now speak tokens. Residue rows: C19 (clip-result-body), C22 (JVM copy) |
+| C4 | Private `env*` readers ×2 + inline lookup | `163d952b` — all three providers call `seon.platform/env-val`; live-verified key resolution |
+| C9 | Worker bootstrap-cache helpers copied "by design" | `d71ab670` — shared LEAF `seon.eval.bootstrap-cache` (no db/schema/pod deps); both copies deleted; worker bundle unchanged (98 files) + wire-proven |
+| C10 | Dead `:seon.agent.ctx/fn` attr mention + inert-removal comment residue | `dab5a3a1` — deleted outright (client.cljs, eval.cljs, transcript.cljs) |
+| C3 | Eval envelope bare `:ok`/`:error` (owner ruled → namespaced) | envelope is now `{:seon.eval/ok? :seon.eval/value :seon.eval/ending-ns}` / `{:seon.eval/ok? false :seon/error <error-map>}` / `{:seon.eval/ok? false :seon.eval/pending-promise <p>}` across eval.cljs + client.cljs + worker_eval (internal; JSON wire keys unchanged — third-party boundary) + all test consumers; live-proven producer + full agent turn + worker pipe; suite 955/4403 green. `5a3af643` |
 
 ## Legitimate — listed, rationale'd, re-audited periodically
 
