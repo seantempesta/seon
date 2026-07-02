@@ -134,17 +134,21 @@ every context band renders an html representation for inspectability.
 Every **page** is a layout placing block html renders into slots; each filled slot
 is a tile. All pages are agent worlds — one mechanism, a tree of routes:
 
-- **world** (`/agent/{id}`) — one agent: the focal **canvas** IS the agent's
-  **live tile** (`seon.render/render-agent-tile` resolving
-  `:seon.render.live-tile/content`, the one HTML surface the agent rewrites),
-  rendered into `#world-canvas`, above a `:seon.agent.ctx/priority`-ordered
-  scroll of the agent's html `:seon.agent/ctx` blocks as supporting tiles
-  (`:transcript` included). The canvas is NOT a `(slot :canvas)` block —
-  `:canvas` is just a block name like any other; the hero is always the live
-  tile (decision #19, observer-confirmed KEEP). With no custom tile, the
-  default (`seon.render.live-tile/welcome`) LEADS with the agent's latest
-  reply rendered as a markdown card (through the `block` message lane), falling
-  back to the greeting only before the agent has spoken.
+- **world** (`/agent/{id}`) — one agent: the focal **canvas** rendered into
+  `#world-canvas`, above a `:seon.agent.ctx/priority`-ordered scroll of the
+  agent's html `:seon.agent/ctx` blocks as supporting tiles (`:transcript`
+  included). The canvas is NOT a `(slot :canvas)` block — `:canvas` is just a
+  block name like any other. **What the canvas shows is derived by default,
+  pinnable to override** (the same derive-default/store-override pattern as
+  everywhere): by default it is the **last-updated tile** — the block-tile
+  whose data most recently changed — so the human's focus follows what the
+  agent is actively doing, and the agent *knows* it does, since it's derived
+  from the agent's own last write (the shared-view property, [[context]]). The
+  agent overrides by pinning `:seon.render.live-tile/content` to a specific
+  tile to feature it regardless of recency. With neither a pin nor any tile
+  update yet, the default (`seon.render.live-tile/welcome`) LEADS with the
+  agent's latest reply as a markdown card, falling back to the greeting only
+  before the agent has spoken.
 - **the root agent's world** (`/`) — the all-agents overview IS the **root
   agent's** world (`:seon.agent/id "root"`). Its system-scoped blocks query across
   all agents to render a preview tile each; dive into one via reverse routing
