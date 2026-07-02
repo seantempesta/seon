@@ -59,51 +59,52 @@ wire-server replays every missed tx in commit order
 (`seon.server.wire/replay-tx-events`), idempotent on the watermark. What a gap
 delayed was listener WAKES (triggers, SSE), by up to the gap length.
 
-## Follow-up: migrate the pod feed to the pub socket (push, not poll)
+## Follow-up: migrate the pod feed to the pub socket — DONE (2026-07-02)
 
-The timeout question only exists because the feed is POLL-based: the pump
-opens a fresh UDS connection every ~55ms (~18 connections/sec per pod,
-forever), and each connection spawns a JVM handler thread
-(`seon.server.wire/start-req-server!`'s thread-per-connection accept loop).
-The wire-server already has the push channel:
-`seon.server.broadcast/start-pub-server!` maintains a pub socket that writes
-every broadcast event to each connected subscriber — the pod just doesn't use
-it (it polls the req socket via `next-tx-event`).
+Shipped as planned (commit `a24b172f`). The pod feed is ONE persistent
+pub-socket connection (`seon.store.internal.wire-node/connect-pub`, a
+streaming length-framed Transit reader) feeding `handle-feed-event!`
+directly; the poll pump, its 2s-retry re-subscribe dance, and the ~18
+conn/sec req-socket churn are GONE from the pod. Details:
 
-Plan:
+- **Gap recovery**: on every (re)connect the adapter calls the new
+  req-socket `replay-tx` op (`seon.server.boot`) with its basis-t
+  watermark; the reply carries the missed events DIRECTLY (no queue/handle),
+  applied ahead of live frames buffered during the replay — DE-2 lossless
+  wake unchanged, overlap deduped by the watermark. Reconnects are
+  feed-generation-guarded so a drop and a failed connect can never race two
+  loops.
+- **db-name demux**: the pub stream is db-agnostic; the `replay-tx` reply
+  carries the resolved db-name and the pod filters frames client-side.
+- **Live-proven** (default cluster, 2026-07-02): foreign tx pushed → native
+  listener fired exactly once, watermark advanced with zero polling;
+  SIGSTOP'd pod + wire-server restart + foreign tx committed in the gap →
+  on resume ONE reconnect, `replayed 4`, the gap tx's listener fired
+  exactly once, watermark = server basis-t.
+- **NOT deleted**: the server-side `subscribe-tx`/`next-tx-event`/
+  `unsubscribe-tx` poll ops + bounded queues stay — the deletion condition
+  ("once no client polls") is not met: the `seon.dev.replica-peer` Stage A/B
+  regression harness (`clj -M:replica-peer-jvm`) still polls them.
 
-- **Pod side** (`seon.store.wire` + `seon.store.internal.wire-node`): replace
-  the pump's poll loop with ONE persistent pub-socket connection; a streaming
-  frame reader feeds `handle-feed-event!` directly. Reconnect-on-drop keeps
-  the existing `since-t` replay for gap recovery — the DE-2 lossless-wake
-  contract is unchanged (the watermark idempotency already dedupes the
-  replay↔live overlap).
-- **Server side**: pub events go to ALL socket subscribers today (no
-  per-subscriber db-name routing on the pub socket; `broadcast!` tags each
-  event with `:seon.store.wire/db-name`), so the pod filters by db-name
-  client-side, or the pub server grows a subscribe handshake. The `since-t`
-  replay stays on the req socket (a "replay request" op) or is pushed down
-  the fresh pub connection ahead of live frames.
-- **Deletion targets**: the pump's poll loop + 2s-retry re-subscribe dance,
-  the per-poll rpc timeout semantics for the feed, the ~18 conn/sec churn and
-  its per-conn JVM handler threads, and (once no client polls) the
-  `next-tx-event` op + per-handle bounded queues + `max-queued-events`
-  drop-oldest backstop in `seon.server.boot`.
-- **Scope**: a two-sided protocol touch (pod wire layer + wire-server
-  boot/broadcast) plus reconnect/replay integration and tests on both sides —
-  roughly a focused multi-day unit, not a patch. Do it as its own task on the
-  post-merge branch.
+## Follow-up: transact timeout ≠ server rollback — DONE (2026-07-02)
 
-## Follow-up: transact timeout ≠ server rollback (agent-facing ambiguity)
+Fixed in the same commit. A transact whose rpc fails BEFORE a reply is read
+(timeout / transport / closed) now has DEFINED semantics
+(`seon.store.wire/transact-rpc-failure`):
 
-Pre-existing, surfaced during this diagnosis: a client-side `transact` rpc
-timeout (30s budget) does NOT undo the server's commit — the write can land
-while the agent sees an error. The write-id echo-suppression set prevents
-double-apply, but the agent-facing ambiguity ("my write failed" when it
-actually committed) deserves its own scoped look — e.g. a timed-out transact
-could re-check the store for its write-id before reporting failure. Separate
-mechanism from the pump; entry point: `seon.store.wire/SeonWireWriter`
-`-dispatch!` calling `seon.store.internal.wire-node/rpc`.
+- The error envelope names commit-or-not in the message and carries
+  `:seon.store.wire/committed?` + `:seon.store.wire/basis-t` +
+  `:seon.store.wire/write-id` — resolved by a LOCAL store query for the
+  committed write-id tx-meta datom (reads are follow-the-store; no wire
+  round-trip).
+- The write-id leaves the echo-suppression set, so a landed-but-unacked tx
+  still fires the conn's native listeners: via the feed (as foreign) if the
+  event hasn't arrived yet, or synthesized from local history
+  (`fire-own-tx-listeners!`) if the feed already own-skipped it.
+- Live-proven with a black-hole UDS server (→ "NOT observed … Safe to
+  retry", committed? false) and a reply-swallowing proxy to the real
+  wire-server (→ "COMMITTED at basis-t N … Do NOT re-send", committed? true,
+  listener fired once for the committed tx).
 
 ## Turn-6 empty recall: pump suspicion FALSIFIED
 
