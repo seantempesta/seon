@@ -598,3 +598,96 @@
         (.catch (fn [e]
                   (is false (str "drift test threw: " (or (.-message e) e)))
                   (done*)))))))
+
+(deftest core-index-tx-reheals-drifted-fn-fields
+  ;; Fn rows dedup on sym AND every derived field (source, spec, doc,
+  ;; arglists, private?). Sym-only dedup was the stale-spec bug (live
+  ;; incident 2026-07-02: seon.agent.shell's rows kept a first-index
+  ;; :seon.shell/* spec forever — the namespaces card showed wrong keyword
+  ;; namespaces to live agents). Pins three behaviors on one conn:
+  ;;
+  ;;   (a) HEAL — a core-claimed row whose stored :seon.fn/spec drifted
+  ;;       from the live var meta re-emits with the fresh spec;
+  ;;   (b) GUARD — a drifted row whose :source tx is NOT core-seed
+  ;;       (agent-authored) is never overwritten by the boot index;
+  ;;   (c) RETRACT — a stale spec on a fn whose fresh derivation is
+  ;;       unspecced yields an explicit [:db/retract …] (upsert can't
+  ;;       remove a datom).
+  (async done
+    (let [restore! (freeze-builders!)
+          done*    (fn [] (restore!) (done))
+          target   "seon.schema/register!"
+          stale    "[:=> [:cat :seon.stale/req] :seon.stale/resp]"
+          guarded  "seon.db/transact!"]
+     (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
+                              (db/tx-meta-datahike-schema)))
+        (.then
+          (fn [conn]
+            (-> (client/core-index-tx conn)
+                (.then (fn [first-tx]
+                         (db/transact! conn first-tx
+                                       {:seon.db/origin :core-seed})))
+                ;; (a) Regress the stored spec in place (identity upsert on
+                ;; sym; the row's :source datom keeps its :core-seed tx).
+                ;; (c) Forge a stale spec onto an UNSPECCED core fn (found
+                ;; dynamically — any row the fresh index emits without
+                ;; :seon.fn/spec).
+                ;; (b) Replace one core row wholesale under an AGENT origin
+                ;; (retractEntity kills the :core-seed source datom).
+                (.then (fn [_]
+                         (db/transact! conn
+                                       [{:seon.fn/sym  target
+                                         :seon.fn/spec stale}]
+                                       {:seon.db/origin :core-seed})))
+                (.then (fn [_]
+                         (db/transact! conn
+                                       [[:db/retractEntity [:seon.fn/sym guarded]]]
+                                       {:seon.db/origin :core-seed})))
+                (.then (fn [_]
+                         (db/transact! conn
+                                       [{:seon.fn/sym      guarded
+                                         :seon.fn/ns       [:seon.ns/name :seon.db]
+                                         :seon.fn/source   "(defn transact! [] :agent-owned)"
+                                         :seon.fn/arglists "([])"
+                                         :seon.fn/doc      ""
+                                         :seon.fn/private? false}]
+                                       {:seon.db/origin :agent})))
+                (.then (fn [_] (client/core-index-tx conn)))
+                (.then
+                  (fn [tx]
+                    (let [fresh-fn  (fn [sym rows]
+                                      (first (filter #(= sym (:seon.fn/sym %)) rows)))
+                          healed    (fresh-fn target tx)
+                          expected  (fresh-fn target @core-tx)]
+                      ;; (a) HEAL
+                      (is (some? healed) "the spec-drifted fn row re-emits")
+                      (is (= (:seon.fn/spec expected) (:seon.fn/spec healed))
+                          "re-emitted with the LIVE var-meta spec, not the stale one")
+                      (is (not= stale (:seon.fn/spec healed))
+                          "the stale spec is gone from the re-emitted row")
+                      ;; (b) GUARD
+                      (is (nil? (fresh-fn guarded tx))
+                          "an agent-origin row with a core sym is NEVER re-emitted over")
+                      ;; (c) RETRACT — dynamic: any unspecced fn in the fresh
+                      ;; index (private helpers are indexed, so one exists).
+                      (if-some [unspecced (:seon.fn/sym
+                                            (first (remove #(or (contains? % :seon.fn/spec)
+                                                                (nil? (:seon.fn/sym %)))
+                                                           @core-tx)))]
+                        (-> (db/transact! conn
+                                          [{:seon.fn/sym  unspecced
+                                            :seon.fn/spec stale}]
+                                          {:seon.db/origin :core-seed})
+                            (.then (fn [_] (client/core-index-tx conn)))
+                            (.then
+                              (fn [tx2]
+                                (is (some #(= % [:db/retract [:seon.fn/sym unspecced]
+                                                 :seon.fn/spec stale])
+                                          tx2)
+                                    "a stale spec on a now-unspecced fn is explicitly retracted")
+                                (done*))))
+                        (do (is true "no unspecced core fn in this build — retract case skipped")
+                            (done*)))))))))
+        (.catch (fn [e]
+                  (is false (str "fn-drift test threw: " (or (.-message e) e)))
+                  (done*)))))))

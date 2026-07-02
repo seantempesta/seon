@@ -1759,19 +1759,71 @@
    full set; on the SECOND and Nth boot (a second `start-agent!` on the shared
    `*conn*`, or a reconnect to a persistent store that already holds the
    core index) it returns ONLY rows whose `:seon.fn/sym` / `:seon.ns/name`
-   identity is absent — typically `[]`.
+   identity is absent or whose stored fields have DRIFTED from the freshly
+   derived ones — typically `[]`.
 
    Querying the conn's CURRENT identity set and emitting only the gap means a
    re-index never re-transacts a core row against the populated store —
    removing the re-seed interaction that the Run-3 findings traced to a
-   malformed `:seon.fn/ns` value. Returns a Promise of the tx-data vector."
+   malformed `:seon.fn/ns` value.
+
+   DRIFT-HEALING is uniform across every row kind: a stored row re-emits
+   whenever ANY freshly-derived field differs from what the store holds —
+   `:seon.ns/source`, `:seon.schema/source`, `:seon.test/source`, and for
+   `:seon.fn` rows the WHOLE derived set (source, spec, doc, arglists,
+   private?). Identity upsert re-asserts the changed datoms in place; a
+   spec that DISAPPEARED from the live var meta is explicitly retracted
+   (upsert can't remove a datom). Fn/test re-emits are provenance-guarded
+   the same way [[prune-core-ghosts!]] is: only rows whose `:source`
+   datom's tx carries `:seon.db/origin :core-seed` are overwritten — an
+   agent-authored row (detect-and-tee, runner) with a core sym is NEVER
+   clobbered by the boot index. Returns a Promise of the tx-data vector."
   {:malli/schema [:=> [:catn [::conn :any]] :any]}
   [conn]
   (let [all       (concat (index-core!)
                           (index-schemas)
                           (index-tests))
         db        (await (d/db conn))
-        have-fns  (into #{} (map first) (d/q '[:find ?sym :where [?f :seon.fn/sym ?sym]] db))
+        ;; Fn rows dedup on sym AND every derived field. Sym-only dedup was
+        ;; the stale-spec bug (live incident 2026-07-02: seon.agent.shell's
+        ;; rows kept a first-index :seon.shell/* spec forever because the
+        ;; changed row was dropped whenever the sym already existed). The
+        ;; "" sentinel marks an absent :seon.fn/spec — a real pr-str'd
+        ;; Malli form is never empty.
+        fn-fields (fn [row]
+                    {:seon.fn/source   (:seon.fn/source row)
+                     :seon.fn/spec     (get row :seon.fn/spec "")
+                     :seon.fn/doc      (:seon.fn/doc row)
+                     :seon.fn/arglists (:seon.fn/arglists row)
+                     :seon.fn/private? (:seon.fn/private? row)})
+        have-fns  (into {}
+                        (map (fn [[sym src spec doc args priv]]
+                               [sym {:seon.fn/source   src
+                                     :seon.fn/spec     spec
+                                     :seon.fn/doc      doc
+                                     :seon.fn/arglists args
+                                     :seon.fn/private? priv}]))
+                        (d/q '[:find ?sym ?src ?spec ?doc ?args ?priv
+                               :where
+                               [?f :seon.fn/sym ?sym]
+                               [?f :seon.fn/source ?src]
+                               [(get-else $ ?f :seon.fn/spec "") ?spec]
+                               [(get-else $ ?f :seon.fn/doc "") ?doc]
+                               [(get-else $ ?f :seon.fn/arglists "") ?args]
+                               [(get-else $ ?f :seon.fn/private? false) ?priv]]
+                             db))
+        ;; The core-claimed syms — rows whose :source datom's tx carries the
+        ;; boot-index provenance. Only these may be drift-overwritten.
+        core-syms (into #{} (map first)
+                        (d/q '[:find ?sym
+                               :where
+                               (or-join [?sym ?tx]
+                                 (and [?f :seon.fn/sym ?sym]
+                                      [?f :seon.fn/source _ ?tx])
+                                 (and [?f :seon.test/sym ?sym]
+                                      [?f :seon.test/source _ ?tx]))
+                               [?tx :seon.db/origin :core-seed]]
+                             db))
         ;; ns rows dedup on name AND source: a `:seon.ns` row re-emits when
         ;; its stored `:seon.ns/source` differs from the freshly-built one —
         ;; this keeps the stored source tracking the build (e.g. a my.*
@@ -1798,17 +1850,41 @@
                                   [?s :seon.schema/key ?k]
                                   [?s :seon.schema/source ?src]]
                                 db))
-        have-tsts (into #{} (map first) (d/q '[:find ?t :where [?e :seon.test/sym ?t]] db))]
-    (vec (remove (fn [row]
-                   (or (contains? have-fns  (:seon.fn/sym row))
-                       (and (contains? row :seon.ns/name)
-                            (= (get have-nses (:seon.ns/name row))
-                               (:seon.ns/source row)))
-                       (when-some [stored (get have-schs (:seon.schema/key row))]
-                         (or (= stored (:seon.schema/source row))
-                             (seval/registration-call-source? stored)))
-                       (contains? have-tsts (:seon.test/sym row))))
-                 all))))
+        ;; Test rows dedup on sym AND source (same drift rule as ns rows).
+        have-tsts (into {} (d/q '[:find ?t ?src
+                                  :where
+                                  [?e :seon.test/sym ?t]
+                                  [?e :seon.test/source ?src]]
+                                db))
+        kept      (vec (remove
+                         (fn [row]
+                           (or (when-some [stored (get have-fns (:seon.fn/sym row))]
+                                 (or (= stored (fn-fields row))
+                                     (not (contains? core-syms (:seon.fn/sym row)))))
+                               (and (contains? row :seon.ns/name)
+                                    (= (get have-nses (:seon.ns/name row))
+                                       (:seon.ns/source row)))
+                               (when-some [stored (get have-schs (:seon.schema/key row))]
+                                 (or (= stored (:seon.schema/source row))
+                                     (seval/registration-call-source? stored)))
+                               (when-some [stored (get have-tsts (:seon.test/sym row))]
+                                 (or (= stored (:seon.test/source row))
+                                     (not (contains? core-syms (:seon.test/sym row)))))))
+                         all))
+        ;; A drifted fn row whose FRESH derivation is unspecced while the
+        ;; stored row carries a spec: identity upsert re-asserts the other
+        ;; fields but can't REMOVE a datom — retract the stale spec
+        ;; explicitly so PRESENT ⇒ specced stays honest.
+        retracts  (into []
+                        (keep (fn [row]
+                                (when-some [sym (:seon.fn/sym row)]
+                                  (let [stored-spec (get-in have-fns [sym :seon.fn/spec])]
+                                    (when (and (not (contains? row :seon.fn/spec))
+                                               (seq stored-spec))
+                                      [:db/retract [:seon.fn/sym sym]
+                                       :seon.fn/spec stored-spec])))))
+                        kept)]
+    (into kept retracts)))
 
 (defn ^:async prune-core-ghosts!
   "Boot-index GC (open-issues 2026-06-11, agent-reported row 5): retract
