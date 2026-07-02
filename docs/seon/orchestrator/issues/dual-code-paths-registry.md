@@ -59,7 +59,7 @@ dual code paths — track everything and fix it"). Rules:
 | M3 | SCI silent unbounded fallback | `6f96b024` — SCI cage bounds every my.* render fn, fail-loud, unbounded fallback GONE (eval lane) |
 | C12 | `~/src/datahike` duplicate checkout | verified-no-unique-work, deleted; bundle at tmp/datahike-salvage/; fork workflow rules in memory |
 | F0 | Fork planner collect-field silent `#{}` | fork `da257d38` + seon `41c1b9b2`, live-proven; skills caveats removed `556fa779` |
-| M12 | Dormant replica-peer harness pinning dead polling ops | `03e1ce3e`+`a74e3e88` — Stage A/B harness (replica-peer/probe nses, probe/ drivers, 2 deps.edn aliases, 2 shadow builds) DELETED and the subscribe-tx/next-tx-event/unsubscribe-tx handle-ops + bounded-queue machinery it was the last consumer of removed; pub-socket push + `replay-tx` is the ONE feed; findings preserved in datahike-native-replica-2026-06-09.md; recoverable at `2ef14d1276` |
+| H1 | Dormant replica-peer harness pinning dead polling ops | `03e1ce3e`+`a74e3e88` — Stage A/B harness (replica-peer/probe nses, probe/ drivers, 2 deps.edn aliases, 2 shadow builds) DELETED and the subscribe-tx/next-tx-event/unsubscribe-tx handle-ops + bounded-queue machinery it was the last consumer of removed; pub-socket push + `replay-tx` is the ONE feed; findings preserved in datahike-native-replica-2026-06-09.md; recoverable at `2ef14d1276` |
 | C11 | `transient-ns-syms` restated ns defs | `dada1ff9` — set derived from the single defs; value-identical, live-verified |
 | C13 | "Redundant" per-entry origin claims in eval.cljs | CLOSED AS DESIGNED (`dada1ff9` report) — live-FALSIFIED: the `:agent` claim is a load-bearing narrowing inside `run-turn!`'s `:system` context; removal flips every eval tx to `:system`. Do NOT retry |
 
