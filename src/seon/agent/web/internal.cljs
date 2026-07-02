@@ -394,12 +394,15 @@
                   (recur (str acc (.decode dec value #js {:stream true})) (+ total len)))))))))))
 
 (defn ^:async transport
-  "Follow redirects (capped, SSRF-re-checked per hop) to a final 2xx
-   response and read its body (text-ish content only, capped). Returns a
-   clj map: an ok?-false [[err]] envelope for a blocked host, DNS failure,
-   timeout, bad scheme, redirect problem, or non-2xx; an ok?-true map
-   {::status ::final-url ::content-type ::lane ::body ::truncated?} for
-   a text-ish 2xx; the same with ::binary? true (no body) for binary."
+  "Follow redirects (capped, SSRF-re-checked per hop) to a final response
+   and read its body (text-ish content only, capped). Any COMPLETED
+   response — 2xx or not — is ok? true: the fetch RAN and ::status carries
+   the real code (a 404 error page still has a body worth reading). Returns
+   a clj map: an ok?-false [[err]] envelope only for a genuine transport
+   failure (blocked host, DNS failure, timeout, bad scheme, redirect
+   problem); an ok?-true map {::status ::final-url ::content-type ::lane
+   ::body ::truncated?} for a text-ish response; the same with ::binary?
+   true (no body) for binary."
   [url timeout-ms max-bytes max-redirects]
   (loop [current url, hops 0, visited #{}]
     (let [parsed (try (js/URL. current) (catch :default _ nil))]
@@ -466,11 +469,6 @@
                                 (nil? nxt)             (err url (str "unfollowable redirect location: " (pr-str loc)))
                                 (contains? visited nxt) (err url "redirect loop detected.")
                                 :else                   (recur nxt (inc hops) (conj visited nxt)))))))
-
-                    (not (<= 200 status 299))
-                    (err url (str "server returned HTTP " status " — the fetch reached "
-                                  "the server but it did not return a success status.")
-                         {::web/status status ::web/final-url current})
 
                     :else
                     (let [ct   (some-> (.-headers resp) (.get "content-type"))

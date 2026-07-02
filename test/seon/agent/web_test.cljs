@@ -10,8 +10,9 @@
       blob-hash pages the WHOLE doc via my.blob/text.
    2. SSRF: a loopback/private-range URL is refused BEFORE any transport;
       a redirect that LANDS on a private range is refused on that hop.
-   3. A non-2xx status is an error value (the server was reached but did
-      not succeed).
+   3. A non-2xx status is ok? true with the real status — the fetch RAN
+      (the shell ok?-means-RAN precedent); only a genuine transport
+      failure (thrown/rejected fetch) is an error value.
    4. Binary content is a legible refusal naming the content-type.
    5. An oversized body is read up to the byte cap with :truncated? true.
 
@@ -192,22 +193,45 @@
       done)))
 
 ;; ---------------------------------------------------------------------------
-;; 3. Non-2xx — an error value, the server was reached but failed.
+;; 3a. Non-2xx — ok? true with the real status: the fetch RAN and the error
+;; page's body is a valid result (the shell ok?-means-RAN precedent).
 ;; ---------------------------------------------------------------------------
 
-(deftest non-2xx-is-an-error-value
+(deftest non-2xx-is-ok-with-status
   (async done
     (reset! int/!lookup-impl (public-dns))
     (reset! int/!fetch-impl
-            (fake-fetch (fn [_] (js/Response. "not found" #js {:status 404
-                                                               :headers #js {"content-type" "text/html"}}))))
+            (fake-fetch (fn [_] (js/Response. "<html><body><p>not found here</p></body></html>"
+                                              #js {:status 404
+                                                   :headers #js {"content-type" "text/html"}}))))
     (run-test
       (fn [_]
         (-> (web/fetch {:seon.agent.web/url "https://example.com/missing"})
+            (.then (fn [{ok?     :seon.agent.web/ok?
+                         status  :seon.agent.web/status
+                         preview :seon.agent.web/preview}]
+                     (is (true? ok?) "the fetch RAN — a 404 is a result, not an error")
+                     (is (= 404 status) "the real status rides the success envelope")
+                     (is (string? preview) "the error page's body is extracted + previewed")
+                     (is (str/includes? preview "not found") "the 404 body content came through")))))
+      done)))
+
+;; ---------------------------------------------------------------------------
+;; 3b. A genuine transport failure (rejected fetch) — still an error value.
+;; ---------------------------------------------------------------------------
+
+(deftest transport-failure-is-an-error-value
+  (async done
+    (reset! int/!lookup-impl (public-dns))
+    (reset! int/!fetch-impl
+            (fn [_ _] (js/Promise.reject (js/Error. "ECONNREFUSED 93.184.216.34:443"))))
+    (run-test
+      (fn [_]
+        (-> (web/fetch {:seon.agent.web/url "https://example.com/down"})
             (.then (fn [{ok? :seon.agent.web/ok?
                          msg :seon.error/message}]
-                     (is (false? ok?))
-                     (is (str/includes? msg "404") "the status is named")))))
+                     (is (false? ok?) "could not fetch at all — the error envelope")
+                     (is (str/includes? msg "ECONNREFUSED") "the transport error is named")))))
       done)))
 
 ;; ---------------------------------------------------------------------------

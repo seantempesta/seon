@@ -232,13 +232,15 @@
   "Fetch a URL; extract to markdown; blob the full text; return a preview.
 
    `^:async` — resolves to a :seon.agent.web/fetch-response, NEVER rejects
-   (errors are values). ok? true = the fetch landed a 2xx and content was
-   extracted + blobbed; the preview is capped at
-   :seon.agent.web/max-preview-tokens (default 2000) with HONEST totals, so
-   page the whole doc via (my.blob/text {:my.blob/hash blob-hash}). ok?
-   false = could not fetch (default-deny/SEON_WEB, blocked private range on
-   any hop, DNS failure, timeout, redirect cap, non-2xx, or binary content
-   refused) — a guiding :seon.error/message, never a throw.
+   (errors are values). ok? true = the fetch RAN to a final response and
+   content was extracted + blobbed — a non-2xx (404, 500, …) is a
+   legitimate result: read :seon.agent.web/status yourself. The preview is
+   capped at :seon.agent.web/max-preview-tokens (default 2000) with HONEST
+   totals, so page the whole doc via (my.blob/text {:my.blob/hash
+   blob-hash}). ok? false = COULD NOT FETCH AT ALL (default-deny/SEON_WEB,
+   blocked private range on any hop, DNS failure, timeout, redirect cap,
+   or binary content refused) — a guiding :seon.error/message, never a
+   throw.
 
    Dials (all optional): :seon.agent.web/timeout-ms (30000),
    :seon.agent.web/max-bytes (2000000, streamed cap → :truncated? true),
@@ -325,7 +327,7 @@
                     title            (assoc ::title title)
                     (seq links)      (assoc ::links links)
                     (< total 40)     (assoc ::hint (str "extracted only ~" total
-                                                        " tokens on a 2xx page — it may be "
+                                                        " tokens — the page may be "
                                                         "script-rendered; a browser tier is "
                                                         "needed for JS-built content."))))))))))
     (catch :default e
