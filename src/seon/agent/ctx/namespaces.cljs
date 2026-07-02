@@ -1,51 +1,39 @@
 (ns seon.agent.ctx.namespaces
-  "The `:namespaces` context section — THE BODY of the prompt: a CURATED FULL
-   set plus the long tail as COMPACT CARDS. Each rendered ns is a comment-block
-   delimited by per-ns `;;; ┌─ namespace x ─` / `;;; └─ end namespace x ─`
-   brackets ([[seon.agent.ctx/ns-demarc]]). A ns renders EITHER its REAL FULL
-   FILE SOURCE (unclipped) OR a compact card (its `register!` block + one-line
-   `defn` heads, body elided) — the split is per-agent config
-   ([[namespaces-block]]). The CURATED FULL set:
+  "The `:namespaces` context section — THE BODY of the prompt. COMPACT
+   EVERYTHING EXCEPT THE CURRENT NS: no hardcoded namespace list, no `my.*`
+   pinning, no `:always` allow-list. THREE rules, nothing else
+   ([[namespaces-block]]):
 
-     - the agent's CURRENT ns — its complete working code (unless the config
-       policy sets `:seon.config/current-ns :off`);
-     - every ns in the config `:seon.config/always` list
-       ([[seon.config/namespaces-policy]]) — the `my.*` toolkit exemplars
-       (`my.kb`/`my.data`/`my.ui`/`my.tile`) plus the core verb nses
-       (`seon.agent.todo`/`seon.agent.message`/`seon.agent.lifecycle`);
-     - the non-third-party nses the CURRENT ns `:require`s that carry stored
-       full source ([[full-source-ns?]]) — so writing a real `(:require …)`
-       pulls a helper into view, self-healing on the `:seon.ns/requires` edges
-       (drop the require → it leaves the set);
-     - every THIRD-PARTY ns — non-seon, non-my (the `SEON_EXTRA_SRC` `acme`
-       business logic the agent needs whole);
-     - the per-agent LIVE-DB override set ([[db-render-set]] —
-       `:seon.agent.ctx/render-namespaces` datoms): transact a ns keyword onto
-       the agent → it renders full next turn; retract → it vanishes.
+     - FULL — the agent's CURRENT ns (its complete working code) PLUS any ns in
+       the per-agent `::full-source` presence-set. Nothing else renders full.
+       The current ns is gated by the `::current-full?` flag (default true).
+     - COMPACT CARD — every ns the CURRENT ns `:require`s (ALL of them), that
+       isn't already full: its `register!` block + one-line `defn` heads (body
+       elided). Self-healing on the `:seon.ns/requires` edges — write a real
+       `(:require [x …])` and `x` joins as a card; drop the require → it
+       vanishes ([[render-one-ns-compact]]).
+     - DROPPED — everything else. Still INDEXED (its `:seon.ns/name` +
+       `:seon.fn` / `:seon.schema` / `:seon.test` rows) and readable in FULL on
+       demand via [[seon.agent.ctx/render-namespace]], just not resident in the
+       section. `*.internal` / `*-test` and empty cards are always omitted.
 
-   The agent's VERB SURFACE that isn't full — the `my.*` toolkit long tail +
-   every `seon.agent.*` verb ns ([[compact-worthy?]]) — renders as a COMPACT
-   CARD ([[render-one-ns-compact]]): the whole callable surface, body elided.
-   The DEEP framework bulk (`seon.db` / `seon.eval` / `seon.web.*` /
-   `seon.render.*` / `seon.handlers.*` / …) stays searchable-only — DROPPED
-   from the section, still INDEXED (its `:seon.ns/name` + `:seon.fn` /
-   `:seon.schema` / `:seon.test` rows) and readable in FULL on demand via
-   [[seon.agent.ctx/render-namespace]]. (The compact scope is a measured token
-   budget: all-cards balloons the section ~2.75×; the agent-facing scope holds
-   it to ~1.5×.) `*.internal` / `*-test` and empty cards are always omitted.
+   Each rendered ns is a comment-block delimited by per-ns
+   `;;; ┌─ namespace x ─` / `;;; └─ end namespace x ─` brackets
+   ([[seon.agent.ctx/ns-demarc]]).
 
    Symbol-wired into the composer layout (`seon.agent.ctx/default-seed-blocks`) as
    `'seon.agent.ctx.namespaces/namespaces-block`; loaded at boot so the
    symbol resolves for `seon.eval/lookup-value`.
 
-   The section NEVER re-reads files at render time (code-as-data): the
-   boot indexer (`seon.client/ns-row`) is the ONE file-reader, and it
-   stores the REAL full file text for exactly the nses rendered full
-   (the same [[full-source-ns?]] rule + the extra-src roots),
-   leaving the framework bulk a `(ns x)` stub — which this section never
-   renders (those nses are dropped from the body; the stub still feeds the
-   on-demand `render-namespace` path). So the full rows here are always
-   real file source, never a reconstructed stub."
+   The section NEVER re-reads files at render time (code-as-data): the boot
+   indexer (`seon.client/ns-row`) is the ONE file-reader. It stores the REAL
+   full file text for the nses that CAN render full ([[full-source-ns?]] — the
+   BOOT-STORAGE rule, all `my.*` incl. the agent's home ns + the config
+   `:always` nses + the extra-src roots) and leaves the rest a `(ns x)` stub.
+   Boot storage is a SUPERSET of what any one agent renders full — it governs
+   WHICH source is available, not the per-agent SELECTION above. So a full row
+   here is always real file source; a compact card reads only indexed
+   fn/schema rows (no stored source needed)."
   (:require
     [cljs.reader :as edn]
     [clojure.string :as str]
@@ -85,12 +73,18 @@
 (schema/register! ::current-tests? [:boolean {:default true}])           ; …and its current ns shows its tests
 
 ;; ============================================================
-;; The namespace-display selection rules — the ONE home for which
-;; indexed :seon.ns rows render, and which render in FULL. Shared by
-;; the boot indexer (`seon.client/ns-row`, the one file reader) and
-;; [[namespaces-block]] (the curated namespaces prompt body):
-;; one rule, one writer, no drift. Pure string/keyword/symbol fns —
-;; no dependency on anything in `seon.agent.ctx`.
+;; The namespace-display rules. Two SEPARATE concerns, both pure
+;; string/keyword/symbol fns (no dependency on anything in `seon.agent.ctx`):
+;;
+;;   - WHICH rows are indexable/renderable at all — [[included-ns?]]
+;;     (`*.internal` / `*-test` excluded). Shared by the boot indexer and
+;;     [[namespaces-block]].
+;;   - The BOOT-STORAGE rule — [[full-source-ns?]] — which rows the boot
+;;     indexer (`seon.client/ns-row`, the one file reader) stores REAL FULL
+;;     FILE TEXT for, so they CAN be rendered full later. A SUPERSET of what
+;;     any one agent renders full; it does NOT drive per-agent SELECTION
+;;     (that is [[namespaces-block]]'s three-rule model: current ∪ requires
+;;     ∪ ::full-source).
 ;; ============================================================
 
 (defn hidden-ns-name?
@@ -151,22 +145,21 @@
 
 (defn- always-full?
   "True when `ns-name` (string/keyword/symbol) is in the resolved config
-   policy's `:seon.config/always` set — the EXPLICIT list of nses rendered
-   FULL (#42, [[seon.config/namespaces-policy]]). Replaces the retired
-   hardcoded `full-source-whitelist`/`canonical-full-my-ns`: the boot indexer
-   (`seon.client/ns-row`) and the renderer share this ONE decision. The policy
-   read is memoized — no per-call file read."
+   policy's `:seon.config/always` set. BOOT-STORAGE only ([[full-source-ns?]]):
+   the boot indexer stores these nses' real file source so a per-agent
+   `::full-source` pin CAN promote them to full. It does NOT itself render
+   anything full — per-agent SELECTION lives in [[namespaces-block]]. The
+   policy read is memoized — no per-call file read."
   [ns-name]
   (contains? (:seon.config/always (config/namespaces-policy))
              (if (keyword? ns-name) ns-name (keyword (str ns-name)))))
 
 (defn always-full-my-nses
-  "The `my.*` namespaces the resolved config policy renders FULL.
-
-   The toolkit exemplars (`my.kb`/`my.data`/`my.ui`/`my.tile` by default): the `my.*`
-   members of [[seon.config/namespaces-policy]]'s `:seon.config/always` set.
-   DERIVED from config, never hardcoded — replaces the retired
-   `canonical-full-my-ns` const for the gym's toolkit-alias derivation."
+  "The `my.*` members of the config `:seon.config/always` set (the toolkit
+   exemplars `my.kb`/`my.data`/`my.ui`/`my.tile` by default). DERIVED from
+   config, never hardcoded. NOT a render-selection input (the `:namespaces`
+   section no longer pins `:always`); used by the GYM harness
+   (`seon.gym.driver`) to derive the toolkit aliases it seeds."
   {:malli/schema [:=> [:cat] [:set :keyword]]}
   []
   (into #{} (filter my-ns-name?) (:seon.config/always (config/namespaces-policy))))
@@ -179,12 +172,13 @@
    `-test` suffix is stripped to the subject ns first), AND every seon.* ns
    the config policy lists in `:seon.config/always` ([[always-full?]] — e.g.
    `:seon.agent.todo`, so its REAL body is stored). Used by the boot indexer
-   (`seon.client/ns-row`) to decide which rows get the file read; the SAME
-   rule decides which rows [[namespaces-block]] renders FULL — one rule, one
-   writer, no drift. Third-party (`acme`) roots are full-source too, gated
-   separately by `seon.client/extra-src-ns-strs` (the same file read). Every
-   other ns gets the minimal `(ns x)` stub at boot and is DROPPED from the
-   rendered section (still indexed + searchable)."
+   (`seon.client/ns-row`) to decide which rows get the file read: it stores
+   source for a SUPERSET of what any one agent renders full, so a per-agent
+   `::full-source` pin (or the current ns) has real source to show. It does
+   NOT drive per-agent SELECTION — that is [[namespaces-block]]'s three-rule
+   model. Third-party (`acme`) roots are full-source too, gated separately by
+   `seon.client/extra-src-ns-strs` (the same file read). Every other ns gets
+   the minimal `(ns x)` stub at boot (still indexed + searchable)."
   {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
   [ns-name]
   (let [s    (if (keyword? ns-name) (name ns-name) (str ns-name))
@@ -193,82 +187,28 @@
                   (or (my-ns-name? base)
                       (always-full? base))))))
 
-(defn- third-party-ns?
-  "A render-time structural rule: an included ns that is NEITHER `seon.*`
-   framework NOR `my.*` is THIRD-PARTY business logic (the `acme`
-   `SEON_EXTRA_SRC` code) — rendered FULL, no clipping, like the human's own
-   `my.*` world. String/keyword tolerant. (Genuine third-party only — `my.*`
-   is selected via the curated full set / current ns / requires, NOT here, so
-   a non-reachable `my.*` ns correctly falls to the navigable long tail.)"
-  [ns-name]
-  (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
-    (and (not (str/starts-with? s "seon."))
-         (not (my-ns-name? s)))))
-
 (defn- seon-framework-ns?
   "True when `ns-name` (string/keyword/symbol) is a `seon.*` framework ns —
-   used to route a STABLE always/required ns into the name-sorted cache PREFIX
-   vs the recency BODY (the agent's churning my.* / current / db-override nses)."
+   used to route a STABLE seon.* required ns into the name-sorted cache PREFIX
+   vs the recency BODY (the agent's churning my.* / current ns)."
   [ns-name]
   (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
     (str/starts-with? s "seon.")))
 
-(defn- compact-worthy?
-  "True when an included-but-not-full ns should render as a COMPACT CARD (vs
-   stay DROPPED / searchable-only). STRUCTURAL, mirroring [[my-ns-name?]] /
-   [[seon-framework-ns?]]: the agent's VERB SURFACE — the `my.*` toolkit long
-   tail + every `seon.agent.*` verb ns — the code the agent actually CALLS. The
-   DEEP framework (`seon.db` / `seon.eval` / `seon.web.*` / `seon.render.*` /
-   `seon.handlers.*` / `seon.ai` / `seon.config` / `seon.schema` / …) stays
-   searchable-only: an agent reaches it by grep / [[seon.agent.ctx/render-namespace]],
-   not by a resident card.
-
-   SCOPE-as-token-budget (measured): all-82-cards balloons the section 2.75×;
-   this agent-facing scope holds it to ~1.5× while still surfacing the whole
-   callable surface. WIDEN/NARROW here — this predicate is the lever."
-  {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
-  [ns-name]
-  (let [s (if (keyword? ns-name) (name ns-name) (str ns-name))]
-    (boolean (or (my-ns-name? s)
-                 (str/starts-with? s "seon.agent")))))
-
-(defn- db-render-set
-  "The per-agent LIVE-DB render override — the set of ns-name keywords the
-   agent (or a human, or another agent) has transacted onto its own row via
-   `:seon.agent.ctx/render-namespaces` (cardinality-many). Pure fn of the DB:
-   add a datom → the ns joins the rendered set next turn; retract → it leaves.
-   Derive-at-render, no stored projection. nil id (inspector path) → empty."
-  [db id]
-  (if-not id
-    #{}
-    (into #{}
-          (map first)
-          (db/query
-            {:seon.db/db db
-             :seon.db/query
-             '[:find ?ns
-               :in $ ?id
-               :where
-               [?a :seon.agent/id ?id]
-               [?a :seon.agent.ctx/render-namespaces ?ns]]
-             :seon.db/args [id]}))))
-
-(defn- required-full-set
-  "The non-third-party nses the CURRENT ns `:require`s that carry stored FULL
-   source ([[full-source-ns?]]) — so a real `(:require [my.helper …])` pulls
-   that helper into the rendered set. GATED on `full-source-ns?` so a require
-   of an infra ns with only a `(ns x)` stub (e.g. `seon.db`/`seon.schema`) is
-   NOT dumped: infra is reached via grep / `render-namespace`, never inlined
-   whole. Self-healing on the `:seon.ns/requires` edges — drop the require → it
-   leaves the set. Empty when `cur-ns` is nil."
+(defn- required-ns-set
+  "The nses the CURRENT ns `:require`s — ALL of them (no full-source gate),
+   each rendered as a COMPACT CARD. Pure fn of the DB: a real
+   `(:require [x …])` on the current ns pulls `x` into context as a card; drop
+   the require → it leaves the set (self-healing on the `:seon.ns/requires`
+   edges). `*.internal` / `*-test` are excluded ([[included-ns?]]); non-keyword
+   rows are skipped. Empty when `cur-ns` is nil."
   [db cur-ns]
   (if-not cur-ns
     #{}
     (into #{}
           (comp (map first)
                 (filter keyword?)
-                (filter included-ns?)
-                (filter full-source-ns?))
+                (filter included-ns?))
           (db/query
             {:seon.db/db db
              :seon.db/query
@@ -281,20 +221,17 @@
 
 (defn- full?
   "True when an included ns `nm` renders FULL (its whole real source); false
-   means it renders as a COMPACT CARD ([[render-one-ns-compact]]). Every
-   included ns now renders one way or the other — the old full-or-DROP gate is
-   gone; the long tail is compact cards, not omitted.
+   means it renders as a COMPACT CARD ([[render-one-ns-compact]]). ONE rule, no
+   second full control:
 
-   FULL when `nm` is a member of the curated `full-set` (config `:always` ∪ the
-   current ns's required-full helpers ∪ the live-DB override ∪ the per-agent
-   `::full-source` presence-set override), is THIRD-PARTY (`acme`) code, or is
-   the agent's CURRENT ns — the current ns honoring both the config policy's
-   `:current-ns` dial (`:off` drops it to compact) and the per-agent
-   `::current-full?` flag. Everything else renders compact."
-  [policy nm cur-ns full-set current-full?]
+     full? ⇔ (nm = current-ns ∧ ::current-full?) ∨ (nm ∈ ::full-source)
+
+   The current ns honors the per-agent `::current-full?` flag (default true)
+   and the config policy's `:current-ns` off-switch (`:off` → compact). Every
+   OTHER included ns — the current ns's `:require`s — renders compact."
+  [policy nm cur-ns full-source current-full?]
   (boolean
-    (or (contains? full-set nm)
-        (third-party-ns? nm)
+    (or (contains? full-source nm)
         (and (= nm cur-ns)
              current-full?
              (not= :off (:seon.config/current-ns policy))))))
@@ -336,12 +273,15 @@
    `:seon.test` rows. Code-as-data: reads the stored `:seon.test/source`
    (keyed off the subject ns via `:seon.test/_ns`), never a file read. Drives
    the `::with-tests` presence-set (an ns in the set → its tests ride along)
-   and the current ns's `::current-tests?` flag."
+   and the current ns's `::current-tests?` flag. nil when the ns has no
+   `:seon.ns/name` entity (a brand-new current ns not yet indexed — `db/pull`
+   would throw on the missing lookup ref)."
   [db nm]
-  (let [tests (->> (db/pull {:seon.db/db db
-                             :seon.db/ref [:seon.ns/name nm]
-                             :seon.db/pull-pattern
-                             '[{:seon.test/_ns [:seon.test/sym :seon.test/source]}]})
+  (let [tests (->> (when (db/entity-lazy {:seon.db/db db :seon.db/ref [:seon.ns/name nm]})
+                     (db/pull {:seon.db/db db
+                               :seon.db/ref [:seon.ns/name nm]
+                               :seon.db/pull-pattern
+                               '[{:seon.test/_ns [:seon.test/sym :seon.test/source]}]}))
                    :seon.test/_ns
                    (sort-by :seon.test/sym))
         srcs  (keep (fn [{:seon.test/keys [source]}]
@@ -385,36 +325,44 @@
    members, unclipped.
 
    The agent's CURRENT ns (`cur-ns`) ALWAYS renders, even when empty: an
-   empty current ns becomes a [[cur-ns-workspace-stub]] (GI-2) so the
-   prompt's 'YOUR OWN namespace renders in full' promise holds. Every OTHER
-   ns with nothing real to show is omitted (nil) — the empty-store edge; the
-   boot indexer guarantees real text for every other selected row."
+   empty current ns becomes a [[cur-ns-workspace-stub]] (GI-2) so the prompt's
+   'YOUR OWN namespace renders in full' promise holds — this covers BOTH a home
+   ns with a `:seon.ns/name` row but no source AND one with NO row at all (a
+   brand-new agent whose home ns was never indexed;
+   [[seon.agent.ctx/render-namespace]] throws on the missing entity, so
+   short-circuit to the stub). Every OTHER ns with nothing real to show is
+   omitted (nil)."
   [db nm cur-ns]
-  (let [txt    (-> (ctx/render-namespace
-                     {:seon.ns/name       nm
-                      :seon.render/depth  0
-                      :seon.render/detail :full
-                      :seon.db/db         db})
-                   :seon.render/text
-                   str/trim)
-        ;; render-namespace brackets even an empty ns, whose body is then
-        ;; `; (no recorded source/fns/schemas)` (entity present, no
-        ;; source/members) or `; requires: x (not in db)` (the home ns —
-        ;; a :seon.ns/name row whose sparse pull returns nil). Both mean
-        ;; "nothing real to show."
-        empty? (or (str/blank? txt)
-                   (str/includes? txt "(no recorded source/fns/schemas)")
-                   (str/includes? txt "(not in db)"))]
-    (cond
-      (= nm cur-ns) (if empty? (cur-ns-workspace-stub db nm) txt)
-      empty?        nil
-      :else         txt)))
+  (if-not (db/entity-lazy {:seon.db/db db :seon.db/ref [:seon.ns/name nm]})
+    ;; No `:seon.ns/name` entity — the current ns still keeps its promise via
+    ;; the workspace stub; any other row with no entity is omitted.
+    (when (= nm cur-ns) (cur-ns-workspace-stub db nm))
+    (let [txt    (-> (ctx/render-namespace
+                       {:seon.ns/name       nm
+                        :seon.render/depth  0
+                        :seon.render/detail :full
+                        :seon.db/db         db})
+                     :seon.render/text
+                     str/trim)
+          ;; render-namespace brackets even an empty ns, whose body is then
+          ;; `; (no recorded source/fns/schemas)` (entity present, no
+          ;; source/members) or `; requires: x (not in db)` (the home ns —
+          ;; a :seon.ns/name row whose sparse pull returns nil). Both mean
+          ;; "nothing real to show."
+          empty? (or (str/blank? txt)
+                     (str/includes? txt "(no recorded source/fns/schemas)")
+                     (str/includes? txt "(not in db)"))]
+      (cond
+        (= nm cur-ns) (if empty? (cur-ns-workspace-stub db nm) txt)
+        empty?        nil
+        :else         txt))))
 
-(defn- render-one-compact
+(defn- compact-block
   "Render ns `nm` as a COMPACT CARD, or nil when the card would carry no real
-   content (a `; (nothing indexed)` / `; (not in db …)` stub) — those long-tail
-   nses with nothing indexed add noise, not signal, so they stay dropped
-   rather than emit an empty card. Delegates to [[render-one-ns-compact]]."
+   content (a `; (nothing indexed)` / `; (not in db …)` stub) — a required ns
+   with nothing indexed adds noise, not signal, so it stays dropped rather than
+   emit an empty card. The compact SIBLING of [[render-one]] (the full
+   wrapper); delegates to [[render-one-ns-compact]]."
   [db nm]
   (let [card (render-one-ns-compact {:seon.ns/name nm :seon.db/db db})]
     (when-not (or (str/includes? card "(nothing indexed)")
@@ -422,51 +370,36 @@
       card)))
 
 (defn namespaces-block
-  "The namespaces body — the CURATED FULL set plus the long tail as COMPACT
-   cards. EVERY included ns now renders one way or the other (the old
-   full-or-DROP gate is gone):
+  "The namespaces body. COMPACT EVERYTHING EXCEPT THE CURRENT NS — no hardcoded
+   list, no `my.*` pinning, no `:always` allow-list. THREE rules:
 
-     - the CURATED FULL set renders FULL — a `;;; ┌─ namespace x ─` / `;;; └─
-       end namespace x ─` bracketed block carrying its REAL FULL FILE SOURCE,
-       unclipped. The set: the config `:always` list (`my.*` toolkit + core
-       verb nses), the current ns + its required-full helpers, third-party
-       (`acme`) code, the per-agent live-DB override, AND the per-agent
-       `::full-source` presence-set. Bound by CURATION, never compression.
-     - the agent-facing VERB SURFACE that isn't full — the `my.*` toolkit long
-       tail + every `seon.agent.*` verb ns ([[compact-worthy?]]) — renders as a
-       COMPACT CARD ([[render-one-ns-compact]]): its `register!` schema block +
-       every public fn's one-line `defn` head (body elided), ~3–5× smaller than
-       full. So the agent sees its WHOLE callable surface as cards instead of
-       nothing. The DEEP framework bulk (`seon.db` / `seon.eval` / `seon.web.*`
-       / …) stays searchable-only — DROPPED, reachable via grep /
-       [[seon.agent.ctx/render-namespace]] — so the section doesn't balloon.
-       (`*.internal` / `*-test` excluded outright, [[included-ns?]]; empty
-       cards dropped.)
+     - FULL — the agent's CURRENT ns + any ns in the per-agent `::full-source`
+       presence-set. A `;;; ┌─ namespace x ─` / `;;; └─ end namespace x ─`
+       bracketed block carrying its REAL FULL FILE SOURCE, unclipped.
+     - COMPACT CARD — every ns the CURRENT ns `:require`s ([[required-ns-set]])
+       that isn't already full ([[render-one-ns-compact]]): its `register!`
+       schema block + every public fn's one-line `defn` head (body elided),
+       ~3–5× smaller than full. Self-healing on the `:seon.ns/requires` edges.
+     - DROPPED — everything else, reachable via grep /
+       [[seon.agent.ctx/render-namespace]]. (`*.internal` / `*-test` excluded
+       outright, [[included-ns?]]; empty cards dropped.)
 
-   FULL-vs-COMPACT is DRIVEN BY THE PER-AGENT CONFIG DIALS, read reactively off
-   the agent's `:namespaces` BLOCK entity, falling back to the agent datom,
-   then the malli default ([[resolve-cfg]], mirroring
-   [[seon.agent.ctx.live-tile/live-tile-block]] — a `db/transact!` re-derives
-   next render, no apply step):
+   DRIVEN BY THE PER-AGENT CONFIG DIALS, read reactively off the agent's
+   `:namespaces` BLOCK entity, falling back to the agent datom, then the malli
+   default ([[resolve-cfg]] — a `db/transact!` re-derives next render, no apply
+   step):
 
-     - `::full-source` — a presence-set of ns keywords to force FULL (added to
-       the curated full set);
+     - `::full-source` — a presence-set of ns keywords to force FULL;
      - `::current-full?` (default true) — whether the agent's CURRENT ns
        renders full (false → its compact card);
      - `::with-tests` — a presence-set of ns keywords whose indexed test SOURCE
        rides along under the ns's block; the current ns joins this set when
        `::current-tests?` (default true) is on.
 
-   ORDER: the STABLE `seon.*` nses (full or compact) render FIRST, name-sorted,
-   as a cache PREFIX; then the agent's churning BODY (my.* / current ns /
-   live-DB override / third party) ordered by RECENCY (tx of the
-   `:seon.ns/name` datom, name tie-break) so the stable core forms a stable
-   prefix and the churning ns sits nearest the tail.
-
-   CACHE TRADE: the live-DB override set ([[db-render-set]]) sits in this
-   CACHED-prefix block (priority ≤ 20). A DB-driven set that CHURNS busts the
-   provider prompt cache whenever it changes — acceptable for the deliberate,
-   rare navigation it serves (pin a ns, read it, unpin), not for per-turn flux.
+   ORDER: the STABLE `seon.*` required nses render FIRST, name-sorted, as a
+   cache PREFIX; then the agent's churning BODY (my.* / current ns) ordered by
+   RECENCY (tx of the `:seon.ns/name` datom, name tie-break) so the stable core
+   forms a stable prefix and the current ns sits nearest the tail.
 
    NEVER a render-time file read — the boot indexer is the one reader; both the
    full renderer and the compact card read only indexed rows."
@@ -501,49 +434,48 @@
         ;; ::with-tests members ∪ (the current ns when ::current-tests? is on).
         tests-set      (cond-> with-tests-cfg
                          (and cur-ns current-tests?) (conj cur-ns))
-        ;; The per-agent live-DB render override (queried once).
-        db-set   (db-render-set db id)
-        ;; The curated FULL set: config :always ∪ current-ns's required-full
-        ;; helpers ∪ the per-agent live-DB override ∪ the per-agent
-        ;; ::full-source presence-set. (THIRD-PARTY + current ns are decided
-        ;; per-row in [[full?]], not folded here.)
-        full-set (-> (:seon.config/always policy)
-                     (into (required-full-set db cur-ns))
-                     (into db-set)
-                     (into full-source-cfg))
-        ;; EVERY included ns row, recency-ordered. One :seon.ns/name datom
-        ;; per ns carries its tx.
-        rows   (->> (db/query
-                      {:seon.db/db db
-                       :seon.db/query
-                       '[:find ?nm ?tx
-                         :where
-                         [?n :seon.ns/name ?nm ?tx]]})
-                    (filter (fn [[nm _]] (included-ns? nm)))
-                    (sort-by (fn [[nm tx]] [tx (name nm)])))
-        ;; Every included row + its full? flag + PHASE: :prefix for a STABLE
-        ;; seon.* ns (name-sorted cache prefix); :body for the agent's churning
-        ;; nses (my.* / current / live-DB override / third party),
-        ;; recency-ordered nearest the tail.
+        ;; The nses the CURRENT ns :require's — each a COMPACT card.
+        required-set   (required-ns-set db cur-ns)
+        ;; The INCLUDE set — PURELY: the current ns ∪ its requires ∪ the
+        ;; per-agent ::full-source pins. Everything else is DROPPED.
+        include-set    (cond-> (into required-set full-source-cfg)
+                         cur-ns (conj cur-ns))
+        ;; The included ns rows, recency-ordered. One :seon.ns/name datom per
+        ;; ns carries its tx; filter to the include set.
+        scanned (->> (db/query
+                       {:seon.db/db db
+                        :seon.db/query
+                        '[:find ?nm ?tx
+                          :where
+                          [?n :seon.ns/name ?nm ?tx]]})
+                     (filter (fn [[nm _]] (and (included-ns? nm)
+                                               (contains? include-set nm))))
+                     (sort-by (fn [[nm tx]] [tx (name nm)])))
+        ;; The current ns ALWAYS renders (the "YOUR OWN namespace renders in
+        ;; full" promise — an empty home ns becomes a workspace stub in
+        ;; [[render-one]]). A fresh home ns (`my.agent.<id>`) may carry no
+        ;; `:seon.ns/name` row yet, so synthesize a tail row when the scan
+        ;; missed it.
+        rows   (if (and cur-ns (not (some (fn [[nm _]] (= nm cur-ns)) scanned)))
+                 (conj (vec scanned) [cur-ns js/Number.MAX_SAFE_INTEGER])
+                 scanned)
+        ;; Each row + its full? flag + PHASE: :prefix for a STABLE seon.*
+        ;; required ns (name-sorted cache prefix); :body for the agent's
+        ;; churning nses (my.* / current ns), recency-ordered nearest the tail.
         selected (mapv (fn [[nm _tx]]
                          (let [prefix? (and (not= nm cur-ns)
-                                            (seon-framework-ns? nm)
-                                            (not (contains? db-set nm)))]
+                                            (seon-framework-ns? nm))]
                            [nm
-                            (full? policy nm cur-ns full-set current-full?)
+                            (full? policy nm cur-ns full-source-cfg current-full?)
                             (if prefix? :prefix :body)]))
                        rows)
         ;; Render ONE row: full → render-one (omitted when empty); else a
-        ;; COMPACT card, but ONLY for the agent-facing verb surface
-        ;; ([[compact-worthy?]]) — the deep framework stays searchable-only
-        ;; (dropped) so the section doesn't balloon. A card is nil when
-        ;; nothing is indexed. Append the ns's indexed test source when it is
-        ;; in tests-set.
+        ;; COMPACT card (it is a required ns). A card is nil when nothing is
+        ;; indexed. Append the ns's indexed test source when it is in tests-set.
         render-row (fn [[nm full? _phase]]
-                     (when-let [block-txt (cond
-                                            full?                  (render-one db nm cur-ns)
-                                            (compact-worthy? nm)   (render-one-compact db nm)
-                                            :else                  nil)]
+                     (when-let [block-txt (if full?
+                                            (render-one db nm cur-ns)
+                                            (compact-block db nm))]
                        (str block-txt
                             (when (contains? tests-set nm)
                               (ns-tests-block db nm)))))
@@ -573,9 +505,8 @@
 ;; Every helper is errors-as-values: a bad row degrades one line, never
 ;; throws into the render.
 ;;
-;; WIRED into [[namespaces-block]]: the curated full set renders full, the
-;; long tail renders here as compact cards, driven by the per-agent
-;; block-entity presence-sets (`::full-source` / `::with-tests`).
+;; WIRED into [[namespaces-block]]: the current ns + `::full-source` pins
+;; render full, the current ns's `:require`s render here as compact cards.
 ;; ============================================================
 
 (defn- abbrev-ns-kws

@@ -150,258 +150,62 @@
     {:seon.db/tx-data [{:seon.ns/name   (keyword nm)
                         :seon.ns/source (str "(ns " nm ")\n" body)}]}))
 
-(deftest namespaces-block-curated-full-only
-  ;; CURATED render, FULL-ONLY (signatures retired): the config :always set
-  ;; (my.kb here) and genuine third-party acme.* render FULL — WHOLE source,
-  ;; UNCLIPPED. A my.* ns that is NOT in :always, NOT the current ns, and NOT
-  ;; required by it falls to the navigable LONG TAIL — DROPPED (the token
-  ;; budget is bound by CURATION, never by clipping authored code). Every
-  ;; seon.* framework ns not in :always is DROPPED too — indexed + searchable,
-  ;; just not shown.
-  (async done
-    (-> (with-conn
-          (fn [_conn]
-            ;; my.agent.a1 (my.*, NOT in :always, no current ns → long tail).
-            (-> (transact-full-ns! "my.agent.a1" "(defn helper [a] (inc a))")
-                ;; my.kb (config :always → FULL body).
-                (.then (fn [_] (transact-full-ns! "my.kb" "(def k 1)")))
-                ;; a genuine third-party acme ns (non-seon, non-my → FULL).
-                (.then (fn [_] (transact-full-ns! "acme.widget" "(def w 2)")))
-                ;; framework nses → DROPPED entirely. seon.client carries a
-                ;; faux body to PROVE the body is never rendered for a
-                ;; dropped ns.
-                (.then (fn [_] (transact-full-ns! "seon.client" "(def never-shown 3)")))
-                (.then (fn [_] (transact-ns-row! "seon.warn")))
-                ;; *.internal is excluded outright.
-                (.then (fn [_] (transact-ns-row! "seon.db.internal")))
-                (.then
-                  (fn [_]
-                    (let [txt (ctx-namespaces/namespaces-block {:seon.db/db @db/*conn*})]
-                      ;; FULL: a config :always my.* renders whole, unclipped.
-                      (is (str/includes? txt "(ns my.kb")
-                          "the :always my.kb renders")
-                      (is (str/includes? txt "(def k 1)")
-                          "its body is shown FULL (no clipping)")
-                      ;; FULL: genuine third-party acme renders its whole source.
-                      (is (str/includes? txt "(ns acme.widget")
-                          "a third-party acme ns renders")
-                      (is (str/includes? txt "(def w 2)")
-                          "the acme body is shown FULL (no clipping)")
-                      ;; LONG TAIL: a non-:always, non-current, non-required
-                      ;; my.* ns is DROPPED (curation, not clipping).
-                      (is (not (str/includes? txt "my.agent.a1"))
-                          "a non-reachable my.* ns falls to the navigable long tail")
-                      (is (not (str/includes? txt "(inc a)"))
-                          "its body is never rendered")
-                      ;; DROPPED: a framework ns is absent entirely.
-                      (is (not (str/includes? txt "(def never-shown 3)"))
-                          "a dropped ns's body is NEVER rendered")
-                      (is (not (str/includes? txt "seon.client"))
-                          "a dropped framework ns does not appear at all")
-                      (is (not (str/includes? txt "seon.warn"))
-                          "another dropped framework ns is absent")
-                      (is (not (str/includes? txt "seon.db.internal"))
-                          "*.internal never appears")
-                      ;; No signature manifest survives anywhere.
-                      (is (not (str/includes? txt "(signatures)"))
-                          "signatures are retired — no manifest view")))))))
-        (.then (fn [] (done)))
-        (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
+;; The block-level SELECTION model (FULL = current ns + ::full-source pins;
+;; COMPACT = the current ns's requires; DROPPED = everything else) is covered
+;; by seon.agent.ctx.namespaces-test. Here we keep only the current-ns
+;; workspace-stub promise, the *.internal/*-test structural exclusion, and the
+;; stable/volatile split.
 
-;; ------------------------------------------------------------
-;; No prefix allow-list — ALL indexed code renders (downstream `acme.*`
-;; included with NO config), *.internal + *-test structurally excluded.
-;; The library gate is on the INDEX side (only first-party/SEON_EXTRA_SRC
-;; code gets a :seon.ns row), so render-time selection is structural only.
-;; ------------------------------------------------------------
-
-(defn- transact-ns-with-test-member!
-  "An ns stub row PLUS one `:seon.test` (deftest) member only — a *-test
-   ns's natural shape. The ns is still excluded by the *-test structural
-   rule regardless; the member just makes it a real (non-bare-stub) row."
-  [nm]
-  (-> (transact-ns-row! nm)
-      (.then (fn [_]
-               (db/transact!
-                 {:seon.db/tx-data
-                  [{:seon.test/sym        (str nm "/probe-test")
-                    :seon.test/ns         [:seon.ns/name (keyword nm)]
-                    :seon.test/source     "(deftest probe-test (is true))"
-                    :seon.test/created-at (js/Date.)}]})))))
-
-(deftest renders-curated-code-internal-and-test-excluded
-  ;; A fresh conn, NO config row anywhere: downstream `acme.widget`
-  ;; (third-party) and `my.kb` (my.*) render as FULL `;; ── namespace x ──`
-  ;; blocks purely because their :seon.ns rows exist; a non-whitelisted
-  ;; seon.* framework ns (`seon.client`) is DROPPED entirely (no block, no
-  ;; name); `acme.widget.internal` (*.internal) and `acme.widget-test`
-  ;; (*-test) are excluded by the structural rules.
+(deftest namespaces-block-drops-unreachable-code
+  ;; With NO current ns and NO pins/requires, the include set is empty —
+  ;; EVERYTHING is DROPPED (indexed + searchable, just not resident). Also
+  ;; proves the structural exclusions (*.internal / *-test never render).
   (async done
     (-> (with-conn
           (fn [_conn]
             (-> (transact-full-ns! "acme.widget" "(def w 1)")
-                (.then (fn [_] (transact-full-ns! "seon.client" "(def c 2)")))
                 (.then (fn [_] (transact-full-ns! "my.kb" "(def k 3)")))
+                (.then (fn [_] (transact-full-ns! "seon.client" "(def c 2)")))
                 (.then (fn [_] (transact-ns-row! "acme.widget.internal")))
-                (.then (fn [_] (transact-ns-with-test-member! "acme.widget-test")))
+                (.then (fn [_] (transact-ns-row! "acme.widget-test")))
                 (.then
                   (fn [_]
+                    ;; No :seon.agent/id → no current ns → include set empty.
                     (let [txt (ctx-namespaces/namespaces-block {:seon.db/db @db/*conn*})]
-                      ;; third-party code renders FULL with NO config transact.
-                      (is (str/includes? txt "(ns acme.widget")
-                          "downstream acme.widget renders FULL with NO config")
-                      (is (str/includes? txt "(def w 1)")
-                          "the acme body is shown FULL")
-                      ;; my.* renders FULL.
-                      (is (str/includes? txt "(ns my.kb")
-                          "my.* renders FULL")
-                      ;; a non-whitelisted framework ns is dropped entirely.
+                      (is (not (str/includes? txt "acme.widget"))
+                          "a non-current, non-required, non-pinned ns is DROPPED")
+                      (is (not (str/includes? txt "my.kb"))
+                          "my.* is NOT auto-pinned — dropped when unreachable")
                       (is (not (str/includes? txt "seon.client"))
-                          "a framework ns is NOT a full block")
-                      (is (not (str/includes? txt "seon.client"))
-                          "the framework ns is DROPPED entirely (not even named)")
-                      ;; *.internal never renders.
+                          "a framework ns is dropped")
                       (is (not (str/includes? txt "acme.widget.internal"))
-                          "*.internal is excluded structurally, no allow-list needed")
-                      ;; *-test never renders into the agent prompt.
+                          "*.internal never renders")
                       (is (not (str/includes? txt "acme.widget-test"))
-                          "*-test is excluded structurally")))))))
+                          "*-test never renders")))))))
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 
-(deftest cur-ns-always-renders-empty-workspace-stub
-  ;; GI-2: the agent's CURRENT ns ALWAYS renders, even before anything is
-  ;; defined in it — keeping the prompt's promise that YOUR OWN namespace
-  ;; renders in full. A fresh home ns (a :seon.ns/name row, no stored source,
-  ;; no fns/schemas) would otherwise be omitted as an empty full block;
-  ;; instead it shows a reconstructed `(ns …)` form + a one-line workspace
-  ;; note. This also exercises the symbol→keyword cur-ns normalization: a
-  ;; fresh agent has no successful evals, so current-ns falls back to the
-  ;; home-ns SYMBOL, which must still match the keyword ns row.
+(deftest cur-ns-always-renders-even-when-empty
+  ;; The agent's CURRENT ns ALWAYS appears — even a brand-new home ns with no
+  ;; source/fns keeps the "your own namespace renders" promise (a workspace
+  ;; stub), never a misleading "not in db" note. Behavior only: the exact
+  ;; require/refer form of the stub is NOT pinned (it changes as the toolkit
+  ;; does). Also exercises the symbol→keyword cur-ns normalization (a fresh
+  ;; agent's current-ns falls back to the home-ns symbol).
   (async done
     (-> (with-conn
           (fn [_conn]
-            (-> (db/transact!
-                  {:seon.db/tx-data
-                   [{:seon.ns/name :my.agent.wtest}
-                    ;; index the messaging verb ns so the signature surfacing
-                    ;; path (verb-signature-whitelist) has a real row to render.
-                    {:seon.ns/name :seon.agent.message}
-                    {:seon.fn/sym      "seon.agent.message/user"
-                     :seon.fn/ns       [:seon.ns/name :seon.agent.message]
-                     :seon.fn/arglists "([content])"
-                     :seon.fn/doc      "Send a message to your human."
-                     :seon.fn/source   "(defn user [content] content)"}]})
+            (-> (db/transact! {:seon.db/tx-data [{:seon.ns/name :my.agent.wtest}]})
                 (.then
                   (fn [_]
                     (let [txt (ctx-namespaces/namespaces-block
                                 {:seon.db/db @db/*conn* :seon.agent/id "wtest"})]
-                      ;; The empty home ns renders inside the per-ns
-                      ;; begin/end demarcation brackets (the `;;;`
-                      ;; runtime-structure convention) — so a truly-empty
-                      ;; workspace is clearly framed, not silent poison.
                       (is (str/includes? txt ";;; ┌─ namespace my.agent.wtest ─")
-                          "the empty current ns renders inside a begin bracket")
+                          "the empty current ns is present (bracketed)")
                       (is (str/includes? txt ";;; └─ end namespace my.agent.wtest ─")
-                          "and a matching end bracket — the ns is demarcated")
+                          "and demarcated with a matching end bracket")
                       (is (not (str/includes? txt "not in db"))
-                          "no misleading 'not in db' for the indexed home ns")
-                      (is (str/includes? txt "(ns my.agent.wtest")
-                          "shows the (ns …) form")
-                      ;; NO hidden aliasing: the workspace block shows the REAL
-                      ;; canonical home-ns require form (seon.eval/home-ns-form)
-                      ;; that setup-agent-ns! installs — WITH aliases/refers —
-                      ;; not a bare-name reconstruction. The agent must SEE that
-                      ;; `message/user`, `db/transact!`, `wait`, `complete`
-                      ;; resolve.
-                      (is (str/includes? txt "[seon.agent.message :as message]")
-                          "shows seon.agent.message WITH its :as message alias")
-                      (is (str/includes? txt "[seon.db :as db]")
-                          "shows seon.db WITH its :as db alias")
-                      (is (str/includes? txt ":refer [wait complete pause resume terminate]")
-                          "shows the refer'd lifecycle verbs")
-                      ;; and the messaging verb is surfaced FULL (config :always)
-                      ;; — its header arglist shows alongside the alias.
-                      (is (str/includes? txt "(seon.agent.message/user [content])")
-                          "surfaces the message/user verb with its arglist")
-                      (is (str/includes? txt "nothing defined here yet")
-                          "carries the empty-workspace note")))))))
-        (.then (fn [] (done)))
-        (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
-
-(deftest required-my-helper-renders-full
-  ;; Reachability after signatures were retired: a my.* helper the CURRENT ns
-  ;; `:require`s renders FULL — writing a real `(:require [my.helper …])` pulls
-  ;; the helper into view, self-healing on the `:seon.ns/requires` edges. A my.*
-  ;; ns that is NOT required (and not in :always / pinned) sits in the navigable
-  ;; long tail — DROPPED. (No agent entity is seeded: current-ns falls back to
-  ;; the home ns `my.agent.ov` for id "ov".)
-  (async done
-    (-> (with-conn
-          (fn [_conn]
-            (-> (db/transact!
-                  {:seon.db/tx-data
-                   [;; the current home ns requires a my.* helper
-                    {:seon.ns/name :my.agent.ov :seon.ns/requires [:my.helper]}
-                    {:seon.ns/name :my.helper :seon.ns/source "(ns my.helper)\n(def h 1)"}
-                    ;; a my.* ns NOT reachable (long tail)
-                    {:seon.ns/name :my.stash :seon.ns/source "(ns my.stash)\n(def s 9)"}]})
-                (.then
-                  (fn [_]
-                    (let [txt (ctx-namespaces/namespaces-block
-                                {:seon.db/db @db/*conn* :seon.agent/id "ov"})]
-                      (is (str/includes? txt "(def h 1)")
-                          "a my.* helper REQUIRED by the current ns renders FULL")
-                      (is (not (str/includes? txt "(def s 9)"))
-                          "a non-required my.* ns sits in the long tail (dropped)")))))))
-        (.then (fn [] (done)))
-        (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
-
-(deftest live-db-override-pins-and-self-heals
-  ;; The per-agent LIVE-DB override (`:seon.agent.ctx/render-namespaces`) PINS
-  ;; a normally-DROPPED ns into the rendered set; retract → it vanishes
-  ;; (reactive, derive-at-render, no stored projection). Uses the root agent
-  ;; (`:seon.agent/id` is a strict id schema — "root" is the one literal id).
-  (async done
-    (-> (with-conn
-          (fn [_conn]
-            (-> (db/transact!
-                  {:seon.db/tx-data
-                   [{:seon.agent/id "root"}
-                    ;; a framework ns — DROPPED by default (not :always/required)
-                    {:seon.ns/name :seon.frobx :seon.ns/source "(ns seon.frobx)\n(def z 7)"}]})
-                (.then
-                  (fn [_]
-                    (let [txt (ctx-namespaces/namespaces-block
-                                {:seon.db/db @db/*conn* :seon.agent/id "root"})]
-                      (is (not (str/includes? txt "(def z 7)"))
-                          "a framework ns is DROPPED by default (not pinned)"))))
-                ;; PIN seon.frobx via the override
-                (.then
-                  (fn [_]
-                    (db/transact!
-                      {:seon.db/tx-data
-                       [{:seon.agent/id "root"
-                         :seon.agent.ctx/render-namespaces [:seon.frobx]}]})))
-                (.then
-                  (fn [_]
-                    (let [txt (ctx-namespaces/namespaces-block
-                                {:seon.db/db @db/*conn* :seon.agent/id "root"})]
-                      (is (str/includes? txt "(def z 7)")
-                          "the live-DB override PINS a normally-dropped ns"))))
-                ;; retract the override datom → seon.frobx vanishes (self-healing)
-                (.then
-                  (fn [_]
-                    (db/transact!
-                      {:seon.db/tx-data
-                       [[:db/retract [:seon.agent/id "root"]
-                         :seon.agent.ctx/render-namespaces :seon.frobx]]})))
-                (.then
-                  (fn [_]
-                    (let [txt (ctx-namespaces/namespaces-block
-                                {:seon.db/db @db/*conn* :seon.agent/id "root"})]
-                      (is (not (str/includes? txt "(def z 7)"))
-                          "retracting the override drops it again (self-healing)")))))))
+                          "no misleading 'not in db' note for the indexed home ns")))))))
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 
@@ -689,10 +493,9 @@
       (-> (with-conn
             (fn [_conn]
               (-> (agent/create! {:seon.agent/id "AGTctxtest00d1"})
-                  ;; an :always my.* ns (my.kb) → rendered FULL as a
-                  ;; `;;; ┌─ namespace x ─` block in the STABLE half (a
-                  ;; non-reachable / framework ns would be dropped entirely).
-                  (.then (fn [_] (transact-full-ns! "my.kb" "(def x 1)")))
+                  ;; The agent's CURRENT ns always renders (its workspace stub)
+                  ;; as a `;;; ┌─ namespace x ─` block in the namespaces section,
+                  ;; which lives in the STABLE half.
                   (.then
                     (fn [_]
                       (let [a1 (assemble "AGTctxtest00d1")
@@ -704,8 +507,8 @@
                         (is (not (str/blank? (:seon.render/stable-text a1)))
                             "stable block is non-blank (system + namespaces)")
                         (is (str/includes? (:seon.render/stable-text a1)
-                                           "my.kb")
-                            "the namespaces body lives in the STABLE half")
+                                           "my.agent.AGTctxtest00d1")
+                            "the namespaces body (current ns) lives in the STABLE half")
                         (is (not (str/includes? (:seon.render/stable-text a1)
                                                 ctx/stable-boundary))
                             "the boundary line is the join, never inside a half")
