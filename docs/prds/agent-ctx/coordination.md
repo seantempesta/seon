@@ -330,3 +330,16 @@ collisions minimally, subject to owner override:
 - **Flake-class addition (harness, mine):** in-flight /solve requests die
   silently on pod restart — connection-drop becomes a classified flake class
   in the taxonomy.
+
+### 2026-07-02 — THE REGISTRY (owner-ordered; both lanes maintain it)
+
+- **`docs/seon/orchestrator/issues/dual-code-paths-registry.md` is now the ONE
+  tracked list** of every dual-path / hand-list / silent-fallback / dual-home
+  finding (owner: "don't lose track of dual code paths — track everything and
+  fix it"). It absorbs your magic-systems audit (M-rows, statuses updated for
+  what's landed since: M2+M7 RESOLVED, M1/M3/M4 marked in-flight-yours) + the
+  tooling complexity sweep (C-rows) + fork findings (F-rows). RULES: new
+  finding = new row at discovery; rows close only with the fixing sha;
+  LEGITIMATE rows stay listed with rationale. Your audit doc remains the
+  depth; the registry is the status. Please add rows for anything your lane
+  finds and close M1/M3/M4 with shas when they land.
