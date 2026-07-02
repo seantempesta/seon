@@ -16,6 +16,43 @@ built, what is not, the corrections to beliefs the docs carried, and the
 dependency-ordered path to close the gap. **No parallel systems: every gap
 closes by a replace-in-place or a delete, never a `-v2`.**
 
+## Shipped 2026-07-02 — this session's landings (agent-fsm → main)
+
+Capstone before the merge. All suite-green, most live-drive verified:
+
+- **inspect.ai tool parity COMPLETE** — `seon.agent.shell` (run + py-run,
+  `SEON_SHELL`), `seon.agent.web/fetch` (undici + readability→markdown,
+  blob-stored, SSRF-gated, non-2xx = `ok?`-true-with-status),
+  `seon.agent.fs/edit-file` (line-range + exact-match). bash/python/file/edit/
+  grep/web all exist on the fs capability template.
+- **`my.blob`** — content-addressed store (`put!`/`get`/`text`/`concat!`), the
+  disk tier; big text lives behind a `:my.blob/hash` ref.
+- **`my.plan`** (renamed from `seon.agent.todo`) — planning graph:
+  `needs`/`parent` deps, `:active`/`:blocked` status, goal/expect/pace, a
+  derived position anchor, a WINDOWED render (frontier + recent tail, dropped
+  interior). Drive-grounded.
+- **Nothing wedges** — `race-timeout` bounds every LLM attempt + `run-loop!`
+  await; a hung call fails the turn as a value, never parks. Sync-CPU residual
+  = the worker tier (W1.5).
+- **fn-row re-seed heals all derived fields** — the boot dedup refreshed only
+  presence, not spec/source/doc; now refreshes the full field set with a
+  `:core-seed` provenance guard (healed 110 drifted rows).
+- **Architecture docs consolidated** — the single target set lives in
+  `docs/seon/architecture/` (+ new context/observability/laws + vision
+  think-in-clojure); the legacy FSM design docs archived; overview retired.
+- **tx-meta provenance rule** taught across skills + data-model (provenance
+  rides the tx entity, never a domain attr).
+
+**Carried to `feature/agent-ctx`** (the next chunk): required-key resolution
+at the eval boundary (Phase 1 built + green, held as a patch), current-ns
+render-fn auto-run → block/tile twins, the `my.*`-as-namespace-scribed-entity
+composition, canvas = last-updated-tile. Design:
+`research/explicit-deps-injection-2026-07-02.md`.
+
+**Still open (agent-ctx or follow-up):** root-world-at-`/` (W3), spawn
+capability gate + roles (W4), observability turn-capture (W1),
+`:seon.agent/purpose` → `:my.agent/purpose` (W7 tail).
+
 ## Baseline — VERIFIED SHIPPED (do not rebuild, do not re-litigate)
 
 - **Config-driven agent-init.** ONE manifest drives the whole agent context:
