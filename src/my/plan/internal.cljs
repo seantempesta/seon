@@ -1,35 +1,58 @@
 (ns my.plan.internal
-  "Private plumbing for `my.plan` — fail/owner-scoping helpers, the
-   write-result envelope mapper, the derived work-queue queries (ready leaves,
-   roll-up, blocked/ready over the shared rule set), the reverse-ref tree pull,
-   the plan! tempid compiler, the drop! subtree walk, and the open-steps
-   context-section render.
+  "Private plumbing for `my.plan` — fail/agent-scoping helpers, the
+   write-result envelope mapper, the shared Datalog rule set, the derived
+   work-queue queries (ready leaves, roll-up, blocked/ready), the position
+   ANCHOR derivation, the reverse-ref tree pull, the plan! tempid compiler,
+   the drop! subtree walk, and the WINDOWED plan-block context render
+   (anchor + open frontier + recently-completed tail; the completed
+   interior stays in the DB, out of the prompt).
 
    Factored out of the public verb surface so the teaching ns shows ONLY the
-   verbs + their register! schemas + the readable `rules` data (the `*.internal`
-   convention drops these from rendered agent context — see
+   verbs + their register! schemas (the `*.internal` convention drops these
+   from rendered agent context — see
    `seon.agent.ctx.namespaces/hidden-ns-name?`).
 
-   Keyword-namespace note: this lives under `my.plan.internal`, so
-   `::foo` would expand WRONG. Every helper references the owning ns's attrs
-   fully-qualified (`:my.plan/id`, never `::id`). The derived queries
-   take the shared `rules` as a PARAMETER — it lives in the public ns so an
-   agent can read and extend it, and passing it keeps the dep one-way."
+   Keyword-namespace note: this lives under `my.plan.internal`, so `::foo`
+   would expand WRONG. Every helper references the owning ns's attrs
+   fully-qualified (`:my.plan/id`, never `::id`). The rule set lives HERE
+   (the render fns need it and the dep is one-way); `my.plan/rules` re-defs
+   the same value so an agent can still read and extend it."
   (:require
     [clojure.string :as str]
     [seon.db :as db]))
 
+(def rules
+  "Datalog rules over the plan graph — `my.plan/rules` re-defs this value:
+   descendant (transitive tree closure, cycle-safe), leaf (no children),
+   unfinished (:open/:active/:blocked — anything not :done), open-work
+   (unfinished leaf in the subtree), blocked (an explicit :blocked status OR
+   a `needs` target with open work), ready (open unblocked leaf — work to do
+   now; an :active step is in hand, not re-listed as ready). Negations
+   (`leaf`, `not blocked`) only FILTER bound tuples, so bind the entity
+   positively BEFORE invoking these."
+  '[[(descendant ?a ?n) [?n :my.plan/parent ?a]]
+    [(descendant ?a ?n) [?m :my.plan/parent ?a] (descendant ?m ?n)]
+    [(leaf ?t) (not-join [?t] [?c :my.plan/parent ?t])]
+    [(unfinished ?t) [?t :my.plan/status :open]]
+    [(unfinished ?t) [?t :my.plan/status :active]]
+    [(unfinished ?t) [?t :my.plan/status :blocked]]
+    [(open-work ?t) (unfinished ?t) (leaf ?t)]
+    [(open-work ?t) (descendant ?t ?l) (unfinished ?l) (leaf ?l)]
+    [(blocked ?t) [?t :my.plan/status :blocked]]
+    [(blocked ?t) [?t :my.plan/needs ?d] (open-work ?d)]
+    [(ready ?t) [?t :my.plan/status :open] (leaf ?t) (not (blocked ?t))]])
+
 (defn fail [msg] {:my.plan/ok? false :my.plan/error msg})
 
-(defn scoped-owner
-  "Explicit owner ref, else the calling agent from the ALS scope."
-  [owner]
-  (or owner (when-let [id (db/current-agent-id)] [:seon.agent/id id])))
+(defn scoped-agent
+  "Explicit agent ref, else the calling agent from the ALS scope."
+  [agent]
+  (or agent (when-let [id (db/current-agent-id)] [:seon.agent/id id])))
 
-(defn owner-eid
-  "Resolve an owner ref (lookup-ref/eid) to its eid in db value `db`, or nil."
-  [db owner]
-  (:db/id (db/entity db owner)))
+(defn agent-eid
+  "Resolve an agent ref (lookup-ref/eid) to its eid in db value `db`, or nil."
+  [db agent]
+  (:db/id (db/entity db agent)))
 
 (defn status-of
   "Current :my.plan/status of step `id`, or nil when no such step."
@@ -49,71 +72,74 @@
     (fail (str verb ": store failed — "
                (get-in env [:seon.db/error :seon.error/message])))))
 
-;; --- Derived work-queue queries — all pure Datalog over the two refs, with
-;; --- the shared `rules` passed as `%`. Nothing here is stored; blocked-ness,
-;; --- ready-ness, and roll-up recompute from the leaf facts every read.
+;; --- Derived work-queue queries — all pure Datalog over the graph, with
+;; --- [[rules]] as `%`. Nothing here is stored; blocked-ness, ready-ness,
+;; --- roll-up, and the position anchor recompute from the facts every read.
 
 (defn ready-leaves
-  "Ready leaves (open, childless, unblocked) owned by `owner-eid`, oldest
-   first, as `[{:id :title :created-at} …]`. Sorted in CLJS — `:seon.db/order-by`
-   is not a `seon.db/query` request key."
-  [db owner-eid rules]
+  "Ready leaves (open, childless, unblocked) owned by `agent-eid`, oldest
+   first, as `[{:id :title :created-at} …]`. Sorted in CLJS —
+   `:seon.db/order-by` is not a `seon.db/query` request key."
+  [db agent-eid]
   (->> (db/query {:seon.db/db db
                   :seon.db/query
                   '[:find ?id ?title ?created
                     :in $ % ?a
                     :where
-                    [?t :my.plan/owner ?a]
+                    [?t :my.plan/agent ?a]
                     (ready ?t)
                     [?t :my.plan/id ?id]
                     [?t :my.plan/title ?title]
                     [?t :my.plan/created-at ?created]]
-                  :seon.db/args [rules owner-eid]})
+                  :seon.db/args [rules agent-eid]})
        (sort-by #(.getTime ^js (nth % 2)))
        (mapv (fn [[id title created]]
                {:my.plan/id         id
                 :my.plan/title      title
                 :my.plan/created-at created}))))
 
-(defn root-ids
-  "Ids of `owner-eid`'s steps with no parent edge — the forest roots."
-  [db owner-eid]
-  (vec (db/query {:seon.db/db db
+(defn active-steps
+  "The `agent-eid`'s :active steps, oldest first, as
+   `[{:id :title :expect?} …]`. ONE is the intended cardinality (active!
+   demotes the rest); a vector so a hand-transacted second active still
+   surfaces instead of vanishing."
+  [db agent-eid]
+  (->> (db/query {:seon.db/db db
                   :seon.db/query
-                  '[:find [?id ...]
+                  '[:find ?t ?id ?title ?created
                     :in $ ?a
                     :where
-                    [?t :my.plan/owner ?a]
+                    [?t :my.plan/agent ?a]
+                    [?t :my.plan/status :active]
                     [?t :my.plan/id ?id]
-                    (not-join [?t] [?t :my.plan/parent _])]
-                  :seon.db/args [owner-eid]})))
+                    [?t :my.plan/title ?title]
+                    [?t :my.plan/created-at ?created]]
+                  :seon.db/args [agent-eid]})
+       (sort-by #(.getTime ^js (nth % 3)))
+       (mapv (fn [[e id title _]]
+               (let [expect (:my.plan/expect (db/entity db e))]
+                 (cond-> {:my.plan/id id :my.plan/title title}
+                   expect (assoc :my.plan/expect expect)))))))
 
-(defn all-root-ids
-  "Ids of EVERY step with no parent edge, any owner — the whole forest's roots."
-  [db]
-  (vec (db/query {:seon.db/db db
-                  :seon.db/query
-                  '[:find [?id ...]
-                    :where
-                    [?t :my.plan/id ?id]
-                    (not-join [?t] [?t :my.plan/parent _])]})))
-
-(def tree-pattern
-  "ONE recursive reverse-ref pull: a node + its whole subtree (children under
-   `:my.plan/_parent`, the reverse of the plain `parent` ref → a
-   vector) + each node's dependency ids inline."
-  '[:my.plan/id :my.plan/title :my.plan/status
-    {:my.plan/_parent ...}
-    {:my.plan/depends-on [:my.plan/id]}])
-
-(defn pull-subtree
-  "Nested-EDN subtree rooted at step `id` (nil when `id` doesn't resolve)."
+(defn ancestor-chain
+  "Step `id`'s ancestor chain as `[root … parent self]` of trimmed maps
+   (id/title + goal/pace when present) — the path the anchor narrates.
+   Walks the plain `parent` ref; cycle-safe via a seen set."
   [db id]
-  (db/pull db tree-pattern [:my.plan/id id]))
+  (loop [chain () cur id seen #{}]
+    (if (or (nil? cur) (seen cur))
+      (vec chain)
+      (let [e (db/entity db [:my.plan/id cur])
+            node (cond-> {:my.plan/id cur :my.plan/title (:my.plan/title e)}
+                   (:my.plan/goal e) (assoc :my.plan/goal (:my.plan/goal e))
+                   (:my.plan/pace e) (assoc :my.plan/pace (:my.plan/pace e)))]
+        (recur (cons node chain)
+               (:my.plan/id (:my.plan/parent e))
+               (conj seen cur))))))
 
 (defn descendant-ids
-  "Ids of every node strictly under `id` (transitive, via the `descendant` rule)."
-  [db id rules]
+  "Ids of every node strictly under `id` (transitive, via `descendant`)."
+  [db id]
   (vec (db/query {:seon.db/db db
                   :seon.db/query
                   '[:find [?cid ...]
@@ -125,10 +151,10 @@
                   :seon.db/args [rules id]})))
 
 (defn rollup
-  "Done/total over the leaves in `id`'s subtree (INCLUDING `id` itself when it
-   is a leaf). `done?` = every such leaf done. Relation-find `[?l ?s]` (NOT a
-   collection-find, which dedups by status and would mis-count)."
-  [db id rules]
+  "Done/total over the leaves in `id`'s subtree (INCLUDING `id` itself when
+   it is a leaf). `done?` = every such leaf done. Relation-find `[?l ?s]`
+   (NOT a collection-find, which dedups by status and would mis-count)."
+  [db id]
   (let [desc (db/query {:seon.db/db db
                         :seon.db/query
                         '[:find ?l ?s
@@ -156,9 +182,8 @@
      :my.plan/done? (and (pos? total) (= done total))}))
 
 (defn blocked?
-  "True iff some dependency of `id` still has open work (one hop over
-   `depends-on` into the `open-work` rule — transitivity rides on done-ness)."
-  [db id rules]
+  "True iff `id` is stored :blocked OR some `needs` target has open work."
+  [db id]
   (boolean (seq (db/query {:seon.db/db db
                            :seon.db/query
                            '[:find ?t :in $ % ?id
@@ -166,8 +191,8 @@
                            :seon.db/args [rules id]}))))
 
 (defn ready?
-  "True iff `id` is an open, unblocked leaf — real work the agent can do now."
-  [db id rules]
+  "True iff `id` is an open, unblocked leaf — real work to do now."
+  [db id]
   (boolean (seq (db/query {:seon.db/db db
                            :seon.db/query
                            '[:find ?t :in $ % ?id
@@ -176,29 +201,53 @@
 
 (defn status-view
   "Derived one-node view: done?/blocked?/ready? + the subtree progress."
-  [db id rules]
-  (let [{:my.plan/keys [done total done?]} (rollup db id rules)]
+  [db id]
+  (let [{:my.plan/keys [done total done?]} (rollup db id)]
     {:my.plan/id       id
      :my.plan/done?    done?
-     :my.plan/blocked? (blocked? db id rules)
-     :my.plan/ready?   (ready? db id rules)
+     :my.plan/blocked? (blocked? db id)
+     :my.plan/ready?   (ready? db id)
      :my.plan/progress {:my.plan/done  done
-                                :my.plan/total total}}))
+                        :my.plan/total total}}))
+
+;; --- The position ANCHOR — derived, never stored. "Where the agent IS":
+;; --- the :active step (or the first ready leaf), its ancestor chain to the
+;; --- root, and the root's done/total roll-up.
+
+(defn anchor
+  "The `agent-eid`'s derived position, or nil when no plan work exists.
+
+   `{:my.plan/step <active-or-first-ready> :my.plan/chain [root … self]
+     :my.plan/active? <bool> :my.plan/progress <root rollup>}`. The :active
+   step wins; with none, the oldest ready leaf is the presumed next
+   position."
+  [db agent-eid]
+  (let [active (first (active-steps db agent-eid))
+        step   (or active (first (ready-leaves db agent-eid)))]
+    (when step
+      (let [chain (ancestor-chain db (:my.plan/id step))
+            root  (first chain)]
+        {:my.plan/step     step
+         :my.plan/chain    chain
+         :my.plan/active?  (some? active)
+         :my.plan/progress (rollup db (:my.plan/id root))}))))
 
 ;; --- plan! — compile a nested plan to ONE flat, tempid-linked transact. ----
 
 (defn compile-plan
-  "`title` + nested `children` → `{:tx <flat tempid-keyed tx-data>
-                                   :labels <author-label/:root → minted id>
-                                   :root-id <id>}`, or `{:error msg}` when an
+  "Nested plan spec `root` → `{:tx <flat tempid-keyed tx-data>
+                               :labels <author-label/:root → minted id>
+                               :root-id <id>}`, or `{:error msg}` when an
    `:my.plan/after` names an unknown label.
 
-   Cross-sibling edges link by STRING TEMPID, never same-tx lookup-refs (a
-   lookup-ref to a not-yet-asserted sibling throws `:entity-id/missing`).
-   Tempids are order-independent, so an `:after` may name any label in the plan.
-   Pass 1 assigns every node a tempid + a minted `:my.plan/id` and
-   records its author label; pass 2 emits one tx-map per node."
-  [owner title children]
+   `root` carries the root's title/goal/pace; every node may carry
+   `:my.plan/expect` and its own `:children`. Cross-sibling edges link by
+   STRING TEMPID, never same-tx lookup-refs (a lookup-ref to a
+   not-yet-asserted sibling throws `:entity-id/missing`). Tempids are
+   order-independent, so an `:after` may name any label in the plan. Pass 1
+   assigns every node a tempid + a minted `:my.plan/id` and records its
+   author label; pass 2 emits one tx-map per node."
+  [agent root]
   (let [nodes      (volatile! [])
         label->tid (volatile! {})]
     (letfn [(walk [node parent-tid]
@@ -209,13 +258,15 @@
                 (vswap! nodes conj {:tid        tid
                                     :id         id
                                     :title      (:my.plan/title node)
+                                    :goal       (:my.plan/goal node)
+                                    :pace       (:my.plan/pace node)
+                                    :expect     (:my.plan/expect node)
                                     :parent-tid parent-tid
                                     :after      (:my.plan/after node)
                                     :label      label})
                 (doseq [c (:my.plan/children node)] (walk c tid))
                 tid))]
-      (walk {:my.plan/title    title
-             :my.plan/children children} nil)
+      (walk root nil)
       (let [l->t    @label->tid
             ns      @nodes
             unknown (->> ns (mapcat :after) distinct (remove l->t) seq)]
@@ -223,15 +274,19 @@
           {:error (str "plan!: :my.plan/after names unknown label(s) "
                        (str/join ", " (map pr-str unknown))
                        " — each :after must match some node's :my.plan/ref.")}
-          {:tx      (mapv (fn [{:keys [tid id title parent-tid after]}]
-                            (cond-> {:db/id                      tid
+          {:tx      (mapv (fn [{:keys [tid id title goal pace expect
+                                       parent-tid after]}]
+                            (cond-> {:db/id              tid
                                      :my.plan/id         id
                                      :my.plan/title      title
                                      :my.plan/status     :open
-                                     :my.plan/owner      owner
+                                     :my.plan/agent      agent
                                      :my.plan/created-at (js/Date.)}
+                              goal        (assoc :my.plan/goal goal)
+                              pace        (assoc :my.plan/pace pace)
+                              expect      (assoc :my.plan/expect expect)
                               parent-tid  (assoc :my.plan/parent parent-tid)
-                              (seq after) (assoc :my.plan/depends-on
+                              (seq after) (assoc :my.plan/needs
                                                  (mapv l->t after))))
                           ns)
            :labels  (into {:root (:id (first ns))}
@@ -239,14 +294,15 @@
            :root-id (:id (first ns))})))))
 
 (defn ^:async retract-subtree!
-  "Retract `id` AND its whole subtree (the plain `parent` ref does NOT cascade,
-   so we walk descendants and `retractEntity` each). Unknown id → fail envelope.
-   History keeps every retracted node — undo is a `db/as-of` away."
-  [id rules]
+  "Retract `id` AND its whole subtree (the plain `parent` ref does NOT
+   cascade, so we walk descendants and `retractEntity` each). Unknown id →
+   fail envelope. History keeps every retracted node — undo is a `db/as-of`
+   away."
+  [id]
   (if (nil? (status-of id))
     (fail (str "drop!: no step " (pr-str id) "."))
     (let [db  @db/*conn*
-          ids (distinct (conj (descendant-ids db id rules) id))
+          ids (distinct (conj (descendant-ids db id) id))
           env (await (db/transact!
                        {:seon.db/tx-data
                         (mapv (fn [i] [:db.fn/retractEntity [:my.plan/id i]]) ids)}))]
@@ -255,54 +311,104 @@
         (fail (str "drop!: store failed — "
                    (get-in env [:seon.db/error :seon.error/message])))))))
 
-;; --- open-steps context-section render (the flat resume view; the
-;; --- hierarchical dual render is a later unit). ---------------------------
+;; --- Tree pull (the structural read behind my.plan/tree). -----------------
+
+(def tree-pattern
+  "ONE recursive reverse-ref pull: a node + its whole subtree (children
+   under `:my.plan/_parent`, the reverse of the plain `parent` ref → a
+   vector) + each node's dependency ids inline."
+  '[:my.plan/id :my.plan/title :my.plan/status :my.plan/goal :my.plan/expect
+    :my.plan/pace
+    {:my.plan/_parent ...}
+    {:my.plan/needs [:my.plan/id]}])
+
+(defn pull-subtree
+  "Nested-EDN subtree rooted at step `id` (nil when `id` doesn't resolve)."
+  [db id]
+  (db/pull db tree-pattern [:my.plan/id id]))
+
+(defn root-ids
+  "Ids of `agent-eid`'s steps with no parent edge — the forest roots."
+  [db agent-eid]
+  (vec (db/query {:seon.db/db db
+                  :seon.db/query
+                  '[:find [?id ...]
+                    :in $ ?a
+                    :where
+                    [?t :my.plan/agent ?a]
+                    [?t :my.plan/id ?id]
+                    (not-join [?t] [?t :my.plan/parent _])]
+                  :seon.db/args [agent-eid]})))
+
+(defn all-root-ids
+  "Ids of EVERY step with no parent edge, any agent — the forest's roots."
+  [db]
+  (vec (db/query {:seon.db/db db
+                  :seon.db/query
+                  '[:find [?id ...]
+                    :where
+                    [?t :my.plan/id ?id]
+                    (not-join [?t] [?t :my.plan/parent _])]})))
+
+;; --- The WINDOWED plan-block render (`:plan` context section). ------------
+;; --- Constant-size for any plan depth: position anchor + open frontier +
+;; --- a small recently-completed tail; the completed interior is DROPPED
+;; --- from the prompt (it stays queryable — tree/status/db-query read it).
 
 (def open-keys
-  "The resume projection of one open item — `[*]`-pulled then trimmed.
-   (Not a pull PATTERN: naming a never-yet-transacted attr there throws.)"
-  [:my.plan/id :my.plan/title
-   :my.plan/created-at :my.plan/description
-   :my.plan/message])
+  "The frontier projection of one unfinished item — `[*]`-pulled then
+   trimmed. (Not a pull PATTERN: naming a never-yet-transacted attr there
+   throws.)"
+  [:my.plan/id :my.plan/title :my.plan/status
+   :my.plan/created-at :my.plan/description :my.plan/message])
 
 (defn open-steps
-  "Open steps in db value `db`, oldest first; `owner-eid` nil = all owners."
-  [db owner-eid]
-  (let [q (if owner-eid
-            '[:find [?t ...] :in $ ?o
-              :where
-              [?t :my.plan/status :open]
-              [?t :my.plan/owner ?o]]
-            '[:find [?t ...] :where [?t :my.plan/status :open]])]
-    (->> (apply db/query q db (when owner-eid [owner-eid]))
+  "Unfinished (:open/:active/:blocked) steps in db value `db`, oldest first;
+   `agent-eid` nil = all agents."
+  [db agent-eid]
+  (let [q (if agent-eid
+            '[:find [?t ...] :in $ % ?o
+              :where (unfinished ?t) [?t :my.plan/agent ?o]]
+            '[:find [?t ...] :in $ %
+              :where [?t :my.plan/id _] (unfinished ?t)])]
+    (->> (db/query {:seon.db/db db
+                    :seon.db/query q
+                    :seon.db/args (if agent-eid [rules agent-eid] [rules])})
          (map #(select-keys (db/pull db '[*] %) open-keys))
          (sort-by #(.getTime ^js (:my.plan/created-at %)))
          vec)))
 
+(def frontier-limit
+  "Max ready steps the frontier renders — the constant-size guarantee. The
+   overflow renders as one `… and N more ready` line; `(my.plan/next {})`
+   reads the full queue."
+  7)
+
 (def recent-done-limit
-  "How many just-finished items the resume view recalls — the bounded
-   anti-redo band. COUNT-bounded (not a wall-clock window) so the rendered line
-   set is byte-identical until the agent actually closes another step, keeping
-   the block cache-stable across renders."
+  "How many just-finished steps the resume tail recalls — the bounded
+   anti-redo band. COUNT-bounded (not a wall-clock window) so the rendered
+   line set is byte-identical until the agent actually closes another step,
+   keeping the block cache-stable across renders."
   5)
 
 (defn recent-done
-  "The `owner-eid`'s most-recently-completed steps (newest first), capped at
-   [[recent-done-limit]] — a derived memory of what was just accomplished so the
-   agent doesn't re-do closed setup. Only done items carry ::completed-at, so
-   that attr doubles as the done filter; [] when nothing's been finished."
-  [db owner-eid]
+  "The `agent-eid`'s most-recently-completed steps (newest first), capped at
+   [[recent-done-limit]] — a derived memory of what was just accomplished so
+   the agent doesn't re-do closed setup. Only done steps carry
+   ::completed-at, so that attr doubles as the done filter; [] when
+   nothing's been finished."
+  [db agent-eid]
   (->> (db/query {:seon.db/db db
                   :seon.db/query
                   '[:find ?id ?title ?at
                     :in $ ?o
                     :where
-                    [?t :my.plan/owner ?o]
+                    [?t :my.plan/agent ?o]
                     [?t :my.plan/status :done]
                     [?t :my.plan/id ?id]
                     [?t :my.plan/title ?title]
                     [?t :my.plan/completed-at ?at]]
-                  :seon.db/args [owner-eid]})
+                  :seon.db/args [agent-eid]})
        (sort-by #(.getTime ^js (nth % 2)) >)
        (take recent-done-limit)
        (mapv (fn [[id title at]]
@@ -312,26 +418,58 @@
 
 (defn stamp
   "Compact ABSOLUTE creation time of `at` — UTC `YYYY-MM-DD HH:MM`, derived
-   only from the datom (NOT `now`), so a row renders byte-identical every turn
-   while the agent still reads recency (it compares against the turn clock).
-   A relative \"3m ago\" string would change on every render and bust the
-   stable-prefix cache for an unchanged block."
+   only from the datom (NOT `now`), so a row renders byte-identical every
+   turn while the agent still reads recency (it compares against the turn
+   clock). A relative \"3m ago\" string would change on every render and
+   bust the stable-prefix cache for an unchanged block."
   [at]
   (-> (.toISOString ^js at) (subs 0 16) (str/replace "T" " ")))
 
-(defn open-section
-  "The `; <id> [<created-at>] <title>` lines for `steps` (oldest first), a `✉`
-   leading items auto-minted from your human's messages — or \"\" when none."
-  [steps]
-  (if (empty? steps)
+(defn anchor-section
+  "The position-anchor lines for [[anchor]] map `a` — \"\" when nil.
+
+   Line 1 names the goal (root title, `goal:` narrative + pace when
+   present); line 2 is the you-are-here: the :active step (or the next
+   ready one) with the root's done/total roll-up; a `verify before done!`
+   line follows when the anchored step carries `:my.plan/expect`."
+  [a]
+  (if (nil? a)
     ""
-    (str "; Your open work items — a memory aid, not an obligation. Close one with\n"
-         ";   (my.plan/done! {:my.plan/id \"<id>\"})\n"
-         "; once addressed. A ✉ item tracks a message from your human.\n"
-         (str/join "\n"
-                   (map (fn [{:my.plan/keys [id title created-at message]}]
-                          (str "; " (when message "✉ ") id " [" (stamp created-at) "] " title))
-                        steps)))))
+    (let [{:my.plan/keys [step chain active? progress]} a
+          root   (first chain)
+          {:my.plan/keys [done total]} progress
+          goal   (:my.plan/goal root)
+          pace   (:my.plan/pace root)
+          expect (:my.plan/expect step)]
+      (str "; PLAN «" (:my.plan/title root) "»"
+           (when goal (str " — goal: " goal))
+           (when pace (str " [" (name pace) "]")) "\n"
+           "; → " (if active? "NOW (active)" "next ready") ": "
+           (:my.plan/id step) " «" (:my.plan/title step) "» — "
+           done " of " total " steps done"
+           (when expect (str "\n;   verify before done!: " expect))))))
+
+(defn frontier-section
+  "The open-frontier lines: `actives` (▸-marked) then up to
+   [[frontier-limit]] `readies`, one `; <id> [<created-at>] <title>` line
+   each (a `✉` marks a step auto-minted from your human's message) — or
+   \"\" when both are empty."
+  [actives readies]
+  (if (and (empty? actives) (empty? readies))
+    ""
+    (let [shown (take frontier-limit readies)
+          more  (- (count readies) (count shown))
+          line  (fn [marker {:my.plan/keys [id title created-at message]}]
+                  (str "; " marker (when message "✉ ") id
+                       (when created-at (str " [" (stamp created-at) "]"))
+                       " " title))]
+      (str "; Open frontier — close one with (my.plan/done! {:my.plan/id \"<id>\"}),\n"
+           "; take one up with (my.plan/active! {:my.plan/id \"<id>\"}):\n"
+           (str/join "\n"
+                     (concat (map #(line "▸ " %) actives)
+                             (map #(line "" %) shown)))
+           (when (pos? more)
+             (str "\n; … and " more " more ready — (my.plan/next {}) lists them all."))))))
 
 (defn done-section
   "The `; ✓ [<completed-at>] <title>` lines for already-finished `dones`
@@ -347,27 +485,40 @@
                         dones)))))
 
 (defn plan-body
-  "Context-section text for `owner` in db value `db`: the open work items
-   (oldest first) PLUS a bounded `Recently completed` recall band (newest
-   first) so the agent sees what it already finished and doesn't re-do closed
-   setup — both DERIVED from the leaf facts, nothing stored. \"\" when the
-   agent has neither open nor recently-done items (the section vanishes — a
-   truly-idle agent shows nothing to acknowledge). Rides as `;` comments so
-   the whole context reads as eval'able Clojure."
-  [db owner]
-  (if-let [oe (:db/id (db/entity db owner))]
-    (let [open (open-section (open-steps db oe))
-          done (done-section (recent-done db oe))]
-      (str/join "\n" (remove str/blank? [open done])))
+  "Windowed plan text for `agent` in db value `db` — \"\" when no plan data.
+
+   Three bands, all DERIVED, nothing stored: (1) the position anchor —
+   where you ARE in which goal, (2) the open frontier — the :active step +
+   the ready queue (capped), (3) a small recently-completed tail (resume
+   grounding). A 1000-step plan renders at constant size: the completed
+   interior is dropped from the prompt but stays queryable (`tree`,
+   `status`, `db/query`). Rides as `;` comments so the whole context reads
+   as eval'able Clojure."
+  [db agent]
+  (if-let [oe (agent-eid db agent)]
+    (let [a          (anchor db oe)
+          actives    (active-steps db oe)
+          active-ids (into #{} (map :my.plan/id) actives)
+          unfinished (open-steps db oe)
+          actives*   (filterv #(active-ids (:my.plan/id %)) unfinished)
+          readies    (filterv (fn [{:my.plan/keys [id status]}]
+                                (and (not (active-ids id))
+                                     (= :open status)
+                                     (ready? db id)))
+                              unfinished)]
+      (str/join "\n" (remove str/blank?
+                             [(anchor-section a)
+                              (frontier-section actives* readies)
+                              (done-section (recent-done db oe))])))
     ""))
 
 (defn plan-block
   "Context-section fn (`:plan`, seon.config/default-ctx-blocks priority 45):
-   [[plan-body]] for the CALLING agent — the `:seon.agent/id` in the
-   render input, resolved as a `[:seon.agent/id id]` ref against the render's
-   db value — absent `:seon.db/db` defaults to the current conn, the same
-   convention as every other core section fn. Returns \"\" when the
-   agent has no open items (the section vanishes — derived, nothing stored,
+   [[plan-body]] for the CALLING agent — the `:seon.agent/id` in the render
+   input, resolved as a `[:seon.agent/id id]` ref against the render's db
+   value — absent `:seon.db/db` defaults to the current conn, the same
+   convention as every other core section fn. Returns \"\" when the agent
+   has no plan data (the section vanishes — derived, nothing stored,
    nothing to acknowledge)."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]

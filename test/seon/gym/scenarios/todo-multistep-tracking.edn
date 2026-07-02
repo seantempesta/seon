@@ -3,21 +3,21 @@
 ;; multi-step data task (3 independent steps: design a schema, store
 ;; rows, define a fn with a test) and NEVER mentions todos — the
 ;; behavioral bar is that the agent spontaneously (a) mints work items
-;; for the steps (≥2 owner-scoped :my.plan rows) and (b) closes
+;; for the steps (≥2 agent-scoped :my.plan rows) and (b) closes
 ;; its own loop: by run end NO todo it owns is still :open (the
 ;; <plan> section it sees every turn renders empty = done), while
 ;; the work itself actually lands (domain attrs registered, a deftest
 ;; written) and the human gets one reply.
 ;;
 ;; GYM INTEGRITY: predicates are STRUCTURAL — rows minted/completed,
-;; owner-scoped via the agent entity; nothing checks any title or any
+;; agent-scoped via the agent entity; nothing checks any title or any
 ;; plant. The teaching under test is WHEN/HOW to use todos generally
 ;; (system-text standing bullet + the my.plan docstring arc),
 ;; never this scenario's specific task.
 ;;
 ;; DEEPSEEK TIER (cheap) — refuses without allow-paid? + key.
 {:seon.gym.scenario/id     :todo-multistep-tracking
- :seon.gym.scenario/doc    "A 3-step data task (schema + rows + fn-with-test) that never mentions todos: the standing teaching says 2+ steps → mint one todo per step and complete! as you go. Bar: ≥2 owner-scoped todo rows minted AND zero still :open at run end (the agent closes its own loop — an empty <plan> block is the done-signal), the work lands (≥2 domain attrs, a deftest), one honest reply, under the turn cap."
+ :seon.gym.scenario/doc    "A 3-step data task (schema + rows + fn-with-test) that never mentions todos: the standing teaching says 2+ steps → mint one todo per step and complete! as you go. Bar: ≥2 agent-scoped todo rows minted AND zero still :open at run end (the agent closes its own loop — an empty <plan> block is the done-signal), the work lands (≥2 domain attrs, a deftest), one honest reply, under the turn cap."
  :seon.gym.scenario/tier   :paid
  :seon.gym.scenario/status :active
  :seon.gym.scenario/competency :planning
@@ -34,7 +34,7 @@
    :seon.gym.predicate/axis   :stores-proactively
    :seon.gym.predicate/query  [:find ?t
                                :where
-                               [?t :my.plan/owner ?a]
+                               [?t :my.plan/agent ?a]
                                [?a :seon.agent/id ?aid]]
    :seon.gym.predicate/expect [:count>= 2]}
   ;; (b) …and CLOSED THE LOOP: by run end no agent-owned todo is still
@@ -47,7 +47,7 @@
    :seon.gym.predicate/query  [:find ?t
                                :where
                                [?t :my.plan/status :open]
-                               [?t :my.plan/owner ?a]
+                               [?t :my.plan/agent ?a]
                                [?a :seon.agent/id ?aid]]
    :seon.gym.predicate/expect :empty}
   ;; The work itself landed: the agent designed a schema — agent-

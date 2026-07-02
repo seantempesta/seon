@@ -474,26 +474,32 @@
    ;; --- User (ONE human entity, seeded at boot) ---
    :seon.user/id
 
-   ;; --- Todo (work items — user→agent asks + agent notes-to-self;
-   ;; --- installed at boot so a RESUMING agent can list-open before
-   ;; --- any step tx has lazily installed the attrs) ---
+   ;; --- Plan (the per-agent planning graph — user→agent asks + the agent's
+   ;; --- own steps; installed at boot so a RESUMING agent can list-open and
+   ;; --- the plan block can pull before any step tx has lazily installed
+   ;; --- the attrs) ---
    :my.plan/id
    :my.plan/title
    :my.plan/description
    :my.plan/status
    :my.plan/created-at
    :my.plan/completed-at
-   :my.plan/owner
+   :my.plan/agent
    :my.plan/from
    ;; Back-ref to the inbound :human message an address-step tracks
    ;; (auto-minted in message!; the render half links id+age+title).
    :my.plan/message
    ;; The plan TREE edge (parent, plain ref) + the dependency DAG edges
-   ;; (depends-on, plain cardinality-many ref). Boot-installed so the derived
+   ;; (needs, plain cardinality-many ref). Boot-installed so the derived
    ;; work-queue rules (next/blocked/ready) query them before any tx has
    ;; lazily installed them on a fresh world.
    :my.plan/parent
-   :my.plan/depends-on
+   :my.plan/needs
+   ;; The goal/expect/pace narrative attrs — boot-installed so the windowed
+   ;; plan render can read them on any node from turn one.
+   :my.plan/goal
+   :my.plan/expect
+   :my.plan/pace
 
    ;; --- Eval ---
    ;; Evals are component-many on :seon.agent.turn/evals — no standalone

@@ -1,6 +1,6 @@
 (ns my.plan-test
   "Envelope-contract tests for my.plan — the exemplar store/retrieve ns.
-   Covers step!/done!/reopen! happy + failure paths, owner scoping (ALS
+   Covers step!/done!/reopen! happy + failure paths, agent scoping (ALS
    default + explicit), the resume property (open items persist; every list
    re-derives from the conn), and the pure plan-body view. All on a
    FRESH :memory conn seeded like the pod boots — never the live agent conn."
@@ -69,28 +69,28 @@
           (fn [conn]
             (-> (plan/step! {:my.plan/title "audit the schemas"
                             :my.plan/description "all of them"
-                            :my.plan/owner a-ref
+                            :my.plan/agent a-ref
                             :my.plan/from  [:seon.user/id "user"]})
                 (.then
                   (fn [{ok? :my.plan/ok? id :my.plan/id}]
                     (is (true? ok?))
                     (is (string? id) "response carries the durable id")
                     (let [t (d/pull @conn
-                                    '[* {:my.plan/owner [:seon.agent/id]
+                                    '[* {:my.plan/agent [:seon.agent/id]
                                          :my.plan/from  [:seon.user/id]}]
                                     [:my.plan/id id])]
                       (is (= "audit the schemas" (:my.plan/title t)))
                       (is (= "all of them" (:my.plan/description t)))
                       (is (= :open (:my.plan/status t)))
                       (is (inst? (:my.plan/created-at t)))
-                      (is (= a-id (get-in t [:my.plan/owner :seon.agent/id])))
+                      (is (= a-id (get-in t [:my.plan/agent :seon.agent/id])))
                       (is (= "user" (get-in t [:my.plan/from :seon.user/id])))
                       (is (nil? (:my.plan/completed-at t))
                           "open item: completed-at ABSENT, never nil")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest add-defaults-owner-from-agent-scope
+(deftest step-defaults-agent-from-agent-scope
   (async done
     (-> (with-conn
           (fn [conn]
@@ -101,18 +101,18 @@
                     (is (true? ok?))
                     (is (= a-id
                            (get-in (d/pull @conn
-                                           '[{:my.plan/owner [:seon.agent/id]}]
+                                           '[{:my.plan/agent [:seon.agent/id]}]
                                            [:my.plan/id id])
-                                   [:my.plan/owner :seon.agent/id]))
-                        "owner defaulted to the ALS agent"))))))
+                                   [:my.plan/agent :seon.agent/id]))
+                        "agent defaulted to the ALS agent"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest add-guards-blank-title-and-missing-owner
+(deftest step-guards-blank-title-and-missing-agent
   (async done
     (-> (with-conn
           (fn [conn]
-            (-> (plan/step! {:my.plan/title "  " :my.plan/owner a-ref})
+            (-> (plan/step! {:my.plan/title "  " :my.plan/agent a-ref})
                 (.then (fn [{ok? :my.plan/ok? error :my.plan/error}]
                          (is (false? ok?))
                          (is (re-find #"blank" error))
@@ -130,7 +130,7 @@
   (async done
     (-> (with-conn
           (fn [conn]
-            (-> (plan/step! {:my.plan/title "first (oldest)" :my.plan/owner a-ref})
+            (-> (plan/step! {:my.plan/title "first (oldest)" :my.plan/agent a-ref})
                 ;; backdate "first" so oldest-first ordering is deterministic
                 (.then (fn [{id :my.plan/id}]
                          (d/transact! conn
@@ -138,24 +138,24 @@
                                        :my.plan/created-at
                                        (js/Date. (- (js/Date.now) 120000))}]})))
                 (.then (fn [_] (plan/step! {:my.plan/title "second"
-                                           :my.plan/owner a-ref})))
+                                           :my.plan/agent a-ref})))
                 (.then (fn [_] (plan/step! {:my.plan/title "b's item"
-                                           :my.plan/owner b-ref})))
+                                           :my.plan/agent b-ref})))
                 (.then
                   (fn [{ok? :my.plan/ok?}]
                     (is (true? ok?))
                     ;; RESUME: everything below re-derives from the conn —
                     ;; no in-memory state survives from the adds.
                     (is (= ["first (oldest)" "second"]
-                           (open-titles (plan/list-open {:my.plan/owner a-ref})))
-                        "owner-scoped, oldest first, b's item excluded")
+                           (open-titles (plan/list-open {:my.plan/agent a-ref})))
+                        "agent-scoped, oldest first, b's item excluded")
                     (is (= ["first (oldest)" "second" "b's item"]
                            (open-titles (plan/list-open {:my.plan/all? true})))
-                        "all? widens across owners")
+                        "all? widens across agents")
                     (let [block (plan-int/plan-body @conn a-ref)
                           ids   (mapv :my.plan/id
                                       (:my.plan/steps
-                                        (plan/list-open {:my.plan/owner a-ref})))]
+                                        (plan/list-open {:my.plan/agent a-ref})))]
                       (is (and (str/includes? block "my.plan/done!")
                                (str/includes? block ":my.plan/id"))
                           "header teaches the done! call — names the fn and its :my.plan/id arg")
@@ -166,7 +166,7 @@
                       (is (< (str/index-of block "first (oldest)")
                              (str/index-of block "second"))
                           "oldest first — `first (oldest)` precedes the newer `second`"))
-                    (let [id (-> (plan/list-open {:my.plan/owner a-ref})
+                    (let [id (-> (plan/list-open {:my.plan/agent a-ref})
                                  :my.plan/steps first :my.plan/id)]
                       (-> (plan/done! {:my.plan/id id})
                           (.then (fn [{ok? :my.plan/ok?}]
@@ -176,7 +176,7 @@
                                        "completed-at stamped")
                                    (is (= ["second"]
                                           (open-titles
-                                            (plan/list-open {:my.plan/owner a-ref})))
+                                            (plan/list-open {:my.plan/agent a-ref})))
                                        "done item left the derived view")
                                    (plan/done! {:my.plan/id id})))
                           (.then (fn [{ok? :my.plan/ok?}]
@@ -189,7 +189,7 @@
                                        "reopen! RETRACTED completed-at")
                                    (is (= ["first (oldest)" "second"]
                                           (open-titles
-                                            (plan/list-open {:my.plan/owner a-ref})))
+                                            (plan/list-open {:my.plan/agent a-ref})))
                                        "reopened item is back, still oldest first"))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -212,7 +212,7 @@
             (is (= "" (plan-int/plan-body @conn a-ref))
                 "no open items → empty block, the section vanishes")
             (is (= "" (plan-int/plan-body @conn [:seon.agent/id "ghost"]))
-                "unknown owner → empty block, not a throw")))
+                "unknown agent → empty block, not a throw")))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -226,10 +226,10 @@
     (-> (with-conn
           (fn [conn]
             (-> (plan/step! {:my.plan/title "set up KB schema"
-                            :my.plan/owner a-ref})
+                            :my.plan/agent a-ref})
                 (.then (fn [{id :my.plan/id}]
                          (-> (plan/step! {:my.plan/title "write the plan"
-                                         :my.plan/owner a-ref})
+                                         :my.plan/agent a-ref})
                              (.then (fn [_] (plan/done! {:my.plan/id id}))))))
                 (.then
                   (fn [_]
@@ -243,14 +243,14 @@
                       (is (str/includes? block "✓")
                           "done lines carry a ✓ marker, distinct from open lines"))
                     ;; close everything — band persists, section does NOT vanish
-                    (let [open-id (-> (plan/list-open {:my.plan/owner a-ref})
+                    (let [open-id (-> (plan/list-open {:my.plan/agent a-ref})
                                       :my.plan/steps first :my.plan/id)]
                       (-> (plan/done! {:my.plan/id open-id})
                           (.then (fn [_]
                                    (let [block (plan-int/plan-body @conn a-ref)]
                                      (is (str/includes? block "Recently completed")
                                          "done-only still renders the recall band")
-                                     (is (not (str/includes? block "open work items"))
+                                     (is (not (str/includes? block "Open frontier"))
                                          "no open items → the open section is gone")
                                      (is (= "" (plan-int/plan-body
                                                  @conn [:seon.agent/id "ghost"]))
@@ -269,7 +269,7 @@
     (-> (with-conn
           (fn [conn]
             (-> (plan/step! {:my.plan/title "live item"
-                            :my.plan/owner a-ref})
+                            :my.plan/agent a-ref})
                 (.then
                   (fn [_]
                     (is (re-find #"live item"
@@ -312,7 +312,7 @@
                                  kids (:my.plan/_parent sub)
                                  syn  (some #(when (= (get ids "syn") (:my.plan/id %)) %) kids)]
                              (is (= 3 (count kids)) "plan! linked 3 children under root in one tx")
-                             (is (= 2 (count (:my.plan/depends-on syn)))
+                             (is (= 2 (count (:my.plan/needs syn)))
                                  "syn's two dependency edges landed in the SAME tx"))
                            (is (= #{"process notes-a.md" "process notes-b.md"}
                                   (set (map :my.plan/title (plan/next {}))))
@@ -350,7 +350,7 @@
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
-(deftest add-parent-and-depends-structure-and-block-the-queue
+(deftest step-parent-and-needs-structure-and-block-the-queue
   (async done
     (let [st (atom {})]
       (-> (with-agent-conn
@@ -364,12 +364,12 @@
                            (swap! st assoc :s1 s1)
                            (plan/step! {:my.plan/title "step 2"
                                        :my.plan/parent [:my.plan/id (:p @st)]
-                                       :my.plan/depends-on [[:my.plan/id s1]]})))
+                                       :my.plan/needs [[:my.plan/id s1]]})))
                   (.then (fn [{s2 :my.plan/id}]
                            (swap! st assoc :s2 s2)
                            (is (= #{"step 1"}
                                   (set (map :my.plan/title (plan/next {}))))
-                               "step!-built dependency blocks step 2 — only step 1 ready")
+                               "step!-built needs edge blocks step 2 — only step 1 ready")
                            (is (:my.plan/blocked? (plan/status {:my.plan/id s2})))
                            (is (= {:my.plan/done 0 :my.plan/total 2}
                                   (:my.plan/progress
@@ -383,13 +383,13 @@
                            (plan/step! {:my.plan/title "step 3"})))
                   (.then (fn [{s3 :my.plan/id}]
                            (swap! st assoc :s3 s3)
-                           (plan/depends! {:my.plan/id (:s2 @st)
+                           (plan/needs! {:my.plan/id (:s2 @st)
                                            :my.plan/on [[:my.plan/id s3]]})))
                   (.then (fn [{ok? :my.plan/ok?}]
                            (is (true? ok?))
                            (is (:my.plan/blocked?
                                  (plan/status {:my.plan/id (:s2 @st)}))
-                               "depends! on the still-open step 3 RE-blocks step 2"))))))
+                               "needs! on the still-open step 3 RE-blocks step 2"))))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
@@ -424,5 +424,161 @@
                            (is (= 1 (count (:my.plan/_parent
                                              (plan/tree {:my.plan/root? (:p2 @st)}))))
                                "move! re-parented the leaf under plan B"))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+;; --- planning redesign (deps as `needs`, :active position, windowed render).
+;; --- Assert MECHANISM (anchor derives, frontier caps, interior drops,
+;; --- stored :blocked excludes from ready), never exact rendered phrasing.
+
+(deftest active-sets-the-position-and-demotes-the-previous
+  (async done
+    (let [st (atom {})]
+      (-> (with-agent-conn
+            (fn []
+              (-> (plan/plan!
+                    {:my.plan/title "two-front plan"
+                     :my.plan/children
+                     [{:my.plan/title "front a" :my.plan/ref "a"}
+                      {:my.plan/title "front b" :my.plan/ref "b"}]})
+                  (.then (fn [{:my.plan/keys [ok? ids]}]
+                           (is (true? ok?))
+                           (reset! st ids)
+                           (plan/active! {:my.plan/id (get ids "a")})))
+                  (.then (fn [{ok? :my.plan/ok?}]
+                           (is (true? ok?))
+                           (is (= :active (plan-int/status-of (get @st "a")))
+                               "active! stores the :active status")
+                           (plan/active! {:my.plan/id (get @st "b")})))
+                  (.then (fn [{ok? :my.plan/ok?}]
+                           (is (true? ok?))
+                           (is (= :active (plan-int/status-of (get @st "b"))))
+                           (is (= :open (plan-int/status-of (get @st "a")))
+                               "one position at a time — the previous active demotes to :open")
+                           (plan/done! {:my.plan/id (get @st "b")})))
+                  (.then (fn [_] (plan/active! {:my.plan/id (get @st "b")})))
+                  (.then (fn [{ok? :my.plan/ok? error :my.plan/error}]
+                           (is (false? ok?) "a :done step cannot be taken up")
+                           (is (re-find #"reopen!" error) "names the fix"))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest stored-blocked-status-excludes-from-ready
+  (async done
+    (let [st (atom {})]
+      (-> (with-agent-conn
+            (fn []
+              (-> (plan/step! {:my.plan/title "waiting on the human"})
+                  (.then (fn [{id :my.plan/id}]
+                           (swap! st assoc :id id)
+                           (is (:my.plan/ready? (plan/status {:my.plan/id id}))
+                               "open free leaf starts ready")
+                           (db/transact!
+                             {:seon.db/tx-data [{:my.plan/id id
+                                                 :my.plan/status :blocked}]})))
+                  (.then (fn [_]
+                           (let [id (:id @st)]
+                             (is (:my.plan/blocked? (plan/status {:my.plan/id id}))
+                                 "stored :blocked derives blocked? true")
+                             (is (false? (:my.plan/ready? (plan/status {:my.plan/id id}))))
+                             (is (empty? (plan/next {}))
+                                 "a :blocked step never enters the focus queue")
+                             (is (= [(:id @st)]
+                                    (mapv :my.plan/id
+                                          (:my.plan/steps (plan/list-open {}))))
+                                 "list-open still surfaces it — unfinished, not done")
+                             (plan/reopen! {:my.plan/id id}))))
+                  (.then (fn [{ok? :my.plan/ok?}]
+                           (is (true? ok?))
+                           (is (:my.plan/ready? (plan/status {:my.plan/id (:id @st)}))
+                               "reopen! flips :blocked back to ready"))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest windowed-render-anchor-frontier-and-dropped-interior
+  ;; The drive's #1 failure (research/long-horizon-plan-drive-2026-07-02):
+  ;; the old open-items-only render went silent on success and carried no
+  ;; position. The windowed render must (a) anchor the position (goal +
+  ;; active step + roll-up), (b) prompt verify-before-done! off ::expect,
+  ;; (c) cap the frontier, and (d) DROP the completed interior while the
+  ;; recent tail keeps resume grounding.
+  (async done
+    (let [st (atom {})]
+      (-> (with-agent-conn
+            (fn []
+              (-> (plan/plan!
+                    {:my.plan/title "big tracker"
+                     :my.plan/goal  "a tracker the human keeps using"
+                     :my.plan/pace  :multi-session
+                     :my.plan/children
+                     (vec (for [i (range 10)]
+                            {:my.plan/title (str "leaf-" i "-x")
+                             :my.plan/ref   (str "c" i)
+                             :my.plan/expect (str "outcome-" i " holds")}))})
+                  (.then (fn [{:my.plan/keys [ok? ids]}]
+                           (is (true? ok?))
+                           (reset! st ids)
+                           ;; close the interior: c0..c6 done
+                           (reduce (fn [p i]
+                                     (.then p (fn [_]
+                                                (plan/done!
+                                                  {:my.plan/id (get @st (str "c" i))}))))
+                                   (js/Promise.resolve nil)
+                                   (range 7))))
+                  ;; backdate c0/c1 completions so the tail (newest 5) is
+                  ;; deterministic even when done! stamps share a millisecond
+                  (.then (fn [_]
+                           (db/transact!
+                             {:seon.db/tx-data
+                              [{:my.plan/id (get @st "c0")
+                                :my.plan/completed-at (js/Date. (- (js/Date.now) 120000))}
+                               {:my.plan/id (get @st "c1")
+                                :my.plan/completed-at (js/Date. (- (js/Date.now) 60000))}]})))
+                  (.then (fn [_] (plan/active! {:my.plan/id (get @st "c7")})))
+                  (.then (fn [_]
+                           (let [block (plan-int/plan-body @db/*conn*
+                                                           [:seon.agent/id a-id])]
+                             ;; (a) the position anchor
+                             (is (str/includes? block "a tracker the human keeps using")
+                                 "the root goal narrative renders every turn")
+                             (is (str/includes? block "multi-session")
+                                 "the pace renders — the don't-rush constraint is visible")
+                             (is (str/includes? block (get @st "c7"))
+                                 "the :active step id anchors the position")
+                             (is (str/includes? block "7 of 10")
+                                 "the roll-up narrates progress (7 of 10 done)")
+                             ;; (b) verify-before-done! off the active step's expect
+                             (is (str/includes? block "outcome-7 holds")
+                                 "the active step's ::expect renders as the verify prompt")
+                             ;; (c) the frontier: ready c8/c9 render
+                             (is (str/includes? block (get @st "c8")))
+                             (is (str/includes? block (get @st "c9")))
+                             ;; (d) the DROPPED interior vs the recent tail
+                             (is (not (str/includes? block "leaf-0-x"))
+                                 "the oldest completed step is OUT of the prompt")
+                             (is (not (str/includes? block "leaf-1-x"))
+                                 "the second-oldest completed step is OUT too")
+                             (is (str/includes? block "leaf-6-x")
+                                 "a recently-completed step stays as resume grounding")
+                             (is (str/includes? block "✓")
+                                 "the tail is marked done, distinct from the frontier"))))
+                  (.then (fn [_]
+                           ;; frontier cap: reopen everything → 9 ready (c7 active)
+                           (reduce (fn [p i]
+                                     (.then p (fn [_]
+                                                (plan/reopen!
+                                                  {:my.plan/id (get @st (str "c" i))}))))
+                                   (js/Promise.resolve nil)
+                                   (range 7))))
+                  (.then (fn [_]
+                           (let [block (plan-int/plan-body @db/*conn*
+                                                           [:seon.agent/id a-id])
+                                 open-ids (map #(get @st (str "c" %)) (range 10))
+                                 shown    (count (filter #(str/includes? block %)
+                                                         open-ids))]
+                             (is (<= shown (+ plan-int/frontier-limit 1))
+                                 "frontier caps at the limit (+ the active step) — constant-size render")
+                             (is (re-find #"more ready" block)
+                                 "the overflow is narrated, not silently dropped")))))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))

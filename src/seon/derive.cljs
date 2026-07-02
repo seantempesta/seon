@@ -294,22 +294,23 @@
   (agent-turn-count db id))
 
 (defn- open-step-count
-  "Count of the agent's open LEAF steps — the real work still owed. With
-   `my.plan` trees, milestone PARENTS stay stored `:open` (their done-ness is
-   DERIVED — done once every child is), so a flat `:status :open` count
+  "Count of the agent's unfinished LEAF steps — the real work still owed.
+   With `my.plan` trees, milestone PARENTS stay stored `:open` (their
+   done-ness is DERIVED — done once every child is), so a flat status count
    over-counts them. Counting only leaves (no child names it as parent — the
-   `leaf` predicate from `my.plan/rules`, inlined to keep this ns's
+   `leaf` predicate from `my.plan.internal/rules`, inlined to keep this ns's
    acyclic seon.db/seon.schema-only dependency) yields the actionable work.
-   Blocked-but-open leaves are still owed, so they count (use `next` for the
-   READY-only focus queue)."
+   :active and :blocked leaves are still owed, so they count (use `next` for
+   the READY-only focus queue)."
   [db id]
   (or (db/query {:seon.db/db db
                  :seon.db/query
                  '[:find (count ?step) . :in $ ?aid
                    :where
                    [?a :seon.agent/id ?aid]
-                   [?step :my.plan/owner ?a]
-                   [?step :my.plan/status :open]
+                   [?step :my.plan/agent ?a]
+                   [?step :my.plan/status ?s]
+                   [(!= ?s :done)]
                    (not-join [?step] [?child :my.plan/parent ?step])]
                  :seon.db/args [id]})
       0))

@@ -232,7 +232,7 @@
                             :my.plan/title      (internal/clip-title content)
                             :my.plan/status     :open
                             :my.plan/created-at (js/Date.)
-                            :my.plan/owner      agent-ref
+                            :my.plan/agent      agent-ref
                             :my.plan/from       from
                             :my.plan/message    [:seon.agent.message/id msg-id]})
                          agent-tos)

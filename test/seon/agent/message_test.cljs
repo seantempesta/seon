@@ -356,13 +356,13 @@
 (defn- steps-for
   "Address-steps owned by agent `aid`, message back-ref pulled."
   [conn aid]
-  (->> (d/q '[:find (pull ?t [* {:my.plan/owner   [:seon.agent/id]
+  (->> (d/q '[:find (pull ?t [* {:my.plan/agent   [:seon.agent/id]
                                  :my.plan/from    [:seon.user/id :seon.agent/id]
                                  :my.plan/message [:seon.agent.message/id]}])
               :in $ ?aid
               :where
               [?o :seon.agent/id ?aid]
-              [?t :my.plan/owner ?o]]
+              [?t :my.plan/agent ?o]]
             @conn aid)
        (map first)
        vec))
@@ -381,7 +381,7 @@
                           t  (first ts)]
                       (is (= 1 (count ts)) "exactly ONE address-step minted")
                       (is (= :open (:my.plan/status t)) "minted open")
-                      (is (= a-id (get-in t [:my.plan/owner :seon.agent/id]))
+                      (is (= a-id (get-in t [:my.plan/agent :seon.agent/id]))
                           "owned by the agent recipient")
                       (is (= "user" (get-in t [:my.plan/from :seon.user/id]))
                           "from = the human sender")

@@ -20,7 +20,7 @@
 ;; (which is still S-06-unsupported — see todo-resume.edn).
 ;;
 ;; GYM INTEGRITY: predicates are STRUCTURAL/behavioral — the plan was
-;; minted (≥3 owner-scoped todos), at least one item was actually closed
+;; minted (≥3 agent-scoped todos), at least one item was actually closed
 ;; (a real completion happened, not a delete), the loop is closed at end
 ;; (no open todos), the plan did NOT balloon (≤5 — a from-scratch re-plan
 ;; of a 3-step task doubles to 6, RED here), the schema landed (≥2 domain
@@ -44,7 +44,7 @@
 ;; PAID — costs real money. Refused without {:seon.gym/allow-paid? true} +
 ;; the active provider's API key.
 {:seon.gym.scenario/id     :plan-resume-across-restart
- :seon.gym.scenario/doc    "Planning continuity across an interruption: a 3-step task (design a books schema → load a list sent LATER → write+test a books-by-author fn) where step 2's data arrives only in turn 2, forcing the agent to stop after step 1 with steps 2-3 open. Turn 2 supplies just the list and never re-states step 3, so resuming requires reading the agent's own open plan items. Bar: ≥3 owner-scoped plan items minted up front, ≥1 actually closed, zero still open at end, the plan never balloons to a from-scratch re-plan (≤5), schema + test land, one honest reply, idle under cap, REPL clean."
+ :seon.gym.scenario/doc    "Planning continuity across an interruption: a 3-step task (design a books schema → load a list sent LATER → write+test a books-by-author fn) where step 2's data arrives only in turn 2, forcing the agent to stop after step 1 with steps 2-3 open. Turn 2 supplies just the list and never re-states step 3, so resuming requires reading the agent's own open plan items. Bar: ≥3 agent-scoped plan items minted up front, ≥1 actually closed, zero still open at end, the plan never balloons to a from-scratch re-plan (≤5), schema + test land, one honest reply, idle under cap, REPL clean."
  :seon.gym.scenario/tier   :paid
  :seon.gym.scenario/status :active
  :seon.gym.scenario/competency :planning
@@ -59,7 +59,7 @@
   ;; ---- own open plan items to finish the job.
   {:seon.gym.turn/message "Back. Here are the books I finished this month:\n- \"The Left Hand of Darkness\" — Ursula K. Le Guin — finished 2026-06-03\n- \"A Wizard of Earthsea\" — Ursula K. Le Guin — finished 2026-06-14\n- \"Project Hail Mary\" — Andy Weir — finished 2026-06-22"}]
  :seon.gym.scenario/predicates
- [;; (a) Broke the task into DURABLE items UP FRONT — ≥3 owner-scoped plan
+ [;; (a) Broke the task into DURABLE items UP FRONT — ≥3 agent-scoped plan
   ;; rows (one per step), owner = an agent entity. Structural: count +
   ;; ownership, never a title.
   {:seon.gym.predicate/id     :minted-a-plan-up-front
@@ -67,7 +67,7 @@
    :seon.gym.predicate/axis   :stores-proactively
    :seon.gym.predicate/query  [:find ?t
                                :where
-                               [?t :my.plan/owner ?a]
+                               [?t :my.plan/agent ?a]
                                [?a :seon.agent/id ?aid]]
    :seon.gym.predicate/expect [:count>= 3]}
   ;; (b) The plan did NOT balloon. A from-scratch re-plan of a 3-step task
@@ -80,7 +80,7 @@
    :seon.gym.predicate/axis   :models-work-directed
    :seon.gym.predicate/query  [:find ?t
                                :where
-                               [?t :my.plan/owner ?a]
+                               [?t :my.plan/agent ?a]
                                [?a :seon.agent/id ?aid]]
    :seon.gym.predicate/expect [:count<= 5]}
   ;; (c) A real completion happened — ≥1 item flipped to :done with a
@@ -93,12 +93,12 @@
    :seon.gym.predicate/axis   :stores-proactively
    :seon.gym.predicate/query  [:find ?t
                                :where
-                               [?t :my.plan/owner ?a]
+                               [?t :my.plan/agent ?a]
                                [?a :seon.agent/id ?aid]
                                [?t :my.plan/status :done]
                                [?t :my.plan/completed-at _]]
    :seon.gym.predicate/expect :non-empty}
-  ;; (d) Closed the loop — by run end NO owner-scoped item is still :open.
+  ;; (d) Closed the loop — by run end NO agent-scoped item is still :open.
   ;; Staying on track across the interruption means finishing what was
   ;; planned. (An empty open-steps block is the agent's own done-signal.)
   {:seon.gym.predicate/id     :closed-the-loop-no-open-items
@@ -107,7 +107,7 @@
    :seon.gym.predicate/query  [:find ?t
                                :where
                                [?t :my.plan/status :open]
-                               [?t :my.plan/owner ?a]
+                               [?t :my.plan/agent ?a]
                                [?a :seon.agent/id ?aid]]
    :seon.gym.predicate/expect :empty}
   ;; The work landed: the agent designed a schema — agent-provenance
