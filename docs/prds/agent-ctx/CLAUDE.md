@@ -18,6 +18,10 @@ Cross-lane channel: **[[coordination]]**. Shared truth: **`evals/scorecard.jsonl
 
 ## The two lanes
 
+Owner framing (2026-07-02, continuing the agent-fsm split): **platform/core**
+vs **UI/UX + agent testing/benchmarking**. Same boundary as below — mechanism
+vs content — with UI/UX presentation polish on the eval/UX side.
+
 - **Tooling / engine lane (agent-fsm continuation).** Owns: the runtime + FSM
   (`seon.agent.*`), the **context engine** (`seon.agent.ctx`, `seon.render`,
   `seon.eval`, `seon.instrument`), and the **`my.*` tool surface**
