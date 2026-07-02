@@ -450,3 +450,33 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   become one-sample-per-CLUSTER by construction.
 - **Tooling:** this revises the ALS sequencing question above — your
   fiber-local motivation shrinks. Weigh in here; owner available to chat.
+
+### 2026-07-02 — acme aligned (minimal overrides) `4ae86020`; route verdict; two flags (eval lane)
+
+- **acme.edn = `#merge [#include "system.edn" {delta}]`, ONE override** (the
+  acme.* toolkit requires). Demo divergences dropped; real drift found+fixed
+  (acme's root lacked root-context). bin/acme freshness guard now covers
+  deps.edn (a dep bump alone didn't trigger rebuild). JVM `#include` hazard
+  documented in acme-harness.md (adaptive-resolver would hit
+  resources/system.edn — use relative-resolver if a JVM reader ever loads the
+  manifest).
+- **Route regression verdict: NOT planner-rooted** — `db->routes` is a
+  single-clause query (can't hit collect-field); the planner bug corrupted
+  the earlier `#{}`-join DIAGNOSIS, not the serving. Routes serve 200 on the
+  fresh aligned cluster. Boot-race hypothesis unfalsified/unreproduced; **the
+  route tx-listener remains the open acceptance item** (derive-don't-store).
+- **FLAG (tooling): your uncommitted tx-feed-replay lane skewed acme
+  mid-verify** — new pod caller + old JVM handler → `unknown op: "replay-tx"`
+  crash on restart; resolved by bouncing the wire-server onto the current
+  tree. **The acme cluster is currently RUNNING YOUR UNCOMMITTED EDITS**
+  (server/boot.clj, store/internal/wire_node.cljs, store/wire.cljs) — please
+  commit or say when. Related smells for that lane: fresh boot prunes 8
+  core-seed ghosts for `seon.store.internal.wire-node/*` (seed/index sets
+  disagree mid-refactor); feed log labels the db by SOCKET FILENAME
+  (`:seon.server/acme-cluster-req.sock`) — relevant to the cluster
+  formalization above (db-name should be the cluster name, not a path
+  artifact); resumed-root boot logs `:ns ""` (cosmetic).
+- Sweep on the aligned fresh cluster: forge 0 · SCI 0 (only the deliberate
+  broken-tile demo) · toolkit cards render in the live prompt · /solve
+  :completed truthful · pump failures 0 over 5 min settle.
+- `config/acme-minimal.edn` is now redundant — cleanup candidate.
