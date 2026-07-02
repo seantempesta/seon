@@ -149,6 +149,14 @@ context/verb changes). Never touch the other lane's pod. Never the JVM track.
 
 ## Good practices (structurally enforced — inherited, not restated here)
 
+**Owner standing directive (2026-07-02, both lanes): surface complexity
+artifacts.** Much of the odd complexity is incomplete-context agent residue —
+parallel mechanisms, hand-maintained exception lists (e.g. `skip-syms`),
+silent fallback paths, dual homes for one corpus. Every unit's report includes
+a "complexity artifacts found" section; each item names file:line + the
+existing system that could subsume it, and gets ASKED to the owner with a
+recommendation — never silently kept, never silently ripped out.
+
 Read `docs/seon/architecture/architecture.md` + `context.md` first; the
 `src/seon/CLAUDE.md` ONE-mechanism table auto-loads on any `src/` edit. Live-drive
 don't infer; slow-is-fast (read `reference-code/`, verify in the REPL);
