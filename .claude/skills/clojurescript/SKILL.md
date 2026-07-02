@@ -77,9 +77,10 @@ Agents should get DATA, not Promises. `seon.eval` enforces this:
 - Bounded by `@seon.eval/!timeout-ms` (default 10000ms) or a one-shot
   `(seon.eval/budget <ms> <expr>)` override (`eval.cljs:97-120`) for a
   legitimately slow op.
-- On timeout it returns `{:ok false :error <timeout>}`. **Known gap:** the
-  pending Promise is currently dropped, not stashed -- so it can't be awaited
-  later. (See research doc D for the stash-on-timeout + re-reference design.)
+- On timeout it returns `{:seon.eval/ok? false :seon.eval/pending-promise <p>}`
+  and the batch path stashes the still-live Promise at `result/<id>` — a later
+  re-reference auto-awaits it to data. A rejection returns
+  `{:seon.eval/ok? false :seon/error <seon.error/->map>}`.
 
 Note: bare `seon.eval/eval` does NOT auto-await; only the
 `eval-batch!`/`eval-form-entry!` path does. New ergonomics plug in there.

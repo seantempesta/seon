@@ -812,7 +812,8 @@
 
 (defn ^:private load-error->log
   "Normalize a load failure `err` (a `seon.error/->map` from
-   `seon.eval/eval`'s `{:ok false :error …}`, or a raw caught JS error)
+   `seon.eval/eval`'s `{:seon.eval/ok? false :seon/error …}`, or a raw
+   caught JS error)
    into the `{:error <message-string> :stack <stack-string>}` shape
    `log-replay-failure!` expects. `:error` carries the full cause-chain
    message ([[error-chain-message]]); `:stack` the deepest cause's stack
@@ -881,14 +882,14 @@
                     (let [src (seval/reconstitute-ns-source db ns-kw)]
                       (await (seval/eval compile-state src {:ns 'cljs.user})))
                     (catch :default e
-                      {:ok false :error e}))]
-            (when-not (:ok r)
+                      {:seon.eval/ok? false :seon/error e}))]
+            (when-not (:seon.eval/ok? r)
               (vswap! !n-fail inc)
               ;; Best-effort log; swallow log-write failure (a
               ;; double-fault must not abort the rest of the load).
               (try
                 (await (log-replay-failure!
-                         agent-id ns-kw (load-error->log (:error r))))
+                         agent-id ns-kw (load-error->log (:seon/error r))))
                 (catch :default e
                   (log/error-console!
                     "seon.client/replay-program-graph!"
@@ -897,12 +898,12 @@
         ;; register! calls evaled from cljs.user.
         (doseq [src standalone]
           (let [r (try (await (seval/eval compile-state src {:ns 'cljs.user}))
-                       (catch :default e {:ok false :error e}))]
-            (when-not (:ok r)
+                       (catch :default e {:seon.eval/ok? false :seon/error e}))]
+            (when-not (:seon.eval/ok? r)
               (vswap! !n-fail inc)
               (try
                 (await (log-replay-failure!
-                         agent-id :standalone-schema (load-error->log (:error r))))
+                         agent-id :standalone-schema (load-error->log (:seon/error r))))
                 (catch :default e
                   (log/error-console!
                     "seon.client/replay-program-graph!"

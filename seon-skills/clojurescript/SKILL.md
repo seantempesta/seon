@@ -52,10 +52,10 @@ envelope directly, same turn.
 
 - Bounded by a default timeout (~10s) or a one-shot longer budget for a
   legitimately slow op.
-- On timeout you get `{:ok false :error <timeout>}`. **Known gap:** the
-  pending Promise is currently dropped, not stashed -- so it can't be
-  recovered later. If you hit this on a slow op, retry with a smaller
-  unit of work rather than waiting longer.
+- On timeout the recorded value is a `:seon.eval/pending` placeholder and
+  the still-running Promise is stashed at `result/<id>` — re-reference
+  `result/<id>` in a LATER eval and it auto-awaits to data. Nothing is
+  dropped; for a slow op you can also split it into smaller units.
 
 ## Promise-detection gotchas
 

@@ -214,10 +214,10 @@
                             (reverse chain))
                       (ex-message e)
                       (str e))]
-    {:kind    (cond timed-out :interrupt
-                    compile?  :compile
-                    :else     :throw)
-     :message msg}))
+    {:seon.error/kind    (cond timed-out :interrupt
+                               compile?  :compile
+                               :else     :throw)
+     :seon.error/message msg}))
 
 (defn eval-form
   "Compile + eval `code` under the warm self-host state.
@@ -225,13 +225,15 @@
    Bounded by
    `budget-ms`. Returns a Promise of a plain clj map:
 
-       {:ok true  :value <pr-str of the value>}
-       {:ok false :error {:kind :compile|:throw|:interrupt :message s}}
+       {:seon.eval/ok? true  :seon.eval/value <pr-str of the value>}
+       {:seon.eval/ok? false
+        :seon/error {:seon.error/kind :compile|:throw|:interrupt
+                     :seon.error/message s}}
 
    `:compile` = the analyzer flagged an unresolved var / bad arity (the form
    does not legally compile); `:throw` = it compiled but threw at runtime;
    `:interrupt` = it exceeded the wall-clock budget (non-termination). A clean
-   compile+eval → `{:ok true …}`.
+   compile+eval → `{:seon.eval/ok? true …}`.
 
    PURE w.r.t. the worker's domain state (no DB, no pod). The only mutable
    touch is the per-eval warning sink, reset here under the sequential
@@ -242,14 +244,18 @@
       (let [state @!state]
         (cond
           (nil? state)
-          (resolve {:ok false :error {:kind :throw :message "eval state not initialized"}})
+          (resolve {:seon.eval/ok? false
+                    :seon/error {:seon.error/kind :throw
+                                 :seon.error/message "eval state not initialized"}})
 
           ;; Empty/blank code is a malformed request, NOT a passing eval. A
           ;; non-JSON or empty line otherwise reads as the empty form and
           ;; evals to nil → a SILENT ok:true FALSE PASS, which would let the
           ;; kill-gate wave garbage through. Reject it as a compile error.
           (str/blank? code)
-          (resolve {:ok false :error {:kind :compile :message "empty or unparseable code"}})
+          (resolve {:seon.eval/ok? false
+                    :seon/error {:seon.error/kind :compile
+                                 :seon.error/message "empty or unparseable code"}})
 
           :else
           (do
@@ -271,17 +277,19 @@
                       ;; ReferenceError). Checking `error` first would mask the
                       ;; analyzer verdict as a coarser `:throw`.
                       (seq warns)
-                      (resolve {:ok false :error {:kind :compile :message (str/join "; " warns)}})
+                      (resolve {:seon.eval/ok? false
+                                :seon/error {:seon.error/kind :compile
+                                             :seon.error/message (str/join "; " warns)}})
 
                       error
-                      (resolve {:ok false :error (classify-error error)})
+                      (resolve {:seon.eval/ok? false :seon/error (classify-error error)})
 
                       :else
-                      (resolve {:ok true
-                                :value (try (pr-str value)
-                                            (catch :default _ "<unprintable>"))})))))
+                      (resolve {:seon.eval/ok? true
+                                :seon.eval/value (try (pr-str value)
+                                                      (catch :default _ "<unprintable>"))})))))
               (catch :default e
-                (resolve {:ok false :error (classify-error e)})))))))))
+                (resolve {:seon.eval/ok? false :seon/error (classify-error e)})))))))))
 
 ;; ============================================================
 ;; Wire boundary — clj result → JSON-serializable JS object.
@@ -293,15 +301,15 @@
 (defn- result->js
   "Flatten an [[eval-form]] result + the echoed `op`/`id` to a
    `JSON.stringify`-able JS value. Keyword `:kind` → its NAME string."
-  [op id {:keys [ok value error]}]
+  [op id {ok? :seon.eval/ok? value :seon.eval/value error :seon/error}]
   (let [base #js {:op   op
                   :tier "eval"
-                  :ok   (boolean ok)}]
+                  :ok   (boolean ok?)}]
     (when (some? id) (gobj-set base "id" id))
-    (if ok
+    (if ok?
       (gobj-set base "value" value)
-      (gobj-set base "error" #js {:kind    (name (:kind error))
-                                  :message (:message error)}))
+      (gobj-set base "error" #js {:kind    (name (:seon.error/kind error))
+                                  :message (:seon.error/message error)}))
     base))
 
 (defn- parse-request

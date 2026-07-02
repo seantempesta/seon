@@ -107,9 +107,9 @@
                               (seval/eval cs "(defn db-ok? [] (some? db/query))"
                                           {:ns 'scratch.before-73 :analyze-deps? false})))
                      (.then (fn [r]
-                              (is (not (:ok r))
+                              (is (not (:seon.eval/ok? r))
                                   "without the canonical alias, db/query does not resolve")
-                              (is (str/includes? (str (:error r)) "db/query")
+                              (is (str/includes? (str (:seon/error r)) "db/query")
                                   "the error names the unresolved db/query"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -147,7 +147,7 @@
                                     (-> (seval/eval cs (str "result/" last-id)
                                                     {:ns (symbol new-ns) :analyze-deps? false})
                                         (.then (fn [r2]
-                                                 (is (true? (:value r2))
+                                                 (is (true? (:seon.eval/value r2))
                                                      "db/query is the live fn — (some? db/query) is true")))))))))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))

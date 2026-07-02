@@ -98,7 +98,7 @@
    :narration   ""
    :source      source
    :ns          'cljs.user
-   :result      {:ok true :value :ok}
+   :result      {:seon.eval/ok? true :seon.eval/value :ok}
    :tee         tee})
 
 ;; ---------------------------------------------------------------------------
@@ -314,7 +314,7 @@
         schemas-before (schema/current-keys)]
     (-> (seval/eval cs source {:ns ns-sym :analyze-deps? false})
         (.then (fn [r]
-                 (is (:ok r) (str "eval ok: " source))
+                 (is (:seon.eval/ok? r) (str "eval ok: " source))
                  ((deref #'seval/build-tee-entities)
                   {:compile-state  cs
                    :defs-before    defs-before
@@ -329,7 +329,7 @@
           (fn [cs]
             (-> (seval/eval cs "(ns probe.teetest (:require [cljs.test]))"
                             {:ns 'cljs.user :analyze-deps? false})
-                (.then (fn [r] (is (:ok r) "probe ns evals")))
+                (.then (fn [r] (is (:seon.eval/ok? r) "probe ns evals")))
                 (.then (fn [_]
                          (tee-for cs 'probe.teetest
                                   "(cljs.test/deftest tee-probe-test (cljs.test/is (= 1 1)))")))
@@ -601,8 +601,8 @@
                                           {:ns 'cljs.user :analyze-deps? false})))
                           (.then
                             (fn [r]
-                              (is (:ok r) "replayed corpus is live")
-                              (is (true? (:value r))
+                              (is (:seon.eval/ok? r) "replayed corpus is live")
+                              (is (true? (:seon.eval/value r))
                                   "deftest var reconstituted on the compile-state"))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -627,7 +627,7 @@
                 (.then (fn [_]
                          (seval/eval cs "(seon.schema/register! :probe.garden.plant/id [:and {:seon.db/identity true} :seon.db/id])"
                                      {:ns 'probe.garden :analyze-deps? false})))
-                (.then (fn [r] (is (:ok r) "id-attr registers")))
+                (.then (fn [r] (is (:seon.eval/ok? r) "id-attr registers")))
                 (.then (fn [_]
                          (tee-for cs 'probe.garden
                                   "(seon.schema/register! :probe.garden.plant [:map {:seon.db/entity true} [:probe.garden.plant/id :probe.garden.plant/id]])")))

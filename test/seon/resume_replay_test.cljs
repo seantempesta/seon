@@ -184,15 +184,15 @@
                                     {:ns 'cljs.user :analyze-deps? false})))
                     (.then
                       (fn [r]
-                        (is (:ok r) "agent-fn loaded without error")
-                        (is (= 42 (:value r))
+                        (is (:seon.eval/ok? r) "agent-fn loaded without error")
+                        (is (= 42 (:seon.eval/value r))
                             "loaded agent-fn is callable: (agent-fn 21) => 42")
                         (seval/eval cs "(some? my.agent.t1/my-test)"
                                     {:ns 'cljs.user :analyze-deps? false})))
                     (.then
                       (fn [r]
-                        (is (:ok r) "agent deftest loaded without error")
-                        (is (true? (:value r))
+                        (is (:seon.eval/ok? r) "agent deftest loaded without error")
+                        (is (true? (:seon.eval/value r))
                             "deftest var reconstituted into the agent ns"))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -309,8 +309,8 @@
                                           {:ns 'cljs.user :analyze-deps? false})))
                           (.then
                             (fn [r]
-                              (is (:ok r) "fn in the requiring ns is callable")
-                              (is (= 42 (:value r)) "(kb-fn 35) => 42"))))))))))
+                              (is (:seon.eval/ok? r) "fn in the requiring ns is callable")
+                              (is (= 42 (:seon.eval/value r)) "(kb-fn 35) => 42"))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -360,8 +360,8 @@
                                           {:ns 'cljs.user :analyze-deps? false})))
                           (.then
                             (fn [r]
-                              (is (:ok r) "cross-ns call resolves")
-                              (is (= 7 (:value r))
+                              (is (:seon.eval/ok? r) "cross-ns call resolves")
+                              (is (= 7 (:seon.eval/value r))
                                   "av -> b/bv via the :as alias => 7"))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

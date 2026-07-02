@@ -1,6 +1,7 @@
 (ns seon.eval
   "Agent eval surface. SAFE BY DEFAULT — `eval` returns
-   {:ok true :value v} or {:ok false :error <error-map>}. A throw,
+   {::ok? true ::value v} or {::ok? false :seon/error <error-map>}. A
+   throw,
    compile error, or async rejection — all return as values. The agent
    session continues.
 
@@ -493,7 +494,7 @@
 ;; compile-state has no analyzer metadata for them — and the analyzer's
 ;; refer-check (`missing-use?`) raises `:undeclared-ns-form` ("Could not parse
 ;; ns form"). Seeding the `:defs` makes `missing-use?` false → the refer parses
-;; with `:ok true`, which is why setup-agent-ns! no longer needs a bare-`(ns)`
+;; with `::ok? true`, which is why setup-agent-ns! no longer needs a bare-`(ns)`
 ;; prime or a `(fn? complete)` probe.
 ;; ============================================================
 
@@ -963,9 +964,20 @@
 ;; branch can append the "did you mean `plan/plan!`?" hint.
 (declare home-ns-alias-hint)
 
+;;; The eval-result ENVELOPE (in-memory, never transacted whole):
+;;;   {::ok? true  ::value v ::ending-ns sym}
+;;;   {::ok? false :seon/error <seon.error/->map>}
+;;;   {::ok? false ::pending-promise <js/Promise>}   ; maybe-await-value only
+;;; `::ok?` is registered in seon.agent (the persisted eval attr — same
+;;; meaning); `::value` / `::pending-promise` carry arbitrary runtime
+;;; values / a live Promise, so they are deliberately unregistered
+;;; (three-tier rule: the DB stores projections, not these).
+(schema/register! ::ending-ns :symbol)
+
 (defn ^:async ^:private raw-eval
-  "Internal — returns a Promise that resolves with {:value v :ns ns}
-   or rejects with the error. The public `eval` catches both.
+  "Internal — returns a Promise that resolves with
+   {::value v ::ending-ns ns} or rejects with the error. The public
+   `eval` catches both.
 
    Warning capture is per-fiber via `warnings-als` (Node
    AsyncLocalStorage). The root handler installed by
@@ -1023,8 +1035,8 @@
                   ;; misses reach this branch.
                   (and result-ref?
                        (some (partial truly-undeclared? compile-state) @warnings))
-                  (resolve {:value (result-miss-message (str/trim (str form-str)))
-                            :ns    ns-sym})
+                  (resolve {::value (result-miss-message (str/trim (str form-str)))
+                            ::ending-ns ns-sym})
 
                   (some (partial truly-undeclared? compile-state) @warnings)
                   (let [{:keys [prefix suffix] :as w}
@@ -1069,21 +1081,21 @@
                   (reject error)
 
                   :else
-                  (resolve {:value value :ns ns}))))))))))
+                  (resolve {::value value ::ending-ns ns}))))))))))
 
 (defn ^:async eval
   "Evaluate a string of CLJS in the agent's persistent compile-state.
    Returns:
-     {:ok true  :value v :ns ns}              on success
-     {:ok false :error <seon.error/->map>}    on any failure
+     {::ok? true  ::value v ::ending-ns ns}   on success
+     {::ok? false :seon/error <seon.error/->map>}  on any failure
    Never throws; never rejects.
 
    Opts (all optional):
      :ns            target namespace (default `cljs.user`). The
-                    returned `:ns` is the ENDING ns — `(ns other)`
-                    forms switch it. Callers that want REPL-style
-                    ns-tracking feed `:ns` from one call into the
-                    next call's `:ns` arg.
+                    returned `::ending-ns` is the ENDING ns — `(ns
+                    other)` forms switch it. Callers that want
+                    REPL-style ns-tracking feed `::ending-ns` from one
+                    call into the next call's `:ns` arg.
      :analyze-deps? whether cljs.js should recursively analyze refs
                     in the form (default `false`). The bootstrap
                     bundle only contains `cljs.core`, so any form
@@ -1100,7 +1112,7 @@
    `(ns …)` analysis, pass `:analyze-deps? true` explicitly.
 
    A form that hangs on a never-resolving Promise returns
-     {:ok false :error {:seon.error/message \"eval timed out after Nms\" …}}
+     {::ok? false :seon/error {:seon.error/message \"eval timed out after Nms\" …}}
    The underlying form keeps running — see `race-timeout` docstring."
   {:malli/schema
    [:function
@@ -1117,16 +1129,16 @@
                             (raw-eval compile-state form-str ns analyze-deps?)
                             ms))]
        (if (identical? raced timeout-sentinel)
-         {:ok false
-          :error (error/->map
-                   (js/Error.
-                     (str "eval timed out after " ms "ms (form still "
-                          "running in background; JS has no preemption — "
-                          "Phase 2 worker_thread or Phase 3 wasmtime "
-                          "needed for hard cancellation)")))}
-         {:ok true :value (:value raced) :ns (:ns raced)}))
+         {::ok? false
+          :seon/error (error/->map
+                        (js/Error.
+                          (str "eval timed out after " ms "ms (form still "
+                               "running in background; JS has no preemption — "
+                               "Phase 2 worker_thread or Phase 3 wasmtime "
+                               "needed for hard cancellation)")))}
+         {::ok? true ::value (::value raced) ::ending-ns (::ending-ns raced)}))
      (catch :default e
-       {:ok false :error (error/->map e)}))))
+       {::ok? false :seon/error (error/->map e)}))))
 
 ;; ============================================================
 ;; Per-agent namespace setup. Run once per agent at boot. Primes the
@@ -1528,7 +1540,7 @@
    declared that ns's `:defs` into every compile-state. The clean emit also
    materializes the home ns's runtime JS object, so a later `(defn …)` has a
    path to write into — hence NO bare-`(ns)` prime and NO `(fn? complete)`
-   probe. A non-`:ok` result now signals a REAL failure (the seed missing, or a
+   probe. A non-`::ok?` result now signals a REAL failure (the seed missing, or a
    toolkit ns gone) and throws."
   {:malli/schema
    [:=> [:catn [::compile-state :any] [::agent-ns-sym :any] [::agent-id :any]] :any]}
@@ -1536,7 +1548,7 @@
   (let [setup-src (home-ns-form agent-ns-sym (home-requires-for agent-id))
         r (await (eval compile-state setup-src
                        {:ns user-ns-sym :analyze-deps? true}))]
-    (when-not (:ok r)
+    (when-not (::ok? r)
       (throw (ex-info
                (str "setup-agent-ns! failed — the home-ns require/refer did not "
                     "analyze cleanly for " agent-ns-sym ". seed-toolkit-refers! "
@@ -1579,15 +1591,16 @@
 
    Bounded by `@!timeout-ms` (default) OR the one-shot override left by
    [[budget]]. A Promise that exceeds the bound is NOT dropped: it is
-   handed back as `:pending` so the caller stashes the live handle at
+   handed back as `::pending-promise` so the caller stashes the live handle at
    `result/<id>` (re-reference auto-resolves it later). A `(defer …)`
-   wrapper opts out of awaiting entirely and takes the same `:pending`
-   path immediately.
+   wrapper opts out of awaiting entirely and takes the same
+   `::pending-promise` path immediately.
 
-   Returns {:ok true  :value v}        on resolution OR a non-Promise value;
-           {:ok false :pending <promise>} on timeout OR `defer` — carry the
-                                          still-running Promise to result/<id>;
-           {:ok false :error <seon.error/->map>} on rejection."
+   Returns {::ok? true  ::value v}     on resolution OR a non-Promise value;
+           {::ok? false ::pending-promise <promise>} on timeout OR `defer` —
+                                          carry the still-running Promise to
+                                          result/<id>;
+           {::ok? false :seon/error <seon.error/->map>} on rejection."
   [v]
   (cond
     ;; Explicit opt-out: `(defer expr)` wrapped the Promise. Don't await —
@@ -1595,7 +1608,7 @@
     ;; budget so it doesn't leak into the NEXT form's auto-await.
     (instance? Deferred v)
     (do (reset! !next-budget-ms nil)
-        {:ok false :pending (.-promise v)})
+        {::ok? false ::pending-promise (.-promise v)})
 
     (instance? js/Promise v)
     (try
@@ -1606,20 +1619,20 @@
             raced    (await (race-timeout v ms))]
         (if (identical? raced timeout-sentinel)
           ;; Auto-await timed out. The Promise keeps running (no JS
-          ;; preemption); carry the live handle back as `:pending` so the
+          ;; preemption); carry the live handle back as `::pending-promise` so the
           ;; caller stashes it at result/<id> for a later re-reference —
           ;; never drop it (the agent would have no way to recover it).
-          {:ok false :pending v}
-          {:ok true :value raced}))
+          {::ok? false ::pending-promise v}
+          {::ok? true ::value raced}))
       (catch :default e
-        {:ok false :error (error/->map e)}))
+        {::ok? false :seon/error (error/->map e)}))
 
     :else
     (do
       ;; Even for non-Promise values, consume any pending budget so it
       ;; doesn't leak into the NEXT form's auto-await.
       (reset! !next-budget-ms nil)
-      {:ok true :value v})))
+      {::ok? true ::value v})))
 
 ;; ============================================================
 ;; Detect-and-tee (v1.md §2.2 + §7 / STATUS.md Phase B item 10)
@@ -2674,7 +2687,7 @@
                           ;; just above): an empty-source row is honest and
                           ;; queryable; a missing row is data loss.
                           :seon.eval/source      (or source "")
-                          :seon.eval/ok?         (boolean (:ok result))
+                          :seon.eval/ok?         (boolean (::ok? result))
                           ;; Renderer dispatch via entity-schema props
                           ;; (`:seon.eval` map registration). No per-row
                           ;; stamp — the renderer enumerates evals by
@@ -2702,10 +2715,10 @@
                    ;; blob even if the render cap is raised; a no-op when the
                    ;; render cap ≤ the store cap. The FULL value is in the
                    ;; globalThis live-result stash (set before this call).
-                   (:ok result)
+                   (::ok? result)
                    (assoc :seon.eval/result-edn
                           (cap-edn
-                            (render-result-edn eval-id (:value result))))
+                            (render-result-edn eval-id (::value result))))
 
                    ;; (fix f) print output captured during the eval span —
                    ;; persisted so the transcript can show it next to the
@@ -2719,11 +2732,11 @@
                    ;; the useful line under the opaque `#error` + stack and
                    ;; was unreadable by the agent-side renderer. The full
                    ;; value remains in the live result stash.
-                   (not (:ok result))
+                   (not (::ok? result))
                    (assoc :seon.eval/error
                           (cap-edn
-                            (try (render-error-string (:error result))
-                                 (catch :default _ (str (:error result))))))
+                            (try (render-error-string (:seon/error result))
+                                 (catch :default _ (str (:seon/error result))))))
 
                    ;; Phase A item 8 — when the error carries a Malli
                    ;; instrumentation envelope (flattened into
@@ -2731,16 +2744,16 @@
                    ;; envelope as `:seon.eval/error-data` (pr-str round-
                    ;; trip — see attr docstring). Renderers branch on
                    ;; this to produce the structured ;; ERROR block.
-                   (and (not (:ok result))
+                   (and (not (::ok? result))
                         (einstrument/instrument-error?
-                          (some-> result :error :seon.error/data)))
+                          (some-> result :seon/error :seon.error/data)))
                    (assoc :seon.eval/error-data
                           ;; Use the fn-stubbing serializer — envelope
                           ;; embeds Malli schemas whose forms contain
                           ;; unreadable #object[…] fn refs. See
                           ;; seon.error.instrument/pr-str-readable.
                           (einstrument/pr-str-readable
-                            (-> result :error :seon.error/data))))
+                            (-> result :seon/error :seon.error/data))))
         ;; Attach the eval as a component child of the turn. Datahike's
         ;; cardinality-many ref accumulates on upsert — each record-eval!
         ;; call appends one eval to the turn's evals set.
@@ -3034,8 +3047,8 @@
         ;; escalate to an honest error instead of letting it read nil.
         stale-ref   (references-failed-def source @failed-defs)]
     (if stale-ref
-      (let [result {:ok false
-                    :error {:seon.error/kind :compile
+      (let [result {::ok? false
+                    :seon/error {:seon.error/kind :compile
                             :seon.error/message
                             (str "`" stale-ref "` does not exist — the def that "
                                  "would create it failed to evaluate earlier this "
@@ -3078,9 +3091,9 @@
                                                      {:ns @current-ns
                                                       :analyze-deps? false}))]
                                 {:raw raw
-                                 :awaited (when (:ok raw)
+                                 :awaited (when (::ok? raw)
                                             (await (maybe-await-value
-                                                     (:value raw))))}))))
+                                                     (::value raw))))}))))
             raw-result  (:raw captured)
             awaited     (:awaited captured)
             ;; A still-running Promise — auto-await timeout OR an explicit
@@ -3089,7 +3102,7 @@
             ;; below) for a later re-reference that auto-awaits it to data.
             ;; The raw Promise NEVER becomes the displayed value — the value
             ;; renderer must not `seq` a Promise.
-            pending-promise (:pending awaited)
+            pending-promise (::pending-promise awaited)
             ;; `pending-promise` is a Promise-or-nil, so `(some? …)` is
             ;; behaviorally identical to a bare test (only nil is falsey) — it
             ;; just states the present-or-absent intent. CLJS has NO
@@ -3100,13 +3113,13 @@
             pending?        (some? pending-promise)
             result
             (cond
-              (not (:ok raw-result)) raw-result
-              pending?               {:ok true
-                                      :value (pending-placeholder eval-id)
-                                      :ns    (:ns raw-result)}
-              (:ok awaited)          {:ok true
-                                      :value (:value awaited)
-                                      :ns    (:ns raw-result)}
+              (not (::ok? raw-result)) raw-result
+              pending?               {::ok? true
+                                      ::value (pending-placeholder eval-id)
+                                      ::ending-ns (::ending-ns raw-result)}
+              (::ok? awaited)        {::ok? true
+                                      ::value (::value awaited)
+                                      ::ending-ns (::ending-ns raw-result)}
               :else                  awaited)
             ;; No restore needed — capture was scoped to the `.run print-als`
             ;; span above. Record/tee/auto-test prints below run OUTSIDE that
@@ -3126,7 +3139,7 @@
         ;; newly registered in its eval ns so the retry is genuinely-new
         ;; and tees — the REPL invariant that a failed defn defines
         ;; nothing. Pre-existing defs (in defs-before) are untouched.
-        (when-not (:ok result)
+        (when-not (::ok? result)
           (analyzer-info/remove-phantom-defs! compile-state defs-before @current-ns)
           ;; #39: the schema analog of the phantom-def rollback. A failed
           ;; eval that ran `schema/register!` must define NOTHING. The
@@ -3141,15 +3154,15 @@
         ;; Failed evals leave the accumulator untouched —
         ;; the form ran in @current-ns and we record that
         ;; value as the form's :seon.eval/ns.
-        (when (and (:ok result) (:ns raw-result))
-          (vreset! current-ns (:ns raw-result)))
+        (when (and (::ok? result) (::ending-ns raw-result))
+          (vreset! current-ns (::ending-ns raw-result)))
         ;; A.4: a DEFINING form whose eval failed registers its target
         ;; symbol so a later reference escalates (see references-failed-def);
         ;; a DEFINING form that SUCCEEDS clears its symbol (a redefinition
         ;; that now works self-heals the guard).
         (let [def-syms (failed-def-syms source)]
           (when (seq def-syms)
-            (if (:ok result)
+            (if (::ok? result)
               (vswap! failed-defs #(reduce disj % def-syms))
               (vswap! failed-defs into def-syms))))
         ;; Live-value stash — direct js/Reflect.set on globalThis,
@@ -3168,8 +3181,8 @@
         ;; AUTO-AWAITS — that would resolve the handle (and block) instead of
         ;; stashing it. A boolean test keeps the Promise unawaited; it reaches
         ;; the stash as a live handle (a fn arg never awaits).
-        (when (:ok result)
-          (let [stash-val (if pending? pending-promise (:value result))]
+        (when (::ok? result)
+          (let [stash-val (if pending? pending-promise (::value result))]
             (stash-result-raw! eval-id stash-val)
             ;; transcript-redesign-2026-06-18: bind the value as the plain
             ;; var `result/<id>` (globalThis + analyzer def) so the agent
@@ -3194,7 +3207,7 @@
         ;; back analyzer defs and never touch the schema registry,
         ;; so diff would be empty anyway; we still skip
         ;; explicitly to keep the contract obvious.
-        (let [tee-entities (when (:ok result)
+        (let [tee-entities (when (::ok? result)
                              (build-tee-entities
                                {:compile-state  compile-state
                                 :defs-before    defs-before
@@ -3229,7 +3242,7 @@
               ;; them. Diff-upsert against the live db value so the
               ;; cardinality-many set tracks EXACTLY (add + retract);
               ;; rides in record-eval!'s atomic tee tx.
-              ending-ns (when (:ok result) @current-ns)
+              ending-ns (when (::ok? result) @current-ns)
               req-tx    (when (and ending-ns
                                    (symbol? ending-ns)
                                    (not (contains? transient-ns-syms
@@ -3260,7 +3273,7 @@
           ;; tx so the `:seon.fn` row is durable before we
           ;; mutate the live var. Best-effort: a thrown
           ;; instrument! aborts only this fn, not the batch.
-          (when (:ok result)
+          (when (::ok? result)
             (try
               (instrument-tee-fns!
                 (collect-instrument-targets compile-state defs-before))
@@ -3294,7 +3307,7 @@
                       (js/console.warn
                         "[seon.eval/eval-batch!] auto-test-run failed:"
                         (or (.-message e) (str e))))))))))
-        (if (:ok result)
+        (if (::ok? result)
           (vswap! n-ok   inc)
           (vswap! n-fail inc))))))
 
@@ -3333,7 +3346,7 @@
                             :narration   narration
                             :source      ""
                             :ns          @current-ns
-                            :result      {:ok true :value nil}}))
+                            :result      {::ok? true ::value nil}}))
 
       ;; REPL-parity intercept (fix d) — in-ns / *ns* get a legible
       ;; translation INSTEAD of an opaque error or a silent nil. No eval
@@ -3341,13 +3354,13 @@
       (some? (parity-intercept source @current-ns))
       (let [pc     (parity-intercept source @current-ns)
             result (if (= :error (:seon.eval/parity pc))
-                     {:ok false
-                      :error {:seon.error/kind    :seon.eval/repl-parity
-                              :seon.error/message (:seon.error/message pc)}}
-                     {:ok true :value (:seon.eval/value pc)})]
-        (when (:ok result)
-          (stash-result-raw! eval-id (:value result))
-          (bind-result-var! compile-state eval-id (:value result)))
+                     {::ok? false
+                      :seon/error {:seon.error/kind    :seon.eval/repl-parity
+                                   :seon.error/message (:seon.error/message pc)}}
+                     {::ok? true ::value (:seon.eval/value pc)})]
+        (when (::ok? result)
+          (stash-result-raw! eval-id (::value result))
+          (bind-result-var! compile-state eval-id (::value result)))
         (await (record-eval! {:eval-id     eval-id
                               :turn-id     turn-id
                               :at          (js/Date.)
@@ -3356,7 +3369,7 @@
                               :source      source
                               :ns          @current-ns
                               :result      result}))
-        (if (:ok result)
+        (if (::ok? result)
           (vswap! n-ok   inc)
           (vswap! n-fail inc)))
 
@@ -3380,7 +3393,7 @@
                                   "argument resolve; keep prose in `;` comments.")
                 :source      source
                 :ns          @current-ns
-                :result      {:ok true :value nil}}))
+                :result      {::ok? true ::value nil}}))
 
       ;; Normal eval path.
       :else
@@ -3417,7 +3430,7 @@
      1. Eval in the accumulator's current-ns.
      2. Auto-await Promise return values.
      3. Compute duration-ms = (now - start).
-     4. On success: advance accumulator to (:ns raw-result); stash
+     4. On success: advance accumulator to (::ending-ns raw-result); stash
         the live value in globalThis under the eval-id kw.
      5. Transact a :seon.eval entity carrying :seon.eval/ns = the
         post-update accumulator value.
@@ -3601,12 +3614,12 @@
                                 :narration   (:narration entry)
                                 :source      (:source entry)
                                 :ns          @current-ns
-                                :result      {:ok false
-                                              :error {:seon.error/kind    :read
-                                                      :seon.error/message
-                                                      (read-error-message
-                                                        (:error entry)
-                                                        (:source entry))}}}))
+                                :result      {::ok? false
+                                              :seon/error {:seon.error/kind    :read
+                                                           :seon.error/message
+                                                           (read-error-message
+                                                             (:error entry)
+                                                             (:source entry))}}}))
                       (vswap! n-fail inc))))
 
                 ;; Every non-`:read` entry — comment / parity-intercept /

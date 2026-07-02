@@ -31,7 +31,7 @@
    chain, joined with ` <- ` — the same view `seon.client`'s
    replay-failure warn surfaces."
   [r]
-  (->> (iterate :seon.error/cause (:error r))
+  (->> (iterate :seon.error/cause (:seon/error r))
        (take-while some?)
        (keep :seon.error/message)
        (str/join " <- ")))
@@ -56,7 +56,7 @@
                             {:ns 'cljs.user :analyze-deps? false})
                 (.then
                   (fn [r]
-                    (is (:ok r)
+                    (is (:seon.eval/ok? r)
                         (str "require of host-bundled nses succeeds — "
                              (err-chain r)))
                     ;; The alias must actually WORK — wired from the ns
@@ -68,9 +68,9 @@
                                  :analyze-deps? false})))
                 (.then
                   (fn [r]
-                    (is (:ok r)
+                    (is (:seon.eval/ok? r)
                         (str "alias call evals — " (err-chain r)))
-                    (is (= "b4-alias" (:value r))
+                    (is (= "b4-alias" (:seon.eval/value r))
                         "aliased var resolves to the live host fn"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -84,7 +84,7 @@
                             {:ns 'cljs.user :analyze-deps? false})
                 (.then
                   (fn [r]
-                    (is (:ok r)
+                    (is (:seon.eval/ok? r)
                         (str "bare (require '[my.kb]) succeeds — "
                              (err-chain r))))))))
         (.then (fn [_] (done)))
@@ -101,7 +101,7 @@
                             {:ns 'cljs.user :analyze-deps? false})
                 (.then
                   (fn [r]
-                    (is (false? (:ok r))
+                    (is (false? (:seon.eval/ok? r))
                         "an absent ns is still a real error")
                     (is (str/includes? (err-chain r) "no.such.namespace")
                         "the error names the missing namespace"))))))

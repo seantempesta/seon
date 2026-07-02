@@ -87,7 +87,7 @@
     [seon.agent.ctx.namespaces :as ctx-ns]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
-    [seon.debug :as debug]
+    [my.blob :as blob]
     ;; World-parity (2026-06-10 deep audit): the :test build has no
     ;; :devtools preload slot, so without this require
     ;; `client/!indexed-test-vars` stays [] and `client/index-tests`
@@ -171,17 +171,17 @@
 ;;   = "the seeded reuse surface is actually visible".
 ;; :prompt-includes / :prompt-excludes / :prompt-every-turn — the
 ;;   referee's EYES (gym-upgrade PRD §2.1 / U1): assert against what
-;;   the agent ACTUALLY SAW. run-turn! persists every full prompt (via
-;;   seon.debug capture, forced ON for gym runs) to
-;;   <debug-dir>/<agent-id>/<turn-idx>-<turn-id>/prompt.txt (the turn
-;;   datom carries :seon.agent.turn/prompt-file); the driver collects the run's turns
-;;   from the post-run store and reads those blobs. :prompt-includes =
+;;   the agent ACTUALLY SAW. run-turn!'s ALWAYS-ON observability capture
+;;   persists every full prompt to the content-addressed blob store (the
+;;   turn datom carries a :seon.agent.turn/prompt-blob ref); the driver
+;;   collects the run's turns from the post-run store and reads those
+;;   blobs back by hash (my.blob/get). :prompt-includes =
 ;;   SOME turn's prompt contains :text; :prompt-excludes = NO turn's
 ;;   prompt contains :text; :prompt-every-turn = EVERY turn's prompt
 ;;   contains :text (the catalog's standing G2 sees-question shape).
 ;;   Optional :seon.gym.predicate/turn pins ONE turn by chronological
 ;;   index; :seon.gym.predicate/agent scopes to one designator's turns.
-;;   A turn with no prompt-file datom, an unreadable blob, an
+;;   A turn with no prompt-blob ref, an unreadable blob, an
 ;;   out-of-range index, or a run with zero turns ALL score RED naming
 ;;   the path/turn — NEVER a silent pass (a referee blind to its own
 ;;   missing eyes would hide the exact regression class this exists
@@ -373,9 +373,10 @@
 (schema/register! :seon.gym.scorecard/toolkit-calls
   [:map-of :seon.gym/toolkit-ns [:int {:min 0}]])
 ;; Per-turn prompt-blob evidence (gym-upgrade PRD §6.6, default-on):
-;; every persisted prompt-file path for the run, chronological — a
-;; moved number is diffable to the exact context bytes the agent saw.
-(schema/register! :seon.gym.scorecard/prompt-files [:vector :string])
+;; every persisted prompt-blob hash for the run, chronological — a
+;; moved number is diffable to the exact context bytes the agent saw
+;; (read back via my.blob/get).
+(schema/register! :seon.gym.scorecard/prompt-blobs [:vector :string])
 ;; --- per-turn context telemetry (informational, NEVER gates pass?) ----------
 ;; Captured once per driven gym turn from the per-block render path's OWN
 ;; output against the PRE-TURN db value (user message landed, turn not
@@ -436,8 +437,8 @@
    [:seon.gym.scorecard/toolkit-calls   :seon.gym.scorecard/toolkit-calls]
    [:seon.gym.scorecard/axes     :seon.gym.scorecard/axes]
    [:seon.gym.scorecard/results  :seon.gym.scorecard/results]
-   [:seon.gym.scorecard/prompt-files {:optional true}
-    :seon.gym.scorecard/prompt-files]
+   [:seon.gym.scorecard/prompt-blobs {:optional true}
+    :seon.gym.scorecard/prompt-blobs]
    ;; one context-telemetry profile per driven turn, chronological —
    ;; informational evidence only, never part of the verdict.
    [:seon.gym.scorecard/turn-profiles :seon.gym.scorecard/turn-profiles]
@@ -878,15 +879,15 @@
                   (db/entity {:seon.db/ref [:seon.agent/id agent-id]
                               :seon.db/db  dbv}))))))
 
-(defn- turn-prompt-files
-  "Chronological [turn-id prompt-file-or-nil] pairs for every RUN-DRIVEN
-   turn (stamped with a `:seon.agent.turn/run` whose run carries a
-   `:seon.agent.run/cause` — the bootstrap turn's run has no cause and
-   renders no prompt, so prompt predicates range over the turns the agent
-   was actually prompted on) in the post-run store — optionally scoped to
-   one agent's turns via agent ← run ← turn. A nil prompt-file means the
-   blob was never written (capture failure, or a seeded turn without one)
-   — prompt-predicate callers MUST treat that as RED."
+(defn- turn-prompt-blobs
+  "Chronological [turn-id prompt-blob-hash-or-nil] pairs for every
+   RUN-DRIVEN turn (stamped with a `:seon.agent.turn/run` whose run
+   carries a `:seon.agent.run/cause` — the bootstrap turn's run has no
+   cause and renders no prompt, so prompt predicates range over the turns
+   the agent was actually prompted on) in the post-run store — optionally
+   scoped to one agent's turns via agent ← run ← turn. A nil hash means
+   the always-on blob capture never landed (write failure, or a seeded
+   turn without one) — prompt-predicate callers MUST treat that as RED."
   [dbv agent-id]
   (->> (if agent-id
          (db/query {:seon.db/query '[:find ?at ?tid ?t
@@ -912,37 +913,43 @@
        ;; the canonical sub-ms order, eid is the cheap proxy here).
        (sort-by (fn [[at _ eid]] [(.getTime ^js at) eid]))
        (mapv (fn [[_ tid _]]
-               [tid (:seon.agent.turn/prompt-file
-                     (db/entity {:seon.db/ref [:seon.agent.turn/id tid]
-                                 :seon.db/db  dbv}))]))))
+               [tid (get-in (db/pull {:seon.db/pull-pattern
+                                      [{:seon.agent.turn/prompt-blob
+                                        [:my.blob/hash]}]
+                                      :seon.db/ref [:seon.agent.turn/id tid]
+                                      :seon.db/db  dbv})
+                            [:seon.agent.turn/prompt-blob :my.blob/hash])]))))
 
 (defn- read-prompt-blob
-  "Read one persisted prompt blob. Returns [:ok text] or
-   [:unreadable reason] — the caller turns :unreadable into a RED
-   result naming the path; this fn never throws."
-  [path]
+  "Read one persisted prompt blob back by content hash (my.blob/get).
+   Returns [:ok text] or [:unreadable reason] — the caller turns
+   :unreadable into a RED result naming the hash; this fn never throws."
+  [hash]
   (try
-    [:ok (.readFileSync (js/require "node:fs") path "utf8")]
+    (let [{:my.blob/keys [ok? content error]} (blob/get {:my.blob/hash hash})]
+      (if ok?
+        [:ok content]
+        [:unreadable (str hash " — " error)]))
     (catch :default e
-      [:unreadable (str path " — " (or (.-message e) e))])))
+      [:unreadable (str hash " — " (or (.-message e) e))])))
 
 (defn- eval-prompt-predicate
   "Evaluate one prompt-blob predicate (:prompt-includes /
    :prompt-excludes / :prompt-every-turn — gym-upgrade PRD §2.1/U1)
-   against the prompts the agent ACTUALLY SAW: the blobs run-turn!
-   persisted (via seon.debug capture, forced ON for gym runs) to
-   <debug-dir>/<agent-id>/<turn-idx>-<turn-id>/prompt.txt, located via
-   the post-run store's :seon.agent.turn/prompt-file datoms. Returns
-   [pass? actual]. Every blind spot is RED, never a silent pass: zero
-   turns, an out-of-range :turn index, a turn with no prompt-file
-   datom, an unreadable blob — each named in the actual.
+   against the prompts the agent ACTUALLY SAW: the content-addressed
+   blobs run-turn!'s ALWAYS-ON observability capture persisted, located
+   via the post-run store's :seon.agent.turn/prompt-blob refs and read
+   back by hash (my.blob/get). Returns [pass? actual]. Every blind spot
+   is RED, never a silent pass: zero turns, an out-of-range :turn index,
+   a turn with no prompt-blob ref, an unreadable blob — each named in
+   the actual.
 
    Containment is WHITESPACE-NORMALIZED ([[normalize-ws]]): rendered
    prompts line-wrap source text, so verbatim matching missed real
    contamination (the s32 salience text split by a docstring line
    break) and flaked on wrapping."
   [dbv agent-id kind text turn-idx]
-  (let [all (turn-prompt-files dbv agent-id)]
+  (let [all (turn-prompt-blobs dbv agent-id)]
     (cond
       (empty? all)
       [false (str "RED — NO turns" (when agent-id (str " for agent " agent-id))
@@ -954,18 +961,17 @@
                   " out of range; run has " (count all) " turn(s)")]
 
       :else
-      (let [reads  (mapv (fn [[tid path]]
-                           (if (nil? path)
+      (let [reads  (mapv (fn [[tid hash]]
+                           (if (nil? hash)
                              {:tid tid
                               :missing (str "turn " tid " has NO "
-                                            ":seon.agent.turn/prompt-file — "
-                                            "blob never written (expected "
-                                            "under the debug-capture dir, "
-                                            "default logs/turns/)")}
-                             (let [[status payload] (read-prompt-blob path)]
+                                            ":seon.agent.turn/prompt-blob — "
+                                            "the always-on blob capture "
+                                            "never landed")}
+                             (let [[status payload] (read-prompt-blob hash)]
                                (if (= :ok status)
-                                 {:tid tid :path path :text payload}
-                                 {:tid tid :path path
+                                 {:tid tid :hash hash :text payload}
+                                 {:tid tid :hash hash
                                   :missing (str "prompt blob unreadable: "
                                                 payload)}))))
                          (if turn-idx [(nth all turn-idx)] all))
@@ -977,7 +983,7 @@
                                reads)
                 stat  (str (count hits) "/" (count reads)
                            " prompt blob(s) contain " (pr-str text)
-                           "; blobs: " (pr-str (mapv :path reads)))]
+                           "; blobs: " (pr-str (mapv :hash reads)))]
             (case kind
               :prompt-includes   [(boolean (seq hits)) stat]
               :prompt-excludes   [(empty? hits) (str stat " (must be 0)")]
@@ -1452,9 +1458,9 @@
   (loop [sources sources]
     (when-let [[src & more] (seq sources)]
       (let [res (await (seval/eval compile-state src {:ns 'cljs.user}))]
-        (when-not (:ok res)
+        (when-not (:seon.eval/ok? res)
           (throw (ex-info "gym: fixture source eval failed"
-                          {:seon.gym/error      (pr-str (:error res))
+                          {:seon.gym/error      (pr-str (:seon/error res))
                            :seon.gym.run/source src}))))
       (recur more))))
 
@@ -1799,13 +1805,9 @@
             ;; resolve-agent-context pick up the run's chosen manifest.
             ;; nil config → no-op. Restored in finally.
             prev-env     (apply-run-config! config)]
-        ;; The gym's prompt-blob evidence (§6.6) IS debug capture — it
-        ;; reads back the verbatim prompt the agent saw. run-turn!'s
-        ;; capture is OFF by default (live pods don't want the disk
-        ;; growth), so the gym forces it ON for the run and restores the
-        ;; prior knob in `finally`. Without this the prompt-* predicates
-        ;; would silently lose their eyes (a turn with no prompt-file).
-        (debug/set-override! :on)
+        ;; The gym's prompt-blob evidence (§6.6) rides run-turn!'s
+        ;; ALWAYS-ON observability capture (:seon.agent.turn/prompt-blob
+        ;; → the content-addressed blob store) — no gate to force on.
         (try
           (let [conn          (await (client/open-agent-conn!))
                 _             (set! db/*conn* conn)
@@ -1946,13 +1948,14 @@
                           (axes-rollup axes results)
                           :seon.gym.scorecard/results  results
                           ;; gym-upgrade §6.6 (default-on): the run's
-                          ;; per-turn prompt-blob paths, chronological —
+                          ;; per-turn prompt-blob hashes, chronological —
                           ;; a moved number diffs to the exact context
-                          ;; bytes the agent saw. nil paths (blob write
-                          ;; failures) are dropped here; the prompt
-                          ;; PREDICATES are where missing blobs go RED.
-                          :seon.gym.scorecard/prompt-files
-                          (into [] (keep second) (turn-prompt-files dbv nil))
+                          ;; bytes the agent saw (my.blob/get). nil
+                          ;; hashes (blob write failures) are dropped
+                          ;; here; the prompt PREDICATES are where
+                          ;; missing blobs go RED.
+                          :seon.gym.scorecard/prompt-blobs
+                          (into [] (keep second) (turn-prompt-blobs dbv nil))
                           ;; context telemetry: one profile per driven
                           ;; turn, chronological — informational only.
                           :seon.gym.scorecard/turn-profiles profiles}
@@ -1967,16 +1970,15 @@
                                  (pr-str (m/explain :seon.gym/scorecard card))})))
               card))
           (finally
-            ;; Restore the root conn + fs capability config + debug-capture
-            ;; knob + the FULL schema registry snapshot so one scenario can't
-            ;; leak into the next (or into non-gym tests sharing the process).
+            ;; Restore the root conn + fs capability config + the FULL
+            ;; schema registry snapshot so one scenario can't leak into
+            ;; the next (or into non-gym tests sharing the process).
             ;; Resetting to the captured map reverts BOTH keys the run minted
             ;; (scenario registrations AND agent-eval register!s) AND any
             ;; pre-existing key whose value a scenario re-registered — the
             ;; latter is what a key-only diff-reap silently left mutated.
             (set! db/*conn* prev-conn)
             (reset! sfs-int/!config prev-fs)
-            (debug/set-override! :env)
             (env-set! "SEON_CONFIG" prev-env)
             (reset! schema/*schemas schemas-before)))))))
 
