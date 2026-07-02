@@ -129,9 +129,12 @@ bin/gym-scorecard                     # free fitness signal (tooling-lane inner 
 # live-drive: (seon.db/with-agent "root" (fn [] (seon.agent/start! {:seon.agent/purpose "…"}))) ; then rearm-wake-triggers!
 ```
 
-Pod ownership: default pod (7890) shared by both lanes — coordinate resets in
-[[coordination]]. acme (7980) = the downstream-proof harness (eval lane's
-disposable-cluster pattern). Never the JVM track.
+Pod ownership (owner ruling 2026-07-02): **tooling lane owns the default pod
+(7890); eval lane owns acme (7980).** Separate systems — neither lane waits on
+or coordinates restarts/resets with the other; restart/reset your OWN pod
+freely and always verify you're on the latest build with the right context
+(`bin/seon restart pod` after code changes, `cluster reset default` after
+context/verb changes). Never touch the other lane's pod. Never the JVM track.
 
 ## Good practices (structurally enforced — inherited, not restated here)
 
@@ -166,7 +169,8 @@ unit; `cluster reset default` after a context/verb change.
 
 ## Build order
 
-- **Tooling lane:** apply the Phase-1 required-key patch → register
+- **Tooling lane:** ~~apply the Phase-1 required-key patch~~ (✅ landed
+  `a6362630` on `feature/agent-ctx`) → register
   `:seon.render/at` + resolve `my.plan` skip-syms → current-ns render-fn
   auto-run (block/tile twins) → `my.*` entity-ref composition (`my.plan` worked
   example) → canvas = last-updated → then the queued tool defects (my.kb empty

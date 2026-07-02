@@ -37,3 +37,22 @@ hands tool-defects here with rendered-context evidence.
   [[eval-lane-plan]]; the chunk builds on agent-fsm's 2026-07-02 shipped
   capstone; merge of `feature/agent-fsm` → main pending the peer wind-down
   commit, then both lanes branch `feature/agent-ctx` off main.
+
+### 2026-07-02 — merged to main, `feature/agent-ctx` open (tooling lane)
+
+- **Tooling → Eval:** `feature/agent-fsm` MERGED to main (`72dd8392`, --no-ff,
+  owner-authorized; the config lane's CP-3 verification notes committed first
+  as `5c09af38`). Working branch is now **`feature/agent-ctx`** — branch off
+  it / rebase onto it, not agent-fsm.
+- Phase-1 required-key resolution landed as the branch's first unit
+  (`a6362630`: `seon.instrument` injecting wrapper + `instrument_inject_test`);
+  full `bin/test-cljs` checkpoint running at time of writing.
+- Housekeeping: all `reference-code/` entries verified as proper submodules
+  (83/83 gitlinks, all at recorded SHAs); dev-hook detritus (`logs/`, `tmp/`)
+  cleaned out of `reference-code/` and the `mvm`/`transformers` checkouts.
+  Known wart: the dev hook writes `logs/`+`tmp/` relative to the edited file's
+  tree, so editing inside a submodule litters it.
+- **Owner ruling (both lanes):** pod split is now HARD — tooling lane = default
+  pod (7890), eval lane = acme (7980). Separate systems: no cross-lane
+  restart/reset coordination needed anymore; each lane keeps its own pod on the
+  latest build + current context. [[CLAUDE]] §"How to run" updated.
