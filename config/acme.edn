@@ -1,43 +1,57 @@
 ;; The Acme harness's OWN config manifest — proof of the per-cluster config
 ;; seam: bin/acme exports SEON_CONFIG=config/acme.edn, so the acme cluster
-;; curates its loadout/routes/skills independently of the default cluster with
+;; configures its whole agent context independently of the default cluster with
 ;; ZERO src edit (read by seon.config via the same aero reader as system.edn).
 ;;
-;; Acme is the maximal-context downstream shape: the `:default` profile primes
-;; the FULL agent skill corpus always-on (every body in `seon-skills/`), so an
-;; acme agent boots with the richest context the harness can offer. The
-;; `#profile` seam mirrors system.edn so the SAME cluster can flip to a lean
-;; context with one env flag — no second file, no rebuild:
+;; Acme is the maximal-context downstream shape: the FULL agent skill corpus is
+;; always-on, and it demonstrates the PER-CLUSTER overrides the v3 two-level
+;; model unlocks (a per-agent LLM, a pinned full-source ns set, a custom eval
+;; decay schedule) — every dial settable from THIS file, no src/seon edit. To
+;; flip to the lean variant, point SEON_CONFIG at a SEPARATE file (no #profile):
 ;;
-;;   bin/acme restart pod                       ; :default → MAX features
-;;   SEON_PROFILE=minimal bin/acme restart pod  ; :minimal → tight context (no skill body)
-;;
-;; aero falls back to `:default` for any unmatched profile, so a bare boot is
-;; the maximal loadout. To prove retract-on-drop against a third-party shape,
-;; point at a different manifest at the shell:
-;;   SEON_CONFIG=config/test.edn bin/acme restart pod
-{;; ── LLM PROVIDER is NOT set in this manifest ──
- ;; Same as the default cluster: the LLM provider/model is the `seon.ai`
- ;; env→DB surface (`:seon.ai/config` row), not this loadout manifest. For
- ;; the acme cluster set it in .env.acme (bin/acme sources it):
+;;   bin/acme restart pod                                   ; MAX context (this file)
+;;   SEON_CONFIG=config/acme-minimal.edn bin/acme restart pod   ; lean context
+;;   SEON_CONFIG=config/test.edn bin/acme restart pod       ; the test manifest
+{;; ── LLM PROVIDER cluster default is the env→DB row (kept) ──
+ ;; The cluster's default provider/model is the `seon.ai` env→DB surface
+ ;; (`:seon.ai/config` row), set in .env.acme (bin/acme sources it):
  ;;   SEON_AI_PROVIDER=diffusiongemma            ; deepseek (default) | anthropic
  ;;   SEON_DG_ENDPOINT=<runpod-endpoint-id>      ;   | openai-compat | diffusiongemma
  ;;   RUNPOD_API_KEY=<key>
- ;; Full var docs: .env.example (DIFFUSIONGEMMA block). A live switch is a
- ;; transact: {:seon.ai/id "config" :seon.ai/provider :diffusiongemma}.
+ ;; The per-agent `:seon.ai/agent-*` keys below DEFAULT :inherit → the global
+ ;; row → .env.acme's value (the env→DB dual-default is preserved), and can
+ ;; OVERRIDE per agent in the agent-context.
 
- ;; ── per-role context loadouts (merged over default-seed-blocks at create) ──
- ;; `:default` profile = MAXIMUM features: every agent-corpus skill body is
- ;; always-on, each seeded as a :skill/<name> block at the cached-prefix
- ;; priority (16) via my.skills/skill-block, so the rich context is part of the
- ;; byte-stable cache prefix. `:minimal` profile = tight context control: an
- ;; empty loadout seeds NO always-on skill body (default-seed-blocks only).
- :seon.config/loadouts
- #profile {:default [{:seon.config/role         :default
-                      :seon.config/default-load [:repl
-                                                 :data-oriented-clojure
-                                                 :datahike
-                                                 :data-modeling
-                                                 :clojurescript
-                                                 :ui-live-tiles]}]
-           :minimal []}}
+ ;; ── AGENT-CONTEXT (v3) — the two-level context the generic loader consumes ──
+ :seon.config/agent-context
+ {;; the MAX skill corpus always-on (the old :default-load, now a presence-set
+  ;; expanded into :skill/<name> body blocks at seed).
+  :my.skills/load [:repl
+                   :data-oriented-clojure
+                   :datahike
+                   :data-modeling
+                   :clojurescript
+                   :ui-live-tiles]
+
+  ;; per-agent LLM — :inherit honors .env.acme's global row (dual-default);
+  ;; an explicit value here would OVERRIDE just that agent's setting. Shown
+  ;; :inherit to prove the seam is present + safe (byte-parity with the
+  ;; cluster default).
+  :seon.ai/agent-provider :inherit
+
+  ;; the transcript block with acme's OWN eval-decay schedule (proves a
+  ;; per-cluster decay is settable from the file) — a shorter 2-band shrink.
+  :seon.agent/ctx
+  [{:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
+    :seon.render/ai seon.agent.ctx.transcript/transcript-block
+    :seon.render/html seon.agent.ctx.transcript/transcript-block-html
+    :seon.agent.ctx.transcript/result-decay
+    [{:seon.agent.ctx.transcript/from-turn-offset 0 :seon.agent.ctx.transcript/token-cap 16384}
+     {:seon.agent.ctx.transcript/from-turn-offset 3 :seon.agent.ctx.transcript/token-cap 800}]}]}
+
+ ;; ── NAMESPACES render policy — acme pins its OWN full-source ns set (incl.
+ ;; its acme.* third-party code proves per-cluster ns render is configurable).
+ :seon.config/namespaces
+ {:seon.config/always     [my.kb my.data my.ui my.tile
+                           seon.agent.todo seon.agent.message seon.agent.lifecycle]
+  :seon.config/current-ns :full}}
