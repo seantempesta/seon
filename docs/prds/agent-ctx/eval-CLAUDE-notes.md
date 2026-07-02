@@ -15,7 +15,7 @@ tags: [orchestrator, agent]
 
 ## Current state
 
-Designed, not yet running. [[design]] is the spec (tiers, rows, sampling,
+Designed, not yet running. [[eval-design]] is the spec (tiers, rows, sampling,
 metrics, parallel-cluster execution). The tool-surface survey
 ([[research/tool-surface-survey-2026-07-02]]) grounds per-row readiness and
 the 8-class flake taxonomy.

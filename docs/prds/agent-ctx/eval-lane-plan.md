@@ -9,7 +9,7 @@ tags: [orchestrator, agent]
 > The lane in one sentence: make "the agent gets the right context and tools
 > to get shit done" a MEASURED, continuously-verified property — via
 > inspect-ai sampling against disposable acme-pattern pods, with the
-> dev/milestone/test tiers of [[design]] as the instrument. This file is the
+> dev/milestone/test tiers of [[eval-design]] as the instrument. This file is the
 > carve-out source for the agent-ctx roadmap: everything below is THIS lane;
 > the explicit not-my-lane list is at the bottom.
 
@@ -107,6 +107,6 @@ tags: [orchestrator, agent]
 ## Shared interfaces
 
 - `evals/scorecard.jsonl` — the cross-lane truth for "did it get better".
-- `docs/prds/eval-suite/CLAUDE.md` — this lane's always-current index.
+- `docs/prds/agent-ctx/` — the SHARED chunk PRD (this lane + agent-fsm tooling lane); the chunk CLAUDE.md/roadmap.md are authored by the roadmap carve-out — [[eval-CLAUDE-notes]] holds this lane's blockers/settled for absorption.
 - `src-inspect-ai/` — the general harness (pod-agnostic, both lanes run it).
 - `docs/prds/agent-fsm/coordination.md` — cross-lane flags both directions.
