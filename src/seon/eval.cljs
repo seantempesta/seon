@@ -48,6 +48,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]
+            [seon.eval.bootstrap-cache :as bootstrap-cache]
             [seon.error.instrument :as einstrument]
             [seon.instrument :as instrument]
             [seon.platform :as platform]
@@ -207,51 +208,6 @@
 ;; callers can `(await ...)` it from straight-line agent code.
 ;; ============================================================
 
-(defn- bootstrap-cache-files
-  "Enumerate `<bootstrap>/ana/*.transit.json` files. Returns a vector
-   of `[ns-sym path]` pairs. cljs.core + cljs.core$macros are sorted
-   first so they land in the analyzer state before anything that
-   references them — order doesn't strictly matter (load-analysis-
-   cache! is just a swap), but cosmetic ordering helps when debugging
-   the @compile-state map."
-  [bootstrap-path]
-  (let [fs       (js/require "fs")
-        path-mod (js/require "path")
-        ana-dir  (.resolve path-mod bootstrap-path "ana")
-        names    (.readdirSync fs ana-dir)
-        suffix   ".transit.json"]
-    (->> (array-seq names)
-         (filter #(str/ends-with? % suffix))
-         (map (fn [filename]
-                (let [ns-name (subs filename 0 (- (count filename) (count suffix)))]
-                  [(symbol ns-name) (.resolve path-mod ana-dir filename)])))
-         (sort-by (fn [[ns-sym _]]
-                    (case (str ns-sym)
-                      "cljs.core"        0
-                      "cljs.core$macros" 1
-                      2))))))
-
-(defn- load-all-analysis-caches!
-  "Read every `*.transit.json` under `<bootstrap>/ana/` and call
-   `cljs.js/load-analysis-cache!` on each. Solves a class of fragility:
-   any namespace listed in `shadow-cljs.edn :bootstrap :entries`
-   automatically lands in the analyzer state, so agent code can
-   `(require ...)` and reference it from inside cljs.js/eval-str
-   without manual maintenance of a load-list.
-
-   Why this is needed: shadow's `boot/init` only auto-loads the
-   analyzer cache for entries whose `[:cljs.analyzer/namespaces ns
-   :name]` is nil (`bootstrap/node.cljs:104`). `(cljs/empty-state)`
-   calls `(dump-core)` which leaves stubs with `:name` set for many
-   nses, so the filter short-circuits. Loading unconditionally
-   here is the robust answer."
-  [state bootstrap-path]
-  (let [fs (js/require "fs")]
-    (doseq [[ns-sym path] (bootstrap-cache-files bootstrap-path)]
-      (let [txt  (.readFileSync fs path "utf8")
-            data (boot/transit-read txt)]
-        (cljs/load-analysis-cache! state ns-sym data)))))
-
 ;; Stamped at code-eval time. Hot-reload of THIS namespace produces a
 ;; fresh gensym; the cached compile-state in `seon.repl/!compile-state`
 ;; carries the old version via `seon.repl/!init-version`, so the next
@@ -397,7 +353,7 @@
    throws TypeError on findInternedVar.
 
    Force-populates the analyzer caches for EVERY namespace shadow
-   emitted into the bootstrap output — see `load-all-analysis-caches!`
+   emitted into the bootstrap output — see `seon.eval.bootstrap-cache/load-all!`
    for the rationale and the alternative we rejected (hand-coded
    load list for `[cljs.core cljs.core$macros]` only, which would
    silently break the moment someone expanded `:bootstrap :entries`).
@@ -418,7 +374,7 @@
                           {:path bootstrap-path
                            :load-on-init '#{cljs.core}}
                           (fn [] (resolve nil))))))
-    (load-all-analysis-caches! state bootstrap-path)
+    (bootstrap-cache/load-all! state bootstrap-path)
     (when-not (and (some? (.-cljs js/global))
                    (some? (.-core (.-cljs js/global))))
       (throw (js/Error.
@@ -487,7 +443,7 @@
 
    Why this lives in `seon.eval`: it's the same concern as the
    analyzer-cache management here (`truly-undeclared?`,
-   `load-all-analysis-caches!`, `init-bootstrap!`). Render and any
+   `seon.eval.bootstrap-cache/load-all!`, `init-bootstrap!`). Render and any
    other consumer call `(eval/lookup-value sym)` rather than each
    maintaining its own copy."
   {:malli/schema [:=> [:cat :any] [:maybe :any]]}

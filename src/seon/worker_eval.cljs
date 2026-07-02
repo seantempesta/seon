@@ -27,12 +27,13 @@
    ## Dependency surface
 
    `cljs.js` (self-host compiler) + `shadow.cljs.bootstrap.node` (the analysis
-   cache loader) + `cljs.analyzer` (warning capture). NO `seon.db`,
-   NO `seon.eval`, NO `seon.schema`, NO pod state, NO datahike — those are
-   pod-coupled (`src/seon/render/sci.cljs:69-70`, `src/seon/eval.cljs:36-58`).
-   The two tiny bootstrap-cache helpers are copied from `seon.eval` BY DESIGN:
-   this is a separate leaf bundle so the self-host weight never bloats the lean
-   parse bundle, and it must not drag the pod cage onto the worker image.
+   cache loader) + `cljs.analyzer` (warning capture) +
+   `seon.eval.bootstrap-cache` (the shared LEAF cache loader — deliberately
+   free of seon.db/seon.schema/pod state). NO `seon.eval`, NO datahike —
+   those are pod-coupled (`src/seon/render/sci.cljs:69-70`,
+   `src/seon/eval.cljs:36-58`); this is a separate leaf bundle so the
+   self-host weight never bloats the lean parse bundle, and it must not drag
+   the pod cage onto the worker image.
 
    ## Non-termination is BOUNDED
 
@@ -77,9 +78,9 @@
     [clojure.string :as str]
     [cljs.js :as cljs]
     [cljs.analyzer :as ana]
+    [seon.eval.bootstrap-cache :as bootstrap-cache]
     [shadow.cljs.bootstrap.node :as boot]
     ["fs" :as fs]
-    ["path" :as path]
     ["vm" :as vm]
     ["readline" :as readline]))
 
@@ -99,41 +100,6 @@
    build output."
   (or (some-> js/process .-env .-SEON_BOOTSTRAP)
       "out/bootstrap"))
-
-;; ============================================================
-;; Bootstrap analysis-cache load (copied leaf helpers — see ns docstring;
-;; seon.eval's are pod-coupled, this bundle must stay DB-free).
-;; ============================================================
-
-(defn- bootstrap-cache-files
-  "Enumerate `<bootstrap>/ana/*.transit.json` as `[ns-sym path]` pairs,
-   cljs.core + cljs.core$macros sorted first (cosmetic)."
-  [bootstrap-path]
-  (let [path-mod (js/require "path")
-        ana-dir  (.resolve path-mod bootstrap-path "ana")
-        names    (.readdirSync fs ana-dir)
-        suffix   ".transit.json"]
-    (->> (array-seq names)
-         (filter #(str/ends-with? % suffix))
-         (map (fn [filename]
-                (let [ns-name (subs filename 0 (- (count filename) (count suffix)))]
-                  [(symbol ns-name) (.resolve path-mod ana-dir filename)])))
-         (sort-by (fn [[ns-sym _]]
-                    (case (str ns-sym)
-                      "cljs.core"        0
-                      "cljs.core$macros" 1
-                      2))))))
-
-(defn- load-all-analysis-caches!
-  "Read every `<bootstrap>/ana/*.transit.json` and
-   `cljs.js/load-analysis-cache!` it into `state`, so every bootstrap entry
-   (cljs.core, clojure.string, malli, …) is resolvable by the analyzer
-   without a hand-maintained load-list."
-  [state bootstrap-path]
-  (doseq [[ns-sym path] (bootstrap-cache-files bootstrap-path)]
-    (let [txt  (.readFileSync fs path "utf8")
-          data (boot/transit-read txt)]
-      (cljs/load-analysis-cache! state ns-sym data))))
 
 ;; ============================================================
 ;; Warm self-host state + per-eval warning capture
@@ -177,7 +143,7 @@
                      {:path bootstrap-path :load-on-init '#{cljs.core}}
                      (fn []
                        (try
-                         (load-all-analysis-caches! state bootstrap-path)
+                         (bootstrap-cache/load-all! state bootstrap-path)
                          ;; Route analyzer warnings through our per-eval sink
                          ;; instead of stderr; undeclared-var is the
                          ;; authoritative \"does not compile\" signal.
