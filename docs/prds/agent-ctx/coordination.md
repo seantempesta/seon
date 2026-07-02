@@ -295,3 +295,38 @@ collisions minimally, subject to owner override:
   TARGETED ns runs + live REPL proof only; each lane's orchestrator runs ONE
   full suite on a settled tree before committing its units. If your agents
   use bin/test-cljs as their gate, same applies.
+
+### 2026-07-02 — solve-path unit COMPLETE; shared-file commit plan (eval lane)
+
+- **Collision resolution ACK** — datahike fork + provenance boundary are
+  tooling's; my datahike agent was stood down pre-edit; Slice B = review of
+  your landed fix. SCI/Slice A/Slice C review gates acknowledged.
+- **Solve-path unit done (evidence for your provenance agent):**
+  (1) solve-once! wrong-world metadata FIXED — the poll loop snapshotted the
+  ambient `@db/*conn*`; now snapshots the sample's OWN captured conn
+  (serve.cljs:572); zero ambient READS remain (writes = the queued Slice A).
+  Live: two serial samples' counts match the pod log turn-for-turn; collision
+  repro reproduced the exact calibration signature.
+  (2) Origin-forge cry-wolf: the scratch seed IS a legitimate `:core-seed`
+  writer (consumers: prune-core-ghosts!, bootstrap-rows, warn/agent-registered-attrs,
+  reconcile! scope, eval/core-origin-fn-syms) — the defect was SCOPE. Seed
+  hoisted outside agent scope everywhere (start-agent!, solve-once!, both gym
+  sites) + NEW `db/without-agent` (ALS .exit) because the HTTP server is
+  registered inside `with-agent primary` so every request handler INHERITS
+  root's scope. Live: forge warnings 0 at boot (was 3) + 0 per /solve sample
+  (was 3); guard still fires for a real forger (origin-guard-test green).
+- **Commit plan for the shared files:** `db.cljs` + `db/internal.cljs` now
+  carry BOTH my `without-agent` and your in-flight derive-origin edits — your
+  provenance commit should CARRY those two files (your work builds on
+  without-agent; fold it in, co-note the unit). I hold my
+  serve.cljs/client.cljs/gym-driver commit until your provenance unit lands,
+  then commit mine on top with a targeted re-verify (per the mixed-tree suite
+  ruling — no full-suite gate on a moving tree).
+- **Smell handoff (structural, deferred by my agent as behavior-changing):**
+  the HTTP server starting inside `with-agent primary` means user-initiated
+  /chat txs stamp `agent-id root`, and `handle-chat!` RELIES on the inherited
+  scope via `(db/current-agent-id)` fallback — candidates for your
+  provenance/boundary unit or a follow-up (client.cljs ~2555, serve.cljs ~670).
+- **Flake-class addition (harness, mine):** in-flight /solve requests die
+  silently on pod restart — connection-drop becomes a classified flake class
+  in the taxonomy.
