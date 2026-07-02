@@ -512,6 +512,27 @@ Nothing rolls up a stored counter — store the leaf facts, derive the window
 `:my.todo/parent` is a plain ref (a parent does not own its children's
 lifecycle), so the tree is navigated by the reverse `:my.todo/_parent` lookup.
 
+**Plan semantics — the tree evolved in place (drive-measured, 2026-07-02).**
+The long-horizon drive proved the tree solid within a run but "a queue, not a
+journal" at a discontinuity: the open-items-only render vanished exactly at
+resume time, nothing stopped a 3× blind retry, and multi-session pacing was
+silently collapsed. The same rows — never a second system — gain plan
+semantics, each targeting a measured failure:
+
+| attribute | malli | targets |
+|---|---|---|
+| `:my.todo/goal` | `[:string]`, optional, root-level | the WHY narrative that outlives the transcript window |
+| `:my.todo/expect` | `[:string]`, optional | the falsifiable expected outcome — "how I'd know this step failed"; the render prompts VERIFY-before-`done!` (stops blind re-issue) |
+| `:my.todo/after` | `:seon.db/ref`, optional | ordering/dependency edge between siblings |
+| `:my.todo/pace` | `[:enum :one-shot :multi-session]`, optional, root-level | explicit scope slot so "spans sessions" can't silently collapse to a sprint |
+
+**The anchor renders from BOTH open and recently-closed rows**: position
+("executing step N of goal G"), the next ordered step, and a
+recently-completed tail (derived: latest `completed-at` descendants) — so the
+plan block never goes silent on success and a resumed agent re-grounds from
+plan-state, not transcript archaeology. Render placement: [[context]] band 1.
+Evidence: `research/long-horizon-plan-drive-2026-07-02.md`.
+
 ### 5.4 my.agent — `:my.agent/purpose`
 
 `:my.agent/purpose` is a markdown goal string carried on the agent entity — the
