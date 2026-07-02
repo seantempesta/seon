@@ -112,20 +112,11 @@ SCI-bounded (`seon.render.sci/invoke-bounded`, a deadline), never
 stays out of the web bundle. The byte-stable cache prefix at low priority is
 preserved for provider prefix-caching.
 
-**The cache gradient — three bands, dynamism matched to cost.** Priority order
-IS cache architecture. (1) The **stable prefix**: code context (namespace cards
-+ full sources, ordered by last-modified so churn sinks to the band's end),
-purpose, plan — bytes that rarely move, so the provider prefix-cache holds
-across turns. (2) The **sliding window**: the transcript's age-banded clips —
-aged clips render byte-identical (the cache-stability law), only the window's
-leading edge moves. (3) The **free tail**: the FULLY-dynamic section rendered
-LAST, right before the generation point — typeahead-style predicted relevance
-(affordance surfacing: fns whose input specs match the shapes in recent evals,
-retrieval hits, "you are here" anchors). Everything after the first changed
-byte is uncached regardless, so the tail may completely re-derive every step
-at zero extra cache cost — its only budget is its token CAP (a config dial,
-constrained by default). A block that churns belongs in the tail; a block in
-the prefix must hold its bytes.
+**Context assembly is its own domain.** How the prompt bands by dynamism
+(stable prefix / sliding window / free dynamic tail), the
+namespace-as-location model, and the cache gradient live in [[context]] —
+this doc owns the shared block/render machinery and the human-facing twin:
+every context band renders an html representation for inspectability.
 
 ## Slots and layouts
 

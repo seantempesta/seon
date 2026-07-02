@@ -304,6 +304,10 @@ doc; this one stays pure target.
 - [[toolkit]] — the `my.*` verb catalog over the protected `seon.*` floor.
 - [[observability]] — turn replay (basis-t + prompt blob + reply), `inspect/turn` /
   `turn-diff`, the blob store, the forensic agent, the `/solve` door.
+- [[context]] — the dynamic context system: `context = f(db, location,
+  window, tail)`, the three-band cache gradient (stable prefix / sliding
+  transcript window / free dynamic tail), namespace-as-location, the
+  affordance tail, and the UI twin of every band.
 - [[laws]] — the drive-measured empirical laws (render-prominence,
   cache-stability, canvas-first, pass^k, keep-iff-lifts-battery) that
   constrain every design above. Not principles — measurements.

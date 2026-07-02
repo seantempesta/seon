@@ -168,6 +168,16 @@ roles = grant-sets queried at the gate; THEN make the docstrings honest.
 in place or re-target [[toolkit]] to the `seon.agent.*` names. One pass,
 no aliases left behind.
 
+**W5.5 — Staleness-on-change class (two verified instances, 2026-07-02).**
+Persisted derived state doesn't refresh when its source changes: (a) the
+boot seed refreshed `:seon.fn/source` but not `:seon.fn/spec` on the shell
+key-rename (fix in flight — both live drives failed identically on the
+stale card); (b) existing agents' home-ns requires don't pick up a changed
+config `:seon.eval/home-requires` (root has no `my.blob` card; fresh
+children do). One rule: every re-seed/reconcile refreshes EVERY derived
+field, and config-driven per-agent state re-reconciles on manifest change
+— extend `reconcile!`, no parallel refresh paths.
+
 **W6 — Truth sweep.** Fix over-claiming docstrings (`start!`, `state.cljs`,
 `render/value.cljs`, `db.cljs:668,1390` "kind" vocabulary), stale comments
 (config.cljs:65-71 + system.edn:26-33 "renders full" story,
