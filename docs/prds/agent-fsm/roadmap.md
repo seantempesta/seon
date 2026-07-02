@@ -109,7 +109,11 @@ Stated once so nobody re-asserts them:
 - **[[agent-runtime]]** — spawn gate + roles-as-capabilities open;
   dead-letter/hop-cap-ack, crash-supervision, tz-aware cron are the
   remaining narrow coordination gaps.
-- **[[ui]]** — root-world-at-`/` convergence open (W3).
+- **[[ui]]** — root-world-at-`/` convergence open (W3). Context finding
+  (blob live-drive 2026-07-02): a large human paste renders verbatim in the
+  transcript on later turns even after the agent blobbed it — big inbound
+  message bodies should clip-with-pointer once stored (transcript render
+  policy, composes with `my.blob`).
 - **[[data-model]]** — `:seon.agent/purpose` → `:my.agent/purpose` move and
   `:my.todo/agent` scoping still open (old Phases 3/6).
 
