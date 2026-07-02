@@ -21,8 +21,31 @@ def test_golden_good_is_faithful_and_behavioral():
     assert sc["behavioral_pass"] is True
 
 
+def test_inlined_idiom_is_equally_faithful_but_idiom_distinguishes():
+    """Owner correction: style preferences report, never gate — correct code in
+    the inlined idiom (no register!, no -request/-response) scores faithful;
+    the `idiom` dict is what tells the two variants apart."""
+    named = o.score_code(o._GOLDEN_GOOD, o._GOLDEN_SPEC)
+    inline = o.score_code(o._GOLDEN_GOOD_INLINE, o._GOLDEN_SPEC)
+    assert inline["faithful"] is True
+    assert inline["behavioral_pass"] is True
+    assert named["idiom"]["all"] is True
+    assert inline["idiom"]["all"] is False
+    assert inline["idiom"]["register"] is False
+    assert inline["idiom"]["map_in_out"] is False
+
+
+def test_idiom_gates_only_when_task_measures_idiom():
+    """skill-lift sets idiom_gates=True — there the idiom IS the measurand."""
+    gated = dict(o._GOLDEN_SPEC, idiom_gates=True,
+                 expects={"register": True, "malli_schema": True,
+                          "map_in_out": True, "namespaced_kw": True})
+    assert o.score_code(o._GOLDEN_GOOD_INLINE, gated)["faithful"] is False
+    assert o.score_code(o._GOLDEN_GOOD, gated)["faithful"] is True
+
+
 @pytest.mark.parametrize("kind,failing_tier", [
-    ("naked_plain", "structural"),      # bare defn — no register!/spec ceremony
+    ("naked_plain", "spec_absent"),     # bare defn — no :malli/schema at all
     ("hallucinated", "structural"),     # clojure.spec instead of the real API
     ("broken", "parses"),               # unbalanced — parse tier
     ("semantic", "eval_ok"),            # undeclared var — compiles? no: eval tier
@@ -36,6 +59,8 @@ def test_fixture_class_fails_its_tier(kind, failing_tier):
         assert sc["parses"] is False
     elif failing_tier == "structural":
         assert sc["structural"] is False
+    elif failing_tier == "spec_absent":
+        assert sc["has_malli"] is False
     elif failing_tier == "eval_ok":
         assert sc["eval_ok"] is False
     elif failing_tier == "vacuous_flag":

@@ -71,23 +71,47 @@ keys off `TaskState.epoch`; if a future inspect version renames it the solvers
 fall back to epoch 1 (`getattr(state, "epoch", 1)`), which collapses mock
 pools to one fixture — the tests would catch it (arm means shift).
 
-## Offline proof (captured 2026-07-02, from THIS layout)
+## Scoring philosophy — correctness gates vs idiom metrics
+
+**Never encode a style preference as a correctness gate** (owner correction,
+2026-07-02: "We never REQUIRE -request/-response"). Seon allows BOTH fn idioms
+— named `::foo-request`/`::foo-response` map-in/map-out (preferred for API
+surfaces) AND named-positional / inlined schemas — and the original ported
+scorer hard-gated the preference: correct inlined-map code scored
+`faithful=false` (behavioral_pass=true, killed by structural). The split now:
+
+- **Correctness gates** (`ladder_scorer`, decides `faithful`): parses ·
+  not-hallucinated · spec PRESENT (either idiom) · eval-clean ·
+  behavioral-pass · not vacuous.
+- **Idiom metrics** (`idiom_scorer`, runs beside it): register! ·
+  `-request`/`-response` naming · namespaced keys — adoption data, never a
+  verdict.
+- **The one exception**: a task whose measurement IS idiom adoption sets
+  `spec["idiom_gates"]=True` — skill-lift does (context teaching the preferred
+  idiom is exactly what it measures); nothing else may.
+
+The liveness gate enforces this structurally: BOTH golden idioms (named +
+inlined) must score faithful before any task runs, so an answer-shaped gate
+cannot sneak back in.
+
+## Offline proof (captured 2026-07-02, from THIS layout, post scorer-fix)
 
 ```text
 RUN                          METRICS (from the eval logs)
-E1 arm1 guided_refine        mean/accuracy=1.000  pass_at_4/accuracy=1.000
-E1 arm2 naked                mean/accuracy=0.250  pass_at_4/accuracy=1.000
-E1 arm3 naked+oracle         mean/accuracy=0.250  pass_at_4/accuracy=1.000
-skill control                mean/accuracy=0.000  pass_at_4/accuracy=0.000
-skill treatment              mean/accuracy=1.000  pass_at_4/accuracy=1.000
-ladder ON                    mean/accuracy=1.000  pass_at_4/accuracy=1.000
-ladder OFF                   mean/accuracy=0.250  pass_at_4/accuracy=1.000
+E1 arm1 guided_refine        ladder:mean=1.000 pass_at_4=1.000   idiom:mean=1.000
+E1 arm2 naked                ladder:mean=0.250 pass_at_4=1.000   idiom:mean=0.250
+E1 arm3 naked+oracle         ladder:mean=0.250 pass_at_4=1.000   idiom:mean=0.250
+skill control                ladder:mean=0.000 pass_at_4=0.000
+skill treatment              ladder:mean=1.000 pass_at_4=1.000
+ladder ON                    ladder:mean=1.000 pass_at_4=1.000
+ladder OFF                   ladder:mean=0.250 pass_at_4=1.000
 ```
 
 The mock encodes the live 06-29 pools + the audit's fixture classes — these
 deltas prove the harness DISCRIMINATES; the model's numbers come from the GPU.
-pytest: 15 passed (scorer-vs-oracles tier table incl. the transducer
-false-positive caught by behavioral-not-eval; liveness-gate loud abort;
+pytest: 20 passed (scorer-vs-oracles tier table incl. the transducer
+false-positive caught by behavioral-not-eval AND the inlined-idiom golden
+scoring faithful with `idiom` distinguishing; liveness-gate loud abort;
 task-wiring means). Engineering note: inspect runs epochs CONCURRENTLY — the
 oracle line-servers serialize request/response pairs with a lock, and metrics
 are read from the eval LOGS, never scraped from stdout.

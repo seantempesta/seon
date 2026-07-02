@@ -46,6 +46,17 @@ wiring). The mock encodes the live 06-29 pools — the deltas prove the HARNESS
 discriminates; model numbers come from the GPU session. Report BOTH reducers:
 `pass_at_k` alone saturates (arm2 = 1.000 at-least-one vs a 0.250 rate).
 
+**Scorer fix (2026-07-02, owner correction):** the ported structural tier was
+answer-shaped — it REQUIRED the named `-request`/`-response` + `register!`
+idiom, failing correct inlined-schema code (behavioral_pass=true, faithful=
+false). Fixed in BOTH homes (the package scorers AND
+`tmp/flash-diffgemma/e1_kill_gate.py`): correctness gates are idiom-agnostic;
+idiom adoption reports separately (`idiom_scorer`) and gates ONLY in
+skill-lift, where teaching the preferred idiom is the measurand. The liveness
+gate now demands BOTH golden idioms score faithful, and the E1 prompts state
+the CALLING convention + sandbox rules without dictating the naming idiom.
+Philosophy + post-fix proof: `src-inspect-ai/README.md` "Scoring philosophy".
+
 ## Consequences for this PRD
 
 - Runbook steps 3 (E1 re-run) and 4 (ladder lift) execute AS inspect tasks

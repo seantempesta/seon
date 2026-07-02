@@ -261,8 +261,15 @@ def eval_behavioral(code: str, spec: dict) -> dict | None:
 def score_code(text: str, spec: dict) -> dict:
     """ONE scoring fn for every task: the full tier dict for a generation.
 
-    `spec` carries `expects` (structural demands), and optionally `fn_name` +
-    `cases` (behavioral). Ported from the fixed e1 `score_attempt`.
+    CORRECTNESS gates vs IDIOM metrics (owner correction, 2026-07-02): Seon
+    allows BOTH fn idioms — named ::foo-request/::foo-response map-in/map-out
+    (preferred for API surfaces) AND named-positional / inlined schemas — so
+    the -request/-response and register! checks are STYLE, reported in `idiom`
+    and NEVER gating `faithful`. `faithful` = parses AND not-hallucinated AND
+    spec present (when the task demands one) AND behavioral/instrumentable AND
+    not vacuous. EXCEPTION: a task whose measurement IS idiom adoption (the
+    skill-lift A/B) sets spec["idiom_gates"]=True and the `expects` idiom
+    checks gate again — there the idiom is the measurand, not a preference.
     """
     code = strip_fence(text)
     pr = oracle_parse(code)
@@ -285,15 +292,22 @@ def score_code(text: str, spec: dict) -> dict:
     map_in_out = ("-request" in code and "-response" in code)
     hallucinated = any(h in code for h in HALLUCINATED)
 
+    idiom = {"register": has_register, "map_in_out": map_in_out,
+             "namespaced_kw": namespaced_kw,
+             "all": has_register and map_in_out and namespaced_kw}
+
     structural = not hallucinated
-    if exp.get("register"):
-        structural = structural and has_register
-    if exp.get("malli_schema"):
-        structural = structural and has_malli
-    if exp.get("map_in_out"):
-        structural = structural and map_in_out
-    if exp.get("namespaced_kw", True):
-        structural = structural and namespaced_kw
+    if spec.get("idiom_gates"):
+        if exp.get("register"):
+            structural = structural and has_register
+        if exp.get("map_in_out"):
+            structural = structural and map_in_out
+        if exp.get("namespaced_kw", True):
+            structural = structural and namespaced_kw
+
+    # a spec is a CORRECTNESS demand (when the task asks for one), not style —
+    # either register!'d or inlined in the fn metadata satisfies it.
+    spec_present = has_malli if exp.get("malli_schema", True) else True
 
     vacuous = is_vacuous(code)
     instrumentable = parses and has_malli and not hallucinated
@@ -302,15 +316,16 @@ def score_code(text: str, spec: dict) -> dict:
 
     behavioral_pass = None if beh is None else beh["behavioral_pass"]
     correctness = behavioral_pass if behavioral_pass is not None else instrumentable
-    faithful = parses and structural and bool(correctness) and not vacuous
-    scalar = (0.15 * parses + 0.20 * structural + 0.15 * bool(correctness)
-              + 0.50 * (not vacuous))
+    faithful = (parses and structural and spec_present and bool(correctness)
+                and not vacuous)
+    scalar = (0.15 * parses + 0.20 * (structural and spec_present)
+              + 0.15 * bool(correctness) + 0.50 * (not vacuous))
     return {
         "parses": parses, "structural": structural, "instrumentable": instrumentable,
         "behavioral_pass": behavioral_pass,
         "behavioral_cases": (beh["cases"] if beh else None),
         "vacuous": vacuous, "hallucinated": hallucinated, "faithful": faithful,
-        "faithfulness": round(scalar, 3), "eval_ok": eval_ok,
+        "faithfulness": round(scalar, 3), "eval_ok": eval_ok, "idiom": idiom,
         "has_register": has_register, "has_malli": has_malli,
         "map_in_out": map_in_out, "namespaced_kw": namespaced_kw,
         "code_head": code[:80],
@@ -335,6 +350,15 @@ _GOLDEN_SPEC = {
               {"in": "{::celsius 100.0}", "key": "::fahrenheit", "expect": 212.0}],
 }
 
+# The SAME correct fn in the OTHER legal idiom — inlined schemas, no register!.
+# Both idioms are allowed Seon (named map-in/map-out is preferred for API
+# surfaces, not required) — the liveness gate demands BOTH score faithful so an
+# answer-shaped structural gate can never sneak back in (owner correction).
+_GOLDEN_GOOD_INLINE = """(defn celsius->fahrenheit
+  {:malli/schema [:=> [:cat [:map [::celsius :double]]] [:map [::fahrenheit :double]]]}
+  [{::keys [celsius]}]
+  {::fahrenheit (+ 32 (* celsius 1.8))})"""
+
 # def-vs-defn: parses clean but MUST fail the eval tier ("Too many arguments to
 # def"). A dead/lenient eval tier fails this golden in the other direction.
 _GOLDEN_BAD = "(def mean [v] (/ (reduce + v) (count v)))"
@@ -351,13 +375,15 @@ def assert_oracle_live() -> None:
     global _LIVENESS_OK
     if _LIVENESS_OK:
         return
-    good = score_code(_GOLDEN_GOOD, _GOLDEN_SPEC)
-    if not (good["faithful"] and good["behavioral_pass"] is True):
-        raise RuntimeError(
-            "ORACLE LIVENESS FAILED: the known-good golden did not score "
-            f"faithful+behavioral: {json.dumps(good)} — the oracle stack is "
-            "dead/degraded; a run now would measure the harness, not the model."
-        )
+    for label, golden in (("named", _GOLDEN_GOOD), ("inlined", _GOLDEN_GOOD_INLINE)):
+        good = score_code(golden, _GOLDEN_SPEC)
+        if not (good["faithful"] and good["behavioral_pass"] is True):
+            raise RuntimeError(
+                f"ORACLE LIVENESS FAILED: the known-good {label}-idiom golden did "
+                f"not score faithful+behavioral: {json.dumps(good)} — either the "
+                "oracle stack is dead/degraded, or an idiom preference is gating "
+                "correctness again (both are refuse-to-run defects)."
+            )
     bad = evalsrv().call({"op": "eval", "code": _GOLDEN_BAD,
                           "budget-ms": EVAL_BUDGET_MS})
     if bad is None or bad.get("ok") is not False:
@@ -378,12 +404,13 @@ from inspect_ai.solver import TaskState  # noqa: E402
 
 @scorer(metrics=[accuracy()])
 def ladder_scorer() -> Scorer:
-    """Score a generation through the full oracle ladder.
+    """Score a generation through the full oracle ladder (CORRECTNESS only).
 
-    CORRECT iff `faithful` (parse AND structural AND behavioral/instrumentable
-    AND not vacuous). The per-sample spec (expects / fn_name / cases) rides in
-    Sample.metadata["spec"]; the full tier dict lands in Score.metadata so the
-    eval log carries parse/structural/eval/behavioral/vacuity per sample.
+    CORRECT iff `faithful` (parse AND not-hallucinated AND spec-present AND
+    behavioral/instrumentable AND not vacuous) — idiom-AGNOSTIC unless the
+    task's spec sets idiom_gates (skill-lift). The per-sample spec rides in
+    Sample.metadata["spec"]; the full tier dict (incl. `idiom`) lands in
+    Score.metadata so the eval log carries every tier per sample.
     """
 
     async def score(state: TaskState, target: Target) -> Score:
@@ -397,6 +424,33 @@ def ladder_scorer() -> Scorer:
             explanation=json.dumps({k: sc[k] for k in (
                 "parses", "structural", "eval_ok", "behavioral_pass", "vacuous")}),
             metadata=sc,
+        )
+
+    return score
+
+
+@scorer(metrics=[accuracy()])
+def idiom_scorer() -> Scorer:
+    """Report adoption of the PREFERRED idiom — a metric, never a gate.
+
+    CORRECT iff the generation uses the full named map-in/map-out ceremony
+    (register! + ::foo-request/::foo-response + namespaced keys). Runs beside
+    `ladder_scorer` so idiom-adoption data stays visible without ever deciding
+    correctness (owner correction 2026-07-02: style preferences report, never
+    gate).
+    """
+
+    async def score(state: TaskState, target: Target) -> Score:
+        import anyio
+
+        spec = (state.metadata or {}).get("spec", {})
+        sc = await anyio.to_thread.run_sync(score_code, state.output.completion, spec)
+        idiom = sc["idiom"]
+        return Score(
+            value=CORRECT if idiom["all"] else INCORRECT,
+            answer=sc["code_head"],
+            explanation=json.dumps(idiom),
+            metadata=idiom,
         )
 
     return score

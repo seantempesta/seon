@@ -51,7 +51,7 @@ def main() -> int:
         for sc in log.results.scores:
             reducer = sc.reducer or "-"
             for mname, m in sc.metrics.items():
-                cells.append(f"{reducer}/{mname}={m.value:.3f}")
+                cells.append(f"{sc.name}:{reducer}/{mname}={m.value:.3f}")
         rows.append((name, "  ".join(cells)))
     print(f"\n{'RUN':28s} METRICS (from the eval logs)")
     for name, cells in rows:

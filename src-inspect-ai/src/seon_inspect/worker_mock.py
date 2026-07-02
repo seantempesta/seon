@@ -28,6 +28,16 @@ NAKED_PLAIN = """```clojure
   (+ 32 (* c 1.8)))
 ```"""
 
+# CORRECT code in the OTHER legal idiom — inlined schemas, no register!, no
+# -request/-response naming. Must score faithful (idiom-agnostic correctness);
+# `idiom_scorer` is what distinguishes it from FAITHFUL above.
+INLINE_FAITHFUL = """```clojure
+(defn celsius->fahrenheit
+  {:malli/schema [:=> [:cat [:map [::celsius :double]]] [:map [::fahrenheit :double]]]}
+  [{::keys [celsius]}]
+  {::fahrenheit (+ 32 (* celsius 1.8))})
+```"""
+
 VACUOUS = """```clojure
 (schema/register! ::celsius->fahrenheit-request [:map])
 (schema/register! ::celsius->fahrenheit-response [:map])
@@ -68,7 +78,8 @@ BROKEN = """```clojure
   {::fahrenheit (+ 32 (* celsius 1.8
 ```"""
 
-TEXT = {"faithful": FAITHFUL, "naked_plain": NAKED_PLAIN, "vacuous": VACUOUS,
+TEXT = {"faithful": FAITHFUL, "inline_faithful": INLINE_FAITHFUL,
+        "naked_plain": NAKED_PLAIN, "vacuous": VACUOUS,
         "semantic": SEMANTIC, "hallucinated": HALLUCINATED, "broken": BROKEN,
         "transducer": TRANSDUCER}
 

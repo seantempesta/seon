@@ -28,6 +28,10 @@ from inspect_ai.solver import Generate, TaskState, solver
 from seon_inspect.oracle_scorers import REPO, assert_oracle_live, ladder_scorer
 from seon_inspect.worker_endpoints import resolve_endpoint
 
+# idiom_gates=True is DELIBERATE here and only here: this task MEASURES whether
+# context (the skill) teaches the PREFERRED named map-in/map-out idiom, so the
+# idiom checks are the measurand, not a style gate on correctness (the owner
+# correction that made every other task idiom-agnostic — see oracle_scorers).
 LEDGER = [
     {
         "skill": "data-modeling",
@@ -35,7 +39,8 @@ LEDGER = [
                    "registered :malli/schema. It takes ONE map argument like "
                    "{::celsius 20.0} and returns a map like {::fahrenheit 68.0}. "
                    "Reply with ONLY a ```clojure``` block."),
-        "spec": {"expects": {"register": True, "malli_schema": True,
+        "spec": {"idiom_gates": True,
+                 "expects": {"register": True, "malli_schema": True,
                              "map_in_out": True, "namespaced_kw": True}},
     },
 ]

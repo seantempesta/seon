@@ -37,7 +37,8 @@ from inspect_ai.scorer import pass_at
 from inspect_ai.solver import Generate, TaskState, solver
 
 from seon_inspect.oracle_scorers import (assert_oracle_live, evalsrv, fn_form,
-                                         ladder_scorer, oracle_parse, strip_fence)
+                                         idiom_scorer, ladder_scorer, oracle_parse,
+                                         strip_fence)
 from seon_inspect.worker_endpoints import resolve_endpoint
 
 SAMPLES_LOG = os.environ.get("SEON_E1_SAMPLES", "e1_inspect_samples.jsonl")
@@ -61,21 +62,25 @@ _CEL_PREFIX, _CEL_SUFFIX = scaffold_frame(
     "celsius->fahrenheit", "[::celsius :double]", "[::fahrenheit :double]", "celsius")
 
 # Contract-stating prompt (the 2026-07-02 audit's context fix): the behavioral
-# harness's calling convention is IN the prompt, fair to ALL arms.
+# harness's CALLING convention is IN the prompt (load-bearing — the omission
+# control scored 0/2), fair to ALL arms. It does NOT dictate the naming idiom
+# (owner correction: named -request/-response is preferred, never required —
+# `ladder_scorer` gates correctness, `idiom_scorer` reports style).
 CELSIUS = {
     "name": "celsius->fahrenheit",
-    "prompt": ("Write `celsius->fahrenheit` as a Seon map-in/map-out fn with a "
-               "registered :malli/schema. It takes ONE map argument like "
-               "{::celsius 20.0} (the `::` keyword auto-resolves to the current "
-               "namespace) and returns a map like {::fahrenheit 68.0}. "
+    "prompt": ("Write `celsius->fahrenheit` with a :malli/schema. It will be "
+               "called as (celsius->fahrenheit {::celsius 20.0}) — ONE map "
+               "argument, the `::` keyword auto-resolving to the current "
+               "namespace — and must return a map like {::fahrenheit 68.0}. "
+               "Use only clojure.core (no requires). "
                "Reply with ONLY a ```clojure``` block."),
     "prefix": _CEL_PREFIX,
     "suffix": _CEL_SUFFIX,
     "max_hole_tokens": 48,
     "spec": {
         "fn_name": "celsius->fahrenheit",
-        "expects": {"register": True, "malli_schema": True, "map_in_out": True,
-                    "namespaced_kw": True},
+        # CORRECTNESS expectation only: a spec must be present (either idiom).
+        "expects": {"malli_schema": True},
         "cases": [{"in": "{::celsius 0.0}", "key": "::fahrenheit", "expect": 32.0},
                   {"in": "{::celsius 100.0}", "key": "::fahrenheit", "expect": 212.0}],
     },
@@ -222,11 +227,11 @@ def e1_arm_solver(arm: str, endpoint: str):
 def e1_spec_fn(arm: str = "arm1_guided_refine",
                endpoint: str = "mock:guided_wins",
                epochs: int = 4):
-    """One E1 arm x pass^k epochs, oracle-ladder scored (liveness-gated)."""
+    """One E1 arm x pass^k epochs; correctness gates, idiom reports beside it."""
     assert_oracle_live()
     return Task(
         dataset=MemoryDataset(_samples()),
         solver=e1_arm_solver(arm, endpoint),
-        scorer=ladder_scorer(),
+        scorer=[ladder_scorer(), idiom_scorer()],
         epochs=Epochs(epochs, ["mean", pass_at(epochs)]),
     )

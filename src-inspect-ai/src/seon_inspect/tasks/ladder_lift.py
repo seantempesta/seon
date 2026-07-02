@@ -40,8 +40,8 @@ TASKS = [
                    "Reply with ONLY a ```clojure``` block."),
         "spec": {
             "fn_name": "celsius->fahrenheit",
-            "expects": {"register": True, "malli_schema": True, "map_in_out": True,
-                        "namespaced_kw": True},
+            # CORRECTNESS expectation only: spec present (either idiom).
+            "expects": {"malli_schema": True},
             "cases": [{"in": "{::celsius 0.0}", "key": "::fahrenheit", "expect": 32.0},
                       {"in": "{::celsius 100.0}", "key": "::fahrenheit",
                        "expect": 212.0}],
