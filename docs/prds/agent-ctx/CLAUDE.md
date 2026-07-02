@@ -157,9 +157,14 @@ Eval-lane blockers before the first dev pass (from [[eval-CLAUDE-notes]]):
   never know other clusters exist (`list-dbs`/`remove-db` are
   supervisor-facing, never agent-exposed). One wire-server JVM hosts ALL
   clusters' dbs (the shipped registry) — a new cluster is a Node proc + a db
-  entry, cheap. **No in-pod multi-world, ever**: one pod = one world = one
-  `*conn*` root is correct by construction, so `/solve`'s scratch root-swap
-  machinery is DELETED, not fixed (Slice A's /solve motivation dissolves).
+  entry, cheap. **VOCABULARY RULE (owner): no "world"/"environment" noun in
+  design or code — from inside a cluster there is ONE conn and ONE database,
+  full stop.** Multiplicity exists only at the supervisor/registry vantage;
+  no agent-facing name, schema, or docstring encodes it. (The `/world` UI
+  roster page is unrelated legacy naming, not this concept.) The single
+  `*conn*` root is thus correct by construction, so `/solve`'s scratch
+  root-swap machinery is DELETED, not fixed (Slice A's /solve motivation
+  dissolves).
   `/solve` is DEPRECATED: replaced by cluster lifecycle
   (`bin/seon cluster create|destroy`, ephemeral or durable) + the existing
   agent verbs over each pod's own HTTP, plus ONE renamed one-shot composition
