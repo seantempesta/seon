@@ -11,7 +11,7 @@ tags: [prd, agent]
 The agent's whole working surface is a SMALL set of namespaces that, shown in
 full, ARE its context — a few high-signal, threadable verbs instead of a 70k-char
 source dump. The agent's tools live in **`my.*` namespaces, fully agent-owned and
-editable** (`my.files`, `my.search`, `my.shell`, `my.todo`, `my.test`, `my.kb`,
+editable** (`my.files`, `my.search`, `my.shell`, `my.plan`, `my.test`, `my.kb`,
 `my.code`, `my.schedule`, `my.recall`, `my.tile`, `my.blob`). Each is a THIN
 wrapper over a protected `seon.*` substrate — the real syscalls, db engine,
 compiler, and wire stay `seon.*` and are `:core-seed`-guarded (un-clobberable).
@@ -20,7 +20,7 @@ Build-your-environment extends to the tools themselves: the agent tweaks
 `forget!` / the bitemporal store recover it.
 
 This doc owns the verb catalog (the action surface). The data shapes those verbs
-read and write — `:my.kb.*`, `:my.todo/*`, `:my.agent/*`, the `:seon/error`
+read and write — `:my.kb.*`, `:my.plan/*`, `:my.agent/*`, the `:seon/error`
 value, the entity-kind-vs-value-enum rule — live in [[data-model]]. The block /
 render / tile / slot machinery the verbs surface into lives in [[ui]]. The loop,
 the run, `start!`, and isolation tiers live in [[agent-runtime]].
@@ -56,7 +56,7 @@ load-bearing for the substrate's correctness.
 | Tier | Namespaces | Origin | Agent may edit? | Renders full in context? |
 |---|---|---|---|---|
 | **Protected floor** | `seon.db` (aliased `db`), `seon.eval`, `seon.agent.message` (aliased `message`), `seon.agent.lifecycle` (refer'd verbs) + root's `seon.agent/start!`, the `*.internal` syscall nses + the wire | `:core-seed` | NO — `forget!`/override guard refuse | NO — indexed + grep-able only |
-| **Owned toolkit** | `my.files`, `my.search`, `my.shell`, `my.todo`, `my.test`, `my.kb`, `my.code`, `my.schedule`, `my.recall`, `my.tile`, `my.blob` | `:toolkit-seed` → `:agent` on first edit | YES — redefine or `forget!` | YES — full source every turn |
+| **Owned toolkit** | `my.files`, `my.search`, `my.shell`, `my.plan`, `my.test`, `my.kb`, `my.code`, `my.schedule`, `my.recall`, `my.tile`, `my.blob` | `:toolkit-seed` → `:agent` on first edit | YES — redefine or `forget!` | YES — full source every turn |
 
 `message` and `lifecycle` stay on the floor because they are the loop's control
 verbs — the wake gate / hop-cap (`message!`) and the run-FSM mutations
@@ -100,7 +100,7 @@ Two `my.*` axes do NOT collide:
   the whole cluster calls.
 - **Scoped data** — global vs per-agent is the DATA's agent-ref, never the ns and
   never a stored kind: `:my.kb.*` rows carry no ref → global (one KB, all
-  agents); `:my.todo/*` rows carry `:my.todo/agent` → per-agent (each sees its
+  agents); `:my.plan/*` rows carry `:my.plan/agent` → per-agent (each sees its
   own). The verb's render fn scopes by what it queries. Full scoping rule:
   [[data-model]].
 
@@ -151,9 +151,9 @@ compose with no rekey.
 
 A lookup-ref `[identity-attr value]` (or a raw eid) is the universal "address of a
 thing," canonical on the floor (`seon.schema`) and used uniformly:
-`:my.todo/agent`, `:seon.agent.message/from`/`/to`, `:seon.agent/parent`. The
+`:my.plan/agent`, `:seon.agent.message/from`/`/to`, `:seon.agent/parent`. The
 output of one verb is the input to the next — a message's `from` is a ref you pass
-straight to `db/entity`, to `my.todo/add!`'s owner, or to `message/agent`.
+straight to `db/entity`, to `my.plan/add!`'s owner, or to `message/agent`.
 
 ```clojure
 [:seon.agent/id "iCg-2606101519"]     ; a ref — addresses an agent
@@ -198,8 +198,9 @@ shape + the entity-kind-vs-value-enum rule live in [[data-model]].
 
 Two specialized values keep their own shape because the value IS the answer:
 
-- **my.shell** — `{:seon.shell/ok? :seon.shell/exit :seon.shell/out
-  :seon.shell/err :seon.shell/timed-out?}`.
+- **my.shell** — `{:seon.agent.shell/ok? :seon.agent.shell/exit
+  :seon.agent.shell/out :seon.agent.shell/err :seon.agent.shell/timed-out?}`
+  (ok? = the process RAN; read `exit` yourself).
 - **my.test** — `{:seon.test/pass? :seon.test/summary :seon.test/failures}`.
 - **lifecycle** — a bare `:seon.derive/state` keyword on success (the derived
   state IS the answer), the envelope only on failure.
@@ -323,49 +324,50 @@ script, a `git` query — and get `{exit out err}` back as data.
 `execFile` (argv, NEVER `sh -c`), the fs cwd gate, the timeout + maxBuffer caps.
 
 ```clojure
-(schema/register! :seon.shell/cmd        [:string {:min 1}])  ; argv[0]
-(schema/register! :seon.shell/args       [:vector :string])   ; argv — never a shell string
-(schema/register! :seon.shell/cwd        :seon.path/abs)       ; gated by the fs allowlist
-(schema/register! :seon.shell/stdin      :string)
-(schema/register! :seon.shell/timeout-ms :int)                 ; default 30000
-(schema/register! :seon.shell/run-response
-  [:or [:map [:seon.shell/ok? [:= true]] [:seon.shell/exit :int]
-             [:seon.shell/out :string] [:seon.shell/err :string]
-             [:seon.shell/timed-out? :boolean]]
-       [:map [:seon.shell/ok? [:= false]] [:seon.error/message :string]]])
+(schema/register! :seon.agent.shell/cmd        [:string {:min 1}]) ; argv[0], PATH-resolved
+(schema/register! :seon.agent.shell/args       [:vector :string])  ; argv[1..] — never a shell string
+(schema/register! :seon.agent.shell/cwd        [:string {:min 1}]) ; absolute; gated by seon.agent.fs
+(schema/register! :seon.agent.shell/stdin      :string)
+(schema/register! :seon.agent.shell/timeout-ms :int)               ; default 30000, then SIGTERM
+(schema/register! :seon.agent.shell/max-output-tokens :int)        ; per-stream envelope cap
 
 (defn ^:async run
-  "Run a command (argv, no shell, no injection surface). ALWAYS resolves; ok? =
-   exit 0. SIGTERM at timeout-ms (default 30s), bounded maxBuffer, windowsHide.
-   The cwd is gated by the seon.agent.fs allowlist; default-deny until the host
-   grants SEON_SHELL." ;; [:=> [:cat :seon.shell/run-request] :seon.shell/run-response]
+  "Run a command as argv (never a shell string); result is data. ALWAYS
+   resolves; ok? = the process RAN — a NON-ZERO exit is a legitimate result
+   (read :seon.agent.shell/exit yourself); ok? false is reserved for COULD
+   NOT RUN AT ALL. SIGTERM at timeout-ms, token-capped out/err with honest
+   full-size totals. The cwd is gated by the seon.agent.fs allowlist;
+   default-deny until the host grants SEON_SHELL."
+  {:malli/schema [:=> [:cat :seon.agent.shell/run-request] :seon.agent.shell/run-response]}
   )
 ```
 
-**Safety:** argv-only; cwd through `seon.agent.fs/stat`; timeout SIGTERM;
-maxBuffer cap (honest `timed-out?`/truncation); `SEON_SHELL` host grant
-(default-deny, same posture as `SEON_FS_*`). A soft boundary against LLM
-accidents, not a security boundary. **Composes:** `:seon.shell/out` → transform →
-`db/transact!`; `cwd` takes a `:seon.path/abs` from a listing/grep. **Budget:**
-~1.2k tok.
+**Safety:** argv-only; cwd through the `seon.agent.fs` allowlist; timeout
+SIGTERM; per-stream token caps (honest `:seon.agent.shell/timed-out?` /
+`truncated?` + full-size `out-tokens`/`err-tokens`); `SEON_SHELL` host grant
+(default-deny, same posture as `SEON_FS_*`; inspect with `grants`). A soft
+boundary against LLM accidents, not a security boundary. **Composes:**
+`:seon.agent.shell/out` → transform → `db/transact!`; `cwd` takes a
+`:seon.path/abs` from a listing/grep; `py-run` is the same envelope for a
+python source string. **Budget:** ~1.2k tok.
 
-#### `my.todo` — floor: `seon.db` + the `:my.todo/*` schema
+#### `my.plan` — floor: `seon.db` + the `:my.plan/*` schema
 
 **Why reach for it:** so a resumed or distracted agent always sees what's left —
 open items render every turn; an empty list is the done-signal.
 
-**Floor:** `seon.db` (the engine) + the `:my.todo/*` entity schema. A todo is just
+**Floor:** `seon.db` (the engine) + the `:my.plan/*` entity schema. A todo is just
 an entity; the wrapper holds the verbs + the owner-scope default, the db engine
 does the durable write.
 
-Surface: `add!` → `{ok? id}` (accepts an optional `:my.todo/parent` ref),
+Surface: `add!` → `{ok? id}` (accepts an optional `:my.plan/parent` ref),
 `complete!`/`reopen!` (idempotent), `list-open` → the `:seon.items/*` envelope.
-Map-in/map-out, never-throws, scoped per-agent by the `:my.todo/agent` ref.
+Map-in/map-out, never-throws, scoped per-agent by the `:my.plan/agent` ref.
 
-**Planning IS the todo tree.** A todo's `:my.todo/parent` ref makes the work-list
+**Planning IS the todo tree.** A todo's `:my.plan/parent` ref makes the work-list
 a plan tree (top = plans/milestones, leaves = actions); a parent's progress is a
 DERIVED roll-up of its children's status — there is no separate plan system. The
-`:my.todo/*` schema, the tree shape, the roll-up derivation, and per-agent scoping
+`:my.plan/*` schema, the tree shape, the roll-up derivation, and per-agent scoping
 live in [[data-model]]. **Budget:** ~1.6k tok.
 
 #### `my.skills` — floor: `seon.agent.ctx` (`install!`/`remove!`) + the `:my.skills/*` schema
@@ -609,7 +611,7 @@ is the thin `put!`/`get` wrapper, storing the hash on a typed projection entity.
 
 ## Detail docs
 
-- [[data-model]] — the `:my.kb.*` / `:my.todo/*` (tree) / `:my.agent/*` schemas +
+- [[data-model]] — the `:my.kb.*` / `:my.plan/*` (tree) / `:my.agent/*` schemas +
   data-agent-ref scoping; the `:seon/error` value; the entity-kind-vs-value-enum
   rule; index-everything / show-`my.*`-full.
 - [[agent-runtime]] — the loop/run/turn/FSM; creation-as-idle; bootstrap-as-seeded

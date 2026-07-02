@@ -87,7 +87,7 @@ the open.
 Per component datom emits `[:db.fn/retractEntity child]`, recursively. So
 `[:db.fn/retractEntity agent]` cascades every `:seon.agent/ctx` block +
 `:seon.agent/schedules`; a turn cascades its evals. ✓ data-model §2.1. NB:
-`:my.todo/parent` is a PLAIN ref (not component) — the tree is NOT owned, so
+`:my.plan/parent` is a PLAIN ref (not component) — the tree is NOT owned, so
 retracting a parent does NOT delete children.
 
 ### The malli→datahike bridge — `src/seon/db/internal.cljs:147-360` ✓
@@ -356,7 +356,7 @@ Concrete examples (file:line) of the patterns to imitate:
 4. ✓ data-model §3 — note the `:orn` branch-order constraint (most-specific-first;
    malli returns first-match).
 5. ✓ Build-note for error construction: `explain` returns `nil` on valid.
-6. ✓ `:my.todo/parent` is a plain ref (NOT a component) — confirmed correct in
+6. ✓ `:my.plan/parent` is a plain ref (NOT a component) — confirmed correct in
    the doc; the grounding makes the "no cascade" consequence explicit.
 
 ## Lane-U grounding — reitit + the gzip-morph live channel (Phase 8)

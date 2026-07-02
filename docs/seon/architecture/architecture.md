@@ -232,8 +232,8 @@ The doc owns every entity/attr/type, the three relationship kinds (datahike ref,
 identity/lookup attr, symbol-as-value late binding), the `:seon/error` model + the
 entity-kind-vs-value-enum rule (kind = attribute presence, never a stored
 discriminator), and the domain schemas: `my.kb` (no agent ref → global, one KB all
-agents see), `my.todo` (a TREE via `:my.todo/parent` + derived roll-up, scoped per
-agent by `:my.todo/agent`), and `my.agent` (`:my.agent/purpose`, the per-agent seed
+agents see), `my.plan` (a TREE via `:my.plan/parent` + derived roll-up, scoped per
+agent by `:my.plan/agent`), and `my.agent` (`:my.agent/purpose`, the per-agent seed
 worked-example). Global-vs-per-agent is decided by the **data's** agent-ref, never by
 the block. Index every ns's valid forms; render `my.*` in full. See [[data-model]].
 
@@ -269,7 +269,7 @@ override model. See [[ui]].
 ### Toolkit — [[toolkit]]
 
 The agent's action surface is the **`my.*` verb catalog** — thin, agent-owned,
-editable wrappers (`my.code`, `my.recall`/`my.kb`, `my.todo`, `my.schedule`,
+editable wrappers (`my.code`, `my.recall`/`my.kb`, `my.plan`, `my.schedule`,
 `my.tile`, `my.shell`, `my.test`, `my.search`, `my.files`) over a protected `seon.*`
 floor, composed on four shared shapes (path, ref, items, the never-throw result
 envelope). See [[toolkit]].
@@ -295,7 +295,7 @@ doc; this one stays pure target.
 ## Detail docs
 
 - [[data-model]] — entities + attrs + the three relationship kinds, the `:seon/error`
-  model + entity-kind-vs-value-enum, the `my.kb`/`my.todo`/`my.agent` schemas + data-
+  model + entity-kind-vs-value-enum, the `my.kb`/`my.plan`/`my.agent` schemas + data-
   agent-ref scoping, index-everything.
 - [[agent-runtime]] — loop/run/turn/FSM/derived-state/two-bounds, creation-as-idle,
   bootstrap-as-seeded-forms, orchestrator-root lifecycle, isolation tiers.

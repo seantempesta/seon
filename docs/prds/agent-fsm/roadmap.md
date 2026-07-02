@@ -115,7 +115,8 @@ Stated once so nobody re-asserts them:
   message bodies should clip-with-pointer once stored (transcript render
   policy, composes with `my.blob`).
 - **[[data-model]]** — `:seon.agent/purpose` → `:my.agent/purpose` move and
-  `:my.todo/agent` scoping still open (old Phases 3/6).
+  the **`seon.agent.todo` → `my.plan` rename + planning redesign** still open
+  (W7; owner-decided 2026-07-02).
 
 ## Build path — dependency-ordered workstreams
 
@@ -188,7 +189,18 @@ CLAUDE.md:98-99,214), declare the `:seon.ai/agent-*` overlay keys in the
 `seon-context-config` rewrite + `datahike` fix DONE (6a0a2077); author the
 observability skill when W1 lands.
 
-**W7 — Data-model moves.** `:my.agent/purpose` + `:my.todo/agent` scoping.
+**W7 — my.plan rename + planning redesign (owner-decided 2026-07-02).**
+Atomic cross-cutting rename `seon.agent.todo` → `my.plan`, `:seon.agent.todo/*`
+→ `:my.plan/*` (~160 refs, 11 code files + `config/system.edn`/`acme.edn`) —
+ORCHESTRATOR-run, single commit, `bin/test-cljs` green + `cluster reset`
+verify, per the shared-tree-rename discipline. FOLD IN the planning redesign
+([[data-model]] §5.3, drive-grounded): dependency graph (`:my.plan/needs` +
+`:my.plan/parent`), `:my.plan/status` gains `:active`/`:blocked`, the
+goal/expect/pace attrs, the DERIVED position anchor, and the WINDOWED render
+(open frontier + small recently-completed tail, drop the completed interior).
+Sequence AFTER the in-flight config/client-touching agents (web-fetch,
+fn-spec) land — it edits the same files. Target docs already renamed; this
+closes the code gap. Also here: `:seon.agent/purpose` → `:my.agent/purpose`.
 
 ## Open owner decisions
 

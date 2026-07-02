@@ -283,8 +283,8 @@ The bootstrap forms **are** the seed commands themselves:
   rewrite its own purpose (schema in [[data-model]], the verb in [[toolkit]]);
 - the home-namespace `defn`s the agent starts life knowing.
 
-**Planning rides the same data.** An agent plans with its **`my.todo` tree** — a
-todo carries a `:my.todo/parent` ref plus status, and parent progress is a derived
+**Planning rides the same data.** An agent plans with its **`my.plan` tree** — a
+todo carries a `:my.plan/parent` ref plus status, and parent progress is a derived
 roll-up of its children (top = plans/milestones, leaves = actions). There is no
 separate plan entity; the work-list *is* the plan tree (schema in [[data-model]],
 verbs in [[toolkit]]). The derived open-todo count feeds the fingerprint above.
@@ -481,13 +481,13 @@ bitemporal, reactive DB. We have one, so:
   capabilities, code-as-data, seed-copy), the one-service principle.
 - [[data-model]] — every entity + attribute + datahike facet: the agent record,
   `:seon.agent.run/*`, `:seon.agent.turn/*`, message, todo, schedule, the
-  `:seon/error` model, and the `my.kb` / `my.todo` (tree) / `my.agent` domain
+  `:seon/error` model, and the `my.kb` / `my.plan` (tree) / `my.agent` domain
   schemas + data-agent-ref scoping.
 - [[ui]] — the block / render / tile / slot / layout system, the seed-copy +
   variadic `install!`/`remove!` override model, the pages (root world / world /
   app), routing-as-data via reitit + the capability gate, and the gzip-morph
   SSE live channel.
-- [[toolkit]] — the agent's `my.*` verb catalog (purpose, the my.todo planning
+- [[toolkit]] — the agent's `my.*` verb catalog (purpose, the my.plan planning
   tree, schedules, code lifecycle, recall).
 - [[roadmap]] — current code state, the gap, and the dependency-ordered,
   replace-in-place migration to this target.

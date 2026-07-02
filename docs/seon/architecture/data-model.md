@@ -37,8 +37,8 @@ agent whose world is the `/` overview and who holds the lifecycle grant (see
 [[agent-runtime]]). The agent's **state is never stored** — it is derived
 (`seon.derive/derive-state`) from its primitives. The **`my.*` domain schemas**
 carry the agent's actual data: `my.kb` (a global knowledge base — rows carry no
-agent ref), `my.todo` (a per-agent plan TREE — rows carry `:my.todo/agent` and
-`:my.todo/parent`), and `my.agent` (the agent's `:my.agent/purpose`). **Global
+agent ref), `my.plan` (a per-agent plan TREE — rows carry `:my.plan/agent` and
+`:my.plan/parent`), and `my.agent` (the agent's `:my.agent/purpose`). **Global
 vs per-agent is a property of the DATA's agent-ref**, never of the block and
 never of a stored `:kind`. The **error value** is ONE base shape, `:seon/error`,
 specialized only where the shape genuinely diverges; failures never crash, they
@@ -65,9 +65,9 @@ A **plain ref** is a single pointer (`:db.cardinality/one :db.type/ref`):
 `:seon.agent/run`, `:seon.agent/parent`, `:seon.agent.run/agent`,
 `:seon.agent.run/cause`, `:seon.agent.turn/run`, `:seon.fn/ns`, `:seon.schema/ns`,
 `:seon.test/ns`, `:seon.agent.message/from`, `:seon.route/owner`,
-`:my.todo/agent`, `:my.todo/parent`. Use a plain ref when the entity does NOT own
+`:my.plan/agent`, `:my.plan/parent`. Use a plain ref when the entity does NOT own
 the referent's lifecycle — a fn does not own its ns; a turn does not own its run;
-a todo does not own its parent.
+a plan step does not own its parent.
 
 A **component ref vector** `[:vector {:seon.db/component true} :seon.db/ref]` is
 an OWNED-children list: `{:seon.db/component true}` → `:db/isComponent true` and
@@ -80,7 +80,7 @@ and retracting a turn retracts its evals. The owned-children attrs:
 `:seon.agent/ctx`, `:seon.agent/schedules`, `:seon.agent.turn/evals`,
 `:seon.render/children`. **Ground in** `transaction.cljc:730` (`retract-components`)
 + our bridge `src/seon/db/internal.cljs:344-350` (the component/identity facet) —
-[[library-grounding]]. (Contrast `:my.todo/parent`, a PLAIN ref: no cascade.)
+[[library-grounding]]. (Contrast `:my.plan/parent`, a PLAIN ref: no cascade.)
 
 Lookup-by-identity rides on a ref's `[:attr val]` form: `[:seon.agent/id "abc"]`
 is a valid `:seon.db/ref` value (the `[:tuple :keyword …]` arm) that datahike
@@ -110,7 +110,7 @@ agent re-seeds idempotently.
 | `:seon.schema/key` | `[:keyword {:seon.db/identity true}]` | `:db.type/keyword` | schema-attr key |
 | `:seon.route/name` | `[:keyword {:seon.db/identity true}]` | `:db.type/keyword` | reverse-routing key |
 | `:my.kb.shared/id` | `[:string {:seon.db/identity true}]` | `:db.type/string` | global KB entry key |
-| `:my.todo/id` | `[:string {:seon.db/identity true}]` | `:db.type/string` | todo key |
+| `:my.plan/id` | `[:string {:seon.db/identity true}]` | `:db.type/string` | plan step key |
 
 `:seon.db/id` is itself a shared shape (`[:string {:min 14 :max 14}]`) referenced
 by every string id-attr — bump it once, every length constraint follows.
@@ -190,7 +190,7 @@ its identity attr. You IDENTIFY kind two ways:
 ;; because #{:seon.fn/ns :seon.fn/source :seon.fn/sym} are all present.
 
 ;; In-flight: the matching Tag's :key is the kind (read (:key tag), not (first)).
-(m/parse [:orn [:my.kb.shared :my.kb.shared] [:my.todo :my.todo]] a-value)
+(m/parse [:orn [:my.kb.shared :my.kb.shared] [:my.plan :my.plan]] a-value)
 ;; => #malli.core.Tag{:key :my.kb.shared, :value {…}}
 ```
 
@@ -215,7 +215,7 @@ whole audit turns on.** Two things wear the keyword `kind`/`type`:
   - `:seon.warn/kind` — the source-check identifier on a DERIVED (never-stored)
     warning map; exactly malli's "registry key into messages" pattern.
   - `:seon.agent.message/origin`, `:seon.agent.run/trigger`,
-    `:seon.agent.run/closed-reason`, `:my.todo/status` — value enums that flavor
+    `:seon.agent.run/closed-reason`, `:my.plan/status` — value enums that flavor
     one already-identified entity kind.
   - Library / third-party shapes (a `cljs.test` report `:type`, an Anthropic
     content block `{:type "text"}`, a rewrite-clj node `:type`, datahike's own
@@ -355,7 +355,7 @@ The run model + FSM live in [[agent-runtime]].
 
 `:seon.user/id` (`[:string {:seon.db/identity true}]`) + the `:seon.user`
 entity-map are the one human; `user-ref` = `[:seon.user/id "user"]`. An inbound
-human message is the first trigger of a run and auto-mints a `my.todo` (§5.3); a
+human message is the first trigger of a run and auto-mints a `my.plan` (§5.3); a
 hop-exhausted message becomes a dead-letter.
 
 ### 4.6 schedule — `:seon.agent.schedule/*`
@@ -452,8 +452,8 @@ ROW's agent-ref, never of the block and never of a stored `:kind`:
 
 - **No agent ref ⇒ global.** `my.kb` rows carry no agent ref, so one knowledge
   base serves every agent. The render fn that surfaces it queries the whole KB.
-- **An agent ref ⇒ per-agent.** `my.todo` rows carry `:my.todo/agent`, so each
-  agent sees only its own. The render fn scopes by `[?t :my.todo/agent
+- **An agent ref ⇒ per-agent.** `my.plan` rows carry `:my.plan/agent`, so each
+  agent sees only its own. The render fn scopes by `[?t :my.plan/agent
   agent-eid]`.
 
 Same block registration in both cases; the render fn scopes by WHAT it queries.
@@ -475,63 +475,68 @@ self-documentation. Rows carry no agent ref, so the base is global.
    [:my.kb.shared/body  :my.kb.shared/body]])
 ```
 
-### 5.3 my.todo — the per-agent plan TREE
+### 5.3 my.plan — the per-agent planning graph
 
-Planning IS the todo list: a todo gains a `:my.todo/parent` ref, so the work-list
-becomes a plan tree (top = plans/milestones, leaves = actions). There is no
-separate plan system. Rows carry `:my.todo/agent`, so the tree is per-agent.
+**Planning, not a todo list.** A plan is a per-agent **dependency graph** built
+for long-range work that survives interruption: nested steps (a `:my.plan/parent`
+tree) with explicit **dependency edges** (`:my.plan/needs`), a durable goal
+narrative, a falsifiable expected outcome per step, and — the load-bearing part —
+a render that always makes clear **where the agent is**. There is no separate
+todo system; this IS the work model. Rows carry `:my.plan/agent`, so the graph
+is per-agent. (Design driven by the 2026-07-02 long-horizon drive: the old
+open-items-only todo tree was "a queue, not a journal" — it went silent on
+success exactly at resume time, offered no position anchor, and let a 3× blind
+retry through. Each attribute below targets one of those measured failures.)
 
-| attribute | malli | datahike facet | notes |
-|---|---|---|---|
-| `:my.todo/id` | `[:string {:seon.db/identity true}]` | string / one / identity | |
-| `:my.todo/title` | `[:string {:min 1}]` | string / one | |
-| `:my.todo/status` | `[:enum :open :done]` | keyword / one | value enum (a flavor, not an entity-kind) |
-| `:my.todo/agent` | `:seon.db/ref` | ref / one | → owning agent (the scoping ref) |
-| `:my.todo/parent` | `:seon.db/ref` | ref / one | optional; → parent todo (the TREE edge) |
-| `:my.todo/created-at` | `:inst` | instant / one | |
-| `:my.todo/completed-at` | `:inst` | instant / one | optional |
-| `:my.todo/from` | `:seon.db/ref` | ref / one | optional; → who asked |
-| `:my.todo/message` | `:seon.db/ref` | ref / one | optional; → the inbound message it tracks |
+| attribute | malli | notes |
+|---|---|---|
+| `:my.plan/id` | `[:string {:seon.db/identity true}]` | step/plan key |
+| `:my.plan/title` | `[:string {:min 1}]` | the step, one line |
+| `:my.plan/status` | `[:enum :open :active :done :blocked]` | value enum; **`:active` = where the agent IS** |
+| `:my.plan/agent` | `:seon.db/ref` | → owning agent (the scoping ref) |
+| `:my.plan/parent` | `:seon.db/ref` | optional; → parent step (the nesting edge) |
+| `:my.plan/needs` | `[:vector :seon.db/ref]` | optional; → prerequisite steps (dependency edges — a step is READY only when all `needs` are `:done`) |
+| `:my.plan/goal` | `[:string]` | optional, root-level; the WHY narrative that outlives the transcript window |
+| `:my.plan/expect` | `[:string]` | optional; the falsifiable expected outcome — "how I'd know this step failed" — so the render prompts VERIFY-before-`done!` (stops blind re-issue) |
+| `:my.plan/pace` | `[:enum :one-shot :multi-session]` | optional, root-level; explicit scope so "spans sessions" can't collapse to a sprint |
+| `:my.plan/created-at` | `:inst` | |
+| `:my.plan/completed-at` | `:inst` | optional; drives the recently-completed window |
+| `:my.plan/from` | `:seon.db/ref` | optional; → who asked |
+| `:my.plan/message` | `:seon.db/ref` | optional; → the inbound message it tracks |
 
 ```clojure
-;; ns my.todo — per-agent tree.
-(schema/register! :my.todo
+;; ns my.plan — per-agent dependency graph.
+(schema/register! :my.plan
   [:map {:seon.db/entity true}
-   [:my.todo/id     :my.todo/id]
-   [:my.todo/title  :my.todo/title]
-   [:my.todo/status :my.todo/status]
-   [:my.todo/agent  :my.todo/agent]
-   [:my.todo/parent {:optional true} :my.todo/parent]])
+   [:my.plan/id      :my.plan/id]
+   [:my.plan/title   :my.plan/title]
+   [:my.plan/status  :my.plan/status]
+   [:my.plan/agent   :my.plan/agent]
+   [:my.plan/parent  {:optional true} :my.plan/parent]
+   [:my.plan/needs   {:optional true} :my.plan/needs]
+   [:my.plan/goal    {:optional true} :my.plan/goal]
+   [:my.plan/expect  {:optional true} :my.plan/expect]])
 ```
 
-**Roll-up is DERIVED, never stored.** A parent's progress is a pure query over
-its subtree: a parent is `:done` when every descendant is `:done`; partial
-progress is the done-fraction of the descendants reached via `:my.todo/_parent`.
-Nothing rolls up a stored counter — store the leaf facts, derive the window
-(self-healing: complete a child and the parent's progress recomputes).
-`:my.todo/parent` is a plain ref (a parent does not own its children's
-lifecycle), so the tree is navigated by the reverse `:my.todo/_parent` lookup.
+**Everything about progress and position is DERIVED — nothing rolls up a stored
+counter.** A parent is `:done` when every descendant is `:done`; a step is
+**ready** when every `:my.plan/needs` target is `:done` (blocked otherwise); the
+**position anchor** is the `:active` step (or the first ready leaf) plus its
+ancestor chain to the goal — "executing step N of goal G, M of K done". Complete
+a step and the whole picture recomputes (self-healing). `:my.plan/parent` and
+`:my.plan/needs` are plain refs (a parent/prerequisite does not own the other's
+lifecycle); the graph is walked by reverse lookups (`:my.plan/_parent`,
+`:my.plan/_needs`).
 
-**Plan semantics — the tree evolved in place (drive-measured, 2026-07-02).**
-The long-horizon drive proved the tree solid within a run but "a queue, not a
-journal" at a discontinuity: the open-items-only render vanished exactly at
-resume time, nothing stopped a 3× blind retry, and multi-session pacing was
-silently collapsed. The same rows — never a second system — gain plan
-semantics, each targeting a measured failure:
-
-| attribute | malli | targets |
-|---|---|---|
-| `:my.todo/goal` | `[:string]`, optional, root-level | the WHY narrative that outlives the transcript window |
-| `:my.todo/expect` | `[:string]`, optional | the falsifiable expected outcome — "how I'd know this step failed"; the render prompts VERIFY-before-`done!` (stops blind re-issue) |
-| `:my.todo/after` | `:seon.db/ref`, optional | ordering/dependency edge between siblings |
-| `:my.todo/pace` | `[:enum :one-shot :multi-session]`, optional, root-level | explicit scope slot so "spans sessions" can't silently collapse to a sprint |
-
-**The anchor renders from BOTH open and recently-closed rows**: position
-("executing step N of goal G"), the next ordered step, and a
-recently-completed tail (derived: latest `completed-at` descendants) — so the
-plan block never goes silent on success and a resumed agent re-grounds from
-plan-state, not transcript archaeology. Render placement: [[context]] band 1.
-Evidence: `research/long-horizon-plan-drive-2026-07-02.md`.
+**The render is WINDOWED — never mostly-completed history.** The plan block
+([[context]] band 1) leads with the position anchor, then shows the open frontier
+(the ready + active steps and their immediate context), then a **small
+recently-completed tail** (the last few `:my.plan/completed-at` steps — proof of
+progress and resume-grounding), and DROPS the long completed interior (it stays
+in the DB, queryable, but out of the prompt). So a plan a thousand steps deep
+renders at constant size, the agent always sees where it is and what's next, and
+a resumed agent re-grounds from plan-state, not transcript archaeology. Evidence:
+`research/long-horizon-plan-drive-2026-07-02.md`.
 
 ### 5.4 my.agent — `:my.agent/purpose`
 

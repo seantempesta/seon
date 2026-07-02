@@ -45,7 +45,7 @@ plain `:keyword`, NOT a datahike identity, so two agents can each own a
 
 Global-vs-per-agent is decided by the DATA the render fn queries, never by the
 block: a `:my.kb.*` row carries no agent ref (one KB, every agent sees it), a
-`:my.todo/*` row carries `:my.todo/agent` (each agent sees its own). Same block
+`:my.plan/*` row carries `:my.plan/agent` (each agent sees its own). Same block
 registration; the render fn scopes by what it reads. (See [[data-model]] for the
 domain schemas + data-ref scoping; [[agent-runtime]] for how the seed runs as
 quiet `:core` bootstrap forms at creation.)
