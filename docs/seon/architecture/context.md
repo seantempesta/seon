@@ -78,6 +78,52 @@ Rule: **derive the derivable, store only the overrides.** Both paths resolve
 into one ordered list of `(render-fn, position)` the renderer walks — never
 two rendering systems.
 
+## Explicit dependencies — injected at the eval boundary
+
+A tool or render fn's dependencies (the db, the calling agent, the current
+time) are **declared in its request schema and injected once at the eval
+boundary** — never read from an ambient dynamic var deep in the body. The
+contract:
+
+- A map-in fn declares an injectable as an **optional** request key —
+  `:seon.db/db`, `:seon.agent/id` ("me"), `:seon.render/at` (now/basis-t),
+  and whatever else the registry grows to hold. It is `{:optional true}` to
+  the *caller* (may omit) but the wrapper guarantees it *present in the body*.
+- On an agent call, the eval boundary inspects the fn's request schema, and
+  for every **injectable key the schema declares that the caller left
+  absent**, fills the current value from the eval context. Declared-and-
+  present is never overwritten (explicit args win — the agent, a test, or a
+  forensic replay can pass a different db/agent).
+- The injectable **registry** is a small explicit map `injectable-key → (fn
+  [eval-ctx] value)`: `:seon.db/db` → the turn's frozen db, `:seon.agent/id`
+  → whose turn is running, etc. Adding a dependency = add one registry entry
+  + fns declare the key. One mechanism; no second wrapper.
+
+This rides the **one instrumentation layer** (every schema'd fn is already
+Malli-instrumented) — inject-then-validate-input, so the filled map satisfies
+the `:map`. The result: a fn's spec IS the honest statement of what it needs,
+the eval log shows real data flowing, and the value is reproducible at
+`as-of t`. This is the one boundary of "clear magic" that lets `with-agent`
+/ ALS stay the core's internal *source* for the injection without leaking
+into every fn body.
+
+The **scope-by-signature** rule falls out: a fn that declares `:seon.agent/id`
+reads/writes **per-agent** data (it stamps `:my.plan/agent me` and filters by
+it); a fn that does not is **global** (`my.kb`). You know where data goes by
+reading the arglist — not from an invisible binding.
+
+## Auto-run — the current `ns`'s render fns become context
+
+The current-`ns` render fns don't need the agent to call them: the render
+pass **queries the program graph** for fns in the current namespace whose
+output schema is a render type (`:seon.render/ai` / `:seon.render/html`) and
+**runs each through the same injecting wrapper** (they're map-in fns declaring
+`:seon.db/db` + `:seon.agent/id`), bounded + errors-as-values. Their outputs
+are the block/tile twins, positioned right after the stable code they belong
+to. So a `defn` in the agent's namespace becomes live context automatically —
+authoring context is writing a specced render fn, and the injection makes it
+run with no arguments the agent has to supply.
+
 ## Order = stability, so the cache holds
 
 Position is sorted by **change-time** (a property of the var / the source),

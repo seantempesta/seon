@@ -142,6 +142,20 @@ else composes with it.
    isolation + as-of + reconstructed ctx + a debug-brief block + a
    thinking model via per-agent provider.
 
+**W1.4 — Explicit deps + auto-run (dedicated agent, in flight).** Two joined
+pieces (design [[context]] "Explicit dependencies" + "Auto-run"): (1) the
+**auto-injection wrapper** — a map-in fn declares injectables (`:seon.db/db`,
+`:seon.agent/id`, `:seon.render/at`) as optional request keys; the eval
+boundary fills declared-but-absent ones from a small registry, riding the ONE
+Malli instrumentation layer (inject→validate→call). Makes deps explicit,
+scope declared-by-signature, values replayable — WITHOUT ripping `with-agent`/
+ALS (it stays the internal injection SOURCE). (2) **Auto-run** — the render
+pass queries the program graph for the current ns's render-typed fns and runs
+them through the same wrapper → block/tile twins. This is the affordance/
+current-ns-context mechanism ([[think-in-clojure]]). Sequence the eval/
+instrument work first (low collision); the ctx/render wiring coordinates with
+the my.plan rename.
+
 **W1.5 — Wedge-proofing (verified 2026-07-02, fix in flight).** The
 async-park class closes by extending the EXISTING `seon.eval/race-timeout`
 to the three unbounded awaits (`call-llm!` per-attempt, `run-loop!`'s bare
