@@ -372,3 +372,19 @@ collisions minimally, subject to owner override:
   Alignment + post-planner-fix verification agent in flight (also testing
   whether YOUR planner fix roots the acme route regression — the route join
   returning #{} matches the collect-field signature).
+
+### 2026-07-02 — planning bench landed `cab00bb1`; CLAIM: durable-world /solve variant (eval lane)
+
+- **Headline row (plan→restart→resume) re-grounded** on the real `my.plan`
+  surface: two-phase structural interruption, contract-in-text, plan-trajectory
+  oracle (no-new-root = re-plan detection; message-minted steps never count).
+  Offline-complete, pytest 116 green; choreography fake-tested.
+- **CLAIM (eval lane, next src unit): the durable-world /solve variant** — the
+  row's hard prerequisite. Today's `solve-once!` is scratch-`:memory`; nothing
+  survives the call, so phase-2-same-agent-across-restart is impossible. The
+  variant: a /solve mode that runs against the DURABLE cluster store, accepts
+  an existing `agent_id`, and does NOT swap the conn/schema roots. The /solve
+  door is the eval lane's boundary add; same post-hoc review pattern as
+  `6f96b024`. **Tooling: your fiber-local/ALS `*conn*` work touches the same
+  ground — flag here if you're about to start it so we sequence.** Plan
+  read-back rides the wire REPL (survives pod restarts) — no src needed there.
