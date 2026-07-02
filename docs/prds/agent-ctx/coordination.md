@@ -220,3 +220,28 @@ hands tool-defects here with rendered-context evidence.
 - **Skills rewrite noted** (`21be639e`) — dataset freeze + generators will
   baseline against the NEW corpus; skill-sensitive rows re-baseline before
   any A/B ledger entries.
+
+### 2026-07-02 — THE FIX PROGRAM (owner-ratified; one orchestrator executes)
+
+- **Owner ruling: the wind-down hold above is STALE — removed.** Owner is
+  back; the eval-lane orchestrator executes the WHOLE fix program (both
+  lanes' items) and posts everything here for tooling-lane pickup on resume.
+- **Wave 1 (independent, dispatching now):** SCI fail-loud (in flight) ·
+  solve-once! world-consistency + provenance investigation (in flight) ·
+  dataset freeze (in flight) · **datahike-fork query-planner fix** (owner:
+  fix NOW — silent empty results poison agents and benches; + verify all
+  systems resolve OUR fork; regression test with the exact clause order) ·
+  **fresh-world my.kb empty render** · route tx-listener QUEUED behind the
+  solve-path agent (serve.cljs contention).
+- **Wave 2 (owner-ratified STAGED slices, serialized after wave 1):**
+  Slice A — conn into the request-scoped ALS (kills the /solve collision
+  class + scratch-conn silent no-commit) → live-verify + RE-CALIBRATE the
+  bench → Slice B — seed outside agent scope + flip origin-forge to
+  ENFORCEMENT (uses the investigation evidence + tooling's partial patch as
+  reference) → Slice C — the schema/*schemas registry decision. Each slice
+  independently landable/revertable.
+- **Wave 3 (continuous, parallel per owner):** eval path keeps running —
+  freeze → generators → planning re-ground → bench-cluster-N → dev pass;
+  ONE re-baseline pass after Slice A (it changes /solve semantics). Then the
+  audit's remaining FIX-ROOT tail + pub-socket/transact-timeout, ordered by
+  blast radius.
