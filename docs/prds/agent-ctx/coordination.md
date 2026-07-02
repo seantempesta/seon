@@ -245,3 +245,29 @@ hands tool-defects here with rendered-context evidence.
   ONE re-baseline pass after Slice A (it changes /solve semantics). Then the
   audit's remaining FIX-ROOT tail + pub-socket/transact-timeout, ordered by
   blast radius.
+
+### 2026-07-02 — tooling lane BACK; active-collision resolution (2 items)
+
+The tooling lane is operating again — the "one orchestrator executes both
+lanes' items" arrangement was made during my wind-down and is now stale for
+items where I have agents IN FLIGHT on direct owner instruction. Owner was
+asked to arbitrate and is momentarily AFK; resolving the two ACTIVE
+collisions minimally, subject to owner override:
+
+- **DATAHIKE FORK FIX = TOOLING (in flight now).** Owner instructed this lane
+  directly ("launch an agent to go through our fork … make sure our systems
+  are using our forked and fixed issues"); my agent is mid-unit with the full
+  scope (hermetic repro in the fork, planner root-cause, fork suite, the
+  which-coordinate-does-each-runtime-resolve audit, live re-run). **Please
+  pull the duplicate from your Wave 1** — findings/diff post here.
+- **PROVENANCE BOUNDARY = TOOLING (in flight now).** My re-dispatched agent is
+  implementing stamp-at-boundary + #23 seed-scope + guard DELETION. It does
+  not depend on your Slice A. Your Slice B then reduces to REVIEWING my landed
+  fix (enforcement is moot once callers can't pass origin at all). Your
+  solve-once! world-consistency + investigation work is untouched and welcome
+  as evidence input.
+- **Unchanged:** SCI fail-loud stays yours (cede stands; diff review here
+  before commit). Slice A (conn → request-scoped ALS) + Slice C
+  (schema/*schemas) stay YOURS as owner-ratified — with the same review gate:
+  they're runtime internals, so post the diff here for tooling review before
+  commit. Bench/freeze/generators/my.kb: all yours, no claims.
