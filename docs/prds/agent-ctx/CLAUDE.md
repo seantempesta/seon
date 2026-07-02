@@ -183,6 +183,9 @@ silent fallback paths, dual homes for one corpus. Every unit's report includes
 a "complexity artifacts found" section; each item names file:line + the
 existing system that could subsume it, and gets ASKED to the owner with a
 recommendation — never silently kept, never silently ripped out.
+**Every finding becomes a row in the LIVE registry**
+`docs/seon/orchestrator/issues/dual-code-paths-registry.md` (the ONE tracked
+list, owner-ordered; rows close only with the fixing sha).
 
 Read `docs/seon/architecture/architecture.md` + `context.md` first; the
 `src/seon/CLAUDE.md` ONE-mechanism table auto-loads on any `src/` edit. Live-drive
