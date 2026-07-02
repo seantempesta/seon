@@ -646,3 +646,99 @@
                                    "the scheduled fn RAN — its invocation recorded as an OK :seon.eval"))))))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "schedule-fire test threw — " e)) (done)))))))
+
+;; ============================================================
+;; ASYNC-PARK bounds — the wedge class closed by racing the loop's awaits
+;; through seon.eval/race-timeout (the ONE racer):
+;;   1. per-ATTEMPT (SEON_LLM_ATTEMPT_TIMEOUT_MS): a never-settling adapter
+;;      attempt yields a timed-out :seon.ai/error VALUE → turn :error → the
+;;      loop closes the run :error. The loop RETURNS — never parks.
+;;   2. per-TURN (SEON_TURN_TIMEOUT_MS): a hung run-turn! frees the awaiter
+;;      with a :seon/error value → the loop closes the run :error instead of
+;;      parking until the deadline reaper fences it.
+;; Neither bound cancels the underlying work (no preemption) — a late
+;; settler's run-scoped writes are aborted by the in-tx CAS work-fence.
+;; ============================================================
+
+(defn- never-settling-llm
+  "ctx-string -> a Promise that NEVER settles (the park the bounds must free)."
+  [_ctx]
+  (js/Promise. (fn [_ _])))
+
+(defn- set-env!
+  "Set/unset `process.env[k]` — `v` string sets, nil deletes. Returns prior."
+  [k v]
+  (let [prior (aget (.-env js/process) k)]
+    (if (some? v)
+      (aset (.-env js/process) k v)
+      (js-delete (.-env js/process) k))
+    prior))
+
+(deftest never-settling-llm-attempt-times-out-run-closes-error
+  (async done
+    (let [prior (set-env! "SEON_LLM_ATTEMPT_TIMEOUT_MS" "60")]
+      (-> (with-conn
+            (fn ^:async run []
+              (let [cs     (await (boot-agent!))
+                    opened (await (run/open-run! {:seon.agent/id agent-id
+                                                  :seon.agent.run/trigger :message}))
+                    run-id (:seon.agent.run/id opened)
+                    final  (await (db/with-agent agent-id
+                                    (fn ^:async drive []
+                                      (await (loop/run-loop!
+                                               {:seon.agent/id            agent-id
+                                                :seon.agent/llm-fn        never-settling-llm
+                                                :seon.agent/compile-state cs}
+                                               run-id)))))]
+                (testing "the loop RETURNS (never parks) and lands :idle"
+                  (is (= :idle final)))
+                (testing "the run closed :error — the timed-out attempt became a value"
+                  (is (= :error (:seon.agent.run/closed-reason
+                                  (run/snapshot {:seon.agent.run/id run-id})))))
+                (testing "the one turn recorded :error (the :seon.ai/error surfaced)"
+                  (is (= [:error]
+                         (db/query {:seon.db/query
+                                    '[:find [?s ...] :in $ ?r
+                                      :where
+                                      [?run :seon.agent.run/id ?r]
+                                      [?t :seon.agent.turn/run ?run]
+                                      [?t :seon.agent.turn/status ?s]]
+                                    :seon.db/args [run-id]})))))))
+          (.finally (fn [] (set-env! "SEON_LLM_ATTEMPT_TIMEOUT_MS" prior)))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest hung-run-turn-hits-per-turn-bound-run-closes-error
+  (async done
+    ;; Loop bound 80ms fires FIRST; the attempt cap (250ms) exists only so the
+    ;; background attempt settles (as a timed-out error) before the test conn
+    ;; is torn down — the drain wait below absorbs its late, fenced writes.
+    (let [prior-turn (set-env! "SEON_TURN_TIMEOUT_MS" "80")
+          prior-llm  (set-env! "SEON_LLM_ATTEMPT_TIMEOUT_MS" "250")]
+      (-> (with-conn
+            (fn ^:async run []
+              (let [cs     (await (boot-agent!))
+                    opened (await (run/open-run! {:seon.agent/id agent-id
+                                                  :seon.agent.run/trigger :message}))
+                    run-id (:seon.agent.run/id opened)
+                    final  (await (db/with-agent agent-id
+                                    (fn ^:async drive []
+                                      (await (loop/run-loop!
+                                               {:seon.agent/id            agent-id
+                                                :seon.agent/llm-fn        never-settling-llm
+                                                :seon.agent/compile-state cs}
+                                               run-id)))))]
+                (testing "the loop RETURNS at the per-turn bound and lands :idle"
+                  (is (= :idle final)))
+                (testing "the run closed :error (not parked until the deadline reaper)"
+                  (is (= :error (:seon.agent.run/closed-reason
+                                  (run/snapshot {:seon.agent.run/id run-id})))))
+                ;; Drain: let the still-running turn's attempt time out (250ms)
+                ;; and its late writes hit the CAS fence while THIS conn is
+                ;; still installed (never the next test's world).
+                (await (js/Promise. (fn [res] (js/setTimeout res 400)))))))
+          (.finally (fn []
+                      (set-env! "SEON_TURN_TIMEOUT_MS" prior-turn)
+                      (set-env! "SEON_LLM_ATTEMPT_TIMEOUT_MS" prior-llm)))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))

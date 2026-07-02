@@ -26,6 +26,7 @@
     [clojure.string :as str]
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
+    [seon.config :as config]
     [seon.retry :as retry]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.relevant :as ctx-relevant]
@@ -352,21 +353,48 @@
       (retry/max-retries (ai/agent-max-retries id llm-retry-default-n))
       (retry/max-duration llm-retry-total-cap-ms)))
 
+(defn ^:async ^:private bounded-llm-attempt!
+  "ONE adapter attempt under the per-attempt wall-clock cap.
+
+   Races `(llm-fn prompt-text)` against [[seon.config/llm-attempt-timeout-ms]]
+   (`SEON_LLM_ATTEMPT_TIMEOUT_MS`, default 2 min) via the ONE racer
+   ([[seon.eval/race-timeout]]) — the inner bound that keeps a single attempt
+   from parking the turn when the adapter's own `:seon.ai/timeout-ms` is
+   unset/huge. A timed-out attempt resolves to a `:seon.ai/error` VALUE
+   (`:seon.ai/timeout? true` — never a throw), so [[llm-retryable?]]
+   classifies it exactly like an adapter-side timeout. The cap frees the
+   AWAITER only — the underlying request keeps running (no preemption);
+   a late settler's turn writes are aborted by the run's in-tx CAS
+   work-fence."
+  [llm-fn prompt-text]
+  (let [ms (config/llm-attempt-timeout-ms)
+        v  (await (seval/race-timeout (llm-fn prompt-text) ms))]
+    (if (seval/timed-out? v)
+      {:seon.ai/error {:seon.ai/msg      (str "LLM attempt exceeded the per-attempt "
+                                              "cap (" ms "ms, SEON_LLM_ATTEMPT_"
+                                              "TIMEOUT_MS) — awaiter freed; the "
+                                              "request may still settle in the "
+                                              "background (CAS-fenced)")
+                       :seon.ai/timeout? true}}
+      v)))
+
 (defn ^:async ^:private call-llm!
   "Internal — `(llm-fn prompt-text)` with bounded retry-with-backoff on a
    TRANSIENT provider failure ([[llm-retryable?]]). Delegates the mechanics
    to [[seon.retry/with-retry!]] (this is the SOLE LLM retry authority —
-   no parallel path). Honors a server `Retry-After`
-   (`:seon.ai/retry-after-ms`, clamped to the per-wait ceiling) over the
-   strategy's delay. On exhaustion the last (error) resp flows through
-   unchanged — the turn surfaces its `:seon.ai/error` as a value, never a
-   throw. When any retry fired, the resp carries `:seon.agent.turn/llm-retries n`
-   so the turn record is honest."
+   no parallel path). Each attempt is individually wall-clock-capped
+   ([[bounded-llm-attempt!]]), so retry count, total backoff AND single-attempt
+   latency are all bounded — a call-llm! can never park the turn. Honors a
+   server `Retry-After` (`:seon.ai/retry-after-ms`, clamped to the per-wait
+   ceiling) over the strategy's delay. On exhaustion the last (error) resp
+   flows through unchanged — the turn surfaces its `:seon.ai/error` as a
+   value, never a throw. When any retry fired, the resp carries
+   `:seon.agent.turn/llm-retries n` so the turn record is honest."
   [id id-of-turn llm-fn prompt-text]
   (let [{:seon.retry/keys [result retries]}
         (await
           (retry/with-retry!
-            {:seon.retry/thunk    (fn [] (llm-fn prompt-text))
+            {:seon.retry/thunk    (fn [] (bounded-llm-attempt! llm-fn prompt-text))
              :seon.retry/strategy (llm-retry-strategy id)
              :seon.retry/retry?   llm-retryable?
              :seon.retry/override (fn [resp]

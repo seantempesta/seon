@@ -181,6 +181,29 @@
 
       :else :turn-ok)))
 
+(defn ^:async ^:private await-bounded
+  "Await Promise `p` under the loop's per-step wall-clock bound.
+
+   Races `p` against [[seon.config/turn-timeout-ms]] (`SEON_TURN_TIMEOUT_MS`,
+   default 15 min — the INNER bound; the run's deadline stays the outer one)
+   via the ONE racer ([[seon.eval/race-timeout]]). When the bound fires the
+   caller gets a `:seon/error` VALUE (`:seon.error/message`, never a throw)
+   after a loud console.error naming `label` — so a hung step fails into the
+   run's :error path instead of parking the loop until the deadline reaper
+   fences it. The bound frees the AWAITER only: the underlying work keeps
+   running (one event loop, no preemption), and a late settler's run-scoped
+   writes are aborted by the run's in-tx CAS work-fence."
+  [label p]
+  (let [ms (config/turn-timeout-ms)
+        v  (await (seval/race-timeout p ms))]
+    (if (seval/timed-out? v)
+      (let [msg (str label " exceeded the per-turn bound (" ms
+                     "ms, SEON_TURN_TIMEOUT_MS) — awaiter freed; late "
+                     "writes are CAS-fenced")]
+        (js/console.error (str "seon.agent.loop: " msg))
+        {:seon.error/message msg})
+      v)))
+
 (defn ^:async run-loop!
   "Drive agentic turns for `run-id` until the FSM leaves :running.
 
@@ -192,8 +215,10 @@
    STREAK is folded alongside the state: a turn with zero actionable forms
    increments it, a productive turn resets it, and [[no-forms-streak-limit]]
    empty turns close the run :no-forms (an unresponsive/looping LLM never spins
-   to the turn-limit). Returns the final FSM state. Errors are values — never
-   throws into the trigger."
+   to the turn-limit). Every await in the body rides [[await-bounded]] (the
+   per-turn INNER bound; the run deadline stays the outer one), so a hung
+   turn/write fails the run :error instead of parking the loop. Returns the
+   final FSM state. Errors are values — never throws into the trigger."
   {:malli/schema [:=> [:catn [:input [:map [:seon.agent/id :seon.agent/id]]]
                              [:run-id :seon.agent.run/id]]
                   :seon.derive/state]}
@@ -204,22 +229,43 @@
             event (next-event db id run-id streak)]
         (cond
           (= :turn-ok event)
-          (let [beat (await (run/beat! {:seon.agent/id id :seon.agent.run/id run-id}))]
-            (if (false? (:seon.db/ok? beat))
+          (let [beat (await (await-bounded
+                              "run/beat!"
+                              (run/beat! {:seon.agent/id id :seon.agent.run/id run-id})))]
+            (cond
+              ;; The beat WRITE hung past the per-turn bound (a wedged write
+              ;; path) — fail the run :error (best-effort close, also bounded)
+              ;; rather than parking the loop.
+              (:seon.error/message beat)
+              (do (log id "halt" "beat hung past per-turn bound → close run :error")
+                  (await (await-bounded
+                           "run/close-run!"
+                           (run/close-run!
+                             {:seon.agent.run/id            run-id
+                              :seon.agent.run/closed-reason :error})))
+                  (transition state :error))
+
               ;; §8c — the beat's leading CAS aborted: a watchdog/newer run
               ;; moved (or retracted) the pointer between next-event and now.
               ;; Authority lost; terminate cleanly (no re-close — the new owner
               ;; / watchdog owns the run).
+              (false? (:seon.db/ok? beat))
               (do (log id "halt" "beat fence lost — superseded; loop terminates")
                   (transition state :superseded))
-              (let [r      (await (turn/run-turn!
-                                    (assoc input :seon.agent.run/id run-id :seon.db/db db)))
-                    ;; A turn that errored (LLM error / catastrophic) OR a result
+
+              :else
+              (let [r      (await (await-bounded
+                                    "turn/run-turn!"
+                                    (turn/run-turn!
+                                      (assoc input :seon.agent.run/id run-id :seon.db/db db))))
+                    ;; A turn that errored (LLM error / catastrophic), a result
                     ;; that created NO turn (no `:seon.agent.turn/id` — e.g. a
-                    ;; fenced/failed open-tx that left no entity) is NOT a no-op
-                    ;; success. The id-absence clause is the structural
-                    ;; guarantee: a failed/fenced open can NEVER masquerade as a
-                    ;; successful no-op turn (which would recur `:turn-ok`
+                    ;; fenced/failed open-tx that left no entity), OR a turn that
+                    ;; hung past the per-turn bound (await-bounded's
+                    ;; `:seon.error/message` value also has no turn-id) is NOT a
+                    ;; no-op success. The id-absence clause is the structural
+                    ;; guarantee: a failed/fenced/hung open can NEVER masquerade
+                    ;; as a successful no-op turn (which would recur `:turn-ok`
                     ;; forever — a retry storm).
                     errored? (or (= :error (:seon.agent.turn/status r))
                                  (false? (:seon.db/ok? r))
@@ -237,9 +283,11 @@
                       (do (log id "halt" (str "turn rejected/closed — " (name ev)))
                           (transition state ev))
                       (do (log id "halt" "turn :error → close run :error")
-                          (await (run/close-run!
-                                   {:seon.agent.run/id            run-id
-                                    :seon.agent.run/closed-reason :error}))
+                          (await (await-bounded
+                                   "run/close-run!"
+                                   (run/close-run!
+                                     {:seon.agent.run/id            run-id
+                                      :seon.agent.run/closed-reason :error})))
                           (transition state :error))))
                   ;; A productive turn (any actionable form ⇒ eval-count > 0)
                   ;; resets the streak; a turn with zero forms extends it
@@ -255,23 +303,29 @@
           (do (log id "halt"
                    (str "no actionable forms for " no-forms-streak-limit
                         " turns → close run :no-forms"))
-              (await (run/close-run!
-                       {:seon.agent.run/id            run-id
-                        :seon.agent.run/closed-reason :no-forms}))
+              (await (await-bounded
+                       "run/close-run!"
+                       (run/close-run!
+                         {:seon.agent.run/id            run-id
+                          :seon.agent.run/closed-reason :no-forms})))
               (transition state :no-forms))
 
           (= :turn-limit event)
           (do (log id "halt" "turn-limit reached → close run")
-              (await (run/close-run!
-                       {:seon.agent.run/id            run-id
-                        :seon.agent.run/closed-reason :turn-limit}))
+              (await (await-bounded
+                       "run/close-run!"
+                       (run/close-run!
+                         {:seon.agent.run/id            run-id
+                          :seon.agent.run/closed-reason :turn-limit})))
               (transition state :turn-limit))
 
           (= :deadline event)
           (do (log id "halt" "deadline passed → close run")
-              (await (run/close-run!
-                       {:seon.agent.run/id            run-id
-                        :seon.agent.run/closed-reason :deadline-exceeded}))
+              (await (await-bounded
+                       "run/close-run!"
+                       (run/close-run!
+                         {:seon.agent.run/id            run-id
+                          :seon.agent.run/closed-reason :deadline-exceeded})))
               (transition state :deadline))
 
           (= :superseded event)
