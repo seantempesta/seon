@@ -4,113 +4,129 @@ status: active
 tags: [architecture, agent]
 ---
 
-# Context — the dynamic context system
+# Context — functions applied to the db
 
-> **Target design** (present tense). The render/block mechanics live in
-> [[ui]] (context and page are twin projections of the same blocks); turn
-> replay and inspection live in [[observability]]; the measured laws that
-> constrain this design live in [[laws]]. We-are-here: [[roadmap]].
+> **Target design** (present tense). The block/render machinery lives in
+> [[ui]]; turn replay + inspection in [[observability]]; the measured laws
+> that constrain this in [[laws]]. We-are-here: [[roadmap]]. This doc keeps
+> to Clojure primitives — `ns`, `defn`, `require`, var metadata, a db value
+> — and reserves only the names backed by real code (`block` =
+> `:seon.agent.ctx/block`, `render` = `:seon.render/*`, `db` = `seon.db`).
 
-The prompt is a **function**: `context = f(db, location, window, tail)` —
-one frozen db value, the agent's current namespace, a sliding transcript
-window, and a fully-dynamic relevance tail. Nothing is accumulated;
-every turn re-derives the whole thing from blocks sorted by
-`:seon.agent.ctx/priority`. Priority order IS cache architecture: the
-context is assembled as a **gradient of dynamism**, stable bytes first,
-churning bytes last, because everything after the first changed byte is
-uncached regardless.
+The prompt is nothing more than **functions applied to the db, in a stable
+order**:
 
-## Band 1 — the stable prefix (cheap because it holds its bytes)
+```clojure
+context = (str/join (map #(% db) (render-fns-in-scope agent)))
+```
 
-The front of the prompt barely moves between turns, so the provider
-prefix-cache holds across the agent's whole life:
+Every turn re-derives the whole thing from one frozen db value. Nothing is
+accumulated. Which functions are in scope, and in what order, is the entire
+design.
 
-- **System text + purpose** — fixed role, the agent's `purpose` (the
-  why that outlives every run).
-- **The plan anchor** — the agent's open plan: goal narrative, steps
-  done/current/next, a "you are executing step N" position line. This is
-  the long-term memory of *what I'm doing*; it is why the transcript
-  window can stay small. (Plan modeling: [[data-model]]; the todo-tree
-  evolves into plan semantics in place.)
-- **Location — the current namespace is the agent's cursor.** Navigation
-  uses plain REPL mechanics (`in-ns`); the context re-centers around
-  wherever the agent stands: the current ns renders FULL real source
-  (code + tests — it's all executable), its `:require`s render as compact
-  cards (one-line docstring heads + verbatim `register!` calls), and the
-  schemas referenced by those fns pull in even when declared elsewhere —
-  so how data flows through the neighborhood is always visible. Everything
-  else is dropped. Per-agent pins (`::full-source` / `::with-tests`
-  presence-sets) widen the full tier; `my.*` composition verbs stay full
-  everywhere (the render-prominence law).
-- **Ordering inside the band**: namespaces sort by last-modified, so the
-  rarely-touched code sits at the very front and edit churn sinks toward
-  the band's end — the prefix-cache survives most turns even while the
-  agent writes code.
+## A render fn is a block and a tile — the twins
 
-Code grows slowly relative to tokens spent running things, so this band
-is the compounding asset: as the agent persists schemas, fns, and tests,
-its own code becomes the majority of its context — self-reinforcing,
-cheap, and cached.
+A `defn` whose input accepts the db and whose output carries a render key is
+a **renderer**, and the keys present decide where it goes:
 
-## Band 2 — the sliding window (the transcript)
+- `{:seon.render/ai …}` → a **block**: its string joins the agent's prompt.
+- `{:seon.render/html …}` → a **tile**: its hiccup joins the agent's tile
+  vector, which the UI already renders on the human's page.
+- **both keys → twins**: one value, two projections — the agent's context
+  and the human's screen showing the same thing.
 
-Recent doing, windowed: the transcript renders in **age bands** with
-per-band token caps and eval-result decay (a big result shrinks as it
-ages). Two hard rules: **aged clips render byte-identical forever**
-(re-flowing old text busts the cache every turn — the cache-stability
-law), and the window is for *what I'm doing right now* — anything that
-must survive longer belongs in the DB (plan items, kb rows, blobs), not
-in transcript residue. Large inbound payloads clip-with-pointer once
-stored (the blob ref replaces the paste). Only the window's leading edge
-moves between turns.
+This is the block's two renders (`:seon.render/ai` / `:seon.render/html`),
+now emitted by any in-scope `defn`, not only by seeded blocks. Its args are
+the db value (all data is reachable from it — [[think-in-clojure]]); it
+`require`s only the *code* it calls. It is pure over the frozen db, so it
+re-runs safely every turn, is bounded + errors-as-values through the exec
+service (a throw becomes a `:seon/error` tile, never a crash), and replays
+byte-identically at `as-of t` ([[observability]]).
 
-## Band 3 — the free tail (fully dynamic, constrained, last)
+## Shared view — the agent knows the human sees it
 
-The section rendered LAST, immediately before the generation point —
-editor-typeahead for agents. It may **completely re-derive every step**
-at zero extra cache cost; its only budget is a token cap (a config dial,
-constrained by default). Its contents are *predicted relevance*:
+Because the *same* function feeds both the prompt and the tile vector, the
+agent and the human look at one derived value. An agent working in `my.plan`
+runs its plan-view `defn`: the `:ai` twin puts the full plan in its own
+context, the `:html` twin puts the full plan on the human's page. The agent
+can rely on "my human is seeing this" — it is structurally true, no
+messaging required. Planning in full detail *is* showing the human the plan.
 
-- **Affordance surfacing** — the schemas of the values in the agent's
-  recent evals joined against every fn's input spec (any namespace):
-  "here is what can process what you're holding." This is a Datalog query
-  over the program graph, possible because every public fn is fully
-  specced over namespaced schemas — relevance is defined
-  programmatically, not curated ([[think-in-clojure]] §1).
-- **Retrieval hits** — semantic neighbors from the ONE embedding index
-  (relevant fns, kb rows) for the current activity.
-- **Ephemeral anchors** — anything useful enough to show *this step* that
-  would be noise if it persisted.
+## What puts a fn in scope — writing it, or pinning it
 
-The tail is an accepted, adjustable cost: it competes for tokens with
-nothing cached, it vanishes when the queries return empty, and every
-element in it must earn adoption in drives (measured, like everything).
+Two ways, one mechanism (a render fn run over the db); they differ only in
+what makes the fn visible:
 
-## Inspectability — the UI twin of every band
+- **Being in its namespace (derived, zero ceremony).** The render fns of the
+  agent's current `ns` are in scope. Authoring context is just writing a
+  `defn` in the namespace it belongs to; move to that `ns` (`in-ns`, plain
+  REPL) and its renderers run. Nothing stored — pure derivation from
+  code-in-the-graph + `*ns*`.
+- **`install!` (explicit override).** Pins a render fn to run *regardless* of
+  `*ns*`, at a chosen priority, in a chosen agent's scope. Storage is the
+  exception, for the non-derivable: always-on blocks (the plan anchor,
+  warnings, the transcript), a hand-set priority, seeding another scope.
 
-Context and page are twin projections, so **every band has an html
-representation the human can inspect**: the per-block prompt-text +
-html-twin panes with per-block token bars (`/agent/{id}/debug`), the
-canvas/world view of the same blocks, and — through [[observability]] —
-the exact historical context of any turn (`inspect/turn`, `turn-diff`,
-`ctx-preview` at any t, the prompt blob as byte ground truth). Watching
-what the agent sees is a first-class UI surface, not a log dump: the
-user debugging an agent and the forensic agent debugging it read the
+Rule: **derive the derivable, store only the overrides.** Both paths resolve
+into one ordered list of `(render-fn, position)` the renderer walks — never
+two rendering systems.
+
+## Order = stability, so the cache holds
+
+Position is sorted by **change-time** (a property of the var / the source),
+so the prompt reads most-stable → most-dynamic and the provider prefix-cache
+survives most turns. A fn busts cache only when *its own* code or *its own*
+db-inputs changed — invalidation stays local to the fn that moved, because
+order is deterministic:
+
+1. **reference-code namespaces** — vendored source, effectively frozen.
+2. **the agent's code namespaces** — current `ns` full source (+ its
+   `require`s as compact cards, + the schemas those fns reference), sorted by
+   last-modified so rarely-touched code sits earliest and edit churn sinks to
+   this group's end.
+3. **the current `ns`'s render fns** — the twins above; they *follow* the
+   stable code they belong to. Their output moves with the db, so this is
+   where the cache prefix ends.
+4. **the transcript** — recent doing, windowed by age with per-band caps and
+   eval-result decay; **aged clips render byte-identical forever** (re-flowing
+   busts the cache — the cache-stability law). Only the leading edge moves.
+   What must outlive the window goes to the DB (plan, kb, blobs), not
+   transcript residue; a large inbound payload clips to a blob ref.
+5. **predicted relevance, last** — the only recompute-every-step region, a
+   capped token budget (config dial): fns whose *input* specs match the
+   shapes the agent is holding (a graph query — [[think-in-clojure]] §1) and
+   embedding neighbors for the current activity. Competes with nothing
+   cached; vanishes when its queries return empty; every element earns its
+   place in drives.
+
+Code grows slowly against tokens spent running things, so groups 1–2 are the
+compounding asset: as the agent persists schemas, fns, and tests, its own
+code becomes the majority of its context — self-reinforcing, cheap, cached.
+
+## Inspectability — the human twin of every position
+
+The `:html` twin means every context position has a view the human can
+inspect: the per-block prompt-text + hiccup panes with per-block token counts
+(`/agent/{id}/debug`), the agent's page showing the same tiles, and — through
+[[observability]] — the exact historical context of any turn (`inspect/turn`,
+`turn-diff`, the prompt at `as-of t`, the prompt blob as byte ground truth).
+The human debugging an agent and the forensic agent debugging it read the
 same derived views.
 
 ## Configuration
 
-Every dial is manifest data (`:seon.config/*`): which nses are always
-full, the presence-set pins, transcript band schedule + decay, render
-caps, the tail's token cap, per-agent overrides in agent scope. Absent
+Every dial is manifest data (`:seon.config/*`): which namespaces render full,
+the presence-set pins, the transcript band schedule + decay, render caps, the
+predicted-relevance token cap, per-agent overrides in agent scope. Absent
 config = the default seed, byte-identical. No env-var side doors.
 
 ## See also
 
-- [[ui]] — blocks, the two renders, seed-copy, `install!`/`remove!`,
-  slots/layouts/pages, the live channel.
-- [[observability]] — turn record, replay verbs, the blob store,
-  the forensic agent.
+- [[ui]] — the block, its two renders, the tile vector, `install!`/`remove!`,
+  the live channel.
+- [[data-model]] — `my.plan` (the worked example: its plan-view `defn` is the
+  twin an agent sees and the human watches), the `my.*` schemas.
+- [[observability]] — turn record, replay verbs, the blob store.
 - [[laws]] — cache-stability, render-prominence, always-on-beats-skills.
-- [[think-in-clojure]] — affordance surfacing as the skills-killer;
-  the meta-system.
+- [[think-in-clojure]] — a fn's specced in/out is the query substrate for
+  both rendering and running.
