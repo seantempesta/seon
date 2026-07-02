@@ -8,11 +8,11 @@
        `:malli/schema`, ALL keys namespaced.
      - ERRORS ARE VALUES: every public fn RESOLVES to an envelope —
        `{::ok? true …}` on success, `{::ok? false ::error <guiding message>
-       ::raw-error <npm-side detail>}` on failure. Never throws, never
-       rejects (same contract as seon.db/transact!). `grep` is `^:async`,
-       so instrumentation skips its throwing validator (it would break the
-       errors-as-values contract); the `:malli/schema` stays as the
-       discoverable contract.
+       ::raw-error <npm-side detail>}` on failure. SEMANTIC failures (blank
+       pattern, no roots, rg errors) never throw — they are envelopes. Only
+       a SHAPE-invalid call trips the instrumentation validator, which the
+       eval boundary surfaces as a structured `:seon/error` value — still
+       data, never a crash.
      - CAPABILITY-GATED: search roots are gated through seon.agent.fs's
        allowlist (never reimplemented), so search and read agree on reach.
 
@@ -206,9 +206,9 @@
      ;; jump to its :seon.agent.search/line-number; or re-grep with
      ;; :seon.agent.search/paths [that-file] to see every hit in it.
 
-   NOTE: ^:async means Malli validates the request; the response schema
-   documents the RESOLVED value (the raw return is a js/Promise — same
-   caveat as seon.db/transact!)."
+   NOTE: ^:async — Malli validates the request synchronously and the
+   response on Promise RESOLUTION (the raw return is a js/Promise; the
+   eval boundary auto-awaits it for you)."
   {:malli/schema [:=> [:cat :seon.agent.search/grep-request]
                   :seon.agent.search/grep-response]}
   [{:seon.agent.search/keys [pattern paths glob max-results full? case-insensitive?]

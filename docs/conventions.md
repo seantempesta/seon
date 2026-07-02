@@ -324,11 +324,15 @@ This is a hard convention, not a style: an agent's eval must survive a bad call
 and read the failure as data, the same way `seon.db/transact!` and
 `seon.agent.search/grep` do. Two consequences:
 
-1. **`^:async` verbs are excluded from instrumentation's throwing validator**
-   (it would break the never-throws contract) — they're listed in
-   `seon.instrument/skip-syms`. The `:malli/schema` stays as the discoverable
-   contract; the function body's guards enforce shape and return the error
-   envelope instead.
+1. **The fn's body owns SEMANTIC failures; instrumentation owns SHAPE.** A
+   semantically-bad call (blank content, denied path, unknown id) returns the
+   `::ok? false` envelope from the body's guards; a shape-invalid call trips
+   the instrumentation validator, which the eval boundary surfaces as a
+   structured `:seon/error` value — data, never a crash. The only fns with NO
+   wrapper are the structurally unwrappable async shapes
+   (`seon.instrument/async-unwrappable?` — an `^:async` fn that is variadic /
+   multi-arity, e.g. `seon.db/transact!`); for those the `:malli/schema` stays
+   the discoverable contract and the body's guards enforce shape too.
 2. **Callers MUST read the envelope.** An eval can succeed while the write
    didn't happen (`::ok? false`). Translate cryptic underlying errors into a
    guiding `::error` and preserve the original at `::raw-error`.
@@ -361,9 +365,10 @@ instrumentation error, **read it and fix the root cause** — either you called
 the function wrong, or the schema doesn't match reality. A wrong schema is a
 bug.
 
-**Opt-out** for the errors-as-values verbs lives in `seon.instrument/skip-syms`
-(a set of fully-qualified symbols / `[ns fn]` pairs), because the CLJS analyzer
-strips schema-prop markers from `:malli/schema` metadata.
+**Opt-out is structural, never a name list**: `seon.instrument/async-unwrappable?`
+computes it from real properties (the `^:async` flag + the live fn's arity shape +
+the schema form) — an async fn that cannot take the Promise-aware injecting
+wrapper registers no wrapper at all. There is no hand-maintained symbol set.
 
 ### Schema Introspection
 

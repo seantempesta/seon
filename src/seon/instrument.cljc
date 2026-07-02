@@ -40,57 +40,6 @@
                [seon.db :as db]
                [seon.error.instrument :as ei]])))
 
-(def skip-syms
-  "Fns that OPT OUT of instrumentation because they are the agent-facing
-   'errors are values' surface: every call RESOLVES to an envelope
-   (`{::ok? true/false …}`), never throws. A throwing validator on their
-   input would break that contract — agents are taught to branch on
-   `::ok?`, so a throw (even one the eval boundary catches as data) aborts
-   their in-eval code instead of returning the envelope it expects.
-
-   These fns own their own validation / degrade-to-envelope; the
-   instrumentation is redundant for them. Instrumentation stays ON for
-   INTERNAL fns (where it earns its keep — it caught `result-var-ref?`).
-
-   Two entry shapes:
-     - a bare `ns-sym` skips EVERY public fn in that ns (use for the pure
-       capability-wrapper namespaces — by the wrapper doctrine, all their
-       public fns are envelope verbs).
-     - a `[ns-sym fn-sym]` pair skips one fn (use in a MIXED ns that also
-       has internal/render fns which SHOULD stay instrumented).
-
-   The opt-out lives here (a symbol set), NOT as fn metadata or a schema
-   property: the CLJS analyzer strips both from the `:malli/schema` value
-   the `collect!` macro reads, so only a FQ-symbol match is reliable. Each
-   verb fn/ns carries a comment pointing back here. New capability wrappers
-   add themselves (see the wrapper doctrine in `seon.agent.search`).
-   Plain `.cljc` so the compile-time macro and the runtime tee path agree."
-  #{;; Pure capability-wrapper namespaces — all public fns are verbs.
-    'seon.agent.search                 ; grep
-    'seon.agent.fs                     ; read-file/write-file/list-dir/stat/…
-    'seon.agent.message                ; message!/user/agent
-    ;; NOTE: the `my.plan` verbs were skipped here until 2026-07-02. They now
-    ;; RIDE the one injecting wrapper — required for `:seon.agent/id`
-    ;; required-key resolution (\"me\" scoping by declared key, not an in-body
-    ;; ambient read). Their in-body guards still own the SEMANTIC failures
-    ;; (blank title, no agent in scope, unknown id → `::ok? false` envelopes);
-    ;; only a shape-invalid call now trips the validator, which the eval
-    ;; boundary surfaces as a structured `:seon/error` value — still data,
-    ;; never a crash.
-    ;; Safe-by-default core write — assert-invocation-shape! returns an
-    ;; envelope; tested in db-test. (seon.db has many non-verb read fns
-    ;; that DO stay instrumented, so this is fn-level.)
-    ['seon.db 'transact!]})
-
-(defn skip?
-  "True when `[ns-sym fn-sym]` is opted out of instrumentation.
-
-   Either its whole ns is in [[skip-syms]] or the specific pair is."
-  {:malli/schema [:=> [:cat :symbol :symbol] :boolean]}
-  [ns-sym fn-sym]
-  (or (contains? skip-syms ns-sym)
-      (contains? skip-syms [ns-sym fn-sym])))
-
 #?(:clj
    (defn- first-party-file?
      "STRUCTURAL first/third-party boundary (V3-C, 2026-06-10 — same
@@ -133,9 +82,9 @@
                       schema   (:malli/schema meta-map)
                       async?   (boolean (:async meta-map))
                       file     (or (:file ana-info) (:file meta-map))]
-             ;; Opt-out ([[skip-syms]], e.g. `seon.db/transact!`) is applied
-             ;; downstream in [[register-target!]] — a FQ-symbol match, since
-             ;; the analyzer strips schema/metadata markers from this view.
+             ;; Opt-out is STRUCTURAL, applied downstream in
+             ;; [[register-target!]] ([[async-unwrappable?]] — computed from
+             ;; the async flag + the live fn's arity shape + the schema form).
              :when   (and schema (first-party-file? file))]
          [ns-sym fn-sym schema async?]))))
 
@@ -202,6 +151,52 @@
       validates correctly."
      [f]
      (and (fn? f) (nil? (gobj/get f "cljs$lang$maxFixedArity")))))
+
+#?(:cljs
+   (defn- -arrow-schema?
+     "True when `schema-form` resolves to a single-arity `:=>` fn schema
+      (as opposed to a multi-arity `:function`). Errors-as-values: an
+      unresolvable form is simply not an arrow."
+     [schema-form]
+     (try (= :=> (m/type (m/schema schema-form)))
+          (catch :default _ false))))
+
+#?(:cljs
+   (defn async-unwrappable?
+     "True when an `^:async` fn has NO correct wrapper today — the
+      STRUCTURAL instrumentation opt-out (computed from real properties;
+      never a name list).
+
+      An async fn returns a `js/Promise`, so only the Promise-aware
+      [[injecting-fschema]] wrapper validates it correctly — and that
+      wrapper handles exactly the simple single-fixed-arity `:=>` shape.
+      For any OTHER async shape (variadic / multi-arity / `:function`
+      schema / live var unresolvable) every available wrapper is wrong:
+
+        - malli's stock SYNC wrapper validates the returned Promise
+          against the output schema → `:malli.core/invalid-output` on
+          EVERY call;
+        - the input-only stock wrapper (`{:scope #{:input}}`) THROWS on a
+          shape-invalid call, which breaks the errors-as-values contract
+          async envelope verbs carry — the canonical instance is
+          `seon.db/transact!`, whose bad-invocation-shape → `{::ok?
+          false}` ENVELOPE behavior is documented and pinned by
+          `db_test/transact!-returns-envelope-on-bad-invocation-shape`,
+          and which core internals (boot, tickers, the loop) call under
+          the never-throw-into-the-loop invariant.
+
+      So: async ∧ not(injecting-wrappable) ⇒ register NOTHING. The
+      `:malli/schema` stays the discoverable contract; the fn's own body
+      is the validation boundary. When a Promise-aware wrapper for
+      variadic/multi-arity shapes exists, this rule collapses to false
+      and those fns instrument like everything else."
+     {:malli/schema [:=> [:cat :boolean :any :any] :boolean]}
+     [async? the-fn schema-form]
+     (boolean
+       (and async?
+            (not (and the-fn
+                      (-arrow-schema? schema-form)
+                      (-simple-fixed-arity-fn? the-fn)))))))
 
 #?(:cljs
    (def injectables
@@ -355,19 +350,14 @@
      "Register ONE schema'd fn into malli's `:cljs` function-schema
       registry with the wrapper that fits its shape, then return. Routes:
 
-        - fn is in [[skip-syms]] → register NOTHING (self-validating).
+        - [[async-unwrappable?]] (async fn that cannot take the injecting
+          wrapper) → register NOTHING; the fn's own body is the validation
+          boundary and its schema stays the discoverable contract.
         - simple single-fixed-arity `:=>` (SYNC or `^:async`) → register an
           [[injecting-fschema]] object: it injects declared-absent deps into
           the request map, validates input synchronously, and validates
           output synchronously (sync return) or on Promise resolution (async
           return). This is the map-in case where dependency injection applies.
-        - async fn that is variadic or multi-arity (e.g. a self-validating
-          fn that did NOT opt out) → register the raw form with per-fn
-          `{:scope #{:input}}`, so malli's stock wrapper (which correctly
-          handles the arg marshalling) validates input + arity only.
-          Output validation for these shapes is deferred — a wrapper that
-          returns a derived Promise across malli's variadic marshalling is
-          a separate piece of work.
         - sync variadic / multi-arity (or a fn whose live var isn't
           resolvable yet) → register the raw schema form; malli's stock
           wrapper validates input + output synchronously (no injection —
@@ -377,24 +367,17 @@
       installs each wrapper in place."
      {:malli/schema [:=> [:cat :symbol :symbol :any :boolean] :any]}
      [ns-sym fn-sym schema-form async?]
-     (cond
-       (skip? ns-sym fn-sym) nil
-       :else
-       (let [the-fn (-find-js-var ns-sym fn-sym)
-             arrow? (try (= :=> (m/type (m/schema schema-form)))
-                         (catch :default _ false))]
-         (cond
-           ;; simple fixed-arity :=> (sync OR async) → the injecting wrapper.
-           (and the-fn arrow? (-simple-fixed-arity-fn? the-fn))
-           (m/-register-function-schema! ns-sym fn-sym (injecting-fschema schema-form)
-                                         {} :cljs identity)
-           ;; async variadic/multi-arity → stock wrapper, input + arity only.
-           async?
-           (m/-register-function-schema! ns-sym fn-sym schema-form
-                                         {:scope #{:input}} :cljs identity)
-           ;; sync variadic/multi-arity (or unresolvable var) → stock wrapper.
-           :else
-           (m/-register-function-schema! ns-sym fn-sym schema-form {} :cljs identity))))))
+     (let [the-fn (-find-js-var ns-sym fn-sym)]
+       (cond
+         ;; STRUCTURAL opt-out — async with no correct wrapper available.
+         (async-unwrappable? async? the-fn schema-form) nil
+         ;; simple fixed-arity :=> (sync OR async) → the injecting wrapper.
+         (and the-fn (-arrow-schema? schema-form) (-simple-fixed-arity-fn? the-fn))
+         (m/-register-function-schema! ns-sym fn-sym (injecting-fschema schema-form)
+                                       {} :cljs identity)
+         ;; sync variadic/multi-arity (or unresolvable var) → stock wrapper.
+         :else
+         (m/-register-function-schema! ns-sym fn-sym schema-form {} :cljs identity)))))
 
 
 #?(:cljs
@@ -416,8 +399,9 @@
       canonical index of EVERY core + agent-authored fn — `index-core!`
       seeds core fns, the eval-tee seeds agent fns), resolves each live JS
       var, reads its spec, and routes it through [[register-target!]]
-      (async detected from the var via [[async-fn?]]; [[skip-syms]]
-      honored), then `mi/instrument!` once.
+      (async detected from the var via [[async-fn?]]; the structural
+      [[async-unwrappable?]] opt-out honored — counted as `:skipped`),
+      then `mi/instrument!` once.
 
       Runs at boot AFTER the core is indexed. The eval-tee path keeps
       instrumenting newly-defined fns inline between boots. No-op when
@@ -470,7 +454,8 @@
                                            "leaving it UNINSTRUMENTED so boot proceeds: "
                                            spec-str))
                                      (vswap! stats update :unresolvable-schema inc))
-               (skip? ns-sym fn-sym) (vswap! stats update :skipped inc)
+               (async-unwrappable? (async-fn? the-fn) the-fn schema)
+               (vswap! stats update :skipped inc)
                :else (do (register-target! ns-sym fn-sym schema (async-fn? the-fn))
                          (vswap! stats update :registered inc)))))
          (mi/instrument! {:report ei/report-fn})

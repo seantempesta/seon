@@ -15,8 +15,12 @@
    ## House-rule API
 
    Map-in / map-out. Every fn takes one map with fully-namespaced keys,
-   returns one map with a `:seon.agent.fs/ok?` discriminator, and NEVER
-   throws — errors land as a `:seon.agent.fs/error` string.
+   returns one map with a `:seon.agent.fs/ok?` discriminator, and never
+   throws from its body — SEMANTIC failures (denied path, read-only,
+   missing file) land as a `:seon.agent.fs/error` string. Only a
+   SHAPE-invalid call trips the instrumentation validator, which the eval
+   boundary surfaces as a structured `:seon/error` value — data, never a
+   crash.
 
    ## Worked examples
 

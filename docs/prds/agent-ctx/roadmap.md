@@ -70,10 +70,15 @@ Stability queue (interleaved, one per feature unit above; owner-agreed
    REMOVED. Absorbs `sci-bounding-fallback-plan-block.md` and part of the
    `*conn*` root.
 4. **`*conn*` single-dynamic-root / fiber-local** (remainder; turn-6 recall).
-5. **skip-syms → zero** (background thread, per unit): every remaining entry
-   gets its root cause fixed or a STRUCTURAL rule (ns-level marker the
-   collect macro can read — the CLJS analyzer strips fn-meta, hence the list);
-   the name list dies.
+5. ~~**skip-syms → zero**~~ ✅ DONE (2026-07-02): `skip-syms`/`skip?` DELETED.
+   `seon.agent.search`/`fs`/`message` verbs now ride the one injecting
+   wrapper (semantic failures stay `ok? false` envelopes; shape-invalid →
+   structured instrument error — the `my.plan` doctrine). The one residual
+   opt-out is STRUCTURAL: `seon.instrument/async-unwrappable?` — an
+   `^:async` fn that cannot take the Promise-aware injecting wrapper
+   (variadic/multi-arity, e.g. `seon.db/transact!`, `seon.eval/eval`,
+   `seon.client/mem-db`) registers NO wrapper; computed from the async flag
+   + live fn shape + schema form, never a name. Boot 553/18 → 569/3.
 6. **Mechanical unification sweep** (one cleanup unit, after roadmap item 1
    lands — audit 2026-07-02): `SEON_EMBED` read ×3 → the one
    `embed-retrieval-on?`; the ×8 pr-str+clip helpers → one bounded-print

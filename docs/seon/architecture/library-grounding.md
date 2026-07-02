@@ -209,12 +209,17 @@ Read: `src/seon/instrument.cljc:109-161` (`collect-registrations` + `collect!`).
   `register-target!` calls. So **a `:malli/schema` on a public fn IS collected and
   instrumented at every rebuild** — the old "analyzer strips fn-meta" worry is
   handled by reading at compile time.
-- What the analyzer DOES strip is custom metadata MARKERS — so **opt-out is a
-  FQ-symbol set `seon.instrument/skip-syms`, never a per-fn marker** (db.cljs:499).
-- `^:async` fns: the `:malli/schema` describes the RESOLVED value; the runtime
-  routes them to an **await-then-validate** wrapper (simple fns get input+output;
-  variadic/multi-arity get input+arity). So an `^:async` fn returning a Promise of
-  `::transact-response` is schema'd as `… ::transact-response` (db.cljs:501-506).
+- What the analyzer DOES strip is custom metadata MARKERS — so opt-out is
+  **computed structurally** (`seon.instrument/async-unwrappable?`: the async
+  flag + the live fn's arity shape + the schema form), never a per-fn marker
+  and never a name list.
+- `^:async` fns: the `:malli/schema` describes the RESOLVED value; simple
+  fixed-arity `:=>` fns get the Promise-aware **injecting wrapper**
+  (input sync + output on resolution); async variadic/multi-arity fns
+  (e.g. `seon.db/transact!`) have NO correct wrapper today and register
+  nothing — their bodies are the validation boundary. So an `^:async` fn
+  returning a Promise of `::transact-response` is schema'd as
+  `… ::transact-response` (db.cljs:501-506).
 - `SEON_INSTRUMENT` is the kill-switch (default ON).
 
 ## reitit — routing-as-data (Phase 5 schema design)
@@ -348,8 +353,9 @@ Concrete examples (file:line) of the patterns to imitate:
    `:db.fn/cas` vector. The CAS executes at the SOLE writer, so the fence is sound
    across the wire (store.wire.cljs:12-21).
 2b. ✓ Instrumentation: write `:malli/schema` normally (collected at compile time,
-   instrument.cljc:109); opt out via `seon.instrument/skip-syms` (FQ-symbol set),
-   NOT a metadata marker; `^:async` fns are schema'd on the RESOLVED value.
+   instrument.cljc:109); opt-out is STRUCTURAL (`seon.instrument/async-unwrappable?`
+   — async fns with no correct wrapper shape), NOT a metadata marker and NOT a
+   name list; `^:async` fns are schema'd on the RESOLVED value.
 3. ✓ Make explicit in data-model: `register!` ≠ datahike-bridge; in-memory `:map`
    value shapes (the `:seon/error` family, `:seon.warn/check-response`,
    `:seon.derive/status`) never bridge — only transacted attrs do.

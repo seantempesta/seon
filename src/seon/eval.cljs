@@ -1765,7 +1765,8 @@
   (for [{:keys [ns sym var-map]} (analyzer-info/defs-since defs-before compile-state)
         :let [schema-form (:malli/schema (:meta var-map))
               async?      (boolean (:async (:meta var-map)))]
-        ;; Opt-out (seon.instrument/skip-syms) is applied in register-target!.
+        ;; Opt-out (seon.instrument/async-unwrappable? — structural, computed
+        ;; from async flag + fn shape + schema form) is applied in register-target!.
         :when (and schema-form
                    (try (m/schema schema-form) true
                         (catch :default _ false)))]

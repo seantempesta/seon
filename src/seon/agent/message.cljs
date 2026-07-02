@@ -253,8 +253,10 @@
 ;; `(message/user "…")` / `(message/agent id "…")`. No self→self
 ;; messaging, ever: `agent` refuses `to = me` (the wake gate already
 ;; ignores `from = me`; this makes it a hard prohibition at the verb).
-;; `^:async` fns are not runtime-instrumented, so the `:malli/schema` is
-;; the only contract — both reuse `::message-response`.
+;; Both ride the one injecting wrapper: SEMANTIC failures stay `ok? false`
+;; envelopes; only a shape-invalid call trips the validator, surfaced by
+;; the eval boundary as a structured `:seon/error` value — data, never a
+;; crash. Both reuse `::message-response`.
 ;; ============================================================
 
 (defn ^:async user
