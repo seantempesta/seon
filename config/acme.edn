@@ -39,6 +39,20 @@
   ;; cluster default).
   :seon.ai/agent-provider :inherit
 
+  ;; home-requires toolbelt (mirrors config/system.edn) — the DEFAULT verb
+  ;; surface a fresh agent's home ns renders as compact cards.
+  :seon.eval/home-requires
+  [[seon.agent.message :as message]
+   [seon.agent.todo :as todo]
+   [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
+   [seon.schema :as schema]
+   [seon.db :as db]
+   [my.kb :as kb]
+   [my.data :as data]
+   [my.ui :as ui]
+   [my.tile :as tile]
+   [seon.agent.search :as search]]
+
   ;; the transcript block with acme's OWN eval-decay schedule (proves a
   ;; per-cluster decay is settable from the file) — a shorter 2-band shrink.
   :seon.agent/ctx
