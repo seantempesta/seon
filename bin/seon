@@ -767,6 +767,13 @@ _stop_unlocked() {
   fi
 
   rm -f "$(pid_file "$name")"
+
+  # A dead pod's port file is a LIE — the next pod binds a fresh ephemeral
+  # port, and a reader polling the stale file (a harness, a curl loop) races
+  # the old port. Remove it on stop so "port file exists" ⇒ "pod wrote it".
+  case "$name" in
+    pod-*) rm -f "tmp/seon-port-${name#pod-}" ;;
+  esac
 }
 
 start_all() {
