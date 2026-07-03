@@ -23,6 +23,7 @@
    stale case is a brand-new ns not yet required anywhere — which by
    definition isn't in the build either."
   (:require [cljs.env :as env]
+            [cljs.util]
             [clojure.java.io :as io]))
 
 (defn- analyzer-namespaces
@@ -107,6 +108,34 @@
                                  (:line m))]
                   (:name d)))]
     `[~@(map (fn [s] (list 'var s)) syms)]))
+
+(defmacro first-party-ns-strs
+  "Expand to a sorted vector of ns NAME STRINGS: every FIRST-PARTY
+   namespace in the calling ns's transitive require closure — the
+   BUILD-DERIVED compiled-ns set. First-party by the same structural
+   boundary as [[public-fn-vars]] ([[first-party-file?]]): a ns joins iff
+   its source lives under a first-party root — checked via any def's
+   analyzer `:file` (the common case) or, for a ns with NO defs at all
+   (a register!-calls-only root), the classpath resource at the ns's own
+   path (`cljs.util/ns->source`). Third-party nses (jar/gitlibs sources)
+   are excluded by the same check.
+
+   This is the computed replacement for hand-maintained compiled-root
+   name sets (the `fn-less-compiled-roots #{\"my.kb\"}` class): a
+   compiled first-party ns is in the set BY CONSTRUCTION, whether or not
+   it owns a public fn var."
+  []
+  (let [nss   (analyzer-namespaces)
+        reach (transitive-requires nss (-> &env :ns :name))
+        fp?   (fn [n]
+                (or (some #(first-party-file? (:file (def-meta (val %))))
+                          (:defs (get nss n)))
+                    (when-let [url (cljs.util/ns->source n)]
+                      (and (= "file" (.getProtocol url))
+                           (let [p (.getPath url)]
+                             (boolean (some #(.startsWith p ^String %)
+                                            (first-party-roots))))))))]
+    `[~@(sort (map str (filter fp? reach)))]))
 
 (defmacro deftest-vars
   "Expand to a vector of `#'`-literals: every deftest var (a def carrying

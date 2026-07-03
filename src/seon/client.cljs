@@ -220,7 +220,7 @@
   ;; below IS this macro's whole-closure roster: every public first-party
   ;; fn the build loads, specced or not (owner directive — 'just index
   ;; everything'; never hand-list vars).
-  (:require-macros [seon.indexing :refer [public-fn-vars]]))
+  (:require-macros [seon.indexing :refer [public-fn-vars first-party-ns-strs]]))
 
 ;; ---------------------------------------------------------------------------
 ;; Process-lifetime state. `defonce` so reloads don't reset it.
@@ -1076,13 +1076,18 @@
   []
   (into #{} (map #(str (:ns (meta %)))) @!extra-core-vars))
 
-(def ^:private fn-less-compiled-roots
-  "COMPILED core nses that own no indexed var (register! calls +
-   ns-doc only) but DO own a boot-indexed full-source `:seon.ns` row —
-   they must join [[core-ns-set]] (replay-skip: re-evaling their
-   shipped source would re-run register! forms) and get an
-   [[index-core!]] ns-row even though no fn-row names them."
-  #{"my.kb"})
+(def ^:private compiled-first-party-ns-strs
+  "BUILD-DERIVED set of every first-party ns name string compiled into
+   this bundle (`seon.indexing/first-party-ns-strs` over this ns's
+   compile-time require closure). The computed replacement for the
+   hand-maintained `fn-less-compiled-roots #{\"my.kb\"}` exception: a
+   compiled ns joins [[core-ns-set]] (replay-skip: re-evaling its
+   shipped source would shadow compiled fns / re-run register! forms)
+   and gets an [[index-core!]] ns-row BY CONSTRUCTION — whether or not
+   any fn-row names it (a register!-only root has no indexed var but is
+   still compiled, and its name-set membership is now a build fact, not
+   a literal)."
+  (into #{} (first-party-ns-strs)))
 
 (defn core-ns-set
   "The set of namespace keywords owned by the COMPILED core, derived
@@ -1098,13 +1103,15 @@
 
    A fn (not a def) because `!indexed-test-vars` is populated by the
    preload AFTER this ns loads; robust by construction either way — it's
-   NOT tx-meta and NOT a hand-typed ns list, it's the live var-meta `:ns`
-   of the indexed vars. [[fn-less-compiled-roots]] joins explicitly
-   because a fn-less compiled root (`my.kb`) owns an indexed full-source
-   `:seon.ns` row without owning any var."
+   NOT tx-meta and NOT a hand-typed ns list. Three computed sources
+   union: [[compiled-first-party-ns-strs]] (the BUILD-DERIVED closure —
+   covers every compiled ns including fn-less register!-only roots),
+   the runtime-scanned extra-src nses, and the live var-meta `:ns` of
+   the indexed vars (covers test/preload/extra vars whose nses sit
+   OUTSIDE this ns's compile-time require closure)."
   {:malli/schema [:=> [:cat] :any]}
   []
-  (into (into (into #{} (map keyword) fn-less-compiled-roots)
+  (into (into (into #{} (map keyword) compiled-first-party-ns-strs)
               ;; Whole-downstream-surface (SEON_EXTRA_SRC): every scanned
               ;; downstream ns is COMPILED-into-the-bundle core (display-only,
               ;; replay-skip) — including an unspecced-only ns (`acme.notes`)
@@ -1674,16 +1681,17 @@
         fn-rows  (into (vec var-rows)
                        (remove #(contains? have-syms (:seon.fn/sym %)))
                        (extra-fn-rows now))
-        ;; Fn-less compiled roots are unioned in explicitly: a root
-        ;; with no public fns of its own (`my.kb` — register! calls +
-        ;; ns-doc only) still needs its full-source `:seon.ns` row,
-        ;; since the :namespaces section renders from exactly these
-        ;; datoms. The scanned downstream nses join the same way — so an
-        ;; unspecced-ONLY downstream ns (`acme.notes`) still gets its row
-        ;; even though no fn-row's sym names it (it does now, via
-        ;; extra-fn-rows — but the union is belt-and-suspenders, and covers
-        ;; a downstream ns with literally zero defns).
-        ns-syms (into (into (set fn-less-compiled-roots) (extra-src-ns-strs))
+        ;; EVERY compiled first-party ns gets a `:seon.ns` row — the
+        ;; BUILD-DERIVED closure set, so a root with no public fns of its
+        ;; own (a register!-calls-only ns) still gets its row by
+        ;; construction (the :namespaces section + `:seon.fn/ns`
+        ;; lookup-refs render from exactly these datoms; no hand
+        ;; exception list). The scanned downstream nses join the same
+        ;; way — so an unspecced-ONLY downstream ns (`acme.notes`) still
+        ;; gets its row even though no fn-row's sym names it (it does
+        ;; now, via extra-fn-rows — but the union is belt-and-suspenders,
+        ;; and covers a downstream ns with literally zero defns).
+        ns-syms (into (into compiled-first-party-ns-strs (extra-src-ns-strs))
                       (map #(first (str/split (:seon.fn/sym %) #"/" 2)))
                       fn-rows)
         ns-rows (map ns-row (sort ns-syms))]
@@ -2509,10 +2517,12 @@
                 ;; This is the complete, ordering-independent source (issue
                 ;; instrumentation-collect-clean-build-empty). Agent fns were
                 ;; already wrapped inline by the eval-tee during replay; this
-                ;; adds the compiled core fns. ONCE per process — a 2nd pass
-                ;; (a later POST /agents/new) would re-read the wrapper vars,
-                ;; mis-detect async, and wedge the pod (see instrument-from-db-once!).
-                instr-stats   (instrument/instrument-from-db-once! (await (d/db conn)))
+                ;; adds the compiled core fns. IDEMPOTENT on a later pass (a
+                ;; POST /agents/new re-runs it): detection sees through
+                ;; malli's per-var wrapper record, so re-instrumentation
+                ;; re-wraps from originals instead of mis-detecting async
+                ;; (the retired once-per-process gate's wedge class).
+                instr-stats   (instrument/instrument-from-db! (await (d/db conn)))
                 _             (log/info-console!
                                 "seon.client/start-agent!"
                                 (str "instrumentation: " (pr-str instr-stats)))
