@@ -2427,18 +2427,26 @@
                   :seon.analyzer-info/require-edges]}
   [db ns-kw]
   (try
-    (into #{}
-          (map (fn [e]
-                 (let [refers (:seon.ns.require/refers e)]
-                   (cond-> (dissoc e :db/id :seon.ns.require/refers)
-                     (seq refers) (assoc :seon.ns.require/refers
-                                         (set refers))))))
-          (:seon.ns/require-edges
-            (db/pull db
-                     '[{:seon.ns/require-edges
-                        [:db/id :seon.ns.require/target :seon.ns.require/alias
-                         :seon.ns.require/refers :seon.ns.require/refer-all?]}]
-                     [:seon.ns/name ns-kw])))
+    ;; Existence probe FIRST — a pull on a missing lookup-ref makes
+    ;; datahike LOG an :error before throwing (a fresh home-ns setup
+    ;; reads before its ns row exists), so probe cheaply and pull only
+    ;; a real row.
+    (if (nil? (ffirst (db/query '[:find ?e :in $ ?ns
+                                  :where [?e :seon.ns/name ?ns]]
+                                db ns-kw)))
+      #{}
+      (into #{}
+            (map (fn [e]
+                   (let [refers (:seon.ns.require/refers e)]
+                     (cond-> (dissoc e :db/id :seon.ns.require/refers)
+                       (seq refers) (assoc :seon.ns.require/refers
+                                           (set refers))))))
+            (:seon.ns/require-edges
+              (db/pull db
+                       '[{:seon.ns/require-edges
+                          [:db/id :seon.ns.require/target :seon.ns.require/alias
+                           :seon.ns.require/refers :seon.ns.require/refer-all?]}]
+                       [:seon.ns/name ns-kw]))))
     (catch :default _ #{})))
 
 (defn ns-require-edges-tx
