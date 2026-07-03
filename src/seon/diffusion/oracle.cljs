@@ -193,7 +193,7 @@
         bad-spans     (into inj-spans (map ::span renoise-spans))
         ;; CLAMPS — good forms that carry no hallucination and are not broken.
         clamps        (->> forms
-                           (keep (fn [{:keys [span source]}]
+                           (keep (fn [{:seon.repl/keys [span source]}]
                                    (when (and span
                                               (not (some #(overlaps? span %) bad-spans)))
                                      {::span span ::source source})))

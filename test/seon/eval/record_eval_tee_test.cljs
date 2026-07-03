@@ -316,11 +316,11 @@
         (.then (fn [r]
                  (is (:seon.eval/ok? r) (str "eval ok: " source))
                  ((deref #'seval/build-tee-entities)
-                  {:compile-state  cs
-                   :defs-before    defs-before
-                   :schemas-before schemas-before
-                   :source         source
-                   :at             (js/Date.)}))))))
+                  {:seon.eval/compile-state  cs
+                   :seon.eval/defs-before    defs-before
+                   :seon.eval/schemas-before schemas-before
+                   :seon.eval/source         source
+                   :seon.eval/at             (js/Date.)}))))))
 
 (deftest agent-deftest-tees-a-seon-test-row-not-a-fn-row
   (async done
