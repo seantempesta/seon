@@ -52,7 +52,25 @@
     ;; parse-forms parser itself lives in seon.repl.internal (.cljc).
     [rewrite-clj.parser]
     [rewrite-clj.node]
-    [rewrite-clj.zip]))
+    [rewrite-clj.zip]
+    [seon.schema :as schema]))
+
+;; ============================================================
+;; The parse-entry envelope (produced by seon.repl.internal/parse-forms —
+;; the .internal machinery of THIS ns, which owns the data). In-memory
+;; only, never transacted whole. `::form` is deliberately UNREGISTERED —
+;; it carries an arbitrary read sexpr (same reasoning as the unregistered
+;; :seon.eval/value). A `:read` entry's failure is the ONE :seon/error
+;; value: {:seon.error/kind <classified> :seon.error/message <parser msg>}.
+;; Registered here, not in the .cljc producer, because seon.repl.internal
+;; must stay loadable by bare babashka (bin/oracle-server) — no malli.
+;; ============================================================
+
+(schema/register! ::kind [:enum :form :read :comment])
+(schema/register! ::ok? :boolean)
+(schema/register! ::narration :string)
+(schema/register! ::source :string)
+(schema/register! ::span [:tuple :int :int])
 
 ;; ============================================================
 ;; Iteration-surface — dev-init! opens an agent conn (history-on) +

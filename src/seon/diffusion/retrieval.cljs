@@ -387,7 +387,7 @@
                   [:vector ::symbol-ref]]}
   [{::keys [canvas-text aliases]}]
   (let [entries (internal/parse-forms canvas-text {:strip-fences? false})
-        forms   (->> entries (filter #(= :form (:kind %))) (map :form))
+        forms   (->> entries (filter #(= :form (:seon.repl/kind %))) (map :seon.repl/form))
         aliases (merge (canvas-aliases forms) (or aliases {}))
         acc     (atom {:candidates [] :bound #{}})]
     (doseq [f forms] (walk! acc f false))
@@ -533,7 +533,7 @@
   [{::keys [canvas-text aliases db]}]
   (let [db      (the-db db)
         entries (internal/parse-forms canvas-text {:strip-fences? false})
-        forms   (->> entries (filter #(= :form (:kind %))) (map :form))
+        forms   (->> entries (filter #(= :form (:seon.repl/kind %))) (map :seon.repl/form))
         aliases (merge (canvas-aliases forms) (or aliases {}))
         refs    (free-references {::canvas-text canvas-text ::aliases aliases})]
     (vec (remove (fn [{::keys [name qualifier]}]
@@ -572,7 +572,7 @@
   [{::keys [canvas-text aliases k db]}]
   (let [db      (the-db db)
         entries (internal/parse-forms canvas-text {:strip-fences? false})
-        forms   (->> entries (filter #(= :form (:kind %))) (map :form))
+        forms   (->> entries (filter #(= :form (:seon.repl/kind %))) (map :seon.repl/form))
         aliases (merge (canvas-aliases forms) (or aliases {}))
         unres   (unresolved-references {::canvas-text canvas-text ::aliases aliases ::db db})]
     {::unresolved unres

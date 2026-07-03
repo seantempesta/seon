@@ -3371,16 +3371,17 @@
    caller's fold volatiles in place exactly as `eval-form-entry!` does.
 
    Map keys: the `eval-form-entry!` set, plus `:entry` (the parsed entry
-   — supplies `:kind`/`:source`) and `:narration` (the final narration,
-   repair note already prepended by the caller for a repaired form)."
+   — supplies `:seon.repl/kind`/`:seon.repl/source`) and `:narration`
+   (the final narration, repair note already prepended by the caller for
+   a repaired form)."
   [{:keys [compile-state eval-id turn-id current-ns n-ok n-fail
            failed-defs outer-test-run? entry narration]}]
-  (let [source (:source entry)]
+  (let [source (:seon.repl/source entry)]
     (cond
       ;; Comment-only entry — no source to eval. Record a comment-only row
       ;; (blank source, ok? true) so trailing `;;` thinking renders in the
       ;; transcript and is never lost. Not counted in n-ok/n-fail.
-      (= :comment (:kind entry))
+      (= :comment (:seon.repl/kind entry))
       (await (record-eval! {:eval-id     eval-id
                             :turn-id     turn-id
                             :at          (js/Date.)
@@ -3468,7 +3469,7 @@
    value at write time (post-update on success; unchanged on failure).
    See docs/seon/concepts/reactive-context.
 
-   `:kind :form` (the normal path):
+   `:seon.repl/kind :form` (the normal path):
      1. Eval in the accumulator's current-ns.
      2. Auto-await Promise return values.
      3. Compute duration-ms = (now - start).
@@ -3477,7 +3478,7 @@
      5. Transact a :seon.eval entity carrying :seon.eval/ns = the
         post-update accumulator value.
 
-   `:kind :read` (a parse-forms failure, see seon.repl.internal):
+   `:seon.repl/kind :read` (a parse-forms failure, see seon.repl.internal):
      1. Skip the eval (no source to evaluate).
      2. Record as a failed :seon.eval with :seon.eval/ns = the
         unchanged accumulator value (the ns the form WOULD have
@@ -3485,7 +3486,7 @@
         ctx and self-corrects.
      3. duration-ms = 0 (no eval happened).
 
-   `:kind :comment` (trailing comment-preamble with no following form):
+   `:seon.repl/kind :comment` (trailing comment-preamble with no following form):
      1. No source to eval — record a comment-only :seon.eval row
         (blank source, ok? true) carrying just `:seon.eval/narration`,
         so the agent's trailing `;;` thinking renders in the transcript
@@ -3501,7 +3502,7 @@
    Args:
      compile-state — the bootstrap compile-state (defonce'd at boot)
      parsed        — vector from `seon.repl.internal/parse-forms`
-                     (mix of `:kind :form` and `:kind :read` entries)
+                     (mix of `:seon.repl/kind` :form and :read entries)
      agent-ns-sym  — agent's home ns (e.g. 'my.agent.seon)
      agent-id      — the owning agent's id
      turn-id       — the owning :seon.agent.turn/id string (eval lands as a
@@ -3593,13 +3594,15 @@
                 ;; structural-shape, so the agent always sees what changed.
                 ;; If repair fails, fall through to the sharpened :read
                 ;; error (A.3) — the form defined NOTHING.
-                (and (= :read (:kind entry)) (false? (:ok? entry)))
+                (and (= :read (:seon.repl/kind entry))
+                     (false? (:seon.repl/ok? entry)))
                 (let [reads? (fn [s]
                                (let [es (internal/parse-forms s)]
                                  (and (seq es)
-                                      (every? #(not= :read (:kind %)) es))))
+                                      (every? #(not= :read (:seon.repl/kind %))
+                                              es))))
                       rep    (repair/repair-source
-                               {:seon.repair/source (:source entry)
+                               {:seon.repair/source (:seon.repl/source entry)
                                 :seon.repair/reads? reads?})]
                   (if (:seon.repair/repaired? rep)
                     ;; Repaired → re-parse the repaired span and run each
@@ -3613,17 +3616,17 @@
                       (loop [es repaired-entries first? true]
                         (when (seq es)
                           (let [e    (first es)
-                                shape (form-shape (:form e))
+                                shape (form-shape (:seon.repl/form e))
                                 note (when first?
                                        (repair/repair-note
                                          {:seon.repair/changes
                                           (:seon.repair/changes rep)
                                           :seon.repair/shape shape}))
                                 narr (if (and first? note)
-                                       (str (when (seq (:narration entry))
-                                              (str (:narration entry) "\n"))
+                                       (str (when (seq (:seon.repl/narration entry))
+                                              (str (:seon.repl/narration entry) "\n"))
                                             note)
-                                       (:narration e))
+                                       (:seon.repl/narration e))
                                 ;; A fresh eval-id per repaired form after the
                                 ;; first (the first reuses this entry's id).
                                 eid  (if first? eval-id (db/new-id!))]
@@ -3653,15 +3656,16 @@
                                 :turn-id     turn-id
                                 :at          (js/Date.)
                                 :duration-ms 0
-                                :narration   (:narration entry)
-                                :source      (:source entry)
+                                :narration   (:seon.repl/narration entry)
+                                :source      (:seon.repl/source entry)
                                 :ns          @current-ns
                                 :result      {::ok? false
                                               :seon/error {:seon.error/kind    :read
                                                            :seon.error/message
                                                            (read-error-message
-                                                             (:error entry)
-                                                             (:source entry))}}}))
+                                                             (-> entry :seon/error
+                                                                 :seon.error/message)
+                                                             (:seon.repl/source entry))}}}))
                       (vswap! n-fail inc))))
 
                 ;; Every non-`:read` entry — comment / parity-intercept /
@@ -3679,7 +3683,7 @@
                           :failed-defs     failed-defs
                           :outer-test-run? outer-test-run?
                           :entry           entry
-                          :narration       (:narration entry)}))))))
+                          :narration       (:seon.repl/narration entry)}))))))
         (vswap! eids conj eval-id)))
     (cond-> {:seon.eval/ids    @eids
              :seon.eval/n-ok   @n-ok

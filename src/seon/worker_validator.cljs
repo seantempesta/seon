@@ -89,11 +89,11 @@
    `closed-loop-span-alignment-2026-06-28.md`."
   [code & [strip-fences?]]
   (let [entries (internal/parse-forms code {:strip-fences? (not (false? strip-fences?))})
-        forms   (filterv #(= :form (:kind %)) entries)
+        forms   (filterv #(= :form (:seon.repl/kind %)) entries)
         errors  (->> entries
-                     (filter #(= :read (:kind %)))
-                     (mapv (fn [{:keys [error-kind span source]}]
-                             {:error-kind error-kind
+                     (filter #(= :read (:seon.repl/kind %)))
+                     (mapv (fn [{:seon.repl/keys [span source] :as entry}]
+                             {:error-kind (-> entry :seon/error :seon.error/kind)
                               :span       span
                               :source     source})))]
     {:forms  (count forms)

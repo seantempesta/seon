@@ -60,11 +60,11 @@
   ([code] (validate code true))
   ([code strip-fences?]
   (let [entries (internal/parse-forms code {:strip-fences? strip-fences?})
-        forms   (filterv #(= :form (:kind %)) entries)
+        forms   (filterv #(= :form (:seon.repl/kind %)) entries)
         errors  (->> entries
-                     (filter #(= :read (:kind %)))
-                     (mapv (fn [{:keys [error-kind span source]}]
-                             {:error-kind (name error-kind)
+                     (filter #(= :read (:seon.repl/kind %)))
+                     (mapv (fn [{:seon.repl/keys [span source] :as entry}]
+                             {:error-kind (name (-> entry :seon/error :seon.error/kind))
                               :span       span
                               :source     source})))]
     {:forms  (count forms)
@@ -90,29 +90,32 @@
   ([code] (refine-parse code nil))
   ([code phase]
    (let [entries (internal/parse-forms code {:strip-fences? false})
-         forms   (filter #(= :form (:kind %)) entries)
-         reads   (filter #(= :read (:kind %)) entries)
+         forms   (filter #(= :form (:seon.repl/kind %)) entries)
+         reads   (filter #(= :read (:seon.repl/kind %)) entries)
          ;; broken-syntax spans (PARSE tier)
-         parse-r (mapv (fn [r] {:span       (:span r)
-                                :error-kind (name (:error-kind r))
-                                :source     (:source r)})
+         parse-r (mapv (fn [r] {:span       (:seon.repl/span r)
+                                :error-kind (name (-> r :seon/error :seon.error/kind))
+                                :source     (:seon.repl/source r)})
                        reads)
          ;; def-vs-defn (STRUCTURAL tier) + phase violations (PHASE tier), both
          ;; over the GOOD forms via the SHARED grammar predicates.
          struct-r (keep (fn [f]
-                          (when (grammar/malformed-def? (:form f))
-                            {:span (:span f) :error-kind "def-vs-defn" :source (:source f)}))
+                          (when (grammar/malformed-def? (:seon.repl/form f))
+                            {:span (:seon.repl/span f) :error-kind "def-vs-defn"
+                             :source (:seon.repl/source f)}))
                         forms)
          phase-r  (when phase
                     (keep (fn [f]
-                            (when (grammar/phase-violation? phase (:form f))
-                              {:span (:span f) :error-kind "phase-violation" :source (:source f)}))
+                            (when (grammar/phase-violation? phase (:seon.repl/form f))
+                              {:span (:seon.repl/span f) :error-kind "phase-violation"
+                               :source (:seon.repl/source f)}))
                           forms))
          renoise  (vec (concat parse-r struct-r phase-r))
          bad      (set (map :span renoise))
          clamps   (->> forms
-                       (remove #(contains? bad (:span %)))
-                       (mapv (fn [f] {:span (:span f) :source (:source f)})))]
+                       (remove #(contains? bad (:seon.repl/span %)))
+                       (mapv (fn [f] {:span (:seon.repl/span f)
+                                      :source (:seon.repl/source f)})))]
      {:tier          "refine"
       :legs          (if phase ["parse" "phase"] ["parse"])
       :note          (str "bb covers the CHEAP tiers — parse + structural (def-vs-defn) + "

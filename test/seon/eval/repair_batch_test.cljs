@@ -112,7 +112,7 @@
                 (is (true? (:ok? row))))
               (testing "recorded source is the REPAIRED, now-readable source"
                 (is (string? (:source row)))
-                (is (every? #(not= :read (:kind %))
+                (is (every? #(not= :read (:seon.repl/kind %))
                             (internal/parse-forms (:source row)))
                     "repaired source re-reads with no :read failures"))
               (testing "the fn was defined with BOTH render keys"
@@ -195,7 +195,7 @@
                 (is (= 1 (:seon.eval/n-ok res)))
                 (is (= 0 (:seon.eval/n-fail res)))
                 (is (true? (:ok? row)))
-                (is (every? #(not= :read (:kind %))
+                (is (every? #(not= :read (:seon.repl/kind %))
                             (internal/parse-forms (:source row))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

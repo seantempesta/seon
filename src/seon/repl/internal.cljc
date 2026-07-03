@@ -9,39 +9,44 @@
 
    ## Entry shape
 
+   Keys live in the `:seon.repl` namespace — the `.internal` machinery
+   of `seon.repl`, which owns the parse-envelope data (registered below).
    Each vector entry is one of:
 
-       {:kind :form
-        :narration string     ; the `;;` COMMENT-PREAMBLE for this form:
-                              ; the real `;` comment lines that preceded it,
-                              ; `;` stripped, one per line (the renderer
-                              ; re-adds `;;`). Bare prose is NOT captured —
-                              ; it is DROPPED (see below).
-        :source string        ; BYTE-FAITHFUL — what the agent typed, char-
-                              ; for-char (load-bearing for resume re-eval)
-        :form any             ; the read sexpr value (always a list/seq)
-        :span [start end]}    ; ABSOLUTE char offsets of the form in `text`
-                              ; (same basis as the `:read` :span) — the
-                              ; closed-loop oracle's clamp-to-HOLD spans for
-                              ; good forms
+       {:seon.repl/kind :form
+        :seon.repl/narration string  ; the `;;` COMMENT-PREAMBLE for this
+                              ; form: the real `;` comment lines that
+                              ; preceded it, `;` stripped, one per line (the
+                              ; renderer re-adds `;;`). Bare prose is NOT
+                              ; captured — it is DROPPED (see below).
+        :seon.repl/source string  ; BYTE-FAITHFUL — what the agent typed,
+                              ; char-for-char (load-bearing for resume
+                              ; re-eval)
+        :seon.repl/form any   ; the read sexpr value (always a list/seq)
+        :seon.repl/span [start end]}  ; ABSOLUTE char offsets of the form
+                              ; in `text` (same basis as the `:read` span)
+                              ; — the closed-loop oracle's clamp-to-HOLD
+                              ; spans for good forms
 
-       {:kind :read
-        :ok? false
-        :narration string     ; same `;;`-comment accumulation rule
-        :source string        ; the bad span (offset → recovery point)
-        :error string         ; rewrite-clj's parser message
-        :span [start end]     ; ABSOLUTE char offsets of the bad span in
-                              ; `text` — what a token-canvas re-noise step
-                              ; maps back to mask positions
-        :error-kind keyword}  ; classified failure (`classify-read-error`):
-                              ; :eof / :unmatched-delimiter / :invalid-token
-                              ; / :read — the re-noise / repair layer
+       {:seon.repl/kind :read
+        :seon.repl/ok? false
+        :seon.repl/narration string  ; same `;;`-comment accumulation rule
+        :seon.repl/source string  ; the bad span (offset → recovery point)
+        :seon/error           ; the ONE error-value shape (seon.error):
+          {:seon.error/kind keyword   ; classified failure
+                              ; (`classify-read-error`): :eof /
+                              ; :unmatched-delimiter / :invalid-token /
+                              ; :read — the re-noise / repair layer
                               ; dispatches on this (tail vs point re-mask;
                               ; :invalid-token is the embedding-lookup hook)
+           :seon.error/message string}  ; rewrite-clj's parser message
+        :seon.repl/span [start end]}  ; ABSOLUTE char offsets of the bad
+                              ; span in `text` — what a token-canvas
+                              ; re-noise step maps back to mask positions
 
-       {:kind :comment
-        :narration string}    ; either trailing `;;` comment lines with NO
-                              ; following form, OR the one-line
+       {:seon.repl/kind :comment
+        :seon.repl/narration string}  ; either trailing `;;` comment lines
+                              ; with NO following form, OR the one-line
                               ; `demoted-literal-warning` for a top-level
                               ; data literal (`{…}`/`[…]`/`#{…}`) that was
                               ; demoted to prose. The renderer shows it as
@@ -82,6 +87,14 @@
     [clojure.string :as str]
     [rewrite-clj.parser :as rcp]
     [rewrite-clj.node :as rcn]))
+
+;; ============================================================
+;; The parse-entry envelope keys are :seon.repl/* — this ns is the
+;; .internal machinery of seon.repl, which OWNS the data and registers
+;; the envelope schemas (see seon.repl). They are not registered HERE
+;; because this ns must stay loadable by bare babashka (bin/oracle-server
+;; puts only src/ on the bb classpath — no malli, no seon.schema).
+;; ============================================================
 
 ;; ============================================================
 ;; Markdown code-fence strip — Postel's law.
@@ -461,14 +474,15 @@
 
 (defn- try-parse-one-token
   "Attempt to parse exactly one rewrite-clj token starting at `offset`.
-   Returns one of:
+   Returns one of (`::` = this ns — private scanner tokens, never the
+   public `:seon.repl/*` entry envelope):
 
-     {:kind :form  :source <byte-faithful> :form <sexpr> :tag <kw> :end <int>}
-     {:kind :comment    :text <stripped>                      :end <int>}
-     {:kind :whitespace                                       :end <int>}
-     {:kind :error      :error <message>}                     ; caller recovers
+     {::kind :form  ::source <byte-faithful> ::form <sexpr> ::tag <kw> ::end <int>}
+     {::kind :comment    ::text <stripped>                       ::end <int>}
+     {::kind :whitespace                                         ::end <int>}
+     {::kind :error      ::error <message>}                      ; caller recovers
 
-   `:tag` is the rewrite-clj node tag (`:list`, `:map`, `:reader-macro`,
+   `::tag` is the rewrite-clj node tag (`:list`, `:map`, `:reader-macro`,
    …) — `prose-token?` needs it to tell a `#inst` datum (sexprs to a seq
    yet is prose) from a genuine list/reader-macro form."
   [text offset]
@@ -480,7 +494,7 @@
           tag   (rcn/tag node)]
       (cond
         (= tag :comment)
-        {:kind :comment :text (comment-text node) :end end}
+        {::kind :comment ::text (comment-text node) ::end end}
 
         ;; :comma matters for prose: "24 minutes, felt good" — the
         ;; comma is Clojure whitespace, but rewrite-clj tags it
@@ -492,12 +506,12 @@
         ;; `#_foo` falsely reads as a :read failure. Drop it like
         ;; whitespace (a bare top-level discard carries nothing to eval).
         (#{:whitespace :newline :comma :uneval} tag)
-        {:kind :whitespace :end end}
+        {::kind :whitespace ::end end}
 
         :else
-        {:kind :form :source src :form (rcn/sexpr node) :tag tag :end end}))
+        {::kind :form ::source src ::form (rcn/sexpr node) ::tag tag ::end end}))
     (catch #?(:clj Exception :cljs :default) e
-      {:kind :error :error (#?(:clj .getMessage :cljs .-message) e)})))
+      {::kind :error ::error (#?(:clj .getMessage :cljs .-message) e)})))
 
 ;; ============================================================
 ;; Read-failure classification
@@ -601,8 +615,8 @@
    comment-preamble that precedes it. See the namespace docstring for the
    entry-shape contract.
 
-   FORMS-AND-PROSE-ONLY (#50/#52): a top-level read form is a `:kind
-   :form` entry (EVALUATED) iff it is a LIST/SEQ — `(…)` and the
+   FORMS-AND-PROSE-ONLY (#50/#52): a top-level read form is a
+   `:seon.repl/kind :form` entry (EVALUATED) iff it is a LIST/SEQ — `(…)` and the
    reader-macros that read as seqs (`@x`/`'x`/`#(…)`/`` `(…) ``/`#'x`) —
    or a bare `result/<id>` stash RE-REFERENCE symbol (#39, which
    self-evaluates into its prior value). EVERYTHING else is prose and is
@@ -612,7 +626,7 @@
    `=>`/`⇒`), TAGGED literals (`#inst`/`#uuid`/`#js`/`#?(…)`), an A.1
    unreadable prose token (`80s`/`to:`), and — the load-bearing #52 fix —
    a top-level DATA LITERAL (`{…}`/`[…]`/`#{…}`). A demoted data literal
-   does NOT silently vanish: it emits a `:kind :comment` entry whose
+   does NOT silently vanish: it emits a `:seon.repl/kind :comment` entry whose
    narration is the one-line `demoted-literal-warning` (a strong signal
    the agent meant to USE a value). The reader groups a whole `(…)` as
    one top-level form regardless of indentation, so a multiline
@@ -620,20 +634,22 @@
    `{…}` is ONE demoted datum.
 
    Real `;;` comments are the taught reasoning channel and still attach
-   as `:narration` to the following form (or emit as a trailing `:kind
-   :comment` entry). Dropped prose between a comment and its form does
-   NOT break that attachment — `;; intent\\nokay\\n(foo)` attaches
-   `intent` to `(foo)` and drops `okay`.
+   as `:seon.repl/narration` to the following form (or emit as a trailing
+   `:seon.repl/kind :comment` entry). Dropped prose between a comment and
+   its form does NOT break that attachment — `;; intent\\nokay\\n(foo)`
+   attaches `intent` to `(foo)` and drops `okay`.
 
    Read errors do NOT halt the parse: a genuinely broken FORM (opener at
-   the start of its span — `(+ 1 3x)`) becomes a `:kind :read :ok? false`
-   entry and parsing continues; a prose-token throw (`80s`) is dropped.
+   the start of its span — `(+ 1 3x)`) becomes a `:seon.repl/kind :read`
+   / `:seon.repl/ok? false` entry (its failure carried as the ONE
+   `:seon/error` value) and parsing continues; a prose-token throw
+   (`80s`) is dropped.
 
    Markdown code-fence lines (` ``` `, ` ```clojure `, ` ~~~ `, …)
    are stripped before reading — see `strip-code-fences`.
 
    `:strip-fences?` (opts, default true) controls that strip. Pass
-   `false` to keep every `:span [s e]` an ABSOLUTE char offset into the
+   `false` to keep every `:seon.repl/span [s e]` an ABSOLUTE char offset into the
    EXACT input string (no fence-line removal shifting later spans). The
    closed-loop renoise path needs this: the diffusion worker's
    `offset_map` indexes the RAW `canvas_text`, so its parser spans must
@@ -652,27 +668,28 @@
         ;; Trailing `;;` comment lines with no following form survive as a
         ;; comment-only entry; dropped prose leaves nothing behind.
         (if (seq pending)
-          (conj out {:kind :comment :narration (join-narration pending)})
+          (conj out {:seon.repl/kind      :comment
+                     :seon.repl/narration (join-narration pending)})
           out)
         (let [token (try-parse-one-token text offset)]
-          (case (:kind token)
+          (case (::kind token)
             :whitespace
-            (recur (:end token) pending out)
+            (recur (::end token) pending out)
 
             :comment
-            (recur (:end token) (conj pending (:text token)) out)
+            (recur (::end token) (conj pending (::text token)) out)
 
             :form
             (cond
               ;; A genuine form (list/seq, not a tagged literal) — emit,
               ;; carrying any accumulated `;;` preamble as narration.
-              (not (prose-token? (:form token) (:tag token)))
-              (recur (:end token)
+              (not (prose-token? (::form token) (::tag token)))
+              (recur (::end token)
                      []
-                     (conj out {:kind      :form
-                                :narration (join-narration pending)
-                                :source    (:source token)
-                                :form      (:form token)
+                     (conj out {:seon.repl/kind      :form
+                                :seon.repl/narration (join-narration pending)
+                                :seon.repl/source    (::source token)
+                                :seon.repl/form      (::form token)
                                 ;; ABSOLUTE `[start end)` char span of this
                                 ;; form in `text` — the SAME basis the `:read`
                                 ;; entry carries, so the closed-loop renoise /
@@ -681,24 +698,24 @@
                                 ;; the broken ones (renoise). `offset` points
                                 ;; exactly at the form start (leading
                                 ;; whitespace was consumed as prior tokens).
-                                :span      [offset (:end token)]}))
+                                :seon.repl/span      [offset (::end token)]}))
 
               ;; A demoted DATA LITERAL (`{…}`/`[…]`/`#{…}`) — DROP the
               ;; eval, but emit ONE warning so the agent learns to wrap a
               ;; value it means to run. Any `;;` preamble rides along.
-              (data-literal? (:form token))
-              (recur (:end token)
+              (data-literal? (::form token))
+              (recur (::end token)
                      []
-                     (conj out {:kind :comment
-                                :narration
+                     (conj out {:seon.repl/kind :comment
+                                :seon.repl/narration
                                 (join-narration
                                   (conj pending
-                                        (demoted-literal-warning (:form token))))}))
+                                        (demoted-literal-warning (::form token))))}))
 
               ;; Ordinary prose tokenized as an atom / tagged literal —
               ;; DROP it; carry `pending` so a real comment still lands.
               :else
-              (recur (:end token) pending out))
+              (recur (::end token) pending out))
 
             :error
             ;; PROSE vs BROKEN CODE (A.1). Classify on the narrowed
@@ -706,14 +723,14 @@
             ;; following lines.
             (let [nl-recovery (next-newline-recovery text offset)
                   prose-span  (subs text offset nl-recovery)]
-              (if (prose-failure? (:error token) prose-span)
+              (if (prose-failure? (::error token) prose-span)
                 ;; Prose tokenized as an invalid token — DROP it; recover
                 ;; at the next newline; carry `pending`.
                 (recur nl-recovery pending out)
                 ;; Broken code — record a :read failure; recover at the
                 ;; next genuine top-level boundary (error-kind-aware: an
                 ;; :eof unclosed form never splits at an interior `;`).
-                (let [error-kind (classify-read-error (:error token))
+                (let [error-kind (classify-read-error (::error token))
                       recovery   (find-recovery-point text offset error-kind)
                       bad-span   (subs text offset recovery)]
                   (if (closer-only? bad-span)
@@ -725,10 +742,15 @@
                     (recur recovery pending out)
                     (recur recovery
                            []
-                           (conj out {:kind       :read
-                                      :ok?        false
-                                      :narration  (join-narration pending)
-                                      :source     bad-span
-                                      :error      (:error token)
-                                      :span       [offset recovery]
-                                      :error-kind error-kind}))))))))))))
+                           (conj out {:seon.repl/kind      :read
+                                      :seon.repl/ok?       false
+                                      :seon.repl/narration (join-narration pending)
+                                      :seon.repl/source    bad-span
+                                      ;; The ONE :seon/error value shape —
+                                      ;; classified kind + the parser message
+                                      ;; (same hand-built form as
+                                      ;; seon.worker-eval/classify-error).
+                                      :seon/error
+                                      {:seon.error/kind    error-kind
+                                       :seon.error/message (str (::error token))}
+                                      :seon.repl/span      [offset recovery]}))))))))))))

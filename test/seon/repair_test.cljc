@@ -25,7 +25,7 @@
    `:kind :read` failures (and at least one entry)."
   [s]
   (let [es (parse/parse-forms s)]
-    (and (seq es) (every? #(not= :read (:kind %)) es))))
+    (and (seq es) (every? #(not= :read (:seon.repl/kind %)) es))))
 
 (defn- repair*
   "Convenience: run repair-source with the parser-based reads? gate."
@@ -40,7 +40,7 @@
    when no map is found."
   [source]
   (let [entries (parse/parse-forms source)
-        form    (:form (first entries))]
+        form    (:seon.repl/form (first entries))]
     (cond
       (map? form) form
       ;; (defn name [args] {map})  OR  (defn name [args] (let [...] {map}))

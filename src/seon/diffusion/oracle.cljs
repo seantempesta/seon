@@ -139,8 +139,8 @@
   {:malli/schema [:=> [:cat ::checkpoint] ::control-set]}
   [{::keys [canvas-text aliases k eval-verdicts phase db]}]
   (let [entries  (internal/parse-forms canvas-text {:strip-fences? false})
-        forms    (filter #(= :form (:kind %)) entries)
-        reads    (filter #(= :read (:kind %)) entries)
+        forms    (filter #(= :form (:seon.repl/kind %)) entries)
+        reads    (filter #(= :read (:seon.repl/kind %)) entries)
         ;; RETRIEVE leg — hallucinated-symbol injections (reads the graph).
         {::retrieval/keys [injections]}
         (retrieval/retrieve-for-canvas
@@ -150,14 +150,16 @@
             db      (assoc :seon.diffusion.retrieval/db db)))
         inj-spans     (mapv :seon.diffusion.retrieval/span injections)
         ;; PARSE-tier renoise spans (broken syntax).
-        parse-renoise (mapv (fn [{:keys [span error-kind source]}]
-                              {::span span ::error-kind error-kind ::source source})
+        parse-renoise (mapv (fn [{:seon.repl/keys [span source] :as entry}]
+                              {::span span
+                               ::error-kind (-> entry :seon/error :seon.error/kind)
+                               ::source source})
                             reads)
         ;; STRUCTURAL-tier (T1) renoise spans — a form that READS clean but has a
         ;; wrong SHAPE the AST alone proves (def-vs-defn). Renoises the offending
         ;; form WITHOUT paying the eval tier.
         struct-renoise (->> forms
-                            (keep (fn [{:keys [span source form]}]
+                            (keep (fn [{:seon.repl/keys [span source form]}]
                                     (when (and span (grammar/malformed-def? form))
                                       {::span span ::error-kind :def-vs-defn
                                        ::source source})))
@@ -168,7 +170,7 @@
         ;; the model regenerates within the phase grammar.
         phase-renoise (if phase
                         (->> forms
-                             (keep (fn [{:keys [span source form]}]
+                             (keep (fn [{:seon.repl/keys [span source form]}]
                                      (when (and span (grammar/phase-violation? phase form))
                                        {::span span ::error-kind :phase-violation
                                         ::source source})))

@@ -980,7 +980,7 @@
     (let [entries (repl-internal/parse-forms
                     "(defn f1 [] 1)\n(defn f2 [] 2)\n(+ 1 2)")]
       (is (= 3 (count entries)))
-      (is (= [:form :form :form] (mapv :kind entries)))
+      (is (= [:form :form :form] (mapv :seon.repl/kind entries)))
       (is (= [true true false]
-             (mapv #(seval/defn-form? (:source %)) entries))
+             (mapv #(seval/defn-form? (:seon.repl/source %)) entries))
           "both defns tee; the trailing expr does not — single-lane resume"))))

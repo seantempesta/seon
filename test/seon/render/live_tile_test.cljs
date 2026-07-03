@@ -687,7 +687,7 @@
 (deftest wiring-source-parses-as-one-tutorial-form
   (let [agent-id "AGTwiresrc0001"
         parsed   (repl.internal/parse-forms (tile/wiring-source agent-id))
-        {:keys [kind narration form]} (first parsed)]
+        {:seon.repl/keys [kind narration form]} (first parsed)]
     (is (= 1 (count parsed)) "exactly ONE form — the wiring transact")
     (is (= :form kind) "it parses cleanly (:form, not :read)")
     (testing "the tutorial comments ride as narration (context-v4 §3.1)"
