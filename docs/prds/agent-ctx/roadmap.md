@@ -364,11 +364,38 @@ repo-dev docs.
    revert recompiled `:client` mid-drive — frozen pod log 0 `reloading`
    lines; the same touches hot-patched a `--watched` contrast cluster 6
    times. pytest 175.
-9. **Ongoing / cadence** — re-run web_fetch after bench-bundle isolation;
-   standard-bench sweep (arc/mmlu/gpqa dev) on a quiet stack; per-row
-   rendered-context audits (every trim is an A/B), baseline each tool the
-   tooling lane lands, milestone runs at merges, the mvm case-2 sandbox tier
-   later.
+9. **bench-cluster-N + cadence sweep — ✅ DONE 2026-07-03.** (A)
+   CONCURRENT per-sample clusters: `run_bench(per_sample_cluster=True,
+   cluster_parallelism=N)` + `tool_rows.run_tool_row(..., parallelism=N)` —
+   N ephemeral clusters live at once over a bounded thread pool, each
+   sample still its OWN cluster (POD_MAX_SAMPLES stays 1). N calibrated
+   empirically (trivial DeepSeek drives, frozen bundle, shared wire-server;
+   serial-equivalent throughput): N=1 23.9 s/sample · N=2 13.0 (1.84x, 0
+   errors) · N=4 11.5 (only +12% over N=2 for 2-3x create/drive latency
+   inflation) → **default `config.BENCH_CLUSTER_PARALLELISM = 2`**;
+   wire-server clean at both. Cross-talk spot-check at N=2 CLEAN: two
+   concurrent samples' turns each landed ONLY in their own cluster db
+   (turn→run→agent join over the wire REPL). The frozen bundle pre-builds
+   ONCE up front (`bin/seon bench-bundle`, mutexed) — creates never rebuild
+   (freshness is RUN-level). (B) web_fetch re-run (the voided row): dev n=8
+   k=3, frozen N=2 → **mean .625 / pass@3 1.0 / pass^3 .25, 0 flakes**
+   (every sample solvable — instability, not a floor; 9 wrong-VALUE replies
+   vs local fixture ground truth). Attempt 1 caught + VOIDED by the identity
+   assertion (`frozen_bundle_changed`) — exposed TWO real defects, both
+   fixed: a per-create staleness rebuild swapped code under the run when the
+   tooling lane saved src/ mid-run, AND the bundle sha hashed only the
+   ~70KB loader (`main.js`) while code lives in the cljs-runtime chunks (a
+   rebuild left main.js byte-identical). (C) standard sweep, dev, k=1,
+   frozen N=2, each bench's own `multiple_choice` chain riding a new
+   `catalog.pod_backed` (its INTERNAL generate callback drives the pod) +
+   guarded `pod_fallback` (keys on the pod-run marker, never re-runs):
+   **arc_challenge .867 · mmlu_0_shot .800 · gpqa_diamond .700**, 0 flakes;
+   per-bench rendered-prompt template spot-checked pre-batch (ANSWER
+   contract + choices present). Ledger now 8 rows; alarm green; pytest 186.
+   Evidence: `evals/runs/2026-07-03-concurrent-pass/`.
+   **Still ongoing:** per-row rendered-context audits (every trim is an
+   A/B), baseline each tool the tooling lane lands, milestone runs at
+   merges, the mvm case-2 sandbox tier later.
 
 Spec: [[eval-design]] · plan: [[eval-lane-plan]] · readiness:
 [[research/tool-surface-survey-2026-07-02]].

@@ -98,6 +98,19 @@ def bundle_violation(start: dict[str, Any] | None) -> str | None:
             "'frozen_bundle_changed' and publish no capability number")
 
 
+def ensure_bench_bundle(runner: Callable[..., Any] = subprocess.run
+                        ) -> dict[str, Any] | None:
+    """Build/refresh the frozen bench bundle ONCE, up front — then create.
+
+    `bin/seon bench-bundle` (staleness-guarded, mutexed supervisor-side) so a
+    bench-cluster-N run never pays — or races — a compile inside a sample's
+    boot window: after this, each concurrent create's own staleness check
+    no-ops. Returns the resulting `bundle_identity()` (the pin the end-of-run
+    assertion checks against)."""
+    _run_seon(["bench-bundle"], runner, timeout_s=330)
+    return bundle_identity()
+
+
 @dataclass(frozen=True)
 class Cluster:
     """A created cluster's coordinates: name + the pod's bound HTTP port."""

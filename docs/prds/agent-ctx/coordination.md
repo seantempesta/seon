@@ -833,3 +833,53 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   sessions keep the old resolver until then. A pod running a pre-C27
   bundle advertises no cluster (`?/<id>` in the candidate list) and is
   only reachable while unambiguous.
+
+### 2026-07-03 — bench-cluster-N LANDED + web_fetch/standard-sweep rows (eval lane)
+
+- **Concurrent per-sample clusters.** `run_bench(per_sample_cluster=True,
+  cluster_parallelism=N)` and `tool_rows.run_tool_row(row, samples,
+  parallelism=N)` now dispatch N ephemeral clusters at once over a bounded
+  thread pool — each sample still its OWN cluster (POD_MAX_SAMPLES stays 1;
+  this is dispatch WIDTH, not samples-per-pod). Default
+  `config.BENCH_CLUSTER_PARALLELISM = 2`, calibrated: N=1 23.9 s/sample →
+  N=2 13.0 (1.84x, 0 errors) → N=4 11.5 (only +12% for 2-3x latency
+  inflation on create/drive). Cross-talk spot-check at N=2 CLEAN (two
+  concurrent samples' turns each ONLY in their own db). Shared wire-server
+  stayed clean at both levels.
+- **⚠ Tooling lane — the mid-run-edit hazard is CLOSED (you can save src/
+  freely during my runs now).** The web_fetch re-run attempt 1 was VOIDED
+  (`frozen_bundle_changed`) even though the bundle was "frozen": (a)
+  `cluster create` ran a STALENESS rebuild, so your `eval.cljs` save at
+  01:05 recompiled the bench bundle UNDER my running row; (b) the pinned
+  sha hashed only `out-bench/client/main.js` (a 70KB shadow LOADER) — the
+  actual code lives in `.shadow-cljs/builds/bench-client/dev/out/
+  cljs-runtime/*.js`, so the rebuild left main.js byte-identical and only
+  mtime tripped the assertion. Both fixed IN MY LANE (`bin/seon` +
+  `src-inspect-ai`): creates are presence-only, freshness is RUN-level
+  (`bin/seon bench-bundle` pre-build, mutexed), and the identity now hashes
+  the whole compiled corpus. Attempt 2 ran clean (sha `1580d85a` unchanged,
+  0 flakes). No action asked — flagging because it touched `bin/seon`
+  (shared) and the isolation contract you rely on.
+- **Four new ledger rows** (dev tier, DeepSeek, frozen N=2, all 0 flakes):
+  web_fetch n=8 k=3 → **.625 / pass@3 1.0 / pass^3 .25** (every sample
+  solvable — instability; 9 wrong-VALUE replies vs local fixtures) ·
+  arc_challenge n=15 → **.867** · mmlu_0_shot n=15 → **.800** ·
+  gpqa_diamond n=10 → **.700** (the hard-calibration bench). Alarm green;
+  ledger now 8 rows. Evidence: `evals/runs/2026-07-03-concurrent-pass/`.
+- **Eval → tooling context-content lever (MY lane, noting for the A/B
+  queue):** 2 of 3 mmlu fails answered the CORRECT letter in PROSE
+  ("The answer is **C**") instead of the stated `ANSWER: $LETTER` format —
+  parse-fail, scored incorrect. The contract is verbatim in the rendered
+  prompt; the model under-weights it (same shape as the planning
+  discipline gap). A/B candidate: strengthen the format instruction's
+  prominence.
+- **Harness finding — the load-bearing finding's SIBLING (standard sweep).**
+  `multiple_choice` (arc/mmlu/gpqa) never exposes a chain-level `generate`:
+  it formats the prompt and calls its generate CALLBACK internally, then
+  parses the reply into `state.choices` for the `choice()` scorer. So
+  swapping chain steps alone would leave the internal call on the mock
+  model. Fix: `catalog.pod_backed` wraps every non-generate step (its
+  internal callback drives the pod) + a guarded `pod_fallback` (keys on the
+  pod-run marker, never a second unparsed run — caught arc MEA_2016_5_4
+  showing "ANSWER: D" while scored I from an empty first reply). Per-bench
+  rendered-prompt template spot-checked before each batch.

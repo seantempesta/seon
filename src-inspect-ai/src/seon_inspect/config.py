@@ -51,6 +51,22 @@ CLUSTER_BOOT_BUDGET_S = 60
 POD_MAX_SAMPLES = 1
 
 
+# bench-cluster-N: how many EPHEMERAL clusters run at once in
+# per_sample_cluster mode (each sample still gets its OWN cluster — this is
+# dispatch width, never samples-per-pod; POD_MAX_SAMPLES stays 1 per pod by
+# construction). Calibration 2026-07-03 (trivial DeepSeek drives, frozen
+# bundle, shared wire-server; per-sample serial-equivalent throughput):
+#   N=1: 23.9 s/sample (create p50 10.3s, drive ~9.7s)
+#   N=2: 13.0 s/sample (1.84x; create 12-16s, drive unchanged; 0 errors)
+#   N=4: 11.5 s/sample (only +12% over N=2; create 17-27s ~2x, drive 13-33s
+#        up to 3x — contention erodes the row-timeout margin; 0 errors)
+# → default 2 (near-linear, minimal inflation); 4 works but pays real
+# latency for marginal throughput — override per run when a row's timeout
+# margin can absorb it. Wire-server stayed clean at both levels; cross-talk
+# spot-check at N=2 CLEAN (each sample's turns only in its own cluster db).
+BENCH_CLUSTER_PARALLELISM = 2
+
+
 def cluster_url(override: str | None = None) -> str:
     """Resolve the pod door: argument > SEON_CLUSTER_URL > default, at call time."""
     return override or os.environ.get("SEON_CLUSTER_URL") or DEFAULT_CLUSTER_URL

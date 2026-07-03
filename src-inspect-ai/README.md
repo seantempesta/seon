@@ -91,6 +91,8 @@ next to `datasets.lock`) — never under the package or docs/.
 | One task offline | `.venv/bin/inspect eval src/seon_inspect/tasks/e1_spec_fn.py@e1_spec_fn -T arm=arm1_guided_refine -T endpoint=mock:guided_wins --model mockllm/model --display plain` | same |
 | Pod-backed (acme, static URL) | `SEON_CLUSTER_URL=http://127.0.0.1:7980/agents/run .venv/bin/inspect eval <task> --model mockllm/model --max-samples 1` | acme pod + DeepSeek key |
 | Per-sample ephemeral clusters | `run_bench("gsm8k", per_sample_cluster=True, ...)` | default supervisor stack up (`bin/seon status`) + DeepSeek key |
+| bench-cluster-N (concurrent per-sample clusters) | `run_bench(..., per_sample_cluster=True, cluster_parallelism=2)` / `tool_rows.run_tool_row(row, samples, parallelism=2, ...)` — default `config.BENCH_CLUSTER_PARALLELISM` (2, calibrated 2026-07-03: N=2 → 1.84x throughput, no degradation; N=4 → +12% more for 2-3x latency inflation). Above 1 the frozen bundle pre-builds ONCE (`bin/seon bench-bundle`) before dispatch. | same |
+| Frozen dev split of a standard bench | `freeze.run_split("arc_challenge", "dev", per_sample_cluster=True, cluster_parallelism=2, run_timeout_s=240, epochs=1)` | same |
 | Planning row (live, two-phase) | `planning.pod_planning_driver(phase1, phase2)` per sample -> `check_planning` | same + wire-server REPL (`tmp/seon-writer-repl-port`) |
 | GPU worker | add `-T endpoint=runpod` + env `DIFFGEMMA_EP`/`RUNPOD_API_KEY`, `--max-samples 1` | deployed worker, `verify_fresh` FIRST (runbook step 0) |
 
@@ -303,6 +305,17 @@ template/system solvers stay, only `generate()` is swapped — and the pod
 solver POSTs the TEMPLATED `state.user_prompt.text`. Replacing the whole
 chain silently drops the contract and the bench measures prompt-omission
 (observed: mean .500 → .730 on the same frozen gsm8k dev samples).
+
+The invariant's sibling (standard sweep, 2026-07-03): composite bench solvers
+(`multiple_choice` — arc/mmlu/gpqa) never expose a chain-level `generate` —
+they format the prompt and call their `generate` CALLBACK internally, then
+parse the reply into `state.choices` for the `choice()` scorer. So
+`swap_generate` wraps every non-generate step in `catalog.pod_backed` (the
+step's internal callback drives the pod) and appends a guarded
+`catalog.pod_fallback` (runs the pod only if nothing upstream produced a
+completion — never a second run). Offline spot-check before any MC batch:
+inject "ANSWER: A" through the wrapped chain and confirm the bench's own
+template + choice scoring flow end-to-end.
 
 ## Parity map (the gym retires at parity)
 

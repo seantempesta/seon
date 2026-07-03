@@ -89,6 +89,20 @@ Tool defects queued for the tooling lane (with rendered-context evidence — eva
   sample until node heap OOM (acme crashed at 4GB after ~55 agents).
   Per-sample ephemeral clusters are immune to (b-at-boot re-registers) and
   (c); (a) hits everything until the frozen bundle lands.
+- **Frozen-bundle isolation — hardened 2026-07-03 (bench-cluster-N unit).**
+  The web_fetch re-run's attempt 1 was VOIDED by the identity assertion
+  (`frozen_bundle_changed`) DESPITE the frozen bundle — exposing two real
+  holes, both fixed: (a) `cluster create` ran a STALENESS rebuild, so a
+  tooling-lane src save mid-run (`eval.cljs` at 01:05) swapped code under
+  the running row → now creates are presence-only; freshness is RUN-level
+  (`bin/seon bench-bundle`, fired once by the harness before dispatch,
+  mutexed against concurrent builds). (b) the bundle sha hashed only the
+  ~70KB `main.js` LOADER while the compiled code lives in
+  `.shadow-cljs/builds/bench-client/dev/out/cljs-runtime/*.js` — a rebuild
+  left main.js byte-identical (sha useless; only mtime moved) → now
+  `write_bench_sha` hashes the loader + every runtime chunk. Attempt 2 ran
+  clean end-to-end (sha `1580d85a` unchanged, 0 flakes). **The isolation
+  contract now holds even while the tooling lane edits src/ mid-run.**
 
 Tooling-lane build issues:
 

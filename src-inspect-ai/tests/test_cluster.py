@@ -148,6 +148,16 @@ def test_bundle_violation_detects_vanished_bundle(tmp_path, monkeypatch):
     assert cl.bundle_violation(start) is not None
 
 
+def test_ensure_bench_bundle_drives_bin_seon(tmp_path, monkeypatch):
+    # the up-front pre-build for bench-cluster-N: one `bin/seon bench-bundle`
+    # call, returning the resulting bundle identity pin
+    _bundle_fixture(tmp_path, monkeypatch)
+    runner = FakeRunner()
+    ident = cl.ensure_bench_bundle(runner=runner)
+    assert runner.calls == [[str(cl.SEON_BIN), "bench-bundle"]]
+    assert ident["sha256"] == "abc123"
+
+
 def test_destroy_cluster_drives_bin_seon():
     runner = FakeRunner()
     cl.destroy_cluster("bench-abc", runner=runner)

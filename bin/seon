@@ -540,7 +540,18 @@ bench_bundle_stale() {
 }
 
 write_bench_sha() {
-  shasum -a 256 "$BENCH_BUNDLE" | awk '{print $1}' > "$BENCH_BUNDLE.sha256"
+  # Identity = the WHOLE compiled corpus, not just the loader. main.js is a
+  # ~70KB bootstrap that loads .shadow-cljs/builds/bench-client/dev/out/
+  # cljs-runtime/*.js — code changes land THERE and leave main.js
+  # byte-identical (observed 2026-07-03: a mid-run rebuild after src edits
+  # kept main.js's sha; only mtime moved). Hash the loader + every runtime
+  # chunk (paths included, so renames count).
+  {
+    shasum -a 256 "$BENCH_BUNDLE"
+    find .shadow-cljs/builds/bench-client/dev/out/cljs-runtime \
+         -type f -name '*.js' 2>/dev/null | LC_ALL=C sort \
+      | xargs shasum -a 256 2>/dev/null
+  } | shasum -a 256 | awk '{print $1}' > "$BENCH_BUNDLE.sha256"
 }
 
 build_bench_bundle() {
@@ -548,26 +559,41 @@ build_bench_bundle() {
   # (identical SEON_EXTRA_* injection), one-off `compile` of the mirror
   # build id instead of `watch client`. Safe alongside a running watch —
   # the :client worker ignores unwatched builds (acme-proven).
+  #
+  # MUTEXED (bench-cluster-N): concurrent `cluster create`s must NEVER
+  # build concurrently — two compilers writing out-bench/ corrupt the
+  # bundle. Waiters block up to 300s (a cold build), then RE-CHECK
+  # staleness: a peer that just built while we waited makes this a no-op.
+  acquire_lock bench-bundle 300
+  if ! bench_bundle_stale; then
+    [ -f "$BENCH_BUNDLE.sha256" ] || write_bench_sha
+    release_lock bench-bundle
+    return 0
+  fi
   local cmd
   cmd="clj$(extra_src_sdeps) -M:cljs compile bench-client$(extra_preload_merge)"
   echo "  ▶ building the frozen bench bundle ($BENCH_BUNDLE, ~30s warm)"
   (cd "$SEON_ROOT" && bash -c "$cmd") || {
     echo "  ✗ bench bundle build FAILED (clj -M:cljs compile bench-client)" >&2
+    release_lock bench-bundle
     return 1
   }
   write_bench_sha
+  release_lock bench-bundle
   echo "  ● bench bundle built — sha256 $(cat "$BENCH_BUNDLE.sha256")"
 }
 
 ensure_bench_bundle() {
-  # mode=fresh   → rebuild when STALE (cluster create only: a bench run
-  #                starts on current code and pins the resulting sha; if
-  #                src changes mid-run a later create rebuilds — and the
-  #                harness's end-of-run identity assertion then DETECTS
-  #                the contamination instead of scoring through it).
-  # mode=present → build only if MISSING (pod-<n> start/restart: a frozen
-  #                cluster PINS its bundle for its whole lifetime — the
-  #                planning row's mid-sample pod restart must not rebuild).
+  # mode=fresh   → rebuild when STALE (`bin/seon bench-bundle` ONLY — the
+  #                RUN-level pre-build the harness fires once before
+  #                dispatching samples, so a bench run starts on current
+  #                code; the end-of-run identity assertion then catches
+  #                any mid-run change).
+  # mode=present → build only if MISSING (cluster create AND pod-<n>
+  #                start/restart: a bundle is pinned for a whole RUN, so
+  #                neither a create nor the planning row's mid-sample pod
+  #                restart may rebuild — a per-create staleness rebuild
+  #                swaps code under a run whenever src/ is saved mid-run).
   local mode="${1:-fresh}"
   case "$mode" in
     fresh)   if ! bench_bundle_stale; then
@@ -701,7 +727,12 @@ ensure_state() { mkdir -p "$(state_dir "$1")"; }
 # ============================================================
 
 acquire_lock() {
+  # $2 (optional) = max seconds to wait (default 10). Long-running critical
+  # sections (the bench-bundle build, ~30-60s) pass a bigger bound so a
+  # concurrent waiter WAITS the build out instead of dying at 10s.
   local name="$1"
+  local max_wait_s="${2:-10}"
+  local max_tries=$((max_wait_s * 10))
   ensure_state "$name"
   local lock
   lock="$(lock_dir "$name")"
@@ -730,8 +761,8 @@ acquire_lock() {
       continue
     fi
     tries=$((tries + 1))
-    if [ "$tries" -gt 100 ]; then
-      echo "  ✗ could not acquire lock for $name after 10s" >&2
+    if [ "$tries" -gt "$max_tries" ]; then
+      echo "  ✗ could not acquire lock for $name after ${max_wait_s}s" >&2
       echo "  held by pid ${owner_pid:-unknown};" >&2
       echo "  if confirmed stale: rm -rf $lock" >&2
       exit 1
@@ -1092,10 +1123,14 @@ cluster_create() {
     # The frozen marker is what process_command (pod-<n>) keys the bundle
     # choice on — it lives with the cluster and dies with destroy.
     date -u +%FT%TZ > "data/clusters/$name/frozen"
-    # Staleness-guarded rebuild NOW, before the pod spawns: the cluster
-    # boots on CURRENT code and pins the resulting sha256 for its lifetime
-    # (restarts use ensure_bench_bundle present — never a rebuild).
-    ensure_bench_bundle fresh || exit 1
+    # PRESENCE only — never a staleness rebuild here. Freshness is a
+    # RUN-level concern (`bin/seon bench-bundle` up front, which the
+    # harness runs before dispatching samples): with per-sample creates, a
+    # staleness rebuild AT CREATE swaps code under a run whenever anyone
+    # saves src/ mid-run — the exact contamination the frozen bundle exists
+    # to prevent (observed voiding a web_fetch row, 2026-07-03). A create
+    # with no bundle at all still builds one.
+    ensure_bench_bundle present || exit 1
   fi
 
   cmd_start "pod-$name"
@@ -1353,6 +1388,11 @@ case "${1:-help}" in
       if [ -n "${!v+x}" ]; then echo "$v=${!v}"; else echo "$v (unset)"; fi
     done ;;
   cluster) shift; cmd_cluster "$@" ;;
+  # Ensure the frozen bench bundle is BUILT + FRESH, without creating a
+  # cluster — the harness's up-front pre-build for bench-cluster-N runs
+  # (build ONCE, then create N clusters concurrently; each create's own
+  # staleness check no-ops). Mutexed against concurrent builds.
+  bench-bundle) shift; ensure_bench_bundle "${1:-fresh}" ;;
   nuke)    shift; cmd_nuke "$@" ;;
   help|--help|-h|*)
     cat <<'EOF'

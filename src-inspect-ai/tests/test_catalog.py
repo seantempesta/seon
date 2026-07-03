@@ -53,9 +53,18 @@ def test_run_bench_max_samples_overridable(monkeypatch):
     assert captured["kw"]["max_samples"] == 4
 
 
+def _stub_prebuild(monkeypatch):
+    # the default BENCH_CLUSTER_PARALLELISM (2) pre-builds the bundle via
+    # bin/seon — offline tests stub it (its own behavior has its own tests)
+    from seon_inspect import cluster as cluster_mod
+    monkeypatch.setattr(cluster_mod, "ensure_bench_bundle",
+                        lambda *a, **k: None)
+
+
 def test_run_bench_per_sample_cluster_mode(monkeypatch):
     # per_sample_cluster=True selects the ephemeral-cluster solver …
     captured = {}
+    _stub_prebuild(monkeypatch)
     monkeypatch.setattr(catalog, "load_bench_task", lambda name, **k: _FakeTask())
     monkeypatch.setattr(catalog, "inspect_eval", lambda *a, **k: captured.setdefault("kw", k) or ["log"])
     def fake_cluster_solver(**kw):
@@ -64,7 +73,10 @@ def test_run_bench_per_sample_cluster_mode(monkeypatch):
     monkeypatch.setattr(catalog, "seon_cluster_solver", fake_cluster_solver)
     catalog.run_bench("gsm8k", per_sample_cluster=True, run_timeout_s=120)
     assert captured["cluster_kw"]["timeout_s"] == 120
-    assert captured["kw"]["solver"] == ["CSOLVER"]
+    # an empty task chain gets the guarded fallback wrapping the pod solver
+    from inspect_ai._util.registry import registry_log_name
+    assert len(captured["kw"]["solver"]) == 1
+    assert registry_log_name(captured["kw"]["solver"][0]).endswith("pod_fallback")
     # … and is mutually exclusive with a static cluster_url
     with pytest.raises(ValueError):
         catalog.run_bench("gsm8k", per_sample_cluster=True,
@@ -76,6 +88,7 @@ def test_run_bench_per_sample_records_bundle_identity(monkeypatch):
     # own artifacts (EvalLog metadata), and an unchanged bundle returns clean
     from seon_inspect import cluster as cluster_mod
     captured = {}
+    _stub_prebuild(monkeypatch)
     monkeypatch.setattr(catalog, "load_bench_task", lambda name, **k: _FakeTask())
 
     def fake_eval(*a, **k):
@@ -96,6 +109,7 @@ def test_run_bench_bundle_change_is_loud_with_evidence(monkeypatch):
     # the run classifies as the harness flake, never a capability number
     from seon_inspect import cluster as cluster_mod
     ident = {"v": {"sha256": "aaa"}}
+    _stub_prebuild(monkeypatch)
     monkeypatch.setattr(catalog, "load_bench_task", lambda name, **k: _FakeTask())
     monkeypatch.setattr(catalog, "seon_cluster_solver", lambda **kw: "CSOLVER")
     monkeypatch.setattr(cluster_mod, "bundle_identity", lambda: ident["v"])
@@ -113,6 +127,57 @@ def test_run_bench_bundle_change_is_loud_with_evidence(monkeypatch):
     assert "frozen_bundle_changed" in str(e.value)
 
 
+def test_run_bench_cluster_parallelism_sets_max_samples(monkeypatch):
+    # bench-cluster-N: N concurrent samples = N live ephemeral clusters;
+    # above 1 the bundle is pre-built ONCE before dispatch
+    from seon_inspect import cluster as cluster_mod
+    captured = {"prepared": 0}
+    monkeypatch.setattr(catalog, "load_bench_task", lambda name, **k: _FakeTask())
+    monkeypatch.setattr(catalog, "inspect_eval",
+                        lambda *a, **k: captured.setdefault("kw", k) or ["log"])
+    monkeypatch.setattr(catalog, "seon_cluster_solver", lambda **kw: "CSOLVER")
+    monkeypatch.setattr(cluster_mod, "bundle_identity", lambda: {"sha256": "a"})
+
+    def fake_prepare(*a, **k):
+        captured["prepared"] += 1
+        return {"sha256": "a"}
+
+    monkeypatch.setattr(cluster_mod, "ensure_bench_bundle", fake_prepare)
+    catalog.run_bench("gsm8k", per_sample_cluster=True, cluster_parallelism=4)
+    assert captured["kw"]["max_samples"] == 4
+    assert captured["prepared"] == 1  # ONE up-front build
+
+
+def test_run_bench_serial_still_prebuilds_and_stays_max_samples_one(monkeypatch):
+    # parallelism 1 (serial dispatch) STILL pre-builds once — freshness is
+    # RUN-level (creates never rebuild; a per-create staleness rebuild swaps
+    # code under the run) — and max_samples stays 1
+    from seon_inspect import cluster as cluster_mod
+    captured = {"prepared": 0}
+    monkeypatch.setattr(catalog, "load_bench_task", lambda name, **k: _FakeTask())
+    monkeypatch.setattr(catalog, "inspect_eval",
+                        lambda *a, **k: captured.setdefault("kw", k) or ["log"])
+    monkeypatch.setattr(catalog, "seon_cluster_solver", lambda **kw: "CSOLVER")
+    monkeypatch.setattr(cluster_mod, "bundle_identity", lambda: {"sha256": "a"})
+
+    def fake_prepare(*a, **k):
+        captured["prepared"] += 1
+
+    monkeypatch.setattr(cluster_mod, "ensure_bench_bundle", fake_prepare)
+    monkeypatch.setattr(catalog.config, "BENCH_CLUSTER_PARALLELISM", 1)
+    catalog.run_bench("gsm8k", per_sample_cluster=True)
+    assert captured["kw"]["max_samples"] == 1
+    assert captured["prepared"] == 1
+
+
+def test_run_bench_parallelism_requires_per_sample_mode():
+    # a static-URL pod is serial by construction — N clusters is the only
+    # parallelism mechanism; reject the incoherent combination loudly
+    with pytest.raises(ValueError, match="per_sample_cluster"):
+        catalog.run_bench("gsm8k", cluster_parallelism=2,
+                          cluster_url="http://x.test/agents/run")
+
+
 def test_cluster_url_resolved_at_call_time(monkeypatch):
     # the import-time-read bug: SEON_CLUSTER_URL set AFTER import must still win
     from seon_inspect import config
@@ -125,24 +190,127 @@ def test_cluster_url_resolved_at_call_time(monkeypatch):
 
 def test_swap_generate_keeps_template_swaps_generate():
     # The bench's answer contract lives in its solver chain (prompt_template);
-    # swap_generate must keep it and replace ONLY generate() with the pod.
+    # swap_generate must keep it (pod_backed) and replace generate() with
+    # the pod.
     from inspect_ai.solver import generate, prompt_template
 
     chain = [prompt_template("Q: {prompt}\nANSWER: $ANSWER"), generate()]
     out = catalog.swap_generate(chain, "POD")
     assert out[-1] == "POD" and len(out) == 2
     from inspect_ai._util.registry import registry_log_name
-    assert registry_log_name(out[0]) == "prompt_template"
+    assert registry_log_name(out[0]).endswith("pod_backed")
 
 
-def test_swap_generate_appends_pod_when_no_generate():
-    assert catalog.swap_generate([], "POD") == ["POD"]
+def test_swap_generate_appends_guarded_fallback_when_no_generate():
+    from inspect_ai._util.registry import registry_log_name
+
+    out = catalog.swap_generate([], "POD")
+    assert len(out) == 1
+    assert registry_log_name(out[0]).endswith("pod_fallback")
 
 
 def test_swap_generate_single_solver_not_sequence():
     from inspect_ai.solver import generate
 
     assert catalog.swap_generate(generate(), "POD") == ["POD"]
+
+
+def test_swap_generate_backs_internal_generate_with_pod():
+    # multiple_choice-style composite steps format the prompt and call their
+    # generate CALLBACK internally — the pod must be that callback, and the
+    # trailing fallback must NOT run the pod a second time.
+    import asyncio
+
+    from inspect_ai.solver import solver as solver_dec
+
+    pod_calls = []
+
+    @solver_dec
+    def composite():
+        async def solve(state, generate):
+            state.user_prompt.text = "TEMPLATED " + state.user_prompt.text
+            return await generate(state)  # the internal call (multiple_choice)
+        return solve
+
+    @solver_dec
+    def fake_pod():
+        async def solve(state, generate):
+            pod_calls.append(state.user_prompt.text)
+            state.output.completion = "POD REPLY"
+            state.metadata = {"pod_agent_id": "a1"}  # _record_result's marker
+            return state
+        return solve
+
+    class _Msg:
+        text = "q"
+
+    class _Out:
+        completion = ""
+
+    class _State:
+        user_prompt = _Msg()
+        output = _Out()
+        metadata = None
+
+    chain = catalog.swap_generate([composite()], fake_pod())
+
+    async def run():
+        s = _State()
+        for step in chain:
+            s = await step(s, None)
+        return s
+
+    s = asyncio.run(run())
+    assert pod_calls == ["TEMPLATED q"]  # the pod saw the step's template, ONCE
+    assert s.output.completion == "POD REPLY"
+
+
+def test_pod_fallback_never_reruns_after_an_empty_pod_reply():
+    # a pod run that returned an EMPTY reply is still THE recorded answer —
+    # the fallback keys on the pod-run marker, not completion text (an
+    # unparsed second run bypasses the bench step's answer parsing)
+    import asyncio
+
+    from inspect_ai.solver import solver as solver_dec
+
+    pod_calls = []
+
+    @solver_dec
+    def fake_pod():
+        async def solve(state, generate):
+            pod_calls.append(1)
+            state.output.completion = ""  # the agent completed silently
+            state.metadata = {"pod_agent_id": "a1"}
+            return state
+        return solve
+
+    @solver_dec
+    def composite():
+        async def solve(state, generate):
+            return await generate(state)
+        return solve
+
+    class _Msg:
+        text = "q"
+
+    class _Out:
+        completion = ""
+
+    class _State:
+        user_prompt = _Msg()
+        output = _Out()
+        metadata = None
+
+    chain = catalog.swap_generate([composite()], fake_pod())
+
+    async def run():
+        s = _State()
+        for step in chain:
+            s = await step(s, None)
+        return s
+
+    asyncio.run(run())
+    assert pod_calls == [1]  # exactly one run — no unparsed re-drive
 
 
 def test_prompt_text_prefers_templated_user_prompt():

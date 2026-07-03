@@ -28,10 +28,12 @@ from __future__ import annotations
 import contextlib
 import time
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any, Callable
 
-from seon_inspect import scorecard
+from seon_inspect import config, scorecard
+from seon_inspect import cluster as cluster_mod
 from seon_inspect.cluster import ephemeral_cluster
 from seon_inspect.generators import materialize_setup, render_input, serve_fixtures
 from seon_inspect.solver import AgentRunRefused, pod_run
@@ -107,6 +109,65 @@ def run_tool_sample(
         score = check_answer(pod.get("reply", ""), meta["oracle"])
     return record(scorecard.PASS if score["ok"] else scorecard.FAIL,
                   score=score, pod=_pod_summary(pod))
+
+
+def run_tool_row(
+    row: str,
+    samples: list[dict[str, Any]],
+    *,
+    workspaces_root: Path,
+    timeout_ms: int,
+    epochs: int = 1,
+    parallelism: int | None = None,
+    cluster_factory: Callable[..., Any] = ephemeral_cluster,
+    run: Callable[..., dict[str, Any]] = pod_run,
+    fixtures: Callable[[Path], Any] = serve_fixtures,
+    prepare: Callable[..., Any] | None = None,
+) -> list[dict[str, Any]]:
+    """One whole tool row — bench-cluster-N: N ephemeral clusters at once.
+
+    Dispatches every (epoch, sample) execution through `run_tool_sample`
+    over a bounded thread pool (`parallelism`, default
+    `config.BENCH_CLUSTER_PARALLELISM`): at most N clusters live at once,
+    the next execution starts as a slot frees. Each execution is
+    structurally isolated (own cluster) AND fault-isolated (`run_tool_sample`
+    never raises — one broken boot becomes that execution's flake-class
+    record, siblings keep running). Records return in dispatch order
+    (epoch-major, then sample order), independent of completion order.
+
+    Frozen-bundle discipline (same as `catalog.run_bench`): the bench
+    bundle is pre-built ONCE up front (`prepare`, default
+    `cluster.ensure_bench_bundle`) at EVERY parallelism — freshness is a
+    RUN-level concern; creates only build-if-missing (a per-create
+    staleness rebuild swaps code under the run whenever src/ is saved
+    mid-run — observed voiding a web_fetch row 2026-07-03). The bundle
+    identity is pinned at start and asserted unchanged at the end — a
+    violation raises `cluster.FrozenBundleChanged` with the execution
+    records attached as `logs` (flake class `frozen_bundle_changed`;
+    publish no capability number)."""
+    n = parallelism or config.BENCH_CLUSTER_PARALLELISM
+    if n < 1:
+        raise ValueError(f"parallelism must be >= 1, got {n}")
+    (prepare or cluster_mod.ensure_bench_bundle)()
+    bundle_start = cluster_mod.bundle_identity()
+    jobs = [(epoch, sample) for epoch in range(1, epochs + 1)
+            for sample in samples]
+
+    def one(job: tuple[int, dict[str, Any]]) -> dict[str, Any]:
+        epoch, sample = job
+        return run_tool_sample(sample, row, workspaces_root=workspaces_root,
+                               timeout_ms=timeout_ms, epoch=epoch,
+                               cluster_factory=cluster_factory, run=run,
+                               fixtures=fixtures)
+
+    with ThreadPoolExecutor(max_workers=n) as pool:
+        executions = list(pool.map(one, jobs))
+    violation = cluster_mod.bundle_violation(bundle_start)
+    if violation:
+        raise cluster_mod.FrozenBundleChanged(
+            violation, start=bundle_start, end=cluster_mod.bundle_identity(),
+            logs=executions)
+    return executions
 
 
 def run_planning_sample_live(

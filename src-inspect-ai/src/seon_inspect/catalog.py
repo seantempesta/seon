@@ -29,7 +29,7 @@ from typing import Any, Callable, Sequence
 
 from inspect_ai import Task, eval as inspect_eval
 from inspect_ai._util.registry import registry_log_name
-from inspect_ai.solver import Solver
+from inspect_ai.solver import Generate, Solver, TaskState, solver
 
 from seon_inspect import cluster as cluster_mod
 from seon_inspect import config
@@ -63,18 +63,68 @@ def load_bench_task(name: str, **task_kwargs: Any) -> Task:
     return task_fn(**task_kwargs)
 
 
+@solver
+def pod_backed(step: Solver, pod_solver: Solver) -> Solver:
+    """A bench solver step whose INTERNAL `generate()` call drives the pod.
+
+    Composite bench solvers (`multiple_choice` — arc/mmlu/gpqa) format the
+    prompt AND call their `generate` callback themselves, then parse the
+    reply into `state.choices` for the `choice()` scorer. They never appear
+    as a chain-level "generate" step, so swapping chain steps alone would
+    leave their internal call on the mock model and the parsed answer would
+    be mock garbage (the answer-format contract's sibling trap, standard
+    sweep 2026-07-03). Wrapping substitutes the callback: the step keeps its
+    own template + parsing; the pod supplies the completion. Steps that
+    never call generate (templates, system messages) pass through unchanged
+    in behavior."""
+
+    async def solve(state: TaskState, generate: Generate) -> TaskState:
+        async def pod_generate(state: TaskState, *args, **kwargs) -> TaskState:
+            return await pod_solver(state, generate)
+
+        return await step(state, pod_generate)
+
+    return solve
+
+
+@solver
+def pod_fallback(pod_solver: Solver) -> Solver:
+    """Run the pod ONLY if no upstream step already drove it.
+
+    Appended when a chain has no chain-level `generate` step: a composite
+    step (multiple_choice) already drove the pod through its internal
+    callback — running the pod AGAIN would double cost and clobber the
+    parsed state. The guard is the pod-run MARKER (`pod_agent_id`, stamped
+    by the solver's `_record_result`), NOT completion text: a pod run that
+    legitimately returned an EMPTY reply must stay that sample's recorded
+    answer — re-running would mint a second agent whose reply bypasses the
+    bench step's parsing (observed: arc MEA_2016_5_4 scored I while its
+    visible completion read "ANSWER: D" — the D came from an unparsed
+    second run)."""
+
+    async def solve(state: TaskState, generate: Generate) -> TaskState:
+        if (state.metadata or {}).get("pod_agent_id") is not None:
+            return state
+        return await pod_solver(state, generate)
+
+    return solve
+
+
 def swap_generate(task_solver: Solver | Sequence[Solver],
                   pod_solver: Solver) -> list[Solver]:
-    """The task's own solver chain with `generate()` swapped for the pod.
+    """The task's own solver chain with every `generate()` swapped for the pod.
 
     A bench's answer-format contract (e.g. gsm8k's "ANSWER: $ANSWER"
     prompt_template) lives in its SOLVER CHAIN, not its dataset — replacing
     the whole chain silently drops the contract and the bench then measures
     prompt-omission, not capability (first dev pass, 2026-07-03: correct
     conversational replies scored INCORRECT because match() never saw a
-    templated answer). So: keep every non-generate step (templates, system
-    messages, fewshot), replace each `generate` with the pod solver, and
-    append the pod solver if the chain had no generate at all."""
+    templated answer). So: chain-level `generate` steps become the pod
+    solver; every OTHER step is kept but `pod_backed` (its internal
+    `generate()` callback — `multiple_choice`'s — drives the pod too); and a
+    guarded `pod_fallback` is appended when the chain had no chain-level
+    generate (it no-ops when a composite step already produced the
+    completion)."""
     steps = (list(task_solver) if isinstance(task_solver, Sequence)
              else [task_solver])
     out: list[Solver] = []
@@ -88,9 +138,9 @@ def swap_generate(task_solver: Solver | Sequence[Solver],
             out.append(pod_solver)
             swapped = True
         else:
-            out.append(step)
+            out.append(pod_backed(step, pod_solver))
     if not swapped:
-        out.append(pod_solver)
+        out.append(pod_fallback(pod_solver))
     return out
 
 
@@ -99,6 +149,7 @@ def run_bench(
     *,
     cluster_url: str | None = None,
     per_sample_cluster: bool = False,
+    cluster_parallelism: int | None = None,
     limit: int | None = 5,
     epochs: int = 1,
     run_timeout_s: int | None = None,
@@ -112,7 +163,15 @@ def run_bench(
     `cluster_url` (or SEON_CLUSTER_URL) selects the long-lived cluster's pod
     door — cluster-agnostic; acme is just one value. `per_sample_cluster=True`
     switches to one ephemeral cluster per sample instead (mutually exclusive
-    with `cluster_url`). `limit` keeps baselines cheap; `epochs` enables
+    with `cluster_url`). `cluster_parallelism` (per-sample mode only; default
+    `config.BENCH_CLUSTER_PARALLELISM`) is bench-cluster-N: that many
+    ephemeral clusters live at once — inspect dispatches that many samples
+    concurrently, each minting its OWN cluster (still ONE sample per pod).
+    In per-sample mode the frozen bench bundle is pre-built ONCE up front
+    (`cluster.ensure_bench_bundle`) — freshness is RUN-level; creates never
+    rebuild, so concurrent creates can't race a compile and mid-run src
+    saves can't swap code under the run. `limit` keeps baselines cheap;
+    `epochs` enables
     pass^k. Timeouts/concurrency default from `seon_inspect.config`
     (calibration-derived) and are overridable here per-run — but `max_samples`
     above `config.POD_MAX_SAMPLES` (1) against a SINGLE cluster corrupts
@@ -129,10 +188,21 @@ def run_bench(
         raise ValueError(
             "per_sample_cluster=True mints its own clusters — "
             "cluster_url selects a long-lived one; pass one or the other")
+    if cluster_parallelism is not None and not per_sample_cluster:
+        raise ValueError(
+            "cluster_parallelism is bench-cluster-N (per-sample ephemeral "
+            "clusters); a static cluster_url pod is serial by construction "
+            "(POD_MAX_SAMPLES) — pass per_sample_cluster=True")
     if task is None:
         task = load_bench_task(name, **(task_kwargs or {}))
     bundle_start = None
     if per_sample_cluster:
+        parallelism = cluster_parallelism or config.BENCH_CLUSTER_PARALLELISM
+        # Build ONCE up front — freshness is RUN-level: creates only
+        # build-if-missing (a per-create staleness rebuild swaps code under
+        # the run whenever src/ is saved mid-run), so the run starts on
+        # current code HERE and the identity stays pinned for the run.
+        cluster_mod.ensure_bench_bundle()
         the_solver = seon_cluster_solver(timeout_s=run_timeout_s)
         # Per-sample clusters run the FROZEN bench bundle (the supervisor's
         # --ephemeral default). Pin its identity NOW and record it in the
@@ -145,13 +215,19 @@ def run_bench(
     else:
         the_solver = seon_pod_solver(cluster_url=cluster_url,
                                      timeout_s=run_timeout_s)
+    if max_samples is None:
+        # per-sample-cluster mode: inspect's sample concurrency IS the number
+        # of live clusters (each concurrent sample mints its own); static-URL
+        # mode stays at the per-pod ceiling (1 by construction).
+        max_samples = (parallelism if per_sample_cluster
+                       else config.POD_MAX_SAMPLES)
     logs = inspect_eval(
         task,
         solver=swap_generate(task.solver, the_solver),
         model=eval_kwargs.pop("model", "mockllm/model"),
         limit=limit,
         epochs=epochs,
-        max_samples=max_samples or config.POD_MAX_SAMPLES,
+        max_samples=max_samples,
         **eval_kwargs,
     )
     if per_sample_cluster:

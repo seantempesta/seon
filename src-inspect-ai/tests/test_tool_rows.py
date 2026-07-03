@@ -1,13 +1,17 @@
 """tool_rows.py — the per-sample run wiring, offline with fakes."""
 
 import contextlib
+import threading
+import time
 from dataclasses import dataclass
 
 import pytest
 
+from seon_inspect import cluster as cluster_mod
 from seon_inspect.generators import generate_rows
 from seon_inspect.solver import AgentRunRefused
-from seon_inspect.tool_rows import run_planning_sample_live, run_tool_sample
+from seon_inspect.tool_rows import (run_planning_sample_live, run_tool_row,
+                                    run_tool_sample)
 
 
 @dataclass
@@ -154,6 +158,145 @@ def test_harness_error_carries_trace(tmp_path):
                           cluster_factory=_fake_cluster_factory, run=boom)
     assert rec["outcome"] == "harness_error"
     assert "bin/seon" in rec["error"]
+
+
+# ---------------------------------------------------------------------------
+# run_tool_row — bench-cluster-N (bounded concurrent dispatch)
+# ---------------------------------------------------------------------------
+
+
+class _SlotCounter:
+    """A cluster factory that counts how many clusters are live at once."""
+
+    def __init__(self, dwell_s=0.05):
+        self.lock = threading.Lock()
+        self.active = 0
+        self.max_active = 0
+        self.creations = 0
+        self.dwell_s = dwell_s
+
+    @contextlib.contextmanager
+    def __call__(self, *a, **k):
+        with self.lock:
+            self.active += 1
+            self.creations += 1
+            self.max_active = max(self.max_active, self.active)
+        try:
+            time.sleep(self.dwell_s)  # hold the slot so overlap is observable
+            yield _FakeCluster()
+        finally:
+            with self.lock:
+                self.active -= 1
+
+
+def test_run_tool_row_dispatch_order_and_epoch_major(tmp_path):
+    # records return in dispatch order (epoch-major, then sample order),
+    # one cluster creation per (epoch, sample) execution
+    samples = generate_rows("web_fetch", 1, 3)
+    factory = _SlotCounter(dwell_s=0)
+    recs = run_tool_row("web_fetch", samples, workspaces_root=tmp_path,
+                        timeout_ms=1000, epochs=2, parallelism=1,
+                        cluster_factory=factory,
+                        run=lambda *a, **k: _pod_ok(reply="x"),
+                        fixtures=_fake_fixtures, prepare=lambda: None)
+    assert [(r["epoch"], r["sample_id"]) for r in recs] == \
+        [(e, s["id"]) for e in (1, 2) for s in samples]
+    assert factory.creations == 6
+    assert factory.max_active == 1  # parallelism=1 stays serial
+
+
+def test_run_tool_row_bounds_live_clusters(tmp_path):
+    # parallelism=2 over 6 executions: at LEAST two clusters overlap
+    # (the slots are used) and NEVER more than two are live (the bound holds)
+    samples = generate_rows("web_fetch", 1, 6)
+    factory = _SlotCounter()
+    recs = run_tool_row("web_fetch", samples, workspaces_root=tmp_path,
+                        timeout_ms=1000, parallelism=2,
+                        cluster_factory=factory,
+                        run=lambda *a, **k: _pod_ok(reply="x"),
+                        fixtures=_fake_fixtures,
+                        prepare=lambda: None)
+    assert len(recs) == 6
+    assert factory.max_active == 2
+
+
+def test_run_tool_row_one_failure_does_not_kill_siblings(tmp_path):
+    # one sample's cluster boot dies -> ITS record is the flake class;
+    # every other execution still runs and scores
+    samples = generate_rows("web_fetch", 1, 4)
+    doomed = samples[1]["id"]
+    factory = _SlotCounter(dwell_s=0)
+    calls = []
+
+    def run(text, timeout_ms, url, agent_id=None):
+        calls.append(text)
+        return _pod_ok(reply="x")
+
+    attempts = []
+
+    def flaky_factory(*a, **k):
+        # boot fails exactly for the doomed sample's execution (serial
+        # dispatch makes attempt #2 deterministic)
+        attempts.append(1)
+        if len(attempts) == 2:
+            @contextlib.contextmanager
+            def dead():
+                raise TimeoutError("pod not ready")
+                yield
+            return dead()
+        return factory(*a, **k)
+
+    recs = run_tool_row("web_fetch", samples, workspaces_root=tmp_path,
+                        timeout_ms=1000, parallelism=1,
+                        cluster_factory=flaky_factory, run=run,
+                        fixtures=_fake_fixtures, prepare=lambda: None)
+    outcomes = {r["sample_id"]: r["outcome"] for r in recs}
+    assert outcomes[doomed] == "cluster_boot_timeout"
+    assert all(o == "fail" or o == "pass"
+               for sid, o in outcomes.items() if sid != doomed)
+    assert len(recs) == 4
+
+
+def test_run_tool_row_prepares_bundle_once_at_any_parallelism(tmp_path):
+    # freshness is RUN-level: exactly ONE up-front build per row run,
+    # never per-create, at serial AND concurrent parallelism (a per-create
+    # staleness rebuild would swap code under the run — the 2026-07-03
+    # web_fetch void)
+    samples = generate_rows("web_fetch", 1, 2)
+    for par in (1, 3):
+        prepared = []
+        run_tool_row("web_fetch", samples, workspaces_root=tmp_path,
+                     timeout_ms=1000, parallelism=par,
+                     cluster_factory=_SlotCounter(dwell_s=0),
+                     run=lambda *a, **k: _pod_ok(reply="x"),
+                     fixtures=_fake_fixtures,
+                     prepare=lambda: prepared.append(1))
+        assert prepared == [1], f"parallelism={par}"
+
+
+def test_run_tool_row_asserts_frozen_bundle(tmp_path, monkeypatch):
+    # a mid-row bundle change raises FrozenBundleChanged with the execution
+    # records attached — contamination is detected, never scored through
+    monkeypatch.setattr(cluster_mod, "REPO_ROOT", tmp_path)
+    b = tmp_path / "out-bench" / "client" / "main.js"
+    b.parent.mkdir(parents=True)
+    b.write_bytes(b"code")
+    (b.parent / "main.js.sha256").write_text("abc\n")
+    monkeypatch.setattr(cluster_mod, "BENCH_BUNDLE", b)
+    monkeypatch.setattr(cluster_mod, "BENCH_BUNDLE_SHA",
+                        b.parent / "main.js.sha256")
+    samples = generate_rows("web_fetch", 1, 2)
+
+    def run(text, timeout_ms, url, agent_id=None):
+        b.write_bytes(b"rebuilt mid-row")  # a tooling-lane save
+        return _pod_ok(reply="x")
+
+    with pytest.raises(cluster_mod.FrozenBundleChanged) as e:
+        run_tool_row("web_fetch", samples, workspaces_root=tmp_path,
+                     timeout_ms=1000, parallelism=1,
+                     cluster_factory=_SlotCounter(dwell_s=0), run=run,
+                     fixtures=_fake_fixtures, prepare=lambda: None)
+    assert len(e.value.logs) == 2  # the evidence rides the raise
 
 
 def test_planning_sample_scored_through_two_part_oracle():
