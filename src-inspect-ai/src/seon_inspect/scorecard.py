@@ -52,6 +52,9 @@ REGRESSION_WINDOW = 7
 #   solve_timeout          pod reported timed_out (taxonomy: latency variance)
 #   agent_run_refused      HTTP 422 from the door (wiring defect, never a score)
 #   cluster_boot_timeout   ephemeral cluster never came ready
+#   frozen_bundle_changed  the pinned bench bundle changed mid-run (the
+#                          end-of-run identity assertion — cluster.
+#                          FrozenBundleChanged); the run is contaminated
 #   harness_error          any other harness-side exception (bin/seon, wire…)
 PASS = "pass"
 FAIL = "fail"

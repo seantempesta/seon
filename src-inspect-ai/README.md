@@ -11,7 +11,12 @@ host-side scorer; a Seon cluster's pod agent is a custom `@solver` behind
 diffusion-worker tasks call the RunPod worker the same way. A CLUSTER is the
 isolation unit: static-URL mode drives one long-lived cluster's pod (acme),
 `per_sample_cluster=True` mints one ephemeral cluster per sample
-(`bin/seon cluster create|destroy`, ~10-25s boot each). Every generation
+(`bin/seon cluster create|destroy`, ~10-25s boot each). Ephemeral clusters
+run the FROZEN bench bundle (`out-bench/client/main.js`, unwatched — a
+cljs-watch save can never hot-patch a pod mid-sample); `run_bench` records
+the bundle identity (`out-bench/client/main.js.sha256`) in each run's
+EvalLog metadata and raises `cluster.FrozenBundleChanged` (flake class
+`frozen_bundle_changed`) if it changed under the run. Every generation
 scores through the REAL Seon oracles — the bb parse/structural/phase server
 (`bin/oracle-server`) and the node cljs.js eval bundle
 (`out/worker-oracle-eval/main.js`) — behind a fail-loud **oracle-liveness

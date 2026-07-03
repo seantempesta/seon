@@ -31,6 +31,7 @@ from inspect_ai import Task, eval as inspect_eval
 from inspect_ai._util.registry import registry_log_name
 from inspect_ai.solver import Solver
 
+from seon_inspect import cluster as cluster_mod
 from seon_inspect import config
 from seon_inspect.solver import seon_cluster_solver, seon_pod_solver
 
@@ -130,12 +131,21 @@ def run_bench(
             "cluster_url selects a long-lived one; pass one or the other")
     if task is None:
         task = load_bench_task(name, **(task_kwargs or {}))
+    bundle_start = None
     if per_sample_cluster:
         the_solver = seon_cluster_solver(timeout_s=run_timeout_s)
+        # Per-sample clusters run the FROZEN bench bundle (the supervisor's
+        # --ephemeral default). Pin its identity NOW and record it in the
+        # run's own artifacts (EvalLog metadata) — the end-of-run assertion
+        # below makes any mid-run bundle change DETECTED, not scored through.
+        bundle_start = cluster_mod.bundle_identity()
+        md = dict(eval_kwargs.pop("metadata", None) or {})
+        md["seon_bundle"] = bundle_start
+        eval_kwargs["metadata"] = md
     else:
         the_solver = seon_pod_solver(cluster_url=cluster_url,
                                      timeout_s=run_timeout_s)
-    return inspect_eval(
+    logs = inspect_eval(
         task,
         solver=swap_generate(task.solver, the_solver),
         model=eval_kwargs.pop("model", "mockllm/model"),
@@ -144,3 +154,13 @@ def run_bench(
         max_samples=max_samples or config.POD_MAX_SAMPLES,
         **eval_kwargs,
     )
+    if per_sample_cluster:
+        violation = cluster_mod.bundle_violation(bundle_start)
+        if violation:
+            # Contamination is a HARNESS flake, never a capability number:
+            # raise loud, with the logs + both identities attached as
+            # evidence (scorecard flake class: frozen_bundle_changed).
+            raise cluster_mod.FrozenBundleChanged(
+                violation, start=bundle_start,
+                end=cluster_mod.bundle_identity(), logs=logs)
+    return logs

@@ -71,6 +71,48 @@ def test_run_bench_per_sample_cluster_mode(monkeypatch):
                           cluster_url="http://x.test/agents/run")
 
 
+def test_run_bench_per_sample_records_bundle_identity(monkeypatch):
+    # frozen-bundle pinning: the identity at run start lands in the run's
+    # own artifacts (EvalLog metadata), and an unchanged bundle returns clean
+    from seon_inspect import cluster as cluster_mod
+    captured = {}
+    monkeypatch.setattr(catalog, "load_bench_task", lambda name, **k: _FakeTask())
+
+    def fake_eval(*a, **k):
+        captured["kw"] = k
+        return ["log"]
+
+    monkeypatch.setattr(catalog, "inspect_eval", fake_eval)
+    monkeypatch.setattr(catalog, "seon_cluster_solver", lambda **kw: "CSOLVER")
+    monkeypatch.setattr(cluster_mod, "bundle_identity", lambda: {"sha256": "aaa"})
+    logs = catalog.run_bench("gsm8k", per_sample_cluster=True)
+    assert captured["kw"]["metadata"]["seon_bundle"] == {"sha256": "aaa"}
+    assert logs == ["log"]
+
+
+def test_run_bench_bundle_change_is_loud_with_evidence(monkeypatch):
+    # a mid-run bundle change (tooling-lane save → cluster-create rebuild)
+    # must raise FrozenBundleChanged carrying the logs + both identities —
+    # the run classifies as the harness flake, never a capability number
+    from seon_inspect import cluster as cluster_mod
+    ident = {"v": {"sha256": "aaa"}}
+    monkeypatch.setattr(catalog, "load_bench_task", lambda name, **k: _FakeTask())
+    monkeypatch.setattr(catalog, "seon_cluster_solver", lambda **kw: "CSOLVER")
+    monkeypatch.setattr(cluster_mod, "bundle_identity", lambda: ident["v"])
+
+    def fake_eval(*a, **k):
+        ident["v"] = {"sha256": "bbb"}  # the bundle changes DURING the run
+        return ["log"]
+
+    monkeypatch.setattr(catalog, "inspect_eval", fake_eval)
+    with pytest.raises(cluster_mod.FrozenBundleChanged) as e:
+        catalog.run_bench("gsm8k", per_sample_cluster=True)
+    assert e.value.start == {"sha256": "aaa"}
+    assert e.value.end == {"sha256": "bbb"}
+    assert e.value.logs == ["log"]
+    assert "frozen_bundle_changed" in str(e.value)
+
+
 def test_cluster_url_resolved_at_call_time(monkeypatch):
     # the import-time-read bug: SEON_CLUSTER_URL set AFTER import must still win
     from seon_inspect import config

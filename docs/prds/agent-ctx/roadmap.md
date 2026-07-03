@@ -330,7 +330,26 @@ repo-dev docs.
    OOM (acme crashed at 4GB heap after ~55 agents — gsm8k epoch 3 truncated
    at 11/15) — per-sample ephemeral clusters are structurally immune;
    restart the acme pod between heavy rows until then.
-8. **Ongoing / cadence** — re-run web_fetch after bench-bundle isolation;
+8. **Frozen bench bundle — ✅ BUILT + LIVE-PROVEN 2026-07-03** (fixes
+   defect (a) above): ephemeral clusters now default to a FROZEN bundle —
+   `bin/seon cluster create` builds `:bench-client` (a `:client` mirror
+   with its OWN build id → `out-bench/client/main.js`; shadow pushes
+   reloads per build id, so cljs-watch can never hot-patch it) via the
+   same `clj -M:cljs compile` invocation, staleness-guarded at create
+   (acme's rule), PINNED across pod restarts (restart never rebuilds —
+   the planning row's interruption stays on one bundle). `--watched`
+   opts a dev inner loop back in; durable creates default watched.
+   Build writes `out-bench/client/main.js.sha256`; the harness records
+   the identity in each per-sample run's EvalLog metadata
+   (`catalog.run_bench`) and asserts it unchanged at run end —
+   violation raises `cluster.FrozenBundleChanged` (flake class
+   `frozen_bundle_changed`), so contamination is DETECTED, never scored
+   through. Live proof: two drives on a frozen ephemeral cluster
+   completed clean (`:completed`, correct replies) while a src touch +
+   revert recompiled `:client` mid-drive — frozen pod log 0 `reloading`
+   lines; the same touches hot-patched a `--watched` contrast cluster 6
+   times. pytest 175.
+9. **Ongoing / cadence** — re-run web_fetch after bench-bundle isolation;
    standard-bench sweep (arc/mmlu/gpqa dev) on a quiet stack; per-row
    rendered-context audits (every trim is an A/B), baseline each tool the
    tooling lane lands, milestone runs at merges, the mvm case-2 sandbox tier

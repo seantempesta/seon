@@ -254,7 +254,14 @@ process_command() {
     # the shared artifact is missing (the default pod's start owns it).
     pod-*)
       local cname="${1#pod-}"
-      echo "{ [ -f resources/public/css/output.css ] || npm run css:build; } && exec env SEON_CLUSTER_DIR=\"data/clusters/$cname\" SEON_PORT=0 SEON_PORT_FILE=\"tmp/seon-port-$cname\" SEON_REQ_SOCK=\"$SEON_REQ_SOCK\" SEON_PUB_SOCK=\"$SEON_PUB_SOCK\" SEON_FS_ROOT=\"$SEON_ROOT\" SEON_FS_READ_ONLY=1$(extra_npm_node_path) node \"${SEON_CLIENT_OUT:-out/client/main.js}\"" ;;
+      # A FROZEN cluster (marker written by cluster_create; the default for
+      # --ephemeral) execs the UNWATCHED bench bundle — cljs-watch rebuilds
+      # out/client/main.js and hot-patches :client runtimes, and a bench pod
+      # must never reload mid-sample. Watched clusters keep the
+      # SEON_CLIENT_OUT seam / the live default bundle.
+      local cbundle="${SEON_CLIENT_OUT:-out/client/main.js}"
+      [ -f "data/clusters/$cname/frozen" ] && cbundle="$BENCH_BUNDLE"
+      echo "{ [ -f resources/public/css/output.css ] || npm run css:build; } && exec env SEON_CLUSTER_DIR=\"data/clusters/$cname\" SEON_PORT=0 SEON_PORT_FILE=\"tmp/seon-port-$cname\" SEON_REQ_SOCK=\"$SEON_REQ_SOCK\" SEON_PUB_SOCK=\"$SEON_PUB_SOCK\" SEON_FS_ROOT=\"$SEON_ROOT\" SEON_FS_READ_ONLY=1$(extra_npm_node_path) node \"$cbundle\"" ;;
     cljs-watch)  echo "clj$(extra_src_sdeps) -M:cljs watch client$(extra_preload_merge)" ;;
     jvm)         echo "./bin/run" ;;
     # V2 platform Host — JVM datahike wire-server (hosts EVERY cluster's db
@@ -478,7 +485,11 @@ maybe_prep_deps() {
 # `clj -M:cljs compile bootstrap && bin/fix-bootstrap-macros` after
 # changing what the bundle ships.
 maybe_build_bootstrap() {
-  [ "$1" = "pod" ] && [ ! -f "$SEON_ROOT/out/bootstrap/index.transit.json" ] || return 0
+  # Cluster pods (pod-<name>) load the same out/bootstrap bundle — gate them
+  # too (cljs-watch never touches out/bootstrap, so it is not a hot-reload
+  # contamination vector; one shared copy is correct even for frozen pods).
+  case "$1" in pod|pod-*) ;; *) return 0 ;; esac
+  [ ! -f "$SEON_ROOT/out/bootstrap/index.transit.json" ] || return 0
   echo "  ▶ out/bootstrap missing — building the bootstrap-CLJS bundle"
   echo "    (one-time on a fresh clone, ~1 min; the pod's self-host eval needs it)"
   {
@@ -490,6 +501,85 @@ maybe_build_bootstrap() {
     return 1
   }
   echo "  ● bootstrap bundle built (out/bootstrap)"
+}
+
+# ============================================================
+# Frozen bench bundle (out-bench/client/main.js — the :bench-client
+# shadow build, a byte-for-byte mirror of :client with its OWN build id
+# and output dir). Frozen clusters (cluster create — the DEFAULT for
+# --ephemeral) exec THIS bundle, so cljs-watch's rebuilds of
+# out/client/main.js can never hot-patch a bench pod mid-sample (first
+# dev pass 2026-07-03: `reloading…` → `run-turn! error No matching
+# clause` voided the whole web_fetch row). Same mechanism as bin/acme's
+# out-acme bundle; NEVER a copy of the watch bundle — a copy taken
+# mid-recompile is the same corruption this exists to prevent.
+#
+# The build step writes $BENCH_BUNDLE.sha256 — the bundle IDENTITY a
+# bench run records at start and asserts unchanged at end (harness:
+# seon_inspect.cluster.bundle_identity), so contamination is detectable,
+# not just prevented.
+# ============================================================
+
+BENCH_BUNDLE="out-bench/client/main.js"
+
+bench_bundle_stale() {
+  # acme's staleness rule: bundle missing, OR any core/overlay source OR a
+  # dependency/build config newer than it (a dep bump needs a re-compile
+  # just as much as a src change does).
+  [ -f "$BENCH_BUNDLE" ] || return 0
+  if [ -n "$(find src ${SEON_EXTRA_SRC:+"$SEON_EXTRA_SRC"} \
+               \( -name '*.cljs' -o -name '*.cljc' \) \
+               -newer "$BENCH_BUNDLE" -print -quit 2>/dev/null)" ]; then
+    return 0
+  fi
+  if [ -n "$(find deps.edn shadow-cljs.edn \
+               -newer "$BENCH_BUNDLE" -print -quit 2>/dev/null)" ]; then
+    return 0
+  fi
+  return 1
+}
+
+write_bench_sha() {
+  shasum -a 256 "$BENCH_BUNDLE" | awk '{print $1}' > "$BENCH_BUNDLE.sha256"
+}
+
+build_bench_bundle() {
+  # ONE build mechanism: the SAME clj -M:cljs invocation cljs-watch uses
+  # (identical SEON_EXTRA_* injection), one-off `compile` of the mirror
+  # build id instead of `watch client`. Safe alongside a running watch —
+  # the :client worker ignores unwatched builds (acme-proven).
+  local cmd
+  cmd="clj$(extra_src_sdeps) -M:cljs compile bench-client$(extra_preload_merge)"
+  echo "  ▶ building the frozen bench bundle ($BENCH_BUNDLE, ~30s warm)"
+  (cd "$SEON_ROOT" && bash -c "$cmd") || {
+    echo "  ✗ bench bundle build FAILED (clj -M:cljs compile bench-client)" >&2
+    return 1
+  }
+  write_bench_sha
+  echo "  ● bench bundle built — sha256 $(cat "$BENCH_BUNDLE.sha256")"
+}
+
+ensure_bench_bundle() {
+  # mode=fresh   → rebuild when STALE (cluster create only: a bench run
+  #                starts on current code and pins the resulting sha; if
+  #                src changes mid-run a later create rebuilds — and the
+  #                harness's end-of-run identity assertion then DETECTS
+  #                the contamination instead of scoring through it).
+  # mode=present → build only if MISSING (pod-<n> start/restart: a frozen
+  #                cluster PINS its bundle for its whole lifetime — the
+  #                planning row's mid-sample pod restart must not rebuild).
+  local mode="${1:-fresh}"
+  case "$mode" in
+    fresh)   if ! bench_bundle_stale; then
+               [ -f "$BENCH_BUNDLE.sha256" ] || write_bench_sha
+               return 0
+             fi ;;
+    present) if [ -f "$BENCH_BUNDLE" ]; then
+               [ -f "$BENCH_BUNDLE.sha256" ] || write_bench_sha
+               return 0
+             fi ;;
+  esac
+  build_bench_bundle
 }
 
 cmd_prep() {
@@ -706,6 +796,16 @@ _start_unlocked() {
   # Fresh-clone guard: the pod needs the bootstrap-CLJS bundle
   # (out/bootstrap) — build it before spawn (no-op when present).
   maybe_build_bootstrap "$name" || return 1
+
+  # Frozen-cluster guard: a frozen pod-<n> execs the bench bundle — build it
+  # only if MISSING (presence, not staleness: the bundle is PINNED for the
+  # cluster's lifetime; a restart mid-sample must not swap code under it).
+  case "$name" in
+    pod-*)
+      if [ -f "data/clusters/${name#pod-}/frozen" ]; then
+        ensure_bench_bundle present || return 1
+      fi ;;
+  esac
 
   # nohup + & detaches from this shell; bash -c handles multi-word cmds.
   nohup bash -c "$cmd" >> "$(log_file "$name")" 2>&1 &
@@ -929,9 +1029,9 @@ cmd_cluster() {
   shift
   case "$sub" in
     reset)   cluster_reset "${1:-default}" ;;
-    create)  cluster_create "${1:?cluster create requires a name}" "${2:-}" ;;
+    create)  cluster_create "$@" ;;
     destroy) cluster_destroy "${1:?cluster destroy requires a name}" ;;
-    *) echo "unknown cluster subcommand: $sub (try: reset [name] | create <name> [--ephemeral] | destroy <name>)" >&2; exit 1 ;;
+    *) echo "unknown cluster subcommand: $sub (try: reset [name] | create <name> [--ephemeral] [--frozen|--watched] | destroy <name>)" >&2; exit 1 ;;
   esac
 }
 
@@ -944,21 +1044,34 @@ valid_cluster_name() {
 }
 
 cluster_create() {
-  local name="$1" flag="${2:-}"
+  local name="${1:?cluster create requires a name}"
+  shift
   if ! valid_cluster_name "$name"; then
     echo "✗ invalid cluster name: '$name' (a-zA-Z0-9_- only)" >&2; exit 1
   fi
   if [ "$name" = "$(basename "$SEON_CLUSTER_DIR")" ]; then
     echo "✗ '$name' is this supervisor's own cluster — it already exists" >&2; exit 1
   fi
-  local ephemeral=0
-  case "$flag" in
-    --ephemeral) ephemeral=1 ;;
-    "") ;;
-    *) echo "✗ unknown cluster create flag: $flag (try --ephemeral)" >&2; exit 1 ;;
-  esac
+  local ephemeral=0 frozen="" flag
+  for flag in "$@"; do
+    case "$flag" in
+      --ephemeral) ephemeral=1 ;;
+      --frozen)    frozen=1 ;;
+      --watched)   frozen=0 ;;
+      "") ;;
+      *) echo "✗ unknown cluster create flag: $flag (try --ephemeral | --frozen | --watched)" >&2; exit 1 ;;
+    esac
+  done
+  # Bundle-mode DEFAULTS: ephemeral ⇒ FROZEN (the canonical consumer is a
+  # bench sample, where a cljs-watch hot-patch mid-sample voided a whole
+  # capability row — 2026-07-03; wanting hot-reload is the conscious
+  # exception: --watched). Durable ⇒ WATCHED (a long-lived dev cluster rides
+  # cljs-watch like the default pod; pin it explicitly with --frozen).
+  [ -z "$frozen" ] && frozen=$ephemeral
 
-  echo "▶ cluster create: $name"
+  local mode_desc="watched bundle"
+  [ "$frozen" = 1 ] && mode_desc="frozen bench bundle"
+  echo "▶ cluster create: $name ($mode_desc)"
 
   # C16 (pod-after-wire-server warmup): the new cluster's db lives on THIS
   # supervisor's wire-server — bring it up and gate on REAL readiness
@@ -975,6 +1088,15 @@ cluster_create() {
   # way (the store is :file, destroy always removes everything). The
   # marker lets sweeps find leftover disposable clusters.
   [ "$ephemeral" = 1 ] && date -u +%FT%TZ > "data/clusters/$name/ephemeral"
+  if [ "$frozen" = 1 ]; then
+    # The frozen marker is what process_command (pod-<n>) keys the bundle
+    # choice on — it lives with the cluster and dies with destroy.
+    date -u +%FT%TZ > "data/clusters/$name/frozen"
+    # Staleness-guarded rebuild NOW, before the pod spawns: the cluster
+    # boots on CURRENT code and pins the resulting sha256 for its lifetime
+    # (restarts use ensure_bench_bundle present — never a rebuild).
+    ensure_bench_bundle fresh || exit 1
+  fi
 
   cmd_start "pod-$name"
   wait_ready "pod-$name" || exit 1
@@ -1268,12 +1390,20 @@ Commands:
   cluster reset [n]  DESTRUCTIVE: stop pod+wire-server, wipe
                      data/clusters/<n>/store (default "default"),
                      restart both — fresh DB, core re-seeds
-  cluster create <n> [--ephemeral]
+  cluster create <n> [--ephemeral] [--frozen|--watched]
                      NEW cluster on this supervisor's wire-server: one
                      db entry (backend :file, ensured at pod boot) + its
                      own pod (process pod-<n>, ephemeral HTTP port in
-                     tmp/seon-port-<n>). --ephemeral marks intent only
-                     (a disposable bench/drive cluster)
+                     tmp/seon-port-<n>). --ephemeral marks intent
+                     (a disposable bench/drive cluster) AND defaults the
+                     pod to the FROZEN bench bundle
+                     (out-bench/client/main.js, :bench-client build) —
+                     unwatched, so cljs-watch can never hot-patch it
+                     mid-sample; rebuilt when stale at create, PINNED
+                     across restarts, identity in
+                     out-bench/client/main.js.sha256. Durable clusters
+                     default --watched (live out/client/main.js);
+                     --frozen/--watched override either default
   cluster destroy <n>
                      DESTRUCTIVE: stop pod-<n>, delete the db from the
                      wire-server registry (REPL → registry/delete-db!),

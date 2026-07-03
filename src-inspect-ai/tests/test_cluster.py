@@ -76,6 +76,78 @@ def test_restart_pod_clears_stale_port_and_returns_new(tmp_path, monkeypatch):
     assert c2.port == 40777 and c2.name == "plan-z"
 
 
+def test_create_cluster_frozen_default_defers_to_supervisor():
+    # frozen=None (default) sends NO bundle flag — the supervisor's own
+    # default rules (ephemeral ⇒ frozen, durable ⇒ watched)
+    runner = FakeRunner()
+    cl.create_cluster("bench-f0", runner=runner, ready=lambda n: 1)
+    assert "--frozen" not in runner.calls[0]
+    assert "--watched" not in runner.calls[0]
+
+
+def test_create_cluster_frozen_override_flags():
+    for frozen, flag in ((True, "--frozen"), (False, "--watched")):
+        runner = FakeRunner()
+        cl.create_cluster("bench-f1", frozen=frozen, runner=runner,
+                          ready=lambda n: 1)
+        assert runner.calls[0][-1] == flag
+
+
+def test_ephemeral_cluster_passes_frozen_through():
+    runner = FakeRunner()
+    with cl.ephemeral_cluster("bench-f2", frozen=False, runner=runner,
+                              ready=lambda n: 1):
+        pass
+    assert runner.calls[0][-1] == "--watched"
+
+
+def _bundle_fixture(tmp_path, monkeypatch):
+    monkeypatch.setattr(cl, "REPO_ROOT", tmp_path)
+    b = tmp_path / "out-bench" / "client" / "main.js"
+    b.parent.mkdir(parents=True)
+    b.write_bytes(b"code")
+    sha = b.parent / "main.js.sha256"
+    sha.write_text("abc123\n")
+    monkeypatch.setattr(cl, "BENCH_BUNDLE", b)
+    monkeypatch.setattr(cl, "BENCH_BUNDLE_SHA", sha)
+    return b, sha
+
+
+def test_bundle_identity_absent_is_none(tmp_path, monkeypatch):
+    monkeypatch.setattr(cl, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(cl, "BENCH_BUNDLE", tmp_path / "out-bench/client/main.js")
+    monkeypatch.setattr(cl, "BENCH_BUNDLE_SHA",
+                        tmp_path / "out-bench/client/main.js.sha256")
+    assert cl.bundle_identity() is None
+    # nothing pinned at start ⇒ nothing to assert (watched-only use)
+    assert cl.bundle_violation(None) is None
+
+
+def test_bundle_identity_reads_build_step_sha(tmp_path, monkeypatch):
+    _bundle_fixture(tmp_path, monkeypatch)
+    ident = cl.bundle_identity()
+    assert ident["sha256"] == "abc123"
+    assert ident["size"] == 4
+    assert ident["path"] == "out-bench/client/main.js"
+
+
+def test_bundle_violation_detects_mid_run_change(tmp_path, monkeypatch):
+    b, sha = _bundle_fixture(tmp_path, monkeypatch)
+    start = cl.bundle_identity()
+    assert cl.bundle_violation(start) is None  # unchanged ⇒ clean
+    b.write_bytes(b"rebuilt")                  # a tooling-lane save mid-run
+    sha.write_text("def456\n")
+    v = cl.bundle_violation(start)
+    assert v is not None and "frozen_bundle_changed" in v
+
+
+def test_bundle_violation_detects_vanished_bundle(tmp_path, monkeypatch):
+    b, _sha = _bundle_fixture(tmp_path, monkeypatch)
+    start = cl.bundle_identity()
+    b.unlink()
+    assert cl.bundle_violation(start) is not None
+
+
 def test_destroy_cluster_drives_bin_seon():
     runner = FakeRunner()
     cl.destroy_cluster("bench-abc", runner=runner)

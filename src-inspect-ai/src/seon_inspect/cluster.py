@@ -36,8 +36,66 @@ from seon_inspect import config
 REPO_ROOT = Path(__file__).resolve().parents[3]
 SEON_BIN = REPO_ROOT / "bin" / "seon"
 
+# The FROZEN bench bundle (:bench-client shadow build) frozen clusters exec —
+# unwatched, so cljs-watch can never hot-patch a bench pod mid-sample (the
+# 2026-07-03 dominant flake class). bin/seon's build step writes the sha file;
+# `bundle_identity`/`bundle_violation` pin + assert it per run.
+BENCH_BUNDLE = REPO_ROOT / "out-bench" / "client" / "main.js"
+BENCH_BUNDLE_SHA = BENCH_BUNDLE.parent / (BENCH_BUNDLE.name + ".sha256")
+
 # Matches bin/seon's valid_cluster_name (a path segment + a wire db-name).
 _NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+
+
+class FrozenBundleChanged(RuntimeError):
+    """The frozen bench bundle changed under a run — the run is contaminated.
+
+    Raised by the end-of-run assertion (`catalog.run_bench` per-sample mode).
+    Classify the run's executions as the flake class `frozen_bundle_changed`
+    and publish NO capability number from it (the uniform-0 law's sibling:
+    contamination is voided, never scored through). Carries both identities
+    and, when raised after an eval, the inspect logs — the evidence is never
+    lost to the raise."""
+
+    def __init__(self, message: str, *, start: dict[str, Any] | None = None,
+                 end: dict[str, Any] | None = None, logs: Any = None) -> None:
+        super().__init__(message)
+        self.start = start
+        self.end = end
+        self.logs = logs
+
+
+def bundle_identity() -> dict[str, Any] | None:
+    """The frozen bench bundle's current identity, or None when absent.
+
+    {"sha256": …, "mtime": …, "size": …, "path": …} — the sha256 comes from
+    the sha file bin/seon's build step writes (never re-hashed here; a
+    mid-recompile hash would race the compiler), mtime/size from the bundle
+    itself. None = no frozen bundle on disk (watched-only use — nothing to
+    pin, nothing to assert)."""
+    if not BENCH_BUNDLE.is_file():
+        return None
+    st = BENCH_BUNDLE.stat()
+    sha = (BENCH_BUNDLE_SHA.read_text().strip()
+           if BENCH_BUNDLE_SHA.is_file() else None)
+    return {"sha256": sha, "mtime": st.st_mtime, "size": st.st_size,
+            "path": str(BENCH_BUNDLE.relative_to(REPO_ROOT))}
+
+
+def bundle_violation(start: dict[str, Any] | None) -> str | None:
+    """None when the bundle is unchanged since `start`; else what changed.
+
+    `start=None` (no bundle existed at run start) asserts nothing. Any
+    difference — sha, mtime, size, or the bundle vanishing — is a violation:
+    samples before and after it ran DIFFERENT code."""
+    if start is None:
+        return None
+    end = bundle_identity()
+    if end == start:
+        return None
+    return (f"frozen bench bundle changed mid-run (start={start}, end={end}) "
+            "— the run is contaminated; classify its executions as "
+            "'frozen_bundle_changed' and publish no capability number")
 
 
 @dataclass(frozen=True)
@@ -109,15 +167,25 @@ def wait_pod_ready(name: str, timeout_s: int = config.CLUSTER_BOOT_BUDGET_S,
 
 
 def create_cluster(name: str | None = None, *, ephemeral: bool = True,
+                   frozen: bool | None = None,
                    runner: Callable[..., Any] = subprocess.run,
                    ready: Callable[[str], int] = wait_pod_ready) -> Cluster:
-    """`bin/seon cluster create <name> [--ephemeral]` → a ready Cluster.
+    """`bin/seon cluster create <name> [--ephemeral] [--frozen|--watched]`.
 
-    The supervisor ready-gates the wire-server and the pod itself; the ready
-    poll here is the harness-side confirmation (and yields the bound port)."""
+    `frozen=None` (default) leaves the bundle choice to the supervisor's own
+    default — ephemeral ⇒ frozen bench bundle (unwatched; no mid-sample
+    hot-patch), durable ⇒ watched. Pass True/False only to override
+    (`--frozen`/`--watched`). The supervisor ready-gates the wire-server and
+    the pod itself; the ready poll here is the harness-side confirmation
+    (and yields the bound port)."""
     name = _check_name(name or bench_cluster_name())
     args = ["cluster", "create", name] + (["--ephemeral"] if ephemeral else [])
-    # create ready-gates wire-server (bound 180s) + pod (120s) internally.
+    if frozen is True:
+        args.append("--frozen")
+    elif frozen is False:
+        args.append("--watched")
+    # create ready-gates wire-server (180s) + pod (120s) internally, plus a
+    # possible frozen-bundle compile (staleness-guarded, ~30s warm).
     _run_seon(args, runner, timeout_s=330)
     return Cluster(name=name, port=ready(name))
 
@@ -145,11 +213,17 @@ def destroy_cluster(name: str, *,
 
 @contextlib.contextmanager
 def ephemeral_cluster(name: str | None = None, *,
+                      frozen: bool | None = None,
                       runner: Callable[..., Any] = subprocess.run,
                       ready: Callable[[str], int] = wait_pod_ready
                       ) -> Iterator[Cluster]:
-    """create → yield → destroy (destroy always runs — no leaked clusters)."""
-    cluster = create_cluster(name, ephemeral=True, runner=runner, ready=ready)
+    """create → yield → destroy (destroy always runs — no leaked clusters).
+
+    Ephemeral ⇒ the supervisor's frozen-bundle default applies (see
+    `create_cluster`); `frozen=False` opts a dev inner loop back into the
+    watched bundle."""
+    cluster = create_cluster(name, ephemeral=True, frozen=frozen,
+                             runner=runner, ready=ready)
     try:
         yield cluster
     finally:

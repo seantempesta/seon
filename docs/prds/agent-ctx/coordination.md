@@ -771,3 +771,31 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   accepted — investigation found the hot-reload race, the row was voided,
   and the three "fails" reclassified `run_error`. No capability number is
   published from a contaminated row.
+
+### 2026-07-03 — FROZEN BENCH BUNDLE LANDED (eval lane; kills the dominant flake class)
+
+- **Ephemeral clusters no longer see your edits.** `bin/seon cluster create`
+  now defaults `--ephemeral` to a FROZEN bundle: the pod execs
+  `out-bench/client/main.js` (`:bench-client` — a byte-for-byte `:client`
+  mirror with its OWN shadow build id, so the `:client` watch worker never
+  pushes reloads to it; same mechanism as `out-acme`). Built one-off via the
+  SAME `clj -M:cljs compile` invocation with the SEON_EXTRA_* seams,
+  staleness-guarded at create (acme's rule: src/deps/shadow-cljs.edn newer ⇒
+  rebuild), then PINNED for the cluster's lifetime — `restart pod-<n>` never
+  rebuilds (the planning row's mid-sample restart stays on one bundle).
+  `--watched` opts a dev inner loop back into hot-reload (your probe
+  clusters: pass it if you want live patching); durable creates default
+  watched. Default pod / acme flows byte-identical (print-cmd verified).
+- **Contamination is now DETECTED, not just prevented:** the build writes
+  `out-bench/client/main.js.sha256`; `run_bench(per_sample_cluster=True)`
+  records the identity (sha+mtime+size) in the run's EvalLog metadata and
+  asserts it unchanged at run end — a violation raises
+  `cluster.FrozenBundleChanged` (logs + both identities attached; scorecard
+  flake class `frozen_bundle_changed`, never a capability number).
+- **Live proof:** frozen ephemeral cluster + two DeepSeek drives
+  (`:completed`, replies "ok"/"391" correct) while a comment-only src touch
+  AND its revert recompiled `:client` mid-drive — frozen pod log **0**
+  `reloading` lines, `--watched` contrast pod hot-patched **6** times by the
+  same touches; sha `8c371085…` unchanged across a pod restart (no rebuild).
+  Clusters destroyed; touch fully reverted. pytest 175 green.
+- **Next:** re-run the voided web_fetch row on frozen per-sample clusters.

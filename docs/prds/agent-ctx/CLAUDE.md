@@ -75,11 +75,14 @@ Tool defects queued for the tooling lane (with rendered-context evidence — eva
   `docs/seon/orchestrator/issues/tx-feed-pump-timeouts.md`. Tooling lane +
   parallel-scoring lever.
 - **Bench-pod isolation gaps (first dev pass, 2026-07-03 — evidence in
-  `evals/runs/2026-07-03-first-dev-pass/` + roadmap step 7):** (a) ephemeral
-  bench pods exec the WATCHED `out/client/main.js` — cljs-watch rebuilds
-  hot-patch them MID-SAMPLE (`run-turn! error No matching clause`); the
-  whole web_fetch row was voided. Fix = frozen bench bundle via the existing
-  `SEON_CLIENT_OUT` override (eval-lane unit, queued next). (b) the
+  `evals/runs/2026-07-03-first-dev-pass/` + roadmap step 7):** (a) ~~ephemeral
+  bench pods exec the WATCHED `out/client/main.js`~~ — ✅ FIXED 2026-07-03
+  (roadmap eval step 8): ephemeral creates default to the FROZEN
+  `:bench-client` bundle (`out-bench/client/main.js`, own build id — no
+  reload push), staleness-rebuilt at create, pinned across restarts,
+  identity sha asserted per run (`FrozenBundleChanged` → flake class
+  `frozen_bundle_changed`); `--watched` opts back in. Live-proven: mid-drive
+  src touches → 0 reloads frozen vs 6 on a watched contrast pod. (b) the
   default-stack wire-server is shared with the tooling lane's pod; an
   external restart mid-run deregisters ephemeral dbs ("unknown db-name" →
   AgentRunRefused). (c) long-lived pods accumulate one agent per bench

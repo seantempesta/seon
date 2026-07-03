@@ -46,6 +46,8 @@ hs_err_pid*.log
 # shadow-cljs build outputs + per-build state
 .shadow-cljs/
 out/
+# frozen bench bundle (:bench-client) — built on demand by bin/seon
+out-bench/
 
 # Symlink into out/ — convenience for local dev; resolves to nothing elsewhere
 /bootstrap
@@ -90,3 +92,4 @@ docs/.obsidian/plugins/
 *.ksv
 target/
 scratchpad/
+out-acme/

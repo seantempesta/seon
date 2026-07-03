@@ -104,6 +104,28 @@
    :compiler-options {:warnings-as-errors false
                       :externs           ["externs/node_fs.js"]}}
 
+  ;; FROZEN bench-pod bundle. A BYTE-FOR-BYTE MIRROR of :client EXCEPT
+  ;; :output-to → "out-bench/client/main.js" (its own output dir + its own
+  ;; BUILD ID). Frozen clusters (bin/seon cluster create — the default for
+  ;; --ephemeral) exec THIS bundle so the live :client watcher can never
+  ;; hot-patch a bench pod mid-sample (first dev pass 2026-07-03:
+  ;; `reloading…` → `run-turn! error` voided the whole web_fetch row). The
+  ;; distinct build id is the isolation mechanism — shadow's devtools worker
+  ;; pushes reloads per build id, and no watch runs for :bench-client (same
+  ;; proof as :acme-client: the acme pod is never hot-patched). Built one-off
+  ;; by bin/seon's ensure_bench_bundle (staleness-guarded at cluster create;
+  ;; the build step writes out-bench/client/main.js.sha256 — the bundle
+  ;; identity bench runs pin + assert against, seon_inspect.cluster). Keep in
+  ;; sync with :client if :client's :devtools/:compiler-options ever change.
+  :bench-client
+  {:target           :node-script
+   :output-to        "out-bench/client/main.js"
+   :main             seon.client/-main
+   :devtools         {:enabled  true
+                      :preloads [seon.dev.test-preload seon.demo]}
+   :compiler-options {:warnings-as-errors false
+                      :externs           ["externs/node_fs.js"]}}
+
   ;; Multi-runtime MCP-eval probe build (go/no-go for "N agents you can
   ;; REPL into by id"). ONE :node-script build, run as N Node processes →
   ;; N distinct shadow runtimes under one worker. `:devtools {:enabled true}`
