@@ -85,7 +85,12 @@
   (or (platform/env-val "SEON_PUB_SOCK")
       "tmp/seon-cluster-default-pub.sock"))
 
-;; ---------- one request / one reply ----------
+;; ---------- wire timing — the ONE home for every wire timeout/backoff ----------
+;; Structural protocol constants, NOT config tunables (owner config-triage:
+;; genuinely-tunable → config edge; these values are justified by mechanism —
+;; op payload size, boot budgets, event-loop-alive semantics — and nobody
+;; tunes them per cluster). Every wire timing value lives HERE; callers
+;; (this ns + seon.store.wire) reference these defs, never inline literals.
 
 (def ^:private rpc-tick-ms
   "The rpc timeout's event-loop-alive tick. The budget below accumulates one
@@ -93,6 +98,45 @@
    interval fire missed during a synchronous stall into ONE, so blocked-loop
    time costs a single tick instead of expiring the budget."
   250)
+
+(def default-rpc-timeout-ms
+  "Default rpc reply budget (event-loop-ALIVE ms — see [[rpc]]) for
+   ordinary wire ops."
+  5000)
+
+(def replay-timeout-ms
+  "Default `replay-tx` reply budget — a large since-t gap makes the reply
+   big, so [[replay-tx]] also accepts a per-call override via opts."
+  30000)
+
+(def ping-attempts
+  "Boot ping-gate retries before the fail-loud throw (seon.store.wire)."
+  5)
+
+(def ping-timeout-ms
+  "Per-attempt ping rpc budget for the boot ping gate."
+  2000)
+
+(def ping-retry-delay-ms
+  "Backoff between boot ping-gate attempts."
+  500)
+
+(def ensure-db-timeout-ms
+  "`ensure-db` rpc budget — creating a fresh cluster's file store on the
+   wire-server can be slow, so it gets more than the default rpc budget."
+  15000)
+
+(def transact-timeout-ms
+  "Transact rpc budget. Generous: the boot core-index transact carries
+   thousands of rows in one tx."
+  30000)
+
+(def feed-reconnect-delay-ms
+  "Delay before the tx-feed pub socket schedules ONE reconnect after a
+   drop (seon.store.wire/schedule-reconnect!)."
+  2000)
+
+;; ---------- one request / one reply ----------
 
 (defn rpc
   "Open a UDS connection to `sock-path`, send `req` (a CLJS map with
@@ -110,7 +154,7 @@
    still rejects after ~timeout-ms of live loop."
   ([req] (rpc default-req-sock req {}))
   ([sock-path req] (rpc sock-path req {}))
-  ([sock-path req {:keys [timeout-ms] :or {timeout-ms 5000}}]
+  ([sock-path req {:keys [timeout-ms] :or {timeout-ms default-rpc-timeout-ms}}]
    (js/Promise.
     (fn [resolve reject]
       (let [sock     (.createConnection net sock-path)
@@ -318,7 +362,7 @@
         (routed {:seon.store.wire/op "replay-tx"
                  :seon.store.wire/since-t since-t}
                 opts)
-        {:timeout-ms (or timeout-ms 30000)})))
+        {:timeout-ms (or timeout-ms replay-timeout-ms)})))
 
 ;; ---------- main ----------
 

@@ -156,7 +156,8 @@
 ;; Boot gate — fail LOUD if the wire-server is down. No dual backend: a
 ;; pod that can't reach its writer must not boot against a local store.
 ;;
-;; The ping retries for ~10s before the fail-loud throw: `bin/seon
+;; The ping retries (budget: the wire-node timing block) before the
+;; fail-loud throw: `bin/seon
 ;; start all` brings the wire-server and pod up in order, but the pod
 ;; can exec before the writer's UDS socket accepts (or while a freshly
 ;; sha-bumped JVM warms up). Boot stays fail-loud, just not
@@ -166,24 +167,25 @@
 (defn- sleep [ms]
   (js/Promise. (fn [res] (js/setTimeout res ms))))
 
-(def ^:private ping-attempts 5)
-(def ^:private ping-timeout-ms 2000)
-(def ^:private ping-retry-delay-ms 500)
+;; Wire timing constants (ping budget/backoff, transact/ensure-db/replay
+;; timeouts, feed reconnect delay) live in ONE place: `seon.store.internal.
+;; wire-node`'s "wire timing" block. Reference `wire/…`, never inline a value.
 
 (defn ^:async ^:private ping-once!
   "One ping rpc. Resolves to the reply map; throws on not-ok/transport."
   []
   (let [resp (await (wire/rpc default-sock-path {:seon.store.wire/op "ping"}
-                              {:timeout-ms ping-timeout-ms}))]
+                              {:timeout-ms wire/ping-timeout-ms}))]
     (when-not (:seon.store.wire/ok resp)
       (throw (ex-info "wire-server ping returned not-ok"
                       {::resp resp})))
     resp))
 
 (defn ^:async ping!
-  "Ping the wire-server, retrying up to `ping-attempts` times.
+  "Ping the wire-server, retrying up to `wire/ping-attempts` times.
 
-   Up to ~10s worst case: 5 × 2s rpc timeout, 500ms backoff between attempts.
+   Worst case ~attempts × (rpc timeout + backoff) — see the wire timing
+   block in `seon.store.internal.wire-node` for the values.
    Resolves to the reply map on success; throws a clear, actionable
    error once the budget is exhausted."
   ;; Resolves to the wire-server reply map (a wire/rpc return — third-party
@@ -195,17 +197,17 @@
       (try
         (await (ping-once!))
         (catch :default e
-          (if (< n ping-attempts)
+          (if (< n wire/ping-attempts)
             (do (js/console.warn
-                 (str "[seon.store.wire] ping attempt " n "/" ping-attempts
+                 (str "[seon.store.wire] ping attempt " n "/" wire/ping-attempts
                       " failed (" (or (.-message e) (str e))
-                      ") — retrying in " ping-retry-delay-ms "ms"))
-                (await (sleep ping-retry-delay-ms))
+                      ") — retrying in " wire/ping-retry-delay-ms "ms"))
+                (await (sleep wire/ping-retry-delay-ms))
                 (await (attempt (inc n))))
             (throw (ex-info
                     (str "seon.store.wire: the cluster wire-server is UNREACHABLE at "
                          default-sock-path " (" (or (.-message e) (str e)) ") "
-                         "after " n " attempts (~10s). "
+                         "after " n " attempts. "
                          "The pod boots ONLY against the cluster store — there is "
                          "no local fallback. Start it with: bin/seon start wire-server")
                     {::sock-path default-sock-path
@@ -230,7 +232,7 @@
                                :seon.store.wire/db-name cluster-name
                                :seon.store.wire/backend "file"
                                :seon.store.wire/path    default-store-path}
-                              {:timeout-ms 15000}))]
+                              {:timeout-ms wire/ensure-db-timeout-ms}))]
     (when-not (:seon.store.wire/ok resp)
       (throw (ex-info (str "seon.store.wire: ensure-db failed for cluster "
                            cluster-name " — " (:seon.store.wire/error resp))
@@ -284,11 +286,6 @@
    (own txs already fired the conn's native listeners via
    `datahike.writer/transact!`)."
   (atom #{}))
-
-(def ^:private transact-timeout-ms
-  "Wire rpc timeout for transacts. Generous: the boot core-index
-   transact carries thousands of rows in one tx."
-  30000)
 
 (declare !adapter fire-own-tx-listeners!)
 
@@ -366,7 +363,7 @@
                                   :seon.store.wire/write-id write-id}
                            (seq tx-meta) (assoc :seon.store.wire/tx-meta tx-meta))]
           (swap! !own-write-ids conj write-id)
-          (-> (wire/rpc sock-path req {:timeout-ms transact-timeout-ms})
+          (-> (wire/rpc sock-path req {:timeout-ms wire/transact-timeout-ms})
               (.then
                (fn [resp]
                  ;; A reply WAS read — no commit ambiguity from here on. Any
@@ -593,16 +590,18 @@
      ::replayed (:seon.store.wire/replayed resp)}))
 
 (defn- schedule-reconnect!
-  ;; Consume feed generation `gen` and schedule ONE reconnect in 2s. A no-op
-  ;; when `gen` is stale (the other failure path of the same attempt already
-  ;; consumed it) — a drop and a failed connect can never race two loops.
+  ;; Consume feed generation `gen` and schedule ONE reconnect after
+  ;; `wire/feed-reconnect-delay-ms`. A no-op when `gen` is stale (the other
+  ;; failure path of the same attempt already consumed it) — a drop and a
+  ;; failed connect can never race two loops.
   [gen reason reconnect!]
   (when (= gen (:feed-gen @!adapter))
     (swap! !adapter #(-> % (update :feed-gen inc) (assoc :connected? false)))
     (log/error-console!
      "seon.store.wire"
-     (str "tx-feed pub connection lost (" reason ") — reconnecting in 2s"))
-    (js/setTimeout reconnect! 2000)))
+     (str "tx-feed pub connection lost (" reason ") — reconnecting in "
+          wire/feed-reconnect-delay-ms "ms"))
+    (js/setTimeout reconnect! wire/feed-reconnect-delay-ms)))
 
 (defn ^:async start-listen-adapter!
   "Connect the persistent pub-socket tx feed and pump FOREIGN tx into the conn.
@@ -611,7 +610,7 @@
    poll pump: the wire-server writes every committed tx event down the
    stream, and the frame reader feeds the conn's native listeners directly.
    Idempotent (defonce-guarded) — a second call is a no-op. Resilient: a
-   drop logs LOUDLY, reconnects after 2s, and recovers the gap via the
+   drop logs LOUDLY, reconnects after `wire/feed-reconnect-delay-ms`, and recovers the gap via the
    req-socket `replay-tx` from the basis-t watermark (DE-2 lossless wake) —
    the adapter never dies silently. The FIRST connect is fail-loud (boot is
    ping-gated; a pod that can't reach its feed must not run).
