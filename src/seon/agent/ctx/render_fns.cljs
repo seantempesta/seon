@@ -118,6 +118,121 @@
    [::current-ns   {:optional true} ::current-ns]
    [::pinned-syms  {:optional true} ::pinned-syms]])
 
+;; ============================================================
+;; The canvas default — the agent's LAST-UPDATED tile (context.md /
+;; ui.md §canvas: "derived by default, pinnable to override"). Pure
+;; f(db value): nothing is stored, no touched-at stamp — the touch
+;; coordinate is read off the datoms' tx column (+ the history view,
+;; so a retraction counts as a change too).
+;; ============================================================
+
+(def ^:private attr-literal-re
+  "Qualified keyword LITERALS in a stored fn source — the fn's declared
+   read-set. Requires a `/` (an unqualified `:keys` never matches); an
+   `::alias/k` form matches only its bare `alias/k` tail, which the
+   installed-attr intersection then discards."
+  #":([A-Za-z][A-Za-z0-9_.$-]*/[A-Za-z0-9_.*+!?<>='-]+)")
+
+(defn- source-attrs
+  "The installed DB attrs `src` names as qualified keyword literals —
+   the fn's DECLARED read-set (code-as-data: the stored source IS the
+   structured corpus; agent `my.*` code must fully qualify (#73), so
+   the literals are the queries). Conservative by construction: an
+   attr reached only dynamically is not watched. The render twin keys
+   are the fn's OUTPUT, never data — excluded."
+  [installed src]
+  (->> (re-seq attr-literal-re src)
+       (map (comp keyword second))
+       (filter installed)
+       (remove twin-keys)
+       distinct
+       vec))
+
+(schema/register! ::last-updated-request
+  [:map
+   [:seon.db/db    :seon.db/db]
+   [:seon.agent/id :string]])
+(schema/register! ::tile-sym :symbol)
+(schema/register! ::last-updated-response
+  [:map [::tile-sym {:optional true} ::tile-sym]])
+
+(defn last-updated-tile
+  "The agent's last-updated tile fn — the derived canvas default.
+
+   Candidates are THIS agent's authored tile fns: `:seon.fn` rows whose
+   `:seon.fn/source` datom's tx carries the agent's provenance
+   (`:seon.db/agent-id` tx-meta — the ONE who-wrote-what mechanism) and
+   whose registered spec's output declares `:seon.render/hiccup`
+   ([[output-twin-keys]] — the same structural detection as auto-run).
+   Each candidate's TOUCH coordinate is the max tx over (a) its own
+   source datom — redefining the tile touches it — and (b) every datom
+   of the attrs its source names ([[source-attrs]]), read on the
+   HISTORY view so retractions count. The candidate with the max touch
+   is the last-updated tile; `{}` when the agent has authored none (the
+   caller falls back to the welcome). Ties break on the fn name.
+
+   Pure over the frozen db value — derive-don't-store: no touched-at
+   stamp exists anywhere. Honest bound: a tile reading attrs it never
+   names literally (dynamic attr construction) follows only its own
+   redefinitions."
+  {:malli/schema [:=> [:cat ::last-updated-request] ::last-updated-response]}
+  [{db :seon.db/db id :seon.agent/id}]
+  (let [installed (db/installed-schema db)]
+    (if-not (every? installed [:seon.fn/sym :seon.fn/source :seon.fn/spec
+                               :seon.db/agent-id])
+      {}
+      (let [;; `get-else` on a NEVER-INSTALLED attr yields NO rows at all
+            ;; (not its default), so the privacy column joins the query
+            ;; only when `:seon.fn/private?` is installed; the filter
+            ;; itself runs in Clojure, mirroring [[render-fn-rows]].
+            q    (if (installed :seon.fn/private?)
+                   '[:find ?sym ?src ?spec ?srctx ?priv
+                     :in $ ?aid
+                     :where
+                     [?f :seon.fn/source ?src ?srctx]
+                     [?srctx :seon.db/agent-id ?aid]
+                     [?f :seon.fn/sym ?sym]
+                     [?f :seon.fn/spec ?spec]
+                     [(get-else $ ?f :seon.fn/private? false) ?priv]]
+                   '[:find ?sym ?src ?spec ?srctx
+                     :in $ ?aid
+                     :where
+                     [?f :seon.fn/source ?src ?srctx]
+                     [?srctx :seon.db/agent-id ?aid]
+                     [?f :seon.fn/sym ?sym]
+                     [?f :seon.fn/spec ?spec]])
+            rows (->> (db/query {:seon.db/db db :seon.db/query q
+                                 :seon.db/args [id]})
+                      (keep (fn [[sym src spec srctx priv]]
+                              (when (and (not priv)
+                                         (contains? (output-twin-keys spec)
+                                                    :seon.render/hiccup))
+                                {::tile-sym (symbol sym)
+                                 ::src-tx   srctx
+                                 ::attrs    (source-attrs installed src)}))))
+            ;; ONE aggregate over the union of watched attrs (history view —
+            ;; a retraction is a change), then per-candidate max lookup.
+            attrs   (into #{} (mapcat ::attrs) rows)
+            attr-tx (if (seq attrs)
+                      (into {} (db/query
+                                 {:seon.db/db (db/history db)
+                                  :seon.db/query
+                                  '[:find ?a (max ?tx)
+                                    :in $ [?a ...]
+                                    :where [?e ?a _ ?tx]]
+                                  :seon.db/args [(vec attrs)]}))
+                      {})
+            best    (->> rows
+                         (map (fn [{::keys [tile-sym src-tx attrs]}]
+                                {::tile-sym tile-sym
+                                 ::touch (reduce max src-tx
+                                                 (keep attr-tx attrs))}))
+                         (sort-by (juxt ::touch (comp str ::tile-sym)))
+                         last)]
+        (if (some? best)
+          {::tile-sym (::tile-sym best)}
+          {})))))
+
 (defn derived-blocks
   "The DERIVED auto-run context blocks for the agent's current ns.
 

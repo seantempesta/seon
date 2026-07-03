@@ -99,8 +99,31 @@ substrate):
    renders in root's ctx (`/agent/root/debug`) with ZERO SCI-bounding
    warnings. Docs: data-model.md §5.1–5.3; test:
    `test/my/plan_test.cljs` `entity-ref-direction-and-agent-retract-semantics`.
-5. **Canvas = last-updated tile** (derived default, pin to override) — the code
-   for the ui.md decision.
+5. **Canvas = last-updated tile** (derived default, pin to override) — ✅
+   COMPLETE (2026-07-03). Resolution is now pin → derived → welcome, one
+   path (`live-tile/wired-content` grew an optional caller-supplied
+   `::derived` slot; `render-agent-tile` + the `:live-tile` ctx section
+   both feed it, so the human's canvas and the agent's provenance header
+   name the SAME value). The derivation
+   (`seon.agent.ctx.render-fns/last-updated-tile`) is a pure f(db):
+   candidates = the agent's OWN authored tile fns (`:seon.fn` rows whose
+   source-datom tx carries the agent's `:seon.db/agent-id` provenance and
+   whose spec output declares the hiccup twin — structural, no lists);
+   touch = max(own source tx, max tx of the attrs the source names as
+   qualified keyword literals — the declared read-set, read on the HISTORY
+   view so retractions count). Argmax touch wins; the derived-canvas fn is
+   skipped as its own auto-run block (same as a pin); no candidates →
+   welcome unchanged. Honest bound (documented in context.md): a tile
+   reaching attrs only dynamically follows only its own redefinitions.
+   Live-proven on the default pod (agent `cvp-2607030320`): authored
+   plan-tile then clock-tile → canvas = clock-tile (last authored); ONE
+   `my.plan` write → canvas = plan-tile rendering the live item, observed
+   in the gunzipped `/agent/{id}` feed `#world-canvas`; pin → pin wins
+   regardless of recency; retract pin → derived again; ctx section header
+   reads "(derived — your last-updated tile; … pin …)" with the fn source
+   inline. Tests: `render_fns_test.cljs` (last-updated-tile ×4) +
+   `live_tile_test.cljs` (pin>derived>welcome). Docs: context.md + ui.md
+   canvas paragraphs, ui-live-tiles skill.
 6. **Queued tool defects** — fresh-world `my.kb` empty render (✅ resolved,
    see agent-ctx CLAUDE.md); turn-6 recall visibility; ~~SCI-bounding
    fallback on `my.plan.internal/plan-block`~~ (✅ fixed 2026-07-02, issue

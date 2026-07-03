@@ -36,11 +36,20 @@ a **renderer**, and the keys present decide where it goes:
   and the human's screen showing the same thing.
 
 The **canvas** is a distinct, focal tile. Default: it shows the
-**last-updated tile** — a function of the db (the block-tile whose data most
-recently changed), so the human's focus follows what the agent is actively
-doing with zero ceremony. Override: the agent pins the canvas to a specific
-tile (`:seon.render.live-tile/content`) to feature it regardless of recency.
+**last-updated tile** — a pure function of the db
+(`seon.agent.ctx.render-fns/last-updated-tile`): among the agent's own
+authored tile fns (its `:seon.fn` rows whose tx provenance names the agent
+and whose output schema declares the hiccup twin), the one most recently
+*touched* — redefined, or a write (or retraction — the history view) to any
+attr its source names as a qualified keyword literal, read off the datoms'
+tx column. So the human's focus follows what the agent is actively doing
+with zero ceremony: author a plan tile, write plan data, and the plan tile
+is the canvas. Override: the agent pins the canvas to a specific tile
+(`:seon.render.live-tile/content`) to feature it regardless of recency;
+retract the pin to fall back to derived; with neither, the core welcome.
 Derive the default, store only the pin — the same rule as everywhere else.
+(Honest bound: a tile that reaches attrs only dynamically — never naming
+them — follows only its own redefinitions.)
 
 This is the block's two renders (`:seon.render/ai` / `:seon.render/html`),
 now emitted by any in-scope `defn`, not only by seeded blocks. Its args are

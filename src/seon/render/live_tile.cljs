@@ -94,7 +94,8 @@
 
    `seon.render/render-agent-tile` is the one entry point: it calls
    [[wired-content]] to resolve WHICH value is wired
-   (`::content` → [[welcome]]), invokes it
+   (`::content` pin → the caller-derived last-updated tile → [[welcome]]),
+   invokes it
    through `seon.render/html-render` (the ONE value-or-fn dispatch),
    and on a throw builds the legible [[error-response]] — a broken
    tile must never silently vanish (vanish = indistinguishable from
@@ -323,10 +324,18 @@
 ;; HOW to change the display. (The legacy `:seon.render/html` arm was
 ;; deleted in the render sweep — PRD live-tiles §8.1, no legacy: that
 ;; key now means ONLY the generic entity-tile render slot.)
-(schema/register! ::source [:enum ::content ::welcome])
+(schema/register! ::source [:enum ::content ::derived ::welcome])
+
+(schema/register! ::derived :symbol)
 
 (schema/register! ::wired-request
-  [:map [:seon.render/entity :map]])
+  [:map
+   [:seon.render/entity :map]
+   ;; The DERIVED canvas default — the agent's last-updated tile fn
+   ;; (seon.agent.ctx.render-fns/last-updated-tile), computed by the
+   ;; caller (this ns loads below render-fns) and consulted only when
+   ;; no pin is stored. Derive the default, store only the pin.
+   [::derived {:optional true} ::derived]])
 
 (schema/register! ::wired-response
   [:map
@@ -366,8 +375,12 @@
   "Resolve WHICH value is the agent's live tile, with provenance.
 
    Resolution on the pulled agent `:seon.render/entity`:
-   `:seon.render.live-tile/content` (THE tile key) when present, else
-   [[welcome-sym]] (the core welcome). Neither the per-entity
+   `:seon.render.live-tile/content` (THE tile key — the PIN) when
+   present; else the caller-supplied `::derived` symbol (the agent's
+   last-updated tile — the derived default, see
+   `seon.agent.ctx.render-fns/last-updated-tile`); else [[welcome-sym]]
+   (the core welcome). Pin wins over derived; retract the pin and the
+   canvas falls back to derived. Neither the per-entity
    `:seon.render/html` nor the `:seon.agent` KIND default is consulted
    — that key means ONLY the generic entity-tile render slot (one key,
    one meaning; the legacy tile fallback was deleted per PRD
@@ -376,12 +389,13 @@
    Values arrive pr-str-encoded from the mixed-:or bridge; the attr
    read decodes via `seon.db/decode-edn-value`."
   {:malli/schema [:=> [:cat ::wired-request] ::wired-response]}
-  [{:seon.render/keys [entity]}]
+  [{:seon.render/keys [entity] ::keys [derived]}]
   (let [content (some->> (::content entity)
                          (db/decode-edn-value ::content))]
-    (if (some? content)
-      {::source ::content ::value content}
-      {::source ::welcome ::value welcome-sym})))
+    (cond
+      (some? content) {::source ::content ::value content}
+      (some? derived) {::source ::derived ::value derived}
+      :else           {::source ::welcome ::value welcome-sym})))
 
 (defn wired-label
   "The awareness-section header identity for a [[wired-content]] result.
@@ -398,6 +412,10 @@
     (if (symbol? value)
       (str value " (a fn on your entity)")
       "literal hiccup on your entity")
+
+    ::derived
+    (str value " (derived — your last-updated tile; transact "
+         ":seon.render.live-tile/content to pin a different one)")
 
     ::welcome
     (str value " (the core default — wire your own)")))

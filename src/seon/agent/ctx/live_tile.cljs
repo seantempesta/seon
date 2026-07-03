@@ -12,6 +12,7 @@
    wired-content provenance."
   (:require
     [seon.agent.ctx :as ctx]
+    [seon.agent.ctx.render-fns :as render-fns]
     [seon.db :as db]
     [seon.render :as render]
     [seon.render.live-tile :as live-tile]))
@@ -140,7 +141,19 @@
                           {:seon.render.live-tile/content blk-content}
                           agent-content))
                       {})
-              wired (live-tile/wired-content {:seon.render/entity ent})
+              ;; No pin → the derived last-updated tile, so the header's
+              ;; provenance names the SAME value render-agent-tile just
+              ;; rendered (one resolution, two readers). Guarded like the
+              ;; render side: derivation failure → welcome provenance.
+              derived (when (nil? (:seon.render.live-tile/content ent))
+                        (try (::render-fns/tile-sym
+                               (render-fns/last-updated-tile
+                                 {:seon.db/db db :seon.agent/id id}))
+                             (catch :default _ nil)))
+              wired (live-tile/wired-content
+                      (cond-> {:seon.render/entity ent}
+                        (some? derived)
+                        (assoc :seon.render.live-tile/derived derived)))
               ;; The body is a render twin (:ai text, or hiccup pr-str, or
               ;; an error envelope) — arbitrary content the human's tile
               ;; shows. It rides this comment-block as `;` lines (via
@@ -172,9 +185,13 @@
                "; progress — belongs HERE as a board/view, not recited in a\n"
                "; paragraph: a PLANNING / GOAL / STATUS ask answered only in prose\n"
                "; (or only as steps) leaves this canvas blank — render the board\n"
-               "; FIRST, then narrate. Set it with ONE transact of either literal\n"
+               "; FIRST, then narrate. UNPINNED, this canvas is DERIVED: it shows\n"
+               "; your LAST-UPDATED tile fn — redefine a tile fn, or write data\n"
+               "; whose attrs its source names, and your human's focus follows\n"
+               "; automatically. PIN it with ONE transact of either literal\n"
                "; hiccup (instant) or a qualified tile-FN symbol (re-derives\n"
-               "; every render, so a live count/query stays current):\n"
+               "; every render, so a live count/query stays current); retract\n"
+               "; :seon.render.live-tile/content to fall back to derived:\n"
                ";\n"
                ";   (seon.db/transact!\n"
                ";     {:seon.db/tx-data\n"

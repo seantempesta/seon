@@ -34,6 +34,17 @@ yourself). The value is either a **literal hiccup vector** (instant, static) or 
 `src/seon/render/live_tile.cljs` (the ns docstring is the contract) and proven in
 a live drive where an agent wired its tile first-try.
 
+**Unpinned, your canvas is DERIVED — it already follows you.** With no
+`:seon.render.live-tile/content` stored, the canvas shows your **last-updated
+tile fn**: among the tile fns YOU authored (output declares
+`:seon.render/hiccup`), the one most recently touched — redefined, or a write to
+any attr its source names as a qualified keyword literal. Author a plan tile,
+write plan data → the plan tile is your canvas, zero ceremony. Transacting
+`content` PINS one tile regardless of recency; `[:db/retract [:seon.agent/id
+(seon.db/current-agent-id)] :seon.render.live-tile/content]` un-pins back to
+derived. (Derived only sees attrs your fn names literally — one more reason to
+write literal queries.)
+
 ### (a) Literal hiccup — instant, no fn needed
 
 For a one-shot view that won't change, transact the hiccup directly:

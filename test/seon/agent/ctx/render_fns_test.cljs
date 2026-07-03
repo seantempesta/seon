@@ -226,3 +226,104 @@
                                 children)
                        children))))))
         (.then done))))
+
+;; ============================================================
+;; last-updated-tile — the derived canvas default (context.md §canvas).
+;; Candidates = THIS agent's authored tile fns (tx provenance); touch =
+;; max(own source tx, txs of the attrs the source names). Pure f(db).
+;; ============================================================
+
+(def ^:private purpose-tile-source
+  ;; a tile whose source NAMES :seon.agent/purpose — its declared read-set.
+  (str "(defn purpose-tile [{pdb :seon.db/db}] "
+       "{:seon.render/ai \"purposes\" "
+       ":seon.render/hiccup [:ul [:li :seon.agent/purpose]]})"))
+
+(def ^:private clock-tile-source
+  ;; a tile naming NO installed attr — follows only its own redefinition.
+  (str "(defn clock-tile [_] "
+       "{:seon.render/ai \"clock\" :seon.render/hiccup [:p \"tick\"]})"))
+
+(defn- transact-as!
+  "Transact `tx-data` on `conn` inside `aid`'s provenance scope."
+  [conn aid tx-data]
+  (db/with-agent aid
+    (fn [] (db/transact! {:seon.db/conn conn :seon.db/tx-data tx-data}))))
+
+(deftest last-updated-tile-derives-nothing-without-authored-tiles
+  (async done
+    (-> (with-seeded
+          (fn [conn]
+            ;; the standard seed has NO agent tx-provenance → no candidates.
+            (testing "no authored tile fns → {} (caller falls back to welcome)"
+              (is (= {} (rf/last-updated-tile {:seon.db/db @conn
+                                               :seon.agent/id agent-id}))))))
+        (.then done))))
+
+(deftest last-updated-tile-follows-authorship-then-data
+  (async done
+    (-> (with-seeded
+          (fn [conn]
+            (-> (transact-as! conn agent-id
+                  [(fn-row (str cur-ns-str "/purpose-tile") render-spec
+                           purpose-tile-source)])
+                (.then (fn [_]
+                  (transact-as! conn agent-id
+                    [(fn-row (str cur-ns-str "/clock-tile") render-spec
+                             clock-tile-source)])))
+                (.then (fn [_]
+                  (testing "the most recently AUTHORED tile is derived"
+                    (is (= {::rf/tile-sym
+                            (symbol (str cur-ns-str "/clock-tile"))}
+                           (rf/last-updated-tile {:seon.db/db @conn
+                                                  :seon.agent/id agent-id}))))
+                  ;; now write DATA the purpose-tile's source names — the
+                  ;; canvas follows the data with zero ceremony.
+                  (db/transact!
+                    {:seon.db/conn conn
+                     :seon.db/tx-data [{:seon.agent/id agent-id
+                                        :seon.agent/purpose "canvas proof"}]})))
+                (.then (fn [_]
+                  (testing "a write to a watched attr makes that tile last-updated"
+                    (is (= {::rf/tile-sym
+                            (symbol (str cur-ns-str "/purpose-tile"))}
+                           (rf/last-updated-tile {:seon.db/db @conn
+                                                  :seon.agent/id agent-id})))))))))
+        (.then done))))
+
+(deftest last-updated-tile-gates-on-provenance-and-privacy
+  (async done
+    (-> (with-seeded
+          (fn [conn]
+            (-> (transact-as! conn "oth-2607020001"
+                  [(fn-row (str cur-ns-str "/other-tile") render-spec
+                           clock-tile-source)])
+                (.then (fn [_]
+                  (transact-as! conn agent-id
+                    [(fn-row (str cur-ns-str "/hidden-tile") render-spec
+                             clock-tile-source :private? true)
+                     (fn-row (str cur-ns-str "/ai-only-tile") ai-only-spec
+                             "(defn ai-only-tile [_] {:seon.render/ai \"a\"})")])))
+                (.then (fn [_]
+                  (testing "another agent's fn, a private fn, and an ai-only fn are not candidates"
+                    (is (= {} (rf/last-updated-tile {:seon.db/db @conn
+                                                     :seon.agent/id agent-id})))))))))
+        (.then done))))
+
+(deftest context-root-skips-the-derived-canvas-tile
+  (async done
+    (-> (with-seeded
+          (fn [conn]
+            (-> (transact-as! conn agent-id
+                  [(fn-row (str cur-ns-str "/clock-tile") render-spec
+                           clock-tile-source)])
+                (.then (fn [_]
+                  (let [names (->> (ctx/context-root {:seon.db/db @conn
+                                                      :seon.agent/id agent-id})
+                                   :seon.agent.ctx/children
+                                   (mapv :seon.agent.ctx/name))]
+                    (testing "the derived-canvas fn does not double-render as its own auto-run block"
+                      (is (not (some #{:render-fn/clock-tile} names))))
+                    (testing "the other auto-run blocks are untouched"
+                      (is (some #{:render-fn/good-view} names)))))))))
+        (.then done))))

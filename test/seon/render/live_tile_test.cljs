@@ -86,6 +86,32 @@
     (is (= :seon.render.live-tile/welcome source))
     (is (= tile/welcome-sym value))))
 
+(deftest wired-content-pin-beats-derived-beats-welcome
+  (testing "no pin + a derived last-updated tile → the derived fn"
+    (let [{:seon.render.live-tile/keys [source value]}
+          (tile/wired-content
+            {:seon.render/entity {:seon.agent/id "wired-22060004"}
+             :seon.render.live-tile/derived 'my.agent.x/plan-tile})]
+      (is (= :seon.render.live-tile/derived source))
+      (is (= 'my.agent.x/plan-tile value))
+      (testing "the label names the derivation and how to pin"
+        (let [label (tile/wired-label
+                      {:seon.render.live-tile/source source
+                       :seon.render.live-tile/value  value})]
+          (is (str/includes? label "my.agent.x/plan-tile"))
+          (is (str/includes? label "derived"))
+          (is (str/includes? label ":seon.render.live-tile/content"))))))
+  (testing "a stored pin wins over the derived default"
+    (let [{:seon.render.live-tile/keys [source value]}
+          (tile/wired-content
+            {:seon.render/entity
+             {:seon.agent/id "wired-22060005"
+              :seon.render.live-tile/content (pr-str 'my.ns/pinned-tile)}
+             :seon.render.live-tile/derived 'my.agent.x/plan-tile})]
+      (is (= :seon.render.live-tile/content source))
+      (is (= 'my.ns/pinned-tile value)
+          "pin regardless of recency — the override"))))
+
 ;; ============================================================
 ;; welcome — time-aware, purpose-aware, twin-carrying, tagged blocks.
 ;; ============================================================

@@ -34,6 +34,7 @@
     [seon.error :as err]
     [seon.error.instrument :as einstrument]
     [seon.eval :as eval]
+    [seon.agent.ctx.render-fns :as render-fns]
     [seon.render.default :as default]
     [seon.render.live-tile :as live-tile]
     [seon.render.sci :as render-sci]
@@ -722,8 +723,21 @@
                  (catch :default _ nil))]
     (if (nil? (:seon.agent/id ent))
       {:seon.render/hiccup nil}
-      (let [{:seon.render.live-tile/keys [value]}
-            (live-tile/wired-content {:seon.render/entity ent})
+      (let [;; No pin stored → the DERIVED default: the agent's
+            ;; last-updated tile (context.md §canvas — derive the
+            ;; default, store only the pin). Guarded: a derivation
+            ;; failure means no derived candidate → the welcome.
+            derived
+            (when (nil? (:seon.render.live-tile/content ent))
+              (try (:seon.agent.ctx.render-fns/tile-sym
+                     (render-fns/last-updated-tile
+                       {:seon.db/db db :seon.agent/id id}))
+                   (catch :default _ nil)))
+            {:seon.render.live-tile/keys [value]}
+            (live-tile/wired-content
+              (cond-> {:seon.render/entity ent}
+                (some? derived)
+                (assoc :seon.render.live-tile/derived derived)))
             input {:seon.db/db         db
                    :seon.agent/id      id
                    :seon.render/entity ent}]

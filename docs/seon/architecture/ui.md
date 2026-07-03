@@ -140,15 +140,20 @@ is a tile. All pages are agent worlds — one mechanism, a tree of routes:
   included). The canvas is NOT a `(slot :canvas)` block — `:canvas` is just a
   block name like any other. **What the canvas shows is derived by default,
   pinnable to override** (the same derive-default/store-override pattern as
-  everywhere): by default it is the **last-updated tile** — the block-tile
-  whose data most recently changed — so the human's focus follows what the
-  agent is actively doing, and the agent *knows* it does, since it's derived
-  from the agent's own last write (the shared-view property, [[context]]). The
-  agent overrides by pinning `:seon.render.live-tile/content` to a specific
-  tile to feature it regardless of recency. With neither a pin nor any tile
-  update yet, the default (`seon.render.live-tile/welcome`) LEADS with the
-  agent's latest reply as a markdown card, falling back to the greeting only
-  before the agent has spoken.
+  everywhere): by default it is the **last-updated tile** — among the agent's
+  own authored tile fns, the one most recently touched (redefined, or a write
+  to an attr its source names; `seon.agent.ctx.render-fns/last-updated-tile`,
+  pure over the db value — see [[context]] for the exact derivation) — so the
+  human's focus follows what the agent is actively doing, and the agent
+  *knows* it does, since it's derived from the agent's own last write (the
+  shared-view property, [[context]]). The agent overrides by pinning
+  `:seon.render.live-tile/content` to a specific tile to feature it
+  regardless of recency (retracting the pin falls back to derived; the
+  derived tile is skipped as its own auto-run block, same as a pin). With
+  neither a pin nor any authored tile yet, the default
+  (`seon.render.live-tile/welcome`) LEADS with the agent's latest reply as a
+  markdown card, falling back to the greeting only before the agent has
+  spoken.
 - **the root agent's world** (`/`) — the all-agents overview IS the **root
   agent's** world (`:seon.agent/id "root"`). Its system-scoped blocks query across
   all agents to render a preview tile each; dive into one via reverse routing
