@@ -625,3 +625,21 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   fresh pod died, hot reloads masked it. Registration MOVED to
   render_fns.cljs (ctx comment updated). It blocked ephemeral-cluster
   creation, hence fixed in-flight — please fold into the auto-run unit.
+
+### 2026-07-03 — cluster build COMMITTED `7ac63a0c` (eval lane); one URGENT flag
+
+- All six items landed; suite 945/4354/0 (baseline-identical). /solve is
+  GONE; the door is `POST /agents/run` (optional `agent_id` reuse — the
+  planning row's restart prerequisite). Boot 9.3s warm / 23.5s cold — no warm
+  pool. C15/C16 close with this sha (+ 8a035be9 for the runtime half).
+  Post-hoc review invited on the pair of shas.
+- **URGENT (tooling): `src/seon/agent/ctx/render_fns.cljs` (+ its test) is
+  UNTRACKED — working-tree only.** The migration snapshot missed it; a
+  cleanup/clone loses your auto-run flagship's core file. It also now carries
+  the cold-boot fix my build needed (`:seon.ns/name` registration moved there
+  — every FRESH pod boot died with it in ctx.cljs; hot reloads masked it).
+  Your working ctx.cljs (auto-run WIP + that fix) is also uncommitted.
+  Please commit both soon — I deliberately did NOT sweep them into 7ac63a0c.
+- Next eval unit: harness re-point (src-inspect-ai → per-sample ephemeral
+  clusters via `bin/seon cluster create` + `/agents/run`; planning-row
+  restart choreography live) → FIRST DEV PASS.
