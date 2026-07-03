@@ -955,8 +955,12 @@
                         (ctx/render-context {:seon.agent/id id})
                         (is (= before (count (d/datoms @db/*conn* :eavt)))
                             "rendering wrote NO datoms — derived, never stored"))
-                      (is (not (str/includes? prod-txt "malli"))
-                          "no swallowed malli code leaks into the prompt")))))))
+                      ;; the word "malli" appears legitimately (the system
+                      ;; text teaches :malli/schema; error lines carry the
+                      ;; HUMANIZED explain) — the leak signature is raw
+                      ;; validator internals, never the taught vocabulary
+                      (is (not (str/includes? prod-txt ":malli.core/"))
+                          "no raw malli internals leak into the prompt")))))))
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 
