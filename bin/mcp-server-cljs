@@ -360,25 +360,42 @@
     (or (when-let [s (get @sessions sid)]
           {:sid sid :session-info s})
         (if (= sid "default")
-          ;; C27: the default session PREFERS the runtime advertising THIS
+          ;; C27: the default session pins to the runtime advertising THIS
           ;; supervisor's own cluster — :runtime-select :latest used to pin
           ;; whichever pod connected last (a watched bench pod, not the
-          ;; default pod). Falls back to the unpinned pivot when no runtime
-          ;; advertises the cluster (fresh pod mid-boot, pre-C27 bundle).
-          (if-let [new-sid (or (when-let [cid (try (find-cluster-runtime!
-                                                     port default-build-id own-cluster)
-                                                   (catch Exception e
-                                                     (log-error "own-cluster probe failed:"
-                                                                (.getMessage e))
-                                                     nil))]
-                                 (create-cljs-session! port default-build-id cid))
-                               (create-cljs-session! port default-build-id))]
+          ;; default pod). When OTHER clusters' runtimes are live but ours
+          ;; isn't, FAIL LOUD (an unpinned fallback would silently ride
+          ;; :latest onto a foreign pod — the exact C27 hazard). The
+          ;; unpinned fallback remains only for the legacy world where NO
+          ;; runtime advertises a cluster (pre-C27 bundles, mid-boot).
+          (let [cands (try (filterv #(= (:build %) default-build-id)
+                                    (probe-advertisements! port))
+                           (catch Exception e
+                             (log-error "advertisement probe failed:" (.getMessage e))
+                             []))
+                own   (filterv #(= own-cluster (:seon.dev.runtime-id/cluster %)) cands)
+                foreign? (boolean (some :seon.dev.runtime-id/cluster cands))]
+            (when (and (empty? own) foreign?)
+              (throw (ex-info (str "no " default-build-id " runtime advertises this "
+                                   "supervisor's cluster '" own-cluster "' — refusing "
+                                   "to fall back to :runtime-select :latest while other "
+                                   "clusters' runtimes are connected. Live advertisements: "
+                                   (pr-str (mapv #(select-keys % [:client-id
+                                                                  :seon.dev.runtime-id/cluster
+                                                                  :seon.dev.runtime-id/ids])
+                                                 cands))
+                                   ". Is the default pod up? bin/seon status / start pod.")
+                              {:cluster own-cluster})))
+            (if-let [new-sid (or (when (= 1 (count own))
+                                   (create-cljs-session! port default-build-id
+                                                         (:client-id (first own))))
+                                 (create-cljs-session! port default-build-id))]
             (let [info (get @sessions new-sid)]
               (swap! sessions (fn [m] (-> m (dissoc new-sid) (assoc "default" info))))
               {:sid "default" :session-info info})
             (throw (ex-info (str "failed to create default CLJS session — pivot into "
                                  default-build-id " failed (watcher up? build watched?)")
-                            {:build default-build-id})))
+                            {:build default-build-id}))))
           (throw (ex-info (str "unknown session id: " sid
                                " (it may have been swept after a watcher restart — "
                                "use create_session for a fresh one)")

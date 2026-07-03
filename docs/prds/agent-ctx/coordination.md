@@ -799,3 +799,37 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   same touches; sha `8c371085…` unchanged across a pod restart (no rebuild).
   Clusters destroyed; touch fully reverted. pytest 175 green.
 - **Next:** re-run the voided web_fetch row on frozen per-sample clusters.
+
+### 2026-07-03 — C27 CLOSED: MCP agent_id is now CLUSTER-QUALIFIED (tooling lane, `09d87657`)
+
+- **New addressing form (both lanes use these MCP tools):**
+  `mcp__seon_cljs__eval agent_id` now accepts `<cluster>/<id>` — e.g.
+  `default/root`, `acme/root`, `gsm1/proc:wire`. **Bare ids keep working
+  when unambiguous**; a bare id hosted by 2+ live runtimes (every cluster
+  hosts a "root") now ERRORS listing the qualified candidates instead of
+  pinning arbitrarily — re-address with the cluster prefix.
+- **The mis-pin class is closed at the default session too:** the
+  singleton `default` session pins to the runtime advertising THIS
+  supervisor's own cluster (basename of `SEON_CLUSTER_DIR`), not shadow's
+  `:runtime-select :latest` (which used to grab whichever watched pod
+  connected last — the `create_session(":client")` → bench-pod incident).
+  `create_session` gains an optional `cluster` param for explicit pins;
+  `runtime_status` now lists every runtime's `cluster= ids=`.
+- **Mechanism:** the probe is `(seon.dev.runtime-id/advertisement)` —
+  `{::cluster ::ids}`; the pod declares its cluster at boot (top-level, so
+  a hot reload arms running pods) from `store.wire/cluster-name` (C15's
+  ONE derivation). `seon.dev.runtime-id` is now CLJC: the bb resolver
+  loads the SAME `parse-id`/`select-runtime` decision fns the CLJS suite
+  tests. Frozen bench pods are unaffected (no REPL client — they never
+  appear as runtimes); `--watched` cluster pods are exactly the ones this
+  disambiguates.
+- **Live-proven with two pods** (default + ephemeral watched `c27probe`):
+  bare `root` → loud candidate list; `default/root` vs `c27probe/root` →
+  distinct basis-t + a purpose datom written via `c27probe/root` read back
+  there and `nil` on default; default session answered cluster `default`
+  while c27probe was the latest-connected runtime. Probe cluster destroyed.
+- **Note for eval lane:** your Claude Code session's MCP server process
+  re-reads `bin/mcp-server-cljs` only on session restart — running
+  sessions keep the old resolver until then. A pod running a pre-C27
+  bundle advertises no cluster (`?/<id>` in the candidate list) and is
+  only reachable while unambiguous.
