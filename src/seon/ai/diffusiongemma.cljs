@@ -139,10 +139,18 @@
       (config/env-string "DIFFGEMMA_EP")))
 
 (defn- base-url
-  "The endpoint's RunPod base `…/v2/{EP}`, or nil when no endpoint id."
+  "The worker base URL, or nil when no endpoint is configured.
+
+   A bare RunPod endpoint id (`\"u50y7khhos5t7o\"`) resolves under
+   `https://api.runpod.ai/v2/{EP}`; a full `http(s)://…` value is used
+   AS the base — that is how a LOCAL worker speaking the same wire
+   contract (e.g. the dg_mlx MLX worker on
+   `http://127.0.0.1:17860`) plugs in with zero other changes."
   []
   (when-let [ep (endpoint-id)]
-    (str runpod-root "/" ep)))
+    (if (str/starts-with? ep "http")
+      ep
+      (str runpod-root "/" ep))))
 
 (defn- resolved-api-key
   "The bearer key for this call, or nil — read from process.env at call
