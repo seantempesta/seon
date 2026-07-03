@@ -425,7 +425,7 @@
       seeds core fns, the eval-tee seeds agent fns), resolves each live JS
       var, reads its spec, and routes it through [[register-target!]]
       (async detected from the var via [[async-fn?]]; the structural
-      [[async-unwrappable?]] opt-out honored — counted as `:skipped`),
+      [[async-unwrappable?]] opt-out honored — counted as `::skipped`),
       then `mi/instrument!` once.
 
       Runs at boot AFTER the core is indexed. The eval-tee path keeps
@@ -446,8 +446,8 @@
       old wrapper until the var is redefined (tee) or the process
       restarts — same accepted limit the once-gate had.
 
-      `:no-var` counts rows whose var isn't live (a prior session's fn);
-      `:bad-spec` counts unreadable spec strings; `:unresolvable-schema`
+      `::no-var` counts rows whose var isn't live (a prior session's fn);
+      `::bad-spec` counts unreadable spec strings; `::unresolvable-schema`
       counts rows whose spec READS but references a schema name that no
       longer resolves in the registry (a renamed/pruned schema ghost) —
       ALL THREE are skipped, never fatal. The last is the boot-resilience
@@ -465,8 +465,8 @@
                                :where [?e :seon.fn/sym ?sym]
                                       [?e :seon.fn/spec ?spec]]
                              db)
-             stats (volatile! {:registered 0 :skipped 0 :no-var 0
-                               :bad-spec 0 :unresolvable-schema 0})]
+             stats (volatile! {::registered 0 ::skipped 0 ::no-var 0
+                               ::bad-spec 0 ::unresolvable-schema 0})]
          (doseq [[sym-str spec-str] rows
                  :let [slash (str/index-of (str sym-str) "/")]
                  :when slash]
@@ -489,19 +489,19 @@
                           (try (m/schema schema) true
                                (catch :default _ false)))]
              (cond
-               (nil? the-fn)    (vswap! stats update :no-var inc)
-               (= ::bad schema) (vswap! stats update :bad-spec inc)
+               (nil? the-fn)    (vswap! stats update ::no-var inc)
+               (= ::bad schema) (vswap! stats update ::bad-spec inc)
                (not ok?)        (do (js/console.warn
                                       (str "seon.instrument/instrument-from-db!: "
                                            sym-str " has a persisted :malli/schema that "
                                            "no longer resolves (renamed/pruned schema) — "
                                            "leaving it UNINSTRUMENTED so boot proceeds: "
                                            spec-str))
-                                     (vswap! stats update :unresolvable-schema inc))
+                                     (vswap! stats update ::unresolvable-schema inc))
                (async-unwrappable? (async-fn? the-fn) the-fn schema)
-               (vswap! stats update :skipped inc)
+               (vswap! stats update ::skipped inc)
                :else (do (register-target! ns-sym fn-sym schema (async-fn? the-fn))
-                         (vswap! stats update :registered inc)))))
+                         (vswap! stats update ::registered inc)))))
          ;; `:skip-instrumented? true` is malli's own per-var guard: a live
          ;; object carrying the `malli$instrument$instrumented?` flag (the
          ;; multi-arity/variadic wrap-in-place case) is left alone instead of
