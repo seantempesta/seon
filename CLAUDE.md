@@ -387,7 +387,7 @@ New CLJS surface that keeps tripping people — read the source before changing 
 
 - **Await only inside a `^:async` fn — never a bare top-level `(await x)`.** Self-host (the pod's bootstrap compiler that evals agent forms) is conditional: a `^:async` fn with an internal `(await …)` works (returns a native `js/Promise`); a top-level `(await x)` throws "await can only be used in async contexts" (the macro asserts `(:async &env)`, false at top level). Resolve a stashed Promise by **re-reference**, not `await`.
 - **Agents get data, not Promises.** `seon.eval/maybe-await-value` auto-awaits a returned Promise, so quick `^:async` verbs (`db/transact!`, `todo/add!`) read as synchronous; a long/timed-out Promise lands in `result/<id>` and resolves on re-reference.
-- **`async-fn?` (ctor name == `"AsyncFunction"`) mis-detects an already-instrumented malli wrapper** — a plain `Function` that still returns a Promise — routing it through the SYNC output validator. This is why instrumentation runs ONCE per process.
+- **Async/shape detection sees THROUGH malli's wrapper record** — `seon.instrument` reads `malli$instrument$original` before any ctor-name (`"AsyncFunction"`) or arity-shape check, so an already-instrumented var re-detects from its REAL fn and `instrument-from-db!` is idempotent (re-run on a later `start-agent!` re-wraps from originals; `:skip-instrumented? true` keeps multi-arity fns single-wrapped). The old once-per-process gate is retired.
 
 ---
 

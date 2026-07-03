@@ -141,6 +141,21 @@
        (catch :default _ nil))))
 
 #?(:cljs
+   (defn- -original-fn
+     "See through malli's per-var instrumentation record: a wrapped var's
+      live fn carries the ORIGINAL under `malli$instrument$original`
+      (set by `malli.instrument/-replace-fn` at wrap time — the same
+      record `mi/instrument!` itself re-wraps from). Returns the original
+      when `f` is a wrapper, `f` unchanged otherwise. Every shape/async
+      detection in this ns goes through this, so re-detection on an
+      already-instrumented var reads the REAL fn, never the wrapper —
+      the root fix for the old \"wrappers erase asyncness\" class (a
+      wrapper is a plain variadic `Function`, so ctor-name async
+      detection and `-simple-fixed-arity-fn?` both mis-read it)."
+     [f]
+     (or (when f (gobj/get f "malli$instrument$original")) f)))
+
+#?(:cljs
    (defn- -simple-fixed-arity-fn?
      "True when `f` is a plain single-fixed-arity fn — NOT variadic, NOT
       multi-arity. CLJS only sets `cljs$lang$maxFixedArity` on
@@ -367,7 +382,11 @@
       installs each wrapper in place."
      {:malli/schema [:=> [:cat :symbol :symbol :any :boolean] :any]}
      [ns-sym fn-sym schema-form async?]
-     (let [the-fn (-find-js-var ns-sym fn-sym)]
+     ;; Shape checks read the ORIGINAL fn ([[-original-fn]]): a live var
+     ;; that is already a malli wrapper is a plain variadic Function, so
+     ;; without the unwrap a re-registration would mis-route every simple
+     ;; fixed-arity fn to the stock wrapper.
+     (let [the-fn (-original-fn (-find-js-var ns-sym fn-sym))]
        (cond
          ;; STRUCTURAL opt-out — async with no correct wrapper available.
          (async-unwrappable? async? the-fn schema-form) nil
@@ -382,12 +401,18 @@
 
 #?(:cljs
    (defn async-fn?
-     "True when `f` is a JS async function (the runtime shape `^:async`
-      compiles to). Lets [[instrument-from-db!]] route async wrappers
-      without the analyzer's `:async` flag — the live var carries the fact."
+     "True when `f` is (or wraps) a JS async function — the runtime shape
+      `^:async` compiles to. Lets [[instrument-from-db!]] route async
+      wrappers without the analyzer's `:async` flag. Sees THROUGH a malli
+      instrumentation wrapper ([[-original-fn]]): the ctor-name check is
+      only ever applied to the real fn, so an already-instrumented
+      `^:async` fn (whose wrapper is a plain `Function` returning a
+      Promise) is still detected async — re-instrumentation is
+      detection-safe by construction."
      {:malli/schema [:=> [:cat :any] :boolean]}
      [f]
-     (and (fn? f) (= "AsyncFunction" (.. f -constructor -name)))))
+     (let [f (-original-fn f)]
+       (and (fn? f) (= "AsyncFunction" (.. f -constructor -name))))))
 
 #?(:cljs
    (defn instrument-from-db!
@@ -406,6 +431,20 @@
       Runs at boot AFTER the core is indexed. The eval-tee path keeps
       instrumenting newly-defined fns inline between boots. No-op when
       [[enabled?]] is false. Returns a stats map.
+
+      IDEMPOTENT on re-run (a later `start-agent!` in the same process):
+      detection sees through malli's per-var wrapper record
+      ([[-original-fn]] / [[async-fn?]]), so an already-wrapped var
+      re-registers from its REAL shape, and `mi/instrument!` runs with
+      `:skip-instrumented? true` — simple fns re-wrap from the recorded
+      original (one wrapper, never stacked); multi-arity/variadic fns,
+      whose live object carries malli's `instrumented?` flag, are left
+      alone. This retired the old once-per-process gate
+      (`instrument-from-db-once!`), whose only job was to fence the
+      wrapper mis-detection this now fixes at the root. A row whose
+      persisted spec changes without a var redefinition still keeps its
+      old wrapper until the var is redefined (tee) or the process
+      restarts — same accepted limit the once-gate had.
 
       `:no-var` counts rows whose var isn't live (a prior session's fn);
       `:bad-spec` counts unreadable spec strings; `:unresolvable-schema`
@@ -433,7 +472,12 @@
                  :when slash]
            (let [ns-sym (symbol (subs sym-str 0 slash))
                  fn-sym (symbol (subs sym-str (inc slash)))
-                 the-fn (-find-js-var ns-sym fn-sym)
+                 ;; Detection reads the ORIGINAL fn ([[-original-fn]]) — on a
+                 ;; re-run the live var may be a malli wrapper (a plain
+                 ;; variadic Function), which would mis-detect every `^:async`
+                 ;; fn as sync and route its Promise through the sync output
+                 ;; validator (the old pod-wedge class).
+                 the-fn (-original-fn (-find-js-var ns-sym fn-sym))
                  schema (try (reader/read-string spec-str)
                              (catch :default _ ::bad))
                  ;; Resolve-check (errors-as-values): build the schema
@@ -458,37 +502,14 @@
                (vswap! stats update :skipped inc)
                :else (do (register-target! ns-sym fn-sym schema (async-fn? the-fn))
                          (vswap! stats update :registered inc)))))
-         (mi/instrument! {:report ei/report-fn})
+         ;; `:skip-instrumented? true` is malli's own per-var guard: a live
+         ;; object carrying the `malli$instrument$instrumented?` flag (the
+         ;; multi-arity/variadic wrap-in-place case) is left alone instead of
+         ;; having its arity slots double-wrapped; a simple wrapped fn (flag
+         ;; lives on its recorded original, not the wrapper) re-wraps FROM
+         ;; that original — one wrapper either way.
+         (mi/instrument! {:report ei/report-fn :skip-instrumented? true})
          (assoc @stats
                 :seon.instrument/enabled? true
                 :seon.instrument/n-instrumented
                 (reduce + (map count (vals (m/function-schemas :cljs)))))))))
-
-#?(:cljs
-   ;; P0 (double-instrument async wedge) — instrument the program graph ONCE
-   ;; per process. The 1st pass (boot, after index + replay) wraps core +
-   ;; every replayed agent fn from its FRESH var. A 2nd pass (a later POST
-   ;; /agents/new → start-agent!) would re-read the 1st pass's WRAPPER var,
-   ;; whose constructor is `Function` not `AsyncFunction`, so `async-fn?`
-   ;; mis-detects every `^:async` fn as sync and re-routes its Promise return
-   ;; through malli's SYNC output validator → `:malli.core/invalid-output`
-   ;; and the pod wedges (ticker + wake loop throw every agent). Agent fns
-   ;; defined AFTER boot are wrapped inline by the eval-tee, so the once-gate
-   ;; loses nothing. Resets on a fresh process (a cluster reset re-boots).
-   (defonce ^:private !instrumented? (atom false)))
-
-#?(:cljs
-   (defn instrument-from-db-once!
-     "Idempotent [[instrument-from-db!]] — the `start-agent!` entry point.
-      Runs the full pass the FIRST time per process, then short-circuits so a
-      later agent-creation never re-instruments already-wrapped vars (which
-      would mis-route every async fn and wedge the pod — see [[!instrumented?]])."
-     {:malli/schema [:=> [:cat :any] :map]}
-     [db]
-     (if @!instrumented?
-       {:seon.instrument/enabled?       (enabled?)
-        :seon.instrument/already-done?  true
-        :seon.instrument/n-instrumented (reduce + (map count (vals (m/function-schemas :cljs))))}
-       (let [stats (instrument-from-db! db)]
-         (reset! !instrumented? true)
-         stats))))
