@@ -135,6 +135,21 @@ substrate):
    canvas watch set read DATOMS — text re-parse survives only as the
    observable pre-structural fallback (once-per-ns debug note)).
 
+7. **Eval-tee robustness (registry C37/C24/C34)** — ✅ COMPLETE
+   (2026-07-03). C37 `fb234016`+`d0de3f60`: `::kw`/`::alias/kw` sources
+   pass the read-gate flywheel (the ONE whole-source structural read is
+   now `seon.repl.internal/read-forms`, rewrite-clj `:auto-resolve`;
+   cljs.tools.reader has NO current-ns hook — live-proven); stored
+   `:seon.fn/read-attrs` carry RESOLVED keywords; falsification caught
+   the resume leg — the sourceless home-ns load unit gets its `(ns …)`
+   head SYNTHESIZED from the M4 `:seon.ns/require-edges` datoms
+   (replay 10/10, `::`-fn resumes into its own ns, instrumented).
+   C24 `d8994100`: the body-only-redef rescue generalized to every
+   source shape (`source-def-syms` walk; single-defn special case
+   deleted; body-sensitive var-digest ruled out — the var-map carries no
+   body). C34 `5f1686af`: `var-projection` speaks
+   `:seon.analyzer-info/*`. Full suite 972/4462 0F/0E.
+
 Stability queue (interleaved, one per feature unit above; owner-agreed
 2026-07-02 — each fix REUSES an existing mechanism, no new ones):
 
