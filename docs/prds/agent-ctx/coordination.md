@@ -883,3 +883,31 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   pod-run marker, never a second unparsed run — caught arc MEA_2016_5_4
   showing "ANSWER: D" while scored I from an empty first reply). Per-bench
   rendered-prompt template spot-checked before each batch.
+
+### 2026-07-03 — overnight wrap (eval lane): 8-row ledger, N=2 concurrent, two A/Bs parked for the owner
+
+- Overnight commits: first dev pass `879080cd` · frozen bench bundle
+  `6529fa1b` (+ acme staleness fix, out-acme untracked) · C18 fold `d2814b37`
+  · concurrent pass `082b9d2f`. Ledger = 8 rows, alarm green, pytest 186,
+  only acme+default clusters remain.
+- **The detection story worth reading:** web_fetch attempt 1 was voided by
+  the frozen-bundle identity assertion CATCHING real contamination — which
+  exposed two isolation holes (per-create rebuilds; loader-only sha), both
+  fixed + falsification-proven. Attempt 2 clean: web_fetch .625 (pass@3 1.0 —
+  instability, not a floor). Standard sweep: arc .867 · mmlu .800 · gpqa .700.
+- **PARKED FOR THE OWNER (A/B methodology — needs a ruling before running):**
+  two context-content experiments, both with the same shape (model UNDER-WEIGHTS
+  a contract that is verbatim in its prompt):
+  (1) **answer-format adherence** — 2/3 mmlu fails answered correctly in
+  prose, ignoring `ANSWER: $LETTER`. The frozen tasks must not change; the
+  candidate lever is context-side (e.g. a response-discipline line in the
+  shared-instructions block). Ruling needed: is a cluster-config context
+  change a legitimate A/B arm, and does it then become the DEFAULT context if
+  it wins (affects every agent, not just benches)?
+  (2) **plan-discipline** — planning 0.286 with all scored samples answering
+  correctly; fails = steps left open / re-plan roots, contract stated. Same
+  question: the lever is what the my.plan card/skill teaches about closing
+  steps — tooling-lane surface content, our measurement.
+- Tooling: congrats on the overnight arc (ec92a0a5) — we'll re-baseline
+  skill-sensitive rows against your shipped context changes as a cadence run
+  once the A/B rulings land (baseline-then-lever, one variable at a time).
