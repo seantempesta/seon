@@ -1858,13 +1858,23 @@
                   (seq? (first forms))
                   (contains? '#{defn defn-} (first (first forms)))))))
 
-(defn- defn-form-name
-  "The NAME symbol of a single `(defn …)`/`(defn- …)` `source`, or nil.
-   Read-only; nil on anything [[defn-form?]] rejects."
+(defn- source-def-syms
+  "The NAME symbols `source`'s top-level defining forms would define.
+
+   Every top-level `(def …)`/`(defn …)`/`(defn- …)` with a symbol name
+   slot, as a distinct vector in source order. The ONE 'what does this
+   source define' walk — the body-redef rescue in [[changed-defs]] and
+   the false-confidence guard ([[failed-def-syms]]) both read it.
+   Fail-closed on unreadable source (empty)."
   [source]
-  (when (defn-form? source)
-    (let [nm (second (first (read-all-forms source)))]
-      (when (symbol? nm) nm))))
+  (into []
+        (comp (keep (fn [f]
+                      (when (and (seq? f)
+                                 (contains? '#{def defn defn-} (first f))
+                                 (symbol? (second f)))
+                        (second f))))
+              (distinct))
+        (or (read-all-forms source) [])))
 
 (defn- changed-defs
   "`analyzer-info/defs-since` PLUS the BODY-ONLY-REDEF rescue.
@@ -1874,22 +1884,34 @@
    IDENTICAL digest, so `defs-since` reports nothing, the tee never
    refreshes `:seon.fn/source`, and the SCI cage renders the OLD body
    forever (live-caught 2026-07-02: an agent fixed its broken render fn
-   and the fix never took). When `source` IS a single `(defn …)` whose
-   sym produced no diff row, synthesize its def entry from the live
-   analyzer state (`eval-ns` = the ns the form ran in) so the tee,
-   instrumentation, and auto-test passes all see the redefinition.
-   Idempotent with a real diff row (guarded by sym)."
+   and the fix never took). A body-sensitive `var-digest` is NOT
+   available as the root fix: the analyzer var-map carries no body, and
+   `snapshot-defs` has no source in scope — so the rescue is the
+   mechanism, generalized (C24): for EVERY sym `source`'s top-level
+   `def`/`defn`/`defn-` forms define ([[source-def-syms]] — single defn,
+   multi-form batch entries, and `(def f (fn …))` alike) that produced
+   no diff row, synthesize its def entry from the live analyzer state
+   (`eval-ns` = the ns the form ran in) so the tee, instrumentation,
+   and auto-test passes all see the redefinition. Idempotent with a
+   real diff row (guarded by sym); a sym absent from the analyzer
+   (failed eval) synthesizes nothing."
   [compile-state defs-before source eval-ns]
-  (let [new-defs (analyzer-info/defs-since defs-before compile-state)]
-    (or (when (symbol? eval-ns)
-          (when-let [nm (defn-form-name source)]
-            (when (not-any? #(= nm (:seon.analyzer-info/sym %)) new-defs)
-              (when-let [vm (get-in @compile-state
-                                    [:cljs.analyzer/namespaces eval-ns :defs nm])]
-                (conj (vec new-defs) {:seon.analyzer-info/ns      eval-ns
-                                      :seon.analyzer-info/sym     nm
-                                      :seon.analyzer-info/var-map vm})))))
-        new-defs)))
+  (let [new-defs (analyzer-info/defs-since defs-before compile-state)
+        diffed   (into #{}
+                       (keep #(when (= eval-ns (:seon.analyzer-info/ns %))
+                                (:seon.analyzer-info/sym %)))
+                       new-defs)
+        rescued  (when (symbol? eval-ns)
+                   (for [nm (source-def-syms source)
+                         :when (not (contains? diffed nm))
+                         :let [vm (get-in @compile-state
+                                          [:cljs.analyzer/namespaces
+                                           eval-ns :defs nm])]
+                         :when (some? vm)]
+                     {:seon.analyzer-info/ns      eval-ns
+                      :seon.analyzer-info/sym     nm
+                      :seon.analyzer-info/var-map vm}))]
+    (into (vec new-defs) rescued)))
 
 ;; ============================================================
 ;; Prose-in-parens demotion (#88). When an agent writes English prose
@@ -3265,14 +3287,7 @@
    2026-06-18). Returns a set of unqualified symbols (possibly empty).
    Fail-closed on unreadable source (empty set)."
   [source]
-  (let [forms (read-all-forms source)]
-    (->> forms
-         (keep (fn [f]
-                 (when (and (seq? f)
-                            (contains? '#{def defn defn-} (first f))
-                            (symbol? (second f)))
-                   (second f))))
-         set)))
+  (set (source-def-syms source)))
 
 (defn- references-failed-def
   "When `source` is a NON-defining form that references one of the

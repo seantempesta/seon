@@ -1047,6 +1047,61 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
+;; C24 — the body-only-redef rescue, GENERALIZED. var-digest covers only the
+;; load-bearing META, so a redefinition changing ONLY the body is
+;; digest-invisible to defs-since. The flagship rescue (c5d6f985) covered a
+;; lone `(defn …)` source; a body-only redef via `(def f (fn …))` or inside a
+;; multi-form source still reported NOTHING — silently dropping the
+;; re-instrument (the redef replaced the wrapped var with a fresh unwrapped
+;; fn) and the auto-test pass. A body-sensitive var-digest is not available
+;; as the root (the analyzer var-map carries no body; snapshot-defs has no
+;; source in scope), so the rescue is the mechanism: EVERY sym the source's
+;; top-level def/defn/defn- forms define that produced no diff row is
+;; synthesized from the live analyzer state.
+;; ---------------------------------------------------------------------------
+
+(deftest body-only-redef-rescue-covers-def-fn-and-multi-form
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+          (fn [cs]
+            (let [uniq  (str "probe.c24rescue" (rand-int 1000000000))
+                  nssym (symbol uniq)
+                  ev    (fn [src] (seval/eval cs src
+                                              {:seon.eval/starting-ns nssym
+                                               :seon.eval/analyze-deps? false}))
+                  cd    (fn [before src]
+                          (mapv :seon.analyzer-info/sym
+                                ((deref #'seval/changed-defs) cs before src nssym)))]
+              (-> (seval/eval cs (str "(ns " uniq ")")
+                              {:seon.eval/starting-ns 'cljs.user
+                               :seon.eval/analyze-deps? false})
+                  ;; VERSION-A of all three shapes — these land in :defs.
+                  (.then (fn [_] (ev "(def dfn (fn [x] (+ x 1)))")))
+                  (.then (fn [_] (ev "(defn ma [x] (+ x 1)) (defn mb [x] (+ x 2))")))
+                  (.then
+                    (fn [_]
+                      (let [before (analyzer-info/snapshot-defs cs)
+                            srcA   "(def dfn (fn [x] (* x 10)))"
+                            srcB   "(defn ma [x] (* x 100)) (defn mb [x] (* x 200))"]
+                        ;; BODY-ONLY redefs: same names, same arglists, same
+                        ;; (absent) meta — digest-identical, defs-since = ().
+                        (-> (ev srcA)
+                            (.then
+                              (fn [_]
+                                (testing "a (def f (fn …)) body-only redef is rescued"
+                                  (is (= '[dfn] (cd before srcA))))
+                                (ev srcB)))
+                            (.then
+                              (fn [_]
+                                (testing "EVERY defn in a multi-form body-only redef is rescued"
+                                  (is (= '[ma mb] (cd before srcB))))
+                                (testing "a sym the analyzer never registered synthesizes nothing"
+                                  (is (= [] (cd before "(defn ghost-c24 [x] x)"))))))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
 ;; C37 — the `::`-keyword read-gate flywheel gap. cljs.tools.reader has NO
 ;; current-ns hook (a bare `::kw` is 'Invalid token' on every CLJS build;
 ;; `::alias/kw` needs *alias-map*), so a defn whose source used auto-resolved
