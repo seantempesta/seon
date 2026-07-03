@@ -231,6 +231,14 @@
          :reload-count 0
          :heartbeat-id nil}))
 
+;; C27: advertise this pod's CLUSTER to the MCP resolver. The probe
+;; `(seon.dev.runtime-id/advertisement)` cluster-qualifies every hosted
+;; id, so `agent_id "default/root"` pins THIS pod deterministically and a
+;; bare "root" across several pods fails loud instead of mis-pinning.
+;; Top level (not -main) so a hot reload arms an already-running pod;
+;; idempotent. `cluster-name` is the ONE derivation (registry C15).
+(runtime-id/cluster! store.wire/cluster-name)
+
 (defn start-heartbeat!
   "Holds the Node event loop open with a minute-cadence heartbeat. The
    real V0 client will keep the loop alive via pending agent-loop work;
