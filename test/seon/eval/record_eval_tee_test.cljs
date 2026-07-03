@@ -91,15 +91,15 @@
 
 (defn- eval-args
   [eval-id turn-id source tee]
-  {:eval-id     eval-id
-   :turn-id     turn-id
-   :at          (js/Date.)
-   :duration-ms 1
-   :narration   ""
-   :source      source
-   :ns          'cljs.user
-   :result      {:seon.eval/ok? true :seon.eval/value :ok}
-   :tee         tee})
+  {:seon.eval/id-of-eval       eval-id
+   :seon.agent.turn/id-of-turn turn-id
+   :seon.eval/at               (js/Date.)
+   :seon.eval/duration-ms      1
+   :seon.eval/narration        ""
+   :seon.eval/source           source
+   :seon.eval/ending-ns        'cljs.user
+   :seon.eval/result           {:seon.eval/ok? true :seon.eval/value :ok}
+   :seon.eval/tee              tee})
 
 ;; ---------------------------------------------------------------------------
 ;; THE fix, half (a): a data-namespace schema registration tees in the SAME
@@ -312,7 +312,7 @@
   [cs ns-sym source]
   (let [defs-before    (analyzer-info/snapshot-defs cs)
         schemas-before (schema/current-keys)]
-    (-> (seval/eval cs source {:ns ns-sym :analyze-deps? false})
+    (-> (seval/eval cs source {:seon.eval/starting-ns ns-sym :seon.eval/analyze-deps? false})
         (.then (fn [r]
                  (is (:seon.eval/ok? r) (str "eval ok: " source))
                  ((deref #'seval/build-tee-entities)
@@ -328,7 +328,7 @@
         (.then
           (fn [cs]
             (-> (seval/eval cs "(ns probe.teetest (:require [cljs.test]))"
-                            {:ns 'cljs.user :analyze-deps? false})
+                            {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
                 (.then (fn [r] (is (:seon.eval/ok? r) "probe ns evals")))
                 (.then (fn [_]
                          (tee-for cs 'probe.teetest
@@ -373,7 +373,7 @@
     (-> (repl/ensure-bootstrap!)
         (.then
           (fn [cs]
-            (-> (seval/eval cs "(ns probe.teefn)" {:ns 'cljs.user :analyze-deps? false})
+            (-> (seval/eval cs "(ns probe.teefn)" {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
                 (.then (fn [_]
                          (tee-for cs 'probe.teefn "(defn tee-probe-fn [n] (+ n 1))")))
                 (.then
@@ -437,7 +437,7 @@
               ;; the live pod root-set!s the conn. Restored in .finally.
               (set! db/*conn* conn)
               (-> (seval/eval cs (str "(ns " uniq ")")
-                              {:ns 'cljs.user :analyze-deps? false})
+                              {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
                   (.then (fn [_] (batch "(defn recover [x] (zzz-undeclared-probe x))")))
                   (.then
                     (fn [b1]
@@ -504,7 +504,7 @@
                   ok-src   (str "(seon.schema/register! " attr " :int)")]
               (set! db/*conn* conn)
               (-> (seval/eval cs (str "(ns " uniq ")")
-                              {:ns 'cljs.user :analyze-deps? false})
+                              {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
                   (.then (fn [_] (batch fail-src)))
                   (.then
                     (fn [b1]
@@ -546,7 +546,7 @@
     (-> (repl/ensure-bootstrap!)
         (.then
           (fn [cs]
-            (-> (seval/eval cs "(ns probe.teeexample)" {:ns 'cljs.user :analyze-deps? false})
+            (-> (seval/eval cs "(ns probe.teeexample)" {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
                 (.then (fn [_]
                          (tee-for cs 'probe.teeexample
                                   "(defn tee-example-fn {:test (fn [] (assert true))} [a b] (+ a b))")))
@@ -598,7 +598,7 @@
                               (is (= 0 (:seon.client/replay-n-fail stats))
                                   "the deftest reconstitutes via the ns's whole-source load")
                               (seval/eval cs "(some? probe.teereplay/replayed-test)"
-                                          {:ns 'cljs.user :analyze-deps? false})))
+                                          {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})))
                           (.then
                             (fn [r]
                               (is (:seon.eval/ok? r) "replayed corpus is live")
@@ -623,10 +623,10 @@
     (-> (repl/ensure-bootstrap!)
         (.then
           (fn [cs]
-            (-> (seval/eval cs "(ns probe.garden)" {:ns 'cljs.user :analyze-deps? false})
+            (-> (seval/eval cs "(ns probe.garden)" {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
                 (.then (fn [_]
                          (seval/eval cs "(seon.schema/register! :probe.garden.plant/id [:and {:seon.db/identity true} :seon.db/id])"
-                                     {:ns 'probe.garden :analyze-deps? false})))
+                                     {:seon.eval/starting-ns 'probe.garden :seon.eval/analyze-deps? false})))
                 (.then (fn [r] (is (:seon.eval/ok? r) "id-attr registers")))
                 (.then (fn [_]
                          (tee-for cs 'probe.garden
@@ -732,7 +732,7 @@
               ;; (start-agent! root-set!s *conn*): the self-tee fires
               ;; during the eval AND record-eval! writes the eval tee.
               (set! db/*conn* conn)
-              (-> (seval/eval cs "(ns probe.teeagent)" {:ns 'cljs.user :analyze-deps? false})
+              (-> (seval/eval cs "(ns probe.teeagent)" {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
                   (.then (fn [_] (tee-for cs 'probe.teeagent src)))
                   (.then
                     (fn [tee]

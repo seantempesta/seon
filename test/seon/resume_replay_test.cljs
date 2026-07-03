@@ -181,14 +181,14 @@
                     (.then
                       (fn [_]
                         (seval/eval cs "(my.agent.t1/agent-fn 21)"
-                                    {:ns 'cljs.user :analyze-deps? false})))
+                                    {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})))
                     (.then
                       (fn [r]
                         (is (:seon.eval/ok? r) "agent-fn loaded without error")
                         (is (= 42 (:seon.eval/value r))
                             "loaded agent-fn is callable: (agent-fn 21) => 42")
                         (seval/eval cs "(some? my.agent.t1/my-test)"
-                                    {:ns 'cljs.user :analyze-deps? false})))
+                                    {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})))
                     (.then
                       (fn [r]
                         (is (:seon.eval/ok? r) "agent deftest loaded without error")
@@ -306,7 +306,7 @@
                                   (str "ns row requiring my.kb loads clean "
                                        "(host-bundle load-fn branch) — " (pr-str stats)))
                               (seval/eval cs "(seon.replay.kbreq/kb-fn 35)"
-                                          {:ns 'cljs.user :analyze-deps? false})))
+                                          {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})))
                           (.then
                             (fn [r]
                               (is (:seon.eval/ok? r) "fn in the requiring ns is callable")
@@ -357,7 +357,7 @@
                               (is (= 0 (:seon.client/replay-n-fail stats))
                                   (str "topo-ordered chain loads clean — " (pr-str stats)))
                               (seval/eval cs "(seon.replay.chaina/av)"
-                                          {:ns 'cljs.user :analyze-deps? false})))
+                                          {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})))
                           (.then
                             (fn [r]
                               (is (:seon.eval/ok? r) "cross-ns call resolves")

@@ -1457,7 +1457,7 @@
   [compile-state sources]
   (loop [sources sources]
     (when-let [[src & more] (seq sources)]
-      (let [res (await (seval/eval compile-state src {:ns 'cljs.user}))]
+      (let [res (await (seval/eval compile-state src {:seon.eval/starting-ns 'cljs.user}))]
         (when-not (:seon.eval/ok? res)
           (throw (ex-info "gym: fixture source eval failed"
                           {:seon.gym/error      (pr-str (:seon/error res))

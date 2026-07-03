@@ -53,7 +53,7 @@
                             (str "(ns scratch.require-b4 "
                                  "(:require [my.kb :as kb] "
                                  "[seon.error :as err]))")
-                            {:ns 'cljs.user :analyze-deps? false})
+                            {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
                 (.then
                   (fn [r]
                     (is (:seon.eval/ok? r)
@@ -64,8 +64,8 @@
                     ;; munged globalThis path.
                     (seval/eval cs
                                 "(err/->message (js/Error. \"b4-alias\"))"
-                                {:ns 'scratch.require-b4
-                                 :analyze-deps? false})))
+                                {:seon.eval/starting-ns 'scratch.require-b4
+                                 :seon.eval/analyze-deps? false})))
                 (.then
                   (fn [r]
                     (is (:seon.eval/ok? r)
@@ -81,7 +81,7 @@
         (.then
           (fn [cs]
             (-> (seval/eval cs "(require '[my.kb])"
-                            {:ns 'cljs.user :analyze-deps? false})
+                            {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
                 (.then
                   (fn [r]
                     (is (:seon.eval/ok? r)
@@ -98,7 +98,7 @@
             (-> (seval/eval cs
                             (str "(ns scratch.require-absent "
                                  "(:require [no.such.namespace :as nope]))")
-                            {:ns 'cljs.user :analyze-deps? false})
+                            {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
                 (.then
                   (fn [r]
                     (is (false? (:seon.eval/ok? r))

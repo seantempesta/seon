@@ -36,7 +36,7 @@
 (defn- value
   "Read `result/<id>` in `ns-sym` on `cs`; returns the eval result map."
   [cs ns-sym id]
-  (seval/eval cs (str "result/" id) {:ns ns-sym :analyze-deps? false}))
+  (seval/eval cs (str "result/" id) {:seon.eval/starting-ns ns-sym :seon.eval/analyze-deps? false}))
 
 (defn- run-batch
   "Run `source` (one form) through eval-batch! in a fresh agent ns.
@@ -99,7 +99,7 @@
   (async done
     (-> (repl/ensure-bootstrap!)
         (.then (fn [cs]
-                 (-> (seval/eval cs "(ns probe.resultmiss)" {:ns 'cljs.user :analyze-deps? true})
+                 (-> (seval/eval cs "(ns probe.resultmiss)" {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? true})
                      (.then (fn [_] (value cs 'probe.resultmiss "zzz-9999999999")))
                      (.then (fn [r]
                               (is (:seon.eval/ok? r) "a miss is a VALUE, not a failed error")
@@ -119,7 +119,7 @@
   (async done
     (-> (repl/ensure-bootstrap!)
         (.then (fn [cs]
-                 (-> (seval/eval cs "(ns probe.resultcap)" {:ns 'cljs.user :analyze-deps? true})
+                 (-> (seval/eval cs "(ns probe.resultcap)" {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? true})
                      (.then (fn [_]
                               (reset! (deref #'seval/!result-var-ids) [])
                               (let [n   (+ cap 5)

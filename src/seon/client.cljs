@@ -808,31 +808,33 @@
 
 (defn ^:async ^:private log-replay-failure!
   {:malli/schema [:=> [:catn [::agent-id :any] [::ns-kw :any] [::err-map :any]] :any]}
-  [agent-id ns-kw {:keys [error stack]}]
+  [agent-id ns-kw {:seon.error/keys [message stack]}]
   (await
     (log/warn! {:seon.log/source  ::log-replay-failure!
                 :seon.log/agent   agent-id
                 :seon.log/message (str "load of ns " (pr-str ns-kw)
-                                       " failed: " error)
+                                       " failed: " message)
                 :seon.log/stack   (or stack "")})))
 
 (defn ^:private load-error->log
   "Normalize a load failure `err` (a `seon.error/->map` from
    `seon.eval/eval`'s `{:seon.eval/ok? false :seon/error …}`, or a raw
    caught JS error)
-   into the `{:error <message-string> :stack <stack-string>}` shape
-   `log-replay-failure!` expects. `:error` carries the full cause-chain
-   message ([[error-chain-message]]); `:stack` the deepest cause's stack
+   into the `{:seon.error/message <string> :seon.error/stack <string>}`
+   shape `log-replay-failure!` expects (the :seon/error vocabulary — a
+   projection, not a full `->map`). `:seon.error/message` carries the
+   full cause-chain message ([[error-chain-message]]);
+   `:seon.error/stack` the deepest cause's stack
    — chosen so a load-failure warn names the actual defect, not cljs.js's
    \"ERROR\" wrapper."
   {:malli/schema [:=> [:catn [::err :any]] :any]}
   [err]
-  {:error (or (some-> err error-chain-message not-empty)
-              (some-> err .-message)
-              (str err))
-   :stack (or (some-> err error-chain-stack)
-              (some-> err .-stack)
-              "")})
+  {:seon.error/message (or (some-> err error-chain-message not-empty)
+                           (some-> err .-message)
+                           (str err))
+   :seon.error/stack   (or (some-> err error-chain-stack)
+                           (some-> err .-stack)
+                           "")})
 
 (defn ^:async replay-program-graph!
   "Load the DB layer (agent-authored code + overrides) on top of the
@@ -849,7 +851,8 @@
         with the agent-ns-set (intra-agent edges only — core deps load
         on-demand via the load-fn). A dep loads before its dependent.
      3. For each ns in topo order, `(seval/eval compile-state
-        (seval/reconstitute-ns-source db ns-kw) {:ns 'cljs.user})`. The
+        (seval/reconstitute-ns-source db ns-kw)
+        {:seon.eval/starting-ns 'cljs.user})`. The
         reconstituted source's head is the `(ns … (:require …))` form, so
         the ns is created first by construction (no `ensure-target-ns!`).
         cljs.js's load-fn (`guarded-load`'s DB branch) supplies any
@@ -886,7 +889,8 @@
         (doseq [ns-kw order]
           (let [r (try
                     (let [src (seval/reconstitute-ns-source db ns-kw)]
-                      (await (seval/eval compile-state src {:ns 'cljs.user})))
+                      (await (seval/eval compile-state src
+                                         {:seon.eval/starting-ns 'cljs.user})))
                     (catch :default e
                       {:seon.eval/ok? false :seon/error e}))]
             (when-not (:seon.eval/ok? r)
@@ -903,7 +907,8 @@
         ;; Standalone (ns-less) entity-schema rows — fully-qualified
         ;; register! calls evaled from cljs.user.
         (doseq [src standalone]
-          (let [r (try (await (seval/eval compile-state src {:ns 'cljs.user}))
+          (let [r (try (await (seval/eval compile-state src
+                                    {:seon.eval/starting-ns 'cljs.user}))
                        (catch :default e {:seon.eval/ok? false :seon/error e}))]
             (when-not (:seon.eval/ok? r)
               (vswap! !n-fail inc)
