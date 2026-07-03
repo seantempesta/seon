@@ -610,6 +610,45 @@
         ;; matching the prior hand-rolled scanner's EOF fallback.
         (subs text idx)))))
 
+(defn read-forms
+  "Every top-level form in `source` as read sexprs; nil on a read error.
+
+   The ONE whole-source structural read (rewrite-clj — the same parse
+   stack as [[parse-forms]]) for callers that classify a source string
+   by its read forms (the eval tee's `defn-form?` gate, the declared
+   read-set walk, the failed-def guard). Whitespace, comments, and `#_`
+   discards are dropped; a read failure returns nil so classification
+   gates FAIL CLOSED (a broken source yields zero forms).
+
+   AUTO-RESOLVED keywords (`::kw` / `::alias/kw`) never throw — the C37
+   flywheel gap: `cljs.tools.reader` has NO current-ns hook at all
+   (`::kw` is 'Invalid token' on every CLJS build, live-proven
+   2026-07-03), so a defn whose body used `::` keywords read as nil,
+   failed the tee gate, and silently skipped persistence/instrument/
+   resume. rewrite-clj's `:auto-resolve` closes it:
+
+     - `opts` `:seon.repl/current-ns` (a symbol) resolves `::kw`;
+       `:seon.repl/aliases` (`{alias-sym → target-ns-sym}`) resolves
+       `::alias/kw`. Thread these from the caller (the CLJS eval tee
+       derives them from the analyzer) — this ns stays bare-babashka
+       loadable, so it never reaches into seon-only state itself.
+     - ABSENT context degrades to rewrite-clj's VISIBLE placeholders
+       (`:?_current-ns_?/kw`, `:??_alias_??/kw`) — structural callers
+       (form counts, head symbols) are unaffected, and a value-consumer
+       can spot the `?`-prefixed namespace and drop it."
+  [source & [{current-ns :seon.repl/current-ns aliases :seon.repl/aliases}]]
+  (try
+    (let [opts {:auto-resolve
+                (fn [alias]
+                  (if (= :current alias)
+                    (or current-ns '?_current-ns_?)
+                    (get aliases alias (symbol (str "??_" alias "_??")))))}]
+      (into []
+            (comp (filter rcn/sexpr-able?)
+                  (map #(rcn/sexpr % opts)))
+            (rcn/children (rcp/parse-string-all (str source)))))
+    (catch #?(:clj Exception :cljs :default) _ nil)))
+
 (defn parse-forms
   "Read `text` top-to-bottom, pairing each evaluable form with the `;;`
    comment-preamble that precedes it. See the namespace docstring for the

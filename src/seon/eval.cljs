@@ -1831,14 +1831,17 @@
   "All top-level forms in `source` (an eval text may carry several).
    Returns nil on a read error — callers treat unreadable source as
    classifying false (a parse failure yields zero forms, so the strict
-   persistence gate fails closed: no row is created/replayed)."
-  [source]
-  (try
-    (let [rdr (reader-types/string-push-back-reader (str source))]
-      (loop [acc []]
-        (let [f (tools-reader/read {:eof ::eof :read-cond :allow} rdr)]
-          (if (= f ::eof) acc (recur (conj acc f))))))
-    (catch :default _ nil)))
+   persistence gate fails closed: no row is created/replayed).
+
+   Delegates to [[internal/read-forms]] (rewrite-clj, the one
+   whole-source structural read) so `::kw`/`::alias/kw` auto-resolved
+   keywords never fail the read (C37 — cljs.tools.reader threw on them,
+   silently exempting the defn from the whole persist/instrument/resume
+   flywheel). Structural callers use the 1-arity (visible placeholder
+   resolution); a value consumer ([[source-qualified-kws]]) threads the
+   real `{:seon.repl/current-ns … :seon.repl/aliases …}` context."
+  ([source] (internal/read-forms source))
+  ([source resolve-opts] (internal/read-forms source resolve-opts)))
 
 (defn defn-form?
   "TRUE iff `source` is exactly ONE top-level `defn`/`defn-` form.
@@ -2337,12 +2340,21 @@
   "Every QUALIFIED keyword literal in `source`'s top-level forms, as a
    set. Walks the READ forms (strings/comments can't false-positive the
    way a text regex does); `#{}` when the source doesn't read — but a
-   `:seon.fn` row only exists for sources [[defn-form?]] read cleanly."
-  [source]
+   `:seon.fn` row only exists for sources [[defn-form?]] read cleanly.
+
+   `resolve-opts` (`{:seon.repl/current-ns … :seon.repl/aliases …}`,
+   from the tee's analyzer context) resolves `::kw`/`::alias/kw`
+   literals to their REAL namespaces (C37 — the stored read-set must
+   carry the resolved attr, not a placeholder). A keyword whose alias
+   did NOT resolve keeps the visible `?`-prefixed placeholder namespace
+   and is DROPPED here — absent beats storing a garbage watch attr."
+  [source resolve-opts]
   (into #{}
         (comp (mapcat #(tree-seq coll? seq %))
-              (filter #(and (keyword? %) (some? (namespace %)))))
-        (or (read-all-forms source) [])))
+              (filter #(and (keyword? %)
+                            (some? (namespace %))
+                            (not (str/starts-with? (namespace %) "?")))))
+        (or (read-all-forms source resolve-opts) [])))
 
 (defn require-edges-from-source
   "Parse an `(ns …)` `source` string into the reified require-edge set.
@@ -3554,6 +3566,16 @@
               ;; row — additions ride an identity upsert, stale
               ;; keywords are retracted (a plain cardinality-many
               ;; upsert would accumulate forever).
+              ;; `::kw`/`::alias/kw` literals resolve against the ENDING
+              ;; ns's analyzer require-edges (C37) — the same facts the
+              ;; M4 structural store tees, read once per entry.
+              kw-resolve
+              (when (symbol? ending-ns)
+                {:seon.repl/current-ns ending-ns
+                 :seon.repl/aliases
+                 (::aliases (edges->require-info
+                              (analyzer-info/ns-require-edges
+                                compile-state ending-ns)))})
               read-attr-tx
               (when db/*conn*
                 (into []
@@ -3563,7 +3585,8 @@
                                   (fn-read-attrs-tx
                                     @db/*conn* s
                                     (source-qualified-kws
-                                      (:seon.fn/source ent))))))
+                                      (:seon.fn/source ent)
+                                      kw-resolve)))))
                       tee-entities))
               tee (vec (concat tee-entities req-tx read-attr-tx))]
           ;; Durable record — always. :seon.eval/ns is the

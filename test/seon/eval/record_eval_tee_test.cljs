@@ -1045,3 +1045,63 @@
                   (.finally (fn [] (set! db/*conn* prev)))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; C37 — the `::`-keyword read-gate flywheel gap. cljs.tools.reader has NO
+;; current-ns hook (a bare `::kw` is 'Invalid token' on every CLJS build;
+;; `::alias/kw` needs *alias-map*), so a defn whose source used auto-resolved
+;; keywords failed read-all-forms → defn-form? FALSE → NO :seon.fn row → the
+;; fn was silently exempt from persist/auto-run/instrument/resume. The read
+;; now rides seon.repl.internal/read-forms (rewrite-clj :auto-resolve): the
+;; gate passes, and the tee resolves the keywords against the ending ns's
+;; analyzer require-edges for the stored read-set.
+;; ---------------------------------------------------------------------------
+
+(deftest auto-resolved-keywords-pass-the-tee-gate
+  (testing "defn-form? TRUE for a defn using ::kw / ::alias/kw (was FALSE)"
+    (is (true? (seval/defn-form? "(defn f [m] (::purpose m))")))
+    (is (true? (seval/defn-form? "(defn g [m] (::pdb/tx-data m))"))))
+  (testing "read-all-forms reads ::-keyword sources (placeholder resolution)"
+    (is (= 2 (count (#'seval/read-all-forms
+                      "(defn f [] ::a) (defn g [] ::x/b)")))))
+  (testing "the strict gates still hold on ::-keyword sources"
+    (is (false? (seval/defn-form? "(def y ::a)")))
+    (is (false? (seval/defn-form? "(defn f [] ::a) (defn g [] ::b)")))))
+
+(deftest auto-resolved-keyword-defn-tees-fn-row-with-resolved-read-attrs
+  (async done
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+        (.then
+          (fn [res]
+            (let [cs    (aget res 0)
+                  conn  (aget res 1)
+                  prev  db/*conn*
+                  uniq  (str "probe.teeautokw" (rand-int 1000000000))
+                  fq    (str uniq "/kw-user")
+                  batch (fn [src] (seval/eval-batch! cs (repl-internal/parse-forms src)
+                                                     (symbol uniq) "tee-autokw-test"
+                                                     (db/new-id!) nil))
+                  fn-row (fn [] (db/pull @conn [:seon.fn/sym :seon.fn/source
+                                                :seon.fn/read-attrs]
+                                         [:seon.fn/sym fq]))]
+              (set! db/*conn* conn)
+              (-> (batch (str "(ns " uniq " (:require [seon.db :as pdb]))"))
+                  (.then
+                    (fn [b1]
+                      (testing "the ns form evals ok"
+                        (is (= 1 (:seon.eval/n-ok b1)) (pr-str b1)))
+                      ;; The C37 shape: bare `::kw` AND aliased `::pdb/kw`.
+                      (batch (str "(defn kw-user [m]"
+                                  " [(::purpose m) (::pdb/tx-data m)])"))))
+                  (.then
+                    (fn [b2]
+                      (testing "the ::-keyword defn evals ok"
+                        (is (= 1 (:seon.eval/n-ok b2)) (pr-str b2)))
+                      (testing "the :seon.fn row EXISTS (the flywheel gap: absent before)"
+                        (is (= fq (:seon.fn/sym (fn-row)))))
+                      (testing "and its read-set carries the RESOLVED keywords"
+                        (is (= #{(keyword uniq "purpose") :seon.db/tx-data}
+                               (set (:seon.fn/read-attrs (fn-row))))))))
+                  (.finally (fn [] (set! db/*conn* prev)))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
