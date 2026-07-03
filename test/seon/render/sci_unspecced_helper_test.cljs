@@ -377,3 +377,61 @@
         (reset! client/!extra-core-vars before-extra)
         (when (some? before-src)
           (aset env "SEON_EXTRA_SRC" before-src))))))
+
+;; ---------------------------------------------------------------------------
+;; M4 — the SCI env is rebuilt from the STORED `:seon.ns/require-edges`
+;; datoms, never from parsing `:seon.ns/source` text. The ns row here is a
+;; STUB (no `:require` clause at all — the my.plan.internal incident shape:
+;; a seeded ns whose aliases never made it into the stored source), so the
+;; old text-parse path could NOT resolve `sdb/…`; the stored edge is the
+;; ONLY carrier of the alias. Passing ⇒ the stored path ran.
+;; ---------------------------------------------------------------------------
+
+(def ^:private edge-dash-source
+  ;; Calls an aliased seon.db FN — deliberately NOT the `*conn*` dynamic
+  ;; var: a nil-rooted var is dropped by `ns-data-members`, and in an
+  ;; ISOLATED run nothing has root-set! `db/*conn*` (CLJS `binding`
+  ;; doesn't span .then continuations), so a `*conn*`-based tile is
+  ;; order-COUPLED (see sci-bounds-tile-derefing-aliased-dynamic-var —
+  ;; passes in the full suite via a leaked root set!, fails alone). Fn
+  ;; members enumerate unconditionally → this test is order-independent.
+  (str "(defn edge-dash [in]\n"
+       "  (let [d (:seon.db/db in)]\n"
+       "    {:seon.render/hiccup [:div (str (pos? (count (sdb/installed-schema d))))]\n"
+       "     :seon.render/ai \"edge dash\"}))"))
+
+(deftest sci-env-from-stored-require-edges
+  (async done
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+        (.then
+          (fn [res]
+            (let [conn (aget res 1)]
+              (binding [db/*conn* conn]
+                (-> (db/transact!
+                      {:seon.db/tx-data
+                       [{:seon.ns/name   :probe.edge-tile
+                         ;; STUB source — the alias lives ONLY in the edges.
+                         :seon.ns/source "(ns probe.edge-tile)"
+                         :seon.ns/require-edges
+                         [{:seon.ns.require/target :seon.db
+                           :seon.ns.require/alias  'sdb}]}
+                        {:seon.fn/sym        "probe.edge-tile/edge-dash"
+                         :seon.fn/ns         {:seon.ns/name :probe.edge-tile}
+                         :seon.fn/source     edge-dash-source
+                         :seon.fn/created-at (js/Date.)}]})
+                    (.then
+                      (fn [_]
+                        (testing "the stored edges round-trip through seon.eval"
+                          (is (= #{{:seon.ns.require/target :seon.db
+                                    :seon.ns.require/alias  'sdb}}
+                                 (seval/stored-require-edges @conn :probe.edge-tile))))
+                        (let [r (sci/invoke-bounded 'probe.edge-tile/edge-dash
+                                                    {:seon.db/db @conn})]
+                          (testing "the alias resolves from DATOMS (text parse could not — stub source)"
+                            (is (not (:seon.render.sci/error r))
+                                (str "bounding failed — the stored-edge alias did "
+                                     "not resolve under SCI: " (pr-str r)))
+                            (is (= [:div "true"] (:seon.render/hiccup r))
+                                "sdb/*conn* resolved via the stored require edge"))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))

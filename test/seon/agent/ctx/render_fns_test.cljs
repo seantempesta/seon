@@ -37,14 +37,15 @@
 
 (def ^:private plain-spec "[:=> [:cat :map] :string]")
 
-(defn- fn-row [sym spec source & {:keys [private?]}]
+(defn- fn-row [sym spec source & {:keys [private? read-attrs]}]
   (cond-> {:seon.fn/sym      sym
            :seon.fn/ns       [:seon.ns/name cur-ns]
            :seon.fn/source   source
            :seon.fn/fn-var?  true
            :seon.fn/private? (boolean private?)
            :seon.fn/arglists "([m])"}
-    spec (assoc :seon.fn/spec spec)))
+    spec (assoc :seon.fn/spec spec)
+    (seq read-attrs) (assoc :seon.fn/read-attrs (vec read-attrs))))
 
 (defn- good-view-source []
   (str "(defn good-view [{pdb :seon.db/db id :seon.agent/id}] "
@@ -287,6 +288,43 @@
                   (testing "a write to a watched attr makes that tile last-updated"
                     (is (= {::rf/tile-sym
                             (symbol (str cur-ns-str "/purpose-tile"))}
+                           (rf/last-updated-tile {:seon.db/db @conn
+                                                  :seon.agent/id agent-id})))))))))
+        (.then done))))
+
+(deftest last-updated-tile-prefers-the-stored-read-set
+  ;; C28 structural store: a row WITH :seon.fn/read-attrs is watched by
+  ;; the STORED set, never the source regex. opaque-tile's SOURCE names
+  ;; no attr literal (a dynamic read), but its stored read-set declares
+  ;; :seon.agent/purpose — under the legacy regex path a purpose write
+  ;; could never surface it, so this pins that the stored path won.
+  (async done
+    (-> (with-seeded
+          (fn [conn]
+            (-> (transact-as! conn agent-id
+                  [(fn-row (str cur-ns-str "/opaque-tile") render-spec
+                           (str "(defn opaque-tile [m] "
+                                "{:seon.render/ai \"opaque\" "
+                                ":seon.render/hiccup [:p \"opaque\"]})")
+                           :read-attrs [:seon.agent/purpose])])
+                (.then (fn [_]
+                  (transact-as! conn agent-id
+                    [(fn-row (str cur-ns-str "/clock-tile") render-spec
+                             clock-tile-source)])))
+                (.then (fn [_]
+                  (testing "later-authored clock-tile is derived first"
+                    (is (= {::rf/tile-sym
+                            (symbol (str cur-ns-str "/clock-tile"))}
+                           (rf/last-updated-tile {:seon.db/db @conn
+                                                  :seon.agent/id agent-id}))))
+                  (db/transact!
+                    {:seon.db/conn conn
+                     :seon.db/tx-data [{:seon.agent/id agent-id
+                                        :seon.agent/purpose "stored read-set proof"}]})))
+                (.then (fn [_]
+                  (testing "a write to a STORED-declared attr surfaces the tile (regex would miss it)"
+                    (is (= {::rf/tile-sym
+                            (symbol (str cur-ns-str "/opaque-tile"))}
                            (rf/last-updated-tile {:seon.db/db @conn
                                                   :seon.agent/id agent-id})))))))))
         (.then done))))

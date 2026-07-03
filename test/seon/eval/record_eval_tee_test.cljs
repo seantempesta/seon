@@ -984,3 +984,64 @@
       (is (= [true true false]
              (mapv #(seval/defn-form? (:seon.repl/source %)) entries))
           "both defns tee; the trailing expr does not — single-lane resume"))))
+
+;; ---------------------------------------------------------------------------
+;; M4 + C28 structural store: the eval-batch! tee writes the reified
+;; require edges for the ending ns (:seon.ns/require-edges — alias/refer
+;; facts from the ANALYZER, seon.analyzer-info/ns-require-edges) and the
+;; declared read-set for every teed fn (:seon.fn/read-attrs — qualified
+;; keyword literals walked off the READ form), and a REDEF diffs both
+;; (stale keywords are retracted, never accumulated).
+;; ---------------------------------------------------------------------------
+
+(deftest eval-batch-tees-require-edges-and-read-attrs
+  (async done
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+        (.then
+          (fn [res]
+            (let [cs    (aget res 0)
+                  conn  (aget res 1)
+                  prev  db/*conn*
+                  uniq  (str "probe.teeedge" (rand-int 1000000000))
+                  fq    (str uniq "/watcher")
+                  batch (fn [src] (seval/eval-batch! cs (repl-internal/parse-forms src)
+                                                     (symbol uniq) "tee-edge-test"
+                                                     (db/new-id!) nil))
+                  read-attrs (fn [] (set (:seon.fn/read-attrs
+                                           (db/pull @conn [:seon.fn/read-attrs]
+                                                    [:seon.fn/sym fq]))))]
+              (set! db/*conn* conn)
+              (-> (batch (str "(ns " uniq " (:require [seon.db :as pdb]"
+                              " [clojure.string :as pstr]))"))
+                  (.then
+                    (fn [b1]
+                      (testing "the ns form evals ok"
+                        (is (= 1 (:seon.eval/n-ok b1)) (pr-str b1)))
+                      (testing "the tee stored the reified require edges (aliases as DATOMS)"
+                        (let [edges (seval/stored-require-edges @conn (keyword uniq))]
+                          (is (contains? edges {:seon.ns.require/target :seon.db
+                                                :seon.ns.require/alias  'pdb})
+                              (str "seon.db edge with alias — got " (pr-str edges)))
+                          (is (contains? edges {:seon.ns.require/target :clojure.string
+                                                :seon.ns.require/alias  'pstr}))))
+                      (batch (str "(defn watcher [m]"
+                                  " [(:seon.agent/purpose m) :probe.teeedge.data/metric])"))))
+                  (.then
+                    (fn [b2]
+                      (testing "the defn evals ok"
+                        (is (= 1 (:seon.eval/n-ok b2)) (pr-str b2)))
+                      (testing "the fn row carries its declared read-set"
+                        (is (= #{:seon.agent/purpose :probe.teeedge.data/metric}
+                               (read-attrs))))
+                      ;; REDEF dropping one literal — the stale keyword must
+                      ;; be RETRACTED (diff, not accumulate).
+                      (batch (str "(defn watcher [m] [(:seon.agent/purpose m) :redef])"))))
+                  (.then
+                    (fn [b3]
+                      (testing "the redef evals ok"
+                        (is (= 1 (:seon.eval/n-ok b3)) (pr-str b3)))
+                      (testing "the read-set tracks the redef exactly (stale literal retracted)"
+                        (is (= #{:seon.agent/purpose} (read-attrs))))))
+                  (.finally (fn [] (set! db/*conn* prev)))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))

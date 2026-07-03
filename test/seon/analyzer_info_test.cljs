@@ -61,3 +61,40 @@
         snap (ai/snapshot-defs cs)]
     (is (= {} snap) "drops the lone nil key, yields the empty map")
     (is (m/validate :seon.analyzer-info/defs-snapshot snap))))
+
+;; ---------------------------------------------------------------------------
+;; ns-require-edges — the M4 structural store's analyzer read: aliases are
+;; the :requires KEYS mapping to a different target; refers are the :uses
+;; keys grouped by target; self and :require-macros excluded.
+;; ---------------------------------------------------------------------------
+
+(defn- compile-state-with-requires []
+  (atom
+    {:cljs.analyzer/namespaces
+     {'my.probe
+      {:requires {'db 'seon.db, 'seon.db 'seon.db
+                  'plan 'my.plan, 'my.plan 'my.plan
+                  'plain.ns 'plain.ns
+                  ;; self-require artifact — must be excluded
+                  'my.probe 'my.probe}
+       :uses {'wait 'seon.agent.lifecycle
+              'complete 'seon.agent.lifecycle}
+       :require-macros {'m 'my.macros}}}}))
+
+(deftest ns-require-edges-reads-aliases-and-refers
+  (let [edges (ai/ns-require-edges (compile-state-with-requires) 'my.probe)]
+    (is (m/validate :seon.analyzer-info/require-edges edges)
+        "output validates as ::require-edges")
+    (is (= #{{:seon.ns.require/target :seon.db
+              :seon.ns.require/alias  'db}
+             {:seon.ns.require/target :my.plan
+              :seon.ns.require/alias  'plan}
+             {:seon.ns.require/target :plain.ns}
+             {:seon.ns.require/target :seon.agent.lifecycle
+              :seon.ns.require/refers #{'wait 'complete}}}
+           edges)
+        "aliases from :requires keys, refers grouped from :uses, self + macro-only deps excluded")))
+
+(deftest ns-require-edges-empty-for-unknown-ns
+  (is (= #{} (ai/ns-require-edges (atom {:cljs.analyzer/namespaces {}}) 'no.such))
+      "unknown / never-eval'd ns yields the empty edge set"))
