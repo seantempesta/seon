@@ -2137,11 +2137,19 @@
                    (let [cur-ns (some-> (current-ns {:seon.agent/id id
                                                      :seon.db/db db})
                                         name keyword)
-                         pinned (into #{}
-                                      (comp (mapcat (juxt :seon.render/ai
-                                                          :seon.render/html))
-                                            (filter symbol?))
-                                      stored)]
+                         ;; A fn already pinned — as a STORED block's slot
+                         ;; (install!) or as the agent's CANVAS content — is
+                         ;; the explicit override: it renders there, so it is
+                         ;; NOT re-derived as its own auto-run block.
+                         canvas (some->> (:seon.render.live-tile/content entity)
+                                         (db/decode-edn-value
+                                           :seon.render.live-tile/content))
+                         pinned (cond-> (into #{}
+                                              (comp (mapcat (juxt :seon.render/ai
+                                                                  :seon.render/html))
+                                                    (filter symbol?))
+                                              stored)
+                                  (symbol? canvas) (conj canvas))]
                      (render-fns/derived-blocks
                        (cond-> {:seon.db/db db
                                 ::render-fns/pinned-syms pinned}

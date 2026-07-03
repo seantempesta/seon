@@ -69,6 +69,7 @@
     [seon.config :as config]
     [seon.db :as db]
     [seon.error :as err]
+    [seon.error.instrument :as einstrument]
     [seon.eval :as seval]
     [seon.log :as log]
     [seon.schema :as schema]))
@@ -201,14 +202,45 @@
                      "banned). Ensure the fn's :seon.fn/source and its ns "
                      ":require aliases are stored (:seon.ns/source).")})))
 
+(defn- instrument-env-in-causes
+  "The malli instrument-error ENVELOPE (ex-data) on `e` or any exception in
+   its cause chain, or nil. SCI re-wraps a thrown instrumented-call failure
+   into a `:sci/error` whose top-level data is location-only; the legible
+   envelope rides the cause."
+  [e]
+  (loop [x e, guard 0]
+    (when (and x (< guard 16))
+      (let [d (ex-data x)]
+        (if (einstrument/instrument-error? d)
+          d
+          (recur (ex-cause x) (inc guard)))))))
+
+(defn- legible-error-message
+  "The error message for a fn SCI could not run — the bare message PLUS,
+   when an instrumented inner call failed validation, the full humanized
+   malli explain (fn, arg, expected vs got). A bare `:malli.core/invalid-input`
+   names NOTHING the author can act on (drive-observed: the agent shipped
+   around its broken view instead of fixing it); the explain names the
+   failing verb + value, so the ⚠ surface is actionable."
+  [e]
+  (let [base (err/->message e)
+        env  (instrument-env-in-causes e)
+        detail (when env
+                 (try (einstrument/render-malli-error env)
+                      (catch :default _ nil)))]
+    (if detail (str base "\n" detail) base)))
+
 (defn- bounding-error
   "The fail-loud envelope for a fn SCI could not run: warn once (per sym)
    and return `{::error <:seon.db/error map>}` for the caller to render in
-   place. `e-or-msg` is an exception or a plain message string."
+   place. `e-or-msg` is an exception or a plain message string. An
+   instrumented inner-call failure carries its humanized malli explain
+   ([[legible-error-message]])."
   [sym e-or-msg]
   (let [em (if (string? e-or-msg)
              {:seon.error/message e-or-msg}
-             (err/->map e-or-msg))]
+             (assoc (err/->map e-or-msg)
+                    :seon.error/message (legible-error-message e-or-msg)))]
     (warn-bounding-failure-once! sym (:seon.error/message em))
     {:seon.render.sci/error em}))
 
