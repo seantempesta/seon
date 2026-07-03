@@ -41,7 +41,9 @@ The **canvas** is a distinct, focal tile. Default: it shows the
 authored tile fns (its `:seon.fn` rows whose tx provenance names the agent
 and whose output schema declares the hiccup twin), the one most recently
 *touched* — redefined, or a write (or retraction — the history view) to any
-attr its source names as a qualified keyword literal, read off the datoms'
+attr in its declared read-set (the stored `:seon.fn/read-attrs` — the
+qualified keyword literals the tee walked off the read form; a regex over
+the source text only for pre-structural rows), read off the datoms'
 tx column. So the human's focus follows what the agent is actively doing
 with zero ceremony: author a plan tile, write plan data, and the plan tile
 is the canvas. Override: the agent pins the canvas to a specific tile

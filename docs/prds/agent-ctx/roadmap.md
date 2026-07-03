@@ -129,7 +129,11 @@ substrate):
    fallback on `my.plan.internal/plan-block`~~ (✅ fixed 2026-07-02, issue
    note completed; re-verified on the default cluster 2026-07-03 — zero
    warnings on a fresh boot with live plan renders; alias STORAGE residue
-   tracked as registry M4).
+   ~~tracked as registry M4~~ ✅ CLOSED 2026-07-03 with C28 (`7c385f61` +
+   `877d8a80`): the tee/setup/boot-index store `:seon.ns/require-edges`
+   component rows + `:seon.fn/read-attrs`; the SCI cage env and the
+   canvas watch set read DATOMS — text re-parse survives only as the
+   observable pre-structural fallback (once-per-ns debug note)).
 
 Stability queue (interleaved, one per feature unit above; owner-agreed
 2026-07-02 — each fix REUSES an existing mechanism, no new ones):
