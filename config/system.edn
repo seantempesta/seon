@@ -52,6 +52,9 @@
  {:seon.config.render/store-edn-cap      16384
   :seon.config.render/eval-cap           1500
   :seon.config.render/message-cap        4000
+  ;; The citable RESULT BODY of one eval row (chars; seon.eval's persistence
+  ;; clip reads the same knob as a chars/4 token budget — registry row C32).
+  :seon.config.render/result-body-cap    16384
   :seon.config.render/value-max-depth    3
   :seon.config.render/value-max-keys     8
   :seon.config.render/value-max-items    8

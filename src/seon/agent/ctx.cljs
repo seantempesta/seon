@@ -525,7 +525,7 @@
    (`seon.eval/render-result-edn`), so a body this size is STRUCTURED, not
    a wall of text.
 
-   16384 currently EQUALS `seon.eval/store-edn-cap`, so a stored result
+   The default 16384 currently EQUALS `store-edn-cap`, so a stored result
    renders WHOLE — but this is a CROSS-REFERENCE, NOT an alias. The render
    cap (an LLM-facing read-time projection) and `store-edn-cap` (the
    write-time per-datom anti-OOM RAM ceiling) are different tiers.
@@ -533,8 +533,13 @@
    This is the FALLBACK cap (the decay default-cap): the transcript's
    `:seon.agent.ctx.transcript/result-decay` schedule caps a result body by AGE
    (CP-3), and this const is the near-full / no-decay default level (offset 0 =
-   16384). Config a decay schedule on the transcript block to age-band it."
-  16384)
+   16384). Config a decay schedule on the transcript block to age-band it.
+
+   The VALUE has one owner — `seon.config/result-body-render-cap` (C32):
+   `seon.eval/clip-result-body` (the write-time persistence clip) reads
+   the same knob as a chars/4 TOKEN budget; this def keeps the ctx-side
+   char-denominated contract (`clip-or-full` plumbing)."
+  (config/result-body-render-cap))
 
 (defn cap-result
   "Truncate a rendered eval-result string to `eval-render-cap`.

@@ -2586,19 +2586,19 @@
            "at you (the failure is a value you can inspect and handle).")
       msg)))
 
-(def result-body-render-cap
-  "TOKEN cap for the rendered `:seon.eval/result-edn` BODY of one eval —
-   the clip applied to the projected/pr-str'd value string before it is
-   persisted. Any value (a giant scalar, a wide map, a long string)
-   clips here to a well-formed string that names `result/<id>` for the
-   full live value. The FALLBACK cap (4096 tokens = the 16384-char store
-   ceiling `seon.agent.ctx/result-body-render-cap`); the transcript's
-   age-keyed `:seon.agent.ctx.transcript/result-decay` schedule bands it
-   per result age."
-  4096)
-
 (defn clip-result-body
-  "Clip a rendered result-body STRING to `result-body-render-cap` tokens.
+  "Clip a rendered result-body STRING to the result-body cap's tokens.
+
+   The clip applied to the projected/pr-str'd value string before it is
+   persisted: any value (a giant scalar, a wide map, a long string)
+   clips to a well-formed string that names `result/<id>` for the full
+   live value. The cap's ONE owner is
+   `seon.config/result-body-render-cap` (chars — the same knob
+   `seon.agent.ctx/result-body-render-cap` reads for the read-time
+   render; C32), converted to this clip's TOKEN budget at the boundary
+   (chars/4, default 16384 chars = 4096 tokens); the transcript's
+   age-keyed `:seon.agent.ctx.transcript/result-decay` schedule bands it
+   per result age.
 
    Delegates the cut to `seon.ai.tokens/clip-str` (the ONE bounded-print)
    with a loud, token-denominated marker: a one-line pointer to the full
@@ -2609,7 +2609,7 @@
   [eval-id body]
   (tokens/clip-str
     body
-    result-body-render-cap
+    (tokens/chars->tokens (config/result-body-render-cap))
     (fn [budget total]
       (str "\n; … +" (- total budget) " tokens clipped (of " total "); the "
            "full value is the live var result/" eval-id " — drill it with "
@@ -2777,8 +2777,9 @@
                    ;; Lookup-ref resolves at tx time (the agent pre-exists).
                    aid (assoc :seon.eval/agent [:seon.agent/id aid])
 
-                   ;; `render-result-edn` already clips the body to
-                   ;; `result-body-render-cap` and names `result/<id>` for the
+                   ;; `render-result-edn` already clips the body to the
+                   ;; result-body cap (`seon.config/result-body-render-cap`
+                   ;; as a token budget) and names `result/<id>` for the
                    ;; full value. `cap-edn` (store-edn-cap) is the additional
                    ;; MEMORY-SAFETY backstop so the DB never holds a multi-MB
                    ;; blob even if the render cap is raised; a no-op when the

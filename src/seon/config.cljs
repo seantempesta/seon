@@ -512,6 +512,20 @@
   []
   (get (render-config) :seon.config.render/message-cap 4000))
 
+(defn result-body-render-cap
+  "Char cap for the CITABLE RESULT BODY of one eval row.
+
+   THE one owner of
+   the value (registry row C32 — it was duplicated as 4096 tokens in
+   `seon.eval` vs 16384 chars in `seon.agent.ctx`): both call sites read
+   this accessor, `seon.eval/clip-result-body` converting to its token
+   budget at the boundary (chars/4). Char-denominated like its family
+   siblings (manifest `:seon.config.render/result-body-cap`; env
+   `SEON_RENDER_RESULT_BODY_CAP`; 16384)."
+  {:malli/schema [:=> [:cat] :int]}
+  []
+  (get (render-config) :seon.config.render/result-body-cap 16384))
+
 ;;; --- Value-renderer bounds — the `SEON_RENDER_VALUE_*` sub-family
 ;;; (per-node depth/breadth limits of the structural eval-value skeleton).
 
