@@ -117,7 +117,8 @@
    [:seon.agent/id {:optional true} :seon.agent/id]  ; injected: you (omit)
    [::children     {:optional true} [:vector ::plan-node]]])
 
-(schema/register! ::ids [:map-of :any ::id])   ; author-label / :root → minted id
+(schema/register! ::ids
+  [:map-of [:or :string [:= :root]] ::id])     ; author-label / :root → minted id
 
 (schema/register! ::plan-response
   [:map
