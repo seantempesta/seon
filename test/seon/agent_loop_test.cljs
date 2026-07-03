@@ -29,6 +29,7 @@
     [seon.derive :as derive]
     [seon.eval :as seval]
     [seon.repl :as repl]
+    [seon.repl.internal :as repl-internal]
     [seon.test-seed :as test-seed]
     [seon.warn :as warn]))
 
@@ -364,7 +365,7 @@
               (let [fenced (await (db/with-agent agent-id
                                     (fn ^:async eb []
                                       (await (seval/eval-batch!
-                                               cs (repl/parse-forms "(def fenced-marker 42)")
+                                               cs (repl-internal/parse-forms "(def fenced-marker 42)")
                                                (ctx/home-ns agent-id)
                                                agent-id (db/new-id!) r1)))))]
                 (testing "the superseded run's batch is fenced — skipped, nothing recorded"
@@ -378,7 +379,7 @@
               (let [ok-batch (await (db/with-agent agent-id
                                       (fn ^:async eb2 []
                                         (await (seval/eval-batch!
-                                                 cs (repl/parse-forms "(+ 1 1)")
+                                                 cs (repl-internal/parse-forms "(+ 1 1)")
                                                  (ctx/home-ns agent-id)
                                                  agent-id (db/new-id!) r2)))))]
                 (testing "the CURRENT run's batch is NOT fenced — it commits"

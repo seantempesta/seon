@@ -429,7 +429,7 @@
                                     @conn fq))
                   ;; one full eval-batch! per attempt (run-id nil → no fence),
                   ;; exercising eval-form-entry!'s failure-path cleanup wiring.
-                  batch (fn [src] (seval/eval-batch! cs (repl/parse-forms src)
+                  batch (fn [src] (seval/eval-batch! cs (repl-internal/parse-forms src)
                                                      (symbol uniq) "tee-retry-test"
                                                      (db/new-id!) nil))]
               ;; set! (not binding) so *conn* spans the async eval-batch!
@@ -494,7 +494,7 @@
                                       :where [?s :seon.schema/key ?k]]
                                     @conn attr))
                   reg?  (fn [] (contains? (schema/current-keys) attr))
-                  batch (fn [src] (seval/eval-batch! cs (repl/parse-forms src)
+                  batch (fn [src] (seval/eval-batch! cs (repl-internal/parse-forms src)
                                                      (symbol uniq) "tee39-test"
                                                      (db/new-id!) nil))
                   ;; the failed form: register! RUNS, then a deliberate throw

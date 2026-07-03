@@ -37,7 +37,7 @@
     [seon.embed.stash :as embed-stash]
     [seon.eval :as seval]
     [seon.log :as seon-log]
-    [seon.repl :as repl]
+    [seon.repl.internal :as repl-internal]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -365,7 +365,7 @@
         ;; from anything, so the byte ground truth goes to the blob store
         ;; (best-effort; a lost capture never wedges the turn).
         reply-blob (await (capture-blob! reply-text :reply))
-        parsed     (repl/parse-forms reply-text)
+        parsed     (repl-internal/parse-forms reply-text)
         batch      (await (seval/eval-batch! compile-state parsed
                                              (ctx/home-ns id) id id-of-turn run-id))]
     (cond->

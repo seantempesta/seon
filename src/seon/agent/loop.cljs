@@ -54,6 +54,7 @@
     [seon.eval :as seval]
     [seon.log :as seon-log]
     [seon.repl :as repl]
+    [seon.repl.internal :as repl-internal]
     [seon.schema :as schema]
     [seon.warn :as warn]))
 
@@ -572,7 +573,7 @@
                         (fn ^:async eval-scheduled! []
                           (await (seval/eval-batch!
                                    compile-state
-                                   (repl/parse-forms source)
+                                   (repl-internal/parse-forms source)
                                    (ctx/home-ns id)
                                    id turn-id run-id)))))))))))))))
 

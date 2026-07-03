@@ -52,18 +52,7 @@
     ;; parse-forms parser itself lives in seon.repl.internal (.cljc).
     [rewrite-clj.parser]
     [rewrite-clj.node]
-    [rewrite-clj.zip]
-    [seon.repl.internal]))
-
-;; ============================================================
-;; parse-forms re-export — historical compat. New callers should
-;; require seon.repl.internal directly.
-;; ============================================================
-
-(def parse-forms
-  "Re-exported from [[seon.repl.internal/parse-forms]] for callers that still
-   reference `seon.repl/parse-forms`. New code: `seon.repl.internal/parse-forms`."
-  seon.repl.internal/parse-forms)
+    [rewrite-clj.zip]))
 
 ;; ============================================================
 ;; Iteration-surface — dev-init! opens an agent conn (history-on) +

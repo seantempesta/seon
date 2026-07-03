@@ -1572,7 +1572,7 @@
 
 ;; ============================================================
 ;; eval-batch! — the REPL harness primitive. Takes parsed pairs from
-;; seon.repl/parse-forms; evaluates each in the agent's compile-state
+;; seon.repl.internal/parse-forms; evaluates each in the agent's compile-state
 ;; with PARTIAL-FAILURE semantics (form N+1 always runs, even if N
 ;; failed); persists each as a :seon.eval entity; stashes the live
 ;; result in the agent's !results atom. Returns the ordered vector of
