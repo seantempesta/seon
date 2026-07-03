@@ -438,6 +438,31 @@ maybe_prep_deps() {
   echo "  ● deps prepped for :$alias"
 }
 
+# The pod's self-host eval path (seon.eval / cljs.js) loads the
+# bootstrap-CLJS bundle from out/bootstrap (shadow :bootstrap target). A
+# fresh clone doesn't have it, and the pod dies at boot with an OPAQUE
+# "uncaught exception transit-load failed" (the shadow bootstrap loader's
+# readFile against the missing bundle). Build it synchronously and loudly
+# BEFORE spawning — same reasoning as maybe_prep_deps: a minute-long build
+# inside the pod's ready window blows the boot timeout. Presence-gated
+# (index.transit.json), so a warm tree is a no-op; rebuild explicitly with
+# `clj -M:cljs compile bootstrap && bin/fix-bootstrap-macros` after
+# changing what the bundle ships.
+maybe_build_bootstrap() {
+  [ "$1" = "pod" ] && [ ! -f "$SEON_ROOT/out/bootstrap/index.transit.json" ] || return 0
+  echo "  ▶ out/bootstrap missing — building the bootstrap-CLJS bundle"
+  echo "    (one-time on a fresh clone, ~1 min; the pod's self-host eval needs it)"
+  {
+    echo "== [bin/seon] bootstrap build started $(date -u +%FT%TZ) =="
+    (cd "$SEON_ROOT" && clj -M:cljs compile bootstrap && bin/fix-bootstrap-macros) \
+      && echo "== [bin/seon] bootstrap build done $(date -u +%FT%TZ) =="
+  } >> "$(log_file "$1")" 2>&1 || {
+    echo "  ✗ bootstrap build FAILED — the pod cannot start without out/bootstrap; read: bin/seon logs $1" >&2
+    return 1
+  }
+  echo "  ● bootstrap bundle built (out/bootstrap)"
+}
+
 cmd_prep() {
   # Explicit git-dep prep verb for DOWNSTREAM supervisors (consumer ask 7):
   # after a git-dep repin, aliases that pull prep-requiring git deps
@@ -518,6 +543,18 @@ cmd_prep() {
     echo "● deps prepped + classpath warm for aliases: $prep_aliases"
   else
     echo "● classpath warm for aliases: $prep_aliases"
+  fi
+
+  # Complete the first-time build: the pod's bootstrap-CLJS bundle
+  # (out/bootstrap). Presence-gated no-op on a warm tree; `start pod`
+  # also self-heals this, but prep-then-start should never surprise.
+  if [ ! -f "$SEON_ROOT/out/bootstrap/index.transit.json" ]; then
+    echo "▶ building the bootstrap-CLJS bundle (out/bootstrap, ~1 min)"
+    (cd "$SEON_ROOT" && clj -M:cljs compile bootstrap && bin/fix-bootstrap-macros) || {
+      echo "✗ bootstrap build FAILED — the pod cannot run without out/bootstrap" >&2
+      return 1
+    }
+    echo "● bootstrap bundle built"
   fi
 }
 
@@ -636,6 +673,10 @@ _start_unlocked() {
   # Sha-bump guard: download + prep git deps BEFORE spawn so they never
   # build inside the process's own ready window (no-op when unchanged).
   maybe_prep_deps "$name" || return 1
+
+  # Fresh-clone guard: the pod needs the bootstrap-CLJS bundle
+  # (out/bootstrap) — build it before spawn (no-op when present).
+  maybe_build_bootstrap "$name" || return 1
 
   # nohup + & detaches from this shell; bash -c handles multi-word cmds.
   nohup bash -c "$cmd" >> "$(log_file "$name")" 2>&1 &
