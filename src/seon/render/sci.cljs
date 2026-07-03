@@ -63,6 +63,7 @@
    the direct compiled call). Default on."
   (:require
     [cljs.reader :as reader]
+    [clojure.string :as str]
     [sci.core :as sci]
     [sci.interrupt :as interrupt]
     [seon.config :as config]
@@ -229,6 +230,47 @@
                                 [?ns :seon.ns/source ?src]]
                :seon.db/args  [ns-kw]}))
     (catch :default _ nil)))
+
+(defn- home-agent-id
+  "The agent id when `ns-str` names an agent HOME ns (`my.agent.<id>` — the
+   deterministic `seon.agent.ctx/home-ns` shape, structural, no list), else
+   nil."
+  [ns-str]
+  (let [prefix "my.agent."]
+    (when (and (str/starts-with? ns-str prefix)
+               (not (str/includes? (subs ns-str (count prefix)) ".")))
+      (subs ns-str (count prefix)))))
+
+(defn- derived-home-ns-source
+  "The canonical home-ns `(ns …)` source for a HOME ns with no stored
+   `:seon.ns/source`. A fresh home ns (`my.agent.<id>`) is WIRED by
+   `seon.eval/setup-agent-ns!` from the ONE canonical
+   `seon.eval/home-ns-form` but only gets a stored source datom when the
+   agent re-evals an `(ns …)` form itself — so derive the SAME form here
+   (per-agent `home-requires-for` honored) and the cage rebuilds the exact
+   aliases/refers the compiled fn had. nil for a non-home ns."
+  [ns-str]
+  (when-let [id (home-agent-id ns-str)]
+    (try (seval/home-ns-form ns-str (seval/home-requires-for id))
+         (catch :default _ nil))))
+
+(defn- ns-requires-edges
+  "The `:seon.ns/requires` edge set for `ns-kw`, as ns SYMBOLS. Captured on
+   EVERY successful eval (a bare `(require '[x])` included), so it can be
+   FRESHER than the stored `:seon.ns/source` — unioned into the exposed ns
+   set so a fully-qualified ref to a required ns always resolves. Fail-soft
+   → `#{}`."
+  [db ns-kw]
+  (try
+    (into #{}
+          (comp (map first) (filter keyword?) (map (comp symbol name)))
+          (db/query
+            {:seon.db/db    db
+             :seon.db/query '[:find ?r :in $ ?ns :where
+                              [?e :seon.ns/name ?ns]
+                              [?e :seon.ns/requires ?r]]
+             :seon.db/args  [ns-kw]}))
+    (catch :default _ #{})))
 
 (defn- fn-source
   "The stored `:seon.fn/source` for `sym` (a string), or nil. nil means we
@@ -422,11 +464,20 @@
            sym (str "no stored :seon.fn/source for " sym
                     " — the fn cannot be interpreted (bounded)"))
          (let [agent-ns (namespace sym)
-               ns-src   (ns-source db (keyword agent-ns))
+               ;; The stored ns form, or — for a HOME ns that never re-eval'd
+               ;; its `(ns …)` (no stored source) — the canonical derived
+               ;; home-ns form, so home-ns render fns get their aliases/refers.
+               ns-src   (or (ns-source db (keyword agent-ns))
+                            (derived-home-ns-source agent-ns))
                {:keys [aliases nses refers refer-all]}
                (if ns-src
                  (ns-requires ns-src)
                  {:aliases {} :nses #{} :refers {} :refer-all #{}})
+               ;; UNION the (fresher, per-eval) `:seon.ns/requires` edges so a
+               ;; fully-qualified ref to a required ns resolves even when the
+               ;; stored source lags a live `(require '[x])`.
+               nses     (into (or nses #{})
+                              (ns-requires-edges db (keyword agent-ns)))
                ;; expose each required seon.*/agent ns (full name) from the index
                req-ns   (reduce (fn [m tns]
                                   (if (exposable-ns? tns)

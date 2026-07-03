@@ -58,7 +58,10 @@
   :seon.config.render/value-max-string   80
   :seon.config.render/value-shape-sample 8
   :seon.config.render/value-verbatim-cap 1500
-  :seon.config.render/value-width        72}
+  :seon.config.render/value-width        72
+  ;; TOKEN cap (the caps above are chars) for ONE current-ns auto-run render
+  ;; fn's ai output (seon.agent.ctx.render-fns).
+  :seon.config.render/render-fn-token-cap 2000}
 
  ;; ── AGENT-CONTEXT (v3, config-driven-agent-init) — the two-level context
  ;; config the GENERIC loader (seon.config/resolve-agent-context) consumes. A

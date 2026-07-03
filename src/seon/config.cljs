@@ -111,7 +111,10 @@
    [:seon.config.render/value-max-string  {:optional true} [:int {:min 1}]]
    [:seon.config.render/value-shape-sample {:optional true} [:int {:min 1}]]
    [:seon.config.render/value-verbatim-cap {:optional true} [:int {:min 1}]]
-   [:seon.config.render/value-width       {:optional true} [:int {:min 1}]]])
+   [:seon.config.render/value-width       {:optional true} [:int {:min 1}]]
+   ;; TOKEN cap (not chars — the auto-run family is token-denominated) for ONE
+   ;; current-ns auto-run render fn's ai output (seon.agent.ctx.render-fns).
+   [:seon.config.render/render-fn-token-cap {:optional true} [:int {:min 1}]]])
 
 ;; THE manifest — the registry of known sections. A future section = ONE more
 ;; optional key here + a resolver fn. Every key optional ⇒ `{}` (config absent)
@@ -568,6 +571,16 @@
    `:seon.config.render/value-width`; env `SEON_RENDER_VALUE_WIDTH`; 72."
   {:malli/schema [:=> [:cat] :int]} []
   (get (render-config) :seon.config.render/value-width 72))
+
+(defn render-fn-token-cap
+  "TOKEN cap for one auto-run render fn's ai output.
+
+   The current-ns auto-run pass (`seon.agent.ctx.render-fns`) clips each
+   discovered render fn's `:seon.render/ai` string at this token budget so
+   one chatty view can't blow the context (manifest
+   `:seon.config.render/render-fn-token-cap`; 2000)."
+  {:malli/schema [:=> [:cat] :int]} []
+  (get (render-config) :seon.config.render/render-fn-token-cap 2000))
 
 (defn render-strict?
   "The FAIL-LOUD render dial.

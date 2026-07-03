@@ -60,6 +60,7 @@
   (:require
     [clojure.string :as str]
     [cljs.reader :as edn]
+    [seon.agent.ctx.render-fns :as render-fns]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.db :as db]
@@ -82,11 +83,13 @@
 
 (declare decode-block)
 
-;; Program-graph ns rows — registered HERE (not seon.agent) because
-;; this ns loads first and its render-namespace schemas reference
-;; :seon.ns/name. The rest of the :seon.fn/:seon.schema attr family
-;; stays in seon.agent until the P6 split finds them a real home.
-(schema/register! :seon.ns/name    [:keyword {:seon.db/identity true}])
+;; Program-graph ns rows. :seon.ns/name itself is registered in
+;; seon.agent.ctx.render-fns — the FIRST-loading ns whose load-time
+;; schemas reference it (this ns requires render-fns, so render-fns
+;; loads before line 90 here would run; registering it here broke
+;; every COLD pod boot while hot reloads sailed). The rest of the
+;; :seon.fn/:seon.schema attr family stays in seon.agent until the P6
+;; split finds them a real home.
 (schema/register! :seon.ns/source  :string)
 ;; The dependency-edge SET for a namespace: the required ns-NAMES as
 ;; keywords (aliases dropped — those are reconstituted from
@@ -2092,13 +2095,17 @@
             :seon.db/ref [:seon.agent/id id]}))
 
 (defn context-root
-  "The ROOT renderable — the agent's OWN complete block set.
+  "The ROOT renderable — the agent's block set plus the current ns's
+   auto-run render fns.
 
    Its children are the agent's OWN
    `:seon.agent/ctx` block set — slot-decoded and priority-sorted by
    [[agent-blocks]], with NO render-time merge over a separate default
-   catalog (every block was seed-copied into the agent at creation, so
-   render reads one collection and stops). The agent entity is pulled once
+   catalog (every block was seed-copied into the agent at creation) —
+   PLUS the DERIVED auto-run blocks ([[seon.agent.ctx.render-fns/derived-blocks]]):
+   one block/tile twin per current-ns fn whose output schema declares a
+   render type, computed per render, never stored. One ordered list.
+   The agent entity is pulled once
    and stashed so every child reads it without re-pulling.
 
    Producing the prompt is rendering the root per view — there is no
@@ -2112,7 +2119,32 @@
   {:malli/schema [:=> [:catn [::ctx :map]] :map]}
   [{:seon.db/keys [db] :seon.agent/keys [id] :as ctx}]
   (let [entity   (pull-agent-entity db id)
-        children (agent-blocks entity)]
+        stored   (agent-blocks entity)
+        ;; AUTO-RUN (context.md §"Auto-run") — the current ns's render fns
+        ;; join the SAME ordered list as DERIVED blocks (derive-don't-store;
+        ;; seon.agent.ctx.render-fns). A fn already pinned by a stored
+        ;; block's slot is the install! override — skipped here. GUARDED:
+        ;; a discovery failure degrades to the stored set, never breaks
+        ;; context assembly.
+        derived  (try
+                   (let [cur-ns (some-> (current-ns {:seon.agent/id id
+                                                     :seon.db/db db})
+                                        name keyword)
+                         pinned (into #{}
+                                      (comp (mapcat (juxt :seon.render/ai
+                                                          :seon.render/html))
+                                            (filter symbol?))
+                                      stored)]
+                     (render-fns/derived-blocks
+                       (cond-> {:seon.db/db db
+                                ::render-fns/pinned-syms pinned}
+                         id     (assoc :seon.agent/id id)
+                         cur-ns (assoc ::render-fns/current-ns cur-ns))))
+                   (catch :default _ []))
+        children (->> (concat stored derived)
+                      (sort-by (juxt :seon.agent.ctx/priority
+                                     (comp str :seon.agent.ctx/name)))
+                      vec)]
     {:seon.agent.ctx/name     :context
      :seon.agent/entity       entity
      :seon.agent.ctx/children children
