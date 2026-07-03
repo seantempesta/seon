@@ -328,7 +328,9 @@
   (ctx/ns-demarc
     nm
     (str (seval/home-ns-form nm (seval/home-requires-for id)) "\n"
-         "; (your workspace — nothing defined here yet; define schemas + fns and they appear here)")))
+         "; (your workspace — nothing defined here yet; define schemas + fns and they appear here.\n"
+         ";  a defn whose :malli/schema output declares :seon.render/ai (and/or :seon.render/hiccup)\n"
+         ";  AUTO-RUNS every turn: its output becomes a live section of your context + a tile on your page)")))
 
 (defn- render-one
   "Render ONE included ns FULL through the SINGLE renderer

@@ -117,6 +117,31 @@ it re-derives every render. Read the `my.ui` source (it renders in full in your
 namespaces context) for the current helper set; every helper emits only safelisted
 classes. This is the "compose smaller pieces" doctrine applied to your canvas.
 
+### Zero-wiring alternative — AUTO-RUN render fns
+
+A `defn` in your CURRENT ns whose `:malli/schema` OUTPUT is a map declaring
+`:seon.render/ai` (and/or `:seon.render/hiccup`) runs AUTOMATICALLY every turn —
+no `install!`, no canvas wiring: its output becomes a live section of your own
+context AND its own tile on your page. Declare `:seon.db/db` / `:seon.agent/id`
+as `{:optional true}` request keys and the current values arrive by themselves:
+
+```clojure
+(defn plan-glance
+  "Open plan items at a glance."
+  {:malli/schema [:=> [:cat [:map [:seon.db/db {:optional true} :seon.db/db]]]
+                  [:map [:seon.render/ai :string]
+                        [:seon.render/hiccup [:vector :any]]]]}
+  [{pdb :seon.db/db}]
+  (let [open (ffirst (seon.db/query {:seon.db/db pdb :seon.db/query
+                                     '[:find (count ?e) :where [?e :my.plan/status :open]]}))]
+    {:seon.render/ai (str (or open 0) " plan items open.")
+     :seon.render/hiccup [:div (str "Open: " (or open 0))]}))
+```
+
+Use the CANVAS (`:seon.render.live-tile/content`) for the ONE focal view your
+human should watch; use auto-run render fns for the standing views you want in
+your own context every turn.
+
 ## Interactive controls — `my.tile` buttons/forms call YOUR fns back
 
 A tile is NOT read-only. `my.tile` is the sibling of `my.ui`: where `my.ui` gives
