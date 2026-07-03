@@ -616,3 +616,58 @@
                                  "the overflow is narrated, not silently dropped")))))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest entity-ref-direction-and-agent-retract-semantics
+  ;; The settled `my.*` scoping shape: per-agent data points DATA→AGENT
+  ;; (`:my.plan/agent`, a plain ref registered in my.plan — the owning ns
+  ;; is the schema authority; the agent entity is never edited to gain a
+  ;; domain). One VAET-indexed ref reads both ways; retracting the AGENT
+  ;; retracts the incoming scoping edges (datahike retract-entity v-datoms,
+  ;; transaction.cljc:897) and ORPHANS the steps — no cascade, history
+  ;; keeps everything.
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (plan/step! {:my.plan/title "a's step" :seon.agent/id a-id})
+                (.then (fn [_] (plan/step! {:my.plan/title "b's step"
+                                            :seon.agent/id b-id})))
+                (.then
+                  (fn [{ok? :my.plan/ok? bid :my.plan/id}]
+                    (is (true? ok?))
+                    ;; forward: step → agent
+                    (is (= b-id (get-in (d/pull @conn
+                                                '[{:my.plan/agent [:seon.agent/id]}]
+                                                [:my.plan/id bid])
+                                        [:my.plan/agent :seon.agent/id]))
+                        "forward pull: the step refs its owning agent")
+                    ;; reverse: agent → steps via the SAME ref (_agent)
+                    (is (= ["b's step"]
+                           (mapv :my.plan/title
+                                 (:my.plan/_agent
+                                   (d/pull @conn
+                                           '[{:my.plan/_agent [:my.plan/title]}]
+                                           b-ref))))
+                        "reverse pull: the agent reaches its steps, scoped")
+                    ;; retract the AGENT entity — the design's delete semantics
+                    (-> (d/transact! conn
+                          {:tx-data [[:db.fn/retractEntity b-ref]]})
+                        (.then
+                          (fn [_]
+                            (is (empty? (d/q '[:find ?e :in $ ?id
+                                               :where [?e :seon.agent/id ?id]]
+                                             @conn b-id))
+                                "agent entity gone")
+                            (let [step (d/pull @conn '[*] [:my.plan/id bid])]
+                              (is (= "b's step" (:my.plan/title step))
+                                  "step entity SURVIVES the agent retract — no cascade")
+                              (is (nil? (:my.plan/agent step))
+                                  "the scoping edge is retracted (v-datom semantics) — the step is orphaned"))
+                            (is (= [] (:my.plan/steps
+                                        (plan/list-open {:seon.agent/id b-id})))
+                                "orphaned step invisible to any agent-scoped read")
+                            (is (= ["a's step"]
+                                   (open-titles
+                                     (plan/list-open {:seon.agent/id a-id})))
+                                "the other agent's scope is untouched")))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))

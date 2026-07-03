@@ -159,22 +159,42 @@
 (schema/register! ::tree-response [:maybe [:or :map [:vector :map]]])
 
 ;; --- The stored entity kind. `{:seon.db/entity true}` DECLARES that rows of
-;; --- this shape live in the DB (puts the kind in the catalog).
+;; --- this shape live in the DB (puts the kind in the catalog). Required =
+;; --- what step!/plan! write unconditionally. ::agent is the SCOPING ref:
+;; --- per-agent data points DATA→AGENT (the step refs its owner; the agent
+;; --- entity is never edited to gain a domain) — read it back either way:
+;; --- forward [?t :my.plan/agent ?a], reverse pull :my.plan/_agent.
 
 (schema/register! ::step
   [:map {:seon.db/entity true}
+   [::id           ::id]
+   [::title        ::title]
+   [::status       ::status]
+   [::agent        ::agent]
+   [::created-at   ::created-at]
+   [::description  {:optional true} ::description]
+   [::goal         {:optional true} ::goal]
+   [::expect       {:optional true} ::expect]
+   [::pace         {:optional true} ::pace]
+   [::from         {:optional true} ::from]
+   [::message      {:optional true} ::message]
+   [::parent       {:optional true} ::parent]
+   [::needs        {:optional true} ::needs]
+   [::completed-at {:optional true} ::completed-at]])
+
+;; list-open's PROJECTION of one unfinished step (internal/open-keys) — the
+;; windowed read, not the stored row (no ::agent: the read is already scoped;
+;; a PULLED ref renders as {:db/id n}, not the transact-side ref form).
+(schema/register! ::open-step
+  [:map
    [::id          ::id]
    [::title       ::title]
+   [::status      ::status]
    [::created-at  ::created-at]
    [::description {:optional true} ::description]
-   [::goal        {:optional true} ::goal]
-   [::expect      {:optional true} ::expect]
-   [::pace        {:optional true} ::pace]
-   [::message     {:optional true} ::message]
-   [::parent      {:optional true} ::parent]
-   [::needs       {:optional true} ::needs]])
+   [::message     {:optional true} [:map [:db/id :int]]]])
 
-(schema/register! ::steps [:vector ::step])
+(schema/register! ::steps [:vector ::open-step])
 
 (schema/register! ::list-request
   [:map
