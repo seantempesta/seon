@@ -66,15 +66,17 @@
 (defn validate
   "Parse `code` and return a plain (JS-serializable) clj map.
 
-       {:forms  <int>            ; count of evaluable top-level forms
-        :tier   :parse           ; which oracle tier ran (seam for :eval)
-        :errors [{:error-kind <kw>    ; :eof / :unmatched-delimiter /
-                                      ;   :invalid-token / :odd-map / …
-                  :span [<start> <end>]  ; ABSOLUTE char offsets in `code`
-                  :source <string>}]}    ; byte-faithful bad span
+       {::forms  <int>           ; count of evaluable top-level forms
+        ::tier   :parse          ; which oracle tier ran (seam for :eval)
+        ::errors [{::error-kind <kw>   ; :eof / :unmatched-delimiter /
+                                       ;   :invalid-token / :odd-map / …
+                  ::span [<start> <end>] ; ABSOLUTE char offsets in `code`
+                  ::source <string>}]}   ; byte-faithful bad span
 
-   Keywords/vectors stay clj here; [[->js]] flattens them to JSON shapes
-   at the wire boundary. A clean parse → `{:forms n :tier :parse :errors []}`.
+   Keywords/vectors stay clj here; [[->js]] flattens them to the JSON wire
+   shape (bare `forms`/`tier`/`errors`/`error-kind`/`span`/`source` keys —
+   the Python worker's contract, UNCHANGED) at the wire boundary. A clean
+   parse → `{::forms n ::tier :parse ::errors []}`.
 
    EVAL-TIER SEAM: a later version adds `(defn validate-eval …)` (or a
    `:tier` arg dispatch) that, AFTER a clean parse, compiles/evals the
@@ -93,12 +95,12 @@
         errors  (->> entries
                      (filter #(= :read (:seon.repl/kind %)))
                      (mapv (fn [{:seon.repl/keys [span source] :as entry}]
-                             {:error-kind (-> entry :seon/error :seon.error/kind)
-                              :span       span
-                              :source     source})))]
-    {:forms  (count forms)
-     :tier   :parse
-     :errors errors}))
+                             {::error-kind (-> entry :seon/error :seon.error/kind)
+                              ::span       span
+                              ::source     source})))]
+    {::forms  (count forms)
+     ::tier   :parse
+     ::errors errors}))
 
 ;; ============================================================
 ;; Wire boundary — clj map → JS-serializable plain object.
@@ -110,11 +112,11 @@
    Keywords → their NAME strings (`:unmatched-delimiter` → \"unmatched-delimiter\"),
    the span vector → a JS array. Done explicitly (not `clj->js`) so the
    exact wire shape the Python worker parses is visible and stable."
-  [{:keys [forms tier errors]}]
+  [{::keys [forms tier errors]}]
   #js {:forms  forms
        :tier   (name tier)
        :errors (clj->js
-                 (mapv (fn [{:keys [error-kind span source]}]
+                 (mapv (fn [{::keys [error-kind span source]}]
                          {:error-kind (name error-kind)
                           :span       span
                           :source     source})

@@ -112,7 +112,7 @@
                     (.then
                       (fn [_]
                         (client/replay-program-graph!
-                          {:conn conn :compile-state cs :agent-id agent-id})))
+                          {:seon.client/conn conn :seon.client/compile-state cs :seon.client/agent-id agent-id})))
                     (.then
                       (fn [stats]
                         (testing "the agent ns + fn replay cleanly"

@@ -589,8 +589,8 @@
                           (.then
                             (fn [_]
                               (client/replay-program-graph!
-                                {:conn conn :compile-state cs
-                                 :agent-id "record-eval-tee-test"})))
+                                {:seon.client/conn conn :seon.client/compile-state cs
+                                 :seon.client/agent-id "record-eval-tee-test"})))
                           (.then
                             (fn [stats]
                               (is (= 1 (:seon.client/replay-n-total stats))
@@ -816,8 +816,8 @@
                     (.then
                       (fn [_]
                         (client/replay-program-graph!
-                          {:conn conn :compile-state cs
-                           :agent-id "record-eval-tee-test"})))
+                          {:seon.client/conn conn :seon.client/compile-state cs
+                           :seon.client/agent-id "record-eval-tee-test"})))
                     (.then
                       (fn [stats]
                         (is (= 0 (:seon.client/replay-n-fail stats))
@@ -855,8 +855,8 @@
                     (.then
                       (fn [_]
                         (client/replay-program-graph!
-                          {:conn conn :compile-state cs
-                           :agent-id "record-eval-tee-test"})))
+                          {:seon.client/conn conn :seon.client/compile-state cs
+                           :seon.client/agent-id "record-eval-tee-test"})))
                     (.then
                       (fn [stats]
                         (is (= 0 (:seon.client/replay-n-fail stats))

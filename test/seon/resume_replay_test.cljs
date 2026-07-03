@@ -170,7 +170,7 @@
             (with-seeded-conn
               (fn [conn]
                 (-> (client/replay-program-graph!
-                      {:conn conn :compile-state cs :agent-id "resume-replay-test"})
+                      {:seon.client/conn conn :seon.client/compile-state cs :seon.client/agent-id "resume-replay-test"})
                     (.then
                       (fn [stats]
                         ;; ONLY the one agent ns loads; core nses excluded.
@@ -298,8 +298,8 @@
                           (.then
                             (fn [_]
                               (client/replay-program-graph!
-                                {:conn conn :compile-state cs
-                                 :agent-id "resume-replay-test"})))
+                                {:seon.client/conn conn :seon.client/compile-state cs
+                                 :seon.client/agent-id "resume-replay-test"})))
                           (.then
                             (fn [stats]
                               (is (= 0 (:seon.client/replay-n-fail stats))
@@ -348,8 +348,8 @@
                           (.then
                             (fn [_]
                               (client/replay-program-graph!
-                                {:conn conn :compile-state cs
-                                 :agent-id "resume-replay-test"})))
+                                {:seon.client/conn conn :seon.client/compile-state cs
+                                 :seon.client/agent-id "resume-replay-test"})))
                           (.then
                             (fn [stats]
                               (is (= 2 (:seon.client/replay-n-total stats))

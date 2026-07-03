@@ -1738,10 +1738,10 @@
    (the test source mentions its own sym) only runs once."
   [compile-state defs-before source eval-ns]
   (let [new-defs    (changed-defs compile-state defs-before source eval-ns)
-        new-tests   (for [{:keys [var-map]} new-defs
+        new-tests   (for [{:seon.analyzer-info/keys [var-map]} new-defs
                           :when (deftest-def? var-map)]
                       (symbol (str (:name var-map))))
-        new-fn-syms (for [{:keys [var-map]} new-defs
+        new-fn-syms (for [{:seon.analyzer-info/keys [var-map]} new-defs
                           :when (and (:fn-var var-map)
                                      ;; deftest's public fn ALSO has
                                      ;; :fn-var true; skip — already
@@ -1762,7 +1762,7 @@
    re-instruments — the redef replaced the wrapped var with a fresh
    unwrapped fn, so skipping it would silently drop validation+injection."
   [compile-state defs-before source eval-ns]
-  (for [{:keys [ns sym var-map]} (changed-defs compile-state defs-before source eval-ns)
+  (for [{:seon.analyzer-info/keys [ns sym var-map]} (changed-defs compile-state defs-before source eval-ns)
         :let [schema-form (:malli/schema (:meta var-map))
               async?      (boolean (:async (:meta var-map)))]
         ;; Opt-out (seon.instrument/async-unwrappable? — structural, computed
@@ -1873,10 +1873,12 @@
   (let [new-defs (analyzer-info/defs-since defs-before compile-state)]
     (or (when (symbol? eval-ns)
           (when-let [nm (defn-form-name source)]
-            (when (not-any? #(= nm (:sym %)) new-defs)
+            (when (not-any? #(= nm (:seon.analyzer-info/sym %)) new-defs)
               (when-let [vm (get-in @compile-state
                                     [:cljs.analyzer/namespaces eval-ns :defs nm])]
-                (conj (vec new-defs) {:ns eval-ns :sym nm :var-map vm})))))
+                (conj (vec new-defs) {:seon.analyzer-info/ns      eval-ns
+                                      :seon.analyzer-info/sym     nm
+                                      :seon.analyzer-info/var-map vm})))))
         new-defs)))
 
 ;; ============================================================
@@ -2115,7 +2117,7 @@
         ;; the stored :seon.fn/source goes permanently stale).
         new-defs    (changed-defs compile-state defs-before source eval-ns)
         new-schemas (set/difference (schema/current-keys) schemas-before)
-        fn-entities (for [{:keys [ns var-map]} new-defs
+        fn-entities (for [{:seon.analyzer-info/keys [ns var-map]} new-defs
                           ;; Classify on the FORM HEAD, not the analyzer's
                           ;; `:test` marker (B9, db-is-the-running-system PRD).
                           ;; The analyzer collapses BOTH a `(deftest …)` AND a
@@ -2219,7 +2221,7 @@
         ;; FQ sym (identity attr). Source is the same form text —
         ;; `tests-referring-to` later substring-scans it to find tests
         ;; that mention a redefined fn.
-        test-entities (for [{:keys [ns var-map]} new-defs
+        test-entities (for [{:seon.analyzer-info/keys [ns var-map]} new-defs
                             :let [{:keys [sym]} (analyzer-info/var-projection var-map)]
                             ;; A :seon.test row ONLY for a real `(deftest …)`:
                             ;; deftest-def? TRUE *and* defn-form? FALSE. A

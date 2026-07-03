@@ -43,9 +43,9 @@
 ;; Output of `defs-since` — one entry per newly-added OR re-defined def.
 (schema/register! ::new-def
                   [:map
-                   [:ns :symbol]
-                   [:sym :symbol]
-                   [:var-map [:map-of :any :any]]])
+                   [::ns :symbol]
+                   [::sym :symbol]
+                   [::var-map [:map-of :any :any]]])
 
 ;; Output of `var-projection`. Matches `:seon.fn/*` attrs per v1.md §2.2.
 (schema/register! ::var-projection
@@ -118,7 +118,7 @@
                              [sym (var-digest var-map)]))])))
 
 (defn defs-since
-  "Seq of `{:ns :sym :var-map}` for defs changed since a snapshot.
+  "Seq of `{::ns ::sym ::var-map}` maps for defs changed since a snapshot.
 
    Every def present now whose digest
    differs from `before-snapshot` — i.e. brand-new defs AND re-defs
@@ -156,7 +156,7 @@
                      (not (true? (:declared var-map)))
                      (not (true? (:seon.eval/result-var? var-map)))
                      (not= before-digest now-digest))]
-      {:ns ns-sym :sym sym :var-map var-map})))
+      {::ns ns-sym ::sym sym ::var-map var-map})))
 
 (defn remove-phantom-defs!
   "Failure-path counterpart to [[defs-since]].

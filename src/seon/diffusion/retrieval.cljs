@@ -507,19 +507,19 @@
                                     d  (levenshtein name nm)]
                                 (cond
                                   (= name nm)
-                                  {:fq fq :kind :exact :distance 0}
+                                  {::fq fq ::match-kind :exact ::distance 0}
                                   (or (<= d thresh)
                                       (str/includes? nm name)
                                       (str/includes? name nm))
-                                  {:fq fq :kind :near-name
-                                   :distance (min d (inc thresh))}
+                                  {::fq fq ::match-kind :near-name
+                                   ::distance (min d (inc thresh))}
                                   :else nil))))
-                      (sort-by (juxt #(if (= :exact (:kind %)) 0 1)
-                                     #(if (and expanded (= expanded (ns-of (:fq %)))) 0 1)
-                                     :distance
-                                     #(count (name-of (:fq %)))))
+                      (sort-by (juxt #(if (= :exact (::match-kind %)) 0 1)
+                                     #(if (and expanded (= expanded (ns-of (::fq %)))) 0 1)
+                                     ::distance
+                                     #(count (name-of (::fq %)))))
                       (take k))]
-    (mapv #(pull-candidate db (:fq %) (:kind %) (:distance %)) scored)))
+    (mapv #(pull-candidate db (::fq %) (::match-kind %) (::distance %)) scored)))
 
 ;; ============================================================
 ;; Detection + injection descriptor

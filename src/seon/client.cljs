@@ -873,8 +873,11 @@
      - Boot path in start-agent!, before per-agent setup.
      - REPL probe via the same-pod-session test pattern — see
        research/resume-findings-2026-05-23.md §'Same-pod-session test'."
-  {:malli/schema [:=> [:catn [::args :any]] :any]}
-  [{:keys [conn compile-state agent-id]}]
+  {:malli/schema [:=> [:catn [::args [:map [::conn :any]
+                                            [::compile-state :any]
+                                            [::agent-id :string]]]]
+                  :any]}
+  [{::keys [conn compile-state agent-id]}]
   (db/with-tx-context
     {:seon.db/origin   :replay
      :seon.db/replay?  true
@@ -1992,8 +1995,8 @@
                                          (not (contains? fresh ident))
                                          (not (and (= :schema kind)
                                                    (seval/registration-call-source? source))))
-                                {:e e :kind kind :ident ident}))))
-                    (sort-by (fn [{:keys [kind ident]}] [kind (str ident)]))
+                                {::e e ::ghost-kind kind ::ident ident}))))
+                    (sort-by (fn [{::keys [ghost-kind ident]}] [ghost-kind (str ident)]))
                     vec)]
     (when (seq ghosts)
       (await (log/info!
@@ -2003,8 +2006,8 @@
                      " core ghost row(s) — core-seeded "
                      "program-graph rows whose source no longer exists "
                      "in the booting code: "
-                     (str/join ", " (map (fn [{:keys [kind ident]}]
-                                           (str (name kind) " " (pr-str ident)))
+                     (str/join ", " (map (fn [{::keys [ghost-kind ident]}]
+                                           (str (name ghost-kind) " " (pr-str ident)))
                                          ghosts)))}))
       ;; `:core-seed` writer → runs OUTSIDE any (inherited) agent scope,
       ;; same writer posture as boot-seed!: the transact boundary stamps
@@ -2017,16 +2020,16 @@
                              (fn []
                                (db/transact!
                                  conn
-                                 (mapv (fn [{:keys [e]}] [:db/retractEntity e])
+                                 (mapv (fn [{::keys [e]}] [:db/retractEntity e])
                                        ghosts)))))))]
         ;; Boot maintenance stays fail-loud (same posture as the seed
         ;; transacts): a silent half-prune would leave the store lying.
         (when-not (:seon.db/ok? res)
           (throw (ex-info (str "boot-index GC retract failed: "
                                (get-in res [:seon.db/error :seon.error/message]))
-                          {:seon.client/pruned (mapv (juxt :kind :ident) ghosts)
+                          {:seon.client/pruned (mapv (juxt ::ghost-kind ::ident) ghosts)
                            :seon.db/error      (:seon.db/error res)})))))
-    {:seon.client/pruned (mapv (juxt :kind :ident) ghosts)}))
+    {:seon.client/pruned (mapv (juxt ::ghost-kind ::ident) ghosts)}))
 
 (defn- stub-llm
   "A fake LLM that demonstrates the REPL-as-harness response shape: a
@@ -2505,9 +2508,9 @@
                 ;; empty conn (genuine first boot) — returns
                 ;; {…replay-n-total 0 …}.
                 replay-stats  (await (replay-program-graph!
-                                       {:conn          conn
-                                        :compile-state compile-state
-                                        :agent-id      primary}))
+                                       {::conn          conn
+                                        ::compile-state compile-state
+                                        ::agent-id      primary}))
                 _             (log/info-console!
                                 "seon.client/start-agent!"
                                 (str "replay: " (pr-str replay-stats)))

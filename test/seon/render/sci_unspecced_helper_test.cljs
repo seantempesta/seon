@@ -87,8 +87,8 @@
                         ;; Replay evals probe.helpers + probe.tile onto
                         ;; globalThis (format-count lands COMPILED there).
                         (client/replay-program-graph!
-                          {:conn conn :compile-state cs
-                           :agent-id "sci-unspecced-test"})))
+                          {:seon.client/conn conn :seon.client/compile-state cs
+                           :seon.client/agent-id "sci-unspecced-test"})))
                     (.then
                       (fn [stats]
                         (testing "the probe nses replay cleanly"
@@ -186,8 +186,8 @@
                         ;; Replay evals data.tile onto globalThis (grounded-dims
                         ;; lands as a NON-fn own member there).
                         (client/replay-program-graph!
-                          {:conn conn :compile-state cs
-                           :agent-id "sci-data-const-test"})))
+                          {:seon.client/conn conn :seon.client/compile-state cs
+                           :seon.client/agent-id "sci-data-const-test"})))
                     (.then
                       (fn [stats]
                         (testing "the data.tile ns replays cleanly"

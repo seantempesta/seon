@@ -100,7 +100,7 @@
                       (.then
                         (fn [_]
                           (client/replay-program-graph!
-                            {:conn conn :compile-state cs :agent-id "extra-core-test"})))
+                            {:seon.client/conn conn :seon.client/compile-state cs :seon.client/agent-id "extra-core-test"})))
                       (.then
                         (fn [stats]
                           (testing "the reconstituted ns replays cleanly through the agent-corpus lane"

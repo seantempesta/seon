@@ -243,8 +243,8 @@
                                          :fn-var true
                                          :arglists '(quote ([x]))}}}}})
         new    (ai/defs-since before cs)
-        nses   (set (map :ns new))
-        syms   (set (map :sym new))]
+        nses   (set (map :seon.analyzer-info/ns new))
+        syms   (set (map :seon.analyzer-info/sym new))]
     (is (not (contains? nses 'result))
         "the reserved result ns must not produce a new-def entry")
     (is (not (contains? syms 'OKf))
