@@ -5,6 +5,11 @@ import pytest
 from seon_inspect import catalog
 
 
+class _FakeTask:
+    """Just enough Task surface for run_bench: a solver chain to swap."""
+    solver = []
+
+
 def test_case1_catalog_is_data():
     # adding a bench is a data edit; every entry is (module, attr)
     assert "gsm8k" in catalog.CASE1_BENCHES
@@ -27,7 +32,7 @@ def test_run_bench_passes_cluster_url_agnostic(monkeypatch):
     import os
     captured = {}
     monkeypatch.delenv("SEON_CLUSTER_URL", raising=False)
-    monkeypatch.setattr(catalog, "load_bench_task", lambda name, **k: captured.setdefault("name", name))
+    monkeypatch.setattr(catalog, "load_bench_task", lambda name, **k: _FakeTask())
     monkeypatch.setattr(catalog, "inspect_eval", lambda *a, **k: captured.setdefault("kw", k) or ["log"])
     monkeypatch.setattr(catalog, "seon_pod_solver", lambda **kw: captured.setdefault("solver_kw", kw) or "SOLVER")
     catalog.run_bench("gsm8k", cluster_url="http://example.test:9999/agents/run", limit=3, epochs=2)
@@ -41,7 +46,7 @@ def test_run_bench_passes_cluster_url_agnostic(monkeypatch):
 def test_run_bench_max_samples_overridable(monkeypatch):
     # per-run override for cluster POOLS — the knob exists, the default stays 1
     captured = {}
-    monkeypatch.setattr(catalog, "load_bench_task", lambda name, **k: "TASK")
+    monkeypatch.setattr(catalog, "load_bench_task", lambda name, **k: _FakeTask())
     monkeypatch.setattr(catalog, "inspect_eval", lambda *a, **k: captured.setdefault("kw", k) or ["log"])
     monkeypatch.setattr(catalog, "seon_pod_solver", lambda **kw: "SOLVER")
     catalog.run_bench("gsm8k", max_samples=4)
@@ -51,7 +56,7 @@ def test_run_bench_max_samples_overridable(monkeypatch):
 def test_run_bench_per_sample_cluster_mode(monkeypatch):
     # per_sample_cluster=True selects the ephemeral-cluster solver …
     captured = {}
-    monkeypatch.setattr(catalog, "load_bench_task", lambda name, **k: "TASK")
+    monkeypatch.setattr(catalog, "load_bench_task", lambda name, **k: _FakeTask())
     monkeypatch.setattr(catalog, "inspect_eval", lambda *a, **k: captured.setdefault("kw", k) or ["log"])
     def fake_cluster_solver(**kw):
         captured["cluster_kw"] = kw
@@ -59,7 +64,7 @@ def test_run_bench_per_sample_cluster_mode(monkeypatch):
     monkeypatch.setattr(catalog, "seon_cluster_solver", fake_cluster_solver)
     catalog.run_bench("gsm8k", per_sample_cluster=True, run_timeout_s=120)
     assert captured["cluster_kw"]["timeout_s"] == 120
-    assert captured["kw"]["solver"] == "CSOLVER"
+    assert captured["kw"]["solver"] == ["CSOLVER"]
     # … and is mutually exclusive with a static cluster_url
     with pytest.raises(ValueError):
         catalog.run_bench("gsm8k", per_sample_cluster=True,
@@ -74,3 +79,38 @@ def test_cluster_url_resolved_at_call_time(monkeypatch):
     assert config.cluster_url("http://arg.test/agents/run") == "http://arg.test/agents/run"
     monkeypatch.delenv("SEON_CLUSTER_URL")
     assert config.cluster_url() == config.DEFAULT_CLUSTER_URL
+
+
+def test_swap_generate_keeps_template_swaps_generate():
+    # The bench's answer contract lives in its solver chain (prompt_template);
+    # swap_generate must keep it and replace ONLY generate() with the pod.
+    from inspect_ai.solver import generate, prompt_template
+
+    chain = [prompt_template("Q: {prompt}\nANSWER: $ANSWER"), generate()]
+    out = catalog.swap_generate(chain, "POD")
+    assert out[-1] == "POD" and len(out) == 2
+    from inspect_ai._util.registry import registry_log_name
+    assert registry_log_name(out[0]) == "prompt_template"
+
+
+def test_swap_generate_appends_pod_when_no_generate():
+    assert catalog.swap_generate([], "POD") == ["POD"]
+
+
+def test_swap_generate_single_solver_not_sequence():
+    from inspect_ai.solver import generate
+
+    assert catalog.swap_generate(generate(), "POD") == ["POD"]
+
+
+def test_prompt_text_prefers_templated_user_prompt():
+    from seon_inspect.solver import _prompt_text
+
+    class _Msg:
+        text = "TEMPLATED with ANSWER contract"
+
+    class _State:
+        user_prompt = _Msg()
+        input_text = "raw"
+
+    assert _prompt_text(_State()) == "TEMPLATED with ANSWER contract"

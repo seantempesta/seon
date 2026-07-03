@@ -286,11 +286,51 @@ repo-dev docs.
    echoes). Grants verified in the ephemeral pod's process env
    (SEON_SHELL=1, SEON_WEB=1 inherited from the supervisor). pytest
    116 → 134 green; datasets.lock regenerate-verify no-op.
-7. **First dev pass** → `evals/scorecard.jsonl` + the `pass^k` regression alarm;
-   then cadence.
-8. **Ongoing** — per-row rendered-context audits (every trim is an A/B),
-   baseline each tool the tooling lane lands, milestone runs at merges, the mvm
-   case-2 sandbox tier later.
+7. ~~**First dev pass**~~ — ✅ DONE 2026-07-03. The ledger is LIVE:
+   `evals/scorecard.jsonl` (4 rows appended, append-only; shape documented in
+   the src-inspect-ai README) + the standing `pass^k` regression alarm
+   (`tests/test_scorecard_alarm.py`: latest dev pass^1 vs the row's ≤7-run
+   median, drop >0.10 fails the suite — eval-design's rule). New maintained
+   modules: `seon_inspect.scorecard` (reducers + append discipline) and
+   `seon_inspect.tool_rows` (per-sample tool-row wiring: materialize →
+   ephemeral cluster → drive → oracle re-read; harness failures are flake
+   classes, never scores). Headline numbers (DeepSeek, dev tier):
+   gsm8k n=15 k=3 → mean .730 / pass@3 .889 / pass^3 .778 · shell_use n=8
+   k=3 → .667 / 1.00 / .600 (every sample CAN pass; 3/5 always do) ·
+   file_edit n=8 → .800 · long_term_planning n=10 → .286 (ALL scored
+   samples answered the synthesis correctly — db data survives restarts;
+   fails are plan DISCIPLINE: steps left open / premature closes / re-plan
+   roots) · web_fetch VOIDED (no ledger row — 5/8 samples ran under mid-run
+   dev-watch hot reloads, 3/8 run_error; re-run queued after bench-bundle
+   isolation). Rendered-context sanity check passed pre-batch (task contract
+   verbatim in the captured turn prompt, ~19k est tokens). Evidence:
+   `evals/runs/2026-07-03-first-dev-pass/` (per-execution records incl. the
+   archived contaminated/pre-fix gsm8k runs + the sanity prompt).
+   **Harness finding (the load-bearing finding biting our own bridge):**
+   `run_bench` replaced each bench's WHOLE solver chain, silently dropping
+   its answer-format contract (gsm8k's "ANSWER: $ANSWER" prompt_template) —
+   correct conversational replies scored INCORRECT. Fixed:
+   `catalog.swap_generate` keeps the task's own template/system solvers and
+   swaps only `generate()`; the pod solver POSTs the TEMPLATED
+   `user_prompt.text`. Pre-fix acme run: mean .500 → post-fix .730 on the
+   same frozen samples (the delta IS the dropped contract).
+   **Environment defects found (evidence in the run dir + coordination):**
+   (a) bench/ephemeral pods run the WATCHED dev build — cljs-watch rebuilds
+   hot-patch them mid-sample (`reloading…` then `run-turn! error No matching
+   clause`); every affected execution excluded as
+   `hot_reload_contaminated`/`run_error`; fix = frozen bench bundle via
+   `SEON_CLIENT_OUT` (queued, next src-adjacent unit). (b) the default-stack
+   wire-server is SHARED and was restarted externally mid-run — ephemeral
+   dbs deregistered ("unknown db-name"), one boot died on the vanished UDS
+   socket. (c) a long-lived pod accumulates one agent per sample until node
+   OOM (acme crashed at 4GB heap after ~55 agents — gsm8k epoch 3 truncated
+   at 11/15) — per-sample ephemeral clusters are structurally immune;
+   restart the acme pod between heavy rows until then.
+8. **Ongoing / cadence** — re-run web_fetch after bench-bundle isolation;
+   standard-bench sweep (arc/mmlu/gpqa dev) on a quiet stack; per-row
+   rendered-context audits (every trim is an A/B), baseline each tool the
+   tooling lane lands, milestone runs at merges, the mvm case-2 sandbox tier
+   later.
 
 Spec: [[eval-design]] · plan: [[eval-lane-plan]] · readiness:
 [[research/tool-surface-survey-2026-07-02]].

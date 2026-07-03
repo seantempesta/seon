@@ -74,6 +74,18 @@ Tool defects queued for the tooling lane (with rendered-context evidence — eva
   `seon.db/*conn*` single dynamic root (not fiber-local); documented in
   `docs/seon/orchestrator/issues/tx-feed-pump-timeouts.md`. Tooling lane +
   parallel-scoring lever.
+- **Bench-pod isolation gaps (first dev pass, 2026-07-03 — evidence in
+  `evals/runs/2026-07-03-first-dev-pass/` + roadmap step 7):** (a) ephemeral
+  bench pods exec the WATCHED `out/client/main.js` — cljs-watch rebuilds
+  hot-patch them MID-SAMPLE (`run-turn! error No matching clause`); the
+  whole web_fetch row was voided. Fix = frozen bench bundle via the existing
+  `SEON_CLIENT_OUT` override (eval-lane unit, queued next). (b) the
+  default-stack wire-server is shared with the tooling lane's pod; an
+  external restart mid-run deregisters ephemeral dbs ("unknown db-name" →
+  AgentRunRefused). (c) long-lived pods accumulate one agent per bench
+  sample until node heap OOM (acme crashed at 4GB after ~55 agents).
+  Per-sample ephemeral clusters are immune to (b-at-boot re-registers) and
+  (c); (a) hits everything until the frozen bundle lands.
 
 Tooling-lane build issues:
 
@@ -195,7 +207,16 @@ Eval-lane blockers before the first dev pass (from [[eval-CLAUDE-notes]]):
   2026-07-03** (roadmap eval step 6): `SEON_CLUSTER_URL`/`cluster_url()` (no
   back-compat alias), `seon_inspect.cluster` lifecycle helper,
   `run_bench(per_sample_cluster=True)`, planning driver LIVE (one DeepSeek
-  sample ok=true both parts). Next: the first dev pass.
+  sample ok=true both parts). **✅ First dev pass 2026-07-03** (roadmap eval
+  step 7): the ledger `evals/scorecard.jsonl` is LIVE (4 rows: gsm8k .730 /
+  shell_use .667 / file_edit .800 / long_term_planning .286; web_fetch
+  VOIDED by env contamination) + the standing pass^k regression alarm
+  (`tests/test_scorecard_alarm.py`, >0.10 drop vs ≤7-run median fails
+  pytest). Evidence: `evals/runs/2026-07-03-first-dev-pass/`. Bridge fix
+  shipped: `catalog.swap_generate` keeps each bench's own prompt-template
+  solvers (the answer-format contract) and swaps only `generate()` — the
+  load-bearing finding had been biting our own harness (.500 → .730 on the
+  same frozen gsm8k samples).
 
 ## The load-bearing finding (binds the whole chunk)
 

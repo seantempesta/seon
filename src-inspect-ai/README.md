@@ -55,6 +55,15 @@ src/seon_inspect/
                          restart choreography (pod_planning_driver: cluster
                          create -> phase 1 -> pod restart -> phase 2 with the
                          SAME agent_id -> plan snapshot via the wire REPL)
+  tool_rows.py           live run wiring for the bespoke tool rows: one
+                         ephemeral cluster per sample, workspace/fixture
+                         materialization + render_input, outcome scored by
+                         the tool oracles; harness failures classified as
+                         flake classes, never scores
+  scorecard.py           the ledger (evals/scorecard.jsonl): append-only rows,
+                         pass^k / pass@k / flake-excluded mean reducers, and
+                         the standing regression alarm (pytest-wired via
+                         tests/test_scorecard_alarm.py)
   worker_endpoints.py    mock:<scenario> | runpod endpoint resolution
   worker_mock.py         canned offline worker (REAL Clojure fixtures)
   offline_proof.py       python -m seon_inspect.offline_proof
@@ -248,6 +257,47 @@ provider and every context change compares against. Small N (a wire-proof, not
 a leaderboard); scale N + add `epochs` for `pass^k` when a real comparison is
 needed. Ran against the pre-`my.plan` bundle — gsm8k is planning-independent so
 the number stands; planning benches need a rebuilt pod (`bin/acme restart pod`).
+
+## The ledger — `evals/scorecard.jsonl` (append-only)
+
+One JSON line per (capability row, run) — the shared truth every context A/B
+is decided against. Shape (eval-design's field set + provenance/attribution):
+
+```json
+{"run_id": "2026-07-03:shell_use:dev:k3", "row": "shell_use", "tier": "dev",
+ "n": 8, "k": 3, "mean": 0.875, "pass_at_k": 1.0, "pass_hat_k": 0.75,
+ "flake_rate": 0.04, "flakes_by_class": {"solve_timeout": 1},
+ "attribution": {"model_miss": 2}, "git_sha": "…", "datasets_lock_sha": "…",
+ "model": "deepseek", "elapsed_s": 1234.5, "timestamp": "…Z"}
+```
+
+Discipline (all enforced by `seon_inspect.scorecard`):
+
+- **Append-only** — a re-run is a NEW line with a fresh `run_id`
+  (deterministic `date:row:tier:k…`); `append_row` refuses duplicates.
+- **Flakes are classified + EXCLUDED from capability means** (a timeout is
+  not a wrong answer): `mean` is the pass rate over non-flake executions and
+  therefore IS pass^1. `pass_at_k`/`pass_hat_k` are computed over samples
+  whose k epochs are all non-flake. Flake classes: `solve_timeout`,
+  `agent_run_refused` (422), `cluster_boot_timeout`, `harness_error`.
+- **Every failing sample is attributed** (`attribution`): context defect /
+  tool defect / flake class / genuine `model_miss` — a low score with clean
+  attribution is a success of the bench.
+- **The standing alarm**: `tests/test_scorecard_alarm.py` fails the suite
+  when any row's latest dev pass^1 drops > 0.10 below the median of its
+  previous ≤7 dev entries (eval-design's proposal, adopted).
+- **Run evidence** lives in `evals/runs/<date>-<pass>/` — the per-execution
+  records (outcome + oracle result + pod metadata per sample/epoch) that
+  back each ledger row's attribution, plus any voided/archived runs.
+
+One more bridge invariant, learned the hard way (first dev pass): a bench's
+answer-format contract lives in its SOLVER CHAIN (e.g. gsm8k's
+`prompt_template` demanding `ANSWER: $ANSWER`), so `run_bench` composes
+`catalog.swap_generate(task.solver, pod_solver)` — the task's own
+template/system solvers stay, only `generate()` is swapped — and the pod
+solver POSTs the TEMPLATED `state.user_prompt.text`. Replacing the whole
+chain silently drops the contract and the bench measures prompt-omission
+(observed: mean .500 → .730 on the same frozen gsm8k dev samples).
 
 ## Parity map (the gym retires at parity)
 

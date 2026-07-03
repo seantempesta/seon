@@ -80,6 +80,20 @@ def _resolve_timeout_ms(state: TaskState, timeout_s: int | None) -> int:
     return int((state.metadata or {}).get("timeout_ms", default_ms))
 
 
+def _prompt_text(state: TaskState) -> str:
+    """The prompt the pod agent gets: the TEMPLATED user prompt.
+
+    A bench's answer-format contract (e.g. gsm8k's "ANSWER: $ANSWER") is
+    applied by its prompt_template solver onto `state.user_prompt` — the raw
+    `input_text` never carries it. `catalog.swap_generate` keeps those
+    template solvers ahead of us; reading user_prompt here delivers their
+    work. With no template solvers, user_prompt IS the input."""
+    try:
+        return state.user_prompt.text
+    except Exception:  # non-user-message inputs (defensive; case-1 is text)
+        return state.input_text
+
+
 def _record_result(state: TaskState, result: dict) -> TaskState:
     """Set the completion + the pod-side honesty metadata on the state."""
     state.output.completion = result.get("reply", "")
@@ -109,7 +123,7 @@ def seon_pod_solver(cluster_url: str | None = None,
         import anyio
 
         result = await anyio.to_thread.run_sync(
-            pod_run, state.input_text,
+            pod_run, _prompt_text(state),
             _resolve_timeout_ms(state, timeout_s), cluster_url)
         return _record_result(state, result)
 
@@ -137,7 +151,7 @@ def seon_cluster_solver(timeout_s: int | None = None,
         def drive() -> dict:
             from seon_inspect.cluster import bench_cluster_name
             with ephemeral_cluster(bench_cluster_name(cluster_prefix)) as c:
-                return pod_run(state.input_text, timeout_ms, c.url)
+                return pod_run(_prompt_text(state), timeout_ms, c.url)
 
         result = await anyio.to_thread.run_sync(drive)
         return _record_result(state, result)

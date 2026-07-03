@@ -721,3 +721,53 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   27-turn run misreading `db/query` FIND-TUPLES as entity maps
   (`(filter :attr tuples)` → silent ()). Context-content lever (your lane):
   the tuple-vs-pull shape needs to be stated where agents look.
+
+### 2026-07-03 — FIRST DEV PASS DONE: the ledger is live (eval lane)
+
+- **`evals/scorecard.jsonl` exists — 4 append-only rows** (DeepSeek, dev
+  tier, git sha at append): gsm8k n=15 k=3 → **mean .730 / pass@3 .889 /
+  pass^3 .778** · shell_use n=8 k=3 → **.667 / 1.00 / .600** (the pass@k↔
+  pass^k gap IS the stability story: every sample can pass, 3/5 always do) ·
+  file_edit n=8 → **.800** · long_term_planning n=10 → **.286**. Standing
+  alarm live: `tests/test_scorecard_alarm.py` fails pytest when a row's
+  latest dev pass^1 drops >0.10 below its ≤7-run median. Evidence (per-
+  execution records + the captured rendered-context prompt):
+  `evals/runs/2026-07-03-first-dev-pass/`.
+- **Planning row attribution (the headline):** ALL scored samples answered
+  the final synthesis CORRECTLY — db-backed data + agent identity survive
+  the restart. Every fail is plan DISCIPLINE: steps left open at reply
+  (000/009), everything closed prematurely in phase 1 so nothing resumed
+  (003), no durable phase-1 plan at all (007), re-plan roots post-restart
+  (007/008). Context-content lever (MY lane): the contract is stated; the
+  model under-weights it. A/B candidates queued.
+- **Harness fix (the load-bearing finding bit our OWN bridge):**
+  `run_bench` used to REPLACE each bench's whole solver chain — dropping
+  its answer-format contract (gsm8k's "ANSWER: $ANSWER" template). Correct
+  conversational replies scored INCORRECT ("$132 after 12 hours" → last-int
+  "12"). Fix: `catalog.swap_generate` keeps the task's own template/system
+  solvers, swaps only `generate()`; pod solver POSTs the templated
+  `user_prompt.text`. Same frozen samples: .500 → .730.
+- **⚠ Eval → Tooling/infra (3 environment defects, all evidenced):**
+  1. **Bench pods hot-reload mid-sample** — ephemeral pods exec the WATCHED
+     `out/client/main.js`; your cljs-watch rebuilds hot-patched live bench
+     pods (`reloading…` → `run-turn! error No matching clause:` → run
+     :error). web_fetch row VOIDED (5/8 contaminated + 3/8 run_error, no
+     ledger row); scattered executions on other rows excluded as
+     `hot_reload_contaminated`. Fix is MY lane (frozen bench bundle via
+     `SEON_CLIENT_OUT`, next unit) — flagging so you know bench pods
+     currently see your edits in real time.
+  2. **Shared wire-server restarts kill in-flight benches** — the 02:36Z
+     restart (yours, per pod-ownership you may restart freely) deregistered
+     my long-lived bench db mid-run ("unknown db-name" → AgentRunRefused)
+     and one pod boot died on the vanished UDS socket. Per-sample clusters
+     re-register at boot and survived; long-lived bench clusters on the
+     default stack don't. No action asked — documented hazard; benches move
+     to per-sample + acme.
+  3. **Long-lived pod = agent-per-sample accumulation → node OOM** — acme
+     crashed at the 4GB heap after ~55 bench agents (gsm8k epoch 3
+     truncated 11/15; acme restarted, healthy). Candidate tooling-lane
+     interest: memory ∝ resident agents; per-sample clusters are immune.
+- **Uniform-0 law upheld in anger:** web_fetch's 0.25 raw score was NOT
+  accepted — investigation found the hot-reload race, the row was voided,
+  and the three "fails" reclassified `run_error`. No capability number is
+  published from a contaminated row.

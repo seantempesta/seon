@@ -25,9 +25,11 @@ are the CASE-2 / mvm tier — deferred, not faked.
 from __future__ import annotations
 
 import importlib
-from typing import Any, Callable
+from typing import Any, Callable, Sequence
 
 from inspect_ai import Task, eval as inspect_eval
+from inspect_ai._util.registry import registry_log_name
+from inspect_ai.solver import Solver
 
 from seon_inspect import config
 from seon_inspect.solver import seon_cluster_solver, seon_pod_solver
@@ -58,6 +60,37 @@ def load_bench_task(name: str, **task_kwargs: Any) -> Task:
     mod_name, attr = CASE1_BENCHES[name]
     task_fn: Callable[..., Task] = getattr(importlib.import_module(mod_name), attr)
     return task_fn(**task_kwargs)
+
+
+def swap_generate(task_solver: Solver | Sequence[Solver],
+                  pod_solver: Solver) -> list[Solver]:
+    """The task's own solver chain with `generate()` swapped for the pod.
+
+    A bench's answer-format contract (e.g. gsm8k's "ANSWER: $ANSWER"
+    prompt_template) lives in its SOLVER CHAIN, not its dataset — replacing
+    the whole chain silently drops the contract and the bench then measures
+    prompt-omission, not capability (first dev pass, 2026-07-03: correct
+    conversational replies scored INCORRECT because match() never saw a
+    templated answer). So: keep every non-generate step (templates, system
+    messages, fewshot), replace each `generate` with the pod solver, and
+    append the pod solver if the chain had no generate at all."""
+    steps = (list(task_solver) if isinstance(task_solver, Sequence)
+             else [task_solver])
+    out: list[Solver] = []
+    swapped = False
+    for step in steps:
+        try:
+            name = registry_log_name(step)
+        except Exception:
+            name = ""
+        if name == "generate":
+            out.append(pod_solver)
+            swapped = True
+        else:
+            out.append(step)
+    if not swapped:
+        out.append(pod_solver)
+    return out
 
 
 def run_bench(
@@ -104,7 +137,7 @@ def run_bench(
                                      timeout_s=run_timeout_s)
     return inspect_eval(
         task,
-        solver=the_solver,
+        solver=swap_generate(task.solver, the_solver),
         model=eval_kwargs.pop("model", "mockllm/model"),
         limit=limit,
         epochs=epochs,
