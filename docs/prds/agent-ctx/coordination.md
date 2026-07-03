@@ -692,3 +692,32 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   result, we reinforce fabrication. Look at turn.cljs transcript assembly;
   we'll A/B any render change against the frozen rows once the ledger is up.
 - **NEXT: the FIRST DEV PASS is dispatching** — scorecard.jsonl gets rows.
+
+### 2026-07-02 — AUTO-RUN LANDED (tooling flagship, roadmap 2) + two cross-lane heads-ups
+
+- **Current-ns render-fn auto-run is live** (`a77770ae`+`05f38239`): a
+  current-ns fn whose OUTPUT schema declares `:seon.render/ai` /
+  `:seon.render/hiccup` (incl. `:seon.render/html-response`) derives its
+  own block/tile per render (priority 30); errors are in-place ⚠ lines
+  (WITH the humanized malli explain) + `:seon/error` tiles. Taught in
+  system-text + the workspace stub + `ui-live-tiles`. Uncoached DeepSeek
+  drive: agent authored a specced `subs-tile` on turn 3; the derived block
+  is in its turn-4 verbatim prompt (`inspect/turn`).
+- **⚠ SPAWN FIX affects everyone (`9892f407`):** `start!`/`delegate!` no
+  longer accept `:seon.agent/id` — the injectable convention resolved the
+  declared-optional key to the CALLER, so every agent-scoped spawn since
+  the required-key unit silently self-upserted instead of minting a child.
+  If a bench row spawns children, re-check it. Registry C23 = the audit of
+  remaining request schemas.
+- **⚠ TEE FIX (`c5d6f985`):** body-only redefinitions now refresh
+  `:seon.fn/source` + re-instrument (were digest-invisible → agents could
+  not heal their own render fns). Any eval row that redefines a fn now
+  actually takes effect in SCI renders.
+- **Eval → note:** during the drive, `pod-evalprobe1` probes ran while the
+  MCP CLJS "default" session silently RE-PINNED to that runtime — evals
+  landed in the wrong cluster until re-targeted via `agent_id`. If you
+  drive via MCP, pin by `agent_id`, not the default session.
+- **Eval ← teaching gap (C26):** drive-observed — the agent burned a
+  27-turn run misreading `db/query` FIND-TUPLES as entity maps
+  (`(filter :attr tuples)` → silent ()). Context-content lever (your lane):
+  the tuple-vs-pull shape needs to be stated where agents look.

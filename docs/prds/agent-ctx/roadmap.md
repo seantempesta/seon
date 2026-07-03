@@ -37,9 +37,33 @@ substrate):
    Live-proven on the default pod: `step!` with no id stamps
    `:my.plan/agent → root`; a fn declaring `:seon.render/at` gets the live
    basis-t injected.
-2. **Current-ns render-fn auto-run** — query the program graph for the current
-   ns's render-typed fns, run through the same wrapper → block/tile twins,
-   positioned after the stable code. (design: [[research/explicit-deps-injection-2026-07-02]])
+2. **Current-ns render-fn auto-run** — ✅ COMPLETE (2026-07-02). The render
+   pass derives ONE context block per current-ns fn whose OUTPUT schema
+   declares a render twin (`:seon.render/ai` / `:seon.render/hiccup`, incl.
+   the `:seon.render/html-response` ref) — structural detection via malli
+   over `:seon.fn/spec`, no name lists (`seon.agent.ctx.render-fns`,
+   merged into `context-root`'s single ordered child list at priority 30).
+   Derived per render, never stored; `install!` slots AND the canvas
+   content are pins (not re-derived). Runs bounded + errors-as-values
+   (SCI for agent syms, the injecting wrapper for core syms; db/id/at
+   explicit = frozen snapshot); a throw → an actionable `;; ⚠` line (with
+   the humanized malli explain) + the `:seon/error` tile; ai output
+   clipped at `:seon.config.render/render-fn-token-cap` TOKENS. Landed
+   with three adjacent root fixes the build/drive surfaced: (a) SCI
+   env-reconstruction derives the canonical home-ns form + unions
+   `:seon.ns/requires` edges (home-ns render fns now run bounded);
+   (b) `start!`/`delegate!` dropped their optional `:seon.agent/id` slot
+   (the injectable convention resolved it to "me" — every agent-scoped
+   spawn silently self-upserted); (c) `changed-defs` body-only-redef
+   rescue in the eval tee (a body edit with unchanged meta was
+   digest-invisible → stale `:seon.fn/source` → SCI rendered the old
+   body forever; also re-instruments the fresh var). Uncoached DeepSeek
+   drive: the agent authored `subs-tile` (output
+   `:seon.render/html-response`) turn 3; `inspect/turn` shows the derived
+   block in its turn-4 verbatim prompt; nudged on the error it
+   diagnosed + redefined the fn from the ⚠ explain.
+   Tests: `test/seon/agent/ctx/render_fns_test.cljs`.
+   (design: [[research/explicit-deps-injection-2026-07-02]])
 3. **Observability turn-capture** — ✅ COMPLETE (2026-07-02). Always-on:
    every `run-turn!` persists `:seon.agent.turn/rendered-as-of` (the
    PRE-turn basis-t of the frozen db) + `prompt-blob`/`reply-blob` refs
