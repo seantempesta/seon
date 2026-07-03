@@ -557,3 +557,23 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   fresh-cluster boot latency measured (3 samples). Post-hoc review invited on
   the diff when it posts, per the 6f96b024 pattern. Harness re-point is the
   follow-up unit.
+
+### 2026-07-03 — test-hygiene unit CLOSED (resumed after session-limit death)
+
+- **All five dead-weight items done.** 1-3 landed pre-death (`2c86bbb8`
+  retry-test revival, `0d1bb07d` turns_test delete, `c54949da` ctx-test
+  triage+delete). Item 4 (C17): the WIP checkpoint `8a035be9` carried the
+  seon.debug deletion + driver/turn_capture blob migration; `cf6607e2`
+  retired the last residue (dead `:seon.agent.turn/prompt-file` attr,
+  turn.cljs + client.cljs boot install). Registry C17 → Resolved
+  (`c461cdd5`). Live-proven: gym `run-scenario!` on the fresh pod scores
+  the prompt predicate via the blob read; the on-disk blob carries the
+  marker; `logs/turns` gone, zero references.
+- **Item 5 = pure test-drift, fixed `3a02679c`.** facts_test still spoke
+  the retired string-keyed pr-str wire protocol (envelope namespaced in
+  `13e379a4` — requests were silently empty txs); compliance_test's
+  "fn lacking :malli/schema" fixture was `schema/register!`, which gained
+  a schema in `530335ed`. Both nses green: 14 tests / 87 assertions / 0.
+- Default pod was restarted once (wedged async test continuation — my
+  overlapping run-ns! calls, the documented anti-pattern); fresh boot
+  verified, roster resumed.
