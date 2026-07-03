@@ -45,6 +45,7 @@
             [malli.core :as m]
             [malli.instrument :as mi]
             [shadow.cljs.bootstrap.node :as boot]
+            [seon.ai.tokens :as tokens]
             [seon.analyzer-info :as analyzer-info]
             [seon.config :as config]
             [seon.db :as db]
@@ -2573,30 +2574,33 @@
       msg)))
 
 (def result-body-render-cap
-  "Char cap for the rendered `:seon.eval/result-edn` BODY of one eval —
+  "TOKEN cap for the rendered `:seon.eval/result-edn` BODY of one eval —
    the clip applied to the projected/pr-str'd value string before it is
    persisted. Any value (a giant scalar, a wide map, a long string)
    clips here to a well-formed string that names `result/<id>` for the
-   full live value. The FALLBACK cap (16384); the transcript's age-keyed
-   `:seon.agent.ctx.transcript/result-decay` schedule bands it per result age."
-  16384)
+   full live value. The FALLBACK cap (4096 tokens = the 16384-char store
+   ceiling `seon.agent.ctx/result-body-render-cap`); the transcript's
+   age-keyed `:seon.agent.ctx.transcript/result-decay` schedule bands it
+   per result age."
+  4096)
 
 (defn clip-result-body
-  "Clip a rendered result-body STRING to `result-body-render-cap`.
+  "Clip a rendered result-body STRING to `result-body-render-cap` tokens.
 
-   Appends a one-line pointer to the full value's `result/<id>` live
-   var. Under the cap → returned unchanged. Names the id so the agent
-   always knows where the untruncated value lives. Pure; nil-safe."
+   Delegates the cut to `seon.ai.tokens/clip-str` (the ONE bounded-print)
+   with a loud, token-denominated marker: a one-line pointer to the full
+   value's `result/<id>` live var. Under the cap → returned unchanged.
+   Names the id so the agent always knows where the untruncated value
+   lives. Pure; nil-safe."
   {:malli/schema [:=> [:catn [::eval-id :string] [::body :string]] :string]}
   [eval-id body]
-  (let [s (str body)
-        n (count s)]
-    (if (> n result-body-render-cap)
-      (str (subs s 0 result-body-render-cap)
-           "\n; … +" (- n result-body-render-cap) " chars clipped; the full "
-           "value is the live var result/" eval-id " — drill it with "
-           "get-in/filter/subs.")
-      s)))
+  (tokens/clip-str
+    body
+    result-body-render-cap
+    (fn [budget total]
+      (str "\n; … +" (- total budget) " tokens clipped (of " total "); the "
+           "full value is the live var result/" eval-id " — drill it with "
+           "get-in/filter/subs."))))
 
 ;; --- agent-safe projection ---------------------------------------------
 ;; The transcript shows a CLIPPED, READER-SAFE summary of each eval value,
@@ -2650,7 +2654,7 @@
    full live value `result/<id>` — never reads its own work back as a
    `#datahike/DB {…}` blob.
 
-   `clip-result-body` is the final char-cap backstop: `render-ai` is
+   `clip-result-body` is the final token-cap backstop: `render-ai` is
    bounded so it rarely fires, but a pathological deep/wide value still
    clips to a well-formed string that names `result/<id>`. Operates on the
    RAW value (pre-pr-str). Pure: stores nothing, does not touch the
