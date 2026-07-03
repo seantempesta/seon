@@ -290,9 +290,11 @@ The machinery already shipped:
 - The `result/<id>` mechanism (eval.cljs:736-784): every eval value is stashed in
   `globalThis.result.<id>` (+ an analyzer def), last 200 kept; the agent drills with
   `(get-in result/<id> […])` / `filter` / `count` WITHOUT re-running.
-- Current caps (ctx.cljs): `eval-render-cap` 1500 (echoed source+stdout),
+- Current caps (owned by `seon.config`, `:seon.config/render` manifest section;
+  ctx.cljs reads them): `eval-render-cap` 1500 (echoed source+stdout),
   `result-body-render-cap` 16384 ≈ 4k tokens (the citable `;;=>` body, skeleton'd +
-  row-capped 50), `message-render-cap` 4000.
+  row-capped 50; ONE owner since C32 — eval's persistence clip reads the same knob
+  as a chars/4 token budget), `message-render-cap` 4000.
 
 **The target model — three tiers, bound the VIEW not the storage:**
 
