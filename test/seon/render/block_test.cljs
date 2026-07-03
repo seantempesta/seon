@@ -21,9 +21,19 @@
 ;; fallback (throw → error card, never an exception). Under the harness
 ;; strict default (SEON_RENDER_STRICT=1) that render THROWS by design, so
 ;; force the fail-loud dial OFF for this ns (process-global env, async-safe).
+;; Restore the CALLER's value, not a hardcoded "1" — an isolated bare-node run
+;; (env unset) must not leave the dial flipped ON for whatever runs next.
+(defonce ^:private prior-strict-env
+  (atom nil))
+
 (t/use-fixtures :once
-  {:before (fn [] (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT) "0"))
-   :after  (fn [] (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT) "1"))})
+  {:before (fn []
+             (reset! prior-strict-env
+                     (.. js/globalThis -process -env -SEON_RENDER_STRICT))
+             (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT) "0"))
+   :after  (fn []
+             (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT)
+                   (or @prior-strict-env "")))})
 
 ;; ============================================================
 ;; clj->hiccup — the server-side Clojure highlighter.

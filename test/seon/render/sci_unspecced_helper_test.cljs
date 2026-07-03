@@ -244,33 +244,45 @@
        "     :seon.render/ai \"conn dash\"}))"))
 
 (deftest sci-bounds-tile-derefing-aliased-dynamic-var
+  ;; ROOT `set!` of db/*conn*, NOT `binding` — a CLJS binding pops at the
+  ;; first .then continuation, and BOTH mechanisms under test read the ROOT
+  ;; value: `ns-data-members` drops nil-rooted vars (so `*conn*` would never
+  ;; enumerate into the SCI cage), and the interpreted `@db/*conn*` derefs the
+  ;; root. HERMETIC: the test establishes its own conn root (the documented
+  ;; with-conn pattern — clojure-testing skill) and restores after; it must
+  ;; never ride a leaked set! from an earlier test in the suite order.
   (async done
     (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
         (.then
           (fn [res]
-            (let [conn (aget res 1)]
-              (binding [db/*conn* conn]
-                (-> (db/transact!
-                      {:seon.db/tx-data
-                       [{:seon.ns/name   :probe.conn-tile
-                         :seon.ns/source conn-tile-ns-source}
-                        {:seon.fn/sym        "probe.conn-tile/conn-dash"
-                         :seon.fn/ns         {:seon.ns/name :probe.conn-tile}
-                         :seon.fn/source     conn-dash-source
-                         :seon.fn/created-at (js/Date.)}]})
-                    (.then
-                      (fn [_]
-                        (testing "*conn* IS an enumerable NON-fn member of the live seon.db ns"
-                          (is (contains? (seval/ns-data-members "seon.db") '*conn*)
-                              "ns-data-members demunges _STAR_conn_STAR_ → *conn*"))
-                        (let [r (sci/invoke-bounded 'probe.conn-tile/conn-dash
-                                                    {:seon.db/db @conn})]
-                          (testing "the aliased dynamic var resolves — the tile runs BOUNDED"
-                            (is (not (:seon.render.sci/error r))
-                                (str "bounding failed — db/*conn* did not resolve "
-                                     "under SCI: " (pr-str r)))
-                            (is (= [:div "true"] (:seon.render/hiccup r))
-                                "@db/*conn* deref'd to a live conn under SCI"))))))))))
+            (let [conn (aget res 1)
+                  orig db/*conn*]
+              (set! db/*conn* conn)
+              (-> (db/transact!
+                    {:seon.db/tx-data
+                     [{:seon.ns/name   :probe.conn-tile
+                       :seon.ns/source conn-tile-ns-source}
+                      {:seon.fn/sym        "probe.conn-tile/conn-dash"
+                       :seon.fn/ns         {:seon.ns/name :probe.conn-tile}
+                       :seon.fn/source     conn-dash-source
+                       :seon.fn/created-at (js/Date.)}]})
+                  (.then
+                    (fn [_]
+                      ;; re-pin: another fiber may have set! the shared root
+                      ;; between async hops (suite runs interleave).
+                      (set! db/*conn* conn)
+                      (testing "*conn* IS an enumerable NON-fn member of the live seon.db ns"
+                        (is (contains? (seval/ns-data-members "seon.db") '*conn*)
+                            "ns-data-members demunges _STAR_conn_STAR_ → *conn*"))
+                      (let [r (sci/invoke-bounded 'probe.conn-tile/conn-dash
+                                                  {:seon.db/db @conn})]
+                        (testing "the aliased dynamic var resolves — the tile runs BOUNDED"
+                          (is (not (:seon.render.sci/error r))
+                              (str "bounding failed — db/*conn* did not resolve "
+                                   "under SCI: " (pr-str r)))
+                          (is (= [:div "true"] (:seon.render/hiccup r))
+                              "@db/*conn* deref'd to a live conn under SCI")))))
+                  (.finally (fn [] (set! db/*conn* orig)))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -389,12 +401,11 @@
 
 (def ^:private edge-dash-source
   ;; Calls an aliased seon.db FN — deliberately NOT the `*conn*` dynamic
-  ;; var: a nil-rooted var is dropped by `ns-data-members`, and in an
-  ;; ISOLATED run nothing has root-set! `db/*conn*` (CLJS `binding`
-  ;; doesn't span .then continuations), so a `*conn*`-based tile is
-  ;; order-COUPLED (see sci-bounds-tile-derefing-aliased-dynamic-var —
-  ;; passes in the full suite via a leaked root set!, fails alone). Fn
-  ;; members enumerate unconditionally → this test is order-independent.
+  ;; var: a nil-rooted var is dropped by `ns-data-members` (CLJS `binding`
+  ;; doesn't span .then continuations), so a `*conn*`-based tile needs a
+  ;; root set! of `db/*conn*` (see sci-bounds-tile-derefing-aliased-
+  ;; dynamic-var, which owns that root hermetically). Fn members
+  ;; enumerate unconditionally → this test needs no conn root at all.
   (str "(defn edge-dash [in]\n"
        "  (let [d (:seon.db/db in)]\n"
        "    {:seon.render/hiccup [:div (str (pos? (count (sdb/installed-schema d))))]\n"

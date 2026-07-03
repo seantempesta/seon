@@ -14,7 +14,7 @@
    All on a FRESH :memory conn seeded like the pod boots — never the
    live agent conn."
   (:require
-    [cljs.test :refer [deftest is async]]
+    [cljs.test :refer [deftest is async use-fixtures]]
     [clojure.string :as str]
     [clojure.test.check :as tc]
     [clojure.test.check.generators :as gen]
@@ -41,6 +41,27 @@
     [seon.render :as render]
     [seon.schema :as schema]
     [seon.test-seed :as test-seed]))
+
+;; This ns asserts STRICT-dial behavior (live-tile-block-stable-on-composer-
+;; input's "no bare ⚠" contract holds because under SEON_RENDER_STRICT=1 a
+;; broken tile yields the legible fail-loud message, not the graceful
+;; ⚠ CANVAS-BROKEN guard). `bin/test-cljs` exports the dial, but a bare
+;; `node out/test/test.js --test=seon.ctx-test` inherits the ambient env —
+;; a test asserting dial-dependent behavior must SET the dial itself
+;; (hermetic fixtures or flaky truth). Pin ON for the ns; restore the
+;; caller's value after (process-global env, async-safe — a scoped
+;; with-redefs would restore before an async body runs).
+(defonce ^:private prior-strict-env
+  (atom nil))
+
+(use-fixtures :once
+  {:before (fn []
+             (reset! prior-strict-env
+                     (.. js/globalThis -process -env -SEON_RENDER_STRICT))
+             (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT) "1"))
+   :after  (fn []
+             (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT)
+                   (or @prior-strict-env "")))})
 
 (defn- fresh-conn
   "Promise of a fresh :memory conn with the pod's boot schema."
