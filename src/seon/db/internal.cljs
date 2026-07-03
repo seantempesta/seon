@@ -195,18 +195,24 @@
    :double  :db.type/double
    :float   :db.type/float
    :keyword :db.type/keyword
+   ;; The qualified variants narrow Malli VALIDATION only — datahike has
+   ;; one keyword/symbol type. (:seon.fn/read-attrs is [:set
+   ;; :qualified-keyword]; MIRRORED in the CLJ bridge leaf-type-map,
+   ;; seon.db.datahike.schema — keep the two lanes in lockstep.)
+   :qualified-keyword :db.type/keyword
    :boolean :db.type/boolean
    :inst    :db.type/instant
    :uuid    :db.type/uuid
-   :symbol  :db.type/symbol})
+   :symbol  :db.type/symbol
+   :qualified-symbol :db.type/symbol})
 
 (def bridge-supported-types
   "Human-readable list of the attr types the Malli→datahike bridge can
    store. Surfaced in the ensure-datahike-attrs! error so an agent that
    registered an unstorable type sees exactly what IS storable."
-  (str ":string :int :double :float :boolean :keyword :inst :uuid "
-       ":symbol :seon.db/ref, [:enum :a :b], or a container "
-       "[:vector|:set|:sequential <one of those>]"))
+  (str ":string :int :double :float :boolean :keyword :qualified-keyword "
+       ":inst :uuid :symbol :qualified-symbol :seon.db/ref, [:enum :a :b], "
+       "or a container [:vector|:set|:sequential <one of those>]"))
 
 (defn form-head
   "The head of a Malli form. For `[:string {:min 1}]` returns `:string`;

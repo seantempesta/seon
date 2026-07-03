@@ -1225,23 +1225,33 @@
    target for indexed members and the on-demand `render-namespace` path,
    and keeps the no-replay invariant trivially cheap to reason about."
   [ns-sym-str]
-  (let [stub (str "(ns " ns-sym-str ")")
+  (let [stub  (str "(ns " ns-sym-str ")")
         ;; Extra-core nses (downstream SEON_EXTRA_SRC code) are
         ;; full-source by rule, like my.* — closes the render-as-stubs
         ;; gap for the extra root.
-        src  (if (or (nss/full-source-ns? ns-sym-str)
-                     (contains? (extra-core-ns-strs) ns-sym-str)
-                     (contains? (extra-src-ns-strs) ns-sym-str))
-               (or (read-ns-source ns-sym-str)
-                   (do (log/error-console!
-                         "seon.client/ns-row"
-                         (str "full-source ns " ns-sym-str " source file "
-                              (pr-str (ns-file-paths ns-sym-str))
-                              " unreadable — falling back to the (ns x) stub"))
-                       stub))
-               stub)]
-    {:seon.ns/name   (keyword ns-sym-str)
-     :seon.ns/source src}))
+        full? (or (nss/full-source-ns? ns-sym-str)
+                  (contains? (extra-core-ns-strs) ns-sym-str)
+                  (contains? (extra-src-ns-strs) ns-sym-str))
+        src   (if full?
+                (or (read-ns-source ns-sym-str)
+                    (do (log/error-console!
+                          "seon.client/ns-row"
+                          (str "full-source ns " ns-sym-str " source file "
+                               (pr-str (ns-file-paths ns-sym-str))
+                               " unreadable — falling back to the (ns x) stub"))
+                        stub))
+                stub)
+        ;; Reified require edges (M4 structural store) for the SCI-
+        ;; renderable surface: full-source nses are exactly where an
+        ;; agent-authored-sym render fn can live (my.* + downstream), so
+        ;; their alias/refer facts must be datoms, not text. Extracted
+        ;; ONCE here at INDEX time from the real file's (ns …) form —
+        ;; write-time extraction, never a render-time re-parse. Stub
+        ;; nses (compiled seon.* — never SCI-rendered) skip the edges.
+        edges (when full? (seval/require-edges-from-source src))]
+    (cond-> {:seon.ns/name   (keyword ns-sym-str)
+             :seon.ns/source src}
+      (seq edges) (assoc :seon.ns/require-edges (vec edges)))))
 
 (defn- arglists-from-source
   "Parse the pr-str-style arglists string (e.g. \"([{::keys [a b]}])\") from a
@@ -1917,8 +1927,28 @@
                                                (seq stored-spec))
                                       [:db/retract [:seon.fn/sym sym]
                                        :seon.fn/spec stored-spec])))))
-                        kept)]
-    (into kept retracts)))
+                        kept)
+        ;; `:seon.ns/require-edges` COMPONENT rows can't ride the plain
+        ;; identity upsert: cardinality-many component maps have no
+        ;; identity of their own, so a drift re-emit (changed
+        ;; :seon.ns/source) would DUPLICATE the edge rows. Strip the
+        ;; edges off the kept ns rows and route them through the ONE
+        ;; diff mechanism (seon.eval/ns-require-edges-tx — retractEntity
+        ;; the old components, assert the new set, [] when unchanged).
+        ;; Diffed over ALL fresh ns rows (not just the kept/drifted
+        ;; ones), so a pre-structural store BACKFILLS its compiled
+        ;; full-source nses on the next boot — ~a pull per full-source
+        ;; ns, [] each once converged.
+        edge-tx   (into []
+                        (mapcat (fn [row]
+                                  (when-some [edges (and (map? row)
+                                                         (:seon.ns/name row)
+                                                         (:seon.ns/require-edges row))]
+                                    (seval/ns-require-edges-tx
+                                      db (:seon.ns/name row) (set edges)))))
+                        all)
+        kept      (mapv #(dissoc % :seon.ns/require-edges) kept)]
+    (-> kept (into edge-tx) (into retracts))))
 
 (defn ^:async prune-core-ghosts!
   "Boot-index GC (open-issues 2026-06-11, agent-reported row 5): retract

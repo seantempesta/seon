@@ -288,6 +288,11 @@
    [:seon.fn/private?   {:optional true} :seon.fn/private?]
    [:seon.fn/spec       {:optional true} :seon.fn/spec]
    [:seon.fn/schema-error {:optional true} :seon.fn/schema-error]
+   ;; The declared read-set (qualified keyword literals in the source,
+   ;; extracted from the already-read form at tee time — C28). ABSENT =
+   ;; no literals OR a pre-structural row (readers regex-fallback).
+   ;; Registered in seon.eval (the tee that writes it).
+   [:seon.fn/read-attrs {:optional true} :seon.fn/read-attrs]
    [:seon.fn/created-at {:optional true} :seon.fn/created-at]])
 
 (schema/register! :seon.schema

@@ -36,8 +36,9 @@
    `:as` aliases (`db/query`, `render/...`) and any own-ns helpers — exactly
    the lexical environment the COMPILED fn had. We rebuild that environment:
 
-   - parse the agent ns's stored `:seon.ns/source` for its `:require` `:as`
-     aliases + `:refer`s (eval.cljs:441 — the ns source carries them);
+   - read the agent ns's STORED `:seon.ns/require-edges` datoms for its
+     `:require` `:as` aliases + `:refer`s (analyzer facts teed at eval/setup
+     time — M4; pre-structural rows fall back to parsing `:seon.ns/source`);
    - expose every required `seon.*`/agent namespace as SCI host vars by
      ENUMERATING its members from the `:seon.fn` index (code-as-data — the
      core IS indexed) and resolving each via `seon.eval/lookup-value`;
@@ -62,7 +63,6 @@
    Toggle: env `SEON_TILE_SCI=0` disables bounding (agent tiles fall back to
    the direct compiled call). Default on."
   (:require
-    [cljs.reader :as reader]
     [clojure.string :as str]
     [sci.core :as sci]
     [sci.interrupt :as interrupt]
@@ -180,7 +180,8 @@
 ;; FAIL-LOUD: bounded rendering is a SAFETY property, not an optimization.
 ;; When SCI can't run an agent-editable fn for any reason OTHER than the
 ;; deadline interrupt — a missing `:seon.fn/source`, an env-reconstruction
-;; gap (an alias the stored `:seon.ns/source` doesn't carry), or a genuine
+;; gap (an alias neither the stored `:seon.ns/require-edges` nor the
+;; fallback-parsed `:seon.ns/source` carries), or a genuine
 ;; runtime throw — invoke-bounded returns `{::error <:seon.db/error map>}`
 ;; and the caller renders a `:seon/error` block IN PLACE (the ONE error
 ;; mechanism). It NEVER falls back to the unbounded compiled path: a
@@ -200,7 +201,8 @@
                      msg ") — rendering a :seon/error block in place "
                      "(fail-loud; the unbounded compiled fallback is "
                      "banned). Ensure the fn's :seon.fn/source and its ns "
-                     ":require aliases are stored (:seon.ns/source).")})))
+                     ":require aliases are stored (:seon.ns/require-edges; "
+                     "re-eval the ns form to tee them).")})))
 
 (defn- instrument-env-in-causes
   "The malli instrument-error ENVELOPE (ex-data) on `e` or any exception in
@@ -317,33 +319,41 @@
                :seon.db/args  [(str sym)]}))
     (catch :default _ nil)))
 
-(defn- ns-requires
-  "Parse an agent ns `:seon.ns/source` string into
-   `{:aliases {alias target} :nses #{target …} :refers {target #{sym …}}
-     :refer-all #{target …}}` from its `:require` clause. `:refer-all` is the
-   set of nses required with `:refer :all` (every member exposed by simple
-   name). Fail-soft → empties on any read error."
-  [ns-source-str]
-  (try
-    (let [form (reader/read-string ns-source-str)
-          reqs (->> form (filter seq?) (some #(when (= :require (first %)) (rest %))))]
-      (reduce
-        (fn [acc r]
-          (cond
-            (symbol? r) (update acc :nses conj r)
-            (vector? r)
-            (let [tns  (first r)
-                  opts (try (apply hash-map (rest r)) (catch :default _ {}))
-                  as   (:as opts)
-                  refr (:refer opts)]
-              (cond-> (update acc :nses conj tns)
-                as                  (assoc-in [:aliases as] tns)
-                (sequential? refr)  (assoc-in [:refers tns] (set refr))
-                (= :all refr)       (update :refer-all conj tns)))
-            :else acc))
-        {:aliases {} :nses #{} :refers {} :refer-all #{}}
-        (or reqs [])))
-    (catch :default _ {:aliases {} :nses #{} :refers {} :refer-all #{}})))
+;; The lexical require facts (aliases / refers / required nses) come from
+;; the STORED `:seon.ns/require-edges` component rows — the analyzer-
+;; derived facts the tee writes (M4 structural store; seon.eval/
+;; stored-require-edges → edges->require-info). Re-parsing the
+;; `:seon.ns/source` TEXT survives only as the documented fallback for
+;; PRE-STRUCTURAL rows (an ns whose edges were never teed — old stores;
+;; they self-backfill on the next replay/re-eval). The once-per-ns debug
+;; note below makes the taken path observable: its ABSENCE on a render
+;; proves the stored path ran.
+(def ^:private !source-fallback-noted (atom #{}))
+
+(defn- note-source-parse-fallback-once! [agent-ns]
+  (when-not (contains? @!source-fallback-noted agent-ns)
+    (swap! !source-fallback-noted conj agent-ns)
+    (log/debug! {:seon.log/source  ::require-info
+                 :seon.log/message
+                 (str "no stored :seon.ns/require-edges for " agent-ns
+                      " — rebuilding the SCI env by PARSING :seon.ns/source "
+                      "(pre-structural row fallback; re-evaling the ns form "
+                      "stores the edges)")})))
+
+(defn- require-info
+  "The `seon.eval/::require-info` map for `agent-ns` (a string): stored
+   `:seon.ns/require-edges` when present; else the documented
+   source-parse fallback over the stored (or derived home-ns)
+   `(ns …)` source. Fail-soft → the empty info."
+  [db agent-ns]
+  (let [stored (seval/stored-require-edges db (keyword agent-ns))]
+    (if (seq stored)
+      (seval/edges->require-info stored)
+      (do (note-source-parse-fallback-once! agent-ns)
+          (let [ns-src (or (ns-source db (keyword agent-ns))
+                           (derived-home-ns-source agent-ns))]
+            (seval/edges->require-info
+              (if ns-src (seval/require-edges-from-source ns-src) #{})))))))
 
 (defn- expose-ns
   "`{simple-sym <value>}` for namespace `ns-sym`, UNIONing three sources:
@@ -463,8 +473,9 @@
      does fallback + recovery);
    - `{:seon.render.sci/error <:seon.db/error map>}` when SCI could not run
      the fn for ANY reason other than the interrupt — no stored source, an
-     env-reconstruction gap (an alias the stored `:seon.ns/source` doesn't
-     carry), a genuine runtime throw, or a result of the wrong shape. The
+     env-reconstruction gap (an alias neither the stored
+     `:seon.ns/require-edges` nor the fallback-parsed `:seon.ns/source`
+     carries), a genuine runtime throw, or a result of the wrong shape. The
      caller renders a `:seon/error` block IN PLACE (fail-loud); it must
      NEVER run the fn on the unbounded compiled path — the never-wedge
      safety property holds unconditionally. Never throws itself."
@@ -496,18 +507,16 @@
            sym (str "no stored :seon.fn/source for " sym
                     " — the fn cannot be interpreted (bounded)"))
          (let [agent-ns (namespace sym)
-               ;; The stored ns form, or — for a HOME ns that never re-eval'd
-               ;; its `(ns …)` (no stored source) — the canonical derived
-               ;; home-ns form, so home-ns render fns get their aliases/refers.
-               ns-src   (or (ns-source db (keyword agent-ns))
-                            (derived-home-ns-source agent-ns))
-               {:keys [aliases nses refers refer-all]}
-               (if ns-src
-                 (ns-requires ns-src)
-                 {:aliases {} :nses #{} :refers {} :refer-all #{}})
+               ;; Aliases/refers/required-nses from the STORED
+               ;; `:seon.ns/require-edges` datoms (analyzer facts teed at
+               ;; eval/setup time — M4); pre-structural rows fall back to
+               ;; parsing the stored (or derived home-ns) source, noted
+               ;; once per ns ([[require-info]]).
+               {:seon.eval/keys [aliases nses refers refer-all]}
+               (require-info db agent-ns)
                ;; UNION the (fresher, per-eval) `:seon.ns/requires` edges so a
                ;; fully-qualified ref to a required ns resolves even when the
-               ;; stored source lags a live `(require '[x])`.
+               ;; stored edges lag a live `(require '[x])`.
                nses     (into (or nses #{})
                               (ns-requires-edges db (keyword agent-ns)))
                ;; expose each required seon.*/agent ns (full name) from the index

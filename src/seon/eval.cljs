@@ -1514,7 +1514,7 @@
 
 ;; Forward refs — the requires-edge tee (defined with the eval-batch machinery
 ;; below) is reused here so a fresh agent records its home-ns requires at setup.
-(declare ns-requires-tx transient-ns-syms)
+(declare ns-requires-tx ns-require-edges-tx transient-ns-syms)
 
 (defn ^:async setup-agent-ns!
   "Create + initialize the agent's home namespace.
@@ -1576,10 +1576,17 @@
     ;; requires-edge path) against the analyzer's require set for the home ns.
     (when (and db/*conn*
                (not (contains? transient-ns-syms agent-ns-sym)))
-      (let [req-tx (ns-requires-tx
-                     @db/*conn*
-                     (keyword (str agent-ns-sym))
-                     (analyzer-info/ns-requires compile-state agent-ns-sym))]
+      (let [ns-kw  (keyword (str agent-ns-sym))
+            req-tx (into (ns-requires-tx
+                           @db/*conn* ns-kw
+                           (analyzer-info/ns-requires compile-state agent-ns-sym))
+                         ;; the reified alias/refer edges too (M4) — a
+                         ;; fresh home ns renders its SCI cage env from
+                         ;; datoms on turn 0, before any eval tees.
+                         (ns-require-edges-tx
+                           @db/*conn* ns-kw
+                           (analyzer-info/ns-require-edges compile-state
+                                                           agent-ns-sym)))]
         (when (seq req-tx)
           (await (db/transact! {:seon.db/tx-data req-tx})))))
     agent-ns-sym))
@@ -2294,6 +2301,205 @@
         retracts  (for [r removals]
                     [:db/retract [:seon.ns/name ns-kw] :seon.ns/requires r])]
     (vec (concat upsert retracts))))
+
+;; ----------------------------------------------------------------------------
+;; Reified require edges + declared fn read-sets (M4 + C28 structural
+;; store). The alias/refer facts and a fn's qualified-keyword literals
+;; were ALWAYS known structurally when the tee wrote the row (the
+;; analyzer's :requires/:uses maps; the already-read defn form) — but
+;; were stored only as SOURCE TEXT and re-derived by a reader/regex at
+;; render time (seon.render.sci ns env rebuild; the canvas-default
+;; derivation in seon.agent.ctx.render-fns). Store them at tee time;
+;; render-time consumers read datoms, with the text parse kept ONLY as
+;; the documented fallback for pre-existing rows (which self-backfill:
+;; every replay/re-eval writes the structural attrs).
+;; ----------------------------------------------------------------------------
+
+;; One component row per required ns, carrying the `:as` alias +
+;; `:refer` set (`:seon.ns.require/*` attrs + the edge shape live in
+;; seon.analyzer-info, the ns that derives them from the analyzer).
+;; Replaced WHOLESALE on change ([[ns-require-edges-tx]]) — component
+;; retractEntity cascades, so no orphan edge rows. `[:vector …]` like
+;; every component-ref attr (tx values are vectors).
+(schema/register! :seon.ns/require-edges
+                  [:vector {:seon.db/component true} :seon.db/ref])
+
+;; The attrs a fn's source names as QUALIFIED keyword literals — its
+;; declared read-set, extracted from the ALREADY-READ defn form at tee
+;; time (never from text). ABSENT = no keyword literals OR a
+;; pre-structural row (consumers fall back to the regex scan).
+;; `[:vector …]` (not `[:set …]`) matching `:seon.ns/requires`: the
+;; transact validator checks the tx VALUE against the registered
+;; container, and diff-upserts transact vectors.
+(schema/register! :seon.fn/read-attrs [:vector :qualified-keyword])
+
+(defn- source-qualified-kws
+  "Every QUALIFIED keyword literal in `source`'s top-level forms, as a
+   set. Walks the READ forms (strings/comments can't false-positive the
+   way a text regex does); `#{}` when the source doesn't read — but a
+   `:seon.fn` row only exists for sources [[defn-form?]] read cleanly."
+  [source]
+  (into #{}
+        (comp (mapcat #(tree-seq coll? seq %))
+              (filter #(and (keyword? %) (some? (namespace %)))))
+        (or (read-all-forms source) [])))
+
+(defn require-edges-from-source
+  "Parse an `(ns …)` `source` string into the reified require-edge set.
+
+   The SOURCE-side counterpart of
+   `seon.analyzer-info/ns-require-edges` — same `::analyzer-info/
+   require-edge` maps, derived by reading the form's `:require` clause.
+   Used where no analyzer state exists: the boot indexer's full-source
+   ns rows and the SCI cage's legacy fallback for pre-structural rows.
+   Also carries `:seon.ns.require/refer-all? true` for a
+   `:refer :all` clause (legacy text only — CLJS can't compile one).
+   Fail-soft → `#{}` on any read error or a non-`(ns …)` form."
+  {:malli/schema [:=> [:cat :string] :seon.analyzer-info/require-edges]}
+  [source]
+  (try
+    (let [form (reader/read-string source)]
+      (if (and (seq? form) (= 'ns (first form)))
+        (let [reqs (->> form
+                        (filter seq?)
+                        (some #(when (= :require (first %)) (rest %))))]
+          (into #{}
+                (keep (fn [r]
+                        (cond
+                          (symbol? r)
+                          {:seon.ns.require/target (keyword (str r))}
+
+                          (and (vector? r) (symbol? (first r)))
+                          (let [tns  (first r)
+                                opts (try (apply hash-map (rest r))
+                                          (catch :default _ {}))
+                                as   (:as opts)
+                                refr (:refer opts)]
+                            (cond-> {:seon.ns.require/target (keyword (str tns))}
+                              (symbol? as)       (assoc :seon.ns.require/alias as)
+                              (sequential? refr) (assoc :seon.ns.require/refers
+                                                        (set refr))
+                              (= :all refr)      (assoc :seon.ns.require/refer-all?
+                                                        true)))
+                          :else nil)))
+                (or reqs [])))
+        #{}))
+    (catch :default _ #{})))
+
+(schema/register! ::aliases   [:map-of :symbol :symbol])
+(schema/register! ::nses      [:set :symbol])
+(schema/register! ::refers    [:map-of :symbol [:set :symbol]])
+(schema/register! ::refer-all [:set :symbol])
+(schema/register! ::require-info
+                  [:map
+                   [::aliases ::aliases]
+                   [::nses ::nses]
+                   [::refers ::refers]
+                   [::refer-all ::refer-all]])
+
+(defn edges->require-info
+  "Fold require-edge maps into the lexical-env shape the SCI cage wants.
+
+   `{::aliases {alias target-sym} ::nses #{target-sym} ::refers
+   {target-sym #{sym}} ::refer-all #{target-sym}}` — targets as ns
+   SYMBOLS. Total: `#{}` of edges folds to the empty info."
+  {:malli/schema [:=> [:cat :seon.analyzer-info/require-edges] ::require-info]}
+  [edges]
+  (reduce
+    (fn [acc {:seon.ns.require/keys [target alias refers refer-all?]}]
+      (let [tsym (symbol (name target))]
+        (cond-> (update acc ::nses conj tsym)
+          alias        (assoc-in [::aliases alias] tsym)
+          (seq refers) (assoc-in [::refers tsym] (set refers))
+          refer-all?   (update ::refer-all conj tsym))))
+    {::aliases {} ::nses #{} ::refers {} ::refer-all #{}}
+    edges))
+
+(defn stored-require-edges
+  "The stored `:seon.ns/require-edges` maps for `ns-kw`, as a set.
+
+   Pulled off the `:seon.ns` row and normalized back to the
+   `::analyzer-info/require-edge` shape (refers vector → set, `:db/id`
+   dropped) so it compares `=` against a freshly-derived edge set.
+   `#{}` when the ns row or the attr is absent (pre-structural rows —
+   callers fall back to parsing `:seon.ns/source`). Never throws."
+  {:malli/schema [:=> [:catn [::db :any] [::ns-kw :keyword]]
+                  :seon.analyzer-info/require-edges]}
+  [db ns-kw]
+  (try
+    (into #{}
+          (map (fn [e]
+                 (let [refers (:seon.ns.require/refers e)]
+                   (cond-> (dissoc e :db/id :seon.ns.require/refers)
+                     (seq refers) (assoc :seon.ns.require/refers
+                                         (set refers))))))
+          (:seon.ns/require-edges
+            (db/pull db
+                     '[{:seon.ns/require-edges
+                        [:db/id :seon.ns.require/target :seon.ns.require/alias
+                         :seon.ns.require/refers :seon.ns.require/refer-all?]}]
+                     [:seon.ns/name ns-kw])))
+    (catch :default _ #{})))
+
+(defn ns-require-edges-tx
+  "Tx ops making `:seon.ns/require-edges` for `ns-kw` EXACTLY `new-edges`.
+
+   `[]` when the stored edge set already equals `new-edges` (set
+   compare over the normalized maps — no spurious tx ops). On change
+   the old COMPONENT rows are `[:db/retractEntity …]`'d (cascade
+   removes the parent ref datoms too; REPL-verified, no orphans) and
+   the new set is asserted via the `:seon.ns/name` identity upsert
+   (creates the ns row when absent — same shape as [[ns-requires-tx]])."
+  {:malli/schema
+   [:=> [:catn [::db :any] [::ns-kw :keyword]
+         [::new-edges :seon.analyzer-info/require-edges]]
+        [:vector :any]]}
+  [db ns-kw new-edges]
+  (if (= (stored-require-edges db ns-kw) new-edges)
+    []
+    (let [old-eids (map first
+                        (db/query '[:find ?e
+                                    :in $ ?ns
+                                    :where
+                                    [?n :seon.ns/name ?ns]
+                                    [?n :seon.ns/require-edges ?e]]
+                                  db ns-kw))]
+      (vec (concat (for [e old-eids] [:db/retractEntity e])
+                   (when (seq new-edges)
+                     [{:seon.ns/name         ns-kw
+                       :seon.ns/require-edges (vec new-edges)}]))))))
+
+(defn fn-read-attrs-tx
+  "Diff-upsert tx ops making `:seon.fn/read-attrs` for `sym-str` EXACTLY
+   `new-kws`.
+
+   Same diff discipline as [[ns-requires-tx]] (cardinality-many
+   accumulates on plain upsert): additions ride an identity upsert,
+   removals get explicit retracts, `[]` when unchanged. Emitted at the
+   tee site for every teed `:seon.fn` row, so a REDEF that drops a
+   keyword literal sheds the stale watch — and a legacy row self-
+   backfills on its first replay/re-eval."
+  {:malli/schema
+   [:=> [:catn [::db :any] [::sym-str :string]
+         [::new-kws [:set :qualified-keyword]]]
+        [:vector :any]]}
+  [db sym-str new-kws]
+  (let [current   (into #{}
+                        (map first)
+                        (db/query '[:find ?k
+                                    :in $ ?s
+                                    :where
+                                    [?f :seon.fn/sym ?s]
+                                    [?f :seon.fn/read-attrs ?k]]
+                                  db sym-str))
+        additions (set/difference new-kws current)
+        removals  (set/difference current new-kws)]
+    (vec (concat (when (seq additions)
+                   [{:seon.fn/sym        sym-str
+                     :seon.fn/read-attrs (vec additions)}])
+                 (for [k removals]
+                   [:db/retract [:seon.fn/sym sym-str]
+                    :seon.fn/read-attrs k])))))
 
 ;; Namespaces the requires-tee SKIPS — transient eval scaffolding, never
 ;; a real program-graph ns: the REPL default home ([[user-ns-sym]]), the
@@ -3323,12 +3529,35 @@
                                    (not (contains? transient-ns-syms
                                                    ending-ns))
                                    db/*conn*)
-                          (ns-requires-tx
-                            @db/*conn*
-                            (keyword (str ending-ns))
-                            (analyzer-info/ns-requires
-                              compile-state ending-ns)))
-              tee (vec (concat tee-entities req-tx))]
+                          ;; Flat dep-edge set + the reified edges
+                          ;; (alias/refer facts) — the M4 structural
+                          ;; store; SAME gating, one atomic tee tx.
+                          (into (ns-requires-tx
+                                  @db/*conn*
+                                  (keyword (str ending-ns))
+                                  (analyzer-info/ns-requires
+                                    compile-state ending-ns))
+                                (ns-require-edges-tx
+                                  @db/*conn*
+                                  (keyword (str ending-ns))
+                                  (analyzer-info/ns-require-edges
+                                    compile-state ending-ns))))
+              ;; Declared read-set diff (C28) for every teed :seon.fn
+              ;; row — additions ride an identity upsert, stale
+              ;; keywords are retracted (a plain cardinality-many
+              ;; upsert would accumulate forever).
+              read-attr-tx
+              (when db/*conn*
+                (into []
+                      (mapcat (fn [ent]
+                                (when-let [s (and (map? ent)
+                                                  (:seon.fn/sym ent))]
+                                  (fn-read-attrs-tx
+                                    @db/*conn* s
+                                    (source-qualified-kws
+                                      (:seon.fn/source ent))))))
+                      tee-entities))
+              tee (vec (concat tee-entities req-tx read-attr-tx))]
           ;; Durable record — always. :seon.eval/ns is the
           ;; post-update accumulator (ending ns on success;
           ;; unchanged ns on failure). Tee rides in the same tx.

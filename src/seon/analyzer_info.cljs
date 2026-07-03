@@ -251,6 +251,65 @@
   [compile-state ns-sym]
   (into #{} (map #(keyword (str %))) (raw-ns-deps compile-state ns-sym)))
 
+;; ---------------------------------------------------------------------------
+;; Reified require edges (M4/C28 structural store — code-as-data: the
+;; analyzer already produced the alias/refer facts at eval time; store
+;; them on the `:seon.ns` row instead of re-parsing `:seon.ns/source`
+;; text at render time). One edge per required ns, carrying the `:as`
+;; alias and `:refer` set when present. The attr registrations live HERE
+;; (this ns loads before seon.eval → seon.render.sci → seon.client, so
+;; every reader/writer sees them registered on a cold boot).
+;; ---------------------------------------------------------------------------
+
+(schema/register! :seon.ns.require/target :keyword)
+(schema/register! :seon.ns.require/alias  :symbol)
+(schema/register! :seon.ns.require/refers [:set :symbol])
+;; `:refer :all` — never produced by the analyzer (CLJS has no
+;; `:refer :all`); only the SOURCE-parse path
+;; (seon.eval/require-edges-from-source, over legacy/handwritten ns
+;; text) can yield it. Registered so a parsed edge round-trips.
+(schema/register! :seon.ns.require/refer-all? :boolean)
+
+(schema/register! ::require-edge
+                  [:map
+                   [:seon.ns.require/target :seon.ns.require/target]
+                   [:seon.ns.require/alias {:optional true} :seon.ns.require/alias]
+                   [:seon.ns.require/refers {:optional true} :seon.ns.require/refers]
+                   [:seon.ns.require/refer-all? {:optional true} :seon.ns.require/refer-all?]])
+(schema/register! ::require-edges [:set ::require-edge])
+
+(defn ns-require-edges
+  "The reified require-edge set for `ns-sym`, read from the analyzer.
+
+   One `::require-edge` map per RUNTIME-required ns (the analyzer's
+   `:requires` vals ∪ `:uses` vals, self excluded — `:require-macros`
+   edges stay in [[ns-requires]] only; the SCI env rebuild has no macro
+   surface). The `:as` alias is the `:requires` KEY mapping to the
+   target where key ≠ target; the `:refer` set is the `:uses` keys
+   grouped by target. `#{}` for an unknown / never-eval'd ns. This is
+   what the tee stores as `:seon.ns/require-edges` (component rows) so
+   `seon.render.sci` rebuilds the lexical env from datoms, never from a
+   reader over `:seon.ns/source` text (M4)."
+  {:malli/schema [:=> [:cat ::compile-state :symbol] ::require-edges]}
+  [compile-state ns-sym]
+  (let [ns-info   (get-in @compile-state [:cljs.analyzer/namespaces ns-sym])
+        reqs      (:requires ns-info)
+        uses      (:uses ns-info)
+        targets   (-> (set (concat (vals reqs) (vals uses)))
+                      (disj ns-sym))
+        alias-of  (into {}
+                        (keep (fn [[k v]] (when (not= k v) [v k])))
+                        reqs)
+        refers-of (reduce-kv (fn [m sym target]
+                               (update m target (fnil conj #{}) sym))
+                             {} uses)]
+    (into #{}
+          (map (fn [t]
+                 (cond-> {:seon.ns.require/target (keyword (str t))}
+                   (alias-of t)  (assoc :seon.ns.require/alias (alias-of t))
+                   (refers-of t) (assoc :seon.ns.require/refers (refers-of t)))))
+          targets)))
+
 (defn var-projection
   "Persistable subset of an analyzer var-map for `:seon.fn` storage.
    Maps analyzer keys (`:fn-var`, `:arglists`, `:meta {:doc ...}`,
