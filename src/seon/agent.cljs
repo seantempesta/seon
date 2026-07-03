@@ -478,9 +478,14 @@
 ;; by some parent via this verb.
 ;; ============================================================
 
+;; NO `:seon.agent/id` slot: under the ONE required-key convention a
+;; DECLARED-optional `:seon.agent/id` is resolved to the CALLING agent at
+;; the eval boundary ("me") — but here the slot meant the CHILD, so every
+;; agent-scoped spawn silently self-upserted instead of minting (live-caught
+;; 2026-07-02). A child id is always minted; a chosen id goes through
+;; `create!` (which REQUIRES the id, so nothing resolves into it).
 (schema/register! ::start-request
   [:map
-   [:seon.agent/id                  {:optional true} :seon.agent/id]
    [:seon.agent/purpose             {:optional true} :any]
    [:seon.agent/default-turn-limit  {:optional true} :any]])
 
@@ -503,8 +508,9 @@
    The spawn counterpart of `seon.agent.lifecycle/terminate`. An alias of `create!`
    that ALSO writes `:seon.agent/parent` = the CALLING agent (read from the
    ALS scope via `db/current-agent-id`). That parent write IS the activation
-   of `:seon.agent/parent` — no separate writer. Mints a fresh 14-char child
-   id when `:seon.agent/id` is absent (a child is never \"root\"). The child
+   of `:seon.agent/parent` — no separate writer. ALWAYS mints a fresh
+   14-char child id (a child is never you; a chosen id goes through
+   `create!`). The child
    is created IDLE: it does no work until it receives a message (which opens
    its run #1).
 
@@ -533,8 +539,8 @@
         then `(message/agent \"<that-id>\" \"<the task>\")` in the NEXT form.
    Never invent/guess a child id — read it back."
   {:malli/schema [:=> [:cat ::start-request] ::create-response]}
-  [{:seon.agent/keys [id purpose default-turn-limit]}]
-  (let [child-id  (or id (db/new-id!))
+  [{:seon.agent/keys [purpose default-turn-limit]}]
+  (let [child-id  (db/new-id!)
         parent-id (db/current-agent-id)
         res       (await (create! {:seon.agent/id child-id
                                    :seon.agent/purpose purpose
@@ -568,10 +574,11 @@
 ;; the ergonomic path agents reach for when delegating a task to a worker.
 ;; ============================================================
 
+;; NO `:seon.agent/id` slot — same reason as [[::start-request]]: the
+;; declared-optional key resolves to the CALLER, and the child is never you.
 (schema/register! ::delegate-request
   [:map
    [:seon.agent.message/content     :string]
-   [:seon.agent/id                  {:optional true} :seon.agent/id]
    [:seon.agent/purpose             {:optional true} :any]
    [:seon.agent/default-turn-limit  {:optional true} :any]])
 
@@ -592,18 +599,17 @@
 
    `:seon.agent/purpose` is the child's stated reason-for-being (shown to your
    human verbatim); `:seon.agent.message/content` is the actual task you hand
-   it. `:seon.agent/id` (optional) pins a specific child id instead of minting
-   one; `:seon.agent/default-turn-limit` (optional) seeds the child's work
+   it. The child id is always minted (spawn a chosen id via `create!`);
+   `:seon.agent/default-turn-limit` (optional) seeds the child's work
    bound. RESOLVES to `{:seon.agent/id child-id}` on success — the id you
    address for any follow-up. On a failed SPAWN the start! error envelope comes
    back as-is; on a spawn-ok-but-message-failed the message error envelope plus
    `:seon.agent/id child-id` (the child exists — retry the message). Errors are
    values; branch on `:seon.db/ok?`."
   {:malli/schema [:=> [:cat ::delegate-request] ::create-response]}
-  [{:seon.agent/keys [id purpose default-turn-limit]
+  [{:seon.agent/keys [purpose default-turn-limit]
     content :seon.agent.message/content}]
   (let [spawn-args (cond-> {}
-                     (some? id)                 (assoc :seon.agent/id id)
                      (some? purpose)            (assoc :seon.agent/purpose purpose)
                      (some? default-turn-limit) (assoc :seon.agent/default-turn-limit default-turn-limit))
         res        (await (start! spawn-args))]
