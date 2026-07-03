@@ -29,7 +29,7 @@ Two-part oracle, both pure data-in/data-out and offline-testable:
          `my.plan` derives parent done-ness, stored parent status stays
          :open by design).
 
-Plan snapshot row (plain dict, one per `:my.plan` step of the solve agent):
+Plan snapshot row (plain dict, one per `:my.plan` step of the driven agent):
 
     {"id": str, "title": str,
      "status": "open" | "active" | "done" | "blocked",
@@ -42,10 +42,13 @@ Plan snapshot row (plain dict, one per `:my.plan` step of the solve agent):
 Run wiring: `run_planning_sample` is the phase-1 → restart → phase-2 →
 snapshot choreography with every effect INJECTED as a callable, so the
 sequencing + metadata assembly are unit-tested offline with fakes. The live
-driver (`pod_planning_driver`) is a documented stub for the first dev pass —
-it needs two /solve-door extensions that cannot be built offline (see its
-docstring). The restart boundary runs against an ISOLATED planning cluster
-(eval-design: this row restarts its pod by design).
+driver (`pod_planning_driver`) binds those callables to a real ISOLATED
+planning cluster (eval-design: this row restarts its pod by design): create
+the cluster → phase 1 via `POST /agents/run` (capture the minted agent_id) →
+`bin/seon restart pod-<cluster>` → phase 2 via the door with the SAME
+agent_id (the cluster store is durable; boot re-arms the agent) → plan
+snapshot read-back over the wire-server socket REPL (which survives the pod
+restart) → destroy the cluster.
 """
 
 from __future__ import annotations
@@ -144,9 +147,9 @@ def run_planning_sample(
     phase1_input: str,
     phase2_input: str,
     *,
-    solve_phase1: Callable[[str], dict[str, Any]],
+    run_phase1: Callable[[str], dict[str, Any]],
     restart_pod: Callable[[], None],
-    solve_phase2: Callable[[str, dict[str, Any]], dict[str, Any]],
+    run_phase2: Callable[[str, dict[str, Any]], dict[str, Any]],
     fetch_snapshot: Callable[[dict[str, Any]], list[dict[str, Any]]],
     clock_ms: Callable[[], int] = lambda: int(time.time() * 1000),
 ) -> dict[str, Any]:
@@ -157,18 +160,18 @@ def run_planning_sample(
     every phase-2 write strictly post — pod and harness share the machine
     clock over loopback):
 
-        r1 = solve_phase1(phase1_input)     # pod /solve, keep-world
+        r1 = run_phase1(phase1_input)     # POST /agents/run, durable cluster
         t  = clock_ms()                     # the interruption boundary
         restart_pod()                       # the planning cluster's pod
-        r2 = solve_phase2(phase2_input, r1) # SAME agent id, resumed world
+        r2 = run_phase2(phase2_input, r1) # SAME agent id, resumed cluster
         snapshot = fetch_snapshot(r1)       # the agent's plan-step rows
 
     Returns the scorer's inputs: the phase-2 reply, `t_interrupt_ms`, the
     snapshot, and both raw phase results (attribution evidence)."""
-    r1 = solve_phase1(phase1_input)
+    r1 = run_phase1(phase1_input)
     t_interrupt_ms = clock_ms()
     restart_pod()
-    r2 = solve_phase2(phase2_input, r1)
+    r2 = run_phase2(phase2_input, r1)
     snapshot = fetch_snapshot(r1)
     return {"reply": r2.get("reply", ""),
             "t_interrupt_ms": t_interrupt_ms,
@@ -177,38 +180,111 @@ def run_planning_sample(
             "phase2": r2}
 
 
-# The read-back recipe the live snapshot fetcher implements (documentation —
-# executed against the planning cluster's world, e.g. via the wire-server
-# socket REPL). One pull per solve-agent step entity → the snapshot rows.
+# The read-back recipe `fetch_plan_snapshot` implements (executed against the
+# planning cluster's db via the wire-server socket REPL, which survives the
+# pod restart). One pull per agent step entity → the snapshot rows.
 SNAPSHOT_QUERY_NOTE = """
-;; steps of the solve agent (eid via [:seon.agent/id <agent_id>]):
+;; steps of the driven agent (eid via [:seon.agent/id <agent_id>]):
 [:find [?t ...] :in $ ?a :where [?t :my.plan/agent ?a]]
 ;; per step, pull → snapshot row (times as epoch ms, keyword name as string):
 [:my.plan/id :my.plan/title :my.plan/status :my.plan/created-at
  :my.plan/completed-at {:my.plan/parent [:my.plan/id]} :my.plan/message]
 """
 
+# The one-line Clojure form the wire REPL evaluates — SNAPSHOT_QUERY_NOTE made
+# executable. Prints the rows as one WIRE-JSON sentinel line (cheshire is on
+# the wire-server classpath). %s slots: db-name keyword, agent-id string.
+_SNAPSHOT_FORM = (
+    "(do (require (quote [cheshire.core :as json]) (quote [datahike.api :as d]))"
+    " (let [conn (:seon.server.registry/conn (seon.server.registry/get-conn"
+    " {:seon.server.registry/db-name :%s}))"
+    " db (deref conn)"
+    " a (d/q (quote [:find ?a . :in $ ?id :where [?a :seon.agent/id ?id]]) db %s)"
+    " ts (if a (d/q (quote [:find [?t ...] :in $ ?a :where"
+    " [?t :my.plan/agent ?a]]) db a) [])"
+    " rows (mapv (fn [t] (let [p (d/pull db (quote [:my.plan/id :my.plan/title"
+    " :my.plan/status :my.plan/created-at :my.plan/completed-at"
+    " {:my.plan/parent [:my.plan/id]} :my.plan/message]) t)]"
+    " {\"id\" (:my.plan/id p)"
+    "  \"title\" (:my.plan/title p)"
+    "  \"status\" (name (:my.plan/status p))"
+    "  \"created_at_ms\" (.getTime (:my.plan/created-at p))"
+    "  \"completed_at_ms\" (some-> (:my.plan/completed-at p) (.getTime))"
+    "  \"parent_id\" (get-in p [:my.plan/parent :my.plan/id])"
+    "  \"from_message\" (contains? p :my.plan/message)})) ts)]"
+    " (println (str \"WIRE-JSON<\" (json/generate-string rows) \">WIRE-JSON\"))))")
 
-def pod_planning_driver(*_args: Any, **_kwargs: Any) -> None:
-    """STUB — the live two-phase /solve driver lands with the first dev pass.
 
-    Cannot be built offline: today's `POST /solve` (`solve-once!` in
-    `seon.web.serve`) mints a per-sample SCRATCH agent on an isolated
-    `:memory` conn and restores the live world afterwards — nothing survives
-    the call, so a restart boundary is meaningless against it. The dev pass
-    needs, on the ISOLATED planning cluster only:
+def fetch_plan_snapshot(cluster_name: str, agent_id: str) -> list[dict[str, Any]]:
+    """The agent's `:my.plan` step rows from the planning cluster's db.
 
-      1. a durable-world solve variant: run the sample against the cluster's
-         real store (no scratch swap) and accept an existing `agent_id` so
-         phase 2 resumes the SAME agent after `bin/seon restart pod`;
-      2. a plan read-back: fetch the solve agent's `:my.plan` step rows as
-         the snapshot (SNAPSHOT_QUERY_NOTE — e.g. via the wire-server socket
-         REPL, which survives the pod restart).
+    Read over the wire-server socket REPL (registry `get-conn` by db-name =
+    the cluster name), so it works while the cluster's pod is up, restarting,
+    or already stopped — the JVM registry holds the conn. Rows are the plain
+    snapshot dicts `check_plan_trajectory` consumes."""
+    from seon_inspect.cluster import wire_repl_json
 
-    Wire those into `run_planning_sample`'s injected callables; the scorer
-    and choreography here are already final."""
-    raise NotImplementedError(
-        "live two-phase planning driver — first dev pass; see docstring")
+    form = _SNAPSHOT_FORM % (cluster_name, json.dumps(agent_id))
+    rows = wire_repl_json(form)
+    if not isinstance(rows, list):
+        raise RuntimeError(f"plan snapshot read-back returned non-list: {rows!r}")
+    return rows
+
+
+def pod_planning_driver(
+    phase1_input: str,
+    phase2_input: str,
+    *,
+    timeout_ms: int | None = None,
+    cluster_name: str | None = None,
+) -> dict[str, Any]:
+    """The LIVE two-phase driver: one planning sample on its own cluster.
+
+    Choreography (the injected-callable wiring of `run_planning_sample`):
+    create a durable planning cluster (never torn down BETWEEN phases; marked
+    ephemeral for leftover sweeps) → phase 1 via `POST /agents/run` on its
+    pod (the minted `agent_id` is the continuity handle) → `bin/seon restart
+    pod-<cluster>` (the interruption; the pod rebinds a fresh ephemeral
+    port) → phase 2 via the door with the SAME agent_id → plan snapshot over
+    the wire REPL → destroy the cluster (always, even on failure).
+
+    Returns `run_planning_sample`'s result dict plus `"cluster"` and
+    `"agent_id"` (attribution evidence). Feed it to `check_planning` with the
+    row's generation-time oracle."""
+    from seon_inspect import cluster as cl
+    from seon_inspect.config import DEFAULT_RUN_TIMEOUT_S
+    from seon_inspect.solver import pod_run
+
+    budget_ms = timeout_ms or DEFAULT_RUN_TIMEOUT_S * 1000
+    holder: dict[str, Any] = {
+        "cluster": cl.create_cluster(
+            cluster_name or cl.bench_cluster_name("plan"), ephemeral=True)}
+    try:
+        def run_phase1(text: str) -> dict[str, Any]:
+            return pod_run(text, budget_ms, holder["cluster"].url)
+
+        def restart() -> None:
+            holder["cluster"] = cl.restart_pod(holder["cluster"])
+
+        def run_phase2(text: str, r1: dict[str, Any]) -> dict[str, Any]:
+            return pod_run(text, budget_ms, holder["cluster"].url,
+                           agent_id=r1["agent_id"])
+
+        def fetch(r1: dict[str, Any]) -> list[dict[str, Any]]:
+            return fetch_plan_snapshot(holder["cluster"].name, r1["agent_id"])
+
+        result = run_planning_sample(
+            phase1_input, phase2_input,
+            run_phase1=run_phase1,
+            restart_pod=restart,
+            run_phase2=run_phase2,
+            fetch_snapshot=fetch,
+        )
+        result["cluster"] = holder["cluster"].name
+        result["agent_id"] = result["phase1"].get("agent_id")
+        return result
+    finally:
+        cl.destroy_cluster(holder["cluster"].name)
 
 
 # ---------------------------------------------------------------------------

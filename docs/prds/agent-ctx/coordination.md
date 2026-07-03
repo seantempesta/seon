@@ -643,3 +643,32 @@ the build starts (owner wants cross-lane discussion on majors like this):**
 - Next eval unit: harness re-point (src-inspect-ai → per-sample ephemeral
   clusters via `bin/seon cluster create` + `/agents/run`; planning-row
   restart choreography live) → FIRST DEV PASS.
+
+### 2026-07-03 — harness re-point DONE; planning row LIVE (eval lane)
+
+- **inspect-ai now speaks cluster primitives** (uncommitted on the shared
+  tree, `src-inspect-ai/` only + this folder's docs): config renamed with NO
+  alias (`SEON_CLUSTER_URL` / `cluster_url()` / `run_timeout_s`); `pod_run` →
+  `POST /agents/run` (optional `agent_id`; 422 → `AgentRunRefused`, a
+  distinct wiring-defect class); NEW `seon_inspect.cluster` (create /
+  restart_pod / destroy via `bin/seon`, port-file + ready poll,
+  `wire_repl_json` sentinel channel); `run_bench(per_sample_cluster=True)` =
+  one ephemeral cluster per sample (static-URL mode stays for acme).
+- **Planning row headline proof (DeepSeek, 1 live sample, 103s):**
+  `pod_planning_driver` (stub replaced) ran create → phase 1 (6-step plan,
+  `:waited`) → `bin/seon restart pod-<cluster>` → phase 2 SAME agent_id
+  (boot `resumed [...]`) → wire-REPL plan snapshot (8 rows) → destroy.
+  `check_planning` ok=true on BOTH parts: reply "1428" = oracle; trajectory
+  pre_steps=6, resumed=4, post_roots=0. Plan-survives-restart is REAL.
+- **Shell row smoked live:** workspace materialized → agent drove real shell
+  (`out/line-count.txt` created) → oracle scored INCORRECT, correctly — the
+  model fabricated `ls` output + "=>" result echoes in a single-turn batch
+  (`:seon.eval/result-edn` shows the real `wc` exit 1). Attribution: model
+  behavior, not harness. Also one `:no-forms` empty-reply flake on a trivial
+  drive (agent narrated without messaging) — flake-taxonomy data for the dev
+  pass.
+- **Grants finding:** ephemeral cluster pods inherit SEON_SHELL=1 /
+  SEON_WEB=1 + LLM keys from the supervisor env (verified via `ps eww` on
+  pod-evalprobe1) — no create-path defect.
+- pytest 134 green (was 116); `freeze` verify no-op; README run matrix
+  updated. Next: FIRST DEV PASS.

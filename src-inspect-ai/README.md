@@ -1,14 +1,17 @@
 # seon-inspect — Seon benchmarks on the inspect-ai standard harness
 
-Core, maintained code (owner directive 2026-07-02): the `/solve` pod solver and
+Core, maintained code (owner directive 2026-07-02): the cluster pod solver and
 the diffusion measurement tasks live HERE, not in a PRD dir. The Phase-0 spike
 (`docs/prds/agent-fsm/research/inspect-bridge-spike/`) is history; future bench
 work goes in this package.
 
 **The shape (Option B — Seon owns the loop):** inspect supplies the dataset +
-host-side scorer; the Seon pod agent is a custom `@solver` behind
-`POST /solve` (its own FSM runs every turn, inspect never manages one), and
-diffusion-worker tasks call the RunPod worker the same way. Every generation
+host-side scorer; a Seon cluster's pod agent is a custom `@solver` behind
+`POST /agents/run` (its own FSM runs every turn, inspect never manages one), and
+diffusion-worker tasks call the RunPod worker the same way. A CLUSTER is the
+isolation unit: static-URL mode drives one long-lived cluster's pod (acme),
+`per_sample_cluster=True` mints one ephemeral cluster per sample
+(`bin/seon cluster create|destroy`, ~10-25s boot each). Every generation
 scores through the REAL Seon oracles — the bb parse/structural/phase server
 (`bin/oracle-server`) and the node cljs.js eval bundle
 (`out/worker-oracle-eval/main.js`) — behind a fail-loud **oracle-liveness
@@ -34,7 +37,12 @@ you loudly when it doesn't). `bb` must be on PATH.
 
 ```
 src/seon_inspect/
-  solver.py              seon_pod_solver (/solve) + timeout_honesty scorer
+  solver.py              pod_run (POST /agents/run) + seon_pod_solver (static
+                         URL) + seon_cluster_solver (ephemeral cluster per
+                         sample) + timeout_honesty scorer; 422 = AgentRunRefused
+  cluster.py             cluster lifecycle (create/restart_pod/destroy via
+                         bin/seon, port-file read, ready poll) + wire-server
+                         socket-REPL read-back (wire_repl_json)
   oracle_scorers.py      persistent bb+node oracle servers, score_code tier
                          ladder, ladder_scorer, assert_oracle_live
   generators.py          seeded bespoke-row generators (shell_use / web_fetch /
@@ -44,7 +52,9 @@ src/seon_inspect/
                          fixture ground truth; bb/node for code targets)
   planning.py            long_term_planning two-part oracle (final answer +
                          plan-trajectory resumption evidence) + the two-phase
-                         restart choreography (live driver = dev-pass stub)
+                         restart choreography (pod_planning_driver: cluster
+                         create -> phase 1 -> pod restart -> phase 2 with the
+                         SAME agent_id -> plan snapshot via the wire REPL)
   worker_endpoints.py    mock:<scenario> | runpod endpoint resolution
   worker_mock.py         canned offline worker (REAL Clojure fixtures)
   offline_proof.py       python -m seon_inspect.offline_proof
@@ -65,7 +75,9 @@ next to `datasets.lock`) — never under the package or docs/.
 | Offline proof (all tasks, canned worker, REAL oracles) | `.venv/bin/python -m seon_inspect.offline_proof` | bb + the node bundle |
 | Test suite | `.venv/bin/pytest` | same |
 | One task offline | `.venv/bin/inspect eval src/seon_inspect/tasks/e1_spec_fn.py@e1_spec_fn -T arm=arm1_guided_refine -T endpoint=mock:guided_wins --model mockllm/model --display plain` | same |
-| Pod-backed (acme) | `SEON_SOLVE_URL=http://127.0.0.1:7980/solve .venv/bin/inspect eval <task> --model mockllm/model --max-samples 1` | acme pod + DeepSeek key |
+| Pod-backed (acme, static URL) | `SEON_CLUSTER_URL=http://127.0.0.1:7980/agents/run .venv/bin/inspect eval <task> --model mockllm/model --max-samples 1` | acme pod + DeepSeek key |
+| Per-sample ephemeral clusters | `run_bench("gsm8k", per_sample_cluster=True, ...)` | default supervisor stack up (`bin/seon status`) + DeepSeek key |
+| Planning row (live, two-phase) | `planning.pod_planning_driver(phase1, phase2)` per sample -> `check_planning` | same + wire-server REPL (`tmp/seon-writer-repl-port`) |
 | GPU worker | add `-T endpoint=runpod` + env `DIFFGEMMA_EP`/`RUNPOD_API_KEY`, `--max-samples 1` | deployed worker, `verify_fresh` FIRST (runbook step 0) |
 
 `--model mockllm/model` satisfies eval()'s model requirement and is never
@@ -131,17 +143,18 @@ are read from the eval LOGS, never scraped from stdout.
 Owner directive: **test useful behaviours with established benches, not
 homemade gates.** So the primary path is running real `inspect_evals` tasks
 (their dataset + their host-side scorer, unchanged) with the Seon pod
-substituted as the solver — `seon_inspect.catalog.run_bench(name, solve_url=…)`
-uses inspect's `eval(task, solver=…)` override (verified against
+substituted as the solver — `seon_inspect.catalog.run_bench(name,
+cluster_url=…)` (or `per_sample_cluster=True`) uses inspect's
+`eval(task, solver=…)` override (verified against
 `reference-code/inspect-ai/_eval/eval.py:121`). Bespoke Seon tasks
 (`e1_spec_fn`, `skill_lift`, `ladder_lift`) stay only for Seon/Clojure codegen,
 where no standard bench measures the same thing — and they are oracle-scored,
 never invented-gate-scored.
 
 Case-1 = `input text → final answer`, host-side scorer, **no** inspect
-sandbox/tool-bridge. That's what `/solve` supports today.
+sandbox/tool-bridge. That's what `POST /agents/run` supports today.
 
-| Bench | Capability | Case-1 via /solve? | Split reported | Notes |
+| Bench | Capability | Case-1 via the pod door? | Split reported | Notes |
 |---|---|---|---|---|
 | `gsm8k` | grade-school math reasoning | ✅ **baselined** | test (report-only) | numeric match scorer, host-side |
 | `arc_easy` / `arc_challenge` | science MC-QA | ✅ | test | choice scorer |
@@ -155,22 +168,27 @@ sandbox/tool-bridge. That's what `/solve` supports today.
 **Long-horizon planning (the headline capability):** no `inspect_evals` bench
 measures long-horizon planning WITHOUT a tool sandbox — the agentic ones
 (`gaia`/`tau2`/`theagentcompany`) are all case-2. So *plan-survives-restart*
-(the spike's `planning_resume` shape: build a durable plan → restart the pod →
-resume from open plan items across process death) legitimately stays a **bespoke
-Seon task** — it exercises the DB-backed `my.plan` durability that generic
-benches don't touch. Tasks state the GOAL (a durable plan that survives an
+(build a durable plan → restart the pod → resume from open plan items across
+process death) legitimately stays a **bespoke Seon task** — it exercises the
+DB-backed `my.plan` durability that generic benches don't touch. It runs LIVE
+via `planning.pod_planning_driver`: its own cluster, phase 1 → `bin/seon
+restart pod-<cluster>` → phase 2 reusing the SAME `agent_id`, plan snapshot
+read back over the wire-server socket REPL, scored by `check_planning`. Tasks state the GOAL (a durable plan that survives an
 interruption), never the API verbs — agents discover `my.plan` from their own
 context (no-coaching rule). The case-2 agentic benches become available once the
 mvm tool-bridge tier lands.
 
-Run one (pod-agnostic — `solve_url` selects ANY pod that mounts `/solve`):
+Run one (cluster-agnostic — `cluster_url` selects ANY pod that mounts
+`POST /agents/run`; or let `per_sample_cluster=True` mint ephemeral ones):
 
 ```bash
-# against the acme harness (the pod we drive today):
-SEON_SOLVE_URL=http://127.0.0.1:7980/solve \
+# against the acme harness (a long-lived cluster):
+SEON_CLUSTER_URL=http://127.0.0.1:7980/agents/run \
   .venv/bin/python -c "from seon_inspect.catalog import run_bench; \
-    run_bench('gsm8k', limit=5, epochs=1, solve_timeout_s=240)"
-# against any other pod: point SEON_SOLVE_URL / solve_url at it. Nothing is acme-specific.
+    run_bench('gsm8k', limit=5, epochs=1, run_timeout_s=240)"
+# per-sample isolation (one ephemeral cluster per sample, serial):
+#   run_bench('gsm8k', per_sample_cluster=True, limit=5, run_timeout_s=240)
+# Nothing is acme-specific.
 ```
 
 `--model mockllm/model` is forced internally (inspect requires a model arg; the
@@ -196,7 +214,7 @@ Run a frozen tier (sample_id-filtered, limit off):
 
 ```python
 from seon_inspect.freeze import run_split
-run_split("gsm8k", "dev", solve_url=..., epochs=2)   # per-sample iteration fine
+run_split("gsm8k", "dev", cluster_url=..., epochs=2)  # per-sample iteration fine
 run_split("gsm8k", "milestone", ...)                  # AGGREGATE-only (loader enforces)
 run_split("gsm8k", "test", formal_eval=True, ...)     # blind reserve: raises without the flag;
                                                       # canary GUID injected into sample METADATA
@@ -219,7 +237,7 @@ re-reads the per-run workspace; bb parse + node behavioral eval for code
 targets) and `tool_scorers.fixture_answer_scorer` (web_fetch — LOCAL fixtures
 via `generators.serve_fixtures`, ground truth computed at generation time).
 
-### First baseline (DeepSeek, via acme /solve, 2026-07-02)
+### First baseline (DeepSeek, via acme, 2026-07-02 — pre-repoint `/solve` door)
 
 | Bench | N | accuracy | turns/sample | notes |
 |---|---|---|---|---|
@@ -245,8 +263,9 @@ scorecard each; the gym's agent scenarios are the agent-fsm lane's parity call.
 
 ## Live-validation checklist (pending)
 
-- [ ] Pod smoke via acme `/solve` (7980) with DeepSeek — the pod-backed row of
-      the run matrix, composing `seon_pod_solver` with `ladder_scorer`.
+- [x] Door smoke with DeepSeek (2026-07-03, ephemeral cluster): 422 refusal
+      class + a completed drive (`reply "391"`, 2 turns) + a shell_use dev
+      sample end-to-end (workspace + real shell + oracle verdict).
 - [ ] GPU E1 re-run (runbook step 3): three `e1_spec_fn` runs,
       `-T endpoint=runpod`, epochs≥4, `--max-samples 1` (~$0.50).
 - [ ] GPU ladder-lift (runbook step 4) on the co-location image.

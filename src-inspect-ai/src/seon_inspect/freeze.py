@@ -76,7 +76,7 @@ SAMPLING_PROCEDURE = (
 # Source specs
 # ---------------------------------------------------------------------------
 
-# External (inspect_evals) sources currently runnable through /solve.
+# External (inspect_evals) sources currently runnable through the pod door.
 # dev/milestone sizes from eval-design.md "Capability rows".
 # pin = (module, attr) of the upstream dataset pin constant — recorded in the
 # lock so an inspect-evals sync that moves a revision diffs LOUDLY.

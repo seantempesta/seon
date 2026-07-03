@@ -117,11 +117,10 @@ Eval-lane blockers before the first dev pass (from [[eval-CLAUDE-notes]]):
    `docs/seon/components/capability-gates.md`.
 2. ~~Planning bench re-grounded on the redesigned `my.plan`~~ — ✅ DONE
    2026-07-02 (roadmap eval step 4): two-phase generator + two-part oracle
-   (`seon_inspect.generators` / `seon_inspect.planning`), lock `generated`,
-   pytest 116 green. Remaining for the dev pass: the durable-world `/solve`
-   variant (agent-id reuse across the restart, planning cluster only) + the
-   plan read-back — the live driver is a documented stub
-   (`planning.pod_planning_driver`).
+   (`seon_inspect.generators` / `seon_inspect.planning`), lock `generated`.
+   ✅ LIVE 2026-07-03 (roadmap eval step 6): `pod_planning_driver` is real —
+   own cluster, restart mid-sample, agent-id reuse, wire-REPL plan snapshot;
+   one DeepSeek sample scored ok=true on both oracle parts.
 3. ~~Tool-row generators~~ — ✅ AUTHORED 2026-07-02
    (`src-inspect-ai/src/seon_inspect/generators.py` + `tool_scorers.py`;
    dev artifacts in `evals/`, lock entries `generated`, run wiring lands
@@ -182,8 +181,11 @@ Eval-lane blockers before the first dev pass (from [[eval-CLAUDE-notes]]):
   Gym + inspect-ai both consume the same primitives (split unchanged). Build:
   eval lane; tooling reviews post-hoc. **✅ BUILT 2026-07-02** (roadmap eval
   step 5): the door is `POST /agents/run` (optional `agent_id` reuse), the
-  scratch machinery is deleted, C15/C16 folded in. Remaining: the harness
-  re-point (inspect-ai → per-sample clusters), a separate unit.
+  scratch machinery is deleted, C15/C16 folded in. **✅ Harness re-point
+  2026-07-03** (roadmap eval step 6): `SEON_CLUSTER_URL`/`cluster_url()` (no
+  back-compat alias), `seon_inspect.cluster` lifecycle helper,
+  `run_bench(per_sample_cluster=True)`, planning driver LIVE (one DeepSeek
+  sample ok=true both parts). Next: the first dev pass.
 
 ## The load-bearing finding (binds the whole chunk)
 

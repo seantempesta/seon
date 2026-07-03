@@ -1,7 +1,7 @@
 [project]
 name = "seon-inspect"
 version = "0.1.0"
-description = "Seon benchmarks on the inspect-ai standard harness: /solve pod solver, oracle-backed scorers, diffusion measurement tasks"
+description = "Seon benchmarks on the inspect-ai standard harness: cluster pod solver (POST /agents/run), oracle-backed scorers, diffusion measurement tasks"
 requires-python = ">=3.10"
 # inspect-ai: proven against the vendored dev build 0.1.dev1+g92dd737b9
 # (reference-code/inspect-ai). `uv sync` installs it from that source path so

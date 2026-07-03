@@ -192,9 +192,36 @@ repo-dev docs.
    the REQUEST's window (a reused agent's history never inflates counts);
    unknown `agent_id`/failed mint → HTTP 422 `{"error": …}` (was only
    500/503).
-6. **First dev pass** → `evals/scorecard.jsonl` + the `pass^k` regression alarm;
+6. ~~**Harness re-point**~~ — ✅ DONE 2026-07-03 (the last gate before the dev
+   pass). Config surface renamed to cluster vocabulary, NO back-compat alias
+   (`SEON_CLUSTER_URL` / `cluster_url()` / `DEFAULT_CLUSTER_URL` /
+   `run_timeout_s`; call-time resolution + env-never-shadows-config kept);
+   `pod_run` posts to `/agents/run` with optional `agent_id`, HTTP 422 →
+   `AgentRunRefused` (a distinct wiring-defect class, never a model score).
+   NEW `seon_inspect.cluster`: create/restart_pod/destroy via `bin/seon`
+   subprocesses, per-cluster port-file read + ready poll, `wire_repl_json`
+   (sentinel-framed JSON over the wire-server socket REPL) — all effects
+   injectable, offline-tested with fakes. `run_bench` gains
+   `per_sample_cluster=True` (one ephemeral cluster per sample, serial;
+   static-URL mode stays for acme); per-sample budget = boot
+   (`CLUSTER_BOOT_BUDGET_S=60`, measured 9.3-23.5s) + row timeout.
+   **Planning row LIVE** — `pod_planning_driver` replaces the stub: cluster
+   create → phase 1 → `bin/seon restart pod-<cluster>` (fresh ephemeral
+   port re-read) → phase 2 with the SAME `agent_id` → `fetch_plan_snapshot`
+   (SNAPSHOT_QUERY_NOTE implemented over the wire REPL) → destroy. Live
+   proof (DeepSeek, 1 sample, 103s wall): phase 1 laid a 6-step plan,
+   `:waited`; restart; phase 2 REUSED the agent (boot log `resumed
+   ["cig-…" "root"]`), completed 4 pre-restart steps post-restart, 0 new
+   roots, replied the oracle answer "1428" — `check_planning` ok=true on
+   BOTH parts. Shell row smoked live end-to-end (workspace materialized,
+   agent drove real shell, oracle correctly scored a model fabrication
+   INCORRECT — `result-edn` showed wc exit 1 vs the model's invented "=>"
+   echoes). Grants verified in the ephemeral pod's process env
+   (SEON_SHELL=1, SEON_WEB=1 inherited from the supervisor). pytest
+   116 → 134 green; datasets.lock regenerate-verify no-op.
+7. **First dev pass** → `evals/scorecard.jsonl` + the `pass^k` regression alarm;
    then cadence.
-7. **Ongoing** — per-row rendered-context audits (every trim is an A/B),
+8. **Ongoing** — per-row rendered-context audits (every trim is an A/B),
    baseline each tool the tooling lane lands, milestone runs at merges, the mvm
    case-2 sandbox tier later.
 
