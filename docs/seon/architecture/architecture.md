@@ -351,8 +351,9 @@ blob store**, never by hunting log files: each turn persists its `basis-t` (the
 frozen db coordinate that makes the context re-derivable), the assembled prompt
 verbatim as a blob, and the raw reply. `inspect/turn` reconstructs any turn;
 `turn-diff` shows what changed between two; a dedicated **forensic agent** runs
-these queries on demand; the `/solve` door hands a reproducible turn to an
-external solver. See [[observability]].
+these queries on demand; the `/agents/run` door drives a reproducible task
+through an agent in the pod's own cluster for an external harness. See
+[[observability]].
 
 ## Build path — [[roadmap]]
 
@@ -372,7 +373,8 @@ doc; this one stays pure target.
   the gzip-morph SSE live channel, the seed-copy + `install!`/`remove!` override.
 - [[toolkit]] — the `my.*` verb catalog over the protected `seon.*` floor.
 - [[observability]] — turn replay (basis-t + prompt blob + reply), `inspect/turn` /
-  `turn-diff`, the blob store, the forensic agent, the `/solve` door.
+  `turn-diff`, the blob store, the forensic agent, cluster lifecycle + the
+  `/agents/run` door.
 - [[context]] — the dynamic context system: `context = f(db, location,
   window, tail)`, the three-band cache gradient (stable prefix / sliding
   transcript window / free dynamic tail), namespace-as-location, the

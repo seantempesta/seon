@@ -166,9 +166,35 @@ repo-dev docs.
    phase-2 texts; pytest 95 → 116 green. Supersedes the spike
    `docs/prds/agent-fsm/research/inspect-bridge-spike/planning_resume_bench.py`
    (pre-rename verbs, kept as history).
-5. **First dev pass** → `evals/scorecard.jsonl` + the `pass^k` regression alarm;
+5. ~~**Cluster formalization build**~~ — ✅ DONE 2026-07-02 (two sessions; the
+   first died at the migration snapshot `8a035be9`, finished on
+   `feature/agent-ctx` HEAD). db-name = CLUSTER NAME everywhere (C15: the ONE
+   derivation `seon.store.wire/cluster-name` = basename of `SEON_CLUSTER_DIR`;
+   wire ops/feed labels/logs carry it; `bin/seon` passes `--db-name` to the
+   wire-server) · supervisor-facing `list-dbs`/`remove-db` wire ops +
+   `registry/delete-db!` (ambient-cluster guard; never agent-exposed) ·
+   `bin/seon cluster create <name> [--ephemeral]` / `destroy <name>` (create =
+   wire-server ready-gate (C16) + `pod-<name>` on an ephemeral port, db
+   ensured `:file` at pod boot; destroy = stop pod + registry delete +
+   `rm -rf data/clusters/<name>/` incl. `blobs/`) · `/solve` scratch machinery
+   DELETED, replaced by `POST /agents/run` (start-or-reuse `agent_id`, real
+   wake path, window-scoped truthful metadata, one conn) · turn capture
+   verified per-cluster (`inspect/turn` ok inside an ephemeral cluster) ·
+   boot latency create→ready: 23.5s cold / 9.3s / 9.3s warm (no pool needed
+   yet). Live proof: probe1 created → DeepSeek task "391" :completed →
+   agent-id reuse drive → destroyed, registry `[:default]`, dir gone, default
+   cluster untouched; acme reset green under `--db-name acme`.
+   **Follow-up (next src-adjacent unit): harness re-point** — inspect-ai's
+   solver → per-sample `bin/seon cluster create` + `POST /agents/run`. Door
+   delta vs `/solve`: path `/solve` → `/agents/run`; new optional `agent_id`
+   request key (the planning row's restart-reuse prerequisite — step 4(a)
+   DELIVERED); response adds nothing, but `turns`/`evals` are now scoped to
+   the REQUEST's window (a reused agent's history never inflates counts);
+   unknown `agent_id`/failed mint → HTTP 422 `{"error": …}` (was only
+   500/503).
+6. **First dev pass** → `evals/scorecard.jsonl` + the `pass^k` regression alarm;
    then cadence.
-6. **Ongoing** — per-row rendered-context audits (every trim is an A/B),
+7. **Ongoing** — per-row rendered-context audits (every trim is an A/B),
    baseline each tool the tooling lane lands, milestone runs at merges, the mvm
    case-2 sandbox tier later.
 

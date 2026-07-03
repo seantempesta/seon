@@ -77,6 +77,16 @@ Tool defects queued for the tooling lane (with rendered-context evidence — eva
 
 Tooling-lane build issues:
 
+- **FLAG (eval→tooling, 2026-07-02): render-fns cold-boot registration order
+  fixed in YOUR in-flight file** — `seon.agent.ctx.render-fns` referenced
+  `:seon.ns/name` at load while its registration sat in `seon.agent.ctx`
+  (which requires render-fns → render-fns loads FIRST) → every FRESH pod
+  boot died (`:malli.core/invalid-schema`); hot reloads masked it. Fix
+  applied mid-cluster-build (it blocked ephemeral-cluster creation): the
+  `:seon.ns/name` registration MOVED to `render_fns.cljs` (per ctx's own
+  "registered in the first-loading ns" rule); ctx.cljs comment updated.
+  Review + fold into your auto-run unit.
+
 - **SCI-bounding fallback on `my.plan.internal/plan-block`** (eval lane,
   evidence attached 2026-07-02): fresh boot logs "Unable to resolve symbol:
   db/*conn*" under SCI bounding → the tile renders on the UNBOUNDED compiled
@@ -170,7 +180,10 @@ Eval-lane blockers before the first dev pass (from [[eval-CLAUDE-notes]]):
   agent verbs over each pod's own HTTP, plus ONE renamed one-shot composition
   door (harness/supervisor-side). "Solve(r)" is harness-side vocabulary only.
   Gym + inspect-ai both consume the same primitives (split unchanged). Build:
-  eval lane; tooling reviews post-hoc.
+  eval lane; tooling reviews post-hoc. **✅ BUILT 2026-07-02** (roadmap eval
+  step 5): the door is `POST /agents/run` (optional `agent_id` reuse), the
+  scratch machinery is deleted, C15/C16 folded in. Remaining: the harness
+  re-point (inspect-ai → per-sample clusters), a separate unit.
 
 ## The load-bearing finding (binds the whole chunk)
 

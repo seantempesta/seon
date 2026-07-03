@@ -98,36 +98,52 @@ Search runs at two ends, one door each, and nothing in between:
 
 ## The forensic agent
 
-Debugging an agent is done **by another agent given the exact world**, not by
-a human reading logs:
+Debugging an agent is done **by another agent given the exact db the target
+saw**, not by a human reading logs:
 
-- Mint a scratch agent over a **snapshot conn** — the same isolation mechanic
-  as the `/solve` door — whose db value is `as-of` the target's basis-t at the
-  turn under investigation. Its world IS the target's world at that moment.
+- Mint a forensic agent in an **ephemeral cluster** (`bin/seon cluster
+  create`, its own pod + db) seeded from the target's history — its db value
+  is `as-of` the target's basis-t at the turn under investigation, so it
+  sees exactly what the target saw at that moment.
 - Seed its ctx with the target's **reconstructed context blocks** plus one
   extra **debug-brief block**: the behavior in question and the ask —
   "identify why the agent did this; answer in clear markdown."
-- It **evals code to investigate** — its transactions land on the local
-  scratch snapshot, advancing a copy of the world realistically, never
-  touching the live cluster.
+- It **evals code to investigate** — its transactions land in its OWN
+  cluster's db, advancing that copy realistically, never touching the
+  target's cluster.
 - **Per-agent LLM config** selects a cheap reasoning model with thinking ON
   for these runs, so forensic passes are routine, not precious.
 
-This is a composition of existing mechanisms — scratch-conn isolation,
-seed-copy ctx override via `install!`, as-of replay, per-agent provider
-routing — not a new runtime. A forensic pass is cheap enough to run on every
-puzzling drive.
+This is a composition of existing mechanisms — cluster isolation (one pod +
+one db per cluster), seed-copy ctx override via `install!`, as-of replay,
+per-agent provider routing — not a new runtime. A forensic pass is cheap
+enough to run on every puzzling drive.
 
-## The external evaluation door
+## Cluster lifecycle and the composition door
 
-`/solve` is the one HTTP door for driving a hermetic agent from outside: mint
-a scratch agent on an isolated conn, inject the input through the real wake
-path, await the derived `:idle`, return the final reply plus honest
-termination metadata (turns, evals, closed-reason, timed-out). The inspect.ai
-bridge is a thin client of it; the gym drives the same recipe in-process. The
-answer key never enters the pod — scoring stays host-side. Forensic agents,
-gym scenarios, and benchmark samples are the same shape: a sealed world, a
-brief, a derived verdict.
+Isolation is the CLUSTER: one shared db + its agents, one Node pod per
+cluster, all dbs hosted by the one wire-server JVM (the registry). From
+inside a cluster there is ONE conn and ONE database — agents never know
+other clusters exist (`list-dbs`/`remove-db` are supervisor-facing wire
+ops, never agent-exposed). The supervisor owns the lifecycle:
+
+- `bin/seon cluster create <name> [--ephemeral]` — a db entry (`:file`,
+  ensured at pod boot) + a pod on its own ephemeral HTTP port. ~10s warm,
+  ~25s cold.
+- `bin/seon cluster destroy <name>` — stop the pod, delete the db from the
+  registry (`registry/delete-db!`), remove `data/clusters/<name>/`
+  including `blobs/` (turn capture is per-cluster).
+
+`POST /agents/run` is the one-shot composition door on EVERY pod, built
+purely from the agent primitives: start-or-reuse an agent in the pod's own
+cluster (optional `agent_id` — durable store, so the same agent can be
+driven again across a pod restart), deliver the input through the real wake
+path, await the derived `:idle` of the run it woke, return the truthful
+reply plus termination metadata (turns/evals scoped to this request's
+window, closed-reason, timed-out). External harnesses drive per-sample
+ephemeral clusters by port; the gym drives the same primitives in-process.
+The answer key never enters the pod — scoring stays host-side. Benchmark
+vocabulary is harness-side only.
 
 ## Build path
 

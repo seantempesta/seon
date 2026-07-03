@@ -1,7 +1,8 @@
 # src/seon/web — the pod's HTTP/SSE front door (.cljs = active; .clj = paused JVM track)
 
 **Read before editing:** `docs/seon/architecture/ui.md` (the live channel +
-routing + page tree), `observability.md` (the `/solve` door + debug surfaces),
+routing + page tree), `observability.md` (cluster lifecycle, the
+`/agents/run` door + debug surfaces),
 `docs/prds/namespace-ui/design-system.md` (Phosphor Terminal theme). Skills:
 `datastar-web-ui` (SSE/morph/signals), `browser-automation` (verification —
 note the browser 503s long-lived SSE; verify feeds with a node gunzip client).
@@ -9,10 +10,12 @@ note the browser 503s long-lived SSE; verify feeds with a node gunzip client).
 ## Systems at play
 
 - **`serve.cljs`** — the one browser-facing HTTP+SSE server, and the
-  **`/solve` door** (`handle-solve!`): mint a scratch agent on an isolated
-  conn, inject input via the real wake path, await derived `:idle`, return
-  reply + honest termination metadata. The inspect.ai bridge, the gym, and
-  forensic agents are all clients of this recipe — extend it, don't fork it.
+  **`POST /agents/run` door** (`handle-agent-run!`): start-or-reuse an agent
+  IN THE POD'S OWN CLUSTER (optional `agent_id`; durable store, survives pod
+  restarts), deliver input via the real wake path, await derived `:idle`,
+  return the truthful reply + termination metadata. NO scratch store, NO
+  conn/schema root swap — isolation is a whole cluster (`bin/seon cluster
+  create`). Extend this recipe, don't fork it.
 - **`router.cljs`** — reitit router derived from `:seon.route/*` datoms; the
   route table is data. `/call` is the ONE action door; the capability gate
   authorizes the fn. New pages = new route datoms + layouts, not new

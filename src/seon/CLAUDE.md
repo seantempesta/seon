@@ -63,8 +63,10 @@ imperative reflexes, guessed library semantics). Ground first:
 
 - The pod is single-threaded: one uncaught throw blanks every agent + the UI
   — hence never-crash/always-surface at every boundary.
-- `seon.db/*conn*` is a single dynamic root (not fiber-local): `/solve` runs
-  samples serially; parallel scoring is a known v2 lever.
+- `seon.db/*conn*` is a single dynamic root — CORRECT by construction: one
+  pod = one cluster = one conn (isolation is the process boundary).
+  Parallelism = more clusters (`bin/seon cluster create`), never a second
+  in-pod conn.
 - Home-ns aliases (`db/`, `plan/`…) don't resolve in agent-authored `my.*`
   nses — agents must fully qualify there (#73).
 - Turn capture is live (`:seon.agent.turn/rendered-as-of` + prompt/reply

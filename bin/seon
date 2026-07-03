@@ -243,14 +243,28 @@ process_command() {
     # Turn observability is ALWAYS-ON in-process (prompt/reply blob refs on
     # every :seon.agent.turn — see observability.md); no capture env var.
     pod)         echo "npm run css:build && exec env SEON_FS_ROOT=\"$SEON_ROOT\" SEON_FS_READ_ONLY=1$(extra_npm_node_path) node \"${SEON_CLIENT_OUT:-out/client/main.js}\"" ;;
+    # pod-<cluster> — a NON-default cluster's pod (bin/seon cluster create).
+    # Same node process as `pod`, re-pointed per cluster: its OWN
+    # SEON_CLUSTER_DIR (store id / blobs / feed db-name all derive from it —
+    # the ONE cluster-name derivation, seon.store.wire/cluster-name), an
+    # EPHEMERAL HTTP port (SEON_PORT=0; the bound port lands in the
+    # per-cluster $SEON_PORT_FILE), and THIS supervisor's wire sockets made
+    # explicit (one wire-server JVM hosts every cluster's db; the pod's
+    # boot ensure-db registers/creates its db there). css:build only when
+    # the shared artifact is missing (the default pod's start owns it).
+    pod-*)
+      local cname="${1#pod-}"
+      echo "{ [ -f resources/public/css/output.css ] || npm run css:build; } && exec env SEON_CLUSTER_DIR=\"data/clusters/$cname\" SEON_PORT=0 SEON_PORT_FILE=\"tmp/seon-port-$cname\" SEON_REQ_SOCK=\"$SEON_REQ_SOCK\" SEON_PUB_SOCK=\"$SEON_PUB_SOCK\" SEON_FS_ROOT=\"$SEON_ROOT\" SEON_FS_READ_ONLY=1$(extra_npm_node_path) node \"${SEON_CLIENT_OUT:-out/client/main.js}\"" ;;
     cljs-watch)  echo "clj$(extra_src_sdeps) -M:cljs watch client$(extra_preload_merge)" ;;
     jvm)         echo "./bin/run" ;;
-    # V2 platform Host — JVM datahike wire-server (single-DB today).
-    # Socket/path strings use "cluster" naming for the eventual multi-DB
-    # layout (P1); they're CLI args, not code identifiers. The --repl-port
-    # opens a loopback-only socket REPL on 127.0.0.1 for diagnostics, and
-    # the chosen port is written to tmp/seon-writer-repl-port.
-    wire-server) echo "clojure -M:simd:fork-deps:writer --backend file --path $SEON_CLUSTER_DIR/store --req-sock $SEON_REQ_SOCK --pub-sock $SEON_PUB_SOCK --repl-port $SEON_WRITER_REPL_PORT" ;;
+    # V2 platform Host — JVM datahike wire-server (hosts EVERY cluster's db
+    # via the registry; extra clusters are ensured onto it at pod boot).
+    # --db-name = the CLUSTER NAME (basename of $SEON_CLUSTER_DIR) — the ONE
+    # identity both sides derive the konserve store :id from (registry C15);
+    # never a socket-path artifact. The --repl-port opens a loopback-only
+    # socket REPL on 127.0.0.1 for diagnostics, and the chosen port is
+    # written to tmp/seon-writer-repl-port.
+    wire-server) echo "clojure -M:simd:fork-deps:writer --backend file --db-name $(basename "$SEON_CLUSTER_DIR") --path $SEON_CLUSTER_DIR/store --req-sock $SEON_REQ_SOCK --pub-sock $SEON_PUB_SOCK --repl-port $SEON_WRITER_REPL_PORT" ;;
     *) return 1 ;;
   esac
 }
@@ -258,6 +272,7 @@ process_command() {
 process_ready_hint() {
   case "$1" in
     pod)         echo "  ready: $SEON_PORT_FILE written + HTTP answers on /" ;;
+    pod-*)       echo "  ready: tmp/seon-port-${1#pod-} written + HTTP answers on /" ;;
     cljs-watch)  echo "  ready: 'Build completed' appears in logs/cljs-watch.log" ;;
     jvm)         echo "  ready: logs/app.log shows 'Server started'" ;;
     wire-server) echo "  ready: $SEON_REQ_SOCK ACCEPTING; REPL on 127.0.0.1:$SEON_WRITER_REPL_PORT (tmp/seon-writer-repl-port)" ;;
@@ -265,7 +280,15 @@ process_ready_hint() {
   esac
 }
 
-all_processes() { echo "pod cljs-watch jvm wire-server"; }
+all_processes() {
+  # The static registry + any cluster pods this supervisor has spawned
+  # (pod-<name> state dirs under $PROC_DIR — bin/seon cluster create).
+  local names="pod cljs-watch jvm wire-server" d
+  for d in "$PROC_DIR"/pod-*/; do
+    [ -d "$d" ] && names="$names $(basename "$d")"
+  done
+  echo "$names"
+}
 
 stack_processes() {
   # Dependency-ordered stack for `start all` (stop reverses the order):
@@ -301,6 +324,12 @@ ready_check() {
         grep -q '\[writer\] ready' "$(log_file wire-server)" 2>/dev/null
       fi
       ;;
+    pod-*)
+      # A cluster pod writes its ephemeral bound port to its own file.
+      [ -f "tmp/seon-port-${name#pod-}" ] || return 1
+      curl -fsS -m 2 -o /dev/null \
+        "http://127.0.0.1:$(cat "tmp/seon-port-${name#pod-}")/" 2>/dev/null
+      ;;
     pod)
       [ -f "$SEON_PORT_FILE" ] || return 1
       # Probe `/` — the most fundamental core route (always seeded on every
@@ -325,7 +354,7 @@ ready_check() {
 ready_bound() {
   case "$1" in
     wire-server) echo 180 ;;   # matches cluster reset's historical wait
-    pod)         echo 120 ;;
+    pod|pod-*)   echo 120 ;;
     cljs-watch)  echo 300 ;;   # cold shadow-cljs build
     *)           echo 0 ;;
   esac
@@ -875,20 +904,115 @@ merged_logs() {
 }
 
 cmd_cluster() {
-  # Cluster lifecycle. Today: `reset [name]` (name defaults to
-  # "default"). One command = stop pod → stop wire-server → wipe the
-  # cluster's STORE DIR ONLY → start wire-server (mints a fresh DB) →
-  # start pod (boot re-seeds the core idempotently).
+  # Cluster lifecycle.
+  #   reset [name]              wipe + reboot ONE cluster's store (default
+  #                             "default") — see cluster_reset.
+  #   create <name> [--ephemeral]  a NEW cluster on THIS supervisor's
+  #                             wire-server: db entry + its own pod.
+  #   destroy <name>            stop its pod, delete its db from the
+  #                             wire-server registry, remove
+  #                             data/clusters/<name>/ INCLUDING blobs/.
   #
-  # The store is the durable home of every agent/message/finding in
-  # the cluster — reset is DESTRUCTIVE and deliberate; there is no
-  # confirmation prompt because the caller already typed "reset".
-  local sub="${1:?cluster requires a subcommand (reset)}"
+  # A cluster = one shared DB + its agents, one Node pod per cluster —
+  # isolation is the process boundary + the wire capability surface. One
+  # wire-server JVM hosts every cluster's db (the registry), so create is
+  # cheap: a db entry + a node process. All lifecycle ops are DESTRUCTIVE
+  # where they say so and deliberate; no confirmation prompts.
+  local sub="${1:?cluster requires a subcommand (reset|create|destroy)}"
   shift
   case "$sub" in
-    reset) cluster_reset "${1:-default}" ;;
-    *) echo "unknown cluster subcommand: $sub (try: reset [name])" >&2; exit 1 ;;
+    reset)   cluster_reset "${1:-default}" ;;
+    create)  cluster_create "${1:?cluster create requires a name}" "${2:-}" ;;
+    destroy) cluster_destroy "${1:?cluster destroy requires a name}" ;;
+    *) echo "unknown cluster subcommand: $sub (try: reset [name] | create <name> [--ephemeral] | destroy <name>)" >&2; exit 1 ;;
   esac
+}
+
+valid_cluster_name() {
+  # The name becomes a path segment under data/clusters/ and a wire db-name.
+  case "$1" in
+    */*|.|..|""|*[!a-zA-Z0-9_-]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+cluster_create() {
+  local name="$1" flag="${2:-}"
+  if ! valid_cluster_name "$name"; then
+    echo "✗ invalid cluster name: '$name' (a-zA-Z0-9_- only)" >&2; exit 1
+  fi
+  if [ "$name" = "$(basename "$SEON_CLUSTER_DIR")" ]; then
+    echo "✗ '$name' is this supervisor's own cluster — it already exists" >&2; exit 1
+  fi
+  local ephemeral=0
+  case "$flag" in
+    --ephemeral) ephemeral=1 ;;
+    "") ;;
+    *) echo "✗ unknown cluster create flag: $flag (try --ephemeral)" >&2; exit 1 ;;
+  esac
+
+  echo "▶ cluster create: $name"
+
+  # C16 (pod-after-wire-server warmup): the new cluster's db lives on THIS
+  # supervisor's wire-server — bring it up and gate on REAL readiness
+  # BEFORE the pod spawns (idempotent no-op when already running). The pod's
+  # own boot then ping-gates the socket AND ensure-db's its cluster db
+  # (backend :file, path data/clusters/<name>/store) before attaching its
+  # read conn — no bash-side db call needed, one creation path.
+  cmd_start wire-server
+  wait_ready wire-server || exit 1
+
+  mkdir -p "data/clusters/$name"
+  # `--ephemeral` records INTENT (this cluster is disposable — a bench
+  # sample, a one-shot drive); create/destroy behave identically either
+  # way (the store is :file, destroy always removes everything). The
+  # marker lets sweeps find leftover disposable clusters.
+  [ "$ephemeral" = 1 ] && date -u +%FT%TZ > "data/clusters/$name/ephemeral"
+
+  cmd_start "pod-$name"
+  wait_ready "pod-$name" || exit 1
+  local port
+  port="$(cat "tmp/seon-port-$name" 2>/dev/null || echo '?')"
+  echo "▶ cluster $name created — pod http://127.0.0.1:$port (db-name $name, store data/clusters/$name/store)"
+}
+
+cluster_destroy() {
+  local name="$1"
+  if ! valid_cluster_name "$name"; then
+    echo "✗ invalid cluster name: '$name'" >&2; exit 1
+  fi
+  if [ "$name" = "default" ] || [ "data/clusters/$name" = "$SEON_CLUSTER_DIR" ]; then
+    echo "✗ refusing to destroy this supervisor's own cluster '$name' — use: bin/seon cluster reset $name" >&2
+    exit 1
+  fi
+
+  echo "▶ cluster destroy: $name"
+
+  cmd_stop "pod-$name"
+
+  # Delete the db from the LIVE wire-server registry (release the conn +
+  # datahike delete-database) via the loopback socket REPL — the
+  # supervisor-facing channel; no pod-side verb reaches this (agents never
+  # see other clusters). Skipped when the wire-server is down: the
+  # directory wipe below is the backstop, and a restarted wire-server only
+  # re-registers dbs that are ensured again.
+  if is_running wire-server && [ -f tmp/seon-writer-repl-port ]; then
+    local repl_port
+    repl_port="$(cat tmp/seon-writer-repl-port)"
+    printf '(seon.server.registry/delete-db! {:seon.server.registry/db-name :%s})\n' "$name" \
+      | nc 127.0.0.1 "$repl_port" -w 5 2>/dev/null \
+      | tr -d '\r' | tail -1 || true
+  else
+    echo "  (wire-server not running — skipping registry delete; wiping the dir)"
+  fi
+
+  # The WHOLE cluster dir — store/ AND blobs/ (per-cluster turn-capture
+  # blobs) AND any future per-cluster artifacts — plus the pod's port file
+  # and supervisor state.
+  rm -rf "data/clusters/$name"
+  rm -f "tmp/seon-port-$name"
+  rm -rf "$PROC_DIR/pod-$name"
+  echo "▶ cluster $name destroyed — data/clusters/$name removed (blobs included), registry entry deleted"
 }
 
 cluster_reset() {
@@ -925,6 +1049,16 @@ cluster_reset() {
   # store and printed "no processes registered for it".
   local bounce=0
   [ "$store_dir" = "$SEON_CLUSTER_DIR/store" ] && bounce=1
+
+  # A supervisor-CREATED cluster (pod-<name> + a registry db entry on the
+  # LIVE wire-server) can't be reset by a bare store wipe — the wire-server
+  # still holds the old conn and would write into the wiped dir. Its
+  # lifecycle is destroy + create.
+  if [ "$bounce" = 0 ] && [ -d "$(state_dir "pod-$name")" ]; then
+    echo "✗ '$name' is a created cluster (pod-$name) — reset it with:" >&2
+    echo "    bin/seon cluster destroy $name && bin/seon cluster create $name" >&2
+    exit 1
+  fi
 
   echo "▶ cluster reset: $name"
 
@@ -1004,10 +1138,17 @@ cmd_nuke() {
   echo "▶ nuke: tearing the world down"
 
   # 1. Stop every managed process (jvm included — full clean slate, unlike
-  #    `start/stop all` which excludes it). Idempotent no-ops if not running.
+  #    `start/stop all` which excludes it), cluster pods too (their stores
+  #    are wiped below). Idempotent no-ops if not running.
   for name in pod wire-server cljs-watch jvm; do
     cmd_stop "$name"
   done
+  for d in "$PROC_DIR"/pod-*/; do
+    [ -d "$d" ] || continue
+    cmd_stop "$(basename "$d")"
+    rm -rf "$d"
+  done
+  rm -f tmp/seon-port-* 2>/dev/null || true
 
   # 2. Drop the default cluster's stale UDS sockets + the published port file
   #    (recreated on the fresh start).
@@ -1120,6 +1261,17 @@ Commands:
   cluster reset [n]  DESTRUCTIVE: stop pod+wire-server, wipe
                      data/clusters/<n>/store (default "default"),
                      restart both — fresh DB, core re-seeds
+  cluster create <n> [--ephemeral]
+                     NEW cluster on this supervisor's wire-server: one
+                     db entry (backend :file, ensured at pod boot) + its
+                     own pod (process pod-<n>, ephemeral HTTP port in
+                     tmp/seon-port-<n>). --ephemeral marks intent only
+                     (a disposable bench/drive cluster)
+  cluster destroy <n>
+                     DESTRUCTIVE: stop pod-<n>, delete the db from the
+                     wire-server registry (REPL → registry/delete-db!),
+                     remove data/clusters/<n>/ INCLUDING blobs/. Refuses
+                     the supervisor's own cluster (use reset)
   nuke --yes         DESTRUCTIVE (full clean slate): stop EVERY process
                      (jvm too), wipe ALL cluster stores + transient data,
                      clear ALL logs, restart the default stack fresh.

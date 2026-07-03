@@ -577,3 +577,51 @@ the build starts (owner wants cross-lane discussion on majors like this):**
 - Default pod was restarted once (wedged async test continuation — my
   overlapping run-ns! calls, the documented anti-pattern); fresh boot
   verified, roster resumed.
+
+### 2026-07-03 — cluster build LANDED (eval lane; post-hoc review invited)
+
+- **All six items done** (first session died at `8a035be9` with items 1/2/4
+  mostly in the snapshot; this session finished 3/5/6 + the wiring gaps).
+  Uncommitted on the shared tree — files: `bin/seon`,
+  `src/seon/web/router.cljs`, `src/seon/agent/ctx.cljs`,
+  `src/seon/agent/ctx/render_fns.cljs` (see the flag below), docs.
+- **db-name = CLUSTER NAME (C15 closed pending sha).** The ONE derivation is
+  `seon.store.wire/cluster-name` (basename of `SEON_CLUSTER_DIR`; config
+  over env was moot — the config.cljs deletion in the snapshot was the
+  test-hygiene unit's debug-capture removal, unrelated). `bin/seon` now
+  passes `--db-name` to the wire-server; `-main` opens the ambient conn
+  THROUGH the registry (one open path). Live: feed logs `db acme` /
+  `db probe1` — no socket artifact anywhere.
+- **Supervisor wire ops** `list-dbs` / `remove-db` (+ `registry/delete-db!`)
+  — UDS/7891-REPL only, ambient-cluster refusal; NOTHING pod-side wraps
+  them, agents can't see other clusters by construction.
+- **`bin/seon cluster create <n> [--ephemeral]` / `destroy <n>`** — create
+  ready-gates the wire-server (C16 absorbed) then spawns `pod-<n>`
+  (ephemeral HTTP port, its own `SEON_CLUSTER_DIR`; db ensured `:file` at
+  pod boot via `ensure-cluster-db!`); destroy = stop pod → REPL
+  `registry/delete-db!` → `rm -rf data/clusters/<n>/` incl. `blobs/`.
+  `cluster reset` + bin/acme unregressed (acme reset green under
+  `--db-name acme`, pod 200 on 7980). NOTE: acme + any pre-existing store
+  needed one reset (store `:id` now hashes the cluster name).
+- **`/solve` scratch machinery DELETED → `POST /agents/run`** (the one
+  composition door, prior session's serve.cljs work + this session's router
+  re-point). Delta for the harness re-point (follow-up unit, mine):
+  path → `/agents/run`; NEW optional `"agent_id"` (reuse, survives pod
+  restart — the planning row's prerequisite); `turns`/`evals` now scoped to
+  the request's window; unknown agent_id / failed mint → 422. Same response
+  keys otherwise.
+- **Turn capture composes per-cluster:** probe1's db carried
+  `rendered-as-of` + prompt/reply blob refs; blobs under
+  `data/clusters/probe1/blobs/`; `inspect/turn` returned `ok? true` +
+  blob-read tokens INSIDE the ephemeral pod (driven through the door with
+  agent-id reuse).
+- **Boot latency create→ready: 23.5s cold / 9.3s / 9.3s warm.** No pool.
+- **Live proof end-to-end:** probe1 created → DeepSeek task → reply "391"
+  `:completed` (2 turns, 15.3s) → reuse drive → destroy → registry back to
+  `[:default]`, dir gone; default cluster untouched throughout.
+- **FLAG (tooling): fixed a cold-boot breaker in YOUR in-flight
+  `render_fns.cljs`** — `:seon.ns/name` referenced at load before its
+  registration (ctx requires render-fns, so render-fns loads first); every
+  fresh pod died, hot reloads masked it. Registration MOVED to
+  render_fns.cljs (ctx comment updated). It blocked ephemeral-cluster
+  creation, hence fixed in-flight — please fold into the auto-run unit.
