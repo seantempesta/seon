@@ -75,12 +75,6 @@
 ;; converts to tokens); the full prompt is never a datom — it lives in the
 ;; blob store via `:seon.agent.turn/prompt-blob` below.
 (schema/register! :seon.agent.turn/prompt-chars :int)
-;; RETIRED writer (C17, 2026-07-02): the gated seon.debug file-tree capture
-;; is deleted; nothing writes this attr anymore. The registration stays
-;; ONLY because seon.client's boot schema install list still names it
-;; (client.cljs is owned by the in-flight unification sweep) and existing
-;; stores carry historical datoms. Remove together with that install row.
-(schema/register! :seon.agent.turn/prompt-file  :string)
 ;; Observability capture — ALWAYS ON, no debug flag (observability.md).
 ;; `rendered-as-of` is the ONE coordinate tx-meta cannot provide: the
 ;; PRE-turn basis-t of the frozen db the prompt rendered from (other
@@ -118,7 +112,6 @@
    [:seon.agent.turn/run          {:optional true} :seon.agent.turn/run]
    [:seon.agent.turn/scheduled?   {:optional true} :seon.agent.turn/scheduled?]
    [:seon.agent.turn/prompt-chars {:optional true} :seon.agent.turn/prompt-chars]
-   [:seon.agent.turn/prompt-file  {:optional true} :seon.agent.turn/prompt-file]
    [:seon.agent.turn/rendered-as-of {:optional true} :seon.agent.turn/rendered-as-of]
    [:seon.agent.turn/prompt-blob  {:optional true} :seon.agent.turn/prompt-blob]
    [:seon.agent.turn/reply-blob   {:optional true} :seon.agent.turn/reply-blob]

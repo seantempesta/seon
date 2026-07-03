@@ -452,12 +452,13 @@
    :seon.agent.turn/id
    :seon.agent.turn/at
    :seon.agent.turn/status
-   ;; The full prompt is a logs/prompts/<agent>/<turn>.txt BLOB (three-
-   ;; tier storage); the datoms are the char-count projection + the
-   ;; file pointer. :seon.agent.turn/prompt-text RETIRED 2026-06-09 (was
-   ;; silently cap-edn-truncated at 16,406 chars — useless evidence).
+   ;; The full prompt lives in the blob store via the turn's
+   ;; :seon.agent.turn/prompt-blob ref (three-tier storage); the datom is
+   ;; the char-count projection (display converts to tokens).
+   ;; :seon.agent.turn/prompt-text RETIRED 2026-06-09 (silently truncated —
+   ;; useless evidence); :seon.agent.turn/prompt-file RETIRED 2026-07-02
+   ;; with the seon.debug file tree (C17 — blob capture subsumes it).
    :seon.agent.turn/prompt-chars
-   :seon.agent.turn/prompt-file
    ;; The run this turn belongs to (its derived current-turn = count turns
    ;; with this run).
    :seon.agent.turn/run
