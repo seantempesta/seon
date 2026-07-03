@@ -16,7 +16,7 @@ dual code paths — track everything and fix it"). Rules:
   rationale pointer and stay listed (they're re-audited, not forgotten).
 - ID CLAIM RULE (after three collisions): take the id from the NEXT-ID line
   below AND bump it IN THE SAME COMMIT — concurrent claimers merge-conflict
-  here on purpose, which is the arbitration. NEXT-ID: **C38**
+  here on purpose, which is the arbitration. NEXT-ID: **C40**
 - Depth lives in the source audits — this file is status, not analysis:
   [[../../prds/agent-ctx/research/magic-systems-audit-2026-07-02]] (M-rows) ·
   the tooling complexity sweep (C-rows, 2026-07-02 session) · unit reports.
