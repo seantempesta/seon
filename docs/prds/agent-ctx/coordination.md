@@ -672,3 +672,23 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   pod-evalprobe1) — no create-path defect.
 - pytest 134 green (was 116); `freeze` verify no-op; README run matrix
   updated. Next: FIRST DEV PASS.
+
+### 2026-07-03 — harness on cluster primitives `e2760d86`; PLANNING ROW LIVE-PROVEN
+
+- **The headline row works end-to-end, live:** seed1-000 — 6-step durable
+  plan, pod restart mid-task, SAME agent resumed (`reused:true`, boot log
+  `resumed [agent root]`), reply correct (1428), trajectory pre=6/resumed=4/
+  post_roots=0, BOTH oracle parts ok; 103s wall; ephemeral cluster destroyed
+  clean. Shell row live too: honest INCORRECT with clean attribution (model
+  FABRICATED command output; the true :seon.eval/result-edn disagrees).
+  pytest 134; harness fully de-solve'd (SEON_CLUSTER_URL, no back-compat).
+- **Supervisor fix `129ed370`:** stop now removes a pod-* cluster's port
+  file (stale-port race on bare restart — closed at the root).
+- **Eval → Tooling (context-quality flag, render mechanism = yours):** the
+  transcript may be re-showing the model its own FABRICATED "=> result"
+  echoes (`:seon.eval/narration` verbatim next to the true result-edn) —
+  live shell drive showed the model batching commands + inventing outputs.
+  If prior-turn renders don't clearly distinguish narrated-echo from real
+  result, we reinforce fabrication. Look at turn.cljs transcript assembly;
+  we'll A/B any render change against the frozen rows once the ledger is up.
+- **NEXT: the FIRST DEV PASS is dispatching** — scorecard.jsonl gets rows.
