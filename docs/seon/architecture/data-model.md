@@ -469,22 +469,51 @@ ROW's agent-ref, never of the block and never of a stored `:kind`:
 
 Same block registration in both cases; the render fn scopes by WHAT it queries.
 
+**The ref direction is settled: per-agent data points DATA→AGENT** (the row
+carries the scoping ref, e.g. `:my.plan/agent`; there is no `:seon.agent/plan`).
+Grounds, in force order:
+
+1. **Schema authority.** The scoping ref registers in the OWNING `my.*` ns — the
+   ns IS the schema authority. An agent-side attr would force the core
+   `seon.agent` schema to learn every `my.*` domain (inverted dependency); with
+   data→agent, adding a per-agent domain = one new ns, the core stays closed.
+2. **Write locality.** Many rows → one agent. An agent-side
+   cardinality-many vector would rewrite the HOT agent entity (the one the
+   run/turn FSM fences on) on every domain write; data→agent writes only the new
+   rows — `my.plan/plan!` stays one flat tempid tx that never touches the agent.
+3. **Query parity.** One VAET-indexed ref reads both ways: forward
+   `[?t :my.plan/agent ?a]`, reverse pull `:my.plan/_agent`. An owner-side
+   vector adds no query power.
+4. **Scope-by-signature** ([[context]]) falls out: the verb that declares
+   `:seon.agent/id` stamps and filters the data-side ref.
+
+**Agent-retract semantics (no cascade, by design):** agents are terminated
+(`:seon.agent/terminated-at`), not retracted. If an agent entity IS retracted,
+datahike's `retract-entity` (`transaction.cljc:897`) also retracts every
+incoming v-datom — the scoping edges vanish and the rows are ORPHANED: their own
+datoms survive, they match no agent-scoped read, and history keeps everything
+(`db/as-of` recovers). Component cascade is reserved for OWNED bounded sets
+(`:seon.agent/ctx`, `:seon.agent/schedules`), never for open-ended domain data.
+
 ### 5.2 my.kb — the global knowledge base (no agent ref)
 
 `my.kb` is the shared, queryable manual every agent reads — the DB's own
-self-documentation. Rows carry no agent ref, so the base is global.
+self-documentation. No attribute in the ns carries an agent ref, so the base is
+global: every fn signature omits `:seon.agent/id` (scope-by-signature, read the
+arglist). The worked shape is claim + graded provenance:
 
 ```clojure
-;; ns my.kb — global: no agent-ref attribute exists on the entity.
-(schema/register! :my.kb.shared/id    [:string {:seon.db/identity true}])
-(schema/register! :my.kb.shared/title :string)
-(schema/register! :my.kb.shared/body  :string)            ; markdown
-(schema/register! :my.kb.shared
-  [:map {:seon.db/entity true}
-   [:my.kb.shared/id    :my.kb.shared/id]
-   [:my.kb.shared/title :my.kb.shared/title]
-   [:my.kb.shared/body  :my.kb.shared/body]])
+;; ns my.kb — global: no agent-ref attribute exists on any row.
+(schema/register! ::source-path :string)     ; file the fact was read from
+(schema/register! ::source-line :int)        ; 1-based first line of a range
+(schema/register! ::verified-at :inst)
+(schema/register! ::confidence  [:enum :verified :inferred])
+(schema/register! ::claim [:string {:seon.db/identity true}])  ; upsert key
 ```
+
+(`my.kb.shared` — the append-only shared-instructions singleton — is the one
+declared entity kind there: `::shared` with an `::instructions` component
+vector.)
 
 ### 5.3 my.plan — the per-agent planning graph
 
@@ -516,17 +545,24 @@ retry through. Each attribute below targets one of those measured failures.)
 | `:my.plan/message` | `:seon.db/ref` | optional; → the inbound message it tracks |
 
 ```clojure
-;; ns my.plan — per-agent dependency graph.
-(schema/register! :my.plan
+;; ns my.plan — per-agent dependency graph. The entity kind is
+;; :my.plan/step; required = what step!/plan! write unconditionally.
+(schema/register! ::step
   [:map {:seon.db/entity true}
-   [:my.plan/id      :my.plan/id]
-   [:my.plan/title   :my.plan/title]
-   [:my.plan/status  :my.plan/status]
-   [:my.plan/agent   :my.plan/agent]
-   [:my.plan/parent  {:optional true} :my.plan/parent]
-   [:my.plan/needs   {:optional true} :my.plan/needs]
-   [:my.plan/goal    {:optional true} :my.plan/goal]
-   [:my.plan/expect  {:optional true} :my.plan/expect]])
+   [::id           ::id]
+   [::title        ::title]
+   [::status       ::status]
+   [::agent        ::agent]          ; the DATA→AGENT scoping ref
+   [::created-at   ::created-at]
+   [::description  {:optional true} ::description]
+   [::goal         {:optional true} ::goal]
+   [::expect       {:optional true} ::expect]
+   [::pace         {:optional true} ::pace]
+   [::from         {:optional true} ::from]
+   [::message      {:optional true} ::message]
+   [::parent       {:optional true} ::parent]
+   [::needs        {:optional true} ::needs]
+   [::completed-at {:optional true} ::completed-at]])
 ```
 
 **Everything about progress and position is DERIVED — nothing rolls up a stored

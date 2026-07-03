@@ -87,20 +87,30 @@ Tooling-lane build issues:
   "registered in the first-loading ns" rule); ctx.cljs comment updated.
   Review + fold into your auto-run unit.
 
-- **SCI-bounding fallback on `my.plan.internal/plan-block`** (eval lane,
-  evidence attached 2026-07-02): fresh boot logs "Unable to resolve symbol:
-  db/*conn*" under SCI bounding → the tile renders on the UNBOUNDED compiled
-  path (a hang there would wedge the pod). Candidate root: `:seon.ns/source`
-  require aliases not stored. Issue:
-  `docs/seon/orchestrator/issues/sci-bounding-fallback-plan-block.md`.
+- ~~**SCI-bounding fallback on `my.plan.internal/plan-block`**~~ — ✅ FIXED
+  2026-07-02 (issue note `sci-bounding-fallback-plan-block.md`, status
+  completed: `full-source-ns?` stores real `my.*.internal` source; unbounded
+  fallback DELETED, fail-loud `:seon/error` block). Re-verified on the DEFAULT
+  cluster 2026-07-03: fresh `cluster reset` boot + `/` + `/agent/root` +
+  `/agent/root/debug` fetches WITH live plan data → **zero** "could not run
+  under SCI bounding" lines in `logs/pod.log`; the plan block rendered
+  (`PLAN «…»` anchor + frontier) bounded.
 
 - ~~**`my.plan` verbs are in `seon.instrument/skip-syms`**~~ — ✅ RESOLVED
   (2026-07-02): removed from skip-syms; the verbs ride the one injecting
   wrapper and declare `:seon.agent/id` (the ambient `scoped-agent` read is
   deleted; semantic failures still return `::ok?` envelopes; shape-invalid
   input surfaces as the structured instrument error at the eval boundary).
-- **The agent↔`my.plan`-entity ref direction** — a design detail to nail during
-  the entity-ref build.
+- ~~**The agent↔`my.plan`-entity ref direction**~~ — ✅ SETTLED (2026-07-02,
+  roadmap tooling item 4): **DATA→AGENT** (`:my.plan/agent`; no
+  `:seon.agent/plan`). Grounds: schema authority stays in the owning `my.*` ns
+  (core never learns a domain), write locality (no hot-agent-entity rewrites),
+  VAET query parity (reverse pull `:my.plan/_agent`), scope-by-signature.
+  No cascade: retracting an agent retracts the incoming scoping edges and
+  ORPHANS the rows (datahike `retract-entity` v-datoms, live-proven);
+  component cascade stays reserved for owned bounded sets. Doc:
+  data-model.md §5.1/§5.3; test:
+  `test/my/plan_test.cljs` `entity-ref-direction-and-agent-retract-semantics`.
 
 Post-merge units (slotted, both lanes care):
 

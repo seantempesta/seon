@@ -78,15 +78,35 @@ substrate):
    Follow-up queued: the gym driver still reads the gated `seon.debug`
    prompt.txt file tree — migrate it to prompt blobs, then retire the
    file tree (dual-path registry row).
-4. **`my.*` as namespace-scribed entities** — the agent entity refs a `my.plan`
-   entity whose schema is scribed in the `my.plan` ns; scope declared by
-   signature. `my.plan` the worked example.
+4. **`my.*` as namespace-scribed entities** — ✅ COMPLETE (2026-07-03).
+   Ref-direction SETTLED: **DATA→AGENT** (`:my.plan/agent`, registered in
+   `my.plan` — the owning ns is the schema authority; there is no
+   `:seon.agent/plan`, the core agent schema never learns a domain). The
+   existing direction WAS the design; the unit formalized it: the
+   `:my.plan/step` entity declaration is now honest (required
+   id/title/status/agent/created-at — what step!/plan! write
+   unconditionally; from/completed-at joined the optionals), and the
+   list-open PROJECTION got its own `::open-step` schema (the old conflated
+   shape also mis-specced a pulled `::message` ref as a transact-side ref).
+   No cascade by design: retracting an agent retracts the incoming scoping
+   edges (datahike `retract-entity` v-datoms, transaction.cljc:897) and
+   orphans the rows out of every scoped read (history recovers) — component
+   cascade stays reserved for owned bounded sets. `my.kb` checked: global by
+   signature everywhere, consistent. Live-proven on a fresh default cluster:
+   plan! under with-agent stamps the ref; both-direction pulls
+   (`:my.plan/agent` / `:my.plan/_agent`); no-id injection stamps the scoped
+   agent; agent-retract orphaning observed in the store; the plan block
+   renders in root's ctx (`/agent/root/debug`) with ZERO SCI-bounding
+   warnings. Docs: data-model.md §5.1–5.3; test:
+   `test/my/plan_test.cljs` `entity-ref-direction-and-agent-retract-semantics`.
 5. **Canvas = last-updated tile** (derived default, pin to override) — the code
    for the ui.md decision.
-6. **Queued tool defects** — fresh-world `my.kb` empty render; turn-6 recall
-   visibility; SCI-bounding fallback on `my.plan.internal/plan-block`
-   (`docs/seon/orchestrator/issues/sci-bounding-fallback-plan-block.md` —
-   unresolvable `db/*conn*` alias drops the tile onto the UNBOUNDED path).
+6. **Queued tool defects** — fresh-world `my.kb` empty render (✅ resolved,
+   see agent-ctx CLAUDE.md); turn-6 recall visibility; ~~SCI-bounding
+   fallback on `my.plan.internal/plan-block`~~ (✅ fixed 2026-07-02, issue
+   note completed; re-verified on the default cluster 2026-07-03 — zero
+   warnings on a fresh boot with live plan renders; alias STORAGE residue
+   tracked as registry M4).
 
 Stability queue (interleaved, one per feature unit above; owner-agreed
 2026-07-02 — each fix REUSES an existing mechanism, no new ones):
