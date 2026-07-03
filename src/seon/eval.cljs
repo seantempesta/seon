@@ -1707,20 +1707,23 @@
   [var-map]
   (true? (:test var-map)))
 
+(declare changed-defs)
+
 (defn- collect-auto-test-targets
   "Phase 4 (mvp-completion-plan 2026-05-27): return the set of FQ test
    syms to run after a successful eval. Two sources:
 
    - Tests newly defined in THIS eval (a fresh `(deftest …)` form). The
-     symbol comes from `defs-since` filtered via [[deftest-def?]].
+     symbol comes from the [[changed-defs]] diff filtered via
+     [[deftest-def?]].
    - Tests in the DB whose `:seon.test/source` mentions any fn newly
      defined in THIS eval. Substring match — v0 heuristic, see
      `seon.test.runner/tests-referring-to`.
 
    Result is a set so a deftest that also matches the substring scan
    (the test source mentions its own sym) only runs once."
-  [compile-state defs-before]
-  (let [new-defs    (analyzer-info/defs-since defs-before compile-state)
+  [compile-state defs-before source eval-ns]
+  (let [new-defs    (changed-defs compile-state defs-before source eval-ns)
         new-tests   (for [{:keys [var-map]} new-defs
                           :when (deftest-def? var-map)]
                       (symbol (str (:name var-map))))
@@ -1740,9 +1743,12 @@
    `:malli/schema` metadata parsed cleanly (Phase 3). `async?` (from the
    var-map's `:async` meta) routes the fn to the await-then-validate
    wrapper in [[instrument-tee-fns!]] instead of malli's stock synchronous
-   wrapper, which would false-fail on the Promise return."
-  [compile-state defs-before]
-  (for [{:keys [ns sym var-map]} (analyzer-info/defs-since defs-before compile-state)
+   wrapper, which would false-fail on the Promise return. Uses
+   [[changed-defs]] so a BODY-ONLY redefinition (digest unchanged) still
+   re-instruments — the redef replaced the wrapped var with a fresh
+   unwrapped fn, so skipping it would silently drop validation+injection."
+  [compile-state defs-before source eval-ns]
+  (for [{:keys [ns sym var-map]} (changed-defs compile-state defs-before source eval-ns)
         :let [schema-form (:malli/schema (:meta var-map))
               async?      (boolean (:async (:meta var-map)))]
         ;; Opt-out (seon.instrument/async-unwrappable? — structural, computed
@@ -1827,6 +1833,37 @@
     (boolean (and (= 1 (count forms))
                   (seq? (first forms))
                   (contains? '#{defn defn-} (first (first forms)))))))
+
+(defn- defn-form-name
+  "The NAME symbol of a single `(defn …)`/`(defn- …)` `source`, or nil.
+   Read-only; nil on anything [[defn-form?]] rejects."
+  [source]
+  (when (defn-form? source)
+    (let [nm (second (first (read-all-forms source)))]
+      (when (symbol? nm) nm))))
+
+(defn- changed-defs
+  "`analyzer-info/defs-since` PLUS the BODY-ONLY-REDEF rescue.
+
+   `var-digest` covers only the load-bearing META (arglists/doc/schema/
+   private) — a redefinition that changes ONLY the body produces an
+   IDENTICAL digest, so `defs-since` reports nothing, the tee never
+   refreshes `:seon.fn/source`, and the SCI cage renders the OLD body
+   forever (live-caught 2026-07-02: an agent fixed its broken render fn
+   and the fix never took). When `source` IS a single `(defn …)` whose
+   sym produced no diff row, synthesize its def entry from the live
+   analyzer state (`eval-ns` = the ns the form ran in) so the tee,
+   instrumentation, and auto-test passes all see the redefinition.
+   Idempotent with a real diff row (guarded by sym)."
+  [compile-state defs-before source eval-ns]
+  (let [new-defs (analyzer-info/defs-since defs-before compile-state)]
+    (or (when (symbol? eval-ns)
+          (when-let [nm (defn-form-name source)]
+            (when (not-any? #(= nm (:sym %)) new-defs)
+              (when-let [vm (get-in @compile-state
+                                    [:cljs.analyzer/namespaces eval-ns :defs nm])]
+                (conj (vec new-defs) {:ns eval-ns :sym nm :var-map vm})))))
+        new-defs)))
 
 ;; ============================================================
 ;; Prose-in-parens demotion (#88). When an agent writes English prose
@@ -2058,8 +2095,11 @@
    throws and sinks the WHOLE record-eval! tx (the run-4 silent
    data-loss bug; data namespaces like `:workout` have no `:seon.ns`
    row)."
-  [{:keys [compile-state defs-before schemas-before source at]}]
-  (let [new-defs    (analyzer-info/defs-since defs-before compile-state)
+  [{:keys [compile-state defs-before schemas-before source at eval-ns]}]
+  (let [;; changed-defs = defs-since + the body-only-redef rescue (a body
+        ;; edit with unchanged meta is digest-invisible; without the rescue
+        ;; the stored :seon.fn/source goes permanently stale).
+        new-defs    (changed-defs compile-state defs-before source eval-ns)
         new-schemas (set/difference (schema/current-keys) schemas-before)
         fn-entities (for [{:keys [ns var-map]} new-defs
                           ;; Classify on the FORM HEAD, not the analyzer's
@@ -3213,7 +3253,8 @@
                                 :defs-before    defs-before
                                 :schemas-before schemas-before
                                 :source         source
-                                :at             at}))
+                                :at             at
+                                :eval-ns        @current-ns}))
               ;; Agent-no-override-core guard (db-is-the-running-
               ;; system PRD; Sean): drop any tee'd :seon.fn row that
               ;; would REDEFINE an existing compiled-core fn (a sym
@@ -3276,7 +3317,8 @@
           (when (::ok? result)
             (try
               (instrument-tee-fns!
-                (collect-instrument-targets compile-state defs-before))
+                (collect-instrument-targets compile-state defs-before
+                                            source @current-ns))
               (catch :default e
                 (js/console.warn
                   "[seon.eval/eval-batch!] auto-instrument failed:"
@@ -3291,7 +3333,7 @@
             ;; runner errors don't abort the batch.
             (when-not outer-test-run?
               (let [targets (collect-auto-test-targets
-                              compile-state defs-before)]
+                              compile-state defs-before source @current-ns)]
                 (when (seq targets)
                   (try
                     (await
