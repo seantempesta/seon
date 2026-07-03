@@ -2175,7 +2175,8 @@
                           ;; stays a RENDER attr below; it no longer gates
                           ;; row creation.
                           :when (defn-form? source)
-                          :let [{:keys [sym fn-var? arglists doc private? spec]}
+                          :let [{:seon.analyzer-info/keys
+                                 [sym fn-var? arglists doc private? spec]}
                                 (analyzer-info/var-projection var-map)
                                 ;; Phase 3 (mvp-completion-plan 2026-05-27): if
                                 ;; `:malli/schema` metadata is present, validate
@@ -2254,7 +2255,8 @@
         ;; `tests-referring-to` later substring-scans it to find tests
         ;; that mention a redefined fn.
         test-entities (for [{:seon.analyzer-info/keys [ns var-map]} new-defs
-                            :let [{:keys [sym]} (analyzer-info/var-projection var-map)]
+                            :let [{:seon.analyzer-info/keys [sym]}
+                                  (analyzer-info/var-projection var-map)]
                             ;; A :seon.test row ONLY for a real `(deftest …)`:
                             ;; deftest-def? TRUE *and* defn-form? FALSE. A
                             ;; usage-example `(defn f {:test …} …)` also carries

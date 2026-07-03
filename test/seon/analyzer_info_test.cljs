@@ -98,3 +98,32 @@
 (deftest ns-require-edges-empty-for-unknown-ns
   (is (= #{} (ai/ns-require-edges (atom {:cljs.analyzer/namespaces {}}) 'no.such))
       "unknown / never-eval'd ns yields the empty edge set"))
+
+;; ---------------------------------------------------------------------------
+;; var-projection — owner-ns keys (C34): the projection map speaks
+;; :seon.analyzer-info/* like every internal envelope, and validates
+;; against its registered schema.
+;; ---------------------------------------------------------------------------
+
+(deftest var-projection-speaks-owner-ns-keys
+  (let [proj (ai/var-projection
+               {:name 'my.ns/foo :fn-var true
+                :arglists '(quote ([x]))
+                :meta {:doc "a fn" :private false
+                       :malli/schema [:=> [:cat :int] :int]}})]
+    (is (m/validate :seon.analyzer-info/var-projection proj)
+        "validates against the registered ::var-projection schema")
+    (is (= {:seon.analyzer-info/sym      "my.ns/foo"
+            :seon.analyzer-info/fn-var?  true
+            :seon.analyzer-info/arglists "([x])"
+            :seon.analyzer-info/doc      "a fn"
+            :seon.analyzer-info/private? false
+            :seon.analyzer-info/spec     "[:=> [:cat :int] :int]"}
+           proj)
+        "every key is :seon.analyzer-info/* — no bare keys; single-arity
+         (quote …) arglists stripped")
+    (is (not (contains? (ai/var-projection {:name 'my.ns/bare :fn-var true
+                                            :arglists '(quote ([x]))
+                                            :meta {}})
+                        :seon.analyzer-info/spec))
+        "unspecced var → ::spec ABSENT (optional = absent, never nil)")))

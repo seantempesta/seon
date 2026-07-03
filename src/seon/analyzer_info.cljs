@@ -48,17 +48,19 @@
                    [::var-map [:map-of :any :any]]])
 
 ;; Output of `var-projection`. Matches `:seon.fn/*` attrs per v1.md §2.2.
+;; Owner-ns keys (C34, C33-residue) — this ns produces the map, so the
+;; keys speak `:seon.analyzer-info/*` like every internal envelope.
 (schema/register! ::var-projection
                   [:map
-                   [:sym :string]
-                   [:fn-var? :boolean]
-                   [:arglists :string]
-                   [:doc :string]
-                   [:private? :boolean]
-                   ;; `:spec` = `(pr-str (m/form <:malli/schema>))` when
+                   [::sym :string]
+                   [::fn-var? :boolean]
+                   [::arglists :string]
+                   [::doc :string]
+                   [::private? :boolean]
+                   ;; `::spec` = `(pr-str (m/form <:malli/schema>))` when
                    ;; present and parseable; ABSENT = unspecced (or the
                    ;; schema failed to parse — caller stamps schema-error).
-                   [:spec {:optional true} :string]])
+                   [::spec {:optional true} :string]])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Internals
@@ -338,9 +340,9 @@
         spec        (when (some? schema-meta)
                       (try (-> schema-meta m/schema m/form pr-str)
                            (catch :default _ nil)))]
-    (cond-> {:sym       (str name)
-             :fn-var?   (boolean fn-var)
-             :arglists  (pr-str al)
-             :doc       (or (:doc meta) "")
-             :private?  (boolean (:private meta))}
-      (some? spec) (assoc :spec spec))))
+    (cond-> {::sym       (str name)
+             ::fn-var?   (boolean fn-var)
+             ::arglists  (pr-str al)
+             ::doc       (or (:doc meta) "")
+             ::private?  (boolean (:private meta))}
+      (some? spec) (assoc ::spec spec))))
