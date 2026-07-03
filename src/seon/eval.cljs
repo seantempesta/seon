@@ -687,6 +687,34 @@
                             :where [?e :seon.ns/name ?ns]]
                           db (keyword ns-sym)))))
 
+(declare stored-require-edges)
+
+(defn- synthesized-ns-head
+  "An `(ns …)` head string rebuilt from `ns-kw`'s STORED require-edges.
+
+   For a member-bearing ns row with NO `:seon.ns/source` — the agent's
+   HOME ns, whose aliases are wired at runtime by [[setup-agent-ns!]]
+   (which runs AFTER the boot replay), never by an agent-eval'd `(ns …)`
+   form. Without a head the reconstituted load unit evals from
+   `cljs.user`: its defns land in the WRONG ns and an auto-resolved
+   `::alias/kw` in a member source cannot even READ (live-caught
+   2026-07-03: the first `::db/tx-data` home-ns fn to survive the C37
+   gate failed the whole unit's replay). The M4 structural store carries
+   exactly the needed facts — rebuild the `(:require …)` clause from
+   `:seon.ns/require-edges` datoms."
+  [db ns-kw]
+  (let [specs (map (fn [{:seon.ns.require/keys [target alias refers refer-all?]}]
+                     (cond-> [(symbol (name target))]
+                       (symbol? alias) (conj :as alias)
+                       (seq refers)    (conj :refer (vec (sort refers)))
+                       refer-all?      (conj :refer :all)))
+                   (sort-by :seon.ns.require/target
+                            (stored-require-edges db ns-kw)))
+        n     (symbol (name ns-kw))]
+    (pr-str (if (seq specs)
+              (list 'ns n (apply list :require specs))
+              (list 'ns n)))))
+
 (defn reconstitute-ns-source
   "One loadable source STRING for agent-authored namespace `ns-kw`.
 
@@ -696,7 +724,15 @@
         form VERBATIM. We use the stored ns form (not a rebuilt one)
         because it carries the `:as` aliases an aliased ref like `b/bv`
         needs — a rebuilt form without `:as b` breaks with `b is not
-        defined`.
+        defined`. When the row has NO source but DOES have fn/test
+        members (the agent HOME ns — its requires are wired at runtime
+        by `setup-agent-ns!`, which runs after the boot replay), the
+        head is SYNTHESIZED from the stored `:seon.ns/require-edges`
+        ([[synthesized-ns-head]]) so members land in their ns and
+        `::alias/kw` literals read. A member-less sourceless row (a
+        data-ns / schema-key stub, C30) stays headless — synthesizing
+        `(ns seon.fn)`-style heads for keyword-namespace stubs would
+        mint junk analyzer namespaces.
      + every CURRENT member source for the ns: `:seon.fn/source` rows,
        `:seon.schema/source` rows that pass [[registration-call-source?]]
        (agent `register!` calls, not boot shape literals), and
@@ -730,8 +766,11 @@
         fns     (member :seon.fn/source     :seon.fn/ns)
         schemas (filter registration-call-source?
                         (member :seon.schema/source :seon.schema/ns))
-        tests   (member :seon.test/source   :seon.test/ns)]
-    (->> (concat [ns-src] fns schemas tests)
+        tests   (member :seon.test/source   :seon.test/ns)
+        head    (or ns-src
+                    (when (seq (concat fns tests))
+                      (synthesized-ns-head db ns-kw)))]
+    (->> (concat [head] fns schemas tests)
          (remove str/blank?)
          (map str/trim)
          (distinct)

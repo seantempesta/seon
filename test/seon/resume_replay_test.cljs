@@ -198,6 +198,75 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
+;; C37 resume leg — a SOURCELESS member-bearing ns row (the agent HOME ns:
+;; its requires are wired at runtime by setup-agent-ns!, which runs AFTER
+;; the boot replay, so no :seon.ns/source is ever stored) reconstitutes
+;; with a head SYNTHESIZED from the stored :seon.ns/require-edges. Without
+;; it the unit is headless: member defns land in cljs.user and a member
+;; using `::alias/kw` cannot even READ (live-caught 2026-07-03 — the first
+;; ::-keyword home-ns fn to survive the C37 gate failed the whole unit's
+;; replay with 'Invalid keyword: ::db/tx-data').
+;; ---------------------------------------------------------------------------
+
+(deftest sourceless-home-ns-resumes-via-synthesized-head
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+          (fn [cs]
+            (-> (client/open-agent-conn!)
+                (.then
+                  (fn [conn]
+                    (binding [db/*conn* conn]
+                      (let [uniq  (str "my.agent.kwresume" (rand-int 1000000000))
+                            ns-kw (keyword uniq)]
+                        (-> (db/transact!
+                              {:seon.db/tx-data
+                               ;; NO :seon.ns/source — edges only (the home-ns
+                               ;; shape the setup-agent-ns! tee writes).
+                               [{:seon.ns/name ns-kw
+                                 :seon.ns/require-edges
+                                 [{:seon.ns.require/target :clojure.string
+                                   :seon.ns.require/alias  'pstr}]}
+                                {:seon.fn/sym (str uniq "/kw-resumer")
+                                 :seon.fn/ns  [:seon.ns/name ns-kw]
+                                 :seon.fn/source
+                                 "(defn kw-resumer [m] [(::marker m) (::pstr/mk m)])"
+                                 :seon.fn/arglists "([m])"
+                                 :seon.fn/doc ""
+                                 :seon.fn/private? false}]})
+                            (.then
+                              (fn [_]
+                                (let [src (seval/reconstitute-ns-source @conn ns-kw)]
+                                  (testing "the head is synthesized from the stored edges"
+                                    (is (str/starts-with? src (str "(ns " uniq))
+                                        (str "head present — got: " (subs src 0 60)))
+                                    (is (str/includes? src "[clojure.string :as pstr]")
+                                        "the :as alias is carried")))
+                                (client/replay-program-graph!
+                                  {:seon.client/conn conn
+                                   :seon.client/compile-state cs
+                                   :seon.client/agent-id "kw-resume-test"})))
+                            (.then
+                              (fn [stats]
+                                (is (= 0 (:seon.client/replay-n-fail stats))
+                                    (str "the ::-keyword home-ns unit loads — "
+                                         (pr-str stats)))
+                                (seval/eval cs
+                                            (str "(" uniq "/kw-resumer"
+                                                 " {" ns-kw "/marker 1"
+                                                 " :clojure.string/mk 2})")
+                                            {:seon.eval/starting-ns 'cljs.user
+                                             :seon.eval/analyze-deps? false})))
+                            (.then
+                              (fn [r]
+                                (is (:seon.eval/ok? r)
+                                    "resumed fn is callable IN ITS OWN ns")
+                                (is (= [1 2] (:seon.eval/value r))
+                                    "::marker and ::pstr/mk resolved against the synthesized head")))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
 ;; Fail-loud load errors — the warn must name the actual defect, not
 ;; cljs.js's literal "ERROR" wrapper (live incident 2026-06-10: every
 ;; :my.workout/* load failure logged as `failed: ERROR`).
