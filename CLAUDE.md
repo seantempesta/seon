@@ -377,6 +377,27 @@ git-ignored by location; it is never committed. The whole feature is gated by
 `SEON_EMBED`. Full verified usage, pricing, and the content-addressed cache/archive
 design: `docs/prds/embeddings/vertex-usage-reference-2026-06-25.md`.
 
+### DiffusionGemma provider — RunPod OR a local MLX worker (optional)
+
+The `:diffusiongemma` LLM provider (`seon.ai.diffusiongemma`) is **OFF by
+default** — the shipped provider is `deepseek`. It is opt-in via
+`SEON_AI_PROVIDER=diffusiongemma` (or per-agent routing), and NOTHING in a
+default `.env` activates it. Do not switch it on as a side effect.
+
+`SEON_DG_ENDPOINT` selects the worker: a **bare id** (`"u50y7khhos5t7o"`)
+resolves under RunPod (`…/v2/{EP}`); a **full `http(s)://` URL** is used AS
+the worker base. That URL form is how a **local worker speaking the same
+wire contract** plugs in with zero seon changes — the reference one is
+`dg_mlx` (a from-scratch MLX port of DiffusionGemma block-diffusion for
+Apple Silicon; 8-bit, ~120 tok/s), which lives in its OWN repo
+(`~/ml/diffusion-gemma`, not this tree — it is model-inference infra, not
+seon core) and serves `POST /run` + `GET /status/{id}` on `127.0.0.1:17860`.
+Start it with `uv run python -m dg_mlx.worker`; a WARM worker pins the model
+in unified memory (tens of GB) until killed, so stop it when idle. One
+provider, one wire contract — the SAME `SEON_AI_PROVIDER=diffusiongemma`
+config runs against an A100/H100 on RunPod or the local Mac by swapping
+`SEON_DG_ENDPOINT` alone.
+
 ### Flow Topology (routing backbone) `[JVM track — paused]`
 
 In the JVM app, all cross-boundary calls — namespace function calls, database writes, REPL eval — route through `topology/request!` (core.async.flow): register promise → inject → step-fn → reply-router → deliver promise. See `docs/prds/unified-flow/design.md`. The **pod is core.async-free** — it uses native CLJS `^:async`/`await` instead.
