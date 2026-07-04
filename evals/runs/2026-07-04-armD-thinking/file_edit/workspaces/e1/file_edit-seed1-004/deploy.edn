@@ -1,0 +1,3 @@
+{:host "krill"
+ :port 8580 :replicas 9
+}
