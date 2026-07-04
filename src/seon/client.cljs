@@ -73,6 +73,7 @@
     [seon.ai.openai-compat :as openai]
     [seon.ai.diffusiongemma :as diffusiongemma]
     [seon.db :as db]
+    [seon.error :as error]
     [seon.eval :as seval]
     [seon.log :as log]
     ;; Render protocol — A-2. Required here so the build includes it.
@@ -2684,11 +2685,12 @@
    caught upstream brings the whole pod down by default — a tiny
    core bug becomes a denial-of-service.
 
-   This handler converts unhandled rejections into logged warnings and
-   keeps the process alive. The pod stays a 'mostly survives, surfaces
-   the error in logs' system rather than a 'one bad transact kills
-   everything' system. Per the user's reliability directive — operations
-   should return data, not exit codes.
+   This is THE NET (error-blame-strict-gate, RULED 2026-07-04): anything
+   escaping every catch becomes a `:seon.error/fault :core` DATOM via
+   `seon.error/record!` with zero per-site work — nothing can silently
+   vanish even before the catch-site sweep lands. Under the dial's
+   `:gate`/`:log` the pod keeps running (never-crash doctrine); under
+   `:crash` record! persists the datom first, then exits loudly.
 
    Individual call sites should still `.catch` and convert to data
    shapes (`{:ok? false :error ...}`) where it matters; this is the
@@ -2697,11 +2699,17 @@
   (.on js/process "unhandledRejection"
        (fn [reason _promise]
          (log/error-console! "seon.client" "unhandled promise rejection"
-                             (or reason "<no reason>"))))
+                             (or reason "<no reason>"))
+         (when-not (error/recorded? reason)
+           (error/record! {:seon.error/raw   reason
+                           :seon.error/fault :core}))))
   (.on js/process "uncaughtException"
        (fn [err _origin]
          (log/error-console! "seon.client" "uncaught exception"
-                             (or (.-message err) err)))))
+                             (or (.-message err) err))
+         (when-not (error/recorded? err)
+           (error/record! {:seon.error/raw   err
+                           :seon.error/fault :core})))))
 
 (defn -main
   {:malli/schema [:=> [:cat [:* :any]] :any]}

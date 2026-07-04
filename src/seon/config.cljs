@@ -225,12 +225,22 @@
    [:seon.eval/home-requires {:optional true} [:vector :any]]
    [:seon.agent/ctx {:optional true} [:vector :map]]])
 
+;; The core-fault escalation dial (error-blame-strict-gate, RULED
+;; 2026-07-04): what a `:core`-fault `seon.error/record!` does BEYOND
+;; persisting its datom. `:crash` = persist first, then loud exit (dev,
+;; after the catch-site sweep); `:gate` = pod stays alive, the CI-shaped
+;; wrappers (bin/test-cljs, dev hook) fail any run that accumulated one
+;; (the SHIPPED default); `:log` = datom + derived section only
+;; (prod/demo). `:agent` faults never escalate in ANY mode.
+(schema/register! :seon.config/on-core-error [:enum :crash :gate :log])
+
 (schema/register! :seon.config/manifest
   [:map
    [:seon.config/skills        {:optional true} :seon.config/skills-spec]
    [:seon.config/namespaces    {:optional true} :seon.config/namespaces-spec]
    [:seon.config/routes        {:optional true} [:vector :seon.config/route-spec]]
    [:seon.config/render        {:optional true} :seon.config/render]
+   [:seon.config/on-core-error {:optional true} :seon.config/on-core-error]
    [:seon.config/agent-context {:optional true} :seon.config/agent-context]
    [:seon.config/root-context  {:optional true} :seon.config/root-context]])
 
@@ -595,6 +605,26 @@
    `:seon.config.render/render-fn-token-cap`; 2000)."
   {:malli/schema [:=> [:cat] :int]} []
   (get (render-config) :seon.config.render/render-fn-token-cap 2000))
+
+;; `def` (NOT defonce) for the same hot-reload rotation reason as
+;; render-config-cache above; memoized per SEON_CONFIG within a process.
+(def ^:private on-core-error-cache (atom {}))
+
+(defn on-core-error
+  "The core-fault escalation dial: `:crash`, `:gate`, or `:log`.
+
+   Manifest `:seon.config/on-core-error`; default `:gate` (the SHIPPED
+   posture — pod never crashes, the CI-shaped wrappers fail runs that
+   accumulated a new `:core`-fault datom). Read by `seon.error/record!`
+   on every `:core` fault; memoized per SEON_CONFIG."
+  {:malli/schema [:=> [:cat] :seon.config/on-core-error]}
+  []
+  (let [k (env "SEON_CONFIG")]
+    (or (get @on-core-error-cache k)
+        (let [raw (get (load-manifest) :seon.config/on-core-error :gate)
+              v   (if (contains? #{:crash :gate :log} raw) raw :gate)]
+          (swap! on-core-error-cache assoc k v)
+          v))))
 
 (defn render-strict?
   "The FAIL-LOUD render dial.

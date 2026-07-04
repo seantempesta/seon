@@ -312,7 +312,7 @@
       {:seon.render.sci/error
        {:seon.error/message (str "auto-run block carries no runnable ::fn-sym ("
                                  (pr-str sym) ")")}}
-      (render-sci/agent-authored-sym? sym)
+      (err/agent-authored-sym? sym)
       (render-sci/invoke-bounded sym input view)
       :else
       (if-let [f (seval/lookup-value sym)]

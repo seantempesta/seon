@@ -577,10 +577,15 @@
    rounds (parent→A then parent→B) never accumulate."
   4)
 
-(defn- latest-user-at
+(defn latest-user-at
   "Wall-clock of the latest message FROM the user anywhere, or nil.
+
    Identity is the ref: a user message is one whose
-   `:seon.agent.message/from` resolves to a `:seon.user/id` entity."
+   `:seon.agent.message/from` resolves to a `:seon.user/id` entity. THE
+   \"since the latest user message\" cutoff every runtime check (and the
+   root-world core-faults section) shares — public so section fns
+   outside this registry reuse it instead of forking the query."
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]] [:maybe :inst]]}
   [db]
   (ffirst (db/query
             {:seon.db/db db

@@ -38,6 +38,7 @@
                [malli.instrument :as mi]
                [seon.config :as config]
                [seon.db :as db]
+               [seon.error :as error]
                [seon.error.instrument :as ei]])))
 
 #?(:clj
@@ -277,6 +278,44 @@
        (catch :default _ #{}))))
 
 #?(:cljs
+   (defn- wrapper-fault
+     "Refine a wrapper-arm `coarse` fault by the ERROR'S OWN content.
+
+      The instrumented `seon.eval` conduits (raw-eval, eval, …) are where
+      an AGENT form's failure first surfaces as a rejection, so the
+      wrapped fn's symbol alone ('what were we calling') misclassifies
+      agent typos as `:core` and reds the strict gate forever. Content
+      wins when it identifies the population:
+
+        - agent-form eval diagnostics (`:seon.eval/warning-type`, kind
+          `:compile`) → `:agent` — the agent's own error, already
+          enveloped for it downstream;
+        - a PROPAGATED malli contract violation → the VIOLATED fn's
+          population when agent-authored, else `:agent` when an agent
+          turn is in scope (the agent was the caller), else `coarse`.
+          Coarse at the boundary by design — misclassifications surface
+          as data (a `:core` datom whose frames are all `my.*`) and get
+          re-blamed as follow-up, not argued up front;
+        - anything else → `coarse` (unclassified bugs stay loud)."
+     [e coarse]
+     (try
+       (let [data (:seon.error/data (error/->map e))]
+         (cond
+           (or (some? (:seon.eval/warning-type data))
+               (= :compile (:seon.error/kind data)))
+           :agent
+
+           (ei/instrument-error? data)
+           (let [violated (:seon.error.malli/fn-sym data)]
+             (cond
+               (and violated (error/agent-authored-sym? violated)) :agent
+               (some? (db/current-agent-id))                       :agent
+               :else coarse))
+
+           :else coarse))
+       (catch :default _ coarse))))
+
+#?(:cljs
    (defn injecting-fschema
      "A malli function-schema OBJECT (not a form) for a single simple
       fixed-arity `:=>` schema — SYNC or `^:async`. Delegates every `Schema`/
@@ -300,11 +339,19 @@
       is the ONE injecting boundary — no second wrapper. Registering it (via
       `m/-register-function-schema!` with the `identity` transformer) makes
       malli's stock `mi/instrument!` reuse ALL its var-surgery and simply call
-      this `-instrument-f`."
-     {:malli/schema [:=> [:cat :any] :any]}
-     [inner-form]
+      this `-instrument-f`.
+
+      `fn-sym` (the wrapped fn's QUALIFIED symbol) decides the
+      `:seon.error/fault` population once, at register time — \"what were
+      we calling\": `my.*`/agent-authored → `:agent`, everything else →
+      `:core`. The async arms below call `seon.error/record!` with it so
+      both async failure modes become datoms regardless of caller
+      behavior (research: malli-instrument-error-data-2026-07-04 §4)."
+     {:malli/schema [:=> [:cat :any :qualified-symbol] :any]}
+     [inner-form fn-sym]
      (let [s        (m/schema inner-form)
-           inj-keys (declared-injectables s)]
+           inj-keys (declared-injectables s)
+           fault    (error/fault-for fn-sym)]
        (reify
          m/Schema
          (-validator [_] (m/-validator s))
@@ -348,12 +395,42 @@
                              {:input input :args args :schema s})))
                  (let [ret (apply f args)]
                    (if (and ret (fn? (.-then ret)))
-                     (.then ret (fn [v]
+                     ;; REJECTION arm FIRST (upstream of the .then, so an
+                     ;; output-violation throw below is not double-recorded):
+                     ;; a rejected Promise from an instrumented `^:async` fn
+                     ;; was previously observed by NO instrumentation layer.
+                     ;; record! persists the datom; the re-throw re-rejects
+                     ;; the chained Promise with the SAME reason, preserving
+                     ;; caller semantics (eval's auto-await / .catch still
+                     ;; see the original error).
+                     (-> ret
+                         (.catch (fn [e]
+                                   ;; ONE error → ONE datom: skip when an
+                                   ;; inner wrapper already recorded this
+                                   ;; propagating rejection.
+                                   (when-not (error/recorded? e)
+                                     (error/record!
+                                       {:seon.error/raw   e
+                                        :seon.error/fault (wrapper-fault e fault)}))
+                                   (throw e)))
+                         (.then (fn [v]
                                   (when (and wrap-out (not (vout v)))
-                                    (report :malli.core/invalid-output
-                                            {:output output :value v
-                                             :args args :schema s}))
-                                  v))
+                                    ;; An async invalid-output becomes a
+                                    ;; REJECTION, not a sync throw — visible
+                                    ;; only if the caller awaits/catches. So
+                                    ;; record! runs HERE, before the report
+                                    ;; throw rides the rejected Promise.
+                                    ;; No refinement: the wrapped fn ITSELF
+                                    ;; broke its output contract, so its own
+                                    ;; population is the right fault.
+                                    (try (report :malli.core/invalid-output
+                                                 {:output output :value v
+                                                  :args args :schema s})
+                                         (catch :default e
+                                           (error/record! {:seon.error/raw   e
+                                                           :seon.error/fault fault})
+                                           (throw e))))
+                                  v)))
                      (do (when (and wrap-out (not (vout ret)))
                            (report :malli.core/invalid-output
                                    {:output output :value ret
@@ -392,7 +469,10 @@
          (async-unwrappable? async? the-fn schema-form) nil
          ;; simple fixed-arity :=> (sync OR async) → the injecting wrapper.
          (and the-fn (-arrow-schema? schema-form) (-simple-fixed-arity-fn? the-fn))
-         (m/-register-function-schema! ns-sym fn-sym (injecting-fschema schema-form)
+         (m/-register-function-schema! ns-sym fn-sym
+                                       (injecting-fschema
+                                         schema-form
+                                         (symbol (str ns-sym) (str fn-sym)))
                                        {} :cljs identity)
          ;; sync variadic/multi-arity (or unresolvable var) → stock wrapper.
          :else

@@ -749,7 +749,7 @@
                 ;; section fns, and literal hiccup stay on the fast compiled
                 ;; `html-render` path untouched.
                 resp   (if (and (render-sci/bounding-enabled?)
-                                (render-sci/agent-authored-sym? value))
+                                (err/agent-authored-sym? value))
                          (let [r (render-sci/invoke-bounded value input)]
                            (cond
                              ;; deadline tripped — reset the tile to welcome +
@@ -803,7 +803,7 @@
                 ;; No-op on core hiccup (welcome/section symbols → not
                 ;; agent-authored) and on hiccup with no interactive handlers.
                 resp   (let [ns-sym (cond
-                                      (render-sci/agent-authored-sym? value)
+                                      (err/agent-authored-sym? value)
                                       (symbol (namespace value))
                                       (vector? value)        ; literal hiccup
                                       (symbol (str "my.agent." id)))]
@@ -992,7 +992,7 @@
       (string? slot-val) (fn [_] slot-val)
       (vector? slot-val) (fn [_] slot-val)
       (symbol? slot-val)
-      (if (render-sci/agent-authored-sym? slot-val)
+      (if (err/agent-authored-sym? slot-val)
         (fn [in]
           (let [r (render-sci/invoke-bounded slot-val in view)]
             (cond

@@ -66,6 +66,16 @@
   ;; fn's ai output (seon.agent.ctx.render-fns).
   :seon.config.render/render-fn-token-cap 2000}
 
+ ;; ── CORE-FAULT ESCALATION DIAL (error-blame-strict-gate, RULED 2026-07-04) ──
+ ;; What a :core-fault seon.error/record! does BEYOND persisting its datom:
+ ;;   :crash — persist the datom FIRST, then loud pod exit (dev, only after the
+ ;;            4-file catch-site sweep drains the backlog)
+ ;;   :gate  — pod stays alive; bin/test-cljs + the dev hook fail any run that
+ ;;            accumulated a new :core-fault (SEON-CORE-FAULT marker). SHIPPED.
+ ;;   :log   — datom + the root-world derived section only (prod/demo).
+ ;; :agent faults never escalate in ANY mode.
+ :seon.config/on-core-error :gate
+
  ;; ── AGENT-CONTEXT (v3, config-driven-agent-init) — the two-level context
  ;; config the GENERIC loader (seon.config/resolve-agent-context) consumes. A
  ;; sparse map: every unspecified key (incl. the whole :seon.agent/ctx block
@@ -127,4 +137,11 @@
   :seon.agent/ctx
   [{:seon.agent.ctx/name :live-tile :seon.agent.ctx/priority 35
     :seon.render/ai seon.agent.ctx.live-tile/live-tile-block
-    :seon.render.live-tile/content seon.render.system/system-view}]}}
+    :seon.render.live-tile/content seon.render.system/system-view}
+   ;; ROOT-ONLY (owner ruling, error-blame-strict-gate 2026-07-04): the
+   ;; :core-fault section renders on the root world only — other agents see
+   ;; nothing (core bugs are not theirs to fix; the affected agent already
+   ;; got its in-place :seon/error envelope). Derived; vanishes when the
+   ;; last :core fault predates the latest user message.
+   {:seon.agent.ctx/name :core-faults :seon.agent.ctx/priority 41
+    :seon.render/ai seon.agent.ctx.warnings/core-faults-block}]}}

@@ -62,6 +62,7 @@
     [datahike.db.interface :as dbi]
     [datahike.impl.entity :as dentity]
     [seon.db.internal :as internal]
+    [seon.error :as error]
     [seon.schema :as schema]))
 
 ;;; ──────────────────────────────────────────────────────────────────────
@@ -1467,3 +1468,19 @@
       ::attr-count    (count counts)
       ::datom-count   (reduce + 0 (vals counts))
       ::topology      entity-topology})))
+
+;; ---------------------------------------------------------------------------
+;; Error-persistence hooks — `seon.error/record!`'s write path, INJECTED here
+;; because the require direction is db→error (seon.db.internal requires
+;; seon.error, so seon.error can never require this ns). Runs at namespace
+;; load; a hot reload re-installs closures over the current fns. Both hooks
+;; are nil-safe pre-boot (no conn yet ⇒ record! buffers in memory).
+;; ---------------------------------------------------------------------------
+
+(error/set-db-hooks!
+  {:seon.error/transact! (fn [tx-data]
+                           (when *conn*
+                             (transact! {::tx-data tx-data})))
+   :seon.error/basis-t   (fn []
+                           (when *conn*
+                             (basis-t)))})

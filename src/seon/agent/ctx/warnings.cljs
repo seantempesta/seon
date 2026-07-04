@@ -4,7 +4,9 @@
    Symbol-wired into the composer (`seon.config/default-ctx-blocks`) as
    `'seon.agent.ctx.warnings/warnings-block`."
   (:require
+    [clojure.string :as str]
     [seon.agent.ctx :as ctx]
+    [seon.db :as db]
     [seon.warn :as warn]))
 
 (defn warnings-block
@@ -33,3 +35,65 @@
     (warn/render-warnings
       (cond-> {:seon.db/db db}
         (some? scope) (assoc :seon.warn/ns scope)))))
+
+(defn- core-fault-rows
+  "[eid msg at tx-inst frame0] rows for `:core`-fault errors since the
+   latest user message (every one when no user message exists yet).
+   `frame0` is the top parsed stack frame's fn name, \"\" when none."
+  [db]
+  (let [cutoff (warn/latest-user-at db)
+        frame0 (into {} (db/query
+                          {:seon.db/db db
+                           :seon.db/query
+                           '[:find ?e ?fn
+                             :where
+                             [?e :seon.error/frames ?f]
+                             [?f :seon.error.frame/index 0]
+                             [?f :seon.error.frame/fn ?fn]]}))
+        rows   (db/query
+                 {:seon.db/db db
+                  :seon.db/query
+                  '[:find ?e ?msg ?at ?inst
+                    :where
+                    [?e :seon.error/fault :core ?tx]
+                    [?e :seon.error/message ?msg]
+                    [(get-else $ ?e :seon.error/at 0) ?at]
+                    [?tx :db/txInstant ?inst]]})]
+    (->> rows
+         (filter (fn [[_ _ _ inst]]
+                   (or (nil? cutoff)
+                       (> (.getTime ^js inst) (.getTime ^js cutoff)))))
+         (sort-by (fn [[_ _ at]] at))
+         (mapv (fn [[e msg at inst]]
+                 [e msg at inst (get frame0 e "")])))))
+
+(defn core-faults-block
+  "`:core`-fault errors since the last user message — ROOT world only.
+
+   The derived strict-gate surface of the error-blame design (RULED
+   2026-07-04): a `seon.error/record!` with fault `:core` is OUR bug
+   (never an agent's), and this section makes it loud on the root
+   world's context until the fix lands — then the query returns empty
+   and the section VANISHES (no acknowledgement state, nothing to
+   clear). Root-only by config wiring: the block rides ONLY in
+   `:seon.config/root-context` (other agents see nothing — core bugs
+   are not theirs to fix; the affected agent already saw its in-place
+   `:seon/error` envelope)."
+  {:malli/schema [:=> [:cat :map] :string]}
+  [{:seon.db/keys [db]}]
+  (let [rows (core-fault-rows db)]
+    (if (empty? rows)
+      ""
+      (str ";;; CORE FAULTS — " (count rows)
+           " since the last user message (root-only)\n"
+           "; These are SEON CORE bugs (fault :core — our machinery), not agent errors.\n"
+           "; Under :seon.config/on-core-error :gate they FAIL dev runs until fixed.\n"
+           (str/join
+             "\n"
+             (map (fn [[e msg at _inst frame]]
+                    (str "; t=" at "  " msg
+                         (when (seq frame) (str "  @ " frame))
+                         "  [eid " e "]"))
+                  rows))
+           "\n; Freeze the db a fault saw: (seon.db/as-of <t>) ; "
+           "full row: (seon.db/pull '[*] <eid>)"))))

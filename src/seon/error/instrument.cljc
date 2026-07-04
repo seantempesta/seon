@@ -223,6 +223,16 @@
                         :seon.error.malli/got-type (got-type leaf-value))
       humanized  (assoc :seon.error.malli/humanized humanized)
       (seq leafs) (assoc :seon.error.malli/errors (mapv #(into {} %) leafs))
+      ;; The FULL args vector — malli hands it over on EVERY report type
+      ;; (core.cljc:2210-2220); it was destructured and discarded here.
+      ;; Push-button re-invocation wants all args, not just the failing
+      ;; leaf. fn-stubbed THEN clipped (plain bounded-pr-str would print
+      ;; unreadable #object[…] for fn-valued args); the generous budget
+      ;; (vs got-edn's 50) is deliberate — under budget it round-trips
+      ;; through read-string. `seon.error/record!` lifts this onto the
+      ;; persisted error datom as `:seon.error/args-edn`.
+      args       (assoc :seon.error/args-edn
+                        (tokens/clip-str (pr-str-readable args) 200))
       arg-index  (assoc :seon.error.malli/arg-index arg-index)
       (= kind :seon.error.kind/malli-instrument-output)
       (assoc :seon.error.malli/return-value-edn (tokens/bounded-pr-str value 50))

@@ -95,22 +95,10 @@
   []
   (not= "0" (config/env-string "SEON_TILE_SCI")))
 
-(defn agent-authored-sym?
-  "True when `sym` names an AGENT-authored fn.
-
-   Any agent-authored
-   render/layout/handler (a tile fn, a context-block render, a layout, a
-   `/call` handler) gets the SCI wrapper; the core
-   (`seon.*`/`clojure.*`/`cljs.*`) compiled path does not. Core renders and
-   every core block fn stay on the fast compiled path; only agent-chosen
-   namespaces (e.g. `my.workouts/chart-tile`) are bounded."
-  {:malli/schema [:=> [:cat :any] :boolean]}
-  [sym]
-  (boolean
-    (and (qualified-symbol? sym)
-         (let [ns (namespace sym)]
-           (not (or (= ns "seon")
-                    (re-find #"^(seon|clojure|cljs|sci|goog)\." ns)))))))
+;; `agent-authored-sym?` MOVED to `seon.error` (2026-07-04,
+;; error-blame-strict-gate phase 1): it now also decides
+;; `:seon.error/fault`, and `seon.instrument` needs it without a require
+;; cycle through this ns. Callers read `err/agent-authored-sym?`.
 
 (defn- exposable-ns?
   "A namespace whose members we expose as SCI host vars — `seon.*`/agent

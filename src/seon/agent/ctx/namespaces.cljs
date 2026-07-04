@@ -182,7 +182,7 @@
    ([[included-ns?]] keeps `.internal` out of the prompt regardless of what
    is stored). `my.*.internal` MUST store real source even though it never
    renders: its fns are agent-editable render fns
-   (`seon.render.sci/agent-authored-sym?` routes every `my.*` fn through
+   (`seon.error/agent-authored-sym?` routes every `my.*` fn through
    the SCI cage) and the cage rebuilds a fn's lexical environment — its
    `:require` `:as` aliases — from the stored `:seon.ns/source`; a
    `(ns x)` stub loses the aliases and the fn cannot run BOUNDED.
