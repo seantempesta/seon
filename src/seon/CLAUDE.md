@@ -21,7 +21,7 @@ existing one needs strengthening IN PLACE.
 | Schema | `seon.schema/register!` (auto-derives datahike schema) | hand-written datahike schema, inline duplicated shapes |
 | Context unit | `:seon.agent.ctx/block` + seed-copy + `install!`/`remove!` | a second block set, render-merge, a provider/catalog |
 | Rendering | `seon.render` — one guarded walker, ai + html views | a second projection path; renders are NEVER stored |
-| Errors | `:seon/error` value (`seon.error`), errors-as-values | throwing into the agent loop; a new error shape |
+| Errors | `:seon/error` value (`seon.error`); catch sites record via `seon.error/record!` (fault-tagged datom, `:agent` never escalates) | throwing into the agent loop; a new error shape; console-only swallows |
 | State seeding/reset | `seon.state/reconcile!` (provenance-scoped diff) | ad-hoc seed/override/restore code paths |
 | Config | ONE manifest `config/system.edn` via `seon.config` (`SEON_CONFIG` picks the file; a variant = a SEPARATE file — `SEON_PROFILE` is inert) | env-var reads, per-feature config files |
 | Literal search | `seon.agent.search` (`grep` files, `grep-graph` DB) | a new scan/query helper per caller |

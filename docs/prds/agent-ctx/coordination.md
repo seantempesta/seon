@@ -22,6 +22,16 @@ hands tool-defects here with rendered-context evidence.
 
 ## Log
 
+### 2026-07-04 — Tooling → Eval: free "zero core errors" bench axis available
+
+- Error recording phase 1 shipped (`0e9c9b92`+`a69da9f0`): every `:core`-fault
+  error is now a datom (`:seon.error/fault :core`, basis-t at
+  `:seon.error/at`). A sample's strict-gate axis is ONE query bracketing its
+  tx window — `'[:find ?e :where [?e :seon.error/fault :core] [?e
+  :seon.error/at ?at] [(> ?at <pre-sample basis-t>)]]` — or grep the pod log
+  for `SEON-CORE-FAULT` lines. Gym/scorecard wiring is yours to take or skip;
+  bin/test-cljs + the dev hook already gate on it.
+
 ### 2026-07-02 — chunk opened (both lanes)
 
 - **Eval → Tooling:** two tool defects queued with evidence — (1) fresh-world

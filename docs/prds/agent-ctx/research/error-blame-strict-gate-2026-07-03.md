@@ -6,7 +6,16 @@ tags: [research, agent]
 
 # Error blame + strict gate — a design proposal
 
-**Status: RULED 2026-07-04 — building.** The owner asked for a way to "fail
+**Status: PHASE 1 SHIPPED 2026-07-04** (commits `0e9c9b92` + `a69da9f0`,
+live-proven on the default pod): `seon.error/record!` (fault + `at` +
+EDN frames + full `args-edn`, fire-and-forget persist w/ bounded buffer,
+one-error-one-datom dedup), the `:seon.config/on-core-error` dial at
+`:gate`, the process net, the async wrapper arms (+ `wrapper-fault`
+content refinement — live drive showed agent typos rejecting through the
+`seon.eval` conduits would otherwise red the gate as `:core`), the
+root-only `core-faults-block`, and the `bin/test-cljs` + dev-hook gates.
+NEXT: phase 2, the 4-file catch-site sweep; then flip dev to `:crash`.
+The owner asked for a way to "fail
 fast and loud in development to catch our own fuckups, and also let agents
 fail while working without crashing things." All four open questions ruled:
 

@@ -96,6 +96,37 @@ Search runs at two ends, one door each, and nothing in between:
   `search-pull` scopes KNN by a datalog `:where`. No second index, no
   separate FTS engine — exact regex and semantic KNN cover the spectrum.
 
+## Error recording — fault-tagged datoms + the strict gate
+
+Errors join turn replay as first-class DB objects. `seon.error/record!`
+is the catch-site verb (the iron rule as a fn: nothing is caught without
+becoming data): it classifies `:seon.error/fault` (`:agent` — expected,
+the agent's learning signal; `:core` — our bug), stamps
+`:seon.error/at` (the basis-t live at the catch site — `(db/as-of at)`
+is the frozen db the failing code saw, composing directly with
+`inspect/turn` replay), parses the stack into `:seon.error/frames`
+component entities (Datalog-queryable traces), and keeps the full args
+of malli contract violations as bounded `:seon.error/args-edn`.
+Persistence is fire-and-forget (never throws, never awaits; a bounded
+drop-oldest buffer rides out conn-less windows) and ONE error yields
+ONE datom (propagating rejections are dedup-tagged).
+
+Two capture layers need zero per-site work: the malli instrumentation
+wrapper's async arms (rejections + resolved-value output violations —
+both previously invisible) and the process net
+(`uncaughtException`/`unhandledRejection` → fault `:core`).
+
+The `:seon.config/on-core-error` dial (manifest; `:crash | :gate |
+:log`, shipped `:gate`) governs `:core` faults only — `:agent` faults
+never escalate in any mode. Under `:gate` the pod keeps running but the
+CI-shaped wrappers fail any run that accumulated a new `:core` fault
+(`bin/test-cljs` greps the run transcript for the `SEON-CORE-FAULT`
+marker; the dev hook brackets the pod log by byte offset). The derived
+`core-faults-block` section renders on the ROOT world only and vanishes
+when the last `:core` fault predates the latest user message — no
+acknowledgement state. Design + rulings:
+`docs/prds/agent-ctx/research/error-blame-strict-gate-2026-07-03.md`.
+
 ## The forensic agent
 
 Debugging an agent is done **by another agent given the exact db the target
