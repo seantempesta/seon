@@ -960,12 +960,30 @@ cmd_restart() {
   # they see "stopped" or "started" but never an intermediate state
   # where another agent could race in and start a competing instance.
   # (`restart all` is per-process atomic, not stack-atomic.)
+  #
+  # Ready-gate parity with `create` / `start all`: after the fresh process
+  # spawns, BLOCK on the SAME wait_ready/ready_check the create path uses,
+  # so `restart pod-<n>` returns only once the pod has WRITTEN its port file
+  # AND answers HTTP on `/` — not the instant the process forks. Without
+  # this the entire re-boot had to fit inside the harness's tight 60s
+  # CLUSTER_BOOT_BUDGET_S with zero slack, so a tail-latency reboot that
+  # `create`'s internal 120s gate would have absorbed hard-failed as a
+  # cluster_boot_timeout (root cause:
+  # docs/prds/agent-ctx/research/cluster-boot-timeout-2026-07-04.md).
+  # Processes with no ready_check (jvm) have ready_bound 0 → wait_ready
+  # returns immediately, so this never hangs them.
   local name="${1:?restart requires a process name}"
   if [ "$name" = "all" ]; then stop_all; start_all; return 0; fi
   acquire_lock "$name"
   _stop_unlocked "$name"
   _start_unlocked "$name"
   release_lock "$name"
+  # Gate AFTER releasing the lock — readiness is observation, not a shared
+  # mutation, so another agent needn't wait behind it; the process is
+  # already spawned + recorded. wait_ready is loud on timeout/early death
+  # and names the log to read; propagate its exit so a failed reboot is a
+  # failed `restart`.
+  wait_ready "$name"
 }
 
 cmd_status() {

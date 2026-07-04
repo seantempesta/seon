@@ -316,7 +316,23 @@ def restart_pod(cluster: Cluster, *,
 
     The pod rebinds an EPHEMERAL port on boot, so the stale port file is
     removed first and the returned Cluster carries the NEW port (the old
-    Cluster's url is dead — always continue with the return value)."""
+    Cluster's url is dead — always continue with the return value).
+
+    Since 2026-07-04 the SUPERVISOR ready-gates `restart pod-<n>` internally
+    (parity with `create` — its `wait_ready`/`ready_check` blocks up to the
+    pod's 120s bound until the port file is written AND the pod answers HTTP),
+    so `_run_seon` here now returns only once the pod is ready. That closes
+    the restart-vs-create asymmetry that let a tail-latency reboot blow the
+    tight 60s CLUSTER_BOOT_BUDGET_S
+    (docs/prds/agent-ctx/research/cluster-boot-timeout-2026-07-04.md). The
+    180s subprocess timeout accommodates that internal wait; a failed reboot
+    surfaces as a non-zero exit → RuntimeError, not a silent early return.
+
+    `ready(...)` below is KEPT as a cheap backstop, NOT a duplicated wait:
+    the supervisor already gated, so this poll returns on its first tick —
+    its job now is to read the bound port for the returned Cluster (and to
+    cover any sliver between the supervisor's curl-ready and our http.client
+    probe). Defense-in-depth, near-instant in the common path."""
     _check_name(cluster.name)
     _port_file(cluster.name).unlink(missing_ok=True)
     _run_seon(["restart", f"pod-{cluster.name}"], runner, timeout_s=180)

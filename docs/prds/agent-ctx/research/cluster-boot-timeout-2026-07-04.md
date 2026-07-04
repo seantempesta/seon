@@ -1,10 +1,36 @@
 ---
 type: research
-status: active
+status: completed
 tags: [research, agent, database]
 ---
 
 # Cluster boot-timeout regression — root-cause (2026-07-04)
+
+## STATUS: FIXED (2026-07-04)
+
+The acute cause — the `restart` vs `create` ready-gate asymmetry (suspect #1
+below) — is **fixed in `bin/seon`**. `cmd_restart` now calls the SAME
+`wait_ready`/`ready_check` the `create`/`start all` paths use, after the fresh
+process spawns and after the lock is released. `bin/seon restart pod-<n>` now
+BLOCKS until the pod has written its port file AND answers HTTP on `/` (pod
+`ready_bound` = 120s), instead of returning the instant `nohup &` forked — so a
+tail-latency reboot is absorbed by the supervisor's 120s internal gate rather
+than having to fit inside the harness's tight 60s `CLUSTER_BOOT_BUDGET_S`.
+Processes with no ready check (jvm, `ready_bound` = 0) pass through immediately,
+so nothing hangs. One mechanism, the existing gate reused — no second readiness
+path.
+
+Live-proven (2026-07-04): an ephemeral `gatetest` cluster, then `bin/seon
+restart pod-gatetest` — the command blocked 12s, printed `waiting for
+pod-gatetest ready (bound 120s) … ● pod-gatetest ready (11s)`, and the moment it
+returned the pod answered `HTTP 200` on its NEW rebound port. The gate is in the
+path by observation, not inference.
+
+Harness side (`src-inspect-ai/src/seon_inspect/cluster.py`): `restart_pod`'s
+`wait_pod_ready` poll is KEPT as a cheap backstop + bound-port reader (returns on
+its first tick now that the supervisor gates), NOT a duplicated wait —
+docstring updated to record the decision. The FD-leak fix (finding #1) remains
+independently valid.
 
 ## TL;DR
 

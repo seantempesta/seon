@@ -1178,3 +1178,33 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   live against root during the error-recording phase-1 proof. Fix shape:
   decode EDN-bridged attrs before the re-transact (the section-verbs
   pattern named in `seon.db.internal/encode-edn-slot-values`'s docstring).
+
+### 2026-07-04 — Eval → Both: `restart` vs `create` ready-gate asymmetry FIXED (shared `bin/seon`)
+
+- **Supervisor change (shared `bin/seon`, noted here per the shared-tree
+  rule).** `cmd_restart` now ready-gates after the fresh process spawns —
+  it calls the SAME `wait_ready`/`ready_check` the `create`/`start all`
+  paths use (lock released first; readiness is observation, not a shared
+  mutation). `bin/seon restart pod-<n>` now BLOCKS until the pod writes its
+  port file AND answers HTTP on `/` (pod bound 120s) instead of returning
+  the instant `nohup &` forked. This is the real fix the boot-timeout
+  research flagged (`research/cluster-boot-timeout-2026-07-04.md`, now
+  status: completed): a tail-latency reboot is absorbed by the supervisor's
+  120s gate rather than having to fit inside the harness's tight 60s
+  `CLUSTER_BOOT_BUDGET_S`. No-ready-check processes (jvm, bound 0) pass
+  through immediately — nothing hangs. One mechanism, the existing gate
+  reused; no second readiness path.
+- **Harness side (`src-inspect-ai/cluster.py`):** `restart_pod`'s
+  `wait_pod_ready` poll KEPT as a cheap backstop + bound-port reader (it
+  returns on the first tick now the supervisor gates), NOT a duplicated
+  wait — docstring records the decision. No test change (offline runners
+  inject fakes; supervisor gating is invisible to them). Full suite green
+  (197 passed).
+- **Live proof:** ephemeral `gatetest` cluster → `restart pod-gatetest`
+  blocked 12s (`waiting for pod-gatetest ready … ● ready (11s)`), pod
+  answered HTTP 200 on its new rebound port the instant restart returned.
+  Default (7890) + acme untouched; cluster destroyed. NOT committed.
+- **Planning-thinking row is now safe to re-run** on the boot axis: the
+  asymmetric tight gate that produced seed1-008's `cluster_boot_timeout` is
+  closed (this + the FD-leak fix). Residual failures in the original run
+  were remote-API degradation, independent of boot.
