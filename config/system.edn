@@ -73,8 +73,14 @@
  ;;   :gate  — pod stays alive; bin/test-cljs + the dev hook fail any run that
  ;;            accumulated a new :core-fault (SEON-CORE-FAULT marker). SHIPPED.
  ;;   :log   — datom + the root-world derived section only (prod/demo).
- ;; :agent faults never escalate in ANY mode.
- :seon.config/on-core-error :gate
+ ;; :agent faults never escalate in ANY mode. The SUITE/CI runner stays :gate
+ ;; via config/test.edn (bin/test-cljs default) — a mid-run :core fault must
+ ;; not .exit the shared node-test runner. This DEV manifest flips to :crash
+ ;; (RULED crash-after-sweep, 2026-07-04): the 4-file catch-site sweep + the
+ ;; C41 expected-fault bracket + the C42 agent-form-fault classification fix
+ ;; all landed, so the only thing that reaches the crash path is a genuine,
+ ;; un-bracketed :core bug — fail fast + loud on our own fuckups.
+ :seon.config/on-core-error :crash
 
  ;; ── WEB-ACCESS POLICY (web-access-policy, RULED 2026-07-04) — the
  ;; host-owned reachability policy for seon.agent.web/fetch. UNIFIES the old
