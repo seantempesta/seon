@@ -485,7 +485,13 @@
               {}
               (js/Object.keys ns-obj))
       {})
-    (catch :default _ {})))
+    (catch :default e
+      ;; code-as-data reflection over a live globalThis ns object — the
+      ;; if-let above already handles the expected absent-ns case, so a
+      ;; throw walking its props is OUR machinery failing (:core); the
+      ;; caller still degrades to the same empty member map.
+      (error/record! {:seon.error/raw e :seon.error/fault :core})
+      {})))
 
 ;; ============================================================
 ;; Home-ns refer toolkit seed — declare the toolkit nses' analyzer `:defs` so
@@ -568,7 +574,13 @@
               {}
               (js/Object.keys ns-obj))
       {})
-    (catch :default _ {})))
+    (catch :default e
+      ;; code-as-data reflection over a live globalThis ns object — the
+      ;; if-let above already handles the expected absent-ns case, so a
+      ;; throw walking its props is OUR machinery failing (:core); the
+      ;; caller still degrades to the same empty member map.
+      (error/record! {:seon.error/raw e :seon.error/fault :core})
+      {})))
 
 (defn- truly-undeclared?
   "Decide whether an `:undeclared-var` / `:undeclared-ns` analyzer
@@ -829,6 +841,13 @@
     (try
       (boot/load compile-state rc relink-cb)
       (catch :default e
+        ;; probe/dispatcher: this is NOT a terminal swallow — it either
+        ;; RECOVERS (the ns IS available on globalThis / in the DB, just
+        ;; not where boot/load looked) or RE-THROWS the legible
+        ;; `Could not require X` up through cljs.js into `eval`'s outer
+        ;; catch, which `record!`s it (wrapper-fault). Recording here
+        ;; would misfire on the recoverable branches, so no record! —
+        ;; the re-throw path is where it becomes data.
         ;; `*conn*` is root-bound at session start, but a load-fn can fire
         ;; before boot completes or in a conn-less test context — bind once
         ;; and only take the DB branch when a conn is actually present;
@@ -903,6 +922,9 @@
               (cljs/eval-str compile-state (str "(ns " ns-sym ")") nil
                 {:eval cljs/js-eval :ns user-ns-sym :context :statement}
                 (fn [_] (resolve nil)))
+              ;; probe: best-effort ns prime — a prime failure is expected
+              ;; (the subsequent real eval surfaces the actual error); the
+              ;; absence of a primed entry is not itself an error.
               (catch :default _ (resolve nil)))))))))
 
 ;; ============================================================
@@ -984,6 +1006,8 @@
                (and (symbol? sym)
                     (= "result" (namespace sym))
                     (= ::eof nxt)))
+             ;; probe: an unreadable string simply isn't a `result/<id>`
+             ;; reference — return false (expected non-match, not a defect).
              (catch :default _ false))))))
 
 (defn result-miss-message
@@ -1191,6 +1215,17 @@
                                "needed for hard cancellation)")))}
          {::ok? true ::value (::value raced) ::ending-ns (::ending-ns raced)}))
      (catch :default e
+       ;; The `seon.eval` compile/eval conduit: a throw from raw-eval is
+       ;; where an AGENT form's failure first surfaces, so classify by the
+       ;; error's OWN content (wrapper-fault) rather than blaming the
+       ;; conduit — an agent compile typo / a propagated agent-caused
+       ;; violation → :agent (never gates); a genuine core compile-pipeline
+       ;; bug stays :core (loud). recorded? skips an inner funnel's datom
+       ;; (the async wrapper arms already record verb rejections). The
+       ;; return contract is byte-unchanged.
+       (when-not (error/recorded? e)
+         (error/record! {:seon.error/raw   e
+                         :seon.error/fault (instrument/wrapper-fault e :core)}))
        {::ok? false :seon/error (error/->map e)}))))
 
 ;; ============================================================
@@ -1227,9 +1262,11 @@
   (try
     (js/Reflect.set js/globalThis (result-key eval-id) value)
     (catch :default e
-      (js/console.warn "[seon.eval/stash-result-raw!] failed for"
-                       (pr-str eval-id) "—"
-                       (error/->message e)))))
+      ;; OUR result-stash machinery (a globalThis set) failing is a core
+      ;; defect — record it (:core); the value just won't be
+      ;; re-referenceable and lookup-result reports the honest miss. Same
+      ;; `:any` return as the prior console-only swallow.
+      (error/record! {:seon.error/raw e :seon.error/fault :core}))))
 
 (defn lookup-result
   "The live value of a prior eval, keyed by its `result/<id>`.
@@ -1256,6 +1293,10 @@
     (if (js/Reflect.has js/globalThis k)
       (js/Reflect.get js/globalThis k)
       (let [row (try (db/entity {:seon.db/ref [:seon.eval/id id-str]})
+                     ;; probe: a lookup-ref to a NON-EXISTENT eval id
+                     ;; throws in datahike — that IS the expected
+                     ;; "no such id" signal (an agent typo'd an id); the
+                     ;; nil row falls to the legible miss messages below.
                      (catch :default _ nil))]
         (cond
           (nil? (:seon.eval/id row))
@@ -1302,12 +1343,19 @@
     (try
       (let [robj (js/Reflect.get js/globalThis (str result-ns-sym))]
         (when robj (js/Reflect.deleteProperty robj munged)))
-      (catch :default _ nil))
+      ;; OUR result-var unbind (globalThis delete) — a throw here is a
+      ;; core defect (these Reflect ops don't throw on ordinary props);
+      ;; record it, cleanup stays best-effort (a stale var is benign).
+      (catch :default e
+        (error/record! {:seon.error/raw e :seon.error/fault :core})))
     (try
       (swap! compile-state update-in
              [:cljs.analyzer/namespaces result-ns-sym :defs]
              dissoc (symbol id))
-      (catch :default _ nil))))
+      ;; OUR analyzer-defs unbind — a throw is a core defect (swap!/dissoc
+      ;; don't throw); record it, cleanup stays best-effort.
+      (catch :default e
+        (error/record! {:seon.error/raw e :seon.error/fault :core})))))
 
 (defn bind-result-var!
   "Bind a successful eval's value `v` as the var `result/<id>`.
@@ -1350,8 +1398,10 @@
         (doseq [old @pruned]
           (unbind-result-var! compile-state old))))
     (catch :default e
-      (js/console.warn "[seon.eval/bind-result-var!] failed for"
-                       (pr-str id) "—" (error/->message e))))
+      ;; OUR result-var bind (globalThis set + analyzer defs) failing is a
+      ;; core defect — record it (:core); the eval pipeline still returns
+      ;; nil (the value is unreachable via result/<id>, a benign miss).
+      (error/record! {:seon.error/raw e :seon.error/fault :core})))
   nil)
 
 (def home-ns-require-specs
@@ -1685,6 +1735,14 @@
           {::ok? false ::pending-promise v}
           {::ok? true ::value raced}))
       (catch :default e
+        ;; The awaited value came from the AGENT form's async execution, so
+        ;; a rejection is agent-fault by default (wrapper-fault refines a
+        ;; propagated core-verb violation back to :core). recorded? skips
+        ;; the datom when an instrumented ^:async verb's wrapper .catch
+        ;; already recorded this same rejection. Return contract unchanged.
+        (when-not (error/recorded? e)
+          (error/record! {:seon.error/raw   e
+                          :seon.error/fault (instrument/wrapper-fault e :agent)}))
         {::ok? false :seon/error (error/->map e)}))
 
     :else
@@ -1814,6 +1872,10 @@
         ;; Opt-out (seon.instrument/async-unwrappable? — structural, computed
         ;; from async flag + fn shape + schema form) is applied in register-target!.
         :when (and schema-form
+                   ;; probe: an unparseable agent `:malli/schema` is
+                   ;; expected — it simply isn't an instrument target (the
+                   ;; parse failure is captured as `:seon.fn/schema-error`
+                   ;; on the tee row, the agent's own signal).
                    (try (m/schema schema-form) true
                         (catch :default _ false)))]
     [ns sym schema-form async?]))
@@ -1827,6 +1889,8 @@
     (let [form (reader/read-string source)]
       (when (and (seq? form) (= 'ns (first form)) (symbol? (second form)))
         (second form)))
+    ;; probe: an unreadable / non-(ns …) source simply has no ns name —
+    ;; nil is the expected answer, not a defect.
     (catch :default _ nil)))
 
 (defn- schema-tee-row
@@ -2063,6 +2127,9 @@
                (and (not (contains? code-head-syms head))
                     (>= (count arg-syms) 2)
                     (not-any? code-signal? all-syms)))))
+      ;; probe: any read error ⇒ NOT prose ⇒ KEEP (fail-closed, per the
+      ;; docstring's err-toward-keep contract); absence of a clean parse
+      ;; is the expected "treat as code" signal, not a defect.
       (catch :default _ false))))
 
 (defn scratch-def-note
@@ -2228,6 +2295,12 @@
                                 ;; silently no-op).
                                 schema-meta  (:malli/schema (:meta var-map))
                                 schema-error (when (some? schema-meta)
+                                               ;; probe: an unparseable agent
+                                               ;; `:malli/schema` is expected and
+                                               ;; ALREADY becomes data — the reason
+                                               ;; string is stored as
+                                               ;; `:seon.fn/schema-error` (the agent's
+                                               ;; own signal); no separate datom.
                                                (try (m/schema schema-meta) nil
                                                     (catch :default e
                                                       (or (.-message e) (str e)))))
@@ -2447,6 +2520,10 @@
                           (and (vector? r) (symbol? (first r)))
                           (let [tns  (first r)
                                 opts (try (apply hash-map (rest r))
+                                          ;; probe: a malformed require clause
+                                          ;; (odd-count opts) yields no opts —
+                                          ;; expected for agent-authored source,
+                                          ;; not a defect.
                                           (catch :default _ {}))
                                 as   (:as opts)
                                 refr (:refer opts)]
@@ -2459,6 +2536,8 @@
                           :else nil)))
                 (or reqs [])))
         #{}))
+    ;; probe: fail-soft over agent-authored source — an unreadable /
+    ;; non-(ns …) form has no require edges; #{} is the expected answer.
     (catch :default _ #{})))
 
 (schema/register! ::aliases   [:map-of :symbol :symbol])
@@ -2522,7 +2601,12 @@
                           [:db/id :seon.ns.require/target :seon.ns.require/alias
                            :seon.ns.require/refers :seon.ns.require/refer-all?]}]
                        [:seon.ns/name ns-kw]))))
-    (catch :default _ #{})))
+    (catch :default e
+      ;; the existence-probe above already returns #{} for the expected
+      ;; missing-row case, so a throw reading OUR stored require edges is a
+      ;; core defect (:core) — the caller still degrades to the empty set.
+      (error/record! {:seon.error/raw e :seon.error/fault :core})
+      #{})))
 
 (defn ns-require-edges-tx
   "Tx ops making `:seon.ns/require-edges` for `ns-kw` EXACTLY `new-edges`.
@@ -2939,6 +3023,10 @@
                (str/includes? s "#js ")
                (str/includes? s "#object")))
     (try
+      ;; probe: an unreadable legacy stored string is expected (the reason
+      ;; the substring-screened re-read exists) — return it verbatim, the
+      ;; same value the agent already sees; absence of a clean re-read is
+      ;; not a defect.
       (pr-str (value/project-plain (reader/read-string s)))
       (catch :default _ s))
     s))
@@ -2969,9 +3057,12 @@
     eval-id
     (try
       (value/render-ai eval-id value)
-      (catch :default _
-        ;; Unprintable value — name where the live value lives instead of
-        ;; a bare (str value) that could itself be a giant/opaque blob.
+      (catch :default e
+        ;; OUR bounded value renderer throwing is a core defect (:core) —
+        ;; it is designed to handle any value; the caller still degrades to
+        ;; a fallback that names where the live value lives instead of a
+        ;; bare (str value) that could itself be a giant/opaque blob.
+        (error/record! {:seon.error/raw e :seon.error/fault :core})
         (str "; <value could not be rendered as data; the live value is "
              "result/" eval-id ">")))))
 
@@ -3097,7 +3188,13 @@
                    (assoc :seon.eval/error
                           (cap-edn
                             (try (render-error-string (:seon/error result))
-                                 (catch :default _ (str (:seon/error result))))))
+                                 ;; OUR error renderer throwing is a core
+                                 ;; defect (:core); the caller still degrades
+                                 ;; to (str error) so the eval row records.
+                                 (catch :default e
+                                   (error/record! {:seon.error/raw e
+                                                   :seon.error/fault :core})
+                                   (str (:seon/error result))))))
 
                    ;; Phase A item 8 — when the error carries a Malli
                    ;; instrumentation envelope (flattened into
@@ -3670,9 +3767,11 @@
                 (collect-instrument-targets compile-state defs-before
                                             source @current-ns))
               (catch :default e
-                (js/console.warn
-                  "[seon.eval/eval-batch!] auto-instrument failed:"
-                  (or (.-message e) (str e)))))
+                ;; OUR instrumentation machinery (mi/instrument! over a
+                ;; newly-tee'd fn whose schema already parsed) throwing is a
+                ;; core defect (:core) — record it; best-effort stays: only
+                ;; this fn's instrument aborts, the batch continues.
+                (error/record! {:seon.error/raw e :seon.error/fault :core})))
             ;; Phase 4 (mvp-completion-plan 2026-05-27) —
             ;; auto-test-run. After the tee tx, any new
             ;; `:seon.test` rows + any existing `:seon.test`
@@ -3696,9 +3795,11 @@
                                     :seon.test.runner/trigger
                                     :seon.test.runner/on-fn-redef})))))
                     (catch :default e
-                      (js/console.warn
-                        "[seon.eval/eval-batch!] auto-test-run failed:"
-                        (or (.-message e) (str e))))))))))
+                      ;; The test RUNNER escaping (individual test failures
+                      ;; are captured as :seon.test data upstream) is a core
+                      ;; defect (:core) — record it; best-effort stays: the
+                      ;; batch continues.
+                      (error/record! {:seon.error/raw e :seon.error/fault :core}))))))))
         (if (::ok? result)
           (vswap! n-ok   inc)
           (vswap! n-fail inc))))))

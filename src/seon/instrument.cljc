@@ -278,7 +278,7 @@
        (catch :default _ #{}))))
 
 #?(:cljs
-   (defn- wrapper-fault
+   (defn wrapper-fault
      "Refine a wrapper-arm `coarse` fault by the ERROR'S OWN content.
 
       The instrumented `seon.eval` conduits (raw-eval, eval, …) are where
@@ -297,6 +297,7 @@
           as data (a `:core` datom whose frames are all `my.*`) and get
           re-blamed as follow-up, not argued up front;
         - anything else → `coarse` (unclassified bugs stay loud)."
+     {:malli/schema [:=> [:cat :any :seon.error/fault] :seon.error/fault]}
      [e coarse]
      (try
        (let [data (:seon.error/data (error/->map e))]
