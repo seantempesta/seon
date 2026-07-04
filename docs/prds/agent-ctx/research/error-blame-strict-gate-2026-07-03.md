@@ -379,6 +379,44 @@ So the plan is a stamp + a join, not new machinery:
 - **Known limit**: as-of gives read/render fidelity; reproducing a WRITE
   path replays against a scratch cluster, not the live store.
 
+### Malli grounding (2026-07-04) — full args free, two async defects found
+
+Source-grounded in [[malli-instrument-error-data-2026-07-04]] (all cites
+to `reference-code/malli` + our instrument layers):
+
+- **Gap 1 (full args) CLOSES with zero plumbing.** Malli's `:report`
+  callback receives the FULL `:args` vector on EVERY report type
+  (input/output/arity/guard — `malli/core.cljc:2210-2220`); our
+  `explain-payload` destructures it and throws it away one line later
+  (`error/instrument.cljc:181`). Fix = one `assoc` of
+  `:seon.error/args-edn`, serialized via the existing fn-stubbing
+  `pr-str-readable` walk + `tokens/clip-str` (plain `bounded-pr-str`
+  would print unreadable `#object[…]` for fn-valued args).
+- **Async defect 1 — rejected Promises are invisible to instrumentation.**
+  Our wrapper `.then`-validates the resolved value but attaches NO
+  rejection handler; malli's stock wrapper validates the Promise OBJECT
+  synchronously. A rejected Promise from an instrumented `^:async` fn is
+  observed by no layer today — turn-scoped calls get rescued at
+  seon.eval's auto-await; everything else falls to `unhandledRejection`.
+  The global net is therefore load-bearing, and the funnel fix is a
+  `.catch` arm in our wrapper calling `record!`.
+- **Async defect 2 — async `invalid-output` becomes a rejection, not a
+  throw.** `report-fn` throws inside the `.then` callback, so the
+  violation envelope rides a rejected Promise — visible only if the
+  caller awaits/catches. `record!` must be invoked INSIDE the wrapper so
+  both async failure modes become datoms regardless of caller behavior.
+- **Persistence hazard:** `:seon.error.malli/errors` currently stores raw
+  explain leaf maps containing live Schema objects + unbounded values —
+  fine as in-memory ex-data, NOT transactable. When `record!` persists
+  the envelope it must sanitize (`m/form` the schema, bound the value)
+  or drop that key, and the registered `[:vector :map]` shape tightens.
+- **Borrows instead of inventions:** `me/error-value` with
+  `::me/mask-valid-values` (sensitive-arg masking for persisted values),
+  `me/with-spell-checking` (would subsume our hand-rolled `hint-for`).
+  malli's violation-as-data IS the `(type, data)` report pair we already
+  mirror; virhe/pretty's intermediate is a print document, not data —
+  nothing to reuse there.
+
 ### Revised rollout order (answers open question 2)
 
 1. Land `record!` + global handlers + frames + `:seon.error/at` + the dial
