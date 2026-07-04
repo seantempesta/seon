@@ -259,10 +259,32 @@ if [ "$TRUNCATED" -ne 0 ] && [ "$REAL_FAILS" -eq 0 ] && [ "$NODE_EXIT" -eq 0 ] &
   fi
 fi
 
+# ---------------------------------------------------------------------------
+# Core-fault strict gate (error-blame-strict-gate, RULED 2026-07-04).
+# seon.error/record! prints one `SEON-CORE-FAULT …` marker line per
+# :seon.error/fault :core error — a CORE bug (never an agent error; :agent
+# faults never print the marker, never gate). A run can be assertion-green
+# and still have accumulated one; under the manifest dial
+# :seon.config/on-core-error :gate (the default) that run FAILS. :log
+# disables the gate (prod/demo posture). The transcript IS the run bracket
+# here — the node-test world is hermetic per-test in-memory conns, so datom
+# counting has no stable store to bracket; the marker is the observable.
+# ---------------------------------------------------------------------------
+CORE_FAULTS=$(grep -ac 'SEON-CORE-FAULT' "$TMPOUT")
+: "${CORE_FAULTS:=0}"
+CORE_MANIFEST="${SEON_CONFIG:-config/system.edn}"
+CORE_DIAL=$(grep -oE ':seon\.config/on-core-error[[:space:]]+:[a-z]+' "$CORE_MANIFEST" 2>/dev/null | awk '{print $2}' | head -1)
+CORE_DIAL="${CORE_DIAL:-:gate}"
+CORE_GATE_TRIPPED=0
+if [ "$CORE_DIAL" != ":log" ] && [ "$CORE_FAULTS" -gt 0 ]; then
+  CORE_GATE_TRIPPED=1
+fi
+
 VERDICT_FAIL=0
 [ "$NODE_EXIT" -ne 0 ] && VERDICT_FAIL=1
 [ "$TRUNCATED" -ne 0 ] && VERDICT_FAIL=1
 [ "$REAL_FAILS" -ne 0 ] && VERDICT_FAIL=1
+[ "$CORE_GATE_TRIPPED" -ne 0 ] && VERDICT_FAIL=1
 
 END=$(date +%s)
 ELAPSED=$((END - START))
@@ -297,6 +319,14 @@ else
     # cut guards against MB-sized single lines (datahike tx blobs inline whole
     # tx-data). Anchored to cljs.test's own "FAIL in ("/"ERROR in (".
     grep -aE '^(FAIL|ERROR) in \(' "$TMPOUT" | cut -c1-400 | head -40 || true
+  fi
+  if [ "$CORE_GATE_TRIPPED" -ne 0 ]; then
+    echo ""
+    echo "CORE-FAULT GATE (:seon.config/on-core-error ${CORE_DIAL}): the run"
+    echo "accumulated ${CORE_FAULTS} :seon.error/fault :core error(s) — CORE bugs,"
+    echo "independent of the assertions above. Fix the underlying defect (each"
+    echo "line below is one seon.error/record! marker):"
+    grep -a 'SEON-CORE-FAULT' "$TMPOUT" | cut -c1-300 | head -20 || true
   fi
 fi
 echo "========================================"

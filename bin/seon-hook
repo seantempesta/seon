@@ -651,6 +651,74 @@
 
       response)))
 
+;;; ---------------------------------------------------------------------------
+;;; Core-fault strict gate (error-blame-strict-gate, RULED 2026-07-04).
+;;; seon.error/record! prints one `SEON-CORE-FAULT …` line into logs/pod.log
+;;; per :seon.error/fault :core error (CORE bugs only — :agent faults never
+;;; mark, never gate). This bb-direct check brackets "the run" as the pod-log
+;;; bytes appended since the LAST hook check (offset in tmp/.core-fault-offset)
+;;; and BLOCKS the edit under the manifest dial :seon.config/on-core-error
+;;; :gate/:crash (the default is :gate); :log disables it. First run arms the
+;;; offset silently (no ancient backlog); a truncated/rotated log rescans from
+;;; the top (every line is new).
+;;; ---------------------------------------------------------------------------
+
+(def core-fault-offset-path (root-file "tmp/.core-fault-offset"))
+(def pod-log-path (root-file "logs/pod.log"))
+
+(defn- core-fault-dial []
+  (let [manifest (io/file repo-root (or (System/getenv "SEON_CONFIG")
+                                        "config/system.edn"))]
+    (or (when (.exists manifest)
+          (second (re-find #":seon\.config/on-core-error\s+(:[a-z]+)"
+                           (slurp manifest))))
+        ":gate")))
+
+(defn- core-fault-gate!
+  "Block-response when NEW SEON-CORE-FAULT markers landed in logs/pod.log
+   since the last check; nil otherwise (and on any internal error)."
+  [event]
+  (try
+    (when (and (= (:hook_event_name event) "PostToolUse")
+               (clojure-file? (get-file-path event))
+               (not= ":log" (core-fault-dial))
+               (.exists pod-log-path))
+      (let [size   (.length pod-log-path)
+            stored (try (Long/parseLong (str/trim (slurp core-fault-offset-path)))
+                        (catch Exception _ nil))
+            start  (cond
+                     (nil? stored)   size ; first run: arm only
+                     (> stored size) 0    ; log truncated/rotated: all new
+                     :else           stored)
+            _ (do (io/make-parents core-fault-offset-path)
+                  (spit core-fault-offset-path (str size)))
+            new-text (when (< start size)
+                       (with-open [raf (java.io.RandomAccessFile. pod-log-path "r")]
+                         (.seek raf start)
+                         (let [buf (byte-array (int (min (- size start) (* 4 1024 1024))))]
+                           (.readFully raf buf)
+                           (String. buf "UTF-8"))))
+            markers (when new-text
+                      (->> (str/split-lines new-text)
+                           (filter #(str/includes? % "SEON-CORE-FAULT"))
+                           (take 10)
+                           (map #(subs % 0 (min (count %) 300)))))]
+        (when (seq markers)
+          (log! "CORE_FAULT_GATE" (str (count markers) " new marker(s)"))
+          {:decision "block"
+           :reason (str "CORE-FAULT GATE (:seon.config/on-core-error "
+                        (core-fault-dial) "): the live pod recorded NEW "
+                        ":seon.error/fault :core error(s) since the last hook "
+                        "check — CORE bugs (our machinery), never agent errors. "
+                        "Inspect + fix before continuing. Query the datoms: "
+                        "'[:find ?e :where [?e :seon.error/fault :core]] ; "
+                        "freeze the db one saw: (seon.db/as-of <:seon.error/at>). "
+                        "Markers:\n"
+                        (str/join "\n" markers))})))
+    (catch Exception e
+      (log! "CORE_FAULT_GATE_ERROR" (.getMessage e))
+      nil)))
+
 (defn- merge-review-feedback
   "Merge a bb-direct review string into the (possibly nil) JVM response.
    If the JVM blocked, leave the block untouched (review is advisory).
@@ -713,10 +781,13 @@
 
             ;; Valid edit: JVM pipeline (reload/test for .clj/.cljc; no-op for
             ;; .cljs/.md when the JVM is down) + bb-direct Gemini review, merged
-            ;; into a single response.
+            ;; into a single response. The core-fault gate (bb-direct, pod-log
+            ;; offset bracket) can BLOCK regardless — a new :core-fault datom
+            ;; fails the run loud under :seon.config/on-core-error :gate.
             (let [response (process-via-nrepl! event)
-                  review (bb-review! event config)]
-              (output! (merge-review-feedback response review)))))))
+                  review (bb-review! event config)
+                  gate (core-fault-gate! event)]
+              (output! (or gate (merge-review-feedback response review))))))))
 
     (catch Exception e
       (log! "ERROR" (.getMessage e))
