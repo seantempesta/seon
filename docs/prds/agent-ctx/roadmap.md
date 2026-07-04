@@ -183,7 +183,13 @@ substrate):
    would `.exit 1` the suite mid-run — violating "CI stays `:gate`". The
    live-pod drain is clean (fresh boot + full render = 0 organic `:core`);
    the flip needs `bin/test-cljs`/CI pinned to a `:gate` config first
-   (`config/test.edn` exists, dial unset). See the proposal doc status.
+   (`config/test.edn` exists, dial unset). Full suite = **982/4511 0F/0E**
+   (behavior preserved) but the gate is RED on **11 test-provoked (0
+   organic) `:core`** — the existing error-path tests now correctly record
+   `:core`, colliding with the phase-1 "suite is marker-free" invariant
+   (registry **C41**; owner decision: a test-scoped `*expect-fault*` marker
+   suppression [recommended] or agent-authored fixtures). See the proposal
+   doc status.
 
 Stability queue (interleaved, one per feature unit above; owner-agreed
 2026-07-02 — each fix REUSES an existing mechanism, no new ones):

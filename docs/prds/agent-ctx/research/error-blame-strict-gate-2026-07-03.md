@@ -37,6 +37,32 @@ The live-pod drain itself is clean (fresh boot + full render of `/`,
 `/agent/root`, `/agent/root/debug` = **0 organic `:core` datoms**), so the
 flip is unblocked on the *runtime* side; only the suite-isolation wiring
 is missing.
+
+**Full-suite gate result (owner decision needed — registry `C41`).**
+`bin/test-cljs` after the sweep: **982 tests / 4511 assertions, 0 failures,
+0 errors** (behavior byte-preserved), but the CORE-FAULT GATE trips on
+**11 `:core` faults — ALL test-provoked, ZERO organic bugs.** They come
+from four error-path test files that DELIBERATELY provoke render/eval
+failures to verify graceful degradation (`seon.render-test`
+`throwing-renderer`/`boom-ai-render`; `seon.render.block-test`
+`with-redefs md/md->hiccup → throw`; `seon.render.live-tile-test`
+deliberate tile / vector-of-vectors / bad-tag; `seon.eval.require-test`
+`no.such.namespace`). Pre-sweep those catches returned an error VALUE
+silently; post-sweep they correctly `record!` `:core` and print
+`SEON-CORE-FAULT`, which collides with the phase-1 invariant
+(`error_record_test.cljs:7`) that **a passing suite emits no marker**
+(phase-1 kept it by testing only `:agent` faults + proving `:core` on the
+pod). The sweep did not introduce a bug; it made the suite's own
+error-path coverage visible to the gate. Two clean resolutions:
+**(A)** a test-scoped `*expect-fault*` suppression that skips the
+escalation MARKER (never the datom) so a deliberately-provoked fault does
+not gate, preserving the gate for real leaks — the smaller, principled
+change; **(B)** rework the fixtures to provoke agent-authored (`my.*`)
+failures where the scenario is realistically an agent render (→ `:agent`,
+no marker), leaving only the genuinely-core delegate tests (block
+`md->hiccup`, `loud-explain`) for (A). Recommend (A). NOT done here — it
+is a design evolution of the phase-1 invariant and warrants the owner's
+call; the sweep code is committed and correct regardless.
 The owner asked for a way to "fail
 fast and loud in development to catch our own fuckups, and also let agents
 fail while working without crashing things." All four open questions ruled:
