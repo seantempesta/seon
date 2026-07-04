@@ -300,6 +300,95 @@ the pattern.
    agent" default, or whether core-bug visibility should be root-only to
    avoid drowning agents in a bug that isn't theirs to fix.
 
+## Revision 2026-07-04 — owner discussion + time-travel grounding
+
+Owner reviewed the draft in chat; the design below supersedes the
+corresponding sections above. Grounding research (all claims cited to
+source): [[error-time-travel-reproduction-2026-07-04]].
+
+### Renames
+
+- **`:seon.error/blame` → `:seon.error/fault`** (`[:enum :agent :core]`).
+  "Blame" implies authorship attribution (git-blame answers who WROTE the
+  line); we classify which population the failure belongs to. `origin` was
+  rejected — collides with `:seon.db/origin` tx provenance.
+- **The catch-site verb is `seon.error/record!`** — a NEW fn, not a change
+  to `->map` (which stays the pure converter). `record!` classifies,
+  structures, persists (fire-and-forget, never throws, never awaits;
+  buffers in memory when the conn is down and flushes on the next
+  successful write), and escalates per the dial. It is the iron rule as a
+  fn: nothing is caught without becoming data.
+
+### The dial: `:seon.config/on-core-error` (replaces boolean `strict?`)
+
+`:crash | :gate | :log` — per-cluster config (manifest, the sanctioned
+hand-maintained home):
+
+- **`:crash`** (dev default, after the sweep lands) — a `:core`-fault
+  error persists its datom FIRST, then exits the pod loudly. Fail fast on
+  our own fuckups.
+- **`:gate`** (CI/test default) — pod stays alive; hook / `bin/test-cljs` /
+  scorecard fail any run that accumulated a new `:core`-fault datom.
+- **`:log`** (prod/demo) — datom + derived section only.
+
+Invariant in every mode: **`:agent`-fault errors never crash, never gate.**
+Agents cannot reach the crash path no matter how badly they flail.
+
+### Automatic capture — two layers
+
+1. **The funnel**: catch sites call `record!`; the malli instrumentation
+   `report-fn` (`error/instrument.cljc:242`) gets the same one-line change,
+   covering every schema'd fn call.
+2. **The net**: `process.on "uncaughtException"` / `"unhandledRejection"`
+   → `record!` with fault `:core`. Anything escaping every catch is
+   persisted with zero per-site work — the 53-site sweep improves
+   classification, but nothing can silently vanish even before it lands.
+
+### EDN stack traces
+
+`cljs.stacktrace/parse-stacktrace :nodejs` (.cljc, already in the pod's
+dep, no source maps needed) parses V8 stack strings into
+`{:file :function :line :column}` frames. `record!` stores
+`:seon.error/frames` (vector of `:seon.error.frame/*` maps) alongside the
+existing raw string — traces become Datalog-queryable ("every core-fault
+error whose top frame is in render/sci.cljs").
+
+### Working backwards — point-in-time restore + reproduction
+
+Verified in the research doc: history is ON everywhere active (store
+config + pod peer config + a boot precondition that throws if off); GC
+never erases history (only explicit `:db/purge`, which seon never issues);
+`seon.db` ALREADY exposes `as-of`/`since`/`history`/`basis-t`, pod-local
+with no wire round-trip; and the int that `basis-t` returns is the tx eid
+that `as-of` takes — the same int `:seon.agent.turn/rendered-as-of`
+already stores.
+
+So the plan is a stamp + a join, not new machinery:
+
+- **`record!` stamps `:seon.error/at`** — `(db/basis-t)` at the catch site
+  (free; covers errors outside any turn: listeners, boot, SSE).
+- **Reproduction recipe**: `(db/as-of db (:seon.error/at err))` → the
+  exact db value the failing code saw → re-render the turn via
+  `seon.agent.inspect/turn` (turn-capture's `rendered-as-of` + prompt blob
+  give byte-exact context replay), or re-invoke the failing fn.
+- **Gap to close (sweep rider): full args.** The instrumentation envelope
+  stores only the FAILING arg (`got-edn` + `arg-index`); push-button
+  re-invocation wants `:seon.error/args-edn` (bounded via
+  `tokens/bounded-pr-str`). Until then, turn-scoped errors reproduce via
+  the turn's eval form.
+- **Known limit**: as-of gives read/render fidelity; reproducing a WRITE
+  path replays against a scratch cluster, not the live store.
+
+### Revised rollout order (answers open question 2)
+
+1. Land `record!` + global handlers + frames + `:seon.error/at` + the dial
+   at `:gate`.
+2. The 4-file catch-site sweep (one commit per file, parity-gated).
+3. Flip dev to `:crash`. Fail-fast arrives after the backlog is drained
+   instead of blocking the tree mid-sweep.
+
+Open questions 1 (ambiguity rule) and 3 (visibility scope) still stand.
+
 ## Cost estimate
 
 - **Schema**: 1 `register!` call (`:seon.error/blame`), 1 file
