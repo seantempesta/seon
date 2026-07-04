@@ -144,7 +144,10 @@
   (let [c (sci/init {:interrupt-fn deadline-interrupt-fn :classes base-classes})]
     (vreset! !deadline (+ (js/Date.now) 60000))
     (try (sci/eval-string* c "(loop [i 0] (if (< i 64) (recur (inc i)) i)) ((fn [x] (inc x)) 1)")
-         (catch :default _ nil))
+         (catch :default e
+           ;; a literal warmup loop failing means SCI itself is broken —
+           ;; OUR machinery (:core); record! buffers pre-conn at load.
+           (err/record! {:seon.error/raw e :seon.error/fault :core})))
     :warmed))
 
 ;; ============================================================
@@ -180,17 +183,29 @@
 ;; in the log without spam.
 (def ^:private !bounding-warned (atom #{}))
 
-(defn- warn-bounding-failure-once! [sym msg]
-  (when-not (contains? @!bounding-warned (str sym))
-    (swap! !bounding-warned conj (str sym))
-    (log/warn! {:seon.log/source  ::invoke-bounded
-                :seon.log/message
-                (str "render fn " sym " could not run under SCI bounding ("
-                     msg ") — rendering a :seon/error block in place "
-                     "(fail-loud; the unbounded compiled fallback is "
-                     "banned). Ensure the fn's :seon.fn/source and its ns "
-                     ":require aliases are stored (:seon.ns/require-edges; "
-                     "re-eval the ns form to tee them).")})))
+(defn- warn-bounding-failure-once!
+  "Warn + `record!` a bounding failure ONCE per [sym fault].
+
+   The render path re-invokes a persistently-broken tile on every
+   fetch/feed tick — per-occurrence recording would flood the DB the
+   same way per-occurrence warns would flood the log, so both ride one
+   dedup. `raw` is the thrown value (or a minted ex-info for the
+   string-message cases); an error already recorded by an inner funnel
+   (the async wrapper arms) is skipped (`recorded?`)."
+  [sym msg fault raw]
+  (let [k (str sym " " fault)]
+    (when-not (contains? @!bounding-warned k)
+      (swap! !bounding-warned conj k)
+      (log/warn! {:seon.log/source  ::invoke-bounded
+                  :seon.log/message
+                  (str "render fn " sym " could not run under SCI bounding ("
+                       msg ") — rendering a :seon/error block in place "
+                       "(fail-loud; the unbounded compiled fallback is "
+                       "banned). Ensure the fn's :seon.fn/source and its ns "
+                       ":require aliases are stored (:seon.ns/require-edges; "
+                       "re-eval the ns form to tee them).")})
+      (when-not (err/recorded? raw)
+        (err/record! {:seon.error/raw raw :seon.error/fault fault})))))
 
 (defn- instrument-env-in-causes
   "The malli instrument-error ENVELOPE (ex-data) on `e` or any exception in
@@ -217,22 +232,33 @@
         env  (instrument-env-in-causes e)
         detail (when env
                  (try (einstrument/render-malli-error env)
-                      (catch :default _ nil)))]
+                      (catch :default e2
+                        ;; OUR renderer failing on OUR OWN malli envelope
+                        ;; is a core bug; the caller still degrades to the
+                        ;; bare base message (contract unchanged).
+                        (err/record! {:seon.error/raw e2 :seon.error/fault :core})
+                        nil)))]
     (if detail (str base "\n" detail) base)))
 
 (defn- bounding-error
-  "The fail-loud envelope for a fn SCI could not run: warn once (per sym)
-   and return `{::error <:seon.db/error map>}` for the caller to render in
-   place. `e-or-msg` is an exception or a plain message string. An
+  "The fail-loud envelope for a fn SCI could not run: warn + `record!`
+   once (per sym+fault) and return `{::error <:seon.db/error map>}` for
+   the caller to render in place. `e-or-msg` is an exception or a plain
+   message string. `fault` defaults `:agent` (invoke-bounded only wraps
+   agent-authored syms — the agent's source/shape/throw is its own);
+   the env-reconstruction/init outer catch passes `:core` explicitly
+   (RULED: our machinery failing while PREPARING agent code). An
    instrumented inner-call failure carries its humanized malli explain
    ([[legible-error-message]])."
-  [sym e-or-msg]
-  (let [em (if (string? e-or-msg)
-             {:seon.error/message e-or-msg}
-             (assoc (err/->map e-or-msg)
-                    :seon.error/message (legible-error-message e-or-msg)))]
-    (warn-bounding-failure-once! sym (:seon.error/message em))
-    {:seon.render.sci/error em}))
+  ([sym e-or-msg] (bounding-error sym e-or-msg :agent))
+  ([sym e-or-msg fault]
+   (let [raw (if (string? e-or-msg) (ex-info e-or-msg {}) e-or-msg)
+         em  (if (string? e-or-msg)
+               {:seon.error/message e-or-msg}
+               (assoc (err/->map e-or-msg)
+                      :seon.error/message (legible-error-message e-or-msg)))]
+     (warn-bounding-failure-once! sym (:seon.error/message em) fault raw)
+     {:seon.render.sci/error em})))
 
 ;; ============================================================
 ;; Lexical-environment reconstruction — aliases, requires, sources.
@@ -251,7 +277,11 @@
                                 [?ns :seon.ns/name ?nm]
                                 [?ns :seon.ns/source ?src]]
                :seon.db/args  [ns-kw]}))
-    (catch :default _ nil)))
+    (catch :default e
+      ;; core machinery reading OUR stored ns source — a query throw is a
+      ;; defect, not "no source"; caller still degrades to nil.
+      (err/record! {:seon.error/raw e :seon.error/fault :core})
+      nil)))
 
 (defn- home-agent-id
   "The agent id when `ns-str` names an agent HOME ns (`my.agent.<id>` — the
@@ -274,7 +304,11 @@
   [ns-str]
   (when-let [id (home-agent-id ns-str)]
     (try (seval/home-ns-form ns-str (seval/home-requires-for id))
-         (catch :default _ nil))))
+         (catch :default e
+           ;; deriving the canonical home-ns form is OUR machinery — a
+           ;; throw is a core defect; caller still degrades to nil.
+           (err/record! {:seon.error/raw e :seon.error/fault :core})
+           nil))))
 
 (defn- ns-requires-edges
   "The `:seon.ns/requires` edge set for `ns-kw`, as ns SYMBOLS. Captured on
@@ -292,7 +326,11 @@
                               [?e :seon.ns/name ?ns]
                               [?e :seon.ns/requires ?r]]
              :seon.db/args  [ns-kw]}))
-    (catch :default _ #{})))
+    (catch :default e
+      ;; core machinery reading stored require edges — record the defect;
+      ;; the surface still degrades to the empty edge set.
+      (err/record! {:seon.error/raw e :seon.error/fault :core})
+      #{})))
 
 (defn- fn-source
   "The stored `:seon.fn/source` for `sym` (a string), or nil. nil means we
@@ -305,7 +343,11 @@
                                 [?f :seon.fn/sym ?sym]
                                 [?f :seon.fn/source ?src]]
                :seon.db/args  [(str sym)]}))
-    (catch :default _ nil)))
+    (catch :default e
+      ;; core machinery reading OUR stored fn source — a query throw is a
+      ;; defect, not "no source"; caller still degrades to nil.
+      (err/record! {:seon.error/raw e :seon.error/fault :core})
+      nil)))
 
 ;; The lexical require facts (aliases / refers / required nses) come from
 ;; the STORED `:seon.ns/require-edges` component rows — the analyzer-
@@ -409,7 +451,11 @@
                           m)))
                     compiled syms)]
       (when (seq m) m))
-    (catch :default _ nil)))
+    (catch :default e
+      ;; env-reconstruction machinery (index query + lookup-value walk)
+      ;; throwing is a core defect; caller still degrades the SCI surface.
+      (err/record! {:seon.error/raw e :seon.error/fault :core})
+      nil)))
 
 ;; ============================================================
 ;; The bounded invocation.
@@ -556,13 +602,18 @@
                                           "a string" "a map")))))
              (catch :default e
                (if (interrupt-ex? e)
+                 ;; the deadline interrupt is NOT swallowed — the caller
+                 ;; runs recovery (retract + message) and the derived
+                 ;; live-tile section is its data surface; no datom here.
                  {:seon.render.sci/interrupt true}
-                 ;; any non-interrupt SCI failure → a :seon/error block in
-                 ;; place (fail-loud; never the unbounded compiled path)
+                 ;; any non-interrupt SCI failure → :agent-fault record! +
+                 ;; a :seon/error block in place (fail-loud; never the
+                 ;; unbounded compiled path)
                  (bounding-error sym e)))))))
      (catch :default e
-       ;; reconstruction / init failure — never crash; error in place.
-       (bounding-error sym e)))))
+       ;; reconstruction / init failure — OUR machinery preparing agent
+       ;; code (:core, RULED); never crash the render; error in place.
+       (bounding-error sym e :core)))))
 
 ;; ============================================================
 ;; Recovery — reset the hung tile to welcome + inform the agent.
