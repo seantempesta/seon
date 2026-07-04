@@ -150,6 +150,23 @@ substrate):
    body). C34 `5f1686af`: `var-projection` speaks
    `:seon.analyzer-info/*`. Full suite 972/4462 0F/0E.
 
+8. **Error recording phase 1 (error-blame-strict-gate)** — ✅ COMPLETE
+   (2026-07-04, `0e9c9b92`+`a69da9f0`+`17c04e3a`). `seon.error/record!`
+   (fault `:agent|:core` + `:seon.error/at` basis-t + EDN frame component
+   entities + full malli `args-edn`; fire-and-forget persist, bounded
+   buffer, one-error-one-datom dedup tag); the `:seon.config/on-core-error`
+   dial SHIPPED `:gate` (`:crash` persists-then-exits, proven with a
+   stubbed `process.exit`); the process net; the injecting-wrapper async
+   arms (rejections + resolved-output violations become datoms;
+   `wrapper-fault` content refinement keeps agent typos rejecting through
+   the `seon.eval` conduits `:agent` — the live drive caught the
+   misclassification); root-only `core-faults-block` (vanishes past the
+   latest user message — live-proven render + vanish); gates in
+   `bin/test-cljs` (transcript marker) + the dev hook (pod-log offset
+   bracket, block-on-new-fault). `agent-authored-sym?` MOVED
+   render.sci → `seon.error`. NEXT: phase 2 — the 4-file catch-site
+   sweep, then flip dev to `:crash`.
+
 Stability queue (interleaved, one per feature unit above; owner-agreed
 2026-07-02 — each fix REUSES an existing mechanism, no new ones):
 
