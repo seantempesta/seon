@@ -194,17 +194,15 @@
 ;; request-opt-only (inherently per-call; no persisted form yet).
 (schema/register! ::extra-body-edn [:string {:min 1}])
 
-;; The RESOLVED call config — model provenance as DB truth (owner ruling,
-;; 2026-07-04). Each adapter attaches this to every response that actually
-;; went to the wire (success AND call-failure; NOT config-gap errors, where
-;; nothing was called), derived from the SAME values it put in the request
-;; body — never re-read after the fact. `seon.agent.turn` persists it as
-;; per-turn `:seon.agent.turn/llm-*` datoms; the `/agents/run` door reads
-;; those datoms back. `::thinking` here is the row-shape STRING
-;; ("false"/"true"/effort — the [[thinking-mode]] vocabulary). Fields the
-;; provider genuinely doesn't send (anthropic never sends temperature)
-;; are ABSENT. Registered AFTER every referenced keyword (register-order
-;; rule).
+;; The RESOLVED five-key LLM config as a VALUE — what an agent runs
+;; under. NEVER stored (owner correction 2026-07-04, derive-don't-store:
+;; the per-turn `llm-*` stamping this shape once fed is deleted);
+;; [[resolved-config]] derives it from ANY db value on demand — the live
+;; db for current intent, `db/as-of` a past turn's `rendered-as-of`
+;; basis for historical exactness. `::thinking` is the row-shape STRING
+;; ("false"/"true"/effort — the [[thinking-mode]] vocabulary). Keys with
+;; no value at any resolution tier (anthropic never sends temperature;
+;; the diffusiongemma worker owns its own model + caps) are ABSENT.
 (schema/register! ::resolved-config
   [:map
    [::provider    ::provider]
@@ -212,6 +210,25 @@
    [::temperature {:optional true} ::temperature]
    [::max-tokens  {:optional true} ::max-tokens]
    [::thinking    {:optional true} ::thinking]])
+
+;; The SHIPPED per-provider defaults for the `::resolved-config` keys —
+;; the LAST tier of the ONE resolution chain (request opt → agent
+;; override → config row → THIS). Single source: the adapters read their
+;; default constants FROM here (seon.ai.openai-compat, seon.ai.anthropic)
+;; and [[resolved-config]] reports them — one map, zero drift.
+;; :openai-compat shares the deepseek adapter's wire path and fallbacks.
+;; :diffusiongemma ships NONE of the five (the worker owns the weights
+;; and its gen-config caps). Endpoint/timeout/key-env defaults stay
+;; adapter-private — they are not part of the resolved-config surface.
+(def shipped-defaults
+  "Per-provider shipped defaults for the `:seon.ai/resolved-config` keys."
+  {:deepseek       {::model "deepseek-v4-pro" ::temperature 0.7
+                    ::max-tokens 4096 ::thinking "false"}
+   :openai-compat  {::model "deepseek-v4-pro" ::temperature 0.7
+                    ::max-tokens 4096 ::thinking "false"}
+   :anthropic      {::model "claude-opus-4-8" ::max-tokens 16000
+                    ::thinking "false"}
+   :diffusiongemma {}})
 
 ;; The config attrs a row (or the env) may carry — shared shape for
 ;; [[sync-tx-data]]'s two inputs and the row read.
@@ -260,9 +277,10 @@
 ;; [[current]] lays the ambient agent's overrides over the global row
 ;; ([[overlay-agent-overrides]]), so every adapter's resolution chain is
 ;; explicit request opt → the AGENT's own config → the global row →
-;; shipped defaults. What a call ACTUALLY resolved is stamped per turn
-;; (`:seon.agent.turn/llm-*` via `::resolved-config`) — intent here,
-;; provenance there.
+;; shipped defaults. What an agent resolves to is a QUERY, never a
+;; stored stamp: [[resolved-config]] derives the effective config (with
+;; per-key provenance) from any db value — live, or `db/as-of` a past
+;; turn's basis-t (derive-don't-store).
 ;; ============================================================
 
 (schema/register! ::agent-provider    [:or {:default :inherit} [:enum :inherit] ::provider])
@@ -396,18 +414,17 @@
 (schema/register! ::agent-id [:string {:min 1}])
 (schema/register! ::effective-config-request [:map [::agent-id ::agent-id]])
 
-(defn- overlay-agent-overrides
-  "Lay agent `id`'s `::agent-*` override datoms over `global` (a `::row`),
-   `:inherit`/absent → keep the global value. Per-attr install-gated (querying a
-   never-installed attr THROWS on datahike-cljs). Nil id / no agent → `global`
-   unchanged."
-  [global id]
-  (let [db        (some-> db/*conn* deref)
-        installed (when db (db/installed-schema db))
+(defn- agent-override-values
+  "Agent `id`'s non-`:inherit` `::agent-*` override VALUES from db value
+   `db`, keyed by the global attr each overrides. Per-attr install-gated
+   (querying a never-installed attr THROWS on datahike-cljs). Nil db /
+   nil id / no such agent → {}."
+  [db id]
+  (let [installed (when db (db/installed-schema db))
         agent     (when (and db id)
                     (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))]
     (if-not agent
-      global
+      {}
       (reduce-kv
         (fn [m agent-attr global-attr]
           ;; `::agent-*` overrides are MIXED-`:or` schemas → stored pr-str'd by
@@ -418,8 +435,15 @@
             (if (or (nil? v) (= :inherit v))
               m
               (assoc m global-attr v))))
-        global
+        {}
         agent-override-attrs))))
+
+(defn- overlay-agent-overrides
+  "Lay agent `id`'s `::agent-*` override datoms over `global` (a `::row`),
+   `:inherit`/absent → keep the global value. Reads the ambient conn's
+   current db. Nil id / no agent → `global` unchanged."
+  [global id]
+  (merge global (agent-override-values (some-> db/*conn* deref) id)))
 
 (defn current
   "The EFFECTIVE LLM config the adapters read PER CALL.
@@ -447,6 +471,68 @@
   {:malli/schema [:=> [:cat ::effective-config-request] ::row]}
   [{::keys [agent-id]}]
   (overlay-agent-overrides (global-config) agent-id))
+
+;; WHERE a resolved value came from — provenance by DERIVATION (the
+;; resolver re-walks the chain), never storage. Same key set as
+;; `::resolved-config`.
+(schema/register! ::source [:enum :agent-override :config-row :default])
+(schema/register! ::provenance
+  [:map
+   [::provider    ::source]
+   [::model       {:optional true} ::source]
+   [::temperature {:optional true} ::source]
+   [::max-tokens  {:optional true} ::source]
+   [::thinking    {:optional true} ::source]])
+(schema/register! ::resolved-config-request
+  [:map
+   [:seon.db/db :seon.db/db-val]
+   [:seon.agent/id {:optional true} ::agent-id]])
+(schema/register! ::resolved-config-response
+  [:map
+   [::resolved-config ::resolved-config]
+   [::provenance      ::provenance]])
+
+(defn resolved-config
+  "The effective LLM config an agent runs under, derived from a db value.
+
+   Pure fn of `:seon.db/db` — derive-don't-store: nothing persists this,
+   asking again re-derives it. Per key the chain is the agent's own
+   `::agent-*` override datom → the global `::config` row → the
+   provider's [[shipped-defaults]] entry (`::provider` itself falls back
+   to `:deepseek`). Returns the `::resolved-config` VALUE plus
+   `::provenance` — the same keys mapped to where each value came from
+   (`:agent-override` / `:config-row` / `:default`). A key with no value
+   at any tier is absent from both. Omit `:seon.agent/id` for the
+   global-only view. (A section fn surfacing this per agent is the
+   natural UI follow-on.)
+
+   Time travel — datahike is bitemporal, so the config a PAST turn ran
+   under is this same fn over that turn's frozen basis:
+
+     (resolved-config
+       {:seon.db/db    (db/as-of db (:seon.agent.turn/rendered-as-of turn))
+        :seon.agent/id agent-id})"
+  {:malli/schema [:=> [:cat ::resolved-config-request] ::resolved-config-response]}
+  [{db :seon.db/db id :seon.agent/id}]
+  (let [overrides (agent-override-values db id)
+        row-cfg   (global-config db)
+        pick      (fn [k defaults]
+                    (cond
+                      (contains? overrides k) [(get overrides k) :agent-override]
+                      (contains? row-cfg k)   [(get row-cfg k)   :config-row]
+                      (contains? defaults k)  [(get defaults k)  :default]))
+        [prov prov-src] (or (pick ::provider {}) [:deepseek :default])
+        defaults  (get shipped-defaults prov {})]
+    (reduce
+      (fn [acc k]
+        (if-let [[v src] (pick k defaults)]
+          (-> acc
+              (assoc-in [::resolved-config k] v)
+              (assoc-in [::provenance k] src))
+          acc))
+      {::resolved-config {::provider prov}
+       ::provenance      {::provider prov-src}}
+      [::model ::temperature ::max-tokens ::thinking])))
 
 (defn agent-max-retries
   "The per-agent LLM retry COUNT for agent `id`.

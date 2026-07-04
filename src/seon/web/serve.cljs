@@ -45,6 +45,7 @@
     [clojure.string :as str]
     [goog.object :as gobj]
     [seon.agent :as agent]
+    [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
     [seon.agent.lifecycle :as lifecycle]
     [seon.agent.run :as run]
@@ -573,48 +574,27 @@
                                                     :seon.db/args [agent-eid]})
                                          (filter (fn [[_ t]] (contains? turn-eids t)))
                                          count)
-                          ;; Model provenance — read from the window's LATEST
-                          ;; turn CARRYING :seon.agent.turn/llm-* datoms (DB
-                          ;; truth the adapter stamped at turn close), never
-                          ;; inferred from the config row. The presence filter
-                          ;; matters: the `complete` lifecycle verb closes the
-                          ;; run from WITHIN a turn's evals, so the idle poll
-                          ;; can snapshot BEFORE that turn's close-tx stamps
-                          ;; its provenance — the previous stamped turn is
-                          ;; then the honest latest. nil when NO window turn
-                          ;; carries it (stub LLM, config-gap) → key omitted.
-                          model-cfg (when-let [latest
-                                               (let [stamped (->> (db/query {:seon.db/db db
-                                                                             :seon.db/query '[:find ?t ?at :in $ ?ag :where
-                                                                                              [?r :seon.agent.run/agent ?ag]
-                                                                                              [?t :seon.agent.turn/run ?r]
-                                                                                              [?t :seon.agent.turn/llm-provider _]
-                                                                                              [?t :seon.agent.turn/at ?at]]
-                                                                             :seon.db/args [agent-eid]})
-                                                                  (sort-by (fn [[_ ^js at]] (.getTime at)))
-                                                                  (map first))
-                                                     ;; window first; a single-turn run racing its own
-                                                     ;; close falls back to the agent's latest stamped
-                                                     ;; turn overall (still THIS agent's recorded truth).
-                                                     in-window (filter #(contains? turn-eids %) stamped)]
-                                                 (or (last in-window) (last stamped)))]
-                                      (let [{:seon.agent.turn/keys
-                                             [llm-provider llm-model llm-temperature
-                                              llm-max-tokens llm-thinking]}
-                                            (db/pull {:seon.db/db db
-                                                      :seon.db/pull-pattern
-                                                      [:seon.agent.turn/llm-provider
-                                                       :seon.agent.turn/llm-model
-                                                       :seon.agent.turn/llm-temperature
-                                                       :seon.agent.turn/llm-max-tokens
-                                                       :seon.agent.turn/llm-thinking]
-                                                      :seon.db/ref latest})]
-                                        (when llm-provider
-                                          (cond-> {:provider (name llm-provider)}
-                                            llm-model       (assoc :model llm-model)
-                                            llm-temperature (assoc :temperature llm-temperature)
-                                            llm-max-tokens  (assoc :max_tokens llm-max-tokens)
-                                            llm-thinking    (assoc :thinking llm-thinking)))))
+                          ;; Model config — COMPUTED at response time by the
+                          ;; ONE resolver (seon.ai/resolved-config), a pure fn
+                          ;; of this poll's db snapshot: the agent's own
+                          ;; :seon.ai/agent-* overrides → the global config
+                          ;; row → shipped defaults. Derive-don't-store (owner
+                          ;; correction 2026-07-04 — supersedes the per-turn
+                          ;; llm-* stamping). Honest CURRENT intent for a
+                          ;; just-finished run; per-turn historical exactness
+                          ;; is the same resolver over (db/as-of db <turn's
+                          ;; rendered-as-of>) — see the resolver docstring.
+                          model-cfg (let [{:seon.ai/keys [resolved-config]}
+                                          (ai/resolved-config
+                                            {:seon.db/db db :seon.agent/id aid})
+                                          {:seon.ai/keys [provider model temperature
+                                                          max-tokens thinking]}
+                                          resolved-config]
+                                      (cond-> {:provider (name provider)}
+                                        model       (assoc :model model)
+                                        temperature (assoc :temperature temperature)
+                                        max-tokens  (assoc :max_tokens max-tokens)
+                                        thinking    (assoc :thinking thinking)))
                           reply     (->> (db/query {:seon.db/db db
                                                     :seon.db/query '[:find ?f ?to ?at ?c :where
                                                                      [?m :seon.agent.message/from ?f]
@@ -630,10 +610,12 @@
                       ;; derived last-closed-reason from an earlier close.
                       (cond-> {:agent_id aid :turns (count turn-eids) :evals evals
                                :reply (or reply "") :elapsed_ms elapsed
+                               ;; always present — the resolver always resolves
+                               ;; (worst case: all shipped defaults).
+                               :model_config model-cfg
                                :closed_reason (if timeout?
                                                 "timeout"
                                                 (str (derive/last-closed-reason db aid)))}
-                        model-cfg (assoc :model_config model-cfg)
                         timeout? (assoc :timed_out true)))))))))))))
 
 (defn- handle-agent-run! [req res]

@@ -141,10 +141,11 @@ driven again across a pod restart), deliver the input through the real wake
 path, await the derived `:idle` of the run it woke, return the truthful
 reply plus termination metadata (turns/evals scoped to this request's
 window, closed-reason, timed-out) and `model_config` — the RESOLVED LLM
-config the run actually used (provider/model/temperature/max-tokens/
-thinking), read from the window's latest stamped turn's
-`:seon.agent.turn/llm-*` datoms ([[data-model]] §4.4), never inferred from
-the config row; omitted on stub-LLM runs. External harnesses drive per-sample
+config the agent runs under (provider/model/temperature/max-tokens/
+thinking), COMPUTED at response time by the pure resolver
+`seon.ai/resolved-config` (agent overrides → config row → shipped
+defaults; derive-don't-store, [[data-model]] §4.4 — per-turn historical
+exactness is the same resolver over an as-of db). External harnesses drive per-sample
 ephemeral clusters by port; the gym drives the same primitives in-process.
 The answer key never enters the pod — scoring stays host-side. Benchmark
 vocabulary is harness-side only.

@@ -99,20 +99,6 @@
 ;; top-level provider fields. Both ABSENT on a stub-LLM turn.
 (schema/register! :seon.agent.turn/llm-usage    :string)
 (schema/register! :seon.agent.turn/llm-meta     :string)
-;; Model provenance — the RESOLVED call config the turn's LLM call ACTUALLY
-;; used (owner ruling 2026-07-04: every run's config queryable as datoms, no
-;; accounting for runs outside the database). Written at close from the
-;; adapter's `:seon.ai/resolved-config` (derived from the wire params —
-;; request opt → the agent's own `:seon.ai/agent-*` config → the global
-;; config row → shipped defaults), so a mid-run config switch is recorded at
-;; the honest grain: per TURN. Value shapes REFERENCE the `:seon.ai/*`
-;; vocabulary (register-once rule); `llm-thinking` is the row-shape string
-;; ("false"/"true"/effort). All absent on a stub-LLM or config-gap turn.
-(schema/register! :seon.agent.turn/llm-provider    :seon.ai/provider)
-(schema/register! :seon.agent.turn/llm-model       :seon.ai/model)
-(schema/register! :seon.agent.turn/llm-temperature :seon.ai/temperature)
-(schema/register! :seon.agent.turn/llm-max-tokens  :seon.ai/max-tokens)
-(schema/register! :seon.agent.turn/llm-thinking    :seon.ai/thinking)
 (schema/register! :seon.agent.turn/evals        [:vector {:seon.db/component true} :seon.db/ref])
 
 ;; Entity shape. NB: seon.db validates per-ATTRIBUTE, not entity-level, so the
@@ -133,11 +119,6 @@
    [:seon.agent.turn/llm-retries  {:optional true} :seon.agent.turn/llm-retries]
    [:seon.agent.turn/llm-usage    {:optional true} :seon.agent.turn/llm-usage]
    [:seon.agent.turn/llm-meta     {:optional true} :seon.agent.turn/llm-meta]
-   [:seon.agent.turn/llm-provider    {:optional true} :seon.agent.turn/llm-provider]
-   [:seon.agent.turn/llm-model       {:optional true} :seon.agent.turn/llm-model]
-   [:seon.agent.turn/llm-temperature {:optional true} :seon.agent.turn/llm-temperature]
-   [:seon.agent.turn/llm-max-tokens  {:optional true} :seon.agent.turn/llm-max-tokens]
-   [:seon.agent.turn/llm-thinking    {:optional true} :seon.agent.turn/llm-thinking]
    [:seon.agent.turn/evals        {:optional true} :seon.agent.turn/evals]])
 
 ;; ============================================================
@@ -348,11 +329,6 @@
                                                    :seon.agent.turn/llm-retries
                                                    :seon.agent.turn/llm-usage
                                                    :seon.agent.turn/llm-meta
-                                                   :seon.agent.turn/llm-provider
-                                                   :seon.agent.turn/llm-model
-                                                   :seon.agent.turn/llm-temperature
-                                                   :seon.agent.turn/llm-max-tokens
-                                                   :seon.agent.turn/llm-thinking
                                                    :seon.agent.turn/reply-blob
                                                    :seon.agent.turn/error]))]}))]
       (when (false? (:seon.db/ok? close))
@@ -371,29 +347,6 @@
                     :seon.agent.turn/error  (turn-error-str e)}]}))
         (catch :default _ nil))
       (throw e))))
-
-;; :seon.ai/resolved-config key → the :seon.agent.turn/llm-* attr it lands
-;; on. Pure projection data — extend by adding a pair, never a branch.
-(def ^:private resolved-config->turn-attr
-  {:seon.ai/provider    :seon.agent.turn/llm-provider
-   :seon.ai/model       :seon.agent.turn/llm-model
-   :seon.ai/temperature :seon.agent.turn/llm-temperature
-   :seon.ai/max-tokens  :seon.agent.turn/llm-max-tokens
-   :seon.ai/thinking    :seon.agent.turn/llm-thinking})
-
-(defn- resolved-config->turn-attrs
-  "The turn's model-provenance attrs from an adapter's resolved config.
-
-   Maps the `:seon.ai/resolved-config` the adapter derived FROM THE WIRE
-   PARAMS onto `:seon.agent.turn/llm-*` datoms. nil/absent resolved
-   config (stub llm-fn, config-gap error) → {} — optional-is-absent."
-  [resolved]
-  (reduce-kv (fn [m ai-key turn-attr]
-               (if-some [v (get resolved ai-key)]
-                 (assoc m turn-attr v)
-                 m))
-             {}
-             resolved-config->turn-attr))
 
 ;; ============================================================
 ;; The LLM call + eval. ask-and-eval-reply! parses the reply and
@@ -540,25 +493,20 @@
         retries (:seon.agent.turn/llm-retries resp)
         raw     (:seon.ai/raw resp)
         usage   (:seon.ai/usage raw)
-        pfields (:seon.ai/provider-fields raw)
-        ;; Model provenance → per-turn datoms, on BOTH outcomes (the call
-        ;; that failed still used this config). Absent on stub/config-gap.
-        config-attrs (resolved-config->turn-attrs (:seon.ai/resolved-config raw))]
+        pfields (:seon.ai/provider-fields raw)]
     (if-let [err (:seon.ai/error resp)]
       (do
         (log id turn-idx "llm error — turn :error"
              (str (when retries (str "(after " retries " retry) "))
                   (:seon.ai/msg err)))
         (cond->
-          (merge {:seon.agent/eval-count 0
-                  :seon.agent.turn/status :error
-                  ;; Capture the failure as data — the error record must not
-                  ;; depend on turn success (observability.md).
-                  :seon.agent.turn/error  (turn-error-str err)}
-                 config-attrs)
+          {:seon.agent/eval-count 0
+           :seon.agent.turn/status :error
+           ;; Capture the failure as data — the error record must not
+           ;; depend on turn success (observability.md).
+           :seon.agent.turn/error  (turn-error-str err)}
           retries (assoc :seon.agent.turn/llm-retries retries)))
-      (cond-> (merge (await (ask-and-eval-reply! resp id id-of-turn compile-state run-id))
-                     config-attrs)
+      (cond-> (await (ask-and-eval-reply! resp id id-of-turn compile-state run-id))
         retries     (assoc :seon.agent.turn/llm-retries retries)
         (seq usage) (assoc :seon.agent.turn/llm-usage (pr-str usage))
         (seq pfields) (assoc :seon.agent.turn/llm-meta (pr-str pfields))))))

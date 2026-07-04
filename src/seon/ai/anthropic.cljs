@@ -86,22 +86,22 @@
    [:seon.ai.anthropic/stop-reason  {:optional true} :seon.ai.anthropic/stop-reason]
    [:seon.ai/usage                  {:optional true} :seon.ai/usage]
    [:seon.ai/tool-calls             {:optional true} :seon.ai/tool-calls]
-   [:seon.ai/provider-fields        {:optional true} :seon.ai/provider-fields]
-   ;; Present on every response that went to the wire (success AND call
-   ;; failure); absent only on a config-gap error where nothing was called.
-   ;; No :seon.ai/temperature — this adapter never sends sampling params.
-   [:seon.ai/resolved-config        {:optional true} :seon.ai/resolved-config]])
+   [:seon.ai/provider-fields        {:optional true} :seon.ai/provider-fields]])
 
 ;; ============================================================
 ;; Config — the shipped defaults. The :seon.ai/config row (read per
 ;; call) overrides these; explicit request opts override the row.
 ;; ============================================================
 
-(def ^:private default-model      "claude-opus-4-8")
-;; max_tokens is REQUIRED by the Messages API. 16000 keeps long
-;; replies from truncating mid-thought (current API guidance) while
-;; staying under HTTP timeouts.
-(def ^:private default-max-tokens 16000)
+;; Model/max-tokens defaults live in the ONE per-provider map
+;; `seon.ai/shipped-defaults` (:anthropic entry), so the queryable
+;; resolver (`seon.ai/resolved-config`) reports exactly what this
+;; adapter falls back to. max_tokens is REQUIRED by the Messages API;
+;; 16000 keeps long replies from truncating mid-thought (current API
+;; guidance) while staying under HTTP timeouts.
+(def ^:private defaults           (:anthropic ai/shipped-defaults))
+(def ^:private default-model      (:seon.ai/model defaults))
+(def ^:private default-max-tokens (:seon.ai/max-tokens defaults))
 (def ^:private default-timeout-ms 60000)
 
 (defn- api-key
@@ -335,36 +335,25 @@
       (let [ms      (or (:seon.ai/timeout-ms (ai/current)) default-timeout-ms)
             ^js client (make-client key ms)
             extra   (request-extra-body request)
-            params-clj (request-params request)
-            ;; Model provenance — derived from the wire params themselves
-            ;; (same rule as seon.ai.openai-compat). No temperature (never
-            ;; sent); thinking is the row-shape string: adaptive → "true".
-            resolved {:seon.ai/provider   :anthropic
-                      :seon.ai/model      (:model params-clj)
-                      :seon.ai/max-tokens (:max_tokens params-clj)
-                      :seon.ai/thinking   (if (:thinking params-clj)
-                                            "true" "false")}
             ;; :extra-body is MERGED into the request PARAMS (1st arg) —
             ;; the SDK's 2nd-arg RequestOptions :body REPLACES the body
             ;; (drops model/messages), so it must NOT be used. Same fix
             ;; as seon.ai.openai-compat (verified live there).
-            params  (clj->js (cond-> params-clj
+            params  (clj->js (cond-> (request-params request)
                                (seq extra) (merge extra)))
             ^js messages (.. client -messages)]
         (try
           (let [^js stream (.stream messages params)
                 message (await (.finalMessage stream))
-                result  (assoc (parse-completion message)
-                               :seon.ai/resolved-config resolved)]
+                result  (parse-completion message)]
             (when-let [err (:seon.ai/error result)]
               (ai/log-error! "Anthropic" err))
             result)
           (catch :default e
             (let [err (error->envelope e)]
               (ai/log-error! "Anthropic" err)
-              {:seon.ai/text            ""
-               :seon.ai/error           err
-               :seon.ai/resolved-config resolved})))))))
+              {:seon.ai/text  ""
+               :seon.ai/error err})))))))
 
 ;; ============================================================
 ;; Adapter for seon.agent — same bridge shape as deepseek's.

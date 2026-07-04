@@ -50,15 +50,15 @@ REGRESSION_WINDOW = 7
 # ---------------------------------------------------------------------------
 # Model provenance — rows must self-describe (audit finding, 2026-07-04)
 # ---------------------------------------------------------------------------
-# The pod owns the provider config (the `:seon.ai/config` DB row + the code
-# defaults in src/seon/ai/openai_compat.cljs); NO pod surface reports the
-# RESOLVED model id / thinking mode / temperature back to the harness — the
-# /agents/run response carries only agent_id/turns/evals/reply/closed_reason.
-# Ask filed to the tooling lane (docs/prds/agent-ctx/coordination.md,
-# 2026-07-04): expose the resolved provider row on the run response. Until it
-# lands, rows record what the harness CAN know — the provider label plus the
-# pod's documented defaults — with `model_config_source` stating exactly that,
-# so an assumed default can never be mistaken for a runtime-confirmed fact.
+# The pod now RUNTIME-DERIVES the resolved model config: the /agents/run
+# response carries `model_config`, COMPUTED at response time by the pod's
+# pure config resolver (seon.ai/resolved-config — the agent's own override
+# datoms → the global config row → shipped defaults; derive-don't-store,
+# owner correction 2026-07-04). Runners capture it via solver._record_result
+# ("pod_model_config" metadata) and pass `model_provenance_from_run(...)`
+# into their row — caller-supplied values win over these fallback defaults
+# in append_row. The constant below remains ONLY as the fallback for rows
+# whose run predates the surface, and it says so.
 MODEL_PROVENANCE: dict[str, Any] = {
     "model": "deepseek",
     "model_id": "deepseek-v4-pro",
@@ -67,8 +67,35 @@ MODEL_PROVENANCE: dict[str, Any] = {
     "model_config_source": (
         "pod defaults per src/seon/ai/openai_compat.cljs (default-model / "
         "default-temperature / thinking disabled-for-:deepseek) — NOT "
-        "runtime-reported; coordination.md ask 2026-07-04"),
+        "runtime-reported (no model_config captured for this run)"),
 }
+
+RUNTIME_SOURCE = "runtime-derived (pod resolver via /agents/run model_config)"
+
+
+def model_provenance_from_run(model_config: dict[str, Any] | None,
+                              ) -> dict[str, Any]:
+    """Ledger-row provenance fields from a pod run's `model_config`.
+
+    `model_config` is the /agents/run response field (or the recorded
+    "pod_model_config" metadata): {"provider", "model", "temperature",
+    "max_tokens", "thinking"} — derived by the pod's config resolver at
+    response time. Returns the row-field mapping with `model_config_source` =
+    RUNTIME_SOURCE, for the caller to merge into its `append_row` row
+    (caller values win over the assumed-defaults constant). {} when the
+    pod reported none — the fallback defaults then apply, honestly marked."""
+    if not model_config:
+        return {}
+    out: dict[str, Any] = {"model_config_source": RUNTIME_SOURCE}
+    if model_config.get("provider") is not None:
+        out["model"] = model_config["provider"]
+    if model_config.get("model") is not None:
+        out["model_id"] = model_config["model"]
+    if model_config.get("thinking") is not None:
+        out["model_thinking"] = model_config["thinking"]
+    if model_config.get("temperature") is not None:
+        out["model_temperature"] = model_config["temperature"]
+    return out
 
 # An execution's outcome: "pass" | "fail" | a flake-taxonomy class string
 # (anything else). Taxonomy classes used by the runners:
@@ -121,6 +148,44 @@ def compute_metrics(executions: list[dict[str, Any]]) -> dict[str, Any]:
         "flake_rate": len(flakes) / len(executions),
         "flakes_by_class": flakes_by_class,
     }
+
+
+def executions_from_eval_log(log: Any) -> list[dict[str, Any]]:
+    """Execution records from ONE inspect EvalLog (run_bench path).
+
+    Previously each run hand-rolled this conversion in an ad-hoc script
+    (evidence jsonls existed, the code didn't) — this is the one shared
+    reducer. Per (sample, epoch): pod-reported timeout → `solve_timeout`;
+    a crashed run (closed_reason ":error") → `run_error`; an inspect-side
+    sample error → `harness_error`; otherwise pass/fail from the sample's
+    first scorer value ("C"/1 = pass). Each record carries the reply text
+    (completion) + the pod summary metadata as evidence."""
+    out: list[dict[str, Any]] = []
+    for s in (getattr(log, "samples", None) or []):
+        md = s.metadata or {}
+        pod = {k.removeprefix("pod_"): md.get(k) for k in
+               ("pod_agent_id", "pod_turns", "pod_evals", "pod_closed_reason",
+                "pod_timed_out", "pod_elapsed_ms", "pod_model_config")
+               if k in md}
+        base = {"pod": pod, "reply": getattr(s.output, "completion", "")}
+        if md.get("pod_evidence_blobs") is not None:
+            base["evidence_blobs"] = md["pod_evidence_blobs"]
+        if getattr(s, "error", None) is not None:
+            out.append(execution(str(s.id), s.epoch, "harness_error",
+                                 error=str(s.error), **base))
+            continue
+        if md.get("pod_timed_out"):
+            out.append(execution(str(s.id), s.epoch, "solve_timeout", **base))
+            continue
+        if str(md.get("pod_closed_reason") or "") == ":error":
+            out.append(execution(str(s.id), s.epoch, "run_error", **base))
+            continue
+        score = next(iter((s.scores or {}).values()), None)
+        val = getattr(score, "value", None)
+        passed = val in ("C", 1, 1.0, True)
+        out.append(execution(str(s.id), s.epoch, PASS if passed else FAIL,
+                             score_value=val, **base))
+    return out
 
 
 def load_rows(path: Path = SCORECARD_PATH) -> list[dict[str, Any]]:

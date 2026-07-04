@@ -403,22 +403,11 @@
    like any other provider; precedence is explicit opt > config row >
    the worker's gen-config default (no default-gen-opts cap)."
   [opts ctx-text]
-  (let [cfg     (ai/current)
-        cfg-max (:seon.ai/max-tokens cfg)
+  (let [cfg-max (:seon.ai/max-tokens (ai/current))
         request (cond-> (merge default-gen-opts opts {::prompt ctx-text})
                   (and cfg-max (not (contains? opts ::max-new-tokens)))
                   (assoc ::max-new-tokens cfg-max))
-        ;; Model provenance (:seon.ai/resolved-config) — resolved HERE (the
-        ;; cap resolution site for this adapter; the worker owns the actual
-        ;; weights, so :seon.ai/model rides only when the config row names
-        ;; one). Attached to the raw response like the other adapters.
-        resolved (cond-> {:seon.ai/provider :diffusiongemma}
-                   (:seon.ai/model cfg)
-                   (assoc :seon.ai/model (:seon.ai/model cfg))
-                   (::max-new-tokens request)
-                   (assoc :seon.ai/max-tokens (::max-new-tokens request)))
-        resp    (assoc (await (complete request))
-                       :seon.ai/resolved-config resolved)]
+        resp    (await (complete request))]
     (cond-> {:text        (:seon.ai/text resp)
              :seon.ai/raw resp}
       (:seon.ai/error resp) (assoc :seon.ai/error (:seon.ai/error resp)))))

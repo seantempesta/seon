@@ -105,7 +105,15 @@ def _record_result(state: TaskState, result: dict) -> TaskState:
         "pod_evals": result.get("evals"),
         "pod_timed_out": result.get("timed_out", False),
         "pod_elapsed_ms": result.get("elapsed_ms"),
+        # Runtime-derived model provenance (2026-07-04): the door COMPUTES
+        # model_config at response time via the pod's pure config resolver
+        # (seon.ai/resolved-config: agent overrides → config row → shipped
+        # defaults) — derive-don't-store; always present on a run response.
+        # scorecard.model_provenance_from_run maps it onto ledger-row fields.
+        "pod_model_config": result.get("model_config"),
     })
+    if result.get("evidence_blobs") is not None:
+        state.metadata["pod_evidence_blobs"] = result["evidence_blobs"]
     return state
 
 
@@ -132,14 +140,18 @@ def seon_pod_solver(cluster_url: str | None = None,
 
 @solver
 def seon_cluster_solver(timeout_s: int | None = None,
-                        cluster_prefix: str = "bench"):
+                        cluster_prefix: str = "bench",
+                        evidence_root=None):
     """One EPHEMERAL cluster per sample: create → drive → destroy.
 
     True per-sample isolation by construction — each sample gets a fresh
     cluster (own db, own pod, own blobs), destroyed afterwards even on
-    failure. Serial (one cluster at a time); bench-cluster-N parallelism is
-    a later unit. Budget per sample = cluster boot
-    (config.CLUSTER_BOOT_BUDGET_S) + the row timeout."""
+    failure. `evidence_root` (a Path; evidence-retention fix 2026-07-04)
+    copies each cluster's blob store (rendered prompts + verbatim replies)
+    to `evidence_root/e<epoch>/<sample_id>/blobs` BEFORE destroy — a wrong
+    reply stays attributable after the cluster is gone. Serial per solver
+    call (bench-cluster-N dispatches N samples concurrently). Budget per
+    sample = cluster boot (config.CLUSTER_BOOT_BUDGET_S) + the row timeout."""
 
     async def solve(state: TaskState, generate: Generate) -> TaskState:
         import anyio
@@ -151,7 +163,15 @@ def seon_cluster_solver(timeout_s: int | None = None,
         def drive() -> dict:
             from seon_inspect.cluster import bench_cluster_name
             with ephemeral_cluster(bench_cluster_name(cluster_prefix)) as c:
-                return pod_run(_prompt_text(state), timeout_ms, c.url)
+                out = pod_run(_prompt_text(state), timeout_ms, c.url)
+                if evidence_root is not None:
+                    from seon_inspect.tool_rows import preserve_cluster_evidence
+                    epoch = getattr(state, "epoch", 1)
+                    dest = (evidence_root / f"e{epoch}"
+                            / str(state.sample_id))
+                    out["evidence_blobs"] = preserve_cluster_evidence(
+                        c.name, dest)
+                return out
 
         result = await anyio.to_thread.run_sync(drive)
         return _record_result(state, result)
