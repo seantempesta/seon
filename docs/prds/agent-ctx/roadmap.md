@@ -396,6 +396,27 @@ repo-dev docs.
    **Still ongoing:** per-row rendered-context audits (every trim is an
    A/B), baseline each tool the tooling lane lands, milestone runs at
    merges, the mvm case-2 sandbox tier later.
+10. **Iterate-until-green — ✅ DONE 2026-07-04.** The instruction-error
+    classes from [[research/reply-surface-instruction-audit-2026-07-04]]
+    iterated to green with GENERAL fixes only. Item 0 (owner-authorized
+    mechanism): parentless `(complete "…")` now DELIVERS its string to the
+    user via the one `message!` path before closing (lifecycle.cljs +
+    targeted tests). Fix 1 (reply-channel truth) + Fix 2 (plan-resumption
+    discipline) landed in `system-text`; two logged wording iterations
+    (final sha `c04ea6bd6bd6`, diffs archived in
+    `evals/runs/2026-07-04-iterate-until-green/`) — incl. the load-bearing
+    find that models COPY example placeholders verbatim (`(complete
+    "result")` → a literal "result" reply; placeholder now
+    `"<the answer>"`). Ledger (arm-labeled rows): gsm8k .730→.800
+    (noise-excluded .972) · mmlu .800→.933 · arc .867→.933 · planning
+    .286→**.700** (armC; the armC-i2 re-run scored .400 — not separable at
+    n=10 k=1; re-plan class ELIMINATED both runs, finals ~100%; residual
+    step-closing compliance classified model-bound at the iteration cap).
+    web_fetch ROOT-CAUSED via the new evidence retention: the
+    always-on SSRF guard refuses the loopback fixtures → fabrication after
+    refusal (flagged to tooling; the pytest alarm is deliberately RED on
+    that attributed row). Harness: run dirs now always retain .eval logs +
+    per-execution reply text + pre-destroy cluster blob copies.
 
 Spec: [[eval-design]] · plan: [[eval-lane-plan]] · readiness:
 [[research/tool-surface-survey-2026-07-02]].

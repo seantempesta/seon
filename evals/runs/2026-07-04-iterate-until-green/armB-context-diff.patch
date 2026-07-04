@@ -1,0 +1,125 @@
+diff --git a/src/seon/agent/ctx.cljs b/src/seon/agent/ctx.cljs
+index 972d999e..7670f3d3 100644
+--- a/src/seon/agent/ctx.cljs
++++ b/src/seon/agent/ctx.cljs
+@@ -1180,6 +1180,8 @@
+     "; SHOW, DON'T TELL: your live tile (the live-tile section below) is\n"
+     "; your PRIMARY surface for showing your human data, results, and\n"
+     "; status; (message/user \"...\") is narration/backup that scrolls away.\n"
++    "; One carve-out: a tile is never a REPLY — a final answer must still\n"
++    "; be SENT with (message/user \"...\") or (complete \"...\").\n"
+     ";\n"
+     "; THE SHARED STORE. All agents are wired to ONE shared datahike\n"
+     "; (datomic-style) database. Two laws worth stating once: register an\n"
+@@ -1279,12 +1281,21 @@
+     ";   (message/user \"...\")            ; tell your one human — they see it now\n"
+     ";   (message/agent \"<id>\" \"...\")    ; tell a specific peer agent\n"
+     ";   (wait \"note\")                   ; deliberately park; resume when a message arrives\n"
+-    ";   (complete \"result\")             ; finish this work cleanly\n"
++    ";   (complete \"result\")             ; finish cleanly — result is DELIVERED to whoever asked\n"
+     "; - TELL YOUR HUMAN with (message/user \"...\"). They see exactly what you\n"
+     ";   send, when you send it — so send the answer when you have it, and a\n"
+     ";   SHORT progress note when a longer task is still running. You can\n"
+     ";   message every turn when they need to stay informed; silence across\n"
+     ";   many turns is the failure, a one-line update is cheap.\n"
++    "; - YOUR DELIVERED ANSWER IS WHAT YOU SEND, never what you merely\n"
++    ";   computed or narrated. A value sitting in a result, a line of prose,\n"
++    ";   or an answer typed raw on its own line (ANSWER: 4) is NOT delivered\n"
++    ";   — raw text is a NOTE, dropped, never sent. Put the answer INSIDE a\n"
++    ";   sending form: (message/user \"...\") or (complete \"...\"). If a\n"
++    ";   specific output format was asked for, that exact format IS the\n"
++    ";   string you send — (message/user \"ANSWER: C\"), verbatim — not\n"
++    ";   narrated around, not paraphrased. And the LAST thing you send\n"
++    ";   should BE the answer: don't follow it with chatter.\n"
+     "; - TALK TO A PEER with (message/agent \"<agent-id>\" \"...\"). Messaging\n"
+     ";   YOURSELF is refused — your notes-to-self are just ; comments in\n"
+     ";   your turn.\n"
+@@ -1324,9 +1335,9 @@
+     ";   being satisfied, not your open steps or the turn cap. Ask each turn:\n"
+     ";   \"do I already have what was asked for?\" If yes, deliver it and stop.\n"
+     "; - WHEN YOU ARE DONE, say so with a verb. (complete \"result\") marks\n"
+-    ";   the work finished — call it the turn the goal is met, right after you\n"
+-    ";   deliver the answer; it is how you close, whoever asked (a human or a\n"
+-    ";   parent agent). (wait \"what you're waiting for\") parks you\n"
++    ";   the work finished AND delivers its result string to whoever asked\n"
++    ";   (your human, or your parent agent) — call it the turn the goal is\n"
++    ";   met. (wait \"what you're waiting for\") parks you\n"
+     ";   until the next message wakes you — use it after you've asked a\n"
+     ";   question and need their answer to continue. If you simply have\n"
+     ";   nothing more to do this loop, emit NO forms — the loop ends cleanly\n"
+diff --git a/src/seon/agent/lifecycle.cljs b/src/seon/agent/lifecycle.cljs
+index 6f6004d2..5f7bd81e 100644
+--- a/src/seon/agent/lifecycle.cljs
++++ b/src/seon/agent/lifecycle.cljs
+@@ -29,6 +29,7 @@
+    `^:async` fns aren't runtime-instrumented — the `:malli/schema` is the
+    contract."
+   (:require
++    [clojure.string :as str]
+     [seon.agent.internal :as internal]
+     [seon.agent.loop :as loop]
+     [seon.agent.message :as msg]
+@@ -69,33 +70,42 @@
+     (internal/no-agent-error "wait")))
+ 
+ (defn ^:async complete
+-  "Finish the calling agent's work: close its open run `:completed`.
+-
+-   Derived `:idle` (a new message opens a fresh run). If `:seon.agent/parent` is set,
+-   send the result to the parent (which wakes it via the normal inbound gate);
+-   no parent → the result is for the human (already said via message/user).
++  "Finish the calling agent's work: deliver `result`, close the run `:completed`.
++
++   Derived `:idle` (a new message opens a fresh run). The `result` string is
++   DELIVERED, never discarded: with a `:seon.agent/parent` it is messaged to
++   the parent (waking it via the normal inbound gate); with no parent it is
++   messaged to the HUMAN — the same `message!` path as `(message/user …)`, so
++   both closing verbs deliver to whoever asked. Delivery happens BEFORE the
++   run closes (a caller that polls for idle then reads the last user message
++   always sees the result). A blank `result` delivers nothing (there is
++   nothing to say) and just closes. A failed delivery is returned as the
++   error envelope WITHOUT closing the run — retry with a fixed result.
+    The result is a MESSAGE, not a state — so it is REPORT=DATA, MESSAGE=POINTER:
+-   `result` is a SHORT pointer (the stored entity id + a one-line summary), not
+-   a long report inline (a multi-line result truncates mid-string and never
+-   sends). Store the findings as data first, then complete with the pointer;
+-   the parent QUERIES the stored data. Returns `:idle` on success, the error
+-   envelope on a failed transact, no agent in scope, or no open run."
++   `result` is the ANSWER itself when it is short, else a SHORT pointer (the
++   stored entity id + a one-line summary) — never a long report inline (a
++   multi-line result truncates mid-string and never sends). Store big findings
++   as data first; the reader QUERIES the stored data. Returns `:idle` on
++   success, the error envelope on a failed transact, no agent in scope, or no
++   open run."
+   {:malli/schema [:=> [:catn [::result :string]]
+                   [:or :seon.derive/state :seon.db/transact-response]]}
+   [result]
+   (if-let [id (db/current-agent-id)]
+     (if-let [r (run/current-run {:seon.agent/id id})]
+-      (let [ent    (db/entity {:seon.db/ref [:seon.agent/id id]})
+-            parent (:db/id (:seon.agent/parent ent))
+-            env    (await (run/close-run!
+-                            {:seon.agent.run/id            (:seon.agent.run/id r)
+-                             :seon.agent.run/closed-reason :completed}))]
+-        (if (:seon.db/ok? env)
+-          (do (when parent
+-                (await (msg/message! {:seon.agent.message/content result
+-                                      :seon.agent.message/to      [parent]})))
+-              :idle)
+-          env))
++      (let [ent      (db/entity {:seon.db/ref [:seon.agent/id id]})
++            parent   (:db/id (:seon.agent/parent ent))
++            sent     (when-not (str/blank? result)
++                       (await (msg/message!
++                                {:seon.agent.message/content result
++                                 :seon.agent.message/to
++                                 (if parent [parent] [msg/user-ref])})))]
++        (if (false? (:seon.db/ok? sent))
++          sent
++          (let [env (await (run/close-run!
++                             {:seon.agent.run/id            (:seon.agent.run/id r)
++                              :seon.agent.run/closed-reason :completed}))]
++            (if (:seon.db/ok? env) :idle env))))
+       (no-open-run-error "complete" id))
+     (internal/no-agent-error "complete")))
+ 

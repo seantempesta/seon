@@ -25,6 +25,8 @@ are the CASE-2 / mvm tier — deferred, not faked.
 from __future__ import annotations
 
 import importlib
+import shutil
+from pathlib import Path
 from typing import Any, Callable, Sequence
 
 from inspect_ai import Task, eval as inspect_eval
@@ -48,6 +50,28 @@ CASE1_BENCHES: dict[str, tuple[str, str]] = {
     "truthfulqa": ("inspect_evals.truthfulqa", "truthfulqa"),
     "gpqa_diamond": ("inspect_evals.gpqa", "gpqa_diamond"),
 }
+
+
+def save_eval_logs(logs: Any, evidence_dir: Path) -> list[str]:
+    """Copy a run's inspect `.eval` log files into `<evidence_dir>/inspect-logs/`.
+
+    Evidence-retention fix (2026-07-04): run dirs under `evals/runs/` must
+    ALWAYS carry the run's own .eval logs — the concurrent-pass web_fetch
+    root-cause was unrecoverable partly because logs lived only under the
+    package's transient logs/ tree. Never raises; returns the copied paths."""
+    out_dir = evidence_dir / "inspect-logs"
+    copied: list[str] = []
+    for log in (logs or []):
+        loc = str(getattr(log, "location", "") or "")
+        src = Path(loc.removeprefix("file://"))
+        try:
+            if src.is_file():
+                out_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, out_dir / src.name)
+                copied.append(str(out_dir / src.name))
+        except Exception:
+            continue
+    return copied
 
 
 def load_bench_task(name: str, **task_kwargs: Any) -> Task:
@@ -156,6 +180,7 @@ def run_bench(
     max_samples: int | None = None,
     task_kwargs: dict[str, Any] | None = None,
     task: Task | None = None,
+    evidence_dir: "Path | None" = None,
     **eval_kwargs: Any,
 ):
     """Run a standard bench with a Seon cluster's pod agent as the solver.
@@ -183,6 +208,13 @@ def run_bench(
     `task` lets a caller pass a PREBUILT catalog Task (e.g. `freeze.run_split`,
     which injects canary metadata into the blind tier) instead of constructing
     one from `task_kwargs` — same dataset+scorer either way.
+
+    `evidence_dir` (evidence-retention fix, 2026-07-04 — run dirs must always
+    hold the evidence): copies the run's inspect `.eval` logs into
+    `<evidence_dir>/inspect-logs/` (even when the frozen-bundle assertion
+    raises), and in per-sample mode also preserves each ephemeral cluster's
+    blob store under `<evidence_dir>/blobs/e<epoch>/<sample_id>/` before the
+    cluster is destroyed — per-execution reply text + transcripts survive.
     """
     if per_sample_cluster and cluster_url:
         raise ValueError(
@@ -203,7 +235,9 @@ def run_bench(
         # the run whenever src/ is saved mid-run), so the run starts on
         # current code HERE and the identity stays pinned for the run.
         cluster_mod.ensure_bench_bundle()
-        the_solver = seon_cluster_solver(timeout_s=run_timeout_s)
+        the_solver = seon_cluster_solver(
+            timeout_s=run_timeout_s,
+            evidence_root=(evidence_dir / "blobs") if evidence_dir else None)
         # Per-sample clusters run the FROZEN bench bundle (the supervisor's
         # --ephemeral default). Pin its identity NOW and record it in the
         # run's own artifacts (EvalLog metadata) — the end-of-run assertion
@@ -230,6 +264,8 @@ def run_bench(
         max_samples=max_samples,
         **eval_kwargs,
     )
+    if evidence_dir is not None:
+        save_eval_logs(logs, evidence_dir)
     if per_sample_cluster:
         violation = cluster_mod.bundle_violation(bundle_start)
         if violation:

@@ -93,3 +93,5 @@ docs/.obsidian/plugins/
 target/
 scratchpad/
 out-acme/
+evals/runs/*/*/blobs/
+evals/runs/*/*/*/blobs/

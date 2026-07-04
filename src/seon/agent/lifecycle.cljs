@@ -29,6 +29,7 @@
    `^:async` fns aren't runtime-instrumented — the `:malli/schema` is the
    contract."
   (:require
+    [clojure.string :as str]
     [seon.agent.internal :as internal]
     [seon.agent.loop :as loop]
     [seon.agent.message :as msg]
@@ -69,33 +70,42 @@
     (internal/no-agent-error "wait")))
 
 (defn ^:async complete
-  "Finish the calling agent's work: close its open run `:completed`.
+  "Finish the calling agent's work: deliver `result`, close the run `:completed`.
 
-   Derived `:idle` (a new message opens a fresh run). If `:seon.agent/parent` is set,
-   send the result to the parent (which wakes it via the normal inbound gate);
-   no parent → the result is for the human (already said via message/user).
+   Derived `:idle` (a new message opens a fresh run). The `result` string is
+   DELIVERED, never discarded: with a `:seon.agent/parent` it is messaged to
+   the parent (waking it via the normal inbound gate); with no parent it is
+   messaged to the HUMAN — the same `message!` path as `(message/user …)`, so
+   both closing verbs deliver to whoever asked. Delivery happens BEFORE the
+   run closes (a caller that polls for idle then reads the last user message
+   always sees the result). A blank `result` delivers nothing (there is
+   nothing to say) and just closes. A failed delivery is returned as the
+   error envelope WITHOUT closing the run — retry with a fixed result.
    The result is a MESSAGE, not a state — so it is REPORT=DATA, MESSAGE=POINTER:
-   `result` is a SHORT pointer (the stored entity id + a one-line summary), not
-   a long report inline (a multi-line result truncates mid-string and never
-   sends). Store the findings as data first, then complete with the pointer;
-   the parent QUERIES the stored data. Returns `:idle` on success, the error
-   envelope on a failed transact, no agent in scope, or no open run."
+   `result` is the ANSWER itself when it is short, else a SHORT pointer (the
+   stored entity id + a one-line summary) — never a long report inline (a
+   multi-line result truncates mid-string and never sends). Store big findings
+   as data first; the reader QUERIES the stored data. Returns `:idle` on
+   success, the error envelope on a failed transact, no agent in scope, or no
+   open run."
   {:malli/schema [:=> [:catn [::result :string]]
                   [:or :seon.derive/state :seon.db/transact-response]]}
   [result]
   (if-let [id (db/current-agent-id)]
     (if-let [r (run/current-run {:seon.agent/id id})]
-      (let [ent    (db/entity {:seon.db/ref [:seon.agent/id id]})
-            parent (:db/id (:seon.agent/parent ent))
-            env    (await (run/close-run!
-                            {:seon.agent.run/id            (:seon.agent.run/id r)
-                             :seon.agent.run/closed-reason :completed}))]
-        (if (:seon.db/ok? env)
-          (do (when parent
-                (await (msg/message! {:seon.agent.message/content result
-                                      :seon.agent.message/to      [parent]})))
-              :idle)
-          env))
+      (let [ent      (db/entity {:seon.db/ref [:seon.agent/id id]})
+            parent   (:db/id (:seon.agent/parent ent))
+            sent     (when-not (str/blank? result)
+                       (await (msg/message!
+                                {:seon.agent.message/content result
+                                 :seon.agent.message/to
+                                 (if parent [parent] [msg/user-ref])})))]
+        (if (false? (:seon.db/ok? sent))
+          sent
+          (let [env (await (run/close-run!
+                             {:seon.agent.run/id            (:seon.agent.run/id r)
+                              :seon.agent.run/closed-reason :completed}))]
+            (if (:seon.db/ok? env) :idle env))))
       (no-open-run-error "complete" id))
     (internal/no-agent-error "complete")))
 

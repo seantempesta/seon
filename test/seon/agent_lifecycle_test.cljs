@@ -44,11 +44,30 @@
                      (.finally (fn [] (set! db/*conn* prev)))))))))
 
 (defn- seed-agents!
-  "Transact two bare agent entities (id only — derived :idle)."
+  "Transact two bare agent entities (id only — derived :idle) + THE user
+   entity (complete's no-parent delivery target)."
   []
   (db/transact!
     {:seon.db/tx-data [{:seon.agent/id "aaa-2606101200"}
-                       {:seon.agent/id "bbb-2606101200"}]}))
+                       {:seon.agent/id "bbb-2606101200"}
+                       {:seon.user/id "user"}]}))
+
+(defn- user-messages-from
+  "Contents of messages FROM agent `id` TO the user, in db order."
+  [id]
+  (let [db      @db/*conn*
+        agent-e (:db/id (db/entity {:seon.db/db db
+                                    :seon.db/ref [:seon.agent/id id]}))
+        user-e  (:db/id (db/entity {:seon.db/db db
+                                    :seon.db/ref [:seon.user/id "user"]}))]
+    (->> (db/query {:seon.db/db db
+                    :seon.db/query '[:find ?m ?c :in $ ?from ?to :where
+                                     [?m :seon.agent.message/from ?from]
+                                     [?m :seon.agent.message/to ?to]
+                                     [?m :seon.agent.message/content ?c]]
+                    :seon.db/args [agent-e user-e]})
+         (sort-by first)
+         (mapv second))))
 
 (defn- derived [id]
   (:seon.agent/state (agent/derive-status {:seon.agent/id id})))
@@ -73,13 +92,25 @@
                                (fn ^:async w [] (await (lifecycle/wait "need an answer")))))]
                 (is (= :idle r) "wait returns the new derived state")
                 (is (= :idle (derived "aaa-2606101200")) "the run closed → :idle")))
-            (testing "complete closes the SCOPED agent's run :completed → :idle"
+            (testing "complete closes the SCOPED agent's run :completed → :idle
+                      AND (no parent) DELIVERS the result to the human"
               (await (run/open-run! {:seon.agent/id "bbb-2606101200"
                                      :seon.agent.run/trigger :message}))
               (let [r (await (db/with-agent "bbb-2606101200"
                                (fn ^:async c [] (await (lifecycle/complete "done")))))]
                 (is (= :idle r))
-                (is (= :idle (derived "bbb-2606101200")))))
+                (is (= :idle (derived "bbb-2606101200")))
+                (is (= ["done"] (user-messages-from "bbb-2606101200"))
+                    "a parentless complete messages its result string to the
+                     user — the string is delivered, never discarded")))
+            (testing "a BLANK complete result delivers nothing and just closes"
+              (await (run/open-run! {:seon.agent/id "bbb-2606101200"
+                                     :seon.agent.run/trigger :message}))
+              (let [r (await (db/with-agent "bbb-2606101200"
+                               (fn ^:async c [] (await (lifecycle/complete "  ")))))]
+                (is (= :idle r) "blank result still closes the run cleanly")
+                (is (= ["done"] (user-messages-from "bbb-2606101200"))
+                    "no second (blank) message was stored")))
             (testing "pause/resume HOLD the run without killing it"
               (await (run/open-run! {:seon.agent/id "bbb-2606101200"
                                      :seon.agent.run/trigger :message}))

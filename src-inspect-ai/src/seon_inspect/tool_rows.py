@@ -26,6 +26,7 @@ only a completed run scores pass/fail against the oracle.
 from __future__ import annotations
 
 import contextlib
+import shutil
 import time
 import traceback
 from concurrent.futures import ThreadPoolExecutor
@@ -48,6 +49,26 @@ def _pod_summary(pod: dict[str, Any]) -> dict[str, Any]:
              "elapsed_ms")}
 
 
+def preserve_cluster_evidence(cluster_name: str, dest: Path) -> str | None:
+    """Copy an ephemeral cluster's blob store to `dest` BEFORE it is destroyed.
+
+    Evidence-retention fix (2026-07-04): the concurrent-pass web_fetch fails
+    were UNRECOVERABLE because per-sample clusters were destroyed with their
+    turn-capture blobs (rendered prompts + verbatim LLM replies) inside.
+    Copies `data/clusters/<name>/blobs/` → `dest/blobs/`; returns the copied
+    path (str) or None when the cluster has no blob dir. Never raises — a
+    failed copy must not turn a scored sample into a harness_error."""
+    src = cluster_mod.REPO_ROOT / "data" / "clusters" / cluster_name / "blobs"
+    try:
+        if not src.is_dir():
+            return None
+        out = dest / "blobs"
+        shutil.copytree(src, out, dirs_exist_ok=True)
+        return str(out)
+    except Exception:
+        return None
+
+
 def run_tool_sample(
     sample: dict[str, Any],
     row: str,
@@ -58,22 +79,30 @@ def run_tool_sample(
     cluster_factory: Callable[..., Any] = ephemeral_cluster,
     run: Callable[..., dict[str, Any]] = pod_run,
     fixtures: Callable[[Path], Any] = serve_fixtures,
+    evidence_root: Path | None = None,
 ) -> dict[str, Any]:
     """One tool-row sample: materialize → drive an ephemeral cluster → score.
 
     Returns an execution record (`scorecard.execution`) carrying the outcome
-    plus evidence: the oracle result, the pod's honest metadata, elapsed
-    seconds, and (on harness failure) the traceback. Never raises — a
-    harness-side exception becomes a flake-class outcome so one broken boot
-    can't abort a row. The workspace is keyed on (epoch, sample id) so a
-    later epoch NEVER sees an earlier epoch's outputs (a shared workspace
-    would score epoch 2 pass off epoch 1's work)."""
+    plus evidence: the oracle result, the pod's honest metadata, the FULL
+    reply text, elapsed seconds, and (on harness failure) the traceback.
+    `evidence_root` (evidence-retention fix, 2026-07-04) additionally copies
+    the ephemeral cluster's blob store (rendered prompts + verbatim replies)
+    to `evidence_root/e<epoch>/<sid>/blobs` BEFORE destroy, so a wrong-value
+    reply is never unrecoverable again. Never raises — a harness-side
+    exception becomes a flake-class outcome so one broken boot can't abort a
+    row. The workspace is keyed on (epoch, sample id) so a later epoch NEVER
+    sees an earlier epoch's outputs (a shared workspace would score epoch 2
+    pass off epoch 1's work)."""
     sid = sample["id"]
     meta = sample["metadata"]
     ws = workspaces_root / f"e{epoch}" / sid
     started = time.monotonic()
+    evidence: str | None = None
 
     def record(outcome: str, **extra: Any) -> dict[str, Any]:
+        if evidence is not None:
+            extra.setdefault("evidence_blobs", evidence)
         return scorecard.execution(
             sid, epoch, outcome,
             elapsed_s=round(time.monotonic() - started, 1), **extra)
@@ -88,6 +117,9 @@ def run_tool_sample(
                 text = render_input(sample, fixture_url=base_url)
             cluster = stack.enter_context(cluster_factory())
             pod = run(text, timeout_ms, cluster.url)
+            if evidence_root is not None:
+                evidence = preserve_cluster_evidence(
+                    cluster.name, evidence_root / f"e{epoch}" / sid)
     except AgentRunRefused as e:
         return record("agent_run_refused", error=str(e))
     except TimeoutError as e:
@@ -97,18 +129,21 @@ def run_tool_sample(
                       trace=traceback.format_exc(limit=4))
 
     if pod.get("timed_out"):
-        return record("solve_timeout", pod=_pod_summary(pod))
+        return record("solve_timeout", pod=_pod_summary(pod),
+                      reply=pod.get("reply", ""))
     if str(pod.get("closed_reason", "")) == ":error":
         # The run CRASHED (turn error / halt :error) — the agent never got to
         # answer; a runtime defect class, not a capability miss. First observed
         # 2026-07-03: cljs-watch hot-reloads landing mid-turn in bench pods.
-        return record("run_error", pod=_pod_summary(pod))
+        return record("run_error", pod=_pod_summary(pod),
+                      reply=pod.get("reply", ""))
     if row in WORKSPACE_ROWS:
         score = check_workspace(ws, meta["oracle"])
     else:
         score = check_answer(pod.get("reply", ""), meta["oracle"])
     return record(scorecard.PASS if score["ok"] else scorecard.FAIL,
-                  score=score, pod=_pod_summary(pod))
+                  score=score, pod=_pod_summary(pod),
+                  reply=pod.get("reply", ""))
 
 
 def run_tool_row(
@@ -123,6 +158,7 @@ def run_tool_row(
     run: Callable[..., dict[str, Any]] = pod_run,
     fixtures: Callable[[Path], Any] = serve_fixtures,
     prepare: Callable[..., Any] | None = None,
+    evidence_root: Path | None = None,
 ) -> list[dict[str, Any]]:
     """One whole tool row — bench-cluster-N: N ephemeral clusters at once.
 
@@ -158,7 +194,7 @@ def run_tool_row(
         return run_tool_sample(sample, row, workspaces_root=workspaces_root,
                                timeout_ms=timeout_ms, epoch=epoch,
                                cluster_factory=cluster_factory, run=run,
-                               fixtures=fixtures)
+                               fixtures=fixtures, evidence_root=evidence_root)
 
     with ThreadPoolExecutor(max_workers=n) as pool:
         executions = list(pool.map(one, jobs))

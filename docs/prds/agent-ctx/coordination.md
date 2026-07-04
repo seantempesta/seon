@@ -993,3 +993,100 @@ the build starts (owner wants cross-lane discussion on majors like this):**
 - Docs: data-model.md §4.4 (attrs + the intent/provenance split + the
   general per-agent resolution pattern), observability.md (`model_config`
   on the door). Tooling reviews post-hoc per the established pattern.
+
+### 2026-07-04 — ITERATE-UNTIL-GREEN (eval lane): reply-channel fixes land; instruction class ~closed; web_fetch root-caused to the SSRF guard
+
+- **ITEM 0 (mechanism, owner-authorized — TOOLING post-hoc review asked):**
+  `seon.agent.lifecycle/complete` no longer silently discards its result on
+  a PARENTLESS agent. New semantics (= agent-runtime.md L185's already-
+  stated ideal): the result string is DELIVERED via the ONE `message!` path
+  — parent if present, else THE user — BEFORE the run closes (a caller that
+  polls idle then reads the last user message always sees it); blank result
+  delivers nothing; a failed delivery returns the error envelope WITHOUT
+  closing (fail-loud, retryable). Docstring updated; targeted tests in
+  `test/seon/agent_lifecycle_test.cljs` (no-parent delivery + blank no-op).
+  KNOWN TRADE, observed live: complete's string becomes the LAST message,
+  so a filler complete can clobber a clean answer — one planning sample
+  delivered the LITERAL string "result" by copying the context's own
+  `(complete "result")` example. Mitigation shipped as content (see below);
+  a mechanism alternative (deliver only when nothing was messaged this run)
+  was considered and NOT built — flag if you prefer it.
+- **Context content (system-text, ctx.cljs — eval-lane content per the
+  boundary; diffs archived in `evals/runs/2026-07-04-iterate-until-green/`):**
+  Fix 1 reply-channel truth (v2 sha `774db55b25f6`): delivered answer = what
+  you SEND; raw text is dropped; a required format is your ENTIRE final
+  string; tile carve-out ("a tile is never a REPLY"). Fix 2 plan discipline
+  + i2 (final combined sha `c04ea6bd6bd6`): done! at verify-moment, resume
+  the rendered plan after restart, sweep-before-complete, and the
+  `(complete "result")` placeholder replaced with `(complete "<the answer>")`
+  (models copy placeholders verbatim — placeholder text is load-bearing).
+- **Ledger (dev, frozen splits, DeepSeek, 0 bench flakes):** gsm8k k3
+  .730→**.800** (residual fails = the 3 documented label-noise golds ×8 + 1
+  stochastic prose slip; noise-excluded .972) · mmlu .800→**.933** (0 format
+  misses; 1 clean wrong option) · arc .867→**.933** (1 clean wrong option) ·
+  long_term_planning .286→**.700** (armC) with the i2 probe closing all 3
+  remaining trajectory fails (armC-i2 full row landing). The
+  delivery/format instruction class is effectively CLOSED.
+- **web_fetch ROOT-CAUSED (evidence-retention fix paid off immediately):**
+  armB .364 (was .625) — retained per-execution blobs show `web/fetch`
+  REFUSES the bench's loopback fixture URLs (the always-on private-range
+  SSRF guard, `seon.agent.web` — "loopback … always refused"), then the
+  model FABRICATES page values (delivered "Gadget X"/1887/1892 appear
+  NOWHERE in the fixtures); every pass routed around via `shell/run curl`
+  or js/fetch. The "off-by-~33" 1920→1887/1892 pair is NOT a read/sum bug —
+  fabricated founding years. **FLAG (eval→tooling): the web bench needs
+  either a host-owned loopback grant for bench clusters (guard change =
+  your mechanism) or the row stays a fallback-resourcefulness measure; also
+  reinforces Fix 3 (fabricated `=>` echo re-rendering).** The standing
+  pytest alarm now RED on web_fetch (correctly — attributed environment
+  defect, not hidden); whether an attributed tool-defect row should gate
+  the suite is an owner call.
+- **Harness (my lane):** run dirs now ALWAYS retain evidence —
+  `catalog.save_eval_logs` + `run_bench(evidence_dir=…)` copy the .eval
+  logs; `tool_rows.preserve_cluster_evidence` + `seon_cluster_solver
+  (evidence_root=…)` copy each ephemeral cluster's blob store BEFORE
+  destroy; execution records carry full reply text; the eval-log→executions
+  reducer is now shared code (`scorecard.executions_from_eval_log`).
+
+### 2026-07-04 — OWNER CORRECTION (eval lane): model provenance is DERIVED, not stored — supersedes the 9b4a819e per-turn stamping
+
+- **Ruling:** per-turn `:seon.agent.turn/llm-*` stamping was wasteful and
+  violated derive-don't-store. The DB can already ANSWER "what config does
+  this agent run under": resolution is a pure fn of a db value, and datahike
+  is bitemporal — the config at any past turn = the same fn over
+  `(db/as-of db (:seon.agent.turn/rendered-as-of turn))`.
+- **Deleted (no legacy, no shims):** the 5 `:seon.agent.turn/llm-*` attr
+  registrations + entity-map rows + `resolved-config->turn-attrs` + the
+  close-tx whitelist additions (turn.cljs); the `:seon.ai/resolved-config`
+  attachment in all three adapters (openai_compat, anthropic,
+  diffusiongemma); the /agents/run stamped-turn query + complete-verb race
+  workaround (serve.cljs).
+- **Built:** `seon.ai/resolved-config` — public, schema'd:
+  `{:seon.db/db db :seon.agent/id id}` → `{:seon.ai/resolved-config {…}
+  :seon.ai/provenance {…}}` with per-key provenance
+  (`:agent-override`/`:config-row`/`:default`) derived by re-walking the
+  chain. Works on the live db AND any as-of db. `seon.ai/shipped-defaults`
+  is now the ONE per-provider defaults map (openai_compat + anthropic read
+  their constants from it — zero drift with what the resolver reports).
+  The `:seon.ai/resolved-config` SCHEMA stays as the value shape.
+- **/agents/run:** `model_config` now COMPUTED via the resolver at response
+  time (always present — current intent for a just-finished run; the as-of
+  recipe covers historical exactness). Harness `model_config_source` →
+  "runtime-derived (pod resolver …)" (scorecard.py/solver.py — provenance
+  lines only; the iterate unit's in-flight edits untouched).
+- **Docs:** data-model.md §4.4 rewritten (resolver + as-of recipe replace
+  the per-turn attrs); observability.md door paragraph updated. Trivially a
+  section-fn candidate for the UI later (noted, not built). **TOOLING:
+  post-hoc review note** — serve.cljs + the two adapter default-constant
+  reads touch your lane's files.
+- **armC-i2 full-row amendment (honesty):** the i2 full planning run scored
+  **.400** vs armC v1's **.700** — at n=10 k=1 the two wordings are NOT
+  separable (a 2-3 sample swing is the whole gap; the i2 probe had flipped
+  all 3 v1 fails clean). Failure class identical in both runs: finished
+  steps left OPEN (finals ~100% correct, ZERO re-plan roots in either run —
+  that class is eliminated). Per the 3-iteration cap: residual step-closing
+  compliance is classified MODEL-BOUND (contract stated verbatim, twice
+  reinforced, per-run compliance still stochastic at temp 0.7). The i2
+  wording is KEPT (its placeholder fix — a literal `(complete "result")`
+  copy — is an observed real defect; the sweep line is noise-neutral).
+  Planning alarm stays green (.400 vs median .493, drop .093 < .10).
