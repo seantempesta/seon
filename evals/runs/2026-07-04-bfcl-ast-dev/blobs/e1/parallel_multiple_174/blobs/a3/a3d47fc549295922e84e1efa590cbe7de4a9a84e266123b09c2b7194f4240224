@@ -1,0 +1,8 @@
+```json
+[
+  {"name": "convert_currency", "arguments": {"base_currency": "EUR", "target_currency": "USD", "amount": 5000}},
+  {"name": "ecology.get_turtle_population", "arguments": {"location": "Galapagos Islands", "year": 2018, "species": true}},
+  {"name": "map_service.get_directions", "arguments": {"start": "New York", "end": "Los Angeles", "avoid": ["tolls", "ferries"]}},
+  {"name": "convert_currency", "arguments": {"base_currency": "GBP", "target_currency": "JPY", "amount": 3000}}
+]
+```

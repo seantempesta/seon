@@ -141,6 +141,52 @@
       },
       "total_n": 1172
     },
+    "bfcl_ast": {
+      "bench": "bfcl_ast",
+      "capability_row": "tool_calling",
+      "content_sha256": "c5ffcb0a878827e7ec884337fe4102df68b6bb6d5782b2b91405ff98b7449ad5",
+      "dev": {
+        "n": 10,
+        "sample_ids": [
+          "parallel_multiple_29",
+          "multiple_66",
+          "simple_python_189",
+          "parallel_3",
+          "parallel_multiple_174",
+          "multiple_130",
+          "simple_python_103",
+          "parallel_191",
+          "parallel_multiple_106",
+          "multiple_168"
+        ]
+      },
+      "milestone": {
+        "n": 10,
+        "sample_ids": [
+          "simple_python_212",
+          "parallel_44",
+          "parallel_multiple_73",
+          "multiple_87",
+          "simple_python_36",
+          "parallel_32",
+          "parallel_multiple_94",
+          "multiple_7",
+          "simple_python_13",
+          "parallel_89"
+        ]
+      },
+      "pin": {
+        "inspect_evals.bfcl.bfcl.BFCL_GITHUB_COMMIT": "dac44e7ac9db5ff26a01ab0c1ec5de5a1e703b7a"
+      },
+      "seed": "20260702:bfcl_ast",
+      "stratify": "category_name",
+      "test": {
+        "canary_guid": "SEON-CANARY-d8df3200-8696-4480-b0b1-91df90f54407",
+        "n": 980,
+        "sample_ids_sha256": "41fcd505122b51e7d6a41ed2a122071a7d26649138e7fe99f032c6eb955eae79"
+      },
+      "total_n": 1000
+    },
     "gpqa_diamond": {
       "bench": "gpqa_diamond",
       "capability_row": "hard_calibration",

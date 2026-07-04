@@ -49,6 +49,28 @@ CASE1_BENCHES: dict[str, tuple[str, str]] = {
     "commonsense_qa": ("inspect_evals.commonsense_qa", "commonsense_qa"),
     "truthfulqa": ("inspect_evals.truthfulqa", "truthfulqa"),
     "gpqa_diamond": ("inspect_evals.gpqa", "gpqa_diamond"),
+    # BFCL single-turn AST subset — established tool-calling bench, pure
+    # host-side AST-match scorer (no exec/sandbox). It needs a text->tool_call
+    # ADAPTER (BENCH_ADAPTERS below), not the generic swap_generate, because
+    # its scorer harvests structured ToolCalls the pod's text reply must be
+    # lifted into. Default categories = the python AST set (see bfcl_adapter).
+    "bfcl_ast": ("inspect_evals.bfcl", "bfcl"),
+}
+
+
+# Benches whose scorer does NOT read the pod's TEXT reply directly and so need
+# a bespoke solver chain (an `adapt` hook) instead of `swap_generate`. Keyed by
+# catalog name; a bench absent here uses `swap_generate` (the default). Data,
+# not a code branch — adopting such a bench stays a one-line edit. bfcl's AST
+# scorer reads synthesized ToolCalls, so bfcl_ast maps to the text->call
+# bridge; nothing else needs one today.
+def _bfcl_adapt(*args: Any) -> Any:
+    from seon_inspect.bfcl_adapter import bfcl_adapt  # deferred: heavy import
+    return bfcl_adapt(*args)
+
+
+BENCH_ADAPTERS: dict[str, Callable[..., list[Solver]]] = {
+    "bfcl_ast": _bfcl_adapt,
 }
 
 
@@ -74,6 +96,20 @@ def save_eval_logs(logs: Any, evidence_dir: Path) -> list[str]:
     return copied
 
 
+# Per-bench default task kwargs, applied UNDER caller kwargs — the one place a
+# bench's constrained scope lives so freeze-time and run-time load identically.
+# bfcl's upstream default is EVERY category (incl. exec + multi-turn, which pull
+# a sandbox); we pin the pure-AST python subset so bfcl_ast never widens.
+def _bfcl_ast_categories() -> list[str]:
+    from seon_inspect.bfcl_adapter import BFCL_AST_CATEGORIES  # deferred import
+    return list(BFCL_AST_CATEGORIES)
+
+
+BENCH_DEFAULT_TASK_KWARGS: dict[str, Callable[[], dict[str, Any]]] = {
+    "bfcl_ast": lambda: {"categories": _bfcl_ast_categories()},
+}
+
+
 def load_bench_task(name: str, **task_kwargs: Any) -> Task:
     """Load a standard inspect_evals Task by catalog name (its own dataset+scorer)."""
     if name not in CASE1_BENCHES:
@@ -84,7 +120,9 @@ def load_bench_task(name: str, **task_kwargs: Any) -> Task:
         )
     mod_name, attr = CASE1_BENCHES[name]
     task_fn: Callable[..., Task] = getattr(importlib.import_module(mod_name), attr)
-    return task_fn(**task_kwargs)
+    defaults = BENCH_DEFAULT_TASK_KWARGS.get(name)
+    merged = {**(defaults() if defaults else {}), **task_kwargs}
+    return task_fn(**merged)
 
 
 @solver
@@ -180,6 +218,7 @@ def run_bench(
     max_samples: int | None = None,
     task_kwargs: dict[str, Any] | None = None,
     task: Task | None = None,
+    adapt: Callable[..., list[Solver]] | None = None,
     evidence_dir: "Path | None" = None,
     **eval_kwargs: Any,
 ):
@@ -227,6 +266,9 @@ def run_bench(
             "(POD_MAX_SAMPLES) — pass per_sample_cluster=True")
     if task is None:
         task = load_bench_task(name, **(task_kwargs or {}))
+    # Bench-specific solver bridge (bfcl needs text->tool_call); default =
+    # swap_generate. An explicit `adapt=` argument overrides the registry.
+    adapt_fn = adapt or BENCH_ADAPTERS.get(name, swap_generate)
     bundle_start = None
     if per_sample_cluster:
         parallelism = cluster_parallelism or config.BENCH_CLUSTER_PARALLELISM
@@ -257,7 +299,7 @@ def run_bench(
                        else config.POD_MAX_SAMPLES)
     logs = inspect_eval(
         task,
-        solver=swap_generate(task.solver, the_solver),
+        solver=adapt_fn(task.solver, the_solver),
         model=eval_kwargs.pop("model", "mockllm/model"),
         limit=limit,
         epochs=epochs,

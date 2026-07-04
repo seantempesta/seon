@@ -1,0 +1,9 @@
+I'll analyze the request and determine the function calls needed.
+
+The user asks for:
+1. Convert 5000 Euros to US dollars → `convert_currency`
+2. Turtle population in Galapagos Islands, year 2018, with species info → `ecology.get_turtle_population`
+3. Directions from New York to Los Angeles, avoiding tolls and ferries → `map_service.get_directions`
+4. Convert 3000 British Pounds to Japanese Yen → `convert_currency`
+
+(message/user "[{\"name\": \"convert_currency\", \"arguments\": {\"base_currency\": \"EUR\", \"target_currency\": \"USD\", \"amount\": 5000}}, {\"name\": \"ecology.get_turtle_population\", \"arguments\": {\"location\": \"Galapagos Islands\", \"year\": 2018, \"species\": true}}, {\"name\": \"map_service.get_directions\", \"arguments\": {\"start\": \"New York\", \"end\": \"Los Angeles\", \"avoid\": [\"tolls\", \"ferries\"]}}, {\"name\": \"convert_currency\", \"arguments\": {\"base_currency\": \"GBP\", \"target_currency\": \"JPY\", \"amount\": 3000}}]")

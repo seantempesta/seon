@@ -115,6 +115,20 @@ EXTERNAL_SOURCES: dict[str, dict[str, Any]] = {
         "freeze_task_kwargs": {},
         "pin": ("inspect_evals.gpqa.gpqa", "GPQA_DIAMOND_DATASET_SHA256"),
     },
+    "bfcl_ast": {
+        "capability_row": "tool_calling",
+        "dev_n": 10,
+        "milestone_n": 10,
+        # Span the AST categories so a split isn't all-simple; category_name
+        # is on every bfcl sample's metadata.
+        "stratify": "category_name",
+        # Categories default to the AST subset via BENCH_DEFAULT_TASK_KWARGS —
+        # freeze and run must load the SAME set, so leave this empty.
+        "freeze_task_kwargs": {},
+        # BFCL's GitHub dataset is commit-pinned (contamination-proof) — record
+        # the pin so an inspect-evals sync that moves it diffs loudly.
+        "pin": ("inspect_evals.bfcl.bfcl", "BFCL_GITHUB_COMMIT"),
+    },
 }
 
 # Bespoke generator rows (eval-design): the GENERATOR + seeds are what's
@@ -147,6 +161,21 @@ class TierDisciplineError(Exception):
 # ---------------------------------------------------------------------------
 
 
+def _input_repr(inp: Any) -> Any:
+    """Stable projection of a Sample.input for hashing.
+
+    A plain-string input hashes as-is. A ChatMessage-list input (bfcl_ast) is
+    projected to (role, text) pairs — the message objects' str() carries a
+    RANDOM per-load uuid id, so hashing them directly would make the corpus
+    fingerprint non-deterministic across freezes."""
+    if isinstance(inp, str):
+        return inp
+    return [
+        {"role": getattr(m, "role", None), "text": getattr(m, "text", str(m))}
+        for m in inp
+    ]
+
+
 def content_hash(sample: Any) -> str:
     """Stable 16-hex content hash of a sample's substance.
 
@@ -157,11 +186,11 @@ def content_hash(sample: Any) -> str:
     """
     if sample.choices:
         payload = {
-            "input": sample.input,
+            "input": _input_repr(sample.input),
             "choices": sorted(str(c) for c in sample.choices),
         }
     else:
-        payload = {"input": sample.input, "target": sample.target}
+        payload = {"input": _input_repr(sample.input), "target": sample.target}
     encoded = json.dumps(payload, sort_keys=True, ensure_ascii=False, default=str)
     return hashlib.sha256(encoded.encode()).hexdigest()[:16]
 

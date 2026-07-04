@@ -1,0 +1,2 @@
+; The request asks for a single JSON array with one call object. The correct function is `traffic_estimate` with all three parameters (two required + the optional `time_period` since "this weekend" calls for "weekend"). I'll wrap it in a form so it evaluates.
+(identity [{"name": "traffic_estimate", "arguments": {"start_location": "Las Vegas", "end_location": "Los Angeles", "time_period": "weekend"}}])

@@ -1,0 +1,5 @@
+The request asks for song lyrics — "Bohemian Rhapsody" by Queen. That matches `get_song_lyrics` exactly, with two required parameters (`song_title`, `artist_name`) and one optional (`lang`). The request doesn't specify a language, so I omit the optional parameter.
+
+```json
+[{"name": "get_song_lyrics", "arguments": {"song_title": "Bohemian Rhapsody", "artist_name": "Queen"}}]
+```

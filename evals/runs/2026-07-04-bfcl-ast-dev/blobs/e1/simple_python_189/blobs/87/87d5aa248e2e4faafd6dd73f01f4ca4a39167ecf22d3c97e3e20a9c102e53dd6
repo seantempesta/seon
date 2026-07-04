@@ -1,0 +1,6 @@
+; The request asks for a weather forecast for a specific city and time frame with details.  
+; The matching function is `weather_forecast_detailed`.  
+; Required params: `location` (string), `days` (integer). Optional: `details` (boolean).  
+; The request specifies New York, USA, 3 days, and details → `details` is true.
+
+(message/user "[{\"name\": \"weather_forecast_detailed\", \"arguments\": {\"location\": \"New York, USA\", \"days\": 3, \"details\": true}}]")

@@ -93,6 +93,7 @@ next to `datasets.lock`) — never under the package or docs/.
 | Per-sample ephemeral clusters | `run_bench("gsm8k", per_sample_cluster=True, ...)` | default supervisor stack up (`bin/seon status`) + DeepSeek key |
 | bench-cluster-N (concurrent per-sample clusters) | `run_bench(..., per_sample_cluster=True, cluster_parallelism=2)` / `tool_rows.run_tool_row(row, samples, parallelism=2, ...)` — default `config.BENCH_CLUSTER_PARALLELISM` (2, calibrated 2026-07-03: N=2 → 1.84x throughput, no degradation; N=4 → +12% more for 2-3x latency inflation). Above 1 the frozen bundle pre-builds ONCE (`bin/seon bench-bundle`) before dispatch. | same |
 | Frozen dev split of a standard bench | `freeze.run_split("arc_challenge", "dev", per_sample_cluster=True, cluster_parallelism=2, run_timeout_s=240, epochs=1)` | same |
+| BFCL tool-calling row (AST subset) | `freeze.run_split("bfcl_ast", "dev", per_sample_cluster=True, cluster_parallelism=2, run_timeout_s=180, epochs=1)` — the `bfcl_adapter` text→tool_call bridge is auto-selected by bench name | same |
 | Planning row (live, two-phase) | `planning.pod_planning_driver(phase1, phase2)` per sample -> `check_planning` | same + wire-server REPL (`tmp/seon-writer-repl-port`) |
 | GPU worker | add `-T endpoint=runpod` + env `DIFFGEMMA_EP`/`RUNPOD_API_KEY`, `--max-samples 1` | deployed worker, `verify_fresh` FIRST (runbook step 0) |
 
@@ -178,6 +179,7 @@ sandbox/tool-bridge. That's what `POST /agents/run` supports today.
 | `commonsense_qa` | commonsense MC-QA | ✅ | validation | choice scorer |
 | `truthfulqa` | truthfulness MC-QA | ✅ | validation | choice scorer |
 | `gpqa_diamond` | hard graduate MC-QA | ✅ | test | csv from openaipublic (sha256-pinned in inspect_evals) — no HF token needed |
+| `bfcl_ast` | **tool / function calling** (established agentic) | ✅ **baselined** | dev (report-only) | single-turn AST subset (`simple_python`/`multiple`/`parallel`/`parallel_multiple`); pure-Python `ast_match`, host-side, no exec/sandbox. Needs the **text→tool_call adapter** (`bfcl_adapter`, NOT `swap_generate`) — the pod emits a JSON call, lifted into the `ToolCall`s the bench's own scorer harvests. NO DeepSeek non-think anchor (no door-fitting agentic bench has one) → band vs the PUBLIC BFCL leaderboard, report-only |
 | `humaneval` / `mbpp` | code generation | ❌ **case-2** | — | scorer EXECUTES model code in a sandbox → mvm tier |
 | `gaia`, `assistant_bench`, `tau2`, `theagentcompany`, `swe_bench` | agentic / **long-horizon planning** | ❌ **case-2** | — | need web/tool/repo sandboxes → mvm tier |
 
@@ -210,6 +212,35 @@ SEON_CLUSTER_URL=http://127.0.0.1:7980/agents/run \
 `--model mockllm/model` is forced internally (inspect requires a model arg; the
 solver bypasses it — the pod owns every turn). Image/multimodal benches also
 need `pillow` (`uv pip install pillow`); the QA/math case-1 set does not.
+
+### BFCL AST — the text→tool_call adapter (`seon_inspect.bfcl_adapter`)
+
+BFCL is the first ESTABLISHED agentic bench in the catalog. Its single-turn AST
+subset is scored by inspect_evals' pure-Python `ast_match` — deterministic,
+host-side, no exec/sandbox — but that scorer harvests structured `ToolCall`s off
+the assistant message, and the Seon pod emits TEXT, not OpenAI `tool_calls`. So
+bfcl uses a bespoke **adapt hook** (`catalog.BENCH_ADAPTERS["bfcl_ast"]`) instead
+of `swap_generate`: a 3-step chain that keeps the bench's OWN scorer and swaps
+only the generate —
+
+1. `bfcl_prompt` renders the sample's candidate function schemas + the request
+   into the prompt, asking for the call(s) as a single **JSON array**, and states
+   every check the scorer makes (exact function/param names, all required params,
+   no extras, JSON types, one call for simple/multiple & all for parallel).
+2. the pod solver drives `/agents/run` unchanged.
+3. `bfcl_parse` extracts the JSON call(s) from the reply and appends a
+   `ChatMessageAssistant` carrying the synthesized `ToolCall`s. A reply with no
+   parseable call stamps `bfcl_parse_error` — a PARSE miss is an adapter-quality
+   signal (fix the bridge), distinct from a MODEL miss (a parseable but wrong
+   call).
+
+Scope is the python AST categories only (`simple_python` / `multiple` /
+`parallel` / `parallel_multiple`); `run_bench("bfcl_ast")` pins them via
+`BENCH_DEFAULT_TASK_KWARGS` so freeze and run load identically. Run it like any
+row (`freeze.run_split("bfcl_ast", "dev", per_sample_cluster=True, ...)`); the
+adapter is selected by bench name — no extra argument. NO DeepSeek non-think
+anchor exists (no door-fitting agentic bench has one) → band the number against
+the PUBLIC BFCL leaderboard in the row notes, never a fabricated anchor column.
 
 ## Frozen splits — `evals/datasets.lock` (dev / milestone / test)
 

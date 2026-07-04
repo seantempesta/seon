@@ -1,0 +1,7 @@
+```json
+[
+  {"name": "protein_info.get_sequence_and_3D", "arguments": {"protein_name": "human HbA1c", "model_3d": true}},
+  {"name": "protein_info.get_sequence_and_3D", "arguments": {"protein_name": "human normal hemoglobin", "model_3d": true}},
+  {"name": "protein_info.get_sequence_and_3D", "arguments": {"protein_name": "rat hemoglobin", "model_3d": true}}
+]
+```

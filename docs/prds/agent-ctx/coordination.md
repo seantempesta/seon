@@ -1252,3 +1252,74 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   DeepSeek-tuned — triggered by harness-build changes + context-arm
   promotions, NOT cadence-tracked. The capability ledger = bespoke + agentic
   rows ONLY. (Queued behind bfcl — shares catalog.py/scorecard.py.)
+
+### 2026-07-04 — web-access policy SHIPPED (config over env) [tooling-reviewable]
+
+- **Implements the owner ruling above.** The binary `SEON_WEB_ALLOW_PRIVATE`
+  env grant AND the separate `configure!`/`SEON_WEB_DOMAINS`/`SEON_WEB_LOCK`
+  allowlist are GONE — unified into ONE host-owned config:
+  `:seon.config/web {:seon.agent.web/policy :open|:public-only|:allowlist
+  :seon.agent.web/allowed-domains [host…]}`. `:seon.agent.web/policy` is the
+  authoritative enum registered in `seon.agent.web`; the manifest references it
+  (cross-ns keyword-ref, LEAF rule intact — no code dep) so a typo fails LOUD
+  at manifest validation. `allowed-domains` matters only under `:allowlist`; a
+  private host is reachable there IFF explicitly listed (private membership
+  rides the list, not special-cased). The old `domain-allowed?`-empty=allow-all
+  became allowlist-empty=reach-nowhere (coherent for a distinct mode).
+- **One guard, one config read:** `internal/host-block-reason` now dispatches
+  on the resolved policy per redirect hop (was: a separate `domain-allowed?`
+  branch in `transport` + a private-range branch). `internal/policy` reads
+  `seon.config/web-policy` (memoized per SEON_CONFIG); a `!policy-override` atom
+  is the hermetic test seam (the `!fetch-impl`/`!lookup-impl` pattern). No
+  runtime `configure!` — the policy is host-owned, agent-unwidenable.
+- **Defaults reconciled:** code/schema fallback = `:public-only` (never
+  SSRF-open by accident); `config/system.edn` + `config/acme.edn` both set
+  `:open` explicitly (owner's clusters run unrestricted; loopback bench
+  fixtures need no grant). Harness: `tool_rows.WEB_FIXTURE_ENV` removed — bench
+  clusters inherit system.edn's `:open` via the default SEON_CONFIG.
+- **SEON_WEB stays env** — it is the master on/off gate (is web available at
+  all), a SEPARATE concern from the reachability policy. capability-gates.md
+  updated (dropped the two retired rows + a new web-policy section).
+- **Shared-tree touches (noted per the rule):** `config/system.edn`,
+  `config/acme.edn`, `bin/seon`, `bin/acme` (dropped the retired env exports),
+  `src-inspect-ai` (tool_rows/cluster). Tooling-reviewable surface:
+  `src/seon/agent/web.cljs` + `web/internal.cljs` + `seon.config` web accessor.
+  Suites: bin/test-cljs (web_test rewritten — old private-grant test → :open +
+  :allowlist policy tests) + pytest. NOT committed.
+
+## 2026-07-04 — eval lane: BFCL AST adopted (first established agentic bench)
+
+Eval lane only; NO `src/seon` edits — `src-inspect-ai` + `evals` + `docs`.
+
+- **What:** BFCL (Berkeley Function-Calling Leaderboard) single-turn AST subset
+  is the harness's first established tool-calling row (`row: "tool_calling"`).
+  Scope = the pure-AST python categories (`simple_python`/`multiple`/`parallel`/
+  `parallel_multiple`), scored by inspect_evals' pure-Python `ast_match` —
+  host-side, no exec/sandbox/tool-bridge. Excluded: exec/rest/live/multi_turn
+  (sandbox tier) + java/js (literal-float rule, deferred).
+- **The only new code = ONE adapter** (`seon_inspect.bfcl_adapter`): the
+  text→tool_call bridge. The pod emits a JSON call as TEXT (no OpenAI
+  `tool_calls`), so a 3-step chain renders the function schemas + JSON-call
+  contract, drives the pod unchanged, then lifts the reply JSON into the
+  synthesized `ToolCall`s the bench's OWN `ast_match` harvests. Scorer
+  untouched. Wiring: `catalog.BENCH_ADAPTERS` (bench→adapt hook, default stays
+  `swap_generate`) + `BENCH_DEFAULT_TASK_KWARGS` (pins the AST subset) + a
+  `run_bench(adapt=)` seam; `freeze.EXTERNAL_SOURCES` bfcl_ast entry
+  (category-stratified 10/10/980, commit-pinned upstream → contamination-proof;
+  public bench → test reserve handles leakage, no bespoke canary).
+- **Live dev proof** (DeepSeek non-think, frozen ephemeral clusters N=2, k=1,
+  0 flakes): mean **.700** (simple 1.00 / multiple 1.00 / parallel .50 /
+  parallel_multiple .33). **parse_miss = 0** — the adapter lifted every reply
+  cleanly; all 3 fails are MODEL misses on multi-call tasks (wrong arg values /
+  over-called by one). Band vs the PUBLIC BFCL leaderboard, report-only (no
+  DeepSeek non-think anchor exists for any door-fitting agentic bench).
+- **Tooling-lane FLAG (no action required, informational):** the pod emits
+  TEXT, never structured `tool_calls`. That is fine for host-side AST scoring
+  (this adapter), but any future bench whose ENV must EXECUTE the pod's calls
+  (tau2, exec_*) will need a real call surface, not a text parse. Noted as the
+  standing "pod-emits-text-not-tool_calls" friction; no fix wanted now.
+- **Files:** `src-inspect-ai/src/seon_inspect/{bfcl_adapter.py (new),catalog.py,
+  freeze.py}`, `tests/test_bfcl_adapter.py` (new, 15 offline tests through the
+  real `ast_match`), `evals/datasets.lock` (+bfcl_ast), `evals/runs/
+  2026-07-04-bfcl-ast-dev/`, README + roadmap. Ledger row
+  `2026-07-04:bfcl_ast:dev:k1:armD-full`. NOT committed.

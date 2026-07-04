@@ -1,0 +1,12 @@
+I need to identify the calls from the request. The function is `public_library.find_nearby` with parameters `location` (string, required) and `facilities` (array of strings, required).
+
+The request asks for three separate searches:
+1. New York, NY — Reading Room and Fiction section
+2. Los Angeles, CA — Wi-Fi and Children Section
+3. Chicago, IL — Cafe and Reading Room
+
+Each is one call with the location string and the facilities array.
+
+```json
+[{"name": "public_library.find_nearby", "arguments": {"location": "New York, NY", "facilities": ["Reading Room", "Fiction"]}}, {"name": "public_library.find_nearby", "arguments": {"location": "Los Angeles, CA", "facilities": ["Wi-Fi", "Children Section"]}}, {"name": "public_library.find_nearby", "arguments": {"location": "Chicago, IL", "facilities": ["Cafe", "Reading Room"]}}]
+```

@@ -457,7 +457,10 @@ repo-dev docs.
     always-on SSRF guard refuses the loopback fixtures → fabrication after
     refusal. FIXED same day (owner-directed): host-owned
     `SEON_WEB_ALLOW_PRIVATE` grant, harness-scoped to web_fetch's ephemeral
-    clusters. Harness: run dirs now always retain .eval logs +
+    clusters. (Later SUPERSEDED 2026-07-04 by the config-driven web-access
+    policy — `:seon.config/web {:seon.agent.web/policy :open|:public-only|:allowlist}`;
+    the env grant + the separate allowlist unified into one host-owned config,
+    bench clusters inherit system.edn's `:open`.) Harness: run dirs now always retain .eval logs +
     per-execution reply text + pre-destroy cluster blob copies; the
     regression alarm keys by (row, arm). **Capstone FULL dev sweep
     (armD-full, one arm, bundle 393c2a26afc3, 0 flakes):** web_fetch .875 ·
@@ -476,8 +479,46 @@ repo-dev docs.
     near-miss → "you passed :seon.web/url — the key is
     :seon.agent.web/url"). Details: coordination.md 2026-07-04 tail.
 
+12. **First established AGENTIC bench — BFCL AST subset — ✅ ADOPTED
+    2026-07-04.** BFCL (Berkeley Function-Calling Leaderboard) single-turn
+    AST subset is the harness's first established tool-calling row. Scope =
+    the pure-AST python categories (`simple_python` / `multiple` /
+    `parallel` / `parallel_multiple`) — scored by inspect_evals' pure-Python
+    `ast_match` (no exec, no sandbox, no tool bridge; even single-turn
+    `exec_*` GT is preprocessed into the same matcher). Excluded: `exec_*`
+    / `rest` / `live_*` / `multi_turn_*` (sandbox/tool-bridge tier) and
+    java/js (their literal-float rule is a separate prompt concern; loadable
+    via `categories=`). New code = ONE adapter, `seon_inspect.bfcl_adapter`
+    (the text→tool_call bridge): the pod emits a JSON call as TEXT (it has
+    no OpenAI `tool_calls`), so a 3-step chain — `bfcl_prompt` (render the
+    candidate function schemas + the JSON-call contract, stating every
+    scorer check: exact names, required params, no extras, JSON types, one
+    call for simple/multiple & all for parallel) → the pod solver
+    (unchanged) → `bfcl_parse` (lift the JSON into synthesized `ToolCall`s
+    the bench's OWN `ast_match` harvests). Scorer untouched — the
+    correctness gate is BFCL's. Wiring: `catalog.BENCH_ADAPTERS` (bench→adapt
+    hook; default stays `swap_generate`) + `BENCH_DEFAULT_TASK_KWARGS`
+    (pins the AST subset so freeze and run load identically) + a `run_bench`
+    `adapt=` seam. Frozen split added (`freeze.EXTERNAL_SOURCES` bfcl_ast,
+    category-stratified dev/milestone/test 10/10/980, commit-pinned upstream
+    `dac44e7a…` → contamination-proof; public bench, test reserve handles
+    leakage, no bespoke canary GUID needed). **Live dev proof** (DeepSeek
+    non-think, frozen ephemeral clusters, N=2, k=1, 0 flakes): mean **.700**
+    (simple 1.00 · multiple 1.00 · parallel .50 · parallel_multiple .33);
+    **parse_miss = 0** — every reply was a clean JSON call the adapter lifted,
+    so all 3 fails are MODEL misses on multi-call tasks (wrong arg values /
+    over-called by one), NOT adapter defects. Report-only band vs the PUBLIC
+    BFCL leaderboard (NO DeepSeek non-think anchor exists for any
+    door-fitting agentic bench — expected; never a fabricated anchor column).
+    Ledger row `2026-07-04:bfcl_ast:dev:k1:armD-full` (row `tool_calling`).
+    Offline proof: `tests/test_bfcl_adapter.py` (15 tests — parse shapes +
+    render contract + end-to-end through the real `ast_match`). Evidence:
+    `evals/runs/2026-07-04-bfcl-ast-dev/` (verbatim prompts, per-execution
+    records, scorer explanations, the run recipe).
+
 Spec: [[eval-design]] · plan: [[eval-lane-plan]] · readiness:
-[[research/tool-surface-survey-2026-07-02]].
+[[research/tool-surface-survey-2026-07-02]] · BFCL adoption:
+[[research/agentic-benchmark-adoption-2026-07-04]].
 
 ## Still open (from agent-fsm, may land here)
 
