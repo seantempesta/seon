@@ -1208,3 +1208,26 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   asymmetric tight gate that produced seed1-008's `cluster_boot_timeout` is
   closed (this + the FD-leak fix). Residual failures in the original run
   were remote-API degradation, independent of boot.
+
+### 2026-07-04 — OWNER RULINGS (eval strategy)
+
+- **Winning A/B arm → DEFAULT context.** A general (non-answer-shaped) context
+  change that beats baseline on the frozen ledger gets PROMOTED into the
+  shipped default context (config/system.edn shared-instructions), with a live
+  re-baseline + a standard-bench regression check after. The eval lane's
+  numbers directly drive what every agent sees. (Guard: the change must be
+  general, never bench-answer-shaped; the standard benches are the
+  regression gate on promotion.)
+- **Agentic benchmarks: bfcl now, then the sandbox-scorer host.** Wire bfcl
+  (function-calling AST subset) as the first real agentic capability row now;
+  then invest in the sandbox/execution scorer host that unlocks the anchored
+  crown jewels (SWE-Verified 73.6 NT, LiveCodeBench 56.8 NT). Both dispatched
+  / roadmapped.
+- **web grant → CONFIG, not env.** SEON_WEB_ALLOW_PRIVATE (683c80d3) moves
+  from an env var into the cluster config manifest — per "config over env,
+  env never shadows config." Host-owned, default-deny, never agent-reachable
+  unchanged; just declared as config data.
+- **OPEN (rethinking): the role of the saturated standard QA benches** — owner
+  found the calibrate-once/keep/drop framing uninspiring; reframing them as
+  the harness's own integrity+regression test suite (not capability rows).
+  Decision pending.
