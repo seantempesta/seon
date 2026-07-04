@@ -133,6 +133,28 @@ def test_append_caller_provenance_wins(tmp_path):
     assert got["model_config_source"] == "pod /agents/run response"
 
 
+def test_model_provenance_from_run_maps_pod_fields(tmp_path):
+    # The pod's runtime-reported model_config → ledger-row fields, and an
+    # append with them carries the runtime-reported source (the override
+    # chain: caller values win over the assumed-defaults constant).
+    from seon_inspect.scorecard import (RUNTIME_SOURCE,
+                                        model_provenance_from_run)
+    cfg = {"provider": "deepseek", "model": "deepseek-v4-pro",
+           "temperature": 0.7, "max_tokens": 4096, "thinking": "false"}
+    prov = model_provenance_from_run(cfg)
+    assert prov == {"model": "deepseek", "model_id": "deepseek-v4-pro",
+                    "model_thinking": "false", "model_temperature": 0.7,
+                    "model_config_source": RUNTIME_SOURCE}
+    p = tmp_path / "scorecard.jsonl"
+    append_row({**_row("r1", "gsm8k", 0.9), **prov}, path=p)
+    got = load_rows(p)[0]
+    assert got["model_config_source"] == RUNTIME_SOURCE
+    assert got["model_thinking"] == "false"
+    # no pod-reported config → {} → the honest fallback defaults apply
+    assert model_provenance_from_run(None) == {}
+    assert model_provenance_from_run({}) == {}
+
+
 def test_append_does_not_touch_existing_lines(tmp_path):
     # Append-only: enrichment applies to NEW rows; prior lines stay
     # byte-identical (the first-dev-pass rows are never rewritten).
