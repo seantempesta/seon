@@ -83,7 +83,10 @@
    [:seon.ai.openai-compat/finish-reason {:optional true} :string]
    [:seon.ai/usage                      {:optional true} :seon.ai/usage]
    [:seon.ai/tool-calls                 {:optional true} :seon.ai/tool-calls]
-   [:seon.ai/provider-fields            {:optional true} :seon.ai/provider-fields]])
+   [:seon.ai/provider-fields            {:optional true} :seon.ai/provider-fields]
+   ;; Present on every response that went to the wire (success AND call
+   ;; failure); absent only on a config-gap error where nothing was called.
+   [:seon.ai/resolved-config            {:optional true} :seon.ai/resolved-config]])
 
 ;; agent-adapter request-option overrides (e.g. {:seon.ai/temperature 0.2}).
 (schema/register! :seon.ai.openai-compat/opts :map)
@@ -217,6 +220,22 @@
   [request]
   (or (:seon.ai/extra-body request)
       (not-empty (ai/config-extra-body))))
+
+(defn- params->resolved-config
+  "The `:seon.ai/resolved-config` for this call, DERIVED from the wire
+   params [[request-params]] built (never a second config read — zero
+   drift by construction). Thinking maps back to the row-shape string:
+   a reasoning-effort passes through; else \"true\"/\"false\" from the
+   explicit toggle; an absent :thinking key (openai-compat gateways,
+   thinking off) is \"false\"."
+  [params]
+  {:seon.ai/provider    (ai/provider)
+   :seon.ai/model       (:model params)
+   :seon.ai/temperature (:temperature params)
+   :seon.ai/max-tokens  (:max_tokens params)
+   :seon.ai/thinking    (or (:reasoning_effort params)
+                            (if (= "enabled" (get-in params [:thinking :type]))
+                              "true" "false"))})
 
 (def ^:private known-completion-keys
   "Top-level ChatCompletion keys the adapter consumes directly — the
@@ -372,26 +391,32 @@
       (let [ms      (or (:seon.ai/timeout-ms (ai/current)) default-timeout-ms)
             ^js client (make-client url key ms)
             extra   (request-extra-body request)
+            params-clj (request-params request)
+            ;; Model provenance: what THIS call resolved, derived from the
+            ;; wire params themselves. Rides every wire-bound response.
+            resolved (params->resolved-config params-clj)
             ;; :extra-body is MERGED into the request PARAMS (1st arg).
             ;; openai-node passes unknown top-level params through
             ;; verbatim. The 2nd-arg RequestOptions :body REPLACES the
             ;; body (does NOT merge) — using it dropped model/messages
             ;; and 400'd every extra-body call (verified live).
-            params  (clj->js (cond-> (request-params request)
+            params  (clj->js (cond-> params-clj
                                (seq extra) (merge extra)))
             ^js completions (.. client -chat -completions)]
         (try
           (let [^js stream (.stream completions params)
                 completion (await (.finalChatCompletion stream))
-                result     (parse-completion completion)]
+                result     (assoc (parse-completion completion)
+                                  :seon.ai/resolved-config resolved)]
             (when-let [err (:seon.ai/error result)]
               (ai/log-error! label err))
             result)
           (catch :default e
             (let [err (error->envelope label e)]
               (ai/log-error! label err)
-              {:seon.ai/text  ""
-               :seon.ai/error err})))))))
+              {:seon.ai/text            ""
+               :seon.ai/error           err
+               :seon.ai/resolved-config resolved})))))))
 
 ;; ============================================================
 ;; Adapter for seon.agent.

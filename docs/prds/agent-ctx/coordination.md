@@ -955,3 +955,41 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   already fit the shape. Remaining families migrate as touched — not a big
   bang. Mechanism = tooling lane; which content an agent's overrides carry =
   eval lane; this entry is the shared contract.
+
+### 2026-07-04 — model provenance SHIPPED (eval lane): per-turn datoms + /agents/run model_config + runtime-reported ledger rows
+
+- **SUPERSEDES the 2026-07-04 provenance ask** (and implements the owner
+  ruling above for the model family). Every LLM turn now persists the
+  RESOLVED call config as datoms — `:seon.agent.turn/llm-provider`/
+  `-model`/`-temperature`/`-max-tokens`/`-thinking` — stamped at turn close
+  from the adapter's `:seon.ai/resolved-config`, which each adapter
+  (openai-compat, anthropic, diffusiongemma) derives FROM ITS OWN WIRE
+  PARAMS (zero drift; attached on success AND call-failure, absent only on
+  stub/config-gap). Attr shapes reference the `:seon.ai/*` vocabulary.
+- **Both grains, per the ruling:** per-AGENT `:seon.ai/agent-*` attrs =
+  intent (the pre-existing `seon.ai/current` overlay — chain: request opt →
+  agent attrs → global `{:seon.ai/id "config"}` row → defaults; the stale
+  "nothing reads these yet" comment fixed); per-TURN `llm-*` datoms =
+  provenance (what each call actually used).
+- **`POST /agents/run` response now carries `model_config`** (provider/
+  model/temperature/max_tokens/thinking), read from the run window's latest
+  STAMPED turn — presence-filtered because the `complete` verb closes the
+  run from within a turn's evals, so the idle poll can snapshot before that
+  turn's close-tx lands (observed live; window-first with agent-wide
+  fallback).
+- **Live proof (ephemeral cluster provtest2, frozen bundle, destroyed):**
+  fresh agent recorded 0.7 default; the agent transacted its own
+  `:seon.ai/agent-temperature 0.2`; the SAME run's later turns flipped to
+  0.2 mid-run (per-turn honesty visible in the datom dump), the next run
+  reported 0.2, and a sibling agent stayed 0.7. Datoms queried via the wire
+  REPL; responses carried the matching `model_config`.
+- **Harness:** `solver._record_result` captures `pod_model_config`;
+  `scorecard.model_provenance_from_run` maps it to row fields with
+  `model_config_source` = "runtime-reported (pod /agents/run model_config)"
+  (caller values win over the assumed-defaults constant, which remains only
+  as the honestly-marked fallback). Smoke: append_row to a tmp ledger with
+  the real drive's config — runtime-reported. Existing ledger rows
+  untouched. pytest 190 green.
+- Docs: data-model.md §4.4 (attrs + the intent/provenance split + the
+  general per-agent resolution pattern), observability.md (`model_config`
+  on the door). Tooling reviews post-hoc per the established pattern.

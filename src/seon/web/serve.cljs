@@ -573,6 +573,48 @@
                                                     :seon.db/args [agent-eid]})
                                          (filter (fn [[_ t]] (contains? turn-eids t)))
                                          count)
+                          ;; Model provenance — read from the window's LATEST
+                          ;; turn CARRYING :seon.agent.turn/llm-* datoms (DB
+                          ;; truth the adapter stamped at turn close), never
+                          ;; inferred from the config row. The presence filter
+                          ;; matters: the `complete` lifecycle verb closes the
+                          ;; run from WITHIN a turn's evals, so the idle poll
+                          ;; can snapshot BEFORE that turn's close-tx stamps
+                          ;; its provenance — the previous stamped turn is
+                          ;; then the honest latest. nil when NO window turn
+                          ;; carries it (stub LLM, config-gap) → key omitted.
+                          model-cfg (when-let [latest
+                                               (let [stamped (->> (db/query {:seon.db/db db
+                                                                             :seon.db/query '[:find ?t ?at :in $ ?ag :where
+                                                                                              [?r :seon.agent.run/agent ?ag]
+                                                                                              [?t :seon.agent.turn/run ?r]
+                                                                                              [?t :seon.agent.turn/llm-provider _]
+                                                                                              [?t :seon.agent.turn/at ?at]]
+                                                                             :seon.db/args [agent-eid]})
+                                                                  (sort-by (fn [[_ ^js at]] (.getTime at)))
+                                                                  (map first))
+                                                     ;; window first; a single-turn run racing its own
+                                                     ;; close falls back to the agent's latest stamped
+                                                     ;; turn overall (still THIS agent's recorded truth).
+                                                     in-window (filter #(contains? turn-eids %) stamped)]
+                                                 (or (last in-window) (last stamped)))]
+                                      (let [{:seon.agent.turn/keys
+                                             [llm-provider llm-model llm-temperature
+                                              llm-max-tokens llm-thinking]}
+                                            (db/pull {:seon.db/db db
+                                                      :seon.db/pull-pattern
+                                                      [:seon.agent.turn/llm-provider
+                                                       :seon.agent.turn/llm-model
+                                                       :seon.agent.turn/llm-temperature
+                                                       :seon.agent.turn/llm-max-tokens
+                                                       :seon.agent.turn/llm-thinking]
+                                                      :seon.db/ref latest})]
+                                        (when llm-provider
+                                          (cond-> {:provider (name llm-provider)}
+                                            llm-model       (assoc :model llm-model)
+                                            llm-temperature (assoc :temperature llm-temperature)
+                                            llm-max-tokens  (assoc :max_tokens llm-max-tokens)
+                                            llm-thinking    (assoc :thinking llm-thinking)))))
                           reply     (->> (db/query {:seon.db/db db
                                                     :seon.db/query '[:find ?f ?to ?at ?c :where
                                                                      [?m :seon.agent.message/from ?f]
@@ -591,6 +633,7 @@
                                :closed_reason (if timeout?
                                                 "timeout"
                                                 (str (derive/last-closed-reason db aid)))}
+                        model-cfg (assoc :model_config model-cfg)
                         timeout? (assoc :timed_out true)))))))))))))
 
 (defn- handle-agent-run! [req res]

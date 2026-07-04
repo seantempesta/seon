@@ -350,7 +350,33 @@ The run model + FSM live in [[agent-runtime]].
 | `:seon.agent.turn/prompt-file` | `:string` | string / one | |
 | `:seon.agent.turn/llm-retries` | `:int` | long / one | |
 | `:seon.agent.turn/llm-usage` | `:string` | string / one | |
+| `:seon.agent.turn/llm-provider` | `:seon.ai/provider` | keyword / one | model provenance (below) |
+| `:seon.agent.turn/llm-model` | `:seon.ai/model` | string / one | |
+| `:seon.agent.turn/llm-temperature` | `:seon.ai/temperature` | double / one | |
+| `:seon.agent.turn/llm-max-tokens` | `:seon.ai/max-tokens` | long / one | the OUTPUT cap |
+| `:seon.agent.turn/llm-thinking` | `:seon.ai/thinking` | string / one | row-shape string: `"false"`/`"true"`/effort |
 | `:seon.agent.turn/evals` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | owned evals (cascade-retract) |
+
+**Model provenance is per-turn DB truth.** Every LLM turn's close-tx stamps the
+RESOLVED call config the adapter actually put on the wire
+(`:seon.ai/resolved-config`, derived from the request params — never a second
+config read). No run's model config lives outside the database: the
+`POST /agents/run` door reads its `model_config` from the run window's latest
+stamped turn, and the bench ledger consumes that runtime-reported value. All
+five attrs are absent on a stub-LLM or config-gap turn (optional = absent).
+The value shapes REFERENCE the `:seon.ai/*` vocabulary (register-once rule).
+
+**Per-agent config = intent; per-turn stamp = provenance.** The agent entity
+carries optional `:seon.ai/agent-provider`/`-model`/`-temperature`/
+`-max-tokens`/`-thinking` override attrs (absent/`:inherit` = inherit), and the
+ONE resolver (`seon.ai/current`) lays the CALLING agent's overrides over the
+global `{:seon.ai/id "config"}` row: **explicit call opts → the agent's own
+attrs → the cluster config row → shipped defaults**. This resolution shape is
+the general pattern for every agent-related config family (skills, render
+caps, ctx blocks, capability sets): agent attrs are the override point, one
+chain, absent = inherit — new families add an attr pair to the resolver's
+data map, never a second mechanism. Intent can change mid-run; the turn stamp
+records what each call actually used.
 
 ### 4.5 message + user — `:seon.agent.message/*`, `:seon.user/*`
 

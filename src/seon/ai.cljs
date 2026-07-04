@@ -194,6 +194,25 @@
 ;; request-opt-only (inherently per-call; no persisted form yet).
 (schema/register! ::extra-body-edn [:string {:min 1}])
 
+;; The RESOLVED call config — model provenance as DB truth (owner ruling,
+;; 2026-07-04). Each adapter attaches this to every response that actually
+;; went to the wire (success AND call-failure; NOT config-gap errors, where
+;; nothing was called), derived from the SAME values it put in the request
+;; body — never re-read after the fact. `seon.agent.turn` persists it as
+;; per-turn `:seon.agent.turn/llm-*` datoms; the `/agents/run` door reads
+;; those datoms back. `::thinking` here is the row-shape STRING
+;; ("false"/"true"/effort — the [[thinking-mode]] vocabulary). Fields the
+;; provider genuinely doesn't send (anthropic never sends temperature)
+;; are ABSENT. Registered AFTER every referenced keyword (register-order
+;; rule).
+(schema/register! ::resolved-config
+  [:map
+   [::provider    ::provider]
+   [::model       {:optional true} ::model]
+   [::temperature {:optional true} ::temperature]
+   [::max-tokens  {:optional true} ::max-tokens]
+   [::thinking    {:optional true} ::thinking]])
+
 ;; The config attrs a row (or the env) may carry — shared shape for
 ;; [[sync-tx-data]]'s two inputs and the row read.
 (schema/register! ::row
@@ -237,8 +256,13 @@
 ;; value arm REUSES the existing global-row value shape by keyword (the
 ;; register-once rule) — `::provider`/`::model`/`::temperature`/
 ;; `::max-tokens`/`::thinking`. `::agent-max-retries` replaces the
-;; SEON_AI_MAX_RETRIES env read (seon.agent.turn). Nothing reads these
-;; yet (CP-1 is purely additive).
+;; SEON_AI_MAX_RETRIES env read (seon.agent.turn). READ per call:
+;; [[current]] lays the ambient agent's overrides over the global row
+;; ([[overlay-agent-overrides]]), so every adapter's resolution chain is
+;; explicit request opt → the AGENT's own config → the global row →
+;; shipped defaults. What a call ACTUALLY resolved is stamped per turn
+;; (`:seon.agent.turn/llm-*` via `::resolved-config`) — intent here,
+;; provenance there.
 ;; ============================================================
 
 (schema/register! ::agent-provider    [:or {:default :inherit} [:enum :inherit] ::provider])

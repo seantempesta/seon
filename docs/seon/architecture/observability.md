@@ -140,7 +140,11 @@ cluster (optional `agent_id` — durable store, so the same agent can be
 driven again across a pod restart), deliver the input through the real wake
 path, await the derived `:idle` of the run it woke, return the truthful
 reply plus termination metadata (turns/evals scoped to this request's
-window, closed-reason, timed-out). External harnesses drive per-sample
+window, closed-reason, timed-out) and `model_config` — the RESOLVED LLM
+config the run actually used (provider/model/temperature/max-tokens/
+thinking), read from the window's latest stamped turn's
+`:seon.agent.turn/llm-*` datoms ([[data-model]] §4.4), never inferred from
+the config row; omitted on stub-LLM runs. External harnesses drive per-sample
 ephemeral clusters by port; the gym drives the same primitives in-process.
 The answer key never enters the pod — scoring stays host-side. Benchmark
 vocabulary is harness-side only.
