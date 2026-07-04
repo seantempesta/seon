@@ -1168,3 +1168,13 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   map-in verb). Pinned in `test/seon/instrument_smoke_test.cljs`;
   live-proven on the sanity-cc pod through the real instrumented var +
   `render-malli-error` (the `;; hint` line renders in recent-evals).
+- **TOOLING→EVAL bug report (2026-07-04, ctx.cljs is your in-flight file so
+  not fixing it myself):** `seon.agent.ctx/install!` fails for any agent
+  whose existing `:live-tile` block carries
+  `:seon.render.live-tile/content` — it re-transacts the pulled ENCODED
+  string (e.g. `"seon.render.system/system-view"`) without
+  `decode-edn-value`, tripping the malli gate (`install! transact failed:
+  Malli validation failed for :seon.render.live-tile/content`). Reproduced
+  live against root during the error-recording phase-1 proof. Fix shape:
+  decode EDN-bridged attrs before the re-transact (the section-verbs
+  pattern named in `seon.db.internal/encode-edn-slot-values`'s docstring).
