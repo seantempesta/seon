@@ -234,6 +234,24 @@
 ;; (prod/demo). `:agent` faults never escalate in ANY mode.
 (schema/register! :seon.config/on-core-error [:enum :crash :gate :log])
 
+;;; WEB-ACCESS POLICY — the host-owned reachability policy for
+;;; `seon.agent.web/fetch` (UNIFIES the old private-range SSRF guard + domain
+;;; allowlist into ONE config). The AUTHORITATIVE `:seon.agent.web/policy` enum
+;;; (:open/:public-only/:allowlist) lives in `seon.agent.web` (the owning ns).
+;;; Here the mode is validated as a LEAF `:keyword` — the LEAF rule: `seon.config`
+;;; loads BEFORE `seon.agent.web`, and `schema/register!` asserts compilability
+;;; EAGERLY, so a forward keyword-ref would break boot. The enum-level check
+;;; happens downstream in [[web-policy]] (coerces an unrecognized mode to the
+;;; SSRF-safe `:public-only` — fail-closed, never open by accident).
+;;; `allowed-domains` matters only under `:allowlist`. Absent section ⇒ the
+;;; accessor's `:public-only` fallback. The master on/off grant (SEON_WEB) stays
+;;; ENV — it gates whether web is available at all; this policy shapes
+;;; reachability once it is (env gate + config policy, two concerns).
+(schema/register! :seon.config/web-spec
+  [:map
+   [:seon.agent.web/policy          {:optional true} :keyword]
+   [:seon.agent.web/allowed-domains {:optional true} [:vector :string]]])
+
 (schema/register! :seon.config/manifest
   [:map
    [:seon.config/skills        {:optional true} :seon.config/skills-spec]
@@ -241,6 +259,7 @@
    [:seon.config/routes        {:optional true} [:vector :seon.config/route-spec]]
    [:seon.config/render        {:optional true} :seon.config/render]
    [:seon.config/on-core-error {:optional true} :seon.config/on-core-error]
+   [:seon.config/web           {:optional true} :seon.config/web-spec]
    [:seon.config/agent-context {:optional true} :seon.config/agent-context]
    [:seon.config/root-context  {:optional true} :seon.config/root-context]])
 
@@ -624,6 +643,37 @@
         (let [raw (get (load-manifest) :seon.config/on-core-error :gate)
               v   (if (contains? #{:crash :gate :log} raw) raw :gate)]
           (swap! on-core-error-cache assoc k v)
+          v))))
+
+;; `def` (NOT defonce) for hot-reload cache rotation; memoized per SEON_CONFIG.
+(def ^:private web-policy-cache (atom {}))
+
+(defn web-policy
+  "The resolved web-access policy for `seon.agent.web/fetch`.
+
+   `{:seon.agent.web/policy <mode> :seon.agent.web/allowed-domains [host…]}`
+   from the manifest's `:seon.config/web` section. Mode default
+   `:public-only` (the SSRF-safe fallback — a downstream inheritor with NO
+   config is never open by accident); the shipped clusters set `:open`
+   explicitly. `allowed-domains` defaults `[]` (only meaningful under
+   `:allowlist`). Host-owned config: `seon.agent.web` reads it but nothing
+   in the pod can widen it. Memoized per SEON_CONFIG (config is boot-stable;
+   the gym steers SEON_CONFIG per run)."
+  {:malli/schema [:=> [:cat]
+                  [:map
+                   [:seon.agent.web/policy :keyword]
+                   [:seon.agent.web/allowed-domains [:vector :string]]]]}
+  []
+  (let [k (env "SEON_CONFIG")]
+    (or (get @web-policy-cache k)
+        (let [m   (get (load-manifest) :seon.config/web {})
+              raw (get m :seon.agent.web/policy :public-only)
+              ;; fail-closed: an unrecognized mode falls back to the SSRF-safe
+              ;; :public-only, never open by accident.
+              pol (if (contains? #{:open :public-only :allowlist} raw) raw :public-only)
+              v {:seon.agent.web/policy          pol
+                 :seon.agent.web/allowed-domains (vec (get m :seon.agent.web/allowed-domains []))}]
+          (swap! web-policy-cache assoc k v)
           v))))
 
 (defn render-strict?

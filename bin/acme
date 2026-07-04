@@ -63,11 +63,12 @@ esac
 #     deny-when-unset; this harness (a legit bench pod AND the downstream-usage
 #     proof) grants shell + web like any consumer's launcher would. Any value
 #     but "0" grants; deny via .env.acme or the shell (SEON_SHELL=0 bin/acme
-#     restart pod). Narrowing knobs (SEON_WEB_DOMAINS / SEON_WEB_LOCK /
-#     SEON_FS_LOCK) pass through from .env.acme when set.
+#     restart pod). Web REACHABILITY is a config policy (config/acme.edn's
+#     :seon.config/web, :open here) — not an env knob. SEON_FS_LOCK still
+#     passes through from .env.acme when set.
 #     Full gate table: docs/seon/components/capability-gates.md ---
 export SEON_SHELL="${SEON_SHELL:-1}"   # seon.agent.shell/run + py-run
-export SEON_WEB="${SEON_WEB:-1}"       # seon.agent.web/fetch (SSRF guard always-on)
+export SEON_WEB="${SEON_WEB:-1}"       # seon.agent.web/fetch (master on/off gate)
 
 # --- the third-party overlay (Path B — docs/seon/components/extra-src.md) ---
 export SEON_EXTRA_SRC="$SEON_ROOT/acme"

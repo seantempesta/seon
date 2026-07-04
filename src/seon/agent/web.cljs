@@ -19,14 +19,16 @@
 
    ## Security model
 
-   **Default-deny.** The whole capability is gated by the host-owned
-   `SEON_WEB` env var (inspect with [[grants]]); a private-range guard
-   refuses loopback / RFC-1918 / link-local / ULA targets on every
-   redirect hop (the SSRF soft boundary) — on by default, never
-   agent-configurable, host-releasable ONLY via the `SEON_WEB_ALLOW_PRIVATE`
-   env grant (loopback-fixture deployments). An OPTIONAL domain allowlist
-   rides [[configure!]]. Soft boundaries against LLM accidents, not
-   security boundaries.
+   **Default-deny + a host-owned reachability policy.** Two host-owned
+   knobs, distinct concerns: the `SEON_WEB` env var gates WHETHER web fetch
+   is available at all (default-deny); the cluster CONFIG
+   (`config/system.edn`'s `:seon.config/web`) shapes which TARGETS are
+   reachable via `:seon.agent.web/policy` — `:open` (anything),
+   `:public-only` (block loopback/RFC-1918/link-local/ULA on every redirect
+   hop — the SSRF-safe fallback), or `:allowlist` (only
+   `:seon.agent.web/allowed-domains`). The agent READS its policy via
+   [[grants]] but nothing inside the pod can widen it. Soft boundaries
+   against LLM accidents, not security boundaries.
 
    ## Output discipline
 
@@ -39,7 +41,7 @@
 
    ## Worked examples
 
-     (seon.agent.web/grants)   ;; the SEON_WEB grant + domain allowlist
+     (seon.agent.web/grants)   ;; the SEON_WEB grant + reachability policy
      (await (seon.agent.web/fetch {:seon.agent.web/url \"https://example.com\"}))
      ;; => {:seon.agent.web/ok? true :seon.agent.web/status 200
      ;;     :seon.agent.web/title \"Example Domain\"
@@ -98,9 +100,14 @@
    [::label {:optional true} ::label]])
 (schema/register! ::links [:vector ::link])
 
-;; grant.
+;; grant + policy.
 (schema/register! ::enabled?        :boolean)
-(schema/register! ::locked?         :boolean)
+;; The web-access policy modes (the AUTHORITATIVE enum — seon.config's manifest
+;; references this keyword; internal/policy resolves to it):
+;;   :open        — no restriction (public AND private/loopback reachable)
+;;   :public-only — refuse internal targets (loopback/RFC-1918/link-local/ULA)
+;;   :allowlist   — reachable ONLY if the host matches ::allowed-domains
+(schema/register! ::policy          [:enum :open :public-only :allowlist])
 (schema/register! ::allowed-domains [:vector :string])
 
 (schema/register! ::fetch-request
@@ -137,58 +144,33 @@
     [:seon.error/message :string]
     [:seon.error/data    {:optional true} :map]]])
 
-(schema/register! ::private-allowed? :boolean)
-
 (schema/register! ::grants-response
   [:map
-   [::enabled?         ::enabled?]
-   [::allowed-domains  ::allowed-domains]
-   [::locked?          ::locked?]
-   [::private-allowed? ::private-allowed?]])
-
-(schema/register! ::configure-response
-  [:map
-   [::ok?             ::ok?]
-   [::allowed-domains {:optional true} ::allowed-domains]
-   [::locked?         {:optional true} ::locked?]
-   [:seon.error/message {:optional true} :string]])
+   [::enabled?        ::enabled?]
+   [::policy          ::policy]
+   [::allowed-domains ::allowed-domains]])
 
 ;; ============================================================
-;; Grant — inspect + configure the (optional) domain allowlist.
+;; Grant + policy — inspect what web access I have (read-only; the policy
+;; is host-owned config the agent CANNOT widen at runtime).
 ;; ============================================================
 
 (defn grants
-  "What web access do I have? — the SEON_WEB grant + domain allowlist.
+  "What web access do I have? — the SEON_WEB grant + the reachability policy.
 
    Returns the live truth every fetch enforces: `:seon.agent.web/enabled?`
-   (SEON_WEB granted), `:seon.agent.web/allowed-domains` (empty = all
-   domains allowed when enabled), `:seon.agent.web/locked?` (SEON_WEB_LOCK
-   — [[configure!]] is a no-op), `:seon.agent.web/private-allowed?` (the
-   host-owned SEON_WEB_ALLOW_PRIVATE grant). Unless the host set that
-   grant, the private-range guard refuses loopback/RFC-1918/link-local/ULA
-   targets; nothing inside the pod can change it."
+   (SEON_WEB granted at all), `:seon.agent.web/policy` (the host-owned
+   config mode — `:open` = anything, `:public-only` = block internal/
+   loopback (the SSRF-safe default), `:allowlist` = only listed domains),
+   and `:seon.agent.web/allowed-domains` (the hosts reachable under
+   `:allowlist`). The policy is cluster CONFIG (`config/system.edn`'s
+   `:seon.config/web`); nothing inside the pod can loosen it."
   {:malli/schema [:=> [:cat] ::grants-response]}
   []
-  {::enabled?         (int/granted?)
-   ::allowed-domains  (int/allowed-domains)
-   ::locked?          (int/locked?)
-   ::private-allowed? (int/private-allowed?)})
-
-(defn configure!
-  "Set the OPTIONAL domain allowlist (empty = allow all when granted).
-
-     (configure! {:seon.agent.web/allowed-domains [\"example.com\"]})
-
-   A no-op error when the host set SEON_WEB_LOCK. Does NOT grant access —
-   SEON_WEB is host-owned; narrowing the allowlist only tightens it."
-  {:malli/schema [:=> [:cat :map] ::configure-response]}
-  [{::keys [allowed-domains]}]
-  (if (int/locked?)
-    {::ok?                false
-     ::locked?            true
-     :seon.error/message "the domain allowlist is locked by the host (SEON_WEB_LOCK)."}
-    (do (swap! int/!config assoc ::allowed-domains (vec (or allowed-domains [])))
-        {::ok? true ::allowed-domains (int/allowed-domains)})))
+  (let [p (int/policy)]
+    {::enabled?        (int/granted?)
+     ::policy          (::policy p)
+     ::allowed-domains (::allowed-domains p)}))
 
 ;; ============================================================
 ;; fetch — the one ^:async verb.

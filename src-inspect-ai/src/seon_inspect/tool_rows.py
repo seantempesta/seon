@@ -42,13 +42,12 @@ from seon_inspect.tool_scorers import check_answer, check_workspace
 
 WORKSPACE_ROWS = ("shell_use", "file_edit")
 
-# The web_fetch row's fixture server binds loopback-only, so its cluster is
-# created with the host-owned SEON_WEB_ALLOW_PRIVATE grant — the pod's SSRF
-# guard otherwise refuses 127.0.0.1 (root-caused 2026-07-04: every
-# wrong-value web_fetch reply was fabrication AFTER that refusal; passes
-# had routed around via shell curl / js/fetch). Scoped to the per-sample
-# ephemeral cluster; never set on durable clusters.
-WEB_FIXTURE_ENV = {"SEON_WEB_ALLOW_PRIVATE": "1"}
+# The web_fetch row's fixture server binds loopback-only. Bench clusters
+# inherit config/system.edn's :seon.config/web {:policy :open} (via the
+# default SEON_CONFIG), so the pod reaches 127.0.0.1 with NO special env
+# grant — the reachability policy is config now, not the retired
+# SEON_WEB_ALLOW_PRIVATE env var (root-caused 2026-07-04: every wrong-value
+# web_fetch reply was fabrication AFTER a private-range refusal).
 
 
 def _pod_summary(pod: dict[str, Any]) -> dict[str, Any]:
@@ -124,8 +123,9 @@ def run_tool_sample(
             else:  # web_fetch — the docroot IS the materialized setup
                 base_url = stack.enter_context(fixtures(ws))
                 text = render_input(sample, fixture_url=base_url)
-                cluster = stack.enter_context(
-                    cluster_factory(extra_env=WEB_FIXTURE_ENV))
+                # loopback is reachable via the cluster's :open web policy
+                # (config/system.edn) — no per-sample env grant needed.
+                cluster = stack.enter_context(cluster_factory())
             pod = run(text, timeout_ms, cluster.url)
             if evidence_root is not None:
                 evidence = preserve_cluster_evidence(

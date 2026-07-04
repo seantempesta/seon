@@ -76,6 +76,22 @@
  ;; :agent faults never escalate in ANY mode.
  :seon.config/on-core-error :gate
 
+ ;; ── WEB-ACCESS POLICY (web-access-policy, RULED 2026-07-04) — the
+ ;; host-owned reachability policy for seon.agent.web/fetch. UNIFIES the old
+ ;; private-range SSRF guard + domain allowlist into ONE config mode:
+ ;;   :open        — no restriction (public AND private/loopback reachable)
+ ;;   :public-only — block internal targets (loopback/RFC-1918/link-local/ULA)
+ ;;                  on every redirect hop — the SSRF-safe posture
+ ;;   :allowlist   — reachable ONLY if the host matches :allowed-domains
+ ;;                  (add :seon.agent.web/allowed-domains ["docs.example.com" …])
+ ;; This (owner's) cluster runs :open — zero friction, and the web_fetch
+ ;; bench's loopback fixtures work with NO special env grant. The CODE/SCHEMA
+ ;; fallback (unset section) is :public-only, so a downstream inheritor is
+ ;; never SSRF-open by accident. Host-owned: the agent reads its policy
+ ;; (web/grants) but nothing in the pod can widen it. The SEON_WEB env var is
+ ;; a SEPARATE concern — it gates whether web fetch is available at all.
+ :seon.config/web {:seon.agent.web/policy :open}
+
  ;; ── AGENT-CONTEXT (v3, config-driven-agent-init) — the two-level context
  ;; config the GENERIC loader (seon.config/resolve-agent-context) consumes. A
  ;; sparse map: every unspecified key (incl. the whole :seon.agent/ctx block

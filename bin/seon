@@ -149,15 +149,13 @@ esac
 # Full gate table: docs/seon/components/capability-gates.md
 # ============================================================
 export SEON_SHELL="${SEON_SHELL:-1}"   # seon.agent.shell/run + py-run
-export SEON_WEB="${SEON_WEB:-1}"       # seon.agent.web/fetch (SSRF guard stays always-on)
-# Optional narrowing knobs — exported only when set (unset = open-when-granted):
-#   SEON_WEB_DOMAINS  comma-separated domain allowlist (empty/unset = all domains)
-#   SEON_WEB_LOCK     "1" locks the web allowlist against runtime configure!
-#   SEON_FS_LOCK      "1" locks the fs grant against runtime configure!
-# (SEON_FS_ROOT / SEON_FS_READ_ONLY are set on the pod command below — the pod
-# gets a durable read-only grant on the repo; shell cwd gating rides on it.)
-[ -n "${SEON_WEB_DOMAINS:-}" ] && export SEON_WEB_DOMAINS
-[ -n "${SEON_WEB_LOCK:-}" ] && export SEON_WEB_LOCK
+export SEON_WEB="${SEON_WEB:-1}"       # seon.agent.web/fetch (master on/off gate)
+# Web REACHABILITY is now a config POLICY, not an env knob: config/system.edn's
+#   :seon.config/web {:seon.agent.web/policy :open|:public-only|:allowlist}
+# (:open here; code fallback :public-only). Narrow web per cluster by editing
+# that manifest, NOT env — SEON_WEB just gates availability. SEON_FS_LOCK still
+# locks the fs grant against runtime configure!; SEON_FS_ROOT / SEON_FS_READ_ONLY
+# are set on the pod command below (durable read-only repo grant; shell cwd rides on it).
 [ -n "${SEON_FS_LOCK:-}" ] && export SEON_FS_LOCK
 
 # ── Config manifest selection — the ONE config seam (read by seon.config) ──
@@ -1401,7 +1399,7 @@ case "${1:-help}" in
   # the verification verb for the gate table in
   # docs/seon/components/capability-gates.md. Unset var = code default (deny).
   print-env)
-    for v in SEON_SHELL SEON_WEB SEON_WEB_DOMAINS SEON_WEB_LOCK \
+    for v in SEON_SHELL SEON_WEB \
              SEON_FS_LOCK SEON_EMBED SEON_INSTRUMENT SEON_SOUL SEON_CONFIG; do
       if [ -n "${!v+x}" ]; then echo "$v=${!v}"; else echo "$v (unset)"; fi
     done ;;

@@ -1260,9 +1260,12 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   allowlist are GONE — unified into ONE host-owned config:
   `:seon.config/web {:seon.agent.web/policy :open|:public-only|:allowlist
   :seon.agent.web/allowed-domains [host…]}`. `:seon.agent.web/policy` is the
-  authoritative enum registered in `seon.agent.web`; the manifest references it
-  (cross-ns keyword-ref, LEAF rule intact — no code dep) so a typo fails LOUD
-  at manifest validation. `allowed-domains` matters only under `:allowlist`; a
+  authoritative enum registered in `seon.agent.web`; the manifest validates the
+  mode as a LEAF `:keyword` (the LEAF rule — `seon.config` loads BEFORE
+  `seon.agent.web` and `register!` asserts compilability EAGERLY, so a forward
+  keyword-ref breaks BOOT; live-caught on a fresh cluster). The enum check is
+  downstream in `web-policy`, coercing an unrecognized mode to `:public-only`
+  (fail-closed). `allowed-domains` matters only under `:allowlist`; a
   private host is reachable there IFF explicitly listed (private membership
   rides the list, not special-cased). The old `domain-allowed?`-empty=allow-all
   became allowlist-empty=reach-nowhere (coherent for a distinct mode).

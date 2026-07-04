@@ -25,6 +25,7 @@
     [my.blob :as blob]
     [seon.agent.web :as-alias web]
     [seon.ai.tokens :as tokens]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.platform :as platform]))
 
@@ -53,48 +54,50 @@
   (let [v (platform/env-val "SEON_WEB")]
     (boolean (and v (not= "0" v)))))
 
-(defn locked?
-  "True when the HOST locked the grant via SEON_WEB_LOCK (any value but
-   \"0\")."
+;; ============================================================
+;; The web-access POLICY — host-owned CONFIG, NOT env. The master on/off
+;; gate (SEON_WEB, above) decides WHETHER web fetch is available; this policy
+;; decides which TARGETS are reachable once it is. It lives in the cluster
+;; manifest (`config/system.edn`'s `:seon.config/web`), read via seon.config,
+;; and resolves to
+;;   {:seon.agent.web/policy <mode> :seon.agent.web/allowed-domains [<host>…]}
+;; where <mode> is one of:
+;;   :open        — no restriction (public AND private/loopback reachable);
+;;   :public-only — refuse internal targets (loopback/RFC-1918/link-local/ULA)
+;;                  on every redirect hop (the SSRF-safe posture);
+;;   :allowlist   — reachable ONLY if the host matches `allowed-domains`
+;;                  (private membership is governed by the list itself).
+;; Host-owned: the agent READS its policy (via [[web/grants]]) but nothing in
+;; the pod can widen it. The code/schema fallback (no config) is :public-only,
+;; so a downstream inheritor is never SSRF-open by accident.
+;; ============================================================
+
+;; Test seam — a hermetic test resets this to a literal policy map instead of
+;; staging a config file (the [[!fetch-impl]]/[[!lookup-impl]] pattern). nil =
+;; read the live config.
+(defonce !policy-override (atom nil))
+
+(defn policy
+  "The resolved web-access policy map (mode + allowed-domains) every hop
+   enforces — the config value, or the [[!policy-override]] test seam.
+   Normalized so both keys are always present (allowed-domains defaults to
+   `[]`), regardless of a sparse override."
   []
-  (let [v (platform/env-val "SEON_WEB_LOCK")]
-    (boolean (and v (not= "0" v)))))
-
-(defn private-allowed?
-  "True when the HOST granted private/loopback targets via
-   SEON_WEB_ALLOW_PRIVATE (any value but \"0\").
-
-   Host-owned like SEON_WEB — read live from the env, nothing inside the
-   pod can flip it. Default (unset) keeps the SSRF private-range guard
-   fully on. Intended for deployments whose legitimate corpus lives on
-   loopback (e.g. a bench cluster serving local fixture pages); never set
-   it on a pod exposed to untrusted tasks."
-  []
-  (let [v (platform/env-val "SEON_WEB_ALLOW_PRIVATE")]
-    (boolean (and v (not= "0" v)))))
-
-;; The configurable domain allowlist. Empty = all domains allowed (when
-;; SEON_WEB is granted). Seeded from SEON_WEB_DOMAINS (comma-separated).
-(defn- env-domains []
-  (when-let [v (platform/env-val "SEON_WEB_DOMAINS")]
-    (->> (str/split v #",") (map str/trim) (remove str/blank?) vec)))
-
-(defonce !config (atom {::web/allowed-domains (or (env-domains) [])}))
-
-(defn allowed-domains [] (vec (::web/allowed-domains @!config)))
+  (let [p (or @!policy-override (config/web-policy))]
+    {::web/policy          (::web/policy p)
+     ::web/allowed-domains (vec (::web/allowed-domains p))}))
 
 (defn domain-allowed?
-  "True iff `hostname` is permitted by the allowlist — always true when
-   the allowlist is empty (allow-all-when-granted). A domain matches its
-   exact host or any subdomain of it."
-  [hostname]
-  (let [allow (allowed-domains)]
-    (or (empty? allow)
-        (boolean (some (fn [d]
-                         (let [d (str/lower-case d)]
-                           (or (= hostname d)
-                               (str/ends-with? hostname (str "." d)))))
-                       allow)))))
+  "True iff `hostname` matches the `allow` list — its exact host or any
+   subdomain of a listed domain (an IP literal matches itself). Only
+   consulted in :allowlist mode; an empty list matches NOTHING (a
+   :allowlist policy with no domains reaches nowhere)."
+  [hostname allow]
+  (boolean (some (fn [d]
+                   (let [d (str/lower-case d)]
+                     (or (= hostname d)
+                         (str/ends-with? hostname (str "." d)))))
+                 allow)))
 
 ;; ============================================================
 ;; Error / denial envelopes — errors are values, never a throw.
@@ -119,13 +122,12 @@
                 "with (seon.agent.web/grants).")))
 
 ;; ============================================================
-;; SSRF guard — block private / loopback / link-local targets. On by
-;; default and never agent-configurable; the ONE opt-out is the host-owned
-;; SEON_WEB_ALLOW_PRIVATE env grant ([[private-allowed?]] — bench clusters
-;; whose fixture corpus is served on loopback). The soft boundary against
-;; LLM-emitted accidents (DNS-rebinding-grade evasion is out of scope —
-;; process isolation is the real boundary). Checked on the resolved
-;; address of EVERY redirect hop.
+;; SSRF / target guard — the ONE per-hop reachability check, driven by the
+;; host-owned [[policy]] (never agent-configurable). :public-only blocks
+;; private/loopback/link-local/ULA targets (the SSRF soft boundary against
+;; LLM-emitted accidents — DNS-rebinding-grade evasion is out of scope,
+;; process isolation is the real boundary); :allowlist blocks any host not
+;; in the list; :open blocks nothing. Checked on EVERY redirect hop.
 ;; ============================================================
 
 (def blocked-hostnames #{"localhost" "localhost.localdomain" "metadata.google.internal"})
@@ -179,31 +181,46 @@
     (catch :default _ nil)))
 
 (defn ^:async host-block-reason
-  "A reason string if the parsed URL's host is a blocked (private) target;
-   `:seon.agent.web.internal/dns-fail` when the host cannot be resolved;
-   nil when the host is a public, reachable address. With the host-owned
-   SEON_WEB_ALLOW_PRIVATE grant set ([[private-allowed?]]), private/
-   loopback targets pass (DNS failures still surface)."
-  [^js parsed]
+  "A short reason string when the parsed URL's host is refused by `policy`,
+   `:seon.agent.web.internal/dns-fail` when it cannot be resolved, or nil
+   when it is reachable. Dispatches on the policy mode:
+     :open        — never refuses (only DNS failure surfaces);
+     :public-only — refuses loopback/RFC-1918/link-local/ULA (checked on
+                    the resolved address of the host);
+     :allowlist   — refuses any host not in `allowed-domains` (a private
+                    host is reachable IFF it is explicitly listed — private
+                    membership is governed by the list, not special-cased)."
+  [^js parsed policy]
   (let [hostname (-> (.-hostname parsed) str/lower-case
                      (str/replace #"^\[" "") (str/replace #"\]$" ""))
-        allow?   (private-allowed?)]
-    (cond
-      (and (not allow?) (contains? blocked-hostnames hostname))
-      (str "blocked host name: " hostname)
+        mode     (::web/policy policy)
+        allow    (::web/allowed-domains policy)]
+    (case mode
+      :allowlist
+      (when-not (domain-allowed? hostname allow)
+        (str "host " hostname " is not in the web allowlist (policy :allowlist)"))
 
-      (ip-literal? hostname)
-      (when (and (not allow?) (private-ip? hostname))
-        (str "private/loopback IP address: " hostname))
+      :open
+      (when (and (not (ip-literal? hostname))
+                 (empty? (await (resolve-addrs hostname))))
+        ::dns-fail)
 
-      :else
-      (let [addrs (await (resolve-addrs hostname))]
-        (cond
-          (empty? addrs)          ::dns-fail
-          (and (not allow?)
-               (some private-ip? addrs)) (str "host " hostname
-                                              " resolves to a private/loopback address")
-          :else                    nil)))))
+      ;; :public-only (the default) — the SSRF private-range guard.
+      (cond
+        (contains? blocked-hostnames hostname)
+        (str "blocked host name: " hostname)
+
+        (ip-literal? hostname)
+        (when (private-ip? hostname)
+          (str "private/loopback IP address: " hostname))
+
+        :else
+        (let [addrs (await (resolve-addrs hostname))]
+          (cond
+            (empty? addrs)           ::dns-fail
+            (some private-ip? addrs) (str "host " hostname
+                                          " resolves to a private/loopback address")
+            :else                    nil))))))
 
 ;; ============================================================
 ;; HTML → markdown — the regex converter ported from openclaw's
@@ -434,23 +451,18 @@
         (err url (str "only http/https URLs are supported (got "
                       (.-protocol parsed) ") — file: is seon.agent.fs's job."))
 
-        (not (domain-allowed? (str/lower-case (.-hostname parsed))))
-        (err url (str "host " (.-hostname parsed) " is not in the configured "
-                      "domain allowlist — inspect it with (seon.agent.web/grants).")
-             {::web/allowed-domains (allowed-domains)})
-
         :else
-        (let [block (await (host-block-reason parsed))]
+        (let [pol   (policy)
+              block (await (host-block-reason parsed pol))]
           (cond
             (= block ::dns-fail)
             (err url (str "could not resolve host " (.-hostname parsed)
                           " (DNS lookup failed)."))
 
             (string? block)
-            (err url (str "blocked by the private-range guard: " block
-                          ". Loopback/RFC-1918/link-local/ULA targets are "
-                          "always refused (SSRF soft boundary).")
-                 {::web/final-url current})
+            (err url (str "web policy refused this target: " block
+                          " — inspect the policy with (seon.agent.web/grants).")
+                 {::web/final-url current ::web/policy (::web/policy pol)})
 
             :else
             (let [ctrl   (js/AbortController.)

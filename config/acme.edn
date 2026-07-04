@@ -19,7 +19,14 @@
 #merge
 [#include "system.edn"
 
- {:seon.config/agent-context
+ {;; Web-access policy — acme (a live dev/bench harness) runs :open like the
+  ;; default cluster, so its loopback bench fixtures are reachable with no
+  ;; special env grant. INHERITED from system.edn's :seon.config/web :open via
+  ;; the #include above — not re-stated here (minimal-overrides: acme = system
+  ;; + acme.* + isolation only; a same-value mirror is exactly the drift trap
+  ;; acme.edn's header warns against).
+
+  :seon.config/agent-context
   {;; system.edn's default toolbelt VERBATIM + the acme.* overlay toolkit.
    ;; WHY kept: acme.helpers / acme.notes are the SEON_EXTRA_SRC namespaces —
    ;; the one structural acme addition. Everything else (skills corpus, render

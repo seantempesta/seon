@@ -287,8 +287,8 @@ def create_cluster(name: str | None = None, *, ephemeral: bool = True,
     hot-patch), durable ⇒ watched. Pass True/False only to override
     (`--frozen`/`--watched`). `extra_env` adds host-owned env grants to the
     create's environment — the spawned pod inherits them (e.g.
-    `{"SEON_WEB_ALLOW_PRIVATE": "1"}` so the web_fetch row's pod may read
-    its own loopback fixture server). The supervisor ready-gates the
+    `{"SEON_SHELL": "0"}` to deny a capability for one bench cluster; web
+    reachability is now a config policy, not env). The supervisor ready-gates the
     wire-server and the pod itself; the ready poll here is the harness-side
     confirmation (and yields the bound port)."""
     name = _check_name(name or bench_cluster_name())
