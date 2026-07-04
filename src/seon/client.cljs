@@ -904,6 +904,13 @@
                       (await (seval/eval compile-state src
                                          {:seon.eval/starting-ns 'cljs.user})))
                     (catch :default e
+                      ;; bulk-load replay machinery (reconstitute-ns-source +
+                      ;; eval) throwing is NOT the normal broken-agent-ns path
+                      ;; (seval/eval returns ok?=false, never throws) — a throw
+                      ;; here is OUR machinery (:core); the row still degrades
+                      ;; to ok?=false and log-replay-failure! runs below.
+                      (when-not (error/recorded? e)
+                        (error/record! {:seon.error/raw e :seon.error/fault :core}))
                       {:seon.eval/ok? false :seon/error e}))]
             (when-not (:seon.eval/ok? r)
               (vswap! !n-fail inc)
@@ -913,24 +920,31 @@
                 (await (log-replay-failure!
                          agent-id ns-kw (load-error->log (:seon/error r))))
                 (catch :default e
-                  (log/error-console!
-                    "seon.client/replay-program-graph!"
-                    (str "log-replay-failure failed: " (.-message e))))))))
+                  ;; double-fault: OUR replay-failure LOG write itself
+                  ;; throwing is a core defect (:core); the load continues
+                  ;; (a double-fault must not abort the rest of the replay).
+                  (error/record! {:seon.error/raw e :seon.error/fault :core}))))))
         ;; Standalone (ns-less) entity-schema rows — fully-qualified
         ;; register! calls evaled from cljs.user.
         (doseq [src standalone]
           (let [r (try (await (seval/eval compile-state src
                                     {:seon.eval/starting-ns 'cljs.user}))
-                       (catch :default e {:seon.eval/ok? false :seon/error e}))]
+                       ;; bulk-load machinery throwing (not the normal
+                       ;; ok?=false path) is OUR defect (:core); the row still
+                       ;; degrades and log-replay-failure! runs below.
+                       (catch :default e
+                         (when-not (error/recorded? e)
+                           (error/record! {:seon.error/raw e :seon.error/fault :core}))
+                         {:seon.eval/ok? false :seon/error e}))]
             (when-not (:seon.eval/ok? r)
               (vswap! !n-fail inc)
               (try
                 (await (log-replay-failure!
                          agent-id :standalone-schema (load-error->log (:seon/error r))))
                 (catch :default e
-                  (log/error-console!
-                    "seon.client/replay-program-graph!"
-                    (str "log-replay-failure failed: " (.-message e))))))))
+                  ;; double-fault: OUR log write itself throwing is a core
+                  ;; defect (:core); the load continues.
+                  (error/record! {:seon.error/raw e :seon.error/fault :core}))))))
         (let [total (+ (count order) (count standalone))]
           {:seon.client/replay-n-total total
            :seon.client/replay-n-ok    (- total @!n-fail)
@@ -1153,6 +1167,9 @@
     (some (fn [root]
             (try
               (.readFileSync fs (str root "/" file) "utf8")
+              ;; probe: `some` over candidate roots — a miss at one root is
+              ;; the EXPECTED signal to try the next (the file lives under
+              ;; exactly one); nil drives the fallthrough, not a defect.
               (catch :default _ nil)))
           (concat (map seon.platform/artifact-path ["src" "test" "guest-cljs/src"])
                   extra))))
@@ -1350,6 +1367,12 @@
         ;; pure data by platform law (see seon.render.live-tile); this
         ;; guard is the backstop for the metadata that isn't.
         spec    (when-some [ms (:malli/schema m)]
+                  ;; probe: an m/schema throw here is the KNOWN, accepted
+                  ;; degradation the docstring above names — a core var whose
+                  ;; `:malli/schema` embeds a fn ref (needs sci, unbundled).
+                  ;; It ALREADY becomes data (a loud, actionable :warn + the
+                  ;; row persists without :seon.fn/spec); gating boot on it
+                  ;; would red the pod for an expected-and-surfaced condition.
                   (try (-> ms m/schema m/form pr-str)
                        (catch :default e
                          (log/warn!
@@ -1428,6 +1451,9 @@
         path (js/require "path")]
     (letfn [(walk [dir acc]
               (let [ents (try (.readdirSync fs dir #js {:withFileTypes true})
+                              ;; probe: a missing / unreadable dir is expected
+                              ;; (SEON_EXTRA_SRC may be unset or partial) — an
+                              ;; empty listing is the answer, not a defect.
                               (catch :default _ #js []))]
                 (reduce
                   (fn [a ent]
@@ -1586,7 +1612,14 @@
           files (mapcat list-cljs-files [(str root "/src") (str root "/test")])]
       (reduce
         (fn [m file]
-          (let [txt (try (.readFileSync fs file "utf8") (catch :default _ nil))
+          (let [txt (try (.readFileSync fs file "utf8")
+                         ;; the file was JUST enumerated by list-cljs-files —
+                         ;; a read failure now is anomalous (:core), and a
+                         ;; silent skip would hide a downstream ns from the
+                         ;; index; the reduce still degrades (nil txt skips).
+                         (catch :default e
+                           (error/record! {:seon.error/raw e :seon.error/fault :core})
+                           nil))
                 ns  (some-> txt ns-name-from-source)]
             (if (and ns (empty? (reserved-extra-nses [ns])))
               (assoc m ns file)
@@ -1619,7 +1652,13 @@
   (let [fs (js/require "fs")]
     (into []
           (mapcat (fn [[ns-str file]]
-                    (let [txt (try (.readFileSync fs file "utf8") (catch :default _ nil))]
+                    (let [txt (try (.readFileSync fs file "utf8")
+                                   ;; enumerated file failing to read now is
+                                   ;; anomalous (:core); a silent skip hides a
+                                   ;; downstream ns's fns from the index.
+                                   (catch :default e
+                                     (error/record! {:seon.error/raw e :seon.error/fault :core})
+                                     nil))]
                       (if txt
                         (defn-rows-from-source ns-str txt now)
                         []))))
@@ -1745,6 +1784,11 @@
           (keep (fn [[k v]]
                   (when (keyword? k)
                     (let [form (try (if (m/schema? v) (m/form v) v)
+                                    ;; probe: a registered value whose m/form
+                                    ;; can't be computed falls back to the raw
+                                    ;; value — the source is still captured
+                                    ;; (pr-str below); expected graceful
+                                    ;; degradation, not a defect.
                                     (catch :default _ v))
                           s    (pr-str form)
                           src  (if (> (count s) schema-source-cap)
