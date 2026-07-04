@@ -6,6 +6,24 @@ tags: [research, agent]
 
 # Error blame + strict gate — a design proposal
 
+**Status: COMPLETE 2026-07-04 — `:crash` FLIPPED + LIVE-PROVEN** (crash-flip
+commit `114b6c80`; C41/C42 fix `5e2416c2`; gate/config `d2a11341`). The dev
+manifest runs `:seon.config/on-core-error :crash`; the suite/CI surface stays
+`:gate` via `config/test.edn` (bin/test-cljs default). C41 resolved (option A:
+`seon.error/expecting-core-fault!` — a TEST bracket printing the distinct
+`SEON-EXPECTED-CORE-FAULT` marker the gate does not count; 8 genuine-`:core`
+render/tile/block fixtures annotated). The C41 investigation surfaced C42 (a
+real, crash-flip-critical bug): agent-form failures (a cljs.js
+`:cljs/analysis-error` — undeclared var / bad require — or a `:user-input`
+kind — a mistyped query attr) were misclassified `:core` and would have
+crashed the pod under `:crash`; `seon.instrument/wrapper-fault` now classifies
+them `:agent`. Live proof on the default pod (7890): a real agent mistyped-attr
+query → `:agent` (no crash); a `:core` record! → datom persisted (`#{[:core
+536870943]}`, same `@t` as the loud exit) THEN pod exits; `:agent` record! on
+the fresh pod → no crash. Full suite 983/4514 0F/0E, 0 un-expected markers.
+
+The historical phase-2 status below is retained for context.
+
 **Status: PHASE 2 SHIPPED 2026-07-04** (phase-1 commits `0e9c9b92` +
 `a69da9f0`; phase-2 sweep commits `825332ce` render/sci, `68f66070`
 eval.cljs + public `wrapper-fault`, `74736906` client.cljs, `f1d035b7`

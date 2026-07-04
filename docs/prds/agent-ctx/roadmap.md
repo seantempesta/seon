@@ -177,19 +177,36 @@ substrate):
    (`fault-for`/`agent-authored-sym?`); OUR-machinery sites default `:core`.
    Return contracts byte-unchanged (live-proven per file: agent typos →
    `:agent` datoms, forced core throws → `:core` datoms w/ frames + `:at`,
-   caller envelopes identical). **`:crash` flip DEFERRED to owner:** a bare
-   `bin/test-cljs` defaults to `SEON_CONFIG=config/system.edn` and the
-   node-test runtime reads the dial, so flipping system.edn to `:crash`
-   would `.exit 1` the suite mid-run — violating "CI stays `:gate`". The
-   live-pod drain is clean (fresh boot + full render = 0 organic `:core`);
-   the flip needs `bin/test-cljs`/CI pinned to a `:gate` config first
-   (`config/test.edn` exists, dial unset). Full suite = **982/4511 0F/0E**
-   (behavior preserved) but the gate is RED on **11 test-provoked (0
-   organic) `:core`** — the existing error-path tests now correctly record
-   `:core`, colliding with the phase-1 "suite is marker-free" invariant
-   (registry **C41**; owner decision: a test-scoped `*expect-fault*` marker
-   suppression [recommended] or agent-authored fixtures). See the proposal
-   doc status.
+   caller envelopes identical).
+
+   **Phase 2 finish — `:crash` FLIPPED + LIVE-PROVEN** — ✅ COMPLETE
+   (2026-07-04, `5e2416c2` C41/C42 + `d2a11341` gate/config + `114b6c80`
+   crash flip). Three parts:
+   - **C41 (owner option A):** `seon.error/expecting-core-fault!` — a TEST
+     bracket (module-level depth counter, async-safe across `.then` hops —
+     NOT a dynamic binding) making `escalate!` print the distinct
+     `SEON-EXPECTED-CORE-FAULT` marker the gate does not count (datom still
+     written, `:crash` not taken). 8 genuine-`:core` render/tile/block
+     fixtures annotated. bin/test-cljs counts `SEON-CORE-FAULT` MINUS the
+     `-EXPECTED-` variant.
+   - **C42 (real bug the C41 investigation surfaced, crash-flip-critical):**
+     agent-form failures (a cljs.js `:cljs/analysis-error` — undeclared var /
+     bad require — or a `:user-input`/`:read`/`:seon.eval/repl-parity`
+     `:seon.error/kind` — a mistyped query attr) were misclassified `:core`
+     and would have crashed the pod under `:crash`. `wrapper-fault` now
+     classifies them `:agent` (a cljs.js analysis error only ever arises from
+     an agent form; core is AOT-compiled by shadow). This is why the tee /
+     gym / require "faults" need NO bracket. The md->hiccup fault was a
+     variadic-only redef fixture (fixed to multi-arity).
+   - **Config-selection:** bin/test-cljs defaults `SEON_CONFIG=config/test.edn`
+     (dial unset → `:gate`), so the suite runtime + gate both stay `:gate`;
+     the dev manifest (`config/system.edn`) flips to `:crash`.
+   Full suite = **983/4514 0F/0E**, gate GREEN (0 un-expected markers, 8
+   expected). Live proof on the default pod (7890) under `:crash`: a real
+   agent mistyped-attr query → `:agent` (no crash); a `:core` record! →
+   `SEON-CORE-FAULT` then "exiting after persisting the fault datom", pod
+   exits, datom persisted (`#{[:core 536870943]}`, same `@t`); `:agent`
+   record! on the fresh pod → no crash. Registry **C41**+**C42** CLOSED.
 
 Stability queue (interleaved, one per feature unit above; owner-agreed
 2026-07-02 — each fix REUSES an existing mechanism, no new ones):
