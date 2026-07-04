@@ -399,7 +399,12 @@
         malli? (einstrument/instrument-error? data)
         detail (when malli?
                  (try (einstrument/render-malli-error data)
-                      (catch :default _ nil)))]
+                      (catch :default e2
+                        ;; OUR renderer failing on OUR OWN malli envelope is a
+                        ;; core bug (:core); the diagnosis still degrades to the
+                        ;; bare base message (detail nil).
+                        (err/record! {:seon.error/raw e2 :seon.error/fault :core})
+                        nil)))]
     (str "[" (name (or where :unnamed)) "] render failed: " (err/->message e)
          (when detail (str "\n" detail)))))
 
@@ -453,6 +458,12 @@
           ;; the ONE shared path so every renderer obeys one contract.
           (unwrap-response :seon.render/html r))
         (catch :default e
+          ;; Classify by the render symbol (fault-for): an agent-authored
+          ;; converter → :agent, a core `seon.handlers.*` converter → :core.
+          ;; Record BEFORE strict-fail! (which re-throws in strict mode,
+          ;; bypassing the tail). recorded? skips an inner funnel's datom.
+          (when-not (err/recorded? e)
+            (err/record! {:seon.error/raw e :seon.error/fault (err/fault-for sym)}))
           ;; STRICT dial: dev/test/gym → re-throw LOUD; prod → graceful guard.
           (strict-fail! sym e)
           (live-tile/error-tile
@@ -664,6 +675,11 @@
         (live-tile/valid-hiccup? x) (hiccup-text x)
         :else              (value/render-ai "inline" x)))
     (catch :default e
+      ;; `block` dispatches to CORE renderers (md->hiccup, clj->hiccup, the
+      ;; value panels) — a throw is our machinery (:core). Record BEFORE
+      ;; strict-fail! (re-throws in strict mode); recorded? skips a funnel dup.
+      (when-not (err/recorded? e)
+        (err/record! {:seon.error/raw e :seon.error/fault :core}))
       ;; STRICT dial: dev/test/gym → re-throw LOUD; prod → graceful guard.
       (strict-fail! :block e)
       (let [msg (str "block render failed: " (err/->message e))]
@@ -720,6 +736,9 @@
         ;; the unresolvable-lookup-ref throw (missing agent → nil
         ;; hiccup, the documented contract).
         ent (try (db/pull db tile-entity-pattern [:seon.agent/id id])
+                 ;; probe: the only throw this covers is the unresolvable
+                 ;; lookup-ref of a MISSING agent — nil ent is the documented
+                 ;; contract (tile renders nothing), an expected absence.
                  (catch :default _ nil))]
     (if (nil? (:seon.agent/id ent))
       {:seon.render/hiccup nil}
@@ -732,7 +751,13 @@
               (try (:seon.agent.ctx.render-fns/tile-sym
                      (render-fns/last-updated-tile
                        {:seon.db/db db :seon.agent/id id}))
-                   (catch :default _ nil)))
+                   ;; core derivation (last-updated-tile) throwing is a defect
+                   ;; (:core) — a genuine "no candidate" RETURNS nil, it does
+                   ;; not throw; the tile still degrades to the welcome.
+                   (catch :default e
+                     (when-not (err/recorded? e)
+                       (err/record! {:seon.error/raw e :seon.error/fault :core}))
+                     nil)))
             {:seon.render.live-tile/keys [value]}
             (live-tile/wired-content
               (cond-> {:seon.render/entity ent}
@@ -840,6 +865,17 @@
               (html/->string hiccup))
             resp)
           (catch :default e
+            ;; The tile `value` decides the population: an agent-authored
+            ;; symbol OR literal hiccup (qualified to my.agent.<id> above) is
+            ;; the agent's own tile → :agent; a core tile symbol → :core.
+            ;; recorded? skips the datom when the SCI bounding funnel already
+            ;; recorded an agent tile-fn failure (re-thrown at :sci/error).
+            ;; Record BEFORE strict-fail! (re-throws in strict mode).
+            (when-not (err/recorded? e)
+              (err/record! {:seon.error/raw   e
+                            :seon.error/fault (if (or (err/agent-authored-sym? value)
+                                                      (vector? value))
+                                                :agent :core)}))
             ;; STRICT dial: dev/test/gym → re-throw LOUD (catch a broken tile
             ;; the moment it renders); prod → the calm derived banner below.
             (strict-fail! :live-tile e)
@@ -880,6 +916,11 @@
         ;; agent reading its context sees its own renderer is broken
         ;; (mirror of the html banner above / the tile's error render).
         (catch :default e
+          ;; Classify by the render symbol (fault-for): agent-authored
+          ;; converter → :agent, core converter → :core. Record BEFORE
+          ;; strict-fail! (re-throws in strict mode); recorded? skips a dup.
+          (when-not (err/recorded? e)
+            (err/record! {:seon.error/raw e :seon.error/fault (err/fault-for sym)}))
           ;; STRICT dial: dev/test/gym → re-throw LOUD; prod → legible line.
           (strict-fail! sym e)
           (str "[render error — " sym " threw: "
@@ -1048,6 +1089,17 @@
       (try
         (unwrap-response view (f in))           ;; bare OR html-response envelope
         (catch :default e
+          ;; Classify by the node's slot value: an agent-authored render
+          ;; symbol → :agent (its SCI-bounding funnel usually recorded it
+          ;; already — recorded? skips the dup), anything else (core section,
+          ;; schema/generic default converter) → :core. Record BEFORE
+          ;; strict-fail! (re-throws in strict mode).
+          (when-not (err/recorded? e)
+            (err/record! {:seon.error/raw   e
+                          :seon.error/fault (let [sv (get node view)]
+                                              (if (and (symbol? sv)
+                                                       (err/agent-authored-sym? sv))
+                                                :agent :core))}))
           ;; STRICT dial: dev/test/gym → re-throw LOUD (block name + full
           ;; malli explain); prod → fall through to the graceful guard below.
           (strict-fail! (renderable-id node) e)
@@ -1078,6 +1130,9 @@
   [db agent-id block-name]
   (when (and db agent-id block-name)
     (let [ent (try (db/pull db '[{:seon.agent/ctx [*]}] [:seon.agent/id agent-id])
+                   ;; probe: an unresolvable lookup-ref (agent absent) → nil
+                   ;; block, the documented "no such block" path; expected
+                   ;; absence, not a defect.
                    (catch :default _ nil))]
       (when-let [b (->> (:seon.agent/ctx ent)
                         (filter #(= block-name (:seon.agent.ctx/name %)))
@@ -1118,6 +1173,13 @@
                 (try
                   (render :seon.render/html (assoc ctx :seon.db/db db) block)
                   (catch :default e
+                    ;; The inner `render` walker records + classifies the
+                    ;; block-render failure (recorded? then skips here); a
+                    ;; throw that reaches this slot machinery unrecorded is our
+                    ;; own (:core). Record BEFORE strict-fail! (re-throws in
+                    ;; strict mode).
+                    (when-not (err/recorded? e)
+                      (err/record! {:seon.error/raw e :seon.error/fault :core}))
                     ;; STRICT dial: dev/test/gym → re-throw LOUD; prod → guard.
                     (strict-fail! block-name e)
                     (live-tile/error-tile
