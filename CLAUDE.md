@@ -392,11 +392,14 @@ wire contract** plugs in with zero seon changes — the reference one is
 Apple Silicon; 8-bit, ~120 tok/s), which lives in its OWN repo
 (`~/ml/diffusion-gemma`, not this tree — it is model-inference infra, not
 seon core) and serves `POST /run` + `GET /status/{id}` on `127.0.0.1:17860`.
-Start it with `uv run python -m dg_mlx.worker`; a WARM worker pins the model
-in unified memory (tens of GB) until killed, so stop it when idle. One
-provider, one wire contract — the SAME `SEON_AI_PROVIDER=diffusiongemma`
-config runs against an A100/H100 on RunPod or the local Mac by swapping
-`SEON_DG_ENDPOINT` alone.
+Manage it with its own `./dg` script — `dg start` / `dg status` (shows PID +
+summed RSS + model loaded?/idle time) / `dg stop` / `dg gen "…"`. A WARM
+worker pins the model in unified memory (tens of GB), but it **auto-unloads
+after 15 min idle** (RSS → ~0.5 GB) and reloads on the next request, so a
+forgotten worker self-cleans; `dg stop` frees it immediately. One provider,
+one wire contract — the SAME `SEON_AI_PROVIDER=diffusiongemma` config runs
+against an A100/H100 on RunPod or the local Mac by swapping `SEON_DG_ENDPOINT`
+alone.
 
 ### Flow Topology (routing backbone) `[JVM track — paused]`
 
