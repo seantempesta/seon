@@ -1231,3 +1231,24 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   found the calibrate-once/keep/drop framing uninspiring; reframing them as
   the harness's own integrity+regression test suite (not capability rows).
   Decision pending.
+
+### 2026-07-04 — OWNER RULINGS (web policy + QA reframe)
+
+- **Web access = a config-driven POLICY, not a boolean grant** (owner: "make
+  it a sane config that's useful"). UNIFY the two existing web restrictions
+  (the private-range SSRF guard + the optional domain allowlist) into ONE
+  policy config: `:open` (no restriction) / `:public-only` (block
+  internal/loopback — SSRF-safe) / `:allowlist` (only listed domains/CIDRs).
+  Replaces the binary `SEON_WEB_ALLOW_PRIVATE` env grant (config over env).
+  DEFAULT: user clusters (system.edn + acme.edn) = `:open` (zero friction,
+  public+private); code/schema fallback = `:public-only` (a downstream
+  inheritor isn't SSRF-open by accident). Host-owned, agent can never widen
+  its own policy.
+- **QA benches = the harness's integrity test suite, CROSS-MODEL.** Standard
+  benches (gsm8k/mmlu/arc/gpqa) are NOT capability rows — saturated for
+  DeepSeek (no headroom) and they test the bare model we don't control. They
+  become pass/fail integrity + regression GATES run across 2-3 MODELS (uses
+  per-agent model config) to prove the harness is model-AGNOSTIC, not
+  DeepSeek-tuned — triggered by harness-build changes + context-arm
+  promotions, NOT cadence-tracked. The capability ledger = bespoke + agentic
+  rows ONLY. (Queued behind bfcl — shares catalog.py/scorecard.py.)
