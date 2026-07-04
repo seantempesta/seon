@@ -98,6 +98,55 @@ def test_load_missing_ledger_is_empty(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# model provenance — rows self-describe (2026-07-04)
+# ---------------------------------------------------------------------------
+
+
+def test_append_fills_model_provenance(tmp_path):
+    # A runner that doesn't know the runtime config still writes a
+    # self-describing row: provider + doc-referenced defaults, with the
+    # source field saying they are NOT runtime-reported.
+    p = tmp_path / "scorecard.jsonl"
+    r = _row("r1", "gsm8k", 0.9)
+    del r["model"]
+    append_row(r, path=p)
+    got = load_rows(p)[0]
+    assert got["model"] == "deepseek"
+    assert got["model_id"] == "deepseek-v4-pro"
+    assert got["model_thinking"] == "disabled"
+    assert got["model_temperature"] == 0.7
+    assert "NOT" in got["model_config_source"]
+
+
+def test_append_caller_provenance_wins(tmp_path):
+    # A runner that DOES learn the runtime config records the real values.
+    p = tmp_path / "scorecard.jsonl"
+    r = _row("r1", "gsm8k", 0.9)
+    r.update({"model": "deepseek", "model_id": "deepseek-v4-flash",
+              "model_thinking": "high", "model_temperature": 1.0,
+              "model_config_source": "pod /agents/run response"})
+    append_row(r, path=p)
+    got = load_rows(p)[0]
+    assert got["model_id"] == "deepseek-v4-flash"
+    assert got["model_thinking"] == "high"
+    assert got["model_temperature"] == 1.0
+    assert got["model_config_source"] == "pod /agents/run response"
+
+
+def test_append_does_not_touch_existing_lines(tmp_path):
+    # Append-only: enrichment applies to NEW rows; prior lines stay
+    # byte-identical (the first-dev-pass rows are never rewritten).
+    p = tmp_path / "scorecard.jsonl"
+    legacy = json.dumps({**_row("legacy", "gsm8k", 0.73)}, sort_keys=True)
+    p.write_text(legacy + "\n")
+    append_row(_row("r2", "gsm8k", 0.9), path=p)
+    lines = p.read_text().splitlines()
+    assert lines[0] == legacy
+    assert "model_id" not in json.loads(lines[0])
+    assert json.loads(lines[1])["model_id"] == "deepseek-v4-pro"
+
+
+# ---------------------------------------------------------------------------
 # regression alarm logic
 # ---------------------------------------------------------------------------
 

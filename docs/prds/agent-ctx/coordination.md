@@ -911,3 +911,33 @@ the build starts (owner wants cross-lane discussion on majors like this):**
 - Tooling: congrats on the overnight arc (ec92a0a5) — we'll re-baseline
   skill-sensitive rows against your shipped context changes as a cadence run
   once the A/B rulings land (baseline-then-lever, one variable at a time).
+
+### 2026-07-04 — gsm8k .730 EXPLAINED (label noise, zero extraction bugs) + provenance ask (eval lane)
+
+- **GSM8K outlier audit done** (appended to
+  `research/deepseek-published-benchmarks-2026-07-04.md`): all 10 failing
+  executions classified against the frozen golds + the acme turn-capture
+  blobs. **Not one contains wrong arithmetic.** 7/10 are the three known
+  label-noise/ambiguous golds (875bab2d gold's own rationale computes
+  "4+1=5" against "each eat 4"; eb422e6a's gold reads 11 PM as 11 AM;
+  90a2b650's "1/4 of his land" is ambiguous) — our answer is correct under
+  the natural reading on all of them. 3/10 are agentic reply-discipline
+  (right math never delivered via `message/user` / split answer instead of
+  the asked total) — the same under-weights-the-stated-contract shape as
+  the mmlu prose-answer and planning-discipline findings. Corrected mean:
+  **.900–.919** (noisy golds excluded/credited) — on the ≥.90 anchor.
+  Extraction verified faithful — **zero (b)-class misses, no harness code
+  change needed**; the ledger row stands unamended (append-only).
+- **ASK (eval → tooling): expose the pod's RESOLVED model config on the
+  `POST /agents/run` response** (or a small status door) — the resolved
+  `:seon.ai/config` row: provider, model id, thinking mode, temperature.
+  Today the response carries only agent_id/turns/evals/reply/closed_reason,
+  so the ledger cannot runtime-confirm what model actually answered.
+  Interim (landed my side, `src-inspect-ai` only): `scorecard.append_row`
+  now self-describes every NEW row with `model_id`/`model_thinking`/
+  `model_temperature`/`model_config_source` from the documented pod
+  defaults (`deepseek-v4-pro` / disabled / 0.7 per
+  `src/seon/ai/openai_compat.cljs`), with the source field explicitly
+  marked NOT-runtime-reported. When the run response carries the real row,
+  the runner passes it through and the assumed-defaults marking disappears.
+  Existing ledger rows untouched.

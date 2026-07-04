@@ -47,6 +47,29 @@ SCORECARD_PATH = REPO_ROOT / "evals" / "scorecard.jsonl"
 REGRESSION_DROP = 0.10
 REGRESSION_WINDOW = 7
 
+# ---------------------------------------------------------------------------
+# Model provenance — rows must self-describe (audit finding, 2026-07-04)
+# ---------------------------------------------------------------------------
+# The pod owns the provider config (the `:seon.ai/config` DB row + the code
+# defaults in src/seon/ai/openai_compat.cljs); NO pod surface reports the
+# RESOLVED model id / thinking mode / temperature back to the harness — the
+# /agents/run response carries only agent_id/turns/evals/reply/closed_reason.
+# Ask filed to the tooling lane (docs/prds/agent-ctx/coordination.md,
+# 2026-07-04): expose the resolved provider row on the run response. Until it
+# lands, rows record what the harness CAN know — the provider label plus the
+# pod's documented defaults — with `model_config_source` stating exactly that,
+# so an assumed default can never be mistaken for a runtime-confirmed fact.
+MODEL_PROVENANCE: dict[str, Any] = {
+    "model": "deepseek",
+    "model_id": "deepseek-v4-pro",
+    "model_thinking": "disabled",
+    "model_temperature": 0.7,
+    "model_config_source": (
+        "pod defaults per src/seon/ai/openai_compat.cljs (default-model / "
+        "default-temperature / thinking disabled-for-:deepseek) — NOT "
+        "runtime-reported; coordination.md ask 2026-07-04"),
+}
+
 # An execution's outcome: "pass" | "fail" | a flake-taxonomy class string
 # (anything else). Taxonomy classes used by the runners:
 #   solve_timeout          pod reported timed_out (taxonomy: latency variance)
@@ -108,10 +131,16 @@ def load_rows(path: Path = SCORECARD_PATH) -> list[dict[str, Any]]:
 
 
 def append_row(row: dict[str, Any], path: Path = SCORECARD_PATH) -> None:
-    """Append ONE row; refuses a duplicate run_id (append-only, no rewrites)."""
+    """Append ONE row; refuses a duplicate run_id (append-only, no rewrites).
+
+    Every appended row self-describes its model: any MODEL_PROVENANCE key the
+    caller omits is filled from that constant (caller-supplied values win —
+    e.g. a runner that DOES learn the runtime config passes the real values).
+    Existing ledger lines are never touched."""
+    row = {**MODEL_PROVENANCE, **row}
     required = {"run_id", "row", "tier", "n", "k", "mean", "pass_at_k",
                 "pass_hat_k", "flake_rate", "git_sha", "datasets_lock_sha",
-                "elapsed_s", "timestamp"}
+                "elapsed_s", "timestamp"} | MODEL_PROVENANCE.keys()
     missing = required - row.keys()
     if missing:
         raise ValueError(f"scorecard row missing fields: {sorted(missing)}")

@@ -173,3 +173,71 @@ GSM8K alone warrants a transcript audit.
 - **Gaps, stated honestly:** no official thinking-off (or any chat-model)
   numbers exist for GSM8K, plain MMLU, or ARC-Challenge on V4-Pro; those
   rows are anchored by base-model/older-model numbers and clearly marked.
+
+## GSM8K outlier audit (2026-07-04) — every failing execution, classified
+
+Per the "suspect the harness/context first" rule, EVERY failing execution in
+`evals/runs/2026-07-03-first-dev-pass/gsm8k.jsonl` was audited against the
+frozen dev samples (question + gold recovered from the pinned HF cache,
+revision `cc7b047b…`) and the acme cluster's turn-capture blobs
+(`data/clusters/acme/blobs/` — the run drove long-lived acme, so every
+agent's rendered prompts/transcripts survive on disk). Run shape: 41
+executions (15 samples × k=3, epoch 3 truncated at 11 by the acme OOM), 4
+flakes excluded as-run (1 `solve_timeout`, 1 `run_error`, 2 `harness_error`),
+37 scored, 27 pass → mean 27/37 = **.730**.
+
+### Per-fail table (10 failing executions, 6 samples)
+
+| Sample (failed epochs) | Gold | Our answer | Class | Evidence |
+|---|---|---|---|---|
+| `875bab2d` (e1,e2,e3) | 150 | **240** | (a) label noise | "Marin and his neighbor Nancy **each eat 4** apples a day … 30 days." Gold's own rationale computes "4 **+ 1** = 5 apples" per day → 150. Correct math is 2 × 4 × 30 = 240 — our answer, deterministic across all 3 epochs. |
+| `eb422e6a` (e1,e2) | 360 | **1800** | (a) label noise | "stapling from 8:00 AM until **11:00 PM**" at 120 reports/hour. Gold's rationale reads it as 11 **AM** ("From 8am - 11am … 3 hours" → 360). 15 h × 120 = 1800 — our answer, both epochs. |
+| `90a2b650` (e1,e2) | 170 | **140** | (a) ambiguous gold | "sold half … then sold another **1/4 of his land**": gold takes 1/4 of the *remaining* 40 sqm (10 sqm → $90 residual → 170); the model takes 1/4 of *his* (original 80 sqm) land (20 sqm → $60 residual → 140). Both readings defensible; the model was consistent across epochs. |
+| `4237339d` (e1; e2,e3 pass) | 16 | *(empty)* | (c) behavioral miss | Transcript (blob `78ef7362…`): pure prose narration ending "Final answer:" with **nothing after it** — no forms, no `message/user`, no number ever produced over 3 turns; run closed `:no-forms`. |
+| `5602e6ac` (e2; e1/e3 flaked) | 4 | *(empty)* | (c) delivery miss (math RIGHT) | Transcript (blob `7e483c06…`): the model derives x = 4 correctly and writes "ANSWER: 4" **repeatedly** — but as raw markdown parsed as code (READ ERRORs, "(17 - x) not defined" loops), never `(message/user …)`. 11 turns, 238 s, zero reply delivered. The completion really was empty — **not** a scoring-extraction bug. |
+| `c7e0bdd1` (e2; e1 pass) | 10 | "ANSWER: 4 blue and 6 red shoe boxes" | (c) composition miss (math RIGHT) | Transcript (blob `94232109…`): computed 4 blue + 6 red correctly but replied the split, never the asked total (10). `match(numeric=True)` extracts 6. No extractor could yield 10 without doing arithmetic — not class (b). |
+
+**Class (b) — answer-extraction/contract misses: ZERO.** Every empty answer
+was genuinely an empty reply (verified in the transcripts); every non-empty
+answer was extracted faithfully from the reply text. The
+`catalog.swap_generate` contract fix (first dev pass) is doing its job — no
+further extraction fix is warranted in `src-inspect-ai`, so none was made.
+
+### Corrected-mean scenarios
+
+| Scenario | Computation | Mean |
+|---|---|---|
+| As-run (ledger row, stands) | 27/37 | **.730** |
+| Extraction fixed | no (b) exists → unchanged | .730 |
+| Noisy/ambiguous golds EXCLUDED (drop `875bab2d`, `eb422e6a`, `90a2b650` — 7 fail executions) | 27/30 | **.900** |
+| Noisy/ambiguous golds credited as correct (our answer is the right one under the natural reading) | 34/37 | **.919** |
+| Arithmetic-only view | 0 of 10 failing executions contain wrong arithmetic | ~1.0 on math; the 3 residual fails are agentic reply-discipline |
+
+Archived contrast runs (never appended to the ledger): the pre-contract-fix
+`gsm8k-no-answer-contract.jsonl` scored .500 (22/44 — the format-contract
+drop added fails on 5 samples the final run passes), and
+`gsm8k-contaminated.jsonl` .400 (hot-reload contamination) — both strictly
+worse and both explained by harness defects since fixed.
+
+### Verdict — .730 is explained; no capability gap
+
+**Yes.** The .730 is NOT a model math deficit: not one failing execution
+shows wrong arithmetic. 7 of 10 failing executions are the three known
+label-noise/ambiguous golds (on all of which our answer is correct under the
+natural reading — two of the golds are outright wrong in their own
+rationales); excluding or crediting them puts the mean at **.900–.919**,
+squarely on the ≥.90 saturation anchor this doc predicted. The remaining 3
+fails are the familiar agentic-harness shape — the model under-weights a
+stated contract (deliver the answer via a user message / as the single
+requested number) — the same pattern as the mmlu prose-answer and planning
+discipline findings, and a context-content A/B lever, not a bench defect.
+Per bench convention and the append-only ledger rule, the .730 row STANDS
+unamended; future runs inherit the (unchanged) extraction and this audit as
+the attribution baseline.
+
+Provenance note (rode along with this audit): ledger rows now self-describe
+the model — `scorecard.append_row` fills `model_id` / `model_thinking` /
+`model_temperature` / `model_config_source` from the pod's documented
+defaults (`deepseek-v4-pro`, thinking disabled, temp 0.7), explicitly marked
+as NOT runtime-reported until the pod exposes its resolved provider row on
+`/agents/run` (ask filed in [[coordination]]).
