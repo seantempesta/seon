@@ -237,6 +237,7 @@ def pod_planning_driver(
     *,
     timeout_ms: int | None = None,
     cluster_name: str | None = None,
+    evidence_root: Any = None,
 ) -> dict[str, Any]:
     """The LIVE two-phase driver: one planning sample on its own cluster.
 
@@ -284,6 +285,16 @@ def pod_planning_driver(
         result["agent_id"] = result["phase1"].get("agent_id")
         return result
     finally:
+        if evidence_root is not None:
+            # Evidence retention (2026-07-04): keep the cluster's blob store
+            # (rendered prompts + verbatim replies) before it is destroyed —
+            # same rule as the tool rows; a trajectory fail stays auditable.
+            from pathlib import Path
+
+            from seon_inspect.tool_rows import preserve_cluster_evidence
+            preserve_cluster_evidence(
+                holder["cluster"].name,
+                Path(evidence_root) / holder["cluster"].name)
         cl.destroy_cluster(holder["cluster"].name)
 
 

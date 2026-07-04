@@ -60,6 +60,19 @@
   (let [v (platform/env-val "SEON_WEB_LOCK")]
     (boolean (and v (not= "0" v)))))
 
+(defn private-allowed?
+  "True when the HOST granted private/loopback targets via
+   SEON_WEB_ALLOW_PRIVATE (any value but \"0\").
+
+   Host-owned like SEON_WEB — read live from the env, nothing inside the
+   pod can flip it. Default (unset) keeps the SSRF private-range guard
+   fully on. Intended for deployments whose legitimate corpus lives on
+   loopback (e.g. a bench cluster serving local fixture pages); never set
+   it on a pod exposed to untrusted tasks."
+  []
+  (let [v (platform/env-val "SEON_WEB_ALLOW_PRIVATE")]
+    (boolean (and v (not= "0" v)))))
+
 ;; The configurable domain allowlist. Empty = all domains allowed (when
 ;; SEON_WEB is granted). Seeded from SEON_WEB_DOMAINS (comma-separated).
 (defn- env-domains []
@@ -106,10 +119,13 @@
                 "with (seon.agent.web/grants).")))
 
 ;; ============================================================
-;; SSRF guard — block private / loopback / link-local targets. Always on,
-;; un-configurable; the soft boundary against LLM-emitted accidents
-;; (DNS-rebinding-grade evasion is out of scope — process isolation is the
-;; real boundary). Checked on the resolved address of EVERY redirect hop.
+;; SSRF guard — block private / loopback / link-local targets. On by
+;; default and never agent-configurable; the ONE opt-out is the host-owned
+;; SEON_WEB_ALLOW_PRIVATE env grant ([[private-allowed?]] — bench clusters
+;; whose fixture corpus is served on loopback). The soft boundary against
+;; LLM-emitted accidents (DNS-rebinding-grade evasion is out of scope —
+;; process isolation is the real boundary). Checked on the resolved
+;; address of EVERY redirect hop.
 ;; ============================================================
 
 (def blocked-hostnames #{"localhost" "localhost.localdomain" "metadata.google.internal"})
@@ -165,24 +181,28 @@
 (defn ^:async host-block-reason
   "A reason string if the parsed URL's host is a blocked (private) target;
    `:seon.agent.web.internal/dns-fail` when the host cannot be resolved;
-   nil when the host is a public, reachable address."
+   nil when the host is a public, reachable address. With the host-owned
+   SEON_WEB_ALLOW_PRIVATE grant set ([[private-allowed?]]), private/
+   loopback targets pass (DNS failures still surface)."
   [^js parsed]
   (let [hostname (-> (.-hostname parsed) str/lower-case
-                     (str/replace #"^\[" "") (str/replace #"\]$" ""))]
+                     (str/replace #"^\[" "") (str/replace #"\]$" ""))
+        allow?   (private-allowed?)]
     (cond
-      (contains? blocked-hostnames hostname)
+      (and (not allow?) (contains? blocked-hostnames hostname))
       (str "blocked host name: " hostname)
 
       (ip-literal? hostname)
-      (when (private-ip? hostname)
+      (when (and (not allow?) (private-ip? hostname))
         (str "private/loopback IP address: " hostname))
 
       :else
       (let [addrs (await (resolve-addrs hostname))]
         (cond
           (empty? addrs)          ::dns-fail
-          (some private-ip? addrs) (str "host " hostname
-                                         " resolves to a private/loopback address")
+          (and (not allow?)
+               (some private-ip? addrs)) (str "host " hostname
+                                              " resolves to a private/loopback address")
           :else                    nil)))))
 
 ;; ============================================================

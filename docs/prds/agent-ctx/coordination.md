@@ -1090,3 +1090,34 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   wording is KEPT (its placeholder fix — a literal `(complete "result")`
   copy — is an observed real defect; the sweep line is noise-neutral).
   Planning alarm stays green (.400 vs median .493, drop .093 < .10).
+
+### 2026-07-04 — web tool FIXED (SSRF grant) + FULL dev sweep (armD-full): system green
+
+- **Web fix (owner-directed):** new HOST-owned env grant
+  `SEON_WEB_ALLOW_PRIVATE` (family of SEON_WEB; default unchanged = refuse;
+  never agent-settable; surfaced in `web/grants`) releases the private-range
+  guard for deployments whose corpus is loopback — the harness sets it ONLY
+  on web_fetch's per-sample ephemeral clusters
+  (`cluster.create_cluster(extra_env=…)` → `tool_rows.WEB_FIXTURE_ENV`).
+  Live-proven: the 3×-deterministic fabrication sample (006 "Gadget X") now
+  does a real `web/fetch` (200, content, blob) and answers the exact gold.
+  New pinning test in `test/seon/agent/web_test.cljs`.
+- **FULL dev sweep** (all 8 rows, ONE arm `armD-full`, bundle
+  `393c2a26afc3`, frozen splits, runtime-reported provenance, 0 flakes):
+  web_fetch **.875** (was .364/.625 — the row was measuring a broken tool) ·
+  shell_use **.917** (was .667) · file_edit .750 (both fails model-bound
+  content, incl. the SAME deterministic `:replicas` omission as baseline) ·
+  gsm8k **.800** (reproduces armB exactly; label-noise floor) · mmlu .733
+  (3 clean wrong letters + ONE over-planning derail — watch: Fix 2 may
+  over-trigger plan! on trivial questions) · arc **1.000** · gpqa_diamond
+  **1.000** (thinking-off confirmed via runtime provenance; the agentic REPL
+  is a calculator the bare published bench lacks, and 2 of 3 baseline fails
+  were delivery-class) · long_term_planning **.800** (best yet; post-fix
+  runs .700/.400/.800 — real lift over .286, high k=1 variance; one
+  re-plan-root recurrence in 30 post-fix samples).
+- Suites: bin/test-cljs 973/4468/0 · pytest 197/0 (alarm green — the
+  (row, arm) keying landed concurrently). No leaked clusters (three
+  killed-sweep plan-cluster orphans destroyed). Published-numbers research
+  doc now carries DeepSeek's COMPLETE tables (base + frontier + modes) and
+  the harness finding: proprietary internal framework, config-only
+  disclosure; our community-standard path = inspect_evals verbatim.

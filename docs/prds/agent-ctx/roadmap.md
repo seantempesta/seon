@@ -414,9 +414,14 @@ repo-dev docs.
     step-closing compliance classified model-bound at the iteration cap).
     web_fetch ROOT-CAUSED via the new evidence retention: the
     always-on SSRF guard refuses the loopback fixtures → fabrication after
-    refusal (flagged to tooling; the pytest alarm is deliberately RED on
-    that attributed row). Harness: run dirs now always retain .eval logs +
-    per-execution reply text + pre-destroy cluster blob copies.
+    refusal. FIXED same day (owner-directed): host-owned
+    `SEON_WEB_ALLOW_PRIVATE` grant, harness-scoped to web_fetch's ephemeral
+    clusters. Harness: run dirs now always retain .eval logs +
+    per-execution reply text + pre-destroy cluster blob copies; the
+    regression alarm keys by (row, arm). **Capstone FULL dev sweep
+    (armD-full, one arm, bundle 393c2a26afc3, 0 flakes):** web_fetch .875 ·
+    shell_use .917 · file_edit .750 · gsm8k .800 · mmlu .733 · arc 1.000 ·
+    gpqa 1.000 · planning .800. Suites 973/4468/0 cljs · 197/0 pytest.
 
 Spec: [[eval-design]] · plan: [[eval-lane-plan]] · readiness:
 [[research/tool-surface-survey-2026-07-02]].

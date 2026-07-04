@@ -244,3 +244,46 @@ def test_wire_repl_json_no_sentinel_is_loud():
             cl.wire_repl_json("(broken", port=port, timeout_s=5)
     finally:
         srv.close()
+
+
+# ---------------------------------------------------------------------------
+# Per-cluster AI config hook (the thinking-arm lever, 2026-07-04)
+# ---------------------------------------------------------------------------
+
+
+def test_ai_config_hook_inert_by_default():
+    calls = []
+    cl.create_cluster("bench-noai", runner=FakeRunner(),
+                      ready=lambda name: 1)
+    assert calls == []  # AI_CONFIG is None — no wire REPL traffic
+
+
+def test_ai_config_hook_applied_after_ready(monkeypatch):
+    seen = {}
+
+    def fake_repl(form):
+        seen["form"] = form
+        return {"thinking": "true", "timeout_ms": 300000}
+
+    monkeypatch.setattr(cl, "AI_CONFIG",
+                        {"thinking": "true", "timeout_ms": 300000})
+    monkeypatch.setattr(cl, "wire_repl_json", fake_repl)
+    c = cl.create_cluster("bench-armd", runner=FakeRunner(),
+                          ready=lambda name: 40999)
+    assert c.port == 40999
+    assert ":bench-armd" in seen["form"]
+    assert ':seon.ai/thinking "true"' in seen["form"]
+    assert ":seon.ai/timeout-ms 300000" in seen["form"]
+
+
+def test_ai_config_readback_mismatch_is_loud():
+    with pytest.raises(RuntimeError) as e:
+        cl.apply_ai_config("bench-x", {"thinking": "true"},
+                           repl=lambda form: {"thinking": None})
+    assert "read-back mismatch" in str(e.value)
+
+
+def test_ai_config_rejects_unknown_keys():
+    with pytest.raises(ValueError):
+        cl.apply_ai_config("bench-x", {"reasoning": "max"},
+                           repl=lambda form: {})

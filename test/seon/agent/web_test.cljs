@@ -170,6 +170,29 @@
       done)))
 
 ;; ---------------------------------------------------------------------------
+;; 2a'. The host-owned SEON_WEB_ALLOW_PRIVATE grant releases the guard —
+;; loopback fetches then run (bench clusters serving loopback fixtures).
+;; Env is set/restored inside the test; default stays refuse.
+;; ---------------------------------------------------------------------------
+
+(deftest allow-private-grant-permits-loopback
+  (async done
+    (reset! int/!fetch-impl
+            (fake-fetch (fn [_] (html-response "<html><body><p>Established in 1920.</p></body></html>"))))
+    (aset (.-env js/process) "SEON_WEB_ALLOW_PRIVATE" "1")
+    (run-test
+      (fn [_]
+        (-> (web/fetch {:seon.agent.web/url "http://127.0.0.1:64999/history.html"})
+            (.then (fn [{ok?     :seon.agent.web/ok?
+                         preview :seon.agent.web/preview}]
+                     (is (true? ok?) "loopback fetch RUNS under the host grant")
+                     (is (str/includes? (str preview) "1920") "the fixture body came through")
+                     (is (true? (:seon.agent.web/private-allowed? (web/grants)))
+                         "grants surfaces the live grant")))
+            (.finally (fn [] (js-delete (.-env js/process) "SEON_WEB_ALLOW_PRIVATE")))))
+      done)))
+
+;; ---------------------------------------------------------------------------
 ;; 2b. Redirect that LANDS on a private range — refused on that hop.
 ;; ---------------------------------------------------------------------------
 

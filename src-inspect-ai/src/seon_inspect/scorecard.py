@@ -218,19 +218,34 @@ def append_row(row: dict[str, Any], path: Path = SCORECARD_PATH) -> None:
         f.write(json.dumps(row, sort_keys=True) + "\n")
 
 
+def row_arm(row: dict[str, Any]) -> str | None:
+    """The context/config ARM a ledger row ran under (None = baseline).
+
+    Read from `attribution.arm` — the label runs have carried since the
+    2026-07-04 arm ladder (armB/armC/armD-thinking…)."""
+    return (row.get("attribution") or {}).get("arm")
+
+
 def regression_failures(rows: list[dict[str, Any]],
                         drop: float = REGRESSION_DROP,
                         window: int = REGRESSION_WINDOW) -> list[str]:
-    """The standing alarm: latest dev pass^1 vs the row's recent median.
+    """The standing alarm: latest dev pass^1 vs the (row, arm)'s recent median.
 
-    For each capability row with >=2 dev-tier entries, compare the LATEST
-    entry's `mean` (pass^1) against the median of the previous <=`window`
-    dev entries; a drop greater than `drop` is a failure string. [] = green.
+    Grouped by (capability row, ARM): an arm changes what the model runs
+    under (context revision, thinking mode), so cross-arm comparison is a
+    deliberate A/B read, never an automatic regression (a thinking-arm entry
+    must not trip — or mask — the non-think history, and vice versa;
+    2026-07-04, armD). Within each group with >=2 dev-tier entries, compare
+    the LATEST entry's `mean` (pass^1) against the median of the previous
+    <=`window` entries; a drop greater than `drop` is a failure string.
+    [] = green. Thresholds unchanged — keying is the only extension.
     """
     dev = [r for r in rows if r.get("tier") == "dev"]
     by_row: dict[str, list[dict[str, Any]]] = {}
     for r in dev:
-        by_row.setdefault(r["row"], []).append(r)
+        arm = row_arm(r)
+        key = r["row"] if arm is None else f"{r['row']}[{arm}]"
+        by_row.setdefault(key, []).append(r)
     failures = []
     for name, entries in sorted(by_row.items()):
         if len(entries) < 2:

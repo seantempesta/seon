@@ -42,11 +42,19 @@ from seon_inspect.tool_scorers import check_answer, check_workspace
 
 WORKSPACE_ROWS = ("shell_use", "file_edit")
 
+# The web_fetch row's fixture server binds loopback-only, so its cluster is
+# created with the host-owned SEON_WEB_ALLOW_PRIVATE grant — the pod's SSRF
+# guard otherwise refuses 127.0.0.1 (root-caused 2026-07-04: every
+# wrong-value web_fetch reply was fabrication AFTER that refusal; passes
+# had routed around via shell curl / js/fetch). Scoped to the per-sample
+# ephemeral cluster; never set on durable clusters.
+WEB_FIXTURE_ENV = {"SEON_WEB_ALLOW_PRIVATE": "1"}
+
 
 def _pod_summary(pod: dict[str, Any]) -> dict[str, Any]:
     return {k: pod.get(k) for k in
             ("agent_id", "turns", "evals", "closed_reason", "timed_out",
-             "elapsed_ms")}
+             "elapsed_ms", "model_config")}
 
 
 def preserve_cluster_evidence(cluster_name: str, dest: Path) -> str | None:
@@ -112,10 +120,12 @@ def run_tool_sample(
         with contextlib.ExitStack() as stack:
             if row in WORKSPACE_ROWS:
                 text = render_input(sample, workspace=str(ws))
+                cluster = stack.enter_context(cluster_factory())
             else:  # web_fetch — the docroot IS the materialized setup
                 base_url = stack.enter_context(fixtures(ws))
                 text = render_input(sample, fixture_url=base_url)
-            cluster = stack.enter_context(cluster_factory())
+                cluster = stack.enter_context(
+                    cluster_factory(extra_env=WEB_FIXTURE_ENV))
             pod = run(text, timeout_ms, cluster.url)
             if evidence_root is not None:
                 evidence = preserve_cluster_evidence(
@@ -212,19 +222,29 @@ def run_planning_sample_live(
     timeout_ms: int | None = None,
     epoch: int = 1,
     driver: Callable[..., dict[str, Any]] | None = None,
+    evidence_root: Path | None = None,
 ) -> dict[str, Any]:
     """One long_term_planning sample via the two-phase restart driver.
 
     Wraps `planning.pod_planning_driver` (cluster create → phase 1 → pod
     restart → phase 2, same agent → plan snapshot → destroy) and scores with
-    the two-part oracle. Same never-raise outcome discipline as
-    `run_tool_sample`; both oracle parts land in the record for attribution."""
+    the two-part oracle. `evidence_root` retains the cluster's blob store
+    before destroy (the tool-row evidence rule). Same never-raise outcome
+    discipline as `run_tool_sample`; both oracle parts land in the record
+    for attribution."""
     from seon_inspect.planning import check_planning, pod_planning_driver
 
     sid = sample["id"]
     meta = sample["metadata"]
     started = time.monotonic()
     drive = driver or pod_planning_driver
+    if evidence_root is not None and driver is None:
+        # Bind the retention path onto the REAL driver only — injected test
+        # fakes keep their (phase1, phase2, timeout_ms) signature.
+        def drive(p1, p2, timeout_ms=None):  # noqa: F811
+            return pod_planning_driver(
+                p1, p2, timeout_ms=timeout_ms,
+                evidence_root=evidence_root / f"e{epoch}" / sid)
 
     def record(outcome: str, **extra: Any) -> dict[str, Any]:
         return scorecard.execution(

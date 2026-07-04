@@ -208,3 +208,38 @@ def test_ledger_rows_parse_as_json_lines(tmp_path):
     append_row(_row("r1", "gsm8k", 0.9), path=p)
     line = p.read_text().splitlines()[0]
     assert json.loads(line)["row"] == "gsm8k"
+
+
+# ---------------------------------------------------------------------------
+# Regression alarm keys on (row, ARM) — armD-thinking extension (2026-07-04)
+# ---------------------------------------------------------------------------
+
+
+def _dev_row(row, mean, run_id, arm=None):
+    r = {"row": row, "tier": "dev", "mean": mean, "run_id": run_id}
+    if arm is not None:
+        r["attribution"] = {"arm": arm}
+    return r
+
+
+def test_alarm_thinking_arm_does_not_trip_nonthink_history():
+    # a new arm's FIRST entry is its own group — it must neither trip
+    # against the baseline median nor become the baseline's "latest".
+    rows = [_dev_row("gpqa", 0.7, "r1"), _dev_row("gpqa", 0.72, "r2"),
+            _dev_row("gpqa", 0.4, "r3", arm="armD-thinking")]
+    assert scorecard.regression_failures(rows) == []
+
+
+def test_alarm_still_fires_within_baseline_after_arm_rows():
+    rows = [_dev_row("gpqa", 0.7, "r1"),
+            _dev_row("gpqa", 0.3, "r2"),  # baseline regression
+            _dev_row("gpqa", 0.9, "r3", arm="armD-thinking")]
+    failures = scorecard.regression_failures(rows)
+    assert len(failures) == 1 and "gpqa" in failures[0]
+
+
+def test_alarm_fires_within_an_arm():
+    rows = [_dev_row("gpqa", 0.9, "r1", arm="armD-thinking"),
+            _dev_row("gpqa", 0.5, "r2", arm="armD-thinking")]
+    failures = scorecard.regression_failures(rows)
+    assert len(failures) == 1 and "gpqa[armD-thinking]" in failures[0]

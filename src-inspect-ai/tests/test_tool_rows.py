@@ -20,7 +20,7 @@ class _FakeCluster:
 
 
 @contextlib.contextmanager
-def _fake_cluster_factory():
+def _fake_cluster_factory(**_kw):
     yield _FakeCluster()
 
 
@@ -137,7 +137,7 @@ def test_refusal_and_boot_timeout_classified_never_raised(tmp_path):
     assert rec["outcome"] == "agent_run_refused"
 
     @contextlib.contextmanager
-    def boot_fails():
+    def boot_fails(**_kw):
         raise TimeoutError("pod not ready within 60s")
         yield
 
@@ -240,7 +240,7 @@ def test_run_tool_row_one_failure_does_not_kill_siblings(tmp_path):
         attempts.append(1)
         if len(attempts) == 2:
             @contextlib.contextmanager
-            def dead():
+            def dead(**_kw):
                 raise TimeoutError("pod not ready")
                 yield
             return dead()

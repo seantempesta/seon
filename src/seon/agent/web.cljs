@@ -20,11 +20,13 @@
    ## Security model
 
    **Default-deny.** The whole capability is gated by the host-owned
-   `SEON_WEB` env var (inspect with [[grants]]); an ALWAYS-ON, un-config
-   private-range guard refuses loopback / RFC-1918 / link-local / ULA
-   targets on every redirect hop (the SSRF soft boundary). An OPTIONAL
-   domain allowlist rides [[configure!]]. Soft boundaries against LLM
-   accidents, not security boundaries.
+   `SEON_WEB` env var (inspect with [[grants]]); a private-range guard
+   refuses loopback / RFC-1918 / link-local / ULA targets on every
+   redirect hop (the SSRF soft boundary) — on by default, never
+   agent-configurable, host-releasable ONLY via the `SEON_WEB_ALLOW_PRIVATE`
+   env grant (loopback-fixture deployments). An OPTIONAL domain allowlist
+   rides [[configure!]]. Soft boundaries against LLM accidents, not
+   security boundaries.
 
    ## Output discipline
 
@@ -135,11 +137,14 @@
     [:seon.error/message :string]
     [:seon.error/data    {:optional true} :map]]])
 
+(schema/register! ::private-allowed? :boolean)
+
 (schema/register! ::grants-response
   [:map
-   [::enabled?        ::enabled?]
-   [::allowed-domains ::allowed-domains]
-   [::locked?         ::locked?]])
+   [::enabled?         ::enabled?]
+   [::allowed-domains  ::allowed-domains]
+   [::locked?          ::locked?]
+   [::private-allowed? ::private-allowed?]])
 
 (schema/register! ::configure-response
   [:map
@@ -158,14 +163,16 @@
    Returns the live truth every fetch enforces: `:seon.agent.web/enabled?`
    (SEON_WEB granted), `:seon.agent.web/allowed-domains` (empty = all
    domains allowed when enabled), `:seon.agent.web/locked?` (SEON_WEB_LOCK
-   — [[configure!]] is a no-op). The always-on private-range guard is not
-   configurable and not shown here — loopback/RFC-1918/link-local/ULA are
-   always refused."
+   — [[configure!]] is a no-op), `:seon.agent.web/private-allowed?` (the
+   host-owned SEON_WEB_ALLOW_PRIVATE grant). Unless the host set that
+   grant, the private-range guard refuses loopback/RFC-1918/link-local/ULA
+   targets; nothing inside the pod can change it."
   {:malli/schema [:=> [:cat] ::grants-response]}
   []
-  {::enabled?        (int/granted?)
-   ::allowed-domains (int/allowed-domains)
-   ::locked?         (int/locked?)})
+  {::enabled?         (int/granted?)
+   ::allowed-domains  (int/allowed-domains)
+   ::locked?          (int/locked?)
+   ::private-allowed? (int/private-allowed?)})
 
 (defn configure!
   "Set the OPTIONAL domain allowlist (empty = allow all when granted).

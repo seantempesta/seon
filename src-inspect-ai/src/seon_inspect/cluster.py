@@ -46,6 +46,94 @@ BENCH_BUNDLE_SHA = BENCH_BUNDLE.parent / (BENCH_BUNDLE.name + ".sha256")
 # Matches bin/seon's valid_cluster_name (a path segment + a wire db-name).
 _NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
 
+# ---------------------------------------------------------------------------
+# Per-cluster LLM config (the thinking-arm lever) — config-DATA, never env
+# ---------------------------------------------------------------------------
+# The ONE uniform lever for an arm that changes the model config (e.g. armD
+# thinking): after `create_cluster`'s ready gate, transact the cluster's
+# GLOBAL `:seon.ai/id "config"` row over the wire-server REPL. The pod reads
+# the row PER CALL (seon.ai/current — the agent-override → config-row →
+# shipped-defaults chain), the row survives pod restarts (the planning row's
+# interruption), and boot re-seeding never retracts it (seon.ai/sync-tx-data
+# is seed-once). Chosen over a solver-level setup eval because EVERY cluster
+# creation (run_bench per-sample, tool_rows, planning driver) already funnels
+# through `create_cluster` — one hook, zero plumbing, and no LLM-driven
+# bootstrap turn polluting the sample's cluster db.
+#
+# Set `AI_CONFIG` from the run script for the whole run; None (default) = the
+# hook is inert and clusters keep the pod's shipped defaults.
+AI_CONFIG: dict[str, Any] | None = None
+
+# Datahike schema for the config-row attrs, DERIVED (not authored) via the one
+# bridge `seon.db/malli->datahike-schema` on the live pod, 2026-07-04:
+#   (seon.db/malli->datahike-schema
+#     [:seon.ai/id :seon.ai/thinking :seon.ai/timeout-ms])
+# Needed because a fresh cluster installs schema lazily on first WRITE and the
+# wire REPL bypasses the pod-side installer. Install-if-missing only; if the
+# source schemas ever drift, the per-run model_config verification fails loud
+# (a sample whose model_config disagrees with AI_CONFIG is a harness defect,
+# never scored). COMPLEXITY ARTIFACT (flagged, accepted): this duplicates the
+# bridge's OUTPUT for three stable attrs because no non-LLM pod-side write
+# door exists for a bench cluster — subsume it if such a door lands.
+_AI_ATTR_SCHEMA_EDN = (
+    '[{:db/ident :seon.ai/id :db/valueType :db.type/string'
+    ' :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}'
+    ' {:db/ident :seon.ai/thinking :db/valueType :db.type/string'
+    ' :db/cardinality :db.cardinality/one}'
+    ' {:db/ident :seon.ai/timeout-ms :db/valueType :db.type/long'
+    ' :db/cardinality :db.cardinality/one}]'
+)
+
+# %s slots: db-name keyword, config-row map EDN (merged over :seon.ai/id).
+_AI_CONFIG_FORM = (
+    "(do (require (quote [cheshire.core :as json]) (quote [datahike.api :as d]))"
+    " (let [conn (:seon.server.registry/conn (seon.server.registry/get-conn"
+    " {:seon.server.registry/db-name :%s}))"
+    " installed (set (keys (d/schema @conn)))"
+    " schema-tx (into [] (remove (fn [s] (installed (:db/ident s)))) " + _AI_ATTR_SCHEMA_EDN + ")"
+    " _ (when (seq schema-tx) (d/transact conn {:tx-data schema-tx}))"
+    " _ (d/transact conn {:tx-data [(merge {:seon.ai/id \"config\"} %s)]})"
+    " row (d/q (quote [:find (pull ?e [*]) . :where [?e :seon.ai/id \"config\"]]) @conn)]"
+    " (println (str \"WIRE-JSON<\" (json/generate-string"
+    " {\"thinking\" (:seon.ai/thinking row)"
+    "  \"timeout_ms\" (:seon.ai/timeout-ms row)}) \">WIRE-JSON\"))))"
+)
+
+_AI_CONFIG_KEYS = {"thinking": ":seon.ai/thinking",
+                   "timeout_ms": ":seon.ai/timeout-ms"}
+
+
+def _ai_config_edn(cfg: dict[str, Any]) -> str:
+    """The config dict as an EDN map literal ({\"thinking\": \"true\", …})."""
+    parts = []
+    for key, attr in _AI_CONFIG_KEYS.items():
+        if key not in cfg:
+            continue
+        v = cfg[key]
+        parts.append(f"{attr} {json.dumps(v) if isinstance(v, str) else v}")
+    unknown = set(cfg) - set(_AI_CONFIG_KEYS)
+    if unknown:
+        raise ValueError(f"unsupported AI_CONFIG keys: {sorted(unknown)} "
+                         f"(supported: {sorted(_AI_CONFIG_KEYS)})")
+    return "{" + " ".join(parts) + "}"
+
+
+def apply_ai_config(name: str, cfg: dict[str, Any],
+                    repl: Callable[..., Any] | None = None) -> dict[str, Any]:
+    """Transact `cfg` onto cluster `name`'s global `:seon.ai` config row.
+
+    Runs after the cluster's ready gate; returns the read-back row fields
+    ({"thinking": …, "timeout_ms": …}) and RAISES when the read-back doesn't
+    carry what was asked (fail-loud: a cluster that didn't take the config
+    must never silently run the arm's samples)."""
+    call = repl or wire_repl_json
+    out = call(_AI_CONFIG_FORM % (_check_name(name), _ai_config_edn(cfg)))
+    if "thinking" in cfg and out.get("thinking") != cfg["thinking"]:
+        raise RuntimeError(
+            f"cluster {name}: AI config read-back mismatch — asked "
+            f"thinking={cfg['thinking']!r}, row says {out.get('thinking')!r}")
+    return out
+
 
 class FrozenBundleChanged(RuntimeError):
     """The frozen bench bundle changed under a run — the run is contaminated.
@@ -139,9 +227,17 @@ def _check_name(name: str) -> str:
 
 
 def _run_seon(args: list[str], runner: Callable[..., Any],
-              timeout_s: int) -> None:
+              timeout_s: int,
+              extra_env: dict[str, str] | None = None) -> None:
+    # extra_env is passed ONLY when set, so injected fake runners in the
+    # offline tests (which don't accept an env kwarg) stay compatible.
+    kwargs: dict[str, Any] = {}
+    if extra_env:
+        import os
+        kwargs["env"] = {**os.environ, **extra_env}
     proc = runner([str(SEON_BIN), *args], cwd=str(REPO_ROOT),
-                  capture_output=True, text=True, timeout=timeout_s)
+                  capture_output=True, text=True, timeout=timeout_s,
+                  **kwargs)
     if proc.returncode != 0:
         raise RuntimeError(
             f"bin/seon {' '.join(args)} failed (exit {proc.returncode}):\n"
@@ -181,6 +277,7 @@ def wait_pod_ready(name: str, timeout_s: int = config.CLUSTER_BOOT_BUDGET_S,
 
 def create_cluster(name: str | None = None, *, ephemeral: bool = True,
                    frozen: bool | None = None,
+                   extra_env: dict[str, str] | None = None,
                    runner: Callable[..., Any] = subprocess.run,
                    ready: Callable[[str], int] = wait_pod_ready) -> Cluster:
     """`bin/seon cluster create <name> [--ephemeral] [--frozen|--watched]`.
@@ -188,9 +285,12 @@ def create_cluster(name: str | None = None, *, ephemeral: bool = True,
     `frozen=None` (default) leaves the bundle choice to the supervisor's own
     default — ephemeral ⇒ frozen bench bundle (unwatched; no mid-sample
     hot-patch), durable ⇒ watched. Pass True/False only to override
-    (`--frozen`/`--watched`). The supervisor ready-gates the wire-server and
-    the pod itself; the ready poll here is the harness-side confirmation
-    (and yields the bound port)."""
+    (`--frozen`/`--watched`). `extra_env` adds host-owned env grants to the
+    create's environment — the spawned pod inherits them (e.g.
+    `{"SEON_WEB_ALLOW_PRIVATE": "1"}` so the web_fetch row's pod may read
+    its own loopback fixture server). The supervisor ready-gates the
+    wire-server and the pod itself; the ready poll here is the harness-side
+    confirmation (and yields the bound port)."""
     name = _check_name(name or bench_cluster_name())
     args = ["cluster", "create", name] + (["--ephemeral"] if ephemeral else [])
     if frozen is True:
@@ -199,8 +299,14 @@ def create_cluster(name: str | None = None, *, ephemeral: bool = True,
         args.append("--watched")
     # create ready-gates wire-server (180s) + pod (120s) internally, plus a
     # possible frozen-bundle compile (staleness-guarded, ~30s warm).
-    _run_seon(args, runner, timeout_s=330)
-    return Cluster(name=name, port=ready(name))
+    _run_seon(args, runner, timeout_s=330, extra_env=extra_env)
+    cluster = Cluster(name=name, port=ready(name))
+    if AI_CONFIG:
+        # Post-create hook (see AI_CONFIG above): the arm's model config as
+        # config-data on the cluster's own db — applied AFTER the pod's boot
+        # seed so seed-once can't race it, BEFORE any sample drives the pod.
+        apply_ai_config(name, AI_CONFIG)
+    return cluster
 
 
 def restart_pod(cluster: Cluster, *,
@@ -227,6 +333,7 @@ def destroy_cluster(name: str, *,
 @contextlib.contextmanager
 def ephemeral_cluster(name: str | None = None, *,
                       frozen: bool | None = None,
+                      extra_env: dict[str, str] | None = None,
                       runner: Callable[..., Any] = subprocess.run,
                       ready: Callable[[str], int] = wait_pod_ready
                       ) -> Iterator[Cluster]:
@@ -234,9 +341,10 @@ def ephemeral_cluster(name: str | None = None, *,
 
     Ephemeral ⇒ the supervisor's frozen-bundle default applies (see
     `create_cluster`); `frozen=False` opts a dev inner loop back into the
-    watched bundle."""
+    watched bundle. `extra_env` rides through to the create (host-owned
+    grants for this cluster's pod)."""
     cluster = create_cluster(name, ephemeral=True, frozen=frozen,
-                             runner=runner, ready=ready)
+                             extra_env=extra_env, runner=runner, ready=ready)
     try:
         yield cluster
     finally:
