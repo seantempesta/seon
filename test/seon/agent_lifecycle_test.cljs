@@ -26,6 +26,7 @@
     [cljs.test :refer [deftest is testing async]]
     [seon.agent :as agent]
     [seon.agent.lifecycle :as lifecycle]
+    [seon.agent.message :as msg]
     [seon.agent.run :as run]
     [seon.client :as client]
     [seon.db :as db]))
@@ -111,6 +112,20 @@
                 (is (= :idle r) "blank result still closes the run cleanly")
                 (is (= ["done"] (user-messages-from "bbb-2606101200"))
                     "no second (blank) message was stored")))
+            (testing "a message already sent THIS RUN suppresses complete's
+                      delivery — the prior message IS the answer (no clobber)"
+              (await (run/open-run! {:seon.agent/id "bbb-2606101200"
+                                     :seon.agent.run/trigger :message}))
+              (let [r (await (db/with-agent "bbb-2606101200"
+                               (fn ^:async c []
+                                 (await (msg/user "the answer"))
+                                 (await (lifecycle/complete "filler")))))]
+                (is (= :idle r) "complete still closes the run cleanly")
+                (is (= :idle (derived "bbb-2606101200")))
+                (is (= ["done" "the answer"] (user-messages-from "bbb-2606101200"))
+                    "exactly ONE message landed this run — the filler complete
+                     string was NOT sent (the earlier message is the delivered
+                     answer; last-message-wins can no longer clobber it)")))
             (testing "pause/resume HOLD the run without killing it"
               (await (run/open-run! {:seon.agent/id "bbb-2606101200"
                                      :seon.agent.run/trigger :message}))

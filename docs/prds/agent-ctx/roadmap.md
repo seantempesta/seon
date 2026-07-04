@@ -439,6 +439,18 @@ repo-dev docs.
     (armD-full, one arm, bundle 393c2a26afc3, 0 flakes):** web_fetch .875 ·
     shell_use .917 · file_edit .750 · gsm8k .800 · mmlu .733 · arc 1.000 ·
     gpqa 1.000 · planning .800. Suites 973/4468/0 cljs · 197/0 pytest.
+11. **Capstone-smell fix pair — ✅ DONE 2026-07-04.** (a) The item-10
+    KNOWN TRADE closed: `complete` now delivers its string ONLY when the
+    agent has NOT already messaged the recipient THIS RUN (derived from
+    the message log, no stored flag) — a filler complete can no longer
+    clobber a clean messaged answer; ctx system-text +
+    agent-runtime.md aligned; live-proven on an ephemeral cluster
+    (message-then-complete → exactly ONE delivered message). (b) The
+    `:seon.web/url` wrong-ns mistake now self-diagnoses: fetch docstring
+    names the key in line 1, and the latently-dead missing-key hint in
+    `seon.error.instrument/hint-for` was fixed generically (wrong-ns
+    near-miss → "you passed :seon.web/url — the key is
+    :seon.agent.web/url"). Details: coordination.md 2026-07-04 tail.
 
 Spec: [[eval-design]] · plan: [[eval-lane-plan]] · readiness:
 [[research/tool-surface-survey-2026-07-02]].

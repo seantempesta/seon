@@ -236,7 +236,11 @@
       (::title e) (assoc ::title (::title e)))))
 
 (defn ^:async fetch
-  "Fetch a URL; extract to markdown; blob the full text; return a preview.
+  "Fetch the page at `:seon.agent.web/url` — markdown preview + blob.
+
+   The request map's keys live in THIS ns: the URL key is
+   :seon.agent.web/url (a :seon.web/url or bare :url is NOT a request
+   key and fails input validation).
 
    `^:async` — resolves to a :seon.agent.web/fetch-response, NEVER rejects
    (errors are values). ok? true = the fetch RAN to a final response and

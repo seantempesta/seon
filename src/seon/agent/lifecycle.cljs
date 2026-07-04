@@ -69,15 +69,37 @@
       (no-open-run-error "wait" id))
     (internal/no-agent-error "wait")))
 
+(defn- messaged-recipient-since?
+  "Whether the agent messaged `recipient-eid` at/after `started-at`.
+
+   DERIVED from the message log at call time (from = the agent's eid,
+   to ∋ the recipient, at ≥ the run's started-at) — no stored flag. The
+   [[complete]] delivery gate: a message already sent this run IS the
+   answer, so complete closes without sending a second one."
+  [agent-eid recipient-eid started-at]
+  (->> (db/query {:seon.db/query '[:find ?m ?at
+                                   :in $ ?from ?to
+                                   :where
+                                   [?m :seon.agent.message/from ?from]
+                                   [?m :seon.agent.message/to ?to]
+                                   [?m :seon.agent.message/at ?at]]
+                  :seon.db/args [agent-eid recipient-eid]})
+       (some (fn [[_ at]]
+               (>= (.getTime ^js at) (.getTime ^js started-at))))
+       boolean))
+
 (defn ^:async complete
-  "Finish the calling agent's work: deliver `result`, close the run `:completed`.
+  "Finish the calling agent's work; close the open run `:completed`.
 
    Derived `:idle` (a new message opens a fresh run). The `result` string is
-   DELIVERED, never discarded: with a `:seon.agent/parent` it is messaged to
+   delivered to WHOEVER ASKED — with a `:seon.agent/parent` it is messaged to
    the parent (waking it via the normal inbound gate); with no parent it is
-   messaged to the HUMAN — the same `message!` path as `(message/user …)`, so
-   both closing verbs deliver to whoever asked. Delivery happens BEFORE the
-   run closes (a caller that polls for idle then reads the last user message
+   messaged to the HUMAN, the same `message!` path as `(message/user …)` —
+   UNLESS the agent already messaged that recipient THIS RUN: the earlier
+   message IS the answer, so complete just closes without sending a second,
+   answer-clobbering message ([[messaged-recipient-since?]] — derived from
+   the message log, no stored flag). Delivery, when it happens, precedes the
+   close (a caller that polls for idle then reads the last user message
    always sees the result). A blank `result` delivers nothing (there is
    nothing to say) and just closes. A failed delivery is returned as the
    error envelope WITHOUT closing the run — retry with a fixed result.
@@ -93,13 +115,20 @@
   [result]
   (if-let [id (db/current-agent-id)]
     (if-let [r (run/current-run {:seon.agent/id id})]
-      (let [ent      (db/entity {:seon.db/ref [:seon.agent/id id]})
-            parent   (:db/id (:seon.agent/parent ent))
-            sent     (when-not (str/blank? result)
-                       (await (msg/message!
-                                {:seon.agent.message/content result
-                                 :seon.agent.message/to
-                                 (if parent [parent] [msg/user-ref])})))]
+      (let [ent       (db/entity {:seon.db/ref [:seon.agent/id id]})
+            parent    (:db/id (:seon.agent/parent ent))
+            recipient (or parent
+                          (:db/id (db/entity {:seon.db/ref msg/user-ref})))
+            started   (:seon.agent.run/started-at r)
+            said?     (boolean
+                        (and recipient started
+                             (messaged-recipient-since?
+                               (:db/id ent) recipient started)))
+            sent      (when-not (or (str/blank? result) said?)
+                        (await (msg/message!
+                                 {:seon.agent.message/content result
+                                  :seon.agent.message/to
+                                  (if parent [parent] [msg/user-ref])})))]
         (if (false? (:seon.db/ok? sent))
           sent
           (let [env (await (run/close-run!

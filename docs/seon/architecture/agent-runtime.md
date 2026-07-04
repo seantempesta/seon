@@ -183,7 +183,10 @@ a quiet stop — it recurs so the next turn surfaces the errors. Two consecutive
 "thinking mode" of up to two empty turns before the loop concludes there is no
 more work. A `wait` parks the agent (wakeable) with its reason on the run's
 `closed-reason`; a `complete` delivers its result as a **message** (to the parent
-or the human) and parks — the result is a message, never a held state.
+or the human) and parks — the result is a message, never a held state — *unless*
+the agent already messaged that recipient this run: the earlier message IS the
+answer (derived from the run's message log, no stored flag), so `complete` closes
+without sending a second, answer-clobbering message.
 
 ## Triggering + fencing — the reactive wake
 

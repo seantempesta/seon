@@ -1131,3 +1131,40 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   doc now carries DeepSeek's COMPLETE tables (base + frontier + modes) and
   the harness finding: proprietary internal framework, config-only
   disclosure; our community-standard path = inspect_evals verbatim.
+
+### 2026-07-04 — two-item fix (eval lane): complete no longer clobbers; wrong-ns web key now self-diagnosing
+
+- **ITEM 1 (mechanism — TOOLING review note: semantics change to a verb
+  agents use):** `seon.agent.lifecycle/complete` now delivers its result
+  string ONLY when the agent has NOT already messaged the delivery
+  recipient (parent if present, else the user) THIS RUN — the drafted
+  alternative from the iterate-until-green ITEM 0 trade. Derived, not
+  tracked: new private `messaged-recipient-since?` queries the run's
+  message log (from = agent eid, to ∋ recipient, at ≥ run started-at); no
+  stored flag. Blank still delivers nothing; a failed delivery still
+  returns the envelope without closing. Docstring + ctx.cljs system-text
+  aligned (the "carries that SAME string" sentence replaced with the new
+  truth: once you've messaged this run, complete sends NOTHING more — a
+  filler string cannot clobber) + agent-runtime.md stop-policy paragraph.
+  Tests: message-then-complete → exactly ONE message
+  (`test/seon/agent_lifecycle_test.cljs`); no-message → delivers; blank →
+  nothing (both pre-existing, still green). Live-proven on an ephemeral
+  cluster (`sanity-cc`, destroyed): a DeepSeek drive told to message
+  "the answer is 42" then `(complete "finished up")` produced EXACTLY one
+  delivered message, reply = "the answer is 42", run closed `:completed`.
+- **ITEM 2 (web/fetch wrong-ns key — TOOLING review note: touches
+  `seon.error.instrument`, a shared .cljc):** the `:seon.web/url` mistake
+  no longer burns a blind turn. (a) `seon.agent.web/fetch` docstring line 1
+  now names the key (`Fetch the page at `:seon.agent.web/url` — …`) + a
+  body line saying :seon.web/url is not a request key. (b) The EXISTING
+  hint mechanism (`seon.error.instrument/hint-for`) was latently dead for
+  missing-key errors — it tested `(keyword? schema)` but malli's missing-key
+  leaf carries the whole map schema, never the keyword, so "did you mean"
+  NEVER fired. Fixed generically: missing key = last `:in` segment;
+  near-miss = a present key with the SAME name, different namespace →
+  "you passed :seon.web/url — the key is :seon.agent.web/url"; else plain
+  "did you mean <key>?". No alias/coercion — the wrong key is still
+  rejected; no hand-maintained list (pure structural rule, works for every
+  map-in verb). Pinned in `test/seon/instrument_smoke_test.cljs`;
+  live-proven on the sanity-cc pod through the real instrumented var +
+  `render-malli-error` (the `;; hint` line renders in recent-evals).

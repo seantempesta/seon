@@ -157,13 +157,25 @@
 (defn- hint-for
   "Compute a one-line hint for a leaf error. Returns nil when no hint
    pattern matches; the renderer skips the line then."
-  [{:keys [type schema value]} present-keys]
+  [{:keys [type schema value in]} present-keys]
   (cond
     (= type :malli.core/missing-key)
-    (when (and (seq present-keys) (keyword? schema))
-      ;; Spell-check style hint — name only the missing key for now;
-      ;; deeper spell-check would compare against present-keys.
-      (str "did you mean " (pr-str schema) "?"))
+    ;; The missing key is the LAST :in segment (malli's :map explain
+    ;; conj's the key onto in; the leaf's :schema is the whole map
+    ;; schema, never the keyword). Spell-check against the keys the
+    ;; caller actually passed: same NAME + different NAMESPACE is the
+    ;; classic wrong-ns call, so name the exact mistake.
+    (let [missing (peek (vec in))]
+      (when (and (seq present-keys) (keyword? missing))
+        (if-let [near (some (fn [k]
+                              (when (and (keyword? k)
+                                         (= (name k) (name missing))
+                                         (not= k missing))
+                                k))
+                            present-keys)]
+          (str "you passed " (pr-str near)
+               " — the key is " (pr-str missing))
+          (str "did you mean " (pr-str missing) "?"))))
 
     (and (string? value) (get coercion-hints schema))
     (get coercion-hints schema)))
