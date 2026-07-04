@@ -1,15 +1,27 @@
 ---
 type: research
-status: draft
+status: active
 tags: [research, agent]
 ---
 
 # Error blame + strict gate — a design proposal
 
-**Status: draft, decision pending.** The owner asked for a way to "fail fast
-and loud in development to catch our own fuckups, and also let agents fail
-while working without crashing things." This doc is the decision surface —
-not yet ruled on.
+**Status: RULED 2026-07-04 — building.** The owner asked for a way to "fail
+fast and loud in development to catch our own fuckups, and also let agents
+fail while working without crashing things." All four open questions ruled:
+
+1. **Fault rule**: our machinery throwing while preparing agent code =
+   `:core`. Discriminator is "what were we calling," never "whose turn is
+   it." No third `:boundary` value.
+2. **Visibility**: the aggregate core-fault section renders on the ROOT
+   world + human UI + gates only. The affected agent always sees its own
+   in-place `:seon/error` envelope; other agents see nothing (core bugs are
+   not theirs to fix).
+3. **Rollout**: dial ships at `:gate`; dev flips to `:crash` only AFTER the
+   4-file sweep drains the backlog.
+4. **Async-unwrappable shapes** (C40): deferred, net-only — build the
+   Promise-aware wrapper only if `:core`-fault datoms from that class
+   actually appear.
 
 ## TL;DR
 
