@@ -6,15 +6,37 @@ tags: [research, agent]
 
 # Error blame + strict gate — a design proposal
 
-**Status: PHASE 1 SHIPPED 2026-07-04** (commits `0e9c9b92` + `a69da9f0`,
-live-proven on the default pod): `seon.error/record!` (fault + `at` +
-EDN frames + full `args-edn`, fire-and-forget persist w/ bounded buffer,
-one-error-one-datom dedup), the `:seon.config/on-core-error` dial at
-`:gate`, the process net, the async wrapper arms (+ `wrapper-fault`
-content refinement — live drive showed agent typos rejecting through the
-`seon.eval` conduits would otherwise red the gate as `:core`), the
-root-only `core-faults-block`, and the `bin/test-cljs` + dev-hook gates.
-NEXT: phase 2, the 4-file catch-site sweep; then flip dev to `:crash`.
+**Status: PHASE 2 SHIPPED 2026-07-04** (phase-1 commits `0e9c9b92` +
+`a69da9f0`; phase-2 sweep commits `825332ce` render/sci, `68f66070`
+eval.cljs + public `wrapper-fault`, `74736906` client.cljs, `f1d035b7`
+render.cljs — all live-proven on the default pod). Phase 1:
+`seon.error/record!` (fault + `at` + EDN frames + full `args-edn`,
+fire-and-forget persist w/ bounded buffer, one-error-one-datom dedup),
+the `:seon.config/on-core-error` dial at `:gate`, the process net, the
+async wrapper arms (+ `wrapper-fault` content refinement), the root-only
+`core-faults-block`, the `bin/test-cljs` + dev-hook gates. Phase 2: all
+44 `catch :default` sites across `eval.cljs` (24), `client.cljs` (10),
+`render.cljs` (10) classified — every catch either `record!`s
+(fault-tagged, guarded by `recorded?`) or is annotated `;; probe:`
+(expected-absence). Conduit/render sites classify by content
+(`wrapper-fault`) or symbol (`fault-for` / `agent-authored-sym?`);
+machinery sites default `:core`; return contracts byte-unchanged
+(live-proven per file).
+
+**`:crash` flip: NOT DONE (deferred to owner — config-selection blocker).**
+The dev dial stays `:gate`. Reason: both the dev pod and a bare
+`bin/test-cljs` default to `SEON_CONFIG=config/system.edn`, and the
+in-process node-test runtime reads `config/on-core-error` too — so
+flipping system.edn to `:crash` would make the suite runner `.exit 1`
+mid-run on any `:core` fault, violating the RULED "CI-shaped runs MUST
+stay `:gate`" constraint. `config/test.edn` exists (dial unset → `:gate`)
+but `bin/test-cljs` does not default to it. A clean flip first needs
+`bin/test-cljs` + CI to pin a `:gate` config (e.g. default to
+`config/test.edn`) — a config-mechanism change outside this sweep's scope.
+The live-pod drain itself is clean (fresh boot + full render of `/`,
+`/agent/root`, `/agent/root/debug` = **0 organic `:core` datoms**), so the
+flip is unblocked on the *runtime* side; only the suite-isolation wiring
+is missing.
 The owner asked for a way to "fail
 fast and loud in development to catch our own fuckups, and also let agents
 fail while working without crashing things." All four open questions ruled:

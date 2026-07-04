@@ -164,8 +164,26 @@ substrate):
    latest user message — live-proven render + vanish); gates in
    `bin/test-cljs` (transcript marker) + the dev hook (pod-log offset
    bracket, block-on-new-fault). `agent-authored-sym?` MOVED
-   render.sci → `seon.error`. NEXT: phase 2 — the 4-file catch-site
-   sweep, then flip dev to `:crash`.
+   render.sci → `seon.error`.
+
+   **Phase 2 (the 4-file catch-site sweep)** — ✅ COMPLETE (2026-07-04,
+   `825332ce` render/sci + `68f66070` eval.cljs + `74736906` client.cljs +
+   `f1d035b7` render.cljs). All 44 `catch :default` sites classified: each
+   either `record!`s a fault-tagged datom (guarded by `recorded?` so a
+   propagated already-recorded error is not double-counted) or is annotated
+   `;; probe:` (expected-absence, e.g. a missing-lookup-ref throw, a
+   best-effort parse). Conduit/render sites classify by content
+   (`wrapper-fault`, now public) or by the render symbol
+   (`fault-for`/`agent-authored-sym?`); OUR-machinery sites default `:core`.
+   Return contracts byte-unchanged (live-proven per file: agent typos →
+   `:agent` datoms, forced core throws → `:core` datoms w/ frames + `:at`,
+   caller envelopes identical). **`:crash` flip DEFERRED to owner:** a bare
+   `bin/test-cljs` defaults to `SEON_CONFIG=config/system.edn` and the
+   node-test runtime reads the dial, so flipping system.edn to `:crash`
+   would `.exit 1` the suite mid-run — violating "CI stays `:gate`". The
+   live-pod drain is clean (fresh boot + full render = 0 organic `:core`);
+   the flip needs `bin/test-cljs`/CI pinned to a `:gate` config first
+   (`config/test.edn` exists, dial unset). See the proposal doc status.
 
 Stability queue (interleaved, one per feature unit above; owner-agreed
 2026-07-02 — each fix REUSES an existing mechanism, no new ones):
