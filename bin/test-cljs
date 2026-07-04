@@ -9,9 +9,10 @@
 # Config seam (per-test manifest): the node test process inherits this shell's
 # env, so a run names its own manifest via SEON_CONFIG / SEON_PROFILE — the SAME
 # seam bin/seon + bin/acme expose (seon.config reads them):
-#   SEON_CONFIG=config/test.edn bin/test-cljs        # custom loadout/routes/skills
-#   SEON_PROFILE=minimal        bin/test-cljs        # a #profile variant of system.edn
-# Unset ⇒ config/system.edn / :default profile (today's behavior, unchanged).
+#   SEON_CONFIG=config/system.edn bin/test-cljs      # the dev-pod manifest
+#   SEON_CONFIG=config/other.edn  bin/test-cljs      # any custom loadout
+# Unset ⇒ config/test.edn (the :gate surface — see the on-core-error note
+# below; an explicit SEON_CONFIG always wins).
 #
 # Exit codes: 0 = pass, 1 = fail, 2 = compile/build error
 #
@@ -30,6 +31,16 @@ cd "$(dirname "$0")/.."
 # prod pod boots WITHOUT this var → graceful guard-and-continue (a prod
 # agent must not hard-crash on one bad block). Respect an explicit override.
 export SEON_RENDER_STRICT="${SEON_RENDER_STRICT:-1}"
+
+# Core-fault dial per surface (error-blame-strict-gate, RULED 2026-07-04):
+# the SUITE/CI runner MUST stay :gate (a mid-run :core fault must NOT .exit
+# the shared node-test runner), while the dev pod may run :crash. The
+# sanctioned ONE-manifest path for a per-surface divergence is a SEPARATE
+# file (no #profile, env must not shadow config): config/test.edn leaves
+# :seon.config/on-core-error UNSET → the :gate default. Both the node-test
+# RUNTIME (seon.error/escalate! reads config/on-core-error) and the gate
+# below read this file, so they agree. An explicit SEON_CONFIG still wins.
+export SEON_CONFIG="${SEON_CONFIG:-config/test.edn}"
 
 BUILD=1
 
@@ -270,7 +281,11 @@ fi
 # here — the node-test world is hermetic per-test in-memory conns, so datom
 # counting has no stable store to bracket; the marker is the observable.
 # ---------------------------------------------------------------------------
-CORE_FAULTS=$(grep -ac 'SEON-CORE-FAULT' "$TMPOUT")
+# Count SEON-CORE-FAULT markers but NOT the SEON-EXPECTED-CORE-FAULT variant
+# (a deliberately-provoked fault bracketed by seon.error/expecting-core-fault!
+# — datom still written, gate not counted). The two markers do not collide as
+# substrings, but the -v filter makes the intent explicit and robust.
+CORE_FAULTS=$(grep -a 'SEON-CORE-FAULT' "$TMPOUT" | grep -vac 'SEON-EXPECTED-CORE-FAULT')
 : "${CORE_FAULTS:=0}"
 CORE_MANIFEST="${SEON_CONFIG:-config/system.edn}"
 CORE_DIAL=$(grep -oE ':seon\.config/on-core-error[[:space:]]+:[a-z]+' "$CORE_MANIFEST" 2>/dev/null | awk '{print $2}' | head -1)
@@ -326,7 +341,7 @@ else
     echo "accumulated ${CORE_FAULTS} :seon.error/fault :core error(s) — CORE bugs,"
     echo "independent of the assertions above. Fix the underlying defect (each"
     echo "line below is one seon.error/record! marker):"
-    grep -a 'SEON-CORE-FAULT' "$TMPOUT" | cut -c1-300 | head -20 || true
+    grep -a 'SEON-CORE-FAULT' "$TMPOUT" | grep -v 'SEON-EXPECTED-CORE-FAULT' | cut -c1-300 | head -20 || true
   fi
 fi
 echo "========================================"
