@@ -941,3 +941,17 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   marked NOT-runtime-reported. When the run response carries the real row,
   the runner passes it through and the assumed-defaults marking disappears.
   Existing ledger rows untouched.
+
+### 2026-07-04 — OWNER RULING (both lanes): every agent-related config is per-AGENT overridable
+
+- **The agent entity is the override point for ALL agent-related config
+  families** — model (in flight now), skills loadout, render caps, ctx
+  blocks, capability sets. ONE uniform resolution shape everywhere:
+  explicit call/request opts → the AGENT's own config attrs (absent =
+  inherit) → the cluster config row/manifest → shipped defaults. No
+  per-family bespoke resolution; the model-config unit landing now is the
+  TEMPLATE (named schemas, optional attrs, resolver reads the calling
+  agent's scope). Existing per-agent surfaces (::full-source pins, canvas)
+  already fit the shape. Remaining families migrate as touched — not a big
+  bang. Mechanism = tooling lane; which content an agent's overrides carry =
+  eval lane; this entry is the shared contract.
