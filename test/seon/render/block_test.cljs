@@ -9,6 +9,7 @@
   (:require
     [cljs.test :as t :refer [deftest is testing]]
     [clojure.string :as str]
+    [seon.error :as error]
     [seon.render :as render]
     [seon.render.value :as rv]
     [seon.ui.clojure :as cljhl]
@@ -131,8 +132,16 @@
 
 (deftest block-throwing-delegate-yields-error-card
   (testing "a throwing delegate becomes an error card (html) / error text (ai), not an exception"
-    (with-redefs [md/md->hiccup (fn [& _] (throw (js/Error. "boom")))]
-      (let [out (s (render/block :html {:seon.render/markdown "hi"}))]
+    ;; A proper MULTI-ARITY throwing fn: the render path calls md->hiccup via
+    ;; its compiled arity-1 method, so a variadic-only (fn [& _]) fails with
+    ;; "arity$1 is not a function" (a DIFFERENT error than the intended "boom").
+    ;; Declaring both arities makes the fixture provoke the real throw.
+    (with-redefs [md/md->hiccup (fn ([_]   (throw (js/Error. "boom")))
+                                  ([_ _] (throw (js/Error. "boom"))))]
+      ;; The throwing delegate is a :core fault (md is seon.*); deliberate here,
+      ;; so bracket it EXPECTED (render/block guards+records synchronously).
+      (let [out (error/expecting-core-fault!
+                  (fn [] (s (render/block :html {:seon.render/markdown "hi"}))))]
         (is (str/includes? out "render error"))
         (is (str/includes? out "block render failed"))))))
 

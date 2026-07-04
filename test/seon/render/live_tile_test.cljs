@@ -23,6 +23,7 @@
     [seon.agent :as agent]
     [seon.client :as client]
     [seon.db :as db]
+    [seon.error :as error]
     [seon.render :as render]
     [seon.render.live-tile :as tile]
     [seon.repl.internal :as repl.internal]
@@ -528,10 +529,15 @@
                      'seon.render.live-tile-test/throwing-tile}]})
                 (.then (fn [_]
                          (binding [db/*conn* conn]
+                           ;; throwing-tile is seon.* → :core fault; deliberate,
+                           ;; so bracket EXPECTED (render is sync; the alias
+                           ;; resolves before the local `error` destructure).
                            (let [{:seon.render/keys [hiccup ai error]}
-                                 (render/render-agent-tile
-                                   {:seon.db/db @conn
-                                    :seon.agent/id "tileerr-000001"})]
+                                 (error/expecting-core-fault!
+                                   (fn []
+                                     (render/render-agent-tile
+                                       {:seon.db/db @conn
+                                        :seon.agent/id "tileerr-000001"})))]
                              (is (some #(re-find #"Updating this tile" %)
                                        (hiccup-strings hiccup))
                                  "human sees the calm placeholder tile — NOT a vanish, NOT a scary error")
@@ -583,9 +589,14 @@
           (.then
             (fn [_]
               (binding [db/*conn* conn]
+                ;; A structurally-broken tile is a :core fault (the render
+                ;; machinery is seon.*); deliberate across vov / literal-broken
+                ;; / backstop, so bracket EXPECTED (sync render).
                 (let [{:seon.render/keys [hiccup ai error]}
-                      (render/render-agent-tile
-                        {:seon.db/db @conn :seon.agent/id agent-id})]
+                      (error/expecting-core-fault!
+                        (fn []
+                          (render/render-agent-tile
+                            {:seon.db/db @conn :seon.agent/id agent-id})))]
                   (is (some #(re-find #"Updating this tile" %)
                             (hiccup-strings hiccup))
                       "human sees the calm placeholder tile — the page never 500s")

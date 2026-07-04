@@ -2920,8 +2920,12 @@
    guidance built by the thrower (db `:user-input`, compile, read,
    schema-validation). For these, the message stands alone — no runtime
    'errors are values' framing is added (it would be wrong: these are
-   not thrown values the agent adapts to, they are defects to FIX)."
-  #{:user-input :compile :read :seon.eval/repl-parity})
+   not thrown values the agent adapts to, they are defects to FIX).
+
+   Same set as the fault-classification agent-population (an agent-fixable
+   input defect is `:agent`, never `:core`) — references the ONE source of
+   truth `seon.error/agent-fault-kinds`."
+  error/agent-fault-kinds)
 
 (defn render-error-string
   "The edn-SAFE `:seon.eval/error` string for a failed eval.

@@ -174,6 +174,17 @@
   [sym]
   (if (agent-authored-sym? sym) :agent :core))
 
+(def agent-fault-kinds
+  "The `:seon.error/kind` values that identify an AGENT-population failure:
+   the agent's OWN input defect, whose message is crystal-clear guidance the
+   agent acts on (a mistyped attr, a bad form, an unreadable expression, a
+   REPL-parity slip). These are :agent no matter which seon.* conduit
+   surfaces the throw — the discriminator here is the error's OWN content,
+   not the wrapping fn (see `seon.instrument/wrapper-fault`). The SINGLE
+   source of truth for this set — `seon.eval/known-error-kinds` references
+   it too (the same 'self-contained agent-fixable error' concept)."
+  #{:user-input :compile :read :seon.eval/repl-parity})
+
 ;; ============================================================
 ;; EDN stack frames — cljs.stacktrace's V8/Node parser (no source maps;
 ;; frames name compiled-JS coords, the munged fn names carry the ns).
@@ -303,25 +314,74 @@
       args-edn       (assoc :seon.error/args-edn args-edn)
       data-edn       (assoc :seon.error/data-edn data-edn))))
 
+;; ============================================================
+;; Expected-fault bracket — a TEST-side marker so a deliberately-provoked
+;; :core fault (an error-path fixture verifying graceful degradation) still
+;; WRITES its datom but does NOT trip the gate. A process-global DEPTH
+;; counter, NOT a dynamic binding: CLJS `binding` does not cross async
+;; .then/.catch hops, and several fixtures provoke faults through async
+;; renders/evals. Node-test runs sequentially, so a global depth is
+;; race-free across the suite. (Genuinely-stateful test artifact — the
+;; reactive-context rule permits these.)
+;; ============================================================
+
+(defonce ^:private !expecting-core-fault (atom 0))
+
+(defn expecting-a-core-fault?
+  "True while inside an [[expecting-core-fault!]] bracket."
+  {:malli/schema [:=> [:cat] :boolean]}
+  []
+  (pos? @!expecting-core-fault))
+
+(defn expecting-core-fault!
+  "TEST bracket: mark `:core` faults provoked inside `thunk` as EXPECTED.
+
+   A deliberately-provoked `:core` fault (an error-path fixture that proves
+   graceful degradation) still WRITES its datom, but [[escalate!]] prints
+   the DISTINCT `SEON-EXPECTED-CORE-FAULT` marker instead of
+   `SEON-CORE-FAULT`, so bin/test-cljs's gate does not count it, and the
+   `:crash` dial does NOT exit. Async-safe: if `thunk` returns a Promise the
+   bracket stays open until it settles (returns that Promise, re-throwing a
+   rejection); otherwise it closes synchronously (returns the value). A NEW
+   fault-provoking test that FORGETS the bracket trips the gate — the
+   intended forcing function; there is deliberately no blanket suppression."
+  {:malli/schema [:=> [:cat fn?] :any]}
+  [thunk]
+  (swap! !expecting-core-fault inc)
+  (let [close! (fn [] (swap! !expecting-core-fault dec))]
+    (try
+      (let [v (thunk)]
+        (if (and (some? v) (fn? (.-then v)))
+          (.then v
+                 (fn [x] (close!) x)
+                 (fn [e] (close!) (throw e)))
+          (do (close!) v)))
+      (catch :default e (close!) (throw e)))))
+
 (defn- escalate!
   "Apply the `:seon.config/on-core-error` dial to a `:core` fault.
 
    `:agent` faults NEVER reach here (enforced in [[record!]], not at
-   call sites). Always logs the loud `SEON-CORE-FAULT` marker (the
-   test-wrapper/hook gates grep it); under `:crash` exits the pod AFTER
-   the persist Promise settles (datom first, then loud exit)."
+   call sites). Logs the loud `SEON-CORE-FAULT` marker (the
+   test-wrapper/hook gates grep it) — or, inside an
+   [[expecting-core-fault!]] bracket, the DISTINCT
+   `SEON-EXPECTED-CORE-FAULT` marker (datom still written, gate NOT
+   tripped, `:crash` NOT taken). Under `:crash` (and not expected) exits
+   the pod AFTER the persist Promise settles (datom first, then loud exit)."
   [projection persist-promise]
-  (js/console.error
-    (str "SEON-CORE-FAULT " (:seon.error/message projection)
-         (when-let [at (:seon.error/at projection)] (str " @t=" at))))
-  (when (= :crash (config/on-core-error))
-    (let [exit! (fn [& _]
-                  (js/console.error
-                    "seon.error/record!: on-core-error :crash — exiting after persisting the fault datom")
-                  (.exit js/process 1))]
-      (if (and persist-promise (fn? (.-then persist-promise)))
-        (.then persist-promise exit! exit!)
-        (exit!)))))
+  (let [expected? (expecting-a-core-fault?)]
+    (js/console.error
+      (str (if expected? "SEON-EXPECTED-CORE-FAULT" "SEON-CORE-FAULT") " "
+           (:seon.error/message projection)
+           (when-let [at (:seon.error/at projection)] (str " @t=" at))))
+    (when (and (not expected?) (= :crash (config/on-core-error)))
+      (let [exit! (fn [& _]
+                    (js/console.error
+                      "seon.error/record!: on-core-error :crash — exiting after persisting the fault datom")
+                    (.exit js/process 1))]
+        (if (and persist-promise (fn? (.-then persist-promise)))
+          (.then persist-promise exit! exit!)
+          (exit!))))))
 
 (defn recorded?
   "True when `e` already produced its datom via [[record!]].

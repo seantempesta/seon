@@ -20,6 +20,7 @@
     [seon.client :as client]
     [seon.config :as config]
     [seon.db :as db]
+    [seon.error :as error]
     [seon.eval :as eval]
     [seon.render :as render]
     [seon.render.default :as default]
@@ -268,7 +269,11 @@
                                  {:seon.db/db @conn
                                   :seon.agent/id "rethrow-00001"
                                   :seon.render/entity entity}))
-                  banner (html/->string (render-one broken))
+                  ;; The throwing renderer is a seon.* sym → :core fault;
+                  ;; deliberate here, so bracket it as EXPECTED (the render is
+                  ;; synchronous — record! fires inside this call).
+                  banner (html/->string
+                           (error/expecting-core-fault! (fn [] (render-one broken))))
                   sib    (html/->string (render-one good))]
               (is (re-find #"render error" banner)
                   "throwing renderer → legible banner, not a vanish")
@@ -285,12 +290,14 @@
   (async done
     (-> (with-tile-conn "rethrow-00002"
           (fn [conn]
-            (let [out (render/render-entity-ai
-                        {:seon.db/db @conn
-                         :seon.agent/id "rethrow-00002"
-                         :seon.render/entity
-                         {:db/id 1
-                          :seon.render/ai 'seon.render-test/throwing-renderer}})]
+            (let [out (error/expecting-core-fault!
+                        (fn []
+                          (render/render-entity-ai
+                            {:seon.db/db @conn
+                             :seon.agent/id "rethrow-00002"
+                             :seon.render/entity
+                             {:db/id 1
+                              :seon.render/ai 'seon.render-test/throwing-renderer}})))]
               (is (string? out) "throwing AI renderer → string, never nil")
               (is (re-find #"render error" out))
               (is (re-find #"boom-renderer" out)
@@ -461,13 +468,20 @@
               :seon.agent.ctx/name   :demoblock}]
     (testing "STRICT OFF → graceful one-line guard, no throw (prod behavior)"
       (with-redefs [config/render-strict? (constantly false)]
-        (let [out (render/render :seon.render/ai {} node)]
+        ;; boom-ai-render throws → :core fault (seon.* converter); deliberate
+        ;; in both dial branches, so bracket as EXPECTED (sync render call —
+        ;; STRICT OFF returns the guard string, STRICT ON re-throws; the
+        ;; bracket re-propagates either way).
+        (let [out (error/expecting-core-fault!
+                    (fn [] (render/render :seon.render/ai {} node)))]
           (is (string? out))
           (is (re-find #"⚠ \[:demoblock\] render failed" out)
               "the graceful guard renders the calm one-liner"))))
     (testing "STRICT ON → THROWS loud, naming the offending block"
       (with-redefs [config/render-strict? (constantly true)]
-        (let [caught (try (render/render :seon.render/ai {} node) ::no-throw
+        (let [caught (try (error/expecting-core-fault!
+                            (fn [] (render/render :seon.render/ai {} node)))
+                          ::no-throw
                           (catch :default e e))]
           (is (not= ::no-throw caught) "strict mode re-throws, never swallows")
           (is (re-find #"\[demoblock\] render failed: boom-detail-XYZ"

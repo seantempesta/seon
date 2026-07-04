@@ -95,6 +95,9 @@
     (-> (repl/ensure-bootstrap!)
         (.then
           (fn [cs]
+            ;; A genuinely-absent ns fails cljs.js analysis → :agent fault
+            ;; (the agent's own require typo — classified by
+            ;; seon.instrument/wrapper-fault, never gates, never crashes).
             (-> (seval/eval cs
                             (str "(ns scratch.require-absent "
                                  "(:require [no.such.namespace :as nope]))")

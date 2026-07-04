@@ -4,9 +4,13 @@
    persistence (+ the no-conn buffer), the wrapper rejection/output arms,
    and one-error-one-datom dedup.
 
-   DELIBERATELY exercises `:agent` faults only — a `:core` fault prints the
-   `SEON-CORE-FAULT` marker that bin/test-cljs's strict gate greps for, so a
-   passing suite must not emit one. The `:core` escalation path (marker +
+   DELIBERATELY exercises `:agent` faults only — an UN-expected `:core` fault
+   prints the `SEON-CORE-FAULT` marker that bin/test-cljs's strict gate greps
+   for, so a passing suite must not emit one. (A deliberately-provoked `:core`
+   fault in an error-path fixture is bracketed by
+   `seon.error/expecting-core-fault!`, which prints the DISTINCT
+   `SEON-EXPECTED-CORE-FAULT` marker the gate does not count — the invariant
+   is now \"no UN-expected marker\".) The `:core` escalation path (marker +
    dial) is live-proven against the pod (see the phase-1 report), and the
    classification fns are pure — tested directly here."
   (:require

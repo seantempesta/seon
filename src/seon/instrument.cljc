@@ -287,9 +287,17 @@
       agent typos as `:core` and reds the strict gate forever. Content
       wins when it identifies the population:
 
-        - agent-form eval diagnostics (`:seon.eval/warning-type`, kind
-          `:compile`) → `:agent` — the agent's own error, already
-          enveloped for it downstream;
+        - agent-form eval diagnostics → `:agent` — the agent's own error,
+          already enveloped for it downstream (a mistyped attr / bad form /
+          undeclared var must NEVER crash the pod). Detected by ANY of:
+          `:seon.eval/warning-type`; a `:cljs/analysis-error` `:tag` (a
+          cljs.js self-host analysis/compile failure ONLY ever arises from an
+          AGENT-submitted form — the core is AOT-compiled by shadow, never
+          self-host); or an agent-input `:seon.error/kind`
+          (`:user-input`/`:compile`/`:read`/`:seon.eval/repl-parity`, i.e.
+          `seon.error/agent-fault-kinds`) at the top OR nested one level in
+          `:seon.error/data` (some throwers, e.g. `seon.db/query`'s
+          missing-attr error, pre-build the envelope);
         - a PROPAGATED malli contract violation → the VIOLATED fn's
           population when agent-authored, else `:agent` when an agent
           turn is in scope (the agent was the caller), else `coarse`.
@@ -300,10 +308,13 @@
      {:malli/schema [:=> [:cat :any :seon.error/fault] :seon.error/fault]}
      [e coarse]
      (try
-       (let [data (:seon.error/data (error/->map e))]
+       (let [data (:seon.error/data (error/->map e))
+             kind (or (:seon.error/kind data)
+                      (:seon.error/kind (:seon.error/data data)))]
          (cond
            (or (some? (:seon.eval/warning-type data))
-               (= :compile (:seon.error/kind data)))
+               (= :cljs/analysis-error (:tag data))
+               (contains? error/agent-fault-kinds kind))
            :agent
 
            (ei/instrument-error? data)
