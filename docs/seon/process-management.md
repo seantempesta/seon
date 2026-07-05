@@ -33,8 +33,43 @@ bin/seon cluster reset [n]  DESTRUCTIVE: wipe data/clusters/<n>/store; bounce
                             wire-server + pod when <n> is the cluster THIS
                             supervisor manages (store == $SEON_CLUSTER_DIR/store),
                             else wipe only (fresh DB)
+bin/seon cluster create <n> [--ephemeral] [--frozen|--watched]
+                            NEW cluster on this supervisor's wire-server:
+                            its own store dir + its own pod (pod-<n>, free port)
+bin/seon cluster fork <src> <t|--at t> [fork-name]
+                            NEW cluster = <src>'s world at basis-t <t> —
+                            independent, writable, disposable (see below)
+bin/seon cluster destroy <n> stop pod-<n>, delete the db from the live
+                            wire-server registry, remove data/clusters/<n>/
 
 ```
+
+## `cluster fork` — a cluster's world at a basis-t, live and writable
+
+`bin/seon cluster fork <src> <t|--at t> [fork-name]` (default fork-name
+`fork-<src>-<t>`) boots a NEW disposable cluster whose database is `<src>`'s
+world exactly at transaction id `<t>`. The primary consumer is error
+forensics: `seon.agent.inspect/repro` returns this command verbatim as its
+`::fork-hint`, with `t` = the error's `:seon.error/at` (the basis-t the
+failing code saw — the error datom itself commits later, so it is not
+inside the fork).
+
+Mechanism: `seon.server.registry/fork-db!`, invoked over the wire-server's
+loopback socket REPL (7891 — the same supervisor channel `cluster destroy`
+uses; never agent-exposed). It wraps `datahike.api/fork-database`: a
+konserve-layer store copy, the fork's head pointed at the commit whose
+`:max-tx` equals `t`, and a fresh deterministic store identity — verified
+after the copy (head at `t` + a full history index scan; one retry covers
+a copy that raced a live write). Entity ids and tx ids are byte-identical,
+so every stored basis-t means the same thing inside the fork. The source's
+`blobs/` (turn prompt/reply content) is copied alongside so turn replay
+works. Boot then follows `cluster create` exactly — the fork pod's own
+`ensure-db` registers the db, so the fork is indistinguishable from a
+normal cluster (feed, replay, inspect verbs all work; the pod's boot-seed
+appends its usual idempotent txs, moving the head slightly past `t` while
+the world-state at `t` stays intact). The fork store is independent by
+construction: `bin/seon cluster destroy <fork-name>` removes it without
+touching the source.
 
 ## `start all` / `restart all` / `stop all` — the whole stack, ordered + gated
 

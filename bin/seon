@@ -1063,6 +1063,10 @@ cmd_cluster() {
   #                             "default") — see cluster_reset.
   #   create <name> [--ephemeral]  a NEW cluster on THIS supervisor's
   #                             wire-server: db entry + its own pod.
+  #   fork <src> <t|--at t> [fork-name]  a NEW cluster whose db is the
+  #                             source cluster's world at basis-t <t> —
+  #                             independent, writable, disposable
+  #                             (error forensics: t = :seon.error/at).
   #   destroy <name>            stop its pod, delete its db from the
   #                             wire-server registry, remove
   #                             data/clusters/<name>/ INCLUDING blobs/.
@@ -1072,13 +1076,14 @@ cmd_cluster() {
   # wire-server JVM hosts every cluster's db (the registry), so create is
   # cheap: a db entry + a node process. All lifecycle ops are DESTRUCTIVE
   # where they say so and deliberate; no confirmation prompts.
-  local sub="${1:?cluster requires a subcommand (reset|create|destroy)}"
+  local sub="${1:?cluster requires a subcommand (reset|create|fork|destroy)}"
   shift
   case "$sub" in
     reset)   cluster_reset "${1:-default}" ;;
     create)  cluster_create "$@" ;;
+    fork)    cluster_fork "$@" ;;
     destroy) cluster_destroy "${1:?cluster destroy requires a name}" ;;
-    *) echo "unknown cluster subcommand: $sub (try: reset [name] | create <name> [--ephemeral] [--frozen|--watched] | destroy <name>)" >&2; exit 1 ;;
+    *) echo "unknown cluster subcommand: $sub (try: reset [name] | create <name> [--ephemeral] [--frozen|--watched] | fork <src> <t|--at t> [fork-name] | destroy <name>)" >&2; exit 1 ;;
   esac
 }
 
@@ -1154,6 +1159,79 @@ cluster_create() {
   local port
   port="$(cat "tmp/seon-port-$name" 2>/dev/null || echo '?')"
   echo "▶ cluster $name created — pod http://127.0.0.1:$port (db-name $name, store data/clusters/$name/store)"
+}
+
+cluster_fork() {
+  # Fork an existing cluster's db at a basis-t (tx id) into a NEW live,
+  # writable, disposable cluster — the error-forensics door: an error's
+  # :seon.error/at is exactly this t, so the fork boots the world the
+  # failing code SAW. (:seon.error/at is captured at the CATCH site; the
+  # error datom itself was recorded in a LATER tx, so it is NOT inside
+  # its own fork.) Mechanism: seon.server.registry/fork-db! over the
+  # loopback socket REPL — the same supervisor channel cluster destroy
+  # uses for delete-db!; never agent-exposed. It wraps
+  # datahike.api/fork-database: konserve-layer copy + head at the :at
+  # commit + a fresh deterministic store identity. eids/tx-eids are
+  # byte-identical, so every stored basis-t means the same thing inside
+  # the fork. Boot then follows cluster create exactly: the fork's own
+  # pod (pod-<fork-name>, free port), whose boot ensure-db registers the
+  # fork db on the wire-server — one creation path. The fork store is
+  # fully independent by construction (own dir, own store id):
+  # `cluster destroy <fork>` removes it without touching the source.
+  local src="${1:?cluster fork requires a source cluster name}"
+  shift
+  [ "${1:-}" = "--at" ] && shift
+  local t="${1:?cluster fork requires a basis-t: bin/seon cluster fork <src> <t|--at t> [fork-name]}"
+  shift || true
+  local fork_name="${1:-fork-$src-$t}"
+  if ! valid_cluster_name "$src"; then
+    echo "✗ invalid source cluster name: '$src'" >&2; exit 1
+  fi
+  case "$t" in
+    *[!0-9]*|"") echo "✗ basis-t must be a tx id (integer), got: '$t'" >&2; exit 1 ;;
+  esac
+  if ! valid_cluster_name "$fork_name"; then
+    echo "✗ invalid fork name: '$fork_name' (a-zA-Z0-9_- only)" >&2; exit 1
+  fi
+  if [ -d "data/clusters/$fork_name" ]; then
+    echo "✗ data/clusters/$fork_name already exists — destroy it first: bin/seon cluster destroy $fork_name" >&2
+    exit 1
+  fi
+
+  echo "▶ cluster fork: $src @t=$t → $fork_name"
+  # The source db lives on THIS supervisor's wire-server; the fork op
+  # runs inside that JVM (registry fn over the loopback REPL).
+  cmd_start wire-server
+  wait_ready wire-server || exit 1
+
+  local repl_port out
+  repl_port="$(cat tmp/seon-writer-repl-port)"
+  out="$(printf '(seon.server.registry/fork-db! {:seon.server.registry/db-name :%s :seon.server.registry/fork-name :%s :seon.server.registry/at %s :seon.server.registry/path "data/clusters/%s/store"})\n' \
+           "$src" "$fork_name" "$t" "$fork_name" \
+         | nc 127.0.0.1 "$repl_port" -w 30 2>/dev/null | tr -d '\r')"
+  if ! printf '%s' "$out" | grep -q ':seon.server.registry/forked? true'; then
+    echo "✗ fork failed — wire-server replied:" >&2
+    printf '%s\n' "$out" | tail -3 >&2
+    echo "  (an unresolved-symbol reply means the running wire-server predates fork-db! — bin/seon restart wire-server)" >&2
+    rm -rf "data/clusters/$fork_name"
+    exit 1
+  fi
+
+  # The forensic world includes the source's turn-capture blobs (prompt/
+  # reply content the store only REFERENCES by hash) — copy them alongside
+  # so inspect/turn replay works inside the fork.
+  [ -d "data/clusters/$src/blobs" ] && cp -R "data/clusters/$src/blobs" "data/clusters/$fork_name/blobs"
+  # Forks are disposable by intent (same marker create --ephemeral writes);
+  # WATCHED bundle (no frozen marker): a fork is a dev-triage world, and
+  # fixing the bug usually means iterating on src/ against it.
+  date -u +%FT%TZ > "data/clusters/$fork_name/ephemeral"
+
+  cmd_start "pod-$fork_name"
+  wait_ready "pod-$fork_name" || exit 1
+  local port
+  port="$(cat "tmp/seon-port-$fork_name" 2>/dev/null || echo '?')"
+  echo "▶ cluster $fork_name forked from $src @t=$t — pod http://127.0.0.1:$port (store data/clusters/$fork_name/store)"
+  echo "  triage inside: (seon.agent.inspect/errors) etc. — this world is what the failing code saw at t=$t; done: bin/seon cluster destroy $fork_name"
 }
 
 cluster_destroy() {

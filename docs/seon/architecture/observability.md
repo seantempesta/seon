@@ -146,9 +146,28 @@ the same datoms:
 - **`repro`** — the work-backwards bundle: the LIVE as-of db value frozen at
   `:seon.error/at` (REPL material — render its basis-t, never print the db),
   the failing fn sym + args-edn when the malli envelope captured them, the
-  linked turn, and a ready-to-eval reproduction expression string built from
+  linked turn, a ready-to-eval reproduction expression string built from
   what is actually stored (an honest note when args were not captured —
-  nothing fabricated).
+  nothing fabricated), and the `::fork-hint` — the exact supervisor command
+  that boots this error's world as a live cluster (below).
+
+The as-of db is read-only; when the fix needs a WRITABLE world — re-running
+the failing code, patching data, letting a forensic agent act — the fourth
+step is **fork**: `bin/seon cluster fork <cluster> <at>` (the command
+`repro` hands back verbatim) copies the cluster's store at the konserve
+layer via `datahike.api/fork-database`, points the fork's head at the
+commit whose `:max-tx` equals `at`, and boots it as a normal disposable
+cluster (own store dir, own pod, own port). Entity ids and tx ids are
+byte-identical, so every stored basis-t (`rendered-as-of`, another error's
+`at`) means the same thing inside the fork, and the inspect verbs work
+there unchanged. The at-semantics are precise: `:seon.error/at` is captured
+at the CATCH site — the db value the failing code SAW — while the error
+datom itself commits in a later tx, so **the error datom does not exist
+inside its own fork**; the fork is the world the failure arose from, not
+the world that records it. The full flow is find (`watch-faults`) →
+`errors` → `error` → `repro` → **fork** → fix, then
+`bin/seon cluster destroy <fork>` (the fork store is independent by
+construction — destroying it cannot touch the source).
 
 The standing alarm is `bin/seon watch-faults` — a dependency-free supervisor
 subcommand that tails the pod log from end-of-file (following across
