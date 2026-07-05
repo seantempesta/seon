@@ -180,6 +180,7 @@ def generate_guided(model, tok, prompt_ids, oracle, eval_session=None,
             ws.clamp(_tok_ids(tok, attempt_hints))
         ws.free(max(MIN_TAIL_FREE, CL - ws.used()))
         prev_signature = None
+        seen_sources = set()                 # per-attempt duplicate guard
 
         for rnd in range(max_rounds):
             rounds_used += 1
@@ -236,6 +237,9 @@ def generate_guided(model, tok, prompt_ids, oracle, eval_session=None,
                 if e > first_bad:
                     break
                 src = form["source"]
+                if src in seen_sources:          # duplicate form: skip past it,
+                    harvest_end = e              # don't re-encode or re-count
+                    continue
                 if eval_session is not None:
                     ev = eval_session.eval(src)
                     if not ev.get("ok"):
@@ -258,6 +262,7 @@ def generate_guided(model, tok, prompt_ids, oracle, eval_session=None,
                 harvest_end = e
                 locked_forms += 1
                 locked_srcs.append(src)
+                seen_sources.add(src)
                 events.append({"attempt": attempt, "round": rnd,
                                "event": "lock", "form": src[:80]})
             if locked_srcs:
@@ -276,30 +281,77 @@ def generate_guided(model, tok, prompt_ids, oracle, eval_session=None,
 
             # done needs PROOF of work: something committed, nothing pending
             if not rel_errors and eos_seen and not remainder.strip() and committed:
+                # the model EOS'd — but did it define everything the checks
+                # need? A missing fn is a cheap ROUND fix (hint + continue,
+                # context kept), not an attempt restart.
+                missing = []
+                if checks and eval_session is not None:
+                    for c in checks:
+                        ev = eval_session.eval(c["call"])
+                        if not ev.get("ok"):
+                            var = _undeclared_var(
+                                (ev.get("error") or {}).get("message", ""))
+                            if var and var not in missing:
+                                missing.append(var)
+                if missing:
+                    events.append({"attempt": attempt, "round": rnd,
+                                   "event": "missing-defs", "symbols": missing})
+                    ws = _Workspace()
+                    if attempt_hints:
+                        ws.clamp(_tok_ids(tok, attempt_hints))
+                    ws.clamp(_tok_ids(tok, "".join(
+                        f"{HINT_PREFIX} you have not defined '{m}' yet — "
+                        f"write (defn {m} ...)\n" for m in missing)))
+                    ws.free(max(MIN_TAIL_FREE, CL - ws.used()))
+                    prev_signature = None
+                    continue
                 done = True
                 events.append({"attempt": attempt, "round": rnd, "event": "done"})
                 break
 
-            # ---- plan the next canvas: keep good text, scramble+hint bad ----
+            # ---- plan the next canvas: keep the clean prefix, scramble ONE
+            # COALESCED region (first error → last error). A broken defn
+            # orphans its interior sub-forms at top level; judging those
+            # fragments individually (phase grammar) destroyed the model's
+            # own correct body parts round after round (measured thrash).
             ws = _Workspace()
             if attempt_hints:
                 ws.clamp(_tok_ids(tok, attempt_hints))
-            pos = 0
-            for e in rel_errors:
-                s, t_end = max(e["span"][0], 0), min(e["span"][1], len(remainder))
-                keep = _strip_hints(remainder[pos:s])
-                ws.clamp(_tok_ids(tok, keep))
-                if hints:
-                    ws.clamp(_tok_ids(tok, _hint_for(e)))
-                ws.free(len(_tok_ids(tok, remainder[s:t_end])) + SLACK_TOKENS)
-                events.append({"attempt": attempt, "round": rnd, "event": "scramble",
-                               "kind": e.get("error-kind"),
-                               "source": (e.get("source") or "")[:80],
-                               "suggest": e.get("suggest")})
-                pos = t_end
-            tail = _strip_hints(remainder[pos:])
+            if not rel_errors:
+                # nothing flagged, just unfinished — keep the text, give room
+                tail = _strip_hints(remainder)
+                if tail.strip():
+                    ws.clamp(_tok_ids(tok, tail))
+                ws.free(max(MIN_TAIL_FREE, CL - ws.used()))
+                signature = (committed, (), remainder)
+                if signature == prev_signature:
+                    events.append({"attempt": attempt, "round": rnd, "event": "stuck"})
+                    break
+                prev_signature = signature
+                continue
+            r_start = max(rel_errors[0]["span"][0], 0)
+            r_end = min(max(e["span"][1] for e in rel_errors), len(remainder))
+            keep_head = _strip_hints(remainder[:r_start])
+            if keep_head.strip():
+                if not keep_head.endswith("\n"):
+                    keep_head += "\n"          # never glue a hint onto code
+                ws.clamp(_tok_ids(tok, keep_head))
+            if hints:
+                seen_h = set()
+                for e in rel_errors:
+                    h = _hint_for(e)
+                    if h not in seen_h and len(seen_h) < 2:
+                        seen_h.add(h)
+                        ws.clamp(_tok_ids(tok, h))
+            ws.free(len(_tok_ids(tok, remainder[r_start:r_end])) + SLACK_TOKENS)
+            events.append({"attempt": attempt, "round": rnd, "event": "scramble",
+                           "kinds": sorted({e.get("error-kind") for e in rel_errors}),
+                           "region": [r_start, r_end],
+                           "suggest": next((e.get("suggest") for e in rel_errors
+                                            if e.get("suggest")), None)})
+            tail = _strip_hints(remainder[r_end:])
             if tail.strip():
-                ws.clamp(_tok_ids(tok, tail))
+                ws.clamp(_tok_ids(tok, tail if tail.startswith("\n") else "\n" + tail))
             ws.free(max(MIN_TAIL_FREE, CL - ws.used()))
 
             signature = (committed, tuple((e.get("error-kind"), tuple(e["span"]))

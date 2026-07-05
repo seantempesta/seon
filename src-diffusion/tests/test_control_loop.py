@@ -120,8 +120,8 @@ def test_def_typo_scrambled_with_hint_then_locked(oracle, session):
     r, model = run(["(def f1 [x] x)", "(defn f1 [x] x)"], oracle, session)
     assert r["done"] and r["locked_forms"] == 1
     assert "(defn f1 [x] x)" in r["text"]
-    kinds = [e for e in r["events"] if e["event"] == "scramble"]
-    assert kinds and kinds[0]["kind"] == "def-vs-defn"
+    scrambles = [e for e in r["events"] if e["event"] == "scramble"]
+    assert scrambles and "def-vs-defn" in scrambles[0]["kinds"]
     # the hint comment was CLAMPED into the round-2 canvas the model saw
     assert any("; fix:" in c for c in model.seen_canvases[1:])
 
@@ -154,7 +154,7 @@ def test_phase_gate_rejects_wrong_head(oracle, session):
     r, _ = run(["(defn p1 [x] x)"], oracle, session,
                phase="schemas", max_rounds=2, max_attempts=1)
     assert not r["done"]
-    assert any(e.get("kind") == "phase-violation" for e in r["events"]
+    assert any("phase-violation" in e.get("kinds", []) for e in r["events"]
                if e["event"] == "scramble")
 
 
