@@ -22,7 +22,23 @@ MEASURED lift on behavioral correctness under the now-FIXED harness — starting
 with the E1 re-run and the phased grammar gate after the ladder's own lift is
 proven on GPU.
 
-## ▸ WE ARE HERE
+## ▸ WE ARE HERE (2026-07-05 — local-first reboot)
+
+**The verified canvas v2 is LIVE on the local MLX model and lifting every
+gate.** The approved plan (verified-canvas v2) superseded the GPU-gated
+path below: the loop now locks-and-EXECUTES forms as they parse (stateful
+eval session), harvests them into the encoder KV, auto-repairs provable
+near-misses for $0 forwards, hints via clamped `; fix:` comments, and
+terminates on T3 proof. **LIVE PROOF #1 (N=18/arm): parse 0.94→1.00, eval
+0.78→1.00, behavioral 0.72→0.94 vs free.** Maintained home =
+`src-diffusion/` (`seon.diffusion.loop` retired → pytest fixtures; CUDA
+worker frozen). Remaining phases: P2 wire (guided mode + provider +
+`:tests` grammar + worker-eval `run-tests`/`repair` ops), P3 pod
+`diffusion/build!` + TDD phases, P4 planning/multi-model + throughput
+sweeps (perf ALWAYS in tok/s). The section below is the pre-reboot state,
+kept for history.
+
+## ▸ WE WERE HERE (2026-07-02, pre-reboot — GPU-gated)
 
 **The offline control surface is COMPLETE and wired on-worker; what remains is GPU
 MEASUREMENT.** The validation ladder — T0 parse → T1 structural lint → phased

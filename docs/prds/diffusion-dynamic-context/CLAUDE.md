@@ -40,7 +40,45 @@ tags: [orchestrator, agent]
   device-assert = static-cache-sizing hypothesis + $0 probe; clamp is
   compile-compatible — the compiled path was never measured).
 
-## ▸ Current state (2026-07-02) — offline surface COMPLETE + wired on-worker; next = GPU measurement
+## ▸ Current state (2026-07-05) — LOCAL-FIRST REBOOT: guided loop PROVEN live on MLX; `src-diffusion/` is the home
+
+**The GPU gating is OBSOLETE — the local MLX worker (M5, 8-bit, ~120 tok/s raw)
+runs everything free.** The approved plan (verified-canvas v2,
+`~/.claude/plans/floating-twirling-lightning.md`) reshaped the design:
+
+- **The guided loop v2** (`src-diffusion/src/seon_diffusion/control.py`):
+  round-denoise → bb oracle check → **auto-REPAIR provable near-misses**
+  ($0 forwards: fuzzy candidate + eval-sandbox proof; `even`→`even?`) →
+  **lock-and-EXECUTE** (stateful `worker-eval --serve` session; defs
+  accumulate) → **harvest locked forms OFF the canvas into the encoder KV**
+  (they never pay decode again) → scramble remaining bad spans under a
+  clamped **`; fix:` hint comment** (content-channel feedback) → T3
+  `[{call,expect}]` checks in-loop; failing checks RESTART the attempt with
+  the failure as a hint. Termination = proof (validation-as-early-stop).
+- **LIVE PROOF #1 (2026-07-05, N=18/arm, 6 tasks × 3 seeds):** guided vs
+  free — parse 0.94→**1.00**, eval 0.78→**1.00**, behavioral 0.72→**0.94**;
+  zero overhead on already-correct outputs. PoC baseline commit `f22a51f`
+  (~/ml/diffusion-gemma), scorecards in `ab_runs/` (raw samples persisted).
+- **The package** `src-diffusion/` (pattern: src-inspect-ai): pytest =
+  scripted stub model + REAL bb/node oracles (loop decisions pinned
+  offline); `bin/seon start dg-worker` (RunPod wire contract on :17860 →
+  `SEON_DG_ENDPOINT=http://127.0.0.1:17860`); `python -m
+  seon_diffusion.ab_guided` = the lift battery (tok/s on every row).
+  `seon.diffusion.loop` retired (policy fixtures ported to pytest); the
+  RunPod CUDA worker is FROZEN in `cuda/` (revive by need); the
+  `tmp/flash-diffgemma` maintained-code violation is closed.
+- **Perf convention (owner): tokens/second, always. Throughput first;
+  brute force (more attempts on the cheap model) is a legitimate strategy.**
+- **Next (plan phases):** P2 wire `mode:"guided"` + provider payload/response
+  + `:tests` grammar + worker-eval `op:"run-tests"`/`op:"repair"` (the
+  Python repair shim then DELETES — candidates move oracle-side, informed by
+  the shared autofix research in
+  `docs/prds/agent-ctx/research/form-autofix-system-2026-07-05.md`); P3 pod
+  `diffusion/build!` (replay-commit tee, schemas→tests→functions TDD
+  phases); P4 planning-phase + multi-model A/Bs (per-agent provider
+  overlays already route strong-planner vs diffusion-implementer).
+
+## ▸ Prior state (2026-07-02) — offline surface COMPLETE + wired on-worker; next was GPU measurement
 
 **A100 UNDEPLOYED ($0).** Every buildable no-GPU half is BUILT, offline-proven with
 the REAL bb+node oracles, and wired on-worker (suite 876/4043 green):
