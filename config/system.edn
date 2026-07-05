@@ -166,4 +166,11 @@
    ;; got its in-place :seon/error envelope). Derived; vanishes when the
    ;; last :core fault predates the latest user message.
    {:seon.agent.ctx/name :core-faults :seon.agent.ctx/priority 41
-    :seon.render/ai seon.agent.ctx.warnings/core-faults-block}]}}
+    :seon.render/ai seon.agent.ctx.warnings/core-faults-block}
+   ;; ROOT-ONLY (C46): the derived instrumentation-coverage invariant —
+   ;; specced fns whose live var lost its malli wrapper (structural async
+   ;; opt-outs excluded). Recomputed from the db + live JS vars at render;
+   ;; vanishes when coverage is re-asserted. A gap is system-wide, so it
+   ;; rides the root world only, like :core-faults.
+   {:seon.agent.ctx/name :instrumentation-gaps :seon.agent.ctx/priority 42
+    :seon.render/ai seon.agent.ctx.warnings/instrumentation-gaps-block}]}}

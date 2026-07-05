@@ -1,31 +1,30 @@
 (ns seon.instrument
-  "Phase A item 7 — collect + install Malli instrumentation for every
-   seon.* fn with `:malli/schema` metadata. (T15 positional read ops.)
+  "Malli instrumentation for every specced first-party fn — registration
+   routing (`register-target!`), the injecting wrapper, the structural
+   async opt-out, and the coverage census.
 
    Why this exists: `malli.instrument/collect!` is JVM-only — it reads
    source files at JVM build time. CLJS has no built-in equivalent;
    `:malli/schema` metadata does NOT auto-populate
-   `malli.core/-function-schemas*` at namespace load. So at boot,
+   `malli.core/-function-schemas*` at namespace load. So without help,
    `malli.instrument/instrument!` finds no schemas and instruments
    nothing.
 
-   The seon-native fix: a compile-time macro that reads the CLJS
-   analyzer's view of every loaded namespace via
-   `cljs.analyzer.api/all-ns` + `ns-publics`, filters to `seon.*`,
-   walks each ns's defs, and for every def whose metadata carries
-   `:malli/schema` emits one
-   `(malli.core/-register-function-schema! ns name schema {})` call.
-   The macro expands to a flat `(do …)` of registration calls —
-   evaluated at runtime, populates the atom that `instrument!` reads.
+   TWO registration sources, ONE routing (`register-target!`):
 
-   The runtime `install!` fn calls the macro then
-   `malli.instrument/instrument!`. Idempotent — re-registering is a
-   no-op (same key, last-write-wins, same value).
-
-   Per CLAUDE.md: we don't have to use packages the way the original
-   author intended. The end goal is `:malli/schema`-annotated fns get
-   their inputs+outputs validated at runtime; the original `collect!`
-   path is JVM-only; we ship the CLJS path that achieves the same end."
+   - **The pod (the live path):** `instrument-from-db!` — the PROGRAM
+     GRAPH is the roster (`:seon.fn/sym` + `:seon.fn/spec` rows; core fns
+     seeded by `index-core!`, agent fns by the eval-tee). Runs at boot /
+     `start-agent!` and re-asserts after every hot reload
+     (`seon.client/after-reload` — a ns re-eval replaces wrapped vars
+     with fresh unwrapped fns, C46). `coverage-gaps` is the derived
+     invariant over the same roster.
+   - **The compile-time `collect!` macro** — walks the CLJS analyzer's
+     view of every loaded first-party namespace at macroexpand time and
+     emits the same `register-target!` calls. NOT on the pod boot path
+     (the program graph replaced it); its remaining consumers are the
+     test harness (`instrument_smoke_test`, `db_test`), which has no db
+     to read a roster from."
   #?(:cljs (:require-macros [seon.instrument :refer [collect!]]))
   (:require
     #?@(:clj  [[cljs.analyzer.api :as ana]
@@ -281,11 +280,14 @@
    (defn wrapper-fault
      "Refine a wrapper-arm `coarse` fault by the ERROR'S OWN content.
 
-      The instrumented `seon.eval` conduits (raw-eval, eval, …) are where
-      an AGENT form's failure first surfaces as a rejection, so the
-      wrapped fn's symbol alone ('what were we calling') misclassifies
-      agent typos as `:core` and reds the strict gate forever. Content
-      wins when it identifies the population:
+      An AGENT form's failure first surfaces as a rejection inside the
+      WRAPPED fns of the eval path (`seon.eval/eval-batch!`,
+      `record-eval!`, …) — the outer conduits themselves are NOT
+      instrumented (`seon.eval/eval` is a structural [[async-unwrappable?]]
+      opt-out; `raw-eval` is private, never in the roster). So the wrapped
+      fn's symbol alone ('what were we calling') misclassifies agent typos
+      as `:core` and reds the strict gate forever. Content wins when it
+      identifies the population:
 
         - agent-form eval diagnostics → `:agent` — the agent's own error,
           already enveloped for it downstream (a mistyped attr / bad form /
@@ -605,3 +607,80 @@
                 :seon.instrument/enabled? true
                 :seon.instrument/n-instrumented
                 (reduce + (map count (vals (m/function-schemas :cljs)))))))))
+
+#?(:cljs
+   (defn coverage-gaps
+     "Specced program-graph fns whose LIVE var carries no malli wrapper.
+
+      The derived coverage invariant (C46): after [[instrument-from-db!]]
+      (boot, `start-agent!`, or the hot-reload re-assert in
+      `seon.client/after-reload`) every specced fn whose live var is
+      resolvable is either malli-wrapped or a STRUCTURAL
+      [[async-unwrappable?]] opt-out. This census recomputes that from the
+      db + the live JS vars at call time — nothing stored — so a non-empty
+      result IS a violation (typically a ns re-eval that replaced wrapped
+      vars without a re-instrument pass, or a spec that no longer
+      reads/resolves). Rows whose var is not live (a prior session's fn)
+      are not gaps — an uncallable fn has no coverage risk. Returns `[]`
+      when the `SEON_INSTRUMENT` kill-switch is off (no invariant to hold)
+      and, in a healthy runtime, `[]` always. Each gap carries the
+      qualified sym string and a reason: `::unwrapped` (wrappable but not
+      wrapped), `::bad-spec` (spec string unreadable), or
+      `::unresolvable-schema` (spec references a pruned/renamed schema)."
+     {:malli/schema [:=> [:cat :any]
+                     [:vector [:map
+                               [:seon.instrument/sym :string]
+                               [:seon.instrument/reason :keyword]]]]}
+     [db]
+     (if-not (enabled?)
+       []
+       (let [rows (db/query '[:find ?sym ?spec
+                              :where [?e :seon.fn/sym ?sym]
+                                     [?e :seon.fn/spec ?spec]]
+                            db)]
+         (into []
+               (keep
+                 (fn [[sym-str spec-str]]
+                   (when-let [slash (str/index-of (str sym-str) "/")]
+                     (let [ns-sym   (symbol (subs sym-str 0 slash))
+                           fn-sym   (symbol (subs sym-str (inc slash)))
+                           f        (-find-js-var ns-sym fn-sym)
+                           ;; Wrapped = the wrapper's recorded original
+                           ;; (simple path), OR malli's `instrumented?` flag
+                           ;; on a NON-simple fn (the wrap-in-place path,
+                           ;; where the live object stays the original with
+                           ;; wrapped arity slots). The flag alone is NOT
+                           ;; proof for a simple fn: malli stamps it on the
+                           ;; ORIGINAL too, so a restored/stripped original
+                           ;; still carries it while validating nothing.
+                           wrapped? (and f
+                                         (or (some? (gobj/get f "malli$instrument$original"))
+                                             (and (some? (gobj/get f "malli$instrument$instrumented?"))
+                                                  (not (-simple-fixed-arity-fn? f)))))]
+                       (when (and f (not wrapped?))
+                         ;; Schema work only for the (rare) unwrapped
+                         ;; candidates — the healthy-path cost is pure
+                         ;; var walking.
+                         (let [schema (try (reader/read-string spec-str)
+                                           (catch :default _ ::bad))
+                               ok?    (when-not (= ::bad schema)
+                                        (try (m/schema schema) true
+                                             (catch :default _ false)))]
+                           (cond
+                             (= ::bad schema)
+                             {:seon.instrument/sym    sym-str
+                              :seon.instrument/reason ::bad-spec}
+
+                             (not ok?)
+                             {:seon.instrument/sym    sym-str
+                              :seon.instrument/reason ::unresolvable-schema}
+
+                             ;; STRUCTURAL opt-out — the fn's own body is
+                             ;; the validation boundary; not a gap.
+                             (async-unwrappable? (async-fn? f) f schema)
+                             nil
+
+                             :else
+                             {:seon.instrument/sym    sym-str
+                              :seon.instrument/reason ::unwrapped})))))))
+               (sort-by first rows))))))
