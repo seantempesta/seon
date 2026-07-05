@@ -55,13 +55,6 @@ def test_session_fails_loud_on_def_typo(session):
     assert "def" in r["error"]["message"]
 
 
-def test_core_names_demunged(session):
-    names = session.core_names()
-    assert "even?" in names
-    assert "reduce" in names
-    assert len(names) > 300
-
-
 def test_config_resolves_repo():
     root = config.repo_root()
     assert (root / "bin" / "oracle-server").exists()

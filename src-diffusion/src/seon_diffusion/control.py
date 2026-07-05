@@ -36,8 +36,7 @@ import mlx.core as mx
 from .generate import GenConfig, _accept, _entropy
 from .repair import (HINT_PREFIX, hint_for as _hint_for,
                      strip_hints as _strip_hints,
-                     suggest_candidates as _suggest_candidates,
-                     try_repair, undeclared_var as _undeclared_var)
+                     undeclared_var as _undeclared_var)
 
 SLACK_TOKENS = 8          # extra free tokens granted to a scrambled span
 MIN_TAIL_FREE = 24        # always leave at least this much workspace tail
@@ -265,21 +264,22 @@ def generate_guided(model, tok, prompt_ids, oracle, eval_session=None,
                         result_note = _result_comment(tok, ev.get("value", ""))
                     if not ev.get("ok"):
                         msg = (ev.get("error") or {}).get("message", "eval failed")
-                        fixed = try_repair(src, msg, eval_session) if repair else None
-                        if fixed is None:
-                            var = _undeclared_var(msg)
-                            cands = (_suggest_candidates(eval_session, var, n=1)
-                                     if var else [])
+                        rr = (eval_session.repair(src, budget_ms=200)
+                              if repair and hasattr(eval_session, "repair")
+                              else None)
+                        if not (rr and rr.get("ok") and rr.get("fixed_code")):
+                            suggs = (rr or {}).get("suggestions") or []
                             errors.append({"span": [s, e], "error-kind": "eval",
                                            "source": msg,
-                                           "suggest": cands[0] if cands else None})
+                                           "suggest": (suggs[0].get("sym")
+                                                       if suggs else None)})
                             break
-                        src, fix_list = fixed
-                        repairs += len(fix_list)
+                        # the op already EVAL'D the winner into the session
+                        src = rr["fixed_code"]
+                        result_note = _result_comment(tok, rr.get("value", ""))
+                        repairs += len(rr["fixes"])
                         events.append({"attempt": attempt, "round": rnd,
-                                       "event": "repair",
-                                       "fixes": [{"from": a, "to": b}
-                                                 for a, b in fix_list]})
+                                       "event": "repair", "fixes": rr["fixes"]})
                 harvest_end = e
                 locked_forms += 1
                 locked_srcs.append(src + ("\n" + result_note if result_note else ""))

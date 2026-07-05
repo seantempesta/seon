@@ -44,6 +44,7 @@
     [clojure.string :as str]
     [seon.agent.turn :as turn]
     [seon.db :as db]
+    [seon.diffusion.grammar :as grammar]
     [seon.embed :as embed]
     [seon.repl.internal :as internal]
     [seon.schema :as schema]))
@@ -427,26 +428,8 @@
 (defn- ns-of [fq]
   (let [i (.lastIndexOf fq "/")] (when (>= i 0) (subs fq 0 i))))
 
-(defn- levenshtein
-  "Classic edit distance between strings `a` and `b`."
-  [a b]
-  (let [m (count a) n (count b)]
-    (cond
-      (zero? m) n
-      (zero? n) m
-      :else
-      (loop [i 1 prev (vec (range (inc n)))]
-        (if (> i m)
-          (peek prev)
-          (let [ca (nth a (dec i))
-                cur (reduce
-                      (fn [row j]
-                        (let [cost (if (= ca (nth b (dec j))) 0 1)]
-                          (conj row (min (inc (peek row))             ; insertion
-                                         (inc (nth prev j))           ; deletion
-                                         (+ cost (nth prev (dec j))))))) ; substitution
-                      [i] (range 1 (inc n)))]
-            (recur (inc i) cur)))))))
+;; The near-name distance fn is the SHARED `seon.diffusion.grammar/levenshtein`
+;; (one mechanism — the worker's `op:"repair"` candidate sweep uses the same fn).
 
 (defn symbol-resolves?
   "True iff `::name` names a real program-graph fn.
@@ -504,7 +487,7 @@
         scored   (->> (graph-syms db)
                       (keep (fn [fq]
                               (let [nm (name-of fq)
-                                    d  (levenshtein name nm)]
+                                    d  (grammar/levenshtein name nm)]
                                 (cond
                                   (= name nm)
                                   {::fq fq ::match-kind :exact ::distance 0}

@@ -8,8 +8,7 @@ Perf convention (owner): report in TOKENS/SECOND, always.
 from .generate import GenConfig, generate
 from .model import DiffusionGemmaMLX, load_model
 from .control import generate_guided
-from .repair import try_repair
 from .oracle import Oracle, EvalSession
 
 __all__ = ["GenConfig", "generate", "DiffusionGemmaMLX", "load_model",
-           "generate_guided", "try_repair", "Oracle", "EvalSession"]
+           "generate_guided", "Oracle", "EvalSession"]

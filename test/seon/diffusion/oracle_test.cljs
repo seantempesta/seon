@@ -226,6 +226,36 @@
             (is (empty? (:violations (run nil)))))))
       done)))
 
+;; :tests phase — model-written cljs.test deftests. ns + deftest + comment
+;; clamp; a defn (implementation before the pin) and register! both renoise.
+
+(def ^:private tests-phase-canvas
+  (str "(ns my.work-test (:require [cljs.test :refer [deftest is]]))\n" ; allowed
+       "(deftest mean-test (is (= 2 (mean [1 2 3]))))\n"                ; allowed
+       "(comment (mean []))\n"                                          ; allowed
+       "(defn mean [v] (/ (reduce + v) (count v)))\n"                   ; violation
+       "(schema/register! ::id :string)"))                              ; violation
+
+(deftest tests-phase-gate
+  (async done
+    (with-db
+      (fn [db]
+        (let [cs (oracle/refine {::oracle/canvas-text tests-phase-canvas
+                                 ::oracle/db db
+                                 ::oracle/phase :tests})
+              violations (->> (::oracle/renoise-spans cs)
+                              (filter #(= :phase-violation (::oracle/error-kind %)))
+                              (map ::oracle/source) set)
+              clamps (set (map ::oracle/source (::oracle/clamps cs)))]
+          (testing ":tests phase — ns + deftest + comment clamp"
+            (is (contains? clamps "(ns my.work-test (:require [cljs.test :refer [deftest is]]))"))
+            (is (contains? clamps "(deftest mean-test (is (= 2 (mean [1 2 3]))))"))
+            (is (contains? clamps "(comment (mean []))")))
+          (testing ":tests phase — defn + register! are violations"
+            (is (contains? violations "(defn mean [v] (/ (reduce + v) (count v)))"))
+            (is (contains? violations "(schema/register! ::id :string)")))))
+      done)))
+
 ;; ---------------------------------------------------------------------------
 ;; EVAL FOLD — a syntactically-clean form retrieval cannot fix (the symbol has
 ;; no near candidate in the graph) is a CLAMP, until an eval verdict (`:compile`

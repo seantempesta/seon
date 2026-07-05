@@ -49,7 +49,7 @@
 ;; vocabulary (text, error envelope) lives in seon.ai.
 ;; ============================================================
 
-(schema/register! ::mode [:enum :generate :clamp-smoke :infill :introspect :probe])
+(schema/register! ::mode [:enum :generate :guided :clamp-smoke :infill :introspect :probe])
 (schema/register! ::prompt :string)
 (schema/register! ::max-new-tokens :int)
 (schema/register! ::trace [:enum :canvas :entropy])
@@ -68,6 +68,18 @@
 (schema/register! ::suffix :string)
 (schema/register! ::max-hole-tokens :int)
 (schema/register! ::expect-contains :string)
+;; guided-mode inputs (the worker's guided loop — round-denoise → oracle
+;; check → repair → lock-and-execute → hint-scramble → in-loop checks).
+;; JSON-ready third-party shapes: strings/numbers/bools/arrays only, the
+;; checks entries string-keyed ({"call" …, "expect" …}) — NO kebab maps.
+(schema/register! ::phase :string)                       ; grammar phase, e.g. "schemas"|"tests"|"functions"
+(schema/register! ::hints :boolean)                      ; clamp `; fix:` hint comments on scrambled spans
+(schema/register! ::repair :boolean)                     ; auto-repair provable near-misses ($0 forwards)
+(schema/register! ::checks [:vector [:map-of :string :string]]) ; T3 behavioral [{call, expect}]
+(schema/register! ::prelude :string)                     ; forms eval'd into the session before checks
+(schema/register! ::max-rounds :int)
+(schema/register! ::max-attempts :int)
+(schema/register! ::seed :int)
 
 ;; The generic control request: a mode + the knobs it uses.
 (schema/register! ::request
@@ -86,7 +98,15 @@
    [::prefix              {:optional true} ::prefix]
    [::suffix              {:optional true} ::suffix]
    [::max-hole-tokens     {:optional true} ::max-hole-tokens]
-   [::expect-contains     {:optional true} ::expect-contains]])
+   [::expect-contains     {:optional true} ::expect-contains]
+   [::phase               {:optional true} ::phase]
+   [::hints               {:optional true} ::hints]
+   [::repair              {:optional true} ::repair]
+   [::checks              {:optional true} ::checks]
+   [::prelude             {:optional true} ::prelude]
+   [::max-rounds          {:optional true} ::max-rounds]
+   [::max-attempts        {:optional true} ::max-attempts]
+   [::seed                {:optional true} ::seed]])
 
 ;; The worker `output` map is Google/RunPod's shape, not seon's — a :map
 ;; boundary (like :seon.ai/provider-fields). We surface a normalized
@@ -190,7 +210,15 @@
    ::prefix              "prefix"
    ::suffix              "suffix"
    ::max-hole-tokens     "max_hole_tokens"
-   ::expect-contains     "expect_contains"})
+   ::expect-contains     "expect_contains"
+   ::phase               "phase"
+   ::hints               "hints"
+   ::repair              "repair"
+   ::checks              "checks"
+   ::prelude             "prelude"
+   ::max-rounds          "max_rounds"
+   ::max-attempts        "max_attempts"
+   ::seed                "seed"})
 
 (defn- ->json-value
   "A field value as the worker's JSON wants it: a keyword (mode / trace)
@@ -222,10 +250,14 @@
 
 ;; mode → the worker output field carrying the generated text.
 (def ^:private text-key-by-mode
-  {:generate :text :clamp-smoke :completion_text :infill :middle_text})
+  {:generate :text :guided :text :clamp-smoke :completion_text :infill :middle_text})
 
 ;; in-band per-mode failure keys the worker returns on a COMPLETED job
 ;; (it does NOT raise to the HTTP layer for a generation failure).
+;; :guided errors ride `gen_error` too; a guided `done:false` is NOT an
+;; error — it is an honest partial whose `text` + loop metadata (done,
+;; attempts, rounds, locked_forms, repairs, checks_passed, decoder_forwards,
+;; tok_per_s) surface via `::worker-output` on `:seon.ai/raw` unchanged.
 (def ^:private mode-error-keys [:gen_error :clamp_smoke_error :infill_error])
 
 (defn normalize-output

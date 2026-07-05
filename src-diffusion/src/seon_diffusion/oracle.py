@@ -96,23 +96,21 @@ class EvalSession(_LineServer):
     def eval(self, code, budget_ms=3000):
         return self.call({"op": "eval", "code": code, "budget-ms": budget_ms})
 
-    _DEMUNGE = [("_QMARK_", "?"), ("_BANG_", "!"), ("_GT_", ">"), ("_LT_", "<"),
-                ("_EQ_", "="), ("_STAR_", "*"), ("_PLUS_", "+"), ("_SLASH_", "/"),
-                ("_AMPERSAND_", "&"), ("_TILDE_", "~"), ("_APOS_", "'"), ("_", "-")]
+    def repair(self, code, graph_names=None, budget_ms=100):
+        """Oracle-side near-miss repair (op:"repair"): detect → candidates
+        from the LIVE session env (cljs.core + session defs + graph_names) →
+        compile-only trials → the unique winner is EVAL'D into the session.
+        Ambiguity or no candidate returns ok:false with suggestions — a
+        hint, never a guess. (Replaced the Python candidate shim.)"""
+        req = {"op": "repair", "code": code, "budget_ms": budget_ms}
+        if graph_names:
+            req["graph_names"] = graph_names
+        return self.call(req)
 
-    def core_names(self):
-        """Demunged `cljs.core` public names (cached) — the did-you-mean pool
-        for undeclared-var repair (a mini retrieval leg; the program-graph
-        retrieval leg supersedes this for project fns)."""
-        if not hasattr(self, "_core_names"):
-            r = self.eval("(pr-str (vec (js-keys js/cljs.core)))")
-            names = []
-            raw = r.get("value", "") if r.get("ok") else ""
-            for m in raw.replace("[", " ").replace("]", " ").replace('\\"', " ").replace('"', " ").split():
-                if "$" in m or m.startswith("-") or m.startswith("_"):
-                    continue
-                for a, b in self._DEMUNGE:
-                    m = m.replace(a, b)
-                names.append(m)
-            self._core_names = names
-        return self._core_names
+    def run_tests(self, vars=None):
+        """Run the session's deftest vars (op:"run-tests") — machine-readable
+        pass/fail/error counts + named failures."""
+        req = {"op": "run-tests"}
+        if vars:
+            req["vars"] = vars
+        return self.call(req)
