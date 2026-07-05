@@ -225,8 +225,9 @@
    `cljs.stacktrace/parse-stacktrace :nodejs` under the hood; bounded to
    [[max-frames]], nil-valued slots ABSENT (optional = absent). Returns
    nil (not []) when the string yields no frames — errors-as-values, a
-   parse mishap just means no frames on the datom."
-  {:malli/schema [:=> [:cat [:maybe :string]] [:maybe [:vector ::frame]]]}
+   parse mishap just means no frames on the datom. Absent ≠ nil: an
+   error with no stack never reaches this fn (callers `some->`)."
+  {:malli/schema [:=> [:cat :string] [:maybe [:vector ::frame]]]}
   [stack-str]
   (when (string? stack-str)
     (try
@@ -472,7 +473,8 @@
                      :always  (as-> m (if-let [t (basis-t-now)]
                                         (assoc m :seon.error/at t) m))
                      args-edn (assoc :seon.error/args-edn args-edn)
-                     :always  (as-> m (if-let [fs (parse-frames (:seon.error/stack m))]
+                     :always  (as-> m (if-let [fs (some-> (:seon.error/stack m)
+                                                          parse-frames)]
                                         (assoc m :seon.error/frames fs) m)))
           projection (datom-projection envelope)
           p          (when-not self-persist-failure?

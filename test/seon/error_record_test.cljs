@@ -113,8 +113,8 @@
     (is (= 10 (:seon.error.frame/column (first frames))))
     (testing "nil-valued slots are ABSENT (optional = absent)"
       (is (not (contains? (second frames) :seon.error.frame/fn))))
-    (testing "garbage/nil → nil, never a throw"
-      (is (nil? (error/parse-frames nil)))
+    (testing "garbage → nil, never a throw (absent ≠ nil: a stackless
+              error never reaches the fn — callers some->)"
       (is (nil? (error/parse-frames "no frames here"))))))
 
 (deftest record-returns-envelope-and-never-throws
