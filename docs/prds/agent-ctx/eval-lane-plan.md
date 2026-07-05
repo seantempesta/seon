@@ -72,7 +72,9 @@ tags: [orchestrator, agent]
     while clusters were in use).
 15. **Case-2 / mvm tier** (later, design-first): the inspect sandbox/tool
     bridge in isolated microVMs (`reference-code/mvm`) — unlocks HumanEval/
-    MBPP, GAIA, tau2, agentbench (the coding + web-agency rows).
+    MBPP, GAIA, agentbench (the coding + web-agency rows). tau2 is DROPPED
+    (protocol-scored — owner ruling 2026-07-05, see
+    [[research/result-driven-benchmark-suite-design-2026-07-05]] §6).
 
 ## D — Acme as the downstream-usage proof
 

@@ -1395,3 +1395,69 @@ Eval lane only; NO `src/seon` edits — `src-inspect-ai` + `evals` + `docs`.
   owner's go/no-go on the ordered plan (slice 1 = oracle checks + repo
   materializer + one `bug_fix` template + `behavior_miss` → one honest ledger
   row, n=5).
+
+## 2026-07-05 — tooling lane: error→fork workflow SHIPPED (unit B; roadmap dirty from peer → note here)
+
+- **What:** `bin/seon cluster fork <src> <t|--at t> [fork-name]` boots a
+  cluster's world at basis-t `t` as a live, WRITABLE, disposable cluster
+  (default name `fork-<src>-<t>`; own store dir + pod-<fork> on a free port).
+  Mechanism: `seon.server.registry/fork-db!` over the 7891 socket REPL (the
+  destroy precedent — one supervisor channel, no wire op, never
+  agent-exposed) wrapping `datahike.api/fork-database` (fork sha `5566ab13`),
+  with post-copy verification (head == `:at` + full history index scan, one
+  tear-retry). The fork pod's own boot `ensure-db` registers it — the ONE
+  creation path; destroy already cleans it fully (independent store id/dir).
+- **Bridge:** `seon.agent.inspect/repro` now returns `::fork-hint` — the
+  exact command for that error's `:seon.error/at`. Flow: `watch-faults` →
+  `errors` → `error` → `repro` → **fork** → fix → destroy.
+- **At-semantics (live-verified):** `:seon.error/at` = catch-site basis-t =
+  the db the failing code SAW; the error datom commits later, so it does
+  NOT exist inside its own fork. Boot-seed appends its usual idempotent txs
+  (head moves a few past t; world-state at t intact).
+- **Live proof (default cluster):** seeded :agent error @t=536870986 →
+  repro's hint → fork booted (pod 52902) → error datom absent, 792 fns/agent
+  present, inspect/errors works, as-of t queryable, write landed + survived a
+  fork-pod restart, source head byte-unchanged (536870987) → destroy left
+  zero residue (dir/port-file/proc-dir/registry), default intact.
+- **Docs:** observability.md (error-recording gains the FORK step +
+  semantics), process-management.md (`cluster fork` section).
+- Commits: dd4fac87 (registry/fork-db!), bf843667 (supervisor+docs),
+  71f00b33 (repro ::fork-hint), 7c83cec9 (REPL literal match fix).
+
+## 2026-07-05 — eval lane: benchmark-suite design FINAL (Seon-in-docker; verified ×3; awaiting owner go/no-go)
+
+- **The design pivoted twice today on owner rulings and is now final in
+  `research/result-driven-benchmark-suite-design-2026-07-05.md`:**
+  (1) suite centers on the two most-curated benches — **SWE-bench Verified**
+  (DeepSeek NT anchor 73.6) + **terminal-bench** (59.1); polyglot demoted to
+  at-most smoke row, BFCL + tau2 dropped (BFCL's shipped adapter/tests:
+  keep-unscheduled recommended, owner call — this moots the parked
+  form-vs-JSON eval-native decision); (2) **Seon is packaged as a canonical
+  docker image** (deployment artifact == test env; restricted-permission
+  users run the same thing we bench). The earlier shell-into-container
+  transport is DEAD as a primary (survives only as fallback option B) — so
+  the shell-transport cross-lane ask is WITHDRAWN.
+- **Substrate:** one container (wire-server JVM + pod, UDS inside), tree
+  fully self-contained under `/opt/seon` incl. bundled JRE + Node (hard
+  requirement — bench task images ship neither); composition = mount the
+  runtime tree read-only into the UNMODIFIED official instance image via
+  inspect-evals' first-class `sandbox_config` per-sample seam (zero ×500
+  builds, official digests intact, official scorers untouched);
+  terminal-bench via their `--agent-import-path` BaseAgent hook.
+- **Verification:** three independent passes; ~40 file:line citations all
+  confirmed (several exact-to-the-count). The one load-bearing hole found
+  (overlay lacked the runtimes) is fixed + named as a §10 falsifier.
+- **Cross-lane asks (tooling), replacing the transport ask:**
+  (a) `seon-entrypoint` packaging contract — foreground boot from immutable
+  `/opt/seon` (wire-server → ready-gate → pod), signal-forwarding,
+  pod-stage-only restart for the resume choreography (contract in design
+  §9); (b) cluster-level run-bounds config — still required (SWE/terminal
+  trajectories ~10× anything run so far). Eval lane prototypes the
+  entrypoint in slice 1; tooling owns the final shape.
+- **Build plan (slices):** 1 canonical image boots standalone + trivial
+  task via /agents/run → 2 zero-Seon SWE-bench de-risk (unchanged
+  inspect-evals, 1-2 instances) → 3 composition on ONE instance (null-run
+  proves oracle non-interference + first honest ledger row) → 4 frozen dev
+  slice + turn-budget measurement → baseline arm (mini-swe-agent) → tb
+  adapter → restart-resume rows → owner-gated milestone. Awaiting owner
+  go/no-go on slice 1.
