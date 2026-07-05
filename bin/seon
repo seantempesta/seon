@@ -1400,8 +1400,11 @@ cmd_watch_faults() {
   mkfifo "$fifo"
   tail -F -n 0 "$lf" 2>/dev/null > "$fifo" &
   local tail_pid=$!
+  # `|| true` is load-bearing: the script runs under set -e, and the trap
+  # re-fires at exit AFTER the explicit kill below — a failing re-kill of the
+  # already-dead tail would flip the exit code to 1.
   # shellcheck disable=SC2064
-  trap "kill $tail_pid 2>/dev/null; rm -f '$fifo'" EXIT INT TERM
+  trap "kill $tail_pid 2>/dev/null || true; rm -f '$fifo'" EXIT INT TERM
   local marker=""
   local line
   while IFS= read -r line; do
@@ -1421,6 +1424,7 @@ cmd_watch_faults() {
   echo "-------------------------------"
   echo "triage: (seon.agent.inspect/errors) → (seon.agent.inspect/error {:seon.agent.inspect/eid N}) → (seon.agent.inspect/repro {:seon.agent.inspect/eid N})"
   echo "(dev dial is :crash — the pod exited after persisting the fault datom; restart: bin/seon restart pod)"
+  trap - EXIT INT TERM
   exit 0
 }
 
