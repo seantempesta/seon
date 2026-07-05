@@ -99,7 +99,9 @@
 (defn- fn-rows
   "Every `:seon.fn` row joined to its owning ns name, optionally
    filtered to `ns-kw` (compared by `name` so :my.ns ≡ 'my.ns).
-   Each row: {:sym :ns :spec :fn-var? :private? :schema-error}.
+   Each row is a projection speaking the PERSISTED attr keys
+   (`:seon.fn/sym`/`:seon.ns/name`/`:seon.fn/spec`/`:seon.fn/fn-var?`/
+   `:seon.fn/private?`/`:seon.fn/schema-error` — C39, no bare twins).
    Absent attrs come back as \"\" / sentinel defaults via get-else."
   [db ns-kw]
   (let [rows (db/query
@@ -115,11 +117,12 @@
                   [(get-else $ ?f :seon.fn/private? false) ?priv]
                   [(get-else $ ?f :seon.fn/schema-error "") ?err]]})
         all  (map (fn [[sym nm spec fnvar priv err]]
-                    {:sym sym :ns (name nm) :spec spec
-                     :fn-var? fnvar :private? priv :schema-error err})
+                    {:seon.fn/sym sym :seon.ns/name nm :seon.fn/spec spec
+                     :seon.fn/fn-var? fnvar :seon.fn/private? priv
+                     :seon.fn/schema-error err})
                   rows)]
     (if ns-kw
-      (filter #(= (name ns-kw) (:ns %)) all)
+      (filter #(= (name ns-kw) (name (:seon.ns/name %))) all)
       all)))
 
 (defn- public-fn-rows
@@ -127,8 +130,8 @@
    apply to. Private helpers and non-fn defs are exempt."
   [db ns-kw]
   (->> (fn-rows db ns-kw)
-       (filter :fn-var?)
-       (remove :private?)))
+       (filter :seon.fn/fn-var?)
+       (remove :seon.fn/private?)))
 
 (defn- parse-spec
   "Read a `:seon.fn/spec` string (pr-str'd Malli form) back to data.
@@ -163,17 +166,17 @@
 
 (defn- arg-entries
   "The argument slots of an arity's input form, each
-   `{:label <string> :schema <form>}`. `[:catn [name spec]…]` slots are
-   labelled by name; `[:cat …]` slots by 1-based position."
+   `{::label <string> ::schema <form>}`. `[:catn [name spec]…]` slots
+   are labelled by name; `[:cat …]` slots by 1-based position."
   [input-form]
   (let [input (strip-props input-form)]
     (when (and (vector? input) (#{:cat :catn} (first input)))
       (if (= :catn (first input))
         (for [entry (rest input)
               :when (vector? entry)]
-          {:label  (str "arg " (first entry))
-           :schema (last entry)})
-        (map-indexed (fn [i s] {:label (str "arg " (inc i)) :schema s})
+          {::label  (str "arg " (first entry))
+           ::schema (last entry)})
+        (map-indexed (fn [i s] {::label (str "arg " (inc i)) ::schema s})
                      (rest input))))))
 
 (defn- form-contains-maybe?
@@ -215,7 +218,7 @@
          "  {:malli/schema [:=> [:cat :string] :string]}\n"
          "  [who]\n"
          "  (str \"hi \" who))")
-    (fn [{:keys [sym spec schema-error]}]
+    (fn [{:seon.fn/keys [sym spec schema-error]}]
       (when (and (str/blank? spec) (str/blank? schema-error))
         [{:seon.warn/sym sym}]))))
 
@@ -231,7 +234,7 @@
          "third-party library returns that you don't control.")
     (str ";; before: [:=> [:cat :string] :any]\n"
          ";; after:  [:=> [:cat :string] :string]")
-    (fn [{:keys [sym spec]}]
+    (fn [{:seon.fn/keys [sym spec]}]
       (for [arity (arity-forms (parse-spec spec))
             :when (= :any (last arity))]
         {:seon.warn/sym sym :seon.warn/where "return"}))))
@@ -247,9 +250,9 @@
          "allowed only for third-party boundary values.")
     (str ";; before: [:=> [:catn [:kb.doc/title :any]] :string]\n"
          ";; after:  [:=> [:catn [:kb.doc/title :string]] :string]")
-    (fn [{:keys [sym spec]}]
+    (fn [{:seon.fn/keys [sym spec]}]
       (for [arity (arity-forms (parse-spec spec))
-            {:keys [label schema]} (arg-entries (second arity))
+            {::keys [label schema]} (arg-entries (second arity))
             :when (= :any schema)]
         {:seon.warn/sym sym :seon.warn/where label}))))
 
@@ -264,7 +267,7 @@
          "Use {:optional true} on the map entry, or a concrete type.")
     (str ";; before: [:map [:kb.doc/title [:maybe :string]]]\n"
          ";; after:  [:map [:kb.doc/title {:optional true} :string]]")
-    (fn [{:keys [sym spec]}]
+    (fn [{:seon.fn/keys [sym spec]}]
       (when-let [form (parse-spec spec)]
         (when (form-contains-maybe? form)
           [{:seon.warn/sym sym :seon.warn/where "schema"}])))))
@@ -279,7 +282,7 @@
          "[:=> [:cat …inputs…] <return>] — add the return.")
     (str ";; before: [:=> [:cat :string]]\n"
          ";; after:  [:=> [:cat :string] :string]")
-    (fn [{:keys [sym spec]}]
+    (fn [{:seon.fn/keys [sym spec]}]
       (for [arity (arity-forms (parse-spec spec))
             :let [input (strip-props (second arity))]
             ;; only when the input IS present (a [:cat …] form) — a
@@ -299,7 +302,7 @@
          "Every arity specs ALL its arguments — a 0-arg fn uses [:cat].")
     (str ";; before: [:=> :string]\n"
          ";; after:  [:=> [:cat] :string]")
-    (fn [{:keys [sym spec]}]
+    (fn [{:seon.fn/keys [sym spec]}]
       (for [arity (arity-forms (parse-spec spec))
             :let [input (strip-props (second arity))]
             :when (and (some? input)
@@ -414,9 +417,9 @@
   (let [groups (->> (domain-attrs req)
                     (keep (fn [attr]
                             (when-let [[stem _] (unit-split attr)]
-                              {:attr attr
-                               :group [(namespace attr) stem]})))
-                    (group-by :group)
+                              {::attr  attr
+                               ::group [(namespace attr) stem]})))
+                    (group-by ::group)
                     vals
                     (filter #(> (count %) 1)))]
     {:seon.warn/kind :parallel-attr
@@ -425,13 +428,13 @@
           (mapcat
             (fn [members]
               (let [ranked (->> members
-                                (map (fn [{:keys [attr]}]
-                                       {:attr attr
-                                        :n    (attr-instance-count db attr)}))
-                                (sort-by (fn [{:keys [attr n]}]
+                                (map (fn [{::keys [attr]}]
+                                       {::attr attr
+                                        ::n    (attr-instance-count db attr)}))
+                                (sort-by (fn [{::keys [attr n]}]
                                            [(- n) (str attr)])))
-                    {established :attr est-n :n} (first ranked)]
-                (for [{:keys [attr]} (rest ranked)]
+                    {established ::attr est-n ::n} (first ranked)]
+                (for [{::keys [attr]} (rest ranked)]
                   {:seon.warn/sym   (str attr)
                    :seon.warn/where (str "vs established " established
                                          " (" est-n " entit"
