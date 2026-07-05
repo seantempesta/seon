@@ -145,8 +145,11 @@ def diffgemma(payload):
             info["config_err"] = f"{type(e).__name__}: {e}"[:200]
         return info
 
+    if mode == "guided":
+        return _guided(payload, info)
+
     if mode != "generate":
-        info["gen_error"] = f"mode {mode!r} not supported by the MLX worker (generate/probe only)"
+        info["gen_error"] = f"mode {mode!r} not supported by the MLX worker (generate/probe/guided)"
         return info
 
     try:
@@ -179,6 +182,70 @@ def diffgemma(payload):
             "gen_s": round(r["generate_s"], 3),
             "tok_per_s": round(r["tok_per_s"], 1),
             "tokens_per_forward": [round(r["tokens_per_forward"], 2)],
+        })
+    except Exception as e:
+        info["gen_error"] = f"{type(e).__name__}: {e}"[:300]
+        info["trace_err"] = traceback.format_exc()[-1200:]
+    return info
+
+
+_ORACLE = {}         # persistent bb oracle, spawned once per worker process
+
+
+def _guided(payload, info):
+    """One guided verified-canvas build: fresh EvalSession per job (torn
+    down on any exit), persistent bb oracle, failures IN-BAND as gen_error.
+    Perf fields in tokens/second."""
+    from .control import generate_guided
+    from .generate import GenConfig
+    from .oracle import EvalSession, Oracle
+    try:
+        tok, model = _load()
+        info["load_s"] = _CACHE["load_s"]
+        if "o" not in _ORACLE:
+            _ORACLE["o"] = Oracle()
+        enc = tok.apply_chat_template(
+            [{"role": "user", "content": payload["prompt"]}],
+            tokenize=True, add_generation_prompt=True)
+        ids = enc["input_ids"] if hasattr(enc, "keys") else enc
+        if ids and isinstance(ids[0], list):
+            ids = ids[0]
+        gen = GenConfig(
+            entropy_bound=float(payload.get("entropy_bound", 0.5)),
+            max_denoising_steps=int(payload.get("max_denoising_steps", 48)),
+            seed=int(payload["seed"]) if payload.get("seed") is not None else None,
+        )
+        prelude = payload.get("prelude") or None
+        ses = EvalSession()
+        try:
+            if prelude:
+                ses.eval(prelude)
+            r = generate_guided(
+                model, tok, ids, _ORACLE["o"], eval_session=ses, gen=gen,
+                phase=payload.get("phase") or None,
+                hints=bool(payload.get("hints", True)),
+                repair=bool(payload.get("repair", True)),
+                checks=payload.get("checks") or None,
+                prelude=prelude,
+                max_rounds=int(payload.get("max_rounds", 8)),
+                max_attempts=int(payload.get("max_attempts", 3)))
+        finally:
+            ses.close()
+        _STATE["gens"] += 1
+        info.update({
+            "text": r["text"],
+            "done": r["done"],
+            "attempts": r["attempts"],
+            "rounds": r["rounds"],
+            "locked_forms": r["locked_forms"],
+            "repairs": r["repairs"],
+            "checks_passed": r["checks_passed"],
+            "decoder_forwards": r["decoder_forwards"],
+            "prompt_tokens": len(ids),
+            "completion_tokens": len(tok(r["text"], add_special_tokens=False)["input_ids"]) if r["text"] else 0,
+            "gen_s": round(r["generate_s"], 3),
+            "tok_per_s": round(r["tok_per_s"], 1),
+            "events": r["events"][:40],
         })
     except Exception as e:
         info["gen_error"] = f"{type(e).__name__}: {e}"[:300]

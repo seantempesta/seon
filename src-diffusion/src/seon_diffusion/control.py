@@ -41,10 +41,25 @@ from .repair import (HINT_PREFIX, hint_for as _hint_for,
 
 SLACK_TOKENS = 8          # extra free tokens granted to a scrambled span
 MIN_TAIL_FREE = 24        # always leave at least this much workspace tail
+RESULT_CLIP_TOKENS = 30   # context gets a clipped projection, NEVER a raw print
 
 
 def _tok_ids(tok, text):
     return tok(text, add_special_tokens=False)["input_ids"] if text else []
+
+
+def _result_comment(tok, value):
+    """Clipped `;; => …` projection of an eval result for the encoder
+    context. The FULL value stays live in the session (re-reference, don't
+    re-print — the three-tier storage rule at one more render boundary).
+    Var prints and nil are noise — omitted."""
+    if not value or value == "nil" or value.startswith("#'"):
+        return ""
+    ids = _tok_ids(tok, value)
+    if len(ids) > RESULT_CLIP_TOKENS:
+        value = tok.decode(ids[:RESULT_CLIP_TOKENS]) + \
+            f" …+{len(ids) - RESULT_CLIP_TOKENS}tok (re-reference, don't re-print)"
+    return f";; => {value}\n"
 
 
 class _Workspace:
@@ -243,8 +258,11 @@ def generate_guided(model, tok, prompt_ids, oracle, eval_session=None,
                 if src in seen_sources:          # duplicate form: skip past it,
                     harvest_end = e              # don't re-encode or re-count
                     continue
+                result_note = ""
                 if eval_session is not None:
                     ev = eval_session.eval(src)
+                    if ev.get("ok"):
+                        result_note = _result_comment(tok, ev.get("value", ""))
                     if not ev.get("ok"):
                         msg = (ev.get("error") or {}).get("message", "eval failed")
                         fixed = try_repair(src, msg, eval_session) if repair else None
@@ -264,7 +282,7 @@ def generate_guided(model, tok, prompt_ids, oracle, eval_session=None,
                                                  for a, b in fix_list]})
                 harvest_end = e
                 locked_forms += 1
-                locked_srcs.append(src)
+                locked_srcs.append(src + ("\n" + result_note if result_note else ""))
                 seen_sources.add(src)
                 events.append({"attempt": attempt, "round": rnd,
                                "event": "lock", "form": src[:80]})
