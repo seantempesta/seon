@@ -4,8 +4,8 @@
 ;;
 ;; Sends ONE Clojure expression to the wire-server's loopback socket REPL
 ;; (the same supervisor channel `cluster fork`/`cluster destroy` have always
-;; used — clojure.core.server/repl on 127.0.0.1, port in
-;; tmp/seon-writer-repl-port) and PARSES the printed reply as EDN instead of
+;; used — clojure.core.server/repl on 127.0.0.1, port in the per-supervisor
+;; $SEON_WRITER_REPL_PORT_FILE) and PARSES the printed reply as EDN instead of
 ;; pattern-matching it. Owner directive: the moment structure crosses a
 ;; boundary it is parsed as data — bash never greps printed EDN (the grep
 ;; approach broke once already: the REPL prints namespaced-map literals
@@ -20,7 +20,9 @@
 ;;   SUCCESS-KEY  optional fully-qualified keyword (with or without the
 ;;                leading ':'); exit 0 iff (get result key) is truthy.
 ;;                Omitted = any map reply is success.
-;;   --port       socket REPL port (default: read tmp/seon-writer-repl-port).
+;;   --port       socket REPL port (default: read the per-supervisor port
+;;                file — $SEON_WRITER_REPL_PORT_FILE when set, else the
+;;                default cluster's tmp/seon-writer-repl-port-default).
 ;;   --timeout    overall deadline in seconds (default 30).
 ;;   --get        print ONLY (get result key) to stdout (strings raw,
 ;;                everything else pr-str'd) instead of the whole map.
@@ -47,7 +49,15 @@
   (or (some-> *file* io/file .getCanonicalFile .getParentFile .getParentFile .getPath)
       (System/getProperty "user.dir")))
 
-(def port-file (io/file repo-root "tmp" "seon-writer-repl-port"))
+;; Per-supervisor port file (registry C48): $SEON_WRITER_REPL_PORT_FILE (repo-
+;; root-relative unless absolute; bin/seon exports it), defaulting to the
+;; default cluster's file. NEVER the old shared tmp/seon-writer-repl-port —
+;; a second supervisor's wire-server (bin/acme) clobbered that.
+(def port-file
+  (let [p (or (System/getenv "SEON_WRITER_REPL_PORT_FILE")
+              "tmp/seon-writer-repl-port-default")
+        f (io/file p)]
+    (if (.isAbsolute f) f (io/file repo-root p))))
 
 (defn die [code & msgs]
   (binding [*out* *err*]

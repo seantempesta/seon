@@ -9,7 +9,8 @@ per sample (`ephemeral_cluster()`); the planning row keeps ITS cluster alive
 across a mid-sample pod restart (`restart_pod`, which mints a NEW ephemeral
 port — always take the returned Cluster).
 
-The wire-server's loopback socket REPL (port in `tmp/seon-writer-repl-port`)
+The wire-server's loopback socket REPL (port in the per-supervisor file —
+`$SEON_WRITER_REPL_PORT_FILE`, default `tmp/seon-writer-repl-port-default`)
 survives pod restarts and sees every cluster's db through the registry —
 `wire_repl_json` is the read-back channel the planning snapshot uses.
 
@@ -20,6 +21,7 @@ unit-tested offline with fakes; nothing here talks to a pod at import time.
 from __future__ import annotations
 
 import contextlib
+import os
 import http.client
 import json
 import re
@@ -371,7 +373,18 @@ def ephemeral_cluster(name: str | None = None, *,
 # Wire-server socket REPL — the supervisor-facing read-back channel
 # ---------------------------------------------------------------------------
 
-WIRE_REPL_PORT_FILE = REPO_ROOT / "tmp" / "seon-writer-repl-port"
+# Per-supervisor port file (seon registry C48): the harness benches through
+# the DEFAULT supervisor's wire-server, whose file is
+# tmp/seon-writer-repl-port-default; $SEON_WRITER_REPL_PORT_FILE overrides
+# (bin/seon exports it). The old shared tmp/seon-writer-repl-port is dead —
+# a second supervisor (bin/acme) clobbered it.
+def _wire_repl_port_file() -> Path:
+    p = Path(os.environ.get("SEON_WRITER_REPL_PORT_FILE",
+                            "tmp/seon-writer-repl-port-default"))
+    return p if p.is_absolute() else REPO_ROOT / p
+
+
+WIRE_REPL_PORT_FILE = _wire_repl_port_file()
 
 
 def wire_repl_port() -> int:

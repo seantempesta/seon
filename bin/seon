@@ -89,6 +89,9 @@ mkdir -p "$PROC_DIR" "$LOG_DIR"
 #   SEON_REQ_SOCK           wire-server request UDS path
 #   SEON_PUB_SOCK           wire-server publish UDS path
 #   SEON_WRITER_REPL_PORT   wire-server loopback socket-REPL port
+#   SEON_WRITER_REPL_PORT_FILE  per-supervisor wire REPL port file (default
+#                           tmp/seon-writer-repl-port-<cluster>); wire-server
+#                           writes it, ready_check/seon-server-call read it
 #   SEON_PORT               pod HTTP port (read by the pod itself —
 #                           seon.web.serve; inherits through nohup)
 #   SEON_PORT_FILE          per-cluster pod port file (default tmp/seon-port);
@@ -108,6 +111,18 @@ SEON_CLUSTER_DIR="${SEON_CLUSTER_DIR:-data/clusters/default}"
 SEON_REQ_SOCK="${SEON_REQ_SOCK:-tmp/seon-cluster-default-req.sock}"
 SEON_PUB_SOCK="${SEON_PUB_SOCK:-tmp/seon-cluster-default-pub.sock}"
 SEON_WRITER_REPL_PORT="${SEON_WRITER_REPL_PORT:-7891}"
+
+# Per-supervisor wire-server REPL port file (registry C48). The wire-server
+# writes its bound REPL port here on boot; ready_check and bin/seon-server-call
+# read it. A SINGLE shared file (the old tmp/seon-writer-repl-port) was
+# clobbered by a second supervisor's wire-server (bin/acme), routing file-based
+# consumers to whichever JVM started LAST — so namespace it by cluster like the
+# pod's $SEON_PORT_FILE: default = tmp/seon-writer-repl-port-default, acme
+# derives tmp/seon-writer-repl-port-acme automatically from its
+# SEON_CLUSTER_DIR. Exported so bin/seon-server-call (and any manual consumer)
+# resolves the SAME file this supervisor's wire-server writes.
+SEON_WRITER_REPL_PORT_FILE="${SEON_WRITER_REPL_PORT_FILE:-tmp/seon-writer-repl-port-$(basename "$SEON_CLUSTER_DIR")}"
+export SEON_WRITER_REPL_PORT_FILE
 
 # Per-cluster pod port file. The pod (seon.web.serve/write-port-file!) writes
 # its bound HTTP port here on boot; the supervisor's ready_check/status read it.
@@ -272,8 +287,8 @@ process_command() {
     # identity both sides derive the konserve store :id from (registry C15);
     # never a socket-path artifact. The --repl-port opens a loopback-only
     # socket REPL on 127.0.0.1 for diagnostics, and the chosen port is
-    # written to tmp/seon-writer-repl-port.
-    wire-server) echo "clojure -M:simd:fork-deps:writer --backend file --db-name $(basename "$SEON_CLUSTER_DIR") --path $SEON_CLUSTER_DIR/store --req-sock $SEON_REQ_SOCK --pub-sock $SEON_PUB_SOCK --repl-port $SEON_WRITER_REPL_PORT" ;;
+    # written to the PER-SUPERVISOR $SEON_WRITER_REPL_PORT_FILE (C48).
+    wire-server) echo "clojure -M:simd:fork-deps:writer --backend file --db-name $(basename "$SEON_CLUSTER_DIR") --path $SEON_CLUSTER_DIR/store --req-sock $SEON_REQ_SOCK --pub-sock $SEON_PUB_SOCK --repl-port $SEON_WRITER_REPL_PORT --repl-port-file $SEON_WRITER_REPL_PORT_FILE" ;;
     *) return 1 ;;
   esac
 }
@@ -284,7 +299,7 @@ process_ready_hint() {
     pod-*)       echo "  ready: tmp/seon-port-${1#pod-} written + HTTP answers on /" ;;
     cljs-watch)  echo "  ready: 'Build completed' appears in logs/cljs-watch.log" ;;
     jvm)         echo "  ready: logs/app.log shows 'Server started'" ;;
-    wire-server) echo "  ready: $SEON_REQ_SOCK ACCEPTING; REPL on 127.0.0.1:$SEON_WRITER_REPL_PORT (tmp/seon-writer-repl-port)" ;;
+    wire-server) echo "  ready: $SEON_REQ_SOCK ACCEPTING; REPL on 127.0.0.1:$SEON_WRITER_REPL_PORT ($SEON_WRITER_REPL_PORT_FILE)" ;;
     dg-worker)   echo "  ready: 'seon_diffusion worker on' in logs/dg-worker.log; /health answers" ;;
     *) echo "" ;;
   esac
@@ -323,7 +338,7 @@ ready_check() {
   case "$name" in
     wire-server)
       [ -S "$SEON_REQ_SOCK" ] || return 1
-      [ -f tmp/seon-writer-repl-port ] || return 1
+      [ -f "$SEON_WRITER_REPL_PORT_FILE" ] || return 1
       if nc_supports_uds; then
         # A real connect with immediate EOF. NOT `nc -z -U`: macOS nc's
         # -z returns 1 even against a live, accepting UDS (verified
@@ -907,6 +922,10 @@ _stop_unlocked() {
   # the old port. Remove it on stop so "port file exists" ⇒ "pod wrote it".
   case "$name" in
     pod-*) rm -f "tmp/seon-port-${name#pod-}" ;;
+    # Same rule for the wire-server's REPL port file: deleteOnExit covers a
+    # graceful JVM exit, but a SIGKILL leaves a stale file — remove it so
+    # "file exists" ⇒ "this supervisor's wire-server wrote it".
+    wire-server) rm -f "$SEON_WRITER_REPL_PORT_FILE" ;;
   esac
 }
 
@@ -1210,11 +1229,10 @@ cluster_fork() {
   wait_ready wire-server || exit 1
 
   local expr out
-  # Port from THIS supervisor's env, not tmp/seon-writer-repl-port: the file
-  # path is hardcoded in wire.clj, so a second supervisor's wire-server
-  # (bin/acme, 7981) clobbers it — file-based discovery could route this
-  # RPC to the WRONG cluster's JVM. $SEON_WRITER_REPL_PORT is exactly what
-  # this supervisor passed via --repl-port at wire-server start.
+  # Port from THIS supervisor's env: $SEON_WRITER_REPL_PORT is exactly what
+  # this supervisor passed via --repl-port at wire-server start. (The port
+  # FILE is per-supervisor too since C48 — $SEON_WRITER_REPL_PORT_FILE — but
+  # the env port is still the most direct source here.)
   expr="$(printf '(seon.server.registry/fork-db! {:seon.server.registry/db-name :%s :seon.server.registry/fork-name :%s :seon.server.registry/at %s :seon.server.registry/path "data/clusters/%s/store"})' \
            "$src" "$fork_name" "$t" "$fork_name")"
   # Structured RPC: bin/seon-server-call parses the REPL's printed EDN as
@@ -1272,9 +1290,8 @@ cluster_destroy() {
     # Structured RPC (bin/seon-server-call): success = delete-db!'s own
     # ::deleted? flag. A false/failed reply is reported honestly but does
     # not abort — the directory wipe below is the backstop either way.
-    # Port from $SEON_WRITER_REPL_PORT (this supervisor's own --repl-port),
-    # not the shared tmp/seon-writer-repl-port file a second supervisor's
-    # wire-server clobbers.
+    # Port from $SEON_WRITER_REPL_PORT (this supervisor's own --repl-port);
+    # the port file is per-supervisor too since C48.
     if out="$(bin/seon-server-call --port "$SEON_WRITER_REPL_PORT" --timeout 15 \
                 "(seon.server.registry/delete-db! {:seon.server.registry/db-name :$name})" \
                 ':seon.server.registry/deleted?')"; then
@@ -1684,6 +1701,9 @@ Env overrides (downstream parametrization — defaults = today's values):
   SEON_REQ_SOCK           wire-server request UDS (default tmp/seon-cluster-default-req.sock)
   SEON_PUB_SOCK           wire-server publish UDS (default tmp/seon-cluster-default-pub.sock)
   SEON_WRITER_REPL_PORT   wire-server loopback REPL port (default 7891)
+  SEON_WRITER_REPL_PORT_FILE  per-supervisor wire REPL port file (default
+                          tmp/seon-writer-repl-port-<cluster>); wire-server
+                          writes it, ready_check/seon-server-call read it
   SEON_PORT               pod HTTP port (default 7890; read by the pod)
   SEON_PORT_FILE          per-cluster pod port file (default tmp/seon-port);
                           pod writes its bound port, status/ready_check read it

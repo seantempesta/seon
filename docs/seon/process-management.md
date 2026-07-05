@@ -83,7 +83,7 @@ Ready gates (`wait_ready` in the script — observed signals, not just log lines
 | Process | Ready when | Bound |
 |---|---|---|
 | `cljs-watch` | `out/client/main.js` newer than this start, or `Build completed` in the fresh log | 300s |
-| `wire-server` | `tmp/seon-cluster-default-req.sock` ACCEPTS a connection (real `nc -U` connect — macOS `nc -z -U` is broken) + `tmp/seon-writer-repl-port` written | 180s |
+| `wire-server` | `tmp/seon-cluster-default-req.sock` ACCEPTS a connection (real `nc -U` connect — macOS `nc -z -U` is broken) + `$SEON_WRITER_REPL_PORT_FILE` (default `tmp/seon-writer-repl-port-default`) written | 180s |
 | `pod` | `$SEON_PORT_FILE` (default `tmp/seon-port`) written + HTTP answers on `/` | 120s |
 
 On timeout or early death the wait fails LOUD, naming the log to read, and later stages are not started. `bin/seon cluster reset` shares the same `wait_ready` helper.
@@ -101,7 +101,7 @@ Real failure 2026-06-10: a datahike `:git/sha` bump made the first wire-server s
 | `pod` | `node out/client/main.js` | `logs/pod.log` | `$SEON_PORT_FILE` (default `tmp/seon-port`) written + HTTP answers on `/` |
 | `cljs-watch` | `clj -M:cljs watch client` | `logs/cljs-watch.log` | "Build completed" appears in log |
 | `jvm` | `./bin/run` | `logs/jvm.log` | `logs/app.log` shows "Server started" |
-| `wire-server` | `clojure -M:writer ...` | `logs/wire-server.log` | `tmp/seon-cluster-default-req.sock` accepting + `tmp/seon-writer-repl-port` written |
+| `wire-server` | `clojure -M:writer ...` | `logs/wire-server.log` | `tmp/seon-cluster-default-req.sock` accepting + `$SEON_WRITER_REPL_PORT_FILE` (default `tmp/seon-writer-repl-port-default`) written |
 
 ### IMPORTANT — pod ↔ cljs-watch dependency
 

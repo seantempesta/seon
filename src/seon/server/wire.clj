@@ -44,6 +44,10 @@
       "--req-sock"  (recur (assoc acc :req-sock (second xs)) (drop 2 xs))
       "--pub-sock"  (recur (assoc acc :pub-sock (second xs)) (drop 2 xs))
       "--repl-port" (recur (assoc acc :repl-port (Long/parseLong (second xs))) (drop 2 xs))
+      ;; --repl-port-file: where the dev REPL's bound port is written for
+      ;; discovery. Per-supervisor (registry C48) — a shared path let a second
+      ;; supervisor's wire-server (bin/acme) clobber the first's file.
+      "--repl-port-file" (recur (assoc acc :repl-port-file (second xs)) (drop 2 xs))
       ;; --preflight: a flag (no value). boot/-main intercepts it and runs the
       ;; embedding self-check BEFORE starting the server. parse-args records it
       ;; so the default "Unknown arg" branch no longer exit-2s on it.
@@ -715,22 +719,34 @@
 ;; Opt-in diagnostic plane. OFF by default — only starts when `--repl-port N`
 ;; is passed (the Rust host does NOT pass it; it's a dev-only escape hatch).
 ;; Binds 127.0.0.1 ONLY (loopback) so the REPL is never reachable off-host.
-;; Writes the chosen port to a file (like the sockets) so a connecting tool
-;; can discover it. One REPL reaches the live `state` atom / conn(s).
+;; Writes the chosen port to a PER-SUPERVISOR file (like the sockets) so a
+;; connecting tool can discover it. One REPL reaches the live `state` atom /
+;; conn(s). The path is per-supervisor (registry C48): a single shared
+;; `tmp/seon-writer-repl-port` was clobbered by whichever cluster's JVM
+;; (default vs acme) started LAST, routing file-based consumers to the wrong
+;; writer. Resolution: `--repl-port-file` arg > `$SEON_WRITER_REPL_PORT_FILE`
+;; env > `tmp/seon-writer-repl-port-<db-name>` (db-name = the cluster name,
+;; so even a bare launch is collision-free).
 
-(def ^:private repl-port-file "tmp/seon-writer-repl-port")
+(defn- repl-port-file
+  "Per-supervisor REPL port-file path: arg > env > derived from db-name."
+  [{:keys [opts db-name]}]
+  (or (:repl-port-file opts)
+      (System/getenv "SEON_WRITER_REPL_PORT_FILE")
+      (str "tmp/seon-writer-repl-port-" db-name)))
 
 (defn- start-repl-server!
-  "Start a loopback-only Clojure socket REPL on `port`. Returns the
-   server-socket so it can be closed on shutdown."
-  [port]
+  "Start a loopback-only Clojure socket REPL on `port`, writing the port
+   to `port-file` for discovery. Returns the server-socket so it can be
+   closed on shutdown."
+  [port port-file]
   (let [server (srv/start-server
                 {:name "seon-writer-repl"
                  :address "127.0.0.1"
                  :port port
                  :accept 'clojure.core.server/repl})]
-    (spit (io/file repl-port-file) (str port))
-    (.deleteOnExit (io/file repl-port-file))
+    (spit (io/file port-file) (str port))
+    (.deleteOnExit (io/file port-file))
     server))
 
 ;; ---------- Main ----------
@@ -774,8 +790,9 @@
         req-server (start-req-server! conn (:req-sock opts))
         _    (println "[writer] req socket:" (:req-sock opts))
         repl-server (when-let [p (:repl-port opts)]
-                      (let [s (start-repl-server! p)]
-                        (println "[writer] dev REPL (127.0.0.1):" p)
+                      (let [pf (repl-port-file {:opts opts :db-name db-name})
+                            s  (start-repl-server! p pf)]
+                        (println "[writer] dev REPL (127.0.0.1):" p "port-file:" pf)
                         s))]
     (reset! state {:conn conn :req-server req-server :pub-server pub-server
                    :repl-server repl-server
