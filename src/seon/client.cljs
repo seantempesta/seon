@@ -288,6 +288,17 @@
   ;; Re-arm the ONE ticker so a hot reload doesn't stack timers and the tick
   ;; body runs just-reloaded code (idempotent — clears the prior interval).
   (agent-loop/install-ticker!)
+  ;; Re-instrument from the program graph (C46): shadow just re-eval'd the
+  ;; changed nses AND their dependents, replacing malli-wrapped vars with
+  ;; fresh UNWRAPPED fns; without this, coverage stays degraded until the
+  ;; next `start-agent!`. `instrument-from-db!` is idempotent
+  ;; (`:skip-instrumented? true`; simple fns re-wrap from recorded
+  ;; originals) — ~450ms, a dev-reload-only cost. Guarded: a reload can
+  ;; only fire post-boot, but the conn check keeps a pre-boot edge safe.
+  (when-let [conn db/*conn*]
+    (let [stats (instrument/instrument-from-db! @conn)]
+      (log/info-console! "seon.client"
+                         (str "reload: re-instrumented " (pr-str stats)))))
   (start-heartbeat!))
 
 ;; ---------------------------------------------------------------------------
