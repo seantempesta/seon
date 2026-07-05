@@ -1,0 +1,1 @@
+(weather_forecast_detailed {:location "New York, USA" :days 3 :details true})

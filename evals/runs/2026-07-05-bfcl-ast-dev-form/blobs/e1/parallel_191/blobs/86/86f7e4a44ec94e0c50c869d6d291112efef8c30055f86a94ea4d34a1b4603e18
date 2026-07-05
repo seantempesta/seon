@@ -1,0 +1,11 @@
+I see the request — I need to emit the function call forms for `public_library.find_nearby` with the right arguments. The function takes `location` (string) and `facilities` (array of strings). From the request:
+
+1. New York, NY — Reading Room and Fiction section
+2. Los Angeles, CA — Wi-Fi and Children Section
+3. Chicago, IL — Cafe and Reading Room
+
+Each is one call with the city and its two facilities.
+
+(public_library.find_nearby {:location "New York, NY" :facilities ["Reading Room" "Fiction section"]})
+(public_library.find_nearby {:location "Los Angeles, CA" :facilities ["Wi-Fi" "Children Section"]})
+(public_library.find_nearby {:location "Chicago, IL" :facilities ["Cafe" "Reading Room"]})

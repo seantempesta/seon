@@ -1,0 +1,5 @@
+The request asks for three calls to `public_library.find_nearby` — one per city with its specific facilities. The function name is not a defined Clojure var, so writing `(public_library.find_nearby …)` as a form will fail. The answer is the call FORMS as requested — I'll write them as the reply string.
+
+(public_library.find_nearby {:location "New York, NY" :facilities ["Reading Room" "Fiction section"]})
+(public_library.find_nearby {:location "Los Angeles, CA" :facilities ["Wi-Fi" "Children Section"]})
+(public_library.find_nearby {:location "Chicago, IL" :facilities ["Cafe" "Reading Room"]})

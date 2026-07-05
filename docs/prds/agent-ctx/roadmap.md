@@ -558,6 +558,32 @@ repo-dev docs.
     `evals/runs/2026-07-04-bfcl-ast-dev/` (verbatim prompts, per-execution
     records, scorer explanations, the run recipe).
 
+    - **FORM-surface A/B — 2026-07-05 (JSON kept).** Owner question: the JSON
+      contract tests a FOREIGN surface (our agents emit Clojure forms
+      natively) — a confound that might UNDERSTATE us. Reworked the adapter to
+      ask for the call as a Clojure form (`(fn {:kw v})`), parsed by a small
+      no-dep s-expr reader (symbol→name, `{:kw v}`→args dict, Clojure
+      literals→the native types `ast_match` compares; dotted names, vectors,
+      floats, multi-forms, candidate-filtered) — SAME frozen 10 dev samples,
+      k=1, frozen ephemeral clusters. **Result: form .600 vs JSON .700 — the
+      confound hypothesis was NOT supported.** 9/10 samples scored IDENTICALLY;
+      the sole flip (`multiple_168`, JSON pass → form fail) REGRESSED, and its
+      mechanism IS the finding: told to "emit a Clojure form the way you invoke
+      a verb at your REPL", the agent tried to EVALUATE the undefined candidate
+      function, errored, and looped to `:turn-limit` with an empty reply. A
+      text form is neither clean text (JSON) nor a real executable verb — it
+      collides with the agent's action semantics. Per the A/B guardrail (forms
+      not ≥ JSON → keep JSON, report before ripping out), **JSON remains the
+      shipped adapter**; the reworked form adapter + its 21 offline tests are
+      preserved as a frozen experiment under the run dir. The evidence points
+      PAST text surfaces to the **eval-native** path (register BFCL candidates
+      as real stub verbs; read the captured call off the runtime — no text
+      parse) — a separate owner decision, see [[coordination]]. Ledger row
+      `2026-07-05:bfcl_ast:dev:k1:form-surface`. Evidence:
+      `evals/runs/2026-07-05-bfcl-ast-dev-form/` (verbatim form prompts,
+      per-execution records incl. the `:turn-limit` transcripts, the frozen
+      form adapter + tests, run recipe).
+
 Spec: [[eval-design]] · plan: [[eval-lane-plan]] · readiness:
 [[research/tool-surface-survey-2026-07-02]] · BFCL adoption:
 [[research/agentic-benchmark-adoption-2026-07-04]].

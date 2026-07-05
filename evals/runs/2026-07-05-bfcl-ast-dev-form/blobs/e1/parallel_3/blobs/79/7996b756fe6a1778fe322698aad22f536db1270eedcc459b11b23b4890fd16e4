@@ -1,0 +1,9 @@
+The user wants me to output the function calls. Let me analyze the request:
+
+- protein_info.get_sequence_and_3D — takes `:protein_name` (required string) and `:model_3d` (optional boolean)
+- Request: "Get the protein sequence of human HbA1c, normal hemoglobin, and rat hemoglobin and their 3D models"
+- So 3 calls, each with `:protein_name` set to the respective protein, and `:model_3d true`
+
+(protein_info.get_sequence_and_3D {:protein_name "human HbA1c" :model_3d true})
+(protein_info.get_sequence_and_3D {:protein_name "normal hemoglobin" :model_3d true})
+(protein_info.get_sequence_and_3D {:protein_name "rat hemoglobin" :model_3d true})

@@ -242,6 +242,27 @@ adapter is selected by bench name — no extra argument. NO DeepSeek non-think
 anchor exists (no door-fitting agentic bench has one) → band the number against
 the PUBLIC BFCL leaderboard in the row notes, never a fabricated anchor column.
 
+**Why JSON and not a native Clojure form — the 2026-07-05 surface A/B.** The
+JSON contract asks for a foreign surface (our agents emit Clojure forms as
+their native output), a possible confound that could UNDERSTATE tool-calling.
+We reworked the adapter to ask for the call as a Clojure form
+(`(fn {:kw v})`) — a small no-dep s-expr reader mapping Clojure literals onto
+the native types `ast_match` compares — and A/B'd it on the SAME frozen 10 dev
+samples, k=1 (evidence + the frozen form adapter: `evals/runs/
+2026-07-05-bfcl-ast-dev-form/`; ledger row `2026-07-05:bfcl_ast:dev:k1:
+form-surface`). Result: form **.600** vs JSON **.700** — the confound
+hypothesis was NOT supported. 9/10 samples scored identically; the one flip
+(`multiple_168`) REGRESSED, and the mechanism is the finding: told to "emit a
+Clojure form the way you invoke a verb at your REPL", the agent tried to
+EVALUATE the (undefined) candidate function, errored, and looped to the
+turn-limit with an empty reply. A text form is caught between two chairs — not
+clean text like JSON, not a real executable verb. **JSON stays the shipped
+adapter.** The evidence points past text surfaces entirely: the truly native
+path is **eval-native** — register the BFCL candidates as real stub verbs so
+the agent's normal call SUCCEEDS and the call is read off the runtime (no text
+parse). That is a separate owner decision (more integration), noted in
+`docs/prds/agent-ctx/coordination.md`, not built here.
+
 ## Frozen splits — `evals/datasets.lock` (dev / milestone / test)
 
 Every A/B (context trim, skill edit, tool tune) runs against FROZEN samples —

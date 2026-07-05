@@ -1,0 +1,5 @@
+The transcript shows that prior evals used `protein_info` — but the candidate function is `protein_info.get_sequence_and_3D`. That's a single function name with dots, not a namespace-qualified symbol. The request asks for three proteins (human HbA1c, normal hemoglobin, rat hemoglobin), each with sequence AND 3D models — so each needs `:model_3d true`. That's three calls.
+
+(protein_info.get_sequence_and_3D {:protein_name "human HbA1c" :model_3d true})
+(protein_info.get_sequence_and_3D {:protein_name "normal hemoglobin" :model_3d true})
+(protein_info.get_sequence_and_3D {:protein_name "rat hemoglobin" :model_3d true})

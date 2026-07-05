@@ -1,0 +1,5 @@
+The user wants me to output a function call form. The function is `weather_forecast_detailed` with parameters `location`, `days`, and `details`. The request asks for New York, USA, 3 days, with details.
+
+The issue is that this function doesn't exist in my namespace — I need to output the call AS a form, not execute it. The instruction says "Do NOT execute anything or explain — only report the call(s)." So I should just output the form as text via `message/user`.
+
+(weather_forecast_detailed {:location "New York, USA" :days 3 :details true})

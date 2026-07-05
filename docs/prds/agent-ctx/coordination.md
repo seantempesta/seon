@@ -1338,3 +1338,29 @@ Eval lane only; NO `src/seon` edits — `src-inspect-ai` + `evals` + `docs`.
   (append-only case entries / one new op) so your cluster build rebases
   clean; shout if you want either done differently or folded into your
   build instead.
+
+- **BFCL surface A/B — form vs JSON — DONE 2026-07-05 (eval lane; JSON kept).**
+  Tested the owner's confound hypothesis (asking BFCL for JSON tests a foreign
+  surface + fights our form-oriented context, maybe understating us). Reworked
+  `bfcl_adapter` to ask for the call as a native Clojure form `(fn {:kw v})`
+  (no-dep s-expr reader → the native types `ast_match` compares) and A/B'd it
+  on the SAME frozen 10 dev samples, k=1. **Result: form .600 vs JSON .700 —
+  confound NOT supported.** 9/10 identical; the one flip (`multiple_168`)
+  REGRESSED because the agent tried to EVALUATE the undefined candidate verb,
+  errored, and looped to `:turn-limit` (empty reply). JSON stays shipped; the
+  form adapter + 21 tests are frozen under `evals/runs/2026-07-05-bfcl-ast-dev-form/`.
+  Ledger row `2026-07-05:bfcl_ast:dev:k1:form-surface`. src untouched
+  (bfcl_adapter.py restored to JSON). NOT committed.
+  - **FLAG → tooling lane (the real signal, owner decision needed): the
+    eval-native path.** The `:turn-limit` loops prove our agent's native
+    surface is EXECUTION, not text — a text form is a false middle. The truly
+    faithful BFCL adapter would **register each sample's candidate functions as
+    real stub verbs in the ephemeral cluster** (each stub just records its
+    captured `{:fn name :args map}` to the db and returns), let the agent call
+    them through its NORMAL eval loop, and read the captured call off the
+    runtime — ZERO text parse, and the agent's call SUCCEEDS instead of looping.
+    That is the "pod-emits-text-not-tool_calls" friction resolved for the AST
+    tier specifically. It's more integration (a per-sample verb-registration
+    step + a runtime read-back, touching the ctx/verb surface) and a separate
+    owner decision — recommend scoping it as a tooling+eval joint unit if the
+    owner wants BFCL fidelity past the current JSON adapter. Not built here.

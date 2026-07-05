@@ -1,0 +1,14 @@
+The user wants me to output the function calls as Clojure forms. I need to parse the request into separate calls for each city with the appropriate facilities.
+
+Looking at the request:
+1. New York, NY — Reading Room and Fiction section
+2. Los Angeles, CA — Wi-Fi and Children Section
+3. Chicago, IL — Cafe and a Reading Room
+
+Each is a separate call to `public_library.find_nearby` with `:location` (string) and `:facilities` (array of strings).
+
+The instructions say output ONLY the call forms — no prose, no code fence. But the REPL rules say bare data literals don't evaluate. These are forms I'm outputting as the answer, not evaluating. Let me just write them as the requested Clojure forms.
+
+(public_library.find_nearby {:location "New York, NY" :facilities ["Reading Room" "Fiction"]})
+(public_library.find_nearby {:location "Los Angeles, CA" :facilities ["Wi-Fi" "Children Section"]})
+(public_library.find_nearby {:location "Chicago, IL" :facilities ["Cafe" "Reading Room"]})

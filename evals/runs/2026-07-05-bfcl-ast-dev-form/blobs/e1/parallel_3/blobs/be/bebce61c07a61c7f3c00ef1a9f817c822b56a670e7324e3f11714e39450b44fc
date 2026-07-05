@@ -1,0 +1,5 @@
+I see the request: call `protein_info.get_sequence_and_3D` for three proteins (human HbA1c, normal hemoglobin, rat hemoglobin), each with `model_3d: true` for the 3D models. Three calls total.
+
+(protein_info.get_sequence_and_3D {:protein_name "human HbA1c" :model_3d true})
+(protein_info.get_sequence_and_3D {:protein_name "normal hemoglobin" :model_3d true})
+(protein_info.get_sequence_and_3D {:protein_name "rat hemoglobin" :model_3d true})

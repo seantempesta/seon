@@ -1,0 +1,5 @@
+I need to output ONLY the call form. The request asks for the lyrics to "Bohemian Rhapsody" by Queen — that's `get_song_lyrics` with the two required params. No optional params are needed.
+
+```clojure
+(get_song_lyrics {:song_title "Bohemian Rhapsody" :artist_name "Queen"})
+```

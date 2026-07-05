@@ -1,0 +1,326 @@
+
+
+SAMPLE parallel_multiple_29  (category=parallel_multiple)
+
+You are given a set of candidate functions and a user request. Decide which function(s) to call and with what arguments to satisfy the request. Do NOT execute anything or explain — only report the call(s).
+
+Candidate functions:
+
+Function: briefs.display_cases
+  Display briefs of the cases Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - case_id (array) [required]: A list of unique identifiers for cases.  (element type: string)
+
+Function: court_records.search_cases
+  Search for court cases based on specific criteria. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - location (string) [required]: The city where the court is located
+    - query (string) [required]: Search string to look for specific cases
+    - year (integer) [required]: Year the case was filed
+    - limit (integer): Limits the number of results returned
+
+User request:
+Find cases that pertain to 'Theft' from court record in 'New York' and from 'San Francisco', filed in year 2021, and display briefs of top 5 relevant cases.
+
+Reply with the function call(s) as a Clojure form — the way you would invoke a verb at your REPL: the function name as the head symbol and ONE argument map of keyword->value, e.g.
+    (function_name {:param_a "value" :param_b 3})
+Rules the answer must satisfy:
+- Use the EXACT function name as the head symbol and the EXACT parameter names as keywords (`:param`) from the schema above — no renaming, no extra parameters.
+- Include every REQUIRED parameter; include an optional one only when the request calls for it.
+- Give each argument a Clojure literal of its schema type — a value taken from the request:
+    integer -> 3   number/float -> 3.0   string -> "text"   boolean -> true/false   array -> ["a" "b"]   object -> {:k "v"}.
+- This request may require SEVERAL function calls. Emit one Clojure form per call the request implies (there can be more than one), written one after another, e.g. (fn_a {:arg 1}) (fn_b {:arg "x"}).
+- Output ONLY the call form(s) — no prose, no code fence, no other forms.
+==============================================================================
+SAMPLE multiple_66  (category=multiple)
+
+You are given a set of candidate functions and a user request. Decide which function(s) to call and with what arguments to satisfy the request. Do NOT execute anything or explain — only report the call(s).
+
+Candidate functions:
+
+Function: calculate_distance
+  Calculate distance between two locations. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - start_point (string) [required]: Starting point of the journey.
+    - end_point (string) [required]: Ending point of the journey.
+
+Function: traffic_estimate
+  Estimate traffic from one location to another for a specific time period. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - start_location (string) [required]: Starting location for the journey.
+    - end_location (string) [required]: Ending location for the journey.
+    - time_period (string): Specify a time frame to estimate the traffic, 'now' for current, 'weekend' for the coming weekend. Default 'now'
+
+Function: weather_forecast
+  Retrieve a weather forecast for a specific location and time frame. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - location (string) [required]: The city that you want to get the weather for.
+    - days (integer) [required]: Number of days for the forecast.
+
+User request:
+How much traffic should I expect from Las Vegas to Los Angeles this weekend?
+
+Reply with the function call(s) as a Clojure form — the way you would invoke a verb at your REPL: the function name as the head symbol and ONE argument map of keyword->value, e.g.
+    (function_name {:param_a "value" :param_b 3})
+Rules the answer must satisfy:
+- Use the EXACT function name as the head symbol and the EXACT parameter names as keywords (`:param`) from the schema above — no renaming, no extra parameters.
+- Include every REQUIRED parameter; include an optional one only when the request calls for it.
+- Give each argument a Clojure literal of its schema type — a value taken from the request:
+    integer -> 3   number/float -> 3.0   string -> "text"   boolean -> true/false   array -> ["a" "b"]   object -> {:k "v"}.
+- Choose the single correct function and emit EXACTLY ONE call as a single Clojure form.
+- Output ONLY the call form(s) — no prose, no code fence, no other forms.
+==============================================================================
+SAMPLE simple_python_189  (category=simple_python)
+
+You are given a set of candidate functions and a user request. Decide which function(s) to call and with what arguments to satisfy the request. Do NOT execute anything or explain — only report the call(s).
+
+Candidate functions:
+
+Function: weather_forecast_detailed
+  Retrieve a detailed weather forecast for a specific city like Boston and time frame. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - location (string) [required]: The city that you want to get the weather for.
+    - days (integer) [required]: Number of days for the forecast.
+    - details (boolean): Provide detailed weather information or not.
+
+User request:
+Get weather information for New York, USA for the next 3 days with details.
+
+Reply with the function call(s) as a Clojure form — the way you would invoke a verb at your REPL: the function name as the head symbol and ONE argument map of keyword->value, e.g.
+    (function_name {:param_a "value" :param_b 3})
+Rules the answer must satisfy:
+- Use the EXACT function name as the head symbol and the EXACT parameter names as keywords (`:param`) from the schema above — no renaming, no extra parameters.
+- Include every REQUIRED parameter; include an optional one only when the request calls for it.
+- Give each argument a Clojure literal of its schema type — a value taken from the request:
+    integer -> 3   number/float -> 3.0   string -> "text"   boolean -> true/false   array -> ["a" "b"]   object -> {:k "v"}.
+- Choose the single correct function and emit EXACTLY ONE call as a single Clojure form.
+- Output ONLY the call form(s) — no prose, no code fence, no other forms.
+==============================================================================
+SAMPLE parallel_3  (category=parallel)
+
+You are given a set of candidate functions and a user request. Decide which function(s) to call and with what arguments to satisfy the request. Do NOT execute anything or explain — only report the call(s).
+
+Candidate functions:
+
+Function: protein_info.get_sequence_and_3D
+  Retrive the sequence and 3D models of proteins. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - protein_name (string) [required]: The name of the protein.
+    - model_3d (boolean): Set true to get 3D model of the protein.
+
+User request:
+Get the protein sequence of human HbA1c, normal hemoglobin, and rat hemoglobin and their 3D models
+
+Reply with the function call(s) as a Clojure form — the way you would invoke a verb at your REPL: the function name as the head symbol and ONE argument map of keyword->value, e.g.
+    (function_name {:param_a "value" :param_b 3})
+Rules the answer must satisfy:
+- Use the EXACT function name as the head symbol and the EXACT parameter names as keywords (`:param`) from the schema above — no renaming, no extra parameters.
+- Include every REQUIRED parameter; include an optional one only when the request calls for it.
+- Give each argument a Clojure literal of its schema type — a value taken from the request:
+    integer -> 3   number/float -> 3.0   string -> "text"   boolean -> true/false   array -> ["a" "b"]   object -> {:k "v"}.
+- This request may require SEVERAL function calls. Emit one Clojure form per call the request implies (there can be more than one), written one after another, e.g. (fn_a {:arg 1}) (fn_b {:arg "x"}).
+- Output ONLY the call form(s) — no prose, no code fence, no other forms.
+==============================================================================
+SAMPLE parallel_multiple_174  (category=parallel_multiple)
+
+You are given a set of candidate functions and a user request. Decide which function(s) to call and with what arguments to satisfy the request. Do NOT execute anything or explain — only report the call(s).
+
+Candidate functions:
+
+Function: convert_currency
+  Converts an amount from a particular currency to another currency. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - base_currency (string) [required]: The base currency in which the original amount is present.
+    - target_currency (string) [required]: The currency to which you want to convert.
+    - amount (integer) [required]: The amount you want to convert.
+
+Function: map_service.get_directions
+  Retrieve directions from a starting location to an ending location, including options for route preferences. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - start (string) [required]: Starting location for the route.
+    - end (string) [required]: Ending location for the route.
+    - avoid (array): Route features to avoid. Default is none if not specified.  (element type: string)
+
+Function: ecology.get_turtle_population
+  Get the population and species of turtles in a specific location. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - location (string) [required]: The name of the location.
+    - year (integer): The year of the data requested. Default is 2023 if not specified.
+    - species (boolean): Whether to include species information. Default is false. (optional)
+
+User request:
+"Could you help me with a few tasks? First, I need to convert 5000 Euros to US dollars. After that, I would like to know the population of turtles in Galapagos Islands in the year 2018, and also include the species information. Then, I need to plan a trip from New York to Los Angeles, but I want to avoid tolls and ferries. Finally, I need to convert 3000 British Pounds to Japanese Yen."
+
+Reply with the function call(s) as a Clojure form — the way you would invoke a verb at your REPL: the function name as the head symbol and ONE argument map of keyword->value, e.g.
+    (function_name {:param_a "value" :param_b 3})
+Rules the answer must satisfy:
+- Use the EXACT function name as the head symbol and the EXACT parameter names as keywords (`:param`) from the schema above — no renaming, no extra parameters.
+- Include every REQUIRED parameter; include an optional one only when the request calls for it.
+- Give each argument a Clojure literal of its schema type — a value taken from the request:
+    integer -> 3   number/float -> 3.0   string -> "text"   boolean -> true/false   array -> ["a" "b"]   object -> {:k "v"}.
+- This request may require SEVERAL function calls. Emit one Clojure form per call the request implies (there can be more than one), written one after another, e.g. (fn_a {:arg 1}) (fn_b {:arg "x"}).
+- Output ONLY the call form(s) — no prose, no code fence, no other forms.
+==============================================================================
+SAMPLE multiple_130  (category=multiple)
+
+You are given a set of candidate functions and a user request. Decide which function(s) to call and with what arguments to satisfy the request. Do NOT execute anything or explain — only report the call(s).
+
+Candidate functions:
+
+Function: chess.rating
+  Fetches the current chess rating of a given player Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - player_name (string) [required]: The full name of the chess player.
+    - variant (string): The variant of chess for which rating is requested (e.g., 'classical', 'blitz', 'bullet'). Default is 'classical'.
+
+Function: solve_quadratic
+  Find the roots of a quadratic equation. Returns both roots. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - a (integer) [required]: Coefficient of x².
+    - b (integer) [required]: Coefficient of x.
+    - c (integer) [required]: Constant term.
+
+Function: calculate_cagr
+  Calculate the Compound Annual Growth Rate (CAGR) given an initial investment value, a final investment value, and the number of years. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - initial_value (integer) [required]: The initial investment value.
+    - final_value (integer) [required]: The final investment value.
+    - period_in_years (integer) [required]: The period of the investment in years.
+
+User request:
+Calculate the Compound Annual Growth Rate (CAGR) for an initial investment of $2000, final value of $3000 in a period of 4 years.
+
+Reply with the function call(s) as a Clojure form — the way you would invoke a verb at your REPL: the function name as the head symbol and ONE argument map of keyword->value, e.g.
+    (function_name {:param_a "value" :param_b 3})
+Rules the answer must satisfy:
+- Use the EXACT function name as the head symbol and the EXACT parameter names as keywords (`:param`) from the schema above — no renaming, no extra parameters.
+- Include every REQUIRED parameter; include an optional one only when the request calls for it.
+- Give each argument a Clojure literal of its schema type — a value taken from the request:
+    integer -> 3   number/float -> 3.0   string -> "text"   boolean -> true/false   array -> ["a" "b"]   object -> {:k "v"}.
+- Choose the single correct function and emit EXACTLY ONE call as a single Clojure form.
+- Output ONLY the call form(s) — no prose, no code fence, no other forms.
+==============================================================================
+SAMPLE simple_python_103  (category=simple_python)
+
+You are given a set of candidate functions and a user request. Decide which function(s) to call and with what arguments to satisfy the request. Do NOT execute anything or explain — only report the call(s).
+
+Candidate functions:
+
+Function: mathematics.calculate_area_under_curve
+  Calculate the area under the curve for a given polynomial function within a specified interval. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - polynomial (array) [required]: The coefficients of the polynomial, in decreasing order of exponent, where the first element is the coefficient for x^n, the second element is the coefficient for x^(n-1), and so on. The last element is the constant term.  (element type: float)
+    - limits (array) [required]: A list of two numbers specifying the lower and upper limit for the integration interval.  (element type: float)
+
+User request:
+Calculate the area under the curve y=3x^2 + 2x - 4, between x = -1 and x = 2.
+
+Reply with the function call(s) as a Clojure form — the way you would invoke a verb at your REPL: the function name as the head symbol and ONE argument map of keyword->value, e.g.
+    (function_name {:param_a "value" :param_b 3})
+Rules the answer must satisfy:
+- Use the EXACT function name as the head symbol and the EXACT parameter names as keywords (`:param`) from the schema above — no renaming, no extra parameters.
+- Include every REQUIRED parameter; include an optional one only when the request calls for it.
+- Give each argument a Clojure literal of its schema type — a value taken from the request:
+    integer -> 3   number/float -> 3.0   string -> "text"   boolean -> true/false   array -> ["a" "b"]   object -> {:k "v"}.
+- Choose the single correct function and emit EXACTLY ONE call as a single Clojure form.
+- Output ONLY the call form(s) — no prose, no code fence, no other forms.
+==============================================================================
+SAMPLE parallel_191  (category=parallel)
+
+You are given a set of candidate functions and a user request. Decide which function(s) to call and with what arguments to satisfy the request. Do NOT execute anything or explain — only report the call(s).
+
+Candidate functions:
+
+Function: public_library.find_nearby
+  Locate nearby public libraries based on specific criteria like English fiction availability and Wi-Fi. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - location (string) [required]: The city and state, e.g. Boston, MA
+    - facilities (array) [required]: Facilities and sections in public library.  (element type: string)
+
+User request:
+Can you help me find public libraries in New York, NY that have a Reading Room and Fiction section, and then in Los Angeles, CA that offer Wi-Fi and have a Children Section, and finally in Chicago, IL that have a Cafe and a Reading Room?
+
+Reply with the function call(s) as a Clojure form — the way you would invoke a verb at your REPL: the function name as the head symbol and ONE argument map of keyword->value, e.g.
+    (function_name {:param_a "value" :param_b 3})
+Rules the answer must satisfy:
+- Use the EXACT function name as the head symbol and the EXACT parameter names as keywords (`:param`) from the schema above — no renaming, no extra parameters.
+- Include every REQUIRED parameter; include an optional one only when the request calls for it.
+- Give each argument a Clojure literal of its schema type — a value taken from the request:
+    integer -> 3   number/float -> 3.0   string -> "text"   boolean -> true/false   array -> ["a" "b"]   object -> {:k "v"}.
+- This request may require SEVERAL function calls. Emit one Clojure form per call the request implies (there can be more than one), written one after another, e.g. (fn_a {:arg 1}) (fn_b {:arg "x"}).
+- Output ONLY the call form(s) — no prose, no code fence, no other forms.
+==============================================================================
+SAMPLE parallel_multiple_106  (category=parallel_multiple)
+
+You are given a set of candidate functions and a user request. Decide which function(s) to call and with what arguments to satisfy the request. Do NOT execute anything or explain — only report the call(s).
+
+Candidate functions:
+
+Function: calculate_distance
+  Calculate distance between two locations. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - start_point (string) [required]: Starting point of the journey.
+    - end_point (string) [required]: Ending point of the journey.
+
+Function: weather_forecast
+  Retrieve a weather forecast for a specific location and time frame. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - location (string) [required]: The city that you want to get the weather for.
+    - days (integer) [required]: Number of days for the forecast.
+
+Function: traffic_estimate
+  Estimate traffic from one location to another for a specific time period. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - start_location (string) [required]: Starting location for the journey.
+    - end_location (string) [required]: Ending location for the journey.
+    - time_period (string): Specify a time frame to estimate the traffic, 'now' for current, 'weekend' for the coming weekend. Default is 'now'.
+
+User request:
+"Can you help me plan my upcoming trip? I need to know the estimated traffic from my home in San Francisco to my office in Palo Alto on a typical weekday. Also, I'm curious about the distance between these two locations. Furthermore, I'm planning a weekend getaway to Los Angeles, so I'd like to know the traffic estimate from Palo Alto to Los Angeles for the coming weekend. Lastly, could you provide me with a 5-day weather forecast for Los Angeles?"
+
+Reply with the function call(s) as a Clojure form — the way you would invoke a verb at your REPL: the function name as the head symbol and ONE argument map of keyword->value, e.g.
+    (function_name {:param_a "value" :param_b 3})
+Rules the answer must satisfy:
+- Use the EXACT function name as the head symbol and the EXACT parameter names as keywords (`:param`) from the schema above — no renaming, no extra parameters.
+- Include every REQUIRED parameter; include an optional one only when the request calls for it.
+- Give each argument a Clojure literal of its schema type — a value taken from the request:
+    integer -> 3   number/float -> 3.0   string -> "text"   boolean -> true/false   array -> ["a" "b"]   object -> {:k "v"}.
+- This request may require SEVERAL function calls. Emit one Clojure form per call the request implies (there can be more than one), written one after another, e.g. (fn_a {:arg 1}) (fn_b {:arg "x"}).
+- Output ONLY the call form(s) — no prose, no code fence, no other forms.
+==============================================================================
+SAMPLE multiple_168  (category=multiple)
+
+You are given a set of candidate functions and a user request. Decide which function(s) to call and with what arguments to satisfy the request. Do NOT execute anything or explain — only report the call(s).
+
+Candidate functions:
+
+Function: get_stock_price
+  Retrieves the current stock price of the specified companies Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - company_names (array) [required]: The list of companies for which to retrieve the stock price.  (element type: string)
+
+Function: get_song_lyrics
+  Retrieve the lyrics of a song based on the artist's name and song title. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - song_title (string) [required]: The title of the song.
+    - artist_name (string) [required]: The name of the artist who performed the song.
+    - lang (string): The language of the lyrics. Default is English.  (one of: ['English', 'French', 'Spanish', 'German', 'Italian'])
+
+Function: park_information
+  Retrieve the basic information such as elevation and area of a national park. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - park_name (string) [required]: The name of the national park.
+    - information (array) [required]: The type of information you want about the park.  (element type: string)
+
+User request:
+Find the lyrics to the song 'Bohemian Rhapsody' by Queen.
+
+Reply with the function call(s) as a Clojure form — the way you would invoke a verb at your REPL: the function name as the head symbol and ONE argument map of keyword->value, e.g.
+    (function_name {:param_a "value" :param_b 3})
+Rules the answer must satisfy:
+- Use the EXACT function name as the head symbol and the EXACT parameter names as keywords (`:param`) from the schema above — no renaming, no extra parameters.
+- Include every REQUIRED parameter; include an optional one only when the request calls for it.
+- Give each argument a Clojure literal of its schema type — a value taken from the request:
+    integer -> 3   number/float -> 3.0   string -> "text"   boolean -> true/false   array -> ["a" "b"]   object -> {:k "v"}.
+- Choose the single correct function and emit EXACTLY ONE call as a single Clojure form.
+- Output ONLY the call form(s) — no prose, no code fence, no other forms.

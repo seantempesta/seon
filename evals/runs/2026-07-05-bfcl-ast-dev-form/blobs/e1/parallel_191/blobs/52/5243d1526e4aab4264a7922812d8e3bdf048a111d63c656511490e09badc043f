@@ -1,0 +1,12 @@
+The user wants me to output function calls as Clojure forms. The function is `public_library.find_nearby` with parameters `:location` (string, required) and `:facilities` (array of strings, required). I need to emit one form per call implied by the request.
+
+The request asks for three separate searches:
+1. New York, NY — Reading Room and Fiction section
+2. Los Angeles, CA — Wi-Fi and Children Section
+3. Chicago, IL — Cafe and Reading Room
+
+Each is a separate call with its own location and facilities array.
+
+(public_library.find_nearby {:location "New York, NY" :facilities ["Reading Room" "Fiction"]})
+(public_library.find_nearby {:location "Los Angeles, CA" :facilities ["Wi-Fi" "Children Section"]})
+(public_library.find_nearby {:location "Chicago, IL" :facilities ["Cafe" "Reading Room"]})

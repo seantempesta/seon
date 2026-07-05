@@ -1,0 +1,5 @@
+I need to read the error and then provide the correct form. The error shows that bare text was typed instead of a Clojure form. The request asks for a single function call.
+
+The correct function is `get_song_lyrics` with required params `song_title` and `artist_name`. `lang` is optional and not requested, so it's omitted.
+
+(get_song_lyrics {:song_title "Bohemian Rhapsody" :artist_name "Queen"})
