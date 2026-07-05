@@ -6,6 +6,17 @@ tags: [research, database]
 
 # Fork-at-t: writable copy of a cluster's world at a failure moment
 
+> **SUPERSEDED BY `datahike.api/fork-database` (2026-07-05).** The
+> copy + walk-to-t + re-identify + `force-branch!` choreography below is now a
+> first-class API inside our datahike fork
+> (`reference-code/datahike/src/datahike/versioning.cljc`, fork commit
+> `5566ab13`): `(d/fork-database source-cfg target-cfg {:at t-or-inst})` copies
+> the store at the konserve layer, resolves the commit (`tx-id` exact /
+> inst ≤ / head), mints a FRESH store identity, and returns the target's
+> effective config — independent, writable, byte-faithful, deletable. This doc
+> stays as the grounding evidence; call the API instead of hand-rolling steps
+> 0–4.
+
 ## TL;DR
 
 1. Full tx-log enumeration = `(d/datoms (d/history db) :eavt)` grouped by `|tx|` — exactly what `wire/replay-tx-events` does (`src/seon/server/wire.clj:348`); the fork has NO `tx-range`, but it DOES have retractions (negative-tx datoms) + tx-meta datoms in that read. `replay-tx` replays since-t with no upper bound and a keep-NEWEST 50k cap — reusable as a reference, not as the fork producer.
