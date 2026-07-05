@@ -1102,16 +1102,17 @@
 
 (defn error-envelope
   "Build a `{::ok? false ::error <error-map>}` failure envelope from a
-   thrown error. Ensures `:seon.error/data` carries a `:seon.error/kind`
-   tag (defaulting to `:core-bug` when the throw didn't ship one).
+   thrown error. Ensures the envelope carries a top-level
+   `:seon.error/kind` tag (`error/->map` lifts a thrown ex-data kind
+   there — C45; `:core-bug` when the throw didn't ship one).
    `:user-input` is reserved for caller-fault paths — invocation shape,
    unregistered attr, value Malli failure. Anything else (datahike
    internals, store I/O, schema bridge bug) defaults to `:core-bug`."
   [e]
   (let [emap (error/->map e)
-        data (or (:seon.error/data emap) {})
-        kind (:seon.error/kind data :core-bug)
-        emap (assoc emap :seon.error/data (assoc data :seon.error/kind kind))]
+        emap (cond-> emap
+               (nil? (:seon.error/kind emap))
+               (assoc :seon.error/kind :core-bug))]
     {::db/ok? false ::db/error emap}))
 
 (def ^:private verbose-data-keys
@@ -1182,8 +1183,7 @@
                   (-> envelope
                       (assoc ::db/raw-error msg)
                       (assoc-in [::db/error :seon.error/message] guiding)
-                      (assoc-in [::db/error :seon.error/data :seon.error/kind]
-                                :user-input)))]
+                      (assoc-in [::db/error :seon.error/kind] :user-input)))]
     (cond
       (not (string? msg))
       envelope

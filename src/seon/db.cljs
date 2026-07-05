@@ -503,7 +503,7 @@
    `::db/tx-report` (escape hatch — needs `:db-after`/`:db-before`); the
    default omits it so the agent value stays small.
 
-   The error's `:seon.error/data` carries `:seon.error/kind` —
+   The error map carries a top-level `:seon.error/kind` —
    `:user-input` (fix tx-data and retry) vs `:core-bug` (the pod
    survived; report it, don't retry blindly).
 
@@ -828,8 +828,8 @@
                        "(seon.schema/register! <attr> <type>) and transact "
                        "data first.")]
           ;; FLAT ex-data — `:seon.error/kind` at the top level, the ONE
-          ;; convention every kind-bearing throw uses (C43); the flattened
-          ;; envelope `:seon.error/data` then carries it directly.
+          ;; convention every kind-bearing throw uses (C43); ->map lifts
+          ;; it to the envelope top (the ONE read position, C45).
           (throw (ex-info msg
                           {:seon.error/kind :user-input
                            ::missing-attrs  (vec (sort unknown))

@@ -297,10 +297,11 @@
           AGENT-submitted form — the core is AOT-compiled by shadow, never
           self-host); or an agent-input `:seon.error/kind`
           (`:user-input`/`:compile`/`:read`/`:seon.eval/repl-parity`, i.e.
-          `seon.error/agent-fault-kinds`) in the flattened
-          `:seon.error/data` — every kind-bearing throw puts the kind FLAT
-          in its ex-data (one convention, C43), and the flatten is
-          deepest-wins, so the DEEPEST kind (the real cause) decides;
+          `seon.error/agent-fault-kinds`) at the envelope TOP — every
+          kind-bearing throw puts the kind FLAT in its ex-data (one
+          convention, C43), `seon.error/->map` flattens deepest-wins and
+          LIFTS the kind to the envelope top (the ONE read position,
+          C45), so the DEEPEST kind (the real cause) decides;
         - a PROPAGATED malli contract violation → the VIOLATED fn's
           population when agent-authored; else `:agent` when an agent
           turn is in scope (the agent was the caller); else `:agent`
@@ -318,8 +319,9 @@
      {:malli/schema [:=> [:cat :any :seon.error/fault] :seon.error/fault]}
      [e coarse]
      (try
-       (let [data (:seon.error/data (error/->map e))
-             kind (:seon.error/kind data)]
+       (let [env  (error/->map e)
+             data (:seon.error/data env)
+             kind (:seon.error/kind env)]
          (cond
            (or (some? (:seon.eval/warning-type data))
                (= :cljs/analysis-error (:tag data))

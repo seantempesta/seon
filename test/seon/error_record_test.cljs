@@ -46,12 +46,19 @@
         outer (ex-info "outer" {:seon.error/kind :core-bug
                                 :my.probe/outer-only 2}
                        deep)
-        data  (:seon.error/data (error/->map outer))]
+        env   (error/->map outer)
+        data  (:seon.error/data env)]
     (is (= :user-input (:seon.error/kind data))
         "on key collision the DEEPEST level's value survives")
     (is (= 1 (:my.probe/deep-only data)))
     (is (= 2 (:my.probe/outer-only data))
-        "non-colliding wrapper keys still merge in")))
+        "non-colliding wrapper keys still merge in")
+    (testing "C45: the deepest kind is LIFTED to the envelope TOP — the
+              ONE position every consumer reads (no `or` over two)"
+      (is (= :user-input (:seon.error/kind env)))
+      (is (not (contains? (error/->map (js/Error. "kindless"))
+                          :seon.error/kind))
+          "a kindless throw lifts nothing — optional = absent"))))
 
 (deftest wrapper-fault-classification-matrix
   ;; THE pinned fault-classification matrix (C42 + C43). Under the
@@ -254,8 +261,8 @@
             (is (= :agent (si/wrapper-fault e :core))
                 "a mistyped query attr is the AGENT's mistake")
             (is (= :user-input
-                   (:seon.error/kind (:seon.error/data (error/->map e))))
-                "the flattened envelope carries the kind directly")))
+                   (:seon.error/kind (error/->map e)))
+                "the envelope carries the kind at the TOP (C45 lift)")))
         (js/Promise.resolve nil))
       done)))
 

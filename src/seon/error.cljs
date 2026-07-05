@@ -119,7 +119,14 @@
    ex-data into one map (deepest wins). Renderers + agent code should
    read THIS, not walk the per-level `:seon.error/ex-data` keys, so
    useful info like `:seon.eval/warning-type` surfaces regardless of
-   how many layers cljs.js's `wrap-error` added on top."
+   how many layers cljs.js's `wrap-error` added on top.
+
+   A `:seon.error/kind` found in that flattened data is LIFTED to the
+   envelope TOP level (C45) — the ONE position every consumer reads
+   (`seon.eval/render-error-string`, `seon.instrument/wrapper-fault`,
+   [[datom-projection]]). Synthesized envelopes (eval's read/compile/
+   parity maps, worker_eval) already build the kind at the top, so
+   after this lift there is no second position to `or` over."
   {:malli/schema [:function
                   [:=> [:cat :any] [:maybe :map]]
                   [:=> [:cat :any :int] [:maybe :map]]]}
@@ -137,10 +144,14 @@
            ;; :seon.error/data only emitted at the top of the chain —
            ;; flattens cljs.js's wraps so renderers read one key.
            merged (when (zero? depth)
-                    (apply merge {} (ex-data-chain e)))]
+                    (apply merge {} (ex-data-chain e)))
+           ;; C45: the deepest kind is lifted to the envelope TOP — the
+           ;; ONE position consumers read (no `or` over two positions).
+           kind   (:seon.error/kind merged)]
        (cond-> base
          data            (assoc :seon.error/ex-data data)
          (seq merged)    (assoc :seon.error/data merged)
+         kind            (assoc :seon.error/kind kind)
          stack           (assoc :seon.error/stack stack)
          cause           (assoc :seon.error/cause cause)
          trunc?          (assoc :seon.error/truncated true))))))
@@ -324,7 +335,7 @@
   "The EDN-safe datom entity for an envelope — bounded strings, reified
    frames, NO live objects (`:seon.error/raw`, malli Schema leafs)."
   [envelope]
-  (let [{:seon.error/keys [fault at stack frames args-edn data]} envelope
+  (let [{:seon.error/keys [fault at stack frames args-edn data kind]} envelope
         ;; The DEEPEST real cause, not cljs.js's top wrapper ("ERROR") —
         ;; this string is what the SEON-CORE-FAULT marker prints and what
         ;; seon.agent.inspect/errors lists.
@@ -339,6 +350,7 @@
                      300))]
     (cond-> {:seon.error/fault   fault
              :seon.error/message (tokens/clip-str (str message) 100)}
+      kind           (assoc :seon.error/kind kind)
       at             (assoc :seon.error/at at)
       stack          (assoc :seon.error/stack stack)
       (seq frames)   (assoc :seon.error/frames frames)
