@@ -827,12 +827,13 @@
                        "(seon.db/installed-schema db). If the attr is new, "
                        "(seon.schema/register! <attr> <type>) and transact "
                        "data first.")]
+          ;; FLAT ex-data — `:seon.error/kind` at the top level, the ONE
+          ;; convention every kind-bearing throw uses (C43); the flattened
+          ;; envelope `:seon.error/data` then carries it directly.
           (throw (ex-info msg
-                          {:seon.error/message msg
-                           :seon.error/data
-                           {:seon.error/kind :user-input
-                            ::missing-attrs  (vec (sort unknown))
-                            ::query          q}})))))))
+                          {:seon.error/kind :user-input
+                           ::missing-attrs  (vec (sort unknown))
+                           ::query          q})))))))
 
 (defn- pull-pattern-attrs
   "Every attr keyword an explicit pull pattern names, recursively
@@ -907,12 +908,11 @@
                      "(seon.schema/register! <attr> <type>) and transact "
                      "data first — datahike installs attr schema lazily at "
                      "first transact!.")]
+        ;; FLAT ex-data — same convention as the query guard above (C43).
         (throw (ex-info msg
-                        {:seon.error/message msg
-                         :seon.error/data
-                         {:seon.error/kind :user-input
-                          ::missing-attrs  (vec (sort unregistered))
-                          ::pull-pattern   pattern}}))))
+                        {:seon.error/kind :user-input
+                         ::missing-attrs  (vec (sort unregistered))
+                         ::pull-pattern   pattern}))))
     (if (empty? registered)
       (d/pull db pattern ref)
       (let [pattern' (filter-pull-pattern pattern (set registered))]

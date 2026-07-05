@@ -36,6 +36,71 @@
     (is (= :core (error/fault-for 'cljs.core/map)))
     (is (= :core (error/fault-for 'unqualified)))))
 
+(deftest error-data-flatten-is-deepest-wins
+  ;; C43: `:seon.error/data` flattens the cause chain DEEPEST-wins — the
+  ;; original throw's ex-data is the real cause; outer wrappers (cljs.js
+  ;; etc.) are conduit noise. Was shallowest-wins, contradicting the
+  ;; docstring; pinned here so the precedence never silently flips back.
+  (let [deep  (ex-info "deep" {:seon.error/kind :user-input
+                               :my.probe/deep-only 1})
+        outer (ex-info "outer" {:seon.error/kind :core-bug
+                                :my.probe/outer-only 2}
+                       deep)
+        data  (:seon.error/data (error/->map outer))]
+    (is (= :user-input (:seon.error/kind data))
+        "on key collision the DEEPEST level's value survives")
+    (is (= 1 (:my.probe/deep-only data)))
+    (is (= 2 (:my.probe/outer-only data))
+        "non-colliding wrapper keys still merge in")))
+
+(deftest wrapper-fault-classification-matrix
+  ;; THE pinned fault-classification matrix (C42 + C43). Under the
+  ;; :seon.config/on-core-error :crash dial a misclassification to :core
+  ;; CRASHES the pod on an agent mistake — every agent-mistake row below
+  ;; must classify :agent, forever. Extend this matrix (don't re-derive
+  ;; it) when classification changes.
+  (testing "cljs.js self-host analysis error (undeclared var, bad require) → :agent"
+    (is (= :agent (si/wrapper-fault
+                    (ex-info "ERROR" {:tag :cljs/analysis-error}) :core))))
+  (testing "agent-form eval diagnostic (warning-type) → :agent"
+    (is (= :agent (si/wrapper-fault
+                    (ex-info "Use of undeclared Var"
+                             {:seon.eval/warning-type :undeclared-var})
+                    :core))))
+  (testing "every agent-input kind, FLAT in ex-data (the ONE convention) → :agent"
+    (doseq [k error/agent-fault-kinds]
+      (is (= :agent (si/wrapper-fault (ex-info "kind" {:seon.error/kind k})
+                                      :core))
+          (str k))))
+  (testing "malli contract violation on an AGENT-authored fn → :agent"
+    (is (= :agent (si/wrapper-fault
+                    (ex-info ":malli.core/invalid-input"
+                             {:seon.error/kind
+                              :seon.error.kind/malli-instrument-input
+                              :seon.error.malli/fn-sym 'my.probe/f})
+                    :core))))
+  (testing "malli violation on a CORE fn, no agent turn in scope → coarse"
+    (is (= :core (si/wrapper-fault
+                   (ex-info ":malli.core/invalid-input"
+                            {:seon.error/kind
+                             :seon.error.kind/malli-instrument-input
+                             :seon.error.malli/fn-sym 'seon.db/transact!})
+                   :core))))
+  (testing "NESTED kinds classify from the DEEPEST kind (the real cause)"
+    (let [deep  (ex-info "agent typo" {:seon.error/kind :user-input})
+          outer (ex-info "core conduit re-wrap"
+                         {:seon.error/kind :core-bug} deep)]
+      (is (= :agent (si/wrapper-fault outer :core))
+          "deep agent-blamed cause re-wrapped by a core wrapper → :agent"))
+    (let [deep  (ex-info "core cause" {:seon.error/kind :core-bug})
+          outer (ex-info "outer user-input wrapper"
+                         {:seon.error/kind :user-input} deep)]
+      (is (= :core (si/wrapper-fault outer :core))
+          "a deep :core cause is NOT masked by an outer agent-ish wrapper")))
+  (testing "unclassified runtime errors stay coarse (loud by default)"
+    (is (= :core  (si/wrapper-fault (js/Error. "boom") :core)))
+    (is (= :agent (si/wrapper-fault (js/Error. "boom") :agent)))))
+
 (deftest parse-frames-nodejs-stack
   (let [stack (str "Error: boom\n"
                    "    at myFn (/Users/x/seon/out/client/main.js:106:10)\n"
@@ -131,6 +196,28 @@
       (is (some? (db/query {:seon.db/query
                             '[:find ?e .
                               :where [?e :seon.error/message "buffered one"]]}))))))
+
+(deftest query-missing-attr-throw-classifies-agent
+  ;; The REAL seon.db/query typo throw (flat :user-input ex-data after
+  ;; C43) through the classifier — the concrete agent-mistake path that
+  ;; used to pre-build a nested envelope.
+  (async done
+    (with-fresh-conn
+      (fn [_conn]
+        (try
+          (db/query '[:find ?e :where [?e :no.such.attr/typo ?v]])
+          (is false "the typo guard must throw")
+          (catch :default e
+            (is (= :user-input (:seon.error/kind (ex-data e)))
+                "kind is FLAT in ex-data")
+            (is (= [:no.such.attr/typo] (:seon.db/missing-attrs (ex-data e))))
+            (is (= :agent (si/wrapper-fault e :core))
+                "a mistyped query attr is the AGENT's mistake")
+            (is (= :user-input
+                   (:seon.error/kind (:seon.error/data (error/->map e))))
+                "the flattened envelope carries the kind directly")))
+        (js/Promise.resolve nil))
+      done)))
 
 (deftest record-persists-fault-at-frames-and-buffer-flush
   (async done

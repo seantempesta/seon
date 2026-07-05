@@ -295,9 +295,10 @@
           AGENT-submitted form — the core is AOT-compiled by shadow, never
           self-host); or an agent-input `:seon.error/kind`
           (`:user-input`/`:compile`/`:read`/`:seon.eval/repl-parity`, i.e.
-          `seon.error/agent-fault-kinds`) at the top OR nested one level in
-          `:seon.error/data` (some throwers, e.g. `seon.db/query`'s
-          missing-attr error, pre-build the envelope);
+          `seon.error/agent-fault-kinds`) in the flattened
+          `:seon.error/data` — every kind-bearing throw puts the kind FLAT
+          in its ex-data (one convention, C43), and the flatten is
+          deepest-wins, so the DEEPEST kind (the real cause) decides;
         - a PROPAGATED malli contract violation → the VIOLATED fn's
           population when agent-authored, else `:agent` when an agent
           turn is in scope (the agent was the caller), else `coarse`.
@@ -309,8 +310,7 @@
      [e coarse]
      (try
        (let [data (:seon.error/data (error/->map e))
-             kind (or (:seon.error/kind data)
-                      (:seon.error/kind (:seon.error/data data)))]
+             kind (:seon.error/kind data)]
          (cond
            (or (some? (:seon.eval/warning-type data))
                (= :cljs/analysis-error (:tag data))

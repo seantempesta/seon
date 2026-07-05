@@ -95,16 +95,16 @@
 
 (defn- ex-data-chain
   "Walk e and its ex-cause chain (bounded depth 5), collecting each
-   level's ex-data. Returns a seq ordered deepest-first, so a
+   level's ex-data. Returns a vector ordered shallowest-first, so a
    subsequent (apply merge ...) gives deepest-wins semantics — the
    ORIGINAL throw's ex-data takes precedence over wrap-layer
    ex-data added by cljs.js etc."
   [e]
-  (loop [e e depth 0 acc ()]
+  (loop [e e depth 0 acc []]
     (if (or (nil? e) (>= depth 5))
       acc
       (let [data (when (instance? cljs.core/ExceptionInfo e) (ex-data e))
-            acc' (if (seq data) (cons data acc) acc)]
+            acc' (if (seq data) (conj acc data) acc)]
         (recur (ex-cause e) (inc depth) acc')))))
 
 (defn ->map

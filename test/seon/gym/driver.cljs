@@ -1031,9 +1031,7 @@
                                                       (resolve-predicate-args
                                                         agents args)))))
                          (catch :default e
-                           (if (get-in (ex-data e)
-                                       [:seon.error/data
-                                        :seon.db/missing-attrs])
+                           (if (:seon.db/missing-attrs (ex-data e))
                              []
                              (throw e))))]
               [(expect-pass? expect rows)
