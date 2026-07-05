@@ -1,0 +1,25 @@
+Loading dataset princeton-nlp/SWE-bench_Verified from Hugging Face...
+Saving the dataset (0/1 shards):   0%|          | 0/500 [00:00<?, ? examples/s]Saving the dataset (1/1 shards): 100%|██████████| 500/500 [00:00<00:00, 137852.63 examples/s]Saving the dataset (1/1 shards): 100%|██████████| 500/500 [00:00<00:00, 134908.46 examples/s]
+time="2026-07-05T15:47:55-04:00" level=warning msg="No services to build"
+time="2026-07-05T15:47:56-04:00" level=warning msg="No services to build"
+Service default: using local image 'ghcr.io/epoch-research/swe-bench.eval.arm64.sympy__sympy-22914:latest'.
+Service default: using local image 'ghcr.io/epoch-research/swe-bench.eval.arm64.astropy__astropy-12907:latest'.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│swe_bench (2 samples): openai-api/deepseek/deepseek-chat                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+sample_id: sympy__sympy-22914,astropy__astropy-12907, message_limit: 30,        
+dataset: princeton-nlp/SWE-bench_Verified                                       
+                                                                                
+total time:                        0:01:08                                      
+openai-api/deepseek/deepseek-chat  160,510 tokens [I: 18,162, CW: 0, CR:        
+                                 137,472, O: 4,876]                             
+                                                                                
+swe_bench_scorer                                                                
+mean              1.000                                                         
+std               0.000                                                         
+                                                                                
+Log:                                                                            
+evals/runs/2026-07-05-slice2-swebench-derisk/logs/2026-07-05T19-47-57-00-00_swe-
+bench_c5AiaKP4tSHsnBMHhPnWsM.eval                                               
+                                                                                
