@@ -1518,3 +1518,23 @@ Eval lane only; NO `src/seon` edits — `src-inspect-ai` + `evals` + `docs`.
   `seon_inspect.swebench_arm` + `tasks/swe_bench_seon.py` (+ freeze.py
   `image_pins` lock seam). Interim egress asymmetry recorded on the row
   (allowlist unbuilt, per §9).
+
+## 2026-07-05 — FLAG eval→tooling (owner-approved P0 ask): structural edit verb in `seon.agent.fs`
+
+- **The ask:** an in-place structural edit verb (str-replace shape: match an
+  exact/anchored region, replace it, fail loudly on 0 or >1 matches — the
+  Claude-Code `Edit` / swe-agent `str_replace_editor` pattern), living in
+  `seon.agent.fs` beside read/write, riding the same grant gates + envelope
+  conventions. The long-flagged "in-place editor" gap, now with score
+  evidence.
+- **Evidence (slice 3, `evals/runs/2026-07-05-slice3-composition/`):** the
+  root agent's swe_bench_verified run failed on EXACTLY a botched edit — a
+  correct `_print_Min`/`_print_Max` patch inserted mid-`_print_Symbol` via
+  shell-only editing (fs was read-only in the bench container; that grant
+  is being fixed eval-side, but whole-file rewrites + sed remain the only
+  edit mechanisms afterwards). Plain DeepSeek+react WITH an editor tool
+  solved the same instance (slice 2). Repo-scale work is edit-dominated;
+  this is the highest-leverage tool ask for the SWE suite.
+- **Measurement offer:** when it lands, the eval lane re-runs the SAME
+  frozen dev slice — a clean before/after A/B on the ledger (the
+  numbers-drive-the-product loop, owner ruling 2026-07-04).
