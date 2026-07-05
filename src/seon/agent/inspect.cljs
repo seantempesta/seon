@@ -43,8 +43,14 @@
     [seon.schema :as schema]
     [seon.store.wire :as store.wire]))
 
+;; Shared success/error envelope keys — registered ONCE up front; every
+;; response schema in this ns references them (errors are values: an
+;; unknown id / missing scope is `{::ok? false ::error <guiding>}`).
+(schema/register! ::ok?   :boolean)
+(schema/register! ::error :string)
+
 (schema/register! :seon.agent.inspect/request
-  [:map [:seon.agent/id {:optional true} :string]])
+  [:map [:seon.agent/id {:optional true} :seon.agent/id]])
 
 ;; One rendered section of the assembled context — name + the exact
 ;; text that section contributed to the joined prompt. Consumed by the
@@ -55,44 +61,24 @@
    [:seon.agent.ctx/name :seon.agent.ctx/name]
    [:seon.render/text :string]])
 
+;; `::ok?` required, render keys optional — the same envelope shape as
+;; `::turn-response` below: `::ok? false` + a guiding `::error` when no
+;; agent scope resolves (errors are values, never a throw).
 (schema/register! :seon.agent.inspect/ctx-response
   [:map
-   [:seon.render/text :string]
-   [:seon.render/section-texts [:vector :seon.agent.inspect/section-text]]
-   [:seon.render/section-html [:vector :seon.agent.ctx/block-html]]
-   [:seon.render/token-estimate :int]])
+   [::ok? ::ok?]
+   [::error {:optional true} ::error]
+   [:seon.render/text {:optional true} :string]
+   [:seon.render/section-texts {:optional true}
+    [:vector :seon.agent.inspect/section-text]]
+   [:seon.render/section-html {:optional true}
+    [:vector :seon.agent.ctx/block-html]]
+   [:seon.render/token-estimate {:optional true} :int]])
 
-(defn- resolve-id
+(defn- ctx-preview*
+  "The resolved-id body of [[ctx-preview]] — renders the full prompt."
   [id]
-  (or id
-      (db/current-agent-id)
-      (throw (ex-info
-               "seon.agent.inspect: no agent-id — pass :seon.agent/id or call inside (seon.db/with-agent id ...)."
-               {:seon.agent.inspect/error :no-agent-id}))))
-
-(defn ctx-preview
-  "Return the FULL prompt the agent would see on its next render.
-
-   The EXACT bytes the LLM receives: the HARDCODED system block FIRST, then
-   the assembled context. The system block is read via the SAME fn the
-   adapters call (`seon.ai/effective-system-prompt` — the system-specific
-   seon mechanics, NOT the soul/any file; explicit-override logic), so
-   the debug text is byte-identical to the real system message; the
-   context comes from `seon.agent.ctx/context-root` → render (and now CARRIES
-   the SOUL.md / AGENTS.md file-sections). Divergence is impossible — both
-   surfaces derive from the same sources the real call uses.
-   `:seon.render/text` = system + boundary + context.
-   `:seon.render/section-texts` leads with a `:system` section (left pane
-   shows the system message too); `:seon.render/section-html` mirrors the
-   context section twins only (the system block is the system message,
-   not a context section). `:seon.render/token-estimate` counts the WHOLE
-   prompt (system included). Renders against the live `@*conn*` — the SAME
-   unfiltered db value the loop renders the prompt over — so the two are
-   byte-identical (no per-agent `d/filter` divergence)."
-  {:malli/schema [:=> [:cat :seon.agent.inspect/request] :seon.agent.inspect/ctx-response]}
-  [{:seon.agent/keys [id]}]
-  (let [id  (resolve-id id)
-        ;; THE SAME db the prompt path renders against — the live cluster
+  (let [;; THE SAME db the prompt path renders against — the live cluster
         ;; conn, UNFILTERED. The loop renders the prompt over `@*conn*`
         ;; ([[seon.agent.ctx/render-context]] / `render-prompt`); the inspector
         ;; must use the SAME db value or it would not be byte-identical (and
@@ -116,7 +102,8 @@
         ;; The FULL prompt = system + boundary + context, via the SAME fn
         ;; the adapters call so the two debug surfaces can't drift.
         full-text     (ai/debug-full-prompt {:seon.ai/ctx text})]
-    {:seon.render/text            full-text
+    {::ok?                        true
+     :seon.render/text            full-text
      :seon.render/section-texts   (into [{:seon.agent.ctx/name     :system
                                           :seon.render/text  system}]
                                         section-texts)
@@ -126,6 +113,35 @@
      ;; system-block length.
      :seon.render/token-estimate  (tokens/estimate full-text)}))
 
+(defn ctx-preview
+  "Return the FULL prompt the agent would see on its next render.
+
+   The EXACT bytes the LLM receives: the HARDCODED system block FIRST, then
+   the assembled context. The system block is read via the SAME fn the
+   adapters call (`seon.ai/effective-system-prompt` — the system-specific
+   seon mechanics, NOT the soul/any file; explicit-override logic), so
+   the debug text is byte-identical to the real system message; the
+   context comes from `seon.agent.ctx/context-root` → render (and now CARRIES
+   the SOUL.md / AGENTS.md file-sections). Divergence is impossible — both
+   surfaces derive from the same sources the real call uses.
+   `:seon.render/text` = system + boundary + context.
+   `:seon.render/section-texts` leads with a `:system` section (left pane
+   shows the system message too); `:seon.render/section-html` mirrors the
+   context section twins only (the system block is the system message,
+   not a context section). `:seon.render/token-estimate` counts the WHOLE
+   prompt (system included). Renders against the live `@*conn*` — the SAME
+   unfiltered db value the loop renders the prompt over — so the two are
+   byte-identical (no per-agent `d/filter` divergence). Errors are
+   values: no id and no agent scope returns `::ok? false` plus a
+   guiding `::error` — nothing throws."
+  {:malli/schema [:=> [:cat :seon.agent.inspect/request] :seon.agent.inspect/ctx-response]}
+  [{:seon.agent/keys [id]}]
+  (if-let [id (or id (db/current-agent-id))]
+    (ctx-preview* id)
+    {::ok?   false
+     ::error (str "seon.agent.inspect/ctx-preview: no agent-id — pass "
+                  ":seon.agent/id or call inside (seon.db/with-agent id ...).")}))
+
 ;;; ============================================================
 ;;; Turn replay — reconstruct any persisted turn from its capture:
 ;;; rendered-as-of (the frozen basis-t), the prompt blob, the reply blob,
@@ -133,8 +149,6 @@
 ;;; values throughout — an unknown id / missing blob is a guiding map.
 ;;; ============================================================
 
-(schema/register! ::ok?           :boolean)
-(schema/register! ::error         :string)
 (schema/register! ::prompt        :string)
 (schema/register! ::reply         :string)
 (schema/register! ::prompt-tokens :int)
@@ -314,7 +328,7 @@
    [:seon.error/message  :seon.error/message]
    [:seon.error/at       {:optional true} :seon.error/at]
    [::top-frame          {:optional true} ::top-frame]
-   [:seon.agent/id       {:optional true} :string]])
+   [:seon.agent/id       {:optional true} :seon.agent/id]])
 
 (schema/register! ::errors-response
   [:map [::errors [:vector ::error-row]]])
@@ -419,7 +433,7 @@
    [:seon.error/args-edn {:optional true} :seon.error/args-edn]
    [:seon.error/data-edn {:optional true} :seon.error/data-edn]
    [::frames             {:optional true} ::frames]
-   [:seon.agent/id       {:optional true} :string]
+   [:seon.agent/id       {:optional true} :seon.agent/id]
    [::turn-eid           {:optional true} ::eid]
    [:seon.agent.turn/id  {:optional true} :seon.agent.turn/id]
    [:seon.agent.turn/rendered-as-of
