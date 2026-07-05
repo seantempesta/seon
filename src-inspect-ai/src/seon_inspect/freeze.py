@@ -130,6 +130,48 @@ EXTERNAL_SOURCES: dict[str, dict[str, Any]] = {
         # the pin so an inspect-evals sync that moves it diffs loudly.
         "pin": ("inspect_evals.bfcl.bfcl", "BFCL_GITHUB_COMMIT"),
     },
+    "swe_bench_verified": {
+        # The A-overlay composition arm (benchmark-suite design §3): dataset
+        # + official scorer from inspect_evals.swe_bench; driven by
+        # tasks/swe_bench_seon.py, never the pod door. Stratified across
+        # repos per the design (Verified is django-heavy).
+        "capability_row": "swe_bench",
+        "dev_n": 10,
+        "milestone_n": 25,
+        "stratify": "repo",
+        "freeze_task_kwargs": {},
+        "pin": ("inspect_evals.swe_bench.swe_bench",
+                "SWE_BENCH_VERIFIED_REVISION"),
+        # Exclusions are FILTERED OUT OF THE DRAW SEQUENCE (never re-shuffled
+        # — the seeded order over the full corpus stays fixed; excluding an
+        # id just promotes the next id in the sequence). Two kinds, both
+        # honest non-difficulty reasons, each recorded in the lock:
+        "exclude_ids": {
+            "sympy__sympy-22914": (
+                "spent as the slice-2 smoke + slice-3 composition probe; "
+                "solution/patch published in evals/runs/ evidence"),
+            "astropy__astropy-12907": (
+                "spent as a slice-2 de-risk smoke probe; solution published "
+                "in evals/runs/ evidence"),
+            # Availability exclusions (slice 4, 2026-07-05): no arm64 epoch
+            # instance image exists — ghcr returns "not found" even
+            # AUTHENTICATED (evals/runs/2026-07-05-slice4-dev-pass/
+            # pull-stats.txt). Not difficulty picks; the seeded sequence
+            # tops the dev slice back up.
+            "pydata__xarray-6721": (
+                "no arm64 epoch instance image on ghcr (not found, "
+                "authenticated pull, 2026-07-05)"),
+            "matplotlib__matplotlib-22719": (
+                "no arm64 epoch instance image on ghcr (not found, "
+                "authenticated pull, 2026-07-05)"),
+            "scikit-learn__scikit-learn-14629": (
+                "no arm64 epoch instance image on ghcr (not found, "
+                "authenticated pull, 2026-07-05)"),
+            "pydata__xarray-4629": (
+                "no arm64 epoch instance image on ghcr (not found, "
+                "authenticated pull, 2026-07-05)"),
+        },
+    },
 }
 
 # Bespoke generator rows (eval-design): the GENERATOR + seeds are what's
@@ -263,12 +305,49 @@ def _corpus_sha256(rows: list[dict[str, Any]]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _dataset_rows(name: str) -> list[dict[str, Any]]:
-    """Load a source's samples as draw rows (downloads/caches via inspect)."""
-    from seon_inspect.catalog import load_bench_task  # deferred: heavy import
+def _freeze_task(name: str):
+    """Load a source's upstream Task for FREEZING (dataset access only).
+
+    Deliberately bypasses `load_bench_task`'s kind gate: the freeze needs
+    every registered source's DATASET, including non-pod-door arms
+    (swe_bench_verified, kind "swebench", is run-refused there but its
+    sample corpus freezes exactly like any other). Same default_task_kwargs
+    merge as load_bench_task, so freeze and run load the SAME set."""
+    from seon_inspect.catalog import BENCHES  # deferred: heavy import
 
     spec = EXTERNAL_SOURCES[name]
-    task = load_bench_task(name, **spec["freeze_task_kwargs"])
+    bench = BENCHES[name]
+    defaults = bench.default_task_kwargs
+    merged = {**(defaults() if defaults else {}), **spec["freeze_task_kwargs"]}
+    return bench.task_fn()(**merged)
+
+
+def excluded_ids(name: str) -> dict[str, str]:
+    """A source's frozen id→reason exclusions ({} for most sources).
+
+    Exclusions never re-shuffle: the seeded draw runs over the FULL corpus
+    and excluded ids are filtered from the resulting sequence, so each
+    exclusion just promotes the next id in the frozen order."""
+    return dict(EXTERNAL_SOURCES[name].get("exclude_ids") or {})
+
+
+def _apply_exclusions(name: str, ordered: list[dict[str, Any]]
+                      ) -> list[dict[str, Any]]:
+    excl = excluded_ids(name)
+    if not excl:
+        return ordered
+    present = {str(r["id"]) for r in ordered}
+    missing = set(excl) - present
+    if missing:
+        raise ValueError(
+            f"{name}: exclude_ids not in the corpus: {sorted(missing)}")
+    return [r for r in ordered if str(r["id"]) not in excl]
+
+
+def _dataset_rows(name: str) -> list[dict[str, Any]]:
+    """Load a source's samples as draw rows (downloads/caches via inspect)."""
+    spec = EXTERNAL_SOURCES[name]
+    task = _freeze_task(name)
     rows = []
     for s in task.dataset:
         stratum = None
@@ -302,7 +381,8 @@ def build_lock(existing: dict[str, Any] | None = None) -> dict[str, Any]:
     for name, spec in EXTERNAL_SOURCES.items():
         rows = _dataset_rows(name)
         ordered = ordered_draw(rows, f"{GLOBAL_SEED}:{name}", bool(spec["stratify"]))
-        tiers = split_ids(ordered, spec["dev_n"], spec["milestone_n"])
+        eligible = _apply_exclusions(name, ordered)
+        tiers = split_ids(eligible, spec["dev_n"], spec["milestone_n"])
         canary = (
             ex_sources.get(name, {}).get("test", {}).get("canary_guid")
             or _new_canary()
@@ -326,6 +406,14 @@ def build_lock(existing: dict[str, Any] | None = None) -> dict[str, Any]:
                 "canary_guid": canary,
             },
         }
+        excl = excluded_ids(name)
+        if excl:
+            # Filtered from the draw sequence (never a re-shuffle); each id
+            # carries its honest, non-difficulty reason.
+            sources[name]["excluded"] = {
+                "n": len(excl),
+                "reasons": dict(sorted(excl.items())),
+            }
 
     from seon_inspect import generators
 
@@ -549,7 +637,8 @@ def load_split(
         spec = EXTERNAL_SOURCES[source]
         rows = _dataset_rows(source)
         ordered = ordered_draw(rows, entry["seed"], bool(spec["stratify"]))
-        tiers = split_ids(ordered, entry["dev"]["n"], entry["milestone"]["n"])
+        eligible = _apply_exclusions(source, ordered)
+        tiers = split_ids(eligible, entry["dev"]["n"], entry["milestone"]["n"])
         got = _ids_sha256(tiers["test"])
         if got != entry["test"]["sample_ids_sha256"]:
             raise TierDisciplineError(

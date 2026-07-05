@@ -144,11 +144,19 @@ _BENCH_ENV = """\
 
 
 def _bench_volumes(volume: str) -> str:
-    """The agent-arm service mounts: overlay RO + entrypoint file + data."""
+    """The agent-arm service mounts: overlay RO + entrypoint file + data.
+
+    The repo entrypoint mounts at CONTAINER ROOT (/seon-entrypoint), NOT
+    over the volume's copy: a file bind whose mountpoint sits inside a
+    read-only mount breaks `docker cp` for the WHOLE container (daemon
+    `openat …: read-only file system`, running or stopped; reproduced
+    slice-4 smoke 2026-07-05) — which broke the OFFICIAL scorer's
+    compose-cp read_file/write_file. The entrypoint takes SEON_HOME from
+    env with the /opt/seon default, so its own location is free."""
     return (
         f"    volumes:\n"
         f"      - {volume}:/opt/seon:ro\n"
-        f"      - {ENTRYPOINT_FILE}:/opt/seon/seon-entrypoint:ro\n"
+        f"      - {ENTRYPOINT_FILE}:/seon-entrypoint:ro\n"
         f"      - /seon-data\n"
     )
 
@@ -185,7 +193,7 @@ def _compose_yaml(image: str, *, boot: bool, volume: str,
         services:
           default:
             image: {image}
-            command: ["/opt/seon/seon-entrypoint", "all"]
+            command: ["/seon-entrypoint", "all"]
             working_dir: /testbed
             mem_limit: 6gb
         """)

@@ -86,11 +86,51 @@
     "seon_runtime": {
       "digest": "sha256:63db32776190f88411542a1415a6eb44bdb17c6b809f2d1fdab39b6a2c0a0557",
       "image": "seon:slice1",
-      "note": "slice 3 dev-spike (A-overlay composition); slice 4's freeze widens this to the frozen instance set",
+      "note": "A-overlay composition; slice-4 freeze (2026-07-05) pinned the frozen dev slice's 10 instance digests below alongside the slice-3 probe's",
       "overlay_volume": "seon-runtime-slice3",
       "pinned_at": "2026-07-05"
     },
     "swe_bench_instances": {
+      "django__django-11299": {
+        "digest": "sha256:422f68c2699b814a614f0da78bf8b11c21cb8fc83a1f22b509af61e89b8a8b48",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.django__django-11299:latest"
+      },
+      "mwaskom__seaborn-3187": {
+        "digest": "sha256:c6b65d4b707df98040cae3e137ad23b104e40a8999ec2e01bcd427c7bd010ef5",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.mwaskom__seaborn-3187:latest"
+      },
+      "pallets__flask-5014": {
+        "digest": "sha256:eecfb236c0343eba8b0d477c6c8d72106920e032f8c0ce02ba4cff1e7c83f8c8",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.pallets__flask-5014:latest"
+      },
+      "psf__requests-1921": {
+        "digest": "sha256:6125049fb44bcbb471008e1853f8c85df8f59fa2d1ae186533fe9831259f9f63",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.psf__requests-1921:latest"
+      },
+      "pylint-dev__pylint-4604": {
+        "digest": "sha256:462e88bf758ebf305a04d929b207a2179fdca4050a7cab5433a2fa76d407590d",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.pylint-dev__pylint-4604:latest"
+      },
+      "pytest-dev__pytest-7490": {
+        "digest": "sha256:f049336c9c8201e8c61280685655078ee5fdd2c8e087c9830816af9e54e92fe9",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.pytest-dev__pytest-7490:latest"
+      },
+      "sphinx-doc__sphinx-10614": {
+        "digest": "sha256:e8d452a33791b8c89998f01dc6110a7708facb33544ffbfb4538d51d44bae5fb",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.sphinx-doc__sphinx-10614:latest"
+      },
+      "sphinx-doc__sphinx-8269": {
+        "digest": "sha256:5dd4ff0ac27fff6fdeb88bc9475f57112bdf98d638d3e890137c06aba949dda0",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.sphinx-doc__sphinx-8269:latest"
+      },
+      "sympy__sympy-15875": {
+        "digest": "sha256:d8fba036b978176223f5173e97e76435b88e6fe01d62b78da2315c264754bba1",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.sympy__sympy-15875:latest"
+      },
+      "sympy__sympy-20916": {
+        "digest": "sha256:9b4e744e61da530e77856634d27b5e29dd0e211034b528784083518ea16106ba",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.sympy__sympy-20916:latest"
+      },
       "sympy__sympy-22914": {
         "digest": "sha256:ca24e98226cb7434dde2b9381401d5dff9439854eb5950dac54d567887db95ef",
         "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.sympy__sympy-22914:latest"
@@ -359,6 +399,78 @@
         "sample_ids_sha256": "62b1e45c0bfb9fbeb6e7e0703410cdac229265f050521e80a7b97a5a0756eac2"
       },
       "total_n": 13937
+    },
+    "swe_bench_verified": {
+      "bench": "swe_bench_verified",
+      "capability_row": "swe_bench",
+      "content_sha256": "d8f25a5d2a103e82397e7d9ff2d516cbde54420c84a7f184f418c9bc8de7283c",
+      "dev": {
+        "n": 10,
+        "sample_ids": [
+          "sympy__sympy-20916",
+          "sphinx-doc__sphinx-10614",
+          "django__django-11299",
+          "pallets__flask-5014",
+          "mwaskom__seaborn-3187",
+          "psf__requests-1921",
+          "pytest-dev__pytest-7490",
+          "pylint-dev__pylint-4604",
+          "sympy__sympy-15875",
+          "sphinx-doc__sphinx-8269"
+        ]
+      },
+      "excluded": {
+        "n": 6,
+        "reasons": {
+          "astropy__astropy-12907": "spent as a slice-2 de-risk smoke probe; solution published in evals/runs/ evidence",
+          "matplotlib__matplotlib-22719": "no arm64 epoch instance image on ghcr (not found, authenticated pull, 2026-07-05)",
+          "pydata__xarray-4629": "no arm64 epoch instance image on ghcr (not found, authenticated pull, 2026-07-05)",
+          "pydata__xarray-6721": "no arm64 epoch instance image on ghcr (not found, authenticated pull, 2026-07-05)",
+          "scikit-learn__scikit-learn-14629": "no arm64 epoch instance image on ghcr (not found, authenticated pull, 2026-07-05)",
+          "sympy__sympy-22914": "spent as the slice-2 smoke + slice-3 composition probe; solution/patch published in evals/runs/ evidence"
+        }
+      },
+      "milestone": {
+        "n": 25,
+        "sample_ids": [
+          "django__django-12713",
+          "matplotlib__matplotlib-25287",
+          "astropy__astropy-13579",
+          "mwaskom__seaborn-3069",
+          "psf__requests-2931",
+          "scikit-learn__scikit-learn-13328",
+          "pytest-dev__pytest-10356",
+          "pylint-dev__pylint-4661",
+          "sympy__sympy-22714",
+          "pydata__xarray-7393",
+          "sphinx-doc__sphinx-7889",
+          "django__django-10999",
+          "matplotlib__matplotlib-26342",
+          "astropy__astropy-14539",
+          "psf__requests-1142",
+          "scikit-learn__scikit-learn-11310",
+          "pytest-dev__pytest-10081",
+          "pylint-dev__pylint-4970",
+          "sympy__sympy-21379",
+          "pydata__xarray-6992",
+          "sphinx-doc__sphinx-8721",
+          "django__django-13568",
+          "matplotlib__matplotlib-20676",
+          "astropy__astropy-13236",
+          "psf__requests-2317"
+        ]
+      },
+      "pin": {
+        "inspect_evals.swe_bench.swe_bench.SWE_BENCH_VERIFIED_REVISION": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+      },
+      "seed": "20260702:swe_bench_verified",
+      "stratify": "repo",
+      "test": {
+        "canary_guid": "SEON-CANARY-62085748-1500-4d7a-a9e0-11c495778ef5",
+        "n": 459,
+        "sample_ids_sha256": "2945dc6ec480b1d1963493864f84f32f2898417c1c9a3fe55f4f890b654ee9af"
+      },
+      "total_n": 500
     }
   }
 }

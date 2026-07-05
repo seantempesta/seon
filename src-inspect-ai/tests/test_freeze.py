@@ -102,8 +102,23 @@ def test_lock_tiers_sized_and_disjoint(lock):
         assert dev["n"] == spec["dev_n"] == len(dev["sample_ids"])
         assert mile["n"] == spec["milestone_n"] == len(mile["sample_ids"])
         assert not set(map(str, dev["sample_ids"])) & set(map(str, mile["sample_ids"]))
-        assert entry["test"]["n"] == entry["total_n"] - dev["n"] - mile["n"]
+        # Excluded ids (spent-as-probe / availability — reasons in the lock)
+        # are filtered from the draw sequence before slicing, so they belong
+        # to NO tier.
+        spec_excl = spec.get("exclude_ids") or {}
+        excluded = entry.get("excluded", {})
+        if spec_excl:
+            assert excluded == {"n": len(spec_excl),
+                                "reasons": dict(sorted(spec_excl.items()))}
+        else:
+            assert "excluded" not in entry
+        n_excluded = excluded.get("n", 0)
+        assert entry["test"]["n"] == (
+            entry["total_n"] - n_excluded - dev["n"] - mile["n"])
         assert entry["test"]["n"] > 0
+        excluded_set = set((excluded.get("reasons") or {}).keys())
+        assert not excluded_set & set(map(str, dev["sample_ids"]))
+        assert not excluded_set & set(map(str, mile["sample_ids"]))
         # blind: the lock lists NO test ids, only their digest + canary
         assert "sample_ids" not in entry["test"]
         assert len(entry["test"]["sample_ids_sha256"]) == 64

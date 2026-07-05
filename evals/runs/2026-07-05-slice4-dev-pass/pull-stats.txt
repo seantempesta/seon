@@ -1,0 +1,27 @@
+PULLED sympy__sympy-20916 3s size_bytes=899161826 digest=ghcr.io/epoch-research/swe-bench.eval.arm64.sympy__sympy-20916@sha256:9b4e744e61da530e77856634d27b5e29dd0e211034b528784083518ea16106ba
+Error response from daemon: error from registry: denied
+denied
+PULL-FAILED pydata__xarray-6721
+PULLED sphinx-doc__sphinx-10614 5s size_bytes=850635366 digest=ghcr.io/epoch-research/swe-bench.eval.arm64.sphinx-doc__sphinx-10614@sha256:e8d452a33791b8c89998f01dc6110a7708facb33544ffbfb4538d51d44bae5fb
+PULLED django__django-11299 9s size_bytes=960313599 digest=ghcr.io/epoch-research/swe-bench.eval.arm64.django__django-11299@sha256:422f68c2699b814a614f0da78bf8b11c21cb8fc83a1f22b509af61e89b8a8b48
+Error response from daemon: error from registry: denied
+denied
+PULL-FAILED matplotlib__matplotlib-22719
+PULLED pallets__flask-5014 5s size_bytes=713128243 digest=ghcr.io/epoch-research/swe-bench.eval.arm64.pallets__flask-5014@sha256:eecfb236c0343eba8b0d477c6c8d72106920e032f8c0ce02ba4cff1e7c83f8c8
+PULLED mwaskom__seaborn-3187 8s size_bytes=852295827 digest=ghcr.io/epoch-research/swe-bench.eval.arm64.mwaskom__seaborn-3187@sha256:c6b65d4b707df98040cae3e137ad23b104e40a8999ec2e01bcd427c7bd010ef5
+PULLED psf__requests-1921 5s size_bytes=704239542 digest=ghcr.io/epoch-research/swe-bench.eval.arm64.psf__requests-1921@sha256:6125049fb44bcbb471008e1853f8c85df8f59fa2d1ae186533fe9831259f9f63
+Error response from daemon: error from registry: denied
+denied
+PULL-FAILED scikit-learn__scikit-learn-14629
+PULLED pytest-dev__pytest-7490 4s size_bytes=722566033 digest=ghcr.io/epoch-research/swe-bench.eval.arm64.pytest-dev__pytest-7490@sha256:f049336c9c8201e8c61280685655078ee5fdd2c8e087c9830816af9e54e92fe9
+Error response from daemon: failed to resolve reference "ghcr.io/epoch-research/swe-bench.eval.arm64.pydata__xarray-6721:latest": ghcr.io/epoch-research/swe-bench.eval.arm64.pydata__xarray-6721:latest: not found
+PULL-FAILED-authed-retry pydata__xarray-6721
+Error response from daemon: failed to resolve reference "ghcr.io/epoch-research/swe-bench.eval.arm64.matplotlib__matplotlib-22719:latest": ghcr.io/epoch-research/swe-bench.eval.arm64.matplotlib__matplotlib-22719:latest: not found
+PULL-FAILED-authed-retry matplotlib__matplotlib-22719
+Error response from daemon: failed to resolve reference "ghcr.io/epoch-research/swe-bench.eval.arm64.scikit-learn__scikit-learn-14629:latest": ghcr.io/epoch-research/swe-bench.eval.arm64.scikit-learn__scikit-learn-14629:latest: not found
+PULL-FAILED-authed-retry scikit-learn__scikit-learn-14629
+PULLED-topup pylint-dev__pylint-4604 6s size_bytes=740761602 digest=ghcr.io/epoch-research/swe-bench.eval.arm64.pylint-dev__pylint-4604@sha256:462e88bf758ebf305a04d929b207a2179fdca4050a7cab5433a2fa76d407590d
+PULLED-topup sympy__sympy-15875 2s size_bytes=898548749 digest=ghcr.io/epoch-research/swe-bench.eval.arm64.sympy__sympy-15875@sha256:d8fba036b978176223f5173e97e76435b88e6fe01d62b78da2315c264754bba1
+Error response from daemon: failed to resolve reference "ghcr.io/epoch-research/swe-bench.eval.arm64.pydata__xarray-4629:latest": ghcr.io/epoch-research/swe-bench.eval.arm64.pydata__xarray-4629:latest: not found
+PULL-FAILED-topup pydata__xarray-4629
+PULLED-topup sphinx-doc__sphinx-8269 6s size_bytes=825059326 digest=ghcr.io/epoch-research/swe-bench.eval.arm64.sphinx-doc__sphinx-8269@sha256:5dd4ff0ac27fff6fdeb88bc9475f57112bdf98d638d3e890137c06aba949dda0

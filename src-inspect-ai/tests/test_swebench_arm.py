@@ -65,7 +65,7 @@ def test_boot_compose_boots_and_stamps_the_sample_port(tmp_path, monkeypatch):
     port = sample_port(str(s.id))
     assert s.metadata["seon_pod_port"] == port
     assert f'"127.0.0.1:{port}:7890"' in text
-    assert 'command: ["/opt/seon/seon-entrypoint", "all"]' in text
+    assert 'command: ["/seon-entrypoint", "all"]' in text
     assert "SEON_BIND=0.0.0.0" in text
     assert "- DEEPSEEK_API_KEY" in text          # passthrough, never a value
     assert "network_mode" not in text
@@ -80,7 +80,10 @@ def test_boot_compose_grants_workspace_rooted_writable_fs(tmp_path, monkeypatch)
     text = _spec_text(_boot_spec(tmp_path, monkeypatch, s))
     assert "- SEON_FS_ROOT=/testbed" in text
     assert "- SEON_FS_READ_ONLY=0" in text
-    assert "docker/seon-entrypoint:/opt/seon/seon-entrypoint:ro" in text
+    # root-level mountpoint: a file bind inside the RO volume breaks
+    # docker cp for the whole container (slice-4 smoke, 2026-07-05)
+    assert "docker/seon-entrypoint:/seon-entrypoint:ro" in text
+    assert ":/opt/seon/seon-entrypoint" not in text
     assert len(s.metadata["seon_entrypoint_sha"]) == 64
 
 
@@ -112,7 +115,7 @@ def test_boot_compose_open_egress_escape_hatch(tmp_path, monkeypatch):
     assert "seon_model_api_ip" not in s.metadata
     # the fs grant + entrypoint overlay apply in BOTH egress stances
     assert "- SEON_FS_ROOT=/testbed" in text
-    assert "seon-entrypoint:/opt/seon/seon-entrypoint:ro" in text
+    assert "seon-entrypoint:/seon-entrypoint:ro" in text
 
 
 def test_sample_port_is_deterministic_and_in_range():
