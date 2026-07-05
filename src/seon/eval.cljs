@@ -2251,6 +2251,15 @@
         ;; edit with unchanged meta is digest-invisible; without the rescue
         ;; the stored :seon.fn/source goes permanently stale).
         new-defs    (changed-defs compile-state defs-before source eval-ns)
+        ;; C14 (owner RULED 2026-07-05: transient stays transient): a def
+        ;; in a transient scratch ns (cljs.user / seon.dynamic / result —
+        ;; the SAME [[transient-ns-syms]] rule the requires-tee uses)
+        ;; mints NO program-graph rows: no :seon.fn/:seon.test/:seon.ns
+        ;; persistence, so no instrumentation and no resume. The def
+        ;; still RAN and returned its value — scratch is scratch.
+        new-defs    (remove (fn [{:seon.analyzer-info/keys [ns]}]
+                              (contains? transient-ns-syms ns))
+                            new-defs)
         new-schemas (set/difference (schema/current-keys) schemas-before)
         fn-entities (for [{:seon.analyzer-info/keys [ns var-map]} new-defs
                           ;; Classify on the FORM HEAD, not the analyzer's
@@ -2382,7 +2391,10 @@
                          :seon.test/source     source
                          :seon.test/created-at at})
         ns-sym      (ns-form-name source)
-        ns-entities (when ns-sym
+        ;; Same C14 gate: `(ns cljs.user)` is eval scaffolding, never a
+        ;; program-graph `:seon.ns` row.
+        ns-entities (when (and ns-sym
+                               (not (contains? transient-ns-syms ns-sym)))
                       [{:seon.ns/name   (keyword (str ns-sym))
                         :seon.ns/source source}])]
     (vec (concat ns-entities fn-entities schema-entities test-entities))))

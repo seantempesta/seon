@@ -1107,6 +1107,62 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
+;; C14 (owner RULED 2026-07-05: transient stays transient) — a def in a
+;; TRANSIENT scratch ns (cljs.user / seon.dynamic / result — the SAME
+;; `transient-ns-syms` rule the requires-tee uses) evals fine and returns
+;; its value, but mints NO program-graph rows: no :seon.fn / :seon.test /
+;; :seon.ns persistence, so no instrumentation and no resume. A def in a
+;; real ns still tees (pinned by plain-defn-still-tees… above; re-pinned
+;; here as the contrast half).
+;; ---------------------------------------------------------------------------
+
+(deftest scratch-ns-def-evals-but-tees-nothing
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+          (fn [cs]
+            (-> (tee-for cs 'cljs.user "(defn c14-scratch-probe [x] (inc x))")
+                (.then
+                  (fn [tee]
+                    (testing "a cljs.user defn mints ZERO program-graph rows"
+                      (is (= [] (vec tee))))
+                    (seval/eval cs "(c14-scratch-probe 41)"
+                                {:seon.eval/starting-ns 'cljs.user
+                                 :seon.eval/analyze-deps? false})))
+                (.then
+                  (fn [r]
+                    (testing "the scratch def still RAN and returns its value"
+                      (is (:seon.eval/ok? r))
+                      (is (= 42 (:seon.eval/value r))))
+                    ;; contrast half: the SAME defn in a real ns tees.
+                    (-> (seval/eval cs "(ns probe.c14real)"
+                                    {:seon.eval/starting-ns 'cljs.user
+                                     :seon.eval/analyze-deps? false})
+                        (.then (fn [_]
+                                 (tee-for cs 'probe.c14real
+                                          "(defn c14-real-probe [x] (inc x))"))))))
+                (.then
+                  (fn [tee]
+                    (testing "a real-ns defn still tees a :seon.fn row"
+                      (is (= ["probe.c14real/c14-real-probe"]
+                             (mapv :seon.fn/sym (filter :seon.fn/sym tee))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest transient-ns-form-tees-no-seon-ns-row
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+          (fn [cs]
+            (tee-for cs 'cljs.user "(ns cljs.user)")))
+        (.then
+          (fn [tee]
+            (testing "(ns cljs.user) is eval scaffolding — no :seon.ns row"
+              (is (= [] (vec (filter :seon.ns/name tee)))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
 ;; C37 — the `::`-keyword read-gate flywheel gap. cljs.tools.reader has NO
 ;; current-ns hook (a bare `::kw` is 'Invalid token' on every CLJS build;
 ;; `::alias/kw` needs *alias-map*), so a defn whose source used auto-resolved
