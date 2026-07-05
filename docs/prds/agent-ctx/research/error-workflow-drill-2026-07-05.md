@@ -178,6 +178,18 @@ held nothing but drill artifacts — pre-drive state was 1 agent, 0 messages,
    action).** The bundle's honest `::note` says so and points at the turn's
    eval forms; recovering the failing form worked through the linked turn +
    blob. Honest, not fabricated — as specced.
+3. **`watch-faults` false-alarms on stream EOF (FIXED, registry C52).**
+   Found while closing the drill: stopping the re-drive's SILENT watch
+   (TaskStop → TERM) killed the tail, the fifo read loop fell through with
+   an empty `marker`, and the script still printed "✗ CORE FAULT detected"
+   (blank marker line) and exited 0 — a ghost alarm a background-task
+   harness would triage. (The re-drive watch verdict stands: zero markers in
+   the log, heartbeat-only context, no exit before the TaskStop — the "fire"
+   was the stop artifact.) Fix: the empty-marker fallthrough now prints
+   "○ watch ended without a fault marker … NO core fault detected" and exits
+   3; exit 0 is reserved for a real marker. Shell-tested both ways on a
+   scratch `--cluster` log (injected marker → alarm with text; TERM → honest
+   line, exit 3).
 
 ## Residue check
 

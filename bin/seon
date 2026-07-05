@@ -1516,6 +1516,17 @@ cmd_watch_faults() {
   done < "$fifo"
   kill "$tail_pid" 2>/dev/null || true
   rm -f "$fifo"
+  # EOF without a match (tail killed, watch TERM'd, fifo closed) is NOT a
+  # fault — falling through to the alarm here printed a FALSE "✗ CORE FAULT
+  # detected" with an EMPTY marker and exit 0 (found by the error-workflow
+  # drill 2026-07-05, registry C52). Report honestly and exit 3 so a
+  # background-task harness never triages a ghost.
+  if [ -z "$marker" ]; then
+    echo ""
+    echo "○ watch ended without a fault marker (log stream closed / watch terminated) — NO core fault detected"
+    trap - EXIT INT TERM
+    exit 3
+  fi
   echo ""
   echo "✗ CORE FAULT detected in $lf:"
   echo "  $marker"
