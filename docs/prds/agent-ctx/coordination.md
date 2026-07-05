@@ -1538,3 +1538,30 @@ Eval lane only; NO `src/seon` edits — `src-inspect-ai` + `evals` + `docs`.
 - **Measurement offer:** when it lands, the eval lane re-runs the SAME
   frozen dev slice — a clean before/after A/B on the ledger (the
   numbers-drive-the-product loop, owner ruling 2026-07-04).
+
+## 2026-07-05 — eval lane: pre-slice-4 debt unit SHIPPED (4/4 live-proven) [touches docker/seon-entrypoint]
+
+- **fs grant:** the pinned entrypoint HARDCODED `SEON_FS_ROOT=$SEON_HOME`/
+  read-only (clobbering container env) — entrypoint now honors env
+  overrides (defaults identical); bench compose bind-mounts the fixed file
+  + sets `SEON_FS_ROOT=/testbed` writable (sha stamped per sample). Proof:
+  /proc env + fs-verb write landed in /testbed, `:completed`.
+  **Tooling-reviewable:** `docker/seon-entrypoint` is §9-contract-owned by
+  tooling — this is the minimal env-overridability fix slice 3 named;
+  fold into the formal entrypoint when you take it.
+- **Interim run bounds:** `:seon.agent.run/default-turn-limit`/
+  `default-deadline-ms` transacted onto root via in-container wire REPL
+  post-mint (apply_ai_config pattern; driver params, recorded per sample).
+  Proof: bounds=2 → `closed_reason :turn-limit`, empty reply — the
+  behavior_miss envelope live end-to-end. Cluster-level config remains the
+  standing §9 ask.
+- **Egress default-deny:** internal-only network + socat TCP-passthrough
+  relay aliased `api.deepseek.com` (no MITM, zero pod config). Proof:
+  DeepSeek through relay OK; example.com DNS fail + raw 1.1.1.1:443
+  unreachable. `open_egress` escape hatch recorded per sample. The
+  comparability asterisk is GONE from future rows.
+- **BenchSpec fold:** ONE `catalog.BENCHES` registry; the three old
+  per-bench registries DELETED (no shims). pytest **230/0**.
+- Evidence: `evals/runs/2026-07-05-pre-slice4-debt/`. Next: slice 4 —
+  frozen SWE-bench Verified dev slice (n≈10) on the fixed substrate +
+  the turn-budget memo.

@@ -10,13 +10,24 @@ class _FakeTask:
     solver = []
 
 
-def test_case1_catalog_is_data():
-    # adding a bench is a data edit; every entry is (module, attr)
-    assert "gsm8k" in catalog.CASE1_BENCHES
-    for name, spec in catalog.CASE1_BENCHES.items():
-        assert isinstance(spec, tuple) and len(spec) == 2, name
-        mod, attr = spec
-        assert mod.startswith("inspect_evals."), name
+def test_bench_registry_is_one_benchspec_surface():
+    # ONE registry: adding a bench is one BenchSpec line carrying task ref,
+    # arm kind, adapter hook, and default task kwargs (the old three-dict
+    # trio is deleted, not aliased)
+    assert "gsm8k" in catalog.BENCHES
+    for name, spec in catalog.BENCHES.items():
+        assert isinstance(spec, catalog.BenchSpec), name
+        assert spec.module.startswith("inspect_evals."), name
+        assert spec.kind in ("case1", "swebench"), name
+    assert not hasattr(catalog, "CASE1_BENCHES")
+    assert not hasattr(catalog, "BENCH_ADAPTERS")
+    assert not hasattr(catalog, "BENCH_DEFAULT_TASK_KWARGS")
+    # bfcl carries its adapter + categories pin ON the spec
+    bfcl = catalog.BENCHES["bfcl_ast"]
+    assert bfcl.adapter is not None and bfcl.default_task_kwargs is not None
+    # the swebench arm is registered but is NOT a pod-door bench
+    assert catalog.BENCHES["swe_bench_verified"].kind == "swebench"
+    assert "swe_bench_verified" not in catalog.case1_benches()
 
 
 def test_unknown_bench_names_case2_tier():
@@ -24,6 +35,13 @@ def test_unknown_bench_names_case2_tier():
     with pytest.raises(KeyError) as e:
         catalog.load_bench_task("humaneval")
     assert "case-2" in str(e.value)
+
+
+def test_non_case1_kind_refused_by_pod_door_loader():
+    # a registered bench of another arm kind names its own driver loudly
+    with pytest.raises(KeyError) as e:
+        catalog.load_bench_task("swe_bench_verified")
+    assert "swe_bench_seon" in str(e.value)
 
 
 def test_run_bench_passes_cluster_url_agnostic(monkeypatch):

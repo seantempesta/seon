@@ -1,0 +1,40 @@
+services:
+  default:
+    image: ghcr.io/epoch-research/swe-bench.eval.arm64.sympy__sympy-22914:latest
+    command: ["/opt/seon/seon-entrypoint", "all"]
+    working_dir: /testbed
+    mem_limit: 6gb
+    environment:
+      - SEON_BIND=0.0.0.0
+      - SEON_RUNTIME_ROOT=/opt/seon
+      - SEON_SHELL=1
+      - SEON_FS_ROOT=/testbed
+      - SEON_FS_READ_ONLY=0
+      - DEEPSEEK_API_KEY
+    depends_on:
+      - relay
+    networks:
+      - internal
+    volumes:
+      - seon-runtime-slice3:/opt/seon:ro
+      - /Users/sean/src/seon/docker/seon-entrypoint:/opt/seon/seon-entrypoint:ro
+      - /seon-data
+  relay:
+    image: alpine/socat
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - "socat TCP-LISTEN:443,fork,reuseaddr TCP:3.173.21.63:443 & exec socat TCP-LISTEN:7890,fork,reuseaddr TCP:default:7890"
+    networks:
+      internal:
+        aliases:
+          - api.deepseek.com
+      egress: {}
+    ports:
+      - "127.0.0.1:17965:7890"
+networks:
+  internal:
+    internal: true
+  egress: {}
+volumes:
+  seon-runtime-slice3:
+    external: true

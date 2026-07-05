@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import importlib
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
@@ -38,40 +39,81 @@ from seon_inspect import config
 from seon_inspect.solver import seon_cluster_solver, seon_pod_solver
 
 
-# The case-1 catalog we have assessed as viable through the pod door (see
-# README "Standard benchmarks"). Value = (module, task-attr). Kept as data so
-# adding a bench is a one-line edit, not new code.
-CASE1_BENCHES: dict[str, tuple[str, str]] = {
-    "gsm8k": ("inspect_evals.gsm8k", "gsm8k"),
-    "arc_easy": ("inspect_evals.arc", "arc_easy"),
-    "arc_challenge": ("inspect_evals.arc", "arc_challenge"),
-    "mmlu_0_shot": ("inspect_evals.mmlu", "mmlu_0_shot"),
-    "commonsense_qa": ("inspect_evals.commonsense_qa", "commonsense_qa"),
-    "truthfulqa": ("inspect_evals.truthfulqa", "truthfulqa"),
-    "gpqa_diamond": ("inspect_evals.gpqa", "gpqa_diamond"),
-    # BFCL single-turn AST subset — established tool-calling bench, pure
-    # host-side AST-match scorer (no exec/sandbox). It needs a text->tool_call
-    # ADAPTER (BENCH_ADAPTERS below), not the generic swap_generate, because
-    # its scorer harvests structured ToolCalls the pod's text reply must be
-    # lifted into. Default categories = the python AST set (see bfcl_adapter).
-    "bfcl_ast": ("inspect_evals.bfcl", "bfcl"),
-}
-
-
-# Benches whose scorer does NOT read the pod's TEXT reply directly and so need
-# a bespoke solver chain (an `adapt` hook) instead of `swap_generate`. Keyed by
-# catalog name; a bench absent here uses `swap_generate` (the default). Data,
-# not a code branch — adopting such a bench stays a one-line edit. bfcl's AST
-# scorer reads synthesized ToolCalls, so bfcl_ast maps to the text->call
-# bridge; nothing else needs one today.
 def _bfcl_adapt(*args: Any) -> Any:
     from seon_inspect.bfcl_adapter import bfcl_adapt  # deferred: heavy import
     return bfcl_adapt(*args)
 
 
-BENCH_ADAPTERS: dict[str, Callable[..., list[Solver]]] = {
-    "bfcl_ast": _bfcl_adapt,
+def _bfcl_ast_kwargs() -> dict[str, Any]:
+    # bfcl's upstream default is EVERY category (incl. exec + multi-turn,
+    # which pull a sandbox); pin the pure-AST python subset so bfcl_ast
+    # never widens — freeze-time and run-time load identically.
+    from seon_inspect.bfcl_adapter import BFCL_AST_CATEGORIES  # deferred
+    return {"categories": list(BFCL_AST_CATEGORIES)}
+
+
+@dataclass(frozen=True)
+class BenchSpec:
+    """ONE per-bench wiring record — the single registry surface.
+
+    Folds the former CASE1_BENCHES / BENCH_ADAPTERS /
+    BENCH_DEFAULT_TASK_KWARGS trio (pre-slice-4 debt, 2026-07-05) plus the
+    arm kind into one structure keyed by bench name:
+
+    - `module`/`attr` — the upstream inspect_evals task callable.
+    - `kind` — the driver arm: "case1" (text through the pod door —
+      `run_bench`) or "swebench" (the A-overlay sandbox composition —
+      `tasks/swe_bench_seon.py`; NOT runnable through `run_bench`).
+    - `adapter` — bespoke solver-chain hook for benches whose scorer does
+      not read the pod's TEXT reply (bfcl's AST scorer reads synthesized
+      ToolCalls); None = the default `swap_generate`.
+    - `default_task_kwargs` — a thunk of per-bench task kwargs applied
+      UNDER caller kwargs (the one place a bench's constrained scope
+      lives); deferred so heavy imports stay lazy.
+    """
+
+    module: str
+    attr: str
+    kind: str = "case1"
+    adapter: Callable[..., list[Solver]] | None = None
+    default_task_kwargs: Callable[[], dict[str, Any]] | None = None
+
+    def task_fn(self) -> Callable[..., Task]:
+        """The upstream task callable (imports the bench module lazily)."""
+        return getattr(importlib.import_module(self.module), self.attr)
+
+
+# The assessed bench registry. Adding a bench is one BenchSpec line.
+# case1 = `input text -> final answer` with a host-side scorer, driven
+# through the pod door; code-exec benches (HumanEval/MBPP) and web-tool
+# benches (GAIA) are the CASE-2 / mvm tier — deferred, not faked.
+BENCHES: dict[str, BenchSpec] = {
+    "gsm8k": BenchSpec("inspect_evals.gsm8k", "gsm8k"),
+    "arc_easy": BenchSpec("inspect_evals.arc", "arc_easy"),
+    "arc_challenge": BenchSpec("inspect_evals.arc", "arc_challenge"),
+    "mmlu_0_shot": BenchSpec("inspect_evals.mmlu", "mmlu_0_shot"),
+    "commonsense_qa": BenchSpec("inspect_evals.commonsense_qa",
+                                "commonsense_qa"),
+    "truthfulqa": BenchSpec("inspect_evals.truthfulqa", "truthfulqa"),
+    "gpqa_diamond": BenchSpec("inspect_evals.gpqa", "gpqa_diamond"),
+    # BFCL single-turn AST subset — established tool-calling bench, pure
+    # host-side AST-match scorer (no exec/sandbox); needs the text->tool_call
+    # adapter, and the categories pin (see the thunks above).
+    "bfcl_ast": BenchSpec("inspect_evals.bfcl", "bfcl",
+                          adapter=_bfcl_adapt,
+                          default_task_kwargs=_bfcl_ast_kwargs),
+    # The SWE-bench A-overlay arm (slice 3): dataset + sandbox + OFFICIAL
+    # scorer from inspect_evals; solver + per-sample compose are ours
+    # (seon_inspect.swebench_arm via tasks/swe_bench_seon.py) — never the
+    # plain pod door.
+    "swe_bench_verified": BenchSpec("inspect_evals.swe_bench", "swe_bench",
+                                    kind="swebench"),
 }
+
+
+def case1_benches() -> dict[str, BenchSpec]:
+    """The registry entries runnable through the pod door (`run_bench`)."""
+    return {n: s for n, s in BENCHES.items() if s.kind == "case1"}
 
 
 def save_eval_logs(logs: Any, evidence_dir: Path) -> list[str]:
@@ -96,33 +138,26 @@ def save_eval_logs(logs: Any, evidence_dir: Path) -> list[str]:
     return copied
 
 
-# Per-bench default task kwargs, applied UNDER caller kwargs — the one place a
-# bench's constrained scope lives so freeze-time and run-time load identically.
-# bfcl's upstream default is EVERY category (incl. exec + multi-turn, which pull
-# a sandbox); we pin the pure-AST python subset so bfcl_ast never widens.
-def _bfcl_ast_categories() -> list[str]:
-    from seon_inspect.bfcl_adapter import BFCL_AST_CATEGORIES  # deferred import
-    return list(BFCL_AST_CATEGORIES)
-
-
-BENCH_DEFAULT_TASK_KWARGS: dict[str, Callable[[], dict[str, Any]]] = {
-    "bfcl_ast": lambda: {"categories": _bfcl_ast_categories()},
-}
-
-
 def load_bench_task(name: str, **task_kwargs: Any) -> Task:
-    """Load a standard inspect_evals Task by catalog name (its own dataset+scorer)."""
-    if name not in CASE1_BENCHES:
+    """Load a standard inspect_evals Task by catalog name (its own dataset+scorer).
+
+    Pod-door (case1) benches only; a registered bench of another kind names
+    its own driver in the error."""
+    spec = BENCHES.get(name)
+    if spec is None:
         raise KeyError(
-            f"{name!r} not in the assessed case-1 catalog {sorted(CASE1_BENCHES)}; "
+            f"{name!r} not in the assessed bench registry {sorted(BENCHES)}; "
             "code-exec (humaneval/mbpp) + web-tool (gaia) benches are the "
             "case-2/mvm tier — not runnable through the pod door."
         )
-    mod_name, attr = CASE1_BENCHES[name]
-    task_fn: Callable[..., Task] = getattr(importlib.import_module(mod_name), attr)
-    defaults = BENCH_DEFAULT_TASK_KWARGS.get(name)
+    if spec.kind != "case1":
+        raise KeyError(
+            f"{name!r} is a {spec.kind!r} arm, not a pod-door bench — drive "
+            "it through its own driver (swebench: tasks/swe_bench_seon.py)."
+        )
+    defaults = spec.default_task_kwargs
     merged = {**(defaults() if defaults else {}), **task_kwargs}
-    return task_fn(**merged)
+    return spec.task_fn()(**merged)
 
 
 @solver
@@ -268,7 +303,8 @@ def run_bench(
         task = load_bench_task(name, **(task_kwargs or {}))
     # Bench-specific solver bridge (bfcl needs text->tool_call); default =
     # swap_generate. An explicit `adapt=` argument overrides the registry.
-    adapt_fn = adapt or BENCH_ADAPTERS.get(name, swap_generate)
+    spec = BENCHES.get(name)
+    adapt_fn = adapt or (spec.adapter if spec else None) or swap_generate
     bundle_start = None
     if per_sample_cluster:
         parallelism = cluster_parallelism or config.BENCH_CLUSTER_PARALLELISM

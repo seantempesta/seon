@@ -1,0 +1,9 @@
+--- api.deepseek.com resolution inside the task container:
+172.19.0.2      api.deepseek.com
+--- relay internal IP:
+preslice4-probe_egress=172.18.0.2 preslice4-probe_internal=172.19.0.2 
+--- fetch https://example.com (must FAIL, 8s cap):
+DENIED as expected: URLError <urlopen error [Errno -3] Temporary failure in name resolution>
+--- raw TCP to 1.1.1.1:443 (must FAIL):
+DENIED as expected: OSError [Errno 101] Network is unreachable
+148305fb84b06ff23fb418015788298981c630aa9d8918a3cb7f8d5a3f1dc509  docker/seon-entrypoint

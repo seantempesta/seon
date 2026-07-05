@@ -1,9 +1,11 @@
-"""SWE-bench composition tasks (slice 3): null-run proofs + the Seon arm.
+"""SWE-bench composition tasks (slice 3+): null-run proofs + the Seon arm.
 
 Thin `@task` wrappers over `inspect_evals.swe_bench` — dataset, sandbox
 lifecycle, and the OFFICIAL scorer come whole from their task; we swap only
 the solver (`task_with`) and, per arm, the per-sample compose via their
-`sandbox_config` seam (see `seon_inspect.swebench_arm`).
+`sandbox_config` seam (see `seon_inspect.swebench_arm`). The upstream task
+callable comes from the ONE bench registry
+(`catalog.BENCHES["swe_bench_verified"]`).
 
 Run these from an env that carries inspect_evals + swebench (the vendored
 inspect-evals checkout; e.g. tmp/slice2-venv with
@@ -26,9 +28,9 @@ from inspect_ai import Task, task, task_with
 
 
 def _swe_bench(**kwargs) -> Task:
-    from inspect_evals.swe_bench import swe_bench  # lazy (see module doc)
+    from seon_inspect.catalog import BENCHES  # lazy: inspect_evals import
 
-    return swe_bench(**kwargs)
+    return BENCHES["swe_bench_verified"].task_fn()(**kwargs)
 
 
 @task
@@ -47,15 +49,27 @@ def swe_bench_null(mounted: bool = False) -> Task:
 
 
 @task
-def swe_bench_seon(timeout_s: int | None = None) -> Task:
+def swe_bench_seon(timeout_s: int | None = None,
+                   turn_limit: int | None = None,
+                   deadline_ms: int | None = None,
+                   open_egress: bool = False) -> Task:
     """The Seon arm: cluster booted INSIDE the instance container (A-overlay),
-    the ROOT agent driven through POST /agents/run, OFFICIAL scorer unchanged."""
+    the ROOT agent driven through POST /agents/run, OFFICIAL scorer unchanged.
+
+    Egress is model-API-only by default (`open_egress=True` is the recorded
+    escape hatch). `turn_limit`/`deadline_ms` are the interim per-run bounds
+    transacted onto the root agent (defaults: 40 turns, the solve timeout)."""
     from seon_inspect.swebench_arm import (
+        DEFAULT_TURN_LIMIT,
         SWEBENCH_RUN_TIMEOUT_S,
         overlay_sandbox_config,
         seon_swebench_solver,
     )
 
     return task_with(
-        _swe_bench(sandbox_config=overlay_sandbox_config(boot=True)),
-        solver=seon_swebench_solver(timeout_s or SWEBENCH_RUN_TIMEOUT_S))
+        _swe_bench(sandbox_config=overlay_sandbox_config(
+            boot=True, open_egress=open_egress)),
+        solver=seon_swebench_solver(
+            timeout_s or SWEBENCH_RUN_TIMEOUT_S,
+            turn_limit=turn_limit or DEFAULT_TURN_LIMIT,
+            deadline_ms=deadline_ms))

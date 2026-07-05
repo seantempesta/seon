@@ -122,8 +122,9 @@ EXTERNAL_SOURCES: dict[str, dict[str, Any]] = {
         # Span the AST categories so a split isn't all-simple; category_name
         # is on every bfcl sample's metadata.
         "stratify": "category_name",
-        # Categories default to the AST subset via BENCH_DEFAULT_TASK_KWARGS —
-        # freeze and run must load the SAME set, so leave this empty.
+        # Categories default to the AST subset via the BenchSpec's
+        # default_task_kwargs (catalog.BENCHES) — freeze and run must load
+        # the SAME set, so leave this empty.
         "freeze_task_kwargs": {},
         # BFCL's GitHub dataset is commit-pinned (contamination-proof) — record
         # the pin so an inspect-evals sync that moves it diffs loudly.

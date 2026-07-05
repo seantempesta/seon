@@ -219,7 +219,7 @@ BFCL is the first ESTABLISHED agentic bench in the catalog. Its single-turn AST
 subset is scored by inspect_evals' pure-Python `ast_match` — deterministic,
 host-side, no exec/sandbox — but that scorer harvests structured `ToolCall`s off
 the assistant message, and the Seon pod emits TEXT, not OpenAI `tool_calls`. So
-bfcl uses a bespoke **adapt hook** (`catalog.BENCH_ADAPTERS["bfcl_ast"]`) instead
+bfcl uses a bespoke **adapt hook** (`catalog.BENCHES["bfcl_ast"].adapter`) instead
 of `swap_generate`: a 3-step chain that keeps the bench's OWN scorer and swaps
 only the generate —
 
@@ -235,8 +235,9 @@ only the generate —
    call).
 
 Scope is the python AST categories only (`simple_python` / `multiple` /
-`parallel` / `parallel_multiple`); `run_bench("bfcl_ast")` pins them via
-`BENCH_DEFAULT_TASK_KWARGS` so freeze and run load identically. Run it like any
+`parallel` / `parallel_multiple`); `run_bench("bfcl_ast")` pins them via the
+BenchSpec's `default_task_kwargs` (`catalog.BENCHES`) so freeze and run load
+identically. Run it like any
 row (`freeze.run_split("bfcl_ast", "dev", per_sample_cluster=True, ...)`); the
 adapter is selected by bench name — no extra argument. NO DeepSeek non-think
 anchor exists (no door-fitting agentic bench has one) → band the number against

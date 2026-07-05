@@ -383,13 +383,26 @@ def wire_repl_port() -> int:
     return int(WIRE_REPL_PORT_FILE.read_text().strip())
 
 
+def parse_wire_json(text: str) -> Any:
+    """Extract + parse the `WIRE-JSON<{...}>WIRE-JSON` sentinel from REPL text.
+
+    The one wire-REPL reply parser — shared by the host loopback channel
+    (`wire_repl_json`) and the in-container exec channel (the SWE-bench arm's
+    run-bounds delivery, `swebench_arm.apply_run_bounds`). Sentinels make the
+    extraction robust against REPL prompts/echoes; raises when absent."""
+    m = re.search(r"WIRE-JSON<(.*)>WIRE-JSON", text, re.DOTALL)
+    if not m:
+        raise RuntimeError(
+            f"wire REPL reply carried no WIRE-JSON sentinel: {text!r:.400}")
+    return json.loads(m.group(1))
+
+
 def wire_repl_json(form: str, *, port: int | None = None,
                    timeout_s: int = 30) -> Any:
     """Eval ONE Clojure form on the wire-server REPL; parse a sentinel line.
 
     The form must print exactly one line `WIRE-JSON<{...}>WIRE-JSON` (JSON
-    between the sentinels — e.g. via cheshire, on the wire-server classpath).
-    Sentinels make the extraction robust against REPL prompts/echoes."""
+    between the sentinels — e.g. via cheshire, on the wire-server classpath)."""
     p = port or wire_repl_port()
     with socket.create_connection(("127.0.0.1", p), timeout=timeout_s) as s:
         s.settimeout(timeout_s)
@@ -399,9 +412,4 @@ def wire_repl_json(form: str, *, port: int | None = None,
         with contextlib.suppress(TimeoutError, OSError):
             while chunk := s.recv(65536):
                 buf += chunk
-    m = re.search(r"WIRE-JSON<(.*)>WIRE-JSON", buf.decode(errors="replace"),
-                  re.DOTALL)
-    if not m:
-        raise RuntimeError(
-            f"wire REPL reply carried no WIRE-JSON sentinel: {buf!r:.400}")
-    return json.loads(m.group(1))
+    return parse_wire_json(buf.decode(errors="replace"))

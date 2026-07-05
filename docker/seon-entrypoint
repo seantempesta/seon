@@ -95,6 +95,9 @@ wait_wire_ready() {
 # under /seon-data, artifacts under SEON_RUNTIME_ROOT, bind 0.0.0.0 so the
 # published port reaches the server. Capability grants follow bin/seon's
 # deployment stance (grant shell+web unless the operator denies via env).
+# The fs grant defaults to the immutable runtime tree read-only, but is
+# env-overridable so a composition can root it at the task workspace
+# (e.g. the bench compose sets SEON_FS_ROOT=/testbed SEON_FS_READ_ONLY=0).
 start_pod() {
   env \
     SEON_RUNTIME_ROOT="$SEON_HOME" \
@@ -105,8 +108,8 @@ start_pod() {
     SEON_PORT="${SEON_PORT:-7890}" \
     SEON_PORT_FILE="$PORT_FILE" \
     SEON_BIND="${SEON_BIND:-0.0.0.0}" \
-    SEON_FS_ROOT="$SEON_HOME" \
-    SEON_FS_READ_ONLY=1 \
+    SEON_FS_ROOT="${SEON_FS_ROOT:-$SEON_HOME}" \
+    SEON_FS_READ_ONLY="${SEON_FS_READ_ONLY:-1}" \
     SEON_SHELL="${SEON_SHELL:-1}" \
     SEON_WEB="${SEON_WEB:-1}" \
     "$NODE" "$SEON_HOME/out/client/main.js" \
