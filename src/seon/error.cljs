@@ -51,9 +51,11 @@
 ;; live objects like :seon.error/raw, the datom never does).
 ;; ============================================================
 
-;; The two error populations. :agent = expected, the agent's learning
-;; signal (NEVER escalates in any mode); :core = our bug (loud per the
-;; :seon.config/on-core-error dial).
+;; The two error populations. :agent = a CALLER mistake — the learning
+;; signal, covering BOTH caller kinds: an agent's own eval AND a dev/MCP
+;; REPL eval in scope ([[in-dev-eval?]]). Recorded, NEVER escalates in
+;; any mode. :core = our bug (loud per the :seon.config/on-core-error
+;; dial).
 (schema/register! ::fault [:enum :agent :core])
 ;; basis-t (tx eid) of the db value live at the catch site — plugs
 ;; straight into `seon.db/as-of` (datahike's :max-tx IS the tx eid).
@@ -344,15 +346,39 @@
       data-edn       (assoc :seon.error/data-edn data-edn))))
 
 ;; ============================================================
-;; Expected-fault bracket — a TEST-side marker so a deliberately-provoked
-;; :core fault (an error-path fixture verifying graceful degradation) still
-;; WRITES its datom but does NOT trip the gate. A process-global DEPTH
-;; counter, NOT a dynamic binding: CLJS `binding` does not cross async
-;; .then/.catch hops, and several fixtures provoke faults through async
-;; renders/evals. Node-test runs sequentially, so a global depth is
-;; race-free across the suite. (Genuinely-stateful test artifact — the
-;; reactive-context rule permits these.)
+;; Ambient scope brackets — ONE mechanism, two thin faces. A
+;; process-global DEPTH counter, NOT a dynamic binding: CLJS `binding`
+;; does not cross async .then/.catch hops, and both faces cover work
+;; that settles through async renders/evals/Promises. Node-test runs
+;; sequentially and the pod is single-threaded, so a global depth is
+;; race-free. (Genuinely-stateful runtime artifacts — the
+;; reactive-context rule permits these.) Faces:
+;;   [[expecting-core-fault!]] — TEST-side expected-fault marker.
+;;   [[dev-eval!]]             — the dev/MCP REPL conduit's CALLER scope.
 ;; ============================================================
+
+(defn- depth-bracket!
+  "Open `!depth`, run `thunk`, close when its value settles.
+
+   The ONE mechanism under [[expecting-core-fault!]] and [[dev-eval!]]:
+   inc `!depth`; a sync value (or sync throw) closes immediately; a
+   returned Promise keeps the bracket open until it settles (returns
+   the chained Promise, re-throwing a rejection so the caller sees the
+   original reason). `settle-close!` receives the close thunk at
+   async-settle time — pass `(fn [c] (c))` for a synchronous close, or
+   defer it (e.g. via `js/setTimeout`) to keep the scope open for
+   same-tick observers like the `unhandledRejection` net."
+  [!depth settle-close! thunk]
+  (swap! !depth inc)
+  (let [close! (fn [] (swap! !depth dec))]
+    (try
+      (let [v (thunk)]
+        (if (and (some? v) (fn? (.-then v)))
+          (.then v
+                 (fn [x] (settle-close! close!) x)
+                 (fn [e] (settle-close! close!) (throw e)))
+          (do (close!) v)))
+      (catch :default e (close!) (throw e)))))
 
 (defonce ^:private !expecting-core-fault (atom 0))
 
@@ -376,16 +402,34 @@
    intended forcing function; there is deliberately no blanket suppression."
   {:malli/schema [:=> [:cat fn?] :any]}
   [thunk]
-  (swap! !expecting-core-fault inc)
-  (let [close! (fn [] (swap! !expecting-core-fault dec))]
-    (try
-      (let [v (thunk)]
-        (if (and (some? v) (fn? (.-then v)))
-          (.then v
-                 (fn [x] (close!) x)
-                 (fn [e] (close!) (throw e)))
-          (do (close!) v)))
-      (catch :default e (close!) (throw e)))))
+  (depth-bracket! !expecting-core-fault (fn [close!] (close!)) thunk))
+
+(defonce ^:private !dev-eval-depth (atom 0))
+
+(defn in-dev-eval?
+  "True while a dev/MCP REPL form (or its returned Promise) is running."
+  {:malli/schema [:=> [:cat] :boolean]}
+  []
+  (pos? @!dev-eval-depth))
+
+(defn dev-eval!
+  "CALLER-scope bracket around one dev/MCP REPL-submitted form.
+
+   Wrapped around the ONE dev-eval choke point (`js/SHADOW_NODE_EVAL`,
+   patched in `seon.client` — both nREPL :7889 entries funnel through
+   it) so `seon.instrument/wrapper-fault` can read [[in-dev-eval?]]: an
+   INPUT-contract violation a dev eval provokes on a core fn is the
+   CALLER's mistake → `:agent` population (recorded, never escalates —
+   dev probing must not crash the pod), while a genuine internal `:core`
+   bug exposed by the same eval still escalates per the dial. Covers
+   Promise settlement when the eval returns one; the async close is
+   DEFERRED one macrotask (`js/setTimeout` 0) so the end-of-tick
+   `unhandledRejection` net still observes the scope. Detached async
+   work the eval fires but does not RETURN is not covered — inherent to
+   an ambient scope."
+  {:malli/schema [:=> [:cat fn?] :any]}
+  [thunk]
+  (depth-bracket! !dev-eval-depth (fn [close!] (js/setTimeout close! 0)) thunk))
 
 (defn- escalate!
   "Apply the `:seon.config/on-core-error` dial to a `:core` fault.

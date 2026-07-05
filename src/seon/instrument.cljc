@@ -302,11 +302,18 @@
           in its ex-data (one convention, C43), and the flatten is
           deepest-wins, so the DEEPEST kind (the real cause) decides;
         - a PROPAGATED malli contract violation → the VIOLATED fn's
-          population when agent-authored, else `:agent` when an agent
-          turn is in scope (the agent was the caller), else `coarse`.
-          Coarse at the boundary by design — misclassifications surface
-          as data (a `:core` datom whose frames are all `my.*`) and get
-          re-blamed as follow-up, not argued up front;
+          population when agent-authored; else `:agent` when an agent
+          turn is in scope (the agent was the caller); else `:agent`
+          when a dev/MCP REPL eval is in scope
+          (`seon.error/in-dev-eval?`) AND the violation is an INPUT
+          contract (`seon.error.instrument/caller-fault-kinds` —
+          invalid input/arity is the caller's fault by construction; an
+          invalid OUTPUT or a non-contract internal throw stays
+          `coarse` — dev presence never excuses our fn breaking); else
+          `coarse`. Coarse at the boundary by design —
+          misclassifications surface as data (a `:core` datom whose
+          frames are all `my.*`) and get re-blamed as follow-up, not
+          argued up front;
         - anything else → `coarse` (unclassified bugs stay loud)."
      {:malli/schema [:=> [:cat :any :seon.error/fault] :seon.error/fault]}
      [e coarse]
@@ -324,6 +331,8 @@
              (cond
                (and violated (error/agent-authored-sym? violated)) :agent
                (some? (db/current-agent-id))                       :agent
+               (and (error/in-dev-eval?)
+                    (contains? ei/caller-fault-kinds kind))        :agent
                :else coarse))
 
            :else coarse))

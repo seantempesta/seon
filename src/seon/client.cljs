@@ -2730,6 +2730,24 @@
 ;; Entry point
 ;; ---------------------------------------------------------------------------
 
+(defonce ^:private !orig-shadow-node-eval
+  ;; Dev-eval CALLER scope (C50): `js/SHADOW_NODE_EVAL` is the ONE conduit
+  ;; every dev/MCP REPL-submitted form enters the pod through — both nREPL
+  ;; :7889 routes (`do-invoke`'s node-eval and `IEvalJS -js-eval`) funnel
+  ;; into this one global (reference-code/shadow-cljs .../client/node.cljs
+  ;; :11-13,:97-108); hot reload uses SHADOW_IMPORT, never this. Patched
+  ;; ONCE per process (defonce) to run each eval inside
+  ;; `seon.error/dev-eval!`, so an input-contract violation a dev probe
+  ;; provokes on a core fn classifies `:agent` (recorded, pod stays up)
+  ;; while a genuine internal `:core` bug still escalates per the dial.
+  ;; Absent global (e.g. the :node-test build) → no-op.
+  (when (exists? js/SHADOW_NODE_EVAL)
+    (let [orig js/SHADOW_NODE_EVAL]
+      (set! js/SHADOW_NODE_EVAL
+            (fn [code source-map-json]
+              (error/dev-eval! (fn [] (orig code source-map-json)))))
+      orig)))
+
 (defn- install-process-safety-net!
   "Belt-and-suspenders: Node 15+ defaults to terminating the process on
    an unhandled Promise rejection. Anything in the pod (core, agent
@@ -2738,11 +2756,14 @@
    core bug becomes a denial-of-service.
 
    This is THE NET (error-blame-strict-gate, RULED 2026-07-04): anything
-   escaping every catch becomes a `:seon.error/fault :core` DATOM via
+   escaping every catch becomes a fault-tagged DATOM via
    `seon.error/record!` with zero per-site work — nothing can silently
-   vanish even before the catch-site sweep lands. Under the dial's
-   `:gate`/`:log` the pod keeps running (never-crash doctrine); under
-   `:crash` record! persists the datom first, then exits loudly.
+   vanish even before the catch-site sweep lands. The fault is coarse
+   `:core` refined by the ONE classifier (`instrument/wrapper-fault` —
+   content wins: an agent-diagnostic or dev-eval-scoped input violation
+   reads `:agent` and never escalates). Under the dial's `:gate`/`:log`
+   the pod keeps running (never-crash doctrine); under `:crash` a `:core`
+   record! persists the datom first, then exits loudly.
 
    Individual call sites should still `.catch` and convert to data
    shapes (`{:ok? false :error ...}`) where it matters; this is the
@@ -2754,14 +2775,14 @@
                              (or reason "<no reason>"))
          (when-not (error/recorded? reason)
            (error/record! {:seon.error/raw   reason
-                           :seon.error/fault :core}))))
+                           :seon.error/fault (instrument/wrapper-fault reason :core)}))))
   (.on js/process "uncaughtException"
        (fn [err _origin]
          (log/error-console! "seon.client" "uncaught exception"
                              (or (.-message err) err))
          (when-not (error/recorded? err)
            (error/record! {:seon.error/raw   err
-                           :seon.error/fault :core})))))
+                           :seon.error/fault (instrument/wrapper-fault err :core)})))))
 
 (defn -main
   {:malli/schema [:=> [:cat [:* :any]] :any]}

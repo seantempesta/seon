@@ -99,7 +99,47 @@
           "a deep :core cause is NOT masked by an outer agent-ish wrapper")))
   (testing "unclassified runtime errors stay coarse (loud by default)"
     (is (= :core  (si/wrapper-fault (js/Error. "boom") :core)))
-    (is (= :agent (si/wrapper-fault (js/Error. "boom") :agent)))))
+    (is (= :agent (si/wrapper-fault (js/Error. "boom") :agent))))
+  (testing "DEV-eval scope (C50): a dev/MCP REPL caller is the :agent population"
+    (let [malli-e (fn [kind]
+                    (ex-info (str kind)
+                             {:seon.error/kind kind
+                              :seon.error.malli/fn-sym 'seon.db/pull}))]
+      (error/dev-eval!
+        (fn []
+          (is (true? (error/in-dev-eval?)))
+          (testing "input-contract violations on a CORE fn → :agent (caller's fault)"
+            (is (= :agent (si/wrapper-fault
+                            (malli-e :seon.error.kind/malli-instrument-input) :core)))
+            (is (= :agent (si/wrapper-fault
+                            (malli-e :seon.error.kind/malli-instrument-arity) :core))))
+          (testing "invalid OUTPUT stays :core — our fn broke; dev presence doesn't excuse it"
+            (is (= :core (si/wrapper-fault
+                           (malli-e :seon.error.kind/malli-instrument-output) :core))))
+          (testing "a genuine internal core throw in dev scope stays :core"
+            (is (= :core (si/wrapper-fault (js/Error. "internal core bug") :core))))))
+      (is (false? (error/in-dev-eval?))
+          "sync bracket closes synchronously — no scope leak into later tests"))))
+
+(deftest dev-eval-bracket-covers-promise-settlement
+  ;; The dev-eval scope must stay open across the async hop (CLJS binding
+  ;; would not) AND through the settle tick — the close is DEFERRED one
+  ;; macrotask so the end-of-tick unhandledRejection net still observes it.
+  (async done
+    (let [p (error/dev-eval!
+              (fn [] (js/Promise. (fn [resolve _]
+                                    (js/setTimeout #(resolve :ok) 10)))))]
+      (is (true? (error/in-dev-eval?)) "scope open while the Promise is pending")
+      (-> p
+          (.then (fn [v]
+                   (is (= :ok v) "the resolved value passes through unchanged")
+                   (is (true? (error/in-dev-eval?))
+                       "same-tick observers (the net) still see the scope at settle")
+                   (js/Promise. (fn [resolve _] (js/setTimeout resolve 0)))))
+          (.then (fn []
+                   (is (false? (error/in-dev-eval?))
+                       "closed after the deferred macrotask")
+                   (done)))))))
 
 (deftest parse-frames-nodejs-stack
   (let [stack (str "Error: boom\n"

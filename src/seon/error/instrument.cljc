@@ -95,6 +95,16 @@
   (and (map? env)
        (contains? kind-set (:seon.error/kind env))))
 
+(def caller-fault-kinds
+  "The instrumentation kinds where the CALLER broke the contract —
+   invalid input or arity means the wrapped fn never ran, so the mistake
+   is the calling side's by construction. `seon.instrument/wrapper-fault`
+   reads this to classify a dev-eval-scoped violation of a core fn as
+   `:agent` (caller mistake). An invalid OUTPUT (or guard) is NOT here:
+   the fn itself broke its contract, and stays with its own population."
+  #{:seon.error.kind/malli-instrument-input
+    :seon.error.kind/malli-instrument-arity})
+
 (defn pr-str-readable
   "pr-str a value with fn-objects replaced by readable placeholders.
 
