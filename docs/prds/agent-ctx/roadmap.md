@@ -243,6 +243,22 @@ substrate):
    persisting, restart clean; seeded datoms retracted. Suite **985/4549
    0F/0E**, gate GREEN.
 
+   **✅ ACCEPTANCE DRILL PASSED (2026-07-05,
+   [[research/error-workflow-drill-2026-07-05]]) — DONE-with-drill.** A
+   realistic core bug planted in `seon.render.value/truncated?` (dropped
+   `map?` guard — `tree-seq` leaf scalars), tripped ORGANICALLY by an
+   uncoached DeepSeek planning+db-memory drive (turn 0's first eval value
+   render), and the whole loop closed on the shipped tools alone: crash +
+   datom persist → `watch-faults` fired → `errors`/`error`/`repro` (frames
+   at the planted line, turn join, byte-exact 17,445-token prompt via
+   `inspect/turn`) → fork-hint run VERBATIM → reproduction in the fork
+   (identical marker; error datom absent inside its own fork, as designed)
+   → fix verified in the fork FIRST → fork destroyed, re-drive green,
+   faults section blank by window-move, watch silent, suite green. All 11
+   links PASS; one gap found AND fixed (C51: a mid-eval crash stranded the
+   captured reply blob — `ask-and-eval-reply!` now links
+   `:seon.agent.turn/reply-blob` eagerly at capture).
+
 Stability queue (interleaved, one per feature unit above; owner-agreed
 2026-07-02 — each fix REUSES an existing mechanism, no new ones):
 
