@@ -208,6 +208,31 @@ substrate):
    exits, datom persisted (`#{[:core 536870943]}`, same `@t`); `:agent`
    record! on the fresh pod → no crash. Registry **C41**+**C42** CLOSED.
 
+   **Unit A (error-workflow arc): triage verbs + watch + deepest message** —
+   ✅ COMPLETE (2026-07-05, `05fc844c`+`ac13d909`). Three `seon.agent.inspect`
+   altitudes over the persisted error datoms: `errors` (compact newest-first
+   list — eid/fault/`at`/deepest-cause message/top frame/agent; fault filter +
+   limit), `error` (full envelope + JOINS: recording agent via tx-meta, the
+   turn active at that basis-t — tx turn-id when turn-scoped, else the
+   `rendered-as-of` window; composes with `inspect/turn`), `repro` (the
+   work-backwards bundle: the LIVE as-of db value frozen at `:seon.error/at`,
+   fn-sym + args-edn from the malli envelope, a ready-to-eval repro
+   expression; honest `::note` when args were not captured).
+   `seon.error/deepest-message` (moved from seon.eval, single owner) now
+   feeds the datom projection, so the `SEON-CORE-FAULT` marker names the
+   real cause, never cljs.js's `"ERROR"` wrapper (prefix/format unchanged —
+   gate greps intact). `bin/seon watch-faults [--cluster n]`: dependency-free
+   background alarm — tail -F from EOF, fires on the first NEW un-expected
+   marker, prints it + 20 context lines, exits 0. Convention documented
+   (CLAUDE.md "Core-fault watch" + observability.md). Live-proven on the
+   default pod under `:crash`: real typo eval → `:agent` datom, triaged
+   through all three verbs; repro's frozen db re-raised the exact violation
+   AND differed from head; a malli-path violation re-invoked via the bundle's
+   expression → same `:malli.core/invalid-input`; a real `:core` fault →
+   watch fired (expected marker earlier ignored), pod exited after
+   persisting, restart clean; seeded datoms retracted. Suite **985/4549
+   0F/0E**, gate GREEN.
+
 Stability queue (interleaved, one per feature unit above; owner-agreed
 2026-07-02 — each fix REUSES an existing mechanism, no new ones):
 
