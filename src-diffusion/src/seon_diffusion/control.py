@@ -88,8 +88,12 @@ class _Workspace:
         return canvas, m, canvas, overflow
 
 
-def _denoise_round(model, canvas, clamp_mask, clamp_ids, cache, cur_len, gen):
-    """One denoise run to natural early-stop, holding clamped positions.
+def _denoise_round(model, canvas, clamp_mask, clamp_ids, cache, cur_len, gen,
+                   probe=None, probe_every=2):
+    """One denoise run, holding clamped positions. Ends on the model's own
+    stability+confidence — OR EARLIER when `probe(belief)` proves the
+    canvas (validation-as-early-stop: a ~0.4ms parse probe against a
+    ~114ms forward; proof beats model confidence).
     Returns (belief_ids[1,CL], forwards)."""
     current = canvas
     sc_logits = None
@@ -117,6 +121,10 @@ def _denoise_round(model, canvas, clamp_mask, clamp_ids, cache, cur_len, gen):
         sc_logits = logits
         if stable and confident:
             break
+        if probe is not None and forwards % probe_every == 0:
+            belief = mx.where(clamp_mask, clamp_ids, argmax_canvas)
+            if probe(belief):
+                break
     belief = mx.where(clamp_mask, clamp_ids, argmax_canvas)
     return belief, forwards
 
@@ -140,6 +148,14 @@ def generate_guided(model, tok, prompt_ids, oracle, eval_session=None,
 
     ids = mx.array(prompt_ids)[None, :]
     t0 = time.time()
+    # scratch session for the mid-round proof probe — throwaway state, so
+    # probing never pollutes the REAL session the lock path executes in
+    probe_session = None
+    if eval_session is not None:
+        try:
+            probe_session = type(eval_session)()
+        except Exception:
+            probe_session = None
     total_forwards = 0
     locked_forms = 0
     repairs = 0
@@ -170,8 +186,35 @@ def generate_guided(model, tok, prompt_ids, oracle, eval_session=None,
             canvas, clamp_mask, clamp_ids, overflow = ws.build(CL, cfg.vocab_size)
             if overflow:
                 events.append({"attempt": attempt, "round": rnd, "event": "overflow"})
+
+            def _proven(belief_ids):
+                """Mid-round probe: stop denoising only on EXECUTION PROOF —
+                parse-clean AND every form evals AND the caller's checks
+                pass (in the scratch session). Parse-clean alone freezes a
+                half-refined draft body (measured: behav 1.00→0.72)."""
+                if probe_session is None:
+                    return False
+                bt = [int(t) for t in belief_ids[0]]
+                be = next((i for i, t in enumerate(bt) if t in gen.eos_token_ids), None)
+                if be is None:
+                    return False
+                btxt = tok.decode([t for t in bt[:be] if t != gen.pad_token_id])
+                if not btxt.strip():
+                    return False
+                br = oracle.refine(btxt, phase=phase)
+                if br["renoise_spans"] or not br["clamps"]:
+                    return False
+                for f in sorted(br["clamps"], key=lambda c: c["span"][0]):
+                    if not probe_session.eval(f["source"]).get("ok"):
+                        return False
+                for c in (checks or []):
+                    ev = probe_session.eval(c["call"])
+                    if not (ev.get("ok") and ev.get("value") == c["expect"]):
+                        return False
+                return True
+
             belief, fwd = _denoise_round(model, canvas, clamp_mask, clamp_ids,
-                                         cache, cur_len, gen)
+                                         cache, cur_len, gen, probe=_proven)
             total_forwards += fwd
 
             toks = [int(t) for t in belief[0]]
@@ -287,6 +330,8 @@ def generate_guided(model, tok, prompt_ids, oracle, eval_session=None,
                 continue                    # fresh attempt, hints in view
         break                               # done (checks passed / no checks) or gave up
 
+    if probe_session is not None:
+        probe_session.close()
     t_total = time.time() - t0
     n_tokens = len(_tok_ids(tok, committed))
     return {

@@ -80,9 +80,9 @@ def spy_clamp_mask(monkeypatch):
     (clamped logits are forced) — the stub is a perfect denoiser."""
     import seon_diffusion.control as C
     real = C._denoise_round
-    def wrapper(model, canvas, clamp_mask, clamp_ids, cache, cur_len, gen):
+    def wrapper(model, canvas, clamp_mask, clamp_ids, cache, cur_len, gen, **kw):
         model._mask = [bool(b) for b in clamp_mask[0]]
-        return real(model, canvas, clamp_mask, clamp_ids, cache, cur_len, gen)
+        return real(model, canvas, clamp_mask, clamp_ids, cache, cur_len, gen, **kw)
     monkeypatch.setattr(C, "_denoise_round", wrapper)
 
 
