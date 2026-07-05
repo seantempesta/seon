@@ -7,6 +7,24 @@ tags: [decision, architecture, schema]
 
 # ADR 007: Always-On Runtime Instrumentation
 
+> **Revision 2026-07-05 (C44/C46 — the pod-era coverage contract).** The
+> decision stands (always-on, default-validated), but the absolute wording
+> below ("all fns", "no off switch") predates the CLJS pod and overclaims.
+> The real semantics on the active track: instrumentation rides the
+> **program graph** (`seon.instrument/instrument-from-db!` at boot /
+> `start-agent!`, re-asserted after every hot reload via
+> `seon.client/after-reload`; the eval-tee wraps agent fns inline).
+> **Structural opt-out** (`async-unwrappable?`, computed — never a name
+> list): `^:async` fns with non-simple shapes (`seon.db/transact!`,
+> `seon.eval/eval`, `seon.client/mem-db`) register no wrapper — their own
+> body validates and returns an error ENVELOPE (never-throw-into-the-loop).
+> `*.internal` fns are deliberately unspecced. A `SEON_INSTRUMENT`
+> kill-switch exists as an emergency bail-out only. Coverage is a
+> **derived invariant**: the root world's `:instrumentation-gaps` section
+> (`seon.instrument/coverage-gaps`) recomputes the census per render and
+> surfaces any specced fn whose live var lost its wrapper. The Integrant
+> component described below is the paused JVM track's machinery.
+
 ## Context
 
 Seon is infrastructure for AI agents to write reliable software. Agents generate and modify code continuously, and the traditional safety net of "a developer eyeballs the diff" does not exist. When an agent writes a function that accepts a map but the caller passes a string, the bug needs to surface immediately -- not silently corrupt data or fail downstream with an unrelated error.

@@ -460,7 +460,7 @@ stop: reframe in attributes + connections. Mindset primer (read it):
 **Maps with namespaced keywords. Every key. No exceptions.** This is the load-bearing rule the rest of the system depends on:
 
 - **Every public function** fully specs and validates ALL its arguments and its return value via `:malli/schema`. Two argument shapes are allowed: (1) **map-in / map-out** — one namespaced-keyword map in, one out, where the request and response are named Malli schemas (`::foo-request`, `::foo-response`) registered via `seon.schema/register!` — **preferred for API-like surfaces** (discoverable, extensible); or (2) **named positional** — each argument is a fully-namespaced-keyword-spec'd slot via Malli `:catn` (named positional) inside a `:=>`/`:function` schema — fine for ordinary data-processing fns and for mimicking a well-known API (e.g. datahike). The invariant: every argument is NAMED, SPECCED, and VALIDATED, whether it sits in a map or a positional slot. The violation is an UNSPECCED or BARE-keyword argument, not a positional one. Every key in any map is fully namespaced (`:seon.runtime/status`, never `:status`).
-- **Every datom persisted to the DB** uses a fully-namespaced attribute keyword whose Malli schema is registered. `seon.db/transact!` enforces this at the boundary — unregistered or unspec'd attrs throw before the tx reaches the DB.
+- **Every datom persisted to the DB** uses a fully-namespaced attribute keyword whose Malli schema is registered. `seon.db/transact!` enforces this at the boundary — in its OWN body (it is a structural instrumentation opt-out, see "Function Instrumentation"): an unregistered/unspec'd attr or invalid value is rejected before the tx reaches the writer, returned as a `{:seon.db/ok? false}` error ENVELOPE (never a throw — the never-throw-into-the-loop invariant).
 - **Every map handed to a callback** (tx-listener handlers, trigger handlers, flow step-fns, async channel envelopes) — fully namespaced. The reason: a single Datalog query should be able to join function specs to the data those functions operate on. `:tx-data` carries no information about which fn owns it; `:seon.db/tx-data` does.
 - **Specificity, not single keywords.** Bare keywords (`:status`, `:ok`, `:tx-data`, `:e`, `:a`, `:v`) are banned in any seon-authored map. If a key feels too generic to namespace, namespace it anyway — that's a signal the schema isn't precise enough yet.
 
@@ -633,9 +633,14 @@ See `docs/conventions.md` for full patterns.
 
 ## Function Instrumentation (IMPORTANT)
 
-All public functions with `:malli/schema` metadata are **instrumented at runtime**. Every call is validated — inputs, outputs, and arity. There is no "off" mode.
+**Give every public fn you write or modify a correct `:malli/schema` — it WILL be enforced at runtime.** On the pod, instrumentation rides the **program graph**: `instrument-from-db!` wraps every specced `:seon.fn` row at boot / `start-agent!` and **re-asserts after every hot reload** (`seon.client/after-reload`); the eval-tee wraps agent-defined fns inline. Every call through a wrapper validates inputs, outputs, and arity. Wrong schemas are bugs — when you see an instrumentation error, **read it and fix the root cause**: either you called the function wrong, or the schema doesn't match reality.
 
-**Every public function you write or modify MUST have a correct `:malli/schema`.** Wrong schemas are bugs — instrumentation will throw at runtime. When you see an instrumentation error, **read it and fix the root cause**: either you called the function wrong, or the schema doesn't match reality.
+The precise coverage contract (don't overclaim it):
+
+- **Structural async opt-out** (`seon.instrument/async-unwrappable?`, computed — never a name list): a `^:async` fn with a non-simple shape (`:function` / multi-arity / variadic) registers NO wrapper — today `seon.db/transact!`, `seon.eval/eval`, `seon.client/mem-db`. Their `:malli/schema` stays the discoverable contract; **their own body is the validation boundary** and they return error ENVELOPES, never throw (the C40 net: an observe-only Promise-aware wrapper would collapse the rule — deferred, owner-gated).
+- **`*.internal` fns are deliberately unspecced** — they are private machinery, outside the contract surface.
+- **Coverage is a derived invariant, not a snapshot**: the root world's `:instrumentation-gaps` section (`seon.instrument/coverage-gaps`) recomputes "specced fn with a live var but no wrapper" at every render and surfaces any gap; empty in a healthy runtime.
+- **`SEON_INSTRUMENT=0/false/off/no` is a kill-switch** (boot + tee). It exists ONLY to bail out if a wrapper ever destabilizes the pod — never set it to silence a validation error; fix the schema or the call.
 
 Public functions fully spec and validate every argument and the return. Two shapes are allowed: **map-in / map-out** (one namespaced-keyword map in, one out — preferred for API-like surfaces) OR **named positional** (each slot specced via Malli `:catn` inside a `:=>`/`:function` schema — fine for ordinary data-processing fns and for mimicking a well-known API). Multi-arity is allowed when every arity is fully specced (use a `:function` schema). The invariant is completeness of specs, not map-wrapping; an unspecced or bare-keyword argument is the violation, not a positional one.
 
@@ -652,7 +657,7 @@ Public functions fully spec and validate every argument and the return. Two shap
   ...)
 ```
 
-Instrumentation is managed by Integrant (`:seon.dev/instrumentation`), survives `(user/reset)`, and picks up schema changes automatically on reload.
+`[JVM track — paused]` instrumentation there is separate machinery: managed by Integrant (`:seon.dev/instrumentation`), survives `(user/reset)`, picks up schema changes on reload.
 
 ---
 

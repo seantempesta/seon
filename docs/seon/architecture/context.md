@@ -110,8 +110,13 @@ contract:
   → whose turn is running, etc. Adding a dependency = add one registry entry
   + fns declare the key. One mechanism; no second wrapper.
 
-This rides the **one instrumentation layer** (every schema'd fn is already
-Malli-instrumented) — inject-then-validate-input, so the filled map satisfies
+This rides the **one instrumentation layer** (every schema'd fn whose shape
+takes a wrapper is Malli-instrumented off the program graph — at boot, on
+`start-agent!`, and re-asserted after every hot reload; the structural
+exception is `^:async` non-simple shapes like `transact!`/`eval`, which
+validate in their own body — and coverage is itself a derived invariant:
+the root world's `:instrumentation-gaps` section recomputes the census per
+render) — inject-then-validate-input, so the filled map satisfies
 the `:map`. The result: a fn's spec IS the honest statement of what it needs,
 the eval log shows real data flowing, and the value is reproducible at
 `as-of t`. This is the one boundary of "clear magic" that lets `with-agent`

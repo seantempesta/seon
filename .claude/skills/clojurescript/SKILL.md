@@ -94,16 +94,17 @@ Note: bare `seon.eval/eval` does NOT auto-await; only the
   duck-types `(fn? (.-then ret))` (`instrument.cljc:258`). For the
   single-realm pod the `instance?` test is adequate; flag it if foreign
   thenables ever enter agent forms.
-- `seon.instrument/async-fn?` (`instrument.cljc:307-313`) checks
-  `(= "AsyncFunction" (.. f -constructor -name))`. **Sound on a freshly
-  compiled `^:async` var, UNSOUND on an already-instrumented wrapper:** malli's
-  `-instrument-f` returns a plain `(fn [& args] ...)` (`instrument.cljc:247`)
-  whose constructor is `"Function"` even though it still returns a Promise. A
-  second instrument pass then mis-detects async as sync and routes the Promise
-  through malli's SYNC output validator -> `:malli.core/invalid-output` -> pod
-  wedges. This is the P0 double-instrument wedge, gated by the once-per-process
-  `!instrumented?` atom (`instrument.cljc:365-376`). **Never run a second
-  instrument pass over the program graph in one process.**
+- `seon.instrument/async-fn?` checks
+  `(= "AsyncFunction" (.. f -constructor -name))` — but only AFTER seeing
+  through malli's wrapper record (`-original-fn` reads
+  `malli$instrument$original` first). A raw ctor-name check on a wrapper
+  would mis-detect async as sync and route the Promise through malli's SYNC
+  output validator -> `:malli.core/invalid-output` -> pod wedges (the old P0
+  double-instrument wedge). The see-through fix made `instrument-from-db!`
+  IDEMPOTENT — it now re-runs on every `start-agent!` AND after every hot
+  reload (`seon.client/after-reload`, C46); the old once-per-process
+  `!instrumented?` gate is retired. When writing NEW detection code, always
+  read the fn via `-original-fn` before any ctor-name/arity-shape check.
 
 ## Callable gotchas -- arity-0 thunks and keyword callbacks
 

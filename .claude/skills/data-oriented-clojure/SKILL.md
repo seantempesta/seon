@@ -76,8 +76,12 @@ data's schema.
   [{::keys [id option]}] ...)
 ```
 
-Every schema'd public fn is **instrumented at runtime** — the wrapper validates
-args + return on every call and *throws* on a mismatch. There is no "off" mode.
+Every schema'd public fn is **instrumented at runtime** — the program graph is
+the roster (`seon.instrument/instrument-from-db!` at boot + after every hot
+reload; the eval-tee wraps agent fns inline) and the wrapper validates args +
+return on every call, *throwing* on a mismatch. The exceptions are structural,
+never a name list (see the envelope section below); `SEON_INSTRUMENT` is an
+emergency kill-switch, never a way to silence an error.
 So a wrong schema is a runtime *bug*, not a doc nit: read the instrumentation
 error and fix the root cause (you called it wrong, or the schema doesn't match
 reality). `:pre`/`:post` gets none of this — not instrumented, not discoverable,
@@ -111,9 +115,11 @@ missing, >78 chars, or lacks terminal punctuation. Full rule + example:
 ```
 
 An agent's eval must survive a bad call and read the failure as *data* — the way
-`seon.db/transact!` and `seon.agent.search/grep` do. These verbs are explicitly
-excluded from the throwing instrumentation validator (`seon.instrument/skip-syms`)
-precisely because a throw would break the `::ok?` contract. Exceptions-as-control-
+`seon.db/transact!` and `seon.agent.search/grep` do. Envelope verbs that are
+`^:async` with non-simple shapes are STRUCTURALLY exempt from the throwing
+instrumentation wrapper (`seon.instrument/async-unwrappable?` — computed from
+the fn's real shape, never a name list) precisely because a throw would break
+the `::ok?` contract; they validate in their own body. Exceptions-as-control-
 flow break the loop; values let the agent inspect, recover, retry. (A genuine
 *programmer* error deep in private code may still throw — errors-as-values is the
 rule for the agent-facing surface.)
