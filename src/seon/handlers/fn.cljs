@@ -106,7 +106,7 @@
 
    The glyph is the FIRST char of line 2 so it lands in the LLM's
    peripheral vision; the agent can scan a long ctx for ✗/⚠ quickly."
-  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :string]]}
   [{:seon.db/keys [db] :seon.render/keys [node entity]}]
   (let [entity    (or node entity)
         sym       (or (:seon.fn/sym entity) "?")
@@ -168,7 +168,7 @@
    this fn (substring heuristic; matches P4 auto-test-run discovery).
    When `:seon.fn/schema-error` is set, the schema-error badge replaces
    the `tested` row with a red one-line warning."
-  {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-tile/hiccup]]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.live-tile/hiccup]]}
   [{:seon.db/keys [db] :seon.render/keys [node entity]}]
   (let [entity   (or node entity)
         sym      (or (:seon.fn/sym entity) "?")

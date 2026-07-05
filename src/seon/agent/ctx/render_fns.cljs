@@ -338,7 +338,7 @@
    `seon.config/render-fn-token-cap` tokens. An interrupt / error / wrong
    shape becomes a `;; ⚠` line naming the fn — the agent sees exactly what
    to fix, in place, and the render pass survives (errors-as-values)."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [in]
   (let [sym (::fn-sym (:seon.render/node in))
         r   (run-render-fn in :seon.render/ai)]
@@ -364,7 +364,7 @@
    `:seon.render/hiccup` (envelope or bare vector); nil renders nothing. An
    interrupt / error / wrong shape becomes the ONE `:seon/error` tile in
    place ([[seon.render.live-tile/error-tile]]) — the render pass survives."
-  {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-tile/hiccup]]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.live-tile/hiccup]]}
   [in]
   (let [sym (::fn-sym (:seon.render/node in))
         r   (run-render-fn in :seon.render/html)]

@@ -57,7 +57,7 @@
   "Format a single message as a single line of LLM-readable text.
 
    `[<from>] <content>`  — e.g. `[user] Define a fn that adds two numbers.`"
-  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :string]]}
   [{:seon.db/keys [db] :seon.render/keys [node entity] :seon.agent/keys [id]}]
   (let [entity (or node entity)
         from (resolve-ref db (:seon.agent.message/from entity))
@@ -79,7 +79,7 @@
      inline HTML renders as visible text, never DOM. No client-side
      `data-markdown`/marked.js pass — the world shim loads only
      datastar.js, so the markdown must be hiccup by the time it ships."
-  {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-tile/hiccup]]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.live-tile/hiccup]]}
   [{:seon.db/keys [db] :seon.render/keys [node entity] :seon.agent/keys [id]}]
   (let [entity (or node entity)
         from   (resolve-ref db (:seon.agent.message/from entity))

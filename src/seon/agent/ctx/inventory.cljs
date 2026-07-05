@@ -164,7 +164,7 @@
    holds no post-bootstrap data — no empty shell. The whole section for
    a typical store is only a few hundred chars (~300 tokens), so it
    stays out of the cacheable prefix and rides near the prompt tail."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{:seon.db/keys [db]}]
   (let [;; Show DOMAIN KNOWLEDGE only — `my.*` and any third-party (acme)
         ;; namespaces the human/agents stored. The framework's own runtime

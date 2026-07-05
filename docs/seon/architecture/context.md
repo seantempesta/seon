@@ -109,6 +109,16 @@ contract:
   [eval-ctx] value)`: `:seon.db/db` → the turn's frozen db, `:seon.agent/id`
   → whose turn is running, etc. Adding a dependency = add one registry entry
   + fns declare the key. One mechanism; no second wrapper.
+- The injectable contract has **one named request shape**:
+  `:seon.render/section-request` (registered in `seon.render`) — an OPEN map
+  naming exactly the registry's keys, each `{:optional true}` and referencing
+  its registered schema. Every block/section/converter fn the render engine
+  calls declares `[:cat :seon.render/section-request]`, never a bare
+  `[:cat :map]` — the contract is greppable, and a wrong-shaped injectable
+  (e.g. a string `:seon.render/at`) rejects at the instrumented boundary
+  naming the schema. Open on purpose: the engine composes extra per-call
+  keys (`:seon.render/node`, `:seon.agent/entity`, …); a semantically
+  richer request (e.g. `:seon.agent.inspect/request`) stays its own schema.
 
 This rides the **one instrumentation layer** (every schema'd fn whose shape
 takes a wrapper is Malli-instrumented off the program graph — at boot, on

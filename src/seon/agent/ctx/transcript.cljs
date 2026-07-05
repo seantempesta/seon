@@ -297,7 +297,7 @@
    it. Content bounded by [[seon.agent.ctx/message-render-cap]]. `new?` marks an
    UNANSWERED inbound — one that arrived after the agent's last action (a
    fresh wake or a mid-call arrival) so the agent re-orients to it."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{node :seon.render/node}]
   (let [{::keys [at from-label to-labels content id new? outbound?]} node
         ;; CP-5 escape-clipping (#43, owner: "render the blocks in full"):
@@ -322,7 +322,7 @@
    changes from the prior eval). PRIOR-SESSION evals (`::prior?` true)
    render their value WITHOUT the `result/<id>` handle (their vars died
    with the restart; the resume marker says so once)."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{node :seon.render/node}]
   (let [{::keys [entity prior? ns-marker]} node
         row (ctx/format-eval-row entity (boolean prior?))]
@@ -390,7 +390,7 @@
    never floods the agent's own context. Flat + eval'able (a pure comment —
    re-evaluating runs nothing, which is correct: every collapsed form DEFINED
    NOTHING)."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{node :seon.render/node}]
   (let [{::keys [signature count]} node]
     (str ";=> ✗ " count "× " signature
@@ -703,7 +703,7 @@
    events; the sliding window lands later. Every past event renders
    byte-identical turn-to-turn (times from FIXED stored `:at`), so the
    prefix caches — only the readline's `now` changes between turns."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{:seon.agent/keys [id] db :seon.db/db render-fn :seon.render/render :as input}]
   (let [db       (or db @db/*conn*)
         a        (agent-rec id db)
@@ -844,7 +844,7 @@
    `:seon.eval`) is rendered through `seon.render/render-entity-html`,
    which resolves the entity's schema-kind html converter. Returns BARE
    hiccup; an empty transcript renders a friendly placeholder."
-  {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-tile/hiccup]]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.live-tile/hiccup]]}
   [{:seon.agent/keys [id] db :seon.db/db :as input}]
   (let [db       (or db @db/*conn*)
         a        (agent-rec id db)

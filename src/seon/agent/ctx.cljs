@@ -48,11 +48,14 @@
        (ns + fns + schemas + tests, :ai or :html), an agent-callable
        core capability the system prompt documents by name.
 
-   Section fns receive ONE map:
+   Section fns receive ONE map — the registered OPEN
+   `:seon.render/section-request` shape (its named keys are the
+   `seon.instrument/injectables` contract):
      {:seon.db/db        <db value>
       :seon.agent/id     <id string>          ; convenience, = entity id
+      :seon.render/at    <basis-t int>        ; \"now\" — the turn's time coordinate
       :seon.agent/entity <the agent's own entity, pulled ONCE>
-      :seon.agent.ctx/block  <this section's map>} ; per-section overrides
+      :seon.render/node  <this section's map>} ; per-section overrides
    and return a string; \"\" suppresses the section.
 
    seon.agent requires this ns and re-exports the agent-facing read API
@@ -242,7 +245,7 @@
    FRESH and `;`-commented (via [[quote-lines]]). Blank when the file
    vanished between wiring and render (the section then renders empty and
    is dropped upstream)."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{{path :seon.agent.ctx/file-path} :seon.render/node}]
   (let [text (read-file-text path)]
     (if (str/blank? text) "" (quote-lines text))))
@@ -253,7 +256,7 @@
    The node's file read
    FRESH and rendered as markdown hiccup. Empty `[:div]` when the file
    vanished."
-  {:malli/schema [:=> [:cat :map] :seon.render.live-tile/content]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :seon.render.live-tile/content]}
   [{{path :seon.agent.ctx/file-path} :seon.render/node}]
   (md/md->hiccup (or (read-file-text path) "")))
 

@@ -69,7 +69,7 @@
    Example:
 
      [ns my.agent.XAR-...]  fns: add, sub  schemas: :answer, :id"
-  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :string]]}
   [{:seon.db/keys [db] :seon.render/keys [node entity]}]
   (let [entity (or node entity)
         n      (:seon.ns/name entity)
@@ -98,7 +98,7 @@
    Header line + collapsible `<details>` per group
    (fns / schemas). Each name is an in-page anchor link — clicking
    `add` jumps to the `:seon.fn` entity card further down the pane."
-  {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-tile/hiccup]]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.live-tile/hiccup]]}
   [{:seon.db/keys [db] :seon.render/keys [node entity]}]
   (let [entity (or node entity)
         n (:seon.ns/name entity)

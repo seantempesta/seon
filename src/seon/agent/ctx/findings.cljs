@@ -160,7 +160,7 @@
    the read-back query so the agent can pull the rest. REACTIVE: returns
    \"\" when the store holds no user-domain rows → the composer drops the
    section."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{:seon.db/keys [db]}]
   (let [boot-ids       (db/bootstrap-row-ids db)
         [eids total]   (finding-eids db boot-ids)]

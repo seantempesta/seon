@@ -34,7 +34,7 @@
 
 (defn pretty-ai
   "Universal AI-side fallback. Emits the input map as edn."
-  {:malli/schema [:=> [:cat :map] :seon.render/ai-response]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :seon.render/ai-response]}
   [input]
   {:seon.render/ai (pr-str input)})
 
@@ -42,7 +42,7 @@
   "Universal HTML-side fallback — wraps an edn dump in monospace.
 
    The container ensures the user at least sees the data structure."
-  {:malli/schema [:=> [:cat :map] :seon.render/html-response]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :seon.render/html-response]}
   [input]
   {:seon.render/hiccup
    [:pre {:class "p-3 text-xs font-mono bg-base-900 text-text-200 overflow-auto"}

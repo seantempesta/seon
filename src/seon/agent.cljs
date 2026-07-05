@@ -74,17 +74,12 @@
 ;; stored on the entity — it's deterministic from the id via `home-ns`.
 ;; ============================================================
 
-;; The literal "root" id (the orchestrator-root base case) is the ONE
-;; agent id exempt from the 14-char minted-id shape — every other agent id
-;; is a `:seon.db/id`. The `:or` bridges to the SAME datahike schema:
-;; the CLJS bridge (seon.db.internal/form->datahike-value-type) walks
-;; `:and` → base, then the `:or` (one mappable type :db.type/string via
-;; :seon.db/id + the unmappable `[:= "root"]`) → :db.type/string; the
-;; `{:seon.db/identity true}` prop still yields :db.unique/identity. Because
-;; the resolved head is `:and` (not `:or`), `edn-encoded-attr?` is FALSE —
-;; "root" stores as a plain string, NOT pr-str'd EDN. Net datahike schema:
-;; byte-identical to before; only Malli validation broadens.
-(schema/register! :seon.agent/id            [:and {:seon.db/identity true} [:or [:= "root"] :seon.db/id]])
+;; `:seon.agent/id` itself is registered in `seon.render` — the
+;; FIRST-loading ns whose load-time schema references it
+;; (`:seon.render/section-request` — this ns loads after seon.render via
+;; the seon.agent.ctx require chain, and register!'s compilability guard
+;; rejects forward references; same precedent as `:seon.ns/name` living
+;; in seon.agent.ctx.render-fns).
 (schema/register! :seon.agent/purpose       :string)
 ;; Subagent → parent (optional; delivery is a thin conditional in
 ;; `complete` — no spawn path sets this yet). References the canonical ref

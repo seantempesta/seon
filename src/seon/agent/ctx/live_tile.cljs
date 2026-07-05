@@ -80,7 +80,7 @@
    missing) — every created agent is welcome-wired, so in practice
    the section is always present; the unwired branch is the
    correctness floor."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
   (try
     (let [{:seon.render/keys [hiccup ai error]}

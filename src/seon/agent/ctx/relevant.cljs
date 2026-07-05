@@ -108,7 +108,7 @@
    REACTIVE: returns \"\" when no hits are stashed (default-OFF — no prefetch
    ran — OR the prefetch found nothing), so the composer drops the section and
    the prompt is unchanged. Self-bound; not charged to the agent budget."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [_input]
   (let [hits (stash/current-hits)]
     (if (seq hits)

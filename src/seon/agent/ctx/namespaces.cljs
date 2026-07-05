@@ -411,7 +411,7 @@
 
    NEVER a render-time file read — the boot indexer is the one reader; both the
    full renderer and the compact card read only indexed rows."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{:seon.db/keys [db] id :seon.agent/id}]
   (let [policy (config/namespaces-policy)
         ;; The agent's current ns (latest successful eval's ns) → rendered per

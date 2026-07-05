@@ -90,7 +90,7 @@
 
    The glyph is the FIRST char of line 2 so it lands in the LLM's
    peripheral vision; the agent can scan a long ctx for ✗/• quickly."
-  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :string]]}
   [{:seon.render/keys [node entity]}]
   (let [entity   (or node entity)
         sym      (or (:seon.test/sym entity) "?")
@@ -119,7 +119,7 @@
    The pill is `passing` (amber), `failing` (red), or `no run` (amber-dim)
    derived from the recorded `:seon.test/last-*` fields. When the last
    run failed and carries a summary, a red one-line warning is shown."
-  {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-tile/hiccup]]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.live-tile/hiccup]]}
   [{:seon.render/keys [node entity]}]
   (let [entity (or node entity)
         sym    (or (:seon.test/sym entity) "?")

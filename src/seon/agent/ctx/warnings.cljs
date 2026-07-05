@@ -20,7 +20,7 @@
    `:seon.warn/all`) on the `:seon.agent.ctx` entity overrides. Runtime checks
    (failed-evals, bad-ref, slow-evals, failing-tests) are always global.
    Dev-only checks are not surfaced here. Add a kind via `seon.warn/checks`."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{:seon.db/keys [db] :seon.agent/keys [id] :as input}]
   ;; The render engine injects this block's own map as :seon.render/node
   ;; (seon.render/render) — that is where a per-block :seon.warn/ns override
@@ -80,7 +80,7 @@
    `:seon.config/root-context` (other agents see nothing — core bugs
    are not theirs to fix; the affected agent already saw its in-place
    `:seon/error` envelope)."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{:seon.db/keys [db]}]
   (let [rows (core-fault-rows db)]
     (if (empty? rows)
@@ -113,7 +113,7 @@
    system-wide, not any one agent's). Structural async opt-outs
    (`async-unwrappable?`) are excluded; the kill-switch (`SEON_INSTRUMENT`
    off) renders empty — no invariant to hold."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{:seon.db/keys [db]}]
   (let [gaps (instrument/coverage-gaps db)]
     (if (empty? gaps)

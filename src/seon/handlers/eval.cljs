@@ -71,7 +71,7 @@
    Source first (what the agent typed),
    result/error as a short tagged summary. See ns docstring for the
    display contract."
-  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :string]]}
   [{:seon.render/keys [node entity]}]
   (let [entity    (or node entity)
         eid       (:seon.eval/id entity)
@@ -131,7 +131,7 @@
      route through the `error-tile` seam — that seam is the never-throw
      backstop for actual RENDER throws and its header reads 'render error',
      which would mislabel (and alarm about) an ordinary eval error."
-  {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-tile/hiccup]]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.live-tile/hiccup]]}
   [{:seon.render/keys [node entity]}]
   (let [entity    (or node entity)
         eid       (:seon.eval/id entity)
