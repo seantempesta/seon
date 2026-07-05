@@ -68,6 +68,26 @@
                    [::deleted? :boolean]
                    [::error {:optional true} :string]])
 
+;; Fork point: a transaction id (basis-t / tx eid — datahike's :max-tx).
+;; `:seon.error/at` carries exactly this value, so an error row's `at`
+;; plugs straight into a fork request.
+(schema/register! ::at :int)
+
+(schema/register! ::fork-db!-request
+                  [:map
+                   [::db-name ::db-name]
+                   [::fork-name ::db-name]
+                   [::at {:optional true} ::at]
+                   [::path {:optional true} ::path]])
+
+(schema/register! ::fork-db!-response
+                  [:map
+                   [::forked? :boolean]
+                   [::db-name {:optional true} ::db-name]
+                   [::basis-t {:optional true} :int]
+                   [::path {:optional true} ::path]
+                   [::error {:optional true} :string]])
+
 (schema/register! ::session-summary
                   [:map
                    [::db-name ::db-name]
@@ -366,6 +386,115 @@
             {::removed? removed? ::deleted? false
              ::error (str (.getMessage t))})))
       {::removed? false ::deleted? false})))
+
+(defn- fork-verify!
+  "Connect `cfg`, prove the fork is whole, release. Returns its basis-t.
+
+   Two checks, both real reads: the head sits exactly at the fork point
+   (`:max-tx` == `at`; skipped for a head fork), and a full history
+   `:eavt` scan completes — the scan forces every index node to load,
+   so a torn konserve copy (source written to mid-copy) surfaces HERE
+   as a throw instead of later inside the fork pod. Throws on failure;
+   the caller deletes the torn target and retries once."
+  [cfg at]
+  (let [conn (d/connect cfg)]
+    (try
+      (let [db (d/db conn)
+            bt (:max-tx db)]
+        (when (and at (not= (long at) (long bt)))
+          (throw (ex-info "fork head is not at the fork point"
+                          {::at at ::basis-t bt})))
+        ;; Force-load the whole index (history includes retractions).
+        (count (d/datoms (d/history db) :eavt))
+        bt)
+      (finally
+        (try (d/release conn) (catch Throwable _))))))
+
+(defn fork-db!
+  "Fork a registered db at basis-t `::at` into a NEW independent store.
+
+   Wraps `datahike.api/fork-database`: copies the source store at the
+   konserve layer, points the fork's head at the commit whose `:max-tx`
+   equals `::at` (absent = the current head), and mints the fork's own
+   deterministic store identity (`store/config-for` on `::fork-name`).
+   The fork is fully writable and byte-faithful as of the fork point —
+   eids/tx-eids identical, so every stored basis-t (`:seon.error/at`,
+   `rendered-as-of`) means the same thing inside it.
+
+   Semantics of `::at` for error forensics: `:seon.error/at` is the
+   basis-t at the CATCH site — the db value the failing code SAW. The
+   error datom itself was recorded in a LATER tx, so it does NOT exist
+   inside its own fork; the fork is the world the failure arose from,
+   not the world that already contains its record.
+
+   The fork is NOT registered here — the fork pod's own boot `ensure-db`
+   registers/connects it, the same one creation path `cluster create`
+   uses, so the end state is indistinguishable from a normal cluster.
+   `::path` defaults via the store layer (cluster callers pass
+   `data/clusters/<fork-name>/store` explicitly).
+
+   Copy-while-live: the source keeps taking writes during the copy
+   (fork-point commits are immutable, so this is normally safe); the
+   fork is VERIFIED after the copy (head at `::at` + a full history
+   index scan) and re-forked once on a torn copy. Supervisor-facing
+   (`bin/seon cluster fork` via the 7891 REPL) — never agent-exposed.
+   Errors return as values: `{::forked? false ::error msg}`."
+  {:malli/schema [:=> [:cat ::fork-db!-request] ::fork-db!-response]}
+  [{::keys [db-name fork-name at path]}]
+  (let [entry (get @!registry db-name)]
+    (cond
+      (nil? entry)
+      {::forked? false
+       ::error (str "source db-name not registered: " db-name
+                    " — ensure-db! it first (a cluster's db registers when"
+                    " its pod boots; the ambient cluster is always registered)")}
+
+      (= db-name fork-name)
+      {::forked? false ::error "fork-name must differ from the source db-name"}
+
+      (contains? @!registry fork-name)
+      {::forked? false
+       ::error (str "fork-name already registered: " fork-name)}
+
+      :else
+      (let [{::keys [backend] src-path ::path} entry
+            src-cfg (store/config-for
+                     (cond-> {:seon.server.store/db-name db-name
+                              :seon.server.store/backend backend}
+                       src-path (assoc :seon.server.store/path src-path)))
+            tgt-cfg (store/config-for
+                     (cond-> {:seon.server.store/db-name fork-name
+                              :seon.server.store/backend :file}
+                       path (assoc :seon.server.store/path path)))
+            store-path (get-in tgt-cfg [:store :path])
+            fork-once! (fn []
+                         (store/ensure-parent-dir!
+                          {:seon.server.store/path store-path})
+                         (d/fork-database src-cfg tgt-cfg
+                                          (cond-> {} at (assoc :at at)))
+                         (fork-verify! tgt-cfg at))]
+        (try
+          (if (d/database-exists? tgt-cfg)
+            {::forked? false
+             ::error (str "fork target store already exists: " store-path)}
+            (let [bt (try
+                       (fork-once!)
+                       (catch Throwable t
+                         ;; Torn copy (source written to mid-copy) or a
+                         ;; transient store error — wipe the partial target
+                         ;; and retry ONCE; a second failure surfaces.
+                         (log/warn t "fork-db!: first fork attempt failed — retrying once"
+                                   {::db-name db-name ::fork-name fork-name ::at at})
+                         (try (d/delete-database tgt-cfg) (catch Throwable _))
+                         (fork-once!)))]
+              {::forked? true
+               ::db-name fork-name
+               ::basis-t (long bt)
+               ::path store-path}))
+          (catch Throwable t
+            {::forked? false
+             ::error (str "fork failed: " (.getMessage t)
+                          " " (pr-str (ex-data t)))}))))))
 
 (defn get-conn
   "Return `{::conn <conn>}` if `db-name` is registered, else `{}`.
