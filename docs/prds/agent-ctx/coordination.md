@@ -1326,3 +1326,15 @@ Eval lane only; NO `src/seon` edits — `src-inspect-ai` + `evals` + `docs`.
   real `ast_match`), `evals/datasets.lock` (+bfcl_ast), `evals/runs/
   2026-07-04-bfcl-ast-dev/`, README + roadmap. Ledger row
   `2026-07-04:bfcl_ast:dev:k1:armD-full`. NOT committed.
+- **TOOLING CLAIM (2026-07-05, owner-ruled build):** error-workflow arc,
+  three units in my lane: (1) `inspect/errors`/`inspect/error`/
+  `inspect/repro` REPL verbs + a core-fault watch (tail-marker based,
+  notifies the orchestrator session); (2) **writable fork-at-t** — replay
+  the tx-log 0→t into a fresh ephemeral cluster (wire-server op +
+  supervisor subcommand) so an agent's world at an error's basis-t boots
+  live; (3) an uncoached planted-bug drill as the acceptance gate. Touches
+  YOUR surfaces: `bin/seon` (a `watch-faults` + `cluster fork`
+  subcommand) and the server wire ops — I'll keep diffs surgical
+  (append-only case entries / one new op) so your cluster build rebases
+  clean; shout if you want either done differently or folded into your
+  build instead.
