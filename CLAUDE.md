@@ -661,6 +661,56 @@ Public functions fully spec and validate every argument and the return. Two shap
 
 ---
 
+## Errors are data — the fault workflow (IMPORTANT)
+
+**Nothing is caught without becoming data.** Every caught error becomes a
+datom via `seon.error/record!`: `:seon.error/fault` (`:agent` | `:core`),
+`:seon.error/at` (the basis-t the failing code SAW), EDN stack frames,
+bounded full args. Two populations, one shape:
+
+- **`:agent` = caller mistake** (an agent's typo'd verb, a dev-REPL probe
+  with bad args). Recorded, surfaced to the caller as its learning signal,
+  **never escalates in any mode** — an agent (or your REPL typo) cannot
+  take the pod down.
+- **`:core` = our bug.** What happens next is the
+  `:seon.config/on-core-error` dial — the ONE knob, set per config file:
+
+| Surface | Config | Dial | Consequence of a `:core` fault |
+|---------|--------|------|-------------------------------|
+| Dev pod (7890) | `config/system.edn` | **`:crash`** | persist the datom, print `SEON-CORE-FAULT <cause> @t=<basis-t>`, EXIT loudly |
+| Suite / CI | `config/test.edn` (via `bin/test-cljs`) | **`:gate`** | run FAILS on any un-expected marker, even with green assertions |
+| Prod / demo | downstream config | **`:log`** | datom + derived warnings surface only; never-crash intact |
+
+**Writing code (the loop you live in):** the dev hook reloads + tests every
+edit AND blocks if your change produced a NEW `:core` fault on the live pod.
+Error-path tests that DELIBERATELY provoke core faults wrap the provocation
+in `seon.error/expecting-core-fault!` (prints the `-EXPECTED-` marker; the
+gates ignore it; the datom still writes). A fault-provoking test WITHOUT the
+bracket reds the gate — that's the forcing function, never blanket-suppress.
+
+**Testing:** targeted runs while iterating; ONE full `bin/test-cljs` per
+unit. Green now means two things: assertions pass AND zero un-expected core
+faults accumulated during the run.
+
+**When a core fault fires (the triage chain — use it, don't log-dig):**
+`bin/seon watch-faults` (the orchestrator's standing background task) hands
+you the marker → `(seon.agent.inspect/errors)` → `(… /error {::eid N})`
+(envelope + frames + the turn join; `inspect/turn` replays the byte-exact
+prompt) → `(… /repro {::eid N})` (the frozen as-of db + a ready-to-eval
+repro expression + a `::fork-hint`) → run the hint verbatim:
+`bin/seon cluster fork default <t>` boots a LIVE, WRITABLE copy of the
+world at the failure moment (own pod/store; the error datom is absent
+inside its own fork — `at` precedes the recording tx). Fix there, verify,
+`bin/seon cluster destroy <fork>` — the source store is untouched by
+construction. This whole loop is acceptance-drill-proven end to end
+(`docs/prds/agent-ctx/research/error-workflow-drill-2026-07-05.md`).
+
+**Production:** same recording, same datoms, same triage chain — the dial
+just says `:log`. A prod fault is a fork-and-reproduce away from a fix; the
+DB's history IS the bug report.
+
+---
+
 ## Docstrings (they render into agent context)
 
 A public fn's docstring **first line is a complete, standalone sentence, ≤72 chars (78 hard cap), ending in terminal punctuation** (`.`/`?`/`!`) — it is the summary shown wherever the fn renders compactly (the compact namespace card shows ONLY line 1). State the **action + data effect, not the mechanism** (mechanism → the body, after a blank line, which renders in the full view). Imperative for side-effecting verbs, noun-phrase for pure queries; backtick-quote identifiers. Enforced by `seon.dev.docstring` (warn-only, dev hook). Full rule + examples: `docs/conventions.md` "Function Docstrings".
