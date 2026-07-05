@@ -1024,13 +1024,18 @@
                               (str "seon.db edge with alias — got " (pr-str edges)))
                           (is (contains? edges {:seon.ns.require/target :clojure.string
                                                 :seon.ns.require/alias  'pstr}))))
-                      (batch (str "(defn watcher [m]"
+                      ;; the attr-map is an ANNOTATION (C38): neither the
+                      ;; :malli/schema key nor the schema-ref keywords in
+                      ;; its value may land in the stored read-set.
+                      (batch (str "(defn watcher"
+                                  " {:malli/schema [:=> [:cat :map] [:vector :keyword]]}"
+                                  " [m]"
                                   " [(:seon.agent/purpose m) :probe.teeedge.data/metric])"))))
                   (.then
                     (fn [b2]
                       (testing "the defn evals ok"
                         (is (= 1 (:seon.eval/n-ok b2)) (pr-str b2)))
-                      (testing "the fn row carries its declared read-set"
+                      (testing "the fn row carries its declared read-set — annotation kws excluded"
                         (is (= #{:seon.agent/purpose :probe.teeedge.data/metric}
                                (read-attrs))))
                       ;; REDEF dropping one literal — the stale keyword must

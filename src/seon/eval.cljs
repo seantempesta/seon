@@ -2416,11 +2416,29 @@
 ;; transact vectors.
 (schema/register! :seon.fn/read-attrs [:vector :qualified-keyword])
 
+(defn- defn-read-forms
+  "The subforms of a top-level `form` whose keyword literals count as
+   READS. For a `(defn …)`/`(defn- …)` that is the params + body: the
+   docstring and the attr-map are code ANNOTATIONS (`:malli/schema`,
+   schema refs), not data reads — C38: the tee was recording the
+   `:malli/schema` metadata key itself as a \"read attribute\".
+   Structural (position, not a keyword name-list): everything between
+   the name and the first non-string/non-map element is annotation. A
+   non-defn form passes through whole."
+  [form]
+  (if (and (seq? form)
+           (symbol? (first form))
+           (contains? #{"defn" "defn-"} (name (first form))))
+    (drop-while #(or (string? %) (map? %)) (drop 2 form))
+    [form]))
+
 (defn- source-qualified-kws
   "Every QUALIFIED keyword literal in `source`'s top-level forms, as a
    set. Walks the READ forms (strings/comments can't false-positive the
    way a text regex does); `#{}` when the source doesn't read — but a
    `:seon.fn` row only exists for sources [[defn-form?]] read cleanly.
+   A defn's docstring/attr-map annotations are excluded
+   ([[defn-read-forms]]).
 
    `resolve-opts` (`{:seon.repl/current-ns … :seon.repl/aliases …}`,
    from the tee's analyzer context) resolves `::kw`/`::alias/kw`
@@ -2430,7 +2448,8 @@
    and is DROPPED here — absent beats storing a garbage watch attr."
   [source resolve-opts]
   (into #{}
-        (comp (mapcat #(tree-seq coll? seq %))
+        (comp (mapcat defn-read-forms)
+              (mapcat #(tree-seq coll? seq %))
               (filter #(and (keyword? %)
                             (some? (namespace %))
                             (not (str/starts-with? (namespace %) "?")))))

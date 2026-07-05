@@ -279,9 +279,10 @@
    [:seon.fn/sym    :seon.fn/sym]
    [:seon.fn/ns     :seon.fn/ns]
    [:seon.fn/source :seon.fn/source]
-   ;; analyzer projections — present when the eval defined a var; null
-   ;; on schema-only registrations. Optional rather than always-present
-   ;; because var-projection returns nil for non-var defs.
+   ;; analyzer projections — the tee stamps all four on every row it
+   ;; mints (strict persistence: only literal `(defn …)` sources get a
+   ;; :seon.fn row). Optional because boot-indexed and legacy rows may
+   ;; omit them.
    [:seon.fn/fn-var?    {:optional true} :seon.fn/fn-var?]
    [:seon.fn/arglists   {:optional true} :seon.fn/arglists]
    [:seon.fn/doc        {:optional true} :seon.fn/doc]
