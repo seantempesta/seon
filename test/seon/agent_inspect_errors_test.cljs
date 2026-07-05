@@ -17,7 +17,8 @@
     [datahike.api :as d]
     [seon.agent.inspect :as inspect]
     [seon.db :as db]
-    [seon.error :as error]))
+    [seon.error :as error]
+    [seon.store.wire :as store.wire]))
 
 ;; ---------------------------------------------------------------------------
 ;; Pure piece — the deepest-message helper (moved from seon.eval).
@@ -154,6 +155,10 @@
       (is (= "[{:my.probe/arg 42}]" (:seon.error/args-edn r)))
       (is (str/includes? (:seon.agent.inspect/repro-expr r)
                          "(apply (resolve 'my.probe/f)"))
+      (testing "the error→fork bridge: the exact supervisor command for this at"
+        (is (= (str "bin/seon cluster fork " store.wire/cluster-name " "
+                    (:seon.error/at r))
+               (:seon.agent.inspect/fork-hint r))))
       (is (not (contains? r :seon.agent.inspect/note)))
       (testing "the as-of db PRE-DATES the error datom (differs from head)"
         (is (nil? (db/query '[:find ?e . :in $ ?m

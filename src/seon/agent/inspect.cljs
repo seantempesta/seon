@@ -40,7 +40,8 @@
     [seon.agent.turn]
     [seon.db :as db]
     [seon.error]
-    [seon.schema :as schema]))
+    [seon.schema :as schema]
+    [seon.store.wire :as store.wire]))
 
 (schema/register! :seon.agent.inspect/request
   [:map [:seon.agent/id {:optional true} :string]])
@@ -498,6 +499,12 @@
 (schema/register! ::fn-sym     :symbol)
 (schema/register! ::repro-expr :string)
 (schema/register! ::note       :string)
+;; The exact supervisor command that boots this error's world as a live,
+;; writable, disposable cluster: `bin/seon cluster fork <cluster> <at>`.
+;; `:seon.error/at` is the basis-t at the CATCH site — the db the failing
+;; code SAW — so the fork holds everything up to the failure but NOT the
+;; error datom itself (recorded in a later tx).
+(schema/register! ::fork-hint  :string)
 
 (schema/register! ::repro-request [:map [::eid ::eid]])
 
@@ -518,6 +525,7 @@
    [:seon.agent.turn/rendered-as-of
     {:optional true} :seon.agent.turn/rendered-as-of]
    [::repro-expr         {:optional true} ::repro-expr]
+   [::fork-hint          {:optional true} ::fork-hint]
    [::note               {:optional true} ::note]])
 
 (defn- fn-sym-from-data-edn
@@ -557,7 +565,11 @@
    when absent — nothing is fabricated), the linked turn
    (`::turn-eid` + `rendered-as-of`, composes with [[turn]]), and
    `::repro-expr` — a ready-to-eval expression string built from what's
-   actually stored. `::ok? false` + guiding `::error` for an unknown
+   actually stored. `::fork-hint` is the supervisor command that boots
+   this world as a live writable cluster (`bin/seon cluster fork
+   <cluster> <at>`) — `at` is the basis-t the failing code SAW, so the
+   fork holds everything up to the failure but not this error datom
+   itself. `::ok? false` + guiding `::error` for an unknown
    eid or an error persisted before a conn was live (no `at`)."
   {:malli/schema [:=> [:cat ::repro-request] ::repro-response]}
   [{eid ::eid}]
@@ -576,7 +588,9 @@
           (cond-> {::ok? true ::eid eid
                    :seon.db/db (db/as-of db at)
                    :seon.error/at at
-                   ::repro-expr (repro-expr-str at fn-sym args-edn)}
+                   ::repro-expr (repro-expr-str at fn-sym args-edn)
+                   ::fork-hint (str "bin/seon cluster fork "
+                                    store.wire/cluster-name " " at)}
             fn-sym   (assoc ::fn-sym fn-sym)
             args-edn (assoc :seon.error/args-edn args-edn)
             teid     (assoc ::turn-eid teid :seon.agent.turn/id tid)
