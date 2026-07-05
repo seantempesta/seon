@@ -24,4 +24,4 @@ A single-page overview of the running system: agents, namespaces, and health sta
 ## Related
 
 - Components: [[components/web-layer]]
-- PRDs: [[prds/dashboard-polish/prd]]
+- PRDs: `prds/dashboard-polish/prd`

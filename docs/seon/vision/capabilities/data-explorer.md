@@ -32,4 +32,4 @@ The XTDB-specific parts (SQL `information_schema`) are obsolete, but the interac
 ## Related
 
 - Components: [[components/web-layer]]
-- PRDs: [[prds/data-viewer/prd]]
+- PRDs: `prds/data-viewer/prd`

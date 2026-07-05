@@ -23,5 +23,5 @@ The system stores functions, schemas, call edges, and namespace dependencies as 
 ## Related
 
 - Components: [[components/code-graph]]
-- PRDs: [[prds/graph-cleanup/prd]], [[prds/spec-driven-rendering/prd]]
+- PRDs: `prds/graph-cleanup/prd`, `prds/spec-driven-rendering/prd`
 - Issues: [[orchestrator/issues/graph-missing-schema-index]]

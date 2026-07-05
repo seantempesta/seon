@@ -31,5 +31,5 @@ Combined with [[concepts/progressive-enhancement]], this means: new data flows t
 
 - Components: [[components/code-graph]], [[components/schema-system]]
 - Concepts: [[concepts/subscriptions]], [[concepts/progressive-enhancement]], [[concepts/renderer-discovery]]
-- PRDs: [[prds/spec-driven-rendering/prd]]
+- PRDs: `prds/spec-driven-rendering/prd`
 - Issues: [[orchestrator/issues/graph-missing-schema-index]]

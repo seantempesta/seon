@@ -22,5 +22,5 @@ Agents eval forms through a pipeline that validates, persists to Datahike with v
 ## Related
 
 - Components: [[components/dev-tools]], [[components/code-graph]]
-- PRDs: [[prds/super-repl/prd]], [[prds/agent-repl-interface/prd]]
+- PRDs: `prds/super-repl/prd`, `prds/agent-repl-interface/prd`
 - Issues: [[orchestrator/issues/dead-repl-graduate]]

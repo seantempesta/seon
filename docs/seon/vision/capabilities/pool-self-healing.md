@@ -22,4 +22,4 @@ None.
 ## Related
 
 - Components: [[components/harness]]
-- PRDs: [[prds/startup-reliability/prd]], [[prds/stability-improvements/prd]]
+- PRDs: `prds/startup-reliability/prd`, `prds/stability-improvements/prd`

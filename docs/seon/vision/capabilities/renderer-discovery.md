@@ -22,5 +22,5 @@ Two dispatch mechanisms coexist (renderer resolution and direct route handlers).
 ## Related
 
 - Components: [[components/renderer]], [[components/code-graph]]
-- PRDs: [[prds/graph-cleanup/prd]], [[prds/render-pipeline/prd]]
+- PRDs: `prds/graph-cleanup/prd`, `prds/render-pipeline/prd`
 - Issues: [[orchestrator/issues/overlap-three-rendering]], [[orchestrator/issues/any-in-render-html]]

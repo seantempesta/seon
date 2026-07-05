@@ -43,4 +43,4 @@ Nothing beyond the partial eval pipeline (see [[capabilities/repl-eval-pipeline]
 
 - Components: [[components/dev-tools]], [[components/agent-system]], [[components/harness]]
 - Concepts: [[concepts/namespace-as-process]], [[concepts/progressive-enhancement]]
-- PRDs: [[prds/agent-repl-interface/prd]]
+- PRDs: `prds/agent-repl-interface/prd`

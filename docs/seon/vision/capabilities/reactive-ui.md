@@ -20,4 +20,4 @@ None.
 ## Related
 
 - Components: [[components/web-layer]], [[components/context]]
-- PRDs: [[prds/render-pipeline/prd]]
+- PRDs: `prds/render-pipeline/prd`

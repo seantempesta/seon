@@ -49,4 +49,4 @@ Nothing beyond the flow topology routing infrastructure. No mailbox abstraction,
 
 - Components: [[components/flow-topology]], [[components/agent-system]]
 - Concepts: [[concepts/progressive-enhancement]], [[concepts/feeds]], [[concepts/subscriptions]]
-- PRDs: [[prds/super-repl/prd]]
+- PRDs: `prds/super-repl/prd`

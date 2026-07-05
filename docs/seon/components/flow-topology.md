@@ -205,7 +205,7 @@ Flow connections support `chan-opts` with `:buf-or-n` and `:xform` per input/out
 - **`sliding-buffer N`** — drop oldest when full. Use for "latest state wins" (ctx persistence, UI updates). Natural backpressure debouncing: fast producer + slow consumer = automatic batching.
 - **`dropping-buffer N`** — drop newest when full. Use for observability (keep recent history for reconnection replay).
 - **Unbuffered (size 1)** — synchronous handoff. Use for critical updates where delivery confirmation matters.
-- **`sliding-buffer 1`** on persist channels — proven pattern for debouncing writes. Writer I/O provides natural backpressure; rapid changes coalesce to latest state. See [[prds/unified-namespace-flow/research/ctx-flow-sync]].
+- **`sliding-buffer 1`** on persist channels — proven pattern for debouncing writes. Writer I/O provides natural backpressure; rapid changes coalesce to latest state. See `prds/unified-namespace-flow/research/ctx-flow-sync`.
 
 Buffer decisions are topology-level configuration, not code-level. See `flow/create-flow` `:chan-opts` parameter. Currently not exposed in `build-topology!` signature — see refactoring opportunities below.
 

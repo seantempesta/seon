@@ -20,5 +20,5 @@ All three ctx atom watches (persistence, SSE broadcast, client-targeted push) wi
 
 ## References
 
-- [[prds/unified-namespace-flow/design]] -- full PRD
-- [[prds/unified-namespace-flow/research/ctx-flow-sync]] -- research on sync mechanism
+- `prds/unified-namespace-flow/design` -- full PRD
+- `prds/unified-namespace-flow/research/ctx-flow-sync` -- research on sync mechanism

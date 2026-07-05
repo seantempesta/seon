@@ -21,4 +21,4 @@ Data API only: `registered-schemas`, `schema-definition`, `schemas-in-namespace`
 ## Related
 
 - Components: [[components/web-layer]], [[components/schema-system]]
-- PRDs: [[prds/schema-viewer/prd]]
+- PRDs: `prds/schema-viewer/prd`
