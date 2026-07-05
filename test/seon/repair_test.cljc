@@ -205,3 +205,80 @@
         "the structural-shape clause is present")
     (is (re-find #"Verify" note)
         "the note tells the agent to verify the repair")))
+
+;; ============================================================
+;; Repair levels + class enablement (form-autofix, owner rulings
+;; 2026-07-05) — enablement is COMPUTED from the class registry
+;; (`class-levels`) + the config kill-switch map, never a call-site list.
+;; ============================================================
+
+(deftest class-enabled-computed-from-level-and-switches
+  (testing ":off disables every class (the pure A/B control arm)"
+    (doseq [c (keys repair/class-levels)]
+      (is (false? (repair/class-enabled? {:seon.repair/level :off
+                                          :seon.repair/classes {}
+                                          :seon.repair/class c})))))
+  (testing ":safe-syntax enables delimiters only"
+    (is (true?  (repair/class-enabled? {:seon.repair/level :safe-syntax
+                                        :seon.repair/classes {}
+                                        :seon.repair/class :seon.repair/delimiters})))
+    (is (false? (repair/class-enabled? {:seon.repair/level :safe-syntax
+                                        :seon.repair/classes {}
+                                        :seon.repair/class :seon.repair/undeclared-var}))))
+  (testing ":symbols enables the symbol tier on top of delimiters"
+    (doseq [c [:seon.repair/delimiters :seon.repair/def-vs-defn
+               :seon.repair/undeclared-var]]
+      (is (true? (repair/class-enabled? {:seon.repair/level :symbols
+                                         :seon.repair/classes {}
+                                         :seon.repair/class c})))))
+  (testing "the per-class kill switch beats the level"
+    (is (false? (repair/class-enabled?
+                  {:seon.repair/level :symbols
+                   :seon.repair/classes {:seon.repair/undeclared-var false}
+                   :seon.repair/class :seon.repair/undeclared-var})))
+    (is (true?  (repair/class-enabled?
+                  {:seon.repair/level :symbols
+                   :seon.repair/classes {:seon.repair/undeclared-var false}
+                   :seon.repair/class :seon.repair/def-vs-defn}))))
+  (testing "an unknown class is never enabled"
+    (is (false? (repair/class-enabled? {:seon.repair/level :aggressive
+                                        :seon.repair/classes {}
+                                        :seon.repair/class :seon.repair/nope})))))
+
+;; ============================================================
+;; The symbol-fix notes — visible original → fixed; refusals name the
+;; candidates (behavior pins, not exact-string pins).
+;; ============================================================
+
+(deftest fix-note-shows-original-and-fixed
+  (let [note (repair/fix-note
+               {:seon.repair/fixes [{:seon.repair/from "even"
+                                     :seon.repair/to "even?"}]})]
+    (is (str/starts-with? note "↻ fixed:")
+        "leads with the ruled `↻ fixed:` glyph line")
+    (is (str/includes? note "even"))
+    (is (str/includes? note "even?"))
+    (is (re-find #"(?i)re-eval" note)
+        "tells the agent how to reject a wrong fix")))
+
+(deftest suggestion-note-names-candidates
+  (let [amb (repair/suggestion-note
+              {:seon.repair/from "thing-ax"
+               :seon.repair/suggestions [{:seon.repair/to "thing-aa"
+                                          :seon.repair/distance 1}
+                                         {:seon.repair/to "thing-ab"
+                                          :seon.repair/distance 1}]
+               :seon.repair/ambiguous? true})
+        did (repair/suggestion-note
+              {:seon.repair/from "transct!"
+               :seon.repair/suggestions [{:seon.repair/to "transact!"
+                                          :seon.repair/distance 1}]
+               :seon.repair/ambiguous? false})]
+    (testing "ambiguous refusal names every candidate + that it refused"
+      (is (re-find #"(?i)ambiguous" amb))
+      (is (str/includes? amb "thing-aa"))
+      (is (str/includes? amb "thing-ab")))
+    (testing "unproven case is a plain did-you-mean"
+      (is (re-find #"(?i)did you mean" did))
+      (is (str/includes? did "transact!"))
+      (is (re-find #"(?i)nothing was changed" did)))))

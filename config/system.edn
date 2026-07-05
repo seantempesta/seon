@@ -82,6 +82,20 @@
  ;; un-bracketed :core bug — fail fast + loud on our own fuckups.
  :seon.config/on-core-error :crash
 
+ ;; ── FORM-AUTOFIX (repair) — owner rulings 2026-07-05 ──
+ ;; Pre-flight repair of provable near-misses at the agent eval path: a form
+ ;; that fails COMPILE with a unique, compile-proven near match is FIXED and
+ ;; evaluated (visible `↻ fixed: even → even?` note; no silent mutation, no
+ ;; wasted turn). Ambiguity ALWAYS refuses (error + did-you-mean instead).
+ ;; Levels: :off | :safe-syntax (parinfer delimiters only — the pre-ruling
+ ;; behavior) | :symbols (+ def-vs-defn + unique-winner undeclared-var fixes)
+ ;; | :aggressive (enum slot only — NOT implemented). Absent section =
+ ;; :symbols (the ruled default; this mirror is for visibility). Per-class
+ ;; kill switches, e.g. {:seon.repair/undeclared-var false}; class registry =
+ ;; seon.repair/class-levels (enablement is computed, never a call-site list).
+ :seon.config/repair
+ {:seon.config.repair/level :symbols}
+
  ;; ── WEB-ACCESS POLICY (web-access-policy, RULED 2026-07-04) — the
  ;; host-owned reachability policy for seon.agent.web/fetch. UNIFIES the old
  ;; private-range SSRF guard + domain allowlist into ONE config mode:

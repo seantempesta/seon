@@ -49,6 +49,7 @@
             [seon.analyzer-info :as analyzer-info]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.diffusion.grammar :as grammar]
             [seon.error :as error]
             [seon.eval.bootstrap-cache :as bootstrap-cache]
             [seon.error.instrument :as einstrument]
@@ -56,6 +57,7 @@
             [seon.platform :as platform]
             [seon.render.value :as value]
             [seon.repair :as repair]
+            [seon.repair.candidates :as candidates]
             [seon.repl.internal :as internal]
             [seon.schema :as schema]
             [seon.test.runner :as test-runner]))
@@ -2909,11 +2911,9 @@
   {:malli/schema [:=> [:catn [::err :any]] :string]}
   [err]
   (let [msg  (error/deepest-message err)
-        ;; The kind may sit at the top level (the synthesized read/
-        ;; compile/parity error maps eval-batch! builds) OR in the
-        ;; flattened `:seon.error/data` (a thrown ex-info's ex-data).
-        kind (or (:seon.error/kind err)
-                 (:seon.error/kind (:seon.error/data err)))
+        ;; ONE position (C45): synthesized maps build the kind at the
+        ;; envelope top; `error/->map` LIFTS a thrown ex-data kind there.
+        kind (:seon.error/kind err)
         ;; A runtime throw is anything NOT a known fix-this defect kind:
         ;; the agent's own (throw …), a JS TypeError from calling a
         ;; non-fn, etc. errors-are-values applies — frame it so.
@@ -3377,6 +3377,373 @@
                 new-clauses (concat other [new-req])]
             (pr-str (apply list 'ns name-sym new-clauses))))))))
 
+;; ============================================================
+;; Pre-flight form autofix (owner rulings 2026-07-05; design:
+;; docs/prds/agent-ctx/research/form-autofix-system-2026-07-05.md).
+;;
+;; At `:symbols`+ every eligible form is COMPILE-GATED before execution
+;; (compile-only — the `:eval` hook is a no-op, so trials can never fire
+;; side effects). A compile failure with a provable near-miss — a
+;; def-vs-defn typo, or an undeclared var with a UNIQUE compile-proven
+;; near match — is FIXED; the fixed form's real eval below is then the
+;; form's FIRST run. Ambiguity ALWAYS refuses: the error gains the
+;; did-you-mean candidates instead. One mechanism, two consumers: the
+;; candidate/distance/threshold/tier logic is the SHARED
+;; `seon.repair.candidates` (the worker-eval bundle's op:"repair" rides
+;; the same code).
+;; ============================================================
+
+(defn- repair-class-on?
+  "Is fix class `class` enabled under the live repair config? The
+   computed rule: `seon.repair/class-enabled?` over the config level +
+   per-class kill-switch map."
+  [class]
+  (repair/class-enabled? {:seon.repair/level   (config/repair-level)
+                          :seon.repair/classes (config/repair-classes)
+                          :seon.repair/class   class}))
+
+(defn- qualified-sym-misses
+  "Qualified symbol references in `source` that provably resolve NOWHERE.
+
+   The analyzer does NOT warn `:undeclared-var` for a missing member of
+   a cache-known ns (live-observed 2026-07-05: `(my.plan/nxt {})`
+   compiles silently and throws 'not a function' at runtime), so the
+   pre-flight gate computes the miss itself with the SAME proof surface
+   `truly-undeclared?` uses: alias-resolve the prefix via the eval ns's
+   require-edges, then require the name to be absent from the resolved
+   ns's analyzer `:defs`, its `$macros` defs (a qualified MACRO call is
+   legal and has no runtime var), AND its globalThis munged path
+   ([[lookup-value]]). Only nses that EXIST (analyzer entry or live ns
+   object) are considered — a bogus ns is the `:undeclared-ns` class,
+   not this one. Quoted subtrees, the reserved `result` ns, and `js`
+   interop are skipped. Returns `[{:prefix s :suffix s} …]` (the
+   warning shape, so the repair loop treats both sources identically)."
+  [compile-state source ns-sym]
+  (let [aliases (try
+                  (::aliases (edges->require-info
+                               (analyzer-info/ns-require-edges
+                                 compile-state ns-sym)))
+                  (catch :default _ {}))
+        nses    (get @compile-state :cljs.analyzer/namespaces)
+        syms    (volatile! [])
+        walk    (fn walk [x]
+                  (cond
+                    (and (seq? x) (= 'quote (first x))) nil
+                    (symbol? x) (when (qualified-symbol? x)
+                                  (vswap! syms conj x))
+                    (coll? x)   (run! walk x)))]
+    (run! walk (or (read-all-forms source) []))
+    (into []
+          (comp
+            (distinct)
+            (keep (fn [s]
+                    (let [n  (symbol (namespace s))
+                          n' (get aliases n n)
+                          m  (name s)]
+                      (when (and (not= 'result n')
+                                 (not= 'js n)
+                                 ;; ctor sugar `(Ns/Type. …)` — the trailing
+                                 ;; dot is never a var name; substituting it
+                                 ;; away would silently turn a ctor call
+                                 ;; into a fn call.
+                                 (not (str/ends-with? m "."))
+                                 (or (seq (:defs (get nses n')))
+                                     (ns-live-on-globalthis? n'))
+                                 (not (contains? (:defs (get nses n'))
+                                                 (symbol m)))
+                                 (not (contains? (:defs (get nses
+                                                           (symbol (str n' "$macros"))))
+                                                 (symbol m)))
+                                 (nil? (lookup-value (symbol (str n') m))))
+                        {:prefix (str n') :suffix m})))))
+          @syms)))
+
+(defn- compile-check
+  "COMPILE-ONLY pass over `source` in `ns-sym` — analyzer + emitter run,
+   NOTHING executes (the `:eval` hook is a no-op; the pod twin of the
+   worker-eval repair trial). Resolves a plain map:
+
+     {::check-ok?         bool   ; no thrown error, no real undeclared
+      ::check-error       e|nil  ; a THROWN analysis error (bad def …)
+      ::check-undeclared  [w …]} ; truly-undeclared refs
+                                 ; ({:prefix :suffix …})
+
+   `::check-undeclared` unions TWO detectors: the captured
+   `:undeclared-var` analyzer warnings (filtered by `truly-undeclared?`
+   — the benign `::analyze-deps? false` false-positives suppressed
+   exactly as the real path does), and [[qualified-sym-misses]] (the
+   qualified member-of-a-known-ns misses the analyzer never warns
+   about). Warning capture rides the same per-fiber `warnings-als`
+   bucket as `raw-eval`. Analyzer state DOES accumulate trial defs —
+   the caller ([[preflight-repair!]]) rolls those back via
+   remove-phantom-defs!."
+  [compile-state source ns-sym]
+  (js/Promise.
+    (fn [resolve _reject]
+      (let [warnings (atom [])]
+        (.run warnings-als warnings
+          (fn []
+            (try
+              (cljs/eval-str compile-state source dynamic-ns-sym
+                {:eval          (fn [_] nil)   ; trial: compile, execute NOTHING
+                 :load          (partial guarded-load compile-state)
+                 :ns            ns-sym
+                 :context       :statement
+                 :def-emits-var true
+                 :analyze-deps  false}
+                (fn [{:keys [error]}]
+                  (let [warned (filterv
+                                 (fn [w]
+                                   (and (= :undeclared-var
+                                           (:seon.eval/warning-type w))
+                                        (truly-undeclared? compile-state w)))
+                                 @warnings)
+                        misses (when (nil? error)
+                                 (qualified-sym-misses
+                                   compile-state source ns-sym))
+                        seen   (into #{} (map #(str (:suffix %))) warned)
+                        undecl (into warned
+                                     (remove #(contains? seen
+                                                         (str (:suffix %))))
+                                     (or misses []))]
+                    (resolve {::check-ok?        (and (nil? error)
+                                                      (empty? undecl))
+                              ::check-error      error
+                              ::check-undeclared undecl}))))
+              (catch :default e
+                (resolve {::check-ok?        false
+                          ::check-error      e
+                          ::check-undeclared []})))))))))
+
+(defn- source-token-for
+  "The symbol TOKEN (as written in `source`) whose simple name is
+   `suffix` — the substitution target for a symbol fix. An
+   alias-qualified reference (`plan/addd!`) warns with the RESOLVED
+   prefix (`my.plan`), so only the as-written token can be substituted
+   back into the source. nil when no such symbol is found."
+  [source suffix]
+  (let [want  (str suffix)
+        found (volatile! nil)
+        walk  (fn walk [x]
+                (when (nil? @found)
+                  (cond
+                    (symbol? x) (when (= (name x) want)
+                                  (vreset! found (str x)))
+                    (coll? x)   (run! walk x))))]
+    (run! walk (or (read-all-forms source) []))
+    @found))
+
+(defn- analyzer-def-names
+  "Simple-symbol def NAMES registered in `ns-sym`'s analyzer entry."
+  [compile-state ns-sym]
+  (->> (get-in @compile-state [:cljs.analyzer/namespaces ns-sym :defs])
+       keys
+       (filter simple-symbol?)
+       (mapv str)))
+
+(defn- graph-fn-names-in-ns
+  "Program-graph `:seon.fn/sym` NAME parts scoped to namespace `ns-str`
+   — the AR win: an agent's typo'd verb name (`my.plan/addd!`) resolves
+   against REAL fns. Empty when no conn."
+  [ns-str]
+  (if db/*conn*
+    (into []
+          (keep (fn [fq]
+                  (when (= ns-str (candidates/ns-part fq))
+                    (candidates/name-part fq))))
+          (db/query '[:find [?s ...] :where [?e :seon.fn/sym ?s]]
+                    @db/*conn*))
+    []))
+
+(defn- repair-candidate-names
+  "The candidate NAME pool for one unresolved `token`.
+
+   QUALIFIED token → same-ns sources only: the RESOLVED ns's analyzer
+   defs, its live compiled members ([[ns-fn-members]]), and its
+   program-graph fns. BARE token → session defs (eval ns + `cljs.user`)
+   plus `cljs.core` publics. Graph names are NOT candidates for a bare
+   token — substituting an unqualified name for a fn that needs
+   qualification can never compile-prove (qualifier fixes are the
+   unimplemented `:aggressive` tier)."
+  [compile-state eval-ns token resolved-prefix]
+  (if (candidates/ns-part token)
+    (-> #{}
+        (into (analyzer-def-names compile-state (symbol resolved-prefix)))
+        (into (map str (keys (ns-fn-members resolved-prefix))))
+        (into (graph-fn-names-in-ns resolved-prefix))
+        vec)
+    (-> #{}
+        (into (analyzer-def-names compile-state eval-ns))
+        (into (analyzer-def-names compile-state user-ns-sym))
+        (into (analyzer-def-names compile-state 'cljs.core))
+        vec)))
+
+(defn- ^:async preflight-repair-run!
+  "The detect → candidates → compile-only trials → apply-or-hint loop
+   over ONE form's source (see [[preflight-repair!]], which owns the
+   analyzer cleanup around this). Returns nil / a fix map / a
+   suggestions map — never throws to the caller (the wrapper records)."
+  [compile-state source ns-sym]
+  (let [budget    (config/repair-budget-ms)
+        start     (.now js/Date)
+        over?     #(> (- (.now js/Date) start) budget)
+        max-fixes (config/repair-max-fixes)]
+    (loop [src source fixes [] cls nil]
+      (let [{::keys [check-ok? check-error check-undeclared]}
+            (await (compile-check compile-state src ns-sym))
+            w     (first check-undeclared)
+            token (when w (source-token-for src (:suffix w)))]
+        (cond
+          ;; Clean — a fix chain that ends clean APPLIES; no fixes = the
+          ;; form was fine (or only fails in ways this gate doesn't own).
+          check-ok?
+          (when (seq fixes)
+            {:seon.repair/source        src
+             :seon.repair/fixes         fixes
+             :seon.repair/applied-class (or cls :seon.repair/undeclared-var)})
+
+          (over?) nil
+
+          ;; A THROWN analysis error — repairable only as the
+          ;; def-vs-defn class (`(def f [x] …)` = a dropped `n`;
+          ;; detection is the AST-only grammar/malformed-def?).
+          (some? check-error)
+          (let [form  (first (or (read-all-forms src) []))
+                fixed (when (and (empty? fixes)
+                                 (repair-class-on? :seon.repair/def-vs-defn)
+                                 (grammar/malformed-def? form))
+                        (str/replace-first src #"\(\s*def\s+" "(defn "))]
+            (when (and fixed (not= fixed src))
+              (recur fixed
+                     (conj fixes {:seon.repair/from "def"
+                                  :seon.repair/to   "defn"})
+                     :seon.repair/def-vs-defn)))
+
+          ;; Undeclared var(s). Unique-winner substitution, else hint.
+          :else
+          (let [class-on? (repair-class-on? :seon.repair/undeclared-var)]
+            (if (or (nil? token) (not class-on?)
+                    (>= (count fixes) max-fixes))
+              ;; Won't fix (cap hit / no token) — still surface the
+              ;; did-you-mean pool when the class is on and we have one.
+              (when (and token class-on? (empty? fixes))
+                (let [names (repair-candidate-names
+                              compile-state ns-sym token (str (:prefix w)))
+                      cands (candidates/rank-candidates
+                              (candidates/name-part token) names)]
+                  (when (seq cands)
+                    {:seon.repair/from        token
+                     :seon.repair/suggestions cands
+                     :seon.repair/ambiguous?  false})))
+              (let [qpart       (candidates/ns-part token)
+                    from-nm     (candidates/name-part token)
+                    replacement (fn [to-nm]
+                                  (if qpart (str qpart "/" to-nm) to-nm))
+                    names       (repair-candidate-names
+                                  compile-state ns-sym token (str (:prefix w)))
+                    cands       (candidates/rank-candidates from-nm names)
+                    pick        (await
+                                  (candidates/pick-winner
+                                    {:seon.repair/cands cands
+                                     :seon.repair/over? over?
+                                     :seon.repair/passes?
+                                     ;; PROOF: the substituted source must
+                                     ;; compile with no thrown error and no
+                                     ;; remaining undeclared hit on either
+                                     ;; side of the swap (other names may
+                                     ;; remain — the chained-typo case).
+                                     (fn ^:async candidate-passes? [c]
+                                       (let [to-nm (:seon.repair/to c)
+                                             code' (candidates/substitute-symbol
+                                                     src token (replacement to-nm))
+                                             {err2 ::check-error
+                                              und2 ::check-undeclared}
+                                             (await (compile-check
+                                                      compile-state code' ns-sym))]
+                                         (and (nil? err2)
+                                              (not-any?
+                                                #(contains? #{from-nm to-nm}
+                                                            (str (:suffix %)))
+                                                und2))))}))]
+                (cond
+                  (:seon.repair/winner pick)
+                  (let [to-tok (replacement
+                                 (:seon.repair/to (:seon.repair/winner pick)))]
+                    (recur (candidates/substitute-symbol src token to-tok)
+                           (conj fixes {:seon.repair/from token
+                                        :seon.repair/to   to-tok})
+                           (or cls :seon.repair/undeclared-var)))
+
+                  (:seon.repair/ambiguous pick)
+                  {:seon.repair/from        token
+                   :seon.repair/suggestions (mapv #(update % :seon.repair/to
+                                                           replacement)
+                                                  (:seon.repair/ambiguous pick))
+                   :seon.repair/ambiguous?  true}
+
+                  (seq cands)
+                  {:seon.repair/from        token
+                   :seon.repair/suggestions (mapv #(update % :seon.repair/to
+                                                           replacement)
+                                                  cands)
+                   :seon.repair/ambiguous?  false}
+
+                  :else nil)))))))))
+
+(def ^:private preflight-skip-heads
+  "Form heads the pre-flight gate never touches: loader-class forms do
+   real work during ANALYSIS (a trial would not be side-effect-free) and
+   are never symbol typo-fix targets. `in-ns` is parity-intercepted
+   upstream; kept here for the direct-eval callers."
+  '#{ns require require-macros use import in-ns})
+
+(defn- preflight-eligible?
+  "Should `source` get the pre-flight compile gate? A symbol-tier class
+   must be enabled, the source must be a real form (non-blank, not a
+   bare `result/<id>` read), and the head must not be a loader form."
+  [source]
+  (and (or (repair-class-on? :seon.repair/undeclared-var)
+           (repair-class-on? :seon.repair/def-vs-defn))
+       (not (str/blank? (str source)))
+       (not (result-var-ref? source))
+       (let [form (first (or (read-all-forms source) []))]
+         (not (and (seq? form)
+                   (symbol? (first form))
+                   (contains? preflight-skip-heads (first form)))))))
+
+(defn- ^:async preflight-repair!
+  "Pre-execution repair gate for ONE parsed form's source.
+
+   Returns nil (compiles clean / not repairable / over budget — the
+   caller proceeds with the ORIGINAL source), a FIX map
+   (`:seon.repair/source` = the proven fixed source to eval INSTEAD,
+   `:seon.repair/fixes`, `:seon.repair/applied-class`), or a SUGGESTIONS
+   map (`:seon.repair/from` + `:seon.repair/suggestions` [+
+   `:seon.repair/ambiguous?`] — the fix was REFUSED; the caller appends
+   the did-you-mean to the eval error). Errors-as-values: a throw inside
+   the gate records a `:core` fault and returns nil (the form just evals
+   un-gated).
+
+   Analyzer hygiene: compile-only trials register phantom defs
+   (`:def-emits-var true` writes `:defs` during analysis), so every
+   trial's phantoms are removed before returning — the real eval's
+   `defs-before` snapshot and the detect-and-tee diff stay
+   byte-identical to a no-preflight world."
+  [compile-state source ns-sym]
+  (await (ensure-analyzer-ns! compile-state ns-sym))
+  (let [defs-before (analyzer-info/snapshot-defs compile-state)
+        outcome     (try
+                      (await (preflight-repair-run! compile-state source ns-sym))
+                      (catch :default e
+                        ;; OUR repair machinery throwing is a core defect
+                        ;; (:core) — record it; the form still evals
+                        ;; un-gated (best-effort, never blocks the loop).
+                        (error/record! {:seon.error/raw e
+                                        :seon.error/fault :core})
+                        nil))]
+    (analyzer-info/remove-phantom-defs! compile-state defs-before ns-sym)
+    outcome))
+
 (defn- failed-def-syms
   "The symbols a `(def …)`/`(defn …)`/`(defn- …)` form would DEFINE,
    given its source string. Used by the false-confidence guard (A.4):
@@ -3480,7 +3847,26 @@
                               ::ending-ns          @current-ns
                               ::result      result}))
         (vswap! n-fail inc))
-      (let [;; Snapshot analyzer + schema registry BEFORE eval
+      (let [;; Pre-flight symbol repair (form-autofix, owner rulings
+            ;; 2026-07-05): compile-gate the form BEFORE any execution. A
+            ;; provable unique near-miss fix is applied here, so the real
+            ;; eval below runs the FIXED source as the form's FIRST run —
+            ;; side effects can never double-fire. The fixed source is
+            ;; what evals, records, AND tees (`:seon.fn/source` = fixed);
+            ;; the visible `↻ fixed:` note rides the narration. A REFUSED
+            ;; fix (ambiguous / unproven) surfaces as did-you-mean on the
+            ;; eval error below.
+            pre        (when (preflight-eligible? source)
+                         (await (preflight-repair!
+                                  compile-state source @current-ns)))
+            fixed?     (some? (:seon.repair/source pre))
+            source     (if fixed? (:seon.repair/source pre) source)
+            narration  (if fixed?
+                         (str (when (seq narration) (str narration "\n"))
+                              (repair/fix-note
+                                {:seon.repair/fixes (:seon.repair/fixes pre)}))
+                         narration)
+            ;; Snapshot analyzer + schema registry BEFORE eval
             ;; so detect-and-tee (v1.md §2.2 / Phase B item 10)
             ;; can diff after. Cheap reads — keyset extraction.
             defs-before    (analyzer-info/snapshot-defs compile-state)
@@ -3537,6 +3923,28 @@
                                       ::value (::value awaited)
                                       ::ending-ns (::ending-ns raw-result)}
               :else                  awaited)
+            ;; Did-you-mean (form-autofix): a REFUSED fix (ambiguous /
+            ;; no compile-proven winner) sharpens the failing eval's
+            ;; error with the candidates, so the agent's fix-turn is
+            ;; one-shot. Appended only when the failure names the same
+            ;; symbol the gate analyzed (the message is the deepest —
+            ;; the undeclared ex-info has no cause chain).
+            result
+            (let [sugg (:seon.repair/suggestions pre)
+                  msg  (get-in result [:seon/error :seon.error/message])]
+              (if (and (not (::ok? result))
+                       (seq sugg)
+                       (string? msg)
+                       (str/includes?
+                         msg (candidates/name-part (:seon.repair/from pre))))
+                (update result :seon/error assoc :seon.error/message
+                        (str msg "\n"
+                             (repair/suggestion-note
+                               {:seon.repair/from (:seon.repair/from pre)
+                                :seon.repair/suggestions sugg
+                                :seon.repair/ambiguous?
+                                (boolean (:seon.repair/ambiguous? pre))})))
+                result))
             ;; No restore needed — capture was scoped to the `.run print-als`
             ;; span above. Record/tee/auto-test prints below run OUTSIDE that
             ;; scope, so the global dispatcher routes them to the pod log, not
@@ -3710,6 +4118,26 @@
                                 ::result       result
                                 ::output       output
                                 ::tee          tee}))
+          ;; Queryable fix datoms (the A/B substrate — fix volume / class
+          ;; mix / revert rate = one Datalog query). A SEPARATE top-level
+          ;; tx: nested attrs need a boot-schema entry, top-level attrs
+          ;; lazy-install (the :seon.eval/record-error precedent).
+          (when (and fixed? db/*conn*)
+            (let [fixes (:seon.repair/fixes pre)
+                  r     (await
+                          (db/transact!
+                            {:seon.db/tx-data
+                             [{:seon.eval/id eval-id
+                               :seon.repair/applied-class
+                               (:seon.repair/applied-class pre)
+                               :seon.repair/from
+                               (str/join " ; " (map :seon.repair/from fixes))
+                               :seon.repair/to
+                               (str/join " ; " (map :seon.repair/to fixes))}]}))]
+              (when-not (:seon.db/ok? r)
+                (js/console.error
+                  "[seon.eval/preflight-repair] fix datoms failed for eval"
+                  eval-id ":" (-> r :seon.db/error :seon.error/message)))))
           ;; Phase 3 (mvp-completion-plan 2026-05-27) —
           ;; auto-instrument any newly-defined fn whose
           ;; `:malli/schema` parsed cleanly. Runs AFTER the tee
@@ -4009,9 +4437,16 @@
                                  (and (seq es)
                                       (every? #(not= :read (:seon.repl/kind %))
                                               es))))
-                      rep    (repair/repair-source
-                               {:seon.repair/source (:seon.repl/source entry)
-                                :seon.repair/reads? reads?})]
+                      ;; The delimiters class is level-gated too (`:off`
+                      ;; = no repair anywhere — the pure A/B control arm;
+                      ;; `:safe-syntax`+ = today's shipped behavior).
+                      rep    (if (repair-class-on? :seon.repair/delimiters)
+                               (repair/repair-source
+                                 {:seon.repair/source (:seon.repl/source entry)
+                                  :seon.repair/reads? reads?})
+                               {:seon.repair/repaired? false
+                                :seon.repair/source    (:seon.repl/source entry)
+                                :seon.repair/changes   []})]
                   (if (:seon.repair/repaired? rep)
                     ;; Repaired → re-parse the repaired span and run each
                     ;; resulting entry through `dispatch-eval-entry!` — the

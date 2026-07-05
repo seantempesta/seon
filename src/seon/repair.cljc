@@ -71,6 +71,55 @@
 
 (schema/register! :seon.repair/note :string)
 
+;; ── Repair LEVELS + fix-class registry (form-autofix, owner rulings
+;; 2026-07-05). Levels are config DATA (`:seon.config/repair` section);
+;; each fix CLASS declares its minimum level HERE — the one class
+;; registry. Enablement is COMPUTED from level rank + the config
+;; kill-switch map, never a hand-maintained list at call sites.
+
+(def levels
+  "Ordered repair levels, weakest → strongest. `:aggressive` is an enum
+   slot only — multi-fix / semantic-index candidates are NOT implemented."
+  [:off :safe-syntax :symbols :aggressive])
+
+(def class-levels
+  "Minimum level per fix class — the class registry (data, ONE place).
+   `:seon.repair/delimiters` = the shipped parinfer parse-class repair;
+   `:seon.repair/def-vs-defn` + `:seon.repair/undeclared-var` = the
+   compile-proven symbol tier."
+  {:seon.repair/delimiters     :safe-syntax
+   :seon.repair/def-vs-defn    :symbols
+   :seon.repair/undeclared-var :symbols})
+
+(def ^:private level-rank (zipmap levels (range)))
+
+(schema/register! :seon.repair/level (into [:enum] levels))
+(schema/register! :seon.repair/class :keyword)
+(schema/register! :seon.repair/classes [:map-of :keyword :boolean])
+
+(schema/register! :seon.repair/class-enabled-request
+                  [:map
+                   [:seon.repair/level :seon.repair/level]
+                   [:seon.repair/classes {:optional true} :seon.repair/classes]
+                   [:seon.repair/class :seon.repair/class]])
+
+;; ── Persisted fix datoms (the A/B substrate — a projection of a real
+;; repair event on the eval entity, one Datalog query for fix volume /
+;; class mix / revert rate). Stamped by `seon.eval` in a separate
+;; top-level tx (the `:seon.eval/record-error` precedent).
+
+(schema/register! :seon.repair/applied-class :keyword)
+(schema/register! :seon.repair/from :string)
+(schema/register! :seon.repair/to :string)
+
+;; One in-memory fix entry (from → to, both symbol TOKENS as written).
+(schema/register! :seon.repair/fix
+                  [:map
+                   [:seon.repair/from :seon.repair/from]
+                   [:seon.repair/to :seon.repair/to]])
+
+(schema/register! :seon.repair/fixes [:vector :seon.repair/fix])
+
 (schema/register! :seon.repair/source-request
                   [:map
                    [:seon.repair/source :seon.repair/source]
@@ -182,3 +231,57 @@
          (when (seq delims) (str " (" delims ")"))
          (when (and shape (seq shape)) (str " → " shape))
          ". Verify this is what you intended; re-eval the whole form if not.")))
+
+(defn class-enabled?
+  "Is fix class `:seon.repair/class` active at `:seon.repair/level`?
+
+   COMPUTED: the class's [[class-levels]] minimum-level rank must be ≤
+   the configured level's rank, AND the per-class kill-switch map
+   (`:seon.repair/classes`, config data) must not disable it (absent =
+   enabled — the level decides). An unknown class is never enabled."
+  {:malli/schema [:=> [:cat :seon.repair/class-enabled-request] :boolean]}
+  [{:seon.repair/keys [level classes class]}]
+  (let [min-level (get class-levels class)]
+    (boolean
+      (and min-level
+           (>= (get level-rank level -1) (get level-rank min-level 99))
+           (get classes class true)))))
+
+(defn fix-note
+  "Compose the visible `↻ fixed:` breadcrumb for a symbol auto-fix.
+
+   Show-don't-tell (owner ruling 2026-07-05): every applied fix renders
+   original → fixed in the agent's context — no silent mutation. Rides
+   the eval row's narration exactly like [[repair-note]] (the transcript
+   renderer emits it as a `;` preamble line above the fixed form)."
+  {:malli/schema [:=> [:cat [:map [:seon.repair/fixes :seon.repair/fixes]]]
+                  :seon.repair/note]}
+  [{:seon.repair/keys [fixes]}]
+  (str "↻ fixed: "
+       (str/join ", " (map (fn [{:seon.repair/keys [from to]}]
+                             (str "`" from "` → `" to "`"))
+                           fixes))
+       " — not defined; substituted the unique compile-proven near match "
+       "and evaluated the FIXED form. Re-eval if that's not what you meant."))
+
+(defn suggestion-note
+  "Compose the did-you-mean line for a REFUSED symbol fix.
+
+   Ambiguity always refuses (owner ruling 2026-07-05): 2+ compile-proven
+   candidates → name them all so the agent's fix-turn is one-shot; 0
+   proven → the nearest non-passing candidates as plain did-you-mean.
+   Appended to the eval error message by `seon.eval`."
+  {:malli/schema [:=> [:cat [:map
+                             [:seon.repair/from :seon.repair/from]
+                             [:seon.repair/suggestions [:vector :map]]
+                             [:seon.repair/ambiguous? {:optional true} :boolean]]]
+                  :seon.repair/note]}
+  [{:seon.repair/keys [from suggestions ambiguous?]}]
+  (let [names (str/join ", " (map #(str "`" (:seon.repair/to %) "`")
+                                  suggestions))]
+    (if ambiguous?
+      (str "↻ auto-fix refused (ambiguous): " (count suggestions)
+           " near matches for `" from "` all compile — " names
+           ". Pick the one you meant and re-eval.")
+      (str "Did you mean " names "? (nearest matches for `" from
+           "` — none compile-proven, so nothing was changed.)"))))

@@ -259,6 +259,36 @@ substrate):
    captured reply blob — `ask-and-eval-reply!` now links
    `:seon.agent.turn/reply-blob` eagerly at capture).
 
+9. **Pod-side form autofix (pre-flight symbol repair)** — ✅ BUILT +
+   LIVE-PROVEN (2026-07-05; owner rulings same day; design
+   [[research/form-autofix-system-2026-07-05]]). ONE mechanism, two
+   consumers: the candidate/distance/⌈n/3⌉-threshold/nearest-tier/
+   unique-winner logic EXTRACTED from the shipped worker `op:"repair"`
+   (2642cb81) into the shared `seon.repair.candidates`; `seon.worker-eval`
+   now delegates. Pod consumer: `seon.eval` gains a pre-execution
+   compile-only gate (`compile-check`, no-op `:eval` — trials can never
+   fire side effects; phantom analyzer defs rolled back) in
+   `eval-form-entry!`; classes `def-vs-defn` + `undeclared-var` at level
+   `:symbols` (the ruled DEFAULT), plus the level-gated shipped parinfer
+   `delimiters` class. Detection unions analyzer warnings
+   (`truly-undeclared?`-filtered) with `qualified-sym-misses` — the
+   analyzer never warns for a missing member of a cache-known ns
+   (live-caught: `(my.plan/nxt {})` threw at RUNTIME pre-fix). A unique
+   compile-proven winner is fixed + evaluated (the fixed source is what
+   records AND tees) with the visible `↻ fixed: a → b` narration note +
+   queryable `:seon.repair/applied-class|from|to` datoms (the A/B
+   substrate); ambiguity ALWAYS refuses — the eval error gains the
+   did-you-mean candidates. Config = data: `:seon.config/repair`
+   (`:off|:safe-syntax|:symbols|:aggressive` — aggressive is an enum slot
+   only; per-class kill switches; budget-ms 50; max-fixes 1) with the
+   computed enablement rule `seon.repair/class-enabled?` over the
+   `class-levels` registry. Live-proven on acme (fresh world, uncoached
+   DeepSeek turns): `(filter even [1 2 3 4])` → fixed, `(2 4)`, note
+   rendered in the actual transcript (the agent itself quoted it);
+   `(my.plan/nxt {})` → `(my.plan/next {})` (the graph-verb win);
+   `(pf-thing-ax 3)` with two 1-edit session fns → REFUSED, error names
+   both candidates.
+
 Stability queue (interleaved, one per feature unit above; owner-agreed
 2026-07-02 — each fix REUSES an existing mechanism, no new ones):
 

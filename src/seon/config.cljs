@@ -252,6 +252,23 @@
    [:seon.agent.web/policy          {:optional true} :keyword]
    [:seon.agent.web/allowed-domains {:optional true} [:vector :string]]])
 
+;;; FORM-AUTOFIX (repair) — the pre-flight repair dial (owner rulings
+;;; 2026-07-05; design docs/prds/agent-ctx/research/form-autofix-system-
+;;; 2026-07-05.md). Levels as config data; per-class kill switches are a
+;;; `{class-kw boolean}` map COMBINED with the class registry in
+;;; `seon.repair/class-levels` (enablement is computed, never a call-site
+;;; list). LEAF rule: the level enum is inlined here (NOT a keyword ref to
+;;; `:seon.repair/level` — `seon.config` loads before `seon.repair`, and
+;;; `register!` asserts compilability eagerly; same pattern as web-spec).
+;;; `:aggressive` is an enum slot only — not implemented.
+(schema/register! :seon.config/repair
+  [:map
+   [:seon.config.repair/level
+    {:optional true} [:enum :off :safe-syntax :symbols :aggressive]]
+   [:seon.config.repair/classes           {:optional true} [:map-of :keyword :boolean]]
+   [:seon.config.repair/max-fixes-per-form {:optional true} [:int {:min 1}]]
+   [:seon.config.repair/budget-ms          {:optional true} [:int {:min 1}]]])
+
 (schema/register! :seon.config/manifest
   [:map
    [:seon.config/skills        {:optional true} :seon.config/skills-spec]
@@ -260,6 +277,7 @@
    [:seon.config/render        {:optional true} :seon.config/render]
    [:seon.config/on-core-error {:optional true} :seon.config/on-core-error]
    [:seon.config/web           {:optional true} :seon.config/web-spec]
+   [:seon.config/repair        {:optional true} :seon.config/repair]
    [:seon.config/agent-context {:optional true} :seon.config/agent-context]
    [:seon.config/root-context  {:optional true} :seon.config/root-context]])
 
@@ -653,6 +671,65 @@
               v   (if (contains? #{:crash :gate :log} raw) raw :gate)]
           (swap! on-core-error-cache assoc k v)
           v))))
+
+;;; --- FORM-AUTOFIX (repair) accessors — the `:seon.config/repair` section.
+;;; Absent section ⇒ the owner-ruled defaults (level `:symbols`, no class
+;;; kill-switches, 1 fix/form, 50ms budget). Consumers combine level +
+;;; classes via `seon.repair/class-enabled?` (the computed rule).
+
+;; `def` (NOT defonce) for hot-reload cache rotation; memoized per SEON_CONFIG.
+(def ^:private repair-config-cache (atom {}))
+
+(defn- repair-config
+  "The resolved `:seon.config/repair` section of the live manifest,
+   memoized per `SEON_CONFIG`. `{}` when absent — each accessor then uses
+   its own literal fallback (= the shipped default)."
+  []
+  (let [k (env "SEON_CONFIG")]
+    (or (get @repair-config-cache k)
+        (let [m (get (load-manifest) :seon.config/repair {})]
+          (swap! repair-config-cache assoc k m)
+          m))))
+
+(defn repair-level
+  "The repair level: `:off` / `:safe-syntax` / `:symbols` / `:aggressive`.
+
+   Manifest `:seon.config.repair/level`; default `:symbols` (owner ruling
+   2026-07-05 — AR agents get pre-flight symbol repair). An unrecognized
+   value coerces to `:symbols` (the manifest validator already rejects it
+   loudly at load; this is the belt for a stale cache)."
+  {:malli/schema [:=> [:cat] :keyword]}
+  []
+  (let [raw (get (repair-config) :seon.config.repair/level :symbols)]
+    (if (contains? #{:off :safe-syntax :symbols :aggressive} raw) raw :symbols)))
+
+(defn repair-classes
+  "The per-class repair kill-switch map `{class-kw boolean}`.
+
+   Manifest `:seon.config.repair/classes`; default `{}` (the level alone
+   decides). Combined with `seon.repair/class-levels` by
+   `seon.repair/class-enabled?`."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  (get (repair-config) :seon.config.repair/classes {}))
+
+(defn repair-max-fixes
+  "Max chained symbol fixes per form.
+
+   Manifest `:seon.config.repair/max-fixes-per-form`; default 1 (multi-fix
+   is the unimplemented `:aggressive` tier's territory)."
+  {:malli/schema [:=> [:cat] :int]}
+  []
+  (get (repair-config) :seon.config.repair/max-fixes-per-form 1))
+
+(defn repair-budget-ms
+  "Wall-clock budget for one form's whole repair pipeline.
+
+   Over budget = no fix, plain error — a slow fix is a worse product than
+   a fast error. Manifest `:seon.config.repair/budget-ms`; default 50."
+  {:malli/schema [:=> [:cat] :int]}
+  []
+  (get (repair-config) :seon.config.repair/budget-ms 50))
 
 ;; `def` (NOT defonce) for hot-reload cache rotation; memoized per SEON_CONFIG.
 (def ^:private web-policy-cache (atom {}))
