@@ -83,10 +83,13 @@ FREE_PROMPT = (
     "over the matching category (0 when none match). Nothing else.")
 
 
+PRELUDE = "(require '[seon.schema :as schema])"
+
+
 def score_domain(oracle, code_text):
     """Identical for both arms: schema declarations present + phase-clean,
-    function checks pass. register! forms are excluded from eval (the
-    sandbox has no seon.schema — pod replay validates them)."""
+    EVERY form (register! included) evals in a seeded session, function
+    checks pass."""
     r = oracle.refine(code_text)
     forms = sorted(r["clamps"], key=lambda f: f["span"][0])
     reg = [f["source"] for f in forms if "schema/register!" in f["source"]]
@@ -94,7 +97,8 @@ def score_domain(oracle, code_text):
                   and all(any(k in s for s in reg) for k in SCHEMA_KEYS))
     ses = EvalSession()
     try:
-        fn_forms = [f["source"] for f in forms if "schema/register!" not in f["source"]]
+        ses.eval(PRELUDE)
+        fn_forms = [f["source"] for f in forms]
         # materialize BEFORE all(): a short-circuit would skip defining the
         # later fns and unfairly fail the behavioral checks (caught live)
         evals = [ses.eval(s) for s in fn_forms]
@@ -149,17 +153,22 @@ def main():
                 code = strip_fences(r["text"])
                 extra = {}
             else:
-                # phase 1: schemas — grammar-locked, no eval session
-                r1 = generate_guided(model, tok, _ids(tok, SCHEMAS_PROMPT),
-                                     oracle, eval_session=None, gen=gen,
-                                     phase="schemas", hints=True, checks=None)
+                # ONE seeded session across BOTH phases: schemas genuinely
+                # register (parse->EVAL gate, owner rule: no parse-only
+                # locks), then functions generate against them.
                 ses = EvalSession()
                 try:
+                    ses.eval(PRELUDE)
+                    r1 = generate_guided(model, tok, _ids(tok, SCHEMAS_PROMPT),
+                                         oracle, eval_session=ses, gen=gen,
+                                         phase="schemas", hints=True,
+                                         prelude=PRELUDE, checks=None)
                     r2 = generate_guided(model, tok,
                                          _ids(tok, functions_prompt(r1["text"])),
                                          oracle, eval_session=ses, gen=gen,
                                          phase="functions", hints=True,
-                                         repair=True, checks=CHECKS)
+                                         repair=True, prelude=PRELUDE,
+                                         checks=CHECKS)
                 finally:
                     ses.close()
                 code = r1["text"] + "\n" + r2["text"]

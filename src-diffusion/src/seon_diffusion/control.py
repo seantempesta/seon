@@ -131,7 +131,8 @@ def _denoise_round(model, canvas, clamp_mask, clamp_ids, cache, cur_len, gen,
 
 def generate_guided(model, tok, prompt_ids, oracle, eval_session=None,
                     gen=None, phase=None, hints=True, repair=True,
-                    checks=None, max_rounds=8, max_attempts=3, verbose=False):
+                    checks=None, prelude=None, max_rounds=8, max_attempts=3,
+                    verbose=False):
     """Oracle-guided generation. Returns the free-gen result dict plus
     committed text, rounds, attempts, locked_forms, repairs,
     checks_passed, tok_per_s (useful committed tokens / wall), events.
@@ -154,6 +155,8 @@ def generate_guided(model, tok, prompt_ids, oracle, eval_session=None,
     if eval_session is not None:
         try:
             probe_session = type(eval_session)()
+            if prelude:
+                probe_session.eval(prelude)   # mirror the caller's session setup
         except Exception:
             probe_session = None
     total_forwards = 0

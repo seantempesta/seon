@@ -265,7 +265,11 @@
                 {:eval          (bounded-eval-fn (or budget-ms default-budget-ms))
                  :context       :expr
                  :def-emits-var true
-                 :analyze-deps  false}
+                 :analyze-deps  false
+                 ;; the bootstrap loader — lets a session (require '[seon.schema
+                 ;; :as schema]) etc. from the analysis cache, so EVERY phase
+                 ;; gate can parse->EVAL (owner: no parse-only locks)
+                 :load          (partial boot/load state)}
                 (fn [{:keys [error value]}]
                   (let [warns @!warnings]
                     (cond
