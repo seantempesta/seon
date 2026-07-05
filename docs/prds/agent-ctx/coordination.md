@@ -1461,3 +1461,29 @@ Eval lane only; NO `src/seon` edits — `src-inspect-ai` + `evals` + `docs`.
   slice + turn-budget measurement → baseline arm (mini-swe-agent) → tb
   adapter → restart-resume rows → owner-gated milestone. Awaiting owner
   go/no-go on slice 1.
+
+## 2026-07-05 — eval lane: SLICE 1 SHIPPED — Seon boots in docker (first linux boot ever) [tooling-reviewable src fixes]
+
+- **The canonical image is real:** `seon:slice1` (1.24 GB arm64,
+  `docker/Dockerfile` multi-stage + `docker/seon-entrypoint` foreground
+  supervisor). Self-contained `/opt/seon` incl. bundled JRE + Node; data on
+  a volume. **All slice-1 acceptance criteria observed** (evidence:
+  `evals/runs/2026-07-05-slice1-canonical-image/`): boot-to-ready ≈ 15 s,
+  replay 11/11, instrumentation 600/0-bad; real DeepSeek task via
+  `POST /agents/run` from inside (12×13 → "156", :completed, LLM egress
+  proven); `docker restart` → agents RESUMED (`:minted []`, core not
+  re-seeded) and the SAME agent recalled the original question from its db.
+- **Tooling-reviewable src fixes (2 files, surgical, loud):**
+  (a) `src/seon/web/serve.cljs` `bind-host` — default 127.0.0.1 unchanged,
+  `SEON_BIND=0.0.0.0` opt-in for containers (published-port forwarding);
+  (b) `src/seon/config.cljs` skills-dir resolves via
+  `platform/artifact-path` (checkout artifact under SEON_RUNTIME_ROOT;
+  CWD behavior identical when unset). Review at leisure; both are
+  behavior-preserving on host.
+- **Owner rulings this arc (recorded in the design doc `ae544365`):**
+  slice-1 GO · mount composition confirmed + **the benched unit is the
+  SWARM** (root + workers; bench drives the ROOT; done = root terminal
+  reply; goal = oracle verdict) · BFCL keep-unscheduled · thinking arm
+  skipped as moot.
+- Next: slice 2 (zero-Seon SWE-bench de-risk: run inspect-evals swe_bench
+  unchanged on 1-2 instances — ghcr auth, arm64 pulls, official scorer).

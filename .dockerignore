@@ -1,0 +1,29 @@
+# Build-context whitelist for docker/Dockerfile (the canonical Seon image).
+# Everything is excluded by default; only what the image build actually
+# consumes is let in — keeps the context ~15 MB instead of ~20 GB
+# (.git, reference-code submodules, data/, .shadow-cljs, node_modules).
+*
+
+# Dependency + build manifests
+!deps.edn
+!shadow-cljs.edn
+!package.json
+!package-lock.json
+
+# Sources + artifacts the pod reads at boot (src indexing, skills corpus)
+!src/
+!test/
+!resources/
+!config/
+!seon-skills/
+!externs/
+
+# Writer-classpath extra paths (deps.edn :simd alias)
+!dev-resources/
+!reference-code/datahike/src-secondary/
+
+# Bootstrap-bundle post-build fix (babashka script)
+!bin/fix-bootstrap-macros
+
+# The image's own entrypoint
+!docker/

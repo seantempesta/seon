@@ -878,6 +878,15 @@
       (let [n (js/parseInt raw 10)]
         (if (js/Number.isNaN n) 7890 n)))))
 
+(defn- bind-host
+  "Pick the bind interface. Default loopback (`127.0.0.1` — nothing on the
+   LAN sees a dev pod). Override via SEON_BIND — a containerized pod sets
+   `SEON_BIND=0.0.0.0` so docker's published-port forward (which targets the
+   container's own interface, never its loopback) can reach the server.
+   Infra-wiring env read at point of use, same category as SEON_PORT."
+  []
+  (or (.. js/process -env -SEON_BIND) "127.0.0.1"))
+
 (defn start!
   "Start the HTTP+SSE server on a loopback port.
 
@@ -892,8 +901,9 @@
    agent boots via POST /agents/new → start-agent! → start!). A dead
    (closed) server object is replaced.
 
-   The server binds to 127.0.0.1 (loopback only). Browsers on the
-   same machine can connect; nothing on the LAN sees the pod.
+   The server binds to 127.0.0.1 by default (loopback only — browsers on
+   the same machine can connect; nothing on the LAN sees the pod). A
+   containerized pod overrides via SEON_BIND=0.0.0.0 (see [[bind-host]]).
 
    If the requested port is in use, the listen fails fast — that's
    the expected behavior for a dev pod (only one instance at a time).
@@ -934,7 +944,7 @@
                      (log/error-console! "seon.web.serve"
                                          (str "listen failed on port " port) err)
                      (reject err)))
-            (.listen server port "127.0.0.1"
+            (.listen server port (bind-host)
                      (fn []
                        (let [addr      (.address server)
                              bound     (.-port addr)

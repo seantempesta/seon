@@ -1,0 +1,160 @@
+#!/usr/bin/env bash
+#
+# seon-entrypoint — foreground supervisor for the canonical Seon container.
+#
+# Contract (design §9, prototyped by the eval lane in slice 1; the tooling
+# lane owns the final shape): boot wire-server + pod in FOREGROUND from the
+# immutable /opt/seon tree (no compile at boot, no nohup, no locks), gate the
+# pod on the wire req-socket ACCEPTING (the same readiness definition as
+# bin/seon's ready_check), forward signals, exit non-zero when either process
+# dies. `seon-entrypoint pod` runs ONLY the pod stage (the restart-resume
+# choreography: kill the pod process, re-exec this stage — the wire-server
+# and the store survive).
+#
+# It is deliberately NOT bin/seon: no nohup, no mkdir-mutex, no cljs-watch,
+# no jvm track — those are host-dev concerns.
+#
+# Layout: /opt/seon = the immutable runtime tree (jre/, node/, src/, out/,
+# node_modules/, cp.txt). /seon-data = the mutable world (cwd for both
+# processes — store, sockets, port file, logs all land here, matching
+# seon.platform's artifact/data split).
+
+set -euo pipefail
+
+SEON_HOME="${SEON_HOME:-/opt/seon}"
+SEON_DATA="${SEON_DATA:-/seon-data}"
+CLUSTER="${SEON_CLUSTER_NAME:-default}"
+CLUSTER_DIR="$SEON_DATA/clusters/$CLUSTER"
+
+JAVA="$SEON_HOME/jre/bin/java"
+NODE="$SEON_HOME/node/bin/node"
+
+REQ_SOCK="${SEON_REQ_SOCK:-$SEON_DATA/tmp/seon-req.sock}"
+PUB_SOCK="${SEON_PUB_SOCK:-$SEON_DATA/tmp/seon-pub.sock}"
+WRITER_REPL_PORT="${SEON_WRITER_REPL_PORT:-7891}"
+PORT_FILE="${SEON_PORT_FILE:-$SEON_DATA/tmp/seon-port}"
+
+mkdir -p "$CLUSTER_DIR" "$SEON_DATA/tmp" "$SEON_DATA/logs"
+cd "$SEON_DATA"
+
+# ── wire-server (JVM datahike writer — the sole writer) ─────────────────
+# Same launch as bin/seon's `clojure -M:simd:fork-deps:writer …`, with the
+# :simd alias's jvm-opts inlined (the clojure CLI stays in the builder; the
+# classpath was baked to cp.txt at image build).
+start_wire() {
+  "$JAVA" \
+    --add-modules jdk.incubator.vector \
+    --enable-native-access=ALL-UNNAMED \
+    -XX:+UseG1GC -Xmx"${SEON_WIRE_XMX:-2g}" \
+    -cp "$(cat "$SEON_HOME/cp.txt")" \
+    clojure.main -m seon.server.boot \
+    --backend file \
+    --db-name "$CLUSTER" \
+    --path "$CLUSTER_DIR/store" \
+    --req-sock "$REQ_SOCK" \
+    --pub-sock "$PUB_SOCK" \
+    --repl-port "$WRITER_REPL_PORT" \
+    >> "$SEON_DATA/logs/wire-server.log" 2>&1 &
+  WIRE_PID=$!
+  echo "[seon-entrypoint] wire-server started (pid $WIRE_PID)"
+}
+
+# Readiness = the req socket ACCEPTING a real connect (bin/seon ready_check
+# semantics: the writer binds the socket only after "[writer] datahike
+# ready"). Probe with the bundled node — no nc dependency in the image.
+wire_ready() {
+  [ -S "$REQ_SOCK" ] || return 1
+  "$NODE" -e '
+    const s = require("net").connect(process.argv[1]);
+    s.on("connect", () => { s.end(); process.exit(0); });
+    s.on("error", () => process.exit(1));
+    setTimeout(() => process.exit(1), 1000);' "$REQ_SOCK" >/dev/null 2>&1
+}
+
+wait_wire_ready() {
+  local bound="${SEON_WIRE_READY_BOUND_S:-180}" waited=0
+  echo "[seon-entrypoint] waiting for wire-server ready (bound ${bound}s)"
+  until wire_ready; do
+    if ! kill -0 "$WIRE_PID" 2>/dev/null; then
+      echo "[seon-entrypoint] wire-server DIED during boot — last log lines:" >&2
+      tail -n 40 "$SEON_DATA/logs/wire-server.log" >&2 || true
+      exit 1
+    fi
+    if [ "$waited" -ge "$bound" ]; then
+      echo "[seon-entrypoint] wire-server not ready after ${bound}s" >&2
+      tail -n 40 "$SEON_DATA/logs/wire-server.log" >&2 || true
+      exit 1
+    fi
+    sleep 1; waited=$((waited + 1))
+  done
+  echo "[seon-entrypoint] wire-server ready (${waited}s)"
+}
+
+# ── pod (Node CLJS runtime — agent loop + HTTP door) ────────────────────
+# Same env bin/seon's pod command sets, container-shaped: data CWD-relative
+# under /seon-data, artifacts under SEON_RUNTIME_ROOT, bind 0.0.0.0 so the
+# published port reaches the server. Capability grants follow bin/seon's
+# deployment stance (grant shell+web unless the operator denies via env).
+start_pod() {
+  env \
+    SEON_RUNTIME_ROOT="$SEON_HOME" \
+    SEON_CONFIG="${SEON_CONFIG:-$SEON_HOME/config/system.edn}" \
+    SEON_CLUSTER_DIR="$CLUSTER_DIR" \
+    SEON_REQ_SOCK="$REQ_SOCK" \
+    SEON_PUB_SOCK="$PUB_SOCK" \
+    SEON_PORT="${SEON_PORT:-7890}" \
+    SEON_PORT_FILE="$PORT_FILE" \
+    SEON_BIND="${SEON_BIND:-0.0.0.0}" \
+    SEON_FS_ROOT="$SEON_HOME" \
+    SEON_FS_READ_ONLY=1 \
+    SEON_SHELL="${SEON_SHELL:-1}" \
+    SEON_WEB="${SEON_WEB:-1}" \
+    "$NODE" "$SEON_HOME/out/client/main.js" \
+    > >(tee -a "$SEON_DATA/logs/pod.log") 2>&1 &
+  POD_PID=$!
+  echo "[seon-entrypoint] pod started (pid $POD_PID, port ${SEON_PORT:-7890})"
+}
+
+shutdown() {
+  echo "[seon-entrypoint] signal received — stopping pod + wire-server"
+  [ -n "${POD_PID:-}" ]  && kill "$POD_PID"  2>/dev/null || true
+  [ -n "${WIRE_PID:-}" ] && kill "$WIRE_PID" 2>/dev/null || true
+  wait || true
+  exit 0
+}
+trap shutdown TERM INT
+
+# ── stages ──────────────────────────────────────────────────────────────
+STAGE="${1:-all}"
+
+case "$STAGE" in
+  pod)
+    # Pod stage only (restart-resume choreography — wire-server + store
+    # stay up; foreground on the pod alone).
+    start_pod
+    code=0
+    wait "$POD_PID" || code=$?
+    echo "[seon-entrypoint] pod exited ($code)" >&2
+    exit "$code"
+    ;;
+  all)
+    start_wire
+    wait_wire_ready
+    start_pod
+    # Supervise both: exit non-zero the moment EITHER dies (`wait -n`
+    # returns on the first child to exit; a clean signal path goes through
+    # the trap above instead).
+    code=0
+    wait -n "$WIRE_PID" "$POD_PID" || code=$?
+    if ! kill -0 "$WIRE_PID" 2>/dev/null; then which=wire-server; else which=pod; fi
+    echo "[seon-entrypoint] $which exited ($code) — stopping the other" >&2
+    kill "$WIRE_PID" "$POD_PID" 2>/dev/null || true
+    wait || true
+    [ "$code" -eq 0 ] && code=1
+    exit "$code"
+    ;;
+  *)
+    echo "usage: seon-entrypoint [all|pod]" >&2
+    exit 2
+    ;;
+esac

@@ -429,12 +429,21 @@
    `:seon.config/dirs` first entry when present, else `SEON_SKILLS_DIR`, else
    `.claude/skills` (the standard Claude-Code layout humans edit too). This is
    where `:seon.config/dirs` is finally consumed — the last hardcoded env read
-   folded into the config seam."
+   folded into the config seam.
+
+   The corpus is a CHECKOUT ARTIFACT (a skills dir in the seon tree), so a
+   RELATIVE value resolves via `seon.platform/artifact-path` — under
+   SEON_RUNTIME_ROOT when set (a containerized/downstream pod running from
+   its own data root), else CWD-relative (seon's own usage, byte-identical).
+   An absolute value is used as-is."
   {:malli/schema [:=> [:cat] :string]}
   []
-  (or (some-> (load-manifest) :seon.config/skills :seon.config/dirs first)
-      (env "SEON_SKILLS_DIR")
-      ".claude/skills"))
+  (let [dir (or (some-> (load-manifest) :seon.config/skills :seon.config/dirs first)
+                (env "SEON_SKILLS_DIR")
+                ".claude/skills")]
+    (if (.startsWith dir "/")
+      dir
+      (platform/artifact-path dir))))
 
 (defn extra-src
   "`SEON_EXTRA_SRC` — a downstream's compiled-in source root, or nil.

@@ -1,0 +1,126 @@
+#0 building with "desktop-linux" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile
+#1 transferring dockerfile: 6.00kB done
+#1 DONE 0.0s
+
+#2 [internal] load metadata for docker.io/library/eclipse-temurin:25-jdk-noble
+#2 DONE 0.3s
+
+#3 [internal] load metadata for docker.io/library/debian:bookworm-slim
+#3 DONE 0.3s
+
+#4 [internal] load .dockerignore
+#4 transferring context: 786B done
+#4 DONE 0.0s
+
+#5 [stage-1 1/3] FROM docker.io/library/debian:bookworm-slim@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df
+#5 resolve docker.io/library/debian:bookworm-slim@sha256:60eac759739651111db372c07be67863818726f754804b8707c90979bda511df done
+#5 DONE 0.0s
+
+#6 [build  1/28] FROM docker.io/library/eclipse-temurin:25-jdk-noble@sha256:3eb81ed94d8c1a34422f19f8188548bdf02cae69c91d0328afdbb7abed90f617
+#6 resolve docker.io/library/eclipse-temurin:25-jdk-noble@sha256:3eb81ed94d8c1a34422f19f8188548bdf02cae69c91d0328afdbb7abed90f617 done
+#6 DONE 0.0s
+
+#7 [internal] load build context
+#7 transferring context: 28.54kB 0.0s done
+#7 DONE 0.0s
+
+#8 [build 28/28] RUN chmod +x /opt/seon/seon-entrypoint
+#8 CACHED
+
+#9 [build  7/28] RUN mkdir -p /root/.clojure  && echo '{:mvn/local-repo "/opt/seon/m2"}' > /root/.clojure/deps.edn
+#9 CACHED
+
+#10 [build  9/28] COPY package.json package-lock.json ./
+#10 CACHED
+
+#11 [stage-1 2/3] RUN apt-get update  && apt-get install -y --no-install-recommends ca-certificates curl  && rm -rf /var/lib/apt/lists/*
+#11 CACHED
+
+#12 [build  3/28] RUN curl -fL "https://nodejs.org/dist/v22.23.1/node-v22.23.1-linux-arm64.tar.xz" -o /tmp/node.tar.xz  && echo "0294e8b915ab75f92c7513d2fcb830ae06e10684e6c603e99a87dbf8835389c1  /tmp/node.tar.xz" | sha256sum -c -  && mkdir -p /opt/seon/node  && tar -xJf /tmp/node.tar.xz --strip-components=1 -C /opt/seon/node  && rm /tmp/node.tar.xz
+#12 CACHED
+
+#13 [build 22/28] RUN clojure -M:cljs compile client
+#13 CACHED
+
+#14 [build 18/28] COPY externs externs
+#14 CACHED
+
+#15 [build  2/28] RUN apt-get update  && apt-get install -y --no-install-recommends curl ca-certificates git xz-utils  && rm -rf /var/lib/apt/lists/*
+#15 CACHED
+
+#16 [build  6/28] RUN curl -fL "https://github.com/babashka/babashka/releases/download/v1.12.218/babashka-1.12.218-linux-aarch64-static.tar.gz"       -o /tmp/bb.tar.gz  && tar -xzf /tmp/bb.tar.gz -C /usr/local/bin bb && rm /tmp/bb.tar.gz
+#16 CACHED
+
+#17 [build 16/28] COPY test test
+#17 CACHED
+
+#18 [build 19/28] COPY config config
+#18 CACHED
+
+#19 [build  8/28] WORKDIR /opt/seon
+#19 CACHED
+
+#20 [build  4/28] RUN curl -fL "https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.3%2B9/OpenJDK25U-jre_aarch64_linux_hotspot_25.0.3_9.tar.gz" -o /tmp/jre.tar.gz  && echo "d12d5b19ff7f6c4a99fd4f9eecede2c96e64df7d1f41cc84f2e9c9b38408600b  /tmp/jre.tar.gz" | sha256sum -c -  && mkdir -p /opt/seon/jre  && tar -xzf /tmp/jre.tar.gz --strip-components=1 -C /opt/seon/jre  && rm /tmp/jre.tar.gz
+#20 CACHED
+
+#21 [build 27/28] COPY docker/seon-entrypoint /opt/seon/seon-entrypoint
+#21 CACHED
+
+#22 [build 20/28] COPY seon-skills seon-skills
+#22 CACHED
+
+#23 [build  5/28] RUN curl -fL https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh -o /tmp/clj-install.sh  && bash /tmp/clj-install.sh && rm /tmp/clj-install.sh
+#23 CACHED
+
+#24 [build 21/28] COPY bin/fix-bootstrap-macros bin/fix-bootstrap-macros
+#24 CACHED
+
+#25 [build 17/28] COPY resources resources
+#25 CACHED
+
+#26 [build 13/28] COPY reference-code/datahike/src-secondary reference-code/datahike/src-secondary
+#26 CACHED
+
+#27 [build 14/28] RUN clojure -X:deps prep :aliases '[:simd :fork-deps :writer]'  && clojure -P -M:simd:fork-deps:writer  && clojure -X:deps prep :aliases '[:cljs]'  && clojure -P -M:cljs
+#27 CACHED
+
+#28 [build 11/28] COPY deps.edn shadow-cljs.edn ./
+#28 CACHED
+
+#29 [build 12/28] COPY dev-resources dev-resources
+#29 CACHED
+
+#30 [build 23/28] RUN clojure -M:cljs compile bootstrap && bb bin/fix-bootstrap-macros
+#30 CACHED
+
+#31 [build 10/28] RUN npm ci
+#31 CACHED
+
+#32 [build 25/28] RUN mkdir -p /tmp/keep  && mv .shadow-cljs/builds/client/dev/out /tmp/keep/out  && rm -rf .shadow-cljs  && mkdir -p .shadow-cljs/builds/client/dev  && mv /tmp/keep/out .shadow-cljs/builds/client/dev/out
+#32 CACHED
+
+#33 [build 15/28] COPY src src
+#33 CACHED
+
+#34 [build 24/28] RUN npm run css:build
+#34 CACHED
+
+#35 [build 26/28] RUN clojure -Spath -M:simd:fork-deps:writer > /tmp/cp.raw  && tr ':' '\n' < /tmp/cp.raw     | sed 's|^\([^/]\)|/opt/seon/\1|'     | paste -sd: - > /opt/seon/cp.txt
+#35 CACHED
+
+#36 [stage-1 3/3] COPY --from=build /opt/seon /opt/seon
+#36 CACHED
+
+#37 exporting to image
+#37 exporting layers done
+#37 exporting manifest sha256:6376686bc29a141fb576a5a1f0a3f63b336e06f78b7149c5908c5d8951393c9c done
+#37 exporting config sha256:8d63c7dd42cbac9ab904fe8768ace1e997532d1c55c81d3e50dcdb34cfe3a2c3 done
+#37 exporting attestation manifest sha256:84c13ea28a427fdda9552a6f689f6ca70223bd0ca5749c9de7f41766a2e7e48a done
+#37 exporting manifest list sha256:63db32776190f88411542a1415a6eb44bdb17c6b809f2d1fdab39b6a2c0a0557 done
+#37 naming to docker.io/library/seon:slice1 done
+#37 unpacking to docker.io/library/seon:slice1 done
+#37 DONE 0.0s
+
+View build details: docker-desktop://dashboard/build/desktop-linux/desktop-linux/xhnvh69icp89tufrfkjfvgktl
