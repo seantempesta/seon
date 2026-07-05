@@ -123,10 +123,21 @@
 ;; (`wire/-main`). Spec'd as reality until that mismatch is unified.
 (schema/register! ::hook-db-name [:or ::db-name :string])
 
-(schema/register! ::snapshot-registry-request [:map])
-(schema/register! ::snapshot-registry-response [:map [::snapshot :map]])
+;; The ONE snapshot shape (test seam) — registry map + agent map + the
+;; on-ensure-db hook vector, all captured together. In-memory only (it
+;; holds live conns/fns); never persisted, so there is no legacy on-disk
+;; shape to migrate — the old bare-map / hookless reader branches are gone
+;; (registry M22).
+(schema/register! ::snapshot
+                  [:map
+                   [::registry :map]
+                   [::agents :map]
+                   [::hooks [:vector ::hook-entry]]])
 
-(schema/register! ::restore-registry-request [:map [::snapshot :map]])
+(schema/register! ::snapshot-registry-request [:map])
+(schema/register! ::snapshot-registry-response [:map [::snapshot ::snapshot]])
+
+(schema/register! ::restore-registry-request [:map [::snapshot ::snapshot]])
 (schema/register! ::restore-registry-response [:map [::restored? :boolean]])
 
 ;; Shared agent-id shape. Platform registers it ONCE here (during the
@@ -607,34 +618,31 @@
    restore instead of stranding an empty hook vector."
   {:malli/schema [:=> [:cat ::snapshot-registry-request] ::snapshot-registry-response]}
   [{}]
-  {::snapshot {:registry @!registry
-               :agents @!agents
-               :hooks @!on-ensure-db-hooks}})
+  {::snapshot {::registry @!registry
+               ::agents @!agents
+               ::hooks @!on-ensure-db-hooks}})
 
 (defn ^:no-doc restore-registry!
-  "Test helper: replace registry + agent map with `::snapshot`.
-   Releases any conns that were added since the snapshot was taken.
-   When the snapshot carries `:hooks` (as `snapshot-registry` now
-   produces), the on-ensure-db hook vector is restored too — a fixture
-   that resets hooks for isolation puts the live hooks back. Accepts
-   the new shape (`{:registry ... :agents ... :hooks ...}`), the
-   hookless shape, and the legacy bare-map shape."
+  "Test helper: replace registry + agents + hooks with `::snapshot`.
+
+   Releases any conns that were added since the snapshot was taken, then
+   restores all three atoms — a fixture that resets hooks for isolation
+   puts the live JVM's hooks (::raw-broadcast, ::reactive, ...) back.
+   Speaks the ONE `::snapshot` shape `snapshot-registry` produces (M22:
+   the legacy bare-map and hookless reader branches are deleted —
+   snapshots are in-memory values, never persisted, so no old shape can
+   arrive from disk)."
   {:malli/schema [:=> [:cat ::restore-registry-request] ::restore-registry-response]}
   [{::keys [snapshot]}]
   (locking !registry
-    (let [;; legacy snapshots were a bare {db-name -> entry} map; new
-          ;; snapshots wrap registry + agents (+ hooks).
-          legacy?       (not (contains? snapshot :registry))
-          registry-snap (if legacy? snapshot (:registry snapshot))
-          agents-snap   (if legacy? {} (:agents snapshot))
-          current       @!registry
-          extra-names   (set/difference (set (keys current))
-                                        (set (keys registry-snap)))]
+    (let [{::keys [registry agents hooks]} snapshot
+          current     @!registry
+          extra-names (set/difference (set (keys current))
+                                      (set (keys registry)))]
       (doseq [n extra-names]
         (when-let [{::keys [conn]} (get current n)]
           (try (d/release conn) (catch Throwable _))))
-      (reset! !registry registry-snap)
-      (reset! !agents agents-snap)
-      (when (contains? snapshot :hooks)
-        (reset! !on-ensure-db-hooks (:hooks snapshot)))
+      (reset! !registry registry)
+      (reset! !agents agents)
+      (reset! !on-ensure-db-hooks hooks)
       {::restored? true})))
