@@ -147,6 +147,21 @@ the current tree.
   `SEON_PORT=7890` (published), LLM keys (`DEEPSEEK_API_KEY` etc. — the pod
   reads provider config from env), `SEON_SHELL`/`SEON_WEB` grants,
   `SEON_FS_ROOT`/`SEON_FS_READ_ONLY`.
+- **The packaged unit is the full multi-agent system, not one agent
+  (owner clarification 2026-07-05).** A cluster is a SWARM: one root agent
+  plus any worker agents it starts, all sharing the one cluster DB
+  (the owner-ratified swarm design — cross-agent coordination through the
+  shared DB, one pod). The bench door drives the ROOT agent
+  (`POST /agents/run`); whether the root does the work itself or delegates
+  to workers is the system's own business — capability, not configuration.
+  "Done" detection is therefore root-anchored: the sample ends when the
+  ROOT's run closes with a terminal reply (`complete` / `message/user`),
+  and "goal met" is always the ORACLE's verdict on the resulting state,
+  never the agent's self-report. The task contract (§3) states the done
+  signal explicitly ("when the goal is met, reply … via message/user"), per
+  the every-check-stated law. Runaway delegation (root spawns workers and
+  never concludes) lands in `behavior_miss` via the run bounds — one more
+  reason the cluster-level run-bounds ask (§9) is required, not optional.
 - **One container, both processes** — NOT a compose pair. Reasons: the UDS
   pair and the port file want one filesystem; a cluster is architecturally
   ONE unit (one db + one pod; isolation lives at the CLUSTER boundary, not
@@ -458,9 +473,9 @@ with both anchors. The choreography exists whole in `pod_planning_driver`
   passing offline tests, a frozen `datasets.lock` split, ledger row
   `2026-07-04:bfcl_ast:dev:k1:armD-full`, plus the form-vs-JSON A/B whose
   eval-native follow-up was awaiting an owner decision). Dropping it moots
-  that pending decision. Recommendation: keep the adapter + tests in place
-  unscheduled (zero maintenance, they document the format-scored cautionary
-  tale); delete only if the owner prefers no inert code.
+  that pending decision. **Owner ruled 2026-07-05: KEEP, unscheduled** —
+  zero maintenance, documents the format-scored cautionary tale, and may be
+  adapted later if a function-calling bench ever fits.
 - **tau2 — dropped.** Same protocol-scoring family + a user-simulator LLM;
   its stateful-backend signal is dominated by terminal-bench's
   stateful-environment tasks, which score outcomes.
