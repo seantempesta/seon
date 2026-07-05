@@ -278,8 +278,7 @@
    shapes — callers that read-string the value back get a usable
    arglists structure either way."
   {:malli/schema [:=> [:cat [:map-of :any :any]] ::var-projection]}
-  [{:keys [name fn-var arglists meta] :as var-map}]
-  {:pre [(map? var-map)]}
+  [{:keys [name fn-var arglists meta]}]
   (let [al (if (and (seq? arglists) (= 'quote (first arglists)))
              (second arglists)
              arglists)
