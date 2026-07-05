@@ -58,8 +58,9 @@
        "   :seon.render/ai \"probe dash\"})"))
 
 (defn- seed-probe-tile!
-  "Transact the probe.helpers + probe.tile rows. probe.tile stores
-   :seon.ns/requires [:probe.helpers] so replay topo-orders helpers first."
+  "Transact the probe.helpers + probe.tile rows. probe.tile stores a
+   :seon.ns/require-edges row → :probe.helpers so replay topo-orders
+   helpers first."
   []
   (db/transact!
     {:seon.db/tx-data
@@ -67,7 +68,8 @@
        :seon.ns/source helpers-ns-source}
       {:seon.ns/name     :probe.tile
        :seon.ns/source   tile-ns-source
-       :seon.ns/requires [:probe.helpers]}
+       :seon.ns/require-edges [{:seon.ns.require/target :probe.helpers
+                                :seon.ns.require/alias  'h}]}
       {:seon.fn/sym        "probe.tile/dash"
        :seon.fn/ns         {:seon.ns/name :probe.tile}
        :seon.fn/source     dash-source

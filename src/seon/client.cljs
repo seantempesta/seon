@@ -680,9 +680,10 @@
 ;; Only the agent DB layer loads, whole-namespace + dependency-ordered:
 ;;
 ;;   - `agent-ns-set` — every `:seon.ns/name` row minus `(core-ns-set)`.
-;;   - `topo-sort-nses` over the STORED `:seon.ns/requires` (intersected
-;;     with the agent-ns-set — intra-agent edges only; core deps load
-;;     on-demand via the DB load-fn). A dep loads before its dependent.
+;;   - `topo-sort-nses` over the STORED `:seon.ns/require-edges`
+;;     (targets intersected with the agent-ns-set — intra-agent edges
+;;     only; core deps load on-demand via the DB load-fn). A dep loads
+;;     before its dependent.
 ;;   - For each ns in topo order, eval its reconstituted whole source
 ;;     (`seon.eval/reconstitute-ns-source`: the verbatim (ns … (:require …))
 ;;     form + every current :seon.fn/:seon.schema/:seon.test source). The
@@ -720,26 +721,21 @@
 
 (defn ^:private agent-ns-requires
   "Map of `agent-ns-kw → #{intra-agent require ns-kws}` for topo-sort.
-   Reads the STORED `:seon.ns/requires` (the one unblocking fix —
-   captured at tee from the analyzer, NOT re-parsed here) for each ns in
-   `agent-nses`, INTERSECTED with `agent-nses` so only intra-agent edges
-   order the load kick. Core/third-party deps are NOT edges here — they
-   are satisfied on-demand by the compiled bundle via the DB load-fn
+   Derives each ns's required set from the STORED
+   `:seon.ns/require-edges` (captured at tee from the analyzer, NOT
+   re-parsed here — `seon.eval/stored-require-targets`), INTERSECTED
+   with `agent-nses` so only intra-agent edges order the load kick.
+   Core/third-party deps are NOT edges here — they are satisfied
+   on-demand by the compiled bundle via the DB load-fn
    (`seon.eval/guarded-load`) DURING each ns's eval. An agent ns with no
-   stored requires (or only core deps) has an empty edge set."
+   stored edges (or only core deps) has an empty edge set."
   {:malli/schema [:=> [:catn [::db :any] [::agent-nses :any]] :any]}
   [db agent-nses]
   (into {}
         (map (fn [ns-kw]
-               (let [reqs (into #{}
-                                (map first)
-                                (db/query '[:find ?r
-                                            :in $ ?ns
-                                            :where
-                                            [?e :seon.ns/name ?ns]
-                                            [?e :seon.ns/requires ?r]]
-                                          db ns-kw))]
-                 [ns-kw (set/intersection reqs agent-nses)])))
+               [ns-kw (set/intersection
+                        (seval/stored-require-targets db ns-kw)
+                        agent-nses)]))
         agent-nses))
 
 (defn ^:private topo-sort-nses
@@ -856,9 +852,10 @@
      1. `agent-ns-set` — every `:seon.ns/name` row minus `(core-ns-set)`.
         Core/third-party are COMPILED (in the bundle), indexed for
         DISPLAY only; only the agent DB layer is loaded.
-     2. `topo-sort-nses` over the STORED `:seon.ns/requires` intersected
-        with the agent-ns-set (intra-agent edges only — core deps load
-        on-demand via the load-fn). A dep loads before its dependent.
+     2. `topo-sort-nses` over the STORED `:seon.ns/require-edges`
+        targets intersected with the agent-ns-set (intra-agent edges
+        only — core deps load on-demand via the load-fn). A dep loads
+        before its dependent.
      3. For each ns in topo order, `(seval/eval compile-state
         (seval/reconstitute-ns-source db ns-kw)
         {:seon.eval/starting-ns 'cljs.user})`. The

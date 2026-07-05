@@ -8,8 +8,8 @@
      `defs-since` + `var-projection` to build `:seon.fn` entities.
    - Phase C item 11: `seed-from-source!` — walks the analyzer's
      known seon.* nses at boot.
-   - Phase D item 15: bulk-load resume — uses `ns-deps` for
-     topo-sort.
+   - Phase D item 15: bulk-load resume — topo-sorts over the stored
+     `:seon.ns/require-edges` the tee writes from [[ns-require-edges]].
 
    `compile-state` is the CLJS-bootstrap inner atom (the one cljs.js
    threads through `eval-str`). The seon process holds it boxed in
@@ -21,8 +21,7 @@
    both throw `TypeError: undefined`. We read
    `(:cljs.analyzer/namespaces @compile-state)` directly. The
    research note's reference impl is wrong on that point."
-  (:require [clojure.set :as set]
-            [malli.core :as m]
+  (:require [malli.core :as m]
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
@@ -205,54 +204,6 @@
              (fn [defs] (apply dissoc defs phantoms))))
     phantoms))
 
-(defn- raw-ns-deps
-  "The UNFILTERED set of ns-NAME symbols `ns-sym` depends on, read
-   straight from the analyzer. Composes the VALUES of the analyzer's
-   `:requires` + `:uses` + `:require-macros` maps (each `{alias→ns,
-   ns→ns}`, so `(vals …)` yields ns names; aliases are values, not
-   keys, and drop out by taking vals — LIVE-verified 2026-06-17, see
-   phase0-live-verification). Self is removed. `:require-macros` is
-   included because macro-only deps don't appear in `:requires` yet
-   still load first. Returns `#{}` for an unknown / never-eval'd ns.
-   Shared raw extraction for [[ns-deps]] (filtered) and
-   [[ns-requires]] (unfiltered, keyword-ized)."
-  [compile-state ns-sym]
-  (let [ns-info (get-in @compile-state [:cljs.analyzer/namespaces ns-sym])]
-    (-> (set (concat (vals (:requires ns-info))
-                     (vals (:uses ns-info))
-                     (vals (:require-macros ns-info))))
-        (disj ns-sym))))
-
-(defn ns-deps
-  "Set of agent-ns syms `ns-sym` depends on.
-
-   Intersected with
-   `known-ns-set` (so cljs.core / clojure.* / bootstrap nses drop
-   out). Reads the analyzer's `:requires` + `:uses` + `:require-macros`
-   maps directly. Excludes self. Used by Phase D bulk-load resume for
-   topo-sort. `:require-macros` matters because macro-only deps
-   (e.g. `(:require-macros [foo.macros :as fm])`) don't show up in
-   `:requires` but DO need to load first on resume."
-  {:malli/schema [:=> [:cat ::compile-state :symbol [:set :symbol]] [:set :symbol]]}
-  [compile-state ns-sym known-ns-set]
-  (set/intersection (raw-ns-deps compile-state ns-sym) known-ns-set))
-
-(defn ns-requires
-  "The UNFILTERED dependency-edge set for `ns-sym`, as keywords.
-
-   Read from the analyzer (no source parsing). This is what the tee
-   stores as `:seon.ns/requires` so the DB-layer load can topo-sort by
-   requires (the one unblocking fix — see the db-is-the-running-system
-   PRD). Unlike [[ns-deps]] it is NOT intersected with a known-set: the
-   full required-ns set is stored, and the load-time topo intersects
-   with the DB-layer ns set. Excludes self. Returns `#{}` for an
-   unknown / never-eval'd ns. Aliases are dropped (vals, not keys) —
-   reconstitution rebuilds the alias-bearing `(ns …)` form from
-   `:seon.ns/source` (Phase 2)."
-  {:malli/schema [:=> [:cat ::compile-state :symbol] [:set :keyword]]}
-  [compile-state ns-sym]
-  (into #{} (map #(keyword (str %))) (raw-ns-deps compile-state ns-sym)))
-
 ;; ---------------------------------------------------------------------------
 ;; Reified require edges (M4/C28 structural store — code-as-data: the
 ;; analyzer already produced the alias/refer facts at eval time; store
@@ -284,9 +235,10 @@
   "The reified require-edge set for `ns-sym`, read from the analyzer.
 
    One `::require-edge` map per RUNTIME-required ns (the analyzer's
-   `:requires` vals ∪ `:uses` vals, self excluded — `:require-macros`
-   edges stay in [[ns-requires]] only; the SCI env rebuild has no macro
-   surface). The `:as` alias is the `:requires` KEY mapping to the
+   `:requires` vals ∪ `:uses` vals, self excluded — macro-only
+   `:require-macros` deps are NOT edges; the SCI env rebuild has no
+   macro surface, and resume's load-fn satisfies transitive requires
+   on demand regardless of topo edges). The `:as` alias is the `:requires` KEY mapping to the
    target where key ≠ target; the `:refer` set is the `:uses` keys
    grouped by target. `#{}` for an unknown / never-eval'd ns. This is
    what the tee stores as `:seon.ns/require-edges` (component rows) so

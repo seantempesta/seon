@@ -285,7 +285,7 @@ discriminator (see [[data-model]]).
 The core's source, the agent's eval log, and the analyzer state are three views of
 one code corpus. Agent-defining forms persist as `:seon.fn` / `:seon.ns` /
 `:seon.schema` entities; the DB IS the running system (query → reconstitute →
-topo-sort by `:seon.ns/requires` → eval; redefine = upsert). An agent's **bootstrap**
+topo-sort by `:seon.ns/require-edges` → eval; redefine = upsert). An agent's **bootstrap**
 is seeded eval'd forms run quietly (`:core` origin, no wake, no turn-count) in the new
 agent's scope before any trigger — the batched `(ctx/install! […])`, the
 `:my.agent/purpose` schema + refine fn, the home-ns `defn`s — so the agent SEES its

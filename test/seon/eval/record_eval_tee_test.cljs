@@ -933,7 +933,7 @@
                  {:seon.fn/sym "my.agent/agentfn"
                   :seon.fn/source "(defn agentfn [] :mine)"}
                  {:seon.ns/name :my.agent :seon.ns/source "(ns my.agent)"}
-                 [:db/retract [:seon.ns/name :my.agent] :seon.ns/requires :foo]]
+                 [:db/retract [:seon.ns/name :my.agent] :seon.fn/read-attrs :foo/bar]]
         blocked #{"seon.core.demo/corefn"}
         out     (seval/reject-core-overrides tee blocked)]
     (testing "the blocked core-override :seon.fn row is removed"

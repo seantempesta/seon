@@ -6,7 +6,7 @@
    the runtime — its `:seon.ns`/`:seon.fn` rows are DISPLAY-only and are NOT
    loaded. Only the agent-authored DB LAYER is loaded:
    `replay-program-graph!` queries the agent ns set (every `:seon.ns/name`
-   row minus `(core-ns-set)`), topo-sorts by the STORED `:seon.ns/requires`,
+   row minus `(core-ns-set)`), topo-sorts by the STORED `:seon.ns/require-edges`,
    and for each ns evals its reconstituted whole source
    (`seon.eval/reconstitute-ns-source` — ns form + every current
    `:seon.fn`/`:seon.schema`/`:seon.test` source). cljs.js's own load-fn
@@ -387,7 +387,7 @@
 ;; Two-ns agent dependency chain — the spine. An agent ns A requires agent
 ;; ns B (with an `:as b` alias); both load from the DB, topo-ordered, and
 ;; B's fn is callable through A. This is the cross-ns dep edge the stored
-;; `:seon.ns/requires` orders and the DB load-fn satisfies.
+;; `:seon.ns/require-edges` orders and the DB load-fn satisfies.
 ;; ---------------------------------------------------------------------------
 
 (deftest load-two-ns-agent-dependency-chain
@@ -409,7 +409,9 @@
                                :seon.fn/arglists "([])" :seon.fn/doc "" :seon.fn/private? false}
                               {:seon.ns/name :seon.replay.chaina
                                :seon.ns/source "(ns seon.replay.chaina (:require [seon.replay.chainb :as b]))"
-                               :seon.ns/requires [:seon.replay.chainb]}
+                               :seon.ns/require-edges
+                               [{:seon.ns.require/target :seon.replay.chainb
+                                 :seon.ns.require/alias  'b}]}
                               {:seon.fn/sym "seon.replay.chaina/av"
                                :seon.fn/ns {:seon.ns/name :seon.replay.chaina}
                                :seon.fn/source "(defn av [] (b/bv))"

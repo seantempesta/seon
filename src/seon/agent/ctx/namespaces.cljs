@@ -9,7 +9,7 @@
        The current ns is gated by the `::current-full?` flag (default true).
      - COMPACT CARD — every ns the CURRENT ns `:require`s (ALL of them), that
        isn't already full: its `register!` block + one-line `defn` heads (body
-       elided). Self-healing on the `:seon.ns/requires` edges — write a real
+       elided). Self-healing on the `:seon.ns/require-edges` rows — write a real
        `(:require [x …])` and `x` joins as a card; drop the require → it
        vanishes ([[render-one-ns-compact]]).
      - DROPPED — everything else. Still INDEXED (its `:seon.ns/name` +
@@ -209,25 +209,16 @@
   "The nses the CURRENT ns `:require`s — ALL of them (no full-source gate),
    each rendered as a COMPACT CARD. Pure fn of the DB: a real
    `(:require [x …])` on the current ns pulls `x` into context as a card; drop
-   the require → it leaves the set (self-healing on the `:seon.ns/requires`
-   edges). `*.internal` / `*-test` are excluded ([[included-ns?]]); non-keyword
-   rows are skipped. Empty when `cur-ns` is nil."
+   the require → it leaves the set (self-healing on the
+   `:seon.ns/require-edges` rows, via `seon.eval/stored-require-targets`).
+   `*.internal` / `*-test` are excluded ([[included-ns?]]). Empty when
+   `cur-ns` is nil."
   [db cur-ns]
   (if-not cur-ns
     #{}
     (into #{}
-          (comp (map first)
-                (filter keyword?)
-                (filter included-ns?))
-          (db/query
-            {:seon.db/db db
-             :seon.db/query
-             '[:find ?r
-               :in $ ?ns
-               :where
-               [?e :seon.ns/name ?ns]
-               [?e :seon.ns/requires ?r]]
-             :seon.db/args [cur-ns]}))))
+          (filter included-ns?)
+          (seval/stored-require-targets db cur-ns))))
 
 (defn- full?
   "True when an included ns `nm` renders FULL (its whole real source); false
@@ -317,8 +308,8 @@
    form [[seon.eval/setup-agent-ns!]] actually installed — `[seon.agent.message
    :as message]` / `[seon.agent.lifecycle :refer [wait complete …]]` / … WITH
    the aliases + refers — straight from the ONE canonical
-   [[seon.eval/home-ns-form]], NOT a bare-name reconstruction from
-   `:seon.ns/requires`. No hidden aliasing: the agent reads the form and knows
+   [[seon.eval/home-ns-form]], NOT a bare-name reconstruction from the
+   stored edges. No hidden aliasing: the agent reads the form and knows
    `message/user`, `db/transact!`, `schema/register!`, `wait`, `complete`
    exist and how to call them. `nm` is a ns-name keyword whose `:seon.ns/name`
    row the caller already matched (an included, current-ns row). `id` is the
@@ -396,7 +387,7 @@
      - COMPACT CARD — every ns the CURRENT ns `:require`s ([[required-ns-set]])
        that isn't already full ([[render-one-ns-compact]]): its `register!`
        schema block + every public fn's one-line `defn` head (body elided),
-       ~3–5× smaller than full. Self-healing on the `:seon.ns/requires` edges.
+       ~3–5× smaller than full. Self-healing on the `:seon.ns/require-edges` rows.
      - DROPPED — everything else, reachable via grep /
        [[seon.agent.ctx/render-namespace]]. (`*.internal` / `*-test` excluded
        outright, [[included-ns?]]; empty cards dropped.)

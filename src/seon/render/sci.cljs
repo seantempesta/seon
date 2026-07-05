@@ -310,28 +310,6 @@
            (err/record! {:seon.error/raw e :seon.error/fault :core})
            nil))))
 
-(defn- ns-requires-edges
-  "The `:seon.ns/requires` edge set for `ns-kw`, as ns SYMBOLS. Captured on
-   EVERY successful eval (a bare `(require '[x])` included), so it can be
-   FRESHER than the stored `:seon.ns/source` — unioned into the exposed ns
-   set so a fully-qualified ref to a required ns always resolves. Fail-soft
-   → `#{}`."
-  [db ns-kw]
-  (try
-    (into #{}
-          (comp (map first) (filter keyword?) (map (comp symbol name)))
-          (db/query
-            {:seon.db/db    db
-             :seon.db/query '[:find ?r :in $ ?ns :where
-                              [?e :seon.ns/name ?ns]
-                              [?e :seon.ns/requires ?r]]
-             :seon.db/args  [ns-kw]}))
-    (catch :default e
-      ;; core machinery reading stored require edges — record the defect;
-      ;; the surface still degrades to the empty edge set.
-      (err/record! {:seon.error/raw e :seon.error/fault :core})
-      #{})))
-
 (defn- fn-source
   "The stored `:seon.fn/source` for `sym` (a string), or nil. nil means we
    can't interpret it (no source) → caller falls back to the compiled path."
@@ -546,13 +524,14 @@
                ;; eval/setup time — M4); pre-structural rows fall back to
                ;; parsing the stored (or derived home-ns) source, noted
                ;; once per ns ([[require-info]]).
+               ;; `::nses` carries every stored edge target — the edge
+               ;; tee fires on EVERY successful eval (a bare
+               ;; `(require '[x])` included), so `:seon.ns/require-edges`
+               ;; IS the fresh dep-edge truth (C36: the flat
+               ;; `:seon.ns/requires` twin + its union here are deleted).
                {:seon.eval/keys [aliases nses refers refer-all]}
                (require-info db agent-ns)
-               ;; UNION the (fresher, per-eval) `:seon.ns/requires` edges so a
-               ;; fully-qualified ref to a required ns resolves even when the
-               ;; stored edges lag a live `(require '[x])`.
-               nses     (into (or nses #{})
-                              (ns-requires-edges db (keyword agent-ns)))
+               nses     (or nses #{})
                ;; expose each required seon.*/agent ns (full name) from the index
                req-ns   (reduce (fn [m tns]
                                   (if (exposable-ns? tns)

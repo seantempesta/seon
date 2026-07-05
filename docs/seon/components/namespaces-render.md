@@ -49,7 +49,7 @@ The include set is `current ns ∪ its :requires ∪ ::full-source pins`. There 
 **no `:always` allow-list, no `compact-worthy?` predicate, and no hardcoded
 `my.*` pinning** in the render (all retired). Write a real `(:require [x …])` on
 the current ns and `x` joins as a card; drop the require and it vanishes —
-self-healing on the `:seon.ns/requires` edges.
+self-healing on the `:seon.ns/require-edges` rows.
 
 The DEFAULT verb surface is therefore a CONFIG concern:
 `:seon.eval/home-requires` in the manifest (`config/system.edn`
