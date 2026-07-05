@@ -856,6 +856,24 @@ _start_unlocked() {
       fi ;;
   esac
 
+  # Writer-warmup guard (C16 root fix): a pod spawned right after
+  # `restart wire-server` races the writer's warmup — the pod's boot ping
+  # is fail-loud (~10s), so it exited and needed a SECOND start. Gate every
+  # pod spawn on the SAME wire-server ready_check that `start all` /
+  # `cluster create` / `cluster reset` use (one mechanism), bounded + loud
+  # via wait_ready. Only when a wire-server is actually running under THIS
+  # supervisor — a missing writer keeps today's honest fail-loud pod boot.
+  case "$name" in
+    pod|pod-*)
+      if is_running wire-server && ! ready_check wire-server; then
+        wait_ready wire-server || {
+          echo "✗ $name NOT started — this supervisor's wire-server never became accept-ready" >&2
+          echo "  read its log: bin/seon logs wire-server   ($(log_file wire-server))" >&2
+          return 1
+        }
+      fi ;;
+  esac
+
   # nohup + & detaches from this shell; bash -c handles multi-word cmds.
   nohup bash -c "$cmd" >> "$(log_file "$name")" 2>&1 &
   local pid=$!
