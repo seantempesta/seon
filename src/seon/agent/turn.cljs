@@ -365,6 +365,22 @@
         ;; from anything, so the byte ground truth goes to the blob store
         ;; (best-effort; a lost capture never wedges the turn).
         reply-blob (await (capture-blob! reply-text :reply))
+        ;; Link the reply blob onto the turn NOW, not only at close-turn!:
+        ;; a turn that dies mid-eval (e.g. a `:core` crash under the
+        ;; on-core-error dial) otherwise strands the captured blob with no
+        ;; ref — `inspect/turn` can't read the raw reply back. Best-effort
+        ;; like the capture; close-turn!'s later merge re-asserts the same
+        ;; ref (idempotent upsert). Drill finding, error-workflow 2026-07-05.
+        _          (when reply-blob
+                     (try
+                       (await (db/transact!
+                                {:seon.db/tx-data
+                                 [{:seon.agent.turn/id         id-of-turn
+                                   :seon.agent.turn/reply-blob reply-blob}]}))
+                       (catch :default e
+                         (js/console.warn
+                           "[seon.agent.turn] eager reply-blob link failed (turn continues):"
+                           e))))
         parsed     (repl-internal/parse-forms reply-text)
         batch      (await (seval/eval-batch! compile-state parsed
                                              (ctx/home-ns id) id id-of-turn run-id))]
