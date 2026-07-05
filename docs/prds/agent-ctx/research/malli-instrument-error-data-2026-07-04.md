@@ -347,3 +347,19 @@ Output-validation coverage summary for `^:async` fns:
   `me/with-spell-checking` (`error.cljc:339-372`, adds
   `::me/likely-misspelling-of` paths — a stronger version of our
   hand-rolled `hint-for`, `error/instrument.cljc:157-169`).
+
+  **CORRECTION (2026-07-05, hygiene-sweep evaluation — do NOT retry the
+  hint-for replacement):** the `with-spell-checking` claim above is
+  REFUTED on both legs, live-proven on the pod. (1) It only tags
+  `::m/extra-key` (closed maps) and `::m/invalid-dispatch-value`
+  (`error.cljc:349-355`; extra-key emission gated on `:closed` in
+  `core.cljc:1306-1312`) — seon request schemas are OPEN maps, so on our
+  envelope path it is a no-op (live: open-map explain → only
+  `::m/missing-key`, no misspelling tag). (2) Even on a closed map its
+  levenshtein length-threshold (`-similar-key`, `error.cljc:261-264`)
+  rejects the same-name-different-namespace near-miss
+  (`:seon.web/url` vs `:seon.agent.web/url` → nil
+  `::likely-misspelling-of`, live-proven) — the exact wrong-ns rule
+  `hint-for` exists for (revived codebase-wide in `8cbabc69`).
+  `hint-for` stays; live: the instrumented `seon.agent.web/fetch` still
+  yields "you passed :seon.web/url — the key is :seon.agent.web/url".

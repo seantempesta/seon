@@ -21,6 +21,16 @@ consolidated architecture docs. The eval harness (`src-inspect-ai/`) is built +
 pytest-green but **not yet running** a standing suite. The context-composition
 work (required-key resolution) is designed + Phase-1-built (held as a patch).
 
+**Hygiene sweep 2026-07-05 (registry rows C36/C38/C39 + the hint-for
+evaluation):** the flat `:seon.ns/requires` twin is DELETED —
+`:seon.ns/require-edges` is the one ns-dep store, flat views derive via
+`seon.eval/stored-require-targets` (`87ec6e45`); the read-attrs tee excludes
+defn annotations (`2264ffe4`); seon.warn internals speak persisted/owner-ns
+keys (`0d0d9358`). `hint-for` is KEPT — malli's `me/with-spell-checking` was
+evaluated and REFUTED as a replacement (open maps → no-op; wrong-ns near-miss
+rejected by its levenshtein threshold even closed) — see the correction in
+[[research/malli-instrument-error-data-2026-07-04]] §5.
+
 ## Tooling lane — the ordered path (ratified with owner 2026-07-02)
 
 **Interleave rule (owner call): one stability unit lands per feature unit** —
