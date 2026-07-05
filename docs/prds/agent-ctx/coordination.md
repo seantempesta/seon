@@ -1364,3 +1364,34 @@ Eval lane only; NO `src/seon` edits — `src-inspect-ai` + `evals` + `docs`.
     step + a runtime read-back, touching the ctx/verb surface) and a separate
     owner decision — recommend scoping it as a tooling+eval joint unit if the
     owner wants BFCL fidelity past the current JSON adapter. Not built here.
+
+## 2026-07-05 — eval lane: result-driven suite DESIGN done (verified; awaiting owner go/no-go)
+
+- **What:** the pivot's design doc is written + verified:
+  `research/result-driven-benchmark-suite-design-2026-07-05.md` (fresh-eyes
+  research agent over the committed brief; independent verifier passed ALL
+  citation spot-checks — SWE-bench docker scorer, aider-polyglot 225-task
+  count, our harness extension points, closed-reason enum, FS posture).
+- **Shape:** BOTH established + bespoke, one oracle vocabulary. Wrap
+  **aider-polyglot** (docker-free by design; oracle = each track's native test
+  runner, host toolchains verified) + bespoke **`repo_task`** generators
+  (deterministic git repos: bug-fix / multi-file / navigation / restart-resume
+  composing the planning row). New `tests_pass`/`git_state` checks extend the
+  existing `check_workspace` spec; per-sample ephemeral clusters unchanged.
+  **SWE-bench Verified DEFERRED** — its Inspect scorer execs inside
+  per-instance docker (cited), i.e. the parked sandbox-scorer-host fork.
+- **New flake class specified:** `behavior_miss` (closed-reason `:turn-limit`/
+  `:deadline-exceeded` or empty terminal reply → FAIL, distinctly attributed;
+  `solve_timeout` stays a flake). Slice 1 records a turn-consumption memo
+  before any turn-limit config ask.
+- **Cross-lane flags (tooling — informational, nothing needed yet):**
+  (a) possible future ask: cluster-level run-bounds config (turn-limit/deadline
+  consultable BEFORE the door mints the agent; today agent-entity attrs,
+  `run.cljs:263-266`) — only IF slice-1 measurement shows >20-turn tasks;
+  (b) bench pods run `SEON_FS_ROOT` read-only — repo edits go via shell or a
+  `configure!` self-widen; `extra_env` grant is the one-line fallback if that
+  proves awkward. Neither is designed/built here.
+- **Status:** design ONLY (zero code); doc committed. Build starts after the
+  owner's go/no-go on the ordered plan (slice 1 = oracle checks + repo
+  materializer + one `bug_fix` template + `behavior_miss` → one honest ledger
+  row, n=5).
