@@ -38,6 +38,7 @@
    the fault/record!/dial design (RULED 2026-07-04)."
   (:require
     [cljs.stacktrace :as stacktrace]
+    [clojure.string :as str]
     [goog.object :as gobj]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
@@ -141,6 +142,29 @@
          stack           (assoc :seon.error/stack stack)
          cause           (assoc :seon.error/cause cause)
          trunc?          (assoc :seon.error/truncated true))))))
+
+(defn deepest-message
+  "The deepest non-generic `:seon.error/message` in a [[->map]] chain.
+
+   cljs.js wraps an agent throw so the TOP message is a useless wrapper
+   (`\"ERROR\"`, `\"Could not eval …\"`); the real message (the malli/db
+   failure string, the agent's `(throw (js/Error. \"boom\"))` text) lives
+   a level or two down the `:seon.error/cause` chain. Falls back to the
+   top message. Bounded depth 6. Feeds the persisted error-datom message
+   ([[record!]]'s projection, so the `SEON-CORE-FAULT` marker and
+   `seon.agent.inspect/errors` show the real cause) and
+   `seon.eval/render-error-string`."
+  {:malli/schema [:=> [:cat :any] :string]}
+  [err]
+  (loop [e err depth 0 best nil]
+    (let [msg     (:seon.error/message e)
+          useful? (and (string? msg)
+                       (not (str/blank? msg))
+                       (not (#{"ERROR" "Could not eval"} (str/trim msg))))
+          best'   (if useful? msg best)]
+      (if (or (nil? (:seon.error/cause e)) (>= depth 6))
+        (or best' (:seon.error/message err) "")
+        (recur (:seon.error/cause e) (inc depth) best')))))
 
 ;; ============================================================
 ;; Fault discriminator — "what were we calling", never "whose turn is
@@ -297,7 +321,11 @@
   "The EDN-safe datom entity for an envelope — bounded strings, reified
    frames, NO live objects (`:seon.error/raw`, malli Schema leafs)."
   [envelope]
-  (let [{:seon.error/keys [message fault at stack frames args-edn data]} envelope
+  (let [{:seon.error/keys [fault at stack frames args-edn data]} envelope
+        ;; The DEEPEST real cause, not cljs.js's top wrapper ("ERROR") —
+        ;; this string is what the SEON-CORE-FAULT marker prints and what
+        ;; seon.agent.inspect/errors lists.
+        message (deepest-message envelope)
         ;; :seon.error.malli/errors carries live Schema objects + raw
         ;; values (research: malli-instrument-error-data-2026-07-04 §3) —
         ;; dropped from the projection; the EDN-safe malli fields

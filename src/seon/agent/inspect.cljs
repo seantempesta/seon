@@ -21,11 +21,17 @@
      - `turn` / `turn-diff` — turn replay: reconstruct any persisted
        turn from its `:seon.agent.turn/rendered-as-of` basis-t + prompt
        and reply blobs; diff two turns (tokens + basis-t delta).
+     - `errors` / `error` / `repro` — error triage over the persisted
+       `seon.error/record!` datoms: compact recent list → one full
+       envelope with the turn/agent joins → the work-backwards bundle
+       (as-of db frozen at the failure + a ready-to-eval repro
+       expression).
 
    All map-in, map-out. Defaults `:seon.agent/id` to
    `(seon.db/current-agent-id)` so REPL calls from inside an agent
    scope work with no argument."
   (:require
+    [cljs.reader :as reader]
     [clojure.string :as str]
     [my.blob :as blob]
     [seon.ai :as ai]
@@ -33,6 +39,7 @@
     [seon.agent.ctx :as ctx]
     [seon.agent.turn]
     [seon.db :as db]
+    [seon.error]
     [seon.schema :as schema]))
 
 (schema/register! :seon.agent.inspect/request
@@ -279,3 +286,307 @@
                                          (::prompt-tokens ft)))
           (seq (keep ::error [ft tt]))
           (assoc ::error (str/join "; " (keep ::error [ft tt]))))))))
+
+;;; ============================================================
+;;; Error triage — the persisted `seon.error/record!` datoms, three
+;;; altitudes: `errors` (compact recent list) → `error` (one full
+;;; envelope + the turn/agent joins) → `repro` (the work-backwards
+;;; bundle: the as-of db value frozen at the failure + a ready-to-eval
+;;; reproduction expression). Errors are values throughout — an unknown
+;;; eid is a guiding map, nothing throws.
+;;; ============================================================
+
+(schema/register! ::eid   :int)
+(schema/register! ::limit [:int {:min 1 :max 200}])
+;; "fn (file:line)" of the failure's TOP stack frame — compact display.
+(schema/register! ::top-frame :string)
+
+(schema/register! ::errors-request
+  [:map
+   [:seon.error/fault {:optional true} :seon.error/fault]
+   [::limit           {:optional true} ::limit]])
+
+(schema/register! ::error-row
+  [:map
+   [::eid                ::eid]
+   [:seon.error/fault    :seon.error/fault]
+   [:seon.error/message  :seon.error/message]
+   [:seon.error/at       {:optional true} :seon.error/at]
+   [::top-frame          {:optional true} ::top-frame]
+   [:seon.agent/id       {:optional true} :string]])
+
+(schema/register! ::errors-response
+  [:map [::errors [:vector ::error-row]]])
+
+(def ^:private default-errors-limit
+  "Row cap for [[errors]] when the caller names none — recent, compact."
+  20)
+
+(defn- tx-agent-id
+  "The `:seon.db/agent-id` tx-meta of the tx that wrote error `eid`."
+  [db eid]
+  (db/query '[:find ?aid . :in $ ?e
+              :where [?e :seon.error/fault _ ?tx]
+                     [?tx :seon.db/agent-id ?aid]]
+            db eid))
+
+(defn- tx-turn-id
+  "The `:seon.db/turn-id` tx-meta of the tx that wrote error `eid`."
+  [db eid]
+  (db/query '[:find ?tid . :in $ ?e
+              :where [?e :seon.error/fault _ ?tx]
+                     [?tx :seon.db/turn-id ?tid]]
+            db eid))
+
+(defn- top-frame-str
+  "\"fn (file:line)\" for the index-0 frame of pulled `frames`, or nil."
+  [frames]
+  (when-let [{f :seon.error.frame/fn file :seon.error.frame/file
+              line :seon.error.frame/line}
+             (first (sort-by :seon.error.frame/index frames))]
+    (let [base (when file (last (str/split file #"/")))]
+      (when (or f base)
+        (str (or f "?")
+             (when base (str " (" base (when line (str ":" line)) ")")))))))
+
+(def ^:private error-pull-pattern
+  [:seon.error/fault :seon.error/message :seon.error/at
+   :seon.error/stack :seon.error/args-edn :seon.error/data-edn
+   {:seon.error/frames [:seon.error.frame/index :seon.error.frame/fn
+                        :seon.error.frame/file :seon.error.frame/line
+                        :seon.error.frame/column]}])
+
+(defn- pull-error
+  "The persisted error entity under `eid`, or nil when it isn't one."
+  [db eid]
+  (let [e (db/pull {:seon.db/db db
+                    :seon.db/pull-pattern error-pull-pattern
+                    :seon.db/ref eid})]
+    (when (:seon.error/fault e) e)))
+
+(defn errors
+  "List recent persisted errors, newest first — compact triage rows.
+
+   Map-in/map-out (0-arity = defaults): optional `:seon.error/fault`
+   filter (`:agent` | `:core`) and `::limit` (default 20). Each row:
+   the error's entity id (feed it to [[error]] / [[repro]]), fault,
+   `:seon.error/at` (basis-t at failure), the DEEPEST-cause short
+   message, the top stack frame, and the recording agent's id when the
+   tx carried one. Token-bounded by construction — stored messages are
+   already clipped; rows clip further for the list."
+  {:malli/schema [:function
+                  [:=> [:cat] ::errors-response]
+                  [:=> [:cat ::errors-request] ::errors-response]]}
+  ([] (errors {}))
+  ([{fault :seon.error/fault limit ::limit}]
+   (let [db   @db/*conn*
+         eids (->> (db/query '[:find ?e ?f
+                               :where [?e :seon.error/fault ?f]]
+                             db)
+                   (filter (fn [[_ f]] (or (nil? fault) (= fault f))))
+                   (map first)
+                   (sort >)                     ; eids are monotonic → newest first
+                   (take (or limit default-errors-limit)))]
+     {::errors
+      (mapv (fn [eid]
+              (let [{:seon.error/keys [fault message at frames]} (pull-error db eid)
+                    top (top-frame-str frames)
+                    aid (tx-agent-id db eid)]
+                (cond-> {::eid eid
+                         :seon.error/fault fault
+                         :seon.error/message (tokens/clip-str message 25)}
+                  at  (assoc :seon.error/at at)
+                  top (assoc ::top-frame top)
+                  aid (assoc :seon.agent/id aid))))
+            eids)})))
+
+(schema/register! ::error-request [:map [::eid ::eid]])
+
+;; Pulled frame rows (sorted by index) — same leaf shape as the stored
+;; component entities, re-used from seon.error's registration.
+(schema/register! ::frames [:vector :seon.error/frame])
+
+(schema/register! ::error-response
+  [:map
+   [::ok?  ::ok?]
+   [::eid  ::eid]
+   [::error {:optional true} ::error]
+   [:seon.error/fault    {:optional true} :seon.error/fault]
+   [:seon.error/message  {:optional true} :seon.error/message]
+   [:seon.error/at       {:optional true} :seon.error/at]
+   [:seon.error/stack    {:optional true} :seon.error/stack]
+   [:seon.error/args-edn {:optional true} :seon.error/args-edn]
+   [:seon.error/data-edn {:optional true} :seon.error/data-edn]
+   [::frames             {:optional true} ::frames]
+   [:seon.agent/id       {:optional true} :string]
+   [::turn-eid           {:optional true} ::eid]
+   [:seon.agent.turn/id  {:optional true} :seon.agent.turn/id]
+   [:seon.agent.turn/rendered-as-of
+    {:optional true} :seon.agent.turn/rendered-as-of]])
+
+(defn- turn-by-id
+  "`[turn-eid turn-id rendered-as-of|nil]` for a turn id, or nil."
+  [db tid]
+  (when tid
+    (when-let [te (db/query '[:find ?t . :in $ ?tid
+                              :where [?t :seon.agent.turn/id ?tid]]
+                            db tid)]
+      [te tid (:seon.agent.turn/rendered-as-of
+                (db/pull {:seon.db/db db
+                          :seon.db/pull-pattern [:seon.agent.turn/rendered-as-of]
+                          :seon.db/ref te}))])))
+
+(defn- turn-active-at
+  "The agent's turn ACTIVE at basis-t `at` — greatest rendered-as-of ≤ at.
+
+   Returns `[turn-eid turn-id rendered-as-of]` or nil. The join is the
+   turns' `rendered-as-of` window (agent → runs → turns); this covers
+   errors recorded outside a turn-scoped tx (listeners, wrappers)."
+  [db aid at]
+  (when (and aid at)
+    (->> (db/query '[:find ?t ?tid ?as
+                     :in $ ?aid ?at
+                     :where
+                     [?a :seon.agent/id ?aid]
+                     [?r :seon.agent.run/agent ?a]
+                     [?t :seon.agent.turn/run ?r]
+                     [?t :seon.agent.turn/id ?tid]
+                     [?t :seon.agent.turn/rendered-as-of ?as]
+                     [(<= ?as ?at)]]
+                   db aid at)
+         (sort-by #(nth % 2) >)
+         first)))
+
+(defn- error-turn
+  "The turn linked to error `eid`: the tx's own `:seon.db/turn-id` when
+   the recording tx was turn-scoped, else the [[turn-active-at]] window."
+  [db eid aid at]
+  (or (turn-by-id db (tx-turn-id db eid))
+      (turn-active-at db aid at)))
+
+(defn error
+  "Full detail for one persisted error: envelope + turn/agent joins.
+
+   Map-in/map-out — `{::eid eid}` (from [[errors]]) returns the whole
+   persisted projection (message, fault, `at`, frames table sorted by
+   index, args-edn, data-edn, stack) plus the JOINS: the recording
+   agent's id and the turn active at that basis-t (tx turn-id when the
+   write was turn-scoped, else the agent's turns' rendered-as-of
+   window) — `::turn-eid` + `:seon.agent.turn/id` so [[turn]] composes.
+   An unknown eid returns `::ok? false` with a guiding `::error`."
+  {:malli/schema [:=> [:cat ::error-request] ::error-response]}
+  [{eid ::eid}]
+  (let [db @db/*conn*]
+    (if-let [e (pull-error db eid)]
+      (let [aid (tx-agent-id db eid)
+            [teid tid t-as-of] (error-turn db eid aid (:seon.error/at e))]
+        (cond-> (merge {::ok? true ::eid eid}
+                       (select-keys e [:seon.error/fault :seon.error/message
+                                       :seon.error/at :seon.error/stack
+                                       :seon.error/args-edn :seon.error/data-edn]))
+          (seq (:seon.error/frames e))
+          (assoc ::frames (->> (:seon.error/frames e)
+                               (sort-by :seon.error.frame/index)
+                               (mapv #(dissoc % :db/id))))
+          aid     (assoc :seon.agent/id aid)
+          teid    (assoc ::turn-eid teid :seon.agent.turn/id tid)
+          t-as-of (assoc :seon.agent.turn/rendered-as-of t-as-of)))
+      {::ok? false ::eid eid
+       ::error (str "no persisted error under eid " eid
+                    " — list them: (seon.agent.inspect/errors)")})))
+
+(schema/register! ::fn-sym     :symbol)
+(schema/register! ::repro-expr :string)
+(schema/register! ::note       :string)
+
+(schema/register! ::repro-request [:map [::eid ::eid]])
+
+(schema/register! ::repro-response
+  [:map
+   [::ok?  ::ok?]
+   [::eid  ::eid]
+   [::error {:optional true} ::error]
+   ;; The LIVE as-of db VALUE frozen at :seon.error/at — REPL use only.
+   ;; NEVER pr-str it into agent context (it prints the whole index);
+   ;; render its basis-t (:seon.error/at) instead.
+   [:seon.db/db          {:optional true} :seon.db/db]
+   [:seon.error/at       {:optional true} :seon.error/at]
+   [::fn-sym             {:optional true} ::fn-sym]
+   [:seon.error/args-edn {:optional true} :seon.error/args-edn]
+   [::turn-eid           {:optional true} ::eid]
+   [:seon.agent.turn/id  {:optional true} :seon.agent.turn/id]
+   [:seon.agent.turn/rendered-as-of
+    {:optional true} :seon.agent.turn/rendered-as-of]
+   [::repro-expr         {:optional true} ::repro-expr]
+   [::note               {:optional true} ::note]])
+
+(defn- fn-sym-from-data-edn
+  "The `:seon.error.malli/fn-sym` embedded in a stored data-edn string."
+  [data-edn]
+  (when (string? data-edn)
+    (when-let [[_ s] (re-find #":seon\.error\.malli/fn-sym\s+([^\s,}\]\)\"]+)"
+                              data-edn)]
+      (symbol s))))
+
+(defn- readable-args-edn
+  "`args-edn` when it read-strings back to the args VECTOR, else nil.
+
+   A stored args-edn can be token-clipped mid-form; a bundle must never
+   hand back an expression built on unreadable args."
+  [args-edn]
+  (when (string? args-edn)
+    (try (when (vector? (reader/read-string args-edn)) args-edn)
+         (catch :default _ nil))))
+
+(defn- repro-expr-str
+  "The ready-to-eval reproduction expression for what's ACTUALLY stored."
+  [at fn-sym args-edn]
+  (if (and fn-sym args-edn)
+    (str "(let [db (seon.db/as-of " at ")]\n"
+         "  (apply (resolve '" fn-sym ") (cljs.reader/read-string "
+         (pr-str args-edn) ")))")
+    (str "(seon.db/as-of " at ")")))
+
+(defn repro
+  "The work-backwards bundle for one persisted error — freeze + re-run.
+
+   Map-in/map-out — `{::eid eid}` returns `:seon.db/db` (the LIVE as-of
+   db VALUE frozen at `:seon.error/at` — REPL material; never print it,
+   render the basis-t), the failing `::fn-sym` + `:seon.error/args-edn`
+   when the malli envelope captured them (a `::note` says so honestly
+   when absent — nothing is fabricated), the linked turn
+   (`::turn-eid` + `rendered-as-of`, composes with [[turn]]), and
+   `::repro-expr` — a ready-to-eval expression string built from what's
+   actually stored. `::ok? false` + guiding `::error` for an unknown
+   eid or an error persisted before a conn was live (no `at`)."
+  {:malli/schema [:=> [:cat ::repro-request] ::repro-response]}
+  [{eid ::eid}]
+  (let [db @db/*conn*]
+    (if-let [e (pull-error db eid)]
+      (let [{:seon.error/keys [at args-edn data-edn]} e
+            aid      (tx-agent-id db eid)
+            fn-sym   (fn-sym-from-data-edn data-edn)
+            args-edn (readable-args-edn args-edn)
+            [teid tid t-as-of] (error-turn db eid aid at)]
+        (if-not at
+          {::ok? false ::eid eid
+           ::error (str "error " eid " has no :seon.error/at (recorded before "
+                        "a conn was live) — no db value to freeze; read the "
+                        "envelope via (seon.agent.inspect/error {::eid " eid "})")}
+          (cond-> {::ok? true ::eid eid
+                   :seon.db/db (db/as-of db at)
+                   :seon.error/at at
+                   ::repro-expr (repro-expr-str at fn-sym args-edn)}
+            fn-sym   (assoc ::fn-sym fn-sym)
+            args-edn (assoc :seon.error/args-edn args-edn)
+            teid     (assoc ::turn-eid teid :seon.agent.turn/id tid)
+            t-as-of  (assoc :seon.agent.turn/rendered-as-of t-as-of)
+            (not (and fn-sym args-edn))
+            (assoc ::note (str "no captured fn/args on this error (non-malli "
+                               "path or clipped args) — re-invocation is not "
+                               "possible from the datom; work from the frozen "
+                               "db + the linked turn's eval forms "
+                               "(seon.agent.inspect/turn)")))))
+      {::ok? false ::eid eid
+       ::error (str "no persisted error under eid " eid
+                    " — list them: (seon.agent.inspect/errors)")})))

@@ -127,6 +127,37 @@ when the last `:core` fault predates the latest user message — no
 acknowledgement state. Design + rulings:
 `docs/prds/agent-ctx/research/error-blame-strict-gate-2026-07-03.md`.
 
+The persisted message is the DEEPEST real cause (`seon.error/deepest-message`
+walks the `:seon.error/cause` chain past cljs.js's generic wrappers), so the
+`SEON-CORE-FAULT <message> @t=<basis-t>` marker and every triage surface name
+the actual failure, never `"ERROR"`.
+
+Triage runs through three `seon.agent.inspect` verbs, three altitudes over
+the same datoms:
+
+- **`errors`** — compact recent list, newest first (optional
+  `:seon.error/fault` filter + limit): per row the error eid, fault, `at`,
+  deepest-cause short message, top stack frame, and the recording agent.
+- **`error`** — one full envelope by eid (message, fault, `at`, frames
+  table, args-edn, data-edn, stack) plus the JOINS: the recording agent and
+  the turn active at that basis-t (the tx's own turn-id when the write was
+  turn-scoped, else the agent's turns' `rendered-as-of` window) — the turn
+  eid composes with `inspect/turn` replay.
+- **`repro`** — the work-backwards bundle: the LIVE as-of db value frozen at
+  `:seon.error/at` (REPL material — render its basis-t, never print the db),
+  the failing fn sym + args-edn when the malli envelope captured them, the
+  linked turn, and a ready-to-eval reproduction expression string built from
+  what is actually stored (an honest note when args were not captured —
+  nothing fabricated).
+
+The standing alarm is `bin/seon watch-faults` — a dependency-free supervisor
+subcommand that tails the pod log from end-of-file (following across
+rotation and pod restarts), blocks until the first NEW un-expected
+`SEON-CORE-FAULT` marker (the `SEON-EXPECTED-CORE-FAULT` fixture marker is
+ignored), prints it with the last ~20 log lines, and exits 0. Run it as a
+background task at session start; when it fires, triage `errors` → `error`
+→ `repro`.
+
 ## The forensic agent
 
 Debugging an agent is done **by another agent given the exact db the target

@@ -717,6 +717,21 @@ Registered processes: `pod` (CLJS pod via Node), `cljs-watch` (CLJS rebuild watc
 codebase on boot. Use for a fresh world. Wipes agent-authored work in that
 store (agent fns, soul edits, chat) — the core seed regenerates, that does not.
 
+### Core-fault watch (active track)
+
+The dev pod runs `:seon.config/on-core-error :crash` — a `:core` fault
+persists its datom, prints `SEON-CORE-FAULT <deepest cause> @t=<basis-t>`,
+and EXITS the pod. **At session start the orchestrator runs
+`bin/seon watch-faults` as a background task**: it blocks until the first
+NEW un-expected marker (starts at end-of-file; `SEON-EXPECTED-CORE-FAULT`
+fixture prints are NOT alarms), prints it + the last ~20 log lines, and
+exits 0 — so the harness re-invokes you when the pod dies on our own bug.
+Triage via `seon.agent.inspect`: `(errors)` (compact recent list) →
+`(error {:seon.agent.inspect/eid N})` (full envelope + turn/agent joins) →
+`(repro {:seon.agent.inspect/eid N})` (the as-of db frozen at the failure +
+a ready-to-eval repro expression). Then `bin/seon restart pod`.
+`--cluster <name>` watches another cluster's pod log.
+
 ### Log Files for Debugging
 
 ```bash

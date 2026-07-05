@@ -2897,24 +2897,6 @@
        (str (subs s 0 limit) " …⟨" (- n limit) " chars elided⟩")
        s))))
 
-(defn- deepest-error-message
-  "Walk a `seon.error/->map` map's `:seon.error/cause` chain and return
-   the deepest non-blank, non-generic `:seon.error/message`. cljs.js wraps
-   an agent throw so the TOP message is a useless wrapper (`\"ERROR\"`,
-   `\"Could not eval …\"`); the real message (the malli/db failure string,
-   the agent's `(throw (js/Error. \"boom\"))` text) lives a level or two
-   down. Falls back to the top message. Bounded depth 6."
-  [err]
-  (loop [e err depth 0 best nil]
-    (let [msg     (:seon.error/message e)
-          useful? (and (string? msg)
-                       (not (str/blank? msg))
-                       (not (#{"ERROR" "Could not eval"} (str/trim msg))))
-          best'   (if useful? msg best)]
-      (if (or (nil? (:seon.error/cause e)) (>= depth 6))
-        (or best' (:seon.error/message err) "")
-        (recur (:seon.error/cause e) (inc depth) best')))))
-
 (def ^:private known-error-kinds
   "Error kinds whose `:seon.error/message` is already crystal-clear
    guidance built by the thrower (db `:user-input`, compile, read,
@@ -2949,7 +2931,7 @@
    agent-side reader)."
   {:malli/schema [:=> [:catn [::err :any]] :string]}
   [err]
-  (let [msg  (deepest-error-message err)
+  (let [msg  (error/deepest-message err)
         ;; The kind may sit at the top level (the synthesized read/
         ;; compile/parity error maps eval-batch! builds) OR in the
         ;; flattened `:seon.error/data` (a thrown ex-info's ex-data).

@@ -1358,6 +1358,72 @@ cmd_nuke() {
   echo "▶ nuke complete — fresh world, core re-seeded on pod boot"
 }
 
+cmd_watch_faults() {
+  # Block until the pod records a NEW :core fault, then exit 0.
+  #
+  # Designed to run as a BACKGROUND task in an orchestrator session: when it
+  # exits, the harness re-invokes the orchestrator, which triages via
+  #   (seon.agent.inspect/errors) → (seon.agent.inspect/error {…/eid N})
+  #   → (seon.agent.inspect/repro {…/eid N}).
+  #
+  # Mechanics: `tail -F -n 0` the pod log (follows across truncation/rotation
+  # AND a pod restart's fresh log; -n 0 = start at end-of-file, so old markers
+  # are never replayed) until the FIRST `SEON-CORE-FAULT` marker line
+  # (seon.error/escalate! prints one per :core fault). The
+  # `SEON-EXPECTED-CORE-FAULT` marker (a test fixture's deliberately-provoked
+  # fault, bracketed by seon.error/expecting-core-fault!) is NOT an alarm and
+  # is explicitly excluded. Prints the marker + the last ~20 log lines of
+  # context, exits 0. Dependency-free shell (tail/grep only).
+  #
+  #   bin/seon watch-faults                    # default cluster (logs/pod.log)
+  #   bin/seon watch-faults --cluster acme2    # a created cluster (logs/pod-acme2.log)
+  local proc="pod"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --cluster)
+        shift
+        local cname="${1:?--cluster requires a name}"
+        [ "$cname" = "default" ] || proc="pod-$cname"
+        shift ;;
+      *) echo "unknown watch-faults arg: $1 (try: --cluster <name>)" >&2; exit 1 ;;
+    esac
+  done
+  local lf
+  lf="$(log_file "$proc")"
+  echo "● watching $lf for SEON-CORE-FAULT (new markers only; expected-bracket markers ignored)"
+  # tail -F retries a missing/rotated/truncated file forever, so this survives
+  # `bin/seon restart pod` (fresh truncated log) mid-watch. The tail runs in
+  # the background so we can kill it the moment the first marker lands —
+  # a `$(pipeline)` capture would otherwise block on tail never exiting.
+  local fifo
+  fifo="$(mktemp -u "${TMPDIR:-/tmp}/seon-watch-faults.XXXXXX")"
+  mkfifo "$fifo"
+  tail -F -n 0 "$lf" 2>/dev/null > "$fifo" &
+  local tail_pid=$!
+  # shellcheck disable=SC2064
+  trap "kill $tail_pid 2>/dev/null; rm -f '$fifo'" EXIT INT TERM
+  local marker=""
+  local line
+  while IFS= read -r line; do
+    case "$line" in
+      *SEON-EXPECTED-CORE-FAULT*) continue ;;             # anchored exclusion
+      *SEON-CORE-FAULT*)          marker="$line"; break ;;
+    esac
+  done < "$fifo"
+  kill "$tail_pid" 2>/dev/null || true
+  rm -f "$fifo"
+  echo ""
+  echo "✗ CORE FAULT detected in $lf:"
+  echo "  $marker"
+  echo ""
+  echo "--- last 20 log lines ($lf) ---"
+  tail -n 20 "$lf" 2>/dev/null || true
+  echo "-------------------------------"
+  echo "triage: (seon.agent.inspect/errors) → (seon.agent.inspect/error {:seon.agent.inspect/eid N}) → (seon.agent.inspect/repro {:seon.agent.inspect/eid N})"
+  echo "(dev dial is :crash — the pod exited after persisting the fault datom; restart: bin/seon restart pod)"
+  exit 0
+}
+
 cmd_adopt() {
   # Use case: process started manually in a terminal (e.g. node out/client/main.js
   # in a watched tab) and the supervisor should now track it.
@@ -1404,6 +1470,10 @@ case "${1:-help}" in
       if [ -n "${!v+x}" ]; then echo "$v=${!v}"; else echo "$v (unset)"; fi
     done ;;
   cluster) shift; cmd_cluster "$@" ;;
+  # Block until the pod's log records a NEW un-expected SEON-CORE-FAULT
+  # marker, print it + context, exit 0 — the orchestrator's background
+  # core-fault alarm (see cmd_watch_faults).
+  watch-faults) shift; cmd_watch_faults "$@" ;;
   # Ensure the frozen bench bundle is BUILT + FRESH, without creating a
   # cluster — the harness's up-front pre-build for bench-cluster-N runs
   # (build ONCE, then create N clusters concurrently; each create's own
@@ -1465,6 +1535,14 @@ Commands:
                      wire-server registry (REPL → registry/delete-db!),
                      remove data/clusters/<n>/ INCLUDING blobs/. Refuses
                      the supervisor's own cluster (use reset)
+  watch-faults [--cluster <n>]
+                     BLOCK until the pod log records a NEW un-expected
+                     SEON-CORE-FAULT marker (starts at end-of-file, follows
+                     across rotation/restart; SEON-EXPECTED-CORE-FAULT is
+                     ignored), print the marker + last 20 log lines, exit 0.
+                     Run as a background task at session start so a :core
+                     fault re-invokes you; triage via seon.agent.inspect/
+                     errors → error → repro
   nuke --yes         DESTRUCTIVE (full clean slate): stop EVERY process
                      (jvm too), wipe ALL cluster stores + transient data,
                      clear ALL logs, restart the default stack fresh.
