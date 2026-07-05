@@ -1209,15 +1209,19 @@ cluster_fork() {
   cmd_start wire-server
   wait_ready wire-server || exit 1
 
-  local repl_port expr out
-  repl_port="$(cat tmp/seon-writer-repl-port)"
+  local expr out
+  # Port from THIS supervisor's env, not tmp/seon-writer-repl-port: the file
+  # path is hardcoded in wire.clj, so a second supervisor's wire-server
+  # (bin/acme, 7981) clobbers it — file-based discovery could route this
+  # RPC to the WRONG cluster's JVM. $SEON_WRITER_REPL_PORT is exactly what
+  # this supervisor passed via --repl-port at wire-server start.
   expr="$(printf '(seon.server.registry/fork-db! {:seon.server.registry/db-name :%s :seon.server.registry/fork-name :%s :seon.server.registry/at %s :seon.server.registry/path "data/clusters/%s/store"})' \
            "$src" "$fork_name" "$t" "$fork_name")"
   # Structured RPC: bin/seon-server-call parses the REPL's printed EDN as
   # data and keys success on fork-db!'s own namespaced flag — bash never
   # pattern-matches printed EDN. Nonzero = the reply map (usually carrying
   # ::error) on stdout, or a transport failure explained on stderr.
-  if ! out="$(bin/seon-server-call --port "$repl_port" --timeout 60 \
+  if ! out="$(bin/seon-server-call --port "$SEON_WRITER_REPL_PORT" --timeout 60 \
                 "$expr" ':seon.server.registry/forked?')"; then
     echo "✗ fork failed — wire-server replied:" >&2
     [ -n "$out" ] && printf '  %s\n' "$out" >&2
@@ -1263,13 +1267,15 @@ cluster_destroy() {
   # see other clusters). Skipped when the wire-server is down: the
   # directory wipe below is the backstop, and a restarted wire-server only
   # re-registers dbs that are ensured again.
-  if is_running wire-server && [ -f tmp/seon-writer-repl-port ]; then
-    local repl_port out
-    repl_port="$(cat tmp/seon-writer-repl-port)"
+  if is_running wire-server; then
+    local out
     # Structured RPC (bin/seon-server-call): success = delete-db!'s own
     # ::deleted? flag. A false/failed reply is reported honestly but does
     # not abort — the directory wipe below is the backstop either way.
-    if out="$(bin/seon-server-call --port "$repl_port" --timeout 15 \
+    # Port from $SEON_WRITER_REPL_PORT (this supervisor's own --repl-port),
+    # not the shared tmp/seon-writer-repl-port file a second supervisor's
+    # wire-server clobbers.
+    if out="$(bin/seon-server-call --port "$SEON_WRITER_REPL_PORT" --timeout 15 \
                 "(seon.server.registry/delete-db! {:seon.server.registry/db-name :$name})" \
                 ':seon.server.registry/deleted?')"; then
       echo "  registry delete: $out"
