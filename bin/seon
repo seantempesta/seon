@@ -1209,7 +1209,9 @@ cluster_fork() {
   out="$(printf '(seon.server.registry/fork-db! {:seon.server.registry/db-name :%s :seon.server.registry/fork-name :%s :seon.server.registry/at %s :seon.server.registry/path "data/clusters/%s/store"})\n' \
            "$src" "$fork_name" "$t" "$fork_name" \
          | nc 127.0.0.1 "$repl_port" -w 30 2>/dev/null | tr -d '\r')"
-  if ! printf '%s' "$out" | grep -q ':seon.server.registry/forked? true'; then
+  # The REPL prints the response as a namespaced-map literal
+  # (#:seon.server.registry{:forked? true …}), so match the short key.
+  if ! printf '%s' "$out" | grep -q ':forked? true'; then
     echo "✗ fork failed — wire-server replied:" >&2
     printf '%s\n' "$out" | tail -3 >&2
     echo "  (an unresolved-symbol reply means the running wire-server predates fork-db! — bin/seon restart wire-server)" >&2
