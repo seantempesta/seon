@@ -22,6 +22,14 @@ query → `:agent` (no crash); a `:core` record! → datom persisted (`#{[:core
 536870943]}`, same `@t` as the loud exit) THEN pod exits; `:agent` record! on
 the fresh pod → no crash. Full suite 983/4514 0F/0E, 0 un-expected markers.
 
+**Addendum (C50, RULED 2026-07-05 — dev-eval caller scope):** the dev/MCP
+REPL conduit (`js/SHADOW_NODE_EVAL`, the one choke point) is bracketed by
+`seon.error/dev-eval!` so an input-contract violation a dev eval provokes on
+a core fn classifies `:agent` (caller mistake — recorded, never escalates,
+pod stays up) while an invalid-output or non-contract internal throw exposed
+by the same eval stays `:core` and still crashes under the dial — no new
+enum value, no dial change, no exemption list.
+
 The historical phase-2 status below is retained for context.
 
 **Status: PHASE 2 SHIPPED 2026-07-04** (phase-1 commits `0e9c9b92` +
