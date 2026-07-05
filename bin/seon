@@ -1209,16 +1209,18 @@ cluster_fork() {
   cmd_start wire-server
   wait_ready wire-server || exit 1
 
-  local repl_port out
+  local repl_port expr out
   repl_port="$(cat tmp/seon-writer-repl-port)"
-  out="$(printf '(seon.server.registry/fork-db! {:seon.server.registry/db-name :%s :seon.server.registry/fork-name :%s :seon.server.registry/at %s :seon.server.registry/path "data/clusters/%s/store"})\n' \
-           "$src" "$fork_name" "$t" "$fork_name" \
-         | nc 127.0.0.1 "$repl_port" -w 30 2>/dev/null | tr -d '\r')"
-  # The REPL prints the response as a namespaced-map literal
-  # (#:seon.server.registry{:forked? true …}), so match the short key.
-  if ! printf '%s' "$out" | grep -q ':forked? true'; then
+  expr="$(printf '(seon.server.registry/fork-db! {:seon.server.registry/db-name :%s :seon.server.registry/fork-name :%s :seon.server.registry/at %s :seon.server.registry/path "data/clusters/%s/store"})' \
+           "$src" "$fork_name" "$t" "$fork_name")"
+  # Structured RPC: bin/seon-server-call parses the REPL's printed EDN as
+  # data and keys success on fork-db!'s own namespaced flag — bash never
+  # pattern-matches printed EDN. Nonzero = the reply map (usually carrying
+  # ::error) on stdout, or a transport failure explained on stderr.
+  if ! out="$(bin/seon-server-call --port "$repl_port" --timeout 60 \
+                "$expr" ':seon.server.registry/forked?')"; then
     echo "✗ fork failed — wire-server replied:" >&2
-    printf '%s\n' "$out" | tail -3 >&2
+    [ -n "$out" ] && printf '  %s\n' "$out" >&2
     echo "  (an unresolved-symbol reply means the running wire-server predates fork-db! — bin/seon restart wire-server)" >&2
     rm -rf "data/clusters/$fork_name"
     exit 1
@@ -1262,11 +1264,19 @@ cluster_destroy() {
   # directory wipe below is the backstop, and a restarted wire-server only
   # re-registers dbs that are ensured again.
   if is_running wire-server && [ -f tmp/seon-writer-repl-port ]; then
-    local repl_port
+    local repl_port out
     repl_port="$(cat tmp/seon-writer-repl-port)"
-    printf '(seon.server.registry/delete-db! {:seon.server.registry/db-name :%s})\n' "$name" \
-      | nc 127.0.0.1 "$repl_port" -w 5 2>/dev/null \
-      | tr -d '\r' | tail -1 || true
+    # Structured RPC (bin/seon-server-call): success = delete-db!'s own
+    # ::deleted? flag. A false/failed reply is reported honestly but does
+    # not abort — the directory wipe below is the backstop either way.
+    if out="$(bin/seon-server-call --port "$repl_port" --timeout 15 \
+                "(seon.server.registry/delete-db! {:seon.server.registry/db-name :$name})" \
+                ':seon.server.registry/deleted?')"; then
+      echo "  registry delete: $out"
+    else
+      echo "  ⚠ registry delete did not confirm (wiping the dir anyway — that is the backstop)" >&2
+      [ -n "$out" ] && printf '  %s\n' "$out" >&2
+    fi
   else
     echo "  (wire-server not running — skipping registry delete; wiping the dir)"
   fi

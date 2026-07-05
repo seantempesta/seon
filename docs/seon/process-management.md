@@ -56,7 +56,10 @@ inside the fork).
 
 Mechanism: `seon.server.registry/fork-db!`, invoked over the wire-server's
 loopback socket REPL (7891 — the same supervisor channel `cluster destroy`
-uses; never agent-exposed). It wraps `datahike.api/fork-database`: a
+uses; never agent-exposed) via `bin/seon-server-call`, the babashka helper
+that parses the REPL's printed reply as EDN and keys success on the fn's
+own namespaced flag (`::forked?` / `::deleted?`) — the supervisor never
+pattern-matches printed EDN. It wraps `datahike.api/fork-database`: a
 konserve-layer store copy, the fork's head pointed at the commit whose
 `:max-tx` equals `t`, and a fresh deterministic store identity — verified
 after the copy (head at `t` + a full history index scan; one retry covers
