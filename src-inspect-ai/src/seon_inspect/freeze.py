@@ -354,7 +354,7 @@ def build_lock(existing: dict[str, Any] | None = None) -> dict[str, Any]:
             })
         bespoke[row] = entry
 
-    return {
+    lock = {
         "schema_version": LOCK_SCHEMA_VERSION,
         "global_seed": GLOBAL_SEED,
         "command": GENERATION_COMMAND,
@@ -362,6 +362,15 @@ def build_lock(existing: dict[str, Any] | None = None) -> dict[str, Any]:
         "sources": sources,
         "bespoke": bespoke,
     }
+    # Pinned image digests (benchmark-suite design §3 freeze rule: the SEON
+    # runtime-image digest + the bench instance-image digests are lock
+    # entries — a row is comparable only within one seon-image digest).
+    # These are RECORDED runtime facts (docker digest resolution at pin
+    # time), carried over verbatim like canary GUIDs — never regenerated
+    # from a dataset draw.
+    if "image_pins" in existing:
+        lock["image_pins"] = existing["image_pins"]
+    return lock
 
 
 def lock_bytes(lock: dict[str, Any]) -> bytes:

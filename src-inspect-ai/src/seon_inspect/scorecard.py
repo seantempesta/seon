@@ -106,8 +106,27 @@ def model_provenance_from_run(model_config: dict[str, Any] | None,
 #                          end-of-run identity assertion — cluster.
 #                          FrozenBundleChanged); the run is contaminated
 #   harness_error          any other harness-side exception (bin/seon, wire…)
+#
+# behavior_miss (design §7, 2026-07-05) is NOT a flake class: the run ended
+# without a terminal reply — closed_reason ∈ {:turn-limit,
+# :deadline-exceeded} or a non-timeout close with an EMPTY reply. It is
+# scored FAIL (it counts in the capability mean) but attributed distinctly
+# (execution record `attribution="behavior_miss"`; roll it into the row's
+# `attribution` counts). Disjoint from `solve_timeout`, which stays an
+# EXCLUDED flake (the pod's honest clock cut, not a behavior).
 PASS = "pass"
 FAIL = "fail"
+BEHAVIOR_MISS = "behavior_miss"
+
+# closed_reason values that mean "the run's own bounds cut it before a
+# terminal reply" (src/seon/agent/run.cljs close reasons).
+_BOUND_CUT_REASONS = {":turn-limit", ":deadline-exceeded"}
+
+
+def behavior_miss(closed_reason: str | None, reply: str | None) -> bool:
+    """True when a (non-timeout) run ended without a terminal reply (§7)."""
+    return (str(closed_reason or "") in _BOUND_CUT_REASONS
+            or not (reply or "").strip())
 
 
 def execution(sample_id: str, epoch: int, outcome: str,
@@ -183,6 +202,13 @@ def executions_from_eval_log(log: Any) -> list[dict[str, Any]]:
         score = next(iter((s.scores or {}).values()), None)
         val = getattr(score, "value", None)
         passed = val in ("C", 1, 1.0, True)
+        if behavior_miss(md.get("pod_closed_reason"), base["reply"]):
+            # §7: scored FAIL regardless of the oracle's verdict (the run
+            # never concluded), attributed distinctly — never excluded.
+            out.append(execution(str(s.id), s.epoch, FAIL,
+                                 attribution=BEHAVIOR_MISS,
+                                 score_value=val, **base))
+            continue
         out.append(execution(str(s.id), s.epoch, PASS if passed else FAIL,
                              score_value=val, **base))
     return out

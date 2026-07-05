@@ -82,6 +82,21 @@
   },
   "command": "cd src-inspect-ai && .venv/bin/python -m seon_inspect.freeze",
   "global_seed": 20260702,
+  "image_pins": {
+    "seon_runtime": {
+      "digest": "sha256:63db32776190f88411542a1415a6eb44bdb17c6b809f2d1fdab39b6a2c0a0557",
+      "image": "seon:slice1",
+      "note": "slice 3 dev-spike (A-overlay composition); slice 4's freeze widens this to the frozen instance set",
+      "overlay_volume": "seon-runtime-slice3",
+      "pinned_at": "2026-07-05"
+    },
+    "swe_bench_instances": {
+      "sympy__sympy-22914": {
+        "digest": "sha256:ca24e98226cb7434dde2b9381401d5dff9439854eb5950dac54d567887db95ef",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.sympy__sympy-22914:latest"
+      }
+    }
+  },
   "sampling_procedure": "per source: sort samples by str(id); shuffle with random.Random(f'{GLOBAL_SEED}:{source}'); where a stratify label exists, shuffle stratum order + within-stratum order with the same rng and interleave round-robin; slice the resulting order: first dev_n = dev, next milestone_n = milestone, remainder = blind test reserve",
   "schema_version": 1,
   "sources": {

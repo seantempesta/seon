@@ -1487,3 +1487,34 @@ Eval lane only; NO `src/seon` edits — `src-inspect-ai` + `evals` + `docs`.
   skipped as moot.
 - Next: slice 2 (zero-Seon SWE-bench de-risk: run inspect-evals swe_bench
   unchanged on 1-2 instances — ghcr auth, arm64 pulls, official scorer).
+
+## 2026-07-05 — eval lane: SLICE 3 SHIPPED — Seon swarm scored by official SWE-bench, first ledger row
+
+- **The thesis mechanism is PROVEN end-to-end:** the packaged `/opt/seon`
+  runtime (from `seon:slice1`, pinned digest) mounted read-only into the
+  UNMODIFIED official `sympy__sympy-22914` instance image → full cluster
+  booted INSIDE (wire-server 4s + pod ~9s; bundled JRE/Node exec'd on
+  ubuntu 22.04 — the §10 self-containment falsifier did NOT fire) → root
+  agent drove the task natively in `/testbed` via its normal verbs → the
+  UNCHANGED official scorer graded the repo state.
+- **Null-run non-interference: byte-identical** verdict/explanation/patch
+  with and without the mounts (17 P2P / 1 F2P, no-op solver, network:none
+  kept) — the mount provably does not perturb the oracle.
+- **First honest row:** `2026-07-05:swe_bench_verified:dev:k1:
+  slice3-composition` — **INCORRECT, attributed model_miss** (12/20 turns,
+  171s of 900s, `:completed`, real terminal reply; the patch inserted
+  `_print_Min/Max` mid-`_print_Symbol`, breaking the method). NOT
+  behavior_miss — the new `behavior_miss` class is now in scorecard.py per
+  design §7 (turn-limit/deadline/empty-reply → FAIL, distinctly
+  attributed, never excluded). pytest 221/0. Contrast datum: plain
+  DeepSeek+react solved this same instance in slice 2 — the gap is now
+  MEASURABLE, which is the whole point.
+- **Tooling-lane note (from deviation 2, affects slice 4):** the pinned
+  entrypoint ships `SEON_FS_ROOT=/opt/seon` read-only, so the agent's ONLY
+  /testbed write surface was the shell verb — likely a capability tax. A
+  workspace-rooted fs grant belongs in the entrypoint contract (§9)
+  follow-up.
+- Evidence: `evals/runs/2026-07-05-slice3-composition/`. New harness code:
+  `seon_inspect.swebench_arm` + `tasks/swe_bench_seon.py` (+ freeze.py
+  `image_pins` lock seam). Interim egress asymmetry recorded on the row
+  (allowlist unbuilt, per §9).

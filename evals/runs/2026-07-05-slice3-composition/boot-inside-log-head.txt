@@ -1,0 +1,107 @@
+[seon-entrypoint] wire-server started (pid 8)
+[seon-entrypoint] waiting for wire-server ready (bound 180s)
+[seon-entrypoint] wire-server ready (4s)
+[seon-entrypoint] pod started (pid 76, port 7890)
+2026-07-05T19:57:35.859Z  INFO  [seon.web.router] router installed {:supplement 16}
+2026-07-05T19:57:35.995Z  INFO  [seon.client] -main boot {:boot-at "2026-07-05T19:57:35.926Z"}
+2026-07-05T19:57:35.996Z  INFO  [seon.client] using deepseek LLM (API key set)
+2026-07-05T19:57:35.996Z  INFO  [seon.client] nREPL :7889 — (shadow.cljs.devtools.api/nrepl-select :client)
+2026-07-05T19:57:36.123Z  INFO  [seon.client] datahike-cljs smoke test PASS {:datoms 7}
+2026-07-05T19:57:36.126Z INFO [konserve.node-filestore:355] - Store directory at  /seon-data/clusters/default/store  exists with  23  konserve keys.
+2026-07-05T19:57:36.134Z  INFO  [seon.client/open-cluster-conn!] cluster default: /seon-data/clusters/default/store (writer: /seon-data/tmp/seon-req.sock)
+2026-07-05T19:57:36.232Z  INFO  [seon.store.wire] tx-feed live (pub socket, db default, replayed 0)
+2026-07-05T19:57:36.349Z  INFO  [seon.client/start-agent!] agent roster {:seon.client/resumed [], :seon.client/minted ["root"]}
+2026-07-05T19:57:36.353Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api/branch! (file "datahike/api.cljc" line 83) — OMITTING
+2026-07-05T19:57:36.353Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api/branch-as-db (file "datahike/api.cljc" line 83) — OMITTING
+2026-07-05T19:57:36.353Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api/branches (file "datahike/api.cljc" line 83) — OMITTING
+2026-07-05T19:57:36.353Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api/commit-as-db (file "datahike/api.cljc" line 83) — OMITTING
+2026-07-05T19:57:36.353Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api/connect (file "datahike/api.cljc" line 83) — OMITTING
+2026-07-05T19:57:36.353Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api/create-database (file "datahike/api.cljc" line 83) — OMITTING
+2026-07-05T19:57:36.353Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api/database-exists? (file "datahike/api.cljc" line 83) — OMITTING
+2026-07-05T19:57:36.353Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api/db (file "datahike/api.cljc" line 83) — OMITTING
+2026-07-05T19:57:36.353Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api/delete-branch! (file "datahike/api.cljc" line 83) — OMITTING
+2026-07-05T19:57:36.354Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api/delete-database (file "datahike/api.cljc" line 83) — OMITTING
+2026-07-05T19:57:36.354Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api/force-branch! (file "datahike/api.cljc" line 83) — OMITTING
+2026-07-05T19:57:36.354Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api/fork-database (file "datahike/api.cljc" line 83) — OMITTING
+2026-07-05T19:57:36.354Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api/gc-storage (file "datahike/api.cljc" line 83) — OMITTING
+2026-07-05T19:57:36.354Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api/listen (file "datahike/api.cljc" line 83) — OMITTING
+2026-07-05T19:57:36.354Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api/load-entities (file "datahike/api.cljc" line 83) — OMITTING
+2026-07-05T19:57:36.354Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api/merge-db (file "datahike/api.cljc" line 83) — OMITTING
+2026-07-05T19:57:36.354Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api/merge-db! (file "datahike/api.cljc" line 83) — OMITTING
+2026-07-05T19:57:36.354Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api/release (file "datahike/api.cljc" line 83) — OMITTING
+2026-07-05T19:57:36.354Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api/transact (file "datahike/api.cljc" line 83) — OMITTING
+2026-07-05T19:57:36.354Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api/transact! (file "datahike/api.cljc" line 83) — OMITTING
+2026-07-05T19:57:36.354Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api/unlisten (file "datahike/api.cljc" line 83) — OMITTING
+2026-07-05T19:57:36.354Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.async/chan->promise (file "datahike/api/async.cljs" line 17) — OMITTING
+2026-07-05T19:57:36.354Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/as-of (file "datahike/api/impl.cljc" line 143) — OMITTING
+2026-07-05T19:57:36.354Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/branch! (file "datahike/api/impl.cljc" line 318) — OMITTING
+2026-07-05T19:57:36.354Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/branch-as-db (file "datahike/api/impl.cljc" line 354) — OMITTING
+2026-07-05T19:57:36.354Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/branches (file "datahike/api/impl.cljc" line 314) — OMITTING
+2026-07-05T19:57:36.354Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/commit-as-db (file "datahike/api/impl.cljc" line 350) — OMITTING
+2026-07-05T19:57:36.354Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/commit-id (file "datahike/api/impl.cljc" line 344) — OMITTING
+2026-07-05T19:57:36.354Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/create-database (file "datahike/api/impl.cljc" line 51) — OMITTING
+2026-07-05T19:57:36.354Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/database-exists? (file "datahike/api/impl.cljc" line 79) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/db (file "datahike/api/impl.cljc" line 135) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/db-with (file "datahike/api/impl.cljc" line 132) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/delete-branch! (file "datahike/api/impl.cljc" line 322) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/delete-database (file "datahike/api/impl.cljc" line 68) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/force-branch! (file "datahike/api/impl.cljc" line 326) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/fork-database (file "datahike/api/impl.cljc" line 72) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/history (file "datahike/api/impl.cljc" line 175) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/index-range (file "datahike/api/impl.cljc" line 279) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/merge-db (file "datahike/api/impl.cljc" line 330) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/merge-db! (file "datahike/api/impl.cljc" line 338) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/parent-commit-ids (file "datahike/api/impl.cljc" line 347) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/reverse-schema (file "datahike/api/impl.cljc" line 296) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/schema (file "datahike/api/impl.cljc" line 282) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/since (file "datahike/api/impl.cljc" line 138) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/transact (file "datahike/api/impl.cljc" line 44) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/transact! (file "datahike/api/impl.cljc" line 30) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/valid-all (file "datahike/api/impl.cljc" line 267) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/valid-at (file "datahike/api/impl.cljc" line 186) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/valid-between (file "datahike/api/impl.cljc" line 236) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/valid-during (file "datahike/api/impl.cljc" line 253) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.impl/with (file "datahike/api/impl.cljc" line 117) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.specification/->cli-command (file "datahike/api/specification.cljc" line 37) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.specification/->url (file "datahike/api/specification.cljc" line 30) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.specification/io-operations (file "datahike/api/specification.cljc" line 838) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.specification/local-only-operations (file "datahike/api/specification.cljc" line 848) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.specification/malli-schema->argslist (file "datahike/api/specification.cljc" line 49) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.specification/operations-by-category (file "datahike/api/specification.cljc" line 853) — OMITTING
+2026-07-05T19:57:36.355Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.specification/pure-operations (file "datahike/api/specification.cljc" line 833) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.specification/remote-operations (file "datahike/api/specification.cljc" line 843) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.types/date? (file "datahike/api/types.cljc" line 23) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.types/explain (file "datahike/api/types.cljc" line 253) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.types/humanize (file "datahike/api/types.cljc" line 258) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.api.types/validate (file "datahike/api/types.cljc" line 248) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.array/->WrappedBytes (file "datahike/array.cljc" line 84) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.array/a= (file "datahike/array.cljc" line 94) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.array/bytes? (file "datahike/array.cljc" line 52) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.array/compare-arrays (file "datahike/array.cljc" line 56) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.array/map->WrappedBytes (file "datahike/array.cljc" line 84) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.array/string-from-bytes (file "datahike/array.cljc" line 73) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.array/wrap-comparable (file "datahike/array.cljc" line 86) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.bitemporal.platform/date-after? (file "datahike/bitemporal/platform.cljc" line 78) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.bitemporal.platform/date-before? (file "datahike/bitemporal/platform.cljc" line 71) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.bitemporal.platform/mget (file "datahike/bitemporal/platform.cljc" line 55) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.bitemporal.platform/mput! (file "datahike/bitemporal/platform.cljc" line 48) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.bitemporal.platform/mutable-map (file "datahike/bitemporal/platform.cljc" line 40) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.bitemporal.predicate/mk-vt-during-pred (file "datahike/bitemporal/predicate.cljc" line 140) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.bitemporal.predicate/mk-vt-overlap-pred (file "datahike/bitemporal/predicate.cljc" line 118) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.bitemporal.predicate/mk-vt-pred (file "datahike/bitemporal/predicate.cljc" line 78) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.config/bool-from-env (file "datahike/config.cljc" line 116) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.config/from-deprecated (file "datahike/config.cljc" line 69) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.config/int-from-env (file "datahike/config.cljc" line 110) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.config/load-config (file "datahike/config.cljc" line 182) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.config/map-from-env (file "datahike/config.cljc" line 123) — OMITTING
+2026-07-05T19:57:36.356Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.config/remove-nils (file "datahike/config.cljc" line 153) — OMITTING
+2026-07-05T19:57:36.357Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.config/storeless-config (file "datahike/config.cljc" line 140) — OMITTING
+2026-07-05T19:57:36.357Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.config/uri->config (file "datahike/config.cljc" line 244) — OMITTING
+2026-07-05T19:57:36.357Z  ERROR [seon.client/var->fn-row] could not read real source for datahike.config/validate-config (file "datahike/config.cljc" line 134) — OMITTING
+[seon-entrypoint] wire-server started (pid 8)
+[seon-entrypoint] waiting for wire-server ready (bound 180s)
+[seon-entrypoint] wire-server ready (4s)
+[seon-entrypoint] pod started (pid 76, port 7890)
+2026-07-05T19:57:36.349Z  INFO  [seon.client/start-agent!] agent roster {:seon.client/resumed [], :seon.client/minted ["root"]}
+2026-07-05T19:57:45.154Z  INFO  [seon.web.serve] listening on http://127.0.0.1:7890 {:port-file "/seon-data/tmp/seon-port"}
+2026-07-05T19:57:45.159Z  INFO  [seon.client] auto-boot ready {:agent "root", :ns "my.agent.root", :resumed [], :minted ["root"], :url "http://127.0.0.1:7890", :port-file "/seon-data/tmp/seon-port"}

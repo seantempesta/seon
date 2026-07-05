@@ -1,0 +1,22 @@
+{
+  "status": "success",
+  "sample_id": "sympy__sympy-22914",
+  "score_value": 0.0,
+  "pod_turns": 12,
+  "pod_closed_reason": ":completed",
+  "pod_timed_out": false,
+  "pod_elapsed_ms": 171068,
+  "pod_evals": 45,
+  "pod_boot_wait_s": 13.2,
+  "pod_model_config": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
+    "temperature": 0.7,
+    "max_tokens": 4096,
+    "thinking": "false"
+  },
+  "reply_head": "I've fixed the issue in `/testbed/sympy/printing/pycode.py` by adding `_print_Min` and `_print_Max` methods to the `PythonCodePrinter` class. The methods convert SymPy's `Min` and `Max` to Python's built-in `min()` and `max()` functions, following the same pattern used by other `_print_*` methods in the class.",
+  "model_patch_head": "diff --git a/sympy/printing/pycode.py b/sympy/printing/pycode.py\nindex 3a72ab606c..e6ee8ac0da 100644\n--- a/sympy/printing/pycode.py\n+++ b/sympy/printing/pycode.py\n@@ -452,6 +452,12 @@ def _print_frac(self, expr):\n \n     def _print_Symbol(self, expr):\n \n+    def _print_Min(self, expr):\n+        return \"min({})\".format(\", \".join(self._print(arg) for arg in expr.args))\n+\n+    def _print_Max(self, expr):\n+        return \"max({})\".format(\", \".join(self._print(arg) for arg in expr.args))\n+\n         name = super()._print_Symbol(expr)\n \n         if name in self.reserved_words:\n@@ -637,4 +643,4 @@ def _print_Function(self, expr):\n                            ', '.join(map(lambda arg: self._print(arg), expr.args)))\n \n     def _print_Pow(self, expr, rational=False):\n-        return self._hprint_Pow(expr, rational=rational, sqrt='sympy.sqrt')\n+        return self._hprint_Pow(expr, rational=rational, sqrt='sympy.sqrt')\n\\ No newline at end of file\n",
+  "explanation": "PASS_TO_PASS:\n\n{\n  \"success\": [],\n  \"failure\": [\n    \"test_PythonCodePrinter_standard\",\n    \"test_MpmathPrinter\",\n    \"test_NumPyPrinter\",\n    \"test_SciPyPrinter\",\n    \"test_pycode_reserved_words\",\n    \"test_sqrt\",\n    \"test_frac\",\n    \"test_printmethod\",\n    \"test_codegen_ast_nodes\",\n    \"test_issue_14283\",\n    \"test_NumPyPrinter_print_seq\",\n    \"test_issue_16535_16536\",\n    \"test_Integral\",\n    \"test_fresnel_integrals\",\n    \"test_beta\",\n    \"test_airy\",\n    \"test_airy_prime\"\n  ]\n}\n\nFAIL_TO_PASS:\n\n{\n  \"success\": [],\n  \"failure\": [\n    \"test_PythonCodePrinter\"\n  ]\n}\n\n",
+  "model_patch": "diff --git a/sympy/printing/pycode.py b/sympy/printing/pycode.py\nindex 3a72ab606c..e6ee8ac0da 100644\n--- a/sympy/printing/pycode.py\n+++ b/sympy/printing/pycode.py\n@@ -452,6 +452,12 @@ def _print_frac(self, expr):\n \n     def _print_Symbol(self, expr):\n \n+    def _print_Min(self, expr):\n+        return \"min({})\".format(\", \".join(self._print(arg) for arg in expr.args))\n+\n+    def _print_Max(self, expr):\n+        return \"max({})\".format(\", \".join(self._print(arg) for arg in expr.args))\n+\n         name = super()._print_Symbol(expr)\n \n         if name in self.reserved_words:\n@@ -637,4 +643,4 @@ def _print_Function(self, expr):\n                            ', '.join(map(lambda arg: self._print(arg), expr.args)))\n \n     def _print_Pow(self, expr, rational=False):\n-        return self._hprint_Pow(expr, rational=rational, sqrt='sympy.sqrt')\n+        return self._hprint_Pow(expr, rational=rational, sqrt='sympy.sqrt')\n\\ No newline at end of file\n"
+}
