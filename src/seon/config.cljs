@@ -155,6 +155,8 @@
     :seon.render/ai 'seon.agent.ctx.warnings/warnings-block}
    {:seon.agent.ctx/name :jobs :seon.agent.ctx/priority 42
     :seon.render/ai 'seon.agent.ctx.jobs/jobs-block}
+   {:seon.agent.ctx/name :test-failures :seon.agent.ctx/priority 43
+    :seon.render/ai 'seon.agent.ctx.testrun/testrun-block}
    {:seon.agent.ctx/name :plan :seon.agent.ctx/priority 45
     :seon.render/ai 'my.plan.internal/plan-block}
    {:seon.agent.ctx/name :relevant-source :seon.agent.ctx/priority 48

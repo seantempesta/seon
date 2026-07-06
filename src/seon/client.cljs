@@ -209,6 +209,7 @@
     [seon.agent.ctx.findings]
     [seon.agent.ctx.relevant]
     [seon.agent.ctx.jobs]
+    [seon.agent.ctx.testrun]
     [seon.platform]
     ;; Phase B item 9 — shared read-side wrapper over the analyzer
     ;; state. Required here so the build includes it; item 10's
@@ -610,7 +611,22 @@
    ;; Phase 4 (mvp-completion-plan 2026-05-27)
    :seon.test/source
    :seon.test/ns
-   :seon.test/created-at])
+   :seon.test/created-at
+
+   ;; --- Testrun (seon.agent.testrun — parsed pytest results projected as
+   ;; data; the :test-failures section reads the LATEST run per agent).
+   ;; Boot-installed so the section can pull on turn one. ::failures is the
+   ;; cardinality-many component ref onto failure entities. ---
+   :seon.agent.testrun/framework
+   :seon.agent.testrun/passed
+   :seon.agent.testrun/failed
+   :seon.agent.testrun/errors
+   :seon.agent.testrun/agent
+   :seon.agent.testrun/failures
+   :seon.agent.testrun/test-name
+   :seon.agent.testrun/path
+   :seon.agent.testrun/line
+   :seon.agent.testrun/message])
 
 ;; ---------------------------------------------------------------------------
 ;; Cluster-store agent conn (unit 2.2e — THE FLIP, 2026-06-10).

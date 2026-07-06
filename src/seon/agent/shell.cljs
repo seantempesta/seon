@@ -45,6 +45,7 @@
   (:require
     [clojure.string :as str]
     [seon.agent.shell.internal :as in]
+    [seon.agent.testrun :as testrun]
     [seon.ai.tokens :as tokens]
     [seon.platform :as platform]
     [seon.schema :as schema]))
@@ -100,7 +101,11 @@
     [:seon.agent.shell/err-tokens :seon.agent.shell/err-tokens]
     [:seon.agent.shell/timed-out? :seon.agent.shell/timed-out?]
     [:seon.agent.shell/truncated? :seon.agent.shell/truncated?]
-    [:seon.agent.shell/hint       {:optional true} :seon.agent.shell/hint]]
+    [:seon.agent.shell/hint       {:optional true} :seon.agent.shell/hint]
+    ;; Parsed test results — present only when the argv was pytest-shaped AND
+    ;; the output was recognized (seon.agent.testrun/parse). Persisted too, so
+    ;; the :test-failures context section renders the latest failing set.
+    [:seon.agent.testrun/result   {:optional true} :seon.agent.testrun/result]]
    ;; COULD-NOT-RUN — gate/spawn failure. Shared error map, never a bare
    ;; string.
    [:map
@@ -159,7 +164,11 @@
     [:seon.agent.shell/runtime-ms  :seon.agent.shell/runtime-ms]
     [:seon.agent.shell/out-tokens  :seon.agent.shell/out-tokens]
     [:seon.agent.shell/err-tokens  :seon.agent.shell/err-tokens]
-    [:seon.agent.shell/exit        {:optional true} :seon.agent.shell/exit]]
+    [:seon.agent.shell/exit        {:optional true} :seon.agent.shell/exit]
+    ;; Derived (read-time, not persisted): a FINISHED pytest job's parsed
+    ;; result via the same seon.agent.testrun/parse. Background runs are not
+    ;; projected into the section (that needs the foreground persist path).
+    [:seon.agent.testrun/result    {:optional true} :seon.agent.testrun/result]]
    :seon.agent.shell/job-fail])
 
 (schema/register! :seon.agent.shell/job-output-request
@@ -213,6 +222,24 @@
 ;; ============================================================
 ;; Public API
 ;; ============================================================
+
+(defn- ^:async attach-testrun!
+  "When `env` is a pytest run that parsed, attach + persist the result.
+
+   Pure pass-through otherwise. The ONE integration of the shared parser on
+   the foreground path: parse the full out/err, and on a recognized run
+   persist it (scoped to the running agent) so the derived section updates,
+   returning `env` with `:seon.agent.testrun/result` assoc'd."
+  [cmd args env]
+  (if (and (:seon.agent.shell/ok? env)
+           (testrun/pytest-argv? cmd (vec (or args []))))
+    (let [parsed (testrun/parse {:seon.agent.testrun/stdout (:seon.agent.shell/out env)
+                                 :seon.agent.testrun/stderr (:seon.agent.shell/err env)})]
+      (if (:seon.agent.testrun/ok? parsed)
+        (do (await (testrun/record! {:seon.agent.testrun/result parsed}))
+            (assoc env :seon.agent.testrun/result parsed))
+        env))
+    env))
 
 (defn grants
   "Report whether the host granted shell access (`SEON_SHELL`).
@@ -278,27 +305,29 @@
               ^js err (.-err r)
               stdout  (str (.-stdout r))
               stderr  (str (.-stderr r))]
-          (cond
-            ;; Binary not found — could not run at all.
-            (and err (= "ENOENT" (.-code err)))
-            (in/fail (str "command not found: " (pr-str cmd) " — argv[0] is "
-                          "PATH-resolved; check the name or use an absolute "
-                          "path.")
-                     {:seon.agent.shell/cmd cmd})
+          (await
+            (attach-testrun! cmd args
+              (cond
+                ;; Binary not found — could not run at all.
+                (and err (= "ENOENT" (.-code err)))
+                (in/fail (str "command not found: " (pr-str cmd) " — argv[0] is "
+                              "PATH-resolved; check the name or use an absolute "
+                              "path.")
+                         {:seon.agent.shell/cmd cmd})
 
-            ;; RAM-ceiling overflow — the child was killed, but the captured
-            ;; partial output IS the (truncated) answer.
-            (and err (= "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" (.-code err)))
-            (in/ran-envelope (in/exit-code err) stdout stderr false true)
+                ;; RAM-ceiling overflow — the child was killed, but the captured
+                ;; partial output IS the (truncated) answer.
+                (and err (= "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" (.-code err)))
+                (in/ran-envelope (in/exit-code err) stdout stderr false true)
 
-            ;; Timeout — execFile SIGTERM'd the child; deliver the honest
-            ;; partial output with the authoritative timed-out? flag.
-            (and err (.-killed err))
-            (in/ran-envelope in/killed-exit stdout stderr true false)
+                ;; Timeout — execFile SIGTERM'd the child; deliver the honest
+                ;; partial output with the authoritative timed-out? flag.
+                (and err (.-killed err))
+                (in/ran-envelope in/killed-exit stdout stderr true false)
 
-            ;; Ran (exit 0 or non-zero) — exit/out/err is the answer.
-            :else
-            (in/ran-envelope (in/exit-code err) stdout stderr false false)))))
+                ;; Ran (exit 0 or non-zero) — exit/out/err is the answer.
+                :else
+                (in/ran-envelope (in/exit-code err) stdout stderr false false)))))))
     (catch :default e
       (in/fail (str "unexpected error in seon.agent.shell/run: "
                     (or (some-> e .-message) (str e)))))))
@@ -419,15 +448,23 @@
   {:malli/schema [:=> [:cat :seon.agent.shell/job-ref-request] :seon.agent.shell/job-status-response]}
   [{:seon.agent.shell/keys [job-id]}]
   (if-let [j (get @in/!jobs job-id)]
-    (cond-> {:seon.agent.shell/ok?         true
-             :seon.agent.shell/job-id      job-id
-             :seon.agent.shell/state       (:seon.agent.shell/state j)
-             :seon.agent.shell/cmd         (:seon.agent.shell/cmd j)
-             :seon.agent.shell/runtime-ms  (in/runtime-ms j)
-             :seon.agent.shell/out-tokens  (tokens/estimate (:seon.agent.shell/out j))
-             :seon.agent.shell/err-tokens  (tokens/estimate (:seon.agent.shell/err j))}
-      (some? (:seon.agent.shell/exit j))
-      (assoc :seon.agent.shell/exit (:seon.agent.shell/exit j)))
+    (let [parsed (when (and (not= :running (:seon.agent.shell/state j))
+                            (testrun/pytest-argv? (:seon.agent.shell/cmd j)
+                                                  (:seon.agent.shell/args j)))
+                   (let [p (testrun/parse {:seon.agent.testrun/stdout (:seon.agent.shell/out j)
+                                           :seon.agent.testrun/stderr (:seon.agent.shell/err j)})]
+                     (when (:seon.agent.testrun/ok? p) p)))]
+      (cond-> {:seon.agent.shell/ok?         true
+               :seon.agent.shell/job-id      job-id
+               :seon.agent.shell/state       (:seon.agent.shell/state j)
+               :seon.agent.shell/cmd         (:seon.agent.shell/cmd j)
+               :seon.agent.shell/runtime-ms  (in/runtime-ms j)
+               :seon.agent.shell/out-tokens  (tokens/estimate (:seon.agent.shell/out j))
+               :seon.agent.shell/err-tokens  (tokens/estimate (:seon.agent.shell/err j))}
+        (some? (:seon.agent.shell/exit j))
+        (assoc :seon.agent.shell/exit (:seon.agent.shell/exit j))
+        (some? parsed)
+        (assoc :seon.agent.testrun/result parsed)))
     (in/unknown-job job-id)))
 
 (defn job-output

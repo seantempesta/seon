@@ -403,6 +403,20 @@ cursor. The derived `:jobs` context section renders running + recent jobs
 with the read-more handle, and vanishes when the table empties. **Budget:**
 ~1.4k tok.
 
+**Parsed test results** (`seon.agent.testrun`): when a `run` (or a finished
+background job) invokes pytest — `pytest …` or `python[3] -m pytest …`
+(computed prefix) — the output is parsed by the ONE parser
+(`seon.agent.testrun/parse`, framework-tagged) into
+`{::ok? ::framework :pytest ::passed ::failed ::errors ::failures [{::test-name
+::path ::message}]}` and attached to the envelope under
+`:seon.agent.testrun/result`. Unrecognized output attaches nothing (errors are
+values, never a guess). A foreground pytest run is also PROJECTED as datoms
+scoped to the agent, so the derived `:test-failures` context section renders
+the CURRENT failing set (counts + one line per failing test) and VANISHES the
+moment a later run is green — latest-wins, no stored "seen" flag (the
+reactive-context pattern). Background runs surface their parse inline on
+`job-status` but are not projected into the section.
+
 #### `seon.agent.web` — the open-web read (fetch + search)
 
 **Why reach for it:** read the open web — `fetch` a known URL to markdown +
