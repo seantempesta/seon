@@ -89,6 +89,19 @@ files you didn't touch). Read
 
 ## The remaining work, in order
 
+### Multi-arch build — ✅ DONE 2026-07-06 (`52e25b6f`)
+
+`docker/Dockerfile` is now `TARGETARCH`-parameterized; BOTH arches build +
+boot + answer (arm64 native 86s, amd64 emulated-under-Rosetta 197s; first
+amd64 Seon run ever, no src change). Overlay volumes: `seon-runtime-arm64`
+(SWE-bench) + `seon-runtime-amd64` (TB-2, unblocks its arch blocker).
+Rosetta re-verify (`4d8809b1`) proved TB-2 amd64 scoring is faithful.
+FOLLOW-UP (small, do in Unit A): repoint the swebench arm from the old
+`seon-runtime-slice3` → `seon-runtime-arm64` (both arm64; the new one is
+off the current Dockerfile). TB-2 live Seon drive is now UNBLOCKED
+(amd64 overlay exists) — a tb2 composition unit can slot in like slice 3
+did for SWE-bench.
+
 ### Unit A — image repin (AFTER tooling's new verbs land; no owner gate)
 
 Rebuild `docker build -t seon:<newtag> .`, record new digest; re-extract
