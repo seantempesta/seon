@@ -73,6 +73,27 @@
       ;; head+1 probe only — never the whole infinite seq
       (is (<= @realized 50)))))
 
+(deftest poisoned-lazy-seq-never-crashes-the-walk
+  ;; Regression — T4 D1 pod crash (error-workflow 2026-07-06). An agent eval
+  ;; can return a lazy seq that THROWS when forced, e.g. `(keys non-map)` →
+  ;; a KeySeq whose -first calls `(key non-map-entry)`. The eval records
+  ;; `ok? true` (lazy, unrealized); forcing it in the renderer must NOT
+  ;; propagate — a propagated throw is recorded `:core` and CRASHES the pod.
+  (testing "sample degrades a throw-on-realize seq to an opaque marker"
+    (let [skel (v/sample (keys [[1 2] [3 4]]))]
+      (is (contains? skel :seon.eval/opaque))
+      (is (str/includes? (:seon.eval/opaque skel) "realization threw"))))
+  (testing "render-ai NEVER throws on a poisoned value — top / nested / deep"
+    (doseq [val [(keys [[1 2] [3 4]])
+                 (vals [[1 2]])
+                 {:a (map (fn [_] (throw (js/Error. "boom"))) [1 2 3])}
+                 {:a {:b (keys [[9 9]])}}]]
+      (let [out (v/render-ai "rid" val)]
+        (is (string? out))
+        (is (str/includes? out "result/rid")))))
+  (testing "a normal value still renders verbatim (guard is inert)"
+    (is (= "{:a 1, :b [1 2 3]}" (v/render-ai "n" {:a 1 :b [1 2 3]})))))
+
 (deftest homogeneous-collection-shows-shared-keys
   (testing "a big collection of uniform maps carries its shared key-set"
     (let [rows (mapv (fn [i] {:seon.fn/name (str "f" i) :seon.fn/arity (mod i 3)})
@@ -177,6 +198,44 @@
       (is (str/includes? out "more keys"))
       ;; every retained key still resolves against the live value (path valid)
       (is (str/includes? out "out-blob")))))
+
+(deftest dominant-string-renders-as-body-not-stub
+  (testing "a map whose payload is ONE dominant string (a read verb's content)
+            renders that string as a bounded BODY BLOCK — many lines, honest
+            ⟨N tokens⟩, header keys intact — not a 2-line stub (O1)"
+    (let [content (apply str (for [i (range 1 54)]
+                               (str " " i "\t# line " i " of the file body\n")))
+          env     {:seon.agent.fs/ok? true
+                   :seon.agent.fs/path "/testbed/two_bucket.py"
+                   :seon.agent.fs/content content
+                   :seon.agent.fs/from-line 1
+                   :seon.agent.fs/lines-returned 53
+                   :seon.agent.fs/total-lines 53
+                   :seon.agent.fs/file-sha "f1b6e41cabc123"}
+          out     (v/render-ai "yPy-1" env)]
+      ;; a real body is shown — not just the first ~80 chars (the old stub
+      ;; stopped around line 3; the body now reaches deep into the file)
+      (is (str/includes? out "line 30 of the file body"))
+      ;; honest truncation marker on the dominant string
+      (is (str/includes? out "tokens⟩"))
+      ;; header keys survive verbatim next to the body
+      (is (str/includes? out "f1b6e41cabc123"))
+      (is (str/includes? out ":seon.agent.fs/total-lines 53"))
+      ;; recovery handle present (result/<id> + keep + get-in)
+      (is (str/includes? out "result/yPy-1"))
+      (is (str/includes? out "get-in")))))
+
+(deftest dominant-rule-does-not-fire-on-many-similar-strings
+  (testing "a map of several comparably-sized strings has NO dominant payload,
+            so each stays inline-clipped — the body-block rule must not fire"
+    (let [s   (fn [n] (apply str (repeat 500 (str n))))
+          m   {:a (s 1) :b (s 2) :c (s 3)}
+          out (v/render-ai "m1" m)]
+      ;; no single string is shown as a 500-char body block
+      (is (not (str/includes? out (s 1))))
+      (is (not (str/includes? out (s 2))))
+      ;; still a partial view with the handle
+      (is (str/includes? out "result/m1")))))
 
 (deftest render-ai-hint-teaches-durability-promotion
   (testing "a partial view's drill hint names BOTH recovery and the my.blob/put!

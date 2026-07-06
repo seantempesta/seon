@@ -217,20 +217,37 @@
 (defn- sample-seqish
   "Breadth + lazy-safe element sampling of a vector/set/seq. Realizes at
    most `max-items`+1 elements to detect overflow without forcing a huge or
-   infinite seq. Order preserved."
+   infinite seq. Order preserved.
+
+   Realization is GUARDED. Forcing the head of a LAZY seq can THROW — an
+   agent trivially builds one, e.g. `(keys non-map)` returns a `KeySeq`
+   whose `-first` calls `(key elem)` on a non-map-entry, or `(map #(throw …)
+   xs)`. The eval that returns such a value records `ok? true` (lazy, never
+   forced); only [[sample]] forcing it here throws. `sample` PROMISES it
+   never throws, and a propagated throw is caught by
+   `seon.eval/render-result-edn` and recorded a `:core` fault — which under
+   `:seon.config/on-core-error :crash` EXITS the pod (error-workflow
+   2026-07-06, T4 D1). So a poisoned realization degrades to an opaque
+   marker naming the cause, exactly like any other non-plain node."
   [coll {:keys [max-items shape-sample] :as opts} depth kind]
-  (let [head+1 (vec (take (inc max-items) coll))
-        over?  (> (count head+1) max-items)
-        shown  (mapv #(sample* % opts (inc depth)) (take max-items head+1))
-        total  (counted-count coll)
-        elided (cond (not over?) 0
-                     total       (- total max-items)
-                     :else       :more)
-        shape  (when over? (shared-keys coll shape-sample))]
-    (cond-> {:seon.render.value/kind  kind
-             :seon.render.value/shown shown}
-      (not= elided 0) (assoc :seon.render.value/elided elided)
-      shape           (assoc :seon.render.value/shape shape))))
+  (let [forced (try {::head+1 (vec (take (inc max-items) coll))}
+                 (catch :default e {::realize-error e}))]
+    (if-some [e (::realize-error forced)]
+      {:seon.eval/opaque  (str (name kind) " realization threw")
+       :seon.eval/summary (tokens/clip-str
+                            (or (some-> ^js e .-message) (str e)) 60)}
+      (let [head+1 (::head+1 forced)
+            over?  (> (count head+1) max-items)
+            shown  (mapv #(sample* % opts (inc depth)) (take max-items head+1))
+            total  (counted-count coll)
+            elided (cond (not over?) 0
+                         total       (- total max-items)
+                         :else       :more)
+            shape  (when over? (shared-keys coll shape-sample))]
+        (cond-> {:seon.render.value/kind  kind
+                 :seon.render.value/shown shown}
+          (not= elided 0) (assoc :seon.render.value/elided elided)
+          shape           (assoc :seon.render.value/shape shape))))))
 
 (defn- sample*
   [x {:keys [max-depth max-keys max-string] :as opts} depth]
@@ -416,14 +433,68 @@
   (when (and (coll? x) (not (record? x)))
     (let [t (cond (map? x) "map" (vector? x) "vector" (set? x) "set"
                   (seq? x) "seq" :else "coll")
-          n (if (counted? x) (count x) (str "≥" (count (take 1001 x))))]
+          ;; Counting a non-counted seq REALIZES up to 1001 elements — a
+          ;; poisoned lazy seq (see [[sample-seqish]]) throws when forced, and
+          ;; this runs OUTSIDE sample's guard. Guard it: an unknown size is a
+          ;; `?`, never a propagated throw (the sample marker already carries
+          ;; the realization error; this is only the drill-hint's size hint).
+          n (if (counted? x)
+              (count x)
+              (try (str "≥" (count (take 1001 x)))
+                (catch :default _ "?")))]
       (str t " " n (if (map? x) " keys" " items")))))
+
+(def ^:private dominant-string-fraction
+  "A map value that occupies at least this fraction of the map's rendered
+   size — and is a plain string longer than the inline `max-string` cap —
+   is the map's PAYLOAD: it renders as a body block (bounded by the generous
+   `verbatim-cap`, honest ⟨N tokens⟩) with the small keys as the header,
+   instead of being elided to a 2-line stub. Shape-general — no verb names."
+  0.70)
+
+(defn- dominant-string-entry
+  "When VALUE is a small map (≤ `max-keys`, so every key already renders)
+   whose rendered size is DOMINATED (≥ `dominant-string-fraction`) by ONE
+   plain-string value longer than the inline `max-string` cap, return that
+   `[k s]` entry; nil otherwise. The winner must be a STRING — a map
+   dominated by a big collection falls to the ordinary skeleton — with
+   something to reveal (longer than the inline stub). This is what makes a
+   read verb's own payload (`view`'s content, a fetched body) VISIBLE instead
+   of a stub, without any per-verb special-casing."
+  [value max-string]
+  (when (and (map? value) (not (record? value)) (seq value)
+             (<= (count value) (:max-keys default-opts)))
+    ;; `(pr-str v)` sizes each RAW map value — a value that is a poisoned lazy
+    ;; seq (see [[sample-seqish]]) throws when pr-str forces it. This is an
+    ;; OPTIMIZATION (show a map's dominant string payload verbatim); if any
+    ;; value can't be measured, fall back to the guarded skeleton — never
+    ;; propagate (the throw here would crash the pod via render-result-edn).
+    (try
+      (let [sized   (map (fn [[k v]]
+                           [k v (+ (count (pr-str k)) (count (pr-str v)))])
+                         value)
+            total   (reduce + (map peek sized))
+            [k v n] (apply max-key peek sized)]
+        (when (and (string? v)
+                   (> (count v) max-string)
+                   (pos? total)
+                   (>= (/ n total) dominant-string-fraction))
+          [k v]))
+      (catch :default _ nil))))
 
 (defn- bounded-view
   "The DEPTH/BREADTH-bounded skeleton + ONE trailing drill hint — the view
-   for a value too large/deep/opaque to print whole."
+   for a value too large/deep/opaque to print whole. A map with ONE dominant
+   string value renders that value as a body block (the generous
+   `verbatim-cap`) so the payload the read produced is actually shown."
   [eval-id value]
-  (let [skel  (sample value)
+  (let [dom   (dominant-string-entry value (:max-string default-opts))
+        skel  (if-some [[dk s] dom]
+                ;; re-clip only the dominant key's value to the body cap —
+                ;; every retained get-in path stays valid; the header keys
+                ;; render verbatim (all kept, since the map is ≤ max-keys).
+                (assoc (sample value) dk (clip-string s verbatim-cap))
+                (sample value))
         clip? (truncated? skel)
         body  (emit skel 0)
         tsz   (top-type+size value)
@@ -462,15 +533,29 @@
                              [:seon.render.value/value :any]]
                   :string]}
   [eval-id value]
-  (let [probe (sample value verbatim-probe-opts)]
-    (if (truncated? probe)
-      (bounded-view eval-id value)
-      ;; probe untruncated ⇒ value is finite, opaque-free, bounded ⇒ pr-str
-      ;; cannot hang. Print it WHOLE when it fits the char budget.
-      (let [edn (pr-str value)]
-        (if (<= (count edn) verbatim-cap)
-          edn
-          (bounded-view eval-id value))))))
+  ;; TOTAL by contract (this ns's CLAUDE.md: a render fn must never crash the
+  ;; walk). Realizing an agent-supplied value can throw (a lazy seq poisoned to
+  ;; throw on force — `(keys non-map)`, `(map #(throw …) xs)`); each realization
+  ;; site below is guarded, and THIS outer net is the backstop for any that
+  ;; slip through. A propagated throw is recorded a `:core` fault by
+  ;; `seon.eval/render-result-edn` and EXITS the pod under
+  ;; `on-core-error :crash` (error-workflow 2026-07-06, T4 D1) — so we degrade
+  ;; to the guaranteed-total `sample` skeleton (its markers name the cause)
+  ;; instead of ever throwing.
+  (try
+    (let [probe (sample value verbatim-probe-opts)]
+      (if (truncated? probe)
+        (bounded-view eval-id value)
+        ;; probe untruncated ⇒ value is finite, opaque-free, bounded ⇒ pr-str
+        ;; cannot hang. Print it WHOLE when it fits the char budget.
+        (let [edn (pr-str value)]
+          (if (<= (count edn) verbatim-cap)
+            edn
+            (bounded-view eval-id value)))))
+    (catch :default e
+      (str (emit (sample value) 0)
+           "\n; ‹value threw on render: " (or (some-> ^js e .-message) (str e))
+           "› — the live value is result/" eval-id))))
 
 ;; ============================================================
 ;; RENDER-HTML-DATA — the DATA CONTRACT for the interactive drill-down
