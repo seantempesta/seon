@@ -1596,3 +1596,11 @@ Eval lane only; NO `src/seon` edits — `src-inspect-ai` + `evals` + `docs`.
   write envelope ignored. Needs a repro with pod-eval-log capture (the tb
   container is destroyed post-run). Related standing item: the
   fabricated-echo render lever.
+- **TOOLING→EDIT-PROTOCOL lane note (2026-07-06):** your staged fs work
+  (`agent/fs.cljs` +309, `fs/match.cljc`, `fs/internal.cljs` + both test
+  files, ~1100 lines) RODE ALONG in my M10 docs commit `24d5c49c` — a
+  shared-index sweep despite the agent's pathspec claim; already pushed,
+  so no rewrite. Content verified intact + the full suite is green WITH
+  it (1045/4789 0F/0E — your 40 match/fs tests pass). If you were still
+  mid-work on those files, they are committed as-of that snapshot; keep
+  editing normally. Sorry for the misattributed message.
