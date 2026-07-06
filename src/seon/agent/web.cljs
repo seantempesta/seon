@@ -144,11 +144,61 @@
     [:seon.error/message :string]
     [:seon.error/data    {:optional true} :map]]])
 
+;; ── search ─────────────────────────────────────────────────────────────
+;; Backend-agnostic rows + an optional grounded ::answer, so :gemini-grounding
+;; (ships) and :serper (documented second backend) sit behind ONE schema.
+(schema/register! ::query        [:string {:min 1}])
+(schema/register! ::max-results  [:int {:min 1 :max 20}])   ; hard cap — safety constraint
+(schema/register! ::snippet      :string)
+(schema/register! ::rank         [:int {:min 0}])           ; 0-based row position
+(schema/register! ::result
+  [:map
+   [::url     ::url]
+   [::title   {:optional true} ::title]
+   [::snippet {:optional true} ::snippet]
+   [::rank    ::rank]])
+(schema/register! ::results       [:vector ::result])
+;; ::backend = which provider produced a RESPONSE; ::search-backend = the
+;; configured/effective backend surfaced by grants (:none when no key).
+(schema/register! ::backend        [:enum :gemini-grounding :serper])
+(schema/register! ::search-backend [:enum :gemini-grounding :serper :none])
+(schema/register! ::search-model   :string)
+(schema/register! ::answer         :string)             ; grounded synthesis (gemini)
+(schema/register! ::answer-tokens  [:int {:min 0}])     ; tokens/estimate — never chars
+(schema/register! ::queries        [:vector ::query])   ; webSearchQueries executed
+(schema/register! ::result-count   [:int {:min 0}])     ; honest pre-cap total
+
+(schema/register! ::search-request
+  [:map
+   [::query       ::query]
+   [::max-results {:optional true} ::max-results]
+   [::timeout-ms  {:optional true} ::timeout-ms]])
+
+(schema/register! ::search-response
+  [:or
+   [:map
+    [::ok?           [:= true]]
+    [::query         ::query]
+    [::backend       ::backend]
+    [::results       ::results]
+    [::result-count  ::result-count]          ; honest total, pre-cap
+    [::answer        {:optional true} ::answer]
+    [::answer-tokens {:optional true} ::answer-tokens]
+    [::queries       {:optional true} ::queries]
+    [::hint          {:optional true} ::hint]]
+   ;; COULD-NOT-SEARCH — the shared :seon.error/* shape, matching fetch.
+   [:map
+    [::ok?               [:= false]]
+    [::query             ::query]
+    [:seon.error/message :string]
+    [:seon.error/data    {:optional true} :map]]])
+
 (schema/register! ::grants-response
   [:map
    [::enabled?        ::enabled?]
    [::policy          ::policy]
-   [::allowed-domains ::allowed-domains]])
+   [::allowed-domains ::allowed-domains]
+   [::search-backend  ::search-backend]])
 
 ;; ============================================================
 ;; Grant + policy — inspect what web access I have (read-only; the policy
@@ -156,21 +206,29 @@
 ;; ============================================================
 
 (defn grants
-  "What web access do I have? — the SEON_WEB grant + the reachability policy.
+  "What web access do I have? — the SEON_WEB grant + reachability + search.
 
-   Returns the live truth every fetch enforces: `:seon.agent.web/enabled?`
+   Returns the live truth every verb enforces: `:seon.agent.web/enabled?`
    (SEON_WEB granted at all), `:seon.agent.web/policy` (the host-owned
    config mode — `:open` = anything, `:public-only` = block internal/
    loopback (the SSRF-safe default), `:allowlist` = only listed domains),
-   and `:seon.agent.web/allowed-domains` (the hosts reachable under
-   `:allowlist`). The policy is cluster CONFIG (`config/system.edn`'s
-   `:seon.config/web`); nothing inside the pod can loosen it."
+   `:seon.agent.web/allowed-domains` (the hosts reachable under
+   `:allowlist`), and `:seon.agent.web/search-backend` (the EFFECTIVE
+   `search` backend — the configured provider, or `:none` when its API key
+   is absent from the env so no search can run). The policy + backend are
+   cluster CONFIG (`config/system.edn`'s `:seon.config/web`); nothing inside
+   the pod can loosen them."
   {:malli/schema [:=> [:cat] ::grants-response]}
   []
-  (let [p (int/policy)]
+  (let [p (int/policy)
+        {::keys [search-backend]} (int/search-config)
+        has-key? (case search-backend
+                   :gemini-grounding (some? (int/gemini-key))
+                   false)]
     {::enabled?        (int/granted?)
      ::policy          (::policy p)
-     ::allowed-domains (::allowed-domains p)}))
+     ::allowed-domains (::allowed-domains p)
+     ::search-backend  (if has-key? search-backend :none)}))
 
 ;; ============================================================
 ;; fetch — the one ^:async verb.
@@ -326,3 +384,113 @@
     (catch :default e
       (int/err url (str "unexpected error in seon.agent.web/fetch: "
                         (or (some-> e .-message) (str e)))))))
+
+;; ============================================================
+;; search — the one ^:async grounded-search verb.
+;; ============================================================
+
+(def ^:private redirect-hint
+  "Standing note on the grounded-URL shape — the URLs are Google
+   grounding-redirect URIs (fetchable NOW via seon.agent.web/fetch, but
+   ephemeral ~30 days); fetch's :seon.agent.web/final-url recovers the
+   canonical page."
+  (str "the ::url values are Google grounding-redirect URIs — fetchable now "
+       "with (seon.agent.web/fetch), but ephemeral (~30 days); fetch's "
+       ":seon.agent.web/final-url recovers the canonical page."))
+
+(defn ^:async search
+  "Search the web — ranked result rows plus a grounded answer.
+
+   The request map's keys live in THIS ns: :seon.agent.web/query (required,
+   non-blank), :seon.agent.web/max-results (default 10, capped 20),
+   :seon.agent.web/timeout-ms (default 30000).
+
+   `^:async` — resolves to a :seon.agent.web/search-response, NEVER rejects
+   (errors are values). ok? true carries backend-agnostic :seon.agent.web/
+   results — each row a {::url ::title ::snippet ::rank} (rank 0-based) —
+   the HONEST pre-cap :seon.agent.web/result-count, the executed
+   :seon.agent.web/queries, and (grounded backend) a synthesized
+   :seon.agent.web/answer with :seon.agent.web/answer-tokens. ok? false =
+   COULD NOT SEARCH AT ALL (SEON_WEB default-deny — search rides the SAME
+   grant as fetch; no backend API key in the env; HTTP/timeout/quota
+   failure) — a guiding :seon.error/message, never a throw.
+
+   Backend is host-owned config (config/system.edn's :seon.config/web); the
+   first wire is Gemini \"Grounding with Google Search\". The ::url values
+   are grounding-redirect URIs — the intended loop is search → pick a ::url
+   → (seon.agent.web/fetch {:seon.agent.web/url …}) (full page → blob) →
+   (my.blob/text …) / (seon.agent.search/grep …). Inspect the live backend
+   with (seon.agent.web/grants).
+
+   Worked example:
+
+     (await (seon.agent.web/search {:seon.agent.web/query \"current stable Clojure version\"}))
+     ;; => {:seon.agent.web/ok? true :seon.agent.web/backend :gemini-grounding
+     ;;     :seon.agent.web/results [{:seon.agent.web/url \"https://…/grounding-api-redirect/…\"
+     ;;                               :seon.agent.web/title \"clojure.org\"
+     ;;                               :seon.agent.web/snippet \"The current stable version…\"
+     ;;                               :seon.agent.web/rank 0} …]
+     ;;     :seon.agent.web/result-count 2
+     ;;     :seon.agent.web/answer \"The current stable version of Clojure is 1.12.5…\"
+     ;;     :seon.agent.web/answer-tokens 18 :seon.agent.web/queries [\"…\"] …}
+     ;; then fetch a row's ::url to page the real page into a blob."
+  {:malli/schema [:=> [:cat ::search-request] ::search-response]}
+  [{::keys [query max-results timeout-ms]
+    :or {max-results int/default-search-results
+         timeout-ms  int/default-timeout-ms}}]
+  (try
+    (cond
+      (not= :node (platform/host))
+      (int/search-err query "seon.agent.web/search requires the :node host (no :wasi fetch yet).")
+
+      (not (int/granted?))
+      (int/search-ungranted query)
+
+      (or (nil? query) (str/blank? query))
+      (int/search-err query ":seon.agent.web/query is required and must be non-blank.")
+
+      :else
+      (let [{backend ::search-backend model ::search-model} (int/search-config)
+            n (max 1 (min max-results int/max-search-results))]
+        (case backend
+          :gemini-grounding
+          (let [key (int/gemini-key)]
+            (if (or (nil? key) (str/blank? key))
+              (int/search-err query
+                              (str "no search backend key — GEMINI_API_KEY is unset "
+                                   "in the pod's env; the :gemini-grounding backend "
+                                   "cannot run. Inspect with (seon.agent.web/grants)."))
+              (let [res (await (int/gemini-request query model key timeout-ms))]
+                (if-not (::ok? res)
+                  res
+                  (let [{::keys [results result-count queries answer]}
+                        (int/parse-grounding (::body res) n)
+                        now (js/Date.)]
+                    ;; Best-effort projection — grep-graph/forensics can see what
+                    ;; was searched; a rejected tx must not fail the search.
+                    (await (db/transact!
+                             {:seon.db/tx-data
+                              [(cond-> {::query        query
+                                        ::backend      :gemini-grounding
+                                        ::result-count result-count
+                                        ::fetched-at   now}
+                                 (seq queries) (assoc ::queries queries))]}))
+                    (cond-> {::ok?           true
+                             ::query         query
+                             ::backend       :gemini-grounding
+                             ::results       results
+                             ::result-count  result-count
+                             ::hint          redirect-hint}
+                      (seq queries)            (assoc ::queries queries)
+                      (not (str/blank? answer))
+                      (-> (assoc ::answer answer)
+                          (assoc ::answer-tokens (tokens/estimate answer)))))))))
+
+          ;; A configured-but-unwired backend (e.g. :serper) — legible refusal.
+          (int/search-err query
+                          (str "search backend " (pr-str backend) " is not wired yet "
+                               "(only :gemini-grounding ships) — set "
+                               ":seon.agent.web/search-backend in config/system.edn.")))))
+    (catch :default e
+      (int/search-err query (str "unexpected error in seon.agent.web/search: "
+                                 (or (some-> e .-message) (str e)))))))

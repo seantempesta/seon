@@ -153,6 +153,8 @@
     :seon.render/ai 'seon.agent.ctx.live-tile/live-tile-block}
    {:seon.agent.ctx/name :warnings :seon.agent.ctx/priority 40
     :seon.render/ai 'seon.agent.ctx.warnings/warnings-block}
+   {:seon.agent.ctx/name :jobs :seon.agent.ctx/priority 42
+    :seon.render/ai 'seon.agent.ctx.jobs/jobs-block}
    {:seon.agent.ctx/name :plan :seon.agent.ctx/priority 45
     :seon.render/ai 'my.plan.internal/plan-block}
    {:seon.agent.ctx/name :relevant-source :seon.agent.ctx/priority 48
@@ -247,10 +249,19 @@
 ;;; accessor's `:public-only` fallback. The master on/off grant (SEON_WEB) stays
 ;;; ENV — it gates whether web is available at all; this policy shapes
 ;;; reachability once it is (env gate + config policy, two concerns).
+;;; The same section also carries the WEB-SEARCH backend (`seon.agent.web/search`):
+;;; `:seon.agent.web/search-backend` (which grounded/SERP provider — leaf
+;;; `:keyword`, enum-checked downstream in [[web-search-config]], default
+;;; `:gemini-grounding`) + `:seon.agent.web/search-model` (the model id for the
+;;; grounded backend, default `"gemini-3.1-flash-lite"`). Backend choice is
+;;; host-owned CONFIG (never env — env carries only the API KEY, read live);
+;;; a new backend (Serper) slots in here WITHOUT changing the verb shape.
 (schema/register! :seon.config/web-spec
   [:map
    [:seon.agent.web/policy          {:optional true} :keyword]
-   [:seon.agent.web/allowed-domains {:optional true} [:vector :string]]])
+   [:seon.agent.web/allowed-domains {:optional true} [:vector :string]]
+   [:seon.agent.web/search-backend  {:optional true} :keyword]
+   [:seon.agent.web/search-model    {:optional true} :string]])
 
 ;;; FORM-AUTOFIX (repair) — the pre-flight repair dial (owner rulings
 ;;; 2026-07-05; design docs/prds/agent-ctx/research/form-autofix-system-
@@ -760,6 +771,40 @@
               v {:seon.agent.web/policy          pol
                  :seon.agent.web/allowed-domains (vec (get m :seon.agent.web/allowed-domains []))}]
           (swap! web-policy-cache assoc k v)
+          v))))
+
+;; `def` (NOT defonce) for hot-reload cache rotation; memoized per SEON_CONFIG.
+(def ^:private web-search-cache (atom {}))
+
+(def ^:private known-search-backends
+  "The wired search backends. `:gemini-grounding` ships; `:serper` is the
+   documented second backend (needs SERPER_API_KEY, slotted, not yet wired)."
+  #{:gemini-grounding :serper})
+
+(defn web-search-config
+  "The resolved web-SEARCH backend config for `seon.agent.web/search`.
+
+   `{:seon.agent.web/search-backend <mode> :seon.agent.web/search-model
+   <id>}` from the manifest's `:seon.config/web` section. Backend default
+   `:gemini-grounding` (an unrecognized mode fails closed to it — never a
+   silent wrong provider); model default `\"gemini-3.1-flash-lite\"` (the
+   cheap retrieval pick). Host-owned config: the API key is NEVER here — it
+   is read live from env (`GEMINI_API_KEY`) at call time. Memoized per
+   SEON_CONFIG (config is boot-stable)."
+  {:malli/schema [:=> [:cat]
+                  [:map
+                   [:seon.agent.web/search-backend :keyword]
+                   [:seon.agent.web/search-model :string]]]}
+  []
+  (let [k (env "SEON_CONFIG")]
+    (or (get @web-search-cache k)
+        (let [m       (get (load-manifest) :seon.config/web {})
+              raw     (get m :seon.agent.web/search-backend :gemini-grounding)
+              backend (if (contains? known-search-backends raw) raw :gemini-grounding)
+              v {:seon.agent.web/search-backend backend
+                 :seon.agent.web/search-model
+                 (get m :seon.agent.web/search-model "gemini-3.1-flash-lite")}]
+          (swap! web-search-cache assoc k v)
           v))))
 
 (defn render-strict?

@@ -379,6 +379,49 @@ boundary against LLM accidents, not a security boundary. **Composes:**
 `:seon.path/abs` from a listing/grep; `py-run` is the same envelope for a
 python source string. **Budget:** ~1.2k tok.
 
+#### `seon.agent.web` — the open-web read (fetch + search)
+
+**Why reach for it:** read the open web — `fetch` a known URL to markdown +
+blob, or `search` a question to ranked source rows + a grounded answer, then
+fetch a row to page it. The lightweight, browserless read (the `curl` /
+WebFetch class); no JS rendering (a browser tier is a later tool).
+
+**Floor:** `seon.agent.web` (+ `.internal`) — built-in `fetch`/undici transport,
+readability→markdown extraction (fetch), and raw-REST Gemini "Grounding with
+Google Search" (search). Both ride the SAME `SEON_WEB` host grant (default-deny;
+inspect with `grants`) and the same errors-as-values envelope.
+
+```clojure
+(defn ^:async fetch
+  "URL in → markdown preview + full text in a blob. ALWAYS resolves; ok? =
+   the fetch RAN (a non-2xx is a result — read :seon.agent.web/status). SSRF
+   guard on every redirect hop per the host-owned :seon.config/web policy."
+  {:malli/schema [:=> [:cat :seon.agent.web/fetch-request] :seon.agent.web/fetch-response]})
+
+(defn ^:async search
+  "Query in → ranked {::url ::title ::snippet ::rank} rows + honest
+   ::result-count + a grounded ::answer (token-estimated ::answer-tokens) +
+   the executed ::queries. ALWAYS resolves; ok? false = COULD NOT SEARCH AT
+   ALL (SEON_WEB default-deny — SAME grant as fetch; no backend API key in
+   env; HTTP/timeout/quota). Backend is host-owned config
+   (:seon.config/web's :seon.agent.web/search-backend, default
+   :gemini-grounding on gemini-3.1-flash-lite); the API key (GEMINI_API_KEY)
+   is read LIVE from env, never stored/logged. Serper slots in later behind
+   the SAME schema."
+  {:malli/schema [:=> [:cat :seon.agent.web/search-request] :seon.agent.web/search-response]})
+```
+
+**Composes (the intended loop):** `search` → pick a row's `::url` →
+`(seon.agent.web/fetch {:seon.agent.web/url …})` (full page → blob) →
+`(my.blob/text …)` / `(seon.agent.search/grep …)`. Search adds NO fetch/extract
+mechanism of its own. The grounded `::url` values are Google
+grounding-redirect URIs — fetchable now (ephemeral ~30 days); fetch's
+`::final-url` recovers the canonical page. **Safety:** `SEON_WEB` grant
+(default-deny) + the host-owned reachability policy (`:open`/`:public-only`/
+`:allowlist`) on every hop; backend + model are config, never
+agent-widenable. A soft boundary against LLM accidents, not a security
+boundary. **Budget:** ~1.4k tok.
+
 #### `my.plan` — floor: `seon.db` + the `:my.plan/*` schema
 
 **Why reach for it:** so a resumed or distracted agent always sees what's left —
