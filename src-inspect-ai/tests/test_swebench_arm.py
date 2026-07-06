@@ -7,13 +7,14 @@ import pytest
 
 from seon_inspect import scorecard
 from seon_inspect.cluster import parse_wire_json
+# run_bounds_form / apply_run_bounds moved to bench_common (shared with the
+# tb adapter) in the Unit-D refactor; the SWE-bench arm re-exports the rest.
+from seon_inspect.bench_common import apply_run_bounds, run_bounds_form
 from seon_inspect.swebench_arm import (
     DEFAULT_TURN_LIMIT,
     MODEL_API_HOST,
     OVERLAY_VOLUME,
-    apply_run_bounds,
     overlay_sandbox_config,
-    run_bounds_form,
     sample_port,
     task_contract,
 )

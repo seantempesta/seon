@@ -64,7 +64,7 @@ from inspect_ai.solver import Generate, TaskState, solver
 from inspect_ai.util import SandboxEnvironmentSpec
 
 from seon_inspect import solver as seon_solver
-from seon_inspect.cluster import parse_wire_json
+from seon_inspect.bench_common import apply_run_bounds, deadline_below_door
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
@@ -99,8 +99,9 @@ SWEBENCH_RUN_TIMEOUT_S = 900
 
 # Interim run bounds (until the tooling lane's cluster-level config lands):
 # transacted onto the root agent per sample. Turn limit sized 2× the slice-3
-# observation (12 turns consumed of the default 20); the deadline default
-# tracks the solve timeout so the pod's own bound cuts before the door clock.
+# observation (12 turns consumed of the default 20); the deadline is derived
+# STRICTLY below the door timeout by `bench_common.deadline_below_door` so the
+# pod's own bound cuts FIRST (quality-review finding 1 — NOT equal to the door).
 DEFAULT_TURN_LIMIT = 40
 
 # In-container pod readiness budget: entrypoint boot measured ~10-25s (fresh
@@ -109,7 +110,13 @@ POD_READY_TIMEOUT_S = 300
 
 
 def sample_port(sample_id: str) -> int:
-    """Deterministic per-sample published host port for the pod door."""
+    """Deterministic per-sample published host port for the pod door.
+
+    NOTE (quality-review, 2026-07-06): sha-mod-100 has a ~37% birthday
+    collision probability at n=10 — SAFE at concurrency 1 (one sample's
+    container lives at a time) but MUST become probe/claim allocation (bind an
+    ephemeral free port, record it) before any concurrency > 1, or two
+    concurrent samples will race the same published port."""
     h = int(hashlib.sha256(str(sample_id).encode()).hexdigest(), 16)
     return POD_PORT_BASE + (h % POD_PORT_SPAN)
 
@@ -124,7 +131,14 @@ def resolve_model_api_ip(host: str = MODEL_API_HOST) -> str:
 
     The relay cannot resolve the NAME itself: on the internal network the
     name is its own alias (the loop). Per-sample compose generation resolves
-    fresh, so a rotated endpoint IP never outlives one sample."""
+    fresh, so a rotated endpoint IP never outlives one sample.
+
+    NOTE (quality-review, 2026-07-06): this pins ONE resolved A-record for the
+    sample's lifetime, and the compose backgrounds the :443 socat with no
+    supervision (`socat … & exec socat …`) — if that A-record rotates OR the
+    backgrounded socat dies mid-run, the pod loses egress silently. Accepted
+    flake class at concurrency 1 (a lost endpoint surfaces as a model/run
+    fault in that one sample's evidence); revisit if it recurs at scale."""
     return pysocket.gethostbyname(host)
 
 
@@ -329,106 +343,6 @@ def wait_pod_ready(port: int, timeout_s: int = POD_READY_TIMEOUT_S) -> float:
         "(seon_env_fault — check the sandbox container's entrypoint log)")
 
 
-# ---------------------------------------------------------------------------
-# Interim run bounds — the apply_ai_config precedent, delivered in-container
-# ---------------------------------------------------------------------------
-
-# The bundled node speaks the wire-REPL socket protocol from INSIDE the task
-# container (no nc in the instance images; the host cannot reach the REPL —
-# it is loopback-only behind the internal network). Mirrors
-# cluster.wire_repl_json: send one form, half-close, read all, print.
-NODE_WIRE_REPL_JS = (
-    'const s=require("net").connect(7891,"127.0.0.1");let b="";'
-    's.on("data",d=>b+=d);'
-    's.on("close",()=>{process.stdout.write(b);process.exit(0);});'
-    's.on("connect",()=>{s.end(process.argv[1]+"\\n");});'
-    's.on("error",e=>{console.error(String(e));process.exit(1);});'
-    'setTimeout(()=>{process.stdout.write(b);process.exit(2);},30000);'
-)
-
-NODE_BIN = "/opt/seon/node/bin/node"
-
-# Datahike schema for the two run-bound attrs, derived via the one bridge
-# (`seon.db/malli->datahike-schema` on `:int` → :db.type/long, same mapping
-# as :seon.ai/timeout-ms in cluster.py's precedent). Needed because a fresh
-# cluster installs schema lazily on the pod-side write path and the wire
-# REPL bypasses that installer. Install-if-missing only.
-_RUN_BOUND_SCHEMA_EDN = (
-    '[{:db/ident :seon.agent.run/default-turn-limit'
-    ' :db/valueType :db.type/long :db/cardinality :db.cardinality/one}'
-    ' {:db/ident :seon.agent.run/default-deadline-ms'
-    ' :db/valueType :db.type/long :db/cardinality :db.cardinality/one}]'
-)
-
-
-def run_bounds_form(turn_limit: int, deadline_ms: int,
-                    db_name: str = "default") -> str:
-    """The wire-REPL form: run-bound attrs onto the ROOT agent + read-back.
-
-    `open-run!` seeds every run's turn-limit/deadline from these agent-entity
-    attrs (`src/seon/agent/run.cljs:263-270`) — so transacting them BEFORE
-    the task posts bounds the task's run. Prints the WIRE-JSON sentinel with
-    the read-back row (fail-loud verification host-side)."""
-    return (
-        "(do (require (quote [cheshire.core :as json])"
-        " (quote [datahike.api :as d]))"
-        " (let [conn (:seon.server.registry/conn (seon.server.registry/get-conn"
-        f" {{:seon.server.registry/db-name :{db_name}}}))"
-        " installed (set (keys (d/schema @conn)))"
-        " schema-tx (into [] (remove (fn [s] (installed (:db/ident s)))) "
-        + _RUN_BOUND_SCHEMA_EDN + ")"
-        " _ (when (seq schema-tx) (d/transact conn {:tx-data schema-tx}))"
-        " _ (d/transact conn {:tx-data"
-        " [{:db/id [:seon.agent/id \"root\"]"
-        f" :seon.agent.run/default-turn-limit {int(turn_limit)}"
-        f" :seon.agent.run/default-deadline-ms {int(deadline_ms)}}}]}})"
-        " row (d/q (quote [:find (pull ?e [:seon.agent.run/default-turn-limit"
-        " :seon.agent.run/default-deadline-ms]) . :where"
-        " [?e :seon.agent/id \"root\"]]) @conn)]"
-        " (println (str \"WIRE-JSON<\" (json/generate-string"
-        " {\"turn_limit\" (:seon.agent.run/default-turn-limit row)"
-        "  \"deadline_ms\" (:seon.agent.run/default-deadline-ms row)})"
-        " \">WIRE-JSON\"))))"
-    )
-
-
-async def apply_run_bounds(exec_fn, *, turn_limit: int, deadline_ms: int,
-                           retries: int = 12, retry_sleep_s: float = 5.0
-                           ) -> dict:
-    """Transact the run bounds onto the in-container root agent, verified.
-
-    `exec_fn` is an async `argv -> stdout+stderr text` executor inside the
-    task container (the solver passes `sandbox().exec`; probes pass `docker
-    compose exec`). Retries cover the window where the pod answers HTTP but
-    the root agent is not yet minted (the transact's lookup-ref fails → no
-    sentinel → retry). RAISES when the read-back doesn't carry what was
-    asked — a run whose bounds didn't take must never be scored as bounded."""
-    import anyio
-
-    argv = [NODE_BIN, "-e", NODE_WIRE_REPL_JS,
-            run_bounds_form(turn_limit, deadline_ms)]
-    last_err: Exception | None = None
-    for attempt in range(retries):
-        try:
-            out = await exec_fn(argv)
-            row = parse_wire_json(out)
-            if (row.get("turn_limit") == turn_limit
-                    and row.get("deadline_ms") == deadline_ms):
-                return {"turn_limit": turn_limit, "deadline_ms": deadline_ms}
-            raise RuntimeError(
-                f"run-bounds read-back mismatch: asked "
-                f"turn_limit={turn_limit} deadline_ms={deadline_ms}, "
-                f"row says {row}")
-        except Exception as e:  # no sentinel yet / root not minted / exec err
-            last_err = e
-            if attempt < retries - 1:
-                await anyio.sleep(retry_sleep_s)
-    raise RuntimeError(
-        f"run bounds not applied after {retries} attempts "
-        f"(seon_env_fault — wire REPL unreachable or root agent absent): "
-        f"{last_err}")
-
-
 async def _sandbox_exec(argv: list[str]) -> str:
     """Run argv in the sample's task container via inspect's sandbox."""
     from inspect_ai.util import sandbox
@@ -445,7 +359,8 @@ def seon_swebench_solver(timeout_s: int = SWEBENCH_RUN_TIMEOUT_S,
 
     Per sample: wait for the pod on the sample's stamped published port,
     transact the run bounds onto the root agent (interim mechanism — see
-    `apply_run_bounds`; `deadline_ms` defaults to the solve timeout), POST
+    `apply_run_bounds`; the deadline is derived STRICTLY below the door
+    timeout via `deadline_below_door` so the pod cuts first — finding 1), POST
     the §3 contract to `POST /agents/run` with `agent_id="root"` (the bench
     drives the ROOT agent — design §2a swarm clarification), record the
     honest door metadata (bounds included). The OFFICIAL scorer then judges
@@ -459,7 +374,10 @@ def seon_swebench_solver(timeout_s: int = SWEBENCH_RUN_TIMEOUT_S,
                       "built with overlay_sandbox_config(boot=True)?")
         url = f"http://127.0.0.1:{port}/agents/run"
         timeout_ms = seon_solver._resolve_timeout_ms(state, timeout_s)
-        dl_ms = deadline_ms or timeout_ms
+        # The pod deadline MUST cut before the door clock — else time
+        # exhaustion is a coin-flip between an excluded solve_timeout and a
+        # scored behavior_miss (quality-review finding 1). One shared rule.
+        dl_ms = deadline_below_door(timeout_ms, deadline_ms)
 
         waited = await anyio.to_thread.run_sync(wait_pod_ready, int(port))
         bounds = await apply_run_bounds(_sandbox_exec, turn_limit=turn_limit,

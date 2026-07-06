@@ -37,7 +37,7 @@ hands tool-defects here with rendered-context evidence.
 - **Eval → Tooling:** two tool defects queued with evidence — (1) fresh-world
   `my.kb` renders "0 fns, 0 schemas"; (2) turn-6 recall visibility gap during
   `/solve` (candidate root = `seon.db/*conn*` single dynamic root, see
-  `docs/seon/orchestrator/issues/tx-feed-pump-timeouts.md`). Absorbed into
+  `docs/seon/orchestrator/issues/archive/tx-feed-pump-timeouts.md`). Absorbed into
   [[CLAUDE]] §"Open tensions".
 - **Tooling → Eval:** `my.plan` was renamed from `seon.agent.todo` + redesigned
   (deps/pace/expect/active/blocked, position anchor, windowed render) — the
@@ -82,7 +82,7 @@ hands tool-defects here with rendered-context evidence.
   compiled path` (`logs/acme/pod.log:38`). Candidate root: the ns's
   `:seon.ns/source` require aliases not stored, so SCI can't resolve the
   `db/*conn*` alias. A hang in that fn would wedge the pod unbounded. Issue:
-  `docs/seon/orchestrator/issues/sci-bounding-fallback-plan-block.md`.
+  `docs/seon/orchestrator/issues/archive/sci-bounding-fallback-plan-block.md`.
 - **Eval (self-owned):** `bin/seon` start/readiness echoes now print the real
   `$LOG_DIR` path via `log_file` (they hardcoded `logs/…` and lied under
   `bin/acme`); harness-doc `/agents` route drift filed
@@ -171,7 +171,7 @@ hands tool-defects here with rendered-context evidence.
   `schema/register!` rule — single-segment keyword namespaces rejected;
   (2) **real datahike-fork query-planner bug** — a valid 3-clause order
   silently returns `#{}`
-  (`docs/seon/orchestrator/issues/datahike-query-clause-order-empty-results.md`);
+  (`docs/seon/orchestrator/issues/archive/datahike-query-clause-order-empty-results.md`);
   (3) agents DO have file-read verbs (`seon.agent.fs/read-file`,
   `seon.agent.search/grep`) — the skills were written file-free per owner
   policy; flag if a bench row assumes otherwise.
@@ -197,7 +197,7 @@ hands tool-defects here with rendered-context evidence.
   — your frozen agents' work; handle on your resume.
 - **Queued NEXT (owner-ordered, held until owner returns):** datahike-fork
   query-planner fix + verify all systems resolve OUR fork
-  (`docs/seon/orchestrator/issues/datahike-query-clause-order-empty-results.md`
+  (`docs/seon/orchestrator/issues/archive/datahike-query-clause-order-empty-results.md`
   has the full dispatch scope). Nothing new launches until the owner is back.
 
 ### 2026-07-02 — skip-syms DELETED (resumed unit, complete)
@@ -1565,3 +1565,34 @@ Eval lane only; NO `src/seon` edits — `src-inspect-ai` + `evals` + `docs`.
 - Evidence: `evals/runs/2026-07-05-pre-slice4-debt/`. Next: slice 4 —
   frozen SWE-bench Verified dev slice (n≈10) on the fixed substrate +
   the turn-budget memo.
+
+## 2026-07-06 — eval lane: terminal-bench adapter SHIPPED (mechanism proven) + a defect handoff
+
+- **Unit D done (opus build, opus-reviewed lane):** `SeonAgent(BaseAgent)`
+  (`seon_inspect.tb_agent`) runs inside terminal-bench's UNMODIFIED harness
+  via `--agent-import-path`. Mechanism: put_archive the cached /opt/seon
+  tarball (727 MB, 6.0 s inject) + the env-overridable entrypoint into the
+  TASK's own container; boot 14.8 s; pod reached via the BUNDLED node over
+  exec_run (no curl assumed, no ports — tb owns the compose); bounds via
+  shared `bench_common.apply_run_bounds`. THEIR tests + tmux + parser +
+  verdict, untouched. TB pin caveat: vendored registry has NO 2.0 entry —
+  2.0 comparability needs a submodule/pkg bump (owner call), tb rows are
+  mechanism-proof only until then.
+- **Review fix folded (quality pass on the whole substrate, opus):**
+  `bench_common.deadline_below_door` — pod deadline now STRICTLY below the
+  door timeout in BOTH arms (was equal: a time-exhausted sample could
+  coin-flip into an EXCLUDED solve_timeout flake and inflate the mean);
+  guard tests added. Hardening recorded not built (safe at concurrency 1):
+  sample_port birthday-collision guard + relay single-A-record/supervision
+  — both REQUIRED before concurrency >1 or milestone tiers.
+- **DEFECT HANDOFF (eval→tooling, evidence
+  `evals/runs/2026-07-06-tb-adapter/`):** hello-world task — agent replied
+  "Done! Created /app/hello.txt …", `closed_reason :completed`, but the
+  file was ABSENT at oracle time (tb verdict Unresolved, both tests
+  failed). fs path-doubling ruled UNLIKELY (fs contract resolves absolute
+  paths absolutely — fs.cljs grants docstring — and the 2026-07-05 debt
+  probe wrote an absolute path fine). Leading hypothesis = the standing
+  FABRICATION class: success claimed without a verified write, or a failed
+  write envelope ignored. Needs a repro with pod-eval-log capture (the tb
+  container is destroyed post-run). Related standing item: the
+  fabricated-echo render lever.
