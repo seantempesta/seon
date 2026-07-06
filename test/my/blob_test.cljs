@@ -199,6 +199,33 @@
                            (is (= "row-149\nrow-150" (:my.blob/content t))))))))))
       done)))
 
+(deftest text-refuses-a-binary-blob
+  (async done
+    (run-test
+      (fn [conn]
+        ;; A PNG signature + IHDR carries NUL bytes and (as UTF-8) replacement
+        ;; chars — text/ must refuse it as a not-text envelope naming the
+        ;; recorded media, NOT return latin1 mojibake with ok? true.
+        (let [png (str "PNG\r\n\n"
+                       (js/String.fromCharCode 0 0 0 13) "IHDR"
+                       (js/String.fromCharCode 0 0 0 1 0 0 0 1))]
+          (-> (blob/put! {:my.blob/content png :my.blob/media :png})
+              (.then (pinned conn
+                       (fn [{:my.blob/keys [hash]}]
+                         (let [t (blob/text {:my.blob/hash hash})]
+                           (is (false? (:my.blob/ok? t)) "binary blob refuses")
+                           (is (str/includes? (:seon.error/message t)
+                                              "binary blob")
+                               "honest not-text message")
+                           (is (= :png (get-in t [:seon.error/data :my.blob/media]))
+                               "error data names the recorded media")
+                           (is (nil? (:my.blob/content t))
+                               "no mojibake content leaks"))
+                         ;; get still reaches the bytes (unchanged)
+                         (is (true? (:my.blob/ok? (blob/get {:my.blob/hash hash})))
+                             "get/stat still reach a binary blob")))))))
+      done)))
+
 ;; ---------------------------------------------------------------------------
 ;; 4. concat! — chunked put!s assemble into ONE canonical blob.
 ;; ---------------------------------------------------------------------------

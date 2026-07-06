@@ -101,7 +101,10 @@
    [::lines-returned {:optional true} ::lines-returned]
    [::total-lines    {:optional true} ::total-lines]
    [::tokens         {:optional true} ::tokens]
-   [::error          {:optional true} ::error]])
+   [::error          {:optional true} ::error]
+   ;; A binary blob refuses as a not-text envelope (naming the recorded media).
+   [:seon.error/message {:optional true} :string]
+   [:seon.error/data    {:optional true} [:map [::media {:optional true} ::media]]]])
 
 (schema/register! ::stat-request
   [:map [::hash ::hash]])
@@ -162,6 +165,19 @@
    ::error (str "no blob stored under " hash
                 " — (my.blob/stat {:my.blob/hash …}) checks the DB projection")})
 
+(defn- text-content?
+  "Whether `content` reads as text rather than binary — a COMPUTED sniff.
+
+   NOT a media allowlist: `::media` is an optional hint and any hand-kept
+   name set of text-vs-binary types would drift. A binary blob (a PNG,
+   audio, an archive) read back as UTF-8 carries NUL (`\\u0000`) and U+FFFD
+   replacement chars from the invalid byte sequences; real text carries
+   neither. Scans a bounded prefix so a huge blob is never fully walked."
+  [content]
+  (let [head (subs content 0 (min (count content) 8192))]
+    (not (or (str/includes? head "\u0000")
+             (str/includes? head "\uFFFD")))))
+
 (defn- page-lines
   "Slice `content` to a 1-based line window with honest totals.
 
@@ -182,6 +198,8 @@
 
 ;;; VERBS — put! is ^:async (it AWAITS the datom write); reads are sync so
 ;;; they compose inside let-bindings without an await.
+
+(declare stat) ; text refuses a binary blob by naming stat's recorded media
 
 (defn ^:async put!
   "Persist `:my.blob/content` content-addressed; record its projection.
@@ -271,12 +289,31 @@
    `:my.blob/from-line` + `:my.blob/max-lines` to walk the rest. The
    response always carries `:my.blob/total-lines` and the whole blob's
    `:my.blob/tokens`, so a partial page never looks complete —
-   `lines-returned` < `max-lines` means you ran off the end."
+   `lines-returned` < `max-lines` means you ran off the end.
+
+   A BINARY blob (a PNG, audio, an archive) is not pageable text: `text`
+   refuses it with `{:my.blob/ok? false :seon.error/message …}` naming the
+   recorded media, rather than returning mojibake — reach its bytes with
+   [[get]] instead."
   {:malli/schema [:=> [:cat ::text-request] ::text-response]}
   [{::keys [hash from-line max-lines] :or {max-lines default-max-lines}}]
   (let [{ok? ::ok? :as env} (get {::hash hash})]
-    (if-not ok?
+    (cond
+      (not ok?)
       (select-keys env [::ok? ::hash ::error])
+
+      ;; A binary blob (image/audio/archive) read back as UTF-8 is mojibake,
+      ;; never pageable text — refuse with an honest not-text envelope
+      ;; (naming the recorded media) instead of returning latin1 garbage
+      ;; with ok? true. get/stat still reach it as bytes.
+      (not (text-content? (::content env)))
+      (let [media (::media (stat {::hash hash}))]
+        (cond-> {::ok?               false
+                 ::hash              hash
+                 :seon.error/message "binary blob — not pageable as text"}
+          media (assoc :seon.error/data {::media media})))
+
+      :else
       (merge {::ok?    true
               ::hash   hash
               ::tokens (::tokens env)}

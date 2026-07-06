@@ -249,13 +249,23 @@
      :seon.render.value/count  (counted-count x)}
 
     (map? x)
-    ;; REPL-faithful: keep the map's NATURAL key order (what `pr-str` shows),
-    ;; never re-sort — an agent reading a constructed value back (e.g. an
-    ;; `{:seon.db/ok? false …}` envelope) sees the keys as it built them.
-    (let [shown-ks (take max-keys (keys x))
+    ;; Over the `max-keys` bound, keep the SMALLEST entries — ranked by
+    ;; RENDERED size (the bounded skeleton's pr-str length), ties broken by
+    ;; original position. A first-N cut drops tiny load-bearing keys (a blob
+    ;; hash, a count, a recovery handle) whenever they sit past the first N,
+    ;; while keeping bulk payload strings; ranking by size elides the bulk and
+    ;; keeps the navigation/handle keys. The KEPT entries then render in the
+    ;; map's NATURAL key order (REPL-faithful — an agent reading a constructed
+    ;; `{:seon.db/ok? false …}` envelope back sees the keys as it built them,
+    ;; and every retained get-in path stays valid). The `+N more keys` marker
+    ;; stays honest.
+    (let [sampled  (mapv (fn [[k v]] [k (sample* v opts (inc depth))]) x)
+          ranked   (sort-by (fn [[i [_ sv]]] [(count (pr-str sv)) i])
+                            (map-indexed vector sampled))
+          keep-idx (into #{} (map first) (take max-keys ranked))
+          kept     (keep-indexed (fn [i kv] (when (contains? keep-idx i) kv)) sampled)
           elided   (max 0 (- (count x) max-keys))]
-      (cond-> (into {} (map (fn [k] [k (sample* (get x k) opts (inc depth))]))
-                    shown-ks)
+      (cond-> (into {} kept)
         (pos? elided) (assoc :seon.render.value/elided-keys elided)))
 
     (vector? x) (sample-seqish x opts depth :vector)
@@ -417,10 +427,19 @@
         clip? (truncated? skel)
         body  (emit skel 0)
         tsz   (top-type+size value)
+        ;; The drill hint teaches BOTH recovery (navigate the live var) AND
+        ;; durability (`keep:` promotes the whole value to a content-addressed
+        ;; blob that survives turns/prune) — a big clipped value the agent
+        ;; wants to KEEP across turns otherwise dies when its `result/<id>`
+        ;; stash is pruned. The `keep:` idiom only renders when an `eval-id`
+        ;; names a live var to promote.
+        id?   (not (str/blank? eval-id))
         hint  (when clip?
                 (str "\n; ‹partial view"
                      (when tsz (str " of " tsz)) "› — the COMPLETE value is "
-                     "result/" eval-id "  (get-in result/" eval-id
+                     "result/" eval-id
+                     (when id? (str " · keep: (my.blob/put! result/" eval-id ")"))
+                     "  (get-in result/" eval-id
                      " […]) · filter · count · take/drop"))]
     (str body hint)))
 

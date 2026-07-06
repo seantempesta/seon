@@ -25,6 +25,7 @@
     [seon.agent.run :as run]
     [seon.agent.turn :as turn]
     [seon.ai :as llm]
+    [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.ai.openai-compat :as openai]
     [seon.analyzer-info :as ai]
@@ -1359,6 +1360,29 @@
     (is (str/includes? whole big)
         "the full value is present uncut in the row")))
 
+(deftest eval-row-clip-marker-is-tokens-not-chars
+  ;; The `(N of M)` handle marker must speak the SAME unit as the inline
+  ;; ⟨… tokens⟩ guide — both TOKENS (no mixed units in one row). body-cap /
+  ;; full are CHAR budgets converted at the display site via chars->tokens.
+  (let [big-edn (str "[" (str/join " " (repeat 300 "\"item-value\"")) "]")
+        row     {:seon.eval/source "(get-stuff)" :seon.eval/ok? true
+                 :seon.eval/result-edn big-edn :seon.eval/id "tok0000001a"
+                 :seon.render/result-body-cap 200}
+        out     (ctx/format-eval-row row false)
+        handle  (first (filter #(str/includes? % "result/tok0000001a")
+                               (str/split-lines out)))]
+    (is (str/includes? handle (str "(" (tokens/chars->tokens 200)
+                                   " of " (tokens/chars->tokens (count big-edn))
+                                   " tokens)"))
+        "the handle marker is token-denominated and labeled 'tokens'")
+    ;; the OLD char-denominated marker must be gone
+    (is (not (str/includes? out (str "(200 of " (count big-edn) ")")))
+        "no bare char marker survives")
+    ;; and it matches the inline TRUNCATED guide's unit
+    (is (str/includes? out (str "of " (tokens/chars->tokens (count big-edn))
+                                " tokens"))
+        "the inline TRUNCATED guide speaks the same token unit")))
+
 ;; ------------------------------------------------------------
 ;; format-eval-row — the REPL-faithful transcript row (ported 2026-07-02
 ;; from agent_context_test.cljs.disabled; assertions retargeted to the
@@ -1425,18 +1449,21 @@
         "no output attr → form then `;=>` value, no blank line injected")))
 
 (deftest eval-row-clipped-value-annotates-shown-of-full
-  ;; a clipped value appends `(N of M)` to the result/<id> handle so the
-  ;; agent knows the shown display is a partial view of a live whole
-  ;; value. The result body clips at result-body-render-cap (the store
-  ;; ceiling), so the value must exceed THAT to clip.
+  ;; a clipped value appends `(N of M tokens)` to the result/<id> handle so
+  ;; the agent knows the shown display is a partial view of a live whole
+  ;; value. The marker speaks TOKENS (Token Reporting rule) — same unit as
+  ;; the inline ⟨… tokens⟩ guide. The result body clips at
+  ;; result-body-render-cap (the store ceiling), so the value must exceed
+  ;; THAT to clip.
   (let [full (+ ctx/result-body-render-cap 5000)
         huge (apply str (repeat full "z"))
         row  (ctx/format-eval-row
                {:seon.eval/source "(big)" :seon.eval/ok? true
                 :seon.eval/result-edn huge :seon.eval/id "cp0000001a"})]
     (is (str/includes? row (str "result/cp0000001a ("
-                                ctx/result-body-render-cap " of " full ")"))
-        "the handle carries (shown of full) so the clip is unambiguous")
+                                (tokens/chars->tokens ctx/result-body-render-cap)
+                                " of " (tokens/chars->tokens full) " tokens)"))
+        "the handle carries (shown of full tokens) so the clip is unambiguous")
     (is (str/includes? row "holds it whole")
         "the size guide still fires for the clipped scalar")))
 

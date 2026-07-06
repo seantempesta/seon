@@ -840,9 +840,19 @@
                  ;; directly. Prior-session rows carry NO handle (their
                  ;; vars died with the process). A clip appends `(N of M)`
                  ;; so the agent knows the shown value is partial.
+                 ;; The `(N of M)` clip marker is TOKENS (Token Reporting
+                 ;; rule): `body-cap`/`full` are CHAR budgets (the ctx clip
+                 ;; plumbing), converted here at the display site so this
+                 ;; marker speaks the SAME unit as the inline `⟨… tokens⟩`
+                 ;; guide `cap-result-body` appends (no mixed units in one
+                 ;; row). Render-time-computed off `raw`, so aging is
+                 ;; unaffected (byte-stable per fixed age).
                  handle  (when-not prior?
                            (str " ; result/" eid
-                                (when clipped? (str " (" body-cap " of " full ")"))))
+                                (when clipped?
+                                  (str " (" (tokens/chars->tokens body-cap)
+                                       " of " (tokens/chars->tokens full)
+                                       " tokens)"))))
                  lines   (str/split-lines v)]
              ;; Prefix ONLY the first line with `;=>` + handle; continuation
              ;; lines (a clip's own `;` guide) stay as the body wrote them.

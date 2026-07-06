@@ -158,6 +158,37 @@
       (is (str/includes? out "result/xyz123"))
       (is (str/includes? out "get-in")))))
 
+(deftest map-elision-keeps-smallest-load-bearing-keys
+  (testing "over the key bound, tiny keys (hashes/counts) survive and the bulk
+            payload strings are elided — ranked by rendered size, not first-N"
+    (let [big  (apply str (repeat 400 "X"))   ; huge payload
+          mid  (apply str (repeat 30 "m"))    ; medium filler (> a hash)
+          m    (into {:seon.agent.shell/out-blob "c4685deadbeefc4685deadbeef"
+                      :seon.agent.shell/err-tokens 17}
+                     (concat [[:payload-a big] [:payload-b big] [:payload-c big]]
+                             (for [i (range 8)] [(keyword (str "f" i)) mid])))
+          out  (v/render-ai "eid1" m)]
+      ;; the two tiny load-bearing keys survive
+      (is (str/includes? out "c4685deadbeefc4685deadbeef"))
+      (is (str/includes? out "err-tokens"))
+      ;; the huge payloads are elided (never rendered whole)
+      (is (not (str/includes? out big)))
+      ;; honest elision marker
+      (is (str/includes? out "more keys"))
+      ;; every retained key still resolves against the live value (path valid)
+      (is (str/includes? out "out-blob")))))
+
+(deftest render-ai-hint-teaches-durability-promotion
+  (testing "a partial view's drill hint names BOTH recovery and the my.blob/put!
+            keep idiom when a result id exists"
+    (let [out (v/render-ai "keep1" (vec (range 2000)))]
+      (is (str/includes? out "partial view"))
+      ;; recovery idiom
+      (is (str/includes? out "get-in"))
+      ;; durability idiom
+      (is (str/includes? out "keep:"))
+      (is (str/includes? out "my.blob/put! result/keep1")))))
+
 (deftest render-ai-long-string-reports-length
   (let [out (v/render-ai "s1" (apply str (repeat 2000 "x")))]
     (is (str/includes? out "tokens⟩"))
