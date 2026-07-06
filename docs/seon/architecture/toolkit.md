@@ -331,7 +331,9 @@ to change a file is `view` → `replace!`, never a whole-file `write-file`.
   `src/**/*.cljs`; a slash-free glob matches the basename at any depth, `**/`
   is zero-or-more segments), `::match-ext` suffix, `::sort` (`:name` default /
   `:mtime` newest-first), `::skip-hidden`, and a `::max-results` cap with
-  honest `::total-found` + `::truncated?` + a narrowing `::hint`.
+  `::total-found` (the count found BEFORE the walk stopped at the cap — a true
+  grand total only when `::truncated?` is false; no second counting pass) +
+  `::truncated?` + a narrowing `::hint`.
 - **`#code` heredoc** — `::find`/`::replace`/`::content` (and `write-file`'s
   `::content`) accept the inert `{:seon.code/lang … :seon.code/text …}` value a
   `#code/<lang> <<SENTINEL … SENTINEL` block reads to, so foreign source with

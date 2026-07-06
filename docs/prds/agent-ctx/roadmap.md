@@ -31,6 +31,12 @@ evaluated and REFUTED as a replacement (open maps → no-op; wrong-ns near-miss
 rejected by its levenshtein threshold even closed) — see the correction in
 [[research/malli-instrument-error-data-2026-07-04]] §5.
 
+**Cleanup sweep 2026-07-06:** removed dead JVM-era/helper code that the issue
+audit had already isolated: stale SQL helpers, BMI consumer-domain metrics,
+the unused REPL graduation prototype, the deprecated JVM SSE `send!` shim, and
+the stateful `schema-required-count` cache. The dev-hook generative-test fixture
+moved from `src/` to `test/` under the same namespace.
+
 ## Tooling lane — the ordered path (ratified with owner 2026-07-02)
 
 **Interleave rule (owner call): one stability unit lands per feature unit** —
@@ -289,6 +295,48 @@ substrate):
    `(pf-thing-ax 3)` with two 1-edit session fns → REFUSED, error names
    both candidates.
 
+10. **Edit-protocol arc (SWE-bench-grade edit surface)** — ✅ BUILT +
+    VERIFIED, HANDOFF-GATE PENDING (2026-07-06; spec
+    [[edit-protocol-spec]]). The anchored in-place edit surface bench work
+    needs, seven shas on `feature/agent-ctx` through HEAD `336917af`:
+    - `4ed0f793` **A1** — the `#code/<lang> <<SENTINEL` heredoc literal:
+      foreign source with quotes/backslashes/regexes crosses into an edit
+      with ZERO escaping (inert `{:seon.code/lang … :seon.code/text …}`
+      value; `seon.repl.internal` pre-pass; render → lang-fenced code).
+    - `24d5c49c` **A2/A3** — `seon.agent.fs/replace!` + `insert!` + `view`
+      (line-numbered bounded read + `::file-sha` fence), backed by the pure
+      deterministic cascade `seon.agent.fs.match/decide` (`.cljc`, no IO):
+      **smart matching FINDS candidates, only DETERMINISTIC matching
+      MUTATES** — exact-at-count → near-window → conservative
+      line-ending/trailing-ws normalization (never indentation); ambiguous
+      or absent → line-numbered candidate previews, writes nothing.
+    - `f9d56f44` **T2** — gold-patch replay falsification harness:
+      **WRONG = 0** hard gate across 15 gold hunks / 10 SWE-bench Verified
+      dev instances (git-apply oracle, 8/8 ambiguity refusals).
+    - `ca2e4afb` **web `search`** — Gemini grounding backend, backend-agnostic
+      rows (composes `search` → `fetch` → blob).
+    - `af36a3db` **A7** — rendered-output audit fixes (handles survive
+      sampler elision; token-honest units; blob binary refusal).
+    - `4af04a73` **A6** — tool-parity sweep: `replace!` `::all?`, grep
+      `::context-lines`/`::multiline?`, `walk-dir` glob/sort, background
+      jobs (+ `:jobs` section), no destructive verb-boundary clipping.
+    - `336917af` **A4** — parsed pytest results: ONE parser
+      (`seon.agent.testrun/parse`) feeding the shell envelope +
+      the derived `:test-failures` context section (vanishes on a green run).
+    Toolbelt exposure (A5 step 0, owner-ack'd 2026-07-06): `[seon.agent.fs
+    :as fs]` added to `config/system.edn` `:seon.eval/home-requires` (both
+    agent- and root-context) so freshly-minted agents render the fs verbs
+    as a discoverable compact card — live-proven on the default pod
+    (`view`/`replace!`/`insert!` first-lines in `ctx-preview`). Docs pass
+    (A5 step 2): toolkit.md + `/repl` skill + this roadmap + coordination.md.
+    **PENDING (orchestrator-run, NOT tooling-lane):** the `/opt/seon`
+    overlay refresh (bench containers pin the pre-arc `seon:slice1` digest)
+    → **T4 live drive** (the handoff gate — DeepSeek drives on scratch
+    non-Clojure repos exercising every verb, dedicated observer) → **A/B
+    handoff** (frozen dev slice, existing tools vs +heredoc+anchored-edit;
+    resolved count + edit-failure incidents). **Arc B (SCIP cross-language
+    indexer) is GATED on the A/B result** (owner decision 2026-07-05).
+
 Stability queue (interleaved, one per feature unit above; owner-agreed
 2026-07-02 — each fix REUSES an existing mechanism, no new ones):
 
@@ -298,13 +346,13 @@ Stability queue (interleaved, one per feature unit above; owner-agreed
    `warn-on-seed-origin-forge!` (the forgery becomes impossible, killing the
    ×3 boot warning).
 2. **Pub-socket feed migration** → **transact-timeout semantics**
-   (`docs/seon/orchestrator/issues/tx-feed-pump-timeouts.md`).
+   (`docs/seon/orchestrator/issues/archive/tx-feed-pump-timeouts.md`).
 3. **SCI alias root-fix + fallback DELETION** — store the analyzer's requires
    on `:seon.ns/source` so SCI resolves aliases (code-as-data reuse); a fn
    that still can't run bounded renders a `:seon/error` tile
    (never-crash-always-surface) and the unbounded compiled fallback path is
-   REMOVED. Absorbs `sci-bounding-fallback-plan-block.md` and part of the
-   `*conn*` root.
+   REMOVED. Absorbs `docs/seon/orchestrator/issues/archive/sci-bounding-fallback-plan-block.md`
+   and part of the `*conn*` root.
 4. ~~**`*conn*` single-dynamic-root / fiber-local**~~ — DISSOLVED by the
    one-pod-per-cluster ruling (coordination.md MAJORs): one pod = one world =
    one root is correct by construction; the root-swap machinery is DELETED in
@@ -318,7 +366,7 @@ Stability queue (interleaved, one per feature unit above; owner-agreed
    `^:async` fn that cannot take the Promise-aware injecting wrapper
    (variadic/multi-arity, e.g. `seon.db/transact!`, `seon.eval/eval`,
    `seon.client/mem-db`) registers NO wrapper; computed from the async flag
-   + live fn shape + schema form, never a name. Boot 553/18 → 569/3.
+	   plus live fn shape plus schema form, never a name. Boot 553/18 → 569/3.
 6. **Mechanical unification sweep** (one cleanup unit, after roadmap item 1
    lands — audit 2026-07-02): `SEON_EMBED` read ×3 → the one
    `embed-retrieval-on?`; the ×8 pr-str+clip helpers → one bounded-print

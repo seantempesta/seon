@@ -187,6 +187,9 @@
 (schema/register! :seon.agent.fs/glob        :string) ; e.g. "*.py" or "src/**/*.cljs"
 (schema/register! :seon.agent.fs/skip-hidden :boolean)
 (schema/register! :seon.agent.fs/max-results :int)
+;; total-found = how many matches were collected BEFORE the walk stopped at
+;; max-results — a true grand total ONLY when :truncated? is false (the walk
+;; halts at the cap; there is no unbounded second counting pass).
 (schema/register! :seon.agent.fs/total-found :int)
 (schema/register! :seon.agent.fs/truncated?  :boolean)
 (schema/register! :seon.agent.fs/hint        :string)
@@ -557,7 +560,9 @@
    Returns:
      {:seon.agent.fs/ok? true :seon.agent.fs/path <p>
       :seon.agent.fs/entries [<absolute-path>...]
-      :seon.agent.fs/total-found <int>
+      :seon.agent.fs/total-found <int>   ; found BEFORE the walk stopped at
+                                         ; the cap — a true grand total only
+                                         ; when :truncated? is false
       :seon.agent.fs/truncated? <bool>}
      {:seon.agent.fs/ok? false :seon.agent.fs/path <p> :seon.agent.fs/error <s>}
 
@@ -572,7 +577,9 @@
      :seon.agent.fs/sort        — :name (default) or :mtime (newest-first)
      :seon.agent.fs/max-results — cap (default 5000); `:truncated? true` +
                                   a :seon.agent.fs/hint when hit (raise the
-                                  cap or narrow the glob)
+                                  cap or narrow the glob). On truncation the
+                                  walk STOPS at the cap, so :total-found then
+                                  equals the cap, NOT the true grand total.
 
    Example:
      (seon.agent.fs/walk-dir {:seon.agent.fs/path \"/Users/you/src/your-project\"
@@ -601,8 +608,10 @@
                                  :seon.agent.fs/truncated?  @!truncated}
                           @!truncated
                           (assoc :seon.agent.fs/hint
-                                 (str "hit the " max-results "-result cap — more files "
-                                      "match. Raise :seon.agent.fs/max-results, or narrow "
+                                 (str "hit the " max-results "-result cap — the walk STOPPED "
+                                      "here, so :seon.agent.fs/total-found is the count found "
+                                      "before the cap, NOT a true grand total (more files "
+                                      "match). Raise :seon.agent.fs/max-results, or narrow "
                                       "with :seon.agent.fs/glob / :seon.agent.fs/match-ext / a "
                                       "deeper :seon.agent.fs/path.")))))
                     (catch :default e (int/->err path e))))
@@ -727,6 +736,20 @@
    `:seon.agent.fs/replace` accept a plain string or a `#code` heredoc
    value. Pass the `:seon.agent.fs/file-sha` from your [[view]] to fence
    against a stale edit (mismatch → an ok?-false with the actual sha).
+
+   Worked example — a `#code` heredoc carries raw foreign source (quotes,
+   backslashes, regexes) with ZERO escaping:
+
+     (replace! {:seon.agent.fs/path \"app.py\"
+                :seon.agent.fs/find #code/python <<PY
+     def f(x):
+         return x
+     PY
+                :seon.agent.fs/replace #code/python <<PY
+     def f(x):
+         return x + 1
+     PY
+                })
 
    Success carries the new `:seon.agent.fs/file-sha`, `range-after`, the
    lines added/removed, and a line-numbered `excerpt` of the result — no

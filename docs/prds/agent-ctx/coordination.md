@@ -1538,6 +1538,19 @@ Eval lane only; NO `src/seon` edits — `src-inspect-ai` + `evals` + `docs`.
 - **Measurement offer:** when it lands, the eval lane re-runs the SAME
   frozen dev slice — a clean before/after A/B on the ledger (the
   numbers-drive-the-product loop, owner ruling 2026-07-04).
+- **✅ CLOSED 2026-07-06 (tooling → edit-protocol lane).** The verb SHIPPED:
+  `seon.agent.fs/replace!` + `insert!` + `view` (the str-replace shape,
+  fail-loud on 0/>1, same grant gates + `:seon/error` envelope), backed by
+  the pure deterministic cascade `seon.agent.fs.match/decide` (`.cljc`) —
+  **smart matching FINDS candidates, only DETERMINISTIC matching MUTATES**;
+  ambiguous/absent → line-numbered candidate previews, writes nothing.
+  Sha `24d5c49c` (A2/A3 core verbs + cascade) + `4af04a73` (A6 parity:
+  `replace!` `::all?`, grep context/multiline, walk-dir glob/sort). Also
+  landed: the `#code/<lang> <<SENTINEL` heredoc literal (`4ed0f793`) so
+  foreign source crosses into `::find`/`::replace`/`::content` with zero
+  escaping. Falsified WRONG=0 by the T2 gold-patch replay (`f9d56f44`).
+  The requested before/after A/B (existing tools vs +anchored-edit) is now
+  gated only on the `/opt/seon` overlay refresh — see the image entry below.
 
 ## 2026-07-05 — eval lane: pre-slice-4 debt unit SHIPPED (4/4 live-proven) [touches docker/seon-entrypoint]
 
@@ -1637,3 +1650,43 @@ against a SEPARATE `git apply` oracle. Evidence:
   `bin/replay_gold_patches.clj`, `evals/runs/2026-07-06-t2-gold-replay/**`.
   Touches `evals/` per spec §T2 authorization (new dir, no existing evidence
   modified). No src/pod changes; no default-cluster resets.
+
+## 2026-07-06 — edit-protocol → eval lane: `/opt/seon` overlay REFRESH requested (A/B ready on refresh)
+
+The edit-protocol tool arc is complete and committed on `feature/agent-ctx`
+through **HEAD `336917af`** — seven shas:
+
+- `4ed0f793` A1 — `#code/<lang> <<SENTINEL` heredoc literal (zero-escaping
+  foreign source into `::find`/`::replace`/`::content`).
+- `24d5c49c` A2/A3 — `seon.agent.fs/replace!` + `insert!` + `view` anchored
+  edit verbs + the pure deterministic cascade `seon.agent.fs.match/decide`.
+- `f9d56f44` T2 — gold-patch replay harness, **WRONG = 0** hard gate.
+- `ca2e4afb` web `search` verb (Gemini grounding, backend-agnostic).
+- `af36a3db` A7 — rendered-output audit fixes (handles survive elision;
+  honest token units).
+- `4af04a73` A6 — tool-parity sweep (`replace!` `::all?`, grep
+  `::context-lines`/`::multiline?`, `walk-dir` glob/sort, background jobs,
+  no destructive verb-boundary clipping).
+- `336917af` A4 — parsed pytest results (one parser, shell envelope +
+  `:test-failures` section).
+
+**The ask:** the bench `/opt/seon` overlay is pinned at the `seon:slice1`
+digest (built 2026-07-05, `evals/runs/2026-07-05-slice1-canonical-image/`) —
+it PREDATES the whole arc, so bench containers do not yet carry the
+anchored-edit verbs, `#code`, or the parity/web/pytest tools. A refresh of
+the overlay bundle (rebuild at the current HEAD digest) is needed before the
+A/B can measure anything.
+
+**The A/B (owner-ordered 2026-07-05, numbers-gate Arc B):** on the FROZEN
+SWE-bench Verified dev slice, before/after = *existing tools* vs *+heredoc +
+anchored-edit + parity tools*; metrics = resolved count + edit-failure
+incidents from the ledger. Requested once the overlay is refreshed.
+
+**Coordination note:** I did NOT rebuild/modify `docker/` — the eval lane
+owns the image/entrypoint (§9 contract) and slice-4 / tb-adapter work is
+in-flight (the 2026-07-06 tb fabrication defect handoff is still open). Also
+gating step 0 (owner-ack'd): `[seon.agent.fs :as fs]` is now in
+`config/system.edn` `:seon.eval/home-requires` (both agent- and
+root-context), so freshly-minted bench agents render the fs verbs as a
+discoverable compact card (live-proven on the default pod; resumed agents
+keep a stale seed-baked list — a fresh mint/cluster reset picks it up).
