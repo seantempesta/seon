@@ -111,7 +111,18 @@ turns/limit, wall, closed_reason → verdict on turn_limit 40 + 1200 s and
 whether the run-bounds ask escalates). Honest mean is the baseline — do
 NOT iterate prompts.
 
-### Unit C — baseline arm (same go can cover it; run on the SAME slice)
+### Unit C — ✅ DONE 2026-07-06 (`09e6c1f9`): baseline mean **0.700** (7/10)
+
+mini-swe-agent 2.4.5, model **deepseek-v4-pro** (NOT deepseek-chat — that
+alias now serves v4-flash, a cheaper tier; the pod's real wire model is
+v4-pro, `src/seon/ai.cljs:225` — match it or the delta is confounded).
+Official swebench grader on the arm64 images via `score_official.py`
+(swebench 4.1.0 `run_evaluation` hardcodes x86_64 — Unit B must score via
+the inspect_evals scorer, which already works on this host). Ledger join =
+row `swe_bench_verified` + `attribution.arm` (`baseline-mini-swe` vs
+`seon-overlay`). All 3 misses clean model_miss; no flakes. Original spec:
+
+### Unit C (original spec) — baseline arm (same go can cover it; run on the SAME slice)
 
 mini-swe-agent (NOT vendored; pip-pin it, record version) over the SAME
 frozen 10 instances + SAME pinned images + same model
