@@ -274,7 +274,11 @@ process_command() {
       # SEON_CLIENT_OUT seam / the live default bundle.
       local cbundle="${SEON_CLIENT_OUT:-out/client/main.js}"
       [ -f "data/clusters/$cname/frozen" ] && cbundle="$BENCH_BUNDLE"
-      echo "{ [ -f resources/public/css/output.css ] || npm run css:build; } && exec env SEON_CLUSTER_DIR=\"data/clusters/$cname\" SEON_PORT=0 SEON_PORT_FILE=\"tmp/seon-port-$cname\" SEON_REQ_SOCK=\"$SEON_REQ_SOCK\" SEON_PUB_SOCK=\"$SEON_PUB_SOCK\" SEON_FS_ROOT=\"$SEON_ROOT\" SEON_FS_READ_ONLY=1$(extra_npm_node_path) node \"$cbundle\"" ;;
+      # fs grant: default = the durable read-only repo grant; a caller-set
+      # SEON_FS_ROOT/SEON_FS_READ_ONLY is HONORED (mirrors the bench
+      # compose, which already scopes the grant per container — e.g. a
+      # drive cluster granting a writable tmp/ workspace).
+      echo "{ [ -f resources/public/css/output.css ] || npm run css:build; } && exec env SEON_CLUSTER_DIR=\"data/clusters/$cname\" SEON_PORT=0 SEON_PORT_FILE=\"tmp/seon-port-$cname\" SEON_REQ_SOCK=\"$SEON_REQ_SOCK\" SEON_PUB_SOCK=\"$SEON_PUB_SOCK\" SEON_FS_ROOT=\"${SEON_FS_ROOT:-$SEON_ROOT}\" SEON_FS_READ_ONLY=\"${SEON_FS_READ_ONLY:-1}\"$(extra_npm_node_path) node \"$cbundle\"" ;;
     cljs-watch)  echo "clj$(extra_src_sdeps) -M:cljs watch client$(extra_preload_merge)" ;;
     jvm)         echo "./bin/run" ;;
     # Local DiffusionGemma MLX worker (src-diffusion) — RunPod wire contract
