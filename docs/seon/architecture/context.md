@@ -182,6 +182,29 @@ Code grows slowly against tokens spent running things, so groups 1–2 are the
 compounding asset: as the agent persists schemas, fns, and tests, its own
 code becomes the majority of its context — self-reinforcing, cheap, cached.
 
+## Multi-agent sections — subagents + orphaned-agents
+
+Two derived sections make the spawn tree visible without any registry or
+notification state (both pure fns of the db, both vanish when their query is
+empty — the reactive rule):
+
+- **`:subagents`** (general agent-context, volatile tail near the transcript) —
+  the **direct** children the rendering agent spawned (`:seon.agent/parent` =
+  me; NOT the whole subtree). One compact line each: id · derived state · purpose
+  · and, running → `turn i/limit` + last-beat age; idle with a completed latest
+  run → the run's `:seon.agent.run/result` (+ a ref pointer); closed abnormally →
+  the `closed-reason` (a parent MUST see a child that DIED, not just one that
+  succeeded). A breaker-tripped child shows it. This is the parent's monitoring
+  surface: completion is a **fact in the DB**, so a parent that was mid-turn or
+  restarted still sees every child result — no acknowledgement, nothing to clear.
+  Childless agents render empty → it costs them zero and rides the general
+  manifest (root gets it too).
+- **`:orphaned-agents`** (root-only, config-injected via
+  `:seon.config/root-context` like `:core-faults`) — live agents whose
+  `:seon.agent/parent` is **terminated**. One line each (id · state · purpose ·
+  parent id). No action machinery — root (or the human) decides per case with the
+  existing verbs (no cascade-terminate, no reparenting: observe first).
+
 ## Inspectability — the human twin of every position
 
 The `:html` twin means every context position has a view the human can

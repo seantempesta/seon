@@ -163,6 +163,13 @@
     :seon.render/ai 'seon.agent.ctx.relevant/relevant-source-block}
    {:seon.agent.ctx/name :findings :seon.agent.ctx/priority 97
     :seon.render/ai 'seon.agent.ctx.findings/findings-block}
+   ;; Subagents monitoring surface (multiagent-context Piece 3). Volatile tail
+   ;; (child status changes each turn — sits near the transcript, below the
+   ;; plan, so it never busts the cached stable prefix). Renders NOTHING for a
+   ;; childless agent (the reactive vanish), so it costs childless agents zero
+   ;; and rides the GENERAL agent-context (root gets it via the same manifest).
+   {:seon.agent.ctx/name :subagents :seon.agent.ctx/priority 96
+    :seon.render/ai 'seon.agent.ctx.subagents/subagents-block}
    {:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
     :seon.render/ai 'seon.agent.ctx.transcript/transcript-block
     ;; the transcript carries BOTH render slots (ai + html) — the html slot
@@ -282,6 +289,20 @@
    [:seon.config.repair/max-fixes-per-form {:optional true} [:int {:min 1}]]
    [:seon.config.repair/budget-ms          {:optional true} [:int {:min 1}]]])
 
+;;; MULTI-AGENT dials (multiagent-context-spec). All three are core config
+;;; numbers, plumbed the same way as `:seon.config/on-core-error` (a plain
+;;; literal in the manifest, absent ⇒ the accessor's default): the spawn
+;;; DEPTH cap (Piece 2 — how deep the spawn tree may go), the heartbeat
+;;; WATCHDOG staleness threshold (Piece 2c), and the schedule-wake circuit
+;;; BREAKER's N + window (Piece 2d). Absent ⇒ byte-identical to the defaults.
+(schema/register! :seon.config/spawn-depth-cap [:int {:min 0}])
+(schema/register! :seon.config/watchdog
+  [:map [:seon.config.watchdog/stale-ms {:optional true} [:int {:min 1}]]])
+(schema/register! :seon.config/schedule-breaker
+  [:map
+   [:seon.config.breaker/crash-count {:optional true} [:int {:min 1}]]
+   [:seon.config.breaker/window-ms   {:optional true} [:int {:min 1}]]])
+
 (schema/register! :seon.config/manifest
   [:map
    [:seon.config/skills        {:optional true} :seon.config/skills-spec]
@@ -291,6 +312,9 @@
    [:seon.config/on-core-error {:optional true} :seon.config/on-core-error]
    [:seon.config/web           {:optional true} :seon.config/web-spec]
    [:seon.config/repair        {:optional true} :seon.config/repair]
+   [:seon.config/spawn-depth-cap   {:optional true} :seon.config/spawn-depth-cap]
+   [:seon.config/watchdog          {:optional true} :seon.config/watchdog]
+   [:seon.config/schedule-breaker  {:optional true} :seon.config/schedule-breaker]
    [:seon.config/agent-context {:optional true} :seon.config/agent-context]
    [:seon.config/root-context  {:optional true} :seon.config/root-context]])
 
@@ -875,6 +899,60 @@
   {:malli/schema [:=> [:cat] :int]}
   []
   (env-int "SEON_TURN_TIMEOUT_MS" 900000))
+
+;;; --- MULTI-AGENT dials (multiagent-context-spec) — read straight off the
+;;; manifest with a literal default (the same shape as `on-core-error`; absent
+;;; section ⇒ the shipped default). Pure fns take these as ARGS — the accessor
+;;; is only the manifest read; never mutate config from a test.
+
+(defn spawn-depth-cap
+  "Max spawn DEPTH a caller may spawn at (Piece 2 backstop).
+
+   Manifest `:seon.config/spawn-depth-cap`; default 1 (root at depth 0 spawns;
+   a depth-1 subagent may NOT). `seon.agent/start!` refuses a caller AT/over
+   this. Raise the dial (and add the spawn verbs to the general agent-context)
+   to deepen the tree."
+  {:malli/schema [:=> [:cat] :int]}
+  []
+  (let [v (get (load-manifest) :seon.config/spawn-depth-cap 1)]
+    (if (and (int? v) (>= v 0)) v 1)))
+
+(defn watchdog-stale-ms
+  "Heartbeat-watchdog staleness threshold in ms (Piece 2c).
+
+   A run whose beat (or `started-at`, if it never beat) has not progressed for
+   longer is closed `:crashed`. Manifest
+   `:seon.config/watchdog {:seon.config.watchdog/stale-ms N}`; default 1200000
+   (20 min — comfortably ABOVE the 15-min per-turn inner bound
+   `SEON_TURN_TIMEOUT_MS`, so a slow-but-alive LLM turn is never falsely
+   killed)."
+  {:malli/schema [:=> [:cat] :int]}
+  []
+  (get-in (load-manifest)
+          [:seon.config/watchdog :seon.config.watchdog/stale-ms] 1200000))
+
+(defn schedule-breaker-crash-count
+  "Schedule-wake breaker trip count N (Piece 2d).
+
+   At ≥N `:crashed` closes within the window, schedule wakes are refused.
+   Manifest `:seon.config/schedule-breaker {:seon.config.breaker/crash-count N}`;
+   default 3."
+  {:malli/schema [:=> [:cat] :int]}
+  []
+  (get-in (load-manifest)
+          [:seon.config/schedule-breaker :seon.config.breaker/crash-count] 3))
+
+(defn schedule-breaker-window-ms
+  "Schedule-wake breaker sliding window in ms (Piece 2d).
+
+   `:crashed` closes older than this don't count toward the trip; the window
+   sliding past re-enables schedules (no stored reset). Manifest
+   `:seon.config/schedule-breaker {:seon.config.breaker/window-ms N}`; default
+   1800000 (30 min)."
+  {:malli/schema [:=> [:cat] :int]}
+  []
+  (get-in (load-manifest)
+          [:seon.config/schedule-breaker :seon.config.breaker/window-ms] 1800000))
 
 (defn- upsert-by-name
   "Layer `additions` over `base` by `:seon.agent.ctx/name`, MERGING an

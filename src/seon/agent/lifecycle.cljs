@@ -103,40 +103,62 @@
    always sees the result). A blank `result` delivers nothing (there is
    nothing to say) and just closes. A failed delivery is returned as the
    error envelope WITHOUT closing the run — retry with a fixed result.
-   The result is a MESSAGE, not a state — so it is REPORT=DATA, MESSAGE=POINTER:
-   `result` is the ANSWER itself when it is short, else a SHORT pointer (the
-   stored entity id + a one-line summary) — never a long report inline (a
+
+   DURABLE VALUE (multi-agent-context Piece 1): the `result` (and optional
+   `result-ref`, an entity id pointing at the stored work product) are written
+   onto the RUN — `:seon.agent.run/result` / `:seon.agent.run/result-ref` —
+   UNCONDITIONALLY, even when the message is skipped by the answered-this-run
+   guard. Message = wake signal; datom = the value a parent (or the human)
+   reads back at any later time via the run, surviving turns and restarts. So
+   REPORT=DATA, MESSAGE=POINTER: `result` is the ANSWER itself when it is
+   short, else a SHORT pointer (the stored entity id + a one-line summary),
+   with `result-ref` the durable handle — never a long report inline (a
    multi-line result truncates mid-string and never sends). Store big findings
    as data first; the reader QUERIES the stored data. Returns `:idle` on
    success, the error envelope on a failed transact, no agent in scope, or no
    open run."
-  {:malli/schema [:=> [:catn [::result :string]]
-                  [:or :seon.derive/state :seon.db/transact-response]]}
-  [result]
-  (if-let [id (db/current-agent-id)]
-    (if-let [r (run/current-run {:seon.agent/id id})]
-      (let [ent       (db/entity {:seon.db/ref [:seon.agent/id id]})
-            parent    (:db/id (:seon.agent/parent ent))
-            recipient (or parent
-                          (:db/id (db/entity {:seon.db/ref msg/user-ref})))
-            started   (:seon.agent.run/started-at r)
-            said?     (boolean
-                        (and recipient started
-                             (messaged-recipient-since?
-                               (:db/id ent) recipient started)))
-            sent      (when-not (or (str/blank? result) said?)
-                        (await (msg/message!
-                                 {:seon.agent.message/content result
-                                  :seon.agent.message/to
-                                  (if parent [parent] [msg/user-ref])})))]
-        (if (false? (:seon.db/ok? sent))
-          sent
-          (let [env (await (run/close-run!
-                             {:seon.agent.run/id            (:seon.agent.run/id r)
-                              :seon.agent.run/closed-reason :completed}))]
-            (if (:seon.db/ok? env) :idle env))))
-      (no-open-run-error "complete" id))
-    (internal/no-agent-error "complete")))
+  {:malli/schema [:function
+                  [:=> [:catn [::result :string]]
+                   [:or :seon.derive/state :seon.db/transact-response]]
+                  [:=> [:catn [::result :string] [::result-ref :seon.db/ref]]
+                   [:or :seon.derive/state :seon.db/transact-response]]]}
+  ([result] (complete result nil))
+  ([result result-ref]
+   (if-let [id (db/current-agent-id)]
+     (if-let [r (run/current-run {:seon.agent/id id})]
+       (let [ent       (db/entity {:seon.db/ref [:seon.agent/id id]})
+             run-id    (:seon.agent.run/id r)
+             parent    (:db/id (:seon.agent/parent ent))
+             recipient (or parent
+                           (:db/id (db/entity {:seon.db/ref msg/user-ref})))
+             started   (:seon.agent.run/started-at r)
+             said?     (boolean
+                         (and recipient started
+                              (messaged-recipient-since?
+                                (:db/id ent) recipient started)))
+             ;; DURABLE VALUE first — written UNCONDITIONALLY (the said? guard
+             ;; gates only the wake MESSAGE, never the datom). A blank result
+             ;; with no ref writes nothing (optional = absent, never store nil).
+             result-row (cond-> {:seon.agent.run/id run-id}
+                          (not (str/blank? result)) (assoc :seon.agent.run/result result)
+                          (some? result-ref)        (assoc :seon.agent.run/result-ref result-ref))
+             wrote      (when (> (count result-row) 1)
+                          (await (db/transact! {:seon.db/tx-data [result-row]})))
+             sent       (when-not (or (str/blank? result) said?)
+                          (await (msg/message!
+                                   {:seon.agent.message/content result
+                                    :seon.agent.message/to
+                                    (if parent [parent] [msg/user-ref])})))]
+         (cond
+           (false? (:seon.db/ok? wrote)) wrote
+           (false? (:seon.db/ok? sent))  sent
+           :else
+           (let [env (await (run/close-run!
+                              {:seon.agent.run/id            run-id
+                               :seon.agent.run/closed-reason :completed}))]
+             (if (:seon.db/ok? env) :idle env))))
+       (no-open-run-error "complete" id))
+     (internal/no-agent-error "complete"))))
 
 (defn ^:async pause
   "Hold the calling agent WITHOUT killing it — stamp its run `paused-at`.

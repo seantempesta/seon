@@ -183,10 +183,50 @@ a quiet stop — it recurs so the next turn surfaces the errors. Two consecutive
 "thinking mode" of up to two empty turns before the loop concludes there is no
 more work. A `wait` parks the agent (wakeable) with its reason on the run's
 `closed-reason`; a `complete` delivers its result as a **message** (to the parent
-or the human) and parks — the result is a message, never a held state — *unless*
-the agent already messaged that recipient this run: the earlier message IS the
-answer (derived from the run's message log, no stored flag), so `complete` closes
-without sending a second, answer-clobbering message.
+or the human) and parks — *unless* the agent already messaged that recipient this
+run: the earlier message IS the answer (derived from the run's message log, no
+stored flag), so `complete` closes without sending a second, answer-clobbering
+message.
+
+**Durable result + outcome routing (multi-agent).** A `complete` also writes the
+result as **DATA on the run** — `:seon.agent.run/result` (the short answer /
+pointer) and optional `:seon.agent.run/result-ref` — *unconditionally* (even when
+the answered-this-run guard skips the message). Message = wake signal; datom = the
+value a parent reads back at **any** later time (a subagents-section render, a
+query), surviving turns and restarts. Beyond `complete`, **every abnormal close is a
+task OUTCOME the PARENT owns**: `close-run!` (the ONE choke point all closes funnel
+through) messages the parent — child id + `closed-reason` + turn count, `origin
+:agent` **from the child** so it WAKES the parent (never `:core`, which the wake gate
+excludes) — for `:turn-limit`/`:deadline-exceeded` (with a *continue* affordance —
+budget exhausted is not death, re-message to open a fresh run),
+`:error`/`:no-forms`, and `:crashed`. A `:crashed` (wedge) **also escalates to
+root** (deduped when the parent IS root; root's own wedge is parentless → the user).
+`:waited`/`:terminated`/`:superseded` message no one. Every close stamps
+`:seon.agent.run/closed-at` (the breaker's window instant; run duration is
+derivable).
+
+**Heartbeat watchdog (`:crashed`).** A wedged agent never closes its own run, so a
+core scan rides the **one ticker** (`run/close-stale-runs!` — no parallel timer;
+the detection core `run/stale-run-ids` is a **pure fn of (db, now)**): an OPEN,
+non-paused run whose freshness anchor (`last-beat-at`, else `started-at` for a
+never-beat wedge) is older than `:seon.config/watchdog-stale-ms` (default 20 min,
+above the per-turn bound) is closed `:crashed` (→ the parent/root outcome notice +
+the pointer retract that unsticks the agent) **and** recorded as a `:core` fault via
+`seon.error/record!` — a wedge is OUR bug, so it enters the standard triage chain
+(watch-faults → inspect → repro → fork; the dev `:crash` dial exits loudly). Fencing
+already covers the false-positive: a late-beating driver's leading CAS aborts
+against the retracted pointer (a no-op, never a double-drive). **Root self-heals
+through the same path but does NOT auto-rewake** — the close unsticks it (idle +
+wakeable); it resumes on the next natural contact.
+
+**Schedule-wake circuit breaker.** With no auto-rewake, the one autonomous
+repeat-wake source is schedules — a deterministic wedge + a periodic schedule is a
+crash loop. The schedule wake-gate refuses to fire for an agent with ≥N `:crashed`
+closes in a recent window (`derive/schedule-breaker-tripped?`, windowed over
+`closed-at`; dials `:seon.config/schedule-breaker`, default N=3 / 30 min) — **derived,
+no stored state**: the window sliding past re-enables it. Human/agent MESSAGES still
+wake it (deliberate contact is not a loop); only schedules are gated. The refusal is
+visible in the subagents-section line.
 
 ## Triggering + fencing — the reactive wake
 
@@ -328,13 +368,24 @@ overview at `/`) **and** the system orchestrator (the lifecycle role — it star
 and manages other agents). These are two facets of the same elevated grant and the
 same bootstrap; there is **never** a second supervisor or overview entity.
 
-- **`seon.agent/start!` — the capability-gated lifecycle verb.** `start!` is a core
-  verb (an alias of `create!`) **granted to root**, called through the **same
-  `/call` capability gate** as any other fn — not a bypass. It transacts a new
-  **idle** child agent and **writes `:seon.agent/parent` = the caller** (root). That
-  write *is* the activation of `:seon.agent/parent`; no separate writer exists. The
-  gate check is ordinary: the caller must hold the spawn capability — root does by
-  grant, a normal agent does not unless granted.
+- **`seon.agent/start!` — the spawn verb, a SOFT gate + a hard depth-cap backstop.**
+  `start!` is a core verb (an alias of `create!`) that transacts a new **idle** child
+  agent and **writes `:seon.agent/parent` = the caller**. That write *is* the
+  activation of `:seon.agent/parent`; no separate writer exists. Two gates, both
+  real (there is **no `/call` capability gate** in the pod — that was aspirational):
+  - **Soft gate — home-requires.** The spawn verbs (`start!`/`delegate!` via the
+    `seon.agent` alias) sit only in **root's** `:seon.eval/home-requires`
+    (`config/system.edn`'s `:seon.config/root-context`), so an ordinary agent's
+    rendered context never surfaces them. It catches the honest case.
+  - **Hard backstop — a computed depth cap.** A full-qualified
+    `(seon.agent/start! …)` slips past the soft gate, so `start!`'s **own body**
+    walks the `:seon.agent/parent` chain (`seon.agent/spawn-depth`, cycle-guarded)
+    and **refuses** when the caller's depth ≥ `:seon.config/spawn-depth-cap`
+    (default **1**: root at depth 0 spawns, a depth-1 subagent may not). The refusal
+    is the standard **error ENVELOPE** (`{:seon.db/ok? false …}`), datom-free (no
+    child minted), never a throw. It is a **config-dialed number, never a name
+    list** — raise the dial + add the spawn requires to the general agent-context to
+    deepen the tree.
 - **Start = create + quiet bootstrap, leaving the child idle.** `start!` runs the
   child's bootstrap form-vector (quiet `:core` evals, as above) and stops. The child
   does no work until it receives a trigger; to make it work, root (or anyone) sends

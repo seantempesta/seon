@@ -149,6 +149,7 @@
    [my.tile :as tile]
    [my.blob :as blob]
    [seon.agent.search :as search]
+   [seon.agent.fs :as fs]
    [seon.agent.shell :as shell]
    [seon.agent.web :as web]]}
 
@@ -176,6 +177,7 @@
    [my.ui :as ui]
    [my.tile :as tile]
    [seon.agent.search :as search]
+   [seon.agent.fs :as fs]
    [seon.agent :as agent]]
   :seon.agent/ctx
   [{:seon.agent.ctx/name :live-tile :seon.agent.ctx/priority 35
@@ -194,4 +196,24 @@
    ;; vanishes when coverage is re-asserted. A gap is system-wide, so it
    ;; rides the root world only, like :core-faults.
    {:seon.agent.ctx/name :instrumentation-gaps :seon.agent.ctx/priority 42
-    :seon.render/ai seon.agent.ctx.warnings/instrumentation-gaps-block}]}}
+    :seon.render/ai seon.agent.ctx.warnings/instrumentation-gaps-block}
+   ;; ROOT-ONLY (multiagent-context Piece 4): live agents whose parent is
+   ;; TERMINATED. Derived; vanishes when there are no orphans. No action
+   ;; machinery — root/human decides per case with the existing verbs.
+   {:seon.agent.ctx/name :orphaned-agents :seon.agent.ctx/priority 43
+    :seon.render/ai seon.agent.ctx.subagents/orphaned-agents-block}]}
+
+ ;; ── MULTI-AGENT dials (multiagent-context-spec) — all OPTIONAL; each absent
+ ;; key falls back to the accessor default (byte-identical to today). Shown
+ ;; here for visibility (tune without hunting the source):
+ ;;   spawn-depth-cap    — how deep the spawn tree may go (Piece 2); root at
+ ;;                        depth 0 spawns, a depth-1 subagent may not.
+ ;;   watchdog stale-ms  — a run with no heartbeat progress for longer is
+ ;;                        closed :crashed (Piece 2c); 20 min is above the
+ ;;                        15-min per-turn inner bound.
+ ;;   schedule-breaker   — refuse SCHEDULE wakes for an agent with ≥N :crashed
+ ;;                        closes in the window (Piece 2d); messages still wake.
+ :seon.config/spawn-depth-cap 1
+ :seon.config/watchdog {:seon.config.watchdog/stale-ms 1200000}
+ :seon.config/schedule-breaker {:seon.config.breaker/crash-count 3
+                                :seon.config.breaker/window-ms   1800000}}

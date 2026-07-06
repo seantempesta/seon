@@ -21,6 +21,7 @@
     [my.blob :as blob]
     [seon.agent :as agent]
     [seon.agent.loop :as loop]
+    [seon.agent.message :as msg]
     [seon.agent.run :as run]
     [seon.agent.schedule :as schedule]
     [seon.client :as client]
@@ -774,3 +775,100 @@
                       (set-env! "SEON_LLM_ATTEMPT_TIMEOUT_MS" prior-llm)))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+;; ============================================================
+;; OUTCOME NOTICE → REAL WAKE (multiagent-context Piece 2b, Gap B) — the
+;; end-to-end proof: an abnormal close of a CHILD run sends a notice that
+;; drives the PARENT'S real wake trigger — the parent's run count INCREASES
+;; (a new run actually opens), not just a message-datom existence check.
+;; ============================================================
+
+(deftest child-outcome-notice-wakes-the-parent-end-to-end
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (let [cs       (await (boot-agent!))
+                  child-id "AGTloopchild01"]
+              ;; parent = agent-id (booted, idle); arm its REAL wake trigger.
+              (loop/install-wake-trigger!
+                {:seon.agent/id            agent-id
+                 :seon.agent/llm-fn        (scripted-llm "(complete \"noted child outcome\")")
+                 :seon.agent/compile-state cs})
+              ;; child, parent ref set (raw transact — spawn path not under test)
+              (await (db/transact!
+                       {:seon.db/tx-data [{:seon.agent/id     child-id
+                                           :seon.agent/parent [:seon.agent/id agent-id]}]}))
+              (is (= [] (runs-for agent-id)) "parent has NO run before the outcome")
+              ;; open a run on the child and close it ABNORMALLY via the one
+              ;; choke point — this fires the Piece 2b parent notice.
+              (let [snap (await (run/open-run! {:seon.agent/id child-id
+                                                :seon.agent.run/trigger :message}))]
+                (await (run/close-run! {:seon.agent.run/id (:seon.agent.run/id snap)
+                                        :seon.agent.run/closed-reason :turn-limit})))
+              ;; the notice must DRIVE the parent's wake: a run actually opens.
+              (let [woke? (await (wait-until
+                                   (fn [] (seq (runs-for agent-id)))
+                                   8000 25))
+                    rids  (runs-for agent-id)]
+                (is woke? "the outcome notice OPENED a run on the parent (real wake path)")
+                (is (= 1 (count rids)) "parent run count 0 → 1")
+                (testing "the parent run's CAUSE is the outcome notice itself"
+                  (let [run-ent (db/entity {:seon.db/ref [:seon.agent.run/id (first rids)]})
+                        cause   (some-> (:db/id (:seon.agent.run/cause run-ent)) db/entity)]
+                    (is (re-find #"turn-limit" (str (:seon.agent.message/content cause)))
+                        "cause message carries the closed-reason")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ============================================================
+;; OUTCOME NOTICE AT THE HOP CAP (Piece 2b "delivery must be reliable") —
+;; hops NEVER gate the TRANSACT (message! always stores; only WAKING is
+;; hop-gated at the trigger). Pinned: with the {child,parent} pair seeded AT
+;; the cap, an abnormal close still STORES its notice datom, but that notice
+;; is NOT wake-eligible (hop-live? false) and the parent does not wake — the
+;; loud hop-exhausted refusal. The datom is never lost; a parked parent at
+;; the cap resumes on the next HUMAN contact (hops reset at the barrier).
+;; ============================================================
+
+(deftest outcome-notice-at-hop-cap-transacts-but-does-not-wake
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (let [cs       (await (boot-agent!))
+                  child-id "AGTloopchild02"]
+              (loop/install-wake-trigger!
+                {:seon.agent/id            agent-id
+                 :seon.agent/llm-fn        (scripted-llm "(complete \"never runs\")")
+                 :seon.agent/compile-state cs})
+              (await (db/transact!
+                       {:seon.db/tx-data [{:seon.agent/id     child-id
+                                           :seon.agent/parent [:seon.agent/id agent-id]}]}))
+              ;; seed the {child,parent} pair AT the cap: a prior parent→child
+              ;; message carrying hops = hop-cap ⇒ the child's next send to the
+              ;; parent derives hops = cap + 1 (≥ cap ⇒ not wake-eligible).
+              (await (send-inbound! [:seon.agent/id agent-id] child-id
+                                    "pair at the cap" warn/hop-cap :agent))
+              (let [snap (await (run/open-run! {:seon.agent/id child-id
+                                                :seon.agent.run/trigger :message}))]
+                (await (run/close-run! {:seon.agent.run/id (:seon.agent.run/id snap)
+                                        :seon.agent.run/closed-reason :turn-limit})))
+              ;; the notice datom EXISTS — transaction is never hop-gated.
+              (let [notice-eid (db/query {:seon.db/query
+                                          '[:find ?m . :in $ ?c
+                                            :where
+                                            [?ce :seon.agent/id ?c]
+                                            [?m :seon.agent.message/from ?ce]]
+                                          :seon.db/args [child-id]})
+                    notice     (db/entity notice-eid)]
+                (is (some? notice-eid) "the outcome notice TRANSACTED at the hop cap")
+                (is (re-find #"turn-limit" (str (:seon.agent.message/content notice)))
+                    "it is the outcome notice")
+                (is (> (:seon.agent.message/hops notice) warn/hop-cap)
+                    "its derived hops exceed the cap")
+                (is (false? (msg/hop-live? notice))
+                    "explicitly NOT wake-eligible — hops gate waking, not storage"))
+              ;; and the parent does NOT wake (loud refusal at the trigger).
+              (let [woke? (await (wait-until (fn [] (seq (runs-for agent-id))) 500 25))]
+                (is (false? woke?) "no parent run opened — the wake was hop-refused")))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))

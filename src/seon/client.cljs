@@ -210,6 +210,7 @@
     [seon.agent.ctx.relevant]
     [seon.agent.ctx.jobs]
     [seon.agent.ctx.testrun]
+    [seon.agent.ctx.subagents]
     [seon.platform]
     ;; Phase B item 9 — shared read-side wrapper over the analyzer
     ;; state. Required here so the build includes it; item 10's
@@ -425,6 +426,10 @@
    ;; latest successful eval's :seon.eval/ns. See
    ;; docs/seon/concepts/reactive-context.
    :seon.agent/id
+   ;; Subagent → parent ref (spawn tree). Boot-installed so the depth-cap walk
+   ;; (`seon.agent/spawn-depth`) and the subagents/orphaned-agents sections can
+   ;; QUERY it on a fresh world before any spawn has lazily installed it.
+   :seon.agent/parent
    ;; Derived-state primitives: the CURRENT run pointer (fencing token +
    ;; spine of derived state) and the terminate marker. Plus the run-bound
    ;; seeds (the :seon.agent.run/default-turn-limit config datom, default 20)
@@ -473,6 +478,12 @@
    :seon.agent.run/remaining-ms
    :seon.agent.run/status
    :seon.agent.run/closed-reason
+   ;; Durable return value (Piece 1) + the close instant the Piece 2d breaker
+   ;; windows over (`:db/txInstant` can't be backdated) — boot-installed so the
+   ;; subagents section + breaker query them on a fresh world.
+   :seon.agent.run/result
+   :seon.agent.run/result-ref
+   :seon.agent.run/closed-at
 
    ;; --- Turn (a standalone entity that points UP to its run) ---
    :seon.agent.turn/id

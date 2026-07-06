@@ -37,6 +37,34 @@ the unused REPL graduation prototype, the deprecated JVM SSE `send!` shim, and
 the stateful `schema-required-count` cache. The dev-hook generative-test fixture
 moved from `src/` to `test/` under the same namespace.
 
+**Multi-agent context unit 2026-07-06** (spec:
+[[multiagent-context-spec]]; test plan:
+[[research/multiagent-test-plan-2026-07-06]]) — subagent visibility, durable
+results, bounded spawn, wedge recovery. Built from existing mechanisms (parent
+refs, the run entity, messages, derived sections — no registry/inbox/subscription):
+- **Piece 1** — `:seon.agent.run/result` + `result-ref` + `closed-at`;
+  `complete` writes the result datoms UNCONDITIONALLY (past the message-skip
+  guard) — the durable return value survives turns + restarts.
+- **Piece 2** — depth-capped spawn: `seon.agent/spawn-depth` (cycle-guarded) +
+  a `:seon.config/spawn-depth-cap` (default 1) hard backstop in `start!`'s body
+  (soft home-requires gate unchanged); a subagent's full-qualified spawn is
+  refused datom-free.
+- **Piece 2b** — outcome routing through the ONE choke point `run/close-run!`:
+  every abnormal close messages the PARENT (`origin :agent`, from the child, so
+  it WAKES — the `:core` conflict fixed), `:crashed` also escalates to root
+  (deduped); budget closes carry the continue affordance.
+- **Piece 2c** — heartbeat watchdog `run/close-stale-runs!` (pure core
+  `stale-run-ids`, rides the one ticker) → `:crashed` + a `:core` fault (triage
+  chain); root self-heals via the same path but stays idle (no auto-rewake).
+- **Piece 2d** — schedule-wake circuit breaker
+  (`derive/schedule-breaker-tripped?`, windowed over `closed-at`, dials
+  `:seon.config/schedule-breaker`) — derived, no stored state; messages still
+  wake.
+- **Pieces 3 + 4** — the `:subagents` (general) + `:orphaned-agents` (root-only)
+  derived context sections (`seon.agent.ctx.subagents`).
+Tests: `test/seon/agent/multiagent_test.cljs` +
+`test/seon/agent/ctx/subagents_test.cljs` (hermetic, time injected).
+
 ## Tooling lane — the ordered path (ratified with owner 2026-07-02)
 
 **Interleave rule (owner call): one stability unit lands per feature unit** —

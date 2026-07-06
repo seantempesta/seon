@@ -629,12 +629,18 @@
   30000)
 
 (defn- run-tick!
-  "ONE ticker pass at `now`: close overdue runs, then fire due schedules
-   (driving each opened run). Returns a Promise; a throw anywhere is caught +
-   logged so the interval survives."
+  "ONE ticker pass at `now`: close overdue runs, close STALE (wedged) runs
+   (the heartbeat watchdog — Piece 2c), then fire due schedules (driving each
+   opened run). Returns a Promise; a throw anywhere is caught + logged so the
+   interval survives. The watchdog rides THIS one ticker — no parallel
+   setInterval; the scan core (`run/stale-run-ids`) is a pure fn of (db, now)."
   [now]
   (-> (js/Promise.resolve
         (run/close-overdue-runs! {:seon.agent/now now}))
+      (.then (fn [_]
+               (run/close-stale-runs!
+                 {:seon.agent/now          now
+                  :seon.agent.run/stale-ms (config/watchdog-stale-ms)})))
       (.then (fn [_]
                (schedule/fire-due-schedules!
                  {:seon.agent/now               now
