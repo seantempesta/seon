@@ -1604,3 +1604,36 @@ Eval lane only; NO `src/seon` edits — `src-inspect-ai` + `evals` + `docs`.
   it (1045/4789 0F/0E — your 40 match/fs tests pass). If you were still
   mid-work on those files, they are committed as-of that snapshot; keep
   editing normally. Sorry for the misattributed message.
+
+## 2026-07-06 — edit-protocol lane: UNIT T2 SHIPPED — gold-patch replay, WRONG=0
+
+Falsification test for A2's pure cascade (`seon.agent.fs.match/decide`).
+`bin/replay-gold-patches` (+ scorer `bin/replay_gold_patches.clj`) replays the
+SWE-bench Verified frozen dev slice (10 instances, `dev-ids.txt`) gold-patch
+hunks through the SAME matcher the `fs/replace!`/`insert!` verbs use, scored
+against a SEPARATE `git apply` oracle. Evidence:
+`evals/runs/2026-07-06-t2-gold-replay/` (README + summary.txt + detail.json).
+
+- **HARD GATE PASSES: WRONG = 0.** 15 gold hunks across all 10 instances (0
+  skipped), 100 % land as **stage-1 exact**; line-oracle final == `git apply`
+  for every file (0 cross-check failures).
+- **Refusal guarantee falsified live** via a single-line-anchor probe: 8 hunks
+  whose anchor is whole-line-ambiguous → **8/8 correctly REFUSED, 0 guessed**
+  (e.g. `return` ×40 in pylint, `        )` ×9 in flask). The cascade never
+  mutates at a guessed location.
+- **Ergonomics finding (for the A/B):** ZERO over-refusals on the real gold
+  hunks — all 15 well-anchored edits applied cleanly. No suspiciously-high
+  refusal rate on valid hunks.
+- **Robustness observed (not a defect):** sphinx-8269 line 167 is an OFFSET
+  substring of the deeper-indented line 183; a naive substring matcher would
+  refuse/guess, but stage-3 whole-line normalization resolves to the unique
+  line 167 (`stage :normalized, ranges [[167 167]]`).
+- **Honest limitation:** clean full-context gold hunks never trigger the
+  near-window / CRLF-normalization RESCUE stages for the real anchor — this
+  harness proves the no-wrong-place + refusal invariants, not rescue coverage
+  (that lives in `match.cljc`'s unit suite). Passes 2–3 came up 0-ambiguous by
+  construction (gold anchors are well-formed) — reported as-is.
+- Files (staged, not committed): `bin/replay-gold-patches`,
+  `bin/replay_gold_patches.clj`, `evals/runs/2026-07-06-t2-gold-replay/**`.
+  Touches `evals/` per spec §T2 authorization (new dir, no existing evidence
+  modified). No src/pod changes; no default-cluster resets.

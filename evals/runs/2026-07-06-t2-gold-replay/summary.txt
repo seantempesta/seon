@@ -1,0 +1,13 @@
+=== T2 GOLD-PATCH REPLAY ===
+instances: 10  ran: 10  errored/skipped: 0
+scored hunks (n): 15
+  exact:        15  (100.0%)
+  near-rescue:   0  (0.0%)
+  norm-rescue:   0  (0.0%)
+  refused:       0  (0.0%)
+  WRONG:       0  <<< HARD GATE (must be 0)
+oracle cross-check fails: 0 []
+PASS 2 (no near, full-context find): multi-match hunks: 0  correctly refused: 0 (n/a)
+PASS 3 (minimal anchor = deleted lines only, no near): hunks-with-deletions: 7  ambiguous (>1 match): 0  correctly refused: 0 (n/a)  guessed-a-location: 0 <<< must be 0
+PASS 4 (single-line anchor, no near): whole-line-ambiguous (>1): 8  correctly refused: 8 (100%)  guessed-a-location: 0 <<< must be 0
+  substring-ambiguous-but-line-unique: 0  correctly disambiguated+applied: 0
