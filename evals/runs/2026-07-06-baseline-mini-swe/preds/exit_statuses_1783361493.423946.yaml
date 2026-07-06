@@ -1,0 +1,12 @@
+instances_by_exit_status:
+    Submitted:
+    - pallets__flask-5014
+    - django__django-11299
+    - psf__requests-1921
+    - pylint-dev__pylint-4604
+    - pytest-dev__pytest-7490
+    - sphinx-doc__sphinx-8269
+    - mwaskom__seaborn-3187
+    - sympy__sympy-15875
+    - sphinx-doc__sphinx-10614
+    - sympy__sympy-20916

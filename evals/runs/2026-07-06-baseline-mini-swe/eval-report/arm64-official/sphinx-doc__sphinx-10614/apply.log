@@ -1,0 +1,5 @@
+$ git apply --verbose
+
+Checking patch sphinx/ext/inheritance_diagram.py...
+Applied patch sphinx/ext/inheritance_diagram.py cleanly.
+

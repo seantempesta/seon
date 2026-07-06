@@ -1,0 +1,5 @@
+$ git apply --verbose
+
+Checking patch src/flask/blueprints.py...
+Applied patch src/flask/blueprints.py cleanly.
+

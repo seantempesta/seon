@@ -1,0 +1,51 @@
+[
+  {
+    "seon.eval/id": "znP-2607061807",
+    "seon.eval/at": "Mon Jul 06 18:07:40 GMT 2026",
+    "seon.eval/source": "(.writeFileSync (js/require \"fs\") \"/app/hello.txt\" \"Hello, world!\")",
+    "seon.eval/ok?": true,
+    "seon.eval/result-edn": "nil"
+  },
+  {
+    "seon.eval/id": "eHf-2607061807",
+    "seon.eval/at": "Mon Jul 06 18:07:40 GMT 2026",
+    "seon.eval/source": "(js/require \"fs\")",
+    "seon.eval/ok?": true,
+    "seon.eval/result-edn": "#‹js/Object #js {:appendFile #object[appendFile], :appendFileSync #object[appendFileSync], :…›\n; ‹partial view› — the COMPLETE value is result/eHf-2607061807  (get-in result/eHf-2607061807 […]) · filter · count · take/drop"
+  },
+  {
+    "seon.eval/id": "XXx-2607061807",
+    "seon.eval/at": "Mon Jul 06 18:07:40 GMT 2026",
+    "seon.eval/source": "(my.plan/active! {:my.plan/id \"kyU-2607061807\"})",
+    "seon.eval/ok?": true,
+    "seon.eval/result-edn": "{:my.plan/ok? true, :my.plan/id \"kyU-2607061807\"}"
+  },
+  {
+    "seon.eval/id": "DQu-2607061807",
+    "seon.eval/at": "Mon Jul 06 18:07:40 GMT 2026",
+    "seon.eval/source": "(.readFileSync (js/require \"fs\") \"/app/hello.txt\" \"utf8\")",
+    "seon.eval/ok?": true,
+    "seon.eval/result-edn": "\"Hello, world!\""
+  },
+  {
+    "seon.eval/id": "UaC-2607061807",
+    "seon.eval/at": "Mon Jul 06 18:07:40 GMT 2026",
+    "seon.eval/source": "(message/user \"Done! I created `/app/hello.txt` with the content \\\"Hello, world!\\\".\")",
+    "seon.eval/ok?": true,
+    "seon.eval/result-edn": "{:seon.agent.message/ok? true, :seon.agent.message/id \"RPc-2607061807\", :seon.agent.message/hops 1}"
+  },
+  {
+    "seon.eval/id": "Vij-2607061807",
+    "seon.eval/at": "Mon Jul 06 18:07:40 GMT 2026",
+    "seon.eval/source": "(my.plan/done! {:my.plan/id \"kyU-2607061807\"})",
+    "seon.eval/ok?": true,
+    "seon.eval/result-edn": "{:my.plan/ok? true, :my.plan/id \"kyU-2607061807\"}"
+  },
+  {
+    "seon.eval/id": "yIe-2607061807",
+    "seon.eval/at": "Mon Jul 06 18:07:40 GMT 2026",
+    "seon.eval/source": "(complete \"Created /app/hello.txt with 'Hello, world!'\")",
+    "seon.eval/ok?": true,
+    "seon.eval/result-edn": ":idle"
+  }
+]

@@ -1,0 +1,7 @@
+Create a file called /app/hello.txt. Write "Hello, world!" to it.
+
+Your workspace is /app inside this machine — your shell runs here, and your file verbs are rooted at /app with write access, so you can read, create, and edit files directly. Do the work by changing the files under /app.
+
+How your work is judged: after you finish, this task's own automated test suite is run against the state you leave in this machine. Only the final state matters.
+
+When the goal is met, send the user a short summary of what you did (reply via message/user) — that reply is the done signal.

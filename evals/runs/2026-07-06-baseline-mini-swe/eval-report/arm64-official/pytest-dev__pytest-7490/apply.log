@@ -1,0 +1,5 @@
+$ git apply --verbose
+
+Checking patch src/_pytest/skipping.py...
+Applied patch src/_pytest/skipping.py cleanly.
+
