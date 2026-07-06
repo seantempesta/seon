@@ -9,16 +9,29 @@
 # absolute path, never PATH): mounting it into any glibc container yields a
 # bootable cluster (the A-overlay bench composition, §2b).
 #
-# Build (arm64-only for slice 1; multi-arch is a later unit):
-#   docker build -f docker/Dockerfile -t seon:dev .
+# Multi-arch: builds BOTH linux/arm64 (native on Apple Silicon) and
+# linux/amd64 (emulated under Rosetta). The three arch-hardcoded downloads
+# (Node, Temurin JRE, babashka) are parameterized on buildx's TARGETARCH;
+# every other layer already adapts (multi-arch bases, in-stage `npm ci`,
+# arch-independent CLJS/Clojure bytecode). Each download sha-verifies both
+# per-arch assets against the official checksums.
+#
+# Build (buildx to per-arch local tags — the default docker image store can't
+# hold a multi-platform manifest under --load, so build each arch separately):
+#   docker buildx build --platform linux/arm64 -f docker/Dockerfile -t seon:multiarch-arm64 --load .
+#   docker buildx build --platform linux/amd64 -f docker/Dockerfile -t seon:multiarch-amd64 --load .
 # Run:
 #   docker run -d --name seon -p 7999:7890 -v seon-data:/seon-data \
-#     -e DEEPSEEK_API_KEY seon:dev
+#     -e DEEPSEEK_API_KEY seon:multiarch-arm64
 
 # ============================================================
 # Builder — all compilation happens HERE; none at container boot.
 # ============================================================
 FROM eclipse-temurin:25-jdk-noble AS build
+
+# buildx auto-populates TARGETARCH per --platform (arm64 | amd64). Each
+# arch-specific download below selects its asset name + sha256 from it.
+ARG TARGETARCH
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl ca-certificates git xz-utils \
@@ -26,18 +39,33 @@ RUN apt-get update \
 
 # --- Bundled runtimes (they ship INSIDE /opt/seon — hard requirement of the
 # --- A-overlay composition: bench task images carry neither java nor node).
+# Node: asset arch arm64→arm64, amd64→x64.
 ARG NODE_VERSION=22.23.1
-ARG NODE_SHA256=0294e8b915ab75f92c7513d2fcb830ae06e10684e6c603e99a87dbf8835389c1
-RUN curl -fL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-arm64.tar.xz" -o /tmp/node.tar.xz \
- && echo "${NODE_SHA256}  /tmp/node.tar.xz" | sha256sum -c - \
+ARG NODE_SHA256_ARM64=0294e8b915ab75f92c7513d2fcb830ae06e10684e6c603e99a87dbf8835389c1
+ARG NODE_SHA256_AMD64=9749e988f437343b7fa832c69ded82a312e41a03116d766797ac14f6f9eee578
+RUN case "$TARGETARCH" in \
+      arm64) NARCH=arm64; NSHA="$NODE_SHA256_ARM64" ;; \
+      amd64) NARCH=x64;   NSHA="$NODE_SHA256_AMD64" ;; \
+      *) echo "unsupported TARGETARCH=$TARGETARCH" >&2; exit 1 ;; \
+    esac \
+ && curl -fL "https://nodejs.org/dist/v${NODE_VERSION}/node-v${NODE_VERSION}-linux-${NARCH}.tar.xz" -o /tmp/node.tar.xz \
+ && echo "${NSHA}  /tmp/node.tar.xz" | sha256sum -c - \
  && mkdir -p /opt/seon/node \
  && tar -xJf /tmp/node.tar.xz --strip-components=1 -C /opt/seon/node \
  && rm /tmp/node.tar.xz
 
-ARG JRE_URL="https://github.com/adoptium/temurin25-binaries/releases/download/jdk-25.0.3%2B9/OpenJDK25U-jre_aarch64_linux_hotspot_25.0.3_9.tar.gz"
-ARG JRE_SHA256=d12d5b19ff7f6c4a99fd4f9eecede2c96e64df7d1f41cc84f2e9c9b38408600b
-RUN curl -fL "${JRE_URL}" -o /tmp/jre.tar.gz \
- && echo "${JRE_SHA256}  /tmp/jre.tar.gz" | sha256sum -c - \
+# Temurin JRE: asset arch arm64→aarch64, amd64→x64.
+ARG JRE_VERSION_TAG=jdk-25.0.3%2B9
+ARG JRE_FILE_VER=25.0.3_9
+ARG JRE_SHA256_ARM64=d12d5b19ff7f6c4a99fd4f9eecede2c96e64df7d1f41cc84f2e9c9b38408600b
+ARG JRE_SHA256_AMD64=487ad434d8b121ae3902d5ad9cb830cd8e1f75fefad6e2ba80f89d60e3db95d7
+RUN case "$TARGETARCH" in \
+      arm64) JARCH=aarch64; JSHA="$JRE_SHA256_ARM64" ;; \
+      amd64) JARCH=x64;     JSHA="$JRE_SHA256_AMD64" ;; \
+      *) echo "unsupported TARGETARCH=$TARGETARCH" >&2; exit 1 ;; \
+    esac \
+ && curl -fL "https://github.com/adoptium/temurin25-binaries/releases/download/${JRE_VERSION_TAG}/OpenJDK25U-jre_${JARCH}_linux_hotspot_${JRE_FILE_VER}.tar.gz" -o /tmp/jre.tar.gz \
+ && echo "${JSHA}  /tmp/jre.tar.gz" | sha256sum -c - \
  && mkdir -p /opt/seon/jre \
  && tar -xzf /tmp/jre.tar.gz --strip-components=1 -C /opt/seon/jre \
  && rm /tmp/jre.tar.gz
@@ -45,9 +73,18 @@ RUN curl -fL "${JRE_URL}" -o /tmp/jre.tar.gz \
 # --- Build tooling: clojure CLI + babashka (bin/fix-bootstrap-macros).
 RUN curl -fL https://github.com/clojure/brew-install/releases/latest/download/linux-install.sh -o /tmp/clj-install.sh \
  && bash /tmp/clj-install.sh && rm /tmp/clj-install.sh
+# babashka: asset arch arm64→aarch64, amd64→amd64 (sha from the release's
+# per-asset .sha256 sidecar).
 ARG BB_VERSION=1.12.218
-RUN curl -fL "https://github.com/babashka/babashka/releases/download/v${BB_VERSION}/babashka-${BB_VERSION}-linux-aarch64-static.tar.gz" \
-      -o /tmp/bb.tar.gz \
+ARG BB_SHA256_ARM64=e9e9190afb0dd33abbcd3aa6c1382184a88a5498800324719be3be6e1aa68302
+ARG BB_SHA256_AMD64=7bd028cc794732ffde3da31ce4379840893c8e54f1046f92a8dfc4f4b3cddaf8
+RUN case "$TARGETARCH" in \
+      arm64) BARCH=aarch64; BSHA="$BB_SHA256_ARM64" ;; \
+      amd64) BARCH=amd64;   BSHA="$BB_SHA256_AMD64" ;; \
+      *) echo "unsupported TARGETARCH=$TARGETARCH" >&2; exit 1 ;; \
+    esac \
+ && curl -fL "https://github.com/babashka/babashka/releases/download/v${BB_VERSION}/babashka-${BB_VERSION}-linux-${BARCH}-static.tar.gz" -o /tmp/bb.tar.gz \
+ && echo "${BSHA}  /tmp/bb.tar.gz" | sha256sum -c - \
  && tar -xzf /tmp/bb.tar.gz -C /usr/local/bin bb && rm /tmp/bb.tar.gz
 
 ENV PATH=/opt/seon/node/bin:$PATH
