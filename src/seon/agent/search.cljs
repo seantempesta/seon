@@ -41,6 +41,15 @@
 (schema/register! :seon.agent.search/max-results :int)
 (schema/register! :seon.agent.search/case-insensitive? :boolean)
 (schema/register! :seon.agent.search/full? :boolean)
+;; N lines of context around each hit (rg -C). Bounded so a broad pattern
+;; can't balloon the response.
+(schema/register! :seon.agent.search/context-lines [:int {:min 0 :max 10}])
+;; Let a pattern span newlines (rg -U --multiline-dotall) — multi-line
+;; signatures, decorators. Slower + more memory; see the docstring.
+(schema/register! :seon.agent.search/multiline? :boolean)
+;; Marks an emitted line as surrounding CONTEXT (from ::context-lines), not
+;; a match — so match counts stay honest while context still renders.
+(schema/register! :seon.agent.search/context? :boolean)
 
 (schema/register! :seon.agent.search/ok? :boolean)
 (schema/register! :seon.agent.search/error :string)
@@ -52,12 +61,15 @@
 (schema/register! :seon.agent.search/line-text :string)
 (schema/register! :seon.agent.search/count :int)
 
-;; A flat match — one hit, returned only under :full? true.
+;; A flat match — one hit, returned only under :full? true. Under
+;; :context-lines the flat stream also carries surrounding CONTEXT lines,
+;; each flagged :context? true (an ordinary match omits the key).
 (schema/register! :seon.agent.search/match
   [:map
    [:seon.agent.search/path        :seon.agent.search/path]
    [:seon.agent.search/line-number :seon.agent.search/line-number]
-   [:seon.agent.search/line-text   :seon.agent.search/line-text]])
+   [:seon.agent.search/line-text   :seon.agent.search/line-text]
+   [:seon.agent.search/context?    {:optional true} :seon.agent.search/context?]])
 
 ;; A file roll-up — the CONCISE default unit: where the pattern hits, how
 ;; many times, and the first matching line (preview-capped) as a sample.
@@ -138,6 +150,8 @@
    [:seon.agent.search/glob              {:optional true} :seon.agent.search/glob]
    [:seon.agent.search/max-results       {:optional true} :seon.agent.search/max-results]
    [:seon.agent.search/full?             {:optional true} :seon.agent.search/full?]
+   [:seon.agent.search/context-lines     {:optional true} :seon.agent.search/context-lines]
+   [:seon.agent.search/multiline?        {:optional true} :seon.agent.search/multiline?]
    [:seon.agent.search/case-insensitive? {:optional true} :seon.agent.search/case-insensitive?]])
 
 (schema/register! :seon.agent.search/grep-response
@@ -164,7 +178,7 @@
    :seon.agent.search/grep-response envelope (never rejects; errors are values).
 
    CONCISE by default: hits are GROUPED BY FILE, ranked by hit-count, and
-   the top :seon.agent.search/max-results (default 20) file rows are
+   the top :seon.agent.search/max-results (default 12) file rows are
    returned under :seon.agent.search/by-file — each a {path, count, the
    first matching line-number + a preview-capped line-text}. The HONEST
    totals (:match-count = all hits, :file-count = all files) are always
@@ -179,10 +193,20 @@
                                     DEFAULT = the seon.agent.fs allowed roots
      :seon.agent.search/glob              optional — filename filter, e.g. \"*.cljs\"
      :seon.agent.search/max-results       optional — max FILE ROWS returned
-                                    (default 20); :truncated? true when clipped
+                                    (default 12); :truncated? true when clipped
      :seon.agent.search/full?             optional — when true, return the FLAT
                                     :seon.agent.search/matches list (every line,
                                     capped at max-results) instead of by-file
+     :seon.agent.search/context-lines     optional — N (0-10) lines of context
+                                    around each hit (rg -C): in by-file mode the
+                                    sample line-text widens to a numbered window;
+                                    in :full? mode the flat stream interleaves
+                                    context lines (flagged :context? true, never
+                                    counted as matches)
+     :seon.agent.search/multiline?        optional — let :pattern span newlines
+                                    (rg -U --multiline-dotall): matches multi-line
+                                    signatures / decorators. Costs more time +
+                                    memory; . now crosses line boundaries
      :seon.agent.search/case-insensitive? optional
 
    No matches is SUCCESS: {:seon.agent.search/ok? true
@@ -211,10 +235,12 @@
    eval boundary auto-awaits it for you)."
   {:malli/schema [:=> [:cat :seon.agent.search/grep-request]
                   :seon.agent.search/grep-response]}
-  [{:seon.agent.search/keys [pattern paths glob max-results full? case-insensitive?]
+  [{:seon.agent.search/keys [pattern paths glob max-results full?
+                             context-lines multiline? case-insensitive?]
     :or {max-results in/default-max-results}}]
   (try
     (let [roots (if (seq paths) (vec paths) (in/default-roots))
+          ctx   (or context-lines 0)
           bin   (in/rg-path)]
       (cond
         (or (nil? pattern) (str/blank? pattern))
@@ -237,7 +263,9 @@
           denied
           (let [args (-> ["--json" "--no-config"]
                          (cond-> case-insensitive? (conj "-i")
-                                 glob              (conj "--glob" glob))
+                                 glob              (conj "--glob" glob)
+                                 (pos? ctx)        (conj "-C" (str ctx))
+                                 multiline?        (conj "-U" "--multiline-dotall"))
                          (conj "--regexp" pattern "--")
                          (into roots))
                 ^js r  (await (in/exec-rg bin args))
@@ -261,7 +289,7 @@
 
               ;; Output cap — partial stdout is still parseable.
               (and err (= "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" (.-code err)))
-              (assoc (in/success-from stdout paths glob max-results full?)
+              (assoc (in/success-from stdout paths glob max-results full? ctx)
                      :seon.agent.search/truncated? true)
 
               ;; rg exit 1 = searched fine, found nothing. NOT an error.
@@ -279,7 +307,7 @@
                        (if (str/blank? (str stderr)) (.-message err) stderr))
 
               :else
-              (in/success-from stdout paths glob max-results full?))))))
+              (in/success-from stdout paths glob max-results full? ctx))))))
     (catch :default e
       (in/fail (str "unexpected error in seon.agent.search/grep: "
                     (or (some-> e .-message) (str e)))))))

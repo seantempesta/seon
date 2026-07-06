@@ -380,6 +380,67 @@
     (is (true? (:seon.agent.fs/ok? r)))
     (is (= "DONE\nx\nDONE\n" (file-content path)))))
 
+(deftest replace!-all?-changes-every-occurrence-without-a-count
+  (let [path (edit-fixture! "log(1)\nx\nlog(2)\nlog(3)\n")
+        r    (fs/replace! {:seon.agent.fs/path path
+                           :seon.agent.fs/find "log"
+                           :seon.agent.fs/replace "trace"
+                           :seon.agent.fs/all? true})]
+    (is (true? (:seon.agent.fs/ok? r)) "::all? applies to every occurrence, no ambiguity")
+    (is (= "trace(1)\nx\ntrace(2)\ntrace(3)\n" (file-content path)))
+    (is (= 3 (:seon.agent.fs/lines-added r)) "all three lines rewritten")))
+
+;; ============================================================
+;; walk-dir — recursive glob filter + mtime sort (A6 item 4).
+;; ============================================================
+
+(defn- walk-fixture!
+  "A pid-scoped tree: a.py, sub/c.py, note.md — grants the dir writable.
+   Files are written with staggered mtimes (note.md newest). Returns the dir."
+  []
+  (.rmSync nfs edit-dir #js {:recursive true :force true})
+  (.mkdirSync nfs (.join npath edit-dir "sub") #js {:recursive true})
+  (.writeFileSync nfs (.join npath edit-dir "a.py") "x = 1\n" "utf-8")
+  (.writeFileSync nfs (.join npath edit-dir "sub" "c.py") "z = 2\n" "utf-8")
+  (.writeFileSync nfs (.join npath edit-dir "note.md") "text\n" "utf-8")
+  ;; bump note.md's mtime so :mtime sort is deterministic (newest first)
+  (let [future (js/Date. (+ (.now js/Date) 100000))]
+    (.utimesSync nfs (.join npath edit-dir "note.md") future future))
+  (fs/configure! {:seon.agent.fs/allowed-roots [edit-dir]
+                  :seon.agent.fs/read-only?    true})
+  edit-dir)
+
+(deftest walk-dir-glob-filters-recursively
+  (let [dir (walk-fixture!)
+        r   (fs/walk-dir {:seon.agent.fs/path dir :seon.agent.fs/glob "*.py"})
+        rel (fn [p] (subs p (inc (count dir))))]
+    (is (true? (:seon.agent.fs/ok? r)))
+    (is (= #{"a.py" "sub/c.py"} (set (map rel (:seon.agent.fs/entries r))))
+        "a slash-free glob matches .py at any depth; note.md excluded")
+    (is (= 2 (:seon.agent.fs/total-found r)))))
+
+(deftest walk-dir-glob-with-path-segment
+  (let [dir (walk-fixture!)
+        r   (fs/walk-dir {:seon.agent.fs/path dir :seon.agent.fs/glob "sub/**/*.py"})
+        rel (fn [p] (subs p (inc (count dir))))]
+    (is (= ["sub/c.py"] (mapv rel (:seon.agent.fs/entries r)))
+        "a glob with a / matches the root-relative path only")))
+
+(deftest walk-dir-mtime-sort-newest-first
+  (let [dir (walk-fixture!)
+        r   (fs/walk-dir {:seon.agent.fs/path dir :seon.agent.fs/sort :mtime})
+        rel (fn [p] (subs p (inc (count dir))))]
+    (is (= "note.md" (rel (first (:seon.agent.fs/entries r))))
+        "note.md's bumped mtime sorts it newest-first")))
+
+(deftest walk-dir-truncation-hints-the-cap
+  (let [dir (walk-fixture!)
+        r   (fs/walk-dir {:seon.agent.fs/path dir :seon.agent.fs/max-results 1})]
+    (is (true? (:seon.agent.fs/truncated? r)) "cap of 1 clips the 3-file tree")
+    (is (= 1 (:seon.agent.fs/total-found r)))
+    (is (string? (:seon.agent.fs/hint r)) "a hint names the cap knob")
+    (is (re-find #"max-results" (:seon.agent.fs/hint r)))))
+
 (deftest replace!-sha-guard-fences-a-stale-edit
   (let [path (edit-fixture! "line-a\nline-b\n")
         good (:seon.agent.fs/file-sha (fs/view {:seon.agent.fs/path path}))]

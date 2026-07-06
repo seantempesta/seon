@@ -32,6 +32,11 @@
 (schema/register! ::find           [:string {:min 1}])
 (schema/register! ::replace        :string)
 (schema/register! ::expected-count [:int {:min 1}])
+;; Replace EVERY occurrence without knowing the count — legitimizes any
+;; count >=1 at the matched stage. Mutually exclusive with ::expected-count
+;; (schema-enforced on ::decide-request below): one says "exactly N", the
+;; other says "however many there are".
+(schema/register! ::all?           :boolean)
 ;; 1-based inclusive [from-line to-line].
 (schema/register! ::range          [:tuple :int :int])
 (schema/register! ::near           ::range)
@@ -55,12 +60,18 @@
 (schema/register! ::lines-removed :int)
 
 (schema/register! ::decide-request
-  [:map
-   [::content        ::content]
-   [::find           ::find]
-   [::expected-count {:optional true} ::expected-count]
-   [::near           {:optional true} ::near]
-   [::replace        {:optional true} ::replace]])
+  [:and
+   [:map
+    [::content        ::content]
+    [::find           ::find]
+    [::expected-count {:optional true} ::expected-count]
+    [::all?           {:optional true} ::all?]
+    [::near           {:optional true} ::near]
+    [::replace        {:optional true} ::replace]]
+   ;; ::all? and ::expected-count answer the SAME question two ways — a
+   ;; request carrying both is incoherent, refused at the boundary.
+   [:fn {:error/message "::all? and ::expected-count are mutually exclusive"}
+    (fn [m] (not (and (contains? m ::expected-count) (contains? m ::all?))))]])
 
 (schema/register! ::decision
   [:or
@@ -346,13 +357,25 @@
 
    Runs the four-stage cascade (exact → exact-in-`::near` → conservative
    line normalization → fail-with-candidates); `::expected-count`
-   defaults to 1. With `::replace` present, an apply decision also
-   carries `::new-content`, `::range-after` (1-based lines in the NEW
-   content), `::lines-added` and `::lines-removed`. Pure — no IO."
+   defaults to 1. `::all?` (mutually exclusive with `::expected-count`)
+   legitimizes ANY count >=1 at the matched stage — it changes each
+   stage's gate from \"exactly N\" to \"one or more\", so a find present
+   several times applies to all of them without ever refusing as
+   ambiguous (only `::not-found` remains a failure). With `::replace`
+   present, an apply decision also carries `::new-content`,
+   `::range-after` (1-based lines in the NEW content), `::lines-added`
+   and `::lines-removed`. Pure — no IO."
   {:malli/schema [:=> [:cat ::decide-request] ::decision]}
-  [{::keys [content find expected-count near replace]}]
-  (let [expected (or expected-count 1)
+  [{::keys [content find expected-count all? near replace]}]
+  (let [all?     (boolean all?)
+        expected (or expected-count 1)
+        ;; ::all? makes any positive count a hit; otherwise the stage
+        ;; matches only the EXACT expected count.
+        hit?     (fn [n] (if all? (pos? n) (= expected n)))
         c-lines  (content-lines content)
+        ;; `::near` matches by the occurrence's START line only — a match
+        ;; whose start is inside the window is kept even if its end line
+        ;; extends past it (multi-line finds are anchored, not contained).
         window?  (fn [{[from _] ::range}]
                    (and near (<= (first near) from (second near))))]
     (if (or (nil? find) (= "" find))
@@ -360,12 +383,12 @@
       (let [occs      (exact-occurrences content find)
             near-occs (when near (filterv window? occs))]
         (cond
-          ;; 1. exact, exactly expected-count in the whole file
-          (= expected (count occs))
+          ;; 1. exact — expected-count occurrences (or any >=1 under ::all?)
+          (hit? (count occs))
           (exact-apply ::exact content occs find replace)
 
-          ;; 2. exact, exactly expected-count inside the ::near window
-          (and near (= expected (count near-occs)))
+          ;; 2. exact, inside the ::near window
+          (and near (hit? (count near-occs)))
           (exact-apply ::exact-near content near-occs find replace)
 
           :else
@@ -373,13 +396,13 @@
                 n-occs  (normalized-occurrences c-lines f-lines)
                 n-near  (when near (filterv window? n-occs))]
             (cond
-              ;; 3. conservative normalization, exactly expected-count
-              (= expected (count n-occs))
+              ;; 3. conservative normalization
+              (hit? (count n-occs))
               (normalized-apply ::normalized content c-lines n-occs
                                 find f-lines replace)
 
               ;; 3b. …inside the ::near window
-              (and near (= expected (count n-near)))
+              (and near (hit? (count n-near)))
               (normalized-apply ::normalized-near content c-lines n-near
                                 find f-lines replace)
 

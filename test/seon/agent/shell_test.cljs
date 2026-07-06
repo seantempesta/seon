@@ -28,6 +28,7 @@
     ["node:path" :as npath]
     [cljs.test :refer [deftest is async use-fixtures]]
     [clojure.string :as str]
+    [seon.agent.ctx.jobs]
     [seon.agent.fs :as fs]
     [seon.agent.fs.internal :as fs-int]
     [seon.agent.shell :as shell]
@@ -181,28 +182,39 @@
         (settle! done))))
 
 ;; ---------------------------------------------------------------------------
-;; 5. Output discipline — clip is honest: full totals, flag, hint.
+;; 5. Output is FULL data, no verb-level token cap — display economy is the
+;;    render layer's. Only bound = the ~2MB/stream RAM ceiling.
 ;; ---------------------------------------------------------------------------
 
-(deftest truncation-metadata-is-honest
+(deftest output-is-returned-in-full-with-honest-tokens
   (async done
     (-> (resolves!
           (shell/run {:seon.agent.shell/cmd  node-bin
-                      :seon.agent.shell/args ["-e" "process.stdout.write('x'.repeat(40000))"]
-                      :seon.agent.shell/max-output-tokens 100}))
+                      :seon.agent.shell/args ["-e" "process.stdout.write('x'.repeat(40000))"]}))
         (.then (fn [{ok?    :seon.agent.shell/ok?
                      out    :seon.agent.shell/out
                      ot     :seon.agent.shell/out-tokens
+                     trunc? :seon.agent.shell/truncated?}]
+                 (is (true? ok?))
+                 (is (= 40000 (count out)) "the FULL stream is returned — no verb-level clip")
+                 (is (= 10000 ot) "HONEST full-stdout token size (40000 chars / 4)")
+                 (is (false? trunc?) "well under the 2MB RAM ceiling — nothing dropped")))
+        (settle! done))))
+
+(deftest over-ram-ceiling-truncates-honestly-with-hint
+  (async done
+    ;; > 2MB on one stream → Node kills the child at maxBuffer; the captured
+    ;; head is the answer, truncated? true, hint points at run-bg!.
+    (-> (resolves!
+          (shell/run {:seon.agent.shell/cmd  node-bin
+                      :seon.agent.shell/args ["-e" "process.stdout.write('x'.repeat(2500000))"]}))
+        (.then (fn [{ok?    :seon.agent.shell/ok?
                      trunc? :seon.agent.shell/truncated?
                      hint   :seon.agent.shell/hint}]
-                 (is (true? ok?))
-                 (is (= 10000 ot) "HONEST full-stdout size (40000 chars / 4)")
-                 (is (true? trunc?))
-                 (is (<= (count out) 401) "delivered text respects the cap (+ellipsis)")
-                 (is (str/ends-with? out "…") "the cut is marked")
+                 (is (true? ok?) "the process RAN — the partial head is still the answer")
+                 (is (true? trunc?) "the 2MB capture ceiling was hit")
                  (is (string? hint))
-                 (is (re-find #"max-output-tokens" hint) "hint names the knob")
-                 (is (re-find #"read-file" hint) "hint names the paging escape")))
+                 (is (re-find #"run-bg!" hint) "hint points at the unbounded-stream escape")))
         (settle! done))))
 
 ;; ---------------------------------------------------------------------------
@@ -291,3 +303,78 @@
                  (is (false? ok?))
                  (is (re-find #"source" msg))))
         (settle! done))))
+
+;; ---------------------------------------------------------------------------
+;; 9. Background jobs — run-bg! / job-status / job-output (full + ::since) /
+;;    job-stop!, plus the derived :jobs context section. Volatile table.
+;; ---------------------------------------------------------------------------
+
+(defn- poll-until
+  "Resolve when `(pred (job-status id))` holds, or after ~4s. A test helper —
+   the job table has no promise, so poll it."
+  [id pred]
+  (js/Promise.
+    (fn [resolve _]
+      (let [tries (atom 0)
+            step  (fn step []
+                    (let [st (shell/job-status {:seon.agent.shell/job-id id})]
+                      (if (or (pred st) (> @tries 40))
+                        (resolve st)
+                        (do (swap! tries inc)
+                            (js/setTimeout step 100)))))]
+        (step)))))
+
+(deftest run-bg-launches-polls-and-pages-output
+  (async done
+    (let [{ok?   :seon.agent.shell/ok?
+           id    :seon.agent.shell/job-id
+           state :seon.agent.shell/state}
+          (shell/run-bg! {:seon.agent.shell/cmd  "bash"
+                          :seon.agent.shell/args ["-c" "echo l1; sleep 1; echo l2"]})]
+      (is (true? ok?) "launch ok")
+      (is (string? id))
+      (is (= :running state) "starts running")
+      (-> (poll-until id #(= :exited (:seon.agent.shell/state %)))
+          (.then (fn [st]
+                   (is (= :exited (:seon.agent.shell/state st)))
+                   (is (= 0 (:seon.agent.shell/exit st)) "exit code captured")
+                   ;; full output
+                   (let [full (shell/job-output {:seon.agent.shell/job-id id})]
+                     (is (= "l1\nl2\n" (:seon.agent.shell/content full))
+                         "FULL captured stdout, uncapped")
+                     (is (false? (:seon.agent.shell/truncated? full)))
+                     ;; ::since returns only new output past the offset
+                     (let [tail (shell/job-output {:seon.agent.shell/job-id id
+                                                   :seon.agent.shell/since 3})]
+                       (is (= "l2\n" (:seon.agent.shell/content tail))
+                           "::since 3 skips the first line already seen")
+                       (is (= 6 (:seon.agent.shell/next-since tail))
+                           "next-since = end offset for the next poll")))
+                   ;; the derived :jobs section renders this job with the handle
+                   (let [blk (seon.agent.ctx.jobs/jobs-block {})]
+                     (is (str/includes? blk id) "section names the job")
+                     (is (str/includes? blk "job-output") "…with the read-more handle"))))
+          (settle! done)))))
+
+(deftest job-stop-sigterms-a-running-job
+  (async done
+    (let [{id :seon.agent.shell/job-id}
+          (shell/run-bg! {:seon.agent.shell/cmd  "bash"
+                          :seon.agent.shell/args ["-c" "sleep 30"]})
+          r  (shell/job-stop! {:seon.agent.shell/job-id id})]
+      (is (true? (:seon.agent.shell/ok? r)))
+      (is (= :stopped (:seon.agent.shell/state r)) "marked stopped immediately")
+      (-> (poll-until id #(not= :running (:seon.agent.shell/state %)))
+          (.then (fn [st]
+                   (is (not= :running (:seon.agent.shell/state st))
+                       "the child actually terminated")))
+          (settle! done)))))
+
+(deftest job-verbs-on-unknown-id-are-guiding-values
+  (async done
+    (let [bad {:seon.agent.shell/job-id "job-nope"}]
+      (doseq [r [(shell/job-status bad) (shell/job-output bad) (shell/job-stop! bad)]]
+        (is (false? (:seon.agent.shell/ok? r)))
+        (is (re-find #"no background job" (:seon.error/message r))))
+      ;; empty section renders nothing
+      (done))))

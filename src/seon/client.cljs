@@ -208,6 +208,7 @@
     [seon.agent.ctx.inventory]
     [seon.agent.ctx.findings]
     [seon.agent.ctx.relevant]
+    [seon.agent.ctx.jobs]
     [seon.platform]
     ;; Phase B item 9 — shared read-side wrapper over the analyzer
     ;; state. Required here so the build includes it; item 10's

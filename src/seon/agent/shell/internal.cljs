@@ -16,6 +16,7 @@
    `:seon.shell/*`; the code ns is the truth, per the root convention.)"
   (:require
     ["node:child_process" :as cp]
+    [clojure.string :as str]
     [seon.agent.fs :as fs]
     [seon.agent.shell :as-alias shell]
     [seon.ai.tokens :as tokens]
@@ -32,24 +33,14 @@
   30000)
 
 (def max-output-bytes
-  "execFile :maxBuffer — per-stream child output beyond this is dropped
-   by Node and the child is killed; the partial output IS still returned
-   with ::shell/truncated? true. Same cap as seon.agent.search.internal."
-  (* 8 1024 1024))
-
-(def default-max-output-tokens
-  "DEFAULT per-stream cap, in TOKENS (seon.ai.tokens/estimate), on the
-   stdout/stderr text placed in the envelope. Modest on purpose: the
-   envelope renders into agent context and threads into other verbs — a
-   chatty build log must not blow the turn. The honest full-size totals
-   (::shell/out-tokens / ::shell/err-tokens) are always reported."
-  2048)
-
-(def hard-max-output-tokens
-  "Ceiling a request's :seon.agent.shell/max-output-tokens is clamped to —
-   the context-explosion guard. Beyond this, redirect the command's
-   output to a file and page it with seon.agent.fs/read-file."
-  16384)
+  "execFile :maxBuffer — the FULL-capture ceiling for a foreground [[run]],
+   mirroring web-fetch's 2MB body cap. Per-stream output up to this is
+   captured whole (and, when it exceeds the preview cap, persisted to
+   my.blob so nothing is discarded at the boundary); beyond it Node kills
+   the child and ::shell/truncated? is set with the honest byte overflow.
+   Long/high-volume output belongs in a background job (spawn-based, not
+   maxBuffer-bounded)."
+  2000000)
 
 (def killed-exit
   "Deterministic exit sentinel for a SIGTERM-killed child (timeout or
@@ -120,52 +111,34 @@
 ;; Output discipline — token-capped streams, honest totals.
 ;; ============================================================
 
-(defn cap-stream
-  "Cap `s` at `max-tokens` (TOKENS, not chars), marking a cut with an
-   ellipsis. Returns the capped ::shell/text plus the HONEST full-size
-   ::shell/tokens and a ::shell/clipped? flag — a partial stream never
-   looks complete."
-  [s max-tokens]
-  (let [s     (str s)
-        total (tokens/estimate s)]
-    (if (> total max-tokens)
-      {::shell/text     (str (subs s 0 (tokens/estimate-chars max-tokens)) "…")
-       ::shell/tokens   total
-       ::shell/clipped? true}
-      {::shell/text s ::shell/tokens total ::shell/clipped? false})))
-
 (defn ran-envelope
-  "The ok?-true envelope: the process RAN and exit/out/err is the
-   answer, whatever the exit code. Streams are token-capped at
-   `max-tokens` with honest full-size totals; ::shell/truncated? is true
-   when ANYTHING was dropped (token cap or the process-buffer cap), with
-   a ::shell/hint naming how to get more."
-  [exit out err timed-out? buffer-truncated? max-tokens]
-  (let [o        (cap-stream out max-tokens)
-        e        (cap-stream err max-tokens)
-        clipped? (boolean (or buffer-truncated?
-                              (::shell/clipped? o)
-                              (::shell/clipped? e)))]
+  "The ok?-true envelope: the process RAN and exit/out/err is the answer.
+
+   Returns the FULL stdout/stderr — no token cap at the verb. Display
+   economy is the render layer's job (a large value stashes as result/<id>
+   and renders as a bounded skeleton with an honest ⟨N tokens⟩ head + the
+   result handle; aged transcript clips decay). ::shell/out-tokens /
+   ::shell/err-tokens are the honest sizes. ::shell/truncated? is set ONLY
+   when output overflowed the [[max-output-bytes]] capture ceiling — a RAM
+   guard, not display economy: bytes beyond it were dropped and a
+   ::shell/hint points at run-bg! for unbounded streams."
+  [exit out err timed-out? buffer-truncated?]
+  (let [out (str out)
+        err (str err)]
     (cond-> {::shell/ok?        true
              ::shell/exit       exit
-             ::shell/out        (::shell/text o)
-             ::shell/err        (::shell/text e)
-             ::shell/out-tokens (::shell/tokens o)
-             ::shell/err-tokens (::shell/tokens e)
+             ::shell/out        out
+             ::shell/err        err
+             ::shell/out-tokens (tokens/estimate out)
+             ::shell/err-tokens (tokens/estimate err)
              ::shell/timed-out? (boolean timed-out?)
-             ::shell/truncated? clipped?}
-      clipped?
+             ::shell/truncated? (boolean buffer-truncated?)}
+      buffer-truncated?
       (assoc ::shell/hint
-             (str "output clipped — full stdout ~" (::shell/tokens o)
-                  " tok / stderr ~" (::shell/tokens e) " tok, shown up to "
-                  max-tokens " tok each"
-                  (when buffer-truncated?
-                    (str ", and the child overflowed the " max-output-bytes
-                         "-byte process buffer (earlier output is gone)"))
-                  ". Raise :seon.agent.shell/max-output-tokens (hard cap "
-                  hard-max-output-tokens "), or redirect the command's "
-                  "output to a file under your fs roots and page it with "
-                  "seon.agent.fs/read-file.")))))
+             (str "output overflowed the " max-output-bytes "-byte capture "
+                  "ceiling — bytes beyond that were dropped (a RAM guard, not "
+                  "display). For an unbounded or long-running stream use "
+                  "(seon.agent.shell/run-bg! …) and page it with job-output.")))))
 
 (defn exit-code
   "The child's exit code as data: 0 when execFile reported no error, the
@@ -205,3 +178,155 @@
           (.on in "error" (fn [_] nil))
           (when (some? stdin) (.write in stdin))
           (.end in))))))
+
+;; ============================================================
+;; Background jobs — a VOLATILE process-lifetime table (globalThis tier,
+;; NEVER datoms; no tmp-file tee). A long-running child spawns; its stdout /
+;; stderr accumulate here (head-capped per stream at [[bg-max-stream-bytes]],
+;; a RAM guard) and [[slice-since]] serves the full-so-far window on demand.
+;; Lost on pod restart — honest, because the child process dies too; a job
+;; is live runtime state, not a persisted fact.
+;; ============================================================
+
+(def bg-max-stream-bytes
+  "Per-stream RAM ceiling for a background job (same ~2MB guard as run's
+   capture ceiling). Output past this is dropped, keeping the HEAD so
+   ::shell/since offsets stay stable, and the stream is flagged truncated."
+  2000000)
+
+(def max-exited-jobs
+  "Cap on retained finished (:exited/:stopped) job records — the oldest are
+   pruned when a job ends and the count exceeds this. Running jobs are never
+   pruned."
+  32)
+
+;; Job id -> record. Each: {::shell/job-id ::shell/cmd ::shell/args
+;; ::shell/cwd ::shell/started-at ::shell/child ::shell/out ::shell/err
+;; ::shell/out-truncated? ::shell/err-truncated? ::shell/state ::shell/exit
+;; ::shell/ended-at}. Volatile — process-lifetime only.
+(defonce !jobs (atom {}))
+
+(defn unknown-job
+  "The ok?-false envelope for an id absent from the volatile job table."
+  [id]
+  (fail (str "no background job " (pr-str id) " — it never started, was "
+             "pruned (oldest finished jobs are dropped past a cap), or the pod "
+             "restarted (the table is volatile). Launch one with "
+             "(seon.agent.shell/run-bg! …).")))
+
+(defn runtime-ms
+  "Wall-clock milliseconds a job has run — to `ended-at` if finished, else now."
+  [j]
+  (let [start (.getTime (::shell/started-at j))
+        end   (if-let [e (::shell/ended-at j)] (.getTime e) (.now js/Date))]
+    (max 0 (- end start))))
+
+(defn- append-capped
+  "Append `chunk` to job `id`'s `out-key`, HEAD-capped at bg-max-stream-bytes.
+
+   Once the ceiling is hit `trunc-key` flips true and further output is
+   dropped — the head is retained so a ::shell/since offset never shifts."
+  [id out-key trunc-key chunk]
+  (swap! !jobs update id
+         (fn [j]
+           (if (or (nil? j) (get j trunc-key))
+             j
+             (let [s' (str (get j out-key) (str chunk))]
+               (if (> (count s') bg-max-stream-bytes)
+                 (assoc j out-key (subs s' 0 bg-max-stream-bytes) trunc-key true)
+                 (assoc j out-key s')))))))
+
+(defn- prune-exited!
+  "Drop the oldest finished job records beyond [[max-exited-jobs]]."
+  []
+  (swap! !jobs
+         (fn [jobs]
+           (let [finished (->> (vals jobs) (remove #(= :running (::shell/state %))))
+                 over     (- (count finished) max-exited-jobs)]
+             (if (pos? over)
+               (let [drop-ids (->> finished
+                                   ;; a just-stopped job may not have its
+                                   ;; close event yet (ended-at nil) — sort it
+                                   ;; newest so it is never the pruned one.
+                                   (sort-by #(or (some-> (::shell/ended-at %) .getTime)
+                                                 js/Number.MAX_SAFE_INTEGER))
+                                   (take over)
+                                   (map ::shell/job-id)
+                                   set)]
+                 (apply dissoc jobs drop-ids))
+               jobs)))))
+
+(defn start-job!
+  "Spawn `cmd`/`args` in the background and register a job; return its id."
+  [cmd args cwd stdin]
+  (let [id    (str "job-" (subs (str (random-uuid)) 0 8))
+        opts  #js {:windowsHide true}
+        _     (when cwd (aset opts "cwd" cwd))
+        child (.spawn cp cmd (into-array args) opts)]
+    (swap! !jobs assoc id
+           {::shell/job-id        id
+            ::shell/cmd           cmd
+            ::shell/args          (vec args)
+            ::shell/cwd           cwd
+            ::shell/started-at    (js/Date.)
+            ::shell/child         child
+            ::shell/out           ""
+            ::shell/err           ""
+            ::shell/out-truncated? false
+            ::shell/err-truncated? false
+            ::shell/state         :running
+            ::shell/exit          nil
+            ::shell/ended-at      nil})
+    (.on (.-stdout child) "data"
+         (fn [d] (append-capped id ::shell/out ::shell/out-truncated? d)))
+    (.on (.-stderr child) "data"
+         (fn [d] (append-capped id ::shell/err ::shell/err-truncated? d)))
+    (.on child "error"
+         (fn [e]
+           (swap! !jobs update id
+                  (fn [j] (when j
+                            (assoc j
+                                   ::shell/state    :exited
+                                   ::shell/exit     killed-exit
+                                   ::shell/ended-at (js/Date.)
+                                   ::shell/err      (str (::shell/err j)
+                                                         "\n[spawn error] "
+                                                         (or (some-> e .-message) (str e)))))))
+           (prune-exited!)))
+    (.on child "close"
+         (fn [code signal]
+           (swap! !jobs update id
+                  (fn [j] (when j
+                            (assoc j
+                                   ::shell/state    (if (= :stopped (::shell/state j)) :stopped :exited)
+                                   ::shell/exit     (cond (number? code) code signal killed-exit :else 0)
+                                   ::shell/ended-at (js/Date.)))))
+           (prune-exited!)))
+    (let [in (.-stdin child)]
+      (when in
+        (.on in "error" (fn [_] nil))
+        (when (some? stdin) (.write in stdin))
+        (.end in)))
+    id))
+
+(defn stop-job!
+  "SIGTERM a running job; mark it :stopped. Idempotent on a finished job."
+  [id]
+  (let [j (get @!jobs id)]
+    (when (and j (= :running (::shell/state j)))
+      (swap! !jobs assoc-in [id ::shell/state] :stopped)
+      (try (.kill ^js (::shell/child j) "SIGTERM") (catch :default _ nil)))))
+
+(defn slice-since
+  "The captured stream `s` from char offset `since` (default 0) to the end.
+
+   Full-so-far minus what a prior poll already read — returns ::shell/content
+   plus ::shell/since (clamped, echoed) and ::shell/next-since (the new end
+   offset to pass as ::since next time to fetch only new output)."
+  [s since]
+  (let [s     (str s)
+        total (count s)
+        from  (min (max 0 (or since 0)) total)]
+    {::shell/content    (subs s from)
+     ::shell/since      from
+     ::shell/next-since total}))

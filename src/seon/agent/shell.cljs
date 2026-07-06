@@ -45,6 +45,7 @@
   (:require
     [clojure.string :as str]
     [seon.agent.shell.internal :as in]
+    [seon.ai.tokens :as tokens]
     [seon.platform :as platform]
     [seon.schema :as schema]))
 
@@ -57,7 +58,6 @@
 (schema/register! :seon.agent.shell/cwd        [:string {:min 1}]) ; absolute; gated by seon.agent.fs
 (schema/register! :seon.agent.shell/stdin      :string)            ; written to the child's stdin
 (schema/register! :seon.agent.shell/timeout-ms :int)               ; default 30000, then SIGTERM
-(schema/register! :seon.agent.shell/max-output-tokens :int)        ; per-stream envelope cap
 (schema/register! :seon.agent.shell/source     [:string {:min 1}]) ; python source (py-run)
 
 (schema/register! :seon.agent.shell/ok?        :boolean)           ; "the process RAN", NOT "exit 0"
@@ -67,7 +67,7 @@
 (schema/register! :seon.agent.shell/out-tokens :int)               ; honest FULL stdout size (tokens)
 (schema/register! :seon.agent.shell/err-tokens :int)               ; honest FULL stderr size (tokens)
 (schema/register! :seon.agent.shell/timed-out? :boolean)
-(schema/register! :seon.agent.shell/truncated? :boolean)           ; anything dropped (token or byte cap)
+(schema/register! :seon.agent.shell/truncated? :boolean)           ; output overflowed the byte-capture ceiling (RAM guard)
 (schema/register! :seon.agent.shell/hint       :string)
 (schema/register! :seon.agent.shell/granted?   :boolean)
 
@@ -77,8 +77,7 @@
    [:seon.agent.shell/args              {:optional true} :seon.agent.shell/args]
    [:seon.agent.shell/cwd               {:optional true} :seon.agent.shell/cwd]
    [:seon.agent.shell/stdin             {:optional true} :seon.agent.shell/stdin]
-   [:seon.agent.shell/timeout-ms        {:optional true} :seon.agent.shell/timeout-ms]
-   [:seon.agent.shell/max-output-tokens {:optional true} :seon.agent.shell/max-output-tokens]])
+   [:seon.agent.shell/timeout-ms        {:optional true} :seon.agent.shell/timeout-ms]])
 
 (schema/register! :seon.agent.shell/py-run-request
   [:map
@@ -86,8 +85,7 @@
    [:seon.agent.shell/cmd               {:optional true} :seon.agent.shell/cmd]
    [:seon.agent.shell/args              {:optional true} :seon.agent.shell/args]
    [:seon.agent.shell/cwd               {:optional true} :seon.agent.shell/cwd]
-   [:seon.agent.shell/timeout-ms        {:optional true} :seon.agent.shell/timeout-ms]
-   [:seon.agent.shell/max-output-tokens {:optional true} :seon.agent.shell/max-output-tokens]])
+   [:seon.agent.shell/timeout-ms        {:optional true} :seon.agent.shell/timeout-ms]])
 
 ;; The ONE envelope — py-run returns it too (no parallel shape).
 (schema/register! :seon.agent.shell/run-response
@@ -109,6 +107,105 @@
     [:seon.agent.shell/ok?     [:= false]]
     [:seon.error/message :string]
     [:seon.error/data    {:optional true} :map]]])
+
+;; ============================================================
+;; Background jobs — spawn long-running work, poll its status, page its
+;; FULL output. The job table is volatile (globalThis tier, NEVER datoms);
+;; job-output pages the whole captured stream, so nothing is discarded.
+;; ============================================================
+
+(schema/register! :seon.agent.shell/job-id     [:string {:min 1}])
+(schema/register! :seon.agent.shell/state      [:enum :running :exited :stopped])
+(schema/register! :seon.agent.shell/runtime-ms :int)
+(schema/register! :seon.agent.shell/stream      [:enum :out :err])
+(schema/register! :seon.agent.shell/since       [:int {:min 0}]) ; char cursor into the captured stream
+(schema/register! :seon.agent.shell/next-since  :int)            ; pass as ::since next poll for only-new output
+(schema/register! :seon.agent.shell/content     :string)
+(schema/register! :seon.agent.shell/tokens      :int)
+
+(schema/register! :seon.agent.shell/run-bg-request
+  [:map
+   [:seon.agent.shell/cmd   :seon.agent.shell/cmd]
+   [:seon.agent.shell/args  {:optional true} :seon.agent.shell/args]
+   [:seon.agent.shell/cwd   {:optional true} :seon.agent.shell/cwd]
+   [:seon.agent.shell/stdin {:optional true} :seon.agent.shell/stdin]])
+
+;; the ok?-false half — shared across every background verb (gate/unknown-job).
+(schema/register! :seon.agent.shell/job-fail
+  [:map
+   [:seon.agent.shell/ok? [:= false]]
+   [:seon.error/message :string]
+   [:seon.error/data    {:optional true} :map]])
+
+(schema/register! :seon.agent.shell/run-bg-response
+  [:or
+   [:map
+    [:seon.agent.shell/ok?     [:= true]]
+    [:seon.agent.shell/job-id  :seon.agent.shell/job-id]
+    [:seon.agent.shell/state   :seon.agent.shell/state]
+    [:seon.agent.shell/cmd     :seon.agent.shell/cmd]]
+   :seon.agent.shell/job-fail])
+
+(schema/register! :seon.agent.shell/job-ref-request
+  [:map [:seon.agent.shell/job-id :seon.agent.shell/job-id]])
+
+(schema/register! :seon.agent.shell/job-status-response
+  [:or
+   [:map
+    [:seon.agent.shell/ok?         [:= true]]
+    [:seon.agent.shell/job-id      :seon.agent.shell/job-id]
+    [:seon.agent.shell/state       :seon.agent.shell/state]
+    [:seon.agent.shell/cmd         :seon.agent.shell/cmd]
+    [:seon.agent.shell/runtime-ms  :seon.agent.shell/runtime-ms]
+    [:seon.agent.shell/out-tokens  :seon.agent.shell/out-tokens]
+    [:seon.agent.shell/err-tokens  :seon.agent.shell/err-tokens]
+    [:seon.agent.shell/exit        {:optional true} :seon.agent.shell/exit]]
+   :seon.agent.shell/job-fail])
+
+(schema/register! :seon.agent.shell/job-output-request
+  [:map
+   [:seon.agent.shell/job-id :seon.agent.shell/job-id]
+   [:seon.agent.shell/stream {:optional true} :seon.agent.shell/stream]
+   [:seon.agent.shell/since  {:optional true} :seon.agent.shell/since]])
+
+(schema/register! :seon.agent.shell/job-output-response
+  [:or
+   [:map
+    [:seon.agent.shell/ok?         [:= true]]
+    [:seon.agent.shell/job-id      :seon.agent.shell/job-id]
+    [:seon.agent.shell/state       :seon.agent.shell/state]
+    [:seon.agent.shell/stream      :seon.agent.shell/stream]
+    [:seon.agent.shell/content     :seon.agent.shell/content]
+    [:seon.agent.shell/since       :seon.agent.shell/since]
+    [:seon.agent.shell/next-since  :seon.agent.shell/next-since]
+    [:seon.agent.shell/tokens      :seon.agent.shell/tokens]
+    [:seon.agent.shell/truncated?  :seon.agent.shell/truncated?]
+    [:seon.agent.shell/runtime-ms  :seon.agent.shell/runtime-ms]
+    [:seon.agent.shell/exit        {:optional true} :seon.agent.shell/exit]]
+   :seon.agent.shell/job-fail])
+
+(schema/register! :seon.agent.shell/job-stop-response
+  [:or
+   [:map
+    [:seon.agent.shell/ok?    [:= true]]
+    [:seon.agent.shell/job-id :seon.agent.shell/job-id]
+    [:seon.agent.shell/state  :seon.agent.shell/state]]
+   :seon.agent.shell/job-fail])
+
+(schema/register! :seon.agent.shell/job-summary
+  [:map
+   [:seon.agent.shell/job-id     :seon.agent.shell/job-id]
+   [:seon.agent.shell/cmd        :seon.agent.shell/cmd]
+   [:seon.agent.shell/state      :seon.agent.shell/state]
+   [:seon.agent.shell/runtime-ms :seon.agent.shell/runtime-ms]
+   [:seon.agent.shell/out-tokens :seon.agent.shell/out-tokens]
+   [:seon.agent.shell/err-tokens :seon.agent.shell/err-tokens]
+   [:seon.agent.shell/exit       {:optional true} :seon.agent.shell/exit]])
+(schema/register! :seon.agent.shell/jobs [:vector :seon.agent.shell/job-summary])
+(schema/register! :seon.agent.shell/list-response
+  [:map
+   [:seon.agent.shell/ok?   [:= true]]
+   [:seon.agent.shell/jobs  :seon.agent.shell/jobs]])
 
 (schema/register! :seon.agent.shell/grants-response
   [:map [:seon.agent.shell/granted? :seon.agent.shell/granted?]])
@@ -136,12 +233,21 @@
    ok? = the process RAN: read :seon.agent.shell/exit for success/failure — a
    non-zero exit is a legitimate answer, not an ok?-false. SIGTERM at
    :seon.agent.shell/timeout-ms (default 30s → :seon.agent.shell/timed-out? true,
-   exit sentinel 143, partial output still delivered). stdout/stderr are
-   token-capped (default 2048/stream, :seon.agent.shell/max-output-tokens to
-   raise, hard cap 16384) with honest full-size totals + a hint when
-   clipped. :seon.agent.shell/cwd (optional) must sit under the seon.agent.fs
-   allowlist; the whole verb is default-deny until the host grants
-   SEON_SHELL.
+   exit sentinel 143, partial output still delivered; no low ceiling — pass a
+   large timeout for a slow build/test). :seon.agent.shell/cwd (optional) must
+   sit under the seon.agent.fs allowlist; the whole verb is default-deny until
+   the host grants SEON_SHELL.
+
+   Output is DATA, uncapped: :seon.agent.shell/out / err carry the FULL
+   streams (with honest :seon.agent.shell/out-tokens / err-tokens sizes) —
+   display economy is the render layer's, not the verb's: a big value stashes
+   as result/<id> and renders as a bounded skeleton you re-reference to read
+   in full. The only bound is a ~2MB/stream RAM ceiling: past it Node kills
+   the child and :seon.agent.shell/truncated? is set with a guiding hint (use
+   [[run-bg!]] for an unbounded stream). To PERSIST output durably, that is
+   your explicit choice — (my.blob/put! {:my.blob/content
+   (:seon.agent.shell/out r)}) the stashed value; the verb never blobs behind
+   your back.
 
    Worked example — run, then thread the output onward:
 
@@ -152,9 +258,8 @@
      ;; (zero? (:seon.agent.shell/exit r)) → clean tree; split :seon.agent.shell/out
      ;; into lines, transform, db/transact!."
   {:malli/schema [:=> [:cat :seon.agent.shell/run-request] :seon.agent.shell/run-response]}
-  [{:seon.agent.shell/keys [cmd args cwd stdin timeout-ms max-output-tokens]
-    :or {timeout-ms        in/default-timeout-ms
-         max-output-tokens in/default-max-output-tokens}}]
+  [{:seon.agent.shell/keys [cmd args cwd stdin timeout-ms]
+    :or {timeout-ms in/default-timeout-ms}}]
   (try
     (cond
       (not= :node (platform/host))
@@ -169,8 +274,7 @@
       :else
       (if-let [denied (when cwd (in/gate-cwd cwd))]
         denied
-        (let [max-tok (min (max 1 max-output-tokens) in/hard-max-output-tokens)
-              ^js r   (await (in/exec cmd (vec (or args [])) cwd stdin timeout-ms))
+        (let [^js r   (await (in/exec cmd (vec (or args [])) cwd stdin timeout-ms))
               ^js err (.-err r)
               stdout  (str (.-stdout r))
               stderr  (str (.-stderr r))]
@@ -182,19 +286,19 @@
                           "path.")
                      {:seon.agent.shell/cmd cmd})
 
-            ;; Output-buffer overflow — the child was killed, but the
+            ;; RAM-ceiling overflow — the child was killed, but the captured
             ;; partial output IS the (truncated) answer.
             (and err (= "ERR_CHILD_PROCESS_STDIO_MAXBUFFER" (.-code err)))
-            (in/ran-envelope (in/exit-code err) stdout stderr false true max-tok)
+            (in/ran-envelope (in/exit-code err) stdout stderr false true)
 
             ;; Timeout — execFile SIGTERM'd the child; deliver the honest
             ;; partial output with the authoritative timed-out? flag.
             (and err (.-killed err))
-            (in/ran-envelope in/killed-exit stdout stderr true false max-tok)
+            (in/ran-envelope in/killed-exit stdout stderr true false)
 
             ;; Ran (exit 0 or non-zero) — exit/out/err is the answer.
             :else
-            (in/ran-envelope (in/exit-code err) stdout stderr false false max-tok)))))
+            (in/ran-envelope (in/exit-code err) stdout stderr false false)))))
     (catch :default e
       (in/fail (str "unexpected error in seon.agent.shell/run: "
                     (or (some-> e .-message) (str e)))))))
@@ -203,8 +307,8 @@
   "Run Python source via stdin (`python3 -`); result is data.
 
    The thin Python specialization of [[run]] — same gate (SEON_SHELL),
-   same :seon.agent.shell/run-response envelope, same caps. The load-bearing
-   rule: :seon.agent.shell/source is shipped to the interpreter AS STDIN DATA,
+   same :seon.agent.shell/run-response envelope, same full-output rule. The
+   load-bearing rule: :seon.agent.shell/source is shipped to the interpreter AS STDIN DATA,
    never string-concatenated into a shell line — write any Python, no
    quoting or escaping games. Optional :seon.agent.shell/args become the
    script's sys.argv[1:]; :seon.agent.shell/cmd overrides the interpreter
@@ -217,13 +321,158 @@
      ;; => {:seon.agent.shell/ok? true :seon.agent.shell/exit 0
      ;;     :seon.agent.shell/out \"42\\n\" :seon.agent.shell/err \"\" …}"
   {:malli/schema [:=> [:cat :seon.agent.shell/py-run-request] :seon.agent.shell/run-response]}
-  [{:seon.agent.shell/keys [source cmd args cwd timeout-ms max-output-tokens]
+  [{:seon.agent.shell/keys [source cmd args cwd timeout-ms]
     :or {cmd "python3"}}]
   (if (or (nil? source) (str/blank? source))
     (in/fail ":seon.agent.shell/source is required and must be non-blank — the Python source text (shipped to the interpreter as stdin).")
     (await (run (cond-> {:seon.agent.shell/cmd   cmd
                          :seon.agent.shell/args  (into ["-"] (or args []))
                          :seon.agent.shell/stdin source}
-                  cwd               (assoc :seon.agent.shell/cwd cwd)
-                  timeout-ms        (assoc :seon.agent.shell/timeout-ms timeout-ms)
-                  max-output-tokens (assoc :seon.agent.shell/max-output-tokens max-output-tokens))))))
+                  cwd        (assoc :seon.agent.shell/cwd cwd)
+                  timeout-ms (assoc :seon.agent.shell/timeout-ms timeout-ms))))))
+
+;; ============================================================
+;; Background jobs — spawn, poll, page, stop. Same SEON_SHELL gate + cwd
+;; allowlist as run; the job table is volatile (lost on pod restart).
+;; ============================================================
+
+(defn run-bg!
+  "Spawn a command in the BACKGROUND; return its :seon.agent.shell/job-id.
+
+   For long or high-volume work (a bench test run, a build) that would
+   outlast [[run]]'s timeout or overflow its capture ceiling. Same gate as
+   run — default-deny until SEON_SHELL, a :seon.agent.shell/cwd under the
+   seon.agent.fs allowlist. Returns immediately with ok? true + the job-id
+   + :seon.agent.shell/state :running; the child's stdout/stderr accumulate
+   in a volatile table (NOT datoms), head-capped per stream at ~2MB (a RAM
+   guard). Poll it with [[job-status]], read its output with [[job-output]]
+   (full-so-far or incremental via ::since), and SIGTERM it with
+   [[job-stop!]]. The table is lost on a pod restart (and the oldest finished
+   jobs are pruned past a cap) — a job is live runtime state, not a persisted
+   fact; my.blob/put! its output if you need it durable.
+
+     (seon.agent.shell/run-bg! {:seon.agent.shell/cmd  \"pytest\"
+                                :seon.agent.shell/args [\"-q\"]
+                                :seon.agent.shell/cwd  \"/Users/me/work-repo\"})
+     ;; => {:seon.agent.shell/ok? true :seon.agent.shell/job-id \"job-1a2b3c4d\"
+     ;;     :seon.agent.shell/state :running :seon.agent.shell/cmd \"pytest\"}"
+  {:malli/schema [:=> [:cat :seon.agent.shell/run-bg-request] :seon.agent.shell/run-bg-response]}
+  [{:seon.agent.shell/keys [cmd args cwd stdin]}]
+  (try
+    (cond
+      (not= :node (platform/host))
+      (in/fail "seon.agent.shell requires the :node host (no :wasi child processes).")
+
+      (not (in/granted?))
+      (in/ungranted)
+
+      (or (nil? cmd) (str/blank? cmd))
+      (in/fail ":seon.agent.shell/cmd is required and must be non-blank — argv[0], PATH-resolved (e.g. \"pytest\").")
+
+      :else
+      (if-let [denied (when cwd (in/gate-cwd cwd))]
+        denied
+        (let [id (in/start-job! cmd (vec (or args [])) cwd stdin)]
+          {:seon.agent.shell/ok?     true
+           :seon.agent.shell/job-id  id
+           :seon.agent.shell/state   :running
+           :seon.agent.shell/cmd     cmd})))
+    (catch :default e
+      (in/fail (str "unexpected error in seon.agent.shell/run-bg!: "
+                    (or (some-> e .-message) (str e)))))))
+
+(defn- job-summary
+  "A background job record → its compact data summary (sizes in tokens)."
+  [j]
+  (cond-> {:seon.agent.shell/job-id     (:seon.agent.shell/job-id j)
+           :seon.agent.shell/cmd        (:seon.agent.shell/cmd j)
+           :seon.agent.shell/state      (:seon.agent.shell/state j)
+           :seon.agent.shell/runtime-ms (in/runtime-ms j)
+           :seon.agent.shell/out-tokens (tokens/estimate (:seon.agent.shell/out j))
+           :seon.agent.shell/err-tokens (tokens/estimate (:seon.agent.shell/err j))}
+    (some? (:seon.agent.shell/exit j))
+    (assoc :seon.agent.shell/exit (:seon.agent.shell/exit j))))
+
+(defn list-jobs
+  "Every background job in the volatile table, newest-first — a data summary.
+
+   The reactive :jobs context section renders from this; agents can also
+   call it to see what they launched. Sizes are TOKENS. The table is
+   process-volatile (running + recently-finished jobs; oldest finished
+   pruned past a cap)."
+  {:malli/schema [:=> [:cat] :seon.agent.shell/list-response]}
+  []
+  {:seon.agent.shell/ok?  true
+   :seon.agent.shell/jobs (->> (vals @in/!jobs)
+                               (sort-by #(- (.getTime (:seon.agent.shell/started-at %))))
+                               (mapv job-summary))})
+
+(defn job-status
+  "Report a background job's state, runtime, and pending-output sizes.
+
+   :seon.agent.shell/state is :running / :exited / :stopped;
+   :seon.agent.shell/exit is present once finished;
+   :seon.agent.shell/runtime-ms is wall-clock so far (or total);
+   :seon.agent.shell/out-tokens / err-tokens are the HONEST full captured
+   sizes so you know how much [[job-output]] has to show. An unknown id
+   (never started, or the pod restarted) is a guiding ok?-false value."
+  {:malli/schema [:=> [:cat :seon.agent.shell/job-ref-request] :seon.agent.shell/job-status-response]}
+  [{:seon.agent.shell/keys [job-id]}]
+  (if-let [j (get @in/!jobs job-id)]
+    (cond-> {:seon.agent.shell/ok?         true
+             :seon.agent.shell/job-id      job-id
+             :seon.agent.shell/state       (:seon.agent.shell/state j)
+             :seon.agent.shell/cmd         (:seon.agent.shell/cmd j)
+             :seon.agent.shell/runtime-ms  (in/runtime-ms j)
+             :seon.agent.shell/out-tokens  (tokens/estimate (:seon.agent.shell/out j))
+             :seon.agent.shell/err-tokens  (tokens/estimate (:seon.agent.shell/err j))}
+      (some? (:seon.agent.shell/exit j))
+      (assoc :seon.agent.shell/exit (:seon.agent.shell/exit j)))
+    (in/unknown-job job-id)))
+
+(defn job-output
+  "A background job's captured output — full-so-far, or only-new via ::since.
+
+   Reads the chosen :seon.agent.shell/stream (:out default / :err) as an
+   ORDINARY eval value (no token cap — display economy is the render layer's;
+   a big result stashes as result/<id>). Default returns everything captured
+   so far; pass :seon.agent.shell/since (a char offset — the previous call's
+   :seon.agent.shell/next-since) to get ONLY output since then, so polling a
+   live job streams incrementally. :seon.agent.shell/tokens is the honest full
+   size; :seon.agent.shell/truncated? true means the stream hit its ~2MB RAM
+   ceiling and later bytes were dropped (head kept). Unknown id → a guiding
+   ok?-false value."
+  {:malli/schema [:=> [:cat :seon.agent.shell/job-output-request] :seon.agent.shell/job-output-response]}
+  [{:seon.agent.shell/keys [job-id stream since]}]
+  (if-let [j (get @in/!jobs job-id)]
+    (let [stream (or stream :out)
+          s      (case stream :err (:seon.agent.shell/err j) (:seon.agent.shell/out j))
+          trunc? (case stream
+                   :err (:seon.agent.shell/err-truncated? j)
+                   (:seon.agent.shell/out-truncated? j))]
+      (cond-> (merge {:seon.agent.shell/ok?         true
+                      :seon.agent.shell/job-id      job-id
+                      :seon.agent.shell/state       (:seon.agent.shell/state j)
+                      :seon.agent.shell/stream      stream
+                      :seon.agent.shell/tokens      (tokens/estimate (str s))
+                      :seon.agent.shell/truncated?  (boolean trunc?)
+                      :seon.agent.shell/runtime-ms  (in/runtime-ms j)}
+                     (in/slice-since s since))
+        (some? (:seon.agent.shell/exit j))
+        (assoc :seon.agent.shell/exit (:seon.agent.shell/exit j))))
+    (in/unknown-job job-id)))
+
+(defn job-stop!
+  "SIGTERM a running background job; return its new state.
+
+   Idempotent — a job already :exited / :stopped is left as-is. The
+   captured output stays retrievable via [[job-output]] after stopping.
+   Unknown id → a guiding ok?-false value."
+  {:malli/schema [:=> [:cat :seon.agent.shell/job-ref-request] :seon.agent.shell/job-stop-response]}
+  [{:seon.agent.shell/keys [job-id]}]
+  (if (get @in/!jobs job-id)
+    (do (in/stop-job! job-id)
+        {:seon.agent.shell/ok?    true
+         :seon.agent.shell/job-id job-id
+         :seon.agent.shell/state  (:seon.agent.shell/state (get @in/!jobs job-id))})
+    (in/unknown-job job-id)))

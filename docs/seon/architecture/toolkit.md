@@ -313,10 +313,12 @@ to change a file is `view` → `replace!`, never a whole-file `write-file`.
   window; the sha is the fence you echo to `replace!`. STRIP the `N<tab>`
   prefix before copying text into a find.
 - **`replace!`** — `{::path ::find ::replace}` (+ optional `::expected-count`
-  default 1, `::near [from to]`, `::file-sha`). The mutation rule: **smart
-  matching FINDS candidates; only DETERMINISTIC matching MUTATES.** A pure
-  cascade (`seon.agent.fs.match`, `.cljc`) tries, first hit wins — exact text
-  at the expected count → the same inside the `near` window → conservative
+  default 1, `::all?` for "every occurrence, whatever the count" — mutually
+  exclusive with `::expected-count`, schema-enforced — `::near [from to]`,
+  `::file-sha`). The mutation rule: **smart matching FINDS candidates; only
+  DETERMINISTIC matching MUTATES.** A pure cascade (`seon.agent.fs.match`,
+  `.cljc`) tries, first hit wins — exact text at the expected count (or any
+  count ≥1 under `::all?`) → the same inside the `near` window → conservative
   line-ending / trailing-whitespace normalization (NEVER indentation). Anything
   ambiguous or absent FAILS with line-numbered candidate previews and writes
   nothing — it never guesses a location. Success returns the new `file-sha`,
@@ -325,6 +327,11 @@ to change a file is `view` → `replace!`, never a whole-file `write-file`.
 - **`insert!`** — `{::path ::content}` plus EXACTLY ONE of `::after-line` /
   `::before-line` (1-based; `after-line 0` prepends, `before-line (inc total)`
   appends). Out-of-range fails with the real `::total-lines`.
+- **`walk-dir`** — recursive listing with an optional `::glob` (`*.py`,
+  `src/**/*.cljs`; a slash-free glob matches the basename at any depth, `**/`
+  is zero-or-more segments), `::match-ext` suffix, `::sort` (`:name` default /
+  `:mtime` newest-first), `::skip-hidden`, and a `::max-results` cap with
+  honest `::total-found` + `::truncated?` + a narrowing `::hint`.
 - **`#code` heredoc** — `::find`/`::replace`/`::content` (and `write-file`'s
   `::content`) accept the inert `{:seon.code/lang … :seon.code/text …}` value a
   `#code/<lang> <<SENTINEL … SENTINEL` block reads to, so foreign source with
@@ -341,7 +348,12 @@ plus the fs-allowlist gate (reuses `seon.agent.fs`, so search and read agree on
 reach). Surface: `grep` → `{ok? items count truncated?}`; a match IS a
 `:seon.path/located` (`:seon.path/abs` + `:seon.path/line` + `:seon.path/preview`).
 `^:async`, never-throws. Then `(map files/read-file matches)` just works.
-**Budget:** ~1.5k tok.
+Optional `::context-lines` (0–10, rg `-C`) widens each hit — the by-file
+sample line-text becomes a numbered window, and under `::full?` the flat
+stream interleaves context lines (flagged `::context?`, never counted as
+matches); `::multiline?` (rg `-U --multiline-dotall`) lets a pattern span
+lines for multi-line signatures/decorators. `grep-graph` is the same shape
+over the program graph. **Budget:** ~1.5k tok.
 
 #### `my.shell` — floor: `seon.agent.shell`
 
@@ -356,28 +368,40 @@ script, a `git` query — and get `{exit out err}` back as data.
 (schema/register! :seon.agent.shell/args       [:vector :string])  ; argv[1..] — never a shell string
 (schema/register! :seon.agent.shell/cwd        [:string {:min 1}]) ; absolute; gated by seon.agent.fs
 (schema/register! :seon.agent.shell/stdin      :string)
-(schema/register! :seon.agent.shell/timeout-ms :int)               ; default 30000, then SIGTERM
-(schema/register! :seon.agent.shell/max-output-tokens :int)        ; per-stream envelope cap
+(schema/register! :seon.agent.shell/timeout-ms :int)               ; default 30000, then SIGTERM (no low ceiling)
 
 (defn ^:async run
   "Run a command as argv (never a shell string); result is data. ALWAYS
    resolves; ok? = the process RAN — a NON-ZERO exit is a legitimate result
    (read :seon.agent.shell/exit yourself); ok? false is reserved for COULD
-   NOT RUN AT ALL. SIGTERM at timeout-ms, token-capped out/err with honest
-   full-size totals. The cwd is gated by the seon.agent.fs allowlist;
-   default-deny until the host grants SEON_SHELL."
+   NOT RUN AT ALL. SIGTERM at timeout-ms. Output is FULL data (no verb-level
+   token cap — display economy is the render layer's, via result/<id>); the
+   only bound is a ~2MB/stream RAM ceiling (::truncated? + hint → run-bg!).
+   The cwd is gated by the seon.agent.fs allowlist; default-deny until the
+   host grants SEON_SHELL."
   {:malli/schema [:=> [:cat :seon.agent.shell/run-request] :seon.agent.shell/run-response]}
   )
 ```
 
 **Safety:** argv-only; cwd through the `seon.agent.fs` allowlist; timeout
-SIGTERM; per-stream token caps (honest `:seon.agent.shell/timed-out?` /
-`truncated?` + full-size `out-tokens`/`err-tokens`); `SEON_SHELL` host grant
-(default-deny, same posture as `SEON_FS_*`; inspect with `grants`). A soft
-boundary against LLM accidents, not a security boundary. **Composes:**
+SIGTERM; `SEON_SHELL` host grant (default-deny, same posture as `SEON_FS_*`;
+inspect with `grants`). A soft boundary against LLM accidents, not a security
+boundary. **Output is full data** — `::out`/`::err` are uncapped strings with
+honest `::out-tokens`/`::err-tokens`; the render layer bounds display and the
+agent chooses durability (`my.blob/put!` the stashed value). **Composes:**
 `:seon.agent.shell/out` → transform → `db/transact!`; `cwd` takes a
 `:seon.path/abs` from a listing/grep; `py-run` is the same envelope for a
-python source string. **Budget:** ~1.2k tok.
+python source string.
+
+**Background jobs** (`run-bg!` / `job-status` / `job-output` / `job-stop!` /
+`list-jobs`): for work that outlasts `run`'s timeout (a bench test run, a
+build). `run-bg!` returns a `::job-id` immediately; the child's stdout/stderr
+accumulate in a VOLATILE globalThis table (never datoms, ~2MB/stream RAM cap,
+oldest finished pruned, lost on pod restart — honest, the process dies too).
+`job-output` reads the full-so-far stream or only-new via a `::since` char
+cursor. The derived `:jobs` context section renders running + recent jobs
+with the read-more handle, and vanishes when the table empties. **Budget:**
+~1.4k tok.
 
 #### `seon.agent.web` — the open-web read (fetch + search)
 

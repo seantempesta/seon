@@ -305,6 +305,53 @@
               "surrounding context to make it unique, or use the "
               "from-line/to-line range mode")}))))
 
+(defn glob->re
+  "Compile a shell glob to an anchored regex.
+
+   `**/` → zero or more path segments (globstar), `**` → any run (incl.
+   `/`), `*` → any run of non-`/`, `?` → one non-`/`. Every other regex
+   metacharacter is escaped so a literal `.` or `(` matches itself. One
+   ordered token pass — no placeholder round-trip."
+  [glob]
+  (let [pat (str/replace
+              glob
+              #"\*\*/|\*\*|\*|\?|[.+^${}()|\[\]\\]|[^*?]"
+              (fn [m]
+                (case m
+                  "**/" "(?:.*/)?"
+                  "**"  ".*"
+                  "*"   "[^/]*"
+                  "?"   "[^/]"
+                  (if (re-matches #"[.+^${}()|\[\]\\]" m) (str "\\" m) m))))]
+    (re-pattern (str "^" pat "$"))))
+
+
+(defn walk-pred
+  "A file-path predicate combining an optional `match-ext` suffix and an
+   optional `glob`. The glob matches the root-RELATIVE path (forward
+   slashes); a slash-free glob (e.g. `*.md`) also matches the basename, so
+   it selects those files at any depth. Absent filters pass everything."
+  [root match-ext glob]
+  (let [re        (when glob (glob->re glob))
+        basename? (and glob (not (str/includes? glob "/")))]
+    (fn [full]
+      (and (or (nil? match-ext) (str/ends-with? full match-ext))
+           (or (nil? re)
+               (let [rel (.relative np root full)]
+                 (boolean (or (re-matches re rel)
+                              (and basename? (re-matches re (.basename np full)))))))))))
+
+(defn sort-by-mtime
+  "Order absolute `paths` newest-first by mtime; an unstatable path sinks
+   to the end (mtime 0). Statting is bounded — the caller already capped
+   `paths` at max-results."
+  [paths]
+  (->> paths
+       (map (fn [p] [p (try (.getTime (.-mtime (.statSync fs p)))
+                            (catch :default _ 0))]))
+       (sort-by (comp - second))
+       (mapv first)))
+
 (defn walk-dir-recursive!
   "Depth-first recursive walk (sync). Mutates `!out` (vector of matching
    absolute paths) and `!truncated?` (boolean) once `cap` is hit."

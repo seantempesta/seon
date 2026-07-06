@@ -137,24 +137,29 @@
       (str (subs t 0 (tokens/estimate-chars max-preview-tokens)) "…")
       t)))
 
-(defn parse-match-line
-  "One rg --json line → a {::path ::line-number ::line-text} map, or nil for
-   non-match events (begin/end/summary), unparsable fragments (the cut-off
-   last line when the output cap hits), and non-UTF8 paths/lines (rg emits
-   `bytes` instead of `text` for those — we skip them). The line-text is
-   already preview-capped."
+(defn parse-event-line
+  "One rg --json line → a {::path ::line-number ::line-text (::context?)}
+   map, or nil for structural events (begin/end/summary), unparsable
+   fragments (the cut-off last line when the output cap hits), and non-UTF8
+   paths/lines (rg emits `bytes` instead of `text` for those — we skip
+   them). BOTH `match` and `context` events are parsed (context events only
+   appear under `-C`/`::context-lines`); a context line carries
+   `::context? true` so callers can count real matches honestly while still
+   showing surrounding lines. The line-text is already preview-capped."
   [line]
   (when-not (str/blank? line)
     (try
-      (let [o (js/JSON.parse line)]
-        (when (= "match" (.-type o))
+      (let [o    (js/JSON.parse line)
+            type (.-type o)]
+        (when (or (= "match" type) (= "context" type))
           (let [d         (.-data o)
                 path-text (some-> d .-path .-text)
                 line-text (some-> d .-lines .-text)]
             (when (and path-text line-text)
-              {::search/path        path-text
-               ::search/line-number (.-line_number d)
-               ::search/line-text   (preview-line line-text)}))))
+              (cond-> {::search/path        path-text
+                       ::search/line-number (.-line_number d)
+                       ::search/line-text   (preview-line line-text)}
+                (= "context" type) (assoc ::search/context? true))))))
       (catch :default _ nil))))
 
 ;; ============================================================
@@ -233,6 +238,51 @@
        ":seon.agent.search/glob, or pass :seon.agent.search/paths to drill; "
        ":seon.agent.search/full? true returns every line."))
 
+;; ── ::context-lines — rg -C N surrounds each hit with N lines. A context
+;; line rides the same flat shape (::context? true) so real matches still
+;; count honestly. Two projections: the by-file row's sample line-text
+;; widens to a numbered block around the first hit; :full? returns the flat
+;; match+context stream, line-numbered.
+
+(defn- numbered
+  "Render a seq of parsed lines as `N<tab>text`, one per line, in
+   line-number order — the shared read-view format, so a widened preview
+   copies back cleanly (strip the N<tab> prefix)."
+  [lines]
+  (->> (sort-by ::search/line-number lines)
+       (map (fn [{n ::search/line-number t ::search/line-text}]
+              (str n "\t" t)))
+       (str/join "\n")))
+
+(defn- widened-file-row
+  "A by-file row whose ::line-text is a numbered window (the first hit ±
+   `context-lines`, drawn from that file's match+context lines in `all`).
+   ::count stays the honest per-file MATCH count."
+  [all context-lines path ms]
+  (let [{ln ::search/line-number} (first ms)
+        lo    (- ln context-lines)
+        hi    (+ ln context-lines)
+        block (filter (fn [m] (and (= path (::search/path m))
+                                   (<= lo (::search/line-number m) hi)))
+                      all)]
+    {::search/path        path
+     ::search/count       (count ms)
+     ::search/line-number ln
+     ::search/line-text   (numbered block)}))
+
+(defn- flat-context-envelope
+  "The :full? projection when ::context-lines is set: the flat match+context
+   stream (each line numbered via ::line-number), capped at `cap` LINES.
+   ::match-count counts only real matches (context is not a match); nothing
+   is discarded silently — ::truncated? flags a clipped stream."
+  [all matches cap]
+  (let [shown (subvec all 0 (min cap (count all)))]
+    {::search/ok?         true
+     ::search/match-count (count matches)
+     ::search/returned    (count shown)
+     ::search/matches     shown
+     ::search/truncated?  (> (count all) (count shown))}))
+
 ;; ============================================================
 ;; Lane-correctness — the active CLJS pod lane is canonical; a paused
 ;; `.clj` lane-sibling (foo.clj alongside foo.cljs) is NOISE. File grep
@@ -296,14 +346,26 @@
   "Parse rg --json stdout into the ok?-true envelope via [[grouped-envelope]]
    (grouped by FILE). Paused `.clj` lane-siblings are suppressed before
    grouping (the active CLJS pod lane is canonical); `paths`/`glob` are the
-   raw request values so an explicitly-targeted `.clj` still reaches the caller."
-  [stdout paths glob cap full?]
-  (-> (into [] (keep parse-match-line) (str/split-lines stdout))
-      (suppress-paused-clj-siblings paths glob)
-      (grouped-envelope ::search/path file-row
+   raw request values so an explicitly-targeted `.clj` still reaches the
+   caller. `context-lines` (0 = none) widens each by-file sample line into a
+   numbered window and, under `full?`, returns the flat match+context
+   stream; real matches are always counted honestly (context lines are not
+   matches)."
+  [stdout paths glob cap full? context-lines]
+  (let [ctx? (pos? (or context-lines 0))
+        all  (-> (into [] (keep parse-event-line) (str/split-lines stdout))
+                 (suppress-paused-clj-siblings paths glob))
+        matches (into [] (remove ::search/context?) all)]
+    (cond
+      (and full? ctx?)  (flat-context-envelope all matches cap)
+      :else
+      (grouped-envelope matches ::search/path
+                        (if ctx?
+                          (fn [path ms] (widened-file-row all context-lines path ms))
+                          file-row)
                         {:rows ::search/by-file :group-count ::search/file-count
                          :hint file-hint}
-                        cap full?)))
+                        cap full?))))
 
 ;; ============================================================
 ;; Graph target — text search over the PROGRAM GRAPH (the literal

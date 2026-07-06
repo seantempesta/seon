@@ -184,16 +184,23 @@
    [:seon.agent.fs/error  {:optional true} :string]])
 
 (schema/register! :seon.agent.fs/match-ext   :string)
+(schema/register! :seon.agent.fs/glob        :string) ; e.g. "*.py" or "src/**/*.cljs"
 (schema/register! :seon.agent.fs/skip-hidden :boolean)
 (schema/register! :seon.agent.fs/max-results :int)
 (schema/register! :seon.agent.fs/total-found :int)
 (schema/register! :seon.agent.fs/truncated?  :boolean)
+(schema/register! :seon.agent.fs/hint        :string)
+;; result order: :name (per-dir alphabetical, the default) or :mtime
+;; (newest-first — the "what changed recently" walk).
+(schema/register! :seon.agent.fs/sort        [:enum :name :mtime])
 
 (schema/register! :seon.agent.fs/walk-request
   [:map
    [:seon.agent.fs/path        :string]
    [:seon.agent.fs/match-ext   {:optional true} :string]
+   [:seon.agent.fs/glob        {:optional true} :seon.agent.fs/glob]
    [:seon.agent.fs/skip-hidden {:optional true} :boolean]
+   [:seon.agent.fs/sort        {:optional true} :seon.agent.fs/sort]
    [:seon.agent.fs/max-results {:optional true} :int]])
 
 (schema/register! :seon.agent.fs/walk-response
@@ -203,6 +210,7 @@
    [:seon.agent.fs/entries     {:optional true} [:vector :string]]
    [:seon.agent.fs/total-found {:optional true} :int]
    [:seon.agent.fs/truncated?  {:optional true} :boolean]
+   [:seon.agent.fs/hint        {:optional true} :seon.agent.fs/hint]
    [:seon.agent.fs/error       {:optional true} :string]])
 
 ;; ── view — a line-numbered, bounded, sha-stamped read (the edit surface).
@@ -236,15 +244,24 @@
 (schema/register! :seon.agent.fs/after-line      :int)
 (schema/register! :seon.agent.fs/before-line     :int)
 
+;; ::all? — replace every occurrence without counting them; mutually
+;; exclusive with ::expected-count (the same rule the pure cascade enforces).
+(schema/register! :seon.agent.fs/all? :seon.agent.fs.match/all?)
+
 (schema/register! :seon.agent.fs/replace-request
-  [:map
-   [:seon.agent.fs/path           :string]
-   [:seon.agent.fs/find           :seon.code/value]
-   [:seon.agent.fs/replace        :seon.code/value]
-   [:seon.agent.fs/expected-count {:optional true} :seon.agent.fs.match/expected-count]
-   [:seon.agent.fs/near           {:optional true} :seon.agent.fs.match/near]
-   [:seon.agent.fs/file-sha       {:optional true} :seon.agent.fs/file-sha]
-   [:seon.agent.fs/encoding       {:optional true} :string]])
+  [:and
+   [:map
+    [:seon.agent.fs/path           :string]
+    [:seon.agent.fs/find           :seon.code/value]
+    [:seon.agent.fs/replace        :seon.code/value]
+    [:seon.agent.fs/expected-count {:optional true} :seon.agent.fs.match/expected-count]
+    [:seon.agent.fs/all?           {:optional true} :seon.agent.fs/all?]
+    [:seon.agent.fs/near           {:optional true} :seon.agent.fs.match/near]
+    [:seon.agent.fs/file-sha       {:optional true} :seon.agent.fs/file-sha]
+    [:seon.agent.fs/encoding       {:optional true} :string]]
+   [:fn {:error/message ":seon.agent.fs/all? and :seon.agent.fs/expected-count are mutually exclusive"}
+    (fn [m] (not (and (contains? m :seon.agent.fs/expected-count)
+                      (contains? m :seon.agent.fs/all?))))]])
 
 (schema/register! :seon.agent.fs/insert-request
   [:map
@@ -546,31 +563,48 @@
 
    Opts (all optional):
      :seon.agent.fs/match-ext   — e.g. \".md\" — only files ending in this
+     :seon.agent.fs/glob        — a shell glob (`*.py`, `src/**/*.cljs`)
+                                  matched against the root-relative path; a
+                                  slash-free glob also matches the basename,
+                                  so `*.py` finds .py files at any depth.
+                                  Combined with match-ext by AND.
      :seon.agent.fs/skip-hidden — skip files starting with \".\" (default true)
-     :seon.agent.fs/max-results — cap (default 5000); `:truncated? true` if hit
+     :seon.agent.fs/sort        — :name (default) or :mtime (newest-first)
+     :seon.agent.fs/max-results — cap (default 5000); `:truncated? true` +
+                                  a :seon.agent.fs/hint when hit (raise the
+                                  cap or narrow the glob)
 
    Example:
      (seon.agent.fs/walk-dir {:seon.agent.fs/path \"/Users/you/src/your-project\"
-                              :seon.agent.fs/match-ext \".md\"})"
+                              :seon.agent.fs/glob \"*.cljs\"
+                              :seon.agent.fs/sort :mtime})"
   {:malli/schema [:=> [:cat :seon.agent.fs/walk-request] :seon.agent.fs/walk-response]}
-  [{:seon.agent.fs/keys [path match-ext skip-hidden max-results]
+  [{:seon.agent.fs/keys [path match-ext glob skip-hidden sort max-results]
     :or {skip-hidden true max-results 5000}}]
   (case (platform/host)
     :node (cond
             (int/out-of-scope? path) (int/scope-denied path)
             :else (try
-                    (let [pred       (if match-ext
-                                       #(str/ends-with? % match-ext)
-                                       (constantly true))
+                    (let [pred       (int/walk-pred path match-ext glob)
                           !out       (atom [])
                           !truncated (atom false)]
                       (int/walk-dir-recursive! path pred skip-hidden max-results
                                                !out !truncated)
-                      {:seon.agent.fs/ok?         true
-                       :seon.agent.fs/path        path
-                       :seon.agent.fs/entries     @!out
-                       :seon.agent.fs/total-found (count @!out)
-                       :seon.agent.fs/truncated?  @!truncated})
+                      (let [found   (count @!out)
+                            entries (if (= :mtime sort)
+                                      (int/sort-by-mtime @!out)
+                                      @!out)]
+                        (cond-> {:seon.agent.fs/ok?         true
+                                 :seon.agent.fs/path        path
+                                 :seon.agent.fs/entries     entries
+                                 :seon.agent.fs/total-found found
+                                 :seon.agent.fs/truncated?  @!truncated}
+                          @!truncated
+                          (assoc :seon.agent.fs/hint
+                                 (str "hit the " max-results "-result cap — more files "
+                                      "match. Raise :seon.agent.fs/max-results, or narrow "
+                                      "with :seon.agent.fs/glob / :seon.agent.fs/match-ext / a "
+                                      "deeper :seon.agent.fs/path.")))))
                     (catch :default e (int/->err path e))))
     :wasi (int/wasi-pending path "walk-dir")))
 
@@ -699,7 +733,7 @@
    re-read needed. Same write gate as [[write-file]] (granted root,
    `read-only?` false). Never throws — every failure is a value."
   {:malli/schema [:=> [:cat :seon.agent.fs/replace-request] :seon.agent.fs/anchored-response]}
-  [{:seon.agent.fs/keys [path find replace expected-count near file-sha encoding]}]
+  [{:seon.agent.fs/keys [path find replace expected-count all? near file-sha encoding]}]
   (let [encoding  (or encoding "utf-8")
         find-text (code/text find)
         repl-text (code/text replace)]
@@ -720,6 +754,7 @@
                                               :seon.agent.fs.match/find    find-text
                                               :seon.agent.fs.match/replace repl-text}
                                        expected-count (assoc :seon.agent.fs.match/expected-count expected-count)
+                                       all?           (assoc :seon.agent.fs.match/all? all?)
                                        near           (assoc :seon.agent.fs.match/near near)))]
                       (if (= :apply (:seon.agent.fs.match/action decision))
                         (let [new-content (:seon.agent.fs.match/new-content decision)]
