@@ -158,6 +158,19 @@ this unit; comparability claims wait on it. Acceptance: ONE task
 end-to-end scored by THEIR unmodified harness. Runs beyond 1-2 tasks =
 owner-gated.
 
+### Unit D2 — ✅ TB 2.0 upgrade DONE 2026-07-06 (`ae346e5c`); live drive arch-blocked
+
+TB 2.0 = the **Harbor** harness (harbor 0.17.1, dataset
+terminal-bench/terminal-bench-2, 89 tasks — NOT a terminal-bench pkg
+release). `tb2_agent.py` (harbor BaseAgent over the same ONE mechanism)
+unit-proven; splits frozen dev=10/milestone=25/test=54, corpus sha-pinned.
+**BLOCKERS for a live TB-2 Seon drive:** (a) all 89 prebuilt images are
+amd64-ONLY → needs the amd64 `/opt/seon` overlay — fold into Unit A's
+rebuild as a `buildx` multi-arch build; (b) faithful scoring on this Mac
+needs Docker Desktop **Rosetta ON** (qemu segfaults pytest) — owner
+setting, docker restart kills running containers, coordinate; or run on
+native amd64 hardware.
+
 ### Unit E — restart-resume rows (design §5; after B)
 
 Kill the pod mid-task (the bench container survives — it is bench-owned),
