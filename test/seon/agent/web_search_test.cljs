@@ -49,6 +49,17 @@
                   :text "The current stable version of Clojure is 1.12.5"}
         :groundingChunkIndices [0 1]}]}}]})
 
+;; The REAL grounding-DECLINED shape (captured from the same live backend
+;; 2026-07-06, query "observer pattern callbacks reactive programming python"):
+;; the model answered from its own knowledge WITHOUT searching, so finishReason
+;; STOP + an answer but NO groundingMetadata at all — ~2/3 of live conceptual
+;; queries. `::results` is empty and there are NO urls to fetch (O5).
+(def ^:private no-grounding-body
+  {:candidates
+   [{:content     {:parts [{:text "The observer pattern lets objects subscribe to events…"}]}
+     :finishReason "STOP"
+     :index       0}]})
+
 ;; ---------------------------------------------------------------------------
 ;; Env + conn fixtures.
 ;; ---------------------------------------------------------------------------
@@ -195,6 +206,30 @@
                      (is (= ["current stable Clojure version"] qs))
                      (is (re-find #"(?i)redirect" hint) "the redirect-URI hint is standing")))))
       done)))
+
+(deftest search-empty-results-hint-is-honest
+  (testing "grounding declined (empty ::results): the hint must NOT advertise
+            fetchable ::url values it doesn't have; ::answer still surfaces (O5)"
+    (async done
+      (reset! int/!gemini-impl (fake-gemini no-grounding-body))
+      (run-test
+        (fn [_]
+          (-> (web/search {:seon.agent.web/query "observer pattern reactive python"})
+              (.then (fn [{ok?   :seon.agent.web/ok?
+                           rows  :seon.agent.web/results
+                           total :seon.agent.web/result-count
+                           ans   :seon.agent.web/answer
+                           hint  :seon.agent.web/hint}]
+                       (is (true? ok?) "grounding-declined is still a successful search")
+                       (is (= [] rows) "no groundingChunks ⇒ empty results")
+                       (is (= 0 total))
+                       (is (str/includes? ans "observer pattern") "the direct answer still surfaces")
+                       ;; the CORE of O5: the empty envelope never claims urls
+                       (is (not (re-find #"(?i)redirect" hint))
+                           "empty results must NOT carry the fetchable-url redirect hint")
+                       (is (re-find #"(?i)no web sources|NO ::url" hint)
+                           "the honest hint says there are no urls to fetch")))))
+        done))))
 
 (deftest search-honors-max-results-cap
   (async done

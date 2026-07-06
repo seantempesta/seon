@@ -398,6 +398,20 @@
        "with (seon.agent.web/fetch), but ephemeral (~30 days); fetch's "
        ":seon.agent.web/final-url recovers the canonical page."))
 
+(defn- empty-results-hint
+  "Truthful hint for an ok? true search that grounded NOTHING — ::results is
+   empty, so there are NO urls to fetch (never advertise the redirect-hint
+   here). The backend commonly declines to search conceptual/how-to queries
+   and answers from its own knowledge; occasionally the answer is filtered."
+  [answer]
+  (str "no web sources were returned — the grounded backend attached no "
+       "results for this query"
+       (if (str/blank? answer)
+         " and produced no ::answer (the response may have been filtered — "
+         "; the ::answer is the model's direct (UNGROUNDED) synthesis — ")
+       "there are NO ::url values to fetch. Rephrase toward a concrete "
+       "fact-lookup query (or retry) if you need citable web sources."))
+
 (defn ^:async search
   "Search the web — ranked result rows plus a grounded answer.
 
@@ -421,6 +435,11 @@
    → (seon.agent.web/fetch {:seon.agent.web/url …}) (full page → blob) →
    (my.blob/text …) / (seon.agent.search/grep …). Inspect the live backend
    with (seon.agent.web/grants).
+
+   NOT every ok? true search grounds: conceptual/how-to queries often return
+   an ::answer the model wrote WITHOUT searching, so ::results is EMPTY (no
+   urls to fetch) — the ::hint says so honestly. For citable web sources
+   phrase a concrete fact-lookup query; ::result-count is the honest total.
 
    Worked example:
 
@@ -465,7 +484,15 @@
                   res
                   (let [{::keys [results result-count queries answer]}
                         (int/parse-grounding (::body res) n)
-                        now (js/Date.)]
+                        now  (js/Date.)
+                        ;; HONEST hint: the redirect-hint promises fetchable
+                        ;; ::url values — only true when rows exist. An empty
+                        ;; result set (grounding declined — common for
+                        ;; conceptual queries) must NOT advertise urls it
+                        ;; doesn't have.
+                        hint (if (seq results)
+                               redirect-hint
+                               (empty-results-hint answer))]
                     ;; Best-effort projection — grep-graph/forensics can see what
                     ;; was searched; a rejected tx must not fail the search.
                     (await (db/transact!
@@ -480,7 +507,7 @@
                              ::backend       :gemini-grounding
                              ::results       results
                              ::result-count  result-count
-                             ::hint          redirect-hint}
+                             ::hint          hint}
                       (seq queries)            (assoc ::queries queries)
                       (not (str/blank? answer))
                       (-> (assoc ::answer answer)
