@@ -120,7 +120,22 @@ scaffold-vs-scaffold delta — the thesis number. Ledger row
 `swe_bench_verified_baseline` (or notes-tagged; keep row naming consistent
 with scorecard.py conventions). Report Seon-vs-baseline honestly.
 
-### Unit D — terminal-bench adapter (design §4; build ≈1 unit, no big runs)
+### Unit D — ✅ DONE 2026-07-06 (`fe2f828a`, opus build + opus quality review)
+
+`seon_inspect.tb_agent.SeonAgent` proven through tb's unmodified harness
+(hello-world n=1, their verdict; put_archive injection + bundled-node
+exec_run door). Also landed from the review: `bench_common` (shared
+run-bounds/wire-REPL) + `deadline_below_door` fix in BOTH arms (+ guard
+tests; the deadline==door coin-flip could have inflated the mean).
+OPEN from this unit: TB 2.0 registry pin (owner call — vendored pin has
+no 2.0; comparability blocked until bumped); the FABRICATION-class defect
+handoff to tooling (agent claimed a write that never landed —
+coordination.md 2026-07-06 entry); hardening REQUIRED before
+concurrency >1: sample_port probe/claim allocation + egress relay
+multi-A-record/supervision (comments in swebench_arm.py). Original spec
+follows for reference:
+
+### Unit D (original spec) — terminal-bench adapter (design §4; build ≈1 unit, no big runs)
 
 Our pod as a custom `BaseAgent` via `--agent-import-path`
 (`terminal_bench/agents/agent_factory.py:64-79`); `perform_task` gets the
