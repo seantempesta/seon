@@ -471,6 +471,75 @@
         "sample_ids_sha256": "2945dc6ec480b1d1963493864f84f32f2898417c1c9a3fe55f4f890b654ee9af"
       },
       "total_n": 500
+    },
+    "terminal_bench_2": {
+      "arm64": {
+        "native_runnable_n": 0,
+        "note": "All 89 prebuilt docker_image manifests are amd64-only (verified docker manifest inspect --verbose, 2026-07-06). Zero native arm64. On an arm64 host TB-2 runs amd64-emulated; faithful scoring needs Rosetta (Docker Desktop) or native amd64 hardware.",
+        "total_n": 89
+      },
+      "bench": "terminal_bench_2",
+      "capability_row": "terminal_bench",
+      "content_sha256": "ca76aef90ff059013eca434050076218ac8d8c3252794a8d75575e63c3e1cb6f",
+      "dev": {
+        "n": 10,
+        "sample_ids": [
+          "constraints-scheduling",
+          "largest-eigenval",
+          "video-processing",
+          "merge-diff-arc-agi-task",
+          "db-wal-recovery",
+          "portfolio-optimization",
+          "mteb-retrieve",
+          "chess-best-move",
+          "pytorch-model-recovery",
+          "log-summary-date-ranges"
+        ]
+      },
+      "milestone": {
+        "n": 25,
+        "sample_ids": [
+          "vulnerable-secret",
+          "git-multibranch",
+          "modernize-scientific-stack",
+          "headless-terminal",
+          "sparql-university",
+          "distribution-search",
+          "feal-linear-cryptanalysis",
+          "custom-memory-heap-crash",
+          "gcode-to-text",
+          "mteb-leaderboard",
+          "pytorch-model-cli",
+          "multi-source-data-merger",
+          "sanitize-git-repo",
+          "configure-git-webserver",
+          "protein-assembly",
+          "polyglot-c-py",
+          "caffe-cifar-10",
+          "feal-differential-cryptanalysis",
+          "sqlite-db-truncate",
+          "extract-moves-from-video",
+          "rstan-to-pystan",
+          "train-fasttext",
+          "financial-document-processor",
+          "password-recovery",
+          "mailman"
+        ]
+      },
+      "pin": {
+        "corpus_manifest": "evals/tb2_terminal_bench_2.corpus.json",
+        "corpus_manifest_sha256": "f22450ac6f71d3625c06160529b7ae9feb5e4b821c94bdfbd0041dd1203b8a12",
+        "harbor_dataset_ref": "terminal-bench/terminal-bench-2@latest",
+        "harbor_version": "0.17.1"
+      },
+      "seed": "20260702:terminal_bench_2",
+      "stratify": "category",
+      "test": {
+        "canary_guid": "SEON-CANARY-b778c568-22e6-4471-8cba-4079e3888120",
+        "n": 54,
+        "sample_ids_sha256": "654e60868faac0fb22d10bbf6ade49897b59628755d7251fdc4af7d32aff4c8d"
+      },
+      "total_n": 89
     }
   }
 }

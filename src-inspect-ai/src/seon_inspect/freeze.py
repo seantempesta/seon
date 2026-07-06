@@ -172,6 +172,29 @@ EXTERNAL_SOURCES: dict[str, dict[str, Any]] = {
                 "authenticated pull, 2026-07-05)"),
         },
     },
+    "terminal_bench_2": {
+        # Terminal-Bench 2.0 (Harbor harness) — the published 59.1 anchor's
+        # task set. NOT an inspect_evals dataset: 89 task DIRECTORIES obtained
+        # via `harbor download terminal-bench/terminal-bench-2` (harbor 0.17.1)
+        # and frozen from a COMMITTED corpus manifest (offline-reproducible; no
+        # harbor in the pinned .venv). Driven by tb2_agent.SeonAgent via
+        # harbor's --agent-import-path, never the pod door — same non-pod-door
+        # shape as swe_bench_verified. Stratified by category (16) so a split
+        # spans the bench. ARM64 NOTE: all 89 prebuilt images are amd64-only
+        # (native_arm64 false in the manifest); the dev split is drawn from the
+        # full 89 (runnable under amd64 emulation/Rosetta) — there is NO
+        # native-arm64 subset to restrict to, and that fact is pinned in the
+        # manifest + the lock's `arm64` block.
+        "capability_row": "terminal_bench",
+        "dev_n": 10,
+        "milestone_n": 25,
+        "stratify": "category",
+        "freeze_task_kwargs": {},
+        # Manifest-corpus source (not an inspect Task): freeze reads the
+        # committed manifest instead of load_bench_task.
+        "corpus": "manifest",
+        "manifest": "evals/tb2_terminal_bench_2.corpus.json",
+    },
 }
 
 # Bespoke generator rows (eval-design): the GENERATOR + seeds are what's
@@ -344,9 +367,33 @@ def _apply_exclusions(name: str, ordered: list[dict[str, Any]]
     return [r for r in ordered if str(r["id"]) not in excl]
 
 
+def _manifest_rows(name: str) -> list[dict[str, Any]]:
+    """Load a manifest-corpus source's tasks as draw rows (offline, no harbor).
+
+    A tb-2-style source freezes from a COMMITTED corpus manifest (evals/…json).
+    The draw `content` folds the task-spec hash AND the authoritative amd64
+    image digest, so a re-pushed environment image (new digest) diffs LOUDLY —
+    the image IS the task environment for these prebuilt-image tasks."""
+    spec = EXTERNAL_SOURCES[name]
+    manifest = json.loads((REPO_ROOT / spec["manifest"]).read_text())
+    rows: list[dict[str, Any]] = []
+    for t in manifest["tasks"]:
+        stratum = t.get(spec["stratify"]) if spec["stratify"] else None
+        content = hashlib.sha256(
+            (t["content_sha256"] + ":" + t["docker_image_digest"]).encode()
+        ).hexdigest()[:16]
+        rows.append({"id": t["id"], "content": content, "stratum": stratum})
+    ids = [str(r["id"]) for r in rows]
+    if len(set(ids)) != len(ids):
+        raise ValueError(f"{name}: duplicate task ids — cannot freeze")
+    return rows
+
+
 def _dataset_rows(name: str) -> list[dict[str, Any]]:
     """Load a source's samples as draw rows (downloads/caches via inspect)."""
     spec = EXTERNAL_SOURCES[name]
+    if spec.get("corpus") == "manifest":
+        return _manifest_rows(name)
     task = _freeze_task(name)
     rows = []
     for s in task.dataset:
@@ -387,10 +434,22 @@ def build_lock(existing: dict[str, Any] | None = None) -> dict[str, Any]:
             ex_sources.get(name, {}).get("test", {}).get("canary_guid")
             or _new_canary()
         )
+        if spec.get("corpus") == "manifest":
+            manifest_path = REPO_ROOT / spec["manifest"]
+            manifest = json.loads(manifest_path.read_text())
+            pin = {
+                "harbor_version": manifest["harbor_version"],
+                "harbor_dataset_ref": manifest["harbor_dataset_ref"],
+                "corpus_manifest": spec["manifest"],
+                "corpus_manifest_sha256":
+                    hashlib.sha256(manifest_path.read_bytes()).hexdigest(),
+            }
+        else:
+            pin = {spec["pin"][0] + "." + spec["pin"][1]: _pin_value(spec["pin"])}
         sources[name] = {
             "bench": name,
             "capability_row": spec["capability_row"],
-            "pin": {spec["pin"][0] + "." + spec["pin"][1]: _pin_value(spec["pin"])},
+            "pin": pin,
             "seed": f"{GLOBAL_SEED}:{name}",
             "stratify": spec["stratify"],
             "total_n": len(rows),
@@ -413,6 +472,17 @@ def build_lock(existing: dict[str, Any] | None = None) -> dict[str, Any]:
             sources[name]["excluded"] = {
                 "n": len(excl),
                 "reasons": dict(sorted(excl.items())),
+            }
+        if spec.get("corpus") == "manifest":
+            # The arm64 reality is a FIRST-CLASS lock fact: these prebuilt-image
+            # tasks are amd64-only, so "arm64-runnable subset" = the emulated
+            # full set, native subset = 0. Pinned so a later arm64 image push
+            # (native subset > 0) surfaces as an intentional re-freeze.
+            manifest = json.loads((REPO_ROOT / spec["manifest"]).read_text())
+            sources[name]["arm64"] = {
+                "native_runnable_n": manifest["n_native_arm64"],
+                "total_n": manifest["n_tasks"],
+                "note": manifest["arch_note"],
             }
 
     from seon_inspect import generators

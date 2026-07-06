@@ -1,0 +1,811 @@
+{
+  "arch_note": "All 89 prebuilt docker_image manifests are amd64-only (verified docker manifest inspect --verbose, 2026-07-06). Zero native arm64. On an arm64 host TB-2 runs amd64-emulated; faithful scoring needs Rosetta (Docker Desktop) or native amd64 hardware.",
+  "dataset": "terminal-bench/terminal-bench-2",
+  "harbor_dataset_ref": "terminal-bench/terminal-bench-2@latest",
+  "harbor_version": "0.17.1",
+  "n_native_arm64": 0,
+  "n_tasks": 89,
+  "tasks": [
+    {
+      "category": "scientific-computing",
+      "content_sha256": "03faaa806bb821833604ddf1daeb534287a92aaeb08133395d59892d3ae52375",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/adaptive-rejection-sampler:20251031",
+      "docker_image_digest": "sha256:985bed39e8448bc95f138b5f766b59003a95c4be171c96af8e76448338f3dd8f",
+      "id": "adaptive-rejection-sampler",
+      "native_arm64": false
+    },
+    {
+      "category": "scientific-computing",
+      "content_sha256": "eda8225e3e71fd74e2c362fc015d6b2ae0347d6eb3c2568a5ae19cfc68d6b391",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/bn-fit-modify:20251031",
+      "docker_image_digest": "sha256:5aeb11ca6e802b83816c9a31f055ac9d028309a853509400c2e3139ac2d8380d",
+      "id": "bn-fit-modify",
+      "native_arm64": false
+    },
+    {
+      "category": "security",
+      "content_sha256": "d629d8f65a5650d61c15ea197bd0638c7032af6d4b565818f1fcf2bb10ae1252",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/break-filter-js-from-html:20251031",
+      "docker_image_digest": "sha256:d7bfb45e47cf10d2e21dc520239215498f4eba9c1ab2d0cd7d647985dddb4fa8",
+      "id": "break-filter-js-from-html",
+      "native_arm64": false
+    },
+    {
+      "category": "debugging",
+      "content_sha256": "463c57f397585b50cf86200efdbe202b20e06ce4d8b56b15090227a0e80113d0",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/build-cython-ext:20251031",
+      "docker_image_digest": "sha256:3612a38fadb89a96f74a1a951fb0b0af734198fd160571eeaba6401593234594",
+      "id": "build-cython-ext",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "b3fbe88db0c4db912a7042b73f86ab017620feaeb87876585b037238c1517fb9",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/build-pmars:20251031",
+      "docker_image_digest": "sha256:57a82706f7491e0b2d1ff7e927e97ae5339892dd09c47ac43290b4ba1f5abc6f",
+      "id": "build-pmars",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "dfb0f62ec32230d3953285926d87b364782f27abfc5a03a86f3f8674391d0c3c",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/build-pov-ray:20251031",
+      "docker_image_digest": "sha256:874baf49341e2853a15a9184e308c7eb632e97f434359fcff2891c6e5ca1b39b",
+      "id": "build-pov-ray",
+      "native_arm64": false
+    },
+    {
+      "category": "machine-learning",
+      "content_sha256": "12ba83c3c21030325116d666dca0181a2e28426b6c52a3fcc3addd5b26f93649",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/caffe-cifar-10:20251031",
+      "docker_image_digest": "sha256:5b54d6e8f1b392cdeb819e28215853f500b72b8e08b91270c7a3693bf44d1fe2",
+      "id": "caffe-cifar-10",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "18599817bc727cc144942b46d239aebf7dcada6b4120530e64640de8facecce6",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/cancel-async-tasks:20251031",
+      "docker_image_digest": "sha256:84c7fae6b256dcc56a350790e2a9715eefc7dad662a9d8e8a472363aa71ef18d",
+      "id": "cancel-async-tasks",
+      "native_arm64": false
+    },
+    {
+      "category": "games",
+      "content_sha256": "a382fd3ed37ebd88fa0e1bd0a630d19dbf2d459123fadab1cf0d12a80722479b",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/chess-best-move:20251031",
+      "docker_image_digest": "sha256:bb447f94d9e2a8ed879f85c85a514b213b7418f9fe11fd7b2428a0b0e436e647",
+      "id": "chess-best-move",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "9f1a3259a02d8d802138bcd212988bbe33095de09bb7d8bb841d29f14ad6ad14",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/circuit-fibsqrt:20251031",
+      "docker_image_digest": "sha256:29783439f529eaed2145592f15af7a2281161528860392a382c825489030ae3a",
+      "id": "circuit-fibsqrt",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "d2135c9e7ddc8e102a3984f3afbd548dbc3ad156ed1b905077f746b9459556b5",
+      "difficulty": "easy",
+      "docker_image": "alexgshaw/cobol-modernization:20251031",
+      "docker_image_digest": "sha256:593ab9df3d83f771e927888b2d9436b380cdf7ec4d0af2a9f0802d541edebba0",
+      "id": "cobol-modernization",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "4cee74fb41733323bbb1c0be5f42facad3a1ea3108003c04ef6eeb2cea7c0010",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/code-from-image:20251031",
+      "docker_image_digest": "sha256:2be9cdb746ed18c1b2b1404032efae0b2235a1b8fc479ef17730c95409d89f76",
+      "id": "code-from-image",
+      "native_arm64": false
+    },
+    {
+      "category": "system-administration",
+      "content_sha256": "4fd1cc3f6a98d4a8fb7d94def70fc7d341281f8a70f50cdf5eae0c81d8f3c29e",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/compile-compcert:20251031",
+      "docker_image_digest": "sha256:f316947b7be23ad0d187320126eb1cbb5685f48342c6543fdd3ac839aa9e1a7f",
+      "id": "compile-compcert",
+      "native_arm64": false
+    },
+    {
+      "category": "system-administration",
+      "content_sha256": "95fd9a8d59683bd955e2da8b17d32c06a92e90c48f4ce42931250a77975ea372",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/configure-git-webserver:20251031",
+      "docker_image_digest": "sha256:9e48389b917fd4650dda1f64406bd7198bbf20dc1c6b0e5c4d81a3c16369f88c",
+      "id": "configure-git-webserver",
+      "native_arm64": false
+    },
+    {
+      "category": "personal-assistant",
+      "content_sha256": "4119c9cb1263c860db9c782fe1f909efcc94fd7176d71e21be50acf02f0fc82c",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/constraints-scheduling:20251031",
+      "docker_image_digest": "sha256:567ce5a189f8d11ac461790876e934cc7af38391baf89a78f95f4dafc1fec3b0",
+      "id": "constraints-scheduling",
+      "native_arm64": false
+    },
+    {
+      "category": "model-training",
+      "content_sha256": "ef3dc3cc213d40466b49afcae953b5c62f14be6322d98a854189d55188657e0f",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/count-dataset-tokens:20251031",
+      "docker_image_digest": "sha256:9c513c4ba342bd95be501f6f5eadd4806a2b18749c87c251615825100130232d",
+      "id": "count-dataset-tokens",
+      "native_arm64": false
+    },
+    {
+      "category": "security",
+      "content_sha256": "10e186f53393e4d1c93b5f35d033cec8a47f680d8eef767b4217d7228a9d9adb",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/crack-7z-hash:20251031",
+      "docker_image_digest": "sha256:0f4453abd774c5a3d3d7e66ba28fae88ec2e49ada3a993b324ebc16c348666d3",
+      "id": "crack-7z-hash",
+      "native_arm64": false
+    },
+    {
+      "category": "debugging",
+      "content_sha256": "ee81eff4c0cbf059c7d8a7bccb2b32bb52017a1e637fdf6bfe615698ccab3a6f",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/custom-memory-heap-crash:20251031",
+      "docker_image_digest": "sha256:1895d7d6240d5fb2ec774d6bfdd1057d170f8d199c15c582e4585d3c63802557",
+      "id": "custom-memory-heap-crash",
+      "native_arm64": false
+    },
+    {
+      "category": "file-operations",
+      "content_sha256": "2bf999a9f942785eda2ed46adeb4b7662eb717c39954865309cfb1a3dd9dab78",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/db-wal-recovery:20251031",
+      "docker_image_digest": "sha256:0e33ea5ec823975d1bd6c3778395c9f94251dd88f571146057bff6adb7e4594e",
+      "id": "db-wal-recovery",
+      "native_arm64": false
+    },
+    {
+      "category": "machine-learning",
+      "content_sha256": "d31cb6b1eb2b1f40938f46377520c8182edfc7cca16bb5ff77e61a89c4b328e7",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/distribution-search:20251031",
+      "docker_image_digest": "sha256:1448f7aa1c6080488251d00350e8e90477858989b1bec0accc866d7b3220738a",
+      "id": "distribution-search",
+      "native_arm64": false
+    },
+    {
+      "category": "scientific-computing",
+      "content_sha256": "59f89437e83d3a54b93da1c3cce806dad132f5f35666e87818323cebb4684c01",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/dna-assembly:20251031",
+      "docker_image_digest": "sha256:d1adf6835f1dd91205ba70e452c699d0aea601010038e5617f370716efb50569",
+      "id": "dna-assembly",
+      "native_arm64": false
+    },
+    {
+      "category": "scientific-computing",
+      "content_sha256": "26318e717a654b35af95994032c338e842875081c6fd116e3a9a0aa4d665725b",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/dna-insert:20251031",
+      "docker_image_digest": "sha256:4dd8760694e355de85ecf03605cb487ccdb33322f6afad513d2920829baa33b2",
+      "id": "dna-insert",
+      "native_arm64": false
+    },
+    {
+      "category": "file-operations",
+      "content_sha256": "edebf2d70ec76c20b517cb3971839e090bfe89dcd027ed1fa0a2b9e6e1801171",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/extract-elf:20251031",
+      "docker_image_digest": "sha256:6932e4cb318464307eacd497ef8dc617eaf551b6a90231f815ec0b911895cfed",
+      "id": "extract-elf",
+      "native_arm64": false
+    },
+    {
+      "category": "file-operations",
+      "content_sha256": "f0e1a2038eeebe00c247950c99e78f4072e20850f24380331062999fb0b809dd",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/extract-moves-from-video:20251031",
+      "docker_image_digest": "sha256:14a9dcca7d08ce53c5a0ed9fbd663a996ef28f207c199ed69d9ccf6064f8b184",
+      "id": "extract-moves-from-video",
+      "native_arm64": false
+    },
+    {
+      "category": "mathematics",
+      "content_sha256": "f4f2f4cfea796667a61d878f9b29623d099b80399b12d76d80cd4a6d2bc0f3f8",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/feal-differential-cryptanalysis:20251031",
+      "docker_image_digest": "sha256:bea93bafe9eab601ca58729f5735a13f8339f52055322d1cf840e3742b54a287",
+      "id": "feal-differential-cryptanalysis",
+      "native_arm64": false
+    },
+    {
+      "category": "mathematics",
+      "content_sha256": "f16d5ce4780affd9d217e9d68796ca98c39b98a99df69a1ad5adf8a8fcbde08a",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/feal-linear-cryptanalysis:20251031",
+      "docker_image_digest": "sha256:ea78749a8422c6228d26c8753f45906a6a2df089906764b7e3c3e27e8f718ee7",
+      "id": "feal-linear-cryptanalysis",
+      "native_arm64": false
+    },
+    {
+      "category": "security",
+      "content_sha256": "f0619e593edf7d529d55700ae251de25fc9fd05c35c47db91c80b71e6aaaae20",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/filter-js-from-html:20251031",
+      "docker_image_digest": "sha256:92acda0f124b988036a6f426ce0bc47fac19f5efe9fc5e6ea3ea52ccb075d0a4",
+      "id": "filter-js-from-html",
+      "native_arm64": false
+    },
+    {
+      "category": "data-processing",
+      "content_sha256": "b66e922213e203390162612a0bed8f443c7fc379528e7c6b3ad369a22ce9c869",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/financial-document-processor:20251031",
+      "docker_image_digest": "sha256:ef6c9cfaaf14cdd200163008a188d5baa9f626f3bfb8d3e7d6f30c08518e6251",
+      "id": "financial-document-processor",
+      "native_arm64": false
+    },
+    {
+      "category": "security",
+      "content_sha256": "6e025e03e81fdfe0c4dc363239e7ff119a714caa136991ac0d653bd4185116eb",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/fix-code-vulnerability:20251031",
+      "docker_image_digest": "sha256:cac325252991f823713b2d0441502972901dd782bd67f66c03d9b1e410dac5c0",
+      "id": "fix-code-vulnerability",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "55b2fa9a469572db0b3aeef447de4508fc891be68c31f250343fc165a3953c45",
+      "difficulty": "easy",
+      "docker_image": "alexgshaw/fix-git:20251031",
+      "docker_image_digest": "sha256:61e431c00c58df652287aadce5457634d9f9330cfdd153ebdf2802df0d540119",
+      "id": "fix-git",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "56a5ec60c5e89e0cdc0945718ddd63fb41beed9433ae0687d1f4bdfe82866fb5",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/fix-ocaml-gc:20251031",
+      "docker_image_digest": "sha256:66a1e2293076c9ef27a118611b3089a6284fdf467fd4675592d0cce7d11e5b0b",
+      "id": "fix-ocaml-gc",
+      "native_arm64": false
+    },
+    {
+      "category": "file-operations",
+      "content_sha256": "f93d9b2f970f9fac52e2090a7019a8fdc79259509a9949bfaa3ca63fdd556dab",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/gcode-to-text:20251031",
+      "docker_image_digest": "sha256:0979ef40c6a3e8c4e7ab5b6c2524c74625a84799e15cd45dd98dcf83b11efd4d",
+      "id": "gcode-to-text",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "b02fb26e8392e96cec7ba27284153832d6f96fcd6ff4d303be9a1649342940f8",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/git-leak-recovery:20251031",
+      "docker_image_digest": "sha256:62160e522a4238b8bcd522411ea97b5b200f811e5899d34947e66809bef7e586",
+      "id": "git-leak-recovery",
+      "native_arm64": false
+    },
+    {
+      "category": "system-administration",
+      "content_sha256": "7c2bfe34ae791eedb73451bd799f39cb25a8472fa031086f1d6b736c0fa5703a",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/git-multibranch:20251031",
+      "docker_image_digest": "sha256:5bc449921c138295f6ddd8dca2977319fee2ce523811dbe56cec4ca663385fb5",
+      "id": "git-multibranch",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "dd1a9d8f9e2f666510240b5afe6e4981c1690f317295047f5090b110879f6dea",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/gpt2-codegolf:20251031",
+      "docker_image_digest": "sha256:537e7bd26b02db5c761230515fa09dc05f89403c6737fbdae4b5793ebc2c7066",
+      "id": "gpt2-codegolf",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "5116767bda0e8af0861d6a0563c876cdbde599d7c06a31084d57e3ef3f306e21",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/headless-terminal:20251031",
+      "docker_image_digest": "sha256:eb7e209672bf6cef2785fafd9e13509b10626c327bcc2b37f5bf40ca83eaf3aa",
+      "id": "headless-terminal",
+      "native_arm64": false
+    },
+    {
+      "category": "data-science",
+      "content_sha256": "33f985c087ec304e7948ed98e6887cd1ebb582e8eaa2a8310894bd3362e8f865",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/hf-model-inference:20251031",
+      "docker_image_digest": "sha256:f96dd7d3c85c7257b404fd63ba8d24ced2478cd90232c20e297c372f953fa607",
+      "id": "hf-model-inference",
+      "native_arm64": false
+    },
+    {
+      "category": "system-administration",
+      "content_sha256": "673410b07a6f69352807c476ddaa3c00fd14104345ad5873e736ae906e0aeb1c",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/install-windows-3.11:20251031",
+      "docker_image_digest": "sha256:c6695097316ef8810abce0545e347e65354aef9d51d4f7f662c3242e742f6a3e",
+      "id": "install-windows-3-11",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "2327e10d35f8798f0476f5cb0aa4a76e177fe9aef17ff469b33e6df6ac153843",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/kv-store-grpc:20251031",
+      "docker_image_digest": "sha256:3399400800dcb207634daa42bc1b052e831e285cc9d221eea66c47bc0fc79791",
+      "id": "kv-store-grpc",
+      "native_arm64": false
+    },
+    {
+      "category": "file-operations",
+      "content_sha256": "c74639dbf8f9c6c8ff44147218a99ca40d83f090dc173b7caa087cc8c8f0d025",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/large-scale-text-editing:20251031",
+      "docker_image_digest": "sha256:719adca3f1388220546ce6a155eee56eff3c4fe318183100320606a210f6b59c",
+      "id": "large-scale-text-editing",
+      "native_arm64": false
+    },
+    {
+      "category": "mathematics",
+      "content_sha256": "9d44c71b17afda2babc6ca8028b753c0c852b4c5417b5f69123be264b91be205",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/largest-eigenval:20251031",
+      "docker_image_digest": "sha256:cb9e3e3b09d0783f3bbcfeec8d77bc32d3791204fb2be6650b19be4fbc082b2e",
+      "id": "largest-eigenval",
+      "native_arm64": false
+    },
+    {
+      "category": "machine-learning",
+      "content_sha256": "9bef3f131921bc68143a6f08c20c5f5af55117101ece223fe61cbd8c7384dc52",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/llm-inference-batching-scheduler:20251031",
+      "docker_image_digest": "sha256:19e79aa49be4e55dccca1dde966515ebe6852314b6010bcb9230afb48b996774",
+      "id": "llm-inference-batching-scheduler",
+      "native_arm64": false
+    },
+    {
+      "category": "data-processing",
+      "content_sha256": "36ef33804589585d56f879a6c06c15a5b7b28e90b7353ee1b7563ab0fb8b45e7",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/log-summary-date-ranges:20251031",
+      "docker_image_digest": "sha256:cbeb6ba905c2fec294f16cd5e16e3ea7f2e04d38ac2484d51a11de262aa7dc51",
+      "id": "log-summary-date-ranges",
+      "native_arm64": false
+    },
+    {
+      "category": "system-administration",
+      "content_sha256": "a88338b7303f2491166f6bdbc50afb4b7140efb56bdc6e90236c5ff2251cd2f0",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/mailman:20251031",
+      "docker_image_digest": "sha256:04fac73db7e2b4f49d43f09fbc2266a94d70131f07efa1393d370abc059f4094",
+      "id": "mailman",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "9d72807e01349fb0dde6b44edb04aee29b4311c815bb2b6be5b286b649f3a7da",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/make-doom-for-mips:20251031",
+      "docker_image_digest": "sha256:80a9459f1b94b692ea8346f68e6b864f6c4d984fbdf6ffd68ad332308300c2ec",
+      "id": "make-doom-for-mips",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "15d7afe8db8fa1d8a8fa591f703399bb0b078770d127c1b68c50dc1e0c715993",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/make-mips-interpreter:20251031",
+      "docker_image_digest": "sha256:082fc8821b317f30fdfbf8d08d528874ce331c03e8083aef0406d48cdd7132a2",
+      "id": "make-mips-interpreter",
+      "native_arm64": false
+    },
+    {
+      "category": "data-science",
+      "content_sha256": "c3055d98235aeacc7463c649763a4930149db8c1f312572f367803c4cf7f6ed3",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/mcmc-sampling-stan:20251031",
+      "docker_image_digest": "sha256:073fc36a3347b4f6b43bd6e98339542c41ed531c771af8bee40ba10f00cfabaf",
+      "id": "mcmc-sampling-stan",
+      "native_arm64": false
+    },
+    {
+      "category": "debugging",
+      "content_sha256": "4f739e627034526c01eefc1ffe289cfed3f4432458db9f475815a767c484e8af",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/merge-diff-arc-agi-task:20251031",
+      "docker_image_digest": "sha256:bfc2a235f2ceea64ffb1ffc5529c2acebf570bff61f3668f0e5669ef570c17d4",
+      "id": "merge-diff-arc-agi-task",
+      "native_arm64": false
+    },
+    {
+      "category": "mathematics",
+      "content_sha256": "15f0595b175f0cf3f8a91e3fe34dac720b6a5e4b21c2b14bfb99df23610b2d83",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/model-extraction-relu-logits:20251031",
+      "docker_image_digest": "sha256:52fe1f089f38650f0dc22d7531ee6e01ebd526de1b349aaa2ecb331dca9fabce",
+      "id": "model-extraction-relu-logits",
+      "native_arm64": false
+    },
+    {
+      "category": "scientific-computing",
+      "content_sha256": "cc911da310f3e3ee9cb9bb8d64d938b7e53280abc71327fe2ac00fa9a2a5e39b",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/modernize-scientific-stack:20251031",
+      "docker_image_digest": "sha256:64e69cee13bf6b0b9016e735b51891bce996a60f1e2d1a005bf12c949e221d71",
+      "id": "modernize-scientific-stack",
+      "native_arm64": false
+    },
+    {
+      "category": "data-science",
+      "content_sha256": "1f02b826cf09bcae1a340c233a444f4f376ebd6d39370d101e9d5588e1e636a5",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/mteb-leaderboard:20251031",
+      "docker_image_digest": "sha256:968de9456bfc53728f7df0cb6c9ce33e17bd0e5563ddfe031e6ed2964965aecf",
+      "id": "mteb-leaderboard",
+      "native_arm64": false
+    },
+    {
+      "category": "data-science",
+      "content_sha256": "80a9baf2403255c96fa10b48069b505e81160569dee3ae32fa336f3295552a13",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/mteb-retrieve:20251031",
+      "docker_image_digest": "sha256:99dd676a21fd3124b7b8164cd93e8f0c51f1fdab2f84a831c61049eff78d063d",
+      "id": "mteb-retrieve",
+      "native_arm64": false
+    },
+    {
+      "category": "data-processing",
+      "content_sha256": "2a108e8890d4df97b230a89f850dcbdf516d33738e950e05e7e96fbddfc39c3e",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/multi-source-data-merger:20251031",
+      "docker_image_digest": "sha256:8b32782078ff7383a1b4e5d3cecca8ce287e30f50bb4c0e5db009a18064e666e",
+      "id": "multi-source-data-merger",
+      "native_arm64": false
+    },
+    {
+      "category": "system-administration",
+      "content_sha256": "6f9e478b5e779b5e953557bedd92ba3f6fded81417614c7e9e1e0dc717e8a9a4",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/nginx-request-logging:20251031",
+      "docker_image_digest": "sha256:693e64431a0dbf45952e8b91a298d54fd60247e501c6623fb8fa3ebc07fc3d3d",
+      "id": "nginx-request-logging",
+      "native_arm64": false
+    },
+    {
+      "category": "security",
+      "content_sha256": "40c6c2c3e8d8a9483f49a4c1e764dd30e9776bf0ea8fff1d6fdcabb7a53f1b35",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/openssl-selfsigned-cert:20251031",
+      "docker_image_digest": "sha256:4c948a4e630af2435ae0a19108fc0814a946ac2fa29a512469e0fc77b38c8c12",
+      "id": "openssl-selfsigned-cert",
+      "native_arm64": false
+    },
+    {
+      "category": "debugging",
+      "content_sha256": "8aff811b787fd09ec3d639327adee98563b529591cbc79410d10432e574e20c7",
+      "difficulty": "easy",
+      "docker_image": "alexgshaw/overfull-hbox:20251031",
+      "docker_image_digest": "sha256:67fe0ccc0ff2305d6fcb3652977d377b901bb7bd96904b6765835935574992e1",
+      "id": "overfull-hbox",
+      "native_arm64": false
+    },
+    {
+      "category": "security",
+      "content_sha256": "ae81cc3525cb845b8a50c4a1094893bbb716d936c768cd8824d7f86a8d82308b",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/password-recovery:20251031",
+      "docker_image_digest": "sha256:15fcd84bf3b06270ee148211cc6da6599b13ec2f41ac1d0894cf75c2225872ee",
+      "id": "password-recovery",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "66b826df0279214fdd8f6059a7d3ce06a3f1d4b3ff3b44f03a4f4afe7ad9286f",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/path-tracing:20251031",
+      "docker_image_digest": "sha256:4b44725102cd627dfa895191a5a30d16dae3c5623bb43da6459f79135db6b482",
+      "id": "path-tracing",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "73ae78c491111f9ba9aab7b600879ec0486ee058a4b2b9b9654ec46f3053ed5c",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/path-tracing-reverse:20251031",
+      "docker_image_digest": "sha256:7911e42479d8f6d8af1248bc52442a0efbc5a33e3ecf535fdc20d252a2c64142",
+      "id": "path-tracing-reverse",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "b99a008ef3681e2a5cc62333153a5df0853e227b5e6ee3caf2ae14d7d5777cdd",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/polyglot-c-py:20251031",
+      "docker_image_digest": "sha256:0f1c3b7816d70cf5551573fd6aeef76893f2ae3000be2419997b6871b5d987ed",
+      "id": "polyglot-c-py",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "aa9e9ee3e614f0c6c8a421d9e44ad1c57d3837bf5b0c9f58f762d06199541f69",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/polyglot-rust-c:20251031",
+      "docker_image_digest": "sha256:3ba84f0e138a4b65e58c53f920a0fc852571e6402901c3bdbb876e9dab6e6c5e",
+      "id": "polyglot-rust-c",
+      "native_arm64": false
+    },
+    {
+      "category": "optimization",
+      "content_sha256": "faf4774a831616566827fd6e25a0085afed2d69e60d23139f51077327d420535",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/portfolio-optimization:20251031",
+      "docker_image_digest": "sha256:93461db3cec697c31585941a3b9387c1398495aa1ff0aee2ac752c7230b50ef8",
+      "id": "portfolio-optimization",
+      "native_arm64": false
+    },
+    {
+      "category": "scientific-computing",
+      "content_sha256": "686fd9c3a8a36b98e08d0ecb91e7d5237596b9d6a65de4c6344e675a2afcfef6",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/protein-assembly:20251031",
+      "docker_image_digest": "sha256:94de701b57e7ecfdbada6044f8534876e4b58874f8f313184dadc4d7533e0818",
+      "id": "protein-assembly",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "0dfac53e4829fbf7182f03b65658ede4d9ef6cfbb6696d0bb483c8216976b7ee",
+      "difficulty": "easy",
+      "docker_image": "alexgshaw/prove-plus-comm:20251031",
+      "docker_image_digest": "sha256:e26741d01681a9da1beeff8b7b7b65fe2b921b8b122a306a3707a81ebd051f73",
+      "id": "prove-plus-comm",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "548c4ed0e3d2125ebff52181162caba70d1d7dc010508e59be206a533100f4fa",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/pypi-server:20251031",
+      "docker_image_digest": "sha256:d18bb30f47c7dcaa3acdbc31ac7413c98eadca2ea16540bbd380f2f063b95276",
+      "id": "pypi-server",
+      "native_arm64": false
+    },
+    {
+      "category": "model-training",
+      "content_sha256": "3ba1eacfff77a482003d1d56d237e64acae3620a2ffc59be5534736370167407",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/pytorch-model-cli:20251031",
+      "docker_image_digest": "sha256:c996884b5fb5fb2c0c07d67da2c4f974f271f07234ed28e1a868240375c57a67",
+      "id": "pytorch-model-cli",
+      "native_arm64": false
+    },
+    {
+      "category": "model-training",
+      "content_sha256": "0a159b878a4b67471d9074c5affc13928d4ad84f0ece67d511397aeae3d9620c",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/pytorch-model-recovery:20251031",
+      "docker_image_digest": "sha256:83efba8d1a163dfe62694789e271ed55010509b6deabbf2d7d6472b40ca8d69a",
+      "id": "pytorch-model-recovery",
+      "native_arm64": false
+    },
+    {
+      "category": "system-administration",
+      "content_sha256": "8dbc23c736f19d6bcc3c1a97c88873d6f64ce20ab1c3398934b1672a493b2232",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/qemu-alpine-ssh:20251031",
+      "docker_image_digest": "sha256:541e8214a8c4faa7b556531b899d45da21048fa2ca6dd328d8cb6c4cffa8e964",
+      "id": "qemu-alpine-ssh",
+      "native_arm64": false
+    },
+    {
+      "category": "system-administration",
+      "content_sha256": "f563c31610aa64922645f04d32e715125674bdad6cdb9d8c2431e143c674ff40",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/qemu-startup:20251031",
+      "docker_image_digest": "sha256:1a666e049db553c5e713830b1f5de1953210ab7c99212d006bb4e46cbc6b6d04",
+      "id": "qemu-startup",
+      "native_arm64": false
+    },
+    {
+      "category": "data-science",
+      "content_sha256": "609afd3d863758119c2bf3167072a20a8356a33e5ba505886d4d1a41347cd9bd",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/query-optimize:20251031",
+      "docker_image_digest": "sha256:28de7da87004eab5b29bd5eaf1823579bc5b73ccea4b80349a5623185770da14",
+      "id": "query-optimize",
+      "native_arm64": false
+    },
+    {
+      "category": "scientific-computing",
+      "content_sha256": "234a3ddcab4d41bb596007d051ed4ddbecfc3fd89e4a085168929648bacd4c08",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/raman-fitting:20251031",
+      "docker_image_digest": "sha256:401fa95d5d491f44a473eda9d2c52930f9565cc889c796eabcb6e20fec26852e",
+      "id": "raman-fitting",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "8931cb0baa7814ea7f65809284227a5031e50457b64ec1a094b5ed5831cc0995",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/regex-chess:20251031",
+      "docker_image_digest": "sha256:e3b6d61d2d3930fbbdc5f7bf091a7f8b7f6125e1951ef8a7dbe165b1ef62942c",
+      "id": "regex-chess",
+      "native_arm64": false
+    },
+    {
+      "category": "data-processing",
+      "content_sha256": "b793c1c2bae155aaccac68d1adb332624ea0371366517ea314d06b463aa537ab",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/regex-log:20251031",
+      "docker_image_digest": "sha256:90101b2e815323a8da20528a1439bebc407eb9761c9c68a3d557730856c878e9",
+      "id": "regex-log",
+      "native_arm64": false
+    },
+    {
+      "category": "data-science",
+      "content_sha256": "b14db6ca7f0e0d0f3a99f3118f77f89f7cf2555ab1b23054a19c60255932d458",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/reshard-c4-data:20251031",
+      "docker_image_digest": "sha256:92d209e704785e17ad6b3f740e813dd72bc7ac33982ce435d197ab9d890eac2a",
+      "id": "reshard-c4-data",
+      "native_arm64": false
+    },
+    {
+      "category": "data-science",
+      "content_sha256": "34f23d7e9e09d927329cfd60b7aea1ca1c18fac9f776e9e496cde3dcea29efef",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/rstan-to-pystan:20251031",
+      "docker_image_digest": "sha256:b23d48839408524326095c15ada4145c772b87646cf299022ff1f58c97baba91",
+      "id": "rstan-to-pystan",
+      "native_arm64": false
+    },
+    {
+      "category": "data-science",
+      "content_sha256": "f7d863b4c2103d3aa201e60288b66d3163cc487c51d4c8fe9b8967f3c0b8e86d",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/sam-cell-seg:20251031",
+      "docker_image_digest": "sha256:d76bdeef19d8113f4094013249c982eca93e62e46130484846269b2d378879d0",
+      "id": "sam-cell-seg",
+      "native_arm64": false
+    },
+    {
+      "category": "security",
+      "content_sha256": "e45b2f489f8031a22bf9456f2747f4bd4dccf2dc056138f4ba54cde86749049f",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/sanitize-git-repo:20251031",
+      "docker_image_digest": "sha256:4b5234da5bb0d67f3b0bf8db40a2883c07a5219f62b64c2bf9ff1ac84cd0f672",
+      "id": "sanitize-git-repo",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "1376618b454fa05543176d5f380e132d80cc2f2ed2d4e0114a2ab57f9441bf27",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/schemelike-metacircular-eval:20251031",
+      "docker_image_digest": "sha256:b485be38bf80d56c1a4cd9da95bbf7ec129dc03f6786b86c0525518a96f6d1db",
+      "id": "schemelike-metacircular-eval",
+      "native_arm64": false
+    },
+    {
+      "category": "data-querying",
+      "content_sha256": "e637aafeec91e03c78bc4f62d2005e7b0f376f913dd8e05466bcbae09b42fd5d",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/sparql-university:20251031",
+      "docker_image_digest": "sha256:92fa4304e51167f9fb4466144eba33ef9272a7df0ac1cab9fc3986bccd1ab708",
+      "id": "sparql-university",
+      "native_arm64": false
+    },
+    {
+      "category": "debugging",
+      "content_sha256": "73cba1a40f5f583177d774b3dc24250d7648e086fc5741350b849c4e8e59af4b",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/sqlite-db-truncate:20251031",
+      "docker_image_digest": "sha256:aabac93c93bd1f310e6a6fb893911d7735026ed18491c72133c9196a09092ca4",
+      "id": "sqlite-db-truncate",
+      "native_arm64": false
+    },
+    {
+      "category": "system-administration",
+      "content_sha256": "8ac21382cab501aa5e46eab27ffc8605370cffe0f614589b31c99996d45ede6e",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/sqlite-with-gcov:20251031",
+      "docker_image_digest": "sha256:f986820b00c74ce75db7288719d364df313fde7c7917bea6eb6352a08431a89f",
+      "id": "sqlite-with-gcov",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "11e8bc1964940b37160a19af18fdcc210569aaca8a3b8c00799100b9531f159f",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/torch-pipeline-parallelism:20251031",
+      "docker_image_digest": "sha256:3cb7b39d86f1704b20e668851da0b08b34b3270c01d583f136d65190984a8d1b",
+      "id": "torch-pipeline-parallelism",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "6292bdd1f6067dd26df16892e67a12c6455a5bd5dd43a119bd2a60eefc35173b",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/torch-tensor-parallelism:20251031",
+      "docker_image_digest": "sha256:c50ac169e11465f41b49749fe87e4487f24d31a0c39c0906cd3242cc5499c690",
+      "id": "torch-tensor-parallelism",
+      "native_arm64": false
+    },
+    {
+      "category": "model-training",
+      "content_sha256": "c286e981386996e574cd82981b76282ff6a62744677ea8a10f175faf90dac0b2",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/train-fasttext:20251031",
+      "docker_image_digest": "sha256:3c77da9617e7fa577de04aef73fb1ac3114be32d7ffef72609c83929d842b157",
+      "id": "train-fasttext",
+      "native_arm64": false
+    },
+    {
+      "category": "scientific-computing",
+      "content_sha256": "a9aa45352fd4352687a9da36c2e9932b1a6f12f78345f6fd1b4045a6e6697fbd",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/tune-mjcf:20251031",
+      "docker_image_digest": "sha256:56c197739db2db79562384581fcc9d3d71e6c171bf052104b1a7ee0282e7c3cf",
+      "id": "tune-mjcf",
+      "native_arm64": false
+    },
+    {
+      "category": "video-processing",
+      "content_sha256": "fd5505a6117bff66979b8dbb9053fcc91d13aac7b9bc41ac3cff8210070879b2",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/video-processing:20251031",
+      "docker_image_digest": "sha256:a2c0f39e3ab04e67ac6e49cad9167bb0d987babe32511768c01aa0c6905a875f",
+      "id": "video-processing",
+      "native_arm64": false
+    },
+    {
+      "category": "security",
+      "content_sha256": "4a6eca3f68ebd160483bfc22131c4331f379b0c72e43abb9c9b850a7ceb03a1a",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/vulnerable-secret:20251031",
+      "docker_image_digest": "sha256:61ebb40454dd103aa2f7e71ad6dafd91cf2b301e6bb07e69d5b472412d1ee15b",
+      "id": "vulnerable-secret",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "a43ea31b4d6fe555a7d05420f7429dd90dcdea65cbeb329d019a42794a56eb95",
+      "difficulty": "medium",
+      "docker_image": "alexgshaw/winning-avg-corewars:20251031",
+      "docker_image_digest": "sha256:ad7a6b1c53aed59e10916c692aa7e2ae00042a4283187430aee1e3e79f72d5c6",
+      "id": "winning-avg-corewars",
+      "native_arm64": false
+    },
+    {
+      "category": "software-engineering",
+      "content_sha256": "49888b6aa810682fb02eb14937ac0202236e7dcd74e480eea9bd62ec6366963d",
+      "difficulty": "hard",
+      "docker_image": "alexgshaw/write-compressor:20251031",
+      "docker_image_digest": "sha256:3618e1f8a997b437c09cd3dbaac736705809c05f6f12f584b65722175970ebe1",
+      "id": "write-compressor",
+      "native_arm64": false
+    }
+  ]
+}
