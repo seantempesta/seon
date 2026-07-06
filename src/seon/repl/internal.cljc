@@ -130,6 +130,254 @@
   (str/replace text fence-line-re ""))
 
 ;; ============================================================
+;; `#code` heredoc literal — pre-tokenization pass (Unit A1).
+;;
+;; rewrite-clj cannot read a heredoc, and the whole point of `#code` is
+;; that a foreign-source payload needs ZERO Clojure escaping. So BEFORE
+;; the token loop we rewrite each
+;;
+;;     #code/<lang> <<SENTINEL
+;;     <payload lines…>
+;;     SENTINEL
+;;
+;; region into a machine-escaped, valid-EDN map literal
+;;
+;;     {:seon.code/lang :<lang>, :seon.code/text "<escaped payload>"}
+;;
+;; that the downstream reader (rewrite-clj here, `cljs.js` at eval time)
+;; reads natively. THE MACHINE does the escaping — the agent never does.
+;;
+;; Two bases are kept in lock-step by a segment map:
+;;   - REWRITTEN text: what the reader sees (valid EDN) — drives
+;;     `:seon.repl/form` and, when it differs, `:seon.repl/eval-source`
+;;     (the cljs-readable string `eval-batch!` actually evaluates).
+;;   - ORIGINAL text: what the agent typed — drives byte-faithful
+;;     `:seon.repl/source` and absolute `:seon.repl/span` offsets.
+;;
+;; Opener: `#code/<lang> <<SENTINEL\n`; lang is any keyword-safe token;
+;; SENTINEL ∈ [A-Za-z0-9_-]+, agent-chosen. Closer: a line that is
+;; EXACTLY SENTINEL (a trailing `\r` allowed, nothing else) — a sentinel
+;; word mid-line or an INDENTED sentinel does not close. Payload = the
+;; bytes between the opener's newline and the closer line, verbatim
+;; (incl. the final newline of the last payload line) — no normalization.
+;;
+;; A truly BARE top-level `#code` splices to a bare map literal and so
+;; demotes to prose like any other top-level `{…}` (with the standard
+;; warning); the value is meant to be USED nested inside a call form
+;; (`(fs/replace! {::find #code/py <<PY…PY})`), which is the primary case.
+;;
+;; Malformed (`#code/lang` with no `<<SENTINEL`) or unterminated (opener
+;; with no closer before EOF) → an error MARKER carried out as a
+;; `:seon.repl/kind :read` entry NAMING the awaited sentinel, never
+;; silently dropped (`#code/…` is a `:reader-macro` tag which
+;; `prose-token?` would otherwise drop as prose).
+;;
+;; Textual scan (like `strip-code-fences`): a `#code/` inside a Clojure
+;; STRING literal would false-positive — agents don't write `#code/` in
+;; strings; documented limitation. Fence stripping runs first, so a
+;; markdown-fence line INSIDE a payload is stripped along with the rest —
+;; also documented (real py/rust/go/yaml payloads carry no ``` lines).
+;; ============================================================
+
+(def ^:private heredoc-opener-re
+  ;; `#code/<lang> <<SENTINEL <eol>` anchored at the `#` (matched against a
+  ;; substring that STARTS at the marker). lang = run up to whitespace/`<`;
+  ;; SENTINEL = [A-Za-z0-9_-]+.
+  #"^#code/([^\s<]+)[ \t]+<<([A-Za-z0-9_-]+)[ \t]*\r?\n")
+
+(def ^:private code-marker-re
+  ;; a bare `#code/<token>` run — the malformed-region span when the full
+  ;; opener does not match. Stops at whitespace OR a closing/opening
+  ;; delimiter so a `#code/python)` does not swallow the enclosing form's
+  ;; `)` (which would unbalance it into a spurious EOF `:read`).
+  #"^#code/[^\s()\[\]{}<>\"]*")
+
+(defn contains-heredoc-opener?
+  "True when `s` holds a `#code/<lang> <<SENTINEL` heredoc opener.
+
+   Such a span must NOT be handed to parinfer delimiter-repair (it would
+   try to balance the raw payload's delimiters); the eval-batch repair path
+   refuses repair on these so the `:read` error naming the sentinel
+   surfaces instead."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [s]
+  (boolean (and s (re-find #"#code/[^\s<]+[ \t]+<<[A-Za-z0-9_-]+" s))))
+
+(defn- find-closer
+  "Byte offsets `[line-start line-end)` of the FIRST line at/after `from`
+   that is EXACTLY `sentinel` (an optional trailing `\\r` allowed), or nil.
+   `line-end` is just past that line's newline (or EOF). Only a whole-line
+   match closes — a sentinel word mid-line or an indented sentinel does
+   not. `from` is a line start (right after the opener's newline)."
+  [text from sentinel]
+  (let [n (count text)]
+    (loop [ls from]
+      (if (> ls n)
+        nil
+        (let [nl    (str/index-of text "\n" ls)
+              le    (if nl (inc nl) n)
+              line  (subs text ls (if nl nl le))
+              line* (if (str/ends-with? line "\r")
+                      (subs line 0 (dec (count line)))
+                      line)]
+          (cond
+            (= line* sentinel) [ls le]
+            nl                 (recur le)
+            :else              nil))))))
+
+(defn- edn-escape
+  "EDN string-literal escaping of `s` — `\\`, `\"`, and the control chars
+   `\\n`/`\\r`/`\\t` → their backslash forms, so the spliced literal is a
+   single-line, byte-faithful string the reader restores exactly.
+   Backslash MUST be escaped first."
+  [s]
+  (-> s
+      (str/replace "\\" "\\\\")
+      (str/replace "\"" "\\\"")
+      (str/replace "\r" "\\r")
+      (str/replace "\n" "\\n")
+      (str/replace "\t" "\\t")))
+
+(defn- block-edn
+  "The valid-EDN map literal a terminated heredoc splices to."
+  [lang-str payload]
+  (str "{:seon.code/lang :" lang-str
+       ", :seon.code/text \"" (edn-escape payload) "\"}"))
+
+(defn- scan-heredoc-pieces
+  "Split `text` into ordered pieces for the heredoc rewrite, or nil when
+   `text` has no `#code/` at all (the identity fast-path). Each piece:
+
+     {::piece :verbatim ::o0 int ::o1 int}          ; copied through as-is
+     {::piece :block    ::o0 ::o1 ::edn string}     ; heredoc → EDN literal
+     {::piece :error    ::o0 ::o1 ::message string} ; malformed/unterminated
+
+   An unterminated opener swallows to EOF (terminal); a malformed
+   `#code/token` spans only that token and the scan continues after it."
+  [text]
+  (when (str/includes? text "#code/")
+    (let [n (count text)]
+      (loop [pos 0, pieces []]
+        (if-let [i (str/index-of text "#code/" pos)]
+          (let [head  (if (> i pos) [{::piece :verbatim ::o0 pos ::o1 i}] [])
+                chunk (subs text i)
+                m     (re-find heredoc-opener-re chunk)]
+            (if m
+              (let [[whole lang sentinel] m
+                    payload-start (+ i (count whole))
+                    closer        (find-closer text payload-start sentinel)]
+                (if closer
+                  (let [[cl-start cl-end] closer
+                        payload (subs text payload-start cl-start)
+                        piece   {::piece :block ::o0 i ::o1 cl-end
+                                 ::edn (block-edn lang payload)}]
+                    (recur cl-end (into pieces (conj head piece))))
+                  ;; Unterminated — terminal: everything from the opener to
+                  ;; EOF is the awaited payload. One `:error` marker naming
+                  ;; the sentinel; the scan ends here.
+                  (into pieces
+                        (conj head
+                              {::piece :error ::o0 i ::o1 n
+                               ::message
+                               (str "unterminated #code/" lang " heredoc: "
+                                    "expected a line containing exactly `"
+                                    sentinel "` to close it, none found before "
+                                    "end of input.")}))))
+              ;; Malformed — `#code/` with no `<<SENTINEL`. Surface a `:read`
+              ;; over the `#code/token` span and continue after it.
+              (let [tok (re-find code-marker-re chunk)]
+                (recur (+ i (count tok))
+                       (into pieces
+                             (conj head
+                                   {::piece :error ::o0 i ::o1 (+ i (count tok))
+                                    ::message
+                                    (str "malformed #code literal `" tok "`: "
+                                         "expected `#code/<lang> <<SENTINEL` "
+                                         "then payload lines then a closing "
+                                         "SENTINEL line.")}))))))
+          (if (< pos n)
+            (conj pieces {::piece :verbatim ::o0 pos ::o1 n})
+            pieces))))))
+
+(defn- assemble
+  "Fold heredoc pieces into `{::rewritten ::segments ::markers}`. Segments
+   map REWRITTEN offsets back to ORIGINAL (`::r0`/`::r1` ↔ `::o0`/`::o1`,
+   `::heredoc?`); markers become `:read` entries. An `:error` piece
+   contributes nothing to the rewritten text."
+  [text pieces]
+  (loop [ps pieces, roff 0, sb [], segs [], marks []]
+    (if-let [{::keys [piece o0 o1 edn message]} (first ps)]
+      (case piece
+        (:verbatim :block)
+        (let [s   (if (= piece :block) edn (subs text o0 o1))
+              len (count s)]
+          (recur (rest ps) (+ roff len) (conj sb s)
+                 (conj segs {::r0 roff ::r1 (+ roff len)
+                             ::o0 o0 ::o1 o1 ::heredoc? (= piece :block)})
+                 marks))
+        :error
+        (recur (rest ps) roff sb segs
+               (conj marks {::o0 o0 ::o1 o1 ::message message})))
+      {::rewritten (str/join sb) ::segments segs ::markers marks})))
+
+(defn- orig-offset
+  "Map a REWRITTEN offset `r` back to the ORIGINAL offset via `segments`.
+   Form boundaries never fall inside a heredoc segment, so such a segment
+   maps only its ends (`::r0`→`::o0`, `::r1`→`::o1`)."
+  [segments r]
+  (loop [segs segments]
+    (if-let [{::keys [r0 r1 o0 o1 heredoc?]} (first segs)]
+      (if (<= r r1)
+        (if heredoc? (if (>= r r1) o1 o0) (+ o0 (- r r0)))
+        (recur (rest segs)))
+      r)))
+
+(defn- remap-entry
+  "Rebase one loop-produced entry from the REWRITTEN basis onto the
+   ORIGINAL text: `:seon.repl/span` → original offsets, `:seon.repl/source`
+   → byte-faithful original substring, and — whenever the cljs-readable
+   rewrite differs from the byte-faithful original, i.e. this entry's
+   source region was touched by the heredoc pre-pass — `:seon.repl/eval-source`
+   = the rewritten (cljs-readable) source `eval-batch!` evaluates. That
+   covers a heredoc form's rewritten `{:seon.code/…}` map AND any entry
+   whose region shifted next to a malformed/unterminated `#code` marker.
+   Entries without a span (comments) pass through untouched."
+  [orig segments entry]
+  (if-let [[r0 r1] (:seon.repl/span entry)]
+    (let [o0   (orig-offset segments r0)
+          o1   (orig-offset segments r1)
+          rsrc (:seon.repl/source entry)
+          osrc (subs orig o0 o1)]
+      (cond-> (assoc entry :seon.repl/span [o0 o1] :seon.repl/source osrc)
+        (and rsrc (not= osrc rsrc)) (assoc :seon.repl/eval-source rsrc)))
+    entry))
+
+(defn- marker->read
+  "A malformed/unterminated `#code` MARKER → a `:seon.repl/kind :read`
+   entry (the ONE `:seon/error` value shape), byte-faithful source + span
+   in the ORIGINAL basis."
+  [orig {::keys [o0 o1 message]}]
+  {:seon.repl/kind      :read
+   :seon.repl/ok?       false
+   :seon.repl/narration ""
+   :seon.repl/source    (subs orig o0 o1)
+   :seon/error          {:seon.error/kind    :read
+                         :seon.error/message message}
+   :seon.repl/span      [o0 o1]})
+
+(defn- heredoc-remap
+  "Rebase `base` (loop entries, REWRITTEN basis) onto `orig` via
+   `segments`, then append any error `markers` as `:read` entries. No-op
+   when there were no heredocs (`segments`/`markers` nil). Markers are
+   appended (an unterminated one is terminal; a mid-stream malformed one
+   is an error path — append ordering is acceptable)."
+  [orig segments markers base]
+  (let [base (if segments (mapv #(remap-entry orig segments %) base) base)]
+    (if (seq markers)
+      (into (vec base) (map #(marker->read orig %) markers))
+      base)))
+
+;; ============================================================
 ;; Prose-vs-form classification — the FORMS-AND-PROSE-ONLY rule
 ;; (#50/#52, LOCKED 2026-06-22).
 ;;
@@ -649,7 +897,7 @@
             (rcn/children (rcp/parse-string-all (str source)))))
     (catch #?(:clj Exception :cljs :default) _ nil)))
 
-(defn parse-forms
+(defn- parse-forms*
   "Read `text` top-to-bottom, pairing each evaluable form with the `;;`
    comment-preamble that precedes it. See the namespace docstring for the
    entry-shape contract.
@@ -793,3 +1041,44 @@
                                       {:seon.error/kind    error-kind
                                        :seon.error/message (str (::error token))}
                                       :seon.repl/span      [offset recovery]}))))))))))))
+
+(defn parse-forms
+  "Parse `text` into structured entries, `#code` heredocs included.
+
+   Runs the `#code` heredoc pre-pass first (see the ns docstring) so a raw
+   foreign-source payload needs ZERO Clojure escaping.
+
+   `#code/<lang> <<SENTINEL … SENTINEL` regions are rewritten to
+   machine-escaped valid-EDN `{:seon.code/lang … :seon.code/text …}` map
+   literals that the reader reads natively (THE MACHINE escapes, never the
+   agent). Used nested in a call form —
+   `(fs/replace! {::find #code/py <<PY…PY})` — the block map lands as the
+   `::find` value; a bare top-level `#code` demotes to prose like any
+   other top-level `{…}` (its value is meant to be USED, not left inert).
+
+   Entries stay on the ORIGINAL basis: `:seon.repl/source` is byte-faithful
+   to what the agent typed and `:seon.repl/span` is an absolute offset into
+   `text`; an entry ALSO carries `:seon.repl/eval-source` — the
+   cljs-readable rewritten string `eval-batch!` evaluates — whenever that
+   rewrite differs from the byte-faithful original, i.e. its source region
+   was rewritten by the heredoc pre-pass. That is the common heredoc-form
+   case, but it also fires for an entry whose region shifted adjacent to a
+   malformed/unterminated `#code` marker (no `seon.code` block of its own).
+   A malformed
+   (no `<<`) or unterminated (no closer) `#code` surfaces as a
+   `:seon.repl/kind :read` entry NAMING the awaited sentinel, never
+   silently dropped.
+
+   Delegates the token loop to [[parse-forms*]] on the rewritten text
+   (`:strip-fences?` false — this fn already stripped), then rebases every
+   entry onto the original text via the segment map."
+  [text & [{:keys [strip-fences?] :or {strip-fences? true}}]]
+  (let [orig     (if strip-fences? (strip-code-fences text) text)
+        pieces   (scan-heredoc-pieces orig)]
+    (if-not pieces
+      ;; No `#code/` — identity fast-path: the loop reads `orig` directly
+      ;; (spans/source already on the original basis).
+      (parse-forms* orig {:strip-fences? false})
+      (let [{::keys [rewritten segments markers]} (assemble orig pieces)
+            base (parse-forms* rewritten {:strip-fences? false})]
+        (heredoc-remap orig (seq segments) (seq markers) base)))))

@@ -4224,7 +4224,11 @@
             failed-defs outer-test-run? entry narration]
     eval-id ::id-of-eval
     turn-id :seon.agent.turn/id-of-turn}]
-  (let [source (:seon.repl/source entry)]
+  ;; A `#code` heredoc form carries `:seon.repl/eval-source` — the
+  ;; machine-escaped, cljs-READABLE rewrite of the byte-faithful (but not
+  ;; cljs-readable) `:seon.repl/source`. Eval MUST run the readable form;
+  ;; absent (the common case) it equals the source.
+  (let [source (or (:seon.repl/eval-source entry) (:seon.repl/source entry))]
     (cond
       ;; Comment-only entry — no source to eval. Record a comment-only row
       ;; (blank source, ok? true) so trailing `;;` thinking renders in the
@@ -4452,7 +4456,15 @@
                       ;; The delimiters class is level-gated too (`:off`
                       ;; = no repair anywhere — the pure A/B control arm;
                       ;; `:safe-syntax`+ = today's shipped behavior).
-                      rep    (if (repair-class-on? :seon.repair/delimiters)
+                      ;; CONSTRAINT: parinfer delimiter-repair must NEVER see
+                      ;; `#code` heredoc payload lines — it would try to balance
+                      ;; the raw payload's delimiters and corrupt it. A bad span
+                      ;; holding a heredoc opener (an UNTERMINATED heredoc, whose
+                      ;; `:read` names the awaited sentinel) is REFUSED repair
+                      ;; here, so that error surfaces intact instead.
+                      rep    (if (and (repair-class-on? :seon.repair/delimiters)
+                                      (not (internal/contains-heredoc-opener?
+                                             (:seon.repl/source entry))))
                                (repair/repair-source
                                  {:seon.repair/source (:seon.repl/source entry)
                                   :seon.repair/reads? reads?})

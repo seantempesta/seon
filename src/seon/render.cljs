@@ -39,6 +39,7 @@
     [seon.render.live-tile :as live-tile]
     [seon.render.sci :as render-sci]
     [seon.render.value :as value]
+    [seon.code :as code]
     [seon.ai.tokens :as tokens]
     [seon.schema :as schema]
     [seon.ui.clojure :as cljhl]
@@ -675,6 +676,17 @@
        (str/join " ")
        str/trim))
 
+(defn- code-fenced
+  "A `seon.code/block` value as a lang-tagged markdown fenced code block —
+   `\"```<lang>\\n<text>\\n```\"`. Reuses the ONE markdown path (`md/md->hiccup`
+   for html, the string itself for ai) so `#code` renders as highlighted
+   code, NOT an escaped Clojure string. Ensures a trailing newline before
+   the closing fence so a payload without one still closes cleanly."
+  [x]
+  (let [txt (code/text x)
+        txt (if (str/ends-with? txt "\n") txt (str txt "\n"))]
+    (str "```" (name (:seon.code/lang x)) "\n" txt "```")))
+
 (defn block
   "THE typed-block renderer for a tagged value in `:html` or `:ai`.
 
@@ -692,6 +704,7 @@
     (case view
       :html
       (cond
+        (code/block? x)    (md/md->hiccup (code-fenced x))
         (message-block? x) (md/md->hiccup (:seon.render/markdown x))
         (source-block? x)  (cljhl/clj->hiccup (:seon.render/source x))
         (data-projection? x) (data-panel x)
@@ -701,6 +714,7 @@
 
       :ai
       (cond
+        (code/block? x)    (code-fenced x)
         (message-block? x) (:seon.render/markdown x)
         (source-block? x)  (:seon.render/source x)
         (data-projection? x) (str (:seon.render.value/summary x)

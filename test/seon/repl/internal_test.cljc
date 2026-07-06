@@ -951,3 +951,180 @@
         (str "strip-fences span-basis property falsified — shrunk: "
              (pr-str (-> result :shrunk :smallest))
              " | result: " (pr-str result)))))
+
+;; ============================================================
+;; `#code` heredoc literal (Unit A1) — the T1 battery.
+;;
+;; A `#code/<lang> <<SENTINEL … SENTINEL` region reads to the inert value
+;; `{:seon.code/lang :<lang> :seon.code/text "<verbatim payload>"}`. The
+;; assertions are behavioral: byte-fidelity on `::text`, the block map
+;; reaching the read `:seon.repl/form`, original-basis source/span, and
+;; malformed/unterminated openers surfacing as `:read` entries NAMING the
+;; sentinel (not silently dropped).
+;; ============================================================
+
+(defn- code-blocks
+  "Every `seon.code` block map nested anywhere in a read `form`."
+  [form]
+  (->> (tree-seq coll? seq form)
+       (filter #(and (map? %) (contains? % :seon.code/text)))))
+
+(defn- first-form [in]
+  (:seon.repl/form (first (parse/parse-forms in))))
+
+(defn- one-text
+  "The `::text` of the single block nested in the first form of `in`."
+  [in]
+  (:seon.code/text (first (code-blocks (first-form in)))))
+
+;; Each case: the raw payload BYTES and the `#code` opener/closer wrapping
+;; it inside a top-level call form, so the block lands in `:seon.repl/form`.
+(def heredoc-fidelity-cases
+  [{:note    "Python docstrings / f-strings / \\d regexes"
+    :payload "def f(x):\n    \"\"\"Docs with \"quotes\" and \\d regexes.\"\"\"\n    return f\"{x}!\"\n"
+    :lang    "python"}
+   {:note    "Rust lifetimes + raw strings r#\"...\"#"
+    :payload "let s = r#\"a \"b\" c\"#;\nfn longest<'a>(x: &'a str, y: &'a str) -> &'a str { x }\n"
+    :lang    "rust"}
+   {:note    "Go backtick raw strings"
+    :payload "s := `raw \"string\" with \\n no escapes`\nt := `line1\nline2`\n"
+    :lang    "go"}
+   {:note    "YAML with quotes and nesting"
+    :payload "key: \"value\"\nnested:\n  - a\n  - b: \"c\"\n"
+    :lang    "yaml"}
+   {:note    "payload CONTAINING the sentinel word mid-line"
+    :payload "return \"ENDPOINT\" and END_TOKEN here\nnot END either\n"
+    :lang    "txt"}
+   {:note    "empty payload"
+    :payload ""
+    :lang    "txt"}
+   {:note    "CRLF payload — bytes preserved"
+    :payload "line1\r\nline2\r\n"
+    :lang    "txt"}])
+
+(deftest heredoc-text-byte-faithful
+  (doseq [{:keys [note payload lang]} heredoc-fidelity-cases]
+    (testing note
+      (let [in (str "(identity #code/" lang " <<SENT\n" payload "SENT\n)")]
+        (is (= payload (one-text in))
+            (str "::text must equal the payload byte-for-byte — " note))))))
+
+(deftest heredoc-reads-to-block-value
+  (testing "the block map lands in :seon.repl/form, lang + text populated"
+    (let [in   "(identity #code/python <<PY\nprint(1)\nPY\n)"
+          form (first-form in)
+          blk  (first (code-blocks form))]
+      (is (= 'identity (first form)))
+      (is (= :python (:seon.code/lang blk)))
+      (is (= "print(1)\n" (:seon.code/text blk))))))
+
+(deftest heredoc-nested-in-call-map
+  (testing "primary use — a #code value as a value inside a fs/replace! map"
+    (let [in   (str "(seon.agent.fs/replace!"
+                    " {:seon.agent.fs/path \"a.py\""
+                    "  :seon.agent.fs/find #code/python <<F\ndef f():\n    pass\nF\n"
+                    "  :seon.agent.fs/replace \"x\"})")
+          form (first-form in)
+          blk  (first (code-blocks form))]
+      (is (= 'seon.agent.fs/replace! (first form)))
+      (is (= "def f():\n    pass\n" (:seon.code/text blk)))
+      (is (= :python (:seon.code/lang blk))))))
+
+(deftest heredoc-two-in-one-form
+  (testing "two heredocs in one form both round-trip"
+    (let [in   "(list #code/a <<A\nhello\nA\n #code/b <<B\nworld\nB\n)"
+          form (first-form in)
+          blks (code-blocks form)]
+      (is (= 2 (count blks)))
+      (is (= #{"hello\n" "world\n"} (set (map :seon.code/text blks))))
+      (is (= #{:a :b} (set (map :seon.code/lang blks)))))))
+
+(deftest heredoc-sentinel-word-midline-does-not-close
+  (testing "a sentinel word mid-line or indented does not close the block"
+    (let [in "(identity #code/txt <<END\nreturn END_TOKEN\n    END\nEND\n)"]
+      (is (= 1 (count (parse/parse-forms in))))
+      (is (= "return END_TOKEN\n    END\n" (one-text in))))))
+
+(deftest heredoc-source-is-byte-faithful-and-span-original
+  (testing ":source keeps the RAW heredoc; :span indexes the ORIGINAL text"
+    (let [in "(identity #code/python <<PY\ndef f(): pass\nPY\n)"
+          e  (first (parse/parse-forms in))
+          [s end] (:seon.repl/span e)]
+      (is (= in (:seon.repl/source e)))
+      (is (= (:seon.repl/source e) (subs in s end))
+          "span must index the ORIGINAL text, not the rewritten one"))))
+
+(deftest heredoc-eval-source-is-cljs-readable
+  (testing ":eval-source is present for a heredoc form and reads to the block"
+    (let [in       "(identity #code/python <<PY\ndef f(): pass\nPY\n)"
+          e        (first (parse/parse-forms in))
+          eval-src (:seon.repl/eval-source e)]
+      (is (string? eval-src))
+      (is (not= eval-src (:seon.repl/source e)))
+      ;; the rewritten eval-source is plain valid Clojure the reader accepts
+      ;; and yields the SAME block value as the entry's :form.
+      (let [re (parse/parse-forms eval-src)]
+        (is (= 1 (count re)))
+        (is (= (:seon.repl/form e) (:seon.repl/form (first re))))))))
+
+(deftest heredoc-no-eval-source-on-plain-forms
+  (testing "a form without a heredoc carries no :eval-source key"
+    (let [e (first (parse/parse-forms "(+ 1 2)"))]
+      (is (not (contains? e :seon.repl/eval-source))))))
+
+(deftest eval-source-tracks-rewrite-not-heredoc-block
+  (testing (str ":eval-source fires whenever the cljs-readable rewrite differs "
+                "from the byte-faithful original — including a form adjacent to "
+                "a malformed #code marker that carries no seon.code block")
+    (let [in      "(identity #code/python)\n(+ 1 2)"
+          entries (parse/parse-forms in)
+          ;; the malformed marker itself surfaces as a :read entry,
+          e       (first (filter #(= :form (:seon.repl/kind %)) entries))]
+      ;; the (identity …) form's source region was rewritten (the marker
+      ;; stripped), so rewritten ≠ original → :eval-source present, even
+      ;; though the form contains NO seon.code block.
+      (is (= "(identity #code/python)" (:seon.repl/source e)))
+      (is (contains? e :seon.repl/eval-source))
+      (is (not= (:seon.repl/eval-source e) (:seon.repl/source e)))
+      ;; and re-parsing that cljs-readable eval-source yields the SAME form.
+      (let [re (parse/parse-forms (:seon.repl/eval-source e))]
+        (is (= 1 (count re)))
+        (is (= (:seon.repl/form e) (:seon.repl/form (first re))))))))
+
+(deftest heredoc-top-level-def
+  (testing "a #code arg to a top-level (def …) evaluates and round-trips"
+    (let [in   "(def snippet #code/python <<PY\nprint(\"hi\")\nPY\n)"
+          form (first-form in)]
+      (is (= 'def (first form)))
+      (is (= "print(\"hi\")\n" (:seon.code/text (first (code-blocks form))))))))
+
+(deftest heredoc-unterminated-is-read-naming-sentinel
+  (testing "unterminated heredoc → a :read entry naming the awaited sentinel"
+    (let [in      "#code/python <<NOPE\ndef f(): pass\nno closer here\n"
+          entries (parse/parse-forms in)
+          reads   (filter #(= :read (:seon.repl/kind %)) entries)
+          msgs    (map #(get-in % [:seon/error :seon.error/message]) reads)]
+      (is (seq reads) "must not be silently dropped as prose")
+      (is (false? (:seon.repl/ok? (first reads))))
+      ;; the SENTINEL appears in some :read message (not exact wording)
+      (is (some #(str/includes? % "NOPE") msgs)
+          "the awaited sentinel must be named in the :read message"))))
+
+(deftest heredoc-malformed-no-arrows-is-read
+  (testing "a #code/lang with no <<SENTINEL surfaces as :read, forms survive"
+    (let [in      "(identity #code/python)\n(+ 1 2)"
+          entries (parse/parse-forms in)
+          reads   (filter #(= :read (:seon.repl/kind %)) entries)
+          forms   (filter #(= :form (:seon.repl/kind %)) entries)]
+      (is (seq reads) "malformed #code must not vanish")
+      (is (some #(str/includes?
+                   (get-in % [:seon/error :seon.error/message]) "#code")
+                reads))
+      ;; the enclosing `)` is not swallowed — both real forms still parse
+      (is (= '[(identity) (+ 1 2)] (mapv :seon.repl/form forms))))))
+
+(deftest heredoc-contains-opener?-predicate
+  (testing "contains-heredoc-opener? gates parinfer repair"
+    (is (parse/contains-heredoc-opener? "(f #code/py <<X\nbody\nX\n)"))
+    (is (not (parse/contains-heredoc-opener? "(f {:a 1})")))
+    (is (not (parse/contains-heredoc-opener? "(f #code/py no-arrows)")))))
