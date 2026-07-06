@@ -40,6 +40,8 @@
     ["node:fs" :as fs]
     [clojure.string :as str]
     [seon.agent.fs.internal :as int]
+    [seon.agent.fs.match :as match]
+    [seon.code :as code]
     [seon.platform :as platform]
     [seon.schema :as schema]))
 
@@ -49,7 +51,12 @@
 
 (schema/register! :seon.agent.fs/path     :string)
 (schema/register! :seon.agent.fs/encoding :string)
-(schema/register! :seon.agent.fs/content  :string)
+;; Content is a string OR a `#code` heredoc value (`:seon.code/value` =
+;; `[:or :string :seon.code/block]`) — one meaning, referenced not
+;; inlined. Every write/insert boundary extracts the verbatim text with
+;; `seon.code/text`, so a plain string is unchanged and a foreign-code
+;; block flows straight from the transcript to disk with no escaping.
+(schema/register! :seon.agent.fs/content  :seon.code/value)
 (schema/register! :seon.agent.fs/ok?      :boolean)
 (schema/register! :seon.agent.fs/error    :string)
 (schema/register! :seon.agent.fs/entries  [:vector :string])
@@ -85,6 +92,10 @@
 (schema/register! :seon.agent.fs/lines-returned :int)
 (schema/register! :seon.agent.fs/total-lines    :int)
 
+;; The file's SHA-256 content address — echoed back to replace! as an
+;; optimistic fence against editing a stale copy.
+(schema/register! :seon.agent.fs/file-sha       :string)
+
 (schema/register! :seon.agent.fs/read-request
   [:map
    [:seon.agent.fs/path      :string]
@@ -100,12 +111,13 @@
    [:seon.agent.fs/from-line      {:optional true} :int]
    [:seon.agent.fs/lines-returned {:optional true} :int]
    [:seon.agent.fs/total-lines    {:optional true} :int]
+   [:seon.agent.fs/file-sha       {:optional true} :seon.agent.fs/file-sha]
    [:seon.agent.fs/error          {:optional true} :string]])
 
 (schema/register! :seon.agent.fs/write-request
   [:map
    [:seon.agent.fs/path     :string]
-   [:seon.agent.fs/content  :string]
+   [:seon.agent.fs/content  :seon.agent.fs/content]
    [:seon.agent.fs/encoding {:optional true} :string]])
 
 (schema/register! :seon.agent.fs/write-response
@@ -128,7 +140,7 @@
    [:seon.agent.fs/path       :string]
    [:seon.agent.fs/from-line  {:optional true} :int]
    [:seon.agent.fs/to-line    {:optional true} :int]
-   [:seon.agent.fs/content    {:optional true} :string]
+   [:seon.agent.fs/content    {:optional true} :seon.agent.fs/content]
    [:seon.agent.fs/old-string {:optional true} :string]
    [:seon.agent.fs/new-string {:optional true} :string]
    [:seon.agent.fs/encoding   {:optional true} :string]])
@@ -192,6 +204,77 @@
    [:seon.agent.fs/total-found {:optional true} :int]
    [:seon.agent.fs/truncated?  {:optional true} :boolean]
    [:seon.agent.fs/error       {:optional true} :string]])
+
+;; ── view — a line-numbered, bounded, sha-stamped read (the edit surface).
+(schema/register! :seon.agent.fs/view-request
+  [:map
+   [:seon.agent.fs/path      :string]
+   [:seon.agent.fs/from-line {:optional true} :int]
+   [:seon.agent.fs/max-lines {:optional true} :int]
+   [:seon.agent.fs/encoding  {:optional true} :string]])
+
+(schema/register! :seon.agent.fs/view-response
+  [:map
+   [:seon.agent.fs/ok?            :boolean]
+   [:seon.agent.fs/path           :string]
+   [:seon.agent.fs/content        {:optional true} :string]
+   [:seon.agent.fs/from-line      {:optional true} :int]
+   [:seon.agent.fs/lines-returned {:optional true} :int]
+   [:seon.agent.fs/total-lines    {:optional true} :int]
+   [:seon.agent.fs/file-sha       {:optional true} :seon.agent.fs/file-sha]
+   [:seon.agent.fs/error          {:optional true} :string]])
+
+;; ── anchored edits — replace! / insert!. Deterministic-only mutation:
+;; the pure cascade in seon.agent.fs.match FINDS candidates; only an
+;; unambiguous hit MUTATES. Response keys reference the match shapes so
+;; the range/normalization vocabulary is defined once.
+(schema/register! :seon.agent.fs/range-after     :seon.agent.fs.match/range)
+(schema/register! :seon.agent.fs/lines-added     :int)
+(schema/register! :seon.agent.fs/lines-removed   :int)
+(schema/register! :seon.agent.fs/excerpt         :string)
+(schema/register! :seon.agent.fs/normalizations  :seon.agent.fs.match/normalizations)
+(schema/register! :seon.agent.fs/after-line      :int)
+(schema/register! :seon.agent.fs/before-line     :int)
+
+(schema/register! :seon.agent.fs/replace-request
+  [:map
+   [:seon.agent.fs/path           :string]
+   [:seon.agent.fs/find           :seon.code/value]
+   [:seon.agent.fs/replace        :seon.code/value]
+   [:seon.agent.fs/expected-count {:optional true} :seon.agent.fs.match/expected-count]
+   [:seon.agent.fs/near           {:optional true} :seon.agent.fs.match/near]
+   [:seon.agent.fs/file-sha       {:optional true} :seon.agent.fs/file-sha]
+   [:seon.agent.fs/encoding       {:optional true} :string]])
+
+(schema/register! :seon.agent.fs/insert-request
+  [:map
+   [:seon.agent.fs/path        :string]
+   [:seon.agent.fs/content     :seon.code/value]
+   [:seon.agent.fs/after-line  {:optional true} :seon.agent.fs/after-line]
+   [:seon.agent.fs/before-line {:optional true} :seon.agent.fs/before-line]
+   [:seon.agent.fs/encoding    {:optional true} :string]])
+
+;; ONE anchored-edit envelope — replace! and insert! share it (no
+;; parallel shape). ok? true carries where the edit landed + a
+;; line-numbered excerpt; ok? false carries the guiding :seon.error/*
+;; (and on a sha mismatch, the file's ACTUAL :seon.agent.fs/file-sha).
+(schema/register! :seon.agent.fs/anchored-response
+  [:or
+   [:map
+    [:seon.agent.fs/ok?            [:= true]]
+    [:seon.agent.fs/path           :string]
+    [:seon.agent.fs/file-sha       :seon.agent.fs/file-sha]
+    [:seon.agent.fs/range-after    :seon.agent.fs/range-after]
+    [:seon.agent.fs/lines-added    :seon.agent.fs/lines-added]
+    [:seon.agent.fs/lines-removed  :seon.agent.fs/lines-removed]
+    [:seon.agent.fs/normalizations {:optional true} :seon.agent.fs/normalizations]
+    [:seon.agent.fs/excerpt        :seon.agent.fs/excerpt]]
+   [:map
+    [:seon.agent.fs/ok?      [:= false]]
+    [:seon.agent.fs/path     :string]
+    [:seon.agent.fs/file-sha {:optional true} :seon.agent.fs/file-sha]
+    [:seon.error/message     :string]
+    [:seon.error/data        {:optional true} :map]]])
 
 ;; ============================================================
 ;; Grant — configure + inspect the allowlist.
@@ -284,8 +367,9 @@
             (int/out-of-scope? path) (int/scope-denied path)
             :else (try
                     (let [content (.readFileSync fs path encoding)
-                          base    {:seon.agent.fs/ok?   true
-                                   :seon.agent.fs/path  path}]
+                          base    {:seon.agent.fs/ok?       true
+                                   :seon.agent.fs/path      path
+                                   :seon.agent.fs/file-sha  (int/file-sha content)}]
                       (if (or from-line max-lines)
                         (merge base (int/page-lines content from-line max-lines))
                         (assoc base :seon.agent.fs/content content)))
@@ -304,7 +388,7 @@
             (int/read-only?)         (int/denied path "filesystem is read-only (:seon.agent.fs/read-only? true)")
             (int/out-of-scope? path) (int/scope-denied path)
             :else (try
-                    (.writeFileSync fs path content encoding)
+                    (.writeFileSync fs path (code/text content) encoding)
                     {:seon.agent.fs/ok?  true
                      :seon.agent.fs/path path}
                     (catch :default e (int/->err path e))))
@@ -384,7 +468,7 @@
                                     "and :seon.agent.fs/new-string"))
 
               line-mode?
-              (apply-edit path encoding #(int/line-range-edit % from-line to-line content))
+              (apply-edit path encoding #(int/line-range-edit % from-line to-line (code/text content)))
 
               match-mode?
               (apply-edit path encoding #(int/match-edit % old-string new-string))
@@ -489,3 +573,214 @@
                        :seon.agent.fs/truncated?  @!truncated})
                     (catch :default e (int/->err path e))))
     :wasi (int/wasi-pending path "walk-dir")))
+
+;; ============================================================
+;; Line-numbered view — the read surface an anchored edit is aimed with.
+;; ============================================================
+
+(def default-view-lines
+  "Default [[view]] page size — a line-numbered read renders straight
+   into context, so an unbounded view is never the default."
+  100)
+
+(defn view
+  "A line-numbered, bounded window of a file, with its content SHA.
+
+   The read surface you aim an edit with: `:seon.agent.fs/content` carries
+   1-based line numbers (right-aligned, `N<tab>line`) so you can pick an
+   exact `:seon.agent.fs/near` window, and `:seon.agent.fs/file-sha` is the
+   token you echo to [[replace!]] to fence against a stale edit. Defaults
+   to the first `default-view-lines` lines; page the rest with a 1-based
+   `:seon.agent.fs/from-line` + `:seon.agent.fs/max-lines`. `total-lines`
+   is the WHOLE file, so a partial page never looks complete —
+   `lines-returned` < `max-lines` means you ran off the end. STRIP the
+   `N<tab>` prefix before copying text into a find/replace payload."
+  {:malli/schema [:=> [:cat :seon.agent.fs/view-request] :seon.agent.fs/view-response]}
+  [{:seon.agent.fs/keys [path from-line max-lines encoding]}]
+  (let [encoding  (or encoding "utf-8")
+        max-lines (or max-lines default-view-lines)]
+    (case (platform/host)
+      :node (cond
+              (int/out-of-scope? path) (int/scope-denied path)
+              :else (try
+                      (let [content (.readFileSync fs path encoding)
+                            lines   (match/content-lines content)
+                            total   (count lines)
+                            from    (max 1 (or from-line 1))
+                            start   (min (dec from) total)
+                            end     (min total (+ start (max 0 max-lines)))
+                            window  (subvec lines start end)]
+                        {:seon.agent.fs/ok?            true
+                         :seon.agent.fs/path           path
+                         :seon.agent.fs/content        (match/number-lines window from)
+                         :seon.agent.fs/from-line      from
+                         :seon.agent.fs/lines-returned (- end start)
+                         :seon.agent.fs/total-lines    total
+                         :seon.agent.fs/file-sha       (int/file-sha content)})
+                      (catch :default e (int/->err path e))))
+      :wasi (int/wasi-pending path "view"))))
+
+;; ============================================================
+;; Anchored edits — replace! / insert!. The mutation rule: the pure
+;; cascade FINDS candidates; only an unambiguous, deterministic hit
+;; WRITES. Every failure is a value on the shared :seon.error/* shape.
+;; ============================================================
+
+(defn- anchored-msg
+  "An anchored-edit ok?-false envelope on the shared :seon.error/* shape."
+  ([path msg] (anchored-msg path msg nil))
+  ([path msg data]
+   (cond-> {:seon.agent.fs/ok?  false
+            :seon.agent.fs/path path
+            :seon.error/message msg}
+     (seq data) (assoc :seon.error/data data))))
+
+(defn- ->anchored-fail
+  "Re-shape an fs `:seon.agent.fs/error` envelope (from the shared gating
+   helpers) into the anchored-edit `:seon.error/message` contract."
+  [{:seon.agent.fs/keys [path error]}]
+  (anchored-msg path error))
+
+(defn- stale-file
+  "The optimistic-fence failure: the on-disk `actual` sha ≠ the `expected`
+   the caller passed. Carries the ACTUAL sha so the caller can re-aim."
+  [path actual expected]
+  (assoc (anchored-msg path
+                       (str "file changed since your read — the on-disk SHA is "
+                            actual ", you passed " expected ". Re-view "
+                            "(seon.agent.fs/view {:seon.agent.fs/path …}) for the "
+                            "current content + :seon.agent.fs/file-sha, then retry.")
+                       {:seon.agent.fs/file-sha actual})
+         :seon.agent.fs/file-sha actual))
+
+(defn- cascade-fail
+  "Turn a match `:fail` decision into the anchored failure envelope —
+   the guiding message plus the reason + line-numbered candidates."
+  [path decision]
+  (anchored-msg path
+                (:seon.agent.fs.match/message decision)
+                {:seon.agent.fs.match/reason     (:seon.agent.fs.match/reason decision)
+                 :seon.agent.fs.match/candidates (:seon.agent.fs.match/candidates decision)}))
+
+(defn- edit-success
+  "The anchored success envelope for a splice that produced `new-content`,
+   from a match `:apply` `decision`. `range-after` + `excerpt` are the
+   1-based landing spot and a ±3-line line-numbered view of the result."
+  [path new-content decision]
+  (let [lines (match/content-lines new-content)
+        range (:seon.agent.fs.match/range-after decision)]
+    (cond-> {:seon.agent.fs/ok?           true
+             :seon.agent.fs/path          path
+             :seon.agent.fs/file-sha      (int/file-sha new-content)
+             :seon.agent.fs/range-after   range
+             :seon.agent.fs/lines-added   (:seon.agent.fs.match/lines-added decision)
+             :seon.agent.fs/lines-removed (:seon.agent.fs.match/lines-removed decision)
+             :seon.agent.fs/excerpt       (match/preview lines range)}
+      (seq (:seon.agent.fs.match/normalizations decision))
+      (assoc :seon.agent.fs/normalizations (:seon.agent.fs.match/normalizations decision)))))
+
+(defn replace!
+  "Replace EXACT `:seon.agent.fs/find` text in a file — deterministic only.
+
+   The safe anchored editor. The pure cascade (seon.agent.fs.match) tries,
+   first hit wins: exact text occurring exactly `:seon.agent.fs/expected-count`
+   times (default 1) → apply; the same inside the `:seon.agent.fs/near`
+   `[from-line to-line]` window → apply; conservative line-ending /
+   trailing-whitespace normalization (NEVER indentation) → apply. Anything
+   else FAILS with line-numbered candidates and never guesses — an
+   ambiguous find returns every occurrence, a not-found returns
+   normalization near-misses. `:seon.agent.fs/find` and
+   `:seon.agent.fs/replace` accept a plain string or a `#code` heredoc
+   value. Pass the `:seon.agent.fs/file-sha` from your [[view]] to fence
+   against a stale edit (mismatch → an ok?-false with the actual sha).
+
+   Success carries the new `:seon.agent.fs/file-sha`, `range-after`, the
+   lines added/removed, and a line-numbered `excerpt` of the result — no
+   re-read needed. Same write gate as [[write-file]] (granted root,
+   `read-only?` false). Never throws — every failure is a value."
+  {:malli/schema [:=> [:cat :seon.agent.fs/replace-request] :seon.agent.fs/anchored-response]}
+  [{:seon.agent.fs/keys [path find replace expected-count near file-sha encoding]}]
+  (let [encoding  (or encoding "utf-8")
+        find-text (code/text find)
+        repl-text (code/text replace)]
+    (case (platform/host)
+      :node (cond
+              (int/read-only?)         (->anchored-fail (int/denied path "filesystem is read-only (:seon.agent.fs/read-only? true)"))
+              (int/out-of-scope? path) (->anchored-fail (int/scope-denied path))
+              (= "" find-text)         (anchored-msg path (str ":seon.agent.fs/find must be non-empty — "
+                                                              "copy the EXACT anchor text from (seon.agent.fs/view …)."))
+              :else
+              (try
+                (let [content (.readFileSync fs path encoding)
+                      actual  (int/file-sha content)]
+                  (if (and file-sha (not= file-sha actual))
+                    (stale-file path actual file-sha)
+                    (let [decision (match/decide
+                                     (cond-> {:seon.agent.fs.match/content content
+                                              :seon.agent.fs.match/find    find-text
+                                              :seon.agent.fs.match/replace repl-text}
+                                       expected-count (assoc :seon.agent.fs.match/expected-count expected-count)
+                                       near           (assoc :seon.agent.fs.match/near near)))]
+                      (if (= :apply (:seon.agent.fs.match/action decision))
+                        (let [new-content (:seon.agent.fs.match/new-content decision)]
+                          (.writeFileSync fs path new-content encoding)
+                          (edit-success path new-content decision))
+                        (cascade-fail path decision)))))
+                (catch :default e (->anchored-fail (int/->err path e)))))
+      :wasi (->anchored-fail (int/wasi-pending path "replace!")))))
+
+(defn insert!
+  "Insert `:seon.agent.fs/content` at a line boundary — exactly one anchor.
+
+   Pass EXACTLY ONE of `:seon.agent.fs/after-line` / `:seon.agent.fs/before-line`
+   (1-based). `after-line 0` prepends; `before-line (inc total)` appends;
+   an out-of-range anchor FAILS with the file's real `:seon.agent.fs/total-lines`.
+   `:seon.agent.fs/content` accepts a plain string or a `#code` heredoc
+   value. Success carries the new `:seon.agent.fs/file-sha`, `range-after`
+   (the inserted span), `lines-added`, and a line-numbered `excerpt`. Same
+   write gate as [[write-file]]; never throws — failures are values."
+  {:malli/schema [:=> [:cat :seon.agent.fs/insert-request] :seon.agent.fs/anchored-response]}
+  [{:seon.agent.fs/keys [path content after-line before-line encoding]}]
+  (let [encoding    (or encoding "utf-8")
+        ins-text    (code/text content)
+        has-after?  (some? after-line)
+        has-before? (some? before-line)]
+    (case (platform/host)
+      :node (cond
+              (int/read-only?)         (->anchored-fail (int/denied path "filesystem is read-only (:seon.agent.fs/read-only? true)"))
+              (int/out-of-scope? path) (->anchored-fail (int/scope-denied path))
+              (= has-after? has-before?)
+              (anchored-msg path (str "pass EXACTLY ONE of :seon.agent.fs/after-line or "
+                                      ":seon.agent.fs/before-line (a 1-based line number); got "
+                                      (if has-after? "both" "neither") "."))
+              :else
+              (try
+                (let [content-str (.readFileSync fs path encoding)
+                      lines       (match/content-lines content-str)
+                      total       (count lines)
+                      trailing?   (str/ends-with? content-str "\n")
+                      idx         (if has-after? after-line (dec before-line))]
+                  (if (or (< idx 0) (> idx total))
+                    (anchored-msg path
+                                  (str (if has-after? ":seon.agent.fs/after-line " ":seon.agent.fs/before-line ")
+                                       (if has-after? after-line before-line)
+                                       " is out of range — the file has " total
+                                       " lines (after-line 0.." total ", before-line 1.." (inc total) ").")
+                                  {:seon.agent.fs/total-lines total})
+                    (let [ins-lines   (match/content-lines ins-text)
+                          new-lines   (-> (subvec lines 0 idx)
+                                          (into ins-lines)
+                                          (into (subvec lines idx)))
+                          new-content (cond-> (str/join "\n" new-lines)
+                                        (and trailing? (seq new-lines)) (str "\n"))
+                          range       [(inc idx) (+ idx (count ins-lines))]]
+                      (.writeFileSync fs path new-content encoding)
+                      {:seon.agent.fs/ok?           true
+                       :seon.agent.fs/path          path
+                       :seon.agent.fs/file-sha      (int/file-sha new-content)
+                       :seon.agent.fs/range-after   range
+                       :seon.agent.fs/lines-added   (count ins-lines)
+                       :seon.agent.fs/lines-removed 0
+                       :seon.agent.fs/excerpt       (match/preview new-lines range)})))
+                (catch :default e (->anchored-fail (int/->err path e)))))
+      :wasi (->anchored-fail (int/wasi-pending path "insert!")))))

@@ -28,12 +28,28 @@
    ops hand the agent the resolved map. Local-file perf cost is
    irrelevant; WASI fd reads are sync too, so this survives convergence."
   (:require
+    ["node:crypto" :as crypto]
     ["node:fs" :as fs]
     ["node:path" :as np]
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.platform :as platform]))
+
+;; ============================================================
+;; Content addressing — the sha guard's currency.
+;; ============================================================
+
+(defn file-sha
+  "SHA-256 hex digest of `content` (utf-8) — the file's content address.
+
+   Same primitive my.blob names a blob by; here it fences an anchored
+   edit against a stale read: read → sha → the agent echoes it back on
+   the next replace!, a mismatch means the file moved under them."
+  [content]
+  (-> (.createHash crypto "sha256")
+      (.update content "utf8")
+      (.digest "hex")))
 
 ;; ============================================================
 ;; Error / denial envelopes — errors are values, never a throw.

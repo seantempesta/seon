@@ -202,18 +202,19 @@ parallel `foo-v2` leaves two versions, doubles the bug surface, and its
 explanatory comment outlives everyone who knew the reason. Same as "register the
 shape once, reference everywhere": duplication guarantees drift.
 
-### In a `my.*` ns you author, `:require` the aliases you use
+### In a `my.*` ns you author, the data/verb aliases just work
 
-The short aliases `db/`, `todo/`, `message/`, `schema/` are wired into your
-agent's HOME ns. When you author a fn in a `my.<domain>` ns you create ("build
-your environment"), give that ns a real `(ns … (:require …))` head carrying the
-same aliases — then `db/query` etc. resolve there because they are genuinely
-required, not by magic:
+The short aliases `db/`, `plan/`, `message/`, `schema/` are wired into your
+agent's HOME ns — and the system injects those same REAL `(:require …)` into
+EVERY `my.<domain>` ns you author (even a bare `(ns my.expense)`), so
+`db/query` etc. resolve there too — genuinely required, no magic, no manual
+step. Writing the requires yourself is fine (then it's a no-op) and makes the
+deps explicit:
 
 ```clojure
 (ns my.expense
   (:require [seon.db :as db]
-            [seon.agent.todo :as todo]
+            [my.plan :as plan]
             [seon.agent.message :as message]
             [seon.schema :as schema]))
 

@@ -67,8 +67,13 @@ imperative reflexes, guessed library semantics). Ground first:
   pod = one cluster = one conn (isolation is the process boundary).
   Parallelism = more clusters (`bin/seon cluster create`), never a second
   in-pod conn.
-- Home-ns aliases (`db/`, `plan/`…) don't resolve in agent-authored `my.*`
-  nses — agents must fully qualify there (#73).
+- Home-ns data/verb aliases (`db/`, `plan/`, `message/`, `schema/`) DO
+  resolve in agent-authored `my.*` nses — `seon.eval/augment-ns-source`
+  injects the real `(:require …)` into every authored `(ns …)` form at eval
+  time (stored verbatim in `:seon.ns/source` + as `:seon.ns/require-edges`;
+  survives resume, #73/#56 CLOSED). NOT auto-aliased: the `my.*` toolkit
+  (`my.ui/…`, `my.data/…`, `my.tile/…`, `my.kb/…`), the `agent/` alias, and
+  the lifecycle refers (`wait`/`complete`/…) — full-qualify those.
 - Turn capture is live (`:seon.agent.turn/rendered-as-of` + prompt/reply
   blob refs, `seon.agent.inspect/turn`/`turn-diff`) and is the ONE capture
   path — the gated `seon.debug` file tree is deleted; the gym driver reads

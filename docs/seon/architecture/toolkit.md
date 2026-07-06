@@ -296,12 +296,40 @@ syscalls + the `SEON_FS_*` allowlist gate. The agent shapes how `my.files`
 returns results but cannot disable the allowlist (that lives on the floor).
 
 Surface: `grants`, `configure!`, `read-file` (paged `from-line`/`max-lines` +
-honest totals), `write-file`, `list-dir`, `walk-dir`, `stat`, `file-exists?`,
-`home-dir`. Map-in/map-out, never-throws, default-deny. `read`/`stat`/`write`
-requests reference `:seon.path/abs`; `list-dir`/`walk-dir` entries are
-`:seon.items/items` of `:seon.path/located` (each `{:seon.path/abs …
-:my.files/dir? …}`), so a located item from `grep` or a listing threads straight
-into `read`/`stat`/`grep`. **Budget:** ~2k tok.
+honest totals, now sha-stamped), `view`, `replace!`, `insert!`, `write-file`,
+`edit-file`, `list-dir`, `walk-dir`, `stat`, `file-exists?`, `home-dir`.
+Map-in/map-out, never-throws, default-deny. `read`/`stat`/`write` requests
+reference `:seon.path/abs`; `list-dir`/`walk-dir` entries are `:seon.items/items`
+of `:seon.path/located` (each `{:seon.path/abs … :my.files/dir? …}`), so a
+located item from `grep` or a listing threads straight into `read`/`stat`/`grep`.
+**Budget:** ~2k tok.
+
+**Anchored in-place editing (the SWE-bench-grade edit surface):** the safe way
+to change a file is `view` → `replace!`, never a whole-file `write-file`.
+
+- **`view`** — a line-numbered (`N<tab>line`), bounded (default 100 lines,
+  paged with `from-line`/`max-lines`) read that also returns
+  `:seon.agent.fs/file-sha`. The line numbers let you pick an exact `near`
+  window; the sha is the fence you echo to `replace!`. STRIP the `N<tab>`
+  prefix before copying text into a find.
+- **`replace!`** — `{::path ::find ::replace}` (+ optional `::expected-count`
+  default 1, `::near [from to]`, `::file-sha`). The mutation rule: **smart
+  matching FINDS candidates; only DETERMINISTIC matching MUTATES.** A pure
+  cascade (`seon.agent.fs.match`, `.cljc`) tries, first hit wins — exact text
+  at the expected count → the same inside the `near` window → conservative
+  line-ending / trailing-whitespace normalization (NEVER indentation). Anything
+  ambiguous or absent FAILS with line-numbered candidate previews and writes
+  nothing — it never guesses a location. Success returns the new `file-sha`,
+  `range-after`, lines added/removed, and a line-numbered `excerpt` of the
+  result. `::find`/`::replace` accept a plain string OR a `#code` heredoc value.
+- **`insert!`** — `{::path ::content}` plus EXACTLY ONE of `::after-line` /
+  `::before-line` (1-based; `after-line 0` prepends, `before-line (inc total)`
+  appends). Out-of-range fails with the real `::total-lines`.
+- **`#code` heredoc** — `::find`/`::replace`/`::content` (and `write-file`'s
+  `::content`) accept the inert `{:seon.code/lang … :seon.code/text …}` value a
+  `#code/<lang> <<SENTINEL … SENTINEL` block reads to, so foreign source with
+  quotes/backslashes/regexes crosses into an edit with zero escaping
+  (`seon.code/text` extracts verbatim at the boundary).
 
 #### `my.search` — floor: `seon.agent.search`
 
