@@ -251,6 +251,43 @@ Tier eviction is INERT by default (::tiers [] — dead path until a
 manifest wires it). Audit leftovers in default store: disposable agent
 hlh-2607061447 + run + blobs (no reset performed).
 
+## Post-handoff unit (owner call): compute the bootstrap schema
+
+A4 flagged `seon.client/agent-bootstrap-attrs` (client.cljs ~419) as a
+HAND-MAINTAINED keyword list that must be manually synced with every
+`schema/register!` — a standing-directive violation. Recommended unit:
+derive the install schema from the `seon.schema` registry (all
+DB-storable registered attrs) so registration is the single act.
+Follow-up also recorded: background pytest runs surface their parse on
+`job-status` (derived) but are NOT projected into the `:test-failures`
+section — clean persistence needs a close-handler seam; revisit if the
+bench drives want bg runs in the section.
+
+## Post-handoff unit (tooling lane): quiesced hot reload (drain-then-swap)
+
+Fixes the class-2 instability (reload swap under live async
+continuations; 4+ crash datapoints 2026-07-06). Mechanism: the pod is
+single-threaded, so reloads interleave with SUSPENDED continuations at
+`await` points — a resumed continuation touches a half-swapped world
+(`reading 'call'` on a mid-redef ns; `IDeref null` on old instances vs
+re-defined protocol tables). Fix via shadow-cljs lifecycle hooks in
+`seon.client`:
+
+1. `^:dev/before-load-async` — LATCH: admit no new turns/evals (flag at
+   the loop-fold boundary), then BOUNDED DRAIN: await in-flight
+   evals/turns settling (~5s; evals are short, long work is background
+   PROCESSES which hold no CLJS continuations). Resolve only when quiet
+   → shadow applies the whole batch atomically w.r.t. continuations.
+2. `^:dev/after-load` — existing re-instrumentation + release latch.
+3. Drain timeout → DEFER the reload to the next turn boundary (never
+   force-swap); still blocked → escalate to a clean supervised pod
+   restart (pod is disposable, DB is truth, agents resume).
+
+Residual hygiene (review-level, not machinery): durable state as DB
+data not closures; `defonce` atoms hold data not fns. Layered strategy:
+frozen bundles for runs that must not move (bench/T4 — exists),
+quiesced reload for interactive dev, `:crash` dial unchanged.
+
 ## Post-handoff unit (owner-ratified 2026-07-06): result persistence
 
 True restores for `result/<id>` across pod restarts. Design settled, do
@@ -321,7 +358,11 @@ the live pod, dedicated agent id (not root), tmp/ scratch only.
    literal), `docs/prds/agent-ctx/roadmap.md` (we-are-here),
    `coordination.md` (close the P0 in-place-editor ask, ~line 1522, with
    the shas). The `/repl` skill entry for `#code` should have landed with
-   A1 — verify, add if missed.
+   A1 — verify, add if missed. PLUS truth-in-labeling (A6 verifier
+   finding, pre-existing): `walk-dir`'s `::total-found` is the count
+   found BEFORE the walk stopped at the cap, not a true grand total
+   (unknowable without an unbounded second pass) — docstring + hint must
+   say so; do NOT add a counting pass.
 3. **T4 live drive — THE HANDOFF GATE (owner-ordered 2026-07-06: the
    bench agent is waiting on this; garbage in, garbage out).** DeepSeek
    drives (pre-authorized) on scratch NON-CLOJURE repos — Python first,
@@ -335,11 +376,29 @@ the live pod, dedicated agent id (not root), tmp/ scratch only.
    text, not envelopes) and flags garbage; orchestrator reviews.
    Defects → fix agent → re-drive. ONLY a clean drive unlocks step 4.
    Prereq: step 0 toolbelt exposure (owner ack'd 2026-07-06) + context
-   refresh so the verbs render discoverable.
-4. **A/B handoff:** post in coordination.md to the eval lane: frozen dev
-   slice rerun, before/after = existing tools vs +heredoc+anchored-edit;
-   metrics = resolved count + edit-failure incidents from the ledger. The
-   A/B result gates Arc B's build (owner decision 2026-07-05).
+   refresh so the verbs render discoverable. STABILITY (owner discussion
+   2026-07-06): run the T4 drives against a FROZEN bundle (the eval
+   lane's out-bench mechanism — presence-only creates, sha-asserted) so
+   peer hot-reloads cannot swap code under a live drive. The underlying
+   class-2 instability — reload swap under live async continuations
+   (4+ crash datapoints today: 'reading call', 'IDeref null',
+   'jobs_block') — is REGISTRY work for the tooling lane; recommended
+   fix: drain-then-swap (watcher signals, pod finishes in-flight
+   turns/evals, then applies the build atomically). The `:crash` dial
+   itself is working as designed (it caught a half-committed
+   config/ns pair at boot) — do not soften it.
+4. **A/B handoff (owner framing 2026-07-06 — PRELIMINARY tools,
+   feedback requested):** post in coordination.md to the eval lane:
+   frozen dev slice rerun, before/after = existing tools vs
+   +heredoc+anchored-edit+parity tools; metrics = resolved count +
+   edit-failure incidents from the ledger. Frame the tool surface as v1
+   under active refinement and explicitly request structured feedback
+   from the docker-isolated runs: which verb agents reached for
+   (replace! vs the legacy edit-file — retirement decision pending),
+   where they flailed or retried, rendered-context defects WITH
+   captured evidence (the standing attribution contract). Their
+   real-repo runs are the second feedback loop after T4. The A/B result
+   gates Arc B's build (owner decision 2026-07-05).
 
 ## Arc B pre-work — indexer image packaging (may run anytime; code gated)
 
