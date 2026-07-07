@@ -220,6 +220,7 @@
         {::keys [search-backend]} (int/search-config)
         has-key? (case search-backend
                    :gemini-grounding (some? (int/gemini-key))
+                   :serper           (some? (int/serper-key))
                    false)]
     {::enabled?        (int/granted?)
      ::policy          (::policy p)
@@ -500,7 +501,39 @@
                       (-> (assoc ::answer answer)
                           (assoc ::answer-tokens (tokens/estimate answer)))))))))
 
-          ;; A configured-but-unwired backend (e.g. :serper) — legible refusal.
+          :serper
+          (let [key (int/serper-key)]
+            (if (or (nil? key) (str/blank? key))
+              (int/search-err query
+                              (str "no search backend key — SERPER_API_KEY is unset "
+                                   "in the pod's env; the :serper backend cannot run. "
+                                   "Inspect with (seon.agent.web/grants)."))
+              (let [res (await (int/serper-request query n timeout-ms))]
+                (if-not (::ok? res)
+                  res
+                  (let [{::keys [results result-count]} (int/parse-serper (::body res) n)
+                        now  (js/Date.)
+                        ;; HONEST hint: redirect-hint only when rows exist;
+                        ;; serper returns real page urls (not redirect URIs) —
+                        ;; an empty set just means no SERP matches.
+                        hint (if (seq results)
+                               "the ::url values are the real page urls the SERP returned — fetch a row's ::url with (seon.agent.web/fetch)."
+                               "no web results matched this query — rephrase toward a concrete fact-lookup query, or retry.")]
+                    ;; Best-effort projection — a rejected tx must not fail search.
+                    (await (db/transact!
+                             {:seon.db/tx-data
+                              [{::query        query
+                                ::backend      :serper
+                                ::result-count result-count
+                                ::fetched-at   now}]}))
+                    {::ok?          true
+                     ::query        query
+                     ::backend      :serper
+                     ::results      results
+                     ::result-count result-count
+                     ::hint         hint})))))
+
+          ;; A configured-but-unwired backend — legible refusal.
           (int/search-err query
                           (str "search backend " (pr-str backend) " is not wired yet "
                                "(only :gemini-grounding ships) — set "

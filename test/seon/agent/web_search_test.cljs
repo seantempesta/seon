@@ -66,6 +66,7 @@
 
 (defonce ^:private !saved-web (atom nil))
 (defonce ^:private !saved-key (atom nil))
+(defonce ^:private !saved-serper (atom nil))
 
 (defn- set-env! [k v]
   (if (some? v) (aset (.-env js/process) k v) (js-delete (.-env js/process) k)))
@@ -74,6 +75,7 @@
   {:before (fn []
              (reset! !saved-web (aget (.-env js/process) "SEON_WEB"))
              (reset! !saved-key (aget (.-env js/process) "GEMINI_API_KEY"))
+             (reset! !saved-serper (aget (.-env js/process) "SERPER_API_KEY"))
              (set-env! "SEON_WEB" "1")
              (set-env! "GEMINI_API_KEY" "test-key-not-real")
              (reset! int/!search-config-override
@@ -82,6 +84,7 @@
    :after  (fn []
              (set-env! "SEON_WEB" @!saved-web)
              (set-env! "GEMINI_API_KEY" @!saved-key)
+             (set-env! "SERPER_API_KEY" @!saved-serper)
              (reset! int/!search-config-override nil))})
 
 (use-fixtures :each
@@ -92,7 +95,7 @@
              (reset! int/!search-config-override
                      {:seon.agent.web/search-backend :gemini-grounding
                       :seon.agent.web/search-model   "gemini-3.1-flash-lite"}))
-   :after  (fn [] (reset! int/!gemini-impl nil))})
+   :after  (fn [] (reset! int/!gemini-impl nil) (reset! int/!serper-impl nil))})
 
 (defn- fresh-conn []
   (let [cfg {:store              {:backend :memory :id (random-uuid)}
@@ -119,6 +122,26 @@
 ;; A faked gemini backend resolving the fixture body as the ok transport shape.
 (defn- fake-gemini [body]
   (fn [_q _model _key _timeout]
+    (js/Promise.resolve {:seon.agent.web/ok? true :seon.agent.web/body body})))
+
+;; ---------------------------------------------------------------------------
+;; Serper fixture — the raw Google-SERP shape (organic[] with 1-based position).
+;; Row 1 has a blank title + no snippet (to prove those keys stay absent); the
+;; last row has no :position (to prove the index fallback).
+;; ---------------------------------------------------------------------------
+
+(def ^:private serper-body
+  {:searchParameters {:q "current stable Clojure version" :num 10}
+   :organic
+   [{:title "Clojure - Downloads" :link "https://clojure.org/releases/downloads"
+     :snippet "The current stable release is 1.12.5." :position 1}
+    {:title "" :link "https://github.com/clojure/clojure/releases" :position 2}
+    {:title "Clojure Deps" :link "https://example.test/deps"
+     :snippet "unranked row — no :position"}]})
+
+;; A faked serper backend resolving the fixture body as the ok transport shape.
+(defn- fake-serper [body]
+  (fn [_q _n _timeout]
     (js/Promise.resolve {:seon.agent.web/ok? true :seon.agent.web/body body})))
 
 ;; ===========================================================================
@@ -286,8 +309,10 @@
 
 (deftest search-unwired-backend-refuses-legibly
   (async done
+    ;; A backend keyword outside the wired case arms falls through to the
+    ;; legible refusal (config override bypasses the enum, so :bing is legal here).
     (reset! int/!search-config-override
-            {:seon.agent.web/search-backend :serper
+            {:seon.agent.web/search-backend :bing
              :seon.agent.web/search-model   "n/a"})
     (run-test
       (fn [_]
@@ -295,7 +320,94 @@
             (.then (fn [{ok? :seon.agent.web/ok?
                          msg :seon.error/message}]
                      (is (false? ok?))
-                     (is (re-find #"(?i)serper|not wired" msg) "names the unwired backend")))))
+                     (is (re-find #"(?i)bing|not wired" msg) "names the unwired backend")))))
+      done)))
+
+;; ===========================================================================
+;; 2b. Serper — PURE parse + the verb branch through the !serper-impl seam.
+;; ===========================================================================
+
+(deftest parse-serper-derives-rows-rank-honest-count
+  (let [{rows  :seon.agent.web/results
+         total :seon.agent.web/result-count}
+        (int/parse-serper serper-body 10)]
+    (is (= 3 total) "honest pre-cap total = organic rows with a link")
+    (is (= 3 (count rows)))
+    (testing "row 0 — position 1 ⇒ rank 0"
+      (let [r0 (first rows)]
+        (is (= "https://clojure.org/releases/downloads" (:seon.agent.web/url r0)))
+        (is (= "Clojure - Downloads" (:seon.agent.web/title r0)))
+        (is (= 0 (:seon.agent.web/rank r0)) "rank = position - 1 (0-based)")
+        (is (str/includes? (:seon.agent.web/snippet r0) "1.12.5"))))
+    (testing "row 1 — blank title + no snippet ⇒ those keys ABSENT"
+      (let [r1 (second rows)]
+        (is (= 1 (:seon.agent.web/rank r1)) "position 2 ⇒ rank 1")
+        (is (not (contains? r1 :seon.agent.web/title)) "blank title omitted")
+        (is (not (contains? r1 :seon.agent.web/snippet)) "missing snippet omitted")))
+    (testing "row 2 — no :position ⇒ 0-based index fallback"
+      (let [r2 (nth rows 2)]
+        (is (= 2 (:seon.agent.web/rank r2)) "missing position ⇒ organic index")))))
+
+(deftest parse-serper-caps-rows-but-count-is-honest
+  (let [{rows  :seon.agent.web/results
+         total :seon.agent.web/result-count}
+        (int/parse-serper serper-body 1)]
+    (is (= 1 (count rows)) "results capped at max-results")
+    (is (= 3 total) "result-count is the HONEST pre-cap total, never the cap")))
+
+(deftest parse-serper-tolerates-empty-organic
+  (let [{rows  :seon.agent.web/results
+         total :seon.agent.web/result-count}
+        (int/parse-serper {:organic []} 10)]
+    (is (= [] rows))
+    (is (= 0 total))))
+
+(deftest search-serper-branch-assembles-response
+  (async done
+    (set-env! "SERPER_API_KEY" "test-serper-key")
+    (reset! int/!search-config-override
+            {:seon.agent.web/search-backend :serper
+             :seon.agent.web/search-model   "n/a"})
+    (reset! int/!serper-impl (fake-serper serper-body))
+    (run-test
+      (fn [_]
+        (-> (web/search {:seon.agent.web/query "current stable Clojure version"})
+            (.then (fn [{ok?   :seon.agent.web/ok?
+                         q     :seon.agent.web/query
+                         be    :seon.agent.web/backend
+                         rows  :seon.agent.web/results
+                         total :seon.agent.web/result-count
+                         ans   :seon.agent.web/answer
+                         qs    :seon.agent.web/queries
+                         hint  :seon.agent.web/hint}]
+                     (is (true? ok?))
+                     (is (= "current stable Clojure version" q))
+                     (is (= :serper be) "the response names its backend")
+                     (is (= 3 (count rows)))
+                     (is (= 3 total))
+                     (is (= 0 (:seon.agent.web/rank (first rows))))
+                     (is (nil? ans) "serper is a raw SERP — no grounded ::answer")
+                     (is (nil? qs) "serper carries no ::queries arm")
+                     (is (string? hint))
+                     (is (not (re-find #"(?i)redirect" hint))
+                         "serper urls are real pages, not redirect URIs")))))
+      done)))
+
+(deftest search-serper-no-key-is-an-error-value
+  (async done
+    (set-env! "SERPER_API_KEY" nil)
+    (reset! int/!search-config-override
+            {:seon.agent.web/search-backend :serper
+             :seon.agent.web/search-model   "n/a"})
+    (reset! int/!serper-impl (fn [& _] (throw (js/Error. "serper must not run with no key"))))
+    (run-test
+      (fn [_]
+        (-> (web/search {:seon.agent.web/query "anything"})
+            (.then (fn [{ok? :seon.agent.web/ok?
+                         msg :seon.error/message}]
+                     (is (false? ok?))
+                     (is (re-find #"(?i)SERPER_API_KEY|no search backend key" msg)
+                         "names the missing key")))))
       done)))
 
 (deftest search-backend-transport-error-passes-through
@@ -322,4 +434,13 @@
   (testing "no key ⇒ :none (no search can run)"
     (set-env! "GEMINI_API_KEY" nil)
     (is (= :none (:seon.agent.web/search-backend (web/grants))))
-    (set-env! "GEMINI_API_KEY" "test-key-not-real")))
+    (set-env! "GEMINI_API_KEY" "test-key-not-real"))
+  (testing "serper configured + keyed ⇒ :serper"
+    (reset! int/!search-config-override
+            {:seon.agent.web/search-backend :serper
+             :seon.agent.web/search-model   "n/a"})
+    (set-env! "SERPER_API_KEY" "test-serper-key")
+    (is (= :serper (:seon.agent.web/search-backend (web/grants))))
+    (testing "serper configured, NO key ⇒ :none"
+      (set-env! "SERPER_API_KEY" nil)
+      (is (= :none (:seon.agent.web/search-backend (web/grants)))))))

@@ -703,3 +703,98 @@
               (if (nil? body)
                 (search-err query "gemini grounding returned a non-JSON body.")
                 {::web/ok? true ::web/body body}))))))))
+
+(defn serper-key
+  "The `SERPER_API_KEY` env value, or nil when unset/blank. Read LIVE at
+   call time — the key is NEVER stored in a datom, config, or log."
+  []
+  (platform/env-val "SERPER_API_KEY"))
+
+;; ---- Serper response parsing (PURE) ---------------------------------------
+;; `parse-serper` turns a keywordized Serper body into the SAME
+;; backend-agnostic rows as `parse-grounding`, minus the grounding-only arms
+;; (`::answer`/`::queries` stay absent — Serper is a raw SERP). No I/O;
+;; unit-tested against a fixture `organic[]` body.
+
+(defn parse-serper
+  "Parse a keywordized Serper body into the search-response result arms.
+
+   Returns `{::web/results [row…] ::web/result-count n}` where each row is
+   `{::web/url link ::web/rank (dec position) (::web/title) (::web/snippet)}`.
+   `::result-count` is the HONEST pre-cap total (organic rows with a link);
+   `::results` is capped at `max-results`. Rank = Serper's 1-based
+   `position` mapped to 0-based (clamped ≥0); when `position` is missing it
+   falls back to the 0-based organic index. Pure — no I/O."
+  [body max-results]
+  (let [all-rows (->> (:organic body)
+                      (map-indexed
+                        (fn [i o]
+                          (let [link  (:link o)
+                                title (:title o)
+                                snip  (:snippet o)
+                                pos   (:position o)
+                                rank  (if (number? pos) (max 0 (dec pos)) i)]
+                            (when-not (str/blank? link)
+                              (cond-> {::web/url link ::web/rank rank}
+                                (not (str/blank? title)) (assoc ::web/title title)
+                                (not (str/blank? snip))  (assoc ::web/snippet snip))))))
+                      (remove nil?)
+                      vec)]
+    {::web/results      (vec (take max-results all-rows))
+     ::web/result-count (count all-rows)}))
+
+;; ---- Serper transport -----------------------------------------------------
+
+(def serper-base
+  "The Serper Google-SERP search endpoint (one POST per query)."
+  "https://google.serper.dev/search")
+
+;; Test seam — a hermetic test resets this to a fake returning a Promise of
+;; either {::web/ok? true ::web/body <keywordized-clj>} or a search-err
+;; envelope, so the parse + envelope path runs with NO network. nil = the
+;; real REST POST below.
+(defonce !serper-impl (atom nil))
+
+(defn ^:async serper-request
+  "POST `query` to Serper's Google-SERP endpoint; resolve to
+   `{::web/ok? true ::web/body <keywordized-clj>}` or a [[search-err]]
+   envelope (timeout, transport failure, non-2xx, non-JSON body). Never
+   throws. The `api-key` rides the `X-API-KEY` header only — never logged."
+  [query n timeout-ms]
+  (if-let [f @!serper-impl]
+    (await (f query n timeout-ms))
+    (let [ctrl    (js/AbortController.)
+          tid     (js/setTimeout #(.abort ctrl) timeout-ms)
+          api-key (serper-key)
+          payload #js {:q query :num n}
+          result  (try
+                    #js {:resp (await ((fetch-fn) serper-base
+                                       #js {:method  "POST"
+                                            :signal  (.-signal ctrl)
+                                            :headers #js {"X-API-KEY"    api-key
+                                                          "Content-Type" "application/json"}
+                                            :body    (.stringify js/JSON payload)}))}
+                    (catch :default e #js {:error e}))
+          _       (js/clearTimeout tid)]
+      (if-let [e (.-error result)]
+        (if (= "AbortError" (.-name ^js e))
+          (search-err query (str "search timed out after " timeout-ms
+                                 " ms — raise :seon.agent.web/timeout-ms if serper is slow."))
+          (search-err query (str "search transport error: " (or (some-> ^js e .-message) (str e)))))
+        (let [resp   (.-resp result)
+              status (.-status resp)
+              text   (await (.text resp))]
+          (if (>= status 400)
+            ;; Surface the provider's message verbatim (bad key/quota/etc).
+            (let [pmsg (try (get-in (js->clj (.parse js/JSON text) :keywordize-keys true)
+                                    [:message])
+                            (catch :default _ nil))]
+              (search-err query
+                          (str "serper HTTP " status
+                               (when pmsg (str " — " pmsg)))
+                          {::web/status status}))
+            (let [body (try (js->clj (.parse js/JSON text) :keywordize-keys true)
+                            (catch :default _ nil))]
+              (if (nil? body)
+                (search-err query "serper returned a non-JSON body.")
+                {::web/ok? true ::web/body body}))))))))
