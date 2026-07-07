@@ -26,10 +26,11 @@
    descendant (transitive tree closure, cycle-safe), leaf (no children),
    unfinished (:open/:active/:blocked — anything not :done), open-work
    (unfinished leaf in the subtree), blocked (an explicit :blocked status OR
-   a `needs` target with open work), ready (open unblocked leaf — work to do
-   now; an :active step is in hand, not re-listed as ready). Negations
-   (`leaf`, `not blocked`) only FILTER bound tuples, so bind the entity
-   positively BEFORE invoking these."
+   a `needs` target with open work), ready (work to do now — an open unblocked
+   leaf, OR an open unblocked non-leaf whose subtree is fully drained: its one
+   remaining action is verify-and-close). An :active step is in hand, not
+   re-listed as ready. Negations (`leaf`, `not blocked`, `not open-work`) only
+   FILTER bound tuples, so bind the entity positively BEFORE invoking these."
   '[[(descendant ?a ?n) [?n :my.plan/parent ?a]]
     [(descendant ?a ?n) [?m :my.plan/parent ?a] (descendant ?m ?n)]
     [(leaf ?t) (not-join [?t] [?c :my.plan/parent ?t])]
@@ -40,7 +41,9 @@
     [(open-work ?t) (descendant ?t ?l) (unfinished ?l) (leaf ?l)]
     [(blocked ?t) [?t :my.plan/status :blocked]]
     [(blocked ?t) [?t :my.plan/needs ?d] (open-work ?d)]
-    [(ready ?t) [?t :my.plan/status :open] (leaf ?t) (not (blocked ?t))]])
+    [(ready ?t) [?t :my.plan/status :open] (leaf ?t) (not (blocked ?t))]
+    [(ready ?t) [?t :my.plan/status :open] (not (leaf ?t))
+     (not (open-work ?t)) (not (blocked ?t))]])
 
 (defn fail [msg] {:my.plan/ok? false :my.plan/error msg})
 
@@ -81,9 +84,9 @@
 ;; --- roll-up, and the position anchor recompute from the facts every read.
 
 (defn ready-leaves
-  "Ready leaves (open, childless, unblocked) owned by `agent-eid`, oldest
-   first, as `[{:id :title :created-at} …]`. Sorted in CLJS —
-   `:seon.db/order-by` is not a `seon.db/query` request key."
+  "Ready steps (open, unblocked — a leaf, or a drained non-leaf to verify and
+   close) owned by `agent-eid`, oldest first, as `[{:id :title :created-at} …]`.
+   Sorted in CLJS — `:seon.db/order-by` is not a `seon.db/query` request key."
   [db agent-eid]
   (->> (db/query {:seon.db/db db
                   :seon.db/query
@@ -195,7 +198,8 @@
                            :seon.db/args [rules id]}))))
 
 (defn ready?
-  "True iff `id` is an open, unblocked leaf — real work to do now."
+  "True iff `id` is open, unblocked, and ready — an actionable leaf or a
+   drained non-leaf whose only remaining action is verify-and-close."
   [db id]
   (boolean (seq (db/query {:seon.db/db db
                            :seon.db/query

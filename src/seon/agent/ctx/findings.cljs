@@ -72,22 +72,41 @@
            (not (str/starts-with? ns "db"))
            (not (str/starts-with? ns "datahike"))))))
 
+(defn- lifecycle-status?
+  "True when datom `[a v]` is a lifecycle STATUS — an attribute whose local
+   name is `status` carrying a keyword state (`:my.plan/status :open`, …).
+   The entity is WORK-TRACKING with a lifecycle, not a settled fact, so it is
+   swept OUT of findings (plan/todo already have their own status-aware
+   sections). A single COMPUTED convention over the attr's local name — NOT a
+   namespace allowlist: any future `my.<domain>/status` is covered with no
+   edit, while genuine knowledge enums (`:my.kb/confidence`) are untouched
+   because their local name is not `status`."
+  [a v]
+  (and (= "status" (name a)) (keyword? v)))
+
 (defn- finding-eids
   "The most-recent user-domain entity ids in `db`, newest first (sort by
    `:db/id` desc — the same monotonic boot-scope exclusion `inventory`
-   uses). An entity is user-domain when it carries any [[user-attr?]]
-   attribute and is NOT a boot-scope row (`boot-ids`,
-   [[seon.db/bootstrap-row-ids]]). Returns `[capped-eids total-count]` so
-   the caller knows whether to render the truncation footer."
+   uses). An entity is a FINDING (settled knowledge) when it carries a
+   [[user-attr?]] attribute, is NOT a boot-scope row (`boot-ids`,
+   [[seon.db/bootstrap-row-ids]]), and carries NO lifecycle status
+   ([[lifecycle-status?]]) — work-tracking rows (an `:open` plan step) never
+   read as accumulated knowledge. Returns `[capped-eids total-count]` so the
+   caller knows whether to render the truncation footer."
   [db boot-ids]
-  (let [pairs (db/query {:seon.db/db db
-                         :seon.db/query '[:find ?e ?a :where [?e ?a ?v]]})
+  (let [triples  (db/query {:seon.db/db db
+                            :seon.db/query '[:find ?e ?a ?v :where [?e ?a ?v]]})
+        work-eids (into #{}
+                        (keep (fn [[e a v]]
+                                (when (lifecycle-status? a v) e)))
+                        triples)
         eids  (into #{}
-                    (keep (fn [[e a]]
+                    (keep (fn [[e a _v]]
                             (when (and (not (contains? boot-ids e))
+                                       (not (contains? work-eids e))
                                        (user-attr? a))
                               e)))
-                    pairs)
+                    triples)
         sorted (sort > eids)]
     [(take max-rows sorted) (count eids)]))
 

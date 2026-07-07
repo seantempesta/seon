@@ -292,6 +292,49 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
+(deftest open-root-with-all-done-children-is-ready-to-close
+  ;; Frontier regression: an :open ROOT whose children are all :done is
+  ;; neither a leaf (so the old (leaf ?t) `ready` rule skipped it) nor :done
+  ;; (so the recall band skipped it) — it went INVISIBLE, the one node whose
+  ;; remaining action is verify-and-close. The extended `ready` rule surfaces
+  ;; a drained open non-leaf; genuinely-incomplete subtrees still frontier
+  ;; their open leaves, not the parent.
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (plan/plan! {:my.plan/title "verify the sum end to end"
+                             :my.plan/children
+                             [{:my.plan/title "compute the sum" :my.plan/ref "a"}
+                              {:my.plan/title "report the sum" :my.plan/ref "b"}]
+                             :seon.agent/id a-id})
+                (.then
+                  (fn [{ok? :my.plan/ok? root :my.plan/root ids :my.plan/ids}]
+                    (is (true? ok?))
+                    (is (not (plan-int/ready? @conn root))
+                        "an incomplete parent is not yet ready-to-close")
+                    (is (plan-int/ready? @conn (get ids "a"))
+                        "an open leaf child is ready — normal frontier intact")
+                    (-> (plan/done! {:my.plan/id (get ids "a")})
+                        (.then (fn [_] (plan/done! {:my.plan/id (get ids "b")})))
+                        (.then
+                          (fn [_]
+                            (is (= :open (:my.plan/status
+                                           (d/pull @conn '[*] [:my.plan/id root])))
+                                "root stayed :open — nobody closed it")
+                            (is (plan-int/ready? @conn root)
+                                "drained open non-leaf is READY (verify and close)")
+                            (is (some #(= root (:my.plan/id %))
+                                      (plan-int/ready-leaves
+                                        @conn (plan-int/agent-eid @conn a-ref)))
+                                "root surfaces in the ready set")
+                            (let [block (plan-int/plan-body @conn a-ref)]
+                              (is (str/includes? block "verify the sum end to end")
+                                  "the open root renders in the plan block")
+                              (is (str/includes? block "Open frontier")
+                                  "it lands in the actionable frontier band"))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 (deftest section-tolerates-absent-db
   ;; The composer-input contract: `:seon.db/db` is the render snapshot
   ;; when present, and ABSENT db defaults to the current conn — the
