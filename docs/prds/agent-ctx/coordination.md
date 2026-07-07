@@ -22,6 +22,41 @@ hands tool-defects here with rendered-context evidence.
 
 ## Log
 
+### 2026-07-07 — Tooling: T4 fix-verification re-drive — 2 fixes PASS, gate gap found+fixed
+
+- **Focused re-drive** (4 tasks × 3, frozen bundle `50945b12` from HEAD,
+  DeepSeek) verifying the three fixes committed since the 2026-07-06 T4 run.
+  Evidence: `evals/runs/2026-07-07-t4-redrive/` (README + defects; raw
+  transcripts now gitignored — on-disk artifacts).
+  - **D1 pod crash (`e0c730b3`) — PASS.** 0 `SEON-CORE-FAULT` / 12 drives;
+    also verified live at the render layer (poison lazy-seq → opaque marker
+    on both eval-result AND transcript-render paths — the ONE renderer covers
+    both, resolving the "eval vs turn-open" question).
+  - **Serper / O5 (`dfd6ecec`) — PASS.** `web/search` returns real `:serper`
+    SERP rows (no more `::results []` ~2/3); search→fetch→blob chain works.
+    The O5 web-empty defect is CLOSED.
+  - **complete-gate (`3acf5225`) — PARTIAL → FIXED (`77ed1be5`).** Found
+    **D-GATE-BG**: the gate only saw FOREGROUND `shell/run` testruns;
+    background pytest (`run-bg!`, what the T4 contracts instruct) persisted no
+    testrun → gate blind → bg-testing agents false-completed over a RED oracle
+    (poker-d1/d3, react-d3, verbatim in defects.md). Fix = persist-at-exit,
+    symmetric with the foreground path (capture agent-id at `start-job!`,
+    `testrun/record!` in the bg `close` handler; one mechanism, single-fire).
+    Live-proven on the default pod (real bg pytest → red testrun persisted →
+    `(complete)` refused verbatim); suite 1139/5134/0/0.
+- **A/B handoff (bench lane): NOT YET.** The gate fix is unit+live proven but
+  NOT yet re-confirmed under the actual T4 FROZEN drive (only on 7890). Per
+  the plan's §7 gate discipline, "T4 clean — A/B unblocked" posts only after a
+  clean frozen re-drive. Interim status: tools solid (0 wrong-place mutations
+  across both runs), D1+O5 closed, gate gap closed pending frozen re-confirm.
+- **Deferred owner-call (design):** an alternative to the gate's "latest-run
+  RED" test — gate on "no GREEN run seen since the last edit" — was noted but
+  scoped OUT (larger re-architecture); revisit if false-completions persist.
+- **Operational note (owner):** two concurrent `/agents/run` on one pod
+  spin-wedged it at 100% CPU (no fault). Driver-self-inflicted (a killed
+  `curl` left a zombie server-side run); recovered clean, all scored drives
+  ran serial. A single pod wedging on concurrent runs may be worth hardening.
+
 ### 2026-07-04 — Tooling → Eval: free "zero core errors" bench axis available
 
 - Error recording phase 1 shipped (`0e9c9b92`+`a69da9f0`): every `:core`-fault
