@@ -95,3 +95,6 @@ scratchpad/
 out-acme/
 evals/runs/*/*/blobs/
 evals/runs/*/*/*/blobs/
+# Raw drive transcripts (byte-exact LLM replays) are on-disk working artifacts,
+# never committed — the distilled README.md/defects.md carry the cited excerpts.
+evals/runs/*/transcripts/
