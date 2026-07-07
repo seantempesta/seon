@@ -266,7 +266,7 @@ shared **author**).
 ;; 2. derived datahike schema (what got installed — no hand-writing):
 (seon.db/malli->datahike-schema
   [:my.kb.source/id :my.kb.source/topics :my.kb.source/author :my.kb.source/findings])
-;;=> [{:db/ident :my.kb.source/id     :db/valueType :db.type/string :db/cardinality :db.cardinality/one
+; ⟹ [{:db/ident :my.kb.source/id     :db/valueType :db.type/string :db/cardinality :db.cardinality/one
 ;;     :db/unique :db.unique/identity}
 ;;    {:db/ident :my.kb.source/topics  :db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
 ;;    {:db/ident :my.kb.source/author  :db/valueType :db.type/ref     :db/cardinality :db.cardinality/one}

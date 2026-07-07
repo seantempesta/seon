@@ -74,7 +74,7 @@ REPL-proven against the live store:
 ```clojure
 ;; "what holds data?" — attr namespaces + counts (no entity kind anywhere)
 (seon.db/store-inventory)
-;; => {:seon.db/attr-groups   [{:seon.db/attr-ns :my.kb
+; ⟹ {:seon.db/attr-groups   [{:seon.db/attr-ns :my.kb
 ;;                              :seon.db/attrs {:my.kb/question 3 :my.kb/answer 3}} …]
 ;;     :seon.db/attr-ns-count 9 :seon.db/attr-count 53 :seon.db/datom-count 124}
 
@@ -89,7 +89,7 @@ REPL-proven against the live store:
              (let [n (count (seon.db/query
                               {:seon.db/query [:find '?e :where ['?e a]]}))]
                (when (pos? n) [a n])))))
-;; => ([:seon.fn/sym 614] [:seon.eval/id 317] [:my.kb.runtime/slug 7] …)
+; ⟹ ([:seon.fn/sym 614] [:seon.eval/id 317] [:my.kb.runtime/slug 7] …)
 ```
 
 The grouping label is always an **attribute** (a namespace or an id-attr), never a
@@ -117,13 +117,13 @@ Inside namespace `my.kb.source` you write `::id` and the reader expands it to
   (if ok? :saved error))
 
 ;; 3. QUERY — SYNC, db auto-injected (omit it). Pick the :find shape:
-(db/query '[:find ?t :where [?e ::title ?t]])           ;=> #{["Alpha"]}     relation
-(db/query '[:find [?t ...] :where [?e ::title ?t]])     ;=> ["Alpha"]        collection
-(db/query '[:find (count ?e) . :where [?e ::id]])       ;=> 1                scalar
+(db/query '[:find ?t :where [?e ::title ?t]])           ; ⟹ #{["Alpha"]}     relation
+(db/query '[:find [?t ...] :where [?e ::title ?t]])     ; ⟹ ["Alpha"]        collection
+(db/query '[:find (count ?e) . :where [?e ::id]])       ; ⟹ 1                scalar
 
 ;; 4. PULL / ENTITY — read one entity by lookup-ref [identity-attr value]:
-(db/pull '[*] [::id "s1"])                ;=> {:db/id N :my.kb.source/id "s1" …}
-(db/entity [::id "s1"])                   ;=> touched plain map
+(db/pull '[*] [::id "s1"])                ; ⟹ {:db/id N :my.kb.source/id "s1" …}
+(db/entity [::id "s1"])                   ; ⟹ touched plain map
 ```
 
 `my.kb` is the runnable, test-exercised manual — every recipe compiles.
@@ -234,10 +234,10 @@ data, so it crosses the write wire (an inline `:db.fn/call` closure would NOT
 
 ```clojure
 ;; relation / scalar / collection / single-tuple — chosen by :find shape:
-(db/query '[:find ?n ?r :where [?e ::name ?n] [?e ::rank ?r]])   ;=> #{["A" 1] …}
-(db/query '[:find ?n . :where [?e ::name ?n]])                   ;=> "A"  (one scalar)
-(db/query '[:find [?n ...] :where [?e ::name ?n]])               ;=> ["A" "B"]
-(db/query '[:find [?n ?r] :where [?e ::name ?n] [?e ::rank ?r]]) ;=> ["A" 1]
+(db/query '[:find ?n ?r :where [?e ::name ?n] [?e ::rank ?r]])   ; ⟹ #{["A" 1] …}
+(db/query '[:find ?n . :where [?e ::name ?n]])                   ; ⟹ "A"  (one scalar)
+(db/query '[:find [?n ...] :where [?e ::name ?n]])               ; ⟹ ["A" "B"]
+(db/query '[:find [?n ?r] :where [?e ::name ?n] [?e ::rank ?r]]) ; ⟹ ["A" 1]
 
 ;; :in parameter — pass inputs AFTER the query:
 (db/query '[:find [?n ...] :in $ ?min
@@ -278,7 +278,7 @@ attr keyword is almost certainly misspelled (the guard below catches it).
 ;; what you can query, and which shapes to REUSE rather than fork). Default
 ;; scope = data added after the core seed.
 (db/store-inventory)
-;;=> {:seon.db/attr-groups [{:seon.db/attr-ns :my.kb :seon.db/attrs {:my.kb/question 3 …}} …]
+; ⟹ {:seon.db/attr-groups [{:seon.db/attr-ns :my.kb :seon.db/attrs {:my.kb/question 3 …}} …]
 ;;    :seon.db/attr-ns-count … :seon.db/attr-count … :seon.db/datom-count … :seon.db/topology …}
 
 ;; installed-schema: EVERY attr installed on the db, including
@@ -286,7 +286,7 @@ attr keyword is almost certainly misspelled (the guard below catches it).
 ;; map is also keyed by numeric attr-eid (a datahike internal):
 (->> (keys (db/installed-schema @db/*conn*)) (filter keyword?)
      (filter #(= "my.plan" (namespace %))) sort)
-;;=> (:my.plan/agent :my.plan/completed-at :my.plan/created-at :my.plan/description
+; ⟹ (:my.plan/agent :my.plan/completed-at :my.plan/created-at :my.plan/description
 ;;    :my.plan/expect :my.plan/from :my.plan/goal :my.plan/id :my.plan/message
 ;;    :my.plan/needs :my.plan/pace :my.plan/parent :my.plan/status :my.plan/title)
 ```

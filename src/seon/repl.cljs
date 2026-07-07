@@ -20,7 +20,7 @@
 
    ```clojure
    (seon.repl/dev-init!)
-   ;; => Promise<{:compile-state #<atom> :conn #<conn>}>
+   ; ⟹ Promise<{:compile-state #<atom> :conn #<conn>}>
 
    (rewrite-clj.parser/parse-string-all \";; hi\\n(+ 1 2)\\n\")
 

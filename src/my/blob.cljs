@@ -17,9 +17,9 @@
 
      (await (my.blob/put! {:my.blob/content big-report
                            :my.blob/media   :markdown}))
-     ;=> {:my.blob/ok? true :my.blob/hash \"9f86d0…\" :my.blob/tokens 812}
+     ; ⟹ «map: :my.blob/ok? true, :my.blob/hash \"9f86d0…\", :my.blob/tokens 812»
      (await (my.blob/concat! {:my.blob/hashes [h1 h2 h3]}))
-     ;=> chunked put!s → ONE canonical hash with honest whole-doc totals
+     ; ⟹ «chunked put!s → ONE canonical hash with honest whole-doc totals»
      (my.blob/stat {:my.blob/hash h})   ; DB projection — no disk touched
      (my.blob/text {:my.blob/hash h :my.blob/from-line 41
                     :my.blob/max-lines 40})  ; paged page, honest totals

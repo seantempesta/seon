@@ -10,7 +10,7 @@ query. Reads are synchronous.
 ```clojure
 (db/query '[:find (count ?e) (avg ?score) (max ?score)
             :where [?e ::score ?score]])
-;; => [[3 30.0 42.0]]
+; ⟹ [[3 30.0 42.0]]
 ```
 
 Built-ins: `count`, `count-distinct`, `sum`, `avg`, `min`, `max`, `median`,
@@ -102,7 +102,7 @@ must declare which vars unify with the outer query.
 ```clojure
 ;; pull refs inline; a sub-pattern expands the ref'd entity:
 (db/query '[:find (pull ?e [::name {::parent [::name]}]) :where [?e ::name _]])
-;; => [[{::name "child" ::parent {::name "parent"}}]]
+; ⟹ [[{::name "child" ::parent {::name "parent"}}]]
 
 ;; wildcard everything for matched entities:
 (db/query '[:find (pull ?e [*]) :where [?e ::id _]])

@@ -766,8 +766,7 @@
         "those roots.")
    :seon.warn/example
    (str "(seon.agent.fs/grants)\n"
-        ";; => {:seon.agent.fs/allowed-roots [\"/Users/me/work\"]\n"
-        ";;     :seon.agent.fs/read-only?    false}")})
+        "; ⟹ «map: :seon.agent.fs/allowed-roots [\"/Users/me/work\"], :seon.agent.fs/read-only? false»")})
 
 (defn check-hop-exhausted
   "Messages dropped at the hop cap since the last user message.

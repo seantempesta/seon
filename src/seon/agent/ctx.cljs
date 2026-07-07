@@ -513,7 +513,7 @@
   (config/eval-render-cap))
 
 (def result-body-render-cap
-  "Render cap for the CITABLE RESULT BODY — the `;;=> <value>` line every
+  "Render cap for the CITABLE RESULT BODY — the `; ⟹ <value>` line every
    successful eval renders (`cap-result-body`). The result body alone gets
    this LARGER cap (vs [[eval-render-cap]] for echoed source + stdout)
    because it is the one component that (a) carries a `result/<id>`
@@ -613,10 +613,25 @@
               "paged take/drop. To get less next time: a :find aggregate, "
               "a tighter :where, or pull fewer attrs."))))))
 
+(def result-marker
+  "The reserved RUNTIME result glyph `⟹` — the SINGLE SOURCE OF TRUTH.
+
+   The runtime writes it in front of a real eval result on the line AFTER
+   a form is submitted (`; ⟹ <value> ; result/<id>`). It is RUNTIME OUTPUT
+   ONLY: an agent never authors it, and [[neutralize-result-claims]]
+   replaces a model-typed `⟹` with [[unverified-narration-marker]]. The
+   emit site ([[format-eval-row]] + `seon.agent.ctx.transcript`), the
+   neutralizer ([[reserved-glyph-re]]), and [[system-text]]'s teaching all
+   reference THIS def — never a bare `\"⟹\"` literal, so the marker is one
+   swappable edit and can never drift between what the runtime emits, what
+   the sanitizer catches, and what the context teaches."
+  "⟹")
+
 (def unverified-narration-marker
   "What a model-authored result-claim comment is rewritten to in the
    transcript. Deliberately does NOT match [[result-claim-re]] itself
-   (no `=>`/`⇒` after the semicolons), so the rewrite is idempotent."
+   (no `=>`/`⇒`/[[result-marker]] after the semicolons), so the rewrite is
+   idempotent."
   ";; [unverified narration — not a real result]")
 
 (def ^:private result-claim-re
@@ -646,6 +661,18 @@
    bounds each match to a single line so the anchor is what selects the
    line, not the trailer."
   #"(?m)^[ \t]*(?:=>|⇒)[^\n]*")
+
+(def ^:private reserved-glyph-re
+  "The RESERVED runtime glyph [[result-marker]] (`⟹`) appearing in
+   model-authored text — ALWAYS a fabrication, because the runtime is the
+   only writer of a real `; ⟹ <value>` result line (the composer appends it
+   AFTER [[neutralize-result-claims]] runs, so a genuine result never passes
+   through here). Unlike `=>`, `⟹` is RESERVED, so this needs none of the
+   fragile `;`-counting or column-0 `:=>`-collision anchoring the two `=>`
+   regexes carry — any `⟹` at all, with its optional leading `;` comment
+   markers, through end of line, is neutralized. Built from [[result-marker]]
+   so the glyph is defined in exactly one place."
+  (re-pattern (str "(?:;+[ \\t]*)?" result-marker "[^\\n]*")))
 
 (defn neutralize-result-claims
   "Rewrite every model-authored result-claim in `s` to a marker.
@@ -678,12 +705,13 @@
   {:malli/schema [:=> [:cat :any] :string]}
   [s]
   (-> (str s)
+      (str/replace reserved-glyph-re unverified-narration-marker)
       (str/replace bare-result-claim-re unverified-narration-marker)
       (str/replace result-claim-re unverified-narration-marker)))
 
 (defn- error-lines
   "Render an error/guidance body `s` as the REPL FAILURE shape: the FIRST
-   non-blank line becomes the `;=> ✗ <headline>` output line (a COMMENTED
+   non-blank line becomes the `; ⟹ ✗ <headline>` output line (a COMMENTED
    result — re-evaluating the transcript runs only the forms, never an
    echoed value), every CONTINUATION line a plain `;` comment (via
    [[quote-lines]], so a read-error's source slice + `^` caret stay
@@ -702,7 +730,7 @@
                      (str/replace #"^[⚠✗][ \t]?" ""))
             rest-body (quote-lines (str/join "\n" (rest lines))
                                    {:seon.agent.ctx/strip-markers? true})]
-        (cond-> (str ";=> ✗ " head)
+        (cond-> (str "; " result-marker " ✗ " head)
           (seq (rest lines)) (str "\n" rest-body))))))
 
 (defn format-eval-row
@@ -711,8 +739,10 @@
    The form's comment-preamble as
    `;` lines (via [[quote-lines]]), the form verbatim (or the
    parinfer-repaired source), captured print output, then the value as a
-   `;=> <value>` COMMENTED output line trailing ` ; result/<id>` (or the
-   error as a `;=> ✗ <guidance>` line). NO history prompt prefix — the live
+   `; ⟹ <value>` COMMENTED output line trailing ` ; result/<id>` (or the
+   error as a `; ⟹ ✗ <guidance>` line). The `⟹` marker is the reserved
+   [[result-marker]] (see its docstring — the runtime is its only writer).
+   NO history prompt prefix — the live
    `<your-ns>=>` cursor lives once at the very END of the context; each
    row reads as plain
    comments + form + commented REPL output, the exact shape the system
@@ -720,9 +750,9 @@
 
      ; add 1 and 2
      (+ 1 2)
-     ;=> 3 ; result/EVLabc-123
+     ; ⟹ 3 ; result/EVLabc-123
 
-   The result line is a COMMENT (`;=>`) so re-evaluating the whole
+   The result line is a COMMENT (`; ⟹`) so re-evaluating the whole
    transcript runs ONLY the forms — the values are history the runtime
    wrote, not inputs (north star: the context IS eval'able Clojure). The
    trailing ` ; result/<id>` is the LIVE VAR HANDLE: the agent references
@@ -732,7 +762,7 @@
    value appends `(N of M)` to the handle so the agent knows the display
    is a partial view.
 
-   FAILURES render `;=> ✗ <crystal-clear guidance>` (never a stack trace,
+   FAILURES render `; ⟹ ✗ <crystal-clear guidance>` (never a stack trace,
    never a `; result/<id>` — there is no value to reuse): the
    pre-rendered legible `:seon.eval/error` string (read/compile/runtime —
    crystal-clear at the source) or a Malli instrumentation envelope via
@@ -854,11 +884,11 @@
                                        " of " (tokens/chars->tokens full)
                                        " tokens)"))))
                  lines   (str/split-lines v)]
-             ;; Prefix ONLY the first line with `;=>` + handle; continuation
+             ;; Prefix ONLY the first line with `; ⟹` + handle; continuation
              ;; lines (a clip's own `;` guide) stay as the body wrote them.
-             ;; `;=>` is a COMMENT — the value is runtime history, never a
+             ;; `; ⟹` is a COMMENT — the value is runtime history, never a
              ;; form to re-run.
-             (str ";=> " (first lines) handle
+             (str "; " result-marker " " (first lines) handle
                   (when (next lines)
                     (str "\n" (str/join "\n" (rest lines))))))
 
@@ -873,7 +903,7 @@
            ;; line, plain-clip (NOT the "narrow your query" result guide).
            (cap-result (error-lines err) limit small-full?)
 
-           :else ";=> ✗ <no result>")
+           :else (str "; " result-marker " ✗ <no result>"))
          ;; Reactive 'won't persist' note (#7) — DERIVED from source, no
          ;; stored attr; recomputed each render so it follows the form.
          note   (when (and ok? (not comment-only?))
@@ -1099,13 +1129,13 @@
     ";\n"
     "; THE TRANSCRIPT IS ONE EVAL'ABLE REPL SESSION. The whole bottom of\n"
     "; this context is your live REPL history: ; comments, the forms you\n"
-    "; wrote, and each form's value on the next line as a ;=> ... comment.\n"
+    "; wrote, and each form's value on the next line as a `; " result-marker "` comment.\n"
     "; Re-evaluating it would run only the forms (the comments pass through),\n"
     "; reproducing your state — it is a replayable program. You write two\n"
     "; things: Clojure (forms) and ; comments. The runtime writes the rest\n"
     "; around your forms: each section's ;;; ┌─ … ─ / ;;; └─ end … ─\n"
     "; fold-brackets, the ;;; ◀ from / ;;; ▶ to message lines, each form's\n"
-    "; ;=> value result, and the <your-ns>=> cursor at the very end. To\n"
+    "; " result-marker " value result, and the <your-ns>=> cursor at the very end. To\n"
     "; reuse a value, name its result/<id> var (below) — that is how\n"
     "; results flow forward.\n"
     ";\n"
@@ -1117,7 +1147,7 @@
     "; (def x {...}) or (identity {...}).\n"
     ";\n"
     "; After your LAST form, STOP. The runtime runs each form and shows you\n"
-    "; the real ;=> value next turn — read it then. If a reply DEPENDS on\n"
+    "; the real " result-marker " value next turn — read it then. If a reply DEPENDS on\n"
     "; a value you have not computed yet, query this turn and reply from the\n"
     "; REAL result on a later turn; the runtime writes the values, you write\n"
     "; the forms.\n"
@@ -1153,13 +1183,21 @@
     "; [from to] or a longer :seon.agent.fs/find to disambiguate; never guess.\n"
     ";\n"
     "; REPORT THE VALUE YOUR LAST EVAL RETURNED. A number you state to your\n"
-    "; human — a count, a total, an id — must be the ;=> value the runtime\n"
+    "; human — a count, a total, an id — must be the " result-marker " value the runtime\n"
     "; just wrote, never one you remember or read off source. To confirm a\n"
     "; figure, eval the form and quote its real result; do not retype a\n"
     "; value you have not just seen returned.\n"
     ";\n"
+    "; " result-marker " marks a REAL result — only the runtime writes it,\n"
+    "; on the turn AFTER you submit a form. NEVER type " result-marker " yourself:\n"
+    "; a `; " result-marker " ...` line you write is not a result and does nothing —\n"
+    "; the pod replaces it with [unverified narration]. To see what a form\n"
+    "; returns, submit it and read the runtime's `; " result-marker "` line next\n"
+    "; turn. Never (complete ...) claiming a result you have not seen the\n"
+    "; runtime print.\n"
+    ";\n"
     "; RESULT VARS. Every eval's value is a live var result/<id>, where the\n"
-    "; id is the short handle the runtime prints on that form's ;=> result\n"
+    "; id is the short handle the runtime prints on that form's " result-marker " result\n"
     "; line in the transcript history. Reference result/<id> directly to\n"
     "; reuse a value — it is faster and surer than re-running a form you\n"
     "; already computed. A clipped display is NOT a clipped value: dig into a\n"

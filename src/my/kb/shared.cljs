@@ -68,9 +68,9 @@
    the ns doc for the one-transact append shape); re-run this whenever
    you want the current set. Returns [] when none exist yet.
 
-   ;; read the current set (db injected automatically):
+   ; read the current set (db injected automatically):
    (my.kb.shared/instructions)
-   ;; => [\"Always store provenance (:my.kb/source-path) with findings.\"]"
+   ; ⟹ «vector: [\"Always store provenance (:my.kb/source-path) with findings.\"]»"
   {:malli/schema [:function
                   [:=> [:cat] [:vector ::text]]
                   [:=> [:catn [::db :seon.db/db]] [:vector ::text]]]}

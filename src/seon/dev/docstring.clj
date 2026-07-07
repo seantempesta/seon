@@ -19,6 +19,13 @@
      (b) <= 78 chars (72 ideal — the fill-column already in use),
      (c) ends in terminal punctuation (`.`/`?`/`!`).
 
+   PLUS a body rule (any docstring line): a worked-example result echo must
+   use the reserved runtime marker `; ⟹` (`seon.agent.ctx/result-marker`),
+   NOT a stale `;=>`/`;; =>`/bare `=>` — that double-`;;=>` shape is the exact
+   fabrication the pod's `neutralize-result-claims` strips, so teaching it in
+   the rendered corpus primes the very lie the runtime rejects. Computed via
+   [[wrong-echo-re]] (a structural regex, never a file list).
+
    WARN-ONLY, by design NEVER blocks: ~560 existing docstrings are
    non-compliant; a blocking lint would wedge the shared multi-agent tree.
    It REPORTS and lets the edit through. It does NOT auto-fix — the cleanup
@@ -52,6 +59,21 @@
   "A complete sentence ends in one of these."
   #{\. \? \!})
 
+(def ^:private wrong-echo-re
+  "A docstring result-echo written on a STALE marker: a line whose first
+   content is an arrow result-claim — `;=>`, `; =>`, `;;=>`, `;; =>`
+   (or `⇒`), or a bare column-0 `=>` — followed by a value. The reserved
+   RUNTIME result marker is `; ⟹` (`⟹`, U+27F9, `seon.agent.ctx/result-marker`),
+   which the runtime alone writes; a worked example must echo results in that
+   shape so the corpus never teaches the double-`;;=>` fabrication shape the
+   pod's own `neutralize-result-claims` strips as unverified narration.
+
+   `⟹` contains no `=>`/`⇒`, so a CORRECT `; ⟹` echo never matches. Anchored
+   to the echo's own indented line start (`^`), so prose that merely MENTIONS
+   the shape mid-sentence (`the `;; =>` shape`) or a `:malli/schema [:=> …]`
+   vector is not flagged."
+  #"^[ \t]*;*[ \t]*(?:=>|⇒)[ \t]")
+
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
 ;;; ---------------------------------------------------------------------------
@@ -73,7 +95,8 @@
                    :missing-docstring
                    :blank-first-line
                    :first-line-too-long
-                   :no-terminal-punctuation])
+                   :no-terminal-punctuation
+                   :result-echo-wrong-marker])
 
 (schema/register! ::line
                   [:int {:min 1 :description "1-based line of the defn form"}])
@@ -260,6 +283,32 @@
 
           :else nil)))))
 
+(defn- check-echoes
+  "Findings for a public defn's docstring BODY lines that echo a result on a
+   STALE marker (`;=>`/`;; =>`/bare `=>`) instead of the reserved `; ⟹`.
+   One finding per offending line; empty when the docstring is clean or nil."
+  [{:keys [fn-name doc line]}]
+  (when doc
+    (into []
+          (comp (filter #(re-find wrong-echo-re %))
+                (map (fn [ln]
+                       {::fn-name fn-name
+                        ::rule :result-echo-wrong-marker
+                        ::line line
+                        ::first-line (str/trim ln)
+                        ::message (str fn-name ": docstring result echo uses a"
+                                       " stale marker — echo results as"
+                                       " `; ⟹ value` (the reserved runtime"
+                                       " result marker), never `=>`/`;;=>`")})))
+          (str/split-lines doc))))
+
+(defn- check-fn
+  "All findings for one public defn: the line-1 finding (if any) plus every
+   stale-marker result-echo in the body."
+  [defn-map]
+  (concat (some-> (check-one defn-map) vector)
+          (check-echoes defn-map)))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Public API
 ;;; ---------------------------------------------------------------------------
@@ -288,7 +337,7 @@
        ::findings []}
       (let [findings (into []
                            (comp (keep public-defn)
-                                 (keep check-one))
+                                 (mapcat check-fn))
                            top-nodes)]
         {::clean? (empty? findings)
          ::skipped? false
@@ -325,7 +374,7 @@
                      (str "  L" (::line v) " " (::message v)))
                    findings)
         full (str "Docstring lint (WARN, non-blocking): "
-                  (count findings) " public-fn line-1 issue(s)\n"
+                  (count findings) " public-fn docstring issue(s)\n"
                   (str/join "\n" lines))]
     {::formatted (let [suffix "\n... (truncated)"]
                    (if (> (count full) max-len)
@@ -360,7 +409,7 @@
              acc
              (let [defns (into [] (keep public-defn) top-nodes)
                    findings (into []
-                                  (comp (keep check-one)
+                                  (comp (mapcat check-fn)
                                         (map #(assoc % ::file-path path)))
                                   defns)]
                (-> acc

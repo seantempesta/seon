@@ -30,14 +30,11 @@
 
    ## Worked examples
 
-     (seon.agent.shell/grants)   ;; the SEON_SHELL grant — call this first
+     (seon.agent.shell/grants)   ; the SEON_SHELL grant — call this first
      (seon.agent.shell/run {:seon.agent.shell/cmd  \"git\"
                             :seon.agent.shell/args [\"status\" \"--porcelain\"]
                             :seon.agent.shell/cwd  \"/Users/me/work-folder\"})
-     ;; => {:seon.agent.shell/ok? true :seon.agent.shell/exit 0
-     ;;     :seon.agent.shell/out \"…\" :seon.agent.shell/err \"\"
-     ;;     :seon.agent.shell/out-tokens 42 :seon.agent.shell/err-tokens 0
-     ;;     :seon.agent.shell/timed-out? false :seon.agent.shell/truncated? false}
+     ; ⟹ «map: ::ok? true, ::exit 0, ::out/::err strings, ::out-tokens/::err-tokens ints, ::timed-out?/::truncated? bools»
      (seon.agent.shell/py-run {:seon.agent.shell/source \"import sys\\nprint(sys.version)\"})
 
    Plumbing (caps, grant read, cwd gate, execFile wrapper) lives in
@@ -281,9 +278,9 @@
      (seon.agent.shell/run {:seon.agent.shell/cmd  \"git\"
                             :seon.agent.shell/args [\"status\" \"--porcelain\"]
                             :seon.agent.shell/cwd  \"/Users/me/work-folder\"})
-     ;; => {:seon.agent.shell/ok? true :seon.agent.shell/exit 0 :seon.agent.shell/out \"…\" …}
-     ;; (zero? (:seon.agent.shell/exit r)) → clean tree; split :seon.agent.shell/out
-     ;; into lines, transform, db/transact!."
+     ; ⟹ «map: ::ok? true, ::exit 0, ::out \"…\", ::err \"\", …»
+     ; (zero? (:seon.agent.shell/exit r)) → clean tree; split :seon.agent.shell/out
+     ; into lines, transform, db/transact!."
   {:malli/schema [:=> [:cat :seon.agent.shell/run-request] :seon.agent.shell/run-response]}
   [{:seon.agent.shell/keys [cmd args cwd stdin timeout-ms]
     :or {timeout-ms in/default-timeout-ms}}]
@@ -347,8 +344,7 @@
    source is just a string):
 
      (seon.agent.shell/py-run {:seon.agent.shell/source \"import sys\\nprint(21 * 2)\"})
-     ;; => {:seon.agent.shell/ok? true :seon.agent.shell/exit 0
-     ;;     :seon.agent.shell/out \"42\\n\" :seon.agent.shell/err \"\" …}"
+     ; ⟹ «map: ::ok? true, ::exit 0, ::out \"42\\n\", ::err \"\", …»"
   {:malli/schema [:=> [:cat :seon.agent.shell/py-run-request] :seon.agent.shell/run-response]}
   [{:seon.agent.shell/keys [source cmd args cwd timeout-ms]
     :or {cmd "python3"}}]
@@ -383,8 +379,7 @@
      (seon.agent.shell/run-bg! {:seon.agent.shell/cmd  \"pytest\"
                                 :seon.agent.shell/args [\"-q\"]
                                 :seon.agent.shell/cwd  \"/Users/me/work-repo\"})
-     ;; => {:seon.agent.shell/ok? true :seon.agent.shell/job-id \"job-1a2b3c4d\"
-     ;;     :seon.agent.shell/state :running :seon.agent.shell/cmd \"pytest\"}"
+     ; ⟹ «map: ::ok? true, ::job-id \"job-1a2b3c4d\", ::state :running, ::cmd \"pytest\"»"
   {:malli/schema [:=> [:cat :seon.agent.shell/run-bg-request] :seon.agent.shell/run-bg-response]}
   [{:seon.agent.shell/keys [cmd args cwd stdin]}]
   (try

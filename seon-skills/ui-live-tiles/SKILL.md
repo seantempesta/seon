@@ -203,7 +203,7 @@ PRODUCER (`my.data/rows` by attribute presence, or `my.data/group-sum`) emits a
       totals (my.data/group-sum (merge exp {:my.data/group-key :my.expense/category
                                             :my.data/key       :my.expense/amount-usd}))]
   (my.data/max-by (merge totals {:my.data/key :my.data/total})))
-;; => {:my.data/group :dining :my.data/total 106}  → feed into a my.ui/kv-table
+; ⟹ {:my.data/group :dining :my.data/total 106}  → feed into a my.ui/kv-table
 ```
 
 Browse `my.data`'s `ns-publics`/docstrings for the full verb set. The flow

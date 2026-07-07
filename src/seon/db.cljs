@@ -70,10 +70,10 @@
 ;;; (`db` is OMITTED everywhere — it auto-injects from *conn*.)
 ;;;
 ;;; FIND shapes — pick by what you want back:
-;;;   relation    [:find ?n :where [?e ::name ?n]]            ;=> #{["A"] ["B"]}
-;;;   scalar  `.` [:find (count ?e) . :where [?e ::name]]     ;=> «one scalar — a count»
-;;;   collection  [:find [?n ...] :where [?e ::name ?n]]      ;=> ["A" "B"]
-;;;   tuple       [:find [?n ?r] :where [?e ::name ?n] [?e ::rank ?r]] ;=> ["A" 1]
+;;;   relation    [:find ?n :where [?e ::name ?n]]            ; ⟹ #{["A"] ["B"]}
+;;;   scalar  `.` [:find (count ?e) . :where [?e ::name]]     ; ⟹ «one scalar — a count»
+;;;   collection  [:find [?n ...] :where [?e ::name ?n]]      ; ⟹ ["A" "B"]
+;;;   tuple       [:find [?n ?r] :where [?e ::name ?n] [?e ::rank ?r]] ; ⟹ ["A" 1]
 ;;;
 ;;; PREDICATE — filter inside :where:  [(> ?l 400)]
 ;;;   [:find ?s :where [?e ::doc ?d] [(count ?d) ?l] [(> ?l 400)] [?e ::sym ?s]]
@@ -90,7 +90,7 @@
 ;;; GROUPED AGGREGATE — pull the group's name in the SAME query (group var must
 ;;; be a NAME, not a ref-eid, or you can't read the result):
 ;;;   [:find ?nm (count ?t) :where [?t :seon.test/ns ?n] [?n :seon.ns/name ?nm]]
-;;;   ;=> «set of [ns-name count] tuples»   (then sort/max in Clojure)
+;;;   ; ⟹ «set of [ns-name count] tuples»   (then sort/max in Clojure)
 ;;;
 ;;; LOOKUP-REF — address an entity by an identity attr instead of a raw eid.
 ;;; The value must be the STORED type. :seon.fn/sym is a :string, so use the
@@ -109,7 +109,7 @@
 ;;; The attr keyword is almost certainly misspelled — copy it exactly from a
 ;;; rendered ns source or (keys (installed-schema @*conn*)).
 ;;;
-;;; REPORT WHAT YOU COMPUTED. Every `;=>` below is a SHAPE, not an answer —
+;;; REPORT WHAT YOU COMPUTED. Every `; ⟹` below is a SHAPE, not an answer —
 ;;; the numbers belong to a different db than yours. State only the value your
 ;;; LAST eval returned; if a count matters, re-eval and read it back. Never
 ;;; quote a number you remember or saw in source/an example.
@@ -315,7 +315,7 @@
    :max 14}]`, so a hand-written string fails validation. Datahike's
    tx-id remains the canonical creation order for sub-minute sorting.
 
-     (db/new-id!)   ;=> \"Kpx-2605232138\"
+     (db/new-id!)   ; ⟹ \"Kpx-2605232138\"
      (db/transact! {::db/tx-data [{::my-id (db/new-id!) ::title \"…\"}]})"
   {:malli/schema [:=> [:cat] :seon.db/id]}
   []
@@ -375,7 +375,7 @@
    Fiber-local across awaits. The standard accessor for any code that
    needs to know whose universe it's running in.
 
-     (db/current-agent-id)   ;=> \"iCg-2606101519\"   (your own id)"
+     (db/current-agent-id)   ; ⟹ \"iCg-2606101519\"   (your own id)"
   {:malli/schema [:=> [:cat] [:maybe :string]]}
   []
   (internal/current-agent-id))
@@ -598,31 +598,31 @@
    full idiom set):
 
      ;; scalar count — when you only need a number, COUNT, don't list
-     ;; (results are clipped ~50 rows). The `;=>` is a SHAPE; report the
+     ;; (results are clipped ~50 rows). The `; ⟹` is a SHAPE; report the
      ;; number YOUR eval returns, not the one written here:
-     (db/query '[:find (count ?e) . :where [?e :seon.fn/sym]])  ;=> «a scalar count»
+     (db/query '[:find (count ?e) . :where [?e :seon.fn/sym]])  ; ⟹ «a scalar count»
      ;; CLIPPED results — when a render shows a banner like «N rows; showing
      ;; first 50, +M more clipped», that N IS the total; READ it. Do NOT
      ;; recount the printed rows, and do NOT re-narrow the query to fit. Need
      ;; only the count? COUNT in the query (above), don't list-then-count.
      ;; registered-schema count — ONE :seon.schema/key row per registered
      ;; schema; this IS the count of registered schemas. Read it back live:
-     (db/query '[:find (count ?e) . :where [?e :seon.schema/key]]) ;=> «a scalar count»
+     (db/query '[:find (count ?e) . :where [?e :seon.schema/key]]) ; ⟹ «a scalar count»
      ;; collection — one value per row:
-     (db/query '[:find [?n ...] :where [?e :seon.ns/name ?n]]) ;=> «vector of ns-name keywords»
+     (db/query '[:find [?n ...] :where [?e :seon.ns/name ?n]]) ; ⟹ «vector of ns-name keywords»
      ;; predicate + binding-expr:
      (db/query '[:find ?s :where [?e :seon.fn/doc ?d] [(count ?d) ?l]
                                  [(> ?l 400)] [?e :seon.fn/sym ?s]])
      ;; REF-JOIN — :seon.fn/ns is a ref (stores an eid); match the target
      ;; by joining through its name, NOT by putting the keyword in the slot:
      (db/query '[:find (count ?e) . :where [?e :seon.fn/ns ?n]
-                                           [?n :seon.ns/name :seon.db]]) ;=> «a scalar count»
+                                           [?n :seon.ns/name :seon.db]]) ; ⟹ «a scalar count»
      ;;   (the keyword form [?e :seon.fn/ns :seon.db] THROWS.)
      ;; GROUPED AGGREGATE with the name pulled in the SAME query, so the
      ;; group is readable (a bare ref-eid is not):
      (db/query '[:find ?nm (count ?t)
                  :where [?t :seon.test/ns ?n] [?n :seon.ns/name ?nm]])
-     ;;   ;=> «set of [ns-name count] tuples»   then (sort-by second > …) in Clojure
+     ;;   ; ⟹ «set of [ns-name count] tuples»   then (sort-by second > …) in Clojure
 
    GUARDED against silent typos (the sibling of [[pull]]'s guard): a
    `:where` clause naming an attribute that is neither installed on
@@ -704,8 +704,8 @@
 
      (filter #(= \"my.plan\" (namespace %))
              (keys (db/installed-schema @db/*conn*)))
-     ;;=> (:my.plan/id :my.plan/title :my.plan/status …)
-     ;;   — registered, queryable, just no rows yet. Reuse it; don't fork."
+     ; ⟹ «(:my.plan/id :my.plan/title :my.plan/status …)»
+     ;   — registered, queryable, just no rows yet. Reuse it; don't fork."
   {:malli/schema [:=> [:catn [::db :any]] :map]}
   [db]
   (or (when (some? db)
@@ -1022,7 +1022,7 @@
    (a quoted symbol THROWS \"Cannot compare String to Symbol\"):
 
      (db/entity {::db/ref [:seon.fn/sym \"seon.db/transact!\"]})
-     ;;=> {:db/id N :seon.fn/sym \"seon.db/transact!\" :seon.fn/arglists \"…\" …}"
+     ; ⟹ «map: :db/id N, :seon.fn/sym \"seon.db/transact!\", :seon.fn/arglists \"…\", …»"
   ;; The 1-arg arity accepts EITHER a request map OR a bare eid/lookup-ref
   ;; (auto-inject from *conn*) — one arity-1 `:=>` (the body branches on
   ;; map?); a separate eid-only `:=>` would collide with the request arity.

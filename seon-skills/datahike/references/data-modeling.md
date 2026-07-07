@@ -83,7 +83,7 @@ that doesn't exist as code. Use the real nested namespace.
                     {:db/id :db/current-tx :co.ingest.tx/source "inbox-export-2026"}]})
     ;; later: which source did these facts come from?
     (db/query '[:find [?s ...] :where [?tx :co.ingest.tx/source ?s]])
-    ;; => ["inbox-export-2026"]
+    ; ⟹ ["inbox-export-2026"]
     ```
 
     `:co.ingest.tx/source` is a normal registered attr — nothing special

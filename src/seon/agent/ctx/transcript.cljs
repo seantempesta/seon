@@ -11,7 +11,7 @@
    marker is the session-resume boundary, interleaved by time.
 
    It reads as an eval'able REPL transcript: `;` comments + forms +
-   `;=>`-commented results + `;;;`-bracketed sections / `;;; ◀`/`;;; ▶`
+   `; ⟹`-commented results + `;;;`-bracketed sections / `;;; ◀`/`;;; ▶`
    message lines + a live `ns=>`
    readline. Re-evaluating the forms (comments pass through) reproduces the
    agent's state — the context IS a replayable program (the north star).
@@ -207,7 +207,7 @@
 ;; FIRST lines of the block. Block-specific cues ONLY (the surface label,
 ;; the oldest-first ordering, append-below); the live-REPL-session framing
 ;; lives ONCE in `seon.agent.ctx/system-text` (no re-teaching here). Never a
-;; `don't write ;=>` prohibition — a negative example primes the mimicry it
+;; `don't write ⟹` prohibition — a negative example primes the mimicry it
 ;; forbids (standing owner rule). The ns slot rides the masthead so the
 ;; agent sees its own session name.
 ;; ------------------------------------------------------------
@@ -393,7 +393,7 @@
   {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{node :seon.render/node}]
   (let [{::keys [signature count]} node]
-    (str ";=> ✗ " count "× " signature
+    (str "; " ctx/result-marker " ✗ " count "× " signature
          " — " count " consecutive failures collapsed; each DEFINED NOTHING. "
          "Fix the form once, not " count " times.")))
 

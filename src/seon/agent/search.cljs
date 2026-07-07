@@ -216,16 +216,8 @@
    resolves the returned Promise for you):
 
      (seon.agent.search/grep {:seon.agent.search/pattern \"message/user\"})
-     ;; => {:seon.agent.search/ok? true
-     ;;     :seon.agent.search/match-count «total hits»
-     ;;     :seon.agent.search/file-count  «total files»
-     ;;     :seon.agent.search/by-file
-     ;;     [{:seon.agent.search/path        \"«abs path of the hit»\"
-     ;;       :seon.agent.search/count       «hits in this file»
-     ;;       :seon.agent.search/line-number «first hit's line»
-     ;;       :seon.agent.search/line-text   \"«preview of that line»\"} …]
-     ;;     :seon.agent.search/truncated? false}
-     ;; pick a file row, then read it (the path is absolute + allowlisted):
+     ; ⟹ «map: ::ok? true, ::match-count int, ::file-count int, ::by-file [{::path, ::count, ::line-number, ::line-text} …], ::truncated? false»
+     ; pick a file row, then read it (the path is absolute + allowlisted):
      (seon.agent.fs/read-file {:seon.agent.fs/path \"<:seon.agent.search/path>\"})
      ;; jump to its :seon.agent.search/line-number; or re-grep with
      ;; :seon.agent.search/paths [that-file] to see every hit in it.
@@ -354,16 +346,7 @@
    Worked example:
 
      (seon.agent.search/grep-graph {:seon.agent.search/pattern \"transact\"})
-     ;; => {:seon.agent.search/ok? true
-     ;;     :seon.agent.search/match-count «matching members»
-     ;;     :seon.agent.search/ns-count    «namespaces»
-     ;;     :seon.agent.search/by-ns
-     ;;     [{:seon.agent.search/ns        \"seon.db\"
-     ;;       :seon.agent.search/count     «hits in this ns»
-     ;;       :seon.agent.search/member    \"seon.db/transact!\"
-     ;;       :seon.agent.search/target    :seon.fn
-     ;;       :seon.agent.search/line-text \"«preview of the matching line»\"} …]
-     ;;     :seon.agent.search/truncated? false}"
+     ; ⟹ «map: ::ok? true, ::match-count int, ::ns-count int, ::by-ns [{::ns \"seon.db\", ::count, ::member \"seon.db/transact!\", ::target :seon.fn, ::line-text} …], ::truncated? false»"
   {:malli/schema [:=> [:cat :seon.agent.search/grep-graph-request]
                   :seon.agent.search/grep-graph-response]}
   [{:seon.agent.search/keys [pattern targets max-results full? case-insensitive?]

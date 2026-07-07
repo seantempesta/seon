@@ -334,9 +334,7 @@
    truth every fs op enforces:
 
      (seon.agent.fs/grants)
-     ;; => {:seon.agent.fs/allowed-roots [\"/Users/me/work-folder\"]
-     ;;     :seon.agent.fs/read-only?    false
-     ;;     :seon.agent.fs/locked?       false}
+     ; ⟹ «map: ::allowed-roots [\"/Users/me/work-folder\"], ::read-only? false, ::locked? false»
 
    Call this BEFORE reasoning about your filesystem access. A directory
    listing or your CWD tells you what EXISTS, not what you may touch — the
@@ -373,9 +371,7 @@
      (seon.agent.fs/read-file {:seon.agent.fs/path \"/Users/me/work/big.md\"
                                :seon.agent.fs/from-line 200
                                :seon.agent.fs/max-lines 50})
-     ;; => {:seon.agent.fs/ok? true :seon.agent.fs/content \"...\"
-     ;;     :seon.agent.fs/from-line 200 :seon.agent.fs/lines-returned 50
-     ;;     :seon.agent.fs/total-lines 1841}
+     ; ⟹ «map: ::ok? true, ::content \"...\", ::from-line 200, ::lines-returned 50, ::total-lines 1841»
 
    `lines-returned` < `max-lines` means you ran off the end. Don't
    summarize a file from one page — page through it, or bind the full

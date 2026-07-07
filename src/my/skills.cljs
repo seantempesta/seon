@@ -269,7 +269,7 @@
    own `:skill/*` blocks. Read it to discover what you can `(load …)`.
 
      (my.skills/list)
-     ;; => [{:my.skills/name :datahike :my.skills/description \"…\" :my.skills/loaded? false} …]"
+     ; ⟹ «vector: [{:my.skills/name :datahike, :my.skills/description \"…\", :my.skills/loaded? false} …]»"
   {:malli/schema [:function
                   [:=> [:cat] [:vector ::catalog-entry]]
                   [:=> [:catn [::db :seon.db/db]] [:vector ::catalog-entry]]]}

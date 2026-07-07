@@ -75,6 +75,55 @@
            (rules "(ns foo)\n(defn bar \"\n  Real content on line 2.\" [x] x)")))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Result-echo marker rule — worked examples must echo on the reserved `; ⟹`
+;;; ---------------------------------------------------------------------------
+
+(deftest result-echo-wrong-marker-test
+  (testing "a stale `;=>` echo in the docstring body is flagged"
+    (is (contains?
+         (rules (str "(ns foo)\n(defn bar\n  \"Store one thing.\n\n"
+                     "     (bar 1)\n     ;=> 1\"\n  [x] x)"))
+         :result-echo-wrong-marker)))
+
+  (testing "the double `;;=>` fabrication shape is flagged"
+    (is (contains?
+         (rules (str "(ns foo)\n(defn bar\n  \"Store one thing.\n\n"
+                     "     (bar 1)\n     ;;=> {:ok? true}\"\n  [x] x)"))
+         :result-echo-wrong-marker)))
+
+  (testing "the spaced `;; =>` shape is flagged"
+    (is (contains?
+         (rules (str "(ns foo)\n(defn bar\n  \"Store one thing.\n\n"
+                     "     (bar 1)\n     ;; => 1\"\n  [x] x)"))
+         :result-echo-wrong-marker)))
+
+  (testing "a bare column-0 `=>` echo is flagged"
+    (is (contains?
+         (rules (str "(ns foo)\n(defn bar\n  \"Store one thing.\n\n"
+                     "     (bar 1)\n     => 1\"\n  [x] x)"))
+         :result-echo-wrong-marker)))
+
+  (testing "the reserved `; ⟹` marker is CLEAN — never flagged"
+    (is (empty?
+         (rules (str "(ns foo)\n(defn bar\n  \"Store one thing.\n\n"
+                     "     (bar 1)\n     ; ⟹ 1\"\n  [x] x)")))))
+
+  (testing "a `; ⟹ «shape»` elided echo is clean"
+    (is (empty?
+         (rules (str "(ns foo)\n(defn bar\n  \"Store one thing.\n\n"
+                     "     (bar 1)\n     ; ⟹ «map: ::ok? true»\"\n  [x] x)")))))
+
+  (testing "prose that only MENTIONS the shape mid-sentence is not flagged"
+    (is (empty?
+         (rules (str "(ns foo)\n(defn bar\n  \"Store one thing.\n\n"
+                     "     the old `;; =>` shape is a fabrication tell.\"\n  [x] x)")))))
+
+  (testing "a `:malli/schema [:=> …]` line in prose is not flagged"
+    (is (empty?
+         (rules (str "(ns foo)\n(defn bar\n  \"Store one thing.\n\n"
+                     "     the schema is [:=> [:cat ::req] ::resp] here.\"\n  [x] x)"))))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Skips
 ;;; ---------------------------------------------------------------------------
 

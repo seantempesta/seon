@@ -41,14 +41,10 @@
 
    ## Worked examples
 
-     (seon.agent.web/grants)   ;; the SEON_WEB grant + reachability policy
+     (seon.agent.web/grants)   ; the SEON_WEB grant + reachability policy
      (await (seon.agent.web/fetch {:seon.agent.web/url \"https://example.com\"}))
-     ;; => {:seon.agent.web/ok? true :seon.agent.web/status 200
-     ;;     :seon.agent.web/title \"Example Domain\"
-     ;;     :seon.agent.web/extractor :readability
-     ;;     :seon.agent.web/total-tokens 84 :seon.agent.web/preview \"# …\"
-     ;;     :seon.agent.web/blob-hash \"9f86d0…\" …}
-     (my.blob/text {:my.blob/hash \"9f86d0…\"})   ;; page the FULL document
+     ; ⟹ «map: ::ok? true, ::status 200, ::title \"Example Domain\", ::extractor :readability, ::total-tokens 84, ::preview \"# …\", ::blob-hash \"9f86d0…\", …»
+     (my.blob/text {:my.blob/hash \"9f86d0…\"})   ; page the FULL document
 
    Plumbing (SSRF guard, transport, extraction, grant read) lives in
    [[seon.agent.web.internal]]."
@@ -302,9 +298,7 @@
    Worked example:
 
      (await (seon.agent.web/fetch {:seon.agent.web/url \"https://example.com\"}))
-     ;; => {:seon.agent.web/ok? true :seon.agent.web/status 200
-     ;;     :seon.agent.web/extractor :readability :seon.agent.web/total-tokens 84
-     ;;     :seon.agent.web/blob-hash \"9f86d0…\" :seon.agent.web/preview \"# …\"}"
+     ; ⟹ «map: ::ok? true, ::status 200, ::extractor :readability, ::total-tokens 84, ::blob-hash \"9f86d0…\", ::preview \"# …\"»"
   {:malli/schema [:=> [:cat ::fetch-request] ::fetch-response]}
   [{::keys [url timeout-ms max-bytes max-preview-tokens max-age-ms]
     :or {timeout-ms         int/default-timeout-ms
@@ -444,15 +438,8 @@
    Worked example:
 
      (await (seon.agent.web/search {:seon.agent.web/query \"current stable Clojure version\"}))
-     ;; => {:seon.agent.web/ok? true :seon.agent.web/backend :gemini-grounding
-     ;;     :seon.agent.web/results [{:seon.agent.web/url \"https://…/grounding-api-redirect/…\"
-     ;;                               :seon.agent.web/title \"clojure.org\"
-     ;;                               :seon.agent.web/snippet \"The current stable version…\"
-     ;;                               :seon.agent.web/rank 0} …]
-     ;;     :seon.agent.web/result-count 2
-     ;;     :seon.agent.web/answer \"The current stable version of Clojure is 1.12.5…\"
-     ;;     :seon.agent.web/answer-tokens 18 :seon.agent.web/queries [\"…\"] …}
-     ;; then fetch a row's ::url to page the real page into a blob."
+     ; ⟹ «map: ::ok? true, ::backend :gemini-grounding, ::results [«::url, ::title, ::snippet, ::rank» …], ::result-count 2, ::answer \"…\", ::answer-tokens 18, ::queries [\"…\"], …»
+     ; then fetch a row's ::url to page the real page into a blob."
   {:malli/schema [:=> [:cat ::search-request] ::search-response]}
   [{::keys [query max-results timeout-ms]
     :or {max-results int/default-search-results

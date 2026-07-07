@@ -424,7 +424,7 @@
 
 ;; ============================================================
 ;; RENDER-AI — the agent-facing text. The bounded skeleton FIRST (so it
-;; composes cleanly behind the transcript's `;=>` prefix — no `;=> ;;`
+;; composes cleanly behind the transcript's `; ⟹` prefix — no `; ⟹ ;;`
 ;; double-comment), then, ONLY when the view is partial, ONE trailing `;`
 ;; hint folding the top-level type/count + a drill pointer at the live var.
 ;; ============================================================
@@ -602,6 +602,6 @@
 ;; `seon.eval/sanitize-result-edn` (the read-side net for legacy rows)
 ;; reuses `project-plain`. The opaque-DETECTION + projection logic lives
 ;; ONLY here; `seon.eval` requires this ns — a one-way edge (eval →
-;; render.value), no cycle. The `result/<id>` handle on the `;=>` line is
+;; render.value), no cycle. The `result/<id>` handle on the `; ⟹` line is
 ;; still added downstream by `seon.agent.ctx/format-eval-row` (untouched).
 ;; ============================================================
