@@ -31,7 +31,12 @@
     [seon.agent.ctx.jobs]
     [seon.agent.fs :as fs]
     [seon.agent.fs.internal :as fs-int]
+    [seon.agent.lifecycle :as lifecycle]
+    [seon.agent.run :as run]
     [seon.agent.shell :as shell]
+    [seon.agent.testrun :as testrun]
+    [seon.client :as client]
+    [seon.db :as db]
     [seon.test.async :refer [settle!]]))
 
 ;; ---------------------------------------------------------------------------
@@ -378,3 +383,113 @@
         (is (re-find #"no background job" (:seon.error/message r))))
       ;; empty section renders nothing
       (done))))
+
+;; ---------------------------------------------------------------------------
+;; 10. Persist-at-exit — a BACKGROUND pytest job records a testrun datom when
+;;     it finishes, so the complete-gate is NOT blind to bg tests (D-GATE-BG).
+;;     End-to-end: a real spawned fake-pytest child (basename "pytest" so
+;;     testrun/pytest-argv? recognizes it) → close handler → testrun/record!
+;;     scoped to the SPAWNING agent → testrun/latest-run → lifecycle/complete.
+;; ---------------------------------------------------------------------------
+
+(defn- write-fake-pytest!
+  "A tiny executable `pytest` under fixture-dir; `$1 = green` prints a green
+   summary + exit 0, else a red short-summary + exit 1. Basename \"pytest\" is
+   what testrun/pytest-argv? keys on — so this exercises the real argv gate."
+  []
+  (let [path (.resolve npath fixture-dir "pytest")]
+    (.writeFileSync
+      nfs path
+      (str "#!/bin/bash\n"
+           "if [ \"$1\" = green ]; then\n"
+           "  echo 'collected 2 items'\n"
+           "  echo '======================== 2 passed in 0.01s ========================'\n"
+           "  exit 0\n"
+           "fi\n"
+           "echo '==================== short test summary info ===================='\n"
+           "echo 'FAILED tests/test_x.py::test_a - assert 1 == 2'\n"
+           "echo '================== 1 failed, 1 passed in 0.02s =================='\n"
+           "exit 1\n")
+      #js {:mode 493})                                    ; 0755, executable
+    path))
+
+(defn- poll-for
+  "Resolve with (thunk) once (pred (thunk)) holds, or after ~5s (a test
+   helper — the job table + the testrun datom have no promise to await)."
+  [thunk pred]
+  (js/Promise.
+    (fn [resolve _]
+      (let [tries (atom 0)
+            step  (fn step []
+                    (let [v (thunk)]
+                      (if (or (pred v) (> @tries 50))
+                        (resolve v)
+                        (do (swap! tries inc) (js/setTimeout step 100)))))]
+        (step)))))
+
+(deftest bg-pytest-run-persists-testrun-at-exit-and-gates-complete
+  (async done
+    (let [pytest (write-fake-pytest!)
+          aid    "shbgtestagt001"
+          latest #(testrun/latest-run @db/*conn* aid)
+          ;; run-bg! under the agent scope so start-job! captures aid; poll to
+          ;; :exited, then poll the persisted testrun until (pred) holds.
+          bg     (fn [args pred]
+                   (db/with-agent aid
+                     (fn []
+                       (let [{id :seon.agent.shell/job-id}
+                             (shell/run-bg! {:seon.agent.shell/cmd  pytest
+                                             :seon.agent.shell/args args
+                                             :seon.agent.shell/cwd  fixture-dir})]
+                         (-> (poll-until id #(= :exited (:seon.agent.shell/state %)))
+                             (.then (fn [_] (poll-for latest pred))))))))
+          complete! (fn ^:async _ []
+                      (await (run/open-run! {:seon.agent/id aid
+                                             :seon.agent.run/trigger :message}))
+                      (await (db/with-agent aid
+                               (fn ^:async c [] (await (lifecycle/complete "all pass"))))))]
+      (-> (client/open-agent-conn!)
+          (.then (fn [conn]
+                   (let [prev db/*conn*]
+                     (set! db/*conn* conn)
+                     (-> (db/transact! {:seon.db/tx-data [{:seon.agent/id aid}
+                                                          {:seon.user/id "user"}]})
+                         ;; (1) a RED bg run persists a red testrun scoped to aid.
+                         (.then (fn [_] (bg ["red"] #(and % (pos? (:seon.agent.testrun/failed %))))))
+                         (.then (fn [lr]
+                                  (is (some? lr) "a bg pytest run persisted a testrun datom")
+                                  (is (= 1 (:seon.agent.testrun/failed lr)) "the red failed count")))
+                         ;; (2) the complete-gate REFUSES on the red bg run.
+                         (.then (fn [_] (complete!)))
+                         (.then (fn [env]
+                                  (is (false? (:seon.db/ok? env))
+                                      "complete refused — the gate saw the BACKGROUND red run")
+                                  (is (str/includes? (:seon.error/message (:seon.db/error env)) "RED")
+                                      "verbatim refusal names the RED state")))
+                         ;; (3) a later GREEN bg run supersedes → complete allowed.
+                         (.then (fn [_]
+                                  (bg ["green"] #(and % (zero? (:seon.agent.testrun/failed %))
+                                                      (zero? (:seon.agent.testrun/errors %))))))
+                         (.then (fn [lr]
+                                  (is (zero? (:seon.agent.testrun/failed lr)) "latest is now green")))
+                         (.then (fn [_] (complete!)))
+                         (.then (fn [r]
+                                  (is (= :idle r) "green latest bg run → complete allowed")))
+                         ;; (4) a NON-pytest bg job records nothing (latest stays green).
+                         (.then (fn [_]
+                                  (let [green-eid (:seon.agent.testrun/eid (latest))]
+                                    (db/with-agent aid
+                                      (fn []
+                                        (let [{id :seon.agent.shell/job-id}
+                                              (shell/run-bg! {:seon.agent.shell/cmd  "bash"
+                                                              :seon.agent.shell/args ["-c" "echo '1 passed'"]
+                                                              :seon.agent.shell/cwd  fixture-dir})]
+                                          (-> (poll-until id #(= :exited (:seon.agent.shell/state %)))
+                                              ;; give any (wrong) record! a chance to land, then assert none did
+                                              (.then (fn [_] (poll-for (constantly nil) (constantly false))))
+                                              (.then (fn [_]
+                                                       (is (= green-eid (:seon.agent.testrun/eid (latest)))
+                                                           "a non-pytest bg job persisted NO testrun (latest unchanged)"))))))))))
+                         (.finally (fn [] (set! db/*conn* prev)))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))

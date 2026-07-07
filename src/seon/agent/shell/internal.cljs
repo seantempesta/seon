@@ -19,8 +19,10 @@
     [clojure.string :as str]
     [seon.agent.fs :as fs]
     [seon.agent.shell :as-alias shell]
+    [seon.agent.testrun :as testrun]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
+    [seon.db :as db]
     [seon.platform :as platform]))
 
 ;; ============================================================
@@ -201,9 +203,11 @@
   32)
 
 ;; Job id -> record. Each: {::shell/job-id ::shell/cmd ::shell/args
-;; ::shell/cwd ::shell/started-at ::shell/child ::shell/out ::shell/err
-;; ::shell/out-truncated? ::shell/err-truncated? ::shell/state ::shell/exit
-;; ::shell/ended-at}. Volatile — process-lifetime only.
+;; ::shell/cwd ::shell/agent-id ::shell/started-at ::shell/child ::shell/out
+;; ::shell/err ::shell/out-truncated? ::shell/err-truncated? ::shell/state
+;; ::shell/exit ::shell/ended-at}. Volatile — process-lifetime only.
+;; ::shell/agent-id is the SPAWNING agent (nil outside agent scope) — the
+;; exit-time testrun persist scopes to it; see [[maybe-record-testrun!]].
 (defonce !jobs (atom {}))
 
 (defn unknown-job
@@ -256,18 +260,52 @@
                  (apply dissoc jobs drop-ids))
                jobs)))))
 
+(defn- maybe-record-testrun!
+  "Persist a FINISHED background pytest job as a testrun datom, or no-op.
+
+   The background analog of `seon.agent.shell/attach-testrun!` — ONE
+   mechanism, applied at process exit instead of on the foreground read, so
+   the `complete` gate sees a background test run exactly as it sees a
+   foreground one. If the job captured a spawning agent-id (nil ⇒ spawned
+   outside agent scope, e.g. a dev REPL — skip, mirroring `record!`'s own
+   no-scope refusal) AND its argv is pytest AND its out/err parse as a
+   recognized run, record it scoped to that agent.
+
+   Persist-at-exit: this fires ONCE (the close/error handler runs once), so
+   NO idempotency guard is needed. Semantics are symmetric with the
+   foreground `latest-run` RED rule — a background run that exits RED blocks
+   completion until the agent SEES a green run, even if it never read the
+   output and edited without re-running (a future refinement could gate on
+   `no green since last edit` instead; out of scope here). `record!` is
+   `^:async` and returns an envelope (never throws); swallow its promise so
+   nothing rejects into the node event handler (never throw into the loop)."
+  [j]
+  (let [aid (::shell/agent-id j)]
+    (when (and aid (testrun/pytest-argv? (::shell/cmd j) (vec (::shell/args j))))
+      (let [parsed (testrun/parse {:seon.agent.testrun/stdout (::shell/out j)
+                                   :seon.agent.testrun/stderr (::shell/err j)})]
+        (when (:seon.agent.testrun/ok? parsed)
+          (-> (testrun/record! {:seon.agent.testrun/result   parsed
+                                :seon.agent.testrun/agent-id aid})
+              (.catch (fn [_] nil))))))))
+
 (defn start-job!
   "Spawn `cmd`/`args` in the background and register a job; return its id."
   [cmd args cwd stdin]
-  (let [id    (str "job-" (subs (str (random-uuid)) 0 8))
-        opts  #js {:windowsHide true}
-        _     (when cwd (aset opts "cwd" cwd))
-        child (.spawn cp cmd (into-array args) opts)]
+  (let [id       (str "job-" (subs (str (random-uuid)) 0 8))
+        ;; Captured DURING the agent's turn (run-bg! runs in agent scope) so
+        ;; the exit-time testrun persist can scope to the spawning agent —
+        ;; runtime-only state on !jobs (like ::shell/child), never a datom.
+        agent-id (db/current-agent-id)
+        opts     #js {:windowsHide true}
+        _        (when cwd (aset opts "cwd" cwd))
+        child    (.spawn cp cmd (into-array args) opts)]
     (swap! !jobs assoc id
            {::shell/job-id        id
             ::shell/cmd           cmd
             ::shell/args          (vec args)
             ::shell/cwd           cwd
+            ::shell/agent-id      agent-id
             ::shell/started-at    (js/Date.)
             ::shell/child         child
             ::shell/out           ""
@@ -292,6 +330,9 @@
                                    ::shell/err      (str (::shell/err j)
                                                          "\n[spawn error] "
                                                          (or (some-> e .-message) (str e)))))))
+           ;; A spawn error usually won't parse as pytest — then this no-ops;
+           ;; if it does parse (an errored run), it records like any red run.
+           (some-> (get @!jobs id) maybe-record-testrun!)
            (prune-exited!)))
     (.on child "close"
          (fn [code signal]
@@ -301,6 +342,9 @@
                                    ::shell/state    (if (= :stopped (::shell/state j)) :stopped :exited)
                                    ::shell/exit     (cond (number? code) code signal killed-exit :else 0)
                                    ::shell/ended-at (js/Date.)))))
+           ;; Persist-at-exit: the ONE place a finished bg pytest run becomes a
+           ;; testrun datom, so the complete-gate is not blind to bg tests.
+           (some-> (get @!jobs id) maybe-record-testrun!)
            (prune-exited!)))
     (let [in (.-stdin child)]
       (when in
