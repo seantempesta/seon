@@ -15,7 +15,7 @@
    (`seon.client`) so the symbol resolves."
   (:require
     [clojure.string :as str]
-    [seon.agent.testrun :as-alias testrun]
+    [seon.agent.testrun :as testrun]
     [seon.db :as db]))
 
 (def ^:private message-cap
@@ -27,25 +27,6 @@
   "How many failures to list inline. A huge failing set is capped with a
    loud footer; re-run pytest to see them all."
   20)
-
-(defn- latest-run-eid
-  "Highest testrun eid scoped to `agent-id` in db value `db`, or nil.
-
-   Entity ids are monotonic, so the max eid is the newest run — the same
-   'latest by :db/id' rule the findings section uses (no stored timestamp)."
-  [db agent-id]
-  (->> (db/query {:seon.db/db db
-                  :seon.db/query
-                  '[:find ?t
-                    :in $ ?aid
-                    :where
-                    [?a :seon.agent/id ?aid]
-                    [?t :seon.agent.testrun/agent ?a]
-                    [?t :seon.agent.testrun/framework _]]
-                  :seon.db/args [agent-id]})
-       (map first)
-       (reduce max 0)
-       (#(when (pos? %) %))))
 
 (defn- clip
   "Collapse whitespace and cap `s` to [[message-cap]] with an inline `…`."
@@ -72,21 +53,17 @@
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
   (if (or (nil? db) (nil? id))
     ""
-    (if-let [eid (latest-run-eid db id)]
-      (let [{:seon.agent.testrun/keys [passed failed errors failures]}
-            (db/pull {:seon.db/db db :seon.db/ref eid
-                      :seon.db/pull-pattern
-                      '[:seon.agent.testrun/passed
-                        :seon.agent.testrun/failed
-                        :seon.agent.testrun/errors
-                        {:seon.agent.testrun/failures
-                         [:seon.agent.testrun/test-name
-                          :seon.agent.testrun/path
-                          :seon.agent.testrun/message]}]})
-            failed (or failed 0)
-            errors (or errors 0)]
-        (if (and (zero? failed) (zero? errors))
-          ""
+    (if-let [{:seon.agent.testrun/keys [eid passed failed errors]}
+             (testrun/latest-run db id)]
+      (if (and (zero? failed) (zero? errors))
+        ""
+        (let [failures (:seon.agent.testrun/failures
+                        (db/pull {:seon.db/db db :seon.db/ref eid
+                                  :seon.db/pull-pattern
+                                  '[{:seon.agent.testrun/failures
+                                     [:seon.agent.testrun/test-name
+                                      :seon.agent.testrun/path
+                                      :seon.agent.testrun/message]}]}))]
           (let [shown  (take max-failures failures)
                 hidden (- (count failures) (count shown))]
             (str ";;; TEST FAILURES — latest pytest run: "

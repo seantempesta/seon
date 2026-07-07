@@ -34,6 +34,7 @@
     [seon.agent.loop :as loop]
     [seon.agent.message :as msg]
     [seon.agent.run :as run]
+    [seon.agent.testrun :as testrun]
     [seon.db :as db]
     [seon.schema :as schema]))
 
@@ -88,6 +89,32 @@
                (>= (.getTime ^js at) (.getTime ^js started-at))))
        boolean))
 
+(defn- complete-refusal
+  "Refuse `complete` (honest value) when the agent's latest test run is RED.
+
+   Purely DERIVED from the agent's own `:seon.agent.testrun` datoms — no
+   stored gate flag. nil (⇒ complete proceeds) when the agent ran no
+   recognized test suite (a non-test task — root/research agent — completes
+   normally) OR the latest run was green (0 failed, 0 errors). A red latest
+   run means not-done: the agent must SEE a real green render before claiming
+   success, so we return the loud, actionable error envelope it reads next
+   turn. `complete` = a success claim; honest give-up is `pause` or a
+   `(message/user …)`, neither of which is gated."
+  [id]
+  (let [{:seon.agent.testrun/keys [passed failed errors]}
+        (testrun/latest-run @db/*conn* id)]
+    (when (and (some? failed) (or (pos? failed) (pos? errors)))
+      {:seon.db/ok? false
+       :seon.db/error
+       {:seon.error/message
+        (str "complete refused — your latest test run is RED ("
+             failed " failed, " (or passed 0) " passed"
+             (when (pos? errors) (str ", " errors " error" (when (not= errors 1) "s")))
+             "). Run the tests and SEE a green result render before completing; "
+             "a result you did not see the runtime render does not count. To "
+             "STOP without claiming success, `pause` or report your honest "
+             "status with (message/user \"…\") — those are not gated.")}})))
+
 (defn ^:async complete
   "Finish the calling agent's work; close the open run `:completed`.
 
@@ -126,37 +153,42 @@
   ([result result-ref]
    (if-let [id (db/current-agent-id)]
      (if-let [r (run/current-run {:seon.agent/id id})]
-       (let [ent       (db/entity {:seon.db/ref [:seon.agent/id id]})
-             run-id    (:seon.agent.run/id r)
-             parent    (:db/id (:seon.agent/parent ent))
-             recipient (or parent
-                           (:db/id (db/entity {:seon.db/ref msg/user-ref})))
-             started   (:seon.agent.run/started-at r)
-             said?     (boolean
-                         (and recipient started
-                              (messaged-recipient-since?
-                                (:db/id ent) recipient started)))
-             ;; DURABLE VALUE first — written UNCONDITIONALLY (the said? guard
-             ;; gates only the wake MESSAGE, never the datom). A blank result
-             ;; with no ref writes nothing (optional = absent, never store nil).
-             result-row (cond-> {:seon.agent.run/id run-id}
-                          (not (str/blank? result)) (assoc :seon.agent.run/result result)
-                          (some? result-ref)        (assoc :seon.agent.run/result-ref result-ref))
-             wrote      (when (> (count result-row) 1)
-                          (await (db/transact! {:seon.db/tx-data [result-row]})))
-             sent       (when-not (or (str/blank? result) said?)
-                          (await (msg/message!
-                                   {:seon.agent.message/content result
-                                    :seon.agent.message/to
-                                    (if parent [parent] [msg/user-ref])})))]
-         (cond
-           (false? (:seon.db/ok? wrote)) wrote
-           (false? (:seon.db/ok? sent))  sent
-           :else
-           (let [env (await (run/close-run!
-                              {:seon.agent.run/id            run-id
-                               :seon.agent.run/closed-reason :completed}))]
-             (if (:seon.db/ok? env) :idle env))))
+       ;; Complete-gate: refuse a success claim while the latest real test
+       ;; run is RED (derived from this agent's own testrun datoms). nil =
+       ;; no test run or green ⇒ proceed. See [[complete-refusal]].
+       (or
+         (complete-refusal id)
+         (let [ent       (db/entity {:seon.db/ref [:seon.agent/id id]})
+               run-id    (:seon.agent.run/id r)
+               parent    (:db/id (:seon.agent/parent ent))
+               recipient (or parent
+                             (:db/id (db/entity {:seon.db/ref msg/user-ref})))
+               started   (:seon.agent.run/started-at r)
+               said?     (boolean
+                           (and recipient started
+                                (messaged-recipient-since?
+                                  (:db/id ent) recipient started)))
+               ;; DURABLE VALUE first — written UNCONDITIONALLY (the said? guard
+               ;; gates only the wake MESSAGE, never the datom). A blank result
+               ;; with no ref writes nothing (optional = absent, never store nil).
+               result-row (cond-> {:seon.agent.run/id run-id}
+                            (not (str/blank? result)) (assoc :seon.agent.run/result result)
+                            (some? result-ref)        (assoc :seon.agent.run/result-ref result-ref))
+               wrote      (when (> (count result-row) 1)
+                            (await (db/transact! {:seon.db/tx-data [result-row]})))
+               sent       (when-not (or (str/blank? result) said?)
+                            (await (msg/message!
+                                     {:seon.agent.message/content result
+                                      :seon.agent.message/to
+                                      (if parent [parent] [msg/user-ref])})))]
+           (cond
+             (false? (:seon.db/ok? wrote)) wrote
+             (false? (:seon.db/ok? sent))  sent
+             :else
+             (let [env (await (run/close-run!
+                                {:seon.agent.run/id            run-id
+                                 :seon.agent.run/closed-reason :completed}))]
+               (if (:seon.db/ok? env) :idle env)))))
        (no-open-run-error "complete" id))
      (internal/no-agent-error "complete"))))
 

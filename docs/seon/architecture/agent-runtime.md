@@ -188,6 +188,29 @@ run: the earlier message IS the answer (derived from the run's message log, no
 stored flag), so `complete` closes without sending a second, answer-clobbering
 message.
 
+**Complete-gate — a success claim must be BACKED by a real green test run.**
+`complete` is the one verb that asserts *success*, so it is REFUSED (an honest
+errors-as-value envelope, never a throw, the run left OPEN so the agent keeps
+working) when the agent's **latest** recognized test run is RED. This is purely
+DERIVED from the agent's own `:seon.agent.testrun` datoms at call time — the max
+testrun eid scoped to the agent (`seon.agent.testrun/latest-run`), refused when
+its `failed > 0` or `errors > 0`; no stored gate flag. It is correctly SCOPED: an
+agent that ran **no** recognized suite (a root orchestrator, a research agent, a
+gsm8k solver) has no testrun datom, so `latest-run` is nil and `complete`
+proceeds normally — the gate never touches non-test work. Latest-wins: a later
+green run supersedes an earlier red (and vice versa) by higher eid. This closes
+the **fabrication hole** (T4): an agent that runs a real red pytest, then in the
+SAME reply fabricates an "all tests pass" echo and calls `complete`, is refused —
+the real red testrun entity persisted via `testrun/record!` (forms eval
+sequentially) BEFORE `complete` evaluated, so the gate reads the truth the
+runtime rendered — the persisted datoms — not the
+model's claim. The refusal is honest and actionable ("your latest test run is
+RED (N failed) … a result you did not see the runtime render does not count"),
+converting an early false-stop into a continued drive. An agent that honestly
+wants to STOP with tests still red is NOT forced to lie: `complete` is the
+success claim, but `pause` and `(message/user …)` are ungated — the agent reports
+its real status through those, and only the success assertion is withheld.
+
 **Durable result + outcome routing (multi-agent).** A `complete` also writes the
 result as **DATA on the run** — `:seon.agent.run/result` (the short answer /
 pointer) and optional `:seon.agent.run/result-ref` — *unconditionally* (even when

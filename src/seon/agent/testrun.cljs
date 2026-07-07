@@ -15,8 +15,7 @@
    ## Worked example
 
      (seon.agent.testrun/parse {::stdout \"…FAILED path::test - msg…\"})
-     ;; => {::ok? true ::framework :pytest ::passed 2 ::failed 1 ::errors 0
-     ;;     ::failures [{::test-name \"test\" ::path \"path\" ::message \"msg\"}]}"
+     ; ⟹ «map: ::ok? true, ::framework :pytest, ::passed 2, ::failed 1, ::errors 0, ::failures [{::test-name \"test\", ::path \"path\", ::message \"msg\"}]»"
   (:require
     [clojure.string :as str]
     [seon.db :as db]
@@ -86,6 +85,17 @@
   [:or
    [:map [::ok? [:= true]]]
    [:map [::ok? [:= false]] [:seon.error/message :string]]])
+
+;; The latest-run projection — eid + counts of the newest persisted run for
+;; one agent. Both the `:test-failures` section and the `complete` gate read
+;; it (ONE query, two consumers). nil = the agent ran no recognized suite.
+(schema/register! ::latest-response
+  [:maybe
+   [:map
+    [::eid    :int]
+    [::passed ::passed]
+    [::failed ::failed]
+    [::errors ::errors]]])
 
 ;; ============================================================
 ;; argv shape — is this invocation a pytest run? Computed prefix match,
@@ -179,6 +189,36 @@
 ;; data → the datom tier). Each run is a new entity scoped to its agent;
 ;; the section reads the LATEST (no upsert, history keeps prior runs).
 ;; ============================================================
+
+(defn latest-run
+  "The agent's newest persisted pytest run in db value `db`, or nil.
+
+   Entity ids are monotonic, so the max testrun eid scoped to `agent-id` is
+   the newest run; pulls its counts. nil = the agent ran no recognized test
+   suite — the `complete` gate reads this: no run ⇒ no test claim to verify,
+   so a non-test agent completes normally. Latest-wins: green supersedes red
+   and vice versa by higher eid."
+  {:malli/schema [:=> [:catn [::db :seon.db/db] [::agent-id :string]] ::latest-response]}
+  [db agent-id]
+  (when-let [eid (->> (db/query {:seon.db/db db
+                                 :seon.db/query
+                                 '[:find ?t
+                                   :in $ ?aid
+                                   :where
+                                   [?a :seon.agent/id ?aid]
+                                   [?t :seon.agent.testrun/agent ?a]
+                                   [?t :seon.agent.testrun/framework _]]
+                                 :seon.db/args [agent-id]})
+                      (map first)
+                      (reduce max 0)
+                      ((fn [m] (when (pos? m) m))))]
+    (let [{::keys [passed failed errors]}
+          (db/pull {:seon.db/db db :seon.db/ref eid
+                    :seon.db/pull-pattern [::passed ::failed ::errors]})]
+      {::eid    eid
+       ::passed (or passed 0)
+       ::failed (or failed 0)
+       ::errors (or errors 0)})))
 
 (defn ^:async record!
   "Persist a recognized pytest `::result` scoped to the running agent.

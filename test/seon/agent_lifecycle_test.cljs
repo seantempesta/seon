@@ -23,11 +23,13 @@
    Tests open a FRESH `:memory` conn (via `seon.client/open-agent-conn!`,
    the same boot helper the pod uses) — nothing here touches the live agents."
   (:require
+    [clojure.string :as str]
     [cljs.test :refer [deftest is testing async]]
     [seon.agent :as agent]
     [seon.agent.lifecycle :as lifecycle]
     [seon.agent.message :as msg]
     [seon.agent.run :as run]
+    [seon.agent.testrun :as testrun]
     [seon.client :as client]
     [seon.db :as db]))
 
@@ -145,6 +147,80 @@
               (let [env (await (lifecycle/wait "orphan"))]
                 (is (false? (:seon.db/ok? env)))
                 (is (string? (:seon.error/message (:seon.db/error env))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ============================================================
+;; complete-gate — a SUCCESS claim is refused while the agent's latest real
+;; test run is RED. Derived from the agent's own :seon.agent.testrun datoms
+;; (no stored gate flag); scoped so a non-test agent (no testrun) completes
+;; normally. Fabrication fix: a fabricated "all pass" + complete in one reply
+;; is caught because the real red testrun datom persisted BEFORE complete evals.
+;; ============================================================
+
+(defn- run-result
+  "A recognized `::result` map with the given failed/errors counts."
+  [failed errors]
+  {:seon.agent.testrun/ok?       true
+   :seon.agent.testrun/framework :pytest
+   :seon.agent.testrun/passed    3
+   :seon.agent.testrun/failed    failed
+   :seon.agent.testrun/errors    errors
+   :seon.agent.testrun/failures
+   (if (pos? (+ failed errors))
+     [{:seon.agent.testrun/test-name "test_x"
+       :seon.agent.testrun/path      "tests/test_x.py"
+       :seon.agent.testrun/message   "assert 1 == 2"}]
+     [])})
+
+(deftest complete-gate-refuses-a-success-claim-while-tests-are-red
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (await (seed-agents!))
+            (let [aid       "aaa-2606101200"
+                  reopen    (fn ^:async _ []
+                              (await (run/open-run! {:seon.agent/id           aid
+                                                     :seon.agent.run/trigger  :message})))
+                  complete! (fn ^:async _ []
+                              (await (db/with-agent aid
+                                       (fn ^:async c [] (await (lifecycle/complete "done"))))))
+                  record!   (fn ^:async _ [res]
+                              (await (testrun/record!
+                                       {:seon.agent.testrun/agent-id aid
+                                        :seon.agent.testrun/result   res})))]
+              (testing "NO testrun → complete allowed (non-test task scoping)"
+                (await (reopen))
+                (is (= :idle (await (complete!)))
+                    "an agent that ran no tests completes normally"))
+              (testing "GREEN latest testrun → complete allowed"
+                (await (record! (run-result 0 0)))
+                (await (reopen))
+                (is (= :idle (await (complete!)))
+                    "a green run is a real terminal-green → success is honest"))
+              (testing "RED latest testrun → complete REFUSED (honest envelope), run stays open"
+                (await (record! (run-result 2 0)))
+                (await (reopen))
+                (let [env (await (complete!))
+                      msg (:seon.error/message (:seon.db/error env))]
+                  (is (false? (:seon.db/ok? env)) "refusal is an errors-as-value envelope")
+                  (is (string? msg))
+                  (is (str/includes? msg "RED") "the message names the RED state")
+                  (is (str/includes? msg "2 failed") "and the actual failing count")
+                  (is (= :running (derived aid))
+                      "the run is NOT closed — the agent keeps working, not falsely done")))
+              (testing "RED then GREEN (latest green) → complete allowed"
+                (await (record! (run-result 0 0)))
+                (is (= :idle (await (complete!)))
+                    "a later real green supersedes the earlier red (latest-wins)"))
+              (testing "GREEN then RED (latest red) → complete refused"
+                (await (reopen))
+                (await (record! (run-result 0 1)))
+                (let [env (await (complete!))]
+                  (is (false? (:seon.db/ok? env))
+                      "the newest run is red (1 error) → refused even after a prior green")
+                  (is (str/includes? (:seon.error/message (:seon.db/error env)) "1 error")
+                      "errors count, not just failures, gate completion"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
