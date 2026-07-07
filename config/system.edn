@@ -111,12 +111,18 @@
  ;; (web/grants) but nothing in the pod can widen it. The SEON_WEB env var is
  ;; a SEPARATE concern — it gates whether web fetch is available at all.
  ;; The same section carries the web-SEARCH backend (seon.agent.web/search):
- ;; which grounded/SERP provider + its model. Backend is host-owned config so
- ;; Serper can slot in later WITHOUT any verb-shape change; the API key is
- ;; read live from env (GEMINI_API_KEY), never here. Absent ⇒ :gemini-grounding
- ;; on gemini-3.1-flash-lite (the cheap retrieval pick).
+ ;; which SERP/grounded provider. Backend is host-owned config; the verb is
+ ;; backend-agnostic ({::url ::title ::snippet ::rank} rows). The API key is
+ ;; read live from env, never here — :serper reads SERPER_API_KEY,
+ ;; :gemini-grounding reads GEMINI_API_KEY. Absent ⇒ :gemini-grounding.
+ ;;   :serper           — real Google SERP JSON (google.serper.dev); 2,500
+ ;;                       free/mo then ~$0.30-1/1k; reliable raw {url,title,
+ ;;                       snippet} rows for pick-then-web/fetch. THE DEFAULT.
+ ;;   :gemini-grounding — an LLM ::answer + grounding-redirect URIs; ~2/3 of
+ ;;                       queries return no fetchable URLs (T4 O5). Kept
+ ;;                       config-selectable for synthesize-what-changed queries.
  :seon.config/web {:seon.agent.web/policy         :open
-                   :seon.agent.web/search-backend :gemini-grounding
+                   :seon.agent.web/search-backend :serper
                    :seon.agent.web/search-model   "gemini-3.1-flash-lite"}
 
  ;; ── AGENT-CONTEXT (v3, config-driven-agent-init) — the two-level context
