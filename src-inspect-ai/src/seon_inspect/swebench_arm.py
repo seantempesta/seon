@@ -69,9 +69,15 @@ from seon_inspect.bench_common import apply_run_bounds, deadline_below_door
 REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # The runtime-overlay volume: /opt/seon extracted from the canonical image at
-# a pinned digest (slice 3 pin: seon:slice1 sha256:63db32776190…; the volume
-# name + source digest are recorded in the run's evidence + ledger notes).
-OVERLAY_VOLUME = "seon-runtime-slice3"
+# a pinned digest (multi-arch build 52e25b6f: seon:multiarch-arm64
+# sha256:a69721a0b899…; the volume name + source digest are recorded in the
+# run's evidence + ledger notes). Repointed 2026-07-06 from the pre-verbs
+# seon-runtime-slice3 (shell-only editing — the slice-3 failure mode) to
+# seon-runtime-arm64, which carries the A5/A6 structural edit verbs
+# (fs/replace!, fail-loud) + toolbelt exposure. The entrypoint bind-mount
+# below is now redundant (this overlay's baked entrypoint already honors
+# SEON_FS_ROOT env) but kept harmless for a belt-and-suspenders grant.
+OVERLAY_VOLUME = "seon-runtime-arm64"
 
 # The repo's entrypoint, bind-mounted over the pinned volume's copy so the
 # bench compose can grant a workspace-rooted writable fs root via env (the
