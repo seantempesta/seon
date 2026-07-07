@@ -629,9 +629,12 @@
     (if (> n cap) (str (subs one 0 cap) "…") one)))
 
 (defn- cite-line
-  "One cite-card row for OK eval `e`: `;   result/<id> => <value>   ; <form>`.
-   The value preview collapses to one line + caps at [[cite-value-cap]]; a clip
-   points back at the live handle (the line prefix) for the whole value."
+  "One cite-card row for OK eval `e`: `;   result/<id> ⟹ <value>   ; <form>`.
+   Uses the reserved [[seon.agent.ctx/result-marker]] — the SAME glyph every
+   real result carries — so the anti-fabrication surface and the eval rows
+   speak ONE marker (never the fabrication-shaped `=>`). The value preview
+   collapses to one line + caps at [[cite-value-cap]]; a clip points back at
+   the live handle (the line prefix) for the whole value."
   [e]
   (let [id  (:seon.eval/id e)
         raw (str/replace (str/trim (str (:seon.eval/result-edn e))) #"\s+" " ")
@@ -639,7 +642,7 @@
               (str (subs raw 0 cite-value-cap)
                    " …⟨clipped — result/" id " holds it whole⟩")
               raw)]
-    (str ";   result/" id " => " val
+    (str ";   result/" id " " ctx/result-marker " " val
          "   ; " (collapse (:seon.eval/source e) cite-source-cap))))
 
 (defn cite-card
