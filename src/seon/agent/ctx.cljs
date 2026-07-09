@@ -674,10 +674,32 @@
 
 (def unverified-narration-marker
   "What a model-authored result-claim comment is rewritten to in the
-   transcript. Deliberately does NOT match [[result-claim-re]] itself
-   (no `=>`/`⇒`/[[result-marker]] after the semicolons), so the rewrite is
-   idempotent."
+   transcript — the STRICT form, for a fabrication with NO real handle (a
+   value typed from nothing: `⟹ {:fake 9}`, bare `=> 61`). Deliberately does
+   NOT match [[result-claim-re]] itself (no `=>`/`⇒`/[[result-marker]] after
+   the semicolons), so the rewrite is idempotent."
   ";; [unverified narration — not a real result]")
+
+(def handle-aware-narration-marker
+  "What a model-authored result-claim that ALSO carries a real `result/<id>`
+   handle is rewritten to. The agent retyped a LIVE handle next to a value (a
+   natural 'let me note what I got' line — most often the cite-card echoed
+   back into its own narration). The retyped VALUE is still stripped (it is
+   the poison a later turn would trust), but the line REFERENCES a real
+   result, so branding it 'not a real result' is an own-goal that teaches the
+   agent to distrust its own cross-turn handles. Reference-forward instead:
+   read the handle, don't retype the value. The strict
+   [[unverified-narration-marker]] stays for a claim with no handle. Like it,
+   carries no `=>`/`⇒`/reserved glyph, so the rewrite is idempotent."
+  ";; [don't retype the value — read result/<id> for it]")
+
+(def ^:private handle-ref-re
+  "A live result-var reference `result/<id>` in a line — the signal that a
+   neutralized result-claim was the agent RETYPING a real handle (not
+   fabricating a value from nothing), so the reference-forward
+   [[handle-aware-narration-marker]] applies to that line instead of the
+   strict [[unverified-narration-marker]]."
+  #"result/\S")
 
 (def ^:private result-claim-re
   "A comment posing as a REPL result read: one-or-more `;`, optional
@@ -730,19 +752,44 @@
                    result-marker result-close status-open status-close
                    "][^\\n]*")))
 
+(defn- neutralize-line
+  "Neutralize one LINE's model-authored result-claims, choosing the marker
+   from that line's provenance. A line referencing a real `result/<id>`
+   handle ([[handle-ref-re]]) — the agent retyped a live handle + value — gets
+   the reference-forward [[handle-aware-narration-marker]]; a bare fabrication
+   with no handle gets the strict [[unverified-narration-marker]]. The VALUE
+   is stripped either way (same three regexes) — only the advisory differs."
+  [line]
+  (let [marker (if (re-find handle-ref-re line)
+                 handle-aware-narration-marker
+                 unverified-narration-marker)]
+    (-> line
+        (str/replace reserved-glyph-re marker)
+        (str/replace bare-result-claim-re marker)
+        (str/replace result-claim-re marker))))
+
 (defn neutralize-result-claims
   "Rewrite every model-authored result-claim in `s` to a marker.
 
-   Rewritten to [[unverified-narration-marker]], dropping the claimed value
-   entirely (the claimed value is the poison: a later turn reads
-   `;; => {...}` or a bare `=> 61` as a real result and trusts data that
-   was never computed — two live fabrication incidents, F13/F14, plus the
-   bare-`=>` headline case in gwM-2606211132).
+   The claimed VALUE is dropped entirely either way (it is the poison: a
+   later turn reads `;; => {...}` or a bare `=> 61` as a real result and
+   trusts data that was never computed — two live fabrication incidents,
+   F13/F14, plus the bare-`=>` headline case in gwM-2606211132).
 
-   TWO shapes: the bare line ([[bare-result-claim-re]], `=> value` at
-   column 0 — the DOMINANT fabrication) is rewritten FIRST, then the
-   commented line ([[result-claim-re]], `;; =>`/inline `;; => 3`). The
-   marker carries no `=>`/`⇒` so neither regex re-matches it — idempotent.
+   HANDLE-AWARE marker, per LINE: a line that references a real `result/<id>`
+   handle ([[handle-ref-re]]) was the agent RETYPING a live handle next to a
+   value (the cite-card echoed into narration — introspection #1), so it gets
+   the reference-forward [[handle-aware-narration-marker]]; a claim with no
+   handle is a fabrication from nothing and gets the strict
+   [[unverified-narration-marker]]. The anti-fabrication guarantee is
+   identical (the value is stripped in BOTH cases) — only the advisory text
+   differs, so a real prior-turn handle is never branded 'not a real result'.
+
+   THREE shapes, per line: the bare line ([[bare-result-claim-re]], `=> value`
+   at column 0 — the DOMINANT fabrication), the reserved-glyph line
+   ([[reserved-glyph-re]], a model-typed `⟹`/`⟸`), and the commented line
+   ([[result-claim-re]], `;; =>`/inline `;; => 3`). Neither marker carries a
+   `=>`/`⇒`/reserved glyph, so no regex re-matches it — idempotent.
 
    PROVENANCE GATE, not regex luck: this runs ONLY on the
    model-authored transcript channels — `:seon.eval/narration` and
@@ -760,10 +807,9 @@
    at the boundary: nil→\"\", any value → its printed form."
   {:malli/schema [:=> [:cat :any] :string]}
   [s]
-  (-> (str s)
-      (str/replace reserved-glyph-re unverified-narration-marker)
-      (str/replace bare-result-claim-re unverified-narration-marker)
-      (str/replace result-claim-re unverified-narration-marker)))
+  (->> (str/split (str s) #"\n" -1)
+       (mapv neutralize-line)
+       (str/join "\n")))
 
 (defn- error-lines
   "Render an error/guidance body `s` as the REPL FAILURE shape: the FIRST

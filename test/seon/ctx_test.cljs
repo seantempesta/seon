@@ -1488,13 +1488,14 @@
                  "; => 42"
                  ";⇒ :ok"
                  ";;=> [1 2 3]"
-                 ;; the RESERVED runtime glyph, typed by a model — ALWAYS a
-                 ;; fabrication (the runtime is its only legitimate writer):
-                 (str "; " ctx/result-marker " {:fabricated 9} ; result/result-3")
+                 ;; the RESERVED runtime glyph, typed by a model with NO real
+                 ;; handle — ALWAYS a fabrication (the runtime is its only
+                 ;; legitimate writer); a value from nothing → strict marker:
+                 (str "; " ctx/result-marker " {:fabricated 9}")
                  (str ctx/result-marker " 999")]]
     (let [out (ctx/neutralize-result-claims claim)]
       (is (= ctx/unverified-narration-marker out)
-          (str (pr-str claim) " rewritten to the marker"))))
+          (str (pr-str claim) " rewritten to the STRICT marker"))))
   ;; ordinary narration / code is untouched — byte-identical.
   (doseq [plain [";; storing the events now"
                  "(def x 1)"
@@ -1523,6 +1524,58 @@
   (let [once (ctx/neutralize-result-claims ";; => 1\n;; ⇒ 2")]
     (is (= once (ctx/neutralize-result-claims once))
         "re-applying changes nothing — no double-marking")))
+
+(deftest neutralize-handle-aware-marker-for-real-result-refs
+  ;; introspection #1: the agent retyped a live `result/<id>` handle next to
+  ;; a value (most often the cite-card echoed back into its own narration).
+  ;; The retyped VALUE is still stripped, but the line REFERENCES a real
+  ;; result — so it must NOT be branded "not a real result"; it gets the
+  ;; reference-forward handle-aware marker instead.
+  (let [line "result/haD-2607091837 ⟹ :my.books/title   ; (schema/register! :my.books/title [:string])"
+        out  (ctx/neutralize-result-claims line)]
+    (is (str/starts-with? out "result/haD-2607091837 ")
+        "the real handle is preserved (it precedes the stripped glyph)")
+    (is (str/includes? out ctx/handle-aware-narration-marker)
+        "a line carrying a real handle gets the reference-forward marker")
+    (is (not (str/includes? out "not a real result"))
+        "a real prior-turn handle is NEVER branded a fabrication")
+    (is (not (str/includes? out ":my.books/title\n"))
+        "the retyped value is still stripped (anti-fabrication intact)")
+    (is (not (str/includes? out "schema/register!"))
+        "the retyped source-hint after the glyph is stripped too"))
+  ;; the whole cite-card echoed into narration (the exact gram-a shape):
+  ;; every retyped handle line → handle-aware, header line untouched.
+  (let [narr (str "values you JUST computed this run — cite THESE figures:\n"
+                  "result/haD-2607091837 ⟹ :my.books/title   ; (schema/register! :my.books/title [:string])\n"
+                  "result/epo-2607091837 ⟹ :my.books/author   ; (schema/register! :my.books/author :string)")
+        out  (ctx/neutralize-result-claims narr)]
+    (is (= 2 (count (re-seq (re-pattern (str/replace ctx/handle-aware-narration-marker
+                                                     #"[.*+?^${}()|\[\]\\/—]" "\\$&"))
+                            out)))
+        "both retyped-handle lines get the handle-aware marker")
+    (is (not (str/includes? out "not a real result"))
+        "no genuine handle line is branded a fabrication")
+    (is (str/includes? out "values you JUST computed")
+        "the prose header line (no glyph) is untouched")))
+
+(deftest neutralize-strict-marker-for-handleless-fabrication
+  ;; the anti-fabrication GUARANTEE: a value typed from nothing, with NO real
+  ;; `result/<id>` handle anywhere on the line, still gets the FULL strict
+  ;; "not a real result" treatment — the confirmation-drive guarantee holds.
+  (doseq [fake [(str ctx/result-marker " {:fake 9}")
+                "=> 61"
+                ";; => {:events 7}"]]
+    (is (= ctx/unverified-narration-marker (ctx/neutralize-result-claims fake))
+        (str (pr-str fake) " — handleless fabrication → STRICT marker")))
+  ;; a real result ROW is never routed through the neutralizer at all: the
+  ;; composer appends `⟹ <value> ⟸ result/<id>` AFTER neutralize runs on the
+  ;; source, so a genuine value line is untouched and unmarked.
+  (let [row (ctx/format-eval-row
+              {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
+               :seon.eval/result-edn "3" :seon.eval/id "abc0000009z"})]
+    (is (str/includes? row "⟹ 3 ⟸ result/abc0000009z")
+        "the runtime-owned value line renders intact")
+    (is (not (str/includes? row "narration")) "no marker on a genuine row")))
 
 (deftest eval-row-neutralizes-fake-claims-keeps-real-results
   ;; fake `;; =>` in stored narration → rewritten in the rendered row;
