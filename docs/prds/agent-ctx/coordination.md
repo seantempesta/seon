@@ -22,6 +22,47 @@ hands tool-defects here with rendered-context evidence.
 
 ## Log
 
+### 2026-07-09 — Tooling: parallel push — OBS-1 + floor rules + transcript-render redesign landed
+
+Three units landed on `feature/agent-ctx` (suite 1148/5175/0/0 on the merged tree):
+
+- **OBS-1 — background jobs scoped per-agent** (`cbb41c76` + fix `153e5c2e`).
+  `list-jobs`/`job-status`/`job-output`/`job-stop!` + the jobs section now filter
+  by the current agent (using the `::shell/agent-id` from `77ed1be5`); no more
+  cross-agent job leak. NOTE the fix commit: the first scoping shipped a
+  regression (a `(some? agent-id)` guard hid a nil-agent job from its own
+  unscoped spawner, breaking `run-bg!`/`job-stop!` tests) — caught by the
+  clean-tree suite, fixed to guard `(some? j)` then scope-equal.
+- **#4 — 4 load-bearing floor rules → always-on system-text** (`0ebaa873`):
+  async/await, every-map-key-namespaced, `:malli/schema`-enforced, no-`:kind`.
+  Skill back-pointers, stale-corpus docstring fixes, a warn-only dup-lint. The
+  A9 `;;;`-subsection RESTRUCTURE is DEFERRED (separate, REPL-audit-owned).
+- **#5 — transcript-render redesign, coherent core** (`17c6ff5b` + teaching
+  align `4e373bf0`): one config-driven render path, **bare-`⟹ <value> ⟸
+  result/<id>` grammar** (replaces the comment-shaped `; ⟹` agents mimicked —
+  the T4 6/24 fabrication vector), single-source glyph constants + neutralizer,
+  `:seon.config/render` knobs (whitespace/tabs/trailing-ws/layout, all
+  byte-identical by default), explicit-whitespace rendering, inverted docstring
+  lint, and 9 `my.*` toolkit ⟹-echoes stripped. system-text teaching aligned to
+  the new grammar (was left out-of-sync by design; now fixed + live-verified).
+
+**#5 DEFERRED (tracked follow-ups, not blockers):**
+- **Per-turn `⋘…⋙ ❯` masthead status** — constants + neutralizer ready, but it
+  reopens byte-stability law #62 (needs per-turn grouping + its own live-drive).
+- **Broader ⟹-echo strip** — the inverted lint now surfaces ~78 remaining
+  literals warn-only (`db.cljs` ~16, agent verbs, skill `.md` ~18, engine
+  docstrings). A mechanical sweep strips the agent-facing ones; engine
+  docstrings warn acceptably.
+- **`/html` twin** (cross-lane) + deeper whitespace wiring into the structural
+  skeleton (single-string path done; nested-map path remains).
+- **Owner decisions #5 surfaced:** `❯` EXCLUDED from the neutralizer (shell-prompt
+  false-positive; carries no fabricatable value) — reversible; multi-line result
+  handle rides the `⟹` marker line (not the value's end). Flag if either is wrong.
+- **Worktree runbook note:** a fresh worktree needs `clojure -M:cljs compile
+  bootstrap` before `bin/test-cljs` (missing `out/bootstrap/index.transit.json`),
+  and the JVM `bin/test` path can't load (`datahike/index/secondary/proximum`
+  uncompiled — paused-track artifact gap).
+
 ### 2026-07-08 — Tooling → Eval: T4 clean — gate fix CONFIRMED in-flow, A/B UNBLOCKED (preliminary)
 
 Supersedes yesterday's "A/B handoff: NOT YET". The complete-gate bg-blind fix
