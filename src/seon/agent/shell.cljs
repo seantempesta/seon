@@ -44,6 +44,7 @@
     [seon.agent.shell.internal :as in]
     [seon.agent.testrun :as testrun]
     [seon.ai.tokens :as tokens]
+    [seon.db :as db]
     [seon.platform :as platform]
     [seon.schema :as schema]))
 
@@ -417,17 +418,28 @@
     (some? (:seon.agent.shell/exit j))
     (assoc :seon.agent.shell/exit (:seon.agent.shell/exit j))))
 
-(defn list-jobs
-  "Every background job in the volatile table, newest-first — a data summary.
+(defn- mine?
+  "True when job `j` was spawned by the CURRENT agent — the per-agent scope
+   filter. A job whose :seon.agent.shell/agent-id is nil (spawned outside any
+   agent scope, e.g. a dev REPL) matches NO agent, so it is invisible in every
+   agent's list; that is acceptable — dev-REPL jobs aren't agent-facing."
+  [j]
+  (and (some? (:seon.agent.shell/agent-id j))
+       (= (:seon.agent.shell/agent-id j) (db/current-agent-id))))
 
-   The reactive :jobs context section renders from this; agents can also
-   call it to see what they launched. Sizes are TOKENS. The table is
-   process-volatile (running + recently-finished jobs; oldest finished
-   pruned past a cap)."
+(defn list-jobs
+  "This agent's background jobs in the volatile table, newest-first.
+
+   Scoped to the CURRENT agent (the reactive :seon.agent/id filter): background
+   jobs are volatile per-agent runtime artifacts, so an agent sees only the
+   jobs IT launched — never another agent's. The reactive :jobs context section
+   renders from this. Sizes are TOKENS. The table is process-volatile (running
+   + recently-finished jobs; oldest finished pruned past a cap)."
   {:malli/schema [:=> [:cat] :seon.agent.shell/list-response]}
   []
   {:seon.agent.shell/ok?  true
    :seon.agent.shell/jobs (->> (vals @in/!jobs)
+                               (filter mine?)
                                (sort-by #(- (.getTime (:seon.agent.shell/started-at %))))
                                (mapv job-summary))})
 
@@ -442,7 +454,7 @@
    (never started, or the pod restarted) is a guiding ok?-false value."
   {:malli/schema [:=> [:cat :seon.agent.shell/job-ref-request] :seon.agent.shell/job-status-response]}
   [{:seon.agent.shell/keys [job-id]}]
-  (if-let [j (get @in/!jobs job-id)]
+  (if-let [j (let [j (get @in/!jobs job-id)] (when (mine? j) j))]
     (let [parsed (when (and (not= :running (:seon.agent.shell/state j))
                             (testrun/pytest-argv? (:seon.agent.shell/cmd j)
                                                   (:seon.agent.shell/args j)))
@@ -476,7 +488,7 @@
    ok?-false value."
   {:malli/schema [:=> [:cat :seon.agent.shell/job-output-request] :seon.agent.shell/job-output-response]}
   [{:seon.agent.shell/keys [job-id stream since]}]
-  (if-let [j (get @in/!jobs job-id)]
+  (if-let [j (let [j (get @in/!jobs job-id)] (when (mine? j) j))]
     (let [stream (or stream :out)
           s      (case stream :err (:seon.agent.shell/err j) (:seon.agent.shell/out j))
           trunc? (case stream
@@ -502,7 +514,7 @@
    Unknown id → a guiding ok?-false value."
   {:malli/schema [:=> [:cat :seon.agent.shell/job-ref-request] :seon.agent.shell/job-stop-response]}
   [{:seon.agent.shell/keys [job-id]}]
-  (if (get @in/!jobs job-id)
+  (if (mine? (get @in/!jobs job-id))
     (do (in/stop-job! job-id)
         {:seon.agent.shell/ok?    true
          :seon.agent.shell/job-id job-id

@@ -384,6 +384,52 @@
       ;; empty section renders nothing
       (done))))
 
+(deftest bg-jobs-are-scoped-per-agent-no-cross-agent-leak
+  ;; OBS-1: a background job is a per-agent volatile runtime artifact, so an
+  ;; agent must see (list/status/output/stop) ONLY the jobs IT launched. Agent
+  ;; B's job appears to NOT EXIST to agent A — same guiding unknown-job value as
+  ;; a truly-absent id, so A's isolation never even leaks B's existence. Two
+  ;; 14-char agent ids (the :seon.agent/id shape the section-request validates).
+  (async done
+    (let [A     "shelltestA0001"
+          B     "shelltestB0001"
+          bg    (fn [aid] (db/with-agent aid
+                            (fn [] (:seon.agent.shell/job-id
+                                    (shell/run-bg! {:seon.agent.shell/cmd  "bash"
+                                                    :seon.agent.shell/args ["-c" "sleep 30"]})))))
+          a-id  (bg A)
+          b-id  (bg B)
+          ids   (fn [aid] (db/with-agent aid
+                            (fn [] (->> (shell/list-jobs) :seon.agent.shell/jobs
+                                        (mapv :seon.agent.shell/job-id) set))))]
+      ;; 1. list-jobs is scoped — A sees only a-id, B only b-id.
+      (is (= #{a-id} (ids A)) "A's list contains ONLY A's job")
+      (is (= #{b-id} (ids B)) "B's list contains ONLY B's job")
+      ;; 2. A on B's id → the SAME unknown-job envelope as an absent id.
+      (db/with-agent A
+        (fn []
+          (doseq [r [(shell/job-status {:seon.agent.shell/job-id b-id})
+                     (shell/job-output {:seon.agent.shell/job-id b-id})
+                     (shell/job-stop!  {:seon.agent.shell/job-id b-id})]]
+            (is (false? (:seon.agent.shell/ok? r)) "B's job appears not to exist to A")
+            (is (re-find #"no background job" (:seon.error/message r))
+                "isolation: identical to a truly-unknown id, no distinct 'not yours'"))
+          ;; 3. A's OWN id still works for A.
+          (is (true? (:seon.agent.shell/ok? (shell/job-status {:seon.agent.shell/job-id a-id})))
+              "A's own job is fully readable by A")
+          ;; 4. the derived section is scoped too — A's render names a-id, not b-id.
+          (let [blk (seon.agent.ctx.jobs/jobs-block {})]
+            (is (str/includes? blk a-id) "A's :jobs section shows A's job")
+            (is (not (str/includes? blk b-id)) "A's :jobs section HIDES B's job"))))
+      ;; B's job is still alive (A's stop was a no-op on a job it can't see).
+      (is (= :running (db/with-agent B (fn [] (:seon.agent.shell/state
+                                               (shell/job-status {:seon.agent.shell/job-id b-id})))))
+          "A could not stop B's job")
+      ;; cleanup — stop both children.
+      (db/with-agent A (fn [] (shell/job-stop! {:seon.agent.shell/job-id a-id})))
+      (db/with-agent B (fn [] (shell/job-stop! {:seon.agent.shell/job-id b-id})))
+      (done))))
+
 ;; ---------------------------------------------------------------------------
 ;; 10. Persist-at-exit — a BACKGROUND pytest job records a testrun datom when
 ;;     it finishes, so the complete-gate is NOT blind to bg tests (D-GATE-BG).

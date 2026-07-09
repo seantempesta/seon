@@ -7,8 +7,9 @@
    datoms) read AT RENDER TIME. It renders NOTHING when the table is empty
    and each line carries the `job-output` handle to read more — so nothing
    is stored, no acknowledgement state, and the section VANISHES the moment
-   the last job is pruned (self-healing). Pod-wide: it does not filter by
-   agent, so every agent sees the jobs any of them launched. Symbol-wired
+   the last job is pruned (self-healing). Scoped to the CURRENT agent:
+   `list-jobs` filters by `:seon.agent/id`, so this section shows ONLY the
+   jobs THIS agent launched — never another agent's (OBS-1). Symbol-wired
    into the composer (`seon.config/default-ctx-blocks`) as
    `'seon.agent.ctx.jobs/jobs-block`."
   (:require
