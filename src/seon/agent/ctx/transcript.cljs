@@ -10,11 +10,13 @@
    NOT containers — there are no per-turn headers; the only structural
    marker is the session-resume boundary, interleaved by time.
 
-   It reads as an eval'able REPL transcript: `;` comments + forms +
-   `; ⟹`-commented results + `;;;`-bracketed sections / `;;; ◀`/`;;; ▶`
-   message lines + a live `ns=>`
-   readline. Re-evaluating the forms (comments pass through) reproduces the
-   agent's state — the context IS a replayable program (the north star).
+   It reads as a REPL transcript: `;` comments + forms + BARE
+   `⟹ <value> ⟸ result/<id>` runtime result lines (NOT comment-shaped, so a
+   model can't fabricate one) + `;;;`-bracketed sections / `;;; ◀`/`;;; ▶`
+   message lines + a live `ns=>` readline. Settled tradeoff
+   (transcript-render redesign): the transcript is no longer re-evaluable
+   Clojure — clarity + anti-fabrication win, because the old `; ⟹` shape was
+   copied by agents into fabricated results.
 
    The masthead opens it, the events stream in time order, and the folded
    live readline at the very bottom carries the cursor (current ns) + this
@@ -385,15 +387,14 @@
             str/trim)))))
 
 (defn coalesced->renderable
-  "The `:seon.render/ai` converter for a COALESCED error run: ONE `;` summary
-   line standing in for N identical consecutive failures, so a thrash burst
-   never floods the agent's own context. Flat + eval'able (a pure comment —
-   re-evaluating runs nothing, which is correct: every collapsed form DEFINED
-   NOTHING)."
+  "The `:seon.render/ai` converter for a COALESCED error run: ONE bare
+   `⟹ ✗ N× …` runtime summary line standing in for N identical consecutive
+   failures, so a thrash burst never floods the agent's own context (every
+   collapsed form DEFINED NOTHING)."
   {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{node :seon.render/node}]
   (let [{::keys [signature count]} node]
-    (str "; " ctx/result-marker " ✗ " count "× " signature
+    (str ctx/result-marker " ✗ " count "× " signature
          " — " count " consecutive failures collapsed; each DEFINED NOTHING. "
          "Fix the form once, not " count " times.")))
 

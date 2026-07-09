@@ -70,7 +70,7 @@
 
    ; read the current set (db injected automatically):
    (my.kb.shared/instructions)
-   ; ⟹ «vector: [\"Always store provenance (:my.kb/source-path) with findings.\"]»"
+   ; returns «vector: [\"Always store provenance (:my.kb/source-path) with findings.\"]»"
   {:malli/schema [:function
                   [:=> [:cat] [:vector ::text]]
                   [:=> [:catn [::db :seon.db/db]] [:vector ::text]]]}

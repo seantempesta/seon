@@ -114,7 +114,20 @@
    [:seon.config.render/value-width       {:optional true} [:int {:min 1}]]
    ;; TOKEN cap (not chars — the auto-run family is token-denominated) for ONE
    ;; current-ns auto-run render fn's ai output (seon.agent.ctx.render-fns).
-   [:seon.config.render/render-fn-token-cap {:optional true} [:int {:min 1}]]])
+   [:seon.config.render/render-fn-token-cap {:optional true} [:int {:min 1}]]
+   ;; EXPLICIT-CHARACTER knobs (transcript-render redesign) — for content the
+   ;; agent edits byte-exactly. Every DEFAULT reproduces today's bytes, so an
+   ;; absent section / `{}` boot is byte-identical.
+   ;;   :whitespace     :raw     — literal (default) | :visible — `·`/`→` glyphs
+   ;;   :tabs           :literal — literal `\t` (default) | :arrow — `→`
+   ;;   :trailing-ws    :off     — no marker (default) | :dot — `·` on trailing ws
+   ;;   :content-layout :structured — multi-line body (default) | :single-line
+   ;;   :line-numbers   false    — no gutter (default) | true — 1-based gutter
+   [:seon.config.render/whitespace     {:optional true} [:enum :raw :visible]]
+   [:seon.config.render/tabs           {:optional true} [:enum :literal :arrow]]
+   [:seon.config.render/trailing-ws    {:optional true} [:enum :off :dot]]
+   [:seon.config.render/content-layout {:optional true} [:enum :structured :single-line]]
+   [:seon.config.render/line-numbers   {:optional true} :boolean]])
 
 ;; THE manifest — the registry of known sections. A future section = ONE more
 ;; optional key here + a resolver fn. Every key optional ⇒ `{}` (config absent)
@@ -688,6 +701,47 @@
    `:seon.config.render/render-fn-token-cap`; 2000)."
   {:malli/schema [:=> [:cat] :int]} []
   (get (render-config) :seon.config.render/render-fn-token-cap 2000))
+
+;;; --- Explicit-character render knobs (transcript-render redesign). Each
+;;; default reproduces today's bytes, so an absent section renders identically.
+
+(defn render-whitespace
+  "Whitespace rendering mode for string content: `:raw` or `:visible`.
+
+   `:visible` makes tab/space glyphs (`·`/`→`) explicit so a whitespace bug
+   (tabs-vs-spaces in Python) is visible; `:raw` (default — byte-identical to
+   today) leaves literal (manifest `:seon.config.render/whitespace`)."
+  {:malli/schema [:=> [:cat] :keyword]} []
+  (get (render-config) :seon.config.render/whitespace :raw))
+
+(defn render-tabs
+  "Tab rendering mode: `:literal` (default) or `:arrow` (`→`).
+
+   Manifest `:seon.config.render/tabs`; default reproduces today's bytes."
+  {:malli/schema [:=> [:cat] :keyword]} []
+  (get (render-config) :seon.config.render/tabs :literal))
+
+(defn render-trailing-ws
+  "Trailing-whitespace marker mode: `:off` (default) or `:dot` (`·`).
+
+   Manifest `:seon.config.render/trailing-ws`; default reproduces today."
+  {:malli/schema [:=> [:cat] :keyword]} []
+  (get (render-config) :seon.config.render/trailing-ws :off))
+
+(defn render-content-layout
+  "Content layout for edited text: `:structured` (default) or `:single-line`.
+
+   Manifest `:seon.config.render/content-layout`; default reproduces today."
+  {:malli/schema [:=> [:cat] :keyword]} []
+  (get (render-config) :seon.config.render/content-layout :structured))
+
+(defn render-line-numbers?
+  "Whether string content renders with a 1-based line-number gutter.
+
+   `false` (default — byte-identical to today); manifest
+   `:seon.config.render/line-numbers`."
+  {:malli/schema [:=> [:cat] :boolean]} []
+  (boolean (get (render-config) :seon.config.render/line-numbers false)))
 
 ;; `def` (NOT defonce) for the same hot-reload rotation reason as
 ;; render-config-cache above; memoized per SEON_CONFIG within a process.

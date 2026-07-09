@@ -64,7 +64,16 @@
   :seon.config.render/value-width        72
   ;; TOKEN cap (the caps above are chars) for ONE current-ns auto-run render
   ;; fn's ai output (seon.agent.ctx.render-fns).
-  :seon.config.render/render-fn-token-cap 2000}
+  :seon.config.render/render-fn-token-cap 2000
+
+  ;; EXPLICIT-CHARACTER render knobs (transcript-render redesign). Each value
+  ;; below IS the default the accessor applies when absent — so this section is
+  ;; byte-identical to omitting it. Flip a knob then `bin/seon restart pod`.
+  :seon.config.render/whitespace     :raw          ; :raw | :visible (·/→ glyphs)
+  :seon.config.render/tabs           :literal      ; :literal | :arrow (→)
+  :seon.config.render/trailing-ws    :off          ; :off | :dot (· on trailing ws)
+  :seon.config.render/content-layout :structured   ; :structured | :single-line
+  :seon.config.render/line-numbers   false}        ; true → 1-based line gutter
 
  ;; ── CORE-FAULT ESCALATION DIAL (error-blame-strict-gate, RULED 2026-07-04) ──
  ;; What a :core-fault seon.error/record! does BEYOND persisting its datom:

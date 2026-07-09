@@ -614,10 +614,13 @@
               "a tighter :where, or pull fewer attrs."))))))
 
 (def result-marker
-  "The reserved RUNTIME result glyph `⟹` — the SINGLE SOURCE OF TRUTH.
+  "The reserved RUNTIME result-OPEN glyph `⟹` — the SINGLE SOURCE OF TRUTH.
 
-   The runtime writes it in front of a real eval result on the line AFTER
-   a form is submitted (`; ⟹ <value> ; result/<id>`). It is RUNTIME OUTPUT
+   The runtime writes it BARE (no leading `;`) in front of a real eval
+   result: `(form) ⟹ <value> ⟸ result/<id>` — everything from `⟹` through
+   the `⟸` handle is the runtime's; the value is deliberately NOT
+   comment-shaped, so a model can't fabricate one by writing a `;` comment
+   (the `; ⟹` shape that agents copied — T4 6/24). It is RUNTIME OUTPUT
    ONLY: an agent never authors it, and [[neutralize-result-claims]]
    replaces a model-typed `⟹` with [[unverified-narration-marker]]. The
    emit site ([[format-eval-row]] + `seon.agent.ctx.transcript`), the
@@ -626,6 +629,48 @@
    swappable edit and can never drift between what the runtime emits, what
    the sanitizer catches, and what the context teaches."
   "⟹")
+
+(def result-close
+  "The reserved RUNTIME result-CLOSE glyph `⟸` — CARRIES THE HANDLE.
+
+   Fences the end of a real result and precedes its live-var handle:
+   `⟹ <value> ⟸ result/<id>`. Reserved like [[result-marker]] (the runtime
+   is its only writer; [[reserved-glyph-re]] neutralizes a model-typed one).
+   ONE swappable edit — every emit site references THIS def, never a bare
+   `\"⟸\"` literal."
+  "⟸")
+
+(def status-open
+  "The reserved RUNTIME per-turn-status OPEN glyph `⋘`.
+
+   Opens the byte-stable per-turn status masthead
+   `⋘ <turn-ts> · turn N · <ctx-tok> · <ns> ⋙ ❯` whose fields are each
+   turn's FIXED stored values (never live-recomputed). Reserved runtime
+   chrome — an agent never writes it; referenced from THIS def only."
+  "⋘")
+
+(def status-close
+  "The reserved RUNTIME per-turn-status CLOSE glyph `⋙` — see [[status-open]]."
+  "⋙")
+
+(def prompt
+  "The reserved RUNTIME prompt glyph `❯` — the last symbol of a status line.
+
+   Marks where the REPL awaits input. Reserved runtime chrome (an agent
+   never authors it); referenced from THIS def only, so it can never drift."
+  "❯")
+
+(def reserved-glyphs
+  "The FIVE reserved result-grammar glyphs, as a set of the single-source
+   constants: result-open [[result-marker]] `⟹`, result-close
+   [[result-close]] `⟸`, status [[status-open]]/[[status-close]] `⋘`/`⋙`,
+   and [[prompt]] `❯`. The runtime is the ONLY writer of any of these; the
+   neutralizer ([[reserved-glyph-re]]) rewrites a model-typed one, and the
+   no-mixed-references lint (`seon.dev.docstring`) flags a literal outside
+   the constant defs. Distinct from the value-VOCABULARY glyphs
+   (`⟨N tok⟩` · `‹partial›` · `#‹…›` · `{…N keys}` · `«…»`) which are NOT
+   reserved and appear legitimately elsewhere (inventory / `my.plan`)."
+  #{result-marker result-close status-open status-close prompt})
 
 (def unverified-narration-marker
   "What a model-authored result-claim comment is rewritten to in the
@@ -663,16 +708,27 @@
   #"(?m)^[ \t]*(?:=>|⇒)[^\n]*")
 
 (def ^:private reserved-glyph-re
-  "The RESERVED runtime glyph [[result-marker]] (`⟹`) appearing in
-   model-authored text — ALWAYS a fabrication, because the runtime is the
-   only writer of a real `; ⟹ <value>` result line (the composer appends it
-   AFTER [[neutralize-result-claims]] runs, so a genuine result never passes
-   through here). Unlike `=>`, `⟹` is RESERVED, so this needs none of the
-   fragile `;`-counting or column-0 `:=>`-collision anchoring the two `=>`
-   regexes carry — any `⟹` at all, with its optional leading `;` comment
-   markers, through end of line, is neutralized. Built from [[result-marker]]
-   so the glyph is defined in exactly one place."
-  (re-pattern (str "(?:;+[ \\t]*)?" result-marker "[^\\n]*")))
+  "A RESERVED runtime result-grammar glyph appearing in model-authored text
+   — ALWAYS a fabrication, because the runtime is the only writer of a real
+   `⟹ <value> ⟸ result/<id>` result line or a `⋘ … ⋙` status line (the
+   composer appends them AFTER [[neutralize-result-claims]] runs, so a
+   genuine one never passes through here). Unlike `=>`, these glyphs are
+   RESERVED, so this needs none of the fragile `;`-counting or column-0
+   `:=>`-collision anchoring the two `=>` regexes carry — any one of them,
+   with its optional leading `;` comment markers, through end of line, is
+   neutralized.
+
+   Keys on the VALUE/STATUS-bearing reserves only —
+   [[result-marker]] `⟹`, [[result-close]] `⟸`, [[status-open]] `⋘`,
+   [[status-close]] `⋙` — the ones that carry (or fence) a fabricatable
+   value or a turn's status. [[prompt]] `❯` is DELIBERATELY EXCLUDED: it is
+   a common shell-prompt glyph an agent may legitimately paste (a pasted
+   terminal transcript), carries no value, and neutralizing it would be a
+   false positive (owner-flagged 2026-07-07). Built from a char class over
+   the constants so each glyph is defined in exactly one place."
+  (re-pattern (str "(?:;+[ \\t]*)?["
+                   result-marker result-close status-open status-close
+                   "][^\\n]*")))
 
 (defn neutralize-result-claims
   "Rewrite every model-authored result-claim in `s` to a marker.
@@ -711,9 +767,9 @@
 
 (defn- error-lines
   "Render an error/guidance body `s` as the REPL FAILURE shape: the FIRST
-   non-blank line becomes the `; ⟹ ✗ <headline>` output line (a COMMENTED
-   result — re-evaluating the transcript runs only the forms, never an
-   echoed value), every CONTINUATION line a plain `;` comment (via
+   non-blank line becomes the bare `⟹ ✗ <headline>` output line (a RUNTIME
+   failure line, not comment-shaped, so it can't be mimicked), every
+   CONTINUATION line a plain `;` comment (via
    [[quote-lines]], so a read-error's source slice + `^` caret stay
    ALIGNED — only the leading comment marker is stripped, never the
    interior indentation the caret depends on). One crystal-clear guidance
@@ -730,7 +786,7 @@
                      (str/replace #"^[⚠✗][ \t]?" ""))
             rest-body (quote-lines (str/join "\n" (rest lines))
                                    {:seon.agent.ctx/strip-markers? true})]
-        (cond-> (str "; " result-marker " ✗ " head)
+        (cond-> (str result-marker " ✗ " head)
           (seq (rest lines)) (str "\n" rest-body))))))
 
 (defn format-eval-row
@@ -739,31 +795,30 @@
    The form's comment-preamble as
    `;` lines (via [[quote-lines]]), the form verbatim (or the
    parinfer-repaired source), captured print output, then the value as a
-   `; ⟹ <value>` COMMENTED output line trailing ` ; result/<id>` (or the
-   error as a `; ⟹ ✗ <guidance>` line). The `⟹` marker is the reserved
-   [[result-marker]] (see its docstring — the runtime is its only writer).
+   BARE `⟹ <value> ⟸ result/<id>` RUNTIME line (or the error as a bare
+   `⟹ ✗ <guidance>` line). The `⟹`/`⟸` glyphs are the reserved
+   [[result-marker]]/[[result-close]] (see their docstrings — the runtime
+   is their only writer, so a model can't fabricate a result by writing a
+   `;` comment). A SHORT single-line value inlines onto the form's own
+   line; a large one spans lines and its `⟸ result/<id>` handle fences it.
    NO history prompt prefix — the live
-   `<your-ns>=>` cursor lives once at the very END of the context; each
-   row reads as plain
-   comments + form + commented REPL output, the exact shape the system
-   prompt teaches.
+   `<your-ns>=>` cursor lives once at the very END of the context.
 
      ; add 1 and 2
-     (+ 1 2)
-     ; ⟹ 3 ; result/EVLabc-123
+     (+ 1 2) ⟹ 3 ⟸ result/EVLabc-123
 
-   The result line is a COMMENT (`; ⟹`) so re-evaluating the whole
-   transcript runs ONLY the forms — the values are history the runtime
-   wrote, not inputs (north star: the context IS eval'able Clojure). The
-   trailing ` ; result/<id>` is the LIVE VAR HANDLE: the agent references
+   The result is NOT comment-shaped (the settled tradeoff: the transcript
+   is no longer re-evaluable Clojure — clarity + anti-fabrication win,
+   because the old `; ⟹` shape was mimicked by agents). The trailing
+   `⟸ result/<id>` is the LIVE VAR HANDLE: the agent references
    `result/<id>` directly to reuse the value. PRIOR-SESSION evals
    (`prior?` true) render the value WITHOUT the handle (their vars died
    with the restart; the resume boundary marker says so once). A clipped
    value appends `(N of M)` to the handle so the agent knows the display
    is a partial view.
 
-   FAILURES render `; ⟹ ✗ <crystal-clear guidance>` (never a stack trace,
-   never a `; result/<id>` — there is no value to reuse): the
+   FAILURES render bare `⟹ ✗ <crystal-clear guidance>` (never a stack trace,
+   never a `⟸ result/<id>` — there is no value to reuse): the
    pre-rendered legible `:seon.eval/error` string (read/compile/runtime —
    crystal-clear at the source) or a Malli instrumentation envelope via
    `render-malli-error`. A COMMENT-ONLY row (blank source — trailing
@@ -878,17 +933,18 @@
                  ;; row). Render-time-computed off `raw`, so aging is
                  ;; unaffected (byte-stable per fixed age).
                  handle  (when-not prior?
-                           (str " ; result/" eid
+                           (str " " result-close " result/" eid
                                 (when clipped?
                                   (str " (" (tokens/chars->tokens body-cap)
                                        " of " (tokens/chars->tokens full)
                                        " tokens)"))))
                  lines   (str/split-lines v)]
-             ;; Prefix ONLY the first line with `; ⟹` + handle; continuation
-             ;; lines (a clip's own `;` guide) stay as the body wrote them.
-             ;; `; ⟹` is a COMMENT — the value is runtime history, never a
-             ;; form to re-run.
-             (str "; " result-marker " " (first lines) handle
+             ;; BARE `⟹ <value> ⟸ result/<id>` — the result-open marker + the
+             ;; result-close handle ride the FIRST line; continuation lines (a
+             ;; clip's own `;` guide, or a multi-line value's rest) stay as the
+             ;; body wrote them. NOT comment-shaped: the runtime is the only
+             ;; writer of a `⟹`/`⟸` line, so a model can't fabricate one.
+             (str result-marker " " (first lines) handle
                   (when (next lines)
                     (str "\n" (str/join "\n" (rest lines))))))
 
@@ -903,17 +959,35 @@
            ;; line, plain-clip (NOT the "narrow your query" result guide).
            (cap-result (error-lines err) limit small-full?)
 
-           :else (str "; " result-marker " ✗ <no result>"))
+           :else (str result-marker " ✗ <no result>"))
          ;; Reactive 'won't persist' note (#7) — DERIVED from source, no
          ;; stored attr; recomputed each render so it follows the form.
          note   (when (and ok? (not comment-only?))
-                  (seval/scratch-def-note src))]
-     (->> [(when (not (str/blank? preamble)) preamble)
-           form-ln
-           out-ln
-           result-ln
-           (when (and note (not (str/blank? note)))
-             (quote-lines note {:seon.agent.ctx/strip-markers? true}))]
+                  (seval/scratch-def-note src))
+         ;; INLINE the result onto the form's OWN line — the PRD grammar
+         ;; `(form) ⟹ <value> ⟸ result/<id>` — when everything is
+         ;; single-line: a form present + single-line, no captured stdout
+         ;; between them, and a single-line result line. A multi-line form,
+         ;; multi-line/clipped value, or intervening stdout keeps the result
+         ;; on its own line (still bare `⟹ …`), so the fence stays legible.
+         inline? (and form-ln
+                      (not (str/includes? form-ln "\n"))
+                      (str/blank? (str out-ln))
+                      (string? result-ln)
+                      (not (str/blank? result-ln))
+                      (not (str/includes? result-ln "\n")))
+         form+result (when inline? (str form-ln " " result-ln))]
+     (->> (if inline?
+            [(when (not (str/blank? preamble)) preamble)
+             form+result
+             (when (and note (not (str/blank? note)))
+               (quote-lines note {:seon.agent.ctx/strip-markers? true}))]
+            [(when (not (str/blank? preamble)) preamble)
+             form-ln
+             out-ln
+             result-ln
+             (when (and note (not (str/blank? note)))
+               (quote-lines note {:seon.agent.ctx/strip-markers? true}))])
           (remove nil?)
           (str/join "\n")))))
 

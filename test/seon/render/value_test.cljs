@@ -7,6 +7,7 @@
   (:require
     [cljs.test :as t :refer [deftest is testing]]
     [clojure.string :as str]
+    [seon.config :as config]
     [seon.render.value :as v]))
 
 ;; Stand-ins for opaque runtime handles (the real ones are datahike's).
@@ -278,3 +279,57 @@
     (is (contains? data :seon.render.value/tree))
     ;; the tree is the same skeleton render-ai emits
     (is (= (v/sample (vec (range 100))) (:seon.render.value/tree data)))))
+
+;; ------------------------------------------------------------
+;; Explicit-whitespace rendering (transcript-render redesign) — the central
+;; capability for surgical edits. Gated by config; default is byte-identical.
+;; ------------------------------------------------------------
+
+(deftest visible-whitespace-is-gated-and-central
+  (testing "all knobs off (default) → byte-identical passthrough"
+    (with-redefs [config/render-whitespace   (constantly :raw)
+                  config/render-tabs         (constantly :literal)
+                  config/render-trailing-ws  (constantly :off)
+                  config/render-line-numbers? (constantly false)]
+      (is (= "a\tb c\n  x " (v/visible-whitespace "a\tb c\n  x ")))))
+  (testing ":visible → every space `·` and every tab `→`"
+    (with-redefs [config/render-whitespace   (constantly :visible)
+                  config/render-tabs         (constantly :literal)
+                  config/render-trailing-ws  (constantly :off)
+                  config/render-line-numbers? (constantly false)]
+      (is (= "a→b·c" (v/visible-whitespace "a\tb c")))))
+  (testing ":tabs :arrow alone → tabs `→`, spaces untouched"
+    (with-redefs [config/render-whitespace   (constantly :raw)
+                  config/render-tabs         (constantly :arrow)
+                  config/render-trailing-ws  (constantly :off)
+                  config/render-line-numbers? (constantly false)]
+      (is (= "a→b c" (v/visible-whitespace "a\tb c")))))
+  (testing ":trailing-ws :dot marks ONLY trailing whitespace"
+    (with-redefs [config/render-whitespace   (constantly :raw)
+                  config/render-tabs         (constantly :literal)
+                  config/render-trailing-ws  (constantly :dot)
+                  config/render-line-numbers? (constantly false)]
+      (is (= "a b·\nx" (v/visible-whitespace "a b \nx"))
+          "interior space kept, trailing space dotted")))
+  (testing ":line-numbers prepends a 1-based gutter"
+    (with-redefs [config/render-whitespace   (constantly :raw)
+                  config/render-tabs         (constantly :literal)
+                  config/render-trailing-ws  (constantly :off)
+                  config/render-line-numbers? (constantly true)]
+      (is (= "1  a\n2  b" (v/visible-whitespace "a\nb"))))))
+
+(deftest render-ai-string-value-uses-whitespace-view-only-when-active
+  (testing "default → string value renders as quoted pr-str (byte-identical)"
+    (with-redefs [config/render-whitespace   (constantly :raw)
+                  config/render-tabs         (constantly :literal)
+                  config/render-trailing-ws  (constantly :off)
+                  config/render-line-numbers? (constantly false)]
+      (is (= (pr-str "a\tb") (v/render-ai "eidX" "a\tb"))
+          "quoted/escaped form, exactly as today")))
+  (testing "whitespace active → string value renders RAW bytes with glyphs"
+    (with-redefs [config/render-whitespace   (constantly :visible)
+                  config/render-tabs         (constantly :literal)
+                  config/render-trailing-ws  (constantly :off)
+                  config/render-line-numbers? (constantly false)]
+      (is (= "a→b" (v/render-ai "eidX" "a\tb"))
+          "raw content with tab→ glyph, not the quoted pr-str form"))))

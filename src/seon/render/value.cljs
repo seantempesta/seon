@@ -212,6 +212,62 @@
      :seon.render.value/head       (subs s 0 (max 0 (dec max-string)))}
     s))
 
+;; ============================================================
+;; Explicit-whitespace rendering — the CENTRAL capability for surgical edits
+;; (transcript-render redesign). Display precision ⟂ match precision: the
+;; glyphs are DISPLAY-only (the live value behind result/<id> is the real
+;; bytes). Every knob DEFAULTS off, so the fast path returns `s` unchanged —
+;; byte-identical to today. Reads `seon.config` once per call.
+;; ============================================================
+
+(defn- whitespace-active?
+  "True iff any explicit-whitespace knob is off its default — the ONLY case
+   where [[visible-whitespace]] diverges from `s`. Lets a caller bypass the
+   pr-str/quote path for a string value ONLY when the operator asked for it,
+   so the default render is byte-identical to today."
+  []
+  (not (and (= (config/render-whitespace) :raw)
+            (= (config/render-tabs) :literal)
+            (= (config/render-trailing-ws) :off)
+            (not (config/render-line-numbers?)))))
+
+(defn- mark-trailing-ws
+  "Glyph only the TRAILING whitespace run of one line (`·` per space, `→` per
+   tab); interior bytes untouched. For `:trailing-ws :dot` (surface a trailing
+   space a diff would otherwise hide) without recoloring every space."
+  [line]
+  (str/replace line #"[ \t]+$"
+               (fn [m] (-> m (str/replace " " "·") (str/replace "\t" "→")))))
+
+(defn visible-whitespace
+  "Render explicit-whitespace glyphs on string content `s` per the render
+   config — the one central place tab/space/indent/trailing-ws become visible.
+
+   `:whitespace :visible` → every space `·`, every tab `→`; `:tabs :arrow`
+   arrows tabs alone; `:trailing-ws :dot` marks only trailing whitespace;
+   `:line-numbers true` prepends a 1-based gutter. All knobs off (the default)
+   short-circuits to `s` unchanged — byte-identical to today. DISPLAY only: the
+   value behind `result/<id>` is the real bytes the agent matches against."
+  {:malli/schema [:=> [:catn [:seon.render.value/content :string]] :string]}
+  [s]
+  (let [ws     (config/render-whitespace)
+        tabs   (config/render-tabs)
+        trail  (config/render-trailing-ws)
+        lines? (config/render-line-numbers?)]
+    (if (and (= ws :raw) (= tabs :literal) (= trail :off) (not lines?))
+      s
+      (->> (str/split s #"\n" -1)
+           (map-indexed
+             (fn [i line]
+               (let [line* (cond-> line
+                             (= ws :visible)                  (str/replace " " "·")
+                             (or (= ws :visible)
+                                 (= tabs :arrow))             (str/replace "\t" "→")
+                             (and (not= ws :visible)
+                                  (= trail :dot))             mark-trailing-ws)]
+                 (if lines? (str (inc i) "  " line*) line*))))
+           (str/join "\n")))))
+
 (declare sample*)
 
 (defn- sample-seqish
@@ -543,15 +599,31 @@
   ;; to the guaranteed-total `sample` skeleton (its markers name the cause)
   ;; instead of ever throwing.
   (try
-    (let [probe (sample value verbatim-probe-opts)]
-      (if (truncated? probe)
-        (bounded-view eval-id value)
-        ;; probe untruncated ⇒ value is finite, opaque-free, bounded ⇒ pr-str
-        ;; cannot hang. Print it WHOLE when it fits the char budget.
-        (let [edn (pr-str value)]
-          (if (<= (count edn) verbatim-cap)
-            edn
-            (bounded-view eval-id value)))))
+    (cond
+      ;; EXPLICIT-CHARACTER view of a STRING value (file content the agent
+      ;; edits) — ONLY when an operator turned a whitespace knob on. Renders the
+      ;; RAW bytes with visible glyphs instead of the quoted/escaped pr-str form,
+      ;; so tab-vs-space is visible for building an exact `replace!` find. Gated:
+      ;; at defaults this branch is skipped and the pr-str path below is unchanged
+      ;; (byte-identical to today). Clipped to `verbatim-cap` with a drill hint so
+      ;; a huge file still points back at its live `result/<id>`.
+      (and (string? value) (whitespace-active?))
+      (if (<= (count value) verbatim-cap)
+        (visible-whitespace value)
+        (str (visible-whitespace (subs value 0 (max 0 (dec verbatim-cap))))
+             "\n; ‹partial view of " (tokens/estimate value)
+             " tokens› — the COMPLETE value is result/" eval-id))
+
+      :else
+      (let [probe (sample value verbatim-probe-opts)]
+        (if (truncated? probe)
+          (bounded-view eval-id value)
+          ;; probe untruncated ⇒ value is finite, opaque-free, bounded ⇒ pr-str
+          ;; cannot hang. Print it WHOLE when it fits the char budget.
+          (let [edn (pr-str value)]
+            (if (<= (count edn) verbatim-cap)
+              edn
+              (bounded-view eval-id value))))))
     (catch :default e
       (str (emit (sample value) 0)
            "\n; ‹value threw on render: " (or (some-> ^js e .-message) (str e))

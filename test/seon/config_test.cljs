@@ -36,6 +36,28 @@
   (testing "the {} manifest leaves the route seed untouched"
     (is (= routes (config/resolve-routes routes {})))))
 
+(deftest render-explicit-char-knobs-validate-and-default
+  ;; transcript-render redesign: the new whitespace/tabs/trailing-ws/layout/
+  ;; line-number knobs validate, and an ABSENT section reproduces today's
+  ;; bytes — every accessor defaults off.
+  (testing "the knobs validate in the manifest"
+    (is (m/validate :seon.config/manifest
+                    {:seon.config/render
+                     {:seon.config.render/whitespace     :visible
+                      :seon.config.render/tabs           :arrow
+                      :seon.config.render/trailing-ws    :dot
+                      :seon.config.render/content-layout :single-line
+                      :seon.config.render/line-numbers   true}})))
+  (testing "an absent section defaults to today's byte-identical render"
+    (with-redefs [config/load-manifest (fn [] {})]
+      (config/reset-render-cache!)
+      (is (= :raw        (config/render-whitespace)))
+      (is (= :literal    (config/render-tabs)))
+      (is (= :off        (config/render-trailing-ws)))
+      (is (= :structured (config/render-content-layout)))
+      (is (false?        (config/render-line-numbers?)))
+      (config/reset-render-cache!))))
+
 ;;; :my.skills/load — the always-on skill-body presence-set expands into
 ;;; :skill/<name> blocks on :seon.agent/ctx (live-proof the dial is consumed:
 ;;; a non-default value observably changes the seeded block set).

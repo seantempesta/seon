@@ -1392,8 +1392,8 @@
 ;; ------------------------------------------------------------
 
 (deftest eval-row-repl-faithful-stream
-  ;; success: preamble as `;` prose, form verbatim, the value as a
-  ;; `; ⟹` COMMENT line carrying the live ` ; result/<id>` var handle.
+  ;; success: preamble as `;` prose, form verbatim, the value on a BARE
+  ;; `⟹ <value> ⟸ result/<id>` line INLINED onto the form (not comment-shaped).
   (let [row (ctx/format-eval-row
               {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
                :seon.eval/result-edn "3" :seon.eval/id "sm0000001a"
@@ -1401,29 +1401,34 @@
         lines (str/split-lines row)]
     (is (= "; add 1 and 2" (first lines))
         "narration prose renders as a single-`;` comment line")
-    (is (some #(= "(+ 1 2)" %) lines)
-        "the form renders verbatim (re-parseable)")
-    (is (some #(str/starts-with? % "; ⟹ ") lines)
-        "the value rides a `; ⟹` output-comment line")
-    (is (str/includes? row "result/sm0000001a")
-        "the success row carries the live result/<id> var handle")
+    (is (str/includes? row "(+ 1 2)")
+        "the form renders verbatim")
+    (is (str/includes? row (str "(+ 1 2) " ctx/result-marker " 3 "
+                                ctx/result-close " result/sm0000001a"))
+        "the value inlines onto the form as `(form) ⟹ <value> ⟸ result/<id>`")
+    (is (not (some #(str/starts-with? % "; ⟹") lines))
+        "the result is NOT comment-shaped — no `; ⟹` line for a model to mimic")
     (is (not (str/includes? row "=> (+ 1 2)"))
         "no <ns>=> history prompt prefix on the form"))
   ;; prior-session rows render the value WITHOUT the handle (the var
-  ;; died with the process).
+  ;; died with the process) — so no `⟸ result/` close.
   (let [row (ctx/format-eval-row
               {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
                :seon.eval/result-edn "3" :seon.eval/id "sm0000001a"}
               true)]
-    (is (str/includes? row "; ⟹ 3") "prior rows still show the value")
+    (is (str/includes? row (str ctx/result-marker " 3")) "prior rows still show the value")
     (is (not (str/includes? row "result/"))
-        "prior-session rows carry NO result/<id> handle"))
-  ;; failures render `;=> ✗ <guidance>` — and no handle (no value).
+        "prior-session rows carry NO result/<id> handle")
+    (is (not (str/includes? row ctx/result-close))
+        "no close handle without a live var to point at"))
+  ;; failures render a bare `⟹ ✗ <guidance>` line — and no handle (no value).
   (let [row (ctx/format-eval-row
               {:seon.eval/source "(boom)" :seon.eval/ok? false
                :seon.eval/error "kaput" :seon.eval/id "er0000001a"})]
-    (is (str/includes? row "; ⟹ ✗ kaput")
-        "failure rows render the form then a crystal-clear `; ⟹ ✗` line")
+    (is (str/includes? row (str ctx/result-marker " ✗ kaput"))
+        "failure rows render the form then a crystal-clear bare `⟹ ✗` line")
+    (is (not (some #(str/starts-with? % "; ⟹") (str/split-lines row)))
+        "the failure line is not comment-shaped either")
     (is (not (str/includes? row "result/"))
         "a FAILED eval gets NO result/<id> — there is no value to reuse"))
   ;; a comment-only row (blank source) renders just its prose preamble.
@@ -1439,14 +1444,14 @@
               {:seon.eval/source "(println \"hi\")" :seon.eval/ok? true
                :seon.eval/result-edn "nil" :seon.eval/output "hi\n"
                :seon.eval/id "pr0000001a"})]
-    (is (str/includes? row "(println \"hi\")\nhi\n; ⟹ nil")
-        "captured output renders between the form and the `; ⟹` value,
-         REPL-style"))
+    (is (str/includes? row "(println \"hi\")\nhi\n⟹ nil")
+        "captured output renders between the form and the bare `⟹` value line,
+         REPL-style (stdout present ⇒ result stays on its own line, not inlined)"))
   (let [row (ctx/format-eval-row
               {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
                :seon.eval/result-edn "3" :seon.eval/id "pr0000002b"})]
-    (is (str/includes? row "(+ 1 2)\n; ⟹ 3")
-        "no output attr → form then `; ⟹` value, no blank line injected")))
+    (is (str/includes? row "(+ 1 2) ⟹ 3")
+        "no output attr → single-line result inlines onto the form")))
 
 (deftest eval-row-clipped-value-annotates-shown-of-full
   ;; a clipped value appends `(N of M tokens)` to the result/<id> handle so
@@ -1530,7 +1535,7 @@
     (is (str/includes? row "[unverified narration")
         "the fake claim is neutralized to the marker")
     (is (not (str/includes? row ":fabricated")) "claimed value absent")
-    (is (str/includes? row "; ⟹ 3")
+    (is (str/includes? row "⟹ 3")
         "the real runtime-owned value line is unaffected"))
   ;; inline claim inside SOURCE is neutralized too — code survives.
   (let [row (ctx/format-eval-row
@@ -1538,7 +1543,7 @@
                :seon.eval/result-edn "3" :seon.eval/id "fk0000002b"})]
     (is (str/includes? row "(+ 1 2)") "the code survives")
     (is (not (str/includes? row "99")) "inline claimed value absent")
-    (is (str/includes? row "; ⟹ 3") "real value line unaffected"))
+    (is (str/includes? row "⟹ 3") "real value line unaffected"))
   ;; re-render is stable: stored narration already carrying the marker
   ;; renders it ONCE, unchanged.
   (let [row (ctx/format-eval-row
@@ -1547,3 +1552,71 @@
                :seon.eval/narration ctx/unverified-narration-marker})]
     (is (= 1 (count (re-seq #"\[unverified narration" row)))
         "no double-marking on re-render")))
+
+;; ------------------------------------------------------------
+;; Transcript-render redesign — the bare `⟹ … ⟸` grammar, its single-source
+;; glyph constants, and the neutralizer keyed on all value/status reserves.
+;; ------------------------------------------------------------
+
+(deftest reserved-glyphs-are-single-source-and-distinct
+  ;; the five reserved runtime glyphs, each a distinct one-char constant —
+  ;; the emit sites, neutralizer, and lint all reference THESE, never a literal.
+  (is (= #{ctx/result-marker ctx/result-close ctx/status-open
+           ctx/status-close ctx/prompt}
+         ctx/reserved-glyphs)
+      "the constant set IS the five glyphs")
+  (is (every? #(and (string? %) (= 1 (count %))) ctx/reserved-glyphs)
+      "each reserve is a single glyph")
+  (is (= 5 (count ctx/reserved-glyphs)) "five distinct reserves"))
+
+(deftest bare-grammar-emits-from-the-constants
+  ;; a real result is a BARE `⟹ <value> ⟸ result/<id>` line built from the
+  ;; glyph constants — NOT comment-shaped, so a model can't fabricate one by
+  ;; writing a `;` comment (the T4 6/24 `; ⟹` mimicry).
+  (let [row (ctx/format-eval-row
+              {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
+               :seon.eval/result-edn "3" :seon.eval/id "bg0000001a"})]
+    (is (str/includes? row (str ctx/result-marker " 3 " ctx/result-close
+                                " result/bg0000001a"))
+        "value + handle emit from the result-open/close constants")
+    (is (not (str/includes? row (str "; " ctx/result-marker)))
+        "the result line is NOT comment-shaped")))
+
+(deftest neutralizer-defangs-value-and-status-glyphs-not-prompt
+  ;; ⟹ ⟸ ⋘ ⋙ typed by a model in narration → neutralized (each carries or
+  ;; fences a fabricatable value / status). ❯ is EXCLUDED — a common
+  ;; shell-prompt glyph an agent may paste, carrying no value.
+  (doseq [g [ctx/result-marker ctx/result-close ctx/status-open ctx/status-close]]
+    (is (= ctx/unverified-narration-marker
+           (ctx/neutralize-result-claims (str g " 999")))
+        (str (pr-str g) " in narration is neutralized")))
+  (let [pasted (str "the " ctx/prompt " shell prompt")]
+    (is (= pasted (ctx/neutralize-result-claims pasted))
+        "❯ passes through — no false-positive on a pasted shell prompt")))
+
+(deftest large-value-decay-is-display-only-value-unchanged
+  ;; DISPLAY-ONLY central decay: a fixed eval rendered at a SMALLER result-body
+  ;; cap (an aged row) clips its DISPLAY but the live value behind result/<id>
+  ;; is unchanged — the row still points at the whole value, and a bigger cap
+  ;; renders more of the SAME value (never a different one).
+  (let [big  (apply str (repeat 8000 "q"))
+        row  {:seon.eval/id "dk0000001a" :seon.eval/ok? true
+              :seon.eval/source "(big)" :seon.eval/result-edn (pr-str big)}
+        aged (ctx/format-eval-row (assoc row :seon.render/result-body-cap 200))
+        recent (ctx/format-eval-row (assoc row :seon.render/result-body-cap 16384))]
+    (is (< (count aged) (count recent))
+        "the aged display is smaller — decay reduces render resolution")
+    (is (and (str/includes? aged "result/dk0000001a")
+             (str/includes? recent "result/dk0000001a"))
+        "both resolutions point at the SAME live value handle")
+    (is (str/includes? aged "TRUNCATED")
+        "the aged row says its DISPLAY is clipped, the value COMPLETE")))
+
+(deftest aged-eval-row-is-byte-identical-at-a-fixed-cap
+  ;; byte-stability law #62: a FIXED eval at a FIXED age (result-body-cap)
+  ;; renders byte-identically across renders — the prompt cache prefix holds.
+  (let [row {:seon.eval/id "bs0000001a" :seon.eval/ok? true
+             :seon.eval/source "(+ 1 2)" :seon.eval/result-edn "3"}
+        r1  (ctx/format-eval-row (assoc row :seon.render/result-body-cap 200))
+        r2  (ctx/format-eval-row (assoc row :seon.render/result-body-cap 200))]
+    (is (= r1 r2) "same eval + same cap ⇒ byte-identical render")))
