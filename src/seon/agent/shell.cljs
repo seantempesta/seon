@@ -419,12 +419,15 @@
     (assoc :seon.agent.shell/exit (:seon.agent.shell/exit j))))
 
 (defn- mine?
-  "True when job `j` was spawned by the CURRENT agent — the per-agent scope
-   filter. A job whose :seon.agent.shell/agent-id is nil (spawned outside any
-   agent scope, e.g. a dev REPL) matches NO agent, so it is invisible in every
-   agent's list; that is acceptable — dev-REPL jobs aren't agent-facing."
+  "True when job `j` belongs to the CURRENT caller's scope — the per-agent
+   filter. Nil `j` (an unknown/pruned id) is never mine. Otherwise scope
+   equality: a job whose :seon.agent.shell/agent-id is nil
+   (spawned outside any agent scope, e.g. a dev REPL or a test) is visible ONLY
+   to an equally-unscoped caller (nil = nil), and NEVER appears in any scoped
+   agent's list (a real agent-id never equals nil). A scoped agent sees only
+   its own jobs; another agent's job is invisible."
   [j]
-  (and (some? (:seon.agent.shell/agent-id j))
+  (and (some? j)
        (= (:seon.agent.shell/agent-id j) (db/current-agent-id))))
 
 (defn list-jobs
