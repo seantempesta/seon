@@ -1099,10 +1099,14 @@
 ;; ------------------------------------------------------------
 
 (def system-text
-  "The ONE universal system block — the concept paragraphs plus the
-   standing behavioral teachings, and nothing else. Usage teaching lives
-   in the rendered namespace sources (docstrings + `;;` comments) and the
-   startup tutorial evals, never here.
+  "The ONE always-on instruction floor — the concept paragraphs, the
+   REPL/eval mechanics, and the universal load-bearing rules every agent
+   needs EVERY turn (async-reads-as-synchronous, register!-before-transact,
+   every-map-key-namespaced, :malli/schema-is-enforced, entities-are-
+   attributes-not-kinds). Per-VERB usage examples live in the rendered
+   namespace sources (docstrings + `;;` comments); DEEP reference lives in
+   the skill bodies, reachable by (my.skills/load :name). This block is the
+   floor, not the depth — a skill only DEEPENS a floor rule.
 
    BYTE-IDENTICAL for every agent and every turn — a `def`, not a fn of
    the agent: the agent id lives in the transcript readline at the very
@@ -1214,6 +1218,12 @@
     "; turn (a self-host limitation); hold mutable values in an atom, not a\n"
     "; bare def.\n"
     ";\n"
+    "; ASYNC READS AS SYNCHRONOUS. (await x) works only INSIDE an ^:async\n"
+    "; fn — a bare top-level (await x) throws. You rarely need it: an\n"
+    "; ^:async verb (db/transact!, plan/*) auto-resolves to its DATA value,\n"
+    "; so it reads as an ordinary synchronous call — use what it returns\n"
+    "; directly.\n"
+    ";\n"
     "; ERRORS ARE VALUES. Core calls never throw at you — a failure\n"
     "; comes back as data, e.g. {:seon.db/ok? false :seon.db/error ...}.\n"
     "; Read the error map; it names the defect and the fix. Telling your\n"
@@ -1242,11 +1252,15 @@
     "; be SENT with (message/user \"...\") or (complete \"...\").\n"
     ";\n"
     "; THE SHARED STORE. All agents are wired to ONE shared datahike\n"
-    "; (datomic-style) database. Two laws worth stating once: register an\n"
+    "; (datomic-style) database. Laws worth stating once: register an\n"
     "; attribute (schema/register!) BEFORE the first transact that uses it,\n"
     "; and give every attribute keyword a namespace of at least two\n"
     "; dot-separated segments (:my.kb.doc/title — never :doc/title, never\n"
-    "; :title).\n"
+    "; :title) — and MORE: every key in every map you write (not just DB\n"
+    "; attrs) is a namespaced keyword; bare :status / :ok are refused. An\n"
+    "; entity has no kind or type — it IS its attributes + refs; never model\n"
+    "; a :kind or :type field, and FIND entities by attribute presence, not\n"
+    "; by a type tag.\n"
     ";\n"
     "; THE NAMESPACES BELOW are real loaded code, each delimited by its own\n"
     "; ;;; ┌─ namespace X ─ / ;;; └─ end namespace X ─ brackets, all in FULL\n"
@@ -1276,6 +1290,9 @@
     "; — design a schema (schema/register!), and COLOCATE the functions that\n"
     "; operate on that data in the same namespace. Your code is my.*, your\n"
     "; knowledge is my.kb.*; the core is seon.* (call it, never redefine it).\n"
+    "; A public fn's :malli/schema is INSTRUMENTED — it validates the args\n"
+    "; and the return on EVERY call and throws on a mismatch, so a wrong\n"
+    "; schema is a runtime bug, not a doc nit.\n"
     "; The my.* toolkit (my.ui / my.tile / my.data) is FULL-QUALIFIED — call\n"
     "; my.ui/card etc. directly, no alias needed. If a tool you need doesn't\n"
     "; exist, write it and run it — don't wait to be given one. Namespaces are\n"

@@ -144,7 +144,8 @@
                   [:map
                    [::content ::content]
                    [::rules {:optional true} ::rules]
-                   [::vault-root {:optional true} ::vault-root]])
+                   [::vault-root {:optional true} ::vault-root]
+                   [::file-path {:optional true} ::file-path]])
 
 (schema/register! ::validate-response
                   [:map
@@ -651,6 +652,109 @@
         links))
 
 ;;; ---------------------------------------------------------------------------
+;;; Skill ↔ system-text floor-duplication (warn-only)
+;;;
+;;; system-text (ctx.cljs) is the SINGLE always-on home for a universal
+;;; load-bearing rule; a `seon-skills/*/SKILL.md` may only DEEPEN a floor rule
+;;; behind a pointer, never restate it verbatim. This is a duplication
+;;; DETECTOR — a contiguous ≥N-word run shared with the live system-text prose
+;;; — not a hand-maintained name list. It reuses the existing markdown linter
+;;; (no second linter), self-gates on the skill path, and is warn-only.
+;;; ---------------------------------------------------------------------------
+
+(def ^:private floor-source-file
+  "The live always-on floor — read as text (a CLJS file, not eval'd here)."
+  "src/seon/agent/ctx.cljs")
+
+(def ^:private floor-ngram-size
+  "A contiguous verbatim run this long counts as reproduction, not overlap."
+  6)
+
+(def ^:private floor-pointer-phrase
+  "A skill section that carries this phrase is DEEPENING a floor rule (points
+   at it), so its restatement is intentional and NOT flagged."
+  "always in your context")
+
+(defn- word-tokens
+  "Lowercased alphanumeric word tokens of `s` (all punctuation dropped)."
+  [s]
+  (->> (str/split (str/lower-case (or s "")) #"[^a-z0-9]+")
+       (remove str/blank?)
+       vec))
+
+(defn- floor-prose
+  "The `;`-comment prose of ctx.cljs's `system-text` def between the
+   `── system ──` / `── end system ──` markers, `\\n` line-joins flattened to
+   spaces. \"\" when the source file is absent."
+  []
+  (let [f (io/file floor-source-file)]
+    (if-not (.exists f)
+      ""
+      (let [src   (slurp f)
+            start (str/index-of src "── system ──")
+            end   (str/index-of src "── end system ──")]
+        (if (and start end (< start end))
+          (str/replace (subs src start end) "\\n" " ")
+          "")))))
+
+(defn- floor-ngram-set
+  "Set of contiguous `floor-ngram-size`-word runs in the floor prose — the
+   lookup index a skill line's runs are tested against."
+  []
+  (into #{} (map vec) (partition floor-ngram-size 1 (word-tokens (floor-prose)))))
+
+(defn- skill-file?
+  "True when `file-path` is a rendered-corpus `seon-skills/<name>/SKILL.md`."
+  [file-path]
+  (boolean (and file-path (re-find #"seon-skills/[^/]+/SKILL\.md$" file-path))))
+
+(defn- line-reproduces-floor?
+  "True when `line` shares a contiguous `floor-ngram-size`-word run with the
+   floor (`grams`)."
+  [grams line]
+  (boolean (some grams (map vec (partition floor-ngram-size 1 (word-tokens line))))))
+
+(defn- rule-skill-floor-duplication
+  "Warn when a seon-skills SKILL.md line reproduces a ≥N-word verbatim run
+   from the always-on floor WITHOUT a pointer prefix. A pointer (the phrase
+   `always in your context`) declared in a section (h1/h2 scope, inherited by
+   its h3+ subsections) marks the whole section as deepening the floor, so its
+   restatement is intentional and not flagged. Self-gates on the skill path;
+   returns [] for every other file (and reads the floor only for skill files)."
+  [lines code-lines file-path]
+  (if-not (skill-file? file-path)
+    []
+    (let [grams (floor-ngram-set)]
+      (loop [i 0, pointer? false, out []]
+        (if (>= i (count lines))
+          out
+          (let [line          (nth lines i)
+                line-num      (inc i)
+                hlevel        (when-let [m (re-matches #"^(#{1,6})\s+.*" line)]
+                                (count (second m)))
+                pointer-here? (str/includes? (str/lower-case line) floor-pointer-phrase)
+                ;; A pointer resets at each top-level (h1/h2) section and is
+                ;; inherited by that section's h3+ subsections.
+                pointer?'     (if (and hlevel (<= hlevel 2))
+                                pointer-here?
+                                (or pointer? pointer-here?))
+                dup?          (and (not pointer?')
+                                   (not (contains? code-lines line-num))
+                                   (line-reproduces-floor? grams line))]
+            (recur (inc i) pointer?'
+                   (if dup?
+                     (conj out
+                           {::rule :skill-floor-duplication
+                            ::severity :warning
+                            ::line line-num
+                            ::message (str "Reproduces a system-text floor sentence (≥"
+                                           floor-ngram-size " words verbatim) without a '"
+                                           floor-pointer-phrase "' pointer — point at the floor, don't restate it")
+                            ::fix (str "Prefix the section with the '" floor-pointer-phrase
+                                       "' pointer, or trim the restatement to a reference")})
+                     out))))))))
+
+;;; ---------------------------------------------------------------------------
 ;;; All Rules
 ;;; ---------------------------------------------------------------------------
 
@@ -661,11 +765,12 @@
     :blanks-around-headings :blanks-around-fences
     :trailing-newline :fenced-code-style :list-style
     :has-frontmatter :required-fields :valid-tags :valid-type
-    :wikilink-target-exists :no-bare-urls})
+    :wikilink-target-exists :no-bare-urls
+    :skill-floor-duplication})
 
 (defn- run-rules
   "Run selected rules against parsed data. Returns vector of violations."
-  [{:keys [content lines code-lines headings links frontmatter vault-root rules fm-end-line]}]
+  [{:keys [content lines code-lines headings links frontmatter vault-root rules fm-end-line file-path]}]
   (let [active (or rules all-rules)
         run? (fn [r] (contains? active r))
         fm-end (or fm-end-line 1)]
@@ -686,7 +791,8 @@
            (when (run? :valid-tags) (rule-valid-tags frontmatter))
            (when (run? :valid-type) (rule-valid-type frontmatter))
            (when (run? :wikilink-target-exists) (rule-wikilink-target-exists links vault-root))
-           (when (run? :no-bare-urls) (rule-no-bare-urls links))])))
+           (when (run? :no-bare-urls) (rule-no-bare-urls links))
+           (when (run? :skill-floor-duplication) (rule-skill-floor-duplication lines code-lines file-path))])))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Auto-Fix
@@ -823,7 +929,7 @@
      (validate {::content \"# Test\\n\"})
      ;; => {::valid? false ::violations [...] ::document {...}}"
   {:malli/schema [:=> [:cat ::validate-request] ::validate-response]}
-  [{::keys [content rules vault-root]}]
+  [{::keys [content rules vault-root file-path]}]
   (let [[_fm _remaining fm-end-line] (parse-frontmatter content)
         document (parse {::content content})
         lines (str/split-lines content)
@@ -836,7 +942,8 @@
                                :frontmatter (::frontmatter document)
                                :vault-root vault-root
                                :rules rules
-                               :fm-end-line (or fm-end-line 1)})]
+                               :fm-end-line (or fm-end-line 1)
+                               :file-path file-path})]
     {::valid? (empty? violations)
      ::violations violations
      ::document document}))
@@ -859,7 +966,7 @@
   (let [f (io/file file-path)]
     (if (.exists f)
       (let [content (slurp f)]
-        (validate (cond-> {::content content}
+        (validate (cond-> {::content content ::file-path file-path}
                     vault-root (assoc ::vault-root vault-root))))
       (do
         (log/warn "Markdown file not found:" file-path)

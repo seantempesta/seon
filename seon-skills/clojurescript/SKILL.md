@@ -14,6 +14,10 @@ gap is the source of almost every surprise below.
 
 ## `^:async` and `await` -- the core feature
 
+The one-line rule (`await` only inside an `^:async` fn; `^:async` verbs
+auto-resolve to data, so they read as synchronous) is ALWAYS in your context.
+This section is the depth: the mechanics and gotchas below.
+
 You have no `core.async`. Asynchrony is native JS `async`/`await`:
 
 - `await` is a **macro**, not a special form. It asserts it is inside an

@@ -41,6 +41,9 @@ can confirm hasn't moved, use a CAS fence (below).
 
 ## There are NO entity kinds — only attributes + connections
 
+The no-`:kind` floor rule is always in your context; here is how it plays out in
+queries and transacts.
+
 The most-repeated correction. An entity has no type/class/kind — it is an id
 plus a set of datoms. What it "is" comes entirely from which attributes it
 carries and how refs connect it. Schema attaches to **attributes**, never to

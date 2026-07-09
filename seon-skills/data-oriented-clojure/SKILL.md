@@ -36,6 +36,11 @@ db values with `=` walks the entire index even on a cache HIT, so don't
 Each pair is WRONG instinct → idiomatic Seon. The skill is the trigger; the
 grounding doc has the file:line for every claim.
 
+> Three of the reflexes below have their one-line rule ALWAYS in your context
+> (system-text): entities-have-no-`:kind`/`:type`, every-map-key-namespaced, and
+> public-fns-carry-`:malli/schema`-which-is-enforced. This skill keeps the WHY
+> and the worked reflexes.
+
 ### Entity = attributes + connections. There are NO kinds.
 
 The OO reflex the system most wants you to drop: a datahike entity has no

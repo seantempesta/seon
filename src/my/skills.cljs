@@ -23,11 +23,15 @@
        unload hint so the trade stays visible. `(unload :name)` drops it.
 
    THE CORPUS — `(load :name)` resolves a `:my.skills/*` row seeded at boot by
-   scanning [[seon.config/skills-dir]] (manifest `:seon.config/dirs` else env
-   `SEON_SKILLS_DIR`, default `.claude/skills`), the SAME directory humans edit. Drop a standard `<name>/SKILL.md` in there
-   and it appears; edit a skill file and the agent gets the edit. The pod
-   stores only the path + the frontmatter `name`/`description` — no YAML or
-   markdown parser, the body is the file.
+   scanning [[seon.config/skills-dir]] (manifest `:seon.config/dirs` first, else
+   env `SEON_SKILLS_DIR`, else the `.claude/skills` fallback). The shipped
+   config pins `seon-skills/` (`config/system.edn` `:seon.config/dirs`), so THAT
+   is the rendered agent corpus — the SAME directory humans edit. (`.claude/skills`
+   is the Claude-Code-dev tree of REAL dirs, used only as the unconfigured
+   fallback default, NOT the agent corpus.) Drop a standard `<name>/SKILL.md` in
+   the corpus dir and it appears; edit a skill file and the agent gets the edit.
+   The pod stores only the path + the frontmatter `name`/`description` — no YAML
+   or markdown parser, the body is the file.
 
    Async: `load`/`unload` AWAIT the underlying `install!`/`remove!` transact
    (they are `^:async`); the eval path auto-awaits, so an agent calling
@@ -125,10 +129,11 @@
    is absent/unreadable. Node `fs` (the pod is Node).
 
    Entry type is resolved with `statSync` (which FOLLOWS symlinks), not the
-   `readdirSync` Dirent flags — a `<dir>/<name>` that is a SYMLINK to a skill
-   directory reports `.isDirectory? = false` on its Dirent and would be
-   silently dropped. `.claude/skills` symlinks the shared `seon-skills/*`
-   dirs in exactly this shape, so following links is mandatory."
+   `readdirSync` Dirent flags: the shipped corpus (`seon-skills/`) holds REAL
+   directories, but statting THROUGH links keeps this robust if a corpus dir is
+   ever a symlink to a skill directory — a `<dir>/<name>` symlink reports
+   `.isDirectory? = false` on its Dirent and would otherwise be silently
+   dropped."
   [dir]
   (let [fs (js/require "fs")
         stat (fn [p] (try (.statSync fs p) (catch :default _ nil)))]

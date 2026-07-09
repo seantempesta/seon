@@ -21,6 +21,9 @@ Read both — this skill assumes their mindset and won't repeat it.
 
 ## Step 0 — there are NO entity kinds; you model ATTRIBUTES + connections
 
+The no-`:kind` floor rule is always in your context; here is how it plays out in
+schema design.
+
 The single biggest design error from an OO/table background: reaching for a
 `:type`/`:kind`/class. Datahike has none — an entity is just an id plus the
 datoms it carries. What an entity "is" comes from **which attributes are present**
@@ -223,9 +226,10 @@ specced positional one.
   [id new-title] …)
 ```
 
-Every schema'd public fn is instrumented and THROWS on a mismatch — a wrong
-schema is a runtime bug, not a doc nit. (Agent-facing verbs return their `::ok?`
-response map instead of throwing — see `data-oriented-clojure`.)
+The `:malli/schema`-is-enforced floor rule is always in your context; the design
+angle here: every schema'd public fn is instrumented and THROWS on a mismatch — a
+wrong schema is a runtime bug, not a doc nit. (Agent-facing verbs return their
+`::ok?` response map instead of throwing — see `data-oriented-clojure`.)
 
 ## The schema IS the generator — generative testing
 
