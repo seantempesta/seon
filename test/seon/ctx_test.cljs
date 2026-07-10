@@ -1420,7 +1420,7 @@
                                 (tokens/chars->tokens ctx/result-body-render-cap)
                                 " of " (tokens/chars->tokens full) " tokens)"))
         "the handle carries (shown of full tokens) so the clip is unambiguous")
-    (is (str/includes? row "holds it whole")
+    (is (str/includes? row (str "bind result/cp0000001a for the full value"))
         "the size guide still fires for the clipped scalar")))
 
 ;; ------------------------------------------------------------

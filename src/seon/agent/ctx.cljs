@@ -608,11 +608,10 @@
        (let [ref (if eid (str "result/" eid) "result/<id>")]
          (str " …⟨⚠ TRUNCATED at " budget " of " total " tokens — the DISPLAY "
               "is clipped, the live value is COMPLETE⟩"
-              "\n; Never summarize or quote beyond the shown " budget
-              " tokens — bind and process the value with code: " ref
-              " holds it whole; (count " ref "), subs, get-in/filter, or "
-              "paged take/drop. To get less next time: a :find aggregate, "
-              "a tighter :where, or pull fewer attrs."))))))
+              "\n; bind " ref " for the full value — process it with code: "
+              "(count " ref "), subs, get-in/filter, or paged take/drop. To "
+              "get less next time: a :find aggregate, a tighter :where, or "
+              "pull fewer attrs."))))))
 
 (def result-marker
   "The reserved RUNTIME result-OPEN glyph `⟹` — the SINGLE SOURCE OF TRUTH.
