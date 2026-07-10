@@ -1261,15 +1261,52 @@
    in current schema\". Now the whole transact fails with a legible
    `:user-input` error naming the attrs, their registered forms, and the
    supported type list — which `transact!`'s catch turns into the
-   `{::ok? false}` envelope the agent can SEE and act on."
+   `{::ok? false}` envelope the agent can SEE and act on.
+
+   RE-REGISTER DIVERGENCE GATE (real-REPL semantics, 2026-07-10): a
+   `schema/register!` that changed an ALREADY-INSTALLED attr's derived
+   `:db/valueType` / `:db/cardinality` used to be silently IGNORED
+   here (the attr was skipped as installed) — the Malli registry and
+   the store diverged until a value crashed the writer. Datahike
+   constitutionally REJECTS altering those in place
+   (`datahike.schema/find-invalid-schema-updates` — even with zero
+   datoms), so the divergence is surfaced as the same legible
+   `:user-input` error, naming the installed vs registered shape, the
+   live datom count, and the migration move: register the new shape
+   under a NEW attribute name, copy the old attr's values across, then
+   retract the old datoms. A re-register with the SAME derived shape
+   (tightened Malli constraints, docs) passes untouched. `:db/unique`
+   is deliberately NOT gated: an identity-flag mismatch against a
+   hand-installed store entry is a pre-existing tolerated divergence
+   (test scaffolding installs identity out of band), and datahike can
+   legally ADD uniqueness later."
   [conn attrs]
   (let [installed  (:schema @conn)
-        candidates (->> attrs
+        relevant   (->> attrs
                         (remove system-attr?)
                         (remove #(= :seon.db/ref %))
                         (filter schema/registered?)
-                        (remove #(contains? installed %))
                         distinct)
+        candidates (remove #(contains? installed %) relevant)
+        divergent  (into []
+                         (keep (fn [attr]
+                                 (when-some [cur (get installed attr)]
+                                   (let [derived (try (malli->datahike-attr attr)
+                                                      ;; unbridgeable NEW shape for an
+                                                      ;; installed attr — the divergence
+                                                      ;; message below names it too.
+                                                      (catch :default _ nil))
+                                         diff    (into {}
+                                                       (keep (fn [k]
+                                                               (let [o (get cur k)
+                                                                     n (get derived k)]
+                                                                 (when (and derived (not= o n))
+                                                                   [k [o n]]))))
+                                                       [:db/valueType
+                                                        :db/cardinality])]
+                                     (when (seq diff)
+                                       {::db/attr attr ::db/diff diff})))))
+                         (filter #(contains? installed %) relevant))
         {:keys [entries failures]}
         (reduce
           (fn [acc attr]
@@ -1282,6 +1319,28 @@
                          ::db/reason (or (.-message e) (str e))}))))
           {:entries [] :failures []}
           candidates)]
+    (when (seq divergent)
+      (let [with-counts
+            (mapv (fn [{attr ::db/attr :as d}]
+                    (assoc d ::db/datom-count
+                           (count (d/q '[:find ?e :in $ ?a :where [?e ?a _]]
+                                       @conn attr))))
+                  divergent)]
+        (throw (ex-info
+                 (str "Re-registering these attrs changed their stored shape, "
+                      "but they are already installed in datahike, which cannot "
+                      "alter :db/valueType / :db/cardinality in place: "
+                      (pr-str (mapv (fn [{attr ::db/attr diff ::db/diff
+                                          n ::db/datom-count}]
+                                      [attr diff {:datoms n}])
+                                    with-counts))
+                      " (per diff key: [installed registered-now]). Migration "
+                      "move: register the NEW shape under a NEW attribute name, "
+                      "copy the old attr's values across, then retract the old "
+                      "datoms — or re-register the original shape to converge.")
+                 {::db/error       :seon.db/schema-divergence
+                  ::db/divergent   with-counts
+                  :seon.error/kind :user-input}))))
     (when (seq failures)
       (throw (ex-info
                (str "These attrs are registered in seon.schema but their "
