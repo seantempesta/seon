@@ -1424,13 +1424,13 @@
         "the size guide still fires for the clipped scalar")))
 
 ;; ------------------------------------------------------------
-;; Transcript-render redesign — the bare `⟹ … ⟸` grammar, its single-source
-;; glyph constants, and the neutralizer keyed on all value/status reserves.
+;; Transcript-render redesign — the bare `⟹ … ⟸` grammar and its
+;; single-source glyph constants (the reply-boundary strip detects them).
 ;; ------------------------------------------------------------
 
 (deftest reserved-glyphs-are-single-source-and-distinct
   ;; the five reserved runtime glyphs, each a distinct one-char constant —
-  ;; the emit sites, neutralizer, and lint all reference THESE, never a literal.
+  ;; the emit sites, detector, and lint all reference THESE, never a literal.
   (is (= #{ctx/result-marker ctx/result-close ctx/status-open
            ctx/status-close ctx/prompt}
          ctx/reserved-glyphs)
