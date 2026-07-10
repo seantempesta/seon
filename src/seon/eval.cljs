@@ -32,7 +32,18 @@
      cross namespaces fine. For the agent's own id, use
      `(seon.db/current-agent-id)` (the core provides it via a
      turn-scoped ALS dynvar).
-   - **`(in-ns 'foo)` is not bootstrapped.** Use `(ns foo)` to switch."
+
+   ## REPL verbs (owner rulings 2026-07-10)
+
+   `(in-ns 'foo)` is THE movement verb — state-preserving; a fresh name
+   is CREATED with the canonical toolkit requires (deliberately better
+   than JVM blank-slate in-ns). `(ns foo …)` declares/updates a
+   namespace's requires (re-eval REPLACES the require set). A bare
+   top-level `(require …)` loads now AND persists into the current
+   ns's stored declaration; `(alias 'a 'the.ns)` records a require
+   alias (error-as-value when the target isn't loaded). `ns-unmap`
+   removes a var + its `:seon.fn` row; `ns-unalias` drops an alias.
+   All handled by [[dispatch-repl-verb!]] at the eval boundary."
   (:refer-clojure :exclude [eval])
   (:require [cljs.analyzer :as ana]
             [cljs.js :as cljs]
@@ -717,9 +728,14 @@
    exactly the needed facts — rebuild the `(:require …)` clause from
    `:seon.ns/require-edges` datoms."
   [db ns-kw]
-  (let [specs (map (fn [{:seon.ns.require/keys [target alias refers refer-all?]}]
+  (let [specs (map (fn [{:seon.ns.require/keys [target alias refers refer-all?
+                                                as-alias?]}]
                      (cond-> [(symbol (name target))]
-                       (symbol? alias) (conj :as alias)
+                       ;; `:as-alias` edges MUST round-trip as `:as-alias` —
+                       ;; a plain `:as` would LOAD the (possibly nonexistent)
+                       ;; target on resume.
+                       (and (symbol? alias) as-alias?)       (conj :as-alias alias)
+                       (and (symbol? alias) (not as-alias?)) (conj :as alias)
                        (seq refers)    (conj :refer (vec (sort refers)))
                        refer-all?      (conj :refer :all)))
                    (sort-by :seon.ns.require/target
@@ -1457,32 +1473,6 @@
    [:vector ::require-spec]
    :symbol])
 
-(defn- home-ns-alias-names
-  "Comma-joined `:as` alias names from [[home-ns-require-specs]]
-   (e.g. \"message, agent, schema, db, plan\") — the short prefixes an
-   agent calls library verbs through from its home ns."
-  []
-  (str/join ", " (keep (fn [spec] (when (= :as (second spec)) (name (nth spec 2))))
-                       home-ns-require-specs)))
-
-(defn- home-ns-refer-names
-  "Comma-joined `:refer`'d verb names from [[home-ns-require-specs]]
-   (e.g. \"wait, complete, pause, resume, terminate\") — the bare verbs that
-   resolve ONLY while the agent sits in its home ns."
-  []
-  (str/join ", " (mapcat (fn [spec] (when (= :refer (second spec))
-                                       (map name (nth spec 2))))
-                         home-ns-require-specs)))
-
-(defn- home-ns-alias-for-ns
-  "The `:as` alias a home ns gives `ns-name` (a dotted string), or nil if
-   `ns-name` isn't aliased there. Derived from [[home-ns-require-specs]]."
-  [ns-name]
-  (some (fn [spec]
-          (when (and (= :as (second spec)) (= (name (first spec)) ns-name))
-            (name (nth spec 2))))
-        home-ns-require-specs))
-
 (defn home-ns-alias-hint
   "The correctly-aliased home-ns form for a bare verb that failed.
 
@@ -1961,16 +1951,22 @@
 (defn- source-def-syms
   "The NAME symbols `source`'s top-level defining forms would define.
 
-   Every top-level `(def …)`/`(defn …)`/`(defn- …)` with a symbol name
-   slot, as a distinct vector in source order. The ONE 'what does this
-   source define' walk — the body-redef rescue in [[changed-defs]] and
-   the false-confidence guard ([[failed-def-syms]]) both read it.
+   Every top-level `(def …)`/`(defn …)`/`(defn- …)`/`(deftest …)` (bare
+   or qualified `cljs.test/deftest`) with a symbol name slot, as a
+   distinct vector in source order. The ONE 'what does this source
+   define' walk — the body-redef rescue in [[changed-defs]] and the
+   false-confidence guard ([[failed-def-syms]]) both read it. deftest
+   is here because a BODY-ONLY deftest redefinition is digest-invisible
+   exactly like a defn's (real-REPL C9, 2026-07-10: the re-eval'd test
+   never re-teed, so the auto-test pass kept running the OLD version).
    Fail-closed on unreadable source (empty)."
   [source]
   (into []
         (comp (keep (fn [f]
                       (when (and (seq? f)
-                                 (contains? '#{def defn defn-} (first f))
+                                 (symbol? (first f))
+                                 (or (contains? '#{def defn defn-} (first f))
+                                     (= "deftest" (name (first f))))
                                  (symbol? (second f)))
                         (second f))))
               (distinct))
@@ -2037,6 +2033,11 @@
   '#{;; special forms
      if do let* loop* recur throw try catch finally def fn* letfn* quote var
      set! ns ns* deftype* defrecord* & case* js* . this-as
+     ;; loader / REPL-verb forms (real-REPL semantics 2026-07-10 — a bare
+     ;; `(require '[x :as y])` was demoted to prose because `require` is a
+     ;; repl special, not a var; these are ALWAYS code)
+     require require-macros use use-macros import refer refer-clojure
+     in-ns alias ns-unmap ns-unalias
      ;; control-flow / binding / def macros
      fn let letfn loop when when-not when-let when-some when-first if-let
      if-not if-some cond condp case and or -> ->> as-> some-> some->>
@@ -2503,9 +2504,16 @@
                                           ;; not a defect.
                                           (catch :default _ {}))
                                 as   (:as opts)
+                                asa  (:as-alias opts)
                                 refr (:refer opts)]
                             (cond-> {:seon.ns.require/target (keyword (str tns))}
                               (symbol? as)       (assoc :seon.ns.require/alias as)
+                              ;; `:as-alias` — reader alias, no load; when
+                              ;; both `:as` and `:as-alias` appear the real
+                              ;; alias wins (the ns IS loaded).
+                              (and (symbol? asa) (not (symbol? as)))
+                              (assoc :seon.ns.require/alias asa
+                                     :seon.ns.require/as-alias? true)
                               (sequential? refr) (assoc :seon.ns.require/refers
                                                         (set refr))
                               (= :all refr)      (assoc :seon.ns.require/refer-all?
@@ -2533,13 +2541,16 @@
 
    `{::aliases {alias target-sym} ::nses #{target-sym} ::refers
    {target-sym #{sym}} ::refer-all #{target-sym}}` — targets as ns
-   SYMBOLS. Total: `#{}` of edges folds to the empty info."
+   SYMBOLS. An `:as-alias?` edge contributes its ALIAS only (keyword
+   resolution), never a ::nses entry — its target is NOT loaded.
+   Total: `#{}` of edges folds to the empty info."
   {:malli/schema [:=> [:cat :seon.analyzer-info/require-edges] ::require-info]}
   [edges]
   (reduce
-    (fn [acc {:seon.ns.require/keys [target alias refers refer-all?]}]
+    (fn [acc {:seon.ns.require/keys [target alias refers refer-all? as-alias?]}]
       (let [tsym (symbol (name target))]
-        (cond-> (update acc ::nses conj tsym)
+        (cond-> acc
+          (not as-alias?) (update ::nses conj tsym)
           alias        (assoc-in [::aliases alias] tsym)
           (seq refers) (assoc-in [::refers tsym] (set refers))
           refer-all?   (update ::refer-all conj tsym))))
@@ -2576,7 +2587,8 @@
               (db/pull db
                        '[{:seon.ns/require-edges
                           [:db/id :seon.ns.require/target :seon.ns.require/alias
-                           :seon.ns.require/refers :seon.ns.require/refer-all?]}]
+                           :seon.ns.require/refers :seon.ns.require/refer-all?
+                           :seon.ns.require/as-alias?]}]
                        [:seon.ns/name ns-kw]))))
     (catch :default e
       ;; the existence-probe above already returns #{} for the expected
@@ -3256,15 +3268,16 @@
 ;; REPL-parity intercepts (unit #23 fix d, per the plan's REPL-PARITY
 ;; CONTRACT). The agent's context mimics a real Clojure REPL, so its
 ;; reflexive moves must work — or fail with a translation that teaches
-;; the core equivalent. Two forms get a form-level pre-check
-;; BEFORE eval (probed live 2026-06-09: `(in-ns 'foo)` fails with an
-;; opaque undeclared-var error; bare `*ns*` SILENTLY evals to nil —
+;; the core equivalent. One form gets a form-level pre-check BEFORE
+;; eval (probed live 2026-06-09: bare `*ns*` SILENTLY evals to nil —
 ;; a silent wrong answer, the worst kind):
 ;;
-;;   (in-ns 'foo) → legible ERROR teaching (ns foo) — same effect.
 ;;   *ns*         → INTERCEPTED VALUE: the current ns symbol (honest —
 ;;                  it IS the ns this form runs in; teaching-only would
 ;;                  leave the silent nil in place).
+;;
+;; `in-ns` / `alias` / `ns-unmap` / `ns-unalias` are REAL verbs now —
+;; see [[dispatch-repl-verb!]] (owner rulings 2026-07-10).
 ;;
 ;; There is NO `*1 *2 *3` intercept: every successful eval's value is a
 ;; live, addressable `result/<id>` var (the id is on its `=>` line in the
@@ -3277,37 +3290,17 @@
   "Form-level REPL-parity pre-check.
 
    Given a form's source string and the
-   current ns symbol, returns nil (no intercept — eval normally) or one of
+   current ns symbol, returns nil (no intercept — eval normally) or
 
-     {:seon.eval/parity :error :seon.error/message <teaching string>}
-     {:seon.eval/parity :value :seon.eval/value    <substituted value>}
+     {:seon.eval/parity :value :seon.eval/value <substituted value>}
 
    Pure string check on the TRIMMED whole form — embedded uses (e.g.
-   `*1` inside a larger form, or `(do *ns*)` wrapping) are NOT
-   intercepted; they fail or silently nil out on their own (known
-   parity boundary) and the taught replacement covers them too."
+   a `(do *ns*)` wrapping) are NOT intercepted; they silently nil out
+   on their own (known parity boundary)."
   {:malli/schema [:=> [:catn [::source :any] [::current-ns :any]] :any]}
   [source current-ns]
   (let [s (str/trim (or source ""))]
-    (cond
-      (re-find #"^\(in-ns[\s)]" s)
-      (let [target (second (re-find #"^\(in-ns\s+'?([^\s\)]+)" s))
-            alias  (when target (home-ns-alias-for-ns target))]
-        {:seon.eval/parity :error
-         :seon.error/message
-         (str "in-ns is not available — and to CALL a verb you do NOT need to "
-              "switch namespace. "
-              (if alias
-                (str "Verbs in " target " are reachable from your home ns as `"
-                     alias "/<verb>` (e.g. `" alias "/plan!`) — use that. ")
-                "Reach another ns's verbs through their home-ns alias (e.g. `plan/plan!`, `message/user`). ")
-              "Stay in your home ns so your aliases (" (home-ns-alias-names)
-              ") and refers (" (home-ns-refer-names) ") keep resolving. "
-              "Only `(ns " (or target "the.target.ns") ")`-switch to DEFINE a "
-              "fn IN that ns — and that switch REPLACES your home aliases until "
-              "you switch back.")})
-
-      (= s "*ns*")
+    (when (= s "*ns*")
       {:seon.eval/parity :value
        :seon.eval/value  current-ns})))
 
@@ -3388,6 +3381,218 @@
                 other       (remove (fn [c] (= c req)) clauses)
                 new-clauses (concat other [new-req])]
             (pr-str (apply list 'ns name-sym new-clauses))))))))
+
+;; ============================================================
+;; REPL movement/update verbs (owner rulings 2026-07-10, settled):
+;; `in-ns` = THE movement verb; `(ns foo …)` = the declare/overwrite
+;; verb; a bare top-level `(require …)` works AND persists into the
+;; namespace's stored declaration (durable-by-default — the DB is the
+;; source of truth, resume replays it); `alias` records a require
+;; alias; redefinition IS update; `ns-unmap`/`ns-unalias` remove.
+;; The pure helpers live here; [[dispatch-repl-verb!]] (below, next to
+;; the eval pipeline it feeds) executes them.
+;; ============================================================
+
+(def repl-verb-heads
+  "Form heads [[dispatch-repl-verb!]] owns — the REPL movement/update
+   verbs implemented at the eval boundary rather than by the compiler."
+  '#{in-ns alias ns-unmap ns-unalias})
+
+(defn repl-verb-form
+  "The parsed verb form of `source` when it is a single top-level list
+   whose head is one of [[repl-verb-heads]]; nil otherwise (the caller
+   evals normally). Fail-soft on unreadable source."
+  {:malli/schema [:=> [:catn [::source [:maybe :string]]] :any]}
+  [source]
+  (let [forms (try (read-all-forms source) (catch :default _ nil))
+        form  (when (= 1 (count forms)) (first forms))]
+    (when (and (seq? form) (symbol? (first form))
+               (contains? repl-verb-heads (first form)))
+      form)))
+
+(defn- quoted-sym
+  "`x` as a symbol: a bare symbol or a `(quote sym)` form; nil otherwise."
+  [x]
+  (cond
+    (symbol? x) x
+    (and (seq? x) (= 'quote (first x)) (symbol? (second x))) (second x)))
+
+(defn- analyzer-ns-entry?
+  "True when `ns-sym` has a COMPLETE analyzer entry in `compile-state`
+   (a `:name`-bearing `:cljs.analyzer/namespaces` row — the loaded/
+   primed state, not a bare skeleton)."
+  [compile-state ns-sym]
+  (some? (:name (get-in @compile-state [:cljs.analyzer/namespaces ns-sym]))))
+
+(defn- normalize-spec
+  "A require libspec as `[target-sym opts-map]` — a bare ns symbol has
+   `{}` opts."
+  [spec]
+  (if (vector? spec)
+    [(first spec) (or (ns-spec-opts spec) {})]
+    [spec {}]))
+
+(defn- opts->spec
+  "Rebuild a libspec from `target` + `opts` — a bare symbol when opts
+   are empty, else `[target :as … :refer …]` (keys sorted, stable)."
+  [target opts]
+  (if (empty? opts)
+    target
+    (into [target] (mapcat identity (sort-by key opts)))))
+
+(defn- merge-spec-opts
+  "Merge a NEW libspec's opts onto an OLD spec's for the same target:
+   the new `:as` wins, `:refer` lists union (`:all` absorbs), and a
+   real `:as` supersedes a reader-only `:as-alias`."
+  [old new]
+  (let [refers (let [o (:refer old) n (:refer new)]
+                 (cond
+                   (or (= :all o) (= :all n)) :all
+                   (or o n) (vec (sort (distinct (concat o n))))))
+        m      (merge old new)
+        m      (if refers (assoc m :refer refers) (dissoc m :refer))]
+    (if (and (:as m) (:as-alias m)) (dissoc m :as-alias) m)))
+
+(defn merge-requires-into-ns-source
+  "Rewrite `(ns …)` source so its `:require` clause carries `new-specs`.
+
+   Durable-by-default (owner ruling 2026-07-10): a REPL-issued bare
+   `(require …)` persists into the namespace's STORED declaration.
+   Appends specs whose target ns is absent; merges opts into an
+   existing spec for the same target ([[merge-spec-opts]]). Returns nil
+   when `ns-source` isn't a single `(ns …)` form or when nothing
+   changed — so re-requiring the same spec is a no-op (idempotent)."
+  {:malli/schema [:=> [:catn [::ns-source [:maybe :string]]
+                       [::new-specs [:sequential :any]]]
+                  [:maybe :string]]}
+  [ns-source new-specs]
+  (let [forms (when ns-source
+                (try (read-all-forms ns-source) (catch :default _ nil)))
+        form  (when (= 1 (count forms)) (first forms))]
+    (when (and (seq? form) (= 'ns (first form)) (symbol? (second form)))
+      (let [name-sym (second form)
+            clauses  (drop 2 form)
+            req      (some (fn [c] (when (and (seq? c) (= :require (first c))) c))
+                           clauses)
+            specs    (vec (rest req))
+            upsert   (fn [acc nspec]
+                       (let [[t nopts] (normalize-spec nspec)
+                             idx (some (fn [[i s]]
+                                         (when (= t (first (normalize-spec s))) i))
+                                       (map-indexed vector acc))]
+                         (if idx
+                           (update acc idx
+                                   (fn [old]
+                                     (let [[_ oopts] (normalize-spec old)]
+                                       (opts->spec t (merge-spec-opts oopts nopts)))))
+                           (conj acc (opts->spec t nopts)))))
+            new-vec  (reduce upsert specs new-specs)]
+        (when (not= new-vec specs)
+          (let [new-req (apply list :require new-vec)
+                other   (remove (fn [c] (= c req)) clauses)]
+            (pr-str (apply list 'ns name-sym (concat other [new-req])))))))))
+
+(defn- require-form-specs
+  "The libspecs of a top-level `(require …)` form, quotes stripped and
+   flag keywords (`:reload` …) dropped. nil when `form` isn't a require."
+  [form]
+  (when (and (seq? form) (symbol? (first form)) (= 'require (first form)))
+    (into []
+          (keep (fn [arg]
+                  (let [a (if (and (seq? arg) (= 'quote (first arg)))
+                            (second arg)
+                            arg)]
+                    (when (or (symbol? a)
+                              (and (vector? a) (symbol? (first a))))
+                      a))))
+          (rest form))))
+
+(defn- ns-source-core-origin?
+  "True when `ns-kw`'s CURRENT `:seon.ns/source` datom was written by
+   the core seed — a REPL-issued require must never rewrite a core ns's
+   stored declaration (the [[reject-core-overrides]] symmetry)."
+  [db ns-kw]
+  (some? (ffirst (db/query '[:find ?e :in $ ?ns
+                             :where
+                             [?e :seon.ns/name ?ns]
+                             [?e :seon.ns/source _ ?tx]
+                             [?tx :seon.db/origin :core-seed]]
+                           db ns-kw))))
+
+(defn- stored-ns-source
+  "The stored `:seon.ns/source` string for `ns-kw`, or nil."
+  [db ns-kw]
+  (ffirst (db/query '[:find ?src :in $ ?ns
+                      :where
+                      [?e :seon.ns/name ?ns]
+                      [?e :seon.ns/source ?src]]
+                    db ns-kw)))
+
+(defn require-decl-tx
+  "Tx upserting `ns-kw`'s stored `:seon.ns/source` with the specs of a
+   bare `(require …)` `source` merged in — the durable-by-default rule.
+
+   `[]` when `source` isn't a single require form, the ns has no stored
+   source (a sourceless ns — the home ns — already persists via its
+   require-edges + [[synthesized-ns-head]]), the stored declaration is
+   core-seeded, or the merge is a no-op (idempotent)."
+  {:malli/schema [:=> [:catn [::db :any] [::ns-kw :keyword]
+                       [::source [:maybe :string]]]
+                  [:vector :any]]}
+  [db ns-kw source]
+  (let [form  (first (or (try (read-all-forms source) (catch :default _ nil)) []))
+        specs (require-form-specs form)]
+    (if-not (seq specs)
+      []
+      (let [ns-src (stored-ns-source db ns-kw)]
+        (if (or (nil? ns-src) (ns-source-core-origin? db ns-kw))
+          []
+          (if-some [new-src (merge-requires-into-ns-source ns-src specs)]
+            [{:seon.ns/name ns-kw :seon.ns/source new-src}]
+            []))))))
+
+(defn- unalias-decl-tx
+  "Tx upserting `ns-kw`'s stored `:seon.ns/source` with `alias-sym`
+   removed: an `:as`/`:as-alias` opt naming it is dropped (the ns stays
+   required — unalias never unloads); a spec that ONLY carried the
+   reader alias is dropped whole. `[]` when there's no stored source,
+   the declaration is core-seeded, or nothing changed."
+  [db ns-kw alias-sym]
+  (let [ns-src (stored-ns-source db ns-kw)
+        forms  (when (and ns-src (not (ns-source-core-origin? db ns-kw)))
+                 (try (read-all-forms ns-src) (catch :default _ nil)))
+        form   (when (= 1 (count forms)) (first forms))]
+    (if-not (and (seq? form) (= 'ns (first form)) (symbol? (second form)))
+      []
+      (let [name-sym (second form)
+            clauses  (drop 2 form)
+            req      (some (fn [c] (when (and (seq? c) (= :require (first c))) c))
+                           clauses)
+            specs    (vec (rest req))
+            new-vec  (into []
+                           (keep (fn [s]
+                                   (let [[t opts] (normalize-spec s)
+                                         hit-keys (into []
+                                                        (keep (fn [[k v]]
+                                                                (when (and (#{:as :as-alias} k)
+                                                                           (= v alias-sym))
+                                                                  k)))
+                                                        opts)
+                                         opts'    (apply dissoc opts hit-keys)]
+                                     (cond
+                                       (empty? hit-keys) s
+                                       ;; a reader-only alias spec does nothing
+                                       ;; once unaliased — drop it whole.
+                                       (and (= hit-keys [:as-alias]) (empty? opts')) nil
+                                       :else (opts->spec t opts')))))
+                           specs)]
+        (if (= new-vec specs)
+          []
+          (let [new-req (when (seq new-vec) (apply list :require new-vec))
+                other   (remove (fn [c] (= c req)) clauses)
+                decl    (apply list 'ns name-sym
+                               (concat other (when new-req [new-req])))]
+            [{:seon.ns/name ns-kw :seon.ns/source (pr-str decl)}]))))))
 
 ;; ============================================================
 ;; Pre-flight form autofix (owner rulings 2026-07-05; design:
@@ -3705,9 +3910,10 @@
 (def ^:private preflight-skip-heads
   "Form heads the pre-flight gate never touches: loader-class forms do
    real work during ANALYSIS (a trial would not be side-effect-free) and
-   are never symbol typo-fix targets. `in-ns` is parity-intercepted
-   upstream; kept here for the direct-eval callers."
-  '#{ns require require-macros use import in-ns})
+   are never symbol typo-fix targets. The [[repl-verb-heads]] verbs are
+   handled by [[dispatch-repl-verb!]] upstream; kept here for the
+   direct-eval callers."
+  (into '#{ns require require-macros use import} repl-verb-heads))
 
 (defn- preflight-eligible?
   "Should `source` get the pre-flight compile gate? A symbol-tier class
@@ -4116,7 +4322,18 @@
                                       (:seon.fn/source ent)
                                       kw-resolve)))))
                       tee-entities))
-              tee (vec (concat tee-entities req-tx read-attr-tx))]
+              ;; Durable-by-default (owner ruling 2026-07-10): a bare
+              ;; top-level `(require …)` — incl. the `alias` rewrite —
+              ;; persists its specs into the CURRENT ns's STORED
+              ;; declaration so a resume replay carries them. `[]` for
+              ;; every non-require form (one read, cheap).
+              req-decl-tx (when (and (::ok? result) ending-ns db/*conn*
+                                     (not (contains? transient-ns-syms
+                                                     ending-ns)))
+                            (require-decl-tx @db/*conn*
+                                             (keyword (str ending-ns))
+                                             source))
+              tee (vec (concat tee-entities req-tx req-decl-tx read-attr-tx))]
           ;; Durable record — always. :seon.eval/ns is the
           ;; post-update accumulator (ending ns on success;
           ;; unchanged ns on failure). Tee rides in the same tx.
@@ -4199,16 +4416,250 @@
           (vswap! n-ok   inc)
           (vswap! n-fail inc))))))
 
+(defn- ^:async record-verb-result!
+  "Record one REPL-verb outcome through the SAME record/stash/counter
+   path a normal form takes.
+
+   `::error` (a message string) makes a failed row (errors-as-values,
+   kind `:seon.eval/repl-verb`); otherwise `::value` is stashed + bound
+   at `result/<id>` and an ok row records. `::tee` tx ops ride the same
+   tx. Mutates the caller's fold counters like eval-form-entry!."
+  [{::keys [compile-state current-ns n-ok n-fail narration source
+            value error tee]
+    eval-id ::id-of-eval
+    turn-id :seon.agent.turn/id-of-turn}]
+  (let [result (if error
+                 {::ok? false
+                  :seon/error {:seon.error/kind    :seon.eval/repl-verb
+                               :seon.error/message error}}
+                 {::ok? true ::value value})]
+    (when (::ok? result)
+      (stash-result-raw! eval-id value)
+      (bind-result-var! compile-state eval-id value))
+    (await (record-eval! {::id-of-eval  eval-id
+                          :seon.agent.turn/id-of-turn turn-id
+                          ::at          (js/Date.)
+                          ::duration-ms 0
+                          ::narration   narration
+                          ::source      source
+                          ::ending-ns   @current-ns
+                          ::result      result
+                          ::tee         (vec (or tee []))}))
+    (if (::ok? result) (vswap! n-ok inc) (vswap! n-fail inc))))
+
+(defn ^:async dispatch-repl-verb!
+  "Execute ONE REPL movement/update verb form (owner rulings 2026-07-10).
+
+   - `(in-ns 'foo)` — THE movement verb: switches the current-ns
+     accumulator, state-preserving (nothing overwritten). A DB-known-
+     but-unloaded ns loads first (the one load-fn); a genuinely FRESH
+     name is CREATED via the augmented-ns path — core referred + the
+     canonical toolkit requires — deliberately richer than the JVM's
+     blank-slate `in-ns`. Never a blank slate, never an error for a
+     fresh name.
+   - `(alias 'a 'the.ns)` — records a require alias: rewritten to
+     `(require '[the.ns :as a])` and run through the NORMAL eval path,
+     so it loads + persists into the stored declaration like any bare
+     require. Error-as-value when the target exists nowhere (Clojure
+     parity: alias requires the target to exist).
+   - `(ns-unmap 'ns 'sym)` / `(ns-unmap 'sym)` (current ns) — the real
+     `cljs.core/ns-unmap` macro removes the analyzer def + live var;
+     the `:seon.fn`/`:seon.test` projection row is retracted in the
+     same record tx so resume + instrumentation forget it. Error-as-
+     value for unknown names and for compiled-core fns (the
+     [[reject-core-overrides]] symmetry).
+   - `(ns-unalias 'ns 'a)` / `(ns-unalias 'a)` — drops the alias from
+     the analyzer entry, the stored declaration ([[unalias-decl-tx]]),
+     and the require-edges. The target ns stays loaded/required.
+
+   `form` is the [[repl-verb-form]] parse of `::source`. Mutates the
+   caller's fold volatiles exactly as eval-form-entry! does."
+  {:malli/schema [:=> [:catn [::request :map]] :any]}
+  [{::keys [compile-state current-ns form narration] :as m}]
+  (let [db (some-> db/*conn* deref)]
+    (case (first form)
+      in-ns
+      (let [target (quoted-sym (second form))]
+        (cond
+          (nil? target)
+          (await (record-verb-result!
+                   (assoc m ::error (str "in-ns takes a namespace symbol: "
+                                         "(in-ns 'my.domain.thing)"))))
+
+          ;; loaded (analyzer entry or live on globalThis) → pure
+          ;; movement; nothing re-eval'd, nothing overwritten.
+          (or (analyzer-ns-entry? compile-state target)
+              (ns-live-on-globalthis? target))
+          (do (await (ensure-analyzer-ns! compile-state target))
+              (vreset! current-ns target)
+              (await (record-verb-result! (assoc m ::value target))))
+
+          ;; known to the DB but not loaded (post-restart) → load it
+          ;; through the ONE load-fn, then move.
+          (and db (ns-rows-in-db? db target))
+          (let [r (await (eval compile-state (str "(require '" target ")")
+                               {::starting-ns @current-ns
+                                ::analyze-deps? true}))]
+            (if (::ok? r)
+              (do (vreset! current-ns target)
+                  (await (record-verb-result! (assoc m ::value target))))
+              (await (record-verb-result!
+                       (assoc m ::error
+                              (str "in-ns could not load " target
+                                   " from the store: "
+                                   (or (some-> r :seon/error
+                                               :seon.error/message)
+                                       "unknown error")))))))
+
+          ;; genuinely fresh → CREATE with the toolkit (the augmented-ns
+          ;; path); the normal pipeline tees the :seon.ns row + edges and
+          ;; advances the accumulator.
+          :else
+          (await (eval-form-entry!
+                   (assoc m ::source (str "(ns " target ")")
+                          ::narration
+                          (str (when (seq narration) (str narration "\n"))
+                               "; in-ns: " target " was new — created it "
+                               "with the standard requires (in-ns preserves "
+                               "existing state; a fresh name gets your "
+                               "toolkit)"))))))
+
+      alias
+      (let [a (quoted-sym (second form))
+            t (quoted-sym (nth form 2 nil))]
+        (cond
+          (or (nil? a) (nil? t))
+          (await (record-verb-result!
+                   (assoc m ::error (str "alias takes two symbols: "
+                                         "(alias 'a 'the.target.ns) — the "
+                                         "alias, then the namespace"))))
+
+          (not (or (analyzer-ns-entry? compile-state t)
+                   (ns-live-on-globalthis? t)
+                   (and db (ns-rows-in-db? db t))))
+          (await (record-verb-result!
+                   (assoc m ::error
+                          (str "No namespace " t " is loaded — nothing to "
+                               "alias. (require '[" t " :as " a "]) loads "
+                               "and aliases in one step."))))
+
+          :else
+          (await (eval-form-entry!
+                   (assoc m ::source (str "(require '[" t " :as " a "])")
+                          ::narration
+                          (str (when (seq narration) (str narration "\n"))
+                               "; alias — recorded as a require alias "
+                               "(persisted in your ns declaration)"))))))
+
+      ns-unmap
+      (let [[ns-arg sym-arg] (if (>= (count form) 3)
+                               [(quoted-sym (second form))
+                                (quoted-sym (nth form 2))]
+                               [@current-ns (quoted-sym (second form))])
+            sym-str (when (and ns-arg sym-arg) (str ns-arg "/" sym-arg))
+            adef?   (some? (get-in @compile-state
+                                   [:cljs.analyzer/namespaces ns-arg
+                                    :defs sym-arg]))
+            fn-row? (when (and db sym-str)
+                      (some? (ffirst (db/query '[:find ?e :in $ ?s
+                                                 :where [?e :seon.fn/sym ?s]]
+                                               db sym-str))))
+            test-row? (when (and db sym-str)
+                        (some? (ffirst (db/query '[:find ?e :in $ ?s
+                                                   :where [?e :seon.test/sym ?s]]
+                                                 db sym-str))))]
+        (cond
+          (or (nil? ns-arg) (nil? sym-arg))
+          (await (record-verb-result!
+                   (assoc m ::error (str "ns-unmap takes symbols: "
+                                         "(ns-unmap 'the.ns 'name), or "
+                                         "(ns-unmap 'name) for the current "
+                                         "ns"))))
+
+          (not (or adef? fn-row? test-row?))
+          (await (record-verb-result!
+                   (assoc m ::error (str "`" sym-str "` is not defined — "
+                                         "nothing to remove."))))
+
+          (and db (seq (core-origin-fn-syms db [sym-str])))
+          (await (record-verb-result!
+                   (assoc m ::error
+                          (str "`" sym-str "` is a compiled core fn — agents "
+                               "cannot remove core. Define and remove in "
+                               "your OWN namespaces."))))
+
+          :else
+          (let [r (await (eval compile-state
+                               (str "(ns-unmap '" ns-arg " '" sym-arg ")")
+                               {::starting-ns @current-ns}))]
+            (if-not (::ok? r)
+              (await (record-verb-result!
+                       (assoc m ::error
+                              (or (some-> r :seon/error :seon.error/message)
+                                  (str "ns-unmap failed for " sym-str)))))
+              (await (record-verb-result!
+                       (assoc m ::value true
+                              ::tee (cond-> []
+                                      fn-row?
+                                      (conj [:db/retractEntity
+                                             [:seon.fn/sym sym-str]])
+                                      test-row?
+                                      (conj [:db/retractEntity
+                                             [:seon.test/sym sym-str]])))))))))
+
+      ns-unalias
+      (let [[ns-arg a] (if (>= (count form) 3)
+                         [(quoted-sym (second form))
+                          (quoted-sym (nth form 2))]
+                         [@current-ns (quoted-sym (second form))])
+            entry      (get-in @compile-state
+                               [:cljs.analyzer/namespaces ns-arg])
+            req-alias? (let [t (get (:requires entry) a)]
+                         (and (some? t) (not= t a)))
+            as-alias?  (contains? (:as-aliases entry) a)]
+        (cond
+          (or (nil? ns-arg) (nil? a))
+          (await (record-verb-result!
+                   (assoc m ::error (str "ns-unalias takes symbols: "
+                                         "(ns-unalias 'the.ns 'a), or "
+                                         "(ns-unalias 'a) for the current "
+                                         "ns"))))
+
+          (not (or req-alias? as-alias?))
+          (await (record-verb-result!
+                   (assoc m ::error (str "`" a "` is not an alias in " ns-arg
+                                         " — nothing to remove."))))
+
+          :else
+          (do
+            (swap! compile-state update-in
+                   [:cljs.analyzer/namespaces ns-arg]
+                   (fn [e] (-> e
+                               (update :requires dissoc a)
+                               (update :as-aliases dissoc a))))
+            (let [ns-kw (keyword (str ns-arg))
+                  tee   (when (and db (not (contains? transient-ns-syms
+                                                      ns-arg)))
+                          (vec (concat
+                                 (unalias-decl-tx db ns-kw a)
+                                 (ns-require-edges-tx
+                                   db ns-kw
+                                   (analyzer-info/ns-require-edges
+                                     compile-state ns-arg)))))]
+              (await (record-verb-result!
+                       (assoc m ::value nil ::tee tee))))))))))
+
 (defn- ^:async dispatch-eval-entry!
   "Dispatch ONE non-`:read` parsed entry through the per-form mechanism:
-   comment-only → REPL-parity intercept (`in-ns`/`*ns*`) → normal
-   `eval-form-entry!`. The SINGLE per-entry mechanism shared by
+   comment-only → REPL-parity intercept (`*ns*`) → REPL verb
+   ([[dispatch-repl-verb!]]: `in-ns`/`alias`/`ns-unmap`/`ns-unalias`) →
+   normal `eval-form-entry!`. The SINGLE per-entry mechanism shared by
    `eval-batch!`'s main loop AND its parinfer-repair sub-loop, so a
    REPAIRED form is handled IDENTICALLY to a normal one — same parity
    teaching, same comment recording, same stash / tee / result-var
    binding. Before this, the repair sub-loop called `eval-form-entry!`
    directly, so a repaired `(in-ns 'foo` (a plausible missing-paren the
-   repair fixes) bypassed the parity teaching the main loop gives, and a
+   repair fixes) bypassed the verb handling the main loop gives, and a
    repaired trailing `:comment` (no `:source`) reached eval with nil.
 
    `:read` entries never reach here — the main loop OWNS the repair
@@ -4243,9 +4694,8 @@
                             ::ending-ns          @current-ns
                             ::result      {::ok? true ::value nil}}))
 
-      ;; REPL-parity intercept (fix d) — in-ns / *ns* get a legible
-      ;; translation INSTEAD of an opaque error or a silent nil. No eval
-      ;; runs; the record is the teaching.
+      ;; REPL-parity intercept (fix d) — bare `*ns*` gets the honest
+      ;; VALUE instead of a silent nil. No eval runs.
       (some? (parity-intercept source @current-ns))
       (let [pc     (parity-intercept source @current-ns)
             result (if (= :error (:seon.eval/parity pc))
@@ -4267,6 +4717,23 @@
         (if (::ok? result)
           (vswap! n-ok   inc)
           (vswap! n-fail inc)))
+
+      ;; REPL movement/update verbs (owner rulings 2026-07-10) —
+      ;; in-ns / alias / ns-unmap / ns-unalias are REAL verbs handled at
+      ;; the eval boundary; see [[dispatch-repl-verb!]].
+      (some? (repl-verb-form source))
+      (await (dispatch-repl-verb!
+               {::compile-state   compile-state
+                ::id-of-eval      eval-id
+                :seon.agent.turn/id-of-turn turn-id
+                ::current-ns      current-ns
+                ::n-ok            n-ok
+                ::n-fail          n-fail
+                ::failed-defs     failed-defs
+                ::outer-test-run? outer-test-run?
+                ::narration       narration
+                ::source          source
+                ::form            (repl-verb-form source)}))
 
       ;; Prose-in-parens demotion (#88) — a `(…)` that is English prose, not
       ;; code (undefined bare head + ≥2 undefined bare words, no qualified or

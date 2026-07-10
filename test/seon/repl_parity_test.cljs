@@ -1,25 +1,19 @@
 (ns seon.repl-parity-test
-  "Unit #23 fix d — REPL-parity translations (the plan's REPL-PARITY
-   CONTRACT): the agent's reflexive REPL moves must work or fail with a
-   translation that teaches the core equivalent.
+  "REPL-parity intercepts + verb routing (real-REPL semantics, owner
+   rulings 2026-07-10).
 
-   Probed live 2026-06-09 before this unit: `(in-ns 'foo)` failed with an
-   opaque `undeclared-var cljs.user/in-ns`; bare `*ns*` SILENTLY evaluated
-   to nil. `seon.eval/parity-intercept` is the form-level pre-check in
-   `eval-batch!` that replaces those outcomes:
-
-     (in-ns 'foo) → legible error teaching (ns foo)
-     *ns*         → intercepted VALUE: the current ns symbol
+   `parity-intercept` now owns exactly ONE translation: bare `*ns*` →
+   the current ns as an honest VALUE (probed live 2026-06-09: it
+   silently evaluated to nil). `in-ns` is NO LONGER a parity error —
+   it is THE movement verb, executed by `seon.eval/dispatch-repl-verb!`
+   together with `alias` / `ns-unmap` / `ns-unalias` ([[repl-verb-form]]
+   routes them). Behavioral coverage for the verbs lives in
+   seon.eval.repl-verbs-test; this file pins the routing seams.
 
    There is no `*1 *2 *3` intercept: every successful eval's value is a
    live, addressable `result/<id>` var (subsuming REPL history), so a
-   bare `*1` is NOT intercepted — it falls through to a normal eval.
-
-   These are pure unit tests on the intercept; the end-to-end path
-   (record + transcript) was REPL-verified against a scratch conn and is
-   covered by the eval-batch! suites."
+   bare `*1` is NOT intercepted — it falls through to a normal eval."
   (:require
-    [clojure.string :as str]
     [cljs.test :refer [deftest is testing]]
     ;; Required so their JS ns objects exist on globalThis — `home-ns-alias-hint`
     ;; reads back their publics via `ns-fn-members`; without these loaded the
@@ -29,37 +23,28 @@
     [seon.db]
     [seon.eval :as seval]))
 
-(deftest in-ns-translates-to-a-teaching-error
-  (let [r (seval/parity-intercept "(in-ns 'kb.docs)" 'my.agent.x)]
-    (is (= :error (:seon.eval/parity r)))
-    (testing "names the exact replacement, with the agent's own target ns"
-      (is (str/includes? (:seon.error/message r) "in-ns is not available"))
-      (is (str/includes? (:seon.error/message r) "(ns kb.docs)"))))
-  (testing "unquoted / whitespace variants still intercept"
-    (let [r (seval/parity-intercept "  (in-ns  my.ns)" 'my.agent.x)]
-      (is (= :error (:seon.eval/parity r)))
-      (is (str/includes? (:seon.error/message r) "(ns my.ns)")))))
+(deftest in-ns-is-a-verb-not-a-parity-error
+  (testing "parity-intercept no longer owns in-ns"
+    (is (nil? (seval/parity-intercept "(in-ns 'kb.docs)" 'my.agent.x))))
+  (testing "repl-verb-form routes it (with or without the quote)"
+    (is (= '(in-ns 'kb.docs) (seval/repl-verb-form "(in-ns 'kb.docs)")))
+    (is (some? (seval/repl-verb-form "(in-ns my.ns)")))))
 
-(deftest in-ns-steers-to-the-alias-not-a-destructive-switch
-  ;; The load-bearing fix (#70): an agent reaching `(in-ns 'my.plan)`
-  ;; to CALL a verb must be steered to `plan/<verb>`, NOT advised to switch
-  ;; namespace (which strips its home-ns message/wait/complete aliases).
-  (let [msg (:seon.error/message
-              (seval/parity-intercept "(in-ns 'my.plan)" 'my.agent.x))]
-    (testing "names the home-ns alias for the target ns"
-      (is (str/includes? msg "plan/")))
-    (testing "tells the agent NOT to switch namespace to call a verb"
-      (is (str/includes? msg "do NOT need to switch namespace")))
-    (testing "still names (ns …)-switch as the DEFINE-only path"
-      (is (str/includes? msg "(ns my.plan)"))
-      (is (str/includes? msg "DEFINE")))
-    (testing "warns the switch replaces home aliases"
-      (is (str/includes? msg "REPLACES your home aliases"))))
-  (testing "an un-aliased target falls back to generic alias guidance"
-    (let [msg (:seon.error/message
-                (seval/parity-intercept "(in-ns 'foo.bar)" 'my.agent.x))]
-      (is (str/includes? msg "home-ns alias"))
-      (is (str/includes? msg "(ns foo.bar)")))))
+(deftest verb-routing-covers-the-whole-verb-surface
+  (testing "each REPL verb parses to its form"
+    (is (some? (seval/repl-verb-form "(alias 'a 'clojure.string)")))
+    (is (some? (seval/repl-verb-form "(ns-unmap 'foo 'bar)")))
+    (is (some? (seval/repl-verb-form "(ns-unmap 'bar)")))
+    (is (some? (seval/repl-verb-form "(ns-unalias 'a)"))))
+  (testing "ordinary forms are NOT verb-routed"
+    (is (nil? (seval/repl-verb-form "(+ 1 2)")))
+    (is (nil? (seval/repl-verb-form "(ns foo.bar)")))
+    (is (nil? (seval/repl-verb-form "(require '[x :as y])"))
+        "bare require flows through the NORMAL eval path (ns* op)")
+    (is (nil? (seval/repl-verb-form "(in-ns-helper 1)"))
+        "lookalike heads don't false-positive")
+    (is (nil? (seval/repl-verb-form "(do (in-ns 'x))"))
+        "only a TOP-LEVEL verb form routes")))
 
 (deftest home-ns-alias-hint-resolves-the-correct-aliased-form
   ;; The missing hint (#70 finding 2): a bare verb that failed to resolve maps
@@ -97,6 +82,4 @@
     (is (nil? (seval/parity-intercept "(ns foo.bar)" 'x)))
     (is (nil? (seval/parity-intercept "(seon.db/query {})" 'x))))
   (testing "only the WHOLE bare *ns* intercepts — embedded uses don't"
-    (is (nil? (seval/parity-intercept "(prn *ns*)" 'x))))
-  (testing "lookalike symbols don't false-positive"
-    (is (nil? (seval/parity-intercept "(in-ns-helper 1)" 'x)))))
+    (is (nil? (seval/parity-intercept "(prn *ns*)" 'x)))))

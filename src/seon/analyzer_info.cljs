@@ -222,13 +222,21 @@
 ;; (seon.eval/require-edges-from-source, over legacy/handwritten ns
 ;; text) can yield it. Registered so a parsed edge round-trips.
 (schema/register! :seon.ns.require/refer-all? :boolean)
+;; `[x :as-alias y]` — a READER alias for qualified keywords with NO
+;; load of the target (Clojure 1.11 semantics; the analyzer stores it
+;; in the ns entry's `:as-aliases`, never `:requires`). The flag keeps
+;; the edge distinguishable so [[seon.eval/synthesized-ns-head]] emits
+;; `:as-alias` back (a plain `:as` would LOAD the target on resume) and
+;; the SCI env never treats the target as a loaded ns.
+(schema/register! :seon.ns.require/as-alias? :boolean)
 
 (schema/register! ::require-edge
                   [:map
                    [:seon.ns.require/target :seon.ns.require/target]
                    [:seon.ns.require/alias {:optional true} :seon.ns.require/alias]
                    [:seon.ns.require/refers {:optional true} :seon.ns.require/refers]
-                   [:seon.ns.require/refer-all? {:optional true} :seon.ns.require/refer-all?]])
+                   [:seon.ns.require/refer-all? {:optional true} :seon.ns.require/refer-all?]
+                   [:seon.ns.require/as-alias? {:optional true} :seon.ns.require/as-alias?]])
 (schema/register! ::require-edges [:set ::require-edge])
 
 (defn ns-require-edges
@@ -240,29 +248,42 @@
    macro surface, and resume's load-fn satisfies transitive requires
    on demand regardless of topo edges). The `:as` alias is the `:requires` KEY mapping to the
    target where key ≠ target; the `:refer` set is the `:uses` keys
-   grouped by target. `#{}` for an unknown / never-eval'd ns. This is
+   grouped by target. `#{}` for an unknown / never-eval'd ns. The ns
+   entry's `:as-aliases` (the `:as-alias` reader aliases — no load)
+   each yield an edge flagged `:seon.ns.require/as-alias? true`, unless
+   the same target is also genuinely required. This is
    what the tee stores as `:seon.ns/require-edges` (component rows) so
    `seon.render.sci` rebuilds the lexical env from datoms, never from a
    reader over `:seon.ns/source` text (M4)."
   {:malli/schema [:=> [:cat ::compile-state :symbol] ::require-edges]}
   [compile-state ns-sym]
-  (let [ns-info   (get-in @compile-state [:cljs.analyzer/namespaces ns-sym])
-        reqs      (:requires ns-info)
-        uses      (:uses ns-info)
-        targets   (-> (set (concat (vals reqs) (vals uses)))
-                      (disj ns-sym))
-        alias-of  (into {}
-                        (keep (fn [[k v]] (when (not= k v) [v k])))
-                        reqs)
-        refers-of (reduce-kv (fn [m sym target]
-                               (update m target (fnil conj #{}) sym))
-                             {} uses)]
-    (into #{}
-          (map (fn [t]
-                 (cond-> {:seon.ns.require/target (keyword (str t))}
-                   (alias-of t)  (assoc :seon.ns.require/alias (alias-of t))
-                   (refers-of t) (assoc :seon.ns.require/refers (refers-of t)))))
-          targets)))
+  (let [ns-info    (get-in @compile-state [:cljs.analyzer/namespaces ns-sym])
+        reqs       (:requires ns-info)
+        uses       (:uses ns-info)
+        as-aliases (:as-aliases ns-info)
+        targets    (-> (set (concat (vals reqs) (vals uses)))
+                       (disj ns-sym))
+        alias-of   (into {}
+                         (keep (fn [[k v]] (when (not= k v) [v k])))
+                         reqs)
+        refers-of  (reduce-kv (fn [m sym target]
+                                (update m target (fnil conj #{}) sym))
+                              {} uses)]
+    (into (into #{}
+                (map (fn [t]
+                       (cond-> {:seon.ns.require/target (keyword (str t))}
+                         (alias-of t)  (assoc :seon.ns.require/alias (alias-of t))
+                         (refers-of t) (assoc :seon.ns.require/refers (refers-of t)))))
+                targets)
+          ;; `:as-alias` reader aliases — targets NOT also required stay
+          ;; load-free edges; a target that IS required already carries
+          ;; its real edge above (the reader alias adds nothing).
+          (keep (fn [[a t]]
+                  (when-not (contains? targets t)
+                    {:seon.ns.require/target    (keyword (str t))
+                     :seon.ns.require/alias     a
+                     :seon.ns.require/as-alias? true})))
+          (or as-aliases {}))))
 
 (defn var-projection
   "Persistable subset of an analyzer var-map for `:seon.fn` storage.
