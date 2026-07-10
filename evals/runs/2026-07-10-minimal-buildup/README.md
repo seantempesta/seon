@@ -395,5 +395,25 @@ reported columns.
    code; prose must never start a line with `(`" — a candidate v2 wording
    for the block-iteration loop.
 
+### No-cards probe (spark-v0, `config/minimal-nocards.edn`)
+
+One more single-drive probe (owner steer: fast iterations): two-bucket on
+Spark with the namespaces block REMOVED (v1 system-text + transcript only).
+**RED — 20 turns (:turn-limit), diff ≈ untouched, 9 failed evals.** Still 0
+strips/0 glyphs, but the turns burned on call-shape discovery by error:
+invented handles (`result/FIND`), wrong `#code/python` heredoc syntax,
+nonexistent verbs (`consolidate`). Same failure class as DeepSeek's v0
+two-bucket (0/2), minus the fabrication.
+
+| drive | model | mode | turns | close | oracle | strips | notes |
+|---|---|---|---|---|---|---|---|
+| spark-v0-two-bucket-v1-d1 | muse-spark-1.1 | A | 20 | :turn-limit | RED (5 failed, 4 passed) | 0 | no namespaces block |
+
+**Floor finding: the namespaces block is load-bearing CROSS-MODEL.** The
+minimum context for tool-using tasks is the ~306-token prompt + transcript
++ the ~6.4k-token cards, regardless of model strength; model strength moves
+the fabrication rate, not the tool-discovery floor. (`minimal-nocards.edn`
+kept as a ladder variant config.)
+
 Interview raw: `observer/spark-interview-raw.txt`. Clusters destroyed
 after extraction. Key stored outside the repo (`~/.config/env/secrets.env`).

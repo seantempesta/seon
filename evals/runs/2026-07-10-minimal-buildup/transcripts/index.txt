@@ -15,3 +15,4 @@ spark-a-poker-v1-d1 agent=hlb-2607101714 outcome=GREEN wall=43s started=2026-07-
 spark-a-two-bucket-v1-d1 agent=lAc-2607101716 outcome=GREEN wall=60s started=2026-07-10T21:16:07Z sha_ok=yes
 spark-a-db-memory-v1-d1 agent=EHX-2607101717 outcome=GREEN wall=26s started=2026-07-10T21:17:28Z sha_ok=yes
 spark-b-poker-v1-d1 agent=WSc-2607101718 outcome=GREEN wall=61s started=2026-07-10T21:18:42Z sha_ok=yes
+spark-v0-two-bucket-v1-d1 agent=IOJ-2607101723 outcome=RED wall=112s started=2026-07-10T21:23:56Z sha_ok=yes
