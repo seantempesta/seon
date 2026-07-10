@@ -442,6 +442,23 @@ priming. Costs: 17.4k billed reasoning tokens + 461s on two-bucket. Mode B
 remains DeepSeek's structural answer; thinking is a quality dial, not a
 fabrication fix.
 
+## Task-13 verification drive (Mode B fixes live, 2026-07-10)
+
+After the Mode B code fixes (form-denominated work bound + single-form
+eval close + system-tokens log + per-model repl-mode default; suite
+1179/5339/0/0), one DeepSeek Mode B two-bucket drive on the rebuilt
+bundle (v2 text, cluster min-b2):
+
+| drive | model | mode | turns | evals | close | oracle | strips | wall |
+|---|---|---|---|---|---|---|---|---|
+| min-b2-two-bucket-v1-d1 | deepseek-v4-pro | B (fixed) | 16 | 17 | **:completed** | GREEN (9) | 0 | 66s |
+
+The pre-fix failure shape is gone: the same task previously went
+`:turn-limit` with the fix already green on disk (form budget burned by
+prose turns); now it closes `:completed` at `loop 16/20` in FORM
+denomination. One turn carried 2 evals — the by-design case (a leading
+colon-prose read-error + the first form); zero multi-error tails.
+
 **v2 text (committed in `config/minimal.edn`):** the two interview-
 diagnosed warts, mechanics-only (no scolds): (a) "ANY line that starts
 with ( is EXECUTED as Clojure code — including a prose aside like

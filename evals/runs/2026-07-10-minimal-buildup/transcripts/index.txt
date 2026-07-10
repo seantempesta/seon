@@ -19,3 +19,4 @@ spark-v0-two-bucket-v1-d1 agent=IOJ-2607101723 outcome=RED wall=112s started=202
 ds-think-poker-v1-d1 agent=IRq-2607101758 outcome=GREEN wall=117s started=2026-07-10T21:58:41Z sha_ok=yes
 ds-think-two-bucket-v1-d1 agent=RCA-2607101800 outcome=GREEN wall=461s started=2026-07-10T22:00:56Z sha_ok=yes
 ds-v2-poker-v1-d1 agent=Xpe-2607101810 outcome=GREEN wall=75s started=2026-07-10T22:10:07Z sha_ok=yes
+min-b2-two-bucket-v1-d1 agent=FhT-2607101919 outcome=GREEN wall=66s started=2026-07-10T23:19:16Z sha_ok=yes
