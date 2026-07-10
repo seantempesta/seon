@@ -109,6 +109,26 @@ config-through-DB base.
   source). **Phases 3–4:** minimal self-describing context + the Mode A vs Mode B
   ledger. Sequencing note: another lane's config→DB migration takes
   `config.cljs`/`client.cljs` after this lands — footprint kept minimal.
+- **Rung-1 foundation SHIPPED (2026-07-10) — REAL-REPL SEMANTICS** (owner
+  rulings settled; runtime = `seon.eval/dispatch-repl-verb!` + teaching in
+  the namespaces-block header): `in-ns` = THE movement verb (state-preserving;
+  DB-known ns loads via the one load-fn; a fresh name is CREATED with the
+  toolkit requires — never blank, never an error); `(ns …)` re-eval REPLACES
+  requires (source + edges heal, no orphans); bare `(require …)` loads AND
+  persists into the stored declaration (`require-decl-tx`; resume replays it
+  — LIVE-PROVEN across `bin/seon restart pod`); `(alias …)` = a persisted
+  require alias (error-as-value when target unloaded); `:as-alias` = keyword
+  alias with NO load (`:seon.ns.require/as-alias?` edge round-trips);
+  redefinition IS update (deftest body-only redefs now rescued —
+  `source-def-syms` covers deftest; auto-test runs the NEW version);
+  incompatible `register!` re-shape of an installed attr →
+  `:seon.db/schema-divergence` envelope naming the migration move (was
+  silent divergence); `ns-unmap` removes the var + retracts the
+  `:seon.fn`/`:seon.test` row (core fns refused); `ns-unalias` drops the
+  alias from analyzer + declaration + edges. Bonus root-cause fix: bare
+  `(require …)` had been silently PROSE-DEMOTED (`code-head-syms` lacked the
+  loader heads). Tests: `test/seon/eval/repl_verbs_test.cljs` (12) +
+  reworked `repl_parity_test` + `test/seon/db/schema_divergence_test.cljs`.
 
 ## Where we are (2026-07-02)
 

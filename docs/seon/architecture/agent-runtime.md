@@ -127,6 +127,36 @@ result write. **Ground in** `transaction.cljc:873` (`compare-and-swap`) +
 only values cross the wire, CAS-as-assertion, never memoize on a db value — is
 [[datahike-primer]].)
 
+### REPL verbs — namespaces are places (settled 2026-07-10)
+
+The eval boundary (`seon.eval/dispatch-repl-verb!`) implements the real-REPL
+movement/update semantics the transcript teaches, so an agent's reflexive
+REPL moves work:
+
+- **`(in-ns 'foo)` is THE movement verb** — state-preserving switch of the
+  current-ns accumulator (the cursor + namespaces block follow via the
+  recorded `:seon.eval/ns`). A DB-known-but-unloaded ns loads through the
+  one load-fn; a genuinely fresh name is CREATED with the canonical toolkit
+  requires (deliberately richer than the JVM's blank-slate `in-ns`) — never
+  a blank slate, never an error.
+- **`(ns foo …)` declares/UPDATES** — re-eval REPLACES the require set;
+  the stored `:seon.ns/source` + `:seon.ns/require-edges` heal wholesale
+  (component retract cascade, no orphans).
+- **A bare top-level `(require …)` is durable by default** — it loads now
+  AND persists into the ns's stored declaration (`require-decl-tx` merges
+  the specs into `:seon.ns/source`), so resume replays it. `(alias 'a 'ns)`
+  is the same mechanism (rewritten to a require; error-as-value when the
+  target exists nowhere). `:as-alias` aliases keywords WITHOUT loading and
+  round-trips as an `:seon.ns.require/as-alias?` edge.
+- **Redefinition IS update** — defn/schema/deftest re-eval upserts the
+  projection row in place (body-only redefs rescued for deftests too); an
+  incompatible `register!` re-shape of an installed attr surfaces as a
+  `:seon.db/schema-divergence` envelope naming the migration move.
+- **`ns-unmap` removes** — live var + analyzer def gone, the
+  `:seon.fn`/`:seon.test` row retracted (resume + instrumentation forget
+  it); compiled-core fns are refused (the override-guard symmetry).
+  `ns-unalias` drops an alias from the analyzer, declaration, and edges.
+
 ## The loop as data — the FSM table + the fold
 
 The loop lives in `seon.agent.loop`, shaped like a flow process for the parts

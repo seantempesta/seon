@@ -132,7 +132,12 @@ self-host-specific -- they do NOT apply to ahead-of-time `.cljs`:
 - **Bare value-def reads don't resolve across `eval-str` calls.** `(def x 42)`
   then `x` returns nil. Use an atom: `(def !x (atom 42))` + `@!x`. **Fns are
   unaffected** -- they cross namespaces fine.
-- **`(in-ns 'foo)` is not bootstrapped.** Use `(ns foo)` to switch namespaces.
+- **`(in-ns 'foo)` IS the movement verb** (real-REPL semantics 2026-07-10,
+  `seon.eval/dispatch-repl-verb!` at the eval boundary): state-preserving
+  switch; a FRESH name is created with the toolkit requires. `(ns foo ...)`
+  declares/UPDATES a namespace's requires (re-eval REPLACES the set). A bare
+  top-level `(require '[x :as y])` works AND persists into the stored
+  declaration; `alias`/`ns-unmap`/`ns-unalias` are real verbs too.
 - A successful eval's value is stashed on `globalThis` and bound as the var
   `result/<id>` (`eval.cljs:962-1095`) -- that is the agent's value-reuse
   surface. The stash is process-scoped: it does NOT survive a pod restart

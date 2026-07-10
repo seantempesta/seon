@@ -295,8 +295,17 @@
   ;; Block-specific cue ONLY — the FULL-vs-queryable policy (what renders in
   ;; full, what stays indexed/searchable) lives once in
   ;; `seon.agent.ctx/system-text` (§"THE NAMESPACES BELOW"); don't re-teach it.
+  ;; The movement/update fragment below is COLOCATED here (the namespaces
+  ;; surface teaches its own verbs — owner rulings 2026-07-10; runtime =
+  ;; seon.eval/dispatch-repl-verb!). Keep it tight.
   (str "; The loaded namespaces below, ordered by recency"
-       " (most-recently-modified last)."))
+       " (most-recently-modified last).\n"
+       "; Namespaces are PLACES — (in-ns 'the.ns) moves you there (your state\n"
+       "; is preserved; a NEW name is created with your toolkit requires).\n"
+       "; (ns the.ns (:require …)) declares/UPDATES a namespace's requires.\n"
+       "; A bare (require '[x :as y]) adds a dependency now AND records it in\n"
+       "; the declaration. Redefining a fn/schema/test IS how you update it;\n"
+       "; (ns-unmap 'name) removes one."))
 
 (defn- cur-ns-workspace-stub
   "The never-omit block for the agent's CURRENT ns when it has no members
