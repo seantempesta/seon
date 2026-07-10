@@ -434,24 +434,15 @@
 ;; Fail-loud render dial (seon.config/render-strict?) — a render/converter
 ;; failure SCREAMS under strict (throws with the offending block + the full
 ;; malli explain), guards gracefully in prod. Plus the specific transcript
-;; root-cause fix: neutralize-result-claims tolerates an off-shape (non-
-;; string) stored narration/source instead of throwing invalid-input.
+;; root-cause fix: format-eval-row tolerates an off-shape (non-string) stored
+;; narration/source instead of throwing invalid-input.
 ;; ============================================================
 
 (defn ^:no-doc boom-ai-render
   "A converter that throws — the induced render failure for the dial tests."
   [_] (throw (js/Error. "boom-detail-XYZ")))
 
-(deftest neutralize-tolerates-off-shape-rows
-  (testing "neutralize-result-claims coerces any value → string (the transcript
-            root-cause fix: an off-shape stored narration/source must be
-            NEUTRALIZED, not throw invalid-input and sink the whole transcript)"
-    (is (= "" (ctx/neutralize-result-claims nil)) "nil → empty string")
-    (is (= "42" (ctx/neutralize-result-claims 42)) "number → its printed form")
-    (is (= ":x" (ctx/neutralize-result-claims :x)) "keyword → its printed form")
-    (is (re-find #"unverified narration"
-                 (ctx/neutralize-result-claims "; note\n=> 5"))
-        "still rewrites a real bare result-claim on strings"))
+(deftest eval-row-tolerates-off-shape-rows
   (testing "the previously-failing eval-row shape (non-string narration) now
             renders instead of throwing"
     (let [row (ctx/format-eval-row {:seon.eval/source "(+ 1 2)"

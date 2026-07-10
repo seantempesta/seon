@@ -622,13 +622,14 @@
    the `⟸` handle is the runtime's; the value is deliberately NOT
    comment-shaped, so a model can't fabricate one by writing a `;` comment
    (the `; ⟹` shape that agents copied — T4 6/24). It is RUNTIME OUTPUT
-   ONLY: an agent never authors it, and [[neutralize-result-claims]]
-   replaces a model-typed `⟹` with [[unverified-narration-marker]]. The
-   emit site ([[format-eval-row]] + `seon.agent.ctx.transcript`), the
-   neutralizer ([[reserved-glyph-re]]), and [[system-text]]'s teaching all
-   reference THIS def — never a bare `\"⟹\"` literal, so the marker is one
-   swappable edit and can never drift between what the runtime emits, what
-   the sanitizer catches, and what the context teaches."
+   ONLY: an agent never authors it, and a model-typed `⟹` is DELETED at the
+   reply boundary (Mode A [[strip-result-claims]], via [[first-result-claim]]
+   /[[reserved-glyph-re]]) before the reply is persisted. The emit site
+   ([[format-eval-row]] + `seon.agent.ctx.transcript`), the detector
+   ([[reserved-glyph-re]]), and [[system-text]]'s teaching all reference
+   THIS def — never a bare `\"⟹\"` literal, so the marker is one swappable
+   edit and can never drift between what the runtime emits, what the strip
+   catches, and what the context teaches."
   "⟹")
 
 (def result-close
@@ -636,7 +637,8 @@
 
    Fences the end of a real result and precedes its live-var handle:
    `⟹ <value> ⟸ result/<id>`. Reserved like [[result-marker]] (the runtime
-   is its only writer; [[reserved-glyph-re]] neutralizes a model-typed one).
+   is its only writer; [[reserved-glyph-re]] flags a model-typed one for the
+   reply-boundary strip).
    ONE swappable edit — every emit site references THIS def, never a bare
    `\"⟸\"` literal."
   "⟸")
@@ -666,41 +668,12 @@
    constants: result-open [[result-marker]] `⟹`, result-close
    [[result-close]] `⟸`, status [[status-open]]/[[status-close]] `⋘`/`⋙`,
    and [[prompt]] `❯`. The runtime is the ONLY writer of any of these; the
-   neutralizer ([[reserved-glyph-re]]) rewrites a model-typed one, and the
-   no-mixed-references lint (`seon.dev.docstring`) flags a literal outside
+   detector ([[reserved-glyph-re]]) flags a model-typed one for the strip, and
+   the no-mixed-references lint (`seon.dev.docstring`) flags a literal outside
    the constant defs. Distinct from the value-VOCABULARY glyphs
    (`⟨N tok⟩` · `‹partial›` · `#‹…›` · `{…N keys}` · `«…»`) which are NOT
    reserved and appear legitimately elsewhere (inventory / `my.plan`)."
   #{result-marker result-close status-open status-close prompt})
-
-(def unverified-narration-marker
-  "What a model-authored result-claim comment is rewritten to in the
-   transcript — the STRICT form, for a fabrication with NO real handle (a
-   value typed from nothing: `⟹ {:fake 9}`, bare `=> 61`). Deliberately does
-   NOT match [[result-claim-re]] itself (no `=>`/`⇒`/[[result-marker]] after
-   the semicolons), so the rewrite is idempotent."
-  ";; [unverified narration — not a real result]")
-
-(def handle-aware-narration-marker
-  "What a model-authored result-claim that ALSO carries a real `result/<id>`
-   handle is rewritten to. The agent retyped a LIVE handle next to a value (a
-   natural 'let me note what I got' line — most often the cite-card echoed
-   back into its own narration). The retyped VALUE is still stripped (it is
-   the poison a later turn would trust), but the line REFERENCES a real
-   result, so branding it 'not a real result' is an own-goal that teaches the
-   agent to distrust its own cross-turn handles. Reference-forward instead:
-   read the handle, don't retype the value. The strict
-   [[unverified-narration-marker]] stays for a claim with no handle. Like it,
-   carries no `=>`/`⇒`/reserved glyph, so the rewrite is idempotent."
-  ";; [don't retype the value — read result/<id> for it]")
-
-(def ^:private handle-ref-re
-  "A live result-var reference `result/<id>` in a line — the signal that a
-   neutralized result-claim was the agent RETYPING a real handle (not
-   fabricating a value from nothing), so the reference-forward
-   [[handle-aware-narration-marker]] applies to that line instead of the
-   strict [[unverified-narration-marker]]."
-  #"result/\S")
 
 (def ^:private result-claim-re
   "A comment posing as a REPL result read: one-or-more `;`, optional
@@ -733,88 +706,30 @@
 (def ^:private reserved-glyph-re
   "A RESERVED runtime result-grammar glyph appearing in model-authored text
    — ALWAYS a fabrication, because the runtime is the only writer of a real
-   `⟹ <value> ⟸ result/<id>` result line or a `⋘ … ⋙` status line (the
-   composer appends them AFTER [[neutralize-result-claims]] runs, so a
-   genuine one never passes through here). Unlike `=>`, these glyphs are
+   `⟹ <value> ⟸ result/<id>` result line or a `⋘ … ⋙` status line (a real
+   one is composed by [[format-eval-row]] at render time, never fed through
+   the reply-boundary strip this feeds). Unlike `=>`, these glyphs are
    RESERVED, so this needs none of the fragile `;`-counting or column-0
    `:=>`-collision anchoring the two `=>` regexes carry — any one of them,
-   with its optional leading `;` comment markers, through end of line, is
-   neutralized.
+   with its optional leading `;` comment markers, through end of line, is a
+   match.
 
    Keys on the VALUE/STATUS-bearing reserves only —
    [[result-marker]] `⟹`, [[result-close]] `⟸`, [[status-open]] `⋘`,
    [[status-close]] `⋙` — the ones that carry (or fence) a fabricatable
    value or a turn's status. [[prompt]] `❯` is DELIBERATELY EXCLUDED: it is
    a common shell-prompt glyph an agent may legitimately paste (a pasted
-   terminal transcript), carries no value, and neutralizing it would be a
+   terminal transcript), carries no value, and matching it would be a
    false positive (owner-flagged 2026-07-07). Built from a char class over
-   the constants so each glyph is defined in exactly one place."
+   the constants so each glyph is defined in exactly one place. One of the
+   three [[result-claim-res]] the detector/strip single-source from."
   (re-pattern (str "(?:;+[ \\t]*)?["
                    result-marker result-close status-open status-close
                    "][^\\n]*")))
 
-(defn- neutralize-line
-  "Neutralize one LINE's model-authored result-claims, choosing the marker
-   from that line's provenance. A line referencing a real `result/<id>`
-   handle ([[handle-ref-re]]) — the agent retyped a live handle + value — gets
-   the reference-forward [[handle-aware-narration-marker]]; a bare fabrication
-   with no handle gets the strict [[unverified-narration-marker]]. The VALUE
-   is stripped either way (same three regexes) — only the advisory differs."
-  [line]
-  (let [marker (if (re-find handle-ref-re line)
-                 handle-aware-narration-marker
-                 unverified-narration-marker)]
-    (-> line
-        (str/replace reserved-glyph-re marker)
-        (str/replace bare-result-claim-re marker)
-        (str/replace result-claim-re marker))))
-
-(defn neutralize-result-claims
-  "Rewrite every model-authored result-claim in `s` to a marker.
-
-   The claimed VALUE is dropped entirely either way (it is the poison: a
-   later turn reads `;; => {...}` or a bare `=> 61` as a real result and
-   trusts data that was never computed — two live fabrication incidents,
-   F13/F14, plus the bare-`=>` headline case in gwM-2606211132).
-
-   HANDLE-AWARE marker, per LINE: a line that references a real `result/<id>`
-   handle ([[handle-ref-re]]) was the agent RETYPING a live handle next to a
-   value (the cite-card echoed into narration — introspection #1), so it gets
-   the reference-forward [[handle-aware-narration-marker]]; a claim with no
-   handle is a fabrication from nothing and gets the strict
-   [[unverified-narration-marker]]. The anti-fabrication guarantee is
-   identical (the value is stripped in BOTH cases) — only the advisory text
-   differs, so a real prior-turn handle is never branded 'not a real result'.
-
-   THREE shapes, per line: the bare line ([[bare-result-claim-re]], `=> value`
-   at column 0 — the DOMINANT fabrication), the reserved-glyph line
-   ([[reserved-glyph-re]], a model-typed `⟹`/`⟸`), and the commented line
-   ([[result-claim-re]], `;; =>`/inline `;; => 3`). Neither marker carries a
-   `=>`/`⇒`/reserved glyph, so no regex re-matches it — idempotent.
-
-   PROVENANCE GATE, not regex luck: this runs ONLY on the
-   model-authored transcript channels — `:seon.eval/narration` and
-   `:seon.eval/source` — BEFORE [[format-eval-row]] composes the row.
-   Real result lines (`=> <value> ;; result/<id>`) are appended by the
-   composer itself AFTER this rewrite and never pass through it, so the
-   bare-`=>` rule can never touch a genuine runtime-written result line.
-
-   Input is `:any`, not `:string`, ON PURPOSE: this is the sanitizer for
-   UNTRUSTED model-authored content, fed straight from a stored
-   `:seon.eval/narration` / `:seon.eval/source`. An off-shape row (a
-   non-string value that slipped past the write boundary) must be
-   NEUTRALIZED, not thrown on — a strict `:string` input turned a bad
-   datom into a whole-transcript render failure. Coerce with `(str s)`
-   at the boundary: nil→\"\", any value → its printed form."
-  {:malli/schema [:=> [:cat :any] :string]}
-  [s]
-  (->> (str/split (str s) #"\n" -1)
-       (mapv neutralize-line)
-       (str/join "\n")))
-
 ;; ============================================================
 ;; The fabrication DETECTOR + reply-boundary STRIP (repl-mode Phase 1).
-;; ONE source of truth: the SAME three regexes the neutralizer uses
+;; ONE source of truth: the three shape regexes
 ;; ([[reserved-glyph-re]] / [[bare-result-claim-re]] / [[result-claim-re]]).
 ;; The detector reports the offset of the first MODEL-AUTHORED result-claim
 ;; — a match whose start falls OUTSIDE every successfully-parsed form span
@@ -847,8 +762,9 @@
       :batch))
 
 (def ^:private result-claim-res
-  "The three fabrication-detection regexes, single-sourced from the
-   neutralizer's private defs — the ONE definition each is built from."
+  "The three fabrication-detection regexes — the ONE definition each is
+   built from ([[reserved-glyph-re]] / [[bare-result-claim-re]] /
+   [[result-claim-re]]), single-sourced here for the detector + strip."
   [reserved-glyph-re bare-result-claim-re result-claim-re])
 
 (defn- form-spans
@@ -897,7 +813,7 @@
   "Char offset of the FIRST model-authored result-claim in `reply` — nil
    when the reply contains none.
 
-   A result-claim is a match of any of the three neutralizer regexes
+   A result-claim is a match of any of the three shape regexes
    ([[reserved-glyph-re]] `⟹⟸⋘⋙`, [[bare-result-claim-re]] col-0
    `=>`/`⇒`, [[result-claim-re]] `;+ =>`) whose START falls OUTSIDE every
    successfully-parsed form span — so a `(println \"⟹\")` string literal
@@ -1052,15 +968,19 @@
          ;; body below gets its age-decayed `result-body-cap`.
          limit       eval-render-cap
          comment-only? (str/blank? (str src))
-         ;; Comment-preamble — the agent's `;`/prose thinking, neutralized
-         ;; against fabricated result-claims BEFORE we re-prefix to `;`.
+         ;; Comment-preamble — the agent's `;`/prose thinking, re-prefixed to
+         ;; `;`. Fabricated result-claims are stripped at the reply boundary
+         ;; (Mode A `strip-result-claims`), so the stored narration is clean.
+         ;; `(str narr)` coerces an off-shape stored narration (a non-string
+         ;; that slipped past the write boundary) so a bad datom renders
+         ;; instead of sinking the whole transcript — never throw into render.
          preamble    (when (and narr (not (str/blank? narr)))
-                       (quote-lines (neutralize-result-claims narr)
+                       (quote-lines (str narr)
                                     {:seon.agent.ctx/strip-markers? true}))
-         ;; The form, verbatim (or repaired) — neutralized for any inline
-         ;; result-claim, capped. Omitted for a comment-only row.
+         ;; The form, verbatim (or repaired), capped. Omitted for a
+         ;; comment-only row. `(str src)` coerces an off-shape source too.
          form-ln     (when-not comment-only?
-                       (cap-result (neutralize-result-claims src) limit small-full?))
+                       (cap-result (str src) limit small-full?))
          ;; Captured println/prn output — shown above the value like a
          ;; real REPL prints before returning. Bounded by the same cap.
          out-ln      (when (and (string? out) (not (str/blank? out)))
@@ -1441,9 +1361,10 @@
     "; " result-marker " marks a REAL result — only the runtime writes it,\n"
     "; on the turn AFTER you submit a form. " result-marker " and " result-close " (and the\n"
     "; " status-open " " status-close " status glyphs) are RESERVED for the runtime —\n"
-    "; NEVER type them yourself: a " result-marker " line you write is not a result\n"
-    "; and does nothing — the pod neutralizes it to [unverified narration]. To\n"
-    "; see what a form returns, submit it and read the runtime's bare\n"
+    "; NEVER type them yourself: a result you type (a " result-marker " line, or a\n"
+    "; bare `=> value`) is STRIPPED from your reply at the boundary before it\n"
+    "; is recorded — it never becomes a result and never reaches a later turn.\n"
+    "; To see what a form returns, submit it and read the runtime's bare\n"
     "; " result-marker " line next turn. Never (complete ...) claiming a result you have not seen the\n"
     "; runtime print.\n"
     ";\n"

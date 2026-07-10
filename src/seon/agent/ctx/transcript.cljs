@@ -344,8 +344,7 @@
 (defn eval->renderable
   "The `:seon.render/ai` converter for a transcript EVAL event — the
    canonical eval row. Delegates to [[seon.agent.ctx/format-eval-row]], which
-   carries the fabrication-guard ([[seon.agent.ctx/neutralize-result-claims]])
-   and the component caps ([[seon.agent.ctx/eval-render-cap]] /
+   carries the component caps ([[seon.agent.ctx/eval-render-cap]] /
    [[seon.agent.ctx/result-body-render-cap]]) forward. A `::ns-marker?` true
    event prepends a `; in <ns>` line (emitted only where the eval ns
    changes from the prior eval). PRIOR-SESSION evals (`::prior?` true)
