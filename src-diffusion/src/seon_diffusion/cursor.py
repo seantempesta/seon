@@ -65,6 +65,8 @@ class Policy:
 
     auto_offer_margin: float = 6.0   # calibrated top-vs-rest glyph margin (nats)
     worst_entropy_gate: float = 1.0  # auto-accept gates on WORST token, not mean
+    settle_rounds: int = 2           # extra per-hole rounds: settled holes CLAMP,
+                                     # only unsettled holes re-noise (per-field lock)
     probe_lengths: int = 3           # CAL hole-length probe: K candidates (1 = off)
     probe_delta: int = 4             # candidate lengths n, n±Δ, n±2Δ, …
     ban_special: bool = True         # ban special/channel tokens at ALL free positions
@@ -357,63 +359,117 @@ class CursorDriver:
                 sized.add(hi)
         segments, probes, probe_fwd = self._probe_hole_lengths(
             cache, cur_len, segments, skip=sized)
-        ws = self._workspace(segments)
-        canvas, clamp_mask, clamp_ids, overflow = ws.build(
-            cfg.canvas_length, cfg.vocab_size, pad_clamp_id=self.gen.pad_token_id)
-        bias = self._fill_bias(ws, clamp_mask, candidates)
-        belief, fwd, logits = control._denoise_round(
-            self.model, canvas, clamp_mask, clamp_ids, cache, cur_len,
-            self.gen, bias=bias)
-        ent = _entropy(logits)
-        toks = [int(t) for t in belief[0]]
-        spans = ws.hole_spans()
         cand_map = dict(_cand_items(candidates))
-        lp = None
-        if cand_map:
-            lp = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
-            mx.eval(lp)
+        hole_seg = [i for i, s in enumerate(segments) if s[0] == "free"]
+        n_holes = len(hole_seg)
+        # per-ORIGINAL-hole state; settled holes CLAMP on later rounds and
+        # only unsettled ones re-noise (per-FIELD locking — the fields of a
+        # template converge independently, measured entropy gap ~10×)
+        state = [{"text": None, "mean": None, "worst": None, "trim": 0,
+                  "accepted": False, "snapped": False, "round": None}
+                 for _ in range(n_holes)]
+        total_fwd = probe_fwd
+        overflow = False
+        rounds = 1 + max(int(p.settle_rounds), 0)
+        for rnd in range(rounds):
+            open_holes = [h for h in range(n_holes) if not state[h]["accepted"]]
+            if not open_holes:
+                break
+            # current segments: settled hole → clamp(text); open hole → free
+            cur_segments, cur_cand, order = [], {}, []
+            for i, (kind, payload) in enumerate(segments):
+                if kind == "clamp":
+                    cur_segments.append((kind, payload))
+                    continue
+                h = hole_seg.index(i)
+                st = state[h]
+                if st["accepted"]:
+                    cur_segments.append(("clamp", st["text"]))
+                else:
+                    if cand_map.get(h):
+                        cur_cand[len(order)] = cand_map[h]
+                    order.append((h, i))
+                    cur_segments.append(("free", payload))
+            ws = self._workspace(cur_segments)
+            canvas, clamp_mask, clamp_ids, ovf = ws.build(
+                cfg.canvas_length, cfg.vocab_size,
+                pad_clamp_id=self.gen.pad_token_id)
+            overflow = overflow or ovf
+            bias = self._fill_bias(ws, clamp_mask, cur_cand)
+            belief, fwd, logits = control._denoise_round(
+                self.model, canvas, clamp_mask, clamp_ids, cache, cur_len,
+                self.gen, bias=bias)
+            total_fwd += fwd
+            ent = _entropy(logits)
+            toks = [int(t) for t in belief[0]]
+            spans = ws.hole_spans()
+            lp = None
+            if cur_cand:
+                lp = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
+                mx.eval(lp)
+            last = rnd == rounds - 1
+            for fi, (h, i) in enumerate(order):
+                a, b = spans[fi]
+                a, b = min(a, cfg.canvas_length), min(b, cfg.canvas_length)
+                if b <= a:
+                    # overflow truncated this hole off the canvas entirely —
+                    # honest empty, never accepted (the caller sees
+                    # overflow=True + accepted=False, not a crash)
+                    state[h].update({"text": "", "mean": None, "worst": None,
+                                     "trim": 0, "snapped": False})
+                    if last:
+                        state[h]["round"] = rnd
+                    continue
+                snapped = None
+                if cand_map.get(h):
+                    # closed slot: SNAP to the highest-probability candidate
+                    # string under the final logits (the token mask alone
+                    # only keeps the fill in-class — measured: "openopen").
+                    best, best_s = None, None
+                    for c in cand_map[h]:
+                        ids = _tok_ids(self.tok, c)[: b - a]
+                        s = sum(float(lp[0, a + j, t])
+                                for j, t in enumerate(ids)) / max(len(ids), 1)
+                        if best_s is None or s > best_s:
+                            best, best_s = c, s
+                    snapped = best
+                text = snapped if snapped is not None else self.tok.decode(
+                    [t for t in toks[a:b] if t != self.gen.pad_token_id]).strip()
+                next_clamp = next(
+                    (s[1] for s in segments[i + 1:] if s[0] == "clamp"), "")
+                text, k = (text, 0) if snapped is not None else \
+                    overlap_trim(text, next_clamp, p.min_overlap)
+                h_ent = [float(ent[0, j]) for j in range(a, b)]
+                worst = max(h_ent) if h_ent else 0.0
+                mean = sum(h_ent) / len(h_ent) if h_ent else 0.0
+                settled = snapped is not None or worst < p.worst_entropy_gate
+                state[h].update(
+                    {"text": text, "mean": round(mean, 3),
+                     "worst": round(worst, 3), "trim": k,
+                     "snapped": snapped is not None})
+                if settled and not state[h]["accepted"]:
+                    state[h]["accepted"] = True
+                    state[h]["round"] = rnd
+                elif last:
+                    state[h]["round"] = rnd    # best effort, honestly unaccepted
 
-        holes, stats, trims = [], [], []
-        pieces = []
-        hi = 0
-        for i, (kind, payload) in enumerate(segments):
+        holes = [st["text"] for st in state]
+        trims = [st["trim"] for st in state]
+        stats = [{"mean": st["mean"], "worst": st["worst"],
+                  "accepted": st["accepted"], "round": st["round"],
+                  **({"snapped": True} if st["snapped"] else {})}
+                 for st in state]
+        pieces, hi = [], 0
+        for kind, payload in segments:
             if kind == "clamp":
                 pieces.append(payload)
-                continue
-            a, b = spans[hi]
-            snapped = None
-            if cand_map.get(hi):
-                # closed slot: SNAP to the highest-probability candidate
-                # string under the final logits (DINGO's guarantee at hole
-                # granularity — the token mask alone only keeps the fill
-                # in-class, it cannot enforce a whole candidate; measured
-                # live: "openopen"). Zero extra forwards.
-                best, best_s = None, None
-                for c in cand_map[hi]:
-                    ids = _tok_ids(self.tok, c)[: b - a]
-                    s = sum(float(lp[0, a + j, t])
-                            for j, t in enumerate(ids)) / max(len(ids), 1)
-                    if best_s is None or s > best_s:
-                        best, best_s = c, s
-                snapped = best
-            text = snapped if snapped is not None else self.tok.decode(
-                [t for t in toks[a:b] if t != self.gen.pad_token_id]).strip()
-            next_clamp = next((s[1] for s in segments[i + 1:] if s[0] == "clamp"), "")
-            text, k = (text, 0) if snapped is not None else \
-                overlap_trim(text, next_clamp, p.min_overlap)
-            h_ent = [float(ent[0, j]) for j in range(a, b)]
-            worst = max(h_ent) if h_ent else 0.0
-            mean = sum(h_ent) / len(h_ent) if h_ent else 0.0
-            holes.append(text)
-            trims.append(k)
-            stats.append({"mean": round(mean, 3), "worst": round(worst, 3),
-                          "accepted": worst < p.worst_entropy_gate,
-                          **({"snapped": True} if snapped is not None else {})})
-            pieces.append(text)
-            hi += 1
+            else:
+                pieces.append(state[hi]["text"] or "")
+                hi += 1
         return {"holes": holes, "hole_confidence": stats, "trims": trims,
                 "probes": probes, "text": _strip_hints("".join(pieces)),
-                "overflow": overflow, "forwards": fwd + probe_fwd}
+                "overflow": overflow, "forwards": total_fwd,
+                "settle_rounds_used": rnd + 1}
 
     def fill(self, prompt, segments, candidates=None, seed=None):
         """mode=fill: template segments in → hole texts + per-hole

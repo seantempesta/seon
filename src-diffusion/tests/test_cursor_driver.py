@@ -460,3 +460,53 @@ def test_expand_clamps_orientation_and_strips_from_draft(oracle):
     assert exp["hole_confidence"][0].get("snapped") is True
     assert exp["holes"][0] in (":open", ":done")
     assert r["new_draft"] == f"(todo/add! {exp['holes'][0]})"
+
+
+# ---------------------------------------------------------------------------
+# progressive per-hole locking (settle rounds)
+# ---------------------------------------------------------------------------
+
+def test_settled_hole_clamps_while_sibling_resettles(oracle):
+    # stub emits junk in hole 2 first round; the settled hole-1 text must
+    # survive (clamped) and only hole 2 re-noises on round 2
+    d, model, spy = driver(["①", (":open junk", False), (":done", False)],
+                           oracle,
+                           policy=Policy(probe_lengths=1, settle_rounds=2,
+                                         worst_entropy_gate=1.0))
+    offers = [{"glyph": "①", "label": "f",
+               "candidates": {"0": [":open"], "1": [":done", ":open"]},
+               "template": [["clamp", "(f "], ["free", 2],
+                            ["clamp", " "], ["free", 2], ["clamp", ")"]]}]
+    r = d.step("ctx", offers=offers)
+    exp = r["expansion"]
+    # both holes end snapped-legal; per-hole state carries the settle round
+    assert exp["holes"][0] == ":open"
+    assert exp["holes"][1] in (":done", ":open")
+    assert all(s["accepted"] for s in exp["hole_confidence"])
+    assert all(s["round"] is not None for s in exp["hole_confidence"])
+    assert "settle_rounds_used" in exp
+
+
+def test_settle_rounds_zero_is_single_round(oracle):
+    d, model, spy = driver(["①", (":open", False)], oracle,
+                           policy=Policy(probe_lengths=1, settle_rounds=0))
+    offers = [{"glyph": "①", "label": "one-slot",
+               "candidates": {"0": [":open", ":done"]},
+               "template": [["clamp", "(f "], ["free", 2], ["clamp", ")"]]}]
+    r = d.step("ctx", offers=offers)
+    assert r["expansion"]["settle_rounds_used"] == 1
+
+
+def test_overflow_truncated_hole_is_honest_not_crash(oracle):
+    # a template longer than the canvas: the truncated hole reports
+    # empty + unaccepted + overflow=True (regression: used to crash)
+    d, model, spy = driver(["①", ("x", False)], oracle,
+                           policy=Policy(probe_lengths=1, settle_rounds=0))
+    offers = [{"glyph": "①", "label": "L" * 90,
+               "candidates": {"1": [":done"]},
+               "template": [["clamp", "(f "], ["free", 2],
+                            ["clamp", " "], ["free", 2], ["clamp", ")"]]}]
+    r = d.step("ctx", offers=offers)
+    exp = r["expansion"]
+    assert exp["overflow"] is True
+    assert exp["hole_confidence"][1]["accepted"] is False
