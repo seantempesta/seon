@@ -104,11 +104,43 @@ config-through-DB base.
   Mode A turn stripped 4 fabricated `⟹` (persisted reply clean, detector nil,
   all forms survived); Mode B ran one-form-per-turn with client-side estimated
   usage flagged. The containment hacks are NOT yet deleted (Phase 2).
-- **Phase 2 (next):** delete the neutralizer rewriter + markers + cite-card +
-  truncation scold (the three detection regexes survive as the detector's
-  source). **Phases 3–4:** minimal self-describing context + the Mode A vs Mode B
-  ledger. Sequencing note: another lane's config→DB migration takes
-  `config.cljs`/`client.cljs` after this lands — footprint kept minimal.
+- **Phase 2 SHIPPED — the strip.** Neutralizer rewriter + markers + cite-card
+  recap + truncation scold deleted from src (the three detection regexes
+  survive as `first-result-claim`'s source; `grep -r neutralize src/` → only
+  the detector remains).
+- **Phase 3 SHIPPED (2026-07-10) — strictly minimal, self-describing,
+  config-through-DB context.**
+  - `seon.ai/effective-system-prompt` is now one `or` chain: request
+    override → the `:seon.config/system-text` DATOM on the `:seon.config`
+    singleton (read via `seon.config/config-view`, the db seam) → the
+    shipped `ctx/system-text` (default cluster byte-identical — live-proven
+    on default/root). `:seon.config/system-text` added to the manifest
+    schema (it was readable by the resolver but missing from the open map).
+  - **`config/minimal.edn`** — aero `#include system.edn` + `#merge`: the v0
+    ~20-line minimal REPL prompt (inline string → the system-text datom),
+    `:seon.config/repl-mode :batch` (the per-variant dial),
+    `:seon.config/agent-context {:my.skills/load [] :seon.agent/ctx
+    [<transcript block verbatim>]}`, `:seon.config/root-context {}` (root
+    gets the same stripped tree). HOW-TO-RUN in the file header (SEON_CONFIG
+    is exported by bin/seon and inherits into pod-<name>; it must ride every
+    later restart of that pod or the boot reconcile re-seeds from
+    system.edn).
+  - **Explicit `:seon.agent/ctx` = the COMPLETE tree** (new rule, test-pinned):
+    a manifest/override that supplies the block vector suppresses the
+    identity file-block auto-prepend — an on-disk AGENTS.md can no longer
+    smuggle a block into a cluster that enumerated its tree. Default/acme
+    (no explicit ctx) unchanged.
+  - **Live-proven on a scratch `min-0` cluster** (created with
+    `SEON_CONFIG=config/minimal.edn bin/seon cluster create min-0
+    --ephemeral`, destroyed after): rendered context = EXACTLY system
+    (306 tok) + transcript (108 tok at turn 0, masthead + `:batch` mode
+    fragment + readline), ~414 tok fixed prefix, nothing else; one real
+    DeepSeek drive end-to-end (`POST /agents/run` → 11 turns / 28 evals /
+    `:completed`, correct reply); a wire-REPL transact of a changed
+    system-text datom changed the NEXT render with zero file edits. Zero
+    SEON-CORE-FAULT in the min-0 log.
+- **Phase 4 (next):** the Mode A vs Mode B × minimal-context matrix + the
+  capability ladder (`evals/runs/2026-07-10-minimal-buildup/`).
 - **Rung-1 foundation SHIPPED (2026-07-10) — REAL-REPL SEMANTICS** (owner
   rulings settled; runtime = `seon.eval/dispatch-repl-verb!` + teaching in
   the namespaces-block header): `in-ns` = THE movement verb (state-preserving;

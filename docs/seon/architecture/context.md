@@ -381,6 +381,18 @@ next prompt with no file edit). `:seon.config/repl-mode` and the transcript's
 tier/decay datoms are the precedents this generalizes to the whole config
 surface.
 
+**The system prompt itself is DB state.** `seon.ai/effective-system-prompt`
+is one `or` chain: the per-request `:seon.ai/system-prompt` override (the one
+escape hatch) → the singleton's `:seon.config/system-text` datom (seeded from
+the manifest key; absent from the default manifest, so the default cluster is
+byte-identical) → the shipped `seon.agent.ctx/system-text`. A cluster owns its
+whole instruction floor from its own manifest file — `config/minimal.edn` is
+the worked example: the transcript block alone plus a ~20-line REPL prompt,
+the rung-0 world the capability ladder measures from. Its companion rule:
+**a manifest that supplies an explicit `:seon.agent/ctx` declares the COMPLETE
+block tree** — nothing (identity file-blocks included) is auto-prepended onto
+an enumerated tree.
+
 ## See also
 
 - [[ui]] — the block, its two renders, the tile vector, `install!`/`remove!`,
