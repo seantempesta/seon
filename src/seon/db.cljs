@@ -1496,9 +1496,12 @@
 ;; ---------------------------------------------------------------------------
 
 ;; Single-slot memo keyed on the IMMUTABLE db value (identical?) — the config
-;; accessors are hot (value.cljs reads several caps per rendered node) and the
-;; loop freezes ONE db value per turn, so this collapses a turn's reads to ONE
-;; entity lookup. Self-invalidating: a new db value (a transact) recomputes.
+;; accessors are hot (value.cljs reads several caps per rendered node), and the
+;; conn's head is stable across a synchronous render stretch, so this collapses
+;; those reads to ONE entity lookup. Self-invalidating: a new db value (a
+;; transact) recomputes. NB the key is the LIVE `@*conn*` head, NOT the turn's
+;; frozen db (the zero-arg accessors carry no db) — a transact landing mid-turn
+;; means later accessor reads see the newer singleton; acceptable for dials.
 ;; Same sanctioned pattern as `render.cljs` `!schema-cache`.
 (defonce ^:private !config-view-cache (atom {:db nil :view nil}))
 

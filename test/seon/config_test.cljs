@@ -270,8 +270,10 @@
                     :seon.config/system-text "stale"}
           desired  (config/resolve-config-singleton {})    ; no system-text
           retracts (config/stale-singleton-retractions current desired)]
-      ;; only system-text is stale (eval-cap is in desired; :db/id is ignored)
-      (is (= [[:db/retract [:seon.config/id "cluster"] :seon.config/system-text "stale"]]
+      ;; only system-text is stale (eval-cap is in desired; :db/id is ignored).
+      ;; VALUE-LESS 3-element retract: value-independent, so an EDN-slot
+      ;; collection knob heals without reproducing the stored pr-str bytes.
+      (is (= [[:db/retract [:seon.config/id "cluster"] :seon.config/system-text]]
              retracts))))
   (testing "no retractions when the stored map matches desired"
     (let [d (config/resolve-config-singleton {})]

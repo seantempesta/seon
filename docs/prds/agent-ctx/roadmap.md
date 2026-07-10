@@ -36,6 +36,19 @@ misread their own situation, then closing each gap.
   round-trip fix) — it lives in `ctx.cljs`, the other lane's file; and Piece 5
   (eval `!timeout-ms`, shell `!jobs` → datoms). So Unit 2 (block reconcile,
   below) is NOT subsumed — it stays open.
+- **Quality/refinement pass over the two-mode + config→DB keepers**
+  (2026-07-10, Fable pass): detector fix — a fabrication after an in-form
+  glyph on the SAME line is no longer shadowed (scan resumes at the form
+  span's end); heredoc payloads proven strip-safe (spans map to original
+  offsets); `cluster-config-id` deduped to `seon.config` (ctx reads it);
+  singleton stale-attr heal now emits VALUE-LESS 3-element retracts
+  (value-matched retracts of EDN-slot collections could never byte-match
+  the stored `pr-str`); per-knob attr schemas registered ONCE and referenced
+  by both the manifest section specs and the singleton (killed ~16 inline
+  shape duplicates; `result-body-cap` added to the render section spec);
+  `stream-until-form!` result keys namespaced; dead 1-arity `masthead`
+  dropped; docstring/comment truth sweep (line-1 rule, stale neutralizer/
+  cite-card/memo references).
 - **Live behavioral drive (isolated `mad-drive` cluster) found the real
   lesson:** the multi-agent sections work where the lever is data-consumption
   (result incorporation + depth-cap redirect are clean wins — the derived

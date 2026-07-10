@@ -91,43 +91,84 @@
   [:map
    [:seon.config/removes {:optional true} [:vector :keyword]]])
 
-;;; RENDER BOUNDS — the GLOBAL, process-wide render/value display caps (#46).
-;;; These are NOT per-agent datoms: they bound the value/eval/message renderers
-;;; for the whole process, so they live in the manifest as a section (not on an
-;;; agent entity). Env OVERRIDES config (owner model): the manifest declares
-;;; each knob as `#long #or [#env SEON_RENDER_* default]` in `config/system.edn`
-;;; — env set → the coerced env value, env unset → the manifest default. The
-;;; keys here are `{:optional true}` WITHOUT a `:default` (decision: default in
-;;; ONE place — the manifest `#or`); the accessors below apply the SAME literal
-;;; as their own fallback when the whole section is absent (a no-manifest boot).
+;;; Per-knob LEAF attrs — each knob's ONE registered shape, referenced by BOTH
+;;; the manifest section specs below AND the `:seon.config` singleton entity
+;;; schema (config-db-migration 2026-07-10): register once, reference
+;;; everywhere. Enum/int/boolean/string scalars store natively as singleton
+;;; datoms; the collection knobs are registered with the singleton block (they
+;;; ride the mixed-`:or` EDN-slot bridge, so their datom shape differs from
+;;; their manifest-section shape).
+
+;; Shared positive-int cap shape — every render/eval/timeout cap knob
+;; references it (register-once, no inline duplication).
+(schema/register! :seon.config/cap [:int {:min 1}])
+
+(schema/register! :seon.config.render/store-edn-cap      :seon.config/cap)
+(schema/register! :seon.config.render/eval-cap           :seon.config/cap)
+(schema/register! :seon.config.render/message-cap        :seon.config/cap)
+(schema/register! :seon.config.render/result-body-cap    :seon.config/cap)
+(schema/register! :seon.config.render/value-max-depth    :seon.config/cap)
+(schema/register! :seon.config.render/value-max-keys     :seon.config/cap)
+(schema/register! :seon.config.render/value-max-items    :seon.config/cap)
+(schema/register! :seon.config.render/value-max-string   :seon.config/cap)
+(schema/register! :seon.config.render/value-shape-sample :seon.config/cap)
+(schema/register! :seon.config.render/value-verbatim-cap :seon.config/cap)
+(schema/register! :seon.config.render/value-width        :seon.config/cap)
+;; TOKEN cap (not chars — the auto-run family is token-denominated) for ONE
+;; current-ns auto-run render fn's ai output (seon.agent.ctx.render-fns).
+(schema/register! :seon.config.render/render-fn-token-cap :seon.config/cap)
+;; EXPLICIT-CHARACTER knobs (transcript-render redesign) — for content the
+;; agent edits byte-exactly. Every DEFAULT reproduces today's bytes, so an
+;; absent section / `{}` boot is byte-identical.
+;;   :whitespace     :raw     — literal (default) | :visible — `·`/`→` glyphs
+;;   :tabs           :literal — literal `\t` (default) | :arrow — `→`
+;;   :trailing-ws    :off     — no marker (default) | :dot — `·` on trailing ws
+;;   :content-layout :structured — multi-line body (default) | :single-line
+;;   :line-numbers   false    — no gutter (default) | true — 1-based gutter
+(schema/register! :seon.config.render/whitespace     [:enum :raw :visible])
+(schema/register! :seon.config.render/tabs           [:enum :literal :arrow])
+(schema/register! :seon.config.render/trailing-ws    [:enum :off :dot])
+(schema/register! :seon.config.render/content-layout [:enum :structured :single-line])
+(schema/register! :seon.config.render/line-numbers   :boolean)
+;; Repair dial scalars (level enum inlined by the LEAF rule — `seon.config`
+;; loads before `seon.repair`, so no keyword ref to `:seon.repair/level`).
+(schema/register! :seon.config.repair/level
+  [:enum :off :safe-syntax :symbols :aggressive])
+(schema/register! :seon.config.repair/max-fixes-per-form :seon.config/cap)
+(schema/register! :seon.config.repair/budget-ms          :seon.config/cap)
+;; Multi-agent dials (watchdog staleness, schedule-breaker N + window).
+(schema/register! :seon.config.watchdog/stale-ms    :seon.config/cap)
+(schema/register! :seon.config.breaker/crash-count  :seon.config/cap)
+(schema/register! :seon.config.breaker/window-ms    :seon.config/cap)
+
+;;; RENDER BOUNDS — the GLOBAL, cluster-wide render/value display caps (#46).
+;;; These are NOT per-agent: they bound the value/eval/message renderers for
+;;; the whole cluster, seeded from this manifest section into the
+;;; `:seon.config` singleton at boot. Env OVERRIDES config (owner model): the
+;;; manifest declares each knob as `#long #or [#env SEON_RENDER_* default]` in
+;;; `config/system.edn` — env set → the coerced env value, env unset → the
+;;; manifest default. The keys here are `{:optional true}` WITHOUT a `:default`
+;;; (decision: default in ONE place — the manifest `#or`); the accessors below
+;;; apply the SAME literal as their own fallback when the section is absent.
 (schema/register! :seon.config/render
   [:map
-   [:seon.config.render/store-edn-cap     {:optional true} [:int {:min 1}]]
-   [:seon.config.render/eval-cap          {:optional true} [:int {:min 1}]]
-   [:seon.config.render/message-cap       {:optional true} [:int {:min 1}]]
-   [:seon.config.render/value-max-depth   {:optional true} [:int {:min 1}]]
-   [:seon.config.render/value-max-keys    {:optional true} [:int {:min 1}]]
-   [:seon.config.render/value-max-items   {:optional true} [:int {:min 1}]]
-   [:seon.config.render/value-max-string  {:optional true} [:int {:min 1}]]
-   [:seon.config.render/value-shape-sample {:optional true} [:int {:min 1}]]
-   [:seon.config.render/value-verbatim-cap {:optional true} [:int {:min 1}]]
-   [:seon.config.render/value-width       {:optional true} [:int {:min 1}]]
-   ;; TOKEN cap (not chars — the auto-run family is token-denominated) for ONE
-   ;; current-ns auto-run render fn's ai output (seon.agent.ctx.render-fns).
-   [:seon.config.render/render-fn-token-cap {:optional true} [:int {:min 1}]]
-   ;; EXPLICIT-CHARACTER knobs (transcript-render redesign) — for content the
-   ;; agent edits byte-exactly. Every DEFAULT reproduces today's bytes, so an
-   ;; absent section / `{}` boot is byte-identical.
-   ;;   :whitespace     :raw     — literal (default) | :visible — `·`/`→` glyphs
-   ;;   :tabs           :literal — literal `\t` (default) | :arrow — `→`
-   ;;   :trailing-ws    :off     — no marker (default) | :dot — `·` on trailing ws
-   ;;   :content-layout :structured — multi-line body (default) | :single-line
-   ;;   :line-numbers   false    — no gutter (default) | true — 1-based gutter
-   [:seon.config.render/whitespace     {:optional true} [:enum :raw :visible]]
-   [:seon.config.render/tabs           {:optional true} [:enum :literal :arrow]]
-   [:seon.config.render/trailing-ws    {:optional true} [:enum :off :dot]]
-   [:seon.config.render/content-layout {:optional true} [:enum :structured :single-line]]
-   [:seon.config.render/line-numbers   {:optional true} :boolean]])
+   [:seon.config.render/store-edn-cap      {:optional true} :seon.config.render/store-edn-cap]
+   [:seon.config.render/eval-cap           {:optional true} :seon.config.render/eval-cap]
+   [:seon.config.render/message-cap        {:optional true} :seon.config.render/message-cap]
+   [:seon.config.render/result-body-cap    {:optional true} :seon.config.render/result-body-cap]
+   [:seon.config.render/value-max-depth    {:optional true} :seon.config.render/value-max-depth]
+   [:seon.config.render/value-max-keys     {:optional true} :seon.config.render/value-max-keys]
+   [:seon.config.render/value-max-items    {:optional true} :seon.config.render/value-max-items]
+   [:seon.config.render/value-max-string   {:optional true} :seon.config.render/value-max-string]
+   [:seon.config.render/value-shape-sample {:optional true} :seon.config.render/value-shape-sample]
+   [:seon.config.render/value-verbatim-cap {:optional true} :seon.config.render/value-verbatim-cap]
+   [:seon.config.render/value-width        {:optional true} :seon.config.render/value-width]
+   [:seon.config.render/render-fn-token-cap {:optional true} :seon.config.render/render-fn-token-cap]
+   [:seon.config.render/whitespace     {:optional true} :seon.config.render/whitespace]
+   [:seon.config.render/tabs           {:optional true} :seon.config.render/tabs]
+   [:seon.config.render/trailing-ws    {:optional true} :seon.config.render/trailing-ws]
+   [:seon.config.render/content-layout {:optional true} :seon.config.render/content-layout]
+   [:seon.config.render/line-numbers   {:optional true} :seon.config.render/line-numbers]])
 
 ;; THE manifest — the registry of known sections. A future section = ONE more
 ;; optional key here + a resolver fn. Every key optional ⇒ `{}` (config absent)
@@ -290,17 +331,15 @@
 ;;; 2026-07-05.md). Levels as config data; per-class kill switches are a
 ;;; `{class-kw boolean}` map COMBINED with the class registry in
 ;;; `seon.repair/class-levels` (enablement is computed, never a call-site
-;;; list). LEAF rule: the level enum is inlined here (NOT a keyword ref to
-;;; `:seon.repair/level` — `seon.config` loads before `seon.repair`, and
-;;; `register!` asserts compilability eagerly; same pattern as web-spec).
-;;; `:aggressive` is an enum slot only — not implemented.
+;;; list). `:aggressive` is an enum slot only — not implemented. `classes`
+;;; stays a plain map HERE (the manifest shape); its DATOM shape is the
+;;; mixed-`:or` EDN-slot registration in the singleton block below.
 (schema/register! :seon.config/repair
   [:map
-   [:seon.config.repair/level
-    {:optional true} [:enum :off :safe-syntax :symbols :aggressive]]
-   [:seon.config.repair/classes           {:optional true} [:map-of :keyword :boolean]]
-   [:seon.config.repair/max-fixes-per-form {:optional true} [:int {:min 1}]]
-   [:seon.config.repair/budget-ms          {:optional true} [:int {:min 1}]]])
+   [:seon.config.repair/level              {:optional true} :seon.config.repair/level]
+   [:seon.config.repair/classes            {:optional true} [:map-of :keyword :boolean]]
+   [:seon.config.repair/max-fixes-per-form {:optional true} :seon.config.repair/max-fixes-per-form]
+   [:seon.config.repair/budget-ms          {:optional true} :seon.config.repair/budget-ms]])
 
 ;;; MULTI-AGENT dials (multiagent-context-spec). All three are core config
 ;;; numbers, plumbed the same way as `:seon.config/on-core-error` (a plain
@@ -310,11 +349,11 @@
 ;;; BREAKER's N + window (Piece 2d). Absent ⇒ byte-identical to the defaults.
 (schema/register! :seon.config/spawn-depth-cap [:int {:min 0}])
 (schema/register! :seon.config/watchdog
-  [:map [:seon.config.watchdog/stale-ms {:optional true} [:int {:min 1}]]])
+  [:map [:seon.config.watchdog/stale-ms {:optional true} :seon.config.watchdog/stale-ms]])
 (schema/register! :seon.config/schedule-breaker
   [:map
-   [:seon.config.breaker/crash-count {:optional true} [:int {:min 1}]]
-   [:seon.config.breaker/window-ms   {:optional true} [:int {:min 1}]]])
+   [:seon.config.breaker/crash-count {:optional true} :seon.config.breaker/crash-count]
+   [:seon.config.breaker/window-ms   {:optional true} :seon.config.breaker/window-ms]])
 
 ;;; REPL MODE (repl-mode Phase 1) — how the agent's REPL turn resolves a
 ;;; form's result. `:batch` (default): the turn is one LLM call writing N
@@ -348,38 +387,13 @@
 
 (schema/register! :seon.config/id [:and {:seon.db/identity true} :string])
 
-;; Shared positive-int cap shape — every render/eval/timeout cap datom
-;; references it (register-once, no inline duplication).
-(schema/register! :seon.config/cap [:int {:min 1}])
-
-;;; Per-knob singleton attrs (value shape = the knob's contract). Enum/int/
-;;; boolean/string scalars store natively; the three collections use the mixed-
-;;; `:or` EDN-slot bridge (a `:nil` alt makes it a mixed `:or` so `transact!`
-;;; pr-str's the value and `config-view` `decode-edn-value`s it back).
-(schema/register! :seon.config.render/store-edn-cap      :seon.config/cap)
-(schema/register! :seon.config.render/eval-cap           :seon.config/cap)
-(schema/register! :seon.config.render/message-cap        :seon.config/cap)
-(schema/register! :seon.config.render/result-body-cap    :seon.config/cap)
-(schema/register! :seon.config.render/value-max-depth    :seon.config/cap)
-(schema/register! :seon.config.render/value-max-keys     :seon.config/cap)
-(schema/register! :seon.config.render/value-max-items    :seon.config/cap)
-(schema/register! :seon.config.render/value-max-string   :seon.config/cap)
-(schema/register! :seon.config.render/value-shape-sample :seon.config/cap)
-(schema/register! :seon.config.render/value-verbatim-cap :seon.config/cap)
-(schema/register! :seon.config.render/value-width        :seon.config/cap)
-(schema/register! :seon.config.render/render-fn-token-cap :seon.config/cap)
-(schema/register! :seon.config.render/whitespace     [:enum :raw :visible])
-(schema/register! :seon.config.render/tabs           [:enum :literal :arrow])
-(schema/register! :seon.config.render/trailing-ws    [:enum :off :dot])
-(schema/register! :seon.config.render/content-layout [:enum :structured :single-line])
-(schema/register! :seon.config.render/line-numbers   :boolean)
-(schema/register! :seon.config.repair/level
-  [:enum :off :safe-syntax :symbols :aggressive])
-(schema/register! :seon.config.repair/max-fixes-per-form :seon.config/cap)
-(schema/register! :seon.config.repair/budget-ms          :seon.config/cap)
-(schema/register! :seon.config.watchdog/stale-ms    :seon.config/cap)
-(schema/register! :seon.config.breaker/crash-count  :seon.config/cap)
-(schema/register! :seon.config.breaker/window-ms    :seon.config/cap)
+;;; The scalar/enum per-knob attrs are registered ONCE with their manifest
+;;; section specs above (the LEAF-attr block before `:seon.config/render`) —
+;;; the singleton entity schema below references those registrations. Only
+;;; the knobs whose DATOM shape differs from their manifest shape live here:
+;;; the three collections ride the mixed-`:or` EDN-slot bridge (a `:nil` alt
+;;; makes it a mixed `:or` so `transact!` pr-str's the value and
+;;; `config-view` `decode-edn-value`s it back).
 ;; The always-on FULL-source ns render list — the resolved keyword set
 ;; (`:seon.config/namespaces` `:always`). EDN-slot bridged (mixed `:or`).
 (schema/register! :seon.config/always [:or [:set :keyword] :nil])
@@ -532,8 +546,8 @@
 ;;; NAMESPACES POLICY — the explicit-listing resolver (#42). The SHIPPED
 ;;; default reproduces the pre-config hardcoded rules BYTE-IDENTICALLY; a lean
 ;;; cluster overrides it with a short explicit list. Pure given the manifest;
-;;; the live accessor [[namespaces-policy]] memoizes per env so the boot
-;;; indexer (93 ns rows) and every render share one read.
+;;; the live accessor [[namespaces-policy]] reads [[config-view]] (the db
+;;; singleton post-conn, the manifest resolve pre-conn — config-through-DB).
 ;;; ============================================================
 
 (def ^:private default-namespaces-policy
@@ -652,25 +666,30 @@
       (assoc :seon.config/system-text (:seon.config/system-text manifest)))))
 
 (defn stale-singleton-retractions
-  "Retract ops for singleton attrs present in `current` but ABSENT from
-   `desired` — the attr-level heal `seon.state/reconcile!`'s entity-level
-   retract cannot do (the singleton always survives, so it is never a stale
+  "Retract ops for stored singleton attrs absent from `desired`.
+
+   The attr-level heal `seon.state/reconcile!`'s entity-level retract
+   cannot do (the singleton always survives, so it is never a stale
    ENTITY). The plain-scalar case that matters: an OPTIONAL knob like
    `:seon.config/system-text` removed from the manifest (absent ⇒ not in
-   `desired`) is retracted so the db stops carrying it. `current` is the stored
-   singleton map (pre-seed db read); `desired` is `(resolve-config-singleton
-   manifest)`. `:db/id` is ignored. Called by `seon.client/boot-seed!` AFTER
-   the config reconcile (the singleton entity exists by then)."
+   `desired`) is retracted so the db stops carrying it. `current` is the
+   stored singleton map (the POST-reconcile db read — the reconcile upserts
+   but never retracts a leftover attr); `desired` is
+   `(resolve-config-singleton manifest)`. `:db/id` is ignored. Emits the
+   VALUE-LESS 3-element `:db/retract` (retract every value of the attr) —
+   value-independent, so an EDN-slot-bridged collection knob heals too (a
+   value-matched retract would have to reproduce the stored `pr-str` byte
+   for byte). Called by `seon.client/boot-seed!` AFTER the config reconcile
+   (the singleton entity exists by then)."
   {:malli/schema [:=> [:catn [::current :map] [::desired :map]] [:vector :any]]}
   [current desired]
   (into []
-        (for [[k v] current
+        (for [[k] current
               :when (and (not= k :db/id) (not (contains? desired k)))]
-          [:db/retract [:seon.config/id cluster-config-id] k v])))
+          [:db/retract [:seon.config/id cluster-config-id] k])))
 
 (defn config-view
-  "The live config singleton map — the db datom POST-conn, the manifest resolve
-   PRE-conn.
+  "The live config singleton map — db post-conn, manifest pre-conn.
 
    The ONE switchover: the injected [[!db-config-view]] seam reads the seeded
    `:seon.config` singleton once the conn is up (config-through-DB); before the
