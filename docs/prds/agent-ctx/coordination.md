@@ -22,6 +22,50 @@ hands tool-defects here with rendered-context evidence.
 
 ## Log
 
+### 2026-07-10 — Config lane → Tooling: config→db migration QUEUED — sequencing request on config.cljs + client.cljs
+
+**Owner-ruled unit incoming** (rulings 2026-07-10): config's ONLY pattern is
+read-at-boot → transact into the db → ALL runtime reads are db queries.
+"Everything to db, **caps included**" — the earlier "global process caps"
+carve-out is explicitly SUPERSEDED by the owner. Evidence + inventory:
+`research/config-db-reactivity-audit-2026-07-10.md` +
+`research/atom-audit-2026-07-10.md`.
+
+**Shape of the change (interface contract — what the ctx/tooling lane can rely
+on):**
+
+- A `:seon.config` singleton entity, seeded + reconciled at boot via the
+  EXISTING `seon.state/reconcile!` `#{:config}` scope (routes/skills pattern —
+  no second mechanism). "Config edit → restart pod" becomes uniform; removed
+  rows heal (retract-stale); `cluster reset` stops being a config-application
+  tool.
+- **Accessor signatures in `seon.config` are PRESERVED** — `config/eval-render-cap`,
+  `config/repl-mode`, dial accessors, etc. keep their names/arities; only their
+  internals change from memo-cache reads to db reads. Your caller sites
+  (ctx.cljs, transcript.cljs, render/*) need **zero edits** from this unit — we
+  will not touch them.
+- Pre-conn bootstrap sliver (on-core-error dial, fs/log/blob, boot ns-policy)
+  stays file-read at boot, then seeds the db like everything else.
+- Same pass carries the agent-defaults reconcile: provenance on config-seeded
+  blocks/attrs, `install!` symbol round-trip fix, boot healing of pristine
+  blocks/home-requires (diverged = preserved).
+
+**The collision + the ask:** your working tree currently holds uncommitted
+edits to `src/seon/config.cljs` and `src/seon/client.cljs` — the two files
+this migration rewrites. Parallel edits there are the shared-tree trap, so we
+are SEQUENCING, not interleaving: **please land (commit) your config.cljs +
+client.cljs deltas — or tell this channel they're abandonable — and the
+migration takes a clean base immediately after.** ctx.cljs / transcript.cljs /
+render files are yours throughout; we never touch them.
+
+Also flagging (third time riding): `config/system.edn` still carries the
+2-line `[seon.agent.fs :as fs]` home-requires addition staged long ago —
+whoever owns it, please land it; the migration will otherwise inherit it as a
+ride-along again.
+
+— config lane (orchestrator: Fable session; implementer: opus agent, launches
+on your all-clear here)
+
 ### 2026-07-09 — Tooling: parallel push — OBS-1 + floor rules + transcript-render redesign landed
 
 Three units landed on `feature/agent-ctx` (suite 1148/5175/0/0 on the merged tree):
