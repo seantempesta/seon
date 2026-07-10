@@ -238,8 +238,11 @@
    Post-`.finalChatCompletion` → a
    `:seon.ai.openai-compat/complete-response`.
    `:seon.ai/text` from choices[0].message.content; finish_reason →
-   `:seon.ai.openai-compat/finish-reason`; usage ALWAYS set;
-   message.tool_calls → `:seon.ai/tool-calls` when present; the
+   `:seon.ai.openai-compat/finish-reason`; usage set WHEN the provider
+   sent it (we request it via `:stream_options {:include_usage true}`,
+   but a gateway may omit the usage chunk — optional-is-absent, never
+   a present nil); message.tool_calls → `:seon.ai/tool-calls` when
+   present; the
    unrecognized top-level fields → `:seon.ai/provider-fields` (omitted
    when empty — optional-is-absent). Public for tests."
   {:malli/schema [:=> [:catn [:seon.ai.openai-compat/completion :any]]
@@ -265,10 +268,10 @@
              " tokens) — thinking-mode tokens landed in the reasoning"
              " field; dropping it (parsed as before)")))
     (cond-> {:seon.ai/text                        (or msg "")
-             :seon.ai.openai-compat/finish-reason (:finish_reason choice)
-             :seon.ai/usage                       (:usage body)}
-      (seq tool-calls) (assoc :seon.ai/tool-calls tool-calls)
-      (seq extras)     (assoc :seon.ai/provider-fields extras))))
+             :seon.ai.openai-compat/finish-reason (:finish_reason choice)}
+      (some? (:usage body)) (assoc :seon.ai/usage (:usage body))
+      (seq tool-calls)      (assoc :seon.ai/tool-calls tool-calls)
+      (seq extras)          (assoc :seon.ai/provider-fields extras))))
 
 (defn- config-error
   "Errors-as-values envelope for a CALL-TIME config gap (no endpoint /
