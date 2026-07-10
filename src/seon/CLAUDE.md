@@ -32,6 +32,7 @@ existing one needs strengthening IN PLACE.
 | Capability fns | `seon.agent.fs` is the template (gating, envelope, paging) | a tool with its own arg/result conventions |
 | Big text at rest | blob store (`my.blob`, three-tier rule) — DB holds projections + refs | large text dumps as datoms; ad-hoc log-file trees |
 | Provenance (who/when wrote a datom) | tx-meta auto-stamp via `db/with-agent`/`with-tx-context` — join the datom's tx | `created-by`/`created-at`/`source-turn` attrs on domain entities |
+| Model/agent evals | `src-inspect-ai/` (tasks + scorers; ledger `evals/scorecard.jsonl`) | a new drive script, a bespoke per-run harness, a 4th testing surface |
 
 ## Lanes — which files are alive
 

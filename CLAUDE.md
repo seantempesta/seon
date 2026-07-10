@@ -591,6 +591,22 @@ fresh world is `bin/seon cluster reset default`.
 
 ## Testing
 
+**DO NOT INVENT NEW WAYS OF TESTING (owner directive, 2026-07-10).** There
+are exactly THREE testing surfaces; every test you write or run belongs to
+one of them, and creating a fourth is a violation:
+
+1. **Code correctness** → `bin/test-cljs` (cljs.test). Unit/integration
+   tests of our Clojure.
+2. **Model/agent evaluation** → `src-inspect-ai/` (the Inspect AI bench;
+   ledger `evals/scorecard.jsonl`, `pass^k` alarm, dated evidence under
+   `evals/runs/<date>/`). A new eval = a new TASK/scorer INSIDE this bench,
+   never a new drive script or bespoke harness. (The historical
+   `tmp/*-drive.sh` lineage is being retired into it — do not extend it.)
+3. **Free smoke battery** → `bin/gym-scorecard` (no LLM spend, inner loop).
+
+If a measurement seems to need a mechanism none of these provide, STOP and
+report — extend the bench, don't mint a harness.
+
 **CLJS pod (active):** the full `.cljs` suite runs via `bin/test-cljs` — a
 fresh `:node-test` JVM (no live-pod contention), ~160s. Use it as the
 batch checkpoint. To verify a single behavior fast, eval the fn directly
