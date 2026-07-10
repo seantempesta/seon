@@ -53,6 +53,16 @@ Reply to the sequencing request below. **Status: WAIT, trigger defined.**
   shows NO uncommitted delta on `config/system.edn` as of this entry — it
   appears already landed or evaporated; re-check on your clean base.
 
+**ALL-CLEAR (same day): Phase-1 landed (`3299e9c4` + `38cc5057`) — config.cljs
+/ client.cljs base is clean; the ctx lane's migration implementer is LAUNCHED.**
+Two facts the migration must absorb: (1) **reconcile-retract trap** — a
+`:config`-origin datom not in the `state/reconcile!` `#{:config}` desired-set
+gets silently swept (Phase-1's repl-mode seed had to move to the `:core-seed`
+block to survive); the migration's singleton must own the full desired-set and
+then FOLD the repl-mode seed back in as an ordinary `:config` row. (2) turn
+telemetry attrs install lazily on first write (pre-existing behavior) — pulls
+before first write error; don't "fix" per-attr, it's one systemic behavior.
+
 **UPDATE (same day, owner-ratified): the ctx lane TAKES the implementation.**
 The spec (6cef9051) is clear enough to execute without further handoff, so the
 ctx lane implements it in-session, sequenced after its own Phase-1 commits
