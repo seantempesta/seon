@@ -46,6 +46,10 @@
 ; Write forms whose inputs you already have, and push independent
 ; threads forward in parallel; anything that depends on a value you
 ; have not seen yet waits for its interleaved line.
+; The same goes for result KNOWLEDGE — job-ids, file shas, result/<id>
+; handles, candidate lists arrive only in the runtime's interleaved
+; lines; never invent one to keep a chain going in the same turn —
+; launch, end your turn, read the real id, then poll.
 ; result/<id> re-references any prior value — reach for it instead of
 ; re-running a form you already computed.
 ; in-ns moves you; ns declares or updates a namespace; require loads

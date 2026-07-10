@@ -649,13 +649,21 @@
                             start   (min (dec from) total)
                             end     (min total (+ start (max 0 max-lines)))
                             window  (subvec lines start end)]
+                        ;; Key ORDER is load-bearing: the transcript render
+                        ;; clips long values front-to-back, so the tiny
+                        ;; load-bearing keys (::file-sha — the replace!
+                        ;; fence token) must render BEFORE the big ::content
+                        ;; string, never after it (a clipped view hid the
+                        ;; sha and the agent invented one — observer drive
+                        ;; evidence 2026-07-10). ≤8 keys = array map,
+                        ;; insertion order preserved.
                         {:seon.agent.fs/ok?            true
                          :seon.agent.fs/path           path
-                         :seon.agent.fs/content        (match/number-lines window from)
+                         :seon.agent.fs/file-sha       (int/file-sha content)
                          :seon.agent.fs/from-line      from
                          :seon.agent.fs/lines-returned (- end start)
                          :seon.agent.fs/total-lines    total
-                         :seon.agent.fs/file-sha       (int/file-sha content)})
+                         :seon.agent.fs/content        (match/number-lines window from)})
                       (catch :default e (int/->err path e))))
       :wasi (int/wasi-pending path "view"))))
 

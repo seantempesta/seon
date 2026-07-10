@@ -365,6 +365,9 @@
 (defn run-bg!
   "Spawn a command in the BACKGROUND; return its :seon.agent.shell/job-id.
 
+   The job-id arrives in THIS call's result — launch, end your turn, then
+   poll with the real id next turn (an id you type yourself never exists).
+
    For long or high-volume work (a bench test run, a build) that would
    outlast [[run]]'s timeout or overflow its capture ceiling. Same gate as
    run — default-deny until SEON_SHELL, a :seon.agent.shell/cwd under the

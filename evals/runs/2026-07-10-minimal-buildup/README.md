@@ -14,6 +14,32 @@ transcript block, nothing else; no tool cards, no skills, no namespaces
 block). Baseline: `evals/runs/2026-07-09-fabrication-grammar/` (full
 default context, pre-strip code path, 32% fab-attempt, 4/6 GREEN).
 
+## Context variants (owner-directed mid-matrix iteration, 2026-07-10)
+
+The matrix grew a CONTEXT-VARIANT dimension (owner: iterate-until-understood;
+each variant applied only at a drive boundary, bundle rebuilt + min-a
+restarted + fresh-agent render verified before the next drive):
+
+- **v0** — the original strictly-minimal context (system-text ~306 tok +
+  transcript only, no cards). Rows: the 6 scored Mode A drives below
+  (poker ×3, two-bucket d1/d2). Turn-1 fixed prefix 515 tok (incl. masthead).
+- **v0+ns** — v0 + the namespaces block (default-ctx-blocks verbatim) with
+  NEW colocated header teaching (full-vs-cards render policy + "more nses
+  exist in the store — query, don't guess" + movement verbs); commit
+  `05ed3797`. Fresh-agent fixed prefix 6,637 tok (system 306 + namespaces
+  6,431 + transcript 174; verified on throwaway BnO-2607101441 via the
+  debug endpoint). Rows: two-bucket-ns-d1 + db-memory ×3 (Mode A).
+- **v1** — v0+ns + four observer-driven fixes (observer/live-notes.md drive-1
+  analysis): (1) system-prompt "result KNOWLEDGE" sentence (job-ids/shas/
+  result-ids/candidate lists arrive only in interleaved lines — launch, end
+  turn, read the real id, then poll); (2) run-bg! docstring "job-id arrives
+  in this call's result" line; (3) fs/view response key-order fix (::file-sha
+  before ::content so the clip never hides the fence token); (4) contract
+  wording `:near [from-line to-line]` (was `:near <line>`, schema is
+  [:tuple :int :int]) — the `*-v1.md` contract copies. Rows: ALL Mode B
+  (min-b ×9) + the Mode A cards-redrives (poker ×3, two-bucket ×3), so the
+  A-vs-B comparison is entirely within v1.
+
 ## STATUS: BLOCKED at 6/18 drives — DeepSeek balance exhausted
 
 Drive 6 (min-a-two-bucket-d3) died turn 1 with `DeepSeek HTTP 402:
@@ -36,6 +62,25 @@ from all capability means, listed in the matrix for honesty.
 | two-bucket-d2 | 20 | 75 | :turn-limit | RED (5 failed, 4 passed) | 10 (50%) | 56 | 23 | 359s | 285,819 | 25,244 | 161,792 / 124,027 |
 | two-bucket-d3 | 1 | 0 | :error | FLAKE (402, excluded) | — | — | — | 3s | 0 | 0 | — |
 | **valid total** | **60** | **335** | — | **3/5 GREEN** | **29 (48%)** | **228** | **38** | ~1259s | 806,358 | 91,715 | 395,648 / 410,710 |
+
+## Per-drive matrix — v0+ns (Mode A `:batch`, cluster min-a, commit 05ed3797)
+
+| drive | started (UTC) | turns | evals | close | oracle | fab-attempt turns | strip total | gate refusals | wall | prompt tok (rep) | compl tok (rep) | cache hit/miss |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| two-bucket-ns-d1 | 18:42:08 | 14 | 85 | :completed | GREEN (9 passed) | 7 (50%) | 53 | 0 | 330s | 258,736 | 21,504 | 124,416 / 134,320 |
+| db-memory-d1 | 18:56:42 | 2 | 9 | :completed | GREEN (59.5 recalled) | 1 (50%) | 2 | 0 | 19s | 18,576 | 626 | 16,384 / 2,192 |
+| db-memory-d2 | 18:57:19 | 3 | 7 | :completed | GREEN (59.5 recalled) | 1 (33%) | 3 | 0 | 18s | 27,848 | 523 | 24,960 / 2,888 |
+| db-memory-d3 | 18:58:07 | 3 | 8 | :completed | GREEN (59.5 recalled) | 0 (0%) | 0 | 0 | 20s | 28,121 | 492 | 24,960 / 3,161 |
+| **v0+ns total** | — | **22** | **109** | — | **4/4 GREEN** | **9 (41%)** | **58** | **0** | 387s | 333,281 | 23,145 | 190,720 / 142,561 |
+
+Additional flakes (excluded, listed for honesty): the d3 redrive dispatched
+18:15:43Z (agent XTz-2607101415, run ZvP-2607101415) was killed by a pod
+restart at 18:15:58Z during the key-rotation/coordination window — run
+crash-closed at boot, 0 turns (2nd d3 flake after the 402). Non-ledger
+agents in min-a's store, excluded from all extraction: pqp-2607101414
+(key check), BnO-2607101441 (v0+ns render verification), LSf-2607101412 /
+XTz-2607101415 / CbH-2607101416 (the other session's runs during the
+coordination window).
 
 ¹ poker-d3's client curl was killed mid-drive during the orchestration
 handover (background batch → foreground control); the run continued
