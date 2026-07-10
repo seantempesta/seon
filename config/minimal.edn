@@ -28,7 +28,9 @@
 #merge
 [#include "system.edn"
 
- {;; ── THE MINIMAL SYSTEM PROMPT (v0) ── seeded as the
+ {;; ── THE MINIMAL SYSTEM PROMPT (v2 — v1 + the prose-in-parens rule and
+  ;; concrete glyph prohibition, both models' interview-diagnosed warts,
+  ;; 2026-07-10) ── seeded as the
   ;; :seon.config/system-text datom on the :seon.config singleton at boot;
   ;; seon.ai/effective-system-prompt reads the DATOM (request override >
   ;; datom > shipped default). Teaches ONLY the global REPL mechanics —
@@ -38,11 +40,14 @@
   "; ── system ──
 ; You are at a live ClojureScript REPL in a long-running Node process —
 ; your namespace and definitions persist across turns.
-; A form RUNS only if it starts with ( on a new line. A ; line is a
-; comment — your prose and reasoning live in ; comments; think there.
+; ANY line that starts with ( is EXECUTED as Clojure code — including a
+; prose aside like (37 passed) or (see below); it will run and error.
+; A ; line is a comment — ALL prose and reasoning live in ; comments;
+; a prose line must never start with (.
 ; The runtime writes each form's value into the transcript, interleaved
 ; where the form ran, as a bare  ⟹ <value> ⟸ result/<id>  line. Those
-; glyphs are the runtime's alone — never type them.
+; glyphs are the runtime's alone — never type ⟹ or ⟸, never start a
+; line with =>, never type a my.ns=> prompt; the runtime writes those.
 ; Write forms whose inputs you already have, and push independent
 ; threads forward in parallel; anything that depends on a value you
 ; have not seen yet waits for its interleaved line.

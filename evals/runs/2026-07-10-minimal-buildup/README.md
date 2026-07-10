@@ -417,3 +417,38 @@ kept as a ladder variant config.)
 
 Interview raw: `observer/spark-interview-raw.txt`. Clusters destroyed
 after extraction. Key stored outside the repo (`~/.config/env/secrets.env`).
+
+## DeepSeek thinking probe + v2 text (2026-07-10, owner-directed)
+
+Owner asks: (1) fix all problematic text; (2) does DeepSeek "low thinking"
+fix the problems? Probes first: DeepSeek ACCEPTS
+`thinking {:type "enabled"}` + `reasoning_effort` but IGNORES the effort
+level (low 226 vs high 188 reasoning tokens on the same prompt — noise),
+so "low thinking" = binary thinking-ON (`SEON_AI_THINKING=low` →
+provider `:deepseek` sends both fields; effort harmless).
+
+| drive | model | thinking | text | turns | close | oracle | fab turns | strips | wall | reasoning tok |
+|---|---|---|---|---|---|---|---|---|---|---|
+| ds-think-poker-v1-d1 | deepseek-v4-pro | on | v1 | 6 | :completed | GREEN (37) | 1/6 (17%) | 4 | 117s | 3,137 |
+| ds-think-two-bucket-v1-d1 | deepseek-v4-pro | on | v1 | 18 | :completed | GREEN (9) | 6/18 (33%) | 23 | 461s | 17,381 |
+| ds-v2-poker-v1-d1 | deepseek-v4-pro | off | **v2** | 10 | :completed | GREEN (37) | 2/10 (20%) | 5 | 75s | 0 |
+
+**Thinking verdict: helps task quality, does NOT fix fabrication.**
+two-bucket GREEN in 18 turns (the first Mode-A DeepSeek GREEN on this
+task; v0 was 0/2 :turn-limit RED — cards confounded, v0+ns was already
+GREEN in 14) — but fab is right back at the 33% ≈ 32% constant, with the
+same boundary shape. The reasoning channel does not absorb the grammar
+priming. Costs: 17.4k billed reasoning tokens + 461s on two-bucket. Mode B
+remains DeepSeek's structural answer; thinking is a quality dial, not a
+fabrication fix.
+
+**v2 text (committed in `config/minimal.edn`):** the two interview-
+diagnosed warts, mechanics-only (no scolds): (a) "ANY line that starts
+with ( is EXECUTED as Clojure code — including a prose aside like
+(37 passed)…"; (b) concrete glyph prohibition ("never type ⟹ or ⟸, never
+start a line with =>, never type a my.ns=> prompt"). One poker redrive:
+GREEN, fab 20% (vs 33–80% v0 spread), 1 residual prose-in-parens error.
+n=1 — kept on "no regression + ~25 tokens + both models' testimony
+endorses it"; the ladder's per-rung fab metrics accumulate the real
+sample. (Verified rendering in the drive transcript itself — the debug
+page HTML-escapes `=>`, don't grep it for this.)
