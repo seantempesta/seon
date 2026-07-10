@@ -34,12 +34,15 @@ agent-adapter → (fn [ctx-text] → Promise< {:text "…" :seon.ai/raw <resp>}
 ## Configuration surface
 
 Every setting can come from an **environment variable** OR from the
-`:seon.ai/config` singleton row in the store. **Env owns the row**: at boot
-`seon.ai/sync!` writes the row to match the `SEON_AI_*` vars (set → asserted,
-unset → retracted), so booting without the env vars yields the shipped
-defaults. A runtime `transact!` against the row takes effect on the **next
-call** (read per-call, no cache, no restart) but is re-synced from env at the
-next boot.
+`:seon.ai/config` singleton row in the store. **Env SEEDS, the DB OWNS**
+(seed-once): at boot `seon.ai/sync!` writes the row from the `SEON_AI_*`
+vars ONLY when the row is unconfigured (nil/`{}`); a row with ≥1 config
+attr is left untouched — env is ignored and runtime switches persist
+across boots. Nothing is ever retracted by sync. A runtime `transact!`
+against the row takes effect on the **next call** (read per-call, no
+cache, no restart). Consequence: to change a value on an EXISTING
+deployment, transact the row (or wipe it) — editing the env alone does
+nothing after first boot.
 
 **Precedence for every setting:** explicit request opt → config row → shipped
 default.
@@ -104,11 +107,78 @@ accepted — the adapter strips a trailing `/chat/completions` (or
 - `:deepseek` always sends an explicit toggle: `{:thinking {:type "disabled"}}`
   unless `SEON_AI_THINKING` is truthy (`"true"` → enabled; `"high"`/`"max"` →
   enabled + that `reasoning_effort`).
-- `:openai-compat` sends the `:thinking` field **only when truthy** — absent /
-  `"false"` sends nothing (graceful no-op on gateways that don't know it). For
-  servers that gate reasoning differently (e.g. Qwen), use `:extra-body`.
+- `:openai-compat` sends ONLY the STANDARD OpenAI param (fixed 2026-07-10):
+  an effort string (`"minimal"`…`"xhigh"`) goes out as `reasoning_effort`;
+  the vendor `:thinking` field is NEVER sent (strict gateways — Meta Model
+  API, vLLM — HTTP-400 unknown params). `"true"` sends nothing (no standard
+  wire form; reasoning models reason by default). For servers that gate
+  reasoning differently (e.g. Qwen), use `:extra-body`.
 - `:anthropic` maps any truthy thinking to `{:thinking {:type "adaptive"}}`;
   falsy omits the key entirely.
+
+## Model catalog — the top models and their good configs (2026-07-10)
+
+The one place that lists CURRENT recommended models per provider with the
+config that actually works. Update this table when a provider ships or
+deprecates a model — same discipline as code. ✔ = verified live from seon;
+◇ = from provider reference, not yet driven live.
+
+### DeepSeek direct (`:deepseek` — the shipped default)
+
+| Model | In/out $/M (cache-hit in) | Notes |
+|---|---|---|
+| ✔ `deepseek-v4-pro` (default) | $0.435 / $0.87 ($0.0036) | ~43 tok/s decode, TTFT ~1.3s (thinking off — our default config). `SEON_AI_THINKING=true|high` for reasoning (slow; watch the 60s timeout). |
+| ✔ `deepseek-v4-flash` | $0.14 / $0.28 ($0.0028) | ~68 tok/s, TTFT ~1.0s, fastest wall-clock of the cheap tier. |
+
+```bash
+SEON_AI_PROVIDER=deepseek        # endpoint + DEEPSEEK_API_KEY defaults apply
+DEEPSEEK_API_KEY=<key>
+# SEON_AI_MODEL=deepseek-v4-flash   # optional; omit -> deepseek-v4-pro
+```
+
+- **Deprecated 2026-07-24:** `deepseek-chat` / `deepseek-reasoner` (legacy
+  slugs for v4-flash non-thinking/thinking). Don't use them anywhere.
+- Peak pricing 2× during UTC 1–4 & 6–10 from mid-July 2026 (US overnight!)
+  — schedule batch drives off-peak.
+
+### Meta Model API (`:openai-compat`) — Muse Spark 1.1
+
+| Model | In/out $/M | Notes |
+|---|---|---|
+| ✔ `muse-spark-1.1` | $1.25 / $4.25 (reasoning bills as output) | ~900–1,060 tok/s decode (≈20× v4-pro); hidden reasoning has NO off-switch — ALWAYS dial `SEON_AI_THINKING=minimal` (TTFT 3.9s, wall 7.7s, beats v4-flash). 1M ctx, multimodal in. Public preview. |
+
+Full recipe, measured tables, gotchas:
+`docs/prds/agent-ctx/research/meta-model-api-muse-spark-2026-07-10.md`.
+
+### Anthropic (`:anthropic`)
+
+| Model | In/out $/M | Notes |
+|---|---|---|
+| ◇ `claude-opus-4-8` (our default) | $5 / $25 | The default Opus tier; adaptive thinking via `SEON_AI_THINKING=true`. Sampling params NOT sent (400 on 4.7+) — the adapter already omits temperature. |
+| ◇ `claude-sonnet-5` | $3 / $15 ($2/$10 intro through 2026-08-31) | Near-Opus coding/agentic at Sonnet cost; new tokenizer (~30% more tokens/text). |
+| ◇ `claude-fable-5` | $10 / $50 | Hardest long-horizon work only. Thinking ALWAYS on (explicit disable 400s — our truthy→adaptive mapping is compatible; never send a disable). Requires 30-day retention org config. |
+| ◇ `claude-haiku-4-5` | $1 / $5 | Quick cheap calls; 200K ctx. |
+
+```bash
+SEON_AI_PROVIDER=anthropic
+ANTHROPIC_API_KEY=<key>
+# SEON_AI_MODEL=claude-sonnet-5     # optional; omit -> claude-opus-4-8
+```
+
+### Local / self-hosted (`:openai-compat` / `:diffusiongemma`)
+
+- **Qwen3.6-35B-A3B via vLLM/SGLang** — see the serving section below.
+- **DiffusionGemma** (`:diffusiongemma`) — RunPod or the local MLX worker
+  (`~/ml/diffusion-gemma`, ~120 tok/s on M-series); see the repo CLAUDE.md
+  §DiffusionGemma.
+
+### Per-agent routing
+
+`:seon.ai/agent-provider` / `agent-model` / `agent-thinking` override the
+global row per agent (`:inherit` default). Caveat: `base-url`/`api-key-env`
+are GLOBAL-row only — one `:openai-compat` gateway at a time; a second
+gateway needs its own cluster (or the `:deepseek` provider, which ignores
+the row's base-url).
 
 ## Serving Qwen3.6-35B-A3B (or any OpenAI-compatible server)
 

@@ -27,6 +27,10 @@ must persist). The `claude-api` dev skill covers Anthropic specifics.
   provider change that reorders or re-flows prompt parts silently destroys
   the cache hit rate; check `llm-usage` cached-token counts after changes.
 
+**Model catalog** (recommended models + working configs per provider):
+`docs/seon/reference/llm-adapters.md` §"Model catalog" — update it when a
+provider ships/deprecates a model.
+
 Adapters: `openai_compat.cljs` (DeepSeek et al — the pod default),
 `anthropic.cljs`, `diffusiongemma.cljs` (the diffusion-worker provider).
 Verified `:openai-compat` gateways: OpenRouter (acme), Meta Model API
