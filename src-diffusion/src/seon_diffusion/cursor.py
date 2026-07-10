@@ -47,7 +47,8 @@ import mlx.core as mx
 from . import control
 from .control import _Workspace, _tok_ids
 from .generate import GenConfig, _entropy
-from .repair import hint_for as _hint_for
+from .repair import (hint_for as _hint_for, orient_for,
+                     strip_hints as _strip_hints)
 
 SELECT_GLYPHS = tuple("①②③④⑤⑥⑦⑧⑨⑩")   # model → driver: select offer N
 GROW_GLYPH = "⤵"                            # model → driver: more space now
@@ -411,7 +412,7 @@ class CursorDriver:
             pieces.append(text)
             hi += 1
         return {"holes": holes, "hole_confidence": stats, "trims": trims,
-                "probes": probes, "text": "".join(pieces),
+                "probes": probes, "text": _strip_hints("".join(pieces)),
                 "overflow": overflow, "forwards": fwd + probe_fwd}
 
     def fill(self, prompt, segments, candidates=None, seed=None):
@@ -647,10 +648,17 @@ class CursorDriver:
         if chosen:
             offer = next((o for o in offers if o.get("glyph") == chosen), None)
             if offer is not None:
-                # EXPAND — clamp the template segments, fill the holes
+                # EXPAND — clamp the template segments, fill the holes.
+                # An orientation line rides the content channel above the
+                # template (measured 0/3→3/3 slot correctness, round 7) —
+                # transient, stripped from the assembled text like hints.
+                cand = {int(k): v for k, v in
+                        (offer.get("candidates") or {}).items()}
+                orient = orient_for(offer.get("label"), cand)
                 segments = ([("clamp", draft)] if draft else []) \
+                    + ([("clamp", orient)] if orient else []) \
                     + norm_segments(offer["template"])
-                fr = self._fill_on(cache, cur_len, segments)
+                fr = self._fill_on(cache, cur_len, segments, candidates=cand)
                 total_fwd += fr["forwards"]
                 events.append({"event": "expand", "glyph": chosen,
                                "auto": bool(auto), "label": offer.get("label"),

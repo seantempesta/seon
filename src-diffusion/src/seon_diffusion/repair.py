@@ -12,7 +12,25 @@ parsing that feeds it.
 
 import re
 
-HINT_PREFIX = "; fix:"    # transient marker — stripped before commit
+HINT_PREFIX = "; fix:"     # transient marker — stripped before commit
+ORIENT_PREFIX = "; slot:"  # orientation line — where the model is + legal
+                           # values; measured 0/3→3/3 slot correctness
+                           # (typeahead research round 7); stripped like hints
+
+
+def orient_for(label, candidates=None):
+    """One `; slot:` orientation line for a template expansion — tells the
+    model WHERE it is and, for closed holes, the legal values. Content
+    channel, transient (strip_hints removes it before commit)."""
+    parts = []
+    if label:
+        parts.append(f"completing {label}")
+    for hi, cands in sorted((candidates or {}).items()):
+        if cands:
+            parts.append(f"hole {int(hi) + 1} takes one of: {' '.join(cands)}")
+    if not parts:
+        return ""
+    return f"{ORIENT_PREFIX} {' — '.join(parts)}\n"
 
 
 def undeclared_var(msg):
@@ -42,4 +60,5 @@ def hint_for(err):
 
 def strip_hints(text):
     return "".join(l for l in text.splitlines(keepends=True)
-                   if not l.lstrip().startswith(HINT_PREFIX))
+                   if not (l.lstrip().startswith(HINT_PREFIX)
+                           or l.lstrip().startswith(ORIENT_PREFIX)))

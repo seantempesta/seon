@@ -153,6 +153,31 @@ Script: `dg_logits.py`. What the canvas logits give us per settle pass:
 | EOS logprob at first tail position | task-complete −2.8 vs more-work-needed −7.0 (argmax `(`) | done-ness meter (ρ-EOS from the infill survey, independently reproduced) |
 | Glyph posterior at cursor | rounds 4–5 | menu intent, current-step, none-of-the-above |
 
+## Round 7 — sizing battery: ρ-EOS, dead-space glyph, orientation line
+
+Scripts: `dg_size.py`, `dg_size_a.py`, `dg_size_c.py`.
+
+- **ρ-EOS: NEGATIVE on DiffusionGemma.** Stop-token (EOS+pad) posterior
+  mass inside an oversized hole never approaches a usable absolute
+  threshold (peaks ≈−8 logprob), and the relative-argmax read looked
+  right once (max exactly at the true boundary, 3/3 seeds) but did NOT
+  generalize — with other hole sizes/prompts the argmax drifts to the
+  hole end. Do not build on it; sizing stays CAL-where-it-works +
+  longest-candidate snapping + overlap-trim.
+- **Teachable dead-space glyph (`·`): weak.** 1/2 seeds used it (after
+  junk), doesn't prevent echo. Consistent with the PAD result: untrained
+  self-report mechanisms underperform mechanical derivation. Skip.
+- **Orientation line: STRONG.** Telling the model where it is —
+  "you are filling the `:my.plan/status` slot of `todo/add!`; legal
+  values: :open :done" — took slot-value correctness **0/3 → 3/3**
+  (bare arm hallucinated `to-do`/`in-progress`); the only residue was
+  suffix-echo-in-slack, which overlap-trim already strips. ADOPT: the
+  driver derives this line from `op:"cursor"` slot facts and clamps it
+  as a hint comment on template EXPAND. (Also the honest resolution of
+  the earlier "0/3 both arms" read — the harness's correctness check
+  required a colon the model legitimately omits mid-canvas; zero-scores
+  rule vindicated again.)
+
 ## Next steps (proposed)
 
 1. `fill_guided` in `control.py` style: fill → oracle parse of the whole

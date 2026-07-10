@@ -430,3 +430,33 @@ def test_eval_gated_lock(oracle, session):
     r2 = d2.step("ctx", eval_session=session)
     assert r2["transition"] == "repair" and not r2["locked"]
     assert any(e["event"] == "eval-failed" for e in r2["events"])
+
+
+# ---------------------------------------------------------------------------
+# orientation line (round 7: 0/3->3/3 slot correctness)
+# ---------------------------------------------------------------------------
+
+def test_orient_for_renders_label_and_candidates():
+    from seon_diffusion.repair import orient_for, strip_hints
+    line = orient_for("(todo/add! …)", {1: [":open", ":done"]})
+    assert line.startswith("; slot:")
+    assert "(todo/add! …)" in line and ":open :done" in line
+    assert strip_hints("(+ 1 2)\n" + line) == "(+ 1 2)\n"
+    assert orient_for(None, {}) == ""
+
+
+def test_expand_clamps_orientation_and_strips_from_draft(oracle):
+    d, model, spy = driver(["①", (":open", False)], oracle)
+    offers = [{"glyph": "①", "label": "(todo/add! <status>)",
+               "candidates": {"0": [":open", ":done"]},
+               "template": [["clamp", "(todo/add! "], ["free", 3],
+                            ["clamp", ")"]]}]
+    r = d.step("ctx", offers=offers)
+    assert r["transition"] == "expand"
+    # orientation line never leaks into the assembled draft
+    assert "; slot:" not in r["new_draft"]
+    # offer candidates flowed through to the closed-hole SNAP
+    exp = r["expansion"]
+    assert exp["hole_confidence"][0].get("snapped") is True
+    assert exp["holes"][0] in (":open", ":done")
+    assert r["new_draft"] == f"(todo/add! {exp['holes'][0]})"
