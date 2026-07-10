@@ -240,6 +240,27 @@ If a generator, fn, schema, or namespace already exists and you're "fixing" it, 
 
 The whole repo is on a feature branch. Atomic refactors are the cheap option, not the expensive one.
 
+### DO NOT WRITE HACKS (owner directive, 2026-07-10)
+
+**When an LLM agent misbehaves, find the root cause and fix it. The root is
+always one of two things: the CONTEXT is wrong, or our CODE is wrong. Hacks
+are never a solution.**
+
+A hack is anything that operates on the SYMPTOM after the fact instead of the
+cause: regex-rewriting model output, marker/warning text scolding the model,
+post-hoc containment layers, "teach the model harder" prose for a behavior the
+mechanics invite. The anti-fabrication arc is the cautionary tale — a
+neutralizer, two marker variants, a recap card, and triplicated scold
+paragraphs were layered on, and the measured fabrication rate did not move,
+because the transcript's own grammar was inviting the behavior. The fix was
+mechanical (strip/abort at the reply boundary), not persuasive.
+
+Before shipping any mitigation for agent misbehavior, answer: what is the
+root cause, and does this change remove it? If it only intercepts, marks,
+rewrites, or scolds the symptom — stop and fix the context or the code
+instead. If you cannot find the root, report it (per "Report Code Smells");
+do not paper over it.
+
 ### Before writing code:
 
 1. **Observe the live system.** Query the REPL. Establish current state with actual data, not assumptions.
@@ -704,6 +725,25 @@ inside its own fork — `at` precedes the recording tx). Fix there, verify,
 `bin/seon cluster destroy <fork>` — the source store is untouched by
 construction. This whole loop is acceptance-drill-proven end to end
 (`docs/prds/agent-ctx/research/error-workflow-drill-2026-07-05.md`).
+
+**Forking a cluster (supervisor-only):** use this for a counterfactual, never
+for a normal fresh sample. First obtain the source basis-t — preferably the
+`::fork-hint` from `inspect/repro`, whose `:seon.error/at` is the exact db
+value the failure saw — then run:
+
+```bash
+bin/seon cluster fork default <basis-t> fork-default-<basis-t>
+# patch source/config as needed; drive the same stimulus against the fork pod
+bin/seon cluster destroy fork-default-<basis-t>
+```
+
+`cluster fork` copies the source store and turn-capture blobs, preserves eids
+and tx ids at the requested basis, starts a separate writable pod on a fresh
+port, and marks the fork disposable. It restores **durable state only**: pin
+the bundle, manifest, model configuration, and replay stimulus in the
+experiment record. Never modify the source store; always destroy the named
+fork in a `finally`/context-manager cleanup. Inspect callers use
+`seon_inspect.cluster.ephemeral_fork` for exactly that lifecycle.
 
 **Production:** same recording, same datoms, same triage chain — the dial
 just says `:log`. A prod fault is a fork-and-reproduce away from a fix; the
