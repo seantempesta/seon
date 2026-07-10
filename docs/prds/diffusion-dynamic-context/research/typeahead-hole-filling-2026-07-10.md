@@ -123,6 +123,36 @@ Hygiene note: one seed leaked a `<|channel>thought` scaffold token into
 free space — ban special/channel tokens at free positions (same one-line
 logit mask as the EOS ban).
 
+## Round 5 — planning-phase protocol (measured same day)
+
+Status glyphs ☐ ☑ ☒ ▶ ✓ ✗ ⏳ are all **single tokens**. Script: `dg_plan.py`.
+
+- **Plan production:** prompted for a plain-language plan as `; ☐ ①` comment
+  lines → perfect format compliance, 2/2 seeds, coherent 3-step plans
+  (~1.4–4.2s). (Content showed atom-based instincts — a context problem the
+  real DB render fixes, not a protocol problem.)
+- **▶ current-step probe works:** with step ① visibly committed, posterior
+  after a clamped `▶` ranked ② (the true next step) at −10.3 vs −24/−26.
+- **☑ done-probe does NOT:** the model marked ② done when ① was the
+  completed step. Done-ness must be DERIVED (eval'd forms matched against
+  plan items — derive-don't-store applies to the model's self-report too),
+  not asked. ▶ = ask the model; ☑ = compute it.
+- **Position bias confirmed** (per the ACI research warning): rotating the
+  menu, the correct item still wins but first-position inflation is large
+  (top margin −0.0 vs −6.4 after rotation; non-first items compress).
+  Glyph posteriors need a null-intent calibration (measure with a
+  content-free prompt, subtract) before thresholding.
+
+## Round 6 — logit-readout inventory (measured same day)
+
+Script: `dg_logits.py`. What the canvas logits give us per settle pass:
+
+| Signal | Measured | Use |
+|---|---|---|
+| Per-hole entropy (mean/worst) | determined slot 0.03–0.57 nats vs underdetermined 1.3–3.0 | "which slot needs help" heat-map; route candidates/docs to the uncertain hole; gate auto-accept on WORST token (per ACI research: mean dilutes) |
+| EOS logprob at first tail position | task-complete −2.8 vs more-work-needed −7.0 (argmax `(`) | done-ness meter (ρ-EOS from the infill survey, independently reproduced) |
+| Glyph posterior at cursor | rounds 4–5 | menu intent, current-step, none-of-the-above |
+
 ## Next steps (proposed)
 
 1. `fill_guided` in `control.py` style: fill → oracle parse of the whole
