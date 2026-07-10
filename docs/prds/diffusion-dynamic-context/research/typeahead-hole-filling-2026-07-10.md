@@ -204,6 +204,47 @@ Scripts: `dg_modes2.py` (v1 mis-scored `new_draft` instead of
   the provider needs a slim block loadout (the ctx-lane minimal-context
   work is exactly the required profile), not a bigger canvas.
 
+## Round 9 — the "8k context cliff" ROOT-CAUSED: our port's encoder, not the model
+
+The owner challenged the round-8 "model can't handle >8k" claim. He was
+right. Scripts: `dg_needle.py`, `dg_bisect.py`, `dg_transplant.py`,
+`dg_kdiff.py`, `vlm_needle.py`.
+
+The elimination chain (each step measured):
+
+1. Config: `max_position_embeddings=262144`; official card rates 256k
+   and reports MRCR retrieval AT 128k. Not a capacity limit.
+2. Needle-in-haystack through OUR port: perfect at ≤8k (even 7.6k-deep
+   needles — long-range attention works), total collapse at ≥10k at
+   EVERY depth incl. 800 tokens from the question. Threshold ≈8–10k.
+3. Eliminated by direct check: RoPE formula (matches reference
+   line-for-line), rope_scaling (none exists), raw MLX sdpa kernel
+   (exact at all lengths, masked and unmasked), masks (reference
+   semantics match), clip buffers (unused), cache numerics (clean),
+   logit softcapping (applied). Per-layer stats: diffuse drift, no
+   single broken layer.
+4. **mlx_vlm 0.6.4 ships DiffusionGemma** (post-dating our port). With
+   the SAME 8-bit weights it retrieves the needle at 10k AND 16k in
+   7–8s total. The model and the quantization are both fine.
+5. **Transplant test: THEIR 10k prefill cache + OUR decoder = perfect
+   retrieval.** Our decoder is correct; the defect is in OUR ENCODER
+   at length (exact mechanism unidentified — layer-0 attention output
+   diverges from theirs uniformly per-position while its K matches;
+   composition-confounded comparison, archaeology stopped as moot).
+6. Their prefill is also ~4× faster (3.4s for 10k tokens, chunked).
+
+**Decision: adopt mlx_vlm's model layer under our verified-canvas
+control** (their `diffusion_prefill_cache` / `diffusion_update_cache` /
+`diffusion_decoder_logits` API exposes exactly the seams control.py and
+cursor.py need). Our from-scratch port predates upstream support; the
+IP worth keeping is the oracle loop + driver FSM + glyph protocol, not
+the transformer forward. The round-8 "≤8k render budget" is VOID as a
+model constraint — re-measure the real context/latency curve after
+adoption (a slim render likely still wins on latency, but as a knob,
+not a wall). Note: our port's bf16 loading (dispatch shims added this
+session) produces garbage even short — unvalidated path, moot after
+adoption; shims kept for the 8-bit-path dispatch cleanliness.
+
 ## Next steps (proposed)
 
 1. `fill_guided` in `control.py` style: fill → oracle parse of the whole

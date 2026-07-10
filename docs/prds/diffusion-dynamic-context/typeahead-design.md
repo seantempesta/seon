@@ -298,14 +298,17 @@ In-band errors (`gen_error`), same contract as today.
 - Not a mode: INTERPRET branches on whether a template expansion is
   active; nothing is asked of the model.
 
-## The context budget (hard constraint, measured round 8)
+## The context budget (REVISED — round 9 root cause)
 
-Frontier correctness vs render size: 2/2 at ≤7.7k tokens (1.3–4.5s/
-step), 0/2 at ≥15.7k (junk/stuck; 23–67s/step). **The typeahead render
-must stay ≤~8k tokens** on DiffusionGemma-26B — the full 36k agent
-render degenerates (P3b live). The provider therefore needs a SLIM
-block loadout (the ctx-lane minimal-context profile is the shape), and
-P4 measures lock-rate at the profile's actual size.
+Round 8 measured a cliff at ~8–10k and called it a model constraint.
+**Wrong — it was our port's encoder bug** (round 9: the official
+mlx_vlm implementation retrieves needles at 16k with the same 8-bit
+weights; a transplant of their prefill cache into our decoder works
+perfectly; the model is rated to 256k). Decision: adopt mlx_vlm's
+model layer under our control loop (their prefill is also ~4× faster).
+The slim render profile remains a LATENCY/quality knob, not a wall —
+re-measure the context/lock-rate/latency curve after the adoption and
+set the P4 profile from that measurement.
 
 ## Settled by measurement (do not re-litigate without new data)
 
@@ -316,4 +319,5 @@ P4 measures lock-rate at the profile's actual size.
 - Plan ledger = todo datoms rendered, done items dropped from render.
 - No new config system: ctx blocks + one policy row.
 - Frontier drafts never clamp a partial symbol (backoff, round 8).
-- Render ≤~8k tokens for this model (the context cliff, round 8).
+- The round-8 "≤8k" cliff was OUR encoder bug, not the model (round 9);
+  model layer moves to mlx_vlm, render budget re-measured after.

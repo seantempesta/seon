@@ -105,11 +105,14 @@ def rms_norm(x, weight, eps):
 
 
 def qlinear(x, w):
-    """x @ W.T for an 8-bit affine-quantized weight dict {weight,scales,biases}."""
-    return mx.quantized_matmul(
-        x, w["weight"], w["scales"], w["biases"],
-        transpose=True, group_size=GROUP_SIZE, bits=BITS,
-    )
+    """x @ W.T — quantized dict {weight,scales,biases} OR a bare (bf16)
+    weight array (the unquantized checkpoint loads to plain arrays)."""
+    if isinstance(w, dict):
+        return mx.quantized_matmul(
+            x, w["weight"], w["scales"], w["biases"],
+            transpose=True, group_size=GROUP_SIZE, bits=BITS,
+        )
+    return x @ w.T
 
 
 def gelu_tanh(x):
@@ -285,20 +288,22 @@ class Layer:
         inv = mx.argsort(order)
         xe = x[order // K][:, None, None, :]        # [N, 1, 1, D] in expert order
         sorted_e = flat_i[order][:, None]           # [N, 1] ascending expert ids
-        gu = mx.gather_qmm(
-            xe, w["experts.gate_up_proj"]["weight"],
-            w["experts.gate_up_proj"]["scales"], w["experts.gate_up_proj"]["biases"],
-            rhs_indices=sorted_e, transpose=True, group_size=GROUP_SIZE, bits=BITS,
-            sorted_indices=True,
-        )  # [N, 1, 1, 2*moe_inter]
+
+        def gmm(inp, key):
+            we = w[key]
+            if isinstance(we, dict):                # quantized checkpoint
+                return mx.gather_qmm(
+                    inp, we["weight"], we["scales"], we["biases"],
+                    rhs_indices=sorted_e, transpose=True,
+                    group_size=GROUP_SIZE, bits=BITS, sorted_indices=True)
+            return mx.gather_mm(                    # bare bf16 checkpoint
+                inp, mx.swapaxes(we, -1, -2), rhs_indices=sorted_e,
+                sorted_indices=True)
+
+        gu = gmm(xe, "experts.gate_up_proj")        # [N, 1, 1, 2*moe_inter]
         gate, up = mx.split(gu, 2, axis=-1)
         act = gelu_tanh(gate) * up
-        down = mx.gather_qmm(
-            act, w["experts.down_proj"]["weight"],
-            w["experts.down_proj"]["scales"], w["experts.down_proj"]["biases"],
-            rhs_indices=sorted_e, transpose=True, group_size=GROUP_SIZE, bits=BITS,
-            sorted_indices=True,
-        )  # [N, 1, 1, D]
+        down = gmm(act, "experts.down_proj")        # [N, 1, 1, D]
         down = down.reshape(T * K, -1)[inv].reshape(T, K, -1)
         return mx.sum(down * top_w.astype(down.dtype)[..., None], axis=1)
 
@@ -331,8 +336,10 @@ class DiffusionGemmaMLX:
         # Dequantized embedding table, cached once — used for the soft-embedding
         # matmul in self-conditioning (probs @ E). ~1.4 GB bf16.
         e = weights["embed_tokens"]
-        self.embed_dequant = mx.dequantize(
-            e["weight"], e["scales"], e["biases"], group_size=GROUP_SIZE, bits=BITS
+        self.embed_dequant = (
+            mx.dequantize(e["weight"], e["scales"], e["biases"],
+                          group_size=GROUP_SIZE, bits=BITS)
+            if isinstance(e, dict) else e
         ).astype(mx.bfloat16)
         self.dtype = mx.bfloat16
         self._core = None  # lazily-built mx.compile'd decode core
@@ -345,11 +352,7 @@ class DiffusionGemmaMLX:
 
     def lm_head(self, h):
         """h [B, L, D] -> fp32 softcapped logits [B, L, V]."""
-        e = self.w["embed_tokens"]
-        logits = mx.quantized_matmul(
-            h, e["weight"], e["scales"], e["biases"],
-            transpose=True, group_size=GROUP_SIZE, bits=BITS,
-        ).astype(mx.float32)
+        logits = qlinear(h, self.w["embed_tokens"]).astype(mx.float32)
         cap = self.cfg.final_logit_softcapping
         return mx.tanh(logits / cap) * cap
 
