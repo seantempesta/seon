@@ -565,12 +565,17 @@
                   :else                     "<not registered>")]
     (str "(register! " key-str " " (abbrev-ns-kws form ns-str) ")")))
 
-(defn- compact-arities
-  "The arity portion of a compact `defn` head, derived from the stored
-   `:seon.fn/arglists` string (`\"([{:my.kb/keys [a]}])\"`). Single arity →
-   `[args] …`; multi-arity → `([a] …) ([a b] …)`. Errors-as-values: an
-   unreadable arglists string falls back to its raw text (outer parens
-   stripped) with an elided body."
+(defn compact-arities
+  "The arity portion of a compact fn head, from an arglists string.
+
+   Derived from the stored `:seon.fn/arglists` string
+   (`\"([{:my.kb/keys [a]}])\"`). Single arity → `[args] …`; multi-arity →
+   `([a] …) ([a b] …)`. Errors-as-values: an unreadable arglists string
+   falls back to its raw text (outer parens stripped) with an elided
+   body. Public: the `:recent-verbs` menu section
+   (`seon.agent.ctx.menu`) renders its glyph entries with the SAME
+   arity grammar as these compact cards."
+  {:malli/schema [:=> [:catn [::arglists [:maybe :string]]] :string]}
   [arglists]
   (let [parsed (try (edn/read-string arglists) (catch :default _ nil))]
     (cond

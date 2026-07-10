@@ -213,6 +213,15 @@
     :seon.render/ai 'seon.agent.ctx.testrun/testrun-block}
    {:seon.agent.ctx/name :plan :seon.agent.ctx/priority 45
     :seon.render/ai 'my.plan.internal/plan-block}
+   ;; Typeahead menu family (diffusion-typeahead P3a) — glyph-numbered,
+   ;; strictly-optional offers, derived per render (both vanish on empty
+   ;; queries, so a fresh agent pays zero). Volatile tail: eval-log/plan
+   ;; content changes each turn, so they sit with :plan/:relevant-source,
+   ;; below the cache breakpoint.
+   {:seon.agent.ctx/name :recent-verbs :seon.agent.ctx/priority 46
+    :seon.render/ai 'seon.agent.ctx.menu/recent-verbs-block}
+   {:seon.agent.ctx/name :plan-ledger :seon.agent.ctx/priority 47
+    :seon.render/ai 'seon.agent.ctx.menu/plan-ledger-block}
    {:seon.agent.ctx/name :relevant-source :seon.agent.ctx/priority 48
     :seon.render/ai 'seon.agent.ctx.relevant/relevant-source-block}
    {:seon.agent.ctx/name :findings :seon.agent.ctx/priority 97

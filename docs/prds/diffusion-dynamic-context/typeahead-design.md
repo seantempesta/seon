@@ -229,6 +229,24 @@ In-band errors (`gen_error`), same contract as today.
    (parse-gated by default); P3 wires it.
 3. **P3 seon** — menu/plan section fns, `:seon.typeahead/policy` row,
    provider wiring, inspector tile (posterior bars + plan ledger).
+   **P3a (section fns + policy row) SHIPPED 2026-07-10**:
+   `seon.agent.ctx.menu` owns `:recent-verbs` (eval-log-derived,
+   glyph-numbered fn menu — glyph + compact-card arity hint + docstring
+   line 1; aliased calls resolve via each eval ns's STORED
+   require-edges) and `:plan-ledger` (▶ active / ☐ open steps, done
+   dropped from the render), both seeded in
+   `seon.config/default-ctx-blocks` at priorities 46/47 (volatile tail,
+   between `:plan` and `:relevant-source`), plus the
+   `[:seon.typeahead/id "policy"]` row (code defaults in
+   `menu/default-policy` — auto-offer-margin / worst-token-gate /
+   probe-budget / menu-cap; per-knob DB override read at every render;
+   the config→DB migration lane owns moving the defaults later). 4
+   behavior tests in `test/seon/agent/ctx/menu_test.cljs`; live-proven
+   on acme (both sections in the byte-exact turn prompt blob; an
+   agent-transacted `menu-cap 2` row truncated both menus on the very
+   next render). Remaining for P3b: provider wiring + inspector tile —
+   and an owner call on the `:plan` vs `:plan-ledger` overlap (both
+   render the same open steps today).
 4. **P4 bench** — the replay-corpus task in src-inspect-ai + live acme
    drive; merge decision on the measured deltas.
 
