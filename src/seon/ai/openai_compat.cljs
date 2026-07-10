@@ -119,9 +119,14 @@
 ;; timeout (observed 2026-06-10). For :deepseek we send {"thinking":
 ;; {"type": "disabled"}} unless the config row's :seon.ai/thinking
 ;; (SEON_AI_THINKING) turns it on: "true" → enabled, "high"/"max" →
-;; enabled + that reasoning_effort. For :openai-compat the thinking
-;; field is sent ONLY when set truthy — absent/"false" sends NOTHING
-;; (graceful no-op on gateways that don't know the field).
+;; enabled + that reasoning_effort. For :openai-compat we send ONLY
+;; the STANDARD OpenAI param — an effort string ("minimal"…"xhigh")
+;; goes out as :reasoning_effort; the vendor :thinking field is NEVER
+;; sent (strict gateways — Meta Model API, vLLM — HTTP-400 unknown
+;; params; verified live against api.meta.ai 2026-07-10). "true" has
+;; no standard wire form on a generic gateway (reasoning models reason
+;; by default) → nothing is sent; use an effort string, or
+;; :extra-body for a gateway's vendor field.
 
 (defn- openai-compat?
   "Is this pod's active provider :openai-compat? Read per call
@@ -209,11 +214,11 @@
        :temperature    (or temperature (:seon.ai/temperature cfg) default-temperature)
        :max_tokens     (or max-tokens (:seon.ai/max-tokens cfg) default-max-tokens)
        :stream_options {:include_usage true}}
-      ;; :deepseek always sends the explicit toggle (the API defaults
-      ;; to enabled); :openai-compat sends the field ONLY when truthy.
-      (not compat?)          (assoc :thinking {:type (if thinking "enabled" "disabled")})
-      (and compat? thinking) (assoc :thinking {:type "enabled"})
-      (string? thinking)     (assoc :reasoning_effort thinking)
+      ;; :deepseek always sends the vendor :thinking toggle (that API
+      ;; defaults to enabled); :openai-compat never sends it — only the
+      ;; standard :reasoning_effort (see the thinking-mode note above).
+      (not compat?)      (assoc :thinking {:type (if thinking "enabled" "disabled")})
+      (string? thinking) (assoc :reasoning_effort thinking)
       (some? tools*)         (assoc :tools tools*)
       (some? choice*)        (assoc :tool_choice choice*))))
 

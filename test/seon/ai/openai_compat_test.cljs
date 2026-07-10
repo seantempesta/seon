@@ -160,6 +160,42 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
+(deftest compat-thinking-sends-only-standard-reasoning-effort
+  ;; :openai-compat NEVER sends the vendor :thinking field — strict
+  ;; gateways (Meta Model API, vLLM) HTTP-400 unknown params (verified
+  ;; live against api.meta.ai 2026-07-10). An effort STRING goes out as
+  ;; the standard :reasoning_effort; "true" has no standard wire form on
+  ;; a generic gateway and sends NEITHER field.
+  ;; NESTING: with-conn OUTERMOST, with-env INSIDE (see
+  ;; request-params-default-shape for why with-env must not head the thread).
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+           (with-env {"SEON_AI_PROVIDER" nil}
+            (fn []
+              (-> (db/transact!
+                    {:seon.db/tx-data [{::ai/id       "config"
+                                        ::ai/provider :openai-compat
+                                        ::ai/thinking "minimal"}]})
+                  (.then (fn [{ok? :seon.db/ok?}]
+                           (is (true? ok?))
+                           (let [p (openai/request-params {:seon.ai/ctx "hi"})]
+                             (is (= "minimal" (:reasoning_effort p))
+                                 "effort string → the STANDARD param")
+                             (is (not (contains? p :thinking))
+                                 "vendor :thinking never sent on compat"))
+                           (db/transact!
+                             {:seon.db/tx-data [{::ai/id       "config"
+                                                 ::ai/thinking "true"}]})))
+                  (.then (fn [_]
+                           (let [p (openai/request-params {:seon.ai/ctx "hi"})]
+                             (is (not (contains? p :thinking))
+                                 "\"true\" on compat → no vendor field")
+                             (is (not (contains? p :reasoning_effort))
+                                 "\"true\" on compat → no invented effort")))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 (deftest tools-included-only-when-passed
   (async done
     (-> (with-conn

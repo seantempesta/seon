@@ -31,8 +31,11 @@ Adapters: `openai_compat.cljs` (DeepSeek et al — the pod default),
 `anthropic.cljs`, `diffusiongemma.cljs` (the diffusion-worker provider).
 Verified `:openai-compat` gateways: OpenRouter (acme), Meta Model API
 (Muse Spark 1.1 — config recipe, measured speed, and the
-`reasoning_effort "minimal"` dial in
-`docs/prds/agent-ctx/research/meta-model-api-muse-spark-2026-07-10.md`;
-do NOT send SEON_AI_THINKING to Meta, it 400s the `:thinking` field).
+`SEON_AI_THINKING=minimal` dial in
+`docs/prds/agent-ctx/research/meta-model-api-muse-spark-2026-07-10.md`).
+On `:openai-compat` a string thinking goes out as the STANDARD
+`reasoning_effort` and the vendor `:thinking` field is NEVER sent
+(strict gateways 400 unknown params); `:deepseek` keeps its explicit
+toggle. Vendor-specific request fields ride `:extra-body` only.
 Vendored SDK grounding: `reference-code/openai-node/`,
 `reference-code/anthropic-sdk-typescript/`, `reference-code/js-genai/`.

@@ -44,10 +44,15 @@ META_MODEL_API_KEY=<key>                  # never committed, never in the DB
 # (TTFT 16–18s → 3.9s, wall 7.7s, reasoning ~2k → ~400 tokens; see the
 # measured table below). Raise to "low"/"medium" only for tasks that
 # measurably benefit; leave the default (≈high) for forensic/debug use.
-SEON_AI_EXTRA_BODY='{:reasoning_effort "minimal"}'
-# Do NOT use SEON_AI_THINKING against Meta — truthy also sends the
-# vendor :thinking field, which api.meta.ai rejects with HTTP 400.
+SEON_AI_THINKING=minimal
 ```
+
+`SEON_AI_THINKING=<effort>` is the front door (row-visible, per-agent
+overridable via `:seon.ai/agent-thinking`): since the 2026-07-10
+adapter fix, `:openai-compat` sends an effort string as the STANDARD
+`reasoning_effort` param and never the vendor `:thinking` field.
+`SEON_AI_EXTRA_BODY='{:reasoning_effort "minimal"}'` remains the
+equivalent data-only door (and the only door for true vendor fields).
 
 - Auth: `Authorization: Bearer <key>`. Key format `LLM_…`. The account
   ships with $20 free credits.
@@ -127,18 +132,40 @@ the same essay prompt:
 | **minimal** | **3.9 s** | **414** | **7.7 s** |
 
 At `minimal`, Muse beats deepseek-v4-flash on wall-clock (7.7 s vs
-7.4–9.9 s) at ~2× flash's decode rate. **Config door (no code
-change):** `SEON_AI_EXTRA_BODY='{:reasoning_effort "minimal"}'` — the
-data-only extra-body path merges it into every request. Do NOT use
-`SEON_AI_THINKING=minimal` against Meta: for `:openai-compat` a truthy
-thinking ALSO sends the vendor-specific `:thinking {:type "enabled"}`
-field, which Meta 400s (adapter smell, flagged below).
+7.4–9.9 s) at ~2× flash's decode rate. Config: `SEON_AI_THINKING=minimal`
+(see the recipe above).
 
-Smell (reported, not changed): `request-params` sends the
-DeepSeek-vendor `:thinking` field for `:openai-compat` whenever
-thinking is truthy — a string effort arguably should send ONLY
-`:reasoning_effort` on generic gateways. Owner call before changing
-shipped compat behavior; the extra-body door covers Meta meanwhile.
+### The adapter smell — researched and FIXED (2026-07-10)
+
+The old `:openai-compat` behavior sent the DeepSeek-vendor
+`:thinking {:type "enabled"}` field whenever thinking was truthy —
+alongside `:reasoning_effort` for a string effort. Researched across
+the ecosystem:
+
+| Surface | vendor `thinking` | standard `reasoning_effort` | unknown params |
+|---|---|---|---|
+| OpenAI spec (openai-node `shared.ts`) | not in spec | ✅ `none…xhigh` | — |
+| DeepSeek direct | ✅ their field | ✅ accepted (their docs) | tolerant |
+| Meta Model API | ❌ HTTP 400 (verified live) | ✅ `minimal/low/medium` (`none` refused) | strict 400 |
+| vLLM OpenAI server | ❌ (uses `chat_template_kwargs`) | ✅ native, auto-enables thinking | strict |
+| OpenRouter | forwarded/ignored | ✅ (shorthand for their `reasoning.effort`) | tolerant |
+
+Verdict: `reasoning_effort` IS the OpenAI-standard knob; `thinking` is
+DeepSeek-vendor. Sending `:thinking` on `:openai-compat` broke exactly
+the strict gateways the mode targets (Meta, vLLM). **Fix (shipped):**
+`:openai-compat` now sends ONLY `:reasoning_effort` for a string
+effort and NOTHING for `"true"` (no standard wire form — reasoning
+models reason by default; vendor fields go through `:extra-body`).
+The `:deepseek` provider is UNCHANGED (always sends the explicit
+toggle — correct, their API defaults thinking ON). The shipped
+DEFAULTS were already right (`"false"` → compat sends nothing); only
+the truthy path was wrong. Pinned by
+`compat-thinking-sends-only-standard-reasoning-effort` in
+`test/seon/ai/openai_compat_test.cljs`.
+
+Side observation (2026-07-10): the OpenRouter account acme's config
+points at is OUT OF CREDITS — live OpenRouter probes returned HTTP 402,
+so acme drives against its default row will fail until topped up.
 
 ## Usage metadata (both wire modes verified)
 
