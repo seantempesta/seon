@@ -43,7 +43,11 @@ consumer-specific references in `src/`, `docs/`, or `pod-host/`.
 
 ## Agent Model Policy
 
-**Never use haiku for coding tasks.** Only use haiku for quick file reads or context gathering. All implementation, bug fixes, and verification that involves writing code must use opus (the default coding model).
+**Implementation work uses Fable 5** (owner directive 2026-07-10 — this is a
+cleanup/optimization phase; quality, care, and refinement over speed). Opus is
+acceptable only for genuinely simple tasks (mechanical deletions, small
+targeted fixes, verification reads). **Never use haiku for coding tasks** —
+haiku only for quick file reads or context gathering.
 
 ---
 
