@@ -11,6 +11,78 @@ The single **we-are-here** for this chunk. The target (idealized system) is
 gap, and the ordered path, for BOTH lanes. Shared state + issues: [[CLAUDE]].
 Cross-lane channel: [[coordination]].
 
+## Context completeness — the feels-stateful arc (2026-07-06)
+
+**Direction (owner, 2026-07-06): make the reactive projection so complete and
+faithful that a stateless agent feels stateful.** The frame is now target-doc:
+[[context]] §"The projection must be complete". Reached by driving why agents
+misread their own situation, then closing each gap.
+
+- **Multi-agent context unit SHIPPED** (`ec4bd5fa`): durable run results,
+  depth-capped spawn (cap 1), outcome→parent routing, heartbeat watchdog,
+  schedule breaker, `:subagents` + `:orphaned-agents` sections. Suite
+  1125/5046. Spec: [[multiagent-context-spec]].
+- **Live behavioral drive (isolated `mad-drive` cluster) found the real
+  lesson:** the multi-agent sections work where the lever is data-consumption
+  (result incorporation + depth-cap redirect are clean wins — the derived
+  context even overrode the model's own hallucinated id). But agents
+  **confabulate their situation** where the projection has gaps. Byte-level
+  observation split the cause:
+  - **RENDER BUG (high):** the findings section rendered OPEN `my.plan` rows as
+    settled facts (status stripped) → a child read its work as already done.
+    Issue: [[findings-renders-open-plan-as-fact]].
+  - **RENDER BUG (med):** the plan frontier hid an open root whose children are
+    all done → the plan silently vanished. Issue:
+    [[plan-frontier-hides-open-root-with-done-children]].
+  - **MISSING ORIENTATION:** no section renders "what just happened"; root
+    latched the unconditional "after a restart, resume" boilerplate and
+    invented a user message that never existed.
+- **Fixes in flight / next (build order):**
+  1. The two render bugs (in flight) — the plan/findings renders stop lying.
+  2. **Wake-orientation section** — event (what opened this run) + situation
+     (open work, waiting-on) + available operations; the restart boilerplate
+     becomes conditional/derived. Closes the spontaneous-delegation and
+     turn-limit-affordance gaps (Phases A & C of the drive).
+  3. **Delta section** — "what changed since my last turn," a query over the
+     prior turn's `:seon.agent.turn/rendered-as-of` basis-t. The sleeper piece:
+     independent snapshots become felt continuity.
+- **Standing method — the confabulation-audit:** every live drive captures the
+  agent's self-claims and ground-checks each against the byte-exact rendered
+  prompt ([[observability]]). An ungrounded self-claim = an incomplete
+  projection = the next section to fix. "Feels stateful" is reached at zero
+  ungrounded self-claims. This is the acceptance test for context now.
+
+## Context-rebuild arc — two REPL modes (2026-07-10)
+
+Plan: `~/.claude/plans/lazy-splashing-rainbow.md` — replace the anti-fabrication
+containment hacks (regex neutralizer + markers + cite-card + scolds) with two
+clean REPL mechanisms, then rebuild context from a strictly-minimal, colocated,
+config-through-DB base.
+
+- **Phase 1 SHIPPED — two REPL modes, one config dial.** Detector
+  `seon.agent.ctx/first-result-claim` (offset of the first model-authored
+  result-claim, built from the three EXISTING neutralizer regexes, skipping
+  matches inside a parsed form span — `(println "⟹")` and `[:=>]` don't fire).
+  **Mode A `:batch`** strips fabricated tails/lines at the reply boundary
+  (`strip-result-claims`) before persist + eval; **Mode B `:stream`** consumes
+  the SDK stream delta-by-delta (`stream-until-form!`), aborting at the first
+  complete top-level form (cheap balance gate `repl.internal/first-top-level-close`
+  confirmed by `parse-forms`) — one form per turn. Mode dial is a DATOM
+  (`:seon.config/repl-mode` on the singleton cluster-config entity, reconciled
+  by `boot-seed!`); the turn loop + masthead read the datom (config-through-DB),
+  and each mode contributes its OWN colocated masthead instruction (the other's
+  is absent). Telemetry widened: `prompt_cache_hit/miss_tokens`,
+  `:seon.agent.turn/results-stripped` (Mode A), `:seon.agent.turn/usage-estimated?`
+  (Mode B aborted streams). **Live-proven on default/root (real DeepSeek):**
+  Mode A turn stripped 4 fabricated `⟹` (persisted reply clean, detector nil,
+  all forms survived); Mode B ran one-form-per-turn with client-side estimated
+  usage flagged. The containment hacks are NOT yet deleted (Phase 2).
+- **Phase 2 (next):** delete the neutralizer rewriter + markers + cite-card +
+  truncation scold (the three detection regexes survive as the detector's
+  source). **Phases 3–4:** minimal self-describing context + the Mode A vs Mode B
+  ledger. Sequencing note: another lane's config→DB migration takes
+  `config.cljs`/`client.cljs` after this lands — footprint kept minimal.
+
 ## Where we are (2026-07-02)
 
 Branching off agent-fsm's shipped capstone (see

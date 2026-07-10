@@ -73,7 +73,6 @@ PostToolUse (after edit lands)
 | `src/seon/dev/test_select.clj` | Dependency-aware test selection via code graph |
 | `src/seon/repl.clj` | REPL form router — classify, eval via flow, store in Datahike, index |
 | `src/seon/repl/context.clj` | Agent context cockpit — graph-based context for functions/namespaces |
-| `src/seon/repl/graduate.clj` | Namespace graduation — assembles stored forms from Datahike into .clj files |
 
 ## Subsystems
 

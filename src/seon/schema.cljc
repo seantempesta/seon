@@ -286,10 +286,7 @@
    in-session registry entries too, so a re-eval of the fixed form
    registers cleanly. `ks` is the keys NEWLY registered during the
    failed eval (post-eval `current-keys` minus the pre-eval snapshot),
-   so a pre-existing key is never in `ks`. `*schema-required-counts` is
-   left untouched — `register!` never writes it (only the boot/lifecycle
-   `entity-schema-tx-data` does), so a failed eval populated no entry to
-   clear. Returns nil."
+   so a pre-existing key is never in `ks`. Returns nil."
   {:malli/schema [:=> [:catn [::discarded-keys [:set :keyword]]] :nil]}
   [ks]
   (swap! *schemas #(apply dissoc % ks))
@@ -331,18 +328,12 @@
 ;;; caller (seon.client/start-agent!) transacts via seon.db/transact!.
 ;;; ---------------------------------------------------------------------------
 
-;; Cache of {schema-key required-attr-count}, populated alongside the tx-data
-;; produced by `entity-schema-tx-data`. Read by render's kind-lookup for
-;; specificity scoring.
-(defonce *schema-required-counts (atom {}))
-
 (defn entity-schema-tx-data
   "Return the tx-data vector for one entity-shape `:map` schema.
 
    One `:db/add` per required-attr, plus the key/id-attr/render-fn datoms.
-   Caller transacts via `seon.db/transact!`. Side-effect: caches the
-   required-count in `*schema-required-counts`. Returns `nil` when `k`
-   does not refer to an entity-shape :map (no id-attr derivable)."
+   Caller transacts via `seon.db/transact!`. Returns `nil` when `k` does
+   not refer to an entity-shape :map (no id-attr derivable)."
   {:malli/schema [:=> [:catn [::registry-key ::registry-key]] :any]}
   [k]
   (let [v (get @*schemas k)]
@@ -361,7 +352,6 @@
                 ;; → one tempid → boot-fatal :transact/upsert). Tempids are
                 ;; tx-local, never stored — identity is :seon.schema/key.
                 tid  (str "schema-" k)]
-            (swap! *schema-required-counts assoc k (count reqs))
             (cond-> [[:db/add tid :seon.schema/key k]
                      [:db/add tid :seon.schema/id-attr id-attr]]
               render-ai   (conj [:db/add tid :seon.schema/render-fn render-ai])
@@ -392,16 +382,6 @@
   {:malli/schema [:=> [:cat] [:vector :any]]}
   []
   (into [] (mapcat entity-schema-tx-data) (entity-schema-keys)))
-
-(defn schema-required-count
-  "The cached required-attr count for `k`, or nil.
-
-   Nil when `k` was never
-   decomposed (e.g. not an entity-shape :map). Populated as a side-effect
-   of `entity-schema-tx-data`."
-  {:malli/schema [:=> [:catn [::registry-key ::registry-key]] :any]}
-  [k]
-  (get @*schema-required-counts k))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Introspection

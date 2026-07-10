@@ -1685,6 +1685,14 @@ Commands:
                      out-bench/client/main.js.sha256. Durable clusters
                      default --watched (live out/client/main.js);
                      --frozen/--watched override either default
+  cluster fork <source> <basis-t|--at basis-t> [fork-name]
+                     Copy a source cluster at an exact transaction id into
+                     a NEW writable, disposable cluster: its own store,
+                     blobs, pod, and ephemeral HTTP port. Use the
+                     `::fork-hint` from seon.agent.inspect/repro for a core
+                     fault; the error datom itself is after that basis and
+                     is therefore absent inside the fork. The source is
+                     untouched. Destroy the named fork when done.
   cluster destroy <n>
                      DESTRUCTIVE: stop pod-<n>, delete the db from the
                      wire-server registry (REPL → registry/delete-db!),

@@ -356,22 +356,6 @@
                         (when on-close (on-close req)))}))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Deprecated send! (for backwards compatibility during migration)
-;;; ---------------------------------------------------------------------------
-
-(defn send!
-  "DEPRECATED: Sends headers on every call. Use send-headers! + send-fn pattern.
-
-  Kept for backwards compatibility during migration."
-  {:deprecated "Use send-headers! + ->send-fn pattern"}
-  [ch event]
-  (hk/send! ch {:status  200
-                :headers {"Content-Type"  "text/event-stream"
-                          "Cache-Control" "no-store"}
-                :body    event}
-            false))
-
-;;; ---------------------------------------------------------------------------
 ;;; Broadcast Infrastructure
 ;;; ---------------------------------------------------------------------------
 

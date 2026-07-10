@@ -562,3 +562,73 @@
             (is (not (contains? error :seon.ai/transport?)))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ============================================================
+;; repl-mode :stream — the delta-by-delta consumer that ABORTS at the first
+;; complete top-level form. Scripted async-iterable stub (no network): the
+;; cheap delimiter-balance gate + the parse-forms confirm + the abort, all
+;; exercised on `stream-until-form!`.
+;; ============================================================
+
+(defn- scripted-stream
+  "A minimal SDK-stream STUB: async-iterable emitting one content delta per
+   `pieces` element, plus an `.abort` recorded in `aborted`. Mirrors the
+   ChatCompletionStream surface `stream-until-form!` touches
+   (`[Symbol.asyncIterator]` → chunks with `.choices[0].delta.content`)."
+  [pieces aborted]
+  (let [i (atom 0)
+        mk (fn [c] #js{:choices #js[#js{:delta #js{:content c}}]})]
+    (js-obj
+      "abort" (fn [] (reset! aborted true))
+      js/Symbol.asyncIterator
+      (fn []
+        (js-obj "next"
+                (fn []
+                  (js/Promise.resolve
+                    (let [n @i]
+                      (if (< n (count pieces))
+                        (do (swap! i inc) #js{:value (mk (nth pieces n)) :done false})
+                        #js{:value js/undefined :done true})))))))))
+
+(deftest stream-aborts-at-first-complete-form
+  ;; the form streams across two deltas; the third delta (a fabricated tail)
+  ;; must NEVER be reached — the stream aborts the instant the form closes.
+  (async done
+    (let [aborted (atom false)
+          s (scripted-stream ["(+ 1" " 2)" " ⟹ 3 fabricated"] aborted)]
+      (-> ((deref #'openai/stream-until-form!) s)
+          (.then (fn [{:keys [text aborted?]}]
+                   (is (= "(+ 1 2)" text) "accumulated exactly through the first form")
+                   (is (true? aborted?) "reported aborted")
+                   (is (true? @aborted) "the SDK stream .abort was called")))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest stream-keeps-going-past-a-demoted-data-literal
+  ;; a bare {…} closes at delimiter-depth 0 but demotes to prose — the
+  ;; consumer must keep streaming until a REAL evaluable form completes.
+  (async done
+    (let [aborted (atom false)
+          s (scripted-stream [";; think\n" "{:a 1}\n" "(message/user \"hi\")"] aborted)]
+      (-> ((deref #'openai/stream-until-form!) s)
+          (.then (fn [{:keys [text aborted?]}]
+                   (is (true? aborted?))
+                   (is (str/includes? text "(message/user \"hi\")")
+                       "streamed through the real form, past the demoted literal")
+                   (is (str/includes? text ";; think")
+                       "leading comment (thinking) is kept with the form")))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest stream-natural-end-when-no-form-completes
+  ;; only comments stream — no top-level form ever closes, so the consumer
+  ;; runs to the stream's natural end and reports NOT aborted.
+  (async done
+    (let [aborted (atom false)
+          s (scripted-stream [";; just\n" ";; comments\n"] aborted)]
+      (-> ((deref #'openai/stream-until-form!) s)
+          (.then (fn [{:keys [aborted?]}]
+                   (is (false? aborted?) "no form → natural end, not aborted")
+                   (is (false? @aborted) ".abort never called")))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))

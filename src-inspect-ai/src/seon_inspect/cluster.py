@@ -311,6 +311,30 @@ def create_cluster(name: str | None = None, *, ephemeral: bool = True,
     return cluster
 
 
+def fork_cluster(source: str, basis_t: int, name: str | None = None, *,
+                 runner: Callable[..., Any] = subprocess.run,
+                 ready: Callable[[str], int] = wait_pod_ready) -> Cluster:
+    """Fork `source` at `basis_t` into a disposable, writable cluster.
+
+    This is the counterfactual entry point: the new cluster carries the source
+    database and blob store as they were at the supplied transaction id, while
+    its pod and subsequent writes are isolated. Callers must pin the runtime
+    artifact, manifest, model configuration, and replay stimulus separately;
+    a database fork intentionally restores only durable world state.
+
+    `name` is fresh by default so independent Inspect samples cannot collide.
+    The supervisor starts and ready-gates the fork pod; the returned cluster
+    always uses the fork's newly assigned HTTP port.
+    """
+    source = _check_name(source)
+    if isinstance(basis_t, bool) or not isinstance(basis_t, int) or basis_t < 0:
+        raise ValueError(f"basis_t must be a non-negative transaction id, got {basis_t!r}")
+    target = _check_name(name or f"fork-{source}-{basis_t}-{uuid.uuid4().hex[:8]}")
+    _run_seon(["cluster", "fork", source, str(basis_t), target], runner,
+              timeout_s=330)
+    return Cluster(name=target, port=ready(target))
+
+
 def restart_pod(cluster: Cluster, *,
                 runner: Callable[..., Any] = subprocess.run,
                 ready: Callable[[str], int] = wait_pod_ready) -> Cluster:
@@ -363,6 +387,23 @@ def ephemeral_cluster(name: str | None = None, *,
     grants for this cluster's pod)."""
     cluster = create_cluster(name, ephemeral=True, frozen=frozen,
                              extra_env=extra_env, runner=runner, ready=ready)
+    try:
+        yield cluster
+    finally:
+        destroy_cluster(cluster.name, runner=runner)
+
+
+@contextlib.contextmanager
+def ephemeral_fork(source: str, basis_t: int, name: str | None = None, *,
+                   runner: Callable[..., Any] = subprocess.run,
+                   ready: Callable[[str], int] = wait_pod_ready
+                   ) -> Iterator[Cluster]:
+    """fork → yield → destroy a counterfactual cluster.
+
+    The source snapshot remains untouched. The fork's pod is ready before the
+    body runs, and cleanup runs on both normal and exceptional exits.
+    """
+    cluster = fork_cluster(source, basis_t, name, runner=runner, ready=ready)
     try:
         yield cluster
     finally:

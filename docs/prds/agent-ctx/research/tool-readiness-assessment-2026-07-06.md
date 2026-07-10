@@ -13,14 +13,19 @@ Read-only + exercise; no `src/` edits, no harness edits, benchmark NOT run.
 
 ## TL;DR — verdict
 
-**GO-WITH-CAVEAT.** The tools are real, fail-loud, exposed in agent context,
-and already baked into the current `seon-runtime-arm64` overlay. The single
-remaining blocker is a **one-line repoint in the eval lane's OWN harness**:
-`swebench_arm.py` still pins `OVERLAY_VOLUME = "seon-runtime-slice3"` (the
-pre-verbs 2026-07-05 overlay) — it must point at `seon-runtime-arm64` (the
-2026-07-06 overlay that actually contains the verbs). No image rebuild is
-needed. Do this repoint and the dev pass measures the fixed capability; skip
-it and the pass re-measures the exact slice-3 shell-only-editing failure.
+**GO** (was GO-WITH-CAVEAT; the caveat cleared mid-assessment). The tools are
+real, fail-loud, exposed in agent context, and baked into the current
+`seon-runtime-arm64` overlay. The one hard blocker — the harness overlay
+repoint — **landed while this was being written**: `swebench_arm.py` now pins
+`OVERLAY_VOLUME = "seon-runtime-arm64"` (commit `0cc9f2a7`, the slice-4 peer on
+this shared branch). No image rebuild is needed; the compose fs-write grant was
+already wired. The dev pass can run.
+
+**One thing to finish first for a clean A/B, not a mechanical blocker:** the
+branch is RED (7 failures) because the A8 `⟹`-glyph migration moved the runtime
+emit to `; ⟹ <value>` but left `ctx_test.cljs` asserting the old `;=>` shape.
+A8 is the fabrication-mitigation context fix — land it to green (tooling lane)
+before measuring, since it directly reduces the fabrication the dev pass sees.
 
 - **Edit verb: EXISTS, fail-loud, verifiable envelope.** `seon.agent.fs/replace!`
   (+ `insert!`) fail loud on 0 matches (`::not-found`) and on >1 matches
@@ -165,15 +170,14 @@ against real files on disk.
    overlay's `/opt/seon` = that commit's `src/`, so the verbs are baked in. No
    src commits landed after the image build except one docs handoff (`8246d0a1`).
 
-2. **Overlay repoint — REQUIRED (the blocker; eval lane's own code).**
-   `src-inspect-ai/src/seon_inspect/swebench_arm.py` still pins
-   `OVERLAY_VOLUME = "seon-runtime-slice3"` — the 2026-07-05 overlay built
-   BEFORE A5/A6, so it has shell-only editing (exactly the slice-3 failure).
-   The multiarch README (`evals/runs/2026-07-06-multiarch-build/README.md`
-   lines 135-138) explicitly flags the repoint `seon-runtime-slice3 →
-   seon-runtime-arm64` as an unfinished follow-up. This is a one-line change
-   (plus the pinned-digest note) in the eval lane's own harness. Both volumes
-   exist locally (`docker volume ls`).
+2. **Overlay repoint — DONE (commit `0cc9f2a7`).** `swebench_arm.py` now pins
+   `OVERLAY_VOLUME = "seon-runtime-arm64"` (the 2026-07-06 overlay with the
+   A5/A6 verbs); the digest note updated to `sha256:a69721a0b899…`. Volume
+   exists locally (`docker volume ls`). The tests reference `OVERLAY_VOLUME`
+   symbolically (`test_swebench_arm.py:45,73`) so the repoint did not break
+   them. NOTE: `tb_agent.py` (Terminal Bench, a DIFFERENT bench) still pins
+   `seon-runtime-slice3` — out of scope for the SWE-bench dev pass, flag to
+   whoever drives TB.
 
 3. **Compose fs-write grant — DONE.** `swebench_arm.py` emits
    `SEON_SHELL=1`, `SEON_FS_ROOT=/testbed`, `SEON_FS_READ_ONLY=0`, and its

@@ -51,7 +51,7 @@ f. Section gate: the moved nss compile — run the section's listed check.
 | `src/seon/claude/exploration.clj` (+ dir if empty) | 0 deps; only refs are an old worktree + settings history |
 | `src/seon/experimental/sci_exploration.clj*` (+ dir) | 0 deps |
 | `src/seon/ai/agent/views.clj` | 16.2k tok, 0 deps |
-| `src/seon/health/metrics.clj` + `test/**/health/metrics_test.clj` | BMI leftovers — violates the no-consumer-code rule |
+| ~~`src/seon/health/metrics.clj` + `test/**/health/metrics_test.clj`~~ | deleted in cleanup pass — BMI leftovers violated the no-consumer-code rule |
 | `src/seon/dev/repair.clj` | duplicate of `seon.repair` (.cljc); FIRST rewire its requirers (the dev hook — grep `seon.dev.repair` under `src/seon/dev/`) to require the cljc ns (post-§3 name: `seon.eval.repair`) and verify the hook still lints a scratch edit |
 
 HELD (owner call, do NOT delete): `seon.ai.claude` (17k tok, 0 in-src deps

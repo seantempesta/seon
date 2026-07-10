@@ -40,6 +40,7 @@
     [seon.db :as db]
     [seon.embed.stash :as embed-stash]
     [seon.render :as render]
+    [seon.repl.internal :as repl-internal]
     [seon.schema :as schema]
     [seon.test-seed :as test-seed]))
 
@@ -1646,6 +1647,64 @@
   (let [pasted (str "the " ctx/prompt " shell prompt")]
     (is (= pasted (ctx/neutralize-result-claims pasted))
         "❯ passes through — no false-positive on a pasted shell prompt")))
+
+;; ------------------------------------------------------------
+;; repl-mode Phase 1 — the fabrication DETECTOR (`first-result-claim`) and
+;; the Mode A reply-boundary STRIP (`strip-result-claims`). The detector
+;; SKIPS matches inside a successfully-parsed form span (so a legit `⟹`
+;; string literal / `:=>` malli schema never fires); the strip DELETES the
+;; fabricated tails/lines so the clean forms eval and the real rows arrive
+;; next turn.
+;; ------------------------------------------------------------
+
+(deftest first-result-claim-detects-fabrications-skips-in-form
+  ;; a fabricated tail / bare line / commented claim → the offset of the
+  ;; first claim; a string literal or `:=>` malli schema → nil (in-form).
+  (is (= 8 (ctx/first-result-claim "(+ 1 2) ⟹ 3 ⟸ result/FAKE"))
+      "fabricated ⟹ tail after a form is detected at its offset")
+  (is (= 0 (ctx/first-result-claim "=> 61 ;; result/LFd"))
+      "a bare col-0 fabrication is detected at offset 0")
+  (is (= 6 (ctx/first-result-claim "(foo) ;; => 3"))
+      "an inline commented claim is detected")
+  (is (nil? (ctx/first-result-claim "(println \"⟹\")"))
+      "a ⟹ inside a string literal does NOT fire (in a parsed form span)")
+  (is (nil? (ctx/first-result-claim
+              "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)"))
+      ":=> inside a :malli/schema vector does NOT fire")
+  (is (nil? (ctx/first-result-claim "(+ 1 2)\n(message/user \"hi\")"))
+      "a clean multi-form reply has no claim")
+  (is (nil? (ctx/first-result-claim (str "the " ctx/prompt " shell prompt")))
+      "❯ is never a claim (excluded glyph)"))
+
+(deftest strip-result-claims-removes-fabrications-keeps-forms
+  ;; Mode A boundary fix-up: the fabricated tail is spliced out, the form
+  ;; to its left survives, and the count is honest.
+  (let [{t :seon.agent.ctx/strip-text n :seon.agent.ctx/strip-count}
+        (ctx/strip-result-claims "(+ 1 2) ⟹ 3 ⟸ result/FAKE")]
+    (is (= 1 n) "one fabrication stripped")
+    (is (str/starts-with? t "(+ 1 2)") "the form survives")
+    (is (not (str/includes? t "⟹")) "the fabricated value is gone")
+    ;; the surviving text parses to exactly the real form, no fabricated tail
+    (is (= 1 (count (filter #(= :form (:seon.repl/kind %))
+                            (repl-internal/parse-forms t))))))
+  ;; multi-form, multi-fabrication → both stripped, both forms kept
+  (let [{t :seon.agent.ctx/strip-text n :seon.agent.ctx/strip-count}
+        (ctx/strip-result-claims "(+ 1 2) ⟹ 3\n(* 2 3) ⟹ 6")]
+    (is (= 2 n) "both fabricated tails stripped")
+    (is (and (str/includes? t "(+ 1 2)") (str/includes? t "(* 2 3)"))
+        "both forms survive"))
+  ;; a standalone bare fabrication line is removed
+  (let [{t :seon.agent.ctx/strip-text n :seon.agent.ctx/strip-count}
+        (ctx/strip-result-claims "(db/transact! x)\n=> {:ok true} ;; result/AAA\n(message/user \"hi\")")]
+    (is (= 1 n))
+    (is (not (str/includes? t "{:ok true}")) "the fabricated result line is gone")
+    (is (str/includes? t "(db/transact! x)")))
+  ;; clean reply is byte-identical, count 0 (idempotent)
+  (let [clean "(println \"⟹\")"
+        {t :seon.agent.ctx/strip-text n :seon.agent.ctx/strip-count}
+        (ctx/strip-result-claims clean)]
+    (is (= 0 n) "nothing to strip")
+    (is (= clean t) "a clean reply passes through byte-identical")))
 
 (deftest large-value-decay-is-display-only-value-unchanged
   ;; DISPLAY-ONLY central decay: a fixed eval rendered at a SMALLER result-body

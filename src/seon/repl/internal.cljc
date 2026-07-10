@@ -858,6 +858,50 @@
         ;; matching the prior hand-rolled scanner's EOF fallback.
         (subs text idx)))))
 
+(defn first-top-level-close
+  "Char offset JUST PAST the first point where the running delimiter depth
+   returns to 0 after at least one `(`/`[`/`{` opened — nil when no top-level
+   group has closed yet.
+
+   The cheap STREAMING gate (Mode B, `:stream`): run this on the text
+   accumulated so far after each stream delta; while it returns nil the
+   model is still mid-form, so keep consuming. When it returns an offset a
+   top-level grouping just closed — the caller runs the real [[parse-forms]]
+   ONCE on the accumulated prefix to CONFIRM a genuine evaluable `:form`
+   (a bare `{…}`/`[…]` closes at depth 0 too but demotes to prose), then
+   aborts the stream and evaluates that single form.
+
+   String / char-literal (`\\(`) / line-comment (`;`) / regex-literal
+   (`#\"…)…\"`) aware — the SAME balancing rules the `#'arglists-from-source`
+   scanner in `seon.client` encodes, so a `)` inside a string or comment
+   never falses the gate. NOT a parser: it only tracks combined
+   `()[]{}` depth; semantic confirmation is [[parse-forms]]'s job."
+  {:malli/schema [:=> [:cat :string] [:maybe :int]]}
+  [text]
+  (let [n (count text)]
+    (loop [i 0 depth 0 opened? false in-str? false esc? false]
+      (if (>= i n)
+        nil
+        (let [c (nth text i)]
+          (cond
+            esc?                   (recur (inc i) depth opened? in-str? false)
+            (and in-str? (= c \\)) (recur (inc i) depth opened? in-str? true)
+            in-str?                (recur (inc i) depth opened? (not (= c \")) false)
+            (= c \")               (recur (inc i) depth opened? true false)
+            (= c \\)               (recur (+ i 2) depth opened? in-str? false)
+            (= c \;)               (let [eol (loop [j i]
+                                               (if (or (>= j n) (= (nth text j) \newline))
+                                                 j (recur (inc j))))]
+                                     (recur eol depth opened? in-str? false))
+            (or (= c \() (= c \[) (= c \{))
+            (recur (inc i) (inc depth) true in-str? false)
+            (or (= c \)) (= c \]) (= c \}))
+            (let [d (dec depth)]
+              (if (and opened? (<= d 0))
+                (inc i)
+                (recur (inc i) (max 0 d) opened? in-str? false)))
+            :else (recur (inc i) depth opened? in-str? false)))))))
+
 (defn read-forms
   "Every top-level form in `source` as read sexprs; nil on a read error.
 

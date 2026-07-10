@@ -22,7 +22,140 @@ context = (str/join (map #(% db) (render-fns-in-scope agent)))
 
 Every turn re-derives the whole thing from one frozen db value. Nothing is
 accumulated. Which functions are in scope, and in what order, is the entire
-design.
+design — and whether that set is **complete** is what makes the agent feel
+stateful.
+
+## The projection must be complete — so the agent feels stateful
+
+An agent carries nothing between turns; every turn is a cold start from one db
+value. Yet it must *behave* as though it remembered — resume its work, act on
+what just happened, notice what changed. It can, because a stateless process is
+indistinguishable from a stateful one exactly when its rendered context is a
+**complete and faithful projection of its situation**: everything a continuous
+being would carry forward, re-derived each turn from the db, with no gap left
+for the model to fill.
+
+**Confabulation is the diagnostic.** When the render omits or garbles part of
+the agent's situation, the model does not fail loudly — it patches the hole
+from its training prior: it invents a restart that did not happen, a user
+instruction never sent, a task already finished. Every such ungrounded
+self-claim is the visible tell of an incomplete projection, and it names the
+section to fix. The invariant a correct context satisfies: **an agent makes no
+claim about its own state or history that the rendered datoms did not
+contain.** This is measurable — replay the byte-exact prompt ([[observability]])
+and ground every self-claim against it — and it is the standing acceptance
+test for context, not a one-time check.
+
+**The completeness model.** A continuous agent always knows, so the projection
+always renders:
+
+- **what just happened** — the event that opened this run (an inbound message,
+  a child's outcome notice, a schedule), in the present tense. Absent this, the
+  most salient standing frame in the prompt wins by default — so evergreen
+  advice ("after a restart, resume your plan") is **conditional/derived**,
+  rendered only when its condition actually holds, never planted every turn.
+- **where I am** — the plan, rendered with unambiguous status. The plan is not
+  a checklist; it is **externalized intent** — the one thing a stateless
+  boundary cannot reconstruct unless it was written down as data. An open step
+  never renders as a settled fact; a node whose only remaining action is
+  verify-and-close renders as actionable, not invisible. (See [[data-model]].)
+- **what I am waiting on** — delegated children and their live state (the
+  multi-agent sections below), blocked items.
+- **what I just did** — my last turn's actions and their outcomes, from the
+  transcript.
+- **what I learned** — accumulated knowledge (`my.kb`), and *only* knowledge:
+  work-tracking that still carries a live lifecycle status is not a settled
+  finding and never renders as one.
+- **what changed since I last looked** — the **delta**, derived from the
+  previous turn's `:seon.agent.turn/rendered-as-of` basis-t: the datoms
+  transacted since I last saw the world (new messages, newly-completed
+  children, newly-failed items). A series of independent snapshots becomes a
+  felt continuity precisely because each turn can name what is new — the
+  basis-t is already recorded per turn ([[observability]]); the delta is a
+  query over it, not new state.
+
+**Situation, never the answer.** The projection renders the agent's operational
+situation and the operations available on it — "a child is idle at its
+turn-limit; continue it or release it," "three plan items are open and
+independent; any may be delegated" — because a continuous agent would know
+these. It never renders the answer to the agent's task; that is the line
+between context and coaching. Making the situation legible makes the right
+action obvious without prescribing it.
+
+## The transcript is the spine — the REPL narrative the rest attaches to
+
+The completeness rows are not peers. One is the **spine**: the transcript —
+the agent's own eval log rendered as a REPL session ("I evaluated X, got Y; a
+message arrived; I evaluated Z"). A snapshot section (plan, findings,
+subagents) is a photo of *now* with no story; a REPL narrative is inherently
+stateful, because it is the ordered record of what the agent actually did and
+what actually happened to it. The eval log is one view of the code corpus
+(code-as-data); the transcript is its faithful render, and it is the agent's
+primary memory. Everything else is **additive**.
+
+**Precedence — the transcript is authoritative for "what happened."** A
+derived section that implies something the transcript contradicts is the bug,
+not the transcript. (The findings-renders-open-plan-as-fact defect was exactly
+this: a snapshot claimed work the eval log never did.) So the
+confabulation-audit grounds an agent's self-claims against the **transcript
+first**; a section that fought it is the defect to fix.
+
+**"Nail the REPL" = four faithfulness invariants.** The transcript renders a
+byte-faithful REPL session:
+
+1. every form the agent evaluated, in order, with its **actual** return — not
+   truncated or summarized into something that reads differently;
+2. errors rendered **as** the failed eval (errors are data — a throw shows as
+   "I tried X and it threw", never silently absent);
+3. events interleaved at the point they occurred and **attributable** — an
+   inbound message is unmistakably distinct from the agent's own eval;
+   mis-attribution is the fake-instruction confabulation;
+4. async resolved to **values**, not dangling Promises — a form that returned
+   a pending computation shows its resolved value (or a legible "value now at
+   `result/<id>`"), never a Promise the agent can't tell finished.
+
+**Additive, not optional.** The spine is bounded and blind, so two additive
+roles are load-bearing: derived sections **crystallize what the transcript
+will lose** as it decays (the plan is the durable form of intent, findings of
+knowledge — what would otherwise scroll off), and they **surface what the spine
+is blind to** — derived state the agent never eval'd (a child at its
+turn-limit) and non-event changes between turns. Because the transcript already
+carries event-deltas (a message that arrived is already a line), the delta
+surface is only the *non-event* changes. Additive sections layer on the spine;
+they never contradict it.
+
+## The REPL mode is a datom — and it teaches its own grammar
+
+The agent's turn resolves a form's result in one of two modes, selected per
+cluster by the `:seon.config/repl-mode` datom (`:batch` default | `:stream`):
+
+- **`:batch`** — one LLM call writes N forms. Every model-authored
+  result-claim (a `⟹ …`/`=> …` a model types into the reply, pattern-completing
+  the transcript's `form ⟹ value` grammar) is **stripped at the reply
+  boundary**, before the reply is persisted or eval'd. The forms run; the next
+  turn's transcript interleaves the *real* `⟹ <value> ⟸ result/<id>` rows in
+  those positions. The fabrication never enters the record — a fix at the
+  boundary, not a render-time rewrite. The detector
+  (`seon.agent.ctx/first-result-claim`) skips any match inside a
+  successfully-parsed form span, so a `(println "⟹")` literal or a `:=>` in a
+  `:malli/schema` never fires.
+- **`:stream`** — the SDK stream is consumed delta-by-delta and **aborted the
+  instant one complete top-level form has streamed** (a cheap escape-aware
+  delimiter-balance gate confirmed by `parse-forms`). One form per turn; its
+  value is in the transcript when the agent continues. Aborting loses the
+  provider's final usage chunk, so those turns carry client-side token
+  estimates (`seon.ai.tokens/estimate`), flagged `:seon.agent.turn/usage-estimated?`.
+
+**The mode teaches its own grammar (colocation).** The instruction that
+describes the mode renders WITH the transcript block it governs — the masthead
+carries `:batch`'s "a result you type is stripped" OR `:stream`'s "your turn
+ends at your first complete form," gated by the same datom. The other mode's
+text is *absent*, not contradicted. This is the general rule: an instruction
+that could conflict is gated by DB-derived state, so it renders exactly when
+the state it describes holds — the same reactive-context discipline as the
+warning blocks. Every turn persists the cost (`prompt_cache_hit_tokens` /
+`prompt_cache_miss_tokens`, forms, `:seon.agent.turn/results-stripped`) so the
+two modes are comparable on identical tasks.
 
 ## A render fn is a block and a tile — the twins
 
@@ -221,6 +354,15 @@ Every dial is manifest data (`:seon.config/*`): which namespaces render full,
 the presence-set pins, the transcript band schedule + decay, render caps, the
 predicted-relevance token cap, per-agent overrides in agent scope. Absent
 config = the default seed, byte-identical. No env-var side doors.
+
+**Config-through-DB.** A manifest value that drives render or turn behavior is
+read ONCE at boot and reconciled into DB state; from there the runtime reads
+the DATOM, never the config accessor. `:seon.config/repl-mode` is the first
+case: `boot-seed!` reconciles the manifest key onto the singleton
+cluster-config entity (`[:seon.config/id "cluster"]`), and both the turn loop
+(`run-turn!`) and the masthead read `seon.agent.ctx/repl-mode` off the frozen
+db. A live `transact` of that datom changes the next prompt with no file edit.
+The transcript's tier/decay datoms are the existing precedent this generalizes.
 
 ## See also
 

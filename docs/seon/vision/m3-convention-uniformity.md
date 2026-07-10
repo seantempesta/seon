@@ -84,11 +84,7 @@ The issue list for M3 is long because convention uniformity touches every file.
 
 **Dead code:**
 
-- [[orchestrator/issues/dead-agent-helpers]] -- every function throws "not yet migrated."
 - [[orchestrator/issues/dead-web-namespace-viewer]] -- replaced by `ns/routes`, still in src/.
-- [[orchestrator/issues/dead-repl-graduate]] -- no callers.
-- [[orchestrator/issues/dead-render-example]] -- no callers, no tests.
-- [[orchestrator/issues/dead-scratch-files]] -- scratch files in src/.
 
 **Coupling and overlap:**
 

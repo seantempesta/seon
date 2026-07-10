@@ -80,7 +80,6 @@ Same query mechanism. Different intent. The discovery API does not care whether 
 - [[orchestrator/issues/overlap-three-status-badges]] -- three badge implementations. Symptom of the same problem.
 - [[orchestrator/issues/coupling-ns-routes-reactive]] -- namespace views bypass the standard push path.
 - [[orchestrator/issues/dead-web-namespace-viewer]] -- dead files from the pre-discovery era.
-- [[orchestrator/issues/deprecated-sse-send]] -- deprecated function still has callers.
 - [[orchestrator/issues/lifecycle-coupling-bottleneck]] -- namespace lifecycle depends on 7 components. Discovery should decouple this.
 
 Renderer discovery proves the pattern works. The gap is generalization: indexing all function schemas (not just render output), providing a unified query API, and converging the overlapping systems that predate discovery.

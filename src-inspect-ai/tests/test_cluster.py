@@ -93,6 +93,25 @@ def test_create_cluster_frozen_override_flags():
         assert runner.calls[0][-1] == flag
 
 
+def test_fork_cluster_drives_supervisor_and_returns_ready_fork():
+    runner = FakeRunner()
+    fork = cl.fork_cluster("source-a", 12345, "counterfactual-a",
+                           runner=runner, ready=lambda name: 40123)
+    assert runner.calls == [[str(cl.SEON_BIN), "cluster", "fork", "source-a",
+                             "12345", "counterfactual-a"]]
+    assert fork == cl.Cluster(name="counterfactual-a", port=40123)
+
+
+def test_fork_cluster_rejects_invalid_basis_or_names():
+    runner = FakeRunner()
+    for basis in (-1, True, "123"):
+        with pytest.raises(ValueError, match="basis_t"):
+            cl.fork_cluster("source-a", basis, runner=runner,
+                            ready=lambda name: 1)
+    with pytest.raises(ValueError):
+        cl.fork_cluster("bad/name", 1, runner=runner, ready=lambda name: 1)
+
+
 def test_ephemeral_cluster_passes_frozen_through():
     runner = FakeRunner()
     with cl.ephemeral_cluster("bench-f2", frozen=False, runner=runner,
@@ -172,6 +191,19 @@ def test_ephemeral_cluster_always_destroys():
             raise RuntimeError("sample blew up")
     assert runner.calls[-1] == [str(cl.SEON_BIN), "cluster", "destroy",
                                 "bench-boom"]
+
+
+def test_ephemeral_fork_always_destroys():
+    runner = FakeRunner()
+    with pytest.raises(RuntimeError, match="boom"):
+        with cl.ephemeral_fork("source-a", 12345, "counterfactual-a",
+                               runner=runner, ready=lambda name: 40123):
+            raise RuntimeError("boom")
+    assert runner.calls == [
+        [str(cl.SEON_BIN), "cluster", "fork", "source-a", "12345",
+         "counterfactual-a"],
+        [str(cl.SEON_BIN), "cluster", "destroy", "counterfactual-a"],
+    ]
 
 
 def test_wait_pod_ready_polls_file_then_probe(tmp_path, monkeypatch):

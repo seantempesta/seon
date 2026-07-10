@@ -72,7 +72,7 @@ Tool defects queued for the tooling lane (with rendered-context evidence — eva
   (eval blocker #4)
 - **Turn-6 recall visibility gap during `/solve`** — candidate root = the
   `seon.db/*conn*` single dynamic root (not fiber-local); documented in
-  `docs/seon/orchestrator/issues/tx-feed-pump-timeouts.md`. Tooling lane +
+  `docs/seon/orchestrator/issues/archive/tx-feed-pump-timeouts.md`. Tooling lane +
   parallel-scoring lever.
 - **Bench-pod isolation gaps (first dev pass, 2026-07-03 — evidence in
   `evals/runs/2026-07-03-first-dev-pass/` + roadmap step 7):** (a) ~~ephemeral
@@ -144,7 +144,7 @@ Tooling-lane build issues:
 Post-merge units (slotted, both lanes care):
 
 - **pub-socket feed migration** — the tx-feed follow-up in
-  `docs/seon/orchestrator/issues/tx-feed-pump-timeouts.md`; a real post-merge
+  `docs/seon/orchestrator/issues/archive/tx-feed-pump-timeouts.md`; a real post-merge
   unit (tooling lane; de-flakes the whole chunk).
 - **transact-timeout ambiguity** — the second scoped follow-up in the same
   issue note; clarify RPC-timeout semantics for transacts.
@@ -297,7 +297,7 @@ unit; `cluster reset default` after a context/verb change.
   `src-inspect-ai/` (`seon_inspect.solver`, `oracle_scorers.py`, `catalog.py`,
   `README.md` run matrix)
 - **Issue notes to update as they resolve:**
-  `docs/seon/orchestrator/issues/tx-feed-pump-timeouts.md` (pub-socket
+  `docs/seon/orchestrator/issues/archive/tx-feed-pump-timeouts.md` (pub-socket
   migration + transact-timeout) · `docs/seon/components/capability-gates.md`
   (gate table)
 - **Evidence base:** the DeepSeek preflight battery (7/7) ·

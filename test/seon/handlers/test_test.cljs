@@ -45,20 +45,14 @@
   (is (contains? (set (schema/entity-schema-keys)) :seon.test)
       ":seon.test appears in entity-schema-keys")
   ;; Required-attrs count: only :seon.test/sym is non-optional. Assert it
-  ;; from the DETERMINISTIC decomposition (entity-schema-tx-data, the same
-  ;; builder the boot seed runs) rather than the lazy *schema-required-counts
-  ;; cache — the cache is a side-effect of decomposition, so reading it
-  ;; cold (the pristine :node-test build, where nothing pre-decomposed
-  ;; :seon.test) returns nil. Decomposing here both populates the cache and
-  ;; gives the authoritative required-attr list to count.
+  ;; from the deterministic decomposition (entity-schema-tx-data), the same
+  ;; builder the boot seed runs.
   (let [txd  (schema/entity-schema-tx-data :seon.test)
         reqs (->> txd
                   (filter (fn [[_ _ a _]] (= a :seon.schema/required-attrs)))
                   (mapv (fn [[_ _ _ v]] v)))]
     (is (= [:seon.test/sym] reqs)
-        "only :seon.test/sym is a required attr in the decomposition")
-    (is (= 1 (schema/schema-required-count :seon.test))
-        "required-count is 1 once the kind is decomposed")))
+        "only :seon.test/sym is a required attr in the decomposition")))
 
 ;; ---------------------------------------------------------------------------
 ;; Handler renders a seeded entity — synchronous, the handler reads only

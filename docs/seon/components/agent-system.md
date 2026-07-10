@@ -25,7 +25,6 @@ The agent system manages the full lifecycle of AI agents: spawning isolated JVM 
 | `seon.ai.agent.views` | `src/seon/ai/agent/views.clj` | Multimethod view renderers for agent data types: summary rows, detail pages, tool-specific log line rendering with 3-tier display (inline/hover/expanded) |
 | `seon.orchestrator.session` | `src/seon/orchestrator/session.clj` | High-level session abstraction: `start-agent-session!` (ctx + pool JVM + nREPL), `stop-agent-session!`, activity tracking, session recovery on restart |
 | `seon.agent.env` | `src/seon/agent/env.clj` | Agent environment toolkit: graph search wrappers, schema discovery (`related-schemas`, `who-produces`, `who-consumes`), context persistence (`ctx-save!`, `ctx-load`) |
-| `seon.agent.helpers` | `src/seon/agent/helpers.clj` | Agent SQL helpers with `*ctx*` binding — currently all throw "not yet migrated"; deprecated, slated for removal |
 
 ## Public API Surface
 
@@ -159,7 +158,8 @@ All multimethods dispatch on `:provider` key:
 
 ## Refactoring Opportunities
 
-- **`seon.agent.helpers`** — SQL functions all throw "not yet migrated". This is dead code that should either be ported to Datalog query helpers or removed entirely
+- **Removed stale SQL helpers** — The old `seon.agent.helpers` namespace was
+  deleted; agent-facing database access goes through `seon.db`.
 - **`FIXME(M-3)` reads in `seon.ai.claude`** — a handful of legacy session/message read sites still need to be ported onto `seon.db/query` against `:seon.ai`. Tracked in source as `FIXME(M-3)`
 - **Session/message entity conversion** manually handles nil filtering and `Instant`-to-`Date` coercion — this could be unified with the schema bridge
 - **`:any` in tool schemas** — `::tool-call` and `::tool-result` have `:any` for `:input` and `:content` fields. The wire protocol carries arbitrary data, but this violates the "no `:any`" rule
