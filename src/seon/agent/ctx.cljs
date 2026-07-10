@@ -2316,19 +2316,17 @@
 ;; ============================================================
 
 (defn decode-block
-  "Decode a PULLED section entity's render slots to value shapes.
+  "Decode a PULLED section entity's EDN-encoded attrs to value shapes.
 
-   The mixed-:or slots, back to
-   their value shapes (`seon.db/decode-edn-value` — the inverse of the
-   bridge's EDN-string storage encoding). Code-default sections pass
-   through unchanged."
+   Every attr runs through `seon.db/decode-edn-value` (the inverse of the
+   bridge's mixed-:or EDN-string storage encoding) — the encoded set is the
+   COMPUTED `edn-encoded-attr?` rule, never a key list here, so new encoded
+   slots (e.g. :seon.render.live-tile/content) decode without this fn
+   changing. Non-encoded attrs pass through unchanged."
   {:malli/schema [:=> [:catn [::block :map]] :map]}
   [section]
-  (cond-> section
-    (contains? section :seon.render/ai)
-    (update :seon.render/ai #(db/decode-edn-value :seon.render/ai %))
-    (contains? section :seon.render/html)
-    (update :seon.render/html #(db/decode-edn-value :seon.render/html %))))
+  (reduce-kv (fn [m k v] (assoc m k (db/decode-edn-value k v)))
+             {} section))
 
 (defn agent-blocks
   "The agent's COMPLETE set of `:seon.agent.ctx/block` maps.
