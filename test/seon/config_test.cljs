@@ -32,7 +32,16 @@
   (testing "the render-bounds section validates"
     (is (m/validate :seon.config/manifest
                     {:seon.config/render {:seon.config.render/value-width 72
-                                          :seon.config.render/store-edn-cap 16384}}))))
+                                          :seon.config.render/store-edn-cap 16384}})))
+  (testing "a minimal-cluster-shaped manifest validates (system-text + repl-mode + explicit ctx)"
+    (is (m/validate :seon.config/manifest
+                    {:seon.config/system-text "; ── system ──\n; the minimal prompt"
+                     :seon.config/repl-mode   :batch
+                     :seon.config/agent-context
+                     {:my.skills/load []
+                      :seon.agent/ctx [{:seon.agent.ctx/name :transcript
+                                        :seon.agent.ctx/priority 100}]}
+                     :seon.config/root-context {}}))))
 
 (deftest config-absent-is-identity
   (testing "the {} manifest leaves the route seed untouched"
@@ -90,6 +99,36 @@
                                (:seon.agent/ctx ctx)))]
         (is (= 'my.skills/skill-block (:seon.render/ai blk)))
         (is (= 16 (:seon.agent.ctx/priority blk)))))))
+
+;;; Explicit `:seon.agent/ctx` = the COMPLETE tree (agent-ctx Phase 3) — the
+;;; documented replaces-wholesale contract extends to the identity file-blocks:
+;;; an on-disk AGENTS.md/SOUL.md must not smuggle a block into a cluster that
+;;; enumerated its tree (config/minimal.edn depends on this).
+
+(deftest explicit-ctx-declares-the-complete-tree
+  (let [transcript-only [{:seon.agent.ctx/name :transcript
+                          :seon.agent.ctx/priority 100
+                          :seon.render/ai 'seon.agent.ctx.transcript/transcript-block}]]
+    (testing "manifest agent-context with explicit ctx → exactly that tree, no identity blocks"
+      (with-redefs [config/load-manifest
+                    (fn [] {:seon.config/agent-context
+                            {:my.skills/load []
+                             :seon.agent/ctx transcript-only}})]
+        (is (= #{:transcript} (ctx-block-names "worker-x" nil)))
+        (is (= #{:transcript} (ctx-block-names "root" nil))
+            "root with an absent root-context gets the same explicit tree")))
+    (testing "a per-mint override with explicit ctx → exactly that tree"
+      (with-redefs [config/load-manifest (fn [] {})]
+        (is (= #{:transcript} (ctx-block-names "worker-x"
+                                               {:my.skills/load []
+                                                :seon.agent/ctx transcript-only})))))
+    (testing "no explicit ctx → the identity file-blocks still ride the default tree"
+      (with-redefs [config/load-manifest (fn [] {})]
+        (let [names (ctx-block-names "worker-x" nil)]
+          (is (contains? names :namespaces) "the default tree is intact")
+          (when (.existsSync (js/require "fs") "AGENTS.md")
+            (is (contains? names :agents)
+                "AGENTS.md present ⇒ the :agents block is prepended (unchanged default)")))))))
 
 ;;; Persisted agent-level dials — `:seon.client/wake?` / `:seon.eval/home-requires`
 ;;; carry NO schema default (the CONSUMER owns the default), so a no-config agent

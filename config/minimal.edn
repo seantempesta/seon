@@ -1,0 +1,85 @@
+;; The STRICTLY MINIMAL agent-context manifest (agent-ctx Phase 3) — the
+;; measurement-ladder rung-0 world: ONE context block (the transcript) plus a
+;; ~20-line system prompt, nothing else. Every knob lands as DB state at boot
+;; (config-through-DB); iterate the prompt text freely — it is v0 of a
+;; measured artifact, not doctrine.
+;;
+;; HOW TO RUN a minimal cluster (verified 2026-07-10): SEON_CONFIG is
+;; exported by bin/seon (caller value wins via ${:-}) and inherits into the
+;; pod-<name> process, so the whole boot is:
+;;
+;;   bin/seon bench-bundle                 # once per src change (ephemeral ⇒ frozen bundle)
+;;   SEON_CONFIG=config/minimal.edn bin/seon cluster create min-0 --ephemeral
+;;   # pod port: cat tmp/seon-port-min-0 ; context: /agent/root/debug on it
+;;   bin/seon cluster destroy min-0
+;;
+;; GOTCHA: SEON_CONFIG must ride EVERY later start/restart of that pod too
+;; (`SEON_CONFIG=config/minimal.edn bin/seon restart pod-min-0`) — a bare
+;; restart re-exports the default config/system.edn and the boot reconcile
+;; would re-seed the singleton from it (retracting the system-text datom).
+;;
+;; Structure: aero #include pulls system.edn verbatim; #merge (shallow,
+;; top-level keys) applies the minimal deltas. Whole-key REPLACEMENT is the
+;; point here: :seon.config/agent-context and :seon.config/root-context below
+;; REPLACE system.edn's (so no default blocks, no home-requires override —
+;; the home-ns toolbelt falls back to the consumer default,
+;; seon.eval/home-ns-require-specs, which is exactly what the prompt's
+;; message/complete/wait forms resolve against).
+#merge
+[#include "system.edn"
+
+ {;; ── THE MINIMAL SYSTEM PROMPT (v0) ── seeded as the
+  ;; :seon.config/system-text datom on the :seon.config singleton at boot;
+  ;; seon.ai/effective-system-prompt reads the DATOM (request override >
+  ;; datom > shipped default). Teaches ONLY the global REPL mechanics —
+  ;; block-specific teaching lives with its block (the transcript masthead +
+  ;; mode fragment). Byte-stable: no timestamps, no ids.
+  :seon.config/system-text
+  "; ── system ──
+; You are at a live ClojureScript REPL in a long-running Node process —
+; your namespace and definitions persist across turns.
+; A form RUNS only if it starts with ( on a new line. A ; line is a
+; comment — your prose and reasoning live in ; comments; think there.
+; The runtime writes each form's value into the transcript, interleaved
+; where the form ran, as a bare  ⟹ <value> ⟸ result/<id>  line. Those
+; glyphs are the runtime's alone — never type them.
+; Write forms whose inputs you already have, and push independent
+; threads forward in parallel; anything that depends on a value you
+; have not seen yet waits for its interleaved line.
+; result/<id> re-references any prior value — reach for it instead of
+; re-running a form you already computed.
+; in-ns moves you; ns declares or updates a namespace; require loads
+; now and records the dependency; redefining IS updating; ns-unmap
+; removes.
+; A (defn ...) and an atom def persist across turns; a bare (def x ...)
+; does not — hold mutable values in an atom.
+; Errors come back as data — read the error map; nothing throws at you.
+; (message/user \"...\") reaches your human. (complete \"...\") ends the
+; task. (wait) parks until something new arrives."
+
+  ;; ── REPL MODE — the per-variant dial (harness flips :batch | :stream
+  ;; per experiment). Seeded → the singleton datom → gates BOTH the turn
+  ;; behavior and the mode's colocated masthead fragment.
+  :seon.config/repl-mode :batch
+
+  ;; ── AGENT-CONTEXT — the ONE block. Supplying :seon.agent/ctx declares
+  ;; the COMPLETE tree (replaces-wholesale; identity file-blocks are not
+  ;; auto-prepended onto an explicit tree). :my.skills/load [] seeds no
+  ;; skill bodies. The transcript block spec is
+  ;; seon.config/default-ctx-blocks' verbatim (incl. the result-decay
+  ;; schedule and the html twin that drives the UI tile).
+  :seon.config/agent-context
+  {:my.skills/load []
+   :seon.agent/ctx
+   [{:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
+     :seon.render/ai seon.agent.ctx.transcript/transcript-block
+     :seon.render/html seon.agent.ctx.transcript/transcript-block-html
+     :seon.agent.ctx.transcript/result-decay
+     [{:seon.agent.ctx.transcript/from-turn-offset 0 :seon.agent.ctx.transcript/token-cap 16384}
+      {:seon.agent.ctx.transcript/from-turn-offset 2 :seon.agent.ctx.transcript/token-cap 1500}
+      {:seon.agent.ctx.transcript/from-turn-offset 5 :seon.agent.ctx.transcript/token-cap 200}]}]}
+
+  ;; ── ROOT-CONTEXT — root gets the SAME stripped tree (no live-tile /
+  ;; core-faults / instrumentation-gaps / orphaned-agents upserts, no
+  ;; orchestration home-requires). Empty override = agent-context as-is.
+  :seon.config/root-context {}}]

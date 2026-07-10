@@ -1091,6 +1091,34 @@
   (is (not (contains? (ns-publics 'seon.ai) 'fallback-system-prompt))
       "fallback-system-prompt is DELETED — no fallback path"))
 
+(deftest system-message-or-chain-reads-the-config-datom
+  ;; agent-ctx Phase 3: request override > the cluster's
+  ;; :seon.config/system-text datom (config-through-DB via config-view) >
+  ;; the shipped default. The datom is transacted here exactly as the boot
+  ;; reconcile seeds it (the :seon.config singleton, identity "cluster").
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (db/transact!
+                  {:seon.db/conn conn
+                   :seon.db/tx-data [{:seon.config/id "cluster"
+                                      :seon.config/system-text "; minimal prompt"}]})
+                (.then
+                  (fn [tx]
+                    (is (:seon.db/ok? tx) "singleton system-text datom transacts")
+                    (is (= "; minimal prompt" (llm/effective-system-prompt {}))
+                        "the seeded :seon.config/system-text datom wins over the shipped default")
+                    (is (= "OVERRIDE"
+                           (llm/effective-system-prompt {:seon.ai/system-prompt "OVERRIDE"}))
+                        "the per-request override still wins over the datom"))))))
+        (.then (fn [_]
+                 ;; conn restored — no datom in sight ⇒ the shipped default,
+                 ;; byte-identical to the pre-datom world.
+                 (is (= ctx/system-text (llm/effective-system-prompt {}))
+                     "absent datom → the shipped seon.agent.ctx/system-text default")
+                 (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 (deftest llm-call-system-message-is-the-hardcoded-mechanics
   (async done
     (-> (with-conn

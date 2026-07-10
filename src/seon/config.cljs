@@ -401,9 +401,12 @@
 (schema/register! :seon.config.repair/classes [:or [:map-of :keyword :boolean] :nil])
 ;; The web allowlist hosts (meaningful only under `:allowlist`). EDN-slot bridged.
 (schema/register! :seon.agent.web/allowed-domains [:or [:vector :string] :nil])
-;; The cluster system-prompt text OR a file path — OPTIONAL, no default (absent
-;; ⇒ not seeded). The read side is wired by a follow-up unit; this unit only
-;; supports the seed path (config-db-migration-spec 2026-07-10).
+;; The cluster system-prompt TEXT — OPTIONAL, no default (absent ⇒ not seeded
+;; ⇒ `seon.ai/effective-system-prompt` falls through to the shipped
+;; `seon.agent.ctx/system-text`, byte-identical to the pre-datom world). The
+;; read side IS wired: request override → THIS datom (via [[config-view]]) →
+;; the shipped default. The value is the literal prompt string (a manifest
+;; keeps it inline; `config/minimal.edn` is the worked example).
 (schema/register! :seon.config/system-text :string)
 
 ;; The singleton entity schema — every knob optional (a `{}` manifest seeds the
@@ -479,6 +482,7 @@
    [:seon.config/namespaces    {:optional true} :seon.config/namespaces-spec]
    [:seon.config/routes        {:optional true} [:vector :seon.config/route-spec]]
    [:seon.config/render        {:optional true} :seon.config/render]
+   [:seon.config/system-text   {:optional true} :seon.config/system-text]
    [:seon.config/on-core-error {:optional true} :seon.config/on-core-error]
    [:seon.config/web           {:optional true} :seon.config/web-spec]
    [:seon.config/repair        {:optional true} :seon.config/repair]
@@ -1363,12 +1367,25 @@
    bodies, default `[:repl]`) and the identity file-blocks ([[identity-file-blocks]]
    — SOUL.md/AGENTS.md when present, gated by SEON_SOUL). Both upsert by name, so
    a manifest that names those blocks wins. A sparse/absent manifest + nil
-   override ⇒ the byte-parity default tree."
+   override ⇒ the byte-parity default tree.
+
+   An EXPLICIT `:seon.agent/ctx` (in the manifest's agent-context or the
+   per-mint `override`) declares the COMPLETE block tree — the documented
+   replaces-wholesale contract — so the identity file-blocks are NOT
+   auto-prepended onto it (an on-disk AGENTS.md must not smuggle a block
+   into a cluster that enumerated its tree; `config/minimal.edn` depends on
+   this). The root-context block UPSERTS stay an override layer, not a tree
+   declaration, so they don't suppress."
   {:malli/schema [:=> [:catn [::agent-id ::agent-id]
                        [::override [:maybe :map]]]
                   :seon.config/agent-context]}
   [id override]
-  (let [merged (merge (context-config-for id (load-manifest)) override)]
-    (-> (m/decode :seon.config/agent-context merged ctx-default-transformer)
-        (expand-skill-blocks)
-        (update :seon.agent/ctx #(upsert-by-name (vec (identity-file-blocks)) %)))))
+  (let [manifest      (load-manifest)
+        explicit-ctx? (or (contains? (get manifest :seon.config/agent-context {})
+                                     :seon.agent/ctx)
+                          (contains? (or override {}) :seon.agent/ctx))
+        merged        (merge (context-config-for id manifest) override)]
+    (cond-> (-> (m/decode :seon.config/agent-context merged ctx-default-transformer)
+                (expand-skill-blocks))
+      (not explicit-ctx?)
+      (update :seon.agent/ctx #(upsert-by-name (vec (identity-file-blocks)) %)))))

@@ -94,10 +94,11 @@
         ;; render (left pane folds per section; right pane one html card per
         ;; renderable).
         {:seon.render/keys [section-texts section-html]} (ctx/ctx-sections ctx)
-        ;; Block 1 — the hardcoded system message, via the EXACT fn the
+        ;; Block 1 — the resolved system message, via the EXACT fn the
         ;; adapters call (no re-implementation, no drift). No override is
-        ;; passed, so this returns the system-specific seon mechanics —
-        ;; the normal call's system message.
+        ;; passed, so this returns the cluster's `:seon.config/system-text`
+        ;; datom when seeded, else the shipped default — the normal call's
+        ;; system message.
         system        (ai/effective-system-prompt {})
         ;; The FULL prompt = system + boundary + context, via the SAME fn
         ;; the adapters call so the two debug surfaces can't drift.
