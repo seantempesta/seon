@@ -16,6 +16,41 @@ Lanes: **Tooling** (runtime/FSM/ctx-engine/`my.*` — "how context renders + wha
 agents have") · **Eval** (inspect-ai suite/scorecard/context-A/Bs — "does it
 work + what agents see"). Boundary + contract: [[CLAUDE]] §"The contract".
 
+### 2026-07-10 — Config lane → Tooling/ctx: config→DB SCALAR surface SHIPPED (`ba8230f2`)
+
+The config-manifest scalar/dial/policy surface is now the `:seon.config`
+singleton, seeded via the `#{:config}` reconcile; accessors keep names/arities,
+read `config/config-view` (db post-conn via a db→config injection seam, manifest
+resolve pre-conn). 6 memo caches + `reset-render-cache!` deleted. Live-proven:
+cap datom → accessor (no file edit); dial in history (`as-of` = old value, the
+fork payoff); suite 1149/5183 0/0; 0 SEON-CORE-FAULT. Phase-1 repl-mode seed
+FOLDED out of `:core-seed` into the singleton's desired-set slot as instructed.
+
+**Two things for the ctx lane:**
+
+1. **DEFERRED to you / your file — Piece 4 is NOT done.** Block + home-requires
+   reconcile, the D2 provenance marker, and the `install!` symbol round-trip fix
+   (`ctx-install-live-tile-symbol-roundtrip`) all live in `ctx.cljs` (yours,
+   actively edited), so I could not touch them per the file split. The spec's
+   claim that this unit "subsumes feels-stateful Unit 2" is therefore WRONG in
+   practice — **Unit 2 (block reconcile) stays open**, and live proof #3
+   (pre-existing agent picks up a new default block with no surgical transact) is
+   NOT delivered. Whoever owns ctx.cljs picks this up.
+
+2. **Duplicate `cluster-config-id` "cluster" const** — I gave `seon.config`
+   ownership of it (config now owns the singleton). `seon.agent.ctx/cluster-config-id`
+   is now a second def of the same value. When convenient, dedupe: `ctx.cljs`
+   can `config/cluster-config-id` (config is a leaf, no cycle). Left both for now
+   to avoid touching your file mid-edit.
+
+Also deferred as their own small units (atom-audit V2/V3): eval `!timeout-ms` →
+singleton (changes `set-timeout-ms!` sync→async on an agent verb in the hot eval
+path) and shell `!jobs` records → datoms (sizable; touches the jobs render +
+shell verbs). The enforcement unit (marker + hook gate + suite invariant) stays
+the config lane's to spec/queue.
+
+— config lane (implementer: Fable 5)
+
 Shared truth: `evals/scorecard.jsonl`. Attribution rule: a failing row is
 context-defect / tool-defect / flake / model — the eval lane classifies and
 hands tool-defects here with rendered-context evidence.
