@@ -1478,7 +1478,22 @@
   (is (nil? (ctx/first-result-claim "(+ 1 2)\n(message/user \"hi\")"))
       "a clean multi-form reply has no claim")
   (is (nil? (ctx/first-result-claim (str "the " ctx/prompt " shell prompt")))
-      "❯ is never a claim (excluded glyph)"))
+      "❯ is never a claim (excluded glyph)")
+  ;; a glyph inside a #code heredoc payload sits inside the enclosing form's
+  ;; ORIGINAL-coordinate span (parse-forms maps spans back through the
+  ;; heredoc rewrite), so the strip can never truncate a heredoc payload.
+  (is (nil? (ctx/first-result-claim
+              "(fs/replace! {:my.fs/find #code/py <<PY\nprint(1) ⟹ 2\nPY\n})"))
+      "a ⟹ inside a #code heredoc payload never fires (in the form span)")
+  ;; an in-form glyph must not SHADOW a fabrication after the form on the
+  ;; SAME line — the scan resumes at the form span's end, not the match end.
+  (is (= 14 (ctx/first-result-claim "(println \"⟹\") ⟹ 99"))
+      "a fabricated tail after an in-form glyph on the same line still fires")
+  (let [{t :seon.agent.ctx/strip-text n :seon.agent.ctx/strip-count}
+        (ctx/strip-result-claims "(println \"⟹\") ⟹ 99")]
+    (is (= 1 n) "the shadowed fabrication is stripped")
+    (is (str/includes? t "(println \"⟹\")") "the form (and its legit glyph) survives")
+    (is (not (str/includes? t "99")) "the fabricated value is gone")))
 
 (deftest strip-result-claims-removes-fabrications-keeps-forms
   ;; Mode A boundary fix-up: the fabricated tail is spliced out, the form

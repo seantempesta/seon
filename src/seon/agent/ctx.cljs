@@ -739,25 +739,20 @@
 ;; real `⟹` rows interleaved.
 ;; ============================================================
 
-(def cluster-config-id
-  "The fixed `:seon.config/id` of the singleton cluster-config entity that
-   carries boot-reconciled cluster-global config datoms (`:seon.config/repl-mode`).
-   One per cluster store; seeded by `seon.client/boot-seed!`."
-  "cluster")
-
 (defn repl-mode
   "The cluster's live REPL mode datom — `:batch` (default) | `:stream`.
 
-   Reads `:seon.config/repl-mode` off the singleton cluster-config entity
-   ([[cluster-config-id]]) in db value `db`; `:batch` when the datom is
-   absent (config-through-DB: the manifest was reconciled here at boot, so
-   the turn loop + masthead read THIS, never the config accessor). Guarded:
-   nil db / no such attr / no entity → `:batch`."
+   Reads `:seon.config/repl-mode` off the `:seon.config` singleton entity
+   (`seon.config/cluster-config-id`) in db value `db`; `:batch` when the
+   datom is absent (config-through-DB: the manifest was reconciled there at
+   boot, so the turn loop + masthead read THIS db value — pinned to the
+   turn's frozen db — never the config accessor). Guarded: nil db / no such
+   attr / no entity → `:batch`."
   {:malli/schema [:=> [:catn [:seon.db/db :any]] :seon.config/repl-mode]}
   [db]
   (or (when (and db (contains? (db/installed-schema db) :seon.config/repl-mode))
         (:seon.config/repl-mode
-          (db/entity {:seon.db/db db :seon.db/ref [:seon.config/id cluster-config-id]})))
+          (db/entity {:seon.db/db db :seon.db/ref [:seon.config/id config/cluster-config-id]})))
       :batch))
 
 (def ^:private result-claim-res
@@ -778,27 +773,35 @@
                        (:seon.repl/span e))))
        vec))
 
-(defn- inside-span?
-  "True when char offset `o` falls inside any `[s e)` span in `spans`."
+(defn- span-containing
+  "The `[s e)` span in `spans` containing char offset `o`, nil when none."
   [spans o]
-  (boolean (some (fn [[s e]] (and (<= s o) (< o e))) spans)))
+  (some (fn [[s e :as span]] (when (and (<= s o) (< o e)) span)) spans))
 
 (defn- claim-ranges
   "Sorted, merged `[start end)` ranges of every MODEL-AUTHORED result-claim
    in `text` — a match of any [[result-claim-res]] regex whose START is
-   NOT inside a parsed `:form` span. Merges overlapping/adjacent matches so
-   a line caught by two regexes counts once."
+   NOT inside a parsed `:form` span. A match that DOES start inside a form
+   span (a legit in-code glyph — its `[^\\n]*` trailer would swallow the
+   rest of the line) resumes the scan at that span's END, so a fabrication
+   AFTER the form on the same line is still caught. Merges overlapping/
+   adjacent matches so a line caught by two regexes counts once."
   [text]
   (let [spans (form-spans text)
-        raw   (for [re result-claim-res
-                    :let [g (js/RegExp. (.-source re) "gm")]
-                    m (loop [acc []]
-                        (if-let [mm (.exec g text)]
-                          (recur (conj acc [(.-index mm)
-                                            (+ (.-index mm) (count (aget mm 0)))]))
-                          acc))
-                    :when (not (inside-span? spans (first m)))]
-                m)]
+        raw   (mapcat
+                (fn [re]
+                  ;; "gm" restores each regex's own flags: `g` for the exec
+                  ;; walk, `m` so bare-result-claim-re's col-0 `^` anchor
+                  ;; stays per-line (its source drops the (?m) into a flag).
+                  (let [g (js/RegExp. (.-source re) "gm")]
+                    (loop [acc []]
+                      (if-let [mm (.exec g text)]
+                        (let [start (.-index mm)]
+                          (if-let [[_ e] (span-containing spans start)]
+                            (do (set! (.-lastIndex g) e) (recur acc))
+                            (recur (conj acc [start (+ start (count (aget mm 0)))]))))
+                        acc))))
+                result-claim-res)]
     (reduce (fn [acc [s e]]
               (if-let [[ps pe] (peek acc)]
                 (if (<= s pe)
@@ -809,8 +812,7 @@
             (sort-by first raw))))
 
 (defn first-result-claim
-  "Char offset of the FIRST model-authored result-claim in `reply` — nil
-   when the reply contains none.
+  "Char offset of the first model-authored result-claim, nil when none.
 
    A result-claim is a match of any of the three shape regexes
    ([[reserved-glyph-re]] `⟹⟸⋘⋙`, [[bare-result-claim-re]] col-0
@@ -830,12 +832,13 @@
   [:map [::strip-text ::strip-text] [::strip-count ::strip-count]])
 
 (defn strip-result-claims
-  "DELETE every model-authored result-claim from `reply`, returning the
-   cleaned text + the count stripped (Mode A `:batch` reply-boundary fix-up).
+  "Delete every model-authored result-claim from `reply` (Mode A fix-up).
 
-   For each fabrication range ([[claim-ranges]] — a `⟹ …`/`=> …` tail to
-   the right of a form or a standalone fabricated result line, never a
-   match inside a parsed form) the span is spliced out (the match runs to
+   Returns the cleaned text + the count stripped, applied at the reply
+   boundary before persist + eval. For each fabrication range
+   ([[claim-ranges]] — a `⟹ …`/`=> …` tail to the right of a form or a
+   standalone fabricated result line, never a match inside a parsed form)
+   the span is spliced out (the match runs to
    end-of-line, so the fabricated value + its fake `result/<id>` handle go
    with it; the form to its left survives). Idempotent — a cleaned reply
    has zero ranges. The forms eval as normal and the next turn's transcript

@@ -243,15 +243,12 @@
    oldest-first, append-below), and the COLOCATED [[mode-fragment]] for the
    live `mode` (`:batch` | `:stream`); the live-REPL-session framing lives
    once in [[seon.agent.ctx/system-text]]."
-  {:malli/schema [:function
-                  [:=> [:catn [::ns-str :string]] :string]
-                  [:=> [:catn [::ns-str :string] [::mode :seon.config/repl-mode]] :string]]}
-  ([ns-str] (masthead ns-str :batch))
-  ([ns-str mode]
-   (str "; seon · " ns-str " · live REPL\n"
-        "; The flat, time-ordered log below is this REPL's history — your\n"
-        "; messages and evals interleaved, oldest-first. Append below.\n"
-        (mode-fragment mode))))
+  {:malli/schema [:=> [:catn [::ns-str :string] [::mode :seon.config/repl-mode]] :string]}
+  [ns-str mode]
+  (str "; seon · " ns-str " · live REPL\n"
+       "; The flat, time-ordered log below is this REPL's history — your\n"
+       "; messages and evals interleaved, oldest-first. Append below.\n"
+       (mode-fragment mode)))
 
 (def resume-marker-line
   "The session-resume boundary: rendered ONCE per resume, between the

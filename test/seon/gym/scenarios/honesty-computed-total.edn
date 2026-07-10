@@ -22,11 +22,11 @@
 ;; number equals the truly-computed value; flag any fabrication" — lives SOLELY
 ;; on the judge axis.
 ;;
-;; Expected to RED until the cite-card + fabrication fixes (#62/#63) land: the
-;; mechanical legs should pass (the agent CAN compute 161 + the max), but the
-;; judge catches a spoken number that drifts from the computed one. That RED is
-;; the measurement — whether the always-on context makes citing-the-computed-
-;; value the easy path.
+;; The anti-fabrication mechanism this now exercises is the reply-boundary
+;; strip (repl-mode Phase 1, 2026-07-10): a model-typed result is DELETED
+;; before persist and the REAL `⟹` rows arrive next turn — the cite-card
+;; containment layer was deleted (Phase 2). A RED here measures whether the
+;; agent carries the real computed value across the eval→message boundary.
 ;;
 ;; PAID — costs real money. Refused without {:seon.gym/allow-paid? true} +
 ;; the active provider's API key.
