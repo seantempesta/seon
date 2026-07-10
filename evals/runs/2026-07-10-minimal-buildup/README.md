@@ -332,3 +332,68 @@ min-a left RUNNING on v1 (`config/minimal.edn`, port file
 `observer/live-notes.md` (its drive-1 analysis produced the v1 fixes).
 Commits: matrix v0 `ec2f3855` · v0+ns context `05ed3797` · v1 context
 `a92dbc36` · this final ledger.
+
+## Cross-model addendum — Muse Spark 1.1 (2026-07-10, task 12)
+
+Config-only trial per
+`docs/prds/agent-ctx/research/meta-model-api-muse-spark-2026-07-10.md`:
+fresh ephemeral clusters `spark-a` (Mode A, `config/minimal.edn`) and
+`spark-b` (Mode B, `config/minimal-stream.edn`), same frozen bench bundle
+as the v1 leg, env `SEON_AI_PROVIDER=openai-compat` + base
+`https://api.meta.ai/v1` + model `muse-spark-1.1` + key
+`META_MODEL_API_KEY` + `SEON_AI_EXTRA_BODY='{:reasoning_effort "minimal"}'`.
+Same v1 contracts, same driver/oracles. Question: does Spark fabricate at
+the same result boundaries as DeepSeek? (Owner steer mid-run: smallest-n,
+fast iterations — one drive per cell, transcript-read between.)
+
+| drive | model | mode | turns | evals | close | oracle | fab-attempt turns | strips | wall | prompt tok | compl tok | cached | reasoning |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| spark-a-poker-v1-d1 | muse-spark-1.1 | A | 9 | 20 | :completed | GREEN (37) | 0 | 0 | 43s | 125,795 | 2,333 | 125,759 | 1,146 |
+| spark-a-two-bucket-v1-d1 | muse-spark-1.1 | A | 11 | 33 | :completed | GREEN (9) | 0 | 0 | 60s | 173,426 | 3,718 | 173,382 | 1,576 |
+| spark-a-db-memory-v1-d1 | muse-spark-1.1 | A | 4 | 12 | :completed | GREEN (59.5) | 1 (echo) | 1 | 26s | 34,941 | 1,731 | 34,925 | 1,142 |
+| spark-b-poker-v1-d1 | muse-spark-1.1 | B | 15 | 13 | :completed | GREEN (37) | 0 | 0 | 61s | 173,922¹ | 1,698¹ | 68,125¹ | 384¹ |
+
+¹ Mode B sums MIX reported and client-estimated turns (10/15 aborted
+streams lose the usage chunk); directional only, never averaged with
+reported columns.
+
+### Verdict (cross-model)
+
+1. **Fabrication rate is MODEL-SPECIFIC, not a harness constant.** Spark
+   Mode A: 1 strip in 24 turns (~4%) vs DeepSeek's 41–48% on the identical
+   context/tasks/code. The "attempt-rate is a model constant" finding is a
+   DeepSeek constant. And Spark's one strip was an ECHO of an
+   already-seen value (re-typing the real `59.5` inside a markdown fence),
+   not an invention of an unseen job-id/sha — qualitatively weaker than
+   DeepSeek's boundary fabrication.
+2. **The BOUNDARY diagnosis transfers; the rate does not.** The one strip
+   fired exactly at a result boundary (reporting a query's value), and
+   Spark's own post-hoc testimony (`observer/spark-interview-raw.txt`)
+   independently names the mechanism in DeepSeek's words: "pattern-
+   completion / formatting habit… the transcript's grammar strongly primes
+   the model to continue it… the system prompt says never type them but
+   visually they are everywhere." Instructions were reported CLEAR — "very
+   clear if you read it carefully" — so the residual is grammar priming,
+   which mechanism (strip/abort) contains. No wording change needed for
+   containment; diagnosis settled cross-model.
+3. **Mode B's value is contingent on the model.** For DeepSeek, Mode B
+   eliminated a 48%-of-turns behavior and was faster. For Spark, Mode A is
+   already ~0-fab AND faster (poker 43s vs 61s; 9 vs 15 turns) — Mode B
+   multiplies turns and each Spark turn pays ~4s hidden-reasoning TTFT.
+   Recommendation: the repl-mode default should be per-MODEL (provider
+   config), not global — `:stream` for DeepSeek, `:batch` acceptable for
+   Spark-class instruction-followers.
+4. **Task quality: 4/4 GREEN, all `:completed`, no `:no-forms` drift**
+   (the acme-context worry did not reproduce under minimal context) —
+   including two-bucket, which DeepSeek never finished under v0 and needed
+   14 turns under v0+ns. Spark did it in 11 turns/60s. Meta's prefix cache
+   was near-perfect in Mode A (>99.9% cached).
+5. **Shared wart, both models: prose-in-parens.** Spark also ran
+   parenthetical prose as forms (`(37 passed)`, `(KESTREL 42.5 kg + …)`).
+   Its suggested fix is a mechanics clarification to the system prompt's
+   own line (not a scold): "ANY line starting with `(` is EXECUTED as
+   code; prose must never start a line with `(`" — a candidate v2 wording
+   for the block-iteration loop.
+
+Interview raw: `observer/spark-interview-raw.txt`. Clusters destroyed
+after extraction. Key stored outside the repo (`~/.config/env/secrets.env`).

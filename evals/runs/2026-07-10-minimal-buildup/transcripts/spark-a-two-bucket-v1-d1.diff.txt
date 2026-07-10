@@ -1,0 +1,13 @@
+Only in tmp/t4-drive/py/two-bucket: .pytest_cache
+diff -ru '--exclude=__pycache__' tmp/t4-masters/py/two-bucket/two_bucket.py tmp/t4-drive/py/two-bucket/two_bucket.py
+--- tmp/t4-masters/py/two-bucket/two_bucket.py	2026-07-06 16:58:35.037359809 -0400
++++ tmp/t4-drive/py/two-bucket/two_bucket.py	2026-07-10 17:16:39.977496104 -0400
+@@ -42,7 +42,7 @@
+                     to_visit.append((empty(buckets, idx), number_count))
+                 if buckets[idx] != sizes[idx]:
+                     to_visit.append((fill(buckets, idx), number_count))
+-                    to_visit.append((empty(buckets, idx), number_count))
++                    to_visit.append((consolidate(buckets, idx), number_count))
+         if not any(to_visit):
+             raise ValueError('No more moves!')
+         buckets, count = to_visit.pop(0)
