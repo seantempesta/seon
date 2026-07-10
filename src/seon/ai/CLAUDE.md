@@ -29,5 +29,10 @@ must persist). The `claude-api` dev skill covers Anthropic specifics.
 
 Adapters: `openai_compat.cljs` (DeepSeek et al — the pod default),
 `anthropic.cljs`, `diffusiongemma.cljs` (the diffusion-worker provider).
+Verified `:openai-compat` gateways: OpenRouter (acme), Meta Model API
+(Muse Spark 1.1 — config recipe, measured speed, and the
+`reasoning_effort "minimal"` dial in
+`docs/prds/agent-ctx/research/meta-model-api-muse-spark-2026-07-10.md`;
+do NOT send SEON_AI_THINKING to Meta, it 400s the `:thinking` field).
 Vendored SDK grounding: `reference-code/openai-node/`,
 `reference-code/anthropic-sdk-typescript/`, `reference-code/js-genai/`.

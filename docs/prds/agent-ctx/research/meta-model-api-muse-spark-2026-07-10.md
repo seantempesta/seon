@@ -20,6 +20,14 @@ provider omitted the usage chunk (a DeepSeek-ism; Meta's preview omits it
 intermittently), tripping `:malli.core/invalid-output`. **The default
 provider is unchanged (DeepSeek).**
 
+Headline numbers: decode is ~900–1,060 tok/s (≈20× deepseek-v4-pro),
+but hidden reasoning cannot be turned off — only dialed. **Run Muse
+with `reasoning_effort "minimal"`** (via `SEON_AI_EXTRA_BODY`, below):
+that cuts time-to-first-token from 16–18 s to 3.9 s and total
+wall-clock to 7.7 s, beating deepseek-v4-flash end-to-end. At the
+default (≈high) effort Muse is SLOWER end-to-end than both DeepSeeks
+on short/medium outputs despite the decode speed.
+
 ## The config (documented, not switched on)
 
 Env for a pod that should run on Meta (seed-once: the row must be
@@ -32,6 +40,13 @@ SEON_AI_BASE_URL=https://api.meta.ai/v1
 SEON_AI_MODEL=muse-spark-1.1
 SEON_AI_API_KEY_ENV=META_MODEL_API_KEY   # the key itself lives ONLY in env
 META_MODEL_API_KEY=<key>                  # never committed, never in the DB
+# RECOMMENDED — thinking has no off-switch; minimal is the fastest dial
+# (TTFT 16–18s → 3.9s, wall 7.7s, reasoning ~2k → ~400 tokens; see the
+# measured table below). Raise to "low"/"medium" only for tasks that
+# measurably benefit; leave the default (≈high) for forensic/debug use.
+SEON_AI_EXTRA_BODY='{:reasoning_effort "minimal"}'
+# Do NOT use SEON_AI_THINKING against Meta — truthy also sends the
+# vendor :thinking field, which api.meta.ai rejects with HTTP 400.
 ```
 
 - Auth: `Authorization: Bearer <key>`. Key format `LLM_…`. The account
@@ -65,7 +80,9 @@ META_MODEL_API_KEY=<key>                  # never committed, never in the DB
    usage). Observed ~200–1,500 reasoning tokens per turn. A small
    `max_tokens` (e.g. 50) is consumed entirely by reasoning →
    `finish_reason "length"`, `content null`. The shipped 4096 output
-   cap was sufficient in all live turns; consider 8192 for headroom.
+   cap was sufficient in all live turns; consider 8192 for headroom at
+   the default effort. At `reasoning_effort "minimal"` (the recommended
+   dial, above) reasoning drops to ~300–650 tokens and 4096 is ample.
 2. **The usage chunk is intermittently omitted** (preview flakiness).
    This killed a live turn until `seon.ai.openai-compat/parse-completion`
    was fixed to omit `:seon.ai/usage` when absent (optional-is-absent —
