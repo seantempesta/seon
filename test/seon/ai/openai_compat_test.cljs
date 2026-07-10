@@ -597,7 +597,7 @@
     (let [aborted (atom false)
           s (scripted-stream ["(+ 1" " 2)" " ⟹ 3 fabricated"] aborted)]
       (-> (openai/stream-until-form! s)
-          (.then (fn [{:keys [text aborted?]}]
+          (.then (fn [{::openai/keys [text aborted?]}]
                    (is (= "(+ 1 2)" text) "accumulated exactly through the first form")
                    (is (true? aborted?) "reported aborted")
                    (is (true? @aborted) "the SDK stream .abort was called")))
@@ -611,7 +611,7 @@
     (let [aborted (atom false)
           s (scripted-stream [";; think\n" "{:a 1}\n" "(message/user \"hi\")"] aborted)]
       (-> (openai/stream-until-form! s)
-          (.then (fn [{:keys [text aborted?]}]
+          (.then (fn [{::openai/keys [text aborted?]}]
                    (is (true? aborted?))
                    (is (str/includes? text "(message/user \"hi\")")
                        "streamed through the real form, past the demoted literal")
@@ -627,7 +627,7 @@
     (let [aborted (atom false)
           s (scripted-stream [";; just\n" ";; comments\n"] aborted)]
       (-> (openai/stream-until-form! s)
-          (.then (fn [{:keys [aborted?]}]
+          (.then (fn [{::openai/keys [aborted?]}]
                    (is (false? aborted?) "no form → natural end, not aborted")
                    (is (false? @aborted) ".abort never called")))
           (.then (fn [_] (done)))

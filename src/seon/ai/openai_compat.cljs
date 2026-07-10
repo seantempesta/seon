@@ -327,29 +327,32 @@
                    :maxRetries 0}
          *fetch* (doto (aset "fetch" *fetch*)))))
 
+(schema/register! ::text     :string)
+(schema/register! ::aborted? :boolean)
 (schema/register! ::stream-result
-  [:map [:text :string] [:aborted? :boolean]])
+  [:map [::text ::text] [::aborted? ::aborted?]])
 
 (defn ^:async stream-until-form!
-  "Consume the SDK `stream` delta-by-delta, ABORTING the moment one complete
-   top-level form has streamed (repl-mode `:stream`).
+  "Consume the SDK stream, aborting once one top-level form has streamed.
 
-   Per content delta: append to the accumulator, run the cheap
+   The repl-mode `:stream` consumer. Per content delta: append to the accumulator, run the cheap
    [[seon.repl.internal/first-top-level-close]] delimiter gate, and — only
    when a top-level group has closed — CONFIRM with the real `parse-forms`
    that a genuine evaluable `:form` is present (a bare `{…}`/`[…]` closes at
    depth 0 but demotes to prose, so keep streaming). On confirm: `.abort()`
-   the stream and return `{:text <through-first-form> :aborted? true}`. On
-   natural end (no form ever completes): `{:text <all> :aborted? false}`.
-   The usage-only final chunk (`:stream_options {:include_usage true}`) has
-   no `choices` — guarded."
+   the stream and resolve the `::stream-result` `{::text … ::aborted? true}`
+   — the text through the delta that COMPLETED the first form (delta
+   granularity: a same-delta tail rides along; Mode A's reply-boundary strip
+   still cleans any fabricated remainder). On natural end (no form ever
+   completes): `{::text <all> ::aborted? false}`. The usage-only final chunk
+   (`:stream_options {:include_usage true}`) has no `choices` — guarded."
   {:malli/schema [:=> [:cat :any] :any]}
   [^js stream]
   (let [it (js-invoke stream js/Symbol.asyncIterator)]
     (loop [acc ""]
       (let [step (await (.next it))]
         (if (.-done step)
-          {:text acc :aborted? false}
+          {::text acc ::aborted? false}
           (let [^js chunk (.-value step)
                 choices   (.-choices chunk)
                 ^js choice (when (and choices (pos? (.-length choices)))
@@ -361,7 +364,7 @@
                      (repl-internal/first-top-level-close acc')
                      (some #(= :form (:seon.repl/kind %))
                            (repl-internal/parse-forms acc')))
-              (do (.abort stream) {:text acc' :aborted? true})
+              (do (.abort stream) {::text acc' ::aborted? true})
               (recur acc'))))))))
 
 (defn- estimated-usage
@@ -446,7 +449,7 @@
             (if stream?
               ;; repl-mode :stream — consume deltas, abort at the first
               ;; complete top-level form (one form per turn).
-              (let [{:keys [text aborted?]} (await (stream-until-form! stream))]
+              (let [{::keys [text aborted?]} (await (stream-until-form! stream))]
                 (if aborted?
                   {:seon.ai/text                        text
                    :seon.ai.openai-compat/finish-reason "abort"

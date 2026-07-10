@@ -105,17 +105,21 @@
 (schema/register! ::estimated? :boolean)
 
 (defn llm-arg->ctx
-  "The ctx STRING from an llm-fn argument that is EITHER a bare ctx string
-   (the back-compat shape every adapter still accepts) OR a request map
-   carrying `:seon.ai/ctx` (the widened shape the turn loop passes when it
-   needs streaming). Coerce, never break: a plain string passes through."
+  "The ctx string from a bare-string or request-map llm-fn argument.
+
+   The argument is EITHER a bare ctx string (the back-compat shape every
+   adapter still accepts) OR a request map carrying `:seon.ai/ctx` (the
+   widened shape the turn loop passes when it needs streaming). Coerce,
+   never break: a plain string passes through."
   {:malli/schema [:=> [:catn [::arg :any]] :string]}
   [arg]
   (if (map? arg) (str (::ctx arg)) (str arg)))
 
 (defn llm-arg->stream?
-  "Whether the llm-fn argument requested streaming — `:seon.ai/stream?` true
-   on a request-map arg, false for a bare string (back-compat)."
+  "Whether the llm-fn argument requested streaming.
+
+   `:seon.ai/stream?` true on a request-map arg, false for a bare string
+   (back-compat)."
   {:malli/schema [:=> [:catn [::arg :any]] :boolean]}
   [arg]
   (boolean (and (map? arg) (::stream? arg))))
