@@ -592,110 +592,6 @@
          " · " (name (or state :idle)) " · " now " · agent " id "\n"
          ns-str "=> ")))
 
-;; ------------------------------------------------------------
-;; Cite-card — the anti-fabrication surface. A DERIVED list of the agent's
-;; last few SUCCESSFUL, non-trivial eval VALUES rendered as compact `;`
-;; lines IMMEDIATELY ABOVE the readline (the composition point), so the real
-;; number it just computed sits in the nearest tokens to where it writes
-;; `(message/user …)`. Honesty becomes the EASY path: cite the handle that's
-;; right there, never retype a figure from memory.
-;;
-;; Pure derivation over the already-ordered THIS-PROCESS eval stream — stores
-;; NOTHING, self-heals (no recent values → no card). Each line carries the
-;; live `result/<id>` handle, so the agent can also re-reference the WHOLE
-;; value (a clipped preview points back at it).
-;; ------------------------------------------------------------
-
-(def cite-card-max-rows
-  "Most cite-card rows shown — the last N citeable values. Tight: it is
-   always-on context, immediately above the readline."
-  5)
-
-(def cite-value-cap
-  "Per-value char cap for a cite-card line. A bigger value is clipped to a
-   shape hint; its `result/<id>` handle (the line prefix) holds it whole."
-  140)
-
-(def cite-source-cap
-  "Per-source char cap for the trailing `; <form>` hint on a cite-card line."
-  56)
-
-(def cite-card-token-cap
-  "Total token budget for the whole cite-card (header + rows). Oldest rows
-   drop first when over budget — it stays small. Measured in TOKENS."
-  320)
-
-(def ^:private cite-card-header
-  "; values you JUST computed this run — cite THESE exact figures; never retype a number from memory:")
-
-(defn- citeable-eval?
-  "True iff an OK eval carries a VALUE worth re-surfacing for citation: real
-   computed data, not a no-op, echo, side-effect receipt, or opaque object.
-   Skips blank/`nil`/`:idle`/boolean results, pure echoes (value == source),
-   bare `result/<id>` re-references, seon verb ACK receipts (`…/ok? …`), and
-   opaque `#‹fn›`/`#object` values."
-  [e]
-  (let [src (str/trim (str (:seon.eval/source e)))
-        res (str/trim (str (:seon.eval/result-edn e)))]
-    (and (true? (:seon.eval/ok? e))
-         (not (str/blank? src))
-         (not (str/blank? res))
-         (not (#{"nil" ":idle" "true" "false"} res))
-         (not= res src)
-         (not (re-matches #"result/\S+" src))
-         (not (re-find #"/ok\?\s+(?:true|false)" res))
-         (not (str/starts-with? res "#‹fn›"))
-         (not (str/starts-with? res "#object")))))
-
-(defn- collapse
-  "One-line, whitespace-collapsed, char-capped projection of `s` (a value or
-   a form) — keeps a cite line tight; nil-safe."
-  [s cap]
-  (let [one (str/replace (str/trim (str s)) #"\s+" " ")
-        n   (count one)]
-    (if (> n cap) (str (subs one 0 cap) "…") one)))
-
-(defn- cite-line
-  "One cite-card row for OK eval `e`: `;   result/<id> ⟹ <value>   ; <form>`.
-   Uses the reserved [[seon.agent.ctx/result-marker]] — the SAME glyph every
-   real result carries — so the anti-fabrication surface and the eval rows
-   speak ONE marker (never the fabrication-shaped `=>`). The value preview
-   collapses to one line + caps at [[cite-value-cap]]; a clip points back at
-   the live handle (the line prefix) for the whole value."
-  [e]
-  (let [id  (:seon.eval/id e)
-        raw (str/replace (str/trim (str (:seon.eval/result-edn e))) #"\s+" " ")
-        val (if (> (count raw) cite-value-cap)
-              (str (subs raw 0 cite-value-cap)
-                   " …⟨clipped — result/" id " holds it whole⟩")
-              raw)]
-    (str ";   result/" id " " ctx/result-marker " " val
-         "   ; " (collapse (:seon.eval/source e) cite-source-cap))))
-
-(defn cite-card
-  "The DERIVED anti-fabrication cite-card: the agent's last
-   [[cite-card-max-rows]] SUCCESSFUL, non-trivial eval values (oldest-first)
-   as compact `;` lines under [[cite-card-header]], bounded by
-   [[cite-card-token-cap]] (oldest rows drop first). `eval-rows` are
-   THIS-PROCESS eval entity maps in time order (their `result/<id>` vars are
-   live). Returns \"\" when there is nothing to cite — the card then vanishes
-   (reactive, self-heals)."
-  {:malli/schema [:=> [:catn [::eval-rows [:sequential :map]]] :string]}
-  [eval-rows]
-  (let [lines (->> eval-rows
-                   (filter citeable-eval?)
-                   (take-last cite-card-max-rows)
-                   (mapv cite-line))
-        fit   (loop [ls lines]
-                (if (and (next ls)
-                         (> (tokens/estimate (str/join "\n" (cons cite-card-header ls)))
-                            cite-card-token-cap))
-                  (recur (rest ls))
-                  ls))]
-    (if (seq fit)
-      (str/join "\n" (cons cite-card-header fit))
-      "")))
-
 (defn- ordered-events
   "The agent's full flat event stream — messages + evals UNIONed, sorted
    by FIXED stored `:at` (byte-stable), with `; in <ns>` markers threaded
@@ -826,16 +722,8 @@
              (remove str/blank?)
              (str/join "\n"))
         head (masthead ns-str (ctx/repl-mode db))
-        ;; The cite-card derives from THIS-PROCESS ok evals (live
-        ;; result/<id> handles) and renders DIRECTLY ABOVE the readline —
-        ;; the real values in the nearest tokens to where the agent composes
-        ;; its reply. Empty (and dropped) when there is nothing to cite.
-        card (cite-card (->> events
-                             (filter #(= :eval (::kind %)))
-                             (remove ::prior?)
-                             (map ::entity)))
         tail (readline input)]
-    (->> [head body card tail]
+    (->> [head body tail]
          (remove str/blank?)
          (str/join "\n\n"))))
 
