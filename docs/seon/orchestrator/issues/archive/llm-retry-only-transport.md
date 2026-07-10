@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: friction
-tags: [issue, agent, ai]
+tags: [issue, agent]
 ---
 # LLM-call retry covers only transport errors, not 429/503/timeout
 

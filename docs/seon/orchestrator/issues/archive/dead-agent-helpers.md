@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 milestone: M1
 tags: [issue, agent, architecture]

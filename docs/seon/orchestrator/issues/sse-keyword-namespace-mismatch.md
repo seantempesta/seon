@@ -2,7 +2,7 @@
 type: issue
 status: open
 severity: cleanup
-tags: [issue, schema, jvm-track, paused]
+tags: [issue, schema]
 ---
 # seon.sse keyword prefix doesn't match its owning namespace
 

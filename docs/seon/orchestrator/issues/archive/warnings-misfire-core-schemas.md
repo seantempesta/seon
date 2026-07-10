@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: cleanup
-tags: [issue, agent, context]
+tags: [issue, agent]
 ---
 
 # Warnings misfire: unmarked-entity-kinds nags agents to re-register core schemas

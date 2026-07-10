@@ -85,7 +85,7 @@ fork bump `41c1b9b2` → `da257d38`, minimal-overrides `config/acme.edn`):
 - **BUT the 302 regression was NOT planner-rooted.** `db->routes` was (and
   is) a SINGLE-clause query — `[:find [(pull ?e [...]) ...] :where
   [?e :seon.route/pattern]]` — and the collect-field bug
-  ([[datahike-query-clause-order-empty-results]]) only affects multi-clause
+  ([[archive/datahike-query-clause-order-empty-results]]) only affects multi-clause
   probe joins (a merge-clause probe var outside the v slot). A one-clause
   scan has no probe, so the planner bug cannot have emptied the router
   projection. Also, the failing bundle (built Jul 2 14:00) already ran

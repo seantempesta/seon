@@ -1,7 +1,7 @@
 ---
 type: issue
-status: verified
-tags: [issue, cleanup]
+status: resolved
+tags: [issue]
 severity: cleanup
 ---
 

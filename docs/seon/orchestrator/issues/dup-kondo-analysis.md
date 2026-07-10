@@ -3,7 +3,7 @@ type: issue
 status: open
 severity: friction
 milestone: M3
-tags: [issue, schema, architecture, jvm-track, paused]
+tags: [issue, schema, architecture]
 ---
 # Duplication: clj-kondo Analysis Wrapped in 3 Namespaces
 

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: completed
+status: resolved
 tags: [issue, database, agent]
 ---
 

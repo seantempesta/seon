@@ -1,9 +1,9 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 milestone: M5
-tags: [issue, architecture, jvm-track, paused]
+tags: [issue, architecture]
 ---
 # Dead Code: repl/graduate.clj
 

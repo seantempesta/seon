@@ -2,7 +2,7 @@
 type: issue
 status: resolved
 severity: friction
-tags: [issue, agent, render]
+tags: [issue, agent]
 ---
 
 # Live-tile section rendered "⚠ render failed: :malli.core/invalid-input"

@@ -167,12 +167,12 @@ because it would collide with the live nREPL/HTTP ports.
 
 Note on `hierarchy.edn` / `system/config.clj`: left as-is (inert without the
 config keys). The `#_`-discarded `defmethod`s in `flow/pool.clj`, `system.clj`,
-`db/datahike/system.clj` also left as-is. These are optional cleanup, not part
+`db/datahike/system.clj` also left as-is. These are optional not part
 of the error fix.
 
 ## Resolution (2026-06-28 audit)
 
 Closed RESOLVED per `docs/seon/orchestrator/issues-audit-2026-06-28.md`: the body
 records the fix as APPLIED — all four dead Integrant keys were removed from
-`resources/system.edn`. JVM-track-paused, so the live `(user/reset)` confirmation
+`resources/system.edn`. JVM-track-so the live `(user/reset)` confirmation
 is moot until that track resumes.
