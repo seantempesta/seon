@@ -510,3 +510,28 @@ def test_overflow_truncated_hole_is_honest_not_crash(oracle):
     exp = r["expansion"]
     assert exp["overflow"] is True
     assert exp["hole_confidence"][1]["accepted"] is False
+
+
+# ---------------------------------------------------------------------------
+# frontier backoff (mode 1: replace the partial symbol, never clamp a typo)
+# ---------------------------------------------------------------------------
+
+def test_split_partial_symbol():
+    from seon_diffusion.cursor import split_partial_symbol
+    assert split_partial_symbol("(todo/ad") == ("(", "todo/ad")
+    assert split_partial_symbol("(f x ") == ("(f x ", "")
+    assert split_partial_symbol('(f "done"') == ('(f "done"', "")
+    assert split_partial_symbol("(let [x 1] (+ x y") == ("(let [x 1] (+ x ", "y")
+    assert split_partial_symbol("") == ("", "")
+
+
+def test_frontier_backoff_lets_model_rewrite_symbol(oracle):
+    # draft ends mid-symbol with a typo'd prefix; the model writes the
+    # correct full symbol because the partial is NOT clamped
+    d, model, spy = driver([("todo/add!)", True)], oracle,
+                           policy=Policy(probe_lengths=1))
+    r = d.step("ctx", draft="(todo/ad")
+    assert any(e["event"] == "frontier-backoff" and e["partial"] == "todo/ad"
+               for e in r["events"])
+    assert r["locked"] == ["(todo/add!)"]
+    assert r["transition"] == "done"

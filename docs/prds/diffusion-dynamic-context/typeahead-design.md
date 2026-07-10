@@ -282,6 +282,31 @@ In-band errors (`gen_error`), same contract as today.
 4. **P4 bench** — the replay-corpus task in src-inspect-ai + live acme
    drive; merge decision on the measured deltas.
 
+## The two cursor regimes (both measured; the regime is DERIVED)
+
+- **Frontier (single position):** free typing; the cursor = end of the
+  clean prefix. A draft ending MID-SYMBOL is never clamped through the
+  partial — a hard-clamped typo is permanent (measured:
+  `(todo/ad` → the undeclared `todo/ad!`). `split_partial_symbol`
+  backs the clamp off so the model rewrites the symbol whole, exactly
+  like editor typeahead replacing the partial word; the partial rides
+  the render via the cursor-op candidates line. Measured after the
+  fix: 6/6 correct symbol completions.
+- **Multi-position (template):** after EXPAND, fields converge
+  independently — per-hole entropy state, settle rounds (settled holes
+  clamp, only unsettled re-noise), per-hole `accepted`/`round`.
+- Not a mode: INTERPRET branches on whether a template expansion is
+  active; nothing is asked of the model.
+
+## The context budget (hard constraint, measured round 8)
+
+Frontier correctness vs render size: 2/2 at ≤7.7k tokens (1.3–4.5s/
+step), 0/2 at ≥15.7k (junk/stuck; 23–67s/step). **The typeahead render
+must stay ≤~8k tokens** on DiffusionGemma-26B — the full 36k agent
+render degenerates (P3b live). The provider therefore needs a SLIM
+block loadout (the ctx-lane minimal-context profile is the shape), and
+P4 measures lock-rate at the profile's actual size.
+
 ## Settled by measurement (do not re-litigate without new data)
 
 - Selection strictly optional; no forcing knob exists.
@@ -290,3 +315,5 @@ In-band errors (`gen_error`), same contract as today.
 - parinfer rejected for repair; edamame owns it.
 - Plan ledger = todo datoms rendered, done items dropped from render.
 - No new config system: ctx blocks + one policy row.
+- Frontier drafts never clamp a partial symbol (backoff, round 8).
+- Render ≤~8k tokens for this model (the context cliff, round 8).

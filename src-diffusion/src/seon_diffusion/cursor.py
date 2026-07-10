@@ -39,6 +39,7 @@ returned in the result (`hints` + events), not clamped into `new_draft`;
 the caller decides their placement in the next render.
 """
 
+import re
 import time
 from dataclasses import dataclass, replace
 
@@ -162,6 +163,22 @@ def make_bias(free_mask, ban_vec, hole_vecs):
             logits = logits + pm[..., None] * vec
         return logits
     return bias
+
+
+_PARTIAL_SYM = re.compile(r"[A-Za-z0-9_.*+!?<>=/-]+$")
+
+
+def split_partial_symbol(draft):
+    """(clamp_text, partial): back the frontier clamp off a trailing
+    partial symbol so the model can rewrite the symbol WHOLE. Only a
+    tail that sits mid-symbol is split — a draft ending in whitespace,
+    a delimiter, or a complete string stays fully clamped."""
+    if not draft or draft[-1] in " \n\t)]}\"":
+        return draft, ""
+    m = _PARTIAL_SYM.search(draft)
+    if not m:
+        return draft, ""
+    return draft[: m.start()], m.group(0)
 
 
 def overlap_trim(hole_text, next_clamp, min_overlap=2):
@@ -614,7 +631,16 @@ class CursorDriver:
 
         # RENDER
         cache, cur_len = self._encode(context_render, committed)
-        draft_ids = _tok_ids(self.tok, draft) if draft else []
+        # frontier backoff: a draft ending MID-SYMBOL is not clamped through
+        # the partial — a hard clamp pins a typo forever (measured: the model
+        # completed "(todo/ad" to the undeclared "todo/ad!" because it could
+        # not insert the missing char). Editor typeahead REPLACES the partial
+        # word; so does the canvas: clamp up to the symbol start, let the
+        # model rewrite the symbol whole (candidates ride the render).
+        clamp_text, partial = split_partial_symbol(draft)
+        if partial:
+            events.append({"event": "frontier-backoff", "partial": partial})
+        draft_ids = _tok_ids(self.tok, clamp_text) if clamp_text else []
         ws = _Workspace()
         ws.clamp(draft_ids)
         ws.free(max(p.grow_free, CL - ws.used()))
@@ -725,7 +751,10 @@ class CursorDriver:
                 return self._finish(result, total_fwd, t0)
             events.append({"event": "glyph-no-offer", "glyph": chosen})
 
-        arm = self._partition(refine, eos_seen, text, draft, locked_any=False)
+        # stuck compares against what was CLAMPED (the backoff strips a
+        # partial symbol from the clamp; re-emitting just that clamp text
+        # is no progress)
+        arm = self._partition(refine, eos_seen, text, clamp_text, locked_any=False)
         if grow_glyph and arm in ("clean-unfinished", "text-progress"):
             arm = "clean-unfinished"
             events.append({"event": "grow-glyph"})

@@ -178,6 +178,32 @@ Scripts: `dg_size.py`, `dg_size_a.py`, `dg_size_c.py`.
   required a colon the model legitimately omits mid-canvas; zero-scores
   rule vindicated again.)
 
+## Round 8 — two cursor regimes + the context cliff (measured same day)
+
+Scripts: `dg_modes2.py` (v1 mis-scored `new_draft` instead of
+`locked` — zero-scores rule, third strike). Through the REAL driver.
+
+- **Frontier regime (single cursor) needed a protocol fix, now 6/6.**
+  Hard-clamping a draft that ends MID-SYMBOL pins the typo: the model
+  completed `(todo/ad` → the undeclared `todo/ad!` because it cannot
+  insert the missing char into a clamp. Editor typeahead REPLACES the
+  partial word — so does the canvas now: `split_partial_symbol` backs
+  the clamp off to the symbol start; the partial rides the render as
+  the candidates line. Measured after the fix: `(todo/ad`→`todo/add!`
+  3/3, `(db/qu`→`db/query` 3/3, full correct forms.
+- **Template regime (multi-position): correct 3/3** — two seeds
+  free-typed the full correct form (`done`, 0.5–0.8s), one landed a
+  near-form for the next round. Per-hole settle rounds shipped: settled
+  holes clamp, only unsettled re-noise; overflow-truncated holes report
+  honestly instead of crashing (latent bug found by the stub canvas).
+- **The context cliff (the P3b degeneration, quantified):** frontier
+  task correct 2/2 @ 1.7k tok (1.3s/step) and 2/2 @ 7.7k (4.5s) —
+  then 0/2 @ 15.7k (junk, 23s) and 0/2 @ 31.7k (stuck, 67s). The
+  swap-in constraint is hard: **the typeahead render must stay ≤~8k
+  tokens** on this model. The 36k full agent render is out of range —
+  the provider needs a slim block loadout (the ctx-lane minimal-context
+  work is exactly the required profile), not a bigger canvas.
+
 ## Next steps (proposed)
 
 1. `fill_guided` in `control.py` style: fill → oracle parse of the whole
