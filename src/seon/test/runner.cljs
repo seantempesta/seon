@@ -200,8 +200,12 @@
 (defn- record-assertion!
   "Append an assertion event to the builder. cljs.test's report map carries
    `:message nil`, `:file nil`, `:line nil` for assertions that didn't
-   supply those — only include the key when the VALUE is non-nil so the
-   resulting event map satisfies `::test-event`'s string/int schemas. The
+   supply those — only include the key when the VALUE satisfies
+   `::test-event`'s string/int schemas. NB `:line` can also arrive as
+   `##NaN` (an assertion inside an async `.then` callback, where cljs.test
+   reads line info off a JS stack frame that has none) — `some?` passes NaN
+   but `:int` rejects it, which crashed the pod as a :core fault
+   (2026-07-10); guard with `int?`, dropping the key exactly like nil. The
    `:expected`/`:actual` pair is always present (cljs.test populates them
    from the assertion sexpr) and we coerce to string via `safe-prstr`."
   [event-map kind]
@@ -211,8 +215,8 @@
                     (some? (:message event-map))  (assoc :message (:message event-map))
                     (contains? event-map :expected) (assoc :expected (safe-prstr (:expected event-map)))
                     (contains? event-map :actual)   (assoc :actual (safe-prstr (:actual event-map)))
-                    (some? (:file event-map))     (assoc :file (:file event-map))
-                    (some? (:line event-map))     (assoc :line (:line event-map))
+                    (string? (:file event-map))   (assoc :file (:file event-map))
+                    (int? (:line event-map))      (assoc :line (:line event-map))
                     (current-var-sym)               (assoc :var (current-var-sym))
                     (current-ns-sym)                (assoc :ns  (current-ns-sym))))))
 
