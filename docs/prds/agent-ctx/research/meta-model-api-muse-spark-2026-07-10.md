@@ -94,6 +94,35 @@ its END-TO-END latency is comparable to pro and slower than flash. The
 longer the visible output, the more Muse's decode speed wins. Numbers
 from `scratchpad/llm-bench.mjs` (this session); re-run to refresh.
 
+### Thinking cannot be turned OFF — but `reasoning_effort` dials it down
+
+Probed live (2026-07-10): DeepSeek-style `thinking {:type "disabled"}`
+→ HTTP 400 `unknown parameter`; `reasoning_effort "none"` → HTTP 400
+`does not support "none" with this model`. Accepted levels:
+`"minimal"` / `"low"` / `"medium"` (default appears ≈high). Measured on
+the same essay prompt:
+
+| reasoning_effort | TTFT | reasoning tokens | wall-clock |
+|---|---|---|---|
+| (default) | 16–18 s | ~1,800–2,600 | 18.5–20.5 s |
+| medium | 5.4 s | 639 | 9.7 s |
+| low | 4.4 s | 319 | 8.7 s |
+| **minimal** | **3.9 s** | **414** | **7.7 s** |
+
+At `minimal`, Muse beats deepseek-v4-flash on wall-clock (7.7 s vs
+7.4–9.9 s) at ~2× flash's decode rate. **Config door (no code
+change):** `SEON_AI_EXTRA_BODY='{:reasoning_effort "minimal"}'` — the
+data-only extra-body path merges it into every request. Do NOT use
+`SEON_AI_THINKING=minimal` against Meta: for `:openai-compat` a truthy
+thinking ALSO sends the vendor-specific `:thinking {:type "enabled"}`
+field, which Meta 400s (adapter smell, flagged below).
+
+Smell (reported, not changed): `request-params` sends the
+DeepSeek-vendor `:thinking` field for `:openai-compat` whenever
+thinking is truthy — a string effort arguably should send ONLY
+`:reasoning_effort` on generic gateways. Owner call before changing
+shipped compat behavior; the extra-body door covers Meta meanwhile.
+
 ## Usage metadata (both wire modes verified)
 
 Both providers return caching + reasoning info in `usage`, in BOTH
