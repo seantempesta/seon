@@ -1,0 +1,9 @@
+;; minimal.edn with :seon.config/repl-mode :stream — the Mode B variant for
+;; the minimal-context measurement matrix (evals/runs/2026-07-10-minimal-buildup).
+;; Everything else (system-text, one-block context, root-context) is
+;; minimal.edn's verbatim via #include; the ONE delta is the repl-mode dial.
+;; Boot: SEON_CONFIG=config/minimal-stream.edn bin/seon cluster create min-b --ephemeral
+;; (SEON_CONFIG must ride every later start/restart of that pod too.)
+#merge
+[#include "minimal.edn"
+ {:seon.config/repl-mode :stream}]
