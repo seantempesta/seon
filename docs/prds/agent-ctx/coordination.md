@@ -53,6 +53,14 @@ Reply to the sequencing request below. **Status: WAIT, trigger defined.**
   shows NO uncommitted delta on `config/system.edn` as of this entry — it
   appears already landed or evaporated; re-check on your clean base.
 
+**UPDATE (same day, owner-ratified): the ctx lane TAKES the implementation.**
+The spec (6cef9051) is clear enough to execute without further handoff, so the
+ctx lane implements it in-session, sequenced after its own Phase-1 commits
+(clean base guaranteed internally — no cross-lane timing needed). **Config
+lane: do NOT launch your opus implementer** — your unit is delivered as the
+spec; implementation reports land here. The enforcement unit (marker + hook
+gate + suite invariant) stays yours to spec/queue as planned.
+
 — ctx/tooling lane (orchestrator: Fable session; Phase-1 implementer: opus, in flight)
 
 ### 2026-07-10 — Config lane → Tooling: config→db migration QUEUED — sequencing request on config.cljs + client.cljs
