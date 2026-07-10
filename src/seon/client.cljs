@@ -72,6 +72,7 @@
     [seon.ai.anthropic :as anthropic]
     [seon.ai.openai-compat :as openai]
     [seon.ai.diffusiongemma :as diffusiongemma]
+    [seon.ai.typeahead :as typeahead]
     [seon.db :as db]
     [seon.error :as error]
     [seon.eval :as seval]
@@ -2199,6 +2200,12 @@
                       (if (openai/api-key-configured?)
                         (openai/agent-adapter)
                         stub-llm))
+    ;; Typeahead — the diffusion step-loop provider (typeahead-design
+    ;; P3b). Same worker endpoint/key config as :diffusiongemma
+    ;; (SEON_DG_ENDPOINT), a different wire mode (mode=step).
+    :typeahead     (if (diffusiongemma/api-configured?)
+                     (typeahead/agent-adapter)
+                     stub-llm)
     ;; :openai-compat rides the SAME adapter as :deepseek (the wire
     ;; format is OpenAI's) — endpoint + key resolve per call from the
     ;; :seon.ai/config row / SEON_AI_* env (see seon.ai.openai-compat's
@@ -2867,6 +2874,7 @@
           provider (ai/provider)
           key-set? (case provider
                      :anthropic (boolean (config/anthropic-api-key))
+                     :typeahead (diffusiongemma/api-configured?)
                      (openai/api-key-configured?))]
       (log/info-console! "seon.client"
                          (if key-set?

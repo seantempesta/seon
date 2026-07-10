@@ -244,9 +244,41 @@ In-band errors (`gen_error`), same contract as today.
    behavior tests in `test/seon/agent/ctx/menu_test.cljs`; live-proven
    on acme (both sections in the byte-exact turn prompt blob; an
    agent-transacted `menu-cap 2` row truncated both menus on the very
-   next render). Remaining for P3b: provider wiring + inspector tile —
-   and an owner call on the `:plan` vs `:plan-ledger` overlap (both
-   render the same open steps today).
+   next render). Open owner call: the `:plan` vs `:plan-ledger` overlap
+   (both render the same open steps today).
+   **P3b (provider + inspector tile) SHIPPED 2026-07-10**:
+   `seon.ai.typeahead` — the `SEON_AI_PROVIDER=typeahead` step-loop
+   provider (OFF by default; endpoint/key config shared with
+   `:diffusiongemma`, and a full-URL `SEON_DG_ENDPOINT` local worker
+   now needs NO bearer key). One provider call = the mode=step loop
+   through the ONE wire path (`dg/complete`; `::mode :step` +
+   committed/draft/offers/policy fields added): offers =
+   `menu/verb-offers` (glyph-aligned with the rendered `:recent-verbs`
+   menu by construction), policy = the P3a row via `policy->wire`
+   (worst-token-gate deliberately unmapped — probability vs the
+   worker's nats gate), committed/locked + draft threaded per round,
+   stop on done / stuck×2 / the new `:seon.typeahead/max-rounds` knob.
+   THE POD OWNS EVAL: the reply is the locked forms as plain LLM-reply
+   text, eval'd ONCE by the turn pipeline — which is also why the
+   mid-loop `;; => result` feedback (control.py's `_result_comment`)
+   is NOT wired: it would need pod-side eval inside the provider =
+   double-eval of side-effecting verbs. Results reach the model next
+   turn via the transcript's real `⟹` rows; a turn-level driver (the
+   loop hoisted out of the provider seam) is the clean fix if mid-loop
+   results prove necessary. Per-step `:seon.typeahead/*` datom
+   projections (transition/glyph/margin/eos-logprob/forwards) + the
+   self-installing `:typeahead-steps` agent-page tile
+   (`steps-tile-html`; reactive — no rows → no body). 7 tests / 42 assertions in
+   `test/seon/ai/typeahead_test.cljs`. Live-proven on acme
+   (2026-07-10, local MLX worker): swap-in via env alone, steps ran
+   end-to-end, datoms + tile + the byte-exact 36k-token prompt blob
+   captured — but the MODEL collapsed under the full acme prompt
+   (progress→grow→stuck×2, zero locked forms, a pipe-noise draft; the
+   EOS meter honest: −1.67→−6.95→−7.4). The 30k+-token encoder context
+   is far beyond every measured protocol (all ≤4k); P4's replay corpus
+   must measure context-length vs lock-rate before any swap-in claim.
+   Null-render calibration is also not wired yet (no auto-offers —
+   explicit glyph selection only).
 4. **P4 bench** — the replay-corpus task in src-inspect-ai + live acme
    drive; merge decision on the measured deltas.
 

@@ -76,6 +76,10 @@
 ;; Glyph page size — max entries any menu section renders (further
 ;; bounded by (count glyphs)).
 (schema/register! :seon.typeahead/menu-cap :int)
+;; Step-loop round budget — how many mode=step calls one provider turn
+;; may make before it stops with whatever locked (the P3b driver's cap;
+;; mirrors the worker Policy's max_rounds default).
+(schema/register! :seon.typeahead/max-rounds :int)
 
 ;; The stored row shape — every knob optional (absent = code default;
 ;; optional = absent, never a stored nil).
@@ -85,7 +89,8 @@
    [:seon.typeahead/auto-offer-margin {:optional true} :seon.typeahead/auto-offer-margin]
    [:seon.typeahead/worst-token-gate  {:optional true} :seon.typeahead/worst-token-gate]
    [:seon.typeahead/probe-budget      {:optional true} :seon.typeahead/probe-budget]
-   [:seon.typeahead/menu-cap          {:optional true} :seon.typeahead/menu-cap]])
+   [:seon.typeahead/menu-cap          {:optional true} :seon.typeahead/menu-cap]
+   [:seon.typeahead/max-rounds        {:optional true} :seon.typeahead/max-rounds]])
 
 ;; The EFFECTIVE policy view [[policy]] returns — every knob present.
 (schema/register! ::policy-view
@@ -93,7 +98,8 @@
    [:seon.typeahead/auto-offer-margin :seon.typeahead/auto-offer-margin]
    [:seon.typeahead/worst-token-gate  :seon.typeahead/worst-token-gate]
    [:seon.typeahead/probe-budget      :seon.typeahead/probe-budget]
-   [:seon.typeahead/menu-cap          :seon.typeahead/menu-cap]])
+   [:seon.typeahead/menu-cap          :seon.typeahead/menu-cap]
+   [:seon.typeahead/max-rounds        :seon.typeahead/max-rounds]])
 
 (def policy-row-id
   "The `:seon.typeahead/id` of the ONE policy singleton row."
@@ -104,7 +110,8 @@
   {:seon.typeahead/auto-offer-margin 3.0
    :seon.typeahead/worst-token-gate  0.9
    :seon.typeahead/probe-budget      3
-   :seon.typeahead/menu-cap          8})
+   :seon.typeahead/menu-cap          8
+   :seon.typeahead/max-rounds        8})
 
 (defn policy
   "The effective typeahead driver policy in db value `db`.
@@ -229,6 +236,19 @@
          (keep (fn [s] (when-let [row (public-fn-row db s)] [s row])))
          vec)))
 
+(defn- capped-verbs
+  "The rendered/offered `[full-sym-str fn-row]` pairs for agent `id` in
+   `db` — [[ranked-verbs]] over the eval window, policy menu-capped. []
+   when the db/agent/attrs are absent, so callers share ONE guard. The
+   SAME list drives the rendered `:recent-verbs` menu AND the driver's
+   wire offers — glyph N always means the same verb on both sides."
+  [db id]
+  (if (and db id
+           (contains? (db/installed-schema db) :seon.eval/agent)
+           (contains? (db/installed-schema db) :seon.fn/sym))
+    (vec (take (menu-cap db) (ranked-verbs db (eval-rows db id))))
+    []))
+
 (def ^:private recent-verbs-header
   (str "; recent verbs — the fns you have been calling, most-used first.\n"
        "; A MENU, never a mandate: select an entry by outputting its glyph\n"
@@ -261,19 +281,64 @@
    composer drops the section."
   {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (let [db (or db (some-> db/*conn* deref))]
-    (if (and db id
-             (contains? (db/installed-schema db) :seon.eval/agent)
-             (contains? (db/installed-schema db) :seon.fn/sym))
-      (let [verbs (take (menu-cap db) (ranked-verbs db (eval-rows db id)))]
-        (if (seq verbs)
-          (str recent-verbs-header "\n"
-               (str/join "\n"
-                         (map-indexed
-                           (fn [i [s row]] (verb-line (glyphs i) s row))
-                           verbs)))
-          ""))
+  (let [db    (or db (some-> db/*conn* deref))
+        verbs (capped-verbs db id)]
+    (if (seq verbs)
+      (str recent-verbs-header "\n"
+           (str/join "\n"
+                     (map-indexed
+                       (fn [i [s row]] (verb-line (glyphs i) s row))
+                       verbs)))
       "")))
+
+;; ============================================================
+;; Driver offers — the SAME capped verb list as the rendered menu, in
+;; the step-driver's offer shape (typeahead-design "Wire modes":
+;; glyph + label + a clamp/free template). The P3b provider
+;; (`seon.ai.typeahead`) converts these to the worker's string-keyed
+;; wire maps; glyph N here is glyph N in the rendered `:recent-verbs`
+;; section by construction (both read [[capped-verbs]]).
+;; ============================================================
+
+(schema/register! :seon.typeahead/glyph :string)
+(schema/register! :seon.typeahead/label :string)
+(schema/register! :seon.typeahead/template-segment
+  [:or [:tuple [:= "clamp"] :string] [:tuple [:= "free"] :int]])
+(schema/register! :seon.typeahead/template
+  [:vector :seon.typeahead/template-segment])
+(schema/register! :seon.typeahead/offer
+  [:map
+   [:seon.typeahead/glyph    :seon.typeahead/glyph]
+   [:seon.typeahead/label    :seon.typeahead/label]
+   [:seon.typeahead/template :seon.typeahead/template]])
+(schema/register! ::offers-view [:vector :seon.typeahead/offer])
+
+(def ^:private offer-args-free-tokens
+  "Free tokens a verb template grants for the call's arguments."
+  24)
+
+(defn verb-offers
+  "Driver offers mirroring the agent's rendered `:recent-verbs` menu.
+
+   One offer per [[capped-verbs]] entry — the selection glyph, a
+   `sym [args] …` label, and a `(sym ` + free-args-hole + `)` clamp
+   template the driver expands on selection. [] when the agent has no
+   menu (same guard as the rendered section), so the wire carries offers
+   exactly when the prompt shows the menu."
+  {:malli/schema [:=> [:catn [::db :seon.db/db] [:seon.agent/id :string]]
+                  ::offers-view]}
+  [db id]
+  (vec
+    (map-indexed
+      (fn [i [s row]]
+        {:seon.typeahead/glyph    (glyphs i)
+         :seon.typeahead/label    (str s " "
+                                       (ns-cards/compact-arities
+                                         (:seon.fn/arglists row)))
+         :seon.typeahead/template [["clamp" (str "(" s " ")]
+                                   ["free" offer-args-free-tokens]
+                                   ["clamp" ")"]]})
+      (capped-verbs db id))))
 
 ;; ============================================================
 ;; :plan-ledger — the open/current plan steps as ▶/☐ glyph lines. The

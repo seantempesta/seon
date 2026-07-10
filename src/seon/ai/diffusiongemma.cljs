@@ -49,7 +49,8 @@
 ;; vocabulary (text, error envelope) lives in seon.ai.
 ;; ============================================================
 
-(schema/register! ::mode [:enum :generate :guided :clamp-smoke :infill :introspect :probe])
+(schema/register! ::mode [:enum :generate :guided :clamp-smoke :infill :introspect :probe
+                          :fill :rank :step])
 (schema/register! ::prompt :string)
 (schema/register! ::max-new-tokens :int)
 (schema/register! ::trace [:enum :canvas :entropy])
@@ -80,6 +81,21 @@
 (schema/register! ::max-rounds :int)
 (schema/register! ::max-attempts :int)
 (schema/register! ::seed :int)
+;; typeahead cursor inputs (mode=step, worker.py `_cursor` — see
+;; typeahead-design.md "Wire modes"). All wire-shaped: string-keyed offer
+;; maps ({"glyph" "①" "label" … "template" [["clamp" "…"]["free" 24]]})
+;; and a string-keyed policy map of the worker Policy's snake_case knobs
+;; (Policy(**payload["policy"]) — an unknown key TypeErrors worker-side,
+;; so only KNOWN knobs may ride).
+(schema/register! ::committed :string)               ; locked forms so far
+(schema/register! ::draft :string)                   ; the in-progress canvas text
+(schema/register! ::template-segment
+  [:or [:tuple [:= "clamp"] :string] [:tuple [:= "free"] :int]])
+(schema/register! ::offer
+  [:map-of :string [:or :string [:vector ::template-segment]]])
+(schema/register! ::offers [:vector ::offer])
+(schema/register! ::policy [:map-of :string [:or :double :int :boolean]])
+(schema/register! ::null-render :string)             ; glyph-calibration baseline render
 
 ;; The generic control request: a mode + the knobs it uses.
 (schema/register! ::request
@@ -106,7 +122,12 @@
    [::prelude             {:optional true} ::prelude]
    [::max-rounds          {:optional true} ::max-rounds]
    [::max-attempts        {:optional true} ::max-attempts]
-   [::seed                {:optional true} ::seed]])
+   [::seed                {:optional true} ::seed]
+   [::committed           {:optional true} ::committed]
+   [::draft               {:optional true} ::draft]
+   [::offers              {:optional true} ::offers]
+   [::policy              {:optional true} ::policy]
+   [::null-render         {:optional true} ::null-render]])
 
 ;; The worker `output` map is Google/RunPod's shape, not seon's — a :map
 ;; boundary (like :seon.ai/provider-fields). We surface a normalized
@@ -179,14 +200,25 @@
   []
   (platform/env-val (or (config/env-string "SEON_DG_API_KEY_ENV") default-key-env)))
 
-(defn api-configured?
-  "Whether BOTH the endpoint id and a bearer key resolve.
+(defn- local-endpoint?
+  "Whether the configured endpoint is a full `http(s)://…` worker URL.
 
-   For the control backend. `seon.client/current-llm-fn` uses this to fall
+   A LOCAL worker (e.g. dg_mlx on `http://127.0.0.1:17860`) speaks the
+   same wire contract but needs NO RunPod bearer key — the key
+   requirement applies only to bare RunPod endpoint ids."
+  []
+  (boolean (some-> (endpoint-id) (str/starts-with? "http"))))
+
+(defn api-configured?
+  "Whether the endpoint id resolves, plus a bearer key when required.
+
+   A bare RunPod endpoint id needs the bearer key too; a full-URL local
+   worker needs no key. `seon.client/current-llm-fn` uses this to fall
    back to the stub llm-fn when the worker isn't configured."
   {:malli/schema [:=> [:cat] :boolean]}
   []
-  (boolean (and (endpoint-id) (resolved-api-key))))
+  (boolean (and (endpoint-id)
+                (or (local-endpoint?) (resolved-api-key)))))
 
 ;; ============================================================
 ;; Request → the worker's snake_case JSON payload.
@@ -218,7 +250,12 @@
    ::prelude             "prelude"
    ::max-rounds          "max_rounds"
    ::max-attempts        "max_attempts"
-   ::seed                "seed"})
+   ::seed                "seed"
+   ::committed           "committed"
+   ::draft               "draft"
+   ::offers              "offers"
+   ::policy              "policy"
+   ::null-render         "null_render"})
 
 (defn- ->json-value
   "A field value as the worker's JSON wants it: a keyword (mode / trace)
@@ -343,7 +380,13 @@
      :retry-after (some-> resp .-headers (.get "retry-after"))
      :body        (js->clj body :keywordize-keys true)}))
 
-(defn- auth-headers [key] #js{"Authorization" (str "Bearer " key)})
+(defn- auth-headers
+  "Bearer headers when a `key` resolved; bare headers for a keyless
+   LOCAL worker (see [[local-endpoint?]])."
+  [key]
+  (if key
+    #js{"Authorization" (str "Bearer " key)}
+    #js{}))
 
 (defn- ^:async submit!
   "POST the job; returns the parsed `{:status :retry-after :body}`."
@@ -401,7 +444,9 @@
         (str label " endpoint not configured — set SEON_DG_ENDPOINT (or "
              "DIFFGEMMA_EP) to the RunPod endpoint id (e.g. \"u50y7khhos5t7o\")"))
 
-      (nil? key)
+      ;; A bare RunPod endpoint id needs the bearer key; a full-URL local
+      ;; worker does not (its wire has no auth).
+      (and (nil? key) (not (local-endpoint?)))
       (config-error
         (str label " API key not found in process.env — set RUNPOD_API_KEY "
              "(or point SEON_DG_API_KEY_ENV at the env var holding the key)"))

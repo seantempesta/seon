@@ -189,7 +189,10 @@
 ;; (enterprise, bearer-keyed). Same wire path as :deepseek
 ;; (seon.ai.openai-compat) with endpoint + key resolved from ::base-url /
 ;; ::api-key-env instead of the shipped deepseek defaults.
-(schema/register! ::provider [:enum :deepseek :anthropic :openai-compat :diffusiongemma])
+;; :typeahead = the diffusion typeahead STEP-LOOP provider
+;; (seon.ai.typeahead) — the same worker endpoint/key config as
+;; :diffusiongemma (SEON_DG_ENDPOINT), a different wire mode (mode=step).
+(schema/register! ::provider [:enum :deepseek :anthropic :openai-compat :diffusiongemma :typeahead])
 ;; DiffusionGemma backend selector (env SEON_DG_BACKEND, DB-ownable like
 ;; ::provider). :control = the transformers RunPod worker that keeps the
 ;; per-step LogitsProcessor seam (seon.ai.diffusiongemma); :vllm = an
@@ -346,6 +349,7 @@
     "anthropic"     :anthropic
     "openai-compat" :openai-compat
     "diffusiongemma" :diffusiongemma
+    "typeahead"     :typeahead
     nil))
 
 (defn- parse-dg-backend
