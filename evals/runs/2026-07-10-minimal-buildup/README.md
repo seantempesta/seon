@@ -42,16 +42,20 @@ restarted + fresh-agent render verified before the next drive):
 
 ## STATUS: BLOCKED at 6/18 drives — DeepSeek balance exhausted
 
-Drive 6 (min-a-two-bucket-d3) died turn 1 with `DeepSeek HTTP 402:
-Insufficient Balance`; direct probe confirms
-`{"is_available":false,"total_balance":"-0.04"}`. **No further drive can
-run until the account is topped up.** Remaining: two-bucket-d3 redrive +
-db-memory ×3 (Mode A, cluster `min-a` left RUNNING for this), and all of
-Mode B ×9 (`min-b` on `config/minimal-stream.edn`, not yet created). The
-402 drive is a FLAKE (0 evals, no model output) — classified, excluded
-from all capability means, listed in the matrix for honesty.
+The account was topped up (rotated key) and the matrix resumed; mid-matrix
+the owner redirected to iterate-the-context (variants above) and then CUT
+scope at decision-grade signal: Mode B ran ONE drive per task (×3) instead
+of ×9, and the planned Mode A v1 redrives ×6 were SKIPPED. Final valid set:
+5 (v0, Mode A) + 4 (v0+ns, Mode A) + 3 (v1, Mode B) = **12 drives, 10
+GREEN**. Flakes (excluded, classified): the 402 drive (min-a-two-bucket-d3,
+`DeepSeek HTTP 402` on the exhausted key, 0 evals) + the restart-crash
+redrive (agent XTz, run crash-closed by a coordination-window pod restart,
+0 turns). The verdict below rests on TRANSCRIPT-LEVEL MECHANISM EVIDENCE,
+not means — n per cell is 1-5 and DeepSeek variance is large (poker 3-12
+turns on identical input); the numbers are directional, the mechanisms are
+load-bearing.
 
-## Per-drive matrix (Mode A `:batch`, minimal context, cluster min-a)
+## Per-drive matrix — v0 (Mode A `:batch`, minimal context, cluster min-a)
 
 | drive | turns | evals | close | oracle | fab-attempt turns | strip total | gate refusals | wall | prompt tok (rep) | compl tok (rep) | cache hit/miss |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -82,6 +86,117 @@ agents in min-a's store, excluded from all extraction: pqp-2607101414
 XTz-2607101415 / CbH-2607101416 (the other session's runs during the
 coordination window).
 
+## Per-drive matrix — v1 (Mode B `:stream`, cluster min-b, commit a92dbc36)
+
+Mode B token columns are ESTIMATED (client-side `chars/4` on prompt +
+partial output) — the stream is aborted at the first complete form, which
+LOSES the API usage chunk, so reported/cache columns are structurally
+empty. Never averaged with Mode A's reported numbers.
+
+| drive | started (UTC) | turns | evals | maxE/t | close | oracle | fab-attempt turns | strip total | wall | prompt tok (EST) | compl tok (EST) |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| poker-v1-d1 | 19:26:20 | 15 | 16 | 2 | :completed | GREEN (37 passed) | 0 (0%) | 0 | 73s | 166,769 | 1,330 |
+| two-bucket-v1-d1 | 20:18:56 | 20 | 30 | 3 | :turn-limit | GREEN (9 passed) | 0 (0%) | 0 | 95s | 231,634 | 1,643 |
+| db-memory-v1-d1 | 20:45:59 | 7 | 7 | 1 | :completed | GREEN (59.5 recalled) | 0 (0%) | 0 | 28s | 52,360 | 358 |
+| **v1/B total** | — | **42** | **53** | — | — | **3/3 GREEN** | **0 (0%)** | **0** | 196s | 450,763 | 3,331 |
+
+Notes: db-memory-v1-d1 was dispatched by the orchestrator (same driver,
+same oracle; scored here). two-bucket-v1-d1 closed `:turn-limit` with the
+fix already GREEN on disk — Mode B spends ONE FORM per turn, so a 20-turn
+cap is a 20-form budget; the agent fixed the file by ~t18 and burned the
+last turns on grounded prose/disambiguation instead of `(complete …)`.
+The one-form-per-turn invariant held on 39/42 turns; the 3 exceptions
+(poker t8 = 2 evals, two-bucket max 3) are all same-second `ok?=false`
+groups — one streamed chunk parsing into multiple ERROR forms, never
+multiple successful forms. The "two candidates" prose in two-bucket
+t19-20 is GROUNDED (real ambiguous-envelope `result/auZ-2607101620`
+rendered in prior turns) — contrast the v0+ns Mode A drive, where the
+same phrasing was hallucinated before any envelope existed.
+
+## FINAL rollups (mechanism evidence; small n — stated, not hidden)
+
+| condition | drives | GREEN | fab-attempt turns | strips | gate refusals | false-green | wall (med) | compl tok/drive |
+|---|---|---|---|---|---|---|---|---|
+| v0 · Mode A (no cards) | 5 | 3/5 | 29/60 (48%) | 228 | 38 | 0 | 196s | ~18.3k (rep) |
+| v0+ns · Mode A (cards) | 4 | 4/4 | 9/22 (41%) | 58 | 0 | 0 | 20s¹ | ~5.8k (rep) |
+| v1 · Mode B (cards+fixes) | 3 | 3/3 | 0/42 (0%) | 0 | 0 | 0 | 73s | ~1.1k (est) |
+| 07-09 baseline (full ctx) | 6 | 4/6 | 21/65 (32%) | — | — | 0 | — | — |
+
+¹ v0+ns median is dominated by the three ~20s db-memory drives; its one
+code task (two-bucket-ns-d1) ran 330s vs v0 two-bucket's 359-475s (both
+of which burned to :turn-limit RED).
+
+## Rung-0 VERDICT (final, scope-cut 2026-07-10)
+
+1. **Cards make call-shape errors vanish; the task effect is visible at
+   n=1-2.** v0 two-bucket (no cards): 0/2 GREEN, both :turn-limit RED,
+   with call-shape discovery-by-error (bare-keyword guesses, 38 refused
+   completes). v0+ns two-bucket: GREEN in 14 turns; the observer logged
+   ZERO call-shape errors on first tries of grep/view/job-status and one
+   wrong-key call self-corrected in one eval off the malli hint. This
+   answers rung 3's question early: compact cards (fn head + docstring
+   line 1 + schema) suffice for correct first calls — the 6.1k-token
+   namespaces block pays for itself on any tool-using task.
+2. **Context does NOT deter fabrication attempts.** v0 48%, v0+ns 41% of
+   turns vs the 07-09 full-context baseline's 32% — consistent with the
+   07-09 A/B conclusion that attempt-rate is a model constant the render
+   can't move. Teaching (v1's result-KNOWLEDGE sentence) was not separately
+   measured in Mode A (scope cut); nothing here contradicts "defang, don't
+   deter".
+3. **Containment held EVERYWHERE: zero fabricated rows persisted, zero
+   false-greens, across all 12 drives.** Mode A: 286 claims stripped at
+   the reply boundary; the complete-gate refused every RED complete (38);
+   both GREEN two-bucket outcomes were verified on-disk by the pytest
+   oracle. The rung-0 gate "fab ≈ 0" is met STRUCTURALLY (consequence),
+   not behaviorally (attempts) — in Mode A.
+4. **Mode B makes typed-result fabrication STRUCTURALLY ABSENT: 0
+   fab-attempt turns, 0 strips, in all 42 turns.** The mechanism, visible
+   in every transcript: the turn ends at the first complete form, so there
+   is no same-turn chain to invent a job-id/sha/result for — the next
+   prompt already carries the real interleaved row. Same-task economics
+   (poker): 73s vs 81-196s wall, ~1.3k vs 5.6-14.4k completion tokens;
+   two-bucket 95s vs 359-475s. Cost caveat: Mode B usage is client-side
+   estimated (abort loses the usage chunk), so cache economics are
+   unmeasured from the API; the prompt is append-only so DeepSeek prefix
+   caching should apply, unverified. New Mode B confusions: (a) turn caps
+   are form budgets — the loop cap must be re-denominated (or the gate's
+   nudge surfaced sooner) or green agents park at :turn-limit; (b) one
+   streamed chunk can parse into MULTIPLE error forms (3/42 turns) — the
+   single-form close should treat a parse-error tail as prose, not extra
+   forms.
+
+**Recommendation (rung-1 default): Mode B `:stream` + the v1 context**
+(minimal system text + result-KNOWLEDGE rule + namespaces block with
+colocated full-vs-cards/movement teaching + transcript). Rationale:
+fabrication is eliminated structurally rather than contained, wall-clock
+and completion cost drop multiples on identical tasks, and the cards buy
+correct first calls. Before rung 1: re-denominate the Mode B loop cap in
+forms, fix the multi-error-form turn close, and keep Mode A supported for
+genuinely parallel multi-form workloads (its strip+gate containment is
+proven but it remains the fabrication-PRONE shape).
+
+## Defects + complexity artifacts (reported, no src edits beyond v1's)
+
+- **Multi-line bare-map strip gap** (known, tasked): fabricated results
+  written as indented bare maps under a form evade the line-shaped claim
+  regexes (5 residual turns in v0; `claim-ranges`/`first-result-claim`).
+- **min-drive.sh bundle fence is loader-only**: `out-bench/client/main.js`
+  is a shadow-cljs LOADER that requires `.shadow-cljs/builds/bench-client/
+  dev/out/cljs-runtime/*` — its sha does not change when code changes, so
+  the sha_ok column certifies nothing about code identity. Fence should
+  hash the build dir (or use `main.js.sha256` = the bundle identity the
+  bench harness pins).
+- **`ctx-tokens` turn-open metric excludes system-text**: turn-0 read
+  6,637 both before and after a +56-token system-prompt edit (v1 verified
+  rendering via the debug page). Report the system prompt separately or
+  fold it in — as-is the "fixed prefix" log line under-reports.
+- **Mode B multi-error-form turns + turn-cap denomination** (above).
+- Complexity artifacts (deliberate, documented): three contract copies per
+  task (`X.md` frozen v0 evidence / `X-ns.md` v0+ns / `X-v1.md` with the
+  `:near` wording fix — canaries identical); throwaway agents in min-a's
+  store (pqp, BnO, kcM + the other session's LSf/XTz/CbH), all excluded
+  from extraction by agent-id.
+
 ¹ poker-d3's client curl was killed mid-drive during the orchestration
 handover (background batch → foreground control); the run continued
 server-side and closed `:completed` — wall-clock from the run entity's
@@ -107,7 +222,7 @@ streams); est. columns all zero, omitted.
 Small n throughout (5 vs 6 drives); DeepSeek non-determinism is large
 (poker spread 3–12 turns on identical input). Directional reads only.
 
-## Rung-0 verdict (PARTIAL — Mode A poker/two-bucket legs only)
+## Rung-0 verdict — INTERIM v0 notes (kept for the record; superseded by the FINAL verdict above)
 
 - **(a) Fabrication still ATTEMPTED under minimal context — MORE, not
   less (48% vs 32% of turns).** Minimal context does not deter the
@@ -209,14 +324,11 @@ tools/fab-analyze.py, tools/fab-summary.py  baseline's fabrication analyzers (ve
 tools/usage-summary.py                      token/telemetry ledger rows
 ```
 
-## Resume checklist (post top-up)
+## Run closed (2026-07-10 ~21:00Z)
 
-1. `zsh evals/runs/2026-07-10-minimal-buildup/tools/min-drive.sh min-a two-bucket two-bucket 3`
-2. Same driver: `min-a - db-memory 1|2|3` — then destroy min-a.
-3. `SEON_CONFIG=config/minimal-stream.edn SEON_SOUL=false SEON_SHELL=1
-   SEON_FS_READ_ONLY=0 SEON_FS_ROOT=/Users/sean/src/seon/tmp/t4-drive
-   bin/seon cluster create min-b --ephemeral`, verify the repl-mode datom
-   is `:stream`, then the 9 min-b drives one at a time; verify
-   one-form-per-turn (maxE/t column = 1) + abort estimates
-   (`usage-estimated?` rows land in the est. columns).
-4. Update the matrix/rollups/verdict here; fold Mode B rows in.
+All legs done under the owner scope-cut; min-b DESTROYED after its leg;
+min-a left RUNNING on v1 (`config/minimal.edn`, port file
+`tmp/seon-port-min-a`) for follow-on iteration. Observer notes:
+`observer/live-notes.md` (its drive-1 analysis produced the v1 fixes).
+Commits: matrix v0 `ec2f3855` · v0+ns context `05ed3797` · v1 context
+`a92dbc36` · this final ledger.
