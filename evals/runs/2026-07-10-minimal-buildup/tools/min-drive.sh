@@ -26,7 +26,8 @@ import json, sys
 print(json.dumps({"input": open(sys.argv[1]).read(), "timeout_ms": 1800000}))
 EOF
 
-echo "[$TAG] dispatching to http://127.0.0.1:$PORT/agents/run ..."
+STARTED_UTC=$(date -u +%FT%TZ)
+echo "[$TAG] dispatching to http://127.0.0.1:$PORT/agents/run ... started=$STARTED_UTC"
 start=$(date +%s)
 curl -s --max-time 1900 "http://127.0.0.1:$PORT/agents/run" \
   -H 'content-type: application/json' \
@@ -58,6 +59,6 @@ else
 fi
 echo "[$TAG] outcome: $OUTCOME  ($(tail -1 $EV/transcripts/$TAG.oracle.txt 2>/dev/null | head -c 120))"
 
-echo "$TAG agent=$AGENT outcome=$OUTCOME wall=$((end-start))s sha_ok=$([ "$sha_before" = "$sha_after" ] && echo yes || echo NO)" >> "$EV/transcripts/index.txt"
+echo "$TAG agent=$AGENT outcome=$OUTCOME wall=$((end-start))s started=$STARTED_UTC sha_ok=$([ "$sha_before" = "$sha_after" ] && echo yes || echo NO)" >> "$EV/transcripts/index.txt"
 rm -f "tmp/min-req-$TAG.json"
 echo "[$TAG] COMPLETE"

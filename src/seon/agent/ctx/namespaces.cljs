@@ -292,12 +292,12 @@
       (str "\n\n; tests:\n" (str/join "\n\n" srcs)))))
 
 (def ^:private namespaces-header
-  ;; Block-specific cue ONLY — the FULL-vs-queryable policy (what renders in
-  ;; full, what stays indexed/searchable) lives once in
-  ;; `seon.agent.ctx/system-text` (§"THE NAMESPACES BELOW"); don't re-teach it.
-  ;; The movement/update fragment below is COLOCATED here (the namespaces
-  ;; surface teaches its own verbs — owner rulings 2026-07-10; runtime =
-  ;; seon.eval/dispatch-repl-verb!). Keep it tight.
+  ;; Block-specific teaching, COLOCATED (the namespaces surface teaches its
+  ;; own verbs AND its own render policy — owner rulings 2026-07-10; runtime =
+  ;; seon.eval/dispatch-repl-verb!): movement/update verbs + the full-vs-cards
+  ;; distinction + "more namespaces exist in the store". Under minimal context
+  ;; the system-text §"THE NAMESPACES BELOW" never renders, so this header is
+  ;; the ONE place the policy is taught. Keep it tight.
   (str "; The loaded namespaces below, ordered by recency"
        " (most-recently-modified last).\n"
        "; Namespaces are PLACES — (in-ns 'the.ns) moves you there (your state\n"
@@ -305,7 +305,11 @@
        "; (ns the.ns (:require …)) declares/UPDATES a namespace's requires.\n"
        "; A bare (require '[x :as y]) adds a dependency now AND records it in\n"
        "; the declaration. Redefining a fn/schema/test IS how you update it;\n"
-       "; (ns-unmap 'name) removes one."))
+       "; (ns-unmap 'name) removes one.\n"
+       "; Your CURRENT namespace renders in FULL; its required namespaces\n"
+       "; render as COMPACT CARDS (fn head + docstring line 1 + :malli/schema,\n"
+       "; bodies elided as …). More namespaces exist in the store than render\n"
+       "; here — query rather than guess."))
 
 (defn- cur-ns-workspace-stub
   "The never-omit block for the agent's CURRENT ns when it has no members
