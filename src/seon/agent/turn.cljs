@@ -99,6 +99,15 @@
 ;; top-level provider fields. Both ABSENT on a stub-LLM turn.
 (schema/register! :seon.agent.turn/llm-usage    :string)
 (schema/register! :seon.agent.turn/llm-meta     :string)
+;; repl-mode telemetry. Mode A (`:batch`): how many model-authored
+;; result-claims were STRIPPED from this turn's reply at the boundary
+;; (absent = none — optional-is-absent; the fabrication count survives even
+;; though the fabrication itself does not enter the record). Mode B
+;; (`:stream`): the turn's `:seon.agent.turn/llm-usage` numbers are
+;; CLIENT-SIDE estimates (the aborted stream lost the provider's usage
+;; chunk) — marked so a reader never treats them as provider-reported.
+(schema/register! :seon.agent.turn/results-stripped :int)
+(schema/register! :seon.agent.turn/usage-estimated? :boolean)
 (schema/register! :seon.agent.turn/evals        [:vector {:seon.db/component true} :seon.db/ref])
 
 ;; Entity shape. NB: seon.db validates per-ATTRIBUTE, not entity-level, so the
@@ -119,6 +128,8 @@
    [:seon.agent.turn/llm-retries  {:optional true} :seon.agent.turn/llm-retries]
    [:seon.agent.turn/llm-usage    {:optional true} :seon.agent.turn/llm-usage]
    [:seon.agent.turn/llm-meta     {:optional true} :seon.agent.turn/llm-meta]
+   [:seon.agent.turn/results-stripped {:optional true} :seon.agent.turn/results-stripped]
+   [:seon.agent.turn/usage-estimated? {:optional true} :seon.agent.turn/usage-estimated?]
    [:seon.agent.turn/evals        {:optional true} :seon.agent.turn/evals]])
 
 ;; ============================================================
@@ -329,6 +340,8 @@
                                                    :seon.agent.turn/llm-retries
                                                    :seon.agent.turn/llm-usage
                                                    :seon.agent.turn/llm-meta
+                                                   :seon.agent.turn/results-stripped
+                                                   :seon.agent.turn/usage-estimated?
                                                    :seon.agent.turn/reply-blob
                                                    :seon.agent.turn/error]))]}))]
       (when (false? (:seon.db/ok? close))
@@ -360,10 +373,19 @@
    down from `run-turn!` (captured before the LLM await), so the always-on
    blob capture pairs this verbatim reply with the same turn's prompt."
   [resp id id-of-turn compile-state run-id]
-  (let [reply-text (or (:text resp) "")
-        ;; Always-on reply capture — the raw LLM reply is not derivable
-        ;; from anything, so the byte ground truth goes to the blob store
-        ;; (best-effort; a lost capture never wedges the turn).
+  (let [raw-reply  (or (:text resp) "")
+        ;; repl-mode reply-boundary fix-up: DELETE every model-authored
+        ;; result-claim BEFORE persist + eval (Mode A `:batch`; Mode B
+        ;; `:stream` structurally has none — its stream aborted at the
+        ;; first form's close, so there is no fabricated tail — but the
+        ;; strip is idempotent and safe on both). The forms eval as normal;
+        ;; the next turn's transcript interleaves the REAL `⟹` rows.
+        {reply-text :seon.agent.ctx/strip-text
+         n-stripped :seon.agent.ctx/strip-count}
+        (ctx/strip-result-claims raw-reply)
+        ;; Always-on reply capture — the (cleaned) reply is the byte ground
+        ;; truth that goes to the blob store (best-effort; a lost capture
+        ;; never wedges the turn). The fabrication never enters the record.
         reply-blob (await (capture-blob! reply-text :reply))
         ;; Link the reply blob onto the turn NOW, not only at close-turn!:
         ;; a turn that dies mid-eval (e.g. a `:core` crash under the
@@ -390,7 +412,8 @@
       ;; failed eval must yield a next turn that shows the error.
       {:seon.agent/eval-count (+ (:seon.eval/n-ok batch)
                                  (:seon.eval/n-fail batch))}
-      reply-blob (assoc :seon.agent.turn/reply-blob reply-blob))))
+      reply-blob      (assoc :seon.agent.turn/reply-blob reply-blob)
+      (pos? n-stripped) (assoc :seon.agent.turn/results-stripped n-stripped))))
 
 ;; LLM retry tuning. The agent loop is the SOLE retry authority (the
 ;; adapters ship `maxRetries 0`); these shape the exponential-backoff
@@ -448,10 +471,18 @@
    classifies it exactly like an adapter-side timeout. The cap frees the
    AWAITER only — the underlying request keeps running (no preemption);
    a late settler's turn writes are aborted by the run's in-tx CAS
-   work-fence."
-  [llm-fn prompt-text]
-  (let [ms (config/llm-attempt-timeout-ms)
-        v  (await (seval/race-timeout (llm-fn prompt-text) ms))]
+   work-fence.
+
+   `stream?` (repl-mode `:stream`) hands the llm-fn the WIDENED map arg
+   `{:seon.ai/ctx … :seon.ai/stream? true}` so the adapter consumes the
+   SDK stream and aborts at the first complete form; `false` passes the
+   bare ctx string (back-compat batch shape)."
+  [llm-fn prompt-text stream?]
+  (let [ms  (config/llm-attempt-timeout-ms)
+        arg (if stream?
+              {:seon.ai/ctx prompt-text :seon.ai/stream? true}
+              prompt-text)
+        v   (await (seval/race-timeout (llm-fn arg) ms))]
     (if (seval/timed-out? v)
       {:seon.ai/error {:seon.ai/msg      (str "LLM attempt exceeded the per-attempt "
                                               "cap (" ms "ms, SEON_LLM_ATTEMPT_"
@@ -473,11 +504,11 @@
    flows through unchanged — the turn surfaces its `:seon.ai/error` as a
    value, never a throw. When any retry fired, the resp carries
    `:seon.agent.turn/llm-retries n` so the turn record is honest."
-  [id id-of-turn llm-fn prompt-text]
+  [id id-of-turn llm-fn prompt-text stream?]
   (let [{:seon.retry/keys [result retries]}
         (await
           (retry/with-retry!
-            {:seon.retry/thunk    (fn [] (bounded-llm-attempt! llm-fn prompt-text))
+            {:seon.retry/thunk    (fn [] (bounded-llm-attempt! llm-fn prompt-text stream?))
              :seon.retry/strategy (llm-retry-strategy id)
              :seon.retry/retry?   llm-retryable?
              :seon.retry/override (fn [resp]
@@ -504,11 +535,13 @@
   {:malli/schema [:=> [:catn [:input :map]] :map]}
   [{:seon.agent/keys [id llm-fn compile-state]
     run-id :seon.agent.run/id
+    stream? :seon.ai/stream?
     :seon.agent.turn/keys  [id-of-turn turn-idx prompt-text]}]
-  (let [resp    (await (call-llm! id id-of-turn llm-fn prompt-text))
+  (let [resp    (await (call-llm! id id-of-turn llm-fn prompt-text (boolean stream?)))
         retries (:seon.agent.turn/llm-retries resp)
         raw     (:seon.ai/raw resp)
         usage   (:seon.ai/usage raw)
+        estimated? (:seon.ai/estimated? raw)
         pfields (:seon.ai/provider-fields raw)]
     (if-let [err (:seon.ai/error resp)]
       (do
@@ -525,6 +558,7 @@
       (cond-> (await (ask-and-eval-reply! resp id id-of-turn compile-state run-id))
         retries     (assoc :seon.agent.turn/llm-retries retries)
         (seq usage) (assoc :seon.agent.turn/llm-usage (pr-str usage))
+        estimated?  (assoc :seon.agent.turn/usage-estimated? true)
         (seq pfields) (assoc :seon.agent.turn/llm-meta (pr-str pfields))))))
 
 (defn ^:async run-turn!
@@ -549,6 +583,10 @@
   {:malli/schema [:=> [:catn [:input :map]] :map]}
   [{:seon.agent/keys [id llm-fn compile-state] run-id :seon.agent.run/id db :seon.db/db}]
   (let [db         (or db @db/*conn*)
+        ;; repl-mode read off the DB DATOM (config-through-DB), pinned to
+        ;; the SAME frozen db the prompt renders from — the turn loop never
+        ;; reads the config accessor.
+        stream?    (= :stream (ctx/repl-mode db))
         turn-id    (db/new-id!)
         turn-idx   (turn-index id)
         prompt     (await (prefetch-and-render-prompt! id db))
@@ -582,6 +620,7 @@
                                                 :seon.agent/llm-fn        llm-fn
                                                 :seon.agent/compile-state compile-state
                                                 :seon.agent.run/id        run-id
+                                                :seon.ai/stream?          stream?
                                                 :seon.agent.turn/id-of-turn     turn-id
                                                 :seon.agent.turn/turn-idx       turn-idx
                                                 :seon.agent.turn/prompt-text    prompt})))))))]

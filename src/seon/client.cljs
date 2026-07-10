@@ -2159,8 +2159,9 @@
    `;; narration` line then a real `(message/user …)` form — the verb
    that says something to the human. The FSM halt policy ends the wake
    when no actionable forms remain. Returns a Promise of {:text \"...\"}."
-  [ctx]
-  (let [text (str
+  [arg]
+  (let [ctx  (ai/llm-arg->ctx arg)
+        text (str
                ";; stub LLM here — the real one needs DEEPSEEK_API_KEY\n"
                ";; say hello to your human via the message/user verb\n"
                "(message/user\n"
@@ -2478,7 +2479,24 @@
                     (check! :core-index
                             (await (db/transact!
                                      {:seon.db/conn conn
-                                      :seon.db/tx-data index-tx}))))))
+                                      :seon.db/tx-data index-tx})))
+                    ;; Config-through-DB (repl-mode Phase 1): the manifest's
+                    ;; `:seon.config/repl-mode` is read ONCE here and
+                    ;; reconciled into the singleton cluster-config entity's
+                    ;; datom. The turn loop + transcript masthead read that
+                    ;; DATOM (`seon.agent.ctx/repl-mode`), never the config
+                    ;; accessor — a manifest change updates it on the next
+                    ;; boot (idempotent upsert-by-identity). Seeded in the
+                    ;; APPEND-ONLY `:core-seed` block (NOT the declarative
+                    ;; `:config` desired set below) so the routes+skills
+                    ;; `reconcile!` — which RETRACTS any `:config`-origin row
+                    ;; absent from its desired set — never sweeps it away.
+                    (check! :repl-mode
+                            (await (db/transact!
+                                     {:seon.db/conn conn
+                                      :seon.db/tx-data
+                                      [{:seon.config/id        seon.agent.ctx/cluster-config-id
+                                        :seon.config/repl-mode (config/manifest-repl-mode)}]}))))))
               ;; DECLARATIVE DESIRED SET (origin :config): the routes
               ;; (`:seon.route/*`, identity `:seon.route/name`) + the scanned
               ;; skills corpus (`:my.skills/*`, identity `:my.skills/name`),

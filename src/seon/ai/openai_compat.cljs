@@ -56,6 +56,7 @@
             [seon.ai.tokens :as tokens]
             [seon.error :as error]
             [seon.platform :as platform]
+            [seon.repl.internal :as repl-internal]
             [seon.schema :as schema]))
 
 ;; ============================================================
@@ -73,6 +74,7 @@
    [:seon.ai/max-tokens    {:optional true} :seon.ai/max-tokens]
    [:seon.ai/tools         {:optional true} :seon.ai/tools]
    [:seon.ai/tool-choice   {:optional true} :seon.ai/tool-choice]
+   [:seon.ai/stream?       {:optional true} :seon.ai/stream?]
    [:seon.ai/extra-body    {:optional true} :seon.ai/extra-body]])
 
 (schema/register!
@@ -82,6 +84,7 @@
    [:seon.ai/error                      {:optional true} :seon.ai/error]
    [:seon.ai.openai-compat/finish-reason {:optional true} :string]
    [:seon.ai/usage                      {:optional true} :seon.ai/usage]
+   [:seon.ai/estimated?                 {:optional true} :seon.ai/estimated?]
    [:seon.ai/tool-calls                 {:optional true} :seon.ai/tool-calls]
    [:seon.ai/provider-fields            {:optional true} :seon.ai/provider-fields]])
 
@@ -324,6 +327,57 @@
                    :maxRetries 0}
          *fetch* (doto (aset "fetch" *fetch*)))))
 
+(schema/register! ::stream-result
+  [:map [:text :string] [:aborted? :boolean]])
+
+(defn ^:async stream-until-form!
+  "Consume the SDK `stream` delta-by-delta, ABORTING the moment one complete
+   top-level form has streamed (repl-mode `:stream`).
+
+   Per content delta: append to the accumulator, run the cheap
+   [[seon.repl.internal/first-top-level-close]] delimiter gate, and — only
+   when a top-level group has closed — CONFIRM with the real `parse-forms`
+   that a genuine evaluable `:form` is present (a bare `{…}`/`[…]` closes at
+   depth 0 but demotes to prose, so keep streaming). On confirm: `.abort()`
+   the stream and return `{:text <through-first-form> :aborted? true}`. On
+   natural end (no form ever completes): `{:text <all> :aborted? false}`.
+   The usage-only final chunk (`:stream_options {:include_usage true}`) has
+   no `choices` — guarded."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [^js stream]
+  (let [it (js-invoke stream js/Symbol.asyncIterator)]
+    (loop [acc ""]
+      (let [step (await (.next it))]
+        (if (.-done step)
+          {:text acc :aborted? false}
+          (let [^js chunk (.-value step)
+                choices   (.-choices chunk)
+                ^js choice (when (and choices (pos? (.-length choices)))
+                             (aget choices 0))
+                ^js delta  (some-> choice .-delta)
+                piece      (some-> delta .-content)
+                acc'    (if piece (str acc piece) acc)]
+            (if (and piece
+                     (repl-internal/first-top-level-close acc')
+                     (some #(= :form (:seon.repl/kind %))
+                           (repl-internal/parse-forms acc')))
+              (do (.abort stream) {:text acc' :aborted? true})
+              (recur acc'))))))))
+
+(defn- estimated-usage
+  "A CLIENT-SIDE usage map for an ABORTED stream (the provider's final usage
+   chunk is lost on abort). Prompt tokens = estimate over the system +
+   user content actually sent; completion tokens = estimate over the text
+   streamed through the first form. DeepSeek-shaped keys so the turn's
+   `llm-usage` projection is uniform; the response also flags
+   `:seon.ai/estimated? true` so the numbers are never mistaken for
+   provider-reported."
+  [request text]
+  (let [p (+ (tokens/estimate (ai/effective-system-prompt request))
+             (tokens/estimate (str (:seon.ai/ctx request))))
+        c (tokens/estimate (str text))]
+    {:prompt_tokens p :completion_tokens c :total_tokens (+ p c)}))
+
 (defn ^:async complete
   "Send a chat-completions request to the active provider's endpoint.
 
@@ -385,14 +439,28 @@
             ;; and 400'd every extra-body call (verified live).
             params  (clj->js (cond-> (request-params request)
                                (seq extra) (merge extra)))
-            ^js completions (.. client -chat -completions)]
+            ^js completions (.. client -chat -completions)
+            stream?  (boolean (:seon.ai/stream? request))]
         (try
-          (let [^js stream (.stream completions params)
-                completion (await (.finalChatCompletion stream))
-                result     (parse-completion completion)]
-            (when-let [err (:seon.ai/error result)]
-              (ai/log-error! label err))
-            result)
+          (let [^js stream (.stream completions params)]
+            (if stream?
+              ;; repl-mode :stream — consume deltas, abort at the first
+              ;; complete top-level form (one form per turn).
+              (let [{:keys [text aborted?]} (await (stream-until-form! stream))]
+                (if aborted?
+                  {:seon.ai/text                        text
+                   :seon.ai.openai-compat/finish-reason "abort"
+                   :seon.ai/usage                       (estimated-usage request text)
+                   :seon.ai/estimated?                  true}
+                  ;; Natural end before any form completed — fall back to
+                  ;; the assembled completion for real usage + full text.
+                  (parse-completion (await (.finalChatCompletion stream)))))
+              ;; repl-mode :batch — buffer to the assembled completion.
+              (let [completion (await (.finalChatCompletion stream))
+                    result     (parse-completion completion)]
+                (when-let [err (:seon.ai/error result)]
+                  (ai/log-error! label err))
+                result)))
           (catch :default e
             (let [err (error->envelope label e)]
               (ai/log-error! label err)
@@ -409,11 +477,17 @@
 
 (defn ^:async ^:private complete+wrap
   "Internal — call complete with merged opts, wrap response into the
-   shape the turn loop expects. On failure `:seon.ai/error` is lifted
-   to the TOP level (alongside `:text`) so the turn loop can surface
-   it without digging into `:seon.ai/raw`."
-  [opts ctx-text]
-  (let [resp (await (complete (assoc opts :seon.ai/ctx ctx-text)))]
+   shape the turn loop expects. `arg` is EITHER a bare ctx string
+   (back-compat) OR a request map carrying `:seon.ai/ctx` +
+   `:seon.ai/stream?` (the widened shape the turn loop passes for
+   repl-mode `:stream`). On failure `:seon.ai/error` is lifted to the TOP
+   level (alongside `:text`) so the turn loop can surface it without
+   digging into `:seon.ai/raw`."
+  [opts arg]
+  (let [ctx-text (ai/llm-arg->ctx arg)
+        stream?  (ai/llm-arg->stream? arg)
+        resp (await (complete (cond-> (assoc opts :seon.ai/ctx ctx-text)
+                                stream? (assoc :seon.ai/stream? true))))]
     (cond-> {:text        (:seon.ai/text resp)
              :seon.ai/raw resp}
       (:seon.ai/error resp) (assoc :seon.ai/error (:seon.ai/error resp)))))
@@ -433,4 +507,4 @@
     [:=> [:catn [::opts ::opts]] :any]]}
   ([] (agent-adapter {}))
   ([opts]
-   (fn [ctx-text] (complete+wrap opts ctx-text))))
+   (fn [arg] (complete+wrap opts arg))))

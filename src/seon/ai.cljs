@@ -94,6 +94,32 @@
 (schema/register! ::provider-fields [:map])
 (schema/register! ::extra-body     [:map])
 
+;; Streaming (repl-mode `:stream`, Phase 1). `::stream?` on the llm-fn arg
+;; asks the adapter to consume the SDK stream delta-by-delta and ABORT the
+;; moment one complete top-level form has streamed (one form per turn).
+;; `::estimated?` marks a response whose `::usage` is a CLIENT-SIDE
+;; `seon.ai.tokens/estimate` (an aborted stream loses the provider's final
+;; usage chunk), so the turn record is honest that its token counts are
+;; estimates, not provider-reported.
+(schema/register! ::stream?    :boolean)
+(schema/register! ::estimated? :boolean)
+
+(defn llm-arg->ctx
+  "The ctx STRING from an llm-fn argument that is EITHER a bare ctx string
+   (the back-compat shape every adapter still accepts) OR a request map
+   carrying `:seon.ai/ctx` (the widened shape the turn loop passes when it
+   needs streaming). Coerce, never break: a plain string passes through."
+  {:malli/schema [:=> [:catn [::arg :any]] :string]}
+  [arg]
+  (if (map? arg) (str (::ctx arg)) (str arg)))
+
+(defn llm-arg->stream?
+  "Whether the llm-fn argument requested streaming — `:seon.ai/stream?` true
+   on a request-map arg, false for a bare string (back-compat)."
+  {:malli/schema [:=> [:catn [::arg :any]] :boolean]}
+  [arg]
+  (boolean (and (map? arg) (::stream? arg))))
+
 ;; The errors-are-values envelope for LLM calls. Every failure mode
 ;; (timeout, fetch throw, HTTP non-2xx, unparseable body, refusal)
 ;; resolves to a response map carrying this under :seon.ai/error —

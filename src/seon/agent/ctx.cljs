@@ -74,6 +74,7 @@
     [seon.handlers.schema :as h-schema]
     [seon.handlers.test :as h-test]
     [seon.render :as render]
+    [seon.repl.internal :as repl-internal]
     [seon.schema :as schema]
     [seon.ui.markdown :as md]
     [seon.warn :as warn]))
@@ -810,6 +811,130 @@
   (->> (str/split (str s) #"\n" -1)
        (mapv neutralize-line)
        (str/join "\n")))
+
+;; ============================================================
+;; The fabrication DETECTOR + reply-boundary STRIP (repl-mode Phase 1).
+;; ONE source of truth: the SAME three regexes the neutralizer uses
+;; ([[reserved-glyph-re]] / [[bare-result-claim-re]] / [[result-claim-re]]).
+;; The detector reports the offset of the first MODEL-AUTHORED result-claim
+;; — a match whose start falls OUTSIDE every successfully-parsed form span
+;; (so a `(println "⟹")` string literal or a `[:=> …]` malli schema never
+;; fires). Mode A (`:batch`) uses [[strip-result-claims]] to DELETE those
+;; spans at the reply boundary before the reply is persisted + eval'd, so
+;; the fabricated value never enters the record and the next turn shows the
+;; real `⟹` rows interleaved.
+;; ============================================================
+
+(def cluster-config-id
+  "The fixed `:seon.config/id` of the singleton cluster-config entity that
+   carries boot-reconciled cluster-global config datoms (`:seon.config/repl-mode`).
+   One per cluster store; seeded by `seon.client/boot-seed!`."
+  "cluster")
+
+(defn repl-mode
+  "The cluster's live REPL mode datom — `:batch` (default) | `:stream`.
+
+   Reads `:seon.config/repl-mode` off the singleton cluster-config entity
+   ([[cluster-config-id]]) in db value `db`; `:batch` when the datom is
+   absent (config-through-DB: the manifest was reconciled here at boot, so
+   the turn loop + masthead read THIS, never the config accessor). Guarded:
+   nil db / no such attr / no entity → `:batch`."
+  {:malli/schema [:=> [:catn [:seon.db/db :any]] :seon.config/repl-mode]}
+  [db]
+  (or (when (and db (contains? (db/installed-schema db) :seon.config/repl-mode))
+        (:seon.config/repl-mode
+          (db/entity {:seon.db/db db :seon.db/ref [:seon.config/id cluster-config-id]})))
+      :batch))
+
+(def ^:private result-claim-res
+  "The three fabrication-detection regexes, single-sourced from the
+   neutralizer's private defs — the ONE definition each is built from."
+  [reserved-glyph-re bare-result-claim-re result-claim-re])
+
+(defn- form-spans
+  "Absolute `[start end)` char spans of every successfully-parsed evaluable
+   `:form` entry in `text` (via `seon.repl.internal/parse-forms`) — the
+   regions a result-claim match must be SKIPPED inside (a legit `⟹`/`=>`
+   the agent typed as code, not a fabricated result). Read/broken `:read`
+   spans are excluded: a match inside broken source is still narration."
+  [text]
+  (->> (repl-internal/parse-forms text)
+       (keep (fn [e] (when (= :form (:seon.repl/kind e))
+                       (:seon.repl/span e))))
+       vec))
+
+(defn- inside-span?
+  "True when char offset `o` falls inside any `[s e)` span in `spans`."
+  [spans o]
+  (boolean (some (fn [[s e]] (and (<= s o) (< o e))) spans)))
+
+(defn- claim-ranges
+  "Sorted, merged `[start end)` ranges of every MODEL-AUTHORED result-claim
+   in `text` — a match of any [[result-claim-res]] regex whose START is
+   NOT inside a parsed `:form` span. Merges overlapping/adjacent matches so
+   a line caught by two regexes counts once."
+  [text]
+  (let [spans (form-spans text)
+        raw   (for [re result-claim-res
+                    :let [g (js/RegExp. (.-source re) "gm")]
+                    m (loop [acc []]
+                        (if-let [mm (.exec g text)]
+                          (recur (conj acc [(.-index mm)
+                                            (+ (.-index mm) (count (aget mm 0)))]))
+                          acc))
+                    :when (not (inside-span? spans (first m)))]
+                m)]
+    (reduce (fn [acc [s e]]
+              (if-let [[ps pe] (peek acc)]
+                (if (<= s pe)
+                  (conj (pop acc) [ps (max pe e)])
+                  (conj acc [s e]))
+                (conj acc [s e])))
+            []
+            (sort-by first raw))))
+
+(defn first-result-claim
+  "Char offset of the FIRST model-authored result-claim in `reply` — nil
+   when the reply contains none.
+
+   A result-claim is a match of any of the three neutralizer regexes
+   ([[reserved-glyph-re]] `⟹⟸⋘⋙`, [[bare-result-claim-re]] col-0
+   `=>`/`⇒`, [[result-claim-re]] `;+ =>`) whose START falls OUTSIDE every
+   successfully-parsed form span — so a `(println \"⟹\")` string literal
+   does NOT fire, a `:=>` inside a `:malli/schema` vector does NOT fire,
+   and the shell-prompt `❯` stays excluded (never in the regex set). The
+   detector behind Mode A's strip and the anti-fabrication telemetry;
+   nil ⇒ a clean reply."
+  {:malli/schema [:=> [:catn [::reply :string]] [:maybe :int]]}
+  [reply]
+  (some-> (claim-ranges reply) first first))
+
+(schema/register! ::strip-text   :string)
+(schema/register! ::strip-count  :int)
+(schema/register! ::strip-result-response
+  [:map [::strip-text ::strip-text] [::strip-count ::strip-count]])
+
+(defn strip-result-claims
+  "DELETE every model-authored result-claim from `reply`, returning the
+   cleaned text + the count stripped (Mode A `:batch` reply-boundary fix-up).
+
+   For each fabrication range ([[claim-ranges]] — a `⟹ …`/`=> …` tail to
+   the right of a form or a standalone fabricated result line, never a
+   match inside a parsed form) the span is spliced out (the match runs to
+   end-of-line, so the fabricated value + its fake `result/<id>` handle go
+   with it; the form to its left survives). Idempotent — a cleaned reply
+   has zero ranges. The forms eval as normal and the next turn's transcript
+   interleaves the REAL `⟹ <value> ⟸ result/<id>` rows in those positions."
+  {:malli/schema [:=> [:catn [::reply :string]] ::strip-result-response]}
+  [reply]
+  (let [ranges (claim-ranges reply)]
+    (if (empty? ranges)
+      {::strip-text reply ::strip-count 0}
+      (let [cleaned (loop [rs (reverse ranges) s reply]
+                      (if-let [[a b] (first rs)]
+                        (recur (rest rs) (str (subs s 0 a) (subs s b)))
+                        s))]
+        {::strip-text cleaned ::strip-count (count ranges)}))))
 
 (defn- error-lines
   "Render an error/guidance body `s` as the REPL FAILURE shape: the FIRST

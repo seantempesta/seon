@@ -214,17 +214,44 @@
 ;; agent sees its own session name.
 ;; ------------------------------------------------------------
 
+(defn mode-fragment
+  "The COLOCATED one-line REPL-mode teaching for `mode` (`:batch` | `:stream`).
+
+   Colocation principle: the instruction that describes the mode's behavior
+   lives WITH the transcript block that renders under it, gated by the live
+   `:seon.config/repl-mode` datom — so exactly ONE mode's text renders and
+   the other mode's is ABSENT (never contradicted). `:batch` teaches that a
+   typed result is stripped and the real value arrives interleaved next
+   turn; `:stream` teaches that the turn ends at the first complete form and
+   its value is already in the transcript on continuation (making the
+   aborted-at-form boundary legible, not a silent cutoff). No reserved glyph
+   is shown (a negative example primes the mimicry it forbids)."
+  {:malli/schema [:=> [:catn [::mode :seon.config/repl-mode]] :string]}
+  [mode]
+  (case mode
+    :stream
+    (str "; Your turn ends at your first complete form — the runtime evaluates it and its\n"
+         "; real value is already in the log when you continue. Write one form and stop.")
+    ;; :batch (default)
+    (str "; Write the forms you want run; never write out a result yourself — a result you\n"
+         "; type is stripped, and the real value arrives interleaved on your next turn.")))
+
 (defn masthead
   "The transcript's in-band opener for namespace label `ns-str`, rendered
    every turn as the block's first lines. Block-specific cues only — the
-   surface label and the flat, time-ordered event log (messages + evals,
-   oldest-first, append-below); the live-REPL-session framing lives once in
-   [[seon.agent.ctx/system-text]]."
-  {:malli/schema [:=> [:catn [::ns-str :string]] :string]}
-  [ns-str]
-  (str "; seon · " ns-str " · live REPL\n"
-       "; The flat, time-ordered log below is this REPL's history — your\n"
-       "; messages and evals interleaved, oldest-first. Append below."))
+   surface label, the flat time-ordered event log (messages + evals,
+   oldest-first, append-below), and the COLOCATED [[mode-fragment]] for the
+   live `mode` (`:batch` | `:stream`); the live-REPL-session framing lives
+   once in [[seon.agent.ctx/system-text]]."
+  {:malli/schema [:function
+                  [:=> [:catn [::ns-str :string]] :string]
+                  [:=> [:catn [::ns-str :string] [::mode :seon.config/repl-mode]] :string]]}
+  ([ns-str] (masthead ns-str :batch))
+  ([ns-str mode]
+   (str "; seon · " ns-str " · live REPL\n"
+        "; The flat, time-ordered log below is this REPL's history — your\n"
+        "; messages and evals interleaved, oldest-first. Append below.\n"
+        (mode-fragment mode))))
 
 (def resume-marker-line
   "The session-resume boundary: rendered ONCE per resume, between the
@@ -799,7 +826,7 @@
              first
              (remove str/blank?)
              (str/join "\n"))
-        head (masthead ns-str)
+        head (masthead ns-str (ctx/repl-mode db))
         ;; The cite-card derives from THIS-PROCESS ok evals (live
         ;; result/<id> handles) and renders DIRECTLY ABOVE the readline —
         ;; the real values in the nearest tokens to where the agent composes

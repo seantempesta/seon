@@ -316,9 +316,29 @@
    [:seon.config.breaker/crash-count {:optional true} [:int {:min 1}]]
    [:seon.config.breaker/window-ms   {:optional true} [:int {:min 1}]]])
 
+;;; REPL MODE (repl-mode Phase 1) — how the agent's REPL turn resolves a
+;;; form's result. `:batch` (default): the turn is one LLM call writing N
+;;; forms; a model-typed result is STRIPPED at the reply boundary and the
+;;; real values arrive interleaved next turn. `:stream`: the SDK stream is
+;;; consumed delta-by-delta and ABORTED the moment one complete top-level
+;;; form has streamed — one form per turn, its real value in the next
+;;; transcript. The manifest value is read ONCE at boot and reconciled into
+;;; a DB datom on the singleton cluster-config entity; the turn loop + the
+;;; transcript masthead read the DATOM (config-through-DB), never this key.
+(schema/register! :seon.config/repl-mode [:enum :batch :stream])
+;; The singleton cluster-config entity — identity `:seon.config/id` (the
+;; fixed value `"cluster"`), carrying boot-reconciled cluster-global config
+;; datoms (today just `:seon.config/repl-mode`).
+(schema/register! :seon.config/id [:and {:seon.db/identity true} :string])
+(schema/register! :seon.config/singleton
+  [:map {:seon.db/entity true}
+   [:seon.config/id        :seon.config/id]
+   [:seon.config/repl-mode {:optional true} :seon.config/repl-mode]])
+
 (schema/register! :seon.config/manifest
   [:map
    [:seon.config/skills        {:optional true} :seon.config/skills-spec]
+   [:seon.config/repl-mode     {:optional true} :seon.config/repl-mode]
    [:seon.config/namespaces    {:optional true} :seon.config/namespaces-spec]
    [:seon.config/routes        {:optional true} [:vector :seon.config/route-spec]]
    [:seon.config/render        {:optional true} :seon.config/render]
@@ -762,6 +782,20 @@
               v   (if (contains? #{:crash :gate :log} raw) raw :gate)]
           (swap! on-core-error-cache assoc k v)
           v))))
+
+(defn manifest-repl-mode
+  "The cluster's REPL mode from the manifest — `:batch` (default) | `:stream`.
+
+   Read ONCE at boot by `seon.client/boot-seed!` and reconciled into the
+   singleton cluster-config entity's `:seon.config/repl-mode` datom. The
+   turn loop + transcript masthead read that DATOM (via
+   `seon.agent.ctx/repl-mode`), never this accessor — config-through-DB.
+   An unrecognized value coerces to `:batch` (the manifest validator
+   already rejects it loudly at load)."
+  {:malli/schema [:=> [:cat] :seon.config/repl-mode]}
+  []
+  (let [raw (get (load-manifest) :seon.config/repl-mode :batch)]
+    (if (contains? #{:batch :stream} raw) raw :batch)))
 
 ;;; --- FORM-AUTOFIX (repair) accessors — the `:seon.config/repair` section.
 ;;; Absent section ⇒ the owner-ruled defaults (level `:symbols`, no class

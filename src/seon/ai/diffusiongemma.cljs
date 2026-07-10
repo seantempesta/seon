@@ -458,4 +458,6 @@
     [:=> [:cat] :any]
     [:=> [:catn [::opts ::opts]] :any]]}
   ([] (agent-adapter {}))
-  ([opts] (fn [ctx-text] (complete+wrap opts ctx-text))))
+  ;; Accept the widened string-or-map llm-fn arg (repl-mode); this adapter
+  ;; buffers, so it uses the ctx and ignores `:seon.ai/stream?`.
+  ([opts] (fn [arg] (complete+wrap opts (ai/llm-arg->ctx arg)))))

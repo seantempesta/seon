@@ -596,7 +596,7 @@
   (async done
     (let [aborted (atom false)
           s (scripted-stream ["(+ 1" " 2)" " ⟹ 3 fabricated"] aborted)]
-      (-> ((deref #'openai/stream-until-form!) s)
+      (-> (openai/stream-until-form! s)
           (.then (fn [{:keys [text aborted?]}]
                    (is (= "(+ 1 2)" text) "accumulated exactly through the first form")
                    (is (true? aborted?) "reported aborted")
@@ -610,7 +610,7 @@
   (async done
     (let [aborted (atom false)
           s (scripted-stream [";; think\n" "{:a 1}\n" "(message/user \"hi\")"] aborted)]
-      (-> ((deref #'openai/stream-until-form!) s)
+      (-> (openai/stream-until-form! s)
           (.then (fn [{:keys [text aborted?]}]
                    (is (true? aborted?))
                    (is (str/includes? text "(message/user \"hi\")")
@@ -626,7 +626,7 @@
   (async done
     (let [aborted (atom false)
           s (scripted-stream [";; just\n" ";; comments\n"] aborted)]
-      (-> ((deref #'openai/stream-until-form!) s)
+      (-> (openai/stream-until-form! s)
           (.then (fn [{:keys [aborted?]}]
                    (is (false? aborted?) "no form → natural end, not aborted")
                    (is (false? @aborted) ".abort never called")))
