@@ -78,8 +78,21 @@ class _Workspace:
     def used(self):
         return sum(len(p) if k == "clamp" else p for k, p in self.segs)
 
-    def build(self, CL, vocab_size):
-        """Return (canvas[1,CL], clamp_mask[1,CL], clamp_ids[1,CL], overflow?)."""
+    def hole_spans(self):
+        """[(start, end), …] canvas position span of each free segment."""
+        spans, pos = [], 0
+        for kind, payload in self.segs:
+            n = len(payload) if kind == "clamp" else payload
+            if kind == "free":
+                spans.append((pos, pos + n))
+            pos += n
+        return spans
+
+    def build(self, CL, vocab_size, pad_clamp_id=None):
+        """Return (canvas[1,CL], clamp_mask[1,CL], clamp_ids[1,CL], overflow?).
+        `pad_clamp_id` clamps the unused tail to that token (the typeahead
+        template pattern: the model only works the holes); default None
+        leaves the tail free (the guided-loop workspace, unchanged)."""
         ids, mask = [], []
         overflow = False
         for kind, payload in self.segs:
@@ -93,8 +106,12 @@ class _Workspace:
             overflow = True
             ids, mask = ids[:CL], mask[:CL]
         pad = CL - len(ids)
-        ids += [None] * pad
-        mask += [False] * pad
+        if pad_clamp_id is not None:
+            ids += [pad_clamp_id] * pad
+            mask += [True] * pad
+        else:
+            ids += [None] * pad
+            mask += [False] * pad
         noise = mx.random.randint(0, vocab_size, (1, CL))
         canvas = mx.array([[i if i is not None else 0 for i in ids]])
         m = mx.array([mask])
@@ -103,21 +120,30 @@ class _Workspace:
 
 
 def _denoise_round(model, canvas, clamp_mask, clamp_ids, cache, cur_len, gen,
-                   probe=None, probe_every=2):
+                   probe=None, probe_every=2, bias=None):
     """One denoise run, holding clamped positions. Ends on the model's own
     stability+confidence — OR EARLIER when `probe(belief)` proves the
     canvas (validation-as-early-stop: a ~0.4ms parse probe against a
     ~114ms forward; proof beats model confidence).
-    Returns (belief_ids[1,CL], forwards)."""
+    `bias`, when given, is applied to the raw logits each forward
+    (additive logit masks — the typeahead slot-masking seam; None keeps
+    the guided baseline byte-identical).
+    Returns (belief_ids[1,CL], forwards, raw_logits[1,CL,V]) — the raw
+    (biased, pre-temperature) logits of the FINAL forward, the logit
+    readout surface."""
     current = canvas
     sc_logits = None
     history = None
     argmax_canvas = current
     forwards = 0
+    raw_logits = None
     for cur_step in range(gen.max_denoising_steps, 0, -1):
         forwards += 1
         logits = model.decode(current, cache, canvas_start=cur_len,
                               self_conditioning_logits=sc_logits)
+        if bias is not None:
+            logits = bias(logits)
+        raw_logits = logits
         temp = gen.t_min + (gen.t_max - gen.t_min) * (cur_step / gen.max_denoising_steps)
         logits = logits / temp
         denoiser = mx.random.categorical(logits)
@@ -140,7 +166,7 @@ def _denoise_round(model, canvas, clamp_mask, clamp_ids, cache, cur_len, gen,
             if probe(belief):
                 break
     belief = mx.where(clamp_mask, clamp_ids, argmax_canvas)
-    return belief, forwards
+    return belief, forwards, raw_logits
 
 
 def generate_guided(model, tok, prompt_ids, oracle, eval_session=None,
@@ -231,8 +257,8 @@ def generate_guided(model, tok, prompt_ids, oracle, eval_session=None,
                         return False
                 return True
 
-            belief, fwd = _denoise_round(model, canvas, clamp_mask, clamp_ids,
-                                         cache, cur_len, gen, probe=_proven)
+            belief, fwd, _ = _denoise_round(model, canvas, clamp_mask, clamp_ids,
+                                            cache, cur_len, gen, probe=_proven)
             total_forwards += fwd
 
             toks = [int(t) for t in belief[0]]

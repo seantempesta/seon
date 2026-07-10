@@ -148,8 +148,12 @@ def diffgemma(payload):
     if mode == "guided":
         return _guided(payload, info)
 
+    if mode in ("fill", "rank", "step"):
+        return _cursor(mode, payload, info)
+
     if mode != "generate":
-        info["gen_error"] = f"mode {mode!r} not supported by the MLX worker (generate/probe/guided)"
+        info["gen_error"] = (f"mode {mode!r} not supported by the MLX worker "
+                             "(generate/probe/guided/fill/rank/step)")
         return info
 
     try:
@@ -247,6 +251,58 @@ def _guided(payload, info):
             "tok_per_s": round(r["tok_per_s"], 1),
             "events": r["events"][:40],
         })
+    except Exception as e:
+        info["gen_error"] = f"{type(e).__name__}: {e}"[:300]
+        info["trace_err"] = traceback.format_exc()[-1200:]
+    return info
+
+
+def _cursor(mode, payload, info):
+    """Typeahead wire modes (typeahead-design.md P2), same in-band-error
+    contract, perf fields in tokens/second:
+
+      fill  {prompt, segments:[["clamp",txt]|["free",n]], candidates?, seed?}
+            → holes + per-hole worst-token confidence + trims + CAL probes
+      rank  {prompt, prefix, candidates, suffix, null_prompt?, seed?}
+            → calibrated ranked list
+      step  {prompt (the context render), committed?, draft?, offers?,
+             policy?, null_render?, seed?}
+            → {transition, arm, new_draft, locked, glyph, posteriors,
+               readouts, hints, events}
+
+    step is STATELESS per call: the driver re-encodes the render every
+    step (encoder prefill measured ~5ms/4k tokens — free next to a
+    ~114ms forward); no session or KV is retained between calls in P2.
+    Locking is parse-gated (bb oracle); the eval-proven lock is the
+    guided-loop path."""
+    from .cursor import CursorDriver, Policy
+    from .oracle import Oracle
+    try:
+        tok, model = _load()
+        info["load_s"] = _CACHE["load_s"]
+        if "o" not in _ORACLE:
+            _ORACLE["o"] = Oracle()
+        if "cursor" not in _CACHE:
+            _CACHE["cursor"] = CursorDriver(model, tok, _ORACLE["o"])
+        drv = _CACHE["cursor"]
+        drv.policy = Policy(**(payload.get("policy") or {}))
+        seed = int(payload["seed"]) if payload.get("seed") is not None else None
+        if mode == "fill":
+            r = drv.fill(payload["prompt"], payload["segments"],
+                         candidates=payload.get("candidates"), seed=seed)
+        elif mode == "rank":
+            r = drv.rank(payload["prompt"], payload["prefix"],
+                         payload["candidates"], payload["suffix"],
+                         null_prompt=payload.get("null_prompt"), seed=seed)
+        else:
+            r = drv.step(payload["prompt"],
+                         committed=payload.get("committed", ""),
+                         draft=payload.get("draft", ""),
+                         offers=payload.get("offers"),
+                         null_render=payload.get("null_render"), seed=seed)
+            r["events"] = r["events"][:40]
+        _STATE["gens"] += 1
+        info.update(r)
     except Exception as e:
         info["gen_error"] = f"{type(e).__name__}: {e}"[:300]
         info["trace_err"] = traceback.format_exc()[-1200:]

@@ -210,7 +210,23 @@ In-band errors (`gen_error`), same contract as today.
    3.1–4.5 ms/call measured through the pipe client; malli templates
    deferred to the pod side — `template` is `null` in P1).
 2. **P2 driver** — `cursor.py` FSM + glyph interception + masks + CAL
-   hole probe + wire modes. Stub-model tests.
+   hole probe + wire modes. Stub-model tests. **SHIPPED 2026-07-10**
+   (`src-diffusion/src/seon_diffusion/cursor.py` — `CursorDriver` +
+   `Policy`; worker modes `fill`/`rank`/`step` stateless per call;
+   19 stub-model pytest proofs, suite 53 green). Live smoke on the MLX
+   worker: fill exact-form 3.3s (CAL probe 1 fwd/length; closed
+   candidate holes sized-and-SNAPPED to the argmax candidate — the
+   token mask alone let mask-legal junk repeat), rank calibrated
+   `db/query` top 1.1s, step done-in-6-forwards 1.3s / free-typed
+   `(reduce + (range 1 101))` 0.7s with the no-menu-fit posterior
+   collapse reproduced. Two live-found corrections: the tokenizer
+   declares EOS special, so the open-tail special ban must EXCLUDE
+   EOS/pad (banning it killed the done-ness meter and invited trailing
+   prose); and uncalibrated Φ(L) was MONOTONE for an enum hole (the
+   CAL peak reproduced only for open text holes — B(L) length-decay
+   calibration not fitted; closed slots use candidate sizing instead).
+   Eval-proven locking in `step` needs a caller-supplied session
+   (parse-gated by default); P3 wires it.
 3. **P3 seon** — menu/plan section fns, `:seon.typeahead/policy` row,
    provider wiring, inspector tile (posterior bars + plan ledger).
 4. **P4 bench** — the replay-corpus task in src-inspect-ai + live acme
