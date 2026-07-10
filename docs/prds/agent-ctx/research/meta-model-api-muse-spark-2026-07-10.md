@@ -79,6 +79,42 @@ META_MODEL_API_KEY=<key>                  # never committed, never in the DB
 4. Do NOT confuse this with the old **Llama API**
    (`api.llama.com`) — that public preview retired 2026-07-06.
 
+## Speed (measured 2026-07-10, same prompt ≈400-word essay, 2 stream + 1 buffered run each)
+
+| | TTFT | decode tok/s (gen window) | wall tok/s | wall-clock to full answer |
+|---|---|---|---|---|
+| muse-spark-1.1 | **16–18 s** (hidden reasoning first) | **~900–1060** | 118–161 | 18.5–20.5 s |
+| deepseek-v4-pro (thinking off) | 1.3 s | ~43 | ~39 | 12.7–15.3 s |
+| deepseek-v4-flash (thinking off) | 1.0 s | ~68 | ~60 | 7.4–9.9 s |
+
+Muse's raw decode is ~20× DeepSeek-pro (likely speculative/parallel
+decode infra), but it spends ~1,800–2,600 hidden reasoning tokens
+(~15–18 s) before the first visible token, so on short/medium answers
+its END-TO-END latency is comparable to pro and slower than flash. The
+longer the visible output, the more Muse's decode speed wins. Numbers
+from `scratchpad/llm-bench.mjs` (this session); re-run to refresh.
+
+## Usage metadata (both wire modes verified)
+
+Both providers return caching + reasoning info in `usage`, in BOTH
+streaming (`stream_options {:include_usage true}`, final chunk) and
+buffered completions — verified live against both:
+
+- Meta: `prompt_tokens_details.cached_tokens`,
+  `completion_tokens_details.reasoning_tokens`.
+- DeepSeek: `prompt_cache_hit_tokens` / `prompt_cache_miss_tokens`
+  (plus `prompt_tokens_details.cached_tokens`).
+- **Dollar cost is NOT returned by either** — compute it as
+  usage × published rates (the OpenRouter gateway CAN return cost;
+  direct DeepSeek/Meta do not).
+
+The adapter persists the whole usage map per turn
+(`:seon.agent.turn/llm-usage`), so cache-hit and reasoning counts are
+queryable per turn. Caveat: in repl-mode `:stream` the adapter aborts
+at the first complete form, losing the provider's final usage chunk —
+usage is then client-ESTIMATED and flagged `:seon.ai/estimated? true`
+(by design); provider-reported usage is guaranteed only in `:batch`.
+
 ## Pricing vs DeepSeek (2026-07-10)
 
 | | Input /M (miss) | Input /M (cache hit) | Output /M |
