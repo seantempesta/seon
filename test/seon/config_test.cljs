@@ -282,7 +282,8 @@
   (testing "the {} manifest resolves every knob to its byte-parity default"
     (let [s (config/resolve-config-singleton {})]
       (is (= "cluster" (:seon.config/id s)))
-      (is (= :batch    (:seon.config/repl-mode s)))
+      ;; repl-mode's default is per-MODEL (env-derived) — pinned by its own
+      ;; deftest below, not here (this test runs under the suite's ambient env).
       (is (= 1500      (:seon.config.render/eval-cap s)))
       (is (= :symbols  (:seon.config.repair/level s)))
       (is (= :public-only (:seon.agent.web/policy s)))
@@ -301,6 +302,40 @@
       (is (= 42 (:seon.config.render/eval-cap s)))
       (is (= :log (:seon.config/on-core-error s)))
       (is (= "you are a helpful agent" (:seon.config/system-text s))))))
+
+(deftest repl-mode-default-is-per-model
+  ;; The manifest-absent repl-mode default is computed from the model
+  ;; identity the :seon.ai/config row seeds from (measured 2026-07-10:
+  ;; DeepSeek fabricates in :batch, :stream removes it structurally;
+  ;; Spark-class models are ~0-fab in :batch and :stream only costs them
+  ;; latency). Env is stashed/restored — the suite's ambient values differ.
+  (let [env     (.-env js/process)
+        saved-p (.-SEON_AI_PROVIDER env)
+        saved-m (.-SEON_AI_MODEL env)
+        mode-of (fn [m] (:seon.config/repl-mode (config/resolve-config-singleton m)))]
+    (try
+      (testing "env unset (the shipped :deepseek default) → :stream"
+        (js-delete env "SEON_AI_PROVIDER")
+        (js-delete env "SEON_AI_MODEL")
+        (is (= :stream (mode-of {}))))
+      (testing "a non-deepseek gateway model → :batch"
+        (set! (.-SEON_AI_PROVIDER env) "openai-compat")
+        (set! (.-SEON_AI_MODEL env) "muse-spark-1.1")
+        (is (= :batch (mode-of {}))))
+      (testing "a deepseek MODEL through a generic gateway → :stream"
+        (set! (.-SEON_AI_MODEL env) "deepseek-v4-flash")
+        (is (= :stream (mode-of {}))))
+      (testing "an explicit manifest value always wins"
+        (js-delete env "SEON_AI_PROVIDER")
+        (js-delete env "SEON_AI_MODEL")
+        (is (= :batch (mode-of {:seon.config/repl-mode :batch}))))
+      (finally
+        (if (some? saved-p)
+          (set! (.-SEON_AI_PROVIDER env) saved-p)
+          (js-delete env "SEON_AI_PROVIDER"))
+        (if (some? saved-m)
+          (set! (.-SEON_AI_MODEL env) saved-m)
+          (js-delete env "SEON_AI_MODEL"))))))
 
 (deftest stale-singleton-retractions-heals-optional-attrs
   (testing "an attr present in the stored singleton but absent from desired is retracted"

@@ -127,7 +127,13 @@ they never contradict it.
 ## The REPL mode is a datom — and it teaches its own grammar
 
 The agent's turn resolves a form's result in one of two modes, selected per
-cluster by the `:seon.config/repl-mode` datom (`:batch` default | `:stream`):
+cluster by the `:seon.config/repl-mode` datom (`:batch` | `:stream`). The
+manifest-absent DEFAULT is **per-model** (`seon.config/default-repl-mode`,
+measured 2026-07-10): DeepSeek-identity configs default `:stream` (fabrication
+is structurally absent there — 0/42 turns vs 32–48% in `:batch`), everything
+else `:batch` (Spark-class instruction-followers are ~0-fab in `:batch` and
+`:stream` only costs them per-turn latency). An explicit manifest value always
+wins; the suite pins `:batch` in `config/test.edn`.
 
 - **`:batch`** — one LLM call writes N forms. Every model-authored
   result-claim (a `⟹ …`/`=> …` a model types into the reply, pattern-completing
@@ -142,7 +148,13 @@ cluster by the `:seon.config/repl-mode` datom (`:batch` default | `:stream`):
 - **`:stream`** — the SDK stream is consumed delta-by-delta and **aborted the
   instant one complete top-level form has streamed** (a cheap escape-aware
   delimiter-balance gate confirmed by `parse-forms`). One form per turn; its
-  value is in the transcript when the agent continues. Aborting loses the
+  value is in the transcript when the agent continues. The eval batch is
+  truncated after the first `:form` entry — a same-delta tail that parses
+  into extra (typically read-error) entries stays byte-intact in the reply
+  blob but never evals. The run's WORK bound is **form-denominated** under
+  `:stream` (`seon.derive/run-form-count` — the loop and the masthead's
+  `loop k/cap` both count forms, so prose/orientation turns burn nothing);
+  `:batch` counts turns as before. Aborting loses the
   provider's final usage chunk, so those turns carry client-side token
   estimates (`seon.ai.tokens/estimate`), flagged `:seon.agent.turn/usage-estimated?`.
 

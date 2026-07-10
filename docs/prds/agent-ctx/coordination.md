@@ -1929,3 +1929,26 @@ gating step 0 (owner-ack'd): `[seon.agent.fs :as fs]` is now in
 root-context), so freshly-minted bench agents render the fs verbs as a
 discoverable compact card (live-proven on the default pod; resumed agents
 keep a stale seed-baked list — a fresh mint/cluster reset picks it up).
+
+## 2026-07-10 — eval lane → BOTH lanes: repl-mode DEFAULT is now per-MODEL — default pod + acme flip to `:stream` on their next boot
+
+Task-13 unit (suite 1179/5339/0/0; live Mode B two-bucket GREEN `:completed`
+16 turns/66s on the fixed code): the manifest-absent `:seon.config/repl-mode`
+default is now computed per-MODEL (`seon.config/default-repl-mode`) — a
+DeepSeek identity (`SEON_AI_PROVIDER` unset/`deepseek`, or a `deepseek*`
+model through a gateway) defaults `:stream`; anything else `:batch`. Grounds:
+the rung-0 matrix + Muse Spark cross-model addendum
+(`evals/runs/2026-07-10-minimal-buildup/README.md`) — Mode B eliminates
+DeepSeek fabrication structurally (0/42 turns vs 32–48%), while Spark-class
+models are ~0-fab in `:batch` and only pay `:stream` latency.
+
+**What changes under you:** `config/system.edn` and `config/acme.edn` carry
+no `repl-mode` key, so the DEFAULT cluster (7890) and ACME (7980) will seed
+`:stream` on their next restart/reset. If you want the tooling pod to stay
+Mode A, add `:seon.config/repl-mode :batch` to `config/system.edn` — an
+explicit manifest value always wins. The SUITE is pinned `:batch` in
+`config/test.edn` (gym stub scenarios script multi-form turns). Mode B also
+gained: form-denominated work bound (`derive/run-form-count`; masthead
+`loop k/cap` counts forms), single-form eval close (delta-tail read-errors
+demote to prose), and the turn-open log now reports system-tokens alongside
+ctx-tokens (it silently under-reported the fixed prefix before).

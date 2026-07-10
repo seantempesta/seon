@@ -9,4 +9,10 @@
 ;;                     it (proving stale rows can't persist across a config change),
 ;;                     not merely skips it.
 {:seon.config/agent-context {:my.skills/load [:repl]}
- :seon.config/routes        [{:seon.config/removes [:seon.route/agent-call]}]}
+ ;; The suite is DETERMINISTIC Mode A: repl-mode's manifest-absent default
+ ;; is per-MODEL (env-derived from SEON_AI_PROVIDER/MODEL, 2026-07-10), and
+ ;; gym stub scenarios script MULTI-form turns — so the suite pins :batch
+ ;; instead of inheriting whatever the ambient env implies. Stream-mode
+ ;; behavior is covered by its own targeted tests.
+ :seon.config/repl-mode      :batch
+ :seon.config/routes         [{:seon.config/removes [:seon.route/agent-call]}]}

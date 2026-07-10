@@ -129,6 +129,30 @@
                  :seon.db/args [run-id]})
       0))
 
+(defn run-form-count
+  "How many FORMS (persisted evals) ran under run `run-id`.
+
+   The repl-mode `:stream` work budget: a stream turn evals at most one
+   form, so counting TURNS makes the cap a form budget that prose and
+   orientation turns burn for nothing (rung-0 verdict, 2026-07-10) —
+   under `:stream` the loop bounds work by THIS count instead. Joins
+   `:seon.agent.turn/run` → `:seon.agent.turn/evals` over the explicit
+   db value; excludes schedule-fire turns like [[run-turn-count]]."
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+                             [:seon.agent.run/id :seon.agent.run/id]]
+                  :int]}
+  [db run-id]
+  (or (db/query {:seon.db/db db
+                 :seon.db/query
+                 '[:find (count ?e) . :in $ ?rid
+                   :where
+                   [?r :seon.agent.run/id ?rid]
+                   [?t :seon.agent.turn/run ?r]
+                   (not [?t :seon.agent.turn/scheduled? true])
+                   [?t :seon.agent.turn/evals ?e]]
+                 :seon.db/args [run-id]})
+      0))
+
 (defn agent-turn-count
   "Turn count for an agent across ALL its runs.
 

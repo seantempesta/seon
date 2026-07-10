@@ -12,7 +12,8 @@
          :terminate (from the run's closed-reason) — the verb owns the close
        - the agent's `:seon.agent/run` points at a DIFFERENT run → :superseded
        - the run carries :paused-at                       → :pause
-       - turn-count ≥ turn-limit (the WORK bound)         → :turn-limit
+       - work ≥ turn-limit (the WORK bound: turns in repl-mode
+         :batch, FORMS in :stream)                        → :turn-limit
        - now > deadline (the WALL-CLOCK bound)            → :deadline
        - else                                             → :turn-ok
      `(transition state event)` gives the next state; the EFFECT of
@@ -167,7 +168,14 @@
       (:seon.agent.run/paused-at r)
       :pause
 
-      (run/turn-limit-reached? (derive/run-turn-count db run-id)
+      ;; The WORK bound is mode-denominated (rung-0 verdict, 2026-07-10):
+      ;; `:batch` counts turns (one turn = many forms of work); `:stream`
+      ;; counts FORMS (one form per turn — a prose/orientation turn burns
+      ;; nothing, so a green agent is never parked at :turn-limit by its
+      ;; own narration).
+      (run/turn-limit-reached? (if (= :stream (ctx/repl-mode db))
+                                 (derive/run-form-count db run-id)
+                                 (derive/run-turn-count db run-id))
                                (:seon.agent.run/turn-limit r))
       :turn-limit
 

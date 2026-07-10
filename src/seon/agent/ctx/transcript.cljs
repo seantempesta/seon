@@ -560,13 +560,21 @@
         n-turns (count turns)
         run     (derive/current-run db id)
         run-eid (:db/id run)
-        ;; loop-k = turns stamped with the CURRENT open run (the run's
-        ;; derived current-turn); 0 when idle. cap = the run's bumpable
-        ;; turn-limit (renew! grows it), else the default when idle.
-        loop-k  (if run-eid
-                  (count (filter #(= run-eid (:db/id (:seon.agent.turn/run %)))
-                                 turns))
-                  0)
+        ;; loop-k = work spent in the CURRENT open run, in the SAME
+        ;; denomination the loop's bound checks (mode-denominated, rung-0
+        ;; verdict 2026-07-10): `:batch` counts the run's turns, `:stream`
+        ;; counts its FORMS (evals) — one form per stream turn, so prose
+        ;; turns don't move the meter. 0 when idle. cap = the run's
+        ;; bumpable turn-limit (renew! grows it), else the default when idle.
+        run-turns (when run-eid
+                    (filter #(= run-eid (:db/id (:seon.agent.turn/run %)))
+                            turns))
+        loop-k  (cond
+                  (nil? run-eid) 0
+                  (= :stream (ctx/repl-mode db))
+                  (reduce + 0 (map (comp count :seon.agent.turn/evals)
+                                   (remove :seon.agent.turn/scheduled? run-turns)))
+                  :else (count run-turns))
         cap     (or (:seon.agent.run/turn-limit run) ctx/default-turn-limit)
         ;; localized full date+tz so the agent can judge what's expensive.
         ;; This is the ONE legitimate live `now` in the transcript.

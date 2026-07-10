@@ -365,7 +365,8 @@
    [:seon.config.breaker/window-ms   {:optional true} :seon.config.breaker/window-ms]])
 
 ;;; REPL MODE (repl-mode Phase 1) — how the agent's REPL turn resolves a
-;;; form's result. `:batch` (default): the turn is one LLM call writing N
+;;; form's result. The DEFAULT is per-MODEL ([[default-repl-mode]]); an
+;;; explicit manifest value always wins. `:batch`: the turn is one LLM call writing N
 ;;; forms; a model-typed result is STRIPPED at the reply boundary and the
 ;;; real values arrive interleaved next turn. `:stream`: the SDK stream is
 ;;; consumed delta-by-delta and ABORTED the moment one complete top-level
@@ -615,6 +616,26 @@
   [v allowed fallback]
   (if (contains? allowed v) v fallback))
 
+(defn- default-repl-mode
+  "The per-MODEL `:seon.config/repl-mode` default (manifest absent).
+
+   Measured 2026-07-10 (evals/runs/2026-07-10-minimal-buildup): DeepSeek
+   pattern-completes typed results in ~32-48% of `:batch` turns and
+   `:stream` eliminates that structurally, while Spark-class
+   instruction-followers are ~0-fab in `:batch` and pay `:stream`'s
+   extra per-turn latency for nothing. The rule is computed from the
+   model identity the `:seon.ai/config` row seeds from — the SAME
+   boot-seed moment as this resolver (`seon.ai` sits above config, so
+   the env is read directly; `:deepseek` is [[seon.ai/provider]]'s
+   documented default when the env is unset). An explicit manifest
+   `:seon.config/repl-mode` always wins."
+  []
+  (let [provider (or (env "SEON_AI_PROVIDER") "deepseek")
+        model    (or (env "SEON_AI_MODEL") "")]
+    (if (or (= "deepseek" provider) (re-find #"deepseek" model))
+      :stream
+      :batch)))
+
 (defn resolve-config-singleton
   "The FLAT `:seon.config` singleton entity map for `manifest`.
 
@@ -631,7 +652,8 @@
         nsp (resolve-namespaces manifest)]
     (cond-> {:seon.config/id cluster-config-id
              :seon.config/repl-mode
-             (coerce-enum (get manifest :seon.config/repl-mode :batch) #{:batch :stream} :batch)
+             (let [d (default-repl-mode)]
+               (coerce-enum (get manifest :seon.config/repl-mode d) #{:batch :stream} d))
              :seon.config/current-ns (:seon.config/current-ns nsp)
              :seon.config/always     (:seon.config/always nsp)
              :seon.config/on-core-error

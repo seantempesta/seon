@@ -372,7 +372,7 @@
    reply and eval-batch the forms. `id` / `id-of-turn` are LOCALS threaded
    down from `run-turn!` (captured before the LLM await), so the always-on
    blob capture pairs this verbatim reply with the same turn's prompt."
-  [resp id id-of-turn compile-state run-id]
+  [resp id id-of-turn compile-state run-id stream?]
   (let [raw-reply  (or (:text resp) "")
         ;; repl-mode reply-boundary fix-up: DELETE every model-authored
         ;; result-claim BEFORE persist + eval (Mode A `:batch`; Mode B
@@ -404,6 +404,23 @@
                            "[seon.agent.turn] eager reply-blob link failed (turn continues):"
                            e))))
         parsed     (repl-internal/parse-forms reply-text)
+        ;; Mode B `:stream` single-form close (rung-0 verdict, 2026-07-10):
+        ;; the stream aborts at the FIRST complete form, but the delta that
+        ;; completed it can carry a tail that parses into extra entries
+        ;; (typically `:read` errors from a partial next line). The turn is
+        ;; ONE form: keep everything through the first `:form` entry and
+        ;; treat the tail as prose — it stays byte-intact in the reply blob,
+        ;; it just never evals. `:batch` evals the full parse as before.
+        parsed     (if stream?
+                     (let [i (reduce (fn [idx e]
+                                       (if (= :form (:seon.repl/kind e))
+                                         (reduced idx)
+                                         (inc idx)))
+                                     0 parsed)]
+                       (if (< i (count parsed))
+                         (vec (take (inc i) parsed))
+                         parsed))
+                     parsed)
         batch      (await (seval/eval-batch! compile-state parsed
                                              (ctx/home-ns id) id id-of-turn run-id))]
     (cond->
@@ -555,7 +572,8 @@
            ;; depend on turn success (observability.md).
            :seon.agent.turn/error  (turn-error-str err)}
           retries (assoc :seon.agent.turn/llm-retries retries)))
-      (cond-> (await (ask-and-eval-reply! resp id id-of-turn compile-state run-id))
+      (cond-> (await (ask-and-eval-reply! resp id id-of-turn compile-state run-id
+                                          (boolean stream?)))
         retries     (assoc :seon.agent.turn/llm-retries retries)
         (seq usage) (assoc :seon.agent.turn/llm-usage (pr-str usage))
         estimated?  (assoc :seon.agent.turn/usage-estimated? true)
@@ -597,7 +615,12 @@
         ;; open-tx; a failed blob write yields nil and the turn proceeds.
         rendered-as-of (db/basis-t db)
         prompt-blob    (await (capture-blob! full-prompt :prompt))]
-    (log id turn-idx "open" turn-id "+" (tokens/estimate prompt) "ctx-tokens")
+    ;; ctx-tokens = the assembled context ONLY; the system text rides the
+    ;; adapter's system message, so it is reported as its own count here
+    ;; (rung-0 defect: the old line silently under-reported the fixed
+    ;; prefix by the system prompt's size).
+    (log id turn-idx "open" turn-id "+" (tokens/estimate prompt) "ctx-tokens"
+         "+" (tokens/estimate (ai/effective-system-prompt {})) "system-tokens")
     (try
       (let [result (await
                      (db/with-agent id
