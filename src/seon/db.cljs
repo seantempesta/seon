@@ -61,6 +61,7 @@
     [datahike.constants :as dconst]
     [datahike.db.interface :as dbi]
     [datahike.impl.entity :as dentity]
+    [seon.config :as config]
     [seon.db.internal :as internal]
     [seon.error :as error]
     [seon.schema :as schema]))
@@ -1484,3 +1485,41 @@
    :seon.error/basis-t   (fn []
                            (when *conn*
                              (basis-t)))})
+
+;; ---------------------------------------------------------------------------
+;; Config-view seam — `seon.config`'s accessors read the `:seon.config`
+;; singleton through this INJECTED reader (require dir is db→config, so config
+;; can't require db; mirror the error-hook seam above). Returns the DECODED
+;; singleton map (the three mixed-`:or` collection knobs decoded) or nil when
+;; no conn / the singleton is not yet seeded — `seon.config/config-view` then
+;; falls back to the boot manifest resolve (the pre-conn sliver).
+;; ---------------------------------------------------------------------------
+
+;; Single-slot memo keyed on the IMMUTABLE db value (identical?) — the config
+;; accessors are hot (value.cljs reads several caps per rendered node) and the
+;; loop freezes ONE db value per turn, so this collapses a turn's reads to ONE
+;; entity lookup. Self-invalidating: a new db value (a transact) recomputes.
+;; Same sanctioned pattern as `render.cljs` `!schema-cache`.
+(defonce ^:private !config-view-cache (atom {:db nil :view nil}))
+
+(defn- read-config-singleton
+  "Decode the `:seon.config` singleton off `db`, or nil when unseeded."
+  [db]
+  (when (contains? (installed-schema db) :seon.config/id)
+    (let [ent (entity {::ref [:seon.config/id config/cluster-config-id] ::db db})]
+      (when (:seon.config/id ent)
+        (into {}
+              (map (fn [[k v]]
+                     [k (if (internal/edn-encoded-attr? k) (decode-edn-value k v) v)]))
+              ent)))))
+
+(config/set-db-config-view!
+  (fn config-singleton-view []
+    (when *conn*
+      (let [db @*conn*
+            c  @!config-view-cache]
+        (if (identical? db (:db c))
+          (:view c)
+          (let [view (read-config-singleton db)]
+            (reset! !config-view-cache {:db db :view view})
+            view))))))

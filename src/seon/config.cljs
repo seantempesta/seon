@@ -326,14 +326,137 @@
 ;;; a DB datom on the singleton cluster-config entity; the turn loop + the
 ;;; transcript masthead read the DATOM (config-through-DB), never this key.
 (schema/register! :seon.config/repl-mode [:enum :batch :stream])
-;; The singleton cluster-config entity — identity `:seon.config/id` (the
-;; fixed value `"cluster"`), carrying boot-reconciled cluster-global config
-;; datoms (today just `:seon.config/repl-mode`).
+
+;;; ============================================================
+;;; THE `:seon.config` SINGLETON — one cluster-config entity, ATTRIBUTE-PER-KEY
+;;; (config-db-migration-spec 2026-07-10). The owner contract: config is read
+;;; at BOOT and TRANSACTED into the db (this singleton); from then on EVERY
+;;; runtime read is a db query ([[config-view]] via the injected [[!db-config-view]]
+;;; seam). Each knob is its OWN registered attr — a real type is the knob's
+;;; contract, NEVER an EDN-blob dump of the whole config. Three collection knobs
+;;; (`:seon.config/always`, `:seon.config.repair/classes`,
+;;; `:seon.agent.web/allowed-domains`) ride the ESTABLISHED mixed-`:or` EDN-slot
+;;; bridge (the `:seon.eval/home-requires` precedent) — one cardinality-one
+;;; datom that upsert REPLACES (so a shrunk list heals, no accumulation). The
+;;; singleton is ONE entity in the boot `#{:config}` `seon.state/reconcile!`
+;;; desired set (routes/skills pattern) — upsert-by-identity keeps it current +
+;;; retract-protected; NO second mechanism.
+;;; ============================================================
+
+;; The fixed singleton identity value — the one cluster-config entity per store.
+(def cluster-config-id "cluster")
+
 (schema/register! :seon.config/id [:and {:seon.db/identity true} :string])
+
+;; Shared positive-int cap shape — every render/eval/timeout cap datom
+;; references it (register-once, no inline duplication).
+(schema/register! :seon.config/cap [:int {:min 1}])
+
+;;; Per-knob singleton attrs (value shape = the knob's contract). Enum/int/
+;;; boolean/string scalars store natively; the three collections use the mixed-
+;;; `:or` EDN-slot bridge (a `:nil` alt makes it a mixed `:or` so `transact!`
+;;; pr-str's the value and `config-view` `decode-edn-value`s it back).
+(schema/register! :seon.config.render/store-edn-cap      :seon.config/cap)
+(schema/register! :seon.config.render/eval-cap           :seon.config/cap)
+(schema/register! :seon.config.render/message-cap        :seon.config/cap)
+(schema/register! :seon.config.render/result-body-cap    :seon.config/cap)
+(schema/register! :seon.config.render/value-max-depth    :seon.config/cap)
+(schema/register! :seon.config.render/value-max-keys     :seon.config/cap)
+(schema/register! :seon.config.render/value-max-items    :seon.config/cap)
+(schema/register! :seon.config.render/value-max-string   :seon.config/cap)
+(schema/register! :seon.config.render/value-shape-sample :seon.config/cap)
+(schema/register! :seon.config.render/value-verbatim-cap :seon.config/cap)
+(schema/register! :seon.config.render/value-width        :seon.config/cap)
+(schema/register! :seon.config.render/render-fn-token-cap :seon.config/cap)
+(schema/register! :seon.config.render/whitespace     [:enum :raw :visible])
+(schema/register! :seon.config.render/tabs           [:enum :literal :arrow])
+(schema/register! :seon.config.render/trailing-ws    [:enum :off :dot])
+(schema/register! :seon.config.render/content-layout [:enum :structured :single-line])
+(schema/register! :seon.config.render/line-numbers   :boolean)
+(schema/register! :seon.config.repair/level
+  [:enum :off :safe-syntax :symbols :aggressive])
+(schema/register! :seon.config.repair/max-fixes-per-form :seon.config/cap)
+(schema/register! :seon.config.repair/budget-ms          :seon.config/cap)
+(schema/register! :seon.config.watchdog/stale-ms    :seon.config/cap)
+(schema/register! :seon.config.breaker/crash-count  :seon.config/cap)
+(schema/register! :seon.config.breaker/window-ms    :seon.config/cap)
+;; The always-on FULL-source ns render list — the resolved keyword set
+;; (`:seon.config/namespaces` `:always`). EDN-slot bridged (mixed `:or`).
+(schema/register! :seon.config/always [:or [:set :keyword] :nil])
+;; The per-class repair kill-switch map `{class-kw boolean}`. EDN-slot bridged.
+(schema/register! :seon.config.repair/classes [:or [:map-of :keyword :boolean] :nil])
+;; The web allowlist hosts (meaningful only under `:allowlist`). EDN-slot bridged.
+(schema/register! :seon.agent.web/allowed-domains [:or [:vector :string] :nil])
+;; The cluster system-prompt text OR a file path — OPTIONAL, no default (absent
+;; ⇒ not seeded). The read side is wired by a follow-up unit; this unit only
+;; supports the seed path (config-db-migration-spec 2026-07-10).
+(schema/register! :seon.config/system-text :string)
+
+;; The singleton entity schema — every knob optional (a `{}` manifest seeds the
+;; resolved defaults; `:seon.config/id` is the only required key).
 (schema/register! :seon.config/singleton
   [:map {:seon.db/entity true}
-   [:seon.config/id        :seon.config/id]
-   [:seon.config/repl-mode {:optional true} :seon.config/repl-mode]])
+   [:seon.config/id                          :seon.config/id]
+   [:seon.config/repl-mode          {:optional true} :seon.config/repl-mode]
+   [:seon.config/current-ns         {:optional true} :seon.config/current-ns]
+   [:seon.config/on-core-error      {:optional true} :seon.config/on-core-error]
+   [:seon.config/spawn-depth-cap    {:optional true} :seon.config/spawn-depth-cap]
+   [:seon.config/always             {:optional true} :seon.config/always]
+   [:seon.config/system-text        {:optional true} :seon.config/system-text]
+   [:seon.config.render/store-edn-cap      {:optional true} :seon.config/cap]
+   [:seon.config.render/eval-cap           {:optional true} :seon.config/cap]
+   [:seon.config.render/message-cap        {:optional true} :seon.config/cap]
+   [:seon.config.render/result-body-cap    {:optional true} :seon.config/cap]
+   [:seon.config.render/value-max-depth    {:optional true} :seon.config/cap]
+   [:seon.config.render/value-max-keys     {:optional true} :seon.config/cap]
+   [:seon.config.render/value-max-items    {:optional true} :seon.config/cap]
+   [:seon.config.render/value-max-string   {:optional true} :seon.config/cap]
+   [:seon.config.render/value-shape-sample {:optional true} :seon.config/cap]
+   [:seon.config.render/value-verbatim-cap {:optional true} :seon.config/cap]
+   [:seon.config.render/value-width        {:optional true} :seon.config/cap]
+   [:seon.config.render/render-fn-token-cap {:optional true} :seon.config/cap]
+   [:seon.config.render/whitespace     {:optional true} :seon.config.render/whitespace]
+   [:seon.config.render/tabs           {:optional true} :seon.config.render/tabs]
+   [:seon.config.render/trailing-ws    {:optional true} :seon.config.render/trailing-ws]
+   [:seon.config.render/content-layout {:optional true} :seon.config.render/content-layout]
+   [:seon.config.render/line-numbers   {:optional true} :seon.config.render/line-numbers]
+   [:seon.config.repair/level              {:optional true} :seon.config.repair/level]
+   [:seon.config.repair/max-fixes-per-form {:optional true} :seon.config/cap]
+   [:seon.config.repair/budget-ms          {:optional true} :seon.config/cap]
+   [:seon.config.repair/classes            {:optional true} :seon.config.repair/classes]
+   ;; LEAF types for the web knobs — `seon.agent.web` (which registers the
+   ;; authoritative `:seon.agent.web/policy`/`search-backend`/`search-model`
+   ;; enums) loads AFTER this leaf ns, so a schema-keyword ref here would break
+   ;; boot. The DATOM's storage type comes from web's own registration (present
+   ;; by boot-seed time); this entity schema only validates loosely.
+   [:seon.agent.web/policy          {:optional true} :keyword]
+   [:seon.agent.web/search-backend  {:optional true} :keyword]
+   [:seon.agent.web/search-model    {:optional true} :string]
+   [:seon.agent.web/allowed-domains {:optional true} :seon.agent.web/allowed-domains]
+   [:seon.config.watchdog/stale-ms   {:optional true} :seon.config/cap]
+   [:seon.config.breaker/crash-count {:optional true} :seon.config/cap]
+   [:seon.config.breaker/window-ms   {:optional true} :seon.config/cap]])
+
+;; ── The db-read seam (config ← db injection) ──
+;; `seon.config` CANNOT require `seon.db` (the require direction is
+;; db→error→config), so — exactly like `seon.error`'s `!db-hooks` — `seon.db`
+;; INJECTS a reader at its load. [[config-view]] reads the singleton through it
+;; POST-conn; a nil reader / no conn / unseeded singleton falls back to the
+;; boot manifest resolve (the pre-conn sliver). ONE switchover point.
+(defonce ^:private !db-config-view
+  ;; fn of [] → the DECODED singleton config map (collections decoded), or nil
+  ;; when no conn / the singleton is not yet seeded.
+  (atom nil))
+
+(defn set-db-config-view!
+  "Install the singleton-config reader [[config-view]] uses post-conn.
+
+   Called ONCE by `seon.db` at namespace load (require dir is db→config, so
+   the read path is injected, not required — mirrors `seon.error/set-db-hooks!`)."
+  {:malli/schema [:=> [:cat fn?] :nil]}
+  [f]
+  (reset! !db-config-view f)
+  nil)
 
 (schema/register! :seon.config/manifest
   [:map
@@ -447,26 +570,131 @@
     {:seon.config/always     (into #{} (map ns-sym->kw) (:seon.config/always merged))
      :seon.config/current-ns (:seon.config/current-ns merged)}))
 
-;; `def` (NOT defonce): a hot-reload of `seon.config` ROTATES the cache, so a
-;; dev edit to `config/system.edn` is picked up on the next reload (config is
-;; otherwise a boot-time read). Within a process it memoizes per env key.
-(def ^:private ns-policy-cache (atom {}))
+;;; ============================================================
+;;; THE RESOLVER + THE RUNTIME READ. `resolve-config-singleton` maps a manifest
+;;; to the FLAT `:seon.config` singleton entity map — every SCALAR knob resolved
+;;; to its EFFECTIVE value (env→manifest→default, coerced) + the three decoded
+;;; collections. It is the ONE resolution point, used BOTH to SEED the db at
+;;; boot AND as the PRE-CONN fallback [[config-view]] reads before the conn
+;;; exists. `config-view` is the runtime read: the db singleton POST-conn (via
+;;; the injected [[!db-config-view]] seam), else the manifest resolve. The ~30
+;;; accessors below are thin `(get (config-view) attr …)` reads — same names +
+;;; arities as before (the coordination contract; ~40 caller sites unchanged).
+;;; ============================================================
+
+(defn- coerce-enum
+  "`v` when it is in `allowed`, else `fallback` — the belt for a stale/invalid
+   value (the manifest validator already rejects a bad literal loudly at load)."
+  [v allowed fallback]
+  (if (contains? allowed v) v fallback))
+
+(defn resolve-config-singleton
+  "The FLAT `:seon.config` singleton entity map for `manifest`.
+
+   Every knob RESOLVED to its effective value (the default reproduces today's
+   byte-parity behavior). The one resolution point — seeds the db at boot AND
+   is the pre-conn fallback [[config-view]] reads. `:seon.config/system-text` is
+   OPTIONAL (no default): included ONLY when the manifest carries it (absent ⇒
+   the key is absent ⇒ [[stale-singleton-retractions]] retracts a stale one)."
+  {:malli/schema [:=> [:catn [::manifest :seon.config/manifest]] :seon.config/singleton]}
+  [manifest]
+  (let [r   (get manifest :seon.config/render {})
+        rep (get manifest :seon.config/repair {})
+        web (get manifest :seon.config/web {})
+        nsp (resolve-namespaces manifest)]
+    (cond-> {:seon.config/id cluster-config-id
+             :seon.config/repl-mode
+             (coerce-enum (get manifest :seon.config/repl-mode :batch) #{:batch :stream} :batch)
+             :seon.config/current-ns (:seon.config/current-ns nsp)
+             :seon.config/always     (:seon.config/always nsp)
+             :seon.config/on-core-error
+             (coerce-enum (get manifest :seon.config/on-core-error :gate) #{:crash :gate :log} :gate)
+             :seon.config/spawn-depth-cap
+             (let [v (get manifest :seon.config/spawn-depth-cap 1)] (if (and (int? v) (>= v 0)) v 1))
+             :seon.config.render/store-edn-cap      (get r :seon.config.render/store-edn-cap 16384)
+             :seon.config.render/eval-cap           (get r :seon.config.render/eval-cap 1500)
+             :seon.config.render/message-cap        (get r :seon.config.render/message-cap 4000)
+             :seon.config.render/result-body-cap    (get r :seon.config.render/result-body-cap 16384)
+             :seon.config.render/value-max-depth    (get r :seon.config.render/value-max-depth 3)
+             :seon.config.render/value-max-keys     (get r :seon.config.render/value-max-keys 8)
+             :seon.config.render/value-max-items    (get r :seon.config.render/value-max-items 8)
+             :seon.config.render/value-max-string   (get r :seon.config.render/value-max-string 80)
+             :seon.config.render/value-shape-sample (get r :seon.config.render/value-shape-sample 8)
+             :seon.config.render/value-verbatim-cap (get r :seon.config.render/value-verbatim-cap 1500)
+             :seon.config.render/value-width        (get r :seon.config.render/value-width 72)
+             :seon.config.render/render-fn-token-cap (get r :seon.config.render/render-fn-token-cap 2000)
+             :seon.config.render/whitespace     (get r :seon.config.render/whitespace :raw)
+             :seon.config.render/tabs           (get r :seon.config.render/tabs :literal)
+             :seon.config.render/trailing-ws    (get r :seon.config.render/trailing-ws :off)
+             :seon.config.render/content-layout (get r :seon.config.render/content-layout :structured)
+             :seon.config.render/line-numbers   (boolean (get r :seon.config.render/line-numbers false))
+             :seon.config.repair/level
+             (coerce-enum (get rep :seon.config.repair/level :symbols)
+                          #{:off :safe-syntax :symbols :aggressive} :symbols)
+             :seon.config.repair/max-fixes-per-form (get rep :seon.config.repair/max-fixes-per-form 1)
+             :seon.config.repair/budget-ms          (get rep :seon.config.repair/budget-ms 50)
+             :seon.config.repair/classes            (get rep :seon.config.repair/classes {})
+             :seon.agent.web/policy
+             (coerce-enum (get web :seon.agent.web/policy :public-only)
+                          #{:open :public-only :allowlist} :public-only)
+             :seon.agent.web/search-backend
+             (coerce-enum (get web :seon.agent.web/search-backend :gemini-grounding)
+                          #{:gemini-grounding :serper} :gemini-grounding)
+             :seon.agent.web/search-model    (get web :seon.agent.web/search-model "gemini-3.1-flash-lite")
+             :seon.agent.web/allowed-domains (vec (get web :seon.agent.web/allowed-domains []))
+             :seon.config.watchdog/stale-ms
+             (get-in manifest [:seon.config/watchdog :seon.config.watchdog/stale-ms] 1200000)
+             :seon.config.breaker/crash-count
+             (get-in manifest [:seon.config/schedule-breaker :seon.config.breaker/crash-count] 3)
+             :seon.config.breaker/window-ms
+             (get-in manifest [:seon.config/schedule-breaker :seon.config.breaker/window-ms] 1800000)}
+      (contains? manifest :seon.config/system-text)
+      (assoc :seon.config/system-text (:seon.config/system-text manifest)))))
+
+(defn stale-singleton-retractions
+  "Retract ops for singleton attrs present in `current` but ABSENT from
+   `desired` — the attr-level heal `seon.state/reconcile!`'s entity-level
+   retract cannot do (the singleton always survives, so it is never a stale
+   ENTITY). The plain-scalar case that matters: an OPTIONAL knob like
+   `:seon.config/system-text` removed from the manifest (absent ⇒ not in
+   `desired`) is retracted so the db stops carrying it. `current` is the stored
+   singleton map (pre-seed db read); `desired` is `(resolve-config-singleton
+   manifest)`. `:db/id` is ignored. Called by `seon.client/boot-seed!` AFTER
+   the config reconcile (the singleton entity exists by then)."
+  {:malli/schema [:=> [:catn [::current :map] [::desired :map]] [:vector :any]]}
+  [current desired]
+  (into []
+        (for [[k v] current
+              :when (and (not= k :db/id) (not (contains? desired k)))]
+          [:db/retract [:seon.config/id cluster-config-id] k v])))
+
+(defn config-view
+  "The live config singleton map — the db datom POST-conn, the manifest resolve
+   PRE-conn.
+
+   The ONE switchover: the injected [[!db-config-view]] seam reads the seeded
+   `:seon.config` singleton once the conn is up (config-through-DB); before the
+   conn exists (the bootstrap sliver — the `on-core-error` dial can fire during
+   store-connect) it falls back to `(resolve-config-singleton (load-manifest))`,
+   the boot file read. Post-seed the db value is authoritative, so a live
+   `db/transact!` to the singleton (or a manifest edit + restart) reaches every
+   accessor. Collections are already decoded by the seam."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  (or (when-let [f @!db-config-view] (f))
+      (resolve-config-singleton (load-manifest))))
 
 (defn namespaces-policy
-  "The resolved namespaces render policy for the live manifest.
+  "The resolved namespaces render policy — read from the config singleton.
 
-   Memoized per
-   `SEON_CONFIG` (config is process-stable; the gym steers SEON_CONFIG per run,
-   so the key tracks it — a different manifest re-resolves). The ONE policy
-   `seon.agent.ctx.namespaces` (renderer) and `seon.client` (boot indexer's
-   full-source decision) share — see [[resolve-namespaces]]."
+   `{:seon.config/always #{ns-kw…} :seon.config/current-ns :full|:off}` off the
+   db singleton (config-through-DB) via [[config-view]]; the boot manifest
+   resolve before the conn. The ONE policy `seon.agent.ctx.namespaces` reads."
   {:malli/schema [:=> [:cat] :seon.config/namespaces-policy]}
   []
-  (let [k (env "SEON_CONFIG")]
-    (or (get @ns-policy-cache k)
-        (let [p (resolve-namespaces (load-manifest))]
-          (swap! ns-policy-cache assoc k p)
-          p))))
+  (let [v (config-view)]
+    {:seon.config/always     (or (:seon.config/always v) #{})
+     :seon.config/current-ns (or (:seon.config/current-ns v) :full)}))
 
 ;;; ============================================================
 ;;; ENV KNOBS — the ONE typed env surface for the FEW knobs that stay env-only
@@ -581,32 +809,18 @@
 ;;; `store-edn-cap` etc.; only the accessor body moved from `env-int` to a
 ;;; manifest read.
 
-;; `def` (NOT defonce): a hot-reload rotates the cache so a dev edit to the
-;; manifest is picked up on next reload. Memoized per SEON_CONFIG within a
-;; process (config is boot-stable; the gym steers SEON_CONFIG per run).
-(def ^:private render-config-cache (atom {}))
-
+;; The render caps are datoms on the config singleton now — [[render-config]]
+;; reads the live [[config-view]] (db post-conn, manifest resolve pre-conn), so
+;; each accessor's `(get (render-config) attr default)` reads the SAME flat map
+;; ([[resolve-config-singleton]] stores the leaf keys top-level). No memo cache:
+;; the db value is the (self-invalidating) cache; a live edit reaches agents on
+;; the next boot reconcile OR a `db/transact!` to the singleton.
 (defn- render-config
-  "The resolved `:seon.config/render` section of the live manifest (env
-   overrides config via the section's `#or [#env … default]` tags), memoized
-   per `SEON_CONFIG`. `{}` when the section is absent — each accessor then uses
-   its own literal fallback (= the manifest default)."
+  "The live config-singleton map [[config-view]] returns — carries every
+   `:seon.config.render/*` cap datom as a top-level key. Each render accessor
+   reads it with its own literal fallback (= the default)."
   []
-  (let [k (env "SEON_CONFIG")]
-    (or (get @render-config-cache k)
-        (let [m (get (load-manifest) :seon.config/render {})]
-          (swap! render-config-cache assoc k m)
-          m))))
-
-(defn reset-render-cache!
-  "Clear the memoized [[render-config]] read.
-
-   For tests that `with-redefs`
-   `load-manifest` and need the next accessor read to re-resolve."
-  {:malli/schema [:=> [:cat] :nil]}
-  []
-  (reset! render-config-cache {})
-  nil)
+  (config-view))
 
 (defn store-edn-cap
   "Per-value pr-str truncation cap for stored EDN display.
@@ -763,58 +977,28 @@
   {:malli/schema [:=> [:cat] :boolean]} []
   (boolean (get (render-config) :seon.config.render/line-numbers false)))
 
-;; `def` (NOT defonce) for the same hot-reload rotation reason as
-;; render-config-cache above; memoized per SEON_CONFIG within a process.
-(def ^:private on-core-error-cache (atom {}))
-
 (defn on-core-error
   "The core-fault escalation dial: `:crash`, `:gate`, or `:log`.
 
-   Manifest `:seon.config/on-core-error`; default `:gate` (the SHIPPED
-   posture — pod never crashes, the CI-shaped wrappers fail runs that
-   accumulated a new `:core`-fault datom). Read by `seon.error/record!`
-   on every `:core` fault; memoized per SEON_CONFIG."
+   Read off the config singleton via [[config-view]] (the manifest resolve
+   pre-conn — this dial can fire during store-connect, so the pre-conn sliver
+   matters). Default `:gate` (the SHIPPED posture — pod never crashes, the
+   CI-shaped wrappers fail runs that accumulated a new `:core`-fault datom).
+   Read by `seon.error/record!` on every `:core` fault."
   {:malli/schema [:=> [:cat] :seon.config/on-core-error]}
   []
-  (let [k (env "SEON_CONFIG")]
-    (or (get @on-core-error-cache k)
-        (let [raw (get (load-manifest) :seon.config/on-core-error :gate)
-              v   (if (contains? #{:crash :gate :log} raw) raw :gate)]
-          (swap! on-core-error-cache assoc k v)
-          v))))
+  (or (:seon.config/on-core-error (config-view)) :gate))
 
-(defn manifest-repl-mode
-  "The cluster's REPL mode from the manifest — `:batch` (default) | `:stream`.
-
-   Read ONCE at boot by `seon.client/boot-seed!` and reconciled into the
-   singleton cluster-config entity's `:seon.config/repl-mode` datom. The
-   turn loop + transcript masthead read that DATOM (via
-   `seon.agent.ctx/repl-mode`), never this accessor — config-through-DB.
-   An unrecognized value coerces to `:batch` (the manifest validator
-   already rejects it loudly at load)."
-  {:malli/schema [:=> [:cat] :seon.config/repl-mode]}
-  []
-  (let [raw (get (load-manifest) :seon.config/repl-mode :batch)]
-    (if (contains? #{:batch :stream} raw) raw :batch)))
-
-;;; --- FORM-AUTOFIX (repair) accessors — the `:seon.config/repair` section.
-;;; Absent section ⇒ the owner-ruled defaults (level `:symbols`, no class
-;;; kill-switches, 1 fix/form, 50ms budget). Consumers combine level +
-;;; classes via `seon.repair/class-enabled?` (the computed rule).
-
-;; `def` (NOT defonce) for hot-reload cache rotation; memoized per SEON_CONFIG.
-(def ^:private repair-config-cache (atom {}))
+;;; --- FORM-AUTOFIX (repair) accessors — the `:seon.config/repair` knobs, now
+;;; singleton datoms. Absent section ⇒ the owner-ruled defaults (level
+;;; `:symbols`, no class kill-switches, 1 fix/form, 50ms budget). Consumers
+;;; combine level + classes via `seon.repair/class-enabled?` (the computed rule).
 
 (defn- repair-config
-  "The resolved `:seon.config/repair` section of the live manifest,
-   memoized per `SEON_CONFIG`. `{}` when absent — each accessor then uses
-   its own literal fallback (= the shipped default)."
+  "The live config-singleton map [[config-view]] returns — carries the
+   `:seon.config.repair/*` datoms as top-level keys."
   []
-  (let [k (env "SEON_CONFIG")]
-    (or (get @repair-config-cache k)
-        (let [m (get (load-manifest) :seon.config/repair {})]
-          (swap! repair-config-cache assoc k m)
-          m))))
+  (config-view))
 
 (defn repair-level
   "The repair level: `:off` / `:safe-syntax` / `:symbols` / `:aggressive`.
@@ -856,70 +1040,40 @@
   []
   (get (repair-config) :seon.config.repair/budget-ms 50))
 
-;; `def` (NOT defonce) for hot-reload cache rotation; memoized per SEON_CONFIG.
-(def ^:private web-policy-cache (atom {}))
-
 (defn web-policy
   "The resolved web-access policy for `seon.agent.web/fetch`.
 
    `{:seon.agent.web/policy <mode> :seon.agent.web/allowed-domains [host…]}`
-   from the manifest's `:seon.config/web` section. Mode default
-   `:public-only` (the SSRF-safe fallback — a downstream inheritor with NO
-   config is never open by accident); the shipped clusters set `:open`
-   explicitly. `allowed-domains` defaults `[]` (only meaningful under
-   `:allowlist`). Host-owned config: `seon.agent.web` reads it but nothing
-   in the pod can widen it. Memoized per SEON_CONFIG (config is boot-stable;
-   the gym steers SEON_CONFIG per run)."
+   off the config singleton via [[config-view]] (the mode coerced fail-closed
+   in [[resolve-config-singleton]]). Mode default `:public-only` (the SSRF-safe
+   fallback — a downstream inheritor with NO config is never open by accident);
+   `allowed-domains` `[]` (only meaningful under `:allowlist`). Host-owned:
+   `seon.agent.web` reads it but nothing in the pod can widen it."
   {:malli/schema [:=> [:cat]
                   [:map
                    [:seon.agent.web/policy :keyword]
                    [:seon.agent.web/allowed-domains [:vector :string]]]]}
   []
-  (let [k (env "SEON_CONFIG")]
-    (or (get @web-policy-cache k)
-        (let [m   (get (load-manifest) :seon.config/web {})
-              raw (get m :seon.agent.web/policy :public-only)
-              ;; fail-closed: an unrecognized mode falls back to the SSRF-safe
-              ;; :public-only, never open by accident.
-              pol (if (contains? #{:open :public-only :allowlist} raw) raw :public-only)
-              v {:seon.agent.web/policy          pol
-                 :seon.agent.web/allowed-domains (vec (get m :seon.agent.web/allowed-domains []))}]
-          (swap! web-policy-cache assoc k v)
-          v))))
-
-;; `def` (NOT defonce) for hot-reload cache rotation; memoized per SEON_CONFIG.
-(def ^:private web-search-cache (atom {}))
-
-(def ^:private known-search-backends
-  "The wired search backends. `:gemini-grounding` ships; `:serper` is the
-   documented second backend (needs SERPER_API_KEY, slotted, not yet wired)."
-  #{:gemini-grounding :serper})
+  (let [v (config-view)]
+    {:seon.agent.web/policy          (or (:seon.agent.web/policy v) :public-only)
+     :seon.agent.web/allowed-domains (vec (:seon.agent.web/allowed-domains v))}))
 
 (defn web-search-config
   "The resolved web-SEARCH backend config for `seon.agent.web/search`.
 
-   `{:seon.agent.web/search-backend <mode> :seon.agent.web/search-model
-   <id>}` from the manifest's `:seon.config/web` section. Backend default
-   `:gemini-grounding` (an unrecognized mode fails closed to it — never a
-   silent wrong provider); model default `\"gemini-3.1-flash-lite\"` (the
-   cheap retrieval pick). Host-owned config: the API key is NEVER here — it
-   is read live from env (`GEMINI_API_KEY`) at call time. Memoized per
-   SEON_CONFIG (config is boot-stable)."
+   `{:seon.agent.web/search-backend <mode> :seon.agent.web/search-model <id>}`
+   off the config singleton via [[config-view]] (backend coerced fail-closed in
+   [[resolve-config-singleton]]). Backend default `:gemini-grounding`; model
+   default `\"gemini-3.1-flash-lite\"`. The API key is NEVER here — read live
+   from env (`GEMINI_API_KEY` / `SERPER_API_KEY`) at call time."
   {:malli/schema [:=> [:cat]
                   [:map
                    [:seon.agent.web/search-backend :keyword]
                    [:seon.agent.web/search-model :string]]]}
   []
-  (let [k (env "SEON_CONFIG")]
-    (or (get @web-search-cache k)
-        (let [m       (get (load-manifest) :seon.config/web {})
-              raw     (get m :seon.agent.web/search-backend :gemini-grounding)
-              backend (if (contains? known-search-backends raw) raw :gemini-grounding)
-              v {:seon.agent.web/search-backend backend
-                 :seon.agent.web/search-model
-                 (get m :seon.agent.web/search-model "gemini-3.1-flash-lite")}]
-          (swap! web-search-cache assoc k v)
-          v))))
+  (let [v (config-view)]
+    {:seon.agent.web/search-backend (or (:seon.agent.web/search-backend v) :gemini-grounding)
+     :seon.agent.web/search-model   (or (:seon.agent.web/search-model v) "gemini-3.1-flash-lite")}))
 
 (defn render-strict?
   "The FAIL-LOUD render dial.
@@ -1002,45 +1156,38 @@
    to deepen the tree."
   {:malli/schema [:=> [:cat] :int]}
   []
-  (let [v (get (load-manifest) :seon.config/spawn-depth-cap 1)]
-    (if (and (int? v) (>= v 0)) v 1)))
+  (get (config-view) :seon.config/spawn-depth-cap 1))
 
 (defn watchdog-stale-ms
   "Heartbeat-watchdog staleness threshold in ms (Piece 2c).
 
    A run whose beat (or `started-at`, if it never beat) has not progressed for
-   longer is closed `:crashed`. Manifest
-   `:seon.config/watchdog {:seon.config.watchdog/stale-ms N}`; default 1200000
-   (20 min — comfortably ABOVE the 15-min per-turn inner bound
+   longer is closed `:crashed`. Singleton `:seon.config.watchdog/stale-ms`;
+   default 1200000 (20 min — comfortably ABOVE the 15-min per-turn inner bound
    `SEON_TURN_TIMEOUT_MS`, so a slow-but-alive LLM turn is never falsely
    killed)."
   {:malli/schema [:=> [:cat] :int]}
   []
-  (get-in (load-manifest)
-          [:seon.config/watchdog :seon.config.watchdog/stale-ms] 1200000))
+  (get (config-view) :seon.config.watchdog/stale-ms 1200000))
 
 (defn schedule-breaker-crash-count
   "Schedule-wake breaker trip count N (Piece 2d).
 
    At ≥N `:crashed` closes within the window, schedule wakes are refused.
-   Manifest `:seon.config/schedule-breaker {:seon.config.breaker/crash-count N}`;
-   default 3."
+   Singleton `:seon.config.breaker/crash-count`; default 3."
   {:malli/schema [:=> [:cat] :int]}
   []
-  (get-in (load-manifest)
-          [:seon.config/schedule-breaker :seon.config.breaker/crash-count] 3))
+  (get (config-view) :seon.config.breaker/crash-count 3))
 
 (defn schedule-breaker-window-ms
   "Schedule-wake breaker sliding window in ms (Piece 2d).
 
    `:crashed` closes older than this don't count toward the trip; the window
-   sliding past re-enables schedules (no stored reset). Manifest
-   `:seon.config/schedule-breaker {:seon.config.breaker/window-ms N}`; default
-   1800000 (30 min)."
+   sliding past re-enables schedules (no stored reset). Singleton
+   `:seon.config.breaker/window-ms`; default 1800000 (30 min)."
   {:malli/schema [:=> [:cat] :int]}
   []
-  (get-in (load-manifest)
-          [:seon.config/schedule-breaker :seon.config.breaker/window-ms] 1800000))
+  (get (config-view) :seon.config.breaker/window-ms 1800000))
 
 (defn- upsert-by-name
   "Layer `additions` over `base` by `:seon.agent.ctx/name`, MERGING an

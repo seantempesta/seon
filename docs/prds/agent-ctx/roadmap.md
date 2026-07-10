@@ -22,6 +22,20 @@ misread their own situation, then closing each gap.
   depth-capped spawn (cap 1), outcome→parent routing, heartbeat watchdog,
   schedule breaker, `:subagents` + `:orphaned-agents` sections. Suite
   1125/5046. Spec: [[multiagent-context-spec]].
+- **Config → DB migration (SCALAR surface) SHIPPED** (config-db-migration-spec,
+  2026-07-10): the whole config-manifest scalar/dial/policy surface is now a
+  `:seon.config` singleton seeded via the `#{:config}` reconcile — render caps,
+  value knobs, repair, web policy/search, watchdog, breaker, spawn-depth-cap,
+  on-core-error, repl-mode, namespaces policy. All 6 `SEON_CONFIG` memo caches
+  deleted; the ~30 accessors keep their names but read `config/config-view` (db
+  post-conn via a db→config injection seam, manifest resolve pre-conn). Live-
+  proven: a dial is now replay-visible (`as-of` a past t sees the OLD cap) and
+  live-tunable (a `db/transact` reaches every accessor, no file edit).
+  **DEFERRED (blocked on ctx.cljs / separate units):** Piece 4 (context-block +
+  home-requires reconcile, provenance markers, the `install!` symbol
+  round-trip fix) — it lives in `ctx.cljs`, the other lane's file; and Piece 5
+  (eval `!timeout-ms`, shell `!jobs` → datoms). So Unit 2 (block reconcile,
+  below) is NOT subsumed — it stays open.
 - **Live behavioral drive (isolated `mad-drive` cluster) found the real
   lesson:** the multi-agent sections work where the lever is data-consumption
   (result incorporation + depth-cap redirect are clean wins — the derived

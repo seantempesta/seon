@@ -5,6 +5,16 @@
 ;; OPTIONAL override below. Every key fully namespaced. Add a new concern = add
 ;; ONE key here + a resolver in seon.config (the "add more things to it"
 ;; contract).
+;;
+;; CONFIG → DB (config-db-migration 2026-07-10): this manifest is a SEED FILE,
+;; not a runtime dependency. At boot `seon.config/resolve-config-singleton`
+;; resolves every knob to its effective value and the `#{:config}` reconcile
+;; transacts them into the `:seon.config` singleton entity; from then on EVERY
+;; runtime read is a db query (`seon.config/config-view`). So a knob is a DATOM
+;; — replay-visible (a `cluster fork` at a past basis-t sees the caps that were
+;; in force then) and live-tunable (a `db/transact!` to the singleton reaches
+;; every agent with no restart). "Config edit → restart pod" applies a file
+;; edit uniformly; a removed key heals on the next boot reconcile.
 {;; ── SKILL CORPUS ──
  ;; The env-dir scan (`SEON_SKILLS_DIR`, default `.claude/skills`) IS the corpus:
  ;; every skill it finds is scanned into the catalog. The always-on skill BODIES

@@ -6,6 +6,14 @@ tags: [research, agent, context]
 
 # Config → DB reactivity audit — does the pod honor "config seeds the DB, everything else derives"?
 
+> **ADOPTED (2026-07-10):** the V1 recommendation (a `:seon.config` singleton
+> seeded via the `#{:config}` reconcile) is BUILT for the SCALAR/dial/policy
+> surface (D5/D6 closed — caps/dials are now replay-visible datoms; the 6 memo
+> caches deleted). The per-agent CONTEXT half (D1–D4: block + home-requires
+> reconcile, the D2 provenance marker, the D3 `install!` symbol round-trip) is
+> DEFERRED — it lives in `ctx.cljs` (the other lane's file). See
+> `config-db-migration-spec.md` Piece 4 + the roadmap.
+
 ## 1. Executive summary
 
 ### The owner's intended contract

@@ -6,6 +6,15 @@ tags: [research, agent, context]
 
 # In-process mutable-state audit — every atom/volatile/set! in the CLJS pod
 
+> **ADOPTED (2026-07-10):** V1 (the 6 config memo caches → a `:seon.config`
+> singleton) is BUILT — caches deleted, caps/dials are datoms. V2
+> (`shell !jobs` records → datoms) and V3 (`eval/!timeout-ms` → the singleton)
+> are DEFERRED as their own small units: V3 changes `set-timeout-ms!`'s
+> sync→async contract on an agent verb in the hot eval path; V2 is sizable
+> (touches the jobs render + shell verbs). The injection-seam sprawl (§7)
+> stays; this migration adds ONE more seam (db→config `config-view`) by the
+> same sanctioned pattern.
+
 Companion to `config-db-reactivity-audit-2026-07-10.md` (read that first for
 the config-manifest half). This one answers the owner's follow-up: *"Why is it
 in an atom? We should be writing to the DB and only reading from the DB. Audit

@@ -355,14 +355,31 @@ the presence-set pins, the transcript band schedule + decay, render caps, the
 predicted-relevance token cap, per-agent overrides in agent scope. Absent
 config = the default seed, byte-identical. No env-var side doors.
 
-**Config-through-DB.** A manifest value that drives render or turn behavior is
-read ONCE at boot and reconciled into DB state; from there the runtime reads
-the DATOM, never the config accessor. `:seon.config/repl-mode` is the first
-case: `boot-seed!` reconciles the manifest key onto the singleton
-cluster-config entity (`[:seon.config/id "cluster"]`), and both the turn loop
-(`run-turn!`) and the masthead read `seon.agent.ctx/repl-mode` off the frozen
-db. A live `transact` of that datom changes the next prompt with no file edit.
-The transcript's tier/decay datoms are the existing precedent this generalizes.
+**Config-through-DB (the whole surface, not one dial).** The manifest is a
+SEED FILE, not a runtime dependency. At boot `seon.config/resolve-config-singleton`
+resolves EVERY knob to its effective value (env→manifest→default) and the
+`#{:config}` `state/reconcile!` transacts them as ONE `:seon.config` singleton
+entity (`[:seon.config/id "cluster"]`) — the SAME reconcile routes and skills
+ride, so a removed key heals on the next boot and the singleton is
+retract-protected by riding the desired set. From there EVERY runtime read is a
+db query: the accessors (`config/eval-render-cap`, `config/on-core-error`,
+`config/web-policy`, `config/namespaces-policy`, the dials …) keep their names
++ arities but read `config/config-view` — the seeded singleton datom (a
+db-value-keyed memo collapses a turn's reads to one entity pull), falling back
+to the boot manifest resolve only for the pre-conn sliver (the `on-core-error`
+dial can fire during store-connect). `seon.config` cannot require `seon.db`
+(the require dir is db→error→config), so `seon.db` INJECTS the reader — the
+same seam pattern as `seon.error`'s db-hooks. Three collection knobs
+(`:seon.config/always`, `:seon.config.repair/classes`,
+`:seon.agent.web/allowed-domains`) ride the mixed-`:or` EDN-slot bridge (the
+`home-requires` precedent) — one cardinality-one datom that upsert replaces.
+
+Two payoffs this unlocks: a dial is now **replay-visible** (a `cluster fork`
+at a basis-t BEFORE a dial change renders with the OLD value — config lives in
+history) and **live-tunable** (a `db/transact` of the singleton changes the
+next prompt with no file edit). `:seon.config/repl-mode` and the transcript's
+tier/decay datoms are the precedents this generalizes to the whole config
+surface.
 
 ## See also
 

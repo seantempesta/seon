@@ -11,9 +11,11 @@
      (require 'seon.config-test :reload)
      (cljs.test/run-tests 'seon.config-test)"
   (:require
-    [cljs.test :refer [deftest is testing]]
+    [cljs.test :refer [deftest is testing async]]
+    [datahike.api :as d]
     [malli.core :as m]
-    [seon.config :as config]))
+    [seon.config :as config]
+    [seon.db :as db]))
 
 (def ^:private routes
   [{:seon.route/name :seon.route/root  :seon.route/pattern "/"}
@@ -49,14 +51,16 @@
                       :seon.config.render/content-layout :single-line
                       :seon.config.render/line-numbers   true}})))
   (testing "an absent section defaults to today's byte-identical render"
+    ;; `*conn*` nil ⇒ the db-view seam returns nil ⇒ the accessors take the
+    ;; PRE-conn manifest-resolve path (`resolve-config-singleton`), so the
+    ;; redefed `{}` manifest drives the defaults (config-db-migration).
     (with-redefs [config/load-manifest (fn [] {})]
-      (config/reset-render-cache!)
-      (is (= :raw        (config/render-whitespace)))
-      (is (= :literal    (config/render-tabs)))
-      (is (= :off        (config/render-trailing-ws)))
-      (is (= :structured (config/render-content-layout)))
-      (is (false?        (config/render-line-numbers?)))
-      (config/reset-render-cache!))))
+      (binding [db/*conn* nil]
+        (is (= :raw        (config/render-whitespace)))
+        (is (= :literal    (config/render-tabs)))
+        (is (= :off        (config/render-trailing-ws)))
+        (is (= :structured (config/render-content-layout)))
+        (is (false?        (config/render-line-numbers?)))))))
 
 ;;; :my.skills/load — the always-on skill-body presence-set expands into
 ;;; :skill/<name> blocks on :seon.agent/ctx (live-proof the dial is consumed:
@@ -178,24 +182,24 @@
 ;;; byte-identical to the shipped value.
 
 (deftest render-caps-read-the-manifest
+  ;; `*conn*` nil ⇒ the db-view seam returns nil ⇒ the accessors resolve from
+  ;; the redefed manifest (the pre-conn sliver path); post-conn they read the
+  ;; seeded singleton datom (proven live, not here — this is the pure resolver).
   (testing "an absent :seon.config/render section → the accessor's literal fallback"
     (with-redefs [config/load-manifest (fn [] {})]
-      ;; bust the memoized read so the redef takes
-      (config/reset-render-cache!)
-      (is (= 72 (config/value-width)))
-      (is (= 16384 (config/store-edn-cap)))
-      (is (= 3 (config/value-max-depth)))))
+      (binding [db/*conn* nil]
+        (is (= 72 (config/value-width)))
+        (is (= 16384 (config/store-edn-cap)))
+        (is (= 3 (config/value-max-depth))))))
   (testing "a manifest value overrides the fallback"
     (with-redefs [config/load-manifest
                   (fn [] {:seon.config/render {:seon.config.render/value-width 40
                                                :seon.config.render/store-edn-cap 999}})]
-      (config/reset-render-cache!)
-      (is (= 40 (config/value-width)))
-      (is (= 999 (config/store-edn-cap)))
-      ;; an unset key in a present section still falls back to the literal
-      (is (= 3 (config/value-max-depth)))))
-  ;; restore the live cache for the rest of the run
-  (config/reset-render-cache!))
+      (binding [db/*conn* nil]
+        (is (= 40 (config/value-width)))
+        (is (= 999 (config/store-edn-cap)))
+        ;; an unset key in a present section still falls back to the literal
+        (is (= 3 (config/value-max-depth)))))))
 
 ;;; ENV KNOBS — the few knobs that stay env-only (launch/process). These tests
 ;;; pin the COERCION + the :seon.config/dirs precedence, not live env values.
@@ -228,3 +232,105 @@
         #(is (= "from/env" (config/skills-dir))))
       (with-env "SEON_SKILLS_DIR" nil
         #(is (= ".claude/skills" (config/skills-dir)))))))
+
+;;; ============================================================
+;;; CONFIG → DB (config-db-migration 2026-07-10). `resolve-config-singleton` is
+;;; the ONE resolver (seed source + pre-conn fallback); the boot reconcile seeds
+;;; it as the `:seon.config` singleton; every accessor reads it back from the db.
+;;; ============================================================
+
+(deftest resolve-config-singleton-defaults-and-overrides
+  (testing "the {} manifest resolves every knob to its byte-parity default"
+    (let [s (config/resolve-config-singleton {})]
+      (is (= "cluster" (:seon.config/id s)))
+      (is (= :batch    (:seon.config/repl-mode s)))
+      (is (= 1500      (:seon.config.render/eval-cap s)))
+      (is (= :symbols  (:seon.config.repair/level s)))
+      (is (= :public-only (:seon.agent.web/policy s)))
+      (is (= 1         (:seon.config/spawn-depth-cap s)))
+      (is (= 1200000   (:seon.config.watchdog/stale-ms s)))
+      (is (= {}        (:seon.config.repair/classes s)))
+      (is (= []        (:seon.agent.web/allowed-domains s)))
+      (is (= :full     (:seon.config/current-ns s)))
+      ;; system-text has NO default — absent from a bare manifest
+      (is (not (contains? s :seon.config/system-text)))))
+  (testing "a manifest value overrides the resolved knob"
+    (let [s (config/resolve-config-singleton
+              {:seon.config/render {:seon.config.render/eval-cap 42}
+               :seon.config/on-core-error :log
+               :seon.config/system-text "you are a helpful agent"})]
+      (is (= 42 (:seon.config.render/eval-cap s)))
+      (is (= :log (:seon.config/on-core-error s)))
+      (is (= "you are a helpful agent" (:seon.config/system-text s))))))
+
+(deftest stale-singleton-retractions-heals-optional-attrs
+  (testing "an attr present in the stored singleton but absent from desired is retracted"
+    (let [current  {:db/id 7 :seon.config/id "cluster"
+                    :seon.config.render/eval-cap 1500
+                    :seon.config/system-text "stale"}
+          desired  (config/resolve-config-singleton {})    ; no system-text
+          retracts (config/stale-singleton-retractions current desired)]
+      ;; only system-text is stale (eval-cap is in desired; :db/id is ignored)
+      (is (= [[:db/retract [:seon.config/id "cluster"] :seon.config/system-text "stale"]]
+             retracts))))
+  (testing "no retractions when the stored map matches desired"
+    (let [d (config/resolve-config-singleton {})]
+      (is (empty? (config/stale-singleton-retractions d d))))))
+
+(defn- config-scratch-conn
+  "Promise of a fresh :memory conn with tx-meta + the `:seon.config` singleton
+   attrs installed — for the db-backed accessor reads."
+  []
+  (let [attrs [:seon.config/id :seon.config/repl-mode :seon.config/current-ns
+               :seon.config/on-core-error :seon.config/spawn-depth-cap
+               :seon.config/always :seon.config/system-text
+               :seon.config.render/eval-cap :seon.config.render/store-edn-cap
+               :seon.config.render/value-width :seon.config.render/line-numbers
+               :seon.config.repair/level :seon.config.repair/classes
+               :seon.agent.web/policy :seon.agent.web/allowed-domains
+               :seon.agent.web/search-backend :seon.agent.web/search-model
+               :seon.config.watchdog/stale-ms :seon.config.breaker/crash-count]
+        cfg {:store {:backend :memory :id (random-uuid)}
+             :schema-flexibility :write :keep-history? true}]
+    (-> (d/create-database cfg)
+        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then (fn [conn]
+                 (-> (d/transact! conn {:tx-data (into (db/malli->datahike-schema attrs)
+                                                       (db/tx-meta-datahike-schema))})
+                     (.then (fn [_] conn))))))))
+
+(deftest accessors-read-the-seeded-singleton-datom
+  ;; Seed the singleton into a scratch conn (the boot path), pin `*conn*`, and
+  ;; prove the accessors read the DATOM — config-through-DB. The three collection
+  ;; knobs round-trip through the EDN-slot bridge (set / map / vector).
+  (async done
+    (-> (config-scratch-conn)
+        (.then
+          (fn [conn]
+            (let [manifest {:seon.config/render {:seon.config.render/eval-cap 4321}
+                            :seon.config/on-core-error :log
+                            :seon.config/repair {:seon.config.repair/classes {:foo false}}
+                            :seon.config/web {:seon.agent.web/policy :allowlist
+                                              :seon.agent.web/allowed-domains ["a.example.com"]}
+                            :seon.config/namespaces {:seon.config/always '[my.kb my.plan]}
+                            :seon.config/system-text "SYS"}
+                  singleton (config/resolve-config-singleton manifest)
+                  prev db/*conn*]
+              (-> (db/with-tx-context
+                    {:seon.db/origin :config}
+                    (fn [] (db/transact! {:seon.db/conn conn :seon.db/tx-data [singleton]})))
+                  (.then
+                    (fn [_]
+                      (set! db/*conn* conn)
+                      (try
+                        ;; scalar caps + dials read from the datom
+                        (is (= 4321 (config/eval-render-cap)))
+                        (is (= :log (config/on-core-error)))
+                        (is (= 1 (config/spawn-depth-cap)))      ; default, seeded
+                        ;; collection knobs decoded off the EDN slot
+                        (is (= #{:my.kb :my.plan} (:seon.config/always (config/namespaces-policy))))
+                        (is (= :allowlist (:seon.agent.web/policy (config/web-policy))))
+                        (is (= ["a.example.com"] (:seon.agent.web/allowed-domains (config/web-policy))))
+                        (finally (set! db/*conn* prev) (done)))))
+                  (.catch (fn [e] (set! db/*conn* prev) (is false (str e)) (done)))))))
+        (.catch (fn [e] (is false (str e)) (done))))))

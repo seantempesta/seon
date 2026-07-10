@@ -2479,43 +2479,28 @@
                     (check! :core-index
                             (await (db/transact!
                                      {:seon.db/conn conn
-                                      :seon.db/tx-data index-tx})))
-                    ;; Config-through-DB (repl-mode Phase 1): the manifest's
-                    ;; `:seon.config/repl-mode` is read ONCE here and
-                    ;; reconciled into the singleton cluster-config entity's
-                    ;; datom. The turn loop + transcript masthead read that
-                    ;; DATOM (`seon.agent.ctx/repl-mode`), never the config
-                    ;; accessor — a manifest change updates it on the next
-                    ;; boot (idempotent upsert-by-identity). Seeded in the
-                    ;; APPEND-ONLY `:core-seed` block (NOT the declarative
-                    ;; `:config` desired set below) so the routes+skills
-                    ;; `reconcile!` — which RETRACTS any `:config`-origin row
-                    ;; absent from its desired set — never sweeps it away.
-                    (check! :repl-mode
-                            (await (db/transact!
-                                     {:seon.db/conn conn
-                                      :seon.db/tx-data
-                                      [{:seon.config/id        seon.agent.ctx/cluster-config-id
-                                        :seon.config/repl-mode (config/manifest-repl-mode)}]}))))))
+                                      :seon.db/tx-data index-tx}))))))
               ;; DECLARATIVE DESIRED SET (origin :config): the routes
-              ;; (`:seon.route/*`, identity `:seon.route/name`) + the scanned
+              ;; (`:seon.route/*`, identity `:seon.route/name`), the scanned
               ;; skills corpus (`:my.skills/*`, identity `:my.skills/name`),
-              ;; curated by the manifest, are ONE managed population synced
-              ;; through reconcile! — upsert-by-identity (idempotent on an Nth
-              ;; boot) AND retract-stale, so a route dropped from the manifest
-              ;; or a skill removed from disk is RETRACTED (it cannot
-              ;; persist). Scope `#{:config}` excludes the :core-seed
-              ;; introspection above. reconcile! never rejects; its
-              ;; error-value is checked + thrown (surface-errors-loudly).
-              (let [desired (into (vec (config/resolve-routes
-                                         (route/core-routes-tx)
-                                         manifest))
-                                  ;; the scanned skill corpus is the desired
-                                  ;; set as-is (no include/exclude curation —
-                                  ;; the env-dir scan IS the corpus; always-on
-                                  ;; bodies are the agent-context's
-                                  ;; :my.skills/load presence-set).
-                                  (my.skills/seed-skills-tx-data))
+              ;; AND the `:seon.config` SINGLETON (identity `:seon.config/id`,
+              ;; every cluster-config knob as a datom — config-db-migration
+              ;; 2026-07-10) are ONE managed population synced through
+              ;; reconcile! — upsert-by-identity (idempotent on an Nth boot)
+              ;; AND retract-stale, so a route dropped from the manifest / a
+              ;; skill removed from disk is RETRACTED. The singleton rides the
+              ;; SAME `#{:config}` scope: folding it INTO the desired set is
+              ;; what keeps it retract-PROTECTED (a `:config`-origin row absent
+              ;; from desired is swept — the Phase-1 reconcile-retract trap the
+              ;; repl-mode seed hit; now the singleton owns the desired-set
+              ;; slot). reconcile! never rejects; its error-value is checked +
+              ;; thrown (surface-errors-loudly).
+              (let [singleton (config/resolve-config-singleton manifest)
+                    desired (-> (vec (config/resolve-routes
+                                       (route/core-routes-tx)
+                                       manifest))
+                                (into (my.skills/seed-skills-tx-data))
+                                (conj singleton))
                     recon   (await
                               (db/with-tx-context
                                 {:seon.db/origin :config}
@@ -2526,10 +2511,25 @@
                                      :seon.db/conn          conn}))))]
                 (when (false? (:seon.state/ok? recon))
                   (throw (ex-info
-                           (str "boot seed reconcile (routes+skills) failed: "
+                           (str "boot seed reconcile (routes+skills+config) failed: "
                                 (:seon.state/error recon))
                            {:seon.client/seed-step :core-declarative
-                            :seon.state/error      (:seon.state/error recon)})))))
+                            :seon.state/error      (:seon.state/error recon)})))
+                ;; Attr-level heal reconcile's entity-level retract can't do:
+                ;; the singleton ALWAYS survives, so an OPTIONAL knob removed
+                ;; from the manifest (e.g. `:seon.config/system-text`) would
+                ;; persist stale. Retract any singleton attr present in the
+                ;; stored entity but absent from the freshly-resolved desired
+                ;; map (read the post-reconcile db value for `current`).
+                (let [current  (config/config-view)
+                      retracts (config/stale-singleton-retractions current singleton)]
+                  (when (seq retracts)
+                    (check! :config-heal
+                            (await (db/with-tx-context
+                                     {:seon.db/origin :config}
+                                     (fn ^:async heal-config! []
+                                       (db/transact! {:seon.db/conn conn
+                                                      :seon.db/tx-data retracts})))))))))
             {::seeded? true}
             (finally
               (set! db/*conn* prev-conn))))))))
