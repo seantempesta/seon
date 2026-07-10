@@ -30,6 +30,12 @@
 ;;; validator's current --serve framing) is also accepted, defaulting to
 ;;; {op:"parse"}, so the same pipe carries either framing.
 ;;;
+;;; op:"cursor" (typeahead-design.md §"The cursor-intelligence oracle"):
+;;;   in :  {"op":"cursor","id":7,"code":"<draft>","cursor":<char offset>}
+;;;   out:  {"op":"cursor","id":7,"tier":"cursor","slot-kind":{…},"locals":[…],
+;;;          "candidates":[{"name":…,"type":…}…],"template":null,
+;;;          "repaired-text":"…","balance-delta":n,"clean":bool}
+;;;
 ;;; Run:  bb --classpath src -m … is NOT used (self-contained); just:
 ;;;         bin/oracle-server          # reads stdin lines, writes stdout lines
 ;;;       or feed one line for a one-shot smoke:
@@ -45,7 +51,11 @@
 
 (require '[seon.repl.internal :as internal]
          '[seon.diffusion.grammar :as grammar]        ; shared T1/phase predicates (bb + pod)
-         '[cheshire.core :as json])
+         '[cheshire.core :as json]
+         '[clojure.string :as str]
+         '[clojure.walk :as walk]
+         '[edamame.core :as edamame]                  ; bb built-in — repair signal
+         '[babashka.pods :as pods])
 
 (defn validate
   "Pure: code-string -> the Node-validator-IDENTICAL result map
@@ -125,6 +135,385 @@
       :renoise_spans renoise
       :injections    []})))
 
+;;; ─────────────────────────────────────────────────────────────────────────
+;;; op:"cursor" — cursor intelligence for the typeahead driver.
+;;;
+;;; Design: docs/prds/diffusion-dynamic-context/typeahead-design.md
+;;;         §"The cursor-intelligence oracle"; composition measured in
+;;;         research/clojure-completion-stack-2026-07-10.md (~2.3ms/call).
+;;;
+;;;   in :  {"op":"cursor","id":7,"code":"(todo/add! {:my.plan/title \"x\", :my.p","cursor":38}
+;;;   out:  {"op":"cursor","id":7,"tier":"cursor",
+;;;          "slot-kind":{"kind":"map-key","head":"todo/add!","arg-position":1},
+;;;          "locals":[…],"candidates":[{"name":…,"type":"local|keyword|core"}…],
+;;;          "template":null,            ; P1: malli templates are pod-side, not derivable here
+;;;          "repaired-text":"…","balance-delta":2,"clean":false}
+;;;
+;;; Pipeline: splice `__prefix__` over the token at `cursor` → edamame-guided
+;;; delimiter repair → compliment-context port (slot-kind + lexical env) +
+;;; clj-kondo pod analysis of the repaired draft (scope-filtered locals,
+;;; buffer keywords) → candidates ranked clojure-lsp-style (locals ≻
+;;; keywords ≻ core). Errors are values: bad input / missing clj-kondo
+;;; degrade in-band, never throw.
+
+;;; ── vendored port: compliment.context + compliment.sources.local-bindings
+;;; (github.com/alexander-yakushev/compliment, EPL-1.0) — trimmed per the
+;;; research doc: `dumb-read-form` dropped (edamame repair supersedes it),
+;;; JVM tag inference + `ns-resolve`d :completion/locals metadata stubbed.
+
+(def ^:private prefix-placeholder
+  "Sentinel spliced over the token at the cursor — the cursor IS this symbol."
+  '__prefix__)
+
+(defn- restore-collection-literals
+  "Undo the `{`→`(compliment-hashmap …)` read trick; odd maps pad with nil."
+  [context]
+  (walk/postwalk
+   (fn [el]
+     (if (and (seq? el) (symbol? (first el)))
+       (case (str (first el))
+         "compliment-hashmap" (apply hash-map
+                                     (if (even? (count el))
+                                       (concat (rest el) [nil])
+                                       (rest el)))
+         "compliment-hashset" (set (rest el))
+         el)
+       el))
+   context))
+
+(defn- try-read-replacing-maps
+  "Read a context string, rewriting map/set literals to call forms so an
+   UNFINISHED map (odd entries — the mid-typing case) still reads. nil on
+   any reader failure."
+  [s]
+  (try (binding [*read-eval* false]
+         (-> s
+             (str/replace "\\{" "(char 123)")
+             (str/replace "\\}" "(char 125)")
+             (str/replace "#{" "(compliment-hashset ")
+             (str/replace "{" "(compliment-hashmap ")
+             (str/replace "}" ")")
+             (str/replace "#?@" "^:splicing-reader-conditional ")
+             (str/replace "#?" "^:reader-conditional ")
+             read-string
+             restore-collection-literals))
+       (catch Exception _ nil)))
+
+(defn- macroexpand-threading
+  "Expand only the threading macros so `->`/`->>`/`doto` don't hide the real
+   call around the cursor."
+  [form]
+  (try
+    (walk/postwalk
+     (fn [x]
+       (if (and (seq? x) (symbol? (first x))
+                (contains? #{"->" "->>" "some->" "some->>" "doto"} (name (first x))))
+         (macroexpand-1 (case (name (first x))
+                          "some->"  (cons '-> (rest x))
+                          "some->>" (cons '->> (rest x))
+                          x))
+         x))
+     form)
+    (catch Exception _ form)))
+
+(defn- parse-context
+  "Compliment's context parse: the levels enclosing `__prefix__`,
+   INNERMOST FIRST, each {:idx … :form …} (+ :map-role :key|:value for maps)."
+  [context]
+  (letfn [(parse [ctx]
+            (cond
+              (sequential? ctx)
+              (when-let [[idx rest] (first (keep-indexed (fn [idx el]
+                                                           (when-let [p (parse el)]
+                                                             [idx p]))
+                                                         ctx))]
+                (cons {:idx idx :form ctx} rest))
+              (map? ctx)
+              (when-let [[idx role rest] (first (keep (fn [[k v]]
+                                                        (if-let [p (parse v)]
+                                                          [k :value p]
+                                                          (when-let [p (parse k)]
+                                                            [v :key p])))
+                                                      ctx))]
+                (cons {:idx idx :map-role role :form ctx} rest))
+              (string? ctx)
+              (let [idx (.indexOf ^String ctx (name prefix-placeholder))]
+                (when (>= idx 0) [{:idx idx :form ctx}]))
+              (= ctx prefix-placeholder) ()))]
+    (some-> (parse context) reverse)))
+
+;; local-bindings port (tag inference stubbed — names only)
+(defn- let-like? [x] (and (symbol? x) (contains? #{"let" "if-let" "when-let" "if-some" "when-some" "loop" "with-open" "dotimes" "with-local-vars"} (name x))))
+(defn- defn-like? [x] (and (symbol? x) (contains? #{"defn" "defn-" "fn" "fn*" "defmacro" "defmethod"} (name x))))
+(defn- doseq-like? [x] (and (symbol? x) (contains? #{"doseq" "for"} (name x))))
+(defn- letfn-like? [x] (and (symbol? x) (= "letfn" (name x))))
+
+(defn- parse-binding
+  "All symbols bound by one binding node, destructuring included."
+  [node]
+  (cond (vector? node) (mapcat parse-binding node)
+        (map? node)
+        (let [normal  (mapcat parse-binding (remove keyword? (keys node)))
+              kb      (->> node
+                           (mapcat (fn [[k v]]
+                                     (when (and (keyword? k)
+                                                (contains? #{"keys" "strs" "syms"} (name k)))
+                                       v)))
+                           (map #(if (keyword? %) (symbol (name %)) %)))
+              as-bind (:as node)]
+          (cond-> (concat normal kb) as-bind (conj as-bind)))
+        (not (contains? #{'& '_} node)) [node]))
+
+(defn- parse-fn-body
+  "Symbols bound by a fn body: the fn name + every arity's argv bindings."
+  [fn-body]
+  (let [fn-name (when (symbol? (first fn-body)) (first fn-body))
+        fn-body (if fn-name (rest fn-body) fn-body)]
+    (cond-> (mapcat parse-binding
+                    (loop [[c & r] fn-body, bnodes []]
+                      (cond (nil? c)    bnodes
+                            (list? c)   (recur r (conj bnodes (first c)))
+                            (vector? c) c
+                            :else       (recur r bnodes))))
+      fn-name (conj fn-name))))
+
+(defn- extract-local-bindings [form]
+  (when (seq? form)
+    (let [sym (first form)]
+      (cond (let-like? sym)   (mapcat (fn [[left _]] (parse-binding left))
+                                      (partition 2 (second form)))
+            (defn-like? sym)  (parse-fn-body (rest form))
+            (letfn-like? sym) (mapcat parse-fn-body (second form))
+            (doseq-like? sym) (->> (partition 2 (second form))
+                                   (mapcat (fn [[left right]]
+                                             (if (= left :let) (take-nth 2 right) [left])))
+                                   (mapcat parse-binding))
+            (= sym 'as->)     [(nth form 2)]))))
+
+(defn- bindings-from-context
+  "Every local bound by the context levels enclosing the cursor."
+  [ctx]
+  (try (->> (mapcat #(extract-local-bindings (:form %)) ctx)
+            (filter symbol?)
+            distinct)
+       (catch Exception _ ())))
+
+;;; ── repair: edamame-guided delimiter append (research doc §Q4/Q5) ──
+
+(defn- scan-missing-closers
+  "Total string/comment/char-literal-aware delimiter scan: the closer string
+   needed to balance `s` at EOF. The finisher when edamame stalls on a
+   NON-delimiter error (e.g. an odd map mid-typing) before reaching EOF."
+  [s]
+  (let [n (count s)]
+    (loop [i 0, stack [], mode :code]
+      (if (>= i n)
+        (str (when (= mode :string) "\"")
+             (apply str (map {\( ")" \[ "]" \{ "}"} (reverse stack))))
+        (let [c (.charAt ^String s i)]
+          (case mode
+            :comment (recur (inc i) stack (if (= c \newline) :code :comment))
+            :string  (cond (= c \\) (recur (+ i 2) stack :string)
+                           (= c \") (recur (inc i) stack :code)
+                           :else    (recur (inc i) stack :string))
+            :code    (cond (= c \\) (recur (+ i 2) stack :code)
+                           (= c \") (recur (inc i) stack :string)
+                           (= c \;) (recur (inc i) stack :comment)
+                           (contains? #{\( \[ \{} c) (recur (inc i) (conj stack c) :code)
+                           (contains? #{\) \] \}} c)
+                           (recur (inc i)
+                                  (if (and (seq stack)
+                                           (= c (get {\( \) \[ \] \{ \}} (peek stack))))
+                                    (pop stack)
+                                    stack)
+                                  :code)
+                           :else (recur (inc i) stack :code))))))))
+
+(defn- delimiter-repair
+  "Bounded append-repair driven by edamame's `:edamame/expected-delimiter`
+   ex-data (EOF errors only — the directed, minimal signal). When edamame
+   stalls mid-text on a non-delimiter error, the remaining closers come from
+   [[scan-missing-closers]] so the result is always delimiter-balanced.
+   Returns {:text s :appended n :clean? bool} (+ :err when not clean)."
+  [s]
+  (loop [s s, n 0]
+    (let [ex (try (edamame/parse-string-all s {:all true :auto-resolve name
+                                               :readers (fn [_] identity)})
+                  nil
+                  (catch Exception ex ex))]
+      (cond
+        (nil? ex) {:text s :appended n :clean? true}
+        (and (< n 24)
+             (:edamame/expected-delimiter (ex-data ex))
+             (str/starts-with? (or (ex-message ex) "") "EOF"))
+        (recur (str s (:edamame/expected-delimiter (ex-data ex))) (inc n))
+        :else (let [more (scan-missing-closers s)]
+                {:text (str s more) :appended (+ n (count more))
+                 :clean? false :err (ex-message ex)})))))
+
+;;; ── clj-kondo pod (research §Q3: 2.0ms/call resident; loaded ONCE, lazily
+;;; so non-cursor consumers of this server never pay for or require it) ──
+
+(def ^:private kondo-run!
+  (delay (try (pods/load-pod "clj-kondo")
+              (require 'pod.borkdude.clj-kondo)
+              (resolve 'pod.borkdude.clj-kondo/run!)
+              (catch Exception _ nil))))
+
+(def ^:private draft-file
+  (delay (let [f (fs/create-temp-file {:prefix "oracle-cursor-draft" :suffix ".cljs"})]
+           (fs/delete-on-exit f)
+           (str f))))
+
+(defn- kondo-analyze
+  "clj-kondo analysis of `code` (the pod lints file paths, so `code` is
+   spitted to one reused temp file). nil when the pod is unavailable —
+   the caller degrades, it does not die."
+  [code]
+  (when-let [run! @kondo-run!]
+    (try
+      (spit @draft-file code)
+      (let [a (:analysis (run! {:lint [@draft-file]
+                                :config {:output {:format :edn
+                                                  :analysis {:locals true
+                                                             :keywords true
+                                                             :arglists true}}}}))]
+        {:locals   (:locals a)
+         :keywords (->> (:keywords a)
+                        (map (fn [{:keys [ns name]}]
+                               (str ":" (when ns (str ns "/")) name)))
+                        distinct)})
+      (catch Exception _ nil))))
+
+;;; ── the op ──
+
+(defn- splice-prefix
+  "Replace the token at `cursor` (char offset, clamped) with `__prefix__`.
+   Returns {:text spliced :prefix typed-so-far :token full-token}."
+  [text cursor]
+  (let [n       (count text)
+        cursor  (max 0 (min cursor n))
+        bound?  (fn [ch] (or (Character/isWhitespace ch)
+                             (contains? #{\( \) \[ \] \{ \} \" \; \, \' \` \~ \@ \^} ch)))
+        token?  (fn [i] (and (>= i 0) (< i n) (not (bound? (.charAt ^String text i)))))
+        start   (loop [i cursor] (if (token? (dec i)) (recur (dec i)) i))
+        end     (loop [i cursor] (if (token? i) (recur (inc i)) i))]
+    {:text   (str (subs text 0 start) (name prefix-placeholder) (subs text end))
+     :prefix (subs text start cursor)
+     :token  (subs text start end)}))
+
+(defn- offset->row-col [text offset]
+  (let [before (subs text 0 (min offset (count text)))
+        nl     (str/last-index-of before "\n")]
+    [(inc (count (filter #(= % \newline) before)))
+     (if nl (- (count before) nl) (inc (count before)))]))
+
+(defn- in-scope-locals
+  "clj-kondo `:locals` rows whose scope interval contains the cursor
+   (clojure-lsp's `inside?` logic), innermost (latest-bound) first."
+  [locals row col]
+  (->> locals
+       (filter (fn [{r :row c :col ser :scope-end-row sec :scope-end-col}]
+                 (and r ser
+                      (neg? (compare [r c] [row col]))
+                      (<= (compare [row col] [ser sec]) 0))))
+       (sort-by (fn [{r :row c :col}] [(- r) (- c)]))
+       (map (comp str :name))
+       distinct))
+
+(defn- slot-kind
+  "Classify the cursor's slot from the context levels (innermost first):
+   map-key / map-value / head / arg / vector / string / top-level, plus the
+   enclosing call's head symbol and the cursor's arg position when present."
+  [ctx]
+  (let [inner (first ctx)
+        call  (first (filter #(and (seq? (:form %)) (integer? (:idx %)) (pos? (:idx %)))
+                             ctx))
+        head  (when (and call (symbol? (first (:form call))))
+                (str (first (:form call))))
+        base  (cond
+                (nil? inner)                 {:kind "top-level"}
+                (= :key (:map-role inner))   {:kind "map-key"}
+                (= :value (:map-role inner)) {:kind "map-value" :key (str (:idx inner))}
+                (and (seq? (:form inner))
+                     (= 0 (:idx inner)))     {:kind "head"}
+                (seq? (:form inner))         {:kind "arg"}
+                (vector? (:form inner))      {:kind "vector"}
+                (string? (:form inner))      {:kind "string"}
+                :else                        {:kind "arg"})]
+    (cond-> base
+      head (assoc :head head)
+      call (assoc :arg-position (:idx call)))))
+
+(def ^:private core-var-names
+  "clojure.core public names — the lowest rung of the candidate ladder."
+  (delay (->> (keys (ns-publics 'clojure.core)) (map str) sort vec)))
+
+(defn- rank-candidates
+  "The clojure-lsp priority ladder (locals ≻ keywords ≻ core), prefix-filtered,
+   slot-kind-restricted, label-sorted within a rung, capped at 40. The typed
+   token itself is never its own suggestion."
+  [kind prefix token locals keywords]
+  (let [match? (fn [s] (and (not= s token)
+                            (or (empty? prefix) (str/starts-with? s prefix))))
+        pools  (case kind
+                 "map-key"             [[3 "keyword" keywords]]
+                 ("head" "top-level")  [[3 "local" locals] [1 "core" @core-var-names]]
+                 [[3 "local" locals] [2 "keyword" keywords] [1 "core" @core-var-names]])]
+    (->> pools
+         (mapcat (fn [[score type names]]
+                   (->> names
+                        (filter match?)
+                        (map (fn [nm] {:score score :name nm :type type})))))
+         (sort-by (fn [{:keys [score name]}] [(- score) name]))
+         (reduce (fn [[seen out] c]
+                   (if (contains? seen (:name c))
+                     [seen out]
+                     [(conj seen (:name c)) (conj out (dissoc c :score))]))
+                 [#{} []])
+         second
+         (take 40)
+         vec)))
+
+(defn cursor-intelligence
+  "The op:\"cursor\" body: {code cursor} → the design-doc contract map.
+   Pure of process state (the kondo pod + temp file are process-resident
+   plumbing); all failure modes are in-band values."
+  [code cursor]
+  (if-not (and (string? code) (int? cursor))
+    {:tier "cursor"
+     :error {:kind "bad-request"
+             :message "cursor op needs code (string) + cursor (int char offset)"}}
+    (let [{spliced :text prefix :prefix token :token} (splice-prefix code cursor)
+          rs      (delimiter-repair spliced)          ; analysis basis (sentinel)
+          ro      (delimiter-repair code)             ; caller basis (no sentinel)
+          entries (internal/parse-forms (:text rs) {:strip-fences? false})
+          src     (or (some (fn [e]
+                              (let [s (:seon.repl/source e)]
+                                (when (and s (str/includes? s (name prefix-placeholder)))
+                                  s)))
+                            entries)
+                      (:text rs))
+          ctx     (some-> src
+                          try-read-replacing-maps
+                          macroexpand-threading
+                          parse-context)
+          sk      (slot-kind ctx)
+          kondo   (kondo-analyze (:text ro))
+          [row col] (offset->row-col code cursor)
+          locals  (->> (concat (in-scope-locals (:locals kondo) row col)
+                               (map str (bindings-from-context ctx)))
+                       distinct
+                       vec)]
+      {:tier          "cursor"
+       :slot-kind     sk
+       :locals        locals
+       :candidates    (rank-candidates (:kind sk) prefix token locals (:keywords kondo))
+       :template      nil    ; P1: malli arg templates are pod-side (registry), not derivable in bb
+       :repaired-text (:text ro)
+       :balance-delta (:appended ro)
+       :clean         (boolean (:clean? ro))})))
+
 (defn handle
   "Dispatch one parsed request map (string keys, from JSON) to a response
    map. The op-dispatch seam: `parse`/`validate` run the parse tier (fence
@@ -133,6 +522,9 @@
    basis the diffusion worker's `offset_map` shares (closed-loop renoise).
    `refine` returns the PARSE HALF of the unified oracle control set
    (clamps + renoise_spans; see [[refine-parse]] for the bb-vs-pod boundary).
+   `cursor` runs the cursor-intelligence composition on `{code cursor}`
+   (see [[cursor-intelligence]]); `text`/`draft` are accepted aliases for
+   `code` on that op (the design doc's contract spells `draft`).
    The `strip-fences` flag (default true) is the per-request override on
    any parse op. Any other op returns an `unimplemented` marker (the
    eval/retrieve tiers are the Node/pod bundle's job — design §3/§5).
@@ -146,6 +538,10 @@
                ("parse" "validate" "parse-raw") (validate (get req "code" "") strip-fences?)
                "refine"                          (refine-parse (get req "code" "")
                                                                (some-> (get req "phase") keyword))
+               "cursor"                          (cursor-intelligence
+                                                  (or (get req "code") (get req "text")
+                                                      (get req "draft") "")
+                                                  (get req "cursor" 0))
                {:error {:kind "unimplemented"}})]
     (cond-> (assoc base :op op)
       (some? id) (assoc :id id))))

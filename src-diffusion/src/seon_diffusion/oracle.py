@@ -81,6 +81,14 @@ class Oracle(_LineServer):
             req["phase"] = phase
         return self.call(req)
 
+    def cursor(self, text, cursor):
+        """Cursor intelligence (op:"cursor") — typeahead-design.md contract:
+        {text, cursor (char offset)} -> {slot-kind, locals, candidates
+        (ranked, typed), template (None in P1), repaired-text,
+        balance-delta, clean}. First call lazily loads the clj-kondo pod
+        server-side (~100ms once); warm calls are single-digit ms."""
+        return self.call({"op": "cursor", "code": text, "cursor": cursor})
+
 
 class EvalSession(_LineServer):
     """node cljs.js eval server — STATEFUL: defs accumulate across calls."""

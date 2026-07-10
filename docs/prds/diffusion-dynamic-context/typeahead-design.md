@@ -205,6 +205,10 @@ In-band errors (`gen_error`), same contract as today.
 
 1. **P1 oracle** — `op:"cursor"` (edamame + clj-kondo + compliment-port
    + malli), offline proofs. No model dependency; useful standalone.
+   **SHIPPED 2026-07-10** (`bin/oracle-server` + `Oracle.cursor()` +
+   9 pytest proofs in `src-diffusion/tests/test_cursor.py`; warm
+   3.1–4.5 ms/call measured through the pipe client; malli templates
+   deferred to the pod side — `template` is `null` in P1).
 2. **P2 driver** — `cursor.py` FSM + glyph interception + masks + CAL
    hole probe + wire modes. Stub-model tests.
 3. **P3 seon** — menu/plan section fns, `:seon.typeahead/policy` row,
