@@ -1,7 +1,7 @@
 """Offline regression tests for the tool-row generators + their oracle scorers.
 
 Proves, without any pod or external network: determinism (same seed →
-byte-identical rows), goal-stated-ness (no Seon verb/namespace coaching in
+byte-identical rows), goal-stated-ness (no Seon function/namespace coaching in
 any task text), placeholder rendering, the lock↔artifact contract, and the
 oracle checks against known-good and known-bad synthetic transcripts /
 workspaces. The Clojure-target checks (parse + behavioral) go through the
@@ -26,7 +26,7 @@ from seon_inspect.tool_scorers import check_answer, check_workspace
 ROWS = sorted(GENERATORS)
 DEV_N = {row: freeze.BESPOKE_ROWS[row]["dev_n"] for row in ROWS}
 
-# Goal-stated means NO API coaching: task text never names Seon verbs,
+# Goal-stated means NO API coaching: task text never names Seon functions,
 # namespaces, or tool functions — the agent discovers its tools from context.
 COACHING_MARKERS = [
     "my.plan", "my.kb", "my.blob", "my.ui", "my.tile", "my.data",

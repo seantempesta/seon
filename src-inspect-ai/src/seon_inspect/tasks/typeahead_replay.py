@@ -25,10 +25,11 @@ corpus's VERBATIM captured sections — orientation + contract ns cards
 Scoring (scorers gate CORRECTNESS, style only reported): eval-answer rows
 pass when the RIGHT ANSWER is delivered — last pure-form value (node
 oracle) OR the answer standing in the reply text (the production
-message-verb/prose convention; cross-arm fairness, measured on arm0);
-verb-call rows pass when the reply parses (bb oracle) AND calls an
-expected verb. Form validity is always reported separately. Metrics per execution
-(metadata, reduced by `run_typeahead`): form validity, verb-choice accuracy,
+message-function/prose convention; cross-arm fairness, measured on arm0);
+verb-call rows (the frozen corpus's predicate-kind literal) pass when the
+reply parses (bb oracle) AND calls a task-required function. Form validity is
+always reported separately. Metrics per execution
+(metadata, reduced by `run_typeahead`): form validity, function-calling accuracy,
 tokens-to-valid-form (chars/4 estimate — the seon convention), wall-clock,
 uptake rate + rounds-to-lock (arm2).
 
@@ -96,7 +97,10 @@ ORIENTATION = (
 
 CONTRACT_LINES = {
     # The scorer's calling convention, STATED in the task (the e1 audit's
-    # context fix) — identical across arms.
+    # context fix) — identical across arms. NOTE: "verb-call" is the FROZEN
+    # corpus predicate-kind literal (evals/typeahead_replay.corpus.json) —
+    # the data key keeps its historical name; code identifiers say fn_*
+    # (functions-not-verbs ruling, 2026-07-11).
     "eval-answer": ("; Finish with ONE expression whose value is the "
                     "answer."),
     "verb-call": ("; Act by CALLING the appropriate function(s) — a "
@@ -192,12 +196,14 @@ _HEAD = re.compile(r"\(\s*([A-Za-z][\w.*+!?<>=/-]*)")
 
 def call_heads(code: str) -> list[str]:
     """Every symbol in call position (strings/comments stripped) — the
-    verb-choice read, nested calls included."""
+    function-choice read, nested calls included."""
     clean = _COMMENT.sub("", _STRING.sub('""', code))
     return _HEAD.findall(clean)
 
 
-def verb_match(code: str, predicate: dict) -> bool:
+def fn_match(code: str, predicate: dict) -> bool:
+    """True when the reply calls a task-required function (exact head or
+    head-namespace match against the sample's predicate)."""
     heads = set(call_heads(code))
     if heads & set(predicate.get("heads") or []):
         return True
@@ -206,7 +212,7 @@ def verb_match(code: str, predicate: dict) -> bool:
 
 
 def eval_answer(code: str, expect: list[str]) -> tuple[bool, str | None]:
-    """Node-oracle-eval the reply's pure forms (unresolvable seon-verb forms
+    """Node-oracle-eval the reply's pure forms (unresolvable seon-fn forms
     are skipped, accumulating the rest); the LAST value must match one of
     `expect` (printed-value strings, whitespace-trimmed)."""
     kept: list[str] = []
@@ -230,7 +236,7 @@ def answer_in_text(text: str, expect: list[str]) -> bool:
     """The expected answer as a standalone token anywhere in the reply.
 
     The cross-arm fairness rule for eval-answer rows: a production-shaped
-    reply delivers the answer via a message verb or prose (measured on the
+    reply delivers the answer via a message function or prose (measured on the
     arm0 DeepSeek turns: `(message/user \"44\")`), not as a bare
     value-bearing expression — the OUTCOME is right either way. None of
     the corpus intents contain their own answers (checked), so a text
@@ -259,18 +265,18 @@ def analyze_reply(text: str, predicate: dict) -> dict:
            "reply_tokens": token_estimate(code)}
     if predicate["kind"] == "eval-answer":
         # outcome = the RIGHT ANSWER delivered: the last pure-form value
-        # matches, OR the answer stands in the reply text (message-verb /
+        # matches, OR the answer stands in the reply text (message-fn /
         # prose delivery — the production convention). Form validity is
         # the separate `parses` metric, reported, not gating the answer.
         ok, got = eval_answer(code, predicate["expect"])
         out.update({"outcome_pass": ok or answer_in_text(code,
                                                          predicate["expect"]),
                     "eval_match": ok, "got": got,
-                    "verb_applicable": False, "verb_match": None})
+                    "fn_applicable": False, "fn_match": None})
     else:
-        vm = verb_match(code, predicate)
+        vm = fn_match(code, predicate)
         out.update({"outcome_pass": parses and vm,
-                    "verb_applicable": True, "verb_match": vm})
+                    "fn_applicable": True, "fn_match": vm})
     return out
 
 
@@ -498,7 +504,7 @@ def _arm_summary(execs: list[dict]) -> dict:
     """The report metrics for one arm over its execution records."""
     scored = [e for e in execs if e["outcome"] in ("pass", "fail")]
     an = [e["analysis"] for e in scored if e.get("analysis")]
-    verb = [a for a in an if a.get("verb_applicable")]
+    fns = [a for a in an if a.get("fn_applicable")]
     ttv = [a["tokens_to_valid_form"] for a in an
            if a.get("tokens_to_valid_form") is not None]
     sm = [e["step_metrics"] for e in scored if e.get("step_metrics")]
@@ -510,8 +516,8 @@ def _arm_summary(execs: list[dict]) -> dict:
                          / len(scored) if scored else 0.0),
         "form_validity": (sum(a["parses"] for a in an) / len(an)
                           if an else 0.0),
-        "verb_accuracy": (sum(a["verb_match"] for a in verb) / len(verb)
-                          if verb else None),
+        "fn_call_accuracy": (sum(a["fn_match"] for a in fns) / len(fns)
+                             if fns else None),
         "tokens_to_valid_form_median": (statistics.median(ttv)
                                         if ttv else None),
         "wall_s_median": (statistics.median(walls) if (walls := [

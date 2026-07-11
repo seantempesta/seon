@@ -122,7 +122,7 @@ text. Flow:
 1. First RENDER of a run offers a plan template (plain-language `; ☐ ①`
    lines — measured: perfect format compliance). The model writes the
    plan; the driver parses lines → `todo/add!` datoms. (Or the agent
-   calls todo verbs directly — same datoms, no special path.)
+   calls todo functions directly — same datoms, no special path.)
 2. Every subsequent RENDER derives the plan ledger from the DB: done
    items **dropped from the render** (hermes precedent = our
    derive-don't-store), current item marked ▶, open items ☐.
@@ -195,7 +195,7 @@ In-band errors (`gen_error`), same contract as today.
 - **src-inspect-ai** — the swap-in bench: replay corpus from real
   turn-capture blobs across capability rungs; arms = free-guided /
   typeahead / typeahead-with-menus-rendered-but-model-instructed-to-
-  ignore (degradation arm). Metrics: form validity, verb-choice
+  ignore (degradation arm). Metrics: form validity, function-calling
   accuracy, tokens-to-valid-form, wall-clock, **uptake rate**, rounds-
   to-lock. Kill criteria: degradation arm regresses baseline → protocol
   leaks; uptake ≈ 0 with no accuracy gain → dead weight. Plus one live
@@ -262,7 +262,7 @@ In-band errors (`gen_error`), same contract as today.
    text, eval'd ONCE by the turn pipeline — which is also why the
    mid-loop `;; => result` feedback (control.py's `_result_comment`)
    is NOT wired: it would need pod-side eval inside the provider =
-   double-eval of side-effecting verbs. Results reach the model next
+   double-eval of side-effecting functions. Results reach the model next
    turn via the transcript's real `⟹` rows; a turn-level driver (the
    loop hoisted out of the provider seam) is the clean fix if mid-loop
    results prove necessary. Per-step `:seon.typeahead/*` datom
@@ -297,8 +297,8 @@ In-band errors (`gen_error`), same contract as today.
    the lift is menu-text-in-a-step-regime + lock/commit/repair. DeepSeek
    references on the same corpus: .70 outcome (both the captured 36k
    production turns and a one-shot on the same 4k render — where its
-   verb accuracy drops .71→.57 via hallucinated verbs; Muse arm skipped,
-   no key on the machine). Merge decision input: the swap-in is NOT
+   function-calling accuracy drops .71→.57 via hallucinated function
+   names; Muse arm skipped, no key on the machine). Merge decision input: the swap-in is NOT
    correctness-parity with DeepSeek yet (.53 vs .70) but ~7× faster and
    local; the next lever per the data is wiring null-render calibration
    (auto-offers) + a glyph-emission teaching pass, then re-measuring
@@ -315,7 +315,7 @@ In-band errors (`gen_error`), same contract as today.
    mirrors it (`build_null_render`), and the menu header gained two
    additive example lines (the bench overlays the CURRENT teaching on
    the corpus's frozen entries — teaching is code, entries are data).
-   Measured: **arm2 .567 outcome / .90 validity / verb-acc .429 /
+   Measured: **arm2 .567 outcome / .90 validity / fn-call acc .429 /
    uptake .077 / 4.3 s** (was .533/.90/.333/0.0/3.0 s); arm3
    .20/.30/36.5 s (was .267/.37/33.4 s — 4 outcome flips, all on the
    REPL rung, noise-scale at n=10 k=3; ZERO glyph chars in arm3
@@ -329,8 +329,8 @@ In-band errors (`gen_error`), same contract as today.
    only 4/63 > 6.0 (the design default); all 7 above-threshold
    non-fires were correctly suppressed by the free-region-typed gate.
    Fired selections were on-menu argmax but **0/13 selected a
-   task-REQUIRED verb — the captured `recent-verbs` menus do not
-   contain the planning verbs the tasks need** (warmups never called
+   task-REQUIRED function — the captured `recent-verbs` menus do not
+   contain the planning functions the tasks need** (warmups never called
    them): a MENU-SOURCE limitation, not a calibration failure. Costs:
    calibration ≈ +0.5 s median on no-expand executions (3.05→3.54 s;
    the worker caches the baseline per (null-render, glyph-set));
@@ -340,7 +340,7 @@ In-band errors (`gen_error`), same contract as today.
    worker): fires between 3–6 nats were correctness-mixed, so the data
    justifies moving neither knob. Next lever per the data: menu
    SOURCES (schema-contracts / task-relevant offers so the menu holds
-   the verbs the task needs) + cheaper expansion (candidate-sized
+   the functions the task needs) + cheaper expansion (candidate-sized
    holes / fewer settle rounds) — not threshold tuning.
 6. **P6 levers** — task-relevant menu source + cheaper/convergent
    EXPAND. **PARTIAL 2026-07-11** (arm3 + summary.json/ledger rows
@@ -356,15 +356,15 @@ In-band errors (`gen_error`), same contract as today.
    round-robin admission, new `:seon.typeahead/toolkit-cap` knob
    (default 4); `verb-offers` mirrors the concatenation by
    construction, and the corpus generator captures it unchanged (same
-   entry grammar). Regenerated corpus: task-required verbs are ON the
-   menu for 9/10 samples (k2's world-state picks missed a DB-read
-   verb — honest gap).
+   entry grammar). Regenerated corpus: task-required functions are ON
+   the menu for 9/10 samples (k2's world-state picks missed a DB-read
+   function — honest gap).
    (b) **The non-converging repeat root-caused** (P5's p1 e3: the same
    failed auto-offer re-fired 4x at identical margins, empty reply):
    TWO mechanical defects — the EXPAND arm handed an unchecked junk
    fill forward as draft (live-reproduced: `(…/user ready")…` — the
    next step's repair dropped the whole broken region INCLUDING the
-   clamped verb call, returning the state to its pre-step value, and
+   clamped function call, returning the state to its pre-step value, and
    the per-step seed made the re-fire deterministic), and the driver
    loop had no memory of failed offers. Fixes: expansions are
    HARVESTED inside the expand step (`_lock_prefix` shared with the
@@ -384,9 +384,9 @@ In-band errors (`gen_error`), same contract as today.
    and `expand_settle_rounds=1` for the step regime.
    Measured (fresh corpus — NOTE it scores harder than P5's: the
    DeepSeek references dropped .70→.40 on it): **arm2 .633 outcome /
-   .867 validity / .524 verb-acc / 4.8 s wall median** vs arm1 guided
+   .867 validity / .524 fn-call acc / 4.8 s wall median** vs arm1 guided
    .286 / .464 / .0 / 29.0 s and BOTH DeepSeek references .40. Expand
-   fires: 3 — **3/3 selected a task-REQUIRED verb** (P5: 0/13), median
+   fires: 3 — **3/3 selected a task-REQUIRED function** (P5: 0/13), median
    expand step **9.1 s** (max 14.6; was ~18 s median), one fire locked
    IN-STEP and passed, both failed expansions were suppressed with
    ZERO repeat fires. Uptake .019 (3 fires / 30 execs; P5's .077 was

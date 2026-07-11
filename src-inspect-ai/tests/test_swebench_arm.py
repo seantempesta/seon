@@ -74,7 +74,7 @@ def test_boot_compose_boots_and_stamps_the_sample_port(tmp_path, monkeypatch):
 
 
 def test_boot_compose_grants_workspace_rooted_writable_fs(tmp_path, monkeypatch):
-    # the P0 debt item: the bench pod's fs verbs are rooted at /testbed with
+    # the P0 debt item: the bench pod's fs functions are rooted at /testbed with
     # write access, delivered by the env-overridable repo entrypoint mounted
     # over the pinned volume's copy (no image rebuild) — sha recorded
     s = _sample()
@@ -141,7 +141,7 @@ def test_task_contract_states_checks_without_leaking_the_oracle():
     assert "FAIL_TO_PASS" not in text            # oracle names withheld
     # the every-check-stated law: the fs capability is TOLD, truthfully
     assert "write access" in text
-    assert "edit" in text and "file verbs" in text
+    assert "edit" in text and "file functions" in text
 
 
 # --- interim run bounds (the apply_ai_config precedent, in-container) -------

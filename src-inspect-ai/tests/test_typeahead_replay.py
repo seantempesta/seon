@@ -106,25 +106,25 @@ def test_render_budget_enforced():
         tr.build_render(fat, "arm1_guided")
 
 
-def test_call_heads_and_verb_match():
+def test_call_heads_and_fn_match():
     code = '(do (my.plan/add! {:my.plan/title "x"}) (str "(not/a-call)"))'
     heads = tr.call_heads(code)
     assert "my.plan/add!" in heads and "not/a-call" not in heads
-    assert tr.verb_match(code, SAMPLE["predicate"])
-    assert not tr.verb_match("(println 1)", SAMPLE["predicate"])
+    assert tr.fn_match(code, SAMPLE["predicate"])
+    assert not tr.fn_match("(println 1)", SAMPLE["predicate"])
 
 
 def test_analyze_reply_eval_answer_real_oracles():
     a = tr.analyze_reply("(def x 25)\n(* x 26)",
                          {"kind": "eval-answer", "expect": ["650"]})
     assert a["parses"] and a["outcome_pass"] and a["got"] == "650"
-    # seon-verb forms are skipped, the pure tail still answers
+    # seon-fn forms are skipped, the pure tail still answers
     b = tr.analyze_reply("(my.plan/add! {:my.plan/title \"x\"})\n(+ 40 4)",
                          {"kind": "eval-answer", "expect": ["44"]})
     assert b["outcome_pass"]
     c = tr.analyze_reply("(+ 1", {"kind": "eval-answer", "expect": ["2"]})
     assert not c["parses"] and not c["outcome_pass"]
-    # production-convention delivery: answer via a message verb / prose
+    # production-convention delivery: answer via a message function / prose
     d = tr.analyze_reply(';; 42 + 2\n(message/user "44")',
                          {"kind": "eval-answer", "expect": ["44"]})
     assert d["outcome_pass"] and not d["eval_match"]
@@ -134,11 +134,12 @@ def test_analyze_reply_eval_answer_real_oracles():
     assert not e["outcome_pass"]
 
 
-def test_analyze_reply_verb_call_real_oracles():
+def test_analyze_reply_fn_call_real_oracles():
+    # "verb-call" is the frozen corpus predicate-kind literal (data key)
     a = tr.analyze_reply("(my.plan/add! {:my.plan/title \"audit\"})",
                          SAMPLE["predicate"])
-    assert a["parses"] and a["verb_match"] and a["outcome_pass"]
-    # right verb inside a BROKEN reply fails the parse gate
+    assert a["parses"] and a["fn_match"] and a["outcome_pass"]
+    # right function inside a BROKEN reply fails the parse gate
     b = tr.analyze_reply("(my.plan/add! {:my.plan/title \"audit\"}",
                          SAMPLE["predicate"])
     assert not b["outcome_pass"]

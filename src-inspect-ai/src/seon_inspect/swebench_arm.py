@@ -13,7 +13,7 @@ only under /opt/seon + /seon-data (plus the ONE entrypoint file overlay
 below). Pre-slice-4 debt unit (2026-07-05) added three properties:
 
 - **Workspace-rooted writable fs grant:** the bench pod runs with
-  `SEON_FS_ROOT=/testbed` and read-only OFF, so the agent's fs verbs edit
+  `SEON_FS_ROOT=/testbed` and read-only OFF, so the agent's fs functions edit
   the repo directly (slice 3 inherited the image's immutable
   `/opt/seon`-read-only grant and could only write via shell). Delivered by
   bind-mounting the REPO's `docker/seon-entrypoint` (env-overridable fs
@@ -71,9 +71,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 # The runtime-overlay volume: /opt/seon extracted from the canonical image at
 # a pinned digest (multi-arch build 52e25b6f: seon:multiarch-arm64
 # sha256:a69721a0b899…; the volume name + source digest are recorded in the
-# run's evidence + ledger notes). Repointed 2026-07-06 from the pre-verbs
+# run's evidence + ledger notes). Repointed 2026-07-06 from the older
 # seon-runtime-slice3 (shell-only editing — the slice-3 failure mode) to
-# seon-runtime-arm64, which carries the A5/A6 structural edit verbs
+# seon-runtime-arm64, which carries the A5/A6 structural edit functions
 # (fs/replace!, fail-loud) + toolbelt exposure. The entrypoint bind-mount
 # below is now redundant (this overlay's baked entrypoint already honors
 # SEON_FS_ROOT env) but kept harmless for a belt-and-suspenders grant.
@@ -316,7 +316,7 @@ def task_contract(problem_statement: str) -> str:
     return (
         f"{problem_statement}\n\n"
         "Your workspace is the repository checked out at /testbed inside "
-        "this machine — your shell runs here, and your file verbs are "
+        "this machine — your shell runs here, and your file functions are "
         "rooted at /testbed with write access, so you can read and edit "
         "the repository files directly. Fix the issue by editing the "
         "repository files under /testbed.\n\n"

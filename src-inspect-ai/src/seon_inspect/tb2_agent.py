@@ -224,7 +224,7 @@ class SeonAgent(BaseAgent):
             pass
 
     async def _detect_workspace(self, environment) -> str:
-        """The task env's working dir (where the agent's fs verbs should root)."""
+        """The task env's working dir (where the agent's fs functions should root)."""
         try:
             res = await environment.exec(command="pwd")
             wd = (res.stdout or "").strip()

@@ -95,7 +95,7 @@ One measurement per unit — the bench falsifies; it is not the work.
 ## Phases (each ends in a live proof on acme)
 
 - **W1 — plan authoring**: prose plan text → correct `plan!` form,
-  eval-proven; refinement verbs exercised (`step!`, `done!` expect-gated,
+  eval-proven; refinement functions exercised (`step!`, `done!` expect-gated,
   `reopen!`). Live proof: a real plan tree in the acme DB authored by the
   worker from handed-down text, visible in the ledger render.
 - **W2 — keep-in-focus execution**: the step loop keyed to the ▶ step;

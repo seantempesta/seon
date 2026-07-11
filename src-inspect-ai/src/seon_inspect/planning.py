@@ -126,7 +126,7 @@ def check_plan_trajectory(snapshot: list[dict[str, Any]],
 # — a form that FUSES work with its close, e.g. `(do (compute …)
 # (my.plan/done! …))`, is WORK: it is the strictest possible adjacency and
 # must BREAK a close run, not extend it — live finding, rung-2 d1);
-# everything that is not a plan verb / movement / require / lifecycle
+# everything that is not a plan function / movement / require / lifecycle
 # chatter counts as WORK.
 _PLAN_AUTHOR_RE = r"(?:my\.)?plan/(?:plan!|step!)"
 _PURE_CLOSE_RE = r"^\s*\((?:my\.)?plan/done!"

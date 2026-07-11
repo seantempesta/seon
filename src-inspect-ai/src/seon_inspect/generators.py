@@ -11,7 +11,7 @@ sha256s in `evals/datasets.lock` and writes the dev artifact to
 
 Task texts are GOAL-STATED and never API-coached: they state outcomes ("a
 file X exists containing exactly Y", "reply with only the integer"), never
-Seon verb or namespace names — the agent discovers its tools from its own
+Seon function or namespace names — the agent discovers its tools from its own
 context. And every check the scorer makes IS stated in the task text (the
 load-bearing finding: otherwise the bench measures prompt-omission, not
 capability).

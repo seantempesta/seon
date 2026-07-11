@@ -123,14 +123,14 @@ NODE_POST_JS = (
 def build_task_contract(instruction: str, workspace: str) -> str:
     """The goal-stated contract around tb's raw instruction (§4, the law).
 
-    States the workspace (native shell + writable file verbs rooted there),
+    States the workspace (native shell + writable file functions rooted there),
     that the work is judged by THIS task's own tests, and the explicit done
     signal — and nothing else (no hints, no test names; tb tasks carry canary
     lines and withhold their tests exactly as the oracle expects)."""
     return (
         f"{instruction}\n\n"
         f"Your workspace is {workspace} inside this machine — your shell runs "
-        f"here, and your file verbs are rooted at {workspace} with write "
+        f"here, and your file functions are rooted at {workspace} with write "
         "access, so you can read, create, and edit files directly. Do the "
         f"work by changing the files under {workspace}.\n\n"
         "How your work is judged: after you finish, this task's own automated "

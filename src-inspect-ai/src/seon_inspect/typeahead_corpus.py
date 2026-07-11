@@ -49,13 +49,16 @@ DRIVE_TIMEOUT_MS = 180_000
 WARMUP = "Reply with the single word ready."
 
 # ---------------------------------------------------------------------------
-# The sample table — capability-rung shapes (goal-stated; verbs are never
-# coached in the intent — the no-coaching rule; predicates live HERE).
-# predicate kinds:
+# The sample table — capability-rung shapes (goal-stated; function names are
+# never coached in the intent — the no-coaching rule; predicates live HERE).
+# predicate kinds ("verb-call" is the FROZEN corpus predicate-kind literal in
+# evals/typeahead_replay.corpus.json — the data key keeps its historical
+# name so the reader stays byte-compatible; code identifiers say fn_*,
+# functions-not-verbs ruling 2026-07-11):
 #   eval-answer  node-oracle-eval the reply's pure forms; the last value must
 #                match one of `expect` (printed-value strings).
-#   verb-call    some call-position symbol matches `heads` exactly or has a
-#                namespace part in `head_nses`.
+#   verb-call    a function call: some call-position symbol matches `heads`
+#                exactly or has a namespace part in `head_nses`.
 # Both kinds additionally REQUIRE the reply to parse (>=1 form, 0 errors).
 # ---------------------------------------------------------------------------
 DB_READ_HEADS = ["db/query", "seon.db/query", "db/pull", "seon.db/pull",
@@ -100,8 +103,8 @@ SAMPLES: list[dict[str, Any]] = [
                    "head_nses": ["my.plan", "plan", "todo"]}},
     {"id": "p2", "rung": "planning", "restart_between": True,
      "warmups": [("Create a durable plan with three steps — inventory your "
-                  "verbs, summarize them, report to me — and complete only "
-                  "the first step.")],
+                  "functions, summarize them, report to me — and complete "
+                  "only the first step.")],
      "intent": ("You were interrupted by a restart. Resume your plan: "
                 "complete the next open step and say which steps remain."),
      "contract_nses": ["my.plan"],
