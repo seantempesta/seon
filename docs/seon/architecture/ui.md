@@ -106,6 +106,20 @@ route their bodies through it, so every surface "just displays the block."
 client markdown JS; the old client-side `data-markdown` / marked.js lane is gone from
 the agent-view page. One lane, server-side, for every message/eval body.
 
+**The human transcript is chat-first.** Message entities render as the visible
+conversation. Eval entities render as one-line activity disclosures derived
+from their called symbol and status; source, arguments, result projections, and
+full errors stay collapsed until requested. Consecutive equivalent failures
+remain coalesced into one disclosure. This changes only the HTML projection—the
+agent's AI transcript remains byte-faithful.
+
+**Large context twins are summaries first.** Plan roots render as compact
+title/progress disclosures; only the focused root starts open, and its tree has
+a bounded internal scroll region. Long titles and goals line-clamp, every
+technical surface wraps or horizontally scrolls, and the canvas has a bounded
+default height. Scale is handled by disclosure and windowing, never smaller
+unbounded text.
+
 **Capability + cache.** Agent-authored renders, layouts, and route handlers run
 SCI-bounded (`seon.render.sci/invoke-bounded`, a deadline), never
 `lookup-value`-direct; core symbols run compiled, and the bootstrap CLJS compiler
@@ -134,12 +148,17 @@ every context band renders an html representation for inspectability.
 Every **page** is a layout placing block html renders into slots; each filled slot
 is a tile. All pages are agent views — one mechanism, a tree of routes:
 
-- **agent view** (`/agent/{id}`) — one agent: a large primary panel with the
-  **canvas selected by default**, and a narrow right rail containing every
-  current HTML context-block render in priority order. Selecting a rail card
+- **agent view** (`/agent/{id}`) — one agent: a large primary panel showing the
+  **most recently agent-updated surface**, and a right rail containing every
+  current HTML context-block render ordered by the same database transaction
+  recency. Selecting a rail card
   displays that render in the primary panel. Missing and AI-only renders are
   omitted. The canvas is NOT a `(slot :canvas)` block — it is the agent's live
-  tile projection. **What the canvas shows is derived by default,
+  tile projection. Renderer recency is the latest transaction by this agent
+  touching the renderer's stored read-set; canvas slot writes share that same
+  coordinate. A click is local inspection state until a newer relevant
+  transaction arrives, when the normal reactive morph follows the newly
+  updated surface. **What the canvas shows is derived by default,
   pinnable to override** (the same derive-default/store-override pattern as
   everywhere): by default it is the **last-updated tile** — among the agent's
   own authored tile fns, the one most recently touched (redefined, or a write

@@ -107,7 +107,7 @@
                        :else
                        "mr-auto bg-base-900 border border-amber-900/50")]
     [:div {:class "py-1 flex"}
-     [:div {:class (str "max-w-[85%] min-w-40 rounded px-2.5 py-1.5 "
+     [:div {:class (str "seon-bubble max-w-[78%] min-w-0 rounded px-2.5 py-1.5 "
                         bubble-class)}
       [:div {:class "flex items-baseline gap-2 flex-wrap"}
        [:span {:class (str "text-xs font-mono font-semibold " from-class)}
@@ -117,5 +117,5 @@
           (str "→ " (str/join ", " tos))])
        (when (instance? js/Date at)
          [:span {:class "text-xs text-text-500"} (hh-mm-ss at)])]
-      [:div {:class "markdown mt-0.5"}
+      [:div {:class "markdown mt-0.5 min-w-0"}
        (render/block :html {:seon.render/markdown (str/trim body)})]]]))

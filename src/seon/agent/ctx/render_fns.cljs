@@ -188,8 +188,81 @@
    [:seon.db/db    :seon.db/db]
    [:seon.agent/id :string]])
 (schema/register! ::tile-sym :symbol)
+(schema/register! ::touch :int)
 (schema/register! ::last-updated-response
-  [:map [::tile-sym {:optional true} ::tile-sym]])
+  [:map
+   [::tile-sym {:optional true} ::tile-sym]
+   [::touch    {:optional true} ::touch]])
+
+(defn- fn-row
+  "One stored fn's source transaction and declared database read-set."
+  [db sym]
+  (let [installed (db/installed-schema db)]
+    (when (every? installed [:seon.fn/sym :seon.fn/source])
+      (when-let [[src src-tx]
+                 (first (db/query
+                          {:seon.db/db db
+                           :seon.db/query
+                           '[:find ?src ?tx
+                             :in $ ?sym
+                             :where
+                             [?f :seon.fn/sym ?sym]
+                             [?f :seon.fn/source ?src ?tx]]
+                           :seon.db/args [(str sym)]}))]
+        (let [stored (when (installed :seon.fn/read-attrs)
+                       (not-empty
+                         (set (:seon.fn/read-attrs
+                                (db/pull db [:seon.fn/read-attrs]
+                                         [:seon.fn/sym (str sym)])))))]
+          {::src-tx src-tx
+           ::attrs (declared-read-attrs installed stored src)})))))
+
+(schema/register! ::renderer-touch-request
+  [:map
+   [:seon.db/db :seon.db/db]
+   [:seon.agent/id :string]
+   [:seon.render/html :symbol]])
+(schema/register! ::renderer-touch-response
+  [:map [::touch {:optional true} ::touch]])
+
+(defn renderer-touch
+  "Latest transaction by `agent-id` touching a renderer's declared read-set.
+
+   The renderer identity and read-set come from the stored program graph. The
+   history query joins each data transaction to the standard agent provenance
+   metadata, so another agent changing the same attribute cannot steal focus.
+   The renderer's own source transaction also counts when that agent authored
+   it. Pure over `db`; `{}` means no deliberate update by this agent."
+  {:malli/schema [:=> [:cat ::renderer-touch-request]
+                  ::renderer-touch-response]}
+  [{db :seon.db/db id :seon.agent/id sym :seon.render/html}]
+  (if-let [{::keys [src-tx attrs]} (fn-row db sym)]
+    (let [history (db/history db)
+          attr-tx (when (seq attrs)
+                    (ffirst
+                      (db/query
+                        {:seon.db/db history
+                         :seon.db/query
+                         '[:find (max ?tx)
+                           :in $ ?aid [?a ...]
+                           :where
+                           [?e ?a _ ?tx]
+                           [?tx :seon.db/agent-id ?aid]]
+                         :seon.db/args [id (vec attrs)]})))
+          source-by-agent?
+          (boolean
+            (seq (db/query
+                   {:seon.db/db history
+                    :seon.db/query
+                    '[:find ?tx
+                      :in $ ?tx ?aid
+                      :where [?tx :seon.db/agent-id ?aid]]
+                    :seon.db/args [src-tx id]})))
+          touches (cond-> []
+                    source-by-agent? (conj src-tx)
+                    attr-tx (conj attr-tx))]
+      (if (seq touches) {::touch (apply max touches)} {}))
+    {}))
 
 (defn last-updated-tile
   "The agent's last-updated tile fn — the derived canvas default.

@@ -2541,7 +2541,8 @@
                                :seon.render/token-estimate (tokens/estimate text))
 
                         (some? html)
-                        (assoc :seon.render/hiccup html))]
+                        (assoc :seon.render/hiccup html
+                               :seon.render/html (:seon.render/html child)))]
              (when (or (contains? out :seon.render/text)
                        (contains? out :seon.render/hiccup))
                out))))

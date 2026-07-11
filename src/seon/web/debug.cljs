@@ -345,13 +345,18 @@
    PRESERVES the node across SSE morphs and only genuinely-new blocks
    animate in. The hiccup is the block's `:seon.render/html` twin (or a
    banner if it threw — the composer's guard never hands us nil)."
-  [{::keys [hiccup kind card-key]}]
+  [{::keys [name hiccup kind card-key]}]
   [:div {:id card-key
          :class (str "border-l-2 border-amber-700/40 pl-2 py-1 "
                      "animate-appear")}
    [:div {:class "text-xs font-mono font-semibold text-text-400 mb-0.5"}
     kind]
-   [:div {:class "mt-0.5"} hiccup]])
+   [:div (cond-> {:class "mt-0.5"}
+           (= name :transcript)
+           (assoc :data-seon-scroll "1"
+                  :class "mt-0.5 overflow-auto"
+                  :style "max-height:min(55vh,36rem)"))
+    hiccup]])
 
 (defn- thinking-bubble
   "Placeholder bubble pinned under the newest card while the agent is
@@ -373,7 +378,6 @@
      [:div {:class "px-2 py-1 text-xs font-mono text-text-400 bg-base-900 border-b border-base-800"}
       ":seon.render/html  (rendered view)"]
      [:div {:id (str "debug-cards-" agent-id)
-            :data-seon-scroll "1"
             :class "seon-agent-content flex-1 overflow-auto p-2 text-xs bg-base-950"}
       (when agent-tile
         [:div {:class (str "border border-amber-700/60 rounded p-1 mb-2 "

@@ -11,9 +11,12 @@ tags: [prd, agent]
 Shipped in `bb433846`: the old page/debug adapters now share one DB-derived rendered
 context-block projection. The prompt requests AI format, the agent view requests
 HTML format, and the separate debug view requests both plus token metadata. The
-main agent view is a large selectable canvas/content panel with a compact HTML
-context-block rail. AI-only blocks are omitted. Browser selection is transient
-Datastar state; database transactions remain the only refresh signal.
+main agent view is a bounded selectable canvas/content panel with a one-third
+HTML context-block rail. AI-only blocks are omitted. The focal surface and rail
+order derive from the latest agent-provenance transaction touching each
+renderer's stored read-set (or the canvas slot). A click is transient Datastar
+inspection state until a newer relevant transaction arrives; database
+transactions remain the only refresh signal.
 
 The hidden code default and implicit `:skill/repl` expansion are removed. The
 manifest is the sole new-agent block template; each created agent owns its copied
@@ -23,8 +26,11 @@ roster view, and debug view.
 
 Live proof on the default pod: fresh agent `uTk-2607111732` seeded exactly
 `:namespaces`, `:plan`, and `:transcript` with no `:skill/*` blocks. Its gzip
-feed emitted whole-`#app-view` Datastar morphs with canvas selected, a 3/4
-primary panel, and plan/transcript HTML cards in the right rail. The debug view
+feed emitted whole-`#app-view` Datastar morphs with transcript selected from tx
+`536871255`, a 2/3 primary panel, and transcript/plan/canvas sorted in the right
+rail. Clicking canvas changed the only visible primary body to `canvas`. The
+transcript is chat-first with eval activity collapsed; plan roots are compact,
+collapsible, and internally bounded. The debug view
 showed the exact AI blocks, HTML twins, ~14.5k total tokens, per-block token
 breakdown, and no browser console errors. Two real Muse runs completed through
 the normal wake/eval/reply/idle path (`LIVE-WORKFLOW-OK`, then

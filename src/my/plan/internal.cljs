@@ -823,8 +823,9 @@
            done? (assoc :data-show "$planfull" :style "display:none"))
      [:div {:class (str "flex items-center gap-2 py-0.5 rounded cursor-pointer"
                         (when active? " bg-base-850"))
-            :style (str "padding-left:" (* 12 depth) "px"
-                        (when active? ";border-left:2px solid #f0b429"))
+            :style (str "padding-left:" (* 12 depth) "px;box-sizing:border-box;"
+                        "border-left:2px solid "
+                        (if active? "#f0b429" "transparent"))
             (keyword "data-on:click") (toggle-step-expr id)}
       (if leaf?
         [:span {:class "shrink-0" :style "display:inline-block;width:1ch"}]
@@ -851,38 +852,42 @@
         (map #(step-row-html db % next-id (inc depth)) children)])]))
 
 (defn- root-card-html
-  "One plan-root card: title + pace + roll-up, goal line, thin amber
-   progress bar, then the full step tree (roll-up via shared [[rollup]])."
-  [db root next-id]
+  "One bounded, collapsible plan-root card."
+  [db root next-id focused-root-id]
   (let [{:my.plan/keys [done total]} (rollup db (:my.plan/id root))
         pct  (if (pos? total) (quot (* 100 done) total) 0)
         goal (:my.plan/goal root)
         pace (:my.plan/pace root)]
-    [:div {:class "flex flex-col gap-1"}
-     [:div {:class "flex items-center gap-2 cursor-pointer"
-            (keyword "data-on:click") (toggle-step-expr (:my.plan/id root))}
-      [:span {:class "text-sm font-semibold text-text-50 truncate"}
-       (:my.plan/title root)]
-      (when pace
-        [:span {:class "text-2xs text-text-500 shrink-0"}
-         (str "[" (name pace) "]")])
-      [:span {:class "text-2xs text-text-400 tabular-nums shrink-0"}
-       (str done "/" total " done")]]
-     (when goal
-       [:div {:class "text-2xs text-text-400 truncate"} (str "goal: " goal)])
-     [:div {:class "bg-base-800 w-full"
-            :style "height:3px;border-radius:2px;overflow:hidden"}
-      [:div {:style (str "height:3px;background:#f0b429;width:" pct "%")}]]
-     (step-detail-html db root)
-     [:ul {:class "flex flex-col"}
-      (map #(step-row-html db % next-id 0) (:my.plan/children root))]]))
+    [:details (cond-> {:class (str "plan-root rounded border border-base-800 "
+                                   "bg-base-950/30 overflow-hidden")}
+                (= (:my.plan/id root) focused-root-id) (assoc :open true))
+     [:summary {:class (str "cursor-pointer px-2 py-1.5 min-w-0 "
+                            "hover:bg-base-900")}
+      [:div {:class "plan-root-heading"}
+       [:span {:class "plan-title text-xs font-semibold text-text-50"}
+        (:my.plan/title root)]
+       [:span {:class "text-2xs text-text-400 tabular-nums shrink-0"}
+        (str done "/" total " done")]]
+      [:div {:class "flex items-center gap-2 min-w-0"}
+       (when pace
+         [:span {:class "text-2xs text-text-500 shrink-0"}
+          (str "[" (name pace) "]")])
+       (when goal
+         [:span {:class "plan-goal text-2xs text-text-500"} goal])]
+      [:div {:class "bg-base-800 w-full mt-1"
+             :style "height:2px;border-radius:2px;overflow:hidden"}
+       [:div {:style (str "height:2px;background:#f0b429;width:" pct "%")}]]]
+     [:div {:class "plan-tree px-2 py-1 border-t border-base-800"}
+      [:ul {:class "flex flex-col"}
+       (map #(step-row-html db % next-id 0) (:my.plan/children root))]]]))
 
 (defn plan-block-html
   "Live, explorable HTML twin of [[plan-block]] — the `/agent/{id}` tile.
 
-   Renders the agent's WHOLE plan forest (the :ai block windows; the tile
-   does not): per root a title/goal/pace header with a done/total roll-up
-   and a thin amber progress bar, then the step tree — `●` active (NOW,
+   Renders the agent's WHOLE plan forest behind bounded root disclosures (the
+   :ai block windows by content). The focused root starts open; other roots are
+   summary rows until selected. Each root carries a title/goal/pace header with
+   a done/total roll-up and a thin amber progress bar, then the step tree — `●` active (NOW,
    highlighted), `○` open (`ready`-tagged), `◌` blocked, `✓` done (hidden
    until the show-completed toggle), `✉` message-minted. STRUCTURE comes
    from [[build-forest]] (the renderable nested tree); every SIGNAL —
@@ -910,6 +915,7 @@
       (let [;; The you-are-here — the SAME [[anchor]] the :ai block reads:
             ;; an :active step wins; else the oldest ready leaf is next.
             a          (anchor db oe)
+            focused-root-id (some-> a :my.plan/chain first :my.plan/id)
             next-id    (when-not (:my.plan/active? a)
                          (:my.plan/id (:my.plan/step a)))
             ;; Rows hidden behind $planfull = the done non-root nodes;
@@ -923,7 +929,7 @@
         [:div {:class "flex flex-col gap-2 text-xs font-mono"
                :data-signals__ifmissing
                "{planstep: '', planclosed: '', planfull: false, plandone: false}"}
-         (map #(root-card-html db % next-id) forest)
+         (map #(root-card-html db % next-id focused-root-id) forest)
          (when (pos? done-count)
            [:div {:class (str "flex items-center gap-1 text-2xs text-text-400 "
                               "cursor-pointer select-none")

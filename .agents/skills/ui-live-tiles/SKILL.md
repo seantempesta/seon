@@ -5,10 +5,12 @@ description: "Show your human a live VIEW, don't just message them. Use this BEF
 
 # Live tiles — show your human, don't just tell them
 
-Your human is not reading a chat log. They are looking at your **page** —
-`/agent/{id}` — and the thing they actually watch is the **canvas**: the focal
-tile at the top, the one HTML surface YOU control. Below it sits the transcript
-of your messages and evals. The transcript is the narration; the canvas is where
+Your human is looking at your **page** — `/agent/{id}` — where the bounded
+canvas and HTML context twins share one selectable focal surface and a right
+rail. The latest surface you deliberately changed is focused automatically;
+the rail follows the same database transaction recency. The transcript twin is
+chat-first: messages are visible narration
+and technical eval detail is collapsed. The canvas is where
 the human SEES what's happening — your current plan, the data you found, your
 progress, the result table, the recommendation.
 

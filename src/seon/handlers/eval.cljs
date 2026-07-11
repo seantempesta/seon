@@ -109,15 +109,26 @@
               (second m))]
     (or msg s)))
 
+(defn- compact-operation
+  "A short operation label derived from eval source, never its arguments."
+  [source]
+  (when-let [[_ op] (re-find #"^\s*\(\s*([^\s\[\](){}]+)" (or source ""))]
+    (let [[owner fname] (str/split op #"/" 2)
+          owner-tail (some-> owner (str/split #"\.") last)]
+      (if fname (str owner-tail "/" fname) op))))
+
 (defn render-html
-  "Hiccup card for the transcript / canvas.
+  "Collapsed activity row for the human transcript.
 
    Every part routes through the
    typed `seon.render/block` renderer so each kind gets first-class TLC.
 
-   - Narration → a markdown card (`{:seon.render/markdown …}`).
-   - Header line: eval id + duration + status pill.
-   - Source → a highlighted Clojure card (`{:seon.render/source …}`,
+   The normal surface is one quiet summary line. Technical material is inside
+   a closed `<details>` disclosure so the conversation remains primary:
+
+   - Summary: narration when present, otherwise `agent activity`, plus duration
+     and success/error state.
+   - Expanded source → a highlighted Clojure card (`{:seon.render/source …}`,
      server-side `seon.ui.clojure/clj->hiccup` — no client highlight.js).
    - On :ok — a collapsible `<details>`: a one-line `=> <short>` summary;
      expanded shows the full result skeleton as a highlighted Clojure
@@ -141,41 +152,47 @@
         res-edn   (:seon.eval/result-edn entity)
         err-str   (:seon.eval/error entity)
         dur       (:seon.eval/duration-ms entity)
-        status-class (if ok? "text-amber-400" "text-error")]
-    [:div {:class "py-1"}
-     (when (and narration (not (str/blank? narration)))
-       [:div {:class "markdown mb-0.5"}
-        (render/block :html {:seon.render/markdown (str/trim narration)})])
-     [:div {:class "flex items-baseline gap-2"}
-      [:span {:class "text-xs font-mono font-semibold text-amber-500"}
-       (str "eval " eid)]
-      (when dur
-        [:span {:class "text-xs text-text-500"} (str dur "ms")])
-      [:span {:class (str "text-xs font-mono " status-class)}
-       (if ok? ":ok" ":error")]]
-     [:div {:class "mt-0.5"}
-      (render/block :html {:seon.render/source (str/trim src)})]
-     (cond
-       ok?
-       (when-let [r (short-result res-edn)]
+        status-class (if ok? "text-success" "text-error")
+        activity-label (if (and narration (not (str/blank? narration)))
+                         (-> narration str/trim str/split-lines first)
+                         (if-let [op (compact-operation src)]
+                           (str "ran " op)
+                           "worked"))]
+    [:div {:class "py-0.5 min-w-0"}
+     [:details {:class "agent-activity rounded border border-base-800 bg-base-950/40"}
+      [:summary {:class (str "cursor-pointer px-2 py-1 text-xs min-w-0 "
+                            "text-text-400 hover:text-text-200")}
+       [:span {:class "font-medium"} activity-label]
+       (when dur
+         [:span {:class "font-mono text-text-600"} (str " · " dur "ms")])
+       [:span {:class (str "font-mono " status-class)}
+        (if ok? " · done" " · failed")]]
+      [:div {:class "px-2 pb-2 pt-1 border-t border-base-800 min-w-0 overflow-hidden"}
+       [:div {:class "text-2xs font-mono text-text-600 mb-1"} (str "eval " eid)]
+       (when (and narration (not (str/blank? narration)))
+         [:div {:class "markdown mb-1 text-xs"}
+          (render/block :html {:seon.render/markdown (str/trim narration)})])
+       [:div {:class "text-2xs font-mono text-text-500 mb-0.5"} "code"]
+       (render/block :html {:seon.render/source (str/trim src)})
+       (cond
+         ok?
+         (when-let [r (short-result res-edn)]
+           [:details {:class "mt-1"}
+            [:summary {:class "text-xs font-mono text-amber-300/70 cursor-pointer"}
+             (str "result · " r)]
+            [:div {:class "mt-1 min-w-0 overflow-hidden"}
+             (render/block :html {:seon.render/source (str res-edn)})]])
+
+         (string? err-str)
          [:details {:class "mt-1"}
-          [:summary {:class "text-xs font-mono text-amber-300/70 cursor-pointer"}
-           (str "=> " r)]
-          [:div {:class "mt-1"}
-           (render/block :html {:seon.render/source (str res-edn)})]])
+          [:summary {:class "text-xs font-mono text-error cursor-pointer"}
+           (str "error · " (short-error err-str))]
+          [:div {:class (str "mt-1 p-2 rounded border border-error/30 "
+                             "bg-error/5 min-w-0 overflow-hidden")}
+           [:pre {:class (str "text-xs font-mono text-text-300 "
+                              "whitespace-pre-wrap break-words")}
+            (full-error err-str)]]]
 
-       (string? err-str)
-       [:details {:class "mt-1"}
-        [:summary {:class "text-xs font-mono text-error cursor-pointer"}
-         (str "✗ " (short-error err-str))]
-        [:div {:class (str "mt-1 p-2 rounded border border-error/30 "
-                           "bg-error/5")}
-         [:div {:class "text-xs font-mono text-error font-semibold mb-1"}
-          "✗ eval failed"]
-         [:pre {:class (str "text-xs font-mono text-text-300 "
-                            "whitespace-pre-wrap break-words")}
-          (full-error err-str)]]]
-
-       :else
-       [:div {:class "text-xs font-mono text-error mt-1"}
-        "✗ eval failed: <no detail>"])]))
+         :else
+         [:div {:class "text-xs font-mono text-error mt-1"}
+          "error details unavailable"])]]]))
