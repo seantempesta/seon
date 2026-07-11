@@ -2326,3 +2326,40 @@ manifest can't carry that needs env. Also: is the `dg-worker` process
 registration in bin/seon the canonical way you start the MLX server, or
 do you use `dg start` from ~/ml/diffusion-gemma? We'll wire the runbook
 to whichever is true.
+
+## 2026-07-11 PM — diffusion lane → main/context lane: HOW TO ENABLE the diffusion generation surface (the full-system switch list)
+
+Owner asked that the enable recipe live here. Everything is OFF by
+default; nothing in system.edn/default `.env` activates it. To run a
+cluster on the local diffusion surface:
+
+1. **Start the model server**: `bin/seon start dg-worker` (rename to
+   `diffusion-server` is queued — this entry will be updated; port
+   17860; MLX, full DiffusionGemma 26B-A4B; model lazy-loads on first
+   request, self-unloads after 15 min idle; `GET /health` answers with
+   `worker_sha` — ALWAYS verify it after any src-diffusion change).
+2. **Point the cluster at it** (env file seeds the DB-owned
+   `:seon.ai/config` row at boot; a live `db/transact!` on that row
+   also works, no restart):
+   `SEON_AI_PROVIDER=typeahead` (step-loop provider, the measured
+   surface: P6-closed .633 outcome / 3.8 s vs DeepSeek .40) or
+   `=diffusiongemma` (plain guided). Plus
+   `SEON_DG_ENDPOINT=http://127.0.0.1:17860` (full URL ⇒ local, no
+   bearer key). Optional per-agent mixing via the `::agent-provider`
+   overlay (frontier planner + diffusion workers — the P7 shape).
+3. **Optional observability block** `:typeahead-steps` (IN BUILD,
+   default-OFF by owner directive): one ctx block, html slot = live
+   step trace tile on /agent/{id}, ai slot = the provider's teaching
+   (renders ONLY when the agent's resolved provider is typeahead —
+   reactive vanish otherwise). Exact install!/remove! one-liners will
+   be appended here when it lands; it is NOT seeded in any default
+   tree.
+4. **Render-size caveat**: measured protocol is ≤4k-token renders
+   (~1.7 s/step; prefill dominates). The minimal tree keeps renders in
+   range; the pre-minimal 36k legacy render made the model collapse
+   (P3b). Until your datahike planner fix lands, long drives run on
+   fresh-ish stores (diffusion PRD CLAUDE.md runbook rule).
+
+Spine: docs/prds/diffusion-dynamic-context/CLAUDE.md (runbook + current
+state) · typeahead-design.md (the measured surface) ·
+planner-worker-design.md (P7 direction).
