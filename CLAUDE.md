@@ -43,11 +43,12 @@ consumer-specific references in `src/`, `docs/`, or `pod-host/`.
 
 ## Agent Model Policy
 
-**Implementation work uses Fable 5** (owner directive 2026-07-10 — this is a
-cleanup/optimization phase; quality, care, and refinement over speed). Opus is
-acceptable only for genuinely simple tasks (mechanical deletions, small
-targeted fixes, verification reads). **Never use haiku for coding tasks** —
-haiku only for quick file reads or context gathering.
+**Implementation work uses Opus** (owner directive 2026-07-11, superseding the
+2026-07-10 Fable ruling — Fable token budget is constrained). Delegate coding
+to opus agents; compensate with MORE up-front investment in the written
+artifacts opus executes against: clear PRDs, tight specs, updated plans and
+docs. Fable is reserved for when the owner explicitly asks. **Never use haiku
+for coding tasks** — haiku only for quick file reads or context gathering.
 
 ---
 

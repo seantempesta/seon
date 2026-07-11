@@ -79,6 +79,25 @@ misread their own situation, then closing each gap.
   projection = the next section to fix. "Feels stateful" is reached at zero
   ungrounded self-claims. This is the acceptance test for context now.
 
+## Minimal-context ladder — we-are-here (2026-07-11)
+
+**The full target + rung status + graduation criteria now live in
+[[minimal-context-ladder]] — the doc of record for this arc; keep IT
+current.** One-paragraph status: rungs 0–2 CLOSED GREEN on both models
+(DeepSeek Mode B, Muse Spark Mode A) under the ~7k minimal context —
+REPL reliability (fabrication structurally contained/eliminated),
+namespace movement (exposed + fixed the cross-turn current-ns runtime
+bug), and planning (decompose-first, close-adjacency,
+resume-after-a-real-pod-restart, answer delivered). Rung 3 pre-answered
+by rung 0 (cards suffice); rung 4 (store) is next and validates the new
+v3.1 restart-survival system-text line. The end state is
+`system.edn`'s tree replaced by the evidenced tree; the main remaining
+work is the shipped-system-text diff audit plus judging the unevidenced
+default blocks (`agents` ~14.1k tokens is the headline). Owner rulings
+2026-07-11: the minimal system text becomes the new system block once
+proven; implementation units are OPUS agents against written specs.
+Ledger: `evals/runs/2026-07-10-minimal-buildup/README.md`.
+
 ## Context-rebuild arc — two REPL modes (2026-07-10)
 
 Plan: `~/.claude/plans/lazy-splashing-rainbow.md` — replace the anti-fabrication

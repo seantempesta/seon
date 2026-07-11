@@ -60,8 +60,10 @@
 ; in-ns moves you; ns declares or updates a namespace; require loads
 ; now and records the dependency; redefining IS updating; ns-unmap
 ; removes.
-; A (defn ...) and an atom def persist across turns; a bare (def x ...)
-; does not — hold mutable values in an atom.
+; Everything you define persists across turns. Across a RESTART only
+; (defn ...), (deftest ...) and (schema/register! ...) survive; a bare
+; (def x ...) and every atom's VALUE are lost — state that must outlive
+; a restart belongs in the db.
 ; Errors come back as data — read the error map; nothing throws at you.
 ; (message/user \"...\") reaches your human. (complete \"...\") ends the
 ; task. (wait) parks until something new arrives.
