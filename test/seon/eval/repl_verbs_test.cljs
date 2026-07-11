@@ -37,10 +37,13 @@
   (swap! @repl/!compile-state update :cljs.analyzer/namespaces
          (fn [m]
            (into {}
-                 (remove (fn [[k _]] (str/starts-with? (str k) "probe.rv")))
+                 (remove (fn [[k _]] (or (str/starts-with? (str k) "probe.rv")
+                                         (str/starts-with? (str k) "my.rvx"))))
                  m)))
   (when-some [p (gobj/get js/globalThis "probe")]
-    (gobj/remove p "rv")))
+    (gobj/remove p "rv"))
+  (when-some [p (gobj/get js/globalThis "my")]
+    (gobj/remove p "rvxuse")))
 
 (t/use-fixtures :once
   {:before (fn [] (scrub-probe-rv!))})
@@ -228,6 +231,65 @@
                       (.then (fn [_]
                                (is (= src (ns-source @db/*conn* :probe.rv.req))
                                    "re-require of the same spec is a no-op")))))))
+            (.finally done))))))
+
+;; ===========================================================================
+;; B4b — cross-ns USE after movement (rung-1 gate drive repro, 2026-07-10,
+;; evals/runs/2026-07-10-minimal-buildup ds-r1-ns-move-v1-d2): a fn defined
+;; in an in-ns-created ns must be callable from ANOTHER ns — via a bare
+;; (require '[that.ns :as a]) alias AND fully qualified. The live drive
+;; showed (require '[my.convert :as convert]) from home making
+;; convert/to-feet "not defined" even though (to-feet 1.0) worked inside
+;; my.convert — the agent burned ~40 forms fighting it.
+;; ===========================================================================
+
+(deftest cross-ns-call-after-in-ns-defn-and-require
+  (async done
+    (with-conn
+      (fn []
+        (-> (run-batch! (str "(in-ns 'probe.rv.xuse)\n"
+                             "(defn xf [m] (* m 2.0))\n"
+                             "(in-ns 'my.agent.rv)\n"
+                             "(require '[probe.rv.xuse :as xu])\n"
+                             "(xu/xf 3.0)\n"
+                             "(probe.rv.xuse/xf 4.0)")
+                        'my.agent.rv)
+            (.then
+              (fn [_]
+                (let [rows (eval-rows @db/*conn*)]
+                  (is (= [true true true true true true] (mapv :ok? rows))
+                      (str "every step of move→defn→move-home→require→call "
+                           "succeeds — errors: "
+                           (pr-str (keep :error rows))))
+                  (testing "the aliased and fully-qualified calls both resolve the var"
+                    (is (true? (:ok? (nth rows 4))) "aliased call (xu/xf 3.0)")
+                    (is (true? (:ok? (nth rows 5))) "qualified call (probe.rv.xuse/xf 4.0)")))))
+            (.finally done))))))
+
+(deftest cross-ns-call-after-multi-turn-my-ns-require
+  ;; The drive-exact shape: a `my.*` ns DECLARED first, the defn in a
+  ;; SEPARATE batch (turn), the (require '[… :as a]) + calls from home in
+  ;; a third — each batch = one turn, like the live loop.
+  (async done
+    (with-conn
+      (fn []
+        (-> (run-batch! "(ns my.rvxuse)" 'my.agent.rv)
+            (.then (fn [_] (run-batch! (str "(in-ns 'my.rvxuse)\n"
+                                            "(defn xg [m] (* m 2.0))")
+                                       'my.agent.rv)))
+            ;; Mode B shape: ONE form per batch — the require and each call
+            ;; land in their own turns (the live ds-r1 failure had the
+            ;; aliased call in the turn AFTER the require; Spark's same-turn
+            ;; require+call succeeded on the same bundle).
+            (.then (fn [_] (run-batch! "(require '[my.rvxuse :as xg2])" 'my.agent.rv)))
+            (.then (fn [_] (run-batch! "(xg2/xg 3.0)" 'my.agent.rv)))
+            (.then (fn [_] (run-batch! "(my.rvxuse/xg 4.0)" 'my.agent.rv)))
+            (.then
+              (fn [_]
+                (let [rows (eval-rows @db/*conn*)]
+                  (is (every? :ok? rows)
+                      (str "declare→defn→require→call across turns all ok — "
+                           "errors: " (pr-str (keep :error rows)))))))
             (.finally done))))))
 
 ;; ===========================================================================

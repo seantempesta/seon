@@ -33,6 +33,7 @@
    `:core` fault). seon.agent requires THIS ns, so the edge runs
    agent → run → {derive, message, error}, never the reverse."
   (:require
+    [seon.agent.ctx :as ctx]
     [seon.agent.message :as msg]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
@@ -119,8 +120,22 @@
 ;; ============================================================
 
 (def default-turn-limit
-  "Work-bound seed when the agent has no `:seon.agent/default-turn-limit`."
+  "Work-bound seed when the agent has no `:seon.agent/default-turn-limit`.
+
+   Denominated in the loop's work unit for repl-mode `:batch`: TURNS."
   20)
+
+(def default-form-limit
+  "Work-bound seed under repl-mode `:stream` — denominated in FORMS.
+
+   One stream turn evals at most one form, so the bound is form-count
+   ([[seon.derive/run-form-count]]). 3× the batch default: a Mode A turn
+   averaged ~5.6 forms in the rung-0 matrix, and the rung-1 gate drive
+   showed a 20-form budget strands a multi-phase task short of its
+   report (evals/runs/2026-07-10-minimal-buildup, ds-r1-ns-move-v1-d1).
+   An agent-level `:seon.agent/default-turn-limit` or an explicit
+   request seed still wins, whatever the mode."
+  60)
 
 (def default-deadline-ms
   "Wall-clock-bound seed (10 min) when the agent has no
@@ -292,7 +307,11 @@
             turn-limit (or tl
                            (:seon.agent.run/default-turn-limit a)
                            (:seon.agent/default-turn-limit a)
-                           default-turn-limit)
+                           ;; mode-denominated const fallback: forms under
+                           ;; :stream, turns under :batch (rung-0 verdict).
+                           (if (= :stream (ctx/repl-mode @db/*conn*))
+                             default-form-limit
+                             default-turn-limit))
             deadline   (or dl (js/Date. (+ (.getTime now)
                                            (or (::default-deadline-ms a)
                                                (:seon.agent/default-deadline-ms a)

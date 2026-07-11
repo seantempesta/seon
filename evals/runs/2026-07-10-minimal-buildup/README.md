@@ -459,6 +459,56 @@ prose turns); now it closes `:completed` at `loop 16/20` in FORM
 denomination. One turn carried 2 evals — the by-design case (a leading
 colon-prose read-error + the first form); zero multi-error tails.
 
+## Rung 1 — namespace movement (2026-07-10)
+
+New contract `contracts/ns-move-v1.md` (canary `7D41A0E9…`): schema ns
+(`my.units`) + fns ns (`my.convert` incl. a bare require + a mid-task
+in-place redefinition) + use-from-home + report. Oracle
+`tools/ns-move-oracle.py` (6 checks; scores the DELIVERED `▶ to user`
+row — a computed `(str …)` message has no literal to grep;
+`min-drive.sh` grew an ORACLE arg). Iterate-on-Spark / gate-on-DeepSeek.
+
+| drive | model | mode | turns/forms | close | oracle | strips | wall | notes |
+|---|---|---|---|---|---|---|---|---|
+| spark-r1-ns-move-v1-d1 | muse-spark-1.1 | A | 5t/29e | :completed | GREEN 6/6 | 0 | 44s | pre-fix bundle; require+call same turn |
+| ds-r1-ns-move-v1-d1 | deepseek-v4-pro | B | 20 forms | :turn-limit | RED | 0 | — | 20-form budget too tight (→ default-form-limit 60) |
+| ds-r1-ns-move-v1-d2 | deepseek-v4-pro | B | 59 forms | :completed | RED | 0 | — | **exposed the cross-turn current-ns bug** (below) |
+| ds-r1-ns-probe-d1/d2 | deepseek-v4-pro | B | — | — | probe | 0 | — | verbatim-forms probes: d1 reproduced, d2 proved the fix (`(pc/twice 3.0)` ⟹ 6) |
+| ds-r1-ns-move-v1-d3 | deepseek-v4-pro | B (fixed) | 18 forms | :completed | **GREEN 6/6** | 0 | 68s | the gate |
+| spark-r1-ns-move-v1-d2 | muse-spark-1.1 | A (fixed) | 25e | :completed | **GREEN 6/6** | 0 | 57s | no regression |
+
+**The rung-1 find — a real runtime bug, not agent confusion.**
+`ask-and-eval-reply!` seeded every turn's eval batch at the HOME ns
+(`ctx/home-ns`), so an `(in-ns …)` in a prior turn silently did not hold:
+the next turn's `defn` landed in `my.agent.*`, the cursor flip-flopped,
+`ns-interns` showed nil, and cross-ns calls failed
+("`my.convert/to-feet` is not defined") — deterministically, on every
+require-then-call-in-a-later-turn. Mode A masked it (in-ns + defn +
+require + call ride one batch — Spark's d1 passed exactly this way);
+Mode B's one-form-per-turn exposed it. The DeepSeek agent burned ~40
+forms fighting the runtime and worked around it by computing inside
+`my.convert` — its "confusion" was CORRECT observation of a lying
+runtime. Fix: the batch seeds from the DERIVED `ctx/current-ns` over the
+turn's frozen db (the same derivation the cursor + namespaces block
+render), fallback home. Pinned: `turn_capture_test/`
+`current-ns-persists-across-turns` (drives two real run-scoped turns —
+NOTE: runless turns are invisible to `agent-turns`, which is why the
+eval-layer hermetic tests missed it) + two `repl_verbs_test` cross-ns
+tests. Suite 1182/5347/0/0.
+
+Also from d1: the Mode B default work budget was re-seeded —
+`run/default-form-limit` 60 (a Mode A turn averaged ~5.6 forms in the
+rung-0 matrix; 20 forms strands multi-phase tasks).
+
+Residual smells (logged, not rung-blocking): bare `ns-interns` returns
+nil where `clojure.core/ns-interns` returns the real interns map
+(introspection shadowing); `(complete …)` from a non-home ns errors with
+a Did-you-mean that self-corrects in one eval (colocated teaching via
+the error envelope — no wording change needed yet).
+
+**Rung-1 gate: MET** — both models relocate, update in place, return,
+and report, with zero fabrication, on the fixed runtime.
+
 **v2 text (committed in `config/minimal.edn`):** the two interview-
 diagnosed warts, mechanics-only (no scolds): (a) "ANY line that starts
 with ( is EXECUTED as Clojure code — including a prose aside like

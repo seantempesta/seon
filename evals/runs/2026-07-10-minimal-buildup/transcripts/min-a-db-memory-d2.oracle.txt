@@ -1,0 +1,4 @@
+transact ok turn: 2
+db/query ok in LATER turn: 3
+answer 59.5 in message/complete: turn 3
+GREEN: store-then-recall verified (query ran after transact; answer reported)

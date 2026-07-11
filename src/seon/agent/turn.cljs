@@ -372,7 +372,7 @@
    reply and eval-batch the forms. `id` / `id-of-turn` are LOCALS threaded
    down from `run-turn!` (captured before the LLM await), so the always-on
    blob capture pairs this verbatim reply with the same turn's prompt."
-  [resp id id-of-turn compile-state run-id stream?]
+  [resp id id-of-turn compile-state run-id stream? start-ns]
   (let [raw-reply  (or (:text resp) "")
         ;; repl-mode reply-boundary fix-up: DELETE every model-authored
         ;; result-claim BEFORE persist + eval (Mode A `:batch`; Mode B
@@ -421,8 +421,15 @@
                          (vec (take (inc i) parsed))
                          parsed))
                      parsed)
+        ;; The batch starts where the agent IS (the derived current-ns the
+        ;; cursor + namespaces block already show), NOT the home ns — an
+        ;; `(in-ns …)` in a PRIOR turn must hold across the turn boundary
+        ;; (rung-1 root cause, 2026-07-10: seeding home here made every
+        ;; Mode B turn silently define into my.agent.*, cursor flip-flop,
+        ;; ns-interns nil, cross-ns resolution failures).
         batch      (await (seval/eval-batch! compile-state parsed
-                                             (ctx/home-ns id) id id-of-turn run-id))]
+                                             (or start-ns (ctx/home-ns id))
+                                             id id-of-turn run-id))]
     (cond->
       ;; ATTEMPTED forms (ok + failed), not just n-ok: the loop's zero-forms
       ;; halt means "no actionable forms" — NOT "every form errored". A
@@ -553,6 +560,7 @@
   [{:seon.agent/keys [id llm-fn compile-state]
     run-id :seon.agent.run/id
     stream? :seon.ai/stream?
+    start-ns :seon.eval/start-ns
     :seon.agent.turn/keys  [id-of-turn turn-idx prompt-text]}]
   (let [resp    (await (call-llm! id id-of-turn llm-fn prompt-text (boolean stream?)))
         retries (:seon.agent.turn/llm-retries resp)
@@ -573,7 +581,7 @@
            :seon.agent.turn/error  (turn-error-str err)}
           retries (assoc :seon.agent.turn/llm-retries retries)))
       (cond-> (await (ask-and-eval-reply! resp id id-of-turn compile-state run-id
-                                          (boolean stream?)))
+                                          (boolean stream?) start-ns))
         retries     (assoc :seon.agent.turn/llm-retries retries)
         (seq usage) (assoc :seon.agent.turn/llm-usage (pr-str usage))
         estimated?  (assoc :seon.agent.turn/usage-estimated? true)
@@ -614,6 +622,12 @@
         ;; assembled prompt verbatim as a blob. Both land on the turn's
         ;; open-tx; a failed blob write yields nil and the turn proceeds.
         rendered-as-of (db/basis-t db)
+        ;; Where the batch STARTS: the agent's derived current-ns over the
+        ;; SAME frozen db the prompt rendered from — so the ns the cursor
+        ;; showed the agent is the ns its forms run in (an in-ns in a prior
+        ;; turn holds; ctx/current-ns already falls back to home).
+        start-ns   (let [c (ctx/current-ns {:seon.agent/id id :seon.db/db db})]
+                     (when c (symbol (if (keyword? c) (name c) (str c)))))
         prompt-blob    (await (capture-blob! full-prompt :prompt))]
     ;; ctx-tokens = the assembled context ONLY; the system text rides the
     ;; adapter's system message, so it is reported as its own count here
@@ -644,6 +658,7 @@
                                                 :seon.agent/compile-state compile-state
                                                 :seon.agent.run/id        run-id
                                                 :seon.ai/stream?          stream?
+                                                :seon.eval/start-ns       start-ns
                                                 :seon.agent.turn/id-of-turn     turn-id
                                                 :seon.agent.turn/turn-idx       turn-idx
                                                 :seon.agent.turn/prompt-text    prompt})))))))]

@@ -20,3 +20,10 @@ ds-think-poker-v1-d1 agent=IRq-2607101758 outcome=GREEN wall=117s started=2026-0
 ds-think-two-bucket-v1-d1 agent=RCA-2607101800 outcome=GREEN wall=461s started=2026-07-10T22:00:56Z sha_ok=yes
 ds-v2-poker-v1-d1 agent=Xpe-2607101810 outcome=GREEN wall=75s started=2026-07-10T22:10:07Z sha_ok=yes
 min-b2-two-bucket-v1-d1 agent=FhT-2607101919 outcome=GREEN wall=66s started=2026-07-10T23:19:16Z sha_ok=yes
+spark-r1-ns-move-v1-d1 agent=WUK-2607101924 outcome=GREEN (oracle fixed, rescored) wall=44s started=2026-07-10T23:24:39Z sha_ok=yes
+ds-r1-ns-move-v1-d1 agent=OTU-2607101927 outcome=RED wall=76s started=2026-07-10T23:27:42Z sha_ok=yes
+ds-r1-ns-move-v1-d2 agent=pLE-2607101931 outcome=RED wall=235s started=2026-07-10T23:31:39Z sha_ok=yes
+ds-r1-ns-probe-d1 agent=UCv-2607101955 outcome=RED wall=127s started=2026-07-10T23:55:56Z sha_ok=yes
+ds-r1-ns-probe-d2 agent=HFI-2607102012 outcome=RED wall=56s started=2026-07-11T00:12:56Z sha_ok=yes
+ds-r1-ns-move-v1-d3 agent=gXn-2607102014 outcome=GREEN wall=68s started=2026-07-11T00:14:06Z sha_ok=yes
+spark-r1-ns-move-v1-d2 agent=Loj-2607102015 outcome=GREEN wall=57s started=2026-07-11T00:15:47Z sha_ok=yes

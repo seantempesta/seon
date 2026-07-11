@@ -1,14 +1,15 @@
 #!/bin/zsh
-# min-drive.sh CLUSTER TASK CONTRACT N — one minimal-context drive.
+# min-drive.sh CLUSTER TASK CONTRACT N [ORACLE] — one minimal-context drive.
 #   CLUSTER=<min-a|min-b>  TASK=<dir under tmp/t4-masters/py, or "-" for none>
 #   CONTRACT=<contracts base>  N=drive#
+#   ORACLE=<tools/*.py transcript oracle for TASK "-"; default db-memory-oracle.py>
 # Serial only. Resets the task dir from master (when TASK != "-"), POSTs the
 # contract to the cluster's pod, extracts the transcript from :<CLUSTER>,
-# then runs the oracle: pytest (py tasks) or db-memory-oracle.py (TASK "-").
+# then runs the oracle: pytest (py tasks) or the transcript ORACLE (TASK "-").
 # Adapted from tmp/gram-drive.sh (2026-07-09 run), parameterized by cluster.
 set -e
 cd /Users/sean/src/seon
-CLUSTER=$1; TASK=$2; CONTRACT=$3; N=$4
+CLUSTER=$1; TASK=$2; CONTRACT=$3; N=$4; ORACLE=${5:-db-memory-oracle.py}
 EV=evals/runs/2026-07-10-minimal-buildup
 PORT=$(cat "tmp/seon-port-$CLUSTER")
 TAG="${CLUSTER}-${CONTRACT}-d${N}"
@@ -55,7 +56,7 @@ if [ "$TASK" != "-" ]; then
     > "$EV/transcripts/$TAG.diff.txt" 2>&1 || true
   echo "[$TAG] diff lines: $(wc -l < $EV/transcripts/$TAG.diff.txt)"
 else
-  python3 "$EV/tools/db-memory-oracle.py" "$EV/transcripts/$TAG.txt" > "$EV/transcripts/$TAG.oracle.txt" 2>&1 && OUTCOME=GREEN || OUTCOME=RED
+  python3 "$EV/tools/$ORACLE" "$EV/transcripts/$TAG.txt" > "$EV/transcripts/$TAG.oracle.txt" 2>&1 && OUTCOME=GREEN || OUTCOME=RED
 fi
 echo "[$TAG] outcome: $OUTCOME  ($(tail -1 $EV/transcripts/$TAG.oracle.txt 2>/dev/null | head -c 120))"
 

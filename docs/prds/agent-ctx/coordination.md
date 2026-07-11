@@ -1952,3 +1952,25 @@ gained: form-denominated work bound (`derive/run-form-count`; masthead
 `loop k/cap` counts forms), single-form eval close (delta-tail read-errors
 demote to prose), and the turn-open log now reports system-tokens alongside
 ctx-tokens (it silently under-reported the fixed prefix before).
+
+## 2026-07-10 — eval lane → tooling lane: cross-turn current-ns runtime bug FIXED in turn.cljs (rung-1 find)
+
+Rung 1 (namespace movement) exposed a core-runtime bug: every turn's eval
+batch seeded its ns fold at HOME (`ask-and-eval-reply!` passed
+`ctx/home-ns`), so an `(in-ns …)` from a prior turn did not hold — the
+next turn's defns silently landed in `my.agent.*`, the cursor
+flip-flopped, and cross-ns resolution failed deterministically. Mode A
+mostly masks it (same-batch in-ns+defn+call), Mode B exposes it on every
+movement. Fix (committed): `run-turn!` derives the batch start-ns via
+`ctx/current-ns` over the turn's frozen db (the derivation the cursor
+already renders), threads it `run-turn! → ask-and-eval! → eval-batch!`.
+Pinned by `turn_capture_test/current-ns-persists-across-turns` — note
+the trap that hid it: RUNLESS turns are invisible to `agent-turns`, so
+eval-layer hermetic tests can't catch turn-layer ns threading; turn-level
+pins must open a real run. Also: `run/default-form-limit` 60 seeds the
+`:stream` work bound (20 turns ≠ 20 forms), and run.cljs now requires
+seon.agent.ctx (cycle-checked). Evidence + probes:
+`evals/runs/2026-07-10-minimal-buildup/README.md` §"Rung 1". Residual
+smell for your lane: bare `ns-interns` resolves to something returning
+nil while `clojure.core/ns-interns` works — introspection shadowing in
+the self-host resolution.

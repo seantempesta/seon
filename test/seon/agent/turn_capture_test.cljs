@@ -29,6 +29,7 @@
     [clojure.string :as str]
     [my.blob :as blob]
     [seon.agent :as agent]
+    [seon.agent.run :as run]
     [seon.agent.inspect :as inspect]
     [seon.agent.turn :as turn]
     [seon.ai :as ai]
@@ -207,4 +208,54 @@
           (is (= "(+ 2 2)\n"
                  (get-in d [:seon.agent.inspect/to-turn :seon.agent.inspect/reply]))
               "the diff carries both reconstructed turns")))
+      done)))
+
+;; ---------------------------------------------------------------------------
+;; 5. Current-ns persists ACROSS turns (rung-1 root cause, 2026-07-10):
+;;    an (in-ns …) in turn N must be where turn N+1's forms run — the batch
+;;    seeds from the DERIVED current-ns over the turn's frozen db, not the
+;;    home ns. Before the fix every turn silently ran at home: defns landed
+;;    in my.agent.*, ns-interns showed nil, cross-ns resolution failed
+;;    (evals/runs/2026-07-10-minimal-buildup, ds-r1-ns-probe-d1).
+;; ---------------------------------------------------------------------------
+
+(deftest current-ns-persists-across-turns
+  (async done
+    (run-test
+      (fn ^:async run []
+        (let [a   (await (fresh-agent!))
+              aid (:seon.agent/id a)
+              ;; a REAL run: ctx/current-ns derives over agent->runs->turns,
+              ;; so runless turns are invisible to it — the live loop always
+              ;; drives under a run, and this pin must too.
+              r   (await (run/open-run! {:seon.agent/id aid
+                                         :seon.agent.run/trigger :message}))
+              rid (:seon.agent.run/id r)
+              drive! (fn ^:async drive! [reply]
+                       (await (db/with-agent aid
+                                (fn []
+                                  (turn/run-turn!
+                                    {:seon.agent/id            aid
+                                     :seon.agent/llm-fn        (fn [_] (js/Promise.resolve {:text reply}))
+                                     :seon.agent/compile-state (:seon.agent/compile-state a)
+                                     :seon.agent.run/id        rid})))))]
+          (await (drive! "(in-ns 'probe.tc.move)\n"))
+          (await (drive! "(defn tmv [x] (* x 3))\n(tmv 2)\n"))
+          (let [db*  @db/*conn*
+                rows (->> (db/query {:seon.db/db db*
+                                     :seon.db/query
+                                     '[:find ?e ?src ?ns ?ok
+                                       :where
+                                       [?e :seon.eval/source ?src]
+                                       [?e :seon.eval/ns ?ns]
+                                       [?e :seon.eval/ok? ?ok]]})
+                          (sort-by first))
+                defn-row (first (filter #(str/includes? (second %) "defn tmv") rows))
+                call-row (first (filter #(= "(tmv 2)" (second %)) rows))]
+            (is (some? defn-row) "the defn eval recorded")
+            (is (= :probe.tc.move (nth defn-row 2))
+                "turn N+1's defn ran in the ns turn N moved to — not home")
+            (is (true? (nth call-row 3)) "the same-ns call resolves")
+            (is (= :probe.tc.move (nth call-row 2)))))
+        nil)
       done)))
