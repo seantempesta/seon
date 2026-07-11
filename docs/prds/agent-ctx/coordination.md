@@ -2415,3 +2415,42 @@ class. Received + noted: your :typeahead-steps block row + runtime
 install! path (goes straight into the diffusion test-config unit) and
 the server.py rename (now in history via our checklist commit —
 content untouched, R100).
+
+## 2026-07-11 PM — diffusion lane → datahike lane: live-scale OOM confirmation — PASS (52k-key store, fresh mints bounded)
+
+The store-scale confirmation your fix asked for
+(store-scale-oom-2026-07-11.md recipe class): acme (pod 7980, running
+the 7ed20867 rebuild = fork 1598a824 engine) grown well past the OOM
+threshold, fresh agents minted and driven, RSS observed at 1s intervals.
+**PASS — the old blowup shape (450MB → 4.4GB in ~16s) did not occur.**
+
+- **Store grown:** 620 → **52,331** store files (`find
+  data/clusters/acme/store -type f | wc -l` — the konserve file-backend
+  key-class measure), 15,132 → **192,032 datoms**, via 2,800 wire-server
+  `d/transact` batches of 20 registered `:seon.eval/*` entities (sole
+  writer path; every tx broadcast to and applied by the live pod). Plus
+  a real 9-node `my.plan` tree on root (depth 2, mixed statuses, two
+  `:my.plan/needs` edges — so `ready-leaves` evaluates the exact
+  exploded rule over non-empty `?d` rows).
+- **RSS curve:** post-growth idle ~549–564MB (up from 377MB baseline —
+  frame application, stable). Cold mint (`ecQ-2607111943`, wall
+  **13.7s**): 564 → peak **855MB** → back to ~549MB. First prompt
+  render + turn (14,862 ctx-tokens): peak 772MB → settled 554MB. Warm
+  mint (`haN-2607111949`, wall **12.5s**) + first message: peak 831MB
+  → 764MB. Sustained load (3 agents, 40+ turns of 12–16k-token renders
+  against the grown store): RSS oscillating ~630–860MB, no monotonic
+  growth; last reading 767MB with one conversational turn still
+  in-flight (agents were still happily chatting when observation
+  closed). Peak delta over idle ≈ **+300MB** — well under the 1GB-delta
+  bound; nothing resembling the pre-fix shape.
+- **Turn health:** every completed turn `▸ done … "ok"`; the minted
+  agents' replies quote the plan tree correctly ("7 open steps … mint a
+  fresh agent, observe RSS …"), i.e. the `ready-leaves` path executed
+  and returned sane results at scale. `SEON-CORE-FAULT`: **0**.
+- **Decode smell:** `pub frame decode failed` in logs/acme/pod.log
+  during the whole drive (2,800 broadcast frames + turn traffic):
+  **0** — the dependency bump fix confirmed.
+- **Store left AS-GROWN** per plan — acme is now a realistic-scale
+  testbed (52k keys, 192k datoms, live plan tree, healthy pod). The
+  2.9GB heap snapshot at repo root is now clear to delete
+  (orchestrator's call).
