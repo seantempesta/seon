@@ -45,11 +45,8 @@
   [:section {:id (str "agent-view-primary-" selection)
              :data-agent-primary selection
              :data-show (str "$selected === '" selection "'")
-             :style (when (= selection "canvas")
-                      "min-height:10rem;max-height:min(38vh,22rem)")
              :class (str "agent-view-surface tile-hero min-h-0 overflow-auto border "
-                         "border-base-800 rounded-md bg-base-900 p-2 "
-                         (when-not (= selection "canvas") "h-full"))}
+                         "border-base-800 rounded-md bg-base-900 p-2 h-full")}
    hiccup])
 
 (defn- rail-button
@@ -177,7 +174,11 @@
           "debug"]]
         (status-chip db agent-id)]
        [:div {:id "agent-view-layout"
-              :class "grid grid-cols-3 gap-2 min-h-0 flex-1"}
+              ;; The fixed time-travel and chat bars occupy the bottom 6.5rem;
+              ;; headers and page chrome occupy the top. Keep the main stage
+              ;; between them and scroll its surfaces internally.
+              :style "height:calc(100vh - 11.5rem)"
+              :class "grid grid-cols-3 gap-2 min-h-0"}
         [:div {:id "agent-view-primary" :class "col-span-2 min-h-0"}
          (doall
            (map (fn [{:keys [selection hiccup]}]
