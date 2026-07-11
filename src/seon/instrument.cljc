@@ -424,6 +424,9 @@
                      ;; output-violation throw below is not double-recorded):
                      ;; a rejected Promise from an instrumented `^:async` fn
                      ;; was previously observed by NO instrumentation layer.
+                     ;; Class rule for the wrapped fns: docs/conventions.md
+                     ;; "Errors Are Values" consequence 3 (never reject with
+                     ;; an expected error — it records as :core here).
                      ;; record! persists the datom; the re-throw re-rejects
                      ;; the chained Promise with the SAME reason, preserving
                      ;; caller semantics (eval's auto-await / .catch still

@@ -557,3 +557,111 @@ def test_frontier_backoff_lets_model_rewrite_symbol(oracle):
                for e in r["events"])
     assert r["locked"] == ["(todo/add!)"]
     assert r["transition"] == "done"
+
+
+# ---------------------------------------------------------------------------
+# buffer picture (buffer_text/buffer_spans) + offer_status — the additive
+# observability fields the :typeahead-steps tile renders
+# ---------------------------------------------------------------------------
+
+def _assert_spans_wellformed(r):
+    """Spans are ordered, non-overlapping, clipped to buffer_text, and use
+    only the closed status vocabulary."""
+    from seon_diffusion.cursor import BUFFER_STATUSES
+    n = len(r["buffer_text"])
+    prev = 0
+    for s in r["buffer_spans"]:
+        assert s["status"] in BUFFER_STATUSES
+        assert 0 <= s["start"] <= s["end"] <= n
+        if s["status"] != "frontier":
+            assert s["start"] >= prev
+            prev = s["end"]
+
+
+def test_spans_overlay_clips_and_orders():
+    from seon_diffusion.cursor import spans_overlay
+    base = [{"start": 0, "end": 10, "status": "settled"}]
+    out = spans_overlay(base, 3, 6, "repaired")
+    assert out == [{"start": 0, "end": 3, "status": "settled"},
+                   {"start": 3, "end": 6, "status": "repaired"},
+                   {"start": 6, "end": 10, "status": "settled"}]
+    # zero-width overlay is a no-op
+    assert spans_overlay(base, 4, 4, "locked") == base
+
+
+def test_progress_buffer_marks_locked_prefix(oracle):
+    d, _, _ = driver(["(defn t9 [x] x)\n; still thinking"], oracle)
+    r = d.step("ctx")
+    _assert_spans_wellformed(r)
+    by = {s["status"]: s for s in r["buffer_spans"]}
+    assert "locked" in by and by["locked"]["start"] == 0
+    locked_txt = r["buffer_text"][by["locked"]["start"]:by["locked"]["end"]]
+    assert "(defn t9 [x] x)" in locked_txt
+    assert "settled" in by            # the unharvested remainder
+    assert "frontier" in by and by["frontier"]["start"] == by["frontier"]["end"]
+
+
+def test_repair_buffer_marks_repaired_region(oracle):
+    d, _, _ = driver(["(def f9 [x] x)"], oracle)
+    r = d.step("ctx")
+    assert r["transition"] == "repair"
+    _assert_spans_wellformed(r)
+    statuses = {s["status"] for s in r["buffer_spans"]}
+    assert "repaired" in statuses
+    rep = next(s for s in r["buffer_spans"] if s["status"] == "repaired")
+    assert "def f9" in r["buffer_text"][rep["start"]:rep["end"]]
+
+
+def test_expand_buffer_spans_clamped_and_locked(oracle):
+    d, _, _ = driver(["①", ("buy milk", False)], oracle)
+    r = d.step("ctx", offers=OFFERS)
+    assert r["transition"] == "expand" and r["locked"]
+    _assert_spans_wellformed(r)
+    statuses = {s["status"] for s in r["buffer_spans"]}
+    assert "locked" in statuses       # the harvested expansion
+    # expansion carries its own per-hole picture + round budget
+    fr = r["expansion"]
+    assert fr["settle_round_budget"] >= fr["settle_rounds_used"] >= 1
+    assert {"clamped", "settled", "resolving"} >= {s["status"] for s in fr["spans"]}
+    # offer_status: the chosen glyph is fired, the other below-margin
+    st = {s["glyph"]: s for s in r["offer_status"]}
+    assert st["①"]["state"] == "fired"
+    assert st["②"]["state"] == "below-margin"
+    assert r["readouts"]["auto_offer_margin"] == Policy().auto_offer_margin
+
+
+def test_typed_region_suppression_reported(oracle):
+    """The margin clears but the model typed a clean form: the top offer
+    reports suppressed/typed-region instead of silently not firing."""
+    class TypedStub(AutoOfferStub):
+        def decode(self, code_buffer_ids, cache, code_buffer_start,
+                   self_conditioning_logits=None):
+            self.calls += 1
+            if self.calls == 1:
+                return mx.zeros((1, CL, VOCAB))
+            logits = self._emit(code_buffer_ids,
+                                self.tok("(db/q 1)")["input_ids"] + [EOS])
+            bump = mx.zeros((1, CL, VOCAB))
+            bump[0, 0, GLYPH_ID["①"]] = 40.0
+            return logits + bump
+
+    tok = GlyphTok()
+    model = TypedStub(tok, [])
+    d = CursorDriver(model, tok, SpyOracle(oracle),
+                     policy=Policy(probe_lengths=1), gen=gen_cfg())
+    r = d.step("ctx", offers=OFFERS, null_render="null intent")
+    st = {s["glyph"]: s for s in r["offer_status"]}
+    assert st["①"]["state"] == "suppressed"
+    assert st["①"]["reason"] == "typed-region"
+    assert any(e["event"] == "auto-offer-suppressed" for e in r["events"])
+
+
+def test_fill_returns_piece_spans(oracle):
+    d, _, _ = driver([("buy milk", False)], oracle)
+    r = d.fill("ctx", [["clamp", '(todo/add! "'], ["free", 8], ["clamp", '")']])
+    assert r["text"].startswith('(todo/add! "')
+    kinds = [s["status"] for s in r["spans"]]
+    assert kinds[0] == "clamped" and kinds[-1] == "clamped"
+    assert any(k in ("settled", "resolving") for k in kinds)
+    # spans tile the text exactly
+    assert "".join(r["text"][s["start"]:s["end"]] for s in r["spans"]) == r["text"]

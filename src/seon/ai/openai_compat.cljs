@@ -457,51 +457,57 @@
                     ":seon.ai/api-key-env / SEON_AI_API_KEY_ENV)"))))
 
       :else
-      (let [ms      (or (:seon.ai/timeout-ms (ai/current)) default-timeout-ms)
-            ^js client (make-client url key ms)
-            extra   (request-extra-body request)
-            ;; :extra-body is MERGED into the request PARAMS (1st arg).
-            ;; openai-node passes unknown top-level params through
-            ;; verbatim. The 2nd-arg RequestOptions :body REPLACES the
-            ;; body (does NOT merge) — using it dropped model/messages
-            ;; and 400'd every extra-body call (verified live).
-            params  (clj->js (cond-> (request-params request)
-                               (seq extra) (merge extra)))
-            ^js completions (.. client -chat -completions)
-            stream?  (boolean (:seon.ai/stream? request))]
-        (try
-          (let [^js stream (.stream completions params)]
-            (if stream?
-              ;; repl-mode :stream — consume deltas, abort at the first
-              ;; complete top-level form (one form per turn).
-              (let [{::keys [text aborted? error]} (await (stream-until-form! stream))]
-                (cond
-                  ;; The consumer captured an SDK failure as a VALUE (it
-                  ;; never rejects — see its docstring); re-raise into
-                  ;; THIS fn's catch, the one error->envelope site.
-                  (some? error) (throw error)
+      ;; The WHOLE build+call rides inside the try — the params build reads
+      ;; config-provided data (the config row, extra-body EDN merged into the
+      ;; params, make-client), so a throw there is an EXPECTED error and must
+      ;; resolve to an envelope, never reject: the instrument wrapper records
+      ;; a rejection as a :core fault (crashes the dev pod). Same class as the
+      ;; stream-until-form! fix (e6295ecd) and the anthropic fix (06615941).
+      (try
+        (let [ms      (or (:seon.ai/timeout-ms (ai/current)) default-timeout-ms)
+              ^js client (make-client url key ms)
+              extra   (request-extra-body request)
+              ;; :extra-body is MERGED into the request PARAMS (1st arg).
+              ;; openai-node passes unknown top-level params through
+              ;; verbatim. The 2nd-arg RequestOptions :body REPLACES the
+              ;; body (does NOT merge) — using it dropped model/messages
+              ;; and 400'd every extra-body call (verified live).
+              params  (clj->js (cond-> (request-params request)
+                                 (seq extra) (merge extra)))
+              ^js completions (.. client -chat -completions)
+              stream?  (boolean (:seon.ai/stream? request))
+              ^js stream (.stream completions params)]
+          (if stream?
+            ;; repl-mode :stream — consume deltas, abort at the first
+            ;; complete top-level form (one form per turn).
+            (let [{::keys [text aborted? error]} (await (stream-until-form! stream))]
+              (cond
+                ;; The consumer captured an SDK failure as a VALUE (it
+                ;; never rejects — see its docstring); re-raise into
+                ;; THIS fn's catch, the one error->envelope site.
+                (some? error) (throw error)
 
-                  aborted?
-                  {:seon.ai/text                        text
-                   :seon.ai.openai-compat/finish-reason "abort"
-                   :seon.ai/usage                       (estimated-usage request text)
-                   :seon.ai/estimated?                  true}
+                aborted?
+                {:seon.ai/text                        text
+                 :seon.ai.openai-compat/finish-reason "abort"
+                 :seon.ai/usage                       (estimated-usage request text)
+                 :seon.ai/estimated?                  true}
 
-                  ;; Natural end before any form completed — fall back to
-                  ;; the assembled completion for real usage + full text.
-                  :else
-                  (parse-completion (await (.finalChatCompletion stream)))))
-              ;; repl-mode :batch — buffer to the assembled completion.
-              (let [completion (await (.finalChatCompletion stream))
-                    result     (parse-completion completion)]
-                (when-let [err (:seon.ai/error result)]
-                  (ai/log-error! label err))
-                result)))
-          (catch :default e
-            (let [err (error->envelope label e)]
-              (ai/log-error! label err)
-              {:seon.ai/text  ""
-               :seon.ai/error err})))))))
+                ;; Natural end before any form completed — fall back to
+                ;; the assembled completion for real usage + full text.
+                :else
+                (parse-completion (await (.finalChatCompletion stream)))))
+            ;; repl-mode :batch — buffer to the assembled completion.
+            (let [completion (await (.finalChatCompletion stream))
+                  result     (parse-completion completion)]
+              (when-let [err (:seon.ai/error result)]
+                (ai/log-error! label err))
+              result)))
+        (catch :default e
+          (let [err (error->envelope label e)]
+            (ai/log-error! label err)
+            {:seon.ai/text  ""
+             :seon.ai/error err}))))))
 
 ;; ============================================================
 ;; Adapter for seon.agent.

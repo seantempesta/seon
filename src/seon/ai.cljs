@@ -193,7 +193,9 @@
 ;; (seon.ai.typeahead) — the same worker endpoint/key config as
 ;; :diffusiongemma (SEON_DG_ENDPOINT), a different wire mode (mode=step).
 (schema/register! ::provider [:enum :deepseek :anthropic :openai-compat :diffusiongemma :typeahead])
-;; DiffusionGemma backend selector (env SEON_DG_BACKEND, DB-ownable like
+;; DiffusionGemma backend selector (env SEON_DG_BACKEND — the SEON_DG_*
+;; names are kept for continuity; the local process is `diffusion-server`).
+;; (DB-ownable like
 ;; ::provider). :control = the transformers RunPod worker that keeps the
 ;; per-step LogitsProcessor seam (seon.ai.diffusiongemma); :vllm = an
 ;; OpenAI-compatible serving endpoint (reuses seon.ai.openai-compat).

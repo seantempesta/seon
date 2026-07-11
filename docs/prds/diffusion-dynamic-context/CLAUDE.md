@@ -50,12 +50,14 @@ grammar; bare `⟹` is real).
 
 ## How to run it
 
-- **Local worker**: `bin/seon start dg-worker` (runs
-  `python -m seon_diffusion.worker --port 17860`;
+- **Local model server**: `bin/seon start diffusion-server` (runs
+  `python -m seon_diffusion.server --port 17860`;
   `SEON_DG_ENDPOINT=http://127.0.0.1:17860`, no bearer key needed for a
-  full-URL endpoint). **Restart after ANY src-diffusion edit and verify
-  `/health` `worker_sha` before trusting a number.** Idle-unloads after
-  15 min (RSS → ~0.5 GB), reloads on next request.
+  full-URL endpoint — the `SEON_DG_*` env names and the `worker_sha`
+  wire field are kept for continuity). **Restart after ANY
+  src-diffusion edit and verify `/health` `worker_sha` before trusting
+  a number.** Idle-unloads after 15 min (RSS → ~0.5 GB), reloads on
+  next request.
 - **Testbed = acme** (pod 7980 / wire 7981, `bin/acme` — ours to reset;
   code edits need `bin/acme build` before `bin/acme restart pod`). The
   default cluster (7890) belongs to other lanes — hands off.

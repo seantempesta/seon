@@ -281,10 +281,11 @@ process_command() {
       echo "{ [ -f resources/public/css/output.css ] || npm run css:build; } && exec env SEON_CLUSTER_DIR=\"data/clusters/$cname\" SEON_PORT=0 SEON_PORT_FILE=\"tmp/seon-port-$cname\" SEON_REQ_SOCK=\"$SEON_REQ_SOCK\" SEON_PUB_SOCK=\"$SEON_PUB_SOCK\" SEON_FS_ROOT=\"${SEON_FS_ROOT:-$SEON_ROOT}\" SEON_FS_READ_ONLY=\"${SEON_FS_READ_ONLY:-1}\"$(extra_npm_node_path) node \"$cbundle\"" ;;
     cljs-watch)  echo "clj$(extra_src_sdeps) -M:cljs watch client$(extra_preload_merge)" ;;
     jvm)         echo "./bin/run" ;;
-    # Local DiffusionGemma MLX worker (src-diffusion) — RunPod wire contract
-    # on 127.0.0.1:17860; seon targets it via SEON_DG_ENDPOINT. Model
-    # lazy-loads on first job; idle-unload frees RSS after 900s.
-    dg-worker)   echo "exec src-diffusion/.venv/bin/python -m seon_diffusion.worker --port 17860" ;;
+    # Local DiffusionGemma MLX server (src-diffusion, full 26B-A4B) — the
+    # RunPod wire contract on 127.0.0.1:17860; seon targets it via
+    # SEON_DG_ENDPOINT (env var name kept for wire-contract continuity).
+    # Model lazy-loads on first job; idle-unload frees RSS after 900s.
+    diffusion-server) echo "exec src-diffusion/.venv/bin/python -m seon_diffusion.server --port 17860" ;;
     # V2 platform Host — JVM datahike wire-server (hosts EVERY cluster's db
     # via the registry; extra clusters are ensured onto it at pod boot).
     # --db-name = the CLUSTER NAME (basename of $SEON_CLUSTER_DIR) — the ONE
@@ -304,7 +305,7 @@ process_ready_hint() {
     cljs-watch)  echo "  ready: 'Build completed' appears in logs/cljs-watch.log" ;;
     jvm)         echo "  ready: logs/app.log shows 'Server started'" ;;
     wire-server) echo "  ready: $SEON_REQ_SOCK ACCEPTING; REPL on 127.0.0.1:$SEON_WRITER_REPL_PORT ($SEON_WRITER_REPL_PORT_FILE)" ;;
-    dg-worker)   echo "  ready: 'seon_diffusion worker on' in logs/dg-worker.log; /health answers" ;;
+    diffusion-server) echo "  ready: 'seon_diffusion server on' in logs/diffusion-server.log; /health answers" ;;
     *) echo "" ;;
   esac
 }
@@ -312,7 +313,7 @@ process_ready_hint() {
 all_processes() {
   # The static registry + any cluster pods this supervisor has spawned
   # (pod-<name> state dirs under $PROC_DIR — bin/seon cluster create).
-  local names="pod cljs-watch jvm wire-server dg-worker" d
+  local names="pod cljs-watch jvm wire-server diffusion-server" d
   for d in "$PROC_DIR"/pod-*/; do
     [ -d "$d" ] && names="$names $(basename "$d")"
   done

@@ -148,7 +148,9 @@
    with any `:where` result. With neither, the search is unscoped (whole index).
 
    Resolves to `{:seon.embed/hits [{:seon.embed/eid e :seon.embed/distance d} …]}`
-   distance-ascending. `:seon.embed/k` defaults to `default-k`."
+   distance-ascending. `:seon.embed/k` defaults to `default-k`. A wire failure
+   RESOLVES to `{:seon.embed/hits [] :seon/error {…}}` — errors are values,
+   never a rejection."
   {:malli/schema [:=> [:cat ::search-request] :any]}
   [{::keys [query k where eids db sock-path]}]
   (let [k     (or k default-k)
@@ -159,10 +161,17 @@
                        (wire-node/knn-search sock-path query k scope {})
                        (wire-node/knn-search query k)))]
     ;; `knn-search` resolves to the decoded value: the hits vector on ok, or the
-    ;; raw not-ok envelope (a map with "ok" false) on error — surface that.
+    ;; raw not-ok envelope (a map with "ok" false) on error. A wire failure
+    ;; (server down, embeddings disabled, index error) is an EXPECTED error and
+    ;; rides the VALUE channel — a specced ^:async fn must never reject with an
+    ;; expected error (docs/conventions.md "Errors Are Values", consequence 3).
     (if (and (map? hits) (false? (get hits "ok")))
-      (throw (ex-info "seon.embed/search: wire knn-search failed"
-                      {::query query ::response hits}))
+      {::hits []
+       :seon/error {:seon.error/kind    :core-bug
+                    :seon.error/message (str "seon.embed/search: wire knn-search failed — "
+                                             (or (get hits "error")
+                                                 (:seon.store.wire/error hits)
+                                                 (pr-str hits)))}}
       {::hits (vec hits)})))
 
 (defn- enrich-hit
@@ -183,7 +192,8 @@
    `:seon.embed/pull-pattern` overrides `default-pull-pattern` (the `[*]`
    wildcard — kind-agnostic, covers whatever attrs a hit carries). Resolves to
    `{:seon.embed/hits [{:seon.embed/eid e :seon.embed/distance d
-                        :seon.embed/entity {…}} …]}`, distance-ascending."
+                        :seon.embed/entity {…}} …]}`, distance-ascending. A
+   [[search]] error envelope (`:seon/error`) passes through UNCHANGED."
   {:malli/schema [:=> [:cat ::search-pull-request] :any]}
   [{::keys [query k where eids pull-pattern db sock-path]}]
   ;; Resolve the LOCAL db value ONCE and forward it to `search` so the
@@ -192,10 +202,14 @@
   ;; resolved against one db, the source pulled from another).
   (let [ldb     (local-db db)
         pattern (or pull-pattern default-pull-pattern)
-        {::keys [hits]}
+        {::keys [hits] :as res}
         (await (search (cond-> {::query query ::db ldb}
                          k         (assoc ::k k)
                          where     (assoc ::where where)
                          eids      (assoc ::eids eids)
                          sock-path (assoc ::sock-path sock-path))))]
-    {::hits (mapv #(enrich-hit ldb pattern %) hits)}))
+    (if (:seon/error res)
+      ;; Wire-failure envelope from `search` — pass it through unchanged
+      ;; (hits already empty); never enrich, never reject.
+      res
+      {::hits (mapv #(enrich-hit ldb pattern %) hits)})))

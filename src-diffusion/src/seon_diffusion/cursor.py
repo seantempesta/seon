@@ -197,6 +197,49 @@ def overlap_trim(hole_text, next_clamp, min_overlap=2):
     return hole_text, 0
 
 
+BUFFER_STATUSES = ("locked", "clamped", "settled", "resolving", "repaired",
+                   "frontier")   # the closed status set of buffer_spans
+_BUFFER_TEXT_CAP = 4000          # wire cap on buffer_text (chars); spans clipped
+_BUFFER_SPAN_CAP = 64            # wire cap on span count
+
+
+def spans_overlay(spans, start, end, status):
+    """Non-overlapping ordered spans with [start, end) re-labeled `status`
+    (existing spans clipped around the overlay). A zero/negative region
+    is a no-op. Spans are {"start","end","status"} dicts in char space."""
+    if end <= start:
+        return list(spans)
+    out = []
+    for s in spans:
+        a, b = s["start"], s["end"]
+        if b <= start or a >= end:
+            out.append(s)
+            continue
+        if a < start:
+            out.append({"start": a, "end": start, "status": s["status"]})
+        if b > end:
+            out.append({"start": end, "end": b, "status": s["status"]})
+    out.append({"start": start, "end": end, "status": status})
+    return sorted(out, key=lambda s: (s["start"], s["end"]))
+
+
+def buffer_view(text, spans, frontier=None):
+    """The additive step-response buffer picture: capped `buffer_text` +
+    clipped, capped `buffer_spans` (+ a zero-width `frontier` cursor
+    span). Every span is clipped to the capped text; empties dropped."""
+    cap = min(len(text), _BUFFER_TEXT_CAP)
+    clipped = []
+    for s in spans:
+        a, b = max(0, min(s["start"], cap)), max(0, min(s["end"], cap))
+        if b > a:
+            clipped.append({"start": a, "end": b, "status": s["status"]})
+    if frontier is not None:
+        f = max(0, min(frontier, cap))
+        clipped.append({"start": f, "end": f, "status": "frontier"})
+    return {"buffer_text": text[:cap],
+            "buffer_spans": clipped[:_BUFFER_SPAN_CAP]}
+
+
 def calibrate(posteriors, baseline):
     """Null-intent baseline subtraction (the measured position-bias
     mitigation: first-slot inflation −0.0 vs −6.4 margins)."""
@@ -511,17 +554,29 @@ class CursorDriver:
                   "accepted": st["accepted"], "round": st["round"],
                   **({"snapped": True} if st["snapped"] else {})}
                  for st in state]
-        pieces, hi = [], 0
+        # assemble per piece (hints stripped per piece — line-based, so
+        # equivalent to stripping the join) and RECORD each piece's char
+        # span + status: the buffer picture the caller renders. Statuses:
+        # clamp segment → "clamped" (hard guarantee), settled hole →
+        # "settled", unsettled hole → "resolving".
+        pieces, spans, hi, off = [], [], 0, 0
         for kind, payload in segments:
             if kind == "clamp":
-                pieces.append(payload)
+                txt, status = _strip_hints(payload), "clamped"
             else:
-                pieces.append(state[hi]["text"] or "")
+                txt = _strip_hints(state[hi]["text"] or "")
+                status = "settled" if state[hi]["accepted"] else "resolving"
                 hi += 1
+            pieces.append(txt)
+            if txt:
+                spans.append({"start": off, "end": off + len(txt),
+                              "status": status})
+                off += len(txt)
         return {"holes": holes, "hole_confidence": stats, "trims": trims,
-                "probes": probes, "text": _strip_hints("".join(pieces)),
-                "overflow": overflow, "forwards": total_fwd,
-                "settle_rounds_used": denoised_rounds}
+                "probes": probes, "text": "".join(pieces),
+                "spans": spans, "overflow": overflow, "forwards": total_fwd,
+                "settle_rounds_used": denoised_rounds,
+                "settle_round_budget": rounds}
 
     def fill(self, prompt, segments, candidates=None, seed=None):
         """mode=fill: template segments in → hole texts + per-hole
@@ -679,7 +734,14 @@ class CursorDriver:
         Locking is parse-gated by the bb oracle; pass `eval_session` for
         the eval-proven lock (the full guided-loop guarantee).
         Returns {transition, arm, new_draft, locked, glyph, posteriors,
-        readouts, hints, events, forwards, gen_s, tok_per_s}."""
+        readouts, hints, events, forwards, gen_s, tok_per_s} plus the
+        additive buffer picture: `buffer_text` (capped) + `buffer_spans`
+        ({start,end,status} char spans, statuses from BUFFER_STATUSES:
+        locked/clamped/settled/resolving/repaired + a zero-width
+        frontier cursor), `offer_status` (per live offer:
+        fired/suppressed/below-margin + calibrated lift), and on expand
+        arms `expansion` (per-hole confidence/probes +
+        settle_rounds_used/settle_round_budget + its own spans)."""
         p = self.policy
         gen = self.gen
         offers = offers or []
@@ -762,6 +824,7 @@ class CursorDriver:
         cal_post = calibrate(raw_post, baseline) if baseline else None
         margin = posterior_margin(cal_post) if cal_post else None
         readouts = {
+            "auto_offer_margin": round(p.auto_offer_margin, 2),
             "eos_logprob_tail": round(eos_lp, 2),
             "free_entropy_mean": round(sum(f_ent) / len(f_ent), 3) if f_ent else None,
             "free_entropy_worst": round(max(f_ent), 3) if f_ent else None,
@@ -782,7 +845,7 @@ class CursorDriver:
         # calibrated-posterior AUTO-OFFER: only when the margin clears the
         # policy AND the free region is still noise (no parse-clean form
         # typed) — never override typing
-        auto = None
+        auto, suppress_reason = None, None
         if (select_glyph is None and offers and cal_post
                 and margin is not None and margin > p.auto_offer_margin):
             free_refine = (self.oracle.refine(free_text)
@@ -791,8 +854,37 @@ class CursorDriver:
                 auto = max(cal_post, key=cal_post.get)
                 events.append({"event": "auto-offer", "glyph": auto,
                                "margin": round(margin, 2)})
+            else:
+                # margin cleared but the model TYPED a parse-clean form —
+                # never override typing; report the suppression honestly
+                suppress_reason = "typed-region"
+                events.append({"event": "auto-offer-suppressed",
+                               "reason": suppress_reason,
+                               "glyph": max(cal_post, key=cal_post.get)})
 
         chosen = select_glyph or auto
+
+        # per-offer status — the additive observability field: how each
+        # live offer fared THIS step (fired / suppressed / below-margin),
+        # with its calibrated lift; the caller adds loop-side suppression
+        # (failed-before) for offers it withheld from the wire.
+        if offer_glyphs:
+            top = max(cal_post, key=cal_post.get) if cal_post else None
+            status = []
+            for g in offer_glyphs:
+                o = next((o for o in offers if o.get("glyph") == g), {})
+                st = {"glyph": g, "label": o.get("label"),
+                      "raw": round(raw_post.get(g, 0.0), 2)}
+                if cal_post and g in cal_post:
+                    st["cal"] = round(cal_post[g], 2)
+                if g == chosen:
+                    st["state"] = "fired"
+                elif suppress_reason and g == top:
+                    st["state"], st["reason"] = "suppressed", suppress_reason
+                else:
+                    st["state"] = "below-margin"
+                status.append(st)
+            result["offer_status"] = status
         if chosen:
             offer = next((o for o in offers if o.get("glyph") == chosen), None)
             if offer is not None:
@@ -853,14 +945,28 @@ class CursorDriver:
                     events.append({"event": "expand-failed", "glyph": chosen,
                                    "kinds": sorted({e.get("error-kind")
                                                     for e in hard})})
+                    # buffer picture: the failed expansion with the oracle-
+                    # rejected regions marked repaired (the caller keeps its
+                    # own draft — this view shows WHY)
+                    espans = fr["spans"]
+                    for e in hard:
+                        espans = spans_overlay(
+                            espans, max(e["span"][0], 0),
+                            min(e["span"][1], len(etext)), "repaired")
                     result.update({"transition": "expand",
                                    "arm": "glyph-select", "glyph": chosen,
                                    "new_draft": draft, "hints": hints,
-                                   "expansion": fr})
+                                   "expansion": fr,
+                                   **buffer_view(etext, espans)})
                     return self._finish(result, total_fwd, t0)
                 result.update({"transition": "expand", "arm": "glyph-select",
                                "glyph": chosen, "locked": elocked,
-                               "new_draft": eremainder, "expansion": fr})
+                               "new_draft": eremainder, "expansion": fr,
+                               **buffer_view(
+                                   etext,
+                                   spans_overlay(fr["spans"], 0,
+                                                 eharvest_end, "locked"),
+                                   frontier=len(etext))})
                 return self._finish(result, total_fwd, t0)
             events.append({"event": "glyph-no-offer", "glyph": chosen})
 
@@ -884,10 +990,24 @@ class CursorDriver:
         result["locked"] = locked
         remainder = text[harvest_end:]
 
+        def _bv(frontier_at=None, repaired=None):
+            """The main-path buffer picture over `text`: settled base,
+            clamped caller-draft prefix, optional repaired region, locked
+            harvest prefix on top, frontier cursor."""
+            sp = ([{"start": 0, "end": len(text), "status": "settled"}]
+                  if text else [])
+            sp = spans_overlay(sp, 0, min(len(clamp_text), len(text)),
+                               "clamped")
+            if repaired is not None:
+                sp = spans_overlay(sp, max(repaired[0], 0),
+                                   min(repaired[1], len(text)), "repaired")
+            sp = spans_overlay(sp, 0, min(harvest_end, len(text)), "locked")
+            return buffer_view(text, sp, frontier=frontier_at)
+
         if arm == "eos-complete" and not errors and not remainder.strip() and locked:
             events.append({"event": "done"})
             result.update({"transition": "done", "arm": "eos-complete",
-                           "new_draft": ""})
+                           "new_draft": "", **_bv()})
             return self._finish(result, total_fwd, t0)
         if arm == "eos-complete":                # eval knocked a form out, or
             arm = "broken" if errors else "text-progress"   # nothing lockable
@@ -895,13 +1015,15 @@ class CursorDriver:
         if arm == "stuck":
             events.append({"event": "stuck"})
             result.update({"transition": "stuck", "arm": "stuck",
-                           "new_draft": draft})
+                           "new_draft": draft,
+                           **_bv(frontier_at=len(text))})
             return self._finish(result, total_fwd, t0)
 
         if arm == "clean-unfinished":
             events.append({"event": "grow"})
             result.update({"transition": "grow", "arm": "clean-unfinished",
-                           "new_draft": text})
+                           "new_draft": text,
+                           **_bv(frontier_at=len(text))})
             return self._finish(result, total_fwd, t0)
 
         if arm == "broken":
@@ -926,13 +1048,17 @@ class CursorDriver:
                            "kinds": sorted({e.get("error-kind") for e in rel}),
                            "region": [r_start, r_end]})
             result.update({"transition": "repair", "arm": "broken",
-                           "new_draft": new_draft, "hints": hints})
+                           "new_draft": new_draft, "hints": hints,
+                           **_bv(frontier_at=len(text),
+                                 repaired=(harvest_end + r_start,
+                                           harvest_end + r_end))})
             return self._finish(result, total_fwd, t0)
 
         # DEFAULT arm — text-progress, exactly the guided loop's move:
         # locked prefix committed, remainder kept as the next draft
         result.update({"transition": "progress", "arm": "text-progress",
-                       "new_draft": remainder.strip()})
+                       "new_draft": remainder.strip(),
+                       **_bv(frontier_at=len(text))})
         return self._finish(result, total_fwd, t0)
 
     def _finish(self, result, forwards, t0):

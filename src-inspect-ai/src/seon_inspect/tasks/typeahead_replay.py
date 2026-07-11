@@ -43,8 +43,8 @@ RUN (all three arms, local worker, evidence + ledger rows):
     .venv/bin/python -c "from seon_inspect.tasks.typeahead_replay import \
         run_typeahead; run_typeahead(epochs=3)"
 
-Freshness discipline: restart the local worker (`bin/seon restart
-dg-worker`) and check /health worker_sha before any measured run —
+Freshness discipline: restart the local diffusion-server (`bin/seon
+restart diffusion-server`) and check /health worker_sha before any measured run —
 run_typeahead records the sha it saw.
 """
 

@@ -177,6 +177,8 @@
    id set in `.env` serves BOTH the Python driver and this provider. nil
    when neither is set."
   []
+  ;; SEON_DG_* names kept for continuity — the local process is now
+  ;; named `diffusion-server` (bin/seon), but the env contract is frozen.
   (or (config/env-string "SEON_DG_ENDPOINT")
       (config/env-string "DIFFGEMMA_EP")))
 
@@ -199,6 +201,7 @@
    time off the var NAMED by SEON_DG_API_KEY_ENV (default RUNPOD_API_KEY).
    The key value is never transacted or logged."
   []
+  ;; SEON_DG_* env names kept for continuity (process renamed diffusion-server).
   (platform/env-val (or (config/env-string "SEON_DG_API_KEY_ENV") default-key-env)))
 
 (defn- local-endpoint?

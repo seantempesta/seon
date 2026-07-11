@@ -1,4 +1,9 @@
-"""Local DiffusionGemma worker — the RunPod wire contract on MLX.
+"""Local DiffusionGemma server — the RunPod wire contract on MLX.
+
+The process is named `diffusion-server` (it runs the FULL 26B-A4B model;
+"worker" was RunPod heritage). The wire field `worker_sha` and the
+`SEON_DG_*` env vars are KEPT UNCHANGED — a frozen contract with every
+recorded measurement and the seon-side adapter.
 
 Speaks the same protocol as the RunPod serverless endpoint that
 seon.ai.diffusiongemma targets, so seon points at it by setting
@@ -15,7 +20,7 @@ plus backend="mlx". Failures are IN-BAND (`gen_error` on a COMPLETED
 job), matching the GPU worker; the HTTP layer never 500s for a
 generation failure.
 
-Run:  bin/seon start dg-worker   (or: python -m seon_diffusion.worker [--port 17860])
+Run:  bin/seon start diffusion-server   (or: python -m seon_diffusion.server [--port 17860])
 """
 
 import argparse
@@ -35,7 +40,9 @@ from . import config
 def _worker_sha():
     """Content hash of ALL steering source in this package (model, loop,
     oracle clients, repair — everything that can change a result), the
-    stale-measurement guard: proves which code produced a result."""
+    stale-measurement guard: proves which code produced a result.
+    Named after the wire field `worker_sha` — kept for continuity with
+    every recorded measurement (the process is `diffusion-server` now)."""
     h = hashlib.sha256()
     d = os.path.dirname(os.path.abspath(__file__))
     for name in sorted(f for f in os.listdir(d) if f.endswith(".py")):
@@ -391,7 +398,7 @@ def main():
         print("probe ok; model loads on first generate", flush=True)
     srv = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     idle = f"{args.idle_timeout}s idle-unload" if args.idle_timeout else "no idle-unload"
-    print(f"seon_diffusion worker on http://127.0.0.1:{args.port}  sha={WORKER_SHA}  ({idle})",
+    print(f"seon_diffusion server on http://127.0.0.1:{args.port}  sha={WORKER_SHA}  ({idle})",
           flush=True)
     srv.serve_forever()
 

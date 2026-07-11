@@ -1915,6 +1915,7 @@ SHADOW_IMPORT("seon.agent.ctx.findings.js");
 SHADOW_IMPORT("seon.agent.ctx.jobs.js");
 SHADOW_IMPORT("seon.agent.ctx.testrun.js");
 SHADOW_IMPORT("seon.agent.ctx.subagents.js");
+SHADOW_IMPORT("seon.agent.ctx.typeahead_steps.js");
 SHADOW_IMPORT("seon.client.js");
 SHADOW_IMPORT("seon.render_test.js");
 SHADOW_IMPORT("seon.boot.preconditions_test.js");

@@ -163,6 +163,105 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
+(defn- seed-buffer-step!
+  "One call3 expand row carrying the FULL buffer/offers/holes picture."
+  []
+  (db/transact!
+    {:seon.db/tx-data
+     [{:seon.typeahead/call "call3" :seon.typeahead/step-idx 0
+       :seon.typeahead/at (js/Date. 9000)
+       :seon.typeahead/transition :expand
+       :seon.typeahead/glyph "①" :seon.typeahead/locked-count 1
+       :seon.typeahead/eos-logprob -3.1
+       :seon.typeahead/gen-s 1.2
+       :seon.typeahead/prompt-tokens 640
+       :seon.typeahead/worker-sha "af497238f289"
+       :seon.typeahead/max-rounds 8
+       :seon.typeahead/committed-tokens 12
+       :seon.typeahead/auto-offer-margin 6.0
+       :seon.typeahead/rounds-used 1
+       :seon.typeahead/round-budget 2
+       :seon.typeahead/buffer-preview "(todo/add! \"buy milk\")\n(def x 1"
+       :seon.typeahead/buffer-spans
+       (pr-str [[0 22 :locked] [22 23 :clamped]
+                [23 31 :resolving] [31 31 :frontier]])
+       :seon.typeahead/offers-edn
+       (pr-str [{:seon.typeahead/glyph "①"
+                 :seon.typeahead/label "todo/add!"
+                 :seon.typeahead/cal 7.5
+                 :seon.typeahead/state :fired}
+                {:seon.typeahead/glyph "②"
+                 :seon.typeahead/label "db/query"
+                 :seon.typeahead/state :suppressed
+                 :seon.typeahead/reason :failed-before}])
+       :seon.typeahead/holes-edn
+       (pr-str [{:seon.typeahead/worst 0.42
+                 :seon.typeahead/accepted true
+                 :seon.typeahead/round 0
+                 :seon.typeahead/chosen-length 8}
+                {:seon.typeahead/worst 2.1
+                 :seon.typeahead/accepted false}])
+       :seon.typeahead/agent [:seon.agent/id a-id]}]}))
+
+(deftest tile-buffer-offers-holes-panels
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (seed-buffer-step!)
+                (.then
+                  (fn [res]
+                    (ok! res)
+                    (let [tile (ts/steps-tile-html {:seon.db/db @conn
+                                                    :seon.agent/id a-id})
+                          s    (pr-str tile)]
+                      ;; 1. state banner
+                      (is (str/includes? s "● expand") "FSM state dot+text")
+                      (is (str/includes? s "step 1/8") "step k/N from max-rounds")
+                      (is (str/includes? s "rounds 1/2") "expansion round usage")
+                      ;; 2. the code-buffer pane + legend
+                      (is (str/includes? s "code buffer") "pane header present")
+                      (is (str/includes? s "buy milk") "span text painted")
+                      (is (str/includes? s "▌") "frontier cursor glyph")
+                      (is (str/includes? s "resolving") "legend decodes statuses")
+                      (is (str/includes? s "repaired") "legend covers repaired")
+                      (is (str/includes? s "committed ~12 tok")
+                          "harvest size in TOKENS")
+                      ;; 3. offers panel
+                      (is (str/includes? s "fire ≥ 6") "threshold in the header")
+                      (is (str/includes? s "● fired") "fired offer state")
+                      (is (str/includes? s "suppressed (failed-before)")
+                          "loop-side suppression reason surfaced")
+                      ;; 4. holes panel
+                      (is (str/includes? s "expand holes") "holes header")
+                      (is (str/includes? s "✓ settled") "accepted hole")
+                      (is (str/includes? s "○ unsettled") "unaccepted hole honest")
+                      (is (str/includes? s "len 8") "CAL-chosen length")
+                      ;; 5. done-ness strip
+                      (is (str/includes? s "tok harvested") "harvest totals")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest tile-panels-vanish-without-projection-attrs
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (seed-steps!)
+                (.then
+                  (fn [res]
+                    (ok! res)
+                    (let [tile (ts/steps-tile-html {:seon.db/db @conn
+                                                    :seon.agent/id a-id})
+                          s    (pr-str tile)]
+                      (is (vector? tile) "tile still renders")
+                      (is (not (str/includes? s "code buffer"))
+                          "no buffer rows → no buffer pane")
+                      (is (not (str/includes? s "fire ≥"))
+                          "no offers rows → no offers panel")
+                      (is (not (str/includes? s "expand holes"))
+                          "no holes rows → no holes panel")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 (deftest tile-renders-latest-call-with-header-and-draft
   (async done
     (-> (with-conn

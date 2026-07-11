@@ -26,7 +26,7 @@ from .control import generate_guided
 from .generate import GenConfig, generate
 from .model import load_model
 from .oracle import EvalSession, Oracle
-from .worker import WORKER_SHA
+from .server import WORKER_SHA
 from . import config
 
 PRD = (

@@ -2333,11 +2333,13 @@ Owner asked that the enable recipe live here. Everything is OFF by
 default; nothing in system.edn/default `.env` activates it. To run a
 cluster on the local diffusion surface:
 
-1. **Start the model server**: `bin/seon start dg-worker` (rename to
-   `diffusion-server` is queued — this entry will be updated; port
-   17860; MLX, full DiffusionGemma 26B-A4B; model lazy-loads on first
-   request, self-unloads after 15 min idle; `GET /health` answers with
-   `worker_sha` — ALWAYS verify it after any src-diffusion change).
+1. **Start the model server**: `bin/seon start diffusion-server`
+   (renamed from `dg-worker` 2026-07-11; module `seon_diffusion.server`,
+   log `logs/diffusion-server.log`; port 17860; MLX, full DiffusionGemma
+   26B-A4B; model lazy-loads on first request, self-unloads after 15 min
+   idle; `GET /health` answers with `worker_sha` — that wire field and
+   the `SEON_DG_*` env vars are KEPT for continuity; ALWAYS verify the
+   sha after any src-diffusion change).
 2. **Point the cluster at it** (env file seeds the DB-owned
    `:seon.ai/config` row at boot; a live `db/transact!` on that row
    also works, no restart):

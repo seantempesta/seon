@@ -31,8 +31,8 @@ src/seon_diffusion/
                  worker-oracle-eval --serve, STATEFUL) pipe clients,
                  liveness-gated
   common.py      pure span/offset helpers (living copies)
-  worker.py      local HTTP worker — RunPod wire contract on :17860,
-                 single MLX executor thread, idle-unload
+  server.py      the local diffusion-server — RunPod wire contract on
+                 :17860, single MLX executor thread, idle-unload
   config.py      sole config surface (repo-root walk; SEON_* overrides)
   ab_guided.py   the guided-vs-free lift battery (scorecards + samples)
   cuda/          FROZEN RunPod A100 artifacts — revive by need
@@ -45,7 +45,7 @@ tests/           offline proofs: scripted stub model + REAL bb/node oracles
 |---|---|---|
 | Tests | `.venv/bin/pytest` | bb, node, built bundles |
 | Lift battery | `.venv/bin/python -m seon_diffusion.ab_guided --n 3 [--repair on\|off]` | model in HF cache |
-| Worker | `bin/seon start dg-worker` (→ `SEON_DG_ENDPOINT=http://127.0.0.1:17860`) | ditto |
+| Server | `bin/seon start diffusion-server` (→ `SEON_DG_ENDPOINT=http://127.0.0.1:17860`) | ditto |
 | Setup | `uv venv && uv pip install -e ".[test]"` | uv |
 
 Oracles: `bin/oracle-server` (bb, parse/lint/phase) and

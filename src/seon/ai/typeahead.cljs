@@ -46,6 +46,7 @@
    enabling it is an explicit per-agent `ctx/install!` (owner
    constraint; the enable story lives in typeahead-design.md)."
   (:require
+    [cljs.reader :as reader]
     [clojure.string :as str]
     [seon.agent.ctx.menu :as menu]
     [seon.ai :as ai]
@@ -76,8 +77,20 @@
 (schema/register! :seon.typeahead/draft-preview :string)  ; truncated post-step draft text
 (schema/register! :seon.typeahead/draft-tokens :int)      ; FULL draft size, tokens/estimate
 (schema/register! :seon.typeahead/prompt-tokens :int)     ; the call's render size, tokens/estimate
-(schema/register! :seon.typeahead/worker-sha :string)     ; the worker build that answered
+(schema/register! :seon.typeahead/worker-sha :string)     ; the diffusion-server build that answered (wire field `worker_sha`, name kept for continuity)
 (schema/register! :seon.typeahead/agent :seon.db/ref)
+;; The code-buffer picture (additive, P6+ tile upgrade). Bounded
+;; projections of the wire's buffer_text/buffer_spans/offer_status/
+;; expansion — spans/offers/holes ride as EDN strings (the
+;; :seon.eval/result-edn pattern), capped at write time; full
+;; round-by-round traces stay on :seon.ai/raw, never datoms.
+(schema/register! :seon.typeahead/buffer-preview :string)  ; capped buffer_text
+(schema/register! :seon.typeahead/buffer-spans :string)    ; EDN [{:start :end :status}], ≤64, clipped to the preview
+(schema/register! :seon.typeahead/offers-edn :string)      ; EDN per-offer status (fired/suppressed/below-margin)
+(schema/register! :seon.typeahead/holes-edn :string)       ; EDN per-hole {:worst :mean :accepted :round :chosen-length :snapped}
+(schema/register! :seon.typeahead/rounds-used :int)        ; expansion settle rounds burned
+(schema/register! :seon.typeahead/round-budget :int)       ; expansion settle round budget
+(schema/register! :seon.typeahead/committed-tokens :int)   ; committed text after this step, tokens/estimate
 
 (schema/register! :seon.typeahead/step
   [:map {:seon.db/entity true}
@@ -96,6 +109,15 @@
    [:seon.typeahead/draft-tokens  {:optional true} :seon.typeahead/draft-tokens]
    [:seon.typeahead/prompt-tokens {:optional true} :seon.typeahead/prompt-tokens]
    [:seon.typeahead/worker-sha    {:optional true} :seon.typeahead/worker-sha]
+   [:seon.typeahead/buffer-preview {:optional true} :seon.typeahead/buffer-preview]
+   [:seon.typeahead/buffer-spans  {:optional true} :seon.typeahead/buffer-spans]
+   [:seon.typeahead/offers-edn    {:optional true} :seon.typeahead/offers-edn]
+   [:seon.typeahead/holes-edn     {:optional true} :seon.typeahead/holes-edn]
+   [:seon.typeahead/rounds-used   {:optional true} :seon.typeahead/rounds-used]
+   [:seon.typeahead/round-budget  {:optional true} :seon.typeahead/round-budget]
+   [:seon.typeahead/committed-tokens {:optional true} :seon.typeahead/committed-tokens]
+   [:seon.typeahead/auto-offer-margin {:optional true} :seon.typeahead/auto-offer-margin]
+   [:seon.typeahead/max-rounds    {:optional true} :seon.typeahead/max-rounds]
    [:seon.typeahead/agent         {:optional true} :seon.db/ref]])
 
 ;; ============================================================
@@ -217,6 +239,90 @@
    draft)."
   160)
 
+(def ^:private buffer-preview-chars
+  "Cap on the persisted code-buffer PREVIEW (the tile's centerpiece pane;
+   displayed sizes are tokens). The wire may carry up to 4000 chars —
+   the datom keeps a bounded projection; the full text rides
+   `:seon.ai/raw` for the turn that made it."
+  600)
+
+(defn- clip-spans
+  "Wire `buffer_spans` → compact EDN-ready `[start end status-kw]` tuples,
+   clipped to the persisted preview `cap`, ≤64 entries. Zero-width spans
+   (the frontier cursor) survive the clip."
+  [spans cap]
+  (into []
+        (comp (map (fn [{:keys [start end status]}]
+                     [(min (max 0 start) cap) (min (max 0 end) cap)
+                      (keyword status)]))
+              (filter (fn [[a b st]] (or (< a b) (= st :frontier))))
+              (take 64))
+        spans))
+
+(defn- add-buffer
+  "Assoc the bounded code-buffer projection when the step output carries
+   the buffer picture."
+  [m output]
+  (let [bt (:buffer_text output)]
+    (if (and (string? bt) (not (str/blank? bt)))
+      (let [cap (min (count bt) buffer-preview-chars)]
+        (assoc m
+               :seon.typeahead/buffer-preview (subs bt 0 cap)
+               :seon.typeahead/buffer-spans
+               (pr-str (clip-spans (:buffer_spans output) cap))))
+      m)))
+
+(defn- add-offers
+  "Assoc the per-offer status projection (fired / suppressed /
+   below-margin, calibrated lift) + the auto-offer threshold."
+  [m output ro]
+  (cond-> m
+    (seq (:offer_status output))
+    (assoc :seon.typeahead/offers-edn
+           (pr-str
+             (into []
+                   (comp (take 10)
+                         (map (fn [{:keys [glyph label cal raw state reason]}]
+                                (cond-> {:seon.typeahead/glyph (str glyph)
+                                         :seon.typeahead/state (keyword state)}
+                                  (string? label) (assoc :seon.typeahead/label label)
+                                  (number? cal)   (assoc :seon.typeahead/cal cal)
+                                  (number? raw)   (assoc :seon.typeahead/raw raw)
+                                  reason (assoc :seon.typeahead/reason
+                                                (keyword reason))))))
+                   (:offer_status output))))
+    (number? (:auto_offer_margin ro))
+    (assoc :seon.typeahead/auto-offer-margin
+           (double (:auto_offer_margin ro)))))
+
+(defn- add-holes
+  "Assoc the expansion's per-hole projection (entropy, CAL-chosen length,
+   accepted/snap) + settle-round usage when this step EXPANDed."
+  [m output]
+  (let [fr     (:expansion output)
+        holes  (:hole_confidence fr)
+        chosen (into {} (map (juxt :hole :chosen)) (:probes fr))]
+    (cond-> m
+      (seq holes)
+      (assoc :seon.typeahead/holes-edn
+             (pr-str
+               (into []
+                     (comp (take 16)
+                           (map-indexed
+                             (fn [i {:keys [mean worst accepted round snapped]}]
+                               (cond-> {:seon.typeahead/accepted (boolean accepted)}
+                                 (number? worst) (assoc :seon.typeahead/worst worst)
+                                 (number? mean)  (assoc :seon.typeahead/mean mean)
+                                 (number? round) (assoc :seon.typeahead/round round)
+                                 (some? (chosen i))
+                                 (assoc :seon.typeahead/chosen-length (chosen i))
+                                 snapped (assoc :seon.typeahead/snapped true)))))
+                     holes)))
+      (number? (:settle_rounds_used fr))
+      (assoc :seon.typeahead/rounds-used (int (:settle_rounds_used fr)))
+      (number? (:settle_round_budget fr))
+      (assoc :seon.typeahead/round-budget (int (:settle_round_budget fr))))))
+
 (defn step-projection
   "One step-output's small datom projection, agent-ref-free.
 
@@ -254,7 +360,10 @@
              (if (> (count draft) draft-preview-chars)
                (str (subs draft 0 draft-preview-chars) "…")
                draft)
-             :seon.typeahead/draft-tokens (tokens/estimate draft)))))
+             :seon.typeahead/draft-tokens (tokens/estimate draft))
+      :always (add-buffer output)
+      :always (add-offers output ro)
+      :always (add-holes output))))
 
 (defn assemble-reply
   "Locked forms + any unfinished tail draft as one LLM-reply-shaped text.
@@ -270,6 +379,35 @@
   (->> (conj locked-forms (str/trim final-draft))
        (remove str/blank?)
        (str/join "\n\n")))
+
+(schema/register! ::withheld :seon.agent.ctx.menu/offers-view)
+(schema/register! ::proj :seon.typeahead/step)
+
+(defn with-withheld-offers
+  "The step projection with loop-side suppressions appended to its
+   offers EDN.
+
+   The worker is stateless: offers whose expansion previously locked
+   nothing are WITHHELD from the wire by the loop (`failed`), so the
+   worker's `offer_status` cannot know them. This appends each as
+   `{… :seon.typeahead/state :suppressed :seon.typeahead/reason
+   :failed-before}` so the tile shows the whole offer picture."
+  {:malli/schema [:=> [:catn [::proj ::proj] [::withheld ::withheld]]
+                  ::proj]}
+  [proj withheld]
+  (if (empty? withheld)
+    proj
+    (let [cur  (try (some-> (:seon.typeahead/offers-edn proj)
+                            reader/read-string)
+                    (catch :default _ nil))
+          rows (into (vec cur)
+                     (map (fn [{:seon.typeahead/keys [glyph label]}]
+                            {:seon.typeahead/glyph  glyph
+                             :seon.typeahead/label  label
+                             :seon.typeahead/state  :suppressed
+                             :seon.typeahead/reason :failed-before}))
+                     withheld)]
+      (assoc proj :seon.typeahead/offers-edn (pr-str rows)))))
 
 ;; ============================================================
 ;; Step-row persistence. (The `:typeahead-steps` render block lives in
@@ -348,15 +486,22 @@
             ;; turn loop's retry classification applies to the whole call.
             {:text "" :seon.ai/raw resp :seon.ai/error err}
             (let [out         (::dg/worker-output resp)
-                  proj        (assoc (step-projection call-id round out)
-                                     :seon.typeahead/prompt-tokens ptoks)
-                  _           (await (record-step! proj))
-                  steps'      (conj steps proj)
                   locked      (mapv str (:locked out))
                   locked-all' (into locked-all locked)
                   committed'  (->> (cons committed locked)
                                    (remove str/blank?)
                                    (str/join "\n"))
+                  withheld    (filterv #(contains? failed
+                                                   (:seon.typeahead/glyph %))
+                                       offers)
+                  proj        (-> (step-projection call-id round out)
+                                  (assoc :seon.typeahead/prompt-tokens ptoks
+                                         :seon.typeahead/max-rounds max-rounds
+                                         :seon.typeahead/committed-tokens
+                                         (tokens/estimate committed'))
+                                  (with-withheld-offers withheld))
+                  _           (await (record-step! proj))
+                  steps'      (conj steps proj)
                   draft'      (str (:new_draft out))
                   transition  (:transition out)
                   stuck'      (if (= "stuck" transition) (inc stuck) 0)

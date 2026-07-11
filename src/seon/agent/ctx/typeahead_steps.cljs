@@ -6,14 +6,20 @@
    render time — reactive-context, nothing stored):
 
      - `:seon.render/html` ([[steps-tile-html]]) — the agent-page live
-       tile: the LAST provider call's step trace (transition, glyph,
-       calibrated margin, EOS done-ness meter, forwards, wall per step),
-       the call header (worker sha, render size in tokens, total locked
-       forms) and the current draft/code-buffer preview (sized in
-       TOKENS). Fed by the per-step `:seon.typeahead/*` projections the
-       provider loop (`seon.ai.typeahead`) transacts each round, so a tx
-       during a live call morphs the tile via the normal datastar SSE
-       channel. nil when the agent has no step rows — the tile vanishes.
+       tile: a state banner (FSM state now, provider, step k/N, rounds,
+       wall, ctx tokens, server sha), THE CODE-BUFFER PANE (the last
+       step's `buffer_text` painted by `buffer_spans` status — locked /
+       clamped / settled / resolving / repaired / frontier — with a
+       legend), the offers panel (per-offer fired/suppressed/
+       below-margin + a calibrated-margin bar against the threshold),
+       the holes panel (per-hole entropy, CAL-chosen length, accepted),
+       the done-ness strip (EOS logprob meter + harvest totals) and the
+       compact step history. Fed by the per-step `:seon.typeahead/*`
+       projections the provider loop (`seon.ai.typeahead`) transacts
+       each round, so a tx during a live call morphs the tile via the
+       normal datastar SSE channel. nil when the agent has no step
+       rows — the tile vanishes; every panel vanishes when its rows
+       lack the data (reactive-context).
      - `:seon.render/ai` ([[steps-ai]]) — the provider protocol's
        special instructions, rendered ONLY when the agent's RESOLVED
        provider is `:typeahead` (`seon.ai/resolved-config` over the
@@ -31,6 +37,7 @@
    in a default config). `(seon.agent.ctx/remove! :typeahead-steps)`
    reverts; both slots vanish on the next render."
   (:require
+    [cljs.reader :as reader]
     [clojure.string :as str]
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
@@ -66,21 +73,24 @@
        "; arrive next turn as the transcript's bare `⟹ <value>` rows.\n"
        "; `⟹` is runtime output only; `;; =>` is not part of the grammar."))
 
+(defn- resolved-provider
+  "Agent `id`'s RESOLVED provider keyword in db value `db`, nil on any
+   read failure (a fresh db without the config attrs installed)."
+  [db id]
+  (try
+    (when db
+      (get-in (ai/resolved-config
+                (cond-> {:seon.db/db db}
+                  id (assoc :seon.agent/id id)))
+              [:seon.ai/resolved-config :seon.ai/provider]))
+    (catch :default _ nil)))
+
 (defn- typeahead-provider?
   "Whether agent `id`'s RESOLVED provider in db value `db` is
    `:typeahead` — the agent's own `::agent-provider` overlay over the
-   global `:seon.ai/config` row over the shipped default. false on any
-   read failure (a fresh db without the config attrs installed)."
+   global `:seon.ai/config` row over the shipped default."
   [db id]
-  (boolean
-    (try
-      (when db
-        (= :typeahead
-           (get-in (ai/resolved-config
-                     (cond-> {:seon.db/db db}
-                       id (assoc :seon.agent/id id)))
-                   [:seon.ai/resolved-config :seon.ai/provider])))
-      (catch :default _ false))))
+  (= :typeahead (resolved-provider db id)))
 
 (defn steps-ai
   "The typeahead provider's protocol instructions, provider-gated.
@@ -102,12 +112,19 @@
 
 (def ^:private transition-display
   "Transition keyword → dot glyph + Phosphor text class."
-  {:done     {:dot "●" :class "text-signal"}
+  {:done     {:dot "●" :class "text-success"}
    :expand   {:dot "●" :class "text-signal"}
    :progress {:dot "●" :class "text-text-200"}
    :grow     {:dot "●" :class "text-text-400"}
    :repair   {:dot "⚠" :class "text-warning"}
    :stuck    {:dot "✗" :class "text-error"}})
+
+(defn- read-edn
+  "Parse a persisted `*-edn` projection string; nil on any failure —
+   a malformed row degrades to a missing panel, never a throw."
+  [s]
+  (when (string? s)
+    (try (reader/read-string s) (catch :default _ nil))))
 
 (defn- last-call-steps
   "The agent's most recent call's step rows, step-idx-ordered. nil when
@@ -133,6 +150,213 @@
                (sort-by :seon.typeahead/step-idx)
                vec))))))
 
+;; ------------------------------------------------------------
+;; 1. State banner — the FSM state NOW + the call vitals.
+;; ------------------------------------------------------------
+
+(defn- fsm-state
+  "The banner's dot+text state from the LAST step row: `done`, `expand`,
+   `repair`, `stuck`, `locked` (progress that harvested) or `denoise`."
+  [{:seon.typeahead/keys [transition locked-count]}]
+  (case transition
+    :done   {:dot "●" :class "text-success" :label "done"}
+    :expand {:dot "●" :class "text-signal"  :label "expand"}
+    :repair {:dot "⚠" :class "text-warning" :label "repair"}
+    :stuck  {:dot "✗" :class "text-error"   :label "stuck"}
+    (if (pos? (or locked-count 0))
+      {:dot "●" :class "text-success" :label "locked"}
+      {:dot "●" :class "text-signal"  :label "denoise"})))
+
+(defn- state-banner
+  "The tile masthead: `● <state>` + provider · N steps · step k/N ·
+   rounds j/b · wall so far · ctx tokens · server sha (short) —
+   whichever of those the rows carry."
+  [db id steps]
+  (let [row    (last steps)
+        {:keys [dot class label]} (fsm-state row)
+        prov   (some-> (resolved-provider db id) name)
+        n      (count steps)
+        kmax   (:seon.typeahead/max-rounds row)
+        ru     (:seon.typeahead/rounds-used row)
+        rb     (:seon.typeahead/round-budget row)
+        wall   (reduce + 0.0 (keep :seon.typeahead/gen-s steps))
+        ptoks  (some :seon.typeahead/prompt-tokens steps)
+        sha    (some :seon.typeahead/worker-sha steps)
+        locked (reduce + 0 (keep :seon.typeahead/locked-count steps))]
+    [:div {:class "flex items-center justify-between gap-2 flex-wrap"}
+     [:div {:class "flex items-center gap-2"}
+      [:span {:class "text-text-500 text-2xs uppercase tracking-wider"}
+       "typeahead steps"]
+      [:span {:class (str class " text-xs font-mono")} (str dot " " label)]]
+     [:span {:class "text-text-500 text-2xs font-mono"}
+      (str/join " · "
+                (cond-> []
+                  prov         (conj prov)
+                  true         (conj (str n " step" (when (not= 1 n) "s")))
+                  kmax         (conj (str "step "
+                                          (inc (or (:seon.typeahead/step-idx row) 0))
+                                          "/" kmax))
+                  (and ru rb)  (conj (str "rounds " ru "/" rb))
+                  (pos? wall)  (conj (str (.toFixed wall 1) "s"))
+                  true         (conj (str "⊢ " locked))
+                  ptoks        (conj (str "ctx ~" ptoks " tok"))
+                  sha          (conj (subs sha 0 (min 8 (count sha))))))]]))
+
+;; ------------------------------------------------------------
+;; 2. THE CODE-BUFFER PANE — the centerpiece: buffer text painted by
+;;    span status, with a legend so the encoding never needs recall.
+;; ------------------------------------------------------------
+
+(def ^:private span-style
+  "Buffer span status → inline style (Phosphor palette). locked = paid
+   and immutable (dim); clamped = hard guarantee (amber underline);
+   settled = fresh clean text (bright cream); resolving = still noise
+   (dotted); repaired = oracle-rejected (warm red); frontier = the
+   cursor (amber block)."
+  {:locked    "color:#6b6459"
+   :clamped   "color:#d4d0c8;border-bottom:1px solid #f0b429"
+   :settled   "color:#faf9f7"
+   :resolving "color:#8c8578;border-bottom:1px dotted #6b6459"
+   :repaired  "color:#f87171;background:rgba(248,113,113,.08)"
+   :frontier  "color:#f0b429"})
+
+(defn- buffer-legend
+  "One line decoding the span colors — rendered under the pane so the
+   owner never has to remember the encoding."
+  []
+  (into [:div {:class "flex items-center gap-3 text-2xs font-mono text-text-500 flex-wrap"}]
+        (map (fn [[st label]]
+               [:span
+                [:span {:style (span-style st)}
+                 (if (= st :frontier) "▌" "▪▪")]
+                (str " " label)])
+             [[:locked "locked"] [:clamped "clamped"] [:settled "settled"]
+              [:resolving "resolving"] [:repaired "repaired"]
+              [:frontier "frontier"]])))
+
+(defn- buffer-pane
+  "The current code buffer, monospace, span-status colored. Renders from
+   the LAST step row's `buffer-preview`/`buffer-spans`; nil when the row
+   carries no buffer picture (pre-upgrade rows, empty buffers)."
+  [row]
+  (let [text  (:seon.typeahead/buffer-preview row)
+        spans (read-edn (:seon.typeahead/buffer-spans row))]
+    (when (and (string? text) (not (str/blank? text)) (seq spans))
+      [:div {:class "flex flex-col gap-1"}
+       [:div {:class "text-text-500 text-2xs uppercase tracking-wider"}
+        (str "code buffer ~" (tokens/estimate text) " tok"
+             (when-let [ct (:seon.typeahead/committed-tokens row)]
+               (str " · committed ~" ct " tok")))]
+       (into [:div {:class (str "text-xs font-mono whitespace-pre-wrap "
+                                "break-words bg-base-900 border "
+                                "border-base-700 rounded p-2 leading-tight")}]
+             (keep (fn [[a b st]]
+                     (if (= st :frontier)
+                       [:span {:style (span-style :frontier)} "▌"]
+                       (let [n   (count text)
+                             seg (subs text (min a n) (min b n))]
+                         (when (seq seg)
+                           [:span {:style (span-style st)} seg]))))
+                   spans))
+       (buffer-legend)])))
+
+;; ------------------------------------------------------------
+;; 3. Offers panel — per-offer state + calibrated margin vs threshold.
+;; ------------------------------------------------------------
+
+(defn- margin-pct
+  "A calibrated-nats value mapped onto the mini-bar's 0–100% (the
+   measured range: off-menu collapse ≈ −12 … strong fire ≈ +12)."
+  [v]
+  (-> (* 100 (/ (+ v 12) 24)) (max 0) (min 100) js/Math.round))
+
+(defn- margin-bar
+  "The offer's calibrated-lift mini-bar with the auto-offer threshold
+   tick. nil when the row carries no calibrated value."
+  [cal thr]
+  (when (number? cal)
+    [:div {:class "relative w-20 h-1.5 bg-base-800 rounded overflow-hidden shrink-0"}
+     [:div {:class "h-full"
+            :style (str "width:" (margin-pct cal) "%;background:#60a5fa")}]
+     (when (number? thr)
+       [:div {:class "absolute top-0 h-full"
+              :style (str "left:" (margin-pct thr) "%;width:1px;background:#f0b429")}])]))
+
+(defn- offer-state
+  "The offer's dot+text outcome cell."
+  [{:seon.typeahead/keys [state reason]}]
+  (case state
+    :fired      [:span {:class "text-success"} "● fired"]
+    :suppressed [:span {:class "text-warning"}
+                 (str "● suppressed" (when reason (str " (" (name reason) ")")))]
+    [:span {:class "text-text-500"} "○ below-margin"]))
+
+(defn- offers-panel
+  "Per-offer status rows from the LAST step row's offers EDN — glyph,
+   fn label, calibrated-margin bar against the threshold tick, outcome.
+   nil when the row carries no offer picture."
+  [row]
+  (let [offers (read-edn (:seon.typeahead/offers-edn row))
+        thr    (:seon.typeahead/auto-offer-margin row)]
+    (when (seq offers)
+      [:div {:class "flex flex-col gap-0.5"}
+       [:div {:class "text-text-500 text-2xs uppercase tracking-wider"}
+        (str "offers" (when (number? thr) (str " · fire ≥ " thr)))]
+       (into [:div {:class "flex flex-col"}]
+             (map (fn [{:seon.typeahead/keys [glyph label cal] :as o}]
+                    [:div {:class "flex items-center gap-3 text-xs font-mono py-0.5"}
+                     [:span {:class "text-signal w-5"} glyph]
+                     [:span {:class "text-text-200 flex-1 truncate"} (or label "—")]
+                     (or (margin-bar cal thr)
+                         [:span {:class "w-20 shrink-0"}])
+                     [:span {:class "text-text-400 w-14 text-right"}
+                      (if (number? cal) (str "Δ" cal) "")]
+                     (offer-state o)])
+                  offers))])))
+
+;; ------------------------------------------------------------
+;; 4. Holes panel — the expansion's per-hole convergence picture.
+;; ------------------------------------------------------------
+
+(defn- holes-panel
+  "Per-hole rows from the latest step row carrying a holes EDN (the
+   last EXPAND): worst/mean entropy, CAL-chosen length, accepted?,
+   snapped-to-candidate?. nil outside expansions."
+  [steps]
+  (let [row   (last (filter :seon.typeahead/holes-edn steps))
+        holes (read-edn (:seon.typeahead/holes-edn row))]
+    (when (seq holes)
+      [:div {:class "flex flex-col gap-0.5"}
+       [:div {:class "text-text-500 text-2xs uppercase tracking-wider"}
+        (str "expand holes"
+             (when-let [ru (:seon.typeahead/rounds-used row)]
+               (str " · rounds " ru
+                    (when-let [rb (:seon.typeahead/round-budget row)]
+                      (str "/" rb)))))]
+       (into [:div {:class "flex flex-col"}]
+             (map-indexed
+               (fn [i {:seon.typeahead/keys [worst mean accepted round
+                                             chosen-length snapped]}]
+                 [:div {:class "flex items-center gap-3 text-xs font-mono py-0.5"}
+                  [:span {:class "text-text-500 w-6 text-right"} (str "#" (inc i))]
+                  [:span {:class "text-text-400 w-20"}
+                   (if (number? worst) (str "H " worst) "H —")]
+                  [:span {:class "text-text-500 w-20"}
+                   (if (number? mean) (str "mean " mean) "")]
+                  [:span {:class "text-text-400 w-16"}
+                   (if chosen-length (str "len " chosen-length) "")]
+                  (if accepted
+                    [:span {:class "text-success w-24"}
+                     (str "✓ settled" (when (number? round) (str " r" round)))]
+                    [:span {:class "text-warning w-24"} "○ unsettled"])
+                  (when snapped
+                    [:span {:class "text-info"} "snap→candidate"])])
+               holes))])))
+
+;; ------------------------------------------------------------
+;; 5. Done-ness strip — the honest EOS signal + harvest totals.
+;; ------------------------------------------------------------
+
 (defn- eos-meter
   "The done-ness meter — `eos-logprob` (measured −7 more-work … −2.8
    done) as a small horizontal bar."
@@ -143,6 +367,29 @@
       [:div {:class "h-full bg-signal"
              :style (str "width:" pct "%")}]]
      [:span {:class "text-text-500 text-2xs font-mono"} (str lp)]]))
+
+(defn- done-strip
+  "EOS-logprob labeled meter + locked-forms / harvested-token totals
+   for the call. nil when the last row has no EOS readout."
+  [steps]
+  (let [{:seon.typeahead/keys [eos-logprob committed-tokens]} (last steps)
+        locked (reduce + 0 (keep :seon.typeahead/locked-count steps))]
+    (when (number? eos-logprob)
+      [:div {:class "flex items-center gap-3 text-xs font-mono"}
+       [:span {:class "text-text-500 text-2xs uppercase tracking-wider"} "eos"]
+       (eos-meter eos-logprob)
+       [:span {:class "text-text-400"}
+        (str "⊢ " locked " form" (when (not= 1 locked) "s")
+             (when committed-tokens
+               (str " · ~" committed-tokens " tok harvested")))]])))
+
+;; ------------------------------------------------------------
+;; 6. Step history — the compact per-step rows (capped).
+;; ------------------------------------------------------------
+
+(def ^:private history-cap
+  "Most recent step rows shown in the history strip."
+  12)
 
 (defn- expand-tag
   "An `:expand` row's outcome tag — the fired offer either locked in the
@@ -176,30 +423,20 @@
        [:span {:class "text-text-500 w-12"} (str "H" entropy-worst)])
      (when eos-logprob (eos-meter eos-logprob))]))
 
-(defn- call-header
-  "The call meta line: step count, total locked forms, render size in
-   tokens, worker sha (short) — whichever of those the rows carry."
+(defn- step-history
+  "The capped compact step rows — the last [[history-cap]] steps."
   [steps]
-  (let [locked (reduce + 0 (keep :seon.typeahead/locked-count steps))
-        ptoks  (some :seon.typeahead/prompt-tokens steps)
-        sha    (some :seon.typeahead/worker-sha steps)]
-    [:div {:class "flex items-center justify-between"}
-     [:span {:class "text-text-500 text-2xs uppercase tracking-wider"}
-      "typeahead steps"]
-     [:span {:class "text-text-500 text-2xs font-mono"}
-      (str/join " · "
-                (cond-> [(str (count steps) " step"
-                              (when (not= 1 (count steps)) "s"))
-                         (str "⊢ " locked)]
-                  ptoks (conj (str "ctx ~" ptoks " tok"))
-                  sha   (conj (subs sha 0 (min 8 (count sha))))))]]))
+  (into [:div {:class "flex flex-col"}]
+        (map step-row (take-last history-cap steps))))
 
 (defn- draft-line
-  "The current draft/code-buffer preview line from the LAST step row —
-   truncated text, sized in TOKENS. nil when the draft is empty."
+  "Fallback draft preview from the LAST step row — only when the row has
+   no buffer picture (pre-upgrade rows); sized in TOKENS."
   [steps]
-  (let [{:seon.typeahead/keys [draft-preview draft-tokens]} (last steps)]
-    (when (and draft-preview (not (str/blank? draft-preview)))
+  (let [{:seon.typeahead/keys [draft-preview draft-tokens
+                               buffer-preview]} (last steps)]
+    (when (and draft-preview (not (str/blank? draft-preview))
+               (str/blank? buffer-preview))
       [:div {:class "text-xs font-mono text-text-400 pt-0.5"}
        [:span {:class "text-text-500"}
         (str "draft ~" (or draft-tokens (tokens/estimate draft-preview))
@@ -207,25 +444,29 @@
        draft-preview])))
 
 (defn steps-tile-html
-  "The typeahead step-trace tile — the last provider call's FSM steps.
+  "The typeahead live tile — the last provider call, fully legible.
 
-   Derived at render from the agent's `:seon.typeahead/*` step rows
-   (latest call only): the call header (steps, total locked, render
-   tokens, worker sha), per step the transition (dot+text), any emitted
-   glyph, the expand outcome (`→⊢` locked / `✗offer` failed), the
-   calibrated margin, locked-form count + decoder forwards, wall per
-   step, worst free-region entropy, and the EOS done-ness meter — then
-   the current draft preview sized in tokens. nil when the agent has no
-   step rows — the tile body vanishes (reactive-context)."
+   Composed top to bottom, every panel reactive (vanishes when its rows
+   lack the data): the state banner (FSM state now, provider, step k/N,
+   rounds j/budget, wall, ctx tokens, server sha), THE CODE-BUFFER PANE
+   (span-status-painted buffer text + legend), the offers panel
+   (fired/suppressed/below-margin + margin bars vs the threshold), the
+   holes panel (per-hole entropy/length/accepted after an EXPAND), the
+   done-ness strip (EOS meter + harvest totals) and the compact step
+   history. nil when the agent has no step rows (reactive-context)."
   {:malli/schema [:=> [:cat :seon.render/section-request]
                   [:maybe :seon.render.live-tile/hiccup]]}
   [{db :seon.db/db id :seon.agent/id}]
   (let [db    (or db (some-> db/*conn* deref))
         steps (last-call-steps db id)]
     (when (seq steps)
-      (into
-        [:div {:class "flex flex-col gap-1"}
-         (call-header steps)
-         (into [:div {:class "flex flex-col"}]
-               (map step-row steps))]
-        (keep identity [(draft-line steps)])))))
+      (let [row (last steps)]
+        (into [:div {:class "flex flex-col gap-1.5"}]
+              (keep identity
+                    [(state-banner db id steps)
+                     (buffer-pane row)
+                     (offers-panel row)
+                     (holes-panel steps)
+                     (done-strip steps)
+                     (step-history steps)
+                     (draft-line steps)]))))))

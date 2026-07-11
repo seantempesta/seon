@@ -24,6 +24,7 @@
      (require 'seon.ai.typeahead-test :reload)
      (cljs.test/run-tests 'seon.ai.typeahead-test)"
   (:require
+    [cljs.reader :as reader]
     [cljs.test :refer [deftest is async]]
     [clojure.string :as str]
     [datahike.api :as d]
@@ -233,7 +234,75 @@
     (is (not (contains? bare :seon.typeahead/margin)))
     (is (not (contains? bare :seon.typeahead/draft-preview))
         "blank draft → no preview datom")
-    (is (not (contains? bare :seon.typeahead/gen-s)))))
+    (is (not (contains? bare :seon.typeahead/gen-s)))
+    (is (not (contains? bare :seon.typeahead/buffer-preview))
+        "no wire buffer picture → no buffer datoms")
+    (is (not (contains? bare :seon.typeahead/offers-edn)))
+    (is (not (contains? bare :seon.typeahead/holes-edn)))))
+
+(deftest step-projection-buffer-offers-holes
+  (let [proj (ta/step-projection
+               "call1" 0
+               {:transition "expand" :glyph "①" :locked ["(def a 1)"]
+                :new_draft ""
+                :buffer_text "(def a 1)\n(def b "
+                :buffer_spans [{:start 0 :end 9 :status "locked"}
+                               {:start 9 :end 17 :status "resolving"}
+                               {:start 17 :end 17 :status "frontier"}]
+                :offer_status [{:glyph "①" :label "todo/add!" :cal 7.5
+                                :raw -0.2 :state "fired"}
+                               {:glyph "②" :label "db/query" :cal -1.0
+                                :raw -8.0 :state "suppressed"
+                                :reason "typed-region"}]
+                :expansion {:hole_confidence [{:mean 0.1 :worst 0.42
+                                               :accepted true :round 0}
+                                              {:mean 1.2 :worst 2.1
+                                               :accepted false :round 1}]
+                            :probes [{:hole 0 :chosen 8}]
+                            :settle_rounds_used 1
+                            :settle_round_budget 2}
+                :readouts {:auto_offer_margin 6.0 :eos_logprob_tail -3.0}})
+        spans  (reader/read-string (:seon.typeahead/buffer-spans proj))
+        offers (reader/read-string (:seon.typeahead/offers-edn proj))
+        holes  (reader/read-string (:seon.typeahead/holes-edn proj))]
+    (is (= "(def a 1)\n(def b " (:seon.typeahead/buffer-preview proj)))
+    (is (= [[0 9 :locked] [9 17 :resolving] [17 17 :frontier]] spans)
+        "spans → compact clipped tuples, statuses keyworded")
+    (is (= 2 (count offers)))
+    (is (= :fired (:seon.typeahead/state (first offers))))
+    (is (= :typed-region (:seon.typeahead/reason (second offers)))
+        "worker-side suppression reason rides")
+    (is (= 6.0 (:seon.typeahead/auto-offer-margin proj))
+        "the fire threshold projected for the tile's bars")
+    (is (= 2 (count holes)))
+    (is (true? (:seon.typeahead/accepted (first holes))))
+    (is (= 8 (:seon.typeahead/chosen-length (first holes)))
+        "CAL-chosen length joined from probes by hole index")
+    (is (false? (:seon.typeahead/accepted (second holes))))
+    (is (= 1 (:seon.typeahead/rounds-used proj)))
+    (is (= 2 (:seon.typeahead/round-budget proj)))))
+
+(deftest with-withheld-offers-appends-loop-suppressions
+  (let [proj {:seon.typeahead/call "c" :seon.typeahead/step-idx 0
+              :seon.typeahead/at (js/Date.)
+              :seon.typeahead/transition :progress
+              :seon.typeahead/locked-count 0
+              :seon.typeahead/offers-edn
+              (pr-str [{:seon.typeahead/glyph "①"
+                        :seon.typeahead/state :below-margin}])}
+        out  (ta/with-withheld-offers
+               proj [{:seon.typeahead/glyph "②"
+                      :seon.typeahead/label "db/query"
+                      :seon.typeahead/template [["clamp" "(db/query q)"]]}])
+        rows (reader/read-string (:seon.typeahead/offers-edn out))]
+    (is (= 2 (count rows)))
+    (is (= {:seon.typeahead/glyph "②" :seon.typeahead/label "db/query"
+            :seon.typeahead/state :suppressed
+            :seon.typeahead/reason :failed-before}
+           (last rows))
+        "withheld offer appended as failed-before suppression")
+    (is (= proj (ta/with-withheld-offers proj []))
+        "no withheld offers → unchanged")))
 
 ;; ============================================================
 ;; The step loop over the scripted wire.

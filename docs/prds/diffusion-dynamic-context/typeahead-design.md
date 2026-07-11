@@ -175,7 +175,7 @@ Because every layer degrades to the layer below (masks → menus → plain
 guided → free generation), any policy combination is safe; the FSM's
 default arm is always plain guided generation.
 
-## Wire modes (worker.py additions)
+## Wire modes (server.py additions)
 
 - `mode=fill` — segments in → hole texts + per-hole worst-confidence +
   trims out.
