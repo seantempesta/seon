@@ -8,7 +8,7 @@ tags: [prd, agent]
 
 ## Agent-view and context-render consolidation (2026-07-11)
 
-In flight: replace the old page/debug adapters with one DB-derived rendered
+Shipped in `bb433846`: the old page/debug adapters now share one DB-derived rendered
 context-block projection. The prompt requests AI format, the agent view requests
 HTML format, and the separate debug view requests both plus token metadata. The
 main agent view is a large selectable canvas/content panel with a compact HTML
@@ -18,8 +18,18 @@ Datastar state; database transactions remain the only refresh signal.
 The hidden code default and implicit `:skill/repl` expansion are removed. The
 manifest is the sole new-agent block template; each created agent owns its copied
 `:seon.agent/ctx` component entities afterward. Existing agents are not silently
-overwritten on boot. Legacy UI vocabulary is retiring in favor of agent view,
+overwritten on boot. Legacy UI vocabulary is retired in favor of agent view,
 roster view, and debug view.
+
+Live proof on the default pod: fresh agent `uTk-2607111732` seeded exactly
+`:namespaces`, `:plan`, and `:transcript` with no `:skill/*` blocks. Its gzip
+feed emitted whole-`#app-view` Datastar morphs with canvas selected, a 3/4
+primary panel, and plan/transcript HTML cards in the right rail. The debug view
+showed the exact AI blocks, HTML twins, ~14.5k total tokens, per-block token
+breakdown, and no browser console errors. Two real Muse runs completed through
+the normal wake/eval/reply/idle path (`LIVE-WORKFLOW-OK`, then
+`LIVE-UPDATE-OK`); the open feed pushed the second turn automatically. Full
+CLJS suite: 1206 tests / 5500 assertions / 0 failures / 0 errors.
 
 The single **we-are-here** for this chunk. The target (idealized system) is
 `docs/seon/architecture/` — present tense; THIS doc holds what's built, the
