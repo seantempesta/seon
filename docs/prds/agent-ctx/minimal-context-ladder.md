@@ -308,4 +308,15 @@ memory `project_context_rebuild_2026_07_10.md`; per-drive evidence:
   identical re-run) — recorded, not root-caused.
 - Introspection-shadowing sweep beyond `ns-interns`/`ns-publics` (fixed via
   computed `core-macro-head?`) — check `ns-aliases` et al.
-- The interactive plan tile (in flight — the `live-tile` milestone pattern).
+- **datahike-CLJS recursive-rule executor broken past depth 1** (plan-tile
+  unit find, 2026-07-11): `(descendant ?r ?x)` on a 3-deep chain returns
+  only depth 1 on every pod runtime (JVM correct on the same store) —
+  `my.plan` roll-ups print "0 of 0 steps done" in REAL prompts and the
+  frontier mislists undrained roots as ready; suite blind (all test trees
+  depth-1). Own unit: depth-2 regression test first, then fix
+  `execute-recursive-rule`; then re-unify `plan-block-html`'s build-forest
+  deviation back onto `rollup`/`ready-leaves`/`anchor`.
+- The interactive plan tile: LIVE on the cutover pod (html twin + 4
+  morph-survivable signals; zero agent-token cost — `*.internal` is
+  context-hidden). Remaining: fresh-boot slot/SCI verification, browser
+  click-through, one full suite.
