@@ -9,9 +9,12 @@
    One provider call = one STEP LOOP. Each round submits `mode=step` to
    the worker (via the ONE wire path, [[seon.ai.diffusiongemma/complete]])
    with `{prompt: the rendered context, committed, draft, offers,
-   policy}` — offers/policy derived from the SAME data the rendered menu
-   shows (`seon.agent.ctx.menu/verb-offers` + `/policy`), so glyph N on
-   the wire is glyph N in the prompt. The worker answers
+   policy, null_render}` — offers/policy derived from the SAME data the
+   rendered menu shows (`seon.agent.ctx.menu/verb-offers` + `/policy`),
+   so glyph N on the wire is glyph N in the prompt, and `null_render`
+   ([[null-render]] — the prompt minus its transcript event log) is the
+   null-intent baseline the worker calibrates glyph posteriors against
+   before any auto-offer thresholding. The worker answers
    `{transition, new_draft, locked, glyph, readouts, …}`; locked forms
    thread forward as the next round's `committed`, the draft carries
    over, and the loop stops on `done`, repeated `stuck`, or the policy
@@ -121,6 +124,77 @@
    "probe_lengths"     probe-budget
    "glyph_page_size"   menu-cap
    "max_rounds"        max-rounds})
+
+;; The transcript section's ai-view brackets (seon.agent.ctx/block-bracket-ai
+;; with the :transcript block name) — the delimiters [[null-render]] keys on.
+(def ^:private transcript-begin ";;; ┌─ transcript ─")
+(def ^:private transcript-end   ";;; └─ end transcript ─")
+
+(defn- strip-section
+  "`prompt` with the whole `;;; ┌─ <name> ─ … ;;; └─ end <name> ─`
+   section removed (blank-line seam preserved); unchanged when absent."
+  [prompt section-name]
+  (let [begin (str ";;; ┌─ " section-name " ─")
+        end   (str ";;; └─ end " section-name " ─")
+        i     (.indexOf prompt begin)
+        j     (when-not (neg? i) (.indexOf prompt end i))]
+    (if (or (neg? i) (nil? j) (neg? j))
+      prompt
+      (str (str/trimr (subs prompt 0 i))
+           "\n\n"
+           (str/triml (subs prompt (+ j (count end))))))))
+
+;; Sections DERIVED from the current task intent — the plan tree the
+;; intent spawned and its glyph-ledger view. They restate the task, so a
+;; baseline keeping them would already carry the intent and calibration
+;; would cancel the very signal it protects (verified on a captured acme
+;; prompt blob: the intent text recurs in both).
+(def ^:private intent-derived-sections ["plan" "plan-ledger"])
+
+(defn null-render
+  "The null-intent calibration render derived from the rendered prompt.
+
+   The design's calibration rule (typeahead-design \"The glyph
+   vocabulary\"): auto-offers threshold CALIBRATED glyph margins — raw
+   posteriors minus a baseline measured under the SAME render with the
+   task intent removed (position bias is measured and real: first-slot
+   inflation −0.0 vs −6.4). Derivation (the documented choice):
+
+   - inside the `transcript` section, the EVENT LOG — everything from
+     the first `;;; ◀`/`;;; ▶` message line through the readline's
+     status line — is dropped; the masthead teaching and the trailing
+     `ns=>` cursor stay,
+   - the intent-DERIVED sections (`plan`, `plan-ledger` — the plan tree
+     the task spawned, which restates it) are dropped whole,
+   - every other section (the `recent-verbs` menu, ns cards,
+     orientation) rides verbatim, so the baseline sees the identical
+     offer scaffolding minus the intent.
+
+   A prompt with no transcript event log returns with only the derived
+   sections stripped (nothing else to null out). Known residue: an
+   agent-authored live-tile/findings body that quotes the task is NOT
+   stripped — a limitation, not a mechanism."
+  {:malli/schema [:=> [:catn [::prompt :string]] :string]}
+  [prompt]
+  (let [prompt (reduce strip-section prompt intent-derived-sections)
+        i (.indexOf prompt transcript-begin)
+        j (.lastIndexOf prompt transcript-end)]
+    (if (or (neg? i) (neg? j) (<= j i))
+      prompt
+      (let [body-start (+ i (count transcript-begin))
+            head   (subs prompt 0 body-start)
+            body   (subs prompt body-start j)
+            tail   (subs prompt j)
+            lines  (str/split-lines body)
+            msg-i  (first (keep-indexed
+                            (fn [k l] (when (re-find #"^;;; [◀▶] " l) k))
+                            lines))
+            cursor (last (remove str/blank? lines))]
+        (if (nil? msg-i)
+          prompt
+          (str head
+               (str/join "\n" (concat (take msg-i lines) [cursor]))
+               "\n" tail))))))
 
 (defn step-projection
   "One step-output's small datom projection, agent-ref-free.
@@ -242,10 +316,15 @@
         agent-id   (db/current-agent-id)
         policy     (menu/policy db)
         offers     (if (and db agent-id) (menu/verb-offers db agent-id) [])
+        ;; offers ride with the null-intent calibration render — the worker
+        ;; gates the glyph baseline on BOTH (cursor.py: `offers and
+        ;; null_render`), so auto-offers can actually fire (P5; P4 measured
+        ;; uptake 0.0 with this unwired).
         wire       (cond-> {::dg/mode   :step
                             ::dg/prompt prompt
                             ::dg/policy (policy->wire policy)}
-                     (seq offers) (assoc ::dg/offers (offers->wire offers)))
+                     (seq offers) (assoc ::dg/offers (offers->wire offers)
+                                         ::dg/null-render (null-render prompt)))
         max-rounds (max 1 (:seon.typeahead/max-rounds policy))
         call-id    (str (random-uuid))]
     (loop [round 0, committed "", draft "", locked-all [], stuck 0, steps []]

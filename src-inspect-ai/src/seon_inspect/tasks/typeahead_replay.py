@@ -10,7 +10,9 @@ three arms over the SAME intents + contracts:
                   mode=step FSM loop (the Python mirror of the shipped
                   seon.ai.typeahead loop: committed/draft threaded, offers
                   glyph-aligned with the rendered menu, stop on done /
-                  stuck×2 / max-rounds), offers ON.
+                  stuck×2 / max-rounds), offers ON, null-render
+                  calibration ON (P5 — the null-intent baseline rides
+                  every step so calibrated auto-offers can fire).
   arm3_degraded   menus RENDERED (same render as arm2) but the machinery
                   INERT: mode=guided, no offers — the always-works
                   invariant arm. 1 vs 3 isolates render-TEXT effects;
@@ -107,21 +109,56 @@ def token_estimate(s: str) -> int:
     return len(s) // 4
 
 
-def build_render(sample: dict, arm: str) -> str:
-    """One arm's encoder context render from the corpus sample's VERBATIM
-    captured sections. Arms 2/3 additionally carry the menu sections; the
-    contract cards + task are byte-identical across arms."""
+# The teaching is CODE (seon.agent.ctx.menu/recent-verbs-header, P5's
+# additive example lines); the entries are DATA (the corpus's verbatim
+# capture). The bench renders the shipped teaching over the frozen
+# entries — same stance as POLICY_WIRE mirroring the shipped defaults.
+_MENU_HEADER_LAST = ("; alone (e.g. ①), or ignore this and write any "
+                     "Clojure — both work.")
+MENU_TEACHING_ADDENDUM = (
+    "; Example: to select entry ①, output the single character ① and\n"
+    "; nothing else — its call template is expanded for you to fill.")
+
+
+def refresh_menu_teaching(section: str) -> str:
+    """The captured `recent-verbs` section with the CURRENT colocated
+    teaching (the P5 example lines appended after the captured header —
+    purely additive; the glyph entries stay byte-verbatim). Idempotent;
+    a section without the known header line rides unchanged."""
+    if MENU_TEACHING_ADDENDUM.splitlines()[0] in section:
+        return section
+    return section.replace(
+        _MENU_HEADER_LAST,
+        _MENU_HEADER_LAST + "\n" + MENU_TEACHING_ADDENDUM, 1)
+
+
+def _render_parts(sample: dict, arm: str, *, null: bool = False) -> list[str]:
+    """The front of one arm's render: orientation + contract ns cards
+    (+ the menu sections on arms 2/3, current teaching). `null` drops
+    the plan-ledger (intent-DERIVED — its captured steps restate the
+    task; the seon-side mirror is null-render's plan/plan-ledger
+    strip)."""
     parts = [ORIENTATION]
     for ns in sample["contract_nses"]:
         sec = sample["sections"].get(f"namespace {ns}")
         if sec:
             parts.append(sec)
     if arm in ("arm2_typeahead", "arm3_degraded"):
-        for name in ("recent-verbs", "plan-ledger"):
+        names = ("recent-verbs",) if null else ("recent-verbs", "plan-ledger")
+        for name in names:
             sec = sample["sections"].get(name)
             if sec:
-                parts.append(sec)
+                parts.append(refresh_menu_teaching(sec)
+                             if name == "recent-verbs" else sec)
+    return parts
+
+
+def build_render(sample: dict, arm: str) -> str:
+    """One arm's encoder context render from the corpus sample's VERBATIM
+    captured sections. Arms 2/3 additionally carry the menu sections; the
+    contract cards + task are byte-identical across arms."""
     contract = CONTRACT_LINES[sample["predicate"]["kind"]]
+    parts = _render_parts(sample, arm)
     parts.append(";;; ◀ from user (NEW — unanswered; respond to this) — "
                  + json.dumps(sample["intent"]) + "\n" + contract
                  + "\nmy.agent=> ")
@@ -131,6 +168,18 @@ def build_render(sample: dict, arm: str) -> str:
         raise ValueError(f"render for {sample['id']}/{arm} is ~{est} tokens "
                          f"(> {RENDER_BUDGET_TOKENS} budget)")
     return render
+
+
+def build_null_render(sample: dict, arm: str) -> str:
+    """The null-intent calibration render: the SAME sections as
+    [[build_render]] minus the task/message content (the design's
+    calibration rule — the seon-side mirror is
+    seon.ai.typeahead/null-render, which drops the transcript event log
+    + the intent-derived plan sections; here the task part IS the event
+    log, the captured plan-ledger restates the task and is dropped, and
+    the null render ends at the bare cursor)."""
+    return "\n\n".join(_render_parts(sample, arm, null=True)
+                       + ["my.agent=> "])
 
 
 # ---------------------------------------------------------------------------
@@ -240,22 +289,30 @@ def run_guided(ep, render: str, seed: int) -> dict:
             "steps": []}
 
 
-def run_step_loop(ep, render: str, offers: list[dict], seed: int) -> dict:
+def run_step_loop(ep, render: str, offers: list[dict], seed: int,
+                  null_render: str | None = None) -> dict:
     """The shipped seon.ai.typeahead step loop, mirrored host-side:
-    committed/draft threaded, stop on done / stuck×2 / MAX_ROUNDS."""
+    committed/draft threaded, stop on done / stuck×2 / MAX_ROUNDS.
+    `null_render` (the null-intent baseline render) rides every step so
+    the worker calibrates glyph posteriors — without it auto-offers
+    structurally cannot fire (the P4 uptake-0.0 finding)."""
     committed, draft, locked_all, stuck = "", "", [], 0
     steps, t0 = [], time.time()
     outcome = "round-cap"
     for rnd in range(MAX_ROUNDS):
-        r = ep.call({"mode": "step", "prompt": render,
-                     "committed": committed, "draft": draft,
-                     "offers": offers, "policy": POLICY_WIRE, "seed": seed})
+        payload = {"mode": "step", "prompt": render,
+                   "committed": committed, "draft": draft,
+                   "offers": offers, "policy": POLICY_WIRE, "seed": seed}
+        if null_render:
+            payload["null_render"] = null_render
+        r = ep.call(payload)
         if r.get("gen_error") or r.get("_timeout") or r.get("_failed"):
             return {"text": "", "gen_error": r.get("gen_error")
                     or "worker timeout/failure", "steps": steps,
                     "raw": r, "gen_s": round(time.time() - t0, 3)}
         locked = [str(f) for f in (r.get("locked") or [])]
         locked_all += locked
+        ro = r.get("readouts") or {}
         steps.append({
             "idx": rnd, "transition": r.get("transition"),
             "glyph": r.get("glyph"),
@@ -263,7 +320,11 @@ def run_step_loop(ep, render: str, offers: list[dict], seed: int) -> dict:
                         for e in (r.get("events") or [])),
             "locked_n": len(locked), "forwards": r.get("forwards"),
             "gen_s": r.get("gen_s"),
-            "eos_logprob": (r.get("readouts") or {}).get("eos_logprob_tail"),
+            "eos_logprob": ro.get("eos_logprob_tail"),
+            # the C-lane evidence: calibrated margins per step, so the
+            # auto_offer_margin policy default is tuned on data, not vibes
+            "margin": ro.get("glyph_margin"),
+            "posteriors_cal": ro.get("glyph_posteriors_calibrated"),
         })
         committed = "\n".join(x for x in [committed, *locked] if x.strip())
         draft = str(r.get("new_draft") or "")
@@ -286,10 +347,12 @@ def step_metrics(steps: list[dict]) -> dict:
     n = len(steps)
     selections = sum(1 for s in steps if s["transition"] == "expand")
     first_lock = next((s["idx"] + 1 for s in steps if s["locked_n"]), None)
+    margins = [s["margin"] for s in steps if s.get("margin") is not None]
     return {"n_steps": n,
             "uptake": (selections / n) if n else None,
             "glyph_selections": selections,
             "auto_offers": sum(1 for s in steps if s.get("auto")),
+            "margins": margins,
             "rounds_to_lock": first_lock,
             "step_s_mean": (round(statistics.mean(
                 [s["gen_s"] for s in steps if s.get("gen_s") is not None]), 3)
@@ -320,7 +383,8 @@ def typeahead_arm_solver(arm: str, endpoint: str):
 
         def drive():
             if arm == "arm2_typeahead":
-                return run_step_loop(ep, render, s["offers"], seed)
+                return run_step_loop(ep, render, s["offers"], seed,
+                                     null_render=build_null_render(s, arm))
             return run_guided(ep, render, seed)
 
         t0 = time.time()

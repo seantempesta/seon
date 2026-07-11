@@ -18,6 +18,8 @@ PROMPT = """header text
 
 ;;; ┌─ recent-verbs ─
 ; recent verbs — the fns you have been calling, most-used first.
+; A MENU, never a mandate: select an entry by outputting its glyph
+; alone (e.g. ①), or ignore this and write any Clojure — both work.
 ; ① (my.plan/done! [{:my.plan/keys [id]}] …) — Mark a step done; may unblock its dependents next turn.
 ; ② (seon.agent.message/user [content] …) — Send a message to your human.
 ;;; └─ end recent-verbs ─
@@ -72,6 +74,31 @@ def test_build_render_arm_deltas_and_budget():
     assert tr.token_estimate(r2) <= tr.RENDER_BUDGET_TOKENS
 
 
+def test_menu_teaching_refresh_additive_and_idempotent():
+    sec = SAMPLE["sections"]["recent-verbs"]
+    ref = tr.refresh_menu_teaching(sec)
+    assert tr.MENU_TEACHING_ADDENDUM in ref, "P5 example lines appended"
+    assert offers_from_menu(ref) == offers_from_menu(sec), \
+        "glyph entries stay byte-verbatim (only the teaching is refreshed)"
+    assert tr.refresh_menu_teaching(ref) == ref, "idempotent"
+    # the refreshed teaching is what arms 2/3 actually render
+    assert tr.MENU_TEACHING_ADDENDUM in tr.build_render(SAMPLE,
+                                                        "arm2_typeahead")
+
+
+def test_build_null_render_same_sections_minus_intent():
+    r2 = tr.build_render(SAMPLE, "arm2_typeahead")
+    n2 = tr.build_null_render(SAMPLE, "arm2_typeahead")
+    task_line = ";;; ◀ from user (NEW — unanswered; respond to this)"
+    assert task_line in r2 and task_line not in n2
+    assert "recent verbs" in n2, "the offer scaffolding stays"
+    assert "☐ ①" not in n2, \
+        "the plan-ledger (intent-derived — it restates the task) is dropped"
+    contract = tr.CONTRACT_LINES[SAMPLE["predicate"]["kind"]]
+    assert contract in r2 and contract not in n2
+    assert n2.endswith("my.agent=> "), "the bare cursor closes the null"
+
+
 def test_render_budget_enforced():
     fat = dict(SAMPLE, sections={**SAMPLE["sections"],
                                  "namespace my.plan": "; x" * 20000})
@@ -119,14 +146,16 @@ def test_analyze_reply_verb_call_real_oracles():
 
 def test_step_metrics_uptake_and_lock():
     steps = [
-        {"idx": 0, "transition": "expand", "glyph": "①", "auto": False,
-         "locked_n": 0, "gen_s": 1.0},
+        {"idx": 0, "transition": "expand", "glyph": "①", "auto": True,
+         "locked_n": 0, "gen_s": 1.0, "margin": 7.2},
         {"idx": 1, "transition": "progress", "glyph": None, "auto": False,
          "locked_n": 1, "gen_s": 2.0},
     ]
     m = tr.step_metrics(steps)
     assert m["uptake"] == 0.5
     assert m["glyph_selections"] == 1
+    assert m["auto_offers"] == 1
+    assert m["margins"] == [7.2]
     assert m["rounds_to_lock"] == 2
     assert m["step_s_mean"] == 1.5
 

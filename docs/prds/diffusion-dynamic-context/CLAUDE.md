@@ -40,22 +40,33 @@ tags: [orchestrator, agent]
   device-assert = static-cache-sizing hypothesis + $0 probe; clamp is
   compile-compatible — the compiled path was never measured).
 
-## ▸ Current state (2026-07-10) — TYPEAHEAD ARC P1–P4 SHIPPED; the bench numbers are in
+## ▸ Current state (2026-07-11) — TYPEAHEAD ARC P1–P5 SHIPPED; the offer channel fires
 
 The typeahead lane ([[typeahead-design]] — read its Phases section, every
-phase carries its shipped note) is COMPLETE through **P4**: cursor oracle
+phase carries its shipped note) is COMPLETE through **P5**: cursor oracle
 (`op:"cursor"`), `cursor.py` driver + wire modes `fill`/`rank`/`step`,
 seon-side menu/plan-ledger ctx blocks + `:seon.typeahead/policy` row +
-the `SEON_AI_PROVIDER=typeahead` step-loop provider, and now the
+the `SEON_AI_PROVIDER=typeahead` step-loop provider, the
 **replay-corpus bench inside src-inspect-ai**
 (`seon_inspect.typeahead_corpus` + `tasks/typeahead_replay.py`; corpus =
-10 real acme sessions, evidence `evals/runs/2026-07-10-typeahead/`,
-ledger rows `2026-07-10:typeahead_replay:dev:k3:arm{1,2,3}`). Headline
-(local MLX, ≤4k renders, k=3): **typeahead .533 outcome / .90 validity /
-3.0 s per reply** vs guided .286/.46/20.5 s; no protocol leak; **uptake
-0.0** (the glyph channel unexercised — null-render calibration unwired);
-DeepSeek reference .70 outcome on the same corpus. Next lever: wire
-auto-offer calibration + glyph-emission teaching, re-measure uptake.
+10 real acme sessions), and now **null-render calibration wired end to
+end** (`seon.ai.typeahead/null-render` — the prompt minus its transcript
+event log + the intent-derived plan sections — rides every step; bench
+arm2 mirrors it via `build_null_render`) plus additive glyph-teaching
+example lines in the menu header. Headline (local MLX, ≤4k renders,
+k=3, SAME corpus, evidence `evals/runs/2026-07-11-typeahead-uptake/`,
+ledger rows `2026-07-11:typeahead_replay:dev:k3:arm{2,3}`): **arm2
+.567 outcome / .90 validity / verb-acc .429 / uptake .077 / 4.3 s**
+(P4: .533/.90/.333/0.0/3.0 s); DeepSeek reference .70 on the same
+corpus. All 13 fired selections were CALIBRATED AUTO-OFFERS — zero
+organic glyph emissions across P4+P5 (the posterior channel is the
+viable selection path in the step regime); 0/13 fires picked a
+task-required verb because the captured menus lack the planning verbs
+(a menu-SOURCE limitation, not calibration). Costs: calibration ≈
++0.5 s median (worker caches the baseline per null-render); EXPAND
+~18 s/step at 3.5k ctx. Margin defaults untuned (fires between 3–6
+nats were correctness-mixed). Next lever: menu SOURCES (task-relevant
+/ schema-contract offers) + cheaper expansion — not threshold tuning.
 
 ## ▸ Prior state (2026-07-05) — LOCAL-FIRST REBOOT: guided loop PROVEN live on MLX; `src-diffusion/` is the home
 

@@ -148,6 +148,56 @@
     (is (not (contains? wire "worst_entropy_gate"))
         "worst-token-gate (a probability) never maps onto the nats gate")))
 
+(def ^:private rendered-prompt
+  ;; The transcript shape the live renderer produces: masthead teaching,
+  ;; message/eval event log, readline (status + `ns=>` cursor), brackets.
+  (str ";;; ┌─ plan ─\n"
+       "; PLAN «the task»\n"
+       ";;; └─ end plan ─\n\n"
+       ";;; ┌─ recent-verbs ─\n"
+       "; ① (db/query [req] …) — Run a Datalog query.\n"
+       ";;; └─ end recent-verbs ─\n\n"
+       ";;; ┌─ plan-ledger ─\n"
+       "; ☐ ① the task\n"
+       ";;; └─ end plan-ledger ─\n\n"
+       ";;; ┌─ transcript ─\n"
+       "; seon · my.agent.X · live REPL\n"
+       "; The flat, time-ordered log below is this REPL's history.\n\n"
+       ";;; ◀ from user @ 20:13:32 [m1] — \"warmup\"\n"
+       "(message/user \"ready\") ⟹ {:ok true} ⟸ result/r1\n"
+       ";;; ▶ to user @ 20:13:36 [m2] — \"ready\"\n"
+       ";;; ◀ from user @ 20:13:41 [m3] (NEW — unanswered; respond to this) — \"the task\"\n\n"
+       "; my.agent.X · turn 2 · loop 0/20 · running · now · agent X\n"
+       "my.agent.X=> \n"
+       ";;; └─ end transcript ─"))
+
+(deftest null-render-drops-event-log-keeps-scaffolding
+  (let [nr (ta/null-render rendered-prompt)]
+    (is (str/includes? nr ";;; ┌─ recent-verbs ─")
+        "menu section rides verbatim")
+    (is (str/includes? nr "; ① (db/query"))
+    (is (str/includes? nr "; seon · my.agent.X · live REPL")
+        "transcript masthead teaching stays")
+    (is (str/ends-with? nr "my.agent.X=> \n;;; └─ end transcript ─")
+        "the ns=> cursor + end bracket close the null render")
+    (is (not (str/includes? nr "the task")) "task intent removed")
+    (is (not (str/includes? nr "warmup")) "message history removed")
+    (is (not (str/includes? nr "result/r1")) "eval history removed")
+    (is (not (str/includes? nr "turn 2 · loop"))
+        "the live status line (turn state) removed")
+    (is (not (str/includes? nr ";;; ┌─ plan ─"))
+        "the intent-derived plan section dropped whole")
+    (is (not (str/includes? nr ";;; ┌─ plan-ledger ─"))
+        "the intent-derived plan-ledger section dropped whole")))
+
+(deftest null-render-no-events-or-no-transcript-is-identity
+  (let [no-events (str ";;; ┌─ transcript ─\n; masthead\n\nmy.agent.X=> \n"
+                       ";;; └─ end transcript ─")]
+    (is (= no-events (ta/null-render no-events))
+        "no message lines → nothing to null out")
+    (is (= "plain prompt" (ta/null-render "plain prompt"))
+        "no transcript section → unchanged")))
+
 (deftest assemble-reply-locked-plus-tail
   (is (= "(def a 1)\n\n(def b 2)" (ta/assemble-reply ["(def a 1)" "(def b 2)"] "")))
   (is (= "(def a 1)\n\n(def b" (ta/assemble-reply ["(def a 1)"] "(def b\n"))

@@ -252,7 +252,9 @@
 (def ^:private recent-verbs-header
   (str "; recent verbs — the fns you have been calling, most-used first.\n"
        "; A MENU, never a mandate: select an entry by outputting its glyph\n"
-       "; alone (e.g. ①), or ignore this and write any Clojure — both work."))
+       "; alone (e.g. ①), or ignore this and write any Clojure — both work.\n"
+       "; Example: to select entry ①, output the single character ① and\n"
+       "; nothing else — its call template is expanded for you to fill."))
 
 (defn- verb-line
   "One rendered menu entry: `; <glyph> (<sym> [args] …) — <doc line 1>`.

@@ -303,6 +303,45 @@ In-band errors (`gen_error`), same contract as today.
    local; the next lever per the data is wiring null-render calibration
    (auto-offers) + a glyph-emission teaching pass, then re-measuring
    uptake.
+5. **P5 uptake** — null-render calibration wired + glyph-emission
+   teaching; re-measured. **SHIPPED 2026-07-11** (same corpus
+   796e81c9…badb, k=3 seeds 100–102, worker e3e4fc3668d3, evidence
+   `evals/runs/2026-07-11-typeahead-uptake/`). Wiring:
+   `seon.ai.typeahead/null-render` derives the null-intent baseline
+   from the rendered prompt (the transcript EVENT LOG dropped, masthead
+   + `ns=>` cursor kept; the intent-DERIVED `plan`/`plan-ledger`
+   sections dropped WHOLE — verified on a captured acme blob that they
+   restate the task) and rides every step beside the offers; bench arm2
+   mirrors it (`build_null_render`), and the menu header gained two
+   additive example lines (the bench overlays the CURRENT teaching on
+   the corpus's frozen entries — teaching is code, entries are data).
+   Measured: **arm2 .567 outcome / .90 validity / verb-acc .429 /
+   uptake .077 / 4.3 s** (was .533/.90/.333/0.0/3.0 s); arm3
+   .20/.30/36.5 s (was .267/.37/33.4 s — 4 outcome flips, all on the
+   REPL rung, noise-scale at n=10 k=3; ZERO glyph chars in arm3
+   replies, so the teaching does not leak glyph-alone replies into the
+   inert arm). The channel now FIRES: 13/63 steps expanded — **all 13
+   calibrated auto-offers, still zero organic glyph emissions** (with
+   P4's 0/66: the posterior channel is the viable selection path in
+   the step regime; the model does not emit glyphs even
+   taught-with-example). Margin evidence (per-step `margins` now in the
+   traces): median 2.51 nats, 20/63 > 3.0 (the shipped seon default),
+   only 4/63 > 6.0 (the design default); all 7 above-threshold
+   non-fires were correctly suppressed by the free-region-typed gate.
+   Fired selections were on-menu argmax but **0/13 selected a
+   task-REQUIRED verb — the captured `recent-verbs` menus do not
+   contain the planning verbs the tasks need** (warmups never called
+   them): a MENU-SOURCE limitation, not a calibration failure. Costs:
+   calibration ≈ +0.5 s median on no-expand executions (3.05→3.54 s;
+   the worker caches the baseline per (null-render, glyph-set));
+   EXPAND is the expensive arm (~18 s median per expand step at ~3.5k
+   ctx — CAL probe + settle rounds; 47 s median for executions that
+   fired). `auto-offer-margin` defaults left UNTUNED (3.0 seon / 6.0
+   worker): fires between 3–6 nats were correctness-mixed, so the data
+   justifies moving neither knob. Next lever per the data: menu
+   SOURCES (schema-contracts / task-relevant offers so the menu holds
+   the verbs the task needs) + cheaper expansion (candidate-sized
+   holes / fewer settle rounds) — not threshold tuning.
 
 ## The two cursor regimes (both measured; the regime is DERIVED)
 
