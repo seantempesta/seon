@@ -711,7 +711,7 @@
 
    The resolved system block
    ([[effective-system-prompt]]), a boundary, then the assembled context
-   (block 2). THE single source both the inspector preview
+   (block 2). THE single source both the debug view preview
    (`seon.agent.inspect/ctx-preview`) and the persisted per-turn log use,
    so the two debug surfaces are byte-identical to each other and to what
    the adapters wire. This is a DEBUG representation only — it is NEVER

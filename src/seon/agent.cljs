@@ -48,7 +48,7 @@
    The LLM ctx is ONE recursive render of the ROOT renderable
    (`seon.agent.ctx/context-root`): `seon.agent.turn/render-prompt` calls
    `(seon.render/render :seon.render/ai ctx (seon.agent.ctx/context-root ctx))`,
-   shared byte-for-byte with the inspector (`seon.agent.inspect/ctx-preview`).
+   shared byte-for-byte with the debug view (`seon.agent.inspect/ctx-preview`).
    The default block set (`seon.config/default-ctx-blocks`) is SEED-COPIED
    into a new agent's own `:seon.agent/ctx` at creation; render reads that one
    complete collection priority-sorted — no merge, no separate default set.
@@ -166,7 +166,7 @@
 ;; so an eval row can be found in ONE hop). Written by record-eval! from
 ;; `(seon.db/current-agent-id)` when the eval runs inside a `with-agent` scope
 ;; (every agent turn does); ABSENT for evals with no agent scope (boot index,
-;; inspector REPL) — optional, never nil. A ref so `[:seon.agent/id id]` value
+;; web UI REPL) — optional, never nil. A ref so `[:seon.agent/id id]` value
 ;; lookup-refs resolve and `/clear`'s `[?e :seon.eval/agent [:seon.agent/id …]]`
 ;; query matches by eid.
 (schema/register! :seon.eval/agent       :seon.db/ref)

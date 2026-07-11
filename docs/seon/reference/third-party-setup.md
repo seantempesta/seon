@@ -22,7 +22,7 @@ The shape: two long-running processes per cluster.
 
 - **wire-server** — a JVM datahike WRITER (sole writer; embedding-backed). You
   ship this as a self-contained uberjar. It owns the durable store.
-- **pod** — a Node process (Seon's CLJS runtime: agent loop, inspector UI). It
+- **pod** — a Node process (Seon's CLJS runtime: agent loop, web UI). It
   forwards writes to the wire-server over a Unix socket and reads local lazy
   db values. Your own source is COMPILED INTO this pod bundle via the overlay.
 
@@ -202,7 +202,7 @@ export SEON_BRAND_TAGLINE="Acme — the third-party harness"
 export SEON_BRAND_CSS=/path/to/acme/branding/acme.css
 ```
 
-`SEON_BRAND_CSS` is inlined into the inspector page head AFTER seon's
+`SEON_BRAND_CSS` is inlined into the web UI page head AFTER seon's
 `output.css`, so its token overrides win. Seon's theme is CSS custom
 properties (`--color-*`); remap them for a visibly-own deployment, and use
 selector rules for finer control. From `acme/branding/acme.css`:
@@ -231,7 +231,7 @@ clean state:
 bin/acme down                        # stop anything stale (ignore errors)
 bin/acme cluster reset default       # wipe data/clusters/acme/store (acme env)
 bin/acme up                          # build + wire-server + pod + status
-curl -s 127.0.0.1:7980/agents        # 200 — your branded inspector
+curl -s 127.0.0.1:7980/agents        # 200 — your branded roster
 ```
 
 Then drive a turn (`SEON_AI_PROVIDER=deepseek DEEPSEEK_API_KEY=…`) and read

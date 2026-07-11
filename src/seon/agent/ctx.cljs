@@ -343,7 +343,7 @@
 
 ;; `current-run` + `derived-state` are the [[seon.derive]] leaf — call
 ;; `seon.derive/current-run` / `seon.derive/derive-state` with the db value the
-;; caller holds (the readline + inspector + loop + wake gate all share that one
+;; caller holds (the readline + web UI + loop + wake gate all share that one
 ;; rule). They were duplicated here only to dodge the agent→ctx→render cycle.
 
 (defn agent-turns
@@ -1869,7 +1869,7 @@
 (defn- render-one-ns-html
   "Render a single namespace block to hiccup. Reuses the per-kind
    `seon.handlers.{ns,fn,schema}/render-html` for each member so the
-   webview card styling stays consistent with the inspector panes."
+   webview card styling stays consistent with the debug view panes."
   [db ns-kw data]
   (if (nil? data)
     [:div {:class "py-1 text-xs font-mono text-text-500 italic"}
@@ -2360,7 +2360,7 @@
 (defn- block-bracket-ai
   "The ai-view bracket the ROOT section renderer wraps each child in — the
    self-demarcating boundary that REPLACES the old per-section `;; ── x ──`
-   headers. The agent can fold the left inspector pane on these lines."
+   headers. The agent can fold the left debug view pane on these lines."
   [section-name body]
   (str ";;; ┌─ " (name section-name) " ─\n"
        body
@@ -2468,10 +2468,10 @@
 
    The SINGLE producer
    the prompt path ([[seon.agent.turn/render-prompt]]) AND the human
-   inspector ([[seon.agent.inspect/ctx-preview]]) both route through. Both
+   web UI ([[seon.agent.inspect/ctx-preview]]) both route through. Both
    render the `:seon.render/ai` side of ONE render ([[seon.render/render]])
    over the SAME `context-root` over the SAME db value, so the model's
-   prompt and the inspector's context pane are byte-identical BY
+   prompt and the web UI's context pane are byte-identical BY
    CONSTRUCTION (the only per-render-moment difference is the single live
    `now` in the transcript readline).
 
@@ -2524,7 +2524,7 @@
 (defn- rendered-block-texts
   "Render each ai-contributing child block to its ai text via `render`, drop
    blanks — the per-block text vector shared by the joined prompt
-   ([[render-context-ai]]) and the inspector ([[ctx-sections]]) so the two can
+   ([[render-context-ai]]) and the web UI ([[ctx-sections]]) so the two can
    never disagree on what each block contributes. A block with no
    `:seon.render/ai` render ([[block-renders-ai?]]) contributes NO prompt
    section."
@@ -2711,7 +2711,7 @@
         rh       #(render/render :seon.render/html ctx* %)
         ra       #(render/render :seon.render/ai   ctx* %)
         ;; Per-block texts — the SAME path the joined prompt takes, so the
-        ;; inspector's left pane shows exactly what each block contributes.
+        ;; debug view's left pane shows exactly what each block contributes.
         texts    (->> (rendered-block-texts ra children)
                       (mapv #(select-keys % [:seon.agent.ctx/name :seon.render/text])))
         htmls    (->> children

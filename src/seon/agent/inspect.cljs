@@ -54,7 +54,7 @@
 
 ;; One rendered section of the assembled context — name + the exact
 ;; text that section contributed to the joined prompt. Consumed by the
-;; inspector's left pane so static sections can collapse per-section
+;; debug view's left pane so static sections can collapse per-section
 ;; instead of re-showing the full static bulk on every view.
 (schema/register! :seon.agent.inspect/section-text
   [:map
@@ -80,15 +80,15 @@
   [id]
   (let [;; THE SAME db the prompt path renders against — the live cluster
         ;; conn, UNFILTERED. The loop renders the prompt over `@*conn*`
-        ;; ([[seon.agent.ctx/render-context]] / `render-prompt`); the inspector
+        ;; ([[seon.agent.ctx/render-context]] / `render-prompt`); the web UI
         ;; must use the SAME db value or it would not be byte-identical (and
         ;; the old per-agent `d/filter` actively DROPPED inbound peer-message
-        ;; content whose datom lived in the peer's tx — the inspector lied).
+        ;; content whose datom lived in the peer's tx — the web UI lied).
         db  @db/*conn*
         ctx {:seon.agent/id id :seon.db/db db}
         ;; THE SAME single producer the prompt path uses — both route
         ;; through `seon.agent.ctx/render-context`, so the LLM prompt and this
-        ;; human inspector are byte-identical by construction.
+        ;; human web UI are byte-identical by construction.
         text          (ctx/render-context ctx)
         ;; Per-section breakdown for the panes, derived from the SAME root +
         ;; render (left pane folds per section; right pane one html card per

@@ -172,7 +172,7 @@
                     (js/Promise.resolve {::ok? false ::error (err->msg e)})))))))))))
 
 ;; ============================================================
-;; HTTP handler — POST /call. Opaque (req,res), like the inspector +
+;; HTTP handler — POST /call. Opaque (req,res), like the debug +
 ;; serve handlers (no Malli schema on the Ring-style boundary).
 ;; ============================================================
 
@@ -218,7 +218,7 @@
    fn. Every path through here writes exactly one response — a bad `?args=`
    decode is caught inside the promise chain, never a hung request. The UI
    update is the reactive feed's job — the invoked fn's transact fans out via
-   the inspector tx-listener."
+   the web UI tx-listener."
   ([r]
    ;; The router's calling convention: self-extract node-req/node-res from the
    ;; Ring request and delegate to the (req res) gate UNCHANGED. The seeded

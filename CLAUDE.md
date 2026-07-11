@@ -14,7 +14,7 @@ task is explicitly JVM-track. Operational sections below that describe the
 paused world are tagged **[JVM track — paused]**.
 
 - **CLJS pod (ACTIVE)** — `src/seon/*.cljs`, a long-running Node process:
-  agent loop, bootstrap CLJS compiler, loopback HTTP+SSE inspector UI on
+  agent loop, bootstrap CLJS compiler, loopback HTTP+SSE web UI on
   `http://127.0.0.1:7890`. Backed by the **central JVM datahike store**
   (the `wire-server` process; file-backed datahike on
   `data/clusters/default/store`). The JVM is the sole writer — the pod
@@ -280,6 +280,7 @@ The canonical names (retired coinages in parens — fix on sight):
 | the `db` | "the store", "memory" | `seon.db` — `db/query`, `db/transact!`, `schema/register!` |
 | `warnings` | "attention" | the `:warnings` block / `seon.warn` |
 | `live-tile` (agent-side block) / `canvas` (the human's focal slot showing it) | — | `:seon.render.live-tile/content`; `#world-canvas` in `seon.ui.world` — the canvas IS the agent's live tile; every other html block is a supporting TILE. (The diffusion lane's generation workspace is named `code-buffer` — renamed 2026-07-11 from "canvas" to resolve the clash; "canvas" means ONLY this UI surface.) |
+| the `web UI` (pages: `dashboard` `/`, `roster` `/agents`, `agent page` `/agent/{id}`, `debug view` `/agent/{id}/debug`, `data browser` `/data`) | "the inspector" | `seon.web` serves it, `seon.ui` renders it (owner, 2026-07-11) |
 | `subagents` | "collaboration", "multi-agent block" | the `:subagents` block |
 | `soul` | "identity" (as a block name) | the `:soul` block / SOUL.md |
 | `:shared-instructions` | "instructions block" | the block's registered name |
@@ -414,7 +415,7 @@ rule in `docs/conventions.md` "Comment levels — prose vs code".
 seon/
 ├── src/seon/
 │   ├── *.cljs                ; CLJS pod (ACTIVE) — client, agent, eval, db,
-│   │                         ;   ctx, render, repl, warn, web/ (inspector/serve)
+│   │                         ;   ctx, render, repl, warn, web/ (serve/debug)
 │   ├── core.clj              ; [JVM track] system entry, protocols
 │   ├── system.clj            ; [JVM track] Integrant system map
 │   ├── config.clj            ; [JVM track] Aero config loading
@@ -523,7 +524,7 @@ Any git operation that changes branch, discards files, or modifies history affec
 
 `seon.*` surfaces use **`.cljs` files alongside `.clj` files** — CLJS reads `.cljs`, CLJ reads `.clj`, neither compiler sees the other's. Two lanes:
 
-- **CLJS pod (active):** owns the `.cljs` files (`seon.client`, `seon.db`, `seon.eval`, `seon.ctx`, `seon.agent.*`, `seon.web.inspector`/`serve`, …) and the genuinely-shared `.cljc` files.
+- **CLJS pod (active):** owns the `.cljs` files (`seon.client`, `seon.db`, `seon.eval`, `seon.ctx`, `seon.agent.*`, `seon.web.serve`/`debug`, …) and the genuinely-shared `.cljc` files.
 - **`[JVM track — paused]`:** owns the `.clj` files under `src/seon/`.
 
 Promote a file to `.cljc` only when it's genuinely platform-portable (e.g. `seon.schema`, `seon.instrument`); don't author a `.cljc` for a namespace that has a live `.clj` sibling on the other track unless both sides converge on its shape.
@@ -724,7 +725,7 @@ checkpoint, not per edit.
 
 ## UI Development
 
-Seon uses a **Phosphor Terminal** theme — warm blacks, cream text, amber accents. Read `docs/prds/namespace-ui/design-system.md`. The pod's UI is `src/seon/web/inspector.cljs` + `serve.cljs` (hiccup); the JVM track uses `src/seon/web/components.clj`. Invoke `/datastar-web-ui` for SSE patterns.
+Seon uses a **Phosphor Terminal** theme — warm blacks, cream text, amber accents. Read `docs/prds/namespace-ui/design-system.md`. The pod's web UI is `src/seon/web/serve.cljs` + `debug.cljs` (hiccup); the JVM track uses `src/seon/web/components.clj`. Invoke `/datastar-web-ui` for SSE patterns.
 
 Key rules: density over whitespace (`p-3` not `p-6`), small text (`text-xs` primary), warm colors (`bg-base-*`, never `bg-white`), dot+text status (`● running`), monospace everywhere.
 

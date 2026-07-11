@@ -56,7 +56,7 @@ where the code runs:
 
 - **`.cljs`** — on-device code: the agent loop, `seon.eval`, `seon.ctx`,
   `seon.render`, `seon.db` (the pod's read-local + write-forwarding face),
-  `seon.agent.*`, the inspector UI (`seon.web.inspector`/`serve`).
+  `seon.agent.*`, the web UI (`seon.web.serve`/`debug`).
 - **`.clj`** — server/heavy code: the authoritative datahike writer and the
   Integrant-managed JVM app.
 - **`.cljc`** — only genuinely platform-portable code (e.g. `seon.schema`,
@@ -336,6 +336,14 @@ and read the failure as data, the same way `seon.db/transact!` and
 2. **Callers MUST read the envelope.** An eval can succeed while the write
    didn't happen (`::ok? false`). Translate cryptic underlying errors into a
    guiding `::error` and preserve the original at `::raw-error`.
+3. **A specced `^:async` fn must NEVER reject with an expected error.** The
+   instrument wrapper records a Promise rejection as a `:core` fault — under
+   the dev pod's `:seon.config/on-core-error :crash` dial that EXITS the pod.
+   Expected errors (transport failures, timeouts, non-2xx, invalid input) ride
+   the VALUE channel as the surface's existing envelope (`:seon.ai/error`,
+   `{:seon.db/ok? false}`, `:seon/error`). Rejection is reserved for genuine
+   bugs and the deliberate boot fail-loud gates. Canonical fix:
+   `seon.ai.openai-compat/stream-until-form!` (e6295ecd).
 
 When an error is genuinely a caller bug to fix vs. a core bug to report, tag it:
 `:seon.error/data` carries `:seon.error/kind` (`:user-input` vs `:core-bug`).
@@ -876,8 +884,8 @@ the prose `;` lines; don't hand-roll a `(str ";; " …)` prefixer in a section f
 ## SSE Patterns
 
 See the `/datastar-web-ui` skill for SSE patterns (direct response vs background
-push, buffer design, refresh triggers, handler hot reload). The pod's UI is
-`seon.web.inspector` + `serve` (hiccup, `.cljs`).
+push, buffer design, refresh triggers, handler hot reload). The pod's web UI is
+`seon.web.serve` + `debug` (hiccup, `.cljs`).
 
 ---
 

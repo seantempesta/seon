@@ -126,7 +126,7 @@
     [seon.handlers.message]
     ;; Renderers for :seon.eval / :seon.fn / :seon.schema / :seon.ns —
     ;; stamped at the write site (record-eval!, build-tee-entities) so
-    ;; each persisted entity appears in the inspector's two panes via
+    ;; each persisted entity appears in the debug view's two panes via
     ;; the core-wide `:seon.render/ai`-walking assembler.
     [seon.handlers.eval]
     [seon.handlers.fn]
@@ -703,7 +703,7 @@
         THE WIRE to the JVM writer; idempotent `:db/ident` upserts, so
         re-booting against the populated store re-asserts no-ops.
      5. listen adapter — foreign writers' txs fire this conn's native
-        listeners (wake triggers + inspector SSE)."
+        listeners (wake triggers + web UI SSE)."
   {:malli/schema [:=> [:cat] :any]}
   []
   (await (store.wire/ping!))
@@ -2869,7 +2869,7 @@
   [& _args]
   ;; FIRST: gate datahike-cljs/konserve trace+debug (per-index-node
   ;; `:datahike/index-access` traces flooded pod.log to 813 MB on one
-  ;; cold-store inspector render, 2026-06-09). Must run before the
+  ;; cold-store web UI render, 2026-06-09). Must run before the
   ;; smoke test / start-agent! open any store.
   (log/quiet-library-logs!)
   (install-process-safety-net!)

@@ -306,7 +306,7 @@
 ;;     `*print-err-fn*` that routes to the active per-eval bucket via
 ;;     `.getStore`. Outside an `(.run print-als …)` scope getStore returns
 ;;     nil and the print falls through to the ORIGINAL fn (pod stdout /
-;;     logs/pod.log) — boot/inspector prints land in the log exactly as
+;;     logs/pod.log) — boot/web-UI prints land in the log exactly as
 ;;     before. The originals are captured ONCE (defonce atom) so a
 ;;     hot-reload reinstall never wraps the dispatcher around itself.
 ;;   - `eval-form-entry!` wraps its eval+auto-await span in
@@ -3130,7 +3130,7 @@
   (let [conn     db/*conn*
         ;; Whose scope produced this eval — the agent turn loop runs each batch
         ;; inside `(db/with-agent id …)`, so this is the owning agent. nil for
-        ;; agent-less evals (boot index, inspector REPL); then the ref is omitted
+        ;; agent-less evals (boot index, web UI REPL); then the ref is omitted
         ;; (optional = absent), never stored nil.
         aid      (db/current-agent-id)
         eval-map (cond-> {:seon.eval/id          eval-id

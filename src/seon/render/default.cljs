@@ -10,7 +10,7 @@
      turn count, error banner, recent messages). Agents repoint their
      tile by transacting a different symbol onto the slot.
    - Read helpers (`recent-messages`, `recent-errors`) used by `view`
-     and the inspector.
+     and the web UI.
 
    This namespace renders the tile and reads the message log; it does
    NOT compose the agent's prompt (that is `seon.agent.ctx`'s job).
@@ -79,7 +79,7 @@
         "(or at literal hiccup).")})
 
 ;; ============================================================
-;; DB query helpers — used by `view` and the inspector.
+;; DB query helpers — used by `view` and the web UI.
 ;; All synchronous; reads resolve against the input map's `:seon.db/db`
 ;; when present, else fall back to `@seon.db/*conn*`.
 ;; ============================================================
@@ -104,7 +104,7 @@
                   [:=> [:cat :any :string :int] :any]]}
   ([db id] (recent-messages db id 20))
   ([db id n]
-   (let [;; All reads via QUERY, not d/entity — the inspector hands
+   (let [;; All reads via QUERY, not d/entity — the web UI hands
          ;; `view` a FilteredDB, and datahike-cljs FilteredDB doesn't
          ;; implement -lookup (entity-by-lookup-ref throws); queries
          ;; work fine.
@@ -200,7 +200,7 @@
               :seon.log/agent id})))
 
 ;; Turn-count + derived-state are the [[seon.derive]] leaf — `view` (and the
-;; inspector) call `seon.derive/agent-turn-count` / `seon.derive/derive-state`
+;; web UI) call `seon.derive/agent-turn-count` / `seon.derive/derive-state`
 ;; with the db value they hold. They were duplicated here only to dodge the
 ;; seon.agent require cycle; the armable-roster lives once in
 ;; `seon.derive/armable-agent-ids` (state = :idle).

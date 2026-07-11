@@ -19,7 +19,7 @@
    for schemas that point at `:seon.ns/name <ns-kw>`.
 
    Returns `{:fns [...] :schemas [...]}`. Safe if `db` is nil — returns
-   empty vectors (some callers might invoke without a db; the inspector
+   empty vectors (some callers might invoke without a db; the web UI
    always passes one)."
   [db ns-kw]
   (if (or (nil? db) (nil? ns-kw))

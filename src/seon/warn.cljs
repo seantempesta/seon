@@ -54,7 +54,7 @@
 (schema/register! :seon.warn/example :string)
 (schema/register! :seon.warn/urgent? :boolean)
 ;; DEV-ONLY tier: a check sets this true when its defect is a
-;; schema-hygiene / display concern for the dev/inspector surface, NOT an
+;; schema-hygiene / display concern for the dev/web-UI surface, NOT an
 ;; agent task. render-warnings drops dev-only clusters from the agent
 ;; render unless :seon.warn/include-dev? is passed (the dev surface opts
 ;; in). Absent ≡ false (agent-actionable). Derived classification, nothing
@@ -74,7 +74,7 @@
   [:map
    [:seon.db/db   :seon.db/db]
    [:seon.warn/ns {:optional true} :seon.warn/ns]
-   ;; When truthy, dev-only clusters are KEPT (the dev/inspector surface
+   ;; When truthy, dev-only clusters are KEPT (the dev/web-UI surface
    ;; opts in). The agent render path passes nothing → dev-only suppressed.
    [:seon.warn/include-dev? {:optional true} :seon.warn/include-dev?]])
 
@@ -511,13 +511,13 @@
    source, which is a core change, not an agent one.)
 
    DEV-ONLY: this is the one check that is purely about the
-   entity-renderer marker — a dev/inspector display concern, not an agent
+   entity-renderer marker — a dev/web-UI display concern, not an agent
    task (the rows ARE queryable and DO show in store-inventory, as the
    explain text itself says). It is tagged `:seon.warn/dev-only? true` so
    [[render-warnings]] drops it from the AGENT prompt (the agent is told to
    store my.kb.* facts under identity attrs — nagging that a correct write
    is \"invisible\" frames the right action as broken). The check still
-   runs globally and stays visible in the dev/inspector surface via
+   runs globally and stays visible in the dev/web-UI surface via
    `:seon.warn/include-dev? true`."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
   [{:seon.db/keys [db]}]
@@ -1087,7 +1087,7 @@
    DEV-ONLY clusters (`:seon.warn/dev-only? true`, e.g.
    [[check-unmarked-entity-kinds]]) are DROPPED unless the request carries
    `:seon.warn/include-dev? true`. The AGENT render path (ctx/warnings.cljs)
-   passes nothing → dev-hygiene is hidden from agents; the dev/inspector
+   passes nothing → dev-hygiene is hidden from agents; the dev/web-UI
    surface opts in to still see it. Derived classification + render-time
    filter — nothing stored (reactive-context model)."
   {:malli/schema [:=> [:cat ::check-request] :string]}

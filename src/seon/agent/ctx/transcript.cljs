@@ -735,7 +735,7 @@
          (str/join "\n\n"))))
 
 ;; ------------------------------------------------------------
-;; HTML twin — the inspector's right-pane transcript card. The same flat
+;; HTML twin — the debug view's right-pane transcript card. The same flat
 ;; event stream, each event rendered through the recursive html handle via
 ;; its kind's html converter (`seon.handlers.message/render-html` /
 ;; `seon.handlers.eval/render-html` — resolved by the entity's schema

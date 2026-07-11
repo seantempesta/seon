@@ -245,7 +245,7 @@
 ;; resolve a render symbol from that schema (or a per-entity override).
 ;;
 ;; Shared by the test-capture-as-data rendering (`render-entity-html`
-;; etc.); the inspector's debug right pane mirrors the left's block set
+;; etc.); the debug view's right pane mirrors the left's block set
 ;; via these same converters.
 ;; ============================================================
 
@@ -293,7 +293,7 @@
 ;; Single-slot cache for the schema lookup tables, keyed by db value
 ;; identity. `entity-primary-schema` used to run one datalog query
 ;; PER ENTITY through the FilteredDB (each datom access re-runs the
-;; filter pred) — the dominant cost of an inspector render on the
+;; filter pred) — the dominant cost of a web UI render on the
 ;; file-backed store. The tables derive purely from `:seon.schema`
 ;; rows, which are immutable for a given db value, so one slot keyed
 ;; by `identical?` is correct and survives exactly as long as the
@@ -328,7 +328,7 @@
    ALL present on `entity` (attribute-presence — an entity has no kind).
    Pure in-memory subset test against the per-db cached
    `:required-by-schema` table ([[schema-tables]]) — the former
-   per-entity datalog query was the inspector's render bottleneck on the
+   per-entity datalog query was the web UI's render bottleneck on the
    file store.
 
    A schema 'fully matches' when every required attr is present on the
@@ -987,7 +987,7 @@
   "A node's stable HANDLE — its identity attr, or a section name.
 
    Dispatch by presence on its own identity attr, else the section's
-   name. Shown in the transcript / inspector so the agent can
+   name. Shown in the transcript / web UI so the agent can
    reference or override it. Never a stored :seon.render/id."
   {:malli/schema [:=> [:cat :any] :any]}
   [node]

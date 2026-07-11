@@ -9,7 +9,7 @@
    The HITS are NOT computed here. They are PREFETCHED by the async
    `seon.agent/run-turn!` (which awaits the wire `knn-search`) and stashed in a
    fiber-local `seon.embed.stash` so this SYNCHRONOUS section can read them
-   without making `assemble-context` async (which would ripple to the inspector
+   without making `assemble-context` async (which would ripple to the web UI
    + the gym). This section is a pure reader of the stash.
 
    REACTIVE + default-OFF: when no prefetch ran (the `SEON_EMBED`

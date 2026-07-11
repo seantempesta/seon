@@ -156,7 +156,7 @@
 ;; sym identity: detect-and-tee source rows (sym+ns+source+created-at) and
 ;; runner result rows (sym+last-*+run-id). Once registered, `:seon.test`
 ;; lands in `entity-schema-keys`, decomposes into a `:seon.schema` row at
-;; boot, and renders per-kind in render-namespace + the inspector panes.
+;; boot, and renders per-kind in render-namespace + the debug view panes.
 (schema/register! :seon.test
   [:map {:seon.db/entity   true
          :seon.render/ai   'seon.handlers.test/render-ai

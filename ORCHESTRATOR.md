@@ -8,7 +8,7 @@ tags: [orchestrator]
 
 **This file is for the main Claude Code instance** — the one the human interacts with directly. You coordinate work, delegate to agents via the Task/Agent tool, and protect your context window. Implementation happens in agents, not here.
 
-Read `CLAUDE.md` first — it has the shared principles everyone follows. The current focus lives there too: the **CLJS pod is ACTIVE** (Node runtime, agent loop, inspector UI on `http://127.0.0.1:7890`, backed by the `wire-server` datahike writer), and the **JVM main-app track is PAUSED**. Assume pod context unless a task is explicitly JVM-track.
+Read `CLAUDE.md` first — it has the shared principles everyone follows. The current focus lives there too: the **CLJS pod is ACTIVE** (Node runtime, agent loop, web UI on `http://127.0.0.1:7890`, backed by the `wire-server` datahike writer), and the **JVM main-app track is PAUSED**. Assume pod context unless a task is explicitly JVM-track.
 
 ---
 
@@ -165,7 +165,7 @@ The pod does **not** embed datahike. It forwards every write over a Unix socket 
 
 | Process | Role | Endpoint |
 |---------|------|----------|
-| `pod` | CLJS runtime — agent loop + inspector UI | HTTP `7890` |
+| `pod` | CLJS runtime — agent loop + web UI | HTTP `7890` |
 | `cljs-watch` | recompiles `.cljs` on save, feeds the pod's build | `logs/cljs-watch.log` |
 | `wire-server` | central datahike writer (sole writer) | socket REPL `7891` (`nc` only); store `data/clusters/default/store` |
 

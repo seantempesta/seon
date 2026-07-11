@@ -692,7 +692,7 @@
 ;; ordered by `:seon.agent.run/started-at`: the wake (trigger + cause-message
 ;; content) and, when the run is closed, its `closed-reason` as the
 ;; stop-reason. A function of the DB; nothing stored that isn't already a run
-;; datom (the inspector's lifecycle split reads the latest row's stop-reason).
+;; datom (the web UI's lifecycle split reads the latest row's stop-reason).
 ;; ============================================================
 
 (schema/register! :seon.agent.loop/activity-request

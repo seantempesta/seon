@@ -684,7 +684,7 @@
    not defensive fluff. ([[pull]] gates its own patterns with this
    automatically.)
 
-   The wrapper db values — FilteredDB (the inspector's per-agent view),
+   The wrapper db values — FilteredDB (the web UI's per-agent view),
    AsOfDB/SinceDB/HistoricalDB (the time-travel values) — don't
    implement ILookup, so `(:schema db)` THROWS on them. Schema is
    conn-level (a filter or time-point can't change which attrs are
@@ -1299,7 +1299,7 @@
    added AFTER bootstrap. Per-ROW, never per-kind-name: an
    agent-authored `:seon.fn` row is NOT in this set; a boot-indexed
    one is. THE shared provenance derivation — [[store-inventory]]'s
-   user/system split, [[core-attr-namespaces]], and the inspector's /data
+   user/system split, [[core-attr-namespaces]], and the /data
    browser all read this one mechanism."
   {:malli/schema [:=> [:catn [::db ::db-val]] ::row-ids]}
   [db]

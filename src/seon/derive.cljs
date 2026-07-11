@@ -90,7 +90,7 @@
    One of :idle/:running/:paused/:terminated. Reads `terminated-at`,
    whether it has an OPEN run
    ([[current-run]]), and that run's `paused-at`, then applies
-   [[state-from-primitives]]. The ONE reader the readline / inspector / loop /
+   [[state-from-primitives]]. The ONE reader the readline / web UI / loop /
    wake gate share."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
                              [:seon.agent/id :seon.agent/id]]

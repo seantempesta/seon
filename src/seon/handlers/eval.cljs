@@ -1,6 +1,6 @@
 (ns seon.handlers.eval
   "Renderers for `:seon.eval` entities — what the LLM sees of its own
-   eval history, and what the human sees in the inspector's HTML pane.
+   eval history, and what the human sees in the web UI's HTML pane.
 
    Stamped on every `:seon.eval` entity by `seon.eval/record-eval!` via:
      :seon.render/ai   'seon.handlers.eval/render-ai

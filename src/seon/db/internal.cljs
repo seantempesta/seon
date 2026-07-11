@@ -46,7 +46,7 @@
 ;; fails loudly at ns load instead of silently at first transact.
 ;;
 ;; `agent-id-als` is distinct from `als-instance` (tx-context) so non-DB
-;; code paths (inspectors, section fns, web handlers) can read the active
+;; code paths (web UI, section fns, web handlers) can read the active
 ;; agent-id without depending on tx-context machinery.
 ;; ---------------------------------------------------------------------------
 
@@ -1030,7 +1030,7 @@
 ;;
 ;; `:seon.db/origin` on a committed tx is STAMPED here, at the transact
 ;; boundary, from the ambient scope. Caller-passed `:tx-meta` origin is
-;; never consulted: the inspector's `on-tx` fan-out trusts a managed
+;; never consulted: the web UI's `on-tx` fan-out trusts a managed
 ;; origin to push the tx to EVERY watching agent's pane, and the
 ;; managed-row machinery (`seon.state/reconcile!`, boot-index GC) trusts
 ;; it to classify rows as core — a caller-claimed origin would let an

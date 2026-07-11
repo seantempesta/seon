@@ -21,7 +21,7 @@
    re-syncs from env.
 
    `SEON_BRAND_CSS=<abs path>` is the stylesheet hook: [[css-text]]
-   reads the file fresh per render and the inspector inlines it AFTER
+   reads the file fresh per render and the web UI inlines it AFTER
    output.css so token overrides (--color-base-*, --color-amber-*,
    fonts) win. Missing/unreadable file = loud log line, page still
    renders (degrade, don't break)."
@@ -170,7 +170,7 @@
   "The brand stylesheet as a raw `<style>…</style>` HTML string.
 
    Returns \"\" when SEON_BRAND_CSS is unset/unreadable. The
-   raw-string sibling of the inspector's hiccup `brand-css-style` — both
+   raw-string sibling of the web UI's hiccup `brand-css-style` — both
    delegate to [[css-text]] — for surfaces (the datastar world shim) that
    build their <head> as a string rather than hiccup. Inlined AFTER
    output.css so its token overrides (--color-base-*, --color-amber-*,
@@ -212,7 +212,7 @@
 (defn ^:async sync!
   "Sync the brand row on the ambient conn to the SEON_BRAND_* env vars.
 
-   See ns doc: env OWNS the row across boots. Called from the inspector's
+   See ns doc: env OWNS the row across boots. Called from the web UI's
    `install!` at boot; idempotent — a second call with the same env
    transacts nothing. Failures log LOUDLY and resolve `{::synced? false}`
    — branding must never take the boot down."

@@ -4,9 +4,9 @@ status: active
 tags: [component, web]
 ---
 
-# Web Inspector (CLJS pod web lane)
+# Web UI (CLJS pod web lane)
 
-> The pod's own browser UI: `seon.web.serve` (`src/seon/web/serve.cljs`) hosts a loopback HTTP+SSE server (default port 7890, `SEON_PORT`/`SEON_PORT_FILE` overrides) and `seon.web.inspector` (`src/seon/web/inspector.cljs`) renders every page. Distinct from the JVM [[components/web-layer]] — this lane is Node-side, has no `.clj` sibling, and is what the demo browser actually talks to.
+> The pod's own browser UI: `seon.web.serve` (`src/seon/web/serve.cljs`) hosts a loopback HTTP+SSE server (default port 7890, `SEON_PORT`/`SEON_PORT_FILE` overrides); `seon.web.router` owns the route vector, and `seon.web.datastar` + `seon.web.debug` render the pages. Distinct from the JVM [[components/web-layer]] — this lane is Node-side, has no `.clj` sibling, and is what the demo browser actually talks to.
 
 ## The four page shells
 
@@ -14,14 +14,14 @@ tags: [component, web]
 |-------|----------|------------|
 | `/agents` | `agents-index-page` → `agents-dash-fragment` | Mission control: brand h1 + tagline, live stat strip (agents/turns/fns/findings/datoms via `cluster-stats`), active-agent tile grid (each tile = the agent's own `render-agent-tile` surface in a fixed `h-44` card with a stretched overlay link), the cross-agent knowledge section, collapsed completed-agents history, and the `+ new agent` button (optional purpose input → `POST /agents/new`) |
 | `/agent/<id>` | `consumer-shell` | The CONSUMER view (live-tiles PRD §1 Surface 2): chat bubbles + input left (`seon.render.chat/bubble-stream`), the SAME live tile expanded right (container-query breakpoint 480px selects the expanded blocks). Carries the debug overlay |
-| `/agent/<id>/debug` | `inspector-shell` | The two-pane DEBUG inspector: left = `:seon.render/ai` per context section as collapsible `<details>` (only `:transcript`/`:prompt`/`:context` open by default), right = per-entity rendered cards with turn separators, eval-time sparkline header, thinking pulse, shared chat bar |
+| `/agent/<id>/debug` | `debug-shell` | The two-pane DEBUG view: left = `:seon.render/ai` per context section as collapsible `<details>` (only `:transcript`/`:prompt`/`:context` open by default), right = per-entity rendered cards with turn separators, eval-time sparkline header, thinking pulse, shared chat bar |
 | (404) | `agent-not-found-page` | Stale-tab landing for ids from a prior store — the `agent-exists?` guard 404s pages AND refuses SSE registration for dead ids |
 
-Routing: `seon.web.serve/handler` owns `/`, static `/css/` + `/js/`, `/sse`, and the POSTs (`/chat`, `/agents/new`, `/clear`, `/log`), and delegates to `inspector/route?` + `inspector/handle!` for the `/agents` + `/agent/<id>` family. `start!` is idempotent (a second boot reuses the listening server) and wraps the handler late-binding so hot-reloaded routes take effect without a pod restart.
+Routing: `seon.web.serve` hosts the HTTP front door and injects its handlers into `seon.web.router`, which owns the route vector (the dashboard `/`, static `/css/` + `/js/`, `/sse`, the POSTs `/chat`, `/agents/new`, `/clear`, `/log`, and the `/agents` roster + `/agent/<id>` family). `start!` is idempotent (a second boot reuses the listening server) and wraps the handler late-binding so hot-reloaded routes take effect without a pod restart.
 
 ## SSE morphing
 
-- ONE `db/listen!` tx-listener (`install!`, key `::inspector`) serves every view. Fan-out scope per commit: core tx (no `:seon.db/agent-id` stamp) and `:substrate-seed`-origin tx go to ALL watching agents; agent-stamped tx only to that agent; the `::index` pseudo-agent (the `/agents` dashboard) watches every commit.
+- ONE `db/listen!` tx-listener (`seon.web.debug/install!`, key `::debug`) serves every view. Fan-out scope per commit: core tx (no `:seon.db/agent-id` stamp) and `:substrate-seed`-origin tx go to ALL watching agents; agent-stamped tx only to that agent; the `::index` pseudo-agent (the `/agents` dashboard) watches every commit.
 - Pushes coalesce on a 100ms trailing timer per agent-id (`schedule-push!`) — a burst of tx within one turn produces one render.
 - Per-agent registry `!sse-by-agent`; each connection is tagged `:view` (`:consumer` | `:debug`) and `push-agent!` writes its view's fragment set — `consumer-snapshot` is deliberately cheaper than the debug `snapshot` (no `ctx-preview`).
 - Payloads are hand-built `datastar-patch-elements` events (`patch-fragment` — inlined to keep the require graph acyclic); idiomorph morphs by stable fragment ids (header + both panes per view, `#agents-dash` for the index).
@@ -41,7 +41,7 @@ All four shells read `brand/info` from [[components/web-brand]] for `<title>` (`
 
 ## The debug overlay
 
-On the consumer view, the debug inspector opens as a full-viewport OVERLAY with no URL change (live-tiles PRD §1 Surface 3 / U6): an iframe lazily pointed at `/agent/<id>/debug` — the real debug page with its own SSE stream inside, zero duplication. Open via the `⚙ debug` header button (document-delegated click, morph-proof) or backtick (focus-guarded — never fires while an input/textarea/contentEditable has focus); close via Esc or the button. Closing resets the iframe to `about:blank` so its SSE stream tears down.
+On the consumer view, the debug view opens as a full-viewport OVERLAY with no URL change (live-tiles PRD §1 Surface 3 / U6): an iframe lazily pointed at `/agent/<id>/debug` — the real debug page with its own SSE stream inside, zero duplication. Open via the `⚙ debug` header button (document-delegated click, morph-proof) or backtick (focus-guarded — never fires while an input/textarea/contentEditable has focus); close via Esc or the button. Closing resets the iframe to `about:blank` so its SSE stream tears down.
 
 ## Other rendering details
 
@@ -52,4 +52,4 @@ On the consumer view, the debug inspector opens as a full-viewport OVERLAY with 
 ## Dependencies
 
 - Uses: `seon.db` (query/entity/listen!/`*conn*`), `seon.agent` (`message!` from `/chat`), `seon.agent.findings`, `seon.agent.inspect` (`ctx-preview`, `handlers`), `seon.agent-view`, `seon.render` + `seon.render.chat` + `seon.render.default`, `seon.web.brand`, `seon.ui.html`/`seon.ui.components`, `seon.platform` (artifact paths), Node `http`/`fs`/`path`.
-- Used by: `seon.client` injects its `start-agent!` closure via `serve/set-create-agent-fn!` (the `/agents/new` boot path — no parallel creation mechanism) and calls `serve/start!` + `inspector/install!` at pod boot.
+- Used by: `seon.client` injects its `start-agent!` closure via `serve/set-create-agent-fn!` (the `/agents/new` boot path — no parallel creation mechanism) and calls `serve/start!` + `seon.web.debug/install!` at pod boot.

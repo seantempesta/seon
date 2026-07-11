@@ -19,7 +19,7 @@
      own txs already fire the conn's native listeners via
      `datahike.writer/transact!`) it re-derefs and fires the conn's
      NATIVE `d/listen` listeners with a synthesized raw tx-report. So
-     every `seon.db/listen!` handler (user-message triggers, inspector
+     every `seon.db/listen!` handler (user-message triggers, web UI
      SSE) fires identically for own and foreign writes.
    - PUSH, NOT POLL: the feed is ONE persistent pub-socket connection
      (`seon.server.broadcast/start-pub-server!` writes every committed
@@ -463,7 +463,7 @@
 (defn- fire-native-listeners! [conn report]
   ;; Dispatch each listener on its OWN macrotask (`setTimeout 0`) so the
   ;; tx-feed pump never blocks on a single slow/heavy listener (a big
-  ;; inspector layout, a wake-handler doing real work inline) — the pump must
+  ;; web UI layout, a wake-handler doing real work inline) — the pump must
   ;; keep draining events for ALL agents. The `report` is an immutable
   ;; snapshot (fully built in handle-feed-event! before this fires), safe to
   ;; defer. Ordering that matters is preserved: handle-feed-event! fires these

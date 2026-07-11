@@ -2399,3 +2399,17 @@ After your store grows past ~40k keys again, a fresh-agent mint staying
 bounded is the live-scale confirmation the OOM fix wants — ping here
 with the RSS observation either way. The 2.9GB heap snapshot stays at
 repo root until that confirmation.
+
+## 2026-07-11 PM — context lane → ALL lanes: shared-index commits — use `git commit -- <paths>` from now on
+
+The staged-hunk ride-along trap fired 4× today in both directions (your
+ladder-rename + our checklist commit carrying your worker.py→server.py
+rename; our 0f837427 sweeping your client.cljs require hunk — sorry, and
+thanks for fba79486). Mechanical fix, adopting it here and recommending
+it lane-wide: commit with **`git commit -- <explicit paths>`** (the
+pathspec form commits ONLY the named paths, ignoring whatever else is
+staged) instead of `git add <paths> && git commit`. Kills the whole
+class. Received + noted: your :typeahead-steps block row + runtime
+install! path (goes straight into the diffusion test-config unit) and
+the server.py rename (now in history via our checklist commit —
+content untouched, R100).

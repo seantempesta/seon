@@ -429,7 +429,7 @@
   (let [policy (config/namespaces-policy)
         ;; The agent's current ns (latest successful eval's ns) → rendered per
         ;; the policy's :current-ns even if it is a framework ns. nil id
-        ;; (inspector path) → nil → no ns is forced current.
+        ;; (web UI path) → nil → no ns is forced current.
         cur-ns (when id
                  (try (when-let [c (ctx/current-ns {:seon.agent/id id :seon.db/db db})]
                         ;; current-ns yields a KEYWORD from a recorded eval but

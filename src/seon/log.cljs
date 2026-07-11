@@ -120,7 +120,7 @@
 ;; `(log/trace :datahike/index-access …)` (persistent_set.cljc:343)
 ;; floods stdout on every uncached store read — observed live
 ;; 2026-06-09: logs/pod.log hit 813 MB / 39 M lines during one
-;; inspector render against the cold file store. Gate trace/debug from
+;; web UI render against the cold file store. Gate trace/debug from
 ;; the replikativ stack to noop; info/warn/error still pass. Seon's own
 ;; logging does NOT route through trove (it uses [[console!]] below),
 ;; so this gate affects library logs only.
