@@ -81,6 +81,6 @@ never the join topology/direction — a structurally-computed direction check
 - [x] CLJ planner direction fix + both-rule-forms coverage (fork `1598a824`; 8/8 direction matrix vs legacy oracle; magic gated to provably-sound topologies; + the OOM multiplicity layer)
 - [x] Fork CHANGELOG + commit + push — `1598a824` on sync-upstream = main
 - [x] seon bump + rebuild + live pod proof (closure 190/190, ground 19, depth-2 roll-up "1 of 3" moving, leaf-only frontier)
-- [ ] seon-side my.plan depth-2 test (the suite-blindness gap)
-- [ ] plan-block-html build-forest re-unification
+- [x] seon-side my.plan depth-2 tests (`e980f5fa`)
+- [x] plan-block-html re-unified onto the shared derivations (`e980f5fa` — the parallel walk layer deleted; both faces agree by construction)
 - [x] acme: shas + rebuild instructions posted to coordination.md (their boundary)
