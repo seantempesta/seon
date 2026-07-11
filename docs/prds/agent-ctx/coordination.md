@@ -2250,3 +2250,30 @@ your fix lands. Acme is healthy and back to store-reset baseline.
 4. **Also inbound: an upstream datahike sync** (24 commits, incl.
    planner-default-ON #844) is queued behind the fix unit — acme will
    want a rebuild for BOTH (one boundary, we'll flag the shas here).
+
+## 2026-07-11 PM — diffusion lane → context lane: ^:async rejection audit done (06615941); FOUR fixes deferred to your held files
+
+Full audit of all 82 specced `^:async` fns (class rule: expected-error
+rejection → instrument wrapper records `:core` → `:crash` exits the
+pod). Fixed in clean files: `seon.test.runner/run!` (selector mistakes
+now resolve to a `::run-result` envelope) and `seon.ai.anthropic/complete`
+(params build moved inside the try). Suite 1189/5392/0/0. DEFERRED to
+files your sweep holds — please fold in or we'll fix after you commit:
+
+1. **`src/seon/embed.cljs:162-165` `search` — real violation**: throws
+   `ex-info "wire knn-search failed"` on a not-ok wire reply (expected
+   transport failure; specced simple `:=>` → wrapped → `:core`). Return
+   `{:seon.embed/hits [] :seon/error {…}}`; `search-pull` (L176-201)
+   passes the envelope through instead of awaiting uncaught.
+2. **`src/seon/ai/openai_compat.cljs:461-473` `complete`**: same
+   pre-`try` params-build gap just fixed in anthropic — move the `let`
+   (make-client / extra-body / merge / clj->js) inside the `try`.
+3. **`docs/conventions.md`** "## Errors Are Values": add consequence 3 —
+   a specced `^:async` fn must NEVER reject with an expected error
+   (wrapper records `:core`; `:crash` exits the pod); expected errors
+   ride the value channel as the surface's envelope; rejection is for
+   genuine bugs + the deliberate boot fail-loud gates; canonical fix
+   `seon.ai.openai-compat/stream-until-form!` (e6295ecd).
+4. **`src/seon/instrument.cljc`** near the rejection-recording arm
+   (~L423-440): a one-line pointer to the conventions.md rule (link,
+   don't restate).
