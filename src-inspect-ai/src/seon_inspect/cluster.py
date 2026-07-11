@@ -380,6 +380,35 @@ def destroy_cluster(name: str, *,
     _run_seon(["cluster", "destroy", _check_name(name)], runner, timeout_s=120)
 
 
+class StubLLMBooted(RuntimeError):
+    """The cluster's pod booted on the STUB LLM (a provider with no key).
+
+    The 2026-07-10 spark trap: a configured provider whose key env is unset
+    boots a stub that returns canned text, so a drive "runs" and SCORES
+    GARBAGE. `seon.client` emits `SEON-STUB-LLM` at boot for exactly this
+    case; `assert_llm_live` refuses to drive such a cluster (raised, never a
+    silent score — the same fail-loud rule as the oracle-liveness gate)."""
+
+
+_POD_LOG = lambda name: REPO_ROOT / "logs" / f"pod-{name}.log"  # noqa: E731
+_STUB_MARKER = "SEON-STUB-LLM"
+
+
+def assert_llm_live(name: str) -> None:
+    """Refuse to drive cluster `name` if its pod booted on the STUB LLM.
+
+    Ported from `min-drive.sh`'s boot guard: scan `logs/pod-<name>.log` for
+    the `SEON-STUB-LLM` marker `seon.client` prints when a configured provider
+    has no key. A missing log is treated as live (the marker is opt-in and
+    absent on a healthy boot); a present marker raises `StubLLMBooted`."""
+    log = _POD_LOG(_check_name(name))
+    if log.is_file() and _STUB_MARKER in log.read_text(errors="replace"):
+        raise StubLLMBooted(
+            f"cluster {name}: pod booted on the STUB LLM (saw {_STUB_MARKER} "
+            f"in {log.relative_to(REPO_ROOT)}) — export the provider key and "
+            "recreate the cluster; a keyless drive scores garbage")
+
+
 @contextlib.contextmanager
 def ephemeral_cluster(name: str | None = None, *,
                       frozen: bool | None = None,

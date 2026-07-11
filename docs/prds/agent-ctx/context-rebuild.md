@@ -271,11 +271,44 @@ own known defects. Ordered; each is an opus unit against a written spec.
    reset/migration required), and the diffusion `canvas-text` rename (D1).
    Owner decisions D1–D4 RULED 2026-07-11 (recorded in the vocabulary
    audit §OWNER DECISIONS).
-2. **Harness consolidation** (task #4): port the milestone harness into
-   src-inspect-ai (contracts→datasets, oracles+fab-analyze→scorers, model
-   column), retire tmp/*-drive.sh + the tmp/t4-* fixtures into proper
-   homes, FIX the broken bundle sha fence (hashes the loader only — use
-   main.js.sha256/build-dir hash, the bench harness precedent).
+2. **Harness consolidation** (task #4) — **DONE 2026-07-11.** The milestone
+   drives are now first-class bench assets, not a tmp shell lineage:
+   - `namespaces` + `db` milestone oracles ported from the transcript
+     scanners (`tools/ns-move-oracle.py` / `db-memory-oracle.py`) to PURE
+     functions over STRUCTURED eval rows in `seon_inspect.milestone`
+     (`check_ns_movement` / `check_store_recall`), reading the same
+     `{source, ok}` rows `planning.fetch_eval_rows` already returns over the
+     wire REPL. Contracts (`NS_MOVEMENT_CONTRACT` / `DB_MEMORY_CONTRACT`)
+     become the `tasks/milestone_lift.py` dataset (fixed-dataset, like
+     `ladder_lift`; run-canary stripped so the canary guard stays clean).
+   - `fab-analyze.py` + `fab-summary.py` → `count_fabrication` /
+     `fabrication_summary` + the `fabrication_metric` @scorer — REPORT-ONLY
+     (rides beside `milestone_scorer`, never gates; scorers-gate-correctness).
+   - Model column: already RUNTIME-DERIVED from the pod's `model_config`
+     (`scorecard.model_provenance_from_run` → `model` = provider) — deepseek
+     vs spark distinguishes with no arm plumbing.
+   - `repl` milestone (poker/two-bucket, the shell+fs code-fix orchestration)
+     maps onto the EXISTING `shell_use`/`file_edit` tool rows; the
+     pytest-over-python-workspace harness was exactly the tmp lineage to
+     retire, NOT re-create. `plan` was already first-class (`planning.py`).
+   - STUB-LLM boot guard ported into `cluster.assert_llm_live` (extends the
+     lifecycle module, not a fork); `SEON_CONFIG`-riding-restart already
+     lived in `restart_pod`/`pod_*_driver`.
+   - **Sha fence FIXED by retirement:** the loader-only `shasum … main.js`
+     fences died with `tmp/gram-drive.sh` + `tmp/t4-masters/drive.sh`. The
+     surviving active fence is the composite `write_bench_sha` (loader + every
+     `cljs-runtime` chunk → `main.js.sha256`), which the bench reads via
+     `cluster.bundle_identity`; grep confirms no loader-only fence remains in
+     `bin/`/`src-inspect-ai/`.
+   - Retired: `tmp/gram-*`, `tmp/t4-*` (untracked scratch; the Serper key was
+     confirmed preserved in `.env` before removing `tmp/t4-serper.env`). The
+     `evals/runs/2026-07-10-minimal-buildup/` evidence (incl. the original
+     `tools/*` + `contracts/*`) is HISTORY — untouched.
+   - Proof (no LLM spend): 15 new offline discrimination tests
+     (`tests/test_milestone.py`), `offline_proof` shows milestone good=1.000 /
+     bad=0.000 with the fab metric riding along, `freeze` verify no-op, canary
+     guard green. Full suite 290 passed / 8 skipped / 1 pre-existing fail (the
+     typeahead_replay P6 regression alarm — typeahead lane's open work).
 3. **Post-cutover deletions** (after a few days' stability): the shipped
    `ctx/system-text` def (still the silent fallback when the datom is
    absent — a live poison vector; make absence LOUD instead), the in-code
