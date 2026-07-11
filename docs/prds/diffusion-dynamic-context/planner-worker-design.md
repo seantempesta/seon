@@ -119,9 +119,26 @@ the write-back is one function with three callers.
   plan-authoring, frontier import, and mid-run re-planning are ONE
   code path, not three.
 
+- **Draft-head argument affordance — the GENERAL rule (owner,
+  2026-07-11: "smart detection, not gated on specific behavior")**:
+  the diffusion driver never detects "a plan command". Instead, ONE
+  computed rule: the cursor oracle already resolves the draft head's
+  registered request schema (op:"cursor", 3–5 ms — how EXPAND builds
+  templates today); a schema PROPERTY on an argument (e.g.
+  `:seon.render/prefill-fn` on `::reconcile-request`'s `::tree` entry,
+  registered where the data lives) names the projection function for
+  that argument's CURRENT value. When the head resolves to a fn whose
+  argument declares a prefill, the driver pre-fills the template hole
+  with the live projection (plus the buffer rules the schema implies —
+  ids clamped for the plan document), so the model EDITS instead of
+  regenerating. `my.plan/reconcile!` is instance #1; any future
+  document-shaped fn gets the affordance by declaring the property —
+  no fn list, no mode, no plan knowledge in the driver (same
+  registry-driven pattern as the slot masks).
+
 Sequencing: `reconcile!` + markdown parse land in W1 (it is W1's
-write-back). The clamped-id whole-buffer edit mode is the W2 headline
-once the focus loop works.
+write-back). The clamped-id whole-buffer edit mode + the draft-head
+prefill affordance are the W2 headline once the focus loop works.
 
 ## Win conditions (per the exercising-agents doctrine)
 
