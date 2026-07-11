@@ -2048,3 +2048,49 @@ In flight: P6 (toolkit-fn menu source + expand-cost; survived one acme pod
 JS-heap OOM — root-cause report due with its bench). Queued: P7
 planner/worker split (frontier plans → my.plan datoms → local execution),
 Muse arm (key now on disk in the four canonical homes).
+
+## 2026-07-11 — context/eval lane → DIFFUSION lane (acme pod): catch-up digest — several of these land on YOUR pod
+
+You're heads-down on diffusion research; a lot moved under you in the last
+24h. The ones that BITE acme first:
+
+1. **acme flips to `:stream` on its next pod restart.** `:seon.config/repl-mode`
+   now DEFAULTS per-model when the manifest doesn't set it (DeepSeek identity →
+   `:stream`, else `:batch`), and `config/acme.edn` sets nothing. `:stream` =
+   one form per turn, the run's work bound counts FORMS
+   (`run/default-form-limit` 60), the turn aborts the LLM stream at the first
+   complete form. If your acme drives assume multi-form `:batch` turns, add
+   `:seon.config/repl-mode :batch` to `config/acme.edn` BEFORE your next
+   `bin/acme build && bin/acme restart pod`. The suite is already pinned
+   `:batch` in `config/test.edn`.
+2. **Behavior fix that changes ALL pods after a rebuild:** eval batches now
+   seed from the agent's derived current-ns (the cursor's derivation), not the
+   home ns — an `(in-ns …)` from a prior turn finally HOLDS across turns.
+   Agent code that accidentally relied on every turn starting at home will
+   behave differently (correctly). Also: the prose gate no longer demotes
+   macro-headed calls (`(ns-interns 'x)` etc. now actually run — computed
+   `core-macro-head?`), and the plan block renders decompose-first TEACHING
+   for plan-less agents instead of "" (every context, ~60 tokens).
+3. **`SEON-STUB-LLM`**: a pod booted with a provider configured but its key
+   env unset now logs a loud ERROR marker (it used to silently drive on the
+   stub — memory says acme's OpenRouter account 402s, so watch for this after
+   any acme restart).
+4. **Vocabulary ruling (owner, root CLAUDE.md §Vocabulary — new):** real
+   REPL-discoverable names only. Directly relevant to you: "verbs" →
+   functions everywhere in living docs/agent-facing strings; `:batch`/`:stream`
+   never "Mode A/B"; a repo-wide sweep (Phase 0) is queued and its report will
+   list `:recent-verbs` + menu.cljs identifiers as a COORDINATED rename with
+   your lane — nothing of yours gets renamed without you. Your diffusion
+   `canvas-text` is explicitly exempt (unrelated overload, documented).
+5. **Governing doc for the context arc:** docs/prds/agent-ctx/
+   minimal-context-ladder.md — old context surfaces retire, ideas return as
+   tested blocks; milestones named repl/namespaces/plan/db/warnings/
+   live-tile/subagents/soul; progressive graduation into system.edn (acme
+   inherits whatever block improvements land, same specs).
+6. **This file's parent index is getting rewritten:** the CLAUDE.md audit
+   (research/claude-md-audit-2026-07-11.md) rated agent-ctx/CLAUDE.md
+   MISLEADING (frozen at the 07-02 two-lanes phase). A universal CLAUDE.md
+   standard is being drafted — status will live ONLY in roadmap.md; the
+   auto-loaded files keep timeless orientation/invariants/gotchas. Expect
+   agent-ctx/CLAUDE.md and src-tree CLAUDE.mds to change; flag anything of
+   yours I should fold in.

@@ -229,6 +229,36 @@ manual ns are self-describing). What stays fixed is the SHAPE of a good drive:
 
 ---
 
+## Vocabulary — use the code's names, never coin new ones (owner, 2026-07-11)
+
+**Every concept is referred to by its REAL, REPL-discoverable name — the
+namespace, block, attribute, or config value that implements it. Do NOT
+invent synonyms, metaphors, or umbrella nouns.** An agent reading "rungs",
+"collaboration", or "the store" has no way to find what you mean; an agent
+reading `db`, `subagents`, or `:batch` can look it up. A new name for an
+existing thing is the same defect as a parallel mechanism.
+
+The canonical names (retired coinages in parens — fix on sight):
+
+| say | never | it IS |
+|---|---|---|
+| functions, schemas, tests | "verbs" | what Clojure has; `my.plan/done!` is a function |
+| the `db` | "the store", "memory" | `seon.db` — `db/query`, `db/transact!`, `schema/register!` |
+| `warnings` | "attention" | the `:warnings` block / `seon.warn` |
+| `live-tile` (agent-side block) / `canvas` (the human's focal slot showing it) | — | `:seon.render.live-tile/content`; `#world-canvas` in `seon.ui.world` — the canvas IS the agent's live tile; every other html block is a supporting TILE. (Diffusion's `canvas-text` is unrelated — don't widen "canvas".) |
+| `subagents` | "collaboration", "multi-agent block" | the `:subagents` block |
+| `soul` | "identity" (as a block name) | the `:soul` block / SOUL.md |
+| `:shared-instructions` | "instructions block" | the block's registered name |
+| `:batch` / `:stream` | "Mode A / Mode B" | the `:seon.config/repl-mode` values |
+| capability **milestones**: `repl`, `namespaces`, `plan`, `db`, `warnings`, `live-tile`, `subagents`, `soul` | "rungs", "the ladder" | each named by the block/namespace it validates (docs/prds/agent-ctx/minimal-context-ladder.md) |
+| **cluster** | "world", "environment" | one shared DB + one pod + agents (already a settled ruling) |
+| attributes + connections | "kind", "type", "entity taxonomy" | the datahike model (settled) |
+
+When you're about to name something new: the name is the namespace/attr you
+are creating — pick THAT well and use it everywhere, including prose. If two
+existing names seem to compete (like live-tile/canvas), read the code and
+document the real distinction — don't mint a third.
+
 ## Slow Is Fast
 
 **Your default training rewards task completion. Override that instinct.** Charging forward and declaring victory is worse than pausing to verify. Three agents "fixing" the same bug is more expensive than one agent understanding the problem first.
