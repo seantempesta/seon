@@ -58,6 +58,11 @@ grammar; bare `⟹` is real).
 - **Bench discipline**: fresh-worker sha-verify first; k=3 seeds
   100–102; zero-scores → suspect the harness before the model (fired 3×
   this arc); one full measurement per unit, not per edit.
+- **Until the datahike planner fix lands** (see Landmines): run long /
+  multi-turn drives on a fresh-ish store — `bin/acme` cluster reset
+  before any drive expected to grow the store past a few-thousand keys.
+  The OOM needs a grown store; fresh stores render the same queries
+  harmlessly. Temporary, remove when the datahike lane ships.
 
 ## Load-bearing findings (timeless — earned the hard way)
 
