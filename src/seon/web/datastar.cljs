@@ -379,15 +379,10 @@
    `safe-id?`, so it is injection-safe inside the single-quoted `@post('…')`."
   [id]
   (html/->string
-    (list
-      ;; Spacer — reserves scroll room equal to the fixed bar's height so the
-      ;; bar never hides the agent's last tile. Inline style (no Tailwind
-      ;; height class is in the safelisted/built vocabulary).
-      [:div {:style "height:3.25rem"}]
-      [:form {:id                     "app-chat"
+    [:form {:id                     "app-chat"
               (keyword "data-on:submit") (str "@post('/chat?agent=" id
                                               "', {contentType:'form'}); $text=''")
-              :class "fixed bottom-0 left-0 right-0 z-10 flex items-center gap-2 border-t border-base-800 bg-base-900 px-3 py-2"}
+              :class "shrink-0 flex items-center gap-2 border-t border-base-800 bg-base-900 px-3 py-2"}
        [:input {:type         "text"
                 :name         "text"
                 :data-bind    "text"
@@ -398,68 +393,23 @@
                 :class "flex-1 bg-base-950 border border-base-800 rounded px-2 py-1 text-text-100 text-xs font-mono"}]
        [:button {:type  "submit"
                  :class "bg-base-800 hover:bg-base-700 text-signal border border-base-700 px-3 py-1 rounded text-xs font-mono"}
-        "send"]])))
+        "send"]]))
 
-(defn- time-travel-bar-html
-  "#18 — historical time-travel on the view feed for `/agent/{id}`, as a raw
-   HTML string. The live feed is `view = f(db)`; time-travel is the SAME feed
-   rendered against `db-as-of-t` — a PAST snapshot that is naturally FROZEN
-   (re-rendering `db-as-of-t` on a later tx yields identical bytes).
+(defn- agent-feed-opener-html
+  "The hidden live-feed owner for an agent page, outside the morph target.
 
-   A FIXED bar (a SIBLING of `#app-view`, OUTSIDE the morph so a whole-`#app-view`
-   morph never clobbers the slider position/focus) OWNS the agent feed via ONE
-   `data-effect` `@get`: datastar re-runs the effect when its referenced
-   signals change AND auto-cancels the prior `@get` issued from the SAME
-   attribute, so exactly ONE gzip stream targets `#app-view` at any time. (This is
-   why the /agent shim omits `data-init` on `#app-view` — the effect is the SOLE
-   opener; a data-init would be a second, competing stream that clobbers the
-   frozen snapshot on the next live tx.)
-
-   Signals: `$live` (true ⇒ the current auto-morphing feed, UNCHANGED), `$t`
-   (the slider's live scrub position, for the readout), `$ct` (the COMMITTED
-   tx-id the feed actually opens at — set on slider release so a drag doesn't
-   open a stream per intermediate tick). Live ⇒ `@get('…/feed')`; scrubbing
-   commits `$ct` + flips `$live` false ⇒ `@get('…/feed?t='+$ct)`. The domain is
-   `[origin-t .. basis-t]` (datahike tx-ids; scrub to the floor = the empty
-   pre-seed view); 'now / live' resets the slider to the basis + re-opens the
-   live feed. `id` is `safe-id?`-validated, injection-safe in `@get('…')`.
-
-   MINIMAL by intent — a raw tx-id slider + a live/as-of readout. The owner
-   refines the timeline UX (human-readable timestamps, tick marks, a diff)."
-  [id basis floor]
+   Time-travel remains a server capability through `?t=`, but its unfinished
+   controls are intentionally absent from the normal agent view."
+  [id]
   (let [feed (str "/agent/" id "/feed")
         opts "{retryMaxCount: Infinity, openWhenHidden: false}"]
+    ;; Keep the sole live-feed owner outside #app-view so morphs cannot remove
+    ;; it. The unfinished time-travel controls are intentionally hidden from
+    ;; the normal agent view; debug can expose that capability deliberately.
     (html/->string
-      (list
-        ;; Spacer — reserves scroll room above the chat bar (which sits at
-        ;; bottom:0 and reserves its own 3.25rem) so neither fixed bar hides a
-        ;; tile. Inline height (no Tailwind height class is in the built vocab).
-        [:div {:style "height:3.25rem"}]
-        [:div {:id "app-time"
-               ;; The SOLE feed opener. Re-runs on $live/$ct change; each @get
-               ;; auto-cancels the prior from THIS attribute → one stream.
-               :data-effect (str "$live ? @get('" feed "', " opts ")"
-                                 " : @get('" feed "?t=' + $ct, " opts ")")
-               :data-signals (str "{t: " basis ", ct: " basis ", live: true}")
-               ;; bottom:3.25rem (inline) stacks this bar above the chat bar;
-               ;; fixed/left-0/right-0/z-10 are in the built vocabulary.
-               :style "bottom:3.25rem"
-               :class "fixed left-0 right-0 z-10 flex items-center gap-2 border-t border-base-800 bg-base-900 px-3 py-2"}
-         [:span {:data-text  "$live ? '● live' : '⏸ as-of t=' + $ct"
-                 :data-class "{'text-signal': $live, 'text-warning': !$live}"
-                 :class      "text-xs font-mono shrink-0 w-32"}]
-         [:input {:type      "range"
-                  :min       floor
-                  :max       basis
-                  :data-bind "t"
-                  ;; Commit on release (not on every input tick): set the as-of
-                  ;; value + leave live mode. The effect re-opens at $ct.
-                  (keyword "data-on:change") "$ct = $t; $live = false"
-                  :class     "flex-1"}]
-         [:button {:type  "button"
-                   (keyword "data-on:click") (str "$live = true; $t = " basis "; $ct = " basis)
-                   :class "bg-base-800 hover:bg-base-700 text-signal border border-base-700 px-3 py-1 rounded text-xs font-mono shrink-0"}
-          "now / live"]]))))
+      [:div {:id "app-agent-feed"
+             :style "display:none"
+             :data-init (str "@get('" feed "', " opts ")")}])))
 
 (defn- new-agent-bar-html
   "The `/agents` roster's new-agent affordance, as a raw HTML string.
@@ -577,18 +527,14 @@
   "The per-agent (/agent/{id}) view shim page (brand-aware head — see
    [[shim-html]]). `id` is pre-validated by `safe-id?`.
 
-   Omits `data-init` on `#app-view` (passes `nil` feed-url): the time-travel bar
-   owns the feed via its single `data-effect` (see [[time-travel-bar-html]]) so
-   it can re-open at a past `t`. The slider's `[floor .. basis]` domain is read
-   from the live db here (guarded — a missing conn degenerates to the origin,
-   the page still serves + the effect still opens the live feed)."
+   The hidden [[agent-feed-opener-html]] owns the live stream outside the morph
+   target; chat is a normal-flow bottom dock."
   [id]
-  (let [basis (try (db/basis-t @db/*conn*) (catch :default _ db/origin-t))]
-    (shim-html (str "agent " id)
-               "bg-base-950 text-text-200 font-mono p-3"
-               nil
-               (str (chat-form-html id)
-                    (time-travel-bar-html id basis db/origin-t)))))
+  (shim-html (str "agent " id)
+             "h-screen overflow-hidden flex flex-col bg-base-950 text-text-200 font-mono p-3"
+             nil
+             (str (chat-form-html id)
+                  (agent-feed-opener-html id))))
 
 (defn serve-agent-page!
   "Serve the per-agent view shim page (the seeded :seon.route/agent handler).

@@ -69,7 +69,7 @@
    ;; preview; interaction belongs to the selected primary render.
    [:div {:class "overflow-hidden"
           :aria-hidden "true"
-          :style "max-height:7rem;pointer-events:none"}
+          :style "max-height:20rem;pointer-events:none"}
     hiccup]])
 
 (defn- agent-attr-touch
@@ -151,7 +151,7 @@
           latest-selection (:selection latest)
           latest-touch (:touch latest)]
       [:main {:id "app-view"
-              :class "flex flex-col gap-2 w-full min-h-screen"
+              :class "flex flex-col gap-2 w-full min-h-0 flex-1 overflow-hidden"
               :data-signals (str "{selected: '" latest-selection
                                  "', seenrevision: " latest-touch "}")
               :data-effect (str "if ($seenrevision !== " latest-touch ") { "
@@ -174,18 +174,16 @@
           "debug"]]
         (status-chip db agent-id)]
        [:div {:id "agent-view-layout"
-              ;; The fixed time-travel and chat bars occupy the bottom 6.5rem;
-              ;; headers and page chrome occupy the top. Keep the main stage
-              ;; between them and scroll its surfaces internally.
-              :style "height:calc(100vh - 11.5rem)"
-              :class "grid grid-cols-3 gap-2 min-h-0"}
-        [:div {:id "agent-view-primary" :class "col-span-2 min-h-0"}
+              :class "grid grid-cols-3 gap-2 min-h-0 flex-1"}
+        [:div {:id "agent-view-primary"
+               :class "col-span-2 min-h-0 h-full overflow-hidden"}
          (doall
            (map (fn [{:keys [selection hiccup]}]
                   (primary-panel selection hiccup))
                 surfaces))]
         [:aside {:id "agent-view-context"
-                 :class "agent-view-rail col-span-1 flex flex-col gap-2 min-h-0 overflow-auto"}
+                 :class (str "agent-view-rail col-span-1 flex flex-col gap-2 "
+                             "min-h-0 h-full overflow-y-auto")}
          (doall
            (map (fn [{:keys [selection label hiccup]}]
                   (rail-button selection label hiccup))
