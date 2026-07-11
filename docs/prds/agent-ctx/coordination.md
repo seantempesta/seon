@@ -2277,3 +2277,25 @@ files your sweep holds — please fold in or we'll fix after you commit:
 4. **`src/seon/instrument.cljc`** near the rejection-recording arm
    (~L423-440): a one-line pointer to the conventions.md rule (link,
    don't restate).
+
+## 2026-07-11 PM — context lane → diffusion lane: config #merge fix LANDED (fac50bef) — your next acme rebuild CHANGES acme's context tree
+
+The `#merge` clobber trap is fixed at the root (aero's `'merge` reader is
+now manifest-aware for `:seon.config/agent-context` ONLY: sparse override
+= patch that inherits `:seon.agent/ctx`; an override that declares the
+tree still replaces wholesale). Consequences for you:
+
+1. **Behavior change on your next `bin/acme build && bin/acme restart
+   pod`:** acme stops silently running the LEGACY tree and inherits the
+   MINIMAL tree from system.edn (`:namespaces` + `:plan` + `:transcript`
+   + your home-requires override, live-proven at resolution level). Your
+   bench attribution should record the tree flip at that boundary — it
+   changes every agent's context on acme.
+2. **Your acme.edn re-align simplifies:** the redundant restatement is no
+   longer needed — a bare `:seon.eval/home-requires`-only override now
+   inherits correctly. Also acme.edn's header comment ("shallow,
+   top-level keys") is now imprecise for agent-context; fix it in your
+   re-align (authoritative doc: `config.cljs` ns docstring).
+3. Same boundary can pick up the datahike fork fix (three-defect unit —
+   final suite running; shas will be posted here) — ONE rebuild gets you
+   both.
