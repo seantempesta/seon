@@ -239,6 +239,15 @@ typeahead-owned):**
 
 ## OWNER DECISIONS (genuine ambiguities)
 
+**ALL FOUR RULED 2026-07-11 (owner, via the orchestrator) — each per the
+recommendation:** D1 = rename the diffusion buffer (coordinated with the
+typeahead lane — their surface, their timing); D2 = agent-facing prose always
+says "the db"; "store" reserved for the physical `data/clusters/*/store` /
+konserve / blob store; D3 = "root cluster only" / "a fresh cluster" in
+agent-facing docstrings; the `/world` page name stays exempt; D4 = the
+rename target is `repl-form` (`dispatch-repl-form!` / `repl-form-heads` /
+`record-form-result!`). The original questions kept below for the record.
+
 - **D1 — diffusion "canvas".** The diffusion subsystem calls the code buffer
   it diffuses a "canvas" (`canvas-text`, "is the canvas structurally
   well-formed?"). This collides with the UI `canvas` (the `#world-canvas`

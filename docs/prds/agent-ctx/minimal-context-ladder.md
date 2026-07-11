@@ -255,10 +255,11 @@ own known defects. Ordered; each is an opus unit against a written spec.
    `context-rebuild.md`), Mode A/B→`:batch`/`:stream`, DEPRECATED headers
    on legacy block render fns. Identifier renames listed for coordination
    (11 symbols + `:recent-verbs`, typeahead-lane-owned). Owner decisions
-   queued: D1 diffusion "canvas-text" homonym (recommend: exempt,
-   documented), D2 "store" for durable-store paths (legit) vs db-synonym
-   uses (fix), D3 "root world" idiom, D4 `dispatch-repl-verb!` →
-   `dispatch-repl-form!`.
+   D1–D4 RULED 2026-07-11 (recorded in the vocabulary audit §OWNER
+   DECISIONS): D1 rename the diffusion buffer (typeahead-lane-coordinated),
+   D2 agent prose says "the db" ("store" = physical store/konserve/blob
+   only), D3 "root cluster" replaces "root world" in prose, D4 the rename
+   target is `repl-form` (`dispatch-repl-form!` etc.).
 2. **Harness consolidation** (task #4): port the milestone harness into
    src-inspect-ai (contracts→datasets, oracles+fab-analyze→scorers, model
    column), retire tmp/*-drive.sh + the tmp/t4-* fixtures into proper
