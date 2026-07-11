@@ -88,7 +88,14 @@
         dead (volatile! [])]
     (doseq [{::keys [^OutputStream out] :as sub} snap]
       (try
-        (codec/write-frame! out event)
+        ;; Datahike may invoke listeners concurrently on writer threads.
+        ;; A frame is two writes (length + Transit payload); without a
+        ;; per-subscriber lock, concurrent broadcasts interleave those bytes
+        ;; and the Node subscriber reads a valid length followed by fragments
+        ;; of two payloads. That creates a reconnect/replay loop which pegs the
+        ;; pod CPU and repeatedly re-renders every open feed.
+        (locking out
+          (codec/write-frame! out event))
         (catch Throwable _
           (vswap! dead conj sub))))
     (when (seq @dead)
