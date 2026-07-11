@@ -3,7 +3,8 @@
 **Read before editing:** `docs/seon/architecture/agent-runtime.md` (loop/run/
 turn/FSM/bounds), `data-model.md` (every attr you'll touch), `observability.md`
 (what each turn must persist), `toolkit.md` (verb conventions). We-are-here:
-`docs/prds/agent-fsm/roadmap.md`. Skills: `datahike`, `clojurescript`,
+`docs/prds/agent-ctx/roadmap.md` (+ `minimal-context-ladder.md`, the
+context-rebuild plan of record). Skills: `datahike`, `clojurescript`,
 `data-oriented-clojure`.
 
 ## Systems at play
@@ -59,21 +60,19 @@ turn/FSM/bounds), `data-model.md` (every attr you'll touch), `observability.md`
   tx-meta; never add `created-by`/`created-at` domain attrs (datahike skill).
 - `^:async`/`await` only inside `^:async` fns (self-host asserts); returned
   Promises auto-await via `seon.eval/maybe-await-value`.
-
-## Known gaps (in flight — check roadmap before "fixing")
-
-- Turn capture LANDED (2026-07-02): `:seon.agent.turn/rendered-as-of` (the
-  PRE-turn frozen basis-t) + always-on prompt/reply blob refs +
-  `:seon.agent.turn/error`; replay via `seon.agent.inspect/turn`/`turn-diff`.
-  This is the ONE capture path — the gated `seon.debug` file tree is
-  deleted (C17); the gym driver reads prompts by blob hash. See
-  `observability.md`.
-- Embedding hits enter the prompt via a volatile stash (`seon.embed.stash`)
-  — being made a recorded turn input.
-- `shell.cljs` (run + py-run, `SEON_SHELL` default-deny), `my.blob`, and
-  `web.cljs` (`fetch`, `SEON_WEB` default-deny, undici + readability→markdown,
-  blob-stored, SSRF-gated) shipped 2026-07-02 — live-drive verification in
-  flight. Design: `docs/prds/agent-fsm/research/web-fetch-design-2026-07-02.md`.
+- **Eval batches seed from the agent's DERIVED current-ns, never home.** The
+  turn threads the current-ns over the turn's frozen db
+  (`ctx/current-ns`, `run-turn!` → `ask-and-eval!` → `eval-batch!` in
+  `turn.cljs`), so an `(in-ns …)` from a PRIOR turn holds across the boundary
+  — home-seeding silently defined into `my.agent.*` and broke cross-ns
+  resolution.
+- **repl-mode `:batch`/`:stream` is a DB datom** (`ctx/repl-mode` off the
+  `:seon.config` singleton; manifest-absent default is per-MODEL,
+  `config/default-repl-mode`). `:stream` aborts the LLM stream at the first
+  complete top-level form and evals ONE form per turn, so the run's work
+  bound counts FORMS (`derive/run-form-count`, `run/default-form-limit` 60);
+  `:batch` evals the full parse but strips model-typed result claims at the
+  reply boundary (`ctx/strip-result-claims`) before persist + eval.
 
 ## Vendored grounding
 

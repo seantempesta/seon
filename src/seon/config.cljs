@@ -212,7 +212,10 @@
    {:seon.agent.ctx/name :test-failures :seon.agent.ctx/priority 43
     :seon.render/ai 'seon.agent.ctx.testrun/testrun-block}
    {:seon.agent.ctx/name :plan :seon.agent.ctx/priority 45
-    :seon.render/ai 'my.plan.internal/plan-block}
+    :seon.render/ai 'my.plan.internal/plan-block
+    ;; html twin — the human's live, explorable plan tile on /agent/{id}
+    ;; (owner directive 2026-07-11: follow the agent's plan live).
+    :seon.render/html 'my.plan.internal/plan-block-html}
    ;; Typeahead menu family (diffusion-typeahead P3a) — glyph-numbered,
    ;; strictly-optional offers, derived per render (both vanish on empty
    ;; queries, so a fresh agent pays zero). Volatile tail: eval-log/plan

@@ -32,6 +32,7 @@
   (:require
     [clojure.string :as str]
     [my.plan.internal :as plan-internal]
+    [seon.agent.ctx :as ctx]
     [seon.agent.ctx.namespaces :as ns-cards]
     [seon.db :as db]
     [seon.eval :as seval]
@@ -76,6 +77,10 @@
 ;; Glyph page size — max entries any menu section renders (further
 ;; bounded by (count glyphs)).
 (schema/register! :seon.typeahead/menu-cap :int)
+;; Max TOOLKIT-group entries in the verb menu (P6 — the second offer
+;; group; the recency group keeps menu-cap; the combined menu is bounded
+;; by the glyph vocabulary).
+(schema/register! :seon.typeahead/toolkit-cap :int)
 ;; Step-loop round budget — how many mode=step calls one provider turn
 ;; may make before it stops with whatever locked (the P3b driver's cap;
 ;; mirrors the worker Policy's max_rounds default).
@@ -90,6 +95,7 @@
    [:seon.typeahead/worst-token-gate  {:optional true} :seon.typeahead/worst-token-gate]
    [:seon.typeahead/probe-budget      {:optional true} :seon.typeahead/probe-budget]
    [:seon.typeahead/menu-cap          {:optional true} :seon.typeahead/menu-cap]
+   [:seon.typeahead/toolkit-cap       {:optional true} :seon.typeahead/toolkit-cap]
    [:seon.typeahead/max-rounds        {:optional true} :seon.typeahead/max-rounds]])
 
 ;; The EFFECTIVE policy view [[policy]] returns — every knob present.
@@ -99,6 +105,7 @@
    [:seon.typeahead/worst-token-gate  :seon.typeahead/worst-token-gate]
    [:seon.typeahead/probe-budget      :seon.typeahead/probe-budget]
    [:seon.typeahead/menu-cap          :seon.typeahead/menu-cap]
+   [:seon.typeahead/toolkit-cap       :seon.typeahead/toolkit-cap]
    [:seon.typeahead/max-rounds        :seon.typeahead/max-rounds]])
 
 (def policy-row-id
@@ -111,6 +118,7 @@
    :seon.typeahead/worst-token-gate  0.9
    :seon.typeahead/probe-budget      3
    :seon.typeahead/menu-cap          8
+   :seon.typeahead/toolkit-cap       4
    :seon.typeahead/max-rounds        8})
 
 (defn policy
@@ -237,11 +245,11 @@
          vec)))
 
 (defn- capped-verbs
-  "The rendered/offered `[full-sym-str fn-row]` pairs for agent `id` in
+  "The RECENCY-group `[full-sym-str fn-row]` pairs for agent `id` in
    `db` — [[ranked-verbs]] over the eval window, policy menu-capped. []
-   when the db/agent/attrs are absent, so callers share ONE guard. The
-   SAME list drives the rendered `:recent-verbs` menu AND the driver's
-   wire offers — glyph N always means the same verb on both sides."
+   when the db/agent/attrs are absent, so callers share ONE guard.
+   [[combined-verbs]] (recency + toolkit, one glyph numbering) is what
+   the rendered menu AND the driver's wire offers both consume."
   [db id]
   (if (and db id
            (contains? (db/installed-schema db) :seon.eval/agent)
@@ -249,12 +257,176 @@
     (vec (take (menu-cap db) (ranked-verbs db (eval-rows db id))))
     []))
 
-(def ^:private recent-verbs-header
-  (str "; recent verbs — the fns you have been calling, most-used first.\n"
-       "; A MENU, never a mandate: select an entry by outputting its glyph\n"
+;; ============================================================
+;; Toolkit group (P6) — task-relevant offers from the program graph. The
+;; P5 measurement: all 13 auto-offer fires were argmax-correct ON the
+;; menu, but 0/13 selected a task-required verb — the recency-only menu
+;; structurally cannot contain a verb the agent has not called yet. This
+;; group puts the agent's core verb surface on the menu regardless of
+;; its own usage:
+;;
+;;   - the TOOLKIT NSES are the nses the agent's CURRENT ns requires
+;;     (the stored `:seon.ns/require-edges` — the SAME set whose compact
+;;     cards the `:namespaces` section renders, mirroring its
+;;     `required-ns-set`; for a home ns that is the canonical
+;;     `seon.eval/home-ns-require-specs` wiring). No hand list: the
+;;     require edges are data, `included-ns?` is the structural filter.
+;;   - the CANDIDATES are those nses' public SPECCED `:seon.fn` rows
+;;     (the program graph; a specced public fn is the agent-facing
+;;     contract surface).
+;;   - the RANK is cross-agent global call frequency over the newest
+;;     [[global-eval-scan-window]] successful evals (any agent — the
+;;     cross-agent reactive-context precedent), admitted ROUND-ROBIN per
+;;     ns (every toolkit ns gets its top verb before any ns gets its
+;;     second) so one chatty ns cannot crowd the rest out. Zero-usage
+;;     worlds fall back to (ns-name, fn-name) order — honest, documented.
+;;
+;; ONE numbering across both groups (decided here, P6): the rendered
+;; section numbers recent + toolkit entries through the SAME glyph
+;; vector, and [[verb-offers]] mirrors the concatenation — glyph N on
+;; the wire is glyph N in the prompt for EVERY offer. (Known flag, out
+;; of scope: the `:plan-ledger` section numbers its own lines from ①
+;; too; its glyphs are not wire offers, so a collision there cannot
+;; expand a wrong template, but the render-side ambiguity stands.)
+;; ============================================================
+
+(def ^:private global-eval-scan-window
+  "How many of the CLUSTER's most recent successful evals (any agent)
+   feed the toolkit-group ranking. Bounds the per-render read."
+  200)
+
+(defn- all-eval-rows
+  "The newest [[global-eval-scan-window]] successful eval rows in `db`
+   across ALL agents, newest first — [[eval-rows]] without the agent
+   filter. [] when the attr is absent."
+  [db]
+  (->> (db/query {:seon.db/db db
+                  :seon.db/query '[:find [?e ...]
+                                   :where [?e :seon.eval/ok? true]]})
+       (map #(db/pull db [:seon.eval/at :seon.eval/source :seon.eval/ns] %))
+       (filter :seon.eval/at)
+       (sort-by #(.getTime ^js (:seon.eval/at %)) >)
+       (take global-eval-scan-window)
+       vec))
+
+(defn- call-freq
+  "full-sym-str → call count across eval `rows` (aliases resolved via
+   each eval ns's stored require-edges, as in [[ranked-verbs]])."
+  [db rows]
+  (let [infos (into {}
+                    (map (fn [k] [k (require-info-for db k)]))
+                    (distinct (map :seon.eval/ns rows)))]
+    (frequencies
+      (mapcat (fn [{src :seon.eval/source ns-kw :seon.eval/ns}]
+                (keep #(resolve-call-sym (get infos ns-kw) %)
+                      (call-syms src)))
+              rows))))
+
+(defn- toolkit-nses
+  "The agent's toolkit ns names (keywords): the nses its CURRENT ns
+   requires, per the stored require-edges — the same set the compact ns
+   cards render (`seon.agent.ctx.namespaces` `required-ns-set` mirror),
+   structurally filtered by [[ns-cards/included-ns?]]. #{} when the
+   agent/attrs are absent."
+  [db id]
+  (let [cur (try (some-> (ctx/current-ns {:seon.agent/id id :seon.db/db db})
+                         name keyword)
+                 (catch :default _ nil))]
+    (if (and cur (contains? (db/installed-schema db) :seon.ns/name))
+      (into #{}
+            (filter ns-cards/included-ns?)
+            (seval/stored-require-targets db cur))
+      #{})))
+
+(defn- ns-public-specced-fns
+  "`[full-sym-str fn-row]` pairs for ns `ns-kw`'s PUBLIC SPECCED fns in
+   `db`, fn-name order. [] when the ns is unindexed."
+  [db ns-kw]
+  (->> (db/query {:seon.db/db db
+                  :seon.db/query '[:find [?e ...]
+                                   :in $ ?nsname
+                                   :where
+                                   [?ns :seon.ns/name ?nsname]
+                                   [?e :seon.fn/ns ?ns]
+                                   [?e :seon.fn/fn-var? true]]
+                  :seon.db/args [ns-kw]})
+       (map #(db/pull db [:seon.fn/sym :seon.fn/private? :seon.fn/spec
+                          :seon.fn/arglists :seon.fn/doc] %))
+       (filter (fn [row] (and (not (:seon.fn/private? row))
+                              (:seon.fn/spec row)
+                              (:seon.fn/sym row))))
+       (map (fn [row] [(:seon.fn/sym row) row]))
+       (sort-by first)
+       vec))
+
+(defn- toolkit-verbs
+  "Up to `cap` `[full-sym-str fn-row]` toolkit entries for agent `id`,
+   excluding syms in `exclude` (the recency group's — no duplicate
+   offers). Round-robin per ns: nses ordered by their best candidate's
+   global call frequency (desc, ns name on ties); within an ns,
+   frequency desc then fn name."
+  [db id exclude cap]
+  (if (and db id (pos? cap)
+           (contains? (db/installed-schema db) :seon.fn/sym))
+    (let [freq     (if (contains? (db/installed-schema db) :seon.eval/ok?)
+                     (call-freq db (all-eval-rows db))
+                     {})
+          per-ns   (->> (toolkit-nses db id)
+                        (map (fn [ns-kw]
+                               (->> (ns-public-specced-fns db ns-kw)
+                                    (remove #(contains? exclude (first %)))
+                                    (sort-by (fn [[s _]] [(- (freq s 0)) s]))
+                                    vec)))
+                        (remove empty?)
+                        (sort-by (fn [cands]
+                                   [(- (freq (ffirst cands) 0))
+                                    (ffirst cands)])))
+          max-len  (apply max 0 (map count per-ns))]
+      (->> (for [k    (range max-len)
+                 cands per-ns
+                 :when (< k (count cands))]
+             (nth cands k))
+           (take cap)
+           vec))
+    []))
+
+;; ============================================================
+;; The combined verb menu — recent group then toolkit group, ONE glyph
+;; numbering, bounded by the glyph vocabulary. The SAME structure drives
+;; the rendered section AND the wire offers.
+;; ============================================================
+
+(defn- combined-verbs
+  "`{::recent [[sym row]…] ::toolkit [[sym row]…]}` for agent `id` in
+   `db` — the recency group ([[capped-verbs]]) plus the toolkit group
+   ([[toolkit-verbs]], deduped, policy `toolkit-cap`), together bounded
+   by the glyph vocabulary. Both groups [] when db/agent are absent."
+  [db id]
+  (let [recent  (capped-verbs db id)
+        t-cap   (-> (:seon.typeahead/toolkit-cap (policy db))
+                    (min (- (count glyphs) (count recent)))
+                    (max 0))
+        toolkit (toolkit-verbs db id (into #{} (map first) recent) t-cap)]
+    {::recent recent ::toolkit toolkit}))
+
+(def ^:private menu-teaching
+  ;; The measured P5 teaching, byte-stable (the bench's teaching overlay
+  ;; keys on these lines).
+  (str "; A MENU, never a mandate: select an entry by outputting its glyph\n"
        "; alone (e.g. ①), or ignore this and write any Clojure — both work.\n"
        "; Example: to select entry ①, output the single character ① and\n"
        "; nothing else — its call template is expanded for you to fill."))
+
+(def ^:private recent-verbs-header
+  (str "; recent verbs — the fns you have been calling, most-used first.\n"
+       menu-teaching))
+
+(def ^:private toolkit-only-header
+  (str "; toolkit verbs — your required namespaces' public fns.\n"
+       menu-teaching))
+
+(def ^:private toolkit-group-header
+  "; toolkit — more verbs from your required namespaces:")
 
 (defn- verb-line
   "One rendered menu entry: `; <glyph> (<sym> [args] …) — <doc line 1>`.
@@ -270,28 +442,43 @@
          (when doc1 (str " — " doc1)))))
 
 (defn recent-verbs-block
-  "The `:recent-verbs` menu section — your most-used fns, glyph-listed.
+  "The `:recent-verbs` menu section — recent + toolkit verbs, glyph-listed.
 
-   Derived at render from YOUR eval log (the last [[eval-scan-window]]
-   successful evals): every fn called there that is a PUBLIC program-graph
-   fn renders as one glyph-numbered entry — glyph, `(fn-sym [args] …)`
-   (compact-card arity grammar), docstring line 1 — most-called first,
-   most-recent first on ties, capped by the policy `menu-cap`. Aliased
-   calls resolve through each eval ns's STORED require-edges; nothing new
-   is stored. Selection is strictly optional (the header teaches it);
-   REACTIVE: no eval history / no resolvable public fns → \"\" and the
-   composer drops the section."
+   ONE menu, TWO derived groups under ONE glyph numbering (P6):
+
+     - recent — every fn called in YOUR last [[eval-scan-window]]
+       successful evals that is a PUBLIC program-graph fn, most-called
+       first, most-recent first on ties, policy `menu-cap`.
+     - toolkit — your current ns's required nses' public SPECCED fns
+       ([[toolkit-verbs]]: cross-agent frequency rank, per-ns
+       round-robin, policy `toolkit-cap`) — the task-relevant surface a
+       recency menu structurally misses (P5: 0/13 fires could select a
+       required verb).
+
+   Entry grammar per line is unchanged: glyph, `(fn-sym [args] …)`
+   (compact-card arity grammar), docstring line 1. Aliased calls resolve
+   through each eval ns's STORED require-edges; nothing new is stored.
+   Selection is strictly optional (the header teaches it); REACTIVE:
+   both groups empty → \"\" and the composer drops the section. The
+   block KEEPS its `:recent-verbs` name (seed-copied into live agents'
+   ctx sets — renaming would orphan them)."
   {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (let [db    (or db (some-> db/*conn* deref))
-        verbs (capped-verbs db id)]
-    (if (seq verbs)
-      (str recent-verbs-header "\n"
-           (str/join "\n"
-                     (map-indexed
-                       (fn [i [s row]] (verb-line (glyphs i) s row))
-                       verbs)))
-      "")))
+  (let [db (or db (some-> db/*conn* deref))
+        {::keys [recent toolkit]} (combined-verbs db id)
+        lines (fn [offset verbs]
+                (str/join "\n"
+                          (map-indexed
+                            (fn [i [s row]] (verb-line (glyphs (+ offset i)) s row))
+                            verbs)))]
+    (cond
+      (and (seq recent) (seq toolkit))
+      (str recent-verbs-header "\n" (lines 0 recent) "\n"
+           toolkit-group-header "\n" (lines (count recent) toolkit))
+
+      (seq recent)  (str recent-verbs-header "\n" (lines 0 recent))
+      (seq toolkit) (str toolkit-only-header "\n" (lines 0 toolkit))
+      :else "")))
 
 ;; ============================================================
 ;; Driver offers — the SAME capped verb list as the rendered menu, in
@@ -322,25 +509,28 @@
 (defn verb-offers
   "Driver offers mirroring the agent's rendered `:recent-verbs` menu.
 
-   One offer per [[capped-verbs]] entry — the selection glyph, a
-   `sym [args] …` label, and a `(sym ` + free-args-hole + `)` clamp
-   template the driver expands on selection. [] when the agent has no
-   menu (same guard as the rendered section), so the wire carries offers
-   exactly when the prompt shows the menu."
+   One offer per [[combined-verbs]] entry (recent group then toolkit
+   group — the SAME concatenation the section renders, so glyph N on
+   the wire is glyph N in the prompt for every offer) — the selection
+   glyph, a `sym [args] …` label, and a `(sym ` + free-args-hole + `)`
+   clamp template the driver expands on selection. [] when the agent
+   has no menu (same guard as the rendered section), so the wire
+   carries offers exactly when the prompt shows the menu."
   {:malli/schema [:=> [:catn [::db :seon.db/db] [:seon.agent/id :string]]
                   ::offers-view]}
   [db id]
-  (vec
-    (map-indexed
-      (fn [i [s row]]
-        {:seon.typeahead/glyph    (glyphs i)
-         :seon.typeahead/label    (str s " "
-                                       (ns-cards/compact-arities
-                                         (:seon.fn/arglists row)))
-         :seon.typeahead/template [["clamp" (str "(" s " ")]
-                                   ["free" offer-args-free-tokens]
-                                   ["clamp" ")"]]})
-      (capped-verbs db id))))
+  (let [{::keys [recent toolkit]} (combined-verbs db id)]
+    (vec
+      (map-indexed
+        (fn [i [s row]]
+          {:seon.typeahead/glyph    (glyphs i)
+           :seon.typeahead/label    (str s " "
+                                         (ns-cards/compact-arities
+                                           (:seon.fn/arglists row)))
+           :seon.typeahead/template [["clamp" (str "(" s " ")]
+                                     ["free" offer-args-free-tokens]
+                                     ["clamp" ")"]]})
+        (concat recent toolkit)))))
 
 ;; ============================================================
 ;; :plan-ledger — the open/current plan steps as ▶/☐ glyph lines. The

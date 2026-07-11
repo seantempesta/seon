@@ -126,9 +126,43 @@ Supporting: `docs/conventions.md` (API/schema patterns), `docs/seon/vision/`
 `docs/seon/components/` (per-component notes).
 
 **After a change:** update the architecture doc it touches (the ideal stays
-current) AND the active PRD's `roadmap.md` (the we-are-here stays honest) — same
-discipline as code. The `src/seon/CLAUDE.md` ONE-mechanism table auto-loads on
-any `src/` edit; check it before building a second version of anything.
+current) AND the active PRD's `roadmap.md` (the we-are-here stays honest) AND
+any nested `CLAUDE.md` whose tree you changed (the standard below) — same
+discipline as code, same unit, same commit. The `src/seon/CLAUDE.md`
+ONE-mechanism table auto-loads on any `src/` edit; check it before building a
+second version of anything.
+
+### Nested `CLAUDE.md` files — the standard (owner directive, 2026-07-11)
+
+These auto-load whenever anyone works in their tree, so a stale one actively
+misleads every future agent. The audit that produced this standard
+(`docs/prds/agent-ctx/research/claude-md-audit-2026-07-11.md`) found a clean
+split: every MISLEADING section was a dated status snapshot ("current state",
+"in flight", "known gaps", "open tensions", "build order"); every
+reliably-current section was timeless (ownership tables, invariants, gotchas).
+Hence:
+
+- **Source-tree `CLAUDE.md`s carry ONLY what stays true between commits:**
+  orientation (what lives here, which files are the active lane), mechanism
+  ownership tables, invariants-that-bite, hard-won gotchas, runbook commands,
+  and pointers to the docs that hold depth. **NO status sections** — status
+  lives in the active PRD's `roadmap.md`, linked, never duplicated.
+- **PRD-folder `CLAUDE.md`s** may carry ONE dated current-state paragraph
+  (they are the folder's index) — the date is mandatory, and refreshing it is
+  part of closing any unit in that PRD.
+- **Maintenance is part of the unit, not a chore for later:** if your change
+  invalidates a claim, adds an invariant/gotcha, or moves a mechanism, the
+  CLAUDE.md update lands in the SAME commit. A report that doesn't mention
+  the CLAUDE.md check for a touched tree is incomplete.
+- **One fact, one file:** a rule lives in the deepest CLAUDE.md that owns it;
+  other files link rather than restate (restatement is how the audit's
+  three-way contradictions happened). When two files disagree, the deeper one
+  wins and the shallower one gets fixed.
+- **Tight:** these files spend context on every load — `src/my/CLAUDE.md`
+  (~35 lines) is the model. If a section needs more than a screen, it belongs
+  in `docs/` with a pointer.
+- The Vocabulary section above applies verbatim (functions, not "verbs"; the
+  code's real names).
 
 ### PRD folder context — auto-loaded `CLAUDE.md`
 

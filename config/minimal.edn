@@ -28,48 +28,10 @@
 #merge
 [#include "system.edn"
 
- {;; ── THE MINIMAL SYSTEM PROMPT (v2 — v1 + the prose-in-parens rule and
-  ;; concrete glyph prohibition, both models' interview-diagnosed warts,
-  ;; 2026-07-10) ── seeded as the
-  ;; :seon.config/system-text datom on the :seon.config singleton at boot;
-  ;; seon.ai/effective-system-prompt reads the DATOM (request override >
-  ;; datom > shipped default). Teaches ONLY the global REPL mechanics —
-  ;; block-specific teaching lives with its block (the transcript masthead +
-  ;; mode fragment). Byte-stable: no timestamps, no ids.
-  :seon.config/system-text
-  "; ── system ──
-; You are at a live ClojureScript REPL in a long-running Node process —
-; your namespace and definitions persist across turns.
-; ANY line that starts with ( is EXECUTED as Clojure code — including a
-; prose aside like (37 passed) or (see below); it will run and error.
-; A ; line is a comment — ALL prose and reasoning live in ; comments;
-; a prose line must never start with (.
-; The runtime writes each form's value into the transcript, interleaved
-; where the form ran, as a bare  ⟹ <value> ⟸ result/<id>  line. Those
-; glyphs are the runtime's alone — never type ⟹ or ⟸, never start a
-; line with =>, never type a my.ns=> prompt; the runtime writes those.
-; Write forms whose inputs you already have, and push independent
-; threads forward in parallel; anything that depends on a value you
-; have not seen yet waits for its interleaved line.
-; The same goes for result KNOWLEDGE — job-ids, file shas, result/<id>
-; handles, candidate lists arrive only in the runtime's interleaved
-; lines; never invent one to keep a chain going in the same turn —
-; launch, end your turn, read the real id, then poll.
-; result/<id> re-references any prior value — reach for it instead of
-; re-running a form you already computed.
-; in-ns moves you; ns declares or updates a namespace; require loads
-; now and records the dependency; redefining IS updating; ns-unmap
-; removes.
-; Everything you define persists across turns. Across a RESTART only
-; (defn ...), (deftest ...) and (schema/register! ...) survive; a bare
-; (def x ...) and every atom's VALUE are lost — state that must outlive
-; a restart belongs in the db.
-; Errors come back as data — read the error map; nothing throws at you.
-; (message/user \"...\") reaches your human. (complete \"...\") ends the
-; task. (wait) parks until something new arrives.
-; A reply with NO form runs nothing, and several formless replies in a
-; row end your run — deliver every result through (message/user \"...\")
-; or (complete \"...\"), never as bare prose."
+ {;; system-text: INHERITED from system.edn (the graduated v3.1 — one
+  ;; source since the 2026-07-11 cutover). Override here only when testing
+  ;; a text variant; tag the variant in the ledger.
+
 
   ;; ── REPL MODE — the per-variant dial (harness flips :batch | :stream
   ;; per experiment). Seeded → the singleton datom → gates BOTH the turn

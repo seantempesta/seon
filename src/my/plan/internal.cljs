@@ -555,3 +555,364 @@
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
   (plan-body (or db @db/*conn*) [:seon.agent/id id]))
+
+;; --- The `:seon.render/html` TWIN — the human's live plan tile. -----------
+;; --- Colocated with [[plan-block]] (the transcript precedent). Zero prompt
+;; --- cost: `*.internal` nses never render into agent context
+;; --- (seon.agent.ctx.namespaces/hidden-ns-name?). Where the :ai block
+;; --- WINDOWS (anchor + capped frontier + recent-done tail), the tile shows
+;; --- the WHOLE forest — the human explores what the prompt windows away.
+;; ---
+;; --- DERIVATION NOTE (2026-07-11): the tile derives structure, roll-up,
+;; --- blocked, and ready from ONE built forest ([[build-forest]] — a
+;; --- query + `[*]` pulls + pure aggregation over plain node maps)
+;; --- instead of [[rollup]] / [[ready-leaves]] / [[anchor]], because the
+;; --- datahike-CLJS recursive-rule executor returns only base-branch
+;; --- tuples (the `descendant` recursion yields nothing past depth 1 on
+;; --- every pod runtime — in-memory AND wire-store; the JVM engine over
+;; --- the same store is correct). RE-UNIFY on the shared rule derivations
+;; --- once that engine bug is fixed. Semantics mirror [[rules]]: parent
+;; --- done-ness is derived from its leaves, ready = open+unblocked leaf
+;; --- OR a drained open non-leaf, blocked = stored :blocked or an undone
+;; --- `needs` target. Plain pulled data only (no lazy Entity walk): a
+;; --- `my.*` render symbol is SCI-re-interpreted from its stored source
+;; --- at render time, and the plain-data primitives are the SCI-proven
+;; --- path ([[plan-body]] uses the same ones).
+;; ---
+;; --- Interactivity rides Datastar SIGNALS (the client-side signal store
+;; --- survives the SSE whole-element morph; `__ifmissing` keeps a re-morph
+;; --- from resetting them): $planstep = the one expanded step id,
+;; --- $planclosed = collapsed subtree ids (space-delimited), $planfull =
+;; --- reveal the completed interior, $plandone = the recent-done list.
+
+(defn- toggle-step-expr
+  "The `data-on:click` expression toggling step `id`'s detail panel."
+  [id]
+  (str "$planstep = ($planstep === '" id "' ? '' : '" id "')"))
+
+(defn- toggle-closed-expr
+  "The `data-on:click` expression toggling subtree `id`'s collapse."
+  [id]
+  (str "$planclosed = ($planclosed.includes(' " id " ') ? "
+       "$planclosed.replace(' " id " ', ' ') : $planclosed + ' " id " ')"))
+
+(defn- step-order
+  "Rows/nodes sorted oldest-first (created-at, then id — stable)."
+  [rows]
+  (sort-by (fn [r] [(or (some-> (:my.plan/created-at r) .getTime) 0)
+                    (:my.plan/id r)])
+           rows))
+
+(defn- row->node
+  "Pulled step row `r` → one walked node map (children filled by caller)."
+  [eid->row waiters r children]
+  (let [needs (->> (:my.plan/needs r)
+                   (keep (fn [n] (eid->row (:db/id n))))
+                   (mapv (fn [nr] {:my.plan/id    (:my.plan/id nr)
+                                   :my.plan/title (:my.plan/title nr)})))]
+    (cond-> {:my.plan/id       (:my.plan/id r)
+             :my.plan/title    (:my.plan/title r)
+             :my.plan/status   (:my.plan/status r)
+             :my.plan/children children}
+      (:my.plan/goal r)         (assoc :my.plan/goal (:my.plan/goal r))
+      (:my.plan/pace r)         (assoc :my.plan/pace (:my.plan/pace r))
+      (:my.plan/expect r)       (assoc :my.plan/expect (:my.plan/expect r))
+      (:my.plan/description r)  (assoc :my.plan/description
+                                       (:my.plan/description r))
+      (:my.plan/message r)      (assoc :my.plan/message? true)
+      (:my.plan/created-at r)   (assoc :my.plan/created-at
+                                       (:my.plan/created-at r))
+      (:my.plan/completed-at r) (assoc :my.plan/completed-at
+                                       (:my.plan/completed-at r))
+      (seq needs)               (assoc :my.plan/needs needs)
+      (seq (waiters (:db/id r))) (assoc :my.plan/waiters
+                                        (waiters (:db/id r))))))
+
+(defn- build-forest
+  "The `agent-eid`'s whole plan forest as nested node maps.
+
+   ONE query for the step eids, one `[*]` pull per step (plain data —
+   the same primitives [[open-steps]] uses), then a pure assembly:
+   children from the forward `parent` ref, `waiters` (what waits on a
+   step) from the inverted `needs` edges. Cycle-safe; oldest-first."
+  [db agent-eid]
+  (let [rows     (->> (db/query {:seon.db/db db
+                                 :seon.db/query
+                                 '[:find [?t ...]
+                                   :in $ ?a
+                                   :where
+                                   [?t :my.plan/agent ?a]
+                                   [?t :my.plan/id _]]
+                                 :seon.db/args [agent-eid]})
+                      (mapv #(db/pull db '[*] %)))
+        eid->row (into {} (map (fn [r] [(:db/id r) r])) rows)
+        kids     (group-by #(get-in % [:my.plan/parent :db/id]) rows)
+        waiters  (reduce (fn [m r]
+                           (reduce (fn [m n]
+                                     (update m (:db/id n) (fnil conj [])
+                                             (:my.plan/title r)))
+                                   m (:my.plan/needs r)))
+                         {} rows)
+        node     (fn node [r seen]
+                   (let [seen (conj seen (:my.plan/id r))
+                         children
+                         (->> (kids (:db/id r))
+                              step-order
+                              (remove #(seen (:my.plan/id %)))
+                              (mapv #(node % seen)))]
+                     (row->node eid->row waiters r children)))]
+    (->> rows
+         (remove :my.plan/parent)
+         step-order
+         (mapv #(node % #{})))))
+
+(defn- subtree-leaves
+  "The leaf nodes of walked `node`'s subtree (`node` itself when a leaf)."
+  [node]
+  (if (empty? (:my.plan/children node))
+    [node]
+    (mapcat subtree-leaves (:my.plan/children node))))
+
+(defn- node-progress
+  "Done/total/done? over walked `node`'s leaves (mirrors [[rollup]])."
+  [node]
+  (let [ls    (subtree-leaves node)
+        total (count ls)
+        done  (count (filter #(= :done (:my.plan/status %)) ls))]
+    {:my.plan/done  done
+     :my.plan/total total
+     :my.plan/done? (and (pos? total) (= done total))}))
+
+(defn- forest-index
+  "id → walked node, over every node in walked `roots`."
+  [roots]
+  (into {}
+        (comp (mapcat #(tree-seq (fn [_] true) :my.plan/children %))
+              (map (fn [n] [(:my.plan/id n) n])))
+        roots))
+
+(defn- node-done?
+  "Derived done-ness of walked `node` (leaf status / leaves roll-up)."
+  [node]
+  (if (empty? (:my.plan/children node))
+    (= :done (:my.plan/status node))
+    (:my.plan/done? (node-progress node))))
+
+(defn- node-blocked?
+  "True iff `node` is stored `:blocked` or waits on an undone need."
+  [idx node]
+  (boolean
+    (or (= :blocked (:my.plan/status node))
+        (some (fn [n]
+                (let [t (idx (:my.plan/id n))]
+                  (and t (not (node-done? t)))))
+              (:my.plan/needs node)))))
+
+(defn- node-ready?
+  "True iff `node` is actionable now — an open unblocked leaf, or an open
+   unblocked non-leaf whose subtree is drained (mirrors the `ready` rule)."
+  [idx node]
+  (and (= :open (:my.plan/status node))
+       (not (node-blocked? idx node))
+       (or (empty? (:my.plan/children node))
+           (every? node-done? (:my.plan/children node)))))
+
+(defn- need-line-html
+  "One `waits on` line for need `n` — done-glyph + title + id."
+  [idx n]
+  (let [t     (idx (:my.plan/id n))
+        done? (and t (node-done? t))]
+    [:li {:class "flex items-center gap-1"}
+     [:span {:class (str "shrink-0 " (if done? "text-success" "text-warning"))}
+      (if done? "✓" "○")]
+     [:span {:class "text-text-200 truncate"} (:my.plan/title n)]
+     [:span {:class "text-text-500 shrink-0"} (:my.plan/id n)]]))
+
+(defn- step-detail-html
+  "Walked `node`'s expand-in-place detail panel — `data-show`n by $planstep."
+  [idx node]
+  (let [id  (:my.plan/id node)
+        row (fn [label body]
+              [:div {:class "flex gap-2"}
+               [:span {:class "text-text-500 shrink-0"} label]
+               [:div {:class "text-text-200 min-w-0"} body]])]
+    [:div {:data-show (str "$planstep === '" id "'")
+           :style "display:none;border-left:1px solid #3d3a36;margin-left:3px;padding-left:10px"
+           :class "flex flex-col gap-1 text-2xs py-1"}
+     [:div {:class "text-text-500"}
+      (str id
+           (when-let [c (:my.plan/created-at node)]
+             (str " · created " (stamp c)))
+           (when-let [d (:my.plan/completed-at node)]
+             (str " · done " (stamp d))))]
+     (when-let [g (:my.plan/goal node)] (row "goal" g))
+     (when-let [d (:my.plan/description node)] (row "desc" d))
+     (when-let [x (:my.plan/expect node)] (row "verify" x))
+     (when-let [needs (seq (:my.plan/needs node))]
+       (row "waits on"
+            (into [:ul {:class "flex flex-col gap-1"}]
+                  (map #(need-line-html idx %))
+                  needs)))
+     (when-let [ws (seq (:my.plan/waiters node))]
+       (row "blocks" (str/join ", " ws)))
+     (when (:my.plan/message? node)
+       (row "origin" "✉ auto-minted from a message"))]))
+
+(defn- step-row-html
+  "One tree row (+ its detail panel + its children `ul`) for walked `node`.
+
+   Glyphs: `●` active (amber, NOW), `✓` done (dim; hidden until $planfull),
+   `○` open (`ready` tag when actionable), `◌` blocked. A non-leaf carries
+   its subtree `done/total` roll-up and a collapse chevron ($planclosed,
+   click-stopped so it doesn't also toggle the detail)."
+  [idx node next-id depth]
+  (let [id       (:my.plan/id node)
+        children (:my.plan/children node)
+        leaf?    (empty? children)
+        ru       (when-not leaf? (node-progress node))
+        done?    (node-done? node)
+        active?  (= :active (:my.plan/status node))
+        next?    (= id next-id)
+        blocked? (and (not done?) (node-blocked? idx node))
+        [glyph gcls] (cond
+                       active?  ["●" "text-signal"]
+                       done?    ["✓" "text-text-500"]
+                       blocked? ["◌" "text-warning"]
+                       :else    ["○" "text-text-400"])
+        tcls     (cond
+                   active?  "text-text-50"
+                   done?    "text-text-500"
+                   blocked? "text-text-400"
+                   :else    "text-text-200")]
+    [:li (cond-> {:class "flex flex-col"}
+           done? (assoc :data-show "$planfull" :style "display:none"))
+     [:div {:class (str "flex items-center gap-2 py-0.5 rounded cursor-pointer"
+                        (when active? " bg-base-850"))
+            :style (str "padding-left:" (* 12 depth) "px"
+                        (when active? ";border-left:2px solid #f0b429"))
+            (keyword "data-on:click") (toggle-step-expr id)}
+      (if leaf?
+        [:span {:class "shrink-0" :style "display:inline-block;width:1ch"}]
+        [:span {:class "text-text-500 shrink-0 select-none"
+                (keyword "data-on:click__stop") (toggle-closed-expr id)
+                :data-text (str "$planclosed.includes(' " id " ') ? '▸' : '▾'")}
+         "▾"])
+      [:span {:class (str "shrink-0 " gcls)} glyph]
+      (when (:my.plan/message? node) [:span {:class "text-info shrink-0"} "✉"])
+      [:span {:class (str "truncate " tcls)} (:my.plan/title node)]
+      (when active? [:span {:class "text-2xs text-signal shrink-0"} "NOW"])
+      (when (and next? (not active?))
+        [:span {:class "text-2xs text-signal shrink-0"} "next"])
+      (when (and (not done?) (not active?) (not next?)
+                 (node-ready? idx node))
+        [:span {:class "text-2xs text-success shrink-0"} "ready"])
+      (when-not leaf?
+        [:span {:class "text-2xs text-text-500 tabular-nums shrink-0"}
+         (str (:my.plan/done ru) "/" (:my.plan/total ru))])]
+     (step-detail-html idx node)
+     (when-not leaf?
+       [:ul {:class "flex flex-col"
+             :data-show (str "!$planclosed.includes(' " id " ')")}
+        (map #(step-row-html idx % next-id (inc depth)) children)])]))
+
+(defn- root-card-html
+  "One plan-root card: title + pace + roll-up, goal line, thin amber
+   progress bar, then the full step tree."
+  [idx root next-id]
+  (let [{:my.plan/keys [done total]} (node-progress root)
+        pct  (if (pos? total) (quot (* 100 done) total) 0)
+        goal (:my.plan/goal root)
+        pace (:my.plan/pace root)]
+    [:div {:class "flex flex-col gap-1"}
+     [:div {:class "flex items-center gap-2 cursor-pointer"
+            (keyword "data-on:click") (toggle-step-expr (:my.plan/id root))}
+      [:span {:class "text-sm font-semibold text-text-50 truncate"}
+       (:my.plan/title root)]
+      (when pace
+        [:span {:class "text-2xs text-text-500 shrink-0"}
+         (str "[" (name pace) "]")])
+      [:span {:class "text-2xs text-text-400 tabular-nums shrink-0"}
+       (str done "/" total " done")]]
+     (when goal
+       [:div {:class "text-2xs text-text-400 truncate"} (str "goal: " goal)])
+     [:div {:class "bg-base-800 w-full"
+            :style "height:3px;border-radius:2px;overflow:hidden"}
+      [:div {:style (str "height:3px;background:#f0b429;width:" pct "%")}]]
+     (step-detail-html idx root)
+     [:ul {:class "flex flex-col"}
+      (map #(step-row-html idx % next-id 0) (:my.plan/children root))]]))
+
+(defn plan-block-html
+  "Live, explorable HTML twin of [[plan-block]] — the `/agent/{id}` tile.
+
+   Renders the agent's WHOLE plan forest (the :ai block windows; the tile
+   does not): per root a title/goal/pace header with a done/total roll-up
+   and a thin amber progress bar, then the step tree — `●` active (NOW,
+   highlighted), `○` open (`ready`-tagged), `◌` blocked, `✓` done (hidden
+   until the show-completed toggle), `✉` message-minted. Structure and
+   state derive from ONE built forest ([[build-forest]] — see the
+   derivation note above); the recently-completed tail reuses
+   [[recent-done]]. Interactivity is Datastar signals (they live
+   client-side, so they survive the SSE whole-element morph): click a
+   step to expand its detail in place (description, verify-before-done
+   `expect`, needs edges both ways, timestamps, id); chevrons collapse
+   subtrees; $planfull reveals the completed interior; the recently-
+   completed tail expands on click. No plan → a quiet one-liner (the
+   teaching text in [[empty-plan-teaching]] is for the model, not the
+   human)."
+  {:malli/schema [:=> [:cat :seon.render/section-request]
+                  :seon.render.live-tile/hiccup]}
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [db     (or db @db/*conn*)
+        oe     (agent-eid db [:seon.agent/id id])
+        forest (if oe (build-forest db oe) [])]
+    (if (empty? forest)
+      [:div {:class "text-text-500 italic text-2xs font-mono py-1"}
+       "no plan yet"]
+      (let [idx        (forest-index forest)
+            all-nodes  (mapcat #(tree-seq (fn [_] true) :my.plan/children %)
+                               forest)
+            ;; The you-are-here: an :active step wins; else the oldest
+            ;; ready leaf is the presumed next position (mirrors [[anchor]]).
+            active?    (some #(= :active (:my.plan/status %)) all-nodes)
+            next-id    (when-not active?
+                         (->> all-nodes
+                              (filter #(and (empty? (:my.plan/children %))
+                                            (node-ready? idx %)))
+                              (sort-by #(some-> (:my.plan/created-at %)
+                                                .getTime))
+                              first
+                              :my.plan/id))
+            ;; Rows hidden behind $planfull = the done non-root nodes.
+            done-count (count (filter node-done?
+                                      (mapcat #(tree-seq (fn [_] true)
+                                                         :my.plan/children %)
+                                              (mapcat :my.plan/children
+                                                      forest))))
+            dones      (recent-done db oe)]
+        [:div {:class "flex flex-col gap-2 text-xs font-mono"
+               :data-signals__ifmissing
+               "{planstep: '', planclosed: '', planfull: false, plandone: false}"}
+         (map #(root-card-html idx % next-id) forest)
+         (when (pos? done-count)
+           [:div {:class (str "flex items-center gap-1 text-2xs text-text-400 "
+                              "cursor-pointer select-none")
+                  (keyword "data-on:click") "$planfull = !$planfull"}
+            [:span {:data-text "$planfull ? '▾' : '▸'"} "▸"]
+            [:span {:data-text (str "$planfull ? 'hide completed steps' : "
+                                    "'show all " done-count
+                                    " completed steps in place'")}
+             (str "show all " done-count " completed steps in place")]])
+         (when (seq dones)
+           [:div {:class "flex flex-col"}
+            [:div {:class (str "flex items-center gap-1 text-2xs text-text-500 "
+                               "cursor-pointer select-none")
+                   (keyword "data-on:click") "$plandone = !$plandone"}
+             [:span {:data-text "$plandone ? '▾' : '▸'"} "▸"]
+             [:span (str "recently completed (" (count dones) ")")]]
+            [:ul {:class "flex flex-col" :data-show "$plandone"
+                  :style "display:none"}
+             (map (fn [{:my.plan/keys [title completed-at]}]
+                    [:li {:class "text-2xs text-text-500 truncate"}
+                     (str "✓ [" (stamp completed-at) "] " title)])
+                  dones)]])]))))

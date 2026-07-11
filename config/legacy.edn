@@ -1,3 +1,13 @@
+;; ═══════════════════════════════════════════════════════════════════
+;; LEGACY — the pre-cutover default context (frozen 2026-07-11).
+;; Kept ONLY for comparison drives against the rebuilt minimal tree
+;; (docs/prds/agent-ctx/minimal-context-ladder.md). Never a fallback.
+;; EXPIRES: delete after the db + warnings + live-tile milestones land.
+;; NOTE: this file intentionally does NOT set :seon.agent/ctx — the old
+;; block tree comes from the in-code seon.config/default-ctx-blocks,
+;; which is itself deprecated reference (Phase 0 labels it).
+;; ═══════════════════════════════════════════════════════════════════
+
 ;; The consolidated pod context manifest — read by seon.config via aero
 ;; (`SEON_CONFIG` overrides the path; a per-cluster variant is a SEPARATE file,
 ;; not a `#profile`). ABSENT → the pod boots byte-identically to a no-config
@@ -161,67 +171,8 @@
  ;; its conventional short alias (kb/data/ui/tile) even though it is called
  ;; full-qualified. `seon.agent` (the orchestration surface) is deliberately
  ;; NOT here — it belongs to root only (see note on :seon.config/root-context).
- ;; ── SYSTEM TEXT — GRADUATED from the measured minimal arc (v3.1,
- ;; 2026-07-11; line provenance: docs/prds/agent-ctx/minimal-context-ladder.md).
- ;; Seeded as the :seon.config/system-text datom at boot; replaces the shipped
- ;; ctx/system-text guess. minimal*.edn inherit THIS text (one source) and
- ;; override only when testing a variant.
- :seon.config/system-text
-  "; ── system ──
-; You are at a live ClojureScript REPL in a long-running Node process —
-; your namespace and definitions persist across turns.
-; ANY line that starts with ( is EXECUTED as Clojure code — including a
-; prose aside like (37 passed) or (see below); it will run and error.
-; A ; line is a comment — ALL prose and reasoning live in ; comments;
-; a prose line must never start with (.
-; The runtime writes each form's value into the transcript, interleaved
-; where the form ran, as a bare  ⟹ <value> ⟸ result/<id>  line. Those
-; glyphs are the runtime's alone — never type ⟹ or ⟸, never start a
-; line with =>, never type a my.ns=> prompt; the runtime writes those.
-; Write forms whose inputs you already have, and push independent
-; threads forward in parallel; anything that depends on a value you
-; have not seen yet waits for its interleaved line.
-; The same goes for result KNOWLEDGE — job-ids, file shas, result/<id>
-; handles, candidate lists arrive only in the runtime's interleaved
-; lines; never invent one to keep a chain going in the same turn —
-; launch, end your turn, read the real id, then poll.
-; result/<id> re-references any prior value — reach for it instead of
-; re-running a form you already computed.
-; in-ns moves you; ns declares or updates a namespace; require loads
-; now and records the dependency; redefining IS updating; ns-unmap
-; removes.
-; Everything you define persists across turns. Across a RESTART only
-; (defn ...), (deftest ...) and (schema/register! ...) survive; a bare
-; (def x ...) and every atom's VALUE are lost — state that must outlive
-; a restart belongs in the db.
-; Errors come back as data — read the error map; nothing throws at you.
-; (message/user \"...\") reaches your human. (complete \"...\") ends the
-; task. (wait) parks until something new arrives.
-; A reply with NO form runs nothing, and several formless replies in a
-; row end your run — deliver every result through (message/user \"...\")
-; or (complete \"...\"), never as bare prose."
-
- ;; ── THE CONTEXT TREE — the evidenced minimal base (owner cutover
- ;; 2026-07-11: untested legacy blocks deprecated OUT; ideas return as
- ;; tested blocks per minimal-context-ladder.md; the old tree is frozen in
- ;; config/legacy.edn for comparison drives only). Blocks: namespaces
- ;; (repl+namespaces milestones) · plan (plan milestone, html twin = the
- ;; human's live plan tile) · transcript (the spine).
  :seon.config/agent-context
- {:seon.agent/ctx
-  [{:seon.agent.ctx/name :namespaces :seon.agent.ctx/priority 20
-    :seon.render/ai seon.agent.ctx.namespaces/namespaces-block}
-   {:seon.agent.ctx/name :plan :seon.agent.ctx/priority 45
-    :seon.render/ai my.plan.internal/plan-block
-    :seon.render/html my.plan.internal/plan-block-html}
-   {:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
-    :seon.render/ai seon.agent.ctx.transcript/transcript-block
-    :seon.render/html seon.agent.ctx.transcript/transcript-block-html
-    :seon.agent.ctx.transcript/result-decay
-    [{:seon.agent.ctx.transcript/from-turn-offset 0 :seon.agent.ctx.transcript/token-cap 16384}
-     {:seon.agent.ctx.transcript/from-turn-offset 2 :seon.agent.ctx.transcript/token-cap 1500}
-     {:seon.agent.ctx.transcript/from-turn-offset 5 :seon.agent.ctx.transcript/token-cap 200}]}]
-  :seon.eval/home-requires
+ {:seon.eval/home-requires
   [[seon.agent.message :as message]
    [my.plan :as plan]
    [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
@@ -264,12 +215,10 @@
    [seon.agent.fs :as fs]
    [seon.agent :as agent]]
   :seon.agent/ctx
-  ;; Cutover 2026-07-11: root's :live-tile dashboard override DEPRECATED with
-  ;; the legacy tree (returns at the live-tile milestone). The three blocks
-  ;; below are KEPT: derived, 0-token-when-healthy fault surfaces (the
-  ;; warnings idea already working reactively); first formally validated at
-  ;; the warnings milestone.
-  [;; ROOT-ONLY (owner ruling, error-blame-strict-gate 2026-07-04): the
+  [{:seon.agent.ctx/name :live-tile :seon.agent.ctx/priority 35
+    :seon.render/ai seon.agent.ctx.live-tile/live-tile-block
+    :seon.render.live-tile/content seon.render.system/system-view}
+   ;; ROOT-ONLY (owner ruling, error-blame-strict-gate 2026-07-04): the
    ;; :core-fault section renders on the root world only — other agents see
    ;; nothing (core bugs are not theirs to fix; the affected agent already
    ;; got its in-place :seon/error envelope). Derived; vanishes when the

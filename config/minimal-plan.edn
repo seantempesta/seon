@@ -15,7 +15,8 @@
    [{:seon.agent.ctx/name :namespaces :seon.agent.ctx/priority 20
      :seon.render/ai seon.agent.ctx.namespaces/namespaces-block}
     {:seon.agent.ctx/name :plan :seon.agent.ctx/priority 45
-     :seon.render/ai my.plan.internal/plan-block}
+     :seon.render/ai my.plan.internal/plan-block
+     :seon.render/html my.plan.internal/plan-block-html}
     {:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
      :seon.render/ai seon.agent.ctx.transcript/transcript-block
      :seon.render/html seon.agent.ctx.transcript/transcript-block-html

@@ -4,8 +4,9 @@
 — start with `architecture.md` (thesis + vocabulary + principles), then the
 domain doc for your area (`data-model.md`, `agent-runtime.md`, `ui.md`,
 `toolkit.md`, `observability.md`). They are TARGET-written (present tense);
-the only we-are-here doc is `docs/prds/agent-fsm/roadmap.md`. Conventions:
-`docs/conventions.md`.
+the only we-are-here doc is `docs/prds/agent-ctx/roadmap.md` (+
+`docs/prds/agent-ctx/minimal-context-ladder.md`, the context-rebuild plan of
+record). Conventions: `docs/conventions.md`.
 
 ## The ONE-mechanism table — never build a second
 
@@ -23,7 +24,7 @@ existing one needs strengthening IN PLACE.
 | Rendering | `seon.render` — one guarded walker, ai + html views | a second projection path; renders are NEVER stored |
 | Errors | `:seon/error` value (`seon.error`); catch sites record via `seon.error/record!` (fault-tagged datom, `:agent` never escalates) | throwing into the agent loop; a new error shape; console-only swallows |
 | State seeding/reset | `seon.state/reconcile!` (provenance-scoped diff) | ad-hoc seed/override/restore code paths |
-| Config | ONE manifest `config/system.edn` via `seon.config` (`SEON_CONFIG` picks the file; a variant = a SEPARATE file — `SEON_PROFILE` is inert) | env-var reads, per-feature config files |
+| Config | ONE manifest `config/system.edn` via `seon.config` (`SEON_CONFIG` picks the file) resolves ONCE at boot into the `:seon.config` DB **singleton** (`resolve-config-singleton`; `:seon.config/system-text` + every dial as datoms); RUNTIME reads the DB via `config/config-view` (accessors keep their names/arities) | env-var reads, per-feature config files, re-reading the manifest at runtime |
 | Literal search | `seon.agent.search` (`grep` files, `grep-graph` DB) | a new scan/query helper per caller |
 | Semantic search | `seon.embed` — ONE `:seon/embedding` attr + Proximum index (wire-server) | a second index or embedder |
 | Token counts | `seon.ai.tokens/estimate` — sizes shown to anyone are TOKENS | printing char counts; a second estimator |

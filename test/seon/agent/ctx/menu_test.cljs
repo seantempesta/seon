@@ -172,6 +172,81 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
+;; The toolkit-group seed (P6): the agent's HOME ns (`my.agent.<id>` —
+;; current-ns falls back to it when no turn-linked eval exists) requires
+;; my.plan; my.plan carries one SPECCED public fn the agent never called
+;; (plan!), one specced fn it did call (done! — must dedup against the
+;; recency group), and one spec-LESS public fn (never a toolkit entry).
+(defn- seed-toolkit!
+  []
+  (db/transact!
+    {:seon.db/tx-data
+     [{:seon.ns/name :my.plan}
+      {:seon.ns/name (keyword (str "my.agent." a-id))
+       :seon.ns/require-edges
+       [{:seon.ns.require/target :my.plan
+         :seon.ns.require/alias  'plan}]}
+      {:seon.fn/sym      "my.plan/plan!"
+       :seon.fn/fn-var?  true
+       :seon.fn/ns       [:seon.ns/name :my.plan]
+       :seon.fn/spec     "[:=> [:cat :my.plan/plan-request] :my.plan/plan-response]"
+       :seon.fn/arglists "([request])"
+       :seon.fn/doc      "Author a WHOLE plan in ONE transact — goal, pace, steps."}
+      {:seon.fn/sym     "my.plan/done!"        ; upsert: spec + ns onto the
+       :seon.fn/ns      [:seon.ns/name :my.plan] ; recency-seeded row
+       :seon.fn/spec    "[:=> [:cat :my.plan/id-request] :my.plan/write-response]"}
+      {:seon.fn/sym      "my.plan/no-spec-fn"
+       :seon.fn/fn-var?  true
+       :seon.fn/ns       [:seon.ns/name :my.plan]
+       :seon.fn/arglists "([x])"
+       :seon.fn/doc      "Public but unspecced — not a toolkit entry."}]}))
+
+(deftest toolkit-group-one-numbering-dedup-and-cap
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (seed-verbs!)
+                (.then (fn [env] (ok! env) (seed-toolkit!)))
+                (.then
+                  (fn [env]
+                    (ok! env)
+                    (let [req {:seon.db/db @conn :seon.agent/id a-id}
+                          out (menu/recent-verbs-block req)
+                          offers (menu/verb-offers @conn a-id)]
+                      (is (str/includes? out "① (my.plan/done!")
+                          "recency group still leads the numbering")
+                      (is (str/includes? out "; toolkit — more verbs")
+                          "the toolkit group renders under its divider")
+                      (is (str/includes? out "③ (my.plan/plan! [request] …)")
+                          "an uncalled specced toolkit verb gets the NEXT glyph (one numbering)")
+                      (is (= 1 (count (re-seq #"my\.plan/done!" out)))
+                          "a verb already in the recency group is never duplicated")
+                      (is (not (str/includes? out "no-spec-fn"))
+                          "a spec-less public fn is not a toolkit entry")
+                      (is (= ["my.plan/done!" "my.plan/step!" "my.plan/plan!"]
+                             (mapv #(first (str/split (:seon.typeahead/label %) #" "))
+                                   offers))
+                          "wire offers mirror the rendered concatenation")
+                      (is (= ["①" "②" "③"]
+                             (mapv :seon.typeahead/glyph offers))
+                          "offer glyphs are the one continuous numbering"))))
+                (.then (fn [_]
+                         (db/transact!
+                           {:seon.db/tx-data
+                            [{:seon.typeahead/id          "policy"
+                              :seon.typeahead/toolkit-cap 0}]})))
+                (.then
+                  (fn [env]
+                    (ok! env)
+                    (let [out (menu/recent-verbs-block
+                                {:seon.db/db @conn :seon.agent/id a-id})]
+                      (is (not (str/includes? out "toolkit"))
+                          "toolkit-cap 0 removes the toolkit group")
+                      (is (not (str/includes? out "plan!"))
+                          "…and its entries")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 (deftest plan-ledger-current-first-open-next-done-absent
   (async done
     (-> (with-conn

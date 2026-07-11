@@ -223,6 +223,83 @@ built is the system being run, which is what makes it sustainable.
   the real block/namespace they validate; `:batch`/`:stream`, never
   "Mode A/B".
 
+## Cutover status (2026-07-11 — DONE, running)
+
+`system.edn` now carries the graduated v3.1 system-text (single source —
+`minimal.edn` inherits it) and the evidenced tree: `:namespaces` +
+`:plan` (with the html twin — the human's live plan tile) + `:transcript`,
+plus root's three KEPT derived fault surfaces (`:core-faults`,
+`:instrumentation-gaps`, `:orphaned-agents` — 0 tokens when healthy;
+first formally validated at the `warnings` milestone). Root's live-tile
+dashboard, skills catalog/bodies, soul/agents file-blocks, and every
+other legacy block are OUT of the running tree; the old tree is frozen
+in `config/legacy.edn` (comparison drives only, expires after
+`db`+`warnings`+`live-tile`). Live proof: `cluster reset default` →
+pod boots on DeepSeek (`:stream` per-model default), `/` 200, the debug
+render shows exactly the expected blocks + the v3.1 text. acme is
+UNAFFECTED tree-wise (its agent-context replaces wholesale) but inherits
+the graduated system-text on its next restart (coordination.md flagged).
+
+## Hacks → production (the consolidated fix-it-all plan, owner-ordered 2026-07-11)
+
+Sources: the dual-code-paths registry (docs/seon/orchestrator/issues/
+dual-code-paths-registry.md — THE canonical list; open rows summarized
+here, the registry stays the tracker), the two 2026-07-11 audits
+(research/claude-md-audit + research/vocabulary-audit), and this arc's
+own known defects. Ordered; each is an opus unit against a written spec.
+
+1. **Phase 0 sweep** (task #6, spec above): verbs→functions (~110 living-doc
+   hits; toolkit.md is fully verb-framed; poison surface = agent-facing
+   strings in ctx.cljs/menu.cljs/client.cljs seeds), rungs→milestone names
+   (incl. RENAMING THIS FILE — "ladder" is retired vocabulary; new name
+   `context-rebuild.md`), Mode A/B→`:batch`/`:stream`, DEPRECATED headers
+   on legacy block render fns. Identifier renames listed for coordination
+   (11 symbols + `:recent-verbs`, typeahead-lane-owned). Owner decisions
+   queued: D1 diffusion "canvas-text" homonym (recommend: exempt,
+   documented), D2 "store" for durable-store paths (legit) vs db-synonym
+   uses (fix), D3 "root world" idiom, D4 `dispatch-repl-verb!` →
+   `dispatch-repl-form!`.
+2. **Harness consolidation** (task #4): port the milestone harness into
+   src-inspect-ai (contracts→datasets, oracles+fab-analyze→scorers, model
+   column), retire tmp/*-drive.sh + the tmp/t4-* fixtures into proper
+   homes, FIX the broken bundle sha fence (hashes the loader only — use
+   main.js.sha256/build-dir hash, the bench harness precedent).
+3. **Post-cutover deletions** (after a few days' stability): the shipped
+   `ctx/system-text` def (still the silent fallback when the datom is
+   absent — a live poison vector; make absence LOUD instead), the in-code
+   `default-ctx-blocks` legacy entries (config/legacy.edn becomes their
+   only home until expiry), the identity file-block read paths, the skills
+   catalog/body loading machinery.
+4. **Detector gap #10**: multi-line bare-map fabricated results evade the
+   line-shaped claim regexes (`:batch` only; 5 residual turns in the v0
+   runs).
+5. **Registry open rows, tooling class** (each small): C55/C56 bare
+   `[:cat :map]` request schemas (named open request schemas per the C54
+   pattern), C58 inline `:seon.agent/id` shape duplication (mechanical),
+   C30 sourceless schema-keyword ns replay stubs, C59 sequential
+   eval-batch! tee loss (latent hazard), C53 two candidate scorers (owner
+   call: parameterize the band), C49 skill-body two-corpora duplication
+   (owner call — may DISSOLVE with the skills retirement in this arc),
+   C25/C29 (perf notes, measure first), C60/C40 (owner-deferred, observe).
+   C26 (db/query tuple misreading) belongs to the `db` milestone's
+   teaching, not a code unit.
+6. **Env-coupled suite flake**: 18 preflight-repair failures once, green
+   on identical re-run — root-cause session (ambient compile-state
+   pollution suspected).
+7. **acme home-requires superset** hand-duplication (acme.edn's own
+   comment admits the drift risk) — derive or document per the
+   shared-shape rule.
+
+## Resume-here (for a fresh session)
+
+The default cluster RUNS the rebuilt tree (cutover above). In-flight at
+wind-down (2026-07-11): the interactive plan tile unit (html twin live on
+the pod; final polish/report may be unfinished — check `git log` +
+`src/my/plan/internal.cljs` state), tasks #4/#5/#6/#7 queued with full
+specs, the `db` milestone is the next capability drive. Session state:
+memory `project_context_rebuild_2026_07_10.md`; per-drive evidence:
+`evals/runs/2026-07-10-minimal-buildup/README.md`.
+
 ## Open defects riding this arc
 
 - #10 multi-line bare-map strip gap (fabricated indented maps evade the
