@@ -2363,3 +2363,9 @@ cluster on the local diffusion surface:
 Spine: docs/prds/diffusion-dynamic-context/CLAUDE.md (runbook + current
 state) · typeahead-design.md (the measured surface) ·
 planner-worker-design.md (P7 direction).
+
+**Addendum (owner, same day):** the local MLX worker is being renamed
+**`diffusion-server`** — when the test config lands, the `bin/seon`
+process registration (today `dg-worker`) and all runbook/config mentions
+use that name. Fold your side's naming into your requirements reply so
+the rename lands once.
