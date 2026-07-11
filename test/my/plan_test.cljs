@@ -13,6 +13,7 @@
   (:require
     [cljs.test :refer [deftest is async use-fixtures]]
     [clojure.string :as str]
+    [clojure.walk :as walk]
     [datahike.api :as d]
     [malli.instrument :as mi]
     [seon.client :as client]
@@ -741,5 +742,135 @@
                                    (open-titles
                                      (plan/list-open {:seon.agent/id a-id})))
                                 "the other agent's scope is untouched")))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; --- depth-2+ coverage. The suite-blindness gap: EVERY prior tree was
+;; --- depth-1, so a broken recursive roll-up ("0 of 0 steps done" over a
+;; --- nested plan) shipped unseen. These assert the shared rule derivations
+;; --- (rollup/ready-leaves/ready?) over a NESTED tree AND that the html twin
+;; --- agrees with the :ai block on the same tree — post re-unification that
+;; --- agreement is STRUCTURAL (both faces read the SAME rollup/ready?/anchor).
+
+(defn- hiccup-strings
+  "Every string anywhere in hiccup `h` — for asserting rendered content."
+  [h]
+  (let [acc (atom [])]
+    (walk/postwalk (fn [x] (when (string? x) (swap! acc conj x)) x) h)
+    @acc))
+
+(deftest depth-2-rollup-ready-leaves-and-html-ai-agree
+  (async done
+    (let [st (atom {})]
+      (-> (with-agent-conn
+            (fn []
+              (-> (plan/plan!
+                    {:my.plan/title "deep root"
+                     :my.plan/children
+                     [{:my.plan/title "phase-A" :my.plan/ref "A"
+                       :my.plan/children
+                       [{:my.plan/title "a1" :my.plan/ref "a1"}
+                        {:my.plan/title "a2" :my.plan/ref "a2"}]}
+                      {:my.plan/title "phase-B" :my.plan/ref "B"
+                       :my.plan/children
+                       [{:my.plan/title "b1" :my.plan/ref "b1"}]}]})
+                  (.then
+                    (fn [{:my.plan/keys [ok? root ids]}]
+                      (reset! st {:root root :ids ids})
+                      (is (true? ok?))
+                      (let [db @db/*conn*]
+                        ;; (1) roll-up counts leaves at DEPTH 2 (a1 a2 b1 = 3)
+                        (is (= {:my.plan/done 0 :my.plan/total 3 :my.plan/done? false}
+                               (plan-int/rollup db root))
+                            "root roll-up counts the 3 depth-2 leaves, none done")
+                        (is (= {:my.plan/done 0 :my.plan/total 2 :my.plan/done? false}
+                               (plan-int/rollup db (get ids "A")))
+                            "phase-A roll-up counts its 2 leaves (nested, not 0/0)")
+                        ;; (2) ready-leaves = leaves ONLY, never an undrained parent
+                        (let [ready-ids (set (map :my.plan/id
+                                                  (plan-int/ready-leaves
+                                                    db (plan-int/agent-eid db a-ref))))]
+                          (is (= #{(get ids "a1") (get ids "a2") (get ids "b1")}
+                                 ready-ids)
+                              "every open leaf is ready; no undrained parent listed")
+                          (is (not (contains? ready-ids (get ids "A")))
+                              "phase-A (undrained non-leaf) is NEVER in the ready set")))
+                      ;; (3) done! a grandchild moves the roll-up
+                      (plan/done! {:my.plan/id (get-in @st [:ids "a1"])})))
+                  (.then
+                    (fn [_]
+                      (let [{:keys [root]} @st db @db/*conn*]
+                        (is (= {:my.plan/done 1 :my.plan/total 3 :my.plan/done? false}
+                               (plan-int/rollup db root))
+                            "closing a depth-2 leaf advances the root roll-up 0->1")
+                        (plan/done! {:my.plan/id (get-in @st [:ids "a2"])}))))
+                  (.then
+                    (fn [_]
+                      (let [{:keys [root ids]} @st db @db/*conn*]
+                        (is (= {:my.plan/done 2 :my.plan/total 2 :my.plan/done? true}
+                               (plan-int/rollup db (get ids "A")))
+                            "phase-A fully drained -> 2/2 done?")
+                        (is (plan-int/ready? db (get ids "A"))
+                            "a drained non-leaf is ready-to-close (verify + done!)")
+                        ;; (4) html twin AGREES with the :ai block on the SAME tree
+                        (let [ai   (plan-int/plan-body db a-ref)
+                              html (plan-int/plan-block-html
+                                     {:seon.db/db db :seon.agent/id a-id})
+                              hs   (hiccup-strings html)
+                              {:my.plan/keys [done total]} (plan-int/rollup db root)]
+                          (is (some #(= (str done "/" total " done") %) hs)
+                              "html root card shows the SAME root roll-up as the shared fn")
+                          (is (str/includes? ai (str done " of " total))
+                              "the :ai block narrates the SAME root roll-up")
+                          (is (some #(= "2/2" %) hs)
+                              "the phase-A row shows its nested 2/2 (depth>1 count correct)"))))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest plan-rejects-misspelled-my-plan-keys
+  ;; Registry class (silent unknown-key acceptance in my.* request maps): an
+  ;; OPEN request map silently swallows a wrongly-NAMED :my.plan/* key
+  ;; (:my.plan/steps for :my.plan/children), minting a childless plan. The
+  ;; COMPUTED guard (accepted set derived from the schemas, no name list)
+  ;; rejects it loudly + a did-you-mean; foreign/injectable + correct keys
+  ;; are unaffected. Recursion catches a child-level typo too.
+  (async done
+    (-> (with-agent-conn
+          (fn []
+            (-> (plan/plan! {:my.plan/title "typo plan"
+                             :my.plan/steps [{:my.plan/title "x"}]})
+                (.then (fn [{ok? :my.plan/ok? error :my.plan/error}]
+                         (is (false? ok?)
+                             "the wrong-key request FAILS, not silently succeeds")
+                         (is (str/includes? error ":my.plan/steps")
+                             "the envelope names the unknown key")
+                         (is (str/includes? error ":my.plan/children")
+                             "and lists the accepted keys — the real one is there")
+                         (is (empty? (:my.plan/steps (plan/list-open {})))
+                             "a rejected request mints NO plan (the silent bug is gone)")
+                         (plan/plan! {:my.plan/title "typo2" :my.plan/gol "why"})))
+                (.then (fn [{ok? :my.plan/ok? error :my.plan/error}]
+                         (is (false? ok?))
+                         (is (re-find #"did you mean :my.plan/goal" error)
+                             "a near-miss key gets a did-you-mean suggestion")
+                         (plan/plan! {:my.plan/title "root ok"
+                                      :my.plan/children
+                                      [{:my.plan/title "kid" :my.plan/xpect "oops"}]})))
+                (.then (fn [{ok? :my.plan/ok? error :my.plan/error}]
+                         (is (false? ok?) "a misspelled key inside a child is caught")
+                         (is (re-find #"did you mean :my.plan/expect" error)
+                             "the child guard uses the NODE key set for its suggestion")
+                         (plan/step! {:my.plan/title "s"
+                                      :my.plan/parnt [:my.plan/id "z"]})))
+                (.then (fn [{ok? :my.plan/ok? error :my.plan/error}]
+                         (is (false? ok?))
+                         (is (re-find #"did you mean :my.plan/parent" error)
+                             "step! rejects its own misspelled key (one shared check)")
+                         (plan/plan! {:my.plan/title "correct" :my.plan/goal "g"
+                                      :my.plan/children
+                                      [{:my.plan/title "kid" :my.plan/ref "k"}]})))
+                (.then (fn [{ok? :my.plan/ok?}]
+                         (is (true? ok?)
+                             "a correctly-keyed plan is unaffected by the guard"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

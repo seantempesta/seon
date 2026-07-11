@@ -19,7 +19,10 @@
    the same value so an agent can still read and extend it."
   (:require
     [clojure.string :as str]
-    [seon.db :as db]))
+    [clojure.walk :as walk]
+    [seon.db :as db]
+    [seon.repair.candidates :as cand]
+    [seon.schema :as schema]))
 
 (def rules
   "Datalog rules over the plan graph — `my.plan/rules` re-defs this value:
@@ -78,6 +81,78 @@
     {:my.plan/ok? true :my.plan/id id}
     (fail (str verb ": db write failed — "
                (get-in env [:seon.db/error :seon.error/message])))))
+
+;; --- Loud unknown-key guard (registry class: silent unknown-key acceptance
+;; --- in my.* request maps). A request map is OPEN — the eval boundary
+;; --- composes injectable keys in, and foreign-namespace keys pass through —
+;; --- so a MISSPELLED `:my.plan/*` key (e.g. `:my.plan/steps` for
+;; --- `:my.plan/children`) is silently dropped and mints a childless plan.
+;; --- The accepted key set is DERIVED from the registered schemas (never a
+;; --- hand list), so it can't drift; the fix suggestion reuses the ONE
+;; --- candidate ranker (`seon.repair.candidates`).
+
+(defn schema-map-keys
+  "The accepted map-entry keys of registered schema `k`, DERIVED from its
+   definition — every key of every nested `[:map …]` (so a `:schema`/
+   registry-wrapped node contributes its keys). Never a hand list."
+  [k]
+  (let [acc (volatile! #{})]
+    (walk/postwalk
+      (fn [x]
+        (when (and (vector? x) (= :map (first x)))
+          (doseq [e (rest x)]
+            (when (and (vector? e) (keyword? (first e)))
+              (vswap! acc conj (first e)))))
+        x)
+      (schema/schema-definition k))
+    @acc))
+
+(defn my-plan-key?
+  "True iff keyword `k` is namespaced under `my.plan` (or `my.plan.*`)."
+  [k]
+  (boolean (when-let [ns (namespace k)]
+             (or (= ns "my.plan") (str/starts-with? ns "my.plan.")))))
+
+(defn unknown-key-fail
+  "Fail envelope for the FIRST `my.plan`-namespaced key in `request` that
+   `accepted` doesn't contain — naming the key + a did-you-mean over the
+   accepted `my.plan` keys ([[cand/rank-candidates]]) + the full accepted
+   set — or nil when every my.plan key is accepted. Foreign-namespace and
+   injectable keys pass (the open-map convention stays intact)."
+  [verb request accepted]
+  (when-let [bad (->> (keys request)
+                      (filter my-plan-key?)
+                      (remove accepted)
+                      first)]
+    (let [targets (filterv my-plan-key? accepted)
+          sugg    (->> (cand/rank-candidates (name bad) (mapv name targets))
+                       (mapv (fn [{to :seon.repair/to}] (str ":my.plan/" to))))]
+      (fail (str verb ": unknown key " bad
+                 (when (seq sugg)
+                   (str " — did you mean " (str/join " or " sugg) "?"))
+                 " Accepted my.plan keys: "
+                 (str/join " " (sort targets)) ".")))))
+
+(defn check-request-keys
+  "Nil, or a fail envelope, when `request` carries an unknown `my.plan` key —
+   accepted set DERIVED from the registered `schema-kw` request schema."
+  [verb request schema-kw]
+  (unknown-key-fail verb request (schema-map-keys schema-kw)))
+
+(defn check-plan-keys
+  "The recursive plan! key guard: the top `request` map against
+   `:my.plan/plan-request`, then every `:my.plan/children` node (at any
+   depth) against `:my.plan/plan-node` — first offender → fail envelope,
+   else nil. Catches a misspelled key that would otherwise vanish and mint
+   a childless plan."
+  [verb request]
+  (let [node-keys (schema-map-keys :my.plan/plan-node)
+        check-node (fn check-node [node]
+                     (or (unknown-key-fail verb node node-keys)
+                         (some #(when (map? %) (check-node %))
+                               (:my.plan/children node))))]
+    (or (unknown-key-fail verb request (schema-map-keys :my.plan/plan-request))
+        (some #(when (map? %) (check-node %)) (:my.plan/children request)))))
 
 ;; --- Derived work-queue queries — all pure Datalog over the graph, with
 ;; --- [[rules]] as `%`. Nothing here is stored; blocked-ness, ready-ness,
@@ -565,21 +640,22 @@
 ;; --- WINDOWS (anchor + capped frontier + recent-done tail), the tile shows
 ;; --- the WHOLE forest — the human explores what the prompt windows away.
 ;; ---
-;; --- DERIVATION NOTE (2026-07-11): the tile derives structure, roll-up,
-;; --- blocked, and ready from ONE built forest ([[build-forest]] — a
-;; --- query + `[*]` pulls + pure aggregation over plain node maps)
-;; --- instead of [[rollup]] / [[ready-leaves]] / [[anchor]], because the
-;; --- datahike-CLJS recursive-rule executor returns only base-branch
-;; --- tuples (the `descendant` recursion yields nothing past depth 1 on
-;; --- every pod runtime — in-memory AND wire-store; the JVM engine over
-;; --- the same store is correct). RE-UNIFY on the shared rule derivations
-;; --- once that engine bug is fixed. Semantics mirror [[rules]]: parent
-;; --- done-ness is derived from its leaves, ready = open+unblocked leaf
-;; --- OR a drained open non-leaf, blocked = stored :blocked or an undone
-;; --- `needs` target. Plain pulled data only (no lazy Entity walk): a
-;; --- `my.*` render symbol is SCI-re-interpreted from its stored source
-;; --- at render time, and the plain-data primitives are the SCI-proven
-;; --- path ([[plan-body]] uses the same ones).
+;; --- STRUCTURE vs SIGNAL (2026-07-11): [[build-forest]] assembles ONLY the
+;; --- renderable nested TREE (parent→children layout, waiters from the
+;; --- inverted `needs` edges, timestamps + message-origin, oldest-first) —
+;; --- a projection the windowing :ai block never needs and the flat shared
+;; --- fns cannot give (they answer counts/positions, not a tree). Every
+;; --- derived SIGNAL — roll-up, done-ness, ready, blocked, the you-are-here
+;; --- position — comes from the SAME shared db fns the :ai block uses
+;; --- ([[rollup]] / [[ready?]] / [[blocked?]] / [[anchor]]), ONE derivation
+;; --- mechanism over the fixed recursive `descendant` rule. (Until the
+;; --- datahike-CLJS recursive-rule engine fix — fork 1598a824 — those rules
+;; --- yielded nothing past depth 1, so the tile carried a parallel pure-walk
+;; --- re-derivation; that workaround is now deleted and the tile agrees with
+;; --- the :ai block on every tree by construction.) Plain pulled data only
+;; --- (no lazy Entity walk): a `my.*` render symbol is SCI-re-interpreted
+;; --- from its stored source at render time, and the plain-data primitives
+;; --- are the SCI-proven path ([[plan-body]] uses the same ones).
 ;; ---
 ;; --- Interactivity rides Datastar SIGNALS (the client-side signal store
 ;; --- survives the SSE whole-element morph; `__ifmissing` keeps a re-morph
@@ -668,62 +744,18 @@
          step-order
          (mapv #(node % #{})))))
 
-(defn- subtree-leaves
-  "The leaf nodes of walked `node`'s subtree (`node` itself when a leaf)."
-  [node]
-  (if (empty? (:my.plan/children node))
-    [node]
-    (mapcat subtree-leaves (:my.plan/children node))))
-
-(defn- node-progress
-  "Done/total/done? over walked `node`'s leaves (mirrors [[rollup]])."
-  [node]
-  (let [ls    (subtree-leaves node)
-        total (count ls)
-        done  (count (filter #(= :done (:my.plan/status %)) ls))]
-    {:my.plan/done  done
-     :my.plan/total total
-     :my.plan/done? (and (pos? total) (= done total))}))
-
-(defn- forest-index
-  "id → walked node, over every node in walked `roots`."
-  [roots]
-  (into {}
-        (comp (mapcat #(tree-seq (fn [_] true) :my.plan/children %))
-              (map (fn [n] [(:my.plan/id n) n])))
-        roots))
-
-(defn- node-done?
-  "Derived done-ness of walked `node` (leaf status / leaves roll-up)."
-  [node]
-  (if (empty? (:my.plan/children node))
-    (= :done (:my.plan/status node))
-    (:my.plan/done? (node-progress node))))
-
-(defn- node-blocked?
-  "True iff `node` is stored `:blocked` or waits on an undone need."
-  [idx node]
-  (boolean
-    (or (= :blocked (:my.plan/status node))
-        (some (fn [n]
-                (let [t (idx (:my.plan/id n))]
-                  (and t (not (node-done? t)))))
-              (:my.plan/needs node)))))
-
-(defn- node-ready?
-  "True iff `node` is actionable now — an open unblocked leaf, or an open
-   unblocked non-leaf whose subtree is drained (mirrors the `ready` rule)."
-  [idx node]
-  (and (= :open (:my.plan/status node))
-       (not (node-blocked? idx node))
-       (or (empty? (:my.plan/children node))
-           (every? node-done? (:my.plan/children node)))))
+;; --- Per-node SIGNALS delegate to the shared rule-backed db fns
+;; --- ([[rollup]] / [[ready?]] / [[blocked?]]) — the SAME derivations the
+;; --- :ai block uses. `db` is the frozen render db value; a node carries its
+;; --- `:my.plan/id` so every signal is one shared-fn call keyed by that id.
+;; --- (Roll-up self-includes a leaf, so `(:my.plan/done? (rollup db id))` is
+;; --- the done-ness of BOTH a leaf and a drained non-leaf — one call.)
 
 (defn- need-line-html
-  "One `waits on` line for need `n` — done-glyph + title + id."
-  [idx n]
-  (let [t     (idx (:my.plan/id n))
-        done? (and t (node-done? t))]
+  "One `waits on` line for need `n` — done-glyph + title + id (done-ness of
+   the target derived via the shared [[rollup]] over db value `db`)."
+  [db n]
+  (let [done? (:my.plan/done? (rollup db (:my.plan/id n)))]
     [:li {:class "flex items-center gap-1"}
      [:span {:class (str "shrink-0 " (if done? "text-success" "text-warning"))}
       (if done? "✓" "○")]
@@ -732,7 +764,7 @@
 
 (defn- step-detail-html
   "Walked `node`'s expand-in-place detail panel — `data-show`n by $planstep."
-  [idx node]
+  [db node]
   (let [id  (:my.plan/id node)
         row (fn [label body]
               [:div {:class "flex gap-2"}
@@ -753,7 +785,7 @@
      (when-let [needs (seq (:my.plan/needs node))]
        (row "waits on"
             (into [:ul {:class "flex flex-col gap-1"}]
-                  (map #(need-line-html idx %))
+                  (map #(need-line-html db %))
                   needs)))
      (when-let [ws (seq (:my.plan/waiters node))]
        (row "blocks" (str/join ", " ws)))
@@ -766,16 +798,17 @@
    Glyphs: `●` active (amber, NOW), `✓` done (dim; hidden until $planfull),
    `○` open (`ready` tag when actionable), `◌` blocked. A non-leaf carries
    its subtree `done/total` roll-up and a collapse chevron ($planclosed,
-   click-stopped so it doesn't also toggle the detail)."
-  [idx node next-id depth]
+   click-stopped so it doesn't also toggle the detail). Signals delegate to
+   the shared [[rollup]]/[[ready?]]/[[blocked?]] over db value `db`."
+  [db node next-id depth]
   (let [id       (:my.plan/id node)
         children (:my.plan/children node)
         leaf?    (empty? children)
-        ru       (when-not leaf? (node-progress node))
-        done?    (node-done? node)
+        ru       (rollup db id)
+        done?    (:my.plan/done? ru)
         active?  (= :active (:my.plan/status node))
         next?    (= id next-id)
-        blocked? (and (not done?) (node-blocked? idx node))
+        blocked? (and (not done?) (blocked? db id))
         [glyph gcls] (cond
                        active?  ["●" "text-signal"]
                        done?    ["✓" "text-text-500"]
@@ -806,22 +839,22 @@
       (when (and next? (not active?))
         [:span {:class "text-2xs text-signal shrink-0"} "next"])
       (when (and (not done?) (not active?) (not next?)
-                 (node-ready? idx node))
+                 (ready? db id))
         [:span {:class "text-2xs text-success shrink-0"} "ready"])
       (when-not leaf?
         [:span {:class "text-2xs text-text-500 tabular-nums shrink-0"}
          (str (:my.plan/done ru) "/" (:my.plan/total ru))])]
-     (step-detail-html idx node)
+     (step-detail-html db node)
      (when-not leaf?
        [:ul {:class "flex flex-col"
              :data-show (str "!$planclosed.includes(' " id " ')")}
-        (map #(step-row-html idx % next-id (inc depth)) children)])]))
+        (map #(step-row-html db % next-id (inc depth)) children)])]))
 
 (defn- root-card-html
   "One plan-root card: title + pace + roll-up, goal line, thin amber
-   progress bar, then the full step tree."
-  [idx root next-id]
-  (let [{:my.plan/keys [done total]} (node-progress root)
+   progress bar, then the full step tree (roll-up via shared [[rollup]])."
+  [db root next-id]
+  (let [{:my.plan/keys [done total]} (rollup db (:my.plan/id root))
         pct  (if (pos? total) (quot (* 100 done) total) 0)
         goal (:my.plan/goal root)
         pace (:my.plan/pace root)]
@@ -840,9 +873,9 @@
      [:div {:class "bg-base-800 w-full"
             :style "height:3px;border-radius:2px;overflow:hidden"}
       [:div {:style (str "height:3px;background:#f0b429;width:" pct "%")}]]
-     (step-detail-html idx root)
+     (step-detail-html db root)
      [:ul {:class "flex flex-col"}
-      (map #(step-row-html idx % next-id 0) (:my.plan/children root))]]))
+      (map #(step-row-html db % next-id 0) (:my.plan/children root))]]))
 
 (defn plan-block-html
   "Live, explorable HTML twin of [[plan-block]] — the `/agent/{id}` tile.
@@ -851,10 +884,13 @@
    does not): per root a title/goal/pace header with a done/total roll-up
    and a thin amber progress bar, then the step tree — `●` active (NOW,
    highlighted), `○` open (`ready`-tagged), `◌` blocked, `✓` done (hidden
-   until the show-completed toggle), `✉` message-minted. Structure and
-   state derive from ONE built forest ([[build-forest]] — see the
-   derivation note above); the recently-completed tail reuses
-   [[recent-done]]. Interactivity is Datastar signals (they live
+   until the show-completed toggle), `✉` message-minted. STRUCTURE comes
+   from [[build-forest]] (the renderable nested tree); every SIGNAL —
+   roll-up, done, ready, blocked, and the you-are-here position — derives
+   from the SAME shared db fns the :ai block uses ([[rollup]]/[[ready?]]/
+   [[blocked?]]/[[anchor]], see the derivation note above); the
+   recently-completed tail reuses [[recent-done]]. Interactivity is
+   Datastar signals (they live
    client-side, so they survive the SSE whole-element morph): click a
    step to expand its detail in place (description, verify-before-done
    `expect`, needs edges both ways, timestamps, id); chevrons collapse
@@ -871,22 +907,14 @@
     (if (empty? forest)
       [:div {:class "text-text-500 italic text-2xs font-mono py-1"}
        "no plan yet"]
-      (let [idx        (forest-index forest)
-            all-nodes  (mapcat #(tree-seq (fn [_] true) :my.plan/children %)
-                               forest)
-            ;; The you-are-here: an :active step wins; else the oldest
-            ;; ready leaf is the presumed next position (mirrors [[anchor]]).
-            active?    (some #(= :active (:my.plan/status %)) all-nodes)
-            next-id    (when-not active?
-                         (->> all-nodes
-                              (filter #(and (empty? (:my.plan/children %))
-                                            (node-ready? idx %)))
-                              (sort-by #(some-> (:my.plan/created-at %)
-                                                .getTime))
-                              first
-                              :my.plan/id))
-            ;; Rows hidden behind $planfull = the done non-root nodes.
-            done-count (count (filter node-done?
+      (let [;; The you-are-here — the SAME [[anchor]] the :ai block reads:
+            ;; an :active step wins; else the oldest ready leaf is next.
+            a          (anchor db oe)
+            next-id    (when-not (:my.plan/active? a)
+                         (:my.plan/id (:my.plan/step a)))
+            ;; Rows hidden behind $planfull = the done non-root nodes;
+            ;; done-ness derives from the shared [[rollup]].
+            done-count (count (filter #(:my.plan/done? (rollup db (:my.plan/id %)))
                                       (mapcat #(tree-seq (fn [_] true)
                                                          :my.plan/children %)
                                               (mapcat :my.plan/children
@@ -895,7 +923,7 @@
         [:div {:class "flex flex-col gap-2 text-xs font-mono"
                :data-signals__ifmissing
                "{planstep: '', planclosed: '', planfull: false, plandone: false}"}
-         (map #(root-card-html idx % next-id) forest)
+         (map #(root-card-html db % next-id) forest)
          (when (pos? done-count)
            [:div {:class (str "flex items-center gap-1 text-2xs text-text-400 "
                               "cursor-pointer select-none")

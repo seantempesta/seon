@@ -219,31 +219,34 @@
    tree/DAG; `:expect` states its falsifiable outcome — all optional.
    → {::ok? true ::id _} or a fail envelope."
   {:malli/schema [:=> [:cat ::step-request] ::write-response]}
-  [{::keys [title description expect from parent needs] agent-id :seon.agent/id}]
-  (let [agent (internal/agent-ref agent-id)]
-    (cond
-      (or (nil? title) (str/blank? title))
-      (internal/fail "step!: blank :my.plan/title refused — say what the step is.")
+  [{::keys [title description expect from parent needs] agent-id :seon.agent/id
+    :as request}]
+  (or
+    (internal/check-request-keys "step!" request ::step-request)
+    (let [agent (internal/agent-ref agent-id)]
+      (cond
+        (or (nil? title) (str/blank? title))
+        (internal/fail "step!: blank :my.plan/title refused — say what the step is.")
 
-      (nil? agent)
-      (internal/fail (str "step!: no :seon.agent/id resolved — pass one, or call "
-                          "from inside an agent turn (the boundary fills in you)."))
+        (nil? agent)
+        (internal/fail (str "step!: no :seon.agent/id resolved — pass one, or call "
+                            "from inside an agent turn (the boundary fills in you)."))
 
-      :else
-      (let [id (db/new-id!)]
-        (->> (await (db/transact!
-                      {:seon.db/tx-data
-                       [(cond-> {::id         id
-                                 ::title      title
-                                 ::status     :open
-                                 ::created-at (js/Date.)
-                                 ::agent      agent}
-                          description (assoc ::description description)
-                          expect      (assoc ::expect expect)
-                          from        (assoc ::from from)
-                          parent      (assoc ::parent parent)
-                          (seq needs) (assoc ::needs needs))]}))
-             (internal/write-result "step!" id))))))
+        :else
+        (let [id (db/new-id!)]
+          (->> (await (db/transact!
+                        {:seon.db/tx-data
+                         [(cond-> {::id         id
+                                   ::title      title
+                                   ::status     :open
+                                   ::created-at (js/Date.)
+                                   ::agent      agent}
+                            description (assoc ::description description)
+                            expect      (assoc ::expect expect)
+                            from        (assoc ::from from)
+                            parent      (assoc ::parent parent)
+                            (seq needs) (assoc ::needs needs))]}))
+               (internal/write-result "step!" id)))))))
 
 (defn ^:async plan!
   "Author a WHOLE plan in ONE transact — goal, pace, nested steps, deps.
@@ -256,24 +259,26 @@
    ::ids <label→id>} or a fail envelope."
   {:malli/schema [:=> [:cat ::plan-request] ::plan-response]}
   [{::keys [title] agent-id :seon.agent/id :as request}]
-  (let [agent (internal/agent-ref agent-id)]
-    (cond
-      (or (nil? title) (str/blank? title))
-      (internal/fail "plan!: blank :my.plan/title refused — name the plan.")
+  (or
+    (internal/check-plan-keys "plan!" request)
+    (let [agent (internal/agent-ref agent-id)]
+      (cond
+        (or (nil? title) (str/blank? title))
+        (internal/fail "plan!: blank :my.plan/title refused — name the plan.")
 
-      (nil? agent)
-      (internal/fail (str "plan!: no :seon.agent/id resolved — pass one, or call "
-                          "from inside an agent turn (the boundary fills in you)."))
+        (nil? agent)
+        (internal/fail (str "plan!: no :seon.agent/id resolved — pass one, or call "
+                            "from inside an agent turn (the boundary fills in you)."))
 
-      :else
-      (let [{:keys [tx labels root-id error]} (internal/compile-plan agent request)]
-        (if error
-          (internal/fail error)
-          (let [env (await (db/transact! {:seon.db/tx-data tx}))]
-            (if (:seon.db/ok? env)
-              {::ok? true ::root root-id ::ids labels}
-              (internal/fail (str "plan!: store failed — "
-                                  (get-in env [:seon.db/error :seon.error/message]))))))))))
+        :else
+        (let [{:keys [tx labels root-id error]} (internal/compile-plan agent request)]
+          (if error
+            (internal/fail error)
+            (let [env (await (db/transact! {:seon.db/tx-data tx}))]
+              (if (:seon.db/ok? env)
+                {::ok? true ::root root-id ::ids labels}
+                (internal/fail (str "plan!: store failed — "
+                                    (get-in env [:seon.db/error :seon.error/message])))))))))))
 
 (defn ^:async active!
   "Take a step up: mark it `:active` — your rendered position anchor.
@@ -281,23 +286,25 @@
    One position at a time: any other `:active` step of the same agent is
    demoted back to `:open`. A `:done` step must be `reopen!`ed first."
   {:malli/schema [:=> [:cat ::id-request] ::write-response]}
-  [{::keys [id]}]
-  (case (internal/status-of id)
-    nil     (internal/fail (str "active!: no step " (pr-str id)
-                                " — (my.plan/next {}) shows the ready ids."))
-    :done   (internal/fail (str "active!: " (pr-str id)
-                                " is :done — reopen! it first."))
-    :active {::ok? true ::id id}
-    (let [db     @db/*conn*
-          agent  (:db/id (::agent (db/entity db [::id id])))
-          others (when agent
-                   (mapv :my.plan/id (internal/active-steps db agent)))]
-      (->> (await (db/transact!
-                    {:seon.db/tx-data
-                     (into [{::id id ::status :active}]
-                           (map (fn [o] {::id o ::status :open}))
-                           (remove #{id} others))}))
-           (internal/write-result "active!" id)))))
+  [{::keys [id] :as request}]
+  (or
+    (internal/check-request-keys "active!" request ::id-request)
+    (case (internal/status-of id)
+      nil     (internal/fail (str "active!: no step " (pr-str id)
+                                  " — (my.plan/next {}) shows the ready ids."))
+      :done   (internal/fail (str "active!: " (pr-str id)
+                                  " is :done — reopen! it first."))
+      :active {::ok? true ::id id}
+      (let [db     @db/*conn*
+            agent  (:db/id (::agent (db/entity db [::id id])))
+            others (when agent
+                     (mapv :my.plan/id (internal/active-steps db agent)))]
+        (->> (await (db/transact!
+                      {:seon.db/tx-data
+                       (into [{::id id ::status :active}]
+                             (map (fn [o] {::id o ::status :open}))
+                             (remove #{id} others))}))
+             (internal/write-result "active!" id))))))
 
 (defn ^:async done!
   "Mark a step done; may unblock its dependents next turn.
@@ -306,31 +313,35 @@
    that you performed an action. Stamps `::completed-at`. Already-done is
    idempotent success; unknown id → fail envelope."
   {:malli/schema [:=> [:cat ::id-request] ::write-response]}
-  [{::keys [id]}]
-  (case (internal/status-of id)
-    nil   (internal/fail (str "done!: no step " (pr-str id)
-                              " — (my.plan/list-open {}) shows the open ids."))
-    :done {::ok? true ::id id}
-    (->> (await (db/transact!
-                  {:seon.db/tx-data [{::id           id
-                                      ::status       :done
-                                      ::completed-at (js/Date.)}]}))
-         (internal/write-result "done!" id))))
+  [{::keys [id] :as request}]
+  (or
+    (internal/check-request-keys "done!" request ::id-request)
+    (case (internal/status-of id)
+      nil   (internal/fail (str "done!: no step " (pr-str id)
+                                " — (my.plan/list-open {}) shows the open ids."))
+      :done {::ok? true ::id id}
+      (->> (await (db/transact!
+                    {:seon.db/tx-data [{::id           id
+                                        ::status       :done
+                                        ::completed-at (js/Date.)}]}))
+           (internal/write-result "done!" id)))))
 
 (defn ^:async reopen!
   "Flip a done/blocked step back to open; retract its `::completed-at`.
 
    Absent means absent — nil is never stored."
   {:malli/schema [:=> [:cat ::id-request] ::write-response]}
-  [{::keys [id]}]
-  (case (internal/status-of id)
-    nil   (internal/fail (str "reopen!: no step " (pr-str id) "."))
-    :open {::ok? true ::id id}
-    (->> (await (db/transact!
-                  {:seon.db/tx-data
-                   [{::id id ::status :open}
-                    [:db/retract [::id id] ::completed-at]]}))
-         (internal/write-result "reopen!" id))))
+  [{::keys [id] :as request}]
+  (or
+    (internal/check-request-keys "reopen!" request ::id-request)
+    (case (internal/status-of id)
+      nil   (internal/fail (str "reopen!: no step " (pr-str id) "."))
+      :open {::ok? true ::id id}
+      (->> (await (db/transact!
+                    {:seon.db/tx-data
+                     [{::id id ::status :open}
+                      [:db/retract [::id id] ::completed-at]]}))
+           (internal/write-result "reopen!" id)))))
 
 (defn ^:async needs!
   "Add dependency edge(s) — the step is ready only after each `:on` is done.
@@ -338,24 +349,28 @@
    Cardinality-many. Remove one via
    `[:db/retract [:my.plan/id id] :my.plan/needs ref]`."
   {:malli/schema [:=> [:cat ::needs-request] ::write-response]}
-  [{::keys [id on]}]
-  (case (internal/status-of id)
-    nil (internal/fail (str "needs!: no step " (pr-str id) "."))
-    (->> (await (db/transact!
-                  {:seon.db/tx-data
-                   (mapv (fn [ref] [:db/add [::id id] ::needs ref]) on)}))
-         (internal/write-result "needs!" id))))
+  [{::keys [id on] :as request}]
+  (or
+    (internal/check-request-keys "needs!" request ::needs-request)
+    (case (internal/status-of id)
+      nil (internal/fail (str "needs!: no step " (pr-str id) "."))
+      (->> (await (db/transact!
+                    {:seon.db/tx-data
+                     (mapv (fn [ref] [:db/add [::id id] ::needs ref]) on)}))
+           (internal/write-result "needs!" id)))))
 
 (defn ^:async move!
   "Re-parent a step — the new parent replaces the old.
 
    `:parent` is cardinality-one. Identity, status, and deps unchanged."
   {:malli/schema [:=> [:cat ::move-request] ::write-response]}
-  [{::keys [id parent]}]
-  (case (internal/status-of id)
-    nil (internal/fail (str "move!: no step " (pr-str id) "."))
-    (->> (await (db/transact! {:seon.db/tx-data [{::id id ::parent parent}]}))
-         (internal/write-result "move!" id))))
+  [{::keys [id parent] :as request}]
+  (or
+    (internal/check-request-keys "move!" request ::move-request)
+    (case (internal/status-of id)
+      nil (internal/fail (str "move!: no step " (pr-str id) "."))
+      (->> (await (db/transact! {:seon.db/tx-data [{::id id ::parent parent}]}))
+           (internal/write-result "move!" id)))))
 
 (defn ^:async drop!
   "Retract a step AND its whole subtree.
@@ -364,8 +379,10 @@
    them (undo via db/as-of). → {::ok? true ::dropped <count>} or a fail
    envelope."
   {:malli/schema [:=> [:cat ::id-request] ::drop-response]}
-  [{::keys [id]}]
-  (await (internal/retract-subtree! id)))
+  [{::keys [id] :as request}]
+  (or
+    (internal/check-request-keys "drop!" request ::id-request)
+    (await (internal/retract-subtree! id))))
 
 (defn next
   "Your focus queue: READY leaves (open, unblocked), oldest first.
