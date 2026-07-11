@@ -38,16 +38,19 @@
 
    Per-step OBSERVABILITY: each round transacts one small
    `:seon.typeahead/*` step projection (transition, glyph, calibrated
-   margin, EOS logprob, forwards — datoms are projections; full
-   posteriors/events are NOT persisted). [[steps-tile-html]] renders the
-   last call's trace as the agent-page tile; the block installs itself
-   (once, via the ONE `ctx/install!` function) on the first recorded step."
+   margin, EOS logprob, forwards, wall, entropy, draft preview — datoms
+   are projections; full posteriors/events are NOT persisted). The
+   `:typeahead-steps` ctx block (`seon.agent.ctx.typeahead-steps` — the
+   render twin; this ns stays hiccup-free) derives the last call's
+   trace from these rows. The block is NEVER installed by this loop —
+   enabling it is an explicit per-agent `ctx/install!` (owner
+   constraint; the enable story lives in typeahead-design.md)."
   (:require
     [clojure.string :as str]
-    [seon.agent.ctx :as ctx]
     [seon.agent.ctx.menu :as menu]
     [seon.ai :as ai]
     [seon.ai.diffusiongemma :as dg]
+    [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.schema :as schema]))
 
@@ -68,20 +71,32 @@
 (schema/register! :seon.typeahead/eos-logprob :double)   ; done-ness meter readout
 (schema/register! :seon.typeahead/forwards :int)         ; decoder forwards this step
 (schema/register! :seon.typeahead/locked-count :int)
+(schema/register! :seon.typeahead/gen-s :double)          ; wall seconds this step (wire gen_s)
+(schema/register! :seon.typeahead/entropy-worst :double)  ; worst free-region token entropy (nats)
+(schema/register! :seon.typeahead/draft-preview :string)  ; truncated post-step draft text
+(schema/register! :seon.typeahead/draft-tokens :int)      ; FULL draft size, tokens/estimate
+(schema/register! :seon.typeahead/prompt-tokens :int)     ; the call's render size, tokens/estimate
+(schema/register! :seon.typeahead/worker-sha :string)     ; the worker build that answered
 (schema/register! :seon.typeahead/agent :seon.db/ref)
 
 (schema/register! :seon.typeahead/step
   [:map {:seon.db/entity true}
-   [:seon.typeahead/call         :seon.typeahead/call]
-   [:seon.typeahead/step-idx     :seon.typeahead/step-idx]
-   [:seon.typeahead/at           :seon.typeahead/at]
-   [:seon.typeahead/transition   :seon.typeahead/transition]
-   [:seon.typeahead/locked-count :seon.typeahead/locked-count]
-   [:seon.typeahead/glyph        {:optional true} :seon.typeahead/glyph]
-   [:seon.typeahead/margin       {:optional true} :seon.typeahead/margin]
-   [:seon.typeahead/eos-logprob  {:optional true} :seon.typeahead/eos-logprob]
-   [:seon.typeahead/forwards     {:optional true} :seon.typeahead/forwards]
-   [:seon.typeahead/agent        {:optional true} :seon.db/ref]])
+   [:seon.typeahead/call          :seon.typeahead/call]
+   [:seon.typeahead/step-idx      :seon.typeahead/step-idx]
+   [:seon.typeahead/at            :seon.typeahead/at]
+   [:seon.typeahead/transition    :seon.typeahead/transition]
+   [:seon.typeahead/locked-count  :seon.typeahead/locked-count]
+   [:seon.typeahead/glyph         {:optional true} :seon.typeahead/glyph]
+   [:seon.typeahead/margin        {:optional true} :seon.typeahead/margin]
+   [:seon.typeahead/eos-logprob   {:optional true} :seon.typeahead/eos-logprob]
+   [:seon.typeahead/forwards      {:optional true} :seon.typeahead/forwards]
+   [:seon.typeahead/gen-s         {:optional true} :seon.typeahead/gen-s]
+   [:seon.typeahead/entropy-worst {:optional true} :seon.typeahead/entropy-worst]
+   [:seon.typeahead/draft-preview {:optional true} :seon.typeahead/draft-preview]
+   [:seon.typeahead/draft-tokens  {:optional true} :seon.typeahead/draft-tokens]
+   [:seon.typeahead/prompt-tokens {:optional true} :seon.typeahead/prompt-tokens]
+   [:seon.typeahead/worker-sha    {:optional true} :seon.typeahead/worker-sha]
+   [:seon.typeahead/agent         {:optional true} :seon.db/ref]])
 
 ;; ============================================================
 ;; Pure shape fns — wire conversion, projection, reply assembly.
@@ -196,17 +211,24 @@
                (str/join "\n" (concat (take msg-i lines) [cursor]))
                "\n" tail))))))
 
+(def ^:private draft-preview-chars
+  "Cap on the persisted draft PREVIEW string (a projection; the size is
+   reported in tokens — `:seon.typeahead/draft-tokens` covers the full
+   draft)."
+  160)
+
 (defn step-projection
   "One step-output's small datom projection, agent-ref-free.
 
-   The caller adds the `:seon.typeahead/agent` ref when an agent is in
-   scope."
+   The caller adds the `:seon.typeahead/agent` ref (and the call-level
+   `:seon.typeahead/prompt-tokens`) when in scope."
   {:malli/schema [:=> [:catn [::call-id ::call-id]
                        [::step-idx ::step-idx]
                        [::step-output ::step-output]]
                   :seon.typeahead/step]}
   [call-id idx output]
-  (let [ro (:readouts output)]
+  (let [ro    (:readouts output)
+        draft (str (:new_draft output))]
     (cond->
       {:seon.typeahead/call         call-id
        :seon.typeahead/step-idx     idx
@@ -220,7 +242,19 @@
       (number? (:eos_logprob_tail ro))
       (assoc :seon.typeahead/eos-logprob (double (:eos_logprob_tail ro)))
       (number? (:forwards output))
-      (assoc :seon.typeahead/forwards (int (:forwards output))))))
+      (assoc :seon.typeahead/forwards (int (:forwards output)))
+      (number? (:gen_s output))
+      (assoc :seon.typeahead/gen-s (double (:gen_s output)))
+      (number? (:free_entropy_worst ro))
+      (assoc :seon.typeahead/entropy-worst (double (:free_entropy_worst ro)))
+      (string? (:worker_sha output))
+      (assoc :seon.typeahead/worker-sha (:worker_sha output))
+      (not (str/blank? draft))
+      (assoc :seon.typeahead/draft-preview
+             (if (> (count draft) draft-preview-chars)
+               (str (subs draft 0 draft-preview-chars) "…")
+               draft)
+             :seon.typeahead/draft-tokens (tokens/estimate draft)))))
 
 (defn assemble-reply
   "Locked forms + any unfinished tail draft as one LLM-reply-shaped text.
@@ -238,7 +272,9 @@
        (str/join "\n\n")))
 
 ;; ============================================================
-;; Step-row persistence + the self-installing tile block.
+;; Step-row persistence. (The `:typeahead-steps` render block lives in
+;; `seon.agent.ctx.typeahead-steps` and is installed EXPLICITLY, never
+;; by this loop — owner constraint.)
 ;; ============================================================
 
 (defn- ^:async record-step!
@@ -256,43 +292,6 @@
       (js/console.warn "[seon.ai.typeahead] step projection failed:"
                        (pr-str (:seon.db/error res))))
     nil))
-
-(defn- tile-installed?
-  "Whether agent `id`'s ctx already carries the `:typeahead-steps` block
-   in db value `db`."
-  [db id]
-  (boolean
-    (and db id
-         (contains? (db/installed-schema db) :seon.agent.ctx/name)
-         (seq (db/query {:seon.db/db    db
-                         :seon.db/query '[:find ?b
-                                          :in $ ?id
-                                          :where
-                                          [?a :seon.agent/id ?id]
-                                          [?a :seon.agent/ctx ?b]
-                                          [?b :seon.agent.ctx/name :typeahead-steps]]
-                         :seon.db/args  [id]})))))
-
-(def tile-block
-  "The `:typeahead-steps` ctx block — html-only (a tile, no prompt text)."
-  {:seon.agent.ctx/name     :typeahead-steps
-   :seon.agent.ctx/priority 95
-   :seon.render/html        'seon.ai.typeahead/steps-tile-html})
-
-(defn- ^:async ensure-tile!
-  "Install the step-trace tile block once for the agent in scope.
-
-   Idempotent by presence check (a re-install would churn the agent's
-   whole ctx block set); a no-scope call or a failed install is a quiet
-   no-op — the tile is observability, never load-bearing."
-  []
-  (when-let [id (db/current-agent-id)]
-    (when-not (tile-installed? (some-> db/*conn* deref) id)
-      (let [res (await (ctx/install! tile-block))]
-        (when (false? (:seon.agent.ctx/ok? res))
-          (js/console.warn "[seon.ai.typeahead] tile install failed:"
-                           (:seon.agent.ctx/error res))))))
-  nil)
 
 ;; ============================================================
 ;; The step loop — the provider body.
@@ -325,7 +324,8 @@
                             ::dg/policy (policy->wire policy)}
                      (seq offers) (assoc ::dg/null-render (null-render prompt)))
         max-rounds (max 1 (:seon.typeahead/max-rounds policy))
-        call-id    (str (random-uuid))]
+        call-id    (str (random-uuid))
+        ptoks      (tokens/estimate prompt)]
     ;; `failed` = glyphs whose EXPANSION locked nothing — suppressed for the
     ;; rest of the call (P6). The worker is stateless by design; this loop's
     ;; step trace is the driver's memory. Without it the P5 p1 trace shows
@@ -334,7 +334,6 @@
            failed #{}]
       (if (>= round max-rounds)
         (let [reply (assemble-reply locked-all draft)]
-          (await (ensure-tile!))
           {:text reply :seon.ai/raw (loop-raw reply call-id :round-cap steps)})
         (let [live (into [] (remove #(contains? failed (:seon.typeahead/glyph %)))
                          offers)
@@ -349,7 +348,8 @@
             ;; turn loop's retry classification applies to the whole call.
             {:text "" :seon.ai/raw resp :seon.ai/error err}
             (let [out         (::dg/worker-output resp)
-                  proj        (step-projection call-id round out)
+                  proj        (assoc (step-projection call-id round out)
+                                     :seon.typeahead/prompt-tokens ptoks)
                   _           (await (record-step! proj))
                   steps'      (conj steps proj)
                   locked      (mapv str (:locked out))
@@ -368,14 +368,12 @@
               (cond
                 (= "done" transition)
                 (let [reply (assemble-reply locked-all' "")]
-                  (await (ensure-tile!))
                   {:text reply :seon.ai/raw (loop-raw reply call-id :done steps')})
 
                 ;; Two stuck rounds in a row = the model is not moving;
                 ;; stop with whatever locked instead of burning forwards.
                 (>= stuck' 2)
                 (let [reply (assemble-reply locked-all' draft')]
-                  (await (ensure-tile!))
                   {:text reply :seon.ai/raw (loop-raw reply call-id :gave-up steps')})
 
                 :else
@@ -397,91 +395,3 @@
     [:=> [:catn [::opts ::opts]] :any]]}
   ([] (agent-adapter {}))
   ([opts] (fn [arg] (step-loop! opts (ai/llm-arg->ctx arg)))))
-
-;; ============================================================
-;; The agent-page tile — the last call's step trace, derived at render
-;; (reactive: no step rows → nil, the tile body vanishes).
-;; ============================================================
-
-(def ^:private transition-display
-  "Transition keyword → dot glyph + Phosphor text class."
-  {:done     {:dot "●" :class "text-signal"}
-   :expand   {:dot "●" :class "text-signal"}
-   :progress {:dot "●" :class "text-text-200"}
-   :grow     {:dot "●" :class "text-text-400"}
-   :repair   {:dot "⚠" :class "text-warning"}
-   :stuck    {:dot "✗" :class "text-error"}})
-
-(defn- last-call-steps
-  "The agent's most recent call's step rows, step-idx-ordered. nil when
-   the attr is uninstalled or the agent has no steps."
-  [db id]
-  (when (and db id (contains? (db/installed-schema db) :seon.typeahead/call))
-    (let [rows (->> (db/query {:seon.db/db    db
-                               :seon.db/query '[:find [?e ...]
-                                                :in $ ?aid
-                                                :where
-                                                [?a :seon.agent/id ?aid]
-                                                [?e :seon.typeahead/agent ?a]]
-                               :seon.db/args  [id]})
-                    (map #(db/pull db '[*] %))
-                    (filter :seon.typeahead/at))]
-      (when (seq rows)
-        (let [call (->> rows
-                        (sort-by #(.getTime ^js (:seon.typeahead/at %)))
-                        last
-                        :seon.typeahead/call)]
-          (->> rows
-               (filter #(= call (:seon.typeahead/call %)))
-               (sort-by :seon.typeahead/step-idx)
-               vec))))))
-
-(defn- eos-meter
-  "The done-ness meter — `eos-logprob` (measured −7 more-work … −2.8
-   done) as a small horizontal bar."
-  [lp]
-  (let [pct (-> (* 100 (/ (+ lp 8) 8)) (max 2) (min 100) js/Math.round)]
-    [:div {:class "flex items-center gap-1"}
-     [:div {:class "w-16 h-1.5 bg-base-800 rounded overflow-hidden"}
-      [:div {:class "h-full bg-signal"
-             :style (str "width:" pct "%")}]]
-     [:span {:class "text-text-500 text-2xs font-mono"} (str lp)]]))
-
-(defn- step-row
-  "One rendered step line: idx, ● transition, glyph, margin, locks, EOS."
-  [{:seon.typeahead/keys [step-idx transition glyph margin eos-logprob
-                          locked-count forwards]}]
-  (let [{:keys [dot class]} (get transition-display transition
-                                 {:dot "●" :class "text-text-400"})]
-    [:div {:class "flex items-center gap-3 text-xs font-mono py-0.5"}
-     [:span {:class "text-text-500 w-6 text-right"} (str step-idx)]
-     [:span {:class (str class " w-24")} (str dot " " (name transition))]
-     [:span {:class "text-signal w-8"} (or glyph "·")]
-     [:span {:class "text-text-400 w-20"}
-      (if margin (str "Δ" margin) "Δ —")]
-     [:span {:class "text-text-400 w-16"}
-      (str "⊢ " locked-count (when forwards (str " ·" forwards "f")))]
-     (when eos-logprob (eos-meter eos-logprob))]))
-
-(defn steps-tile-html
-  "The typeahead step-trace tile — the last provider call's FSM steps.
-
-   Derived at render from the agent's `:seon.typeahead/*` step rows
-   (latest call only): per step the transition (dot+text), any emitted
-   glyph, the calibrated margin, locked-form count + decoder forwards,
-   and the EOS done-ness meter. nil when the agent has no step rows —
-   the tile body vanishes (reactive-context)."
-  {:malli/schema [:=> [:cat :seon.render/section-request]
-                  [:maybe :seon.render.live-tile/hiccup]]}
-  [{db :seon.db/db id :seon.agent/id}]
-  (let [db    (or db (some-> db/*conn* deref))
-        steps (last-call-steps db id)]
-    (when (seq steps)
-      [:div {:class "flex flex-col gap-1"}
-       [:div {:class "flex items-center justify-between"}
-        [:span {:class "text-text-500 text-2xs uppercase tracking-wider"}
-         "typeahead steps"]
-        [:span {:class "text-text-500 text-2xs font-mono"}
-         (str (count steps) " step" (when (not= 1 (count steps)) "s"))]]
-       (into [:div {:class "flex flex-col"}]
-             (map step-row steps))])))

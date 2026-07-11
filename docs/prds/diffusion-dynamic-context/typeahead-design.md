@@ -426,6 +426,74 @@ In-band errors (`gen_error`), same contract as today.
    preserved, exact retainer unpinned; cluster reset cleared it) — and
    the DEFAULT cluster's DeepSeek key returns 402 Insufficient Balance.
 
+## The live block (`:typeahead-steps`) — observability + provider instructions
+
+ONE ctx block (`seon.agent.ctx.typeahead-steps/steps-block`, name
+`:typeahead-steps`, priority 95), BOTH render slots, both reactive.
+The provider loop (`seon.ai.typeahead`) stays hiccup-free — it only
+transacts the per-step `:seon.typeahead/*` projections; the block ns
+derives everything at render. The P3b self-install is RETIRED: nothing
+installs this block by default, anywhere.
+
+- **`:seon.render/html`** (`steps-tile-html`) — the agent-page tile:
+  the LAST call's step trace (per step: transition dot+text, glyph, the
+  expand outcome `→⊢`/`✗offer`, calibrated margin Δ, locked count +
+  forwards, wall `gen-s`, worst free-entropy `H`, the EOS done-ness
+  bar), a call header (steps · total ⊢ · `ctx ~N tok` render size ·
+  worker sha), and the current draft preview sized in TOKENS. The
+  per-step transacts make it live over the normal datastar SSE morph
+  (live-proven 2026-07-11: continuous `/agent/{id}/feed` frames during
+  a provider call, step rows growing frame-to-frame). No step rows →
+  nil → the tile vanishes.
+- **`:seon.render/ai`** (`steps-ai`) — the provider protocol teaching,
+  rendered ONLY when the agent's RESOLVED provider is `:typeahead`
+  (`seon.ai/resolved-config` over the render db — global config row
+  with the per-agent `:seon.ai/agent-provider` overlay). Content is
+  what the menu headers do NOT teach (glyph selection stays colocated
+  with the menu blocks): the lock/draft reply mechanics, template
+  expansion, and the result grammar (results arrive as the
+  transcript's bare `⟹` rows; `;; =>` is not part of the grammar).
+  Any other provider → `""` → the section vanishes at zero token cost.
+
+Additive per-step datom fields (all sourced from the existing step
+wire response, no worker change): `:seon.typeahead/gen-s`,
+`:seon.typeahead/entropy-worst`, `:seon.typeahead/draft-preview`
+(160-char cap), `:seon.typeahead/draft-tokens`,
+`:seon.typeahead/prompt-tokens`, `:seon.typeahead/worker-sha`.
+
+### Enable story (opt-in only — never a shipped default)
+
+The PRIMARY enable path is CONFIG-DRIVEN at cluster scope: add the
+block row to a manifest overlay's `:seon.config/agent-context`
+`:seon.agent/ctx` tree (resolved once at boot into the DB; blocks are
+upserted by name). The row, verbatim:
+
+```clojure
+{:seon.agent.ctx/name :typeahead-steps :seon.agent.ctx/priority 95
+ :seon.render/ai seon.agent.ctx.typeahead-steps/steps-ai
+ :seon.render/html seon.agent.ctx.typeahead-steps/steps-tile-html}
+```
+
+Do NOT add it to `config/system.edn` / `config/acme.edn` defaults —
+a cluster that wants it adds the row to ITS overlay.
+
+The RUNTIME path diffs the block onto one LIVE agent without a
+restart — the same one mechanism (`install!`/`remove!`), agent scope:
+
+```clojure
+;; enable (eval'd by the agent, or any driver inside its scope)
+(seon.agent.ctx/install! seon.agent.ctx.typeahead-steps/steps-block)
+
+;; disable — both slots vanish on the next render (reactive)
+(seon.agent.ctx/remove! :typeahead-steps)
+```
+
+Note the ai slot is DOUBLY gated: even installed, it renders only for
+a `:typeahead`-resolved agent — flipping `:seon.ai/agent-provider`
+back to `:deepseek` blanks the instructions without uninstalling the
+tile (live-proven: post-flip prompt blobs carry zero instruction
+lines while the step tile stays).
+
 ## The two cursor regimes (both measured; the regime is DERIVED)
 
 - **Frontier (single position):** free typing; the cursor = end of the

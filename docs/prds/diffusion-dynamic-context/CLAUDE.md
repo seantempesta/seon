@@ -15,6 +15,13 @@ tags: [orchestrator, agent]
 
 ## ▸ Current state (2026-07-11 PM)
 
+**NEW (2026-07-11): the `:typeahead-steps` ctx block** — one block, both
+slots (live step-trace tile + provider-gated ai instructions), in
+`seon.agent.ctx.typeahead-steps`; the P3b self-install is retired,
+enabling is opt-in only (manifest overlay row or per-agent
+`ctx/install!` — see [[typeahead-design]] §"The live block"). Live-proven
+on acme (feed morph mid-call, prompt-blob ai section, remove!-vanish).
+
 P1–P6 shipped + measured — P6 CLOSED 2026-07-11 (full re-run of all
 local arms, worker `c88acc1913c4`; evidence
 `evals/runs/2026-07-11-typeahead-p6/` summary.json + `…-p6-close:`

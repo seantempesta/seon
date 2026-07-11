@@ -14,10 +14,11 @@
      - step-projection (readout scalars in, optional-is-absent out)
      - the step LOOP: committed/draft threading across scripted steps,
        reply assembly from locked forms, per-step datom projections
-       recorded under the agent scope, the tile block self-install,
-       and a keyless LOCAL (full-URL) endpoint working
-     - steps-tile-html: nil on an empty db (tile vanishes), hiccup rows
-       once step datoms exist
+       recorded under the agent scope (incl. the additive observability
+       fields), NO block self-install (owner constraint — the
+       `:typeahead-steps` block is explicit-install only; its render
+       tests live in seon.agent.ctx.typeahead-steps-test), and a keyless
+       LOCAL (full-URL) endpoint working
 
    Run interactively via MCP eval:
      (require 'seon.ai.typeahead-test :reload)
@@ -208,7 +209,10 @@
   (let [full (ta/step-projection
                "call1" 2 {:transition "expand" :glyph "①"
                           :locked ["(def a 1)"] :forwards 4
-                          :readouts {:glyph_margin 7.5 :eos_logprob_tail -6.4}})
+                          :gen_s 1.7 :worker_sha "abc123def456"
+                          :new_draft "(def b"
+                          :readouts {:glyph_margin 7.5 :eos_logprob_tail -6.4
+                                     :free_entropy_worst 0.42}})
         bare (ta/step-projection "call1" 0 {:transition "stuck" :locked []})]
     (is (= :expand (:seon.typeahead/transition full)))
     (is (= "①" (:seon.typeahead/glyph full)))
@@ -216,11 +220,20 @@
     (is (= -6.4 (:seon.typeahead/eos-logprob full)))
     (is (= 1 (:seon.typeahead/locked-count full)))
     (is (= 4 (:seon.typeahead/forwards full)))
+    (is (= 1.7 (:seon.typeahead/gen-s full)) "wall per step projected")
+    (is (= 0.42 (:seon.typeahead/entropy-worst full)))
+    (is (= "abc123def456" (:seon.typeahead/worker-sha full)))
+    (is (= "(def b" (:seon.typeahead/draft-preview full)))
+    (is (= 1 (:seon.typeahead/draft-tokens full))
+        "draft sized in TOKENS (chars/4), never chars")
     (is (= :stuck (:seon.typeahead/transition bare)))
     (is (= 0 (:seon.typeahead/locked-count bare)))
     (is (not (contains? bare :seon.typeahead/glyph))
         "optional = absent — no nil glyph/margin stored")
-    (is (not (contains? bare :seon.typeahead/margin)))))
+    (is (not (contains? bare :seon.typeahead/margin)))
+    (is (not (contains? bare :seon.typeahead/draft-preview))
+        "blank draft → no preview datom")
+    (is (not (contains? bare :seon.typeahead/gen-s)))))
 
 ;; ============================================================
 ;; The step loop over the scripted wire.
@@ -287,22 +300,23 @@
                             (is (= [:progress :done]
                                    (mapv :seon.typeahead/transition steps)))
                             (is (= [1 1] (mapv :seon.typeahead/locked-count steps)))
-                            ;; the tile block self-installed once
-                            (is (seq (db/query
-                                       {:seon.db/db dbv
-                                        :seon.db/query
-                                        '[:find ?b
-                                          :in $ ?aid
-                                          :where
-                                          [?a :seon.agent/id ?aid]
-                                          [?a :seon.agent/ctx ?b]
-                                          [?b :seon.agent.ctx/name :typeahead-steps]]
-                                        :seon.db/args [a-id]}))
-                                "the :typeahead-steps tile block installed")
-                            ;; and the tile renders the trace
-                            (let [tile (ta/steps-tile-html {:seon.db/db dbv
-                                                            :seon.agent/id a-id})]
-                              (is (vector? tile) "step rows → hiccup tile"))))))))))
+                            ;; "the rendered prompt" = 19 chars → 4 tokens
+                            (is (= [4 4] (mapv :seon.typeahead/prompt-tokens steps))
+                                "render size stamped per row, in TOKENS")
+                            ;; the block is EXPLICIT-INSTALL ONLY: the loop
+                            ;; must NOT install it (owner constraint — not
+                            ;; enabled by default anywhere)
+                            (is (empty? (db/query
+                                          {:seon.db/db dbv
+                                           :seon.db/query
+                                           '[:find ?b
+                                             :in $ ?aid
+                                             :where
+                                             [?a :seon.agent/id ?aid]
+                                             [?a :seon.agent/ctx ?b]
+                                             [?b :seon.agent.ctx/name :typeahead-steps]]
+                                           :seon.db/args [a-id]}))
+                                "the loop never self-installs :typeahead-steps")))))))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
@@ -378,16 +392,5 @@
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
-;; ============================================================
-;; Tile suppression.
-;; ============================================================
-
-(deftest steps-tile-suppressed-when-empty
-  (async done
-    (-> (with-conn
-          (fn [conn]
-            (is (nil? (ta/steps-tile-html {:seon.db/db @conn
-                                           :seon.agent/id a-id}))
-                "no step rows → nil (the tile body vanishes)")))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+;; (Tile + ai-slot render tests live with the block family:
+;; seon.agent.ctx.typeahead-steps-test.)
