@@ -668,3 +668,71 @@
                    (is (false? @aborted) ".abort never called")))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(defn- rejecting-stream
+  "A minimal SDK-stream STUB whose iterator REJECTS on `.next` — the shape
+   a transport failure (timeout / connection reset) takes on the
+   ChatCompletionStream async-iteration surface."
+  [err]
+  (js-obj
+    "abort" (fn [])
+    js/Symbol.asyncIterator
+    (fn [] (js-obj "next" (fn [] (js/Promise.reject err))))))
+
+(deftest stream-transport-failure-is-a-value-not-a-rejection
+  ;; THE P4-BENCH CRASH GUARD (2026-07-10): stream-until-form! is an
+  ;; instrumented ^:async fn — a rejection propagating out of it records a
+  ;; :core fault datom at the wrapper (pod-fatal under the dev :crash
+  ;; dial) even though complete catches it one frame up. So the contract
+  ;; is: NEVER reject; the SDK failure comes back as the ::error VALUE.
+  ;; The process-level hook also asserts no rejection escapes to Node.
+  (async done
+    (let [escaped (atom [])
+          handler (fn [reason _] (swap! escaped conj reason))
+          _       (.on js/process "unhandledRejection" handler)
+          s       (rejecting-stream (js/Error. "Request timed out."))]
+      (-> (openai/stream-until-form! s)
+          (.then (fn [{::openai/keys [text aborted? error]}]
+                   (is (= "" text))
+                   (is (false? aborted?))
+                   (is (= "Request timed out." (some-> error .-message))
+                       "the SDK failure rides the result map as ::error"))
+                 (fn [e]
+                   (is false (str "REJECTED — must be errors-as-values: " e))))
+          ;; two macrotasks so Node would have fired any escaped rejection
+          (.then (fn [_] (js/Promise. (fn [res] (js/setTimeout res 0)))))
+          (.then (fn [_] (js/Promise. (fn [res] (js/setTimeout res 0)))))
+          (.then (fn [_]
+                   (.off js/process "unhandledRejection" handler)
+                   (is (empty? @escaped)
+                       (str "unhandledRejection escaped: "
+                            (pr-str (mapv #(some-> ^js % .-message) @escaped))))
+                   (done)))))))
+
+(deftest stream-mode-transport-failure-is-errors-as-values
+  ;; the whole complete path in repl-mode :stream — a transport-level
+  ;; fetch rejection resolves to the retryable envelope, never a throw.
+  (async done
+    (let [escaped (atom [])
+          handler (fn [reason _] (swap! escaped conj reason))
+          _       (.on js/process "unhandledRejection" handler)]
+      (-> (with-stubbed
+            (fn [_ _] (js/Promise.reject (js/TypeError. "fetch failed")))
+            #(openai/complete {:seon.ai/ctx "hi" :seon.ai/stream? true}))
+          (.then
+            (fn [{:seon.ai/keys [text error]}]
+              (is (= "" text) "errors-as-values — empty text, never a rejection")
+              (is (true? (:seon.ai/transport? error))
+                  "stream-mode transport failure is the retryable class")))
+          (.then (fn [_] (js/Promise. (fn [res] (js/setTimeout res 0)))))
+          (.then (fn [_] (js/Promise. (fn [res] (js/setTimeout res 0)))))
+          (.then (fn [_]
+                   (.off js/process "unhandledRejection" handler)
+                   (is (empty? @escaped)
+                       (str "unhandledRejection escaped: "
+                            (pr-str (mapv #(some-> ^js % .-message) @escaped))))
+                   (done)))
+          (.catch (fn [e]
+                    (.off js/process "unhandledRejection" handler)
+                    (is false (str "threw — " e))
+                    (done)))))))

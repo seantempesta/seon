@@ -337,8 +337,12 @@
 
 (schema/register! ::text     :string)
 (schema/register! ::aborted? :boolean)
+;; The captured SDK throwable when the stream failed mid-consume — a
+;; third-party boundary value (:any is allowed exactly here).
+(schema/register! ::error    :any)
 (schema/register! ::stream-result
-  [:map [::text ::text] [::aborted? ::aborted?]])
+  [:map [::text ::text] [::aborted? ::aborted?]
+   [::error {:optional true} ::error]])
 
 (defn ^:async stream-until-form!
   "Consume the SDK stream, aborting once one top-level form has streamed.
@@ -353,27 +357,40 @@
    granularity: a same-delta tail rides along; Mode A's reply-boundary strip
    still cleans any fabricated remainder). On natural end (no form ever
    completes): `{::text <all> ::aborted? false}`. The usage-only final chunk
-   (`:stream_options {:include_usage true}`) has no `choices` — guarded."
+   (`:stream_options {:include_usage true}`) has no `choices` — guarded.
+
+   NEVER rejects. A transport/SDK failure mid-consume (timeout, connection
+   reset — the iterator's `.next` Promise rejects) is returned as the
+   `::error` VALUE, converted to the `:seon.ai/error` envelope by
+   [[complete]]. This fn is instrumented, and a rejection crossing the
+   wrapper records a `:seon.error/fault :core` datom — pod-fatal under the
+   dev `:crash` dial — even though [[complete]] catches it one frame up
+   (the P4-bench acme pod crashes, 2026-07-10). Errors-as-values at this
+   boundary is the root fix, not an exception to the fault net: an
+   external provider failure is the caller's expected error, not our bug."
   {:malli/schema [:=> [:cat :any] :any]}
   [^js stream]
-  (let [it (js-invoke stream js/Symbol.asyncIterator)]
-    (loop [acc ""]
-      (let [step (await (.next it))]
-        (if (.-done step)
-          {::text acc ::aborted? false}
-          (let [^js chunk (.-value step)
-                choices   (.-choices chunk)
-                ^js choice (when (and choices (pos? (.-length choices)))
-                             (aget choices 0))
-                ^js delta  (some-> choice .-delta)
-                piece      (some-> delta .-content)
-                acc'    (if piece (str acc piece) acc)]
-            (if (and piece
-                     (repl-internal/first-top-level-close acc')
-                     (some #(= :form (:seon.repl/kind %))
-                           (repl-internal/parse-forms acc')))
-              (do (.abort stream) {::text acc' ::aborted? true})
-              (recur acc'))))))))
+  (try
+    (let [it (js-invoke stream js/Symbol.asyncIterator)]
+      (loop [acc ""]
+        (let [step (await (.next it))]
+          (if (.-done step)
+            {::text acc ::aborted? false}
+            (let [^js chunk (.-value step)
+                  choices   (.-choices chunk)
+                  ^js choice (when (and choices (pos? (.-length choices)))
+                               (aget choices 0))
+                  ^js delta  (some-> choice .-delta)
+                  piece      (some-> delta .-content)
+                  acc'    (if piece (str acc piece) acc)]
+              (if (and piece
+                       (repl-internal/first-top-level-close acc')
+                       (some #(= :form (:seon.repl/kind %))
+                             (repl-internal/parse-forms acc')))
+                (do (.abort stream) {::text acc' ::aborted? true})
+                (recur acc')))))))
+    (catch :default e
+      {::text "" ::aborted? false ::error e})))
 
 (defn- estimated-usage
   "A CLIENT-SIDE usage map for an ABORTED stream (the provider's final usage
@@ -457,14 +474,22 @@
             (if stream?
               ;; repl-mode :stream — consume deltas, abort at the first
               ;; complete top-level form (one form per turn).
-              (let [{::keys [text aborted?]} (await (stream-until-form! stream))]
-                (if aborted?
+              (let [{::keys [text aborted? error]} (await (stream-until-form! stream))]
+                (cond
+                  ;; The consumer captured an SDK failure as a VALUE (it
+                  ;; never rejects — see its docstring); re-raise into
+                  ;; THIS fn's catch, the one error->envelope site.
+                  (some? error) (throw error)
+
+                  aborted?
                   {:seon.ai/text                        text
                    :seon.ai.openai-compat/finish-reason "abort"
                    :seon.ai/usage                       (estimated-usage request text)
                    :seon.ai/estimated?                  true}
+
                   ;; Natural end before any form completed — fall back to
                   ;; the assembled completion for real usage + full text.
+                  :else
                   (parse-completion (await (.finalChatCompletion stream)))))
               ;; repl-mode :batch — buffer to the assembled completion.
               (let [completion (await (.finalChatCompletion stream))
