@@ -70,7 +70,7 @@
        :seon.ns/source   tile-ns-source
        :seon.ns/require-edges [{:seon.ns.require/target :probe.helpers
                                 :seon.ns.require/alias  'h}]}
-      {:seon.fn/sym        "probe.canvas/dash"
+      {:seon.fn/sym        "probe.tile/dash"
        :seon.fn/ns         {:seon.ns/name :probe.tile}
        :seon.fn/source     dash-source
        :seon.fn/created-at (js/Date.)}]}))
@@ -109,11 +109,11 @@
                                   @conn))
                               "no :seon.fn row for any probe.helpers member"))
                         (testing "the tile fn itself IS resolvable + has stored source"
-                          (is (fn? (seval/lookup-value 'probe.canvas/dash))))
+                          (is (fn? (seval/lookup-value 'probe.tile/dash))))
                         ;; THE ASSERTION — post-fix, invoke-bounded returns a
                         ;; REAL render map (not fallthrough), because expose-ns
                         ;; now unions the compiled helper.
-                        (let [r (sci/invoke-bounded 'probe.canvas/dash
+                        (let [r (sci/invoke-bounded 'probe.tile/dash
                                                     {:seon.db/db @conn})]
                           (testing "invoke-bounded returns a real render map (NOT an error)"
                             (is (not (:seon.render.sci/error r))
@@ -264,7 +264,7 @@
                     {:seon.db/tx-data
                      [{:seon.ns/name   :probe.conn-tile
                        :seon.ns/source conn-tile-ns-source}
-                      {:seon.fn/sym        "probe.conn-canvas/conn-dash"
+                      {:seon.fn/sym        "probe.conn-tile/conn-dash"
                        :seon.fn/ns         {:seon.ns/name :probe.conn-tile}
                        :seon.fn/source     conn-dash-source
                        :seon.fn/created-at (js/Date.)}]})
@@ -276,7 +276,7 @@
                       (testing "*conn* IS an enumerable NON-fn member of the live seon.db ns"
                         (is (contains? (seval/ns-data-members "seon.db") '*conn*)
                             "ns-data-members demunges _STAR_conn_STAR_ → *conn*"))
-                      (let [r (sci/invoke-bounded 'probe.conn-canvas/conn-dash
+                      (let [r (sci/invoke-bounded 'probe.conn-tile/conn-dash
                                                   {:seon.db/db @conn})]
                         (testing "the aliased dynamic var resolves — the tile runs BOUNDED"
                           (is (not (:seon.render.sci/error r))
