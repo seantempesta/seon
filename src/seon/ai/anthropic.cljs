@@ -332,28 +332,34 @@
     (if (nil? key)
       (config-error
         "ANTHROPIC_API_KEY not set in process.env — set it to the Anthropic bearer key")
-      (let [ms      (or (:seon.ai/timeout-ms (ai/current)) default-timeout-ms)
-            ^js client (make-client key ms)
-            extra   (request-extra-body request)
-            ;; :extra-body is MERGED into the request PARAMS (1st arg) —
-            ;; the SDK's 2nd-arg RequestOptions :body REPLACES the body
-            ;; (drops model/messages), so it must NOT be used. Same fix
-            ;; as seon.ai.openai-compat (verified live there).
-            params  (clj->js (cond-> (request-params request)
-                               (seq extra) (merge extra)))
-            ^js messages (.. client -messages)]
-        (try
-          (let [^js stream (.stream messages params)
-                message (await (.finalMessage stream))
-                result  (parse-completion message)]
-            (when-let [err (:seon.ai/error result)]
-              (ai/log-error! "Anthropic" err))
-            result)
-          (catch :default e
-            (let [err (error->envelope e)]
-              (ai/log-error! "Anthropic" err)
-              {:seon.ai/text  ""
-               :seon.ai/error err})))))))
+      ;; The WHOLE build+call rides inside the try — the params build reads
+      ;; config-provided data (the config row, SEON_AI_EXTRA_BODY extra-body
+      ;; merged into the params, the ctx split), so a throw there is an
+      ;; EXPECTED error and must resolve to an envelope, never reject: the
+      ;; instrument wrapper records a rejection as a :core fault (crashes
+      ;; the dev pod). Same class as the stream-until-form! fix (e6295ecd).
+      (try
+        (let [ms      (or (:seon.ai/timeout-ms (ai/current)) default-timeout-ms)
+              ^js client (make-client key ms)
+              extra   (request-extra-body request)
+              ;; :extra-body is MERGED into the request PARAMS (1st arg) —
+              ;; the SDK's 2nd-arg RequestOptions :body REPLACES the body
+              ;; (drops model/messages), so it must NOT be used. Same fix
+              ;; as seon.ai.openai-compat (verified live there).
+              params  (clj->js (cond-> (request-params request)
+                                 (seq extra) (merge extra)))
+              ^js messages (.. client -messages)
+              ^js stream (.stream messages params)
+              message (await (.finalMessage stream))
+              result  (parse-completion message)]
+          (when-let [err (:seon.ai/error result)]
+            (ai/log-error! "Anthropic" err))
+          result)
+        (catch :default e
+          (let [err (error->envelope e)]
+            (ai/log-error! "Anthropic" err)
+            {:seon.ai/text  ""
+             :seon.ai/error err}))))))
 
 ;; ============================================================
 ;; Adapter for seon.agent — same bridge shape as deepseek's.

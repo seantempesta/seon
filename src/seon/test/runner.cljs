@@ -99,7 +99,15 @@
    [::selected-vars  {:optional true} ::vars]
    [::recorded?      {:optional true} :boolean]
    [::recorded-syms  {:optional true} ::recorded-syms]
-   [::trigger        {:optional true} ::trigger]])
+   [::trigger        {:optional true} ::trigger]
+   ;; Present ONLY on a selector-violation envelope (see `run!`): a caller
+   ;; mistake rides the VALUE channel — a specced ^:async fn must never
+   ;; reject with an expected error (the instrument wrapper records a
+   ;; rejection as a :core fault, which crashes the dev pod).
+   [:seon/error      {:optional true}
+    [:map
+     [:seon.error/kind    :seon.error/kind]
+     [:seon.error/message :seon.error/message]]]])
 
 (schema/register! ::last-result-response
   [:maybe [:map
@@ -759,7 +767,9 @@
 (defn- resolve-selector
   "Resolve a ::selector to the concrete vector of FQ test-var symbols.
    Phase 1: handles ::vars (pass-through) and ::ns (vars-in-ns lookup).
-   Future phases add ::nses, ::all?, ::failed-only?, ::tag here."
+   Future phases add ::nses, ::all?, ::failed-only?, ::tag here.
+   `run!` guards the no-selector case BEFORE calling this — the :else
+   throw is a genuine-bug guard, never an expected-error path."
   [{::keys [vars ns] :as req}]
   (cond
     vars vars
@@ -767,6 +777,18 @@
     :else
     (throw (ex-info "No selector — expected ::vars or ::ns"
                     {:type ::no-selector :request req}))))
+
+(defn- selector-error
+  "A schema-valid `::run-result` ERROR envelope for a selector violation.
+   Errors are values: `run!` is a specced ^:async fn, so an expected
+   caller mistake must resolve (never reject — a rejection is recorded
+   as a :core fault by the instrument wrapper and crashes the dev pod).
+   Zero tests ran; the summary counts the violation as 1 :error."
+  [msg]
+  {::events  []
+   ::summary {:test 0 :pass 0 :fail 0 :error 1}
+   :seon/error {:seon.error/kind    :user-input
+                :seon.error/message msg}})
 
 (defn ^:async run!
   "Universal entrypoint.
@@ -777,8 +799,10 @@
 
    Phase 1 selectors: exactly one of `::vars` or `::ns` must be present.
    The schema (`::selector`) carries the pure-data \"at least one\"
-   shape; the exactly-one rule lives HERE so a violation gets a legible
-   error envelope naming both offending keys, not a schema dump.
+   shape; the exactly-one rule lives HERE so a violation RESOLVES to a
+   legible `::run-result` error envelope (`:seon/error` alongside an
+   empty run — see [[selector-error]]), not a schema dump and never a
+   rejected Promise.
 
    Examples:
      ;; one var
@@ -791,35 +815,41 @@
    and `::trigger` propagated through."
   {:malli/schema [:=> [:cat ::run-request] ::run-result]}
   [{::keys [record? trigger] :as req}]
-  (when (and (some? (::vars req)) (some? (::ns req)))
-    (throw (ex-info (str "Ambiguous selector — provide exactly one of "
-                         "::vars or ::ns, not both. Got ::vars "
-                         (pr-str (::vars req)) " AND ::ns "
-                         (pr-str (::ns req)) ".")
-                    {:type ::ambiguous-selector :request req})))
-  (let [selected (vec (resolve-selector req))
-        result   (await (run-vars {::vars selected}))
-        base     (cond-> (assoc result ::selected-vars selected)
-                   trigger (assoc ::trigger trigger))]
-    (if record?
-      (let [run-id (stash-run! {::run-result base})
-            _      (await (record-run! (cond-> {::run-result base
-                                                 ::run-id     run-id}
-                                          (::db/conn req)
-                                          (assoc ::db/conn (::db/conn req)))))
-            ;; Reconstruct recorded-syms from events that produced a
-            ;; pass/fail/error outcome (same logic as record-run!).
-            per-var      (group-by :var (filter #(some? (:var %)) (::events base)))
-            recorded     (vec (for [[var-sym evts] per-var
-                                    :let [outcome (last (filter #(#{:pass :fail :error}
-                                                                    (:type %)) evts))]
-                                    :when outcome]
-                                (str var-sym)))]
-        (assoc base
-               ::run-id        run-id
-               ::recorded?     true
-               ::recorded-syms recorded))
-      base)))
+  (cond
+    (and (some? (::vars req)) (some? (::ns req)))
+    (selector-error (str "Ambiguous selector — provide exactly one of "
+                         ":seon.test.runner/vars or :seon.test.runner/ns, "
+                         "not both. Got ::vars " (pr-str (::vars req))
+                         " AND ::ns " (pr-str (::ns req)) "."))
+
+    (and (nil? (::vars req)) (nil? (::ns req)))
+    (selector-error (str "No selector — provide exactly one of "
+                         ":seon.test.runner/vars or :seon.test.runner/ns."))
+
+    :else
+    (let [selected (vec (resolve-selector req))
+          result   (await (run-vars {::vars selected}))
+          base     (cond-> (assoc result ::selected-vars selected)
+                     trigger (assoc ::trigger trigger))]
+      (if record?
+        (let [run-id (stash-run! {::run-result base})
+              _      (await (record-run! (cond-> {::run-result base
+                                                  ::run-id     run-id}
+                                           (::db/conn req)
+                                           (assoc ::db/conn (::db/conn req)))))
+              ;; Reconstruct recorded-syms from events that produced a
+              ;; pass/fail/error outcome (same logic as record-run!).
+              per-var      (group-by :var (filter #(some? (:var %)) (::events base)))
+              recorded     (vec (for [[var-sym evts] per-var
+                                      :let [outcome (last (filter #(#{:pass :fail :error}
+                                                                     (:type %)) evts))]
+                                      :when outcome]
+                                  (str var-sym)))]
+          (assoc base
+                 ::run-id        run-id
+                 ::recorded?     true
+                 ::recorded-syms recorded))
+        base))))
 
 (defn ^:async run-ns!
   "Sugar: run every test var defined in `::ns`, recording the projection."
