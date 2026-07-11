@@ -19,8 +19,8 @@
 
 (schema/register! ::label :string)
 (schema/register! ::handler :symbol)
-(schema/register! ::args [:vector :any]) ; captured DATA payload, checked again by /call
-(schema/register! ::field :string)
+(schema/register! ::data [:map-of :qualified-keyword :any])
+(schema/register! ::field :qualified-keyword)
 (schema/register! ::placeholder :string)
 (schema/register! ::option [:tuple :string :string])
 (schema/register! ::options [:vector ::option])
@@ -36,8 +36,14 @@
 (def ^:private field-label-class "text-2xs text-text-400 uppercase tracking-wider")
 (def ^:private field-wrap-class "flex flex-col gap-1")
 
-(defn- action [handler args]
-  (if (seq args) (apply list handler args) handler))
+(def ^:private signal-prefix "seon_")
+
+(defn- field-signal
+  "Encode a qualified field keyword as a Datastar-safe signal identifier.
+   `/call` decodes this exact prefix back to the original keyword."
+  [field]
+  (str signal-prefix
+       (.toString (.from js/Buffer (str field) "utf8") "base64url")))
 
 (schema/register! ::view-request
   [:map
@@ -110,14 +116,17 @@
   [:map
    [::label ::label]
    [::handler ::handler]
-   [::args {:optional true} ::args]])
+   [::data {:optional true} ::data]])
 
 (defn button
-  "A button routed to one of YOUR handler fns through the standard call gate."
+  "A button routed to one of YOUR map-in handler fns through the call gate.
+
+   The handler always receives one fully-namespaced data map. Omitted `::data`
+   becomes `{}`; use `::data` to capture a row identity or command parameters."
   {:malli/schema [:=> [:cat ::button-request] ::control]}
-  [{::keys [label handler args]}]
+  [{::keys [label handler data]}]
   [:button {:type "button"
-            :on-click (action handler args)
+            :on-click (list handler (or data {}))
             :class button-class}
    label])
 
@@ -128,12 +137,13 @@
    [::placeholder {:optional true} ::placeholder]])
 
 (defn input
-  "A text field bound to a Datastar signal for a surrounding [[form]]."
+  "A text field for a surrounding [[form]]. `::field` is a qualified keyword;
+   the routing adapter preserves that exact key in the handler request map."
   {:malli/schema [:=> [:cat ::input-request] ::control]}
   [{::keys [field label placeholder]}]
   [:label {:class field-wrap-class}
    (when label [:span {:class field-label-class} label])
-   [:input (cond-> {:type "text" :data-bind field :class field-class}
+   [:input (cond-> {:type "text" :data-bind (field-signal field) :class field-class}
              placeholder (assoc :placeholder placeholder))]])
 
 (schema/register! ::select-request
@@ -143,12 +153,12 @@
    [::label {:optional true} ::label]])
 
 (defn select
-  "A dropdown bound to a Datastar signal for a surrounding [[form]]."
+  "A dropdown whose qualified `::field` is preserved in the handler map."
   {:malli/schema [:=> [:cat ::select-request] ::control]}
   [{::keys [field options label]}]
   [:label {:class field-wrap-class}
    (when label [:span {:class field-label-class} label])
-   (into [:select {:data-bind field :class field-class}]
+   (into [:select {:data-bind (field-signal field) :class field-class}]
          (map (fn [[value option-label]]
                 [:option {:value value} option-label]))
          options)])
@@ -159,11 +169,11 @@
    [::label {:optional true} ::label]])
 
 (defn toggle
-  "A boolean checkbox bound to a Datastar signal for a surrounding [[form]]."
+  "A boolean checkbox whose qualified `::field` is preserved in the handler map."
   {:malli/schema [:=> [:cat ::toggle-request] ::control]}
   [{::keys [field label]}]
   [:label {:class "flex flex-row gap-2 items-center cursor-pointer select-none"}
-   [:input {:type "checkbox" :data-bind field
+   [:input {:type "checkbox" :data-bind (field-signal field)
             :class "cursor-pointer accent-amber-400"}]
    (when label [:span {:class "text-xs text-text-200"} label])])
 
@@ -174,7 +184,8 @@
    [::controls ::controls]])
 
 (defn form
-  "Stack controls into a form that sends current signals to YOUR handler fn."
+  "Stack controls into a form that sends one fully-namespaced field map to
+   YOUR handler fn. Ambient page signals are excluded by the call adapter."
   {:malli/schema [:=> [:cat ::form-request] ::control]}
   [{::keys [handler label controls]}]
   (into [:form {:on-submit handler :class "flex flex-col gap-2"}]

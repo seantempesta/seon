@@ -197,12 +197,30 @@
 
 (defn- parse-signals
   "Datastar sends current signals as a JSON body on POST. Parse to a map with
-   keyword keys; blank/garbled → {}."
+   keyword keys; blank/garbled → {}.
+
+   `my.canvas` fields use a `seon_` + base64url encoding so Datastar receives a
+   safe identifier while agent handlers receive the original fully-qualified
+   keyword. When at least one encoded canvas field is present, return ONLY
+   those fields: page-level signals (`:t`, `:live`, chat text) are transport
+   state, not domain input. Raw non-canvas forms keep their existing map."
   [body]
   (try
-    (if (str/blank? body)
-      {}
-      (js->clj (js/JSON.parse body) :keywordize-keys true))
+    (let [raw (if (str/blank? body)
+                {}
+                (js->clj (js/JSON.parse body) :keywordize-keys true))
+          canvas-fields
+          (into {}
+                (keep (fn [[k v]]
+                        (let [n (name k)]
+                          (when (str/starts-with? n "seon_")
+                            (let [decoded (.toString
+                                            (.from js/Buffer (subs n 5) "base64url")
+                                            "utf8")]
+                              (when (str/starts-with? decoded ":")
+                                [(keyword (subs decoded 1)) v]))))))
+                raw)]
+      (if (seq canvas-fields) canvas-fields raw))
     (catch :default _ {})))
 
 (defn ^:async handle!

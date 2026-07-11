@@ -10,7 +10,7 @@
 (deftest button-builds-reusable-hiccup-and-routes-through-call-gate
   (let [h (canvas/button {:my.canvas/label "Approve"
                           :my.canvas/handler 'approve!
-                          :my.canvas/args [{:my.order/id "o-7"}]})
+                          :my.canvas/data {:my.order/id "o-7"}})
         [_ attrs label] h]
     (is (= :button (first h)))
     (is (= (list 'approve! {:my.order/id "o-7"}) (:on-click attrs)))
@@ -23,12 +23,12 @@
       (is (nil? (:on-click (second wired)))))))
 
 (deftest controls-compose-as-hiccup-without-envelope-extraction
-  (let [input (canvas/input {:my.canvas/field "note"
+  (let [input (canvas/input {:my.canvas/field :my.demo/note
                              :my.canvas/label "Note"
                              :my.canvas/placeholder "type…"})
-        select (canvas/select {:my.canvas/field "tier"
+        select (canvas/select {:my.canvas/field :my.demo/tier
                                :my.canvas/options [["free" "Free"] ["pro" "Pro"]]})
-        toggle (canvas/toggle {:my.canvas/field "live"
+        toggle (canvas/toggle {:my.canvas/field :my.demo/live
                                :my.canvas/label "Live updates"})
         form (canvas/form {:my.canvas/handler 'save-note!
                            :my.canvas/label "Save"
@@ -36,8 +36,7 @@
         rendered (pr-str form)]
     (is (= :form (first form)))
     (is (= 'save-note! (:on-submit (second form))))
-    (is (str/includes? rendered ":data-bind \"note\""))
-    (is (str/includes? rendered ":data-bind \"tier\""))
+    (is (= 3 (count (re-seq #"seon_[A-Za-z0-9_-]+" rendered))))
     (is (str/includes? rendered ":type \"checkbox\""))
     (is (some #(and (vector? %) (= :button (first %))) (drop 2 form)))
     (let [wired (transform/transform-hiccup 'my.agent.x form)]
