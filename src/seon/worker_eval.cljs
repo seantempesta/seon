@@ -5,7 +5,7 @@
 
    ## What this answers
 
-   Parse asks \"is the canvas structurally well-formed?\" (rewrite-clj spans).
+   Parse asks \"is the code-buffer structurally well-formed?\" (rewrite-clj spans).
    EVAL asks the next question: \"does the generated code actually RUN?\" — does
    the form COMPILE, and (for a self-contained form) EVALUATE without an
    unbound var / arity error / throw, inside a wall-clock budget. That verdict

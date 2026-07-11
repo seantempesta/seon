@@ -6,7 +6,7 @@ tags: [orchestrator, agent]
 
 # Diffusion dynamic-context — auto-loaded index (one-stop shop)
 
-> **The verified canvas**: a diffusion LLM (DiffusionGemma, local MLX)
+> **The verified code-buffer**: a diffusion LLM (DiffusionGemma, local MLX)
 > generates Clojure fast while Seon's oracle proves every commit — denoise
 > → oracle check → lock/harvest eval-proven forms into the encoder KV →
 > repair the rest. The typeahead provider (`SEON_AI_PROVIDER=typeahead`)
@@ -125,7 +125,7 @@ grammar; bare `⟹` is real).
   (P1–P6). The context-budget table lives here.
 - [[research/typeahead-hole-filling-2026-07-10]] — rounds 1–10
   measurements (incl. the 8k-cliff forensics).
-- [[roadmap]] + [[architecture]] + [[grounding]] — the verified-canvas
+- [[roadmap]] + [[architecture]] + [[grounding]] — the verified code-buffer
   spine and the (dormant) CUDA/RunPod era: worker modes, validation
   ladder, speed levers, deploy-stability procedure, research index.
   The RunPod worker is FROZEN in `src-diffusion/…/cuda/`; revive by

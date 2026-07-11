@@ -7,7 +7,7 @@
 ;;;
 ;;; Why bb: parse-forms is PURELY STRUCTURAL (rewrite-clj read + read-error
 ;;; span classification — no semantics), so babashka's built-in rewrite-clj
-;;; reads CLJS-flavored canvas forms BIT-IDENTICALLY to the pod — zero
+;;; reads CLJS-flavored code-buffer forms BIT-IDENTICALLY to the pod — zero
 ;;; fidelity loss, NO shadow build, NO Node, NO pod. Same path bin/test-parser
 ;;; proves (bb --classpath src on the .cljc source).
 ;;;
@@ -64,7 +64,7 @@
    strings at this boundary, exactly as the Node bundle does).
 
    `strip-fences?` (default true) controls markdown fence stripping. Pass
-   false for the CANVAS-TEXT basis: spans then index the EXACT input
+   false for the CODE-BUFFER-TEXT basis: spans then index the EXACT input
    string, aligning with the diffusion worker's `offset_map` (see the
    `parse-raw` op below + closed-loop-span-alignment-2026-06-28.md)."
   ([code] (validate code true))
@@ -83,7 +83,7 @@
 
 (defn refine-parse
   "The CHEAP TIERS of the unified `seon.diffusion.oracle/refine` control set,
-   computed on the CANVAS basis (no fence strip — spans share the worker's
+   computed on the CODE-BUFFER basis (no fence strip — spans share the worker's
    `offset_map`). One bb call covers the tiers that need NO out-of-process help:
 
      - `renoise_spans` — broken-syntax spans (PARSE) + def-vs-defn spans
@@ -518,7 +518,7 @@
   "Dispatch one parsed request map (string keys, from JSON) to a response
    map. The op-dispatch seam: `parse`/`validate` run the parse tier (fence
    STRIPPING, the chat/LLM-reply basis); `parse-raw` runs the SAME tier
-   with NO fence strip, so spans index the EXACT input — the canvas_text
+   with NO fence strip, so spans index the EXACT input — the code_buffer_text
    basis the diffusion worker's `offset_map` shares (closed-loop renoise).
    `refine` returns the PARSE HALF of the unified oracle control set
    (clamps + renoise_spans; see [[refine-parse]] for the bb-vs-pod boundary).

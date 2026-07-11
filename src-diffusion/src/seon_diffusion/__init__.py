@@ -1,4 +1,4 @@
-"""seon_diffusion — the verified canvas: oracle-guided DiffusionGemma
+"""seon_diffusion — the verified code_buffer: oracle-guided DiffusionGemma
 generation on the local MLX model, integrated with seon's co-located
 oracles (bb parse/lint/phase, stateful node eval session).
 

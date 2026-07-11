@@ -6,7 +6,7 @@ from the LIVE session env (cljs.core + session defs + program-graph
 names), proves them with compile-only trials, and evals only the unique
 winner — the Python candidate shim this module once carried is deleted.
 What remains here is the CONTENT-CHANNEL half shared by the diffusion
-canvas and any AR path: the `; fix:` hint vocabulary and the error-message
+code_buffer and any AR path: the `; fix:` hint vocabulary and the error-message
 parsing that feeds it.
 """
 

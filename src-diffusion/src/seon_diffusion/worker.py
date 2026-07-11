@@ -197,7 +197,7 @@ _ORACLE = {}         # persistent bb oracle, spawned once per worker process
 
 
 def _guided(payload, info):
-    """One guided verified-canvas build: fresh EvalSession per job (torn
+    """One guided verified code-buffer build: fresh EvalSession per job (torn
     down on any exit), persistent bb oracle, failures IN-BAND as gen_error.
     Perf fields in tokens/second."""
     from .control import generate_guided

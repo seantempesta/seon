@@ -4,7 +4,7 @@
 
    ## What it answers
 
-   Parse asks \"is the canvas well-formed?\"; eval asks \"does it RUN?\".
+   Parse asks \"is the code-buffer well-formed?\"; eval asks \"does it RUN?\".
    Retrieval asks the question only the PROGRAM GRAPH can answer: \"does this
    committed symbol NAME a real fn — and if not, what real fn did the model
    MEAN?\". This is the AUROC-0.471 class (see
@@ -14,7 +14,7 @@
 
    ## The three steps (this ns is the SEON-side oracle, NO GPU)
 
-   1. DETECT — `unresolved-references`: extract the canvas's free symbol
+   1. DETECT — `unresolved-references`: extract the code-buffer's free symbol
       references (call-position + every used var, minus locals/specials/core),
       char-span each, and keep the ones that do NOT resolve in the program
       graph. This is the offline, graph-membership equivalent of the analyzer's
@@ -22,7 +22,7 @@
    2. RETRIEVE — `retrieve-candidates`: for an unresolved name, return the
       nearest REAL `:seon.fn` candidates. The GRAPH path (always on): exact
       name match + near-name (Levenshtein) over `:seon.fn/sym`. The SEMANTIC
-      enhancement (`retrieve-for-canvas+semantic`, gated by `SEON_EMBED`):
+      enhancement (`retrieve-for-code-buffer+semantic`, gated by `SEON_EMBED`):
       `seon.embed/search-pull` KNN over the Proximum/Vertex fn index, fail-soft.
    3. EMIT — `build-injection` / `to-wire`: the INJECTION descriptor the GPU
       worker's clamp/infill surface consumes — the real symbol + its
@@ -31,7 +31,7 @@
 
    ## Worker integration (mid-denoise, once on GPU)
 
-   The descriptor is char-span based; the worker maps `::span` → canvas token
+   The descriptor is char-span based; the worker maps `::span` → code-buffer token
    positions via its `offset_map` (the L linchpin), then (op `:clamp`) forces
    those positions to `::replacement` while appending `::spec-text` to the
    encoder KV so the decoder cross-attends the real signature for the next
@@ -53,16 +53,16 @@
 ;; Schemas
 ;; ============================================================
 
-(schema/register! ::canvas-text :string)
-;; alias-string → ns-name-string, e.g. {"db" "seon.db"} — from the canvas's
+(schema/register! ::code-buffer-text :string)
+;; alias-string → ns-name-string, e.g. {"db" "seon.db"} — from the code-buffer's
 ;; own `(ns … (:require [seon.db :as db]))` and/or a caller-supplied override.
 (schema/register! ::aliases [:map-of :string :string])
-;; absolute char offsets [start end) into the canvas string.
+;; absolute char offsets [start end) into the code-buffer string.
 (schema/register! ::span [:tuple :int :int])
 (schema/register! ::match-kind [:enum :exact :near-name :semantic])
 (schema/register! ::k [:int {:min 1}])
 
-;; A free symbol reference detected in the canvas.
+;; A free symbol reference detected in the code-buffer.
 (schema/register!
   ::symbol-ref
   [:map
@@ -107,7 +107,7 @@
 (schema/register!
   ::detect-request
   [:map
-   [::canvas-text ::canvas-text]
+   [::code-buffer-text ::code-buffer-text]
    [::aliases {:optional true} ::aliases]
    [::db {:optional true} :seon.embed/db]])
 
@@ -123,7 +123,7 @@
 (schema/register!
   ::retrieve-request
   [:map
-   [::canvas-text ::canvas-text]
+   [::code-buffer-text ::code-buffer-text]
    [::aliases {:optional true} ::aliases]
    [::k {:optional true} ::k]
    [::db {:optional true} :seon.embed/db]])
@@ -148,7 +148,7 @@
      deftest is testing async are use-fixtures})
 
 (def ^:private core-symbols
-  "Common clojure/cljs.core fns + macros used in agent canvases. Not
+  "Common clojure/cljs.core fns + macros used in agent code-buffers. Not
    exhaustive — a miss here only triggers a retrieval that finds no near
    candidate (fail-soft, no injection), never a wrong correction."
   '#{+ - * / inc dec quot rem mod min max abs = == not= < > <= >= not
@@ -308,8 +308,8 @@
     (coll? form)   (walk-children! acc form)
     :else          nil))
 
-(defn- canvas-aliases
-  "Extract `{alias-string → ns-string}` from the canvas's `(ns …)` form's
+(defn- code-buffer-aliases
+  "Extract `{alias-string → ns-string}` from the code-buffer's `(ns …)` form's
    `:require` specs (`[ns :as alias]`)."
   [forms]
   (reduce
@@ -341,17 +341,17 @@
   (or (nil? c) (boolean (re-find #"[\s(){}\[\]\"';@^~`,]" c))))
 
 (defn- find-symbol-span
-  "First absolute `[start end)` span of token `needle` in `canvas` bounded by
+  "First absolute `[start end)` span of token `needle` in `code-buffer` bounded by
    non-constituent chars (so `db` does not match inside `db/x`, and `:db/x`
    keyword does not match `db/x`). nil if absent."
-  [canvas needle]
-  (let [n (count needle) clen (count canvas)]
+  [code-buffer needle]
+  (let [n (count needle) clen (count code-buffer)]
     (loop [from 0]
-      (let [i (.indexOf canvas needle from)]
+      (let [i (.indexOf code-buffer needle from)]
         (when (>= i 0)
-          (let [before (when (pos? i) (subs canvas (dec i) i))
+          (let [before (when (pos? i) (subs code-buffer (dec i) i))
                 after-i (+ i n)
-                after   (when (< after-i clen) (subs canvas after-i (inc after-i)))]
+                after   (when (< after-i clen) (subs code-buffer after-i (inc after-i)))]
             (if (and (boundary? before) (boundary? after))
               [i after-i]
               (recur (inc i)))))))))
@@ -376,20 +376,20 @@
               (contains? core-namespaces expanded)))))))
 
 (defn free-references
-  "Every FREE symbol reference in the canvas — a PURE structural pass.
+  "Every FREE symbol reference in the code-buffer — a PURE structural pass.
 
    Call
    position and value position — minus locals, special forms, core, and
    interop. These are the symbols that MUST resolve to an external var; the
    ones that do not exist in the program graph are the retrieval targets
    (`unresolved-references`). Each carries its first char `::span`."
-  {:malli/schema [:=> [:cat [:map [::canvas-text ::canvas-text]
+  {:malli/schema [:=> [:cat [:map [::code-buffer-text ::code-buffer-text]
                                   [::aliases {:optional true} ::aliases]]]
                   [:vector ::symbol-ref]]}
-  [{::keys [canvas-text aliases]}]
-  (let [entries (internal/parse-forms canvas-text {:strip-fences? false})
+  [{::keys [code-buffer-text aliases]}]
+  (let [entries (internal/parse-forms code-buffer-text {:strip-fences? false})
         forms   (->> entries (filter #(= :form (:seon.repl/kind %))) (map :seon.repl/form))
-        aliases (merge (canvas-aliases forms) (or aliases {}))
+        aliases (merge (code-buffer-aliases forms) (or aliases {}))
         acc     (atom {:candidates [] :bound #{}})]
     (doseq [f forms] (walk! acc f false))
     (let [{:keys [candidates bound]} @acc
@@ -400,7 +400,7 @@
       (->> by-sym
            (keep (fn [[sym head?]]
                    (when-not (ref-resolved-by-name? sym aliases bound)
-                     (when-let [span (find-symbol-span canvas-text (str sym))]
+                     (when-let [span (find-symbol-span code-buffer-text (str sym))]
                        (let [s  (str sym)
                              qi (str/index-of s "/")]
                          (cond-> {::symbol s
@@ -513,12 +513,12 @@
 
    The program-graph misses — the hallucinated / dead-name symbols. Each is a retrieval target."
   {:malli/schema [:=> [:cat ::detect-request] [:vector ::symbol-ref]]}
-  [{::keys [canvas-text aliases db]}]
+  [{::keys [code-buffer-text aliases db]}]
   (let [db      (the-db db)
-        entries (internal/parse-forms canvas-text {:strip-fences? false})
+        entries (internal/parse-forms code-buffer-text {:strip-fences? false})
         forms   (->> entries (filter #(= :form (:seon.repl/kind %))) (map :seon.repl/form))
-        aliases (merge (canvas-aliases forms) (or aliases {}))
-        refs    (free-references {::canvas-text canvas-text ::aliases aliases})]
+        aliases (merge (code-buffer-aliases forms) (or aliases {}))
+        refs    (free-references {::code-buffer-text code-buffer-text ::aliases aliases})]
     (vec (remove (fn [{::keys [name qualifier]}]
                    (symbol-resolves? (cond-> {::name name ::aliases aliases ::db db}
                                        qualifier (assoc ::qualifier qualifier))))
@@ -544,20 +544,20 @@
        ::spec-text   (::spec-text best)
        ::candidates  candidates})))
 
-(defn retrieve-for-canvas
-  "THE graph-path entry: detect, retrieve, and emit injections for a canvas.
+(defn retrieve-for-code-buffer
+  "THE graph-path entry: detect, retrieve, and emit injections for a code-buffer.
 
-   Detects unresolved symbols in `::canvas-text`, retrieves
+   Detects unresolved symbols in `::code-buffer-text`, retrieves
    real candidates for each, and emits injection descriptors. PURE reader over
    the db — no GPU, no embeddings. Returns `{::unresolved [...] ::injections
    [...]}`."
   {:malli/schema [:=> [:cat ::retrieve-request] ::retrieval-result]}
-  [{::keys [canvas-text aliases k db]}]
+  [{::keys [code-buffer-text aliases k db]}]
   (let [db      (the-db db)
-        entries (internal/parse-forms canvas-text {:strip-fences? false})
+        entries (internal/parse-forms code-buffer-text {:strip-fences? false})
         forms   (->> entries (filter #(= :form (:seon.repl/kind %))) (map :seon.repl/form))
-        aliases (merge (canvas-aliases forms) (or aliases {}))
-        unres   (unresolved-references {::canvas-text canvas-text ::aliases aliases ::db db})]
+        aliases (merge (code-buffer-aliases forms) (or aliases {}))
+        unres   (unresolved-references {::code-buffer-text code-buffer-text ::aliases aliases ::db db})]
     {::unresolved unres
      ::injections
      (vec (keep (fn [ref]
@@ -578,11 +578,11 @@
   '[[?e :seon.fn/source]])
 
 (defn- span-context
-  "A window of canvas text around `[s e)` — the embedder reads the surrounding
+  "A window of code-buffer text around `[s e)` — the embedder reads the surrounding
    FORM's intent, not just the wrong token."
-  [canvas [s e]]
+  [code-buffer [s e]]
   (let [pad 120]
-    (subs canvas (max 0 (- s pad)) (min (count canvas) (+ e pad)))))
+    (subs code-buffer (max 0 (- s pad)) (min (count code-buffer) (+ e pad)))))
 
 (defn- semantic-candidate
   "Build a `:semantic` candidate map from a search-pull hit entity."
@@ -597,16 +597,16 @@
       (seq (:seon.fn/doc e))      (assoc ::doc (:seon.fn/doc e))
       (seq (:seon.fn/spec e))     (assoc ::spec (:seon.fn/spec e)))))
 
-(defn ^:async retrieve-for-canvas+semantic
-  "ENHANCEMENT over [[retrieve-for-canvas]] with semantic neighbours.
+(defn ^:async retrieve-for-code-buffer+semantic
+  "ENHANCEMENT over [[retrieve-for-code-buffer]] with semantic neighbours.
 
    When `SEON_EMBED` is on, augments
    each injection's `::candidates` with semantic neighbours from the Proximum
    fn index (`seon.embed/search-pull`, span-context query, fn-scope). Fail-soft
    — embed off or any wire error returns the graph-only result unchanged."
   {:malli/schema [:=> [:cat ::retrieve-request] :any]}
-  [{::keys [canvas-text] :as req}]
-  (let [base (retrieve-for-canvas req)]
+  [{::keys [code-buffer-text] :as req}]
+  (let [base (retrieve-for-code-buffer req)]
     (if-not (turn/embed-retrieval-on?)
       base
       (try
@@ -615,7 +615,7 @@
                 (if-let [inj (first injs)]
                   (let [{:seon.embed/keys [hits]}
                         (await (embed/search-pull
-                                 {:seon.embed/query (span-context canvas-text (::span inj))
+                                 {:seon.embed/query (span-context code-buffer-text (::span inj))
                                   :seon.embed/k 5
                                   :seon.embed/where fn-scope
                                   :seon.embed/pull-pattern

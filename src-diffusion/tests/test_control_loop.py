@@ -1,6 +1,6 @@
 """generate_guided logic against a SCRIPTED stub model + the REAL oracles.
 
-The stub emits one scripted canvas per round (near-one-hot logits, so a
+The stub emits one scripted code_buffer per round (near-one-hot logits, so a
 round is exactly one forward: stability_threshold=0 and the entropy is
 ~0). bb parse/lint and the node eval session are the real ones — this
 pins the loop's decisions (lock, harvest, scramble, hint, repair,
@@ -39,10 +39,10 @@ class StubModel:
     near-one-hot logits pass the confidence gate immediately)."""
 
     def __init__(self, targets):
-        self.cfg = SimpleNamespace(canvas_length=CL, vocab_size=VOCAB)
+        self.cfg = SimpleNamespace(code_buffer_length=CL, vocab_size=VOCAB)
         self.targets = list(targets)
         self.encoded = []                    # harvested texts, for assertions
-        self.seen_canvases = []              # decoded canvas ins, for assertions
+        self.seen_code_buffers = []              # decoded code_buffer ins, for assertions
         self._mask = [False] * CL            # set by the _denoise_round spy
 
     def new_cache(self):
@@ -51,14 +51,14 @@ class StubModel:
     def encode(self, ids, cache, past_len):
         self.encoded.append(CharTok().decode([int(t) for t in ids[0]]))
 
-    def decode(self, canvas_ids, cache, canvas_start, self_conditioning_logits=None):
-        self.seen_canvases.append(CharTok().decode([int(t) for t in canvas_ids[0]]))
+    def decode(self, code_buffer_ids, cache, code_buffer_start, self_conditioning_logits=None):
+        self.seen_code_buffers.append(CharTok().decode([int(t) for t in code_buffer_ids[0]]))
         target = self.targets.pop(0) if self.targets else ""
         stream = [ord(c) for c in target] + [EOS]
         out, ti = [], 0
         for p in range(CL):
             if self._mask[p]:
-                out.append(int(canvas_ids[0][p]))     # hold the clamp
+                out.append(int(code_buffer_ids[0][p]))     # hold the clamp
             elif ti < len(stream):
                 out.append(stream[ti])
                 ti += 1
@@ -80,9 +80,9 @@ def spy_clamp_mask(monkeypatch):
     (clamped logits are forced) — the stub is a perfect denoiser."""
     import seon_diffusion.control as C
     real = C._denoise_round
-    def wrapper(model, canvas, clamp_mask, clamp_ids, cache, cur_len, gen, **kw):
+    def wrapper(model, code_buffer, clamp_mask, clamp_ids, cache, cur_len, gen, **kw):
         model._mask = [bool(b) for b in clamp_mask[0]]
-        return real(model, canvas, clamp_mask, clamp_ids, cache, cur_len, gen, **kw)
+        return real(model, code_buffer, clamp_mask, clamp_ids, cache, cur_len, gen, **kw)
     monkeypatch.setattr(C, "_denoise_round", wrapper)
 
 
@@ -122,8 +122,8 @@ def test_def_typo_scrambled_with_hint_then_locked(oracle, session):
     assert "(defn f1 [x] x)" in r["text"]
     scrambles = [e for e in r["events"] if e["event"] == "scramble"]
     assert scrambles and "def-vs-defn" in scrambles[0]["kinds"]
-    # the hint comment was CLAMPED into the round-2 canvas the model saw
-    assert any("; fix:" in c for c in model.seen_canvases[1:])
+    # the hint comment was CLAMPED into the round-2 code_buffer the model saw
+    assert any("; fix:" in c for c in model.seen_code_buffers[1:])
 
 
 def test_undeclared_var_repaired_not_scrambled(oracle, session):
@@ -141,7 +141,7 @@ def test_failing_check_restarts_attempt(oracle, session):
     assert r["done"] and r["attempts"] == 2 and r["checks_passed"]
     assert "(+ x 2)" in r["text"]
     # the behavioral failure rode the content channel into attempt 2
-    assert any("must return 3" in c for c in model.seen_canvases[1:])
+    assert any("must return 3" in c for c in model.seen_code_buffers[1:])
 
 
 def test_harvest_reaches_encoder_cache(oracle, session):

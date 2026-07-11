@@ -80,7 +80,7 @@
       (is (= expected (strip-form-span (parse/parse-forms in)))))))
 
 ;; ============================================================
-;; Form `:span` is canvas-aligned — every `:kind :form` entry carries an
+;; Form `:span` is code-buffer-aligned — every `:kind :form` entry carries an
 ;; ABSOLUTE `[start end)` char span whose substring IS its byte-faithful
 ;; :source. This is the closed-loop oracle's clamp-to-HOLD basis (the same
 ;; basis the :read renoise spans already use). Asserted as a MECHANISM
@@ -878,7 +878,7 @@
 ;; `:strip-fences? true` must give a span shifted by EXACTLY the fence-prefix
 ;; length the strip leaves before the form — a uniform shift on BOTH
 ;; endpoints, nothing distorted. That is what lets the driver translate a
-;; good-form clamp span between the stripped basis and the raw `canvas_text`
+;; good-form clamp span between the stripped basis and the raw `code_buffer_text`
 ;; the worker's `offset_map` indexes.
 ;;
 ;; (Note the asymmetry the strip exists to absorb: a BARE ``` fence with no

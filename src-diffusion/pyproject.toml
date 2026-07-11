@@ -1,7 +1,7 @@
 [project]
 name = "seon-diffusion"
 version = "0.1.0"
-description = "The verified canvas — oracle-guided DiffusionGemma generation (MLX-local first) for seon"
+description = "The verified code-buffer — oracle-guided DiffusionGemma generation (MLX-local first) for seon"
 requires-python = ">=3.12"
 dependencies = [
     "mlx>=0.31.2",

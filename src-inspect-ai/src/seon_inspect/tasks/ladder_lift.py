@@ -81,7 +81,7 @@ def ladder_solver(ladder: bool, endpoint: str):
             payload = {"mode": "generate", "prompt": t["prompt"],
                        "max_new_tokens": 320, "_idx": idx}
         r = await anyio.to_thread.run_sync(ep.call, payload)
-        state.output.completion = (r.get("text") or r.get("canvas_text") or "")
+        state.output.completion = (r.get("text") or r.get("code_buffer_text") or "")
         state.metadata.update({"ladder": ladder,
                                **{k: r.get(k) for k in WORKER_METRICS}})
         return state

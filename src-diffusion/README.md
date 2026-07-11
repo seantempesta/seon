@@ -1,9 +1,9 @@
-# seon-diffusion — the verified canvas
+# seon-diffusion — the verified code-buffer
 
 Oracle-guided DiffusionGemma generation, local-first (MLX on Apple
-Silicon). The diffusion model denoises Clojure on a 256-token canvas;
+Silicon). The diffusion model denoises Clojure on a 256-token code-buffer;
 seon's co-located oracles steer it between rounds: forms **lock and
-execute** the moment they parse+lint+eval (harvested off the canvas into
+execute** the moment they parse+lint+eval (harvested off the code-buffer into
 the encoder KV cache), provable near-misses are **auto-repaired** for $0
 model tokens, remaining bad spans are scrambled under a `; fix:` hint
 comment, and the caller's `[{call,expect}]` checks terminate the loop on
@@ -66,4 +66,4 @@ was retired 2026-07-10; it lives in git history and in
 - Phase-0 lift proof (PoC repo, 2026-07-05): guided vs free, N=18/arm —
   parse 0.94→1.00, eval 0.78→1.00, behavioral 0.72→0.94.
 - Design + phase plan: `docs/prds/diffusion-dynamic-context/` +
-  the approved plan (verified-canvas v2).
+  the approved plan (verified code-buffer v2).

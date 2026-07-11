@@ -1,8 +1,8 @@
-"""Guided generation — the verified-canvas loop on the local MLX model.
+"""Guided generation — the verified code-buffer loop on the local MLX model.
 
-The unit of progress is the top-level FORM, not the canvas:
+The unit of progress is the top-level FORM, not the code_buffer:
 
-  round:   denoise the workspace canvas to its natural early-stop
+  round:   denoise the workspace code_buffer to its natural early-stop
   check:   bb oracle partitions the text — good forms / broken spans
            (parse + def-vs-defn lint + phase grammar, one ~0.1ms call)
   repair:  a provably-fixable near-miss is REWRITTEN in place, $0 model
@@ -12,7 +12,7 @@ The unit of progress is the top-level FORM, not the canvas:
            the fallback, never the first move.
   lock:    the maximal PREFIX of good forms is EXECUTED against the
            stateful eval session (defs accumulate); each form that runs
-           is harvested OFF the canvas into the encoder cache — it
+           is harvested OFF the code_buffer into the encoder cache — it
            becomes conditioning context and never pays decode cost again
   fix:     every remaining flagged span is scrambled (fresh noise) with a
            `; fix:` hint comment CLAMPED above it — feedback rides the
@@ -67,7 +67,7 @@ def _result_comment(tok, value):
 
 
 class _Workspace:
-    """Next-round canvas plan: clamped segments + free (noise) segments."""
+    """Next-round code_buffer plan: clamped segments + free (noise) segments."""
 
     def __init__(self):
         self.segs = []                      # ("clamp", [ids]) | ("free", n)
@@ -84,7 +84,7 @@ class _Workspace:
         return sum(len(p) if k == "clamp" else p for k, p in self.segs)
 
     def hole_spans(self):
-        """[(start, end), …] canvas position span of each free segment."""
+        """[(start, end), …] code_buffer position span of each free segment."""
         spans, pos = [], 0
         for kind, payload in self.segs:
             n = len(payload) if kind == "clamp" else payload
@@ -94,7 +94,7 @@ class _Workspace:
         return spans
 
     def build(self, CL, vocab_size, pad_clamp_id=None):
-        """Return (canvas[1,CL], clamp_mask[1,CL], clamp_ids[1,CL], overflow?).
+        """Return (code_buffer[1,CL], clamp_mask[1,CL], clamp_ids[1,CL], overflow?).
         `pad_clamp_id` clamps the unused tail to that token (the typeahead
         template pattern: the model only works the holes); default None
         leaves the tail free (the guided-loop workspace, unchanged)."""
@@ -118,17 +118,17 @@ class _Workspace:
             ids += [None] * pad
             mask += [False] * pad
         noise = mx.random.randint(0, vocab_size, (1, CL))
-        canvas = mx.array([[i if i is not None else 0 for i in ids]])
+        code_buffer = mx.array([[i if i is not None else 0 for i in ids]])
         m = mx.array([mask])
-        canvas = mx.where(m, canvas, noise)
-        return canvas, m, canvas, overflow
+        code_buffer = mx.where(m, code_buffer, noise)
+        return code_buffer, m, code_buffer, overflow
 
 
-def _denoise_round(model, canvas, clamp_mask, clamp_ids, cache, cur_len, gen,
+def _denoise_round(model, code_buffer, clamp_mask, clamp_ids, cache, cur_len, gen,
                    probe=None, probe_every=2, bias=None):
     """One denoise run, holding clamped positions. Ends on the model's own
     stability+confidence — OR EARLIER when `probe(belief)` proves the
-    canvas (validation-as-early-stop: a ~0.4ms parse probe against a
+    code_buffer (validation-as-early-stop: a ~0.4ms parse probe against a
     ~114ms forward; proof beats model confidence).
     `bias`, when given, is applied to the raw logits each forward
     (additive logit masks — the typeahead slot-masking seam; None keeps
@@ -136,15 +136,15 @@ def _denoise_round(model, canvas, clamp_mask, clamp_ids, cache, cur_len, gen,
     Returns (belief_ids[1,CL], forwards, raw_logits[1,CL,V]) — the raw
     (biased, pre-temperature) logits of the FINAL forward, the logit
     readout surface."""
-    current = canvas
+    current = code_buffer
     sc_logits = None
     history = None
-    argmax_canvas = current
+    argmax_code_buffer = current
     forwards = 0
     raw_logits = None
     for cur_step in range(gen.max_denoising_steps, 0, -1):
         forwards += 1
-        logits = model.decode(current, cache, canvas_start=cur_len,
+        logits = model.decode(current, cache, code_buffer_start=cur_len,
                               self_conditioning_logits=sc_logits)
         if bias is not None:
             logits = bias(logits)
@@ -152,25 +152,25 @@ def _denoise_round(model, canvas, clamp_mask, clamp_ids, cache, cur_len, gen,
         temp = gen.t_min + (gen.t_max - gen.t_min) * (cur_step / gen.max_denoising_steps)
         logits = logits / temp
         denoiser = mx.random.categorical(logits)
-        argmax_canvas = mx.argmax(logits, axis=-1)
+        argmax_code_buffer = mx.argmax(logits, axis=-1)
         accepted, m = _accept(current, denoiser, logits, gen.entropy_bound)
         renoise = mx.random.randint(0, model.cfg.vocab_size, current.shape)
         current = mx.where(m, accepted, renoise)
         current = mx.where(clamp_mask, clamp_ids, current)
 
         stable = gen.stability_threshold == 0 or (
-            history is not None and bool(mx.all(history == argmax_canvas)))
-        history = argmax_canvas
+            history is not None and bool(mx.all(history == argmax_code_buffer)))
+        history = argmax_code_buffer
         confident = float(mx.mean(_entropy(logits))) < gen.confidence_threshold
-        mx.eval(current, argmax_canvas)
+        mx.eval(current, argmax_code_buffer)
         sc_logits = logits
         if stable and confident:
             break
         if probe is not None and forwards % probe_every == 0:
-            belief = mx.where(clamp_mask, clamp_ids, argmax_canvas)
+            belief = mx.where(clamp_mask, clamp_ids, argmax_code_buffer)
             if probe(belief):
                 break
-    belief = mx.where(clamp_mask, clamp_ids, argmax_canvas)
+    belief = mx.where(clamp_mask, clamp_ids, argmax_code_buffer)
     return belief, forwards, raw_logits
 
 
@@ -190,7 +190,7 @@ def generate_guided(model, tok, prompt_ids, oracle, eval_session=None,
     if gen.seed is not None:
         mx.random.seed(gen.seed)
     cfg = model.cfg
-    CL = cfg.canvas_length
+    CL = cfg.code_buffer_length
 
     ids = mx.array(prompt_ids)[None, :]
     t0 = time.time()
@@ -232,7 +232,7 @@ def generate_guided(model, tok, prompt_ids, oracle, eval_session=None,
 
         for rnd in range(max_rounds):
             rounds_used += 1
-            canvas, clamp_mask, clamp_ids, overflow = ws.build(CL, cfg.vocab_size)
+            code_buffer, clamp_mask, clamp_ids, overflow = ws.build(CL, cfg.vocab_size)
             if overflow:
                 events.append({"attempt": attempt, "round": rnd, "event": "overflow"})
 
@@ -262,7 +262,7 @@ def generate_guided(model, tok, prompt_ids, oracle, eval_session=None,
                         return False
                 return True
 
-            belief, fwd, _ = _denoise_round(model, canvas, clamp_mask, clamp_ids,
+            belief, fwd, _ = _denoise_round(model, code_buffer, clamp_mask, clamp_ids,
                                             cache, cur_len, gen, probe=_proven)
             total_forwards += fwd
 
@@ -361,7 +361,7 @@ def generate_guided(model, tok, prompt_ids, oracle, eval_session=None,
                 events.append({"attempt": attempt, "round": rnd, "event": "done"})
                 break
 
-            # ---- plan the next canvas: keep the clean prefix, scramble ONE
+            # ---- plan the next code_buffer: keep the clean prefix, scramble ONE
             # COALESCED region (first error → last error). A broken defn
             # orphans its interior sub-forms at top level; judging those
             # fragments individually (phase grammar) destroyed the model's

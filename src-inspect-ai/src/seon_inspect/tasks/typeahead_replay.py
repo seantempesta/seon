@@ -5,7 +5,7 @@ evals/typeahead_replay.corpus.json) against the DiffusionGemma worker in
 three arms over the SAME intents + contracts:
 
   arm1_guided     free guided generation (mode=guided) — NO menus in the
-                  render. The shipped verified-canvas baseline.
+                  render. The shipped verified code-buffer baseline.
   arm2_typeahead  the full surface: menus + plan ledger IN the render,
                   mode=step FSM loop (the Python mirror of the shipped
                   seon.ai.typeahead loop: committed/draft threaded, offers

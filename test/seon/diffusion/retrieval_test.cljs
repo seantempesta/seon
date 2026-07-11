@@ -1,7 +1,7 @@
 (ns seon.diffusion.retrieval-test
   "Offline proof for the RETRIEVAL leg of the diffusion buzzsaw
    (`seon.diffusion.retrieval`) — NO GPU, NO embeddings. Each test seeds a
-   small in-memory program graph (a few real `:seon.fn` rows), feeds a canvas
+   small in-memory program graph (a few real `:seon.fn` rows), feeds a code-buffer
    that references a hallucinated near-name (`transct!` / `db/store!`), and
    asserts the three steps:
 
@@ -77,11 +77,11 @@
       (.then (fn [_] (done)))))
 
 ;; ---------------------------------------------------------------------------
-;; The canonical wrong-name canvas: a qualified hallucination (db/store!) AND a
+;; The canonical wrong-name code-buffer: a qualified hallucination (db/store!) AND a
 ;; bare near-name hallucination (transct!), among real refs (db, save!, m).
 ;; ---------------------------------------------------------------------------
 
-(def ^:private canvas
+(def ^:private code-buffer
   (str "(ns my.work (:require [seon.db :as db]))\n"
        "(defn save! [m]\n"
        "  (db/transct! {:db/tx-data [m]})\n"
@@ -95,7 +95,7 @@
   (async done
     (with-db
       (fn [db]
-        (let [unres (ret/unresolved-references {::ret/canvas-text canvas ::ret/db db})
+        (let [unres (ret/unresolved-references {::ret/code-buffer-text code-buffer ::ret/db db})
               syms  (set (map ::ret/symbol unres))]
           (testing "both hallucinated names are flagged (bare + qualified)"
             (is (contains? syms "transct!"))
@@ -109,7 +109,7 @@
           (testing "each flag carries an absolute char span pointing at the token"
             (let [by-sym (into {} (map (juxt ::ret/symbol identity)) unres)
                   [s e]  (::ret/span (by-sym "transct!"))]
-              (is (= "transct!" (subs canvas s e)))))))
+              (is (= "transct!" (subs code-buffer s e)))))))
       done)))
 
 ;; The AUROC-0.471 split: a confidently-wrong-but-REAL core name (reduce-kv on
@@ -120,7 +120,7 @@
     (with-db
       (fn [db]
         (let [unres (ret/unresolved-references
-                      {::ret/canvas-text "(defn sum [xs] (reduce-kv + 0 xs))" ::ret/db db})]
+                      {::ret/code-buffer-text "(defn sum [xs] (reduce-kv + 0 xs))" ::ret/db db})]
           (is (empty? unres) "reduce-kv is a real core fn — graph path defers to eval")))
       done)))
 
@@ -158,7 +158,7 @@
   (async done
     (with-db
       (fn [db]
-        (let [{::ret/keys [injections]} (ret/retrieve-for-canvas {::ret/canvas-text canvas ::ret/db db})
+        (let [{::ret/keys [injections]} (ret/retrieve-for-code-buffer {::ret/code-buffer-text code-buffer ::ret/db db})
               by-unres (into {} (map (juxt ::ret/unresolved identity)) injections)
               inj      (by-unres "transct!")]
           (testing "the transct! injection names the real replacement + span + spec"
@@ -166,7 +166,7 @@
             (is (= "transct!" (::ret/unresolved inj)))
             (is (= "transact!" (::ret/replacement inj)))
             (let [[s e] (::ret/span inj)]
-              (is (= "transct!" (subs canvas s e))))
+              (is (= "transct!" (subs code-buffer s e))))
             (is (re-find #"seon.db/transact!" (::ret/spec-text inj))))
           (testing "the qualified db/transct! injection preserves the alias in the replacement"
             (let [qinj (by-unres "db/transct!")]
@@ -178,20 +178,20 @@
               (is (= "transact!" (.-replacement w)))
               (is (= "transct!" (.-unresolved w)))
               (is (= (::ret/span inj) (vec (.-span w))))
-              (is (= "transct!" (apply subs canvas (vec (.-span w)))))
+              (is (= "transct!" (apply subs code-buffer (vec (.-span w)))))
               (is (re-find #"seon.db/transact!" (.-spec_text w)))))))
       done)))
 
 ;; ---------------------------------------------------------------------------
-;; Falsification: a clean canvas yields no injections; membership is honest.
+;; Falsification: a clean code-buffer yields no injections; membership is honest.
 ;; ---------------------------------------------------------------------------
 
-(deftest clean-canvas-no-injections
+(deftest clean-code-buffer-no-injections
   (async done
     (with-db
       (fn [db]
-        (let [r (ret/retrieve-for-canvas
-                  {::ret/canvas-text "(defn sum [xs] (reduce + 0 xs))" ::ret/db db})]
+        (let [r (ret/retrieve-for-code-buffer
+                  {::ret/code-buffer-text "(defn sum [xs] (reduce + 0 xs))" ::ret/db db})]
           (is (empty? (::ret/unresolved r)))
           (is (empty? (::ret/injections r)))))
       done)))
@@ -262,10 +262,10 @@
             (fn [db]
               (check 100
                 (prop/for-all [fq (gen/elements syms)]
-                  (let [canvas  (str "(defn use1 [x] (" fq " x))")
+                  (let [code-buffer  (str "(defn use1 [x] (" fq " x))")
                         flagged (set (map ::ret/symbol
                                           (ret/unresolved-references
-                                            {::ret/canvas-text canvas ::ret/db db})))]
+                                            {::ret/code-buffer-text code-buffer ::ret/db db})))]
                     (and (not (contains? flagged fq))
                          (ret/symbol-resolves?
                            {::ret/name (nm-of fq) ::ret/qualifier (ns-of fq)
@@ -273,7 +273,7 @@
           (.catch (fn [e] (is false (str "threw — " e))))
           (.then (fn [_] (done)))))))
 
-;; Property 2: a canvas referencing an absent NEAR-name (1 edit from a real
+;; Property 2: a code-buffer referencing an absent NEAR-name (1 edit from a real
 ;; sym) IS flagged AND retrieves that real sym.
 (deftest retrieve-prop-near-miss-flagged-and-retrieved
   (async done
@@ -288,10 +288,10 @@
                                extra (gen/elements (vec name-alpha))]
                   (let [nm     (nm-of fq)
                         miss   (if drop? (subs nm 0 (dec (count nm))) (str nm extra))
-                        canvas (str "(defn use1 [x] (" miss " x))")
+                        code-buffer (str "(defn use1 [x] (" miss " x))")
                         flagged   (set (map ::ret/symbol
                                             (ret/unresolved-references
-                                              {::ret/canvas-text canvas ::ret/db db})))
+                                              {::ret/code-buffer-text code-buffer ::ret/db db})))
                         cand-syms (set (map ::ret/sym
                                             (ret/retrieve-candidates
                                               {::ret/name miss ::ret/db db})))]
@@ -300,7 +300,7 @@
           (.catch (fn [e] (is false (str "threw — " e))))
           (.then (fn [_] (done)))))))
 
-;; Property 3: every emitted injection has a span within canvas bounds (whose
+;; Property 3: every emitted injection has a span within code-buffer bounds (whose
 ;; substring IS the flagged token) and a replacement whose name EXISTS in the
 ;; graph — never a fabricated correction.
 (deftest retrieve-prop-injection-span-and-replacement-valid
@@ -316,16 +316,16 @@
                                real  (gen/elements syms)
                                extra (gen/elements (vec name-alpha))]
                   (let [miss   (str (nm-of fq) extra)
-                        canvas (str "(defn use1 [x] (" real " x) (" miss " x))")
+                        code-buffer (str "(defn use1 [x] (" real " x) (" miss " x))")
                         {::ret/keys [injections]}
-                        (ret/retrieve-for-canvas {::ret/canvas-text canvas ::ret/db db})
-                        clen (count canvas)]
+                        (ret/retrieve-for-code-buffer {::ret/code-buffer-text code-buffer ::ret/db db})
+                        clen (count code-buffer)]
                     (and (pos? (count injections))       ; the near-miss yields an injection
                          (every?
                            (fn [inj]
                              (let [[s e] (::ret/span inj)]
                                (and (<= 0 s) (<= s e) (<= e clen)
-                                    (= (::ret/unresolved inj) (subs canvas s e))
+                                    (= (::ret/unresolved inj) (subs code-buffer s e))
                                     (contains? gnames (nm-of (::ret/replacement inj))))))
                            injections)))))))
           (.catch (fn [e] (is false (str "threw — " e))))
@@ -342,9 +342,9 @@
               (check 100
                 (prop/for-all [klen (gen/choose 3 6)]
                   (let [far    (apply str (repeat klen "z"))  ; 'z' ∉ the name alphabet
-                        canvas (str "(defn use1 [x] (" far " x))")
+                        code-buffer (str "(defn use1 [x] (" far " x))")
                         {::ret/keys [unresolved injections]}
-                        (ret/retrieve-for-canvas {::ret/canvas-text canvas ::ret/db db})
+                        (ret/retrieve-for-code-buffer {::ret/code-buffer-text code-buffer ::ret/db db})
                         flagged (set (map ::ret/symbol unresolved))]
                     (and (contains? flagged far)         ; the dead name IS flagged
                          (empty? injections)))))))         ; but NO wrong injection

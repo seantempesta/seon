@@ -41,7 +41,7 @@
                               ; :invalid-token is the embedding-lookup hook)
            :seon.error/message string}  ; rewrite-clj's parser message
         :seon.repl/span [start end]}  ; ABSOLUTE char offsets of the bad
-                              ; span in `text` — what a token-canvas
+                              ; span in `text` — what a token-code-buffer
                               ; re-noise step maps back to mask positions
 
        {:seon.repl/kind :comment
@@ -638,7 +638,7 @@
 ;;
 ;; The other prose-side THROW is an inline-backtick span: an agent writes
 ;; markdown narration into the eval channel like `` `:seon.db/id` shape ``
-;; or `` `: they're dynamic verbs… ``. The leading `` ` `` makes rewrite-clj
+;; or `` `: they're dynamic functions… ``. The leading `` ` `` makes rewrite-clj
 ;; throw `Invalid character: \` … while reading keyword` — a message
 ;; `prose-error-re` deliberately does NOT match (broadening it to
 ;; "character" would over-drop genuinely broken code). The precise,
@@ -863,7 +863,7 @@
    returns to 0 after at least one `(`/`[`/`{` opened — nil when no top-level
    group has closed yet.
 
-   The cheap STREAMING gate (Mode B, `:stream`): run this on the text
+   The cheap STREAMING gate (`:stream`): run this on the text
    accumulated so far after each stream delta; while it returns nil the
    model is still mid-form, so keep consuming. When it returns an offset a
    top-level grouping just closed — the caller runs the real [[parse-forms]]
@@ -983,7 +983,7 @@
    `false` to keep every `:seon.repl/span [s e]` an ABSOLUTE char offset into the
    EXACT input string (no fence-line removal shifting later spans). The
    closed-loop renoise path needs this: the diffusion worker's
-   `offset_map` indexes the RAW `canvas_text`, so its parser spans must
+   `offset_map` indexes the RAW `code_buffer_text`, so its parser spans must
    share that basis — see
    `docs/prds/diffusion-dynamic-context/research/closed-loop-span-alignment-2026-06-28.md`."
   [text & [{:keys [strip-fences?] :or {strip-fences? true}}]]
@@ -1024,7 +1024,7 @@
                                 ;; ABSOLUTE `[start end)` char span of this
                                 ;; form in `text` — the SAME basis the `:read`
                                 ;; entry carries, so the closed-loop renoise /
-                                ;; oracle layer has canvas-aligned spans for
+                                ;; oracle layer has code-buffer-aligned spans for
                                 ;; the GOOD forms (clamp-to-HOLD) as well as
                                 ;; the broken ones (renoise). `offset` points
                                 ;; exactly at the form start (leading

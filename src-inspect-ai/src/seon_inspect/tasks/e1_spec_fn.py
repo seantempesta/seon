@@ -100,12 +100,12 @@ def _samples():
 # --------------------------------------------------------------------------- #
 def worker_text(result):
     return (result.get("assembled") or result.get("text")
-            or result.get("canvas_text") or result.get("middle_text") or "")
+            or result.get("code_buffer_text") or result.get("middle_text") or "")
 
 
 def worker_middle(result):
     return (result.get("middle_text") or result.get("text")
-            or result.get("canvas_text") or "")
+            or result.get("code_buffer_text") or "")
 
 
 def assemble_clamped(t, middle):
@@ -138,8 +138,8 @@ def oracle_fix(ep, text, t, idx):
     return worker_text(r2), True
 
 
-def _body_region_spans(canvas, body_span):
-    pr = oracle_parse(canvas)
+def _body_region_spans(code_buffer, body_span):
+    pr = oracle_parse(code_buffer)
     errs = pr.get("errors") or []
     if not body_span:
         return [e["span"] for e in errs if "span" in e]
@@ -155,7 +155,7 @@ def arm1_guided_refine(ep, t, idx):
                  "max_new_tokens": t.get("max_new_tokens", 128),
                  "_arm_hint": "arm1", "_idx": idx})
     seed = r.get("argmax_per_position")
-    canvas = r.get("canvas_text") or ""
+    code_buffer = r.get("code_buffer_text") or ""
     body_span = r.get("body_span")
     middle = worker_middle(r)
     for _ in range(REFINE_MAX_ITERS):
@@ -164,17 +164,17 @@ def arm1_guided_refine(ep, t, idx):
             break
         if not seed:
             break
-        spans = _body_region_spans(canvas, body_span) if not _clean(code) else []
+        spans = _body_region_spans(code_buffer, body_span) if not _clean(code) else []
         if not spans:
             spans = [body_span] if body_span else []
         if not spans:
             break
-        r = ep.call({"mode": "resume_renoise", "seed_canvas": seed,
+        r = ep.call({"mode": "resume_renoise", "seed_code_buffer": seed,
                      "renoise_spans": spans, "prefix": t["prefix"],
                      "suffix": t["suffix"], "prompt": t["prompt"],
                      "denoise_steps": RENOISE_STEPS, "_arm_hint": "arm1", "_idx": idx})
         seed = r.get("argmax_per_position") or seed
-        canvas = r.get("canvas_text") or canvas
+        code_buffer = r.get("code_buffer_text") or code_buffer
         body_span = r.get("body_span") or body_span
         middle = worker_middle(r)
     return assemble_clamped(t, middle), r

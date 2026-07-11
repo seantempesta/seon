@@ -42,16 +42,16 @@ Full read-through: [[research/transformers-diffusion-source-grounding-2026-06-28
   positive temperature → our `ClampLogitsProcessor` holds. This is the whole
   between-step-control thesis.
 - **Commit is emergent, not a mask — `:388,400,444`** ✓. `EntropyBoundSampler`:
-  `accept_canvas` (`:400`) keeps the lowest-entropy positions up to `entropy_bound`
-  (`:431-442`); `renoise_canvas` (`:444`) re-randomizes the rest via
-  `initialize_canvas` = `torch.randint(0, vocab_size)` (`:388`) — **random vocab
+  `accept_code-buffer` (`:400`) keeps the lowest-entropy positions up to `entropy_bound`
+  (`:431-442`); `renoise_code-buffer` (`:444`) re-randomizes the rest via
+  `initialize_code-buffer` = `torch.randint(0, vocab_size)` (`:388`) — **random vocab
   ids, no mask token**. `mask_token_id=4` is vestigial (the only `masked_*` calls are
   `masked_scatter` for image embeds, `modeling_diffusion_gemma.py:1094`). HIGHER
   `entropy_bound` → more accepted/forward → higher `tokens_per_forward`.
-- **Two nested loops — `:713,751,786`** ✓. Outer block-AR over canvases
-  (`max_new_canvases = ceil(max_new_tokens / canvas_length)`, `:638`); inner denoise
+- **Two nested loops — `:713,751,786`** ✓. Outer block-AR over code-buffers
+  (`max_new_code-buffers = ceil(max_new_tokens / code_buffer_length)`, `:638`); inner denoise
   `for cur_step in reversed(range(1, max_denoising_steps+1))` — N..1, the cap counts
-  DOWN. The outer loop appends `argmax_canvas` (the draft), `:786`.
+  DOWN. The outer loop appends `argmax_code-buffer` (the draft), `:786`.
 - **`max_denoising_steps` is a CAP, not a checkpoint — `:311`** ✓ (the trap).
   `temperature = t_min + (t_max-t_min)*(cur_step/max_denoising_steps)`
   (`LinearTemperatureScheduleLogitsProcessor.__call__:311`). Shrinking the cap
@@ -59,7 +59,7 @@ Full read-through: [[research/transformers-diffusion-source-grounding-2026-06-28
   intermediate state, keep N and stop EXTERNALLY.
 - **Custom early-stop — `:466,1207`** ✓ (the supported override).
   `DiffusionGemmaAdaptiveStopping` is an ABC (`:466`); subclass it and inject via
-  `_prepare_diffusion_stopping_criteria` (`:1207`); it gets `(argmax_canvas,
+  `_prepare_diffusion_stopping_criteria` (`:1207`); it gets `(argmax_code-buffer,
   processed_logits)` at the per-step update site (`:1059`). Runs on the default
   non-compiled DynamicCache path (`is_compiling=False`, `:692`) so a Python
   parse/eval doesn't break `torch.compile` (`:1258-1263`) — but it is therefore
@@ -72,8 +72,8 @@ Full read-through: [[research/transformers-diffusion-source-grounding-2026-06-28
 - **The step metric — `:829`** ✓. `out.tokens_per_forward` = non-pad tokens ÷
   decoder forward passes. The actual denoise-step count is NOT returned directly;
   recover it as `num_valid_tokens / tokens_per_forward` or `len(streamer.steps)`.
-- **The streamer — `:773-779`** ✓. `put_draft(value=argmax_canvas.cpu())` unless
-  `_takes_logits` (then the FULL `(1,canvas,vocab)` logits copy — GB/step, the OOM
+- **The streamer — `:773-779`** ✓. `put_draft(value=argmax_code-buffer.cpu())` unless
+  `_takes_logits` (then the FULL `(1,code-buffer,vocab)` logits copy — GB/step, the OOM
   risk). Default to the CHEAP argmax trace; gate entropy hard.
 - **Newer transformers buys nothing** ✓. The streamer/logits/sampler/seed seam is
   byte-identical v5.11.0..`main`; upgrading adds only convenience + a cache-API
@@ -84,7 +84,7 @@ Full read-through: [[research/transformers-diffusion-source-grounding-2026-06-28
 - **`ClampLogitsProcessor` (`diffgemma_common.py:35-78`)** — forces clamped
   positions to a near-one-hot every step; documented to run before the temp schedule
   (`:52-59`). PROVEN by `clamp_smoke`.
-- **`build_offset_map` / `span_to_positions` (`:184-222`)** — char-span ↔ canvas
+- **`build_offset_map` / `span_to_positions` (`:184-222`)** — char-span ↔ code-buffer
   token positions, the bridge from the parser's `:span` to the renoise dial.
 - **`TraceStreamer` (`:81`)** — mirrors the reference `TextDiffusionStreamer`
   contract exactly (`put`/`put_draft`/`_takes_logits`/`end`); the `n_stable` path
@@ -224,7 +224,7 @@ Full read-throughs: [[research/flash-deployment-stability-2026-06-28]],
   every control loop without owning the decode code (maintenance death).
 - **Stop external, keep N** — never shrink `max_denoising_steps` to "checkpoint".
 - **Cheap argmax trace first** — entropy (`_takes_logits=True`) copies the full
-  logits GB/step; prove `put_draft` fires on the tiny argmax canvas first.
+  logits GB/step; prove `put_draft` fires on the tiny argmax code-buffer first.
 - **Never trust wall-clock** — reconcile `len(streamer.steps)` with
   `out.tokens_per_forward`; "fast + empty" = a not-attached streamer or a swallowed
   exception, not the model.

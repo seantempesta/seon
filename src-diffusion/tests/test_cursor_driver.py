@@ -52,7 +52,7 @@ class StubModel:
     the target's flag says so)."""
 
     def __init__(self, tok, targets):
-        self.cfg = SimpleNamespace(canvas_length=CL, vocab_size=VOCAB)
+        self.cfg = SimpleNamespace(code_buffer_length=CL, vocab_size=VOCAB)
         self.tok = tok
         self.targets = [(t, True) if isinstance(t, str) else t for t in targets]
         self.encoded = []
@@ -64,11 +64,11 @@ class StubModel:
     def encode(self, ids, cache, past_len):
         self.encoded.append(self.tok.decode([int(t) for t in ids[0]]))
 
-    def _emit(self, canvas_ids, stream):
+    def _emit(self, code_buffer_ids, stream):
         out, ti = [], 0
         for p in range(CL):
             if self._mask[p]:
-                out.append(int(canvas_ids[0][p]))
+                out.append(int(code_buffer_ids[0][p]))
             elif ti < len(stream):
                 out.append(stream[ti])
                 ti += 1
@@ -80,10 +80,10 @@ class StubModel:
         onehot[0, mx.arange(CL), mx.array(safe)] = 50.0
         return logits + onehot
 
-    def decode(self, canvas_ids, cache, canvas_start, self_conditioning_logits=None):
+    def decode(self, code_buffer_ids, cache, code_buffer_start, self_conditioning_logits=None):
         target, want_eos = self.targets.pop(0) if self.targets else ("", False)
         stream = self.tok(target)["input_ids"] + ([EOS] if want_eos else [])
-        return self._emit(canvas_ids, stream)
+        return self._emit(code_buffer_ids, stream)
 
 
 @pytest.fixture(autouse=True)
@@ -92,9 +92,9 @@ def spy_clamp_mask(monkeypatch):
     import seon_diffusion.control as C
     real = C._denoise_round
 
-    def wrapper(model, canvas, clamp_mask, clamp_ids, cache, cur_len, gen, **kw):
+    def wrapper(model, code_buffer, clamp_mask, clamp_ids, cache, cur_len, gen, **kw):
         model._mask = [bool(b) for b in clamp_mask[0]]
-        return real(model, canvas, clamp_mask, clamp_ids, cache, cur_len, gen, **kw)
+        return real(model, code_buffer, clamp_mask, clamp_ids, cache, cur_len, gen, **kw)
     monkeypatch.setattr(C, "_denoise_round", wrapper)
 
 
@@ -312,16 +312,16 @@ class AutoOfferStub(StubModel):
         super().__init__(tok, targets)
         self.calls = 0
 
-    def decode(self, canvas_ids, cache, canvas_start, self_conditioning_logits=None):
+    def decode(self, code_buffer_ids, cache, code_buffer_start, self_conditioning_logits=None):
         self.calls += 1
         if self.calls == 1:
             return mx.zeros((1, CL, VOCAB))
         if self.calls == 2:
-            logits = self._emit(canvas_ids, [])          # all spaces
+            logits = self._emit(code_buffer_ids, [])          # all spaces
             bump = mx.zeros((1, CL, VOCAB))
             bump[0, 0, GLYPH_ID["①"]] = 40.0             # -20+40=20 < the space's 30
             return logits + bump
-        return super().decode(canvas_ids, cache, canvas_start,
+        return super().decode(code_buffer_ids, cache, code_buffer_start,
                               self_conditioning_logits)
 
 
@@ -343,12 +343,12 @@ def test_no_auto_offer_when_model_typed_code(oracle):
     """Never override typing: a parse-clean free-typed form wins even if
     the glyph posterior margin clears the threshold."""
     class TypedStub(AutoOfferStub):
-        def decode(self, canvas_ids, cache, canvas_start,
+        def decode(self, code_buffer_ids, cache, code_buffer_start,
                    self_conditioning_logits=None):
             self.calls += 1
             if self.calls == 1:
                 return mx.zeros((1, CL, VOCAB))
-            logits = self._emit(canvas_ids,
+            logits = self._emit(code_buffer_ids,
                                 self.tok("(db/q 1)")["input_ids"] + [EOS])
             bump = mx.zeros((1, CL, VOCAB))
             bump[0, 0, GLYPH_ID["①"]] = 40.0
@@ -408,7 +408,7 @@ class ProbeStub(StubModel):
         super().__init__(tok, [])
         self.hole_start = hole_start
 
-    def decode(self, canvas_ids, cache, canvas_start, self_conditioning_logits=None):
+    def decode(self, code_buffer_ids, cache, code_buffer_start, self_conditioning_logits=None):
         logits = mx.zeros((1, CL, VOCAB))
         for i, t in enumerate(self.tok("abc")["input_ids"]):
             logits[0, self.hole_start + i, t] = 50.0
@@ -520,7 +520,7 @@ def test_settle_rounds_zero_is_single_round(oracle):
 
 
 def test_overflow_truncated_hole_is_honest_not_crash(oracle):
-    # a template longer than the canvas: the truncated hole reports
+    # a template longer than the code_buffer: the truncated hole reports
     # empty + unaccepted + overflow=True (regression: used to crash)
     d, model, spy = driver(["①", ("x", False)], oracle,
                            policy=Policy(probe_lengths=1, settle_rounds=0))

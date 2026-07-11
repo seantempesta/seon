@@ -8,7 +8,7 @@ tags: [reference, agent]
 
 **For the executing agent: decisions are pre-made; reality contradicting a
 step = STOP + report, never improvise.** Context: the approved
-verified-canvas v2 plan (Phases 0-2 SHIPPED: `src-diffusion/` guided loop
+verified code-buffer v2 plan (Phases 0-2 SHIPPED: `src-diffusion/` guided loop
 + worker `mode:"guided"` + provider `:guided` + worker-eval
 `op:"repair"`/`op:"run-tests"` + pod pre-flight autofix). Read
 `docs/prds/diffusion-dynamic-context/CLAUDE.md` "Current state" +

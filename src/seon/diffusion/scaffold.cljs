@@ -8,7 +8,7 @@
 
    The roadmap's MVP target (`docs/prds/diffusion-dynamic-context/roadmap.md`
    §P2): a single `defn` plus its map-in/map-out `:malli/schema` contract,
-   emitted as a partially-fixed canvas. Some character spans are FIXED
+   emitted as a partially-fixed code-buffer. Some character spans are FIXED
    structure the worker HOLDS (the `defn`/`schema/register!` forms, the
    `:=>` wiring, the `::request`/`::response` refs) so the map-in/map-out
    shape can't drift; the complementary spans are SLOTS the worker re-noises
@@ -26,7 +26,7 @@
 
    `::clamp-spans` and `::infill-spans` are absolute char offsets into
    `::frame-text`, the SAME `[start end)` span object `seon.diffusion.retrieval`
-   emits — the worker maps a span → canvas token positions via its `offset_map`
+   emits — the worker maps a span → code-buffer token positions via its `offset_map`
    (the L linchpin). The two span sets TILE the frame exactly (no gap, no
    overlap), so `[0, (count frame-text))` is partitioned into HOLD vs GENERATE.
    `to-wire` flattens to the worker's `{op,span,…}` shape, op `:clamp` for the

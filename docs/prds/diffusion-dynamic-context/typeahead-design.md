@@ -34,17 +34,17 @@ invariant, not a tunable — no future knob may make selection mandatory.
 1. **Commit axis (AR, form-at-a-time):** eval-proven forms harvest into
    the encoder KV cache and never pay decode cost again (existing
    `control.py` lock path).
-2. **Intra-form (diffusion):** the 256-token canvas works the current
+2. **Intra-form (diffusion):** the 256-token code-buffer works the current
    form — holes, templates, free text. Clamps are hard guarantees.
 3. **Between commits (reactive):** the encoder context re-renders as a
    function of `(db, committed, draft)` — measured ~5ms for 4k tokens,
    free relative to one 114ms forward. Menus, contracts, and the plan
-   ledger live HERE, not on the canvas.
+   ledger live HERE, not on the code-buffer.
 
 ## The driver FSM
 
 The model is stateless; the driver is the machine. State =
-`(committed, canvas-plan, active-offer)` — all derivable, all datoms.
+`(committed, code-buffer-plan, active-offer)` — all derivable, all datoms.
 
 | State | Does | Exits |
 |---|---|---|
@@ -116,7 +116,7 @@ trim as fallback. Accept imperfect: the oracle loop catches what leaks.
 
 ## The planning phase
 
-Plan = `my.plan` items in the DB (the existing todo tree), NOT canvas
+Plan = `my.plan` items in the DB (the existing todo tree), NOT code-buffer
 text. Flow:
 
 1. First RENDER of a run offers a plan template (plain-language `; ☐ ①`
@@ -374,8 +374,8 @@ In-band errors (`gen_error`), same contract as today.
    suppress a glyph whose expansion locked nothing for the rest of the
    call — the step trace IS the memory; the worker stays stateless.
    (c) **Expand cost** — measured: the 18 s was ONE denoise round
-   burning the full 48-step budget (whole-canvas stop criteria never
-   satisfied by a mostly-clamped canvas) + settle re-noise that rescued
+   burning the full 48-step budget (whole-code-buffer stop criteria never
+   satisfied by a mostly-clamped code-buffer) + settle re-noise that rescued
    0/2 junk holes. Fixes: hole-stability early stop (denoise ends when
    the hole belief is unchanged across two probes), the CAL probe
    ladder now alternates geometric-DOWN with +Δ up (live: Φ(12)=.40 >

@@ -300,11 +300,11 @@ class CursorDriver:
         """Φ(L): average first-step denoise confidence (mean max-prob) over
         the hole — CAL's signal: it peaks near the true content length."""
         ws = self._workspace(segments)
-        canvas, clamp_mask, clamp_ids, _ = ws.build(
-            self.model.cfg.canvas_length, self.model.cfg.vocab_size,
+        code_buffer, clamp_mask, clamp_ids, _ = ws.build(
+            self.model.cfg.code_buffer_length, self.model.cfg.vocab_size,
             pad_clamp_id=self.gen.pad_token_id)
         a, b = ws.hole_spans()[hole_idx]
-        logits = self.model.decode(canvas, cache, canvas_start=cur_len)
+        logits = self.model.decode(code_buffer, cache, code_buffer_start=cur_len)
         lp = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
         conf = mx.mean(mx.exp(mx.max(lp[0, a:b, :], axis=-1)))
         mx.eval(conf)
@@ -426,20 +426,20 @@ class CursorDriver:
                     order.append((h, i))
                     cur_segments.append(("free", payload))
             ws = self._workspace(cur_segments)
-            canvas, clamp_mask, clamp_ids, ovf = ws.build(
-                cfg.canvas_length, cfg.vocab_size,
+            code_buffer, clamp_mask, clamp_ids, ovf = ws.build(
+                cfg.code_buffer_length, cfg.vocab_size,
                 pad_clamp_id=self.gen.pad_token_id)
             overflow = overflow or ovf
             bias = self._fill_bias(ws, clamp_mask, cur_cand)
             # hole-stability early stop (P6, live-measured: one fill round
             # burned the full 48-step budget while the hole belief had long
-            # settled — the round's whole-canvas stop criterion is dominated
+            # settled — the round's whole-code_buffer stop criterion is dominated
             # by clamped-position uncertainty the fill can't reduce). Only
             # the hole positions are being generated: when their belief is
             # unchanged across two consecutive probes, further forwards are
             # pure heat.
             hole_positions = [j for a, b in ws.hole_spans()
-                              for j in range(a, min(b, cfg.canvas_length))]
+                              for j in range(a, min(b, cfg.code_buffer_length))]
             snap = {"prev": None, "hits": 0}
 
             def holes_stable(belief_ids, _snap=snap, _pos=hole_positions):
@@ -449,7 +449,7 @@ class CursorDriver:
                 return _snap["hits"] >= 1
 
             belief, fwd, logits = control._denoise_round(
-                self.model, canvas, clamp_mask, clamp_ids, cache, cur_len,
+                self.model, code_buffer, clamp_mask, clamp_ids, cache, cur_len,
                 self.gen, bias=bias, probe=holes_stable)
             total_fwd += fwd
             ent = _entropy(logits)
@@ -462,9 +462,9 @@ class CursorDriver:
             last = rnd == rounds - 1
             for fi, (h, i) in enumerate(order):
                 a, b = spans[fi]
-                a, b = min(a, cfg.canvas_length), min(b, cfg.canvas_length)
+                a, b = min(a, cfg.code_buffer_length), min(b, cfg.code_buffer_length)
                 if b <= a:
-                    # overflow truncated this hole off the canvas entirely —
+                    # overflow truncated this hole off the code_buffer entirely —
                     # honest empty, never accepted (the caller sees
                     # overflow=True + accepted=False, not a crash)
                     state[h].update({"text": "", "mean": None, "worst": None,
@@ -549,13 +549,13 @@ class CursorDriver:
         segments = [("clamp", prefix), ("free", hole_n), ("clamp", suffix)]
         ws = self._workspace(segments)
         cfg = self.model.cfg
-        canvas, clamp_mask, clamp_ids, _ = ws.build(
-            cfg.canvas_length, cfg.vocab_size, pad_clamp_id=self.gen.pad_token_id)
+        code_buffer, clamp_mask, clamp_ids, _ = ws.build(
+            cfg.code_buffer_length, cfg.vocab_size, pad_clamp_id=self.gen.pad_token_id)
         a, _b = ws.hole_spans()[0]
         settle = replace(self.gen, max_denoising_steps=self.policy.settle_steps,
                          stability_threshold=2, confidence_threshold=-1.0)
         _, fwd, logits = control._denoise_round(
-            self.model, canvas, clamp_mask, clamp_ids, cache, cur_len, settle)
+            self.model, code_buffer, clamp_mask, clamp_ids, cache, cur_len, settle)
         lp = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
         mx.eval(lp)
         scores = {}
@@ -597,9 +597,9 @@ class CursorDriver:
             cache, cur_len = self._encode(null_render)
             cfg = self.model.cfg
             ws = _Workspace()
-            ws.free(cfg.canvas_length)
-            canvas, clamp_mask, clamp_ids, _ = ws.build(cfg.canvas_length, cfg.vocab_size)
-            logits = self.model.decode(canvas, cache, canvas_start=cur_len)
+            ws.free(cfg.code_buffer_length)
+            code_buffer, clamp_mask, clamp_ids, _ = ws.build(cfg.code_buffer_length, cfg.vocab_size)
+            logits = self.model.decode(code_buffer, cache, code_buffer_start=cur_len)
             lp = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
             mx.eval(lp)
             self._baselines[key] = {
@@ -688,7 +688,7 @@ class CursorDriver:
         if seed is not None:
             mx.random.seed(seed)
         cfg = self.model.cfg
-        CL = cfg.canvas_length
+        CL = cfg.code_buffer_length
 
         # calibration baseline BEFORE the main denoise (deterministic order)
         offer_glyphs = [o["glyph"] for o in offers if o.get("glyph") in self.glyphs]
@@ -701,7 +701,7 @@ class CursorDriver:
         # the partial — a hard clamp pins a typo forever (measured: the model
         # completed "(todo/ad" to the undeclared "todo/ad!" because it could
         # not insert the missing char). Editor typeahead REPLACES the partial
-        # word; so does the canvas: clamp up to the symbol start, let the
+        # word; so does the code_buffer: clamp up to the symbol start, let the
         # model rewrite the symbol whole (candidates ride the render).
         clamp_text, partial = split_partial_symbol(draft)
         if partial:
@@ -710,7 +710,7 @@ class CursorDriver:
         ws = _Workspace()
         ws.clamp(draft_ids)
         ws.free(max(p.grow_free, CL - ws.used()))
-        canvas, clamp_mask, clamp_ids, overflow = ws.build(CL, cfg.vocab_size)
+        code_buffer, clamp_mask, clamp_ids, overflow = ws.build(CL, cfg.vocab_size)
         if overflow:
             events.append({"event": "overflow"})
 
@@ -720,7 +720,7 @@ class CursorDriver:
         bias = make_bias(free, ban_vector(cfg.vocab_size, self._open_ban_ids())
                          if p.ban_special else None, [])
         belief, fwd, logits = control._denoise_round(
-            self.model, canvas, clamp_mask, clamp_ids, cache, cur_len, gen,
+            self.model, code_buffer, clamp_mask, clamp_ids, cache, cur_len, gen,
             bias=bias)
         total_fwd = fwd
         lp = logits - mx.logsumexp(logits, axis=-1, keepdims=True)

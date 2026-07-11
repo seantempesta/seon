@@ -1,6 +1,7 @@
 (ns seon.ai.diffusiongemma
   "DiffusionGemma CONTROL backend — the transformers RunPod worker that
-   keeps the per-step LogitsProcessor/accept_canvas seam (clamp / infill /
+   keeps the per-step LogitsProcessor/accept_canvas seam (the FROZEN cuda
+   worker's identifier — its code-buffer accept hook) (clamp / infill /
    eval-renoise). ^:async — returns Promises.
 
    TRANSPORT is a RunPod ASYNC JOB, not one round-trip: SUBMIT a job to
@@ -53,7 +54,7 @@
                           :fill :rank :step])
 (schema/register! ::prompt :string)
 (schema/register! ::max-new-tokens :int)
-(schema/register! ::trace [:enum :canvas :entropy])
+(schema/register! ::trace [:enum :code-buffer :entropy])
 ;; denoise tuning — the worker's _gen_overrides. entropy_bound is the
 ;; commit-rate dial; all optional, absent = the worker's gen-config defaults.
 (schema/register! ::entropy-bound :double)
@@ -62,9 +63,9 @@
 (schema/register! ::t-max :double)
 (schema/register! ::stability-threshold :int)
 (schema/register! ::confidence-threshold :double)
-;; clamp_smoke / infill inputs — third-party-shaped (the worker's canvas
+;; clamp_smoke / infill inputs — third-party-shaped (the worker's code-buffer
 ;; positions), so a :map boundary.
-(schema/register! ::clamp-text [:map-of :string :string])  ; {canvas-pos → token-string}
+(schema/register! ::clamp-text [:map-of :string :string])  ; {code-buffer-pos → token-string}
 (schema/register! ::prefix :string)
 (schema/register! ::suffix :string)
 (schema/register! ::max-hole-tokens :int)
@@ -88,7 +89,7 @@
 ;; (Policy(**payload["policy"]) — an unknown key TypeErrors worker-side,
 ;; so only KNOWN knobs may ride).
 (schema/register! ::committed :string)               ; locked forms so far
-(schema/register! ::draft :string)                   ; the in-progress canvas text
+(schema/register! ::draft :string)                   ; the in-progress code-buffer text
 (schema/register! ::template-segment
   [:or [:tuple [:= "clamp"] :string] [:tuple [:= "free"] :int]])
 (schema/register! ::offer

@@ -26,9 +26,9 @@ language}.py before touching this):
   commit-encode: the encoder APPENDS to the same cache, and RoPE offsets
   come from the cache offset (language.py `_cache_offset`), so appends
   are positionally correct. This is the harvest path.
-- Model.diffusion_decoder_logits(canvas_ids, cache, self_conditioning) —
+- Model.diffusion_decoder_logits(code_buffer_ids, cache, self_conditioning) —
   one denoiser forward, read-only w.r.t. the cache (decoder=True skips
-  update_and_fetch); canvas RoPE offset = cache offset; returns fp32
+  update_and_fetch); code_buffer RoPE offset = cache offset; returns fp32
   softcapped logits [B, L, V].
 - Model.prefers_logits_self_conditioning — True for the 8-bit checkpoint
   (QuantizedEmbedding), so `self_conditioning` is the raw logits of the
@@ -47,7 +47,7 @@ PREFILL_STEP = 2048
 @dataclass
 class DGConfig:
     """The config slice the denoise loops consume."""
-    canvas_length: int
+    code_buffer_length: int
     vocab_size: int
 
 
@@ -92,7 +92,7 @@ class DiffusionGemmaVLM:
     def __init__(self, vlm_model):
         self.vlm = vlm_model
         cfg = vlm_model.config
-        self.cfg = DGConfig(canvas_length=cfg.canvas_length,
+        self.cfg = DGConfig(code_buffer_length=cfg.code_buffer_length,
                             vocab_size=cfg.text_config.vocab_size)
         if not vlm_model.prefers_logits_self_conditioning:
             # Non-quantized embeddings want self-conditioning EMBEDDINGS;
@@ -125,15 +125,15 @@ class DiffusionGemmaVLM:
         else:
             self.vlm.diffusion_update_cache(ids, cache=cache.vlm)
 
-    def decode(self, canvas_ids, cache, canvas_start, self_conditioning_logits=None):
-        """One denoiser forward: canvas + read-only cache -> fp32 logits."""
-        if canvas_start != cache.offset:
+    def decode(self, code_buffer_ids, cache, code_buffer_start, self_conditioning_logits=None):
+        """One denoiser forward: code_buffer + read-only cache -> fp32 logits."""
+        if code_buffer_start != cache.offset:
             raise ValueError(
-                f"decode canvas_start={canvas_start} != cache offset "
+                f"decode code_buffer_start={code_buffer_start} != cache offset "
                 f"{cache.offset} — the caller's position bookkeeping is out "
                 "of sync")
         return self.vlm.diffusion_decoder_logits(
-            canvas_ids, cache=cache.vlm,
+            code_buffer_ids, cache=cache.vlm,
             self_conditioning=self_conditioning_logits)
 
 

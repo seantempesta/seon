@@ -42,7 +42,7 @@ root-cause probes); the E1 three-arm kill-gate (RAN — behavioral 0.0 on ALL ar
 **VOIDED: proven dead-eval-bundle defect**,
 [[research/e1-behavioral-zero-audit-2026-07-02]]; step 3 is the re-run on the
 fixed harness); the closed-loop renoise + injection live drives (RAN in the
-battery — renoise reduces errors, injections hold); the canvas-length probe
+battery — renoise reduces errors, injections hold); the code-buffer-length probe
 (fits, token-aligned).
 
 ---
@@ -94,14 +94,14 @@ hypothesized with cheap discriminating probes — the compiled path has never
 actually been measured ([[research/compile-control-ceiling-2026-07-02]]).
 
 ```bash
-# a) static-cache under-sizing hypothesis: single-canvas budget → no assert?
+# a) static-cache under-sizing hypothesis: single-code-buffer budget → no assert?
 python3 battery.py 1 --param max_length=288
 # b) the 2-line find_spec monkeypatch (worker-side, no image rebuild) + compile on:
 TORCH_LOGS="graph_breaks,recompiles" python -u client.py \
   '{"mode":"generate","prompt":"Write a Clojure mean over a vector.","compile":true,"max_length":288}'
 ```
 
-- **Win condition (a):** `max_length=288` (one canvas) runs clean where 512
+- **Win condition (a):** `max_length=288` (one code-buffer) runs clean where 512
   asserted → the assert is cache sizing, not the MoE. **(b):** graph-break log
   clean of find_spec → steady-state compiled `tok_per_s` vs eager is the FIRST
   real compiled-path number.
@@ -155,7 +155,7 @@ python -u client.py '{"mode":"generate","prompt":"<same task>"}'   # the OFF arm
 
 ## 5. The §3 over-commit × free-renoise Pareto sweep
 
-The verified canvas's unique speed×quality move: commit aggressively (high
+The verified code-buffer's unique speed×quality move: commit aggressively (high
 `entropy_bound` from step 1's knee), let the ~free oracle renoise exactly the
 wrong spans. Three arms — A baseline (eb 0.1, no renoise), B over-commit naked,
 C over-commit + oracle renoise.
