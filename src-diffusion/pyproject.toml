@@ -5,6 +5,7 @@ description = "The verified canvas — oracle-guided DiffusionGemma generation (
 requires-python = ">=3.12"
 dependencies = [
     "mlx>=0.31.2",
+    "mlx-vlm>=0.6.4",
     "transformers>=5.11.0",
     "safetensors",
     "sentencepiece",
@@ -14,8 +15,6 @@ dependencies = [
 
 [project.optional-dependencies]
 test = ["pytest>=8"]
-# torch/MPS parity oracle for the MLX model (parity_ref.npz lives outside git)
-parity = ["torch>=2.12.1", "accelerate"]
 # frozen RunPod CUDA worker (cuda/runpod_worker.py) — revive by need
 cuda = []
 

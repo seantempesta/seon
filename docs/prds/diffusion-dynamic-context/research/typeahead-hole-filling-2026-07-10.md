@@ -245,6 +245,56 @@ not a wall). Note: our port's bf16 loading (dispatch shims added this
 session) produces garbage even short — unvalidated path, moot after
 adoption; shims kept for the 8-bit-path dispatch cleanliness.
 
+## Round 10 — P2.5 SHIPPED: mlx_vlm model layer, curve re-measured
+
+`src-diffusion/src/seon_diffusion/model.py` is now an adapter over
+`mlx_vlm.models.diffusion_gemma` (0.6.4), exposing the same surface the
+loops consume (`load_model` / `new_cache` / `encode` / `decode` /
+`cfg`); the from-scratch forward is deleted (git history has it; the
+parity harness scripts went with it). Mapping: `encode(past_len=0)` →
+`diffusion_prefill_cache` (chunked at 2048, mlx_vlm's default step);
+`encode(past_len>0)` → `diffusion_update_cache` — verified in source
+that the encoder APPENDS via `KVCache.update_and_fetch` with RoPE
+offsets from the cache offset, so incremental harvest is first-class;
+`decode` → `diffusion_decoder_logits` with logits self-conditioning
+(`prefers_logits_self_conditioning` is True for the 8-bit checkpoint;
+the adapter refuses non-quantized checkpoints loudly). Both position
+arguments (`past_len`, `canvas_start`) are asserted against the cache
+offset — bookkeeping drift now fails loudly instead of corrupting.
+
+Everything below measured on the NEW stack (same 8-bit weights,
+M-series, scripts `p25/r10_{latency2,needle,frontier}.py` in the
+session scratchpad; suite 60/60 green, stub interface unchanged):
+
+- **Behavior contract (ab_guided, n=3, 6 tasks):** guided n=18
+  parse/lint/eval/behav = 1.00/1.00/1.00/**1.00** avg 17.4 tok/s (wall
+  2.1 s); free n=18 behav 0.89 avg 21.5 tok/s. The old stack's last
+  scorecard (2026-07-05) was guided 0.94 / free 0.72 — no regression,
+  a lift.
+- **Needle (8k/16k/32k × depth 5/50/95%):** 7/9 exact; the two misses
+  (16k@50%, 32k@95%) emitted `391` — the needle WAS retrieved, the
+  first digit token dropped in the denoise; not the old ≥10k total
+  collapse (round 8 was 0/anything at ≥10k).
+- **Latency curve** (honest sync: all layer cache states eval'd):
+
+| context | prefill | decode forward | harvest-encode (256 tok) |
+|---|---|---|---|
+| 2k | 0.46 s (4.4k tok/s) | 193 ms | 148 ms |
+| 8k | 2.63 s (3.0k tok/s) | 183 ms | 157 ms |
+| 16k | 5.51 s (2.9k tok/s) | 188 ms | 165 ms |
+| 32k | 12.16 s (2.6k tok/s) | 229 ms | 189 ms |
+
+- **Frontier typeahead sweep (3 seeds/size):** 3/3 correct at 2k, 8k,
+  16k AND 32k (old stack: dead above 8k); 1.7 / 3.6 / 6.7 / 14.4
+  s/step — step cost is prefill-dominated (decode is ~flat), so the
+  render budget is a latency knob exactly as round 9 predicted. The
+  P4 numbers live in typeahead-design.md §context budget.
+
+Notes: mlx-vlm pins transformers to 5.12.x (was 5.13.0 in the venv —
+downgraded by the install, tokenizer-only usage unaffected). mlx_vlm
+loads the vision tower too (small next to the 26B text stack); load
+time ~3 s from a warm page cache.
+
 ## Next steps (proposed)
 
 1. `fill_guided` in `control.py` style: fill → oracle parse of the whole

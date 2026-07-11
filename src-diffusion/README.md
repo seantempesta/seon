@@ -19,7 +19,9 @@ PoC ancestors (gitignored `tmp/flash-diffgemma/`, external
 
 ```
 src/seon_diffusion/
-  model.py       MLX DiffusionGemma (8-bit), parity-proven vs torch ref
+  model.py       model layer = mlx_vlm's DiffusionGemma (adapter exposing
+                 load_model/new_cache/encode/decode/cfg; incremental
+                 harvest via diffusion_update_cache)
   generate.py    free block-diffusion loop (the BASELINE arm — untouched)
   control.py     generate_guided: round → check → repair → lock/harvest →
                  scramble+hint → prove (T3 checks, attempt-restart)
@@ -53,9 +55,11 @@ carries `worker_sha` (all package .py files); the battery stamps it on
 every row.
 
 Model: `mlx-community/diffusiongemma-26B-A4B-it-8bit` (HF cache; override
-`SEON_DG_SNAPSHOT`). The torch parity oracle + `parity_ref.npz` (132MB)
-live outside git in `~/ml/diffusion-gemma/` — regenerate via
-`parity_ref_torch.py` under `[parity]`.
+`SEON_DG_SNAPSHOT`), loaded through `mlx_vlm` (>= 0.6.4). Our original
+from-scratch MLX port (parity-proven decoder, but an encoder that
+corrupted beyond ~8-10k context — Round 9 of the typeahead research)
+was retired 2026-07-10; it lives in git history and in
+`~/ml/diffusion-gemma/`.
 
 ## Provenance
 

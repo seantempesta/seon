@@ -298,17 +298,33 @@ In-band errors (`gen_error`), same contract as today.
 - Not a mode: INTERPRET branches on whether a template expansion is
   active; nothing is asked of the model.
 
-## The context budget (REVISED — round 9 root cause)
+## The context budget (MEASURED — round 10, mlx_vlm model layer)
 
 Round 8 measured a cliff at ~8–10k and called it a model constraint.
-**Wrong — it was our port's encoder bug** (round 9: the official
-mlx_vlm implementation retrieves needles at 16k with the same 8-bit
-weights; a transplant of their prefill cache into our decoder works
-perfectly; the model is rated to 256k). Decision: adopt mlx_vlm's
-model layer under our control loop (their prefill is also ~4× faster).
-The slim render profile remains a LATENCY/quality knob, not a wall —
-re-measure the context/lock-rate/latency curve after the adoption and
-set the P4 profile from that measurement.
+**Wrong — it was our port's encoder bug** (round 9: transplant test).
+Round 10 swapped the model layer to mlx_vlm 0.6.4 (P2.5) and
+re-measured the real curve on the new stack (M-series, 8-bit,
+seed-averaged; research note §Round 10 has the full tables):
+
+| context | prefill | decode forward | harvest-encode (256) | frontier task |
+|---|---|---|---|---|
+| 2k | 0.5 s (4.4k tok/s) | 193 ms | 148 ms | 3/3 |
+| 8k | 2.6 s (3.0k tok/s) | 183 ms | 157 ms | 3/3 |
+| 16k | 5.5 s (2.9k tok/s) | 188 ms | 165 ms | 3/3 |
+| 32k | 12.2 s (2.6k tok/s) | 229 ms | 189 ms | 3/3 |
+
+There is NO quality wall through 32k: needle retrieval 7/9 exact (the
+two misses emitted `391` — a first-token denoise drop, not a retrieval
+failure) and the frontier typeahead task is 3/3 at every size. The
+budget is therefore pure LATENCY: decode forwards are ~flat (~0.2 s),
+so per-step cost is dominated by the fresh-render prefill at ~2.6–3
+k tok/s. A stateless step over an N-token render costs ≈ N/2800 s +
+rounds×~0.2 s: ~1.7 s/step at 2k, ~3.6 s at 8k, ~6.7 s at 16k, ~14 s
+at 32k (measured end-to-end). **P4 render profile: pick the render
+size from the interactivity target** — ≤4k for sub-2s typeahead
+steps, ≤8k when ~4 s is acceptable; beyond that, keep context across
+steps (harvest-encode is ~0.15–0.19 s per 256-token commit) instead
+of re-prefilling, which is the P3+ session-cache lever.
 
 ## Settled by measurement (do not re-litigate without new data)
 
