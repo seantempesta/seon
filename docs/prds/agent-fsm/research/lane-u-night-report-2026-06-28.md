@@ -57,14 +57,14 @@ for the session** (~80 min, no uncommitted work), I completed it under a hard
 **no-red-build** rule (end green + full suite or revert):
 - **Deleted −4189 lines** — the parallel WORLD renderers: `inspector.cljs`
   (agent-world console/datastar-view), `tile.cljs` (packetstar tile console +
-  `:seon.tile/*`), `packetstar.js`, `page.cljc` (the dead A-6 stub), the
+  `:seon.canvas/*`), `packetstar.js`, `page.cljc` (the dead A-6 stub), the
   `legacy-default` delegation in `router.cljs` (no-match now 404s), + 2 dead test ns.
 - **Preserved (#25 = carve)** — the operator dev tools live in a new **`seon.web.debug`**
   ns: `GET /data` (datom browser) + `GET /agent/{id}/debug` (the two-pane exact-LLM-bytes
   inspector + token/cache-line bar), with their SSE, wired as reitit routes in the
   static-supplement. `/` now 302s → `/world`.
 - **Verified in acme** (build 0 warnings): new page + feeds + chat + the gate 403 all
-  work; `/debug`+`/data` → 200; deleted paths (`/agents`, `/tile/console/<id>`,
+  work; `/debug`+`/data` → 200; deleted paths (`/agents`, `/canvas/console/<id>`,
   `/agent/<id>/sse`) → 404. **Full suite 648/0**; grep-CLEAN (no dangling refs).
 
 **One P3 follow-up (your call):** the world page doesn't yet cross-link `/debug`+`/data`
@@ -79,7 +79,7 @@ the routes the new router derives from).
 
 - **#20 P0 wedge** — FIXED (`cc38a8e2`, instrument-once) but next-boot-only → default
   pod needs the restart above.
-- **#22 observer findings** — the biggest lever is `my.tile` interactivity (the live
+- **#22 observer findings** — the biggest lever is `my.canvas` interactivity (the live
   tile is read-only hiccup; an agent couldn't fulfil "let me add one"); plus ~40%
   prompt bloat (SOUL + acme fixtures + unused `my.kb`) and toolkit-catalog ≠ live-floor
   naming. Full report: `research/deepseek-drive-observation-2026-06-28.md`.

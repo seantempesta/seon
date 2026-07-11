@@ -1,8 +1,8 @@
-(ns seon.agent.ctx.live-tile
-  "The `:live-tile` context section — \"what your human currently sees\",
-   rendered as a `;; ── live tile ──` comment-block. Symbol-wired into the
+(ns seon.agent.ctx.canvas
+  "The `:canvas` context section — \"what your human currently sees\",
+   rendered as a `;; ── canvas ──` comment-block. Symbol-wired into the
    composer layout (`config manifest`) as
-   `'seon.agent.ctx.live-tile/live-tile-block`; loaded at boot so the symbol
+   `'seon.agent.ctx.canvas/canvas-block`; loaded at boot so the symbol
    resolves for `seon.eval/lookup-value`.
 
    The agent sees the SAME wired value the human's surfaces render —
@@ -14,8 +14,9 @@
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.render-fns :as render-fns]
     [seon.db :as db]
+    [seon.error :as err]
     [seon.render :as render]
-    [seon.render.live-tile :as live-tile]))
+    [seon.render.canvas :as canvas]))
 
 (defn- wired-fn-source
   "The program-graph source of the qualified fn `sym` driving the agent's
@@ -34,33 +35,34 @@
                :seon.db/args  [(str sym)]}))))
 
 (defn- block-content
-  "The MEANINGFUL canvas content on agent `id`'s `:live-tile` BLOCK entity
+  "The MEANINGFUL canvas content on agent `id`'s `:canvas` BLOCK entity
    (config-driven agent-init CP-3 move 11) — the block's decoded
-   `:seon.render.live-tile/content` when it is a real value (a fn symbol or
+   `:seon.render.canvas/content` when it is a real value (a fn symbol or
    literal hiccup), or nil when the block is absent or carries the `:none`
    default. Reactive config-on-record: root-context seeds root's block with
    `system-view`; a non-root agent's block defaults `:none`, so the caller
    falls back to the agent-entity datom (byte-parity). Values arrive
    pr-str-encoded from the mixed-:or bridge → decode on read."
   [db id]
-  (let [blk (some (fn [b] (when (= :live-tile (:seon.agent.ctx/name b)) b))
+  (let [blk (some (fn [b] (when (= :canvas (:seon.agent.ctx/name b)) b))
                   (:seon.agent/ctx
                     (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]})))
-        c   (some->> (:seon.render.live-tile/content blk)
-                     (db/decode-edn-value :seon.render.live-tile/content))]
+        c   (some->> (:seon.render.canvas/content blk)
+                     (db/decode-edn-value :seon.render.canvas/content))]
     (when (and (some? c) (not= :none c)) c)))
 
-(defn live-tile-block
-  "DEPRECATED — reference for the `live-tile` milestone; see context-rebuild.
+(defn canvas-block
+  "Show and explain the agent's current live canvas.
 
-   The `:live-tile` section — what your human currently sees.
+   The `:canvas` section — what your human currently sees and the complete,
+   compact operational contract for changing it.
 
    Invokes the agent's wired tile value against THIS TURN's db
-   value through `seon.render/render-agent-tile` (the ONE tile entry
+   value through `seon.render/render-agent-canvas` (the ONE tile entry
    point — same resolution, same render the human surfaces use) and
    renders:
 
-     header — the wired identity (`seon.render.live-tile/wired-label`:
+     header — the wired identity (`seon.render.canvas/wired-label`:
               fn name, or \"literal hiccup on your entity\") so the
               agent always sees HOW to change the display;
      body   — the `:seon.render/ai` twin for fns; the literal hiccup
@@ -89,9 +91,9 @@
           ;; The ONE tile entry point — SCI wall-clock-bounded for
           ;; agent-authored tile fns, and on ANY throw it returns the
           ;; legible `error-response` (never throws past here). This is
-          ;; the safety the live tile rides; the body below is always a
+          ;; the safety the canvas rides; the body below is always a
           ;; clean twin, an error twin, or the welcome card — never raw.
-          (render/render-agent-tile {:seon.agent/id id :seon.db/db db})
+          (render/render-agent-canvas {:seon.agent/id id :seon.db/db db})
           body (cond
                  ;; Renderer THREW — your human is staring at an error
                  ;; tile RIGHT NOW. Say so LOUDLY and first (the agent must
@@ -101,7 +103,7 @@
                  (some? error)
                  (str "⚠ YOUR CANVAS IS BROKEN — your human currently sees an\n"
                       "error tile, not your content. Fix the fn/hiccup driving\n"
-                      ":seon.render.live-tile/content (its source is below).\n"
+                      ":seon.render.canvas/content (its source is below).\n"
                       "Why: " (:seon.error/message error) "\n"
                       (pr-str (select-keys error [:seon.error/data
                                                   :seon.error/ex-data]))
@@ -115,21 +117,21 @@
         ;; db by `:seon.agent/id` (the composer injects :seon.db/db +
         ;; :seon.agent/id, NOT the entity itself). The tile slot is read
         ;; behind the same `seon.db/installed-schema` gate
-        ;; `live-tile/user-name` uses: datahike THROWS on pulling an attr
+        ;; `canvas/user-name` uses: datahike THROWS on pulling an attr
         ;; the conn never installed (installs are lazy, at first
         ;; transact), so a fresh store predating any tile transact must
         ;; resolve to `{}` → the core welcome (load-bearing, not
         ;; defensive fluff). `wired-content` needs a map; never a nil.
         (let [ent   (if (contains? (db/installed-schema db)
-                                   :seon.render.live-tile/content)
+                                   :seon.render.canvas/content)
                       (let [agent-content
                             (or (db/pull {:seon.db/db db
                                           :seon.db/pull-pattern
-                                          '[:seon.render.live-tile/content]
+                                          '[:seon.render.canvas/content]
                                           :seon.db/ref [:seon.agent/id id]})
                                 {})
                             ;; CP-3 move 11: the canvas content is READ off the
-                            ;; agent's `:live-tile` BLOCK entity (root-context's
+                            ;; agent's `:canvas` BLOCK entity (root-context's
                             ;; mechanism — root's block carries `system-view`).
                             ;; A meaningful block content (not `:none`/absent)
                             ;; wins; otherwise FALL BACK to the agent-entity
@@ -140,22 +142,22 @@
                             ;; `system-view`, so reading either is identical.
                             blk-content (block-content db id)]
                         (if (some? blk-content)
-                          {:seon.render.live-tile/content blk-content}
+                          {:seon.render.canvas/content blk-content}
                           agent-content))
                       {})
               ;; No pin → the derived last-updated tile, so the header's
-              ;; provenance names the SAME value render-agent-tile just
+              ;; provenance names the SAME value render-agent-canvas just
               ;; rendered (one resolution, two readers). Guarded like the
               ;; render side: derivation failure → welcome provenance.
-              derived (when (nil? (:seon.render.live-tile/content ent))
+              derived (when (nil? (:seon.render.canvas/content ent))
                         (try (::render-fns/tile-sym
                                (render-fns/last-updated-tile
                                  {:seon.db/db db :seon.agent/id id}))
                              (catch :default _ nil)))
-              wired (live-tile/wired-content
+              wired (canvas/wired-content
                       (cond-> {:seon.render/entity ent}
                         (some? derived)
-                        (assoc :seon.render.live-tile/derived derived)))
+                        (assoc :seon.render.canvas/derived derived)))
               ;; The body is a render twin (:ai text, or hiccup pr-str, or
               ;; an error envelope) — arbitrary content the human's tile
               ;; shows. It rides this comment-block as `;` lines (via
@@ -167,11 +169,15 @@
               ;; so the agent sees the exact code driving the tile and can
               ;; edit it without a lookup. Literal-hiccup canvases have no
               ;; fn; the body already IS the value verbatim.
-              fn-src       (wired-fn-source db (:seon.render.live-tile/value
-                                                wired))]
-          (str "; Your live tile — what your human currently sees (as-of this\n"
+              wired-value  (:seon.render.canvas/value wired)
+              ;; Agents can evolve only their own renderer. Embedding the
+              ;; shared welcome/system source wastes context and invites the
+              ;; exact core-edit mistake the block warns against.
+              fn-src       (when (err/agent-authored-sym? wired-value)
+                             (wired-fn-source db wired-value))]
+          (str "; Your canvas — what your human currently sees (as-of this\n"
                "; turn's render; the human's view live-updates between turns).\n"
-               "; Wired: " (live-tile/wired-label wired) "\n"
+               "; Wired: " (canvas/wired-label wired) "\n"
                ";\n"
                body-comment "\n"
                ";\n"
@@ -180,45 +186,47 @@
                       "; your human sees):\n"
                       (ctx/quote-lines fn-src) "\n"
                       ";\n"))
-               "; ── THIS canvas is your PRIMARY surface ── your human WATCHES\n"
-               "; this tile; messages are backup narration that scrolls away.\n"
-               "; Anything worth seeing at a glance — a status, a plan, goals, a\n"
-               "; checklist, a recommendation, a data breakdown, a result table,\n"
-               "; progress — belongs HERE as a board/view, not recited in a\n"
-               "; paragraph: a PLANNING / GOAL / STATUS ask answered only in prose\n"
-               "; (or only as steps) leaves this canvas blank — render the board\n"
-               "; FIRST, then narrate. UNPINNED, this canvas is DERIVED: it shows\n"
-               "; your LAST-UPDATED tile fn — redefine a tile fn, or write data\n"
-               "; whose attrs its source names, and your human's focus follows\n"
-               "; automatically. PIN it with ONE transact of either literal\n"
-               "; hiccup (instant) or a qualified tile-FN symbol (re-derives\n"
-               "; every render, so a live count/query stays current); retract\n"
-               "; :seon.render.live-tile/content to fall back to derived:\n"
+               "; To deliberately UPDATE THE CANVAS, reuse my.canvas/show! and verify\n"
+               "; its returned :seon.db/ok?. Defining a render fn alone only creates\n"
+               "; an auto-run context tile; it does NOT deliberately wire canvas.\n"
+               "; Canvas values and operations (the complete contract):\n"
+               "; 1. STATIC — show a literal hiccup vector. Use semantic hiccup\n"
+               ";    such as [:section [:h2 \"Title\"] [:p \"State\"]]. Raw HTML\n"
+               ";    and <script> strings are escaped; arbitrary browser JS is not\n"
+               ";    a tile API.\n"
+               "; 2. LIVE — define a schema'd fn in your home ns that accepts\n"
+               ";    :seon.render/system-input and returns (my.canvas/view {...}).\n"
+               ";    Query database state from its injected :seon.db/db value, then\n"
+               ";    EXPLICITLY wire its qualified fn symbol below. The feed redraws after\n"
+               ";    every transaction.\n"
+               "; 3. INTERACTIVE — compose my.canvas/button, input, select, toggle,\n"
+               ";    or form into that live fn. A handler is YOUR schema'd home-ns\n"
+               ";    fn symbol, never a URL/string. Button args capture explicit data;\n"
+               ";    form handlers receive one signal map.\n"
+               ";    signal map. The /agent/<id>/call capability gate invokes it,\n"
+               ";    its DB transaction changes state, and the normal feed redraws.\n"
+               ";    Controls return reusable hiccup directly; my.canvas/view supplies\n"
+               ";    the final HTML/AI twin. Handler fns need concrete Malli contracts.\n"
+               ";    Always inspect :seon.db/ok? before claiming an action worked.\n"
+               "; 4. COMPOSE — reuse my.canvas directly, or define higher-level helpers\n"
+               ";    in YOUR namespace from the same constructs. my.data aggregates DB\n"
+               ";    rows. Use only fully namespaced\n"
+               ";    data keys and registered schemas. Pull `ui-canvas` only when\n"
+               ";    you need the detailed cookbook and CSS vocabulary.\n"
                ";\n"
-               ";   (seon.db/transact!\n"
-               ";     {:seon.db/tx-data\n"
-               ";      [{:seon.agent/id (seon.db/current-agent-id)\n"
-               ";        :seon.render.live-tile/content\n"
-               ";        <hiccup-vector  OR  'my.agent." id "/your-tile-fn>}]})\n"
-               ";\n"
-               "; COMPOSE it from the toolkit instead of hand-rolling [:div …]:\n"
-               ";   my.ui   — dual-render status-line / kv-table / section (static)\n"
-               ";   my.tile — INTERACTIVE button / input / select / toggle / form\n"
-               ";             (controls that call YOUR fns back — buttons WORK)\n"
-               ";   my.data — sum-by / max-by / group-sum over stored rows\n"
-               "; A tile fn returns {:seon.render/hiccup … :seon.render/ai …}: the\n"
-               "; human sees the hiccup, YOU see the :ai twin (above). The\n"
-               "; `ui-live-tiles` skill is the full cookbook + the CSS safelist\n"
-               "; (only safelisted classes exist at runtime; classless semantic\n"
-               "; hiccup — [:table] [:ul] [:h2] [:p] [:pre [:code …]] — is styled\n"
-               "; for free). Evolve YOUR fn; never edit the shared core welcome tile."))))
+               "; Pin either literal hiccup or a live qualified fn symbol:\n"
+               ";   (my.canvas/show! {:my.canvas/content\n"
+               ";                  <hiccup-vector OR 'my.agent." id "/your-fn>})\n"
+               "; Read (my.canvas/pinned {}) to inspect the explicit pin; call\n"
+               "; (my.canvas/clear! {}) to resume automatic derived selection.\n"
+               "; Evolve YOUR fn; never edit the shared core welcome tile."))))
     ;; CONTRACT: this section NEVER vanishes and NEVER surfaces a bare
-    ;; ⚠/malli code. `render-agent-tile` is already throw-safe, so this
+    ;; ⚠/malli code. `render-agent-canvas` is already throw-safe, so this
     ;; backstop only fires on an UNEXPECTED failure (e.g. a db read) —
     ;; and even then the agent reads a clear, actionable safe-state, not
     ;; a swallowed error keyword. Self-heals on the next clean render.
     (catch :default e
-      (str "; Your live tile — loading (safe-state placeholder this turn).\n"
+      (str "; Your canvas — loading (safe-state placeholder this turn).\n"
            "; The per-turn tile derivation hit an unexpected error and\n"
            "; degraded gracefully; your human sees the calm core welcome\n"
            "; card, never a broken panel. This is a transient render\n"
@@ -227,5 +235,5 @@
            "; Diagnostic: " (ex-message e) "\n"
            ";\n"
            "; To (re)wire your tile, transact a qualified fn symbol or\n"
-           "; literal hiccup onto :seon.render.live-tile/content on your\n"
+           "; literal hiccup onto :seon.render.canvas/content on your\n"
            "; agent entity."))))

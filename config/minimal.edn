@@ -57,7 +57,7 @@
       {:seon.agent.ctx.transcript/from-turn-offset 2 :seon.agent.ctx.transcript/token-cap 1500}
       {:seon.agent.ctx.transcript/from-turn-offset 5 :seon.agent.ctx.transcript/token-cap 200}]}]}
 
-  ;; ── ROOT-CONTEXT — root gets the SAME stripped tree (no live-tile /
+  ;; ── ROOT-CONTEXT — root gets the SAME stripped tree (no canvas /
   ;; core-faults / instrumentation-gaps / orphaned-agents upserts, no
   ;; orchestration home-requires). Empty override = agent-context as-is.
   :seon.config/root-context {}}]

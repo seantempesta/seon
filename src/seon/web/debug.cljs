@@ -202,9 +202,9 @@
         turn-durs []
         ;; The agent's OWN tile — rendered explicitly (the agent entity is
         ;; not a context block, so it has no block twin). Wired
-        ;; `:seon.render.live-tile/content` wins; default is the core welcome.
+        ;; `:seon.render.canvas/content` wins; default is the core welcome.
         tile  (:seon.render/hiccup
-                (render/render-agent-tile {:seon.db/db db
+                (render/render-agent-canvas {:seon.db/db db
                                            :seon.agent/id agent-id}))
         ;; Just the ONE agent entity. State is DERIVED (no stored enum), so
         ;; the snapshot carries the projected state + turn count the header

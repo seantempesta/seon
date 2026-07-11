@@ -225,7 +225,7 @@ deps explicit:
 **Full-qualification is the always-correct floor** — `seon.db/transact!`,
 `seon.agent.message/user`, `my.ui/status-line` work from ANY ns with no
 require. Use it whenever you skip the require, and ALWAYS for the `my.*`
-toolkit (`my.ui/…`, `my.tile/…`, `my.data/…`, `my.kb/…`, `my.plan/…`) —
+toolkit (`my.ui/…`, `my.canvas/…`, `my.data/…`, `my.kb/…`, `my.plan/…`) —
 those are not aliased.
 
 The lifecycle verbs `wait` `complete` `pause` `resume` `terminate` are
@@ -255,6 +255,6 @@ call does — auto-await in your eval, or an explicit `await` inside an
 |---|---|
 | Model data, write a Datalog query, design identity/refs | the **`datahike`** skill |
 | Write/debug `^:async`/`await`, self-host eval quirks | the **`clojurescript`** skill |
-| Wire a canvas / dashboard / interactive control | the **`ui-live-tiles`** skill |
+| Wire a canvas / dashboard / interactive control | the **`ui-canvas`** skill |
 | Get your own form to parse and land on the first try | the **`repl`** skill |
 </content>

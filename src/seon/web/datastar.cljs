@@ -93,8 +93,8 @@
 (defn- tile-preview
   "Agent `id`'s canvas as a clipped compact face for its roster tile, or nil.
 
-   The canvas = the agent's live tile — `render/render-agent-tile` (the ONE
-   tile entry point: the pinned `:seon.render.live-tile/content`, else the
+   The canvas = the agent's canvas — `render/render-agent-canvas` (the ONE
+   tile entry point: the pinned `:seon.render.canvas/content`, else the
    derived last-updated tile, else the welcome card; throw-safe). Clipped to
    a fixed height (inline style — no matching Tailwind class in the built
    vocabulary) with a stretched inset-0 anchor to `/agent/<id>` (the
@@ -107,7 +107,7 @@
   (when (not= id "root")
     (try
       (when-let [hiccup (:seon.render/hiccup
-                          (render/render-agent-tile
+                          (render/render-agent-canvas
                             {:seon.db/db db :seon.agent/id id}))]
         [:div {:id    (str "app-agent-" id "-tile")
                :class "relative overflow-hidden border-t border-base-800/60 bg-base-950/40"
@@ -122,7 +122,7 @@
   "One roster tile for `id` — a LINK to that agent's view (`/agent/<id>`)
    showing its id, DERIVED FSM state as a dot+text chip, its purpose line-1
    (when set), and its canvas compact face ([[tile-preview]] — the agent's
-   live tile, morphed live with every commit). `derive-state`, the purpose
+   canvas, morphed live with every commit). `derive-state`, the purpose
    pull, and the preview are each guarded so a single bad agent can never
    abort the whole-view render (the never-crash floor). Keeps the
    `app-agent-<id>` id so idiomorph anchors the tile."
@@ -146,7 +146,7 @@
   "The live agent roster (`/agents`) as `[:main#app-view …rows…]` = f(db).
 
    Every agent is a tile (id, DERIVED FSM state, purpose line-1, and its
-   canvas compact face — the agent's live tile) linking to its
+   canvas compact face — the agent's canvas) linking to its
    `/agent/<id>` view.
 
    Pure of external state — reads only the supplied db value, so the same
@@ -621,7 +621,7 @@
    `/` is the root agent's view, so it reuses the per-agent
    shim page bound to the literal id \"root\". The page's feed effect opens
    `/agent/root/feed` (already seeded), whose `agent-view` renders root's
-   canvas = `seon.render.system/system-view` (root's seeded live-tile content).
+   canvas = `seon.render.system/system-view` (root's seeded canvas content).
    ONE mechanism — no `/`-special page, no `/`-special feed. A Ring handler:
    injects the `\"root\"` path-param and delegates to [[serve-agent-page!]].
    Public — db->routes resolves its symbol at request time."

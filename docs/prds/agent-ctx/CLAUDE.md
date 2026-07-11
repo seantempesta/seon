@@ -77,7 +77,7 @@ inclusion bar in [[context-rebuild]]).
   **refs** link the agent entity to namespace-scribed entities; **functions**
   never "verbs"; **`:batch`/`:stream`** never "Mode A/B"; milestones named by
   the block/namespace they validate (`repl`/`namespaces`/`plan`/`db`/`warnings`/
-  `live-tile`/`subagents`/`soul`). A new noun = parallel-system risk.
+  `canvas`/`subagents`/`soul`). A new noun = parallel-system risk.
 - `docs/seon/architecture/` is the SINGLE idealized-system set; this folder is
   the roadmap chunk, not a second doc system.
 - **Eval:** scorers gate CORRECTNESS (parses ∧ spec validates ∧ runs ∧ right

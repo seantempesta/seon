@@ -158,18 +158,18 @@ slot. An EXISTING compiled caller reads that slot at call time, so your
 override flows through without editing seon's source. Side effects fire when
 your preload requires the overriding ns. This works for ANY seon fn —
 inject context sections (`seon.ctx/core-default-ctx`), reshape a tile's error
-card (`seon.render.live-tile/error-response`), etc.
+card (`seon.render.canvas/error-response`), etc.
 
 Worked example — `acme/src/acme/overrides.cljs` reshapes the broken-tile card
 so the human sees a calm Acme-branded placeholder instead of seon's stock one:
 
 ```clojure
 (ns acme.overrides
-  (:require [seon.render.live-tile :as live-tile]))
+  (:require [seon.render.canvas :as canvas]))
 
-(defonce ^:private orig-error-response live-tile/error-response)
+(defonce ^:private orig-error-response canvas/error-response)
 
-(set! live-tile/error-response
+(set! canvas/error-response
       (fn acme-error-response [req]
         (assoc (orig-error-response req)            ; keep the :seon.render/ai twin
                :seon.render/hiccup
@@ -235,7 +235,7 @@ curl -s 127.0.0.1:7980/agents        # 200 — your branded roster
 ```
 
 Then drive a turn (`SEON_AI_PROVIDER=deepseek DEEPSEEK_API_KEY=…`) and read
-`/agent/<id>` to see your overlay namespaces in context, your live tiles
+`/agent/<id>` to see your overlay namespaces in context, your canvas
 rendering, and your overrides and branding applied. Full acceptance-check
 list + isolation table: [[../components/acme-harness.md]].
 

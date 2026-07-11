@@ -53,7 +53,7 @@ body stays in the file. Drop a standard `<name>/SKILL.md` in there and it appear
 edit it and the agent gets the edit.
 
 **ONE corpus, split by consumer on disk.** `seon-skills/` is the dedicated AGENT
-corpus (datahike, clojurescript, repl, data-oriented-clojure, ui-live-tiles, …);
+corpus (datahike, clojurescript, repl, data-oriented-clojure, ui-canvas, …);
 `.claude/skills/` holds the Claude-Code/dev skills (browser-automation,
 clojure-testing) that an agent should NOT load, **plus symlinks back to the shared
 seon-skills entries** so Claude Code reads them natively too. The directory split —

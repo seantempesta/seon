@@ -32,7 +32,7 @@
     [seon.db :as db]
     [seon.handlers.test :as h-test]
     [seon.render :as render]
-    [seon.render.live-tile :as tile]
+    [seon.render.canvas :as canvas]
     [seon.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
@@ -101,7 +101,7 @@
   (let [hiccup (h-test/render-html {:seon.render/node ent-fail})]
     (is (vector? hiccup) "html form is a hiccup vector")
     (is (= :div (first hiccup)) "outer container is a :div")
-    (is (tile/valid-hiccup? hiccup) "passes valid-hiccup?")
+    (is (canvas/valid-hiccup? hiccup) "passes valid-hiccup?")
     (let [s (pr-str hiccup)]
       (is (str/includes? s "demo.ns/t-fail") "sym appears in the hiccup")
       (is (str/includes? s "failing") "failing pill present")
@@ -231,7 +231,7 @@
                               :seon.render/depth 0 :seon.render/format :html}))
                   s      (pr-str hiccup)]
               (is (vector? hiccup) "html form is a hiccup vector")
-              (is (tile/valid-hiccup? hiccup) "passes valid-hiccup?")
+              (is (canvas/valid-hiccup? hiccup) "passes valid-hiccup?")
               (is (str/includes? s "demo.ns/t-attached")
                   "the test sym appears in the ns's html")
               (is (str/includes? s "passing")

@@ -41,7 +41,7 @@
     [my.kb :as kb]
     [my.data :as data]
     [my.ui :as ui]
-    [my.tile :as tile]
+    [my.canvas :as canvas]
     [my.blob :as blob]
     [seon.agent.search :as search]
     [seon.agent.shell :as shell]

@@ -22,10 +22,10 @@ grep tallies (representative, not exhaustive); "verbatim" excluded from all
 | term cluster | canonical name | must-fix (living docs + agent-facing strings) | rename-unit (code identifiers) | exempt / note only |
 |---|---|---|---|---|
 | "verb(s)" | **functions / schemas / tests** | ~110 living-doc hits + dozens of agent-facing strings (`ctx.cljs`, `menu.cljs`, `toolkit.md` is 100% verb-framed) | **11 symbols** across `eval.cljs` + `menu.cljs`, plus the `:recent-verbs` **block name** (typeahead-lane) | ~1106 hits under `docs/prds/**` research/history — light note only |
-| "rung(s)" / "the ladder" | **capability milestones** (`repl`/`namespaces`/`plan`/`db`/`warnings`/`live-tile`/`subagents`/`soul`) | 124 doc hits incl. the doc filename `context-rebuild.md`; ~13 src comments; config `.edn` comments | none (milestone names already canonical) | dated markers ("rung-0 verdict, 2026-07-10") in code comments — history, light note |
+| "rung(s)" / "the ladder" | **capability milestones** (`repl`/`namespaces`/`plan`/`db`/`warnings`/`canvas`/`subagents`/`soul`) | 124 doc hits incl. the doc filename `context-rebuild.md`; ~13 src comments; config `.edn` comments | none (milestone names already canonical) | dated markers ("rung-0 verdict, 2026-07-10") in code comments — history, light note |
 | "Mode A / Mode B" | **`:batch` / `:stream`** (`:seon.config/repl-mode`) | 20 doc + 16 src hits, all comments/docstrings (most pair the coinage WITH the canonical value) | none | test.edn comment |
 | "the store" / "memory" (=DB) | **the `db`** (`seon.db`) | ~10 agent-facing docstrings (`namespaces.cljs`, `findings.cljs`, `inventory.cljs`, `render/system.cljs`, `ui/header.cljs`, `web/debug.cljs`, `live_tile.cljs`) | none | `:memory` conn, konserve store, `data/clusters/*/store` path = LEGIT, not flagged |
-| "canvas" vs "live-tile" vs "tile" | **`canvas` = `#world-canvas` focal slot; `live-tile` = the agent-side block; other html = tiles** | seon UI usage is mostly CONSISTENT | none | diffusion's `canvas-text` (`worker_eval`, `worker_validator`, `diffusion/*`) is an unrelated homonym → OWNER note |
+| "canvas" vs "canvas" vs "tile" | **`canvas` = `#world-canvas` focal slot; `canvas` = the agent-side block; other html = tiles** | seon UI usage is mostly CONSISTENT | none | diffusion's `canvas-text` (`worker_eval`, `worker_validator`, `diffusion/*`) is an unrelated homonym → OWNER note |
 | "collaboration"/"identity"/"attention" (block names) | **`subagents` / `soul` / `warnings`** | docs only: collaboration 23, attention 144, identity-as-block a few | `identity-file-blocks` (`config.cljs`) is a soul+agents umbrella — minor | `:db.unique/identity`, `clojure.core/identity`, "identity file" = LEGIT |
 | "world" / "environment" (=cluster) | **cluster** | scattered ("root world", "fresh world", "ROOT world only" in agent-facing docstrings) | none | `/world` UI page + `seon.ui.world` = EXEMPT legacy; OS/lexical `environment` = LEGIT → OWNER note on "root world" |
 | "kind"/"type" taxonomies | **attributes + connections** | settled — no live offenders found in src | none | — |
@@ -56,7 +56,7 @@ poison surface (agent-facing prose).
 
 **Agent-facing src strings (MUST-FIX, highest priority — these render):**
 
-- `src/seon/agent/ctx.cljs:1440` — `"; my.tile) and your core verbs (plan /
+- `src/seon/agent/ctx.cljs:1440` — `"; my.canvas) and your core verbs (plan /
   message / lifecycle). Everything\n"`
 - `src/seon/agent/ctx.cljs:1534` — `"; explicit verbs — all plain Clojure…"`
 - `src/seon/agent/ctx.cljs:1597` — `"; - WHEN YOU ARE DONE, say so with a
@@ -82,7 +82,7 @@ research/history — do not sweep; they record the era's language.
 ### 2. "rung(s)" / "the ladder" → capability milestones
 
 The milestone names are already canonical (`repl`/`namespaces`/`plan`/`db`/
-`warnings`/`live-tile`/`subagents`/`soul`). "rung"/"ladder" is the metaphor
+`warnings`/`canvas`/`subagents`/`soul`). "rung"/"ladder" is the metaphor
 layered over them.
 
 - **MUST-FIX (living guidance):** the doc filename itself —
@@ -141,12 +141,12 @@ Note: because "the store" ALSO legitimately names the durable wire-server
 datahike store, some of these are arguably correct-in-context. See OWNER
 DECISION D2.
 
-### 5. canvas / live-tile / tile
+### 5. canvas / canvas / tile
 
 seon's own UI usage is **consistent** with the canonical distinction:
 `docs/seon/architecture/ui.md:137-141` correctly documents canvas =
 `#world-canvas` focal slot, `:canvas` "is just a block name like any
-other", live-tile = `:seon.render.live-tile/content`. `config.cljs:12/293`,
+other", canvas = `:seon.render.canvas/content`. `config.cljs:12/293`,
 `client.cljs:151`, `render.cljs:794/1161` align. No fix needed inside seon
 UI.
 

@@ -1,11 +1,11 @@
 (ns seon.render.sci
-  "SCI-bounded invocation for AGENT-authored live-tile fns (tile-isolation
+  "SCI-bounded invocation for AGENT-authored canvas fns (tile-isolation
    PRD Layer 1, docs/prds/agent-runtime/tile-isolation-prd-2026-06-21.md).
 
    ## Why this exists
 
-   The pod is a SINGLE Node thread. A live tile lets an agent point
-   `:seon.render.live-tile/content` at a fn symbol that is invoked
+   The pod is a SINGLE Node thread. A canvas lets an agent point
+   `:seon.render.canvas/content` at a fn symbol that is invoked
    SYNCHRONOUSLY in the render path (`seon.render/html-render` →
    `(f input-map)`). A non-terminating agent tile fn (a sync
    `(loop [] (recur))` / `(while true)` / runaway interpreted recursion)
@@ -454,7 +454,7 @@
      :seon.render/ai                — a map, a bare STRING, or nil.
    Anything else is a broken render fn → a `:seon/error` block in place
    (fail-loud; re-running it on the unbounded compiled path is banned).
-   The TILE caller (`seon.render/render-agent-tile`) additionally requires
+   The TILE caller (`seon.render/render-agent-canvas`) additionally requires
    the map envelope and fail-louds a bare value itself — the envelope-vs-
    bare tolerance is the caller's contract, not SCI's."
   [view r]
@@ -583,7 +583,7 @@
                (if (interrupt-ex? e)
                  ;; the deadline interrupt is NOT swallowed — the caller
                  ;; runs recovery (retract + message) and the derived
-                 ;; live-tile section is its data surface; no datom here.
+                 ;; canvas section is its data surface; no datom here.
                  {:seon.render.sci/interrupt true}
                  ;; any non-interrupt SCI failure → :agent-fault record! +
                  ;; a :seon/error block in place (fail-loud; never the
@@ -611,17 +611,17 @@
 
 (defn- warning-text
   [sym budget-ms]
-  (str "Your live tile fn `" sym "` did not terminate within " budget-ms
+  (str "Your canvas fn `" sym "` did not terminate within " budget-ms
        "ms and was reset to the welcome tile. Tile fns must be PURE, FAST, "
        "TERMINATING database→hiccup renders — no loops, blocking, or native "
        "regex. They return {:seon.render/hiccup … :seon.render/ai …} from a "
-       "few DB queries. Re-wire :seon.render.live-tile/content with a fn that "
+       "few DB queries. Re-wire :seon.render.canvas/content with a fn that "
        "renders a query, not one that computes."))
 
 (defn recover-hung-tile!
   "Reset agent `agent-id`'s hung tile to the core welcome.
 
-   Retracts `:seon.render.live-tile/content` and posts the agent a force'd message
+   Retracts `:seon.render.canvas/content` and posts the agent a force'd message
    explaining what happened. Async + deduped; returns nil."
   {:malli/schema [:=> [:catn [::agent-id :string] [::sym :symbol] [::budget-ms :int]]
                   :nil]}
@@ -633,7 +633,7 @@
                  (db/transact!
                    {:seon.db/tx-data
                     [[:db/retract [:seon.agent/id agent-id]
-                      :seon.render.live-tile/content]]})))
+                      :seon.render.canvas/content]]})))
         (.then (fn [_]
                  ;; late-resolved to avoid a require cycle
                  ;; (render → render.sci → message → ctx → render). user-ref is
@@ -660,8 +660,8 @@
 ;; FROM the user-ref with :force, indistinguishable from a human message,
 ;; so a broken tile re-armed the wake loop AND defeated the halt. There is
 ;; no active intervention now: a broken tile is a DERIVED surface. The
-;; `:seon.render/ai` render in seon.render.live-tile/error-response carries
-;; "YOUR LIVE TILE IS BROKEN — …" and the :seon.agent.ctx.live-tile/live-tile-
+;; `:seon.render/ai` render in seon.render.canvas/error-response carries
+;; "YOUR CANVAS IS BROKEN — …" and the :seon.agent.ctx.canvas/canvas-
 ;; section re-derives it from the db value EVERY turn (a pure fn of state,
 ;; no stored error flag, self-healing when the tile renders clean again).
 ;; The agent learns of breakage by reading its own context, not by being

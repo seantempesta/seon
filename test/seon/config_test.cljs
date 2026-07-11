@@ -126,25 +126,25 @@
 
 ;;; Block-override MERGES by name — a manifest overriding a block need only name
 ;;; the sub-keys it changes; the default block's other attrs survive (the
-;;; third-party-first contract). Proven via the root-context `:live-tile` block,
+;;; third-party-first contract). Proven via the root-context `:canvas` block,
 ;;; which by default carries `:seon.agent.ctx/priority` + `:seon.render/ai` +
-;;; `:seon.render.live-tile/content`.
+;;; `:seon.render.canvas/content`.
 
 (deftest block-override-merges-preserving-sub-keys
-  (testing "root-context overriding ONE :live-tile sub-key keeps the default block's other attrs"
+  (testing "root-context overriding ONE :canvas sub-key keeps the default block's other attrs"
     (with-redefs [config/load-manifest
                   (fn [] {:seon.config/agent-context
                           {:seon.agent/ctx
-                           [{:seon.agent.ctx/name :live-tile
+                           [{:seon.agent.ctx/name :canvas
                              :seon.agent.ctx/priority 35
-                             :seon.render/ai 'probe/live-tile}]}
+                             :seon.render/ai 'probe/canvas}]}
                           :seon.config/root-context
                           {:seon.agent/ctx
-                           [{:seon.agent.ctx/name :live-tile
-                             :seon.render.live-tile/content [:div "ACME-CUSTOM"]}]}})]
+                           [{:seon.agent.ctx/name :canvas
+                             :seon.render.canvas/content [:div "ACME-CUSTOM"]}]}})]
       (let [blocks (:seon.agent/ctx (config/resolve-agent-context "root" nil))
-            lt     (first (filter #(= :live-tile (:seon.agent.ctx/name %)) blocks))]
-        (is (= [:div "ACME-CUSTOM"] (:seon.render.live-tile/content lt))
+            lt     (first (filter #(= :canvas (:seon.agent.ctx/name %)) blocks))]
+        (is (= [:div "ACME-CUSTOM"] (:seon.render.canvas/content lt))
             "the overridden sub-key wins")
         (is (contains? lt :seon.agent.ctx/priority)
             "the default block's priority survives a sparse override")
@@ -154,9 +154,9 @@
     (with-redefs [config/load-manifest
                   (fn [] {:seon.config/agent-context
                           {:seon.agent/ctx
-                           [{:seon.agent.ctx/name :live-tile
+                           [{:seon.agent.ctx/name :canvas
                              :seon.agent.ctx/priority 35
-                             :seon.render/ai 'probe/live-tile}]}
+                             :seon.render/ai 'probe/canvas}]}
                           :seon.config/root-context
                           {:seon.agent/ctx
                            [{:seon.agent.ctx/name :acme-extra
@@ -164,7 +164,7 @@
                              :seon.render/ai 'my.ui/extra}]}})]
       (let [names (ctx-block-names "root" nil)]
         (is (contains? names :acme-extra) "the new block is seeded")
-        (is (contains? names :live-tile) "default blocks remain")))))
+        (is (contains? names :canvas) "default blocks remain")))))
 
 ;;; The `#merge` COMPOSITION trap (config-merge, 2026-07-11) — a per-cluster
 ;;; manifest composes as `#merge [#include "base" {overrides}]`. Aero's shipped

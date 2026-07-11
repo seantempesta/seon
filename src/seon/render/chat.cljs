@@ -1,6 +1,6 @@
 (ns seon.render.chat
   "The conversation surface — chat bubbles for the consumer agent view
-   (`/agent/<id>`, live-tiles PRD §1 Surface 2).
+   (`/agent/<id>`, canvas PRD §1 Surface 2).
 
    ## The stream is DERIVED — nothing stored per-view
 
@@ -81,7 +81,7 @@
 ;; `:seon.db/db` is registered (as `:any` — runtime handle) in
 ;; seon.render, which loads AFTER this ns can; the handle is specced
 ;; inline as `:any` here (same sanctioned third-party-boundary
-;; exception as seon.render.live-tile's request shapes).
+;; exception as seon.render.canvas's request shapes).
 (schema/register! ::conversation-request
   [:map
    [:seon.agent/id :string]
@@ -95,13 +95,13 @@
   [:map [::messages [:vector ::message]]])
 
 ;; Bubble fns return the registered hiccup shape
-;; `:seon.render.live-tile/hiccup` — referenced DIRECTLY in their
+;; `:seon.render.canvas/hiccup` — referenced DIRECTLY in their
 ;; `:malli/schema` metadata (resolved at instrument time, after the
 ;; whole bundle loads — same forward-metadata-reference pattern as
 ;; seon.render.default's `:seon.render/ai-response`). NOT re-aliased
-;; via register! here: this ns now loads BEFORE seon.render.live-tile
-;; (live-tile requires [[last-reply]] for its welcome compact block,
-;; live-tiles U3), and register!'s compilability guard rejects forward
+;; via register! here: this ns now loads BEFORE seon.render.canvas
+;; (canvas requires [[last-reply]] for its welcome compact block,
+;; canvas U3), and register!'s compilability guard rejects forward
 ;; references at load time.
 
 ;; ============================================================
@@ -204,7 +204,7 @@
    Returns `{}` when the agent has never replied (optional = absent).
 
    This is what the default root tile shows
-   (`seon.render.live-tile/welcome`'s compact block: purpose + id +
+   (`seon.render.canvas/welcome`'s compact block: purpose + id +
    last reply) — DERIVED from the message log at render time, nothing
    stored (reactive-context doctrine)."
   {:malli/schema [:=> [:cat ::last-reply-request] ::last-reply-response]}
@@ -240,7 +240,7 @@
    Human and agent content renders markdown → hiccup SERVER-SIDE
    (`seon.ui.markdown/md->hiccup` — symmetric, escaped-by-the-
    serializer; see the ns docstring)."
-  {:malli/schema [:=> [:cat ::message] :seon.render.live-tile/hiccup]}
+  {:malli/schema [:=> [:cat ::message] :seon.render.canvas/hiccup]}
   [{::keys [at kind label content]}]
   (let [time (hh-mm at)]
     (case kind

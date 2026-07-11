@@ -1,14 +1,14 @@
 (ns my.ui
   "COMPOSE your canvas from small dual-render pieces — don't hand-roll a
    `[:div …]` from scratch. Every helper here takes DATA and returns the
-   `:seon.render/html-response` envelope your live tile wants:
+   `:seon.render/html-response` envelope your canvas wants:
 
      {:seon.render/hiccup […]   ; the HUMAN's view — styled, safelisted
       :seon.render/ai    \"…\"}    ; YOUR view — the SAME info, compact text
 
    The two are mirrored from ONE input, so they CAN'T drift: the agent
    reasons over the lean `:seon.render/ai` line it sees every turn (the
-   `; Your live tile` section renders it), while the human gets the
+   `; Your canvas` section renders it), while the human gets the
    beautiful HTML. Neither lies about the other.
 
    THE MOVE — set your canvas by COMPOSING, then wire the result. Build
@@ -24,10 +24,10 @@
        (seon.db/transact!
          {:seon.db/tx-data
           [{:seon.agent/id (seon.db/current-agent-id)
-            :seon.render.live-tile/content (:seon.render/hiccup s)}]}))
+            :seon.render.canvas/content (:seon.render/hiccup s)}]}))
 
    For a LIVE tile that re-derives every render, wrap a `section` call in a
-   home-ns fn and wire its SYMBOL instead (see the `ui-live-tiles` skill).
+   home-ns fn and wire its SYMBOL instead (see the `ui-canvas` skill).
 
    All helpers emit ONLY safelisted classes (`resources/public/css/input.css`)
    — anything else is invisible — and are SYNC pure data (no `^:async`).

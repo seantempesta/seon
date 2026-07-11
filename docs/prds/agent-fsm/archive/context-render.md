@@ -41,7 +41,7 @@ A renderable is just a domain entity. It carries OPTIONAL render-control attrs; 
 ;;               stored.
 ;;   • ORDER   = static :seon.ctx/priority; there is no churn attr.
 (schema/register! :seon.render/ai   [:or :string :symbol])           ;; SLOT (text):  verbatim string OR fn-symbol — EXISTS
-(schema/register! :seon.render/html :seon.render.live-tile/content)  ;; SLOT (hiccup): shallow-hiccup value OR fn-symbol — EXISTS, shared shape
+(schema/register! :seon.render/html :seon.render.live-canvas/content)  ;; SLOT (hiccup): shallow-hiccup value OR fn-symbol — EXISTS, shared shape
 (schema/register! :seon.ctx/priority :int)                           ;; static section order: stable low → volatile high — EXISTS
 (schema/register! :seon.render/clip
   [:or :int
@@ -53,7 +53,7 @@ A renderable is just a domain entity. It carries OPTIONAL render-control attrs; 
   [:vector {:seon.db/component true} :seon.db/ref])                  ;; OPTIONAL authored nesting; DERIVED sections query their children instead
 ```
 
-`:seon.render/html` references the canonical shallow-hiccup shape `:seon.render.live-tile/content` (registered once, shared with the live tile — no inline duplication). Arbitrarily-nested hiccup is NOT a Malli schema: a recursive seqex trips `:malli.core/potentially-recursive-seqex` inside instrumented fns, which is why a `:seon.render/hiccup` schema is not used. Deep validity is checked at the render boundary by the plain fn `seon.render.live-tile/valid-hiccup?`.
+`:seon.render/html` references the canonical shallow-hiccup shape `:seon.render.live-canvas/content` (registered once, shared with the live tile — no inline duplication). Arbitrarily-nested hiccup is NOT a Malli schema: a recursive seqex trips `:malli.core/potentially-recursive-seqex` inside instrumented fns, which is why a `:seon.render/hiccup` schema is not used. Deep validity is checked at the render boundary by the plain fn `seon.render.live-canvas/valid-hiccup?`.
 
 Most renderables are DERIVED — a projection of domain rows, reactive, nothing to clear. Only genuinely authored ones are stored (the soul doc, an agent's custom section).
 
@@ -365,7 +365,7 @@ The first-turn planning bootstrap is a dynamic renderable, shown only when there
 ## Schemas (new / changed, complete)
 
 - `seon.render/*` renderable control attrs — see "The renderable". Note the deletions: no `:seon.render/id`, no `:seon.render/at`, no `:seon.render/ordinal`, no `:seon.render/churn` (handle = own id; time = `:db/txInstant`; order = `:seon.ctx/priority`).
-- `:seon.render/html` → `:seon.render.live-tile/content` (shared shape, not the deleted `:seon.render/hiccup`).
+- `:seon.render/html` → `:seon.render.live-canvas/content` (shared shape, not the deleted `:seon.render/hiccup`).
 - `:seon.render/clip` map alternative uses fully-namespaced keys (`:seon.render/ai` / `:seon.render/html`).
 - `:seon.agent.todo/message` `:seon.db/ref` (the message↔todo link, read by the todo renderable).
 - (The `:seon.agent.message/handled?` deletion and the `:seon.agent.loop/cause` / `:seon.agent.loop/stop-reason` tx-meta attrs are loop concerns — specified in `agent-loop.md`.)
@@ -410,7 +410,7 @@ This work decomposes into pillars, each a facet of the one system:
 
 #### Keystone — the Renderable schema + the converter collapse + the root renderable
 
-- **Add** the OPTIONAL render-control attrs in-place beside `:seon.ctx/section` (`ctx.cljs:96-109`): `:seon.render/ai`/`:html` (exist), reuse `:seon.ctx/priority`, `:seon.render/clip` (namespaced map keys), `:seon.render/hidden?`, `:seon.render/children`. NO `:seon.render/id`, NO `:seon.render/at`, NO `:seon.render/kind`, NO `:seon.ctx/cache-tier`. `:seon.render/html` references `:seon.render.live-tile/content` (shared shape), NOT the deleted `:seon.render/hiccup`. Make `:seon.ctx/section` a superset of the renderable so dynamic agent sections ARE renderables.
+- **Add** the OPTIONAL render-control attrs in-place beside `:seon.ctx/section` (`ctx.cljs:96-109`): `:seon.render/ai`/`:html` (exist), reuse `:seon.ctx/priority`, `:seon.render/clip` (namespaced map keys), `:seon.render/hidden?`, `:seon.render/children`. NO `:seon.render/id`, NO `:seon.render/at`, NO `:seon.render/kind`, NO `:seon.ctx/cache-tier`. `:seon.render/html` references `:seon.render.live-canvas/content` (shared shape), NOT the deleted `:seon.render/hiccup`. Make `:seon.ctx/section` a superset of the renderable so dynamic agent sections ARE renderables.
 - **Add** `renderable-id` (own-id by attribute presence) + `renderable-inst` (`:db/txInstant` join) in `seon.render`.
 - **DELETE in this patch:** the `:seon.render/text` second arm of `:seon.render/ai-response` (`render.cljs:106-113`) + the `:seon.render/text` tolerance arm of `render-entity-ai` (`render.cljs:468-490`) — flagged "delete with the V4 composer rewrite" (`render.cljs:99`); THIS is that rewrite.
 - **Replace** the composer with the ROOT renderable: DELETE `assemble-context` (`ctx.cljs:1711-1816`), `merge-sections` (`1598-1612`), `render-section` (`1619-1643`), `render-section-html` (`1645-1666`). New body: `context-root` gathers the agent's renderables (core converters + agent `:seon.agent/ctx` override-by-id + derived domain rows in ONE query — subsuming merge-sections override-by-name), sorted by `:seon.ctx/priority` (STATIC); the prompt is `(render :seon.render/ai ctx (context-root ctx))` and `(render :seon.render/html …)`. The cache breakpoints are a thin post-step on the rendered `:ai` string.

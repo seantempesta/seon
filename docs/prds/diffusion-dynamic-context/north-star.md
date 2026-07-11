@@ -104,7 +104,7 @@ correctness metric.
 | `repl` skill | EXPLAIN a parser error (prose) | 0/8 real-parser, **8/8 hallucinated JSON/XML** | 7/8 real `parse-forms`/parinfer, 0/8 hallucinated | KEEP — huge lift; works for PROSE/explanation too, not just code-gen |
 | `data-oriented-clojure` skill | design session-history storage (mindset) | 1/8 EAV, 0/8 namespaced, **8/8 hallucinated commercial-Seon SaaS** | 8/8 EAV + namespaced, 1/8 hallucinated | KEEP — huge lift; redirects the commercial-Seon prior to our EAV model |
 | `seon.*` required-API render (feat `844ec448`) | (context section, not a skill) | — | shipped, ~2.9k tok/turn | **LIFT UNMEASURED** — must A/B to justify the token cost or trim the cap |
-| `ui-live-tiles` skill | render a live todos tile | 0/8 real-render-ns, 0/8 namespaced, 7/8 hallucinated tile-map | 8/8 `:seon.render` + namespaced + `:malli/schema` | KEEP — huge lift |
+| `ui-canvas` skill | render a live todos tile | 0/8 real-render-ns, 0/8 namespaced, 7/8 hallucinated tile-map | 8/8 `:seon.render` + namespaced + `:malli/schema` | KEEP — huge lift |
 
 **▸ SWEEP COMPLETE — 6/6 skills, ALL ~0→100% structural.** The north-star's
 structural thesis is proven: context takes this model from ~0% correct (confidently
@@ -246,7 +246,7 @@ When iterating autonomously (e.g. overnight), each cycle:
 ### Work queue (durable, test-gated — reorder by measured value)
 
 - **Skill-lift sweep:** A/B each existing skill (`datahike`, `clojurescript`, `repl`,
-  `ui-live-tiles`, `data-oriented-clojure`) for generation lift; refine the laggards;
+  `ui-canvas`, `data-oriented-clojure`) for generation lift; refine the laggards;
   re-test. (`data-modeling` = done, 0→100%.) Build the (task, scorer) pair per skill.
 - **Close the eval-renoise loop:** `resume_renoise` (clamp good / re-noise garbled
   spans) + tune K (~24-32, not 8 — the code-buffer is still noise early). Gate: the loop

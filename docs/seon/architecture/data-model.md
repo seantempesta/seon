@@ -141,7 +141,7 @@ Two storage encodings, both VALUES:
   (`:db.type/string`), because datahike's typed schema cannot hold a scalar
   union; the bridge encodes on write and `seon.db/decode-edn-value` decodes on
   read. Used by `:seon.render/ai` (`[:or :string :symbol]`) and
-  `:seon.render/html` (references `:seon.render.live-tile/content`,
+  `:seon.render/html` (references `:seon.render.canvas/content`,
   `[:or :symbol ::hiccup]`).
 
 The render path resolves these through ONE engine: `ai-render` / `html-render`
@@ -266,7 +266,7 @@ bridge-storable. **Ground in** `src/seon/db/internal.cljs:286-360,1211` —
 | `:seon.agent/schedules` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | owned cron maps (cascade-retract) |
 | `:seon.agent/ctx` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | owned **blocks** (cascade-retract), seeded at creation, sorted by `:seon.agent.ctx/priority` at render |
 | `:seon.render/ai` | `:seon.render/ai` | string (EDN) / one | optional; the agent record's own ai render (absent by default) |
-| `:seon.render/html` | `:seon.render.live-tile/content` | string (EDN) / one | optional; per-entity tile-render override |
+| `:seon.render/html` | `:seon.render.canvas/content` | string (EDN) / one | optional; per-entity tile-render override |
 
 The `:seon.agent` entity map (`{:seon.db/entity true}`) lists `id` required,
 everything else optional. **State is derived, never stored** — there is no

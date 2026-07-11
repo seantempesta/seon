@@ -4,11 +4,11 @@ status: completed
 tags: [research, agent, ui, gym]
 ---
 
-# my.tile composability — the last toolkit piece, PROVEN
+# my.canvas composability — the last toolkit piece, PROVEN
 
 Hermetic paid gym drive of `interactive-tile-checklist` (DeepSeek), closing
 the toolkit-composability proof. `my.data` (15x/23x) and `my.ui` (9x/11x)
-were already proven composable; `my.tile` (interactive controls) was the last
+were already proven composable; `my.canvas` (interactive controls) was the last
 untested piece.
 
 - **Scenario:** `:interactive-tile-checklist` (`test/seon/gym/scenarios/interactive-tile-checklist.edn`)
@@ -20,25 +20,25 @@ untested piece.
 
 ## TL;DR — TOOLKIT FULLY PROVEN
 
-`my.tile` is composable. The agent composed **`(tile/button …)` 3x**, each
+`my.canvas` is composable. The agent composed **`(canvas/button …)` 3x**, each
 **wired to its own handler fn** (`toggle-water!` / `toggle-vitamins!` /
 `toggle-walk!`), inside a derive-from-db `morning-tile` fn it set as its
-canvas. `toolkit-calls{:my.tile} = 6`, `wired-to-an-own-fn` PASS,
+canvas. `toolkit-calls{:my.canvas} = 6`, `wired-to-an-own-fn` PASS,
 `drove-its-canvas` PASS, judge **100/100**, **eval-error-rate 0**. All three
-toolkit pieces (`my.data` / `my.ui` / `my.tile`) now compose.
+toolkit pieces (`my.data` / `my.ui` / `my.canvas`) now compose.
 
 The scorecard's `pass? false` is driven by **two predicate-calibration bugs,
-not a my.tile failure** (detailed below). The headline criterion from the
-drive — `toolkit-calls{:my.tile} > 0` AND wired to an own fn — is met.
+not a my.canvas failure** (detailed below). The headline criterion from the
+drive — `toolkit-calls{:my.canvas} > 0` AND wired to an own fn — is met.
 
 ## The headline metric
 
 ```
-:seon.gym.scorecard/toolkit-calls {:my.data 0, :my.ui 6, :my.tile 6}
+:seon.gym.scorecard/toolkit-calls {:my.data 0, :my.ui 6, :my.canvas 6}
 ```
 
-`my.tile` referenced **6x** (whole-store eval-source scan). The 6 are the
-fully-qualified keyword keys `:my.tile/label` + `:my.tile/action` across the
+`my.canvas` referenced **6x** (whole-store eval-source scan). The 6 are the
+fully-qualified keyword keys `:my.canvas/label` + `:my.canvas/action` across the
 three buttons (2 keys x 3 buttons). `my.ui = 6` is `ui/section` +
 `ui/progress` keys; `my.data = 0` (no aggregation needed for a checklist).
 
@@ -49,7 +49,7 @@ handler fns, and a derive-from-db tile fn — then wired the fn-symbol to its
 canvas:
 
 ```clojure
-;; home ns require (seeded): [my.tile :as tile] [my.ui :as ui]
+;; home ns require (seeded): [my.canvas :as tile] [my.ui :as ui]
 (schema/register! :my.agent.me/morning-water    :boolean)
 (schema/register! :my.agent.me/morning-vitamins :boolean)
 (schema/register! :my.agent.me/morning-walk     :boolean)
@@ -78,26 +78,26 @@ canvas:
        :my.ui/blocks
        [(ui/progress {:my.ui/label "Done" :my.ui/current done :my.ui/total 3
                       :my.ui/tone (if (= done 3) :success :signal)})
-        (tile/button {:my.tile/label (if water "✓ Water plants" "○ Water plants")
-                      :my.tile/action (list 'my.agent.GrZ-2606282304/toggle-water!)})
-        (tile/button {:my.tile/label (if vitamins "✓ Take vitamins" "○ Take vitamins")
-                      :my.tile/action (list 'my.agent.GrZ-2606282304/toggle-vitamins!)})
-        (tile/button {:my.tile/label (if walk "✓ 10-min walk" "○ 10-min walk")
-                      :my.tile/action (list 'my.agent.GrZ-2606282304/toggle-walk!)})]})))
+        (canvas/button {:my.canvas/label (if water "✓ Water plants" "○ Water plants")
+                      :my.canvas/action (list 'my.agent.GrZ-2606282304/toggle-water!)})
+        (canvas/button {:my.canvas/label (if vitamins "✓ Take vitamins" "○ Take vitamins")
+                      :my.canvas/action (list 'my.agent.GrZ-2606282304/toggle-vitamins!)})
+        (canvas/button {:my.canvas/label (if walk "✓ 10-min walk" "○ 10-min walk")
+                      :my.canvas/action (list 'my.agent.GrZ-2606282304/toggle-walk!)})]})))
 
 (db/transact!
   {:seon.db/tx-data
    [{:seon.agent/id (db/current-agent-id)
-     :seon.render.live-tile/content 'my.agent.GrZ-2606282304/morning-tile}]})
+     :seon.render.live-canvas/content 'my.agent.GrZ-2606282304/morning-tile}]})
 ;; => {:seon.db/ok? true … :seon.db/added 7}
 ```
 
 This is the ideal answer: derive-from-db (booleans pulled live, progress
-re-computed each render), `tile/button` composed from the toolkit (not a
+re-computed each render), `canvas/button` composed from the toolkit (not a
 hand-rolled `[:button]`), each action wired to a fn the agent owns, canvas as
 primary surface + an honest backup message.
 
-`my.tile` renders **FULL** in the namespaces block (the worked
+`my.canvas` renders **FULL** in the namespaces block (the worked
 `button`/`input`/`select`/`toggle`/`form` examples are visible at
 `prompt.txt:977-1214`) — the agent had the worked example and used it.
 
@@ -106,9 +106,9 @@ primary surface + an honest backup message.
 | predicate | axis | pass? | actual |
 |---|---|---|---|
 | `:modelled-the-checklist` | models-work-directed | **false** | `domain attrs: [] expect=[:count>= 1]` |
-| `:composed-an-interactive-control` | drives-canvas | **false** | `0/14 evals match my\.tile/(button\|form\|input\|select\|toggle)` |
-| `:wired-to-an-own-fn` | drives-canvas | true | `1/14 evals match :my\.tile/(action\|submit)…'` |
-| `:drove-its-canvas` | drives-canvas | true | `:seon.render.live-tile/content PRESENT` |
+| `:composed-an-interactive-control` | drives-canvas | **false** | `0/14 evals match my\.canvas/(button\|form\|input\|select\|toggle)` |
+| `:wired-to-an-own-fn` | drives-canvas | true | `1/14 evals match :my\.canvas/(action\|submit)…'` |
+| `:drove-its-canvas` | drives-canvas | true | `:seon.render.live-canvas/content PRESENT` |
 | `:agent-replied-to-the-user` | replies-honestly | true | 2 outbound messages |
 | `:makes-few-errors` | makes-few-errors | true | `eval-error-rate=0 max=0.2` |
 | `:agent-ends-idle` | terminates | true | idle, no open run |
@@ -123,16 +123,16 @@ actionable control covering all three tasks."*
 Turn-1 context profile: `:namespaces` 18035 tok (the ~64% / #42 block),
 `:live-tile` 1899, `:soul` 1933 — total ~24.8k tok.
 
-## The two reds are predicate bugs, NOT my.tile failures
+## The two reds are predicate bugs, NOT my.canvas failures
 
 **1. `:composed-an-interactive-control` is ALIAS-BLIND (false negative).** Its
-regex is `my\.tile/(button|form|input|select|toggle)`, but the seeded home-ns
-require is `[my.tile :as tile]`, so every agent calls the verb as
-**`tile/button`**, never `my.tile/button`. The agent composed `tile/button`
+regex is `my\.canvas/(button|form|input|select|toggle)`, but the seeded home-ns
+require is `[my.canvas :as tile]`, so every agent calls the verb as
+**`canvas/button`**, never `my.canvas/button`. The agent composed `canvas/button`
 3x and the predicate scored it **0/14**. This predicate will give a false RED
-on *every* correct composition. The robust signal — `toolkit-calls{:my.tile}`
+on *every* correct composition. The robust signal — `toolkit-calls{:my.canvas}`
 (=6) — caught it because it counts the fully-qualified keyword KEYS
-(`:my.tile/label`), which survive the alias. Fix: match `\b(my\.tile|tile)/…`
+(`:my.canvas/label`), which survive the alias. Fix: match `\b(my\.tile|tile)/…`
 (accept the seeded alias), or scan for the keyword keys like toolkit-calls
 does. (Owner-facing: a gym-integrity bug — flag, do not work around.)
 
@@ -156,13 +156,13 @@ home ns `my.agent.GrZ-2606282304` carried `[seon.db :as db]` in its seeded
 require and `db/current-agent-id` / `db/pull` / `db/transact!` all resolved
 cleanly inside its own `toggle-*!` and `morning-tile` fns. Whether #73 is
 fixed or simply not exercised by this path, this drive was clean — note it,
-but it is a separate gap and did not touch the my.tile result.
+but it is a separate gap and did not touch the my.canvas result.
 
 ## Verdict
 
-**TOOLKIT FULLY PROVEN.** `my.tile` composes: the agent built `tile/button`
+**TOOLKIT FULLY PROVEN.** `my.canvas` composes: the agent built `canvas/button`
 3x wired to its own handler fns, derived from db, set as canvas, judge 100,
 zero eval errors. With `my.data` and `my.ui` already proven, all three
 toolkit pieces compose. The scenario's `pass? false` is two predicate
 miscalibrations (alias-blind control-scan + a click-dependent domain-attrs
-expectation), each worth a precise gym fix, neither a my.tile deficiency.
+expectation), each worth a precise gym fix, neither a my.canvas deficiency.

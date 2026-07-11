@@ -2,13 +2,13 @@
   "Root's SYSTEM VIEW — the `/` dashboard that IS root's agent-view canvas.
 
    The all-agents overview is the root agent's view. Generic agents fall
-   through their live tile to `welcome` (their
-   latest-reply card); root's `:seon.render.live-tile/content` is seeded to
-   [[system-view]] here, so the SAME `render-agent-tile` seam every agent
+   through their canvas to `welcome` (their
+   latest-reply card); root's `:seon.render.canvas/content` is seeded to
+   [[system-view]] here, so the SAME `render-agent-canvas` seam every agent
    uses renders the fleet/system view for root. ONE mechanism, one seam — no
    special layout, no special route.
 
-   [[system-view]] is the live-tile content fn: a pure function of the db
+   [[system-view]] is the canvas content fn: a pure function of the db
    value (passed explicitly), returning the `:seon.render/html-response`
    envelope (`:seon.render/hiccup` for the human card, `:seon.render/ai` for
    root's prompt understanding of the fleet — same data, agent-facing). It
@@ -18,7 +18,7 @@
 
      1. VITALS    ([[fleet-summary]]) — agent count by derived state, total
                   turns/evals, last activity, embeddings on/off.
-     2. AGENTS    — a card grid, one `render/render-agent-tile` preview per
+     2. AGENTS    — a card grid, one `render/render-agent-canvas` preview per
                   agent + derived state dot + turn count + purpose, each card
                   a link to `/agent/{id}`. Root's own card first, marked.
      3. STORE     ([[store-summary]]) — `seon.db/store-inventory`: which attrs
@@ -41,7 +41,7 @@
 
 ;; ============================================================
 ;; The literal root id (carved into `:seon.agent/id` — agent.cljs). Root's
-;; card renders a COMPACT system summary, NOT `render-agent-tile`: root's
+;; card renders a COMPACT system summary, NOT `render-agent-canvas`: root's
 ;; tile content IS system-view, so re-rendering it per card would recurse.
 ;; ============================================================
 
@@ -244,7 +244,7 @@
 ;; ============================================================
 ;; Rendering — hiccup (human) + ai (root's prompt). Children are SEQS
 ;; (doall'd) so the `seon.ui.html` splicer never hits a vector in child
-;; position, and the render-agent-tile serialization backstop forces them
+;; position, and the render-agent-canvas serialization backstop forces them
 ;; inside its guard.
 ;; ============================================================
 
@@ -280,7 +280,7 @@
       (if embedding? "⌁ embeddings on" "embeddings off")]]))
 
 (defn- root-card-hiccup
-  "Root's OWN card — a compact, marked system label (NOT render-agent-tile;
+  "Root's OWN card — a compact, marked system label (NOT render-agent-canvas;
    root's tile IS system-view, so re-rendering it would recurse)."
   [{::keys [turns] :keys [seon.agent/purpose]}]
   [:div {:class "flex flex-col gap-1 p-3 h-full"}
@@ -295,7 +295,7 @@
     (str turns " turns · you are here")]])
 
 (defn- agent-card-hiccup
-  "One agent card: the agent's `render-agent-tile` preview (its own live
+  "One agent card: the agent's `render-agent-canvas` preview (its own live
    tile / welcome) + a footer with the derived-state dot, turn count, and an
    `open →`. The whole card is a stretched link to `/agent/{id}` (a DIV +
    inset-0 anchor, NOT a wrapping `<a>` — agent hiccup can contain `<a>`,
@@ -305,7 +305,7 @@
         body (if root?
                (root-card-hiccup line)
                (or (:seon.render/hiccup
-                     (render/render-agent-tile {:seon.db/db db :seon.agent/id id}))
+                     (render/render-agent-canvas {:seon.db/db db :seon.agent/id id}))
                    [:div {:class "p-3 text-xs text-text-500 italic"}
                     "no tile yet"]))]
     [:div {:class (str "relative flex flex-col h-44 border rounded overflow-hidden "
@@ -424,7 +424,7 @@
                  (if (= :eval kind) "λ" "✉") " " text)))))
 
 ;; ============================================================
-;; The public live-tile content fn — root's seeded canvas.
+;; The public canvas content fn — root's seeded canvas.
 ;; ============================================================
 
 (schema/register! ::view-input
@@ -433,10 +433,10 @@
    [:seon.agent/id {:optional true} :seon.agent/id]])
 
 (defn system-view
-  "Root's live-tile content (`:seon.render.live-tile/content` symbol).
+  "Root's canvas content (`:seon.render.canvas/content` symbol).
 
    Called
-   by `render/render-agent-tile` with the render input map (carrying the db
+   by `render/render-agent-canvas` with the render input map (carrying the db
    value); returns the `:seon.render/html-response` envelope — the system
    dashboard hiccup for the human card + root's fleet understanding for its
    prompt. Reads the db EXPLICITLY (purity); composes [[fleet-summary]],

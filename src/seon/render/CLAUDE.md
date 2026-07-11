@@ -1,8 +1,8 @@
 # src/seon/render — the ONE projection engine (with src/seon/ui as its tile library)
 
-**Read before editing:** `docs/seon/architecture/ui.md` (block/render/tile/
+**Read before editing:** `docs/seon/architecture/ui.md` (block/render/canvas/
 slot/layout + the render engine contract), `architecture.md` glossary.
-Skills: `ui-live-tiles` (the agent-facing canvas how-to), `datastar-web-ui`.
+Skills: `ui-canvas` (the agent-facing canvas how-to), `datastar-web-ui`.
 
 ## The contract
 
@@ -15,9 +15,9 @@ Skills: `ui-live-tiles` (the agent-facing canvas how-to), `datastar-web-ui`.
   says must key on basis-t — and probably don't need (measure first).
 - **A render fn must never crash the walk** — guard it; a throwing render
   becomes a `:seon/error` surfaced in place.
-- **`live_tile.cljs` is the canvas**: agents set their focal view by
+- **`canvas.cljs` owns the low-level canvas render contract**: agents set their focal view by
   transacting hiccup OR a qualified fn symbol onto
-  `:seon.render.live-tile/content`. Its docstring and the CSS safelist must
+  `:seon.render.canvas/content`. Its docstring and the CSS safelist must
   stay in sync — agents guess from the docstring.
 - **Render-prominence law**: a COMPOSITION function's value is its worked
   example — compact/signature renders are for simple-call functions only.
@@ -30,6 +30,6 @@ are data in, data out, guarded like everything else. `value.cljs` /
 `chat.cljs` / `default.cljs` are the typed-value renderers the block
 renderer dispatches to.
 
-`src/seon/ui/` is the tile/layout library on top (agent view, header, markdown,
+`src/seon/ui/` is the canvas/layout library on top (agent view, header, markdown,
 clojure, components) — hiccup only, placed into slots by layouts; keep
 logic in render/derive fns, not tiles.

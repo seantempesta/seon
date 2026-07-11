@@ -8,7 +8,7 @@ tags: [prd, agent, index]
 
 **The point (owner, 2026-07-11): the old context tree's SURFACES retire, but
 their IDEAS are the inventory.** Each old block held an idea — some good
-(the live tile, reactive warnings, shared instructions), some accreted
+(the canvas, reactive warnings, shared instructions), some accreted
 guesswork. The rebuild is: carefully add NEW blocks based on the ideas the
 old blocks held, each colocated, each tested to confirm it works as
 intended. Deletion applies only where an idea isn't useful. Nothing is
@@ -67,7 +67,7 @@ coordinated remainders listed under item 1; item 4 still open.**
 3. **Deprecation labeling — DONE**: every legacy block surface NOT in the
    target vision carries docstring line 1 `DEPRECATED — … see
    context-rebuild.`: `jobs-block`, `testrun-block`, `findings-block`,
-   `inventory-block`, `relevant-source-block`, `live-tile-block`,
+   `inventory-block`, `relevant-source-block`, `canvas-block`,
    `my.skills/catalog-block` + `skill-block`, and the soul/agents surfaces
    `file-block`/`-ai`/`-html` + `config/identity-file-blocks`.
    `seon.agent.ctx.usage` is a live usage extractor, not a block — not
@@ -96,7 +96,7 @@ chat shorthand that leaked; Phase 0 sweeps it from living docs).
 | **`plan`** | rung 2 | GREEN both models incl. a real mid-drive pod restart |
 | **`db`** | rung 4 ("store"/"memory") | NEXT — `schema/register!` / `db/transact!` / `db/query` round-trip, recall across turns AND a restart; validates the v3.1 restart-survival line; decides whether any db teaching beyond cards + error envelopes is needed |
 | **`warnings`** | rung W ("attention") | derived problem surfaces — instrumentation errors, test failures, why-complete-refused — render until fixed. **Owner-extended (2026-07-11): the ROOT-context blocks get the same methodical colocated treatment** — root's kept surfaces (`:core-faults`, `:instrumentation-gaps`, `:orphaned-agents`) each carry their own colocated teaching (what the surface means + the one next action, rendered exactly when the state holds), designed + drive-validated under the same inclusion bar. Gate: base context confirmed in good shape (fork fix integrated + roll-ups live-proven, browser-audit findings triaged, registry unit landed) |
-| **`live-tile`** | rung L ("canvas") | the human's live view returns with its own teaching; the interactive plan tile (in flight) is the pattern |
+| **`canvas`** | rung L ("canvas") | the human's live view returns with its own teaching; the interactive plan tile (in flight) is the pattern |
 | **`subagents`** | rung M ("collaboration") | children status + outcome routing, per the multiagent spec's win conditions. **Owner direction (2026-07-11): PLAN-DRIVEN agents.** The `my.plan` infrastructure drives ALL agents: spawn hands the child a PLAN (as `my.plan` datoms the child wakes up owning), with `:seon.agent/purpose` reduced to the one-line why; improve the plan infrastructure until it carries this (it already survives restarts — the `plan` milestone's win). Root's standing guidance becomes a durable ROOT PLAN (respond to agent problems; on wakeup, inspect the system and keep it healthy) rather than prose blocks — converges with task #12 (root-block colocated teaching) and the diffusion lane's P7 planner/worker (frontier plans → `my.plan` datoms → execution), which is the same shape from the other end. Design doc before implementation |
 | **`soul`** | rung I ("identity") | owner-gated — define what it IS before any block exists |
 
@@ -116,7 +116,7 @@ when its state is empty. Sizes are fixed-prefix estimates.
 | **`:namespaces`** | WHERE the agent is and WHAT exists: current-ns full source, home-required namespaces as compact cards (function heads + docstring line 1 + schema), more-exist-query-don't-guess | full-vs-cards policy, movement/update semantics | ~6.4k |
 | **`:plan`** | durable work state: goal anchor, open frontier, recently-done | decompose-first (empty state), close-when-work-lands, discovered-steps-under-the-plan | 0.1–0.2k |
 | **`:warnings`** | current problems: instrumentation errors, failing tests, faults, refused completes — render-until-fixed, self-healing | what each surface means + the one next action, per surface, only when present | 0 when healthy |
-| **`:live-tile`** | the human's live canvas | render-don't-narrate, how to put a view up, that the human watches THIS | ~0.3k |
+| **`:canvas`** | the human's live canvas | render-don't-narrate, how to put a view up, that the human watches THIS | ~0.3k |
 | **`:shared-instructions`** | DB-backed standing instructions (human- or agent-added, cross-agent) | renders only when rows exist; each instruction is its own teaching | 0 when empty |
 | **`:subagents`** | children + their outcomes, orphans | renders only when children exist; spawn/outcome semantics | 0 when none |
 | **`:transcript`** | the spine: interleaved messages + evals, oldest-first, age-band decayed | masthead grammar + the mode-gated repl fragment (`:batch`/`:stream`) | grows, decayed |
@@ -144,9 +144,9 @@ tree is attributable to evidence.
 | `soul` (5, SOUL.md) | persistent identity/persona | `soul` milestone; identity as DB state; drive law already ran soul OFF | owner-defined win condition |
 | `agents` (8, AGENTS.md, ~14.1k) | house rules / operating instructions | MINED per-line: global+load-bearing → system-text candidates; block-specific → that block's teaching; the rest presumed pile-on | per-line inclusion bar |
 | `shared-instructions` (10) | DB-backed standing instructions all agents see | rebuilt state-gated (keeps its real name) | add instruction → behavior changes → remove → reverts |
-| `skills-catalog` (12) + always-on bodies (16, ~2.9k) | discoverable on-demand expertise | dissolves: cards + state-gated teaching + pull references | the `live-tile` milestone drives tile-building with NO skill body |
+| `skills-catalog` (12) + always-on bodies (16, ~2.9k) | discoverable on-demand expertise | dissolves: cards + state-gated teaching + pull references | the `canvas` milestone drives tile-building with NO skill body |
 | `namespaces` (20) | place + visible code | **kept — the proven floor** | `repl`/`namespaces` milestones |
-| `live-tile` (35) | the human watches a canvas, not a chat log | rebuilt at the `live-tile` milestone | observer-scored followability drive |
+| `canvas` (35) | the human watches a canvas, not a chat log | rebuilt at the `canvas` milestone | observer-scored followability drive |
 | `warnings` (40) | reactive self-healing problem surfaces | rebuilt at the `warnings` milestone | agent recovers from its own turns-old breakage unprompted |
 | `jobs` (42) | background-job visibility | likely covered by cards + result envelopes (proven in `repl`-milestone drives); rebuild only on demonstrated blindness | long-job + restart drive |
 | `test-failures` (43) | WHY the complete-gate refused | the `warnings` milestone (the gate already enforces) | turns-to-understand-refusal with/without |
@@ -192,7 +192,7 @@ built is the system being run, which is what makes it sustainable.
 2. **Continuous (already happening):** rebuilt blocks are the SAME specs
    both trees reference — the `plan` milestone's teaching reached the default
    automatically. No fork ever exists.
-3. **Tree parity (after `db` + `warnings` + `live-tile` = daily-work
+3. **Tree parity (after `db` + `warnings` + `canvas` = daily-work
    coverage):** `system.edn`'s TREE switches to the rebuilt tree — one
    coordinated commit (owner + both lanes; the default pod is shared). The
    old tree survives only as `config/legacy.edn` for comparison drives,
@@ -243,11 +243,11 @@ built is the system being run, which is what makes it sustainable.
 `:plan` (with the html twin — the human's live plan tile) + `:transcript`,
 plus root's three KEPT derived fault surfaces (`:core-faults`,
 `:instrumentation-gaps`, `:orphaned-agents` — 0 tokens when healthy;
-first formally validated at the `warnings` milestone). Root's live-tile
+first formally validated at the `warnings` milestone). Root's canvas
 dashboard, skills catalog/bodies, soul/agents file-blocks, and every
 other legacy block are OUT of the running tree; the old tree is frozen
 in `config/legacy.edn` (comparison drives only, expires after
-`db`+`warnings`+`live-tile`). Live proof: `cluster reset default` →
+`db`+`warnings`+`canvas`). Live proof: `cluster reset default` →
 pod boots on DeepSeek (`:stream` per-model default), `/` 200, the debug
 render shows exactly the expected blocks + the v3.1 text. acme is
 UNAFFECTED tree-wise (its agent-context replaces wholesale) but inherits

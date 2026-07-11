@@ -268,6 +268,6 @@
 
 (def header-spacer
   "A sibling spacer reserving scroll room equal to the fixed header's height
-   so the bar never hides the first tile/content. Inline height (no Tailwind
+   so the bar never hides the first canvas/content. Inline height (no Tailwind
    height class is guaranteed in the built vocabulary)."
   [:div {:id "system-header-spacer" :style "height:2.25rem"}])

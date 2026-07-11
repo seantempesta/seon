@@ -1,6 +1,6 @@
 ---
 name: browser-automation
-description: "Verify the Seon pod's OWN web UI in a real browser. Use when eyeballing the /agents roster or an /agent/{id} page on http://127.0.0.1:7890, checking a Datastar morph rendered, or debugging a tile/console error. Provides Chrome-MCP tab-ownership so agents don't clobber each other's tabs — and the KEY limit: the browser agent 503s long-lived SSE streams, so verify the /feed server-side (node gunzip client), not in the browser."
+description: "Verify the Seon pod's OWN web UI in a real browser. Use when eyeballing the /agents roster or an /agent/{id} page on http://127.0.0.1:7890, checking a Datastar morph rendered, or debugging a canvas/console error. Provides Chrome-MCP tab-ownership so agents don't clobber each other's tabs — and the KEY limit: the browser agent 503s long-lived SSE streams, so verify the /feed server-side (node gunzip client), not in the browser."
 ---
 
 # Browser Automation — verifying the Seon pod UI

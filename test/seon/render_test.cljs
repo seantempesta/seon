@@ -24,7 +24,7 @@
     [seon.eval :as eval]
     [seon.render :as render]
     [seon.render.default :as default]
-    [seon.render.live-tile :as live-tile]
+    [seon.render.canvas :as canvas]
     [seon.schema :as schema]
     [seon.ui.html :as html]))
 
@@ -148,7 +148,7 @@
 ;; ============================================================
 
 (deftest pretty-ai-returns-ai-string
-  ;; Render-key convergence (PRD live-tiles §8.2): the ai render is
+  ;; Render-key convergence (PRD canvas §8.2): the ai render is
   ;; :seon.render/ai — pretty-ai emits it, never the retired producer
   ;; key :seon.render/text.
   (let [out (default/pretty-ai {:seon.db/db nil :seon.agent/id "x"})]
@@ -166,10 +166,10 @@
       (is (= :pre (first h))))))
 
 ;; ============================================================
-;; render-agent-tile (unit 1.4) — the agent's ONE live tile.
-;;   • default: unwired agent → seon.render.live-tile/welcome.
-;;   • override: :seon.render.live-tile/content (covered in
-;;     seon.render.live-tile-test; the legacy :seon.render/html tile
+;; render-agent-canvas (unit 1.4) — the agent's ONE canvas.
+;;   • default: unwired agent → seon.render.canvas/welcome.
+;;   • override: :seon.render.canvas/content (covered in
+;;     seon.render.canvas-test; the legacy :seon.render/html tile
 ;;     fallback was DELETED in the render sweep — PRD §8.1, no legacy).
 ;;   • missing agent → {:seon.render/hiccup nil}, never a throw.
 ;; Fresh isolated conn per test (client/open-agent-conn!) — NEVER the
@@ -191,16 +191,16 @@
                               (binding [db/*conn* conn]
                                 (body conn))))))))))
 
-(deftest render-agent-tile-default-renders-welcome
-  ;; live-tiles U1: an UNWIRED agent's tile is the core welcome
-  ;; (seon.render.live-tile/welcome), no longer the :seon.agent kind
+(deftest render-agent-canvas-default-renders-welcome
+  ;; canvas U1: an UNWIRED agent's tile is the core welcome
+  ;; (seon.render.canvas/welcome), no longer the :seon.agent kind
   ;; default seon.render.default/view — the tile slot and the generic
   ;; entity-card slot are separate roles now (PRD §8.1).
   (async done
     (-> (with-tile-conn "tiletest-00001"
           (fn [conn]
             (let [{:seon.render/keys [hiccup ai]}
-                  (render/render-agent-tile {:seon.db/db @conn
+                  (render/render-agent-canvas {:seon.db/db @conn
                                              :seon.agent/id "tiletest-00001"})]
               (is (vector? hiccup) "default tile renders hiccup")
               (is (= "seon-tile" (:class (second hiccup)))
@@ -211,12 +211,12 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest render-agent-tile-ignores-legacy-html-slot
+(deftest render-agent-canvas-ignores-legacy-html-slot
   ;; Render sweep 2026-06-11 (PRD §8.1, no legacy): a per-entity
   ;; :seon.render/html value is the generic ENTITY-CARD slot only —
   ;; the tile ignores it and falls through to the welcome. The
   ;; positive ::content override path is pinned in
-  ;; seon.render.live-tile-test.
+  ;; seon.render.canvas-test.
   (async done
     (-> (with-tile-conn "tileovr-000001"
           (fn [conn]
@@ -227,7 +227,7 @@
                 (.then (fn [_]
                          (binding [db/*conn* conn]
                            (let [{:seon.render/keys [hiccup]}
-                                 (render/render-agent-tile
+                                 (render/render-agent-canvas
                                    {:seon.db/db @conn
                                     :seon.agent/id "tileovr-000001"})]
                              (is (= "seon-tile" (:class (second hiccup)))
@@ -305,11 +305,11 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest render-agent-tile-missing-agent-renders-nothing
+(deftest render-agent-canvas-missing-agent-renders-nothing
   (async done
     (-> (with-tile-conn "tilesome-00001"
           (fn [conn]
-            (let [out (render/render-agent-tile {:seon.db/db @conn
+            (let [out (render/render-agent-canvas {:seon.db/db @conn
                                                  :seon.agent/id "no-such-agent0"})]
               (is (= {:seon.render/hiccup nil} out)
                   "missing agent → nil hiccup, no throw"))))
@@ -381,16 +381,16 @@
 
 (deftest slot-missing-block-routes-through-overridable-error-never-throws
   ;; CONVERGENCE: a missing (or throwing) block surfaces THROUGH the
-  ;; overridable seon.render.live-tile/error-tile seam — not a hardcoded
+  ;; overridable seon.render.canvas/error-tile seam — not a hardcoded
   ;; div — so a consumer's set! override (acme's branded card) applies on
   ;; the agent view too. Never throws; stable id + sibling kept.
   (async done
     (-> (with-block-conn "slottest-00002"
           (fn [conn]
             (let [ctx  {:seon.db/db @conn :seon.agent/id "slottest-00002"}
-                  orig live-tile/error-tile]
+                  orig canvas/error-tile]
               (try
-                (set! live-tile/error-tile
+                (set! canvas/error-tile
                       (fn [_] [:div.acme-override "OVERRIDE CARD"]))
                 (let [missing (render/slot ctx :no-such-block)
                       sibling (render/slot ctx :mytile)]
@@ -402,7 +402,7 @@
                       "the error tile routes through the overridable error-tile seam")
                   (is (re-find #"tile!" (html/->string sibling))
                       "a sibling slot renders untouched (never-crash-always-surface)"))
-                (finally (set! live-tile/error-tile orig))))))
+                (finally (set! canvas/error-tile orig))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -414,7 +414,7 @@
     (-> (with-blocks-conn "slotmap-00001"
           [{:seon.agent.ctx/name     :wtile
             :seon.agent.ctx/priority 50
-            :seon.render/html        'seon.render.live-tile/welcome}]
+            :seon.render/html        'seon.render.canvas/welcome}]
           (fn [conn]
             (let [out  (render/slot {:seon.db/db @conn :seon.agent/id "slotmap-00001"}
                                     :wtile)

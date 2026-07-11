@@ -4,21 +4,21 @@ status: active
 tags: [research, agent, index]
 ---
 
-# Full-battery k=1 triage — my.tile verdict + k=3 confirmation (2026-06-29)
+# Full-battery k=1 triage — my.canvas verdict + k=3 confirmation (2026-06-29)
 
 Triage of the first trustworthy full paid battery (k=1 @ `b50899c0`, scorecard
 line written @ `f23262c7`): separate REAL regressions from k=1 sampling noise,
-cheapest-decisive-first, and explain the `my.tile` 0-calls anomaly. All live
+cheapest-decisive-first, and explain the `my.canvas` 0-calls anomaly. All live
 evidence (indexed counts, k=3 scorecard line, per-predicate drive cards), no
 inference where a probe was cheap.
 
 ## TL;DR
 
-- **`my.tile` is REACHABLE, not regressed.** 5 indexed `:seon.fn` rows
-  (`button`/`form`/`input`/`select`/`toggle`), `:seon.ns/name :my.tile` row present,
+- **`my.canvas` is REACHABLE, not regressed.** 5 indexed `:seon.fn` rows
+  (`button`/`form`/`input`/`select`/`toggle`), `:seon.ns/name :my.canvas` row present,
   in `canonical-full-my-ns`, required in `client.cljs`. The battery-wide
-  `{:my.tile 0}` was a **k=1 single-sample behavioral miss** — at k=3 the agent
-  composed `my.tile` **21×** and `interactive-tile-checklist` passed **1/3**. NOT a
+  `{:my.canvas 0}` was a **k=1 single-sample behavioral miss** — at k=3 the agent
+  composed `my.canvas` **21×** and `interactive-tile-checklist` passed **1/3**. NOT a
   #72-style reachability regression. The FREE structural check settled this with
   zero paid spend.
 - **`plan-resume-across-restart` is NOT a planning regression.** All **8**
@@ -33,9 +33,9 @@ inference where a probe was cheap.
   `deftest`** for the fn it builds. This is a CONTEXT/guidance lever (U-lane), NOT a
   Core engine regression — and likely a STANDING gap (the `:writes-tests` axis never
   landed for the weak model), not a code regression.
-- **No Core reachability regression exists.** Nothing to route to Core for `my.tile`.
+- **No Core reachability regression exists.** Nothing to route to Core for `my.canvas`.
 
-## Step 1 — FREE structural `my.tile` reachability check (no spend)
+## Step 1 — FREE structural `my.canvas` reachability check (no spend)
 
 Live pod (`mcp__seon_cljs__eval`, default session, cluster conn). `:seon.fn/ns` is a
 **ref to the `:seon.ns` entity**, not a keyword — query joins through
@@ -43,25 +43,25 @@ Live pod (`mcp__seon_cljs__eval`, default session, cluster conn). `:seon.fn/ns` 
 
 ```clojure
 ;; indexed fn-count per toolkit ns, joined through the ns ref
-{:my.tile-count 5  :my.tile-syms [my.tile/button my.tile/form my.tile/input
-                                  my.tile/select my.tile/toggle]
+{:my.canvas-count 5  :my.canvas-syms [my.canvas/button my.canvas/form my.canvas/input
+                                  my.canvas/select my.canvas/toggle]
  :my.ui-count   7
  :my.data-count 4
- :my.tile-ns-row? true}
+ :my.canvas-ns-row? true}
 ```
 
 Structural sources both correct:
 
-- `src/seon/client.cljs:157-159` — requires `[my.data] [my.ui] [my.tile]` (the #77
+- `src/seon/client.cljs:157-159` — requires `[my.data] [my.ui] [my.canvas]` (the #77
   fix; indexes them at boot).
 - `src/seon/agent/ctx/namespaces.cljs:197` — `canonical-full-my-ns`
-  = `#{:my.kb :my.data :my.ui :my.tile}` (renders them FULL).
+  = `#{:my.kb :my.data :my.ui :my.canvas}` (renders them FULL).
 
-**Verdict: REACHABLE.** The whole-battery `{:my.tile 0}` is reconciled by the
+**Verdict: REACHABLE.** The whole-battery `{:my.canvas 0}` is reconciled by the
 per-scenario k=1 detail: in the single `interactive-tile-checklist` sample the agent
 made 63 toolkit calls but they were `my.ui`/`my.data` (the read-only DISPLAY verbs),
-not `my.tile` (the INTERACTIVE control) — a discoverability/behavioral miss on one
-draw of a weak model. At k=3 the same scenario composed `my.tile` 21× → the medium
+not `my.canvas` (the INTERACTIVE control) — a discoverability/behavioral miss on one
+draw of a weak model. At k=3 the same scenario composed `my.canvas` 21× → the medium
 works. This echoes the render-prominence law (a verb's adoption is noisy on a single
 sample), NOT the #72 "client.cljs didn't require the toolkit" reachability bug.
 
@@ -73,11 +73,11 @@ code-current. k=1 column = the full-battery baseline (`e9178ffc`, per-scenario
 
 | scenario | k=1 rate | k=3 rate | canvas (k3) | toolkit-max (k3) | verdict |
 |---|---|---|---|---|---|
-| interactive-tile-checklist | 0/1 (0) | **1/3 (0.33)** | 3/3 | 0–32 (`my.tile` composed) | **NOISE / partial** — medium works, weak-model variance + a strict secondary predicate |
+| interactive-tile-checklist | 0/1 (0) | **1/3 (0.33)** | 3/3 | 0–32 (`my.canvas` composed) | **NOISE / partial** — medium works, weak-model variance + a strict secondary predicate |
 | plan-resume-across-restart | 0/1 (0) | **0/3 (0)** | 2/3 | 0–18 | **CONFIRMED fail — but NOT planning**; root = writes-test + marginal repl-noise |
 | todo-multistep-tracking | 0/1 (0) | **0/3 (0)** | 0/3 | 0–5 | **CONFIRMED fail**; root = writes-test + 1 todo left open |
 
-Battery toolkit-calls k=3 = `{:my.data 5, :my.ui 70, :my.tile 21}` — `my.tile`
+Battery toolkit-calls k=3 = `{:my.data 5, :my.ui 70, :my.canvas 21}` — `my.canvas`
 adoption proven live.
 
 ## Per-predicate root cause (single hermetic `run-scenario!` drives, live cards)
@@ -153,25 +153,25 @@ Guesses read off the predicate + the k=1 per-scenario card (judge-mean / eval-er
    0.25–0.30 max for the weak DeepSeek tier, or report eval-error as a signal not a
    gate. Owner/U decision.
 4. **(Noise, no action) interactive-tile-checklist.** Medium proven (k=3 1/3,
-   `my.tile` composed, canvas 3/3). The 2/3 misses are weak-model variance + the
+   `my.canvas` composed, canvas 3/3). The 2/3 misses are weak-model variance + the
    strict `:wired-to-an-own-fn` quoted-fn-symbol predicate; re-measure at higher k
    before treating as a gap.
 5. **(Owner-blocked) s12-run8-two-agent-consultation** — decision #81, SKIP.
 
 ## What is NOT a lever
 
-- **`my.tile` reachability** — proven reachable; no Core action.
+- **`my.canvas` reachability** — proven reachable; no Core action.
 - **planning continuity / interruption-resume** — proven healthy (plan-resume 8/8
   planning predicates); not the regression.
 
 ## Method notes (for the next triage)
 
 - `:seon.fn/ns` is a **ref**; join through `:seon.ns/name` to count a toolkit ns's
-  fns. A literal `[?f :seon.fn/ns :my.tile]` throws "Nothing found for entity id".
+  fns. A literal `[?f :seon.fn/ns :my.canvas]` throws "Nothing found for entity id".
 - The scorecard `pass-k` carries only aggregates (rate / judge-mean / eval-error /
   canvas / toolkit-min/max) — NOT per-predicate. To get the failing predicate
   without another `--paid` battery, run ONE `seon.gym.driver/run-scenario!`
   `{:seon.gym/allow-paid? true}` in the live `:repl` session and read its
   `:seon.gym.scorecard/results` (each `:seon.gym.predicate/id` + `:pass?` +
   `:actual`). It's hermetic (swaps `seon.db/*conn*`, restores in `finally`) —
-  verified the cluster conn intact afterward (5 `my.tile` fns still indexed).
+  verified the cluster conn intact afterward (5 `my.canvas` fns still indexed).

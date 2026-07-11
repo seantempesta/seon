@@ -4,13 +4,13 @@ status: completed
 tags: [research, agent, ui, dashboard]
 ---
 
-# Canvas drive validation — canvas-first SAFE, my.ui/my.tile prominence REGRESSED
+# Canvas drive validation — canvas-first SAFE, my.ui/my.canvas prominence REGRESSED
 
 Hermetic gym drive of the two `:ui`-competency canvas scenarios
 (`canvas-budget-breakdown` + `canvas-goal-board`) on the real DeepSeek adapter,
 `{:seon.gym/allow-paid? true}`, scratch `:memory` conns — no live-pod touch, no
 Core-file edits. Two goals: (1) validate the canvas-first work (does the agent
-drive its canvas now?), and (2) produce the my.ui/my.tile PROMINENCE EVIDENCE
+drive its canvas now?), and (2) produce the my.ui/my.canvas PROMINENCE EVIDENCE
 Core asked for before adding them to `canonical-full-my-ns`.
 
 Run: `SEON_AI_PROVIDER=deepseek bin/gym --paid=canvas-budget,canvas-goal`.
@@ -24,20 +24,20 @@ on the shared tree mid-run). Durable cards:
 
 1. **Canvas-first: SAFE.** `canvas-updated?` rose from the Phase-A all-false
    baseline to **TRUE on BOTH** scenarios. Both agents defined a tile fn and
-   wired it onto `:seon.render.live-tile/content` as their primary surface. The
+   wired it onto `:seon.render.live-canvas/content` as their primary surface. The
    canvas-PRIMARY live-tile block (`fe83c76c`) lands even on a weak model.
-2. **my.ui/my.tile prominence: REGRESSED (worse than expected).** Both agents
-   composed `my.ui` / `my.tile` **0×** and **hand-rolled raw `[:div]…[:table]`
-   hiccup** with guessed CSS classes. The premise was "my.ui/my.tile are
+2. **my.ui/my.canvas prominence: REGRESSED (worse than expected).** Both agents
+   composed `my.ui` / `my.canvas` **0×** and **hand-rolled raw `[:div]…[:table]`
+   hiccup** with guessed CSS classes. The premise was "my.ui/my.canvas are
    signature-trimmed (worked example elided)" — the reality from the prompt
-   blobs is sharper: **`my.ui` and `my.tile` do not appear in the rendered
+   blobs is sharper: **`my.ui` and `my.canvas` do not appear in the rendered
    namespaces AT ALL** (not even signature-trimmed). This is the drive-evidence
    → route to Core: this is exactly peer finding **#72** (`7b465a5c`,
-   supersedes #70). Add `:my.ui` (+ `:my.tile`) to `canonical-full-my-ns`.
+   supersedes #70). Add `:my.ui` (+ `:my.canvas`) to `canonical-full-my-ns`.
 
 ## The numbers
 
-| scenario | canvas-updated? | toolkit-calls {my.data my.ui my.tile} | eval-error-rate | driven turns | pass? | judge |
+| scenario | canvas-updated? | toolkit-calls {my.data my.ui my.canvas} | eval-error-rate | driven turns | pass? | judge |
 |---|---|---|---|---|---|---|
 | canvas-budget-breakdown | **true** | **{15, 0, 0}** | 0.0 | 3 | true | **fail** (prose totals wrong, canvas correct) |
 | canvas-goal-board | **true** | **{0, 0, 0}** | 0.0 | 9 | true | **pass** (named all 3 goals + status) |
@@ -48,7 +48,7 @@ Mechanical axes both green: `:drives-canvas true`, `:replies-honestly true`,
 ## Verdict 1 — canvas-first SAFE (rose from the false baseline)
 
 Both agents drove the canvas, unprompted (nothing in the scenario says "use a
-tile"; the standing live-tile block + `ui-live-tiles` skill teach the medium):
+tile"; the standing live-tile block + `ui-canvas` skill teach the medium):
 
 **budget** — defined `expense-tile` (re-deriving tile fn) and wired it:
 
@@ -56,7 +56,7 @@ tile"; the standing live-tile block + `ui-live-tiles` skill teach the medium):
 (db/transact!
   {:seon.db/tx-data
    [{:seon.agent/id (db/current-agent-id)
-     :seon.render.live-tile/content 'my.agent.YnV-2606282145/expense-tile}]})
+     :seon.render.live-canvas/content 'my.agent.YnV-2606282145/expense-tile}]})
 ;=> {:seon.db/ok? true … :seon.db/added 7 …}
 ```
 
@@ -76,10 +76,10 @@ canvas was MORE accurate than the hand-narrated prose — and the judge only see
 the reply text, not the canvas (the known `judge-ctx` flag below). Canvas-first
 is the honest medium precisely because the prose is where the model fabricates.
 
-## Verdict 2 — my.ui/my.tile prominence REGRESSED → route to Core
+## Verdict 2 — my.ui/my.canvas prominence REGRESSED → route to Core
 
 Both agents HAND-ROLLED their tiles. They never called a single `my.ui` or
-`my.tile` verb, despite `my.ui` having exactly the helpers the task needed
+`my.canvas` verb, despite `my.ui` having exactly the helpers the task needed
 (`table`, `section`, `kv-table`, `status-line`, `badge`).
 
 **budget hand-roll** (raw table, manual Tailwind):
@@ -111,7 +111,7 @@ safelisted dual-render helpers exist to prevent. `my.ui/badge` +
 
 ### Why they couldn't compose it — they never saw it
 
-The agent saw `my.ui`/`my.tile` only as a one-line NAME-DROP in the live-tile
+The agent saw `my.ui`/`my.canvas` only as a one-line NAME-DROP in the live-tile
 block ("`my.ui` — dual-render status-line / kv-table / section …"). Reading the
 persisted prompt blobs, the rendered `:namespaces` body contains:
 
@@ -120,14 +120,14 @@ persisted prompt blobs, the rendered `:namespaces` body contains:
   gets USED; one that doesn't, doesn't.
 - `my.kb` FULL; `my.kb.author` / `my.kb.finding` / `my.kb.shared` /
   `my.kb.source` / `my.skills` / `my.expense` as `(signatures)` blocks.
-- **`my.ui` and `my.tile`: ABSENT.** Not full, not signature — not rendered.
+- **`my.ui` and `my.canvas`: ABSENT.** Not full, not signature — not rendered.
 
 So this is NOT the task's premise ("signature-trimmed, worked example elided").
-my.ui/my.tile produce NO block at all. Signature rendering itself works (the
-`my.kb.*` sig blocks render fine), so the cause is specific: **my.ui/my.tile
+my.ui/my.canvas produce NO block at all. Signature rendering itself works (the
+`my.kb.*` sig blocks render fine), so the cause is specific: **my.ui/my.canvas
 have no indexed `:seon.fn` rows** → the signature render has nothing to emit →
 the block is dropped. This corroborates peer finding **#72** (`7b465a5c`:
-"toolkit not reachable — client.cljs doesn't index it; my.data/my.ui/my.tile
+"toolkit not reachable — client.cljs doesn't index it; my.data/my.ui/my.canvas
 with ZERO indexed fns").
 
 ### Precise routing to Core
@@ -137,12 +137,12 @@ render reads the stored `:seon.ns/source` file text (stored for every `my.*` via
 `full-source-ns?`), which BYPASSES the missing-fn-index gap. So the same fix
 works for the static/interactive toolkit:
 
-- **Add `:my.ui` and `:my.tile` to `canonical-full-my-ns`** (`namespaces.cljs`,
+- **Add `:my.ui` and `:my.canvas` to `canonical-full-my-ns`** (`namespaces.cljs`,
   currently `#{:my.kb :my.data}`). They will then render FULL from their stored
   source regardless of whether fn-indexing is fixed — the immediate, proven
   lever (same recursion that fixed `my.data` in `c8f064e6`). The
   `canonical-full-my-ns` docstring already names this as the trigger
-  ("extend to my.ui/my.tile if their drives show the same named-but-not-composed
+  ("extend to my.ui/my.canvas if their drives show the same named-but-not-composed
   regression") — this drive is that evidence.
 - The deeper #72 fix (index the toolkit's fns so even signature render works)
   is Core's call; not required for the prominence win, but it's the root cause

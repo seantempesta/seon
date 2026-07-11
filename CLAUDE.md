@@ -279,19 +279,19 @@ The canonical names (retired coinages in parens — fix on sight):
 | functions, schemas, tests | "verbs" | what Clojure has; `my.plan/done!` is a function |
 | the `db` | "the store", "memory" | `seon.db` — `db/query`, `db/transact!`, `schema/register!` |
 | `warnings` | "attention" | the `:warnings` block / `seon.warn` |
-| `live-tile` (agent-side block) / `canvas` (the human's focal slot showing it) | — | `:seon.render.live-tile/content`; `#world-canvas` in `seon.ui.world` — the canvas IS the agent's live tile; every other html block is a supporting TILE. (The diffusion lane's generation workspace is named `code-buffer` — renamed 2026-07-11 from "canvas" to resolve the clash; "canvas" means ONLY this UI surface.) |
+| `canvas` (agent-side block) / `canvas` (the human's focal slot showing it) | — | `:seon.render.canvas/content`; `#world-canvas` in `seon.ui.world` — the canvas IS the agent's canvas; every other html block is a supporting TILE. (The diffusion lane's generation workspace is named `code-buffer` — renamed 2026-07-11 from "canvas" to resolve the clash; "canvas" means ONLY this UI surface.) |
 | the `web UI` (pages: `dashboard` `/`, `roster` `/agents`, `agent page` `/agent/{id}`, `debug view` `/agent/{id}/debug`, `data browser` `/data`) | "the inspector" | `seon.web` serves it, `seon.ui` renders it (owner, 2026-07-11) |
 | `subagents` | "collaboration", "multi-agent block" | the `:subagents` block |
 | `soul` | "identity" (as a block name) | the `:soul` block / SOUL.md |
 | `:shared-instructions` | "instructions block" | the block's registered name |
 | `:batch` / `:stream` | "Mode A / Mode B" | the `:seon.config/repl-mode` values |
-| capability **milestones**: `repl`, `namespaces`, `plan`, `db`, `warnings`, `live-tile`, `subagents`, `soul` | "rungs", "the ladder" | each named by the block/namespace it validates (docs/prds/agent-ctx/context-rebuild.md) |
+| capability **milestones**: `repl`, `namespaces`, `plan`, `db`, `warnings`, `canvas`, `subagents`, `soul` | "rungs", "the ladder" | each named by the block/namespace it validates (docs/prds/agent-ctx/context-rebuild.md) |
 | **cluster** | "world", "environment" | one shared DB + one pod + agents (already a settled ruling) |
 | attributes + connections | "kind", "type", "entity taxonomy" | the datahike model (settled) |
 
 When you're about to name something new: the name is the namespace/attr you
 are creating — pick THAT well and use it everywhere, including prose. If two
-existing names seem to compete (like live-tile/canvas), read the code and
+existing names seem to compete (like canvas/canvas), read the code and
 document the real distinction — don't mint a third.
 
 ## Slow Is Fast
@@ -614,7 +614,7 @@ The manifest (`config/system.edn`, `SEON_CONFIG` picks the file) resolves **ONCE
 | `/clojurescript` | Pod CLJS semantics: `^:async`/`await`, self-host eval (agent forms compile via `cljs.js`, NOT the JVM), Promise auto-await, async instrumentation wedge |
 | `/repl` | How the REPL reads/repairs/evals the forms you write; parse errors, unbalanced forms |
 | `/seon-context-config` | `config/system.edn`/`acme.edn`, manifest sections, which skills/blocks/nses an agent sees, render caps |
-| `/ui-live-tiles` | Show your human a live VIEW not prose — `:seon.render.live-tile/content`, `my.ui`/`my.tile`/`my.data`, the canvas |
+| `/ui-canvas` | Show your human a live VIEW not prose — `:seon.render.canvas/content`, `my.ui`/`my.canvas`/`my.data`, the canvas |
 | `/datastar-web-ui` | SSE handlers, `data-*` attributes, the gzip-morph channel, the `seon.render/block` + slot renderer |
 | `/browser-automation` | Verifying the pod's OWN web UI in a browser (note: browser 503s long-lived SSE — verify feeds server-side) |
 | `/clojure-testing` | Pod-first `.cljs` test patterns: fixtures, `cljs.test/async`, hermetic in-memory conns |

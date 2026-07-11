@@ -295,7 +295,7 @@
   (str "; - :" (name nm) "  " (if loaded? "● loaded" "○") " — " desc))
 
 (defn catalog-block
-  "DEPRECATED — reference for the `live-tile` milestone; see context-rebuild.
+  "DEPRECATED — reference for the `canvas` milestone; see context-rebuild.
 
    The L0 `:skills-catalog` context block — one `;`-line per skill.
 
@@ -350,7 +350,7 @@
          "\n;    done? (my.skills/unload :" (name skill-name) ") ──")))
 
 (defn skill-block
-  "DEPRECATED — reference for the `live-tile` milestone; see context-rebuild.
+  "DEPRECATED — reference for the `canvas` milestone; see context-rebuild.
 
    The L2 loaded-body block — the skill's full SKILL.md, `;`-commented.
 

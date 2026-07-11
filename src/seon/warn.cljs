@@ -85,7 +85,7 @@
    [:seon.warn/explain  :seon.warn/explain]
    [:seon.warn/example  :seon.warn/example]
    ;; URGENCY tier: a check sets this true when its defect is one the
-   ;; human is hitting RIGHT NOW (e.g. a broken live tile). render-warnings
+   ;; human is hitting RIGHT NOW (e.g. a broken canvas). render-warnings
    ;; renders urgent clusters FIRST with a louder template. Absent ≡ false.
    [:seon.warn/urgent?  {:optional true} :seon.warn/urgent?]
    ;; DEV-ONLY tier: a schema-hygiene/display concern for the dev surface,
@@ -923,9 +923,9 @@
    "(seon.test.runner/run-vars {:seon.test.runner/vars ['my.ns/my-test]})"})
 
 (defn check-tile-unresolved
-  "Live tiles pointing at a fn symbol not loaded in the runtime.
+  "Canvass pointing at a fn symbol not loaded in the runtime.
 
-   `:seon.render.live-tile/content` names a qualified fn symbol that
+   `:seon.render.canvas/content` names a qualified fn symbol that
    `seon.eval/lookup-value` can't resolve, so the human sees a calm
    \"preparing this view…\" placeholder instead of the real view. Literal
    hiccup tiles (vectors) and resolving symbols (incl. the welcome
@@ -939,23 +939,23 @@
                 '[:find ?aid ?content
                   :where
                   [?e :seon.agent/id ?aid]
-                  [?e :seon.render.live-tile/content ?content]]})]
+                  [?e :seon.render.canvas/content ?content]]})]
     {:seon.warn/kind :tile-unresolved
      :seon.warn/urgent? true
      :seon.warn/affected
      (->> rows
           (keep (fn [[aid content]]
                   (let [decoded (db/decode-edn-value
-                                  :seon.render.live-tile/content content)]
+                                  :seon.render.canvas/content content)]
                     (when (and (qualified-symbol? decoded)
                                (nil? (eval/lookup-value decoded)))
                       {:seon.warn/sym   (str decoded)
-                       :seon.warn/where (str "live tile of " aid)}))))
+                       :seon.warn/where (str "canvas of " aid)}))))
           (sort-by :seon.warn/sym)
           vec)
      :seon.warn/explain
-     (str "Your live tile is BROKEN RIGHT NOW: "
-          ":seon.render.live-tile/content points at a fn that isn't loaded "
+     (str "Your canvas is BROKEN RIGHT NOW: "
+          ":seon.render.canvas/content points at a fn that isn't loaded "
           "in the runtime, so the human is staring at a calm \"preparing "
           "this view…\" placeholder INSTEAD of your view — this very "
           "render. The fn does not exist (most likely its defn failed to "
@@ -972,7 +972,7 @@
           "(seon.db/transact!\n"
           "  {:seon.db/tx-data\n"
           "   [{:seon.agent/id \"<id>\"\n"
-          "     :seon.render.live-tile/content `my.agent.<id>/my-kb-tile}]})")}))
+          "     :seon.render.canvas/content `my.agent.<id>/my-kb-tile}]})")}))
 
 ;; ============================================================
 ;; Registry + clustered renderer
@@ -1060,7 +1060,7 @@
 
 (defn- render-urgent-cluster
   "A LOUD cluster for a `:seon.warn/urgent? true` check — something the
-   human is hitting THIS render (e.g. a broken live tile). Unmistakable
+   human is hitting THIS render (e.g. a broken canvas). Unmistakable
    `‼ URGENT` banner as a single-`;` line, then the same explanation + fix
    example + affected list. Rendered at the TOP of the WARNINGS block,
    ahead of the ordinary contract/runtime clusters."

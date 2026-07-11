@@ -91,7 +91,7 @@ tags: [research, agent, web, ui]
   standing, curated view. If a curated inventory summary is intended, it is not
   wired into root's block set.
 - **No "how to present to the human" guidance with a worked example.** The
-  `:live-tile` block says *"point `:seon.render.live-tile/content` at your own fn"*
+  `:live-tile` block says *"point `:seon.render.live-canvas/content` at your own fn"*
   and *"define a tile fn … that returns hiccup"* but gives **zero copy-paste hiccup
   example.** The presentation research (`agent-presentation-canvas-2026-06-28.md`)
   explicitly recommends adding 1–2 copy-paste hiccup examples to root's `:live-tile`
@@ -195,7 +195,7 @@ ui.md should gain a short subsection or xref):
   section doesn't mention it. *Fix:* add a line under "The render engine" pointing at the
   typed block renderer as the layer above `seon.ui.html`.
 - **Canvas default behavior is under-specified.** ui.md line ~108–114 says the canvas is
-  the live tile resolving `:seon.render.live-tile/content`, but does not say what the
+  the live tile resolving `:seon.render.live-canvas/content`, but does not say what the
   default shows when an agent has none. The real default (`welcome`) doesn't surface the
   latest reply (B2). *Fix:* state the no-custom-tile default renders the latest agent→user
   message as a markdown card.

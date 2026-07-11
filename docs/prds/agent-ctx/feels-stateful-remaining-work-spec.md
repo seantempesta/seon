@@ -131,8 +131,8 @@ Spec'd above under the critical dependency. Minimum: the surgical-transact
 stopgap so Unit 1 can be live-proven on root. Recommended durable build: derive
 each agent's block set from `(manifest defaults) + (agent install/remove
 diffs)` at render, retiring copy-once staleness. Fixing
-[[ctx-install-live-tile-symbol-roundtrip]] (the symbol round-trip that blocks
-`install!` on any agent carrying a live-tile block) is part of this — it is the
+[[ctx-install-canvas-symbol-roundtrip]] (the symbol round-trip that blocks
+`install!` on any agent carrying a canvas block) is part of this — it is the
 mechanism a clean reconcile would use.
 
 ---
@@ -218,7 +218,7 @@ it converts "feels stateful" from taste into a ledger row.
   catches a blocked Node event loop / dead-but-not-exited pod (the in-process
   watchdog structurally can't). Own small unit; the `tx-audit` drive re-proved
   the failure mode (a `--watched` cluster crashed on another lane's hot-reload).
-- **`ctx/install!` symbol round-trip bug** — [[ctx-install-live-tile-symbol-roundtrip]];
+- **`ctx/install!` symbol round-trip bug** — [[ctx-install-canvas-symbol-roundtrip]];
   subsumed by Unit 2's correct build.
 - **Watchdog stale-ms threshold** — currently reasoned (20 min), never measured
   on the live pod as the multiagent spec asked; measure and dial.

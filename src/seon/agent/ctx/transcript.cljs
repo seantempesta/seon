@@ -769,7 +769,7 @@
    `:seon.eval`) is rendered through `seon.render/render-entity-html`,
    which resolves the entity's schema-kind html converter. Returns BARE
    hiccup; an empty transcript renders a friendly placeholder."
-  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.live-tile/hiccup]]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.canvas/hiccup]]}
   [{:seon.agent/keys [id] db :seon.db/db :as input}]
   (let [db       (or db @db/*conn*)
         a        (agent-rec id db)
@@ -778,6 +778,17 @@
         ;; Same coalescing as the :ai twin — content-free noise dropped,
         ;; consecutive same-error runs collapsed (here: expandable cards).
         events   (coalesce-events (ordered-events db own-id my-eid))
+        render-message
+        (fn [ev]
+          (when-let [mid (::id ev)]
+            (render/render-entity-html
+              (assoc input :seon.db/db db
+                     :seon.render/node
+                     (db/pull db '[* {:seon.agent.message/from
+                                      [:db/id :seon.user/id :seon.agent/id]
+                                      :seon.agent.message/to
+                                      [:db/id :seon.user/id :seon.agent/id]}]
+                              [:seon.agent.message/id mid])))))
         cards
         (->> events
              (keep
@@ -787,21 +798,21 @@
                    ;; Message events carry projected fields, not the raw
                    ;; entity — re-pull the message by id so the html
                    ;; converter sees its full shape.
-                   :message   (when-let [mid (::id ev)]
-                                (render/render-entity-html
-                                  (assoc input :seon.db/db db
-                                         :seon.render/node
-                                         (db/pull db '[* {:seon.agent.message/from
-                                                          [:db/id :seon.user/id :seon.agent/id]
-                                                          :seon.agent.message/to
-                                                          [:db/id :seon.user/id :seon.agent/id]}]
-                                                   [:seon.agent.message/id mid]))))
+                   :message   (render-message ev)
                    :eval      (render/render-entity-html
                                 (assoc input :seon.render/node (::entity ev)
                                        :seon.db/db db))
                    nil)))
-             vec)]
+             vec)
+        latest-reply (some->> events
+                              (filter #(and (= :message (::kind %))
+                                            (::outbound? %)))
+                              last
+                              render-message)]
     (if (seq cards)
-      (into [:div {:class "flex flex-col"}] cards)
+      [:div {:class "seon-tile"}
+       [:div {:class "seon-tile-compact"}
+        (or latest-reply (last cards))]
+       (into [:div {:class "seon-tile-expanded flex flex-col"}] cards)]
       [:div {:class "text-text-500 italic p-2 text-xs font-mono"}
        "no events yet — every message and eval this agent makes appears here live"])))

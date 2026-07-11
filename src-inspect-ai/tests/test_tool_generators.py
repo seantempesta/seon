@@ -29,7 +29,7 @@ DEV_N = {row: freeze.BESPOKE_ROWS[row]["dev_n"] for row in ROWS}
 # Goal-stated means NO API coaching: task text never names Seon functions,
 # namespaces, or tool functions — the agent discovers its tools from context.
 COACHING_MARKERS = [
-    "my.plan", "my.kb", "my.blob", "my.ui", "my.tile", "my.data",
+    "my.plan", "my.kb", "my.blob", "my.ui", "my.canvas", "my.data",
     "seon.", "shell/exec", "web/fetch", "edit-file", "fs/", "(exec",
     "clojure fn", "capability", "toolkit",
 ]

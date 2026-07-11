@@ -18,7 +18,7 @@ A synchronous infinite loop in an agent's live-tile rendering function freezes t
 
 The Seon agent runtime utilizes a single-threaded Node.js event loop:
 - In [client.cljs:L1872-2018](file:///Users/sean/src/seon/src/seon/client.cljs#L1872-2018), `start-agent!` boots the pod and spins up the HTTP/SSE server [serve.cljs:L531-590](file:///Users/sean/src/seon/src/seon/web/serve.cljs#L531-590).
-- If an agent points `:seon.render.live-tile/content` at a symbol that performs a non-terminating synchronous loop (such as runaway recursion or a `while` loop), that execution blocks the single JavaScript execution thread.
+- If an agent points `:seon.render.live-canvas/content` at a symbol that performs a non-terminating synchronous loop (such as runaway recursion or a `while` loop), that execution blocks the single JavaScript execution thread.
 - Existing async timeouts (like `!timeout-ms` in [eval.cljs:L74](file:///Users/sean/src/seon/src/seon/eval.cljs#L74) and `race-timeout` in [eval.cljs:L115-125](file:///Users/sean/src/seon/src/seon/eval.cljs#L115-125)) rely on `js/setTimeout` and Promises. Because the event loop is blocked, the timer events never fire.
 - The render path in `render-agent-tile` in [render.cljs:L376-435](file:///Users/sean/src/seon/src/seon/render.cljs#L376-435) has no protection. The entire process hangs, and the shell supervisor's heartbeat in [client.cljs:L184-193](file:///Users/sean/src/seon/src/seon/client.cljs#L184-193) stops.
 
@@ -49,7 +49,7 @@ sequenceDiagram
     Note over P: Killed (Marker file remains)
     S->>P: Start fresh pod
     P->>P: Read tmp/tile-render-marker.edn
-    P->>DB: Retract :seon.render.live-tile/content
+    P->>DB: Retract :seon.render.live-canvas/content
     P->>DB: Post warning message to agent
     P->>P: Delete marker file
     P->>P: Replay & Boot normally (Fallback to welcome tile)
@@ -167,12 +167,12 @@ Edit [src/seon/render.cljs](file:///Users/sean/src/seon/src/seon/render.cljs#L37
  (defn render-agent-tile
    "Render the agent's live tile — the one HTML surface the agent
     dynamically rewrites (by transacting a qualified fn symbol or
-    literal hiccup onto `:seon.render.live-tile/content` on its own
+    literal hiccup onto `:seon.render.live-canvas/content` on its own
     agent entity; see seon.render.live-tile's ns docstring for the
     full contract).
  
     Returns `:seon.render/html-response`. A renderer that THROWS does
-    NOT vanish: the response is `seon.render.live-tile/error-response`
+    NOT vanish: the response is `seon.render.live-canvas/error-response`
     — fallback card for the human, `:seon.render/ai` twin for the agent.
     nil hiccup only when the agent entity doesn't exist (the tile never
     crashes its caller)."
@@ -188,14 +188,14 @@ Edit [src/seon/render.cljs](file:///Users/sean/src/seon/src/seon/render.cljs#L37
                   (catch :default _ nil))]
      (if (nil? (:seon.agent/id ent))
        {:seon.render/hiccup nil}
-       (let [{:seon.render.live-tile/keys [value]}
-             (live-tile/wired-content {:seon.render/entity ent})
+       (let [{:seon.render.live-canvas/keys [value]}
+             (live-canvas/wired-content {:seon.render/entity ent})
              input {:seon.db/db         db
                     :seon.agent/id      id
 -                   :seon.render/entity ent}]
 +                   :seon.render/entity ent}
 +            custom-fn? (and (qualified-symbol? value)
-+                            (not= value 'seon.render.live-tile/welcome))]
++                            (not= value 'seon.render.live-canvas/welcome))]
          (try
 -          (let [resp   (html-render value input)
 -                hiccup (:seon.render/hiccup resp)]
@@ -208,14 +208,14 @@ Edit [src/seon/render.cljs](file:///Users/sean/src/seon/src/seon/render.cljs#L37
 -            (when (some? hiccup)
 -              ;; (a) serializer-faithful structural walk — a legible
 -              ;;     message locating the defect (path included);
--              (when-some [{:seon.render.live-tile/keys
+-              (when-some [{:seon.render.live-canvas/keys
 -                           [structure-path structure-message]}
--                           (live-tile/hiccup-structure-error hiccup)]
+-                           (live-canvas/hiccup-structure-error hiccup)]
 -                (throw (ex-info (str "invalid tile hiccup — "
 -                                     structure-message
 -                                     " (at path " (pr-str structure-path)
 -                                     ")")
--                                {:seon.render.live-tile/structure-path
+-                                {:seon.render.live-canvas/structure-path
 -                                 structure-path})))
 -              ;; (b) backstop: PROVE the hiccup serializes. ->string is
 -              ;;     pure + deterministic, so success here guarantees
@@ -231,23 +231,23 @@ Edit [src/seon/render.cljs](file:///Users/sean/src/seon/src/seon/render.cljs#L37
 +              (clear-marker!))
 +            ;; SERIALIZATION joins the same guarded path as invocation...
 +            (when (some? hiccup)
-+              (when-some [{:seon.render.live-tile/keys
++              (when-some [{:seon.render.live-canvas/keys
 +                           [structure-path structure-message]}
-+                          (live-tile/hiccup-structure-error hiccup)]
++                          (live-canvas/hiccup-structure-error hiccup)]
 +                (throw (ex-info (str "invalid tile hiccup — "
 +                                     structure-message
 +                                     " (at path " (pr-str structure-path)
 +                                     ")")
-+                                {:seon.render.live-tile/structure-path
++                                {:seon.render.live-canvas/structure-path
 +                                 structure-path})))
 +              (html/->string hiccup))
 +            resp)
            (catch :default e
 +            (when custom-fn?
 +              (clear-marker!))
-             (live-tile/error-response
+             (live-canvas/error-response
                {:seon.db/error                 (err/->map e)
-                :seon.render.live-tile/content value})))))))
+                :seon.render.live-canvas/content value})))))))
 ```
 
 ### Step 4: Implement Boot Recovery inside `client.cljs`
@@ -272,13 +272,13 @@ Edit [src/seon/client.cljs](file:///Users/sean/src/seon/src/seon/client.cljs#L18
 +                             (str "CRASH DETECTED: agent " agent-id
 +                                  " hung on tile value " (pr-str value)))
 +          (let [db  @conn
-+                ent (db/pull db [:db/id :seon.render.live-tile/content] [:seon.agent/id agent-id])
-+                val (:seon.render.live-tile/content ent)]
++                ent (db/pull db [:db/id :seon.render.live-canvas/content] [:seon.agent/id agent-id])
++                val (:seon.render.live-canvas/content ent)]
 +            (when val
 +              (log/info-console! "seon.client/recover-tile-crash!"
 +                                 (str "Retracting tile content: " (pr-str val)))
 +              (await (db/transact! conn
-+                                   [[:db/retract (:db/id ent) :seon.render.live-tile/content val]]
++                                   [[:db/retract (:db/id ent) :seon.render.live-canvas/content val]]
 +                                   {:seon.db/origin :system})))
 +          (log/info-console! "seon.client/recover-tile-crash!" "Posting warning message to agent...")
 +          (await (agent/message!
@@ -327,7 +327,7 @@ Edit [src/seon/client.cljs](file:///Users/sean/src/seon/src/seon/client.cljs#L18
 ### 2. The crash-MARKER file
 - **Recording content:** `{:agent-id agent-id, :value value}`.
 - **Node `fs.writeFileSync` flushing:** In Node, `fs.writeFileSync` is a synchronous block that commits the write to the operating system's write queue before resolving. Even though a subsequent sync loop blocks Javascript execution, the filesystem write is completed at the system call layer. It will reliably survive process termination (`SIGTERM` or `SIGKILL`).
-- **Cost Negligibility:** Gated on `(and (qualified-symbol? value) (not= value 'seon.render.live-tile/welcome))`. Welcome tiles and static hiccup vectors bypass file writing completely.
+- **Cost Negligibility:** Gated on `(and (qualified-symbol? value) (not= value 'seon.render.live-canvas/welcome))`. Welcome tiles and static hiccup vectors bypass file writing completely.
 
 ### 3. Boot RECOVERY ordering
 - **Placement:** Placed inside `start-agent!` right after `prune-core-ghosts!` and before `replay-program-graph!`.

@@ -22,7 +22,7 @@ tags: [research, web, agent, flow, ui]
      interactive instinct (`[:button {:on-click ...}]` in a literal-hiccup tile)
      **silently produces a dead button.** This is the #1 correctness gap and a
      2-line Core fix (`render.cljs:678`).
-  2. **No `my.tile` interactive primitives** — agents must hand-author hiccup
+  2. **No `my.canvas` interactive primitives** — agents must hand-author hiccup
      handler slots + `data-bind` signal wiring + remember the safelist. There is
      no `button` / `form` / `input` / `select` / `toggle` helper that emits
      correct, safelisted, dual-render hiccup. `my.ui` (the static helpers, owned
@@ -36,7 +36,7 @@ tags: [research, web, agent, flow, ui]
      feed re-renders, which is correct and sufficient, but nothing tells the
      agent's *context* that a human acted. The clean shape (derive-don't-store)
      is a section that reads the agent's own interaction-effect datoms.
-- **Recommendation:** build `my.tile` as a thin set of dual-render interactive
+- **Recommendation:** build `my.canvas` as a thin set of dual-render interactive
   primitives on top of the existing transform+gate (no engine rewrite), fix the
   literal-hiccup transform gate in Core, extend the safelist, and prefer the
   **fn-REF + signals** shape (form fields → one map argument) as the canonical
@@ -216,7 +216,7 @@ resp (let [h (:seon.render/hiccup resp)]
 
 This is a **Core fix** (`seon.render` is Core's). Flagged below.
 
-### B.2 No `my.tile` interactive primitive set
+### B.2 No `my.canvas` interactive primitive set
 
 The transform mechanism is there but agents must:
 - remember the `:on-click (list 'fn args)` vs `:on-click 'fn` distinction,
@@ -234,7 +234,7 @@ need the interactive sibling. Design in Part C.
 layout/space/text/color/border — but **zero** of `cursor-pointer`, `hover:*`,
 `focus:*`, `focus-visible:*`, `active:*`, `disabled:*`, `select-none`,
 `ring-*`. An agent-authored button is unstyled and gives no click affordance; an
-input has no focus ring. The `my.tile` primitives should emit a small fixed set
+input has no focus ring. The `my.canvas` primitives should emit a small fixed set
 of control classes, and those classes must be added to the safelist (additive,
 ~1 line). **UI-lane fix** (the safelist is owned here / shared with the canvas
 lane — coordinate so the static + interactive additions land together).
@@ -253,13 +253,13 @@ must-haves.
 
 ---
 
-## Part C — Design: the `my.tile` interactive primitives
+## Part C — Design: the `my.canvas` interactive primitives
 
-`my.tile` is the **interactive** sibling of `my.ui` (static). Same contract:
+`my.canvas` is the **interactive** sibling of `my.ui` (static). Same contract:
 DATA in, the `:seon.render/html-response` dual-render envelope out
 (`{:seon.render/hiccup … :seon.render/ai …}`), so the human's styled control and
 the agent's text description can't drift. It lives in a NEW file `src/my/tile.cljs`
-(the concurrent lane owns `my.ui*` + `live_tile.cljs` + `ui-live-tiles`; `my.tile`
+(the concurrent lane owns `my.ui*` + `live_tile.cljs` + `ui-canvas`; `my.canvas`
 is this lane's interactive tier per the prompt).
 
 ### C.1 The primitives
@@ -270,28 +270,28 @@ so the agent's live-tile section reads "a button labelled X that calls my fn Y",
 never raw HTML.
 
 ```clojure
-;; my.tile/button — label + an action (a fn-CALL list or a fn-REF symbol).
-(button {:my.tile/label  "Approve"
-         :my.tile/action (list 'approve! order-id)})  ; fn-CALL: render-time arg
+;; my.canvas/button — label + an action (a fn-CALL list or a fn-REF symbol).
+(button {:my.canvas/label  "Approve"
+         :my.canvas/action (list 'approve! order-id)})  ; fn-CALL: render-time arg
 ;; human: a styled clickable button (data-on:click @post → /call)
 ;; ai:    "[button] Approve → calls approve! with \"order-7\""
 
-;; my.tile/button — fn-REF (bare symbol): args come from click-time signals.
-(button {:my.tile/label "Submit" :my.tile/action 'submit! :my.tile/submit? true})
+;; my.canvas/button — fn-REF (bare symbol): args come from click-time signals.
+(button {:my.canvas/label "Submit" :my.canvas/action 'submit! :my.canvas/submit? true})
 
-;; my.tile/input — a labelled field BOUND to a signal (data-bind).
-(input {:my.tile/field "note" :my.tile/label "Note" :my.tile/placeholder "…"})
+;; my.canvas/input — a labelled field BOUND to a signal (data-bind).
+(input {:my.canvas/field "note" :my.canvas/label "Note" :my.canvas/placeholder "…"})
 
-;; my.tile/select / my.tile/toggle — same field→signal binding.
-(select {:my.tile/field "tier" :my.tile/options [["free" "Free"] ["pro" "Pro"]]})
-(toggle {:my.tile/field "live" :my.tile/label "Live updates"})
+;; my.canvas/select / my.canvas/toggle — same field→signal binding.
+(select {:my.canvas/field "tier" :my.canvas/options [["free" "Free"] ["pro" "Pro"]]})
+(toggle {:my.canvas/field "live" :my.canvas/label "Live updates"})
 
-;; my.tile/form — fields → a submit action. The fields data-bind to signals; on
+;; my.canvas/form — fields → a submit action. The fields data-bind to signals; on
 ;; submit the signals POST as the body and land as ONE map arg to the handler.
-(form {:my.tile/submit 'save-note!            ; fn-REF — gets {:note "…" :tier "…"}
-       :my.tile/label  "Save"
-       :my.tile/fields [(input  {:my.tile/field "note"  :my.tile/label "Note"})
-                        (select {:my.tile/field "tier" :my.tile/options […]})]})
+(form {:my.canvas/submit 'save-note!            ; fn-REF — gets {:note "…" :tier "…"}
+       :my.canvas/label  "Save"
+       :my.canvas/fields [(input  {:my.canvas/field "note"  :my.canvas/label "Note"})
+                        (select {:my.canvas/field "tier" :my.canvas/options […]})]})
 ```
 
 `form` composes child field-envelopes exactly the way `my.ui/section` composes
@@ -318,7 +318,7 @@ data-flow** — a real agent fn carries a `:malli/schema` (instrumentation is
 always-on) and any new attribute (`:my.agent/counter`, `:my.note/*`) is
 `schema/register!`-ed first, else `db/transact!` refuses it. Both are exactly
 what the always-on `:namespaces` context teaches via the worked
-`register!→transact!→query` example; the `my.tile` primitives don't change that.
+`register!→transact!→query` example; the `my.canvas` primitives don't change that.
 For the counter example:
 
 ```clojure
@@ -358,7 +358,7 @@ extra wiring (the feed re-renders on the transact).
 AGENT (one eval)                          RENDER (every feed tick)
   defn inc-counter!  ──► :seon.fn row       render-agent-tile
   transact tile-fn symbol onto                resolve wired value (the tile fn)
-    :seon.render.live-tile/content            html-render → hiccup w/ [:button {:on-click (list 'inc-counter!)}]
+    :seon.render.live-canvas/content            html-render → hiccup w/ [:button {:on-click (list 'inc-counter!)}]
                                               transform-hiccup → [:button {:data-on:click "@post('/agent/<id>/call?fn=…inc-counter!')"}]
                                               SSE morph → human sees the button
 HUMAN clicks ──────────────────────────►  POST /agent/<id>/call?fn=my.agent.<id>%2Finc-counter!
@@ -424,13 +424,13 @@ This is already the design; stating it as the contract for #22:
    not from the SCI tile sandbox (that catches LLM hallucinations / non-terminating
    tiles, `render.cljs:649-670`).
 
-The one thing to ADD for `my.tile` is nothing on the security side — the
+The one thing to ADD for `my.canvas` is nothing on the security side — the
 primitives produce handler slots that ride the SAME gate. The danger to avoid is
 a primitive that lets the agent specify a *raw Datastar action string* (e.g. a
-free-form `@post(url)`), which would bypass namespace-routing. `my.tile` must
+free-form `@post(url)`), which would bypass namespace-routing. `my.canvas` must
 only accept a fn-symbol/fn-call as the action, never a string — the transform's
 `call-or-ref` already ignores non-symbol/seq handler values
-(`transform.cljs:168-181`), so keeping the primitive's `:my.tile/action` typed as
+(`transform.cljs:168-181`), so keeping the primitive's `:my.canvas/action` typed as
 `[:or :symbol [:sequential :any]]` enforces it.
 
 ---
@@ -489,7 +489,7 @@ needs a write.
 
 **Keep the framing:** an interaction is an eval authored as hiccup, routed by
 namespace, gated by the agent's own fn set. We are adding ergonomics
-(`my.tile`), one correctness fix (literal-hiccup gate), and presentation (safelist)
+(`my.canvas`), one correctness fix (literal-hiccup gate), and presentation (safelist)
 — NOT a new mechanism, NOT a new security model, NOT a new update path. The feed
 is the result channel; the agent's own fns are the allowlist; the namespace is the
 route.
@@ -506,7 +506,7 @@ route.
   canvas lane (owner of `my.ui*`/`input.css` additions) so interactive + static
   safelist entries land together.
 - **[CORE, pre-existing] `message/user` install-timing + discoverability** — if
-  `my.tile` handlers message the agent (D.2), they hit the known wart (CLAUDE.md
+  `my.canvas` handlers message the agent (D.2), they hit the known wart (CLAUDE.md
   Open list). Orthogonal to #22 but will surface in any "form → message" demo.
 - **[doc] `live_tile.cljs` guidance** — once B.1 lands, the live-tile docstring's
   "literal hiccup — instant" example should gain an interactive variant so agents

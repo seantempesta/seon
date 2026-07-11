@@ -157,7 +157,7 @@
 (defn always-full-my-nses
   "The `my.*` members of the config `:seon.config/always` set.
 
-   The toolkit exemplars `my.kb`/`my.data`/`my.ui`/`my.tile` by default. DERIVED from
+   The toolkit exemplars `my.kb`/`my.data`/`my.ui`/`my.canvas` by default. DERIVED from
    config, never hardcoded. NOT a render-selection input (the `:namespaces`
    section no longer pins `:always`); used by the GYM harness
    (`seon.gym.driver`) to derive the toolkit aliases it seeds."
@@ -240,7 +240,7 @@
 (defn- ns-block-entity
   "The agent's `:namespaces` block entity (raw datahike Entity, lazy ILookup),
    or nil when the agent has no id / no such block. Mirrors
-   [[seon.agent.ctx.live-tile/block-content]]: read the agent's
+   [[seon.agent.ctx.canvas/block-content]]: read the agent's
    `:seon.agent/ctx` set and find the block named `:namespaces`. The
    config-driven-agent-init lane transacts the render-dial datoms
    (`::full-source` / `::with-tests` / `::current-full?` / `::current-tests?`)
@@ -260,7 +260,7 @@
    BLOCK entity if present, else the value on its AGENT entity (datom
    fallback), else `default`. `some?` (not truthiness) draws the present/absent
    line so a legit `false`/empty value overrides. Mirrors
-   [[seon.agent.ctx.live-tile/live-tile-block]]'s block→agent→default read."
+   [[seon.agent.ctx.canvas/canvas-block]]'s block→agent→default read."
   [block agent-ent k default]
   (let [bv (get block k)]
     (if (some? bv)

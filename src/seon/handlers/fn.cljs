@@ -168,7 +168,7 @@
    this fn (substring heuristic; matches P4 auto-test-run discovery).
    When `:seon.fn/schema-error` is set, the schema-error badge replaces
    the `tested` row with a red one-line warning."
-  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.live-tile/hiccup]]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.canvas/hiccup]]}
   [{:seon.db/keys [db] :seon.render/keys [node entity]}]
   (let [entity   (or node entity)
         sym      (or (:seon.fn/sym entity) "?")

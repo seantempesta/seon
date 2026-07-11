@@ -204,7 +204,7 @@ the startup eval demonstrates it.
 
 A pull of the agent's OWN entity rendered as a **pretty-printed map
 with keys and values** (r2: a map, NOT raw datoms): purpose, tile
-wiring (`:seon.render.live-tile/content`), registered sections,
+wiring (`:seon.render.live-canvas/content`), registered sections,
 lifecycle attrs, and **any self-instructions the agent has written to
 itself**. Replaces the `:purpose` section AND `:your-sections` AND
 (r2) the per-agent role of `my.kb.instruction`.
@@ -315,7 +315,7 @@ written so reading them teaches the three core moves:
 ;; and point this attr at it.
 (seon.db/transact!
   [{:seon.db/ref [:seon.agent/id "kXQ-2606101814"]
-    :seon.render.live-tile/content 'seon.render.live-tile/welcome}])
+    :seon.render.live-canvas/content 'seon.render.live-canvas/welcome}])
 ;; => {:seon.db/ok? true}
 
 ;; Second: my todo view. A context section is just a query rendered

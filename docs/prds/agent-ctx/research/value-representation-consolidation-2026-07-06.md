@@ -68,7 +68,7 @@ the fabrication shape.
 | DB verbs | `src/seon/db.cljs` | 16 | single `;=>` + `«…»` shapes | **BEST — the model to copy** |
 | Always-on | `src/seon/agent/ctx.cljs` `system-text` | teaches `;=>` (single) 3× | single `;=>` | CORRECT — already runtime-faithful |
 | Skills (rendered) | `seon-skills/datahike/SKILL.md` | 13 | mixed | corpus, standardize |
-| Skills (rendered) | `seon-skills/{data-modeling,data-oriented-clojure,ui-live-tiles}` + `datahike/references/*` | ~5 | mixed | corpus, standardize |
+| Skills (rendered) | `seon-skills/{data-modeling,data-oriented-clojure,ui-canvas}` + `datahike/references/*` | ~5 | mixed | corpus, standardize |
 
 Counts across the agent-facing `.cljs` subset: **18 double vs 19 single** — a
 near-even split with NO convention, and the split falls exactly on the axis that

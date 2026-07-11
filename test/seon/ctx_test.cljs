@@ -33,7 +33,7 @@
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.findings :as ctx-findings]
     [seon.agent.ctx.inventory :as ctx-inventory]
-    [seon.agent.ctx.live-tile :as ctx-live-tile]
+    [seon.agent.ctx.canvas :as ctx-canvas]
     [seon.agent.ctx.namespaces :as ctx-namespaces]
     [seon.agent.ctx.relevant :as ctx-relevant]
     [seon.agent.ctx.transcript :as transcript]
@@ -44,7 +44,7 @@
     [seon.schema :as schema]
     [seon.test-seed :as test-seed]))
 
-;; This ns asserts STRICT-dial behavior (live-tile-block-stable-on-composer-
+;; This ns asserts STRICT-dial behavior (canvas-block-stable-on-composer-
 ;; input's "no bare ⚠" contract holds because under SEON_RENDER_STRICT=1 a
 ;; broken tile yields the legible fail-loud message, not the graceful
 ;; ⚠ CANVAS-BROKEN guard). `bin/test-cljs` exports the dial, but a bare
@@ -308,8 +308,8 @@
   (some #(when (= nm (:seon.agent.ctx/name %)) (:seon.render/text %))
         (:seon.render/section-texts (assemble id))))
 
-(deftest live-tile-block-stable-on-composer-input
-  ;; REGRESSION GUARD (live-tile-nil-entity-render-failed): the composer
+(deftest canvas-block-stable-on-composer-input
+  ;; REGRESSION GUARD (canvas-nil-entity-render-failed): the composer
   ;; injects ONLY {:seon.db/db … :seon.agent/id …} — it does NOT pass
   ;; :seon.agent/entity. The section must resolve the agent entity from
   ;; the db by id itself; it must NEVER surface a bare "⚠ render failed"
@@ -321,7 +321,7 @@
                (.then
                  (fn [_]
                    ;; (a) the EXACT composer input shape — db + id, no entity.
-                   (let [out (str (ctx-live-tile/live-tile-block
+                   (let [out (str (ctx-canvas/canvas-block
                                     {:seon.db/db    @db/*conn*
                                      :seon.agent/id "AGTctxtile00p1"}))]
                      (is (seq out) "section renders content, never blank")
@@ -345,11 +345,11 @@
                         (db/transact!
                           {:seon.db/tx-data
                            [{:seon.db/ref [:seon.agent/id "AGTctxtile00p1"]
-                             :seon.render.live-tile/content
+                             :seon.render.canvas/content
                              'my.broken/does-not-exist}]})))
                (.then
                  (fn [_]
-                   (let [out (str (ctx-live-tile/live-tile-block
+                   (let [out (str (ctx-canvas/canvas-block
                                     {:seon.db/db    @db/*conn*
                                      :seon.agent/id "AGTctxtile00p1"}))]
                      (is (not (str/includes? out "⚠"))
@@ -484,7 +484,7 @@
 
 ;; ------------------------------------------------------------
 ;; Prompt-bloat guard: an html-only block (a human-facing widget — the
-;; live-tile/canvas, an acme dashboard tile) has nothing to say to the
+;; canvas/canvas, an acme dashboard tile) has nothing to say to the
 ;; agent, so it contributes NO prompt section — no self-demarcating
 ;; bracket, no generic data-dump stub. The inverse of the html view's
 ;; "ai-only block contributes no tile" rule.

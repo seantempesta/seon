@@ -2,9 +2,9 @@
 ;; a PLANNING ask. The human names three quarter goals and asks for a
 ;; "status board I can glance at and keep an eye on." The honest, durable
 ;; answer is a live status tile on the agent's OWN canvas
-;; (:seon.render.live-tile/content) showing the three goals + their state —
-;; ideally a tile FN so it re-derives as the goals move (the live-tile
-;; guidance + ui-live-tiles skill teach both the medium and the
+;; (:seon.render.canvas/content) showing the three goals + their state —
+;; ideally a tile FN so it re-derives as the goals move (the canvas
+;; guidance + ui-canvas skill teach both the medium and the
 ;; re-derive-don't-snapshot doctrine). A prose list that scrolls away is
 ;; the wrong medium.
 ;;

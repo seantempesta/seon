@@ -224,7 +224,7 @@ required, not by magic:
 **Full-qualification is the always-correct floor** — `seon.db/transact!`,
 `seon.agent.message/user`, `my.ui/status-line` work from ANY ns with no require.
 Use it whenever you skip the require, and ALWAYS for the `my.*` toolkit
-(`my.ui/…`, `my.tile/…`, `my.data/…`, `my.kb/…`) — those are not aliased.
+(`my.ui/…`, `my.canvas/…`, `my.data/…`, `my.kb/…`) — those are not aliased.
 
 The lifecycle verbs `wait` `complete` `pause` `resume` `terminate` are refer'd in
 your HOME ns only; call them from there, or fully-qualify

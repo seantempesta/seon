@@ -50,7 +50,7 @@
 (defn- card
   [id pass? & {:keys [err canvas judge-results toolkit]
                :or   {err 0.0 canvas false
-                      toolkit {:my.data 0 :my.ui 0 :my.tile 0}}}]
+                      toolkit {:my.data 0 :my.ui 0 :my.canvas 0}}}]
   (cond-> {:seon.gym.scorecard/scenario       id
            :seon.gym.scorecard/git-sha        "deadbee"
            :seon.gym.scorecard/run-id         (random-uuid)
@@ -132,13 +132,13 @@
         ;; visible, not buried in total-tokens).
         measures  [(measure :s-ui 300
                             :blocks [[:namespaces 200] [:transcript 50]
-                                     [:live-tile 50]])
+                                     [:canvas 50]])
                    (measure :s-mem 220
                             :blocks [[:namespaces 120] [:transcript 100]])]
         ;; s-ui's agent CALLED the toolkit; s-mem hand-rolled (0×) — the
         ;; exact #42 signature: a render-prominence drop reads as 0 calls.
-        cards     [(card :s-ui  true  :toolkit {:my.data 3 :my.ui 2 :my.tile 1})
-                   (card :s-mem true  :toolkit {:my.data 0 :my.ui 0 :my.tile 0})]
+        cards     [(card :s-ui  true  :toolkit {:my.data 3 :my.ui 2 :my.canvas 1})
+                   (card :s-mem true  :toolkit {:my.data 0 :my.ui 0 :my.canvas 0})]
         agg (sc/aggregate {:seon.gym/scenarios        scenarios
                            :seon.gym.battery/measures  measures
                            :seon.gym.battery/card-runs (mapv vector cards)
@@ -146,13 +146,13 @@
                            :seon.gym.battery/at        now})]
     (is (m/validate :seon.gym/battery-scorecard agg)
         "the aggregate (with the new axes) still validates")
-    (is (= {:namespaces 320 :transcript 150 :live-tile 50}
+    (is (= {:namespaces 320 :transcript 150 :canvas 50}
            (:seon.gym.battery/block-tokens agg))
         "per-block tokens SUM each block by name across measures — the
          :namespaces trim would move ON ITS OWN KEY")
     (is (= 520 (:seon.gym.battery/total-tokens agg))
         "total-tokens still sums (300 + 220), kept alongside per-block")
-    (is (= {:my.data 3 :my.ui 2 :my.tile 1}
+    (is (= {:my.data 3 :my.ui 2 :my.canvas 1}
            (:seon.gym.battery/toolkit-calls agg))
         "toolkit-calls sums across scored cards — a context change that
          drops these toward 0 is the #42 render-prominence regression")))
@@ -202,13 +202,13 @@
   (let [scenarios [(scen :s-canvas :ui)]
         measures  [(measure :s-canvas 100)]
         runs      [[(card :s-canvas true  :canvas true
-                          :toolkit {:my.data 2 :my.ui 0 :my.tile 0}
+                          :toolkit {:my.data 2 :my.ui 0 :my.canvas 0}
                           :judge-results [(judged 90)])
                     (card :s-canvas false :canvas true   ; the flake
-                          :toolkit {:my.data 0 :my.ui 0 :my.tile 0}
+                          :toolkit {:my.data 0 :my.ui 0 :my.canvas 0}
                           :judge-results [(judged 40)])
                     (card :s-canvas true  :canvas true
-                          :toolkit {:my.data 5 :my.ui 0 :my.tile 0}
+                          :toolkit {:my.data 5 :my.ui 0 :my.canvas 0}
                           :judge-results [(judged 85)])]]
         agg (sc/aggregate {:seon.gym/scenarios        scenarios
                            :seon.gym.battery/measures  measures
@@ -259,7 +259,7 @@
     (is (= 0 (:seon.gym.battery/total-tokens agg)))
     (is (= {} (:seon.gym.battery/block-tokens agg))
         "no measures → no per-block tokens")
-    (is (= {:my.data 0 :my.ui 0 :my.tile 0}
+    (is (= {:my.data 0 :my.ui 0 :my.canvas 0}
            (:seon.gym.battery/toolkit-calls agg))
         "empty battery → honest all-zero toolkit-calls, never an absent map")
     (is (= 0.0 (:seon.gym.battery/eval-error-rate agg)))

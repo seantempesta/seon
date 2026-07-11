@@ -230,7 +230,7 @@ boot-path ordering (#23's lane per the TODO).
 
 ### 3 + 4. SCI bounding: silent unbounded fallback + source re-parsing — FIX-ROOT
 
-**What.** Agent-authored tile/render fns run interpreted under SCI so a
+**What.** Agent-authored canvas/render fns run interpreted under SCI so a
 wall-clock interrupt can abort a sync loop (the pod's ONLY protection —
 `race-timeout` can't fire when the one thread is blocked,
 `render/sci.cljs:13-16`). To interpret the fn, the code rebuilds its

@@ -444,7 +444,7 @@
        draft-preview])))
 
 (defn steps-tile-html
-  "The typeahead live tile — the last provider call, fully legible.
+  "The typeahead canvas — the last provider call, fully legible.
 
    Composed top to bottom, every panel reactive (vanishes when its rows
    lack the data): the state banner (FSM state now, provider, step k/N,
@@ -455,7 +455,7 @@
    done-ness strip (EOS meter + harvest totals) and the compact step
    history. nil when the agent has no step rows (reactive-context)."
   {:malli/schema [:=> [:cat :seon.render/section-request]
-                  [:maybe :seon.render.live-tile/hiccup]]}
+                  [:maybe :seon.render.canvas/hiccup]]}
   [{db :seon.db/db id :seon.agent/id}]
   (let [db    (or db (some-> db/*conn* deref))
         steps (last-call-steps db id)]

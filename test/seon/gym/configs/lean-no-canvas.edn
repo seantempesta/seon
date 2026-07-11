@@ -1,5 +1,5 @@
 ;; Gym-local seon.config manifest — the lean A/B arm. A `:seon.gym/config`
-;; `{:seon.gym.config/path "test/seon/gym/configs/lean-no-live-tile.edn"}`
+;; `{:seon.gym.config/path "test/seon/gym/configs/lean-no-canvas.edn"}`
 ;; points SEON_CONFIG here for the run; the REAL seed path
 ;; (`agent/create!` → `ctx/seed-default-ctx!` → `config/resolve-agent-context`)
 ;; reads it, so gym agents seed FROM this agent-context.

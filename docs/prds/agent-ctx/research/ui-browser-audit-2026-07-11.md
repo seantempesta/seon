@@ -29,7 +29,7 @@ visitor sees:
 
 - A greeting canvas placeholder — "Good afternoon. … I'm still finding my purpose —
   tell me what you need. I'll update this tile as I work" — with a live date/time
-  stamp. This is the live-tile slot speaking for an agent that hasn't rendered one
+  stamp. This is the canvas slot speaking for an agent that hasn't rendered one
   yet; it tells the visitor what the slot IS and invites input. Good default.
 - The transcript tile (collapsed-empty with teaching text: "no events yet — every
   message and eval this agent makes appears here live").

@@ -418,7 +418,7 @@ race. Two answers:
 ### The `my.*` tool library the bridge adapts (owner's frame)
 
 The agent's native tool surface is already `my.*` fns (`my.kb` memory;
-`my.ui`/`my.tile`/`my.data` UI toolkit) + `seon.agent.fs` (files). The case-2 tool
+`my.ui`/`my.canvas`/`my.data` UI toolkit) + `seon.agent.fs` (files). The case-2 tool
 library = **`my.*` siblings in the SAME house style** (map-in/out,
 errors-as-values, capability-gated), and the bridge ADAPTS them per harness (local
 backend vs sandbox exec). One documented fn corpus the agent already understands;

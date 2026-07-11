@@ -58,7 +58,7 @@
    [:seon.agent.ctx/name :seon.agent.ctx/name]
    [:seon.agent.ctx/priority :seon.agent.ctx/priority]
    [:seon.render/text {:optional true} :string]
-   [:seon.render/hiccup {:optional true} :seon.render.live-tile/hiccup]
+   [:seon.render/hiccup {:optional true} :seon.render.canvas/hiccup]
    [:seon.render/token-estimate {:optional true} :int]])
 
 ;; `::ok?` required, render keys optional — the same envelope shape as

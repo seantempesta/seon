@@ -29,7 +29,7 @@ gaps the research mapped, plus an E2E round-trip proof:
    reachable pod, plus the gate's allow/refuse boundary.
 
 Suite: `bin/test-cljs` green — **754 tests / 3423 assertions / 0 failures /
-0 errors** (includes the new `my.tile-test` + the new render interactive test;
+0 errors** (includes the new `my.canvas-test` + the new render interactive test;
 no pre-existing `ctx_test` failures were present at run time).
 
 ## What I fixed/built (file:line)
@@ -50,10 +50,10 @@ Test: `test/seon/render/live_tile_test.cljs`
 `{:data-on:click "@post('/agent/<id>/call?fn=my.agent.<id>%2Fbump!&args=…')"}`,
 and the raw `:on-click` slot is gone.
 
-### 2. `my.tile` — interactive primitives
+### 2. `my.canvas` — interactive primitives
 
 `src/my/tile.cljs`. Same dual-render contract as `my.ui`; fully-namespaced
-`:my.tile/*` schemas; `:malli/schema` on every public fn. The action type is
+`:my.canvas/*` schemas; `:malli/schema` on every public fn. The action type is
 `[:or :symbol [:sequential :any]]` — a fn-REF or fn-CALL, never a raw string
 (so an agent can't author a free-form `@post` that bypasses namespace routing).
 
@@ -67,15 +67,15 @@ API (all return `{:seon.render/hiccup … :seon.render/ai …}`):
 | `toggle` | `::field`, `::label?` | checkbox `data-bind` to `::field` (boolean) |
 | `form` | `::submit` (fn-REF), `::label`, `::fields [envelopes]` | stacks the field hiccup; on submit every bound signal POSTs as ONE map arg to `::submit` |
 
-Worked example (ai + html twins), from a live self-host eval of `my.tile/form`:
+Worked example (ai + html twins), from a live self-host eval of `my.canvas/form`:
 
 ```clojure
-(my.tile/form
-  {:my.tile/submit 'save-note!
-   :my.tile/label  "Save"
-   :my.tile/fields [(my.tile/input  {:my.tile/field "note" :my.tile/label "Note"})
-                    (my.tile/select {:my.tile/field "tier"
-                                     :my.tile/options [["free" "Free"] ["pro" "Pro"]]})]})
+(my.canvas/form
+  {:my.canvas/submit 'save-note!
+   :my.canvas/label  "Save"
+   :my.canvas/fields [(my.canvas/input  {:my.canvas/field "note" :my.canvas/label "Note"})
+                    (my.canvas/select {:my.canvas/field "tier"
+                                     :my.canvas/options [["free" "Free"] ["pro" "Pro"]]})]})
 ;; :seon.render/hiccup
 [:form {:on-submit save-note! :class "flex flex-col gap-2"}
  [:label {:class "flex flex-col gap-1"}
@@ -107,7 +107,7 @@ the existing safelist: `cursor-pointer select-none accent-amber-400`,
 `hover:bg-base-{800,850} hover:text-text-{50,100} hover:border-base-700`,
 `focus:outline-none focus-visible:border-amber-400 border-amber-{300,400}`,
 `disabled:opacity-50 placeholder:text-text-{400,500}`. Kept tight and in sync
-with `my.tile`'s class strings. (Each variant needs its own entry — the base
+with `my.canvas`'s class strings. (Each variant needs its own entry — the base
 class alone doesn't emit the variant.)
 
 ## E2E proof — click→invoke→tx→morph, zero LLM
@@ -115,7 +115,7 @@ class alone doesn't emit the variant.)
 Lane note: the acme pod is NOT reachable via the MCP CLJS REPL (documented in
 `acme-harness.md` — MCP sees only the live `:client` shadow runtime, not the
 `compile`-built `:acme-client`; standing a parallel shadow server for it was
-disproportionate). The acme bundle DOES carry the fix + seeds `my.tile`, so it
+disproportionate). The acme bundle DOES carry the fix + seeds `my.canvas`, so it
 works there too — but the executable, observable round trip was run on the
 reachable default pod via the GENUINE self-host agent path, with a fully
 **ephemeral** agent that was retracted afterward (the shared store is clean —
@@ -148,11 +148,11 @@ Observed (live):
 So: human click (POST) → capability gate → invoke (apply, args as DATA) → tx →
 the existing reactive feed morph. The whole #22 loop, no LLM.
 
-## Security contract (unchanged — `my.tile` rides the existing gate)
+## Security contract (unchanged — `my.canvas` rides the existing gate)
 
 The allowlist is the agent's own `:seon.fn` set by namespace; refusal precedes
 invocation; fn-CALL args are decoded DATA-ONLY; fn-REF signals are `js->clj`
-of the JSON body; same-origin middleware on the route. `my.tile` adds nothing
+of the JSON body; same-origin middleware on the route. `my.canvas` adds nothing
 on the security side — `::action` is typed `[:or :symbol [:sequential :any]]`,
 so a raw action string is rejected at the schema boundary before it could
 bypass namespace routing.
@@ -160,9 +160,9 @@ bypass namespace routing.
 ## What Core / other lanes may want next (non-blocking)
 
 - **Agent-facing guidance** — the `seon.render.live-tile` docstring and the
-  `ui-live-tiles` skill still say tile interactivity is "UNBUILT / no
+  `ui-canvas` skill still say tile interactivity is "UNBUILT / no
   interactive buttons yet". With #22 shipped they should gain an interactive
-  variant (the `:on-click 'my-fn` shape + a `my.tile/button` example) so agents
+  variant (the `:on-click 'my-fn` shape + a `my.canvas/button` example) so agents
   learn it from the always-on context. (Core owns the live_tile docstring; the
   skill content is UI-lane — follow-up.)
 - **(Optional) "the human acted" context surface** (research B.4) — a

@@ -2,7 +2,7 @@
   "The shared collection-envelope shapes (`seon.items` + `seon.result`)
    are registered at load, and a producer envelope conforms. These shapes
    are load-bearing — `my.data` and the upcoming `my.recall`/`my.schedule`/
-   `my.tile` reference them, so their registration must survive a refactor.
+   `my.canvas` reference them, so their registration must survive a refactor.
 
    Run via bin/test-cljs, or interactively:
      (require 'seon.items-test :reload)

@@ -25,7 +25,7 @@ went stale. The route truth lives in ONE place — `src/seon/web/CLAUDE.md`
 The agent runtime + FSM (loop/run/turn, lifecycle, isolation), the context
 engine and `seon.render`, the config-driven agent-init (ONE manifest →
 `seed-default-ctx!`), the compact-namespace-card render, the `my.*` toolkit
-(`my.data`/`my.ui`/`my.tile`) proven composable, transcript eviction, and the
+(`my.data`/`my.ui`/`my.canvas`) proven composable, transcript eviction, and the
 gym fitness function. Depth and live-proof are in the roadmap and research below.
 
 ## Pointers (depth)

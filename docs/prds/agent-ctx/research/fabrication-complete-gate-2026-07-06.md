@@ -82,7 +82,7 @@ The owner's hypothesis, checked against the source and the T4 verbatim samples.
 `(call …)` → `;; => {result-map}` shape. Five agent-facing skills also carry it
 (`.claude/skills/datahike/SKILL.md` + `references/querying.md` +
 `references/data-modeling.md`, `.claude/skills/data-modeling/SKILL.md`,
-`.claude/skills/ui-live-tiles/SKILL.md`). The agent sees a form and its result
+`.claude/skills/ui-canvas/SKILL.md`). The agent sees a form and its result
 adjacent, on a comment line the agent could type itself. Nothing in the example
 says the `;; =>` line is the RUNTIME's, not the author's.
 
@@ -144,7 +144,7 @@ Every agent-facing worked example modeling `form → agent-written result`:
   `(call …)` → `;; => {…}`.
 - **Skills (render when loaded):** `datahike/SKILL.md`,
   `datahike/references/querying.md`, `datahike/references/data-modeling.md`,
-  `data-modeling/SKILL.md`, `ui-live-tiles/SKILL.md` carry `;; =>`/`; =>` result
+  `data-modeling/SKILL.md`, `ui-canvas/SKILL.md` carry `;; =>`/`; =>` result
   echoes (many are pure-fn REPL examples, lower risk than the TOOL docstrings —
   a `(+ 1 2) ;; => 3` teaches arithmetic, not a tool-result echo — but they
   still normalize the "I write my results" format; triage tool docstrings
@@ -323,5 +323,5 @@ The ONE real gating defect from the same run is unrelated to fabrication: D1, th
 - `src/seon/agent/ctx.cljs` (`neutralize-result-claims` / `result-claim-re` —
   the sanitizer that ALREADY strips the taught shape) · `src/seon/agent/turn.cljs`
 - Tool docstrings audited: `src/seon/agent/{shell,web,fs,search}.cljs`
-- Skills audited: `.claude/skills/{datahike,data-modeling,ui-live-tiles}/**`
+- Skills audited: `.claude/skills/{datahike,data-modeling,ui-canvas}/**`
 - `docs/prds/agent-ctx/CLAUDE.md` (the prompt-omission load-bearing finding)

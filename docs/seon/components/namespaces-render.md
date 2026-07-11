@@ -56,7 +56,7 @@ The DEFAULT function surface is therefore a CONFIG concern:
 `:seon.config/agent-context` + `:seon.config/root-context`) is what a fresh
 agent's home ns requires, so it IS what renders as cards. Root additionally gets
 `[seon.agent :as agent]`; the default toolbelt is `message` / `todo` /
-`lifecycle` / `schema` / `db` / `my.kb` / `my.data` / `my.ui` / `my.tile` /
+`lifecycle` / `schema` / `db` / `my.kb` / `my.data` / `my.ui` / `my.canvas` /
 `search`.
 
 ## Per-agent dials (config-driven-agent-init)

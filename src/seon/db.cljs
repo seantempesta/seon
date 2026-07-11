@@ -214,7 +214,7 @@
 ;;
 ;;   - This schema is `'map?` — the only form that is BOTH clean
 ;;     pure-data (re-readable WITHOUT sci, no embedded fn object — the
-;;     pure-data platform law, see seon.render.live-tile + the
+;;     pure-data platform law, see seon.render.canvas + the
 ;;     `registered-forms-are-pure-data` test) AND true for every db
 ;;     flavor (DB / FilteredDB / HistoricalDB / AsOfDB / SinceDB are all
 ;;     `defrecord`s ⇒ `map?`-true). At these slots the arity has ALREADY

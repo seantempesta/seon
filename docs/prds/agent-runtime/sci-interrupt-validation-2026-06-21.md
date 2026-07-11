@@ -6,7 +6,7 @@ tags: [research, agent]
 
 # SCI interrupt — validation & how to test
 
-This is the **downstream-testable** record of the fix approach for the tile/eval lockup: an
+This is the **downstream-testable** record of the fix approach for the canvas/eval lockup: an
 agent-authored function that does not terminate (an infinite loop, runaway recursion, or a
 synchronous block) freezes the entire single-threaded Seon pod — heartbeat, HTTP, SSE, and every
 other agent — until a manual restart.
@@ -105,7 +105,7 @@ Driven by direct eval against the running pod (agent `gwM-…`), each via
   `render-agent-tile` returned the `welcome` fallback in ~316ms (not a forever-freeze); a
   `setTimeout` liveness canary fired (event loop resumed); `curl /agents` answered HTTP 200 in
   ~30–120ms throughout.
-- **Self-heal + notify.** The hung tile's `:seon.render.live-tile/content` was retracted (→
+- **Self-heal + notify.** The hung tile's `:seon.render.live-canvas/content` was retracted (→
   `welcome`); the agent received exactly ONE force'd message ("…did not terminate within 250ms and
   was reset…"). Deduped — repeated renders during the write-propagation window do not double-post.
 - **Real aliased tile renders bounded.** An agent's own `(db/query …)` stats tile rendered under
@@ -146,7 +146,7 @@ the trailing `.catch` handles any rejection — no unhandled rejection, no crash
    [{:seon.ns/name :my.t}
     {:seon.fn/sym "my.t/hang" :seon.fn/ns [:seon.ns/name :my.t]
      :seon.fn/source "(defn hang [m] (loop [] (recur)))" :seon.fn/created-at (js/Date.)}
-    {:seon.agent/id "<AGENT-ID>" :seon.render.live-tile/content 'my.t/hang}]})
+    {:seon.agent/id "<AGENT-ID>" :seon.render.live-canvas/content 'my.t/hang}]})
 ;; then render — returns the welcome fallback within ~budget, never hangs:
 (seon.render/render-agent-tile {:seon.agent/id "<AGENT-ID>"})
 ;; observe: content retracted to welcome, agent messaged, pod still answers HTTP.

@@ -30,7 +30,7 @@ FOLDED out of `:core-seed` into the singleton's desired-set slot as instructed.
 
 1. **DEFERRED to you / your file — Piece 4 is NOT done.** Block + home-requires
    reconcile, the D2 provenance marker, and the `install!` symbol round-trip fix
-   (`ctx-install-live-tile-symbol-roundtrip`) all live in `ctx.cljs` (yours,
+   (`ctx-install-canvas-symbol-roundtrip`) all live in `ctx.cljs` (yours,
    actively edited), so I could not touch them per the file split. The spec's
    claim that this unit "subsumes feels-stateful Unit 2" is therefore WRONG in
    practice — **Unit 2 (block reconcile) stays open**, and live proof #3
@@ -949,7 +949,7 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   `:seon.render/hiccup` (incl. `:seon.render/html-response`) derives its
   own block/tile per render (priority 30); errors are in-place ⚠ lines
   (WITH the humanized malli explain) + `:seon/error` tiles. Taught in
-  system-text + the workspace stub + `ui-live-tiles`. Uncoached DeepSeek
+  system-text + the workspace stub + `ui-canvas`. Uncoached DeepSeek
   drive: agent authored a specced `subs-tile` on turn 3; the derived block
   is in its turn-4 verbatim prompt (`agent-debug/turn`).
 - **⚠ SPAWN FIX affects everyone (`9892f407`):** `start!`/`delegate!` no
@@ -1409,11 +1409,11 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   `render-malli-error` (the `;; hint` line renders in recent-evals).
 - **TOOLING→EVAL bug report (2026-07-04, ctx.cljs is your in-flight file so
   not fixing it myself):** `seon.agent.ctx/install!` fails for any agent
-  whose existing `:live-tile` block carries
-  `:seon.render.live-tile/content` — it re-transacts the pulled ENCODED
+  whose existing `:canvas` block carries
+  `:seon.render.canvas/content` — it re-transacts the pulled ENCODED
   string (e.g. `"seon.render.system/system-view"`) without
   `decode-edn-value`, tripping the malli gate (`install! transact failed:
-  Malli validation failed for :seon.render.live-tile/content`). Reproduced
+  Malli validation failed for :seon.render.canvas/content`). Reproduced
   live against root during the error-recording phase-1 proof. Fix shape:
   decode EDN-bridged attrs before the re-transact (the section-verbs
   pattern named in `seon.db.internal/encode-edn-slot-values`'s docstring).
@@ -2085,7 +2085,7 @@ You're heads-down on diffusion research; a lot moved under you in the last
 5. **Governing doc for the context arc:** docs/prds/agent-ctx/
    context-rebuild.md — old context surfaces retire, ideas return as
    tested blocks; milestones named repl/namespaces/plan/db/warnings/
-   live-tile/subagents/soul; progressive graduation into system.edn (acme
+   canvas/subagents/soul; progressive graduation into system.edn (acme
    inherits whatever block improvements land, same specs).
 6. **This file's parent index is getting rewritten:** the CLAUDE.md audit
    (research/claude-md-audit-2026-07-11.md) rated agent-ctx/CLAUDE.md

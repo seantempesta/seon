@@ -195,7 +195,7 @@ the source text only for pre-structural rows), read off the datoms'
 tx column. So the human's focus follows what the agent is actively doing
 with zero ceremony: author a plan tile, write plan data, and the plan tile
 is the canvas. Override: the agent pins the canvas to a specific tile
-(`:seon.render.live-tile/content`) to feature it regardless of recency;
+(`:seon.render.canvas/content`) to feature it regardless of recency;
 retract the pin to fall back to derived; with neither, the core welcome.
 Derive the default, store only the pin — the same rule as everywhere else.
 (Honest bound: a tile that reaches attrs only dynamically — never naming

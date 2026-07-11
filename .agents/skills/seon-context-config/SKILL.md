@@ -56,7 +56,7 @@ Source of truth (read before changing): `src/seon/config.cljs`,
      re-bands, no apply step. `config/acme.edn` sets its own 2-band decay.
 2. `:seon.config/root-context` — a SPARSE override merged over agent-context by
    IDENTITY (id `"root"`, never a stored kind): scalar keys merge, `:seon.agent/ctx`
-   blocks upsert-by-name. Its `:live-tile` block sets root's canvas =
+   blocks upsert-by-name. Its `:canvas` block sets root's canvas =
    `seon.render.system/system-view`.
 3. `:seon.config/namespaces` — `{:seon.config/always [ns-syms]
    :seon.config/current-ns :full|:off}` (`resolve-namespaces`, key-level merge

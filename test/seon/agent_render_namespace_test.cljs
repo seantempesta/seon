@@ -30,7 +30,7 @@
     [seon.agent :as agent]
     [seon.client :as client]
     [seon.db :as db]
-    [seon.render.live-tile :as tile]
+    [seon.render.canvas :as canvas]
     [seon.repl.internal :as repl-internal]))
 
 ;; ---------------------------------------------------------------------------
@@ -167,7 +167,7 @@
                   hiccup (:seon.render/hiccup res)]
               (is (vector? hiccup) ":html form is a hiccup vector")
               (is (= :div (first hiccup)) "outer container is a :div")
-              (is (tile/valid-hiccup? hiccup) "passes valid-hiccup?")
+              (is (canvas/valid-hiccup? hiccup) "passes valid-hiccup?")
               (is (str/includes? (pr-str hiccup) "test.parent/greet")
                   "fn sym appears somewhere in the hiccup"))))
         (.then (fn [_] (done)))

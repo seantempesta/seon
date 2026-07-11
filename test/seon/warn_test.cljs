@@ -549,7 +549,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Urgent broken-tile warning (Group C / §C.2). check-tile-unresolved is the
-;; one URGENT check: when a live tile points at a fn that isn't loaded, the
+;; one URGENT check: when a canvas points at a fn that isn't loaded, the
 ;; human is staring at the calm "preparing this view…" placeholder RIGHT NOW.
 ;; It is DERIVED (query the stored pointer + resolvability), self-heals, and
 ;; renders FIRST with the louder ‼ URGENT template.
@@ -576,7 +576,7 @@
   (async done
     (-> (with-tile-db
           [{:seon.agent/id "warntst-tile01"
-            :seon.render.live-tile/content 'my.agent.warntst/missing-tile}]
+            :seon.render.canvas/content 'my.agent.warntst/missing-tile}]
           (fn [db]
             (let [r     (warn/check-tile-unresolved {:seon.db/db db})
                   entry (first (:seon.warn/affected r))]
@@ -586,7 +586,7 @@
               (is (= #{"my.agent.warntst/missing-tile"} (affected-syms r))
                   "names the exact unresolvable symbol")
               (is (str/includes? (:seon.warn/where entry) "warntst-tile01")
-                  "names which agent's live tile is dead"))))
+                  "names which agent's canvas is dead"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -597,9 +597,9 @@
   (async done
     (-> (with-tile-db
           [{:seon.agent/id "warntst-rslv01"
-            :seon.render.live-tile/content 'seon.warn/render-warnings}
+            :seon.render.canvas/content 'seon.warn/render-warnings}
            {:seon.agent/id "warntst-hicc01"
-            :seon.render.live-tile/content [:div {:class "seon-tile"} "literal"]}]
+            :seon.render.canvas/content [:div {:class "seon-tile"} "literal"]}]
           (fn [db]
             (let [r (warn/check-tile-unresolved {:seon.db/db db})]
               (is (= [] (:seon.warn/affected r))
@@ -619,7 +619,7 @@
                   {:seon.db/conn conn
                    :seon.db/tx-data
                    [{:seon.agent/id "warntst-heal01"
-                     :seon.render.live-tile/content 'my.agent.warntst/not-yet-defined}]})
+                     :seon.render.canvas/content 'my.agent.warntst/not-yet-defined}]})
                 (.then (fn [env]
                   (is (:seon.db/ok? env) "broken-tile tx lands")
                   (let [r (warn/check-tile-unresolved {:seon.db/db @conn})]
@@ -630,7 +630,7 @@
                     {:seon.db/conn conn
                      :seon.db/tx-data
                      [{:seon.agent/id "warntst-heal01"
-                       :seon.render.live-tile/content 'seon.warn/render-warnings}]})))
+                       :seon.render.canvas/content 'seon.warn/render-warnings}]})))
                 (.then (fn [env]
                   (is (:seon.db/ok? env) "re-point tx lands")
                   (let [r2 (warn/check-tile-unresolved {:seon.db/db @conn})]

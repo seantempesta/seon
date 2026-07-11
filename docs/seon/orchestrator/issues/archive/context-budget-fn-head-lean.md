@@ -44,7 +44,7 @@ Per-section (tokens):
 | namespaces | 47,290 |
 | transcript | 5,618 |
 | system | 1,373 |
-| live-tile | 405 |
+| canvas | 405 |
 | inventory | 252 |
 | warnings | 185 |
 | your-entity | 163 |
@@ -60,7 +60,7 @@ Namespaces section composition (47,290 tok, 56 tags, 0 stubs):
 - remainder (~5k tok): ns forms, blank lines, tags.
 
 Biggest namespaces (tokens): `seon.ctx` 5,354 · `seon.db` 4,619 ·
-`seon.test.runner` 3,329 · `seon.agent.fs` 2,564 · `seon.render.live-tile`
+`seon.test.runner` 3,329 · `seon.agent.fs` 2,564 · `seon.render.canvas`
 2,547 · `seon.eval` 2,081 · `seon.ai` 1,975 · `seon.warn` 1,869.
 
 ## Root finding

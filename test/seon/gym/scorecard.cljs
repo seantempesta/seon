@@ -64,7 +64,7 @@
 ;; (e.g. the #42 namespaces signature-trim, −43.5%) is VISIBLE on its own
 ;; key, not buried in `total-tokens` (which is confounded by scenario count
 ;; and dominated by non-namespaces context). Carries :namespaces /
-;; :transcript / :live-tile and every other rendered block. Tokens, never
+;; :transcript / :canvas and every other rendered block. Tokens, never
 ;; chars (the per-block estimates come straight off
 ;; :seon.gym.profile/block-tokens).
 (schema/register! :seon.gym.battery/block-tokens
@@ -321,7 +321,7 @@
                                      (reduce-kv (fn [m k v]
                                                   (update m k (fnil + 0) v))
                                                 m tc))
-                                   {:my.data 0 :my.ui 0 :my.tile 0}))
+                                   {:my.data 0 :my.ui 0 :my.canvas 0}))
         eval-err     (mean (map :seon.gym.scorecard/eval-error-rate scored))
         canvas-cnt   (count (filter :seon.gym.scorecard/canvas-updated? scored))
         judge-scores (mapcat real-judge-scores scored)

@@ -106,17 +106,17 @@
   "Canvas recency from its explicit slot and its derived tile renderer."
   [dbv agent-id]
   (let [pinned (try
-                 (some-> (db/pull dbv [:seon.render.live-tile/content]
+                 (some-> (db/pull dbv [:seon.render.canvas/content]
                                   [:seon.agent/id agent-id])
-                         :seon.render.live-tile/content
-                         (db/decode-edn-value :seon.render.live-tile/content))
+                         :seon.render.canvas/content
+                         (db/decode-edn-value :seon.render.canvas/content))
                  (catch :default _ nil))
         derived (when-not (symbol? pinned)
                   (::render-fns/tile-sym
                     (render-fns/last-updated-tile
                       {:seon.db/db dbv :seon.agent/id agent-id})))
         renderer (when (symbol? (or pinned derived)) (or pinned derived))]
-    (max (agent-attr-touch dbv agent-id :seon.render.live-tile/content)
+    (max (agent-attr-touch dbv agent-id :seon.render.canvas/content)
          (renderer-touch dbv agent-id renderer))))
 
 (defn agent-view
@@ -129,7 +129,7 @@
     (let [ctx         {:seon.db/db db :seon.agent/id agent-id}
           blocks      (agent-ctx/rendered-context-blocks ctx #{:html})
           canvas      (:seon.render/hiccup
-                        (render/render-agent-tile {:seon.agent/id agent-id
+                        (render/render-agent-canvas {:seon.agent/id agent-id
                                                    :seon.db/db db}))
           context-surfaces
           (mapv (fn [{nm :seon.agent.ctx/name

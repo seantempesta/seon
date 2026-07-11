@@ -55,7 +55,7 @@ agent-customized one.
 |---|-----------|-------|----------|-----|
 | D1 | New/changed default context blocks never reach **existing** agents | C (copy-once) | **HIGH** | `create!` seeds blocks only for a `fresh?` entity; no boot reconcile of `:seon.agent/ctx`. Proven live 2026-07-06. Editing `default-ctx-blocks` / manifest `:seon.agent/ctx` requires `cluster reset` to take effect. |
 | D2 | Seeded block entities carry **no provenance** — cannot tell "unmodified default" from "agent-edited" | C (missing marker) | **HIGH** | Without it, a boot reconcile for blocks (the D1 fix) is impossible to write safely — it can't know which blocks to heal vs preserve. The code corpus solved exactly this with `:seon.db/origin :core-seed`; blocks have no equivalent. |
-| D3 | `ctx/install!` is broken for any agent whose ctx has a symbol-valued block attr (`:live-tile`) | bug | **HIGH** | Symbol/EDN-string round-trip asymmetry rejects the re-transact of untouched kept blocks. Blocks the natural D1 fix (re-installing the default set). Issue `ctx-install-live-tile-symbol-roundtrip.md`. |
+| D3 | `ctx/install!` is broken for any agent whose ctx has a symbol-valued block attr (`:canvas`) | bug | **HIGH** | Symbol/EDN-string round-trip asymmetry rejects the re-transact of untouched kept blocks. Blocks the natural D1 fix (re-installing the default set). Issue `ctx-install-canvas-symbol-roundtrip.md`. |
 | D4 | `:seon.eval/home-requires` is copy-once onto the agent at seed; a manifest edit never reaches existing agents | C (copy-once) | MED | `home-requires-for` reads the copy-once **datom first** (`eval.cljs:1539-1547`); only a fresh mint or a live `db/transact!` override re-reads config. Same staleness class as blocks. |
 | D5 | ~40 runtime call sites read config live for behavior (render caps, dials, gates, policy, timeouts, namespaces policy) | B (`f(db,config)`) | MED (mostly deliberate) | Owner explicitly carved render caps out as *global process caps, not per-agent datoms* (`config.cljs:94-102`). Legit as design, but it means these values are NOT in the db and NOT reactive to db — they need a config-file edit + pod restart, and they are invisible to `as-of`/time-travel/forensic replay. |
 | D6 | Render caps etc. are **memoized per `SEON_CONFIG`** — a live config edit is ignored until reload/restart | B (cache) | LOW | Explains the "config edit → restart pod" note. The memo atoms are `def` (not `defonce`) so a hot-reload rotates them; a bare file edit with no reload does nothing. |
@@ -83,7 +83,7 @@ behavior.
 | `:seon.agent/ctx` default block tree (`config/default-ctx-blocks`) | **C** | seeded `agent.cljs:467-470` → `ctx/seed-default-ctx!` (`ctx.cljs:2214`) ONLY when `fresh?`; render reads db (`ctx.cljs:2284-2298 agent-blocks`) | **STALE (D1).** New default block never reaches existing agents; `cluster reset` required. Render itself IS `f(db)` (good) — the staleness is purely at the copy-once seed. |
 | `:seon.eval/home-requires` (agent-context + root-context) | **C** | seeded via `seed-default-ctx!` scalar transact (`ctx.cljs:2245`); read `eval.cljs:1539-1553 home-requires-for` (datom-first, then config, then const) | **STALE (D4).** Copy-once datom wins over the manifest for existing agents. Consumed only at `setup-agent-ns!` (agent boot), not per-turn. |
 | `:my.skills/load` (always-on skill bodies) | **C** | consumed-into-blocks at seed (`config.cljs:1082-1091 expand-skill-blocks`), dropped from scalar transact (`ctx.cljs:2206-2212`) | **STALE.** Block presence IS its truth; a changed `:my.skills/load` only affects fresh agents (same class as D1). |
-| `:seon.config/root-context` (`:live-tile` canvas, root-only blocks) | **C** | merged at seed by `context-config-for` (`config.cljs:1126-1151`), id `"root"` | **STALE.** Root's canvas/blocks are copy-once; a manifest edit needs root re-created (cluster reset). |
+| `:seon.config/root-context` (`:canvas` canvas, root-only blocks) | **C** | merged at seed by `context-config-for` (`config.cljs:1126-1151`), id `"root"` | **STALE.** Root's canvas/blocks are copy-once; a manifest edit needs root re-created (cluster reset). |
 | `:seon.config/render` store-edn-cap | **B** | `eval.cljs:2871` | Global cap; not in db; config-edit+restart to change; memoized `config.cljs:567-579`. |
 | `:seon.config/render` eval-cap | **B** | `ctx.cljs:513` | " |
 | `:seon.config/render` result-body-cap | **B** | `ctx.cljs:539`, `eval.cljs:2962`, `:3138` | " (C32 single-owner). |
@@ -197,13 +197,13 @@ the edit get the new block. Confirmed live 2026-07-06 per task brief. Only
 `cluster reset` (wipe → agents recreated fresh) applies it fleet-wide.
 
 **B2 — `ctx/install!` rejects any agent whose ctx has a symbol-valued block attr
-(D3).** Confirmed from issue `ctx-install-live-tile-symbol-roundtrip.md` +
+(D3).** Confirmed from issue `ctx-install-canvas-symbol-roundtrip.md` +
 `install!` code. `install!` (`ctx.cljs:2164-2172`) re-transacts ALL kept blocks
 (`current` via `ctx-entities`, minus the names being installed). A kept
-`:live-tile` block's `:seon.render.live-tile/content` reads back from the entity
+`:canvas` block's `:seon.render.canvas/content` reads back from the entity
 as a **string** (`"seon.render.system/system-view"`) while its schema requires
 `:symbol`, so the re-transact of untouched blocks fails validation. **Failing
-scenario:** any `install!` call on root (whose ctx carries the `:live-tile`
+scenario:** any `install!` call on root (whose ctx carries the `:canvas`
 symbol content). Root can never add a block via the normal verb. Root cause: a
 symbol/EDN-string round-trip asymmetry between the storage bridge (writes symbol)
 and the kept-path read (reads string). This directly blocks the D1 fix, since a
@@ -267,10 +267,10 @@ restart-reactive while blocks/home-requires are reset-only.
    it does make that block formally `f(db,config)`. Whether that is acceptable vs.
    pushing the breaker numbers into the db is a design call I can't settle.
 
-4. **Whether the `install!` kept-path (B2) round-trips only `:live-tile` or every
+4. **Whether the `install!` kept-path (B2) round-trips only `:canvas` or every
    symbol-valued block attr.** The issue says "suspect every install! caller on
    agents whose ctx contains any symbol-valued block attr." From code the
    `decode-block` path (`ctx.cljs:2269-2282`) decodes `:seon.render/ai|html`
    symbols on the RENDER read but `ctx-entities` (the `install!` kept-path read)
    apparently does not — I did not fully trace `ctx-entities` decode behavior, so
-   the exact breadth of B2 is unconfirmed beyond `:live-tile`.
+   the exact breadth of B2 is unconfirmed beyond `:canvas`.

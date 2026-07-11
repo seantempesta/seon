@@ -74,7 +74,7 @@ imperative reflexes, guessed library semantics). Ground first:
   injects the real `(:require …)` into every authored `(ns …)` form at eval
   time (stored verbatim in `:seon.ns/source` + as `:seon.ns/require-edges`;
   survives resume, #73/#56 CLOSED). NOT auto-aliased: the `my.*` toolkit
-  (`my.ui/…`, `my.data/…`, `my.tile/…`, `my.kb/…`), the `agent/` alias, and
+  (`my.ui/…`, `my.data/…`, `my.canvas/…`, `my.kb/…`), the `agent/` alias, and
   the lifecycle refers (`wait`/`complete`/…) — full-qualify those.
 - Turn capture is live (`:seon.agent.turn/rendered-as-of` + prompt/reply
   blob refs, `seon.agent.debug/turn`/`turn-diff`) and is the ONE capture

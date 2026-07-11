@@ -124,7 +124,7 @@ answer delivered). The cards question was pre-answered early (cards
 suffice); the `db` milestone is next and validates the new v3.1
 restart-survival system-text line. Milestones are named by the block/
 namespace they validate — `repl`, `namespaces`, `plan`, `db`,
-`warnings`, `live-tile`, `subagents`, `soul`; "rung" and the metaphor
+`warnings`, `canvas`, `subagents`, `soul`; "rung" and the metaphor
 names (Memory/Attention/Canvas/Collaboration/Identity) are retired
 vocabulary (Phase 0 swept the docs; "verbs" → functions). **Owner
 rulings 2026-07-11 (sharpened): the OLD tree is deprecated WHOLESALE —
@@ -135,7 +135,7 @@ by being rebuilt on the minimal core under the inclusion bar
 principle: this is about bad information poisoning behavior, not
 tokens — omission is recoverable and attributable, inclusion is
 neither.** The deprecation register, skills-dissolution plan, rebuild
-sequence (db → warnings → live-tile → subagents → soul), and cutover
+sequence (db → warnings → canvas → subagents → soul), and cutover
 mechanics live in [[context-rebuild]]. Implementation units are OPUS
 agents against written specs. Ledger:
 `evals/runs/2026-07-10-minimal-buildup/README.md`.
@@ -357,8 +357,8 @@ substrate):
    `test/my/plan_test.cljs` `entity-ref-direction-and-agent-retract-semantics`.
 5. **Canvas = last-updated tile** (derived default, pin to override) — ✅
    COMPLETE (2026-07-03). Resolution is now pin → derived → welcome, one
-   path (`live-tile/wired-content` grew an optional caller-supplied
-   `::derived` slot; `render-agent-tile` + the `:live-tile` ctx section
+   path (`canvas/wired-content` grew an optional caller-supplied
+   `::derived` slot; `render-agent-canvas` + the `:canvas` ctx section
    both feed it, so the human's canvas and the agent's provenance header
    name the SAME value). The derivation
    (`seon.agent.ctx.render-fns/last-updated-tile`) is a pure f(db):
@@ -379,7 +379,7 @@ substrate):
    reads "(derived — your last-updated tile; … pin …)" with the fn source
    inline. Tests: `render_fns_test.cljs` (last-updated-tile ×4) +
    `live_tile_test.cljs` (pin>derived>welcome). Docs: context.md + ui.md
-   canvas paragraphs, ui-live-tiles skill.
+   canvas paragraphs, ui-canvas skill.
 6. **Queued tool defects** — fresh-view `my.kb` empty render (✅ resolved,
    see agent-ctx CLAUDE.md); turn-6 recall visibility; ~~SCI-bounding
    fallback on `my.plan.internal/plan-block`~~ (✅ fixed 2026-07-02, issue
@@ -442,7 +442,7 @@ substrate):
      bracket (module-level depth counter, async-safe across `.then` hops —
      NOT a dynamic binding) making `escalate!` print the distinct
      `SEON-EXPECTED-CORE-FAULT` marker the gate does not count (datom still
-     written, `:crash` not taken). 8 genuine-`:core` render/tile/block
+     written, `:crash` not taken). 8 genuine-`:core` render/canvas/block
      fixtures annotated. bin/test-cljs counts `SEON-CORE-FAULT` MINUS the
      `-EXPECTED-` variant.
    - **C42 (real bug the C41 investigation surfaced, crash-flip-critical):**

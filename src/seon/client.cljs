@@ -84,10 +84,10 @@
     [seon.render]
     [seon.render.default]
     ;; Live-tile render namespace — required so the build includes it.
-    [seon.render.live-tile]
-    ;; Root's SYSTEM VIEW — the `/` dashboard = root's live-tile content.
+    [seon.render.canvas]
+    ;; Root's SYSTEM VIEW — the `/` dashboard = root's canvas content.
     ;; Required so the build includes it and `system-view`'s symbol resolves
-    ;; via eval/lookup-value when render-agent-tile renders root.
+    ;; via eval/lookup-value when render-agent-canvas renders root.
     [seon.render.system]
     ;; Routing-as-data — the `:seon.route/*` schema + the seeded core route
     ;; set; boot-seed! transacts (route/core-routes-tx). Required here so the
@@ -148,15 +148,15 @@
     ;; available on demand and are not standing context blocks.
     ;; Required here so its register! calls run and the build includes it.
     [my.skills]
-    ;; The live-tile/canvas TOOLKIT — the aggregation (`my.data`) + static
-    ;; (`my.ui`) + interactive (`my.tile`) functions the agent composes its
+    ;; The canvas/canvas TOOLKIT — the aggregation (`my.data`) + static
+    ;; (`my.ui`) + interactive (`my.canvas`) functions the agent composes its
     ;; canvas from. Required here so they BUILD + INDEX at boot (their
     ;; `:seon.fn` rows render full in the `:namespaces` block — the worked
     ;; examples, not `(no public fns indexed yet)`). They reference the
     ;; `:seon.items/*` envelope required above.
     [my.data]
     [my.ui]
-    [my.tile]
+    [my.canvas]
     ;; Content-addressed blob store — the disk tier (big text lives behind
     ;; a :my.blob/hash ref, never as datoms). Required so it builds +
     ;; indexes at boot and turn-capture/web-fetch can compose on it.
@@ -202,7 +202,7 @@
     ;; render time (no require cycle: the section nses require seon.agent.ctx
     ;; for the shared read API, seon.agent.ctx names them only as symbols).
     [seon.agent.ctx.namespaces :as nss]
-    [seon.agent.ctx.live-tile]
+    [seon.agent.ctx.canvas]
     [seon.agent.ctx.warnings]
     [seon.agent.ctx.transcript]
     [seon.agent.ctx.inventory]
@@ -1423,11 +1423,11 @@
         ;; Per-var blast-radius guard (sci-not-available incident,
         ;; 2026-06-11): CLJS var meta is UNEVALUATED data, so a
         ;; `:malli/schema` form that embeds a symbol-referenced fn
-        ;; (e.g. `[:fn live-tile/valid-hiccup?]`) needs sci — which the
+        ;; (e.g. `[:fn canvas/valid-hiccup?]`) needs sci — which the
         ;; pod doesn't bundle — and `m/schema` THROWS. One bad form
         ;; must degrade ONE row (spec omitted, loud :warn), never kill
         ;; boot + the whole context-test family. Registered forms are
-        ;; pure data by platform law (see seon.render.live-tile); this
+        ;; pure data by platform law (see seon.render.canvas); this
         ;; guard is the backstop for the metadata that isn't.
         spec    (when-some [ms (:malli/schema m)]
                   ;; probe: an m/schema throw here is the KNOWN, accepted

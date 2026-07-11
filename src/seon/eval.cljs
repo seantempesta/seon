@@ -1458,7 +1458,7 @@
 ;; has no column type, so it hard-rejects (`:seon.db/unbridgeable-attrs`).
 ;; The EDN-blob path the spec names ("stored as a pr-str'd EDN string") is
 ;; the bridge's MIXED-`:or` branch (db/internal `form->datahike-value-type`
-;; `:or`) — the SAME mechanism `:seon.render.live-tile/content` /
+;; `:or`) — the SAME mechanism `:seon.render.canvas/content` /
 ;; `:seon.render/ai` use. So this is a mixed `:or` (the require-spec vector
 ;; arm + a scalar `:symbol` arm) → `:db.type/string` EDN, decoded on read
 ;; via `seon.db/decode-edn-value`. Default = the live [[home-ns-require-specs]]

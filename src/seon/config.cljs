@@ -7,7 +7,7 @@
      1. the agent CONTEXT — the two-level `:seon.config/agent-context`
         (agent-level scalars + a `:seon.agent/ctx` block tree) the GENERIC loader
         ([[resolve-agent-context]]) decodes + transacts; `:seon.config/root-context`
-        is the sparse root override (its `:live-tile` block = the system canvas);
+        is the sparse root override (its `:canvas` block = the system canvas);
      2. routes — drop seeded `:seon.route/*` rows per cluster ([[resolve-routes]]);
      3. the global RENDER bounds — `:seon.config/render` (value/eval/message
         display caps), read by the [[store-edn-cap]] etc. accessors.
@@ -210,7 +210,7 @@
    [:seon.agent/ctx {:optional true :default []} [:vector :map]]])
 
 ;; The ROOT override — a SPARSE agent-context merged over `:seon.config/agent-context`
-;; by [[context-config-for]] (block upsert-by-name). Its `:live-tile` block sets
+;; by [[context-config-for]] (block upsert-by-name). Its `:canvas` block sets
 ;; root's canvas = `system-view`, REPLACING the hardcoded client.cljs root branch.
 ;; NOT decoded through the transformer directly (it's a partial override layer);
 ;; only the MERGED result is decoded. Same loose `[:vector :map]` leaf shape.
@@ -550,7 +550,7 @@
    in `seon.agent.ctx.namespaces`). `config/system.edn` mirrors this list
    verbatim for visibility; a lean cluster overrides it with a short explicit
    list (the curation lever)."
-  {:seon.config/always     '[my.kb my.data my.ui my.tile
+  {:seon.config/always     '[my.kb my.data my.ui my.canvas
                              my.plan seon.agent.message seon.agent.lifecycle]
    :seon.config/current-ns :full})
 
@@ -1223,8 +1223,8 @@
 (defn- upsert-by-name
   "Layer `additions` over `base` by `:seon.agent.ctx/name`, MERGING an
    addition's attrs OVER the matching base block IN PLACE — so a sparse
-   override that sets ONE sub-key (e.g. root/acme's `:live-tile` setting
-   only `:seon.render.live-tile/content`) KEEPS the default block's other
+   override that sets ONE sub-key (e.g. root/acme's `:canvas` setting
+   only `:seon.render.canvas/content`) KEEPS the default block's other
    attrs (`:seon.agent.ctx/priority`, `:seon.render/ai`, ...). This is the
    third-party-first contract: a manifest overriding a block need only name
    the sub-keys it changes, never re-specify the whole block. A name absent

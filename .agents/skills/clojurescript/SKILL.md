@@ -111,7 +111,7 @@ Note: bare `seon.eval/eval` does NOT auto-await; only the
 Two silent footguns from "what is actually callable" in CLJS:
 
 - **`(fn [])` is a strict zero-arity fn; `constantly` is variadic.** A callback
-  the caller invokes WITH args (a `.then` handler, a tile/render fn, a
+  the caller invokes WITH args (a `.then` handler, a canvas/render fn, a
   multimethod/`reduce` step, an event handler) blows up on `(fn [] body)` with
   an `Invalid arity: 1` -- the fn declares exactly zero params. Use
   `(constantly v)` (-> `(fn [& _] v)`, swallows any args) for a value-returning

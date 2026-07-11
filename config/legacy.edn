@@ -2,7 +2,7 @@
 ;; LEGACY — the pre-cutover default context (frozen 2026-07-11).
 ;; Kept ONLY for comparison drives against the rebuilt minimal tree
 ;; (docs/prds/agent-ctx/context-rebuild.md). Never a fallback.
-;; EXPIRES: delete after the db + warnings + live-tile milestones land.
+;; EXPIRES: delete after the db + warnings + canvas milestones land.
 ;; NOTE: this file intentionally does NOT set :seon.agent/ctx — the old
 ;; block tree comes from the in-code seon.config/default-ctx-blocks,
 ;; which is itself deprecated reference (Phase 0 labels it).
@@ -55,7 +55,7 @@
  ;; :require's as compact cards; render selection is the home-requires list
  ;; below. (Mirrors seon.config/default-namespaces-policy.)
  :seon.config/namespaces
- {:seon.config/always     [my.kb my.data my.ui my.tile
+ {:seon.config/always     [my.kb my.data my.ui my.canvas
                            my.plan seon.agent.message seon.agent.lifecycle]
   :seon.config/current-ns :full}
 
@@ -181,7 +181,7 @@
    [my.kb :as kb]
    [my.data :as data]
    [my.ui :as ui]
-   [my.tile :as tile]
+   [my.canvas :as canvas]
    [my.blob :as blob]
    [seon.agent.search :as search]
    [seon.agent.fs :as fs]
@@ -189,7 +189,7 @@
    [seon.agent.web :as web]]}
 
  ;; ── ROOT-CONTEXT — a SPARSE override merged over :seon.config/agent-context
- ;; by IDENTITY (id "root"), block upsert-by-:seon.agent.ctx/name. The :live-tile
+ ;; by IDENTITY (id "root"), block upsert-by-:seon.agent.ctx/name. The :canvas
  ;; block sets root's canvas = the system/fleet dashboard, the config-driven
  ;; replacement for the hardcoded client.cljs root branch.
  ;;
@@ -210,14 +210,14 @@
    [my.kb :as kb]
    [my.data :as data]
    [my.ui :as ui]
-   [my.tile :as tile]
+   [my.canvas :as canvas]
    [seon.agent.search :as search]
    [seon.agent.fs :as fs]
    [seon.agent :as agent]]
   :seon.agent/ctx
-  [{:seon.agent.ctx/name :live-tile :seon.agent.ctx/priority 35
-    :seon.render/ai seon.agent.ctx.live-tile/live-tile-block
-    :seon.render.live-tile/content seon.render.system/system-view}
+  [{:seon.agent.ctx/name :canvas :seon.agent.ctx/priority 35
+    :seon.render/ai seon.agent.ctx.canvas/canvas-block
+    :seon.render.canvas/content seon.render.system/system-view}
    ;; ROOT-ONLY (owner ruling, error-blame-strict-gate 2026-07-04): the
    ;; :core-fault section renders on the root world only — other agents see
    ;; nothing (core bugs are not theirs to fix; the affected agent already

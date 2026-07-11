@@ -211,8 +211,8 @@
 
 ;; ============================================================
 ;; 4b. Roster tiles carry the agent's canvas COMPACT FACE (2026-07-11):
-;; each non-root tile embeds `render/render-agent-tile`'s hiccup (the
-;; agent's live tile — pinned content, else derived, else the welcome
+;; each non-root tile embeds `render/render-agent-canvas`'s hiccup (the
+;; agent's canvas — pinned content, else derived, else the welcome
 ;; card) clipped + stretch-linked to `/agent/{id}`. Root is skipped by
 ;; design (root's canvas is the `/` dashboard, which itself renders this
 ;; roster — embedding would recurse). Assert the MECHANISM (the preview

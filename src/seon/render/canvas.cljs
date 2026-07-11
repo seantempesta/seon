@@ -1,5 +1,5 @@
-(ns seon.render.live-tile
-  "The live tile — the ONE thing an agent is currently conveying to
+(ns seon.render.canvas
+  "The canvas — the ONE thing an agent is currently conveying to
    its human (a chart, a status, a list — whatever the human asked
    for). One wired value renders at every zoom surface: the root grid
    (compact), the agent view (expanded), and — as an ai render — the
@@ -8,7 +8,7 @@
 
    ## Wiring the tile
 
-   ONE attr on your agent entity: `:seon.render.live-tile/content`.
+   ONE attr on your agent entity: `:seon.render.canvas/content`.
    Its value follows the `:seon.render/html` semantics exactly:
 
    - a LITERAL HICCUP vector for static content — `[:h1 \"hi\"]`
@@ -21,7 +21,7 @@
        (seon.db/transact!
          {:seon.db/tx-data
           [{:seon.agent/id (seon.db/current-agent-id)
-            :seon.render.live-tile/content 'my.workouts/chart-tile}]})
+            :seon.render.canvas/content 'my.workouts/chart-tile}]})
 
    ## The two renders
 
@@ -92,7 +92,7 @@
 
    ## Who calls what
 
-   `seon.render/render-agent-tile` is the one entry point: it calls
+   `seon.render/render-agent-canvas` is the one entry point: it calls
    [[wired-content]] to resolve WHICH value is wired
    (`::content` pin → the caller-derived last-updated tile → [[welcome]]),
    invokes it
@@ -307,7 +307,7 @@
 ;; as the `[:fn]` arm did.
 (schema/register! ::hiccup [:and [:vector :any] [:cat :keyword [:* :any]]])
 
-;; THE live-tile key — qualified fn symbol OR literal hiccup, stored
+;; THE canvas key — qualified fn symbol OR literal hiccup, stored
 ;; as a pr-str'd EDN string by the mixed-:or bridge, decoded on read
 ;; via `seon.db/decode-edn-value`. `:seon.render/html` references
 ;; this shape (deliberate uniformity — agents already know that
@@ -322,7 +322,7 @@
 ;; Where the wired value came from — the tile's provenance. Rendered
 ;; into the agent's awareness section header so the agent always sees
 ;; HOW to change the display. (The legacy `:seon.render/html` arm was
-;; deleted in the render sweep — PRD live-tiles §8.1, no legacy: that
+;; deleted in the render sweep — PRD canvas §8.1, no legacy: that
 ;; key now means ONLY the generic entity-tile render slot.)
 (schema/register! ::source [:enum ::content ::derived ::welcome])
 
@@ -369,13 +369,13 @@
 (def welcome-sym
   "The core default tile — [[welcome]], late-resolved like any
    other wired symbol (the default eats the same dogfood)."
-  'seon.render.live-tile/welcome)
+  'seon.render.canvas/welcome)
 
 (defn wired-content
-  "Resolve WHICH value is the agent's live tile, with provenance.
+  "Resolve WHICH value is the agent's canvas, with provenance.
 
    Resolution on the pulled agent `:seon.render/entity`:
-   `:seon.render.live-tile/content` (THE tile key — the PIN) when
+   `:seon.render.canvas/content` (THE tile key — the PIN) when
    present; else the caller-supplied `::derived` symbol (the agent's
    last-updated tile — the derived default, see
    `seon.agent.ctx.render-fns/last-updated-tile`); else [[welcome-sym]]
@@ -384,7 +384,7 @@
    `:seon.render/html` nor the `:seon.agent` KIND default is consulted
    — that key means ONLY the generic entity-tile render slot (one key,
    one meaning; the legacy tile fallback was deleted per PRD
-   live-tiles-prd-2026-06-11 §8.1).
+   canvas-prd-2026-06-11 §8.1).
 
    Values arrive pr-str-encoded from the mixed-:or bridge; the attr
    read decodes via `seon.db/decode-edn-value`."
@@ -415,7 +415,7 @@
 
     ::derived
     (str value " (derived — your last-updated tile; transact "
-         ":seon.render.live-tile/content to pin a different one)")
+         ":seon.render.canvas/content to pin a different one)")
 
     ::welcome
     (str value " (the core default — wire your own)")))
@@ -541,7 +541,7 @@
          [:div {:class "text-xs text-text-400 italic"} tile-line]])]
      :seon.render/ai
      (str "Welcome — your tile is showing the core default "
-          "(point :seon.render.live-tile/content at your own fn to "
+          "(point :seon.render.canvas/content at your own fn to "
           "replace it). Your human currently sees — in the root grid "
           "(compact): "
           (if purpose
@@ -554,12 +554,12 @@
           "; expanded (the agent view): \"" greet-line "\" with "
           date-str " " time-str ", your purpose line, and: \""
           tile-line "\" "
-          "To replace it, transact :seon.render.live-tile/content onto "
+          "To replace it, transact :seon.render.canvas/content onto "
           "your agent entity — a qualified fn symbol or literal hiccup.")}))
 
 ;; ============================================================
 ;; Creation wiring — the eval every NEW agent runs as its first
-;; logged act (live-tiles PRD 2026-06-11 §6 U4, minimal scope).
+;; logged act (canvas PRD 2026-06-11 §6 U4, minimal scope).
 ;;
 ;; ONE canonical definition of the wiring form, AS DATA (a source
 ;; string), so the boot path (seon.client/creation-evals!) and the
@@ -586,7 +586,7 @@
     ";; I am an entity in the shared store — everything about me is data,\n"
     ";; and I change myself by transacting to my own lookup ref: the\n"
     ";; identity attr :seon.agent/id in this map addresses MY entity.\n"
-    ";; First act: wire my live tile (the tile my human sees) to the\n"
+    ";; First act: wire my canvas (the tile my human sees) to the\n"
     ";; core welcome fn. Any fn returning\n"
     ";; {:seon.render/hiccup … :seon.render/ai …} can go here — when I\n"
     ";; have something better to show, I define a fn and point this\n"
@@ -594,7 +594,7 @@
     "(seon.db/transact!\n"
     "  {:seon.db/tx-data\n"
     "   [{:seon.agent/id " (pr-str agent-id) "\n"
-    "     :seon.render.live-tile/content '" welcome-sym "}]})\n"))
+    "     :seon.render.canvas/content '" welcome-sym "}]})\n"))
 
 ;; ============================================================
 ;; Errors are legible — a broken tile never silently vanishes.
@@ -602,7 +602,7 @@
 ;; ONE overridable seam ([[error-tile]]) renders the ERROR-TILE surfaces
 ;; (entity render, agent-view slot, a render failure); a consumer `set!`s it to
 ;; a branded card (acme does) and the override carries across them all.
-;; The live-tile HERO ([[error-response]]) is the deliberate EXCEPTION: it
+;; The canvas HERO ([[error-response]]) is the deliberate EXCEPTION: it
 ;; stays CALM — the human never sees the failure there (it rides the agent
 ;; twin), so the hero does NOT route through the seam.
 ;; ============================================================
@@ -628,7 +628,7 @@
 (def error-tile
   "THE one overridable error-tile seam — a fn `(fn [:seon/error] → hiccup)`
    the error-tile surfaces call (entity render, slot, a render failure) —
-   NOT the calm live-tile hero ([[error-response]]). A consumer `set!`s
+   NOT the calm canvas hero ([[error-response]]). A consumer `set!`s
    this var to a branded card and the override carries across those
    surfaces (the late-binding `set!` pattern acme already uses). Defaults
    to [[default-error-tile]]. One error renderer, no forks."
@@ -644,7 +644,7 @@
    the truth: the `:seon.render/ai` render carries the failure (awareness
    section) and the full `:seon.error/*` envelope rides on `:seon.render/error`.
    Breakage is a DERIVED surface only (#43 / D2) — the
-   `:seon.agent.ctx.live-tile/live-tile-block` re-derives this render into the
+   `:seon.agent.ctx.canvas/canvas-block` re-derives this render into the
    agent's context EVERY turn (a pure fn of state, no stored flag,
    self-healing on the next clean render). There is NO active push: a forged
    self-message would wake the agent and defeat the loop's halt. So the human
@@ -665,8 +665,8 @@
        [:div {:class "text-xs text-text-400 italic"}
         "I'm refining what I show here."]]]
      :seon.render/ai
-     (str "YOUR LIVE TILE IS BROKEN — the wired renderer (" wired-str
+     (str "YOUR CANVAS IS BROKEN — the wired renderer (" wired-str
           ") threw: " msg ". Your human sees a calm 'updating this tile' "
           "placeholder, not your content. Fix the fn, or transact a working "
-          "value onto :seon.render.live-tile/content.")
+          "value onto :seon.render.canvas/content.")
      :seon.render/error error}))

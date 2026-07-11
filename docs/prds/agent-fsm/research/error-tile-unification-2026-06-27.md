@@ -10,13 +10,13 @@ tags: [research, web, agent]
 
 Seon renders an error tile in **four** hardcoded places (the prompt said three;
 it missed one and its line refs are stale — see §1). A downstream consumer can
-override only ONE of them today (`seon.render.live-tile/error-response`, which
+override only ONE of them today (`seon.render.live-canvas/error-response`, which
 acme brands), so acme's calm card carries to the legacy live-tile hero but
 **no-ops on the new world page** (`/agent/{id}`) — proven by `eb04736b`.
 
 **Core is already mid-fix in its working tree (uncommitted, +80 lines on
 `render.cljs`).** Core chose to route `slot` + `render` errors *through the
-existing* `live-tile/error-response` via a private `error-tile-hiccup` helper
+existing* `live-canvas/error-response` via a private `error-tile-hiccup` helper
 (render.cljs:679-692) — the right instinct (reuse the one overridable seam, no
 new parallel var), but it (a) leaves `render-entity-html`'s catch hardcoded, and
 (b) **overloads** `error-response` (a *live-tile*-specific html-response that
@@ -25,7 +25,7 @@ param) as the generic slot/world error source, discarding its ai render and
 feeding it a synthetic minimal error.
 
 **Recommended design (B): promote the seam, don't overload `error-response`.**
-Introduce ONE pure overridable seam `seon.render.live-tile/error-tile`
+Introduce ONE pure overridable seam `seon.render.live-canvas/error-tile`
 (`(fn [:seon/error] → hiccup)`, late-bindable by `set!` exactly like
 `error-response` is today). `error-response` *delegates* its hiccup to it; the
 four render sites call it directly; acme `set!`s `error-tile` instead of
@@ -55,7 +55,7 @@ is clean at HEAD. Line numbers below are the **current on-disk** state.
 | 1 | `render-entity-html` catch | `render.cljs:375-381` | hardcoded `[:div …border-error/40…] "⚠ render error"` | **NO** |
 | 2 | `render` catch (html view) | `render.cljs:716-720` → `error-tile-hiccup` (WIP) | now routes through `error-response` | yes (via error-response) |
 | 3 | `slot` missing/threw | `render.cljs:776,783` → `error-tile-hiccup` (WIP) | now routes through `error-response` | yes (via error-response) |
-| 4 | `live-tile/error-response` | `live_tile.cljs:559-591` | the calm card acme overrides | **yes** (acme `set!`s it) |
+| 4 | `live-canvas/error-response` | `live_tile.cljs:559-591` | the calm card acme overrides | **yes** (acme `set!`s it) |
 | — | `error-tile-hiccup` floor | `render.cljs:688-692` (WIP) | last-resort hardcoded div if error-response itself throws | n/a (never-crash floor) |
 
 Prompt-vs-reality corrections (report these to the orchestrator):
@@ -81,14 +81,14 @@ override-carries goal. Flagged, not fixed.
 
 ### Why acme's override no-ops on the world page (the `eb04736b` proof)
 
-`acme.overrides` does `(set! live-tile/error-response …)`. Before Core's WIP,
+`acme.overrides` does `(set! live-canvas/error-response …)`. Before Core's WIP,
 sites 2 + 3 were hardcoded divs that never called `error-response`, so on the
 world page (`/agent/{id}`, which renders blocks via `render/slot`) a throwing
 block produced the stock div, not acme's card. acme.world already installs
 `acme.widget/broken-tile` two ways — onto a `:acme-broken` ctx block (the new
-slot path) AND onto `:seon.render.live-tile/content` (the error-response path) —
+slot path) AND onto `:seon.render.live-canvas/content` (the error-response path) —
 and the commit's own finding records: "the new world/slot error path does NOT
-route through the overridable `live-tile/error-response`."
+route through the overridable `live-canvas/error-response`."
 
 ---
 
@@ -152,7 +152,7 @@ callee's global var slot; an EXISTING compiled caller reads that slot at call
 time"). `seon.client.extra-core-test` is the standing proof this pattern works.
 
 **Why it lives in `live-tile`, not `seon.render`:** `seon.render` requires
-`seon.render.live-tile` (render.cljs:36) and calls `live-tile/error-response`
+`seon.render.live-tile` (render.cljs:36) and calls `live-canvas/error-response`
 (render.cljs:478/686). `error-response` lives in `live-tile`; for it to delegate
 its hiccup to the seam without a require cycle, the seam must be at-or-below
 `live-tile`. The prompt's `seon.render/error-tile` name would force
@@ -160,7 +160,7 @@ its hiccup to the seam without a require cycle, the seam must be at-or-below
 worse than a direct ref at the dependency floor. The var name is the only place
 I diverge from the prompt; it is forced by the require graph.
 
-**Override model (acme):** `(set! seon.render.live-tile/error-tile branded-fn)`.
+**Override model (acme):** `(set! seon.render.live-canvas/error-tile branded-fn)`.
 One `set!` carries to all four sites because each reads the var at call time.
 acme's existing `error-response` override is **deleted** — `error-response` keeps
 building the agent-facing `:seon.render/ai` (core), and only its *hiccup* flows
@@ -186,8 +186,8 @@ consumer's branded override)".
 
 | Half | Lives in | What |
 |---|---|---|
-| **Core (render engine — gated, diff only)** | `src/seon/render/live_tile.cljs`, `src/seon/render.cljs` | the `error-tile` var + `default-error-tile`; `error-response` hiccup → `(error-tile error)`; migrate the 4 render sites to call `live-tile/error-tile`; **delete the WIP `error-tile-hiccup`** |
-| **UI / acme (Phase 8)** | `acme/src/acme/overrides.cljs`, `docs/prds/agent-fsm/ui.md` | swap acme's `set!` from `error-response` → `error-tile`; fix the "Total override" table's error row to name `live-tile/error-tile` |
+| **Core (render engine — gated, diff only)** | `src/seon/render/live_tile.cljs`, `src/seon/render.cljs` | the `error-tile` var + `default-error-tile`; `error-response` hiccup → `(error-tile error)`; migrate the 4 render sites to call `live-canvas/error-tile`; **delete the WIP `error-tile-hiccup`** |
+| **UI / acme (Phase 8)** | `acme/src/acme/overrides.cljs`, `docs/prds/agent-fsm/ui.md` | swap acme's `set!` from `error-response` → `error-tile`; fix the "Total override" table's error row to name `live-canvas/error-tile` |
 
 Deviation from the prompt's lane guess: the prompt put "the default error-tile
 html render fn" in UI's half. The require cycle forces the seam **and its
@@ -282,7 +282,7 @@ OLD:
 NEW:
 ```clojure
         (catch :default e
-          (live-tile/error-tile
+          (live-canvas/error-tile
             {:seon.error/message (str sym " threw: " (or (.-message e) (str e)))
              :seon.error/symbol  sym}))
 ```
@@ -302,7 +302,7 @@ NEW:
         (catch :default e
           (if (= view :seon.render/ai)
             (str ";; ⚠ [" (renderable-id node) "] render failed: " (ex-message e))
-            (live-tile/error-tile
+            (live-canvas/error-tile
               {:seon.error/message (str (renderable-id node) " — " (ex-message e))})))
 ```
 
@@ -324,7 +324,7 @@ OLD:
 NEW:
 ```clojure
         body  (if (nil? block)
-                (live-tile/error-tile
+                (live-canvas/error-tile
                   {:seon.error/message (str "no block named " block-name " on "
                                             (or id "this agent"))
                    :seon.error/where   block-name
@@ -332,14 +332,14 @@ NEW:
                 (try
                   (render :seon.render/html (assoc ctx :seon.db/db db) block)
                   (catch :default e
-                    (live-tile/error-tile
+                    (live-canvas/error-tile
                       {:seon.error/message (str block-name " render failed: "
                                                 (err/->message e))
                        :seon.error/where   block-name}))))]
 ```
 
 No new requires: `render.cljs` already aliases `live-tile` (36) and `err` (33).
-Calling `live-tile/error-tile` from `render-entity-html` (line ~375, above the
+Calling `live-canvas/error-tile` from `render-entity-html` (line ~375, above the
 deleted helper) is a cross-ns ref to a fully-loaded ns — no forward-reference
 warning, the reason the seam at the dependency floor is cleaner than Core's
 in-ns `error-tile-hiccup` (which forced ordering gymnastics for site (ii)).
@@ -351,9 +351,9 @@ override):
 
 OLD:
 ```clojure
-(defonce ^:private orig-error-response live-tile/error-response)
+(defonce ^:private orig-error-response live-canvas/error-response)
 
-(set! live-tile/error-response
+(set! live-canvas/error-response
       (fn acme-error-response [req]
         (assoc (orig-error-response req)
                :seon.render/hiccup
@@ -363,7 +363,7 @@ OLD:
 ```
 NEW:
 ```clojure
-(set! live-tile/error-tile
+(set! live-canvas/error-tile
       (fn acme-error-tile [_error]
         [:div {:class "seon-tile"}
          [:div {:class "seon-tile-compact p-3 text-xs text-text-300 italic"}
@@ -381,7 +381,7 @@ The error layer is currently absent from the table (and coordination.md notes th
 table "OVERSELLS — fix when #12 lands"). Add the row:
 
 ```markdown
-| **error tile (any surface)** | `set!` `seon.render.live-tile/error-tile` | seon's `default-error-tile` |
+| **error tile (any surface)** | `set!` `seon.render.live-canvas/error-tile` | seon's `default-error-tile` |
 ```
 
 ---
@@ -395,7 +395,7 @@ gaps:
 
 1. **Migrate `render-entity-html`'s catch** (render.cljs:375-381) to
    `error-tile-hiccup` (the §5b-ii change, but calling `error-tile-hiccup` instead
-   of `live-tile/error-tile`). Because `error-tile-hiccup` is defined LATER in the
+   of `live-canvas/error-tile`). Because `error-tile-hiccup` is defined LATER in the
    ns (679) than `render-entity-html` (344), add `error-tile-hiccup` to a
    top-of-ns `declare` (there is already `(declare render slot)` at 586 — move it
    up or add a second), OR relocate `error-tile-hiccup` to just after
@@ -435,7 +435,7 @@ breakage window.
 
 acme is the harness (pod 7980, wire-REPL 7981, store `data/clusters/acme`).
 acme.world already installs `acme.widget/broken-tile` onto the `:acme-broken`
-ctx block (the new world/slot path) AND onto `:seon.render.live-tile/content`
+ctx block (the new world/slot path) AND onto `:seon.render.live-canvas/content`
 (the error-response path).
 
 1. `bin/acme build && bin/acme restart pod` (acme bundle is not watched).
@@ -448,7 +448,7 @@ ctx block (the new world/slot path) AND onto `:seon.render.live-tile/content`
    the fix the world slot shows the hardcoded `default-error-tile`/`error-tile-
    hiccup` floor; after, it shows acme's branded card — proving the single
    `error-tile` override carries to the NEW world page.
-4. Confirm the live-tile hero (`/agent/{id}`, the `:seon.render.live-tile/content`
+4. Confirm the live-tile hero (`/agent/{id}`, the `:seon.render.live-canvas/content`
    path) ALSO shows the acme card (regression check — error-response delegates to
    the same overridden seam), and that the agent's awareness/live-tile context
    block still carries the core `:seon.render/ai` "YOUR LIVE TILE IS BROKEN" line
@@ -471,7 +471,7 @@ doc. Paste this under the task #12 recommendation at `coordination.md:128-132`.)
 > in this rec is resolved: do NOT add a new `seon.render/error-tile` var (the
 > require cycle forbids it — `render` requires `live-tile`, where `error-response`
 > lives). Promote Core's WIP `error-tile-hiccup` into ONE public overridable seam
-> **`seon.render.live-tile/error-tile`** (`(fn [:seon/error] → hiccup)`, `set!`-
+> **`seon.render.live-canvas/error-tile`** (`(fn [:seon/error] → hiccup)`, `set!`-
 > overridable). `error-response` delegates its hiccup to it; the FOUR render
 > sites (note: 4, not 3 — `render-entity-html:375-381`, `render:716-720`,
 > `slot:776/783`, `error-response`) call it directly; acme swaps its `set!` from

@@ -167,11 +167,11 @@ is a tile. All pages are agent views — one mechanism, a tree of routes:
   human's focus follows what the agent is actively doing, and the agent
   *knows* it does, since it's derived from the agent's own last write (the
   shared-view property, [[context]]). The agent overrides by pinning
-  `:seon.render.live-tile/content` to a specific tile to feature it
+  `:seon.render.canvas/content` to a specific tile to feature it
   regardless of recency (retracting the pin falls back to derived; the
   derived tile is skipped as its own auto-run block, same as a pin). With
   neither a pin nor any authored tile yet, the default
-  (`seon.render.live-tile/welcome`) LEADS with the agent's latest reply as a
+  (`seon.render.canvas/welcome`) LEADS with the agent's latest reply as a
   markdown card, falling back to the greeting only before the agent has
   spoken.
 - **the root agent’s view** (`/`) — the all-agents overview IS the **root
@@ -182,7 +182,7 @@ is a tile. All pages are agent views — one mechanism, a tree of routes:
   view (`/`) → per-agent views (`/agent/{id}`) → apps. (Root's
   lifecycle/orchestrator facet lives in [[agent-runtime]]; here it is just the
   agent whose view is `/`.) It is the same page as any `/agent/{id}` view,
-  with `seon.render.system/system-view` as its canvas (its live-tile content).
+  with `seon.render.system/system-view` as its canvas (its canvas content).
 - **debug view** (`/agent/{id}/debug`) — the exact AI context grouped into
   collapsible blocks, with HTML twins alongside when present. It also derives
   the total prompt token estimate, per-block token breakdown, cache boundary,
@@ -352,9 +352,9 @@ acme cluster's NEW per-agent page (`/agent/{id}`), not just the legacy console:
 | **block set** (supporting tiles) | `ctx/install!` / `ctx/remove!` from acme's own nses | seon's seeded set |
 | **seed block tree per cluster** | `config/system.edn` (selected by `SEON_CONFIG`) `:seon.config/agent-context` / `:seon.config/root-context` block tree + route-`removes` | seon's `default-seed-blocks` |
 | **a tile's look** | the block's `:seon.render/html` symbol | seon's html render fn |
-| **focal `#view-canvas` (the live tile)** | the agent's `:seon.render.live-tile/content` symbol | seon's `welcome` tile |
-| **the calm hero error (a broken live tile)** | `set!` of `seon.render.live-tile/error-response` (the CALM hero — keeps the agent-facing `:seon.render/ai`/`:seon.render/error`, swaps only the human hiccup) | seon's "updating this tile" card |
-| **slot / view / entity error tiles** | `set!` of `seon.render.live-tile/error-tile` (the `(fn [:seon/error] → hiccup)` seam the `render` / `slot` / `render-entity-html` catches call) | seon's `default-error-tile` (informative card) |
+| **focal `#view-canvas` (the canvas)** | the agent's `:seon.render.canvas/content` symbol | seon's `welcome` tile |
+| **the calm hero error (a broken canvas)** | `set!` of `seon.render.canvas/error-response` (the CALM hero — keeps the agent-facing `:seon.render/ai`/`:seon.render/error`, swaps only the human hiccup) | seon's "updating this tile" card |
+| **slot / view / entity error tiles** | `set!` of `seon.render.canvas/error-tile` (the `(fn [:seon/error] → hiccup)` seam the `render` / `slot` / `render-entity-html` catches call) | seon's `default-error-tile` (informative card) |
 | **root agent’s view (`/`)** | the `/` route handler symbol (root's agent-view layout) | seon's root agent-view layout |
 | **routes / apps** | `:seon.route/*` rows | seeded core routes |
 | **brand head — name / tagline / CSS** | `SEON_BRAND_NAME` / `SEON_BRAND_TAGLINE` / `SEON_BRAND_CSS` (on every shim `<head>`, incl. `/agent/{id}`) | seon defaults / Phosphor |
@@ -365,13 +365,13 @@ where it already wires its overrides. There are **two error seams**, and acme
 `set!`s BOTH so every error surface on the page is branded:
 
 - the **focal `#view-canvas`** flows through the LIVE-TILE path:
-  `view-layout`'s canvas IS `render-agent-tile` resolving the agent's
-  `:seon.render.live-tile/content`, and a throwing tile routes through the CALM
-  hero seam `seon.render.live-tile/error-response` (the human never sees the
+  `view-layout`'s canvas IS `render-agent-canvas` resolving the agent's
+  `:seon.render.canvas/content`, and a throwing tile routes through the CALM
+  hero seam `seon.render.canvas/error-response` (the human never sees the
   failure here — it rides the agent twin, so the hero does NOT delegate).
 - the **slot / view / entity error tiles** (`render` / `slot` /
   `render-entity-html` catches) route through the SEPARATE
-  `seon.render.live-tile/error-tile` var (`(fn [:seon/error] → hiccup)`,
+  `seon.render.canvas/error-tile` var (`(fn [:seon/error] → hiccup)`,
   defaulting to `default-error-tile`).
 
 One `set!` per seam — two lines in `acme.overrides` — brands every error tile on
@@ -379,7 +379,7 @@ the page.
 
 Acceptance (proven server-side on `/agent/{id}`, agent `zeG-2606272150`, acme
 cluster port 7980 — gunzipped feed, not inference): with acme's
-`:seon.render.live-tile/content` wired to `acme.widget/broken-tile` (a throwing
+`:seon.render.canvas/content` wired to `acme.widget/broken-tile` (a throwing
 tile) and its blocks installed via `ctx/install!`, the focal `#view-canvas`
 (via `error-response`) and the `#tile-acme-broken` slot (via `error-tile`) BOTH
 render acme's branded `"Acme is preparing this view…"` card — NOT seon's stock
@@ -406,7 +406,7 @@ link and read it.
 - [[architecture]] — the map: glossary, the cross-cutting principles, deployment topology.
 - [[data-model]] — the block / `:seon.route/*` / `:seon/error` schemas these renders read, and the `my.*` domains.
 - [[agent-runtime]] — the loop that assembles the prompt, the bootstrap that seeds blocks, and the run-status block's data source (`derive-status`).
-- [[toolkit]] — `my.tile` and the agent functions that drive the live tile.
+- [[toolkit]] — `my.canvas` and the agent functions that drive the canvas.
 - [[context-rebuild]] — the governing arc for knowledge-on-demand (cards + state-gated teaching + pull); the `my.skills` loadable-skills facade retires ([[loadable-skills]] is the deprecated reference).
 - [[roadmap]] — current code state + the dependency-ordered migration to this target (Lane U).
 - [[datahike-primer]] — the datahike-in-the-grain mindset.

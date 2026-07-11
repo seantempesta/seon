@@ -38,14 +38,14 @@
     [seon.db :as db]
     [seon.error :as err]
     [seon.eval :as seval]
-    [seon.render.live-tile :as live-tile]
+    [seon.render.canvas :as canvas]
     [seon.render.sci :as render-sci]
     [seon.schema :as schema]))
 
 (def auto-run-priority
   "The derived blocks' `:seon.agent.ctx/priority` — context.md group 3:
    right after the stable code (`:namespaces` = 20), before the volatile
-   tail (`:live-tile` = 35)."
+   tail (`:canvas` = 35)."
   30)
 
 (def ^:private twin-keys
@@ -455,19 +455,19 @@
    Runs the node's `::fn-sym` through [[run-render-fn]] and returns its
    `:seon.render/hiccup` (envelope or bare vector); nil renders nothing. An
    interrupt / error / wrong shape becomes the ONE `:seon/error` tile in
-   place ([[seon.render.live-tile/error-tile]]) — the render pass survives."
-  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.live-tile/hiccup]]}
+   place ([[seon.render.canvas/error-tile]]) — the render pass survives."
+  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.canvas/hiccup]]}
   [in]
   (let [sym (::fn-sym (:seon.render/node in))
         r   (run-render-fn in :seon.render/html)]
     (cond
       (and (map? r) (:seon.render.sci/interrupt r))
-      (live-tile/error-tile
+      (canvas/error-tile
         {:seon.error/message (str sym " did not terminate within its budget")
          :seon.error/where   :auto-run
          :seon.error/hint    "render fns must be fast, terminating db→view derivations"})
       (and (map? r) (:seon.render.sci/error r))
-      (live-tile/error-tile
+      (canvas/error-tile
         (assoc (:seon.render.sci/error r) :seon.error/where :auto-run
                :seon.error/symbol sym))
       :else
@@ -475,7 +475,7 @@
         (cond
           (nil? h)    nil
           (vector? h) h
-          :else (live-tile/error-tile
+          :else (canvas/error-tile
                   {:seon.error/message (str sym " returned a non-hiccup "
                                             ":seon.render/hiccup — fix its output")
                    :seon.error/where   :auto-run}))))))

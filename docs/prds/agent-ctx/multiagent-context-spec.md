@@ -17,7 +17,7 @@ results, an enforced depth bound, and orphan surfacing).
 
 - **Visibility = direct children only.** An agent's subagents section shows
   the agents it spawned, not the whole subtree. Root's *dashboard*
-  (`system-view` live-tile) keeps showing the whole fleet — unchanged.
+  (`system-view` canvas) keeps showing the whole fleet — unchanged.
 - **Spawn depth cap = 1.** Root (depth 0) may spawn; a spawned agent
   (depth 1) may NOT spawn. Enforced as a computed structural rule (walk
   `:seon.agent/parent` chain) inside `start!`'s own body — a config-dialable

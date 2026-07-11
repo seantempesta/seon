@@ -24,6 +24,19 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
+# A Ctrl-C during the final `node | tee` pipeline used to leave the Node test
+# child reparented to launchd, where it kept a CPU core busy indefinitely.
+# Kill every direct child while this shell still owns them; normal completion
+# has no live children, so the EXIT arm is a no-op.
+cleanup_children() {
+  local children
+  children="$(pgrep -P $$ 2>/dev/null || true)"
+  if [ -n "$children" ]; then
+    kill $children 2>/dev/null || true
+  fi
+}
+trap cleanup_children EXIT INT TERM
+
 # Fail-loud render dial (seon.config/render-strict?): ON by default in the
 # test harness so a swallowed render/converter failure SCREAMS (throws with
 # the offending block + the full malli explain) the moment it happens,

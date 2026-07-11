@@ -168,7 +168,7 @@ against a live agent id.
 
 ### 6.1 A hung tile no longer freezes the pod
 
-Wire a non-terminating fn as the agent's live-tile and confirm it aborts at the
+Wire a non-terminating fn as the agent's canvas and confirm it aborts at the
 wall-clock budget instead of wedging the single pod thread:
 
 ```clojure
@@ -177,12 +177,12 @@ wall-clock budget instead of wedging the single pod thread:
   {:seon.db/tx-data [{:seon.fn/sym "my.t/hang"
                       :seon.fn/source "(defn hang [m] (loop [] (recur)))"}
                      {:seon.agent/id "<id>"
-                      :seon.render.live-tile/content 'my.t/hang}]})
-(seon.render/render-agent-tile {:seon.agent/id "<id>"})
+                      :seon.render.canvas/content 'my.t/hang}]})
+(seon.render/render-agent-canvas {:seon.agent/id "<id>"})
 ```
 
 Expect the `welcome` fallback within ~the budget (not a hang); `/agents` keeps
-answering; `:seon.render.live-tile/content` is retracted back to welcome; the
+answering; `:seon.render.canvas/content` is retracted back to welcome; the
 agent is messaged once (deduped). A tile that THROWS instead shows the calm
 "Updating this panel" card and notifies the agent — no crash, content kept so a
 fix takes effect. Set `SEON_TILE_SCI=0` to disable bounding. Mechanism +

@@ -4,7 +4,7 @@
    open-agent-conn! → transact :seon.ns/:seon.fn rows → replay-program-graph!
    → eval).
 
-   BUG A — SCI live-tile bounding missed UNSPECCED helpers.
+   BUG A — SCI canvas bounding missed UNSPECCED helpers.
      `expose-ns` enumerated a required ns's members ONLY from the `:seon.fn`
      index, which holds only SPECCED (`:malli/schema`-carrying) fns. A tile
      fn that calls an aliased UNSPECCED compiled helper (`h/format-count`,
@@ -70,7 +70,7 @@
        :seon.ns/source   tile-ns-source
        :seon.ns/require-edges [{:seon.ns.require/target :probe.helpers
                                 :seon.ns.require/alias  'h}]}
-      {:seon.fn/sym        "probe.tile/dash"
+      {:seon.fn/sym        "probe.canvas/dash"
        :seon.fn/ns         {:seon.ns/name :probe.tile}
        :seon.fn/source     dash-source
        :seon.fn/created-at (js/Date.)}]}))
@@ -109,11 +109,11 @@
                                   @conn))
                               "no :seon.fn row for any probe.helpers member"))
                         (testing "the tile fn itself IS resolvable + has stored source"
-                          (is (fn? (seval/lookup-value 'probe.tile/dash))))
+                          (is (fn? (seval/lookup-value 'probe.canvas/dash))))
                         ;; THE ASSERTION — post-fix, invoke-bounded returns a
                         ;; REAL render map (not fallthrough), because expose-ns
                         ;; now unions the compiled helper.
-                        (let [r (sci/invoke-bounded 'probe.tile/dash
+                        (let [r (sci/invoke-bounded 'probe.canvas/dash
                                                     {:seon.db/db @conn})]
                           (testing "invoke-bounded returns a real render map (NOT an error)"
                             (is (not (:seon.render.sci/error r))
@@ -169,7 +169,7 @@
     {:seon.db/tx-data
      [{:seon.ns/name   :data.tile
        :seon.ns/source data-tile-ns-source}
-      {:seon.fn/sym        "data.tile/dims"
+      {:seon.fn/sym        "data.canvas/dims"
        :seon.fn/ns         {:seon.ns/name :data.tile}
        :seon.fn/source     dims-source
        :seon.fn/created-at (js/Date.)}]}))
@@ -197,7 +197,7 @@
                               (str "replay had failures — " (pr-str stats))))
                         (testing "the data const IS on globalThis as a NON-fn member"
                           (is (= #{:a :b :c}
-                                 (seval/lookup-value 'data.tile/grounded-dims))
+                                 (seval/lookup-value 'data.canvas/grounded-dims))
                               "grounded-dims resolves via the globalThis walk")
                           (is (contains? (seval/ns-data-members "data.tile")
                                          'grounded-dims)
@@ -206,11 +206,11 @@
                                               'grounded-dims))
                               "ns-fn-members (fns only) does NOT — the gap the fix closes"))
                         (testing "the tile fn itself IS resolvable + has stored source"
-                          (is (fn? (seval/lookup-value 'data.tile/dims))))
+                          (is (fn? (seval/lookup-value 'data.canvas/dims))))
                         ;; THE ASSERTION — post-fix, invoke-bounded returns a
                         ;; REAL render map (not fallthrough), because expose-ns
                         ;; now merges the own-ns NON-fn data const.
-                        (let [r (sci/invoke-bounded 'data.tile/dims
+                        (let [r (sci/invoke-bounded 'data.canvas/dims
                                                     {:seon.db/db @conn})]
                           (testing "invoke-bounded returns a real render map (NOT an error)"
                             (is (not (:seon.render.sci/error r))
@@ -264,7 +264,7 @@
                     {:seon.db/tx-data
                      [{:seon.ns/name   :probe.conn-tile
                        :seon.ns/source conn-tile-ns-source}
-                      {:seon.fn/sym        "probe.conn-tile/conn-dash"
+                      {:seon.fn/sym        "probe.conn-canvas/conn-dash"
                        :seon.fn/ns         {:seon.ns/name :probe.conn-tile}
                        :seon.fn/source     conn-dash-source
                        :seon.fn/created-at (js/Date.)}]})
@@ -276,7 +276,7 @@
                       (testing "*conn* IS an enumerable NON-fn member of the live seon.db ns"
                         (is (contains? (seval/ns-data-members "seon.db") '*conn*)
                             "ns-data-members demunges _STAR_conn_STAR_ → *conn*"))
-                      (let [r (sci/invoke-bounded 'probe.conn-tile/conn-dash
+                      (let [r (sci/invoke-bounded 'probe.conn-canvas/conn-dash
                                                   {:seon.db/db @conn})]
                         (testing "the aliased dynamic var resolves — the tile runs BOUNDED"
                           (is (not (:seon.render.sci/error r))
@@ -428,7 +428,7 @@
                          :seon.ns/require-edges
                          [{:seon.ns.require/target :seon.db
                            :seon.ns.require/alias  'sdb}]}
-                        {:seon.fn/sym        "probe.edge-tile/edge-dash"
+                        {:seon.fn/sym        "probe.edge-canvas/edge-dash"
                          :seon.fn/ns         {:seon.ns/name :probe.edge-tile}
                          :seon.fn/source     edge-dash-source
                          :seon.fn/created-at (js/Date.)}]})
@@ -438,7 +438,7 @@
                           (is (= #{{:seon.ns.require/target :seon.db
                                     :seon.ns.require/alias  'sdb}}
                                  (seval/stored-require-edges @conn :probe.edge-tile))))
-                        (let [r (sci/invoke-bounded 'probe.edge-tile/edge-dash
+                        (let [r (sci/invoke-bounded 'probe.edge-canvas/edge-dash
                                                     {:seon.db/db @conn})]
                           (testing "the alias resolves from DATOMS (text parse could not — stub source)"
                             (is (not (:seon.render.sci/error r))

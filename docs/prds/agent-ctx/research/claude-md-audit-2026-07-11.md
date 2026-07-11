@@ -131,7 +131,7 @@ below). web/CLAUDE.md is the correct one.
 35 lines — the tightest file and a model for the standard. Every claim (full
 source renders into context, docstring line-1 rule, keep `register!` in file,
 token weight, new nses must be required into `client.cljs`, full-qualification
-not home aliases, the current ns list `data/ui/tile/kb/skills/blob`) matches.
+not home aliases, the current ns list `data/ui/canvas/kb/skills/blob`) matches.
 The concurrently-edited `my.plan.internal` isn't named in the ns list — worth a
 glance once that lands, but not stale today.
 
@@ -149,7 +149,7 @@ phase**:
   repl-mode `:batch`/`:stream`, no config→DB singleton, no
   `context-rebuild.md` (which exists, 07-11, and is described in MEMORY as
   "the governing plan"), no strip/abort fabrication mechanics, no milestone names
-  (repl/namespaces/plan/db/warnings/live-tile/subagents/soul). An agent landing
+  (repl/namespaces/plan/db/warnings/canvas/subagents/soul). An agent landing
   on this branch reads a five-week-old eval-lane charter and learns nothing about
   what is actually being built.
 - "Build order" (lines 308-321) lists tooling-lane and eval-lane sequences that

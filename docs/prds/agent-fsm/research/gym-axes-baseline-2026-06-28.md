@@ -20,7 +20,7 @@ competency grouping, then captured the green baseline (issue #51).
   `{:seon.db/ok? false}` as a value, the eval is `:ok? true`, rate stays 0.0.
 - **canvas (UI-update) axis** — every scorecard carries
   `:seon.gym.scorecard/canvas-updated?` = did the primary agent set
-  `:seon.render.live-tile/content` on its OWN `[:seon.agent/id …]` entity. A
+  `:seon.render.live-canvas/content` on its OWN `[:seon.agent/id …]` entity. A
   new `:canvas-updated` predicate kind asserts it per-agent.
 - **competency tag** — `:seon.gym.scenario/competency` (required enum:
   `:planning :db-memory :error-recovery :honesty :over-retrieval`); all 16

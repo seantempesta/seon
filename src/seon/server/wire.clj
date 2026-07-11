@@ -337,7 +337,7 @@
 ;; writer replays every tx committed after it — reconstructed from the
 ;; bitemporal tx-log — shaped EXACTLY like a live `tx` event. Per-subscriber by
 ;; construction: it is a pure function of (conn, db-name, since-t), so any
-;; number of independent feed processes (loop, live-tile, debug, chat) each
+;; number of independent feed processes (loop, canvas, debug, chat) each
 ;; recover their OWN gap. No pod-singleton assumption.
 
 (def ^:private max-replay-txs

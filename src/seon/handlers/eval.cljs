@@ -142,7 +142,7 @@
      route through the `error-tile` seam — that seam is the never-throw
      backstop for actual RENDER throws and its header reads 'render error',
      which would mislabel (and alarm about) an ordinary eval error."
-  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.live-tile/hiccup]]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.canvas/hiccup]]}
   [{:seon.render/keys [node entity]}]
   (let [entity    (or node entity)
         eid       (:seon.eval/id entity)

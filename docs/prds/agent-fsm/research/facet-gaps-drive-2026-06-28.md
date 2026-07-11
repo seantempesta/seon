@@ -38,7 +38,7 @@ edits. Run sha `90085b09`.
 ## Scenario 1 — plan-resume-across-restart (`:resume`)
 
 `scorecard/pass? false` · `judge-pass? true` · 19 turns · error-rate 0.29 ·
-toolkit-calls `{:my.ui 26 :my.data 0 :my.tile 0}`
+toolkit-calls `{:my.ui 26 :my.data 0 :my.canvas 0}`
 
 | predicate | axis | result |
 |-----------|------|--------|
@@ -103,7 +103,7 @@ teaching gap.
 ## Scenario 2 — err-recovery-diagnose-and-continue (`:err2`)
 
 `scorecard/pass? true` · `judge-pass? true` · 10 turns · error-rate 0.23 ·
-toolkit-calls `{:my.data 21 :my.ui 52 :my.tile 0}`
+toolkit-calls `{:my.data 21 :my.ui 52 :my.canvas 0}`
 
 | predicate | result |
 |-----------|--------|

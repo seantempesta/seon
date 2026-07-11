@@ -131,7 +131,7 @@
 ;; The two CURATION axes (context-curation Phase A) extend the §7
 ;; behavioral vocabulary: `:makes-few-errors` (eval-error-rate below a
 ;; threshold — fewer REPL mistakes) and `:drives-canvas` (the agent set
-;; its OWN `:seon.render.live-tile/content` — it used the live tile as
+;; its OWN `:seon.render.canvas/content` — it used the canvas as
 ;; the primary surface, not just messages). Both are measured every run
 ;; and surfaced on the scorecard; a scenario opts into asserting them
 ;; via the `:eval-error-rate` / `:canvas-updated` predicate kinds.
@@ -194,9 +194,9 @@
 ;;   too, so this also catches malformed-form noise). Zero evals = 0.0
 ;;   (no errors), passes any threshold.
 ;; :canvas-updated — pass iff the (optionally agent-scoped, default :a)
-;;   agent drove its OWN canvas: :seon.render.live-tile/content is
+;;   agent drove its OWN canvas: :seon.render.canvas/content is
 ;;   present on [:seon.agent/id <agent>] in the post-run store. The
-;;   instrument for "agents drive the live tile as the primary surface,
+;;   instrument for "agents drive the canvas as the primary surface,
 ;;   messages only a backup".
 (schema/register! :seon.gym.predicate/kind
   [:enum :datalog :transcript-includes :transcript-excludes
@@ -357,19 +357,19 @@
 ;; `:eval-error-rate` predicate; references the canonical rate shape.
 (schema/register! :seon.gym.scorecard/eval-error-rate :seon.gym/eval-error-rate)
 ;; Did the PRIMARY agent (:a) drive its own canvas this run — i.e. set
-;; :seon.render.live-tile/content on its own entity? The "agents drive
-;; the live tile as the primary surface" instrument.
+;; :seon.render.canvas/content on its own entity? The "agents drive
+;; the canvas as the primary surface" instrument.
 (schema/register! :seon.gym.scorecard/canvas-updated? :boolean)
 ;; Toolkit-ADOPTION signal (the axis that would've caught #42): per `my.*`
 ;; toolkit namespace, how many times the run-driven evals REFERENCE it
-;; (`my.data/`, `my.ui/`, `my.tile/`) — did the agent CALL the taught
+;; (`my.data/`, `my.ui/`, `my.canvas/`) — did the agent CALL the taught
 ;; toolkit, or hand-roll the equivalent footgun path? A SIGNAL, never a
 ;; gate: a context change that drops these toward 0 is a render-prominence
 ;; regression (the #42 namespaces signature-trim regressed my.data adoption
 ;; to 0×, which the confounded total-tokens axis missed). Reads eval SOURCE
 ;; only (anti-cheat: never an answer). FREE-mode-blind — stub scripts don't
 ;; call tools, so it fills on --paid drives.
-(schema/register! :seon.gym/toolkit-ns [:enum :my.data :my.ui :my.tile])
+(schema/register! :seon.gym/toolkit-ns [:enum :my.data :my.ui :my.canvas])
 (schema/register! :seon.gym.scorecard/toolkit-calls
   [:map-of :seon.gym/toolkit-ns [:int {:min 0}]])
 ;; Per-turn prompt-blob evidence (gym-upgrade PRD §6.6, default-on):
@@ -551,7 +551,7 @@
                        :seon.gym.turn/message             msg})))))
 
 ;; --- ALIAS-BLIND PREDICATE GUARD --------------------------------------------
-;; This bug class has bitten three times (my.tile e6aaf9f0; three seon.db/
+;; This bug class has bitten three times (my.canvas e6aaf9f0; three seon.db/
 ;; store-read predicates fc557fbf): a predicate :pattern regexes a
 ;; FULLY-QUALIFIED `seon.<ns>/` name, but the agent's home ns aliases that
 ;; ns to a SHORT prefix (seon.db -> db, seon.agent.message -> message, …),
@@ -570,7 +570,7 @@
 
 (defn- dotted-prefix-esc
   "The regex-escaped leading PREFIX of a dotted ns name — everything up to
-   and including the final dot (\"seon.db\" -> \"seon\\.\", \"my.tile\" ->
+   and including the final dot (\"seon.db\" -> \"seon\\.\", \"my.canvas\" ->
    \"my\\.\", \"my.plan\" -> \"my\\.\"). Used to build the
    per-ns optional-prefix idiom `(?:<prefix>)?<alias>` an alias-tolerant
    pattern may use — `(?:seon\\.)?db` for a seon verb, `(?:my\\.)?tile` for
@@ -601,12 +601,12 @@
    (seon.agent.ctx.namespaces/always-full-my-nses) (the my.* members of the
    resolved config `:seon.config/always` policy — the toolkit set the agent
    composes its canvas/memory from). The alias is the last dotted segment —
-   the CONVENTION every agent writes the toolkit by (`my.tile` → `tile`,
+   the CONVENTION every agent writes the toolkit by (`my.canvas` → `tile`,
    `my.ui` → `ui`, `my.data` → `data`, `my.kb` → `kb`), confirmed by the
-   toolkit test nses' `(:require [my.tile :as tile] …)` heads. These are NOT in
+   toolkit test nses' `(:require [my.canvas :as tile] …)` heads. These are NOT in
    [[home-ns-seon-aliases]] (a DIFFERENT wiring than the seon.* verbs in
    home-ns-require-specs), yet the ORIGINAL alias-blind instance was a
-   `my.tile/button` predicate — so without them the guard misses the whole
+   `my.canvas/button` predicate — so without them the guard misses the whole
    toolkit-alias class. Derives from the policy, never hardcodes."
   []
   (into {}
@@ -630,9 +630,9 @@
   "True when `pattern` references `dotted` (its regex-escaped form `esc`) as
    a FN-CALL alias target — `<esc>/` or `<esc>\\b` — at a position that is
    NOT part of a namespaced KEYWORD (`:<esc>/…`). A namespaced keyword like
-   `:my.tile/action` is an un-aliasable DATA KEY (the tile map's key), never
-   a `tile/action` alias call, so a `:my\\.tile/(action|submit)` data-key
-   predicate must NOT read as an alias-blind `my.tile/button` fn call. We
+   `:my.canvas/action` is an un-aliasable DATA KEY (the tile map's key), never
+   a `canvas/action` alias call, so a `:my\\.canvas/(action|submit)` data-key
+   predicate must NOT read as an alias-blind `my.canvas/button` fn call. We
    strip the `:<esc>` keyword occurrences first, then test the remainder for
    the bare fn-call form."
   [pattern esc]
@@ -646,7 +646,7 @@
    regexes WITHOUT also accepting the short alias the agent actually writes.
 
    For each aliased ns ([[home-ns-aliases]] — the seon.* verbs db/message/
-   schema/agent/plan AND the my.* toolkit tile/ui/data/kb): if the pattern
+   schema/agent/plan AND the my.* toolkit canvas/ui/data/kb): if the pattern
    references the qualified FN-CALL form `<long>\\<ns>/` (or `<long>\\b`) —
    [[qualified-fn-ref?]], which ignores un-aliasable `:<long>/…` keyword
    data-keys — it points at the long name directly; that is alias-BLIND
@@ -658,10 +658,10 @@
    No false positives: a fully-qualified pattern for a ns that is NOT
    aliased (seon.agent.search/grep, seon.agent.fs/read-file — agents write
    those qualified) is CORRECT, as is a namespaced-keyword data-key
-   (`:my.tile/action`). The qualified test demands a `/` or `\\b` right
+   (`:my.canvas/action`). The qualified test demands a `/` or `\\b` right
    after `<ns>` and discounts keyword occurrences, so `seon\\.agent\\.search/`
-   never trips the `seon.agent` alias and `:my\\.tile/action` never trips
-   the `my.tile` alias."
+   never trips the `seon.agent` alias and `:my\\.canvas/action` never trips
+   the `my.canvas` alias."
   [{:seon.gym.predicate/keys [id pattern]}]
   (when pattern
     (some (fn [[dotted alias]]
@@ -843,7 +843,7 @@
 
 (def ^:private toolkit-nses
   "The `my.*` toolkit namespaces the toolkit-adoption signal watches."
-  [:my.data :my.ui :my.tile])
+  [:my.data :my.ui :my.canvas])
 
 (defn- count-substring
   "How many (non-overlapping) times `sub` occurs in `s`."
@@ -855,7 +855,7 @@
 
 (defn- toolkit-calls*
   "Per `my.*` toolkit namespace, how many times the RUN-DRIVEN evals
-   REFERENCE it (`my.data/`, `my.ui/`, `my.tile/`) — the toolkit-ADOPTION
+   REFERENCE it (`my.data/`, `my.ui/`, `my.canvas/`) — the toolkit-ADOPTION
    signal (did the agent CALL the taught toolkit, or hand-roll it?). Reads
    eval SOURCE only (same caused-run scoping as [[eval-at+source]];
    anti-cheat: never an answer). Always returns all three keys (0 when the
@@ -868,14 +868,14 @@
 
 (defn- agent-canvas-updated?
   "Did the agent drive its OWN canvas — i.e. is
-   `:seon.render.live-tile/content` present on `[:seon.agent/id agent-id]`
+   `:seon.render.canvas/content` present on `[:seon.agent/id agent-id]`
    in the post-run store? (Fresh gym agents — designators :a, :b — start
    with the attr ABSENT; only the live 'root' agent is seeded a default
    tile, and the gym never boots root.)"
   [dbv agent-id]
   (boolean
     (and agent-id
-         (some? (:seon.render.live-tile/content
+         (some? (:seon.render.canvas/content
                   (db/entity {:seon.db/ref [:seon.agent/id agent-id]
                               :seon.db/db  dbv}))))))
 
@@ -1081,7 +1081,7 @@
             (let [aid (or agent-id (get agents :a))]
               [(agent-canvas-updated? dbv aid)
                (str "agent " (or agent :a)
-                    " :seon.render.live-tile/content "
+                    " :seon.render.canvas/content "
                     (if (agent-canvas-updated? dbv aid)
                       "PRESENT (canvas driven)"
                       "ABSENT (canvas not driven)"))])
@@ -1213,17 +1213,17 @@
        "\n\n== Reference facts (ground truth) ==\n" reference))
 
 (defn- agent-canvas-ai
-  "The agent's resolved live-tile `:seon.render/ai` twin — what the human
+  "The agent's resolved canvas `:seon.render/ai` twin — what the human
    actually SEES on the canvas — so a canvas-content judge grades the
    RENDERED tile, not just the reply prose. Goes through the public
-   `seon.render/render-agent-tile` path (the ONE tile entry point the
-   debug view + the live-tile awareness block use), NEVER render-engine
+   `seon.render/render-agent-canvas` path (the ONE tile entry point the
+   debug view + the canvas awareness block use), NEVER render-engine
    internals. Falls back to the error message + twin when the renderer
    threw, the hiccup pr-str when a tile carries no ai twin, and the empty
    string when nothing resolves (no canvas → nothing to append)."
   [dbv agent-id]
   (let [{:seon.render/keys [ai error hiccup]}
-        (render/render-agent-tile {:seon.agent/id agent-id :seon.db/db dbv})]
+        (render/render-agent-canvas {:seon.agent/id agent-id :seon.db/db dbv})]
     (cond
       (some? error) (str "⚠ canvas renderer threw: " (:seon.error/message error)
                          (when (some? ai) (str "\n" ai)))
@@ -1234,7 +1234,7 @@
 (defn- judge-ctx
   "Assemble the grading context for one :llm-judge predicate: the
    designated agent's question(s), its verbatim reply, its RENDERED
-   CANVAS (the resolved live-tile `:seon.render/ai` twin — so a
+   CANVAS (the resolved canvas `:seon.render/ai` twin — so a
    canvas-content judge grades what the human actually sees, not the
    reply prose alone), the rubric, the reference facts."
   [turns agents dbv {:seon.gym.predicate/keys [agent rubric reference]}]

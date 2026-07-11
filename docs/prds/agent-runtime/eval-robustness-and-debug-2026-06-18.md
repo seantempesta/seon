@@ -584,7 +584,7 @@ warning datoms), per the reactive principle.
   later form" workflow is normal and must not be blocked at the wire.
 - **No new stored DB attribute** to flag the problem either. The broken-tile
   condition is ALREADY a pure query over the existing stored pointer
-  (`:seon.render.live-tile/content`) joined against resolvability — exactly what
+  (`:seon.render.live-canvas/content`) joined against resolvability — exactly what
   the already-shipped, derived, self-healing `check-tile-unresolved` warning
   (C.2) computes. "Derive, don't store."
 

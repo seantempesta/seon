@@ -75,7 +75,7 @@ doctrine that legitimately stays; label = the subsection it becomes):
 | 1182-1192 | "RESULT VARS. Every eval's value is a live var result/<id>" | **R** | RESULT-VARS |
 | 1194-1198 | "STATE ACROSS TURNS. defn/atom persist, bare def does not" | **R** | DEF-PERSISTENCE |
 | 1200-1205 | "ERRORS ARE VALUES" | **R** | ERRORS-ARE-VALUES |
-| 1207-1225 | "THE RENDERING SYSTEM … render twins, auto-run, SHOW-DON'T-TELL" | B (UI) | stays (or links ui-live-tiles) |
+| 1207-1225 | "THE RENDERING SYSTEM … render twins, auto-run, SHOW-DON'T-TELL" | B (UI) | stays (or links ui-canvas) |
 | 1227-1232 | "THE SHARED STORE … register! before transact, namespaced keys" | B (db) | stays |
 | 1234-1270 | "THE NAMESPACES BELOW … curated, discover don't hallucinate; BUILD YOUR ENVIRONMENT; ids are live handles" | B (mixed) | stays |
 | 1272-1428 | "STANDING TEACHINGS … kb-storage, planning, messaging, lifecycle, finishing" | B | stays |

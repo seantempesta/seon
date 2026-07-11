@@ -31,7 +31,7 @@ tags: [research, agent, context]
 - **Agents DO use the live tile, and the context DOES steer them to.** Live-driven a fresh
   normal agent with "show my todo list as a live tile" → it authored
   `my.agent.<id>/todo-tile` (a render-twin fn) and wired it onto
-  `:seon.render.live-tile/content` across 12 turns / 39 evals, then confirmed to the human.
+  `:seon.render.live-canvas/content` across 12 turns / 39 evals, then confirmed to the human.
   Live-proven below.
 - Design (a) **skill catalog + `enable-skill`**: fits the block model cleanly — it IS the
   `my.skills` design doc's level-1 catalog + level-2 `load`/`install!`. Recommend building it,
@@ -86,7 +86,7 @@ What it actually says (verbatim section headers, full text in `ctx.cljs:885`):
   small + one `:test` example; mint a todo per step; address-todo on inbound; messages render
   as markdown.
 - **MESSAGING + LIFECYCLE** — the four verbs (`message/user`, `message/agent`, `wait`,
-  `complete`); tell-your-human cadence; done-via-verb; per-loop sliding-window cap; tile/panel
+  `complete`); tell-your-human cadence; done-via-verb; per-loop sliding-window cap; canvas/panel
   hiccup splicing; grade `my.kb` facts with source+confidence.
 
 This 3 114-tok block is the **entire hardcoded steering** and it is **the same for root and
@@ -202,7 +202,7 @@ body (level-2) = its `SKILL.md` size, `chars/4`, shown with a derived `~N tok` f
 
 ## 3. Do agents actually USE the live tile? — YES (live-proven)
 
-**Store scan:** only **root** carries a custom `:seon.render.live-tile/content`
+**Store scan:** only **root** carries a custom `:seon.render.live-canvas/content`
 (`seon.render.system/system-view`, its seeded dashboard). No other persisted agent had one at
 start — because only root existed.
 
@@ -210,7 +210,7 @@ start — because only root existed.
 `:live-tile` block (`live_tile.cljs:98-139`) ALWAYS renders (~611 tok for a normal agent) and
 contains explicit copy-paste recipes: "(a) literal hiccup — instant, no fn needed" and "(b) a
 tile FN in your home ns — re-derives every render", each with a full `seon.db/transact!`
-example targeting `:seon.render.live-tile/content`. It also softens it: "PRESENT RICHLY, OR
+example targeting `:seon.render.live-canvas/content`. It also softens it: "PRESENT RICHLY, OR
 JUST REPLY IN MARKDOWN… your LATEST REPLY renders as a real markdown card… Build a tile only
 when you want to show something richer."
 
@@ -223,7 +223,7 @@ Observed in `logs/pod.log` + the store:
 - The agent ran **12 turns, 39 evals**, then `halt verb — complete`.
 - It **authored `my.agent.Rtd-2606281344/todo-tile`** — a render-twin fn in its OWN home ns
   (it chose recipe (b)) — and transacted that qualified symbol onto
-  `:seon.render.live-tile/content`. Store read-back:
+  `:seon.render.live-canvas/content`. Store read-back:
   `{:tile #{["my.agent.Rtd-2606281344/todo-tile"]}}`.
 - Rendering its tile live (`seon.render/render-agent-tile`) returns a real twin:
   - `:seon.render/ai` → `"Your human sees your open todo list: 0 items — "`
@@ -318,7 +318,7 @@ leave the `:ai` transcript flat.** Low risk, real UX win, no agent-facing behavi
 - `(inspect/ctx-preview {:seon.agent/id "root"})` → total `12548`; sections as §1b.
 - `(inspect/ctx-preview {:seon.agent/id "Rtd-2606281344"})` → sections as §1c.
 - `(db/query '[:find ?c :where [?e :seon.agent/id "Rtd-2606281344"]
-   [?e :seon.render.live-tile/content ?c]])` → `#{["my.agent.Rtd-2606281344/todo-tile"]}`
+   [?e :seon.render.live-canvas/content ?c]])` → `#{["my.agent.Rtd-2606281344/todo-tile"]}`
 - `(seon.render/render-agent-tile {:seon.agent/id "Rtd-2606281344" :seon.db/db @db/*conn*})`
   → real `:seon.render/ai` + `:seon.render/hiccup` twin (todo tile).
 - `(my.kb.shared/instructions-block {…})` → `""` (the `:shared-instructions` slot is dormant).

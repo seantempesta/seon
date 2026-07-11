@@ -97,7 +97,7 @@ confirmed.
 **Entry / wired path** (all verified by reading source):
 
 - `seon.render/render-agent-tile` — `src/seon/render.cljs:377-466`. Pulls the
-  agent entity, resolves the wired value via `live-tile/wired-content`
+  agent entity, resolves the wired value via `live-canvas/wired-content`
   (render.cljs:401-405), and for an agent-authored symbol
   (`render-sci/agent-authored-sym?` true) calls `render-sci/invoke-bounded`
   (render.cljs:413-428).
@@ -141,7 +141,7 @@ into a `:seon.log` :warn and continues — so that ns is **silently absent from
 `globalThis` after every boot**. An Acme ns that uses `:refer :all` (or
 requires one) THEN hits the proposed symptom via the genuine globalThis-miss
 path. This is third-party-specific because seon core tile fns
-(`seon.render.live-tile/welcome`, `seon.render.chat/last-reply`) are COMPILED
+(`seon.render.live-canvas/welcome`, `seon.render.chat/last-reply`) are COMPILED
 into the bundle and are on `globalThis` from module-load regardless of replay.
 
 **Confirmed cosmetic defect — `:seon.ns/source` double-store:**
@@ -476,7 +476,7 @@ pass/fail observation on the RUNNING Acme pod — not inferred from tests.
   `(ns acme.widget (:require [seon.db :as db]))\n(defn dash [in]
   {:seon.render/hiccup [:div (str (count (seon.db/installed-schema
   (:seon.db/db in))))] :seon.render/ai "acme dash"})`; transact
-  `{:seon.agent/id <id> :seon.render.live-tile/content 'acme.widget/dash}`;
+  `{:seon.agent/id <id> :seon.render.live-canvas/content 'acme.widget/dash}`;
   `bin/acme restart pod`; then
   `(seon.render/render-agent-tile {:seon.db/db @seon.db/*conn*
   :seon.agent/id <id>})`. ASSERT the returned `:seon.render/hiccup` contains

@@ -43,7 +43,7 @@ Each tool below is a `my.*` wrapper; the "floor it backs onto" column is the
 | **my.code** (`forget!`) | hybrid (thin-wrap + 1 generalized floor primitive) | Generalize the private `seon.eval/unbind-result-var!` → public `seon.eval/undef-sym!` (analyzer `:defs` dissoc + munged-globalThis delete) over any FQ sym. NO library (JVM `ns-unmap` = design model only; `cljs.analyzer.api/remove-ns` is whole-ns; replumb undoes requires not defs) | `^:async forget!` — bare-sym sugar OR `{:my.code/sym [:or symbol keyword]}`. Success `{ok? true :my.code/{sym kind prior-source}}`; fail `{ok? false :seon.error/* (:kind :user-input \| :core-protected)}`. Pipeline: resolve identity attr → core-origin guard → return prior source → retractEntity → drop live binding (fn/test: `undef-sym!`; schema: NEW `seon.schema/unregister!`). `prior-source` = one-eval undo. `rename!` DEFERRED (= read-source → eval-new → forget!-old) | `seon.eval` (undef) + `seon.db` (retractEntity, bitemporal undo) + `seon.schema` (NEW `unregister!`) |
 | **my.schedule** (`remind!`) | hybrid (thin-wrap; KEEP the in-repo cron engine) | KEEP the hand-rolled pure cron engine (`parse`/`due?`/`next-fire-at`). NO npm cron lib (schedulers own timers + in-memory state → fight the ONE-ticker + DB-derived-due-ness + crash-recovery model; croner is the only correctly-shaped one but still rejected). Timezone gap closes in-place with native `Intl.DateTimeFormat` | `^:async add! {:seon.agent.schedule/{cron, say?, fn?, timezone?}}` → `{ok? true id :my.schedule/next-fire-at}` \| `{ok? false :seon.error/*}` (cron validated via floor `parse`). `list {}` → ITEMS (each item carries `id` → threads to cancel!). `^:async cancel! {id}` (retract, idempotent). `^:async remind! {say, cron \| at}` = add! sugar (recurring or one-shot) | `seon.agent.schedule` (entity schema, pure cron logic, `fire-due-schedules!`, the ONE ticker) |
 | **my.recall** | thin-wrap-existing-seon | Wrap `seon.embed/search-pull` (pod = read-only client; JVM wire-server embeds via Gemini `gemini-embedding-2` 1536-dim + Proximum HNSW cosine). NO in-pod embedder/index — transformers.js (384-dim MiniLM) is vector-space-INCOMPATIBLE with the authoritative 1536-dim index; hnswlib-node/Voy/LanceDB rejected | `^:async recall {:my.recall/{query, k?(default 10, suggest 5), within?(datalog :where), eids?, min-similarity?, pull?([*])}}` → on ok `{ok? true :seon.items/items count truncated?}` distance-ascending; on fail `{ok? false :seon.error/* (:kind :feature-off \| :user-input)}`. Each item = pulled entity lifted to top + `:seon.db/ref` + `:my.recall/distance` (raw cosine) + `:my.recall/similarity` (1-distance). Sibling `recall-refs` = ids+scores, no pull. SEON_EMBED-off → graceful ok?-false fallback (never throws) | `seon.embed` (pod client) → `wire-node/knn-search` (UDS) → JVM `seon.embed.clj` (key + index) |
-| **my.tile** | hybrid (thin-wrap + small build-fresh core) | Reuse the DB-as-bus write path (`:seon.render.live-tile/content`) + `seon.ui.html` renderer; build-fresh ONLY a data registry `{view → component-symbol}` resolved through existing `seon.eval/lookup-value` + a Malli `:multi` (dispatch `:seon.tile/view`) validating `:seon.tile/data`. Replicant (`replicant.string`/aliases) VALIDATES the design but is inspire-don't-adopt (we already have a renderer + an alias-equivalent) | All `^:async` (transact forwards to wire-server); default target = caller's own agent by `:seon.agent/id`. `preview {view, data?}` → `{ok? true :seon.render.live-tile/content(hiccup\|sym) :seon.render/ai}` (PURE, no effect). `show! {view, data?}` → same, transacts (kw view = eager literal hiccup snapshot; sym view = late-resolved each render). `card!`/`pros-cons!`/`recommend!` = show! sugar. `views {}` → ITEMS of view+data-schema | `seon.render.live-tile` (write path + `::content` shape) + `seon.ui.components`/`seon.ui.html` (hiccup floor). BLOCKED on U-lane Layer-1 components + `:seon.ui/*` vocabulary |
+| **my.canvas** | hybrid (thin-wrap + small build-fresh core) | Reuse the DB-as-bus write path (`:seon.render.live-canvas/content`) + `seon.ui.html` renderer; build-fresh ONLY a data registry `{view → component-symbol}` resolved through existing `seon.eval/lookup-value` + a Malli `:multi` (dispatch `:seon.canvas/view`) validating `:seon.canvas/data`. Replicant (`replicant.string`/aliases) VALIDATES the design but is inspire-don't-adopt (we already have a renderer + an alias-equivalent) | All `^:async` (transact forwards to wire-server); default target = caller's own agent by `:seon.agent/id`. `preview {view, data?}` → `{ok? true :seon.render.live-canvas/content(hiccup\|sym) :seon.render/ai}` (PURE, no effect). `show! {view, data?}` → same, transacts (kw view = eager literal hiccup snapshot; sym view = late-resolved each render). `card!`/`pros-cons!`/`recommend!` = show! sugar. `views {}` → ITEMS of view+data-schema | `seon.render.live-tile` (write path + `::content` shape) + `seon.ui.components`/`seon.ui.html` (hiccup floor). BLOCKED on U-lane Layer-1 components + `:seon.ui/*` vocabulary |
 
 ## Cross-cutting decisions
 
@@ -62,7 +62,7 @@ one-line reason each loses to a Node builtin or an existing `seon.*` floor:
 | JVM `ns-unmap` / `cljs.analyzer.api/remove-ns` / replumb | my.code | NO | JVM-only / whole-ns granularity / undoes requires-not-defs. The best single-sym CLJS undefine already lives in `seon.eval`. |
 | `node-cron` / `node-schedule` / `croner` / `cron-parser` | my.schedule | NO | schedulers own timers + in-memory job state → fight the ONE-ticker + DB-derived-due-ness + crash-recovery model. The in-repo pure engine is code-as-data; an opaque dep is not. |
 | transformers.js / hnswlib-node / Voy / LanceDB | my.recall | NO | vector-space INCOMPATIBLE (384-dim MiniLM vs the authoritative 1536-dim Gemini index) → would force a second drifting index or pod-side embedding (forbidden). |
-| Replicant (`replicant.string`) | my.tile | NO (inspire) | on-point and validating, but seon already has an XSS-safe hiccup renderer + an alias-equivalent (late symbol resolution). Two renderers = "don't be a dumbass." |
+| Replicant (`replicant.string`) | my.canvas | NO (inspire) | on-point and validating, but seon already has an XSS-safe hiccup renderer + an alias-equivalent (late symbol resolution). Two renderers = "don't be a dumbass." |
 
 ### B. Small `:core-seed` floor additions required (NOT new deps)
 
@@ -89,11 +89,11 @@ floor (step 1, before any wrapper):
   `read-file`/`stat`/`shell cwd` ACCEPT one. Deletes the current manual rekey
   (`:seon.agent.search/path` → `:seon.agent.fs/path`).
 - **REF** — `:seon.db/ref` (already exists). The DB address an item carries so it
-  threads into `db/pull`/`db/entity`/`my.tile` (my.recall items, my.test failure
+  threads into `db/pull`/`db/entity`/`my.canvas` (my.recall items, my.test failure
   vars via `[:seon.test/sym (str var)]`, my.code's sym-as-address).
 - **ITEMS** — `:seon.items/{items, count, truncated?}` (NEW). A self-describing
   collection mixin; each item is itself a valid next input. Adopted by
-  my.search/my.files (located), my.recall (entities), my.schedule/my.tile (rows).
+  my.search/my.files (located), my.recall (entities), my.schedule/my.canvas (rows).
   Counts stay scalars (aggregates, not items).
 - **RESULT** — `:seon.result/ok?` (NEW discriminator) + the existing `:seon.error/*`
   map (`{:seon.error/message :seon.error/data{:seon.error/kind …} :seon.error/raw}`).
@@ -149,7 +149,7 @@ build on top.
 6. **my.schedule / remind!** — verb over the existing cron engine + ticker; tz fix
    deferred.
 7. **my.recall** — over `seon.embed`; SEON_EMBED-off → graceful fallback.
-8. **my.tile** — facade; BLOCKED on the U-lane Layer-1 `seon.ui.components` +
+8. **my.canvas** — facade; BLOCKED on the U-lane Layer-1 `seon.ui.components` +
    `:seon.ui/*` vocabulary, so it lands last of the eight.
 
 (Interleaves with the catalog's full plan — `my.todos`, the `message` floor smell,
@@ -174,10 +174,10 @@ out of scope for these eight researched tools but share step 0's backbone.)
 - **my.recall k default**: floor `default-k` is 10; each `[*]`-pulled entity hits
   the token-budgeted context — suggest the wrapper default to 5 (reuse
   `seon.embed/default-k`, don't mint a second constant). Owner judgment call.
-- **my.tile is BLOCKED**: needs Layer-1 `md-card`/`pros-cons`/`decision-summary`
+- **my.canvas is BLOCKED**: needs Layer-1 `md-card`/`pros-cons`/`decision-summary`
   components + the unregistered `:seon.ui/*` vocabulary. Build order: shapes →
-  components → my.tile. Also: do NOT ship both `seon.agent.ui` (the older
-  `ux-toolkit-proposal` framing) and `my.tile` — `my.tile` is the one to build.
+  components → my.canvas. Also: do NOT ship both `seon.agent.ui` (the older
+  `ux-toolkit-proposal` framing) and `my.canvas` — `my.canvas` is the one to build.
 - **my.test render** (separate owner): the per-ns `:seon.test` block must render
   only for the agent's CURRENT ns, coordinated with the GI-1 double-render fix —
   not a my.test API concern but the verify-loop UX depends on it.

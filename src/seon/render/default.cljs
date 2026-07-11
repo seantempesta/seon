@@ -49,12 +49,12 @@
     (pr-str input)]})
 
 (defn pending-html
-  "Calm IN-PROGRESS placeholder for a live tile still loading.
+  "Calm IN-PROGRESS placeholder for a canvas still loading.
 
    Its content symbol
    names an agent-authored render fn that ISN'T loaded in the runtime
    right now (`seon.eval/lookup-value` returned nil). Mirrors the
-   `seon.render.live-tile/welcome` tile shape (compact + expanded,
+   `seon.render.canvas/welcome` tile shape (compact + expanded,
    muted text) so the human sees \"preparing this view…\", NOT an error
    dump of the render-context map. Self-heals: the moment the fn is
    (re)defined the symbol resolves and the real tile renders again."
@@ -71,11 +71,11 @@
       "This panel points at a render fn that isn't loaded yet."]
      [:div {:class "text-[10px] font-mono text-text-500"} (str sym)]]]
    :seon.render/ai
-   (str "Your live tile points at " sym ", but that fn isn't loaded in "
+   (str "Your canvas points at " sym ", but that fn isn't loaded in "
         "the runtime right now — so the human sees a calm "
         "\"preparing this view…\" placeholder instead of your view. "
         "(Re)define the fn (eval its defn) so the symbol resolves, or "
-        "point :seon.render.live-tile/content at a fn that exists "
+        "point :seon.render.canvas/content at a fn that exists "
         "(or at literal hiccup).")})
 
 ;; ============================================================
@@ -231,7 +231,7 @@
        (comp/status-dot state id)
        [:span {:class "text-xs text-text-400 ml-auto"} (str "turn " turns)]]
       ;; NOTE: children are built with `into` (vectors), NOT bare
-      ;; `(for …)` lazy seqs — `seon.render.live-tile/valid-hiccup?`
+      ;; `(for …)` lazy seqs — `seon.render.canvas/valid-hiccup?`
       ;; (the render-boundary validator) accepts only
       ;; string/int/nil/vector children, so a lazy-seq child makes
       ;; instrumentation reject the whole tile.

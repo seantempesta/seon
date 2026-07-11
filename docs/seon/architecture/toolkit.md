@@ -12,7 +12,7 @@ The agent's whole working surface is a SMALL set of namespaces that, shown in
 full, ARE its context — a few high-signal, threadable functions instead of a 70k-char
 source dump. The agent's tools live in **`my.*` namespaces, fully agent-owned and
 editable** (`my.files`, `my.search`, `my.shell`, `my.plan`, `my.test`, `my.kb`,
-`my.code`, `my.schedule`, `my.recall`, `my.tile`, `my.blob`). Each is a THIN
+`my.code`, `my.schedule`, `my.recall`, `my.canvas`, `my.blob`). Each is a THIN
 wrapper over a protected `seon.*` substrate — the real syscalls, db engine,
 compiler, and wire stay `seon.*` and are `:core-seed`-guarded (un-clobberable).
 Build-your-environment extends to the tools themselves: the agent tweaks
@@ -56,7 +56,7 @@ load-bearing for the substrate's correctness.
 | Tier | Namespaces | Origin | Agent may edit? | Renders full in context? |
 |---|---|---|---|---|
 | **Protected floor** | `seon.db` (aliased `db`), `seon.eval`, `seon.agent.message` (aliased `message`), `seon.agent.lifecycle` (refer'd functions) + root's `seon.agent/start!`, the `*.internal` syscall nses + the wire | `:core-seed` | NO — `forget!`/override guard refuse | NO — indexed + grep-able only |
-| **Owned toolkit** | `my.files`, `my.search`, `my.shell`, `my.plan`, `my.test`, `my.kb`, `my.code`, `my.schedule`, `my.recall`, `my.tile`, `my.blob` | `:toolkit-seed` → `:agent` on first edit | YES — redefine or `forget!` | YES — full source every turn |
+| **Owned toolkit** | `my.files`, `my.search`, `my.shell`, `my.plan`, `my.test`, `my.kb`, `my.code`, `my.schedule`, `my.recall`, `my.canvas`, `my.blob` | `:toolkit-seed` → `:agent` on first edit | YES — redefine or `forget!` | YES — full source every turn |
 
 `message` and `lifecycle` stay on the floor because they are the loop's control
 functions — the wake gate / hop-cap (`message!`) and the run-FSM mutations
@@ -664,34 +664,34 @@ The wrapper reshapes `:seon.embed/hits` → the `:seon.items/*` envelope (so hit
 thread into `pull`/`transact!`) and handles `SEON_EMBED` off as a graceful
 ok?-false fallback. **Budget:** ~900 tok.
 
-#### `my.tile` — floor: the UI tile/component layer ([[ui]])
+#### `my.canvas` — floor: the UI canvas/component layer ([[ui]])
 
 **Why reach for it:** show the human a finished view — a note, a pros/cons, a
 recommendation — with ONE call and zero hiccup authoring; the agent says what it
 MEANS, the human sees the picture.
 
-`my.tile` is the agent-facing call over the tile/render machinery in [[ui]]. It
+`my.canvas` is the agent-facing call over the canvas/render machinery in [[ui]]. It
 writes by transacting the built hiccup onto the agent's `:seon.render/html`
-(the agent's own html render — its live tile) — a
+(the agent's own html render — its canvas) — a
 literal hiccup (built from a UI component) bypasses SCI; a fn symbol late-resolves
 SCI-bounded and re-derives every render.
 
 ```clojure
-(schema/register! :seon.tile/view [:or :keyword :symbol])  ; a prebuilt view key OR your own fn sym
+(schema/register! :seon.canvas/view [:or :keyword :symbol])  ; a prebuilt view key OR your own fn sym
 (defn ^:async show!
-  "Set your live tile to a prebuilt VIEW rendered with DATA — transacts the built
-   hiccup onto the agent's :seon.render/html. (tile/show! {:seon.tile/view
-   :pros-cons :seon.tile/data {:seon.ui/title \"…\" …}})" )
+  "Set your canvas to a prebuilt VIEW rendered with DATA — transacts the built
+   hiccup onto the agent's :seon.render/html. (canvas/show! {:seon.canvas/view
+   :pros-cons :seon.canvas/data {:seon.ui/title \"…\" …}})" )
 ```
 
-Prebuilt views (`:seon.tile/view` keys): `:note`, `:pros-cons`, `:recommendation`.
-**Composes:** `:seon.tile/data` is plain namespaced data the agent already has (a
+Prebuilt views (`:seon.canvas/view` keys): `:note`, `:pros-cons`, `:recommendation`.
+**Composes:** `:seon.canvas/data` is plain namespaced data the agent already has (a
 `store-inventory` row, a `query` result) — show it without rendering it. For
-dynamic tiles, `:seon.tile/view` is the agent's own hiccup-returning fn SYMBOL, so
+dynamic tiles, `:seon.canvas/view` is the agent's own hiccup-returning fn SYMBOL, so
 the tile re-derives every render. The tile / slot / render mechanism lives in
 [[ui]]; the agent-facing how-to (transact hiccup or a tile-fn symbol onto
-`:seon.render.live-tile/content` to SHOW the human a live view) is the
-`ui-live-tiles` skill in the corpus. **Budget:** ~1k tok.
+`:seon.render.canvas/content` to SHOW the human a live view) is the
+`ui-canvas` skill in the corpus. **Budget:** ~1k tok.
 
 #### `my.blob` — floor: `seon.blob`
 

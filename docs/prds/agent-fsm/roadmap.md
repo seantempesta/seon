@@ -116,7 +116,7 @@ Stated once so nobody re-asserts them:
   system.edn:26-33 still describe the older full-everywhere story — stale
   in-file comments, W6.
 - **The `my.*` toolkit rename is mostly unbuilt.** Only
-  `my.kb/data/ui/tile/skills` exist; `my.files`/`my.search`/`my.shell`/
+  `my.kb/data/ui/canvas/skills` exist; `my.files`/`my.search`/`my.shell`/
   `my.todo`/`my.test`/`my.blob` do not — verbs live under `seon.agent.*`.
   [[toolkit]] names the target; W5 owns the decision.
 - **`start!` is not capability-gated** despite its docstring

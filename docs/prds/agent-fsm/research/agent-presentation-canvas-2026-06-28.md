@@ -39,7 +39,7 @@ tags: [research, web, ui, agent]
   text. That is exactly why root's "how's your env" reply looked raw. Fix =
   collapse onto lane (a) everywhere the world page renders.
 - **The canvas default is wrong content, not wrong markdown.** When an agent has
-  no `:seon.render.live-tile/content` (live-proven: root `:has-content? false`),
+  no `:seon.render.live-canvas/content` (live-proven: root `:has-content? false`),
   the canvas resolves to `welcome` (`live_tile.cljs:439`) — a greeting/date/purpose
   card whose EXPANDED view never shows the latest reply. Owner's fix: when no
   custom tile, the canvas renders the **latest `:origin :agent`→user message as a
@@ -55,10 +55,10 @@ tags: [research, web, ui, agent]
   the canvas. Not a new "history" surface — the same transcript.
 - **Agent guidance (Core):** extend root's existing `:live-tile` ai block + the
   `welcome` `:seon.render/ai` text with 1-2 copy-paste hiccup examples; v1 needs
-  NO `my.tile` build — "transact `:seon.render.live-tile/content`" already works.
-  `my.tile`/interactivity (task #22) is the richer follow-up, not a v1 gate.
+  NO `my.canvas` build — "transact `:seon.render.live-canvas/content`" already works.
+  `my.canvas`/interactivity (task #22) is the richer follow-up, not a v1 gate.
 - **Root (`/`) is the SAME page, specialized via the SAME canvas seam.** Root's
-  `:seon.render.live-tile/content` is seeded (at root bootstrap) to a
+  `:seon.render.live-canvas/content` is seeded (at root bootstrap) to a
   **system-understanding** render fn; its transcript is the UNFILTERED cross-agent
   stream. One mechanism: root doesn't get a special layout, it gets a special
   canvas symbol. Opinionated layout proposed in §6 below (vitals strip → agent
@@ -126,7 +126,7 @@ as a shared leaf, callable from either lane.
 `world-layout` (`ui/world.cljs:123`) sets the focal `#world-canvas` to
 `(render/render-agent-tile {:seon.agent/id id :seon.db/db db})`'s `:seon.render/hiccup`
 (`world.cljs:144-161`). `render-agent-tile` (`render.cljs:407`) resolves content via
-`live-tile/wired-content` (`live_tile.cljs:360`): **`:seon.render.live-tile/content`
+`live-canvas/wired-content` (`live_tile.cljs:360`): **`:seon.render.live-canvas/content`
 present → render it (UNCHANGED); else → `welcome-sym`** (`live_tile.cljs:355,377-379`).
 So the "else" branch the owner wants to change is **`welcome`** (`live_tile.cljs:439`).
 
@@ -153,11 +153,11 @@ words never reach the canvas richly.
   noise; keep it lean.
 - `welcome`'s `:seon.render/ai` (`live_tile.cljs:500`) is unchanged — the agent
   still reads "your tile shows the core default; point
-  `:seon.render.live-tile/content` at your own fn to replace it."
+  `:seon.render.live-canvas/content` at your own fn to replace it."
 
 This keeps ONE default tile fn, ONE resolution seam (`wired-content`), and the
 custom-content path totally untouched. A consumer/agent that sets
-`:seon.render.live-tile/content` still wins exactly as before.
+`:seon.render.live-canvas/content` still wins exactly as before.
 
 Lane: **Core** (`seon.render.live-tile` is the render engine, Core-owned per
 `coordination.md:43`). It gains a require on the leaf `seon.ui.markdown` (Core's
@@ -181,7 +181,7 @@ renderers.
 | **message** (markdown) | `seon.ui.markdown/md->hiccup` | `ui/markdown.cljs:211` | ✅ live (chat bubbles) |
 | **data / EDN** (collapsible drill-down) | `seon.render.value` — `sample` skeleton + `render-html-data` data contract (`:tree`/`:summary`/`:truncated?`) | `render/value.cljs:248,427` | ⚠ projection live; the html PANEL that turns `:tree` → collapsible hiccup is UI-lane (docstring `:437` "styling+interactivity are U's") — re-wire it into the world UI |
 | **source** (Clojure) | `[:code.language-clojure.hljs …]` relying on CLIENT highlight.js | `handlers/eval.cljs:140`; loader `web/debug.cljs:585-614` | ⚠ client-only; world shim has no hljs → unhighlighted |
-| **error** (`:seon/error`) | `seon.render.live-tile/error-tile` seam (`set!`-overridable) + `default-error-tile` | `render/live_tile.cljs:566` | ✅ live, override-proven (acme) |
+| **error** (`:seon/error`) | `seon.render.live-canvas/error-tile` seam (`set!`-overridable) + `default-error-tile` | `render/live_tile.cljs:566` | ✅ live, override-proven (acme) |
 | **hiccup** (literal) | `seon.ui.html/->string` (seq-flatten, escape) | `ui/html.cljc:319` | ✅ live |
 
 So FOUR of five kinds already have a renderer; the work is **routing**, plus the
@@ -204,7 +204,7 @@ value IS the discriminator, per the house rule):
     (md-text? x)        (md/md->hiccup (:seon.render/markdown x) …)   ; message
     (value-projection? x) (value-panel x)                            ; data (seon.render.value/:tree)
     (clj-source? x)     (clj->hiccup (:seon.render/source x))        ; source  (§3 highlighter)
-    (error-value? x)    (live-tile/error-tile x)                     ; :seon/error
+    (error-value? x)    (live-canvas/error-tile x)                     ; :seon/error
     (hiccup? x)         x                                            ; literal hiccup passthrough
     :else               (value-panel (value/render-html-data … x)))) ; fallback: project anything
 ```
@@ -338,7 +338,7 @@ block:
 - Add to the `:live-tile` block's ai render (Core, the block's render fn) a short
   **"present richly OR reply in markdown"** instruction plus **2 copy-paste
   examples**:
-  1. a literal-hiccup note card transacted onto `:seon.render.live-tile/content`
+  1. a literal-hiccup note card transacted onto `:seon.render.live-canvas/content`
      (no SCI, instant);
   2. a tiny `(defn my.agent.<id>/status-tile [m] {:seon.render/hiccup … :seon.render/ai …})`
      + the transact that points content at it (the dynamic, re-derived path).
@@ -346,11 +346,11 @@ block:
   (`live_tile.cljs:530` `wiring-source` shows the agent the transact form as its
   first logged eval).
 
-**Does this need `my.tile` (task #22)?** **No, not for v1.** The presentation gap
+**Does this need `my.canvas` (task #22)?** **No, not for v1.** The presentation gap
 the owner hit is "a plain markdown reply looks raw" — solved entirely by §2
 (canvas default) + §1 (server markdown), with ZERO agent effort. The next rung
 ("set a nice view") is solved by the example above (transact hiccup onto
-`:seon.render.live-tile/content`), which works today. `my.tile/show!` (prebuilt
+`:seon.render.live-canvas/content`), which works today. `my.canvas/show!` (prebuilt
 `:note`/`:pros-cons`/`:recommendation` views, `toolkit.md:531`) and live-tile
 INTERACTIVITY (the DeepSeek observer's "couldn't add a new todo" — task #22) are
 the richer follow-up: build them when the observer shows agents want a
@@ -367,7 +367,7 @@ agent's world, `/agent/{id}` uniform for all incl `/agent/root`. So root needs N
 special page — it needs a **special canvas content symbol**, seeded at root
 bootstrap, reusing the §2 seam every agent uses:
 
-> root's `:seon.render.live-tile/content` = `seon.render.system/system-view` (a
+> root's `:seon.render.live-canvas/content` = `seon.render.system/system-view` (a
 > new Core render fn). Generic agents fall through to `welcome` (latest-message
 > card); root falls through to the fleet/system view. **One mechanism, one seam.**
 
@@ -418,7 +418,7 @@ for later; the vitals strip is where they'll land.
 
 - **Core:** the system render fns (`seon.render.system/system-view` +
   `fleet-summary` / `store-summary` / `recent-activity`), root's bootstrap seeding
-  `:seon.render.live-tile/content` = `system-view` + a system-scoped `:root`
+  `:seon.render.live-canvas/content` = `system-view` + a system-scoped `:root`
   context block (its `:seon.render/ai` twin = root's prompt understanding of the
   fleet — same data, agent-facing). System-scoped = the query fns take NO agent
   filter.
@@ -442,7 +442,7 @@ for later; the vitals strip is where they'll land.
 | 7 | `:live-tile` block ai render: guidance + 2 copy-paste examples | Core | the `:live-tile` block render fn (`seon.agent.ctx*`) | none |
 | 8 | Transcript: wrap `:transcript` in collapsible `<details>` `#world-transcript` below canvas; exclude from supporting-tile loop | UI | `ui/world.cljs:61,162-171` | 4,5 |
 | 9 | Root system render fns (`fleet`/`store`/`activity`/`system-view`) | Core | new `seon.render.system` | store-inventory concise (parallel) |
-| 10 | Root bootstrap: seed `:seon.render.live-tile/content`=`system-view` + `:root` ctx block | Core | root bootstrap (`seon.agent`/seed) | 9 |
+| 10 | Root bootstrap: seed `:seon.render.live-canvas/content`=`system-view` + `:root` ctx block | Core | root bootstrap (`seon.agent`/seed) | 9 |
 | 11 | Agent card grid chrome + responsive CSS; unfiltered transcript on `/` | UI | `ui/world.cljs`, `resources/public/css` | 9,10 |
 
 \* **Lane flag (fork below):** `src/seon/handlers/**` is NOT named in the
@@ -485,7 +485,7 @@ shared dependency for both the transcript (UI) and the canvas (Core).
 
 2. **Custom hiccup tile vs the message card — replace or stack?** The owner said
    "custom view OR markdown reply." When an agent BOTH sets a custom
-   `:seon.render.live-tile/content` AND keeps chatting, the canvas shows the custom
+   `:seon.render.live-canvas/content` AND keeps chatting, the canvas shows the custom
    tile (existing behavior, unchanged) and the latest reply lives only in the
    transcript below. **My call: REPLACE** — custom tile wins the canvas; the reply
    is in the transcript. (Stacking a reply card under every custom tile fights the
@@ -500,7 +500,7 @@ shared dependency for both the transcript (UI) and the canvas (Core).
    derivation; not worth it for v1.
 
 4. **Root canvas = system-view, or system-view as a tall tile under a normal
-   canvas?** I propose root's `:seon.render.live-tile/content` = `system-view`
+   canvas?** I propose root's `:seon.render.live-canvas/content` = `system-view`
    (root's canvas IS the fleet/system view, via the same seam). Alternative: keep
    root's canvas as welcome and make `system-view` the top supporting tile. **My
    call: canvas = system-view** (root's welcome is low-value; the fleet view is the
@@ -552,7 +552,7 @@ shared dependency for both the transcript (UI) and the canvas (Core).
 
 ## See also
 
-- [[ui]] — block/render/tile/slot/layout; canvas=live-tile (#19); error seams.
-- [[toolkit]] — `my.tile` (the richer follow-up; task #22).
+- [[ui]] — block/render/canvas/slot/layout; canvas=live-tile (#19); error seams.
+- [[toolkit]] — `my.canvas` (the richer follow-up; task #22).
 - [[root-os-vision]] — `root = /`; the system-understanding / supervisor arc.
 - [[coordination]] — the Core⟷UI lanes + cross-lane interface.

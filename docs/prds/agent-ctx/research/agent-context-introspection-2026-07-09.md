@@ -17,7 +17,7 @@ marked with their grounding location.
 
 **The current context is largely CLEAR and the agents like it.** All three
 subjects independently praised the namespace cards + inline `:malli/schema`,
-the `my.*` toolkit split (`my.ui`/`my.tile`/`my.data`), the `my.plan` verbs,
+the `my.*` toolkit split (`my.ui`/`my.canvas`/`my.data`), the `my.plan` verbs,
 the `#code` heredoc, and the skills load/unload token economy — and they SHIPPED
 real work through it (coding agent: 7/7 pytest green in 62 evals; DB agent:
 registered a schema + stored + queried back 3 books; render agent: a live
@@ -243,7 +243,7 @@ finding, it is a driving-concurrency constraint).
   timed-out first wave; coding agent: "a status line without context … a
   tombstone, not a diagnostic." Fix: when a run closes `:error`, surface the
   cause line in the transcript.
-- **live-tile section describes the tile in prose instead of showing its
+- **canvas section describes the tile in prose instead of showing its
   current state.** Exploration agent: "If the tile is my primary surface, I
   should see its CURRENT rendered state — or at least a compact summary — not
   just its source and a prose description."
@@ -269,7 +269,7 @@ Every agent volunteered praise for these; they are load-bearing wins:
   killer feature — I never have to guess what shape a fn expects or returns."
   Render agent: "The `:malli/schema` on the tile fn … validated cleanly on
   first try."
-- **The `my.*` toolkit split** (`my.ui` static / `my.tile` interactive /
+- **The `my.*` toolkit split** (`my.ui` static / `my.canvas` interactive /
   `my.data` aggregation) — "three small namespaces, each with a clear job."
   Render agent built a working tile with `my.ui/section` + `status-line` +
   `table` composition "straightforward … exactly one form" to wire.

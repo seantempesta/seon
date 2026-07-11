@@ -1,7 +1,7 @@
-(ns seon.render.live-tile-test
-  "Tests for seon.render.live-tile — the tile key, resolution
+(ns seon.render.canvas-test
+  "Tests for seon.render.canvas — the tile key, resolution
    provenance, the welcome, and the legible-error contract — plus the
-   render-agent-tile integration (live-tiles PRD 2026-06-11, U1):
+   render-agent-canvas integration (canvas PRD 2026-06-11, U1):
 
      • greeting — time-of-day boundaries
      • wired-content — ::content wins (legacy :seon.render/html tile
@@ -10,7 +10,7 @@
      • welcome — .seon-tile compact+expanded blocks, date, purpose,
        tile line, :seon.render/ai render
      • error-response — fallback tile + envelope + render (never vanish)
-     • render-agent-tile — unwired→welcome, literal hiccup via the new
+     • render-agent-canvas — unwired→welcome, literal hiccup via the new
        key, throwing fn → error-response, ::content EDN roundtrip
 
    Fresh isolated conn per integration test (client/open-agent-conn!)
@@ -25,12 +25,12 @@
     [seon.db :as db]
     [seon.error :as error]
     [seon.render :as render]
-    [seon.render.live-tile :as tile]
+    [seon.render.canvas :as canvas]
     [seon.repl.internal :as repl.internal]
     [seon.schema :as schema]
     [seon.ui.html :as html]))
 
-;; The render-agent-tile degradation tests assert the graceful PROD fallback
+;; The render-agent-canvas degradation tests assert the graceful PROD fallback
 ;; (throw / broken hiccup → calm banner, never a crash). Under the harness
 ;; strict default (SEON_RENDER_STRICT=1) those renders THROW by design, so
 ;; force the fail-loud dial OFF for this ns (process-global env, async-safe —
@@ -54,14 +54,14 @@
 ;; ============================================================
 
 (deftest greeting-time-of-day-boundaries
-  (is (= "Good morning"   (tile/greeting 5)))
-  (is (= "Good morning"   (tile/greeting 11)))
-  (is (= "Good afternoon" (tile/greeting 12)))
-  (is (= "Good afternoon" (tile/greeting 16)))
-  (is (= "Good evening"   (tile/greeting 17)))
-  (is (= "Good evening"   (tile/greeting 21)))
-  (is (= "Good night"     (tile/greeting 22)))
-  (is (= "Good night"     (tile/greeting 4))))
+  (is (= "Good morning"   (canvas/greeting 5)))
+  (is (= "Good morning"   (canvas/greeting 11)))
+  (is (= "Good afternoon" (canvas/greeting 12)))
+  (is (= "Good afternoon" (canvas/greeting 16)))
+  (is (= "Good evening"   (canvas/greeting 17)))
+  (is (= "Good evening"   (canvas/greeting 21)))
+  (is (= "Good night"     (canvas/greeting 22)))
+  (is (= "Good night"     (canvas/greeting 4))))
 
 ;; ============================================================
 ;; wired-content — resolution order + provenance.
@@ -69,57 +69,57 @@
 ;; ============================================================
 
 (deftest wired-content-new-key-wins
-  (let [{:seon.render.live-tile/keys [source value]}
-        (tile/wired-content
+  (let [{:seon.render.canvas/keys [source value]}
+        (canvas/wired-content
           {:seon.render/entity
            {:seon.agent/id "wired-22060001"
-            :seon.render.live-tile/content (pr-str 'my.ns/tile-fn)
+            :seon.render.canvas/content (pr-str 'my.ns/tile-fn)
             :seon.render/html              (pr-str 'other.ns/old-fn)}})]
-    (is (= :seon.render.live-tile/content source))
+    (is (= :seon.render.canvas/content source))
     (is (= 'my.ns/tile-fn value) "new key wins AND decodes")))
 
 (deftest wired-content-ignores-legacy-html-slot
   ;; Render sweep 2026-06-11 (PRD §8.1, no legacy): :seon.render/html
   ;; is the generic entity-card slot ONLY — never the tile.
-  (let [{:seon.render.live-tile/keys [source value]}
-        (tile/wired-content
+  (let [{:seon.render.canvas/keys [source value]}
+        (canvas/wired-content
           {:seon.render/entity
            {:seon.agent/id    "wired-22060002"
             :seon.render/html (pr-str [:h1 "legacy"])}})]
-    (is (= :seon.render.live-tile/welcome source))
-    (is (= tile/welcome-sym value)
+    (is (= :seon.render.canvas/welcome source))
+    (is (= canvas/welcome-sym value)
         "the card slot never wires the tile — welcome renders")))
 
 (deftest wired-content-unwired-defaults-to-welcome
-  (let [{:seon.render.live-tile/keys [source value]}
-        (tile/wired-content
+  (let [{:seon.render.canvas/keys [source value]}
+        (canvas/wired-content
           {:seon.render/entity {:seon.agent/id "wired-22060003"}})]
-    (is (= :seon.render.live-tile/welcome source))
-    (is (= tile/welcome-sym value))))
+    (is (= :seon.render.canvas/welcome source))
+    (is (= canvas/welcome-sym value))))
 
 (deftest wired-content-pin-beats-derived-beats-welcome
   (testing "no pin + a derived last-updated tile → the derived fn"
-    (let [{:seon.render.live-tile/keys [source value]}
-          (tile/wired-content
+    (let [{:seon.render.canvas/keys [source value]}
+          (canvas/wired-content
             {:seon.render/entity {:seon.agent/id "wired-22060004"}
-             :seon.render.live-tile/derived 'my.agent.x/plan-tile})]
-      (is (= :seon.render.live-tile/derived source))
+             :seon.render.canvas/derived 'my.agent.x/plan-tile})]
+      (is (= :seon.render.canvas/derived source))
       (is (= 'my.agent.x/plan-tile value))
       (testing "the label names the derivation and how to pin"
-        (let [label (tile/wired-label
-                      {:seon.render.live-tile/source source
-                       :seon.render.live-tile/value  value})]
+        (let [label (canvas/wired-label
+                      {:seon.render.canvas/source source
+                       :seon.render.canvas/value  value})]
           (is (str/includes? label "my.agent.x/plan-tile"))
           (is (str/includes? label "derived"))
-          (is (str/includes? label ":seon.render.live-tile/content"))))))
+          (is (str/includes? label ":seon.render.canvas/content"))))))
   (testing "a stored pin wins over the derived default"
-    (let [{:seon.render.live-tile/keys [source value]}
-          (tile/wired-content
+    (let [{:seon.render.canvas/keys [source value]}
+          (canvas/wired-content
             {:seon.render/entity
              {:seon.agent/id "wired-22060005"
-              :seon.render.live-tile/content (pr-str 'my.ns/pinned-tile)}
-             :seon.render.live-tile/derived 'my.agent.x/plan-tile})]
-      (is (= :seon.render.live-tile/content source))
+              :seon.render.canvas/content (pr-str 'my.ns/pinned-tile)}
+             :seon.render.canvas/derived 'my.agent.x/plan-tile})]
+      (is (= :seon.render.canvas/content source))
       (is (= 'my.ns/pinned-tile value)
           "pin regardless of recency — the override"))))
 
@@ -134,16 +134,16 @@
 
 (deftest welcome-emits-tagged-blocks-and-twin
   (let [{:seon.render/keys [hiccup ai]}
-        (tile/welcome {:seon.db/db nil :seon.agent/id "wlcm-2206110001"})
+        (canvas/welcome {:seon.db/db nil :seon.agent/id "wlcm-2206110001"})
         classes (->> (flatten hiccup) (filter map?) (keep :class))]
-    (is (tile/valid-hiccup? hiccup))
+    (is (canvas/valid-hiccup? hiccup))
     (is (= "seon-tile" (:class (second hiccup)))
         "wrapped in the .seon-tile container")
     (is (some #(re-find #"seon-tile-compact" %) classes))
     (is (some #(re-find #"seon-tile-expanded" %) classes)
         "ONE render carries BOTH zoom blocks")
     (testing "time-aware greeting matches the wall clock"
-      (let [expected (tile/greeting (.getHours (js/Date.)))]
+      (let [expected (canvas/greeting (.getHours (js/Date.)))]
         (is (some #(re-find (re-pattern expected) %) (hiccup-strings hiccup)))
         (is (re-find (re-pattern expected) ai))))
     (testing "today's date renders"
@@ -153,13 +153,13 @@
                                                :day     "numeric"})]
         (is (some #(re-find (re-pattern date-str) %) (hiccup-strings hiccup)))))
     (testing "the double-duty tile line is present in BOTH renders"
-      (is (some #(= tile/tile-line %) (hiccup-strings hiccup)))
-      (is (str/includes? ai tile/tile-line)
+      (is (some #(= canvas/tile-line %) (hiccup-strings hiccup)))
+      (is (str/includes? ai canvas/tile-line)
           "the ai render surfaces the tile-line verbatim"))))
 
 (deftest welcome-uses-purpose-when-present
   (let [{:seon.render/keys [hiccup ai]}
-        (tile/welcome {:seon.db/db nil
+        (canvas/welcome {:seon.db/db nil
                        :seon.agent/id "wlcm-2206110002"
                        :seon.render/entity
                        {:seon.agent/id      "wlcm-2206110002"
@@ -170,24 +170,24 @@
 
 (deftest welcome-generic-without-purpose-or-name
   (let [{:seon.render/keys [hiccup]}
-        (tile/welcome {:seon.db/db nil :seon.agent/id "wlcm-2206110003"})]
+        (canvas/welcome {:seon.db/db nil :seon.agent/id "wlcm-2206110003"})]
     (is (some #(re-find #"finding my purpose" %) (hiccup-strings hiccup))
         "gracefully generic — no purpose, no name, still elegant")))
 
 (deftest welcome-compact-shows-purpose-id-and-truthful-twin
   (let [{:seon.render/keys [hiccup ai]}
-        (tile/welcome {:seon.db/db nil
+        (canvas/welcome {:seon.db/db nil
                        :seon.agent/id "wlcm-2206110004"
                        :seon.render/entity
                        {:seon.agent/id      "wlcm-2206110004"
                         :seon.agent/purpose "track your workouts"}})]
     (is (some #(= "wlcm-2206110004" %) (hiccup-strings hiccup))
-        "the agent's id renders on the default tile (live-tiles U3)")
+        "the agent's id renders on the default tile (canvas U3)")
     (testing "the twin is TRUTHFUL — every minted agent IS wired (to welcome)"
       (is (not (re-find #"haven't wired" ai))
           "the old wording lied: creation wires every agent to welcome")
       (is (re-find #"core default" ai))
-      (is (re-find #":seon.render.live-tile/content" ai)
+      (is (re-find #":seon.render.canvas/content" ai)
           "the twin always says HOW to repoint the tile"))))
 
 ;; ============================================================
@@ -197,10 +197,10 @@
 (deftest error-response-never-vanishes
   (let [env {:seon.error/message "boom from tile fn"}
         {:seon.render/keys [hiccup ai error]}
-        (tile/error-response
+        (canvas/error-response
           {:seon.db/error                 env
-           :seon.render.live-tile/content 'my.ns/broken-tile})]
-    (is (tile/valid-hiccup? hiccup) "human sees a card, not a blank")
+           :seon.render.canvas/content 'my.ns/broken-tile})]
+    (is (canvas/valid-hiccup? hiccup) "human sees a card, not a blank")
     ;; ISOLATION CONTRACT (tile-isolation Layer 1), asserted as MECHANISM not
     ;; placeholder wording: the failure is partitioned to the agent-facing
     ;; channels (the :seon.render/ai twin + the :seon.render/error envelope)
@@ -237,34 +237,34 @@
   ;; Serializer-tolerant shapes valid-hiccup? REJECTS must pass here —
   ;; gating the render path on the strict authoring shape would
   ;; falsely error legitimate tiles.
-  (is (nil? (tile/hiccup-structure-error [:div "plain"])))
-  (is (nil? (tile/hiccup-structure-error
+  (is (nil? (canvas/hiccup-structure-error [:div "plain"])))
+  (is (nil? (canvas/hiccup-structure-error
               [:div {:class "x"} 3.14 nil false
                (list [:li "a"] [:li "b"])
                (html/raw "<b>pre-escaped</b>")
                'a-symbol-child])))
-  (is (nil? (tile/hiccup-structure-error
+  (is (nil? (canvas/hiccup-structure-error
               (:seon.render/hiccup
-                (tile/welcome {:seon.db/db nil
+                (canvas/welcome {:seon.db/db nil
                                :seon.agent/id "structok-000001"}))))
       "the core welcome passes its own gate"))
 
 (deftest structure-error-locates-vector-of-vectors
-  (let [{:seon.render.live-tile/keys [structure-path structure-message]}
-        (tile/hiccup-structure-error vov-repro-hiccup)]
+  (let [{:seon.render.canvas/keys [structure-path structure-message]}
+        (canvas/hiccup-structure-error vov-repro-hiccup)]
     (is (= [2] structure-path) "the defect's path, not just 'somewhere'")
     (is (re-find #"vector-of-vectors" structure-message))
     (is (re-find #"Splice" structure-message)
         "the message teaches the fix, not just the failure"))
   (testing "nested + behind an attrs map — path offsets account for attrs"
-    (let [{:seon.render.live-tile/keys [structure-path]}
-          (tile/hiccup-structure-error
+    (let [{:seon.render.canvas/keys [structure-path]}
+          (canvas/hiccup-structure-error
             [:div {:class "x"} [:span "ok"] [:div [[:b "deep"]]]])]
       (is (= [3 1] structure-path)))))
 
 (deftest structure-error-locates-invalid-tag
-  (let [{:seon.render.live-tile/keys [structure-path structure-message]}
-        (tile/hiccup-structure-error [:div [123 "not a tag"]])]
+  (let [{:seon.render.canvas/keys [structure-path structure-message]}
+        (canvas/hiccup-structure-error [:div [123 "not a tag"]])]
     (is (= [1] structure-path))
     (is (re-find #"invalid tag" structure-message))
     (is (re-find #"123" structure-message) "quotes the offending value")))
@@ -273,8 +273,8 @@
   ;; #42 — the unambiguous displaced-attrs case: the 2nd slot is a
   ;; non-map child AND an attrs-looking map sits at child index ≥ 1, so
   ;; the serializer reads it as garbage content instead of attrs.
-  (let [{:seon.render.live-tile/keys [structure-path structure-message]}
-        (tile/hiccup-structure-error [:div "title" {:class "c"} "body"])]
+  (let [{:seon.render.canvas/keys [structure-path structure-message]}
+        (canvas/hiccup-structure-error [:div "title" {:class "c"} "body"])]
     (is (= [2] structure-path) "the misplaced map's vector index")
     (is (re-find #"misplaced attrs map" structure-message))
     (is (re-find #"SECOND element" structure-message)
@@ -283,19 +283,19 @@
         "the message names the offending child index")
     (is (re-find #"\{:class" structure-message) "quotes the offending map"))
   (testing "nested — the path descends into the offending child"
-    (let [{:seon.render.live-tile/keys [structure-path]}
-          (tile/hiccup-structure-error [:div [:span "a" {:k 1}]])]
+    (let [{:seon.render.canvas/keys [structure-path]}
+          (canvas/hiccup-structure-error [:div [:span "a" {:k 1}]])]
       (is (= [1 2] structure-path))))
   (testing "CONSERVATIVE — valid tiles never trip the misplaced-attrs rule"
     ;; correct attrs in 2nd position
-    (is (nil? (tile/hiccup-structure-error [:div {:k 1} "x"])))
+    (is (nil? (canvas/hiccup-structure-error [:div {:k 1} "x"])))
     ;; no map at all
-    (is (nil? (tile/hiccup-structure-error [:h3 "x"])))
-    (is (nil? (tile/hiccup-structure-error [:div [:h3 "x"] [:p "y"]])))
+    (is (nil? (canvas/hiccup-structure-error [:h3 "x"])))
+    (is (nil? (canvas/hiccup-structure-error [:div [:h3 "x"] [:p "y"]])))
     ;; bare tag
-    (is (nil? (tile/hiccup-structure-error [:hr])))
+    (is (nil? (canvas/hiccup-structure-error [:hr])))
     ;; a raw map as content is fine (raw? excluded)
-    (is (nil? (tile/hiccup-structure-error
+    (is (nil? (canvas/hiccup-structure-error
                 [:div "txt" (html/raw "<b>x</b>")])))))
 
 ;; ============================================================
@@ -308,10 +308,10 @@
 ;; ============================================================
 
 (deftest registered-forms-are-pure-data
-  (doseq [k [:seon.render.live-tile/hiccup
-             :seon.render.live-tile/content
-             :seon.render.live-tile/wired-response
-             :seon.render.live-tile/error-request
+  (doseq [k [:seon.render.canvas/hiccup
+             :seon.render.canvas/content
+             :seon.render.canvas/wired-response
+             :seon.render.canvas/error-request
              :seon.render/html
              :seon.render/html-response
              :seon.render/ai-response
@@ -328,7 +328,7 @@
 
 (deftest content-shape-semantics
   (let [valid? #(m/validate
-                  (m/schema :seon.render.live-tile/content)
+                  (m/schema :seon.render.canvas/content)
                   %)]
     (is (valid? 'my.ns/tile-fn) "qualified fn symbol")
     (is (valid? [:h1 {:class "x"} "hi" [:span "nested"]]) "literal hiccup")
@@ -337,14 +337,14 @@
     (is (not (valid? "string")) "bare string rejected")))
 
 ;; ============================================================
-;; render-agent-tile integration — fresh conn, never the live pod.
+;; render-agent-canvas integration — fresh conn, never the live pod.
 ;; ============================================================
 
 (defn throwing-tile
   "Test tile renderer that always throws — the error-envelope target."
   {:malli/schema [:=> [:cat :seon.render/system-input] :seon.render/html-response]}
   [_input]
-  (throw (ex-info "deliberate tile failure" {:seon.render.live-tile/test true})))
+  (throw (ex-info "deliberate tile failure" {:seon.render.canvas/test true})))
 
 (defn twin-tile
   "Test tile renderer returning BOTH twins — the twin-contract target."
@@ -371,24 +371,24 @@
                      (.then (fn [_] (body conn)))
                      (.finally (fn [] (set! db/*conn* orig)))))))))
 
-(deftest render-agent-tile-unwired-renders-welcome
+(deftest render-agent-canvas-unwired-renders-welcome
   (async done
     (-> (with-agent-conn "tilewlc-000001"
           (fn [conn]
             (let [{:seon.render/keys [hiccup ai]}
-                  (render/render-agent-tile {:seon.db/db @conn
+                  (render/render-agent-canvas {:seon.db/db @conn
                                              :seon.agent/id "tilewlc-000001"})]
               ;; DISPATCH MECHANISM, not the greeting prose: an unwired agent
               ;; resolves to the welcome renderable, which ALWAYS returns the
               ;; html-response twin pair. Assert the twin is present and
               ;; non-blank, and that it's the WELCOME twin specifically — its
               ;; stable contract is naming how to repoint the tile
-              ;; (:seon.render.live-tile/content), not any time-of-day wording.
+              ;; (:seon.render.canvas/content), not any time-of-day wording.
               (is (= "seon-tile" (:class (second hiccup)))
                   "unwired agent dispatches to the core welcome renderable")
               (is (and (string? ai) (seq ai))
                   "the welcome twin (the ai-format string) rides the response")
-              (is (str/includes? ai ":seon.render.live-tile/content")
+              (is (str/includes? ai ":seon.render.canvas/content")
                   "the welcome twin teaches HOW to repoint the tile — its stable contract"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -424,7 +424,7 @@
                   (fn [_]
                     (binding [db/*conn* conn]
                       (let [{:seon.render/keys [hiccup ai]}
-                            (tile/welcome
+                            (canvas/welcome
                               {:seon.db/db @conn
                                :seon.agent/id "wlcmrpl-000001"
                                :seon.render/entity {:seon.agent/id "wlcmrpl-000001"}})]
@@ -439,18 +439,18 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest render-agent-tile-content-key-literal-hiccup
+(deftest render-agent-canvas-content-key-literal-hiccup
   (async done
     (-> (with-agent-conn "tilelit-000001"
           (fn [conn]
             (-> (db/transact!
                   {:seon.db/tx-data
                    [{:seon.agent/id "tilelit-000001"
-                     :seon.render.live-tile/content [:h1 "wired!"]}]})
+                     :seon.render.canvas/content [:h1 "wired!"]}]})
                 (.then (fn [_]
                          (binding [db/*conn* conn]
                            (let [{:seon.render/keys [hiccup]}
-                                 (render/render-agent-tile
+                                 (render/render-agent-canvas
                                    {:seon.db/db @conn
                                     :seon.agent/id "tilelit-000001"})]
                              (is (= [:h1 "wired!"] hiccup)
@@ -458,7 +458,7 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest render-agent-tile-literal-hiccup-interactive-gets-transform
+(deftest render-agent-canvas-literal-hiccup-interactive-gets-transform
   ;; #22 B.1 — a LITERAL-HICCUP tile with an :on-click handler is
   ;; agent-authored too, so its handler MUST be rewritten to a Datastar
   ;; @post pointing at the agent's OWN /call door. Before the fix the
@@ -470,12 +470,12 @@
             (-> (db/transact!
                   {:seon.db/tx-data
                    [{:seon.agent/id "tileint-000001"
-                     :seon.render.live-tile/content
+                     :seon.render.canvas/content
                      [:button {:on-click (list 'bump! "row-1")} "+1"]}]})
                 (.then (fn [_]
                          (binding [db/*conn* conn]
                            (let [{:seon.render/keys [hiccup]}
-                                 (render/render-agent-tile
+                                 (render/render-agent-canvas
                                    {:seon.db/db @conn
                                     :seon.agent/id "tileint-000001"})
                                  attrs (second hiccup)
@@ -495,19 +495,19 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest render-agent-tile-twin-fn-carries-both-keys
+(deftest render-agent-canvas-twin-fn-carries-both-keys
   (async done
     (-> (with-agent-conn "tiletwn-000001"
           (fn [conn]
             (-> (db/transact!
                   {:seon.db/tx-data
                    [{:seon.agent/id "tiletwn-000001"
-                     :seon.render.live-tile/content
-                     'seon.render.live-tile-test/twin-tile}]})
+                     :seon.render.canvas/content
+                     'seon.render.canvas-test/twin-tile}]})
                 (.then (fn [_]
                          (binding [db/*conn* conn]
                            (let [{:seon.render/keys [hiccup ai]}
-                                 (render/render-agent-tile
+                                 (render/render-agent-canvas
                                    {:seon.db/db @conn
                                     :seon.agent/id "tiletwn-000001"})]
                              (is (= [:div.seon-tile [:span "3 workouts this week"]]
@@ -518,15 +518,15 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest render-agent-tile-throwing-fn-is-legible
+(deftest render-agent-canvas-throwing-fn-is-legible
   (async done
     (-> (with-agent-conn "tileerr-000001"
           (fn [conn]
             (-> (db/transact!
                   {:seon.db/tx-data
                    [{:seon.agent/id "tileerr-000001"
-                     :seon.render.live-tile/content
-                     'seon.render.live-tile-test/throwing-tile}]})
+                     :seon.render.canvas/content
+                     'seon.render.canvas-test/throwing-tile}]})
                 (.then (fn [_]
                          (binding [db/*conn* conn]
                            ;; throwing-tile is seon.* → :core fault; deliberate,
@@ -535,7 +535,7 @@
                            (let [{:seon.render/keys [hiccup ai error]}
                                  (error/expecting-core-fault!
                                    (fn []
-                                     (render/render-agent-tile
+                                     (render/render-agent-canvas
                                        {:seon.db/db @conn
                                         :seon.agent/id "tileerr-000001"})))]
                              (is (some #(re-find #"Updating this tile" %)
@@ -585,7 +585,7 @@
       (-> (db/transact!
             {:seon.db/tx-data
              [{:seon.agent/id                 agent-id
-               :seon.render.live-tile/content content}]})
+               :seon.render.canvas/content content}]})
           (.then
             (fn [_]
               (binding [db/*conn* conn]
@@ -595,7 +595,7 @@
                 (let [{:seon.render/keys [hiccup ai error]}
                       (error/expecting-core-fault!
                         (fn []
-                          (render/render-agent-tile
+                          (render/render-agent-canvas
                             {:seon.db/db @conn :seon.agent/id agent-id})))]
                   (is (some #(re-find #"Updating this tile" %)
                             (hiccup-strings hiccup))
@@ -607,16 +607,16 @@
                   (is (string? (html/->string hiccup))
                       "the fallback hiccup itself serializes")))))))))
 
-(deftest render-agent-tile-vector-of-vectors-degrades-to-banner
+(deftest render-agent-canvas-vector-of-vectors-degrades-to-banner
   (async done
     (-> (tile-degrades-legibly
           "tilevov-000001"
-          'seon.render.live-tile-test/vector-of-vectors-tile
+          'seon.render.canvas-test/vector-of-vectors-tile
           #"vector-of-vectors")
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest render-agent-tile-literal-broken-hiccup-degrades-to-banner
+(deftest render-agent-canvas-literal-broken-hiccup-degrades-to-banner
   ;; The literal-hiccup arm of html-render never CALLS anything — the
   ;; old guard couldn't fire at all. Same seam covers it.
   (async done
@@ -625,13 +625,13 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest render-agent-tile-serializer-backstop-catches-walk-misses
+(deftest render-agent-canvas-serializer-backstop-catches-walk-misses
   ;; Falsifies the backstop layer specifically: a defect the walk
   ;; doesn't model (unparseable keyword tag) still degrades.
   (async done
     (-> (tile-degrades-legibly
           "tilevov-000003"
-          'seon.render.live-tile-test/unparseable-tag-tile
+          'seon.render.canvas-test/unparseable-tag-tile
           #"Unparseable tag")
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -669,7 +669,7 @@
        set))
 
 (def ^:private docstring-vocabulary
-  "The utility vocabulary the live-tile ns docstring teaches agents —
+  "The utility vocabulary the canvas ns docstring teaches agents —
    every entry MUST be safelisted or agents emit classes that
    silently don't exist. Keep in sync with the docstring AND the
    @source inline(...) block in resources/public/css/input.css."
@@ -733,7 +733,7 @@
 
 (deftest wiring-source-parses-as-one-tutorial-form
   (let [agent-id "AGTwiresrc0001"
-        parsed   (repl.internal/parse-forms (tile/wiring-source agent-id))
+        parsed   (repl.internal/parse-forms (canvas/wiring-source agent-id))
         {:seon.repl/keys [kind narration form]} (first parsed)]
     (is (= 1 (count parsed)) "exactly ONE form — the wiring transact")
     (is (= :form kind) "it parses cleanly (:form, not :read)")
@@ -745,6 +745,6 @@
       (let [tx-map (first (:seon.db/tx-data (second form)))]
         (is (= agent-id (:seon.agent/id tx-map))
             "identity attr addresses the agent's OWN entity")
-        (is (= (list 'quote tile/welcome-sym)
-               (:seon.render.live-tile/content tx-map))
+        (is (= (list 'quote canvas/welcome-sym)
+               (:seon.render.canvas/content tx-map))
             "wires the quoted core welcome symbol")))))

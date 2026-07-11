@@ -12,7 +12,7 @@ manifest runs `:seon.config/on-core-error :crash`; the suite/CI surface stays
 `:gate` via `config/test.edn` (bin/test-cljs default). C41 resolved (option A:
 `seon.error/expecting-core-fault!` — a TEST bracket printing the distinct
 `SEON-EXPECTED-CORE-FAULT` marker the gate does not count; 8 genuine-`:core`
-render/tile/block fixtures annotated). The C41 investigation surfaced C42 (a
+render/canvas/block fixtures annotated). The C41 investigation surfaced C42 (a
 real, crash-flip-critical bug): agent-form failures (a cljs.js
 `:cljs/analysis-error` — undeclared var / bad require — or a `:user-input`
 kind — a mistyped query attr) were misclassified `:core` and would have
@@ -71,7 +71,7 @@ is missing.
 from four error-path test files that DELIBERATELY provoke render/eval
 failures to verify graceful degradation (`seon.render-test`
 `throwing-renderer`/`boom-ai-render`; `seon.render.block-test`
-`with-redefs md/md->hiccup → throw`; `seon.render.live-tile-test`
+`with-redefs md/md->hiccup → throw`; `seon.render.canvas-test`
 deliberate tile / vector-of-vectors / bad-tag; `seon.eval.require-test`
 `no.such.namespace`). Pre-sweep those catches returned an error VALUE
 silently; post-sweep they correctly `record!` `:core` and print

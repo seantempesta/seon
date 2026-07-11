@@ -581,7 +581,7 @@
                             {:seon.gym/scenario s
                              :seon.gym/config
                              {:seon.gym.config/path
-                              "test/seon/gym/configs/lean-no-live-tile.edn"}})
+                              "test/seon/gym/configs/lean-no-canvas.edn"}})
                           (fn [lean] [full lean]))))
           (.then (fn [[full lean]]
                    (let [full-blocks (first-profile-blocks full)
@@ -651,12 +651,12 @@
 ;; ---------------------------------------------------------------------------
 ;; ALIAS-BLIND PREDICATE LOAD CHECK — a :pattern that regexes a qualified
 ;; FN-CALL `<long-ns>/` whose home ns aliases it (the seon.* verbs db/,
-;; message/, … AND the my.* toolkit tile/, ui/, data/, kb/) but does NOT
+;; message/, … AND the my.* toolkit canvas/, ui/, data/, kb/) but does NOT
 ;; accept the short alias false-negatives EVERY correct read, silently
-;; suppressing the pass-rate (bit thrice: my.tile e6aaf9f0, three seon.db/
+;; suppressing the pass-rate (bit thrice: my.canvas e6aaf9f0, three seon.db/
 ;; reads fc557fbf). It must FAIL TO LOAD with the named error, while
 ;; alias-tolerant patterns, legitimately-qualified (non-aliased) patterns,
-;; and namespaced-keyword data-keys (`:my.tile/action`) all load.
+;; and namespaced-keyword data-keys (`:my.canvas/action`) all load.
 ;; ---------------------------------------------------------------------------
 
 (deftest alias-blind-predicate-detects-the-aliased-qualified-without-alias
@@ -674,24 +674,24 @@
     (is (some? (blind? "my\\.plan/plan!"))
         "qualified my.plan/ without the plan alias is alias-blind")
     ;; FLAGGED — the ORIGINAL alias-blind class (e6aaf9f0): a my.* TOOLKIT
-    ;; fn-call `my.tile/button` with no `tile/` alternative.
-    (is (= "my.tile" (:seon.gym/alias-blind-ns (blind? "my\\.tile/(button|form)")))
-        "qualified my.tile/ fn-call without the tile alias is alias-blind")
+    ;; fn-call `my.canvas/button` with no `canvas/` alternative.
+    (is (= "my.canvas" (:seon.gym/alias-blind-ns (blind? "my\\.canvas/(button|form)")))
+        "qualified my.canvas/ fn-call without the tile alias is alias-blind")
     ;; NOT flagged — the sanctioned alias-tolerant idioms (seon. and my.)
     (is (nil? (blind? "(?:seon\\.)?db/(query|pull|entity|store-inventory)"))
         "the (?:seon\\.)? optional-prefix idiom accepts the alias")
     (is (nil? (blind? "\\bdb/(query|pull|entity|store-inventory)"))
         "the \\bdb/ alias alternative accepts the alias")
-    (is (nil? (blind? "(?:my\\.)?tile/(button|form|input)"))
+    (is (nil? (blind? "(?:my\\.)?canvas/(button|form|input)"))
         "the (?:my\\.)? optional-prefix idiom accepts the toolkit alias")
-    ;; NOT flagged — the CURRENT battery toolkit idiom `\b(my.tile|tile)/`
-    ;; (qualified-or-alias alternation — never a bare `my.tile/` fn call).
+    ;; NOT flagged — the CURRENT battery toolkit idiom `\b(my.canvas|tile)/`
+    ;; (qualified-or-alias alternation — never a bare `my.canvas/` fn call).
     (is (nil? (blind? "\\b(my\\.tile|tile)/(button|form|input)"))
-        "the \\b(my.tile|tile)/ alternation is alias-tolerant, not blind")
+        "the \\b(my.canvas|tile)/ alternation is alias-tolerant, not blind")
     ;; NOT flagged — a namespaced-KEYWORD data-key is un-aliasable, never a
-    ;; `tile/action` fn call (the `:wired-to-an-own-fn` battery predicate).
-    (is (nil? (blind? ":my\\.tile/(action|submit)\\s+\\(?\\s*(list\\s+)?'"))
-        "a :my.tile/ namespaced-keyword data-key is not an alias-blind fn call")
+    ;; `canvas/action` fn call (the `:wired-to-an-own-fn` battery predicate).
+    (is (nil? (blind? ":my\\.canvas/(action|submit)\\s+\\(?\\s*(list\\s+)?'"))
+        "a :my.canvas/ namespaced-keyword data-key is not an alias-blind fn call")
     ;; NOT flagged — NON-aliased namespaces agents write fully-qualified
     (is (nil? (blind? "seon\\.agent\\.search/grep|seon\\.agent\\.fs/read-file"))
         "seon.agent.search / seon.agent.fs are NOT aliased — fully-qualified is correct")
@@ -1116,12 +1116,12 @@
 ;; CURATION AXES (context-curation Phase A) — eval-error-rate + canvas.
 ;; Every scorecard carries :seon.gym.scorecard/eval-error-rate (failed
 ;; RUN-DRIVEN evals ÷ total) and :seon.gym.scorecard/canvas-updated?
-;; (did the primary agent set its own :seon.render.live-tile/content);
+;; (did the primary agent set its own :seon.render.canvas/content);
 ;; the :eval-error-rate / :canvas-updated predicate kinds assert them.
 ;; ---------------------------------------------------------------------------
 
 (deftest curation-axes-eval-error-rate-and-canvas-scored
-  ;; One turn: the agent drives its OWN canvas (sets live-tile content on
+  ;; One turn: the agent drives its OWN canvas (sets canvas content on
   ;; itself) THEN makes a failing eval — so canvas-updated? is true and
   ;; eval-error-rate is in (0,1). Both predicate kinds + both scorecard
   ;; fields exercised.
@@ -1138,7 +1138,7 @@
              :seon.gym.turn/llm-script
              [(str "(seon.db/transact! {:seon.db/tx-data "
                    "[{:seon.agent/id (seon.db/current-agent-id) "
-                   ":seon.render.live-tile/content [:div \"hi\"]}]})\n"
+                   ":seon.render.canvas/content [:div \"hi\"]}]})\n"
                    "(this-symbol-does-not-exist-xyzzy)\n")]}]
            :seon.gym.scenario/predicates
            [{:seon.gym.predicate/id   :drove-its-canvas
@@ -1183,7 +1183,7 @@
                      (str "an error VALUE is not a failed eval — rate "
                           (:seon.gym.scorecard/eval-error-rate card)))
                  (is (false? (:seon.gym.scorecard/canvas-updated? card))
-                     "the agent never set its own live-tile content")
+                     "the agent never set its own canvas content")
                  (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

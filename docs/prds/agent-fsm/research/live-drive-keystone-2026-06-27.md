@@ -76,7 +76,7 @@ In `(seon.db/with-agent "dgS-2606271925" …)` scope:
 
 Baseline prompt ≈ 10k tokens (40,024 chars), 9 seeded blocks. Reads cleanly:
 
-- The stable→volatile cache boundary lands correctly (soul/namespaces/shared-instructions above; live-tile/transcript below).
+- The stable→volatile cache boundary lands correctly (soul/namespaces/shared-instructions above; live-canvas/transcript below).
 - Empty blocks (warnings, open-todos, relevant-source, inventory, shared-instructions when empty) correctly VANISH — reactive, no empty headers.
 - No overlap/repetition between blocks; `my.kb` / `my.kb.shared` / `seon.agent.todo` render in full as the worked manual; the agent's own (empty) home ns renders as a one-line workspace stub.
 - No stale `:seon.ctx`-rename text in the agent-facing output.

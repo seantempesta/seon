@@ -519,7 +519,7 @@ The same rule applies to id shapes, length constraints, enum values, and any oth
 | `/clojurescript` | Pod CLJS semantics: `^:async`/`await`, self-host eval (agent forms compile via `cljs.js`, NOT the JVM), Promise auto-await, async instrumentation wedge |
 | `/repl` | How the REPL reads/repairs/evals the forms you write; parse errors, unbalanced forms |
 | `/seon-context-config` | `config/system.edn`/`acme.edn`, manifest sections, which skills/blocks/nses an agent sees, render caps |
-| `/ui-live-tiles` | Show your human a live VIEW not prose — `:seon.render.live-tile/content`, `my.ui`/`my.tile`/`my.data`, the canvas |
+| `/ui-canvas` | Show your human a live VIEW not prose — `:seon.render.canvas/content`, `my.ui`/`my.canvas`/`my.data`, the canvas |
 | `/datastar-web-ui` | SSE handlers, `data-*` attributes, the gzip-morph channel, the `seon.render/block` + slot renderer |
 | `/browser-automation` | Verifying the pod's OWN web UI in a browser (note: browser 503s long-lived SSE — verify feeds server-side) |
 | `/clojure-testing` | Pod-first `.cljs` test patterns: fixtures, `cljs.test/async`, hermetic in-memory conns |

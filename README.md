@@ -68,7 +68,7 @@ The data and language foundation:
 
 The real-time UI:
 
-- **Datastar** (Star Federation, MIT). The hypermedia framework behind Seon's SSE-driven live tiles — declarative `data-*` attributes, one connection up, the server streams HTML and the DOM patches itself.
+- **Datastar** (Star Federation, MIT). The hypermedia framework behind Seon's SSE-driven canvas — declarative `data-*` attributes, one connection up, the server streams HTML and the DOM patches itself.
 - **[hyperlith](https://github.com/andersmurphy/hyperlith)** (Anders Murphy, MIT). The render-loop design Seon's live-feed layer adopts: render the view as a pure function of state, stream the compressed result, let the client apply it — no client-side state machine. Anders's "send the whole render down and diff on arrival" approach (and his poor-man's-datastar experiment) shaped how Seon builds composable feeds and interactive tiles.
 
 Resilience:
@@ -131,7 +131,7 @@ env vars taking precedence. `.env.example` documents every setting
 `.env`, not `.env.example`.
 
 Mint an agent on that page and talk to it: the left pane is the
-conversation, the right pane is the agent's **live tile** — the thing
+conversation, the right pane is the agent's **canvas** — the thing
 it is currently showing you, which it updates by writing code. Press
 backtick (or the ⚙ button) for the debug overlay: the exact context
 the agent sees each turn, because the prompt IS a REPL session over

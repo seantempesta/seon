@@ -52,7 +52,7 @@
 
    Shape is syntax-highlighted so highlight.js
    colorizes it like the eval cards."
-  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.live-tile/hiccup]]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.canvas/hiccup]]}
   [{:seon.render/keys [node entity]}]
   (let [entity (or node entity)
         k     (:seon.schema/key entity)

@@ -44,9 +44,9 @@ fell off the bounded path. (`*conn*` itself enumerates fine off the live
 2. **Fail-loud (owner ruling)** — `seon.render.sci/invoke-bounded` no longer
    returns `{::fallthrough true}`; when SCI cannot run a `my.*` render fn it
    returns `{:seon.render.sci/error <:seon.db/error map>}` and BOTH callers
-   (`seon.render/render-agent-tile`, the `resolve-render` slot path) render a
+   (`seon.render/render-agent-canvas`, the `resolve-render` slot path) render a
    `:seon/error` block IN PLACE via the ONE error mechanism (tile →
-   `live-tile/error-response`; slot → the walker guard → `live-tile/error-tile`,
+   `canvas/error-response`; slot → the walker guard → `canvas/error-tile`,
    both overridable seams — acme's overrides verified intact). The unbounded
    compiled fallback is GONE; the never-wedge safety property holds
    unconditionally. The one-per-sym log warning stays (new message names the
@@ -72,7 +72,7 @@ fell off the bounded path. (`*conn*` itself enumerates fine off the live
   there is no silent third path: an agent-authored sym either runs bounded or
   errors loudly — plan-block's silence IS the bounded path.
 - Fail-loud live proof: wired `my.probe/bad-tile` (body references an
-  un-required `bogus/x` alias) onto root's live tile → pod log
+  un-required `bogus/x` alias) onto root's canvas → pod log
   `19:21:53 WARN … my.probe/bad-tile could not run under SCI bounding (Unable
   to resolve symbol: bogus/x) — rendering a :seon/error block in place` and the
   canvas rendered acme's OVERRIDDEN error card in place (override seam intact),

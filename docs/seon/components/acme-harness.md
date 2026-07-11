@@ -148,7 +148,7 @@ NEVER `bin/seon start/stop/restart` it or write to its store. Use **only**
   renders under the SCI-bounded path (proven: "N installed schemas", no
   "could not run under SCI bounding" warn).
 - **Function overrides** — `acme.overrides` `set!`s
-  `seon.render.live-tile/error-response` (and is the place to override
+  `seon.render.live-canvas/error-response` (and is the place to override
   `seon.ctx/core-default-ctx` to inject sections) — the universal
   extend-without-fork mechanism.
 - **CSS / branding** — `acme/branding/acme.css` + `SEON_BRAND_NAME/TAGLINE`.

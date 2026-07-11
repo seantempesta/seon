@@ -384,7 +384,7 @@ same line as the REPL concentration); (2) every map key namespaced
 (general); (3) public-fn `:malli/schema` is instrumented + throws;
 (4) entities = attributes + connections, no `:type`/`:kind`. STAYS as
 skill depth (pointer-reachable): datahike query/CAS/as-of, data-modeling
-design, DoC rationale, ui-live-tiles helpers, clojurescript gotchas, repl
+design, DoC rationale, ui-canvas helpers, clojurescript gotchas, repl
 parinfer/`:read` taxonomy. Each skill losing a floor rule gets a one-line
 back-pointer ("the core rule is always in your context; this is the deep
 dive"). DRIFT FIXES (keep-current): the `my.skills`/`list-skill-files`

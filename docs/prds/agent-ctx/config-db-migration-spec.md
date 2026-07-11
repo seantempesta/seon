@@ -93,7 +93,7 @@ class from the audit):
    "agent-diverged" (content hash of the seeded version, matching however the
    code-corpus reconcile compares).
 2. **Fix `ctx/install!`'s symbol round-trip** (issue
-   `ctx-install-live-tile-symbol-roundtrip.md`) — the read path must
+   `ctx-install-canvas-symbol-roundtrip.md`) — the read path must
    round-trip symbol-valued block attrs faithfully (root cause is the
    storage-bridge/read asymmetry; fix the bridge/read, not call sites). This
    is the mechanism a clean reconcile uses; it's on the critical path.
@@ -145,7 +145,7 @@ Hermetic (`bin/test-cljs` fixtures):
 - Agent healing: a pristine-provenance block updates when the default
   changes; a diverged block survives untouched; an agent from a
   pre-provenance world is treated conservatively.
-- `install!` round-trips a symbol-valued block (the live-tile case from the
+- `install!` round-trips a symbol-valued block (the canvas case from the
   issue).
 - Pre-conn sliver: the on-core-error dial is readable before connect and
   matches the db after.

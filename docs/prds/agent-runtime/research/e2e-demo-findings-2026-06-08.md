@@ -743,7 +743,7 @@ plus paid DeepSeek tier (`--paid=s32,s21,s12`), working tree at
   cards validate (the "schema still requires turn-profiles" trap was
   checked: not present).
 - `test/seon/gym/driver_test.cljs`: the two structural falsification
-  tests (volatile/stable static section) replaced by ONE telemetry
+  tests (volacanvas/stable static section) replaced by ONE telemetry
   test (`turn-profiles-record-context-telemetry-without-gating`) that
   asserts the verdict comes ONLY from scenario predicates while the
   evidence (profiles, prompt files) is all captured.

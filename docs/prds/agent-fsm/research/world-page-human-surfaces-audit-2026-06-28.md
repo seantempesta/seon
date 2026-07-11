@@ -36,7 +36,7 @@ into the world shim/layout FIRST, then #6 can delete legacy.**
   **No chat input, no nav, no controls** in the streamed `#world`.
 - `GET /agent/<id>/debug` → 200 (legacy two-pane debug + chat-bar still reachable
   via the no-match `legacy-default` delegation).
-- `GET /tile/console/<id>` → 200 (legacy packetstar console + its REPL input still
+- `GET /canvas/console/<id>` → 200 (legacy packetstar console + its REPL input still
   reachable).
 - The world feed includes a live `:transcript` tile — so a human message + the
   agent's reply WOULD surface there over the broadcast morph, once an input
@@ -47,7 +47,7 @@ into the world shim/layout FIRST, then #6 can delete legacy.**
 Two legacy stacks ride `legacy-default` in `seon.web.router`:
 `seon.web.inspector` (`/agents`, `/data`, `/agent/<id>/debug`, the now-shadowed
 `/agent/<id>` consumer view) and `seon.web.tile` (the older packetstar console
-at `/tile/console/<id>`). All POST endpoints live in `seon.web.serve` and are
+at `/canvas/console/<id>`). All POST endpoints live in `seon.web.serve` and are
 same-origin-gated by `seon.web.router/same-origin-mw`.
 
 | # | Human surface | What it does | Endpoint / mechanism | On the new world page? |

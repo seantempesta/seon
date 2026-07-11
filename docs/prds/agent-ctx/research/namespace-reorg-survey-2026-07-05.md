@@ -39,16 +39,16 @@ call count (persisted-attr rename cost proxy), Last = last git touch.
 | `my.plan` | pod | 4653 | 1 | seon.client | 43 | 2026-07-02 | Your PLANNING system — a per-agent dependency graph, not a todo list. |
 | `my.plan.internal` | pod | 5895 | 1 | my.plan | 0 | 2026-07-02 | Private plumbing for `my.plan` — fail/agent-scoping helpers, the |
 | `my.skills` | pod | 4353 | 1 | seon.client | 10 | 2026-07-01 | Loadable skills — knowledge an agent dials INTO its own context only while |
-| `my.tile` | pod | 2868 | 1 | seon.client | 12 | 2026-07-01 | INTERACTIVE canvas pieces — the sibling of `my.ui` (static). Where |
+| `my.canvas` | pod | 2868 | 1 | seon.client | 12 | 2026-07-01 | INTERACTIVE canvas pieces — the sibling of `my.ui` (static). Where |
 | `my.ui` | pod | 3312 | 1 | seon.client | 21 | 2026-07-01 | COMPOSE your canvas from small dual-render pieces — don't hand-roll a |
 | `seon.agent` | pod | 10294 | 5 | my.plan, seon.agent.loop, seon.client | 51 | 2026-07-05 | The agent RECORD + the agent-facing verbs — 'what an agent IS' (the loop |
-| `seon.agent.ctx` | pod | 32329 | 14 | my.skills, seon.agent, seon.agent.ctx.live-tile | 32 | 2026-07-05 | Context generation — the ONE block renderer. The prompt IS a REPL |
+| `seon.agent.ctx` | pod | 32329 | 14 | my.skills, seon.agent, seon.agent.ctx.canvas | 32 | 2026-07-05 | Context generation — the ONE block renderer. The prompt IS a REPL |
 | `seon.agent.ctx.findings` | pod | 2050 | 1 | seon.client | 0 | 2026-07-01 | The stored-findings context section — the CONTENT counterpart to |
 | `seon.agent.ctx.inventory` | pod | 2649 | 1 | seon.client | 0 | 2026-07-01 | The stored-data inventory context section — a cheap, reactive map of |
-| `seon.agent.ctx.live-tile` | pod | 3397 | 1 | seon.client | 0 | 2026-07-02 | The `:live-tile` context section — "what your human currently sees", |
+| `seon.agent.ctx.canvas` | pod | 3397 | 1 | seon.client | 0 | 2026-07-02 | The `:canvas` context section — "what your human currently sees", |
 | `seon.agent.ctx.namespaces` | pod | 8598 | 2 | seon.agent, seon.client | 5 | 2026-07-05 | The `:namespaces` context section — THE BODY of the prompt. COMPACT |
 | `seon.agent.ctx.relevant` | pod | 1416 | 2 | seon.agent.turn, seon.client | 0 | 2026-07-01 | The `:relevant-source` context section — the top-k embedding-retrieval |
-| `seon.agent.ctx.render-fns` | pod | 4690 | 3 | seon.agent.ctx, seon.agent.ctx.live-tile, seon.render | 8 | 2026-07-04 | Auto-run — the current ns's render fns become context (context.md |
+| `seon.agent.ctx.render-fns` | pod | 4690 | 3 | seon.agent.ctx, seon.agent.ctx.canvas, seon.render | 8 | 2026-07-04 | Auto-run — the current ns's render fns become context (context.md |
 | `seon.agent.ctx.transcript` | pod | 11382 | 2 | seon.agent, seon.client | 9 | 2026-07-02 | The `:transcript` context section + its `:seon.render/html` twin — the |
 | `seon.agent.ctx.usage` | pod | 828 | 2 | seon.ui.header, seon.web.debug | 6 | 2026-07-01 | Read-side extractor for the per-turn LLM token usage — the FIRST (and |
 | `seon.agent.ctx.warnings` | pod | 1610 | 2 | seon.agent, seon.client | 0 | 2026-07-05 | The `:warnings` context section — current problems rendered as a |
@@ -169,13 +169,13 @@ call count (persisted-attr rename cost proxy), Last = last git touch.
 | `seon.ns.view` | JVM | 4607 | 4 | seon.ai.agent, seon.ai.agent.views, seon.ns.example | 10 | 2026-06-28 | Namespace-based view system for rendering Clojure values in multiple formats. |
 | `seon.phase2.demo` | JVM | 171 | 1 | seon.system | 2 | 2026-04-19 | Phase 2 demo namespace -- purely a test fixture for the datahike routing work. |
 | `seon.platform` | pod | 953 | 17 | my.blob, seon.agent.fs, seon.agent.fs.internal | 0 | 2026-07-01 | Runtime host detection. Returns `:node` when running under Node.js |
-| `seon.render` | clj+cljs | 22443 | 14 | seon.agent.ctx, seon.agent.ctx.live-tile, seon.agent.ctx.transcript | 25 | 2026-07-04 | Multi-format rendering with code-graph-based renderer resolution. |
-| `seon.render.chat` | pod | 3044 | 1 | seon.render.live-tile | 12 | 2026-07-01 | The conversation surface — chat bubbles for the consumer agent view |
+| `seon.render` | clj+cljs | 22443 | 14 | seon.agent.ctx, seon.agent.ctx.canvas, seon.agent.ctx.transcript | 25 | 2026-07-04 | Multi-format rendering with code-graph-based renderer resolution. |
+| `seon.render.chat` | pod | 3044 | 1 | seon.render.canvas | 12 | 2026-07-01 | The conversation surface — chat bubbles for the consumer agent view |
 | `seon.render.code` | JVM | 3805 | 1 | seon.ai.claude | 6 | 2026-05-29 | Code and documentation rendering from the knowledge graph. |
 | `seon.render.default` | pod | 3047 | 3 | seon.client, seon.render, seon.render.chat | 0 | 2026-07-01 | Default renderers + shared DB-read helpers for the render surface. |
 | `seon.render.default-page` | JVM | 2607 | 1 | seon.ns.routes | 4 | 2026-02-26 | Default page template for namespaces with *ctx* but no custom renderer. |
-| `seon.render.live-tile` | pod | 7961 | 4 | seon.agent.ctx.live-tile, seon.agent.ctx.render-fns, seon.client | 14 | 2026-07-02 | The live tile — the ONE thing an agent is currently conveying to |
-| `seon.render.sci` | pod | 8639 | 2 | seon.agent.ctx.render-fns, seon.render | 1 | 2026-07-05 | SCI-bounded invocation for AGENT-authored live-tile fns (tile-isolation |
+| `seon.render.canvas` | pod | 7961 | 4 | seon.agent.ctx.canvas, seon.agent.ctx.render-fns, seon.client | 14 | 2026-07-02 | The canvas — the ONE thing an agent is currently conveying to |
+| `seon.render.sci` | pod | 8639 | 2 | seon.agent.ctx.render-fns, seon.render | 1 | 2026-07-05 | SCI-bounded invocation for AGENT-authored canvas fns (tile-isolation |
 | `seon.render.system` | pod | 5275 | 2 | seon.client, seon.ui.header | 4 | 2026-07-02 | Root's SYSTEM VIEW — the `/` dashboard that IS root's world canvas. |
 | `seon.render.value` | pod | 5383 | 2 | seon.eval, seon.render | 0 | 2026-07-02 | Structural value renderer — the render-twin applied to EVERY eval value. |
 | `seon.repair` | cljc | 3337 | 1 | seon.eval | 17 | 2026-07-01* | Best-effort delimiter repair for one Clojure form, via parinferish |
@@ -210,7 +210,7 @@ call count (persisted-attr rename cost proxy), Last = last git touch.
 | `seon.ui.clojure` | pod | 2105 | 1 | seon.render | 1 | 2026-06-28 | Server-side Clojure syntax highlighter — `clj->hiccup`. A pure CLJS leaf, |
 | `seon.ui.components` | cljc | 2737 | 2 | seon.render.default, seon.web.debug | 0 | 2026-07-01 | Shared UI component library for Phosphor Terminal styling. CLJC port |
 | `seon.ui.header` | pod | 3425 | 3 | seon.ui.world, seon.web.datastar, seon.web.debug | 3 | 2026-07-01 | The persistent global status bar — `system-header = f(db)` — rendered as a |
-| `seon.ui.html` | cljc | 3638 | 4 | seon.render, seon.render.live-tile, seon.web.datastar | 0 | 2026-07-01 | Hiccup → HTML-string. Pure data transform; portable across CLJ + CLJS. |
+| `seon.ui.html` | cljc | 3638 | 4 | seon.render, seon.render.canvas, seon.web.datastar | 0 | 2026-07-01 | Hiccup → HTML-string. Pure data transform; portable across CLJ + CLJS. |
 | `seon.ui.markdown` | pod | 2257 | 4 | seon.agent.ctx, seon.render, seon.render.chat | 0 | 2026-07-01 | Minimal markdown → hiccup renderer for chat messages. |
 | `seon.ui.viewer` | JVM | 2457 | 1 | seon.web.namespace | 0 | 2026-01-23 | Value viewer with multimethod dispatch for rendering Clojure values as Hiccup. |
 | `seon.ui.world` | pod | 2882 | 1 | seon.web.datastar | 0 | 2026-06-28 | The per-agent world layout — `world-layout = f(db, agent-id)` → the |
@@ -399,9 +399,9 @@ the store — see rename costs).
   dev.clojure-replace, repl.context, session, graph.query, dev.runtime-id;
   bin/mcp-server-cljs → agent, dev.runtime-id, store.wire.
 - **config/*.edn** (manifest sections + block/handler SYMBOLS): seon.config,
-  seon.agent.ctx(+.warnings/.render-fns/.live-tile), seon.agent(.message/
+  seon.agent.ctx(+.warnings/.render-fns/.canvas), seon.agent(.message/
   .lifecycle/.search/.shell/.web), seon.ai, seon.eval, seon.render(.system/
-  .live-tile), seon.route, seon.db, seon.schema, seon.error, my.kb/ui/tile/
+  .canvas), seon.route, seon.db, seon.schema, seon.error, my.kb/ui/canvas/
   plan/data/skills/blob. Renaming anything here breaks manifests until
   edited.
 - **Python** (src-diffusion + src-inspect-ai): `my.plan` (40 refs — the

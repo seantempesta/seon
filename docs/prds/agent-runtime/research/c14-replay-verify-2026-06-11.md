@@ -17,7 +17,7 @@ any agent's rendered context — fix-unit spec below (size S).
 - Minted 2 probe agents on the live cluster store, each with a
   persisted `(ns …)` row (one requiring host-bundled `my.kb` — the
   exact B4 class — one requiring `seon.db`), 2 `:seon.fn` rows each,
-  and a wired live tile (`:seon.render.live-tile/content` = qualified
+  and a wired live tile (`:seon.render.live-canvas/content` = qualified
   fn symbol). Plus one deliberately-broken ns row
   (`(:require [no.such.ns])`) as the forced-failure probe.
 - `bin/seon restart pod` → roster resumed all 3 active agents; replay
@@ -158,5 +158,5 @@ id; substrate/unowned → no agent tag).
   including the bad ns row — replay is GLOBAL, so leaving it would
   WARN on every future boot) + both tile-content datoms.
   `query-program-graph-entries` post-cleanup returns only the
-  pre-existing B4 proof rows (`my.tile.proof14`).
+  pre-existing B4 proof rows (`my.canvas.proof14`).
 - Pod left healthy: pid 69288, `/agents` → 200, heartbeat live.

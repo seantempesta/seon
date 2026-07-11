@@ -30,7 +30,7 @@ See `README.md` for the convention.
 | [Test-suite audit — fragile/stale/wrong tests + bug-finding (2026-06-25)](test-suite-audit-2026-06-25.md) | friction | agent |
 | [Wire call graph context into Gemini review](hook-callgraph-review-context.md) | friction | agent |
 | [acme cluster has no programmatic SCI eval seam](acme-no-sci-eval-seam.md) | friction | agent |
-| [`ctx/install!` broken for agents with symbol-valued blocks (live-tile round-trip)](ctx-install-live-tile-symbol-roundtrip.md) | friction | agent |
+| [`ctx/install!` broken for agents with symbol-valued blocks (canvas round-trip)](ctx-install-canvas-symbol-roundtrip.md) | friction | agent |
 | [bin/seon supervisor — startup/teardown race audit (2026-06-25)](supervisor-startup-race-audit-2026-06-25.md) | friction | Core |
 
 ## Cleanup (14)

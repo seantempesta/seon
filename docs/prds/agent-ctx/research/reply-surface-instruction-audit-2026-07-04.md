@@ -38,7 +38,7 @@ user ∧ at ≥ injection`, sorts by `at`, takes `last`). Nothing else is a repl
 | a bare data literal `{…}`/`[…]` answer | dropped with one ⚠ warning | no |
 | a backticked / ```-fenced answer | syntax-quote or `:read` error → eval noise | no |
 | a computed value / `result/<id>` never messaged | lives in the REPL only | no |
-| a live-tile / render-fn `:seon.render/html` | rendered to the HTML surface | **NO** — `/agents/run` reply query never reads tiles |
+| a canvas / render-fn `:seon.render/html` | rendered to the HTML surface | **NO** — `/agents/run` reply query never reads tiles |
 | NO forms at all | turn empty; 3 in a row → run closes `:no-forms` | reply = last `message/user` (often "") |
 
 `closed_reason` (the run FSM, `run.cljs`) is orthogonal to "did a reply land":
@@ -411,7 +411,7 @@ recommendation, not applied.
 
 - **`complete` no-parent silent drop** (`lifecycle.cljs` L74-76) — the smell
   above; a delivery path that depends on an unenforced assumption. Owner = tooling.
-- **Two "answer" surfaces that aren't the reply** — the live tile
+- **Two "answer" surfaces that aren't the reply** — the canvas
   (`:seon.render/html`, taught as PRIMARY, prompt L105-107) and `complete`'s
   string are both surfaces the `/agents/run` reply query never reads. The
   context frames `message/user` as backup while it is the ONLY delivery channel.

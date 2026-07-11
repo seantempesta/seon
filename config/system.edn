@@ -41,7 +41,7 @@
  ;; :require's as compact cards; render selection is the home-requires list
  ;; below. (Mirrors seon.config/default-namespaces-policy.)
  :seon.config/namespaces
- {:seon.config/always     [my.kb my.data my.ui my.tile
+ {:seon.config/always     [my.kb my.data my.ui my.canvas seon.render.canvas
                            my.plan seon.agent.message seon.agent.lifecycle]
   :seon.config/current-ns :full}
 
@@ -204,6 +204,8 @@
  {:seon.agent/ctx
   [{:seon.agent.ctx/name :namespaces :seon.agent.ctx/priority 20
     :seon.render/ai seon.agent.ctx.namespaces/namespaces-block}
+   {:seon.agent.ctx/name :canvas :seon.agent.ctx/priority 35
+    :seon.render/ai seon.agent.ctx.canvas/canvas-block}
    {:seon.agent.ctx/name :plan :seon.agent.ctx/priority 45
     :seon.render/ai my.plan.internal/plan-block
     :seon.render/html my.plan.internal/plan-block-html}
@@ -223,7 +225,7 @@
    [my.kb :as kb]
    [my.data :as data]
    [my.ui :as ui]
-   [my.tile :as tile]
+   [my.canvas :as canvas]
    [my.blob :as blob]
    [seon.agent.search :as search]
    [seon.agent.fs :as fs]
@@ -231,7 +233,7 @@
    [seon.agent.web :as web]]}
 
  ;; ── ROOT-CONTEXT — a SPARSE override merged over :seon.config/agent-context
- ;; by IDENTITY (id "root"), block upsert-by-:seon.agent.ctx/name. The :live-tile
+ ;; by IDENTITY (id "root"), block upsert-by-:seon.agent.ctx/name. The :canvas
  ;; block sets root's canvas = the system/fleet dashboard, the config-driven
  ;; replacement for the hardcoded client.cljs root branch.
  ;;
@@ -252,13 +254,13 @@
    [my.kb :as kb]
    [my.data :as data]
    [my.ui :as ui]
-   [my.tile :as tile]
+   [my.canvas :as canvas]
    [seon.agent.search :as search]
    [seon.agent.fs :as fs]
    [seon.agent :as agent]]
   :seon.agent/ctx
-  ;; Cutover 2026-07-11: root's :live-tile dashboard override DEPRECATED with
-  ;; the legacy tree (returns at the live-tile milestone). The three blocks
+  ;; Cutover 2026-07-11: root's :canvas dashboard override DEPRECATED with
+  ;; the legacy tree (returns at the canvas milestone). The three blocks
   ;; below are KEPT: derived, 0-token-when-healthy fault surfaces (the
   ;; warnings idea already working reactively); first formally validated at
   ;; the warnings milestone.

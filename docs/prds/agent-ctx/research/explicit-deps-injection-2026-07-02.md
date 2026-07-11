@@ -185,7 +185,7 @@ mechanism — a block fn, NOT a second render path):
   with `render-fns-block` (`:seon.render/ai`) + `render-fns-block-html`
   (`:seon.render/html` twin).
 - Wired into `seon.config/default-ctx-blocks` at priority ~30 (after
-  `:namespaces` = 20, before `:live-tile` = 35 — group 3 in context.md's
+  `:namespaces` = 20, before `:canvas` = 35 — group 3 in context.md's
   order, right after the stable code it belongs to).
 - The block:
   1. resolves the agent's current ns (`ctx/current-ns`, same as

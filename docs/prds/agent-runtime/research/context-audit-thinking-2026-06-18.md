@@ -180,7 +180,7 @@ Both are corner cases. A REAL working agent would stack `namespaces` (~47k) +
 - ONE composer shared by prompt and inspector — the old "three context builders"
   problem (`overlap-three-ai-context.md`) is RESOLVED on the active CLJS track
   (that issue note is stale and cites dead JVM `.clj` paths).
-- The volatile/cacheable design intent is sound: `prompt` carries every per-turn
+- The volacanvas/cacheable design intent is sound: `prompt` carries every per-turn
   byte (incl. the agent id) so everything above stays cacheable.
 - `warnings` + `open-todos` are the cleanest actionability surfaces: clustered
   fix-examples that self-heal, and an explicit done-signal.

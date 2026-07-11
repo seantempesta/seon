@@ -209,7 +209,7 @@
 
    A prompt with no transcript event log returns with only the derived
    sections stripped (nothing else to null out). Known residue: an
-   agent-authored live-tile/findings body that quotes the task is NOT
+   agent-authored canvas/findings body that quotes the task is NOT
    stripped — a limitation, not a mechanism."
   {:malli/schema [:=> [:catn [::prompt :string]] :string]}
   [prompt]

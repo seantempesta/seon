@@ -174,7 +174,7 @@ real-REPL movement semantics (§"REPL forms — namespaces are places"). Gaps:
 
 The `my.*` catalog, the two-tier floor/toolkit split, the four shared shapes,
 and every other tool entry (files/search/shell/web/plan/test/kb/code/schedule/
-recall/tile/blob) are current and match the code surface. One stale entry:
+recall/canvas/blob) are current and match the code surface. One stale entry:
 
 - **§`my.skills` (lines 489–519) — MISLEADING as target.** A full first-class
   catalog entry: `load`/`unload`/`list`, the always-on `catalog-block`

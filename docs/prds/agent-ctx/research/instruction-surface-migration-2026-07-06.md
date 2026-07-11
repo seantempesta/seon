@@ -100,7 +100,7 @@ Mechanism (`my.skills.cljs` + `config.cljs:135-189`):
 
 Default `:my.skills/load` = `[:repl]` (`config.cljs:219`, `my.skills.cljs:58`) →
 **`repl` body always-on; `clojurescript`/`data-oriented-clojure`/`datahike`/
-`data-modeling`/`ui-live-tiles` bodies are opt-in.** Agents `(load)`/`(unload)`
+`data-modeling`/`ui-canvas` bodies are opt-in.** Agents `(load)`/`(unload)`
 to dial depth in; cost is derived (unload → the body + its token cost vanish).
 
 Per-skill LOAD-BEARING content that an agent could NEED but MISS because the body
@@ -137,9 +137,9 @@ is opt-in (the migration-candidate hunt):
 - **`data-modeling`** (opt-in) — pure DESIGN depth (identity vs ref vs component,
   optional=absent, shared-shapes, map-in/map-out, the schema-is-the-generator).
   Nothing beyond the DoC/datahike floor is universal. STAYS entire.
-- **`ui-live-tiles`** (opt-in) — the INTENT (show-don't-tell, set your tile,
+- **`ui-canvas`** (opt-in) — the INTENT (show-don't-tell, set your tile,
   auto-run views, full-qualify in my.*) is ALREADY always-on in THE RENDERING
-  SYSTEM. Deep how — `:seon.render.live-tile/content` write, my.ui/my.tile/my.data
+  SYSTEM. Deep how — `:seon.render.canvas/content` write, my.ui/my.canvas/my.data
   helper sets, safelisted class vocabulary, compact/expanded faces, `seon.render/
   block` — correctly STAYS behind `(load)`.
 
@@ -178,7 +178,7 @@ cues and already defer to system-text (REPL audit §1d). **Leave all.**
 ### 1f — The default-ctx block set (config.cljs:135-189)
 
 `shared-instructions`(10) · `skills-catalog`(12) · `namespaces`(20) ·
-`live-tile`(35) · `warnings`(40) · `jobs`(42) · `test-failures`(43) · `plan`(45) ·
+`canvas`(35) · `warnings`(40) · `jobs`(42) · `test-failures`(43) · `plan`(45) ·
 `relevant-source`(48) · `subagents`(96) · `findings`(97) · `transcript`(100).
 All are DERIVED views (reactive, vanish when empty) — none is a static-instruction
 home except the catalog (1b) and the empty shared-instructions (1c). Confirms
@@ -202,7 +202,7 @@ rendered-conditionally (docstring/file-block). ★ = load-bearing every-turn.
 | **every MAP key namespaced / no bare keys** | partial (DB only) | doc | — | A/**L** | ★ | **extend floor → MIGRATE** |
 | **public fn `:malli/schema` enforced (throws)** | ✗ | doc, data-modeling | — | **L** | ★ | **TRAP → MIGRATE 1 line** |
 | **entities = attributes+connections, no `:kind`** | ✗ | doc, datahike, data-modeling | — | **L** | ★ | **TRAP → MIGRATE 1 floor line** |
-| show-don't-tell / set your tile / auto-run | ✓ | ui-live-tiles | — | A | ★ | covered (intent A, how L) |
+| show-don't-tell / set your tile / auto-run | ✓ | ui-canvas | — | A | ★ | covered (intent A, how L) |
 | full-qualify the my.* toolkit in authored ns | ✓ | doc, ui | src/my/CLAUDE | A | ★ | covered |
 | discover-don't-hallucinate / store-inventory | ✓ | datahike | — | A | ★ | covered |
 | plan!/resume / message/complete / finishing | ✓ | — | — | A | ★ | covered (one home) |
@@ -210,7 +210,7 @@ rendered-conditionally (docstring/file-block). ★ = load-bearing every-turn.
 | db-is-a-value / thread-once | ✗ | doc, datahike | — | L | ○ | depth STAYS |
 | query `:find` shapes / refs / CAS / as-of | ✗ | datahike | — | L | ○ | depth STAYS (exemplar) |
 | identity vs ref vs component / optional=absent | ✗ | data-modeling, datahike | — | L | ○ | depth STAYS |
-| my.ui/my.tile/my.data helpers + safelist classes | ✗ | ui-live-tiles | src/my source | L | ○ | depth STAYS |
+| my.ui/my.canvas/my.data helpers + safelist classes | ✗ | ui-canvas | src/my source | L | ○ | depth STAYS |
 | parinfer/`:read`-error repair taxonomy | ✗ | repl | — | A(body) | ○ | depth (repl already A) |
 | callable/thenable/instrument gotchas | ✗ | clojurescript | — | L | ○ | depth STAYS |
 | cluster-wide standing orders | ✗ | — | kb.shared(empty) | S | ○ | runtime append home |
@@ -269,7 +269,7 @@ trigger; `(load :name)` pulls the body. STAYS as opt-in depth:
   reduce-over-loops, `:or` footgun, provenance-on-tx, no-foo-v2, test-ns.
 - **`clojurescript`** — Promise-detection/thenable, arity/keyword-callback
   gotchas, the instrumentation async wedge, self-host quirks.
-- **`ui-live-tiles`** — the tile-content write, my.ui/my.tile/my.data helper
+- **`ui-canvas`** — the tile-content write, my.ui/my.canvas/my.data helper
   sets, safelisted classes, compact/expanded faces, `seon.render/block`.
 - **`repl`** — parinfer repair + `:read` taxonomy (already always-on body via
   the `[:repl]` default; unique depth beyond the migrated REPL floor).
@@ -326,7 +326,7 @@ is the deep dive" — so the skill stays accurate, not stale, and reads as depth
 - **`datahike`** / **`data-modeling`** — one line near the top of the "no
   entity kinds" step: *"The no-`:kind` floor is always-on; here is how it plays
   out in queries/design."* No content removed.
-- **`ui-live-tiles`** — already opens by deferring to the always-on live-tile
+- **`ui-canvas`** — already opens by deferring to the always-on canvas
   section ("This skill is the deep version of that section") — leave as the
   model.
 - **`repl`** — trim the three duplicated topics (comment-levels, what-runs,

@@ -904,7 +904,7 @@
    teaching text in [[empty-plan-teaching]] is for the model, not the
    human)."
   {:malli/schema [:=> [:cat :seon.render/section-request]
-                  :seon.render.live-tile/hiccup]}
+                  :seon.render.canvas/hiccup]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
   (let [db     (or db @db/*conn*)
         oe     (agent-eid db [:seon.agent/id id])

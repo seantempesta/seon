@@ -51,7 +51,7 @@ silently-inert dials — every one is WIRED, REMOVED, or PARKED-with-note).
 | `:seon.ai/agent-max-retries` | `agent-max-retries` @ turn.cljs | `:inherit`→env default |
 | `:seon.agent.ctx.transcript/tiers`+`/turns-retained` | `clip-events-by-tiers` | empty→render-all (parity); tier→eviction window |
 | `:seon.agent.ctx.transcript/result-decay` (+`::decay-level` reified) | `decay-cap-for-offset` × per-eval offset | 0→16384, 2→1500, 5→200; old eval 28× smaller |
-| `:seon.render.live-tile/content` | `live-tile-block` | root→`system-view` |
+| `:seon.render.live-canvas/content` | `live-tile-block` | root→`system-view` |
 | soul/agents identity blocks | `identity-file-blocks` (config) | SEON_SOUL off→none; on+file→`:soul`@5 |
 
 **REMOVED** (registered, zero consumers, no clean seam — owner three-fates):
@@ -89,7 +89,7 @@ Verified against the acme store (via `seon.server.wire/state` `:conn`) — the
 default pod was NEVER touched:
 
 - **6 skill blocks** rendered (`:skill/{clojurescript,data-modeling,
-  data-oriented-clojure,datahike,repl,ui-live-tiles}`) from `:my.skills/load`.
+  data-oriented-clojure,datahike,repl,ui-canvas}`) from `:my.skills/load`.
 - **per-agent `:seon.ai/agent-provider :inherit`** datom on root.
 - **acme's OWN decay** `[{0 16384}{3 800}]` reified onto the transcript block.
 - **LLM env→DB dual-default**: global `:seon.ai/config` row = `:openai-compat`

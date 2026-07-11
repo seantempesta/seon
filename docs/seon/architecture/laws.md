@@ -15,7 +15,7 @@ around it.
 ## Context
 
 - **Render-prominence: a composition function's value IS its worked example.**
-  A function agents must COMPOSE (`my.data`, `my.ui`, `my.tile`) rendered as a
+  A function agents must COMPOSE (`my.data`, `my.ui`, `my.canvas`) rendered as a
   bare signature is undiscoverable — a signature-trim drove adoption of a
   built toolkit to zero and the agents hand-rolled the broken path instead.
   Simple-call functions may render compact; composition functions render FULL.

@@ -333,7 +333,7 @@ routes: the root agent’s view (`/`), per-agent views (`/agent/{id}`), and apps
 is the route). The **live channel is ours**: one tx-listener on a read-replica derives
 every view and streams it as a per-connection gzip whole-element **morph**
 (idiomorph-diffed client-side); reconnect just repaints `view = f(db)`, no UI-side
-`since-t` replay. The doc owns block/render/tile/slot/layout, the page tree,
+`since-t` replay. The doc owns block/render/canvas/slot/layout, the page tree,
 reitit + the gate, the SSE channel, and the seed-copy + variadic `install!`/`remove!`
 override model. See [[ui]].
 
@@ -341,7 +341,7 @@ override model. See [[ui]].
 
 The agent's action surface is the **`my.*` function catalog** — thin, agent-owned,
 editable wrappers (`my.code`, `my.recall`/`my.kb`, `my.plan`, `my.schedule`,
-`my.tile`, `my.shell`, `my.test`, `my.search`, `my.files`) over a protected `seon.*`
+`my.canvas`, `my.shell`, `my.test`, `my.search`, `my.files`) over a protected `seon.*`
 floor, composed on four shared shapes (path, ref, items, the never-throw result
 envelope). See [[toolkit]].
 
@@ -371,7 +371,7 @@ doc; this one stays pure target.
   agent-ref scoping, index-everything.
 - [[agent-runtime]] — loop/run/turn/FSM/derived-state/two-bounds, creation-as-idle,
   bootstrap-as-seeded-forms, orchestrator-root lifecycle, isolation tiers.
-- [[ui]] — block/render/tile/slot/layout, the page tree, reitit + the capability gate,
+- [[ui]] — block/render/canvas/slot/layout, the page tree, reitit + the capability gate,
   the gzip-morph SSE live channel, the seed-copy + `install!`/`remove!` override.
 - [[toolkit]] — the `my.*` function catalog over the protected `seon.*` floor.
 - [[observability]] — turn replay (basis-t + prompt blob + reply), `agent-debug/turn` /

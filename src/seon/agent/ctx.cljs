@@ -37,7 +37,7 @@
        every read takes the composer's `:seon.db/db` snapshot so one
        render is one db view. The other core sections live in their own
        `seon.agent.ctx.<name>` nses: :namespaces → `seon.agent.ctx.namespaces`,
-       :live-tile → `seon.agent.ctx.live-tile`, :warnings →
+       :canvas → `seon.agent.ctx.canvas`, :warnings →
        `seon.agent.ctx.warnings`,
        :inventory → `seon.agent.ctx.inventory`, :relevant-source →
        `seon.agent.ctx.relevant`, :transcript → `seon.agent.ctx.transcript`;
@@ -260,7 +260,7 @@
    The node's file read
    FRESH and rendered as markdown hiccup. Empty `[:div]` when the file
    vanished."
-  {:malli/schema [:=> [:cat :seon.render/section-request] :seon.render.live-tile/content]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :seon.render.canvas/content]}
   [{{path :seon.agent.ctx/file-path} :seon.render/node}]
   (md/md->hiccup (or (read-file-text path) "")))
 
@@ -1408,7 +1408,7 @@
     ";\n"
     "; THE RENDERING SYSTEM. You show your human things with render\n"
     "; twins: :seon.render/ai (text for you) + :seon.render/html (hiccup\n"
-    "; for their screen) — one render, two surfaces. Your live tile and\n"
+    "; for their screen) — one render, two surfaces. Your canvas and\n"
     "; your context sections both ride this shape. A *section* (not just\n"
     "; the tile) can carry an :seon.render/html twin — that is where rich\n"
     "; panels (tables, images, SVG) go: the agent reads the :ai text, the\n"
@@ -1420,7 +1420,7 @@
     "; :seon.db/db / :seon.agent/id as optional request keys and the\n"
     "; current values arrive by themselves. Writing such a specced view fn\n"
     "; IS building a live, always-current view.\n"
-    "; SHOW, DON'T TELL: your live tile (the live-tile section below) is\n"
+    "; SHOW, DON'T TELL: your canvas (the canvas section below) is\n"
     "; your PRIMARY surface for showing your human data, results, and\n"
     "; status; (message/user \"...\") is narration/backup that scrolls away.\n"
     "; One carve-out: a tile is never a REPLY — a final answer must still\n"
@@ -1442,7 +1442,7 @@
     "; real source (no signatures, no clipping). What renders is CURATED: YOUR\n"
     "; CURRENT namespace (your live workspace, the most important thing here)\n"
     "; and the nses it :requires, the my.* toolkit (my.kb / my.data / my.ui /\n"
-    "; my.tile) and your core functions (plan / message / lifecycle). Everything\n"
+    "; my.canvas) and your core functions (plan / message / lifecycle). Everything\n"
     "; else — the rest of the seon framework AND your other my.* nses — is\n"
     "; deliberately NOT dumped; it stays QUERYABLE and SEARCHABLE, one step\n"
     "; away, so you are not buried in code you don't need. Never hallucinate a\n"
@@ -1468,7 +1468,7 @@
     "; A public fn's :malli/schema is INSTRUMENTED — it validates the args\n"
     "; and the return on EVERY call and throws on a mismatch, so a wrong\n"
     "; schema is a runtime bug, not a doc nit.\n"
-    "; The my.* toolkit (my.ui / my.tile / my.data) is FULL-QUALIFIED — call\n"
+    "; The my.* toolkit (my.ui / my.canvas / my.data) is FULL-QUALIFIED — call\n"
     "; my.ui/card etc. directly, no alias needed. If a tool you need doesn't\n"
     "; exist, write it and run it — don't wait to be given one. Namespaces are\n"
     "; PLACES: (in-ns 'my.domain.thing) moves you there (state preserved; a\n"
@@ -1974,9 +1974,9 @@
   [:map
    [:seon.render/text   {:optional true} :string]
    ;; Pure-data shallow hiccup bound — registered forms must not embed
-   ;; fns (platform law; see seon.render.live-tile). Deep validation
+   ;; fns (platform law; see seon.render.canvas). Deep validation
    ;; stays at the render boundary.
-   [:seon.render/hiccup {:optional true} :seon.render.live-tile/hiccup]])
+   [:seon.render/hiccup {:optional true} :seon.render.canvas/hiccup]])
 
 (defn render-namespace
   "Render a WHOLE namespace — its source plus every owned entity.
@@ -2101,13 +2101,13 @@
 ;; the dormant `:seon.render/html` slot, resolved through
 ;; `seon.render/html-render` + the throw-to-banner guard, paired with its
 ;; section name. Hiccup is genuinely arbitrary agent-authored data at this
-;; boundary — `:seon.render.live-tile/hiccup` is the registered shallow
+;; boundary — `:seon.render.canvas/hiccup` is the registered shallow
 ;; bound (vector with keyword head); the deep walk happens at the render
 ;; boundary, same as every `:seon.render/html-response`.
 (schema/register! :seon.agent.ctx/block-html
   [:map
    [:seon.agent.ctx/name :seon.agent.ctx/name]
-   [:seon.render/hiccup :seon.render.live-tile/hiccup]])
+   [:seon.render/hiccup :seon.render.canvas/hiccup]])
 
 (schema/register! :seon.render/stable-text   :string)
 (schema/register! :seon.render/volatile-text :string)
@@ -2121,7 +2121,7 @@
   "The in-band cache-boundary line the composer joins between the
    STABLE prefix (every section through :namespaces — byte-stable
    within a session given the deterministic rendering) and the
-   VOLATILE tail (everything after: live-tile, warnings,
+   VOLATILE tail (everything after: canvas, warnings,
    plan, relevant-source, inventory, transcript).
 
    In-band because the agent loop hands providers ONE assembled
@@ -2322,7 +2322,7 @@
    Every attr runs through `seon.db/decode-edn-value` (the inverse of the
    bridge's mixed-:or EDN-string storage encoding) — the encoded set is the
    COMPUTED `edn-encoded-attr?` rule, never a key list here, so new encoded
-   slots (e.g. :seon.render.live-tile/content) decode without this fn
+   slots (e.g. :seon.render.canvas/content) decode without this fn
    changing. Non-encoded attrs pass through unchanged."
   {:malli/schema [:=> [:catn [::block :map]] :map]}
   [section]
@@ -2380,7 +2380,7 @@
                 :seon.agent/purpose
                 :seon.agent/default-turn-limit
                 :seon.render/ai :seon.render/html
-                :seon.render.live-tile/content
+                :seon.render.canvas/content
                 {:seon.agent/ctx [*]}]
               :seon.db/ref eid})
     {}))
@@ -2425,12 +2425,12 @@
                          ;; (install!) or as the agent's CANVAS content — is
                          ;; the explicit override: it renders there, so it is
                          ;; NOT re-derived as its own auto-run block.
-                         canvas (some->> (:seon.render.live-tile/content entity)
+                         canvas (some->> (:seon.render.canvas/content entity)
                                          (db/decode-edn-value
-                                           :seon.render.live-tile/content))
+                                           :seon.render.canvas/content))
                          ;; No pin → the canvas is the DERIVED last-updated
                          ;; tile (render-fns/last-updated-tile — the same
-                         ;; resolution render-agent-tile applies), so that fn
+                         ;; resolution render-agent-canvas applies), so that fn
                          ;; is equally "already rendering on the canvas" and
                          ;; is skipped as its own auto-run block.
                          canvas (or canvas
@@ -2502,7 +2502,7 @@
 (defn- block-renders-ai?
   "A context block contributes to the agent's PROMPT only when it declares an
    `:seon.render/ai` render. An html-only block (a human-facing widget — the
-   live-tile/canvas, an acme dashboard tile) has nothing to say to the agent:
+   canvas/canvas, an acme dashboard tile) has nothing to say to the agent:
    it is OMITTED from the prompt entirely — no self-demarcating bracket, no
    generic data-dump stub (`;; :canvas {:db/id … :seon.agent.ctx/name …}`).
    This is the inverse of the html view's 'ai-only block contributes no tile'
@@ -2608,7 +2608,7 @@
    Renders each child's html twin via the
    injected handle, one card per renderable (eval cards short, per-item — NOT
    a section-level dump), in render order."
-  {:malli/schema [:=> [:catn [::input :map]] :seon.render.live-tile/hiccup]}
+  {:malli/schema [:=> [:catn [::input :map]] :seon.render.canvas/hiccup]}
   [{:seon.render/keys [node render]}]
   (into [:div {:class "flex flex-col gap-2"}]
         (map (fn [{nm :seon.agent.ctx/name h :seon.render/hiccup}]

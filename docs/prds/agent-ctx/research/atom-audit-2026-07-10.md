@@ -4,7 +4,7 @@ status: active
 tags: [research, agent, context]
 ---
 
-# In-process mutable-state audit — every atom/volatile/set! in the CLJS pod
+# In-process mutable-state audit — every atom/volacanvas/set! in the CLJS pod
 
 > **ADOPTED (2026-07-10):** V1 (the 6 config memo caches → a `:seon.config`
 > singleton) is BUILT — caches deleted, caps/dials are datoms. V2

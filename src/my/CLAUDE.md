@@ -2,7 +2,7 @@
 
 **Read before editing:** `docs/seon/architecture/toolkit.md` (the function
 catalog + the four shared shapes), `data-model.md` (the `my.kb`/`my.todo`
-schemas + data-agent-ref scoping). Skills: `ui-live-tiles`,
+schemas + data-agent-ref scoping). Skills: `ui-canvas`,
 `data-oriented-clojure`.
 
 These namespaces are special: **their full source renders into every
