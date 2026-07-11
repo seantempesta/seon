@@ -89,8 +89,11 @@ REPL reliability (fabrication structurally contained/eliminated),
 namespace movement (exposed + fixed the cross-turn current-ns runtime
 bug), and planning (decompose-first, close-adjacency,
 resume-after-a-real-pod-restart, answer delivered). Rung 3 pre-answered
-by rung 0 (cards suffice); rung 4 (store) is next and validates the new
-v3.1 restart-survival system-text line. **Owner rulings 2026-07-11
+early (cards suffice); the Memory milestone (the store) is next and
+validates the new v3.1 restart-survival system-text line. Milestones
+carry proper names now — REPL reliability, Namespace movement, Planning,
+Memory, Attention, Canvas, Collaboration, Identity — "rung" is retired
+vocabulary (Phase 0 cleanup sweeps the docs; "verbs" → functions). **Owner rulings 2026-07-11
 (sharpened): the OLD tree is deprecated WHOLESALE — legacy blocks, the
 skills system, and the shipped system text all DELETE at cutover;
 nothing is audited back in; capabilities return only by being rebuilt
