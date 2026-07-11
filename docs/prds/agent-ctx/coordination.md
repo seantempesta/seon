@@ -2351,9 +2351,13 @@ cluster on the local diffusion surface:
    default-OFF by owner directive): one ctx block, html slot = live
    step trace tile on /agent/{id}, ai slot = the provider's teaching
    (renders ONLY when the agent's resolved provider is typeahead —
-   reactive vanish otherwise). Exact install!/remove! one-liners will
-   be appended here when it lands; it is NOT seeded in any default
-   tree.
+   reactive vanish otherwise). Enabling is CONFIG-DRIVEN at cluster
+   scope: add the block row to the manifest's `:seon.agent/ctx` tree
+   (your overlay config; resolved once at boot into the DB — the exact
+   row will be appended here when it lands). `install!`/`remove!`
+   remains the RUNTIME path — diffing the block onto one live agent
+   without a restart. Same mechanism, two scopes; it is NOT seeded in
+   any default tree.
 4. **Render-size caveat**: measured protocol is ≤4k-token renders
    (~1.7 s/step; prefill dominates). The minimal tree keeps renders in
    range; the pre-minimal 36k legacy render made the model collapse
