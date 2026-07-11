@@ -48,17 +48,22 @@ def _tok_ids(tok, text):
 
 
 def _result_comment(tok, value):
-    """Clipped `;; => …` projection of an eval result for the encoder
-    context. The FULL value stays live in the session (re-reference, don't
-    re-print — the three-tier storage rule at one more render boundary).
-    Var prints and nil are noise — omitted."""
+    """Clipped bare `⟹ <value>` projection of an eval result for the
+    encoder context — seon's LIVE result grammar (the runtime-only, NOT
+    comment-shaped result-open glyph; a `;; =>` comment is exactly the
+    fabricated-result shape the pod strips at the reply boundary, so
+    teaching it here would train the banned convention). No `⟸ result/<id>`
+    handle: this session has no live result vars, matching the live
+    grammar's handle-less prior rows. The FULL value stays live in the
+    session (re-reference, don't re-print — the three-tier storage rule at
+    one more render boundary). Var prints and nil are noise — omitted."""
     if not value or value == "nil" or value.startswith("#'"):
         return ""
     ids = _tok_ids(tok, value)
     if len(ids) > RESULT_CLIP_TOKENS:
         value = tok.decode(ids[:RESULT_CLIP_TOKENS]) + \
-            f" …+{len(ids) - RESULT_CLIP_TOKENS}tok (re-reference, don't re-print)"
-    return f";; => {value}\n"
+            f" …⟨+{len(ids) - RESULT_CLIP_TOKENS} tok — re-reference, don't re-print⟩"
+    return f"⟹ {value}\n"
 
 
 class _Workspace:
