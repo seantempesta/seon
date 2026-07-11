@@ -2351,13 +2351,19 @@ cluster on the local diffusion surface:
    default-OFF by owner directive): one ctx block, html slot = live
    step trace tile on /agent/{id}, ai slot = the provider's teaching
    (renders ONLY when the agent's resolved provider is typeahead —
-   reactive vanish otherwise). Enabling is CONFIG-DRIVEN at cluster
-   scope: add the block row to the manifest's `:seon.agent/ctx` tree
-   (your overlay config; resolved once at boot into the DB — the exact
-   row will be appended here when it lands). `install!`/`remove!`
-   remains the RUNTIME path — diffing the block onto one live agent
-   without a restart. Same mechanism, two scopes; it is NOT seeded in
-   any default tree.
+   reactive vanish otherwise). LANDED (fba79486, live-proven on acme:
+   SSE morph mid-call, ai section in the byte-exact blob, remove!
+   vanish; suite 1201/5461/0/0). Enabling is CONFIG-DRIVEN at cluster
+   scope — paste this row into your overlay's `:seon.agent/ctx` tree:
+   `{:seon.agent.ctx/name :typeahead-steps :seon.agent.ctx/priority 95
+   :seon.render/ai seon.agent.ctx.typeahead-steps/steps-ai
+   :seon.render/html seon.agent.ctx.typeahead-steps/steps-tile-html}`.
+   RUNTIME path (one live agent, no restart):
+   `(seon.agent.ctx/install! seon.agent.ctx.typeahead-steps/steps-block)`
+   / `(seon.agent.ctx/remove! :typeahead-steps)`. Same mechanism, two
+   scopes; NOT seeded in any default tree. NOTE: fba79486 also restores
+   HEAD compilability — 0f837427 swept our client.cljs require hunk
+   before the new ns file was committed.
 4. **Render-size caveat**: measured protocol is ≤4k-token renders
    (~1.7 s/step; prefill dominates). The minimal tree keeps renders in
    range; the pre-minimal 36k legacy render made the model collapse
