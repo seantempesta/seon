@@ -343,10 +343,13 @@ In-band errors (`gen_error`), same contract as today.
    the functions the task needs) + cheaper expansion (candidate-sized
    holes / fewer settle rounds) — not threshold tuning.
 6. **P6 levers** — task-relevant menu source + cheaper/convergent
-   EXPAND. **PARTIAL 2026-07-11** (arm3 + summary.json/ledger rows
-   pending; evidence `evals/runs/2026-07-11-typeahead-p6/`, FRESH
-   corpus regenerated on acme with the new menu live, worker
-   `dffbc439cd6a`, k=3 seeds 100–102). Built:
+   EXPAND. **SHIPPED 2026-07-11** (measured PARTIAL, then CLOSED same
+   day with a full re-run of all local arms; evidence
+   `evals/runs/2026-07-11-typeahead-p6/` incl. summary.json, FRESH
+   corpus regenerated on acme with the new menu live (2a31a33d…),
+   close-run worker `c88acc1913c4` (all local arms one sha), k=3 seeds
+   100–102, ledger rows under the `2026-07-11-typeahead-p6-close:`
+   run_id label). Built:
    (a) **Toolkit menu group** — `seon.agent.ctx.menu` renders a second
    group under ONE glyph numbering with the recency group: public
    SPECCED program-graph fns of the nses the agent's CURRENT ns
@@ -382,19 +385,40 @@ In-band errors (`gen_error`), same contract as today.
    Φ(24)=.27 > Φ(28)=.21 on the offer-args hole — the old ±Δ ladder
    never reached short lengths; the slack is what invites the echo),
    and `expand_settle_rounds=1` for the step regime.
-   Measured (fresh corpus — NOTE it scores harder than P5's: the
-   DeepSeek references dropped .70→.40 on it): **arm2 .633 outcome /
-   .867 validity / .524 fn-call acc / 4.8 s wall median** vs arm1 guided
-   .286 / .464 / .0 / 29.0 s and BOTH DeepSeek references .40. Expand
-   fires: 3 — **3/3 selected a task-REQUIRED function** (P5: 0/13), median
-   expand step **9.1 s** (max 14.6; was ~18 s median), one fire locked
-   IN-STEP and passed, both failed expansions were suppressed with
-   ZERO repeat fires. Uptake .019 (3 fires / 30 execs; P5's .077 was
-   inflated by the 4x re-fire loop). PENDING for close: arm3
-   (protocol-leak criterion this round), summary.json + ledger rows —
-   the first runner invocation crashed appending arm2's ledger row on
-   a same-day run_id collision with P5 (now fixed: run_id carries the
-   run LABEL); re-run arm2+arm3 under the fixed runner. Ops findings
+   Measured — close run 2026-07-11 (fresh corpus; NOTE it scores
+   harder than P5's: the DeepSeek references dropped .70→.40 on it):
+   **arm2 .633 outcome / .867 validity / .524 fn-call acc / 3.8 s wall
+   median / uptake .019** vs arm1 guided .286 / .464 / .0 / 22.4 s
+   (n_scored 28 — 2 worker flakes) and arm3 inert-menus .267 / .333 /
+   .0 / 24.8 s; DeepSeek references arm0 .40/.80/.571 (production 36k
+   render) and arm0b one-shot .40/1.0/.143 on the same 4k render. The
+   close run REPRODUCED the partial arm2 readings (.633/.867/.524;
+   wall 3.8 vs the partial's 4.8 s) on a fresh worker sha. Expand
+   fires: 3 — **3/3 on the task-REQUIRED function** (sample p3, one
+   fire per seed, calibrated auto at ~3.3 nats; P5: 0/13
+   task-relevant), median expand step **6.7 s** (was ~18 s pre-P6),
+   ZERO repeat fires, 1/3 firing execs passed. Uptake .019 (3 fires /
+   30 execs; P5's .077 was inflated by the 4x re-fire loop).
+   **Kill-criteria verdicts (summary.json):** protocol-leak —
+   arm3−arm1 = −.019; the report's strict-inequality check prints
+   "LEAK", but the pass COUNTS are identical (8/28 vs 8/30 — the delta
+   is arm1's flake-excluded denominator), i.e. no regression beyond
+   noise, the same call as P4's −.02. Dead-weight — uptake .019 < .05
+   BUT accuracy gain +.348 → "earns its render"; per the P5/P6
+   decomposition the earn is menu TEXT + step regime +
+   lock/commit/repair, and the glyph SELECTION channel stays FROZEN.
+   Close-run mechanics, for the record: the original invocation
+   crashed appending arm2's ledger row on a same-day run_id collision
+   with P5 (fixed: run_id carries the run LABEL); the FIRST re-run
+   flaked 30/30 on every arm because the canvas→code_buffer rename
+   (33ee4673) crossed the mlx_vlm boundary (`ModelConfig.canvas_length`
+   is the checkpoint's own field name — fixed at the `model.py`
+   adapter seam, the one external-config read); its flake_rate=1.0
+   rows remain in the append-only ledger under the
+   `2026-07-11-typeahead-p6:` label, the real rows carry `…-p6-close:`.
+   `_arm_summary` gained read-side `verb_*`→`fn_*` compat so frozen
+   pre-rename jsonls (arm0b — DeepSeek key 402, not re-runnable) still
+   reduce. Ops findings
    (same day, both OUTSIDE this lane's code): the acme pod OOM'd (4 GB
    heap in ~16 s) on FRESH-AGENT mint/render once the store hit ~40k
    konserve keys — proven NOT this work (a pre-P6 stash build crashed

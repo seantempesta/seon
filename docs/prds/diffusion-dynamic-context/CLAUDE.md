@@ -15,14 +15,18 @@ tags: [orchestrator, agent]
 
 ## ▸ Current state (2026-07-11 PM)
 
-P1–P5 shipped + measured; P6 PARTIAL (arm3 + summary.json pending on the
-fixed bench runner — see [[typeahead-design]] Phases §6, the resume
-point). Headline on the FRESH corpus (harder; DeepSeek refs drop to
-.40): **typeahead .633 outcome / .867 validity / 4.8 s median vs guided
-.286 / 29 s** — better than the frontier reference AND ~5× faster,
-free-local. The glyph SELECTION channel is marginal by measurement
-(uptake .019; organic emissions 0/129 ever) and is now **FROZEN** —
-menus stay as passive context only.
+P1–P6 shipped + measured — P6 CLOSED 2026-07-11 (full re-run of all
+local arms, worker `c88acc1913c4`; evidence
+`evals/runs/2026-07-11-typeahead-p6/` summary.json + `…-p6-close:`
+ledger rows; numbers + kill verdicts in [[typeahead-design]] Phases
+§6). Headline on the FRESH corpus (harder; DeepSeek refs drop to .40):
+**typeahead .633 outcome / .867 validity / 3.8 s median vs guided
+.286 / 22.4 s and inert-menus .267** — better than the frontier
+reference AND ~6× faster, free-local; no protocol leak (arm3−arm1 =
+−.019, identical pass counts), "earns its render" (gain +.348). The
+glyph SELECTION channel is marginal by measurement (uptake .019;
+organic emissions 0/129 ever) and is now **FROZEN** — menus stay as
+passive context only.
 
 **Owner pivot (2026-07-11 PM):** fable agents re-cleared for all work;
 focus = planning + executing + fixing CORE-SYSTEM problems, NOT
@@ -84,6 +88,11 @@ grammar; bare `⟹` is real).
   exits the pod (stability fix e6295ecd; audit task open).
 - The round-8 "8k context cliff" was OUR encoder bug (cache
   transplant), not the model — mlx_vlm adapter replaced the port.
+- **Seon-side renames must not cross the mlx_vlm boundary** —
+  `ModelConfig.canvas_length` is the checkpoint's OWN field name; the
+  canvas→code_buffer sweep (33ee4673) renamed the read in `model.py`
+  and every worker call AttributeError'd (P6 close, 30/30 flake). The
+  external name is read ONCE, at the `DiffusionGemmaVLM` adapter seam.
 - Perf is ALWAYS tokens/second; brute force on the cheap model is a
   legitimate strategy (owner convention).
 
@@ -98,10 +107,6 @@ grammar; bare `⟹` is real).
   `my.plan.internal/ready-leaves`' plan at mint. Until their fix lands,
   long-running stores WILL hit it again — keep multi-turn drives on
   fresh-ish stores and keep the repo-root heap snapshot.
-- **P6 close pending**: re-run arm2+arm3 under the fixed runner
-  (run_id now carries the run label), land summary.json + ledger rows,
-  update the PARTIAL markers. Worker sha will differ if the grammar
-  sweep lands first — that's fine, record it.
 - tx-feed pub reader logs `pub frame decode failed … not valid JSON`
   on every acme pod boot (reconnects 2 s; smell, task filed).
 - Default cluster DeepSeek key: 402 Insufficient Balance (owner top-up;

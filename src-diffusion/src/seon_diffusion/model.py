@@ -92,7 +92,11 @@ class DiffusionGemmaVLM:
     def __init__(self, vlm_model):
         self.vlm = vlm_model
         cfg = vlm_model.config
-        self.cfg = DGConfig(code_buffer_length=cfg.code_buffer_length,
+        # `canvas_length` is mlx_vlm's OWN field name (the checkpoint's
+        # config.json vocabulary) — a third-party boundary the seon-side
+        # canvas->code_buffer rename must not cross (live-hit 33ee4673:
+        # every worker call AttributeError'd).
+        self.cfg = DGConfig(code_buffer_length=cfg.canvas_length,
                             vocab_size=cfg.text_config.vocab_size)
         if not vlm_model.prefers_logits_self_conditioning:
             # Non-quantized embeddings want self-conditioning EMBEDDINGS;
