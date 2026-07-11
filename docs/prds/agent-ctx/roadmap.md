@@ -90,13 +90,19 @@ namespace movement (exposed + fixed the cross-turn current-ns runtime
 bug), and planning (decompose-first, close-adjacency,
 resume-after-a-real-pod-restart, answer delivered). Rung 3 pre-answered
 by rung 0 (cards suffice); rung 4 (store) is next and validates the new
-v3.1 restart-survival system-text line. The end state is
-`system.edn`'s tree replaced by the evidenced tree; the main remaining
-work is the shipped-system-text diff audit plus judging the unevidenced
-default blocks (`agents` ~14.1k tokens is the headline). Owner rulings
-2026-07-11: the minimal system text becomes the new system block once
-proven; implementation units are OPUS agents against written specs.
-Ledger: `evals/runs/2026-07-10-minimal-buildup/README.md`.
+v3.1 restart-survival system-text line. **Owner rulings 2026-07-11
+(sharpened): the OLD tree is deprecated WHOLESALE — legacy blocks, the
+skills system, and the shipped system text all DELETE at cutover;
+nothing is audited back in; capabilities return only by being rebuilt
+on the minimal core under the inclusion bar (colocation + ledger row +
+colocated provenance note). Poison principle: this is about bad
+information poisoning behavior, not tokens — omission is recoverable
+and attributable, inclusion is neither.** The deprecation register,
+skills-dissolution plan, rebuild ladder (store → warnings → live-tile →
+multi-agent → identity), and cutover mechanics live in
+[[minimal-context-ladder]]. Implementation units are OPUS agents
+against written specs. Ledger:
+`evals/runs/2026-07-10-minimal-buildup/README.md`.
 
 ## Context-rebuild arc — two REPL modes (2026-07-10)
 
