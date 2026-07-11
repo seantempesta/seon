@@ -78,11 +78,9 @@ never the join topology/direction — a structurally-computed direction check
 ## Fix-state checklist
 
 - [x] CLJS platform-gating + regression tests (uncommitted, fork tree)
-- [ ] CLJ planner direction fix + both-rule-forms coverage
-- [ ] Fork CHANGELOG + commit + push (seantempesta/datahike, sync-upstream)
-- [ ] seon deps.edn sha bump + reference-code/datahike submodule bump (same
-      commit — deps.edn:85 rule), rebuild, live pod proof
+- [x] CLJ planner direction fix + both-rule-forms coverage (fork `1598a824`; 8/8 direction matrix vs legacy oracle; magic gated to provably-sound topologies; + the OOM multiplicity layer)
+- [x] Fork CHANGELOG + commit + push — `1598a824` on sync-upstream = main
+- [x] seon bump + rebuild + live pod proof (closure 190/190, ground 19, depth-2 roll-up "1 of 3" moving, leaf-only frontier)
 - [ ] seon-side my.plan depth-2 test (the suite-blindness gap)
 - [ ] plan-block-html build-forest re-unification
-- [ ] acme: `bin/acme build` + coordination.md flag (typeahead lane restarts
-      at a safe bench boundary)
+- [x] acme: shas + rebuild instructions posted to coordination.md (their boundary)
