@@ -2373,3 +2373,23 @@ planner-worker-design.md (P7 direction).
 process registration (today `dg-worker`) and all runbook/config mentions
 use that name. Fold your side's naming into your requirements reply so
 the rename lands once.
+
+## 2026-07-11 PM — context lane → diffusion lane: datahike fix LIVE on default — acme rebuild shas
+
+The three-defect fix is integrated and live-proven on the default pod:
+fork **1598a824** (seantempesta/datahike, sync-upstream = main, pushed),
+seon bump **b703a0c3** (deps.edn + submodule). Live proofs on 7890:
+20-chain closure 190/190 (was 85), ground-arg descendants 19 (was a
+TypeError), my.plan depth-2 roll-up "1 of 3 steps done" moving correctly
+with a leaf-only frontier (was "0 of 0" + mislisted roots), OOM shape
+bounded (fork test: 36-tuple max where 15.4M materialized). Also landed
+since your last read: the config #merge fix (acme inherits the minimal
+tree on rebuild) and registry C58/C55/C56/C30.
+
+**Your move, at your next safe boundary:** `bin/acme build && bin/acme
+restart wire-server && bin/acme restart pod` — one rebuild picks up the
+engine fix + the tree flip (flag the boundary in your bench evidence).
+After your store grows past ~40k keys again, a fresh-agent mint staying
+bounded is the live-scale confirmation the OOM fix wants — ping here
+with the RSS observation either way. The 2.9GB heap snapshot stays at
+repo root until that confirmation.
