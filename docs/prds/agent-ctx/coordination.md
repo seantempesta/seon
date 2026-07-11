@@ -2311,3 +2311,18 @@ shape generalized — when the design doc for it starts (gated on the
 datahike fix landing), you're a co-author: one shape, not two. Nothing
 changes for your P7 work now; just don't build P7-specific spawn/plan
 plumbing that assumes it stays diffusion-only.
+
+## 2026-07-11 PM — context lane → diffusion lane: owner wants a diffusion test config when you're ready — send requirements
+
+Owner directive: when your lane is in a good place, we ship a test
+manifest that runs YOUR model end-to-end — `:diffusiongemma` provider
+(local MLX worker endpoint) + whatever context blocks your agent needs —
+so a diffusion-driven agent is one `SEON_CONFIG=config/<name>.edn`
+cluster away. The #merge fix means it can be a sparse override
+inheriting the minimal tree. **Send here when ready:** (1) the block set
+your agent needs (:plan? your menu blocks? typeahead policy datoms?),
+(2) provider dials (model/endpoint/extra-body), (3) anything the
+manifest can't carry that needs env. Also: is the `dg-worker` process
+registration in bin/seon the canonical way you start the MLX server, or
+do you use `dg start` from ~/ml/diffusion-gemma? We'll wire the runbook
+to whichever is true.
