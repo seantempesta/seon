@@ -342,6 +342,65 @@ In-band errors (`gen_error`), same contract as today.
    SOURCES (schema-contracts / task-relevant offers so the menu holds
    the verbs the task needs) + cheaper expansion (candidate-sized
    holes / fewer settle rounds) — not threshold tuning.
+6. **P6 levers** — task-relevant menu source + cheaper/convergent
+   EXPAND. **PARTIAL 2026-07-11** (arm3 + summary.json/ledger rows
+   pending; evidence `evals/runs/2026-07-11-typeahead-p6/`, FRESH
+   corpus regenerated on acme with the new menu live, worker
+   `dffbc439cd6a`, k=3 seeds 100–102). Built:
+   (a) **Toolkit menu group** — `seon.agent.ctx.menu` renders a second
+   group under ONE glyph numbering with the recency group: public
+   SPECCED program-graph fns of the nses the agent's CURRENT ns
+   requires (the same stored-require-edges set whose compact cards the
+   `:namespaces` section renders — computed, no hand list), ranked by
+   cross-agent global call frequency (newest-200 eval window), per-ns
+   round-robin admission, new `:seon.typeahead/toolkit-cap` knob
+   (default 4); `verb-offers` mirrors the concatenation by
+   construction, and the corpus generator captures it unchanged (same
+   entry grammar). Regenerated corpus: task-required verbs are ON the
+   menu for 9/10 samples (k2's world-state picks missed a DB-read
+   verb — honest gap).
+   (b) **The non-converging repeat root-caused** (P5's p1 e3: the same
+   failed auto-offer re-fired 4x at identical margins, empty reply):
+   TWO mechanical defects — the EXPAND arm handed an unchecked junk
+   fill forward as draft (live-reproduced: `(…/user ready")…` — the
+   next step's repair dropped the whole broken region INCLUDING the
+   clamped verb call, returning the state to its pre-step value, and
+   the per-step seed made the re-fire deterministic), and the driver
+   loop had no memory of failed offers. Fixes: expansions are
+   HARVESTED inside the expand step (`_lock_prefix` shared with the
+   main path — parse/eval-gated; a broken closed-template expansion
+   keeps the CALLER's draft + reports `expand-failed` + hints), and
+   BOTH loop mirrors (seon.ai.typeahead + the bench `run_step_loop`)
+   suppress a glyph whose expansion locked nothing for the rest of the
+   call — the step trace IS the memory; the worker stays stateless.
+   (c) **Expand cost** — measured: the 18 s was ONE denoise round
+   burning the full 48-step budget (whole-canvas stop criteria never
+   satisfied by a mostly-clamped canvas) + settle re-noise that rescued
+   0/2 junk holes. Fixes: hole-stability early stop (denoise ends when
+   the hole belief is unchanged across two probes), the CAL probe
+   ladder now alternates geometric-DOWN with +Δ up (live: Φ(12)=.40 >
+   Φ(24)=.27 > Φ(28)=.21 on the offer-args hole — the old ±Δ ladder
+   never reached short lengths; the slack is what invites the echo),
+   and `expand_settle_rounds=1` for the step regime.
+   Measured (fresh corpus — NOTE it scores harder than P5's: the
+   DeepSeek references dropped .70→.40 on it): **arm2 .633 outcome /
+   .867 validity / .524 verb-acc / 4.8 s wall median** vs arm1 guided
+   .286 / .464 / .0 / 29.0 s and BOTH DeepSeek references .40. Expand
+   fires: 3 — **3/3 selected a task-REQUIRED verb** (P5: 0/13), median
+   expand step **9.1 s** (max 14.6; was ~18 s median), one fire locked
+   IN-STEP and passed, both failed expansions were suppressed with
+   ZERO repeat fires. Uptake .019 (3 fires / 30 execs; P5's .077 was
+   inflated by the 4x re-fire loop). PENDING for close: arm3
+   (protocol-leak criterion this round), summary.json + ledger rows —
+   the first runner invocation crashed appending arm2's ledger row on
+   a same-day run_id collision with P5 (now fixed: run_id carries the
+   run LABEL); re-run arm2+arm3 under the fixed runner. Ops findings
+   (same day, both OUTSIDE this lane's code): the acme pod OOM'd (4 GB
+   heap in ~16 s) on FRESH-AGENT mint/render once the store hit ~40k
+   konserve keys — proven NOT this work (a pre-P6 stash build crashed
+   identically; heap = ~18M small arrays + ~20M objects, snapshot
+   preserved, exact retainer unpinned; cluster reset cleared it) — and
+   the DEFAULT cluster's DeepSeek key returns 402 Insufficient Balance.
 
 ## The two cursor regimes (both measured; the regime is DERIVED)
 

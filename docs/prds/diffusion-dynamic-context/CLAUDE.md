@@ -40,7 +40,36 @@ tags: [orchestrator, agent]
   device-assert = static-cache-sizing hypothesis + $0 probe; clamp is
   compile-compatible — the compiled path was never measured).
 
-## ▸ Current state (2026-07-11) — TYPEAHEAD ARC P1–P5 SHIPPED; the offer channel fires
+## ▸ Current state (2026-07-11) — P6 PARTIAL: fires now select task-required verbs
+
+P6 (the two P5-identified levers) is built and measured PARTIAL — see
+[[typeahead-design]] Phases §6 for the full note. (a) The verb menu grew
+a TOOLKIT group (one glyph numbering with recency): public specced
+program-graph fns of the current ns's required nses, cross-agent
+frequency rank, per-ns round-robin, `:seon.typeahead/toolkit-cap`
+(default 4) — required verbs now ON the menu 9/10 corpus samples.
+(b) The P5 repeat-fire loop is root-caused + fixed mechanically:
+expansions HARVEST in-step (lock or `expand-failed`, caller's draft
+preserved), and both step-loop mirrors suppress a glyph whose expansion
+locked nothing (the step trace is the memory). (c) Expand cost halved:
+hole-stability early stop + geometric-down CAL ladder +
+`expand_settle_rounds=1`. Fresh corpus (regenerated on acme — the old
+frozen menus can't carry the new group; NOTE it scores HARDER: DeepSeek
+refs .70→.40), k=3, worker `dffbc439cd6a`, evidence
+`evals/runs/2026-07-11-typeahead-p6/`: **arm2 .633 outcome / .867
+validity / .524 verb-acc / 4.8 s median** vs arm1 .286/.464/.0/29.0 s;
+expand fires 3/3 task-required verbs (P5: 0/13), median expand step
+9.1 s (was ~18), zero repeat fires, one expansion locked in-step and
+passed. PENDING: arm3 + summary.json + ledger rows (the first runner
+invocation crashed on a same-day ledger run_id collision — runner
+fixed, re-run arm2+arm3). Suites green: bin/test-cljs 1189/5390/0/0,
+src-diffusion pytest 59, bench pytest 13. OPS (not this lane's code):
+the acme pod OOM'd on fresh-agent mint at ~40k store keys (a pre-P6
+build crashes identically; heap snapshot preserved; cluster reset
+cleared it — investigation open), and the DEFAULT cluster's DeepSeek
+key is 402 Insufficient Balance.
+
+## ▸ Prior state (2026-07-11) — P1–P5 SHIPPED; the offer channel fires
 
 The typeahead lane ([[typeahead-design]] — read its Phases section, every
 phase carries its shipped note) is COMPLETE through **P5**: cursor oracle
