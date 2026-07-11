@@ -69,6 +69,43 @@ Render budget rule: a step must be workable inside a ≤4k-token render
 too big to render small are a planner defect, and the bench will show it
 as blown time budgets.
 
+## The plan document round-trip — `my.plan/reconcile!` (owner, 2026-07-11)
+
+The revival of verified-canvas v2's variant B ("the canvas plans
+itself"), sharpened: the plan tree is also editable as ONE document, and
+the write-back is one function with three callers.
+
+- **The document** is a canonical EDN projection of the agent's OPEN
+  tree (`my.plan/tree`'s shape, made round-trippable): every node
+  carries its `:my.plan/id`; done steps are EXCLUDED (derive-don't-
+  store — an edit can never un-happen history).
+- **`my.plan/reconcile!`** takes the edited document (or frontier
+  markdown, parsed leniently to the same shape), diffs it against the
+  live tree, and compiles the delta into ordinary plan transactions.
+  Identity rules: node with id → update in place (title/description/
+  expect/parent/needs edits); node without id → minted; OPEN node
+  absent from the document → dropped. Returns
+  `{::ok? true ::root … ::diff {::added n ::dropped n ::updated n}}` —
+  the `⟹` result line IS the receipt, and the next render's plan block
+  IS the confirmation (reactive context; no notification mechanism).
+- **The three callers, one mechanism**: (1) the frontier model's
+  handed-down markdown — full encode all at once, and later re-hands
+  reconcile as UPDATES (unchanged nodes keep identity/status);
+  (2) the diffusion agent editing the document on the CODE-BUFFER —
+  the diffusion-native operation (whole-document refinement in one
+  denoise pass, which AR models structurally can't do): ids CLAMPED
+  (identity unforgeable by construction), free regions = titles/
+  expects/structure, the June plan-phase grammar gate + oracle proof
+  before lock; (3) the agent calling `reconcile!` from code like any
+  function.
+- **Authoring = reconciling against an empty tree** — so W1's
+  plan-authoring, frontier import, and mid-run re-planning are ONE
+  code path, not three.
+
+Sequencing: `reconcile!` + markdown parse land in W1 (it is W1's
+write-back). The clamped-id whole-buffer edit mode is the W2 headline
+once the focus loop works.
+
 ## Win conditions (per the exercising-agents doctrine)
 
 - **Continuity**: a mid-run `bin/seon restart pod` (acme) and the worker
