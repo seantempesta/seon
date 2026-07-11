@@ -595,6 +595,10 @@ Pattern (canonical example, lives in `seon.db`):
 
 The same rule applies to id shapes, length constraints, enum values, and any other property cluster you'd otherwise repeat. If a shape would be repeated, register it under a `:seon.<domain>/<name>` keyword first, then reference it. If the Malli bridge or our `seon.db/malli->datahike-schema` doesn't yet handle the reference shape you need (e.g. adding a property to a referenced schema), **fix the bridge** — do NOT duct-tape by inlining the shape at each site. Duplicated definitions guarantee drift; bridge fixes are one-time.
 
+### Configuration resolves into the DB
+
+The manifest (`config/system.edn`, `SEON_CONFIG` picks the file) resolves **ONCE at boot** into the `:seon.config` DB **singleton** — `:seon.config/system-text` and every dial stored as datoms. **Runtime reads the DB**, never the env or the file: the accessors keep their names/arities but read `config/config-view`. So a dial is replay-visible (`as-of` a past `t` sees the old value) and live-tunable (a `db/transact!` reaches every accessor, no restart). See the `src/seon/CLAUDE.md` Config row for the owner detail.
+
 ---
 
 ## Skills (IMPORTANT)
