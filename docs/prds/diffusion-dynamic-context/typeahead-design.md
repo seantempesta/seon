@@ -280,7 +280,29 @@ In-band errors (`gen_error`), same contract as today.
    Null-render calibration is also not wired yet (no auto-offers —
    explicit glyph selection only).
 4. **P4 bench** — the replay-corpus task in src-inspect-ai + live acme
-   drive; merge decision on the measured deltas.
+   drive; merge decision on the measured deltas. **SHIPPED 2026-07-10**
+   (`seon_inspect.typeahead_corpus` — 10 real acme sessions across the
+   capability rungs, byte-exact prompt blobs + verbatim menu/card
+   sections + host-side outcome predicates in
+   `evals/typeahead_replay.corpus.json`; task
+   `seon_inspect/tasks/typeahead_replay.py`, 9 offline pytest proofs;
+   evidence + ledger rows `evals/runs/2026-07-10-typeahead/`). Measured
+   (local MLX worker, k=3, ≤4k renders): **typeahead .533 outcome /
+   .90 validity / 3.0 s per reply** vs guided-no-menus .286/.46/20.5 s
+   and guided-with-inert-menus .267/.37/33.4 s — the step surface earns
+   (+.25 outcome at ~7× lower latency); no protocol leak (arm3−arm1 =
+   −.02 = one execution, noise). **BUT uptake = 0.0** — zero glyph
+   emissions in 66 steps, and auto-offers can't fire without null-render
+   calibration, so the SELECTION channel specifically is unexercised:
+   the lift is menu-text-in-a-step-regime + lock/commit/repair. DeepSeek
+   references on the same corpus: .70 outcome (both the captured 36k
+   production turns and a one-shot on the same 4k render — where its
+   verb accuracy drops .71→.57 via hallucinated verbs; Muse arm skipped,
+   no key on the machine). Merge decision input: the swap-in is NOT
+   correctness-parity with DeepSeek yet (.53 vs .70) but ~7× faster and
+   local; the next lever per the data is wiring null-render calibration
+   (auto-offers) + a glyph-emission teaching pass, then re-measuring
+   uptake.
 
 ## The two cursor regimes (both measured; the regime is DERIVED)
 

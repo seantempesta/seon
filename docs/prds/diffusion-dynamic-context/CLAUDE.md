@@ -40,7 +40,24 @@ tags: [orchestrator, agent]
   device-assert = static-cache-sizing hypothesis + $0 probe; clamp is
   compile-compatible — the compiled path was never measured).
 
-## ▸ Current state (2026-07-05) — LOCAL-FIRST REBOOT: guided loop PROVEN live on MLX; `src-diffusion/` is the home
+## ▸ Current state (2026-07-10) — TYPEAHEAD ARC P1–P4 SHIPPED; the bench numbers are in
+
+The typeahead lane ([[typeahead-design]] — read its Phases section, every
+phase carries its shipped note) is COMPLETE through **P4**: cursor oracle
+(`op:"cursor"`), `cursor.py` driver + wire modes `fill`/`rank`/`step`,
+seon-side menu/plan-ledger ctx blocks + `:seon.typeahead/policy` row +
+the `SEON_AI_PROVIDER=typeahead` step-loop provider, and now the
+**replay-corpus bench inside src-inspect-ai**
+(`seon_inspect.typeahead_corpus` + `tasks/typeahead_replay.py`; corpus =
+10 real acme sessions, evidence `evals/runs/2026-07-10-typeahead/`,
+ledger rows `2026-07-10:typeahead_replay:dev:k3:arm{1,2,3}`). Headline
+(local MLX, ≤4k renders, k=3): **typeahead .533 outcome / .90 validity /
+3.0 s per reply** vs guided .286/.46/20.5 s; no protocol leak; **uptake
+0.0** (the glyph channel unexercised — null-render calibration unwired);
+DeepSeek reference .70 outcome on the same corpus. Next lever: wire
+auto-offer calibration + glyph-emission teaching, re-measure uptake.
+
+## ▸ Prior state (2026-07-05) — LOCAL-FIRST REBOOT: guided loop PROVEN live on MLX; `src-diffusion/` is the home
 
 **The GPU gating is OBSOLETE — the local MLX worker (M5, 8-bit, ~120 tok/s raw)
 runs everything free.** The approved plan (verified-canvas v2,
