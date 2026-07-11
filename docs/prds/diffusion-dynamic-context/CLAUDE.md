@@ -84,12 +84,15 @@ grammar; bare `⟹` is real).
 
 ## Landmines / open issues
 
-- **Store-scale OOM (CORE, owner-directed fix in flight)**: pod heap
-  450 MB → 4.4 GB (Node's default V8 cap) in ~16 s on fresh-agent mint
-  once the store hits ~40k konserve keys. NOT this lane's code (pre-P6
-  builds crash identically). 2.9 GB heap snapshot preserved untracked
-  at repo root. Will recur as ANY store grows — the top blocker for
-  multi-turn workhorse runs.
+- **Store-scale OOM: ROOT-CAUSED, fix owned by the datahike lane**
+  (owner handoff 2026-07-11; evidence
+  `docs/prds/agent-ctx/research/store-scale-oom-2026-07-11.md`,
+  d53815ea): the datahike-CLJS query planner's recursive-rule execution
+  duplicates tuples multiplicatively (zero-common-attr `hash-join` =
+  silent Cartesian product) — 15.4M tuples for 783 distinct pairs in
+  `my.plan.internal/ready-leaves`' plan at mint. Until their fix lands,
+  long-running stores WILL hit it again — keep multi-turn drives on
+  fresh-ish stores and keep the repo-root heap snapshot.
 - **P6 close pending**: re-run arm2+arm3 under the fixed runner
   (run_id now carries the run label), land summary.json + ledger rows,
   update the PARTIAL markers. Worker sha will differ if the grammar
