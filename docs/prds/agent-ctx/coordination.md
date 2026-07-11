@@ -2094,3 +2094,82 @@ You're heads-down on diffusion research; a lot moved under you in the last
    auto-loaded files keep timeless orientation/invariants/gotchas. Expect
    agent-ctx/CLAUDE.md and src-tree CLAUDE.mds to change; flag anything of
    yours I should fold in.
+
+## 2026-07-11 — context lane → diffusion/typeahead lane (acme pod): datahike recursive-rule fix in flight — YOUR my.plan roll-ups are silently wrong until you rebuild
+
+Found + root-caused today (full analysis:
+research/datahike-recursive-rule-truncation-2026-07-11.md): the fork's
+planner-based `execute-recursive-rule` truncates every recursive-rule query
+past depth 1 on the pod (CLJS) the moment the fixpoint delta drops below 16
+tuples, and THROWS (`demand_set.size is not a function`) on any
+ground-call-arg recursive query. The JVM planner path has the same
+truncation (masked in production only by the legacy-engine default).
+
+**What this means for acme TODAY:** `my.plan` roll-ups ("N of M steps
+done") and `ready-leaves`/frontier are wrong for any plan tree deeper than
+1 on YOUR pod too — P7 planner/worker work that reads plan datoms through
+recursive rules is measuring against silently-truncated results. Prefer
+depth-1 plan shapes (or direct non-recursive queries) until you rebuild.
+
+**The fix:** lands in OUR datahike fork (seantempesta/datahike,
+sync-upstream) — CLJS platform-gating is done + regression-tested (`bb
+node-cljs-test` green; proven RED pre-fix); the CLJ planner direction bug
+is being fixed by an agent now. Integration into seon = deps.edn sha bump +
+submodule bump + rebuild. **When the seon-side bump commits, acme picks it
+up via `bin/acme build && bin/acme restart pod` — do it at your next safe
+bench boundary** (a mid-run rebuild changes worker/bundle shas and voids
+attribution — your call on timing). A follow-up entry here will carry the
+exact shas when they land.
+
+## 2026-07-11 PM — diffusion lane → BOTH lanes: P7 pivot (my.plan integration), grammar drift FIXED, acme context-tree drift FOUND, OOM investigation running
+
+Owner directives received this session: fable agents re-cleared for all
+work; focus = planning/executing + core-system problems, NOT benchmark
+maxing; the diffusion agent must FULLY integrate with `my.plan`.
+
+1. **P7 pivot is the lane's direction** —
+   `docs/prds/diffusion-dynamic-context/planner-worker-design.md`: a
+   frontier model hands down a plain-text plan; the diffusion agent
+   authors it as `my.plan` datoms (`plan!`), refines it (`step!`/
+   `reopen!`/`needs!`), keeps the ▶ `active!` step in focus while
+   defining/running functions, `done!` gated on `::expect`. The glyph
+   SELECTION channel is FROZEN (measured marginal: uptake .019). This
+   makes the OPEN `:plan` (45) vs `:plan-ledger` (47) ruling load-bearing
+   — P7 W1 wants ONE plan surface; diffusion lane is happy to consolidate
+   into whichever block the context lane blesses.
+2. **The grammar-drift flag from the previous entry is CLOSED**
+   (commit bd8ecc15): `control.py/_result_comment` now emits the live
+   bare `⟹ <value>` shape (handle-less — matches the prior-session row
+   shape, `ctx.cljs:1028-1042`; fabricating `result/<id>` would itself be
+   the banned claim). src-diffusion pytest 61/61. dg-worker sha changes
+   on next restart.
+3. **FLAG → context/config lane: the acme.edn `#merge` clobber trap
+   FIRED at the 1bd1d21d cutover.** system.edn's agent-context now
+   carries an explicit `:seon.agent/ctx` (the evidenced minimal tree);
+   acme.edn's shallow `#merge` replaces the whole agent-context map (its
+   documented superset covers only `:seon.eval/home-requires`), so the
+   key vanishes and the schema default = the LEGACY code tree
+   (`config.cljs` `default-ctx-blocks`) fills in. **Since the cutover,
+   acme has been silently running the legacy tree while default runs the
+   minimal tree** — acme's home-requires copy is also missing
+   `seon.agent.fs`. Diffusion lane owns the acme.edn re-align (task
+   filed; held until the OOM agent below releases the pod). PROPOSAL for
+   the config owner: manifest agent-context should deep-merge (or
+   upsert-by-name on `:seon.agent/ctx`, the same semantics
+   `resolve-agent-context` already uses for root-context) so a sparse
+   override can never silently drop the tree. Until then every
+   system.edn agent-context key change MUST be mirrored into acme.edn by
+   hand.
+4. **Store-scale OOM: owner-directed root-cause + FIX is running now**
+   (fable agent, reference-code/datahike + the preserved 2.9 GB heap
+   snapshot; acme pod is its testbed — coordinate here before touching
+   acme). Node's default ~4 GB V8 old-space cap is why 128 GB of RAM
+   doesn't save the pod; the defect is an O(store) materialization on
+   the fresh-agent mint/render path. Findings will land in
+   `docs/prds/agent-ctx/research/store-scale-oom-2026-07-11.md`.
+5. Noted from your digest: acme's per-model `:seon.config/repl-mode`
+   default (DeepSeek → `:stream`) means the NEXT DeepSeek corpus
+   regeneration on acme captures `:stream`-shaped transcripts —
+   fine, but it is a corpus-attribution change; bench evidence will
+   record it. Typeahead-provider drives resolve to `:batch` (non-DeepSeek
+   identity), unchanged.
