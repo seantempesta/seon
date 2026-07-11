@@ -71,11 +71,6 @@ grammar; bare `⟹` is real).
 - **Bench discipline**: fresh-worker sha-verify first; k=3 seeds
   100–102; zero-scores → suspect the harness before the model (fired 3×
   this arc); one full measurement per unit, not per edit.
-- **Until the datahike planner fix lands** (see Landmines): run long /
-  multi-turn drives on a fresh-ish store — `bin/acme` cluster reset
-  before any drive expected to grow the store past a few-thousand keys.
-  The OOM needs a grown store; fresh stores render the same queries
-  harmlessly. Temporary, remove when the datahike lane ships.
 
 ## Load-bearing findings (timeless — earned the hard way)
 
@@ -107,15 +102,13 @@ grammar; bare `⟹` is real).
 
 ## Landmines / open issues
 
-- **Store-scale OOM: ROOT-CAUSED, fix owned by the datahike lane**
-  (owner handoff 2026-07-11; evidence
-  `docs/prds/agent-ctx/research/store-scale-oom-2026-07-11.md`,
-  d53815ea): the datahike-CLJS query planner's recursive-rule execution
-  duplicates tuples multiplicatively (zero-common-attr `hash-join` =
-  silent Cartesian product) — 15.4M tuples for 783 distinct pairs in
-  `my.plan.internal/ready-leaves`' plan at mint. Until their fix lands,
-  long-running stores WILL hit it again — keep multi-turn drives on
-  fresh-ish stores and keep the repo-root heap snapshot.
+- **Store-scale OOM: FIXED + live-scale CONFIRMED 2026-07-11** (fork
+  1598a824; confirmation drive d1253588: store grown to 52k keys /
+  192k datoms, fresh mint peaked +300 MB over idle and settled, the
+  once-exploding `ready-leaves` rule returns correct results at scale,
+  0 core faults). The fresh-store drive rule is RETIRED; acme is left
+  AS-GROWN as a realistic-scale testbed. History: research/
+  store-scale-oom-2026-07-11.md (agent-ctx).
 - tx-feed pub reader logs `pub frame decode failed … not valid JSON`
   on every acme pod boot (reconnects 2 s; smell, task filed).
 - Default cluster DeepSeek key: 402 Insufficient Balance (owner top-up;
