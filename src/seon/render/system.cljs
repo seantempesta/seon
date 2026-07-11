@@ -430,7 +430,7 @@
 (schema/register! ::view-input
   [:map
    [:seon.db/db :seon.db/db]
-   [:seon.agent/id {:optional true} :string]])
+   [:seon.agent/id {:optional true} :seon.agent/id]])
 
 (defn system-view
   "Root's live-tile content (`:seon.render.live-tile/content` symbol).

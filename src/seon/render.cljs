@@ -123,23 +123,13 @@
 ;; coordinate; wall-clock is derivable from the tx's `:db/txInstant`.
 (schema/register! :seon.render/at [:int {:min 0}])
 
-;; `:seon.agent/id` — registered HERE (not in its owning ns `seon.agent`)
-;; because this is the FIRST-loading ns whose load-time schema references
-;; it (`:seon.render/section-request` below; seon.agent loads after this
-;; ns via the seon.agent.ctx require chain, and register!'s compilability
-;; guard rejects forward references — same precedent as `:seon.ns/name`
-;; living in seon.agent.ctx.render-fns). The literal "root" id (the
-;; orchestrator-root base case) is the ONE agent id exempt from the
-;; 14-char minted-id shape — every other agent id is a `:seon.db/id`.
-;; The `:or` bridges to the SAME datahike schema: the CLJS bridge
-;; (seon.db.internal/form->datahike-value-type) walks `:and` → base, then
-;; the `:or` (one mappable type :db.type/string via :seon.db/id + the
-;; unmappable `[:= "root"]`) → :db.type/string; the
-;; `{:seon.db/identity true}` prop still yields :db.unique/identity.
-;; Because the resolved head is `:and` (not `:or`), `edn-encoded-attr?`
-;; is FALSE — "root" stores as a plain string, NOT pr-str'd EDN.
-(schema/register! :seon.agent/id
-  [:and {:seon.db/identity true} [:or [:= "root"] :seon.db/id]])
+;; `:seon.agent/id` is registered in seon.agent.ctx.render-fns — the
+;; FIRST-loading ns whose load-time schema references it (C58 made
+;; `::derived-blocks-request` there reference the registered shape;
+;; register!'s compilability guard rejects forward references, so the
+;; registration lives with the earliest referencer — the first-loading-ns
+;; rule, the `:seon.ns/name` precedent). Moved seon.agent → here in C54,
+;; here → render-fns in C58.
 
 ;; The ONE section/render-fn REQUEST shape (owner-ruled 2026-07-05).
 ;; Every block/section/converter fn the render engine calls declares
@@ -1194,7 +1184,7 @@
 (schema/register! ::slot-request
   [:map
    [:seon.db/db    {:optional true} :seon.db/db]
-   [:seon.agent/id {:optional true} :string]])
+   [:seon.agent/id {:optional true} :seon.agent/id]])
 
 (defn slot
   "Place the agent's block named `block-name` into a named tile slot.

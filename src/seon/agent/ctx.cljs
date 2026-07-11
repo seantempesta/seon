@@ -1130,7 +1130,7 @@
                   [:=> [:cat] [:vector :any]]
                   [:=> [:catn [::opts [:map
                                        [:seon.agent/n  {:optional true} :int]
-                                       [:seon.agent/id {:optional true} :string]
+                                       [:seon.agent/id {:optional true} :seon.agent/id]
                                        [:seon.db/db    {:optional true} :any]]]]
                    [:vector :any]]]}
   ([] (messages {}))
@@ -1167,7 +1167,7 @@
   {:malli/schema [:function
                   [:=> [:cat] :any]
                   [:=> [:catn [::opts [:map
-                                       [:seon.agent/id {:optional true} :string]
+                                       [:seon.agent/id {:optional true} :seon.agent/id]
                                        [:seon.db/db    {:optional true} :any]]]]
                    :any]]}
   ([] (current-turn {}))
@@ -1202,7 +1202,7 @@
                   [:=> [:cat] [:vector :any]]
                   [:=> [:catn [::opts [:map
                                        [:seon.agent/n  {:optional true} :int]
-                                       [:seon.agent/id {:optional true} :string]
+                                       [:seon.agent/id {:optional true} :seon.agent/id]
                                        [:seon.db/db    {:optional true} :any]]]]
                    [:vector :any]]]}
   ([] (evals {}))
@@ -1225,7 +1225,7 @@
   {:malli/schema [:function
                   [:=> [:cat] :any]
                   [:=> [:catn [::opts [:map
-                                       [:seon.agent/id {:optional true} :string]
+                                       [:seon.agent/id {:optional true} :seon.agent/id]
                                        [:seon.db/db    {:optional true} :any]]]]
                    :any]]}
   ([] (current-ns {}))
@@ -1249,7 +1249,7 @@
   {:malli/schema [:function
                   [:=> [:cat] [:vector :map]]
                   [:=> [:catn [::opts [:map
-                                       [:seon.agent/id {:optional true} :string]]]]
+                                       [:seon.agent/id {:optional true} :seon.agent/id]]]]
                    [:vector :map]]]}
   ([] (ctx-entities {}))
   ([{:seon.agent/keys [id]}]

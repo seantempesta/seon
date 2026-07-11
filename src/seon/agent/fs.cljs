@@ -78,6 +78,14 @@
    [:seon.agent.fs/read-only?    :seon.agent.fs/read-only?]
    [:seon.agent.fs/locked?       :seon.agent.fs/locked?]])
 
+;; `configure!` request — pass only the keys you want to change.
+;; Open map (merged over the live grant); references the registered
+;; grant-key shapes (shared-shape rule).
+(schema/register! :seon.agent.fs/configure-request
+  [:map
+   [:seon.agent.fs/allowed-roots {:optional true} :seon.agent.fs/allowed-roots]
+   [:seon.agent.fs/read-only?    {:optional true} :seon.agent.fs/read-only?]])
+
 (schema/register! :seon.agent.fs/configure-response
   [:map
    [:seon.agent.fs/ok?           :boolean]
@@ -313,7 +321,7 @@
    (`:seon.agent.fs/ok? false`, `:seon.agent.fs/locked? true`) and the
    live grant is untouched — read it with [[grants]] and work within it
    (narrowing your own grant can lock you out of paths you still need)."
-  {:malli/schema [:=> [:cat :map] :seon.agent.fs/configure-response]}
+  {:malli/schema [:=> [:cat :seon.agent.fs/configure-request] :seon.agent.fs/configure-response]}
   [updates]
   (if (int/fs-locked?)
     {:seon.agent.fs/ok?     false

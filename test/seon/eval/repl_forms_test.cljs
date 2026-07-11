@@ -34,12 +34,16 @@
 ;; every run starts from genuinely fresh names.
 (defn- scrub-probe-rv!
   []
-  (swap! @repl/!compile-state update :cljs.analyzer/namespaces
-         (fn [m]
-           (into {}
-                 (remove (fn [[k _]] (or (str/starts-with? (str k) "probe.rv")
-                                         (str/starts-with? (str k) "my.rvx"))))
-                 m)))
+  ;; A nil compile-state (an ISOLATED --test= run before any
+  ;; ensure-bootstrap!) has no prior probe.rv.* state to scrub — no-op
+  ;; (hermetic-fixture rule, C35 class).
+  (when-some [cs @repl/!compile-state]
+    (swap! cs update :cljs.analyzer/namespaces
+           (fn [m]
+             (into {}
+                   (remove (fn [[k _]] (or (str/starts-with? (str k) "probe.rv")
+                                           (str/starts-with? (str k) "my.rvx"))))
+                   m))))
   (when-some [p (gobj/get js/globalThis "probe")]
     (gobj/remove p "rv"))
   (when-some [p (gobj/get js/globalThis "my")]
@@ -530,4 +534,87 @@
                                    (is (false? (:ok? r)))
                                    (is (str/includes? (str (:error r))
                                                       "not an alias"))))))))))
+            (.finally done))))))
+
+;; ===========================================================================
+;; C59 repro — sequential eval-batch! calls within ONE async microtask
+;; chain must BOTH tee their program-graph rows. Registry row C59 reports
+;; two real-ns batches awaited back-to-back in one ^:async fn both teeing
+;; 0 fn/ns rows (evals succeed, n-ok correct; rows never committed).
+;; This pins the expected behavior: each batch's defn tees its :seon.fn
+;; row and its ns row, with no macrotask separation between the batches.
+;; ===========================================================================
+
+(deftest c59-back-to-back-batches-both-tee
+  (async done
+    (with-conn
+      (fn []
+        (-> (run-batch! (str "(ns probe.rv.c59a)\n"
+                             "(defn fa [x] (+ x 1))")
+                        'my.agent.rv)
+            ;; SAME microtask chain — no timer/macrotask between batches.
+            (.then
+              (fn [r1]
+                (is (= 2 (:seon.eval/n-ok r1)) "batch 1 evals ok")
+                (run-batch! (str "(ns probe.rv.c59b)\n"
+                                 "(defn fb [x] (* x 2))")
+                            'my.agent.rv)))
+            (.then
+              (fn [r2]
+                (is (= 2 (:seon.eval/n-ok r2)) "batch 2 evals ok")
+                (let [db* @db/*conn*]
+                  (testing "batch 1's tee rows committed"
+                    (is (some? (fn-row-source db* "probe.rv.c59a/fa"))
+                        "batch 1 :seon.fn row present")
+                    (is (some? (ns-source db* :probe.rv.c59a))
+                        "batch 1 :seon.ns row present"))
+                  (testing "batch 2's tee rows committed"
+                    (is (some? (fn-row-source db* "probe.rv.c59b/fb"))
+                        "batch 2 :seon.fn row present")
+                    (is (some? (ns-source db* :probe.rv.c59b))
+                        "batch 2 :seon.ns row present")))))
+            (.finally done))))))
+
+;; The EXACT reported shape: two awaited batches inside ONE ^:async fn,
+;; under the turn-runner's outer with-tx-context (agent + turn scope) —
+;; the closest hermetic stand-in for the §1 verify unit's driver.
+(deftest c59-awaited-batches-in-one-async-fn-both-tee
+  (async done
+    (with-conn
+      (fn []
+        (-> (repl/ensure-bootstrap!)
+            (.then
+              (fn [_]
+                (db/with-tx-context
+                  {:seon.db/agent-id "rv-agent-2607"
+                   :seon.db/turn-id  (db/new-id!)
+                   :seon.db/origin   :system}
+                  (fn ^:async run-two-batches! []
+                    (let [cs @repl/!compile-state
+                          r1 (await (seval/eval-batch!
+                                      cs
+                                      (internal/parse-forms
+                                        "(ns probe.rv.c59c)\n(defn fc [x] (- x 1))")
+                                      'my.agent.rv "rv-agent-2607"
+                                      (db/new-id!) nil))
+                          r2 (await (seval/eval-batch!
+                                      cs
+                                      (internal/parse-forms
+                                        "(ns probe.rv.c59d)\n(defn fd [x] (* x 3))")
+                                      'my.agent.rv "rv-agent-2607"
+                                      (db/new-id!) nil))]
+                      {:r1 r1 :r2 r2})))))
+            (.then
+              (fn [{:keys [r1 r2]}]
+                (is (= 2 (:seon.eval/n-ok r1)) "awaited batch 1 evals ok")
+                (is (= 2 (:seon.eval/n-ok r2)) "awaited batch 2 evals ok")
+                (let [db* @db/*conn*]
+                  (is (some? (fn-row-source db* "probe.rv.c59c/fc"))
+                      "awaited batch 1 :seon.fn row present")
+                  (is (some? (fn-row-source db* "probe.rv.c59d/fd"))
+                      "awaited batch 2 :seon.fn row present")
+                  (is (some? (ns-source db* :probe.rv.c59c))
+                      "awaited batch 1 :seon.ns row present")
+                  (is (some? (ns-source db* :probe.rv.c59d))
+                      "awaited batch 2 :seon.ns row present"))))
             (.finally done))))))

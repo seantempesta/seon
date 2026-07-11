@@ -289,13 +289,31 @@
   (let [s (str s)]
     (str s (apply str (repeat (max 0 (- n (count s))) " ")))))
 
+;; The render request — the malli-error envelope keys `render-malli-error`
+;; reads. Open map (the envelope carries more), every column key optional
+;; (missing keys render gracefully); references the registered field
+;; shapes (shared-shape rule).
+(schema/register! :seon.error.malli/render-request
+  [:map
+   [:seon.error/kind             {:optional true} :seon.error/kind]
+   [:seon.error.malli/fn-sym     {:optional true} :seon.error.malli/fn-sym]
+   [:seon.error.malli/arg-index  {:optional true} :seon.error.malli/arg-index]
+   [:seon.error.malli/expected   {:optional true} :seon.error.malli/expected]
+   [:seon.error.malli/path       {:optional true} :seon.error.malli/path]
+   [:seon.error.malli/got-edn    {:optional true} :seon.error.malli/got-edn]
+   [:seon.error.malli/got-type   {:optional true} :seon.error.malli/got-type]
+   [:seon.error.malli/humanized  {:optional true} :seon.error.malli/humanized]
+   [:seon.error.malli/hint       {:optional true} :seon.error.malli/hint]
+   [:seon.error.malli/arity      {:optional true} :seon.error.malli/arity]
+   [:seon.error.malli/arities    {:optional true} :seon.error.malli/arities]])
+
 (defn render-malli-error
   "Format the envelope into the multi-line ;; ERROR block.
 
    Returns
    a string (no trailing newline). Renders missing keys gracefully —
    if a column's source key is absent, that line is omitted."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.error.malli/render-request] :string]}
   [{kind   :seon.error/kind
     fn-sym :seon.error.malli/fn-sym
     arg-i  :seon.error.malli/arg-index

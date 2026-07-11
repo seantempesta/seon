@@ -267,6 +267,71 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
+;; C30 — keyword-namespace schema STUBS are excluded from the replay set.
+;; `index-schemas` mints a `:seon.ns/name` row per NAMESPACED schema key as
+;; a `:seon.schema/ns` backref (`:seon.fn/spec` → `:seon.ns/name :seon.fn`).
+;; Those namespaces are NOT compiled nses, so `agent-ns-set` (which only
+;; subtracts `core-ns-set`) keeps them — but they reconstitute to "" (no
+;; source, no fn/test members, their core shape-literal schema rows fail
+;; `registration-call-source?`). The computed blank-source filter drops
+;; them from the replay count without a name list; real agent nses stay.
+;; ---------------------------------------------------------------------------
+
+(deftest c30-blank-source-stub-nses-excluded-from-replay
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+          (fn [cs]
+            (-> (client/open-agent-conn!)
+                (.then
+                  (fn [conn]
+                    (binding [db/*conn* conn]
+                      (-> (db/transact!
+                            {:seon.db/tx-data
+                             [;; a REAL agent ns — must replay.
+                              {:seon.ns/name :my.agent.c30
+                               :seon.ns/source "(ns my.agent.c30)"}
+                              {:seon.fn/sym "my.agent.c30/f"
+                               :seon.fn/ns [:seon.ns/name :my.agent.c30]
+                               :seon.fn/source "(defn f [] 1)"
+                               :seon.fn/arglists "([])" :seon.fn/doc "" :seon.fn/private? false}
+                              ;; a C30 STUB ns — keyword-only, no source; its
+                              ;; only member a CORE shape-literal schema row
+                              ;; (source "[…]" fails registration-call-source?),
+                              ;; exactly what index-schemas' :seon.schema/ns
+                              ;; backref mints.
+                              {:seon.ns/name :seon.fn}
+                              {:seon.schema/key    :seon.fn/spec
+                               :seon.schema/source "[:vector :any]"
+                               :seon.schema/ns     [:seon.ns/name :seon.fn]}]})
+                          (.then
+                            (fn [_]
+                              (is (contains? ((deref #'client/agent-ns-set) @conn) :seon.fn)
+                                  "the stub IS in agent-ns-set — only the replay filter drops it")
+                              (is (str/blank? (seval/reconstitute-ns-source @conn :seon.fn))
+                                  "the keyword-only stub ns reconstitutes to nothing")
+                              (is (not (str/blank? (seval/reconstitute-ns-source @conn :my.agent.c30)))
+                                  "a real agent ns reconstitutes non-blank")
+                              (client/replay-program-graph!
+                                {:seon.client/conn conn :seon.client/compile-state cs
+                                 :seon.client/agent-id "c30-test"})))
+                          (.then
+                            (fn [stats]
+                              (is (= 1 (:seon.client/replay-n-total stats))
+                                  (str "only the real agent ns is a replay unit — the "
+                                       "blank-source stub is skipped — " (pr-str stats)))
+                              (is (= 0 (:seon.client/replay-n-fail stats))
+                                  "no load failures")
+                              (seval/eval cs "(my.agent.c30/f)"
+                                          {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})))
+                          (.then
+                            (fn [r]
+                              (is (:seon.eval/ok? r) "the real agent ns still loaded")
+                              (is (= 1 (:seon.eval/value r)) "(f) => 1"))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
 ;; Fail-loud load errors — the warn must name the actual defect, not
 ;; cljs.js's literal "ERROR" wrapper (live incident 2026-06-10: every
 ;; :my.workout/* load failure logged as `failed: ERROR`).

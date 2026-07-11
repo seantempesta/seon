@@ -792,7 +792,7 @@
    tutorial demonstrates."
   {:malli/schema [:=> [:cat [:map
                              [:seon.render/ai :string]
-                             [:seon.agent/id {:optional true} :string]]]
+                             [:seon.agent/id {:optional true} :seon.agent/id]]]
                   ::section-response]}
   [{text :seon.render/ai id :seon.agent/id}]
   (let [id (or id (db/current-agent-id))]

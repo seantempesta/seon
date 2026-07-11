@@ -213,6 +213,10 @@
     [seon.agent.ctx.testrun]
     [seon.agent.ctx.subagents]
     [seon.agent.ctx.menu]
+    ;; The :typeahead-steps block family (NOT seeded by default — installed
+    ;; explicitly per agent / via a manifest overlay). Required so the build
+    ;; includes it and its render-slot symbols resolve.
+    [seon.agent.ctx.typeahead-steps]
     [seon.platform]
     ;; Phase B item 9 — shared read-side wrapper over the analyzer
     ;; state. Required here so the build includes it; item 10's
@@ -936,13 +940,31 @@
     (fn ^:async run-replay! []
       (let [db       @conn
             agents   (agent-ns-set db)
-            order    (topo-sort-nses (agent-ns-requires db agents))
+            ;; Reconstitute each agent ns ONCE (frozen db value). A BLANK
+            ;; source = nothing to replay: a member-less sourceless
+            ;; keyword-namespace STUB (C30). `index-schemas` mints a
+            ;; `:seon.ns/name` row per NAMESPACED schema key as a
+            ;; `:seon.schema/ns` backref (`:seon.fn`, `:seon.ns`,
+            ;; `:seon.error.malli`, …); those are NOT compiled nses, so
+            ;; `agent-ns-set` (which subtracts only `core-ns-set`) can't
+            ;; drop them, and `reconstitute-ns-source` yields "" (no
+            ;; `:seon.ns/source`, no fn/test members, their core
+            ;; shape-literal schema rows fail `registration-call-source?`).
+            ;; Eval'ing "" is a harmless no-op — skipping it (computed, no
+            ;; name list) keeps replay-n honest. A REAL agent ns always
+            ;; reconstitutes non-blank (source or a fn/test/register!
+            ;; member), so nothing real is skipped.
+            src-of   (into {}
+                           (map (fn [k] [k (seval/reconstitute-ns-source db k)]))
+                           agents)
+            order    (->> (topo-sort-nses (agent-ns-requires db agents))
+                          (filterv (fn [k] (not (str/blank? (get src-of k))))))
             standalone (standalone-schema-sources db)
             !n-fail  (volatile! 0)]
         ;; Whole-namespace, dependency-ordered load (the spine).
         (doseq [ns-kw order]
           (let [r (try
-                    (let [src (seval/reconstitute-ns-source db ns-kw)]
+                    (let [src (get src-of ns-kw)]
                       (await (seval/eval compile-state src
                                          {:seon.eval/starting-ns 'cljs.user})))
                     (catch :default e

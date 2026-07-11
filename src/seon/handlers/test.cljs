@@ -14,9 +14,21 @@
    - HTML pane: amber `test` badge, fully-qualified symbol, pass/fail
      pill, collapsible source."
   (:require
-    [clojure.string :as str]))
+    [clojure.string :as str]
+    [seon.schema :as schema]))
 
 (def ^:private source-inline-threshold 200)
+
+;; The status request — the `:seon.test` entity fields the three status
+;; fns (`test-status`/`status-glyph`/`status-line`) read. ONE shared
+;; open-map shape (shared-shape rule); every field optional (a test with
+;; no recorded run has none of them). Open — the whole entity carries
+;; `:seon.test/sym`/`:ns`/`:source` too, passed straight through.
+(schema/register! :seon.handlers.test/status-request
+  [:map
+   [:seon.test/last-passed-at       {:optional true} :inst]
+   [:seon.test/last-failed-at       {:optional true} :inst]
+   [:seon.test/last-failure-summary {:optional true} :string]])
 
 (defn test-status
   "The recorded test run's `{:ran? :passing? :failure-summary}` triple.
@@ -29,7 +41,7 @@
    `render-ai`/`render-html` AND `seon.agent/test-block-ai`
    (whole-namespace render) derive their glyph/pill from it, so the
    `last-passed-at`/`last-failed-at` → ✓/✗/• logic lives in ONE place."
-  {:malli/schema [:=> [:cat :map] :map]}
+  {:malli/schema [:=> [:cat :seon.handlers.test/status-request] :map]}
   [{:seon.test/keys [last-passed-at last-failed-at last-failure-summary]}]
   (cond
     (and (nil? last-passed-at) (nil? last-failed-at))
@@ -50,7 +62,7 @@
    place the ✓/✗/• literals are defined. `✓` last run passed, `✗` last
    run failed, `•` no run recorded. Used by this ns's renderers and by
    `seon.agent`'s whole-namespace render so the two never diverge."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.handlers.test/status-request] :string]}
   [entity]
   (let [{:keys [ran? passing?]} (test-status entity)]
     (cond
@@ -64,7 +76,7 @@
    `;; • test (no run recorded)`. Built on `status-glyph` so the glyph
    literals stay single-sourced; shared by `render-ai` here and
    `seon.agent/test-block-ai`."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.handlers.test/status-request] :string]}
   [entity]
   (let [{:keys [ran? passing? failure-summary]} (test-status entity)
         glyph (status-glyph entity)]

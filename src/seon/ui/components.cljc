@@ -21,7 +21,8 @@
    migration plan reaches Stage 3 this file MERGES with the JVM
    `seon.web.components.clj` into one `.cljc` — most of the body is
    already byte-identical because the originals were pure hiccup
-   factories.")
+   factories."
+  (:require [seon.schema :as schema]))
 
 ;; ============================================================
 ;; Design system constants
@@ -153,6 +154,16 @@
   "Max characters to show before truncating log details."
   120)
 
+;; A single log entry — parsed (`::timestamp`/`::type`/`::details`) or
+;; unparsed (`::raw`). Open map, every field optional (the two variants
+;; are disjoint); primitive leaf types inlined (not shared shapes).
+(schema/register! :seon.ui.components/log-entry
+  [:map
+   [:seon.ui.components/timestamp {:optional true} :string]
+   [:seon.ui.components/type      {:optional true} :string]
+   [:seon.ui.components/details   {:optional true} :string]
+   [:seon.ui.components/raw       {:optional true} :string]])
+
 (defn log-line
   "Single log line — timestamp, type, content.
 
@@ -161,10 +172,10 @@
    `<details>` for expand/collapse; the `data-preserve-attr=\"open\"`
    tells Datastar to preserve the open-state across SSE morphs.
 
-   entry — `{:timestamp :type :details}` for parsed lines, or
-           `{:raw \"...\"}` for unparsed."
-  {:malli/schema [:=> [:cat :map] :any]}
-  [{:keys [timestamp type details raw]}]
+   entry — `{::timestamp ::type ::details}` for parsed lines, or
+           `{::raw \"...\"}` for unparsed."
+  {:malli/schema [:=> [:cat :seon.ui.components/log-entry] :any]}
+  [{:seon.ui.components/keys [timestamp type details raw]}]
   (let [type-class      (or (get type-colors type) "text-text-400")
         emphasis?       (contains? #{"LAUNCH" "COMPLETE" "ERROR"} type)
         full-type-class (str type-class (when emphasis? " font-semibold"))
