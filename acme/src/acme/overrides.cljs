@@ -7,7 +7,7 @@
 
    Two error seams, both branded calm. Core split the one error contract
    into two vars:
-   - `error-response` — the live-tile HERO (`render-agent-tile`'s catch):
+   - `error-response` — the canvas HERO (`render-agent-tile`'s catch):
      returns the FULL `:seon.render/html-response` map, so we preserve the
      agent-facing `:seon.render/ai` + `:seon.render/error` and swap only the
      human-facing hiccup.
@@ -18,11 +18,11 @@
    Both render the same calm 'preparing this view' card — while an agent is
    mid-building a tile the human sees a calm placeholder instead of a raw
    error, the agent-facing signal stays intact on the hero."
-  (:require [seon.render.live-tile :as live-tile]))
+  (:require [seon.render.canvas :as canvas]))
 
-(defonce ^:private orig-error-response live-tile/error-response)
+(defonce ^:private orig-error-response canvas/error-response)
 
-(set! live-tile/error-response
+(set! canvas/error-response
       (fn acme-error-response [req]
         (assoc (orig-error-response req)
                :seon.render/hiccup
@@ -35,7 +35,7 @@
 ;; envelope like the hero), so there is nothing from the default to preserve:
 ;; we replace it outright with acme's calm branded card (mirroring the hero
 ;; above). One `set!`, every slot/world/entity error tile on the page is acme.
-(set! live-tile/error-tile
+(set! canvas/error-tile
       (fn acme-error-tile [_err]
         [:div {:class "seon-tile"}
          [:div {:class "seon-tile-compact p-3 text-xs text-text-300 italic"}

@@ -13,9 +13,11 @@
 ;; can't see the functions). Isolation (ports/store/sockets/logs/bundle) lives in
 ;; bin/acme env, not here.
 ;;
-;; NOTE `#merge` replaces whole top-level keys: `:seon.config/agent-context`
-;; below REPLACES system.edn's (which carries only :seon.eval/home-requires) —
-;; keep this block a superset of system's agent-context if system grows keys.
+;; NOTE `#merge` is manifest-aware for `:seon.config/agent-context` (fac50bef):
+;; a sparse override like this one is a PATCH — system.edn's `:seon.agent/ctx`
+;; block tree is INHERITED, only the keys stated here are replaced. (An
+;; override that declares `:seon.agent/ctx` itself still replaces the tree
+;; wholesale.) Authoritative semantics: the `seon.config` ns docstring.
 #merge
 [#include "system.edn"
 
@@ -44,6 +46,7 @@
     [my.canvas :as canvas]
     [my.blob :as blob]
     [seon.agent.search :as search]
+    [seon.agent.fs :as fs]
     [seon.agent.shell :as shell]
     [seon.agent.web :as web]
     [acme.helpers :as helpers]
