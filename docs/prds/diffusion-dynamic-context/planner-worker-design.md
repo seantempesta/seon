@@ -98,6 +98,23 @@ the write-back is one function with three callers.
   expects/structure, the June plan-phase grammar gate + oracle proof
   before lock; (3) the agent calling `reconcile!` from code like any
   function.
+- **Boundary rule (owner, 2026-07-11): `my.plan/reconcile!` carries
+  ZERO diffusion knowledge.** It is general planning semantics —
+  document in, diff, transactions, receipt out — usable by any agent
+  on any provider. Everything diffusion-specific (rendering the
+  document onto the code-buffer, the id clamp map, the plan-phase
+  grammar gate, the denoise/lock driver) lives diffusion-side
+  (`src-diffusion` + `seon.diffusion.*`) and CALLS the general
+  function like any other client. A clamp/glyph/buffer parameter
+  appearing in `my.plan` is the violation.
+- **The document is the ARGUMENT (owner, 2026-07-11)** — the general
+  variant is any model simply emitting
+  `(my.plan/reconcile! {::tree <edited-document>})` (or `::markdown`)
+  as ordinary code output; the diffusion buffer mode is just a better
+  editor for producing that same argument. Two update shapes, both
+  general, no third: DELTAS = the existing `step!`/`done!`/`move!`/
+  `drop!` functions; WHOLE-DOCUMENT = `reconcile!` with the document
+  as argument.
 - **Authoring = reconciling against an empty tree** — so W1's
   plan-authoring, frontier import, and mid-run re-planning are ONE
   code path, not three.
