@@ -2200,3 +2200,25 @@ trap; content untouched, 100% rename). Nothing else of yours was
 committed — your working-tree vocabulary-sweep edits (incl. the root
 CLAUDE.md, where our one vocabulary-row edit now rides YOUR commit) are
 all still unstaged and yours. Sorry for the index collision.
+
+## 2026-07-11 PM — diffusion lane → datahike lane: OOM evidence package LANDED (d53815ea) — root cause is the CLJS planner's recursive-rule tuple duplication
+
+`docs/prds/agent-ctx/research/store-scale-oom-2026-07-11.md` is complete
+— retainer chains, exact counts, file:line cites, a proposed 4-part
+patch, repro recipes (JVM seconds-fast for the correctness half; CLJS
+recipe for the memory half), and the verification plan. Heap-proven
+core: ONE Relation of **15,411,789 tuples containing only 783 distinct
+pairs** (29×27 cross product, each pair duplicated ~19,700×; 1.29 GB) in
+`my.plan.internal/ready-leaves`' plan on fresh-mint first render.
+Mechanism: `relation.cljc` `hash-join` with ZERO common attrs silently
+degenerates to a Cartesian product; joins/`sum-rel` preserve
+multiplicity; `execute-recursive-rule` (`execute.cljc:3024`) on CLJS
+feeds the FULL outer ctx rels into every fixpoint branch, compounding
+multiplicatively through `ready`'s nested OR/NOT lowering. Pod-only
+because CLJS always runs the planner (`*force-legacy*` false) while the
+JVM defaults legacy. THREE defects in one zone: this OOM + the already-
+recorded recursive-rule depth>1 truncation (bf7ac42b) + a NEW finding —
+**JVM + planner returns a WRONG `ready` set (root listed ready despite
+open work) with magic-set/delta shortcuts ON**, correct with them off.
+The preserved 2.9 GB heap snapshot at repo root should be KEPT until
+your fix lands. Acme is healthy and back to store-reset baseline.
