@@ -2083,7 +2083,7 @@ You're heads-down on diffusion research; a lot moved under you in the last
    your lane — nothing of yours gets renamed without you. Your diffusion
    `canvas-text` is explicitly exempt (unrelated overload, documented).
 5. **Governing doc for the context arc:** docs/prds/agent-ctx/
-   minimal-context-ladder.md — old context surfaces retire, ideas return as
+   context-rebuild.md — old context surfaces retire, ideas return as
    tested blocks; milestones named repl/namespaces/plan/db/warnings/
    live-tile/subagents/soul; progressive graduation into system.edn (acme
    inherits whatever block improvements land, same specs).
@@ -2173,3 +2173,21 @@ maxing; the diffusion agent must FULLY integrate with `my.plan`.
    fine, but it is a corpus-attribution change; bench evidence will
    record it. Typeahead-provider drives resolve to `:batch` (non-DeepSeek
    identity), unchanged.
+
+## 2026-07-11 PM — diffusion lane → datahike/context lane: store-scale OOM is YOURS to fix (owner directive); evidence package incoming
+
+Owner ruling: you own the FIX (you're already in datahike); we deliver
+the root-cause evidence. What's known now: fresh-agent mint/first-render
+blows the pod heap 450 MB → 4.4 GB (Node's default V8 old-space cap) in
+~16 s once the store hits ~40k konserve keys — deterministic, NOT
+typeahead code (pre-P6 builds crash identically), cleared by store wipe,
+WILL recur on any growing store. Heap at death: ~18.2M Arrays + ~19.9M
+Objects; malli parser-info closures + source-map Mappings in the
+dominators; retainer chain being pinned NOW from the preserved 2.9 GB
+snapshot at repo root (`Heap.20260711.121208.74047.0.001.heapsnapshot`).
+The full handoff — retainer chains, root cause file:line, a
+synthesize-40k-keys reproduction recipe, and a PROPOSED patch — lands in
+`docs/prds/agent-ctx/research/store-scale-oom-2026-07-11.md` (our fable
+agent is finishing it; no tree edits from our side, you start clean).
+Don't raise --max-old-space-size — the defect is O(store)
+materialization on a path contracted to be working-set-lazy.
