@@ -633,7 +633,7 @@
 
    The seeded :seon.route/agent-feed handler. A Ring handler: takes the
    Ring request `r`, self-extracts node-req/node-res + the `{id}` path-param.
-   Lazily installs the tx-listener (idempotent). Invalid ids 404. Public —
+   Lazily installs the tx-listener (idempotent). Invalid or stale ids 404. Public —
    db->routes resolves its symbol.
 
    #18 — historical time-travel: an optional `?t=<tx-id>` binds the view to
@@ -647,14 +647,15 @@
   (let [^js req (:seon.http/node-req r)
         ^js res (:seon.http/node-res r)
         id      (get-in r [:path-params :id])]
-    (if (safe-id? id)
+    (if (and (safe-id? id) (agent-exists? id))
       (let [t (parse-t req)]
         (open-feed! req res
                     (if t
                       #(agent-view/agent-view (db/as-of @db/*conn* t) id)
                       #(agent-view/agent-view @db/*conn* id))))
-      (do (.writeHead res 404 #js {"Content-Type" "text/plain; charset=utf-8"})
-          (.end res "invalid agent id")))))
+      (do (.writeHead res 404 #js {"Content-Type" "text/plain; charset=utf-8"
+                                   "Cache-Control" "no-store"})
+          (.end res "unknown agent id")))))
 
 (defn serve-agents-page!
   "Serve GET /agents — the live agent roster shim page.
