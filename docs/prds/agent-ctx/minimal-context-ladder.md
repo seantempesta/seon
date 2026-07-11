@@ -4,24 +4,25 @@ status: active
 tags: [prd, agent, index]
 ---
 
-# The minimal-context rebuild — deprecate everything, rebuild from the core
+# The minimal-context rebuild — old surfaces retire, their IDEAS return tested
 
-**The point (owner, 2026-07-11, sharpened): the OLD context tree is
-deprecated wholesale — every legacy block, the skills system, and the shipped
-system text. Nothing is "audited back in." The minimal core is the new base,
-and capabilities return ONLY by being rebuilt on it: colocated, correct,
-helpful, with drive evidence.** The live tile will come back; the 14k
-`agents` block will not — unless something rebuilds a small, evidenced
-replacement for whatever it was actually doing.
+**The point (owner, 2026-07-11, refined): the old context tree's SURFACES
+retire wholesale, but their IDEAS are the inventory.** Each old block held
+an idea — some good (the live tile, reactive warnings, shared instructions),
+some accreted guesswork. The rebuild is: carefully re-add NEW blocks based
+on the ideas the old blocks held, each colocated, each tested to confirm it
+actually works as intended. Deletion applies only where the idea itself
+isn't useful. Nothing is ported verbatim; everything that returns is
+rebuilt on the minimal base and earns a ledger row.
 
 **Why (the poison principle — this is NOT about tokens):** bad information
-in context poisons behavior, the old tree is an initial guess plus years of
-pile-on (bloated, self-repeating, probably self-contradictory), and
-attributing a bad drive to a specific line is intractable. The asymmetry
+in context poisons behavior, the old tree is an initial guess plus pile-on
+(bloated, self-repeating, probably self-contradictory), and attributing a
+bad drive to a specific line after the fact is intractable. The asymmetry
 that decides everything: **omission is recoverable and attributable** (an
 agent hits a wall, the transcript shows the wall, one rung adds one
-fragment), **inclusion is neither** (poison hides in the pile). So the
-inclusion bar is high and the deletion bar is zero.
+fragment), **inclusion is neither** (poison hides in the pile). So evidence
+attaches at INSERTION time, and the safest posture is minimal.
 
 Evidence ledger: `evals/runs/2026-07-10-minimal-buildup/README.md`.
 Origin plan: `~/.claude/plans/lazy-splashing-rainbow.md`. Standing rules:
@@ -68,25 +69,34 @@ cross-turn current-ns core bug), **2** (planning flagship; decompose-first,
 close-adjacency, resume-after-restart, answer delivery). Rung 3 (cards
 suffice for correct first calls) was pre-answered by rung 0.
 
-## The deprecation register — every legacy surface dies; some get reborn
+## The idea inventory — every old surface, the idea it holds, its replacement
 
-The old tree is enumerated here so the cutover is a checklist, not a
-discovery. "Rebuild" means a NEW minimal, colocated, evidenced fragment/block
-built on the base — never a port of the old text.
+The COMPLETE old tree (priorities from `default-ctx-blocks` + the identity
+file-blocks + the skills machinery), each mapped to the idea it embodies,
+what replaces the surface, and how the replacement gets tested. "Rebuild"
+always means a NEW minimal, colocated block built on the base and validated
+by a drive — never a port of the old text.
 
-| legacy surface | ~tokens | fate | rebuild path (if any) |
+| old surface (prio) | the idea it holds | replacement | tested by |
 |---|---|---|---|
-| shipped `ctx/system-text` def (~4–5k) | 4–5k | **DELETE** | one MINING pass first: skim for genuine mechanics not yet true anywhere; each candidate enters only via the inclusion bar. No coverage obligation — the default assumption is pile-on. |
-| `agents` identity file-block | ~14,100 | **DELETE** | if identity/behavioral guidance proves needed, a future rung defines what it even is; expected outcome: a tiny block or nothing |
-| `soul` file-block | ~1,900 | **DELETE** | same as above (drive law already had soul OFF) |
-| `skills-catalog` + always-on skill bodies | ~2,900 | **DELETE the mechanism** | see "skills dissolve" below |
-| `live-tile` block | ~2,000 | **DELETE, rebuild planned** | rung L (below) — the tile returns with colocated teaching + a human-UX win condition; the interactive plan tile (in flight) is the pattern |
-| `jobs` block | ~85 | delete; rebuild if a rung shows background-job blindness | shell cards already taught job polling in rung-0 drives — likely covered |
-| `plan-ledger`, `recent-verbs` (typeahead menus) | ~150 | other lane's live experiments — coordinate, exempt from this register until their arc concludes | — |
-| `relevant-source` (retrieval) | var. | delete; rebuild only when a rung shows cards + current-ns are not enough for a real task | needs its own win condition |
-| `findings`, `warnings`, `test-failures`, `usage`, `inventory` | small | delete; the REACTIVE ones (warnings/test-failures) are strong rebuild candidates — derived sections that render only when the state exists are colocation-native | rung W |
-| `subagents` / `orphans` | small | delete; rebuild with the multi-agent rung | rung M |
-| `my.kb` manual ns (pushed via home-requires) | in cards | stays reachable as a PULL reference (the agent reads it when needed); never pushed | rung 4 decides whether pushing anything is needed at all |
+| shipped `ctx/system-text` def (~4–5k) | REPL/eval mechanics; async-reads-as-synchronous; register!-before-transact; namespaced-keys; schemas-are-enforced; entities-are-attributes-not-kinds; concept doctrine | v3.x already holds the REPL mechanics (measured). The DATA-RULE ideas are rung-4 candidates — but note the runtime already teaches most of them REACTIVELY (`transact!` rejects unregistered attrs with a guiding envelope; instrumentation errors carry the schema) — a text line enters only where the error envelope demonstrably isn't enough | rung 4 drives; per-line inclusion bar |
+| `soul` (5, SOUL.md) | persistent identity/persona | rung I — identity as DB state (config-through-DB), owner defines what identity IS first; drive law already ran soul OFF | owner-defined win condition |
+| `agents` (8, AGENTS.md, ~14.1k) | house rules / operating instructions | MINE for ideas: global+load-bearing → candidate system-text lines (one at a time); block-specific → that block's teaching; the rest presumed pile-on | per-line inclusion bar |
+| `shared-instructions` (10) | **good idea**: DB-backed standing instructions every agent sees; humans/agents can add them at runtime | rebuild as a state-gated block rendering ONLY when rows exist (reactive, colocation-native) | an instruction-following drive: add a shared instruction, verify the behavior change, remove it, verify the reversal |
+| `skills-catalog` (12) + always-on skill bodies (16, ~2.9k) | discoverable on-demand deep expertise | dissolves three ways (below): cards (proven), state-gated teaching, pull references | rung L is the first direct test (tile-building with no skill body) |
+| `namespaces` (20) | **kept — the proven floor** | as-is | rungs 0–2 |
+| `live-tile` (35) | **good idea**: the human watches a live canvas, not a chat log; render, don't narrate | rung L — rebuilt with its own colocated teaching; the interactive plan tile (in flight) is the render-quality pattern | observer-scored followability drive |
+| `warnings` (40) | **good idea**: reactive self-healing surfaces — problems render until fixed, vanish on fix, no acks | rung W — derived sections, born colocated | agent recovers from its own turns-old breakage without a nudge |
+| `jobs` (42) | background-job visibility | likely already covered: cards + result envelopes drove correct job polling in rung-0 drives; rebuild only if a drive shows job blindness | a long-job + restart drive |
+| `test-failures` (43) | the latest testrun state visible (why the complete-gate refused) | rung W family — the gate already ENFORCES mechanically; the block's idea is explaining the refusal | two-bucket-style drive: turns-to-understand-refusal with/without |
+| `plan` (45) | **kept — rebuilt and proven** | as-is (rung 2) | rung 2 |
+| `recent-verbs` (46) / `plan-ledger` (47) | typeahead offer menus (derived per render) | the OTHER lane's live experiment — born-colocated already; exempt here, coordinate at cutover | their arc's own measures |
+| `relevant-source` (48) | retrieval: source related to what you're doing, beyond current-ns | rebuild only when a drive shows cards + current-ns fail a real cross-ns discovery task; consider agent-PULL (semantic search verb) before a pushed block | a discovery-task oracle |
+| `subagents` (96) | children status + outcome routing visibility | rung M per the multiagent spec's win conditions | spawn/outcome/orphan drives |
+| `findings` (97) | durable task findings that outlive the transcript | rung 4 decides: findings-as-db-facts recalled by query may subsume it; else a state-gated recent-findings render | store-then-recall across restart |
+| `transcript` (100) | **kept — the spine** | as-is | every drive |
+| `usage`, `inventory` (families, not in the default tree) | token-spend awareness; store inventory | ideas on the shelf; rebuild on demonstrated need | — |
+| `my.kb` manual ns | the worked DB-memory manual | stays as a PULL reference (agent reads it on demand); never pushed | rung 4 |
 
 ## Skills dissolve into the reactive context
 
@@ -138,22 +148,35 @@ Standing check at every rung: re-run rung-0 fab metrics on the accepted
 variant (the additive-context fabrication check), and the earlier rungs'
 oracles must not regress.
 
-## Cutover mechanics (deprecation, not migration)
+## Progressive graduation — the minimal MATURES INTO the system (owner Q 2026-07-11: yes)
 
-1. **Now → rung 4:** the rebuilt tree lives in `config/minimal-*.edn`;
-   the default tree keeps running untouched.
-2. **After rung 4 + W + L** (store + warnings + tile = daily-work coverage):
-   `system.edn` SWITCHES to the rebuilt tree — one coordinated commit
-   (owner + both lanes; the default pod is shared). The old tree survives
-   only as `config/legacy.edn` for comparison drives, with a deletion date;
-   it is never a fallback.
-3. **The deletes land with the switch:** the shipped system-text def, the
-   identity file-block reads, the skills catalog/bodies, and every register
-   row above marked DELETE — plus their dead code paths. Deleting the
-   mechanism is the point; a disabled block is still a poison vector.
-4. **After the deletion date:** `legacy.edn` and the mined-out old text are
-   removed; the ledger + provenance notes are the permanent record of why
-   every surviving line exists.
+Not a big-bang cutover: the minimal tree matures in place until it IS
+`system.edn`, in steps that are each individually safe, so the system being
+built is the system being run — that continuity is what makes it
+sustainable.
+
+1. **Now (safe, immediate):** the measured system-text graduates to
+   `system.edn`'s `:seon.config/system-text` — every cluster gets the
+   evidenced v3.x lines instead of the shipped guess. The default's blocks
+   stay untouched; this swaps only the text with the best provenance.
+2. **Continuous (already happening):** rebuilt blocks are THE SAME block
+   specs both trees reference — the plan block's rung-2 teaching reached
+   the default automatically. Every rung's improvement flows to both trees
+   by construction; there is never a fork to reconcile.
+3. **Tree parity (after rung 4 + W + L — store, warnings, tile = daily-work
+   coverage):** `system.edn`'s TREE switches to the rebuilt tree, one
+   coordinated commit (owner + both lanes; the default pod is shared). The
+   old tree survives only as `config/legacy.edn` for comparison drives,
+   with an expiry date — never a fallback.
+4. **The retires land with the switch:** the shipped system-text def, the
+   identity file-block reads, the skills catalog/bodies — plus their dead
+   code paths (a disabled surface is still a poison vector). Ideas not yet
+   rebuilt stay in the inventory table above, not in the tree.
+5. **Steady state (the sustainable loop):** there is ONE tree; every later
+   rung lands directly in it; maintenance IS the same loop that built it —
+   confusion in a transcript → reword that block's own lines → redrive →
+   ledger row → provenance note. The system never again accretes unattributed
+   text, because the inclusion bar is the only door.
 
 ## System-text v3.1 — line provenance (the graduation candidate)
 
