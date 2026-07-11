@@ -19,10 +19,14 @@
    ONE `system.edn` mental model. aero's CLJS branch reads via `cljs.tools.reader`
    (already bundled by `seon.eval`) + Node `fs`. The render section uses aero's
    own `#long`/`#or`/`#env` tags (env OVERRIDES a manifest default) — no custom
-   data-readers. `seon.config` is shadow-COMPILED (not self-host), so
-   `:require-macros` resolves at build time. If aero ever fails to compile/run the
-   swap is one private fn ([[read-config-file]]) — the manifest SHAPE is
-   reader-independent.
+   data-readers. The `#merge` tag is OVERRIDDEN here ([[merge-manifest-pair]]):
+   aero ships a SHALLOW map merge, so a sparse per-cluster override
+   (`config/acme.edn`) silently dropped the base's `:seon.agent/ctx` block tree —
+   the override is now manifest-aware for that ONE key (inherit when sparse,
+   replace when it declares `:seon.agent/ctx`). `seon.config` is shadow-COMPILED
+   (not self-host), so `:require-macros` resolves at build time. If aero ever
+   fails to compile/run the swap is one private fn ([[read-config-file]]) — the
+   manifest SHAPE is reader-independent.
 
    EXTENSIBILITY (the 'add more things to it' contract) — a new config concern is
    FOUR mechanical steps, no reshape: (1) `schema/register!` a
@@ -529,12 +533,72 @@
   [var-name]
   (platform/env-val var-name))
 
+;;; ── `#merge` COMPOSITION — the manifest-aware combine (config-merge trap,
+;;; 2026-07-11) ──
+;;; A per-cluster manifest (`config/acme.edn`, `config/minimal*.edn`) composes as
+;;; `#merge [#include "system.edn" {overrides}]`. Aero's SHIPPED `#merge` reader
+;;; is `(apply merge values)` — a SHALLOW map merge, so a top-level key in the
+;;; override REPLACES the base's value WHOLESALE. That is correct for a scalar
+;;; knob but WRONG for the nested `:seon.config/agent-context`: a sparse override
+;;; that sets only `:seon.eval/home-requires` silently DROPPED the base's
+;;; `:seon.agent/ctx` block tree, and the schema `:default` then quietly filled
+;;; the LEGACY tree — acme ran the wrong context for a day (the 1bd1d21d cutover
+;;; regression). We OVERRIDE aero's `'merge` reader (its `reader` multimethod is
+;;; the designed extension point) with a manifest-aware combine that applies —
+;;; for the `:seon.config/agent-context` key ONLY — the SAME replaces-wholesale
+;;; rule [[resolve-agent-context]] already documents: an override that declares
+;;; `:seon.agent/ctx` replaces the tree wholesale; a SPARSE override (no
+;;; `:seon.agent/ctx`) is a PATCH whose keys win while every unstated key
+;;; (`:seon.agent/ctx` included) inherits from the base. Every OTHER top-level
+;;; key stays shallow-replace, byte-identical to aero's default — so the
+;;; wholesale-replacing minimal.edn family (which DECLARES `:seon.agent/ctx`, and
+;;; deliberately drops the base home-requires to fall back to the consumer
+;;; default) is untouched. ONE merge rule, applied at the ONE composition seam.
+
+(defn- combine-agent-context
+  "Combine a base `:seon.config/agent-context` map with an `override` map.
+
+   An `override` that declares `:seon.agent/ctx` REPLACES the whole map (the
+   documented replaces-wholesale contract the minimal.edn family relies on to
+   also drop the base `:seon.eval/home-requires`). A SPARSE `override` (no
+   `:seon.agent/ctx`) is a PATCH: its keys win, every unstated key — the
+   `:seon.agent/ctx` block tree included — inherits from `base`. Matches
+   [[resolve-agent-context]]'s `explicit-ctx?` rule."
+  [base override]
+  (if (contains? override :seon.agent/ctx)
+    override
+    (merge base override)))
+
+(defn- merge-manifest-pair
+  "Shallow-merge `override` over `base`, then re-combine the nested
+   `:seon.config/agent-context` maps via [[combine-agent-context]] so a sparse
+   override can never silently drop the base's block tree. Only that ONE key is
+   special-cased; every other top-level key keeps aero's shallow replace."
+  [base override]
+  (let [m (merge base override)]
+    (cond-> m
+      (and (map? (:seon.config/agent-context base))
+           (map? (:seon.config/agent-context override)))
+      (assoc :seon.config/agent-context
+             (combine-agent-context (:seon.config/agent-context base)
+                                    (:seon.config/agent-context override))))))
+
+;; OVERRIDE aero's built-in `#merge` (shipped `(apply merge values)`) with the
+;; manifest-aware fold. Registered at ns load — `seon.config` is the pod's ONLY
+;; aero user, so the blast radius is exactly the config-manifest composition this
+;; fixes. `values` is the vector of maps after the `#merge` tag.
+(defmethod aero/reader 'merge
+  [_opts _tag values]
+  (reduce merge-manifest-pair {} values))
+
 (defn- read-config-file
   "Read + resolve `path` via aero. The ONE reader seam — the manifest shape is
    reader-independent, so a fallback to `cljs.reader/read-string` would swap only
    this body. A per-cluster variant is a SEPARATE file pointed at by
    `SEON_CONFIG` (no `#profile` — one file, one shape). The render section's
-   `#long`/`#or`/`#env` tags resolve through aero's own readers here."
+   `#long`/`#or`/`#env` tags resolve through aero's own readers here; the
+   `#merge` tag uses our manifest-aware [[merge-manifest-pair]] override above
+   (a sparse agent-context override can never silently drop the block tree)."
   [path]
   (aero/read-config path {}))
 

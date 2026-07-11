@@ -181,6 +181,67 @@
         (is (contains? names :acme-extra) "the new block is seeded")
         (is (contains? names :live-tile) "default blocks remain")))))
 
+;;; The `#merge` COMPOSITION trap (config-merge, 2026-07-11) — a per-cluster
+;;; manifest composes as `#merge [#include "base" {overrides}]`. Aero's shipped
+;;; `#merge` is a SHALLOW map merge, so a sparse override that sets only
+;;; `:seon.eval/home-requires` USED to silently DROP the base's `:seon.agent/ctx`
+;;; block tree (the schema `:default` then quietly filled the LEGACY tree — acme
+;;; ran the wrong context for a day, the 1bd1d21d cutover regression). The
+;;; manifest-aware `#merge` override in `seon.config` (loaded by this ns's
+;;; require) applies `resolve-agent-context`'s replaces-wholesale rule to the
+;;; `:seon.config/agent-context` key: a sparse override INHERITS `:seon.agent/ctx`,
+;;; an explicit one REPLACES it wholesale. Pinned hermetically via temp edn files
+;;; read through the same aero seam `load-manifest` uses (temp dir is gitignored).
+
+(defn- write-tmp!
+  "Write `content` to `tmp/config-merge-test/rel`, return the path."
+  [rel content]
+  (let [fs   (js/require "fs")
+        path (js/require "path")
+        dir  "tmp/config-merge-test"]
+    (.mkdirSync fs dir #js {:recursive true})
+    (let [p (.join path dir rel)]
+      (.writeFileSync fs p content)
+      p)))
+
+(defn- manifest-via-config
+  "Drive `config/load-manifest` at `path` through a `SEON_CONFIG` swap — the real
+   read+validate seam (so the `#merge` reader override is exercised), env restored."
+  [path]
+  (let [env (.. js/globalThis -process -env) old (aget env "SEON_CONFIG")]
+    (try (aset env "SEON_CONFIG" path) (config/load-manifest)
+         (finally (if (nil? old) (js-delete env "SEON_CONFIG") (aset env "SEON_CONFIG" old))))))
+
+(deftest merge-agent-context-inherits-or-replaces-block-tree
+  (let [base-blocks [{:seon.agent.ctx/name :namespaces :seon.agent.ctx/priority 20}
+                     {:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100}]]
+    (write-tmp! "base.edn"
+                (pr-str {:seon.config/agent-context
+                         {:seon.agent/ctx           base-blocks
+                          :seon.eval/home-requires  '[[a :as a]]}}))
+    (testing "a SPARSE override (only home-requires) INHERITS the base :seon.agent/ctx (the trap)"
+      (let [p  (write-tmp! "sparse.edn"
+                           (str "#merge\n[#include \"base.edn\"\n"
+                                " {:seon.config/agent-context"
+                                "  {:seon.eval/home-requires [[b :as b]]}}]"))
+            ac (:seon.config/agent-context (manifest-via-config p))]
+        (is (= (mapv :seon.agent.ctx/name base-blocks)
+               (mapv :seon.agent.ctx/name (:seon.agent/ctx ac)))
+            "the base :seon.agent/ctx block tree survives a sparse override")
+        (is (= '[[b :as b]] (:seon.eval/home-requires ac))
+            "the override's stated key still wins")))
+    (testing "an override that DECLARES :seon.agent/ctx replaces the tree WHOLESALE"
+      (let [p  (write-tmp! "explicit.edn"
+                           (str "#merge\n[#include \"base.edn\"\n"
+                                " {:seon.config/agent-context"
+                                "  {:seon.agent/ctx [{:seon.agent.ctx/name :plan"
+                                "                     :seon.agent.ctx/priority 45}]}}]"))
+            ac (:seon.config/agent-context (manifest-via-config p))]
+        (is (= [:plan] (mapv :seon.agent.ctx/name (:seon.agent/ctx ac)))
+            "the explicit tree wins wholesale (base blocks dropped)")
+        (is (not (contains? ac :seon.eval/home-requires))
+            "wholesale replace drops the base's other keys (consumer-default fallback)")))))
+
 ;;; Soul/agents identity file-blocks — migrated from the retired
 ;;; `seon.agent.ctx/default-seed-blocks` into the config path
 ;;; (`identity-file-blocks`). Present only when the file EXISTS and SEON_SOUL is
