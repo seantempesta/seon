@@ -424,7 +424,7 @@
   "POST /agent/<id>/complete — external control: CLOSE the agent's open run
    `:completed` (derived state falls to `:idle`, the single wakeable parked
    state — a new message opens a fresh run). Same effect as the agent's own
-   `complete` verb. When the agent has no open run it is already idle → 200
+   `complete` function. When the agent has no open run it is already idle → 200
    no-op. 200 + id on success, 500 with the store error otherwise."
   [_req res agent-id]
   (-> (js/Promise.resolve

@@ -1,7 +1,7 @@
 (ns seon.agent.ctx.findings
   "The stored-findings context section — the CONTENT counterpart to
    `seon.agent.ctx.inventory` (which renders COUNTS for discoverability).
-   A fresh agent must SEE the knowledge already in the store, not just be
+   A fresh agent must SEE the knowledge already in the db, not just be
    told how many rows exist — otherwise it under-stores and re-researches
    instead of consulting (the DB-memory regression this restores). So this
    renders the TOP-N most-recent user-domain `my.*`/consumer rows' actual
@@ -20,7 +20,7 @@
    (priority > cache-breakpoint) so a newly-stored finding never busts
    the cached stable prefix.
 
-   REACTIVE: returns \"\" when the store holds no user-domain rows → the
+   REACTIVE: returns \"\" when the db holds no user-domain rows → the
    composer drops the section (no empty shell)."
   (:require
     [clojure.string :as str]
@@ -28,7 +28,7 @@
 
 (def ^:private max-rows
   "How many most-recent findings to render inline. Bounded so the section
-   never grows unbounded as the store accumulates — older rows live behind
+   never grows unbounded as the db accumulates — older rows live behind
    the read-back query in the truncation footer."
   10)
 
@@ -162,7 +162,9 @@
          content (provenance-str m))))
 
 (defn findings-block
-  "The stored-findings content surface: recent claims + `:my.kb` provenance.
+  "DEPRECATED — reference for the `db` milestone; see context-rebuild.
+
+   The stored-findings content surface: recent claims + `:my.kb` provenance.
 
    Volatile tail — the TOP-N most-recent user-domain rows' actual
    claim/answer TEXT + their `:my.kb/source-*` provenance, one
@@ -177,7 +179,7 @@
    BOUNDED: at most [[max-rows]] rows, each clipped to [[content-char-cap]];
    when more findings exist than are shown, a loud-truncation footer carries
    the read-back query so the agent can pull the rest. REACTIVE: returns
-   \"\" when the store holds no user-domain rows → the composer drops the
+   \"\" when the db holds no user-domain rows → the composer drops the
    section."
   {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{:seon.db/keys [db]}]

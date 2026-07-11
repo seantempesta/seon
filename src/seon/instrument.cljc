@@ -193,7 +193,7 @@
           EVERY call;
         - the input-only stock wrapper (`{:scope #{:input}}`) THROWS on a
           shape-invalid call, which breaks the errors-as-values contract
-          async envelope verbs carry — the canonical instance is
+          async envelope functions carry — the canonical instance is
           `seon.db/transact!`, whose bad-invocation-shape → `{::ok?
           false}` ENVELOPE behavior is documented and pinned by
           `db_test/transact!-returns-envelope-on-bad-invocation-shape`,

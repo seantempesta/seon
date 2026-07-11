@@ -5,7 +5,7 @@
 domain doc for your area (`data-model.md`, `agent-runtime.md`, `ui.md`,
 `toolkit.md`, `observability.md`). They are TARGET-written (present tense);
 the only we-are-here doc is `docs/prds/agent-ctx/roadmap.md` (+
-`docs/prds/agent-ctx/minimal-context-ladder.md`, the context-rebuild plan of
+`docs/prds/agent-ctx/context-rebuild.md`, the context-rebuild plan of
 record). Conventions: `docs/conventions.md`.
 
 ## The ONE-mechanism table — never build a second
@@ -69,7 +69,7 @@ imperative reflexes, guessed library semantics). Ground first:
   pod = one cluster = one conn (isolation is the process boundary).
   Parallelism = more clusters (`bin/seon cluster create`), never a second
   in-pod conn.
-- Home-ns data/verb aliases (`db/`, `plan/`, `message/`, `schema/`) DO
+- Home-ns data/function aliases (`db/`, `plan/`, `message/`, `schema/`) DO
   resolve in agent-authored `my.*` nses — `seon.eval/augment-ns-source`
   injects the real `(:require …)` into every authored `(ns …)` form at eval
   time (stored verbatim in `:seon.ns/source` + as `:seon.ns/require-edges`;

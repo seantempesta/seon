@@ -1,10 +1,10 @@
 (ns seon.agent.fs.internal
   "Filesystem-capability internals — the private data-manipulation +
-   allowlist plumbing behind [[seon.agent.fs]]'s public verbs.
+   allowlist plumbing behind [[seon.agent.fs]]'s public functions.
 
    Split out so the teaching namespace stays a clean list of map-in /
    map-out capability fns. Loaded + indexed + grep-able, but NOT
-   whitelisted for full-source rendering: agents call the public verbs
+   whitelisted for full-source rendering: agents call the public functions
    in [[seon.agent.fs]], not these.
 
    ## Capability config — default-deny allowlist

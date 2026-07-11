@@ -110,7 +110,7 @@ Two kinds of docs, one rule each. Do NOT create a third doc system.
   - `agent-runtime.md` — loop/run/turn/FSM, lifecycle, isolation, "nothing wedges"
   - `ui.md` — blocks/renders/tiles/slots/pages, the live channel
   - `observability.md` — turn replay, the blob store, the forensic agent, `/solve`
-  - `toolkit.md` — the agent verb surface
+  - `toolkit.md` — the agent function surface
   - `laws.md` — drive-measured empirical laws · `library-grounding.md` — the
     `reference-code/…:LINE` read-map · `decisions/` — settled ADRs
   This is where the ideal is kept current as it changes — ONE place, present
@@ -244,7 +244,7 @@ The personal domains (trading, health, finance) are eventual product domains, no
 
 **When you test or drive an agent, use scenarios that exercise two capabilities —
 long-term planning and database-backed memory — NOT the old health / "workout" /
-trading toy domains.** Don't hardcode the verbs to call here; the API moves and
+trading toy domains.** Don't hardcode the functions to call here; the API moves and
 the agent discovers it from its own context (the todo namespace and the `my.kb`
 manual ns are self-describing). What stays fixed is the SHAPE of a good drive:
 
@@ -279,12 +279,12 @@ The canonical names (retired coinages in parens — fix on sight):
 | functions, schemas, tests | "verbs" | what Clojure has; `my.plan/done!` is a function |
 | the `db` | "the store", "memory" | `seon.db` — `db/query`, `db/transact!`, `schema/register!` |
 | `warnings` | "attention" | the `:warnings` block / `seon.warn` |
-| `live-tile` (agent-side block) / `canvas` (the human's focal slot showing it) | — | `:seon.render.live-tile/content`; `#world-canvas` in `seon.ui.world` — the canvas IS the agent's live tile; every other html block is a supporting TILE. (Diffusion's `canvas-text` is unrelated — don't widen "canvas".) |
+| `live-tile` (agent-side block) / `canvas` (the human's focal slot showing it) | — | `:seon.render.live-tile/content`; `#world-canvas` in `seon.ui.world` — the canvas IS the agent's live tile; every other html block is a supporting TILE. (The diffusion lane's generation workspace is named `code-buffer` — renamed 2026-07-11 from "canvas" to resolve the clash; "canvas" means ONLY this UI surface.) |
 | `subagents` | "collaboration", "multi-agent block" | the `:subagents` block |
 | `soul` | "identity" (as a block name) | the `:soul` block / SOUL.md |
 | `:shared-instructions` | "instructions block" | the block's registered name |
 | `:batch` / `:stream` | "Mode A / Mode B" | the `:seon.config/repl-mode` values |
-| capability **milestones**: `repl`, `namespaces`, `plan`, `db`, `warnings`, `live-tile`, `subagents`, `soul` | "rungs", "the ladder" | each named by the block/namespace it validates (docs/prds/agent-ctx/minimal-context-ladder.md) |
+| capability **milestones**: `repl`, `namespaces`, `plan`, `db`, `warnings`, `live-tile`, `subagents`, `soul` | "rungs", "the ladder" | each named by the block/namespace it validates (docs/prds/agent-ctx/context-rebuild.md) |
 | **cluster** | "world", "environment" | one shared DB + one pod + agents (already a settled ruling) |
 | attributes + connections | "kind", "type", "entity taxonomy" | the datahike model (settled) |
 
@@ -500,7 +500,7 @@ In the JVM app, all cross-boundary calls — namespace function calls, database 
 New CLJS surface that keeps tripping people — read the source before changing it: `docs/prds/agent-fsm/research/cljs-async-await-2026-06-28.md` + `reference-code/clojurescript/` (the `await` macro + `cljs/js.cljs` self-host).
 
 - **Await only inside a `^:async` fn — never a bare top-level `(await x)`.** Self-host (the pod's bootstrap compiler that evals agent forms) is conditional: a `^:async` fn with an internal `(await …)` works (returns a native `js/Promise`); a top-level `(await x)` throws "await can only be used in async contexts" (the macro asserts `(:async &env)`, false at top level). Resolve a stashed Promise by **re-reference**, not `await`.
-- **Agents get data, not Promises.** `seon.eval/maybe-await-value` auto-awaits a returned Promise, so quick `^:async` verbs (`db/transact!`, `todo/add!`) read as synchronous; a long/timed-out Promise lands in `result/<id>` and resolves on re-reference.
+- **Agents get data, not Promises.** `seon.eval/maybe-await-value` auto-awaits a returned Promise, so quick `^:async` fns (`db/transact!`, `todo/add!`) read as synchronous; a long/timed-out Promise lands in `result/<id>` and resolves on re-reference.
 - **Async/shape detection sees THROUGH malli's wrapper record** — `seon.instrument` reads `malli$instrument$original` before any ctor-name (`"AsyncFunction"`) or arity-shape check, so an already-instrumented var re-detects from its REAL fn and `instrument-from-db!` is idempotent (re-run on a later `start-agent!` re-wraps from originals; `:skip-instrumented? true` keeps multi-arity fns single-wrapped). The old once-per-process gate is retired.
 
 ---
@@ -641,7 +641,7 @@ running pod picks up the new build. If the pod gets into a bad state,
 `bin/seon restart pod` (wait for `agent roster` in `logs/pod.log`). A
 fresh world is `bin/seon cluster reset default`.
 
-**`[JVM track — paused]`** uses the dev hook + REPL verbs (you rarely reload manually):
+**`[JVM track — paused]`** uses the dev hook + REPL fns (you rarely reload manually):
 
 ```clojure
 (user/reload)  ; Fast reload via clj-reload
@@ -778,7 +778,7 @@ datom via `seon.error/record!`: `:seon.error/fault` (`:agent` | `:core`),
 `:seon.error/at` (the basis-t the failing code SAW), EDN stack frames,
 bounded full args. Two populations, one shape:
 
-- **`:agent` = caller mistake** (an agent's typo'd verb, a dev-REPL probe
+- **`:agent` = caller mistake** (an agent's typo'd function call, a dev-REPL probe
   with bad args). Recorded, surfaced to the caller as its learning signal,
   **never escalates in any mode** — an agent (or your REPL typo) cannot
   take the pod down.
@@ -924,7 +924,7 @@ tail -f logs/cljs-watch.log                      # CLJS rebuild status
 tail -f logs/wire-server.log                     # datahike writer
 ```
 
-### `[JVM track — paused]` REPL verbs + recovery
+### `[JVM track — paused]` REPL fns + recovery
 
 These apply to the embedded-datahike JVM app (`./bin/run`), NOT the pod:
 

@@ -199,7 +199,7 @@ tail -f logs/wire-server.log    # datahike writer
 
 ### `[JVM track — paused]`
 
-The embedded-datahike JVM app (`./bin/run`, nREPL 7888 / HTTP 8080, `(user/reset)` / `(user/restart-db!)` / `(user/db-reset!)`) is paused. Don't drive it for active work. If a task is explicitly JVM-track, see `CLAUDE.md` "Code Reloading" and "REPL verbs + recovery" rather than duplicating those verbs here.
+The embedded-datahike JVM app (`./bin/run`, nREPL 7888 / HTTP 8080, `(user/reset)` / `(user/restart-db!)` / `(user/db-reset!)`) is paused. Don't drive it for active work. If a task is explicitly JVM-track, see `CLAUDE.md` "Code Reloading" and "REPL fns + recovery" rather than duplicating those fns here.
 
 ---
 
@@ -213,7 +213,7 @@ bin/test-cljs                   # fresh :node-test JVM (no live-pod contention),
 
 To verify a single behavior fast, **eval the fn directly against the live pod** rather than running a whole test ns. **Never fire overlapping `cljs.test/run-tests` in the live pod** — it wedges the shared async continuation; restart the pod for a pristine run.
 
-Run the full suite **once**, at the natural checkpoint after a unit of work completes — never after each sub-step (token economy; everything is in git and reverts are cheap). `[JVM track — paused]` test verbs (`(user/run-tests …)`) live in `CLAUDE.md`.
+Run the full suite **once**, at the natural checkpoint after a unit of work completes — never after each sub-step (token economy; everything is in git and reverts are cheap). `[JVM track — paused]` test fns (`(user/run-tests …)`) live in `CLAUDE.md`.
 
 **Third-party harness:** a fully isolated second cluster (`bin/acme`, pod 7980, wire REPL 7981) reproduces downstream-consumer bugs without touching the live default cluster. Never `bin/seon start/stop/restart` the live cluster to chase a consumer bug — use the harness. See `docs/seon/components/acme-harness.md`.
 

@@ -133,7 +133,7 @@
    [:seon.agent.shell/cwd   {:optional true} :seon.agent.shell/cwd]
    [:seon.agent.shell/stdin {:optional true} :seon.agent.shell/stdin]])
 
-;; the ok?-false half — shared across every background verb (gate/unknown-job).
+;; the ok?-false half — shared across every background function (gate/unknown-job).
 (schema/register! :seon.agent.shell/job-fail
   [:map
    [:seon.agent.shell/ok? [:= false]]
@@ -260,18 +260,18 @@
    :seon.agent.shell/timeout-ms (default 30s → :seon.agent.shell/timed-out? true,
    exit sentinel 143, partial output still delivered; no low ceiling — pass a
    large timeout for a slow build/test). :seon.agent.shell/cwd (optional) must
-   sit under the seon.agent.fs allowlist; the whole verb is default-deny until
+   sit under the seon.agent.fs allowlist; the whole function is default-deny until
    the host grants SEON_SHELL.
 
    Output is DATA, uncapped: :seon.agent.shell/out / err carry the FULL
    streams (with honest :seon.agent.shell/out-tokens / err-tokens sizes) —
-   display economy is the render layer's, not the verb's: a big value stashes
+   display economy is the render layer's, not the function's: a big value stashes
    as result/<id> and renders as a bounded skeleton you re-reference to read
    in full. The only bound is a ~2MB/stream RAM ceiling: past it Node kills
    the child and :seon.agent.shell/truncated? is set with a guiding hint (use
    [[run-bg!]] for an unbounded stream). To PERSIST output durably, that is
    your explicit choice — (my.blob/put! {:my.blob/content
-   (:seon.agent.shell/out r)}) the stashed value; the verb never blobs behind
+   (:seon.agent.shell/out r)}) the stashed value; the function never blobs behind
    your back.
 
    Worked example — run, then thread the output onward:

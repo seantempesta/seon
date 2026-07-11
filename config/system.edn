@@ -130,7 +130,7 @@
  ;; (web/grants) but nothing in the pod can widen it. The SEON_WEB env var is
  ;; a SEPARATE concern — it gates whether web fetch is available at all.
  ;; The same section carries the web-SEARCH backend (seon.agent.web/search):
- ;; which SERP/grounded provider. Backend is host-owned config; the verb is
+ ;; which SERP/grounded provider. Backend is host-owned config; the function is
  ;; backend-agnostic ({::url ::title ::snippet ::rank} rows). The API key is
  ;; read live from env, never here — :serper reads SERPER_API_KEY,
  ;; :gemini-grounding reads GEMINI_API_KEY. Absent ⇒ :gemini-grounding.
@@ -155,14 +155,14 @@
  ;; `:seon.eval/home-requires` — the DEFAULT toolbelt every agent's home ns is
  ;; wired with (OVERRIDES the `seon.eval/home-ns-require-specs` const). Since the
  ;; namespaces block renders "the current ns's requires as compact cards", these
- ;; ARE what a fresh agent sees as its verb surface. Each entry must match
- ;; `seon.eval/require-spec` (`[ns :as alias]` or `[ns :refer [verbs…]]`) — a
+ ;; ARE what a fresh agent sees as its function surface. Each entry must match
+ ;; `seon.eval/require-spec` (`[ns :as alias]` or `[ns :refer [fns…]]`) — a
  ;; bare `[ns]` is rejected by the transact schema, so the `my.*` toolkit carries
  ;; its conventional short alias (kb/data/ui/tile) even though it is called
  ;; full-qualified. `seon.agent` (the orchestration surface) is deliberately
  ;; NOT here — it belongs to root only (see note on :seon.config/root-context).
  ;; ── SYSTEM TEXT — GRADUATED from the measured minimal arc (v3.1,
- ;; 2026-07-11; line provenance: docs/prds/agent-ctx/minimal-context-ladder.md).
+ ;; 2026-07-11; line provenance: docs/prds/agent-ctx/context-rebuild.md).
  ;; Seeded as the :seon.config/system-text datom at boot; replaces the shipped
  ;; ctx/system-text guess. minimal*.edn inherit THIS text (one source) and
  ;; override only when testing a variant.
@@ -203,7 +203,7 @@
 
  ;; ── THE CONTEXT TREE — the evidenced minimal base (owner cutover
  ;; 2026-07-11: untested legacy blocks deprecated OUT; ideas return as
- ;; tested blocks per minimal-context-ladder.md; the old tree is frozen in
+ ;; tested blocks per context-rebuild.md; the old tree is frozen in
  ;; config/legacy.edn for comparison drives only). Blocks: namespaces
  ;; (repl+namespaces milestones) · plan (plan milestone, html twin = the
  ;; human's live plan tile) · transcript (the spine).
@@ -285,7 +285,7 @@
     :seon.render/ai seon.agent.ctx.warnings/instrumentation-gaps-block}
    ;; ROOT-ONLY (multiagent-context Piece 4): live agents whose parent is
    ;; TERMINATED. Derived; vanishes when there are no orphans. No action
-   ;; machinery — root/human decides per case with the existing verbs.
+   ;; machinery — root/human decides per case with the existing functions.
    {:seon.agent.ctx/name :orphaned-agents :seon.agent.ctx/priority 43
     :seon.render/ai seon.agent.ctx.subagents/orphaned-agents-block}]}
 

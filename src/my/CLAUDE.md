@@ -1,12 +1,12 @@
 # src/my — the agent-owned toolkit (renders INTO agent context, in full)
 
-**Read before editing:** `docs/seon/architecture/toolkit.md` (the verb
+**Read before editing:** `docs/seon/architecture/toolkit.md` (the function
 catalog + the four shared shapes), `data-model.md` (the `my.kb`/`my.todo`
 schemas + data-agent-ref scoping). Skills: `ui-live-tiles`,
 `data-oriented-clojure`.
 
 These namespaces are special: **their full source renders into every
-agent's context** (the render-prominence law — a composition verb's value
+agent's context** (the render-prominence law — a composition function's value
 IS its worked example). That means:
 
 - **Every line here is agent-facing teaching material.** Code must be the
@@ -19,10 +19,10 @@ IS its worked example). That means:
 - **Keep `register!` calls in the file** — agents learn the schema pattern
   from seeing them.
 - **Token weight is real**: this corpus is in every prompt. Every fn must
-  pull measurable weight; new verbs need drive evidence they get used.
+  pull measurable weight; new functions need drive evidence they get used.
 - **New nses must be required into the boot build** (`client.cljs`) or they
   index with ZERO fns and render name-only.
-- Agents reach these verbs by FULL qualification (`my.data/…`) or a real
+- Agents reach these functions by FULL qualification (`my.data/…`) or a real
   `:require` alias — never home-ns aliases.
 
 Current: `data` (aggregation), `ui` (static hiccup), `tile` (interactive

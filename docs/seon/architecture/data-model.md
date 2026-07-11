@@ -13,7 +13,7 @@ the three relationship kinds; how an entity's kind is identified; the
 `my.*` domain schemas; and the one general `:seon/error` value. Vocabulary is
 locked in [[architecture]] (the glossary). This doc owns the **schema**; it
 points at [[ui]] for the render/route/slot machinery, at [[agent-runtime]] for
-the loop/lifecycle that mutates these rows, and at [[toolkit]] for the verbs an
+the loop/lifecycle that mutates these rows, and at [[toolkit]] for the functions an
 agent calls over them.
 
 ## 1. TL;DR — the entity graph in one paragraph
@@ -476,9 +476,9 @@ is the data fact here.
 ## 5. Domain schemas — `my.*` (the agent's data)
 
 The `my.*` namespaces carry the agent's actual domain data and are seeded as
-worked-examples at creation (the seed registers the schema, defines the verbs,
+worked-examples at creation (the seed registers the schema, defines the functions,
 and installs the rendering block — see [[agent-runtime]] for the bootstrap and
-[[toolkit]] for the verbs). They demonstrate the two scoping patterns.
+[[toolkit]] for the functions). They demonstrate the two scoping patterns.
 
 ### 5.1 Global vs per-agent = the DATA's agent-ref
 
@@ -508,7 +508,7 @@ Grounds, in force order:
 3. **Query parity.** One VAET-indexed ref reads both ways: forward
    `[?t :my.plan/agent ?a]`, reverse pull `:my.plan/_agent`. An owner-side
    vector adds no query power.
-4. **Scope-by-signature** ([[context]]) falls out: the verb that declares
+4. **Scope-by-signature** ([[context]]) falls out: the function that declares
    `:seon.agent/id` stamps and filters the data-side ref.
 
 **Agent-retract semantics (no cascade, by design):** agents are terminated
@@ -613,7 +613,7 @@ a resumed agent re-grounds from plan-state, not transcript archaeology. Evidence
 
 `:my.agent/purpose` is a markdown goal string carried on the agent entity — the
 agent's stated objective. It is the first per-agent seed worked-example: the seed
-registers the schema, defines a `refine` verb, and installs a self-refining block
+registers the schema, defines a `refine` function, and installs a self-refining block
 into the agent's `:seon.agent/ctx` so the agent owns and SEES its own purpose and
 can revise it.
 
@@ -623,7 +623,7 @@ can revise it.
 ```
 
 The bootstrap that seeds the schema, the refine fn, and the block is owned by
-[[agent-runtime]]; the refine verb is owned by [[toolkit]].
+[[agent-runtime]]; the refine function is owned by [[toolkit]].
 
 ### 5.5 my.skills — loadable knowledge (no `:kind`; file-backed vs inline is attribute presence)
 
@@ -663,7 +663,7 @@ clojure-testing) **plus symlinks back to the shared ones** — so both consumers
 one physical source, curated by directory rather than by an exclude list.
 `seon.config` ([[loadable-skills]]) optionally curates the scanned corpus per cluster
 (`include`/`exclude`) and seeds always-on bodies (`default-load`). The
-`load`/`unload`/`list` verbs + the catalog/footer render live in [[toolkit]].
+`load`/`unload`/`list` functions + the catalog/footer render live in [[toolkit]].
 
 ### 5.6 config manifest — `:seon.config/*` (the ONE config schema)
 
@@ -893,7 +893,7 @@ transient render values.
 - [[ui]] — block / render / tile / slot / layout, world / root-world / app,
   reitit routing + the capability gate, the gzip-morph SSE channel, the
   seed-copy + variadic `install!`/`remove!` override model.
-- [[toolkit]] — the `my.*` verb catalog (the agent's action surface over these
+- [[toolkit]] — the `my.*` function catalog (the agent's action surface over these
   schemas).
 - [[roadmap]] — current code state, the gap, and the dependency-ordered
   migration to this target.

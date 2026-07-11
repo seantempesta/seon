@@ -1,4 +1,4 @@
-;; minimal-plan.edn with repl-mode :stream — the rung-2 Mode B variant
+;; minimal-plan.edn with repl-mode :stream — the `plan`-milestone :stream variant
 ;; (DeepSeek's measured default). One delta, everything else inherited.
 #merge
 [#include "minimal-plan.edn"

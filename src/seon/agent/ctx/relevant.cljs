@@ -97,7 +97,9 @@
     (block title (when (not= title body) body))))
 
 (defn relevant-source-block
-  "The `:relevant-source` section — top retrieval-stash hits for this turn.
+  "DEPRECATED — pull-first idea (relevant-source); see context-rebuild.
+
+   The `:relevant-source` section — top retrieval-stash hits for this turn.
 
    PURE reader of the per-turn retrieval
    stash ([[seon.embed.stash/current-hits]]) — renders the top-`top-k` hits,

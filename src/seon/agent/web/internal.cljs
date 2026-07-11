@@ -6,7 +6,7 @@
    grant read, and the errors-as-values envelope helpers.
 
    This namespace is INTERNAL: the `*.internal` ns name IS the render
-   filter — agents call the public verbs in `seon.agent.web`, never these.
+   filter — agents call the public functions in `seon.agent.web`, never these.
    All map keys stay in the `:seon.agent.web/*` namespace (via
    `:as-alias`): the keyword namespace tracks the OWNING DATA namespace
    (`seon.agent.web`), not the file the code lives in — the same rule
@@ -409,7 +409,7 @@
 
 ;; ============================================================
 ;; Transport — the redirect-following, SSRF-re-checked, capped-body
-;; fetch. Returns a clj map, never throws; the public verb decides the
+;; fetch. Returns a clj map, never throws; the public function decides the
 ;; output discipline on top of it.
 ;; ============================================================
 

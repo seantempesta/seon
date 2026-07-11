@@ -82,14 +82,14 @@ Two processes, one switch.
     `d/transact`, and appends `:seon/embedding` + `:seon.embed/source-hash`
     assertions. The SHA cache (`:seon.embed/source-hash`, a plain string in the
     primary store) means an unchanged document never pays a Gemini call.
-  - The `knn-search` wire verb embeds an NL query (with a retrieval-instruction
+  - The `knn-search` wire function embeds an NL query (with a retrieval-instruction
     prefix — v2 has no `task_type`) and runs KNN, optionally scoped to an eid
     set, returning `[{eid distance} …]`.
   - A bounded backfill (`backfill-cap` = 64 per boot) embeds already-stored
     entities that lack a current embedding, on each cluster-conn open.
 - Pod (CLJS, read-only agents) — `src/seon/embed.cljs`:
   - `search` / `search-pull` are the pod's thin client over the `knn-search`
-    wire verb. The pod never embeds — it sends the query text over the Unix
+    wire function. The pod never embeds — it sends the query text over the Unix
     socket; the wire-server (which owns the key + index) embeds and runs KNN.
     `search-pull` enriches each hit by pulling the full entity from the pod's
     LOCAL db value (`[*]` wildcard pull by default, kind-agnostic).

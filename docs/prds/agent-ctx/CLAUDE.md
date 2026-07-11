@@ -10,7 +10,7 @@ tags: [orchestrator, agent]
 then MEASURE whether that context + the tool surface actually let agents get
 work done. The idealized system is `docs/seon/architecture/` (read
 [[architecture]] + [[context]] FIRST — don't restate them). This folder is
-the roadmap chunk. **Status lives in [[roadmap]] and [[minimal-context-ladder]]
+the roadmap chunk. **Status lives in [[roadmap]] and [[context-rebuild]]
 (the plan of record) — not here.** Cross-lane channel: [[coordination]].
 Shared ledger: `evals/scorecard.jsonl`.
 
@@ -25,7 +25,7 @@ live plan tile) + `:transcript`, and root's three KEPT derived fault surfaces
 healthy). Every legacy block is OUT of the running tree; the old tree is frozen
 in `config/legacy.edn` (comparison drives only, expiry-dated). Capability
 milestones `repl` / `namespaces` / `plan` are GREEN (both model classes); **`db`
-is next**. See [[minimal-context-ladder]] for the milestone table, the target
+is next**. See [[context-rebuild]] for the milestone table, the target
 block set, and the inclusion bar; [[roadmap]] for detailed status.
 
 ## The three lanes (all active as of 2026-07-11)
@@ -68,7 +68,7 @@ the contract sentence alone.) The eval lane's numbers are only meaningful if the
 context actually says what the task needs. The rebuild's corollary (the poison
 principle): omission is recoverable and attributable, inclusion is neither — so
 evidence attaches at INSERTION time and the safest posture is minimal (see the
-inclusion bar in [[minimal-context-ladder]]).
+inclusion bar in [[context-rebuild]]).
 
 ## Settled — do NOT re-litigate
 
@@ -114,7 +114,7 @@ default` after a context/block change to re-seed the shared pod.
 
 ## Pointer index
 
-- **Plan of record:** [[minimal-context-ladder]] (the milestone table, target
+- **Plan of record:** [[context-rebuild]] (the milestone table, target
   block set, idea inventory, inclusion bar, cutover status) · **we-are-here:**
   [[roadmap]] · **cross-lane channel:** [[coordination]]
 - **Architecture (idealized system):** [[architecture]] · [[context]] ·

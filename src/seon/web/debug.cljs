@@ -883,7 +883,7 @@
        "data"]
       [:span {:class "text-xs font-mono text-text-500"}
        (if data-system?
-         "every row in the store — the whole system is data"
+         "every row in the db — the whole system is data"
          "what this cluster stored after bootstrap")]
       [:div {:class "ml-auto flex items-baseline gap-4"}
        (data-toggle-link params)

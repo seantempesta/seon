@@ -69,7 +69,7 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    holding" is a Datalog join — relevance is computed, not curated. Prose only
    for what cannot execute. Anchors: `schema/register!` + `:malli/schema`,
    `:seon.fn`/`:seon.ns`, [[toolkit]]. (Trajectory, bounded by the measured
-   present: always-on context beats loadable skills, and composition verbs
+   present: always-on context beats loadable skills, and composition functions
    render FULL — [[laws]].)
 3. **The agent authors its own environment.** A `defn` returning
    `:seon.render/ai` and/or `:seon.render/html` is a block and/or tile —
@@ -161,7 +161,7 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
 - **seed-copy** — the seed/override mechanism: ALL blocks are copied into the agent's
   own `:seon.agent/ctx` at creation; render reads that COMPLETE set sorted by
   priority. There is no render-merge, no separate default set, no provider.
-- **`install!` / `remove!`** — the sole seed/override verbs, in `seon.agent.ctx`.
+- **`install!` / `remove!`** — the sole seed/override functions, in `seon.agent.ctx`.
   `install!` is scope-aware + variadic (a single map OR a vector-of-maps); idempotent
   upsert-by-`:seon.agent.ctx/name`; at boot/no-scope it builds the default seed set,
   in an agent's scope it targets that agent's `:seon.agent/ctx`. `remove!` drops by
@@ -317,7 +317,7 @@ seeds + the ctx seed + the home ns); the loop opens a **run** only on a **trigge
 every work tx with an in-tx `:db.fn/cas` work-fence, so a superseded run's writes
 abort at commit. The doc owns the run/turn/FSM/derived-state mechanics, creation-as-
 idle-entity, bootstrap-as-seeded-forms, the **orchestrator-root** lifecycle
-(`start!` = a core verb granted to root, aliasing `create!` through `/call`, writing
+(`start!` = a core function granted to root, aliasing `create!` through `/call`, writing
 `:seon.agent/parent`; roles-as-capabilities; root = the cluster-boot base case;
 UI-root == orchestrator-root), and the isolation tiers. See [[agent-runtime]].
 
@@ -337,7 +337,7 @@ override model. See [[ui]].
 
 ### Toolkit — [[toolkit]]
 
-The agent's action surface is the **`my.*` verb catalog** — thin, agent-owned,
+The agent's action surface is the **`my.*` function catalog** — thin, agent-owned,
 editable wrappers (`my.code`, `my.recall`/`my.kb`, `my.plan`, `my.schedule`,
 `my.tile`, `my.shell`, `my.test`, `my.search`, `my.files`) over a protected `seon.*`
 floor, composed on four shared shapes (path, ref, items, the never-throw result
@@ -371,7 +371,7 @@ doc; this one stays pure target.
   bootstrap-as-seeded-forms, orchestrator-root lifecycle, isolation tiers.
 - [[ui]] — block/render/tile/slot/layout, the page tree, reitit + the capability gate,
   the gzip-morph SSE live channel, the seed-copy + `install!`/`remove!` override.
-- [[toolkit]] — the `my.*` verb catalog over the protected `seon.*` floor.
+- [[toolkit]] — the `my.*` function catalog over the protected `seon.*` floor.
 - [[observability]] — turn replay (basis-t + prompt blob + reply), `inspect/turn` /
   `turn-diff`, the blob store, the forensic agent, cluster lifecycle + the
   `/agents/run` door.

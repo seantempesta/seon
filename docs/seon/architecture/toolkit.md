@@ -4,12 +4,12 @@ status: active
 tags: [prd, agent]
 ---
 
-# Agent toolkit — the `my.*` verb catalog over a protected `seon.*` floor
+# Agent toolkit — the `my.*` function catalog over a protected `seon.*` floor
 
 > **Target design** (present tense — the system as it is when built). Current code state + the migration path live in [[roadmap]].
 
 The agent's whole working surface is a SMALL set of namespaces that, shown in
-full, ARE its context — a few high-signal, threadable verbs instead of a 70k-char
+full, ARE its context — a few high-signal, threadable functions instead of a 70k-char
 source dump. The agent's tools live in **`my.*` namespaces, fully agent-owned and
 editable** (`my.files`, `my.search`, `my.shell`, `my.plan`, `my.test`, `my.kb`,
 `my.code`, `my.schedule`, `my.recall`, `my.tile`, `my.blob`). Each is a THIN
@@ -19,21 +19,21 @@ Build-your-environment extends to the tools themselves: the agent tweaks
 `my.files`, and if it breaks a wrapper, the protected floor still stands and
 `forget!` / the bitemporal store recover it.
 
-This doc owns the verb catalog (the action surface). The data shapes those verbs
+This doc owns the function catalog (the action surface). The data shapes those functions
 read and write — `:my.kb.*`, `:my.plan/*`, `:my.agent/*`, the `:seon/error`
 value, the entity-kind-vs-value-enum rule — live in [[data-model]]. The block /
-render / tile / slot machinery the verbs surface into lives in [[ui]]. The loop,
+render / tile / slot machinery the functions surface into lives in [[ui]]. The loop,
 the run, `start!`, and isolation tiers live in [[agent-runtime]].
 
 ## TL;DR
 
 - Seon's agent does not edit files; it DEFINES functions, evals them, redefines
   (= upserts), composes, and tests in a live REPL, with code and knowledge
-  persisting as datoms. Every verb is a REPL one-liner whose value is data the
+  persisting as datoms. Every function is a REPL one-liner whose value is data the
   agent reads back and threads onward.
 - **Two tiers.** A PROTECTED FLOOR (`seon.*`, `:core-seed`-guarded): the db
   engine (`seon.db`, aliased `db`), the compiler (`seon.eval`), the loop's
-  control verbs (`seon.agent.message`, `seon.agent.lifecycle`, and root's
+  control functions (`seon.agent.message`, `seon.agent.lifecycle`, and root's
   `seon.agent/start!`), and the `*.internal` syscall namespaces + the wire. An AGENT-OWNED
   TOOLKIT (`my.*`, editable thin wrappers) over it.
 - **Shared cluster-wide.** The `my.*` toolkit is ONE seeded definition the user's
@@ -42,8 +42,8 @@ the run, `start!`, and isolation tiers live in [[agent-runtime]].
   agent's purpose and its own defns.
 - **The action surface threads.** Four shared shapes (`:seon.path/*`,
   `:seon.db/ref`, `:seon.items/*`, the `<ns>/ok?` + `:seon/error` envelope) make
-  the output of one verb a valid input to the next with no reshaping at the arrow.
-- **Three lifecycle verbs for code:** define → redefine (= upsert) → `forget!`.
+  the output of one function a valid input to the next with no reshaping at the arrow.
+- **Three lifecycle functions for code:** define → redefine (= upsert) → `forget!`.
   `forget!` retracts the owning entity AND drops the live binding, core-guarded;
   undo is free from the bitemporal store.
 
@@ -55,12 +55,12 @@ load-bearing for the substrate's correctness.
 
 | Tier | Namespaces | Origin | Agent may edit? | Renders full in context? |
 |---|---|---|---|---|
-| **Protected floor** | `seon.db` (aliased `db`), `seon.eval`, `seon.agent.message` (aliased `message`), `seon.agent.lifecycle` (refer'd verbs) + root's `seon.agent/start!`, the `*.internal` syscall nses + the wire | `:core-seed` | NO — `forget!`/override guard refuse | NO — indexed + grep-able only |
+| **Protected floor** | `seon.db` (aliased `db`), `seon.eval`, `seon.agent.message` (aliased `message`), `seon.agent.lifecycle` (refer'd functions) + root's `seon.agent/start!`, the `*.internal` syscall nses + the wire | `:core-seed` | NO — `forget!`/override guard refuse | NO — indexed + grep-able only |
 | **Owned toolkit** | `my.files`, `my.search`, `my.shell`, `my.plan`, `my.test`, `my.kb`, `my.code`, `my.schedule`, `my.recall`, `my.tile`, `my.blob` | `:toolkit-seed` → `:agent` on first edit | YES — redefine or `forget!` | YES — full source every turn |
 
 `message` and `lifecycle` stay on the floor because they are the loop's control
-verbs — the wake gate / hop-cap (`message!`) and the run-FSM mutations
-(`wait`/`complete`/`pause`/`resume`/`terminate`) plus the spawn verb
+functions — the wake gate / hop-cap (`message!`) and the run-FSM mutations
+(`wait`/`complete`/`pause`/`resume`/`terminate`) plus the spawn function
 (`seon.agent/start!`, an alias of `create!`).
 The agent talks THROUGH them (aliased/refer'd into its home ns), it does not own
 them.
@@ -101,7 +101,7 @@ Two `my.*` axes do NOT collide:
 - **Scoped data** — global vs per-agent is the DATA's agent-ref, never the ns and
   never a stored kind: `:my.kb.*` rows carry no ref → global (one KB, all
   agents); `:my.plan/*` rows carry `:my.plan/agent` → per-agent (each sees its
-  own). The verb's render fn scopes by what it queries. Full scoping rule:
+  own). The function's render fn scopes by what it queries. Full scoping rule:
   [[data-model]].
 
 The toolkit renders FULL every turn (the build-your-environment payoff — the
@@ -118,7 +118,7 @@ block, and any `defn`s it authors for itself. See `my.agent` in the catalog.
 
 ## The composability backbone — four shared shapes
 
-The rule the whole catalog is held to: **the output of one verb is a valid input
+The rule the whole catalog is held to: **the output of one function is a valid input
 to the next, with no reshaping at the arrow.** A small set of shapes that many
 wrappers reference (the register-once rule) carries the threading. Tool-specific
 payload keys are `my.<tool>/*`; the shapes you THREAD are `seon.*`. There are
@@ -152,7 +152,7 @@ compose with no rekey.
 A lookup-ref `[identity-attr value]` (or a raw eid) is the universal "address of a
 thing," canonical on the floor (`seon.schema`) and used uniformly:
 `:my.plan/agent`, `:seon.agent.message/from`/`/to`, `:seon.agent/parent`. The
-output of one verb is the input to the next — a message's `from` is a ref you pass
+output of one function is the input to the next — a message's `from` is a ref you pass
 straight to `db/entity`, to `my.plan/add!`'s owner, or to `message/agent`.
 
 ```clojure
@@ -180,7 +180,7 @@ Counts/aggregates are NOT items — they stay scalars.
 
 ### 4. RESULT — `<ns>/ok?` + `:seon/error` (the never-throw envelope)
 
-Every agent-facing verb returns an envelope and never throws (errors are values).
+Every agent-facing function returns an envelope and never throws (errors are values).
 The envelope is `{<ns>/ok? <bool> …}`; on failure `{<ns>/ok? false :seon/error
 <error value>}`. The discriminator namespace tracks the owning data ns
 (`:seon.db/ok?`, `:my.files/ok?`, …), each referencing one shared
@@ -243,7 +243,7 @@ Surface: `new-id!`, `transact!`, `query`, `pull`, `entity`,
 `as-of`/`since`/`history`, `listen!`/`unlisten!`, `store-inventory`,
 `installed-schema`. **Composes:** `store-inventory` → `query`; `pull`/`entity`
 emit maps; `transact!`'s `:seon.db/tempids` resolves new refs. **Budget:** ≤ 2.5k
-tok — `db` is the one heavy ns; render its docstring + cheat sheet + verb
+tok — `db` is the one heavy ns; render its docstring + cheat sheet + function
 signatures, keep guard/bridge bodies in `seon.db.internal`. The worked DB chains
 and the cheat sheet live in `my.kb` (the DB manual), not a separate examples ns.
 
@@ -256,14 +256,14 @@ The single write path for `:seon.agent.message` rows, coupled to the wake gate
 false :seon/error …}` (own-ns `ok?` + the shared error value). **Budget:** ~3k
 tok.
 
-#### `lifecycle` — `seon.agent.lifecycle`, refer'd verbs
+#### `lifecycle` — `seon.agent.lifecycle`, refer'd functions
 
 `wait`/`complete`/`pause`/`resume`/`terminate` are run-FSM mutations the agent
 makes on its OWN run; the agent's state is DERIVED from those primitives via
 `seon.derive/derive-state`, never stored. They return a bare `:seon.derive/state`
 keyword on success ("keyword ⇒ ok, map ⇒ error"), the envelope only on failure.
 
-`seon.agent/start!` is the lifecycle SPAWN verb — a core verb GRANTED to root (and to any
+`seon.agent/start!` is the lifecycle SPAWN function — a core function GRANTED to root (and to any
 agent holding the spawn capability), an alias of `create!`, called through the
 SAME `/call` capability gate. It transacts an IDLE child agent and writes
 `:seon.agent/parent` = the caller; the child's quiet bootstrap runs and leaves it
@@ -376,7 +376,7 @@ script, a `git` query — and get `{exit out err}` back as data.
   "Run a command as argv (never a shell string); result is data. ALWAYS
    resolves; ok? = the process RAN — a NON-ZERO exit is a legitimate result
    (read :seon.agent.shell/exit yourself); ok? false is reserved for COULD
-   NOT RUN AT ALL. SIGTERM at timeout-ms. Output is FULL data (no verb-level
+   NOT RUN AT ALL. SIGTERM at timeout-ms. Output is FULL data (no function-level
    token cap — display economy is the render layer's, via result/<id>); the
    only bound is a ~2MB/stream RAM ceiling (::truncated? + hint → run-bg!).
    The cwd is gated by the seon.agent.fs allowlist; default-deny until the
@@ -468,14 +468,14 @@ boundary. **Budget:** ~1.4k tok.
 open items render every turn; an empty list is the done-signal.
 
 **Floor:** `seon.db` (the engine) + the `:my.plan/*` entity schema. A todo is just
-an entity; the wrapper holds the verbs + the owner-scope default, the db engine
+an entity; the wrapper holds the functions + the owner-scope default, the db engine
 does the durable write.
 
 Surface: `plan!`/`step!` → `{ok? id}` (optional `:my.plan/parent` /
 `:my.plan/needs` refs), `active!`/`done!`/`reopen!` (idempotent), `next`/
 `tree`/`status`/`list-open` (derived reads), `drop!`. Map-in/map-out;
 semantic failures are `::ok?` envelopes. Per-agent scope is DECLARED:
-each scoped verb carries `:seon.agent/id {:optional true}` in its request
+each scoped function carries `:seon.agent/id {:optional true}` in its request
 schema — omitted, the eval boundary fills the calling agent (the
 required-key resolution in [[context]]); the row is stamped with the
 `:my.plan/agent` ref.
@@ -490,7 +490,7 @@ live in [[data-model]]. **Budget:** ~1.6k tok.
 
 **Why reach for it:** load a skill's full knowledge into context only while you need
 it, and drop it when done. The always-on catalog costs ~1 line per skill; a loaded
-body shows its own token cost so the trade is visible and the unload is one verb away.
+body shows its own token cost so the trade is visible and the unload is one function away.
 
 **Floor:** `seon.agent.ctx` (`install!`/`remove!` over `:seon.agent/ctx`) + the
 `:my.skills/*` schema. A loaded skill IS a `:seon.agent.ctx/block` — NOT a parallel
@@ -576,10 +576,10 @@ ns would otherwise play). The `:my.kb.*` schemas + global scoping live in
 **Why reach for it:** the agent can DEFINE and REDEFINE (= upsert) a
 fn/schema/test, but otherwise has no way to REMOVE one — a wrong `(defn …)`
 lingers as a live binding AND a `:seon.fn` row. `forget!` is the missing third
-verb of define→redefine→forget, so the agent cleans up its own toolkit.
+function of define→redefine→forget, so the agent cleans up its own toolkit.
 
 Every defined thing is an entity with a UNIQUE identity sym (`:seon.fn/sym`,
-`:seon.schema/key`, `:seon.test/sym`), so ONE general verb covers all three:
+`:seon.schema/key`, `:seon.test/sym`), so ONE general function covers all three:
 
 ```clojure
 (schema/register! :seon.code/sym  :symbol)
@@ -620,7 +620,7 @@ it is a value-enum label produced at return time, exactly the
 entity-kind-vs-value-enum distinction (a stored field that selects a row's schema
 is banned; a derived/value label is fine — [[data-model]]).
 
-**Undo is free — no new verb.** The store is bitemporal: re-transact the sym's
+**Undo is free — no new function.** The store is bitemporal: re-transact the sym's
 prior `:seon.fn/source` from `(db/history)` and re-eval it, or read `(db/as-of t)`
 before the forget. The recipe lives in `my.kb` (the DB manual). **Composes:** a
 bare sym OR `{:seon.code/sym 'my.x/foo}` → the RESULT envelope. **Budget:** ~900
@@ -651,7 +651,7 @@ thin wrapper that transacts a schedule entity onto the agent's
 A due schedule fires via the ticker: it opens a `:schedule` run (the wake), the
 `:say` text surfaces in the woken run's context, and the schedule's fn runs in the
 agent's sandbox through the one exec service. The ticker + run mechanics live in
-[[agent-runtime]]. **Budget:** ~1.2k tok (verb only).
+[[agent-runtime]]. **Budget:** ~1.2k tok (function only).
 
 #### `my.recall` — floor: `seon.embed`
 

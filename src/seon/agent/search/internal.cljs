@@ -169,7 +169,7 @@
 ;; SAME shape: a flat list of hits, GROUPED by a container (file path /
 ;; namespace), each group a row with a hit-count + a sample preview,
 ;; capped + ranked by density, with honest totals + a narrowing hint
-;; when clipped. This fn IS that shape; the two verbs only differ in the
+;; when clipped. This fn IS that shape; the two functions only differ in the
 ;; container key, the per-group row projection, the response field names,
 ;; and the hint text — all passed in. Do NOT fork a second formatter.
 ;; ============================================================

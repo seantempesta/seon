@@ -14,11 +14,11 @@ around it.
 
 ## Context
 
-- **Render-prominence: a composition verb's value IS its worked example.**
-  A verb agents must COMPOSE (`my.data`, `my.ui`, `my.tile`) rendered as a
+- **Render-prominence: a composition function's value IS its worked example.**
+  A function agents must COMPOSE (`my.data`, `my.ui`, `my.tile`) rendered as a
   bare signature is undiscoverable — a signature-trim drove adoption of a
   built toolkit to zero and the agents hand-rolled the broken path instead.
-  Simple-call verbs may render compact; composition verbs render FULL.
+  Simple-call functions may render compact; composition functions render FULL.
 - **Agents succeed from the always-on context; they rarely load skills.**
   The lean always-on base is what matters — hoist the highest-value skill
   guidance into it rather than growing the loadable corpus.
@@ -65,7 +65,7 @@ around it.
 
 - **Live-drive beats inference.** Server-side "it renders correctly" has
   repeatedly contradicted what the driven agent actually used or
-  understood. Every context/UI/verb unit ships with a real drive + an
+  understood. Every context/UI/function unit ships with a real drive + an
   observer reading the agent-facing output.
 - **The system is the test substrate.** Per-agent context experiments
   (mint a child, `install!`/`remove!` in its scope) beat cluster resets —

@@ -1,5 +1,5 @@
 (ns seon.agent
-  "The agent RECORD + the agent-facing verbs — 'what an agent IS' (the loop
+  "The agent RECORD + the agent-facing functions — 'what an agent IS' (the loop
    that runs it lives in [[seon.agent.loop]], one turn in [[seon.agent.turn]]).
 
    The agent operates as a real REPL: bootstrap-CLJS evaluates its forms,
@@ -41,7 +41,7 @@
      :running    — an open run, not paused (the loop is driving turns)
    A trigger (inbound message / due schedule) opens a RUN
    ([[seon.agent.run/open-run!]]); the loop drives turns until a bound fires
-   or a verb closes the run (see [[seon.agent.loop/run-loop!]]).
+   or a function closes the run (see [[seon.agent.loop/run-loop!]]).
 
    ## Prompt assembly
 
@@ -476,7 +476,7 @@
 
 ;; ============================================================
 ;; Spawn depth (multi-agent-context Piece 2) — the DEPTH-CAP backstop. The soft
-;; gate (spawn verbs only in root's home-requires) keeps ordinary agents from
+;; gate (spawn functions only in root's home-requires) keeps ordinary agents from
 ;; REACHING start!, but a full-qualified `(seon.agent/start! …)` slips past it;
 ;; this is the hard, computed structural rule that refuses it. `spawn-depth`
 ;; walks the `:seon.agent/parent` chain to a number; `start!` refuses a caller
@@ -511,10 +511,10 @@
           (recur parent (inc depth) (conj seen id)))))))
 
 ;; ============================================================
-;; start! — the spawn verb. Alias of create! that ALSO writes the caller as
+;; start! — the spawn function. Alias of create! that ALSO writes the caller as
 ;; the new agent's `:seon.agent/parent`. The base case of the spawn recursion
 ;; is the orchestrator-root ("root", parentless); every other agent is spawned
-;; by some parent via this verb.
+;; by some parent via this function.
 ;; ============================================================
 
 ;; NO `:seon.agent/id` slot: under the ONE required-key convention a
@@ -571,7 +571,7 @@
               {:seon.agent/id child-id}))))))
 
 (defn ^:async start!
-  "Spawn a child agent — the capability-gated spawn lifecycle verb.
+  "Spawn a child agent — the capability-gated spawn lifecycle function.
 
    The spawn counterpart of `seon.agent.lifecycle/terminate`. An alias of `create!`
    that ALSO writes `:seon.agent/parent` = the CALLING agent (read from the
@@ -739,7 +739,7 @@
 ;; ============================================================
 ;; message! lives in [[seon.agent.message]] (the keyword namespace matches
 ;; the code namespace). Re-exported here so `seon.agent/message!` resolves;
-;; the agent-facing messaging verbs are `seon.agent.message/user` + `/agent`
+;; the agent-facing messaging functions are `seon.agent.message/user` + `/agent`
 ;; via the `message/` alias. Same caveat as the ctx aliases above — a def
 ;; alias captures the fn value at load time (pre-instrumentation); call
 ;; `seon.agent.message/*` directly for the validated entry point.
@@ -749,25 +749,25 @@
 (def user-ref msg/user-ref)
 
 ;; ============================================================
-;; Lifecycle verbs — wait / complete / pause / resume / terminate — live in
+;; Lifecycle functions — wait / complete / pause / resume / terminate — live in
 ;; [[seon.agent.lifecycle]] (a lean, whitelisted teaching ns). They are the
-;; agent-facing run-lifecycle verbs; each MUTATES the agent's RUN (close /
+;; agent-facing run-lifecycle functions; each MUTATES the agent's RUN (close /
 ;; pause / set terminated-at), and the derived state follows. The agent home
 ;; ns `:refer`s them directly.
 ;; ============================================================
 
 ;; ============================================================
 ;; The agent's ctx-LAYOUT surface is `seon.agent.ctx/install!` /
-;; `seon.agent.ctx/remove!` — the scope-aware override + seed verbs over the
+;; `seon.agent.ctx/remove!` — the scope-aware override + seed functions over the
 ;; agent's own `:seon.agent/ctx` block set. The block fns + the render
 ;; pipeline live in seon.agent.ctx (read API re-exported above).
 ;; ============================================================
 
 ;; ============================================================
-;; Self-context verbs — the validated path onto YOUR OWN entity. Errors are
+;; Self-context functions — the validated path onto YOUR OWN entity. Errors are
 ;; values; default scope = the calling agent; explicit :seon.agent/id allowed
 ;; (a human or another agent can configure an agent — it is all just
-;; transacts; the verb is the validated path).
+;; transacts; the function is the validated path).
 ;; ============================================================
 
 ;; Shared response shapes for set-purpose! (errors are values).

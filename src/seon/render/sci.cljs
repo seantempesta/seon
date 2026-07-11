@@ -226,7 +226,7 @@
    malli explain (fn, arg, expected vs got). A bare `:malli.core/invalid-input`
    names NOTHING the author can act on (drive-observed: the agent shipped
    around its broken view instead of fixing it); the explain names the
-   failing verb + value, so the ⚠ surface is actionable."
+   failing function + value, so the ⚠ surface is actionable."
   [e]
   (let [base (err/->message e)
         env  (instrument-env-in-causes e)

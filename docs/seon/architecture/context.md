@@ -348,7 +348,7 @@ empty — the reactive rule):
   `:seon.config/root-context` like `:core-faults`) — live agents whose
   `:seon.agent/parent` is **terminated**. One line each (id · state · purpose ·
   parent id). No action machinery — root (or the human) decides per case with the
-  existing verbs (no cascade-terminate, no reparenting: observe first).
+  existing functions (no cascade-terminate, no reparenting: observe first).
 
 ## Inspectability — the human twin of every position
 
@@ -411,7 +411,7 @@ an enumerated tree.
   the live channel.
 - [[data-model]] — `my.plan` (the worked example: its plan-view `defn` is the
   twin an agent sees and the human watches), the `my.*` schemas.
-- [[observability]] — turn record, replay verbs, the blob store.
+- [[observability]] — turn record, replay functions, the blob store.
 - [[laws]] — cache-stability, render-prominence, always-on-beats-skills.
 - [[think-in-clojure]] — a fn's specced in/out is the query substrate for
   both rendering and running.

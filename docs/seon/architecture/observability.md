@@ -63,17 +63,17 @@ capability instead of ad-hoc log files:
   cluster dir, beside the store they annotate.
 - **A blob ref is data** — the datom carries the hash plus a token estimate
   and a media hint, so queries can filter and budget without touching disk.
-- **Verbs** — `my.blob/put!`, `my.blob/get`, `my.blob/text` (paged, honest
-  totals), on the same never-throw result envelope as every toolkit verb.
+- **Functions** — `my.blob/put!`, `my.blob/get`, `my.blob/text` (paged, honest
+  totals), on the same never-throw result envelope as every toolkit function.
 - **One store, many writers** — turn capture, oversized eval results, and
-  agent-authored artifacts all use the same verbs. There is no separate
+  agent-authored artifacts all use the same functions. There is no separate
   "debug capture" file tree; debug persistence IS blob persistence.
 - **Searchable** — blobs are inside the `my.search` grep surface, and any
   blob-backed attr can be pointed at the embedding index.
 
 ## Replay, diff, search
 
-Three verbs make a turn a first-class object of study:
+Three functions make a turn a first-class object of study:
 
 - **`inspect/turn`** — one call returns the whole bundle for agent X, turn N:
   the exact prompt (blob), the structured context (as-of re-render, per-block),
@@ -99,7 +99,7 @@ Search runs at two ends, one door each, and nothing in between:
 ## Error recording — fault-tagged datoms + the strict gate
 
 Errors join turn replay as first-class DB objects. `seon.error/record!`
-is the catch-site verb (the iron rule as a fn: nothing is caught without
+is the catch-site function (the iron rule as a fn: nothing is caught without
 becoming data): it classifies `:seon.error/fault` (`:agent` — expected,
 the agent's learning signal; `:core` — our bug), stamps
 `:seon.error/at` (the basis-t live at the catch site — `(db/as-of at)`
@@ -132,7 +132,7 @@ walks the `:seon.error/cause` chain past cljs.js's generic wrappers), so the
 `SEON-CORE-FAULT <message> @t=<basis-t>` marker and every triage surface name
 the actual failure, never `"ERROR"`.
 
-Triage runs through three `seon.agent.inspect` verbs, three altitudes over
+Triage runs through three `seon.agent.inspect` functions, three altitudes over
 the same datoms:
 
 - **`errors`** — compact recent list, newest first (optional
@@ -159,7 +159,7 @@ layer via `datahike.api/fork-database`, points the fork's head at the
 commit whose `:max-tx` equals `at`, and boots it as a normal disposable
 cluster (own store dir, own pod, own port). Entity ids and tx ids are
 byte-identical, so every stored basis-t (`rendered-as-of`, another error's
-`at`) means the same thing inside the fork, and the inspect verbs work
+`at`) means the same thing inside the fork, and the inspect functions work
 there unchanged. The at-semantics are precise: `:seon.error/at` is captured
 at the CATCH site — the db value the failing code SAW — while the error
 datom itself commits in a later tx, so **the error datom does not exist
@@ -240,7 +240,7 @@ capture path — the old gated `seon.debug` file tree (`SEON_DEBUG_CAPTURE`,
 `logs/turns/`) is deleted; the gym driver reads prompts back by blob hash.
 Remaining gaps — the as-of per-block re-render inside `inspect/turn`, the
 volatile prompt inputs as recorded data, grep/embedding targets not yet
-widened, the forensic seed verb — live in [[roadmap]].
+widened, the forensic seed function — live in [[roadmap]].
 Source-grounded verification of what datahike's tx metadata already provides
 (and why the pre-turn basis-t is the one thing it doesn't):
 `docs/prds/agent-fsm/research/` tx-metadata findings, 2026-07-02.

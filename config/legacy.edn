@@ -1,7 +1,7 @@
 ;; ═══════════════════════════════════════════════════════════════════
 ;; LEGACY — the pre-cutover default context (frozen 2026-07-11).
 ;; Kept ONLY for comparison drives against the rebuilt minimal tree
-;; (docs/prds/agent-ctx/minimal-context-ladder.md). Never a fallback.
+;; (docs/prds/agent-ctx/context-rebuild.md). Never a fallback.
 ;; EXPIRES: delete after the db + warnings + live-tile milestones land.
 ;; NOTE: this file intentionally does NOT set :seon.agent/ctx — the old
 ;; block tree comes from the in-code seon.config/default-ctx-blocks,

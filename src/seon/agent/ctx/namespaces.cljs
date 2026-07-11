@@ -293,9 +293,9 @@
 
 (def ^:private namespaces-header
   ;; Block-specific teaching, COLOCATED (the namespaces surface teaches its
-  ;; own verbs AND its own render policy — owner rulings 2026-07-10; runtime =
-  ;; seon.eval/dispatch-repl-verb!): movement/update verbs + the full-vs-cards
-  ;; distinction + "more namespaces exist in the store". Under minimal context
+  ;; own functions AND its own render policy — owner rulings 2026-07-10; runtime =
+  ;; seon.eval/dispatch-repl-form!): movement/update functions + the full-vs-cards
+  ;; distinction + "more namespaces exist in the db". Under minimal context
   ;; the system-text §"THE NAMESPACES BELOW" never renders, so this header is
   ;; the ONE place the policy is taught. Keep it tight.
   (str "; The loaded namespaces below, ordered by recency"
@@ -308,7 +308,7 @@
        "; (ns-unmap 'name) removes one.\n"
        "; Your CURRENT namespace renders in FULL; its required namespaces\n"
        "; render as COMPACT CARDS (fn head + docstring line 1 + :malli/schema,\n"
-       "; bodies elided as …). More namespaces exist in the store than render\n"
+       "; bodies elided as …). More namespaces exist in the db than render\n"
        "; here — query rather than guess."))
 
 (defn- cur-ns-workspace-stub
@@ -519,7 +519,7 @@
 ;; I/O contract + its arglist, and elides only the fn BODY (`…`) and
 ;; the deep multiline prose (all but docstring line 1). This is the
 ;; coverage lever — for the budget of ~11 full nses the agent instead
-;; sees its ENTIRE verb surface as cards.
+;; sees its ENTIRE function surface as cards.
 ;;
 ;; It reads INDEXED ROWS ONLY (`:seon.fn/_ns`, `:seon.schema/_ns`),
 ;; never a file read — code-as-data, the boot indexer is the one reader.

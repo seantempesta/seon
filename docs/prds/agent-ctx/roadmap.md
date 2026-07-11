@@ -79,32 +79,34 @@ misread their own situation, then closing each gap.
   projection = the next section to fix. "Feels stateful" is reached at zero
   ungrounded self-claims. This is the acceptance test for context now.
 
-## Minimal-context ladder — we-are-here (2026-07-11)
+## Context rebuild — we-are-here (2026-07-11)
 
-**The full target + rung status + graduation criteria now live in
-[[minimal-context-ladder]] — the doc of record for this arc; keep IT
-current.** One-paragraph status: rungs 0–2 CLOSED GREEN on both models
-(DeepSeek Mode B, Muse Spark Mode A) under the ~7k minimal context —
-REPL reliability (fabrication structurally contained/eliminated),
-namespace movement (exposed + fixed the cross-turn current-ns runtime
-bug), and planning (decompose-first, close-adjacency,
-resume-after-a-real-pod-restart, answer delivered). Rung 3 pre-answered
-early (cards suffice); the Memory milestone (the store) is next and
-validates the new v3.1 restart-survival system-text line. Milestones
-carry proper names now — REPL reliability, Namespace movement, Planning,
-Memory, Attention, Canvas, Collaboration, Identity — "rung" is retired
-vocabulary (Phase 0 cleanup sweeps the docs; "verbs" → functions). **Owner rulings 2026-07-11
-(sharpened): the OLD tree is deprecated WHOLESALE — legacy blocks, the
-skills system, and the shipped system text all DELETE at cutover;
-nothing is audited back in; capabilities return only by being rebuilt
-on the minimal core under the inclusion bar (colocation + ledger row +
-colocated provenance note). Poison principle: this is about bad
-information poisoning behavior, not tokens — omission is recoverable
-and attributable, inclusion is neither.** The deprecation register,
-skills-dissolution plan, rebuild ladder (store → warnings → live-tile →
-multi-agent → identity), and cutover mechanics live in
-[[minimal-context-ladder]]. Implementation units are OPUS agents
-against written specs. Ledger:
+**The full target + milestone status + graduation criteria now live in
+[[context-rebuild]] — the doc of record for this arc; keep IT
+current.** One-paragraph status: the `repl` / `namespaces` / `plan`
+milestones are CLOSED GREEN on both models (DeepSeek `:stream`, Muse
+Spark `:batch`) under the ~7k minimal context — REPL reliability
+(fabrication structurally contained/eliminated), namespace movement
+(exposed + fixed the cross-turn current-ns runtime bug), and planning
+(decompose-first, close-adjacency, resume-after-a-real-pod-restart,
+answer delivered). The cards question was pre-answered early (cards
+suffice); the `db` milestone is next and validates the new v3.1
+restart-survival system-text line. Milestones are named by the block/
+namespace they validate — `repl`, `namespaces`, `plan`, `db`,
+`warnings`, `live-tile`, `subagents`, `soul`; "rung" and the metaphor
+names (Memory/Attention/Canvas/Collaboration/Identity) are retired
+vocabulary (Phase 0 swept the docs; "verbs" → functions). **Owner
+rulings 2026-07-11 (sharpened): the OLD tree is deprecated WHOLESALE —
+legacy blocks, the skills system, and the shipped system text all
+DELETE at cutover; nothing is audited back in; capabilities return only
+by being rebuilt on the minimal core under the inclusion bar
+(colocation + ledger row + colocated provenance note). Poison
+principle: this is about bad information poisoning behavior, not
+tokens — omission is recoverable and attributable, inclusion is
+neither.** The deprecation register, skills-dissolution plan, rebuild
+sequence (db → warnings → live-tile → subagents → soul), and cutover
+mechanics live in [[context-rebuild]]. Implementation units are OPUS
+agents against written specs. Ledger:
 `evals/runs/2026-07-10-minimal-buildup/README.md`.
 
 ## Context-rebuild arc — two REPL modes (2026-07-10)
@@ -167,10 +169,10 @@ config-through-DB base.
     `:completed`, correct reply); a wire-REPL transact of a changed
     system-text datom changed the NEXT render with zero file edits. Zero
     SEON-CORE-FAULT in the min-0 log.
-- **Phase 4 (next):** the Mode A vs Mode B × minimal-context matrix + the
-  capability ladder (`evals/runs/2026-07-10-minimal-buildup/`).
+- **Phase 4 (next):** the `:batch` vs `:stream` × minimal-context matrix +
+  the capability milestones (`evals/runs/2026-07-10-minimal-buildup/`).
 - **Rung-1 foundation SHIPPED (2026-07-10) — REAL-REPL SEMANTICS** (owner
-  rulings settled; runtime = `seon.eval/dispatch-repl-verb!` + teaching in
+  rulings settled; runtime = `seon.eval/dispatch-repl-form!` + teaching in
   the namespaces-block header): `in-ns` = THE movement verb (state-preserving;
   DB-known ns loads via the one load-fn; a fresh name is CREATED with the
   toolkit requires — never blank, never an error); `(ns …)` re-eval REPLACES

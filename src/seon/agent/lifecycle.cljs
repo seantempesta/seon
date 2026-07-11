@@ -1,8 +1,8 @@
 (ns seon.agent.lifecycle
-  "The agent's run-lifecycle verbs — `wait` / `complete` / `pause` / `resume`
+  "The agent's run-lifecycle functions — `wait` / `complete` / `pause` / `resume`
    / `terminate`.
 
-   State is DERIVED from the run, so each verb is a RUN mutation, not a stored
+   State is DERIVED from the run, so each function is a RUN mutation, not a stored
    state flip:
      - `wait`      closes the open run `:waited`      → derived `:idle`
      - `complete`  closes the open run `:completed`   → derived `:idle`
@@ -16,7 +16,7 @@
    `:terminated` for terminate), or a loud error envelope on a failed transact
    / no agent in scope / no open run (errors are values — never a throw). The
    REASON a run closed lives on the run (`:seon.agent.run/closed-reason`), not
-   a separate note. No verb ever writes a self→self message.
+   a separate note. No function ever writes a self→self message.
 
    `wait` / `complete` / `pause` / `resume` default to the calling agent, read
    from the ALS scope via `(seon.db/current-agent-id)` — call them inside
@@ -42,7 +42,7 @@
 (schema/register! ::result :string)
 
 (defn- no-open-run-error
-  "The error envelope a verb returns when the agent has no OPEN run to act on
+  "The error envelope a function returns when the agent has no OPEN run to act on
    (e.g. `wait` called while already idle)."
   [verb id]
   {:seon.db/ok? false

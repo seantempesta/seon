@@ -148,7 +148,7 @@
       (str total-turns "t/" total-evals "e")]]))
 
 (defn- store-chunk
-  "The store + embeddings cluster: datom count (links `/data`) + the
+  "The db + embeddings cluster: datom count (links `/data`) + the
    `SEON_EMBED` indicator."
   [db {::system/keys [embedding?]}]
   (let [{:seon.db/keys [datom-count]} (db/store-inventory {:seon.db/db db})]

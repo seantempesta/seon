@@ -7,7 +7,7 @@
      - `message!` — fully-formed storage, boundary defaulting, the
        blank-content refusal, hop derivation (`outbound-hops`), the
        concise success envelope
-     - the two agent-facing verbs, thin wrappers over `message!` — the
+     - the two agent-facing functions, thin wrappers over `message!` — the
        agent reaches them through the `message/` alias on its home ns
        (`(message/user …)` / `(message/agent …)`):
          `user`  — from = me (the ALS agent), to = the one human user
@@ -72,7 +72,7 @@
    [:seon.agent.message/origin  :seon.agent.message/origin]])
 
 ;; ============================================================
-;; message! — the SINGLE write entry point for messages (the verbs
+;; message! — the SINGLE write entry point for messages (the functions
 ;; `user`/`agent` below are thin wrappers over it). Presence of
 ;; attributes IS the intent; the DB holds only FULLY-FORMED messages
 ;; (from + to + content + at + id + hops). All defaulting is a
@@ -247,12 +247,12 @@
           env)))))
 
 ;; ============================================================
-;; The two agent-facing verbs. Thin wrappers over `message!` — `from`
+;; The two agent-facing functions. Thin wrappers over `message!` — `from`
 ;; defaults to the ALS agent inside `message!`, so these only fix `to`.
 ;; The agent reaches them through the `message/` alias on its home ns:
 ;; `(message/user "…")` / `(message/agent id "…")`. No self→self
 ;; messaging, ever: `agent` refuses `to = me` (the wake gate already
-;; ignores `from = me`; this makes it a hard prohibition at the verb).
+;; ignores `from = me`; this makes it a hard prohibition at the function).
 ;; Both ride the one injecting wrapper: SEMANTIC failures stay `ok? false`
 ;; envelopes; only a shape-invalid call trips the validator, surfaced by
 ;; the eval boundary as a structured `:seon/error` value — data, never a

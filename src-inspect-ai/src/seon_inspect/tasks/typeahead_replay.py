@@ -501,9 +501,18 @@ def _executions(log) -> list[dict]:
 
 
 def _arm_summary(execs: list[dict]) -> dict:
-    """The report metrics for one arm over its execution records."""
+    """The report metrics for one arm over its execution records.
+
+    Read-side compat: jsonl frozen before the verb->fn metric rename
+    (de9b8309) carries `verb_applicable`/`verb_match`; accept those as
+    fallbacks so frozen evidence (e.g. a DeepSeek reference arm that
+    cannot be re-run) still reduces. Frozen data keeps its keys; new
+    runs emit `fn_*` only."""
     scored = [e for e in execs if e["outcome"] in ("pass", "fail")]
-    an = [e["analysis"] for e in scored if e.get("analysis")]
+    an = [{**a, "fn_applicable": a.get("fn_applicable",
+                                       a.get("verb_applicable")),
+           "fn_match": a.get("fn_match", a.get("verb_match"))}
+          for e in scored if (a := e.get("analysis"))]
     fns = [a for a in an if a.get("fn_applicable")]
     ttv = [a["tokens_to_valid_form"] for a in an
            if a.get("tokens_to_valid_form") is not None]

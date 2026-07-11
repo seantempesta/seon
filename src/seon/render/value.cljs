@@ -505,7 +505,7 @@
    size — and is a plain string longer than the inline `max-string` cap —
    is the map's PAYLOAD: it renders as a body block (bounded by the generous
    `verbatim-cap`, honest ⟨N tokens⟩) with the small keys as the header,
-   instead of being elided to a 2-line stub. Shape-general — no verb names."
+   instead of being elided to a 2-line stub. Shape-general — no function names."
   0.70)
 
 (defn- dominant-string-entry
@@ -515,8 +515,8 @@
    `[k s]` entry; nil otherwise. The winner must be a STRING — a map
    dominated by a big collection falls to the ordinary skeleton — with
    something to reveal (longer than the inline stub). This is what makes a
-   read verb's own payload (`view`'s content, a fetched body) VISIBLE instead
-   of a stub, without any per-verb special-casing."
+   read function's own payload (`view`'s content, a fetched body) VISIBLE instead
+   of a stub, without any per-function special-casing."
   [value max-string]
   (when (and (map? value) (not (record? value)) (seq value)
              (<= (count value) (:max-keys default-opts)))

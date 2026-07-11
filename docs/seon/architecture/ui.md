@@ -52,7 +52,7 @@ quiet `:core` bootstrap forms at creation.)
 
 ## `install!` / `remove!` — the one override
 
-`seon.agent.ctx/install!` and `seon.agent.ctx/remove!` are the sole verbs that
+`seon.agent.ctx/install!` and `seon.agent.ctx/remove!` are the sole functions that
 shape a block set:
 
 - `install!` is **scope-aware + variadic** — one block map OR a vector of block
@@ -379,7 +379,7 @@ link and read it.
 - [[architecture]] — the map: glossary, the cross-cutting principles, deployment topology.
 - [[data-model]] — the block / `:seon.route/*` / `:seon/error` schemas these renders read, and the `my.*` domains.
 - [[agent-runtime]] — the loop that assembles the prompt, the bootstrap that seeds blocks, and the run-status block's data source (`derive-status`).
-- [[toolkit]] — `my.tile` and the agent verbs that drive the live tile.
+- [[toolkit]] — `my.tile` and the agent functions that drive the live tile.
 - [[loadable-skills]] — skills as `:skill/<name>` blocks; the `seon.config` seed/skill override.
 - [[roadmap]] — current code state + the dependency-ordered migration to this target (Lane U).
 - [[datahike-primer]] — the datahike-in-the-grain mindset.

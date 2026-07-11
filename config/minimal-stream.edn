@@ -1,4 +1,4 @@
-;; minimal.edn with :seon.config/repl-mode :stream — the Mode B variant for
+;; minimal.edn with :seon.config/repl-mode :stream — the :stream variant for
 ;; the minimal-context measurement matrix (evals/runs/2026-07-10-minimal-buildup).
 ;; Everything else (system-text, one-block context, root-context) is
 ;; minimal.edn's verbatim via #include; the ONE delta is the repl-mode dial.

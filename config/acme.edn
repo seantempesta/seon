@@ -10,7 +10,7 @@
 ;; drift. The ONLY delta is the agent-context toolbelt: system's list PLUS the
 ;; acme.* extra-src namespaces (structurally necessary — the overlay's own
 ;; toolkit must appear in home-requires or its cards never render and agents
-;; can't see the verbs). Isolation (ports/store/sockets/logs/bundle) lives in
+;; can't see the functions). Isolation (ports/store/sockets/logs/bundle) lives in
 ;; bin/acme env, not here.
 ;;
 ;; NOTE `#merge` replaces whole top-level keys: `:seon.config/agent-context`

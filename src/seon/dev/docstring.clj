@@ -202,7 +202,7 @@
                     (str/includes? ns-name ".internal.")))))
 
 (defn- test-ns?
-  "A `*-test` namespace — its deftests are not public verbs, skip linting."
+  "A `*-test` namespace — its deftests are not public functions, skip linting."
   [ns-name]
   (boolean (and ns-name (str/ends-with? ns-name "-test"))))
 

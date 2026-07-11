@@ -20,7 +20,7 @@ render — nothing stored that needs clearing (reactive context).
 
 | Namespace | File | Role |
 |-----------|------|------|
-| `my.skills` | `src/my/skills.cljs` | corpus scan + seed, `load`/`unload`/`list` verbs, L0 catalog + L2 body render fns |
+| `my.skills` | `src/my/skills.cljs` | corpus scan + seed, `load`/`unload`/`list` functions, L0 catalog + L2 body render fns |
 
 ## The model — attributes, not a `:kind`
 
@@ -96,12 +96,12 @@ LOUD at validation. NOTE: there are now two `seon.config` namespaces in differen
 lanes — this pod `.cljs` manifest reader and the `[JVM track — paused]` aero
 Integrant loader (`config.clj`); they share the aero + `system.edn` mental model.
 
-## Verbs
+## Functions
 
 `load`/`unload` are `^:async` (they await the `install!`/`remove!` transact); the
 eval path auto-awaits, so an agent calling `(my.skills/load :datahike)` gets the
 result MAP, not a Promise. `list` is a synchronous derived query — the catalog
-with each skill's `::loaded?` against the agent's own blocks. Verbs are
+with each skill's `::loaded?` against the agent's own blocks. Functions are
 errors-as-values (`{::ok? false ::message …}` when no such skill / install fails).
 
 ## Key files

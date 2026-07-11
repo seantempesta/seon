@@ -8,7 +8,7 @@
    extractor, total TOKENS, blob-hash — plus a token-capped preview and a
    capped link list. Page through the whole document with `my.blob/text`
    on the returned `:seon.agent.web/blob-hash`; search it with
-   `seon.agent.search/grep` over the blob — this verb adds NO paging or
+   `seon.agent.search/grep` over the blob — this function adds NO paging or
    search mechanism of its own.
 
    ## The honest limitation
@@ -204,7 +204,7 @@
 (defn grants
   "What web access do I have? — the SEON_WEB grant + reachability + search.
 
-   Returns the live truth every verb enforces: `:seon.agent.web/enabled?`
+   Returns the live truth every function enforces: `:seon.agent.web/enabled?`
    (SEON_WEB granted at all), `:seon.agent.web/policy` (the host-owned
    config mode — `:open` = anything, `:public-only` = block internal/
    loopback (the SSRF-safe default), `:allowlist` = only listed domains),
@@ -228,7 +228,7 @@
      ::search-backend  (if has-key? search-backend :none)}))
 
 ;; ============================================================
-;; fetch — the one ^:async verb.
+;; fetch — the one ^:async function.
 ;; ============================================================
 
 (defn- extract-content
@@ -327,7 +327,7 @@
 
             (::binary? res)
             (int/err url (str "refusing binary content (" (::content-type res)
-                              ") — this verb extracts text; a blob-tier binary "
+                              ") — this function extracts text; a blob-tier binary "
                               "fetch is a later capability.")
                      {::status (::status res) ::final-url (::final-url res)
                       ::content-type (::content-type res)})
@@ -381,7 +381,7 @@
                         (or (some-> e .-message) (str e)))))))
 
 ;; ============================================================
-;; search — the one ^:async grounded-search verb.
+;; search — the one ^:async grounded-search function.
 ;; ============================================================
 
 (def ^:private redirect-hint

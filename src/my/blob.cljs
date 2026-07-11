@@ -12,7 +12,7 @@
    dir (`<cluster>/blobs/<first-2-of-hash>/<hash>`), beside the store
    they annotate. No GC — content-addressed blobs are append-only.
 
-   Errors are VALUES: every verb returns a map with `:my.blob/ok?`;
+   Errors are VALUES: every function returns a map with `:my.blob/ok?`;
    a missing or malformed hash is a guiding error map, never a throw.
 
      (await (my.blob/put! {:my.blob/content big-report

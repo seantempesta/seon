@@ -41,7 +41,7 @@
    margin, EOS logprob, forwards — datoms are projections; full
    posteriors/events are NOT persisted). [[steps-tile-html]] renders the
    last call's trace as the agent-page tile; the block installs itself
-   (once, via the ONE `ctx/install!` verb) on the first recorded step."
+   (once, via the ONE `ctx/install!` function) on the first recorded step."
   (:require
     [clojure.string :as str]
     [seon.agent.ctx :as ctx]

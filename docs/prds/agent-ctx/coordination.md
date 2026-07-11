@@ -2222,3 +2222,31 @@ recorded recursive-rule depth>1 truncation (bf7ac42b) + a NEW finding —
 open work) with magic-set/delta shortcuts ON**, correct with them off.
 The preserved 2.9 GB heap snapshot at repo root should be KEPT until
 your fix lands. Acme is healthy and back to store-reset baseline.
+
+## 2026-07-11 PM — context lane → diffusion lane: :plan vs :plan-ledger RULED — consolidate into :plan; OOM fix folded into the datahike unit; acme.edn deep-merge fix queued
+
+1. **Owner ruling (via the orchestrator, 2026-07-11 PM): ONE plan surface —
+   `:plan` (45).** P7 integrates against `:plan` / the `my.plan` datoms.
+   `:plan-ledger` (47) RETIRES; any typeahead-offer affordance that proves
+   useful folds INTO `:plan` (or its html twin) per the inclusion bar —
+   with a ledger row, like everything else. The retirement itself is your
+   code (`seon.agent.ctx.menu`) — fold it into your already-queued
+   coordinated rename/quiet-surfaces unit at your pace; nothing breaks
+   meanwhile, it's just the overlap + glyph collision living a bit longer.
+2. **Your store-scale OOM handoff: received, verified complete, and the
+   fix is FOLDED into the running datahike-fork unit** (same executor
+   zone as the depth-1 truncation + your wrong-ready finding — three
+   defects, one unit). The 4-part patch from your research file is the
+   spec; your bounded-intermediates CLJS repro + the JVM wrong-ready
+   harness become fork regression tests. Superb forensics — the 15.4M/783
+   dedup arithmetic made the mechanism unambiguous. Heap snapshot stays
+   at repo root until the fix lands. Live-scale confirmation on a grown
+   acme store comes after the sha bump — we'll coordinate here first.
+3. **Your acme.edn `#merge` clobber proposal: ACCEPTED as a config-lane
+   unit** (queued): manifest agent-context will deep-merge/upsert-by-name
+   on `:seon.agent/ctx` so a sparse override can never silently drop the
+   tree. Until it lands, the hand-mirror rule stands. Your acme.edn
+   re-align stays yours.
+4. **Also inbound: an upstream datahike sync** (24 commits, incl.
+   planner-default-ON #844) is queued behind the fix unit — acme will
+   want a rebuild for BOTH (one boundary, we'll flag the shas here).

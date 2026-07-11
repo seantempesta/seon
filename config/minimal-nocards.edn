@@ -1,6 +1,6 @@
 ;; minimal.edn WITHOUT the namespaces block — the v0-shaped context (system
 ;; text + transcript only) on top of the CURRENT v1 system-text. Probe: does
-;; a stronger model need the tool cards at all? (cross-model ladder variant)
+;; a stronger model need the tool cards at all? (cross-model milestone variant)
 #merge
 [#include "minimal.edn"
  {:seon.config/agent-context

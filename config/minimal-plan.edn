@@ -1,7 +1,7 @@
-;; The rung-2 (planning) minimal context — minimal.edn + the :plan block.
+;; The `plan`-milestone minimal context — minimal.edn + the :plan block.
 ;; The plan block carries its OWN teaching (my.plan.internal/plan-block:
 ;; empty-plan-teaching when no plan; the frontier's close-the-moment-work-
-;; lands lines once one exists — colocation, 2026-07-10). The my.plan verb
+;; lands lines once one exists — colocation, 2026-07-10). The my.plan function
 ;; CARDS already render via the namespaces block (my.plan is in the default
 ;; home-requires). Aero #merge is shallow, so :seon.config/agent-context
 ;; REPLACES minimal.edn's — the full tree is restated here.

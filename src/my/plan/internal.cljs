@@ -7,8 +7,8 @@
    (anchor + open frontier + recently-completed tail; the completed
    interior stays in the DB, out of the prompt).
 
-   Factored out of the public verb surface so the teaching ns shows ONLY the
-   verbs + their register! schemas (the `*.internal` convention drops these
+   Factored out of the public function surface so the teaching ns shows ONLY the
+   functions + their register! schemas (the `*.internal` convention drops these
    from rendered agent context — see
    `seon.agent.ctx.namespaces/hidden-ns-name?`).
 
@@ -50,7 +50,7 @@
 (defn agent-ref
   "Lookup ref for agent id `id` — nil when no id resolved.
 
-   The id arrives as the verbs' DECLARED `:seon.agent/id` request key
+   The id arrives as the functions' DECLARED `:seon.agent/id` request key
    (filled at the eval boundary when the caller omits it — see
    `seon.instrument/injectables`); no ambient read happens here."
   [id]
@@ -76,7 +76,7 @@
   [verb id env]
   (if (:seon.db/ok? env)
     {:my.plan/ok? true :my.plan/id id}
-    (fail (str verb ": store failed — "
+    (fail (str verb ": db write failed — "
                (get-in env [:seon.db/error :seon.error/message])))))
 
 ;; --- Derived work-queue queries — all pure Datalog over the graph, with

@@ -26,7 +26,7 @@ and observed usage as tiebreaks).
 
 The agent never "reaches out" for guidance. Holding a `::expense` map
 makes `totals-by-category` visible; storing a `:my.kb` row surfaces the
-recall verbs; a `:seon/error` value surfaces the fns that consume errors.
+recall functions; a `:seon/error` value surfaces the fns that consume errors.
 Relevance is **defined programmatically and always loaded** — computed
 from data flow at render time, self-healing like every derived block.
 This is the replacement trajectory for the skill library: procedural
@@ -78,7 +78,7 @@ tests and future changes are reasoned against; the target-language code
 is its projection.
 
 This composes with the rest of the runtime: the plan lives in the plan
-tree, the foreign index in the graph, the translation verbs are specced
+tree, the foreign index in the graph, the translation functions are specced
 fns, and the whole loop is drivable and measurable (SWE-bench-class
 benchmarks through the same `/solve` door are the natural fitness
 function for translate-quality).

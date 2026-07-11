@@ -4,12 +4,12 @@
    The loop is a FOLD of [[transition]] (the FSM transition table, which lives
    HERE with the loop that folds it) over events derived from the RUN's data.
    A trigger (an inbound message) opens a RUN ([[seon.agent.run/open-run!]]);
-   `run-loop!` then drives turns until a bound fires or a verb closes the run:
+   `run-loop!` then drives turns until a bound fires or a function closes the run:
 
      each iteration re-reads ONE frozen db value (§8a) and `next-event` derives
      the event from it:
-       - run already :closed (a verb ran inside a turn) → :wait / :complete /
-         :terminate (from the run's closed-reason) — the verb owns the close
+       - run already :closed (a function ran inside a turn) → :wait / :complete /
+         :terminate (from the run's closed-reason) — the function owns the close
        - the agent's `:seon.agent/run` points at a DIFFERENT run → :superseded
        - the run carries :paused-at                       → :pause
        - work ≥ turn-limit (the WORK bound: turns in repl-mode
@@ -18,7 +18,7 @@
        - else                                             → :turn-ok
      `(transition state event)` gives the next state; the EFFECT of
        :turn-ok is `beat!` + `run-turn!`; the LOOP closes the run on
-       :turn-limit/:deadline/:error (the bounds it owns), while verb closes
+       :turn-limit/:deadline/:error (the bounds it owns), while function closes
        and supersede are already handled (no re-close). The loop ends when the
        state leaves :running.
 
@@ -80,7 +80,7 @@
 
 (def transitions
   "The whole FSM as data — `{state {event → next-state}}`. A wake (`:trigger`)
-   opens a run (`:idle`→`:running`); verbs/bounds/fences close it back to
+   opens a run (`:idle`→`:running`); functions/bounds/fences close it back to
    `:idle`; `:pause`/`:resume` hold without killing; `:terminate` is terminal.
    An event absent from a state's row leaves the state unchanged (see
    [[transition]])."
@@ -122,7 +122,7 @@
 ;; ============================================================
 ;; The loop — a fold of [[transition]] over run-derived events. Each
 ;; iteration re-reads the run; :turn-ok runs a turn, the bounds close the
-;; run, verb closes / supersede are already settled.
+;; run, function closes / supersede are already settled.
 ;; ============================================================
 
 (def no-forms-streak-limit
@@ -139,7 +139,7 @@
 (defn- next-event
   "Derive the loop event from the run's data over the FROZEN db value `db`
    (§8a — one basis-t per turn) + the consecutive empty-turn `streak` (no side
-   effects). One of :wait/:complete/:terminate (a verb closed the run inside a
+   effects). One of :wait/:complete/:terminate (a function closed the run inside a
    turn), :superseded (a newer run owns the agent OR the pointer was
    retracted), :pause, :turn-limit, :deadline, :no-forms (the LLM produced zero
    actionable forms for [[no-forms-streak-limit]] turns running), or :turn-ok
@@ -168,7 +168,7 @@
       (:seon.agent.run/paused-at r)
       :pause
 
-      ;; The WORK bound is mode-denominated (rung-0 verdict, 2026-07-10):
+      ;; The WORK bound is mode-denominated (repl-milestone rung-0 verdict, 2026-07-10):
       ;; `:batch` counts turns (one turn = many forms of work); `:stream`
       ;; counts FORMS (one form per turn — a prose/orientation turn burns
       ;; nothing, so a green agent is never parked at :turn-limit by its
@@ -219,7 +219,7 @@
    `input` carries `:seon.agent/id` / `:seon.agent/llm-fn` / `:seon.agent/compile-state`.
    A fold of [[seon.agent.transition]] over [[next-event]]: :turn-ok beats
    + runs a turn; the loop closes the run on the bounds it owns (:turn-limit /
-   :deadline / :error / :no-forms); verb closes (:wait/:complete/:terminate)
+   :deadline / :error / :no-forms); function closes (:wait/:complete/:terminate)
    and :superseded are already settled (no re-close). The consecutive empty-turn
    STREAK is folded alongside the state: a turn with zero actionable forms
    increments it, a productive turn resets it, and [[no-forms-streak-limit]]
@@ -342,10 +342,10 @@
               (transition state :superseded))
 
           ;; :wait / :complete / :terminate / :pause — the run is already
-          ;; closed/paused by the verb; the loop just stops, recording the
-          ;; FSM state the verb moved to.
+          ;; closed/paused by the function; the loop just stops, recording the
+          ;; FSM state the function moved to.
           :else
-          (do (log id "halt" (str "verb — " (name event)))
+          (do (log id "halt" (str "function — " (name event)))
               (transition state event)))))))
 
 (defn ^:async ^:private renew-current-run!

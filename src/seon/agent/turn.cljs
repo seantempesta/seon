@@ -99,11 +99,11 @@
 ;; top-level provider fields. Both ABSENT on a stub-LLM turn.
 (schema/register! :seon.agent.turn/llm-usage    :string)
 (schema/register! :seon.agent.turn/llm-meta     :string)
-;; repl-mode telemetry. Mode A (`:batch`): how many model-authored
+;; repl-mode telemetry. `:batch`: how many model-authored
 ;; result-claims were STRIPPED from this turn's reply at the boundary
 ;; (absent = none — optional-is-absent; the fabrication count survives even
-;; though the fabrication itself does not enter the record). Mode B
-;; (`:stream`): the turn's `:seon.agent.turn/llm-usage` numbers are
+;; though the fabrication itself does not enter the record). `:stream`:
+;; the turn's `:seon.agent.turn/llm-usage` numbers are
 ;; CLIENT-SIDE estimates (the aborted stream lost the provider's usage
 ;; chunk) — marked so a reader never treats them as provider-reported.
 (schema/register! :seon.agent.turn/results-stripped :int)
@@ -268,7 +268,7 @@
 ;; run ref (:seon.agent.turn/run) into the open-tx; close-turn! folds
 ;; telemetry. The turn manages ONLY `:seon.agent.turn/status` — the agent's
 ;; DERIVED state is a projection of its RUN (opened/closed by the loop and the
-;; lifecycle verbs), so a turn never touches agent state; it just runs.
+;; lifecycle functions), so a turn never touches agent state; it just runs.
 ;; ============================================================
 
 (declare close-turn!)
@@ -281,7 +281,7 @@
    derived current-turn count counts it). Awaits `body-fn` (a 0-arg thunk
    returning Promise<map>) via `close-turn!`. Returns whatever `body-fn`
    returned, so the caller can read `:seon.agent/eval-count`. Touches NO agent
-   state — the run lifecycle is the loop's / the verbs' concern.
+   state — the run lifecycle is the loop's / the functions' concern.
 
    When `scheduled?` is true, the turn is stamped `:seon.agent.turn/scheduled?
    true` (a cron-fire turn): it still carries the run stamp so its evals RENDER
@@ -375,8 +375,8 @@
   [resp id id-of-turn compile-state run-id stream? start-ns]
   (let [raw-reply  (or (:text resp) "")
         ;; repl-mode reply-boundary fix-up: DELETE every model-authored
-        ;; result-claim BEFORE persist + eval (Mode A `:batch`; Mode B
-        ;; `:stream` structurally has none — its stream aborted at the
+        ;; result-claim BEFORE persist + eval (`:batch`; `:stream`
+        ;; structurally has none — its stream aborted at the
         ;; first form's close, so there is no fabricated tail — but the
         ;; strip is idempotent and safe on both). The forms eval as normal;
         ;; the next turn's transcript interleaves the REAL `⟹` rows.
@@ -404,7 +404,7 @@
                            "[seon.agent.turn] eager reply-blob link failed (turn continues):"
                            e))))
         parsed     (repl-internal/parse-forms reply-text)
-        ;; Mode B `:stream` single-form close (rung-0 verdict, 2026-07-10):
+        ;; `:stream` single-form close (repl-milestone rung-0 verdict, 2026-07-10):
         ;; the stream aborts at the FIRST complete form, but the delta that
         ;; completed it can carry a tail that parses into extra entries
         ;; (typically `:read` errors from a partial next line). The turn is
@@ -424,8 +424,8 @@
         ;; The batch starts where the agent IS (the derived current-ns the
         ;; cursor + namespaces block already show), NOT the home ns — an
         ;; `(in-ns …)` in a PRIOR turn must hold across the turn boundary
-        ;; (rung-1 root cause, 2026-07-10: seeding home here made every
-        ;; Mode B turn silently define into my.agent.*, cursor flip-flop,
+        ;; (namespaces-milestone rung-1 root cause, 2026-07-10: seeding home here made every
+        ;; `:stream` turn silently define into my.agent.*, cursor flip-flop,
         ;; ns-interns nil, cross-ns resolution failures).
         batch      (await (seval/eval-batch! compile-state parsed
                                              (or start-ns (ctx/home-ns id))
@@ -631,7 +631,7 @@
         prompt-blob    (await (capture-blob! full-prompt :prompt))]
     ;; ctx-tokens = the assembled context ONLY; the system text rides the
     ;; adapter's system message, so it is reported as its own count here
-    ;; (rung-0 defect: the old line silently under-reported the fixed
+    ;; (repl-milestone rung-0 defect: the old line silently under-reported the fixed
     ;; prefix by the system prompt's size).
     (log id turn-idx "open" turn-id "+" (tokens/estimate prompt) "ctx-tokens"
          "+" (tokens/estimate (ai/effective-system-prompt {})) "system-tokens")

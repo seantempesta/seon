@@ -129,8 +129,9 @@
   "Work-bound seed under repl-mode `:stream` — denominated in FORMS.
 
    One stream turn evals at most one form, so the bound is form-count
-   ([[seon.derive/run-form-count]]). 3× the batch default: a Mode A turn
-   averaged ~5.6 forms in the rung-0 matrix, and the rung-1 gate drive
+   ([[seon.derive/run-form-count]]). 3× the batch default: a `:batch` turn
+   averaged ~5.6 forms in the repl-milestone rung-0 matrix, and the
+   namespaces-milestone rung-1 gate drive
    showed a 20-form budget strands a multi-phase task short of its
    report (evals/runs/2026-07-10-minimal-buildup, ds-r1-ns-move-v1-d1).
    An agent-level `:seon.agent/default-turn-limit` or an explicit
@@ -308,7 +309,7 @@
                            (:seon.agent.run/default-turn-limit a)
                            (:seon.agent/default-turn-limit a)
                            ;; mode-denominated const fallback: forms under
-                           ;; :stream, turns under :batch (rung-0 verdict).
+                           ;; :stream, turns under :batch (repl-milestone rung-0 verdict).
                            (if (= :stream (ctx/repl-mode @db/*conn*))
                              default-form-limit
                              default-turn-limit))

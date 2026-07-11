@@ -330,7 +330,7 @@
 ;;; `:gemini-grounding`) + `:seon.agent.web/search-model` (the model id for the
 ;;; grounded backend, default `"gemini-3.1-flash-lite"`). Backend choice is
 ;;; host-owned CONFIG (never env — env carries only the API KEY, read live);
-;;; a new backend (Serper) slots in here WITHOUT changing the verb shape.
+;;; a new backend (Serper) slots in here WITHOUT changing the function shape.
 (schema/register! :seon.config/web-spec
   [:map
    [:seon.agent.web/policy          {:optional true} :keyword]
@@ -570,7 +570,7 @@
 (def ^:private default-namespaces-policy
   "The SHIPPED default namespaces render policy. Everything renders FULL real
    source; this is just WHICH nses are always present: the `my.*` toolkit
-   exemplars plus the core verb nses the agent calls constantly
+   exemplars plus the core function nses the agent calls constantly
    (`my.plan`/`seon.agent.message`/`seon.agent.lifecycle`). The agent's
    CURRENT ns and the nses it `:require`s render full on top of this (resolved
    in `seon.agent.ctx.namespaces`). `config/system.edn` mirrors this list
@@ -1209,7 +1209,7 @@
 
    Manifest `:seon.config/spawn-depth-cap`; default 1 (root at depth 0 spawns;
    a depth-1 subagent may NOT). `seon.agent/start!` refuses a caller AT/over
-   this. Raise the dial (and add the spawn verbs to the general agent-context)
+   this. Raise the dial (and add the spawn functions to the general agent-context)
    to deepen the tree."
   {:malli/schema [:=> [:cat] :int]}
   []
@@ -1300,7 +1300,9 @@
        (try (.existsSync (js/require "fs") path) (catch :default _ false))))
 
 (defn- identity-file-blocks
-  "The soul/agents file-blocks PREPENDED onto the seed when their file is
+  "DEPRECATED — reference for the `soul` milestone; see context-rebuild.
+
+   The soul/agents file-blocks PREPENDED onto the seed when their file is
    PRESENT (reactive, NO fallback — absent file → no block, as the retired
    `seon.agent.ctx/default-seed-blocks` fn did). SOUL.md at priority 5 (gated by SEON_SOUL),
    AGENTS.md at priority 8. Each is a pure-data block carrying the shipped

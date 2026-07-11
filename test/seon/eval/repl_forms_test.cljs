@@ -1,6 +1,6 @@
-(ns seon.eval.repl-verbs-test
+(ns seon.eval.repl-forms-test
   "REAL-REPL semantics (owner rulings 2026-07-10): `in-ns` is THE
-   movement verb (state-preserving; a fresh name is created with the
+   movement form (state-preserving; a fresh name is created with the
    toolkit requires); `(ns …)` re-eval REPLACES the require set (edges
    heal, no orphans); a bare top-level `(require …)` loads now AND
    persists into the stored declaration (durable-by-default — resume
@@ -14,8 +14,8 @@
    the exact agent path. Nothing here touches the live agent conn.
 
    Run interactively (single ns, NEVER overlapping in the live pod):
-     (require 'seon.eval.repl-verbs-test :reload)
-     (cljs.test/run-tests 'seon.eval.repl-verbs-test)"
+     (require 'seon.eval.repl-forms-test :reload)
+     (cljs.test/run-tests 'seon.eval.repl-forms-test)"
   (:require
     [cljs.test :as t :refer [deftest is testing async]]
     [clojure.string :as str]
@@ -277,7 +277,7 @@
             (.then (fn [_] (run-batch! (str "(in-ns 'my.rvxuse)\n"
                                             "(defn xg [m] (* m 2.0))")
                                        'my.agent.rv)))
-            ;; Mode B shape: ONE form per batch — the require and each call
+            ;; `:stream` shape: ONE form per batch — the require and each call
             ;; land in their own turns (the live ds-r1 failure had the
             ;; aliased call in the turn AFTER the require; Spark's same-turn
             ;; require+call succeeded on the same bundle).

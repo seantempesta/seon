@@ -13,7 +13,7 @@
        one slot attr is `:seon.render/ai` (string = verbatim doctrine,
        symbol = late-bound block fn); `:seon.render/html` is the
        optional debug-view twin.
-     - `install!` / `remove!` — the ONE scope-aware override + seed verb
+     - `install!` / `remove!` — the ONE scope-aware override + seed function
        over the agent's own `:seon.agent/ctx` block set; `seed-default-ctx!`
        SEED-COPIES `seon.config/default-ctx-blocks` into a fresh agent at creation.
        `context-root` reads the agent's COMPLETE `:seon.agent/ctx`, decoded
@@ -138,7 +138,7 @@
 ;;   search[grep]/fs/http. Registered + kept so the shape is stable, but there
 ;;   is deliberately NO consumer YET: grep/fs are unconditionally available
 ;;   today, and per-agent capability ENFORCEMENT is a phase-2 mechanism (a
-;;   check at each provider verb). Tracked here as the single park note; wire the
+;;   check at each provider function). Tracked here as the single park note; wire the
 ;;   enforcement when the owner greenlights per-agent capability scoping.
 ;; ============================================================
 
@@ -240,7 +240,9 @@
         (str/join "\n"))))
 
 (defn file-block-ai
-  "The `:seon.render/ai` slot for a file-block.
+  "DEPRECATED — reference for the `soul` milestone; see context-rebuild.
+
+   The `:seon.render/ai` slot for a file-block.
 
    The node's file read
    FRESH and `;`-commented (via [[quote-lines]]). Blank when the file
@@ -252,7 +254,9 @@
     (if (str/blank? text) "" (quote-lines text))))
 
 (defn file-block-html
-  "The `:seon.render/html` slot for a file-block.
+  "DEPRECATED — reference for the `soul` milestone; see context-rebuild.
+
+   The `:seon.render/html` slot for a file-block.
 
    The node's file read
    FRESH and rendered as markdown hiccup. Empty `[:div]` when the file
@@ -262,7 +266,9 @@
   (md/md->hiccup (or (read-file-text path) "")))
 
 (defn file-block
-  "A renderable context SECTION backed by a markdown file.
+  "DEPRECATED — reference for the `soul` milestone; see context-rebuild.
+
+   A renderable context SECTION backed by a markdown file.
 
    At
    `:seon.agent.ctx/file-path`, named `:seon.agent.ctx/name`, ordered at
@@ -622,7 +628,7 @@
    comment-shaped, so a model can't fabricate one by writing a `;` comment
    (the `; ⟹` shape that agents copied — T4 6/24). It is RUNTIME OUTPUT
    ONLY: an agent never authors it, and a model-typed `⟹` is DELETED at the
-   reply boundary (Mode A [[strip-result-claims]], via [[first-result-claim]]
+   reply boundary (`:batch` [[strip-result-claims]], via [[first-result-claim]]
    /[[reserved-glyph-re]]) before the reply is persisted. The emit site
    ([[format-eval-row]] + `seon.agent.ctx.transcript`), the detector
    ([[reserved-glyph-re]]), and [[system-text]]'s teaching all reference
@@ -733,7 +739,7 @@
 ;; The detector reports the offset of the first MODEL-AUTHORED result-claim
 ;; — a match whose start falls OUTSIDE every successfully-parsed form span
 ;; (so a `(println "⟹")` string literal or a `[:=> …]` malli schema never
-;; fires). Mode A (`:batch`) uses [[strip-result-claims]] to DELETE those
+;; fires). `:batch` uses [[strip-result-claims]] to DELETE those
 ;; spans at the reply boundary before the reply is persisted + eval'd, so
 ;; the fabricated value never enters the record and the next turn shows the
 ;; real `⟹` rows interleaved.
@@ -820,7 +826,7 @@
    successfully-parsed form span — so a `(println \"⟹\")` string literal
    does NOT fire, a `:=>` inside a `:malli/schema` vector does NOT fire,
    and the shell-prompt `❯` stays excluded (never in the regex set). The
-   detector behind Mode A's strip and the anti-fabrication telemetry;
+   detector behind `:batch`'s strip and the anti-fabrication telemetry;
    nil ⇒ a clean reply."
   {:malli/schema [:=> [:catn [::reply :string]] [:maybe :int]]}
   [reply]
@@ -832,7 +838,7 @@
   [:map [::strip-text ::strip-text] [::strip-count ::strip-count]])
 
 (defn strip-result-claims
-  "Delete every model-authored result-claim from `reply` (Mode A fix-up).
+  "Delete every model-authored result-claim from `reply` (`:batch` fix-up).
 
    Returns the cleaned text + the count stripped, applied at the reply
    boundary before persist + eval. For each fabrication range
@@ -972,7 +978,7 @@
          comment-only? (str/blank? (str src))
          ;; Comment-preamble — the agent's `;`/prose thinking, re-prefixed to
          ;; `;`. Fabricated result-claims are stripped at the reply boundary
-         ;; (Mode A `strip-result-claims`), so the stored narration is clean.
+         ;; (`:batch` `strip-result-claims`), so the stored narration is clean.
          ;; `(str narr)` coerces an off-shape stored narration (a non-string
          ;; that slipped past the write boundary) so a bad datom renders
          ;; instead of sinking the whole transcript — never throw into render.
@@ -1390,7 +1396,7 @@
     ";\n"
     "; ASYNC READS AS SYNCHRONOUS. (await x) works only INSIDE an ^:async\n"
     "; fn — a bare top-level (await x) throws. You rarely need it: an\n"
-    "; ^:async verb (db/transact!, plan/*) auto-resolves to its DATA value,\n"
+    "; ^:async function (db/transact!, plan/*) auto-resolves to its DATA value,\n"
     "; so it reads as an ordinary synchronous call — use what it returns\n"
     "; directly.\n"
     ";\n"
@@ -1437,7 +1443,7 @@
     "; real source (no signatures, no clipping). What renders is CURATED: YOUR\n"
     "; CURRENT namespace (your live workspace, the most important thing here)\n"
     "; and the nses it :requires, the my.* toolkit (my.kb / my.data / my.ui /\n"
-    "; my.tile) and your core verbs (plan / message / lifecycle). Everything\n"
+    "; my.tile) and your core functions (plan / message / lifecycle). Everything\n"
     "; else — the rest of the seon framework AND your other my.* nses — is\n"
     "; deliberately NOT dumped; it stays QUERYABLE and SEARCHABLE, one step\n"
     "; away, so you are not buried in code you don't need. Never hallucinate a\n"
@@ -1531,7 +1537,7 @@
     ";   code or data); plain prose otherwise.\n"
     ";\n"
     "; MESSAGING + LIFECYCLE. You talk to people and you end your work with\n"
-    "; explicit verbs — all plain Clojure, all through the DB:\n"
+    "; explicit functions — all plain Clojure, all through the DB:\n"
     ";   (message/user \"...\")            ; tell your one human — they see it now\n"
     ";   (message/agent \"<id>\" \"...\")    ; tell a specific peer agent\n"
     ";   (wait \"note\")                   ; deliberately park; resume when a message arrives\n"
@@ -1594,7 +1600,7 @@
     ";   they burn turns on a finished task. The done-signal is the GOAL\n"
     ";   being satisfied, not your open steps or the turn cap. Ask each turn:\n"
     ";   \"do I already have what was asked for?\" If yes, deliver it and stop.\n"
-    "; - WHEN YOU ARE DONE, say so with a verb. (complete \"<the answer>\")\n"
+    "; - WHEN YOU ARE DONE, say so with a function. (complete \"<the answer>\")\n"
     ";   marks the work finished AND — if you have not already messaged\n"
     ";   whoever asked (your human, or your parent agent) this run —\n"
     ";   delivers that exact string to them; so its argument is the\n"
@@ -1927,7 +1933,7 @@
 (schema/register! :seon.render/detail [:enum :full])
 
 ;; The member-drill handle: name ONE fn within the rendered ns to pull its
-;; FULL source (the common case — the agent wants a specific verb, not the
+;; FULL source (the common case — the agent wants a specific function, not the
 ;; whole namespace). Accepts a bare name ("store-fact"), a qualified name
 ;; ("my.kb/store-fact"), or a symbol — normalized + matched against
 ;; :seon.fn/sym in [[render-member]].
@@ -1999,13 +2005,13 @@
    → {:seon.render/text <string>}     for :ai
    → {:seon.render/hiccup <hiccup>}   for :html
 
-   FULL by default — signatures are retired: the verb returns the ns's whole
+   FULL by default — signatures are retired: the function returns the ns's whole
    real source (plus every member), unclipped. Token budget is bound by
    CURATION (the always-on `:namespaces` section curates WHICH nses it routes
    here), never by compression.
 
    `:seon.ns/member` is the DRILL handle — the common case where the agent
-   wants ONE specific verb, not the whole ns. Naming a member (bare
+   wants ONE specific function, not the whole ns. Naming a member (bare
    \"store-fact\" or qualified \"my.kb/store-fact\") returns just that fn's
    FULL source, ignoring depth. An unknown member returns a one-line note
    listing the public fns (errors-as-values), never a throw.
@@ -2158,7 +2164,7 @@
 ;; symbols) and this ns renders it.
 
 ;; ============================================================
-;; install! / remove! — the ONE scope-aware override + seed verb over the
+;; install! / remove! — the ONE scope-aware override + seed function over the
 ;; agent's own :seon.agent/ctx block set. Errors are values. Both target the
 ;; agent in scope (db/current-agent-id): an agent shapes its OWN context, and
 ;; the boot seed-copy runs them inside the new agent's with-agent scope.

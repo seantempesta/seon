@@ -69,7 +69,7 @@
                  [e msg at inst (get frame0 e "")])))))
 
 (defn core-faults-block
-  "`:core`-fault errors since the last user message — ROOT world only.
+  "`:core`-fault errors since the last user message — root cluster only.
 
    The derived strict-gate surface of the error-blame design (RULED
    2026-07-04): a `seon.error/record!` with fault `:core` is OUR bug
@@ -100,7 +100,7 @@
            "full row: (seon.db/pull '[*] <eid>)"))))
 
 (defn instrumentation-gaps-block
-  "Specced fns whose live var lost its malli wrapper — ROOT world only.
+  "Specced fns whose live var lost its malli wrapper — root cluster only.
 
    The derived coverage invariant (C46) as a reactive section: the census
    (`seon.instrument/coverage-gaps`) is recomputed from the db + the live

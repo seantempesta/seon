@@ -1,7 +1,7 @@
 (ns seon.agent.inspect
   "Agent self-introspection: 'what am I seeing right now?'
 
-   Two verbs:
+   Two functions:
      - `ctx-preview` — the FULL prompt the agent would receive on its
        next render: the HARDCODED system block FIRST (read via the SAME
        fn the adapters call, `seon.ai/effective-system-prompt` — the
@@ -233,7 +233,7 @@
      ::error (str "no turn stored under " (pr-str turn-id))}))
 
 ;;; turn-diff — what changed between two turns, as a summary an agent can
-;;; budget on: basis-t delta (how many txs advanced the world between the
+;;; budget on: basis-t delta (how many txs advanced the db between the
 ;;; two renders) + a token/line summary of the prompt drift + both replies.
 
 (schema/register! ::from :seon.agent.turn/id)
@@ -273,7 +273,7 @@
   "What changed between two persisted turns — a budgetable summary.
 
    Map-in/map-out — `{::from id ::to id}` returns both [[turn]] bundles
-   plus: `::basis-t-delta` (txs the world advanced between the two
+   plus: `::basis-t-delta` (txs the db advanced between the two
    renders — `rendered-as-of` distance), `::prompt-token-delta` (tokens,
    the ONE estimator), and a multiset line summary of the prompt drift
    (`::prompt-lines-added` / `-removed` — cache-stability instrument:

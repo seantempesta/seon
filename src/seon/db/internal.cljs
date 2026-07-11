@@ -399,7 +399,7 @@
    map entities (including nested component maps) and `[:db/add e a v]`
    vector forms. ALWAYS pr-str's (strings included — `\"x\"` stores as
    `\"\\\"x\\\"\"`), so decode by `read-string` is unambiguous. Callers
-   re-transacting a PULLED value must decode first (the section verbs
+   re-transacting a PULLED value must decode first (the section functions
    do) — double-encoding is on them."
   [tx-data]
   (letfn [(encode-map [m]

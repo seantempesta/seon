@@ -43,7 +43,9 @@
        (when (seq message) (str " — " (clip message)))))
 
 (defn testrun-block
-  "The agent's latest pytest failures as a block, or empty when green.
+  "DEPRECATED — reference for the `warnings` milestone; see context-rebuild.
+
+   The agent's latest pytest failures as a block, or empty when green.
 
    Derived from the newest persisted testrun scoped to this agent. Renders a
    `TEST FAILURES` comment block (counts + one line per failing test) when

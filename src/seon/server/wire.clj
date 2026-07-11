@@ -243,7 +243,7 @@
 ;;
 ;; `list-dbs` / `remove-db` are SUPERVISOR/REPL-surface ops: they ride the
 ;; host-local UDS req socket (and the 7891 wire REPL), and NOTHING pod-side
-;; wraps them — `seon.db` has no verb for them and the agent toolkit never
+;; wraps them — `seon.db` has no function for them and the agent toolkit never
 ;; sees them, so an agent's capability surface stays one-cluster by
 ;; construction. `bin/seon cluster destroy` is the caller.
 

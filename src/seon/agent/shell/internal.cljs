@@ -116,7 +116,7 @@
 (defn ran-envelope
   "The ok?-true envelope: the process RAN and exit/out/err is the answer.
 
-   Returns the FULL stdout/stderr — no token cap at the verb. Display
+   Returns the FULL stdout/stderr — no token cap at the function. Display
    economy is the render layer's job (a large value stashes as result/<id>
    and renders as a bounded skeleton with an honest ⟨N tokens⟩ head + the
    result handle; aged transcript clips decay). ::shell/out-tokens /

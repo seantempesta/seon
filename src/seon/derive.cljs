@@ -134,7 +134,7 @@
 
    The repl-mode `:stream` work budget: a stream turn evals at most one
    form, so counting TURNS makes the cap a form budget that prose and
-   orientation turns burn for nothing (rung-0 verdict, 2026-07-10) —
+   orientation turns burn for nothing (repl-milestone rung-0 verdict, 2026-07-10) —
    under `:stream` the loop bounds work by THIS count instead. Joins
    `:seon.agent.turn/run` → `:seon.agent.turn/evals` over the explicit
    db value; excludes schedule-fire turns like [[run-turn-count]]."

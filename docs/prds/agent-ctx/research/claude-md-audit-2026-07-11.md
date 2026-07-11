@@ -38,7 +38,7 @@ singleton, `default-repl-mode` (per-MODEL), `config/system-text` datom +
 `resolve-config-singleton`, `my.plan.internal/empty-plan-teaching`,
 `SEON-STUB-LLM` boot marker (`client.cljs:2888`), `eval/core-macro-head?`
 (prose-gate computed check), cross-turn current-ns seed (`turn.cljs:424-431`,
-"rung-1 root cause 2026-07-10"), `minimal-context-ladder.md` (the governing
+"rung-1 root cause 2026-07-10"), `context-rebuild.md` (the governing
 plan). The neutralizer/marker hacks ARE gone (grep-confirmed deleted).
 
 ---
@@ -72,7 +72,7 @@ The ONE-mechanism table is the single highest-value section in the whole set
 (see Observations) and is almost entirely current. Issues:
 - **Wrong we-are-here pointer (line 7):** "the only we-are-here doc is
   `docs/prds/agent-fsm/roadmap.md`." The active branch is `feature/agent-ctx`;
-  the live roadmap is `docs/prds/agent-ctx/roadmap.md` (+ `minimal-context-ladder.md`).
+  the live roadmap is `docs/prds/agent-ctx/roadmap.md` (+ `context-rebuild.md`).
   agent-fsm merged to main 2026-07-02.
 - **Config row (line 26)** omits the DB singleton: "ONE manifest
   `config/system.edn` via `seon.config` … `SEON_PROFILE` is inert / Never:
@@ -147,7 +147,7 @@ phase**:
   ref direction). "LIVE" it is not.
 - **Zero mention of the context-rebuild arc that is the current focus:** no
   repl-mode `:batch`/`:stream`, no config→DB singleton, no
-  `minimal-context-ladder.md` (which exists, 07-11, and is described in MEMORY as
+  `context-rebuild.md` (which exists, 07-11, and is described in MEMORY as
   "the governing plan"), no strip/abort fabrication mechanics, no milestone names
   (repl/namespaces/plan/db/warnings/live-tile/subagents/soul). An agent landing
   on this branch reads a five-week-old eval-lane charter and learns nothing about

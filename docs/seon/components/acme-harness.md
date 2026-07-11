@@ -36,7 +36,7 @@ it), then `start pod`, then `status`. The blocking wire-server start is why
 one shell line CAN race (the pod's 5-attempt ping fails in ~10s if the socket
 isn't up yet — it then exits, see logs/acme/pod.log).
 
-The granular verbs still work if you want them:
+The granular commands still work if you want them:
 
 ```bash
 bin/acme build              # one-off compile :acme-client -> out-acme/client/main.js
@@ -53,9 +53,9 @@ process restart on `store_dir == $SEON_CLUSTER_DIR/store` (the cluster THIS
 invocation manages), not the literal name `default`. It wipes
 `data/clusters/acme/store` and race-safely restarts acme (wait_ready's the
 wire-server before the pod), and can never touch the live default cluster. PLUS
-the three cluster-level convenience verbs `bin/acme` adds on top:
+the three cluster-level convenience commands `bin/acme` adds on top:
 
-| verb | what it does |
+| command | what it does |
 |---|---|
 | `bin/acme up` | `build` + `start wire-server` + `start pod` + `status` |
 | `bin/acme down` | stop the whole cluster (pod first, then wire-server) |

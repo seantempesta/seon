@@ -13,7 +13,7 @@
 
      - `orphaned-agents-block` — the ROOT-ONLY section: live agents whose
        parent is TERMINATED. Root (or the human) decides per case with the
-       existing verbs — no cascade-terminate, no reparenting (observe first).
+       existing functions — no cascade-terminate, no reparenting (observe first).
        Wired into `:seon.config/root-context` (like `:core-faults`).
 
    Sizes shown are TOKENS (`seon.ai.tokens/estimate`), never chars. Both
@@ -184,11 +184,11 @@
        vec))
 
 (defn orphaned-agents-block
-  "LIVE agents whose parent is TERMINATED — ROOT world only (Piece 4).
+  "LIVE agents whose parent is TERMINATED — root cluster only (Piece 4).
 
    One line each: id · derived state · purpose · parent id. Empty → absent
    (the reactive vanish). No action machinery — root (or the human) decides
-   per case with the existing verbs (no cascade-terminate, no reparenting:
+   per case with the existing functions (no cascade-terminate, no reparenting:
    observe first). Root-only by config wiring (rides `:seon.config/root-context`,
    like `:core-faults`). Pure read of the db."
   {:malli/schema [:=> [:cat :seon.render/section-request] :string]}

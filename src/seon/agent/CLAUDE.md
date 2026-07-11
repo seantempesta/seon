@@ -2,8 +2,8 @@
 
 **Read before editing:** `docs/seon/architecture/agent-runtime.md` (loop/run/
 turn/FSM/bounds), `data-model.md` (every attr you'll touch), `observability.md`
-(what each turn must persist), `toolkit.md` (verb conventions). We-are-here:
-`docs/prds/agent-ctx/roadmap.md` (+ `minimal-context-ladder.md`, the
+(what each turn must persist), `toolkit.md` (function conventions). We-are-here:
+`docs/prds/agent-ctx/roadmap.md` (+ `context-rebuild.md`, the
 context-rebuild plan of record). Skills: `datahike`, `clojurescript`,
 `data-oriented-clojure`.
 
@@ -51,7 +51,7 @@ context-rebuild plan of record). Skills: `datahike`, `clojurescript`,
 - **Transcript clips must render byte-identical as they age** (age-band
   eviction, not recency-weighting) or the LLM prompt cache is busted every
   turn.
-- **Home-ns data/verb aliases (`db/`, `plan/`, `message/`, `schema/`) resolve
+- **Home-ns data/function aliases (`db/`, `plan/`, `message/`, `schema/`) resolve
   in agent-authored `my.*` nses too** — `seon.eval/augment-ns-source` writes
   the real `(:require …)` into every authored `(ns …)` form (no magic; stored
   + resume-safe, #73/#56 CLOSED). The `my.*` toolkit, the `agent/` alias, and

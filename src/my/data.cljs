@@ -1,7 +1,7 @@
 (ns my.data
   "Turn stored rows into the number your human asked for — SUM, argMAX,
    group-then-sum — WITHOUT hand-rolling a datalog aggregate. Datalog's
-   aggregates have two traps these verbs make unreachable:
+   aggregates have two traps these functions make unreachable:
 
      - the `(sum ?x)` DEDUP collapse — an aggregate runs over the
        deduplicated projected tuples, so two rows of 5 sum to 5, not 10,
@@ -23,7 +23,7 @@
 
    The universal arrow is `(reducer (merge (producer …) {:my.data/key k}))`:
    a producer's envelope already carries `:seon.items/items`, so merging in
-   the key gives a valid reducer request. All four verbs are SYNC (reads
+   the key gives a valid reducer request. All four functions are SYNC (reads
    only — no `^:async`, no Promise to trip on) and map-in/map-out.
 
    NB rows does NOT clip — aggregation needs every row, so a truncated

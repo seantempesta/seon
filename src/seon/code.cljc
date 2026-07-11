@@ -3,10 +3,10 @@
 
   A `#code/<lang> <<SENTINEL … SENTINEL` block in an agent transcript
   reads to a `::block` map. The value is DATA — never evaluated as
-  Clojure. Consumers (`seon.agent.fs` edit verbs, future graph verbs)
+  Clojure. Consumers (`seon.agent.fs` edit functions, future graph functions)
   take `::text` verbatim; `::lang` drives rendering (fenced code block)
   and language-aware handling. This ns will also house the foreign
-  program-graph verbs when that arc lands."
+  program-graph functions when that arc lands."
   (:require [seon.schema :as schema]))
 
 ;; The language tag is open — any keyword (:python :ts :rust :diff …);

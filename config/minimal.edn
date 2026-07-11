@@ -1,5 +1,5 @@
 ;; The STRICTLY MINIMAL agent-context manifest (agent-ctx Phase 3) — the
-;; measurement-ladder rung-0 world: ONE context block (the transcript) plus a
+;; `repl`-milestone measurement cluster: ONE context block (the transcript) plus a
 ;; ~20-line system prompt, nothing else. Every knob lands as DB state at boot
 ;; (config-through-DB); iterate the prompt text freely — it is v0 of a
 ;; measured artifact, not doctrine.
@@ -44,7 +44,7 @@
   ;; an explicit tree). :my.skills/load [] seeds no skill bodies. Both
   ;; block specs are seon.config/default-ctx-blocks' verbatim (incl. the
   ;; result-decay schedule and the html twin that drives the UI tile).
-  ;; The namespaces block teaches its own render policy + movement verbs
+  ;; The namespaces block teaches its own render policy + movement functions
   ;; in its colocated header (owner directive 2026-07-10 — under minimal
   ;; context nothing else teaches it).
   :seon.config/agent-context

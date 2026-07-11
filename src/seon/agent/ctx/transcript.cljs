@@ -563,7 +563,7 @@
         run     (derive/current-run db id)
         run-eid (:db/id run)
         ;; loop-k = work spent in the CURRENT open run, in the SAME
-        ;; denomination the loop's bound checks (mode-denominated, rung-0
+        ;; denomination the loop's bound checks (mode-denominated, repl-milestone rung-0
         ;; verdict 2026-07-10): `:batch` counts the run's turns, `:stream`
         ;; counts its FORMS (evals) — one form per stream turn, so prose
         ;; turns don't move the meter. 0 when idle. cap = the run's

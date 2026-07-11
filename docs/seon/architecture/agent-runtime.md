@@ -14,7 +14,7 @@ primitives, how an agent is **created** and **bootstrapped**, how the
 **orchestrator-root** starts and manages other agents, and the **isolation**
 backend that runs agent code. The entity schemas it reads live in
 [[data-model]]; the blocks/renders/pages it feeds live in [[ui]]; the agent's
-action verbs live in [[toolkit]]; the cross-cutting principles and the glossary
+action functions live in [[toolkit]]; the cross-cutting principles and the glossary
 live in [[architecture]].
 
 ## The model in one paragraph
@@ -127,13 +127,13 @@ result write. **Ground in** `transaction.cljc:873` (`compare-and-swap`) +
 only values cross the wire, CAS-as-assertion, never memoize on a db value — is
 [[datahike-primer]].)
 
-### REPL verbs — namespaces are places (settled 2026-07-10)
+### REPL forms — namespaces are places (settled 2026-07-10)
 
-The eval boundary (`seon.eval/dispatch-repl-verb!`) implements the real-REPL
+The eval boundary (`seon.eval/dispatch-repl-form!`) implements the real-REPL
 movement/update semantics the transcript teaches, so an agent's reflexive
 REPL moves work:
 
-- **`(in-ns 'foo)` is THE movement verb** — state-preserving switch of the
+- **`(in-ns 'foo)` is THE movement form** — state-preserving switch of the
   current-ns accumulator (the cursor + namespaces block follow via the
   recorded `:seon.eval/ns`). A DB-known-but-unloaded ns loads through the
   one load-fn; a genuinely fresh name is CREATED with the canonical toolkit
@@ -170,8 +170,8 @@ parallelism; isolation is the worker tier below.
 (def transitions
   {:idle       {:trigger     :running}     ; a wake (message/schedule) opens a run
    :running    {:turn-ok     :running      ; within both bounds → another turn
-                :wait        :idle          ; verb: park, wakeable
-                :complete    :idle          ; verb: finished; result delivered as a message
+                :wait        :idle          ; function: park, wakeable
+                :complete    :idle          ; function: finished; result delivered as a message
                 :turn-limit  :idle          ; work bound hit (clean)
                 :deadline    :idle          ; clock bound hit (ticker; :deadline-exceeded)
                 :superseded  :idle          ; a newer run won the fence
@@ -202,7 +202,7 @@ run-loop!(agent, run):
 ```
 
 `next-event` reads the event off the run's data: still `:running`, within both
-bounds, and still owning the fence → `:turn-ok` (beat + run a turn); a verb inside
+bounds, and still owning the fence → `:turn-ok` (beat + run a turn); a function inside
 the turn emits `:wait`/`:complete`/`:pause`/`:terminate`; a bound or the ticker
 emits `:turn-limit`/`:deadline`/`:superseded`. Because every branch is data, the
 machine is itself inspectable and renderable.
@@ -219,7 +219,7 @@ stored flag), so `complete` closes without sending a second, answer-clobbering
 message.
 
 **Complete-gate — a success claim must be BACKED by a real green test run.**
-`complete` is the one verb that asserts *success*, so it is REFUSED (an honest
+`complete` is the one function that asserts *success*, so it is REFUSED (an honest
 errors-as-value envelope, never a throw, the run left OPEN so the agent keeps
 working) when the agent's **latest** recognized test run is RED. This is purely
 DERIVED from the agent's own `:seon.agent.testrun` datoms at call time — the max
@@ -376,14 +376,14 @@ The bootstrap forms **are** the seed commands themselves:
 - `(schema/register! :my.agent/purpose …)` plus its **refine** fn and a
   self-refining block — `:my.agent/purpose` (a markdown goal string) is the
   canonical **first per-agent seed worked-example**: the agent owns, sees, and can
-  rewrite its own purpose (schema in [[data-model]], the verb in [[toolkit]]);
+  rewrite its own purpose (schema in [[data-model]], the function in [[toolkit]]);
 - the home-namespace `defn`s the agent starts life knowing.
 
 **Planning rides the same data.** An agent plans with its **`my.plan` tree** — a
 todo carries a `:my.plan/parent` ref plus status, and parent progress is a derived
 roll-up of its children (top = plans/milestones, leaves = actions). There is no
 separate plan entity; the work-list *is* the plan tree (schema in [[data-model]],
-verbs in [[toolkit]]). The derived open-todo count feeds the fingerprint above.
+functions in [[toolkit]]). The derived open-todo count feeds the fingerprint above.
 
 ## Cluster boot — the core seed (`boot-seed!` → `reconcile!`)
 
@@ -421,12 +421,12 @@ overview at `/`) **and** the system orchestrator (the lifecycle role — it star
 and manages other agents). These are two facets of the same elevated grant and the
 same bootstrap; there is **never** a second supervisor or overview entity.
 
-- **`seon.agent/start!` — the spawn verb, a SOFT gate + a hard depth-cap backstop.**
-  `start!` is a core verb (an alias of `create!`) that transacts a new **idle** child
+- **`seon.agent/start!` — the spawn function, a SOFT gate + a hard depth-cap backstop.**
+  `start!` is a core function (an alias of `create!`) that transacts a new **idle** child
   agent and **writes `:seon.agent/parent` = the caller**. That write *is* the
   activation of `:seon.agent/parent`; no separate writer exists. Two gates, both
   real (there is **no `/call` capability gate** in the pod — that was aspirational):
-  - **Soft gate — home-requires.** The spawn verbs (`start!`/`delegate!` via the
+  - **Soft gate — home-requires.** The spawn functions (`start!`/`delegate!` via the
     `seon.agent` alias) sit only in **root's** `:seon.eval/home-requires`
     (`config/system.edn`'s `:seon.config/root-context`), so an ordinary agent's
     rendered context never surfaces them. It catches the honest case.
@@ -442,7 +442,7 @@ same bootstrap; there is **never** a second supervisor or overview entity.
 - **Start = create + quiet bootstrap, leaving the child idle.** `start!` runs the
   child's bootstrap form-vector (quiet `:core` evals, as above) and stops. The child
   does no work until it receives a trigger; to make it work, root (or anyone) sends
-  it a message — that message opens its run #1. Two steps, one entry verb.
+  it a message — that message opens its run #1. Two steps, one entry function.
 - **Roles are capability-SETS, not a stored `:kind`/`:role`.** A role = (the set of
   granted `:seon.fn` capabilities) + (which bootstrap form-vector ran).
   "Orchestrator" = an agent granted the spawn/terminate/system fns; "worker" = an
@@ -593,7 +593,7 @@ bitemporal, reactive DB. We have one, so:
   variadic `install!`/`remove!` override model, the pages (root world / world /
   app), routing-as-data via reitit + the capability gate, and the gzip-morph
   SSE live channel.
-- [[toolkit]] — the agent's `my.*` verb catalog (purpose, the my.plan planning
+- [[toolkit]] — the agent's `my.*` function catalog (purpose, the my.plan planning
   tree, schedules, code lifecycle, recall).
 - [[roadmap]] — current code state, the gap, and the dependency-ordered,
   replace-in-place migration to this target.

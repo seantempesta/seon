@@ -295,7 +295,9 @@
   (str "; - :" (name nm) "  " (if loaded? "● loaded" "○") " — " desc))
 
 (defn catalog-block
-  "The L0 `:skills-catalog` context block — one `;`-line per skill.
+  "DEPRECATED — reference for the `live-tile` milestone; see context-rebuild.
+
+   The L0 `:skills-catalog` context block — one `;`-line per skill.
 
    Each line is cheap: name + description + a DERIVED ●/○ loaded marker.
    A symbol-slot section wired into `seon.config/default-ctx-blocks` at
@@ -348,7 +350,9 @@
          "\n;    done? (my.skills/unload :" (name skill-name) ") ──")))
 
 (defn skill-block
-  "The L2 loaded-body block — the skill's full SKILL.md, `;`-commented.
+  "DEPRECATED — reference for the `live-tile` milestone; see context-rebuild.
+
+   The L2 loaded-body block — the skill's full SKILL.md, `;`-commented.
 
    Eval-safe via [[seon.agent.ctx/quote-lines]], with a DERIVED token-cost
    footer. The skill name comes from the block's own `:skill/<name>` name;

@@ -82,7 +82,7 @@ intricate as it needs to be. The public ns is the discoverable contract; the
 
 Reach for `.internal` whenever a public fn's helpers would otherwise bloat the
 context the agent reads. Keep the public surface to the named request/response
-schemas plus the verb fns.
+schemas plus the function fns.
 
 ---
 
@@ -309,9 +309,9 @@ retract it explicitly — omitting a key means "leave unchanged".)
 
 ---
 
-## Errors Are Values (agent-facing verb boundaries)
+## Errors Are Values (agent-facing function boundaries)
 
-Functions an agent calls directly — the capability verbs — **return an
+Functions an agent calls directly — the capability functions — **return an
 envelope, they do NOT throw**. The canonical shape:
 
 ```clojure
@@ -645,7 +645,7 @@ schema's edges; generative tests alone don't show real-world usage.)
 - **Live verification:** to verify a single behavior fast, eval the fn directly
   against the live pod rather than running a whole test namespace. **Live proof,
   not inference** — read a datom back, observe the running system.
-- **JVM track (paused):** tests run inside the running JVM via REPL verbs —
+- **JVM track (paused):** tests run inside the running JVM via REPL functions —
   `(user/run-tests 'seon.foo-test)`, `(user/test-affected 'seon.foo)` — never by
   spawning a separate process.
 
@@ -655,7 +655,7 @@ See the `/clojure-testing` skill for fixtures, generators, and debugging.
 
 Show the intended workflow — executable documentation. For a behavior that
 doesn't touch the DB, a plain `cljs.test/async` test is enough — the
-capability verbs return Promises, so await them (`<p!` / `.then`) and read the
+capability functions return Promises, so await them (`<p!` / `.then`) and read the
 envelope:
 
 ```clojure
@@ -736,7 +736,7 @@ on the pod.
 ;;      on a registered attr, addressed by lookup-ref [::doc-id "d1"]
 {:seon/id "abc" ::title "x"}
 
-;; BAD: an agent-facing verb that THROWS instead of returning an envelope
+;; BAD: an agent-facing function that THROWS instead of returning an envelope
 (defn grep [req] (throw (ex-info "no match" {})))   ; must return {::ok? false …}
 
 ;; BAD: using :or in destructuring for optional API values

@@ -22,7 +22,7 @@ grep tallies (representative, not exhaustive); "verbatim" excluded from all
 | term cluster | canonical name | must-fix (living docs + agent-facing strings) | rename-unit (code identifiers) | exempt / note only |
 |---|---|---|---|---|
 | "verb(s)" | **functions / schemas / tests** | ~110 living-doc hits + dozens of agent-facing strings (`ctx.cljs`, `menu.cljs`, `toolkit.md` is 100% verb-framed) | **11 symbols** across `eval.cljs` + `menu.cljs`, plus the `:recent-verbs` **block name** (typeahead-lane) | ~1106 hits under `docs/prds/**` research/history — light note only |
-| "rung(s)" / "the ladder" | **capability milestones** (`repl`/`namespaces`/`plan`/`db`/`warnings`/`live-tile`/`subagents`/`soul`) | 124 doc hits incl. the doc filename `minimal-context-ladder.md`; ~13 src comments; config `.edn` comments | none (milestone names already canonical) | dated markers ("rung-0 verdict, 2026-07-10") in code comments — history, light note |
+| "rung(s)" / "the ladder" | **capability milestones** (`repl`/`namespaces`/`plan`/`db`/`warnings`/`live-tile`/`subagents`/`soul`) | 124 doc hits incl. the doc filename `context-rebuild.md`; ~13 src comments; config `.edn` comments | none (milestone names already canonical) | dated markers ("rung-0 verdict, 2026-07-10") in code comments — history, light note |
 | "Mode A / Mode B" | **`:batch` / `:stream`** (`:seon.config/repl-mode`) | 20 doc + 16 src hits, all comments/docstrings (most pair the coinage WITH the canonical value) | none | test.edn comment |
 | "the store" / "memory" (=DB) | **the `db`** (`seon.db`) | ~10 agent-facing docstrings (`namespaces.cljs`, `findings.cljs`, `inventory.cljs`, `render/system.cljs`, `ui/header.cljs`, `web/debug.cljs`, `live_tile.cljs`) | none | `:memory` conn, konserve store, `data/clusters/*/store` path = LEGIT, not flagged |
 | "canvas" vs "live-tile" vs "tile" | **`canvas` = `#world-canvas` focal slot; `live-tile` = the agent-side block; other html = tiles** | seon UI usage is mostly CONSISTENT | none | diffusion's `canvas-text` (`worker_eval`, `worker_validator`, `diffusion/*`) is an unrelated homonym → OWNER note |
@@ -86,7 +86,7 @@ The milestone names are already canonical (`repl`/`namespaces`/`plan`/`db`/
 layered over them.
 
 - **MUST-FIX (living guidance):** the doc filename itself —
-  `docs/prds/agent-ctx/minimal-context-ladder.md` (11 "rung" hits), which
+  `docs/prds/agent-ctx/context-rebuild.md` (11 "rung" hits), which
   the root CLAUDE.md table cites as the milestone definition. The doc name +
   body embody the retired coinage.
 - **src comments (history-flavored, light-fix):** `derive.cljs:137`,

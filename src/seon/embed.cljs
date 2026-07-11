@@ -4,7 +4,7 @@
    The pod is READ-ONLY and carries NO Proximum/Gemini — query embedding + KNN
    live on the JVM wire-server (it owns the embeddings key + the HNSW index).
    This sibling of `seon.embed` (clj — the wire-server FOUNDATION + WRITE +
-   query-side verb) is the pod's thin client over the `knn-search` wire verb:
+   query-side function) is the pod's thin client over the `knn-search` wire function:
 
      pod                                wire-server (JVM)
      ───                                ─────────────────

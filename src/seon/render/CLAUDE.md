@@ -19,8 +19,8 @@ Skills: `ui-live-tiles` (the agent-facing canvas how-to), `datastar-web-ui`.
   transacting hiccup OR a qualified fn symbol onto
   `:seon.render.live-tile/content`. Its docstring and the CSS safelist must
   stay in sync — agents guess from the docstring.
-- **Render-prominence law**: a COMPOSITION verb's value is its worked
-  example — compact/signature renders are for simple-call verbs only.
+- **Render-prominence law**: a COMPOSITION function's value is its worked
+  example — compact/signature renders are for simple-call functions only.
   Compact namespace cards select by presence-sets (`::full-source` /
   `::with-tests`), never a map-of/density enum.
 - Sizes rendered anywhere are TOKENS (`seon.ai.tokens/estimate`).

@@ -68,7 +68,7 @@
       (tokens/clip-str budget)))
 
 (defn- all-agent-ids
-  "Every agent id in the store (root + children), root FIRST then the rest
+  "Every agent id in the db (root + children), root FIRST then the rest
    sorted — the grid order."
   [db]
   (let [ids (or (db/query {:seon.db/db db

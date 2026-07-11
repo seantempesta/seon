@@ -54,7 +54,7 @@
     ;; Pull in the agent's required namespaces at compile time so all
     ;; schemas are registered before start-agent! runs.
     [seon.agent :as agent]
-    ;; Lifecycle verbs (wait/complete/terminate) — host-bundled so the agent
+    ;; Lifecycle functions (wait/complete/terminate) — host-bundled so the agent
     ;; home ns can `:refer` them; required here so the build includes the ns.
     [seon.agent.lifecycle]
     ;; The agent loop + wake trigger: the client boot path ARMS the wake
@@ -149,7 +149,7 @@
     ;; Required here so its register! calls run and the build includes it.
     [my.skills]
     ;; The live-tile/canvas TOOLKIT — the aggregation (`my.data`) + static
-    ;; (`my.ui`) + interactive (`my.tile`) verbs the agent composes its
+    ;; (`my.ui`) + interactive (`my.tile`) functions the agent composes its
     ;; canvas from. Required here so they BUILD + INDEX at boot (their
     ;; `:seon.fn` rows render full in the `:namespaces` block — the worked
     ;; examples, not `(no public fns indexed yet)`). They reference the
@@ -163,7 +163,7 @@
     [my.blob]
     ;; Inert foreign-code values — the `#code` heredoc literal's schemas
     ;; (`:seon.code/lang`/`::text`/`::block`). Required here so register!
-    ;; runs before the reader/fs verbs hand these maps around.
+    ;; runs before the reader/fs functions hand these maps around.
     [seon.code]
     ;; Config-driven context — the OPTIONAL manifest (`config/system.edn`)
     ;; that shapes the agent-context, routes, and global render bounds.
@@ -430,7 +430,7 @@
    :seon.agent/id
    ;; Subagent → parent ref (spawn tree). Boot-installed so the depth-cap walk
    ;; (`seon.agent/spawn-depth`) and the subagents/orphaned-agents sections can
-   ;; QUERY it on a fresh world before any spawn has lazily installed it.
+   ;; QUERY it on a fresh cluster before any spawn has lazily installed it.
    :seon.agent/parent
    ;; Derived-state primitives: the CURRENT run pointer (fencing token +
    ;; spine of derived state) and the terminate marker. Plus the run-bound
@@ -482,7 +482,7 @@
    :seon.agent.run/closed-reason
    ;; Durable return value (Piece 1) + the close instant the Piece 2d breaker
    ;; windows over (`:db/txInstant` can't be backdated) — boot-installed so the
-   ;; subagents section + breaker query them on a fresh world.
+   ;; subagents section + breaker query them on a fresh cluster.
    :seon.agent.run/result
    :seon.agent.run/result-ref
    :seon.agent.run/closed-at
@@ -532,7 +532,7 @@
    ;; The plan TREE edge (parent, plain ref) + the dependency DAG edges
    ;; (needs, plain cardinality-many ref). Boot-installed so the derived
    ;; work-queue rules (next/blocked/ready) query them before any tx has
-   ;; lazily installed them on a fresh world.
+   ;; lazily installed them on a fresh cluster.
    :my.plan/parent
    :my.plan/needs
    ;; The goal/expect/pace narrative attrs — boot-installed so the windowed
@@ -2158,14 +2158,14 @@
 
 (defn- stub-llm
   "A fake LLM that demonstrates the REPL-as-harness response shape: a
-   `;; narration` line then a real `(message/user …)` form — the verb
+   `;; narration` line then a real `(message/user …)` form — the function
    that says something to the human. The FSM halt policy ends the wake
    when no actionable forms remain. Returns a Promise of {:text \"...\"}."
   [arg]
   (let [ctx  (ai/llm-arg->ctx arg)
         text (str
                ";; stub LLM here — the real one needs DEEPSEEK_API_KEY\n"
-               ";; say hello to your human via the message/user verb\n"
+               ";; say hello to your human via the message/user function\n"
                "(message/user\n"
                "  "
                (pr-str (str "hello from the stub LLM — saw "
@@ -2273,7 +2273,7 @@
   "THE ONE way an agent comes to life or re-arms IN-PROCESS. Deterministic, no
    turn-0 ceremony. Steps (fixed order):
      1. resolve cs = compile-state | (ensure-bootstrap!), llm = llm-fn | (current-llm-fn)
-     2. setup-agent-ns!  — wire the home ns requires (the reflexive-verb wiring)
+     2. setup-agent-ns!  — wire the home ns requires (the reflexive-function wiring)
      3. (mint?) agent/boot! — create the entity (+ purpose); on FAILURE do NOT
         arm/host, return the error envelope (no ghost agent, task #21 stance)
      4. install-wake-trigger! {id llm cs}
@@ -2879,7 +2879,7 @@
       (if key-set?
         (log/info-console! "seon.client"
                            (str "using " (name provider) " LLM (API key set)"))
-        ;; LOUD, grep-able marker (rung-1 trap, 2026-07-10): a real provider
+        ;; LOUD, grep-able marker (namespaces-milestone rung-1 trap, 2026-07-10): a real provider
         ;; configured with its key unset silently drove a whole trial on the
         ;; stub. ERROR level + the SEON-STUB-LLM token so harnesses can
         ;; refuse to dispatch against an accidental stub; boot still

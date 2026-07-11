@@ -40,7 +40,9 @@
        "  (seon.agent.shell/job-output {:seon.agent.shell/job-id \"" job-id "\"})"))
 
 (defn jobs-block
-  "Running + recent background shell jobs as a block, or empty when none.
+  "DEPRECATED — shelf idea (jobs); reference only, see context-rebuild.
+
+   Running + recent background shell jobs as a block, or empty when none.
 
    Derived from the live volatile job table at render time — no stored
    state, self-healing (vanishes when the table empties). Each row names

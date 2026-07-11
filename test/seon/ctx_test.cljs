@@ -1482,7 +1482,7 @@
 
 ;; ------------------------------------------------------------
 ;; repl-mode Phase 1 — the fabrication DETECTOR (`first-result-claim`) and
-;; the Mode A reply-boundary STRIP (`strip-result-claims`). The detector
+;; the `:batch` reply-boundary STRIP (`strip-result-claims`). The detector
 ;; SKIPS matches inside a successfully-parsed form span (so a legit `⟹`
 ;; string literal / `:=>` malli schema never fires); the strip DELETES the
 ;; fabricated tails/lines so the clean forms eval and the real rows arrive
@@ -1524,7 +1524,7 @@
     (is (not (str/includes? t "99")) "the fabricated value is gone")))
 
 (deftest strip-result-claims-removes-fabrications-keeps-forms
-  ;; Mode A boundary fix-up: the fabricated tail is spliced out, the form
+  ;; `:batch` boundary fix-up: the fabricated tail is spliced out, the form
   ;; to its left survives, and the count is honest.
   (let [{t :seon.agent.ctx/strip-text n :seon.agent.ctx/strip-count}
         (ctx/strip-result-claims "(+ 1 2) ⟹ 3 ⟸ result/FAKE")]

@@ -85,7 +85,7 @@
    ## Tile updates should be RENDERED DATABASE QUERIES
 
    Transact important findings as linked entities; render by
-   reference. A tile fn that QUERIES the store re-derives on a fresh
+   reference. A tile fn that QUERIES the db re-derives on a fresh
    pod (session resume works for free) — a hardcoded hiccup snapshot
    of a computed value goes stale and dies with the session. This is
    the reactive-context principle applied to the human surface.
@@ -437,7 +437,7 @@
     :else           "Good night"))
 
 (defn user-name
-  "The human's name, when the store carries one.
+  "The human's name, when the db carries one.
 
    From `:seon.user/name` on
    the user entity. Returns `{::user-name \"Sean\"}` or `{}` —

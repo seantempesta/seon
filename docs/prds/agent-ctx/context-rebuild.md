@@ -39,34 +39,47 @@ specs.
 
 ## Phase 0 — cleanup FIRST (owner-ordered)
 
-Before any further capability work:
+**Status (2026-07-11): items 1–3 DONE (the Phase 0 sweep unit), minus the
+coordinated remainders listed under item 1; item 4 still open.**
 
-1. **Vocabulary sweep**: "verb(s)" → "function(s)" across `docs/**`, the
-   `CLAUDE.md` files, and every AGENT-FACING string (docstrings, block
-   teaching, card headers). ~100 hits in the core docs alone; the vision/
-   history docs get a light pass (they are records, not guidance). Code
-   IDENTIFIERS containing "verb" (e.g. the repl routing helpers, the
-   `:recent-verbs` block name) are listed and renamed as their own
-   coordinated unit — symbol renames in the shared tree are atomic,
-   orchestrator-scheduled, and the `:recent-verbs` block belongs to the
-   typeahead lane (coordinate, don't clobber).
-2. **Milestone naming**: "rung N" → the milestone names (table below — real block/namespace names);
-   this doc, the roadmap, the ledger README headers, and memory notes
-   updated. The ledger's historical run data keeps its recorded labels —
+1. **Vocabulary sweep — DONE**: "verb(s)" → "function(s)" across the living
+   docs (`docs/seon/architecture/`, `docs/conventions.md`, the `CLAUDE.md`
+   family, `ORCHESTRATOR.md`, components + a light vision pass) and every
+   AGENT-FACING string (`ctx.cljs` block teaching, `client.cljs` seeds,
+   docstrings, config comments). "Mode A/B" → `:batch`/`:stream` swept from
+   src + config (zero remaining). D2/D3 applied: agent-facing "the
+   store"-meaning-db → "the db"; "ROOT world"/"fresh world" → "root
+   cluster"/"a fresh cluster". D4 landed file-local in `eval.cljs`:
+   `dispatch-repl-form!` / `repl-form-heads` / `repl-form-of` /
+   `record-form-result!`. **Coordinated remainders (typeahead lane, do not
+   clobber):** `seon.agent.ctx.menu` strings + identifiers + the
+   `:recent-verbs` block name (seed-copied into live agents — needs a
+   cluster reset/migration when renamed); the diffusion buffer's
+   `canvas-text` rename (D1). Also deliberately kept: the persisted
+   error-kind keyword `:seon.eval/repl-verb` (a stored VALUE — renaming it
+   is a migration unit, not a string sweep).
+2. **Milestone naming — DONE**: "rung N" → the milestone names (table
+   below); this file RENAMED from `minimal-context-ladder.md` with every
+   reference updated; config header comments name milestones; dated src
+   markers keep the recorded "rung-N" label with the milestone name
+   appended. The ledger's historical run data keeps its recorded labels —
    history isn't rewritten, only living guidance.
-3. **Deprecation labeling**: every legacy block surface that is NOT in the
-   target vision gets an explicit `DEPRECATED` header — docstring line 1 of
-   its render function ("DEPRECATED — reference for the <idea> milestone;
-   see minimal-context-ladder") and its row in this doc — so the old code
-   reads unambiguously as reference material, never as the live pattern to
-   imitate.
-4. **Doc reconciliation**: `docs/seon/architecture/context.md` + `toolkit.md`
-   updated to name the rebuild as the governing arc; stale references to
-   the skills system as load-bearing get the deprecation framing.
+3. **Deprecation labeling — DONE**: every legacy block surface NOT in the
+   target vision carries docstring line 1 `DEPRECATED — … see
+   context-rebuild.`: `jobs-block`, `testrun-block`, `findings-block`,
+   `inventory-block`, `relevant-source-block`, `live-tile-block`,
+   `my.skills/catalog-block` + `skill-block`, and the soul/agents surfaces
+   `file-block`/`-ai`/`-html` + `config/identity-file-blocks`.
+   `seon.agent.ctx.usage` is a live usage extractor, not a block — not
+   labeled.
+4. **Doc reconciliation** (open): `docs/seon/architecture/context.md` +
+   `toolkit.md` updated to name the rebuild as the governing arc; stale
+   references to the skills system as load-bearing get the deprecation
+   framing.
 
-Phase 0 is a single opus unit against this spec; the orchestrator reviews
-the sweep diff (vocabulary changes are cheap to make and expensive to
-half-make).
+Phase 0 ran as a single opus unit against this spec; the orchestrator
+reviews the sweep diff (vocabulary changes are cheap to make and expensive
+to half-make).
 
 ## Capability milestones (formerly "rungs")
 
@@ -248,18 +261,16 @@ here, the registry stays the tracker), the two 2026-07-11 audits
 (research/claude-md-audit + research/vocabulary-audit), and this arc's
 own known defects. Ordered; each is an opus unit against a written spec.
 
-1. **Phase 0 sweep** (task #6, spec above): verbs→functions (~110 living-doc
-   hits; toolkit.md is fully verb-framed; poison surface = agent-facing
-   strings in ctx.cljs/menu.cljs/client.cljs seeds), rungs→milestone names
-   (incl. RENAMING THIS FILE — "ladder" is retired vocabulary; new name
-   `context-rebuild.md`), Mode A/B→`:batch`/`:stream`, DEPRECATED headers
-   on legacy block render fns. Identifier renames listed for coordination
-   (11 symbols + `:recent-verbs`, typeahead-lane-owned). Owner decisions
-   D1–D4 RULED 2026-07-11 (recorded in the vocabulary audit §OWNER
-   DECISIONS): D1 rename the diffusion buffer (typeahead-lane-coordinated),
-   D2 agent prose says "the db" ("store" = physical store/konserve/blob
-   only), D3 "root cluster" replaces "root world" in prose, D4 the rename
-   target is `repl-form` (`dispatch-repl-form!` etc.).
+1. **Phase 0 sweep — DONE 2026-07-11** (task #6, spec above): verbs→
+   functions across living docs + agent-facing strings, rungs→milestone
+   names (this file renamed to `context-rebuild.md`), Mode A/B→
+   `:batch`/`:stream` (zero remaining in src/config), DEPRECATED headers on
+   legacy block render fns, D2/D3 prose fixes, D4 renames in `eval.cljs`.
+   **Remaining, coordinated with the typeahead lane:** `menu.cljs` strings
+   + identifiers + the `:recent-verbs` block name (seed-copied — cluster
+   reset/migration required), and the diffusion `canvas-text` rename (D1).
+   Owner decisions D1–D4 RULED 2026-07-11 (recorded in the vocabulary
+   audit §OWNER DECISIONS).
 2. **Harness consolidation** (task #4): port the milestone harness into
    src-inspect-ai (contracts→datasets, oracles+fab-analyze→scorers, model
    column), retire tmp/*-drive.sh + the tmp/t4-* fixtures into proper
