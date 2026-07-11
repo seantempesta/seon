@@ -73,13 +73,19 @@ their run via `:seon.agent.turn/run`.
 The two bounds are deliberately separate (the k8s split: a `backoffLimit` count
 vs an `activeDeadlineSeconds` clock):
 
-- **Work-quantity bound (derived).** The effective turn budget is **base
-  `:seon.agent/default-turn-limit` plus the count of inbound messages received
-  during the run** — nothing per-message is stored. Every inbound that lands
-  mid-run earns +1 turn, so a message arriving during an LLM call always earns a
-  turn to be **seen and answered**. The current turn is itself a derived count of
-  `:seon.agent.turn/run` datoms — `seon.derive/run-turn-count`. A stored
-  override appears only when a process *explicitly* bumps or stops the budget.
+- **Work-quantity bound (derived) — denominated by the REPL mode.** The unit is
+  **turns under `:batch`, forms under `:stream`** (the `:seon.config/repl-mode`
+  datom — [[context]] §"The REPL mode is a datom"; the manifest-absent default is
+  per-model, DeepSeek → `:stream`). Under `:batch` the effective budget is base
+  `:seon.agent/default-turn-limit` (20) and the current turn is a derived count of
+  `:seon.agent.turn/run` datoms — `seon.derive/run-turn-count`. Under `:stream` a
+  turn evals at most one form, so the budget is **form-denominated**
+  (`seon.agent.run/default-form-limit` 60) and the count is
+  `seon.derive/run-form-count` — so prose/orientation turns burn nothing. Either
+  way, **plus the count of inbound messages received during the run** — nothing
+  per-message is stored. Every inbound that lands mid-run earns +1, so a message
+  arriving during an LLM call always earns a unit to be **seen and answered**. A
+  stored override appears only when a process *explicitly* bumps or stops the budget.
 - **Wall-clock bound (`deadline`).** A run opens with `deadline = started-at +`
   the agent's `:seon.agent/default-deadline-ms` (or a generous global default).
   It is an **absolute instant**, so it survives restart and is a pure DB read;
@@ -409,8 +415,14 @@ independent per-step seeders:
   seam ([[data-model]] §5.6, which also holds the per-test recipe).
 
 Each agent's block loadout is shaped from the same manifest at create
-(`resolve-loadout`, the install!/seed-copy mechanism owned by [[ui]]); SOUL.md /
-AGENTS.md are NOT seed steps — they are reactive `file-block`s re-read every render.
+(the `install!`/seed-copy mechanism owned by [[ui]]). The identity file-blocks
+(`file-block`/`-ai`/`-html`, `config/identity-file-blocks`) that re-read SOUL.md /
+AGENTS.md every render are **DEPRECATED and out of the running tree** (their render
+fns carry `DEPRECATED` docstrings): AGENTS.md's operating rules are being MINED
+per-line into the `:seon.config/system-text` datom + the relevant block's own
+teaching, and `soul` returns as a capability milestone (identity as DB state,
+possibly inside system-text), not a re-read file. See [[context-rebuild]] ("The
+idea inventory").
 
 ## The orchestrator-root + agent lifecycle
 

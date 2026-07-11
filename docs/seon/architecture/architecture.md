@@ -72,7 +72,7 @@ concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
    present: always-on context beats loadable skills, and composition functions
    render FULL — [[laws]].)
 3. **The agent authors its own environment.** A `defn` returning
-   `:seon.render/ai` and/or `:seon.render/html` is a block and/or tile —
+   `:seon.render/ai` and/or `:seon.render/hiccup` is a block and/or tile —
    writing a function IS authoring context, tools, and UI at once. Both keys =
    twins: agent and human look at ONE derived value; shared situational
    awareness is structural, not messaged (canvas-first mitigates fabrication —
@@ -123,9 +123,11 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
   via `seon.eval/lookup-value`). `:seon.render/ai`.
 - **html render** — a block's hiccup output → a tile. `:seon.render/html`.
 - **prompt** — the agent's assembled context: ai renders concatenated by priority
-  (`seon.agent.ctx/render-context`), prefixed by a fixed system role
-  (`seon.agent.ctx/system-text`, a code const — not a block, not per-request
-  overridable).
+  (`seon.agent.ctx/render-context`), prefixed by a system role resolved by
+  `seon.ai/effective-system-prompt` — the per-request `:seon.ai/system-prompt`
+  override → the cluster's `:seon.config/system-text` datom → the shipped
+  `seon.agent.ctx/system-text` default. The system prompt is DB state and
+  per-request overridable ([[context]] §"The system prompt itself is DB state").
 - **page** — the human's UI: a layout placing html renders into slots. `seon.ui.*`.
 - **tile** — an html render placed in a slot (the live UI element).
 - **slot** — a named, DB-keyed hole in a layout: `(slot :name)` →
@@ -377,8 +379,8 @@ doc; this one stays pure target.
   `/agents/run` door.
 - [[context]] — the dynamic context system: `context = f(db, location,
   window, tail)`, the three-band cache gradient (stable prefix / sliding
-  transcript window / free dynamic tail), namespace-as-location, the
-  affordance tail, and the UI twin of every band.
+  transcript window / free dynamic tail), namespace-as-location, pull-first
+  relevance retrieval, and the UI twin of every band.
 - [[laws]] — the drive-measured empirical laws (render-prominence,
   cache-stability, canvas-first, pass^k, keep-iff-lifts-battery) that
   constrain every design above. Not principles — measurements.

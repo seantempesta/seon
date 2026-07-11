@@ -486,37 +486,23 @@ DERIVED roll-up of its children's status — there is no separate plan system. T
 `:my.plan/*` schema, the tree shape, the roll-up derivation, and per-agent scoping
 live in [[data-model]]. **Budget:** ~1.6k tok.
 
-#### `my.skills` — floor: `seon.agent.ctx` (`install!`/`remove!`) + the `:my.skills/*` schema
+#### `my.skills` — DEPRECATED (the loadable-skills system is retiring)
 
-**Why reach for it:** load a skill's full knowledge into context only while you need
-it, and drop it when done. The always-on catalog costs ~1 line per skill; a loaded
-body shows its own token cost so the trade is visible and the unload is one function away.
+The `my.skills` load/unload facade — the always-on `catalog-block`, the loaded
+`skill-block`, the `SEON_SKILLS_DIR` corpus scan, the `default-load` seed — is
+**retiring**, and its render fns carry `DEPRECATED` docstrings (the `my.*` catalog
+above deliberately no longer lists it). Its job — discoverable, on-demand
+expertise — dissolves into three pieces that need no catalog: **compact cards**
+(a home-required ns's function heads + docstring line 1 + schema ARE the
+discoverable surface — proven at the `repl`/`namespaces` milestones), **state-gated
+block teaching** (each block carries its own teaching, colocated), and **pull
+references** (`my.kb` and any deeper manual read on demand — the db is
+self-describing, never pushed). See [[context-rebuild]] ("The idea inventory" +
+"Deliberately NOT blocks") and the target surface in [[data-model]] §5.5.
 
-**Floor:** `seon.agent.ctx` (`install!`/`remove!` over `:seon.agent/ctx`) + the
-`:my.skills/*` schema. A loaded skill IS a `:seon.agent.ctx/block` — NOT a parallel
-context system: `load` = `install!`, `unload` = `remove!`, the agent's loaded set
-persists in its own `:seon.agent/ctx`.
-
-Surface: `load` → installs the skill's SKILL.md body as a `:skill/<name>` block (the
-full body, priority 30 — the volatile band, so loading doesn't bust the cached static
-prefix); `unload` → removes it (back to the catalog line); `list` → the rows + a
-DERIVED `loaded?`. The always-on `catalog-block` (priority 12) renders one
-`:name — description` line per skill with a `●/○` loaded marker; the loaded
-`skill-block` renders the body `;`-commented + a DERIVED token-cost footer (`~N tok` +
-the `(unload :name)` hint). Markers/cost are pure projections — no stored "loaded" flag.
-
-**The corpus is the dedicated agent skills dir.** At boot the `:core-skills` seed
-scans `SEON_SKILLS_DIR` (default `seon-skills/`) for `<name>/SKILL.md` and seeds one
-`:my.skills` row each (frontmatter `name`+`description`; the body stays in the file,
-read fresh at render). ONE corpus, split by consumer on disk: `seon-skills/` is the
-AGENT corpus (datahike, clojurescript, repl, data-oriented-clojure, ui-live-tiles…);
-`.claude/skills/` holds Claude-Code/dev skills (browser-automation, clojure-testing)
-plus symlinks back to the shared ones — edit a skill, every consumer gets it.
-`seon.config` curates the scan per cluster and can seed a skill body always-on
-(`default-load`, e.g. `:repl` for every agent — see [[loadable-skills]]). The
-`:my.skills/*` schema + the file-backed-vs-inline (attribute-presence) distinction
-live in [[data-model]]. **Budget:** catalog ~0.7k tok always-on; a loaded body costs
-what its footer says (e.g. datahike ~2.6k tok).
+The block mechanism the facade rode on is unaffected: `install!`/`remove!` over
+`:seon.agent/ctx` stays the sole seed/override path, so pinning any knowledge fn
+as a block is still one `install!` ([[ui]]).
 
 #### `my.test` — floor: `seon.test.runner`
 

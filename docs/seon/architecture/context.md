@@ -175,8 +175,11 @@ A `defn` whose input accepts the db and whose output carries a render key is
 a **renderer**, and the keys present decide where it goes:
 
 - `{:seon.render/ai …}` → a **block**: its string joins the agent's prompt.
-- `{:seon.render/html …}` → a **tile**: its own hiccup surface on the
+- `{:seon.render/hiccup …}` → a **tile**: its own hiccup surface on the
   agent's page (each block has its own separate tile — not a merged vector).
+  (`:seon.render/hiccup` is the fn's OUTPUT-map key that twin-detection reads,
+  `seon.agent.ctx.render-fns/twin-keys`; `:seon.render/html` is the stored
+  block/pin ATTR and the render-engine view selector — [[ui]].)
 - **both keys → twins**: one value, two projections — the agent's context
   and the human's screen showing the same thing.
 
@@ -198,7 +201,7 @@ Derive the default, store only the pin — the same rule as everywhere else.
 (Honest bound: a tile that reaches attrs only dynamically — never naming
 them — follows only its own redefinitions.)
 
-This is the block's two renders (`:seon.render/ai` / `:seon.render/html`),
+This is the block's two renders (`:seon.render/ai` / `:seon.render/hiccup`),
 now emitted by any in-scope `defn`, not only by seeded blocks. Its args are
 the db value (all data is reachable from it — [[think-in-clojure]]); it
 `require`s only the *code* it calls. It is pure over the frozen db, so it
@@ -316,12 +319,15 @@ order is deterministic:
    busts the cache — the cache-stability law). Only the leading edge moves.
    What must outlive the window goes to the DB (plan, kb, blobs), not
    transcript residue; a large inbound payload clips to a blob ref.
-5. **predicted relevance, last** — the only recompute-every-step region, a
-   capped token budget (config dial): fns whose *input* specs match the
-   shapes the agent is holding (a graph query — [[think-in-clojure]] §1) and
-   embedding neighbors for the current activity. Competes with nothing
-   cached; vanishes when its queries return empty; every element earns its
-   place in drives.
+5. **pull-first relevance (conditional, not a standing band)** — retrieval
+   beyond the current `ns` — fns whose *input* specs match the shapes the agent
+   is holding (a graph query — [[think-in-clojure]] §1) and embedding neighbors
+   for the current activity — is a search the agent CALLS, not a pushed block.
+   The context rebuild demoted it from a standing order position to pull-first:
+   it becomes a recompute-every-step tail block (a capped token budget, config
+   dial) only if a drive proves the need. When present it competes with nothing
+   cached and vanishes when its queries return empty; every element earns its
+   place in drives. ([[context-rebuild]] §"Deliberately NOT blocks".)
 
 Code grows slowly against tokens spent running things, so groups 1–2 are the
 compounding asset: as the agent persists schemas, fns, and tests, its own
@@ -399,8 +405,10 @@ escape hatch) → the singleton's `:seon.config/system-text` datom (seeded from
 the manifest key; absent from the default manifest, so the default cluster is
 byte-identical) → the shipped `seon.agent.ctx/system-text`. A cluster owns its
 whole instruction floor from its own manifest file — `config/minimal.edn` is
-the worked example: the transcript block alone plus a ~20-line REPL prompt,
-the rung-0 world the capability ladder measures from. Its companion rule:
+the worked example: it `#include`s `system.edn` and INHERITS the graduated
+v3.1 system-text (the one source `system.edn` carries), supplying only a
+minimal block tree (namespaces + transcript) — the base the `repl` capability
+milestone measures from. Its companion rule:
 **a manifest that supplies an explicit `:seon.agent/ctx` declares the COMPLETE
 block tree** — nothing (identity file-blocks included) is auto-prepended onto
 an enumerated tree.
