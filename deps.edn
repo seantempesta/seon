@@ -99,10 +99,9 @@
   :fork-deps
   {:extra-deps {org.replikativ/datahike
                 {:git/url "https://github.com/seantempesta/datahike"
-                 :git/sha "1598a824be92390d3eda34988dc08029e43eda19"}}
+                 :git/sha "6e2d9beeb5002ba025e2f3aa69cd9111afd7abf8"}}
    :override-deps {org.replikativ/konserve
-                   {:git/url "https://github.com/seantempesta/konserve"
-                    :git/sha "32e3c59847184c3b4a3acea87797ed9c864a0ff7"}}}
+                   {:mvn/version "0.9.353"}}}
 
   :simd
   {:jvm-opts ["--add-modules" "jdk.incubator.vector"
@@ -307,17 +306,14 @@
          ;; PR-shaped pending upstream review.
          :override-deps {org.replikativ/datahike
                          {:git/url "https://github.com/seantempesta/datahike"
-                          :git/sha "1598a824be92390d3eda34988dc08029e43eda19"}
-                         ;; konserve header fix (2.2d Stage A): CLJS
-                         ;; meta-size BE32 at bytes 4-7 + legacy 1-byte
-                         ;; sniff in parse-header, so JVM- and Node-written
-                         ;; stores are mutually readable. Fork repo has no
-                         ;; pushable remote (mvn 0.9.346 deployed from it)
-                         ;; => :local/root until a new mvn deploy.
-                         ;; Konserve repo commit: 32e3c598 (sync-only).
+                          :git/sha "6e2d9beeb5002ba025e2f3aa69cd9111afd7abf8"}
+                         ;; konserve: the header fix (CLJS meta-size BE32 +
+                         ;; legacy sniff) is UPSTREAMED (#143); 0.9.353 also
+                         ;; carries #144 per-write metadata REQUIRED by the
+                         ;; merged datahike (6e2d9bee). Fork carve-out retired
+                         ;; 2026-07-11.
                          org.replikativ/konserve
-                         {:git/url "https://github.com/seantempesta/konserve"
-                            :git/sha "32e3c59847184c3b4a3acea87797ed9c864a0ff7"}
+                         {:mvn/version "0.9.353"}
                          org.replikativ/superv.async
                          ;; Patched simple-supervisor's stale-pending
                          ;; watchdog to be LAZY: instead of starting a
@@ -334,8 +330,8 @@
                          {:git/url "https://github.com/seantempesta/superv.async"
                           :git/sha "3e6ed755f83634c9e9bbb58707f9446420d32ce9"}
                          is.simm/partial-cps
-                         {:git/url "https://github.com/seantempesta/partial-cps"
-                          :git/sha "c0d941d4b591351267bc828fdfdf029be53a132f"}}
+                         {:git/url "https://github.com/simm-is/partial-cps"
+                          :git/sha "1e119b03ea908ad925b98f9ba0a26371c65441e3"}}
          :main-opts     ["-m" "shadow.cljs.devtools.cli"]}
 
   :nrepl {:jvm-opts ["-Xms512m"
