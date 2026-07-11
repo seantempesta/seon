@@ -15,9 +15,10 @@ index into what agent-fsm shipped.
 **Do not read this folder for current state.** Anything about what is running
 now, which issues are open, or which surfaces are live is authoritative in the
 leaf `src/seon/**/CLAUDE.md` files and `docs/seon/architecture/`, not here.
-(Historical footgun: prior versions of this file listed already-closed issues as
-open and called `/world` "retired" — both wrong; `serve.cljs` redirects `/` →
-`/world`, the live human surface, and the leaf files hold the true issue status.)
+(Historical footgun: prior versions of this file described the route surface and
+went stale. The route truth lives in ONE place — `src/seon/web/CLAUDE.md`
+(post-cutover: `/` IS root's world/dashboard, the fleet roster is `/agents`,
+`/world` is retired). Read that leaf file for routes, not this one.)
 
 ## What agent-fsm delivered
 

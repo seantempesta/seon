@@ -14,7 +14,7 @@
 
    These are the operator/developer introspection surfaces (raw prompt,
    cache-line audit, stored datoms) — distinct from the agent-WORLD renderers
-   (`seon.web.datastar`), which own `/`, `/world`, `/agent/<id>`. The routes
+   (`seon.web.datastar`), which own `/`, `/agents`, `/agent/<id>`. The routes
    are wired into `seon.web.router`'s static supplement as plain reitit routes.
 
    Both per-agent panes derive from `inspect/ctx-preview` (soul system block
@@ -187,6 +187,26 @@
      ::live-cached-tokens (some-> usage :seon.agent.ctx.usage/cached)
      ::provider-shape     (some-> usage :seon.agent.ctx.usage/provider-shape)}))
 
+(defn- html-block-names
+  "Set of the agent's `:seon.agent.ctx/name`s whose block carries a
+   `:seon.render/html` render. A block NOT in this set is AI-ONLY (prompt
+   text, no html twin); the right pane renders those as a clean placeholder
+   rather than the raw ctx entity map the render engine falls back to
+   pr-str'ing (`{:db/id …, :seon.agent.ctx/name …}`)."
+  [db agent-id]
+  (->> (when-let [eid (ffirst
+                        (db/query {:seon.db/db    db
+                                   :seon.db/query '[:find ?a
+                                                    :in $ ?id
+                                                    :where [?a :seon.agent/id ?id]]
+                                   :seon.db/args  [agent-id]}))]
+         (:seon.agent/ctx
+           (db/pull db '[{:seon.agent/ctx [:seon.agent.ctx/name
+                                           :seon.render/html]}] eid)))
+       (filter #(contains? % :seon.render/html))
+       (map :seon.agent.ctx/name)
+       set))
+
 (defn- snapshot
   "Compute one render snapshot for `agent-id`:
      {:ai-text <string>
@@ -209,10 +229,15 @@
         section-texts (expand-namespaces-section (or section-texts []))
         ;; Each section twin → one right-pane card, in render order. The
         ;; card-key is the section name so idiomorph preserves the node
-        ;; across SSE morphs.
+        ;; across SSE morphs. `::ai-only?` marks blocks with no
+        ;; `:seon.render/html` — their `:seon.render/hiccup` is the engine's
+        ;; entity-map fallback, so the card renders a placeholder instead.
+        html-names (html-block-names db agent-id)
         cards (->> section-html
                    (mapv (fn [{nm :seon.agent.ctx/name h :seon.render/hiccup}]
-                           {::hiccup   h
+                           {::name     nm
+                            ::hiccup   h
+                            ::ai-only? (not (contains? html-names nm))
                             ::kind     (str nm)
                             ::card-key (str "section-" (clojure.core/name nm))})))
         turn-durs []
@@ -296,7 +321,7 @@
       (str "~" token-est " tokens")]
      [:a {:href (str "/agent/" agent-id)
           :class "text-xs text-amber-500 hover:text-amber-300"} "← agent"]
-     [:a {:href "/world"
+     [:a {:href "/agents"
           :class "text-xs text-amber-500 hover:text-amber-300"} "← all agents"]]))
 
 (def ^:private open-ai-sections
@@ -361,13 +386,20 @@
    PRESERVES the node across SSE morphs and only genuinely-new sections
    animate in. The hiccup is the section's `:seon.render/html` twin (or a
    banner if it threw — the composer's guard never hands us nil)."
-  [{::keys [hiccup kind card-key]}]
+  [{::keys [hiccup kind card-key ai-only?]}]
   [:div {:id card-key
          :class (str "border-l-2 border-amber-700/40 pl-2 py-1 "
                      "animate-appear")}
    [:div {:class "text-xs font-mono font-semibold text-text-400 mb-0.5"}
     kind]
-   [:div {:class "mt-0.5"} hiccup]])
+   [:div {:class "mt-0.5"}
+    (if ai-only?
+      ;; No html twin — never dump the raw ctx entity map. The block's text
+      ;; is in the left (`:seon.render/ai`) pane; this pane shows only html
+      ;; renders, so name it as ai-only and point there.
+      [:div {:class "text-text-600 italic text-xs font-mono py-0.5"}
+       "ai-only block — no html twin; its text is in the left pane"]
+      hiccup)]])
 
 (defn- thinking-bubble
   "Placeholder bubble pinned under the newest card while the agent is
@@ -475,7 +507,7 @@
     [:div {:id (context-bar-id agent-id)
            :class (str "shrink-0 border-t border-base-800 bg-base-900 "
                        "px-2 pt-5 pb-1.5")}
-     [:div {:class "flex items-center gap-3 mb-1 text-[10px] font-mono text-text-400"}
+     [:div {:class "flex flex-wrap items-center gap-x-3 gap-y-0.5 mb-1 text-[10px] font-mono text-text-400"}
       [:span {:class "text-text-200"} "context"]
       [:span {:class "text-amber-400"}
        (str "~" total-tokens " tok total")]
@@ -486,7 +518,7 @@
          (str "live cached " live-cached-tokens " tok"
               (when provider-shape (str " · " (clojure.core/name provider-shape))))]
         [:span {:class "text-text-600 italic"} "no live usage yet"])
-      [:span {:class "ml-auto text-text-600"} "stable prefix amber · volatile tail grey"]]
+      [:span {:class "shrink-0 text-text-600"} "stable prefix amber · volatile tail grey"]]
      [:div {:class "relative h-6 w-full flex rounded-sm overflow-visible bg-base-950 border border-base-800"}
       (if (seq segments)
         (into [:div {:class "flex w-full h-full rounded-sm overflow-hidden"}]
@@ -887,7 +919,7 @@
          "what this cluster stored after bootstrap")]
       [:div {:class "ml-auto flex items-baseline gap-4"}
        (data-toggle-link params)
-       [:a {:href "/world"
+       [:a {:href "/agents"
             :class "text-xs font-mono text-amber-500 hover:text-amber-300"}
         "← all agents"]]]
      (if data-ns
@@ -953,7 +985,7 @@
             (str "agent " agent-id " is not in this cluster store")]
            [:div {:class "text-text-500 text-xs mb-4"}
             "it belonged to a previous store — this tab is stale"]
-           [:a {:href "/world"
+           [:a {:href "/agents"
                 :class "text-amber-500 hover:text-amber-300 text-xs underline"}
             "← all live agents"]]]]))))
 

@@ -20,6 +20,13 @@ note the browser 503s long-lived SSE; verify feeds with a node gunzip client).
   route table is data. `/call` is the ONE action door; the capability gate
   authorizes the fn. New pages = new route datoms + layouts, not new
   handlers.
+- **Route truth (the ONE place — link here, don't restate):** `/` IS root's
+  own world = the dashboard (`datastar/serve-root!`, NOT a redirect); `/agents`
+  + `/agents/feed` = the fleet roster (`world-view`); `/agent/{id}` +
+  `/agent/{id}/feed` = a per-agent world; `/agent/{id}/call` = the action door.
+  The old `/world` roster path is **retired** — its links now point at
+  `/agents`. Route changes are `:seon.route/*` datom seeds, so a
+  `bin/seon cluster reset default` is required for a new/renamed route to land.
 - **`datastar.cljs`** — the live channel: one tx-listener on the replica
   derives the WHOLE element (`view = f(db-as-of t)`) and pushes one gzip
   datastar **morph**; idiomorph diffs client-side; a coalescing throttle

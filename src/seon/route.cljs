@@ -64,7 +64,9 @@
 ;;
 ;; `root = /` (root-os-vision, owner 2026-06-28): the all-agents overview IS the
 ;; root agent's world, so `/` IS the dashboard and `/agent/{id}` is uniform for
-;; EVERY agent incl `/agent/root`. `/world` + `/world/feed` are RETIRED. `/`'s
+;; EVERY agent incl `/agent/root`. The old `/world` + `/world/feed` roster path
+;; is RETIRED; the fleet roster lives at `/agents` + `/agents/feed` (a name that
+;; does not compete with "/ IS the dashboard"). `/`'s
 ;; handler is `seon.web.datastar/serve-root!` — it serves root's world shim page
 ;; (the per-agent page bound to the literal id "root"); the page's feed opens
 ;; `/agent/root/feed`, whose world-layout renders root's canvas =
@@ -101,6 +103,15 @@
   []
   [{::pattern "/"                ::method :get  ::name ::root
     ::handler 'seon.web.datastar/serve-root!}
+   ;; The explicit fleet roster — id + DERIVED state + purpose line-1 per
+   ;; agent, linking to each `/agent/{id}` world. `/` stays root's own
+   ;; dashboard; `/agents` is where the fleet enumerates (the retired `/world`
+   ;; roster, re-seeded under a name that doesn't compete with "/ IS the
+   ;; dashboard"). Shim page + its long-lived gzip roster feed sibling.
+   {::pattern "/agents"          ::method :get  ::name ::agents
+    ::handler 'seon.web.datastar/serve-agents-page!}
+   {::pattern "/agents/feed"     ::method :get  ::name ::agents-feed
+    ::handler 'seon.web.datastar/open-roster-feed!}
    {::pattern "/agent/{id}"      ::method :get  ::name ::agent
     ::handler 'seon.web.datastar/serve-agent-page!}
    {::pattern "/agent/{id}/feed" ::method :get  ::name ::agent-feed

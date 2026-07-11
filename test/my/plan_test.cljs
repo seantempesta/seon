@@ -432,6 +432,30 @@
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
+(deftest plan-carries-child-description-through-to-the-db
+  ;; Regression: compile-plan's walk once dropped :my.plan/description on
+  ;; children (the ::node schema accepts it, step! persists it, and the tile
+  ;; renders a `desc` row from it — but plan!-authored children silently lost
+  ;; it). Assert a child's description survives the tempid compiler + tx.
+  (async done
+    (-> (with-agent-conn
+          (fn []
+            (-> (plan/plan!
+                  {:my.plan/title "root"
+                   :my.plan/children
+                   [{:my.plan/title       "child with a description"
+                     :my.plan/ref         "kid"
+                     :my.plan/description "why this step exists"}]})
+                (.then (fn [{:my.plan/keys [ok? ids]}]
+                         (is (true? ok?))
+                         (let [t (d/pull @db/*conn* '[:my.plan/description]
+                                         [:my.plan/id (get ids "kid")])]
+                           (is (= "why this step exists"
+                                  (:my.plan/description t))
+                               "plan! carried the child's description into the db")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 (deftest step-parent-and-needs-structure-and-block-the-queue
   (async done
     (let [st (atom {})]

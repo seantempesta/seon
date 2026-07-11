@@ -102,10 +102,11 @@
 (schema/register! ::plan-node
   [:schema {:registry {::node [:map
                                [::title ::title]
-                               [::ref      {:optional true} :string]
-                               [::after    {:optional true} [:vector :string]]
-                               [::expect   {:optional true} ::expect]
-                               [::children {:optional true} [:vector [:ref ::node]]]]}}
+                               [::ref         {:optional true} :string]
+                               [::after       {:optional true} [:vector :string]]
+                               [::description {:optional true} ::description]
+                               [::expect      {:optional true} ::expect]
+                               [::children    {:optional true} [:vector [:ref ::node]]]]}}
    [:ref ::node]])
 
 (schema/register! ::plan-request

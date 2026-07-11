@@ -9,14 +9,18 @@
    `datastar-patch-elements` event (flushed immediately) to every open
    stream — a single whole-element morph (no per-tile `{id,html}` streaming).
 
-   ## The two routes (added additively to seon.web.serve's dispatch)
+   ## The surfaces (seeded `:seon.route/*` datoms → this ns's handlers)
 
-     GET /world       → the shim page: loads datastar.js + opens the feed
-                        via `data-init=\"@get('/world/feed')\"`, with an
-                        empty `<main id=\"world\">` morph target.
-     GET /world/feed  → the long-lived gzip SSE stream. On open it sends an
-                        initial paint; thereafter every tx broadcasts a
-                        whole-`#world` morph.
+     GET /agents       → the roster shim page ([[serve-agents-page!]]): loads
+                         datastar.js + opens the feed via
+                         `data-init=\"@get('/agents/feed')\"`, empty
+                         `<main id=\"world\">` morph target.
+     GET /agents/feed  → the long-lived gzip roster SSE stream
+                         ([[open-roster-feed!]] → [[world-view]]).
+     GET /agent/{id}   → one agent's world ([[serve-agent-page!]]); its
+     GET /agent/{id}/feed  gzip feed ([[open-agent-feed!]] → world-layout).
+     GET /             → root's world ([[serve-root!]]); `/` IS root's
+                         dashboard, so `/agents` is the explicit fleet roster.
 
    ## Wire format (grounded in datastar consts.clj + the proven ds-spike.js)
 
@@ -78,26 +82,45 @@
 ;; view = f(db) — the live agent roster as `[:main#world …tiles…]`.
 ;; ============================================================
 
+(def ^:private roster-state-dot
+  "DERIVED FSM state → the Phosphor dot color class for a roster row."
+  {:running    "text-signal"
+   :idle       "text-text-400"
+   :paused     "text-warning"
+   :terminated "text-text-500"})
+
 (defn- agent-tile
-  "One roster tile for `id` — a LINK to that agent's world (`/agent/<id>`),
-   showing its id + DERIVED FSM state. `derive-state` is guarded so a single
-   bad agent can never abort the whole-view render. The `<a>` makes the roster
-   navigable (P1) instead of a set of dead `<li>`s; `text-signal` marks it as a
-   link in the Phosphor palette."
+  "One roster row for `id` — a LINK to that agent's world (`/agent/<id>`)
+   showing its id, DERIVED FSM state as a dot+text chip, and its purpose
+   line-1 (when set). `derive-state` + the purpose pull are each guarded so a
+   single bad agent can never abort the whole-view render (the never-crash
+   floor). Keeps the `world-agent-<id>` id so idiomorph anchors the row."
   [db id]
-  (let [state (try (derive/derive-state db id) (catch :default _ :unknown))]
-    [:li {:id (str "world-agent-" id) :class "world-tile"}
-     [:a {:href (str "/agent/" id) :class "world-tile-id text-signal"}
-      id
-      [:span {:class "world-tile-state"} (str " ● " (name state))]]]))
+  (let [state   (try (derive/derive-state db id) (catch :default _ :unknown))
+        purpose (try (:seon.agent/purpose
+                       (db/pull db '[:seon.agent/purpose] [:seon.agent/id id]))
+                     (catch :default _ nil))
+        p1      (when (seq purpose) (first (str/split-lines purpose)))
+        dot-cls (get roster-state-dot state "text-text-500")]
+    [:li {:id (str "world-agent-" id) :class "border-b border-base-800"}
+     [:a {:href  (str "/agent/" id)
+          :class "flex items-center gap-3 px-3 py-2 hover:bg-base-900 text-xs font-mono"}
+      [:span {:class "text-signal font-semibold shrink-0 w-40 truncate"} id]
+      [:span {:class (str "flex items-center gap-1 shrink-0 w-24 " dot-cls)}
+       [:span "●"] [:span (name state)]]
+      [:span {:class "text-text-400 truncate min-w-0"} (or p1 "")]]]))
 
 (defn world-view
-  "view = f(db): the live agent roster as `[:main#world …tiles…]`.
+  "The live agent roster (`/agents`) as `[:main#world …rows…]` = f(db).
+
+   Every agent is a row (id, DERIVED FSM state, purpose line-1) linking to
+   its `/agent/<id>` world.
 
    Pure of external state — reads only the supplied db value, so the same
    db always renders the same hiccup. NEVER throws (the whole-view morph
    engine must be crash-proof): a render error degrades to a visible error
-   tile inside `#world`."
+   tile inside `#world`. Root id stays `world` — the morph target the shim
+   page declares."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]] :any]}
   [db]
   (try
@@ -106,18 +129,24 @@
                                                :where [?a :seon.agent/id ?id]]})
                    (map first)
                    sort)]
-      [:main {:id "world" :class "world"}
+      [:main {:id "world" :class "flex flex-col gap-3 w-full"}
        (header/system-header db)
        header/header-spacer
-       [:h1 {:class "world-title"} "Seon world"]
-       [:div {:id "world-count" :class "world-count"}
-        (str (count ids) " agent" (when (not= 1 (count ids)) "s"))]
-       [:ul {:id "world-roster" :class "world-roster"}
-        (for [id ids]
-          (agent-tile db id))]])
+       [:header {:class "flex items-center justify-between border-b border-base-800 pb-2"}
+        [:div {:class "flex items-center gap-2"}
+         [:a {:href "/" :class "text-text-400 text-xs font-mono"} "← home"]
+         [:span {:class "text-text-500 text-2xs uppercase tracking-wider"} "agents"]]
+        [:span {:id "world-count" :class "text-text-400 text-xs font-mono tabular-nums"}
+         (str (count ids) " agent" (when (not= 1 (count ids)) "s"))]]
+       (if (seq ids)
+         (into [:ul {:id "world-roster"
+                     :class "flex flex-col border border-base-800 rounded-md bg-base-900 overflow-hidden"}]
+               (map #(agent-tile db %) ids))
+         [:div {:id "world-empty" :class "text-text-500 text-xs font-mono"}
+          "no agents yet"])])
     (catch :default e
-      [:main {:id "world" :class "world"}
-       [:div {:id "world-error" :class "world-error"}
+      [:main {:id "world" :class "flex flex-col gap-3 w-full"}
+       [:div {:id "world-error" :class "text-error text-xs font-mono"}
         (str "render error: " (.-message e))]])))
 
 (defn- view-fn-patch
@@ -248,6 +277,18 @@
          ;; (seon.ui.clojure/clj->hiccup, via seon.render/block) — the eval
          ;; cards on the transcript/canvas highlight without any client JS.
          "<link rel=\"stylesheet\" href=\"/css/highlight-github-dark.css\">\n"
+         ;; Phosphor Terminal control styling — the native-blue range thumb/
+         ;; track (the time-travel scrubber) + the default blue focus ring on
+         ;; text inputs (chat / new-agent bars) are the two loudest breaks on
+         ;; an otherwise warm-black/amber page. `accent-color` tints the range
+         ;; amber cross-browser; the focus ring becomes an amber 1px ring.
+         ;; Placed BEFORE the optional brand stylesheet so a downstream brand
+         ;; still wins the cascade.
+         "<style>"
+         "input[type=range]{accent-color:#f0b429;}"
+         "input[type=text]:focus,input[type=text]:focus-visible"
+         "{outline:none;border-color:#b45309;box-shadow:0 0 0 1px #b45309;}"
+         "</style>\n"
          (brand/css-style-tag)
          "<script type=\"module\" src=\"/js/datastar.js\"></script>\n"
          "</head>\n"
@@ -414,17 +455,13 @@
                                ".catch(function(e){b.disabled=false;b.textContent='\\u2717 '+e;});")}
         "+ new agent"]])))
 
-(defn- world-page-html
-  "The /world roster shim page (brand-aware head — see [[shim-html]]). Carries
-   the new-agent bar (P1c) as its OUTSIDE-the-morph human affordance."
+(defn- agents-page-html
+  "The `/agents` roster shim page (brand-aware head — see [[shim-html]]). Its
+   feed effect opens `/agents/feed` → [[world-view]]; carries the new-agent
+   bar (P1c) as its OUTSIDE-the-morph human affordance."
   []
-  (shim-html "world" "bg-base-900 text-text-200 font-mono p-3" "/world/feed"
+  (shim-html "agents" "bg-base-950 text-text-200 font-mono p-3" "/agents/feed"
              (new-agent-bar-html)))
-
-(defn- serve-world-page! [^js res]
-  (.writeHead res 200 #js {"Content-Type"  "text/html; charset=utf-8"
-                           "Cache-Control" "no-store, no-cache, must-revalidate"})
-  (.end res (world-page-html)))
 
 (defn- open-feed!
   "Open a long-lived gzip-compressed SSE stream bound to `view-fn` (a 0-arg
@@ -576,21 +613,26 @@
       (do (.writeHead res 404 #js {"Content-Type" "text/plain; charset=utf-8"})
           (.end res "invalid agent id")))))
 
-(defn handle!
-  "Dispatch a /world route (shim page or gzip SSE feed).
+(defn serve-agents-page!
+  "Serve GET /agents — the live agent roster shim page.
 
-   The seeded :seon.route/world (shim page) +
-   :seon.route/world-feed (gzip SSE feed) BOTH resolve here, routing on the
-   path internally. A Ring handler: takes the Ring request `r`, self-extracts
-   node-req/node-res/path. Lazily installs the tx-listener on first hit
-   (idempotent). The router wraps this and appends the hijack sentinel, so the
-   true/false return is ignored. Public — db->routes resolves its symbol."
+   The seeded :seon.route/agents handler. A Ring handler: self-extracts the
+   node res. Public — db->routes resolves its symbol at request time."
+  [r]
+  (let [^js res (:seon.http/node-res r)]
+    (.writeHead res 200 #js {"Content-Type"  "text/html; charset=utf-8"
+                             "Cache-Control" "no-store, no-cache, must-revalidate"})
+    (.end res (agents-page-html))))
+
+(defn open-roster-feed!
+  "Open GET /agents/feed — the roster gzip feed bound to [[world-view]].
+
+   The seeded :seon.route/agents-feed handler — the SAME whole-`#world` morph
+   engine the per-agent world rides, so a new/terminated agent appears/updates
+   live. A Ring handler: self-extracts node-req/node-res; lazily installs the
+   tx-listener. Public — db->routes resolves its symbol."
   [r]
   (ensure-installed!)
   (let [^js req (:seon.http/node-req r)
-        ^js res (:seon.http/node-res r)
-        path    (:uri r)]
-    (cond
-      (= path "/world/feed") (do (open-feed! req res #(world-view @db/*conn*)) true)
-      (= path "/world")      (do (serve-world-page! res) true)
-      :else                  false)))
+        ^js res (:seon.http/node-res r)]
+    (open-feed! req res #(world-view @db/*conn*))))

@@ -263,15 +263,16 @@
                     id    (db/new-id!)
                     label (:my.plan/ref node)]
                 (when label (vswap! label->tid assoc label tid))
-                (vswap! nodes conj {:tid        tid
-                                    :id         id
-                                    :title      (:my.plan/title node)
-                                    :goal       (:my.plan/goal node)
-                                    :pace       (:my.plan/pace node)
-                                    :expect     (:my.plan/expect node)
-                                    :parent-tid parent-tid
-                                    :after      (:my.plan/after node)
-                                    :label      label})
+                (vswap! nodes conj {:tid         tid
+                                    :id          id
+                                    :title       (:my.plan/title node)
+                                    :goal        (:my.plan/goal node)
+                                    :pace        (:my.plan/pace node)
+                                    :description (:my.plan/description node)
+                                    :expect      (:my.plan/expect node)
+                                    :parent-tid  parent-tid
+                                    :after       (:my.plan/after node)
+                                    :label       label})
                 (doseq [c (:my.plan/children node)] (walk c tid))
                 tid))]
       (walk root nil)
@@ -282,7 +283,7 @@
           {:error (str "plan!: :my.plan/after names unknown label(s) "
                        (str/join ", " (map pr-str unknown))
                        " — each :after must match some node's :my.plan/ref.")}
-          {:tx      (mapv (fn [{:keys [tid id title goal pace expect
+          {:tx      (mapv (fn [{:keys [tid id title goal pace description expect
                                        parent-tid after]}]
                             (cond-> {:db/id              tid
                                      :my.plan/id         id
@@ -292,6 +293,7 @@
                                      :my.plan/created-at (js/Date.)}
                               goal        (assoc :my.plan/goal goal)
                               pace        (assoc :my.plan/pace pace)
+                              description (assoc :my.plan/description description)
                               expect      (assoc :my.plan/expect expect)
                               parent-tid  (assoc :my.plan/parent parent-tid)
                               (seq after) (assoc :my.plan/needs

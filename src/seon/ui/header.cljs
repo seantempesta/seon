@@ -1,6 +1,6 @@
 (ns seon.ui.header
   "The persistent global status bar — `system-header = f(db)` — rendered as a
-   fixed top bar on EVERY view (every `/agent/{id}`, root `/`, the `/world`
+   fixed top bar on EVERY view (every `/agent/{id}`, root `/`, the `/agents`
    roster, `/data`, `/debug`). One pure function of the db value: same db
    always renders the same hiccup, nothing stored, self-healing.
 
@@ -217,7 +217,7 @@
                              "border-base-700 px-2 py-0.5 rounded text-xs font-mono")}
       "+ new agent"]
      [:a {:href "/" :class "text-text-400 hover:text-amber-300"} "home"]
-     [:a {:href "/world" :class "text-text-400 hover:text-amber-300"} "agents"]
+     [:a {:href "/agents" :class "text-text-400 hover:text-amber-300"} "agents"]
      [:span {:class (if running? "text-amber-400" "text-text-600")
              :title (if running? "an agent is running" "fleet idle")}
       "●"]]))

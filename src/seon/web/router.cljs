@@ -4,7 +4,7 @@
 
    The route vector is `(into (db->routes db) (static-supplement h))`:
    [[db->routes]] is a PURE projection of the seeded `:seon.route/*` datoms
-   (the six core routes — `/`, `/world`, `/world/feed`, `/agent/{id}`,
+   (the core routes — `/`, `/agents`, `/agents/feed`, `/agent/{id}`,
    `/agent/{id}/feed`, `/agent/{id}/call`), and the static supplement carries
    the routes NOT yet seeded as datoms (static assets, the secondary POST
    doors, `/sse`, the flat `/call`). The router is cached in `!ring-handler`
@@ -53,9 +53,10 @@
     [seon.eval :as seval]
     [seon.log :as log]
     ;; Build-inclusion only (no alias): db->routes resolves datastar's core
-    ;; handler SYMBOLS (`handle!`, `serve-agent-page!`, `open-agent-feed!`) at
-    ;; request time via eval/lookup-value, so the ns must be compiled into the
-    ;; build. router is its sole requirer.
+    ;; handler SYMBOLS (`serve-root!`, `serve-agents-page!`, `open-roster-feed!`,
+    ;; `serve-agent-page!`, `open-agent-feed!`) at request time via
+    ;; eval/lookup-value, so the ns must be compiled into the build. router is
+    ;; its sole requirer.
     [seon.web.datastar]
     [seon.web.debug :as debug]
     [seon.web.reactive.call :as call]

@@ -6,7 +6,7 @@
    prod) can reach the agent UI without intermediate infrastructure.
 
    Routes (V0.5):
-     GET  /                  → 302 redirect to /world (the converged human surface)
+     GET  /                  → root's world (seeded :seon.route/root → datastar)
      GET  /css/output.css    → resources/public/css/output.css
      GET  /js/datastar.js    → resources/public/js/datastar.js
      GET  /sse               → SSE stream
@@ -189,22 +189,6 @@
 ;; ============================================================
 ;; Route handlers
 ;; ============================================================
-
-(defn serve-root!
-  "GET / — 302 redirect to the world roster (/world).
-
-   A Ring handler: takes the Ring request `r`, self-extracts the node res.
-   Resolved LATE by the router (db->routes) from the seeded :seon.route/root
-   datom, so it is PUBLIC — its symbol must resolve via eval/lookup-value at
-   request time."
-  [r]
-  ;; `/world` (seon.web.datastar) is the converged human surface — the live
-  ;; agent roster + per-agent canvas/tiles/chat. The root just lands the user
-  ;; there.
-  (let [^js res (:seon.http/node-res r)]
-    (.writeHead res 302 #js {"Location"      "/world"
-                             "Cache-Control" "no-store, no-cache, must-revalidate"})
-    (.end res "")))
 
 (defn- open-sse! [^js req ^js res]
   (.writeHead res 200 #js {"Content-Type"      "text/event-stream"
@@ -829,9 +813,10 @@
 ;; `router/handle-request`.
 ;; ============================================================
 
-;; `serve-root!` is NOT injected here — it is a SEEDED core route
-;; (:seon.route/root → seon.web.serve/serve-root!), resolved late by the
-;; router's db->routes. Only the non-core supplement handlers are injected.
+;; `/` is NOT a serve handler — it is a SEEDED core route
+;; (:seon.route/root → seon.web.datastar/serve-root!, root's own world),
+;; resolved late by the router's db->routes. Only the non-core supplement
+;; handlers are injected here.
 (router/install!
   {:seon.web.router/sse           open-sse!
    :seon.web.router/static        serve-static!

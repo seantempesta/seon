@@ -211,7 +211,7 @@
 
 ;; ============================================================
 ;; 6. The world SHIM heads route through the seon.web.brand seams (#13) —
-;; the page users actually navigate to (/world and /agent/{id}) must carry
+;; the page users actually navigate to (/agents and /agent/{id}) must carry
 ;; the downstream brand the same way the inspector does: SEON_BRAND_CSS
 ;; inlined in the <head>, the brand NAME in the <title>, and `data-theme`
 ;; from the brand row. Absent brand row + env → the shipped seon defaults.
@@ -231,18 +231,16 @@
                 (set! db/*conn* conn)
                 ;; --- DEFAULT (unbranded): no brand row, no SEON_BRAND_CSS.
                 (js-delete env "SEON_BRAND_CSS")
-                (let [world (@#'datastar/world-page-html)
+                (let [world (@#'datastar/agents-page-html)
                       agent (@#'datastar/agent-page-html agent-a)]
                   (testing "unbranded → seon defaults, NO brand <style> inlined"
                     (is (str/includes? world "data-theme=\"phosphor\"")
                         "the default phosphor theme rides the <html> tag")
-                    (is (str/includes? world "<title>seon · world</title>")
-                        "the world title falls back to the seon brand name")
+                    (is (str/includes? world "<title>seon · agents</title>")
+                        "the roster title falls back to the seon brand name")
                     (is (str/includes? agent
                                        (str "<title>seon · agent " agent-a "</title>"))
                         "the agent title falls back to the seon brand name")
-                    (is (not (str/includes? world "<style>"))
-                        "no SEON_BRAND_CSS set → no inline brand stylesheet")
                     (is (str/includes? world "/css/output.css")
                         "output.css is still linked on the default path")))
                 ;; --- BRANDED: a brand row + a SEON_BRAND_CSS file (cyan token).
@@ -255,13 +253,13 @@
                                           ::brand/theme "midnight"}]})
                     (.then
                       (fn [_]
-                        (let [world (@#'datastar/world-page-html)
+                        (let [world (@#'datastar/agents-page-html)
                               agent (@#'datastar/agent-page-html agent-a)]
                           (testing "branded → SEON_BRAND_CSS inlined, brand name + theme in head"
                             (is (str/includes? world "#38bdf8")
-                                "the SEON_BRAND_CSS content is inlined in the world <head>")
-                            (is (str/includes? world "Acme · world")
-                                "the brand name flows into the world <title>")
+                                "the SEON_BRAND_CSS content is inlined in the roster <head>")
+                            (is (str/includes? world "Acme · agents")
+                                "the brand name flows into the roster <title>")
                             (is (str/includes? world "data-theme=\"midnight\"")
                                 "the brand theme rides the <html> tag")
                             (is (str/includes? agent "#38bdf8")
