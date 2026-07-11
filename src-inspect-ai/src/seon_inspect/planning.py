@@ -121,21 +121,110 @@ def check_plan_trajectory(snapshot: list[dict[str, Any]],
             "post_roots": len(new_roots)}
 
 
+# Eval-source classification for the rung-2 process checks (2026-07-10).
+# Plan-AUTHORING = minting the plan; plan-CLOSE = a PURE done! form (anchored
+# — a form that FUSES work with its close, e.g. `(do (compute …)
+# (my.plan/done! …))`, is WORK: it is the strictest possible adjacency and
+# must BREAK a close run, not extend it — live finding, rung-2 d1);
+# everything that is not a plan verb / movement / require / lifecycle
+# chatter counts as WORK.
+_PLAN_AUTHOR_RE = r"(?:my\.)?plan/(?:plan!|step!)"
+_PURE_CLOSE_RE = r"^\s*\((?:my\.)?plan/done!"
+_NON_WORK_RE = (r"^\s*\((?:(?:my\.)?plan/\w+!?|in-ns\b|ns\b|require\b|"
+                r"(?:seon\.agent\.)?message/|(?:seon\.agent\.lifecycle/)?"
+                r"(?:complete|wait|pause|resume)\b)")
+
+
+def _classify(row: dict[str, Any] | str) -> str:
+    import re
+    if isinstance(row, str):        # convenience for tests/back-compat
+        row = {"source": row}
+    # a PROSE-demoted eval (the reply parser recorded commentary, nothing
+    # ran — its narration carries the demotion note) is neither work nor a
+    # close-run breaker: pure transcript chatter.
+    if "PROSE, not code" in (row.get("narration") or ""):
+        return "prose"
+    src = row["source"]
+    if re.match(_PURE_CLOSE_RE, src):
+        return "close"
+    if re.search(_PLAN_AUTHOR_RE, src):
+        return "author"
+    if re.match(_NON_WORK_RE, src):
+        return "other"
+    return "work"
+
+
+def check_decompose_first(evals: list[dict[str, Any]]) -> dict[str, Any]:
+    """Decomposition happened BEFORE the work (rung-2 process check).
+
+    `evals` = the agent's eval rows `{at_ms, source, ok, narration}` in
+    eval order. OK iff the first successful plan-AUTHORING eval precedes
+    the first successful WORK eval. No plan-authoring eval at all fails;
+    work-free runs (nothing but planning) pass vacuously."""
+    kinds = [(_classify(e), e) for e in evals if e.get("ok")]
+    first_author = next((i for i, (k, _) in enumerate(kinds) if k == "author"),
+                        None)
+    first_work = next((i for i, (k, _) in enumerate(kinds) if k == "work"),
+                      None)
+    ok = first_author is not None and (first_work is None
+                                       or first_author < first_work)
+    return {"ok": ok, "first_author_idx": first_author,
+            "first_work_idx": first_work}
+
+
+def check_close_adjacency(evals: list[dict[str, Any]],
+                          *, max_close_run: int = 2) -> dict[str, Any]:
+    """Closes land as the work lands — never dumped in one batch.
+
+    The rung-2 headline metric, measured as the batch-dump SIGNATURE: a
+    run of >`max_close_run` STRICTLY CONSECUTIVE successful pure-`done!`
+    evals (any other successful eval between closes — work, an `active!`,
+    a `tree` check — breaks the run: the agent was doing something between
+    them). The allowance of 2 covers the legitimate last-step + wrap-up
+    pair. Also fails when there are no closes at all. (First cut counted
+    `other`/`prose` as non-breaking and false-failed a live drive whose
+    completion timestamps were spread over two minutes — the run rule now
+    matches the temporal truth; rung-2 d1, 2026-07-10.)"""
+    runs: list[int] = []
+    cur = 0
+    for e in evals:
+        if not e.get("ok"):
+            continue
+        if _classify(e) == "close":
+            cur += 1
+        else:
+            if cur:
+                runs.append(cur)
+            cur = 0
+    if cur:
+        runs.append(cur)
+    n_closes = sum(runs)
+    longest = max(runs, default=0)
+    return {"ok": bool(runs) and longest <= max_close_run,
+            "n_closes": n_closes,
+            "longest_close_run": longest}
+
+
 def check_planning(reply: str,
                    snapshot: list[dict[str, Any]],
                    t_interrupt_ms: int,
-                   oracle: dict[str, Any]) -> dict[str, Any]:
-    """The full two-part planning oracle: final answer AND trajectory.
+                   oracle: dict[str, Any],
+                   eval_rows: list[dict[str, Any]] | None = None) -> dict[str, Any]:
+    """The full planning oracle: answer + trajectory + process checks.
 
     CORRECT only when the phase-2 reply carries the generation-time synthesis
-    answer (`oracle["final"]`, via `tool_scorers.check_answer`) AND the plan
-    trajectory shows resumption (`check_plan_trajectory`). Both sub-results
+    answer (`oracle["final"]`, via `tool_scorers.check_answer`), the plan
+    trajectory shows resumption (`check_plan_trajectory`), AND — when
+    `eval_rows` are provided (the rung-2 wiring always provides them) — the
+    process checks hold: decompose-first + close-adjacency. All sub-results
     are returned for per-part attribution."""
     final = check_answer(reply, oracle["final"])
     trajectory = check_plan_trajectory(snapshot, t_interrupt_ms, oracle)
-    return {"ok": bool(final["ok"] and trajectory["ok"]),
-            "final": final,
-            "trajectory": trajectory}
+    parts = {"final": final, "trajectory": trajectory}
+    if eval_rows is not None:
+        parts["decompose_first"] = check_decompose_first(eval_rows)
+        parts["close_adjacency"] = check_close_adjacency(eval_rows)
+    return {"ok": all(bool(p["ok"]) for p in parts.values()), **parts}
 
 
 # ---------------------------------------------------------------------------
@@ -151,6 +240,7 @@ def run_planning_sample(
     restart_pod: Callable[[], None],
     run_phase2: Callable[[str, dict[str, Any]], dict[str, Any]],
     fetch_snapshot: Callable[[dict[str, Any]], list[dict[str, Any]]],
+    fetch_evals: Callable[[dict[str, Any]], list[dict[str, Any]]] | None = None,
     clock_ms: Callable[[], int] = lambda: int(time.time() * 1000),
 ) -> dict[str, Any]:
     """One two-phase drive; every effect is an injected callable.
@@ -173,9 +263,11 @@ def run_planning_sample(
     restart_pod()
     r2 = run_phase2(phase2_input, r1)
     snapshot = fetch_snapshot(r1)
+    eval_rows = fetch_evals(r1) if fetch_evals is not None else None
     return {"reply": r2.get("reply", ""),
             "t_interrupt_ms": t_interrupt_ms,
             "plan_snapshot": snapshot,
+            "eval_rows": eval_rows,
             "phase1": r1,
             "phase2": r2}
 
@@ -215,6 +307,41 @@ _SNAPSHOT_FORM = (
     " (println (str \"WIRE-JSON<\" (json/generate-string rows) \">WIRE-JSON\"))))")
 
 
+# The agent's eval rows for the process checks (rung 2, 2026-07-10) —
+# ordered by eid (monotonic), source + ok?. Same wire-REPL door as the plan
+# snapshot; survives the pod restart.
+_EVALS_FORM = (
+    "(do (require (quote [cheshire.core :as json]) (quote [datahike.api :as d]))"
+    " (let [conn (:seon.server.registry/conn (seon.server.registry/get-conn"
+    " {:seon.server.registry/db-name :%s}))"
+    " db (deref conn)"
+    " a (d/q (quote [:find ?a . :in $ ?id :where [?a :seon.agent/id ?id]]) db %s)"
+    " es (if a (d/q (quote [:find [?e ...] :in $ ?a :where"
+    " [?e :seon.eval/agent ?a] [?e :seon.eval/source _]]) db a) [])"
+    " rows (mapv (fn [e] (let [p (d/pull db (quote [:seon.eval/source"
+    " :seon.eval/ok? :seon.eval/at :seon.eval/narration]) e)]"
+    " {\"source\" (:seon.eval/source p)"
+    "  \"ok\" (:seon.eval/ok? p)"
+    "  \"at_ms\" (some-> (:seon.eval/at p) (.getTime))"
+    "  \"narration\" (:seon.eval/narration p)}))"
+    " (sort es))]"
+    " (println (str \"WIRE-JSON<\" (json/generate-string rows) \">WIRE-JSON\"))))")
+
+
+def fetch_eval_rows(cluster_name: str, agent_id: str) -> list[dict[str, Any]]:
+    """The agent's eval rows `{source, ok, at_ms}` in eval (eid) order.
+
+    Read over the wire-server socket REPL like the plan snapshot — the
+    process-check input for `check_decompose_first` / `check_close_adjacency`."""
+    from seon_inspect.cluster import wire_repl_json
+
+    form = _EVALS_FORM % (cluster_name, json.dumps(agent_id))
+    rows = wire_repl_json(form)
+    if not isinstance(rows, list):
+        raise RuntimeError(f"eval-rows read-back returned non-list: {rows!r}")
+    return rows
+
+
 def fetch_plan_snapshot(cluster_name: str, agent_id: str) -> list[dict[str, Any]]:
     """The agent's `:my.plan` step rows from the planning cluster's db.
 
@@ -238,6 +365,7 @@ def pod_planning_driver(
     timeout_ms: int | None = None,
     cluster_name: str | None = None,
     evidence_root: Any = None,
+    seon_config: str | None = None,
 ) -> dict[str, Any]:
     """The LIVE two-phase driver: one planning sample on its own cluster.
 
@@ -257,15 +385,21 @@ def pod_planning_driver(
     from seon_inspect.solver import pod_run
 
     budget_ms = timeout_ms or DEFAULT_RUN_TIMEOUT_S * 1000
+    # `seon_config` (e.g. config/minimal-plan.edn — the rung-2 minimal
+    # context) rides BOTH the create and the mid-sample restart: a bare
+    # restart would re-seed the default manifest and swap the context.
+    env = {"SEON_CONFIG": seon_config} if seon_config else None
     holder: dict[str, Any] = {
         "cluster": cl.create_cluster(
-            cluster_name or cl.bench_cluster_name("plan"), ephemeral=True)}
+            cluster_name or cl.bench_cluster_name("plan"), ephemeral=True,
+            extra_env=env)}
     try:
         def run_phase1(text: str) -> dict[str, Any]:
             return pod_run(text, budget_ms, holder["cluster"].url)
 
         def restart() -> None:
-            holder["cluster"] = cl.restart_pod(holder["cluster"])
+            holder["cluster"] = cl.restart_pod(holder["cluster"],
+                                               extra_env=env)
 
         def run_phase2(text: str, r1: dict[str, Any]) -> dict[str, Any]:
             return pod_run(text, budget_ms, holder["cluster"].url,
@@ -274,12 +408,16 @@ def pod_planning_driver(
         def fetch(r1: dict[str, Any]) -> list[dict[str, Any]]:
             return fetch_plan_snapshot(holder["cluster"].name, r1["agent_id"])
 
+        def fetch_evals(r1: dict[str, Any]) -> list[dict[str, Any]]:
+            return fetch_eval_rows(holder["cluster"].name, r1["agent_id"])
+
         result = run_planning_sample(
             phase1_input, phase2_input,
             run_phase1=run_phase1,
             restart_pod=restart,
             run_phase2=run_phase2,
             fetch_snapshot=fetch,
+            fetch_evals=fetch_evals,
         )
         result["cluster"] = holder["cluster"].name
         result["agent_id"] = result["phase1"].get("agent_id")
@@ -322,12 +460,18 @@ def planning_scorer() -> Scorer:
             meta["plan_snapshot"],
             meta["t_interrupt_ms"],
             meta["oracle"],
+            eval_rows=meta.get("eval_rows"),
         )
         return Score(
             value=CORRECT if res["ok"] else INCORRECT,
             explanation=json.dumps({
                 "final_ok": res["final"]["ok"],
                 "trajectory_failures": res["trajectory"]["failures"],
+                "decompose_first_ok": res.get("decompose_first", {}).get("ok"),
+                "close_adjacency": {
+                    k: res["close_adjacency"][k]
+                    for k in ("ok", "longest_close_run")}
+                if "close_adjacency" in res else None,
             }),
             metadata=res,
         )

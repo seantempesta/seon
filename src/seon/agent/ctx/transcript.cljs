@@ -231,7 +231,9 @@
   (case mode
     :stream
     (str "; Your turn ends at your first complete form — the runtime evaluates it and its\n"
-         "; real value is already in the log when you continue. Write one form and stop.")
+         "; real value is already in the log when you continue. Write one form and stop.\n"
+         "; A reply with NO form does nothing and a few in a row end your run — to say\n"
+         "; something, (message/user \"…\"); to deliver a final answer, (complete \"…\").")
     ;; :batch (default)
     (str "; Write the forms you want run; never write out a result yourself — a result you\n"
          "; type is stripped, and the real value arrives interleaved on your next turn.")))

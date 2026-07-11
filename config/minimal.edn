@@ -64,7 +64,10 @@
 ; does not — hold mutable values in an atom.
 ; Errors come back as data — read the error map; nothing throws at you.
 ; (message/user \"...\") reaches your human. (complete \"...\") ends the
-; task. (wait) parks until something new arrives."
+; task. (wait) parks until something new arrives.
+; A reply with NO form runs nothing, and several formless replies in a
+; row end your run — deliver every result through (message/user \"...\")
+; or (complete \"...\"), never as bare prose."
 
   ;; ── REPL MODE — the per-variant dial (harness flips :batch | :stream
   ;; per experiment). Seeded → the singleton datom → gates BOTH the turn

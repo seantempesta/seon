@@ -509,6 +509,50 @@ the error envelope — no wording change needed yet).
 **Rung-1 gate: MET** — both models relocate, update in place, return,
 and report, with zero fabrication, on the fixed runtime.
 
+## Rung 2 — planning, the flagship (2026-07-10)
+
+Harness = the EXISTING src-inspect-ai planning driver re-grounded on the
+minimal context (front-loading task-11: `pod_planning_driver` gained
+`seon_config` riding create AND restart — `restart_pod` had silently
+dropped `SEON_CONFIG`, re-seeding the default context mid-sample; fixed).
+Context = `config/minimal-plan{,-stream}.edn` (minimal + the `:plan`
+block, whose teaching is now COLOCATED in the block itself:
+`empty-plan-teaching` when no plan exists — decompose-first + the
+close-when-landed rule — and the frontier's own lines once one does).
+Two NEW oracle parts (stated in the regenerated `_LTP_CONTRACT`; lock
+refrozen): `check_decompose_first` (plan authored before first work
+eval) + `check_close_adjacency` (no strictly-consecutive `done!` dump
+> 2 — a fused `(do work (done! …))` is work; PROSE-demoted rows are
+chatter; both refined against live evidence below). Eval rows join via
+a second wire-REPL fetch (`fetch_eval_rows`).
+
+| drive | model | mode | final | trajectory | decompose | adjacency | OK | fix between drives |
+|---|---|---|---|---|---|---|---|---|
+| rung2-live-d1 | deepseek-v4-pro | B | ✗ (:no-forms, answer only println'd) | ✓ 6 pre / 3 resumed / 0 re-plans | ✓ | ✗→✓ (metric refined: run rule + fused-close + prose) | ✗ | stream masthead: "a reply with NO form does nothing… (complete …)" |
+| rung2-live-d2 | deepseek-v4-pro | B | **✓ "1428"** | ✗ (2 discovered steps minted as parentless ROOTS) | ✓ | ✓ | ✗ | the block's OWN teaching had taught the parentless `step!` shape — frontier + empty teaching now show `:my.plan/parent` |
+| rung2-live-d3 | deepseek-v4-pro | B | ✓ "1428" | ✓ 4/2/0 | ✓ | ✓ (run 1) | **GREEN** | — |
+| rung2-spark-d1 | muse-spark-1.1 | A | ✗ (:no-forms) | ✓ 7/4/0 | ✓ | ✗ (a real 6-close dump) | ✗ | the delivery rule was stream-only — moved to SYSTEM text v3 (mode-agnostic mechanics: "a reply with NO form runs nothing… deliver through message/user / complete") |
+| rung2-spark-d2 | muse-spark-1.1 | A | **✓ "1428"** | ✓ 6/3/0 | ✓ | ✓ (run 2) | **GREEN** | — |
+
+**Rung-2 gate: MET on both models** — durable decomposition before work,
+resume-after-restart with zero re-planning, closes landing with the work,
+and the answer delivered, under the minimal-plan context with a real
+mid-sample pod restart. Notable: Spark spontaneously designed a
+`:my.ledger` schema and transacted/queried real facts (rung-4 behavior,
+unprompted) — recording-as-plan-titles (DeepSeek d1) and
+recording-as-datoms (Spark) both pass the trajectory oracle.
+
+**The iteration loop, worked:** every fix in the table is a COLOCATED
+wording change to the block that owns the confused behavior (stream
+masthead → system-text v3 → plan-block teaching), redriven at n=1 per
+the fast-iteration steer; the two metric refinements came from reading
+live evidence, not tuning to green (the d1 adjacency "failure" was
+temporally false — completion stamps spread over 2 minutes; the spark-d1
+6-dump was real and stayed a failure until the model's behavior changed).
+
+Evidence: `rung2-live-d1.json` / `rung2-spark-d{1,2}.json` (scores +
+eval rows + snapshots) + preserved blob evidence under `rung2-evidence/`.
+
 **v2 text (committed in `config/minimal.edn`):** the two interview-
 diagnosed warts, mechanics-only (no scolds): (a) "ANY line that starts
 with ( is EXECUTED as Clojure code — including a prose aside like

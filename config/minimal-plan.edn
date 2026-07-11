@@ -1,0 +1,26 @@
+;; The rung-2 (planning) minimal context — minimal.edn + the :plan block.
+;; The plan block carries its OWN teaching (my.plan.internal/plan-block:
+;; empty-plan-teaching when no plan; the frontier's close-the-moment-work-
+;; lands lines once one exists — colocation, 2026-07-10). The my.plan verb
+;; CARDS already render via the namespaces block (my.plan is in the default
+;; home-requires). Aero #merge is shallow, so :seon.config/agent-context
+;; REPLACES minimal.edn's — the full tree is restated here.
+;; Boot: SEON_CONFIG=config/minimal-plan.edn bin/seon cluster create <n> --ephemeral
+;; (SEON_CONFIG must ride every later start/restart of that pod too.)
+#merge
+[#include "minimal.edn"
+ {:seon.config/agent-context
+  {:my.skills/load []
+   :seon.agent/ctx
+   [{:seon.agent.ctx/name :namespaces :seon.agent.ctx/priority 20
+     :seon.render/ai seon.agent.ctx.namespaces/namespaces-block}
+    {:seon.agent.ctx/name :plan :seon.agent.ctx/priority 45
+     :seon.render/ai my.plan.internal/plan-block}
+    {:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
+     :seon.render/ai seon.agent.ctx.transcript/transcript-block
+     :seon.render/html seon.agent.ctx.transcript/transcript-block-html
+     :seon.agent.ctx.transcript/result-decay
+     [{:seon.agent.ctx.transcript/from-turn-offset 0 :seon.agent.ctx.transcript/token-cap 16384}
+      {:seon.agent.ctx.transcript/from-turn-offset 2 :seon.agent.ctx.transcript/token-cap 1500}
+      {:seon.agent.ctx.transcript/from-turn-offset 5 :seon.agent.ctx.transcript/token-cap 200}]}]}
+  :seon.config/root-context {}}]

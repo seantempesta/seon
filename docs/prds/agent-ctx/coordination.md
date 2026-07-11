@@ -1974,3 +1974,27 @@ seon.agent.ctx (cycle-checked). Evidence + probes:
 smell for your lane: bare `ns-interns` resolves to something returning
 nil while `clojure.core/ns-interns` works — introspection shadowing in
 the self-host resolution.
+
+## 2026-07-10 — eval lane → tooling lane: plan block now teaches when EMPTY + rung-2 GREEN both models
+
+Rung 2 (planning flagship) is GREEN on DeepSeek Mode B AND Muse Spark
+Mode A under the minimal-plan context with a real mid-sample pod restart
+(ledger §"Rung 2"). Two changes that touch YOUR surfaces: (1)
+`my.plan.internal/plan-block` no longer renders "" for a plan-less agent —
+it renders `empty-plan-teaching` (decompose-first + close-when-landed +
+the `:parent`-ed `step!` shape), byte-stable, ~60 tokens; every DEFAULT-
+cluster agent without a plan now sees it (colocation: the empty state is
+when nothing else teaches the workflow). The frontier header also gained
+the close-the-moment-work-lands + discovered-step-under-the-plan lines.
+(2) the transcript `:stream` masthead fragment + the minimal system-text
+(v3) teach the no-forms consequence and message/complete delivery.
+Harness: `seon_inspect.cluster/restart_pod` now takes `extra_env` —
+it was silently dropping `SEON_CONFIG` on the mid-sample restart
+(re-seeding the default context); `pod_planning_driver` gained
+`seon_config`; the planning oracle gained decompose-first +
+close-adjacency parts (contract restated, lock refrozen). Also shipped:
+the prose gate's computed `core-macro-head?` (bare `(ns-interns 'x)` was
+silently DEMOTED to prose with a false-confidence ok?/nil — the smell
+from the rung-1 note is root-caused and fixed) and the loud
+`SEON-STUB-LLM` boot marker (a configured provider with an unset key no
+longer silently drives on the stub; min-drive.sh refuses to dispatch).

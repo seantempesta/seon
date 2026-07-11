@@ -336,9 +336,16 @@ def fork_cluster(source: str, basis_t: int, name: str | None = None, *,
 
 
 def restart_pod(cluster: Cluster, *,
+                extra_env: dict[str, str] | None = None,
                 runner: Callable[..., Any] = subprocess.run,
                 ready: Callable[[str], int] = wait_pod_ready) -> Cluster:
     """`bin/seon restart pod-<name>` — the planning row's interruption.
+
+    `extra_env` MUST carry the same host-owned env the create used (e.g.
+    `SEON_CONFIG` for a minimal-context cluster) — a bare restart re-exports
+    the default manifest and the boot reconcile re-seeds the config
+    singleton from it, silently swapping the cluster's whole context
+    (the documented minimal.edn gotcha; bit rung 2, 2026-07-10).
 
     The pod rebinds an EPHEMERAL port on boot, so the stale port file is
     removed first and the returned Cluster carries the NEW port (the old
@@ -361,7 +368,8 @@ def restart_pod(cluster: Cluster, *,
     probe). Defense-in-depth, near-instant in the common path."""
     _check_name(cluster.name)
     _port_file(cluster.name).unlink(missing_ok=True)
-    _run_seon(["restart", f"pod-{cluster.name}"], runner, timeout_s=180)
+    _run_seon(["restart", f"pod-{cluster.name}"], runner, timeout_s=180,
+              extra_env=extra_env)
     return Cluster(name=cluster.name, port=ready(cluster.name))
 
 

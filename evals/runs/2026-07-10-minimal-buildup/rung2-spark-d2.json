@@ -1,0 +1,283 @@
+{
+ "score": {
+  "ok": true,
+  "final": {
+   "ok": true,
+   "answer": "1428",
+   "reply_tail": "1428"
+  },
+  "trajectory": {
+   "ok": true,
+   "failures": [],
+   "pre_steps": 6,
+   "resumed_steps": 3,
+   "post_roots": 0
+  },
+  "decompose_first": {
+   "ok": true,
+   "first_author_idx": 0,
+   "first_work_idx": 3
+  },
+  "close_adjacency": {
+   "ok": true,
+   "n_closes": 6,
+   "longest_close_run": 2
+  }
+ },
+ "eval_rows": [
+  {
+   "source": "(my.plan/plan! {:my.plan/title \"Tally delivery ledger across restart\"\n              :my.plan/goal \"Compute total easels received across all depots counting both batches, surviving a runtime restart\"\n              :my.plan/pace :multi-session\n              :my.plan/expect \"Final reply is single integer total\"\n              :my.plan/children [{:my.plan/title \"Durable plan recorded\"\n                                  :my.plan/ref \"plan-recorded\"\n                                  :my.plan/expect \"plan! transaction succeeded\"}\n                                 {:my.plan/title \"Record first batch: Dunmore 313, Fernhill 232, Coldspring 165\"\n                                  :my.plan/ref \"first-batch\"\n                                  :my.plan/after [\"plan-recorded\"]\n                                  :my.plan/expect \"First batch persisted in DB\"}\n                                 {:my.plan/title \"Survive restart and await second batch\"\n                                  :my.plan/ref \"await-restart\"\n                                  :my.plan/after [\"first-batch\"]\n                                  :my.plan/expect \"Progress persisted, agent idle waiting\"}\n                                 {:my.plan/title \"Record second batch after restart\"\n                                  :my.plan/ref \"second-batch\"\n                                  :my.plan/after [\"await-restart\"]\n                                  :my.plan/expect \"Second batch persisted\"}\n                                 {:my.plan/title \"Compute total and reply with single integer\"\n                                  :my.plan/ref \"compute-total\"\n                                  :my.plan/after [\"second-batch\"]\n                                  :my.plan/expect \"Total computed and all steps closed\"}]})",
+   "ok": true,
+   "at_ms": 1783734919128,
+   "narration": ""
+  },
+  {
+   "source": "(my.plan/done! {:my.plan/id \"tAN-2607102155\"})",
+   "ok": true,
+   "at_ms": 1783734930326,
+   "narration": ""
+  },
+  {
+   "source": "(my.plan/active! {:my.plan/id \"ynq-2607102155\"})",
+   "ok": true,
+   "at_ms": 1783734930968,
+   "narration": ""
+  },
+  {
+   "source": "(schema/register! :my.ledger/id [:and {:seon.db/identity true} :seon.db/id])",
+   "ok": true,
+   "at_ms": 1783734931516,
+   "narration": ""
+  },
+  {
+   "source": "(schema/register! :my.ledger/depot :string)",
+   "ok": true,
+   "at_ms": 1783734931954,
+   "narration": ""
+  },
+  {
+   "source": "(schema/register! :my.ledger/count :int)",
+   "ok": true,
+   "at_ms": 1783734932415,
+   "narration": ""
+  },
+  {
+   "source": "(schema/register! :my.ledger/batch :int)",
+   "ok": true,
+   "at_ms": 1783734932875,
+   "narration": ""
+  },
+  {
+   "source": "(schema/register! :my.ledger/receipt [:map {:seon.db/entity true :seon.entity/id-attr :my.ledger/id} [:my.ledger/id :my.ledger/id] [:my.ledger/depot :my.ledger/depot] [:my.ledger/count :my.ledger/count] [:my.ledger/batch :my.ledger/batch]])",
+   "ok": true,
+   "at_ms": 1783734933455,
+   "narration": ""
+  },
+  {
+   "source": "(db/transact! {::db/tx-data [{::db/id \"rcpt-dunmore-1\" :my.ledger/id \"rcpt-dunmore-1\" :my.ledger/depot \"Dunmore\" :my.ledger/count 313 :my.ledger/batch 1}\n                             {::db/id \"rcpt-fernhill-1\" :my.ledger/id \"rcpt-fernhill-1\" :my.ledger/depot \"Fernhill\" :my.ledger/count 232 :my.ledger/batch 1}\n                             {::db/id \"rcpt-coldspring-1\" :my.ledger/id \"rcpt-coldspring-1\" :my.ledger/depot \"Coldspring\" :my.ledger/count 165 :my.ledger/batch 1}]})",
+   "ok": true,
+   "at_ms": 1783734933928,
+   "narration": ""
+  },
+  {
+   "source": "(db/transact! {::db/tx-data [{::db/id (db/new-id!) :my.ledger/id (db/new-id!) :my.ledger/depot \"Dunmore\" :my.ledger/count 313 :my.ledger/batch 1}\n                             {::db/id (db/new-id!) :my.ledger/id (db/new-id!) :my.ledger/depot \"Fernhill\" :my.ledger/count 232 :my.ledger/batch 1}\n                             {::db/id (db/new-id!) :my.ledger/id (db/new-id!) :my.ledger/depot \"Coldspring\" :my.ledger/count 165 :my.ledger/batch 1}]})",
+   "ok": true,
+   "at_ms": 1783734939153,
+   "narration": "Fixing ID format and recording first batch"
+  },
+  {
+   "source": "(my.plan/done! {:my.plan/id \"ynq-2607102155\"})",
+   "ok": true,
+   "at_ms": 1783734944771,
+   "narration": ""
+  },
+  {
+   "source": "(my.plan/active! {:my.plan/id \"tcc-2607102155\"})",
+   "ok": true,
+   "at_ms": 1783734945291,
+   "narration": ""
+  },
+  {
+   "source": "(my.plan/done! {:my.plan/id \"tcc-2607102155\"})",
+   "ok": true,
+   "at_ms": 1783734945860,
+   "narration": ""
+  },
+  {
+   "source": "(seon.agent.lifecycle/wait \"Awaiting second batch after restart\")",
+   "ok": true,
+   "at_ms": 1783734946428,
+   "narration": ""
+  },
+  {
+   "source": "(my.plan/tree {:my.plan/root? \"lrX-2607102155\"})",
+   "ok": true,
+   "at_ms": 1783735003999,
+   "narration": ""
+  },
+  {
+   "source": "(schema/register! :my.ledger/id [:and {:seon.db/identity true} :seon.db/id])",
+   "ok": true,
+   "at_ms": 1783735010667,
+   "narration": "Re-register ledger schemas after restart"
+  },
+  {
+   "source": "(schema/register! :my.ledger/depot :string)",
+   "ok": true,
+   "at_ms": 1783735011133,
+   "narration": ""
+  },
+  {
+   "source": "(schema/register! :my.ledger/count :int)",
+   "ok": true,
+   "at_ms": 1783735011626,
+   "narration": ""
+  },
+  {
+   "source": "(schema/register! :my.ledger/batch :int)",
+   "ok": true,
+   "at_ms": 1783735012108,
+   "narration": ""
+  },
+  {
+   "source": "(schema/register! :my.ledger/receipt [:map {:seon.db/entity true :seon.entity/id-attr :my.ledger/id} [:my.ledger/id :my.ledger/id] [:my.ledger/depot :my.ledger/depot] [:my.ledger/count :my.ledger/count] [:my.ledger/batch :my.ledger/batch]])",
+   "ok": true,
+   "at_ms": 1783735012554,
+   "narration": ""
+  },
+  {
+   "source": "(my.plan/active! {:my.plan/id \"JoP-2607102155\"})",
+   "ok": true,
+   "at_ms": 1783735013036,
+   "narration": "Activate second batch step"
+  },
+  {
+   "source": "(db/transact! {::db/tx-data [{::db/id (db/new-id!) :my.ledger/id (db/new-id!) :my.ledger/depot \"Ashford\" :my.ledger/count 294 :my.ledger/batch 2}\n                             {::db/id (db/new-id!) :my.ledger/id (db/new-id!) :my.ledger/depot \"Graymoor\" :my.ledger/count 424 :my.ledger/batch 2}]})",
+   "ok": true,
+   "at_ms": 1783735017768,
+   "narration": "Record second batch"
+  },
+  {
+   "source": "(my.plan/done! {:my.plan/id \"JoP-2607102155\"})",
+   "ok": true,
+   "at_ms": 1783735024065,
+   "narration": ""
+  },
+  {
+   "source": "(my.plan/active! {:my.plan/id \"geq-2607102155\"})",
+   "ok": true,
+   "at_ms": 1783735024646,
+   "narration": ""
+  },
+  {
+   "source": "(db/query {:seon.db/query '[:find (sum ?c) :where [_ :my.ledger/count ?c]]})",
+   "ok": true,
+   "at_ms": 1783735025262,
+   "narration": ""
+  },
+  {
+   "source": "(my.plan/done! {:my.plan/id \"geq-2607102155\"})",
+   "ok": true,
+   "at_ms": 1783735030994,
+   "narration": ""
+  },
+  {
+   "source": "(my.plan/done! {:my.plan/id \"lrX-2607102155\"})",
+   "ok": true,
+   "at_ms": 1783735031558,
+   "narration": ""
+  },
+  {
+   "source": "(seon.agent.message/user \"1428\")",
+   "ok": true,
+   "at_ms": 1783735032180,
+   "narration": ""
+  },
+  {
+   "source": "(my.plan/list-open {})",
+   "ok": true,
+   "at_ms": 1783735037017,
+   "narration": "Verify no open steps"
+  },
+  {
+   "source": "(seon.agent.lifecycle/complete \"Total easels: 1428 (Dunmore 313 + Fernhill 232 + Coldspring 165 + Ashford 294 + Graymoor 424)\")",
+   "ok": true,
+   "at_ms": 1783735037419,
+   "narration": "Then complete the agent"
+  }
+ ],
+ "snapshot": [
+  {
+   "id": "ynq-2607102155",
+   "title": "Record first batch: Dunmore 313, Fernhill 232, Coldspring 165",
+   "status": "done",
+   "created_at_ms": 1783734919325,
+   "completed_at_ms": 1783734944881,
+   "parent_id": "lrX-2607102155",
+   "from_message": false
+  },
+  {
+   "id": "JoP-2607102155",
+   "title": "Record second batch after restart",
+   "status": "done",
+   "created_at_ms": 1783734919326,
+   "completed_at_ms": 1783735024174,
+   "parent_id": "lrX-2607102155",
+   "from_message": false
+  },
+  {
+   "id": "geq-2607102155",
+   "title": "Compute total and reply with single integer",
+   "status": "done",
+   "created_at_ms": 1783734919326,
+   "completed_at_ms": 1783735031106,
+   "parent_id": "lrX-2607102155",
+   "from_message": false
+  },
+  {
+   "id": "tAN-2607102155",
+   "title": "Durable plan recorded",
+   "status": "done",
+   "created_at_ms": 1783734919325,
+   "completed_at_ms": 1783734930447,
+   "parent_id": "lrX-2607102155",
+   "from_message": false
+  },
+  {
+   "id": "lrX-2607102155",
+   "title": "Tally delivery ledger across restart",
+   "status": "done",
+   "created_at_ms": 1783734919325,
+   "completed_at_ms": 1783735031678,
+   "parent_id": null,
+   "from_message": false
+  },
+  {
+   "id": "hyp-2607102155",
+   "title": "You are tallying a delivery ledger. So far you have the first batch of data: the\u2026",
+   "status": "open",
+   "created_at_ms": 1783734905712,
+   "completed_at_ms": null,
+   "parent_id": null,
+   "from_message": true
+  },
+  {
+   "id": "tcc-2607102155",
+   "title": "Survive restart and await second batch",
+   "status": "done",
+   "created_at_ms": 1783734919325,
+   "completed_at_ms": 1783734945974,
+   "parent_id": "lrX-2607102155",
+   "from_message": false
+  },
+  {
+   "id": "SPC-2607102156",
+   "title": "Your runtime has been restarted. Here is the remaining data: the Ashford depot r\u2026",
+   "status": "open",
+   "created_at_ms": 1783734995835,
+   "completed_at_ms": null,
+   "parent_id": null,
+   "from_message": true
+  }
+ ]
+}

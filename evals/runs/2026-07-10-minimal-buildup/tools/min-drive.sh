@@ -17,6 +17,14 @@ TAG="${CLUSTER}-${CONTRACT}-d${N}"
 sha_before=$(shasum -a 256 out-bench/client/main.js | awk '{print $1}')
 echo "[$TAG] bundle sha before: ${sha_before:0:12} port=$PORT"
 
+# Refuse to drive a pod that booted on the STUB LLM (a configured provider
+# with its key env unset) — the 2026-07-10 spark trap: the drive "runs" and
+# scores garbage. The marker is emitted at boot by seon.client.
+if grep -q "SEON-STUB-LLM" "logs/pod-$CLUSTER.log" 2>/dev/null; then
+  echo "[$TAG] ABORT: pod-$CLUSTER booted on the STUB LLM (see SEON-STUB-LLM in logs/pod-$CLUSTER.log) — export the provider key and recreate/restart the cluster" >&2
+  exit 2
+fi
+
 if [ "$TASK" != "-" ]; then
   rm -rf "tmp/t4-drive/py/$TASK"
   cp -R "tmp/t4-masters/py/$TASK" "tmp/t4-drive/py/$TASK"

@@ -253,16 +253,19 @@ def test_live_driver_choreography_with_fakes(monkeypatch):
     snap = _good_snapshot()
 
     monkeypatch.setattr(cl, "create_cluster",
-                        lambda name, ephemeral: (order.append(("create", name, ephemeral))
-                                                 or cl.Cluster(name, 40001)))
+                        lambda name, ephemeral, **kw: (order.append(("create", name, ephemeral))
+                                                       or cl.Cluster(name, 40001)))
     monkeypatch.setattr(cl, "restart_pod",
-                        lambda c: (order.append(("restart", c.name))
-                                   or cl.Cluster(c.name, 40002)))
+                        lambda c, **kw: (order.append(("restart", c.name))
+                                         or cl.Cluster(c.name, 40002)))
     monkeypatch.setattr(cl, "destroy_cluster",
                         lambda name: order.append(("destroy", name)))
     monkeypatch.setattr(planning, "fetch_plan_snapshot",
                         lambda cname, aid: (order.append(("snapshot", cname, aid))
                                             or snap))
+    monkeypatch.setattr(planning, "fetch_eval_rows",
+                        lambda cname, aid: (order.append(("evals", cname, aid))
+                                            or []))
 
     def fake_run(text, timeout_ms, url, agent_id=None):
         order.append(("run", url, agent_id))
@@ -273,7 +276,7 @@ def test_live_driver_choreography_with_fakes(monkeypatch):
     out = planning.pod_planning_driver("p1 text", "p2 text",
                                        cluster_name="plan-t")
     kinds = [o[0] for o in order]
-    assert kinds == ["create", "run", "restart", "run", "snapshot", "destroy"]
+    assert kinds == ["create", "run", "restart", "run", "snapshot", "evals", "destroy"]
     assert order[0] == ("create", "plan-t", True)
     assert order[1][1].endswith(":40001/agents/run")  # phase 1: pre-restart port
     assert order[3][1].endswith(":40002/agents/run")  # phase 2: the NEW port
@@ -290,7 +293,7 @@ def test_live_driver_destroys_on_failure(monkeypatch):
 
     destroyed = []
     monkeypatch.setattr(cl, "create_cluster",
-                        lambda name, ephemeral: cl.Cluster(name, 40001))
+                        lambda name, ephemeral, **kw: cl.Cluster(name, 40001))
     monkeypatch.setattr(cl, "destroy_cluster", destroyed.append)
 
     def boom(*a, **k):
@@ -311,3 +314,143 @@ def test_snapshot_form_is_one_line_with_sentinels():
     assert form.count("WIRE-JSON") == 2
     assert ":seon.server.registry/db-name :plan-t" in form
     assert '"a-9"' in form
+
+
+# --- rung-2 process checks (2026-07-10): decompose-first + close-adjacency ----
+
+
+def _ev(source, ok=True, at=1_000):
+    return {"source": source, "ok": ok, "at_ms": at}
+
+
+_WORK = '(db/transact! {:seon.db/tx-data [{:my.cargo/name "x"}]})'
+
+
+def test_decompose_first_good():
+    evals = [_ev("(in-ns 'my.agent.a)"),
+             _ev('(my.plan/plan! {:my.plan/title "t" :my.plan/children []})'),
+             _ev(_WORK)]
+    from seon_inspect.planning import check_decompose_first
+    assert check_decompose_first(evals)["ok"] is True
+
+
+def test_decompose_first_work_before_plan_fails():
+    from seon_inspect.planning import check_decompose_first
+    evals = [_ev(_WORK),
+             _ev('(my.plan/plan! {:my.plan/title "t"})')]
+    assert check_decompose_first(evals)["ok"] is False
+
+
+def test_decompose_first_no_plan_fails():
+    from seon_inspect.planning import check_decompose_first
+    assert check_decompose_first([_ev(_WORK)])["ok"] is False
+
+
+def test_decompose_first_failed_plan_eval_does_not_count():
+    from seon_inspect.planning import check_decompose_first
+    evals = [_ev('(my.plan/plan! {:bad "shape"})', ok=False),
+             _ev(_WORK),
+             _ev('(my.plan/plan! {:my.plan/title "t"})')]
+    assert check_decompose_first(evals)["ok"] is False
+
+
+def test_close_adjacency_interleaved_good():
+    from seon_inspect.planning import check_close_adjacency
+    evals = [_ev('(my.plan/plan! {:my.plan/title "t"})'),
+             _ev(_WORK), _ev('(my.plan/done! {:my.plan/id "s1"})'),
+             _ev(_WORK), _ev('(my.plan/done! {:my.plan/id "s2"})'),
+             _ev('(my.plan/done! {:my.plan/id "s3"})')]  # final pair ok
+    res = check_close_adjacency(evals)
+    assert res["ok"] is True, res
+    assert res["n_closes"] == 3
+
+
+def test_close_adjacency_batch_close_fails():
+    from seon_inspect.planning import check_close_adjacency
+    evals = [_ev('(my.plan/plan! {:my.plan/title "t"})'),
+             _ev(_WORK), _ev(_WORK),
+             _ev('(my.plan/done! {:my.plan/id "s1"})'),
+             _ev('(my.plan/done! {:my.plan/id "s2"})'),
+             _ev('(my.plan/done! {:my.plan/id "s3"})')]
+    res = check_close_adjacency(evals)
+    assert res["ok"] is False
+    assert res["longest_close_run"] == 3
+
+
+def test_close_adjacency_no_closes_fails():
+    from seon_inspect.planning import check_close_adjacency
+    assert check_close_adjacency([_ev(_WORK)])["ok"] is False
+
+
+def test_check_planning_gates_on_process_checks():
+    # answer + trajectory good, but batch-closing evals → INCORRECT overall
+    from seon_inspect.planning import check_planning
+    snap = _good_snapshot()
+    oracle = {"final": {"answer": "42", "kind": "exact"},
+              "resume": {"min_pre_steps": MIN_PRE_STEPS}}
+    batch = [_ev('(my.plan/plan! {:my.plan/title "t"})'),
+             _ev(_WORK),
+             _ev('(my.plan/done! {:my.plan/id "a"})'),
+             _ev('(my.plan/done! {:my.plan/id "b"})'),
+             _ev('(my.plan/done! {:my.plan/id "c"})')]
+    res = check_planning("the total is 42", snap, T, oracle, eval_rows=batch)
+    assert res["final"]["ok"] and res["trajectory"]["ok"]
+    assert res["close_adjacency"]["ok"] is False
+    assert res["ok"] is False
+
+
+def test_run_planning_sample_wires_eval_rows():
+    from seon_inspect.planning import run_planning_sample
+    out = run_planning_sample(
+        "p1", "p2",
+        run_phase1=lambda t: {"agent_id": "a-1", "reply": "r1"},
+        restart_pod=lambda: None,
+        run_phase2=lambda t, r1: {"reply": "r2"},
+        fetch_snapshot=lambda r1: [],
+        fetch_evals=lambda r1: [_ev(_WORK)],
+        clock_ms=lambda: 5_000,
+    )
+    assert out["eval_rows"] == [_ev(_WORK)]
+
+
+def test_evals_form_is_one_line_with_sentinels():
+    from seon_inspect.planning import _EVALS_FORM
+    form = _EVALS_FORM % ("plan-t", '"a-9"')
+    assert "\n" not in form
+    assert form.count("WIRE-JSON") == 2
+
+
+def test_close_adjacency_fused_work_and_close_breaks_the_run():
+    # a `(do (compute …) (my.plan/done! …))` form is WORK (the strictest
+    # adjacency) — it must break a close run, never extend it (rung-2 d1)
+    from seon_inspect.planning import check_close_adjacency
+    evals = [_ev('(my.plan/done! {:my.plan/id "a"})'),
+             _ev('(do (println (+ 1 2)) (my.plan/done! {:my.plan/id "b"}))'),
+             _ev('(my.plan/done! {:my.plan/id "root"})')]
+    res = check_close_adjacency(evals)
+    assert res["ok"] is True, res
+    assert res["longest_close_run"] == 1
+
+
+def test_close_adjacency_activity_between_closes_is_fine():
+    # active!/tree/prose between closes = the agent was doing something —
+    # only STRICTLY consecutive done!s form a batch-dump run
+    from seon_inspect.planning import check_close_adjacency
+    evals = [_ev('(my.plan/done! {:my.plan/id "a"})'),
+             _ev('(my.plan/active! {:my.plan/id "b"})'),
+             _ev('(my.plan/done! {:my.plan/id "b"})'),
+             {"source": "(all recorded)", "ok": True, "at_ms": 1,
+              "narration": "demoted: PROSE, not code"},
+             _ev('(my.plan/done! {:my.plan/id "c"})')]
+    res = check_close_adjacency(evals)
+    assert res["ok"] is True, res
+    assert res["longest_close_run"] == 1
+
+
+def test_decompose_first_prose_is_not_work():
+    from seon_inspect.planning import check_decompose_first
+    evals = [{"source": "(thinking out loud)", "ok": True, "at_ms": 1,
+              "narration": "demoted: PROSE, not code"},
+             _ev('(my.plan/plan! {:my.plan/title "t"})'),
+             _ev(_WORK)]
+    assert check_decompose_first(evals)["ok"] is True

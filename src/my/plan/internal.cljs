@@ -471,8 +471,11 @@
                   (str "; " marker (when message "✉ ") id
                        (when created-at (str " [" (stamp created-at) "]"))
                        " " title))]
-      (str "; Open frontier — close one with (my.plan/done! {:my.plan/id \"<id>\"}),\n"
-           "; take one up with (my.plan/active! {:my.plan/id \"<id>\"}):\n"
+      (str "; Open frontier — close each step with (my.plan/done! {:my.plan/id \"<id>\"})\n"
+           "; the MOMENT its work lands (never batch closes at the end);\n"
+           "; take one up with (my.plan/active! {:my.plan/id \"<id>\"}); add a\n"
+           "; DISCOVERED step UNDER this plan (never a new parentless root):\n"
+           "; (my.plan/step! {:my.plan/title \"…\" :my.plan/parent [:my.plan/id \"<an id here>\"]})\n"
            (str/join "\n"
                      (concat (map #(line "▸ " %) actives)
                              (map #(line "" %) shown)))
@@ -492,8 +495,25 @@
                           (str "; ✓ [" (stamp completed-at) "] " title))
                         dones)))))
 
+(def empty-plan-teaching
+  "The `:plan` block's OWN teaching for the no-plan-yet state.
+
+   Colocation (owner directive 2026-07-10): the empty state is exactly
+   when decompose-first must be taught — once a plan exists the anchor +
+   frontier lines carry the workflow themselves, and this header is
+   absent. Byte-stable (cache-safe)."
+  (str "; ── plan ── (empty)\n"
+       "; Multi-step work: decompose FIRST, before starting the work —\n"
+       ";   (my.plan/plan! {:my.plan/title \"…\" :my.plan/goal \"…\"\n"
+       ";                   :my.plan/children [{:my.plan/title \"step 1\"} …]})\n"
+       "; mints the whole plan in one call; it renders here and survives\n"
+       "; restarts. Close each step the MOMENT its work lands\n"
+       "; ((my.plan/done! {:my.plan/id \"<id>\"})); add a discovered step\n"
+       "; UNDER the plan: (my.plan/step! {:my.plan/title \"…\"\n"
+       ";                                 :my.plan/parent [:my.plan/id \"<id>\"]})."))
+
 (defn plan-body
-  "Windowed plan text for `agent` in db value `db` — \"\" when no plan data.
+  "Windowed plan text for `agent` in db value `db`.
 
    Three bands, all DERIVED, nothing stored: (1) the position anchor —
    where you ARE in which goal, (2) the open frontier — the :active step +
@@ -501,33 +521,37 @@
    grounding). A 1000-step plan renders at constant size: the completed
    interior is dropped from the prompt but stays queryable (`tree`,
    `status`, `db/query`). Rides as `;` comments so the whole context reads
-   as eval'able Clojure."
+   as eval'able Clojure. NO plan data ⇒ [[empty-plan-teaching]] — the
+   block teaches its own workflow exactly when nothing else can."
   [db agent]
-  (if-let [oe (agent-eid db agent)]
-    (let [a          (anchor db oe)
-          actives    (active-steps db oe)
-          active-ids (into #{} (map :my.plan/id) actives)
-          unfinished (open-steps db oe)
-          actives*   (filterv #(active-ids (:my.plan/id %)) unfinished)
-          readies    (filterv (fn [{:my.plan/keys [id status]}]
-                                (and (not (active-ids id))
-                                     (= :open status)
-                                     (ready? db id)))
-                              unfinished)]
-      (str/join "\n" (remove str/blank?
-                             [(anchor-section a)
-                              (frontier-section actives* readies)
-                              (done-section (recent-done db oe))])))
-    ""))
+  (let [body
+        (if-let [oe (agent-eid db agent)]
+          (let [a          (anchor db oe)
+                actives    (active-steps db oe)
+                active-ids (into #{} (map :my.plan/id) actives)
+                unfinished (open-steps db oe)
+                actives*   (filterv #(active-ids (:my.plan/id %)) unfinished)
+                readies    (filterv (fn [{:my.plan/keys [id status]}]
+                                      (and (not (active-ids id))
+                                           (= :open status)
+                                           (ready? db id)))
+                                    unfinished)]
+            (str/join "\n" (remove str/blank?
+                                   [(anchor-section a)
+                                    (frontier-section actives* readies)
+                                    (done-section (recent-done db oe))])))
+          "")]
+    (if (str/blank? body) empty-plan-teaching body)))
 
 (defn plan-block
   "Context-section fn (`:plan`, seon.config/default-ctx-blocks priority 45):
    [[plan-body]] for the CALLING agent — the `:seon.agent/id` in the render
    input, resolved as a `[:seon.agent/id id]` ref against the render's db
    value — absent `:seon.db/db` defaults to the current conn, the same
-   convention as every other core section fn. Returns \"\" when the agent
-   has no plan data (the section vanishes — derived, nothing stored,
-   nothing to acknowledge)."
+   convention as every other core section fn. An agent with no plan data
+   gets [[empty-plan-teaching]] — the block's own decompose-first
+   workflow header (colocation, 2026-07-10); everything else is derived,
+   nothing stored, nothing to acknowledge."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
   (plan-body (or db @db/*conn*) [:seon.agent/id id]))

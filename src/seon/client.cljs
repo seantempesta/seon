@@ -2876,11 +2876,21 @@
                      :anthropic (boolean (config/anthropic-api-key))
                      :typeahead (diffusiongemma/api-configured?)
                      (openai/api-key-configured?))]
-      (log/info-console! "seon.client"
-                         (if key-set?
-                           (str "using " (name provider) " LLM (API key set)")
-                           (str "using stub LLM (" (name provider)
-                                " selected but its API key is unset)")))
+      (if key-set?
+        (log/info-console! "seon.client"
+                           (str "using " (name provider) " LLM (API key set)"))
+        ;; LOUD, grep-able marker (rung-1 trap, 2026-07-10): a real provider
+        ;; configured with its key unset silently drove a whole trial on the
+        ;; stub. ERROR level + the SEON-STUB-LLM token so harnesses can
+        ;; refuse to dispatch against an accidental stub; boot still
+        ;; proceeds — the suite/gym rely on the stub deliberately.
+        (log/error-console! "seon.client"
+                            (str "SEON-STUB-LLM: using stub LLM — provider "
+                                 (name provider) " is configured but its API "
+                                 "key env is unset; every agent turn will get "
+                                 "canned replies. Export the key and restart "
+                                 "(SEON_CONFIG must ride the restart) if this "
+                                 "pod is meant to do real work.")))
       (-> (start-agent! {:llm-fn llm-fn})
           (.then (fn [{:seon.agent/keys [id ns]
                        :seon.client/keys [resumed-ids minted-ids]

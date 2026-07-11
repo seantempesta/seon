@@ -1,0 +1,5 @@
+;; minimal-plan.edn with repl-mode :stream — the rung-2 Mode B variant
+;; (DeepSeek's measured default). One delta, everything else inherited.
+#merge
+[#include "minimal-plan.edn"
+ {:seon.config/repl-mode :stream}]

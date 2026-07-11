@@ -610,9 +610,11 @@ MIN_PRE_STEPS = 2
 # open / the final synthesis answer.
 _LTP_CONTRACT = (
     "Partway through this task your runtime will be restarted, and your plan "
-    "and progress must survive that restart. Before doing anything else, "
-    "record a durable plan for the WHOLE task, broken into steps, and keep it "
-    "current — mark a step done only once its outcome actually holds. Then "
+    "and progress must survive that restart. Before doing anything else — "
+    "before recording any data — record a durable plan for the WHOLE task, "
+    "broken into steps, and keep it current: mark each step done THE MOMENT "
+    "its work lands, only once its outcome actually holds — never save your "
+    "step closes for the end of the task. Then "
     "record the data above. After the restart you will receive the remaining "
     "data; you must resume from the plan you already recorded — do not start "
     "a new plan from scratch — and no step of your plan may be left open at "

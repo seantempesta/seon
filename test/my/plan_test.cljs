@@ -239,14 +239,18 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest block-is-empty-when-no-open-work
+(deftest block-teaches-when-no-open-work
+  ;; Colocation (2026-07-10): the no-plan state renders the block's OWN
+  ;; decompose-first teaching (byte-stable) instead of vanishing — the
+  ;; empty state is exactly when nothing else teaches the workflow.
   (async done
     (-> (with-conn
           (fn [conn]
-            (is (= "" (plan-int/plan-body @conn a-ref))
-                "no open items → empty block, the section vanishes")
-            (is (= "" (plan-int/plan-body @conn [:seon.agent/id "ghost"]))
-                "unknown agent → empty block, not a throw")))
+            (is (= plan-int/empty-plan-teaching (plan-int/plan-body @conn a-ref))
+                "no open items → the block teaches decompose-first")
+            (is (= plan-int/empty-plan-teaching
+                   (plan-int/plan-body @conn [:seon.agent/id "ghost"]))
+                "unknown agent → the same teaching, not a throw")))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -286,9 +290,10 @@
                                          "done-only still renders the recall band")
                                      (is (not (str/includes? block "Open frontier"))
                                          "no open items → the open section is gone")
-                                     (is (= "" (plan-int/plan-body
-                                                 @conn [:seon.agent/id "ghost"]))
-                                         "truly-idle agent (no open, no done) → still vanishes")))))))))))
+                                     (is (= plan-int/empty-plan-teaching
+                                            (plan-int/plan-body
+                                              @conn [:seon.agent/id "ghost"]))
+                                         "truly-idle agent (no open, no done) → the teaching header")))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -357,9 +362,9 @@
                                  (plan-int/plan-block
                                    {:seon.agent/id a-id}))
                         "db absent → defaults to the current conn, no throw")
-                    (is (= "" (plan-int/plan-block
-                                {:seon.agent/id b-id}))
-                        "other agent, no items → empty, section vanishes"))))))
+                    (is (= plan-int/empty-plan-teaching
+                           (plan-int/plan-block {:seon.agent/id b-id}))
+                        "other agent, no items → the decompose-first teaching"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
