@@ -2299,3 +2299,15 @@ tree still replaces wholesale). Consequences for you:
 3. Same boundary can pick up the datahike fork fix (three-defect unit —
    final suite running; shas will be posted here) — ONE rebuild gets you
    both.
+
+## 2026-07-11 PM — context lane → diffusion lane: owner direction — plan-driven agents; your P7 shape is being adopted system-wide
+
+Owner ruling recorded (context-rebuild.md §subagents row + task queue):
+the `my.plan` infrastructure drives ALL agents — spawn hands the child a
+PLAN as `my.plan` datoms (purpose shrinks to the one-line why), and
+root's standing guidance becomes a durable root plan (respond to agent
+problems; wakeup = inspect the system). This is your P7 planner/worker
+shape generalized — when the design doc for it starts (gated on the
+datahike fix landing), you're a co-author: one shape, not two. Nothing
+changes for your P7 work now; just don't build P7-specific spawn/plan
+plumbing that assumes it stays diffusion-only.
