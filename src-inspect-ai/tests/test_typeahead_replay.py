@@ -160,6 +160,52 @@ def test_step_metrics_uptake_and_lock():
     assert m["step_s_mean"] == 1.5
 
 
+class _ScriptedEP:
+    """Stub worker endpoint: returns scripted step outputs, records
+    every payload (the P6 suppression proof)."""
+
+    def __init__(self, outputs):
+        self.outputs = list(outputs)
+        self.payloads = []
+
+    def call(self, payload):
+        self.payloads.append(payload)
+        return self.outputs.pop(0)
+
+
+def test_step_loop_suppresses_failed_offer():
+    # P6: an expand that locks NOTHING suppresses that glyph's offer for
+    # the rest of the call (the P5 p1 trace re-fired the identical failed
+    # auto-offer 4x — the stateless worker cannot remember; the loop must).
+    offers = [{"glyph": "①", "label": "a", "template": [["clamp", "(a )"]]},
+              {"glyph": "②", "label": "b", "template": [["clamp", "(b )"]]}]
+    ep = _ScriptedEP([
+        {"transition": "expand", "glyph": "①", "locked": [],
+         "new_draft": "", "events": [{"event": "expand-failed",
+                                      "glyph": "①"}]},
+        {"transition": "stuck", "locked": [], "new_draft": ""},
+        {"transition": "stuck", "locked": [], "new_draft": ""},
+    ])
+    r = tr.run_step_loop(ep, "render", offers, seed=1, null_render="null")
+    assert r["outcome"] == "gave-up"
+    assert [o["glyph"] for o in ep.payloads[0]["offers"]] == ["①", "②"]
+    assert [o["glyph"] for o in ep.payloads[1]["offers"]] == ["②"]
+    assert [o["glyph"] for o in ep.payloads[2]["offers"]] == ["②"]
+
+
+def test_step_loop_expand_that_locks_is_not_suppressed():
+    offers = [{"glyph": "①", "label": "a", "template": [["clamp", "(a )"]]}]
+    ep = _ScriptedEP([
+        {"transition": "expand", "glyph": "①", "locked": ["(a 1)"],
+         "new_draft": ""},
+        {"transition": "done", "locked": [], "new_draft": ""},
+    ])
+    r = tr.run_step_loop(ep, "render", offers, seed=1)
+    assert r["outcome"] == "done"
+    assert r["text"] == "(a 1)"
+    assert [o["glyph"] for o in ep.payloads[1]["offers"]] == ["①"]
+
+
 def test_kill_criteria_verdicts():
     leak = tr.kill_criteria({
         "arm1_guided": {"outcome_mean": 0.8},

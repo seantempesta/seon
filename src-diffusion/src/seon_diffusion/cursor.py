@@ -68,6 +68,10 @@ class Policy:
     worst_entropy_gate: float = 1.0  # auto-accept gates on WORST token, not mean
     settle_rounds: int = 2           # extra per-hole rounds: settled holes CLAMP,
                                      # only unsettled holes re-noise (per-field lock)
+    expand_settle_rounds: int = 1    # step-mode expansions only (P6, live-measured:
+                                     # re-noising an unsettled offer-args hole rescued
+                                     # 0/2 at ~2x the forwards; the step loop's own
+                                     # retry/suppress is the cheaper recovery)
     probe_lengths: int = 3           # CAL hole-length probe: K candidates (1 = off)
     probe_delta: int = 4             # candidate lengths n, n±Δ, n±2Δ, …
     ban_special: bool = True         # ban special/channel tokens at ALL free positions
@@ -326,15 +330,22 @@ class CursorDriver:
             if hn in skip:
                 continue
             n = segments[si][1]
-            lengths = [n]
-            d = p.probe_delta
+            # P6 ladder: geometric DOWN alternated with +Δ up. Live-measured
+            # on the offer-args hole: Φ(20) > Φ(24) > Φ(28) — the true
+            # content is far shorter than the template default, and the old
+            # ±Δ ladder never reached short lengths; the slack is what
+            # invites the echo/junk. Halving reaches short lengths in
+            # O(log n) probes; the +Δ arm keeps the upward direction open.
+            lengths, down, d = [n], n, p.probe_delta
             while len(lengths) < p.probe_lengths:
-                lo, hi = n - d, n + d
-                if lo >= 1 and lo not in lengths:
-                    lengths.append(lo)
-                if len(lengths) < p.probe_lengths and hi not in lengths:
-                    lengths.append(hi)
-                d += p.probe_delta
+                down = max(2, down // 2)
+                if down not in lengths:
+                    lengths.append(down)
+                if len(lengths) < p.probe_lengths:
+                    hi = n + d
+                    if hi not in lengths:
+                        lengths.append(hi)
+                    d += p.probe_delta
             scores = {}
             for L in sorted(lengths):
                 trial = list(segments)
@@ -358,10 +369,15 @@ class CursorDriver:
                 ws.free(payload)
         return ws
 
-    def _fill_on(self, cache, cur_len, segments, candidates=None):
+    def _fill_on(self, cache, cur_len, segments, candidates=None,
+                 settle_rounds=None):
         """Fill template holes on an existing cache: CAL length probe →
-        masked denoise → per-hole readouts → suffix-echo overlap-trim."""
+        masked denoise → per-hole readouts → suffix-echo overlap-trim.
+        `settle_rounds` overrides the policy default (the step-mode
+        expansion regime)."""
         p = self.policy
+        if settle_rounds is not None:
+            p = replace(p, settle_rounds=settle_rounds)
         cfg = self.model.cfg
         segments = norm_segments(segments)
         # a hole with a candidate set is CLOSED: size it to its longest
@@ -388,10 +404,12 @@ class CursorDriver:
         total_fwd = probe_fwd
         overflow = False
         rounds = 1 + max(int(p.settle_rounds), 0)
+        denoised_rounds = 0
         for rnd in range(rounds):
             open_holes = [h for h in range(n_holes) if not state[h]["accepted"]]
             if not open_holes:
                 break
+            denoised_rounds += 1
             # current segments: settled hole → clamp(text); open hole → free
             cur_segments, cur_cand, order = [], {}, []
             for i, (kind, payload) in enumerate(segments):
@@ -413,9 +431,26 @@ class CursorDriver:
                 pad_clamp_id=self.gen.pad_token_id)
             overflow = overflow or ovf
             bias = self._fill_bias(ws, clamp_mask, cur_cand)
+            # hole-stability early stop (P6, live-measured: one fill round
+            # burned the full 48-step budget while the hole belief had long
+            # settled — the round's whole-canvas stop criterion is dominated
+            # by clamped-position uncertainty the fill can't reduce). Only
+            # the hole positions are being generated: when their belief is
+            # unchanged across two consecutive probes, further forwards are
+            # pure heat.
+            hole_positions = [j for a, b in ws.hole_spans()
+                              for j in range(a, min(b, cfg.canvas_length))]
+            snap = {"prev": None, "hits": 0}
+
+            def holes_stable(belief_ids, _snap=snap, _pos=hole_positions):
+                cur = tuple(int(belief_ids[0, j]) for j in _pos)
+                _snap["hits"] = _snap["hits"] + 1 if cur == _snap["prev"] else 0
+                _snap["prev"] = cur
+                return _snap["hits"] >= 1
+
             belief, fwd, logits = control._denoise_round(
                 self.model, canvas, clamp_mask, clamp_ids, cache, cur_len,
-                self.gen, bias=bias)
+                self.gen, bias=bias, probe=holes_stable)
             total_fwd += fwd
             ent = _entropy(logits)
             toks = [int(t) for t in belief[0]]
@@ -486,7 +521,7 @@ class CursorDriver:
         return {"holes": holes, "hole_confidence": stats, "trims": trims,
                 "probes": probes, "text": _strip_hints("".join(pieces)),
                 "overflow": overflow, "forwards": total_fwd,
-                "settle_rounds_used": rnd + 1}
+                "settle_rounds_used": denoised_rounds}
 
     def fill(self, prompt, segments, candidates=None, seed=None):
         """mode=fill: template segments in → hole texts + per-hole
@@ -571,6 +606,37 @@ class CursorDriver:
                 g: float(lp[0, 0, self.glyphs[g]])
                 for g in offer_glyphs if g in self.glyphs}
         return self._baselines[key]
+
+    # ---- LOCK/HARVEST (shared: main path + the EXPAND arm) -----------------
+
+    def _lock_prefix(self, text, refine, errors, eval_session, events):
+        """The maximal clean-prefix lock over `text`: parse-gated by the
+        oracle `refine` result, eval-gated when a session is supplied.
+        Appends lock/eval-failed events; an eval failure appends its span
+        to `errors` (the caller's list, mutated — same contract as the
+        inline original). Returns (locked, harvest_end, eval_broke)."""
+        good = sorted(refine["clamps"], key=lambda c: c["span"][0])
+        first_bad = min((e["span"][0] for e in errors), default=len(text) + 1)
+        locked, harvest_end, eval_broke = [], 0, False
+        for form in good:
+            s, e = form["span"]
+            if e > first_bad:
+                break
+            src = form["source"]
+            if eval_session is not None:
+                ev = eval_session.eval(src)
+                if not ev.get("ok"):
+                    msg = (ev.get("error") or {}).get("message", "eval failed")
+                    errors.append({"span": [s, e], "error-kind": "eval",
+                                   "source": msg})
+                    events.append({"event": "eval-failed", "form": src[:80],
+                                   "error": msg[:120]})
+                    eval_broke = True
+                    break
+            locked.append(src)
+            harvest_end = e
+            events.append({"event": "lock", "form": src[:80]})
+        return locked, harvest_end, eval_broke
 
     # ---- INTERPRET ----------------------------------------------------------
 
@@ -737,17 +803,64 @@ class CursorDriver:
                 cand = {int(k): v for k, v in
                         (offer.get("candidates") or {}).items()}
                 orient = orient_for(offer.get("label"), cand)
+                tmpl = norm_segments(offer["template"])
                 segments = ([("clamp", draft)] if draft else []) \
                     + ([("clamp", orient)] if orient else []) \
-                    + norm_segments(offer["template"])
-                fr = self._fill_on(cache, cur_len, segments, candidates=cand)
+                    + tmpl
+                fr = self._fill_on(cache, cur_len, segments, candidates=cand,
+                                   settle_rounds=p.expand_settle_rounds)
                 total_fwd += fr["forwards"]
                 events.append({"event": "expand", "glyph": chosen,
                                "auto": bool(auto), "label": offer.get("label"),
                                "trims": fr["trims"], "probes": fr["probes"]})
+                # P6: harvest the expansion IMMEDIATELY (parse-gated, eval-
+                # gated with a session) instead of handing an unchecked fill
+                # forward as draft. Live-measured failure mode: a junk-args
+                # fill rode out as new_draft, the NEXT step's repair arm
+                # dropped the whole broken region (the clamped verb call
+                # included), the state returned to its pre-step value, and
+                # the identical auto-offer re-fired forever. A clean
+                # expansion now LOCKS in the same step; a broken one keeps
+                # the caller's own draft (never the junk) and reports
+                # expand-failed + hints, so the caller's offer memory can
+                # suppress the glyph.
+                etext = fr["text"]
+                eref = (self.oracle.refine(etext) if etext.strip()
+                        else {"renoise_spans": [], "clamps": []})
+                eerrors = list(eref["renoise_spans"])
+                elocked, eharvest_end, _ = self._lock_prefix(
+                    etext, eref, eerrors, eval_session, events)
+                eremainder = etext[eharvest_end:].strip()
+                # A trailing eof error is normally "unfinished, growable" —
+                # but when the offer template ENDS with a closing clamp the
+                # assembled text is complete by construction, so any eof
+                # left standing was injected by the hole (live-measured:
+                # `ready")` broke the string balance and the junk rode
+                # forward as an eof-only draft).
+                template_closed = bool(tmpl) and tmpl[-1][0] == "clamp"
+                hard = [e for e in eerrors
+                        if e["span"][1] > eharvest_end
+                        and not (not template_closed
+                                 and e.get("error-kind") == "eof"
+                                 and e["span"][1] >= len(etext))]
+                if not elocked and hard:
+                    hints, seen = [], set()
+                    for e in sorted(hard, key=lambda e: e["span"][0]):
+                        h = _hint_for(e)
+                        if h not in seen and len(seen) < 2:
+                            seen.add(h)
+                            hints.append(h)
+                    events.append({"event": "expand-failed", "glyph": chosen,
+                                   "kinds": sorted({e.get("error-kind")
+                                                    for e in hard})})
+                    result.update({"transition": "expand",
+                                   "arm": "glyph-select", "glyph": chosen,
+                                   "new_draft": draft, "hints": hints,
+                                   "expansion": fr})
+                    return self._finish(result, total_fwd, t0)
                 result.update({"transition": "expand", "arm": "glyph-select",
-                               "glyph": chosen, "new_draft": fr["text"],
-                               "expansion": fr})
+                               "glyph": chosen, "locked": elocked,
+                               "new_draft": eremainder, "expansion": fr})
                 return self._finish(result, total_fwd, t0)
             events.append({"event": "glyph-no-offer", "glyph": chosen})
 
@@ -762,29 +875,12 @@ class CursorDriver:
         # LOCK/HARVEST — maximal clean prefix (parse-gated; eval-gated
         # when a session is supplied), shared by the progress/broken/done arms
         errors = list(refine["renoise_spans"])
-        good = sorted(refine["clamps"], key=lambda c: c["span"][0])
-        first_bad = min((e["span"][0] for e in errors), default=len(text) + 1)
         locked, harvest_end = [], 0
         if arm in ("eos-complete", "text-progress", "broken"):
-            for form in good:
-                s, e = form["span"]
-                if e > first_bad:
-                    break
-                src = form["source"]
-                if eval_session is not None:
-                    ev = eval_session.eval(src)
-                    if not ev.get("ok"):
-                        msg = (ev.get("error") or {}).get("message", "eval failed")
-                        errors.append({"span": [s, e], "error-kind": "eval",
-                                       "source": msg})
-                        events.append({"event": "eval-failed", "form": src[:80],
-                                       "error": msg[:120]})
-                        arm = "broken"
-                        first_bad = min(first_bad, s)
-                        break
-                locked.append(src)
-                harvest_end = e
-                events.append({"event": "lock", "form": src[:80]})
+            locked, harvest_end, eval_broke = self._lock_prefix(
+                text, refine, errors, eval_session, events)
+            if eval_broke:
+                arm = "broken"
         result["locked"] = locked
         remainder = text[harvest_end:]
 

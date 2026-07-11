@@ -387,6 +387,12 @@ def enrich_replay_replies(cluster: str = "acme", wire_port: int = 7981,
     from seon_inspect.cluster import wire_repl_json
     manifest = json.loads(path.read_text())
     for s in manifest["samples"]:
+        if s.get("replay_reply"):
+            # already enriched — skip. Idempotence must not require the
+            # BLOB to still exist: the reply text lives in the manifest,
+            # and a cluster reset between partial generations wipes the
+            # blob store (live-hit 2026-07-11).
+            continue
         h = s["replay"]["prompt_blob"]
         out = wire_repl_json(_REPLY_FORM % (cluster, json.dumps(h)),
                              port=wire_port)

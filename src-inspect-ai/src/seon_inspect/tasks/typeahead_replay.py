@@ -295,14 +295,21 @@ def run_step_loop(ep, render: str, offers: list[dict], seed: int,
     committed/draft threaded, stop on done / stuck×2 / MAX_ROUNDS.
     `null_render` (the null-intent baseline render) rides every step so
     the worker calibrates glyph posteriors — without it auto-offers
-    structurally cannot fire (the P4 uptake-0.0 finding)."""
+    structurally cannot fire (the P4 uptake-0.0 finding). P6: an offer
+    whose expansion locked NOTHING is suppressed for the rest of the
+    call — the step trace is the driver's memory (the P5 p1 trace shows
+    the identical failed offer re-firing 4x at the same margin; the
+    worker is stateless by design, so the memory lives in this loop)."""
     committed, draft, locked_all, stuck = "", "", [], 0
     steps, t0 = [], time.time()
     outcome = "round-cap"
+    failed_glyphs: set[str] = set()
     for rnd in range(MAX_ROUNDS):
+        live_offers = [o for o in offers
+                       if o.get("glyph") not in failed_glyphs]
         payload = {"mode": "step", "prompt": render,
                    "committed": committed, "draft": draft,
-                   "offers": offers, "policy": POLICY_WIRE, "seed": seed}
+                   "offers": live_offers, "policy": POLICY_WIRE, "seed": seed}
         if null_render:
             payload["null_render"] = null_render
         r = ep.call(payload)
@@ -328,6 +335,8 @@ def run_step_loop(ep, render: str, offers: list[dict], seed: int,
         })
         committed = "\n".join(x for x in [committed, *locked] if x.strip())
         draft = str(r.get("new_draft") or "")
+        if r.get("transition") == "expand" and not locked and r.get("glyph"):
+            failed_glyphs.add(r["glyph"])
         stuck = stuck + 1 if r.get("transition") == "stuck" else 0
         if r.get("transition") == "done":
             outcome, draft = "done", ""
@@ -639,7 +648,11 @@ def run_typeahead(arms: tuple[str, ...] = ARMS,
                 [{"sample_id": e["sample_id"], "epoch": e["epoch"],
                   "outcome": e["outcome"]} for e in execs])
             scorecard.append_row({
-                "run_id": f"{date}:typeahead_replay:dev:k{epochs}:{arm}",
+                # run_id carries the run LABEL (run_dir), not just the
+                # date — two same-day runs (P5 + P6, live-hit 2026-07-11)
+                # must not collide in the append-only ledger.
+                "run_id": (f"{run_dir or f'{date}-typeahead'}:"
+                           f"typeahead_replay:dev:k{epochs}:{arm}"),
                 "row": "typeahead_replay", "tier": "dev", **m,
                 "attribution": {"arm": arm, "corpus_sha": c_sha,
                                 "worker_sha": health.get("worker_sha")},

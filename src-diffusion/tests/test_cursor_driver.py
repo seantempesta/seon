@@ -260,15 +260,34 @@ def test_arm_stuck_no_progress(oracle):
     assert r["new_draft"] == "(def f [x] x)"
 
 
-def test_arm_glyph_select_expands_and_strips(oracle):
+def test_arm_glyph_select_expands_and_locks(oracle):
+    # P6: a parse-clean expansion locks IN the expand step (harvested
+    # immediately) instead of riding forward as an unchecked draft.
     d, model, spy = driver(["①", ("buy milk", False)], oracle)
     r = d.step("ctx", offers=OFFERS)
     assert r["arm"] == "glyph-select" and r["transition"] == "expand"
     assert r["glyph"] == "①"
-    assert r["new_draft"] == '(todo/add! "buy milk")'
+    assert r["locked"] == ['(todo/add! "buy milk")']
+    assert r["new_draft"] == ""
+    assert any(e["event"] == "lock" for e in r["events"])
     # the glyph exists only between driver and model — never in text
     assert all("①" not in code for code in spy.seen)
-    assert "①" not in r["new_draft"] and not r["locked"]
+    assert all("①" not in form for form in r["locked"])
+
+
+def test_expand_failed_keeps_caller_draft_and_reports(oracle):
+    # P6 root-cause fix (live-measured p1 loop): a junk-args fill must NOT
+    # ride forward as new_draft (the next step's repair dropped the whole
+    # region and the identical auto-offer re-fired forever). A broken
+    # expansion keeps the caller's own draft, locks nothing, and reports
+    # expand-failed so the caller's offer memory can suppress the glyph.
+    d, model, spy = driver(["①", ('a" ]', False)], oracle)
+    r = d.step("ctx", draft="", offers=OFFERS)
+    assert r["transition"] == "expand" and r["glyph"] == "①"
+    assert r["locked"] == []
+    assert r["new_draft"] == ""          # the caller's draft, unchanged
+    assert any(e["event"] == "expand-failed" for e in r["events"])
+    assert r["hints"]
 
 
 def test_grow_glyph_saves_a_round(oracle):
@@ -317,7 +336,7 @@ def test_auto_offer_fires_on_calibrated_margin(oracle):
     cal = r["readouts"]["glyph_posteriors_calibrated"]
     assert cal["①"] > cal["②"]
     assert r["readouts"]["glyph_margin"] > Policy().auto_offer_margin
-    assert "milk" in r["new_draft"]
+    assert "milk" in (r["new_draft"] + " ".join(r["locked"]))
 
 
 def test_no_auto_offer_when_model_typed_code(oracle):
@@ -453,13 +472,16 @@ def test_expand_clamps_orientation_and_strips_from_draft(oracle):
                             ["clamp", ")"]]}]
     r = d.step("ctx", offers=offers)
     assert r["transition"] == "expand"
-    # orientation line never leaks into the assembled draft
-    assert "; slot:" not in r["new_draft"]
+    produced = r["new_draft"] + " ".join(r["locked"])
+    # orientation line never leaks into the assembled output
+    assert "; slot:" not in produced
     # offer candidates flowed through to the closed-hole SNAP
     exp = r["expansion"]
     assert exp["hole_confidence"][0].get("snapped") is True
     assert exp["holes"][0] in (":open", ":done")
-    assert r["new_draft"] == f"(todo/add! {exp['holes'][0]})"
+    # P6: the clean expansion locks in-step
+    assert r["locked"] == [f"(todo/add! {exp['holes'][0]})"]
+    assert r["new_draft"] == ""
 
 
 # ---------------------------------------------------------------------------

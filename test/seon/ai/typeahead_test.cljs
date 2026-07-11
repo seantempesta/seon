@@ -306,6 +306,58 @@
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
+(deftest step-loop-suppresses-failed-offer
+  ;; P6: an offer whose EXPANSION locked nothing is suppressed for the
+  ;; rest of the call (the P5 p1 trace: the identical failed auto-offer
+  ;; re-fired 4x — the stateless worker cannot remember, the loop must).
+  (async done
+    (let [calls (atom [])
+          fetch (scripted-fetch
+                  calls
+                  [(step-response {:transition "expand" :glyph "①"
+                                   :locked [] :new_draft ""
+                                   :events [{:event "expand-failed"
+                                             :glyph "①"}]})
+                   (step-response {:transition "stuck" :locked []
+                                   :new_draft ""})
+                   (step-response {:transition "stuck" :locked []
+                                   :new_draft ""})])]
+      (-> (with-conn
+            (fn [_conn]
+              ;; one-menu-entry seed: a public program-graph fn + one eval
+              ;; calling it → menu/verb-offers yields the ① offer
+              (-> (db/transact!
+                    {:seon.db/tx-data
+                     [{:seon.fn/sym      "my.plan/done!"
+                       :seon.fn/fn-var?  true
+                       :seon.fn/arglists "([{:my.plan/keys [id]}])"}
+                      {:seon.eval/agent  [:seon.agent/id a-id]
+                       :seon.eval/at     (js/Date. 1000)
+                       :seon.eval/ok?    true
+                       :seon.eval/source "(my.plan/done! {:my.plan/id \"x\"})"}]})
+                  (.then
+                    (fn [_]
+                      (with-local-worker fetch
+                        (fn []
+                          (db/with-agent a-id
+                            (fn [] ((ta/agent-adapter) "the rendered prompt")))))))
+                  (.then
+                    (fn [resp]
+                      (is (= :gave-up (get-in resp [:seon.ai/raw
+                                                    :seon.ai.typeahead/outcome]))
+                          "failed expand then stuck×2 → gave-up")
+                      (let [[c1 c2 c3] @calls]
+                        (is (= 3 (count @calls)))
+                        (is (= 1 (count (get (:payload c1) "offers")))
+                            "step 1 carries the menu offer")
+                        (is (= "①" (get-in (:payload c1) ["offers" 0 "glyph"])))
+                        (is (nil? (get (:payload c2) "offers"))
+                            "the failed offer is suppressed on step 2")
+                        (is (nil? (get (:payload c3) "offers"))
+                            "…and stays suppressed for the whole call")))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
 (deftest step-loop-worker-error-is-a-value
   (async done
     (let [calls (atom [])

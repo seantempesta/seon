@@ -323,16 +323,25 @@
         wire       (cond-> {::dg/mode   :step
                             ::dg/prompt prompt
                             ::dg/policy (policy->wire policy)}
-                     (seq offers) (assoc ::dg/offers (offers->wire offers)
-                                         ::dg/null-render (null-render prompt)))
+                     (seq offers) (assoc ::dg/null-render (null-render prompt)))
         max-rounds (max 1 (:seon.typeahead/max-rounds policy))
         call-id    (str (random-uuid))]
-    (loop [round 0, committed "", draft "", locked-all [], stuck 0, steps []]
+    ;; `failed` = glyphs whose EXPANSION locked nothing — suppressed for the
+    ;; rest of the call (P6). The worker is stateless by design; this loop's
+    ;; step trace is the driver's memory. Without it the P5 p1 trace shows
+    ;; the identical failed auto-offer re-firing 4x at the same margin.
+    (loop [round 0, committed "", draft "", locked-all [], stuck 0, steps []
+           failed #{}]
       (if (>= round max-rounds)
         (let [reply (assemble-reply locked-all draft)]
           (await (ensure-tile!))
           {:text reply :seon.ai/raw (loop-raw reply call-id :round-cap steps)})
-        (let [resp (await (dg/complete (merge wire opts
+        (let [live (into [] (remove #(contains? failed (:seon.typeahead/glyph %)))
+                         offers)
+              resp (await (dg/complete (merge (cond-> wire
+                                                (seq live)
+                                                (assoc ::dg/offers (offers->wire live)))
+                                              opts
                                               {::dg/committed committed
                                                ::dg/draft     draft})))]
           (if-let [err (:seon.ai/error resp)]
@@ -350,7 +359,12 @@
                                    (str/join "\n"))
                   draft'      (str (:new_draft out))
                   transition  (:transition out)
-                  stuck'      (if (= "stuck" transition) (inc stuck) 0)]
+                  stuck'      (if (= "stuck" transition) (inc stuck) 0)
+                  failed'     (if (and (= "expand" transition)
+                                       (empty? locked)
+                                       (string? (:glyph out)))
+                                (conj failed (:glyph out))
+                                failed)]
               (cond
                 (= "done" transition)
                 (let [reply (assemble-reply locked-all' "")]
@@ -365,7 +379,8 @@
                   {:text reply :seon.ai/raw (loop-raw reply call-id :gave-up steps')})
 
                 :else
-                (recur (inc round) committed' draft' locked-all' stuck' steps')))))))))
+                (recur (inc round) committed' draft' locked-all' stuck' steps'
+                       failed')))))))))
 
 (defn agent-adapter
   "A fn-of-ctx-string suitable for `seon.agent`'s `llm-fn`.
