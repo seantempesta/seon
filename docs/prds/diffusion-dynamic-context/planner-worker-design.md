@@ -98,6 +98,31 @@ One measurement per unit — the bench falsifies; it is not the work.
   eval-proven; refinement functions exercised (`step!`, `done!` expect-gated,
   `reopen!`). Live proof: a real plan tree in the acme DB authored by the
   worker from handed-down text, visible in the ledger render.
+
+  **W1 unit brief (implementable now):**
+  - *Stimulus*: a message to a typeahead-provider agent on acme carrying
+    a short frontier-style plan (goal line + 3–4 ordered steps, each
+    with a falsifiable outcome sentence). Author two fixture texts
+    (planning-shaped + db-memory-shaped per the exercising-agents
+    rules); they live with the bench task, never in any context block.
+  - *Expected behavior, no new mechanism*: the worker's step loop
+    produces one `(my.plan/plan! {::title … ::goal … ::children […]})`
+    form (nested `:children`, `:ref`/`:after` where the text implies
+    order, `::expect` per step), which the pod evals through the normal
+    turn pipeline → datoms land.
+  - *Build surface (src-diffusion + bench only)*: whatever the step
+    loop needs to reliably emit ONE large nested form — likely GROW
+    budget for a multi-line map, the code-buffer working a form bigger
+    than one hole. Measure the failure mode first; change second.
+  - *Acceptance*: (1) `(my.plan/tree {})` on acme shows the authored
+    tree matching the text's steps 1:1; (2) `::expect` non-empty on
+    every leaf; (3) the next render's plan ledger shows the ☐ steps and
+    `active!` takes one up; (4) zero hand-edits between text and
+    datoms; (5) fresh store per drive (planner-bug rule, runbook).
+  - *Falsification*: run the same texts through the plain guided
+    provider — if it lands correct `plan!` forms at a similar rate,
+    W1's step machinery added nothing for this shape (report the
+    number; the value would then be W2's focus loop, not authoring).
 - **W2 — keep-in-focus execution**: the step loop keyed to the ▶ step;
   active-step-derived retrieval feeding the render; `done!`/`active!`
   transitions driven by the worker. Live proof: a 3-step plan executed
