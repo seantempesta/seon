@@ -43,6 +43,7 @@
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.log :as log]
+    [seon.render :as render]
     [seon.ui.header :as header]
     [seon.ui.html :as html]
     [seon.ui.world :as world]
@@ -89,12 +90,42 @@
    :paused     "text-warning"
    :terminated "text-text-500"})
 
+(defn- tile-preview
+  "Agent `id`'s canvas as a clipped compact face for its roster tile, or nil.
+
+   The canvas = the agent's live tile — `render/render-agent-tile` (the ONE
+   tile entry point: the pinned `:seon.render.live-tile/content`, else the
+   derived last-updated tile, else the welcome card; throw-safe). Clipped to
+   a fixed height (inline style — no matching Tailwind class in the built
+   vocabulary) with a stretched inset-0 anchor to `/agent/<id>` (the
+   system-view card pattern: agent hiccup can CONTAIN `<a>`, and nested
+   anchors split in the parser). Skipped for root: root's canvas is the `/`
+   dashboard itself (`system-view`), which renders this roster's agents —
+   embedding it in a row would recurse the whole dashboard into the list.
+   Guarded: any failure → nil (row renders without a preview)."
+  [db id]
+  (when (not= id "root")
+    (try
+      (when-let [hiccup (:seon.render/hiccup
+                          (render/render-agent-tile
+                            {:seon.db/db db :seon.agent/id id}))]
+        [:div {:id    (str "world-agent-" id "-tile")
+               :class "relative overflow-hidden border-t border-base-800/60 bg-base-950/40"
+               :style "max-height:7rem"}
+         hiccup
+         [:a {:href       (str "/agent/" id)
+              :aria-label (str "open agent " id)
+              :class      "absolute inset-0"}]])
+      (catch :default _ nil))))
+
 (defn- agent-tile
-  "One roster row for `id` — a LINK to that agent's world (`/agent/<id>`)
-   showing its id, DERIVED FSM state as a dot+text chip, and its purpose
-   line-1 (when set). `derive-state` + the purpose pull are each guarded so a
-   single bad agent can never abort the whole-view render (the never-crash
-   floor). Keeps the `world-agent-<id>` id so idiomorph anchors the row."
+  "One roster tile for `id` — a LINK to that agent's world (`/agent/<id>`)
+   showing its id, DERIVED FSM state as a dot+text chip, its purpose line-1
+   (when set), and its canvas compact face ([[tile-preview]] — the agent's
+   live tile, morphed live with every commit). `derive-state`, the purpose
+   pull, and the preview are each guarded so a single bad agent can never
+   abort the whole-view render (the never-crash floor). Keeps the
+   `world-agent-<id>` id so idiomorph anchors the tile."
   [db id]
   (let [state   (try (derive/derive-state db id) (catch :default _ :unknown))
         purpose (try (:seon.agent/purpose
@@ -108,13 +139,15 @@
       [:span {:class "text-signal font-semibold shrink-0 w-40 truncate"} id]
       [:span {:class (str "flex items-center gap-1 shrink-0 w-24 " dot-cls)}
        [:span "●"] [:span (name state)]]
-      [:span {:class "text-text-400 truncate min-w-0"} (or p1 "")]]]))
+      [:span {:class "text-text-400 truncate min-w-0"} (or p1 "")]]
+     (tile-preview db id)]))
 
 (defn world-view
   "The live agent roster (`/agents`) as `[:main#world …rows…]` = f(db).
 
-   Every agent is a row (id, DERIVED FSM state, purpose line-1) linking to
-   its `/agent/<id>` world.
+   Every agent is a tile (id, DERIVED FSM state, purpose line-1, and its
+   canvas compact face — the agent's live tile) linking to its
+   `/agent/<id>` world.
 
    Pure of external state — reads only the supplied db value, so the same
    db always renders the same hiccup. NEVER throws (the whole-view morph
@@ -252,10 +285,13 @@
    `page-title`, `data-theme` from the brand row, and the optional
    SEON_BRAND_CSS inlined AFTER output.css — so a downstream deploy's
    branding reaches the world page users actually navigate to (not just
-   the inspector). Absent brand row + env → the shipped seon defaults.
+   the web UI). Absent brand row + env → the shipped seon defaults.
 
-   The shim itself: load datastar.js, open the long-lived feed via
-   `data-init`, and present an empty `<main id=\"world\">` for the feed's
+   The shim itself: load datastar.js, open the long-lived feed via a
+   `data-init` on a hidden SIBLING opener div (OUTSIDE the morph target —
+   a data-init on `#world` itself is stripped by the first whole-element
+   morph, killing the stream), and present an empty `<main id=\"world\">`
+   for the feed's
    first morph to fill. `title-suffix` is the brand-name suffix (\"world\",
    \"agent <id>\"); `feed-url` the data-init SSE URL — or `nil` to OMIT
    data-init, when the page's `extra-body` opens the feed itself (the
@@ -300,11 +336,18 @@
          ;; cheap, and reopen = a fresh full `view=f(db)` repaint (no since-t
          ;; replay needed in this model). Both verified-supported in our shipped
          ;; datastar.js RC.7.
-         "<main id=\"world\""
+         "<main id=\"world\">loading…</main>\n"
+         ;; The feed OPENER is a SIBLING of `#world`, never `#world` itself:
+         ;; the feed's whole-element morph replaces `#world`'s attributes with
+         ;; the pushed element's (which carries no `data-init`), so an opener
+         ;; ON the morph target is stripped by its own first paint — datastar
+         ;; cancels the stream ~100ms after open and the page goes dead
+         ;; (the 2026-07-11 '/agents never updates' bug). Same
+         ;; outside-the-morph rule as the human input bars.
          (when feed-url
-           (str " data-init=\"@get('" feed-url
-                "', {retryMaxCount: Infinity, openWhenHidden: false})\""))
-         ">loading…</main>\n"
+           (str "<div id=\"world-feed-opener\" style=\"display:none\""
+                " data-init=\"@get('" feed-url
+                "', {retryMaxCount: Infinity, openWhenHidden: false})\"></div>\n"))
          extra-body
          "</body></html>")))
 
@@ -425,7 +468,7 @@
    existing `/agents/new` (optional form-urlencoded `purpose=`) then navigates
    to the new `/agent/<id>` on the 200 id-body. Inline JS (not datastar
    `@post`) because the response is the new id as plain text that we must READ
-   and navigate to — copied from the inspector mission-control button. The
+   and navigate to — copied from the web UI mission-control button. The
    endpoint is same-origin-gated and serializes creates (409 while one is in
    flight); errors land in the button's own text, never swallowed."
   []

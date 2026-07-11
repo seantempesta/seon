@@ -253,7 +253,7 @@
      ["/sse"         {:get {:handler (fn [r] (sse (node-req r) (node-res r)) hijacked)}}]
 
      ;; Operator dev tools (seon.web.debug) — the datom browser + the
-     ;; per-agent two-pane debug inspector. Plain leaf handlers (no serve
+     ;; per-agent two-pane debug view. Plain leaf handlers (no serve
      ;; state), required directly; distinct paths from the seeded
      ;; `/agent/{id}` family, so no reitit conflict.
      ["/data"     {:get {:handler (fn [r] (debug/data-page! (node-req r) (node-res r)) hijacked)}}]

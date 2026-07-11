@@ -1,7 +1,7 @@
 (ns seon.web.debug
   "Operator dev tools — the two surfaces that have NO world-page equivalent:
 
-     GET /agent/<id>/debug      — the two-pane debug inspector: the EXACT
+     GET /agent/<id>/debug      — the two-pane debug view: the EXACT
                                   bytes the LLM receives (left) beside the
                                   rendered context-section html twins (right),
                                   plus the per-section token + cache-line
@@ -441,7 +441,7 @@
 
 ;; ============================================================
 ;; The context bar — per-section token + cache-line viz along the bottom
-;; of the debug inspector. A horizontal stacked bar: one segment per
+;; of the debug view. A horizontal stacked bar: one segment per
 ;; rendered section (width ∝ estimated tokens), the STRUCTURAL cache
 ;; breakpoint as one marker, the LIVE cached extent as a second marker.
 ;; Display-only — re-rendered every SSE push (stable id so idiomorph
@@ -494,7 +494,7 @@
       label]]))
 
 (defn- context-bar-fragment
-  "The bottom context bar for the debug inspector. Stacked per-section
+  "The bottom context bar for the debug view. Stacked per-section
    token segments + structural cache-line + live cached overlay. Stable
    `:id` so SSE morphs preserve it."
   [agent-id {:keys [context-bar]}]
@@ -683,7 +683,7 @@
        "if(f){e.preventDefault();f.requestSubmit();}}});"))
 
 (defn- debug-shell
-  "The full page for `/agent/<id>/debug` — the two-pane debug inspector
+  "The full page for `/agent/<id>/debug` — the two-pane debug view
    (raw context sections left, rendered cards right) + the context-bar
    audit instrument + a chat bar. The header is inside the morph zone so
    it updates too; Esc returns to the agent's world page."
@@ -1161,7 +1161,7 @@
         (log/error-console! "seon.web.debug" "data initial render failed" e)))))
 
 (defn debug-page!
-  "GET /agent/<id>/debug — render the two-pane debug inspector.
+  "GET /agent/<id>/debug — render the two-pane debug view.
 
    Guards a stale `<id>` (no entity in this store) with a clean 404 page
    rather than a 500 out of `snapshot`'s lookup-ref pull."

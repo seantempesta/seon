@@ -216,7 +216,7 @@
 ;; ============================================================
 ;; POST /chat — inject a user message into the named agent's log.
 ;; The message tx wakes the agent's loop; it runs a turn, the LLM
-;; responds, and the inspector morphs the view via SSE.
+;; responds, and the web UI morphs the view via SSE.
 ;;
 ;; Body is application/x-www-form-urlencoded (Datastar's
 ;; `@post('/chat', {contentType:'form'})` posts FormData). `agent` is
@@ -790,7 +790,7 @@
    `Host` header (so it holds for loopback dev AND a Caddy/Tauri front that
    preserves Host). When no Host is available we fall back to allowing loopback
    origins only. `req` is an opaque Node IncomingMessage (Ring-style boundary,
-   no Malli schema — same as the /call, inspector, and serve handlers)."
+   no Malli schema — same as the /call, debug, and serve handlers)."
   [^js req]
   (let [headers (.-headers req)
         origin  (when headers (gobj/get headers "origin"))]

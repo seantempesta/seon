@@ -210,6 +210,61 @@
 ;; ============================================================
 
 ;; ============================================================
+;; 4b. Roster tiles carry the agent's canvas COMPACT FACE (2026-07-11):
+;; each non-root tile embeds `render/render-agent-tile`'s hiccup (the
+;; agent's live tile — pinned content, else derived, else the welcome
+;; card) clipped + stretch-linked to `/agent/{id}`. Root is skipped by
+;; design (root's canvas is the `/` dashboard, which itself renders this
+;; roster — embedding would recurse). Assert the MECHANISM (the preview
+;; wrapper's stable id, presence for a bare agent via the welcome
+;; fallback, absence for root) — not the rendered face.
+;; ============================================================
+
+(deftest roster-tile-carries-the-agent-canvas-compact-face
+  (async done
+    (-> (with-conn [agent-a "root"]
+          (fn [conn]
+            (let [s (html/->string (datastar/world-view @conn))]
+              (testing "both agents render a roster tile"
+                (is (str/includes? s (str "world-agent-" agent-a)))
+                (is (str/includes? s "world-agent-root")))
+              (testing "a bare agent still gets a compact face (welcome fallback)"
+                (is (str/includes? s (str "world-agent-" agent-a "-tile"))
+                    "the preview wrapper renders with its stable DOM id"))
+              (testing "root gets NO embedded face (its canvas is / itself)"
+                (is (not (str/includes? s "world-agent-root-tile"))
+                    "no preview wrapper for root")))))
+        (.then done))))
+
+;; ============================================================
+;; 5b. The shim's feed OPENER lives OUTSIDE the morph target (2026-07-11
+;; regression): a `data-init` ON `#world` is stripped by the feed's own
+;; first whole-element morph (the pushed `[:main#world …]` carries no
+;; data-init), so datastar cancels the stream ~100ms after open and the
+;; roster page goes permanently dead. The opener must be a SIBLING of
+;; `<main id="world">`.
+;; ============================================================
+
+(deftest regression-shim-feed-opener-is-outside-the-morph-target
+  (async done
+    (-> (client/open-agent-conn!)
+        (.then
+          (fn [conn]
+            (let [orig db/*conn*]
+              (set! db/*conn* conn)
+              (let [world (@#'datastar/agents-page-html)]
+                (testing "#world itself carries NO data-init (the morph would strip it)"
+                  (is (str/includes? world "<main id=\"world\">")
+                      "the morph target is a bare <main id=world>"))
+                (testing "the feed opener is a sibling element carrying the data-init"
+                  (is (str/includes? world "world-feed-opener")
+                      "the opener div is present")
+                  (is (str/includes? world "@get('/agents/feed'")
+                      "the opener opens /agents/feed")))
+              (set! db/*conn* orig)
+              (done)))))))
+
+;; ============================================================
 ;; 6. The world SHIM heads route through the seon.web.brand seams (#13) —
 ;; the page users actually navigate to (/agents and /agent/{id}) must carry
 ;; the downstream brand the same way the inspector does: SEON_BRAND_CSS
