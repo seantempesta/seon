@@ -95,7 +95,7 @@ chat shorthand that leaked; Phase 0 sweeps it from living docs).
 | **`namespaces`** | rung 1 | GREEN both models; exposed + fixed the cross-turn current-ns core bug |
 | **`plan`** | rung 2 | GREEN both models incl. a real mid-drive pod restart |
 | **`db`** | rung 4 ("store"/"memory") | NEXT — `schema/register!` / `db/transact!` / `db/query` round-trip, recall across turns AND a restart; validates the v3.1 restart-survival line; decides whether any db teaching beyond cards + error envelopes is needed |
-| **`warnings`** | rung W ("attention") | derived problem surfaces — instrumentation errors, test failures, why-complete-refused — render until fixed |
+| **`warnings`** | rung W ("attention") | derived problem surfaces — instrumentation errors, test failures, why-complete-refused — render until fixed. **Owner-extended (2026-07-11): the ROOT-context blocks get the same methodical colocated treatment** — root's kept surfaces (`:core-faults`, `:instrumentation-gaps`, `:orphaned-agents`) each carry their own colocated teaching (what the surface means + the one next action, rendered exactly when the state holds), designed + drive-validated under the same inclusion bar. Gate: base context confirmed in good shape (fork fix integrated + roll-ups live-proven, browser-audit findings triaged, registry unit landed) |
 | **`live-tile`** | rung L ("canvas") | the human's live view returns with its own teaching; the interactive plan tile (in flight) is the pattern |
 | **`subagents`** | rung M ("collaboration") | children status + outcome routing, per the multiagent spec's win conditions |
 | **`soul`** | rung I ("identity") | owner-gated — define what it IS before any block exists |
