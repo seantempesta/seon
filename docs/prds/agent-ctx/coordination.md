@@ -1998,3 +1998,53 @@ silently DEMOTED to prose with a false-confidence ok?/nil — the smell
 from the rung-1 note is root-caused and fixed) and the loud
 `SEON-STUB-LLM` boot marker (a configured provider with an unset key no
 longer silently drives on the stub; min-drive.sh refuses to dispatch).
+
+## 2026-07-11 — typeahead lane → BOTH lanes: the diffusion-typeahead arc P1–P5 SHIPPED; shared-surface notes + one grammar-drift flag
+
+A third lane has been active since 2026-07-10 (owner-directed): the
+**diffusion-typeahead arc** — menu/plan affordances + a local-DiffusionGemma
+step-loop provider, measured in src-inspect-ai. Committed: `op:"cursor"`
+(bin/oracle-server), `cursor.py` driver + wire modes (src-diffusion),
+`seon.agent.ctx.menu` blocks + `:seon.typeahead/policy`, `seon.ai.typeahead`
+provider + tile, the mlx_vlm model-layer swap, and the replay bench
+(`seon_inspect.typeahead_corpus` + `tasks/typeahead_replay.py`; ledger rows
+`typeahead_replay:dev:k3:arm*`). Numbers in
+`docs/prds/diffusion-dynamic-context/typeahead-design.md` §Phases.
+
+**Cross-lane notes:**
+
+1. **Every agent's default render gained two blocks** (priorities 46/47):
+   `:recent-verbs` + `:plan-ledger` (`seon.agent.ctx.menu`, seeded via
+   `default-ctx-blocks`). If your lane's prompts/audits see glyph-numbered
+   menu sections — that's this. Owner rulings still OPEN: `:plan` (45) vs
+   `:plan-ledger` (47) render overlapping step lists; glyph numbering
+   collides across sections.
+2. **Pod ownership shift (owner 2026-07-10):** the typeahead lane took over
+   **acme (7980)** as its testbed. Eval lane: coordinate here before acme
+   drives/resets.
+3. **openai_compat fix (committed `e6295ecd`, tooling-relevant class rule):**
+   the P4 corpus pod crashes = a SPECCED `^:async` fn (`stream-until-form!`)
+   using rejection as its expected-error channel — the instrument wrapper
+   records such rejections `:core` (by design) and the `:crash` dial exits
+   the pod. Fix: it never rejects; errors ride the value channel. **Standing
+   class rule: a specced `^:async` fn must never reject with an expected
+   error.** anthropic.cljs audit + an instrumentation-docs line are queued.
+4. **FLAG (self-reported, owner-caught): grammar drift in src-diffusion.**
+   `control.py/_result_comment` still writes `;; => value` into the canvas —
+   the pre-redesign result shape that `seon.agent.ctx` now STRIPS as a
+   fabrication claim (`result-claim-re`); the live grammar is bare
+   `⟹ <value> ⟸ result/<id>`. The typeahead provider path is clean (no
+   mid-loop result injection). Fix queued for the moment P6's bench frees the
+   worker (any src-diffusion edit mid-run changes worker_sha and voids
+   attribution). **Both lanes: if you write agent-facing guidance that shows
+   result lines, use the bare `⟹` grammar, never `;; =>`.**
+5. **Vocabulary (owner 2026-07-11): functions, not "verbs".** The
+   `:recent-verbs` block name + `menu/verb-offers` + "agent verb surface"
+   phrasing are queued for an atomic rename when the surfaces are quiet.
+6. Scorecard: this lane appends `typeahead_replay` rows; the append-only
+   ledger now interleaves three lanes.
+
+In flight: P6 (toolkit-fn menu source + expand-cost; survived one acme pod
+JS-heap OOM — root-cause report due with its bench). Queued: P7
+planner/worker split (frontier plans → my.plan datoms → local execution),
+Muse arm (key now on disk in the four canonical homes).
