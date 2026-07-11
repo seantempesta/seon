@@ -1,6 +1,6 @@
 ---
 name: datastar-web-ui
-description: "The ACTIVE pod web UI — Datastar SSE over a gzip whole-element morph, hiccup in .cljs, reitit routes from :seon.route/* datoms, the seon.render/block + slot renderer, and the Phosphor Terminal theme. Use when editing seon.web.serve / seon.web.datastar / seon.web.router / seon.web.debug, the seon.ui.* layout/tiles (world, header, markdown, clojure), or seon.render. Use when working with data-init / data-bind / data-on:submit / data-effect / data-signals / data-text signal attributes, the /world + /agent/{id} pages and their /feed SSE streams, tiles/slots, time-travel as-of feeds, or styling (warm blacks / cream / amber / monospace / dot+text status). Use when a live UI doesn't update on a tx, an SSE stream won't verify in the browser, or a human input bar loses focus on morph."
+description: "The ACTIVE pod web UI — Datastar SSE over a gzip whole-element morph, hiccup in .cljs, reitit routes from :seon.route/* datoms, the seon.render/block + slot renderer, and the Phosphor Terminal theme. Use when editing seon.web.serve / seon.web.datastar / seon.web.router / seon.web.debug, the seon.ui.* layout/tiles (agent view, header, markdown, clojure), or seon.render. Use when working with data-init / data-bind / data-on:submit / data-effect / data-signals / data-text signal attributes, the /agents + /agent/{id} pages and their /feed SSE streams, tiles/slots, time-travel as-of feeds, or styling (warm blacks / cream / amber / monospace / dot+text status). Use when a live UI doesn't update on a tx, an SSE stream won't verify in the browser, or a human input bar loses focus on morph."
 ---
 
 # Datastar Web UI — the active pod surface
@@ -25,11 +25,11 @@ datahike commit re-renders a whole element and morphs it in place.
 `seon.web.datastar` ports the hyperlith pattern into the pod. There is no
 per-fragment update, no `refresh-all!`, no signal-diffing handler-per-action:
 
-1. ONE render fn produces the **whole** element (`world-view` →
-   `[:main#world …]`, or `seon.ui.world/world-layout` for `/agent/{id}`).
+1. ONE render fn produces the **whole** `#app-view` element (`roster-view` for
+   `/agents`, or `seon.ui.agent-view/agent-view` for `/agent/{id}`).
 2. Each page is **two routes**: a tiny **shim page** (GET) and a **separate
    long-lived `/feed` GET** that is a gzip-compressed SSE stream. The shim's
-   `<main id="world">` opens the feed via `data-init="@get('/world/feed')"`.
+   `<main id="app-view">` opens the feed via `data-init="@get('/agents/feed')"`.
 3. The feed registers in `!feeds` with its OWN bound `view-fn` thunk. A
    `db/listen!` tx-listener (`on-tx`) fires `schedule-broadcast!` — a 50 ms
    trailing coalesce so an agent turn's many datoms become ONE morph — which
@@ -42,9 +42,9 @@ per-fragment update, no `refresh-all!`, no signal-diffing handler-per-action:
    line terminates.
 
 The render fn is **pure of external state** and **NEVER throws** — a render
-error degrades to a visible `#world-error` tile inside the same element, because
+error degrades to a visible `#app-view-error` tile inside the same element, because
 the morph engine must be crash-proof. Source: `src/seon/web/datastar.cljs`
-(`patch-elements`, `world-view`, `push-conn!`, `broadcast!`, `open-feed!`).
+(`patch-elements`, `roster-view`, `push-conn!`, `broadcast!`, `open-feed!`).
 
 ### Time-travel falls out for free
 
@@ -52,7 +52,7 @@ the morph engine must be crash-proof. Source: `src/seon/web/datastar.cljs`
 is naturally FROZEN (re-rendering it on a later tx yields identical bytes). The
 `/agent/{id}/feed?t=<tx-id>` stream binds `view-fn` to the as-of db; the
 time-travel bar drives it with ONE `data-effect` `@get` that auto-cancels the
-prior stream so exactly one feed targets `#world`. (`open-agent-feed!`,
+prior stream so exactly one feed targets `#app-view`. (`open-agent-feed!`,
 `time-travel-bar-html`.)
 
 ## CRITICAL: verify the stream SERVER-SIDE, not in the browser agent
@@ -60,7 +60,7 @@ prior stream so exactly one feed targets `#world`. (`open-agent-feed!`,
 The in-tool Chrome agent's network layer **503s long-lived
 `text/event-stream`** connections, so you cannot confirm a feed morphs by
 watching it in the browser MCP. Verify the wire server-side: a tiny Node client
-that GETs `/world/feed`, gunzips the response stream, and prints the
+that GETs `/agents/feed`, gunzips the response stream, and prints the
 `datastar-patch-elements` frames — plus a human eyeball on the real page. Don't
 trust "the browser agent saw nothing"; trust the gunzip client + `logs/pod.log`
 (the `FEED OPEN` / `broadcast` lines). See **`browser-automation`** for the
@@ -68,10 +68,10 @@ browser side and its limits.
 
 ## Human input bars live OUTSIDE the morphed element
 
-A whole-`#world` morph **replaces** everything inside `#world` on every tx — so
+A whole-`#app-view` morph **replaces** everything inside `#app-view` on every tx — so
 a `<form>`/`<input>` placed inside it loses focus/value mid-typing. Every human
 affordance (chat bar, new-agent bar, time-travel slider) is a **sibling of
-`<main id="world">` in `<body>`**, spliced via the shim's `extra-body`, so the
+`<main id="app-view">` in `<body>`**, spliced via the shim's `extra-body`, so the
 feed never clobbers it. A fixed bottom bar + an inline-height spacer reserves
 scroll room. (`chat-form-html`, `new-agent-bar-html`, `time-travel-bar-html` in
 `datastar.cljs`.)
@@ -84,7 +84,7 @@ In hiccup that needs a colon in the key, use `(keyword "data-on:submit")`.
 
 | Attribute | Purpose | Live example (datastar.cljs) |
 |---|---|---|
-| `data-init` | open the feed on element init | `@get('/world/feed', {retryMaxCount: Infinity, openWhenHidden: false})` |
+| `data-init` | open the feed on element init | `@get('/agents/feed', {retryMaxCount: Infinity, openWhenHidden: false})` |
 | `data-effect` | re-run + auto-cancel prior `@get` | the time-travel bar's sole feed opener |
 | `data-signals` | declare reactive state | `{t: <basis>, ct: <basis>, live: true}` |
 | `data-bind` | two-way bind input → signal | `data-bind "text"` on the chat input |
@@ -106,7 +106,7 @@ Tiles are hiccup vectors built in `.cljs` and serialized by
 
 | ns | Role |
 |---|---|
-| `seon.ui.world` | `world-layout = f(db, agent-id)` — canvas (live tile) + transcript + priority-ordered tiles |
+| `seon.ui.agent-view` | `agent-view = f(db, agent-id)` — primary canvas + selectable HTML context-block rail |
 | `seon.ui.header` | `system-header = f(db)` — the fixed fleet status bar (agents/throughput/store/health) |
 | `seon.ui.markdown` | `md->hiccup` — LLM markdown replies → styled hiccup, no client JS |
 | `seon.ui.clojure` | `clj->hiccup` — server-side Clojure syntax highlight (`.hljs-*` palette) |
@@ -139,8 +139,8 @@ section (no stored error flag — self-heals on the next clean render).
 
 `seon.web.router` derives the reitit route vector from the database:
 `db->routes` is a PURE projection of the seeded `:seon.route/*` datoms (pattern
-/ method / handler-symbol / middleware) — the six core routes (`/`, `/world`,
-`/world/feed`, `/agent/{id}`, `/agent/{id}/feed`, `/agent/{id}/call`). Handler
+/ method / handler-symbol / middleware) — the core routes (`/`, `/agents`,
+`/agents/feed`, `/agent/{id}`, `/agent/{id}/feed`, `/agent/{id}/call`). Handler
 symbols resolve **late** at request time via `eval/lookup-value`, so a redefine
 needs no rebuild. Routes NOT yet seeded as datoms (static assets, the secondary
 POST doors `/chat`/`/stop`/`/resume`/`/clear`/`/agents/new`, `/sse`, `/data`,
@@ -179,12 +179,12 @@ Full palette, type scale, density rules, component patterns, and anti-patterns:
 | File | Purpose |
 |---|---|
 | `src/seon/web/serve.cljs` | HTTP server on 7890; POST handlers (`/chat`, `/agents/new`, `/stop`, …); same-origin gate |
-| `src/seon/web/datastar.cljs` | the gzip-morph `view=f(db)` feed: `world-view`, `open-feed!`, `broadcast!`, the human input bars, time-travel |
+| `src/seon/web/datastar.cljs` | the gzip-morph `view=f(db)` feed: `roster-view`, `open-feed!`, `broadcast!`, the human input bars, time-travel |
 | `src/seon/web/router.cljs` | reitit over `:seon.route/*` datoms; the Node↔Ring adapter + hijack sentinel |
 | `src/seon/web/debug.cljs` | operator dev tools: `/agent/{id}/debug` (the exact LLM bytes) + `/data` (datom browser) |
 | `src/seon/web/brand.cljs` | downstream brand seam (name/tagline/theme as DATA, read at render time) |
 | `src/seon/render.cljs` | `block` (typed-value renderer) + `slot` + the recursive guarded engine |
-| `src/seon/ui/world.cljs` · `header.cljs` · `markdown.cljs` · `clojure.cljs` | the layout, status bar, and content renderers |
+| `src/seon/ui/agent_view.cljs` · `header.cljs` · `markdown.cljs` · `clojure.cljs` | the layout, status bar, and content renderers |
 | `reference-code/datastar-clojure/` · `reference-code/datastar/` | datastar source — the `patch-elements`/gzip idioms (`tiny_gzip.clj`); read it, don't guess |
 
 ## When to read which reference

@@ -77,7 +77,7 @@
      `seon.ui.markdown/md->hiccup`). XSS-safe end-to-end: every text node
      is HTML-escaped by seon.ui.html at serialization, so agent-authored
      inline HTML renders as visible text, never DOM. No client-side
-     `data-markdown`/marked.js pass — the world shim loads only
+     `data-markdown`/marked.js pass — the agent-view shim loads only
      datastar.js, so the markdown must be hiccup by the time it ships."
   {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.live-tile/hiccup]]}
   [{:seon.db/keys [db] :seon.render/keys [node entity] :seon.agent/keys [id]}]

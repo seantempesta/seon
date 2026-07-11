@@ -21,8 +21,8 @@ reactively. Isolation, aggregation, and recovery all fall out of that one choice
 units share *data*, not memory, so they run in parallel, can't corrupt each other,
 and restart cleanly from the DB (which is itself reversible). The loop is data; the
 prompt is a render of data; the UI is a reactive projection of data. The context
-unit is the **block** (`:seon.agent.ctx/block`); the prompt, an agent's **world**,
-and the **root agent's** world (`/`) are each a derivation of the same blocks.
+unit is the **block** (`:seon.agent.ctx/block`); the prompt, an agent’s **view**,
+and the **root agent's** view (`/`) are each a derivation of the same blocks.
 
 It is **dual-track**: a CLJ **JVM server** (the DB writer + render/serve + Integrant
 lifecycle + heavy processing, data-only) and CLJS **agent executors** (isolated),
@@ -134,14 +134,14 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
   `[:div {:id "tile-<name>" :data-slot :name}]`, keyed on `:seon.agent.ctx/name`.
 - **layout** — a render whose hiccup contains slots (it nests tiles); a role, not a
   stored kind. A render with no slots is a leaf tile.
-- **canvas** — the focal block on an agent's world: the agent↔human communication
+- **canvas** — the focal block on an agent's view: the agent↔human communication
   block.
-- **world** — an agent's page, route `/agent/{id}`: the canvas plus a
+- **view** — an agent's page, route `/agent/{id}`: the canvas plus a
   `:seon.agent.ctx/priority` scroll of the agent's tiles.
-- **root agent** — ONE `:seon.agent/id "root"` that is BOTH the `/`-world owner (the
+- **root agent** — ONE `:seon.agent/id "root"` that is BOTH the `/`-view owner (the
   UI) AND the system orchestrator (lifecycle) — the same elevated grant, never two
-  entities. Its world IS the all-agents overview at route `/`, rendered by the
-  IDENTICAL block/layout/route machinery as any agent's world. It holds the elevated
+  entities. Its view IS the all-agents overview at route `/`, rendered by the
+  IDENTICAL block/layout/route machinery as any agent's view. It holds the elevated
   capability grant — system-level `:seon.fn`s (`start!`, terminate, cross-agent) —
   through the SAME `/call` gate, not a bypass. It is the root of the render + route
   tree (`/` → `/agent/{id}` → apps) and the base case of the bootstrap recursion
@@ -186,7 +186,7 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
         │  SSE down (the live channel), POST up (actions)
         ▼
    NODE UI-HOST ── read-only replica + ONE tx-listener + the route table (reitit)
-        │  listen! → derive world → whole-element morph → push  the only browser-facing HTTP/SSE
+        │  listen! → derive view → whole-element morph → push  the only browser-facing HTTP/SSE
         ▲                                                    (derives every page; runs NO agent code)
         │  wire (RPC + tx-feed, since-t replay)
    JVM WIRE-SERVER ── single-writer datahike + heavy processing (embeddings/LLM/indexing) + Integrant
@@ -202,7 +202,7 @@ Three roles, decoupled in principle, co-located in one pod for v1:
   plus heavy processing (embeddings, LLM, indexing) and Integrant lifecycle. Data
   only; it never executes agent code.
 - **Node UI-host** — the browser's single front door: a read-only replica + one
-  tx-listener that derives every agent's **world** (including the root agent's world
+  tx-listener that derives every agent’s **view** (including the root agent’s view
   at `/`) from `:seon.agent/ctx`, holds the route table, and streams patches. The
   streamer is a **role, not a process** — any process holding a replica + a
   tx-listener can play it, so the UI-host is relocatable.
@@ -243,7 +243,7 @@ an SSE connection** — agents write facts; the UI-host derives and streams.
 
 ### Derive everything
 
-Everything — the loop, the prompt, an agent's world, a status view, the work
+Everything — the loop, the prompt, an agent's view, a status view, the work
 bound, the agent's state — is a **function of the DB at render time**; nothing
 derivable is stored. Agent state is the `seon.derive/derive-state` projection of
 primitives (an open run, `paused-at`, `terminated-at`), never a stored field. The
@@ -326,12 +326,12 @@ UI-root == orchestrator-root), and the isolation tiers. See [[agent-runtime]].
 ### UI — [[ui]]
 
 The human UI is **pages** — a **layout** placing block html renders into named
-**slots**, each filled slot a **tile**; all pages are agent **worlds**, a tree of
-routes: the root agent's world (`/`), per-agent worlds (`/agent/{id}`), and apps
+**slots**, each filled slot a **tile**; all pages are agent **views**, a tree of
+routes: the root agent’s view (`/`), per-agent views (`/agent/{id}`), and apps
 (`/agent/{id}/app/{x}`). Routing is data via **reitit** over `:seon.route/*` datoms;
 `/call` is the one action door and the capability gate authorizes the fn (namespace
 is the route). The **live channel is ours**: one tx-listener on a read-replica derives
-every world and streams it as a per-connection gzip whole-element **morph**
+every view and streams it as a per-connection gzip whole-element **morph**
 (idiomorph-diffed client-side); reconnect just repaints `view = f(db)`, no UI-side
 `since-t` replay. The doc owns block/render/tile/slot/layout, the page tree,
 reitit + the gate, the SSE channel, and the seed-copy + variadic `install!`/`remove!`
@@ -351,7 +351,7 @@ Every question about agent behavior — what an agent saw at turn N, what change
 between turns, why it acted — is answered by a **query against the DB plus the
 blob store**, never by hunting log files: each turn persists its `basis-t` (the
 frozen db coordinate that makes the context re-derivable), the assembled prompt
-verbatim as a blob, and the raw reply. `inspect/turn` reconstructs any turn;
+verbatim as a blob, and the raw reply. `agent-debug/turn` reconstructs any turn;
 `turn-diff` shows what changed between two; a dedicated **forensic agent** runs
 these queries on demand; the `/agents/run` door drives a reproducible task
 through an agent in the pod's own cluster for an external harness. See
@@ -374,7 +374,7 @@ doc; this one stays pure target.
 - [[ui]] — block/render/tile/slot/layout, the page tree, reitit + the capability gate,
   the gzip-morph SSE live channel, the seed-copy + `install!`/`remove!` override.
 - [[toolkit]] — the `my.*` function catalog over the protected `seon.*` floor.
-- [[observability]] — turn replay (basis-t + prompt blob + reply), `inspect/turn` /
+- [[observability]] — turn replay (basis-t + prompt blob + reply), `agent-debug/turn` /
   `turn-diff`, the blob store, the forensic agent, cluster lifecycle + the
   `/agents/run` door.
 - [[context]] — the dynamic context system: `context = f(db, location,

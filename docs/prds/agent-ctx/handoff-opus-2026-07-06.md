@@ -32,7 +32,7 @@ final suite run + live proofs. Do:
   `seon.error/expecting-core-fault!` for any `:core` provocation):
   (a) a def in `cljs.user` evals but mints NO `:seon.fn` row; a def in a
   `my.*` ns still tees (C14); (b) `(:seon.error/kind envelope)` at TOP
-  level on a provoked error (C45); (c) `seon.agent.inspect/ctx-preview`
+  level on a provoked error (C45); (c) `seon.agent.debug/ctx-preview`
   returns an error VALUE on bad input (no throw).
 - Push.
 

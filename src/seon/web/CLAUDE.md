@@ -20,12 +20,11 @@ note the browser 503s long-lived SSE; verify feeds with a node gunzip client).
   route table is data. `/call` is the ONE action door; the capability gate
   authorizes the fn. New pages = new route datoms + layouts, not new
   handlers.
-- **Route truth (the ONE place — link here, don't restate):** `/` IS root's
-  own world = the dashboard (`datastar/serve-root!`, NOT a redirect); `/agents`
-  + `/agents/feed` = the fleet roster (`world-view`); `/agent/{id}` +
-  `/agent/{id}/feed` = a per-agent world; `/agent/{id}/call` = the action door.
-  The old `/world` roster path is **retired** — its links now point at
-  `/agents`. Route changes are `:seon.route/*` datom seeds, so a
+- **Route truth (the ONE place — link here, don't restate):** `/` is root's
+  agent view (`datastar/serve-root!`, not a redirect); `/agents` +
+  `/agents/feed` is the fleet roster (`roster-view`); `/agent/{id}` +
+  `/agent/{id}/feed` is a per-agent view; `/agent/{id}/call` is the action
+  door. Route changes are `:seon.route/*` datom seeds, so a
   `bin/seon cluster reset default` is required for a new/renamed route to land.
 - **`datastar.cljs`** — the live channel: one tx-listener on the replica
   derives the WHOLE element (`view = f(db-as-of t)`) and pushes one gzip
@@ -34,7 +33,7 @@ note the browser 503s long-lived SSE; verify feeds with a node gunzip client).
   dead — don't rebuild it). The time-travel bar here is the worked example
   of as-of rendering.
 - **`debug.cljs`** — `/agent/{id}/debug`: per-block prompt text + HTML twins
-  + token context-bar, derived via `inspect/ctx-preview` (present-tense
+  + token context-bar, derived via `agent-debug/ctx-preview` (present-tense
   today; historical turns come via the observability build).
 
 ## Rules that bite

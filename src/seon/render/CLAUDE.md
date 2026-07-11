@@ -30,6 +30,6 @@ are data in, data out, guarded like everything else. `value.cljs` /
 `chat.cljs` / `default.cljs` are the typed-value renderers the block
 renderer dispatches to.
 
-`src/seon/ui/` is the tile/layout library on top (world, header, markdown,
+`src/seon/ui/` is the tile/layout library on top (agent view, header, markdown,
 clojure, components) — hiccup only, placed into slots by layouts; keep
 logic in render/derive fns, not tiles.

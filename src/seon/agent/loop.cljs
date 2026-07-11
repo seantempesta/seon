@@ -615,7 +615,7 @@
 
 ;; ============================================================
 ;; The ONE ticker — the only active machinery. The DB is passive about
-;; wall-clock: a `deadline` is past or a cron is due in the world, but nothing
+;; wall-clock: a `deadline` is past or a cron is due in the cluster, but nothing
 ;; fires until something CHECKS. This single `setInterval` is that check —
 ;; each tick (1) closes overdue runs ([[seon.agent.run/close-overdue-runs!]],
 ;; the deadline watchdog) then (2) fires due schedules

@@ -22,9 +22,9 @@ Source of truth (read before changing): `src/seon/config.cljs`,
   still exports it, but nothing in `seon.config` reads it; memoization keys on
   `SEON_CONFIG` only). `config/acme.edn` = the harness variant (minimal
   overrides), `config/test.edn` = tests.
-- **Absent/empty manifest → the pod boots byte-identically to a no-config world**
-  (every key optional; defaults live in the schemas + accessors). Present → it
-  overrides only the keys it lists.
+- **Absent/empty manifest → no context blocks are seeded.** Present manifests
+  declare the complete initial context tree; scalar accessors retain their own
+  documented fallbacks.
 - **Folder = corpus** (`skills-dir`: manifest `:seon.config/skills`
   `:seon.config/dirs` first entry, else `SEON_SKILLS_DIR`, else `.Codex/skills`).
   The boot scan loads ALL skills it finds — with the default dir that is BOTH the
@@ -37,12 +37,8 @@ Source of truth (read before changing): `src/seon/config.cljs`,
 
 1. `:seon.config/agent-context` — the v3 two-level context config the GENERIC
    loader (`resolve-agent-context` → `seed-default-ctx!`) decodes and transacts
-   at agent creation. SPARSE: the recursive default-value-transformer fills every
-   absent key, so `{}` reproduces the default tree. Agent-level keys:
-   - `:my.skills/load` — the always-on skill-BODY presence-set (default
-     `[:repl]`), expanded by `expand-skill-blocks` into priority-16
-     `:skill/<name>` blocks (the cached prefix, below cache-breakpoint 20).
-     `[]` seeds no bodies. Consumed at seed, never an agent datom.
+   at agent creation. The context vector is explicit; `{}` means no blocks.
+   Agent-level keys:
    - `:seon.eval/home-requires` — the home-ns toolbelt (each entry needs
      `:as`/`:refer`; bare `[ns]` is rejected). These requires ARE the verb
      surface a fresh agent sees (they render as compact cards — see below).
@@ -98,11 +94,9 @@ in the renderer; token budget is bound by CURATION (which nses, via requires +
 
 ## Durable footguns (the reason this skill exists)
 
-- **A manifest that supplies `:seon.agent/ctx` REPLACES the default block tree
-  wholesale** — malli default-fill only fills ABSENT keys; vectors don't merge.
-  To customize ONE block you must re-list EVERY default block you keep, or
-  `:namespaces` and the rest silently vanish (see `config/acme.edn`'s comment).
-  `:seon.config/root-context` blocks are the exception: upsert-by-name.
+- **A manifest's `:seon.agent/ctx` is the complete base block tree.** There is
+  no hidden default to merge and no implicit skill injection.
+  `:seon.config/root-context` blocks are sparse upserts-by-name over that tree.
 - **Config is runtime EDN → NO rebuild.** Edit `config/*.edn`, then
   `bin/seon restart pod` (or `bin/acme restart pod`). Only `.cljs`/`src` changes
   need `bin/acme build` first. The agent-context is SEED-COPIED at creation —
@@ -122,8 +116,8 @@ in the renderer; token budget is bound by CURATION (which nses, via requires +
 
 ## How to do common edits
 
-- **Skill bodies always-on per cluster:** set `:my.skills/load` in
-  `:seon.config/agent-context` (acme loads the full set; `[]` = none).
+- **Reference corpus:** configure `:seon.config/skills` directories. Corpus
+  entries remain pull-based and do not become standing context blocks.
 - **Change a fresh agent's verb surface:** edit `:seon.eval/home-requires`
   (acme swaps in `acme.helpers`/`acme.notes` with zero src edits).
 - **Lean-context A/B:** a variant = a SEPARATE edn file (override only the

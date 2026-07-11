@@ -6,7 +6,7 @@
    prod) can reach the agent UI without intermediate infrastructure.
 
    Routes (V0.5):
-     GET  /                  → root's world (seeded :seon.route/root → datastar)
+     GET  /                  → root.s agent view (seeded :seon.route/root → datastar)
      GET  /css/output.css    → resources/public/css/output.css
      GET  /js/datastar.js    → resources/public/js/datastar.js
      GET  /sse               → SSE stream
@@ -138,8 +138,7 @@
 ;; Map URL prefix → disk root. The roots are seon BUILD ARTIFACTS, so
 ;; they resolve through `seon.platform/artifact-path`: CWD-relative
 ;; when the pod runs from the seon repo root (today's usage), under
-;; SEON_RUNTIME_ROOT when a downstream pod runs from its own world
-;; root.
+;; SEON_RUNTIME_ROOT when a downstream pod runs from its own runtime root.
 ;; ============================================================
 
 (def ^:private static-roots
@@ -515,7 +514,7 @@
             (loop []
               (await (js/Promise. (fn [r] (js/setTimeout r 1500))))
               ;; ONE db snapshot per poll — every read below sees the same
-              ;; world (a mid-poll write must not split state vs reply reads).
+              ;; snapshot (a mid-poll write must not split state vs reply reads).
               (let [db       @conn
                     st       (derive/derive-state db aid)
                     elapsed  (- (js/Date.now) start)
@@ -814,7 +813,7 @@
 ;; ============================================================
 
 ;; `/` is NOT a serve handler — it is a SEEDED core route
-;; (:seon.route/root → seon.web.datastar/serve-root!, root's own world),
+;; (:seon.route/root → seon.web.datastar/serve-root!, root's own agent view),
 ;; resolved late by the router's db->routes. Only the non-core supplement
 ;; handlers are injected here.
 (router/install!

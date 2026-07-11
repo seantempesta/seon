@@ -180,7 +180,7 @@
   ;; authoritative body, so per-member blocks are NOT re-emitted. The one
   ;; member fact NOT visible in the source and worth the agent's attention is
   ;; a FAILING test — it surfaces as a compact one-line ⚠ note. A PASSING test
-  ;; is omitted (nothing actionable; the inspector HTML view below still shows
+  ;; is omitted (nothing actionable; the debug view HTML view below still shows
   ;; full pass/fail status). The seed attaches a passing `t-attached`; here we
   ;; add a failing `t-broken` to the same full-source ns.
   (async done

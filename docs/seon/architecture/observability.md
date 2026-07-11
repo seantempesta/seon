@@ -75,15 +75,15 @@ capability instead of ad-hoc log files:
 
 Three functions make a turn a first-class object of study:
 
-- **`inspect/turn`** — one call returns the whole bundle for agent X, turn N:
+- **`agent-debug/turn`** — one call returns the whole bundle for agent X, turn N:
   the exact prompt (blob), the structured context (as-of re-render, per-block),
   the reply, the evals with results, usage, and the messages visible at that
   basis-t. No joins by hand, no filesystem.
-- **`inspect/turn-diff`** — what changed between two turns: a block-level diff
+- **`agent-debug/turn-diff`** — what changed between two turns: a block-level diff
   of the two rendered contexts plus the datom delta between the two basis-ts
   (`db/since`). This is also the cache-stability instrument: bytes that should
   have been frozen but moved show up here.
-- **`inspect/ctx-preview`** — generalized over time: preview any agent's
+- **`agent-debug/ctx-preview`** — generalized over time: preview any agent's
   context at any t, not just now.
 
 Search runs at two ends, one door each, and nothing in between:
@@ -104,7 +104,7 @@ becoming data): it classifies `:seon.error/fault` (`:agent` — expected,
 the agent's learning signal; `:core` — our bug), stamps
 `:seon.error/at` (the basis-t live at the catch site — `(db/as-of at)`
 is the frozen db the failing code saw, composing directly with
-`inspect/turn` replay), parses the stack into `:seon.error/frames`
+`agent-debug/turn` replay), parses the stack into `:seon.error/frames`
 component entities (Datalog-queryable traces), and keeps the full args
 of malli contract violations as bounded `:seon.error/args-edn`.
 Persistence is fire-and-forget (never throws, never awaits; a bounded
@@ -122,7 +122,7 @@ never escalate in any mode. Under `:gate` the pod keeps running but the
 CI-shaped wrappers fail any run that accumulated a new `:core` fault
 (`bin/test-cljs` greps the run transcript for the `SEON-CORE-FAULT`
 marker; the dev hook brackets the pod log by byte offset). The derived
-`core-faults-block` section renders on the ROOT world only and vanishes
+`core-faults-block` section renders on the ROOT view only and vanishes
 when the last `:core` fault predates the latest user message — no
 acknowledgement state. Design + rulings:
 `docs/prds/agent-ctx/research/error-blame-strict-gate-2026-07-03.md`.
@@ -132,7 +132,7 @@ walks the `:seon.error/cause` chain past cljs.js's generic wrappers), so the
 `SEON-CORE-FAULT <message> @t=<basis-t>` marker and every triage surface name
 the actual failure, never `"ERROR"`.
 
-Triage runs through three `seon.agent.inspect` functions, three altitudes over
+Triage runs through three `seon.agent.debug` functions, three altitudes over
 the same datoms:
 
 - **`errors`** — compact recent list, newest first (optional
@@ -142,16 +142,16 @@ the same datoms:
   table, args-edn, data-edn, stack) plus the JOINS: the recording agent and
   the turn active at that basis-t (the tx's own turn-id when the write was
   turn-scoped, else the agent's turns' `rendered-as-of` window) — the turn
-  eid composes with `inspect/turn` replay.
+  eid composes with `agent-debug/turn` replay.
 - **`repro`** — the work-backwards bundle: the LIVE as-of db value frozen at
   `:seon.error/at` (REPL material — render its basis-t, never print the db),
   the failing fn sym + args-edn when the malli envelope captured them, the
   linked turn, a ready-to-eval reproduction expression string built from
   what is actually stored (an honest note when args were not captured —
   nothing fabricated), and the `::fork-hint` — the exact supervisor command
-  that boots this error's world as a live cluster (below).
+  that boots this error's view as a live cluster (below).
 
-The as-of db is read-only; when the fix needs a WRITABLE world — re-running
+The as-of db is read-only; when the fix needs a WRITABLE view — re-running
 the failing code, patching data, letting a forensic agent act — the fourth
 step is **fork**: `bin/seon cluster fork <cluster> <at>` (the command
 `repro` hands back verbatim) copies the cluster's store at the konserve
@@ -163,8 +163,8 @@ byte-identical, so every stored basis-t (`rendered-as-of`, another error's
 there unchanged. The at-semantics are precise: `:seon.error/at` is captured
 at the CATCH site — the db value the failing code SAW — while the error
 datom itself commits in a later tx, so **the error datom does not exist
-inside its own fork**; the fork is the world the failure arose from, not
-the world that records it. The full flow is find (`watch-faults`) →
+inside its own fork**; the fork is the view the failure arose from, not
+the view that records it. The full flow is find (`watch-faults`) →
 `errors` → `error` → `repro` → **fork** → fix, then
 `bin/seon cluster destroy <fork>` (the fork store is independent by
 construction — destroying it cannot touch the source).
@@ -234,11 +234,11 @@ vocabulary is harness-side only.
 ## Build path
 
 Turn capture is LIVE (2026-07-02): every turn persists `rendered-as-of` +
-prompt/reply blob refs (always on), and `seon.agent.inspect/turn` /
+prompt/reply blob refs (always on), and `seon.agent.debug/turn` /
 `turn-diff` reconstruct/compare turns from them. The blob refs are the ONE
 capture path — the old gated `seon.debug` file tree (`SEON_DEBUG_CAPTURE`,
 `logs/turns/`) is deleted; the gym driver reads prompts back by blob hash.
-Remaining gaps — the as-of per-block re-render inside `inspect/turn`, the
+Remaining gaps — the as-of per-block re-render inside `agent-debug/turn`, the
 volatile prompt inputs as recorded data, grep/embedding targets not yet
 widened, the forensic seed function — live in [[roadmap]].
 Source-grounded verification of what datahike's tx metadata already provides

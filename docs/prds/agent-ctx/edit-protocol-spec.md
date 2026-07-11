@@ -461,7 +461,7 @@ web-fetch, my.plan, plus raw eval values: small <1500 verbatim, medium,
 huge >16384, wide map, deep nest, long string, lazy seq, opaque JS/db
 value). Then age them through the decay schedule (offsets 0 / 2 / 5 —
 drive enough subsequent turns; use the ctx/transcript render fns or
-`seon.agent.inspect/turn` byte-exact replays) and CAPTURE the rendered
+`seon.agent.debug/turn` byte-exact replays) and CAPTURE the rendered
 text verbatim at each level. Judge each sample: shape-preserving? honest
 markers? recovery handle present and usable (result/<id> resolves, blob
 hash pages, from-line re-view works)? any garbage (invalid EDN, escaped

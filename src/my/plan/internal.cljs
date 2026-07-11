@@ -621,7 +621,7 @@
     (if (str/blank? body) empty-plan-teaching body)))
 
 (defn plan-block
-  "Context-section fn (`:plan`, seon.config/default-ctx-blocks priority 45):
+  "Context-section fn (`:plan`, config manifest priority 45):
    [[plan-body]] for the CALLING agent — the `:seon.agent/id` in the render
    input, resolved as a `[:seon.agent/id id]` ref against the render's db
    value — absent `:seon.db/db` defaults to the current conn, the same

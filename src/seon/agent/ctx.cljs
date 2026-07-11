@@ -13,9 +13,9 @@
        one slot attr is `:seon.render/ai` (string = verbatim doctrine,
        symbol = late-bound block fn); `:seon.render/html` is the
        optional debug-view twin.
-     - `install!` / `remove!` — the ONE scope-aware override + seed function
-       over the agent's own `:seon.agent/ctx` block set; `seed-default-ctx!`
-       SEED-COPIES `seon.config/default-ctx-blocks` into a fresh agent at creation.
+     - `install!` / `remove!` — the ONE scope-aware mutation surface over the
+       agent's own `:seon.agent/ctx` block set; `seed-default-ctx!` copies the
+       manifest-declared tree into a fresh agent at creation.
        `context-root` reads the agent's COMPLETE `:seon.agent/ctx`, decoded
        + priority-sorted — NO render-time merge, NO separate default set, NO
        char budget. The render guard (a broken block renders an inline error
@@ -41,7 +41,7 @@
        `seon.agent.ctx.warnings`,
        :inventory → `seon.agent.ctx.inventory`, :relevant-source →
        `seon.agent.ctx.relevant`, :transcript → `seon.agent.ctx.transcript`;
-       `seon.config/default-ctx-blocks` wires them by SYMBOL (late lookup-value
+       `config/system.edn` wires active blocks by SYMBOL (late lookup-value
        resolution), so this ns does NOT require them — they require this
        ns for the shared read API.
      - `render-namespace` — the standalone whole-namespace render
@@ -80,9 +80,8 @@
     [seon.warn :as warn]))
 
 ;; ============================================================
-;; Block schemas. A block is a plain map — the SAME shape whether it lives
-;; in code (the default seed set) or as a component entity on the agent's
-;; :seon.agent/ctx vector.
+;; Block schemas. A block is a plain map in config and a component entity on
+;; the agent's :seon.agent/ctx vector.
 ;; ============================================================
 
 (declare decode-block)
@@ -153,7 +152,7 @@
 ;; file PATH (not soul, not agents — any `.md`), returns a section when
 ;; the file currently exists, else nil (REACTIVE: an absent file is no
 ;; section, NO fallback). SOUL.md and AGENTS.md are two `file-block`s
-;; wired in `seon.config/default-ctx-blocks`; a third party adds another the same way.
+;; declared in the manifest; a third party adds another the same way.
 ;;
 ;; The file is read FRESH on every render (the path lives on the section
 ;; node; the slot fns re-read it), so a user's edit lands next render
@@ -279,8 +278,8 @@
    slot fns ([[file-block-ai]] / [[file-block-html]]) re-read the file
    fresh on every render so a user's edit lands next turn with no
    seed/restart. GENERIC: any markdown file is a section — SOUL.md and
-   AGENTS.md are two `file-block`s prepended by `seon.config/identity-file-blocks`,
-   nothing file-name-specific lives here."
+   AGENTS.md may each be declared as `file-block`s in a manifest; nothing
+   file-name-specific lives here."
   {:malli/schema [:=> [:cat [:map
                              [:seon.agent.ctx/file-path :seon.agent.ctx/file-path]
                              [:seon.agent.ctx/name :keyword]
@@ -299,8 +298,8 @@
      :seon.render/ai     'seon.agent.ctx/file-block-ai
      :seon.render/html   'seon.agent.ctx/file-block-html}))
 
-;; The repo-relative identity files surfaced to every agent as
-;; file-blocks prepended by `seon.config/identity-file-blocks`. The primary file is
+;; Repo-relative identity-file helpers retained for explicitly declared
+;; file-blocks. The primary file is
 ;; `SEON_SOUL_FILE` (override) else `SOUL.md`; AGENTS.md is the cross-tool
 ;; standard repo/work-instructions file, read alongside it. They are
 ;; CONTEXT, NOT the LLM system message — that is the hardcoded mechanics
@@ -2155,9 +2154,8 @@
       {:seon.render/stable-text   (subs text 0 i)
        :seon.render/volatile-text (subs text (+ i (count stable-boundary-delim)))})))
 
-;; The default block layout lives in `seon.config/default-ctx-blocks` (the seed
-;; source `seon.config/resolve-agent-context` fills); the soul/agents identity
-;; file-blocks are prepended by `seon.config/identity-file-blocks`. This ns owns
+;; The default block layout lives in the manifest resolved by
+;; `seon.config/resolve-agent-context`. This ns still owns
 ;; the file-block RENDER fns ([[file-block-ai]]/[[file-block-html]]) + the
 ;; identity-file PATH consts ([[soul-file-path]]/[[agents-file-path]], read by
 ;; [[identity-files-text]]) — config emits the block DATA (literal render
@@ -2261,10 +2259,8 @@
 (def ^:private seed-consumed-keys
   "Agent-context keys CONSUMED at seed rather than persisted as an agent datom,
    so [[seed-default-ctx!]] drops them from the scalar transact:
-     - `:seon.agent/ctx`   — `install!` owns the block-tree transact.
-     - `:my.skills/load`   — already expanded into `:skill/<name>` blocks by the
-                             loader; block presence is its persisted truth."
-  #{:seon.agent/ctx :my.skills/load})
+     - `:seon.agent/ctx` — `install!` owns the block-tree transact."
+  #{:seon.agent/ctx})
 
 (defn ^:async seed-default-ctx!
   "SEED-COPY the resolved agent-context into the agent in scope.
@@ -2278,15 +2274,14 @@
 
    The seed is shaped by the OPTIONAL config manifest via the GENERIC loader
    ([[seon.config/resolve-agent-context]]) selected by the scoped agent's IDENTITY
-   (root gets the root-context canvas override) — config absent → the schema's
-   defaults (byte-identical to today); present → whatever the manifest specifies.
+   (root gets the root-context override). An absent context declaration produces
+   an empty block tree; a present declaration is copied exactly.
 
    TWO seed writes: (1) `install!` upserts the block tree; (2) the surviving
    AGENT-LEVEL keys (everything except [[seed-consumed-keys]]) are transacted
    onto the agent ENTITY as its reactive config-on-record — so a consumer reads
    the datom off the agent (e.g. `:seon.client/wake?`, `:seon.eval/home-requires`).
-   Defaults land as data ⇒ byte-identical behavior for a no-config agent; a
-   manifest override lands its non-default value, which the consumer then reads.
+   Declared scalar values land as data, which the consumer then reads.
    GENERIC — it carries WHATEVER agent-level keys the resolved config holds, so a
    newly-activated dial needs no change here (only its schema key + its reader)."
   {:malli/schema [:=> [:cat] ::result]}
@@ -2353,8 +2348,8 @@
 ;; ── the root's children = the agent's OWN complete block set ─────────────
 ;; The ROOT renderable's children are exactly the agent's `:seon.agent/ctx`
 ;; blocks, one priority sort. There is no render-time merge over a separate
-;; default catalog — `seon.config/default-ctx-blocks` was copied into the agent at
-;; creation, so render reads one collection and stops.
+;; default catalog — the manifest tree was copied into the agent at creation,
+;; so render reads one collection and stops.
 
 
 (defn- block-bracket-ai
@@ -2373,15 +2368,22 @@
    re-pulling. Registered-but-uninstalled attrs (e.g. the tile slot on a
    store predating it) are silently filtered by the pull guard — safe."
   [db id]
-  (db/pull {:seon.db/db db
-            :seon.db/pull-pattern
-            '[:db/id :seon.agent/id
-              :seon.agent/purpose
-              :seon.agent/default-turn-limit
-              :seon.render/ai :seon.render/html
-              :seon.render.live-tile/content
-              {:seon.agent/ctx [*]}]
-            :seon.db/ref [:seon.agent/id id]}))
+  (if-let [eid (ffirst
+                 (db/query {:seon.db/db db
+                            :seon.db/query '[:find ?a
+                                             :in $ ?id
+                                             :where [?a :seon.agent/id ?id]]
+                            :seon.db/args [id]}))]
+    (db/pull {:seon.db/db db
+              :seon.db/pull-pattern
+              '[:db/id :seon.agent/id
+                :seon.agent/purpose
+                :seon.agent/default-turn-limit
+                :seon.render/ai :seon.render/html
+                :seon.render.live-tile/content
+                {:seon.agent/ctx [*]}]
+              :seon.db/ref eid})
+    {}))
 
 (defn context-root
   "The ROOT renderable — the agent's block set plus the current ns's
@@ -2468,7 +2470,7 @@
 
    The SINGLE producer
    the prompt path ([[seon.agent.turn/render-prompt]]) AND the human
-   web UI ([[seon.agent.inspect/ctx-preview]]) both route through. Both
+   web UI ([[seon.agent.debug/ctx-preview]]) both route through. Both
    render the `:seon.render/ai` side of ONE render ([[seon.render/render]])
    over the SAME `context-root` over the SAME db value, so the model's
    prompt and the web UI's context pane are byte-identical BY
@@ -2497,14 +2499,6 @@
                                         (context-root ctx))
                          ""))))
 
-(defn- render-child-text
-  "Render ONE child block to its ai text via the injected handle, carrying
-   its name + priority forward for the cache split."
-  [render child]
-  {:seon.agent.ctx/name     (:seon.agent.ctx/name child)
-   :seon.agent.ctx/priority (:seon.agent.ctx/priority child)
-   :seon.render/text  (or (render child) "")})
-
 (defn- block-renders-ai?
   "A context block contributes to the agent's PROMPT only when it declares an
    `:seon.render/ai` render. An html-only block (a human-facing widget — the
@@ -2521,19 +2515,56 @@
   [block]
   (contains? block :seon.render/ai))
 
-(defn- rendered-block-texts
-  "Render each ai-contributing child block to its ai text via `render`, drop
-   blanks — the per-block text vector shared by the joined prompt
-   ([[render-context-ai]]) and the web UI ([[ctx-sections]]) so the two can
-   never disagree on what each block contributes. A block with no
-   `:seon.render/ai` render ([[block-renders-ai?]]) contributes NO prompt
-   section."
-  [render children]
+(defn- rendered-child-blocks
+  "Render `children` in the requested formats as one block-oriented view.
+
+   `render-ai` and `render-html` are format-bound render handles. A format is
+   evaluated only when requested and declared on the block. Blank AI and nil
+   HTML results disappear independently; a block remains when either requested
+   format produced content. This is the one projection consumed by prompt,
+   agent view, and debug view — no parallel text/html collections to correlate."
+  [children formats render-ai render-html]
   (->> children
-       (filter block-renders-ai?)
-       (map #(render-child-text render %))
-       (remove (comp str/blank? :seon.render/text))
+       (keep
+         (fn [child]
+           (let [base {:seon.agent.ctx/name     (:seon.agent.ctx/name child)
+                       :seon.agent.ctx/priority (:seon.agent.ctx/priority child)}
+                 text (when (and (contains? formats :ai)
+                                 (block-renders-ai? child))
+                        (render-ai child))
+                 html (when (and (contains? formats :html)
+                                 (contains? child :seon.render/html))
+                        (render-html child))
+                 out  (cond-> base
+                        (and (string? text) (not (str/blank? text)))
+                        (assoc :seon.render/text text
+                               :seon.render/token-estimate (tokens/estimate text))
+
+                        (some? html)
+                        (assoc :seon.render/hiccup html))]
+             (when (or (contains? out :seon.render/text)
+                       (contains? out :seon.render/hiccup))
+               out))))
        vec))
+
+(defn rendered-context-blocks
+  "Resolved context blocks for one agent and frozen db snapshot.
+
+   Reads the database-owned block collection, adds DB-derived auto-run blocks,
+   and renders only `formats` (`:ai`, `:html`, or both). Output stays block-
+   oriented so every consumer sees the same ordered identities. Rendering is a
+   pure projection and writes no datoms."
+  {:malli/schema [:=> [:catn [::ctx :map]
+                       [:seon.render/formats [:set [:enum :ai :html]]]]
+                  [:vector :map]]}
+  [ctx formats]
+  (let [root (context-root ctx)
+        ctx* (assoc ctx :seon.agent/entity (:seon.agent/entity root))]
+    (rendered-child-blocks
+      (:seon.agent.ctx/children root)
+      formats
+      #(render/render :seon.render/ai ctx* %)
+      #(render/render :seon.render/html ctx* %))))
 
 (defn render-context-ai
   "The ROOT renderable's `:ai` slot — the block renderer.
@@ -2548,7 +2579,8 @@
   {:malli/schema [:=> [:catn [::input :map]] :string]}
   [{:seon.render/keys [node render]}]
   (let [breakpoint (cache-breakpoint)
-        rendered  (rendered-block-texts render (:seon.agent.ctx/children node))
+        rendered  (rendered-child-blocks
+                    (:seon.agent.ctx/children node) #{:ai} render (constantly nil))
         bracketed (mapv (fn [s]
                           (assoc s :seon.render/bracketed
                                  (block-bracket-ai (:seon.agent.ctx/name s)
@@ -2578,12 +2610,10 @@
   {:malli/schema [:=> [:catn [::input :map]] :seon.render.live-tile/hiccup]}
   [{:seon.render/keys [node render]}]
   (into [:div {:class "flex flex-col gap-2"}]
-        (->> (:seon.agent.ctx/children node)
-             (keep (fn [child]
-                     (when-let [h (render child)]
-                       [:section {:data-section (clojure.core/name
-                                                  (:seon.agent.ctx/name child :unnamed))}
-                        h]))))))
+        (map (fn [{nm :seon.agent.ctx/name h :seon.render/hiccup}]
+               [:section {:data-context-block (clojure.core/name nm)} h]))
+        (rendered-child-blocks
+          (:seon.agent.ctx/children node) #{:html} (constantly nil) render)))
 
 ;; ============================================================
 ;; Block-chain KV cache keys — the Seon half of the prefix-KV reuse win.
@@ -2669,8 +2699,8 @@
    (`::blocks`, `:seon.agent/id`) only — no I/O, no GPU.
 
    `::blocks` is the turn's `:seon.render/text`-bearing blocks in prompt order
-   (static→volatile, the `seon.config/default-ctx-blocks` ordering — soul…:namespaces
-   then the volatile tail), as produced by [[rendered-block-texts]]. The
+   (static→volatile by stored priority), as produced by
+   [[rendered-context-blocks]]. The
    output `::chain-hashes` is parallel to `::blocks`: hash i fingerprints the
    exact block prefix 0..i, salted at the root by `:seon.agent/id`.
 
@@ -2694,32 +2724,3 @@
                (conj acc (block-chain-hash parent (:seon.render/text block) salt))))
            []
            (map-indexed vector blocks))})
-
-(defn ctx-sections
-  "Structured per-section breakdown for the INSPECTOR.
-
-   One entry per
-   non-blank section, each carrying its name + the exact ai text it
-   contributes (left pane, foldable) + its html twin (right pane, one card
-   per renderable). Derives from the SAME `context-root` + `render` the
-   prompt uses, so the debug view can never drift from the agent's context."
-  {:malli/schema [:=> [:catn [::ctx :map]] :map]}
-  [{:as ctx}]
-  (let [root     (context-root ctx)
-        children (:seon.agent.ctx/children root)
-        ctx*     (assoc ctx :seon.agent/entity (:seon.agent/entity root))
-        rh       #(render/render :seon.render/html ctx* %)
-        ra       #(render/render :seon.render/ai   ctx* %)
-        ;; Per-block texts — the SAME path the joined prompt takes, so the
-        ;; debug view's left pane shows exactly what each block contributes.
-        texts    (->> (rendered-block-texts ra children)
-                      (mapv #(select-keys % [:seon.agent.ctx/name :seon.render/text])))
-        htmls    (->> children
-                      (keep (fn [c]
-                              (when-let [h (rh c)]
-                                {:seon.agent.ctx/name      (:seon.agent.ctx/name c)
-                                 :seon.render/hiccup h})))
-                      vec)]
-    {:seon.render/section-texts texts
-     :seon.render/section-html  htmls}))
-

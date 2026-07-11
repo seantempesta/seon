@@ -200,7 +200,7 @@ must be a repeatable harness.
 (delegation, turn-limit recovery, restart, async result re-reference, …),
 captures every self-referential claim in its replies, and ground-checks each
 against the byte-exact rendered prompt it saw (transcript + sections, via
-`inspect/turn`). Score = fraction of self-claims grounded. An ungrounded claim
+`agent-debug/turn`). Score = fraction of self-claims grounded. An ungrounded claim
 names the section to fix — the same loop we ran by hand, automated.
 
 **Placement / coordination.** This is a **scorer**, and it belongs in the eval

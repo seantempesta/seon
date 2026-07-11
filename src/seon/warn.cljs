@@ -586,7 +586,7 @@
    Identity is the ref: a user message is one whose
    `:seon.agent.message/from` resolves to a `:seon.user/id` entity. THE
    \"since the latest user message\" cutoff every runtime check (and the
-   root-world core-faults section) shares — public so section fns
+   root-agent-view core-faults section) shares — public so section fns
    outside this registry reuse it instead of forking the query."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]] [:maybe :inst]]}
   [db]

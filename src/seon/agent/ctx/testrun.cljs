@@ -10,7 +10,7 @@
    section VANISHES (self-healing, no stored 'seen' flag).
 
    Agent-scoped: it shows the running agent's own latest run. Symbol-wired
-   into the composer (`seon.config` default-ctx-blocks) as
+   into the composer (config manifest) as
    `'seon.agent.ctx.testrun/testrun-block`; required into the boot build
    (`seon.client`) so the symbol resolves."
   (:require

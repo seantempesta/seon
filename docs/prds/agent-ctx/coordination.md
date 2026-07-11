@@ -758,7 +758,7 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   persist post-commit on a fresh reset (if yes → registry rows).
 - **Build inputs from my side, for your arc:** (1) turn-capture is live
   (`2ef14d12`) — per-sample clusters compose with it for free (each cluster's
-  turns carry `rendered-as-of` + prompt/reply blob refs; `inspect/turn` is
+  turns carry `rendered-as-of` + prompt/reply blob refs; `agent-debug/turn` is
   your per-row rendered-context evidence). (2) Ephemeral-cluster DESTROY
   should remove the whole `data/clusters/<name>/` including `blobs/` (the
   turn-capture blob dir is per-cluster). (3) Consider absorbing registry C16
@@ -861,7 +861,7 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   keys otherwise.
 - **Turn capture composes per-cluster:** probe1's db carried
   `rendered-as-of` + prompt/reply blob refs; blobs under
-  `data/clusters/probe1/blobs/`; `inspect/turn` returned `ok? true` +
+  `data/clusters/probe1/blobs/`; `agent-debug/turn` returned `ok? true` +
   blob-read tokens INSIDE the ephemeral pod (driven through the door with
   agent-id reuse).
 - **Boot latency create→ready: 23.5s cold / 9.3s / 9.3s warm.** No pool.
@@ -951,7 +951,7 @@ the build starts (owner wants cross-lane discussion on majors like this):**
   (WITH the humanized malli explain) + `:seon/error` tiles. Taught in
   system-text + the workspace stub + `ui-live-tiles`. Uncoached DeepSeek
   drive: agent authored a specced `subs-tile` on turn 3; the derived block
-  is in its turn-4 verbatim prompt (`inspect/turn`).
+  is in its turn-4 verbatim prompt (`agent-debug/turn`).
 - **⚠ SPAWN FIX affects everyone (`9892f407`):** `start!`/`delegate!` no
   longer accept `:seon.agent/id` — the injectable convention resolved the
   declared-optional key to the CALLER, so every agent-scoped spawn since
@@ -1560,14 +1560,14 @@ Eval lane only; NO `src/seon` edits — `src-inspect-ai` + `evals` + `docs`.
   (this adapter), but any future bench whose ENV must EXECUTE the pod's calls
   (tau2, exec_*) will need a real call surface, not a text parse. Noted as the
   standing "pod-emits-text-not-tool_calls" friction; no fix wanted now.
-- **Files:** `src-inspect-ai/src/seon_inspect/{bfcl_adapter.py (new),catalog.py,
+- **Files:** `src-inspect-ai/src/seon_agent-debug/{bfcl_adapter.py (new),catalog.py,
   freeze.py}`, `tests/test_bfcl_adapter.py` (new, 15 offline tests through the
   real `ast_match`), `evals/datasets.lock` (+bfcl_ast), `evals/runs/
   2026-07-04-bfcl-ast-dev/`, README + roadmap. Ledger row
   `2026-07-04:bfcl_ast:dev:k1:armD-full`. NOT committed.
 - **TOOLING CLAIM (2026-07-05, owner-ruled build):** error-workflow arc,
-  three units in my lane: (1) `inspect/errors`/`inspect/error`/
-  `inspect/repro` REPL verbs + a core-fault watch (tail-marker based,
+  three units in my lane: (1) `agent-debug/errors`/`agent-debug/error`/
+  `agent-debug/repro` REPL verbs + a core-fault watch (tail-marker based,
   notifies the orchestrator session); (2) **writable fork-at-t** — replay
   the tx-log 0→t into a fresh ephemeral cluster (wire-server op +
   supervisor subcommand) so an agent's world at an error's basis-t boots
@@ -1646,7 +1646,7 @@ Eval lane only; NO `src/seon` edits — `src-inspect-ai` + `evals` + `docs`.
   with post-copy verification (head == `:at` + full history index scan, one
   tear-retry). The fork pod's own boot `ensure-db` registers it — the ONE
   creation path; destroy already cleans it fully (independent store id/dir).
-- **Bridge:** `seon.agent.inspect/repro` now returns `::fork-hint` — the
+- **Bridge:** `seon.agent.debug/repro` now returns `::fork-hint` — the
   exact command for that error's `:seon.error/at`. Flow: `watch-faults` →
   `errors` → `error` → `repro` → **fork** → fix → destroy.
 - **At-semantics (live-verified):** `:seon.error/at` = catch-site basis-t =
@@ -1655,7 +1655,7 @@ Eval lane only; NO `src/seon` edits — `src-inspect-ai` + `evals` + `docs`.
   (head moves a few past t; world-state at t intact).
 - **Live proof (default cluster):** seeded :agent error @t=536870986 →
   repro's hint → fork booted (pod 52902) → error datom absent, 792 fns/agent
-  present, inspect/errors works, as-of t queryable, write landed + survived a
+  present, agent-debug/errors works, as-of t queryable, write landed + survived a
   fork-pod restart, source head byte-unchanged (536870987) → destroy left
   zero residue (dir/port-file/proc-dir/registry), default intact.
 - **Docs:** observability.md (error-recording gains the FORK step +

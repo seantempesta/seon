@@ -112,7 +112,7 @@ Each **turn** threads **one frozen db value** (re-read once at the top) through
 `next-event`, the prompt render, and the bound checks, so the LLM reasons over a
 single consistent basis-t. The **next** turn re-reads the latest store — and
 because there is a single writer, that read sees every other writer's commits, so
-a turn never runs in a private world.
+a turn never runs in a private view.
 
 **The in-tx work-fence.** Every WORK transaction (`beat!`, `open-turn!`,
 `eval-batch!`) **leads** with an in-tx assertion:
@@ -321,7 +321,7 @@ CAS (hard-aborting an in-flight LLM call is the worker-kill of the isolation tie
 
 ## The one ticker — schedules + overdue runs
 
-The DB is **passive about wall-clock**: `now > deadline` is true in the world but
+The DB is **passive about wall-clock**: `now > deadline` is true in the view but
 nothing fires until something checks. So exactly **one periodic ticker** (wired at
 boot beside the wake trigger) does the only active work in the system. Every N
 seconds it:
@@ -393,8 +393,8 @@ functions in [[toolkit]]). The derived open-todo count feeds the fingerprint abo
 
 ## Cluster boot — the core seed (`boot-seed!` → `reconcile!`)
 
-Before any agent runs, the pod seeds the world a cluster boots into. There is ONE
-boot entry — `seon.client/boot-seed!` (the gym's scratch worlds call the SAME fn, so
+Before any agent runs, the pod seeds the view a cluster boots into. There is ONE
+boot entry — `seon.client/boot-seed!` (the gym's scratch views call the SAME fn, so
 they can't drift) — and it writes **two provenance layers**, never a stack of
 independent per-step seeders:
 
@@ -428,7 +428,7 @@ idea inventory").
 
 **Root is one ordinary agent holding capabilities others don't — not special core
 machinery.** There is exactly **one** `:seon.agent/id "root"`, and it is **both**
-the `/`-world owner (the UI role — its system-scoped blocks derive the all-agents
+the `/`-view owner (the UI role — its system-scoped blocks derive the all-agents
 overview at `/`) **and** the system orchestrator (the lifecycle role — it starts
 and manages other agents). These are two facets of the same elevated grant and the
 same bootstrap; there is **never** a second supervisor or overview entity.
@@ -465,9 +465,9 @@ same bootstrap; there is **never** a second supervisor or overview entity.
   same way `start!` seeds a child, except root has **no parent** —
   `:seon.agent/parent` is absent, root *is* the base case of the recursion. Boot
   runs root's elevated bootstrap form-vector: install its system-scoped blocks, seed
-  the `/`-world layout on root's route, grant the spawn/terminate/system fns. The
+  the `/`-view layout on root's route, grant the spawn/terminate/system fns. The
   recursion bottoms out cleanly: **boot → seed-root → root.start!(child) →
-  seed-child → …** The "start an agent" affordance on the `/`-world is simply this
+  seed-child → …** The "start an agent" affordance on the `/`-view is simply this
   orchestrator capability exposed for the human — it calls root's `start!` through
   `/call`.
 
@@ -602,7 +602,7 @@ bitemporal, reactive DB. We have one, so:
   `:seon/error` model, and the `my.kb` / `my.plan` (tree) / `my.agent` domain
   schemas + data-agent-ref scoping.
 - [[ui]] — the block / render / tile / slot / layout system, the seed-copy +
-  variadic `install!`/`remove!` override model, the pages (root world / world /
+  variadic `install!`/`remove!` override model, the pages (root agent view / view /
   app), routing-as-data via reitit + the capability gate, and the gzip-morph
   SSE live channel.
 - [[toolkit]] — the agent's `my.*` function catalog (purpose, the my.plan planning

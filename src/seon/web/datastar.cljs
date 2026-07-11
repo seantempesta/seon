@@ -14,12 +14,12 @@
      GET /agents       → the roster shim page ([[serve-agents-page!]]): loads
                          datastar.js + opens the feed via
                          `data-init=\"@get('/agents/feed')\"`, empty
-                         `<main id=\"world\">` morph target.
+                         `<main id=\"app-view\">` morph target.
      GET /agents/feed  → the long-lived gzip roster SSE stream
-                         ([[open-roster-feed!]] → [[world-view]]).
-     GET /agent/{id}   → one agent's world ([[serve-agent-page!]]); its
-     GET /agent/{id}/feed  gzip feed ([[open-agent-feed!]] → world-layout).
-     GET /             → root's world ([[serve-root!]]); `/` IS root's
+                         ([[open-roster-feed!]] → [[roster-view]]).
+     GET /agent/{id}   → one agent's view ([[serve-agent-page!]]); its
+     GET /agent/{id}/feed  gzip feed ([[open-agent-feed!]] → agent-view).
+     GET /             → root's view ([[serve-root!]]); `/` IS root's
                          dashboard, so `/agents` is the explicit fleet roster.
 
    ## Wire format (grounded in datastar consts.clj + the proven ds-spike.js)
@@ -46,12 +46,12 @@
     [seon.render :as render]
     [seon.ui.header :as header]
     [seon.ui.html :as html]
-    [seon.ui.world :as world]
+    [seon.ui.agent-view :as agent-view]
     [seon.web.brand :as brand]))
 
 ;; ============================================================
-;; Connection registry — every open gzip stream (a /world roster or a
-;; /agent/{id} world). Each entry carries its OWN `:view-fn` (a 0-arg
+;; Connection registry — every open gzip stream (a /view roster or a
+;; /agent/{id} view). Each entry carries its OWN `:view-fn` (a 0-arg
 ;; thunk → hiccup, bound to its route's params) so a single commit
 ;; re-renders DIFFERENT views per connection.
 ;; ============================================================
@@ -80,7 +80,7 @@
        "\n\n"))
 
 ;; ============================================================
-;; view = f(db) — the live agent roster as `[:main#world …tiles…]`.
+;; view = f(db) — the live agent roster as `[:main#app-view …tiles…]`.
 ;; ============================================================
 
 (def ^:private roster-state-dot
@@ -109,7 +109,7 @@
       (when-let [hiccup (:seon.render/hiccup
                           (render/render-agent-tile
                             {:seon.db/db db :seon.agent/id id}))]
-        [:div {:id    (str "world-agent-" id "-tile")
+        [:div {:id    (str "app-agent-" id "-tile")
                :class "relative overflow-hidden border-t border-base-800/60 bg-base-950/40"
                :style "max-height:7rem"}
          hiccup
@@ -119,13 +119,13 @@
       (catch :default _ nil))))
 
 (defn- agent-tile
-  "One roster tile for `id` — a LINK to that agent's world (`/agent/<id>`)
+  "One roster tile for `id` — a LINK to that agent's view (`/agent/<id>`)
    showing its id, DERIVED FSM state as a dot+text chip, its purpose line-1
    (when set), and its canvas compact face ([[tile-preview]] — the agent's
    live tile, morphed live with every commit). `derive-state`, the purpose
    pull, and the preview are each guarded so a single bad agent can never
    abort the whole-view render (the never-crash floor). Keeps the
-   `world-agent-<id>` id so idiomorph anchors the tile."
+   `app-agent-<id>` id so idiomorph anchors the tile."
   [db id]
   (let [state   (try (derive/derive-state db id) (catch :default _ :unknown))
         purpose (try (:seon.agent/purpose
@@ -133,7 +133,7 @@
                      (catch :default _ nil))
         p1      (when (seq purpose) (first (str/split-lines purpose)))
         dot-cls (get roster-state-dot state "text-text-500")]
-    [:li {:id (str "world-agent-" id) :class "border-b border-base-800"}
+    [:li {:id (str "app-agent-" id) :class "border-b border-base-800"}
      [:a {:href  (str "/agent/" id)
           :class "flex items-center gap-3 px-3 py-2 hover:bg-base-900 text-xs font-mono"}
       [:span {:class "text-signal font-semibold shrink-0 w-40 truncate"} id]
@@ -142,17 +142,17 @@
       [:span {:class "text-text-400 truncate min-w-0"} (or p1 "")]]
      (tile-preview db id)]))
 
-(defn world-view
-  "The live agent roster (`/agents`) as `[:main#world …rows…]` = f(db).
+(defn roster-view
+  "The live agent roster (`/agents`) as `[:main#app-view …rows…]` = f(db).
 
    Every agent is a tile (id, DERIVED FSM state, purpose line-1, and its
    canvas compact face — the agent's live tile) linking to its
-   `/agent/<id>` world.
+   `/agent/<id>` view.
 
    Pure of external state — reads only the supplied db value, so the same
    db always renders the same hiccup. NEVER throws (the whole-view morph
    engine must be crash-proof): a render error degrades to a visible error
-   tile inside `#world`. Root id stays `world` — the morph target the shim
+   tile inside `#app-view`. Root id is the morph target the shim
    page declares."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]] :any]}
   [db]
@@ -162,43 +162,43 @@
                                                :where [?a :seon.agent/id ?id]]})
                    (map first)
                    sort)]
-      [:main {:id "world" :class "flex flex-col gap-3 w-full"}
+      [:main {:id "app-view" :class "flex flex-col gap-3 w-full"}
        (header/system-header db)
        header/header-spacer
        [:header {:class "flex items-center justify-between border-b border-base-800 pb-2"}
         [:div {:class "flex items-center gap-2"}
          [:a {:href "/" :class "text-text-400 text-xs font-mono"} "← home"]
          [:span {:class "text-text-500 text-2xs uppercase tracking-wider"} "agents"]]
-        [:span {:id "world-count" :class "text-text-400 text-xs font-mono tabular-nums"}
+        [:span {:id "app-count" :class "text-text-400 text-xs font-mono tabular-nums"}
          (str (count ids) " agent" (when (not= 1 (count ids)) "s"))]]
        (if (seq ids)
-         (into [:ul {:id "world-roster"
+         (into [:ul {:id "app-roster"
                      :class "flex flex-col border border-base-800 rounded-md bg-base-900 overflow-hidden"}]
                (map #(agent-tile db %) ids))
-         [:div {:id "world-empty" :class "text-text-500 text-xs font-mono"}
+         [:div {:id "app-empty" :class "text-text-500 text-xs font-mono"}
           "no agents yet"])])
     (catch :default e
-      [:main {:id "world" :class "flex flex-col gap-3 w-full"}
-       [:div {:id "world-error" :class "text-error text-xs font-mono"}
+      [:main {:id "app-view" :class "flex flex-col gap-3 w-full"}
+       [:div {:id "app-error" :class "text-error text-xs font-mono"}
         (str "render error: " (.-message e))]])))
 
 (defn- view-fn-patch
-  "Render a connection's bound 0-arg `view-fn` → its `#world` SSE morph
-   string. GUARDED: a throwing view degrades to a visible `#world-error`
+  "Render a connection's bound 0-arg `view-fn` → its `#app-view` SSE morph
+   string. GUARDED: a throwing view degrades to a visible `#app-view-error`
    morph so one bad view never aborts the whole broadcast."
   [view-fn]
   (-> (try
         (view-fn)
         (catch :default e
-          [:main {:id "world"}
-           [:div {:id "world-error" :class "text-error text-xs font-mono"}
+          [:main {:id "app-view"}
+           [:div {:id "app-error" :class "text-error text-xs font-mono"}
             (str "render error: " (.-message e))]]))
       html/->string
       patch-elements))
 
 ;; ============================================================
 ;; Per-connection push + broadcast. Each connection renders its OWN
-;; bound view (the /world roster vs a /agent/{id} world). Best-effort,
+;; bound view (the /view roster vs a /agent/{id} view). Best-effort,
 ;; never throws.
 ;; ============================================================
 
@@ -216,7 +216,7 @@
 
 (defn- broadcast!
   "Re-render EACH open feed's OWN bound view and morph it — per connection,
-   so the /world roster and a /agent/{id} world reflect the same commit
+   so the /view roster and a /agent/{id} view reflect the same commit
    through different views."
   []
   (when (seq @!feeds)
@@ -251,27 +251,27 @@
 (defonce ^:private !installed? (atom false))
 
 (defn install!
-  "Install the world tx-listener. Idempotent — same key replaces."
+  "Install the view tx-listener. Idempotent — same key replaces."
   []
-  (db/listen! {:seon.db/key ::world :seon.db/handler on-tx})
+  (db/listen! {:seon.db/key ::views :seon.db/handler on-tx})
   (reset! !installed? true))
 
 (defn uninstall!
-  "Remove the world tx-listener."
+  "Remove the view tx-listener."
   []
-  (db/unlisten! {:seon.db/key ::world})
+  (db/unlisten! {:seon.db/key ::views})
   (reset! !installed? false))
 
 (defn- ensure-installed! []
   (when-not @!installed? (install!)))
 
 (defn ^:dev/before-load before-reload
-  "Uninstall the world tx-listener before a hot reload."
+  "Uninstall the view tx-listener before a hot reload."
   []
   (try (uninstall!) (catch :default _ nil)))
 
 (defn ^:dev/after-load after-reload
-  "Reinstall the world tx-listener after a hot reload."
+  "Reinstall the view tx-listener after a hot reload."
   []
   (try (install!) (catch :default _ nil)))
 
@@ -280,26 +280,26 @@
 ;; ============================================================
 
 (defn- shim-html
-  "The datastar world-shim page as a raw HTML string, BRAND-AWARE: the
+  "The datastar app-shim page as a raw HTML string, BRAND-AWARE: the
    <head> routes through the seon.web.brand seams — the brand <title> via
    `page-title`, `data-theme` from the brand row, and the optional
    SEON_BRAND_CSS inlined AFTER output.css — so a downstream deploy's
-   branding reaches the world page users actually navigate to (not just
+   branding reaches the view page users actually navigate to (not just
    the web UI). Absent brand row + env → the shipped seon defaults.
 
    The shim itself: load datastar.js, open the long-lived feed via a
    `data-init` on a hidden SIBLING opener div (OUTSIDE the morph target —
-   a data-init on `#world` itself is stripped by the first whole-element
-   morph, killing the stream), and present an empty `<main id=\"world\">`
+   a data-init on `#app-view` itself is stripped by the first whole-element
+   morph, killing the stream), and present an empty `<main id=\"app-view\">`
    for the feed's
-   first morph to fill. `title-suffix` is the brand-name suffix (\"world\",
+   first morph to fill. `title-suffix` is the brand-name suffix (\"agents\",
    \"agent <id>\"); `feed-url` the data-init SSE URL — or `nil` to OMIT
    data-init, when the page's `extra-body` opens the feed itself (the
    /agent/{id} time-travel bar owns its feed via a single `data-effect` so it
    can re-open at a past `t`; a data-init here would be a second, competing
    stream). `extra-body` is a raw HTML string spliced in as a SIBLING of
-   `<main id=\"world\">` (a human input — chat / new-agent / time-travel — that
-   must live OUTSIDE the morphed `#world` so the feed's whole-element morph
+   `<main id=\"app-view\">` (a human input — chat / new-agent / time-travel — that
+   must live OUTSIDE the morphed `#app-view` so the feed's whole-element morph
    never clobbers its focus/value). Raw string (not hiccup) so the data-init
    single quotes stay literal and the doctype leads."
   [title-suffix body-class feed-url extra-body]
@@ -336,25 +336,25 @@
          ;; cheap, and reopen = a fresh full `view=f(db)` repaint (no since-t
          ;; replay needed in this model). Both verified-supported in our shipped
          ;; datastar.js RC.7.
-         "<main id=\"world\">loading…</main>\n"
-         ;; The feed OPENER is a SIBLING of `#world`, never `#world` itself:
-         ;; the feed's whole-element morph replaces `#world`'s attributes with
+         "<main id=\"app-view\">loading…</main>\n"
+         ;; The feed OPENER is a SIBLING of `#app-view`, never `#app-view` itself:
+         ;; the feed's whole-element morph replaces `#app-view`'s attributes with
          ;; the pushed element's (which carries no `data-init`), so an opener
          ;; ON the morph target is stripped by its own first paint — datastar
          ;; cancels the stream ~100ms after open and the page goes dead
          ;; (the 2026-07-11 '/agents never updates' bug). Same
          ;; outside-the-morph rule as the human input bars.
          (when feed-url
-           (str "<div id=\"world-feed-opener\" style=\"display:none\""
+           (str "<div id=\"app-feed-opener\" style=\"display:none\""
                 " data-init=\"@get('" feed-url
                 "', {retryMaxCount: Infinity, openWhenHidden: false})\"></div>\n"))
          extra-body
          "</body></html>")))
 
 ;; ============================================================
-;; Human input bars — the surfaces the world page needs so a human can
-;; OPERATE (not just observe). Each lives OUTSIDE `<main id=\"world\">` (a
-;; SIBLING in <body>) so the feed's whole-`#world` morph never clobbers the
+;; Human input bars — the surfaces the view page needs so a human can
+;; OPERATE (not just observe). Each lives OUTSIDE `<main id=\"app-view\">` (a
+;; SIBLING in <body>) so the feed's whole-`#app-view` morph never clobbers the
 ;; input's focus/value. They reuse the already-routed, same-origin-gated
 ;; POST endpoints (`/chat`, `/agents/new`) — no Core change. A fixed bottom
 ;; bar + an inline-style spacer reserves scroll room so the last tile is never
@@ -384,7 +384,7 @@
       ;; bar never hides the agent's last tile. Inline style (no Tailwind
       ;; height class is in the safelisted/built vocabulary).
       [:div {:style "height:3.25rem"}]
-      [:form {:id                     "world-chat"
+      [:form {:id                     "app-chat"
               (keyword "data-on:submit") (str "@post('/chat?agent=" id
                                               "', {contentType:'form'}); $text=''")
               :class "fixed bottom-0 left-0 right-0 z-10 flex items-center gap-2 border-t border-base-800 bg-base-900 px-3 py-2"}
@@ -401,17 +401,17 @@
         "send"]])))
 
 (defn- time-travel-bar-html
-  "#18 — historical time-travel on the world feed for `/agent/{id}`, as a raw
+  "#18 — historical time-travel on the view feed for `/agent/{id}`, as a raw
    HTML string. The live feed is `view = f(db)`; time-travel is the SAME feed
    rendered against `db-as-of-t` — a PAST snapshot that is naturally FROZEN
    (re-rendering `db-as-of-t` on a later tx yields identical bytes).
 
-   A FIXED bar (a SIBLING of `#world`, OUTSIDE the morph so a whole-`#world`
+   A FIXED bar (a SIBLING of `#app-view`, OUTSIDE the morph so a whole-`#app-view`
    morph never clobbers the slider position/focus) OWNS the agent feed via ONE
    `data-effect` `@get`: datastar re-runs the effect when its referenced
    signals change AND auto-cancels the prior `@get` issued from the SAME
-   attribute, so exactly ONE gzip stream targets `#world` at any time. (This is
-   why the /agent shim omits `data-init` on `#world` — the effect is the SOLE
+   attribute, so exactly ONE gzip stream targets `#app-view` at any time. (This is
+   why the /agent shim omits `data-init` on `#app-view` — the effect is the SOLE
    opener; a data-init would be a second, competing stream that clobbers the
    frozen snapshot on the next live tx.)
 
@@ -421,7 +421,7 @@
    open a stream per intermediate tick). Live ⇒ `@get('…/feed')`; scrubbing
    commits `$ct` + flips `$live` false ⇒ `@get('…/feed?t='+$ct)`. The domain is
    `[origin-t .. basis-t]` (datahike tx-ids; scrub to the floor = the empty
-   pre-seed world); 'now / live' resets the slider to the basis + re-opens the
+   pre-seed view); 'now / live' resets the slider to the basis + re-opens the
    live feed. `id` is `safe-id?`-validated, injection-safe in `@get('…')`.
 
    MINIMAL by intent — a raw tx-id slider + a live/as-of readout. The owner
@@ -435,7 +435,7 @@
         ;; bottom:0 and reserves its own 3.25rem) so neither fixed bar hides a
         ;; tile. Inline height (no Tailwind height class is in the built vocab).
         [:div {:style "height:3.25rem"}]
-        [:div {:id "world-time"
+        [:div {:id "app-time"
                ;; The SOLE feed opener. Re-runs on $live/$ct change; each @get
                ;; auto-cancels the prior from THIS attribute → one stream.
                :data-effect (str "$live ? @get('" feed "', " opts ")"
@@ -462,7 +462,7 @@
           "now / live"]]))))
 
 (defn- new-agent-bar-html
-  "P1c — the `/world` roster's new-agent affordance, as a raw HTML string.
+  "The `/agents` roster's new-agent affordance, as a raw HTML string.
 
    A fixed bottom bar (outside the morph) whose button INLINE-FETCH POSTs the
    existing `/agents/new` (optional form-urlencoded `purpose=`) then navigates
@@ -475,18 +475,18 @@
   (html/->string
     (list
       [:div {:style "height:3.25rem"}]
-      [:div {:id    "world-new-agent"
+      [:div {:id    "app-new-agent"
              :class "fixed bottom-0 left-0 right-0 z-10 flex items-center gap-2 border-t border-base-800 bg-base-900 px-3 py-2"}
-       [:input {:id           "world-new-agent-purpose"
+       [:input {:id           "app-new-agent-purpose"
                 :type         "text"
                 :autocomplete "off"
                 :placeholder  "purpose (optional)…"
                 :class "flex-1 bg-base-950 border border-base-800 rounded px-2 py-1 text-text-100 text-xs font-mono"}]
-       [:button {:id      "world-new-agent-btn"
+       [:button {:id      "app-new-agent-btn"
                  :type    "button"
                  :class   "bg-base-800 hover:bg-base-700 text-signal border border-base-700 px-3 py-1 rounded text-xs font-mono"
                  :onclick (str "var b=this;b.disabled=true;b.textContent='booting…';"
-                               "var p=document.getElementById('world-new-agent-purpose');"
+                               "var p=document.getElementById('app-new-agent-purpose');"
                                "var body=p&&p.value?'purpose='+encodeURIComponent(p.value):'';"
                                "fetch('/agents/new',{method:'POST',"
                                "headers:{'Content-Type':'application/x-www-form-urlencoded'},"
@@ -500,7 +500,7 @@
 
 (defn- agents-page-html
   "The `/agents` roster shim page (brand-aware head — see [[shim-html]]). Its
-   feed effect opens `/agents/feed` → [[world-view]]; carries the new-agent
+   feed effect opens `/agents/feed` → [[roster-view]]; carries the new-agent
    bar (P1c) as its OUTSIDE-the-morph human affordance."
   []
   (shim-html "agents" "bg-base-950 text-text-200 font-mono p-3" "/agents/feed"
@@ -535,8 +535,8 @@
                               {:conn-id (str id) :remaining (count @!feeds)})))))
 
 ;; ============================================================
-;; Per-agent world (/agent/{id}) — the shim page + the feed bound to
-;; that agent's `world-layout`. The router calls these public entries
+;; Per-agent view (/agent/{id}) — the shim page + the feed bound to
+;; that agent's `agent-view`. The router calls these public entries
 ;; with the `{id}` path-param.
 ;; ============================================================
 
@@ -551,7 +551,7 @@
 (defn- agent-exists?
   "True iff `id` resolves to a live `:seon.agent/id` entity in the cluster
    store. Guards the per-agent page: an unknown/stale id (a bookmark from a
-   reset store, a typo) redirects HOME rather than serving an empty world."
+   reset store, a typo) redirects HOME rather than serving an empty view."
   [id]
   (boolean
     (seq (db/query {:seon.db/db    @db/*conn*
@@ -574,10 +574,10 @@
     (catch :default _ nil)))
 
 (defn- agent-page-html
-  "The per-agent (/agent/{id}) world shim page (brand-aware head — see
+  "The per-agent (/agent/{id}) view shim page (brand-aware head — see
    [[shim-html]]). `id` is pre-validated by `safe-id?`.
 
-   Omits `data-init` on `#world` (passes `nil` feed-url): the time-travel bar
+   Omits `data-init` on `#app-view` (passes `nil` feed-url): the time-travel bar
    owns the feed via its single `data-effect` (see [[time-travel-bar-html]]) so
    it can re-open at a past `t`. The slider's `[floor .. basis]` domain is read
    from the live db here (guarded — a missing conn degenerates to the origin,
@@ -591,7 +591,7 @@
                     (time-travel-bar-html id basis db/origin-t)))))
 
 (defn serve-agent-page!
-  "Serve the per-agent world shim page (the seeded :seon.route/agent handler).
+  "Serve the per-agent view shim page (the seeded :seon.route/agent handler).
    A Ring handler: takes the Ring request `r`, self-extracts the node res + the
    `{id}` path-param. Invalid ids 404. Public — db->routes resolves its symbol
    via eval/lookup-value at request time."
@@ -604,7 +604,7 @@
       (do (.writeHead res 302 #js {"Location" "/" "Cache-Control" "no-store"})
           (.end res ""))
       ;; #28 — a well-formed but UNKNOWN agent (stale bookmark, reset store,
-      ;; typo) gracefully redirects HOME rather than serving an empty world or
+      ;; typo) gracefully redirects HOME rather than serving an empty view or
       ;; a raw 404. "root" always resolves (seeded), so it is never redirected.
       (not (agent-exists? id))
       (do (.writeHead res 302 #js {"Location" "/" "Cache-Control" "no-store"})
@@ -615,12 +615,12 @@
           (.end res (agent-page-html id))))))
 
 (defn serve-root!
-  "Serve `/` — root's world (the all-agents dashboard).
+  "Serve `/` — root's view (the all-agents dashboard).
 
    `root = /`
-   (root-os-vision): `/` is the root agent's world, so it reuses the per-agent
+   `/` is the root agent's view, so it reuses the per-agent
    shim page bound to the literal id \"root\". The page's feed effect opens
-   `/agent/root/feed` (already seeded), whose `world-layout` renders root's
+   `/agent/root/feed` (already seeded), whose `agent-view` renders root's
    canvas = `seon.render.system/system-view` (root's seeded live-tile content).
    ONE mechanism — no `/`-special page, no `/`-special feed. A Ring handler:
    injects the `\"root\"` path-param and delegates to [[serve-agent-page!]].
@@ -629,7 +629,7 @@
   (serve-agent-page! (assoc-in r [:path-params :id] "root")))
 
 (defn open-agent-feed!
-  "Open the per-agent world gzip feed.
+  "Open the per-agent view gzip feed.
 
    The seeded :seon.route/agent-feed handler. A Ring handler: takes the
    Ring request `r`, self-extracts node-req/node-res + the `{id}` path-param.
@@ -638,9 +638,9 @@
 
    #18 — historical time-travel: an optional `?t=<tx-id>` binds the view to
    `db-as-of-t` instead of the live db. With `t`, the feed is the SAME
-   `world-layout` rendered against `(db/as-of @*conn* t)` — a PAST snapshot that
+   `agent-view` rendered against `(db/as-of @*conn* t)` — a PAST snapshot that
    is naturally FROZEN (re-rendering it on a later tx yields identical bytes, so
-   the broadcast harmlessly re-pushes the same #world). With NO `t` it is the
+   the broadcast harmlessly re-pushes the same #app-view). With NO `t` it is the
    current auto-morphing feed, UNCHANGED. A bad/absent `t` falls back to live."
   [r]
   (ensure-installed!)
@@ -651,8 +651,8 @@
       (let [t (parse-t req)]
         (open-feed! req res
                     (if t
-                      #(world/world-layout (db/as-of @db/*conn* t) id)
-                      #(world/world-layout @db/*conn* id))))
+                      #(agent-view/agent-view (db/as-of @db/*conn* t) id)
+                      #(agent-view/agent-view @db/*conn* id))))
       (do (.writeHead res 404 #js {"Content-Type" "text/plain; charset=utf-8"})
           (.end res "invalid agent id")))))
 
@@ -668,14 +668,14 @@
     (.end res (agents-page-html))))
 
 (defn open-roster-feed!
-  "Open GET /agents/feed — the roster gzip feed bound to [[world-view]].
+  "Open GET /agents/feed — the roster gzip feed bound to [[roster-view]].
 
-   The seeded :seon.route/agents-feed handler — the SAME whole-`#world` morph
-   engine the per-agent world rides, so a new/terminated agent appears/updates
+   The seeded :seon.route/agents-feed handler — the SAME whole-`#app-view` morph
+   engine the per-agent view rides, so a new/terminated agent appears/updates
    live. A Ring handler: self-extracts node-req/node-res; lazily installs the
    tx-listener. Public — db->routes resolves its symbol."
   [r]
   (ensure-installed!)
   (let [^js req (:seon.http/node-req r)
         ^js res (:seon.http/node-res r)]
-    (open-feed! req res #(world-view @db/*conn*))))
+    (open-feed! req res #(roster-view @db/*conn*))))

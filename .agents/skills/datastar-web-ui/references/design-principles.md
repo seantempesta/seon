@@ -78,7 +78,7 @@ the active track — that is the paused JVM `.clj` web stack. Build tiles direct
 as hiccup and route content through `seon.render/block`:
 
 ```clojure
-;; A status chip — dot + label (seon.ui.world/status-chip is the live example)
+;; A status chip — dot + label (seon.ui.agent-view/status-chip is the live example)
 [:span {:class "flex items-center gap-1 text-xs font-mono"}
  [:span {:class "text-signal"} "●"]
  [:span {:class "text-text-200"} "running"]]
@@ -112,6 +112,6 @@ variables in `input.css` when a tile opts into `prose prose-sm max-w-none`.
 | File | Purpose |
 |------|---------|
 | `docs/prds/namespace-ui/design-system.md` | Full design system spec |
-| `src/seon/ui/world.cljs` · `header.cljs` | Live Phosphor hiccup tiles + the status bar (active pod) |
+| `src/seon/ui/agent_view.cljs` · `header.cljs` | Live Phosphor hiccup tiles + the status bar (active pod) |
 | `src/seon/render.cljs` | `block`/`slot` — the typed value renderer every tile shares |
 | `resources/public/css/input.css` | Tailwind v4 theme source (`@theme` + `@source`) |

@@ -667,7 +667,7 @@
 ;; datahike's CLJS wrapper dbs overrode ILookup to THROW, so the query
 ;; planner's `(:eavt op-db)` fast-path probe blew up ("-lookup is not
 ;; supported on AsOfDB") for any query that reached it — aggregates and
-;; multi-clause ref-joins in particular — which is what the inspector's
+;; multi-clause ref-joins in particular — which is what the debug view's
 ;; time-travel render issues. The fork now returns field-or-nil from -lookup
 ;; (JVM defrecord parity: a wrapper has no :eavt field ⇒ nil ⇒ the planner
 ;; routes it through the temporal/search-context path). Assert BOTH no-throw

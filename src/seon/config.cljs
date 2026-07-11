@@ -2,9 +2,7 @@
   "The pod's config-read layer — ONE consolidated manifest (`config/system.edn`,
    `SEON_CONFIG` override) that primes an agent's context + the global render
    bounds WITHOUT a code change. The manifest is a pure OPTIONAL OVERRIDE: absent
-   → the system behaves byte-identically to a no-config boot (the env-dir skill
-   scan + the default context tree unchanged). Present → it shapes what the code
-   would otherwise hardcode:
+   → no context blocks are seeded. Present → it declares the database state:
 
      1. the agent CONTEXT — the two-level `:seon.config/agent-context`
         (agent-level scalars + a `:seon.agent/ctx` block tree) the GENERIC loader
@@ -56,10 +54,9 @@
 ;;; shapes are validated as leaf `:keyword` / `:map` here and fully validated
 ;;; downstream (the LEAF rule above), so this ns stays cycle-free.
 
-;; The skills section carries ONLY the corpus dir override now — the always-on
-;; skill BODIES are the agent-context's `:my.skills/load` presence-set, and the
-;; corpus is the env-dir scan verbatim (no include/exclude curation). Roots
-;; identify by id "root", never a stored `:seon.agent/kind` / config `:role`.
+;; The skills section carries ONLY the pull-reference corpus directory. Corpus
+;; rows are never injected into an agent's context tree. Roots identify by id
+;; "root", never a stored `:seon.agent/kind` / config `:role`.
 (schema/register! :seon.config/skills-spec
   [:map
    ;; corpus dir(s); `skills-dir` reads the first entry, else SEON_SKILLS_DIR,
@@ -179,95 +176,17 @@
 ;; validates ⇒ identity everywhere.
 ;;; ============================================================
 ;;; AGENT-CONTEXT — the v3 two-level context config (decisions 13/16/4). ONE
-;;; nested map: agent-level scalars/presence-sets + a `:seon.agent/ctx` vector
-;;; of BLOCK maps (component-ref'd onto the agent at transact). The whole point
-;;; of the schema is to CARRY the `:default`s that the recursive
-;;; `default-value-transformer` fills — a SPARSE manifest (`{}`) decodes into
-;;; the FULL byte-parity tree. LEAF rule holds: the block vector is a loose
+;;; nested map: agent-level scalars + a `:seon.agent/ctx` vector of BLOCK maps
+;;; (component-ref'd onto the agent at transact). The manifest owns the desired
+;;; seed tree; absent config means an empty tree, never a hidden code fallback.
+;;; LEAF rule holds: the block vector is a loose
 ;;; `[:vector :map]` (block/attr shapes register + validate downstream at
-;;; install!/transact!), so `seon.config` never requires `seon.agent.ctx` /
-;;; `my.skills` — the `:seon.render/ai` values are literal quoted symbols
+;;; install!/transact!), so `seon.config` never requires `seon.agent.ctx` —
+;;; the `:seon.render/ai` values are literal quoted symbols
 ;;; (VERIFIED to survive `m/decode` as `cljs.core/Symbol`), not var refs.
 ;;; ============================================================
 
-(def ^:private default-ctx-blocks
-  "The default `:seon.agent/ctx` block TREE the schema carries as its `:default`
-   — a SPARSE manifest fills it. Reproduces the CP-0 parity oracle. Two block
-   groups are NOT hardcoded here, they are computed by
-   [[resolve-agent-context]]: the always-on skill BODIES (from `:my.skills/load`
-   via [[expand-skill-blocks]], default `[:repl]`) and the soul/agents identity
-   file-blocks (from [[identity-file-blocks]] — present only when the file exists
-   and SEON_SOUL is not off; the default cluster runs SEON_SOUL=false, matching
-   the soul-off oracle). `:seon.render/ai` values are literal quoted symbols
-   (LEAF rule — no var ref). Sorted top→bottom = static→volatile (the
-   provider-cache contract)."
-  [{:seon.agent.ctx/name :shared-instructions :seon.agent.ctx/priority 10
-    :seon.render/ai 'my.kb.shared/instructions-block}
-   {:seon.agent.ctx/name :skills-catalog :seon.agent.ctx/priority 12
-    :seon.render/ai 'my.skills/catalog-block}
-   {:seon.agent.ctx/name :namespaces :seon.agent.ctx/priority 20
-    :seon.render/ai 'seon.agent.ctx.namespaces/namespaces-block}
-   {:seon.agent.ctx/name :live-tile :seon.agent.ctx/priority 35
-    :seon.render/ai 'seon.agent.ctx.live-tile/live-tile-block}
-   {:seon.agent.ctx/name :warnings :seon.agent.ctx/priority 40
-    :seon.render/ai 'seon.agent.ctx.warnings/warnings-block}
-   {:seon.agent.ctx/name :jobs :seon.agent.ctx/priority 42
-    :seon.render/ai 'seon.agent.ctx.jobs/jobs-block}
-   {:seon.agent.ctx/name :test-failures :seon.agent.ctx/priority 43
-    :seon.render/ai 'seon.agent.ctx.testrun/testrun-block}
-   {:seon.agent.ctx/name :plan :seon.agent.ctx/priority 45
-    :seon.render/ai 'my.plan.internal/plan-block
-    ;; html twin — the human's live, explorable plan tile on /agent/{id}
-    ;; (owner directive 2026-07-11: follow the agent's plan live).
-    :seon.render/html 'my.plan.internal/plan-block-html}
-   ;; Typeahead menu family (diffusion-typeahead P3a) — glyph-numbered,
-   ;; strictly-optional offers, derived per render (both vanish on empty
-   ;; queries, so a fresh agent pays zero). Volatile tail: eval-log/plan
-   ;; content changes each turn, so they sit with :plan/:relevant-source,
-   ;; below the cache breakpoint.
-   {:seon.agent.ctx/name :recent-verbs :seon.agent.ctx/priority 46
-    :seon.render/ai 'seon.agent.ctx.menu/recent-verbs-block}
-   {:seon.agent.ctx/name :plan-ledger :seon.agent.ctx/priority 47
-    :seon.render/ai 'seon.agent.ctx.menu/plan-ledger-block}
-   {:seon.agent.ctx/name :relevant-source :seon.agent.ctx/priority 48
-    :seon.render/ai 'seon.agent.ctx.relevant/relevant-source-block}
-   {:seon.agent.ctx/name :findings :seon.agent.ctx/priority 97
-    :seon.render/ai 'seon.agent.ctx.findings/findings-block}
-   ;; Subagents monitoring surface (multiagent-context Piece 3). Volatile tail
-   ;; (child status changes each turn — sits near the transcript, below the
-   ;; plan, so it never busts the cached stable prefix). Renders NOTHING for a
-   ;; childless agent (the reactive vanish), so it costs childless agents zero
-   ;; and rides the GENERAL agent-context (root gets it via the same manifest).
-   {:seon.agent.ctx/name :subagents :seon.agent.ctx/priority 96
-    :seon.render/ai 'seon.agent.ctx.subagents/subagents-block}
-   {:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
-    :seon.render/ai 'seon.agent.ctx.transcript/transcript-block
-    ;; the transcript carries BOTH render slots (ai + html) — the html slot
-    ;; drives the datastar UI tile. Matches default-ctx-blocks +
-    ;; the CP-0 oracle inventory (:seon.render html(1)).
-    :seon.render/html 'seon.agent.ctx.transcript/transcript-block-html
-    ;; CP-5 — the eval-result age-decay schedule (owner: evals "start larger
-    ;; and shrink over time"). Nested maps → datahike reifies each into a
-    ;; `::decay-level` entity (component ref). Near-full this turn + next
-    ;; (0→16384), partial at offset 2 (→1500), stub at offset 5 (→200, keeps
-    ;; the result/<id> handle). Seeded HERE (the loose block-vector default
-    ;; does not run the per-block schema decode, so the ::result-decay schema
-    ;; default is not auto-filled — the schedule rides the seed explicitly).
-    :seon.agent.ctx.transcript/result-decay
-    [{:seon.agent.ctx.transcript/from-turn-offset 0 :seon.agent.ctx.transcript/token-cap 16384}
-     {:seon.agent.ctx.transcript/from-turn-offset 2 :seon.agent.ctx.transcript/token-cap 1500}
-     {:seon.agent.ctx.transcript/from-turn-offset 5 :seon.agent.ctx.transcript/token-cap 200}]}])
-
-;; The agent-context map — agent-level config keys (all `{:optional true}`,
-;; carrying their `:default`) + the `:seon.agent/ctx` block vector (its
-;; `:default` = the full tree). Every key optional ⇒ `{}` validates ⇒ the
-;; recursive decode fills the whole thing.
-;;
-;; TWO CLASSES of agent-level key:
-;;   (a) CONSUMED-INTO-BLOCKS at seed, NOT persisted as an agent datom —
-;;       `:my.skills/load` (expanded into `:skill/<name>` blocks; block presence
-;;       is its truth). Dropped before the scalar transact by `seed-default-ctx!`.
-;;   (b) PERSISTED as an agent-entity datom, read reactively by its consumer —
+;; Agent-level keys are persisted on the agent entity and read reactively:
 ;;       `:seon.client/wake?` (gates the wake trigger at init),
 ;;       `:seon.eval/home-requires` (the home-ns require list). These are
 ;;       declared HERE (referencing their owning ns's registered shape) so the
@@ -285,12 +204,10 @@
 ;; downstream at `transact!`, the same rule the block vector uses).
 (schema/register! :seon.config/agent-context
   [:map
-   ;; (a) consumed-into-blocks at seed (leaf `:keyword`; my.skills owns identity)
-   [:my.skills/load          {:optional true :default [:repl]} [:vector :keyword]]
-   ;; (b) persisted agent datoms — override-only (no default; consumer owns it)
+   ;; Persisted agent datoms — override-only (no default; consumer owns it).
    [:seon.client/wake?       {:optional true} :boolean]
    [:seon.eval/home-requires {:optional true} [:vector :any]]
-   [:seon.agent/ctx {:optional true :default default-ctx-blocks} [:vector :map]]])
+   [:seon.agent/ctx {:optional true :default []} [:vector :map]]])
 
 ;; The ROOT override — a SPARSE agent-context merged over `:seon.config/agent-context`
 ;; by [[context-config-for]] (block upsert-by-name). Its `:live-tile` block sets
@@ -519,13 +436,6 @@
   "The consolidated manifest, CWD-relative (the pod's cwd is the repo root) —
    `SEON_CONFIG` overrides the path (the SOUL.md / SEON_SKILLS_DIR precedent)."
   "config/system.edn")
-
-(def ^:private skill-body-priority
-  "An always-on skill body sits in the CACHED prefix between the L0 catalog
-   (`:skills-catalog`, 12) and `:namespaces` (20), inside `cache-breakpoint`
-   = 20, so an always-on body never busts the provider cache. (A RUNTIME
-   `(my.skills/load …)` uses the volatile band instead.)"
-  16)
 
 (defn- env
   "A `process.env` value, nil when unset/blank — `seon.platform/env-val`, the
@@ -1320,7 +1230,7 @@
    the sub-keys it changes, never re-specify the whole block. A name absent
    from `base` is a brand-new block, appended in `additions` order. Used by
    [[context-config-for]] to layer the root-context override over the base,
-   by [[expand-skill-blocks]], and by [[resolve-agent-context]]."
+   by [[context-config-for]]."
   [base additions]
   (let [by-name  (into {} (map (juxt :seon.agent.ctx/name identity)) additions)
         seen     (atom #{})
@@ -1335,64 +1245,6 @@
         ;; additions with no base counterpart: append in original order.
         appended (filterv #(not (@seen (:seon.agent.ctx/name %))) additions)]
     (into merged appended)))
-
-(defn- skill-body-block
-  "The always-on body block a `:my.skills/load` skill-name expands to — the
-   SAME `:skill/<name>` handle a runtime `(my.skills/load …)` uses, reusing the
-   shipped `my.skills/skill-block` render fn (a literal quoted symbol; no var
-   ref — LEAF rule), seeded at the cached-prefix priority so the body is
-   always-on AND cacheable."
-  [skill-name]
-  {:seon.agent.ctx/name     (keyword "skill" (name skill-name))
-   :seon.agent.ctx/priority skill-body-priority
-   :seon.render/ai          'my.skills/skill-block})
-
-(defn- soul-file-path
-  "The primary identity file: `nil` when `SEON_SOUL` is explicitly disabled
-   (`false`/`0`/`off`/`no`), else `SEON_SOUL_FILE` override, else `SOUL.md`.
-   Mirrors the retired `seon.agent.ctx/soul-file-path` const — now the config
-   path owns identity-file seeding (LEAF rule: config computes the path + does
-   the fs existence check, emitting a pure-data block with a literal render
-   symbol; no `seon.agent.ctx` var ref)."
-  []
-  (let [flag (some-> (env "SEON_SOUL") clojure.string/lower-case clojure.string/trim)]
-    (when-not (contains? #{"false" "0" "off" "no"} flag)
-      (or (env "SEON_SOUL_FILE") "SOUL.md"))))
-
-(defn- file-exists? [path]
-  (and (string? path)
-       (try (.existsSync (js/require "fs") path) (catch :default _ false))))
-
-(defn- identity-file-blocks
-  "DEPRECATED — reference for the `soul` milestone; see context-rebuild.
-
-   The soul/agents file-blocks PREPENDED onto the seed when their file is
-   PRESENT (reactive, NO fallback — absent file → no block, as the retired
-   `seon.agent.ctx/default-seed-blocks` fn did). SOUL.md at priority 5 (gated by SEON_SOUL),
-   AGENTS.md at priority 8. Each is a pure-data block carrying the shipped
-   `seon.agent.ctx/file-block-ai|html` render symbols (the slot fns re-read the
-   file fresh each render). Only files that EXIST yield a block, so a soul-OFF /
-   file-absent cluster gets none = byte-parity."
-  []
-  (->> [(when-let [p (soul-file-path)]
-          {:seon.agent.ctx/name :soul :seon.agent.ctx/priority 5
-           :seon.agent.ctx/file-path p})
-        {:seon.agent.ctx/name :agents :seon.agent.ctx/priority 8
-         :seon.agent.ctx/file-path "AGENTS.md"}]
-       (filterv (fn [b] (and b (file-exists? (:seon.agent.ctx/file-path b)))))
-       (mapv (fn [b] (assoc b :seon.render/ai   'seon.agent.ctx/file-block-ai
-                              :seon.render/html 'seon.agent.ctx/file-block-html)))))
-
-(defn- expand-skill-blocks
-  "Expand the agent-context's `:my.skills/load` presence-set into `:skill/<name>`
-   body blocks upserted onto `:seon.agent/ctx`, so the always-on skill BODIES a
-   cluster names in `:my.skills/load` actually drive the seeded blocks (not a
-   hardcoded list). Default `[:repl]` → the one `:skill/repl` block = byte-parity
-   with the pre-CP-4 hardcoded seed. An explicit `[]` seeds no bodies."
-  [{:my.skills/keys [load] :as ctx}]
-  (assoc ctx :seon.agent/ctx
-         (upsert-by-name (:seon.agent/ctx ctx)
-                         (mapv skill-body-block (distinct load)))))
 
 (defn resolve-routes
   "Curate the seeded `routes` by the manifest's `:seon.config/routes`.
@@ -1430,13 +1282,12 @@
 (defn- context-config-for
   "Select the FULLY-DEFAULTED agent-context map for `id` from `manifest`
    (decision 11) — by IDENTITY, not a `:kind`. Decodes `:seon.config/agent-context`
-   through the default transformer FIRST (so the block tree is present), then for
+   through the default transformer FIRST, then for
    `\"root\"` upserts the sparse `:seon.config/root-context` blocks over it by
-   `:seon.agent.ctx/name` (root's `:live-tile` upserts to set `system-view`). Any
-   other id gets the defaulted agent-context unchanged. Both manifest keys default
-   `{}` when absent ⇒ the schema fills the full byte-parity tree. Decoding the base
-   BEFORE the root upsert is load-bearing: a sparse `{}` base only carries its
-   blocks after decode, so upserting first would drop the default tree."
+   `:seon.agent.ctx/name`. Any other id gets the decoded agent-context unchanged.
+   Both manifest keys default to `{}` when absent; the context vector then defaults
+   to empty. Decoding before the root upsert keeps scalar defaults and block-value
+   decoding on one path."
   [id manifest]
   (let [base (m/decode :seon.config/agent-context
                        (get manifest :seon.config/agent-context {})
@@ -1462,30 +1313,12 @@
    [[context-config-for]], by identity, already defaulted) ← per-mint `override`
    — then a final recursive `m/decode` fills any key the override left absent.
    Returns `{… agent scalars … :seon.agent/ctx [block …]}`; the caller transacts
-   it as ONE nested component-ref tx. Two non-generic block steps run last:
-   [[expand-skill-blocks]] (the `:my.skills/load` presence-set → `:skill/<name>`
-   bodies, default `[:repl]`) and the identity file-blocks ([[identity-file-blocks]]
-   — SOUL.md/AGENTS.md when present, gated by SEON_SOUL). Both upsert by name, so
-   a manifest that names those blocks wins. A sparse/absent manifest + nil
-   override ⇒ the byte-parity default tree.
-
-   An EXPLICIT `:seon.agent/ctx` (in the manifest's agent-context or the
-   per-mint `override`) declares the COMPLETE block tree — the documented
-   replaces-wholesale contract — so the identity file-blocks are NOT
-   auto-prepended onto it (an on-disk AGENTS.md must not smuggle a block
-   into a cluster that enumerated its tree; `config/minimal.edn` depends on
-   this). The root-context block UPSERTS stay an override layer, not a tree
-   declaration, so they don't suppress."
+   it as ONE nested component-ref tx. An explicit `:seon.agent/ctx` is the
+   complete seed tree; absent config resolves to an empty tree."
   {:malli/schema [:=> [:catn [::agent-id ::agent-id]
                        [::override [:maybe :map]]]
                   :seon.config/agent-context]}
   [id override]
-  (let [manifest      (load-manifest)
-        explicit-ctx? (or (contains? (get manifest :seon.config/agent-context {})
-                                     :seon.agent/ctx)
-                          (contains? (or override {}) :seon.agent/ctx))
-        merged        (merge (context-config-for id manifest) override)]
-    (cond-> (-> (m/decode :seon.config/agent-context merged ctx-default-transformer)
-                (expand-skill-blocks))
-      (not explicit-ctx?)
-      (update :seon.agent/ctx #(upsert-by-name (vec (identity-file-blocks)) %)))))
+  (let [manifest (load-manifest)
+        merged   (merge (context-config-for id manifest) override)]
+    (m/decode :seon.config/agent-context merged ctx-default-transformer)))

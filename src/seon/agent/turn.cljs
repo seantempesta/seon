@@ -209,7 +209,7 @@
   "The agent's full LLM context, rendered as a bare String (sync).
 
    Thin delegate to [[seon.agent.ctx/render-context]] (the SINGLE producer the human
-   web UI `seon.agent.inspect/ctx-preview` also routes through, so the
+   web UI `seon.agent.debug/ctx-preview` also routes through, so the
    debug view and the model's prompt are byte-identical by construction).
    Renders against the frozen `db` value the loop pinned for this TURN (the
    one basis-t the bound-checks + render share, §8a); defaults to `@*conn*`
@@ -390,7 +390,7 @@
         ;; Link the reply blob onto the turn NOW, not only at close-turn!:
         ;; a turn that dies mid-eval (e.g. a `:core` crash under the
         ;; on-core-error dial) otherwise strands the captured blob with no
-        ;; ref — `inspect/turn` can't read the raw reply back. Best-effort
+        ;; ref — `agent-debug/turn` can't read the raw reply back. Best-effort
         ;; like the capture; close-turn!'s later merge re-asserts the same
         ;; ref (idempotent upsert). Drill finding, error-workflow 2026-07-05.
         _          (when reply-blob

@@ -31,7 +31,7 @@
    `req` (method, uri sans query, query-string, headers) AND injects the raw
    node `req`/`res` under `:seon.http/node-req` / `:seon.http/node-res` so the
    streaming + static handlers can reach the socket. A handler that takes over
-   the socket itself (the SSE open, a static file pipe, the gzip /world feed,
+   the socket itself (the SSE open, a static file pipe, the gzip /agent-view feed,
    a /call JSON write) returns the **hijack sentinel** `{:seon.http/hijacked
    true}`; [[handle-request]] sees it and writes NOTHING (the handler already
    owns the stream). A handler that returns a plain Ring response map is

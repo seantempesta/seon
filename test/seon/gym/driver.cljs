@@ -1120,12 +1120,11 @@
   "One `:seon.gym/turn-profile` for the turn about to run — context BLOCK
    names in render order + per-block TOKEN estimates (the hard
    size-reporting rule: tokens via `seon.ai.tokens/estimate`, never
-   chars) from [[ctx/ctx-sections]] (the SAME per-block render path the
-   prompt and the inspector take) against the pre-turn db value."
+   tokens) from [[ctx/rendered-context-blocks]] (the SAME per-block render path the
+   prompt and the debug view take) against the pre-turn db value."
   [dbv agent-id designator]
-  (let [texts (:seon.render/section-texts
-                (ctx/ctx-sections {:seon.db/db dbv
-                                   :seon.agent/id agent-id}))]
+  (let [texts (ctx/rendered-context-blocks
+                {:seon.db/db dbv :seon.agent/id agent-id} #{:ai})]
     {:seon.gym.profile/agent  designator
      :seon.gym.profile/blocks (mapv :seon.agent.ctx/name texts)
      :seon.gym.profile/block-tokens
@@ -1218,7 +1217,7 @@
    actually SEES on the canvas — so a canvas-content judge grades the
    RENDERED tile, not just the reply prose. Goes through the public
    `seon.render/render-agent-tile` path (the ONE tile entry point the
-   inspector + the live-tile awareness block use), NEVER render-engine
+   debug view + the live-tile awareness block use), NEVER render-engine
    internals. Falls back to the error message + twin when the renderer
    threw, the hiccup pr-str when a tile carries no ai twin, and the empty
    string when nothing resolves (no canvas → nothing to append)."

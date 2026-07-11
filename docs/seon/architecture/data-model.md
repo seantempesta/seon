@@ -33,7 +33,7 @@ the agent that started it (`:seon.agent/parent`); a run points back
 schedules reference its members by **symbol value** (late-resolved, NOT a
 datahike ref). **Routes** (`:seon.route`) are datoms a `db->routes` fn projects
 into reitit. The **root agent** (`:seon.agent/id "root"`) is the seeded base
-agent whose world is the `/` overview and who holds the lifecycle grant (see
+agent whose view is the `/` overview and who holds the lifecycle grant (see
 [[agent-runtime]]). The agent's **state is never stored** — it is derived
 (`seon.derive/derive-state`) from its primitives. The **`my.*` domain schemas**
 carry the agent's actual data: `my.kb` (a global knowledge base — rows carry no
@@ -424,7 +424,7 @@ trigger, recorded but not waking a run) is owned by [[agent-runtime]].
 ### 4.8 route — `:seon.route/*`
 
 Each row is a datom a `db->routes` fn projects into a reitit route vector. The
-schema lives here; reitit, `db->routes`, the capability gate, and the root-world
+schema lives here; reitit, `db->routes`, the capability gate, and the root-agent-view
 (`/`) are owned by [[ui]].
 
 | attribute | malli | datahike facet | notes |
@@ -883,7 +883,7 @@ transient render values.
 - [[agent-runtime]] — loop / run / turn / FSM / derived-state, creation-as-idle,
   bootstrap-as-seeded-forms, orchestrator-root lifecycle, the `:core`-origin
   quietness, isolation tiers.
-- [[ui]] — block / render / tile / slot / layout, world / root-world / app,
+- [[ui]] — block / render / tile / slot / layout, view / root-agent-view / app,
   reitit routing + the capability gate, the gzip-morph SSE channel, the
   seed-copy + variadic `install!`/`remove!` override model.
 - [[toolkit]] — the `my.*` function catalog (the agent's action surface over these

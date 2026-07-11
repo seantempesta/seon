@@ -242,7 +242,7 @@
 ;; legible, never a silent vanish (demo-polish 2026-06-12; the old
 ;; `(catch … nil)` made a broken agent-authored renderer's card
 ;; indistinguishable from "no renderer" and dead-coded the
-;; inspector's render-error fallback).
+;; debug view's render-error fallback).
 ;; ============================================================
 
 (defn throwing-renderer
@@ -383,7 +383,7 @@
   ;; CONVERGENCE: a missing (or throwing) block surfaces THROUGH the
   ;; overridable seon.render.live-tile/error-tile seam — not a hardcoded
   ;; div — so a consumer's set! override (acme's branded card) applies on
-  ;; the world page too. Never throws; stable id + sibling kept.
+  ;; the agent view too. Never throws; stable id + sibling kept.
   (async done
     (-> (with-block-conn "slottest-00002"
           (fn [conn]

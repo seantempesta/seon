@@ -20,7 +20,7 @@ tags: [decision, architecture, schema]
 > body validates and returns an error ENVELOPE (never-throw-into-the-loop).
 > `*.internal` fns are deliberately unspecced. A `SEON_INSTRUMENT`
 > kill-switch exists as an emergency bail-out only. Coverage is a
-> **derived invariant**: the root world's `:instrumentation-gaps` section
+> **derived invariant**: the root agent view's `:instrumentation-gaps` section
 > (`seon.instrument/coverage-gaps`) recomputes the census per render and
 > surfaces any specced fn whose live var lost its wrapper. The Integrant
 > component described below is the paused JVM track's machinery.

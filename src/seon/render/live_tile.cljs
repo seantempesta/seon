@@ -600,7 +600,7 @@
 ;; Errors are legible — a broken tile never silently vanishes.
 ;;
 ;; ONE overridable seam ([[error-tile]]) renders the ERROR-TILE surfaces
-;; (entity render, world slot, a render failure); a consumer `set!`s it to
+;; (entity render, agent-view slot, a render failure); a consumer `set!`s it to
 ;; a branded card (acme does) and the override carries across them all.
 ;; The live-tile HERO ([[error-response]]) is the deliberate EXCEPTION: it
 ;; stays CALM — the human never sees the failure there (it rides the agent

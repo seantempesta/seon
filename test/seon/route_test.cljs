@@ -16,10 +16,9 @@
     [seon.test.async :refer [settle!]]))
 
 (def ^:private expected
-  "name → [pattern method] — the authoritative seeded core route set. `root = /`
-   (root-os-vision): the old `/world` + `/world/feed` roster path is RETIRED; `/`
-   IS root's world (the dashboard) and the fleet roster lives at `/agents` +
-   `/agents/feed`. So the seed is `/` + the roster page + its `…/feed` stream +
+  "name → [pattern method] — the authoritative seeded core route set. `/`
+   is the root agent view and the fleet roster lives at `/agents` +
+   `/agents/feed`. The seed is `/` + the roster page + its `…/feed` stream +
    the per-agent page + its separate `…/feed` SSE stream + the one POST door."
   {:seon.route/root        ["/" :get]
    :seon.route/agents      ["/agents" :get]
@@ -32,15 +31,13 @@
   (let [rows  (route/core-routes-tx)
         by-nm (into {} (map (juxt :seon.route/name identity)) rows)]
     (is (= (set (keys expected)) (set (keys by-nm)))
-        "exactly the corrected core routes (post-/world-retirement), no more, no fewer")
+        "exactly the core routes, no more, no fewer")
     (doseq [[nm [pattern method]] expected]
       (testing (str nm)
         (let [r (by-nm nm)]
           (is (= pattern (:seon.route/pattern r)))
           (is (= method (:seon.route/method r))))))
-    (testing "/world is RETIRED (root = /); the fleet roster is /agents; the agent /feed stays a SEPARATE GET path"
-      (is (not (contains? by-nm :seon.route/world)))
-      (is (not (contains? by-nm :seon.route/world-feed)))
+    (testing "the roster and per-agent feeds stay separate GET paths"
       (is (contains? by-nm :seon.route/agents))
       (is (contains? by-nm :seon.route/agents-feed))
       (is (contains? by-nm :seon.route/agent-feed)))

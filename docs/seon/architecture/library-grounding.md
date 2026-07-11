@@ -482,7 +482,7 @@ Read: `reference-code/hyperlith/src/hyperlith/core.clj:88-110`
   shim-vs-stream by HTTP METHOD (GET=page, POST=stream), so its `on-load-js` does
   `@post(window.location.pathname …)` with a `&u=` cache-buster (its comment: GET/POST
   cache headers collide on one URL). ⚠ **We DIVERGED — and the divergence is correct:**
-  our shim and feed are SEPARATE paths (`/world` GET → `/world/feed` GET; `/agent/{id}`
+  our shim and feed are SEPARATE paths (`/view` GET → `/view/feed` GET; `/agent/{id}`
   GET → `/agent/{id}/feed` GET). This matches datastar-clojure's OWN canonical example
   (`tiny_gzip.clj:31` — page at `/`, stream at a separate GET `/updates` via
   `(d*/sse-get "/updates")`), and because the two URLs differ there is NO GET/POST
@@ -530,14 +530,14 @@ Chrome.
 
 Re-read hyperlith (`core.clj`, `impl/datastar.clj`), reitit (`reitit-ring/.../ring.cljc`),
 datastar-clojure (`consts.clj`, `tiny_gzip.clj`) against `web/datastar.cljs`,
-`web/router.cljs`, `ui/world.cljs`. The wire framing + view=f(db) + crash-guards all
+`web/router.cljs`, `ui/view.cljs`. The wire framing + view=f(db) + crash-guards all
 hold. Findings, by severity:
 
 - 🔴 **A — feed routing: doc/contract was WRONG, would 404 the feed at Phase 5.** The code
-  uses separate GET feed paths (`/world/feed`, `/agent/{id}/feed`); the doc said "no /feed,
+  uses separate GET feed paths (`/view/feed`, `/agent/{id}/feed`); the doc said "no /feed,
   same path." The code is the idiomatic choice (datastar-clojure `tiny_gzip.clj:31`). FIXED
   the routing contract here + [[ui]] + coordination Handoff #3 / Interface #2 so Phase-5
-  `db->routes` SEEDS the feed routes (`/world/feed`, `/agent/{id}/feed` GET). Without this
+  `db->routes` SEEDS the feed routes (`/view/feed`, `/agent/{id}/feed` GET). Without this
   fix the feeds vanish when the static route vector is replaced by the db projection.
 - 🟠 **B — no reconnect/retry hardening on the feed.** `shim-html`'s `data-init="@get('…')"`
   relies on datastar defaults; hyperlith sets `{retryMaxCount: Infinity, openWhenHidden:

@@ -10,7 +10,7 @@
    the last job is pruned (self-healing). Scoped to the CURRENT agent:
    `list-jobs` filters by `:seon.agent/id`, so this section shows ONLY the
    jobs THIS agent launched — never another agent's (OBS-1). Symbol-wired
-   into the composer (`seon.config/default-ctx-blocks`) as
+   into the composer (`config manifest`) as
    `'seon.agent.ctx.jobs/jobs-block`."
   (:require
     [clojure.string :as str]

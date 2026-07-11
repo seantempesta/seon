@@ -149,7 +149,7 @@
                  :my.plan/id-request
                  :seon.agent.ctx/render-namespace-request
                  :seon.handler/input
-                 :seon.agent.inspect/request
+                 :seon.agent.debug/request
                  :seon.render/assemble-request
                  :seon.effect/wake-request]]
         (is (not (contains? kinds k)) (str k " must NOT be a kind"))))))

@@ -616,7 +616,7 @@
 ;; ============================================================
 ;; The deadline WATCHDOG — the wall-clock half of the one ticker
 ;; ([[seon.agent.loop/install-ticker!]]). The DB is passive about wall-clock:
-;; `now > deadline` is true in the world, but nothing fires until something
+;; `now > deadline` is true in the cluster, but nothing fires until something
 ;; checks. This scan IS that check — the EXTERNAL enforcement of the clock
 ;; bound (a stalled LLM burns the clock and can't self-detect). A run whose
 ;; async turn overran its deadline is closed here; when the await returns the

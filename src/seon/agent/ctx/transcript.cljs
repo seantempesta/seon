@@ -20,7 +20,7 @@
 
    The masthead opens it, the events stream in time order, and the folded
    live readline at the very bottom carries the cursor (current ns) + this
-   turn's status/steering. Symbol-wired into `seon.config/default-ctx-blocks` as
+   turn's status/steering. Symbol-wired into `config manifest` as
    `'seon.agent.ctx.transcript/transcript-block` (+ the html twin
    `'…/transcript-block-html`).
 

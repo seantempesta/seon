@@ -10,8 +10,7 @@
 #merge
 [#include "minimal.edn"
  {:seon.config/agent-context
-  {:my.skills/load []
-   :seon.agent/ctx
+  {:seon.agent/ctx
    [{:seon.agent.ctx/name :namespaces :seon.agent.ctx/priority 20
      :seon.render/ai seon.agent.ctx.namespaces/namespaces-block}
     {:seon.agent.ctx/name :plan :seon.agent.ctx/priority 45

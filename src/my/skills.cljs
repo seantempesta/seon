@@ -300,7 +300,7 @@
    The L0 `:skills-catalog` context block — one `;`-line per skill.
 
    Each line is cheap: name + description + a DERIVED ●/○ loaded marker.
-   A symbol-slot section wired into `seon.config/default-ctx-blocks` at
+   A symbol-slot section wired into `config manifest` at
    priority 12 (cached prefix). REACTIVE: \"\" when no skill rows exist, so
    the section drops."
   {:malli/schema [:=> [:cat :map] :string]}

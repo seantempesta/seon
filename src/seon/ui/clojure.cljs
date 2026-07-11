@@ -4,10 +4,10 @@
    `[:pre [:code …]]` hiccup out, no client JS pass.
 
    Why server-side (not the CDN highlight.js the legacy `/debug` shell loads):
-   the new world page's shim ships ONLY `datastar.js` — no hljs — so eval
+   the new agent view's shim ships ONLY `datastar.js` — no hljs — so eval
    source there is unhighlighted, and any client pass races idiomorph after
    every SSE morph. A pure server tokenizer is morph-safe by construction,
-   renders under `?t=` time-travel and `curl`, and keeps the world page's JS
+   renders under `?t=` time-travel and `curl`, and keeps the agent view's JS
    = datastar-only.
 
    It REUSES the existing `.hljs-*` palette (the same classes the debug shell

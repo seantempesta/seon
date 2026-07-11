@@ -40,16 +40,13 @@
 
   ;; ── AGENT-CONTEXT — TWO blocks (v0+ns): the namespaces block + the
   ;; transcript. Supplying :seon.agent/ctx declares the COMPLETE tree
-  ;; (replaces-wholesale; identity file-blocks are not auto-prepended onto
-  ;; an explicit tree). :my.skills/load [] seeds no skill bodies. Both
-  ;; block specs are seon.config/default-ctx-blocks' verbatim (incl. the
-  ;; result-decay schedule and the html twin that drives the UI tile).
+  ;; (replaces-wholesale). The transcript block includes the result-decay
+  ;; schedule and the HTML twin that drives the agent view.
   ;; The namespaces block teaches its own render policy + movement functions
   ;; in its colocated header (owner directive 2026-07-10 — under minimal
   ;; context nothing else teaches it).
   :seon.config/agent-context
-  {:my.skills/load []
-   :seon.agent/ctx
+  {:seon.agent/ctx
    [{:seon.agent.ctx/name :namespaces :seon.agent.ctx/priority 20
      :seon.render/ai seon.agent.ctx.namespaces/namespaces-block}
     {:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100

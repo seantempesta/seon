@@ -14,7 +14,7 @@ context unit is the **block**; the engine is `seon.render`; the front door is
 **reitit**; the live channel is a gzip-compressed datastar **morph** stream
 driven by one tx-listener. Every layer is a
 symbol or a datom, so a third party overrides any of it — blocks, canvas,
-layout, the root agent's world, routes, CSS, client — reusing the same
+layout, the root agent’s view, routes, CSS, client — reusing the same
 primitives, with zero `src/seon` edits.
 
 ## The block and its two renders
@@ -56,17 +56,16 @@ quiet `:core` bootstrap forms at creation.)
 shape a block set:
 
 - `install!` is **scope-aware + variadic** — one block map OR a vector of block
-  maps to load the whole set at once. With no agent scope (boot) it builds the
-  default seed set; in an agent's scope it targets THAT agent's `:seon.agent/ctx`.
+  maps to load the whole set at once. In an agent's scope it targets THAT
+  agent's `:seon.agent/ctx`.
   Idempotent **upsert by `:seon.agent.ctx/name`**.
 - `remove!` drops a block by name; because `:seon.agent/ctx` is a component
   vector, the child entity cascade-retracts.
 
-seon's `my.*` namespaces DEFINE the render fns and block data and batch-install
-the set at seed. acme overrides by calling `install!`/`remove!` from its own
-namespaces (loaded via `SEON_EXTRA_SRC`), so new acme agents seed acme's set. One
-mechanism for everyone — seon, acme, and the agents themselves. A pure ADD needs
-nothing more: name a block and its render symbols; the symbols resolve late.
+The cluster manifest declares the initial block data. Agents may later call
+`install!`/`remove!` against the same database-owned collection. A pure ADD
+needs nothing more: name a block and its render symbols; the symbols resolve
+late.
 
 **Pinning a fn is a block; config shapes the seed.** Any render fn an agent wants
 always-on is nothing but a block — `install!` at a chosen priority pins it,
@@ -75,9 +74,8 @@ render. (This is the mechanism the retiring `my.skills` load/unload facade rode
 on — the facade retires, the `install!`/`remove!`-block path stays; see
 [[data-model]] §5.5 + [[context-rebuild]].) And the per-cluster `seon.config`
 manifest (aero `config/system.edn`) shapes the seed set declaratively WITHOUT a
-code change: its per-agent context adds/removes blocks and drops seeded
-blocks/routes by name. Absent config ⇒ byte-identical to a no-config boot; both
-are the SAME seed-copy mechanism, fed by data instead of a hardcode.
+code change. An absent block tree means no blocks; no hidden code fallback or
+implicit skill-body injection exists.
 
 ## The render engine
 
@@ -104,9 +102,9 @@ anything else → the data panel (never throws). The transcript and the canvas b
 route their bodies through it, so every surface "just displays the block."
 
 **Markdown renders server-side.** Agent text becomes HTML on the server via
-`seon.ui.markdown/md->hiccup` (the `block` message lane) — the world shim loads NO
+`seon.ui.markdown/md->hiccup` (the `block` message lane) — the view shim loads NO
 client markdown JS; the old client-side `data-markdown` / marked.js lane is gone from
-the world page. One lane, server-side, for every message/eval body.
+the agent-view page. One lane, server-side, for every message/eval body.
 
 **Capability + cache.** Agent-authored renders, layouts, and route handlers run
 SCI-bounded (`seon.render.sci/invoke-bounded`, a deadline), never
@@ -131,16 +129,17 @@ every context band renders an html representation for inspectability.
   a role, never stored**: a render with child slots is a layout, a render with
   none is a leaf **tile**.
 
-## Pages — world, the root agent's world, app
+## Pages — agent view, debug view, roster, app
 
 Every **page** is a layout placing block html renders into slots; each filled slot
-is a tile. All pages are agent worlds — one mechanism, a tree of routes:
+is a tile. All pages are agent views — one mechanism, a tree of routes:
 
-- **world** (`/agent/{id}`) — one agent: the focal **canvas** rendered into
-  `#world-canvas`, above a `:seon.agent.ctx/priority`-ordered scroll of the
-  agent's html `:seon.agent/ctx` blocks as supporting tiles (`:transcript`
-  included). The canvas is NOT a `(slot :canvas)` block — `:canvas` is just a
-  block name like any other. **What the canvas shows is derived by default,
+- **agent view** (`/agent/{id}`) — one agent: a large primary panel with the
+  **canvas selected by default**, and a narrow right rail containing every
+  current HTML context-block render in priority order. Selecting a rail card
+  displays that render in the primary panel. Missing and AI-only renders are
+  omitted. The canvas is NOT a `(slot :canvas)` block — it is the agent's live
+  tile projection. **What the canvas shows is derived by default,
   pinnable to override** (the same derive-default/store-override pattern as
   everywhere): by default it is the **last-updated tile** — among the agent's
   own authored tile fns, the one most recently touched (redefined, or a write
@@ -156,15 +155,22 @@ is a tile. All pages are agent worlds — one mechanism, a tree of routes:
   (`seon.render.live-tile/welcome`) LEADS with the agent's latest reply as a
   markdown card, falling back to the greeting only before the agent has
   spoken.
-- **the root agent's world** (`/`) — the all-agents overview IS the **root
-  agent's** world (`:seon.agent/id "root"`). Its system-scoped blocks query across
+- **the root agent’s view** (`/`) — the all-agents overview IS the **root
+  agent's** view (`:seon.agent/id "root"`). Its system-scoped blocks query across
   all agents to render a preview tile each; dive into one via reverse routing
   (step back to see all, dive into one). The IDENTICAL block/layout/route
   machinery — NOT a separate overview page. It grounds the render + route tree: root
-  world (`/`) → per-agent worlds (`/agent/{id}`) → apps. (Root's
+  view (`/`) → per-agent views (`/agent/{id}`) → apps. (Root's
   lifecycle/orchestrator facet lives in [[agent-runtime]]; here it is just the
-  agent whose world is `/`.) It is the same page as any `/agent/{id}` world,
+  agent whose view is `/`.) It is the same page as any `/agent/{id}` view,
   with `seon.render.system/system-view` as its canvas (its live-tile content).
+- **debug view** (`/agent/{id}/debug`) — the exact AI context grouped into
+  collapsible blocks, with HTML twins alongside when present. It also derives
+  the total prompt token estimate, per-block token breakdown, cache boundary,
+  agent state, and turn diagnostics. It is available for every agent and does
+  not alter the prompt.
+- **roster** (`/agents`) — the live agent list, backed by `/agents/feed` and
+  the same whole-element Datastar morph mechanism.
 - **app** (`/agent/{id}/app/{x}`) — an agent-authored sub-page; its route handler
   is an agent layout symbol, SCI-bounded.
 
@@ -175,8 +181,8 @@ pure function of the db value (NEVER throws — degrades to a brand-only bar).
 Left→right: the brand (`seon.web.brand`, links `/`); agents-by-state dots+counts
 (reusing `seon.render.system/fleet-summary` — one fleet counter, not
 re-derived); throughput; datom count (links `/data`) + `SEON_EMBED` on/off; and a
-`+ new agent` button + home/data links + a health dot. On the morphed world pages
-(`/`, `/agent/{id}`, `/world`) it lives INSIDE `#world`, so it rides the live
+`+ new agent` button + home/data links + a health dot. On the morphed agent-view pages
+(`/`, `/agents`, `/agent/{id}`) it lives INSIDE `#app-view`, so it rides the live
 morph and the stats tick on every commit; on the server-rendered `/data` +
 `/agent/{id}/debug` it is a request-time snapshot. The `+ new agent` button POSTs
 the same `/agents/new` create door and SWITCHES to the new `/agent/{id}`.
@@ -206,8 +212,8 @@ the route datoms rebuilt on tx via a reloading thunk. This replaces hand-rolled
 `case`/`cond`/`re-matches` dispatch. (The `:seon.route/*` attributes are
 registered per [[data-model]].)
 
-- **Seeded core routes:** `/` (root agent's world), `/world` + `/world/feed`, and
-  `/agent/{id}` + `/agent/{id}/feed` — all GET. Each world is TWO GET routes: the
+- **Seeded core routes:** `/` (root agent’s view), `/agents` + `/agents/feed`, and
+  `/agent/{id}` + `/agent/{id}/feed` — all GET. Each view is TWO GET routes: the
   shim page and its long-lived SSE stream at a `…/feed` sibling path (the shim's
   `data-init="@get('…/feed')"` opens the stream). The one action door is
   `/agent/{id}/call` (POST). Agents add `/agent/{id}/app/{x}` rows
@@ -246,8 +252,8 @@ derivation of the DB. The agent only `transact!`s datoms; it never opens or writ
 a stream. The model is hyperlith's `view = f(db)` ported into the Node pod, proven
 in `seon.web.datastar`.
 
-- **view = f(db-as-of t).** ONE render fn produces the WHOLE element (a world =
-  `[:main#world …tiles…]`). On every datahike commit the tx-listener re-renders
+- **view = f(db-as-of t).** ONE render fn produces the WHOLE element (a view =
+  `[:main#app-view …tiles…]`). On every datahike commit the tx-listener re-renders
   `view = f(db)` and writes ONE `datastar-patch-elements` event (default patch
   mode `outer`) to every open stream. datastar's **idiomorph** diffs the DOM
   client-side, so pushing the whole element MORPHS only what changed and preserves
@@ -263,8 +269,8 @@ in `seon.web.datastar`.
 - **One throttle.** A drop-latest (coalescing) throttle collapses a tx burst into
   ONE morph — an agent turn commits many datoms; the human sees a single
   re-render.
-- **Separate GET feed path.** The shim page (`/world`, `/agent/{id}`) and its live
-  stream (`/world/feed`, `/agent/{id}/feed`) are two GET URLs; the shim's
+- **Separate GET feed path.** The shim page (`/view`, `/agent/{id}`) and its live
+  stream (`/view/feed`, `/agent/{id}/feed`) are two GET URLs; the shim's
   `data-init="@get('…/feed')"` opens the stream. Two distinct URLs sidestep the
   GET/POST same-URL cache collision that forces hyperlith's same-path-POST `&u=`
   hack, and this matches datastar-clojure's own example (`tiny_gzip.clj`: page `/`,
@@ -275,18 +281,18 @@ in `seon.web.datastar`.
   Transient client state lives in datastar **signals** only, never DOM attrs. Time
   travel is `view = f(db-as-of t)` over the bitemporal DB — a different `t`, the
   same render. Reconnect needs no UI-side `since-t` replay: the first paint fires
-  immediately on open and repaints the current world. **Status: LIVE** (`/agent/{id}`).
+  immediately on open and repaints the current view. **Status: LIVE** (`/agent/{id}`).
   `open-agent-feed!` reads an optional `?t=<tx-id>` and binds the view-fn to
-  `world-layout (db/as-of @*conn* t)` — a PAST snapshot that is naturally FROZEN
+  `view-layout (db/as-of @*conn* t)` — a PAST snapshot that is naturally FROZEN
   (re-rendering `db-as-of-t` on a later tx yields identical bytes, so the broadcast
-  harmlessly re-pushes the same `#world`); no `?t` ⇒ the current auto-morphing feed,
-  unchanged. The `/agent` shim's time-travel bar (a SIBLING of `#world`, outside the
+  harmlessly re-pushes the same `#view`); no `?t` ⇒ the current auto-morphing feed,
+  unchanged. The `/agent` shim's time-travel bar (a SIBLING of `#view`, outside the
   morph) owns the feed via ONE `data-effect` `@get` so datastar's per-attribute
-  auto-cancellation aborts the prior stream → exactly one stream targets `#world`
-  (the shim omits `data-init` on `#world` for that reason). Signals: `$live` /
+  auto-cancellation aborts the prior stream → exactly one stream targets `#view`
+  (the shim omits `data-init` on `#view` for that reason). Signals: `$live` /
   `$t` (scrub position) / `$ct` (committed as-of tx, set on slider release). Domain
   is `[db/origin-t .. db/basis-t]` (tx-ids). Proven server-side: pre-creation `t` →
-  empty world, mid `t` → frozen partial world that holds under tx pressure, no-`t` →
+  empty view, mid `t` → frozen partial view that holds under tx pressure, no-`t` →
   live auto-morph. The timeline UX (human timestamps, ticks, diff) is the owner's to
   refine.
 - **The hard invariant: no agent code ever touches an SSE connection.** agent →
@@ -327,10 +333,10 @@ acme cluster's NEW per-agent page (`/agent/{id}`), not just the legacy console:
 | **block set** (supporting tiles) | `ctx/install!` / `ctx/remove!` from acme's own nses | seon's seeded set |
 | **seed block tree per cluster** | `config/system.edn` (selected by `SEON_CONFIG`) `:seon.config/agent-context` / `:seon.config/root-context` block tree + route-`removes` | seon's `default-seed-blocks` |
 | **a tile's look** | the block's `:seon.render/html` symbol | seon's html render fn |
-| **focal `#world-canvas` (the live tile)** | the agent's `:seon.render.live-tile/content` symbol | seon's `welcome` tile |
+| **focal `#view-canvas` (the live tile)** | the agent's `:seon.render.live-tile/content` symbol | seon's `welcome` tile |
 | **the calm hero error (a broken live tile)** | `set!` of `seon.render.live-tile/error-response` (the CALM hero — keeps the agent-facing `:seon.render/ai`/`:seon.render/error`, swaps only the human hiccup) | seon's "updating this tile" card |
-| **slot / world / entity error tiles** | `set!` of `seon.render.live-tile/error-tile` (the `(fn [:seon/error] → hiccup)` seam the `render` / `slot` / `render-entity-html` catches call) | seon's `default-error-tile` (informative card) |
-| **root agent's world (`/`)** | the `/` route handler symbol (root's world layout) | seon's root world layout |
+| **slot / view / entity error tiles** | `set!` of `seon.render.live-tile/error-tile` (the `(fn [:seon/error] → hiccup)` seam the `render` / `slot` / `render-entity-html` catches call) | seon's `default-error-tile` (informative card) |
+| **root agent’s view (`/`)** | the `/` route handler symbol (root's agent-view layout) | seon's root agent-view layout |
 | **routes / apps** | `:seon.route/*` rows | seeded core routes |
 | **brand head — name / tagline / CSS** | `SEON_BRAND_NAME` / `SEON_BRAND_TAGLINE` / `SEON_BRAND_CSS` (on every shim `<head>`, incl. `/agent/{id}`) | seon defaults / Phosphor |
 | **client JS** | `SEON_EXTRA_PUBLIC` + scripts | datastar.js |
@@ -339,12 +345,12 @@ acme installs at preload in its own namespaces (loaded via `SEON_EXTRA_SRC`),
 where it already wires its overrides. There are **two error seams**, and acme
 `set!`s BOTH so every error surface on the page is branded:
 
-- the **focal `#world-canvas`** flows through the LIVE-TILE path:
-  `world-layout`'s canvas IS `render-agent-tile` resolving the agent's
+- the **focal `#view-canvas`** flows through the LIVE-TILE path:
+  `view-layout`'s canvas IS `render-agent-tile` resolving the agent's
   `:seon.render.live-tile/content`, and a throwing tile routes through the CALM
   hero seam `seon.render.live-tile/error-response` (the human never sees the
   failure here — it rides the agent twin, so the hero does NOT delegate).
-- the **slot / world / entity error tiles** (`render` / `slot` /
+- the **slot / view / entity error tiles** (`render` / `slot` /
   `render-entity-html` catches) route through the SEPARATE
   `seon.render.live-tile/error-tile` var (`(fn [:seon/error] → hiccup)`,
   defaulting to `default-error-tile`).
@@ -355,12 +361,12 @@ the page.
 Acceptance (proven server-side on `/agent/{id}`, agent `zeG-2606272150`, acme
 cluster port 7980 — gunzipped feed, not inference): with acme's
 `:seon.render.live-tile/content` wired to `acme.widget/broken-tile` (a throwing
-tile) and its blocks installed via `ctx/install!`, the focal `#world-canvas`
+tile) and its blocks installed via `ctx/install!`, the focal `#view-canvas`
 (via `error-response`) and the `#tile-acme-broken` slot (via `error-tile`) BOTH
 render acme's branded `"Acme is preparing this view…"` card — NOT seon's stock
 "updating this tile" card and NOT the informative `default-error-tile` — and the
-`#world-tile-canvas` phantom (the stale pre-#19 `:canvas` block) is gone, while
-the agent's normal tiles (`#world-tile-acme-tile`, `#world-tile-acme-widget`)
+`#view-tile-canvas` phantom (the stale pre-#19 `:canvas` block) is gone, while
+the agent's normal tiles (`#view-tile-acme-tile`, `#view-tile-acme-widget`)
 still render. `bin/acme build` ran with zero warnings; the default seon UI
 (default cluster) is untouched.
 

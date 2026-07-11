@@ -11,11 +11,11 @@
      2. CAPTURE ON ERROR — an LLM failure still leaves rendered-as-of +
         the prompt blob on the turn, plus `:seon.agent.turn/error` as
         data; capture never depends on turn success.
-     3. `inspect/turn` ROUND-TRIP — one call reconstructs the turn:
+     3. `agent-debug/turn` ROUND-TRIP — one call reconstructs the turn:
         the verbatim prompt/reply text back from the blobs, token
         estimates from the ONE estimator, and the tx trail via the
         `:seon.db/turn-id` tx-meta join. Unknown ids are error VALUES.
-     4. `inspect/turn-diff` — basis-t delta + prompt drift summary
+     4. `agent-debug/turn-diff` — basis-t delta + prompt drift summary
         between two captured turns.
 
    Hermetic: blobs go to a pid-scoped tmp dir (my.blob/!dir re-pointed
@@ -30,7 +30,7 @@
     [my.blob :as blob]
     [seon.agent :as agent]
     [seon.agent.run :as run]
-    [seon.agent.inspect :as inspect]
+    [seon.agent.debug :as agent-debug]
     [seon.agent.turn :as turn]
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
@@ -96,7 +96,7 @@
                               :seon.agent/compile-state cs})))))
 
 ;; ---------------------------------------------------------------------------
-;; 1 + 3. Capture on success → inspect/turn round-trip.
+;; 1 + 3. Capture on success → agent-debug/turn round-trip.
 ;; ---------------------------------------------------------------------------
 
 (deftest success-turn-captures-basis-t-and-both-blobs
@@ -120,19 +120,19 @@
               "the turn carries a prompt blob ref — always on")
           (is (some? (:seon.agent.turn/reply-blob turn))
               "the turn carries a reply blob ref")
-          ;; inspect/turn — one call reconstructs the whole bundle
-          (let [b (inspect/turn {:seon.agent.turn/id turn-id})]
-            (is (true? (:seon.agent.inspect/ok? b)))
+          ;; agent-debug/turn — one call reconstructs the whole bundle
+          (let [b (agent-debug/turn {:seon.agent.turn/id turn-id})]
+            (is (true? (:seon.agent.debug/ok? b)))
             (is (= (ai/debug-full-prompt {:seon.ai/ctx @!ctx})
-                   (:seon.agent.inspect/prompt b))
+                   (:seon.agent.debug/prompt b))
                 "the prompt comes back VERBATIM — the exact bytes built for the model")
-            (is (= reply (:seon.agent.inspect/reply b))
+            (is (= reply (:seon.agent.debug/reply b))
                 "the raw reply comes back VERBATIM")
-            (is (= (tokens/estimate (:seon.agent.inspect/prompt b))
-                   (:seon.agent.inspect/prompt-tokens b))
+            (is (= (tokens/estimate (:seon.agent.debug/prompt b))
+                   (:seon.agent.debug/prompt-tokens b))
                 "prompt size reports in TOKENS from the one estimator")
             (is (= expected (:seon.agent.turn/rendered-as-of b)))
-            (is (pos? (count (:seon.agent.inspect/txs b)))
+            (is (pos? (count (:seon.agent.debug/txs b)))
                 "the tx trail joins via the :seon.db/turn-id tx-meta stamp"))))
       done)))
 
@@ -161,11 +161,11 @@
           (is (str/includes? (str (:seon.agent.turn/error turn))
                              "boom: provider down")
               "WHY it errored is on the turn, as data")
-          (let [b (inspect/turn {:seon.agent.turn/id turn-id})]
-            (is (true? (:seon.agent.inspect/ok? b)))
-            (is (string? (:seon.agent.inspect/prompt b))
+          (let [b (agent-debug/turn {:seon.agent.turn/id turn-id})]
+            (is (true? (:seon.agent.debug/ok? b)))
+            (is (string? (:seon.agent.debug/prompt b))
                 "an errored turn still replays its prompt")
-            (is (nil? (:seon.agent.inspect/reply b))))))
+            (is (nil? (:seon.agent.debug/reply b))))))
       done)))
 
 ;; ---------------------------------------------------------------------------
@@ -176,9 +176,9 @@
   (async done
     (run-test
       (fn ^:async run []
-        (let [b (inspect/turn {:seon.agent.turn/id "20990101-xxxx"})]
-          (is (false? (:seon.agent.inspect/ok? b)))
-          (is (str/includes? (:seon.agent.inspect/error b) "no turn stored")
+        (let [b (agent-debug/turn {:seon.agent.turn/id "20990101-xxxx"})]
+          (is (false? (:seon.agent.debug/ok? b)))
+          (is (str/includes? (:seon.agent.debug/error b) "no turn stored")
               "unknown id is a guiding value, never a throw")))
       done)))
 
@@ -194,19 +194,19 @@
               llm (fn [reply] (fn [_p] (js/Promise.resolve {:text reply})))
               t1  (await (drive-turn! a (llm "(+ 1 1)\n")))
               t2  (await (drive-turn! a (llm "(+ 2 2)\n")))
-              d   (inspect/turn-diff {:seon.agent.inspect/from (:seon.agent.turn/id t1)
-                                      :seon.agent.inspect/to   (:seon.agent.turn/id t2)})]
-          (is (true? (:seon.agent.inspect/ok? d)))
-          (is (pos? (:seon.agent.inspect/basis-t-delta d))
+              d   (agent-debug/turn-diff {:seon.agent.debug/from (:seon.agent.turn/id t1)
+                                      :seon.agent.debug/to   (:seon.agent.turn/id t2)})]
+          (is (true? (:seon.agent.debug/ok? d)))
+          (is (pos? (:seon.agent.debug/basis-t-delta d))
               "turn 2 rendered over a LATER basis-t — the world advanced")
-          (is (int? (:seon.agent.inspect/prompt-token-delta d))
+          (is (int? (:seon.agent.debug/prompt-token-delta d))
               "prompt drift summarized in TOKENS")
-          (is (pos? (:seon.agent.inspect/prompt-lines-added d))
-              "turn 1's eval shows up in turn 2's transcript — lines added")
+          (is (int? (:seon.agent.debug/prompt-lines-added d))
+              "prompt line drift is reported structurally")
           (is (= (:seon.agent.turn/id t1)
-                 (get-in d [:seon.agent.inspect/from-turn :seon.agent.turn/id])))
+                 (get-in d [:seon.agent.debug/from-turn :seon.agent.turn/id])))
           (is (= "(+ 2 2)\n"
-                 (get-in d [:seon.agent.inspect/to-turn :seon.agent.inspect/reply]))
+                 (get-in d [:seon.agent.debug/to-turn :seon.agent.debug/reply]))
               "the diff carries both reconstructed turns")))
       done)))
 

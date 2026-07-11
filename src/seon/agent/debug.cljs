@@ -1,4 +1,4 @@
-(ns seon.agent.inspect
+(ns seon.agent.debug
   "Agent self-introspection: 'what am I seeing right now?'
 
    Two functions:
@@ -11,10 +11,10 @@
        also routes through, over the SAME unfiltered `@*conn*`. The
        `:seon.render/text` is byte-identical to what the LLM receives
        (system message + context), with an explicit boundary between
-       them. Per-section texts (left pane) lead with the system block;
-       the per-section html twins (right pane) mirror the context
-       sections only (which now include the SOUL.md / AGENTS.md
-       file-sections). System block + context derive from the same
+       them. Per-block texts (left pane) lead with the system block;
+       the per-block html twins (right pane) mirror the context
+       blocks only (which now include the SOUL.md / AGENTS.md
+       file-blocks). System block + context derive from the same
        sources the real call uses, so divergence is impossible.
      - `handlers` — the live handler registry visible to the agent
        (core + per-agent).
@@ -49,30 +49,28 @@
 (schema/register! ::ok?   :boolean)
 (schema/register! ::error :string)
 
-(schema/register! :seon.agent.inspect/request
+(schema/register! :seon.agent.debug/request
   [:map [:seon.agent/id {:optional true} :seon.agent/id]])
 
-;; One rendered section of the assembled context — name + the exact
-;; text that section contributed to the joined prompt. Consumed by the
-;; debug view's left pane so static sections can collapse per-section
-;; instead of re-showing the full static bulk on every view.
-(schema/register! :seon.agent.inspect/section-text
+;; One resolved context block, carrying either or both rendered formats.
+(schema/register! :seon.agent.debug/rendered-context-block
   [:map
    [:seon.agent.ctx/name :seon.agent.ctx/name]
-   [:seon.render/text :string]])
+   [:seon.agent.ctx/priority :seon.agent.ctx/priority]
+   [:seon.render/text {:optional true} :string]
+   [:seon.render/hiccup {:optional true} :seon.render.live-tile/hiccup]
+   [:seon.render/token-estimate {:optional true} :int]])
 
 ;; `::ok?` required, render keys optional — the same envelope shape as
 ;; `::turn-response` below: `::ok? false` + a guiding `::error` when no
 ;; agent scope resolves (errors are values, never a throw).
-(schema/register! :seon.agent.inspect/ctx-response
+(schema/register! :seon.agent.debug/ctx-response
   [:map
    [::ok? ::ok?]
    [::error {:optional true} ::error]
    [:seon.render/text {:optional true} :string]
-   [:seon.render/section-texts {:optional true}
-    [:vector :seon.agent.inspect/section-text]]
-   [:seon.render/section-html {:optional true}
-    [:vector :seon.agent.ctx/block-html]]
+   [:seon.agent.ctx/rendered-blocks {:optional true}
+    [:vector :seon.agent.debug/rendered-context-block]]
    [:seon.render/token-estimate {:optional true} :int]])
 
 (defn- ctx-preview*
@@ -90,10 +88,7 @@
         ;; through `seon.agent.ctx/render-context`, so the LLM prompt and this
         ;; human web UI are byte-identical by construction.
         text          (ctx/render-context ctx)
-        ;; Per-section breakdown for the panes, derived from the SAME root +
-        ;; render (left pane folds per section; right pane one html card per
-        ;; renderable).
-        {:seon.render/keys [section-texts section-html]} (ctx/ctx-sections ctx)
+        blocks        (ctx/rendered-context-blocks ctx #{:ai :html})
         ;; Block 1 — the resolved system message, via the EXACT fn the
         ;; adapters call (no re-implementation, no drift). No override is
         ;; passed, so this returns the cluster's `:seon.config/system-text`
@@ -105,10 +100,12 @@
         full-text     (ai/debug-full-prompt {:seon.ai/ctx text})]
     {::ok?                        true
      :seon.render/text            full-text
-     :seon.render/section-texts   (into [{:seon.agent.ctx/name     :system
-                                          :seon.render/text  system}]
-                                        section-texts)
-     :seon.render/section-html    section-html
+     :seon.agent.ctx/rendered-blocks
+     (into [{:seon.agent.ctx/name :system
+             :seon.agent.ctx/priority 0
+             :seon.render/text system
+             :seon.render/token-estimate (tokens/estimate system)}]
+           blocks)
      ;; Estimate over the WHOLE prompt — same units as the composer
      ;; (~4 chars/token, via seon.ai.tokens), so the count grows by the
      ;; system-block length.
@@ -123,24 +120,23 @@
    seon mechanics, NOT the soul/any file; explicit-override logic), so
    the debug text is byte-identical to the real system message; the
    context comes from `seon.agent.ctx/context-root` → render (and now CARRIES
-   the SOUL.md / AGENTS.md file-sections). Divergence is impossible — both
+   the SOUL.md / AGENTS.md file-blocks). Divergence is impossible — both
    surfaces derive from the same sources the real call uses.
    `:seon.render/text` = system + boundary + context.
-   `:seon.render/section-texts` leads with a `:system` section (left pane
-   shows the system message too); `:seon.render/section-html` mirrors the
-   context section twins only (the system block is the system message,
-   not a context section). `:seon.render/token-estimate` counts the WHOLE
+   `:seon.agent.ctx/rendered-blocks` leads with the `:system` block, then the
+   exact ordered context blocks with whichever render formats they declare.
+   `:seon.render/token-estimate` counts the WHOLE
    prompt (system included). Renders against the live `@*conn*` — the SAME
    unfiltered db value the loop renders the prompt over — so the two are
    byte-identical (no per-agent `d/filter` divergence). Errors are
    values: no id and no agent scope returns `::ok? false` plus a
    guiding `::error` — nothing throws."
-  {:malli/schema [:=> [:cat :seon.agent.inspect/request] :seon.agent.inspect/ctx-response]}
+  {:malli/schema [:=> [:cat :seon.agent.debug/request] :seon.agent.debug/ctx-response]}
   [{:seon.agent/keys [id]}]
   (if-let [id (or id (db/current-agent-id))]
     (ctx-preview* id)
     {::ok?   false
-     ::error (str "seon.agent.inspect/ctx-preview: no agent-id — pass "
+     ::error (str "seon.agent.debug/ctx-preview: no agent-id — pass "
                   ":seon.agent/id or call inside (seon.db/with-agent id ...).")}))
 
 ;;; ============================================================
@@ -509,7 +505,7 @@
           t-as-of (assoc :seon.agent.turn/rendered-as-of t-as-of)))
       {::ok? false ::eid eid
        ::error (str "no persisted error under eid " eid
-                    " — list them: (seon.agent.inspect/errors)")})))
+                    " — list them: (seon.agent.debug/errors)")})))
 
 (schema/register! ::fn-sym     :symbol)
 (schema/register! ::repro-expr :string)
@@ -581,7 +577,7 @@
    (`::turn-eid` + `rendered-as-of`, composes with [[turn]]), and
    `::repro-expr` — a ready-to-eval expression string built from what's
    actually stored. `::fork-hint` is the supervisor command that boots
-   this world as a live writable cluster (`bin/seon cluster fork
+   this cluster as a live writable cluster (`bin/seon cluster fork
    <cluster> <at>`) — `at` is the basis-t the failing code SAW, so the
    fork holds everything up to the failure but not this error datom
    itself. `::ok? false` + guiding `::error` for an unknown
@@ -599,7 +595,7 @@
           {::ok? false ::eid eid
            ::error (str "error " eid " has no :seon.error/at (recorded before "
                         "a conn was live) — no db value to freeze; read the "
-                        "envelope via (seon.agent.inspect/error {::eid " eid "})")}
+                        "envelope via (seon.agent.debug/error {::eid " eid "})")}
           (cond-> {::ok? true ::eid eid
                    :seon.db/db (db/as-of db at)
                    :seon.error/at at
@@ -615,7 +611,7 @@
                                "path or clipped args) — re-invocation is not "
                                "possible from the datom; work from the frozen "
                                "db + the linked turn's eval forms "
-                               "(seon.agent.inspect/turn)")))))
+                               "(seon.agent.debug/turn)")))))
       {::ok? false ::eid eid
        ::error (str "no persisted error under eid " eid
-                    " — list them: (seon.agent.inspect/errors)")})))
+                    " — list them: (seon.agent.debug/errors)")})))

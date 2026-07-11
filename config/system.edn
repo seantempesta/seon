@@ -1,8 +1,8 @@
 ;; The consolidated pod context manifest — read by seon.config via aero
 ;; (`SEON_CONFIG` overrides the path; a per-cluster variant is a SEPARATE file,
-;; not a `#profile`). ABSENT → the pod boots byte-identically to a no-config
-;; world (full env-dir skill scan + the default context tree). PRESENT → the
-;; OPTIONAL override below. Every key fully namespaced. Add a new concern = add
+;; not a `#profile`). ABSENT → no context blocks are seeded. PRESENT → the
+;; declared context tree is reconciled into the database. Every key fully
+;; namespaced. Add a new concern = add
 ;; ONE key here + a resolver in seon.config (the "add more things to it"
 ;; contract).
 ;;
@@ -15,13 +15,9 @@
 ;; in force then) and live-tunable (a `db/transact!` to the singleton reaches
 ;; every agent with no restart). "Config edit → restart pod" applies a file
 ;; edit uniformly; a removed key heals on the next boot reconcile.
-{;; ── SKILL CORPUS ──
- ;; The env-dir scan (`SEON_SKILLS_DIR`, default `.claude/skills`) IS the corpus:
- ;; every skill it finds is scanned into the catalog. The always-on skill BODIES
- ;; are the agent-context's `:my.skills/load` presence-set (default `[:repl]`,
- ;; seeded as the `:skill/repl` block). No include/exclude curation — a cluster
- ;; that wants a different corpus points SEON_SKILLS_DIR at its own dir. This
- ;; section carries only the optional `:seon.config/dirs` corpus-dir override:
+{;; ── PULL-REFERENCE CORPUS ──
+ ;; Corpus files remain available for explicit lookup. They do not install
+ ;; default context blocks. This section carries only the optional directory:
  ;;   :seon.config/skills {:seon.config/dirs ["path/to/skills"]}
  ;; Owner rule (2026-07-02): values the manifest can own do NOT also live in
  ;; .env (env must never shadow config) — the corpus dir moved here from
@@ -91,7 +87,7 @@
  ;;            4-file catch-site sweep drains the backlog)
  ;;   :gate  — pod stays alive; bin/test-cljs + the dev hook fail any run that
  ;;            accumulated a new :core-fault (SEON-CORE-FAULT marker). SHIPPED.
- ;;   :log   — datom + the root-world derived section only (prod/demo).
+ ;;   :log   — datom + the root-agent derived block only (prod/demo).
  ;; :agent faults never escalate in ANY mode. The SUITE/CI runner stays :gate
  ;; via config/test.edn (bin/test-cljs default) — a mid-run :core fault must
  ;; not .exit the shared node-test runner. This DEV manifest flips to :crash
@@ -146,11 +142,8 @@
 
  ;; ── AGENT-CONTEXT (v3, config-driven-agent-init) — the two-level context
  ;; config the GENERIC loader (seon.config/resolve-agent-context) consumes. A
- ;; sparse map: every unspecified key (incl. the whole :seon.agent/ctx block
- ;; tree) is filled from its schema :default by the recursive
- ;; default-value-transformer, so `{}` reproduces the byte-parity default. Add a
- ;; key here only to DIFFER from the default (e.g. a lean block set, a per-agent
- ;; scalar). Empty = byte-identical to the no-config default tree.
+ ;; sparse map: the explicit :seon.agent/ctx vector is the complete tree seeded
+ ;; for an agent. There is no hidden code fallback and no implicit skill block.
  ;;
  ;; `:seon.eval/home-requires` — the DEFAULT toolbelt every agent's home ns is
  ;; wired with (OVERRIDES the `seon.eval/home-ns-require-specs` const). Since the
@@ -270,7 +263,7 @@
   ;; warnings idea already working reactively); first formally validated at
   ;; the warnings milestone.
   [;; ROOT-ONLY (owner ruling, error-blame-strict-gate 2026-07-04): the
-   ;; :core-fault section renders on the root world only — other agents see
+   ;; :core-fault block renders on the root agent only — other agents see
    ;; nothing (core bugs are not theirs to fix; the affected agent already
    ;; got its in-place :seon/error envelope). Derived; vanishes when the
    ;; last :core fault predates the latest user message.
@@ -280,7 +273,7 @@
    ;; specced fns whose live var lost its malli wrapper (structural async
    ;; opt-outs excluded). Recomputed from the db + live JS vars at render;
    ;; vanishes when coverage is re-asserted. A gap is system-wide, so it
-   ;; rides the root world only, like :core-faults.
+   ;; rides the root agent only, like :core-faults.
    {:seon.agent.ctx/name :instrumentation-gaps :seon.agent.ctx/priority 42
     :seon.render/ai seon.agent.ctx.warnings/instrumentation-gaps-block}
    ;; ROOT-ONLY (multiagent-context Piece 4): live agents whose parent is

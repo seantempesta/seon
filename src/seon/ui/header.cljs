@@ -25,7 +25,7 @@
                   to the new `/agent/{id}`) + small `/` and `⛁ data` links +
                   a subtle system-health dot.
 
-   On the morphed world pages the header rides inside `#world`, so every
+   On the morphed app views the header rides inside `#app-view`, so every
    commit re-renders it and the stats tick LIVE. On the server-rendered
    `/data` and `/debug` pages it is a request-time snapshot. The `+ new
    agent` button uses an inline `prompt()` for the optional purpose (no
@@ -191,7 +191,7 @@
    new `/agent/{id}` on the id body. Inline JS (not datastar `@post`) because
    the response is the new id we must READ + navigate to. Errors land in the
    button text — never swallowed. No persistent input → nothing for a live
-   `#world` morph to clobber."
+   `#app-view` morph to clobber."
   (str "var b=this;"
        "var p=window.prompt('purpose for the new agent (optional)','');"
        "if(p===null)return;"

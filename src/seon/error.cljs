@@ -165,7 +165,7 @@
    a level or two down the `:seon.error/cause` chain. Falls back to the
    top message. Bounded depth 6. Feeds the persisted error-datom message
    ([[record!]]'s projection, so the `SEON-CORE-FAULT` marker and
-   `seon.agent.inspect/errors` show the real cause) and
+   `seon.agent.debug/errors` show the real cause) and
    `seon.eval/render-error-string`."
   {:malli/schema [:=> [:cat :any] :string]}
   [err]
@@ -338,7 +338,7 @@
   (let [{:seon.error/keys [fault at stack frames args-edn data kind]} envelope
         ;; The DEEPEST real cause, not cljs.js's top wrapper ("ERROR") —
         ;; this string is what the SEON-CORE-FAULT marker prints and what
-        ;; seon.agent.inspect/errors lists.
+        ;; seon.agent.debug/errors lists.
         message (deepest-message envelope)
         ;; :seon.error.malli/errors carries live Schema objects + raw
         ;; values (research: malli-instrument-error-data-2026-07-04 §3) —

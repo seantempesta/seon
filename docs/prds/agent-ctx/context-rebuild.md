@@ -48,7 +48,7 @@ coordinated remainders listed under item 1; item 4 still open.**
    AGENT-FACING string (`ctx.cljs` block teaching, `client.cljs` seeds,
    docstrings, config comments). "Mode A/B" → `:batch`/`:stream` swept from
    src + config (zero remaining). D2/D3 applied: agent-facing "the
-   store"-meaning-db → "the db"; "ROOT world"/"fresh world" → "root
+   store"-meaning-db → "the db"; "ROOT view"/"fresh view" → "root
    cluster"/"a fresh cluster". D4 landed file-local in `eval.cljs`:
    `dispatch-repl-form!` / `repl-form-heads` / `repl-form-of` /
    `record-form-result!`. **Coordinated remainders (typeahead lane, do not

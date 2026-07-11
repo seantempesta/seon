@@ -664,7 +664,7 @@
 ;; the shipped default is `seon.agent.ctx/system-text` (byte-identical to
 ;; the pre-datom world). SOUL.md / AGENTS.md are FILE-LOADED CONTEXT
 ;; sections (`seon.agent.ctx/file-block`), wired into
-;; `seon.config/default-ctx-blocks` — they ride the user-message context,
+;; the manifest-declared context blocks — they ride the user-message context,
 ;; not here. There is NO per-call file read in this path: the datom read is
 ;; `seon.config/config-view` (the db singleton post-conn; the boot manifest
 ;; resolve is only the pre-conn sliver).
@@ -714,7 +714,7 @@
    The resolved system block
    ([[effective-system-prompt]]), a boundary, then the assembled context
    (block 2). THE single source both the debug view preview
-   (`seon.agent.inspect/ctx-preview`) and the persisted per-turn log use,
+   (`seon.agent.debug/ctx-preview`) and the persisted per-turn log use,
    so the two debug surfaces are byte-identical to each other and to what
    the adapters wire. This is a DEBUG representation only — it is NEVER
    sent to the LLM (the adapters add the system block themselves; sending

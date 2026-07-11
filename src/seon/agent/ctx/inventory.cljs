@@ -5,7 +5,7 @@
    comment-block. Entities have no kind: this groups the live attributes
    by their namespace so the agent knows which attr's index to scan
    (attribute-presence) to FIND data. Symbol-wired into the composer
-   layout (`seon.config/default-ctx-blocks`) as
+   layout (`config manifest`) as
    `'seon.agent.ctx.inventory/inventory-block`; loaded at boot so the
    symbol resolves for `seon.eval/lookup-value`."
   (:require

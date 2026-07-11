@@ -48,9 +48,9 @@
    The LLM ctx is ONE recursive render of the ROOT renderable
    (`seon.agent.ctx/context-root`): `seon.agent.turn/render-prompt` calls
    `(seon.render/render :seon.render/ai ctx (seon.agent.ctx/context-root ctx))`,
-   shared byte-for-byte with the debug view (`seon.agent.inspect/ctx-preview`).
-   The default block set (`seon.config/default-ctx-blocks`) is SEED-COPIED
-   into a new agent's own `:seon.agent/ctx` at creation; render reads that one
+   shared byte-for-byte with the debug view (`seon.agent.debug/ctx-preview`).
+   The manifest-declared block set is copied into a new agent's own
+   `:seon.agent/ctx` at creation; render reads that one
    complete collection priority-sorted — no merge, no separate default set.
    Each block's `:seon.render/ai` slot is a verbatim string or a fn symbol
    resolved late via `seon.eval/lookup-value`.

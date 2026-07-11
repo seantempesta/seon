@@ -6,6 +6,21 @@ tags: [prd, agent]
 
 # agent-ctx roadmap — we are here → the target
 
+## Agent-view and context-render consolidation (2026-07-11)
+
+In flight: replace the old page/debug adapters with one DB-derived rendered
+context-block projection. The prompt requests AI format, the agent view requests
+HTML format, and the separate debug view requests both plus token metadata. The
+main agent view is a large selectable canvas/content panel with a compact HTML
+context-block rail. AI-only blocks are omitted. Browser selection is transient
+Datastar state; database transactions remain the only refresh signal.
+
+The hidden code default and implicit `:skill/repl` expansion are removed. The
+manifest is the sole new-agent block template; each created agent owns its copied
+`:seon.agent/ctx` component entities afterward. Existing agents are not silently
+overwritten on boot. Legacy UI vocabulary is retiring in favor of agent view,
+roster view, and debug view.
+
 The single **we-are-here** for this chunk. The target (idealized system) is
 `docs/seon/architecture/` — present tense; THIS doc holds what's built, the
 gap, and the ordered path, for BOTH lanes. Shared state + issues: [[CLAUDE]].
@@ -284,7 +299,7 @@ substrate):
    digest-invisible → stale `:seon.fn/source` → SCI rendered the old
    body forever; also re-instruments the fresh var). Uncoached DeepSeek
    drive: the agent authored `subs-tile` (output
-   `:seon.render/html-response`) turn 3; `inspect/turn` shows the derived
+   `:seon.render/html-response`) turn 3; `agent-debug/turn` shows the derived
    block in its turn-4 verbatim prompt; nudged on the error it
    diagnosed + redefined the fn from the ⚠ explain.
    Tests: `test/seon/agent/ctx/render_fns_test.cljs`.
@@ -294,10 +309,10 @@ substrate):
    PRE-turn basis-t of the frozen db) + `prompt-blob`/`reply-blob` refs
    (`my.blob`, content-addressed) + `:seon.agent.turn/error` on failure —
    capture is errors-as-values, never wedges a turn.
-   `seon.agent.inspect/turn` reconstructs {basis-t, verbatim prompt/reply,
+   `seon.agent.debug/turn` reconstructs {basis-t, verbatim prompt/reply,
    tokens, tx trail}; `turn-diff` gives basis-t delta + prompt drift
    (tokens + line multiset). Eval-lane consumption: per-row
-   rendered-context evidence = `(seon.agent.inspect/turn
+   rendered-context evidence = `(seon.agent.debug/turn
    {:seon.agent.turn/id id})` over the sample's turns. Tests:
    `test/seon/agent/turn_capture_test.cljs` (4 tests / 26 assertions).
    Follow-up queued: the gym driver still reads the gated `seon.debug`
@@ -343,13 +358,13 @@ substrate):
    Live-proven on the default pod (agent `cvp-2607030320`): authored
    plan-tile then clock-tile → canvas = clock-tile (last authored); ONE
    `my.plan` write → canvas = plan-tile rendering the live item, observed
-   in the gunzipped `/agent/{id}` feed `#world-canvas`; pin → pin wins
+   in the gunzipped `/agent/{id}` feed `#view-canvas`; pin → pin wins
    regardless of recency; retract pin → derived again; ctx section header
    reads "(derived — your last-updated tile; … pin …)" with the fn source
    inline. Tests: `render_fns_test.cljs` (last-updated-tile ×4) +
    `live_tile_test.cljs` (pin>derived>welcome). Docs: context.md + ui.md
    canvas paragraphs, ui-live-tiles skill.
-6. **Queued tool defects** — fresh-world `my.kb` empty render (✅ resolved,
+6. **Queued tool defects** — fresh-view `my.kb` empty render (✅ resolved,
    see agent-ctx CLAUDE.md); turn-6 recall visibility; ~~SCI-bounding
    fallback on `my.plan.internal/plan-block`~~ (✅ fixed 2026-07-02, issue
    note completed; re-verified on the default cluster 2026-07-03 — zero
@@ -434,12 +449,12 @@ substrate):
    record! on the fresh pod → no crash. Registry **C41**+**C42** CLOSED.
 
    **Unit A (error-workflow arc): triage verbs + watch + deepest message** —
-   ✅ COMPLETE (2026-07-05, `05fc844c`+`ac13d909`). Three `seon.agent.inspect`
+   ✅ COMPLETE (2026-07-05, `05fc844c`+`ac13d909`). Three `seon.agent.debug`
    altitudes over the persisted error datoms: `errors` (compact newest-first
    list — eid/fault/`at`/deepest-cause message/top frame/agent; fault filter +
    limit), `error` (full envelope + JOINS: recording agent via tx-meta, the
    turn active at that basis-t — tx turn-id when turn-scoped, else the
-   `rendered-as-of` window; composes with `inspect/turn`), `repro` (the
+   `rendered-as-of` window; composes with `agent-debug/turn`), `repro` (the
    work-backwards bundle: the LIVE as-of db value frozen at `:seon.error/at`,
    fn-sym + args-edn from the malli envelope, a ready-to-eval repro
    expression; honest `::note` when args were not captured).
@@ -466,7 +481,7 @@ substrate):
    render), and the whole loop closed on the shipped tools alone: crash +
    datom persist → `watch-faults` fired → `errors`/`error`/`repro` (frames
    at the planted line, turn join, byte-exact 17,445-token prompt via
-   `inspect/turn`) → fork-hint run VERBATIM → reproduction in the fork
+   `agent-debug/turn`) → fork-hint run VERBATIM → reproduction in the fork
    (identical marker; error datom absent inside its own fork, as designed)
    → fix verified in the fork FIRST → fork destroyed, re-drive green,
    faults section blank by window-move, watch silent, suite green. All 11
@@ -497,7 +512,7 @@ substrate):
    (`:off|:safe-syntax|:symbols|:aggressive` — aggressive is an enum slot
    only; per-class kill switches; budget-ms 50; max-fixes 1) with the
    computed enablement rule `seon.repair/class-enabled?` over the
-   `class-levels` registry. Live-proven on acme (fresh world, uncoached
+   `class-levels` registry. Live-proven on acme (fresh view, uncoached
    DeepSeek turns): `(filter even [1 2 3 4])` → fixed, `(2 4)`, note
    rendered in the actual transcript (the agent itself quoted it);
    `(my.plan/nxt {})` → `(my.plan/next {})` (the graph-verb win);
@@ -563,7 +578,7 @@ Stability queue (interleaved, one per feature unit above; owner-agreed
    REMOVED. Absorbs `docs/seon/orchestrator/issues/archive/sci-bounding-fallback-plan-block.md`
    and part of the `*conn*` root.
 4. ~~**`*conn*` single-dynamic-root / fiber-local**~~ — DISSOLVED by the
-   one-pod-per-cluster ruling (coordination.md MAJORs): one pod = one world =
+   one-pod-per-cluster ruling (coordination.md MAJORs): one pod = one view =
    one root is correct by construction; the root-swap machinery is DELETED in
    the eval lane's cluster build, not fixed. Turn-6 recall re-verifies after
    that build.
@@ -605,7 +620,7 @@ repo-dev docs.
    (conn-swap collisions observed live at c=2: cas write-errors + 300s burns —
    parallelism = more pods, never more samples per pod); gsm8k median 40.7s /
    p90 ~70s → `QA_SOLVE_TIMEOUT_S=240` (opt-in), general default 300s, wired into
-   `src-inspect-ai/src/seon_inspect/config.py` (call-time, per-run
+   `src-inspect-ai/src/seon_agent-debug/config.py` (call-time, per-run
    overridable). Agentic rows re-calibrate when their generators land (step 3/4).
 2. ~~**Dataset freeze**~~ — ✅ DONE 2026-07-02: `seon_inspect.freeze` +
    `evals/datasets.lock` (global seed 20260702; gsm8k/arc_challenge 15/15,
@@ -616,7 +631,7 @@ repo-dev docs.
    `formal_eval=True`, canary GUID → test-sample METADATA); canary CI grep =
    `tests/test_canary_guard.py` (fail proven on a planted canary in docs/).
 3. ~~**Tool-row generators**~~ — ✅ DONE 2026-07-02: seeded generators
-   (`src-inspect-ai/src/seon_inspect/generators.py` — 8 templates per row,
+   (`src-inspect-ai/src/seon_agent-debug/generators.py` — 8 templates per row,
    rows derive from seed + procedure, byte-identical per seed) + outcome
    oracles (`tool_scorers.py`: workspace re-read for shell/file-edit with bb
    parse + node behavioral eval on code targets; LOCAL-fixture ground truth
@@ -640,7 +655,7 @@ repo-dev docs.
    message-minted steps excluded; open parent roots tolerated — my.plan derives
    parent done-ness). Choreography (`run_planning_sample`) is
    injected-callable + unit-tested; the LIVE driver is a loud stub — the dev
-   pass needs (a) a durable-world `/solve` variant that reuses an `agent_id`
+   pass needs (a) a durable-view `/solve` variant that reuses an `agent_id`
    across the restart on the ISOLATED planning cluster and (b) the plan
    read-back (`SNAPSHOT_QUERY_NOTE`). Lock upgraded `pending-generator` →
    `generated` (canary carried; regenerate-with-lock no-op ×2); artifact
@@ -661,7 +676,7 @@ repo-dev docs.
    `rm -rf data/clusters/<name>/` incl. `blobs/`) · `/solve` scratch machinery
    DELETED, replaced by `POST /agents/run` (start-or-reuse `agent_id`, real
    wake path, window-scoped truthful metadata, one conn) · turn capture
-   verified per-cluster (`inspect/turn` ok inside an ephemeral cluster) ·
+   verified per-cluster (`agent-debug/turn` ok inside an ephemeral cluster) ·
    boot latency create→ready: 23.5s cold / 9.3s / 9.3s warm (no pool needed
    yet). Live proof: probe1 created → DeepSeek task "391" :completed →
    agent-id reuse drive → destroyed, registry `[:default]`, dir gone, default
@@ -903,6 +918,6 @@ Spec: [[eval-design]] · plan: [[eval-lane-plan]] · readiness:
 
 ## Still open (from agent-fsm, may land here)
 
-Root-world-at-`/`, the spawn capability gate + roles,
+Root-view-at-`/`, the spawn capability gate + roles,
 `:seon.agent/purpose` → `:my.agent/purpose`. (The observability
 turn-capture build landed — item 3 above.)

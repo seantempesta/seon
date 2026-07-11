@@ -68,7 +68,7 @@ always renders:
   finding and never renders as one.
 - **what changed since I last looked** — the **delta**, derived from the
   previous turn's `:seon.agent.turn/rendered-as-of` basis-t: the datoms
-  transacted since I last saw the world (new messages, newly-completed
+  transacted since I last saw the view (new messages, newly-completed
   children, newly-failed items). A series of independent snapshots becomes a
   felt continuity precisely because each turn can name what is new — the
   basis-t is already recorded per turn ([[observability]]); the delta is a
@@ -266,14 +266,14 @@ contract:
   (e.g. a string `:seon.render/at`) rejects at the instrumented boundary
   naming the schema. Open on purpose: the engine composes extra per-call
   keys (`:seon.render/node`, `:seon.agent/entity`, …); a semantically
-  richer request (e.g. `:seon.agent.inspect/request`) stays its own schema.
+  richer request (e.g. `:seon.agent.debug/request`) stays its own schema.
 
 This rides the **one instrumentation layer** (every schema'd fn whose shape
 takes a wrapper is Malli-instrumented off the program graph — at boot, on
 `start-agent!`, and re-asserted after every hot reload; the structural
 exception is `^:async` non-simple shapes like `transact!`/`eval`, which
 validate in their own body — and coverage is itself a derived invariant:
-the root world's `:instrumentation-gaps` section recomputes the census per
+the root view's `:instrumentation-gaps` section recomputes the census per
 render) — inject-then-validate-input, so the filled map satisfies
 the `:map`. The result: a fn's spec IS the honest statement of what it needs,
 the eval log shows real data flowing, and the value is reproducible at
@@ -361,7 +361,7 @@ empty — the reactive rule):
 The `:html` twin means every context position has a view the human can
 inspect: the per-block prompt-text + hiccup panes with per-block token counts
 (`/agent/{id}/debug`), the agent's page showing the same tiles, and — through
-[[observability]] — the exact historical context of any turn (`inspect/turn`,
+[[observability]] — the exact historical context of any turn (`agent-debug/turn`,
 `turn-diff`, the prompt at `as-of t`, the prompt blob as byte ground truth).
 The human debugging an agent and the forensic agent debugging it read the
 same derived views.

@@ -1,8 +1,8 @@
 (ns seon.render.system
-  "Root's SYSTEM VIEW — the `/` dashboard that IS root's world canvas.
+  "Root's SYSTEM VIEW — the `/` dashboard that IS root's agent-view canvas.
 
-   `root = /` (root-os-vision): the all-agents overview IS the root agent's
-   world. Generic agents fall through their live tile to `welcome` (their
+   The all-agents overview is the root agent's view. Generic agents fall
+   through their live tile to `welcome` (their
    latest-reply card); root's `:seon.render.live-tile/content` is seeded to
    [[system-view]] here, so the SAME `render-agent-tile` seam every agent
    uses renders the fleet/system view for root. ONE mechanism, one seam — no

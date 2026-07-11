@@ -1,7 +1,7 @@
 (ns seon.agent.ctx.live-tile
   "The `:live-tile` context section — \"what your human currently sees\",
    rendered as a `;; ── live tile ──` comment-block. Symbol-wired into the
-   composer layout (`seon.config/default-ctx-blocks`) as
+   composer layout (`config manifest`) as
    `'seon.agent.ctx.live-tile/live-tile-block`; loaded at boot so the symbol
    resolves for `seon.eval/lookup-value`.
 

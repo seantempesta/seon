@@ -98,7 +98,7 @@
    append a row and it appears next turn; retract it and the line is gone
    — nothing stored that needs clearing. Empty string when none exist, so
    the whole section vanishes until the first instruction lands.
-   Symbol-wired into the composer (`seon.config/default-ctx-blocks`) as
+   Symbol-wired into the composer (`config manifest`) as
    `'my.kb.shared/instructions-block`."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db]}]

@@ -8,7 +8,7 @@
        (no owning agent or no `:seon.fn` row) — never invoked.
 
    (c) A /call that invokes a granted fn which transacts → the datom is
-       written (the reactive push is the inspector feed's job). Proven
+       written (the reactive push is the debug view feed's job). Proven
        in-process (ensure-bootstrap! + open-agent-conn! + transact :seon.ns
        / :seon.fn rows + replay-program-graph! + invoke!), the same harness
        the SCI tile tests use — no live pod."

@@ -4,8 +4,7 @@
 #merge
 [#include "minimal.edn"
  {:seon.config/agent-context
-  {:my.skills/load []
-   :seon.agent/ctx
+  {:seon.agent/ctx
    [{:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
      :seon.render/ai seon.agent.ctx.transcript/transcript-block
      :seon.render/html seon.agent.ctx.transcript/transcript-block-html

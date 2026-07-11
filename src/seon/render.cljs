@@ -523,6 +523,7 @@
 (schema/register! :seon.render/message-block [:map [:seon.render/markdown :seon.render/markdown]])
 (schema/register! :seon.render/source-block  [:map [:seon.render/source   :seon.render/source]])
 (schema/register! :seon.render/view [:enum :html :ai])
+(schema/register! :seon.render/formats [:set :seon.render/view])
 
 (defn- message-block? [x]
   (and (map? x) (contains? x :seon.render/markdown)))
@@ -1226,4 +1227,3 @@
                        :seon.error/where   block-name}))))]
     [:div {:id (str "tile-" (name block-name)) :data-slot (name block-name)}
      body]))
-

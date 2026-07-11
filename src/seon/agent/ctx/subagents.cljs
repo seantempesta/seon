@@ -8,7 +8,7 @@
        each with derived state + progress-or-result-or-death. A parent's
        monitoring surface: completion is a FACT in the DB (`:seon.agent.run/
        result`), so a parent that was mid-turn or restarted still sees every
-       child result. Wired into `seon.config/default-ctx-blocks` (childless
+       child result. Wired into `config manifest` (childless
        agents render empty → it costs them zero; root gets it too).
 
      - `orphaned-agents-block` — the ROOT-ONLY section: live agents whose

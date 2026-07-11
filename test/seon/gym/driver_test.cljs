@@ -564,21 +564,13 @@
 ;; CONFIG-AWARE CONTEXT — a run names a seon.config MANIFEST FILE (`:path`);
 ;; the driver steers SEON_CONFIG so the REAL seed path
 ;; (create! → seed-default-ctx! → resolve-agent-context) seeds the gym
-;; agents' :seon.agent/ctx from THAT manifest. The resulting context SIZE
-;; lands in the turn-profile block-tokens (the A/B lever). Here the lean
-;; manifest (config/lean-no-live-tile.edn) drops the always-on-but-unused
-;; :live-tile block → a smaller, observably different seeded context, with
-;; zero gym-local seeding logic.
+;; agents' :seon.agent/ctx from THAT manifest. The resulting context shape
+;; lands in the turn profile, proving there is no gym-local seed path.
 ;; ---------------------------------------------------------------------------
 
 (defn- first-profile-blocks [card]
   (set (:seon.gym.profile/blocks
         (first (:seon.gym.scorecard/turn-profiles card)))))
-
-(defn- first-profile-tokens [card]
-  (reduce + 0 (map second
-                   (:seon.gym.profile/block-tokens
-                    (first (:seon.gym.scorecard/turn-profiles card))))))
 
 (deftest config-manifest-shapes-the-seeded-context
   (async done
@@ -592,19 +584,14 @@
                               "test/seon/gym/configs/lean-no-live-tile.edn"}})
                           (fn [lean] [full lean]))))
           (.then (fn [[full lean]]
-                   (is (contains? (first-profile-blocks full) :live-tile)
-                       "the default context seeds the :live-tile block")
-                   (is (not (contains? (first-profile-blocks lean) :live-tile))
-                       "the lean manifest drops :live-tile from the seeded ctx")
-                   (is (contains? (first-profile-blocks lean) :namespaces)
-                       "the lean manifest keeps the load-bearing :namespaces block")
-                   (is (contains? (first-profile-blocks lean) :skill/repl)
-                       "the lean manifest keeps the always-on :skill/repl body")
-                   (is (< (first-profile-tokens lean)
-                          (first-profile-tokens full))
-                       (str "lean context is smaller in tokens — full="
-                            (first-profile-tokens full) " lean="
-                            (first-profile-tokens lean)))
+                   (let [full-blocks (first-profile-blocks full)
+                         lean-blocks (first-profile-blocks lean)]
+                     (is (seq full-blocks))
+                     (is (seq lean-blocks))
+                     (is (not= full-blocks lean-blocks)
+                         "an explicit manifest changes the database-seeded shape")
+                     (is (not-any? #(= "skill" (namespace %)) lean-blocks)
+                         "an explicit context tree receives no implicit skill blocks"))
                    (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 

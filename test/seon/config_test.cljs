@@ -19,14 +19,16 @@
 
 (def ^:private routes
   [{:seon.route/name :seon.route/root  :seon.route/pattern "/"}
-   {:seon.route/name :seon.route/world :seon.route/pattern "/world"}])
+   {:seon.route/name :seon.route/legacy-page :seon.route/pattern "/legacy"}])
 
 (deftest manifest-schema-validity
   (testing "a representative manifest validates against :seon.config/manifest"
     (is (m/validate :seon.config/manifest
                     {:seon.config/skills        {:seon.config/dirs ["seon-skills"]}
                      :seon.config/routes        [{:seon.config/removes [:seon.route/agent-call]}]
-                     :seon.config/agent-context {:my.skills/load [:repl]}})))
+                     :seon.config/agent-context
+                     {:seon.agent/ctx [{:seon.agent.ctx/name :transcript
+                                        :seon.agent.ctx/priority 100}]}})))
   (testing "the empty manifest (config absent) is valid — every key optional"
     (is (m/validate :seon.config/manifest {})))
   (testing "the render-bounds section validates"
@@ -38,8 +40,7 @@
                     {:seon.config/system-text "; ── system ──\n; the minimal prompt"
                      :seon.config/repl-mode   :batch
                      :seon.config/agent-context
-                     {:my.skills/load []
-                      :seon.agent/ctx [{:seon.agent.ctx/name :transcript
+                     {:seon.agent/ctx [{:seon.agent.ctx/name :transcript
                                         :seon.agent.ctx/priority 100}]}
                      :seon.config/root-context {}}))))
 
@@ -71,34 +72,14 @@
         (is (= :structured (config/render-content-layout)))
         (is (false?        (config/render-line-numbers?)))))))
 
-;;; :my.skills/load — the always-on skill-body presence-set expands into
-;;; :skill/<name> blocks on :seon.agent/ctx (live-proof the dial is consumed:
-;;; a non-default value observably changes the seeded block set).
-
 (defn- ctx-block-names [id override]
   (into #{} (map :seon.agent.ctx/name)
         (:seon.agent/ctx (config/resolve-agent-context id override))))
 
-(deftest skills-load-expands-to-skill-blocks
+(deftest absent-config-has-no-hidden-context-default
   (with-redefs [config/load-manifest (fn [] {})]
-    (testing "default :my.skills/load [:repl] seeds exactly the :skill/repl body"
-      (let [names (ctx-block-names "worker-x" nil)]
-        (is (contains? names :skill/repl))
-        (is (not (contains? names :skill/datahike)))))
-    (testing "a NON-default :my.skills/load seeds a body block per member"
-      (let [names (ctx-block-names "worker-x" {:my.skills/load [:repl :datahike]})]
-        (is (contains? names :skill/repl))
-        (is (contains? names :skill/datahike))))
-    (testing "an explicit empty :my.skills/load seeds NO skill body"
-      (let [names (ctx-block-names "worker-x" {:my.skills/load []})]
-        (is (not (some #(= "skill" (namespace %)) names))
-            "no :skill/<name> block when load is empty")))
-    (testing "the expanded body block carries the shipped render symbol + priority 16"
-      (let [ctx (config/resolve-agent-context "worker-x" {:my.skills/load [:datahike]})
-            blk (first (filter #(= :skill/datahike (:seon.agent.ctx/name %))
-                               (:seon.agent/ctx ctx)))]
-        (is (= 'my.skills/skill-block (:seon.render/ai blk)))
-        (is (= 16 (:seon.agent.ctx/priority blk)))))))
+    (is (empty? (ctx-block-names "worker-x" nil)))
+    (is (empty? (ctx-block-names "root" nil)))))
 
 ;;; Explicit `:seon.agent/ctx` = the COMPLETE tree (agent-ctx Phase 3) — the
 ;;; documented replaces-wholesale contract extends to the identity file-blocks:
@@ -112,23 +93,17 @@
     (testing "manifest agent-context with explicit ctx → exactly that tree, no identity blocks"
       (with-redefs [config/load-manifest
                     (fn [] {:seon.config/agent-context
-                            {:my.skills/load []
-                             :seon.agent/ctx transcript-only}})]
+                            {:seon.agent/ctx transcript-only}})]
         (is (= #{:transcript} (ctx-block-names "worker-x" nil)))
         (is (= #{:transcript} (ctx-block-names "root" nil))
             "root with an absent root-context gets the same explicit tree")))
     (testing "a per-mint override with explicit ctx → exactly that tree"
       (with-redefs [config/load-manifest (fn [] {})]
         (is (= #{:transcript} (ctx-block-names "worker-x"
-                                               {:my.skills/load []
-                                                :seon.agent/ctx transcript-only})))))
-    (testing "no explicit ctx → the identity file-blocks still ride the default tree"
+                                               {:seon.agent/ctx transcript-only})))))
+    (testing "no explicit ctx → no hidden code or file-backed block tree"
       (with-redefs [config/load-manifest (fn [] {})]
-        (let [names (ctx-block-names "worker-x" nil)]
-          (is (contains? names :namespaces) "the default tree is intact")
-          (when (.existsSync (js/require "fs") "AGENTS.md")
-            (is (contains? names :agents)
-                "AGENTS.md present ⇒ the :agents block is prepended (unchanged default)")))))))
+        (is (empty? (ctx-block-names "worker-x" nil)))))))
 
 ;;; Persisted agent-level dials — `:seon.client/wake?` / `:seon.eval/home-requires`
 ;;; carry NO schema default (the CONSUMER owns the default), so a no-config agent
@@ -158,7 +133,12 @@
 (deftest block-override-merges-preserving-sub-keys
   (testing "root-context overriding ONE :live-tile sub-key keeps the default block's other attrs"
     (with-redefs [config/load-manifest
-                  (fn [] {:seon.config/root-context
+                  (fn [] {:seon.config/agent-context
+                          {:seon.agent/ctx
+                           [{:seon.agent.ctx/name :live-tile
+                             :seon.agent.ctx/priority 35
+                             :seon.render/ai 'probe/live-tile}]}
+                          :seon.config/root-context
                           {:seon.agent/ctx
                            [{:seon.agent.ctx/name :live-tile
                              :seon.render.live-tile/content [:div "ACME-CUSTOM"]}]}})]
@@ -172,7 +152,12 @@
             "the default block's render fn survives a sparse override"))))
   (testing "a root-context block whose name is NOT in the base is appended as new"
     (with-redefs [config/load-manifest
-                  (fn [] {:seon.config/root-context
+                  (fn [] {:seon.config/agent-context
+                          {:seon.agent/ctx
+                           [{:seon.agent.ctx/name :live-tile
+                             :seon.agent.ctx/priority 35
+                             :seon.render/ai 'probe/live-tile}]}
+                          :seon.config/root-context
                           {:seon.agent/ctx
                            [{:seon.agent.ctx/name :acme-extra
                              :seon.agent.ctx/priority 99
@@ -242,11 +227,6 @@
         (is (not (contains? ac :seon.eval/home-requires))
             "wholesale replace drops the base's other keys (consumer-default fallback)")))))
 
-;;; Soul/agents identity file-blocks — migrated from the retired
-;;; `seon.agent.ctx/default-seed-blocks` into the config path
-;;; (`identity-file-blocks`). Present only when the file EXISTS and SEON_SOUL is
-;;; not off — so a soul-off (or file-absent) cluster gets none = byte-parity.
-
 (defn- with-env
   "Set process.env[k]=v, run f, restore — so the env-reading accessors/config
    get a known value without touching the ambient pod env."
@@ -255,24 +235,9 @@
     (try (if (nil? v) (js-delete env k) (aset env k v)) (f)
          (finally (if (nil? old) (js-delete env k) (aset env k old))))))
 
-(deftest soul-block-gated-by-env-and-file-presence
-  (with-redefs [config/load-manifest (fn [] {})]
-    (testing "SEON_SOUL=false → NO :soul block (byte-parity with the soul-off default cluster)"
-      (with-env "SEON_SOUL" "false"
-        #(let [names (ctx-block-names "x" nil)]
-           (is (not (contains? names :soul))))))
-    (testing "SEON_SOUL on + SOUL.md present → the :soul block at priority 5, file-block render"
-      ;; SOUL.md exists in the repo; the default cluster just runs SEON_SOUL=false.
-      (with-env "SEON_SOUL" "true"
-        #(let [blocks (:seon.agent/ctx (config/resolve-agent-context "x" nil))
-               soul   (first (filter (fn [b] (= :soul (:seon.agent.ctx/name b))) blocks))]
-           (is (some? soul) "soul block present when SEON_SOUL on + SOUL.md exists")
-           (is (= 5 (:seon.agent.ctx/priority soul)))
-           (is (= 'seon.agent.ctx/file-block-ai (:seon.render/ai soul))))))))
-
 (deftest route-removes
   (testing "a route spec drops the named seeded routes"
-    (let [m {:seon.config/routes [{:seon.config/removes [:seon.route/world]}]}]
+    (let [m {:seon.config/routes [{:seon.config/removes [:seon.route/legacy-page]}]}]
       (is (= [:seon.route/root]
              (mapv :seon.route/name (config/resolve-routes routes m)))))))
 

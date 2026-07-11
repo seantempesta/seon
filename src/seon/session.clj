@@ -111,7 +111,7 @@
 
    ```clojure
    (with-agent \"a1b2c3d4e5f6a7\"
-     (d/transact *conn* [{:db/ident :hello/world}]))
+     (d/transact *conn* [{:db/ident :hello/session}]))
    ```"
   [agent-id & body]
   `(let [agent-id# ~agent-id

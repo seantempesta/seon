@@ -171,7 +171,7 @@
 
    Returns \"\" when SEON_BRAND_CSS is unset/unreadable. The
    raw-string sibling of the web UI's hiccup `brand-css-style` — both
-   delegate to [[css-text]] — for surfaces (the datastar world shim) that
+   delegate to [[css-text]] — for surfaces (the datastar agent-view shim) that
    build their <head> as a string rather than hiccup. Inlined AFTER
    output.css so its token overrides (--color-base-*, --color-amber-*,
    fonts) win the cascade."

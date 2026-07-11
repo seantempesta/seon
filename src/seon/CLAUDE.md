@@ -77,6 +77,6 @@ imperative reflexes, guessed library semantics). Ground first:
   (`my.ui/…`, `my.data/…`, `my.tile/…`, `my.kb/…`), the `agent/` alias, and
   the lifecycle refers (`wait`/`complete`/…) — full-qualify those.
 - Turn capture is live (`:seon.agent.turn/rendered-as-of` + prompt/reply
-  blob refs, `seon.agent.inspect/turn`/`turn-diff`) and is the ONE capture
+  blob refs, `seon.agent.debug/turn`/`turn-diff`) and is the ONE capture
   path — the gated `seon.debug` file tree is deleted; the gym driver reads
   prompts by blob hash (see `observability.md`).

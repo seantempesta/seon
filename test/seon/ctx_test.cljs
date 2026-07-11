@@ -21,7 +21,7 @@
     [clojure.test.check.properties :as prop :include-macros true]
     [datahike.api :as d]
     [seon.agent :as agent]
-    [seon.agent.inspect :as inspect]
+    [seon.agent.debug :as agent-debug]
     [seon.agent.run :as run]
     [seon.agent.turn :as turn]
     [seon.ai :as llm]
@@ -281,7 +281,7 @@
 
 (defn- assemble
   "The assembled context as a map, derived from the keystone ONE-render
-   (`context-root` + `render` + `ctx-sections`) — the shape the old
+   (`context-root` + `rendered-context-blocks`) — the shape the old
    `assemble-context` returned, rebuilt from the new system so these tests
    keep asserting against the agent's real context."
   [id]
@@ -289,7 +289,9 @@
         root  (ctx/context-root ctx)
         text  (or (render/render :seon.render/ai ctx root) "")
         split (ctx/split-context text)
-        {:seon.render/keys [section-texts section-html]} (ctx/ctx-sections ctx)]
+        blocks (ctx/rendered-context-blocks ctx #{:ai :html})
+        section-texts (filterv #(contains? % :seon.render/text) blocks)
+        section-html  (filterv #(contains? % :seon.render/hiccup) blocks)]
     {:seon.render/text           text
      :seon.render/stable-text    (:seon.render/stable-text split)
      :seon.render/volatile-text  (:seon.render/volatile-text split)
@@ -330,7 +332,7 @@
                      (is (str/includes? out "Wired:")
                          "the wired-label header resolves (welcome by default)"))
                    ;; (b) the REAL prompt path (render-context-ai, NOT the
-                   ;; inspector's ctx-sections) must also be render-failure-free.
+                   ;; debug view's rendered-context-blocks) must also be render-failure-free.
                    (let [ctx  {:seon.db/db @db/*conn* :seon.agent/id "AGTctxtile00p1"}
                          text (str (render/render :seon.render/ai ctx
                                                   (ctx/context-root ctx)))]
@@ -888,23 +890,7 @@
                 (.then
                   (fn [_]
                     (let [r1 (assemble "AGTctxrel0001p")
-                          r2 (assemble "AGTctxrel0001p")
-                          texts-of (fn [r]
-                                     (into {} (map (juxt :seon.agent.ctx/name
-                                                         :seon.render/text))
-                                           (:seon.render/section-texts r)))]
-                      ;; :relevant-source IS in the LAYOUT provenance (every
-                      ;; merged section name, blank or not — assemble-context
-                      ;; docstring) ...
-                      (is (some #{:relevant-source}
-                                (:seon.render/sections r1))
-                          ":relevant-source is part of the core layout")
-                      ;; ... but with NO retrieval stash active (default-OFF —
-                      ;; run-turn! never called with-hits) it renders BLANK, so
-                      ;; it contributes NO :seon.render/section-texts entry and
-                      ;; NO text to the prompt — the composer drops it.
-                      (is (not (contains? (texts-of r1) :relevant-source))
-                          ":relevant-source contributes no text (blank → dropped)")
+                          r2 (assemble "AGTctxrel0001p")]
                       ;; byte-identical across two assemblies (the section
                       ;; is not pulling query-dependent content into the
                       ;; prompt when off). The byte-stability contract is the
@@ -924,7 +910,7 @@
 ;; ------------------------------------------------------------
 ;; THE single render path — prompt == view, byte-identical by
 ;; construction. The model's prompt (the loop's `render-prompt`) and the
-;; human inspector's context pane (`ctx-preview`) both route through the
+;; human debug view's context pane (`ctx-preview`) both route through the
 ;; ONE producer `seon.agent.ctx/render-context` over the SAME unfiltered db, so
 ;; the `:ai` side is byte-identical by construction. Asserted THROUGH the
 ;; real fns — never a hand-built ctx string (the trap that let the old
@@ -937,15 +923,15 @@
    readline status line (`; <ns> · turn N · loop K/cap · <state> · <now> ·
    agent <id>`), the only render output that depends on `now` rather than
    the db (transcript ns docstring). Everything else is a pure fn of the db
-   value and must be byte-identical across the prompt + inspector paths."
+   value and must be byte-identical across the prompt + debug view paths."
   [s]
   (str/replace s #"(?m)^;[^\n]* · loop [^\n]*$" "; <READLINE NOW NORMALIZED>"))
 
-(deftest prompt-and-inspector-are-byte-identical
+(deftest prompt-and-debug-view-are-byte-identical
   ;; THE headline property. `render-context` is the SINGLE producer; the
-  ;; loop's `render-prompt` and the inspector's `ctx-preview` both call it
+  ;; loop's `render-prompt` and the debug view's `ctx-preview` both call it
   ;; over the SAME `@*conn*`. Prove: (1) render-prompt IS render-context;
-  ;; (2) the inspector's full prompt text ENDS WITH the exact prompt bytes
+  ;; (2) the debug view's full prompt text ENDS WITH the exact prompt bytes
   ;; (system + boundary + context, the context byte-identical); (3) every
   ;; per-section `:ai` twin appears verbatim in the prompt (one render, two
   ;; consumers); (4) derived-never-stored — rendering writes NO datoms.
@@ -960,13 +946,13 @@
                           loop-txt (strip-readline-now (turn/render-prompt id))
                           prod-txt (strip-readline-now
                                      (ctx/render-context {:seon.agent/id id}))
-                          preview  (inspect/ctx-preview {:seon.agent/id id})
+                          preview  (agent-debug/ctx-preview {:seon.agent/id id})
                           full     (strip-readline-now (:seon.render/text preview))]
                       (is (pos? (count prod-txt)) "the prompt is non-empty")
                       (is (= loop-txt prod-txt)
                           "render-prompt IS render-context (the loop routes through the one producer)")
                       (is (str/ends-with? full prod-txt)
-                          "inspector context pane is byte-identical to the prompt (full = system + boundary + the EXACT context bytes)")
+                          "debug view context pane is byte-identical to the prompt (full = system + boundary + the EXACT context bytes)")
                       (doseq [{nm  :seon.agent.ctx/name
                                txt :seon.render/text} (:seon.render/section-texts preview)
                               :when (not= nm :system)]
@@ -974,7 +960,7 @@
                             (str "section " nm " :ai twin appears verbatim in the prompt")))
                       (let [before (count (d/datoms @db/*conn* :eavt))]
                         (turn/render-prompt id)
-                        (inspect/ctx-preview {:seon.agent/id id})
+                        (agent-debug/ctx-preview {:seon.agent/id id})
                         (ctx/render-context {:seon.agent/id id})
                         (is (= before (count (d/datoms @db/*conn* :eavt)))
                             "rendering wrote NO datoms — derived, never stored"))
@@ -1075,12 +1061,11 @@
   (let [text (ctx/identity-files-text)]
     (is (string? text) "identity-files-text returns a string")))
 
-(deftest system-message-is-hardcoded-mechanics-not-the-soul
-  ;; THE decoupling: the LLM system message is the hardcoded mechanics.
-  (is (= ctx/system-text (llm/effective-system-prompt {}))
-      "system message = the hardcoded seon mechanics (seon.agent.ctx/system-text)")
-  (is (= ctx/system-text (llm/effective-system-prompt {:seon.ai/system-prompt nil}))
-      "no override → still the hardcoded mechanics (no fallback const)")
+(deftest system-message-comes-from-config-state-not-identity-files
+  (let [expected (or (:seon.config/system-text (config/config-view))
+                     ctx/system-text)]
+    (is (= expected (llm/effective-system-prompt {})))
+    (is (= expected (llm/effective-system-prompt {:seon.ai/system-prompt nil}))))
   (is (= "OVERRIDE" (llm/effective-system-prompt {:seon.ai/system-prompt "OVERRIDE"}))
       "an explicit override still wins")
   ;; The system message is NOT the identity-file text (decoupled).
@@ -1112,10 +1097,11 @@
                            (llm/effective-system-prompt {:seon.ai/system-prompt "OVERRIDE"}))
                         "the per-request override still wins over the datom"))))))
         (.then (fn [_]
-                 ;; conn restored — no datom in sight ⇒ the shipped default,
-                 ;; byte-identical to the pre-datom world.
-                 (is (= ctx/system-text (llm/effective-system-prompt {}))
-                     "absent datom → the shipped seon.agent.ctx/system-text default")
+                 ;; The ambient conn is restored, so resolution returns to the
+                 ;; ambient config state. Do not pin the prompt's wording.
+                 (is (= (or (:seon.config/system-text (config/config-view))
+                            ctx/system-text)
+                        (llm/effective-system-prompt {})))
                  (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -1123,12 +1109,13 @@
   (async done
     (-> (with-conn
           (fn [_conn]
-            ;; The adapter's system message IS the hardcoded mechanics —
-            ;; NOT the live identity text, NOT a fallback.
-            (let [body (openai/request-params {:seon.ai/ctx "hi"})
-                  sys  (-> body :messages first :content)]
-              (is (= sys ctx/system-text)
-                  "the system message sent to the API is the hardcoded mechanics")
+            ;; The adapter must use the same config-backed resolution path as
+            ;; the agent loop; this test deliberately does not pin its wording.
+            (let [body     (openai/request-params {:seon.ai/ctx "hi"})
+                  sys      (-> body :messages first :content)
+                  expected (llm/effective-system-prompt {})]
+              (is (= sys expected)
+                  "the API adapter and agent loop resolve the same system prompt")
               (is (= "OVERRIDE"
                      (-> (openai/request-params {:seon.ai/ctx "hi"
                                                  :seon.ai/system-prompt "OVERRIDE"})

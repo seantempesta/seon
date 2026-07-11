@@ -4,31 +4,13 @@
 ;; (`agent/create!` → `ctx/seed-default-ctx!` → `config/resolve-agent-context`)
 ;; reads it, so gym agents seed FROM this agent-context.
 ;;
-;; Drops the always-on-but-unused `:live-tile` block (minimal-context
-;; experiment 2026-06-28: a free win — agents never referenced it) while
-;; KEEPING the load-bearing `:namespaces` manual (its removal broke
-;; memory-write) and the `:repl` skill body. In the v3 two-level model a
-;; block's PRESENCE is "on" — to drop `:live-tile` this manifest supplies the
-;; explicit `:seon.agent/ctx` block tree WITHOUT it (mirrors
-;; seon.config/default-ctx-blocks minus :live-tile).
+;; Supplies an intentionally small explicit block tree for config A/B runs.
+;; It exercises the real manifest -> database seed path without relying on
+;; hidden defaults or injecting skill bodies into agent context.
 {:seon.config/agent-context
  {:seon.agent/ctx
-  [{:seon.agent.ctx/name :shared-instructions :seon.agent.ctx/priority 10
-    :seon.render/ai my.kb.shared/instructions-block}
-   {:seon.agent.ctx/name :skills-catalog :seon.agent.ctx/priority 12
-    :seon.render/ai my.skills/catalog-block}
-   {:seon.agent.ctx/name :skill/repl :seon.agent.ctx/priority 16
-    :seon.render/ai my.skills/skill-block}
-   {:seon.agent.ctx/name :namespaces :seon.agent.ctx/priority 20
+  [{:seon.agent.ctx/name :namespaces :seon.agent.ctx/priority 20
     :seon.render/ai seon.agent.ctx.namespaces/namespaces-block}
-   {:seon.agent.ctx/name :warnings :seon.agent.ctx/priority 40
-    :seon.render/ai seon.agent.ctx.warnings/warnings-block}
-   {:seon.agent.ctx/name :plan :seon.agent.ctx/priority 45
-    :seon.render/ai my.plan.internal/plan-block}
-   {:seon.agent.ctx/name :relevant-source :seon.agent.ctx/priority 48
-    :seon.render/ai seon.agent.ctx.relevant/relevant-source-block}
-   {:seon.agent.ctx/name :findings :seon.agent.ctx/priority 97
-    :seon.render/ai seon.agent.ctx.findings/findings-block}
    {:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
     :seon.render/ai seon.agent.ctx.transcript/transcript-block
     :seon.render/html seon.agent.ctx.transcript/transcript-block-html}]}}
