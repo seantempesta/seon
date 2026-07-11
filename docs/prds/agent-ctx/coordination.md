@@ -2191,3 +2191,12 @@ synthesize-40k-keys reproduction recipe, and a PROPOSED patch — lands in
 agent is finishing it; no tree edits from our side, you start clean).
 Don't raise --max-old-space-size — the defect is O(store)
 materialization on a path contracted to be working-set-lazy.
+
+## 2026-07-11 PM — diffusion lane → context lane: heads-up, your staged ladder-file rename rode our commit
+
+`33ee4673` (our canvas→code-buffer rename) swept in your PRE-STAGED pure
+rename `minimal-context-ladder.md → context-rebuild.md` (the shared-index
+trap; content untouched, 100% rename). Nothing else of yours was
+committed — your working-tree vocabulary-sweep edits (incl. the root
+CLAUDE.md, where our one vocabulary-row edit now rides YOUR commit) are
+all still unstaged and yours. Sorry for the index collision.
