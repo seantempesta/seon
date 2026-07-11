@@ -155,6 +155,32 @@
               (is (not (re-find prose-note-re (str (:narration row)))) "NOT demoted")))))
       done)))
 
+(deftest macro-headed-introspection-is-kept-and-runs
+  ;; Rung-1 smell (2026-07-10): `(ns-interns 'some.ns)` was DEMOTED — the
+  ;; head is a core MACRO (absent from globalThis, so no var probe hit)
+  ;; missing from code-head-syms' literal set, and the quoted ns-name reads
+  ;; as 2 unresolvable arg symbols. The agent got a false-confidence
+  ;; `ok? nil` for a form that never ran, while the qualified
+  ;; `clojure.core/ns-interns` call worked. `core-macro-head?` (the
+  ;; COMPUTED complement — the analyzer's own cljs.core$macros defs) keeps
+  ;; every macro-headed call.
+  (async done
+    (settle!
+      (with-conn
+        (fn ^:async run []
+          (testing "(ns-interns 'cljs.user) — macro head → eval'd, returns a map"
+            (let [res (await (run-batch! "(ns-interns 'cljs.user)" (db/new-id!)))
+                  row (row-for "(ns-interns 'cljs.user)")]
+              (is (= 1 (:seon.eval/n-ok res)) "evaluated, not demoted")
+              (is (true? (:ok? row)))
+              (is (not (re-find prose-note-re (str (:narration row)))) "NOT demoted")))
+          (testing "(ns-publics 'cljs.user) — same, the sibling macro"
+            (let [res (await (run-batch! "(ns-publics 'cljs.user)" (db/new-id!)))
+                  row (row-for "(ns-publics 'cljs.user)")]
+              (is (= 1 (:seon.eval/n-ok res)) "evaluated, not demoted")
+              (is (not (re-find prose-note-re (str (:narration row)))) "NOT demoted")))))
+      done)))
+
 (deftest namespaced-head-is-kept
   ;; A namespaced symbol ANYWHERE is a hard code signal — KEEP.
   ;; `clojure.string/upper-case` is bundled and resolves, so this real call

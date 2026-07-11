@@ -27,3 +27,4 @@ ds-r1-ns-probe-d1 agent=UCv-2607101955 outcome=RED wall=127s started=2026-07-10T
 ds-r1-ns-probe-d2 agent=HFI-2607102012 outcome=RED wall=56s started=2026-07-11T00:12:56Z sha_ok=yes
 ds-r1-ns-move-v1-d3 agent=gXn-2607102014 outcome=GREEN wall=68s started=2026-07-11T00:14:06Z sha_ok=yes
 spark-r1-ns-move-v1-d2 agent=Loj-2607102015 outcome=GREEN wall=57s started=2026-07-11T00:15:47Z sha_ok=yes
+spark-p-introspect-probe-d1 agent=Fku-2607102053 outcome=RED wall=11s started=2026-07-11T00:53:29Z sha_ok=yes

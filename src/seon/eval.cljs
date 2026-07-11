@@ -2064,6 +2064,21 @@
           (resolves-on-globalthis? (str "cljs.core." m))
           (resolves-on-globalthis? (str (cljs.core/munge (str ns-sym)) "." m))))))
 
+(defn- core-macro-head?
+  "True when `sym` names a macro the self-host analyzer knows.
+
+   A `:defs` entry in `cljs.core$macros` — every core macro lands there in
+   the bootstrap compile-state. The COMPUTED complement to
+   [[code-head-syms]]' literal set: macro heads the list missed
+   (`ns-interns`, `ns-publics`, `ns-aliases`, …) are absent from globalThis
+   so [[symbol-resolves-as-var?]] can't see them, and the prose gate was
+   demoting their calls to prose — recording a false-confidence `ok? nil`
+   row for a form that never ran (rung-1 introspection smell, 2026-07-10).
+   Consulted for the HEAD only, like the literal set."
+  [compile-state sym]
+  (some? (get-in @compile-state
+                 [:cljs.analyzer/namespaces 'cljs.core$macros :defs sym])))
+
 (defn- collect-symbols
   "Every symbol appearing anywhere in `x` (recursively through lists,
    vectors, maps, sets), as a vector in encounter order."
@@ -2088,7 +2103,9 @@
 
      1. `source` reads as exactly ONE non-empty list whose HEAD is a symbol.
      2. HEAD is unqualified, NOT in [[code-head-syms]] (special form / core
-        macro), and does NOT resolve to a var.
+        macro), NOT a macro the analyzer knows ([[core-macro-head?]] — the
+        computed complement covering macros the literal set missed), and
+        does NOT resolve to a var.
      3. NO symbol ANYWHERE in the form is qualified, AND none resolves to a
         var — the instant one does (head or arg) it is real code.
      4. There are AT LEAST TWO symbols in ARGUMENT position. A lone undefined
@@ -2123,6 +2140,10 @@
                    (fn [s] (or (qualified-symbol? s)
                                (symbol-resolves-as-var? compile-state ns-sym s)))]
                (and (not (contains? code-head-syms head))
+                    ;; computed macro-head check — the analyzer's own
+                    ;; cljs.core$macros defs; macros aren't runtime vars,
+                    ;; so the var probe can't vouch for them
+                    (not (core-macro-head? compile-state head))
                     (>= (count arg-syms) 2)
                     (not-any? code-signal? all-syms)))))
       ;; probe: any read error ⇒ NOT prose ⇒ KEEP (fail-closed, per the
