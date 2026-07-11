@@ -53,13 +53,14 @@
    hiccup])
 
 (defn- rail-button
-  "A compact selectable card for one primary-panel body."
+  "A compact selectable card for a non-focused primary-panel body."
   [selection label hiccup]
   [:div {:role "button"
          :tabindex "0"
          :aria-label (str "Show " label " in the primary view")
          :class (str "w-full text-left border border-base-800 rounded-md cursor-pointer "
                      "bg-base-900 overflow-hidden hover:border-base-700")
+         :data-show (str "$selected !== '" selection "'")
          :data-class (str "{'border-amber-700': $selected === '" selection "'}")
          (keyword "data-on:click") (str "$selected = '" selection "'")
          (keyword "data-on:keydown")

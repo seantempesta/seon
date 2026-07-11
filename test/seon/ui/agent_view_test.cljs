@@ -38,7 +38,12 @@
               (is (str/includes? s "id=\"app-view\""))
               (is (str/includes? s "DUAL-HTML"))
               (is (not (str/includes? s "AI-ONLY-TEXT")))
-              (is (str/includes? s "data-agent-primary=\"context-dual\"")))))
+              (is (str/includes? s "data-agent-primary=\"context-dual\""))
+              (testing "the focused surface is reactively omitted from the rail"
+                (is (str/includes? s
+                      "data-show=\"$selected !== &#39;context-dual&#39;\""))
+                (is (str/includes? s
+                      "data-show=\"$selected !== &#39;canvas&#39;\""))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str e)) (done))))))
 
