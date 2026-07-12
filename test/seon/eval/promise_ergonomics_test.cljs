@@ -5,7 +5,7 @@
 
    - record a clean `:seon.eval/pending` PLACEHOLDER as the form value (never
      the raw Promise — the value renderer must not `seq` a Promise);
-   - stash the live Promise HANDLE at `result/<id>` (NOT the placeholder);
+   - store the live Promise HANDLE at `result/<id>` (NOT the placeholder);
    - resolve to real DATA when `result/<id>` is re-referenced in a later eval
      (the existing auto-await on the eval-batch path).
 
@@ -13,7 +13,7 @@
    The CLJS-async gotcha this guards: a Promise sitting in an `if`/`or`/`cond`
    TEST position is AUTO-AWAITED by the compiler, which would resolve (and
    block on) the handle. So the pending branch tests `(some? handle)` — never
-   a bare `handle` — and stashes via `(if pending? handle …)`, keeping the
+   a bare `handle` — and binds via `(if pending? handle …)`, keeping the
    Promise in branch/arg positions only.
 
    Run via `bin/test-cljs`, or:
@@ -44,8 +44,8 @@
 (defn- run-batch
   "Run `source` (one form) through eval-batch! in `aid`'s home ns against the
    current root conn. Returns a Promise of the eval-batch! result map. The
-   live-result stash (`result/<id>`) is process-global, so a later run-batch
-   re-references a handle a prior one stashed."
+   live-result store (`result/<id>`) is process-global, so a later run-batch
+   re-references a handle a prior one bound."
   [aid source]
   (-> (repl/ensure-bootstrap!)
       (.then (fn [cs]
@@ -74,11 +74,11 @@
   (is (= [:plain :data] (seval/defer [:plain :data]))))
 
 ;; ---------------------------------------------------------------------------
-;; defer e2e — the form does NOT block; it records the placeholder and stashes
+;; defer e2e — the form does NOT block; it records the placeholder and stores
 ;; the live Promise; re-referencing result/<id> auto-awaits it to data.
 ;; ---------------------------------------------------------------------------
 
-(deftest defer-records-placeholder-stashes-handle-and-re-reference-resolves
+(deftest defer-records-placeholder-stores-handle-and-re-reference-resolves
   (async done
     (let [!id (atom nil)]
       (-> (with-conn
@@ -112,11 +112,11 @@
 
 ;; ---------------------------------------------------------------------------
 ;; timeout e2e — a Promise that exceeds the per-form auto-await budget records
-;; a placeholder + stashes the handle (same downstream as defer); re-reference
+;; a placeholder + stores the handle (same downstream as defer); re-reference
 ;; resolves it. The one-shot `(budget …)` sets the bound INSIDE the form.
 ;; ---------------------------------------------------------------------------
 
-(deftest timed-out-promise-stashes-handle-and-re-reference-resolves
+(deftest timed-out-promise-stores-handle-and-re-reference-resolves
   (async done
     (let [!id (atom nil)]
       (-> (with-conn
@@ -130,7 +130,7 @@
                                  handle (seval/lookup-result id)]
                              (reset! !id id)
                              (is (instance? js/Promise handle)
-                                 "the auto-await TIMEOUT stashes the live Promise handle, not the resolved value")
+                                 "the auto-await TIMEOUT stores the live Promise handle, not the resolved value")
                              (is (str/includes? (:seon.eval/result-edn (row id)) ":seon.eval/pending")
                                  "timeout records the placeholder")
                              handle)))         ; return the handle → next .then waits for it to resolve

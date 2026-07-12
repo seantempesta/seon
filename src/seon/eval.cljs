@@ -158,8 +158,8 @@
    in a LATER eval and the normal auto-await resolves it to data. A
    non-Promise argument is returned unchanged (nothing to defer).
 
-   NOTE: the stash is process-scoped (globalThis) — a pod restart drops
-   it. Anything that must survive a restart should persist its RESULT to
+   NOTE: the capped live-result store is process-scoped — a pod restart
+   drops it. Anything that must survive a restart should persist its RESULT to
    the DB, not rely on this in-memory handle."
   ;; `v` + the return are `:any` on purpose: `v` is the agent form's
   ;; already-evaluated value (a Promise / any runtime value) — a
@@ -976,8 +976,8 @@
 ;;
 ;; Session cap: keep the last `result-vars-cap` ids; prune older ones
 ;; (undef from BOTH globalThis and the analyzer) so memory stays
-;; bounded. Resets on process restart — like the globalThis stash, the
-;; vars do not survive a new process. A reference to a pruned /
+;; bounded. Resets on process restart — the live values and analyzer
+;; handles do not survive a new process. A reference to a pruned /
 ;; prior-session id is a GRACEFUL MISS (see the `result/*` special-case
 ;; in `raw-eval`), never a raw undeclared error.
 ;;
@@ -1254,45 +1254,22 @@
 ;; ============================================================
 
 ;; ============================================================
-;; Results store. Lives on globalThis so any value (including
-;; non-readable CLJS objects like datahike DB tagged literals) can
-;; be stashed and looked up. We don't go through pr-str/read-string
-;; here — the value is the raw object.
-;;
-;; Key shape: "__seon_results_<eval-id>"
-;; This stash is the runtime VALUE backing each `result/<id>` var (the
-;; agent's value-reuse surface) and the internal `lookup-result` reader
-;; (e.g. seon.agent.message's batch-failure check). It is NOT itself an
-;; agent-facing call.
+;; Results store. The one runtime value lives at
+;; `globalThis.result.<munged-id>`, the same slot emitted for the
+;; agent-facing `result/<id>` analyzer handle. Any value type can live
+;; there, including opaque Datahike objects and Promises; no
+;; pr-str/read-string round trip is involved. `!result-var-ids` owns
+;; oldest-first eviction for both the value slot and analyzer def.
 ;; ============================================================
-
-(def ^:private results-key-prefix "__seon_results_")
-
-(defn- result-key [eval-id]
-  (str results-key-prefix eval-id))
-
-(defn stash-result-raw!
-  "Stash a raw value (any type) on globalThis keyed by the eval-id.
-   No pr-str round-trip — value-type-agnostic. Soft-fails on impossible
-   sets (logs + ignores)."
-  {:malli/schema [:=> [:catn [::eval-id :any] [::value :any]] :any]}
-  [eval-id value]
-  (try
-    (js/Reflect.set js/globalThis (result-key eval-id) value)
-    (catch :default e
-      ;; OUR result-stash machinery (a globalThis set) failing is a core
-      ;; defect — record it (:core); the value just won't be
-      ;; re-referenceable and lookup-result reports the honest miss. Same
-      ;; `:any` return as the prior console-only swallow.
-      (error/record! {:seon.error/raw e :seon.error/fault :core}))))
 
 (defn lookup-result
   "The live value of a prior eval, keyed by its `result/<id>`.
 
    The id on its value line
-   in the transcript (string or keyword). Backed by the globalThis
-   stash, so any value type round-trips. INTERNAL reader — the agent's
-   value-reuse surface is the `result/<id>` var (same stash backing);
+   in the transcript (string or keyword). Reads the same bounded
+   `globalThis.result.<id>` value slot as the analyzer-emitted var, so
+   any value type round-trips. INTERNAL reader — the agent's
+   value-reuse surface is the `result/<id>` var;
    `lookup-result` is used by core code that needs an eval's live value
    programmatically (e.g. seon.agent.message's batch-failure check).
 
@@ -1307,9 +1284,10 @@
   {:malli/schema [:=> [:catn [::id :any]] :any]}
   [id]
   (let [id-str (if (keyword? id) (name id) (str id))
-        k      (result-key id-str)]
-    (if (js/Reflect.has js/globalThis k)
-      (js/Reflect.get js/globalThis k)
+        munged (cljs.core/munge id-str)
+        robj   (js/Reflect.get js/globalThis (str result-ns-sym))]
+    (if (and robj (js/Reflect.has robj munged))
+      (js/Reflect.get robj munged)
       (let [row (try (db/entity {:seon.db/ref [:seon.eval/id id-str]})
                      ;; probe: a lookup-ref to a NON-EXISTENT eval id
                      ;; throws in datahike — that IS the expected
@@ -1339,9 +1317,9 @@
                 "source is on the eval's prompt line) to recompute it.")})))))
 
 ;; ============================================================
-;; `result/<id>` vars — binding side. Constants + the reference
-;; predicate + the graceful-miss message live ABOVE `raw-eval` (it
-;; needs them); the actual binding fns live here, near the eval
+;; `result/<id>` values + analyzer handles — binding side. Constants +
+;; the reference predicate + the graceful-miss message live ABOVE
+;; `raw-eval` (it needs them); the binding fns live here, near the eval
 ;; pipeline that calls them.
 ;; ============================================================
 
@@ -1352,6 +1330,25 @@
       (let [o #js {}]
         (js/Reflect.set js/globalThis (str result-ns-sym) o)
         o)))
+
+(defn- replace-live-result!
+  "Replace an already-live `result/<id>` value without changing its age.
+
+   Used when a pending Promise settles. Returns true only while both the
+   capped roster and runtime slot are still live; an evicted pending result
+   never resurrects itself or displaces a newer eval."
+  [id value]
+  (try
+    (let [munged (cljs.core/munge id)
+          robj   (js/Reflect.get js/globalThis (str result-ns-sym))]
+      (boolean
+        (when (and (some #(= id %) @!result-var-ids)
+                   robj
+                   (js/Reflect.has robj munged))
+          (js/Reflect.set robj munged value))))
+    (catch :default e
+      (error/record! {:seon.error/raw e :seon.error/fault :core})
+      false)))
 
 (defn- unbind-result-var!
   "Remove a single `result/<id>` var — undef from globalThis AND the
@@ -1376,12 +1373,13 @@
         (error/record! {:seon.error/raw e :seon.error/fault :core})))))
 
 (defn bind-result-var!
-  "Bind a successful eval's value `v` as the var `result/<id>`.
+  "Store a successful eval's live value as the var `result/<id>`.
 
    Sets `globalThis.result.<munged-id>` and registers `<id>` in the
    `result` ns's analyzer defs in `compile-state`, so a later bare
-   `result/<id>` resolves with no undeclared-var warning. Track the id
-   for the session cap and prune the oldest beyond `result-vars-cap`.
+   `result/<id>` resolves with no undeclared-var warning and
+   [[lookup-result]] reads the identical slot. Tracks the id for the
+   session cap and prunes the value plus analyzer handle together.
 
    Failed evals never call this — there is no value to bind. Soft-fails
    (logs + ignores) so a bind hiccup never breaks the eval pipeline."
@@ -1416,7 +1414,7 @@
         (doseq [old @pruned]
           (unbind-result-var! compile-state old))))
     (catch :default e
-      ;; OUR result-var bind (globalThis set + analyzer defs) failing is a
+      ;; OUR result-value bind (globalThis set + analyzer defs) failing is a
       ;; core defect — record it (:core); the eval pipeline still returns
       ;; nil (the value is unreachable via result/<id>, a benign miss).
       (error/record! {:seon.error/raw e :seon.error/fault :core})))
@@ -1671,9 +1669,9 @@
 ;; eval-batch! — the REPL harness primitive. Takes parsed pairs from
 ;; seon.repl.internal/parse-forms; evaluates each in the agent's compile-state
 ;; with PARTIAL-FAILURE semantics (form N+1 always runs, even if N
-;; failed); persists each as a :seon.eval entity; stashes the live
-;; result in the agent's !results atom. Returns the ordered vector of
-;; eval-id strings.
+;; failed); persists each as a :seon.eval entity; and binds each successful
+;; live value at its capped `result/<id>` handle. Returns the ordered vector
+;; of eval-id strings.
 ;;
 ;; Per spec-02 §2.5: every form is safe-by-default. The eval surface
 ;; never throws; the agent session is never killed by a bad form.
@@ -1688,7 +1686,7 @@
 
    Bounded by `@!timeout-ms` (default) OR the one-shot override left by
    [[budget]]. A Promise that exceeds the bound is NOT dropped: it is
-   handed back as `::pending-promise` so the caller stashes the live handle at
+   handed back as `::pending-promise` so the caller binds the live handle at
    `result/<id>` (re-reference auto-resolves it later). A `(defer …)`
    wrapper opts out of awaiting entirely and takes the same
    `::pending-promise` path immediately.
@@ -1717,7 +1715,7 @@
         (if (identical? raced timeout-sentinel)
           ;; Auto-await timed out. The Promise keeps running (no JS
           ;; preemption); carry the live handle back as `::pending-promise` so the
-          ;; caller stashes it at result/<id> for a later re-reference —
+          ;; caller binds it at result/<id> for a later re-reference —
           ;; never drop it (the agent would have no way to recover it).
           {::ok? false ::pending-promise v}
           {::ok? true ::value raced}))
@@ -2899,8 +2897,8 @@
 
    16k is generous headroom for direct datom inspection/debugging while
    staying ~600x below the 9.7M blob that caused the OOM. The FULL value
-   remains available in-session as the live var `result/<id>` (globalThis
-   live-result stash, `stash-result-raw!`) — that path is NOT capped."
+   remains available in-session as the live var `result/<id>` in the bounded
+   process store — its VALUE is not clipped."
   (config/store-edn-cap))
 
 (defn cap-edn
@@ -3059,7 +3057,7 @@
    bounded so it rarely fires, but a pathological deep/wide value still
    clips to a well-formed string that names `result/<id>`. Operates on the
    RAW value (pre-pr-str). Pure: stores nothing, does not touch the
-   live-result stash. Never throws."
+   live result store. Never throws."
   {:malli/schema [:=> [:catn [::eval-id :string] [::value :any]] :string]}
   [eval-id value]
   (clip-result-body
@@ -3175,7 +3173,7 @@
                    ;; MEMORY-SAFETY backstop so the DB never holds a multi-MB
                    ;; blob even if the render cap is raised; a no-op when the
                    ;; render cap ≤ the store cap. The FULL value is in the
-                   ;; globalThis live-result stash (set before this call).
+                   ;; bounded live result store (set before this call).
                    (::ok? result)
                    (assoc :seon.eval/result-edn
                           (cap-edn
@@ -3192,7 +3190,7 @@
                    ;; the raw `pr-str` of the whole `->map` — that buried
                    ;; the useful line under the opaque `#error` + stack and
                    ;; was unreadable by the agent-side renderer. The full
-                   ;; value remains in the live result stash.
+                   ;; failed evals have no live result value.
                    (not (::ok? result))
                    (assoc :seon.eval/error
                           (cap-edn
@@ -4025,7 +4023,7 @@
 (defn- ^:async eval-form-entry!
   "The normal single-form eval path, extracted from `eval-batch!`'s
    `:else` branch so a parinfer-REPAIRED form (A.2) can reuse the exact
-   same eval → auto-await → stash → detect-and-tee → record →
+   same eval → auto-await → live-result bind → detect-and-tee → record →
    auto-instrument → auto-test-run pipeline. Behavior-preserving.
 
    Mutates the caller's fold volatiles in place (a transient impl
@@ -4140,7 +4138,7 @@
             awaited     (::awaited captured)
             ;; A still-running Promise — auto-await timeout OR an explicit
             ;; `(defer …)`. The form records a clean PLACEHOLDER value and
-            ;; the live Promise is stashed at result/<id> (see stash site
+            ;; the live Promise is bound at result/<id> (see binding site
             ;; below) for a later re-reference that auto-awaits it to data.
             ;; The raw Promise NEVER becomes the displayed value — the value
             ;; renderer must not `seq` a Promise.
@@ -4151,7 +4149,7 @@
             ;; implicit-await pass: a Promise in an `if`/`or`/`cond` TEST is a
             ;; plain truthy object, NEVER awaited (the only await-emitting sites
             ;; are the `await` macro and the iife-open). So neither form would
-            ;; resolve the handle; the Promise stays live for the later stash.
+            ;; resolve the handle; the Promise stays live for the later bind.
             pending?        (some? pending-promise)
             result
             (cond
@@ -4229,43 +4227,41 @@
             (if (::ok? result)
               (vswap! failed-defs #(reduce disj % def-syms))
               (vswap! failed-defs into def-syms))))
-        ;; Live-value stash — direct js/Reflect.set on globalThis,
-        ;; no eval-str round-trip (opaque values like datahike DB
-        ;; tagged literals don't break the stash). Backs the `result/<id>`
-        ;; value var AND the internal `lookup-result` reader.
+        ;; Live value — one raw globalThis.result slot plus its analyzer
+        ;; handle, no eval-str round trip (opaque values like Datahike DB
+        ;; tagged literals remain intact). `result/<id>` and the internal
+        ;; `lookup-result` reader share this one bounded slot.
         ;;
-        ;; PENDING case (auto-await timeout / `defer`): stash the live
+        ;; PENDING case (auto-await timeout / `defer`): store the live
         ;; PROMISE handle (`pending-promise`), NOT the placeholder that was
         ;; recorded as the displayed value — so a later bare `result/<id>`
         ;; returns the Promise and the eval-batch auto-await resolves it to
-        ;; data. The normal case stashes the resolved value.
+        ;; data. The normal case stores the resolved value.
         ;; `(if pending? pending-promise …)`, NOT `(or pending-promise …)`:
         ;; `or` expands to `(if pending-promise pending-promise …)`, putting
         ;; the Promise in the TEST position, which a CLJS `^:async` fn
         ;; AUTO-AWAITS — that would resolve the handle (and block) instead of
-        ;; stashing it. A boolean test keeps the Promise unawaited; it reaches
-        ;; the stash as a live handle (a fn arg never awaits).
+        ;; storing it. A boolean test keeps the Promise unawaited; it reaches
+        ;; the result slot as a live handle (a fn arg never awaits).
         (when (::ok? result)
-          (let [stash-val (if pending? pending-promise (::value result))]
-            (stash-result-raw! eval-id stash-val)
+          (let [live-value (if pending? pending-promise (::value result))]
             ;; transcript-redesign-2026-06-18: bind the value as the plain
             ;; var `result/<id>` (globalThis + analyzer def) so the agent
             ;; references it directly — the SOLE value-reuse surface. Failed
             ;; evals bind nothing — no value to retrieve.
-            (bind-result-var! compile-state eval-id stash-val)
-            ;; PENDING self-heal: the stash above holds a RAW js/Promise, and
+            (bind-result-var! compile-state eval-id live-value)
+            ;; PENDING self-heal: the slot above holds a RAW js/Promise, and
             ;; only a BARE `result/<id>` reference auto-awaits it — any IN-FORM
             ;; use ((first result/<id>), (group-by k result/<id>), (let [xs
             ;; result/<id>] …)) operates on the un-awaited Promise and returns
-            ;; garbage. Re-stash + re-bind the RESOLVED value the instant the
+            ;; garbage. Re-bind the RESOLVED value the instant the
             ;; Promise settles, so EVERY reference (bare or in-form) reads real
             ;; data. errors-as-values: a rejected Promise no-ops (the placeholder
             ;; stays honest) — never throws into the eval loop.
             (when pending?
               (-> pending-promise
                   (.then (fn [v]
-                           (stash-result-raw! eval-id v)
-                           (bind-result-var! compile-state eval-id v)))
+                           (replace-live-result! eval-id v)))
                   (.catch (fn [_] nil))))))
         ;; Detect-and-tee — only on success. Failed evals roll
         ;; back analyzer defs and never touch the schema registry,
@@ -4439,11 +4435,11 @@
           (vswap! n-fail inc))))))
 
 (defn- ^:async record-form-result!
-  "Record one REPL-form outcome through the SAME record/stash/counter
+  "Record one REPL-form outcome through the SAME record/result/counter
    path a normal form takes.
 
    `::error` (a message string) makes a failed row (errors-as-values,
-   kind `:seon.eval/repl-form`); otherwise `::value` is stashed + bound
+   kind `:seon.eval/repl-form`); otherwise `::value` is bound
    at `result/<id>` and an ok row records. `::tee` tx ops ride the same
    tx. Mutates the caller's fold counters like eval-form-entry!."
   [{::keys [compile-state current-ns n-ok n-fail narration source
@@ -4456,7 +4452,6 @@
                                :seon.error/message error}}
                  {::ok? true ::value value})]
     (when (::ok? result)
-      (stash-result-raw! eval-id value)
       (bind-result-var! compile-state eval-id value))
     (await (record-eval! {::id-of-eval  eval-id
                           :seon.agent.turn/id-of-turn turn-id
@@ -4678,7 +4673,7 @@
    normal `eval-form-entry!`. The SINGLE per-entry mechanism shared by
    `eval-batch!`'s main loop AND its parinfer-repair sub-loop, so a
    REPAIRED form is handled IDENTICALLY to a normal one — same parity
-   teaching, same comment recording, same stash / tee / result-var
+   teaching, same comment recording, same result / tee / result-var
    binding. Before this, the repair sub-loop called `eval-form-entry!`
    directly, so a repaired `(in-ns 'foo` (a plausible missing-paren the
    repair fixes) bypassed the form handling the main loop gives, and a
@@ -4726,7 +4721,6 @@
                                    :seon.error/message (:seon.error/message pc)}}
                      {::ok? true ::value (:seon.eval/value pc)})]
         (when (::ok? result)
-          (stash-result-raw! eval-id (::value result))
           (bind-result-var! compile-state eval-id (::value result)))
         (await (record-eval! {::id-of-eval     eval-id
                               :seon.agent.turn/id-of-turn     turn-id
@@ -4796,7 +4790,7 @@
 (defn ^:async eval-batch!
   "Execute a sequence of parsed entries as a REPL batch.
 
-   Partial-failure: every entry gets its own try + record + stash; entry
+   Partial-failure: every entry gets its own try + record + result binding; entry
    N+1 always runs even if N failed.
 
    Per entry, three kinds (`:form` / `:read` / `:comment`, below):
@@ -4814,8 +4808,8 @@
      1. Eval in the accumulator's current-ns.
      2. Auto-await Promise return values.
      3. Compute duration-ms = (now - start).
-     4. On success: advance accumulator to (::ending-ns raw-result); stash
-        the live value in globalThis under the eval-id kw.
+     4. On success: advance accumulator to (::ending-ns raw-result); bind
+        the live value at the capped `result/<id>` process slot.
      5. Transact a :seon.eval entity carrying :seon.eval/ns = the
         post-update accumulator value.
 

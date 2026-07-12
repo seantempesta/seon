@@ -12,9 +12,9 @@
      longer flows through cap-edn — it persists WHOLE as a
      logs/prompts/<agent>/<turn>.txt blob with chars/file datom
      projections, 2026-06-09.)
-   - the FULL value still lives in the globalThis live-result stash that
-     backs the `result/<id>` var, so the un-capped value stays available
-     in-session even when the persisted datom is bounded.
+   - the FULL value still lives in the one capped `result/<id>` process
+     store, so the unclipped value stays available in-session even when
+     the persisted datom is bounded.
    - normal small results are stored verbatim (no spurious truncation).
 
    Run interactively via MCP eval:
@@ -89,31 +89,39 @@
   (is (= "abc" (seval/cap-edn "abc" 3))))
 
 ;; ---------------------------------------------------------------------------
-;; The live-result stash is SEPARATE from the persisted datom. Capping the
-;; datom must NOT break the `result/<id>` var, whose runtime value is the
-;; raw object read off globalThis (written by stash-result-raw!).
+;; The live-result store is SEPARATE from the persisted datom. Capping the
+;; datom must NOT clip the `result/<id>` runtime value. The agent-facing var
+;; and internal lookup must read the same bounded process slot; no hidden
+;; second property may retain the value.
 ;; ---------------------------------------------------------------------------
 
-(deftest live-stash-returns-the-full-value-even-when-the-datom-would-be-capped
-  (let [eval-id   "memsafe0001"
-        big-value (apply str (repeat (* 5 1024 1024) "y")) ; 5 MB raw value
+(deftest one-live-result-slot-retains-the-full-value
+  (let [eval-id       "mem-safe-0001"
+        big-value     (apply str (repeat (* 5 1024 1024) "y"))
+        compile-state (atom {:cljs.analyzer/namespaces {}})
+        roster        (deref #'seval/!result-var-ids)
+        prior-roster  @roster
+        legacy-key    (str "__seon_results_" eval-id)
         ;; what record-eval! WOULD persist for this value:
         persisted (seval/cap-edn (pr-str big-value))]
-    ;; stash the raw value the way eval-batch! does (before record-eval!)
-    (seval/stash-result-raw! eval-id big-value)
+    (reset! roster [])
+    (seval/bind-result-var! compile-state eval-id big-value)
     (try
       (testing "persisted datom is bounded"
         (is (<= (count persisted) (+ seval/store-edn-cap 64)))
         (is (< (count persisted) (count big-value))))
-      (testing "live stash still holds the FULL, un-capped value"
-        (let [stashed (js/Reflect.get
-                        js/globalThis
-                        (str "__seon_results_" eval-id))]
-          (is (= big-value stashed))
-          (is (= (count big-value) (count stashed)))))
+      (testing "the public var and internal lookup share one unclipped slot"
+        (is (= big-value (seval/lookup-result eval-id)))
+        (is (= big-value (seval/lookup-result (keyword eval-id))))
+        (is (contains?
+              (get-in @compile-state
+                      [:cljs.analyzer/namespaces seval/result-ns-sym :defs])
+              (symbol eval-id))))
+      (testing "the retired unbounded property is not recreated"
+        (is (false? (js/Reflect.has js/globalThis legacy-key))))
       (finally
-        (js/Reflect.deleteProperty
-          js/globalThis (str "__seon_results_" eval-id))))))
+        ((deref #'seval/unbind-result-var!) compile-state eval-id)
+        (reset! roster prior-roster)))))
 
 ;; ---------------------------------------------------------------------------
 ;; render-result-edn — the agent-facing text. Delegates to

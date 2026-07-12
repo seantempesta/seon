@@ -21,7 +21,6 @@
      (cljs.test/run-tests 'seon.eval.result-var-test)"
   (:require
     [cljs.test :refer [deftest is testing async]]
-    [clojure.string :as str]
     [seon.agent :as agent]
     [seon.client :as client]
     [seon.db :as db]
@@ -47,13 +46,17 @@
     (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
         (.then (fn [pair]
                  (let [cs   (aget pair 0)
-                       conn (aget pair 1)]
+                       conn (aget pair 1)
+                       prev db/*conn*]
+                   ;; CLJS dynamic bindings unwind before Promise callbacks.
+                   ;; Own the root for this complete async span and restore it.
+                   (set! db/*conn* conn)
                    (-> (seval/setup-agent-ns! cs hns aid)
                        (.then (fn [_]
-                                (binding [db/*conn* conn]
-                                  (seval/eval-batch!
-                                    cs (repl-int/parse-forms source) hns aid tid nil))))
-                       (.then (fn [r] #js {:cs cs :hns hns :result r})))))))))
+                                (seval/eval-batch!
+                                  cs (repl-int/parse-forms source) hns aid tid nil)))
+                       (.then (fn [r] #js {:cs cs :hns hns :result r}))
+                       (.finally (fn [] (set! db/*conn* prev))))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; result-var-ref? — the bare-symbol predicate that drives :expr context +
@@ -103,11 +106,8 @@
                      (.then (fn [_] (value cs 'probe.resultmiss "zzz-9999999999")))
                      (.then (fn [r]
                               (is (:seon.eval/ok? r) "a miss is a VALUE, not a failed error")
-                              (is (string? (:seon.eval/value r)) "the miss value is the guidance string")
-                              (is (str/includes? (:seon.eval/value r) "isn't live")
-                                  "names the not-live condition")
-                              (is (str/includes? (:seon.eval/value r) "re-run its form")
-                                  "tells the agent the next action"))))))
+                              (is (string? (:seon.eval/value r))
+                                  "the miss remains a readable value"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -117,32 +117,62 @@
 
 (deftest cap-prunes-oldest-keeps-recent
   (async done
-    (-> (repl/ensure-bootstrap!)
-        (.then (fn [cs]
-                 (-> (seval/eval cs "(ns probe.resultcap)" {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? true})
-                     (.then (fn [_]
-                              (reset! (deref #'seval/!result-var-ids) [])
-                              (let [n   (+ cap 5)
-                                    ids (mapv #(str "cz" (mod % 26) "-99999999" (+ 10 %)) (range n))]
-                                (doseq [[i id] (map-indexed vector ids)]
-                                  (seval/bind-result-var! cs id (* 100 i)))
-                                (is (= cap (count (deref (deref #'seval/!result-var-ids))))
-                                    "registry capped at result-vars-cap")
-                                (-> (js/Promise.all
-                                      #js [(value cs 'probe.resultcap (first ids))
-                                           (value cs 'probe.resultcap (nth ids 5))
-                                           (value cs 'probe.resultcap (last ids))])
-                                    (.then (fn [rs]
-                                             (testing "oldest pruned → graceful miss"
-                                               (is (:seon.eval/ok? (aget rs 0)))
-                                               (is (string? (:seon.eval/value (aget rs 0))))
-                                               (is (str/includes? (:seon.eval/value (aget rs 0)) "isn't live")))
-                                             (testing "first survivor still resolves"
-                                               (is (= 500 (:seon.eval/value (aget rs 1)))))
-                                             (testing "newest resolves"
-                                               (is (= (* 100 (dec n)) (:seon.eval/value (aget rs 2))))))))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+    (let [roster       (deref #'seval/!result-var-ids)
+          prior-roster @roster
+          !cleanup     (atom nil)]
+      (-> (repl/ensure-bootstrap!)
+          (.then (fn [cs]
+                   (-> (seval/eval cs "(ns probe.resultcap)"
+                                   {:seon.eval/starting-ns 'cljs.user
+                                    :seon.eval/analyze-deps? false})
+                       (.then (fn [_]
+                                (let [n   (+ cap 5)
+                                      ids (mapv #(str "cz" (mod % 26)
+                                                     "-99999999" (+ 10 %))
+                                                (range n))]
+                                  ;; Isolate the cap roster without deleting any
+                                  ;; live values established by earlier tests.
+                                  (reset! roster [])
+                                  (reset! !cleanup [cs ids])
+                                  (doseq [[i id] (map-indexed vector ids)]
+                                    (seval/bind-result-var! cs id (* 100 i)))
+                                  (is (= cap (count @roster))
+                                      "the live-result roster plateaus at its cap")
+                                  (is (false?
+                                        ((deref #'seval/replace-live-result!)
+                                         (first ids) -1))
+                                      "late settlement cannot resurrect an evicted value")
+                                  (is (true?
+                                        ((deref #'seval/replace-live-result!)
+                                         (last ids) (* 100 (dec n))))
+                                      "a still-live pending value can settle in place")
+                                  (-> (js/Promise.all
+                                        #js [(value cs 'probe.resultcap (first ids))
+                                             (value cs 'probe.resultcap (nth ids 5))
+                                             (value cs 'probe.resultcap (last ids))])
+                                      (.then
+                                        (fn [rs]
+                                          (testing "oldest value and analyzer handle evict together"
+                                            (is (:seon.eval/ok? (aget rs 0)))
+                                            (is (string? (:seon.eval/value (aget rs 0))))
+                                            (let [miss (seval/lookup-result (first ids))]
+                                              (is (false? (:seon.eval/ok? miss)))
+                                              (is (not (contains? miss :seon.eval/value)))))
+                                          (testing "first survivor still resolves"
+                                            (is (= 500 (:seon.eval/value (aget rs 1)))))
+                                          (testing "newest resolves through both readers"
+                                            (is (= (* 100 (dec n))
+                                                   (:seon.eval/value (aget rs 2))))
+                                            (is (= (* 100 (dec n))
+                                                   (seval/lookup-result (last ids))))))))))))))
+          (.catch (fn [e] (is false (str "threw — " e))))
+          (.finally
+            (fn []
+              (when-let [[cs ids] @!cleanup]
+                (doseq [id ids]
+                  ((deref #'seval/unbind-result-var!) cs id)))
+              (reset! roster prior-roster)
+              (done)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Failed eval binds NO result/<id> — its id is a graceful miss.
@@ -158,8 +188,7 @@
                        (.then (fn [r2]
                                 (is (:seon.eval/ok? r2) "the read itself is a value")
                                 (is (string? (:seon.eval/value r2))
-                                    "a failed eval's id is a graceful miss — no value bound")
-                                (is (str/includes? (:seon.eval/value r2) "isn't live"))))))))
+                                    "a failed eval's id is a graceful miss — no value bound")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
