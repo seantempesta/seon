@@ -219,6 +219,13 @@ One explicit un-attributed genesis transaction installs these ref attributes,
 root, and the three process identities before normal provenance can refer to
 them.
 
+An asynchronous ownership boundary must select these refs again rather than
+inherit the notifier's fiber. In particular, inbound-message wake, renew, and
+re-drive callbacks explicitly select the receiving agent plus REPL after their
+timer hop. Explicit transaction context intentionally outranks the ambient
+agent scope, so a callback that restored only the latter could otherwise record
+the sender as the user of the receiver's work.
+
 The durable provenance primitive is therefore a join from datom to transaction
 to user/process/time. Provenance belongs on the transaction entity, not as an
 owner, creator, kind, or status attribute copied onto domain entities. It does

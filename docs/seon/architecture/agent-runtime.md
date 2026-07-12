@@ -305,6 +305,15 @@ stay as datoms, render as a reactive warning, and never wake. `:core`-origin
 messages are substrate nudges and are **quiet** by construction: they never wake
 an idle agent. Durable agent initialization does not manufacture eval rows.
 
+The listener runs inside the transaction fiber that delivered the datom, but
+the work it starts belongs to the receiving agent. Every timer-driven wake,
+renew, and re-drive therefore enters one colocated runtime boundary that sets
+both scopes explicitly: `user = receiving agent` and `process = REPL`. Restoring
+only `with-agent` is insufficient because an explicit transaction user inherited
+from the notifying fiber correctly outranks a derived agent scope. The boundary
+prevents an inbound caller from becoming the recorded user for the receiver's
+run transactions.
+
 **Fencing is two-layered, both via the single writer:**
 
 - **The OPEN race.** Opening a run ends with `[:db.fn/cas … :seon.agent/run nil

@@ -319,7 +319,10 @@ user/process refs for all 177 transactions; at `t=536871162`, the unjoined
 count was zero. The migration classifier and fixture were then deleted. The
 remaining runtime supports only minimal fresh genesis and exact convergence;
 historical retired datoms remain immutable data with no production reader or
-writer.
+writer. Hermetic stores now run the same genesis before ordinary writes, and
+the timer-driven wake/renew/re-drive ingress explicitly re-establishes the
+receiving agent plus REPL process so notifier AsyncLocalStorage cannot leak into
+the receiver's transactions.
 
 - Colocate `:seon.db/user` and transaction-context selection in `seon.db`.
 - Colocate `:seon.db.process/id`, its boot/config/REPL rows, and lookup helpers
