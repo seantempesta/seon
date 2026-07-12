@@ -6,9 +6,9 @@
    onto `:seon.test/*` entities so the warnings / recent-evals
    tiles can read test state via Datalog.
 
-   Both fns map-in / map-out with registered Malli schemas. No
-   globals; no install! mutation of `cljs.test/report` at the var
-   root — instead we use `cljs.test`'s own per-call `:reporter`
+   Both fns map-in / map-out with registered Malli schemas. Reporter
+   capture never mutates `cljs.test/report` at the var root — instead
+   we use `cljs.test`'s own per-call `:reporter`
    slot via `(empty-env ::seon.test.runner/capture)` and per-event
    defmethods that append to a volatile builder living in the
    env. The builder is fn-local; the API stays pure data-in,
@@ -115,7 +115,7 @@
            [::run-result ::run-result]]])
 
 ;; record-run! takes a run-result + the run-id that stash-run! issued
-;; (so the DB row points at the agent-ns stash). Conn is optional —
+;; (so the DB row points at the bounded process stash). Conn is optional —
 ;; falls back on db's dynamic *conn*.
 (schema/register! ::record-request
   [:map
@@ -128,7 +128,7 @@
 ;; db/transact!'s validation gate accept the tx.
 ;;
 ;; NOTE: the FULL event sequence is NOT a DB field. It lives in the
-;; agent's ns (via stash-run! below) and the DB carries only the
+;; bounded process stash below and the DB carries only the
 ;; minimal projection the warnings / recent-evals tiles render.
 ;; Per the user's design directive: "only put data in the database
 ;; schema that we want to surface in the agent's context."
@@ -601,51 +601,65 @@
       {::events events ::summary summary})))
 
 ;; ============================================================
-;; Stash — full run-result lives on globalThis (keyed by run-id), NOT
-;; the DB. The DB carries a pointer (:seon.test/last-run-id); the agent
-;; reads the most-recent run via `(seon.test.runner/last-result {})`,
-;; which resolves that pointer and fetches the blob with `fetch-run`.
-;; (This is a SEPARATE stash from the eval `result/<id>` vars — a test
-;; run is not an eval, so it has no `result/<id>` handle.)
+;; Stash — one bounded process-local store for full test run results.
+;; The DB carries a pointer (:seon.test/last-run-id); the agent reads the
+;; most-recent live run via `(seon.test.runner/last-result {})`. A test run
+;; is not an eval, so it has no `result/<id>` handle. The store deliberately
+;; disappears on restart and retains no parallel globalThis properties.
 ;; ============================================================
 
-(def ^:private stash-key-prefix "__seon_test_run_")
+(def ^:private run-stash-cap
+  "Maximum full test-run results retained in this process. The database keeps
+   summaries; this bounded runtime detail store is only for recent drill-down."
+  32)
+
+(defonce ^:private !run-stash
+  ;; Oldest first. Each entry is one fully namespaced run-id/result pair.
+  (atom []))
 
 (defn- new-run-id
   "10-char base62 id — same shape as eval-id. Local copy to avoid a
    require cycle with seon.eval (test.runner shouldn't depend on the
-   eval namespace; both stash on globalThis under different prefixes)."
+   eval namespace). Phase 1 replaces every generated id through the one
+   schema-driven allocator."
   []
   (let [alphabet "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"]
     (apply str (repeatedly 10 #(nth alphabet (rand-int 62))))))
 
 (defn stash-run!
-  "Stash the full run-result on globalThis keyed by a fresh run-id.
+  "Stash the full run-result in the bounded process store under a fresh run-id.
    Returns the run-id. The agent reaches the blob through
    `(seon.test.runner/last-result {})` — it resolves the latest
-   `:seon.test/last-run-id` from the DB and fetches this stash with
-   `fetch-run` (the `__seon_test_run_*` key written here).
+   `:seon.test/last-run-id` from the DB and fetches this stash with `fetch-run`.
 
-   Storing on globalThis (instead of the DB) is deliberate: huge
+   Keeping full events out of the DB is deliberate: huge
    event sequences would balloon datahike's transit cost on every
    read, and the agent typically only needs the latest run + a small
-   surfaced summary. The DB row points here via `:seon.test/last-run-id`."
+   surfaced summary. The DB row points here via `:seon.test/last-run-id`.
+   Eviction is oldest-first and makes an old pointer an honest cache miss."
   {:malli/schema [:=> [:cat [:map [::run-result ::run-result]]]
                   ::run-id]}
   [{::keys [run-result]}]
   (let [id (new-run-id)]
     (try
-      (js/Reflect.set js/globalThis (str stash-key-prefix id) run-result)
+      (swap! !run-stash
+             (fn [entries]
+               (let [entries' (conj (vec (remove #(= id (::run-id %)) entries))
+                                    {::run-id id ::run-result run-result})
+                     excess   (max 0 (- (count entries') run-stash-cap))]
+                 (subvec entries' excess))))
       (catch :default e
-        (js/console.warn "[seon.test.runner/stash-run!] failed —"
-                         (error/->message e))))
+        (error/record! {:seon.error/raw e :seon.error/fault :core})))
     id))
 
 (defn fetch-run
   "Look up a stashed run-result by id. Returns nil if absent."
   {:malli/schema [:=> [:catn [::run-id :string]] :any]}
   [run-id]
-  (js/Reflect.get js/globalThis (str stash-key-prefix run-id)))
+  (some (fn [entry]
+          (when (= run-id (::run-id entry))
+            (::run-result entry)))
+        (rseq @!run-stash)))
 
 ;; ============================================================
 ;; Record — minimal projection to the DB. NEVER transacts events.
@@ -886,8 +900,9 @@
   "The `{::run-id ::run-result}` for the most recently recorded run, or nil.
 
    Scoped to this pod. Pulls the run-id from the DB projection, then
-   fetches the full event sequence from the globalThis stash that
-   `stash-run!` wrote.
+   fetches the full event sequence from the bounded process stash that
+   `stash-run!` wrote. An evicted or prior-process run returns nil; database
+   summaries remain available independently.
 
    Used by humans at the REPL and by agents reading their own most-
    recent test outcome. NOT per-agent today — Phase 2+ will key by

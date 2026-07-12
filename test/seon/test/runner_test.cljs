@@ -252,7 +252,7 @@
                   (done))))))
 
 ;; ============================================================
-;; last-result — DB lookup + globalThis stash round-trip
+;; last-result — DB lookup + bounded process-stash round-trip
 ;; ============================================================
 
 (deftest last-result-roundtrips-most-recent-run
@@ -282,6 +282,37 @@
         (.catch (fn [e]
                   (is false (str "threw — " e))
                   (done))))))
+
+(deftest full-run-stash-evicts-oldest-and-retains-newest
+  ;; Full event vectors are process-only drill-down data. Repeated test runs
+  ;; must plateau rather than leave unbounded globalThis properties behind.
+  (let [stash (deref #'r/!run-stash)
+        cap   (deref #'r/run-stash-cap)
+        prior @stash
+        legacy-before
+        (set (filter #(str/starts-with? % "__seon_test_run_")
+                     (js/Object.keys js/globalThis)))
+        run-result {:seon.test.runner/events []
+                    :seon.test.runner/summary
+                    {:test 0 :pass 0 :fail 0 :error 0}}]
+    (try
+      (reset! stash [])
+      (let [ids (mapv (fn [_]
+                        (r/stash-run!
+                          {:seon.test.runner/run-result run-result}))
+                      (range (inc cap)))]
+        (is (= cap (count @stash))
+            "the process store plateaus at its item cap")
+        (is (nil? (r/fetch-run (first ids)))
+            "the oldest full result is evicted")
+        (is (= run-result (r/fetch-run (last ids)))
+            "the newest full result remains available")
+        (is (= legacy-before
+               (set (filter #(str/starts-with? % "__seon_test_run_")
+                            (js/Object.keys js/globalThis))))
+            "the canonical store creates no parallel globalThis properties"))
+      (finally
+        (reset! stash prior)))))
 
 ;; ============================================================
 ;; Async driver — the body's `(is true)` assertion fires inside a
