@@ -260,11 +260,25 @@ under the byte-exact rule). Per-kind: `transact!` 4, `reconcile!` 5,
 `defn` 21, `register!` 22, `query` ~58 — vs needle's ≥120-per-kind
 guidance. Therefore:
 
-1. **Primary: synthetic/gold.** Frontier-driven sessions on ephemeral
-   clusters generating (profile-context, forms) pairs at scale —
-   situations staged as REAL db states, contexts rendered by the real
-   profile (byte-exact even for synthetic data) — plus
-   orchestrator-authored gold with agy paraphrase augmentation.
+1. **Primary: synthetic/gold, REPL-proven — no live LLM harness
+   needed for the bulk (owner, 2026-07-12).** Orchestrator-driven
+   data-gen agents work the REPL directly (the seon MCP eval surface /
+   wire REPL): stage a scenario, render the profile, eval the gold
+   forms, verify effects, mint the pair. Two isolation tiers:
+   - **Value tier (the bulk)**: datahike immutability dissolves state
+     reset — stage each scenario with `db-with` over a shared SEEDED
+     BASE db value (never touching any store), render the profile over
+     that value (pure fn of the db — byte-exact by construction), eval
+     + verify, discard the value. Zero reset cost, zero cross-agent
+     interference, covers all v0 form kinds.
+   - **Cluster tier (the tail)**: ephemeral concurrent clusters
+     (per-cluster store + own pod; `bin/seon cluster fork/destroy`,
+     the acme precedent) for scenarios needing the full runtime — blob
+     writes, `my.shell` effects, benchmark-oracle execution.
+   The live agent harness is reserved for what only it can measure:
+   KT4 (suggestion uptake by a real driven agent), agent-level lift,
+   and benchmark-oracle runs. Plus agy paraphrase augmentation over
+   the authored guidance texts.
    `reconcile!`-as-cheap-supervision applies NARROWLY: as a label
    source only for STRUCTURED frontier markdown where the parse is
    information-preserving; always as the oracle/filter (parse+compile
