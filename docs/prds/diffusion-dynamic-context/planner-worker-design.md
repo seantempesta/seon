@@ -137,6 +137,35 @@ the write-back is one function with three callers.
   no fn list, no mode, no plan knowledge in the driver (same
   registry-driven pattern as the slot masks).
 
+## The separation of authority (owner design session, 2026-07-11 late)
+
+Not "high vs low level" as a prose rule — **editability ZONES in the
+one plan tree, enforced mechanically**:
+
+- **Frontier = the skeleton, rarely.** Root `::goal` + the top layer of
+  milestone steps, outcomes with falsifiable `::expect`s, never
+  function names. Runs at task start + on escalation only; its
+  markdown lands via `reconcile!` — strategy arrives as DATA.
+- **Diffusion = the flesh, every step.** Below the frontier layer: the
+  per-step plan pass may SPLIT a frontier leaf into substeps, SHARPEN
+  expects into checkable form, reorder ITS OWN subtree, take ▶,
+  propose closure.
+- **The oracle = "done."** `done!` stays expect-gated and eval-proven —
+  marking things off is a PROOF event, not either model's judgment.
+- **Enforcement is clamps, not prose:** plan nodes carry authorship
+  via tx provenance; frontier-authored titles/expects render CLAMPED
+  in the plan-pass buffer — diffusion can nest under them and mark
+  status but cannot rewrite or drop strategy, by construction (the
+  unforgeable-ids trick, one level up).
+- **Escalation = derived DB state:** stuck×N / repeated
+  expect-failure is a query; rows → the planner re-plans THAT subtree
+  via `reconcile!`, clamped to its own zone. No ad-hoc frontier calls;
+  frontier spend stays proportional to genuine strategic trouble.
+
+One tree, one function (`reconcile!`), two editability zones, closure
+by proof. Each side is trusted only with decisions it can be
+mechanically held to.
+
 ## The per-step plan pass (owner, 2026-07-11 late — the W2 headline)
 
 **Owner directive: "if planning via diffusion is cheap and high
