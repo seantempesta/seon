@@ -31,7 +31,14 @@ targets, JSON-native `json_tools`/`json_target` via the KT2b layer),
 fit tables (2048 holds 100% of rows; card budget +14 @2048 / +55
 @4096), and the `enc_rope_scale` position-interpolation scaffold
 (`seon_needle.extend`, default byte-parity) with a green 2048 overfit
-smoke in both arms — recommendation 2048. Live status: [[roadmap.md]].
+smoke in both arms — recommendation 2048. **Surface-tuning sweep RUN**
+([[research/surface-tuning-sweep-2026-07-12.md]]): 16 needle + 6 Qwen
+presentation ablations over the KT2b lint — docstring rewrites transfer
+cross-model (+.041/+.048), ns-strip reverses on Qwen (+.152/−.055),
+stack-of-real-fn-fixes ≥ facades on both models (no toolkit facades
+justified except the kb recall contract gap), compact cards @8 = the
+serving default, 16-menu = a discrimination cliff even when it fits.
+Live status: [[roadmap.md]].
 
 ## Settled — do NOT re-litigate
 
