@@ -75,7 +75,18 @@ owner-gated (context frozen). Probe: `src-needle/…/lint_probe.py`,
 
 ## Ordered path (spend-gated; thresholds in design.md §Measurement)
 
-1. **KT1 tokenizer envelope** — needs A1's real exported rows; hours.
+1. **KT1 tokenizer envelope — FIRED 2026-07-12**
+   ([[research/kt1-tokenizer-envelope-2026-07-12.md]]): 95.3% of full
+   encoder inputs >1024 (kill >25%); targets PASS (median 76 tok,
+   byte-fallback 2.6%). Diagnosis: envelope-FIT, not tokenizer — the
+   profile caps were denominated in `chars/4` (worth 1.86× needle
+   tokens; "678 est" ≈ 1,265 real) + 15.2% context byte-fallback from
+   render glyphs (~110-165 tok/row) + fat cards (−151 median when
+   compacted). OWNER DECISION pending: (a) re-cap ~800 real tokens +
+   compact cards + owner-gated glyph dial, re-export, re-measure;
+   (b) 2048-RoPE-extension finetune (tied embeddings forbid
+   retokenizing, NOT longer-context finetuning); (c) kill as
+   designed.
 2. **KT2 zero-shot copy fidelity** — stock checkpoint, hours (KT2b's
    0.73 per-key copy accuracy on ids/strings is favorable adjacent
    evidence).
