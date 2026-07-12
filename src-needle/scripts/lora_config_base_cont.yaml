@@ -1,0 +1,26 @@
+# LoRA arm 2 — Qwen2.5-Coder-1.5B BASE, continuation framing (completions
+# format, prompt-masked): cont-doc prompt -> FIRST form (next-form target,
+# matching the cont serving stop condition). Tests whether the transcript-
+# document framing can LEARN what stock base could not (KT3b cont .115).
+model: mlx-community/Qwen2.5-Coder-1.5B-4bit
+train: true
+data: /Users/sean/src/seon/src-needle/data/lora/cont
+mask_prompt: true
+fine_tune_type: lora
+optimizer: adam
+num_layers: -1
+batch_size: 4
+iters: 500
+val_batches: -1
+learning_rate: 1.0e-4
+steps_per_report: 20
+steps_per_eval: 100
+save_every: 100
+adapter_path: /Users/sean/src/seon/src-needle/checkpoints/lora-qwen25c15b-base-cont
+max_seq_length: 2560
+grad_checkpoint: true
+seed: 42
+lora_parameters:
+  rank: 16
+  dropout: 0.05
+  scale: 20.0

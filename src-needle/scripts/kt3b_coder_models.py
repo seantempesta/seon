@@ -347,6 +347,8 @@ def main():
     ap.add_argument("--tag", required=True)
     ap.add_argument("--arms", default="cont",
                     help="comma list: cont,instr-zero,instr-few,fim")
+    ap.add_argument("--adapter-path", default=None,
+                    help="LoRA adapter dir (mlx_lm.load adapter_path)")
     ap.add_argument("--max-tokens", type=int, default=2048)
     ap.add_argument("--limit", type=int, default=0, help="first N rows (smoke)")
     args = ap.parse_args()
@@ -355,8 +357,15 @@ def main():
     exemplars = pick_exemplars(rows)
     OUTDIR.mkdir(parents=True, exist_ok=True)
 
-    print(f"loading {args.model} …", flush=True)
-    model, tokenizer = load(args.model)
+    print(f"loading {args.model} (adapter: {args.adapter_path}) …", flush=True)
+    model, tokenizer = load(args.model, adapter_path=args.adapter_path)
+    # mlx-community 4-bit conversions carry config eos_token_id 151643
+    # (<|endoftext|>) ONLY and no generation_config.json; upstream Qwen
+    # lists [<|im_end|>, <|endoftext|>]. Without this a chat-tuned model
+    # that ends its turn at <|im_end|> (e.g. a LoRA trained on chat rows)
+    # never stops and burns the token cap.
+    if "<|im_end|>" in tokenizer.get_vocab():
+        tokenizer.add_eos_token("<|im_end|>")
 
     for arm in args.arms.split(","):
         early_stop = arm in ("cont", "fim")
