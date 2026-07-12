@@ -294,17 +294,15 @@
   ;; Re-arm the ONE ticker so a hot reload doesn't stack timers and the tick
   ;; body runs just-reloaded code (idempotent — clears the prior interval).
   (agent-loop/install-ticker!)
-  ;; Re-instrument from the program graph (C46): shadow just re-eval'd the
-  ;; changed nses AND their dependents, replacing malli-wrapped vars with
-  ;; fresh UNWRAPPED fns; without this, coverage stays degraded until the
-  ;; next cold runtime start. `instrument-from-db!` is idempotent
-  ;; (`:skip-instrumented? true`; simple fns re-wrap from recorded
-  ;; originals) — ~450ms, a dev-reload-only cost. Guarded: a reload can
-  ;; only fire post-boot, but the conn check keeps a pre-boot edge safe.
+  ;; Shadow re-emits changed namespaces and dependents as fresh unwrapped
+  ;; functions, but its zero-argument after-load hook does not identify those
+  ;; sources. Derive the live gaps once and pass ONLY those definitions through
+  ;; the exact delta boundary. Healthy wrappers retain object identity.
   (when-let [conn db/*conn*]
-    (let [stats (instrument/instrument-from-db! @conn)]
+    (let [stats (instrument/refresh-live-coverage! @conn)]
       (log/info-console! "seon.client"
-                         (str "reload: re-instrumented " (pr-str stats)))))
+                         (str "reload: instrumentation gaps refreshed "
+                              (pr-str stats)))))
   (start-heartbeat!))
 
 (defn ^:async mem-db

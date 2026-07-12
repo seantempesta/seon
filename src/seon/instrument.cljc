@@ -601,78 +601,107 @@
                 (get rejected-counts ::unresolvable-schema 0))))))
 
 #?(:cljs
-   (defn coverage-gaps
-     "Specced program-graph fns whose LIVE var carries no malli wrapper.
+   (defn- program-schema-rows
+     "The canonical qualified-symbol/spec rows, in stable order."
+     [db]
+     (sort-by first
+              (db/query '[:find ?sym ?spec
+                          :where [?e :seon.fn/sym ?sym]
+                                 [?e :seon.fn/spec ?spec]]
+                        db))))
 
-      The derived coverage invariant (C46): after [[instrument-from-db!]]
-      (boot, `start-agent!`, or the hot-reload re-assert in
-      `seon.client/after-reload`) every specced fn whose live var is
-      resolvable is either malli-wrapped or a STRUCTURAL
-      [[async-unwrappable?]] opt-out. This census recomputes that from the
-      db + the live JS vars at call time — nothing stored — so a non-empty
-      result IS a violation (typically a ns re-eval that replaced wrapped
-      vars without a re-instrument pass, or a spec that no longer
-      reads/resolves). Rows whose var is not live (a prior session's fn)
-      are not gaps — an uncallable fn has no coverage risk. Returns `[]`
-      when the `SEON_INSTRUMENT` kill-switch is off (no invariant to hold)
-      and, in a healthy runtime, `[]` always. Each gap carries the
-      qualified sym string and a reason: `::unwrapped` (wrappable but not
-      wrapped), `::bad-spec` (spec string unreadable), or
-      `::unresolvable-schema` (spec references a pruned/renamed schema)."
-     {:malli/schema [:=> [:cat :any]
+#?(:cljs
+   (defn- coverage-gap
+     "A derived live-wrapper gap for one canonical row, or nil."
+     [[sym-str spec-str]]
+     (when-let [slash (str/index-of (str sym-str) "/")]
+       (let [ns-sym (symbol (subs sym-str 0 slash))
+             fn-sym (symbol (subs sym-str (inc slash)))
+             target-sym (symbol sym-str)
+             f (find-js-var ns-sym fn-sym)
+             ;; A simple wrapper records its original on the wrapper. Malli
+             ;; instruments multi-arity fns in place, so their live original
+             ;; carries the instrumentation flag instead.
+             wrapped? (and f
+                           (or (some? (gobj/get f "malli$instrument$original"))
+                               (and (some? (gobj/get f "malli$instrument$instrumented?"))
+                                    (not (-simple-fixed-arity-fn? f)))))]
+         (when (and f (not wrapped?))
+           (let [schema (try (reader/read-string spec-str)
+                             (catch :default _ ::bad))
+                 resolves? (when-not (= ::bad schema)
+                             (try (m/schema schema) true
+                                  (catch :default _ false)))]
+             (cond
+               (= ::bad schema)
+               {::sym sym-str ::target-sym target-sym ::reason ::bad-spec}
+
+               (not resolves?)
+               {::sym sym-str ::target-sym target-sym
+                ::schema-form schema ::reason ::unresolvable-schema}
+
+               ;; The function body is the validation boundary for the one
+               ;; async shape Malli cannot wrap correctly.
+               (async-unwrappable? (async-fn? f) f schema)
+               nil
+
+               :else
+               {::sym sym-str ::target-sym target-sym
+                ::schema-form schema ::reason ::unwrapped})))))))
+
+#?(:cljs
+   (defn- coverage-gaps-for-rows [rows]
+     (into [] (keep coverage-gap) rows)))
+
+#?(:cljs
+   (defn coverage-gaps
+     "Specced program-graph fns whose live var has no Malli wrapper.
+
+      This is a derived invariant over canonical DB rows plus live function
+      objects; it stores no registry or dirty flag. Rows with no live var and
+      structural async opt-outs are not gaps. A result names an unwrapped,
+      unreadable, or currently unresolvable contract."
+     {:malli/schema [:=> [:catn [::db :any]]
                      [:vector [:map
-                               [:seon.instrument/sym :string]
-                               [:seon.instrument/reason :keyword]]]]}
+                               [::sym :string]
+                               [::reason :keyword]]]]}
      [db]
      (if-not (enabled?)
        []
-       (let [rows (db/query '[:find ?sym ?spec
-                              :where [?e :seon.fn/sym ?sym]
-                                     [?e :seon.fn/spec ?spec]]
-                            db)]
-         (into []
-               (keep
-                 (fn [[sym-str spec-str]]
-                   (when-let [slash (str/index-of (str sym-str) "/")]
-                     (let [ns-sym   (symbol (subs sym-str 0 slash))
-                           fn-sym   (symbol (subs sym-str (inc slash)))
-                           f        (find-js-var ns-sym fn-sym)
-                           ;; Wrapped = the wrapper's recorded original
-                           ;; (simple path), OR malli's `instrumented?` flag
-                           ;; on a NON-simple fn (the wrap-in-place path,
-                           ;; where the live object stays the original with
-                           ;; wrapped arity slots). The flag alone is NOT
-                           ;; proof for a simple fn: malli stamps it on the
-                           ;; ORIGINAL too, so a restored/stripped original
-                           ;; still carries it while validating nothing.
-                           wrapped? (and f
-                                         (or (some? (gobj/get f "malli$instrument$original"))
-                                             (and (some? (gobj/get f "malli$instrument$instrumented?"))
-                                                  (not (-simple-fixed-arity-fn? f)))))]
-                       (when (and f (not wrapped?))
-                         ;; Schema work only for the (rare) unwrapped
-                         ;; candidates — the healthy-path cost is pure
-                         ;; var walking.
-                         (let [schema (try (reader/read-string spec-str)
-                                           (catch :default _ ::bad))
-                               ok?    (when-not (= ::bad schema)
-                                        (try (m/schema schema) true
-                                             (catch :default _ false)))]
-                           (cond
-                             (= ::bad schema)
-                             {:seon.instrument/sym    sym-str
-                              :seon.instrument/reason ::bad-spec}
+       (mapv #(select-keys % [::sym ::reason])
+             (coverage-gaps-for-rows (program-schema-rows db))))))
 
-                             (not ok?)
-                             {:seon.instrument/sym    sym-str
-                              :seon.instrument/reason ::unresolvable-schema}
+#?(:cljs
+   (defn refresh-live-coverage!
+     "Instrument only wrappers lost since cold reconstruction.
 
-                             ;; STRUCTURAL opt-out — the fn's own body is
-                             ;; the validation boundary; not a gap.
-                             (async-unwrappable? (async-fn? f) f schema)
-                             nil
-
-                             :else
-                             {:seon.instrument/sym    sym-str
-                              :seon.instrument/reason ::unwrapped})))))))
-               (sort-by first rows))))))
+      Agent evals call [[instrument-delta!]] with their accepted definitions
+      directly. Shadow hot reload does not pass changed sources to its
+      zero-argument `after-load` hook, so this correctness fallback scans the
+      canonical rows once, performs schema work only for live unwrapped vars,
+      and sends precisely those symbols through the same delta boundary.
+      Healthy wrapped functions are never unstrumented or re-instrumented.
+      No gaps means no Malli mutation."
+     {:malli/schema [:=> [:catn [::db :any]] :map]}
+     [db]
+     (if-not (enabled?)
+       {::enabled? false ::n-scanned 0 ::n-gaps 0
+        ::n-unstrumented 0 ::n-instrumented 0}
+       (let [rows (program-schema-rows db)
+             gaps (coverage-gaps-for-rows rows)
+             changed-syms (into #{} (map ::target-sym) gaps)
+             targets (into []
+                           (keep (fn [{::keys [target-sym schema-form]}]
+                                   (when schema-form
+                                     {::sym target-sym
+                                      ::schema-form schema-form})))
+                           gaps)
+             result (if (seq changed-syms)
+                      (instrument-delta!
+                        {::changed-syms changed-syms ::targets targets})
+                      {::enabled? true ::n-unstrumented 0 ::n-instrumented 0
+                       ::accepted-syms #{} ::rejected []})]
+         (assoc result
+                ::n-scanned (count rows)
+                ::n-gaps (count gaps)
+                ::gaps (mapv #(select-keys % [::sym ::reason]) gaps))))))

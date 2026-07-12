@@ -4,6 +4,7 @@
     [cljs.test :refer [deftest is testing]]
     [goog.object :as gobj]
     [malli.core :as m]
+    [seon.db :as db]
     [seon.instrument :as instrument]))
 
 (defn probe-a [x] x)
@@ -24,6 +25,11 @@
 
 (defn- live-fn [sym]
   (instrument/find-js-var (symbol (namespace sym)) (symbol (name sym))))
+
+(defn- set-live-fn! [sym f]
+  (let [ns-object (js/goog.getObjectByName
+                    (cljs.core/munge (namespace sym)) js/goog.global)]
+    (gobj/set ns-object (cljs.core/munge (name sym)) f)))
 
 (deftest exact-data-and-delta-refresh-only-affected-wrappers
   (let [roster-before (m/function-schemas :cljs)
@@ -85,3 +91,42 @@
              :seon.instrument/reason
              :seon.instrument/unresolvable-schema}]
            (:seon.instrument/rejected result)))))
+
+(deftest reload-refresh-instruments-only-new-live-gaps-once
+  (let [schema-form [:=> [:cat :int] :int]
+        rows [[(str a-sym) (pr-str schema-form)]
+              [(str b-sym) (pr-str schema-form)]]
+        a-base (live-fn a-sym)
+        b-base (live-fn b-sym)]
+    (try
+      (instrument/instrument-targets!
+        [(target a-sym schema-form) (target b-sym schema-form)])
+      (when (instrument/enabled?)
+        (let [b-wrapper (live-fn b-sym)]
+          ;; Model Shadow replacing exactly one compiled var with a fresh raw
+          ;; function. Its after-load hook does not tell application hooks
+          ;; which source files were imported.
+          (set-live-fn! a-sym (fn [x] x))
+          (with-redefs [db/query (fn [& _] rows)]
+            (let [first-refresh (instrument/refresh-live-coverage! ::fake-db)
+                  a-wrapper (live-fn a-sym)]
+              (is (= 2 (:seon.instrument/n-scanned first-refresh)))
+              (is (= 1 (:seon.instrument/n-gaps first-refresh)))
+              (is (= 1 (:seon.instrument/n-instrumented first-refresh)))
+              (is (trapped? #(probe-a "wrong"))
+                  "the freshly emitted raw function is wrapped again")
+              (is (identical? b-wrapper (live-fn b-sym))
+                  "the healthy peer wrapper is never replaced")
+              (let [second-refresh
+                    (instrument/refresh-live-coverage! ::fake-db)]
+                (is (= 0 (:seon.instrument/n-gaps second-refresh)))
+                (is (= 0 (:seon.instrument/n-instrumented second-refresh)))
+                (is (identical? a-wrapper (live-fn a-sym))
+                    "one definition is instrumented once, not on every scan")
+                (is (identical? b-wrapper (live-fn b-sym))))))))
+      (finally
+        (instrument/instrument-delta!
+          {::instrument/changed-syms target-syms
+           ::instrument/targets []})
+        (set-live-fn! a-sym a-base)
+        (set-live-fn! b-sym b-base)))))
