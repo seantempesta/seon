@@ -90,9 +90,9 @@
   []
   (let [cs (await (repl/ensure-bootstrap!))]
     (await (db/transact! {:seon.db/tx-data [{:seon.user/id "user"}]}))
+    (await (agent/create! {:seon.agent/id agent-id}))
     (await (db/with-agent agent-id
              (fn ^:async boot []
-               (await (agent/create! {:seon.agent/id agent-id}))
                (await (seval/setup-agent-ns! cs (home/home-ns agent-id) agent-id)))))
     cs))
 
@@ -509,23 +509,71 @@
                           (fn [] (scripted-llm "(complete \"ok\")"))]
               ;; Spawn with NO id — start! MINTS one and must return it. (No
               ;; agent scope ⇒ parentless child.)
-              (let [res      (await (agent/start! {:seon.agent/purpose "spawn-arm test"}))
-                    child-id (:seon.agent/id res)]
-                (testing "start! returns the minted child id (addressable same-turn)"
-                  (is (string? child-id) "response carries :seon.agent/id")
-                  (is (some? (db/entity {:seon.db/ref [:seon.agent/id child-id]}))
-                      "the returned id names a real entity — not a ghost"))
-                (testing "the minted child is ARMED in-process: a message wakes it"
-                  (is (= [] (runs-for child-id)) "idle, no run before any message")
-                  (await (send-inbound! [:seon.user/id "user"]
-                                        child-id "wake up" 0 :human))
-                  (let [woke? (await (wait-until
-                                       (fn [] (seq (runs-for child-id)))
-                                       8000 25))]
-                    (is woke?
-                        (str "a message sent immediately after start! opened a run "
-                             "on the freshly-spawned child — no out-of-band "
-                             "resume"))))))))
+              (await
+                (db/without-agent
+                  (fn ^:async host-start! []
+                    (await
+                      (db/with-tx-context
+                        {:seon.db/user nil
+                         :seon.db/process nil}
+                        (fn ^:async mint-message-and-observe! []
+                          (is (nil? (db/current-agent-id))
+                              "host start has no calling agent")
+                          (let [res      (await
+                                           (agent/start!
+                                             {:seon.agent/purpose
+                                              "spawn-arm test"}))
+                                child-id (:seon.agent/id res)]
+                            (testing "start! returns the minted child id (addressable same-turn)"
+                              (is (string? child-id) "response carries :seon.agent/id")
+                              (is (some? (db/entity {:seon.db/ref [:seon.agent/id child-id]}))
+                                  "the returned id names a real entity — not a ghost"))
+                            (testing "the minted child is ARMED in-process: a message wakes it"
+                              (is (= [] (runs-for child-id)) "idle, no run before any message")
+                              (await (send-inbound! [:seon.user/id "user"]
+                                                    child-id "wake up" 0 :human))
+                              (let [woke? (await (wait-until
+                                                   (fn [] (seq (runs-for child-id)))
+                                                   8000 25))]
+                                (is woke?
+                                    (str "a message sent immediately after start! opened a run "
+                                         "on the freshly-spawned child — no out-of-band "
+                                         "resume"))
+                                (when woke?
+                                  (let [run-id (first (runs-for child-id))]
+                                    (is (= #{[child-id]}
+                                           (db/query
+                                             {:seon.db/query
+                                              '[:find ?user-id
+                                                :in $ ?run-id
+                                                :where
+                                                [?run :seon.agent.run/id ?run-id ?tx]
+                                                [?tx :seon.db/user ?user]
+                                                [?user :seon.agent/id ?user-id]
+                                                [?tx :seon.db/process ?process]
+                                                [?process :seon.db.process/id
+                                                 :seon.db.process/repl]]
+                                              :seon.db/args [run-id]}))
+                                        "the wake transaction belongs to the child through REPL")
+                                    (is (await
+                                          (wait-until
+                                            (fn []
+                                              (and
+                                                (= :closed
+                                                   (:seon.agent.run/status
+                                                     (run/snapshot
+                                                       {:seon.agent.run/id run-id})))
+                                                (seq (turns-for child-id))
+                                                (every?
+                                                  (fn [turn-eid]
+                                                    (contains?
+                                                      #{:done :error}
+                                                      (:seon.agent.turn/status
+                                                        (db/entity
+                                                          {:seon.db/ref turn-eid}))))
+                                                  (turns-for child-id))))
+                                            8000 25))
+                                        "the child loop settles before the isolated conn is restored")))))))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

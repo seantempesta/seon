@@ -386,6 +386,21 @@
 ;; warning surface the refusal.
 ;; ============================================================
 
+(defn- with-agent-repl
+  "Run one asynchronous agent-owned callback with final provenance.
+
+   Wake listeners execute inside the transaction fiber that notified them;
+   without this boundary, an inbound caller's explicit transaction user can
+   survive `setTimeout` and override `with-agent`. Every wake, renew, and
+   re-drive therefore enters both the agent identity and its REPL process."
+  [id f]
+  (db/with-agent id
+    (fn []
+      (db/with-tx-context
+        {:seon.db/user [:seon.agent/id id]
+         :seon.db/process [:seon.db.process/id :seon.db.process/repl]}
+        f))))
+
 (defn wake-handler
   "Return the tx-listener handler for `input`'s agent.
 
@@ -440,7 +455,10 @@
             (js/setTimeout
               (fn []
                 (-> (js/Promise.resolve
-                      (db/with-agent id (fn ^:async renew! [] (await (renew-current-run! id)))))
+                      (with-agent-repl
+                        id
+                        (fn ^:async renew! []
+                          (await (renew-current-run! id)))))
                     (.catch (fn [e]
                               (js/console.error
                                 (str "seon.agent.loop: wake renew threw for "
@@ -453,7 +471,8 @@
             (js/setTimeout
               (fn []
                 (-> (js/Promise.resolve
-                      (db/with-agent id
+                      (with-agent-repl
+                        id
                         (fn ^:async wake! []
                           (let [opened (await (run/open-run!
                                                 {:seon.agent/id           id
@@ -475,7 +494,8 @@
                               :else
                               (js/console.error
                                 (str "seon.agent.loop: open-run! FAILED for " id
-                                     ": " (:seon.error/message (:seon.db/error opened)))))))))
+                                     ": " (:seon.error/message
+                                            (:seon.db/error opened)))))))))
                     (.catch (fn [e]
                               (js/console.error
                                 (str "seon.agent.loop: wake loop threw for "
@@ -511,10 +531,12 @@
     (js/setTimeout
       (fn []
         (-> (js/Promise.resolve
-              (db/with-agent id
+              (with-agent-repl
+                id
                 (fn ^:async redrive! []
                   (when-let [cur (run/current-run {:seon.agent/id id})]
-                    (await (run-loop! input (:seon.agent.run/id cur)))))))
+                    (await
+                      (run-loop! input (:seon.agent.run/id cur)))))))
             (.catch (fn [e]
                       (js/console.error
                         (str "seon.agent.loop: drive-run! threw for "
