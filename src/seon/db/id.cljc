@@ -79,11 +79,24 @@
                    [::identity-attr ::identity-attr]])
 (schema/register! ::allocations [:vector {:min 1} ::allocation])
 (schema/register! ::transaction-builder 'fn?)
+(schema/register! ::candidate-key ::key)
+(schema/register! ::lookup-ref
+                  [:tuple ::identity-attr :seon.db/lookup-ref-value])
+(schema/register! ::dependent-identity
+                  [:map
+                   [::candidate-key ::candidate-key]
+                   [::lookup-ref ::lookup-ref]])
+(schema/register! ::dependent-identities
+                  [:vector {:min 1} ::dependent-identity])
+(schema/register! ::dependent-lookup-refs
+                  [:vector {:min 1} ::lookup-ref])
 (schema/register! ::generated-candidate
                   [:map
                    [::key ::key]
                    [::identity-attr ::identity-attr]
-                   [::value ::value]])
+                   [::value ::value]
+                   [::dependent-lookup-refs {:optional true}
+                    ::dependent-lookup-refs]])
 (schema/register! ::generated-candidates
                   [:vector {:min 1} ::generated-candidate])
 (schema/register! ::generated-identity-attrs
@@ -122,6 +135,7 @@
 (schema/register! ::db-value :any)
 (schema/register! ::transaction-data [:vector :any])
 (schema/register! ::tempid [:or :string :int])
+(schema/register! ::transaction-tempids [:vector ::tempid])
 (schema/register! ::allocation-tempids [:map-of ::key ::tempid])
 (schema/register! ::report-tempids :map)
 (schema/register! ::reserved-fields [:vector :keyword])
@@ -141,6 +155,12 @@
   [::transaction-data ::transaction-data]
   [::generated-candidates ::generated-candidates]
   [::generated-identity-attrs ::generated-identity-attrs]])
+
+(schema/register!
+ ::transaction-tempids-request
+ [:map
+  [::db-value ::db-value]
+  [::transaction-data ::transaction-data]])
 
 (schema/register!
  ::prepare-response
@@ -261,12 +281,29 @@
   [datahike-schema tx-data]
   (mapcat #(entity-maps-in datahike-schema %) tx-data))
 
+(defn- dependent-identity-claims
+  "The candidate-owned dependent identity claims as
+   `[generated-candidate lookup-ref]` pairs. Internal normalized form: the
+   public builder's candidate-key entries have already been attached to their
+   generated candidate before the request reaches the serialized writer."
+  [candidates]
+  (mapcat (fn [candidate]
+            (map (fn [lookup-ref] [candidate lookup-ref])
+                 (::dependent-lookup-refs candidate)))
+          candidates))
+
+(defn- dependent-lookup-ref-set
+  [candidates]
+  (into #{} (map second) (dependent-identity-claims candidates)))
+
 (defn- manifest-error
   [installed-schema tx-data candidates identity-attrs]
   (let [datahike-schema (effective-schema installed-schema tx-data)
         identity-attr-set (set identity-attrs)
         candidate-keys (map ::key candidates)
-        candidate-attrs (map ::identity-attr candidates)]
+        candidate-attrs (map ::identity-attr candidates)
+        dependent-claims (vec (dependent-identity-claims candidates))
+        dependent-lookups (mapv second dependent-claims)]
     (cond
       (not (vector? candidates))
       "generated candidates must be a vector"
@@ -289,9 +326,13 @@
                   (not (qualified-keyword? (::key candidate)))
                   (not (qualified-keyword? (::identity-attr candidate)))
                   (not (string? (::value candidate)))
-                  (str/blank? (::value candidate))))
+                  (str/blank? (::value candidate))
+                  (and (contains? candidate ::dependent-lookup-refs)
+                       (not (m/validate ::dependent-lookup-refs
+                                        (::dependent-lookup-refs candidate))))))
             candidates)
-      "each generated candidate must have a key, identity attr, and value"
+      (str "each generated candidate must have a key, identity attr, value, "
+           "and valid dependent lookup refs")
 
       (not= (count candidate-keys) (count (distinct candidate-keys)))
       "generated candidate keys must be distinct"
@@ -307,6 +348,14 @@
                    (not (identity-attr? installed-schema attr))))
             identity-attrs)
       "an installed generated identity attr is not db.unique/identity"
+
+      (not= (count dependent-lookups) (count (distinct dependent-lookups)))
+      "dependent identity lookup refs must be distinct across candidates"
+
+      (some (fn [[_candidate [attr _value]]]
+              (not (identity-attr? datahike-schema attr)))
+            dependent-claims)
+      "every dependent identity attr must be installed or declared as identity"
 
       :else
       nil)))
@@ -346,6 +395,31 @@
              [(nth item 2) (nth item 3)]))
          tx-data)))
 
+(defn- entity-asserts-identity?
+  [entity [attr value]]
+  (and (contains? entity attr)
+       (= value (get entity attr))))
+
+(defn- claimed-identity-pairs
+  "Every generated or dependent identity pair explicitly claimed on `entity`.
+   Other identity assertions are ordinary upserts and therefore disqualify a
+   claimed-new entity when they already resolve in the writer's old DB."
+  [candidates entity]
+  (into (into #{}
+              (map (juxt ::identity-attr ::value))
+              (matching-candidates candidates entity))
+        (filter #(entity-asserts-identity? entity %))
+        (dependent-lookup-ref-set candidates)))
+
+(defn- existing-unclaimed-identity?
+  [db-value installed-schema candidates entity]
+  (let [claimed (claimed-identity-pairs candidates entity)]
+    (some (fn [[attr value]]
+            (and (identity-attr? installed-schema attr)
+                 (not (contains? claimed [attr value]))
+                 (seq (d/datoms db-value :avet attr value))))
+          entity)))
+
 (defn- candidate-entity-error
   [db-value installed-schema datahike-schema tx-data candidates]
   (let [entities (vec (all-entity-maps datahike-schema tx-data))
@@ -358,21 +432,13 @@
                                    entities)
                   entity (first matches)
                   entity-id (:db/id entity)
-                  candidate-pairs
-                  (into #{}
-                        (map (juxt ::identity-attr ::value))
-                        (matching-candidates candidates entity))
                   existing-other-identity?
-                  (some (fn [[attr value]]
-                          (and (identity-attr? installed-schema attr)
-                               (not (contains? candidate-pairs [attr value]))
-                               (seq (d/datoms db-value :avet attr value))))
-                        entity)
+                  (existing-unclaimed-identity? db-value installed-schema
+                                                candidates entity)
                   duplicate-identity-assertion?
-                  (some (fn [[attr value]]
-                          (and (identity-attr? datahike-schema attr)
-                               (> (get assertion-counts [attr value] 0) 1)))
-                        entity)]
+                  (some (fn [{attr ::identity-attr value ::value}]
+                          (> (get assertion-counts [attr value] 0) 1))
+                        (matching-candidates candidates entity))]
               (cond
                 (not= 1 (count matches))
                 "each generated candidate must occur in exactly one entity map"
@@ -391,6 +457,33 @@
                 nil)))
           candidates)))
 
+(defn- dependent-identity-entity-error
+  [db-value installed-schema datahike-schema tx-data candidates]
+  (let [entities (vec (all-entity-maps datahike-schema tx-data))]
+    (some (fn [[_candidate lookup-ref]]
+            (let [matches (filterv #(entity-asserts-identity? % lookup-ref)
+                                   entities)]
+              (cond
+                (empty? matches)
+                "each dependent identity must occur in a transaction entity map"
+
+                (some (fn [entity]
+                        (let [entity-id (:db/id entity)]
+                          (and (contains? entity :db/id)
+                               (not (or (nil? entity-id)
+                                        (tempid? entity-id))))))
+                      matches)
+                "a dependent identity entity must be new or use a tempid"
+
+                (some #(existing-unclaimed-identity?
+                        db-value installed-schema candidates %)
+                      matches)
+                "a dependent identity entity resolves an unclaimed existing identity"
+
+                :else
+                nil)))
+          (dependent-identity-claims candidates))))
+
 (defn- existing-candidate-conflict
   [db-value installed-schema candidates identity-attrs]
   (some (fn [candidate]
@@ -402,6 +495,14 @@
                       candidate))
                   identity-attrs)))
         candidates))
+
+(defn- existing-dependent-identity-conflict
+  [db-value installed-schema candidates]
+  (some (fn [[candidate [attr value]]]
+          (when (and (identity-attr? installed-schema attr)
+                     (seq (d/datoms db-value :avet attr value)))
+            candidate))
+        (dependent-identity-claims candidates)))
 
 (defn- candidate-entities
   [datahike-schema tx-data candidates]
@@ -443,14 +544,89 @@
                 candidate)))
           candidates)))
 
-(defn- transaction-tempids
-  [tx-data]
-  ;; Deliberately over-collect scalar strings/negative integers. A tempid is
-  ;; transaction-local; avoiding every caller value gives the allocator a
-  ;; collision-free private name without interpreting non-ref domain data.
-  (into #{}
-        (filter tempid?)
-        (tree-seq coll? seq tx-data)))
+(defn- incoming-dependent-identity-conflict
+  [datahike-schema tx-data candidates]
+  (let [assertion-counts
+        (frequencies (identity-assertions datahike-schema tx-data))]
+    (some (fn [[candidate lookup-ref]]
+            (when (> (get assertion-counts lookup-ref 0) 1)
+              candidate))
+          (dependent-identity-claims candidates))))
+
+(def ^:private transaction-id-values
+  #{:db/current-tx ":db/current-tx" "datomic.tx" "datahike.tx"})
+
+(defn- external-tempid?
+  [value]
+  (and (tempid? value)
+       (not (contains? transaction-id-values value))))
+
+(defn- transaction-tempids*
+  [datahike-schema tx-data]
+  (letfn [(one-ref-tempids [value]
+            (cond
+              (map? value) [value]
+              (lookup-ref? datahike-schema value) []
+              (external-tempid? value) [value]
+              :else []))
+          (ref-tempids [attr value]
+            (if (and (many-attr? datahike-schema attr)
+                     (coll? value)
+                     (not (lookup-ref? datahike-schema value)))
+              (mapcat one-ref-tempids value)
+              (one-ref-tempids value)))
+          (entity-tempids [entity]
+            (concat
+             (when (external-tempid? (:db/id entity))
+               [(:db/id entity)])
+             (mapcat (fn [[attr value]]
+                       (when (ref-attr? datahike-schema attr)
+                         (mapcat entity-or-tempid
+                                 (ref-tempids attr value))))
+                     entity)))
+          (entity-or-tempid [value]
+            (if (map? value)
+              (entity-tempids value)
+              [value]))
+          (item-tempids [item]
+            (cond
+              (map? item)
+              (entity-tempids item)
+
+              (and (sequential? item)
+                   (= :db/add (first item))
+                   (= 4 (count item)))
+              (let [[_ entity attr value] item]
+                (concat
+                 (when (external-tempid? entity) [entity])
+                 (when (ref-attr? datahike-schema attr)
+                   (mapcat entity-or-tempid
+                           (ref-tempids attr value)))))
+
+              :else []))]
+    (second
+     (reduce (fn [[seen ordered] tempid]
+               (if (contains? seen tempid)
+                 [seen ordered]
+                 [(conj seen tempid) (conj ordered tempid)]))
+             [#{} []]
+             (mapcat item-tempids tx-data)))))
+
+(defn transaction-tempids
+  "Return caller-visible Datahike tempids in first-seen order.
+
+   The exact old DB supplies installed ref/cardinality/identity schema; schema
+   declarations in the transaction extend that view. Only entity ids and
+   schema-declared ref positions are walked, including nested entity maps.
+   Lookup refs and Datahike's reserved transaction ids are not tempids. The
+   allocator's private replacement tempids are created later and are therefore
+   deliberately absent from this result."
+  {:malli/schema [:=> [:cat ::transaction-tempids-request]
+                  ::transaction-tempids]}
+  [{::keys [db-value transaction-data]}]
+  (transaction-tempids* (effective-schema (:schema db-value)
+                                          transaction-data)
+                        transaction-data))
 
 (defn- fresh-allocator-tempid
   [used-tempids start-index]
@@ -480,7 +656,7 @@
                            tempid))
                plan'
                matched-candidates)))
-   {::used-tempids (transaction-tempids tx-data)
+   {::used-tempids (set (transaction-tempids* datahike-schema tx-data))
     ::next-tempid-index 0
     ::allocation-tempids {}}
    (candidate-entities datahike-schema tx-data candidates)))
@@ -545,16 +721,24 @@
                              (candidate-entity-error db-value installed-schema
                                                      datahike-schema
                                                      transaction-data
-                                                     generated-candidates))]
+                                                     generated-candidates)
+                             (dependent-identity-entity-error
+                              db-value installed-schema datahike-schema
+                              transaction-data generated-candidates))]
     (if protocol-message
       {::status ::protocol-error ::message protocol-message}
       (let [conflict (or (duplicate-candidate generated-candidates)
                          (incoming-candidate-conflict
                           datahike-schema transaction-data
                           generated-candidates generated-identity-attrs)
+                         (incoming-dependent-identity-conflict
+                          datahike-schema transaction-data
+                          generated-candidates)
                          (existing-candidate-conflict
                           db-value installed-schema generated-candidates
-                          generated-identity-attrs))]
+                          generated-identity-attrs)
+                         (existing-dependent-identity-conflict
+                          db-value installed-schema generated-candidates))]
         (if conflict
           {::status ::candidate-conflict
            ::generated-candidate conflict}
@@ -704,8 +888,10 @@
             [nil nil])]
       (when (#{:transact/unique :transact/upsert} error)
         (some (fn [attempt]
-                (when (and (= attr (::identity-attr attempt))
-                           (= candidate-value (::value attempt)))
+                (when (or (and (= attr (::identity-attr attempt))
+                               (= candidate-value (::value attempt)))
+                          (contains? (set (::dependent-lookup-refs attempt))
+                                     [attr candidate-value]))
                   attempt))
               generated-candidates)))))
 
@@ -867,6 +1053,43 @@
   [manifest]
   (into {} (map (juxt ::key ::value)) manifest))
 
+(defn- attach-dependent-identities!
+  "Attach the builder's public candidate-key claims to the private generated
+   manifest sent through the existing serialized-writer field. This keeps the
+   wire transaction shape unchanged: `seon.db.internal` already forwards the
+   generated manifest, and the writer strips that whole manifest before
+   Datahike sees the domain transaction."
+  [manifest dependent-identities]
+  (if (nil? dependent-identities)
+    manifest
+    (do
+      (when-not (m/validate ::dependent-identities dependent-identities)
+        (throw
+         (ex-info "Allocation builder returned invalid dependent identities."
+                  {::error :seon.db.id.error/invalid-dependent-identities
+                   :seon.error/kind :core-bug})))
+      (let [candidate-keys (set (map ::key manifest))]
+        (when-let [unknown
+                   (some (fn [{::keys [candidate-key]}]
+                           (when-not (contains? candidate-keys candidate-key)
+                             candidate-key))
+                         dependent-identities)]
+          (throw
+           (ex-info "Dependent identity names an unknown allocation candidate."
+                    {::error :seon.db.id.error/unknown-dependent-candidate
+                     ::candidate-key unknown
+                     :seon.error/kind :core-bug})))
+        (reduce
+         (fn [candidates {::keys [candidate-key lookup-ref]}]
+           (mapv (fn [candidate]
+                   (if (= candidate-key (::key candidate))
+                     (update candidate ::dependent-lookup-refs
+                             (fnil conj []) lookup-ref)
+                     candidate))
+                 candidates))
+         manifest
+         dependent-identities)))))
+
 (defn- exact-generated-conflict?
   [envelope manifest]
   (boolean
@@ -963,7 +1186,8 @@
               {::error :seon.db.id.error/invalid-builder-output
                :seon.error/kind :core-bug})))
   (when (or (contains? built ::generated-candidates)
-            (contains? built ::generated-identity-attrs))
+            (contains? built ::generated-identity-attrs)
+            (contains? built ::dependent-lookup-refs))
     (throw
      (ex-info "The allocation builder may not set allocator-owned fields."
               {::error :seon.db.id.error/reserved-request-field
@@ -973,7 +1197,16 @@
         (when (map? opts)
           (filterv #(contains? opts %)
                    [:tx-data ::generated-candidates
-                    ::generated-identity-attrs]))]
+                    ::generated-identity-attrs
+                    ::dependent-identities
+                    ::dependent-lookup-refs]))]
+    (when (and (contains? built ::dependent-identities)
+               (not (m/validate ::dependent-identities
+                                (::dependent-identities built))))
+      (throw
+       (ex-info "Allocation builder returned invalid dependent identities."
+                {::error :seon.db.id.error/invalid-dependent-identities
+                 :seon.error/kind :core-bug})))
     (when (and (some? opts) (not (map? opts)))
       (throw
        (ex-info "Allocation transaction options must be a map."
@@ -987,22 +1220,29 @@
                  :seon.error/kind :core-bug}))))
   nil)
 
+(defn- normalize-built-allocation!
+  [manifest built]
+  (validate-built-transaction! built)
+  [(dissoc built ::dependent-identities)
+   (attach-dependent-identities! manifest (::dependent-identities built))])
+
 #?(:cljs
    (defn ^:async ^:private allocate-attempt!
      [{::keys [allocations transaction-builder] conn :seon.db/conn :as request}
       attempt]
-     (let [manifest       (candidate-round! allocations)
-           ids            (candidate-map manifest)
+     (let [candidate-manifest (candidate-round! allocations)
+           ids            (candidate-map candidate-manifest)
            managed-attrs  (generated-identity-attrs!)
-           built          (transaction-builder ids)]
-       (when (instance? js/Promise built)
+           raw-built      (transaction-builder ids)]
+       (when (instance? js/Promise raw-built)
          (throw
           (ex-info "The allocation transaction builder must be pure and synchronous."
                    {::error :seon.db.id.error/async-builder
                     :seon.error/kind :core-bug})))
-       (db.internal/assert-invocation-shape! built)
-       (validate-built-transaction! built)
-       (let [transaction-request
+       (let [[built manifest]
+             (normalize-built-allocation! candidate-manifest raw-built)
+             _ (db.internal/assert-invocation-shape! built)
+             transaction-request
              (-> built
                  (assoc :seon.db/conn conn)
                  (assoc ::generated-candidates manifest)
@@ -1089,11 +1329,12 @@
          conn :seon.db/conn
          :as request}
         attempt]
-       (let [manifest (candidate-round! allocations)
-             ids (candidate-map manifest)
+       (let [candidate-manifest (candidate-round! allocations)
+             ids (candidate-map candidate-manifest)
              managed-attrs (generated-identity-attrs!)
-             built (transaction-builder ids)]
-         (validate-built-transaction! built)
+             raw-built (transaction-builder ids)
+             [built manifest]
+             (normalize-built-allocation! candidate-manifest raw-built)]
          (let [envelope (transact-jvm-allocation! conn built manifest
                                                   managed-attrs)]
            (cond

@@ -17,6 +17,8 @@
 (def ^:private identity-attr :idtest.record/id)
 (def ^:private other-allocation-key :idtest.record/other-id)
 (def ^:private other-identity-attr :idtest.record/other-id)
+(def ^:private dependent-identity-attr :idtest.namespace/name)
+(def ^:private dependent-source-attr :idtest.namespace/source)
 
 (defn- register-allocation-schema! []
   (schema/register!
@@ -31,7 +33,10 @@
           :seon.db.id/generator
           :seon.db.id.generator/compact}
     ::id/compact-value])
-  (schema/register! :idtest.record/source :string))
+  (schema/register! :idtest.record/source :string)
+  (schema/register! dependent-identity-attr
+                    [:keyword {:seon.db/identity true}])
+  (schema/register! dependent-source-attr :string))
 
 (defn- candidates [generator n]
   (into [] (repeatedly n #(generate-candidate generator))))
@@ -108,6 +113,55 @@
     (is (= :seon.db.id.error/unsupported-generator
            (::id/error (ex-data error))))))
 
+(deftest transaction-tempids-follow-the-effective-ref-schema
+  (let [old-db
+        {:schema
+         {:idtest.graph/child
+          {:db/valueType :db.type/ref
+           :db/cardinality :db.cardinality/one}
+          :idtest.graph/children
+          {:db/valueType :db.type/ref
+           :db/cardinality :db.cardinality/many}
+          :idtest.graph/not-ref
+          {:db/valueType :db.type/string
+           :db/cardinality :db.cardinality/one}
+          dependent-identity-attr
+          {:db/valueType :db.type/keyword
+           :db/cardinality :db.cardinality/one
+           :db/unique :db.unique/identity}}}
+        tx-data
+        [{:db/ident :idtest.graph/dynamic
+          :db/valueType :db.type/ref
+          :db/cardinality :db.cardinality/one}
+         ;; Installed schema wins over a conflicting incoming declaration.
+         {:db/ident :idtest.graph/not-ref
+          :db/valueType :db.type/ref
+          :db/cardinality :db.cardinality/one}
+         {:db/id "parent"
+          :idtest.graph/not-ref "ordinary-domain-string"
+          :idtest.graph/child
+          {:db/id "child"
+           :idtest.graph/children
+           ["leaf"
+            [dependent-identity-attr :idtest.namespace/existing]
+            "child"]}}
+         [:db/add "op-entity" :idtest.graph/child "leaf"]
+         {:db/id "declared-parent"
+          :idtest.graph/dynamic "declared-child"}
+         {:db/id "datomic.tx"}
+         {:db/id "datahike.tx"}
+         {:db/id ":db/current-tx"}]]
+    (is (= ["parent" "child" "leaf" "op-entity"
+            "declared-parent" "declared-child"]
+           (id/transaction-tempids
+            {::id/db-value old-db
+             ::id/transaction-data tx-data})))
+    (is (not-any? #{"ordinary-domain-string"
+                    :idtest.namespace/existing}
+                  (id/transaction-tempids
+                   {::id/db-value old-db
+                    ::id/transaction-data tx-data})))))
+
 #?(:clj
    (do
      (defn- jvm-allocation-conn
@@ -145,6 +199,13 @@
                :db/unique :db.unique/identity}
               {:db/ident :idtest.record/source
                :db/valueType :db.type/string
+               :db/cardinality :db.cardinality/one}
+              {:db/ident dependent-identity-attr
+               :db/valueType :db.type/keyword
+               :db/cardinality :db.cardinality/one
+               :db/unique :db.unique/identity}
+              {:db/ident dependent-source-attr
+               :db/valueType :db.type/string
                :db/cardinality :db.cardinality/one}])
             conn))))
 
@@ -177,6 +238,73 @@
          (is (= #{allocation-key other-allocation-key}
                 (set (keys eids))))
          (is (= 3 (count (conj (set (vals eids)) automatic-eid))))))
+
+     (deftest dependent-identity-collision-rebuilds-the-whole-birth
+       (register-allocation-schema!)
+       (let [conn (jvm-allocation-conn)
+             rejected-candidate "a12345678901"
+             accepted-candidate "b12345678901"
+             rejected-home (keyword "idtest.namespace" rejected-candidate)
+             accepted-home (keyword "idtest.namespace" accepted-candidate)
+             !candidates (atom [rejected-candidate accepted-candidate])
+             !builds (atom [])]
+         (d/transact conn
+                     [{dependent-identity-attr rejected-home
+                       dependent-source-attr "orphan-source"}])
+         (let [before (:max-tx (d/db conn))
+               response
+               (with-redefs-fn
+                 {generate-candidate
+                  (fn [_generator]
+                    (let [candidate (first @!candidates)]
+                      (swap! !candidates subvec 1)
+                      candidate))}
+                 (fn []
+                   (id/allocate!
+                    {::id/allocations
+                     [{::id/key allocation-key
+                       ::id/identity-attr identity-attr}]
+                     ::id/transaction-builder
+                     (fn [ids]
+                       (let [candidate (get ids allocation-key)
+                             home (keyword "idtest.namespace" candidate)]
+                         (swap! !builds conj candidate)
+                         {:seon.db/tx-data
+                          [{identity-attr candidate
+                            :idtest.record/source (str "agent-source:" candidate)}
+                           {dependent-identity-attr home
+                            dependent-source-attr (str "home-source:" candidate)}]
+                          ::id/dependent-identities
+                          [{::id/candidate-key allocation-key
+                            ::id/lookup-ref
+                            [dependent-identity-attr home]}]}))
+                     :seon.db/conn conn})))]
+           (is (true? (:seon.db/ok? response)))
+           (is (= accepted-candidate
+                  (get-in response [::id/ids allocation-key])))
+           (is (= [rejected-candidate accepted-candidate] @!builds))
+           (is (= (inc before) (:max-tx (d/db conn)))
+               "only the accepted whole birth commits")
+           (let [orphan-eid
+                 (:e (first (d/datoms (d/db conn) :avet
+                                      dependent-identity-attr rejected-home)))]
+             (is (= "orphan-source"
+                    (dependent-source-attr
+                     (d/pull (d/db conn) '[*] orphan-eid)))
+                 "the pre-existing dependent entity is unchanged"))
+           (is (empty? (d/datoms (d/db conn) :avet identity-attr
+                                 rejected-candidate))
+               "the rejected agent identity never lands")
+           (is (empty? (d/datoms (d/db conn) :avet :idtest.record/source
+                                 (str "agent-source:" rejected-candidate)))
+               "no rejected agent facts land")
+           (is (empty? (d/datoms (d/db conn) :avet dependent-source-attr
+                                 (str "home-source:" rejected-candidate)))
+               "no rejected home facts land")
+           (is (= 1 (count (d/datoms (d/db conn) :avet identity-attr
+                                     accepted-candidate))))
+           (is (= 1 (count (d/datoms (d/db conn) :avet
+                                     dependent-identity-attr accepted-home)))))))
 
      (deftest unconfigured-local-writer-fails-before-domain-commit
        (register-allocation-schema!)
@@ -459,6 +587,79 @@
                                            (.-message error)))))
                   (.finally done))))
 
+     (deftest local-writer-refuses-an-occupied-dependent-identity-atomically
+       (async done
+              (register-allocation-schema!)
+              (-> (fresh-allocation-conn)
+                  (.then
+                   (fn [conn]
+                     (-> (db.internal/ensure-datahike-attrs!
+                          conn
+                          [identity-attr :idtest.record/source
+                           dependent-identity-attr dependent-source-attr])
+                         (.then
+                          (fn [_]
+                            (let [candidate "c12345678901"
+                                  home (keyword "idtest.namespace" candidate)]
+                              (-> (d/transact!
+                                   conn
+                                   {:tx-data
+                                    [{dependent-identity-attr home
+                                      dependent-source-attr "orphan-source"}]})
+                                  (.then
+                                   (fn [_]
+                                     (-> (d/transact!
+                                          conn
+                                          {:tx-data
+                                           [{identity-attr candidate
+                                             :idtest.record/source
+                                             (str "agent-source:" candidate)}
+                                            {dependent-identity-attr home
+                                             dependent-source-attr
+                                             (str "home-source:" candidate)}]
+                                           ::id/generated-candidates
+                                           [{::id/key allocation-key
+                                             ::id/identity-attr identity-attr
+                                             ::id/value candidate
+                                             ::id/dependent-lookup-refs
+                                             [[dependent-identity-attr home]]}]
+                                           ::id/generated-identity-attrs
+                                           [identity-attr]})
+                                         (.then
+                                          (fn [_]
+                                            {::conn conn
+                                             ::candidate candidate
+                                             ::home home
+                                             ::rejected? false})
+                                          (fn [_error]
+                                            {::conn conn
+                                             ::candidate candidate
+                                             ::home home
+                                             ::rejected? true}))))))))))))
+                  (.then
+                   (fn [{::keys [conn candidate home rejected?]}]
+                     (is rejected?)
+                     (is (empty? (d/datoms @conn :avet identity-attr candidate))
+                         "the rejected candidate entity never lands")
+                     (is (empty? (d/datoms @conn :avet
+                                           :idtest.record/source
+                                           (str "agent-source:" candidate)))
+                         "the rejected candidate facts never land")
+                     (is (empty? (d/datoms @conn :avet dependent-source-attr
+                                           (str "home-source:" candidate)))
+                         "the attempted dependent upsert never lands")
+                     (let [orphan-eid
+                           (:e (first (d/datoms @conn :avet
+                                                dependent-identity-attr home)))]
+                       (is (= "orphan-source"
+                              (dependent-source-attr
+                               (d/pull @conn '[*] orphan-eid)))
+                           "the occupied dependent entity stays unchanged"))))
+                  (.catch (fn [error]
+                            (is false (str "dependent identity probe rejected: "
+                                           (.-message error)))))
+                  (.finally done))))
+
      (deftest allocation-rebuilds-the-complete-transaction-after-a-conflict
        (async done
               (register-allocation-schema!)
@@ -467,10 +668,19 @@
                     builder   (fn [ids]
                                 (let [candidate (get ids allocation-key)]
                                   (swap! !builds conj candidate)
-                                  {:seon.db/tx-data
-                                   [{identity-attr candidate
-                                     :idtest.record/source
-                                     (str "source:" candidate)}]}))
+                                  (let [home (keyword "idtest.namespace"
+                                                      candidate)]
+                                    {:seon.db/tx-data
+                                     [{identity-attr candidate
+                                       :idtest.record/source
+                                       (str "source:" candidate)}
+                                      {dependent-identity-attr home
+                                       dependent-source-attr
+                                       (str "home-source:" candidate)}]
+                                     ::id/dependent-identities
+                                     [{::id/candidate-key allocation-key
+                                       ::id/lookup-ref
+                                       [dependent-identity-attr home]}]})))
                     stub      (fn [request]
                                 (swap! !requests conj request)
                                 (let [manifest (::id/generated-candidates request)]
@@ -483,8 +693,11 @@
                                        :seon.error/data
                                        {:error :transact/upsert
                                         :assertion
-                                        [1 identity-attr
-                                         (::id/value (first manifest))]}}}
+                                        [1 dependent-identity-attr
+                                         (second
+                                          (first
+                                           (::id/dependent-lookup-refs
+                                            (first manifest))))]}}}
                                      {:seon.db/ok? true
                                       :seon.db/tx 100
                                       :seon.db/tx-count 2
@@ -503,14 +716,27 @@
                        (is (= (second @!builds)
                               (get-in response [::id/ids allocation-key])))
                        (is (= 42 (get-in response [::id/eids allocation-key])))
-                       (let [first-row  (-> @!requests first :seon.db/tx-data first)
-                             second-row (-> @!requests second :seon.db/tx-data first)]
+                       (let [first-request (first @!requests)
+                             second-request (second @!requests)
+                             first-row  (-> first-request :seon.db/tx-data first)
+                             second-row (-> second-request :seon.db/tx-data first)
+                             first-home (-> first-request :seon.db/tx-data second)
+                             second-home (-> second-request :seon.db/tx-data second)]
+                         (is (not (contains? first-request
+                                             ::id/dependent-identities))
+                             "builder metadata is normalized into the writer manifest")
                          (is (= (str "source:" (identity-attr first-row))
                                 (:idtest.record/source first-row)))
                          (is (= (str "source:" (identity-attr second-row))
                                 (:idtest.record/source second-row)))
                          (is (not= (:idtest.record/source first-row)
-                                   (:idtest.record/source second-row))))))
+                                   (:idtest.record/source second-row)))
+                         (is (= (str "home-source:" (identity-attr first-row))
+                                (dependent-source-attr first-home)))
+                         (is (= (str "home-source:" (identity-attr second-row))
+                                (dependent-source-attr second-home)))
+                         (is (not= (dependent-identity-attr first-home)
+                                   (dependent-identity-attr second-home))))))
                     (.catch (fn [e]
                               (is false (str "allocation rejected: " (.-message e)))))
                     (.finally done)))))
