@@ -91,6 +91,33 @@ verification table in the report (Qwen2.5-Coder/DeepSeek-Coder/Stack
 v1+v2/Granite = YES). Per-kind: 1.5B query .419 / plan .372 above
 frontier; register .100 regresses; defn ~0 (exclusion re-confirmed).
 
+## KT3-redux — HALTED mid-matrix (2026-07-12, owner stop order)
+
+The fair ceiling test, owner-corrected (full 168-fn index in every arm,
+in-document exemplars for base models, scoring v2 = set-union bundle F1
++ full decomposition/confusion/id lenses)
+([[research/kt3-redux-full-index-2026-07-12.md]], status: draft).
+**HALTED: the v2 display is defective** (cards spec-less — `:malli/schema`
+stripped by KT1 compaction; stale deleted-fn cards; glyph tax) — re-run
+pending the v3 export (spec-bearing cards, ASCII, stale filter).
+Completed before the halt (defective-display baselines): DeepSeek 5 arms
+incl. a 4-layout NIAH sweep + a rowcards control (full index ≤ curated
+4 cards on F1 for every layout: .177-.202 vs .252; but register .85
+@cov≥.75 — best KT3-series number), Muse first-class full run (.176),
+1.5B-instruct (few-shot COLLAPSES under the index .270→.071 —
+exemplar-parroting + temp-0 loops; zero-shot flat), 1.5B base
+cont-bare→cont-few .067→.112 (the owner's exemplar fix works on base
+models). Hallucinated fn heads ≤3% with the index; failure mass =
+selection + missing emission; spurious ids ~97% grounded-but-wrong (the
+validate-against-live-db gate stands). Qwen3.5-2B VERIFIED (2B dense
+GDN-hybrid, 262k ctx, unified VL) + both variants converted to MLX
+4-bit, ready. DeepSeek thinking arm mechanics verified (reasoning
+traces saved in full — owner's data-generation recipe candidate). Tools
+kept: extended `kt3_score.clj` (legacy mode byte-stable),
+`scripts/kt3_redux.py` (verify/api/local/report, layouts, thinking,
+rowcards controls), `src-needle/data/kt3redux/STATUS.md` (arm
+inventory).
+
 ## Extended-context prep — RUN (2026-07-12)
 
 Prep unit for the 2048-vs-4096 extension decision
