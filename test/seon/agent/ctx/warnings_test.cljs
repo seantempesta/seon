@@ -16,7 +16,6 @@
   (:require
     [clojure.string :as str]
     [cljs.test :refer [deftest is testing async]]
-    [malli.instrument :as mi]
     [seon.agent.ctx.warnings :as warnings]
     [seon.client :as client]
     [seon.db :as db]
@@ -135,10 +134,13 @@
                                  (is (str/includes? out "INSTRUMENTATION GAPS"))
                                  (is (str/includes? out "seon.agent.ctx.warnings-test/gap-probe"))))
                              (testing "re-asserting coverage self-heals: gap vanishes, block renders empty"
-                               (instrument/register-target!
-                                 'seon.agent.ctx.warnings-test 'gap-probe gap-probe-spec false)
-                               (mi/instrument! {:filters [(mi/-filter-ns 'seon.agent.ctx.warnings-test)]
-                                                :skip-instrumented? true})
+                               (instrument/instrument-delta!
+                                 {::instrument/changed-syms
+                                  #{'seon.agent.ctx.warnings-test/gap-probe}
+                                  ::instrument/targets
+                                  [{::instrument/sym
+                                    'seon.agent.ctx.warnings-test/gap-probe
+                                    ::instrument/schema-form gap-probe-spec}]})
                                (is (= [] (instrument/coverage-gaps dbv)))
                                (is (= "" (warnings/instrumentation-gaps-block
                                            {:seon.db/db dbv})))))))))))

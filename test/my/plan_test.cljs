@@ -6,8 +6,8 @@
    plan-body view. All on a FRESH :memory conn seeded like the pod boots —
    never the live agent conn.
 
-   The functions are INSTRUMENTED for this ns (the same `register-target!` →
-   `mi/instrument!` path the pod boots with) so the declared-key injection
+   The functions are instrumented through the pod's exact-data path so the
+   declared-key injection
    — omit `:seon.agent/id`, the wrapper fills the calling agent — is
    exercised for real, not stubbed. Teardown unstruments."
   (:require
@@ -15,7 +15,6 @@
     [clojure.string :as str]
     [clojure.walk :as walk]
     [datahike.api :as d]
-    [malli.instrument :as mi]
     [seon.client :as client]
     [seon.db :as db]
     [seon.db.id :as db.id]
@@ -76,12 +75,20 @@
    'list-open  (:malli/schema (meta #'plan/list-open))})
 
 (defn- instrument-functions! []
-  (doseq [[fn-sym schema] function-schemas]
-    (inst/register-target! 'my.plan fn-sym schema false))
-  (mi/instrument! {:filters [(fn [n _ _] (= n 'my.plan))]}))
+  (inst/instrument-delta!
+    {::inst/changed-syms
+     (into #{} (map #(symbol "my.plan" (name %))) (keys function-schemas))
+     ::inst/targets
+     (mapv (fn [[fn-sym function-schema]]
+             {::inst/sym (symbol "my.plan" (name fn-sym))
+              ::inst/schema-form function-schema})
+           function-schemas)}))
 
 (defn- uninstrument-functions! []
-  (mi/unstrument! {:filters [(fn [n _ _] (= n 'my.plan))]}))
+  (inst/instrument-delta!
+    {::inst/changed-syms
+     (into #{} (map #(symbol "my.plan" (name %))) (keys function-schemas))
+     ::inst/targets []}))
 
 (use-fixtures :once {:before instrument-functions! :after uninstrument-functions!})
 

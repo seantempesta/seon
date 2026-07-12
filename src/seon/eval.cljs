@@ -54,7 +54,6 @@
             [clojure.string :as str]
             [goog.object :as gobj]
             [malli.core :as m]
-            [malli.instrument :as mi]
             [shadow.cljs.bootstrap.node :as boot]
             [seon.agent.home :as home]
             [seon.ai.tokens :as tokens]
@@ -1681,33 +1680,22 @@
 ;; ============================================================
 
 (defn- instrument-tee-fns!
-  "Phase 3 (mvp-completion-plan 2026-05-27): auto-instrument every
-   newly-tee'd fn whose `:malli/schema` parsed cleanly (i.e. the entity
-   has a `:seon.fn/spec` and NO `:seon.fn/schema-error`).
+  "Refresh exactly the changed function targets after their tee commits.
 
-   For each, register the function schema in
-   `malli.core/-function-schemas*` (the atom `mi/instrument!` reads),
-   then run `mi/instrument!` filtered to those (ns, sym) pairs only.
-   Calls `(seon.error.instrument/report-fn ...)` on validation failure
-   so the envelope flows through the same record-eval! path that the
-   boot-time instrumentation uses.
-
-   Idempotent: re-registering same key is last-write-wins; re-running
-   `mi/instrument!` against an already-wrapped var replaces the wrapper.
-
-   Async fns route through [[seon.instrument/register-target!]] — simple
-   fixed-arity fns get input+output (output on Promise resolution),
-   variadic/multi-arity get input+arity. No-op when instrumentation is
-   disabled via the `SEON_INSTRUMENT` kill-switch.
-
-   `targets` — seq of `[ns-sym fn-sym schema-form async?]` tuples."
+   The analyzer tuples are converted to the namespaced target data owned by
+   `seon.instrument`. Malli receives an explicit delta map; no global roster
+   or whole-program filter is involved."
   [targets]
-  (when (and (seq targets) (instrument/enabled?))
-    (doseq [[ns-sym fn-sym schema-form async?] targets]
-      (instrument/register-target! ns-sym fn-sym schema-form async?))
-    (let [target-set (set (map (fn [[n s _ _]] [n s]) targets))]
-      (mi/instrument! {:report  einstrument/report-fn
-                       :filters [(fn [n s _d] (contains? target-set [n s]))]}))))
+  (when (seq targets)
+    (let [instrument-targets
+          (mapv (fn [[ns-sym fn-sym schema-form _async?]]
+                  {::instrument/sym (symbol (str ns-sym) (str fn-sym))
+                   ::instrument/schema-form schema-form})
+                targets)]
+      (instrument/instrument-delta!
+        {::instrument/changed-syms
+         (into #{} (map ::instrument/sym) instrument-targets)
+         ::instrument/targets instrument-targets}))))
 
 (defn- deftest-def?
   "True when an analyzer var-map came from a `(deftest …)` form.
@@ -1776,8 +1764,8 @@
   (for [{:seon.analyzer-info/keys [ns sym var-map]} (changed-defs compile-state defs-before source eval-ns)
         :let [schema-form (:malli/schema (:meta var-map))
               async?      (boolean (:async (:meta var-map)))]
-        ;; Opt-out (seon.instrument/async-unwrappable? — structural, computed
-        ;; from async flag + fn shape + schema form) is applied in register-target!.
+        ;; Structural async opt-out is applied while the exact target data is
+        ;; prepared in seon.instrument.
         :when (and schema-form
                    ;; probe: an unparseable agent `:malli/schema` is
                    ;; expected — it simply isn't an instrument target (the
@@ -4181,7 +4169,7 @@
                 (collect-instrument-targets compile-state defs-before
                                             source @current-ns))
               (catch :default e
-                ;; OUR instrumentation machinery (mi/instrument! over a
+                ;; OUR instrumentation machinery (an exact Malli delta over a
                 ;; newly-tee'd fn whose schema already parsed) throwing is a
                 ;; core defect (:core) — record it; best-effort stays: only
                 ;; this fn's instrument aborts, the batch continues.

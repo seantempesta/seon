@@ -11,7 +11,7 @@
    + `docs/seon/architecture/context.md` §\"Explicit dependencies\".
 
    The probe fns live in THIS ns; they route through the SAME
-   `register-target!` → `mi/instrument!` path the pod boots with. Teardown
+   exact-data instrumentation path the pod boots with. Teardown
    unstruments them so no wrapper leaks. A fresh `:memory` conn is the db the
    `:seon.db/db` provider reads via `db/*conn*`; `db/with-agent` supplies the
    `:seon.agent/id` provider's value."
@@ -19,13 +19,12 @@
     [cljs.test :refer [deftest is async use-fixtures]]
     [datahike.api :as d]
     [malli.core :as m]
-    [malli.instrument :as mi]
     [seon.db :as db]
     [seon.instrument :as inst]
     [seon.render]))   ; load-order: probe schema references :seon.render/at
 
 ;; ── probe fns — one declaring both injectables, one declaring none ──────────
-;; Both are simple single-fixed-arity `:=>` map-in fns, so register-target!
+;; Both are simple single-fixed-arity `:=>` map-in fns, so target preparation
 ;; routes each through injecting-fschema. Their bodies REPORT what landed in
 ;; the request map so a test can assert the injection outcome directly.
 
@@ -51,18 +50,25 @@
   [{x :probe/x :as req}]
   {:key-count (count req) :x x})
 
-(def ^:private target-set '#{[seon.instrument-inject-test probe-injects]
-                             [seon.instrument-inject-test probe-no-inject]})
+(def ^:private target-syms
+  '#{seon.instrument-inject-test/probe-injects
+     seon.instrument-inject-test/probe-no-inject})
+
+(def ^:private targets
+  [{::inst/sym 'seon.instrument-inject-test/probe-injects
+    ::inst/schema-form (:malli/schema (meta #'probe-injects))}
+   {::inst/sym 'seon.instrument-inject-test/probe-no-inject
+    ::inst/schema-form (:malli/schema (meta #'probe-no-inject))}])
 
 (defn- instrument-probes! []
-  (inst/register-target! 'seon.instrument-inject-test 'probe-injects
-                         (:malli/schema (meta #'probe-injects)) false)
-  (inst/register-target! 'seon.instrument-inject-test 'probe-no-inject
-                         (:malli/schema (meta #'probe-no-inject)) false)
-  (mi/instrument! {:filters [(fn [n s _] (contains? target-set [n s]))]}))
+  (inst/instrument-delta!
+    {::inst/changed-syms target-syms
+     ::inst/targets targets}))
 
 (defn- uninstrument-probes! []
-  (mi/unstrument! {:filters [(fn [n s _] (contains? target-set [n s]))]}))
+  (inst/instrument-delta!
+    {::inst/changed-syms target-syms
+     ::inst/targets []}))
 
 (use-fixtures :once {:before instrument-probes! :after uninstrument-probes!})
 

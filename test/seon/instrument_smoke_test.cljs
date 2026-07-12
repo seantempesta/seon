@@ -13,9 +13,8 @@
    \"could not be rendered as data\").
 
    This ns closes that gap: it turns instrumentation ON for the duration of
-   the test (the boot posture — `collect!` populates the `:cljs`
-   function-schema registry exactly as the pod does, then
-   `malli.instrument/instrument!` wraps every var), then EXERCISES every
+   the test from the same canonical program rows the pod indexes, then
+   EXERCISES every
    arity of the multi-arity (delegation-prone) fns plus the value renderer
    with representative VALID args, asserting NO instrumentation
    input/output throw. A teardown un-instruments so nothing leaks into the
@@ -31,11 +30,11 @@
    Deterministic — a fresh `:memory` datahike conn seeded like the pod
    boots, never the live pod."
   (:require
+    [cljs.reader]
     [cljs.test :refer [deftest is async use-fixtures]]
     [clojure.string :as str]
     [datahike.api :as d]
     [malli.core :as m]
-    [malli.instrument :as mi]
     [my.kb.shared :as kb]
     [seon.client :as client]
     [seon.agent.ctx :as ctx]
@@ -43,28 +42,24 @@
     [seon.error :as err]
     [seon.error.instrument :as einst]
     [seon.eval :as seval]
-    [seon.instrument]
+    [seon.instrument :as instrument]
     [seon.render.default :as rdef]
     [seon.render.value :as value]
     [seon.ui.components :as comp]
     [seon.ui.markdown :as md]
-    [seon.web.brand :as brand])
-  (:require-macros [seon.instrument :refer [collect!]]))
+    [seon.web.brand :as brand]))
 
 ;; ============================================================
 ;; Instrumentation fixture — the boot posture, ON for this ns only.
-;; `collect!` is the compile-time macro the pod's ORIGINAL boot path used:
-;; it scans the analyzer's view of every first-party `:malli/schema`-bearing
-;; fn and registers each into malli's `:cljs` function-schema registry (the
-;; same atom `instrument-from-db!` populates at runtime). `mi/instrument!`
-;; then reads that registry and wraps each live var; `ei/report-fn` makes a
-;; violation THROW (so an exercised arity that trips fails the test). The
-;; `:after` un-instruments so the wrappers don't leak into other nses.
+;; `client/index-core!` is the production canonical program snapshot builder.
+;; The fixture selects this guard's namespaces from those rows and hands their
+;; specs to seon.instrument as explicit exact data. Malli's process-global
+;; function-schema roster is deliberately untouched.
 ;; ============================================================
 
 (def ^:private target-nses
-  "The namespaces whose fns this guard exercises. instrument!/unstrument!
-   are SCOPED to these (via `mi/-filter-ns`): scoping keeps the teardown
+  "The namespaces whose fns this guard exercises. Exact target selection
+   keeps the teardown
    from tripping malli's multi-arity `unstrument!` bug on UNRELATED fns
    whose `:malli/schema` is a single `:=>` over a multi-arity fn (e.g.
    `seon.render.sci/invoke-bounded`) — unstrument nils the uncovered
@@ -74,18 +69,30 @@
     seon.ui.components seon.ui.markdown seon.web.brand seon.db
     seon.error seon.error.instrument my.kb.shared])
 
+(def ^:private exact-targets
+  (->> (client/index-core!)
+       (keep (fn [{sym-str :seon.fn/sym spec-str :seon.fn/spec}]
+               (when (and sym-str spec-str)
+                 (let [sym (symbol sym-str)]
+                   (when (contains? (set target-nses)
+                                    (symbol (namespace sym)))
+                     {::instrument/sym sym
+                      ::instrument/schema-form
+                      (cljs.reader/read-string spec-str)})))))
+       vec))
+
+(def ^:private roster-before (m/function-schemas :cljs))
+
 (defn- instrument-all!
-  "Populate the `:cljs` registry from compile-time metadata (`collect!` —
-   the pod's original boot scan), then install malli instrumentation with
-   seon's throwing reporter, SCOPED to [[target-nses]] — the live-pod boot
-   posture, in-process, blast-radius-limited."
+  "Instrument the guard's exact canonical program targets."
   []
-  (collect!)
-  (mi/instrument! {:report  einst/report-fn
-                   :filters [(apply mi/-filter-ns target-nses)]}))
+  (instrument/instrument-targets! exact-targets))
 
 (defn- uninstrument-all! []
-  (mi/unstrument! {:filters [(apply mi/-filter-ns target-nses)]}))
+  (instrument/instrument-delta!
+    {::instrument/changed-syms
+     (into #{} (map ::instrument/sym) exact-targets)
+     ::instrument/targets []}))
 
 (use-fixtures :once {:before instrument-all! :after uninstrument-all!})
 
@@ -138,20 +145,21 @@
 ;; ============================================================
 
 (deftest instrumentation-is-actually-live
-  ;; A registry-and-wrapper smoke check: a representative fn from EACH
-  ;; exercised namespace must be present in the `:cljs` registry (so
-  ;; `collect!` covered it — guards against a compile-order miss), and a
+  ;; A target-and-wrapper smoke check: representative fns must be present in
+  ;; the canonical exact set (guards against an indexing miss), and a
   ;; known-bad input must throw. Without this, a no-op fixture would let
   ;; every clean test below pass vacuously.
-  (let [schemas (m/function-schemas :cljs)]
-    (doseq [[ns-sym fn-sym] '[[seon.render.value sample]
-                              [seon.agent.ctx cap-result-body]
-                              [seon.agent.ctx format-eval-row]
-                              [seon.render.default recent-messages]
-                              [seon.db core-attr-namespaces]
-                              [seon.ui.components status-dot]]]
-      (is (some? (get-in schemas [ns-sym fn-sym]))
-          (str ns-sym "/" fn-sym " must be registered for instrumentation"))))
+  (let [target-syms (into #{} (map ::instrument/sym) exact-targets)]
+    (doseq [sym '[seon.render.value/sample
+                  seon.agent.ctx/cap-result-body
+                  seon.agent.ctx/format-eval-row
+                  seon.render.default/recent-messages
+                  seon.db/core-attr-namespaces
+                  seon.ui.components/status-dot]]
+      (is (contains? target-syms sym)
+          (str sym " must be present in the canonical exact target set"))))
+  (is (= roster-before (m/function-schemas :cljs))
+      "exact instrumentation never mutates Malli's global function roster")
   ;; A wrapped fn rejects bad input with an instrumentation throw.
   (is (instrument-traps? #(db/core-attr-namespaces :not-a-db))
       "core-attr-namespaces must reject a non-db arg under instrumentation"))

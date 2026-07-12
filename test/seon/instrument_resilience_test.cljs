@@ -19,10 +19,8 @@
    unresolvable fn row returns a stats map (never throws) and registers
    nothing.
 
-   The malli `:cljs` function-schema registry is process-global; this ns
-   snapshots and restores it around the call so the internal `mi/instrument!`
-   runs on an EMPTY registry (a true no-op) and nothing leaks into the other
-   (uninstrumented) test namespaces.
+   The Malli `:cljs` function-schema registry is process-global. The exact-data
+   boot path must leave it byte-for-byte unchanged.
 
    Deterministic — a fresh :memory datahike conn, never the live pod."
   (:require
@@ -79,31 +77,18 @@
             ;; teeth (otherwise a green run would mean nothing).
             (is (thrown? :default (m/schema (reader/read-string bad-spec)))
                 "seed spec must be genuinely unresolvable")
-            ;; Snapshot + clear the global :cljs registry so the internal
-            ;; mi/instrument! is a true no-op and nothing leaks.
             (let [snapshot (m/function-schemas :cljs)]
-              (m/-deregister-function-schemas! :cljs)
-              (try
-                ;; The boot call: it RETURNS rather than throwing.
-                (let [stats (instrument/instrument-from-db! @conn)]
-                  (is (map? stats)
-                      "instrument-from-db! returns a stats map, never throws")
-                  (when (:seon.instrument/enabled? stats)
-                    (is (= 1 (:seon.instrument/unresolvable-schema stats))
-                        "the one ghost row is counted as :seon.instrument/unresolvable-schema")
-                    (is (= 0 (:seon.instrument/registered stats))
-                        "the ghost row is NEVER registered for instrumentation")
-                    (is (nil? (get-in (m/function-schemas :cljs)
-                                      ['seon.render.value 'sample]))
-                        "the ghost fn must stay OUT of the function-schema registry")))
-                (finally
-                  ;; Restore the registry exactly as we found it.
-                  (m/-deregister-function-schemas! :cljs)
-                  (doseq [[ns-sym fns] snapshot
-                          [fn-sym entry] fns]
-                    (m/-register-function-schema!
-                      ns-sym fn-sym (:schema entry)
-                      (dissoc entry :schema :ns :name) :cljs identity)))))))
+              ;; The boot call returns rather than throwing.
+              (let [stats (instrument/instrument-from-db! @conn)]
+                (is (map? stats)
+                    "instrument-from-db! returns a stats map, never throws")
+                (when (:seon.instrument/enabled? stats)
+                  (is (= 1 (:seon.instrument/unresolvable-schema stats))
+                      "the one ghost row is counted as unresolved")
+                  (is (= 0 (:seon.instrument/registered stats))
+                      "the ghost row is never instrumented")
+                  (is (= snapshot (m/function-schemas :cljs))
+                      "boot instrumentation never mutates Malli's roster"))))))
         (.catch (fn [e]
                   (is false (str "deftest threw: " (ex-message e)))))
         (.finally done))))

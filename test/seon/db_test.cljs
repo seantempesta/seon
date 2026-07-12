@@ -21,10 +21,8 @@
   (:require
     [cljs.test :as t :refer [deftest is testing async use-fixtures]]
     [datahike.api :as d]
-    [malli.instrument :as mi]
     [seon.db :as db]
     [seon.db.internal :as internal]
-    [seon.error.instrument :as ei]
     [seon.instrument :as si]
     [seon.schema :as schema]))
 
@@ -53,9 +51,16 @@
              ;; Requires a DEV-compiled test build: malli's CLJS
              ;; instrument walks goog.global munged paths, which Closure
              ;; :simple/:advanced flatten away (see bin/test-cljs).
-             (si/collect!)
-             (mi/instrument! {:report  ei/report-fn
-                              :filters [(mi/-filter-ns 'seon.db)]}))})
+             (let [targets
+                   [{::si/sym 'seon.db/query
+                     ::si/schema-form (:malli/schema (meta #'db/query))}
+                    {::si/sym 'seon.db/pull
+                     ::si/schema-form (:malli/schema (meta #'db/pull))}
+                    {::si/sym 'seon.db/entity
+                     ::si/schema-form (:malli/schema (meta #'db/entity))}]]
+               (si/instrument-delta!
+                 {::si/changed-syms (into #{} (map ::si/sym) targets)
+                  ::si/targets targets})))})
 
 ;; ---------------------------------------------------------------------------
 ;; Helpers: open a fresh :memory DB per test. Returns a Promise resolving to
