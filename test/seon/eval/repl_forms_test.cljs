@@ -24,6 +24,7 @@
     [seon.agent]                          ; :seon.eval / :seon.agent.turn registrations
     [seon.client :as client]
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.eval :as seval]
     [seon.repl :as repl]
     [seon.repl.internal :as internal]))
@@ -57,18 +58,38 @@
 ;; `binding` does not survive await boundaries), fixed valid turn identity.
 ;; ---------------------------------------------------------------------------
 
+(def ^:dynamic ^:private fixture-agent-id nil)
+(def ^:dynamic ^:private fixture-turn-id nil)
+
 (defn- with-conn
   "Open a fresh full-schema :memory conn, `set!` it as the ROOT
    `db/*conn*`, run `body` (0-arg, may return a Promise), restore after."
   [body]
   (-> (client/open-agent-conn!)
       (.then (fn [conn]
-               (let [prev db/*conn*]
-                 (set! db/*conn* conn)
-                 (-> (js/Promise.resolve (body))
-                     (.finally (fn [] (set! db/*conn* prev)))))))))
-
-(def ^:private fixture-turn-id "turnrepl0001")
+               (-> (db.id/allocate!
+                     {::db.id/allocations
+                      [{::db.id/key ::fixture-agent
+                        ::db.id/identity-attr :seon.agent/id}
+                       {::db.id/key ::fixture-turn
+                        ::db.id/identity-attr :seon.agent.turn/id}]
+                      ::db.id/transaction-builder
+                      (fn [ids]
+                        {:seon.db/tx-data
+                         [{:seon.agent/id (::fixture-agent ids)}
+                          {:seon.agent.turn/id (::fixture-turn ids)}]})
+                      :seon.db/conn conn})
+                   (.then
+                     (fn [env]
+                       (set! fixture-agent-id
+                             (get-in env [::db.id/ids ::fixture-agent]))
+                       (set! fixture-turn-id
+                             (get-in env [::db.id/ids ::fixture-turn]))
+                       (let [prev db/*conn*]
+                         (set! db/*conn* conn)
+                         (-> (js/Promise.resolve (body))
+                             (.finally
+                               (fn [] (set! db/*conn* prev))))))))))))
 
 (defn- run-batch!
   "Parse `source` and run it through `eval-batch!` against the
@@ -79,7 +100,7 @@
                (seval/eval-batch! @repl/!compile-state
                                   (internal/parse-forms source)
                                   start-ns
-                                  "rv-agent-2607"
+                                  fixture-agent-id
                                   fixture-turn-id
                                   nil)))))
 
@@ -588,7 +609,7 @@
             (.then
               (fn [_]
                 (db/with-tx-context
-                  {:seon.db/agent-id "rv-agent-2607"
+                  {:seon.db/agent-id fixture-agent-id
                    :seon.db/turn-id  fixture-turn-id
                    :seon.db/origin   :system}
                   (fn ^:async run-two-batches! []
@@ -597,13 +618,13 @@
                                       cs
                                       (internal/parse-forms
                                         "(ns probe.rv.c59c)\n(defn fc [x] (- x 1))")
-                                      'my.agent.rv "rv-agent-2607"
+                                      'my.agent.rv fixture-agent-id
                                       fixture-turn-id nil))
                           r2 (await (seval/eval-batch!
                                       cs
                                       (internal/parse-forms
                                         "(ns probe.rv.c59d)\n(defn fd [x] (* x 3))")
-                                      'my.agent.rv "rv-agent-2607"
+                                      'my.agent.rv fixture-agent-id
                                       fixture-turn-id nil))]
                       {:r1 r1 :r2 r2})))))
             (.then

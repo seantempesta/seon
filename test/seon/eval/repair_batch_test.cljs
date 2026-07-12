@@ -22,6 +22,7 @@
     [seon.agent]                          ; :seon.eval / :seon.agent.turn registrations
     [seon.client :as client]
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.eval :as seval]
     [seon.repl :as repl]
     [seon.repl.internal :as internal]))
@@ -37,6 +38,9 @@
 ;; eval row is lost.
 ;; ---------------------------------------------------------------------------
 
+(def ^:dynamic ^:private fixture-agent-id nil)
+(def ^:dynamic ^:private fixture-turn-id nil)
+
 (defn- with-conn
   "Open a fresh full-schema :memory conn, `set!` it as the ROOT
    `db/*conn*`, run `body` (0-arg, may return a Promise), restore after.
@@ -44,12 +48,29 @@
   [body]
   (-> (client/open-agent-conn!)
       (.then (fn [conn]
-               (let [prev db/*conn*]
-                 (set! db/*conn* conn)
-                 (-> (js/Promise.resolve (body))
-                     (.finally (fn [] (set! db/*conn* prev)))))))))
-
-(def ^:private fixture-turn-id "turnrepair01")
+               (-> (db.id/allocate!
+                     {::db.id/allocations
+                      [{::db.id/key ::fixture-agent
+                        ::db.id/identity-attr :seon.agent/id}
+                       {::db.id/key ::fixture-turn
+                        ::db.id/identity-attr :seon.agent.turn/id}]
+                      ::db.id/transaction-builder
+                      (fn [ids]
+                        {:seon.db/tx-data
+                         [{:seon.agent/id (::fixture-agent ids)}
+                          {:seon.agent.turn/id (::fixture-turn ids)}]})
+                      :seon.db/conn conn})
+                   (.then
+                     (fn [env]
+                       (set! fixture-agent-id
+                             (get-in env [::db.id/ids ::fixture-agent]))
+                       (set! fixture-turn-id
+                             (get-in env [::db.id/ids ::fixture-turn]))
+                       (let [prev db/*conn*]
+                         (set! db/*conn* conn)
+                         (-> (js/Promise.resolve (body))
+                             (.finally
+                               (fn [] (set! db/*conn* prev))))))))))))
 
 (defn- run-batch!
   "Parse `source` and run it through `eval-batch!` against the root-bound
@@ -61,7 +82,7 @@
                (seval/eval-batch! @repl/!compile-state
                                   (internal/parse-forms source)
                                   'my.agent.test
-                                  "rb-agent-2606"
+                                  fixture-agent-id
                                   turn-id
                                   nil)))))   ; runless eval path — no work fence
 

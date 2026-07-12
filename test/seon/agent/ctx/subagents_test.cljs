@@ -12,35 +12,29 @@
     [seon.db :as db]
     [seon.db.id :as db.id]))
 
-(def ^:private parent-id "parent-2607aa")
-(def ^:private child-id  "child-2607aaaa")
-(def ^:private gchild-id "gchild-2607aaa")
-
-(def ^:private extra-attrs
-  [:seon.agent/run :seon.agent/terminated-at :seon.agent/parent :seon.agent/purpose
-   :seon.agent/default-turn-limit :seon.agent/default-deadline-ms :seon.agent/schedules
-   :seon.agent.run/id :seon.agent.run/agent :seon.agent.run/started-at
-   :seon.agent.run/trigger :seon.agent.run/cause :seon.agent.run/turn-limit
-   :seon.agent.run/deadline :seon.agent.run/last-beat-at :seon.agent.run/paused-at
-   :seon.agent.run/remaining-ms :seon.agent.run/status :seon.agent.run/closed-reason
-   :seon.agent.run/result :seon.agent.run/result-ref :seon.agent.run/closed-at
-   :seon.agent.turn/run])
+(def ^:dynamic ^:private parent-id nil)
+(def ^:dynamic ^:private child-id nil)
+(def ^:dynamic ^:private gchild-id nil)
 
 (defn- fresh-conn []
-  (let [cfg {:store {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write :keep-history? true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_]
-                 (d/connect (db.id/allocation-connect-config cfg)
-                            {:sync? false})))
-        (.then (fn [conn]
-                 (-> (d/transact! conn {:tx-data (into (db/malli->datahike-schema
-                                                         (into client/agent-bootstrap-attrs extra-attrs))
-                                                       (db/tx-meta-datahike-schema))})
-                     (.then (fn [_]
-                              (d/transact! conn {:tx-data [{:seon.user/id "user"}
-                                                           {:seon.agent/id parent-id}]})))
-                     (.then (fn [_] conn))))))))
+  (-> (client/open-agent-conn!)
+      (.then
+        (fn [conn]
+          (-> (db.id/allocate!
+                {::db.id/allocations
+                 [{::db.id/key ::parent
+                   ::db.id/identity-attr :seon.agent/id}]
+                 ::db.id/transaction-builder
+                 (fn [ids]
+                   {:seon.db/tx-data
+                    [{:seon.agent/id (::parent ids)}]})
+                 :seon.db/conn conn})
+              (.then
+                (fn [env]
+                  (when-not (:seon.db/ok? env)
+                    (throw (ex-info "parent agent allocation failed" env)))
+                  (set! parent-id (get-in env [::db.id/ids ::parent]))
+                  conn)))))))
 
 (defn- with-conn [body]
   (-> (fresh-conn)
@@ -50,10 +44,25 @@
                  (-> (js/Promise.resolve (body conn))
                      (.finally (fn [] (set! db/*conn* orig)))))))))
 
-(defn- add-child! [conn id parent purpose]
-  (d/transact! conn {:tx-data [(cond-> {:seon.agent/id id
-                                        :seon.agent/parent [:seon.agent/id parent]}
-                                 purpose (assoc :seon.agent/purpose purpose))]}))
+(defn- add-child! [conn allocation-key parent purpose]
+  (-> (db.id/allocate!
+        {::db.id/allocations
+         [{::db.id/key allocation-key
+           ::db.id/identity-attr :seon.agent/id}]
+         ::db.id/transaction-builder
+         (fn [ids]
+           {:seon.db/tx-data
+            [(cond-> {:seon.agent/id (get ids allocation-key)
+                      :seon.agent/parent [:seon.agent/id parent]}
+               purpose (assoc :seon.agent/purpose purpose))]})
+         :seon.db/conn conn})
+      (.then
+        (fn [env]
+          (case allocation-key
+            ::child (set! child-id (get-in env [::db.id/ids ::child]))
+            ::gchild (set! gchild-id (get-in env [::db.id/ids ::gchild]))
+            nil)
+          env))))
 
 (defn- render [id]
   (sub/subagents-block {:seon.db/db @db/*conn* :seon.agent/id id}))
@@ -68,7 +77,7 @@
   (async done
     (-> (with-conn
           (fn ^:async af [conn]
-            (await (add-child! conn child-id parent-id "research duckdb"))
+            (await (add-child! conn ::child parent-id "research duckdb"))
             (await (run/open-run! {:seon.agent/id child-id :seon.agent.run/trigger :message}))
             (let [out (render parent-id)]
               (is (re-find (re-pattern child-id) out) "names the child")
@@ -81,7 +90,7 @@
   (async done
     (-> (with-conn
           (fn ^:async af [conn]
-            (await (add-child! conn child-id parent-id "compute"))
+            (await (add-child! conn ::child parent-id "compute"))
             (let [snap (await (run/open-run! {:seon.agent/id child-id :seon.agent.run/trigger :message}))
                   rid  (:seon.agent.run/id snap)]
               (await (d/transact! conn {:tx-data [{:seon.agent.run/id rid :seon.agent.run/result "the answer is 42"}]}))
@@ -96,7 +105,7 @@
   (async done
     (-> (with-conn
           (fn ^:async af [conn]
-            (await (add-child! conn child-id parent-id "risky"))
+            (await (add-child! conn ::child parent-id "risky"))
             (let [snap (await (run/open-run! {:seon.agent/id child-id :seon.agent.run/trigger :message}))
                   rid  (:seon.agent.run/id snap)]
               (await (run/close-run! {:seon.agent.run/id rid :seon.agent.run/closed-reason :error}))
@@ -109,8 +118,8 @@
   (async done
     (-> (with-conn
           (fn ^:async af [conn]
-            (await (add-child! conn child-id parent-id "child"))
-            (await (add-child! conn gchild-id child-id "grandchild"))
+            (await (add-child! conn ::child parent-id "child"))
+            (await (add-child! conn ::gchild child-id "grandchild"))
             (let [out (render parent-id)]
               (is (re-find (re-pattern child-id) out) "direct child present")
               (is (not (re-find (re-pattern gchild-id) out)) "grandchild ABSENT (direct only)"))))
@@ -122,7 +131,10 @@
     (-> (with-conn
           (fn ^:async af [conn]
             (dotimes [i 5]
-              (await (add-child! conn (str "kid-260700000" i) parent-id
+              (await (add-child! conn
+                                 (keyword "seon.agent.ctx.subagents-test"
+                                          (str "kid-" i))
+                                 parent-id
                                  (apply str (repeat 300 "x")))))
             (let [out (render parent-id)]
               (is (<= (tokens/estimate out) 900) "section bounded in TOKENS"))))
@@ -133,7 +145,7 @@
   (async done
     (-> (with-conn
           (fn ^:async af [conn]
-            (await (add-child! conn child-id parent-id "alive"))
+            (await (add-child! conn ::child parent-id "alive"))
             (is (= "" (sub/orphaned-agents-block {:seon.db/db @db/*conn*}))
                 "no orphans -> reactive vanish")))
         (.then (fn [_] (done)))
@@ -143,7 +155,7 @@
   (async done
     (-> (with-conn
           (fn ^:async af [conn]
-            (await (add-child! conn child-id parent-id "orphan"))
+            (await (add-child! conn ::child parent-id "orphan"))
             (await (d/transact! conn {:tx-data [{:seon.agent/id parent-id
                                                  :seon.agent/terminated-at (js/Date.)}]}))
             (let [out (sub/orphaned-agents-block {:seon.db/db @db/*conn*})]
@@ -156,7 +168,7 @@
   (async done
     (-> (with-conn
           (fn ^:async af [conn]
-            (await (add-child! conn child-id parent-id "dead-orphan"))
+            (await (add-child! conn ::child parent-id "dead-orphan"))
             (await (d/transact! conn {:tx-data [{:seon.agent/id parent-id :seon.agent/terminated-at (js/Date.)}
                                                 {:seon.agent/id child-id :seon.agent/terminated-at (js/Date.)}]}))
             (is (= "" (sub/orphaned-agents-block {:seon.db/db @db/*conn*}))

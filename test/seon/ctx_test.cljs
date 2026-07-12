@@ -67,28 +67,15 @@
 (defn- fresh-conn
   "Promise of a fresh :memory conn with the pod's boot schema."
   []
-  (let [cfg {:store              {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history?      true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_]
-                 (d/connect (db.id/allocation-connect-config cfg)
-                            {:sync? false})))
-        (.then (fn [conn]
-                 (-> (d/transact!
-                       conn
-                       {:tx-data (into (db/malli->datahike-schema
-                                         client/agent-bootstrap-attrs)
-                                       (db/tx-meta-datahike-schema))})
-                     ;; the my.* slice of the boot index — SCI bounding is
-                     ;; fail-loud, so the default ctx blocks' my.* render fns
-                     ;; need their stored source rows to render BOUNDED here.
-                     ;; db/transact! (not raw d/transact!) so any :seon.fn/*
-                     ;; attr missing from the bootstrap set auto-installs.
-                     (.then (fn [_] (db/transact!
-                                      {:seon.db/conn    conn
-                                       :seon.db/tx-data (test-seed/my-core-rows)})))
-                     (.then (fn [_] conn))))))))
+  (-> (client/open-agent-conn!)
+      ;; the my.* slice of the boot index — SCI bounding is fail-loud, so the
+      ;; default ctx blocks' my.* render fns need their stored source rows to
+      ;; render BOUNDED here. db/transact! (not raw d/transact!) so any
+      ;; :seon.fn/* attr missing from the bootstrap set auto-installs.
+      (.then (fn [conn]
+               (-> (db/transact! {:seon.db/conn    conn
+                                  :seon.db/tx-data (test-seed/my-core-rows)})
+                   (.then (fn [_] conn)))))))
 
 (defn- with-conn
   "Fresh seeded conn, `set!` as the ROOT db/*conn* for `body` (conn →
@@ -101,6 +88,19 @@
                  (set! db/*conn* conn)
                  (-> (js/Promise.resolve (body conn))
                      (.finally (fn [] (set! db/*conn* orig)))))))))
+
+(defn- allocate-turn!
+  "Allocate and commit one turn fixture."
+  [conn turn]
+  (db.id/allocate!
+    {::db.id/allocations
+     [{::db.id/key ::turn
+       ::db.id/identity-attr :seon.agent.turn/id}]
+     ::db.id/transaction-builder
+     (fn [ids]
+       {:seon.db/tx-data
+        [(assoc turn :seon.agent.turn/id (::turn ids))]})
+     :seon.db/conn conn}))
 
 ;; ------------------------------------------------------------
 ;; Selection rules — the ONE inclusion rule + the depth rule.
@@ -569,14 +569,13 @@
                   (.then (fn [_] (run/open-run! {:seon.agent/id "AGTctxtest00d1"
                                                  :seon.agent.run/trigger :message})))
                   (.then (fn [opened]
-                           (db/transact!
-                             {:seon.db/tx-data
-                              [{:seon.agent.turn/id "turnctx00001"
-                                :seon.agent.turn/at (js/Date.)
-                                :seon.agent.turn/status :running
-                                :seon.agent.turn/prompt-chars 1
-                                :seon.agent.turn/run
-                                [:seon.agent.run/id (:seon.agent.run/id opened)]}]})))
+                           (allocate-turn!
+                             db/*conn*
+                             {:seon.agent.turn/at (js/Date.)
+                              :seon.agent.turn/status :running
+                              :seon.agent.turn/prompt-chars 1
+                              :seon.agent.turn/run
+                              [:seon.agent.run/id (:seon.agent.run/id opened)]})))
                   (.then
                     (fn [_]
                       (let [after (assemble "AGTctxtest00d1")]

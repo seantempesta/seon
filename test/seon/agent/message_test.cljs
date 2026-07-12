@@ -25,37 +25,42 @@
     [seon.db.id :as db.id]
     [seon.warn :as warn]))
 
-(def ^:private a-id "msgtest-agent-a")
-(def ^:private b-id "msgtest-agent-b")
+(def ^:dynamic ^:private a-id nil)
+(def ^:dynamic ^:private b-id nil)
+
+(defn- allocate-agents!
+  "Allocate and commit the requested minimal agent fixtures."
+  [conn allocation-keys]
+  (db.id/allocate!
+    {::db.id/allocations
+     (mapv (fn [allocation-key]
+             {::db.id/key allocation-key
+              ::db.id/identity-attr :seon.agent/id})
+           allocation-keys)
+     ::db.id/transaction-builder
+     (fn [ids]
+       {:seon.db/tx-data
+        (into []
+              (map (fn [allocation-key]
+                     {:seon.agent/id (get ids allocation-key)}))
+              allocation-keys)})
+     :seon.db/conn conn}))
 
 (defn- fresh-conn
   "Promise of a fresh :memory conn with the pod's boot schema + the user
    entity + agents A and B (the same rows seon.client seeds at boot)."
   []
-  (let [cfg {:store              {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history?      true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_]
-                 (d/connect (db.id/allocation-connect-config cfg)
-                            {:sync? false})))
-        (.then (fn [conn]
-                 (-> (d/transact!
-                       conn
-                       {:tx-data (into (db/malli->datahike-schema
-                                         client/agent-bootstrap-attrs)
-                                       ;; tx-meta attrs — with-agent's ALS
-                                       ;; scope auto-stamps :seon.db/agent-id
-                                       ;; into tx-meta, which needs the attr
-                                       ;; installed (same as prod boot).
-                                       (db/tx-meta-datahike-schema))})
-                     (.then (fn [_]
-                              (d/transact!
-                                conn
-                                {:tx-data [{:seon.user/id "user"}
-                                           {:seon.agent/id a-id}
-                                           {:seon.agent/id b-id}]})))
-                     (.then (fn [_] conn))))))))
+  (-> (client/open-agent-conn!)
+      (.then
+        (fn [conn]
+          (-> (allocate-agents! conn [::agent-a ::agent-b])
+              (.then
+                (fn [env]
+                  (when-not (:seon.db/ok? env)
+                    (throw (ex-info "agent fixture allocation failed" env)))
+                  (set! a-id (get-in env [::db.id/ids ::agent-a]))
+                  (set! b-id (get-in env [::db.id/ids ::agent-b]))
+                  conn)))))))
 
 (defn- with-conn
   "Open a fresh seeded conn, `set!` it as the ROOT `db/*conn*` for the
@@ -201,26 +206,27 @@
     (-> (with-conn
           (fn [conn]
             ;; parent = a-id; children = b-id (round 1) and c-id (round 2).
-            (-> (d/transact! conn {:tx-data [{:seon.agent/id "msgtest-agent-c"}]})
-                (.then (fn [_]
-                         ;; round 1: parent → childB (task), childB → parent (report)
-                         (send-hops a-id b-id "research option 1")))
-                (.then (fn [hpx]
-                         (is (= 1 hpx) "parent→childB is a fresh pair ⇒ hops 1")
-                         (send-hops b-id a-id "option 1 done — stored 6 rows")))
-                (.then (fn [hxp]
-                         (is (= 2 hxp) "childB→parent report ⇒ hops 2")
-                         ;; round 2: parent → childC (a DISTINCT pair)
-                         (send-hops a-id "msgtest-agent-c" "research option 2")))
-                (.then (fn [hpy]
-                         (is (= 1 hpy)
-                             "parent→childC is a DISTINCT pair ⇒ resets to hops 1 (NOT 3)")
-                         (send-hops "msgtest-agent-c" a-id "option 2 done — stored 6 rows")))
-                (.then (fn [hyp]
-                         (is (= 2 hyp)
-                             "childC→parent round-2 report ⇒ hops 2, NOT 4 — wakes the parent (bug #79 fixed)")
-                         (is (< hyp warn/hop-cap)
-                             "the 2nd-round report is UNDER the cap ⇒ no silent deadlock"))))))
+            (-> (allocate-agents! conn [::agent-c])
+                (.then
+                  (fn [env]
+                    (let [c-id (get-in env [::db.id/ids ::agent-c])]
+                      (-> (send-hops a-id b-id "research option 1")
+                          (.then (fn [hpx]
+                                   (is (= 1 hpx) "parent→childB is a fresh pair ⇒ hops 1")
+                                   (send-hops b-id a-id "option 1 done — stored 6 rows")))
+                          (.then (fn [hxp]
+                                   (is (= 2 hxp) "childB→parent report ⇒ hops 2")
+                                   ;; round 2: parent → childC (a DISTINCT pair)
+                                   (send-hops a-id c-id "research option 2")))
+                          (.then (fn [hpy]
+                                   (is (= 1 hpy)
+                                       "parent→childC is a DISTINCT pair ⇒ resets to hops 1 (NOT 3)")
+                                   (send-hops c-id a-id "option 2 done — stored 6 rows")))
+                          (.then (fn [hyp]
+                                   (is (= 2 hyp)
+                                       "childC→parent round-2 report ⇒ hops 2, NOT 4 — wakes the parent (bug #79 fixed)")
+                                   (is (< hyp warn/hop-cap)
+                                       "the 2nd-round report is UNDER the cap ⇒ no silent deadlock"))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -265,11 +271,12 @@
 
 (deftest from-slot-admits-lookup-ref-resolved-ref-and-default
   (testing "the request schema admits all three from-ref forms at the boundary"
-    (let [req (fn [from] {:seon.agent.message/from    from
-                          :seon.agent.message/to      [:seon.agent/id a-id]
+    (let [sample-agent-id "MSGschemaid001"
+          req (fn [from] {:seon.agent.message/from    from
+                          :seon.agent.message/to      [:seon.agent/id sample-agent-id]
                           :seon.agent.message/content "hi"})]
       (is (m/validate :seon.agent.message/message-request
-                      (req [:seon.agent/id a-id]))
+                      (req [:seon.agent/id sample-agent-id]))
           "lookup-ref from validates")
       (is (m/validate :seon.agent.message/message-request (req 42))
           "resolved eid (int) from validates")
@@ -279,8 +286,10 @@
   (async done
     (-> (with-conn
           (fn [conn]
-            (let [a-eid (d/q '[:find ?e . :where [?e :seon.agent/id "msgtest-agent-a"]]
-                             @conn)
+            (let [a-eid (d/q '[:find ?e .
+                               :in $ ?agent-id
+                               :where [?e :seon.agent/id ?agent-id]]
+                             @conn a-id)
                   from-resolves-to-a?
                   (fn [{mid :seon.agent.message/id ok? :seon.agent.message/ok?} label]
                     (is (true? ok?) (str label " → ok? envelope"))
@@ -464,9 +473,11 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 (deftest labels-resolve-by-ref-kind
-  (testing "user / self / other-agent labels"
-    (is (= "user" (agent/message-label {:seon.user/id "user"} a-id)))
-    (is (= "assistant" (agent/message-label {:seon.agent/id a-id} a-id)))
-    (is (= (str "agent-" b-id)
-           (agent/message-label {:seon.agent/id b-id} a-id)))
-    (is (= "unknown" (agent/message-label nil a-id)))))
+  (let [self-id "MSGlabelself01"
+        peer-id "MSGlabelpeer01"]
+    (testing "user / self / other-agent labels"
+      (is (= "user" (agent/message-label {:seon.user/id "user"} self-id)))
+      (is (= "assistant" (agent/message-label {:seon.agent/id self-id} self-id)))
+      (is (= (str "agent-" peer-id)
+             (agent/message-label {:seon.agent/id peer-id} self-id)))
+      (is (= "unknown" (agent/message-label nil self-id))))))

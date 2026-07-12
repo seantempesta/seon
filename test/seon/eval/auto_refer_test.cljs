@@ -30,6 +30,7 @@
     [seon.agent.home :as home]
     [seon.client :as client]
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.eval :as seval]
     [seon.repl :as repl]
     [seon.repl.internal :as repl-int]))
@@ -119,25 +120,42 @@
   ;; The fix: the agent's eval-batch path augments the `(ns …)` form, so a
   ;; fn it then defines in that ns resolves `db/query` with no error.
   (async done
-    (let [aid    "ar73-2606291200"
-          new-ns "my.recall.ar73"
+    (let [new-ns "my.recall.ar73"
           src    (str "(ns " new-ns ")\n"
                       "(defn db-ok? [] (some? db/query))\n"
                       "(db-ok?)")]
       (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
           (.then (fn [pair]
                    (let [cs   (aget pair 0)
-                         conn (aget pair 1)
-                         hns  (symbol (str "my.agent." aid))]
-                     (-> (seval/setup-agent-ns! cs hns aid)
-                         (.then (fn [_]
-                                  ;; CLJS dynamic bindings don't cross async
-                                  ;; hops — set the root so db/*conn* holds
-                                  ;; through eval-batch!'s awaits.
-                                  (set! db/*conn* conn)
-                                  (seval/eval-batch!
-                                    cs (repl-int/parse-forms src) hns aid
-                                    "turnrefer001" nil)))
+                         conn (aget pair 1)]
+                     ;; CLJS dynamic bindings don't cross async hops — set the
+                     ;; root so db/*conn* holds through eval-batch!'s awaits.
+                     (set! db/*conn* conn)
+                     (-> (db.id/allocate!
+                           {::db.id/allocations
+                            [{::db.id/key ::fixture-agent
+                              ::db.id/identity-attr :seon.agent/id}
+                             {::db.id/key ::fixture-turn
+                              ::db.id/identity-attr :seon.agent.turn/id}]
+                            ::db.id/transaction-builder
+                            (fn [ids]
+                              {:seon.db/tx-data
+                               [{:seon.agent/id (::fixture-agent ids)}
+                                {:seon.agent.turn/id (::fixture-turn ids)}]})
+                            :seon.db/conn conn})
+                         (.then (fn [env]
+                                  (let [aid (get-in env [::db.id/ids
+                                                        ::fixture-agent])
+                                        hns (home/home-ns aid)]
+                                    (-> (seval/setup-agent-ns! cs hns aid)
+                                        (.then
+                                          (fn [_]
+                                            (seval/eval-batch!
+                                              cs (repl-int/parse-forms src)
+                                              hns aid
+                                              (get-in env [::db.id/ids
+                                                           ::fixture-turn])
+                                              nil)))))))
                          (.then (fn [r]
                                   (is (= 0 (:seon.eval/n-fail r))
                                       "no form failed — db/query resolved in the new ns")

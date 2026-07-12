@@ -24,6 +24,7 @@
     [seon.agent.home :as home]
     [seon.client :as client]
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.eval :as seval]
     [seon.repl :as repl]
     [seon.repl.internal :as repl-int]))
@@ -40,23 +41,42 @@
 (defn- run-batch
   "Run `source` (one form) through eval-batch! in a fresh agent ns.
    Returns a Promise of `#js {:cs … :hns … :result <eval-batch! map>}`."
-  [aid source]
-  (let [hns (home/home-ns aid)
-        tid "turnresvar01"]
-    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
-        (.then (fn [pair]
-                 (let [cs   (aget pair 0)
-                       conn (aget pair 1)
-                       prev db/*conn*]
-                   ;; CLJS dynamic bindings unwind before Promise callbacks.
-                   ;; Own the root for this complete async span and restore it.
-                   (set! db/*conn* conn)
-                   (-> (seval/setup-agent-ns! cs hns aid)
-                       (.then (fn [_]
-                                (seval/eval-batch!
-                                  cs (repl-int/parse-forms source) hns aid tid nil)))
-                       (.then (fn [r] #js {:cs cs :hns hns :result r}))
-                       (.finally (fn [] (set! db/*conn* prev))))))))))
+  [_aid source]
+  (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+      (.then (fn [pair]
+               (let [cs   (aget pair 0)
+                     conn (aget pair 1)
+                     prev db/*conn*]
+                 ;; CLJS dynamic bindings unwind before Promise callbacks.
+                 ;; Own the root for this complete async span and restore it.
+                 (set! db/*conn* conn)
+                 (-> (db.id/allocate!
+                       {::db.id/allocations
+                        [{::db.id/key ::fixture-agent
+                          ::db.id/identity-attr :seon.agent/id}
+                         {::db.id/key ::fixture-turn
+                          ::db.id/identity-attr :seon.agent.turn/id}]
+                        ::db.id/transaction-builder
+                        (fn [ids]
+                          {:seon.db/tx-data
+                           [{:seon.agent/id (::fixture-agent ids)}
+                            {:seon.agent.turn/id (::fixture-turn ids)}]})
+                        :seon.db/conn conn})
+                     (.then
+                       (fn [env]
+                         (let [aid (get-in env [::db.id/ids ::fixture-agent])
+                               hns (home/home-ns aid)]
+                           (-> (seval/setup-agent-ns! cs hns aid)
+                               (.then
+                                 (fn [_]
+                                   (seval/eval-batch!
+                                     cs (repl-int/parse-forms source) hns aid
+                                     (get-in env [::db.id/ids ::fixture-turn])
+                                     nil)))
+                               (.then
+                                 (fn [r]
+                                   #js {:cs cs :hns hns :result r}))))))
+                     (.finally (fn [] (set! db/*conn* prev)))))))))
 
 ;; ---------------------------------------------------------------------------
 ;; result-var-ref? — the bare-symbol predicate that drives :expr context +

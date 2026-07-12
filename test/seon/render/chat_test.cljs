@@ -147,33 +147,40 @@
 ;; conversation — derived from the real message log.
 ;; ============================================================
 
-(def ^:private a-id "chattest-agent-a")
-(def ^:private b-id "chattest-agent-b")
+(def ^:dynamic ^:private a-id nil)
+(def ^:dynamic ^:private b-id nil)
+
+(defn- allocate-agent-pair!
+  "Allocate and commit the two minimal conversation agents."
+  [conn]
+  (db.id/allocate!
+    {::db.id/allocations
+     [{::db.id/key ::agent-a
+       ::db.id/identity-attr :seon.agent/id}
+      {::db.id/key ::agent-b
+       ::db.id/identity-attr :seon.agent/id}]
+     ::db.id/transaction-builder
+     (fn [ids]
+       {:seon.db/tx-data
+        [{:seon.agent/id (::agent-a ids)}
+         {:seon.agent/id (::agent-b ids)}]})
+     :seon.db/conn conn}))
 
 (defn- fresh-conn
   "Promise of a fresh :memory conn with the pod's boot schema + the
    user entity + agents A and B (mirrors seon.agent.message-test)."
   []
-  (let [cfg {:store              {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history?      true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_]
-                 (d/connect (db.id/allocation-connect-config cfg)
-                            {:sync? false})))
-        (.then (fn [conn]
-                 (-> (d/transact!
-                       conn
-                       {:tx-data (into (db/malli->datahike-schema
-                                         client/agent-bootstrap-attrs)
-                                       (db/tx-meta-datahike-schema))})
-                     (.then (fn [_]
-                              (d/transact!
-                                conn
-                                {:tx-data [{:seon.user/id "user"}
-                                           {:seon.agent/id a-id}
-                                           {:seon.agent/id b-id}]})))
-                     (.then (fn [_] conn))))))))
+  (-> (client/open-agent-conn!)
+      (.then
+        (fn [conn]
+          (-> (allocate-agent-pair! conn)
+              (.then
+                (fn [env]
+                  (when-not (:seon.db/ok? env)
+                    (throw (ex-info "conversation agent allocation failed" env)))
+                  (set! a-id (get-in env [::db.id/ids ::agent-a]))
+                  (set! b-id (get-in env [::db.id/ids ::agent-b]))
+                  conn)))))))
 
 (defn- with-conn
   "Open a fresh seeded conn, `set!` it as the ROOT `db/*conn*` for the
@@ -369,10 +376,7 @@
                       ;; downstream from the status — turns store no message
                       ;; of their own). Only the :error turn may surface; the
                       ;; :done turn never does. RAW d/transact! like the
-                      ;; fixture itself — the fixture's 16-char agent ids
-                      ;; predate the 14-char :seon.db/id gate, so
-                      ;; db/transact!'s validation would reject any tx-map
-                      ;; carrying :seon.agent/id.
+                      ;; fixture itself.
                       ;; Run model: turns are STANDALONE entities that point
                       ;; UP to a run (`:seon.agent.turn/run`), the run UP to the
                       ;; agent (`:seon.agent.run/agent`). The `run` tempid links

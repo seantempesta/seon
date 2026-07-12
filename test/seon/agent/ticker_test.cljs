@@ -16,47 +16,21 @@
     [seon.agent.run :as run]
     [seon.agent.schedule :as schedule]
     [seon.client :as client]
-    [seon.db :as db]
-    [seon.db.id :as db.id]))
+    [seon.db :as db]))
 
 (def ^:private a-id "ticktest-26062")   ; exactly 14 chars (:seon.db/id)
-
-(def ^:private extra-attrs
-  "Run-model + schedule attrs the pod installs — added to the test conn's
-   boot schema alongside client/agent-bootstrap-attrs."
-  [:seon.agent/run :seon.agent/terminated-at :seon.agent/default-turn-limit
-   :seon.agent/default-deadline-ms :seon.agent/schedules
-   :seon.agent.run/id :seon.agent.run/agent :seon.agent.run/started-at
-   :seon.agent.run/trigger :seon.agent.run/cause :seon.agent.run/turn-limit
-   :seon.agent.run/deadline :seon.agent.run/last-beat-at :seon.agent.run/paused-at
-   :seon.agent.run/remaining-ms :seon.agent.run/status :seon.agent.run/closed-reason
-   :seon.agent.turn/run
-   :seon.agent.schedule/id :seon.agent.schedule/cron :seon.agent.schedule/fn
-   :seon.agent.schedule/timezone :seon.agent.schedule/concurrency-policy])
 
 (defn- fresh-conn
   "Promise of a fresh :memory conn with the pod's boot schema + run/schedule
    schema + the user entity + an :idle agent A."
   []
-  (let [cfg {:store {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history? true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_]
-                 (d/connect (db.id/allocation-connect-config cfg)
-                            {:sync? false})))
-        (.then (fn [conn]
-                 (-> (d/transact!
-                       conn
-                       {:tx-data (into (db/malli->datahike-schema
-                                         (into client/agent-bootstrap-attrs extra-attrs))
-                                       (db/tx-meta-datahike-schema))})
-                     (.then (fn [_]
-                              (d/transact!
-                                conn
-                                {:tx-data [{:seon.user/id "user"}
-                                           {:seon.agent/id a-id}]})))
-                     (.then (fn [_] conn))))))))
+  (-> (client/open-agent-conn!)
+      (.then (fn [conn]
+               (-> (d/transact!
+                     conn
+                     {:tx-data [{:seon.user/id "user"}
+                                {:seon.agent/id a-id}]})
+                   (.then (fn [_] conn)))))))
 
 (defn- with-conn
   "Fresh seeded conn `set!` as the ROOT db/*conn* for `body` (conn → Promise),

@@ -19,46 +19,48 @@
     [seon.error :as error]))
 
 (def ^:private root-id "root")
-(def ^:private parent-id "parent-2606aa")
-(def ^:private child-id  "child-2606aaaa")
-(def ^:private gchild-id "gchild-2606aaa")
-
-(def ^:private extra-attrs
-  [:seon.agent/run :seon.agent/terminated-at :seon.agent/parent :seon.agent/purpose
-   :seon.agent/default-turn-limit :seon.agent/default-deadline-ms
-   :seon.agent/schedules
-   :seon.agent.run/id :seon.agent.run/agent :seon.agent.run/started-at
-   :seon.agent.run/trigger :seon.agent.run/cause :seon.agent.run/turn-limit
-   :seon.agent.run/deadline :seon.agent.run/last-beat-at :seon.agent.run/paused-at
-   :seon.agent.run/remaining-ms :seon.agent.run/status :seon.agent.run/closed-reason
-   :seon.agent.run/result :seon.agent.run/result-ref :seon.agent.run/closed-at
-   :seon.agent.turn/run
-   :seon.agent.schedule/id :seon.agent.schedule/cron :seon.agent.schedule/fn
-   :seon.agent.schedule/timezone :seon.agent.schedule/concurrency-policy])
+(def ^:dynamic ^:private parent-id nil)
+(def ^:dynamic ^:private child-id nil)
+(def ^:dynamic ^:private gchild-id nil)
 
 (defn- fresh-conn []
-  (let [cfg {:store {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history? true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_]
-                 (d/connect (db.id/allocation-connect-config cfg)
-                            {:sync? false})))
-        (.then (fn [conn]
-                 (-> (d/transact!
-                       conn
-                       {:tx-data (into (db/malli->datahike-schema
-                                         (into client/agent-bootstrap-attrs extra-attrs))
-                                       (db/tx-meta-datahike-schema))})
-                     (.then (fn [_]
-                              (d/transact!
-                                conn
-                                {:tx-data [{:seon.user/id "user"}
-                                           {:seon.agent/id root-id}
-                                           {:seon.agent/id parent-id}
-                                           {:seon.agent/id child-id
-                                            :seon.agent/parent [:seon.agent/id parent-id]}]})))
-                     (.then (fn [_] conn))))))))
+  (-> (client/open-agent-conn!)
+      (.then
+        (fn [conn]
+          (-> (db.id/allocate!
+                {::db.id/allocations
+                 [{::db.id/key ::parent
+                   ::db.id/identity-attr :seon.agent/id}
+                  {::db.id/key ::child
+                   ::db.id/identity-attr :seon.agent/id}]
+                 ::db.id/transaction-builder
+                 (fn [ids]
+                   {:seon.db/tx-data
+                    [{:db/id "fixture-parent"
+                      :seon.agent/id (::parent ids)}
+                     {:seon.agent/id (::child ids)
+                      :seon.agent/parent "fixture-parent"}]})
+                 :seon.db/conn conn})
+              (.then
+                (fn [env]
+                  (when-not (:seon.db/ok? env)
+                    (throw (ex-info "multiagent fixture allocation failed" env)))
+                  (set! parent-id (get-in env [::db.id/ids ::parent]))
+                  (set! child-id (get-in env [::db.id/ids ::child]))
+                  conn)))))))
+
+(defn- allocate-row!
+  "Allocate one governed identity and commit its fixture row."
+  [conn allocation-key identity-attr row]
+  (db.id/allocate!
+    {::db.id/allocations
+     [{::db.id/key allocation-key
+       ::db.id/identity-attr identity-attr}]
+     ::db.id/transaction-builder
+     (fn [ids]
+       {:seon.db/tx-data
+        [(assoc row identity-attr (get ids allocation-key))]})
+     :seon.db/conn conn}))
 
 (defn- with-conn [body]
   (-> (fresh-conn)
@@ -152,8 +154,11 @@
   (async done
     (-> (with-conn
           (fn ^:async af [conn]
-            (await (d/transact! conn {:tx-data [{:seon.agent/id gchild-id
-                                                 :seon.agent/parent [:seon.agent/id child-id]}]}))
+            (let [env (await
+                        (allocate-row!
+                          conn ::gchild :seon.agent/id
+                          {:seon.agent/parent [:seon.agent/id child-id]}))]
+              (set! gchild-id (get-in env [::db.id/ids ::gchild])))
             (let [db @db/*conn*]
               (is (= 0 (agent/spawn-depth db root-id)) "root = 0")
               (is (= 0 (agent/spawn-depth db parent-id)) "parentless = 0")
@@ -386,16 +391,17 @@
           (.catch (fn [e] (is false (str "threw " e)) (done)))))))
 
 (defn- seed-crash! [conn agent-id rid-suffix closed-at]
-  (d/transact! conn
-    {:tx-data [{:seon.agent.run/id            (str "crun-" rid-suffix)
-                :seon.agent.run/agent         [:seon.agent/id agent-id]
-                :seon.agent.run/started-at    closed-at
-                :seon.agent.run/trigger       :schedule
-                :seon.agent.run/turn-limit    20
-                :seon.agent.run/deadline      closed-at
-                :seon.agent.run/status        :closed
-                :seon.agent.run/closed-reason :crashed
-                :seon.agent.run/closed-at     closed-at}]}))
+  (allocate-row!
+    conn (keyword "seon.agent.multiagent-test" (str "crash-" rid-suffix))
+    :seon.agent.run/id
+    {:seon.agent.run/agent         [:seon.agent/id agent-id]
+     :seon.agent.run/started-at    closed-at
+     :seon.agent.run/trigger       :schedule
+     :seon.agent.run/turn-limit    20
+     :seon.agent.run/deadline      closed-at
+     :seon.agent.run/status        :closed
+     :seon.agent.run/closed-reason :crashed
+     :seon.agent.run/closed-at     closed-at}))
 
 (deftest breaker-trips-at-N-in-window
   (async done
@@ -438,12 +444,14 @@
           window 1800000]
       (-> (with-conn
             (fn ^:async af [conn]
-              (await (d/transact! conn
-                       {:tx-data [{:seon.agent.run/id "done-run-abcd" :seon.agent.run/agent [:seon.agent/id child-id]
-                                   :seon.agent.run/started-at now :seon.agent.run/trigger :message
-                                   :seon.agent.run/turn-limit 20 :seon.agent.run/deadline now
-                                   :seon.agent.run/status :closed :seon.agent.run/closed-reason :completed
-                                   :seon.agent.run/closed-at (js/Date. (- (.getTime now) 60000))}]}))
+              (await
+                (allocate-row!
+                  conn ::completed-run :seon.agent.run/id
+                  {:seon.agent.run/agent [:seon.agent/id child-id]
+                   :seon.agent.run/started-at now :seon.agent.run/trigger :message
+                   :seon.agent.run/turn-limit 20 :seon.agent.run/deadline now
+                   :seon.agent.run/status :closed :seon.agent.run/closed-reason :completed
+                   :seon.agent.run/closed-at (js/Date. (- (.getTime now) 60000))}))
               (is (= 0 (derive/recent-crash-count @db/*conn* child-id
                                                   (js/Date. (- (.getTime now) window))))
                   "only :crashed closes count")))

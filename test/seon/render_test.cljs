@@ -20,6 +20,7 @@
     [seon.client :as client]
     [seon.config :as config]
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.error :as error]
     [seon.eval :as eval]
     [seon.render :as render]
@@ -176,20 +177,33 @@
 ;; live pod conn.
 ;; ============================================================
 
+(defn- allocate-agent-row!
+  "Allocate and commit one render fixture agent row."
+  [conn row]
+  (db.id/allocate!
+    {::db.id/allocations
+     [{::db.id/key ::render-agent
+       ::db.id/identity-attr :seon.agent/id}]
+     ::db.id/transaction-builder
+     (fn [ids]
+       {:seon.db/tx-data
+        (into (vec (schema/entity-schema-tx-data :seon.agent))
+              [(assoc row :seon.agent/id (::render-agent ids))])})
+     :seon.db/conn conn}))
+
 (defn- with-tile-conn
   "Open a fresh conn, seed the :seon.agent kind schema entity + one
    agent row, call `body` with the conn bound. Returns a Promise."
-  [agent-id body]
+  [body]
   (-> (client/open-agent-conn!)
       (.then (fn [conn]
                (binding [db/*conn* conn]
-                 (-> (db/transact!
-                       {:seon.db/tx-data
-                        (into (vec (schema/entity-schema-tx-data :seon.agent))
-                              [{:seon.agent/id    agent-id}])})
-                     (.then (fn [_]
-                              (binding [db/*conn* conn]
-                                (body conn))))))))))
+                 (-> (allocate-agent-row! conn {})
+                     (.then (fn [env]
+                              (let [agent-id (get-in env [::db.id/ids
+                                                          ::render-agent])]
+                                (binding [db/*conn* conn]
+                                  (body conn agent-id)))))))))))
 
 (deftest render-agent-canvas-default-renders-welcome
   ;; canvas U1: an UNWIRED agent's tile is the core welcome
@@ -197,11 +211,11 @@
   ;; default seon.render.default/view — the tile slot and the generic
   ;; entity-card slot are separate roles now (PRD §8.1).
   (async done
-    (-> (with-tile-conn "tiletest-00001"
-          (fn [conn]
+    (-> (with-tile-conn
+          (fn [conn agent-id]
             (let [{:seon.render/keys [hiccup ai]}
                   (render/render-agent-canvas {:seon.db/db @conn
-                                             :seon.agent/id "tiletest-00001"})]
+                                               :seon.agent/id agent-id})]
               (is (vector? hiccup) "default tile renders hiccup")
               (is (= "seon-tile" (:class (second hiccup)))
                   "it is the welcome's .seon-tile container")
@@ -218,18 +232,18 @@
   ;; positive ::content override path is pinned in
   ;; seon.render.canvas-test.
   (async done
-    (-> (with-tile-conn "tileovr-000001"
-          (fn [conn]
+    (-> (with-tile-conn
+          (fn [conn agent-id]
             (-> (db/transact!
                   {:seon.db/tx-data
-                   [{:seon.agent/id    "tileovr-000001"
+                   [{:seon.agent/id    agent-id
                      :seon.render/html [:h1 "card-slot-not-a-tile"]}]})
                 (.then (fn [_]
                          (binding [db/*conn* conn]
                            (let [{:seon.render/keys [hiccup]}
                                  (render/render-agent-canvas
                                    {:seon.db/db @conn
-                                    :seon.agent/id "tileovr-000001"})]
+                                    :seon.agent/id agent-id})]
                              (is (= "seon-tile" (:class (second hiccup)))
                                  "tile ignores :seon.render/html and renders the welcome")
                              (is (not= [:h1 "card-slot-not-a-tile"] hiccup)
@@ -258,8 +272,8 @@
 
 (deftest render-entity-html-throwing-renderer-shows-banner
   (async done
-    (-> (with-tile-conn "rethrow-00001"
-          (fn [conn]
+    (-> (with-tile-conn
+          (fn [conn agent-id]
             (let [broken {:db/id 1
                           :seon.render/html 'seon.render-test/throwing-renderer}
                   good   {:db/id 2
@@ -267,7 +281,7 @@
                   render-one (fn [entity]
                                (render/render-entity-html
                                  {:seon.db/db @conn
-                                  :seon.agent/id "rethrow-00001"
+                                  :seon.agent/id agent-id
                                   :seon.render/entity entity}))
                   ;; The throwing renderer is a seon.* sym → :core fault;
                   ;; deliberate here, so bracket it as EXPECTED (the render is
@@ -288,13 +302,13 @@
 
 (deftest render-entity-ai-throwing-renderer-is-legible
   (async done
-    (-> (with-tile-conn "rethrow-00002"
-          (fn [conn]
+    (-> (with-tile-conn
+          (fn [conn agent-id]
             (let [out (error/expecting-core-fault!
                         (fn []
                           (render/render-entity-ai
                             {:seon.db/db @conn
-                             :seon.agent/id "rethrow-00002"
+                             :seon.agent/id agent-id
                              :seon.render/entity
                              {:db/id 1
                               :seon.render/ai 'seon.render-test/throwing-renderer}})))]
@@ -307,8 +321,8 @@
 
 (deftest render-agent-canvas-missing-agent-renders-nothing
   (async done
-    (-> (with-tile-conn "tilesome-00001"
-          (fn [conn]
+    (-> (with-tile-conn
+          (fn [conn _agent-id]
             (let [out (render/render-agent-canvas {:seon.db/db @conn
                                                  :seon.agent/id "no-such-agent0"})]
               (is (= {:seon.render/hiccup nil} out)
@@ -328,27 +342,27 @@
   "Fresh conn seeded with the :seon.agent kind schema, one agent row, and
    one :seon.agent/ctx block named :mytile whose :seon.render/html is a
    literal hiccup. Calls `body` with the conn bound; returns a Promise."
-  [agent-id body]
+  [body]
   (-> (client/open-agent-conn!)
       (.then (fn [conn]
                (binding [db/*conn* conn]
-                 (-> (db/transact!
-                       {:seon.db/tx-data
-                        (into (vec (schema/entity-schema-tx-data :seon.agent))
-                              [{:seon.agent/id   agent-id
-                                :seon.agent/ctx
-                                [{:seon.agent.ctx/name     :mytile
-                                  :seon.agent.ctx/priority 50
-                                  :seon.render/html        [:h1 "tile!"]}]}])})
-                     (.then (fn [_]
-                              (binding [db/*conn* conn]
-                                (body conn))))))))))
+                 (-> (allocate-agent-row!
+                       conn
+                       {:seon.agent/ctx
+                        [{:seon.agent.ctx/name     :mytile
+                          :seon.agent.ctx/priority 50
+                          :seon.render/html        [:h1 "tile!"]}]})
+                     (.then (fn [env]
+                              (let [agent-id (get-in env [::db.id/ids
+                                                          ::render-agent])]
+                                (binding [db/*conn* conn]
+                                  (body conn agent-id)))))))))))
 
 (deftest slot-renders-named-block-html
   (async done
-    (-> (with-block-conn "slottest-00001"
-          (fn [conn]
-            (let [out (render/slot {:seon.db/db @conn :seon.agent/id "slottest-00001"}
+    (-> (with-block-conn
+          (fn [conn agent-id]
+            (let [out (render/slot {:seon.db/db @conn :seon.agent/id agent-id}
                                    :mytile)]
               (is (vector? out) "slot returns hiccup")
               (is (= :div (first out)) "wrapped in a div")
@@ -366,18 +380,16 @@
    given :seon.agent/ctx `blocks`. Calls `body` with the conn bound; Promise.
    The flexible twin of [[with-block-conn]] (which fixes one literal-hiccup
    block) — for slots over symbol-html and map-envelope blocks."
-  [agent-id blocks body]
+  [blocks body]
   (-> (client/open-agent-conn!)
       (.then (fn [conn]
                (binding [db/*conn* conn]
-                 (-> (db/transact!
-                       {:seon.db/tx-data
-                        (into (vec (schema/entity-schema-tx-data :seon.agent))
-                              [{:seon.agent/id  agent-id
-                                :seon.agent/ctx (vec blocks)}])})
-                     (.then (fn [_]
-                              (binding [db/*conn* conn]
-                                (body conn))))))))))
+                 (-> (allocate-agent-row! conn {:seon.agent/ctx (vec blocks)})
+                     (.then (fn [env]
+                              (let [agent-id (get-in env [::db.id/ids
+                                                          ::render-agent])]
+                                (binding [db/*conn* conn]
+                                  (body conn agent-id)))))))))))
 
 (deftest slot-missing-block-routes-through-overridable-error-never-throws
   ;; CONVERGENCE: a missing (or throwing) block surfaces THROUGH the
@@ -385,9 +397,9 @@
   ;; div — so a consumer's set! override (acme's branded card) applies on
   ;; the agent view too. Never throws; stable id + sibling kept.
   (async done
-    (-> (with-block-conn "slottest-00002"
-          (fn [conn]
-            (let [ctx  {:seon.db/db @conn :seon.agent/id "slottest-00002"}
+    (-> (with-block-conn
+          (fn [conn agent-id]
+            (let [ctx  {:seon.db/db @conn :seon.agent/id agent-id}
                   orig canvas/error-tile]
               (try
                 (set! canvas/error-tile
@@ -411,12 +423,12 @@
   ;; :seon.render/html-response MAP envelope must render its HICCUP in the
   ;; slot — not a raw/empty map body. welcome returns the envelope.
   (async done
-    (-> (with-blocks-conn "slotmap-00001"
+    (-> (with-blocks-conn
           [{:seon.agent.ctx/name     :wtile
             :seon.agent.ctx/priority 50
             :seon.render/html        'seon.render.canvas/welcome}]
-          (fn [conn]
-            (let [out  (render/slot {:seon.db/db @conn :seon.agent/id "slotmap-00001"}
+          (fn [conn agent-id]
+            (let [out  (render/slot {:seon.db/db @conn :seon.agent/id agent-id}
                                     :wtile)
                   body (nth out 2 nil)]
               (is (= "tile-wtile" (:id (second out)))

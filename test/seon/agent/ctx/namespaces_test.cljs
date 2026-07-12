@@ -22,7 +22,8 @@
     [seon.agent.home :as home]
     [seon.ai.tokens :as tokens]
     [seon.client :as client]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.db.id :as db.id]))
 
 ;; A valid agent id (`:seon.agent/id` is a strict shape) and its home ns —
 ;; a fresh agent's current ns falls back to `(home-ns id)`.
@@ -137,23 +138,32 @@
     (-> (client/open-agent-conn!)
         (.then (fn [conn]
                  (binding [db/*conn* conn]
-                   (let [fresh "tst-cfg-2606260000"
-                         home  :my.agent.tst-cfg-2606260000]
-                     (-> (db/transact! {:seon.db/tx-data [{:seon.agent/id fresh}]})
-                         (.then (fn [_]
-                                  (let [out       (nss/namespaces-block
-                                                    {:seon.db/db @conn :seon.agent/id fresh})
-                                        resolved  (home/home-requires-for fresh)
-                                        cfg-form  (home/home-ns-form home resolved)
-                                        const-form (home/home-ns-form home)]
-                                    (is (contains? (section-nses out) "my.agent.tst-cfg-2606260000")
-                                        "the fresh agent's home ns renders (the workspace stub)")
-                                    (is (str/includes? out cfg-form)
-                                        "stub prose is built from the config-resolved requires")
-                                    ;; Only meaningful when config actually diverges from the const.
-                                    (when (not= cfg-form const-form)
-                                      (is (not (str/includes? out const-form))
-                                          "stub prose is NOT the stale const default"))))))))))
+                   (-> (db.id/allocate!
+                         {::db.id/allocations
+                          [{::db.id/key ::configured-agent
+                            ::db.id/identity-attr :seon.agent/id}]
+                          ::db.id/transaction-builder
+                          (fn [ids]
+                            {:seon.db/tx-data
+                             [{:seon.agent/id (::configured-agent ids)}]})
+                          :seon.db/conn conn})
+                       (.then (fn [env]
+                                (let [fresh (get-in env [::db.id/ids
+                                                        ::configured-agent])
+                                      home  (home/home-ns fresh)
+                                      out       (nss/namespaces-block
+                                                  {:seon.db/db @conn :seon.agent/id fresh})
+                                      resolved  (home/home-requires-for fresh)
+                                      cfg-form  (home/home-ns-form home resolved)
+                                      const-form (home/home-ns-form home)]
+                                  (is (contains? (section-nses out) (name home))
+                                      "the fresh agent's home ns renders (the workspace stub)")
+                                  (is (str/includes? out cfg-form)
+                                      "stub prose is built from the config-resolved requires")
+                                  ;; Only meaningful when config actually diverges from the const.
+                                  (when (not= cfg-form const-form)
+                                    (is (not (str/includes? out const-form))
+                                        "stub prose is NOT the stale const default")))))))))
         (.then (fn [_] (done)) (fn [e] (is false (str "threw: " (.-message e))) (done))))))
 
 (deftest compact-of-unindexed-ns-does-not-throw
