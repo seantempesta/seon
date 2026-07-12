@@ -10,11 +10,16 @@ tags: [orchestrator, agent]
 re-founded ([[research/design-review-2026-07-12.md]] — verdict
 right-track-with-changes, changes folded into [[design.md]]). B1 MLX
 port SHIPPED (`5481ab36`: parity 20/20, ~0.25s/suggestion, Clojure
-1.82× token cost). KT0 fired: only ~224 minable turns (all acme) —
-data recipe inverted to synthetic/gold-primary. A1
-(`seon.repl.autocomplete` profile + exporter) and the verbs-rename /
-deprecated-deletion cleanup in flight. Next: KT1-KT4 kill tests before
-any training spend. Live status: [[roadmap.md]].
+1.82× token cost). **A1 SHIPPED** (`af67b188`):
+`seon.repl.autocomplete` — `context` through the ONE producer
+(`render-context` + the `:autocomplete` profile, config→DB
+`:seon.config/context-profiles`), `rate!` curation, `export!` →
+`data/tune/acme-2026-07-12.jsonl` (214 rows, **0 determinism
+mismatches**, contexts ≤678 tok, coverage mean .64). Context generation
+is OWNER-FROZEN: profiles = selection + caps only; default prompt path
+byte-parity. Verbs-rename / deprecated-deletion cleanup in flight.
+Next: KT1-KT4 kill tests before any training spend. Live status:
+[[roadmap.md]].
 
 ## Settled — do NOT re-litigate
 

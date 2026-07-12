@@ -31,13 +31,31 @@ contract = copy-heavy form kinds (plan/transact/register).
 
 ## In flight
 
-- **A1** — `seon.repl.autocomplete` (context profile via ONE renderer
-  `seon.agent.ctx/render-context` + `:seon.agent.ctx/profile` key,
-  config→DB profiles, curation attrs, exporter). Acceptance now
-  includes the three determinism holes (result-handles, warnings
-  wall-clock, `@db/*conn*` reads).
 - Vocabulary cleanup: "verbs"-named surfaces → functions names;
   deprecated `:relevant-source` deletion.
+
+## A1 — SHIPPED (`af67b188`, 2026-07-12)
+
+- **`seon.repl.autocomplete`**: `context` (the byte-exact encoder input —
+  `seon.agent.ctx/render-context` + the `:autocomplete` profile),
+  `rate!` + `::rating`/`::tag` curation datoms on turns, `export!`
+  (JSONL to `data/tune/`, per-row ingredients coverage, built-in
+  double-render determinism self-check, token summaries).
+- **Profile mechanism** (selection + caps ONLY — frozen-context
+  compliant): `:seon.agent.ctx/profile` on `render-context`/`context-root`
+  (absent ⇒ byte-parity); per-block `:seon.agent.ctx/token-cap`/`cap-keep`;
+  transcript `::readline?`/`::result-handles?` dials (default true);
+  profiles config→DB via `:seon.config/context-profiles` (as-of-versioned;
+  seeded in `config/system.edn` — keep in sync with the code default).
+- **Live proof (acme store)**: 214 rows / 262 turns walked / 17 agents;
+  **0 determinism mismatches** over 214 double-renders; contexts 206–678
+  tokens (all under the 700 budget); targets p50 34 tokens (7 rows over
+  the 512 decoder budget); 0/214 handle or readline leaks; coverage
+  mean .64 (40 rows < .25 — context-gap evidence). Form kinds
+  (overlapping): my.plan 111 · db/query 57 · in-ns/ns/require 53 ·
+  register! 24 · defn 15 · transact! 10 · other 34. File:
+  `data/tune/acme-2026-07-12.jsonl` — this IS the held-out
+  real-distribution eval set (KT1/KT3 unblocked).
 
 ## Ordered path (spend-gated; thresholds in design.md §Measurement)
 
