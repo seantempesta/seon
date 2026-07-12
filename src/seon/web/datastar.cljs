@@ -200,18 +200,44 @@
       patch-elements))
 
 ;; ============================================================
-;; Per-connection push + broadcast. Each connection renders its OWN
-;; bound view (the /view roster vs a /agent/{id} view). Best-effort,
-;; never throws.
+;; Per-connection push + broadcast. Equivalent feeds share a render; each
+;; gzip stream independently applies latest-wins backpressure. Best-effort.
 ;; ============================================================
 
+(declare push-event!)
+
+(defn- drain-feed!
+  "Resume one backpressured feed with only its newest pending event."
+  [{pending :seon.web.feed/pending-event
+    draining? :seon.web.feed/draining?
+    :as conn}]
+  (reset! draining? false)
+  (when-let [event @pending]
+    (reset! pending nil)
+    (push-event! conn event)))
+
 (defn- push-event!
-  "Write an already-rendered Datastar event to one gzip connection."
-  [{gz :seon.web.feed/gzip res :seon.web.feed/response} event]
+  "Write one rendered event, retaining only the newest event under pressure."
+  [{gz :seon.web.feed/gzip
+    res :seon.web.feed/response
+    pending :seon.web.feed/pending-event
+    draining? :seon.web.feed/draining?
+    :as conn}
+   event]
   (try
-    (when-not (or (.-writableEnded ^js gz) (.-writableEnded ^js res))
-      (.write ^js gz event)
-      (.flush ^js gz (.. zlib -constants -Z_SYNC_FLUSH)))
+    (cond
+      (or (.-writableEnded ^js gz) (.-writableEnded ^js res))
+      (reset! pending nil)
+
+      @draining?
+      (reset! pending event)
+
+      :else
+      (let [accepted? (.write ^js gz event)]
+        (.flush ^js gz (.. zlib -constants -Z_SYNC_FLUSH))
+        (when-not accepted?
+          (reset! draining? true)
+          (.once ^js gz "drain" #(drain-feed! conn)))))
     (catch :default e
       (log/error-console! "seon.web.datastar" "push-event! failed" e))))
 
@@ -499,6 +525,8 @@
                     :seon.web.feed/id id
                     :seon.web.feed/gzip gz
                     :seon.web.feed/response res
+                    :seon.web.feed/pending-event (atom nil)
+                    :seon.web.feed/draining? (atom false)
                     :seon.web.feed/opened-at (js/Date.))]
     (.on gz "error"  (fn [e] (log/error-console! "seon.web.datastar" "gz error" e)))
     (.on res "error" (fn [e] (log/error-console! "seon.web.datastar" "res error" e)))

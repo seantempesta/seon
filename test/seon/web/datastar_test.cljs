@@ -233,6 +233,31 @@
         {:seon.db/db nil :seon.db/changed-attrs #{:example/value}})
       (is (zero? @renders) "as-of feeds never rerender on current commits"))))
 
+(deftest backpressured-feed-retains-only-latest-event
+  (let [writes (atom [])
+        on-drain (atom nil)
+        gz #js {:writableEnded false
+                :write (fn [event] (swap! writes conj event) false)
+                :flush (fn [_] nil)
+                :once (fn [event-name handler]
+                        (when (= event-name "drain")
+                          (reset! on-drain handler)))}
+        res #js {:writableEnded false}
+        pending (atom nil)
+        draining? (atom false)
+        conn {:seon.web.feed/gzip gz
+              :seon.web.feed/response res
+              :seon.web.feed/pending-event pending
+              :seon.web.feed/draining? draining?}]
+    (@#'datastar/push-event! conn "first")
+    (@#'datastar/push-event! conn "obsolete")
+    (@#'datastar/push-event! conn "latest")
+    (is (= ["first"] @writes) "pressure prevents an unbounded write queue")
+    (is (= "latest" @pending) "new activity replaces stale pending activity")
+    (@on-drain)
+    (is (= ["first" "latest"] @writes)
+        "drain sends only the newest derived state")))
+
 ;; ============================================================
 ;; 5. PER-CONNECTION views — the streamer renders EACH connection's OWN
 ;; bound view-fn (the /view roster vs a /agent/{id} view both ride the

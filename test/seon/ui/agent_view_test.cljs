@@ -71,11 +71,13 @@
     (-> (with-agents
           [[agent-a []]]
           (fn [conn]
-            (with-redefs [agent-ctx/rendered-context-blocks
-                          (fn [_ _]
-                            [{:seon.agent.ctx/name :render-fn/live
-                              :seon.agent.ctx/priority 50
-                              :seon.render/hiccup [:div "DERIVED-HTML"]}])]
+            (with-redefs [agent-ctx/context-root
+                          (fn [_]
+                            {:seon.agent/entity {}
+                             :seon.agent.ctx/children
+                             [{:seon.agent.ctx/name :render-fn/live
+                               :seon.agent.ctx/priority 50
+                               :seon.render/html [:div "DERIVED-HTML"]}]})]
               (let [s (html/->string (agent-view/agent-view @conn agent-a))]
                 (is (str/includes? s "DERIVED-HTML"))
                 (is (str/includes? s "context-render-fn-live"))))))

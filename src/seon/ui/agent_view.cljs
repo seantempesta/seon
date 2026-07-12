@@ -147,6 +147,28 @@
         0)
     0))
 
+(defn- assistant-reply-touch
+  "Latest real reply from this agent to the human user.
+
+   Transcript evals and peer traffic still invalidate and reorder its content,
+   but only a human-facing reply deliberately moves focus to the transcript."
+  [dbv agent-id]
+  (or
+    (ffirst
+      (db/query
+        {:seon.db/db dbv
+         :seon.db/query
+         '[:find (max ?tx)
+           :in $ ?aid
+           :where
+           [?agent :seon.agent/id ?aid]
+           [?user :seon.user/id "user"]
+           [?message :seon.agent.message/from ?agent]
+           [?message :seon.agent.message/to ?user]
+           [?message :seon.agent.message/content _ ?tx]]
+         :seon.db/args [agent-id]}))
+    0))
+
 (defn- canvas-touch
   "Canvas recency from its explicit slot and its derived tile renderer."
   [dbv agent-id]
@@ -220,10 +242,14 @@
                   :seon.ui.surface/node child
                   :seon.ui.surface/root root
                   :seon.ui.surface/renderer displayed-renderer
-                  :seon.ui.surface/read-attrs
+                 :seon.ui.surface/read-attrs
                   (renderer-attrs dbv dependency-renderer)
                   :seon.ui.surface/touch
-                  (renderer-touch dbv agent-id dependency-renderer)}))))
+                  (renderer-touch dbv agent-id dependency-renderer)
+                  :seon.ui.surface/focus-touch
+                  (if (= nm :transcript)
+                    (assistant-reply-touch dbv agent-id)
+                    (renderer-touch dbv agent-id dependency-renderer))}))))
          vec)))
 
 (defn- canvas-surface-spec [dbv agent-id]
@@ -233,11 +259,21 @@
      :seon.ui.surface/renderer renderer
      :seon.ui.surface/read-attrs
      (conj (renderer-attrs dbv renderer) :seon.render.canvas/content)
-     :seon.ui.surface/touch (canvas-touch dbv agent-id)}))
+     :seon.ui.surface/touch (canvas-touch dbv agent-id)
+     :seon.ui.surface/focus-touch (canvas-touch dbv agent-id)}))
 
 (defn- surface-specs [dbv agent-id]
   (conj (context-surface-specs dbv agent-id)
         (canvas-surface-spec dbv agent-id)))
+
+(defn- latest-focus
+  "Most recently deliberately updated surface; canvas wins an untouched tie."
+  [surfaces]
+  (last
+    (sort-by (juxt :seon.ui.surface/focus-touch
+                   #(if (= "canvas" (:seon.ui.surface/selection %)) 1 0)
+                   :seon.ui.surface/label)
+             surfaces)))
 
 (defn- render-surface
   "Render one descriptor once, then project its compact/expanded faces."
@@ -253,11 +289,14 @@
                         :seon.agent/entity (:seon.agent/entity root)}]
               (render/render :seon.render/html ctx
                              (:seon.ui.surface/node spec))))
-        h (or h [:div {:class "p-2 text-text-500 text-xs"}
-                 "No render yet."])]
-    (assoc spec
-           :seon.ui.surface/compact (face h :compact)
-           :seon.ui.surface/expanded (face h :expanded))))
+        h (if (= selection "canvas")
+            (or h [:div {:class "p-2 text-text-500 text-xs"}
+                   "No canvas render yet."])
+            h)]
+    (when h
+      (assoc spec
+             :seon.ui.surface/compact (face h :compact)
+             :seon.ui.surface/expanded (face h :expanded)))))
 
 (defn- focus-marker [selection touch]
   [:div {:id "agent-view-focus-revision"
@@ -288,19 +327,23 @@
   (if (seq (set/intersection structural-attrs changed-attrs))
     [(agent-view dbv agent-id)]
     (let [specs (surface-specs dbv agent-id)
-          affected (filterv
-                     #(seq (set/intersection
-                             changed-attrs
-                             (:seon.ui.surface/read-attrs %)))
-                     specs)
-          latest (last (sort-by (juxt :seon.ui.surface/touch
-                                      :seon.ui.surface/label)
-                                specs))]
-      (into [(header/system-header dbv)
-             (focus-marker (:seon.ui.surface/selection latest)
-                           (:seon.ui.surface/touch latest))]
-            (mapcat #(surface-elements (render-surface dbv agent-id %)))
-            affected))))
+          affected-specs
+          (filterv #(seq (set/intersection
+                           changed-attrs
+                           (:seon.ui.surface/read-attrs %)))
+                   specs)
+          affected (mapv #(render-surface dbv agent-id %) affected-specs)
+          latest (latest-focus specs)]
+      ;; A formerly-present conditional renderer returning nil requires a shell
+      ;; morph so Datastar removes both of its old faces. Ordinary updates stay
+      ;; on the small, ID-addressed path.
+      (if (some nil? affected)
+        [(agent-view dbv agent-id)]
+        (into [(header/system-header dbv)
+               (focus-marker (:seon.ui.surface/selection latest)
+                             (:seon.ui.surface/focus-touch latest))]
+              (mapcat surface-elements)
+              affected)))))
 
 (defn agent-view
   "Render one agent's canvas and HTML context blocks from `db`."
@@ -309,40 +352,16 @@
                   :any]}
   [db agent-id]
   (try
-    (let [ctx         {:seon.db/db db :seon.agent/id agent-id}
-          blocks      (agent-ctx/rendered-context-blocks ctx #{:html})
-          canvas      (:seon.render/hiccup
-                        (render/render-agent-canvas {:seon.agent/id agent-id
-                                                   :seon.db/db db}))
-          context-surfaces
-          (mapv (fn [{nm :seon.agent.ctx/name
-                      h  :seon.render/hiccup
-                      renderer :seon.render/html}]
-                  (let [selection (selection-key nm)]
-                    {:seon.ui.surface/selection selection
-                     :seon.ui.surface/label (name nm)
-                     :seon.ui.surface/compact (face h :compact)
-                     :seon.ui.surface/expanded (face h :expanded)
-                     :seon.ui.surface/touch (renderer-touch db agent-id renderer)
-                     :seon.ui.surface/renderer renderer}))
-                blocks)
-          surfaces (->> (conj context-surfaces
-                              (let [h (or canvas
-                                          [:div {:class "p-2 text-text-500 text-xs"}
-                                           "No canvas render yet."])]
-                                {:seon.ui.surface/selection "canvas"
-                                 :seon.ui.surface/label "canvas"
-                                 :seon.ui.surface/compact (face h :compact)
-                                 :seon.ui.surface/expanded (face h :expanded)
-                                 :seon.ui.surface/touch (canvas-touch db agent-id)}))
+    (let [surfaces (->> (surface-specs db agent-id)
+                        (keep #(render-surface db agent-id %))
                         (sort-by (juxt (comp - :seon.ui.surface/touch)
                                        :seon.ui.surface/label))
                         vec)
-          latest (or (first surfaces)
+          latest (or (latest-focus surfaces)
                      {:seon.ui.surface/selection "canvas"
-                      :seon.ui.surface/touch 0})
+                      :seon.ui.surface/focus-touch 0})
           latest-selection (:seon.ui.surface/selection latest)
-          latest-touch (:seon.ui.surface/touch latest)]
+          latest-touch (:seon.ui.surface/focus-touch latest)]
       [:main {:id "app-view"
               :class "flex flex-col gap-2 w-full min-h-0 flex-1 overflow-hidden"
               :data-signals__ifmissing
