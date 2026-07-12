@@ -1,8 +1,8 @@
 (ns seon.agent.ctx.menu
   "The typeahead MENU block family — glyph-numbered, strictly-OPTIONAL
    offers derived from the db at render time (diffusion-typeahead P3a;
-   see docs/prds/diffusion-dynamic-context/typeahead-design.md). Two
-   sections, both pure fns of the db (reactive-context — the query
+   see docs/prds/diffusion-dynamic-context/typeahead-design.md). One
+   section, a pure fn of the db (reactive-context — the query
    returns nothing → the section vanishes, nothing is stored):
 
      - `:recent-verbs` ([[recent-verbs-block]]) — the agent's most-used
@@ -10,10 +10,13 @@
        the turn loop already persists — no new storage), each rendered
        as a glyph-numbered entry: glyph, `(fn-sym [args] …)` in the same
        arity grammar as the compact ns cards, docstring line 1.
-     - `:plan-ledger` ([[plan-ledger-block]]) — the open/current
-       `my.plan` steps as `▶`/`☐` glyph lines. DONE steps are DROPPED
-       from the render (derive-don't-store; the full tree stays
-       queryable via `my.plan/tree`).
+
+   (The former `:plan-ledger` section retired 2026-07-11 — owner ruling,
+   planner-worker-design.md: `:plan` is THE plan surface; its ▶/☐/
+   done-dropped compactness contract lives in
+   `my.plan.internal/plan-block` now. Its glyphs were never wire offers,
+   so [[verb-offers]] alignment is untouched — and the render-side
+   duplicate-① ambiguity is gone with it.)
 
    The one law (settled by measurement — see the design doc): selection
    is STRICTLY OPTIONAL, forever. Each section header teaches it once,
@@ -31,7 +34,6 @@
    surface later phases add; the design doc pins these keyword names.)"
   (:require
     [clojure.string :as str]
-    [my.plan.internal :as plan-internal]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.namespaces :as ns-cards]
     [seon.db :as db]
@@ -41,9 +43,7 @@
 
 ;; ============================================================
 ;; Glyphs — the model→driver selection vocabulary (①–⑩, all single
-;; tokens, measured — typeahead-design "The glyph vocabulary"). The
-;; ledger's status glyphs ▶/☐ are driver→model render chrome only (☑ is
-;; never rendered here: done items are dropped, not marked).
+;; tokens, measured — typeahead-design "The glyph vocabulary").
 ;; ============================================================
 
 (def glyphs
@@ -284,10 +284,10 @@
 ;; ONE numbering across both groups (decided here, P6): the rendered
 ;; section numbers recent + toolkit entries through the SAME glyph
 ;; vector, and [[verb-offers]] mirrors the concatenation — glyph N on
-;; the wire is glyph N in the prompt for EVERY offer. (Known flag, out
-;; of scope: the `:plan-ledger` section numbers its own lines from ①
-;; too; its glyphs are not wire offers, so a collision there cannot
-;; expand a wrong template, but the render-side ambiguity stands.)
+;; the wire is glyph N in the prompt for EVERY offer. (The retired
+;; `:plan-ledger` section used to number its own lines from ① too;
+;; that render-side ambiguity is gone — this menu is the only
+;; glyph-numbered surface.)
 ;; ============================================================
 
 (def ^:private global-eval-scan-window
@@ -532,55 +532,6 @@
                                      ["clamp" ")"]]})
         (concat recent toolkit)))))
 
-;; ============================================================
-;; :plan-ledger — the open/current plan steps as ▶/☐ glyph lines. The
-;; plan IS the todo tree (`my.plan` datoms); this is a second VIEW of it
-;; for the glyph-selection channel — done steps dropped from the render
-;; entirely (hermes precedent = our derive-don't-store), the `:active`
-;; step marked ▶, open steps ☐. Blocked steps are not selectable work
-;; and stay off the menu (the `:plan` section's frontier still shows
-;; everything with ids).
-;; ============================================================
-
-(def ^:private plan-ledger-header
-  (str "; plan ledger — your plan's open steps (done steps are dropped;\n"
-       "; the full tree stays queryable via my.plan/tree). ▶ = the step\n"
-       "; you are on, ☐ = open. Select one by outputting its glyph alone,\n"
-       "; or ignore this and write any Clojure — both work."))
-
-(defn plan-ledger-block
-  "The `:plan-ledger` menu section — open plan steps as ▶/☐ glyph lines.
-
-   Derived at render from YOUR `my.plan` steps: the `:active` step
-   renders first as `▶ ① <title>`, then open steps oldest-first as
-   `☐ ② <title>`, capped by the policy `menu-cap` (an overflow renders
-   one `… and N more` line). DONE steps are NOT rendered — done-ness is
-   derived and the completed interior stays queryable, never in the
-   prompt. Selection is strictly optional (the header teaches it);
-   REACTIVE: no open/active steps → \"\" and the composer drops the
-   section."
-  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
-  [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (let [db (or db (some-> db/*conn* deref))]
-    (if (and db id (contains? (db/installed-schema db) :my.plan/status))
-      (if-let [oe (plan-internal/agent-eid db [:seon.agent/id id])]
-        (let [steps (->> (plan-internal/open-steps db oe)
-                         (filter #(contains? #{:active :open}
-                                             (:my.plan/status %)))
-                         (sort-by #(if (= :active (:my.plan/status %)) 0 1)))
-              shown (take (menu-cap db) steps)
-              more  (- (count steps) (count shown))]
-          (if (seq shown)
-            (str plan-ledger-header "\n"
-                 (str/join "\n"
-                           (map-indexed
-                             (fn [i {:my.plan/keys [status title]}]
-                               (str "; " (if (= :active status) "▶" "☐")
-                                    " " (glyphs i) " " title))
-                             shown))
-                 (when (pos? more)
-                   (str "\n; … and " more
-                        " more open — (my.plan/next {}) lists them.")))
-            ""))
-        "")
-      "")))
+;; (The `:plan-ledger` section that used to live here retired 2026-07-11
+;; — see the ns docstring; `my.plan.internal/plan-block` carries the
+;; ▶/☐/done-dropped contract now.)

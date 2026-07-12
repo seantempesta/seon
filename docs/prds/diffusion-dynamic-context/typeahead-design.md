@@ -161,8 +161,9 @@ a RENDER**, and what's configurable is which section fns run, per agent,
 via `install!`/`remove!` on ctx blocks. No new config surface:
 
 - **Menu sources** = section fns (recent-verbs-from-eval-log,
-  schema-contracts-for-draft-head, plan-ledger, kb-hits). New source =
-  new section fn. Per-agent loadout = ctx blocks, already durable,
+  schema-contracts-for-draft-head, kb-hits; the plan-ledger source
+  retired 2026-07-11 — the `:plan` block owns the ▶/☐ step render).
+  New source = new section fn. Per-agent loadout = ctx blocks, already durable,
   already inspectable.
 - **Driver policy** = one `:seon.typeahead/policy` map (DB-config row):
   auto-offer margin, worst-token gate, hole-length probe budget, masks
@@ -244,8 +245,11 @@ In-band errors (`gen_error`), same contract as today.
    behavior tests in `test/seon/agent/ctx/menu_test.cljs`; live-proven
    on acme (both sections in the byte-exact turn prompt blob; an
    agent-transacted `menu-cap 2` row truncated both menus on the very
-   next render). Open owner call: the `:plan` vs `:plan-ledger` overlap
-   (both render the same open steps today).
+   next render). The `:plan` vs `:plan-ledger` overlap was RULED +
+   implemented 2026-07-11: `:plan` is THE plan surface —
+   `plan-ledger-block` deleted, its ▶/☐/done-dropped contract folded
+   into `my.plan.internal/plan-block` (its glyphs were never wire
+   offers, so `verb-offers` alignment was untouched).
    **P3b (provider + inspector tile) SHIPPED 2026-07-10**:
    `seon.ai.typeahead` — the `SEON_AI_PROVIDER=typeahead` step-loop
    provider (OFF by default; endpoint/key config shared with
@@ -310,7 +314,8 @@ In-band errors (`gen_error`), same contract as today.
    `seon.ai.typeahead/null-render` derives the null-intent baseline
    from the rendered prompt (the transcript EVENT LOG dropped, masthead
    + `ns=>` cursor kept; the intent-DERIVED `plan`/`plan-ledger`
-   sections dropped WHOLE — verified on a captured acme blob that they
+   sections dropped WHOLE (since the 2026-07-11 ledger retirement,
+   `plan` is the one intent-derived section) — verified on a captured acme blob that they
    restate the task) and rides every step beside the offers; bench arm2
    mirrors it (`build_null_render`), and the menu header gained two
    additive example lines (the bench overlays the CURRENT teaching on

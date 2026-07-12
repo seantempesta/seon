@@ -7,11 +7,14 @@
 ;; Structure: aero `#include` pulls in system.edn VERBATIM (resolved relative to
 ;; this file), then `#merge` (shallow, top-level keys) applies acme's deltas.
 ;; System.edn edits flow to acme automatically — there is no second copy to
-;; drift. The ONLY delta is the agent-context toolbelt: system's list PLUS the
+;; drift. TWO deltas: (1) the agent-context toolbelt — system's list PLUS the
 ;; acme.* extra-src namespaces (structurally necessary — the overlay's own
 ;; toolkit must appear in home-requires or its cards never render and agents
-;; can't see the functions). Isolation (ports/store/sockets/logs/bundle) lives in
-;; bin/acme env, not here.
+;; can't see the functions); (2) the DECLARED :seon.agent/ctx tree — the
+;; diffusion-testbed loadout (owner ruling 2026-07-11), which wholesale-
+;; replaces system.edn's tree and therefore mirrors its rows BY HAND (see the
+;; note at the declaration). Isolation (ports/store/sockets/logs/bundle) lives
+;; in bin/acme env, not here.
 ;;
 ;; NOTE `#merge` is manifest-aware for `:seon.config/agent-context` (fac50bef):
 ;; a sparse override like this one is a PATCH — system.edn's `:seon.agent/ctx`
@@ -29,11 +32,43 @@
   ;; acme.edn's header warns against).
 
   :seon.config/agent-context
-  {;; system.edn's default toolbelt VERBATIM + the acme.* overlay toolkit.
+  {;; ── THE DIFFUSION-TESTBED CONTEXT TREE (owner-ruled testbed loadout,
+   ;; 2026-07-11, planner-worker-design.md §Rulings landed): acme is the
+   ;; typeahead testbed, so it DECLARES :seon.agent/ctx — and declaring the
+   ;; tree = WHOLESALE REPLACE under the manifest-aware #merge (only a sparse
+   ;; override that omits :seon.agent/ctx inherits system.edn's tree).
+   ;; ACCEPTED COST: system.edn's tree rows below are a BY-HAND MIRROR — any
+   ;; system.edn tree change must be copied here manually or acme drifts.
+   ;; The testbed additions over the mirrored base: :recent-verbs 46 (the
+   ;; glyph verb menu) + :typeahead-steps 95 (the step-loop tile, on by
+   ;; default on the TESTBED only; the default cluster stays minimal).
+   ;; NO :plan-ledger — retired 2026-07-11 (:plan is THE plan surface).
+   :seon.agent/ctx
+   [{:seon.agent.ctx/name :namespaces :seon.agent.ctx/priority 20
+     :seon.render/ai seon.agent.ctx.namespaces/namespaces-block}
+    {:seon.agent.ctx/name :canvas :seon.agent.ctx/priority 35
+     :seon.render/ai seon.agent.ctx.canvas/canvas-block}
+    {:seon.agent.ctx/name :plan :seon.agent.ctx/priority 45
+     :seon.render/ai my.plan.internal/plan-block
+     :seon.render/html my.plan.internal/plan-block-html}
+    {:seon.agent.ctx/name :recent-verbs :seon.agent.ctx/priority 46
+     :seon.render/ai seon.agent.ctx.menu/recent-verbs-block}
+    {:seon.agent.ctx/name :typeahead-steps :seon.agent.ctx/priority 95
+     :seon.render/ai seon.agent.ctx.typeahead-steps/steps-ai
+     :seon.render/html seon.agent.ctx.typeahead-steps/steps-tile-html}
+    {:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
+     :seon.render/ai seon.agent.ctx.transcript/transcript-block
+     :seon.render/html seon.agent.ctx.transcript/transcript-block-html
+     :seon.agent.ctx.transcript/result-decay
+     [{:seon.agent.ctx.transcript/from-turn-offset 0 :seon.agent.ctx.transcript/token-cap 16384}
+      {:seon.agent.ctx.transcript/from-turn-offset 2 :seon.agent.ctx.transcript/token-cap 1500}
+      {:seon.agent.ctx.transcript/from-turn-offset 5 :seon.agent.ctx.transcript/token-cap 200}]}]
+
+   ;; system.edn's default toolbelt VERBATIM + the acme.* overlay toolkit.
    ;; WHY kept: acme.helpers / acme.notes are the SEON_EXTRA_SRC namespaces —
    ;; the one structural acme addition. Everything else (skills corpus, render
-   ;; caps, namespaces policy, root-context, block tree, decay) inherits from
-   ;; system.edn via the #include above.
+   ;; caps, namespaces policy, root-context) inherits from system.edn via the
+   ;; #include above.
    :seon.eval/home-requires
    [[seon.agent.message :as message]
     [my.plan :as plan]

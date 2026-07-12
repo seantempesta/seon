@@ -298,6 +298,56 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
+(deftest frontier-active-first-as-arrow-open-as-box-done-dropped
+  ;; The ▶/☐/done-dropped compactness contract, absorbed from the retired
+  ;; `:plan-ledger` block (owner ruling 2026-07-11, planner-worker-design):
+  ;; the :active step renders ▶-marked ahead of the ☐-marked ready steps;
+  ;; a DONE step never renders in the frontier band (only the ✓ recall
+  ;; band recalls it); a :blocked step is not actionable and stays off
+  ;; the frontier.
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (db/transact!
+                  {:seon.db/tx-data
+                   [{:my.plan/id "planledgerstA1" :my.plan/title "design the schema"
+                     :my.plan/status :open :my.plan/agent a-ref
+                     :my.plan/created-at (js/Date. 1000)}
+                    {:my.plan/id "planledgerstB2" :my.plan/title "store the seed rows"
+                     :my.plan/status :active :my.plan/agent a-ref
+                     :my.plan/created-at (js/Date. 2000)}
+                    {:my.plan/id "planledgerstC3" :my.plan/title "render the summary tile"
+                     :my.plan/status :open :my.plan/agent a-ref
+                     :my.plan/created-at (js/Date. 3000)}
+                    {:my.plan/id "planledgerstD4" :my.plan/title "already shipped setup"
+                     :my.plan/status :done :my.plan/agent a-ref
+                     :my.plan/created-at (js/Date. 500)
+                     :my.plan/completed-at (js/Date. 900)}
+                    {:my.plan/id "planledgerstE5" :my.plan/title "waiting on the human"
+                     :my.plan/status :blocked :my.plan/agent a-ref
+                     :my.plan/created-at (js/Date. 400)}]})
+                (.then
+                  (fn [{ok? :seon.db/ok? err :seon.db/error}]
+                    (is (true? ok?) (str "seed transacted — " (pr-str err)))
+                    (let [block (plan-int/plan-body @conn a-ref)]
+                      (is (str/includes? block "; ▶ planledgerstB2")
+                          "the :active step renders ▶-marked")
+                      (is (str/includes? block "; ☐ planledgerstA1")
+                          "an open ready step renders ☐-marked")
+                      (is (< (str/index-of block "▶ planledgerstB2")
+                             (str/index-of block "☐ planledgerstA1"))
+                          "the active step leads the frontier")
+                      (is (str/includes? block "▶ = the step you are on")
+                          "the glyph legend is taught in the frontier header")
+                      (is (not (str/includes? block "☐ planledgerstD4"))
+                          "a DONE step is dropped from the frontier entirely")
+                      (is (str/includes? block "✓ [")
+                          "…and recalls only through the ✓ recently-completed band")
+                      (is (not (str/includes? block "waiting on the human"))
+                          "a blocked step is not actionable — off the frontier")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 (deftest open-root-with-all-done-children-is-ready-to-close
   ;; Frontier regression: an :open ROOT whose children are all :done is
   ;; neither a leaf (so the old (leaf ?t) `ready` rule skipped it) nor :done

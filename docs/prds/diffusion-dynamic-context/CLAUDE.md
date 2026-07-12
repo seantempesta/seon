@@ -49,12 +49,18 @@ benchmark maxing. The lane's direction is now
 [[planner-worker-design]] (P7): a frontier model hands down a plain-text
 plan; the diffusion agent authors it as `my.plan` datoms (`plan!`),
 refines it (`step!`/`reopen!`/`needs!`), keeps it in focus via the
-`:plan-ledger` ▶ anchor (`active!`), and `done!`s steps only when
+`:plan` block's ▶ anchor (`active!`), and `done!`s steps only when
 `::expect` verifies — multi-turn goal completion at a time budget, with
 plan-survives-pod-restart in the win condition. In flight (fable
 agents): the store-scale OOM root-cause (owner-directed, see Landmines)
 and the src-diffusion grammar-drift sweep (`;; =>` is banned live
 grammar; bare `⟹` is real).
+
+**Landed 2026-07-11 evening**: both block rulings implemented —
+`:plan-ledger` retired (▶/☐/done-dropped folded into
+`my.plan.internal/plan-block`) and acme.edn declares the full
+diffusion-testbed `:seon.agent/ctx` tree (mirrored by hand from
+system.edn + `:recent-verbs` + `:typeahead-steps`).
 
 ## How to run it
 
@@ -121,8 +127,12 @@ grammar; bare `⟹` is real).
   on every acme pod boot (reconnects 2 s; smell, task filed).
 - Default cluster DeepSeek key: 402 Insufficient Balance (owner top-up;
   Muse key IS on disk — `META_MODEL_API_KEY`, see memory).
-- `:plan` vs `:plan-ledger` block overlap — owner ruling pending; P7 W1
-  should land ONE plan surface.
+- `:plan` vs `:plan-ledger` overlap: RULED + IMPLEMENTED 2026-07-11 —
+  `:plan` is THE plan surface (▶/☐/done-dropped folded into
+  `my.plan.internal/plan-block`; `plan-ledger-block` deleted); acme.edn
+  now DECLARES the full testbed tree (system.edn rows mirrored BY HAND
+  + `:recent-verbs` 46 + `:typeahead-steps` 95) — a system.edn tree
+  change must be copied into acme.edn manually.
 
 ## Settled — do NOT re-litigate (measured; new data required to reopen)
 
@@ -132,8 +142,9 @@ grammar; bare `⟹` is real).
   on current evidence.
 - parinfer rejected; edamame owns repair. Frontier drafts never clamp a
   partial symbol.
-- Plan ledger = `my.plan` datoms rendered; done items dropped from the
-  render. No new config surface: ctx blocks + one policy row.
+- The plan render = `my.plan` datoms derived at render time; done items
+  dropped from the frontier (the `:plan` block owns this since
+  2026-07-11). No new config surface: ctx blocks + one policy row.
 - Scaffold-infill steering demoted; free-gen/typeahead + oracle is the
   product path. GPU gating obsolete — local MLX runs everything free.
 - Older GPU-era settlements (A100/FP8/TPU/deploy stability): see

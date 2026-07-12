@@ -535,10 +535,13 @@
            (when expect (str "\n;   verify before done!: " expect))))))
 
 (defn frontier-section
-  "The open-frontier lines: `actives` (▸-marked) then up to
-   [[frontier-limit]] `readies`, one `; <id> [<created-at>] <title>` line
-   each (a `✉` marks a step auto-minted from your human's message) — or
-   \"\" when both are empty."
+  "The open-frontier lines: `actives` (`▶` — the step you are on) then up
+   to [[frontier-limit]] `readies` (`☐` — open), one
+   `; <glyph> <id> [<created-at>] <title>` line each (a `✉` marks a step
+   auto-minted from your human's message) — or \"\" when both are empty.
+   DONE steps never render here (the ▶/☐/done-dropped compactness
+   contract, absorbed from the retired `:plan-ledger` block 2026-07-11);
+   the recently-completed `✓` band is the only done recall."
   [actives readies]
   (if (and (empty? actives) (empty? readies))
     ""
@@ -548,14 +551,15 @@
                   (str "; " marker (when message "✉ ") id
                        (when created-at (str " [" (stamp created-at) "]"))
                        " " title))]
-      (str "; Open frontier — close each step with (my.plan/done! {:my.plan/id \"<id>\"})\n"
+      (str "; Open frontier (▶ = the step you are on, ☐ = open) — close each\n"
+           "; step with (my.plan/done! {:my.plan/id \"<id>\"})\n"
            "; the MOMENT its work lands (never batch closes at the end);\n"
            "; take one up with (my.plan/active! {:my.plan/id \"<id>\"}); add a\n"
            "; DISCOVERED step UNDER this plan (never a new parentless root):\n"
            "; (my.plan/step! {:my.plan/title \"…\" :my.plan/parent [:my.plan/id \"<an id here>\"]})\n"
            (str/join "\n"
-                     (concat (map #(line "▸ " %) actives)
-                             (map #(line "" %) shown)))
+                     (concat (map #(line "▶ " %) actives)
+                             (map #(line "☐ " %) shown)))
            (when (pos? more)
              (str "\n; … and " more " more ready — (my.plan/next {}) lists them all."))))))
 

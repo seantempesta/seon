@@ -30,8 +30,9 @@ surface now.
   proven: .633 outcome / 4.8 s vs DeepSeek .40 / ~23 s on the fresh
   corpus. What is UNMEASURED is stringing turns together toward a goal.
 - Every mechanism already exists: `my.plan` (plan!/step!/active!/done!
-  with `::expect` gating, `::pace :multi-session`), the `:plan-ledger`
-  ctx block (▶ active / ☐ open, done dropped from render), per-agent
+  with `::expect` gating, `::pace :multi-session`), the `:plan` ctx
+  block (▶ active / ☐ open, done dropped from render — the ledger
+  contract folded in 2026-07-11), per-agent
   provider routing (`::agent-provider` in `seon.ai`), and the typeahead
   step-loop provider. **Zero new mechanisms.** New capability = the
   worker agent actually USING them, plus one bench task that measures it.
@@ -206,13 +207,21 @@ One measurement per unit — the bench falsifies; it is not the work.
 
 ## Rulings landed (owner, 2026-07-11 evening)
 
-- **`:plan` is THE plan surface** — the ▶/☐ ledger rendering and
-  done-dropped behavior fold into `my.plan.internal/plan-block`;
-  `:plan-ledger` retires (unit queued; the `verb-offers` glyph
-  alignment moves with it).
-- **Acme testbed loadout**: acme.edn declares the full diffusion tree —
-  minimal tree + menu blocks + `:typeahead-steps` (tile on by default
-  on the TESTBED only; the default cluster stays minimal).
+- **`:plan` is THE plan surface** — **IMPLEMENTED 2026-07-11**: the
+  ▶/☐/done-dropped compactness contract folded into
+  `my.plan.internal/plan-block` (frontier lines now ▶ active / ☐ open,
+  glyph legend in the header); `:plan-ledger` retired
+  (`plan-ledger-block` deleted from `seon.agent.ctx.menu`, its tests
+  migrated to `my.plan-test`, `seon.ai.typeahead` strips `plan` only).
+  Glyph-alignment finding: the ledger's ① numbering was render-side
+  only — `verb-offers` reads the recent+toolkit fn menu exclusively —
+  so plan-step selection glyphs retired WITH the ledger and the
+  duplicate-① render ambiguity is gone.
+- **Acme testbed loadout** — **IMPLEMENTED 2026-07-11**: acme.edn
+  declares `:seon.agent/ctx` (wholesale replace) — system.edn's tree
+  mirrored by hand (the accepted cost) + `:recent-verbs` 46 +
+  `:typeahead-steps` 95 (tile on by default on the TESTBED only; the
+  default cluster stays minimal).
 - **P7 frontier = BOTH**: DeepSeek (topped up; key verified live) as
   the reference arm, scheduled off-peak per the pricing memory; Muse
   as the planner.

@@ -2499,3 +2499,25 @@ datoms (192k, mostly synthetic `:seon.eval/source` rows). Left
 as-grown deliberately — this is exactly what the realistic-scale
 testbed is for — but whoever owns the render caps should look before
 long feed sessions on acme.
+
+## 2026-07-11 EVE — diffusion lane → context lane: both block rulings IMPLEMENTED (ledger retired; acme declares the tree)
+
+1. **`:plan-ledger` is GONE.** `plan-ledger-block` deleted from
+   `seon.agent.ctx.menu`; what moved into `my.plan.internal/plan-block`
+   is the ▶/☐/done-dropped compactness contract — frontier lines now
+   render `▶ <id> …` (active, first) / `☐ <id> …` (open), with the
+   glyph legend in the frontier header; done steps still surface only
+   through the `✓` recently-completed band. Glyph finding: the ledger's
+   ① numbering was render-side only (`verb-offers` reads the
+   recent+toolkit fn menu exclusively), so plan-step selection glyphs
+   retired WITH the block and the duplicate-① render ambiguity is gone.
+   `seon.ai.typeahead` `intent-derived-sections` is now `["plan"]`.
+   Tests migrated: ledger behaviors → `my.plan-test`
+   (`frontier-active-first-as-arrow-open-as-box-done-dropped`).
+2. **acme.edn now DECLARES `:seon.agent/ctx`** (wholesale replace under
+   the manifest-aware `#merge`): system.edn's tree rows mirrored — the
+   ACCEPTED COST is that any system.edn tree change must be copied into
+   acme.edn BY HAND from now on — plus `:recent-verbs` 46 and
+   `:typeahead-steps` 95 (testbed-only tile). The block landscape on
+   acme is therefore: namespaces 20 · canvas 35 · plan 45 ·
+   recent-verbs 46 · typeahead-steps 95 · transcript 100.

@@ -151,7 +151,7 @@ tree is attributable to evidence.
 | `jobs` (42) | background-job visibility | likely covered by cards + result envelopes (proven in `repl`-milestone drives); rebuild only on demonstrated blindness | long-job + restart drive |
 | `test-failures` (43) | WHY the complete-gate refused | the `warnings` milestone (the gate already enforces) | turns-to-understand-refusal with/without |
 | `plan` (45) | durable work state | **kept — rebuilt and proven** | the `plan` milestone |
-| `recent-verbs` (46) / `plan-ledger` (47) | typeahead offer menus | the typeahead lane's live experiment — exempt; `recent-verbs` also carries a vocabulary rename (Phase 0, coordinated) | their arc's measures |
+| `recent-verbs` (46) | typeahead offer menu | the typeahead lane's live experiment — exempt; also carries a vocabulary rename (Phase 0, coordinated); on the acme testbed tree by declaration (2026-07-11). The former `plan-ledger` (47) retired 2026-07-11 — its ▶/☐/done-dropped contract folded into `plan` (45) | their arc's measures |
 | `relevant-source` (48) | retrieval beyond current-ns | pull-first (a search the agent calls); pushed block only if a discovery-task drive proves the need | discovery-task oracle |
 | `subagents` (96) | children + outcomes | rebuilt at the `subagents` milestone | multiagent spec win conditions |
 | `findings` (97) | durable findings outliving the transcript | the `db` milestone decides — findings-as-db-facts may subsume it | store-then-recall across restart |

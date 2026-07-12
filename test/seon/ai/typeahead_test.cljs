@@ -155,13 +155,11 @@
   ;; message/eval event log, readline (status + `ns=>` cursor), brackets.
   (str ";;; ┌─ plan ─\n"
        "; PLAN «the task»\n"
+       "; ▶ stepid00000001 [2026-07-11 00:00] the task\n"
        ";;; └─ end plan ─\n\n"
        ";;; ┌─ recent-verbs ─\n"
        "; ① (db/query [req] …) — Run a Datalog query.\n"
        ";;; └─ end recent-verbs ─\n\n"
-       ";;; ┌─ plan-ledger ─\n"
-       "; ☐ ① the task\n"
-       ";;; └─ end plan-ledger ─\n\n"
        ";;; ┌─ transcript ─\n"
        "; seon · my.agent.X · live REPL\n"
        "; The flat, time-ordered log below is this REPL's history.\n\n"
@@ -188,9 +186,7 @@
     (is (not (str/includes? nr "turn 2 · loop"))
         "the live status line (turn state) removed")
     (is (not (str/includes? nr ";;; ┌─ plan ─"))
-        "the intent-derived plan section dropped whole")
-    (is (not (str/includes? nr ";;; ┌─ plan-ledger ─"))
-        "the intent-derived plan-ledger section dropped whole")))
+        "the intent-derived plan section (incl. its ▶/☐ steps) dropped whole")))
 
 (deftest null-render-no-events-or-no-transcript-is-identity
   (let [no-events (str ";;; ┌─ transcript ─\n; masthead\n\nmy.agent.X=> \n"

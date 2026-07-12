@@ -182,11 +182,12 @@
            (str/triml (subs prompt (+ j (count end))))))))
 
 ;; Sections DERIVED from the current task intent — the plan tree the
-;; intent spawned and its glyph-ledger view. They restate the task, so a
-;; baseline keeping them would already carry the intent and calibration
-;; would cancel the very signal it protects (verified on a captured acme
-;; prompt blob: the intent text recurs in both).
-(def ^:private intent-derived-sections ["plan" "plan-ledger"])
+;; intent spawned. It restates the task, so a baseline keeping it would
+;; already carry the intent and calibration would cancel the very signal
+;; it protects (verified on a captured acme prompt blob). (`plan-ledger`
+;; was here too until the block retired 2026-07-11 — `:plan` is THE plan
+;; surface now.)
+(def ^:private intent-derived-sections ["plan"])
 
 (defn null-render
   "The null-intent calibration render derived from the rendered prompt.
@@ -201,8 +202,8 @@
      the first `;;; ◀`/`;;; ▶` message line through the readline's
      status line — is dropped; the masthead teaching and the trailing
      `ns=>` cursor stay,
-   - the intent-DERIVED sections (`plan`, `plan-ledger` — the plan tree
-     the task spawned, which restates it) are dropped whole,
+   - the intent-DERIVED section (`plan` — the plan tree the task
+     spawned, which restates it) is dropped whole,
    - every other section (the `recent-verbs` menu, ns cards,
      orientation) rides verbatim, so the baseline sees the identical
      offer scaffolding minus the intent.

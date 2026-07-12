@@ -2,24 +2,24 @@
   "Behavior tests for the typeahead menu block family
    (`seon.agent.ctx.menu` — diffusion-typeahead P3a).
 
-   Covers: empty-world suppression (both sections return \"\" and vanish),
-   the recent-verbs derivation (eval-log ranking, alias resolution via
-   stored require-edges, private/failed-eval exclusion, glyph numbering),
-   the plan ledger (active ▶ first, open ☐ oldest-first, DONE items
-   absent from the render), and the `:seon.typeahead/policy` override
-   row (menu-cap respected by both sections).
+   Covers: empty-world suppression (the section returns \"\" and
+   vanishes), the recent-verbs derivation (eval-log ranking, alias
+   resolution via stored require-edges, private/failed-eval exclusion,
+   glyph numbering), and the `:seon.typeahead/policy` override row
+   (menu-cap respected). The former `:plan-ledger` behaviors (▶ active
+   first, ☐ open, done dropped) live on `my.plan.internal/plan-block`
+   now — tested in `my.plan-test`.
 
    Fresh `:memory` conn seeded like the pod boots, set! as the root
    db/*conn* so `db/transact!` targets it (lazy-installs the domain
-   schema); both section fns are PURE reads of the passed db value."
+   schema); the section fn is a PURE read of the passed db value."
   (:require
     [cljs.test :refer [deftest is async]]
     [clojure.string :as str]
     [datahike.api :as d]
     [seon.agent.ctx.menu :as menu]
     [seon.client :as client]
-    [seon.db :as db]
-    [my.plan]))   ; load-order: registers :my.plan/* attr schemas
+    [seon.db :as db]))
 
 (def ^:private a-id "menutestagentA")   ; 14 chars — the :seon.db/id shape
 
@@ -107,39 +107,15 @@
        :seon.eval/ns     :my.agent.menutestagent
        :seon.eval/source "(my.plan/drop! {:my.plan/id \"nope\"})"}]}))
 
-;; The plan-ledger seed: one :active, two :open, one :done, one :blocked.
-(defn- seed-plan!
-  []
-  (db/transact!
-    {:seon.db/tx-data
-     [{:my.plan/id "menuledgerstA1" :my.plan/title "design the schema"
-       :my.plan/status :open :my.plan/agent [:seon.agent/id a-id]
-       :my.plan/created-at (js/Date. 1000)}
-      {:my.plan/id "menuledgerstB2" :my.plan/title "store the seed rows"
-       :my.plan/status :active :my.plan/agent [:seon.agent/id a-id]
-       :my.plan/created-at (js/Date. 2000)}
-      {:my.plan/id "menuledgerstC3" :my.plan/title "render the summary tile"
-       :my.plan/status :open :my.plan/agent [:seon.agent/id a-id]
-       :my.plan/created-at (js/Date. 3000)}
-      {:my.plan/id "menuledgerstD4" :my.plan/title "already shipped setup"
-       :my.plan/status :done :my.plan/agent [:seon.agent/id a-id]
-       :my.plan/created-at (js/Date. 500)
-       :my.plan/completed-at (js/Date. 900)}
-      {:my.plan/id "menuledgerstE5" :my.plan/title "waiting on the human"
-       :my.plan/status :blocked :my.plan/agent [:seon.agent/id a-id]
-       :my.plan/created-at (js/Date. 400)}]}))
-
-(deftest empty-world-both-sections-vanish
-  ;; A fresh world has no eval log and no plan — both sections must return
-  ;; "" (the composer drops them; the reactive vanish costs zero).
+(deftest empty-world-menu-vanishes
+  ;; A fresh world has no eval log — the section must return "" (the
+  ;; composer drops it; the reactive vanish costs zero).
   (async done
     (-> (with-conn
           (fn [conn]
             (let [req {:seon.db/db @conn :seon.agent/id a-id}]
               (is (= "" (menu/recent-verbs-block req))
-                  "no eval history → no recent-verbs section")
-              (is (= "" (menu/plan-ledger-block req))
-                  "no plan steps → no plan-ledger section"))))
+                  "no eval history → no recent-verbs section"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -247,40 +223,13 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest plan-ledger-current-first-open-next-done-absent
-  (async done
-    (-> (with-conn
-          (fn [conn]
-            (-> (seed-plan!)
-                (.then
-                  (fn [env]
-                    (ok! env)
-                    (let [out (menu/plan-ledger-block
-                                {:seon.db/db @conn :seon.agent/id a-id})]
-                      (is (str/includes? out "outputting its glyph alone")
-                          "the optionality teaching is colocated with the block")
-                      (is (str/includes? out "; ▶ ① store the seed rows")
-                          "the :active step renders first as ▶ ①")
-                      (is (str/includes? out "; ☐ ② design the schema")
-                          "open steps follow oldest-first as ☐")
-                      (is (str/includes? out "; ☐ ③ render the summary tile")
-                          "…numbered in render order")
-                      (is (not (str/includes? out "already shipped setup"))
-                          "a DONE step is dropped from the render entirely")
-                      (is (not (str/includes? out "waiting on the human"))
-                          "a blocked step is not selectable work — off the menu"))))))
-          )
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
-
-(deftest policy-row-menu-cap-overrides-both-sections
+(deftest policy-row-menu-cap-overrides-the-menu
   ;; The [:seon.typeahead/id "policy"] singleton row overrides the code
-  ;; default per knob; menu-cap 1 truncates both menus to ONE glyph.
+  ;; default per knob; menu-cap 1 truncates the verb menu to ONE glyph.
   (async done
     (-> (with-conn
           (fn [conn]
             (-> (seed-verbs!)
-                (.then (fn [env] (ok! env) (seed-plan!)))
                 (.then (fn [env]
                          (ok! env)
                          (db/transact!
@@ -291,20 +240,13 @@
                   (fn [env]
                     (ok! env)
                     (let [req   {:seon.db/db @conn :seon.agent/id a-id}
-                          verbs (menu/recent-verbs-block req)
-                          plan  (menu/plan-ledger-block req)]
+                          verbs (menu/recent-verbs-block req)]
                       (is (= 1 (:seon.typeahead/menu-cap (menu/policy @conn)))
                           "the policy row overrides the code default")
                       (is (str/includes? verbs "① (my.plan/done!")
                           "the top verb still renders")
                       (is (not (str/includes? verbs "②"))
-                          "menu-cap 1 → no second verb entry")
-                      (is (str/includes? plan "▶ ① store the seed rows")
-                          "the active step still renders")
-                      (is (not (str/includes? plan "②"))
-                          "menu-cap 1 → no second ledger entry")
-                      (is (str/includes? plan "and 2 more open")
-                          "the overflow renders one honest … and N more line"))))))
+                          "menu-cap 1 → no second verb entry"))))))
           )
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
