@@ -12,7 +12,7 @@ The agent's whole working surface is a SMALL set of namespaces that, shown in
 full, ARE its context — a few high-signal, threadable functions instead of a 70k-char
 source dump. The agent's tools live in **`my.*` namespaces, fully agent-owned and
 editable** (`my.files`, `my.search`, `my.shell`, `my.plan`, `my.test`, `my.kb`,
-`my.code`, `my.schedule`, `my.recall`, `my.canvas`, `my.blob`). Each is a THIN
+`my.code`, `my.schedule`, `my.ns`, `my.canvas`, `my.blob`). Each is a THIN
 wrapper over a protected `seon.*` substrate — the real syscalls, db engine,
 compiler, and wire stay `seon.*` and are namespace-guarded (un-clobberable).
 Build-your-environment extends to the tools themselves: the agent tweaks
@@ -56,7 +56,7 @@ load-bearing for the substrate's correctness.
 | Tier | Namespaces | Initial/current provenance | Agent may edit? | Renders full in context? |
 |---|---|---|---|---|
 | **Protected floor** | `seon.db` (aliased `db`), `seon.eval`, `seon.agent.message` (aliased `message`), `seon.agent.lifecycle` (refer'd functions) + root's `seon.agent/start!`, the `*.internal` syscall nses + the wire | root/boot compiled facts | NO — `forget!`/override guard refuse | NO — indexed + grep-able only |
-| **Owned toolkit** | `my.files`, `my.search`, `my.shell`, `my.plan`, `my.test`, `my.kb`, `my.code`, `my.schedule`, `my.recall`, `my.canvas`, `my.blob` | root/boot seed → agent/REPL on edit | YES — redefine or `forget!` | YES — full source every turn |
+| **Owned toolkit** | `my.files`, `my.search`, `my.shell`, `my.plan`, `my.test`, `my.kb`, `my.code`, `my.schedule`, `my.ns`, `my.canvas`, `my.blob` | root/boot seed → agent/REPL on edit | YES — redefine or `forget!` | YES — full source every turn |
 
 `message` and `lifecycle` stay on the floor because they are the loop's control
 functions — the wake gate / hop-cap (`message!`) and the run-FSM mutations
@@ -561,12 +561,23 @@ another ns's (the render-curation rule lives in [[data-model]]). **Composes:**
 a verified fact with provenance — via `db/query` + `db/transact!` over a real
 per-domain schema, NOT a generic memory store.
 
-**The knowledge base's API IS `seon.db`.** There is deliberately no
-`remember!`/`recall`/`forget` CRUD facade: `remember!` would just be `transact!`
-with a stamped `:my.kb/verified-at`, `recall` is `query`, and a CRUD wrapper
-re-grows the memory-blob anti-pattern while hiding the schema-design skill that IS
-the product. Designing a `my.kb.<domain>` schema is the same skill as modeling the
-human's data; `store-inventory` + `query` is the discoverable recall path.
+**The knowledge base's API IS `seon.db`** — designing a `my.kb.<domain>` schema
+is the same skill as modeling the human's data, and `store-inventory` + `query`
+remains the full-power recall path. Two entry points cover the everyday store/ask
+moves without hiding that skill (they are the measured minimum, not a CRUD
+facade — a general wrapper layer stays banned):
+
+- `remember` — store ONE claim with provenance
+  (`::claim`/`::source`/`::confidence`), upserting by claim identity. A
+  multi-field domain still designs its own schema.
+- `recall` — the symmetric ask: `(my.kb/recall {:my.kb/about "vendor API"})` →
+  ranked stored facts with provenance. Deterministic whole-token match over
+  every `my.kb*` string attr (claims AND domain rows); with `SEON_EMBED`,
+  unfilled slots top up semantically via `seon.embed/search-pull` (one
+  embedder — never a second index). Evidence for the contract: the
+  aggregation-ask shape scored 0/3 in every presentation arm on both models —
+  a missing question→findings CONTRACT, not a card problem (the repl-autosuggest
+  surface-tuning sweep, `docs/prds/repl-autosuggest/research/surface-tuning-sweep-2026-07-12.md`).
 
 `my.kb` registers the shared provenance shapes (`:my.kb/source-path`,
 `/source-line`, `/source-line-end`, `/verified-at`, `/confidence`); domain
@@ -575,7 +586,8 @@ shared `:my.kb/*` provenance. KB rows carry no agent-ref → the KB is GLOBAL (o
 base all agents share). `my.kb` is also the **DB manual** — it carries the worked
 `db` chains and the cheat sheet the agent consults (the role a separate examples
 ns would otherwise play). The `:my.kb.*` schemas + global scoping live in
-[[data-model]]. **Budget:** ~700 tok (schema + the worked chains).
+[[data-model]]. **Budget:** ~900 tok (schema + the worked chains + the two entry
+points).
 
 #### `my.code` — floor: `seon.eval` + `seon.db`
 
@@ -665,30 +677,26 @@ A due schedule fires via the ticker: it opens a `:schedule` run (the wake), the
 agent's sandbox through the one exec service. The ticker + run mechanics live in
 [[agent-runtime]]. **Budget:** ~1.2k tok (function only).
 
-#### `my.recall` — floor: `seon.embed`
+#### `my.ns` — floor: the `:seon.fn` program graph + the compact-card renderer
 
-**Why reach for it:** find what's stored BY MEANING, not exact attr/keyword —
-"what do I know about the user's sleep?" matching a row that never said "sleep."
-This is categorically NOT a CRUD facade: that would wrap `transact!`/`query` (which
-datalog already does); THIS expresses nearest-by-meaning, which datalog CANNOT.
+**Why reach for it:** "what can I call in X?" — list ANY indexed namespace's
+functions as one-line cards without pulling the whole source. The measured gap:
+no fn/ns-listing existed in the agent surface (nearest was `grep-graph` — a
+text search, the wrong contract for enumeration).
 
-**Floor:** `seon.embed` — pod-side, READ-ONLY. The pod never embeds; it ships
-`{query, k, eids}` over the wire to the JVM writer, which embeds the query
-(retrieval prefix) + runs HNSW KNN, returning hits distance-ascending.
+`(my.ns/functions {:my.ns/ns 'my.plan})` → `{:seon.result/ok? true
+:my.ns/cards ["(defn done! …)" …] :my.ns/count n}`. Cards come from the live
+`:seon.fn` rows (includes session-defined fns that exist in no file) through
+ONE card mechanism — `seon.agent.ctx.namespaces/compact-fn-head`, the same
+renderer the `:namespaces` section and the autocomplete exporter use. Unknown
+ns → an ok?-false envelope carrying the discovery query; the full-source drill
+stays `seon.agent.ctx/render-namespace` (named in the fn's docstring).
+**Budget:** ~350 tok.
 
-```clojure
-(schema/register! :seon.recall/query :string)
-(schema/register! :seon.recall/k     :int)         ; default seon.embed default-k
-(defn ^:async recall
-  "Semantic KNN over your store: nearest entities to QUERY by meaning. Returns the
-   :seon.items/items envelope (each item the pulled entity + its distance). Gated
-   by SEON_EMBED; when OFF, a legible ok?-false pointing you at store-inventory +
-   datalog/grep — never an error. (recall {:seon.recall/query \"user sleep\"})" )
-```
-
-The wrapper reshapes `:seon.embed/hits` → the `:seon.items/*` envelope (so hits
-thread into `pull`/`transact!`) and handles `SEON_EMBED` off as a graceful
-ok?-false fallback. **Budget:** ~900 tok.
+Semantic nearest-by-meaning recall did NOT become its own `my.recall` wrapper
+ns: it is the `SEON_EMBED` top-up arm of `my.kb/recall` (floor:
+`seon.embed/search-pull` — pod-side, read-only; the pod never embeds). Raw KNN
+with custom scoping stays directly on `seon.embed/search`/`search-pull`.
 
 #### `my.canvas` — floor: the UI canvas/component layer ([[ui]])
 

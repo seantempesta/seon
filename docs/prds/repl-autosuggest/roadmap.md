@@ -141,6 +141,36 @@ GB, single process. **Recommendation: 2048** (numbers in the research
 file); 4096 re-runs the same scaffold at scale 4 if card-budget evidence
 later demands it (needs attention-memory surgery to train gently).
 
+## Toolkit contract gaps — SHIPPED (2026-07-12)
+
+The two measured gaps from KT2b §Index-reconciliation + the sweep's
+facade verdict, built as ordinary tested toolkit code (NOT a
+context-generation change; docstrings written to the sweep's winning
+action style):
+
+- **`my.kb/recall`** — the symmetric ask to `remember`:
+  `(my.kb/recall {:my.kb/about "…" :my.kb/limit 10})` → the
+  `:seon.result/ok?` + `:seon.items/*` envelope of ranked stored facts
+  (full pulled rows + derived `::match`/`::matched-tokens` labels,
+  honest `::matched` total). Deterministic whole-token match over every
+  `my.kb*` string attr; `SEON_EMBED` tops up unfilled slots via
+  `seon.embed/search-pull` (reused, not forked). Evidence: the
+  aggregation-ask shape 0/3 in ALL 22 sweep arms on both models — a
+  missing CONTRACT, not presentation.
+- **`my.ns/functions`** — the fn-listing gap:
+  `(my.ns/functions {:my.ns/ns 'my.plan})` → the compact one-line cards
+  through the ONE card mechanism
+  (`seon.agent.ctx.namespaces/compact-fn-head`), private fns excluded,
+  errors-as-values for unknown namespaces. New ns `src/my/ns.cljs`,
+  required into the boot build.
+
+Tests: `test/my/kb_test.cljs` (+3 recall deftests) +
+`test/my/ns_test.cljs` (4 deftests), hermetic :memory conns. **Next
+sweep re-run must include the NEW cards** so the 0/3 aggregation-ask
+shape is re-measured against a real contract (and `my.ns/functions`
+enters the leaderboard) — the dump script picks both up automatically
+(`my.*` surface rule).
+
 ## Ordered path (spend-gated; thresholds in design.md §Measurement)
 
 1. **KT1 tokenizer envelope — FIRED 2026-07-12**

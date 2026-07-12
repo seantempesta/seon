@@ -38,6 +38,11 @@ cross-model (+.041/+.048), ns-strip reverses on Qwen (+.152/−.055),
 stack-of-real-fn-fixes ≥ facades on both models (no toolkit facades
 justified except the kb recall contract gap), compact cards @8 = the
 serving default, 16-menu = a discrimination cliff even when it fits.
+**Toolkit contract gaps SHIPPED** (`e2e4ce92`): `my.kb/recall` (the
+symmetric ask — deterministic token match + `SEON_EMBED` top-up) +
+`my.ns/functions` (fn listing through the ONE compact-card mechanism);
+the NEXT sweep re-run must include the new cards so the 0/3
+aggregation-ask shape is re-measured against a real contract.
 Live status: [[roadmap.md]].
 
 ## Settled — do NOT re-litigate

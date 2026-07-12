@@ -27,7 +27,9 @@ IS its worked example). That means:
 
 Current: `data` (aggregation), `ui` (static hiccup), `tile` (interactive
 controls wired to agent-defined handlers), `kb` (the DB-memory worked
-manual), `skills` (the skill catalog blocks), `blob` (the content-addressed
+manual — `remember` store + `recall` ask), `ns` (program-graph fn listing
+via the ONE compact-card renderer), `skills` (the skill catalog blocks),
+`blob` (the content-addressed
 disk tier — SHA-256-named files under `<cluster>/blobs/`, paged reads; see
 `docs/seon/architecture/observability.md`). `my.blob` IS required into the
 boot build (`client.cljs`) and aliased as `blob` in `home-requires`. A

@@ -346,7 +346,7 @@ override model. See [[ui]].
 ### Toolkit — [[toolkit]]
 
 The agent's action surface is the **`my.*` function catalog** — thin, agent-owned,
-editable wrappers (`my.code`, `my.recall`/`my.kb`, `my.plan`, `my.schedule`,
+editable wrappers (`my.code`, `my.kb`, `my.ns`, `my.plan`, `my.schedule`,
 `my.canvas`, `my.shell`, `my.test`, `my.search`, `my.files`) over a protected `seon.*`
 floor, composed on four shared shapes (path, ref, items, the never-throw result
 envelope). See [[toolkit]].
