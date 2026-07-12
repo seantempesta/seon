@@ -157,6 +157,34 @@
 ;; render-ai — text composition + the drill hint contract.
 ;; ============================================================
 
+(deftest prepared-ai-reuses-one-lazy-realization-across-eval-ids
+  (testing "preparation owns lazy effects; ID formatting reads immutable data"
+    (let [realized       (atom 0)
+          raw            (map (fn [i]
+                                (swap! realized inc)
+                                {:row/id i})
+                              (range 2000))
+          prepared       (v/prepare-ai {::v/value raw})
+          after-prepare  @realized
+          first-out      (v/format-ai {::v/eval-id "first-id"
+                                       ::v/prepared prepared})
+          after-first    @realized
+          second-out     (v/format-ai {::v/eval-id "second-id"
+                                       ::v/prepared prepared})
+          after-second   @realized]
+      (is (pos? after-prepare) "the raw lazy value was actually sampled")
+      (is (< after-prepare 2000) "preparation remains bounded")
+      (is (= after-prepare after-first after-second)
+          "formatting two allocator candidates performs no further realization")
+      (is (str/includes? first-out "partial view"))
+      (is (str/includes? first-out "result/first-id"))
+      (is (not (str/includes? first-out "result/second-id")))
+      (is (str/includes? second-out "partial view"))
+      (is (str/includes? second-out "result/second-id"))
+      (is (not (str/includes? second-out "result/first-id")))
+      (is (every? qualified-keyword? (keys prepared))
+          "the prepared contract has only fully namespaced keys"))))
+
 (deftest render-ai-small-value-has-no-hint
   (testing "a fully-shown value renders verbatim, no partial-view hint"
     (let [out (v/render-ai "abc" [1 2 3])]

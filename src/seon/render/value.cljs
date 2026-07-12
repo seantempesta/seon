@@ -60,7 +60,48 @@
   (:require
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]
-    [seon.config :as config]))
+    [seon.config :as config]
+    [seon.schema :as schema]))
+
+;; The eval loop can allocate a different id on retry. Preparation therefore
+;; owns every touch of the raw value; formatting owns only the later id. These
+;; are transient rendering contracts, not stored entities.
+(schema/register! ::value :any)
+(schema/register! ::eval-id :string)
+(schema/register! ::body :string)
+(schema/register! ::top-type-size :string)
+(schema/register! ::string-token-estimate [:int {:min 0}])
+(schema/register! ::render-error-message :string)
+(schema/register! ::drill-hint
+                  [:map {:closed true}
+                   [::top-type-size {:optional true} ::top-type-size]])
+(schema/register! ::prepared-complete
+                  [:map {:closed true}
+                   [::body ::body]])
+(schema/register! ::prepared-drill
+                  [:map {:closed true}
+                   [::body ::body]
+                   [::drill-hint ::drill-hint]])
+(schema/register! ::prepared-string-partial
+                  [:map {:closed true}
+                   [::body ::body]
+                   [::string-token-estimate ::string-token-estimate]])
+(schema/register! ::prepared-error
+                  [:map {:closed true}
+                   [::body ::body]
+                   [::render-error-message ::render-error-message]])
+(schema/register! ::prepared-ai
+                  [:or ::prepared-drill
+                   ::prepared-string-partial
+                   ::prepared-error
+                   ::prepared-complete])
+(schema/register! ::prepare-ai-request
+                  [:map {:closed true}
+                   [::value ::value]])
+(schema/register! ::format-ai-request
+                  [:map {:closed true}
+                   [::eval-id ::eval-id]
+                   [::prepared ::prepared-ai]])
 
 ;; ============================================================
 ;; Sampling bounds — every one overridable by env (the `SEON_RENDER_VALUE_*`
@@ -537,12 +578,10 @@
           [k v]))
       (catch :default _ nil))))
 
-(defn- bounded-view
-  "The DEPTH/BREADTH-bounded skeleton + ONE trailing drill hint — the view
-   for a value too large/deep/opaque to print whole. A map with ONE dominant
-   string value renders that value as a body block (the generous
-   `verbatim-cap`) so the payload the read produced is actually shown."
-  [eval-id value]
+(defn- prepare-bounded-view
+  "Prepare the bounded body and ID-independent drill facts for a value too
+   large, deep, or opaque to print whole."
+  [value]
   (let [dom   (dominant-string-entry value (:max-string default-opts))
         skel  (if-some [[dk s] dom]
                 ;; re-clip only the dominant key's value to the body cap —
@@ -552,22 +591,86 @@
                 (sample value))
         clip? (truncated? skel)
         body  (emit skel 0)
-        tsz   (top-type+size value)
+        tsz   (top-type+size value)]
+    (cond-> {::body body}
+      clip? (assoc ::drill-hint
+                   (cond-> {}
+                     tsz (assoc ::top-type-size tsz))))))
+
+(defn prepare-ai
+  "Prepare one raw eval value for agent-facing text.
+
+   This is the ONLY phase allowed to realize, sample, print, or otherwise
+   touch the raw value. The returned map is immutable, fully namespaced data
+   with no reference to the original value, so an allocator may safely format
+   it under any later eval id without repeating lazy effects."
+  {:malli/schema [:=> [:cat ::prepare-ai-request] ::prepared-ai]}
+  [{::keys [value]}]
+  (try
+    (cond
+      ;; EXPLICIT-CHARACTER view of a STRING value (file content the agent
+      ;; edits) — ONLY when an operator turned a whitespace knob on. Renders the
+      ;; RAW bytes with visible glyphs instead of the quoted/escaped pr-str form,
+      ;; so tab-vs-space is visible for building an exact `replace!` find. Gated:
+      ;; at defaults this branch is skipped and the pr-str path below is unchanged
+      ;; (byte-identical to today).
+      (and (string? value) (whitespace-active?))
+      (if (<= (count value) verbatim-cap)
+        {::body (visible-whitespace value)}
+        {::body
+         (visible-whitespace (subs value 0 (max 0 (dec verbatim-cap))))
+         ::string-token-estimate (tokens/estimate value)})
+
+      :else
+      (let [probe (sample value verbatim-probe-opts)]
+        (if (truncated? probe)
+          (prepare-bounded-view value)
+          ;; probe untruncated ⇒ value is finite, opaque-free, bounded ⇒ pr-str
+          ;; cannot hang. Print it WHOLE when it fits the char budget.
+          (let [edn (pr-str value)]
+            (if (<= (count edn) verbatim-cap)
+              {::body edn}
+              (prepare-bounded-view value))))))
+    (catch :default e
+      {::body (emit (sample value) 0)
+       ::render-error-message
+       (or (some-> ^js e .-message) (str e))})))
+
+(defn format-ai
+  "Format immutable prepared render data under one allocated eval id.
+
+   This phase never sees the raw eval value. Reusing the same `::prepared`
+   map with several ids therefore performs no further realization."
+  {:malli/schema [:=> [:cat ::format-ai-request] :string]}
+  [{::keys [eval-id prepared]}]
+  (let [body (::body prepared)]
+    (cond
+      (contains? prepared ::render-error-message)
+      (str body
+           "\n; ‹value threw on render: " (::render-error-message prepared)
+           "› — the live value is result/" eval-id)
+
+      (contains? prepared ::string-token-estimate)
+      (str body
+           "\n; ‹partial view of " (::string-token-estimate prepared)
+           " tokens› — the COMPLETE value is result/" eval-id)
+
+      (contains? prepared ::drill-hint)
+      (let [tsz (get-in prepared [::drill-hint ::top-type-size])
+            id? (not (str/blank? eval-id))]
         ;; The drill hint teaches BOTH recovery (navigate the live var) AND
         ;; durability (`keep:` promotes the whole value to a content-addressed
-        ;; blob that survives turns/prune) — a big clipped value the agent
-        ;; wants to KEEP across turns otherwise dies when its `result/<id>`
-        ;; stash is pruned. The `keep:` idiom only renders when an `eval-id`
-        ;; names a live var to promote.
-        id?   (not (str/blank? eval-id))
-        hint  (when clip?
-                (str "\n; ‹partial view"
-                     (when tsz (str " of " tsz)) "› — the COMPLETE value is "
-                     "result/" eval-id
-                     (when id? (str " · keep: (my.blob/put! result/" eval-id ")"))
-                     "  (get-in result/" eval-id
-                     " […]) · filter · count · take/drop"))]
-    (str body hint)))
+        ;; blob that survives turns/prune). The keep idiom only renders when
+        ;; an eval id names a live var to promote.
+        (str body
+             "\n; ‹partial view"
+             (when tsz (str " of " tsz)) "› — the COMPLETE value is "
+             "result/" eval-id
+             (when id? (str " · keep: (my.blob/put! result/" eval-id ")"))
+             "  (get-in result/" eval-id
+             " […]) · filter · count · take/drop"))
+
+      :else body)))
 
 (defn render-ai
   "Agent-facing TEXT for an eval value.
@@ -580,53 +683,15 @@
    whole output is valid Clojure comment prose — no backticks, no fences — so
    it round-trips through the eval-able context.
 
-   The SIZE GATE: a lazy-safe `verbatim-probe-opts` sample first proves the
-   value is finite + plain (never hangs on a lazy/infinite seq); only then is
-   `pr-str` safe, and a value whose printed form fits `verbatim-cap` prints
-   whole. Everything else falls to `bounded-view`."
+   Convenience composition of [[prepare-ai]] and [[format-ai]]. Callers that
+   allocate an eval id inside a retryable transaction prepare once OUTSIDE the
+   retry, then invoke [[format-ai]] with the candidate id inside it."
   {:malli/schema [:=> [:catn [:seon.render.value/eval-id :string]
                              [:seon.render.value/value :any]]
                   :string]}
   [eval-id value]
-  ;; TOTAL by contract (this ns's CLAUDE.md: a render fn must never crash the
-  ;; walk). Realizing an agent-supplied value can throw (a lazy seq poisoned to
-  ;; throw on force — `(keys non-map)`, `(map #(throw …) xs)`); each realization
-  ;; site below is guarded, and THIS outer net is the backstop for any that
-  ;; slip through. The failure becomes bounded result data here instead of
-  ;; propagating to `seon.eval/render-result-edn`: that caller can execute in
-  ;; an allocator's retryable transaction builder and must remain pure. The
-  ;; fallback uses the guaranteed-total `sample` skeleton (whose markers name
-  ;; the cause) rather than ever throwing.
-  (try
-    (cond
-      ;; EXPLICIT-CHARACTER view of a STRING value (file content the agent
-      ;; edits) — ONLY when an operator turned a whitespace knob on. Renders the
-      ;; RAW bytes with visible glyphs instead of the quoted/escaped pr-str form,
-      ;; so tab-vs-space is visible for building an exact `replace!` find. Gated:
-      ;; at defaults this branch is skipped and the pr-str path below is unchanged
-      ;; (byte-identical to today). Clipped to `verbatim-cap` with a drill hint so
-      ;; a huge file still points back at its live `result/<id>`.
-      (and (string? value) (whitespace-active?))
-      (if (<= (count value) verbatim-cap)
-        (visible-whitespace value)
-        (str (visible-whitespace (subs value 0 (max 0 (dec verbatim-cap))))
-             "\n; ‹partial view of " (tokens/estimate value)
-             " tokens› — the COMPLETE value is result/" eval-id))
-
-      :else
-      (let [probe (sample value verbatim-probe-opts)]
-        (if (truncated? probe)
-          (bounded-view eval-id value)
-          ;; probe untruncated ⇒ value is finite, opaque-free, bounded ⇒ pr-str
-          ;; cannot hang. Print it WHOLE when it fits the char budget.
-          (let [edn (pr-str value)]
-            (if (<= (count edn) verbatim-cap)
-              edn
-              (bounded-view eval-id value))))))
-    (catch :default e
-      (str (emit (sample value) 0)
-           "\n; ‹value threw on render: " (or (some-> ^js e .-message) (str e))
-           "› — the live value is result/" eval-id))))
+  (format-ai {::eval-id eval-id
+              ::prepared (prepare-ai {::value value})}))
 
 ;; ============================================================
 ;; RENDER-HTML-DATA — the DATA CONTRACT for the interactive drill-down
