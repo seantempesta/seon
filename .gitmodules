@@ -290,3 +290,9 @@
 [submodule "reference-code/needle"]
 	path = reference-code/needle
 	url = https://github.com/cactus-compute/needle
+[submodule "reference-code/browsecomp-plus"]
+	path = reference-code/browsecomp-plus
+	url = https://github.com/texttron/BrowseComp-Plus
+[submodule "reference-code/deepswe"]
+	path = reference-code/deepswe
+	url = https://github.com/datacurve-ai/deep-swe
