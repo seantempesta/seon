@@ -146,6 +146,26 @@ Failed forms excluded for free — the db already knows.
   already present in the plan step/guidance, squarely inside the copy
   envelope. gen-fn does the heavy lifting (below).
 
+## The division of labor (owner, 2026-07-12 — the lane's thesis)
+
+**Planner (frontier): intent + decomposition, in words. The tiny
+model: words → mechanical REPL forms** (plan bookkeeping, transacts,
+schema registrations, fn calls). **gen-fn/worker: the
+generation-from-knowledge parts** (fn bodies, query joins), outsourced
+on demand. The little model drives the REPL; nothing asks it to think.
+
+Data modeling sits squarely in the tiny model's lane (`register!` ~70%
+copy): the malli type vocabulary is CLOSED (constrained decoding
+clamps most of the form), neighboring registrations in context are the
+ideal ingredient, and the shared-shapes rule makes the correct answer
+a reference-copy (`:seon.db/ref`, not an invented inline shape). The
+structural judgments (identity/ref/component/optional/cardinality)
+arrive as the planner's words; entity/connection COMPOSITION stays
+with the planner. KT5's register! arm measures two strata — explicit
+guidance ("the id is unique") vs implicit (infer from context) — an
+implicit-stratum failure is a planner-prompt specificity finding, not
+a model defect.
+
 ## `seon.ai/gen-fn` — words into a function (owner, 2026-07-12)
 
 Agent-facing, valuable independent of the suggestion model: intent
