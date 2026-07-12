@@ -51,23 +51,27 @@
                                      :seon.ns/member \"done!\"})."
   {:malli/schema [:=> [:cat ::functions-request] ::functions-response]}
   [{ns-name ::ns}]
-  (let [db     @db/*conn*
-        ns-kw  (if (keyword? ns-name) ns-name (keyword (str ns-name)))
-        pulled (db/pull db
-                        '[:seon.ns/name
-                          {:seon.fn/_ns [:seon.fn/sym :seon.fn/arglists
-                                         :seon.fn/doc :seon.fn/spec
-                                         :seon.fn/private?]}]
-                        [:seon.ns/name ns-kw])]
-    (if (nil? pulled)
+  (let [db    @db/*conn*
+        ns-kw (if (keyword? ns-name) ns-name (keyword (str ns-name)))
+        ;; resolve the eid by QUERY, not a lookup-ref pull — pulling an
+        ;; unresolved lookup-ref THROWS (:entity-id/missing); a scalar
+        ;; find returns nil (errors-as-values).
+        eid   (db/query '[:find ?e . :in $ ?n :where [?e :seon.ns/name ?n]]
+                        db ns-kw)]
+    (if (nil? eid)
       {:seon.result/ok? false
        ::error (str "namespace " (name ns-kw) " is not indexed — no :seon.ns row.")
        ::hint  (str "(seon.db/query '[:find [?n ...] :where [_ :seon.ns/name ?n]]) "
                     "lists every indexed namespace.")}
-      (let [cards (->> (:seon.fn/_ns pulled)
-                       (remove :seon.fn/private?)
-                       (sort-by :seon.fn/sym)
-                       (mapv #(ns-cards/compact-fn-head (name ns-kw) %)))]
+      (let [pulled (db/pull db
+                            '[{:seon.fn/_ns [:seon.fn/sym :seon.fn/arglists
+                                             :seon.fn/doc :seon.fn/spec
+                                             :seon.fn/private?]}]
+                            eid)
+            cards  (->> (:seon.fn/_ns pulled)
+                        (remove :seon.fn/private?)
+                        (sort-by :seon.fn/sym)
+                        (mapv #(ns-cards/compact-fn-head (name ns-kw) %)))]
         (cond-> {:seon.result/ok? true
                  ::cards cards
                  ::count (count cards)}

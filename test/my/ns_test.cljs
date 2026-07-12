@@ -35,13 +35,18 @@
                      (.then (fn [_] conn))))))))
 
 (defn- run-test
-  "Seed conn as the ROOT db/*conn*, run (chain conn) → Promise, restore."
+  "Seed conn as the ROOT db/*conn*, run (chain conn) → Promise, restore.
+
+   `chain` runs inside a `.then` so even a SYNCHRONOUS throw becomes a
+   rejection and `.finally` still restores the root conn — a leaked test
+   conn wedges later async test namespaces."
   [chain done]
   (-> (fresh-conn)
       (.then (fn [conn]
                (let [orig db/*conn*]
                  (set! db/*conn* conn)
-                 (-> (js/Promise.resolve (chain conn))
+                 (-> (js/Promise.resolve)
+                     (.then (fn [] (chain conn)))
                      (.finally (fn [] (set! db/*conn* orig)))))))
       (.then (fn [_] (done)))
       (.catch (fn [e] (is false (str "threw — " e)) (done)))))
