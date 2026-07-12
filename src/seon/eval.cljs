@@ -60,6 +60,7 @@
             [seon.analyzer-info :as analyzer-info]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.db.id :as db.id]
             [seon.diffusion.grammar :as grammar]
             [seon.error :as error]
             [seon.eval.bootstrap-cache :as bootstrap-cache]
@@ -321,6 +322,26 @@
 (defonce print-als
   (let [AsyncLocalStorage (.-AsyncLocalStorage (js/require "node:async_hooks"))]
     (AsyncLocalStorage.)))
+
+;; The eval recorder is the durability boundary for schema registrations made
+;; while an agent form runs. It cannot use a not-yet-committed eval id as an
+;; execution marker: identity now belongs to record-eval!, after the form has
+;; executed exactly once. This private ALS marker follows the form across
+;; Promise/await boundaries and tells the eager schema self-tee to stand down;
+;; the successful form's detect-and-tee rows then commit with its eval row.
+;; It is deliberately separate from print-als because capture routing and
+;; durability ownership are independent execution scopes.
+(defonce ^:private record-boundary-als
+  (let [AsyncLocalStorage (.-AsyncLocalStorage (js/require "node:async_hooks"))]
+    (AsyncLocalStorage.)))
+
+(defn- record-boundary-active?
+  []
+  (true? (.getStore record-boundary-als)))
+
+(defn- run-with-record-boundary
+  [body-fn]
+  (.run record-boundary-als true body-fn))
 
 ;; The ORIGINAL print fns (route to pod stdout). Captured ONCE on first
 ;; install; reused on every hot-reload reinstall so the dispatcher always
@@ -1744,9 +1765,8 @@
 ;; schema registry's keyset before/after; every new def becomes a
 ;; :seon.fn entity, every new schema key becomes a :seon.schema entity.
 ;; An `(ns …)` form also yields a :seon.ns entity. These ride in the
-;; same tx as the eval entity (via record-eval!'s ::tee arg), sharing
-;; the :seon.db/eval-id tx-meta — the eval IS the tx that wrote the
-;; program-graph datom.
+;; same tx as the eval entity (via record-eval!'s ::tee arg) — the eval's
+;; committed transaction IS the transaction that wrote the program-graph datom.
 ;;
 ;; Redefinition: snapshot-defs digests each var-map (B1 fix
 ;; 2026-05-25), so a re-defn with changed body/doc/arglists/etc.
@@ -2808,15 +2828,14 @@
      re-teeing them would write a no-op upsert per schema per boot,
      re-anchoring row tx-ids (the exact churn the replay design's
      'detect-and-tee doesn't re-fire' invariant exists to avoid).
-   - EVAL-BATCH scope (`:seon.db/eval-id` in the tx-context) → nil. An
-     agent turn's `eval-batch!` wraps each form in a tx-context carrying
-     its eval-id, and the GATED detect-and-tee (`build-tee-entities` in
-     `record-eval!`) writes the :seon.schema row only on a SUCCESSFUL
-     eval. The self-tee must stand down there or a `register!` in a
-     later-failing form would persist its schema/`:seon.ns` rows anyway
-     (#39 — the eval is the transaction boundary). The self-tee is the
-     durability path ONLY for the bare-eval/REPL scope (no eval-id, no
-     detect-and-tee).
+   - EVAL RECORD scope ([[record-boundary-active?]]) → nil. `eval-batch!`
+     wraps each form in the private ALS boundary before it executes. The
+     gated detect-and-tee path writes the :seon.schema row only with a
+     SUCCESSFUL eval. The self-tee must stand down there or a `register!`
+     in a later-failing form would persist its schema/`:seon.ns` rows
+     anyway (#39 — the eval is the transaction boundary). The self-tee
+     is the durability path only for bare eval/REPL scope outside that
+     boundary.
    - CORE-CLAIMED row (current `:seon.schema/source` datom's tx
      carries `:seon.db/origin :core-seed`) → nil. The bootstrap
      self-host compiler can re-execute compiled-bundle registrations
@@ -2841,15 +2860,11 @@
   [k form]
   (when-some [conn db/*conn*]
     (when-not (or (:seon.db/replay? (db/current-tx-context))
-                  ;; #39: inside an eval-batch! per-form scope (an eval-id is
-                  ;; in the tx-context) the GATED detect-and-tee
-                  ;; (`build-tee-entities` in `record-eval!`) owns this
-                  ;; schema's :seon.schema row and writes it ONLY on a
-                  ;; successful eval. Deferring here is what makes "a
-                  ;; register! in a FAILED form persists nothing" true — the
-                  ;; eager self-tee is the durability path ONLY for the
-                  ;; bare-eval/REPL scope (no eval-id, no detect-and-tee).
-                  (:seon.db/eval-id (db/current-tx-context)))
+                  ;; #39: inside the private per-form record boundary the
+                  ;; gated detect-and-tee path owns this schema row and writes
+                  ;; it only with a successful eval. No pre-minted eval id is
+                  ;; required merely to mark execution scope.
+                  (record-boundary-active?))
       (let [source (pr-str (list 'seon.schema/register! k form))
             [stored-src origin]
             (first (db/query
@@ -3064,225 +3079,141 @@
     eval-id
     (try
       (value/render-ai eval-id value)
-      (catch :default e
-        ;; OUR bounded value renderer throwing is a core defect (:core) —
-        ;; it is designed to handle any value; the caller still degrades to
-        ;; a fallback that names where the live value lives instead of a
-        ;; bare (str value) that could itself be a giant/opaque blob.
-        (error/record! {:seon.error/raw e :seon.error/fault :core})
+      (catch :default _
+        ;; This function runs inside the allocator's retryable transaction
+        ;; builder, so it must be total and side-effect free. A renderer defect
+        ;; degrades to a bounded pointer; recording/logging here would repeat
+        ;; once per generated-candidate retry.
         (str "; <value could not be rendered as data; the live value is "
              "result/" eval-id ">")))))
 
+(defn- allocator-failure?
+  [envelope]
+  (let [error-tag (get-in envelope
+                          [:seon.db/error :seon.error/data ::db.id/error])]
+    (= "seon.db.id.error" (some-> error-tag namespace))))
+
 (defn ^:async record-eval!
-  "Transact one `:seon.eval` as a component child of its turn.
+  "Allocate and transact one eval as a component child of its turn.
 
-   Per v1.md §2.1 — `:seon.agent.turn/evals` is component-many. The
-   nested-map shorthand creates the eval inline; datahike's component
-   semantics mean a one-pull on the turn returns its evals without
-   needing a back-ref query.
+   The caller supplies a committed turn id and a frozen eval outcome—never an
+   eval id. The allocator may retry only the pure transaction builder that
+   associates a candidate id into that frozen data. Accepted program-graph tee
+   operations ride in the same transaction as the eval identity and turn
+   component assertion.
 
-   When `::tee` is non-empty, the detect-and-tee program-graph entities
-   (`:seon.fn` / `:seon.schema` / `:seon.ns` — see v1.md §2.2 / Phase
-   B item 10) land in the SAME tx as the eval entity. Identity-attr
-   upserts handle redefinition.
-
-   NEVER silently loses the eval row (run-4 root cause,
-   e2e-demo-findings-2026-06-08 §Run 4 CORRECTION). A nil `source` is
-   coerced to \"\" before the tx (the attr is `:string`; a nil would fail
-   Malli and sink the whole tx) so a comment-only / repaired entry still
-   records. A DB write failure doesn't abort the batch, but it is handled
-   in two LOUD stages:
-
-   1. Full tx (eval + tee) fails → `console.error` with the message +
-      source, then RETRY without the tee rows. The transcript is the
-      agent's memory — a dropped tee row is recoverable (re-derivable
-      from source), a dropped eval row is not. The recovered eval row
-      is then stamped `:seon.eval/record-error` (separate top-level
-      tx) — the PARTIAL record is honest, queryable, and surfaces via
-      `seon.warn/check-record-errors` in every agent's context.
-   2. Even the bare eval-row retry fails → `console.error` marked
-      DATA LOSS. Nothing softer than error for either stage.
-
-   The conn is captured from `seon.db/*conn*` at (synchronous) entry
-   and passed explicitly to BOTH transacts — the retry runs after an
-   await, where a CLJS `binding` of `*conn*` (test fixtures) has
-   already unwound.
-
-   The tx auto-tags with whatever causality bundle is in
-   `(seon.db/current-tx-context)` (eval-batch! opens the per-eval
-   scope with `:seon.db/agent-id` + `:seon.db/eval-id` + `:seon.db/
-   origin :agent`, plus whatever the caller layered above).
-
-   Request keys (C21): `::id-of-eval` / `:seon.agent.turn/id-of-turn`
-   are REFERENCE ids (the open-turn! `id-of-*` request idiom); `::at` /
-   `::narration` / `::source` / `::duration-ms` / `::output` reuse the
-   persisted-attr keys (same meaning, same type); `::ending-ns` is the
-   fold-accumulator ns (a SYMBOL — the registered `::ending-ns`, not the
-   persisted :keyword `::ns`, coerced at the write boundary below);
-   `::result` (the eval-result envelope) and `::tee` (tx maps) carry
-   runtime data and stay unregistered."
+   A non-allocator transaction failure with a nonempty tee gets one transcript-
+   first recovery allocation using the same frozen outcome and no tee. That
+   fallback may commit a different id and stamps it with
+   `:seon.eval/record-error`. Allocator/protocol failures never enter the
+   fallback. Returns an error envelope or a success carrying the one committed
+   `:seon.eval/id`; no result handle is bound here."
   {:malli/schema [:=> [:catn [::record-request :map]] :any]}
-  [{::keys [at narration source result duration-ms tee output]
-    eval-id ::id-of-eval
+  [{::keys [at narration source result duration-ms tee output pending?]
     turn-id :seon.agent.turn/id-of-turn
     ns      ::ending-ns}]
-  (let [conn     db/*conn*
-        ;; Whose scope produced this eval — the agent turn loop runs each batch
-        ;; inside `(db/with-agent id …)`, so this is the owning agent. nil for
-        ;; agent-less evals (boot index, web UI REPL); then the ref is omitted
-        ;; (optional = absent), never stored nil.
-        aid      (db/current-agent-id)
-        eval-map (cond-> {:seon.eval/id          eval-id
-                          :seon.eval/at          at
-                          :seon.eval/duration-ms (or duration-ms 0)
-                          :seon.eval/narration   (or narration "")
-                          ;; `:seon.eval/source` is registered `:string`, so a
-                          ;; nil source (a comment-only / repaired entry whose
-                          ;; span carries no readable form) would fail Malli
-                          ;; and SINK THE WHOLE TX — dropping the agent's eval
-                          ;; row, the one thing this fn must never lose. Coerce
-                          ;; nil→"" at the write boundary (same as narration
-                          ;; just above): an empty-source row is honest and
-                          ;; queryable; a missing row is data loss.
-                          :seon.eval/source      (or source "")
-                          :seon.eval/ok?         (boolean (::ok? result))
-                          ;; Renderer dispatch via entity-schema props
-                          ;; (`:seon.eval` map registration). No per-row
-                          ;; stamp — the renderer enumerates evals by
-                          ;; walking the AEVT index for `:seon.eval/id`
-                          ;; and resolves `:seon.render/ai` through
-                          ;; `(m/schema :seon.eval)`'s properties.
-                          ;; v1.md:236 — ending ns. From the eval result
-                          ;; on success; from the fold accumulator on
-                          ;; failure (last-known-good). Always populated.
-                          ;; Stored as :keyword per spec; eval-batch
-                          ;; holds it as a symbol for cljs.js, coerce
-                          ;; at this boundary.
-                          :seon.eval/ns          (if (keyword? ns)
-                                                   ns
-                                                   (keyword (str ns)))}
-                   ;; Denormalized agent link — a ref to the owning agent so an
-                   ;; eval is found in one hop (e.g. `/clear`'s eval query).
-                   ;; Lookup-ref resolves at tx time (the agent pre-exists).
-                   aid (assoc :seon.eval/agent [:seon.agent/id aid])
+  (let [conn db/*conn*
+        aid  (db/current-agent-id)
+        stable-eval-row
+        (cond-> {:seon.eval/at          at
+                 :seon.eval/duration-ms (or duration-ms 0)
+                 :seon.eval/narration   (or narration "")
+                 :seon.eval/source      (or source "")
+                 :seon.eval/ok?         (boolean (::ok? result))
+                 :seon.eval/ns          (if (keyword? ns)
+                                          ns
+                                          (keyword (str ns)))}
+          aid
+          (assoc :seon.eval/agent [:seon.agent/id aid])
 
-                   ;; `render-result-edn` already clips the body to the
-                   ;; result-body cap (`seon.config/result-body-render-cap`
-                   ;; as a token budget) and names `result/<id>` for the
-                   ;; full value. `cap-edn` (store-edn-cap) is the additional
-                   ;; MEMORY-SAFETY backstop so the DB never holds a multi-MB
-                   ;; blob even if the render cap is raised; a no-op when the
-                   ;; render cap ≤ the store cap. The FULL value is in the
-                   ;; bounded live result store (set before this call).
-                   (::ok? result)
-                   (assoc :seon.eval/result-edn
-                          (cap-edn
-                            (render-result-edn eval-id (::value result))))
+          (and (string? output) (not (str/blank? output)))
+          (assoc :seon.eval/output (cap-edn output))
 
-                   ;; (fix f) print output captured during the eval span —
-                   ;; persisted so the transcript can show it next to the
-                   ;; result, like a real REPL. Absent when nothing printed.
-                   (and (string? output) (not (str/blank? output)))
-                   (assoc :seon.eval/output (cap-edn output))
+          (not (::ok? result))
+          (assoc :seon.eval/error
+                 (cap-edn
+                   (try (render-error-string (:seon/error result))
+                        (catch :default e
+                          (error/record! {:seon.error/raw e
+                                          :seon.error/fault :core})
+                          (str (:seon/error result))))))
 
-                   ;; Store the LEGIBLE, edn-safe error string (deepest
-                   ;; real message + structured `:seon.error/data`), NOT
-                   ;; the raw `pr-str` of the whole `->map` — that buried
-                   ;; the useful line under the opaque `#error` + stack and
-                   ;; was unreadable by the agent-side renderer. The full
-                   ;; failed evals have no live result value.
-                   (not (::ok? result))
-                   (assoc :seon.eval/error
-                          (cap-edn
-                            (try (render-error-string (:seon/error result))
-                                 ;; OUR error renderer throwing is a core
-                                 ;; defect (:core); the caller still degrades
-                                 ;; to (str error) so the eval row records.
-                                 (catch :default e
-                                   (error/record! {:seon.error/raw e
-                                                   :seon.error/fault :core})
-                                   (str (:seon/error result))))))
-
-                   ;; Phase A item 8 — when the error carries a Malli
-                   ;; instrumentation envelope (flattened into
-                   ;; :seon.error/data by seon.error/->map), persist the
-                   ;; envelope as `:seon.eval/error-data` (pr-str round-
-                   ;; trip — see attr docstring). Renderers branch on
-                   ;; this to produce the structured ;; ERROR block.
-                   (and (not (::ok? result))
-                        (einstrument/instrument-error?
-                          (some-> result :seon/error :seon.error/data)))
-                   (assoc :seon.eval/error-data
-                          ;; Use the fn-stubbing serializer — envelope
-                          ;; embeds Malli schemas whose forms contain
-                          ;; unreadable #object[…] fn refs. See
-                          ;; seon.error.instrument/pr-str-readable.
-                          (einstrument/pr-str-readable
-                            (-> result :seon/error :seon.error/data))))
-        ;; Attach the eval as a component child of the turn. Datahike's
-        ;; cardinality-many ref accumulates on upsert — each record-eval!
-        ;; call appends one eval to the turn's evals set.
-        ;;
-        ;; Tee entities (`:seon.fn` / `:seon.schema` / `:seon.ns` from
-        ;; detect-and-tee, v1.md §2.2 / Phase B item 10) ride in the same
-        ;; tx so they share `:seon.db/eval-id` tx-meta and either all
-        ;; land or none do.
-        eval-tx  [{:seon.agent.turn/id    turn-id
-                   :seon.agent.turn/evals [eval-map]}]
-        tx-data  (into eval-tx tee)
-        ;; Explicit conn on both transacts — see docstring (retry runs
-        ;; after an await, outside any CLJS `binding` of *conn*).
-        request  (cond-> {:seon.db/tx-data tx-data}
-                   conn (assoc :seon.db/conn conn))
-        r (await (db/transact! request))]
-    (when-not (:seon.db/ok? r)
-      (js/console.error "[seon.eval/record-eval!] tx FAILED:"
-                        (-> r :seon.db/error :seon.error/message)
-                        "— source:" source)
-      (if (seq tee)
-        ;; Stage 2: the eval row is the agent's memory — retry WITHOUT
-        ;; the tee rows so the transcript survives a bad tee entity.
-        (let [retry (cond-> {:seon.db/tx-data eval-tx}
-                      conn (assoc :seon.db/conn conn))
-              r2    (await (db/transact! retry))]
-          (if (:seon.db/ok? r2)
-            ;; HONEST RECORDS (task #24 symptom 3): a recovered-without-
-            ;; tee eval is a PARTIAL record — the dropped tee means that
-            ;; registration/def will NOT resume after a restart. The old
-            ;; behavior was a console.error and nothing else: the log
-            ;; lied by omission. Stamp :seon.eval/record-error on the
-            ;; eval row (a SEPARATE top-level tx — nested attrs need a
-            ;; boot-schema entry, top-level attrs lazy-install) so the
-            ;; failure is queryable and seon.warn/check-record-errors
-            ;; derives the warning into every agent's context until the
-            ;; next user message scopes it out.
-            (let [reason (cap-edn
-                           (str (count tee) " program-graph tee row(s) "
-                                "DROPPED (will not survive a restart) — "
-                                "tee tx failed: "
-                                (-> r :seon.db/error :seon.error/message)))
-                  r3     (await (db/transact!
-                                  (cond-> {:seon.db/tx-data
-                                           [{:seon.eval/id eval-id
-                                             :seon.eval/record-error reason}]}
-                                    conn (assoc :seon.db/conn conn))))]
-              (js/console.error
-                "[seon.eval/record-eval!] eval row RECOVERED without tee —"
-                (count tee) "program-graph tee row(s) DROPPED for eval"
-                eval-id)
-              (when-not (:seon.db/ok? r3)
+          (and (not (::ok? result))
+               (einstrument/instrument-error?
+                 (some-> result :seon/error :seon.error/data)))
+          (assoc :seon.eval/error-data
+                 (einstrument/pr-str-readable
+                   (-> result :seon/error :seon.error/data))))
+        allocate-record!
+        (fn ^:async allocate-record! [accepted-tee]
+          (await
+            (db.id/allocate!
+              {::db.id/allocations
+               [{::db.id/key ::eval-allocation
+                 ::db.id/identity-attr :seon.eval/id}]
+               ::db.id/transaction-builder
+               (fn [{eval-id ::eval-allocation}]
+                 (let [stored-value (if pending?
+                                      (pending-placeholder eval-id)
+                                      (::value result))
+                       eval-row (cond->
+                                  (assoc stable-eval-row :seon.eval/id eval-id)
+                                  (::ok? result)
+                                  (assoc :seon.eval/result-edn
+                                         (cap-edn
+                                           (render-result-edn eval-id
+                                                              stored-value))))]
+                   {:seon.db/tx-data
+                    (into [{:seon.agent.turn/id turn-id
+                            :seon.agent.turn/evals [eval-row]}]
+                          accepted-tee)}))
+               :seon.db/conn conn})))
+        primary (await (allocate-record! (vec (or tee []))))]
+    (if (:seon.db/ok? primary)
+      {:seon.db/ok? true
+       :seon.eval/id (get-in primary [::db.id/ids ::eval-allocation])
+       ::tee-recorded? true}
+      (do
+        (js/console.error "[seon.eval/record-eval!] tx FAILED:"
+                          (-> primary :seon.db/error :seon.error/message)
+                          "— source:" source)
+        (if (and (seq tee) (not (allocator-failure? primary)))
+          (let [fallback (await (allocate-record! []))]
+            (if (:seon.db/ok? fallback)
+              (let [eval-id (get-in fallback
+                                    [::db.id/ids ::eval-allocation])
+                    reason (cap-edn
+                             (str (count tee) " program-graph tee row(s) "
+                                  "DROPPED (will not survive a restart) — "
+                                  "tee tx failed: "
+                                  (-> primary :seon.db/error
+                                      :seon.error/message)))
+                    stamped (await
+                              (db/transact!
+                                (cond-> {:seon.db/tx-data
+                                         [{:seon.eval/id eval-id
+                                           :seon.eval/record-error reason}]}
+                                  conn (assoc :seon.db/conn conn))))]
                 (js/console.error
-                  "[seon.eval/record-eval!] could not stamp"
-                  ":seon.eval/record-error on eval" eval-id ":"
-                  (-> r3 :seon.db/error :seon.error/message))))
-            (js/console.error
-              "[seon.eval/record-eval!] DATA LOSS — eval row" eval-id
-              "could not be persisted even without tee:"
-              (-> r2 :seon.db/error :seon.error/message)
-              "— source:" source)))
-        (js/console.error
-          "[seon.eval/record-eval!] DATA LOSS — bare eval row" eval-id
-          "failed with no tee rows to drop — source:" source)))))
+                  "[seon.eval/record-eval!] eval row RECOVERED without tee —"
+                  (count tee) "program-graph tee row(s) DROPPED for eval"
+                  eval-id)
+                (when-not (:seon.db/ok? stamped)
+                  (js/console.error
+                    "[seon.eval/record-eval!] could not stamp"
+                    ":seon.eval/record-error on eval" eval-id ":"
+                    (-> stamped :seon.db/error :seon.error/message)))
+                {:seon.db/ok? true
+                 :seon.eval/id eval-id
+                 ::tee-recorded? false})
+              (do
+                (js/console.error
+                  "[seon.eval/record-eval!] DATA LOSS — eval row could not be"
+                  "persisted even without tee:"
+                  (-> fallback :seon.db/error :seon.error/message)
+                  "— source:" source)
+                fallback)))
+          primary)))))
 
 ;; ============================================================
 ;; REPL-parity intercepts (unit #23 fix d, per the plan's REPL-PARITY
@@ -4023,7 +3954,7 @@
 (defn- ^:async eval-form-entry!
   "The normal single-form eval path, extracted from `eval-batch!`'s
    `:else` branch so a parinfer-REPAIRED form (A.2) can reuse the exact
-   same eval → auto-await → live-result bind → detect-and-tee → record →
+   same eval → auto-await → detect-and-tee → record → live-result bind →
    auto-instrument → auto-test-run pipeline. Behavior-preserving.
 
    Mutates the caller's fold volatiles in place (a transient impl
@@ -4035,8 +3966,7 @@
 
    Map keys:
      ::compile-state   — the bootstrap compile-state.
-     ::id-of-eval         — pre-minted id for this entry's :seon.eval row.
-     :seon.agent.turn/id-of-turn         — owning turn id (component parent).
+     :seon.agent.turn/id-of-turn — committed owning turn id.
      ::current-ns      — volatile<symbol>, the fold accumulator ns.
      ::n-ok ::n-fail    — volatile<int> counters.
      ::failed-defs     — volatile<set> of failed-def symbols this batch.
@@ -4046,7 +3976,6 @@
      ::source          — the source string to eval (repaired or original)."
   [{::keys [compile-state current-ns n-ok n-fail
             failed-defs outer-test-run? narration source]
-    eval-id ::id-of-eval
     turn-id :seon.agent.turn/id-of-turn}]
   (let [;; Real requires (#73/#56): if this is a NEW agent-authored `(ns …)`
         ;; form, write the canonical short aliases into its REAL `:require`
@@ -4070,21 +3999,23 @@
     (if stale-ref
       (let [result {::ok? false
                     :seon/error {:seon.error/kind :compile
-                            :seon.error/message
-                            (str "`" stale-ref "` does not exist — the def that "
-                                 "would create it failed to evaluate earlier this "
-                                 "turn (it defined NOTHING). A reference to it "
-                                 "reads nil, NOT a usable value. Fix and re-eval "
-                                 "the def first, then re-run this form.")}}]
-        (await (record-eval! {::id-of-eval     eval-id
-                              :seon.agent.turn/id-of-turn     turn-id
-                              ::at          at
-                              ::duration-ms 0
-                              ::narration   narration
-                              ::source      source
-                              ::ending-ns          @current-ns
-                              ::result      result}))
-        (vswap! n-fail inc))
+                                 :seon.error/message
+                                 (str "`" stale-ref "` does not exist — the def that "
+                                      "would create it failed to evaluate earlier this "
+                                      "turn (it defined NOTHING). A reference to it "
+                                      "reads nil, NOT a usable value. Fix and re-eval "
+                                      "the def first, then re-run this form.")}}
+            recorded (await
+                       (record-eval!
+                         {:seon.agent.turn/id-of-turn turn-id
+                          ::at          at
+                          ::duration-ms 0
+                          ::narration   narration
+                          ::source      source
+                          ::ending-ns   @current-ns
+                          ::result      result}))]
+        (vswap! n-fail inc)
+        recorded)
       (let [;; Pre-flight symbol repair (form-autofix, owner rulings
             ;; 2026-07-05): compile-gate the form BEFORE any execution. A
             ;; provable unique near-miss fix is applied here, so the real
@@ -4155,7 +4086,7 @@
             (cond
               (not (::ok? raw-result)) raw-result
               pending?               {::ok? true
-                                      ::value (pending-placeholder eval-id)
+                                      ::value nil
                                       ::ending-ns (::ending-ns raw-result)}
               (::ok? awaited)        {::ok? true
                                       ::value (::value awaited)
@@ -4205,7 +4136,7 @@
           (analyzer-info/remove-phantom-defs! compile-state defs-before @current-ns)
           ;; #39: the schema analog of the phantom-def rollback. A failed
           ;; eval that ran `schema/register!` must define NOTHING. The
-          ;; self-tee already DEFERRED its DB write (eval-id in scope), so
+          ;; self-tee already DEFERRED its DB write (record boundary in scope), so
           ;; nothing persisted; drop the in-memory registry entries too —
           ;; diff is THIS form's newly-registered keys only (current-keys
           ;; minus the pre-eval snapshot) — so a re-eval of the fixed form
@@ -4227,42 +4158,6 @@
             (if (::ok? result)
               (vswap! failed-defs #(reduce disj % def-syms))
               (vswap! failed-defs into def-syms))))
-        ;; Live value — one raw globalThis.result slot plus its analyzer
-        ;; handle, no eval-str round trip (opaque values like Datahike DB
-        ;; tagged literals remain intact). `result/<id>` and the internal
-        ;; `lookup-result` reader share this one bounded slot.
-        ;;
-        ;; PENDING case (auto-await timeout / `defer`): store the live
-        ;; PROMISE handle (`pending-promise`), NOT the placeholder that was
-        ;; recorded as the displayed value — so a later bare `result/<id>`
-        ;; returns the Promise and the eval-batch auto-await resolves it to
-        ;; data. The normal case stores the resolved value.
-        ;; `(if pending? pending-promise …)`, NOT `(or pending-promise …)`:
-        ;; `or` expands to `(if pending-promise pending-promise …)`, putting
-        ;; the Promise in the TEST position, which a CLJS `^:async` fn
-        ;; AUTO-AWAITS — that would resolve the handle (and block) instead of
-        ;; storing it. A boolean test keeps the Promise unawaited; it reaches
-        ;; the result slot as a live handle (a fn arg never awaits).
-        (when (::ok? result)
-          (let [live-value (if pending? pending-promise (::value result))]
-            ;; transcript-redesign-2026-06-18: bind the value as the plain
-            ;; var `result/<id>` (globalThis + analyzer def) so the agent
-            ;; references it directly — the SOLE value-reuse surface. Failed
-            ;; evals bind nothing — no value to retrieve.
-            (bind-result-var! compile-state eval-id live-value)
-            ;; PENDING self-heal: the slot above holds a RAW js/Promise, and
-            ;; only a BARE `result/<id>` reference auto-awaits it — any IN-FORM
-            ;; use ((first result/<id>), (group-by k result/<id>), (let [xs
-            ;; result/<id>] …)) operates on the un-awaited Promise and returns
-            ;; garbage. Re-bind the RESOLVED value the instant the
-            ;; Promise settles, so EVERY reference (bare or in-form) reads real
-            ;; data. errors-as-values: a rejected Promise no-ops (the placeholder
-            ;; stays honest) — never throws into the eval loop.
-            (when pending?
-              (-> pending-promise
-                  (.then (fn [v]
-                           (replace-live-result! eval-id v)))
-                  (.catch (fn [_] nil))))))
         ;; Detect-and-tee — only on success. Failed evals roll
         ;; back analyzer defs and never touch the schema registry,
         ;; so diff would be empty anyway; we still skip
@@ -4351,25 +4246,37 @@
                             (require-decl-tx @db/*conn*
                                              (keyword (str ending-ns))
                                              source))
-              tee (vec (concat tee-entities req-tx req-decl-tx read-attr-tx))]
-          ;; Durable record — always. :seon.eval/ns is the
-          ;; post-update accumulator (ending ns on success;
-          ;; unchanged ns on failure). Tee rides in the same tx.
-          (await (record-eval! {::id-of-eval      eval-id
-                                :seon.agent.turn/id-of-turn      turn-id
-                                ::at           at
-                                ::duration-ms  duration-ms
-                                ::narration    narration
-                                ::source       source
-                                ::ending-ns           @current-ns
-                                ::result       result
-                                ::output       output
-                                ::tee          tee}))
+              tee (vec (concat tee-entities req-tx req-decl-tx read-attr-tx))
+              ;; Durable record — always. Identity allocation and accepted tee
+              ;; commit before a process-local result handle can exist.
+              recorded (await
+                         (record-eval!
+                           {:seon.agent.turn/id-of-turn turn-id
+                            ::at           at
+                            ::duration-ms  duration-ms
+                            ::narration    narration
+                            ::source       source
+                            ::ending-ns    @current-ns
+                            ::result       result
+                            ::pending?     pending?
+                            ::output       output
+                            ::tee          tee}))
+              eval-id (:seon.eval/id recorded)]
+          ;; Bind only the committed id. A failed recorder leaves no orphaned
+          ;; result slot; a rejected allocation candidate is never observable.
+          (when (and (:seon.db/ok? recorded) (::ok? result))
+            (let [live-value (if pending? pending-promise (::value result))]
+              (bind-result-var! compile-state eval-id live-value)
+              (when pending?
+                (-> pending-promise
+                    (.then (fn [v]
+                             (replace-live-result! eval-id v)))
+                    (.catch (fn [_] nil))))))
           ;; Queryable fix datoms (the A/B substrate — fix volume / class
           ;; mix / revert rate = one Datalog query). A SEPARATE top-level
           ;; tx: nested attrs need a boot-schema entry, top-level attrs
           ;; lazy-install (the :seon.eval/record-error precedent).
-          (when (and fixed? db/*conn*)
+          (when (and (:seon.db/ok? recorded) fixed? db/*conn*)
             (let [fixes (:seon.repair/fixes pre)
                   r     (await
                           (db/transact!
@@ -4391,7 +4298,9 @@
           ;; tx so the `:seon.fn` row is durable before we
           ;; mutate the live var. Best-effort: a thrown
           ;; instrument! aborts only this fn, not the batch.
-          (when (::ok? result)
+          (when (and (:seon.db/ok? recorded)
+                     (::tee-recorded? recorded)
+                     (::ok? result))
             (try
               (instrument-tee-fns!
                 (collect-instrument-targets compile-state defs-before
@@ -4429,40 +4338,42 @@
                       ;; are captured as :seon.test data upstream) is a core
                       ;; defect (:core) — record it; best-effort stays: the
                       ;; batch continues.
-                      (error/record! {:seon.error/raw e :seon.error/fault :core}))))))))
-        (if (::ok? result)
-          (vswap! n-ok   inc)
-          (vswap! n-fail inc))))))
+                      (error/record! {:seon.error/raw e :seon.error/fault :core})))))))
+          (if (::ok? result)
+            (vswap! n-ok   inc)
+            (vswap! n-fail inc))
+          recorded)))))
 
 (defn- ^:async record-form-result!
   "Record one REPL-form outcome through the SAME record/result/counter
    path a normal form takes.
 
    `::error` (a message string) makes a failed row (errors-as-values,
-   kind `:seon.eval/repl-form`); otherwise `::value` is bound
-   at `result/<id>` and an ok row records. `::tee` tx ops ride the same
+   kind `:seon.eval/repl-form`); otherwise `::value` is bound at the
+   committed `result/<id>` after its row records. `::tee` tx ops ride the same
    tx. Mutates the caller's fold counters like eval-form-entry!."
   [{::keys [compile-state current-ns n-ok n-fail narration source
             value error tee]
-    eval-id ::id-of-eval
     turn-id :seon.agent.turn/id-of-turn}]
   (let [result (if error
                  {::ok? false
                   :seon/error {:seon.error/kind    :seon.eval/repl-form
                                :seon.error/message error}}
-                 {::ok? true ::value value})]
-    (when (::ok? result)
-      (bind-result-var! compile-state eval-id value))
-    (await (record-eval! {::id-of-eval  eval-id
-                          :seon.agent.turn/id-of-turn turn-id
-                          ::at          (js/Date.)
-                          ::duration-ms 0
-                          ::narration   narration
-                          ::source      source
-                          ::ending-ns   @current-ns
-                          ::result      result
-                          ::tee         (vec (or tee []))}))
-    (if (::ok? result) (vswap! n-ok inc) (vswap! n-fail inc))))
+                 {::ok? true ::value value})
+        recorded (await
+                   (record-eval!
+                     {:seon.agent.turn/id-of-turn turn-id
+                      ::at          (js/Date.)
+                      ::duration-ms 0
+                      ::narration   narration
+                      ::source      source
+                      ::ending-ns   @current-ns
+                      ::result      result
+                      ::tee         (vec (or tee []))}))]
+    (when (and (:seon.db/ok? recorded) (::ok? result))
+      (bind-result-var! compile-state (:seon.eval/id recorded) value))
+    (if (::ok? result) (vswap! n-ok inc) (vswap! n-fail inc))
+    recorded))
 
 (defn ^:async dispatch-repl-form!
   "Execute ONE REPL movement/update form (owner rulings 2026-07-10).
@@ -4690,7 +4601,6 @@
    a repaired form)."
   [{::keys [compile-state current-ns n-ok n-fail
             failed-defs outer-test-run? entry narration]
-    eval-id ::id-of-eval
     turn-id :seon.agent.turn/id-of-turn}]
   ;; A `#code` heredoc form carries `:seon.repl/eval-source` — the
   ;; machine-escaped, cljs-READABLE rewrite of the byte-faithful (but not
@@ -4702,8 +4612,7 @@
       ;; (blank source, ok? true) so trailing `;;` thinking renders in the
       ;; transcript and is never lost. Not counted in n-ok/n-fail.
       (= :comment (:seon.repl/kind entry))
-      (await (record-eval! {::id-of-eval     eval-id
-                            :seon.agent.turn/id-of-turn     turn-id
+      (await (record-eval! {:seon.agent.turn/id-of-turn turn-id
                             ::at          (js/Date.)
                             ::duration-ms 0
                             ::narration   narration
@@ -4719,20 +4628,23 @@
                      {::ok? false
                       :seon/error {:seon.error/kind    :seon.eval/repl-parity
                                    :seon.error/message (:seon.error/message pc)}}
-                     {::ok? true ::value (:seon.eval/value pc)})]
-        (when (::ok? result)
-          (bind-result-var! compile-state eval-id (::value result)))
-        (await (record-eval! {::id-of-eval     eval-id
-                              :seon.agent.turn/id-of-turn     turn-id
-                              ::at          (js/Date.)
-                              ::duration-ms 0
-                              ::narration   narration
-                              ::source      source
-                              ::ending-ns          @current-ns
-                              ::result      result}))
+                     {::ok? true ::value (:seon.eval/value pc)})
+            recorded (await
+                       (record-eval!
+                         {:seon.agent.turn/id-of-turn turn-id
+                          ::at          (js/Date.)
+                          ::duration-ms 0
+                          ::narration   narration
+                          ::source      source
+                          ::ending-ns   @current-ns
+                          ::result      result}))]
+        (when (and (:seon.db/ok? recorded) (::ok? result))
+          (bind-result-var! compile-state (:seon.eval/id recorded)
+                            (::value result)))
         (if (::ok? result)
           (vswap! n-ok   inc)
-          (vswap! n-fail inc)))
+          (vswap! n-fail inc))
+        recorded)
 
       ;; REPL movement/update forms (owner rulings 2026-07-10) —
       ;; in-ns / alias / ns-unmap / ns-unalias are REAL forms handled at
@@ -4740,7 +4652,6 @@
       (some? (repl-form-of source))
       (await (dispatch-repl-form!
                {::compile-state   compile-state
-                ::id-of-eval      eval-id
                 :seon.agent.turn/id-of-turn turn-id
                 ::current-ns      current-ns
                 ::n-ok            n-ok
@@ -4759,8 +4670,7 @@
       ;; n-ok nor n-fail (exactly like a `;` comment — it ran nothing).
       (prose-paren? compile-state @current-ns source)
       (await (record-eval!
-               {::id-of-eval     eval-id
-                :seon.agent.turn/id-of-turn     turn-id
+               {:seon.agent.turn/id-of-turn turn-id
                 ::at          (js/Date.)
                 ::duration-ms 0
                 ::narration   (str (when (seq narration) (str narration "\n"))
@@ -4777,8 +4687,7 @@
       :else
       (await (eval-form-entry!
                {::compile-state   compile-state
-                ::id-of-eval         eval-id
-                :seon.agent.turn/id-of-turn         turn-id
+                :seon.agent.turn/id-of-turn turn-id
                 ::current-ns      current-ns
                 ::n-ok            n-ok
                 ::n-fail          n-fail
@@ -4828,11 +4737,11 @@
         and is never lost. Counts as neither n-ok nor n-fail (no eval
         happened); duration-ms = 0.
 
-   Per-form work is wrapped in `(db/with-tx-context {…} f)` so every
-   transact inside auto-tags with the causality bundle (agent-id +
-   eval-id + origin). Callers that establish a wider scope first
-   (the turn runner adding turn-id) get those keys layered in via
-   with-tx-context's merge.
+   Per-form work is wrapped in the private record boundary plus
+   `(db/with-tx-context {…} f)`. Transactions keep agent/process context;
+   eval identity is allocated only when the frozen outcome records. Callers
+   that establish a wider scope first (the turn runner adding turn-id) get
+   those keys layered in via with-tx-context's merge.
 
    Args:
      compile-state — the bootstrap compile-state (defonce'd at boot)
@@ -4908,18 +4817,27 @@
         ;; `:origin :test-run` wrapper around a test body that itself
         ;; calls `eval-batch!`) already established `:test-run`, the
         ;; inner batch must skip auto-test-run to avoid recursion.
-        outer-test-run? (= :test-run (::db/origin (db/current-tx-context)))]
+        outer-test-run? (= :test-run (::db/origin (db/current-tx-context)))
+        run-entry!
+        (fn ^:async run-entry! [body-fn]
+          (await
+            (db/with-tx-context
+              {:seon.db/agent-id agent-id
+               :seon.db/origin   :agent}
+              (fn ^:async run-in-record-boundary! []
+                (await (run-with-record-boundary body-fn))))))
+        append-record!
+        (fn [recorded]
+          (when (:seon.db/ok? recorded)
+            (vswap! eids conj (:seon.eval/id recorded)))
+          recorded)]
     ;; Fence lost ⇒ iterate over nil (zero entries) — the batch is skipped, the
     ;; volatiles stay at their empty seed, and the return below flags :fenced?.
     (doseq [entry (when-not fence-lost? parsed)]
-      (let [eval-id    (db/new-id!)
-            tx-context {:seon.db/agent-id agent-id
-                        :seon.db/eval-id  eval-id
-                        :seon.db/origin   :agent}]
-        (await
-          (db/with-tx-context tx-context
-            (fn ^:async run-one-entry! []
-              (cond
+      (await
+        (run-entry!
+          (fn ^:async run-one-entry! []
+            (cond
                 ;; Read-failure entry from seon.repl.internal. A.2: attempt
                 ;; a PER-FORM parinfer indent-mode repair on the bad span
                 ;; (never the whole reply — that would mangle good forms
@@ -4977,45 +4895,39 @@
                                               (str (:seon.repl/narration entry) "\n"))
                                             note)
                                        (:seon.repl/narration e))
-                                ;; A fresh eval-id per repaired form after the
-                                ;; first (the first reuses this entry's id).
-                                eid  (if first? eval-id (db/new-id!))]
-                            (await
-                              (db/with-tx-context
-                                {:seon.db/agent-id agent-id
-                                 :seon.db/eval-id  eid
-                                 :seon.db/origin   :agent}
-                                (fn ^:async run-repaired! []
-                                  (await (dispatch-eval-entry!
-                                           {::compile-state   compile-state
-                                            ::id-of-eval         eid
-                                            :seon.agent.turn/id-of-turn         turn-id
-                                            ::current-ns      current-ns
-                                            ::n-ok            n-ok
-                                            ::n-fail          n-fail
-                                            ::failed-defs     failed-defs
-                                            ::outer-test-run? outer-test-run?
-                                            ::entry           e
-                                            ::narration       narr})))))
-                            (when-not first? (vswap! eids conj eid))
+                                recorded
+                                (await
+                                  (dispatch-eval-entry!
+                                    {::compile-state   compile-state
+                                     :seon.agent.turn/id-of-turn turn-id
+                                     ::current-ns      current-ns
+                                     ::n-ok            n-ok
+                                     ::n-fail          n-fail
+                                     ::failed-defs     failed-defs
+                                     ::outer-test-run? outer-test-run?
+                                     ::entry           e
+                                     ::narration       narr}))]
+                            (append-record! recorded)
                             (recur (rest es) false)))))
                     ;; Not repairable → sharpened read error (A.3).
-                    (do
-                      (await (record-eval!
-                               {::id-of-eval     eval-id
-                                :seon.agent.turn/id-of-turn     turn-id
-                                ::at          (js/Date.)
-                                ::duration-ms 0
-                                ::narration   (:seon.repl/narration entry)
-                                ::source      (:seon.repl/source entry)
-                                ::ending-ns          @current-ns
-                                ::result      {::ok? false
-                                              :seon/error {:seon.error/kind    :read
-                                                           :seon.error/message
-                                                           (read-error-message
-                                                             (-> entry :seon/error
-                                                                 :seon.error/message)
-                                                             (:seon.repl/source entry))}}}))
+                    (let [recorded
+                          (await
+                            (record-eval!
+                              {:seon.agent.turn/id-of-turn turn-id
+                               ::at          (js/Date.)
+                               ::duration-ms 0
+                               ::narration   (:seon.repl/narration entry)
+                               ::source      (:seon.repl/source entry)
+                               ::ending-ns   @current-ns
+                               ::result
+                               {::ok? false
+                                :seon/error
+                                {:seon.error/kind :read
+                                 :seon.error/message
+                                 (read-error-message
+                                   (-> entry :seon/error :seon.error/message)
+                                   (:seon.repl/source entry))}}}))]
+                      (append-record! recorded)
                       (vswap! n-fail inc))))
 
                 ;; Every non-`:read` entry — comment / parity-intercept /
@@ -5023,18 +4935,18 @@
                 ;; exact same `dispatch-eval-entry!` the repair sub-loop
                 ;; above calls. One mechanism, no parallel path.
                 :else
-                (await (dispatch-eval-entry!
-                         {::compile-state   compile-state
-                          ::id-of-eval         eval-id
-                          :seon.agent.turn/id-of-turn         turn-id
-                          ::current-ns      current-ns
-                          ::n-ok            n-ok
-                          ::n-fail          n-fail
-                          ::failed-defs     failed-defs
-                          ::outer-test-run? outer-test-run?
-                          ::entry           entry
-                          ::narration       (:seon.repl/narration entry)}))))))
-        (vswap! eids conj eval-id)))
+                (append-record!
+                  (await
+                    (dispatch-eval-entry!
+                      {::compile-state   compile-state
+                       :seon.agent.turn/id-of-turn turn-id
+                       ::current-ns      current-ns
+                       ::n-ok            n-ok
+                       ::n-fail          n-fail
+                       ::failed-defs     failed-defs
+                       ::outer-test-run? outer-test-run?
+                       ::entry           entry
+                       ::narration       (:seon.repl/narration entry)}))))))))
     (cond-> {:seon.eval/ids    @eids
              :seon.eval/n-ok   @n-ok
              :seon.eval/n-fail @n-fail}

@@ -280,11 +280,10 @@
    whose `-first` calls `(key elem)` on a non-map-entry, or `(map #(throw …)
    xs)`. The eval that returns such a value records `ok? true` (lazy, never
    forced); only [[sample]] forcing it here throws. `sample` PROMISES it
-   never throws, and a propagated throw is caught by
-   `seon.eval/render-result-edn` and recorded a `:core` fault — which under
-   `:seon.config/on-core-error :crash` EXITS the pod (error-workflow
-   2026-07-06, T4 D1). So a poisoned realization degrades to an opaque
-   marker naming the cause, exactly like any other non-plain node."
+   never throws, so a poisoned realization degrades to an opaque marker
+   naming the cause, exactly like any other non-plain node. `render-ai` adds
+   an outer totality net for an unforeseen realization site; its caller may
+   run inside an allocator retry and therefore cannot report side effects."
   [coll {:keys [max-items shape-sample] :as opts} depth kind]
   (let [forced (try {::head+1 (vec (take (inc max-items) coll))}
                  (catch :default e {::realize-error e}))]
@@ -593,11 +592,11 @@
   ;; walk). Realizing an agent-supplied value can throw (a lazy seq poisoned to
   ;; throw on force — `(keys non-map)`, `(map #(throw …) xs)`); each realization
   ;; site below is guarded, and THIS outer net is the backstop for any that
-  ;; slip through. A propagated throw is recorded a `:core` fault by
-  ;; `seon.eval/render-result-edn` and EXITS the pod under
-  ;; `on-core-error :crash` (error-workflow 2026-07-06, T4 D1) — so we degrade
-  ;; to the guaranteed-total `sample` skeleton (its markers name the cause)
-  ;; instead of ever throwing.
+  ;; slip through. The failure becomes bounded result data here instead of
+  ;; propagating to `seon.eval/render-result-edn`: that caller can execute in
+  ;; an allocator's retryable transaction builder and must remain pure. The
+  ;; fallback uses the guaranteed-total `sample` skeleton (whose markers name
+  ;; the cause) rather than ever throwing.
   (try
     (cond
       ;; EXPLICIT-CHARACTER view of a STRING value (file content the agent

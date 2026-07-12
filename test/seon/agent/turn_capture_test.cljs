@@ -79,7 +79,7 @@
   "Create a booted agent on the current conn; resolves to its id + cs."
   []
   (let [cs  (await (repl/ensure-bootstrap!))
-        aid (db/new-id!)]
+        aid "turn-capture-agent"]
     (await (db/with-agent aid
              (fn ^:async boot []
                (await (seval/setup-agent-ns! cs (agent/home-ns aid) aid))
@@ -94,6 +94,60 @@
              (turn/run-turn! {:seon.agent/id            aid
                               :seon.agent/llm-fn        llm-fn
                               :seon.agent/compile-state cs})))))
+
+(deftest open-turn-commits-identity-before-running-the-body
+  (async done
+    (run-test
+      (fn ^:async run []
+        (let [!calls (atom 0)
+              !seen  (atom nil)
+              result
+              (await
+                (turn/open-turn!
+                  {:seon.agent/id "root"
+                   :seon.agent.turn/prompt-text "atomic turn probe"}
+                  (fn ^:async body [turn-id]
+                    (swap! !calls inc)
+                    (reset! !seen
+                            (db/entity
+                              {:seon.db/ref [:seon.agent.turn/id turn-id]}))
+                    {:seon.agent/eval-count 0})))
+              turn-id (:seon.agent.turn/id result)
+              stored  (db/entity
+                        {:seon.db/ref [:seon.agent.turn/id turn-id]})]
+          (is (= 1 @!calls) "the irreversible body ran exactly once")
+          (is (= turn-id (:seon.agent.turn/id @!seen))
+              "the callback received an identity already visible in the db")
+          (is (= :running (:seon.agent.turn/status @!seen))
+              "the open transaction committed before the callback")
+          (is (= :done (:seon.agent.turn/status stored)))
+          (is (= turn-id (:seon.agent.turn/id stored)))))
+      done)))
+
+(deftest committed-turn-identity-survives-a-body-throw
+  (async done
+    (run-test
+      (fn ^:async run []
+        (let [failure
+              (try
+                (await
+                  (turn/open-turn!
+                    {:seon.agent/id "root"
+                     :seon.agent.turn/prompt-text "throwing turn probe"}
+                    (fn ^:async body [_turn-id]
+                      (throw (js/Error. "deliberate turn body failure")))))
+                nil
+                (catch :default e e))
+              failure-data (ex-data failure)
+              turn-id (:seon.agent.turn/id failure-data)
+              stored  (db/entity
+                        {:seon.db/ref [:seon.agent.turn/id turn-id]})]
+          (is (some? failure) "the historical rejected-Promise contract remains")
+          (is (string? turn-id))
+          (is (= :error (:seon.agent.turn/status failure-data)))
+          (is (= :error (:seon.agent.turn/status stored)))
+          (is (= turn-id (:seon.agent.turn/id stored)))))
+      done)))
 
 ;; ---------------------------------------------------------------------------
 ;; 1 + 3. Capture on success → agent-debug/turn round-trip.

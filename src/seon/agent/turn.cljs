@@ -30,6 +30,7 @@
     [seon.agent.ctx :as ctx]
     [my.blob :as blob]
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.error :as error]
     [seon.eval :as seval]
     [seon.log :as seon-log]
@@ -49,7 +50,11 @@
 ;; {:seon.db/identity true} so the bridge writes :db.unique/identity.
 ;; ============================================================
 
-(schema/register! :seon.agent.turn/id           [:and {:seon.db/identity true} :seon.db/id])
+(schema/register!
+  :seon.agent.turn/id
+  [:and {:seon.db/identity true
+         :seon.db.id/generator :seon.db.id.generator/compact}
+   ::db.id/compact-value])
 (schema/register! :seon.agent.turn/at           :inst)
 ;; A turn is running/done/error — DISTINCT from the agent FSM state
 ;; (idle/running/…): a turn is a single completion, the agent is the actor.
@@ -232,10 +237,13 @@
 
    `prompt-text` is attached and
    the agent's current run STAMPED on `:seon.agent.turn/run` (the run's
-   derived current-turn count counts it). Awaits `body-fn` (a 0-arg thunk
-   returning Promise<map>) via `close-turn!`. Returns whatever `body-fn`
-   returned, so the caller can read `:seon.agent/eval-count`. Touches NO agent
-   state — the run lifecycle is the loop's / the functions' concern.
+   derived current-turn count counts it). This function owns turn identity:
+   it allocates and commits the open row before invoking `body-fn` with the
+   committed id. Only the pure transaction builder can retry. On success it
+   returns the body result carrying `:seon.agent.turn/id`; if the body throws,
+   it marks the committed turn `:error` and rejects with that id in ex-data.
+   Touches NO agent state — the run lifecycle is the loop's / the functions'
+   concern.
 
    When `scheduled?` is true, the turn is stamped `:seon.agent.turn/scheduled?
    true` (a cron-fire turn): it still carries the run stamp so its evals RENDER
@@ -252,40 +260,59 @@
   {:malli/schema [:=> [:catn [:turn-input :map] [:body-fn :any]] :any]}
   [{:seon.agent/keys [id]
     :seon.agent.run/keys [id-of-run]
-    :seon.agent.turn/keys [id-of-turn prompt-text scheduled?
+    :seon.agent.turn/keys [prompt-text scheduled?
                            rendered-as-of prompt-blob]}
    body-fn]
-  (let [turn-row
+  (let [conn db/*conn*
+        turn-row
         (cond->
-          {:seon.agent.turn/id           id-of-turn
-           :seon.agent.turn/at           (js/Date.)
+          {:seon.agent.turn/at           (js/Date.)
            :seon.agent.turn/status       :running
            :seon.agent.turn/prompt-chars (count (str prompt-text))}
           rendered-as-of (assoc :seon.agent.turn/rendered-as-of rendered-as-of)
           prompt-blob    (assoc :seon.agent.turn/prompt-blob prompt-blob)
           scheduled?  (assoc :seon.agent.turn/scheduled? true)
           id-of-run  (assoc :seon.agent.turn/run [:seon.agent.run/id id-of-run]))
-        open-result
+        allocation
         (await
-          (db/transact!
-            {:seon.db/tx-data
-             (if id-of-run
-               [(db/cas-assert [:seon.agent/id id] :seon.agent/run
-                               [:seon.agent.run/id id-of-run])
-                turn-row]
-               [turn-row])}))]
-    (if (false? (:seon.db/ok? open-result))
-      open-result
-      (close-turn! id id-of-turn body-fn))))
+          (db.id/allocate!
+            {::db.id/allocations
+             [{::db.id/key ::turn-allocation
+               ::db.id/identity-attr :seon.agent.turn/id}]
+             ::db.id/transaction-builder
+             (fn [{turn-id ::turn-allocation}]
+               {:seon.db/tx-data
+                (cond-> []
+                  id-of-run
+                  (conj (db/cas-assert [:seon.agent/id id] :seon.agent/run
+                                       [:seon.agent.run/id id-of-run]))
+                  true
+                  (conj (assoc turn-row :seon.agent.turn/id turn-id)))
+                ;; Temporary debug provenance bridge: the id is now a committed
+                ;; candidate owned by this allocation, never a caller premint.
+                :seon.db/opts {:tx-meta {:seon.db/turn-id turn-id}}})
+             :seon.db/conn conn}))]
+    (if (false? (:seon.db/ok? allocation))
+      allocation
+      (let [turn-id (get-in allocation [::db.id/ids ::turn-allocation])]
+        (await
+          (db/with-tx-context
+            {:seon.db/turn-id turn-id}
+            (fn ^:async close-allocated-turn! []
+              (await (close-turn! id turn-id body-fn)))))))))
 
 (defn ^:async ^:private close-turn!
-  "Internal — the body of `open-turn!` after the open-tx succeeded. await
-   body-fn, close the turn `:status :done` on success, flip it to `:error` on
-   throw (then re-throw so the loop sees the failure). Touches ONLY the turn
-   status; the agent's derived state follows its RUN, never the turn."
+  "Close an allocated turn while retaining its committed identity.
+
+   Invokes `body-fn` with the committed turn id, closes `:done` on success,
+   and marks `:error` when the body throws. A body failure is rethrown as an
+   ex-info whose data carries `:seon.agent.turn/id`, preserving the historical
+   rejection contract while making the already-committed row discoverable.
+   Allocation failure is handled before this function."
   [id id-of-turn body-fn]
   (try
-    (let [result (await (body-fn))
+    (let [result (assoc (or (await (body-fn id-of-turn)) {})
+                        :seon.agent.turn/id id-of-turn)
           close  (await
                    (db/transact!
                      {:seon.db/tx-data
@@ -304,16 +331,23 @@
                id " turn " id-of-turn ". " (pr-str (:seon.db/error close)))))
       result)
     (catch :default e
-      ;; Mark the turn :error (best-effort) and re-throw. The agent's state
-      ;; is the loop's concern — its catch/finally resets to :idle.
-      (try
-        (await (db/transact!
-                 {:seon.db/tx-data
-                  [{:seon.agent.turn/id     id-of-turn
+      ;; Mark the turn :error best-effort, then preserve the pre-allocation
+      ;; propagation contract. Scheduled/direct callers still observe a
+      ;; rejected Promise; the committed id travels with that rejection.
+      (let [message (turn-error-str e)]
+        (try
+          (await (db/transact!
+                   {:seon.db/tx-data
+                    [{:seon.agent.turn/id     id-of-turn
+                      :seon.agent.turn/status :error
+                      :seon.agent.turn/error  message}]}))
+          (catch :default _ nil))
+        (throw
+          (ex-info message
+                   {:seon.agent.turn/id     id-of-turn
                     :seon.agent.turn/status :error
-                    :seon.agent.turn/error  (turn-error-str e)}]}))
-        (catch :default _ nil))
-      (throw e))))
+                    :seon.error/data        message}
+                   e))))))
 
 ;; ============================================================
 ;; The LLM call + eval. ask-and-eval-reply! parses the reply and
@@ -559,7 +593,8 @@
    the per-form txs inside `eval-batch!`) auto-tags with the causality
    bundle. Returns the closed turn entity pulled with evals inlined, plus
    `:seon.agent/eval-count`. On catastrophic error returns
-   `{:seon.agent.turn/status :error :seon.error/data <str>}`."
+   `{:seon.agent.turn/status :error :seon.error/data <str>}` and retains
+   `:seon.agent.turn/id` when the turn row was already committed."
   {:malli/schema [:=> [:catn [:input :map]] :map]}
   [{:seon.agent/keys [id llm-fn compile-state] run-id :seon.agent.run/id db :seon.db/db}]
   (let [db         (or db @db/*conn*)
@@ -567,7 +602,6 @@
         ;; the SAME frozen db the prompt renders from — the turn loop never
         ;; reads the config accessor.
         stream?    (= :stream (ctx/repl-mode db))
-        turn-id    (db/new-id!)
         turn-idx   (turn-index id)
         prompt     (render-prompt id db)
         full-prompt (ai/debug-full-prompt {:seon.ai/ctx prompt})
@@ -587,35 +621,39 @@
     ;; adapter's system message, so it is reported as its own count here
     ;; (repl-milestone rung-0 defect: the old line silently under-reported the fixed
     ;; prefix by the system prompt's size).
-    (log id turn-idx "open" turn-id "+" (tokens/estimate prompt) "ctx-tokens"
-         "+" (tokens/estimate (ai/effective-system-prompt {})) "system-tokens")
     (try
       (let [result (await
                      (db/with-agent id
                        (fn []
                          (db/with-tx-context
                            {:seon.db/agent-id   id
-                            :seon.db/turn-id    turn-id
                             :seon.db/origin     :system}
                            (fn []
                              (open-turn!
                                (cond->
                                  {:seon.agent/id           id
                                   :seon.agent.run/id-of-run run-id
-                                  :seon.agent.turn/id-of-turn    turn-id
                                   :seon.agent.turn/prompt-text   full-prompt
                                   :seon.agent.turn/rendered-as-of rendered-as-of}
                                  prompt-blob
                                  (assoc :seon.agent.turn/prompt-blob prompt-blob))
-                               #(ask-and-eval! {:seon.agent/id            id
-                                                :seon.agent/llm-fn        llm-fn
-                                                :seon.agent/compile-state compile-state
-                                                :seon.agent.run/id        run-id
-                                                :seon.ai/stream?          stream?
-                                                :seon.eval/start-ns       start-ns
-                                                :seon.agent.turn/id-of-turn     turn-id
-                                                :seon.agent.turn/turn-idx       turn-idx
-                                                :seon.agent.turn/prompt-text    prompt})))))))]
+                               (fn ^:async run-allocated-turn! [turn-id]
+                                 (log id turn-idx "open" turn-id "+"
+                                      (tokens/estimate prompt) "ctx-tokens" "+"
+                                      (tokens/estimate
+                                        (ai/effective-system-prompt {}))
+                                      "system-tokens")
+                                 (await
+                                   (ask-and-eval!
+                                     {:seon.agent/id            id
+                                      :seon.agent/llm-fn        llm-fn
+                                      :seon.agent/compile-state compile-state
+                                      :seon.agent.run/id        run-id
+                                      :seon.ai/stream?          stream?
+                                      :seon.eval/start-ns       start-ns
+                                      :seon.agent.turn/id-of-turn turn-id
+                                      :seon.agent.turn/turn-idx turn-idx
+                                      :seon.agent.turn/prompt-text prompt})))))))))]
         (if (false? (:seon.db/ok? result))
           ;; The open-tx FAILED — there is NO turn entity to pull (the
           ;; lookup-ref is unresolvable). Return the same `:error` shape the
@@ -627,7 +665,8 @@
                    (pr-str (:seon.db/error result)))
               {:seon.agent.turn/status :error
                :seon.error/data        (pr-str (:seon.db/error result))})
-          (let [n-ok (or (:seon.agent/eval-count result) 0)]
+          (let [turn-id (:seon.agent.turn/id result)
+                n-ok (or (:seon.agent/eval-count result) 0)]
             (log id turn-idx (name (or (:seon.agent.turn/status result) :done)) n-ok
                  (if (:seon.agent.turn/status result) "llm-error" "ok"))
             (assoc (db/pull {:seon.db/pull-pattern
@@ -637,6 +676,10 @@
       (catch :default e
         ;; Catastrophic turn failure → return the :error shape. State is the
         ;; loop's concern (its finally resets :idle); the turn never touches it.
-        (log id turn-idx "run-turn! error" (str e))
-        {:seon.agent.turn/status :error
-         :seon.error/data (str e)}))))
+        ;; A body failure carries the identity already committed by open-turn!.
+        (let [failure-data (ex-data e)
+              turn-id     (:seon.agent.turn/id failure-data)]
+          (log id turn-idx "run-turn! error" (str e))
+          (cond-> {:seon.agent.turn/status :error
+                   :seon.error/data        (str e)}
+            turn-id (assoc :seon.agent.turn/id turn-id)))))))

@@ -572,7 +572,6 @@
         (fn ^:async run-scheduled! []
           (when-let [cur (run/current-run {:seon.agent/id id})]
             (let [run-id  (:seon.agent.run/id cur)
-                  turn-id (db/new-id!)
                   source  (str/join "\n"
                             (map (fn [s]
                                    (str ";; schedule fired — running " s "\n(" s ")"))
@@ -580,17 +579,15 @@
               (await
                 (db/with-tx-context
                   {:seon.db/agent-id id
-                   :seon.db/turn-id  turn-id
                    :seon.db/origin   :system}
                   (fn ^:async open-scheduled-turn! []
                     (await
                       (turn/open-turn!
                         {:seon.agent/id               id
                          :seon.agent.run/id-of-run    run-id
-                         :seon.agent.turn/id-of-turn  turn-id
                          :seon.agent.turn/scheduled?  true
                          :seon.agent.turn/prompt-text ""}
-                        (fn ^:async eval-scheduled! []
+                        (fn ^:async eval-scheduled! [turn-id]
                           (await (seval/eval-batch!
                                    compile-state
                                    (repl-internal/parse-forms source)

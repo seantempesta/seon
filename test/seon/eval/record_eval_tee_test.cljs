@@ -30,9 +30,12 @@
     [clojure.string :as str]
     [datahike.api :as d]
     [seon.agent]                          ; :seon.eval/:seon.agent.turn/:seon.ns/:seon.schema registrations
+    [seon.agent.turn :as turn]
     [seon.analyzer-info :as analyzer-info]
     [seon.client :as client]
     [seon.db :as db]
+    [seon.db.id :as db.id]
+    [seon.db.internal :as db.internal]
     [seon.eval :as seval]
     [seon.repl :as repl]
     [seon.repl.internal :as repl-internal]
@@ -64,21 +67,54 @@
              :schema-flexibility :write
              :keep-history?      true}]
     (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then (fn [_]
+                 (d/connect (db.id/allocation-connect-config cfg)
+                            {:sync? false})))
         (.then (fn [conn]
                  (-> (d/transact!
                        conn
-                       {:tx-data (db/malli->datahike-schema
-                                   client/agent-bootstrap-attrs)})
+                       {:tx-data (into
+                                   (db/malli->datahike-schema
+                                     client/agent-bootstrap-attrs)
+                                   (db/tx-meta-datahike-schema))})
                      (.then (fn [_] conn))))))))
 
 (defn- record!
-  "Call record-eval! against `conn` with `db/*conn*` bound for the SYNC
-   extent (record-eval! captures the conn at entry, so the binding only
-   needs to cover the synchronous prefix). Returns record-eval!'s Promise."
+  "Open a committed parent turn, then record one eval against `conn`."
   [conn args]
-  (binding [db/*conn* conn]
-    (seval/record-eval! args)))
+  (let [previous db/*conn*]
+    (set! db/*conn* conn)
+    (-> (turn/open-turn!
+          {:seon.agent/id "root"
+           :seon.agent.turn/prompt-text "record-eval fixture"}
+          (fn ^:async record-in-committed-turn! [turn-id]
+            (await
+              (seval/record-eval!
+                (assoc args :seon.agent.turn/id-of-turn turn-id)))))
+        (.finally (fn [] (set! db/*conn* previous))))))
+
+(defn- candidate-conflict
+  "The writer envelope for an exact allocator-owned candidate conflict."
+  [candidate]
+  {:seon.db/ok? false
+   :seon.db/error
+   {:seon.error/message "generated candidate conflict"
+    :seon.error/kind :user-input
+    :seon.error/data
+    {::db.id/error :seon.db.id.error/candidate-conflict
+     ::db.id/generated-candidate candidate}}})
+
+(defn- with-transact-wrapper
+  "Keep one test transaction wrapper installed until an async body settles."
+  [wrapper body]
+  (let [original db.internal/transact!*]
+    (set! db.internal/transact!* (wrapper original))
+    (try
+      (-> (js/Promise.resolve (body))
+          (.finally (fn [] (set! db.internal/transact!* original))))
+      (catch :default e
+        (set! db.internal/transact!* original)
+        (js/Promise.reject e)))))
 
 (defn- schema-tee-row
   "The exact `:seon.schema` tee shape build-tee-entities emits for a
@@ -90,16 +126,97 @@
    :seon.schema/created-at (js/Date.)})
 
 (defn- eval-args
-  [eval-id turn-id source tee]
-  {:seon.eval/id-of-eval       eval-id
-   :seon.agent.turn/id-of-turn turn-id
-   :seon.eval/at               (js/Date.)
+  [source tee]
+  {:seon.eval/at               (js/Date.)
    :seon.eval/duration-ms      1
    :seon.eval/narration        ""
    :seon.eval/source           source
    :seon.eval/ending-ns        'cljs.user
    :seon.eval/result           {:seon.eval/ok? true :seon.eval/value :ok}
    :seon.eval/tee              tee})
+
+(deftest eval-body-runs-once-when-identity-allocation-retries
+  (async done
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!)
+                             (client/open-agent-conn!)])
+        (.then
+          (fn [values]
+            (let [compile-state (aget values 0)
+                  conn          (aget values 1)
+                  previous      db/*conn*
+                  agent-id      "eval-collision-test"
+                  !attempts     (atom 0)
+                  !conflicted   (atom nil)
+                  source
+                  (str "(do "
+                       "(set! (.-seonEvalCollisionCount js/globalThis) "
+                       "      (inc (.-seonEvalCollisionCount js/globalThis))) "
+                       "(.-seonEvalCollisionCount js/globalThis))")]
+              (set! db/*conn* conn)
+              (set! (.-seonEvalCollisionCount js/globalThis) 0)
+              (-> (turn/open-turn!
+                    {:seon.agent/id agent-id
+                     :seon.agent.turn/prompt-text "allocation retry probe"}
+                    (fn [turn-id]
+                      (with-transact-wrapper
+                        (fn [original]
+                          (fn [request]
+                            (if-let [manifest (::db.id/generated-candidates
+                                                request)]
+                              (let [candidate (first manifest)
+                                    conflicted @!conflicted]
+                                (swap! !attempts inc)
+                                ;; Force the first candidate to conflict. If a
+                                ;; package repeats it, keep reporting the same
+                                ;; exact collision until it proposes a new one.
+                                (if (or (nil? conflicted)
+                                        (= conflicted candidate))
+                                  (do
+                                    (when (nil? conflicted)
+                                      (reset! !conflicted candidate))
+                                    (js/Promise.resolve
+                                      (candidate-conflict candidate)))
+                                  (original request)))
+                              (original request))))
+                        (fn []
+                          (seval/eval-batch!
+                            compile-state
+                            (repl-internal/parse-forms source)
+                            'cljs.user
+                            agent-id
+                            turn-id
+                            nil)))))
+                  (.then
+                    (fn [batch]
+                      (let [turn-id (:seon.agent.turn/id batch)
+                            eval-id (first (:seon.eval/ids batch))
+                            rows
+                            (d/q '[:find ?id
+                                   :in $ ?turn-id
+                                   :where
+                                   [?turn :seon.agent.turn/id ?turn-id]
+                                   [?turn :seon.agent.turn/evals ?eval]
+                                   [?eval :seon.eval/id ?id]]
+                                 @conn turn-id)]
+                        (testing "only persistence retried"
+                          (is (> @!attempts 1))
+                          (is (map? @!conflicted))
+                          (is (not= (::db.id/value @!conflicted) eval-id)))
+                        (testing "the agent form itself executed exactly once"
+                          (is (= 1 (.-seonEvalCollisionCount js/globalThis)))
+                          (is (= 1 (:seon.eval/n-ok batch)))
+                          (is (= 0 (:seon.eval/n-fail batch))))
+                        (testing "one committed identity names one durable eval"
+                          (is (= [eval-id] (:seon.eval/ids batch)))
+                          (is (= #{[eval-id]} rows))))))
+                  (.finally
+                    (fn []
+                      (js-delete js/globalThis "seonEvalCollisionCount")
+                      (set! db/*conn* previous)))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e]
+                  (is false (str "threw — " e))
+                  (done))))))
 
 ;; ---------------------------------------------------------------------------
 ;; THE fix, half (a): a data-namespace schema registration tees in the SAME
@@ -112,14 +229,13 @@
     (-> (fresh-conn)
         (.then
           (fn [conn]
-            (let [eval-id (db/new-id!)
-                  turn-id (db/new-id!)
-                  src     "(seon.schema/register! :probe.dom/dur-secs :int)"
+            (let [src     "(seon.schema/register! :probe.dom/dur-secs :int)"
                   tee     [(schema-tee-row :probe.dom/dur-secs src)]]
-              (-> (record! conn (eval-args eval-id turn-id src tee))
+              (-> (record! conn (eval-args src tee))
                   (.then
-                    (fn [_]
-                      (let [db* @conn]
+                    (fn [recorded]
+                      (let [db* @conn
+                            eval-id (:seon.eval/id recorded)]
                         (testing "the :seon.eval row survived"
                           (is (= #{[eval-id true]}
                                  (d/q '[:find ?id ?ok :in $ ?id
@@ -133,6 +249,16 @@
                                                [?s :seon.schema/ns ?n]
                                                [?n :seon.ns/name ?nm]]
                                       db*))))
+                        (testing "eval identity, turn link, and tee share one tx"
+                          (let [[eval-tx link-tx tee-tx]
+                                (d/q '[:find [?eval-tx ?link-tx ?tee-tx]
+                                       :in $ ?id ?key
+                                       :where
+                                       [?eval :seon.eval/id ?id ?eval-tx]
+                                       [?turn :seon.agent.turn/evals ?eval ?link-tx]
+                                       [?schema :seon.schema/key ?key ?tee-tx]]
+                                     db* eval-id :probe.dom/dur-secs)]
+                            (is (= eval-tx link-tx tee-tx))))
                         (testing "exactly one :seon.ns entity for the data ns"
                           (is (= [[1]]
                                  (d/q '[:find (count ?n)
@@ -161,8 +287,7 @@
                     (is (:seon.db/ok? seed-r) "ns seed tx ok")
                     (let [src "(seon.schema/register! :probe.code/x :int)"
                           tee [(schema-tee-row :probe.code/x src)]]
-                      (record! conn (eval-args (db/new-id!) (db/new-id!)
-                                               src tee)))))
+                      (record! conn (eval-args src tee)))))
                 (.then
                   (fn [_]
                     (let [db* @conn]
@@ -193,8 +318,7 @@
     (-> (fresh-conn)
         (.then
           (fn [conn]
-            (let [eval-id (db/new-id!)
-                  src     "(whatever)"
+            (let [src     "(whatever)"
                   bad-tee [{:seon.schema/key        :no.such.ns/attr
                             ;; deliberately the OLD broken shape: lookup-ref
                             ;; to a :seon.ns that doesn't exist → datahike
@@ -202,10 +326,11 @@
                             :seon.schema/ns         [:seon.ns/name :no.such.ns]
                             :seon.schema/source     src
                             :seon.schema/created-at (js/Date.)}]]
-              (-> (record! conn (eval-args eval-id (db/new-id!) src bad-tee))
+              (-> (record! conn (eval-args src bad-tee))
                   (.then
-                    (fn [_]
-                      (let [db* @conn]
+                    (fn [recorded]
+                      (let [db* @conn
+                            eval-id (:seon.eval/id recorded)]
                         (testing "the eval row SURVIVED the failing tee"
                           (is (= #{[eval-id]}
                                  (d/q '[:find ?id :in $ ?id
@@ -233,13 +358,14 @@
     (-> (fresh-conn)
         (.then
           (fn [conn]
-            (let [eval-id (db/new-id!)]
+            (let [source nil]
               ;; nil source + empty tee = the "bare eval row, no tee rows to
               ;; drop" path that silently dropped rows pre-fix.
-              (-> (record! conn (eval-args eval-id (db/new-id!) nil []))
+              (-> (record! conn (eval-args source []))
                   (.then
-                    (fn [_]
-                      (let [db* @conn]
+                    (fn [recorded]
+                      (let [db* @conn
+                            eval-id (:seon.eval/id recorded)]
                         (testing "the eval row landed despite a nil source"
                           (is (= #{[eval-id ""]}
                                  (d/q '[:find ?id ?src :in $ ?id
@@ -261,18 +387,18 @@
     (-> (fresh-conn)
         (.then
           (fn [conn]
-            (let [eval-id (db/new-id!)
-                  src     "(whatever)"
+            (let [src     "(whatever)"
                   bad-tee [{:seon.schema/key        :no.such.ns/attr2
                             ;; the OLD broken lookup-ref shape — guaranteed
                             ;; tee tx failure, fires the recovery path.
                             :seon.schema/ns         [:seon.ns/name :no.such.ns]
                             :seon.schema/source     src
                             :seon.schema/created-at (js/Date.)}]]
-              (-> (record! conn (eval-args eval-id (db/new-id!) src bad-tee))
+              (-> (record! conn (eval-args src bad-tee))
                   (.then
-                    (fn [_]
-                      (let [db* @conn
+                    (fn [recorded]
+                      (let [eval-id (:seon.eval/id recorded)
+                            db* @conn
                             err (ffirst
                                   (d/q '[:find ?err :in $ ?id
                                          :where [?e :seon.eval/id ?id]
@@ -354,8 +480,8 @@
                       (-> (fresh-conn)
                           (.then
                             (fn [conn]
-                              (-> (record! conn (eval-args (db/new-id!) (db/new-id!)
-                                                           (:seon.test/source row) tee))
+                              (-> (record! conn (eval-args
+                                                 (:seon.test/source row) tee))
                                   (.then
                                     (fn [_]
                                       (testing ":seon.test row EXISTS after record-eval!"
@@ -411,8 +537,8 @@
 (deftest failed-body-defn-then-same-signature-retry-tees
   (async done
     ;; open-agent-conn! (NOT fresh-conn): eval-batch! opens a tx-context with
-    ;; the causality bundle (:seon.db/agent-id/eval-id/origin), so record-eval!
-    ;; auto-tags the tx with those tx-meta attrs — they must be in the conn's
+    ;; the agent/process causality bundle, so record-eval! auto-tags the tx
+    ;; with those tx-meta attrs — they must be in the conn's
     ;; schema. open-agent-conn! installs pod-full-schema (entity + tx-meta);
     ;; fresh-conn here installs only entity attrs.
     (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
@@ -431,7 +557,7 @@
                   ;; exercising eval-form-entry!'s failure-path cleanup wiring.
                   batch (fn [src] (seval/eval-batch! cs (repl-internal/parse-forms src)
                                                      (symbol uniq) "tee-retry-test"
-                                                     (db/new-id!) nil))]
+                                                     "turnteertry1" nil))]
               ;; set! (not binding) so *conn* spans the async eval-batch!
               ;; internals (record-eval! reads it post-await), mirroring how
               ;; the live pod root-set!s the conn. Restored in .finally.
@@ -464,9 +590,9 @@
 ;; registry entry), and a subsequent SUCCESSFUL register! of the same key
 ;; tees normally.
 ;;
-;; Mechanism: `register!`'s self-tee DEFERS its DB write when a `:seon.db/
-;; eval-id` is in the tx-context (every eval-batch! per-form scope), because
-;; the GATED detect-and-tee (build-tee-entities in record-eval!) owns the
+;; Mechanism: `register!`'s self-tee DEFERS its DB write inside the private
+;; eval record boundary (every eval-batch! per-form scope), because the
+;; GATED detect-and-tee (build-tee-entities in record-eval!) owns the
 ;; :seon.schema row and writes it ONLY on success. On the failure path
 ;; eval-form-entry! also calls `schema/discard-registrations!` over the form's
 ;; newly-registered keys, the schema analog of remove-phantom-defs!. Without
@@ -496,7 +622,7 @@
                   reg?  (fn [] (contains? (schema/current-keys) attr))
                   batch (fn [src] (seval/eval-batch! cs (repl-internal/parse-forms src)
                                                      (symbol uniq) "tee39-test"
-                                                     (db/new-id!) nil))
+                                                     "turntee39001" nil))
                   ;; the failed form: register! RUNS, then a deliberate throw
                   ;; fails the whole `do` (errors-are-values → :ok false).
                   fail-src (str "(do (seon.schema/register! " attr " :int)"
@@ -643,15 +769,15 @@
                         (is (str/starts-with? (str/trim (:seon.schema/source row)) "(")))
                       ;; And it LANDS: the whole tee (entity row included)
                       ;; transacts with the eval row — no recovery path.
-                      (let [eval-id (db/new-id!)]
-                        (-> (fresh-conn)
+                      (-> (fresh-conn)
                             (.then
                               (fn [conn]
-                                (-> (record! conn (eval-args eval-id (db/new-id!)
-                                                             (:seon.schema/source row) tee))
+                                (-> (record! conn (eval-args
+                                                   (:seon.schema/source row) tee))
                                     (.then
-                                      (fn [_]
-                                        (let [db* @conn]
+                                      (fn [recorded]
+                                        (let [eval-id (:seon.eval/id recorded)
+                                              db* @conn]
                                           (testing "tee row present in the store"
                                             (is (= #{[:probe.garden.plant]}
                                                    (d/q '[:find ?k :in $ ?k
@@ -662,7 +788,7 @@
                                                    (d/q '[:find ?err :in $ ?id
                                                           :where [?e :seon.eval/id ?id]
                                                                  [?e :seon.eval/record-error ?err]]
-                                                        db* eval-id))))))))))))))))))
+                                                        db* eval-id)))))))))))))))))
         (.then (fn [_]
                  (unregister! :probe.garden.plant/id :probe.garden.plant)
                  (done)))
@@ -737,8 +863,7 @@
                   (.then
                     (fn [tee]
                       (-> (or @schema/!last-tee (js/Promise.resolve nil))
-                          (.then (fn [_] (record! conn (eval-args (db/new-id!) (db/new-id!)
-                                                                  src tee)))))))
+                          (.then (fn [_] (record! conn (eval-args src tee)))))))
                   (.then
                     (fn [_]
                       (testing "exactly ONE :seon.schema row — self-tee + eval tee upsert, never duplicate"
@@ -1006,7 +1131,7 @@
                   fq    (str uniq "/watcher")
                   batch (fn [src] (seval/eval-batch! cs (repl-internal/parse-forms src)
                                                      (symbol uniq) "tee-edge-test"
-                                                     (db/new-id!) nil))
+                                                     "turnteeedge1" nil))
                   read-attrs (fn [] (set (:seon.fn/read-attrs
                                            (db/pull @conn [:seon.fn/read-attrs]
                                                     [:seon.fn/sym fq]))))]
@@ -1196,7 +1321,7 @@
                   fq    (str uniq "/kw-user")
                   batch (fn [src] (seval/eval-batch! cs (repl-internal/parse-forms src)
                                                      (symbol uniq) "tee-autokw-test"
-                                                     (db/new-id!) nil))
+                                                     "turnautokw01" nil))
                   fn-row (fn [] (db/pull @conn [:seon.fn/sym :seon.fn/source
                                                 :seon.fn/read-attrs]
                                          [:seon.fn/sym fq]))]
