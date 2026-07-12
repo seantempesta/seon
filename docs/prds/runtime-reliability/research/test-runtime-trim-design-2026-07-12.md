@@ -6,6 +6,15 @@ tags: [research, prd, flow, agent]
 
 # CLJS test-runtime trim design (2026-07-12)
 
+> **Owner correction, later 2026-07-12:** `seon.gym` is a retirement target,
+> not a refactoring target. It will be replaced by Inspect AI or another
+> reviewed external harness. Do not implement the proposed pure gym seams or
+> structured gym-result expansion below. The measured 24-seed repetition,
+> immutable-DB test support, assertion-quality policy, tiering, and list of
+> unique regressions remain valid evidence. Migrate only unique regressions to
+> their production owners, preserve scenario/evidence data for the selected
+> replacement, then delete the homegrown driver/scorer.
+
 ## TL;DR
 
 The default CLJS gate can lose roughly half its Node runtime without weakening
@@ -16,8 +25,9 @@ wiring, context telemetry, and battery selection. A clean run spent about
 the same full seed twice more to preserve a config/tombstone path the runtime
 reliability design is deleting.
 
-The mechanically safe replacement is not a shared mutable test connection and
-not a cached legacy boot. Split the existing gym pipeline in place into:
+The mechanically safe suite correction is not a shared mutable test connection
+and not a cached legacy boot. The original audit proposed splitting the gym
+pipeline in place into:
 
 - pure scenario validation and selection;
 - pure/mechanical predicate evaluation over an immutable database value;
@@ -34,7 +44,8 @@ mandatory for transaction envelopes, history, listeners, ambient-connection
 behavior, and agent turns. Never turn the cached database value back into a
 writable shared connection.
 
-The default fast gate should run zero `boot-seed!` calls. One cold boot, one
+That in-place gym refactor is superseded by the owner correction above. The
+default fast gate should still run zero `boot-seed!` calls. One cold boot, one
 warm mint/resume, and one representative scripted agent journey belong in the
 runtime acceptance tier. Once the canonical Datahike branch lifecycle lands,
 the acceptance harness may seed one scratch base and create isolated writable

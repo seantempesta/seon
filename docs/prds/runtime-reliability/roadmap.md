@@ -143,12 +143,13 @@ its complete asynchronous span.
 
 The test-runtime trim design identifies 24 full cluster seeds in the gym driver
 namespace and two obsolete reconciler seeds. Gym alone accounts for roughly
-half the Node gate. The ordered correction extracts pure predicate/scorecard
-seams in the existing driver, uses immutable Datahike values for read-only
-behavior, retains fresh connections for transactional semantics, and moves only
-true system journeys to runtime/process acceptance. It explicitly preserves
-machine grammar while replacing presentation-text assertions with facts,
-relationships, bounds, and structured errors.
+half the Node gate. The owner subsequently marked the homegrown gym for
+replacement, possibly by Inspect AI, so no new predicate/scorer architecture
+will be built into it. Unique regressions move to their production owners,
+scenario/evidence data remains available for the selected external harness, and
+the old driver/scorer leaves the default gate and is deleted. The independent
+immutable-Datahike test support, test tiers, and presentation-text cleanup still
+apply.
 
 - Capture cold boot, converged restart, five sequential mints, one concurrent
   mint attempt, core reload, and config apply timings.
