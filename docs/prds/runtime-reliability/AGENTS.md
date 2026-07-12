@@ -134,7 +134,10 @@ target semantics and are not available until Phase 5 lands.
    lifecycle.
 7. Unify live subscriptions/feeds, add observed-read invalidation, then bound
    legitimate renders.
-8. Run the full cold/restart/agent-workflow/browser/feed/CPU/RSS acceptance
+8. Move unique gym regressions to their subsystem owners, drive the canonical
+   restart/planning and store/retrieve journeys through Inspect AI, and delete
+   the homegrown gym atomically.
+9. Run the full cold/restart/agent-workflow/browser/feed/CPU/RSS acceptance
    matrix and graduate the PRD.
 
 ## Entry points
@@ -161,6 +164,9 @@ target semantics and are not available until Phase 5 lands.
   repetition, immutable-DB test seams, behavioral assertion policy, and the
   fast/runtime/process suite cutover. Its proposed gym refactor is superseded:
   gym is being replaced, not rebuilt.
+- [[research/evaluation-harness-replacement-2026-07-12]] — why the existing
+  Inspect AI integration is the one replacement control plane, which gym
+  evidence moves to subsystem tests, and the atomic retirement sequence.
 - [[docs/seon/architecture/agent-runtime]], [[docs/seon/architecture/data-model]],
   and [[docs/seon/architecture/ui]] — ideal system docs to keep current.
 - `src/seon/client.cljs`, `src/seon/state.cljs`, `src/seon/db.cljs`,

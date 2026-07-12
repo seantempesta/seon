@@ -99,17 +99,22 @@ key without first querying its eid.
 makes the entity upsertable by that value: transacting a map carrying the
 identity attr MERGES into the existing entity rather than creating a new one —
 this is how "redefine = upsert" works for program definitions and how exact
-reconciliation applies known identities. Generated creation deliberately does
-not use that path: `seon.db.id/allocate!` asserts the candidate on a concrete
-fresh eid so a collision aborts instead of mutating an existing agent/entity.
+reconciliation applies known identities. Generated creation deliberately
+guards that path: inside the serialized writer, `seon.db.id/allocate!` checks
+the exact old database and incoming transaction for every identity that could
+resolve the candidate entity, injects an allocator-owned tempid, and returns
+the final eid only from Datahike's committed transaction report. A generated
+collision therefore retries without mutating an existing agent/entity.
 
-The broad transport schema `:seon.db/id` accepts exact legacy, word, compact,
+The broad transport schema `:seon.db/id` accepts the complete legacy value
+domain (every 14-character string admitted by the old schema), word, compact,
 and reserved-root syntax so old facts and generic envelopes remain readable.
 Persisted identity attributes use narrower named value schemas:
 `:seon.db.id/agent-value` accepts only `root`, legacy, or word syntax;
 `:seon.db.id/compact-value` accepts only legacy or compact syntax. Generator
-metadata selects output, while these value schemas reject an explicit write in
-the wrong grammar.
+metadata selects output. The narrow schemas reject new wrong-grammar writes
+except where a value necessarily overlaps the durable 14-character legacy
+domain; generated package output is checked against the exact new grammar.
 
 | identity attr | malli shape | datahike valueType | role |
 |---|---|---|---|
@@ -137,13 +142,21 @@ registered `:seon.db.id/generator` metadata, privately adapts the platform
 package, and commits the complete candidate-dependent domain transaction before
 returning an id. Only `:seon.agent/id` may register the human-readable policy;
 all other generated persistent identities register compact. A matching
-Datahike uniqueness conflict rebuilds and retries the whole transaction within
-the fixed bound; reconciliation of known ids is a separate intentional-upsert
-operation. Existing ids are never rewritten merely to change representation.
-Immediately before commit, the serialized writer also performs indexed lookups
-for each candidate across every registered generator-managed identity attr in
-that logical database/branch. This supplies global generated-value uniqueness
-without storing a global identity entity; lookup refs remain attribute-qualified.
+structured Datahike `:transact/unique` or `:transact/upsert`
+conflict rebuilds and retries the whole transaction within the fixed bound;
+reconciliation of known ids is a separate intentional-upsert operation.
+Existing ids are never rewritten merely to change representation.
+Inside the writer operation, the canonical preparer performs indexed lookups
+for each candidate across every registered generator-managed identity attr and
+scans incoming identity assertions. It injects allocator-owned tempids and
+resolves final eids from Datahike's committed report. Local connections name
+the durable `:seon.db.id.writer/serialized` backend; its runtime multimethod
+delegates to Datahike's self writer with the private transaction operation in
+memory. No function enters the database config that Datahike persists on each
+commit. The JVM wire registry uses that same backend, so local and remote
+allocations run against the writer-supplied old database without another lock
+or transaction path. This supplies global generated-value uniqueness without
+storing a global identity entity; lookup refs remain attribute-qualified.
 `:seon.agent.ctx/name` is NOT an identity (see §4.2): it is a plain `:keyword`, a
 per-agent upsert key, not a global identity.
 

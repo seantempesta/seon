@@ -31,6 +31,7 @@
    and the platform-review hook-mechanism section."
   (:require [clojure.set :as set]
             [datahike.api :as d]
+            [seon.db.id :as id]
             [seon.schema :as schema]
             [seon.server.store :as store]
             [taoensso.timbre :as log]))
@@ -237,7 +238,8 @@
       (store/ensure-parent-dir! {:seon.server.store/path store-path}))
     (when-not (d/database-exists? cfg)
       (d/create-database cfg))
-    (let [conn (d/connect cfg)]
+    (let [conn (d/connect (id/allocation-connect-config cfg))]
+      (id/assert-allocation-writer! conn)
       (cond-> {::conn conn
                ::backend backend}
         store-path (assoc ::path store-path)))))
@@ -408,7 +410,8 @@
    as a throw instead of later inside the fork pod. Throws on failure;
    the caller deletes the torn target and retries once."
   [cfg at]
-  (let [conn (d/connect cfg)]
+  (let [conn (d/connect (id/allocation-connect-config cfg))]
+    (id/assert-allocation-writer! conn)
     (try
       (let [db (d/db conn)
             bt (:max-tx db)]

@@ -198,16 +198,17 @@ grammar.
   `io.github.thibaultmeyer:cuid` 2.0.5 for every other
   actual generated persistent identity. Put JVM deps in `deps.edn`, Node deps in
   `package.json`, and keep adapter differences private in the one `.cljc` file.
-- Reserve `root`; accept exact legacy values without rewriting; remove time from
-  newly generated values and project creation time from the identity datom's
-  transaction.
+- Reserve `root`; preserve every 14-character value the old schema admitted
+  without rewriting; remove time from newly generated values and project
+  creation time from the identity datom's transaction.
 - Replace the query-then-entity-map `new-id!` path with `allocate!`: declarations
   name identity attributes, registered metadata chooses the adapter, and a pure
   builder receives candidates and produces the complete normal transaction.
 - Extend the existing wire transaction/result shape with a generated-candidate
-  manifest and structured Datahike uniqueness details. The JVM writer assigns
-  concrete fresh eids so collisions raise `:transact/unique` rather than
-  upserting.
+  manifest and structured Datahike uniqueness details. Inside the serialized
+  writer operation, the canonical CLJC preparer injects collision-free tempids;
+  Datahike assigns final eids and the adapter resolves them from the committed
+  transaction report.
 - Retry only when the normalized error attribute and attempted value exactly
   match the generated manifest. Rebuild the whole candidate-dependent
   transaction on each attempt; after sixteen rounds return a namespaced
@@ -215,8 +216,14 @@ grammar.
   retry.
 - At the serialized writer, preflight each candidate through indexed AVET
   lookups over the registry-derived set of all generator-managed identity attrs
-  and reject duplicate candidates inside the request. A hit is a matching
-  generated-candidate conflict and retries; it stores no global id entity.
+  and scan the incoming transaction for cross-attribute reuse. Reject duplicate
+  candidates and any existing identity that would silently upsert a candidate
+  entity. A generated-value hit is a matching candidate conflict and retries;
+  it stores no global id entity. Local and JVM wire-registry connections name
+  the fully namespaced `:seon.db.id.writer/serialized` backend. Its runtime
+  multimethod installs the private operation in Datahike's self writer while
+  the persisted config contains only the keyword, so there is no
+  client-side query-then-transact path or unserializable live function.
 - Gate creation of generator-managed identity attributes through `allocate!`;
   known-id exact reconciliation remains a separate intentional-upsert path.
   This is a consistency boundary, not an authorization system.
@@ -765,7 +772,40 @@ by whole views; no SCI budget increase masks unbounded work.
 
 Commit: bounded render/read paths and profiling evidence.
 
-## Phase 14 — system acceptance and graduation
+## Phase 14 — replace the homegrown gym with Inspect AI
+
+Retire the duplicate evaluation lifecycle after the runtime, coordinates, and
+restore surfaces it must drive are stable. The existing `src-inspect-ai/`
+integration is the only evaluation control plane; Harbor remains an optional
+upstream source of containerized benchmark tasks, not a second Seon harness.
+
+- Inventory every gym assertion and classify it as a production subsystem
+  regression, an end-to-end agent journey, presentation-only text, or obsolete
+  duplicate coverage.
+- Move unique deterministic regressions to the owning subsystem tests. Keep
+  those tests behavioral: assert datoms, state transitions, process survival,
+  and rendered structure rather than exact model prose.
+- Express the first two Inspect journeys through Seon's public operator surface:
+  a multi-step plan that resumes after a pod restart, and schema-backed facts
+  stored in one turn then queried in a later turn.
+- Make Inspect consume structured run evidence from the database and blob
+  archive. Do not teach a scorer to scrape the transcript or duplicate Seon's
+  lifecycle in Python.
+- Replace the homegrown scorecard writer with one import/projection of Inspect
+  result facts. Keep raw artifacts outside the hot Datahike graph and persist
+  only the facts needed for comparison and provenance.
+- Remove gym namespaces, drivers, scenarios, scorecards, scripts, and default
+  test discovery in the same commit once the two journeys and migrated
+  regressions are green. No compatibility wrapper remains.
+
+Exit proof: the fast CLJS gate contains the migrated subsystem regressions but
+no gym namespace; Inspect can drive both canonical journeys against a freshly
+started pod and after restart; failures identify a durable run/turn/eval fact;
+and repository search finds no live homegrown gym control path.
+
+Commit: Inspect AI evaluation control plane and atomic gym retirement.
+
+## Phase 15 — system acceptance and graduation
 
 Run from a cold process and a converged restart:
 

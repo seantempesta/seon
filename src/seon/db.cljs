@@ -62,6 +62,7 @@
     [datahike.db.interface :as dbi]
     [datahike.impl.entity :as dentity]
     [seon.config :as config]
+    [seon.db.id]
     [seon.db.internal :as internal]
     [seon.error :as error]
     [seon.schema :as schema]))

@@ -25,6 +25,10 @@
         com.taoensso/timbre {:mvn/version "6.5.0"} ; Logging (app code)
         ch.qos.logback/logback-classic {:mvn/version "1.5.6"} ; SLF4J provider
         tick/tick {:mvn/version "0.7.5"}           ; Time handling
+        ;; Package-owned identity adapters used behind seon.db.id's one
+        ;; reader-conditional allocation contract.
+        com.github.kkuegler/human-readable-ids-java {:mvn/version "0.4"}
+        io.github.thibaultmeyer/cuid {:mvn/version "2.0.5"}
 
         ;; HTTP & JSON
         hato/hato {:mvn/version "1.0.0"}           ; HTTP client

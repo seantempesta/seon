@@ -15,8 +15,8 @@
             [clojure.java.io :as io]
             [datahike.api :as d]
             [konserve-jdbc.core]
+            [seon.db.id :as id]
             [seon.server.codec :as codec]
-            [seon.server.store :as store]
             [seon.server.registry :as registry]
             [seon.server.broadcast :as bcast])
   (:import [java.net StandardProtocolFamily UnixDomainSocketAddress]
@@ -475,34 +475,68 @@
            :seon.store.wire/datoms-retracted  retracted}
     write-id (assoc :seon.store.wire/write-id write-id)))
 
+;; Generated ids use this same transaction operation. The registry configures
+;; Datahike's serialized writer with `seon.db.id`; this handler only forwards
+;; its manifest and translates an exact candidate conflict for the wire.
+
+(defn- generated-candidate-conflict
+  [candidate]
+  (assoc (err "generated-candidate-conflict"
+              "a generated identity candidate is already in use")
+         :seon.store.wire/generated-candidate candidate))
+
 (defmethod handle-op "transact" [conn req]
-  (let [tx         (:seon.store.wire/tx-data req)
-        tx-meta-in (:seon.store.wire/tx-meta req)
-        write-id   (let [r (:seon.store.wire/write-id req)] (when (and r (not= "" r)) r))
-        schema     (schema-of conn)
-        tx0        (coerce-tx-data-for-schema schema tx)
-        ;; Embed-on-write: append :seon/embedding + :seon.embed/source-hash
-        ;; for entities carrying a registered trigger-attr whose composed-doc
-        ;; hash changed. Gemini call happens HERE (request thread, before
-        ;; d/transact), never inside the conn/listener. No-op when no trigger
-        ;; attrs present or no augmenter installed.
-        tx*        (augment-tx conn tx0)
-        ;; Carry the wire write-id through tx-meta so the per-conn
-        ;; ::raw-broadcast listener emits it on the pub event (the listener
-        ;; fires on the writer thread, after this request thread). seed-base-schema!
-        ;; declares the :seon.store.wire/write-id attr so :schema-flexibility
-        ;; :write accepts it.
-        tx-meta*   (cond-> (or tx-meta-in {})
-                     write-id (assoc :seon.store.wire/write-id write-id))
-        report     (if (seq tx-meta*)
-                     (d/transact conn {:tx-data tx* :tx-meta tx-meta*})
-                     (d/transact conn tx*))
-        r          (tx-report->ok-map report write-id)]
-    ;; Broadcast is NOT imperative here anymore: the per-conn
-    ;; `::raw-broadcast` `d/listen!` (installed by the on-ensure-db hook /
-    ;; start-req-server!) fires synchronously on commit and emits the
-    ;; db-name-tagged tx event. See `raw-broadcast-listener-fn`.
-    (ok (ok-response-from-report r))))
+  (let [tx          (:seon.store.wire/tx-data req)
+        tx-meta-in  (:seon.store.wire/tx-meta req)
+        write-id    (let [candidate (:seon.store.wire/write-id req)]
+                      (when (and candidate (not= "" candidate)) candidate))
+        candidates  (:seon.store.wire/generated-candidates req)
+        generated?  (contains? req
+                               :seon.store.wire/generated-candidates)
+        identity-attrs
+        (:seon.store.wire/generated-identity-attrs req)
+        schema      (schema-of conn)
+        tx0         (coerce-tx-data-for-schema schema tx)
+        ;; Embed-on-write happens before the one Datahike transaction. The
+        ;; configured writer owns generated-id preflight and rewrite.
+        tx*         (augment-tx conn tx0)
+        tx-meta*    (cond-> (or tx-meta-in {})
+                      write-id (assoc :seon.store.wire/write-id write-id))
+        transaction (cond-> {:tx-data tx*}
+                      (seq tx-meta*)
+                      (assoc :tx-meta tx-meta*)
+                      generated?
+                      (assoc ::id/generated-candidates candidates
+                             ::id/generated-identity-attrs identity-attrs))]
+    (when generated?
+      (id/assert-allocation-writer! conn))
+    (try
+      (let [report   (d/transact conn transaction)
+            response (ok-response-from-report
+                      (tx-report->ok-map report write-id))
+            generated-eids (::id/generated-eids report)]
+        ;; Broadcast is driven by the per-conn Datahike listener. The custom
+        ;; writer adds generated eids only for allocation-aware transactions.
+        (ok (cond-> response
+              (some? generated-eids)
+              (assoc :seon.store.wire/generated-eids
+                     generated-eids))))
+      (catch Throwable throwable
+        (if generated?
+          (let [classified (id/classify-allocation-error
+                            {::id/generated-candidates candidates
+                             ::id/throwable throwable})]
+            (case (::id/error-status classified)
+              :seon.db.id/candidate-conflict
+              (generated-candidate-conflict
+               (::id/generated-candidate classified))
+
+              :seon.db.id/protocol-error
+              (err "protocol" (::id/message classified))
+
+              :seon.db.id/unrelated
+              (throw throwable)))
+          (throw throwable))))))
 
 (defmethod handle-op "transact-batch" [conn req]
   (let [tx-data-list (vec (:seon.store.wire/tx-data-list req))
@@ -537,24 +571,24 @@
         (let [tx         (nth tx-data-list idx)
               tx-meta-in (some-> tx-meta-list (nth idx nil))
               write-id   (let [r (some-> write-ids (nth idx nil))]
-                           (when (and r (not= "" r)) r))]
-          (let [result (try
-                         {:ok (per-tx-report idx tx tx-meta-in write-id)}
-                         (catch clojure.lang.ExceptionInfo e
-                           {:err {:kind "datahike"
-                                  :msg  (str (.getMessage e) " " (pr-str (ex-data e)))}})
-                         (catch Throwable t
-                           {:err {:kind "internal"
-                                  :msg  (.toString t)}}))]
-            (if-let [ok-rep (:ok result)]
-              (recur (inc idx) (conj! wire-reports ok-rep))
-              (let [{:keys [kind msg]} (:err result)]
-                (ok {:seon.store.wire/reports    (persistent! wire-reports)
-                     :seon.store.wire/applied    idx
-                     :seon.store.wire/total      n
-                     :seon.store.wire/failed-at  idx
-                     :seon.store.wire/error      msg
-                     :seon.store.wire/error-kind kind})))))))))
+                           (when (and r (not= "" r)) r))
+              result     (try
+                           {:ok (per-tx-report idx tx tx-meta-in write-id)}
+                           (catch clojure.lang.ExceptionInfo e
+                             {:err {:kind "datahike"
+                                    :msg  (str (.getMessage e) " " (pr-str (ex-data e)))}})
+                           (catch Throwable t
+                             {:err {:kind "internal"
+                                    :msg  (.toString t)}}))]
+          (if-let [ok-rep (:ok result)]
+            (recur (inc idx) (conj! wire-reports ok-rep))
+            (let [{:keys [kind msg]} (:err result)]
+              (ok {:seon.store.wire/reports    (persistent! wire-reports)
+                   :seon.store.wire/applied    idx
+                   :seon.store.wire/total      n
+                   :seon.store.wire/failed-at  idx
+                   :seon.store.wire/error      msg
+                   :seon.store.wire/error-kind kind}))))))))
 
 (defmethod handle-op "pull" [conn req]
   (let [selector (:seon.store.wire/selector req)

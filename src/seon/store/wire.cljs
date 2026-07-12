@@ -353,6 +353,19 @@
         (let [arg-map    (first args)
               tx-data    (if (map? arg-map) (:tx-data arg-map) arg-map)
               tx-meta    (when (map? arg-map) (:tx-meta arg-map))
+              generated? (and (map? arg-map)
+                              (contains? arg-map
+                                         :seon.db.id/generated-candidates))
+              generated-candidates
+              (when (map? arg-map)
+                (:seon.db.id/generated-candidates arg-map))
+              generated-attrs-present?
+              (and (map? arg-map)
+                   (contains? arg-map
+                              :seon.db.id/generated-identity-attrs))
+              generated-identity-attrs
+              (when (map? arg-map)
+                (:seon.db.id/generated-identity-attrs arg-map))
               write-id   (str (random-uuid))
               ;; Every write is db-name-routed to THIS pod's cluster db —
               ;; N pods can share one wire-server without ambient-conn
@@ -361,7 +374,14 @@
                                   :seon.store.wire/db-name  cluster-name
                                   :seon.store.wire/tx-data  tx-data
                                   :seon.store.wire/write-id write-id}
-                           (seq tx-meta) (assoc :seon.store.wire/tx-meta tx-meta))]
+                           (seq tx-meta)
+                           (assoc :seon.store.wire/tx-meta tx-meta)
+                           generated?
+                           (assoc :seon.store.wire/generated-candidates
+                                  generated-candidates)
+                           generated-attrs-present?
+                           (assoc :seon.store.wire/generated-identity-attrs
+                                  generated-identity-attrs))]
           (swap! !own-write-ids conj write-id)
           (-> (wire/rpc sock-path req {:timeout-ms wire/transact-timeout-ms})
               (.then
@@ -373,8 +393,19 @@
                    (if-not (:seon.store.wire/ok resp)
                      (put! p (ex-info (str "wire transact failed: "
                                            (:seon.store.wire/error resp))
-                                      {::error-kind (:seon.store.wire/error-kind resp)
-                                       :seon.error/kind :user-input}))
+                                      (cond->
+                                        {::error-kind
+                                         (:seon.store.wire/error-kind resp)
+                                         :seon.error/kind :user-input}
+                                        (= "generated-candidate-conflict"
+                                           (:seon.store.wire/error-kind resp))
+                                        (assoc :seon.db.id/error
+                                               :seon.db.id.error/candidate-conflict)
+                                        (:seon.store.wire/generated-candidate resp)
+                                        (assoc
+                                          :seon.db.id/generated-candidate
+                                          (:seon.store.wire/generated-candidate
+                                           resp)))))
                      ;; RYOW: resolve only once a local deref is at/past
                      ;; the ack'd basis-t. The synthesized report carries
                      ;; the MATERIALIZED post-tx db value, so straight-line
@@ -382,7 +413,9 @@
                      (let [bt      (:seon.store.wire/basis-t resp)
                            db      (ryow-deref! conn bt)
                            tempids (:seon.store.wire/tempids resp)
-                           tx-meta (:seon.store.wire/tx-meta resp)]
+                           tx-meta (:seon.store.wire/tx-meta resp)
+                           generated-eids
+                           (:seon.store.wire/generated-eids resp)]
                        (put! p (cond-> {:db-after db
                                         :tx-data  (wire-datoms->datoms
                                                    (:seon.store.wire/tx-data resp))
@@ -397,6 +430,9 @@
                                         ;; from reconstituted datoms.
                                         :datoms-added     (:seon.store.wire/datoms-added resp)
                                         :datoms-retracted (:seon.store.wire/datoms-retracted resp)}
+                                 (seq generated-eids)
+                                 (assoc :seon.db.id/generated-eids
+                                        generated-eids)
                                  (some? tx-meta) (assoc :tx-meta tx-meta)
                                  (:seon.store.wire/basis-t-before resp)
                                  (assoc :db-before

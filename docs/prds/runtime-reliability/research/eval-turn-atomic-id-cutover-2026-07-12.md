@@ -337,10 +337,12 @@ to stop supplying an unsafe id.
 The normal Datahike writer is serialized: it dequeues one operation, calls its
 configured write function with the exact prior DB, and advances to that
 operation's `:db-after` (`reference-code/datahike/src/datahike/writer.cljc:43-112`).
-The local writer merges a configured `write-fn-map` with its defaults at
-`:185-203`. That is the correct seam for the direct in-memory test adapter: the
-shared Seon preparation function runs inside the writer operation, not in a
-client-side preflight that could race the commit.
+The local writer merges a runtime `write-fn-map` with its defaults at
+`:185-203`. Seon's namespaced writer backend supplies that private function at
+runtime while the durable config stores only the backend keyword. That is the
+correct seam for direct connections: the shared preparation function runs
+inside the writer operation, not in a client-side preflight that could race the
+commit or in an unserializable persisted config.
 
 ClojureScript `await` is a macro that is legal only in an async environment
 (`reference-code/clojurescript/src/main/clojure/cljs/core.cljc:975-977`). The
@@ -402,9 +404,9 @@ generator-managed identity attribute in the same commit.
 Both adapters use the same preparation and conflict classifier:
 
 - the JVM wire adapter calls them while holding the sole-writer serialization;
-- a direct in-memory Datahike connection installs one custom `transact!` write
-  function through Datahike's `write-fn-map`, so preparation receives the exact
-  writer `old` DB and returns a normal report; and
+- a direct Datahike connection names the Seon writer backend, whose runtime
+  method installs one private `transact!` operation so preparation receives the
+  exact writer `old` DB and returns a normal report; and
 - manifest-less transactions delegate byte-for-byte to Datahike's ordinary
   writer function.
 

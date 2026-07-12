@@ -1401,6 +1401,12 @@
              ::db/tx-count   (count datoms)
              ::db/added      added
              ::db/retracted  retracted}
+      ;; Present only for `seon.db.id/allocate!`.  The sole writer assigned
+      ;; allocator tempids inside the serialized transaction and resolved the
+      ;; committed eids from Datahike's tx report; ordinary transacts retain
+      ;; the exact compact envelope they had before this extension.
+      (seq (:seon.db.id/generated-eids report))
+      (assoc :seon.db.id/eids (:seon.db.id/generated-eids report))
       return-report? (assoc ::db/tx-report report))))
 
 (defn ^:async transact!*
@@ -1424,6 +1430,20 @@
   [arg]
   (try
     (let [{::db/keys [tx-data opts conn return-report?]} arg
+          ;; Allocation metadata is internal request DATA owned by
+          ;; `seon.db.id`. It rides Datahike's ordinary arg-map to the active
+          ;; serialized writer: `:seon-wire` forwards it to the sole JVM
+          ;; writer, while `allocation-connect-config` installs the same
+          ;; preparation in a local self writer. Keeping it on the existing
+          ;; transaction path preserves the write-id ambiguity fence and one
+          ;; commit mechanism—there is no second allocation RPC.
+          generated? (contains? arg :seon.db.id/generated-candidates)
+          generated-candidates
+          (:seon.db.id/generated-candidates arg)
+          generated-attrs-present?
+          (contains? arg :seon.db.id/generated-identity-attrs)
+          generated-identity-attrs
+          (:seon.db.id/generated-identity-attrs arg)
           c           (resolve-conn conn)
           ;; A symbol written where a keyword-typed IDENTITY value belongs
           ;; (`{:seon.ns/name 'my.agent.foo …}`, the prompted fn-registration
@@ -1453,8 +1473,15 @@
       ;; as a third arg that datahike silently ignored — so user tx-meta
       ;; NEVER reached the db before this fix. The single arg-map shape
       ;; is the only supported call path.
-      (let [arg-map (merge {:tx-data (encode-edn-slot-values tx-data)}
-                           merged-opts)
+      (let [arg-map (cond->
+                      (merge {:tx-data (encode-edn-slot-values tx-data)}
+                             merged-opts)
+                      generated?
+                      (assoc :seon.db.id/generated-candidates
+                             generated-candidates)
+                      generated-attrs-present?
+                      (assoc :seon.db.id/generated-identity-attrs
+                             generated-identity-attrs))
             report  (await (d/transact! c arg-map))]
         (transact-success-envelope report return-report?)))
     (catch :default e

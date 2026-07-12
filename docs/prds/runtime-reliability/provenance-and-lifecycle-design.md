@@ -761,18 +761,23 @@ Creation time is projected through the identity assertion's transaction and
 `:db/txInstant`; it is not duplicated into the id.
 
 The allocator submits the complete candidate-dependent domain transaction
-through the normal wire writer using concrete fresh eids. Datahike therefore
-reports an existing identity as structured `:transact/unique` rather than
-upserting. Only an error whose attribute and value exactly match that attempt's
-generated manifest is retryable. Each retry discards and rebuilds the entire
+through the normal writer. Inside the serialized writer operation, one shared
+CLJC preparation function proves the candidates fresh, injects
+allocator-owned Datahike tempids, and resolves the final eids from the committed
+transaction report. Depending on the transaction shape, a remaining Datahike
+identity race reports structured `:transact/unique` or `:transact/upsert`; both
+carry the exact assertion data.
+Only an error whose attribute and value exactly match that attempt's generated
+manifest is retryable. Each retry discards and rebuilds the entire
 transaction—agent home namespace, function/schema identities, lookup refs,
 source forms, and response included. Sixteen failed candidate rounds return a
 namespaced exhaustion error; there is no fallback grammar or unbounded loop.
 The write id preserves commit ambiguity resolution, and ids are returned only
 after commit plus the normal read-your-own-write fence.
 
-The shared `:seon.db/id` value schema accepts reserved, exact legacy, word, and
-compact syntax. Generator policy belongs to each registered identity attribute,
+The shared `:seon.db/id` value schema accepts reserved, word, compact, and the
+complete old 14-character schema domain. Generator policy belongs to each
+registered identity attribute,
 not to an entity and not to a caller option. Values stay lowercase URL/DOM/
 CLJS-namespace safe; the schema does not copy package word lists.
 
@@ -788,12 +793,19 @@ Datahike enforces uniqueness per fully namespaced identity attribute, while
 Seon's serialized allocator additionally guarantees that a newly generated
 value is unused under every registered generator-managed identity attribute in
 the same logical database/branch. The writer performs indexed AVET lookups over
-that derived attribute set immediately before the concrete-eid transaction and
-also rejects duplicate candidates within one allocation request. A matching hit
-is the same retryable generated-candidate conflict; no global identity table or
-duplicate universal-id datom is stored. Independent branches may diverge and
-generate the same later value; their full database coordinates distinguish
-them.
+that derived attribute set and scans the incoming transaction immediately
+before applying its tempid transaction. It rejects duplicate candidates,
+cross-managed-attribute reuse, and any other existing identity that would make
+a candidate entity upsert. A matching generated-value hit is the same retryable
+candidate conflict; no global identity table or duplicate universal-id datom is
+stored. Local Datahike connections name the fully namespaced
+`:seon.db.id.writer/serialized` backend. Its runtime multimethod delegates to
+Datahike's self writer with the private operation in memory, while the durable
+connection config contains only the backend keyword. The JVM wire registry
+uses the same backend. Preparation therefore receives the writer's exact old
+database without another lock, queue, or unserializable function in stored
+config. Independent branches may diverge and generate the same later value;
+their full database coordinates distinguish them.
 
 ## Graduation criteria
 

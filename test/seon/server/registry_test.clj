@@ -10,6 +10,7 @@
    test get released by `restore-registry!`."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as d]
+            [seon.db.id :as id]
             [seon.server.registry :as ss])
   (:import [java.io File]))
 
@@ -61,6 +62,13 @@
         (is (true? removed?)))
       (is (nil? (::ss/conn (ss/get-conn {::ss/db-name db-name})))
           "after remove, get-conn returns no conn"))))
+
+(deftest ensure-db-installs-the-canonical-allocation-writer
+  (let [db-name :test/allocation-writer
+        conn (::ss/conn
+              (ss/ensure-db! {::ss/db-name db-name ::ss/backend :memory}))]
+    (is (nil? (id/assert-allocation-writer! conn)))
+    (ss/remove-db! {::ss/db-name db-name})))
 
 (deftest ensure-db-is-idempotent
   (testing "calling ensure-db! twice with same db-name returns same conn"
