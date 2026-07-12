@@ -46,12 +46,14 @@ any training spend. Live status: [[roadmap.md]].
   overlay datoms; autocomplete = `:seon.config/suggest` config section
   + `SEON_NEEDLE_ENDPOINT`. Needle in `provider-locality` or on
   `SEON_DG_ENDPOINT` is FORBIDDEN.
-- **Serving**: call-once-then-derive (pre-render `/runsync`, suggestion
-  stored as turn-scoped datom+blob, `:suggest` block pure over the
-  row); volatile-segment priority; src-diffusion wire contract with
-  `mode:"suggest"`; shared submit/poll transport extracted from
-  `seon.ai.diffusiongemma`. Second consumer: the typeahead offer
-  channel.
+- **Serving**: call-once-then-derive (pre-render `/runsync`); ONE
+  capture dial (owner, 2026-07-12) gates prompt/reply/suggestion blobs
+  — dev/acme on (row+blob, flywheel pairs), prod off (volatile-tier
+  ride, no storage); `rendered-as-of` always-on; `:suggest` block
+  reads row-else-stash. Volatile-segment priority; src-diffusion wire
+  contract with `mode:"suggest"`; shared submit/poll transport
+  extracted from `seon.ai.diffusiongemma`. Second consumer: the
+  typeahead offer channel.
 - **Kill-test ladder before training spend** (KT1 tokenizer → KT2 copy
   fidelity → KT3 signal ceiling → KT4 channel uptake → KT5
   reachability → $0-baseline ship gate). Envelope 1024/512; no

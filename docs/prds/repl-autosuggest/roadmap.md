@@ -67,4 +67,7 @@ contract = copy-heavy form kinds (plan/transact/register).
 - One `:openai-compat` gateway per cluster / one `SEON_DG_ENDPOINT`
   per pod — extend `agent-override-attrs` only when a second is
   actually needed.
-- Prompt-blob capture volume in prod — dial idea, not blocking.
+- ~~Prompt-blob capture volume in prod~~ — RULED 2026-07-12: ONE
+  capture dial gates prompt/reply/suggestion blobs; prod off, dev/acme
+  on; `rendered-as-of` always-on. Lands with B3 (small turn.cljs +
+  config change).

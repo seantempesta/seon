@@ -221,12 +221,22 @@ mechanisms:
   is EXTRACTED from `seon.ai.diffusiongemma` and shared, not a second
   fetch loop; suggest uses `/runsync` (bounded timeout, single
   attempt, NO retry — fail-soft is absence).
-- **A model output is a runtime artifact, not a derivation**: a
-  pre-render step calls the server and transacts the suggestion as a
-  turn-scoped datom (+ blob for the text); the `:suggest` block is
-  then PURE over that stored row — absent row ⇒ renders nothing. This
-  keeps as-of re-renders deterministic AND stamps every mined turn
-  with suggestion-contamination for the exporter.
+- **A model output is a runtime artifact, not a derivation** — and
+  **capture is dial-gated (owner ruling, 2026-07-12): the system must
+  not generate storage nothing will read.** ONE capture dial
+  (config→DB) gates ALL turn-capture blobs — prompt, reply, AND
+  suggestion. Dev/acme (mining + measurement): on. Prod: off.
+  `rendered-as-of` stays always-on (one int datom; the regenerability
+  anchor). Capture ON ⇒ the pre-render step transacts the suggestion
+  as a turn-scoped datom + tiny blob (~100-400 tokens,
+  content-addressed) — the `:suggest` block is pure over that row, and
+  mined turns carry contamination stamps + (suggested, actual)
+  correction pairs for retraining. Capture OFF ⇒ the same pre-render
+  call rides the volatile tier (`globalThis`, the sanctioned third
+  tier) for the current turn's render only; the block reads
+  row-else-stash, absent both ⇒ renders nothing. Prod turns are
+  therefore not minable — consistent: mining/measurement is a
+  dev/acme activity by construction.
 - `:suggest` renders with priority in the **volatile** segment (after
   the cache-breakpoint split) — a per-turn block in the stable prefix
   would bust the provider prompt cache every turn.
