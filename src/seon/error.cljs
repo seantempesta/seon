@@ -305,10 +305,25 @@
                    (subvec v (- (count v) pending-cap)))
                v)))))
 
-(defonce ^:private !persists-inflight
-  ;; Count of error-persist transacts not yet settled — the recursion
-  ;; fence [[record!]] reads (see self-persist-failure? there).
-  (atom 0))
+;; One fiber-local scope store for error machinery. Process-global counters are
+;; incorrect in the pod: while one Promise is pending, another agent can run on
+;; the same event loop and must not inherit its expected-fault/dev-eval/persist
+;; state. AsyncLocalStorage follows only the async work spawned in a scope.
+(defonce ^:private scope-als
+  (let [AsyncLocalStorage (.-AsyncLocalStorage (js/require "node:async_hooks"))]
+    (AsyncLocalStorage.)))
+
+(defn- current-scope []
+  (or (.getStore scope-als) {}))
+
+(defn- in-scope?
+  [scope-key]
+  (true? (get (current-scope) scope-key)))
+
+(defn- run-in-scope
+  "Run `thunk` with `scope-key` true in this fiber; nested scopes merge."
+  [scope-key thunk]
+  (.run scope-als (assoc (current-scope) scope-key true) thunk))
 
 (defn- persist!
   "Fire-and-forget transact of error `entities`; re-buffers on failure.
@@ -318,14 +333,15 @@
    throws, never awaited by callers."
   [entities]
   (let [tx! (:seon.error/transact! @!db-hooks)
-        p   (when tx! (try (tx! entities) (catch :default _ nil)))]
+        p   (when tx!
+              (try
+                (run-in-scope :seon.error.scope/persist? #(tx! entities))
+                (catch :default _ nil)))]
     (if (and p (fn? (.-then p)))
-      (do (swap! !persists-inflight inc)
-          (-> p
-              (.then (fn [{ok? :seon.db/ok?}]
-                       (when-not ok? (run! buffer! entities))))
-              (.catch (fn [_] (run! buffer! entities)))
-              (.finally (fn [] (swap! !persists-inflight dec)))))
+      (-> p
+          (.then (fn [{ok? :seon.db/ok?}]
+                   (when-not ok? (run! buffer! entities))))
+          (.catch (fn [_] (run! buffer! entities))))
       (do (run! buffer! entities) nil))))
 
 (defn- basis-t-now
@@ -361,47 +377,18 @@
       data-edn       (assoc :seon.error/data-edn data-edn))))
 
 ;; ============================================================
-;; Ambient scope brackets — ONE mechanism, two thin faces. A
-;; process-global DEPTH counter, NOT a dynamic binding: CLJS `binding`
-;; does not cross async .then/.catch hops, and both faces cover work
-;; that settles through async renders/evals/Promises. Node-test runs
-;; sequentially and the pod is single-threaded, so a global depth is
-;; race-free. (Genuinely-stateful runtime artifacts — the
-;; reactive-context rule permits these.) Faces:
+;; Ambient scope brackets — ONE fiber-local mechanism, two thin faces.
+;; AsyncLocalStorage crosses Promise/await hops without leaking between
+;; concurrent agents. Faces:
 ;;   [[expecting-core-fault!]] — TEST-side expected-fault marker.
 ;;   [[dev-eval!]]             — the dev/MCP REPL conduit's CALLER scope.
 ;; ============================================================
-
-(defn- depth-bracket!
-  "Open `!depth`, run `thunk`, close when its value settles.
-
-   The ONE mechanism under [[expecting-core-fault!]] and [[dev-eval!]]:
-   inc `!depth`; a sync value (or sync throw) closes immediately; a
-   returned Promise keeps the bracket open until it settles (returns
-   the chained Promise, re-throwing a rejection so the caller sees the
-   original reason). `settle-close!` receives the close thunk at
-   async-settle time — pass `(fn [c] (c))` for a synchronous close, or
-   defer it (e.g. via `js/setTimeout`) to keep the scope open for
-   same-tick observers like the `unhandledRejection` net."
-  [!depth settle-close! thunk]
-  (swap! !depth inc)
-  (let [close! (fn [] (swap! !depth dec))]
-    (try
-      (let [v (thunk)]
-        (if (and (some? v) (fn? (.-then v)))
-          (.then v
-                 (fn [x] (settle-close! close!) x)
-                 (fn [e] (settle-close! close!) (throw e)))
-          (do (close!) v)))
-      (catch :default e (close!) (throw e)))))
-
-(defonce ^:private !expecting-core-fault (atom 0))
 
 (defn expecting-a-core-fault?
   "True while inside an [[expecting-core-fault!]] bracket."
   {:malli/schema [:=> [:cat] :boolean]}
   []
-  (pos? @!expecting-core-fault))
+  (in-scope? :seon.error.scope/expecting-core-fault?))
 
 (defn expecting-core-fault!
   "TEST bracket: mark `:core` faults provoked inside `thunk` as EXPECTED.
@@ -410,22 +397,20 @@
    graceful degradation) still WRITES its datom, but [[escalate!]] prints
    the DISTINCT `SEON-EXPECTED-CORE-FAULT` marker instead of
    `SEON-CORE-FAULT`, so bin/test-cljs's gate does not count it, and the
-   `:crash` dial does NOT exit. Async-safe: if `thunk` returns a Promise the
-   bracket stays open until it settles (returns that Promise, re-throwing a
-   rejection); otherwise it closes synchronously (returns the value). A NEW
-   fault-provoking test that FORGETS the bracket trips the gate — the
-   intended forcing function; there is deliberately no blanket suppression."
+   `:crash` dial does NOT exit. Async-safe: work spawned by `thunk` inherits
+   the marker through its Promise/await hops, while unrelated fibers do not.
+   Returns `thunk`'s value unchanged. A NEW fault-provoking test that FORGETS
+   the bracket trips the gate — the intended forcing function; there is
+   deliberately no blanket suppression."
   {:malli/schema [:=> [:cat fn?] :any]}
   [thunk]
-  (depth-bracket! !expecting-core-fault (fn [close!] (close!)) thunk))
-
-(defonce ^:private !dev-eval-depth (atom 0))
+  (run-in-scope :seon.error.scope/expecting-core-fault? thunk))
 
 (defn in-dev-eval?
   "True while a dev/MCP REPL form (or its returned Promise) is running."
   {:malli/schema [:=> [:cat] :boolean]}
   []
-  (pos? @!dev-eval-depth))
+  (in-scope? :seon.error.scope/dev-eval?))
 
 (defn dev-eval!
   "CALLER-scope bracket around one dev/MCP REPL-submitted form.
@@ -437,14 +422,12 @@
    CALLER's mistake → `:agent` population (recorded, never escalates —
    dev probing must not crash the pod), while a genuine internal `:core`
    bug exposed by the same eval still escalates per the dial. Covers
-   Promise settlement when the eval returns one; the async close is
-   DEFERRED one macrotask (`js/setTimeout` 0) so the end-of-tick
-   `unhandledRejection` net still observes the scope. Detached async
-   work the eval fires but does not RETURN is not covered — inherent to
-   an ambient scope."
+   Promise settlement and the Promise's `unhandledRejection` callback through
+   Node async context propagation. Detached async work inherits the scope it was
+   spawned in; unrelated fibers never do."
   {:malli/schema [:=> [:cat fn?] :any]}
   [thunk]
-  (depth-bracket! !dev-eval-depth (fn [close!] (js/setTimeout close! 0)) thunk))
+  (run-in-scope :seon.error.scope/dev-eval? thunk))
 
 (defn- escalate!
   "Apply the `:seon.config/on-core-error` dial to a `:core` fault.
@@ -524,7 +507,7 @@
           ;; persisting it would re-trip the same violation forever (async
           ;; loop, not a stack overflow). Console-only for that one shape.
           self-persist-failure?
-          (and (pos? @!persists-inflight)
+          (and (in-scope? :seon.error.scope/persist?)
                (= 'seon.db/transact!
                   (get-in envelope [:seon.error/data :seon.error.malli/fn-sym])))
           args-edn (get-in envelope [:seon.error/data :seon.error/args-edn])

@@ -15,8 +15,11 @@ cluster-wide work. A grown-store open feed repeatedly invokes expensive
 render/SCI work and produces transient RSS sawtoothing around 1.4–2.5 GB.
 
 The core source/live audits, integrated design, ID study, and Datahike
-fork/restore study are complete. No refactor implementation has begun on this
-branch. The authoritative target is
+fork/restore study are complete. Phase 0 implementation is underway: the first
+unsafe process-global error scopes have been replaced by one fiber-local async
+scope with behavioral concurrency coverage. Mutable-authority, token-surface,
+test-runtime, and live-baseline evidence is being integrated before the atomic
+ID allocator begins. The authoritative target is
 [[provenance-and-lifecycle-design]] and the ordered implementation/commit plan
 is [[roadmap]].
 

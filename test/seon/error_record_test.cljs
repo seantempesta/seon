@@ -128,25 +128,57 @@
       (is (false? (error/in-dev-eval?))
           "sync bracket closes synchronously — no scope leak into later tests"))))
 
-(deftest dev-eval-bracket-covers-promise-settlement
-  ;; The dev-eval scope must stay open across the async hop (CLJS binding
-  ;; would not) AND through the settle tick — the close is DEFERRED one
-  ;; macrotask so the end-of-tick unhandledRejection net still observes it.
+(deftest ambient-error-scopes-propagate-without-cross-fiber-leaks
+  ;; Both faces share AsyncLocalStorage: work spawned inside a scope inherits
+  ;; it through async hops, but a second scope and the test's caller fiber do
+  ;; not inherit one another. The retired process-global depth counters failed
+  ;; every isolation assertion below while either Promise was pending.
   (async done
-    (let [p (error/dev-eval!
-              (fn [] (js/Promise. (fn [resolve _]
-                                    (js/setTimeout #(resolve :ok) 10)))))]
-      (is (true? (error/in-dev-eval?)) "scope open while the Promise is pending")
-      (-> p
-          (.then (fn [v]
-                   (is (= :ok v) "the resolved value passes through unchanged")
-                   (is (true? (error/in-dev-eval?))
-                       "same-tick observers (the net) still see the scope at settle")
-                   (js/Promise. (fn [resolve _] (js/setTimeout resolve 0)))))
-          (.then (fn []
-                   (is (false? (error/in-dev-eval?))
-                       "closed after the deferred macrotask")
-                   (done)))))))
+    (let [dev-p
+          (error/dev-eval!
+            (fn []
+              (is (true? (error/in-dev-eval?)))
+              (is (false? (error/expecting-a-core-fault?)))
+              (js/Promise.
+                (fn [resolve _]
+                  (js/setTimeout
+                    (fn []
+                      (is (true? (error/in-dev-eval?))
+                          "dev scope crosses the async hop it spawned")
+                      (is (false? (error/expecting-a-core-fault?))
+                          "the concurrent test scope does not leak into dev")
+                      (resolve :dev))
+                    10)))))
+          expected-p
+          (error/expecting-core-fault!
+            (fn []
+              (is (true? (error/expecting-a-core-fault?)))
+              (is (false? (error/in-dev-eval?)))
+              (js/Promise.
+                (fn [resolve _]
+                  (js/setTimeout
+                    (fn []
+                      (is (true? (error/expecting-a-core-fault?))
+                          "expected-fault scope crosses its own async hop")
+                      (is (false? (error/in-dev-eval?))
+                          "the concurrent dev scope does not leak into the test")
+                      (resolve :expected))
+                    5)))))]
+      (is (false? (error/in-dev-eval?))
+          "the caller does not inherit a pending dev-eval scope")
+      (is (false? (error/expecting-a-core-fault?))
+          "the caller does not inherit a pending expected-fault scope")
+      (-> (js/Promise.all #js [dev-p expected-p])
+          (.then
+            (fn [values]
+              (is (= :dev (aget values 0)))
+              (is (= :expected (aget values 1)))
+              (is (false? (error/in-dev-eval?)))
+              (is (false? (error/expecting-a-core-fault?)))
+              (done))
+            (fn [e]
+              (is false (str "scope test rejected — " e))
+              (done)))))))
 
 (deftest parse-frames-nodejs-stack
   (let [stack (str "Error: boom\n"
@@ -203,6 +235,17 @@
   "Promise resolving after `ms` — lets a fire-and-forget persist settle."
   [ms]
   (js/Promise. (fn [resolve _] (js/setTimeout resolve ms))))
+
+(defn- install-default-error-hooks!
+  "Restore the same late-bound hooks installed by `seon.db` at ns load."
+  []
+  (error/set-db-hooks!
+    {:seon.error/transact! (fn [tx-data]
+                             (when db/*conn*
+                               (db/transact! {:seon.db/tx-data tx-data})))
+     :seon.error/basis-t   (fn []
+                             (when db/*conn* (db/basis-t)))})
+  nil)
 
 (defn- with-fresh-conn
   "Run `f` (conn → Promise) with db/*conn* set! to a fresh conn; restore
@@ -363,3 +406,71 @@
                                            [?e :seon.error/fault ?fault]]}))
                            "exactly ONE datom, refined to :agent"))))))
       done)))
+
+;; ---------------------------------------------------------------------------
+;; Persistence-hook isolation — after the real buffer-flush proof above so
+;; these deliberately injected hooks cannot consume that fixture's pending row.
+;; ---------------------------------------------------------------------------
+
+(deftest persist-recursion-fence-is-local-to-the-persist-fiber
+  ;; A contract failure caused by the error-persistence write itself must not
+  ;; recursively call the same write forever. Capture the deliberate marker so
+  ;; this structural fixture does not trip bin/test-cljs's unexpected-core gate.
+  (let [calls         (atom 0)
+        console-error (.-error js/console)]
+    (try
+      (set! (.-error js/console) (fn [& _] nil))
+      (error/set-db-hooks!
+        {:seon.error/transact!
+         (fn [_]
+           (swap! calls inc)
+           (error/record!
+             {:seon.error/raw
+              (ex-info "persist contract"
+                       {:seon.error.malli/fn-sym 'seon.db/transact!})
+              :seon.error/fault :agent})
+           (js/Promise.resolve {:seon.db/ok? true}))
+         :seon.error/basis-t (constantly nil)})
+      (error/record! {:seon.error/raw (js/Error. "outer error")
+                      :seon.error/fault :agent})
+      (is (= 1 @calls)
+          "the nested persist-contract error is console-only, not recursive")
+      (finally
+        (set! (.-error js/console) console-error)
+        (install-default-error-hooks!)))))
+
+(deftest pending-persist-does-not-suppress-an-unrelated-fiber
+  ;; While one error write is pending, another agent may independently hit a
+  ;; transact!-shaped error. A process-global in-flight counter suppressed that
+  ;; second error; the persist marker must belong only to the first async fiber.
+  (async done
+    (let [calls         (atom 0)
+          resolve-first (atom nil)
+          first-p       (js/Promise. (fn [resolve _]
+                                       (reset! resolve-first resolve)))]
+      (error/set-db-hooks!
+        {:seon.error/transact!
+         (fn [_]
+           (if (= 1 (swap! calls inc))
+             first-p
+             (js/Promise.resolve {:seon.db/ok? true})))
+         :seon.error/basis-t (constantly nil)})
+      (error/record! {:seon.error/raw (js/Error. "first pending write")
+                      :seon.error/fault :agent})
+      (error/record!
+        {:seon.error/raw
+         (ex-info "unrelated transact error"
+                  {:seon.error.malli/fn-sym 'seon.db/transact!})
+         :seon.error/fault :agent})
+      (is (= 2 @calls)
+          "the unrelated fiber still attempts its own persistence write")
+      (@resolve-first {:seon.db/ok? true})
+      (-> (tick 0)
+          (.then
+            (fn []
+              (install-default-error-hooks!)
+              (done))
+            (fn [e]
+              (install-default-error-hooks!)
+              (is false (str "persist-isolation cleanup rejected — " e))
+              (done)))))))

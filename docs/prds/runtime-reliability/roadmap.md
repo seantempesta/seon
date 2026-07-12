@@ -104,6 +104,16 @@ The transaction/lifecycle audit is complete. Before implementation, finish the
 mutable-authority/display inventory and make the existing failure measurable
 without persisting derived counters.
 
+Progress on 2026-07-12: the integrated design/research package is committed.
+The first mutable-authority fix retired three process-global error-scope
+counters in favor of one fiber-local AsyncLocalStorage map; focused behavioral
+coverage passes 14 tests / 79 assertions, including concurrent scope and pending
+write isolation. The first full CLJS gate took 348 seconds and exposed a
+cross-test pending-buffer fixture dependency; the fixture order is corrected
+and its focused namespace is green. Baseline profiling is still partially
+contaminated by a separately owned research lane restarting the default pod, so
+clean mint/feed measurements remain open rather than being inferred.
+
 - Capture cold boot, converged restart, five sequential mints, one concurrent
   mint attempt, core reload, and config apply timings.
 - Record transaction/broadcast counts for each transition.

@@ -516,10 +516,13 @@ this census instead of rediscovering them:
   concurrent agents can change one another's eval budget. Durable defaults and
   overrides belong in config/agent facts; a one-shot override is lexical or
   AsyncLocalStorage execution context.
-- `src/seon/error.cljs` keeps `!expecting-core-fault`, `!dev-eval-depth`, and a
-  process-global `!persists-inflight`. The first two assume sequential fibers
-  and move to AsyncLocalStorage; persistence suppression must tag the actual
-  persistence attempt rather than dropping an unrelated concurrent fault.
+- `src/seon/error.cljs` previously kept `!expecting-core-fault`,
+  `!dev-eval-depth`, and process-global `!persists-inflight` counters. Phase 0
+  retired all three in favor of one AsyncLocalStorage scope map. Expected-test,
+  dev-eval, and persistence markers now follow only their originating async
+  work; behavioral tests pin both propagation and isolation while one write is
+  still pending. The injected DB hooks and bounded pending-error buffer remain
+  valid process-local handles whose loss behavior is explicit.
 - `src/seon/client.cljs` keeps `!agent-conn` beside `seon.db/*conn*`, plus
   `!indexed-test-vars` and `!extra-core-vars` beside the database program graph.
   Delete these duplicate authorities after their callers use the canonical

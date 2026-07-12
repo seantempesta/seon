@@ -125,6 +125,14 @@ wrapper's async arms (rejections + resolved-value output violations —
 both previously invisible) and the process net
 (`uncaughtException`/`unhandledRejection` → fault `:core`).
 
+Expected-test faults, dev-REPL classification, and the error-write recursion
+fence are ambient execution facts, not process-wide modes. One
+`AsyncLocalStorage` scope map carries their fully namespaced markers only along
+the Promise/await work spawned inside that scope. Concurrent agents never
+inherit one another's markers. In particular, a pending error persistence write
+suppresses only a contract fault caused by that same write chain; it cannot drop
+an unrelated agent's simultaneous fault. None of these markers is persisted.
+
 The `:seon.config/on-core-error` dial (manifest; `:crash | :gate |
 :log`, shipped `:gate`) governs `:core` faults only — `:agent` faults
 never escalate in any mode. Under `:gate` the pod keeps running but the
