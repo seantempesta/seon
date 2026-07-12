@@ -57,10 +57,28 @@ contract = copy-heavy form kinds (plan/transact/register).
   `data/tune/acme-2026-07-12.jsonl` — this IS the held-out
   real-distribution eval set (KT1/KT3 unblocked).
 
+## KT2b — RUN (2026-07-12)
+
+Legibility lint of the 168-fn agent surface through the STOCK checkpoint
+via needle-home JSON translation
+([[research/kt2b-legibility-lint-2026-07-12.md]] — leaderboard v0 +
+attributions + the benchmark sampling). Headline: BFCL anchor 0.65 @8-tool
+menus; ours **0.283 @8** (chance .125 — the weak band: informs, doesn't
+kill); menu-of-1 parse 1.0; per-key arg copy 0.73 (copy machinery fine);
+irrelevance false-suggestion rate 0.25; 16-tool menus overflow the 1024
+envelope (165/169) — compact cards are mandatory. Worst tier
+(`transact!`/`query`/`register!`/`step!`/`done!`/`next` at 0.00)
+attributes to implementation-vocabulary docstring line-1s and
+non-projecting opaque request schemas; fix list in the report,
+owner-gated (context frozen). Probe: `src-needle/…/lint_probe.py`,
+`cases/kt2b_cases.json`, `scripts/dump_fn_index.clj` (`ccf6abba`).
+
 ## Ordered path (spend-gated; thresholds in design.md §Measurement)
 
 1. **KT1 tokenizer envelope** — needs A1's real exported rows; hours.
-2. **KT2 zero-shot copy fidelity** — stock checkpoint, hours.
+2. **KT2 zero-shot copy fidelity** — stock checkpoint, hours (KT2b's
+   0.73 per-key copy accuracy on ids/strings is favorable adjacent
+   evidence).
 3. **KT3 frontier signal-ceiling on the profile** — the 224 held-out
    turns; fixes the projection before any training.
 4. **KT4 oracle-injection uptake** (inspect-ai) — proves the channel

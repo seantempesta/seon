@@ -18,7 +18,12 @@ port SHIPPED (`5481ab36`: parity 20/20, ~0.25s/suggestion, Clojure
 mismatches**, contexts ≤678 tok, coverage mean .64). Context generation
 is OWNER-FROZEN: profiles = selection + caps only; default prompt path
 byte-parity. Verbs-rename / deprecated-deletion cleanup in flight.
-Next: KT1-KT4 kill tests before any training spend. Live status:
+**KT2b RUN** ([[research/kt2b-legibility-lint-2026-07-12.md]]): stock
+checkpoint on the fn index in needle-home JSON — 0.283 @8-tool menus vs
+BFCL anchor 0.65 (weak band, informs not kills); leaderboard v0 +
+per-fn attributions shipped; arg copy 0.73; false-suggestion 0.25;
+16-tool menus bust the 1024 envelope. Fix list = docstrings/schemas,
+owner-gated. Next: KT1/KT3-KT4 before any training spend. Live status:
 [[roadmap.md]].
 
 ## Settled — do NOT re-litigate
