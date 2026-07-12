@@ -19,23 +19,28 @@
 
 (defn- req! [op extra] (tu/req! op extra))
 
+(defn- transact! [wire-id tx-data]
+  (req! "transact"
+        {:seon.store.wire/id wire-id
+         :seon.store.wire/tx-data tx-data}))
+
 (defn- result-of [resp] (:seon.store.wire/result resp))
 (defn- meta-of   [resp] (:seon.store.wire/tx-meta resp))
 
 ;; ---------- Helpers ----------
 
 (defn- install-msg-schema! []
-  (req! "transact"
-        {:seon.store.wire/tx-data
-         [{:db/ident :msg/at
-           :db/valueType :db.type/instant
-           :db/cardinality :db.cardinality/one}
-          {:db/ident :msg/role
-           :db/valueType :db.type/keyword
-           :db/cardinality :db.cardinality/one}
-          {:db/ident :msg/text
-           :db/valueType :db.type/string
-           :db/cardinality :db.cardinality/one}]}))
+  (transact!
+   "overlay/msg-schema"
+   [{:db/ident :msg/at
+     :db/valueType :db.type/instant
+     :db/cardinality :db.cardinality/one}
+    {:db/ident :msg/role
+     :db/valueType :db.type/keyword
+     :db/cardinality :db.cardinality/one}
+    {:db/ident :msg/text
+     :db/valueType :db.type/string
+     :db/cardinality :db.cardinality/one}]))
 
 ;; ---------- Reason C — basis-t threading (warnings composer) ----------
 
@@ -45,13 +50,13 @@
             the queries. This is the overlay's `(db conn)` -> {:basis-t N}
             value semantics."
     (install-msg-schema!)
-    (let [r1 (req! "transact"
-                   {:seon.store.wire/tx-data [{:msg/role :user :msg/text "a" :msg/at #inst "2026-05-01"}]})
+    (let [r1 (transact! "overlay/reason-c/a"
+                        [{:msg/role :user :msg/text "a" :msg/at #inst "2026-05-01"}])
           bt1 (:seon.store.wire/basis-t r1)
-          _   (req! "transact"
-                    {:seon.store.wire/tx-data [{:msg/role :user :msg/text "b" :msg/at #inst "2026-05-02"}]})
-          _   (req! "transact"
-                    {:seon.store.wire/tx-data [{:msg/role :user :msg/text "c" :msg/at #inst "2026-05-03"}]})
+          _   (transact! "overlay/reason-c/b"
+                         [{:msg/role :user :msg/text "b" :msg/at #inst "2026-05-02"}])
+          _   (transact! "overlay/reason-c/c"
+                         [{:msg/role :user :msg/text "c" :msg/at #inst "2026-05-03"}])
 
           ;; Two queries against bt1 — should both see only one msg.
           q-shape '[:find (count ?e) . :where [?e :msg/text]]
@@ -75,16 +80,16 @@
             rewrite computes the cutoff #inst on the guest side and passes it
             as an arg, no fn binding required."
     (install-msg-schema!)
-    (req! "transact"
-          {:seon.store.wire/tx-data [{:msg/role :user :msg/text "older" :msg/at #inst "2026-04-01"}
-                                     {:msg/role :user :msg/text "newer" :msg/at #inst "2026-06-01"}]})
+    (transact! "overlay/reason-a/messages"
+               [{:msg/role :user :msg/text "older" :msg/at #inst "2026-04-01"}
+                {:msg/role :user :msg/text "newer" :msg/at #inst "2026-06-01"}])
     ;; The cutoff #inst can ride either as a native query literal OR as a
     ;; native arg under :seon.store.wire/args — both round-trip as a Date
     ;; through the uniform Transit frame. Use a native arg here.
     (let [q '[:find ?t :in $ ?cutoff
               :where [?e :msg/text ?t] [?e :msg/at ?at]
-                     [(.compareTo ?at ?cutoff) ?c]
-                     [(pos? ?c)]]
+              [(.compareTo ?at ?cutoff) ?c]
+              [(pos? ?c)]]
           r (req! "q" {:seon.store.wire/query q
                        :seon.store.wire/args [#inst "2026-05-01T00:00:00.000-00:00"]})]
       (is (= true (:seon.store.wire/ok r)))
@@ -100,23 +105,23 @@
             eagerly-realized map where reading a top-level attr or a
             component-ref vector works exactly the same way."
     ;; Install a parent/child component schema.
-    (req! "transact"
-          {:seon.store.wire/tx-data
-           [{:db/ident :agent/id
-             :db/valueType :db.type/string :db/unique :db.unique/identity
-             :db/cardinality :db.cardinality/one}
-            {:db/ident :agent/sessions
-             :db/valueType :db.type/ref :db/isComponent true
-             :db/cardinality :db.cardinality/many}
-            {:db/ident :session/at
-             :db/valueType :db.type/instant
-             :db/cardinality :db.cardinality/one}]})
-    (req! "transact"
-          {:seon.store.wire/tx-data
-           [{:agent/id "alpha"
-             :agent/sessions [{:session/at #inst "2026-05-01"}
-                              {:session/at #inst "2026-05-22"}
-                              {:session/at #inst "2026-05-10"}]}]})
+    (transact!
+     "overlay/reason-b/schema"
+     [{:db/ident :agent/id
+       :db/valueType :db.type/string :db/unique :db.unique/identity
+       :db/cardinality :db.cardinality/one}
+      {:db/ident :agent/sessions
+       :db/valueType :db.type/ref :db/isComponent true
+       :db/cardinality :db.cardinality/many}
+      {:db/ident :session/at
+       :db/valueType :db.type/instant
+       :db/cardinality :db.cardinality/one}])
+    (transact!
+     "overlay/reason-b/alpha"
+     [{:agent/id "alpha"
+       :agent/sessions [{:session/at #inst "2026-05-01"}
+                        {:session/at #inst "2026-05-22"}
+                        {:session/at #inst "2026-05-10"}]}])
     (let [r (req! "entity-pull" {:seon.store.wire/ref [:agent/id "alpha"]})]
       (is (= true (:seon.store.wire/ok r)))
       (let [m (result-of r)
@@ -143,10 +148,9 @@
           ^java.nio.channels.SocketChannel pub-ch
           (client/start-pub-collector! (:pub-sock *ctx*) events)]
       (try
-        (let [rid (str (java.util.UUID/randomUUID))
-              _   (req! "transact"
-                        {:seon.store.wire/tx-data [{:msg/role :user :msg/text "hello" :msg/at #inst "2026-05-25"}]
-                         :seon.store.wire/write-id rid})
+        (let [rid "overlay/reason-d/event"
+              _   (transact! rid
+                             [{:msg/role :user :msg/text "hello" :msg/at #inst "2026-05-25"}])
               _   (Thread/sleep 250)
               ev  (first @events)]
           (is (some? ev) "pub event fired")
@@ -155,8 +159,8 @@
           (is (integer? (:seon.store.wire/basis-t-before ev)))
           (is (vector? (:seon.store.wire/tx-data ev)))
           (is (map? (meta-of ev)))
-          (is (= rid (:seon.store.wire/write-id ev))
-              "write-id round-trips end-to-end (overlay uses for own-tx dedup)")
+          (is (= rid (:seon.store.wire/id ev))
+              "wire-id round-trips end-to-end (overlay uses it for own-tx dedup)")
           ;; Datom shape matches what the overlay's handler decoder expects.
           (let [d (first (:seon.store.wire/tx-data ev))]
             (is (= 5 (count d)) "datom is [e a v t op]")))
@@ -168,16 +172,16 @@
   (testing "The overlay's `d/filter` ships a predicate query (not a fn).
             This test exercises the canonical 'agents whose role matches X'
             pattern."
-    (req! "transact"
-          {:seon.store.wire/tx-data
-           [{:db/ident :person/name :db/valueType :db.type/string
-             :db/unique :db.unique/identity :db/cardinality :db.cardinality/one}
-            {:db/ident :person/role :db/valueType :db.type/keyword
-             :db/cardinality :db.cardinality/one}]})
-    (req! "transact"
-          {:seon.store.wire/tx-data [{:person/name "alice" :person/role :admin}
-                                     {:person/name "bob"   :person/role :user}
-                                     {:person/name "carol" :person/role :admin}]})
+    (transact!
+     "overlay/filter/schema"
+     [{:db/ident :person/name :db/valueType :db.type/string
+       :db/unique :db.unique/identity :db/cardinality :db.cardinality/one}
+      {:db/ident :person/role :db/valueType :db.type/keyword
+       :db/cardinality :db.cardinality/one}])
+    (transact! "overlay/filter/people"
+               [{:person/name "alice" :person/role :admin}
+                {:person/name "bob"   :person/role :user}
+                {:person/name "carol" :person/role :admin}])
     (let [f (req! "db-filter"
                   {:seon.store.wire/pred-query '[:find ?e :where [?e :person/role :admin]]
                    :seon.store.wire/args []})]

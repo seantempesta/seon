@@ -131,6 +131,12 @@
    thousands of rows in one tx."
   30000)
 
+(def transact-attempts
+  "Maximum same-id deliveries of one frozen transaction after reply loss.
+   Every retry is idempotent at the JVM writer; exhausting the bound reports
+   an unknown status and never claims that the write did not commit."
+  3)
+
 (def feed-reconnect-delay-ms
   "Delay before the tx-feed pub socket schedules ONE reconnect after a
    drop (seon.store.wire/schedule-reconnect!)."
@@ -300,7 +306,7 @@
   ([sock tx-data {:keys [tx-meta request-id] :as opts}]
    (-> (rpc sock (routed (cond-> {:seon.store.wire/op "transact"
                                   :seon.store.wire/tx-data tx-data
-                                  :seon.store.wire/write-id (or request-id "")}
+                                  :seon.store.wire/id (or request-id "")}
                            tx-meta (assoc :seon.store.wire/tx-meta tx-meta))
                          opts))
        (then (fn [resp] resp)))))

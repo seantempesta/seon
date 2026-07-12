@@ -61,7 +61,7 @@
 ;; the conn's `::raw-broadcast` listener). Each event is the SAME map
 ;; `seon.server.wire`'s broadcaster builds (`ok-event-from-report`):
 ;; `:seon.store.wire/*` keyword keys, `tx-data` as native 5-vectors
-;; [e a v t op], `tx-meta`/`write-id` carried through. `replay-tx` returns the
+;; [e a v t op], `tx-meta`/wire id carried through. `replay-tx` returns the
 ;; missed range of exactly-that-shaped events for a reconnecting subscriber.
 ;; ---------------------------------------------------------------------------
 

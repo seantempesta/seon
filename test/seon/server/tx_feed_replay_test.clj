@@ -63,21 +63,21 @@
         (is (contains? vs [:note/id "b" true]))
         (is (contains? vs [:note/text "two" true]))))))
 
-(deftest replay-recovers-tx-meta-and-write-id
+(deftest replay-recovers-tx-meta-and-wire-id
   (let [conn (mem-conn)
         _    (commit! conn [{:db/ident :note/id :db/valueType :db.type/string
                              :db/unique :db.unique/identity
                              :db/cardinality :db.cardinality/one}])
         tk   (bt conn)
         _    (commit-meta! conn [{:note/id "x"}]
-                           {:seon.store.wire/write-id "wid-7"
+                           {:seon.store.wire/id "wid-7"
                             :seon.audit/cause :seon.cause/test})
         evs  (wire/replay-tx-events conn "db" tk)]
     (is (= 1 (count evs)))
     (let [ev (first evs)]
-      (is (= "wid-7" (:seon.store.wire/write-id ev))
-          "write-id recovered from the tx entity for echo-suppression")
-      (is (= "wid-7" (get-in ev [:seon.store.wire/tx-meta :seon.store.wire/write-id])))
+      (is (= "wid-7" (:seon.store.wire/id ev))
+          "wire-id recovered from the tx entity for echo-suppression")
+      (is (= "wid-7" (get-in ev [:seon.store.wire/tx-meta :seon.store.wire/id])))
       (is (= :seon.cause/test (get-in ev [:seon.store.wire/tx-meta :seon.audit/cause]))
           "arbitrary seon tx-meta provenance survives the replay"))))
 

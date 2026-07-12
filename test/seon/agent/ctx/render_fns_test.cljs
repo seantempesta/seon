@@ -345,7 +345,7 @@
                                :read-attrs [:seon.agent/purpose
                                             :seon.db/agent-id
                                             :seon.db/origin
-                                            :seon.store.wire/write-id])])))
+                                            :seon.store.wire/id])])))
                 (.then
                   (fn [_]
                     (is (= #{:seon.agent/purpose}

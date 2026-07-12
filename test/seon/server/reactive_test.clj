@@ -94,7 +94,7 @@
       (is (= #{["s1" (pr-str units-query)]}
              (d/q '[:find ?id ?q
                     :where [?s :seon.subscription/id ?id]
-                           [?s :seon.subscription/query ?q]]
+                    [?s :seon.subscription/query ?q]]
                   (d/db conn)))))
     (testing "the registration tx did NOT self-route (register-after-transact)"
       (is (= 0 (count @emitted))))
@@ -147,17 +147,17 @@
                (set (keys (first (:seon.server.reactive/changed ev))))))
         (is (vector? (:seon.server.reactive/rows (first (:seon.server.reactive/changed ev)))))))))
 
-(deftest request-id-rides-the-event
-  ;; R1 reactive-side: the engine surfaces the tx's request-id on the
-  ;; changed-summaries event so a guest can dedup its own writeback (review issue 1).
+(deftest wire-id-rides-the-reactive-event
+  ;; R1 reactive-side: the engine surfaces the transaction's wire-id as the
+  ;; changed-summaries request-id so a guest can dedup its own writeback.
   (let [{:keys [conn emitted state]} (with-engine)]
     (d/transact conn [{:db/id -1 :unit/name "A" :unit/pos "x"}])
     (reactive/register-sub! state conn "s1" units-query)
     (reset! emitted [])
     (d/transact conn {:tx-data [{:db/id 1 :unit/pos "y"}]
-                      :tx-meta {:seon.store.wire/write-id "r-123"}})
+                      :tx-meta {:seon.store.wire/id "r-123"}})
     (is (= "r-123" (:seon.server.reactive/request-id (first @emitted)))
-        "on-tx! surfaces the tx's :seon.store.wire/write-id on the event")))
+        "on-tx! surfaces the tx's :seon.store.wire/id on the event")))
 
 (deftest register-subscription-handler
   (let [{:keys [conn emitted state]} (with-engine)]

@@ -9,11 +9,14 @@
      encode/decode. No inner Transit strings.
    - Datom shape: 5-vector [e a v t op] — a and v are NATIVE (keyword attr,
      any value); e, t are ints; op is bool.
-   - Echo id: `:seon.store.wire/write-id` end-to-end — the transport key ==
+   - Echo id: `:seon.store.wire/id` end-to-end — the transport key ==
      the persisted Datahike attr (one id, transport + storage)."
   (:require [clojure.core.server :as srv]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [datahike.api :as d]
+            [hasch.core :as hasch]
             [konserve-jdbc.core]
             [seon.db.id :as id]
             [seon.server.codec :as codec]
@@ -59,21 +62,53 @@
 
 (declare raw-broadcast-listener-fn)
 
+(def ^:private base-schema
+  [{:db/ident       :seon.store.wire/id
+    :db/valueType   :db.type/string
+    :db/cardinality :db.cardinality/one
+    :db/unique      :db.unique/identity}
+   {:db/ident       :seon.store.wire/request-hash
+    :db/valueType   :db.type/uuid
+    :db/cardinality :db.cardinality/one}
+   {:db/ident       :seon.store.wire/protocol-version
+    :db/valueType   :db.type/long
+    :db/cardinality :db.cardinality/one}
+   {:db/ident       :seon.store.wire.tempid/key-edn
+    :db/valueType   :db.type/string
+    :db/cardinality :db.cardinality/one}
+   {:db/ident       :seon.store.wire.tempid/entity
+    :db/valueType   :db.type/ref
+    :db/cardinality :db.cardinality/one}])
+
+(def ^:private schema-properties
+  [:db/valueType :db/cardinality :db/unique :db/isComponent])
+
 (defn- seed-base-schema!
-  "Install wire-server base-schema attrs that every conn needs regardless of
-   the agent's domain schema. Currently just `:seon.store.wire/write-id` — the
-   wire-protocol per-write ECHO-SUPPRESSION id: the pod mints a UUID per
-   forwarded write, the wire-server threads it into the committed tx-meta under
-   this attr, and the pod recognizes its own tx on the broadcast feed and skips
-   re-firing local listeners. Declared here so `:schema-flexibility :write`
-   accepts it in tx-meta (the channel that carries it to the ::raw-broadcast
-   listener thread). This is a wire-protocol field, NOT a seon.db Malli-domain
-   attr — the writer uses RAW datahike schema, so this seed IS its declaration.
-   Idempotent: a re-seed transacts the same :db/ident, a no-op datahike upsert."
+  "Install the exact raw Datahike schema for idempotent wire transactions.
+
+   `:seon.store.wire/id` is the durable, unique logical-write identity on the
+   transaction entity. The versioned request hash rejects accidental id reuse,
+   while same-transaction tempid markers retain the only response data that
+   cannot be derived from transaction history. Existing compatible attrs are not
+   re-transacted; an incompatible declaration fails loudly."
   [conn]
-  (d/transact conn [{:db/ident       :seon.store.wire/write-id
-                     :db/valueType   :db.type/string
-                     :db/cardinality :db.cardinality/one}]))
+  (let [installed (:schema (d/db conn))
+        incompatible
+        (keep (fn [{:db/keys [ident] :as declaration}]
+                (when-let [actual (get installed ident)]
+                  (let [expected (select-keys declaration schema-properties)
+                        actual   (select-keys actual schema-properties)]
+                    (when (not= expected actual)
+                      {:seon.store.wire/attribute ident
+                       :seon.store.wire/expected expected
+                       :seon.store.wire/actual actual}))))
+              base-schema)
+        missing (filterv #(not (contains? installed (:db/ident %))) base-schema)]
+    (when (seq incompatible)
+      (throw (ex-info "Wire schema is incompatible with the idempotent protocol."
+                      {:seon.store.wire/incompatible (vec incompatible)})))
+    (when (seq missing)
+      (d/transact conn missing))))
 
 ;; ---------- Response helpers ----------
 
@@ -113,9 +148,6 @@
 ;; serializes it with the appropriate type tag, and the guest gets a JS
 ;; Number back (the truth lives in the DB).
 
-(defn- schema-of [conn]
-  (-> (d/db conn) :schema))
-
 (defn- valueType-of [schema attr]
   (when (keyword? attr)
     (get-in schema [attr :db/valueType])))
@@ -151,6 +183,37 @@
 
        :else item))
    tx-data))
+
+;; ---------- Idempotent transaction receipts ----------
+
+(defn- request-hash
+  "Map-order-independent content fingerprint of the logical request."
+  [request]
+  (hasch/uuid request))
+
+(def ^:private internal-tempid-prefix
+  "seon.store.wire.tempid/")
+
+(defn- internal-tempid?
+  [value]
+  (and (string? value) (str/starts-with? value internal-tempid-prefix)))
+
+(defn- tempid-receipts
+  [wire-id tempids]
+  (let [used (set tempids)]
+    (mapv (fn [index tempid]
+            (let [marker-id
+                  (loop [salt 0]
+                    (let [candidate (str internal-tempid-prefix wire-id "/"
+                                         index "/" salt)]
+                      (if (contains? used candidate)
+                        (recur (inc salt))
+                        candidate)))]
+              {:db/id marker-id
+               :seon.store.wire.tempid/key-edn (pr-str tempid)
+               :seon.store.wire.tempid/entity tempid}))
+          (range)
+          tempids)))
 
 ;; ---------- Embed-on-write seam ----------
 ;;
@@ -286,36 +349,92 @@
     (ok {:seon.store.wire/basis-t (basis-t-of db)
          :seon.store.wire/result  result})))
 
+(def ^:private receipt-attributes
+  #{:seon.store.wire.tempid/key-edn
+    :seon.store.wire.tempid/entity})
+
+(def ^:private protocol-attributes
+  (into receipt-attributes
+        #{:seon.store.wire/id
+          :seon.store.wire/request-hash
+          :seon.store.wire/protocol-version}))
+
+(defn- transaction-attributes
+  [tx-data]
+  (into #{}
+        (mapcat (fn [node]
+                  (cond
+                    (map? node)
+                    (cond-> (filterv qualified-keyword? (keys node))
+                      (qualified-keyword? (:db/ident node))
+                      (conj (:db/ident node)))
+
+                    (and (vector? node)
+                         (#{:db/add :db/retract} (first node))
+                         (<= 3 (count node)))
+                    [(nth node 2)]
+
+                    :else [])))
+        (tree-seq coll? seq tx-data)))
+
+(defn- assert-protocol-fields-free!
+  [tx-data tx-meta]
+  (let [used (into (set (keys (or tx-meta {})))
+                   (transaction-attributes tx-data))
+        reserved (vec (sort-by str (filter used protocol-attributes)))]
+    (when (seq reserved)
+      (throw
+       (ex-info "Transaction data may not assert wire-protocol attributes."
+                {:seon.server.wire/error
+                 :seon.server.wire.error/reserved-attribute
+                 :seon.store.wire/attributes reserved})))))
+
+(defn- public-transaction-datoms
+  [datoms]
+  (filterv (fn [^datahike.datom.Datom datom]
+             (not (contains? receipt-attributes (.-a datom))))
+           datoms))
+
 (defn- tx-report->ok-map
-  [report write-id]
+  [report wire-id]
   (let [db        (:db-after report)
         db-before (:db-before report)
-        tx-data   (:tx-data report)
+        tx-data   (public-transaction-datoms (:tx-data report))
         wire-data (tx-data->wire tx-data)
         added     (count (filter :added tx-data))
         retracted (count (remove :added tx-data))
         bt        (basis-t-of db)
         bt-before (basis-t-of db-before)
-        tempids   (dissoc (:tempids report) :db/current-tx)
+        tempids   (into {}
+                        (remove (fn [[tempid _]]
+                                  (or (= :db/current-tx tempid)
+                                      (internal-tempid? tempid))))
+                        (:tempids report))
         tx-meta   (:tx-meta report)]
-    {:wire-data wire-data
-     :added     added
-     :retracted retracted
-     :bt        bt
-     :bt-before bt-before
-     :tempids   tempids
-     :tx-meta   tx-meta
-     :write-id  write-id}))
+    {::wire-data wire-data
+     ::added added
+     ::retracted retracted
+     ::basis-t bt
+     ::basis-t-before bt-before
+     ::tempids tempids
+     ::tx-meta tx-meta
+     ::wire-id wire-id}))
 
 (defn- ok-event-from-report
   "Build the raw `tx` broadcast event. `db-name` is the committing conn's real
-   db-name string (no more hardcoded \"default\"). `write-id` comes from the
-   commit's tx-meta (`:seon.store.wire/write-id`) so it survives the async hop to
+   db-name string (no more hardcoded \"default\"). The wire id comes from the
+   commit's tx-meta (`:seon.store.wire/id`) so it survives the async hop to
    the `::raw-broadcast` listener thread — the listener, not the request handler,
    emits the event now (see `raw-broadcast-listener-fn`). It rides the broadcast
-   event under `:seon.store.wire/write-id` (transport key == persisted attr),
+   event under `:seon.store.wire/id` (transport key == persisted attr),
    which the pod matches for echo suppression."
-  [db-name {:keys [wire-data added retracted bt bt-before tx-meta write-id]}]
+  [db-name {wire-data ::wire-data
+            added ::added
+            retracted ::retracted
+            bt ::basis-t
+            bt-before ::basis-t-before
+            tx-meta ::tx-meta
+            wire-id ::wire-id}]
   (cond-> {:seon.store.wire/event "tx"
            :seon.store.wire/basis-t bt
            :seon.store.wire/basis-t-before bt-before
@@ -324,7 +443,7 @@
            :seon.store.wire/datoms-added added
            :seon.store.wire/datoms-retracted retracted
            :seon.store.wire/tx-meta tx-meta}
-    write-id (assoc :seon.store.wire/write-id write-id)))
+    wire-id (assoc :seon.store.wire/id wire-id)))
 
 ;; ---------- since-t replay (the DE-2 lossless-wake fix) ----------
 ;;
@@ -355,7 +474,7 @@
    event is shaped EXACTLY like the live `::raw-broadcast` `tx` event
    (`ok-event-from-report`/`datom->wire`) so a reconnecting subscriber applies
    replayed and live events through ONE code path: `:seon.store.wire/event
-   \"tx\"`, native 5-vector `tx-data`, `tx-meta`/`write-id` recovered from the
+   \"tx\"`, native 5-vector `tx-data`, `tx-meta`/wire id recovered from the
    committing tx entity.
 
    Source: the bitemporal tx-log via `(d/since (d/history db) since-t)`. Datoms
@@ -363,7 +482,7 @@
    datoms carry a NEGATIVE tx, so we group by its absolute value but keep the
    signed tx verbatim in the wire vector (byte-identical to a live retraction).
    The committing tx's own datoms (`:db/txInstant` + any seon tx-meta attrs such
-   as `:seon.store.wire/write-id` and provenance) carry the tx-meta. NB: a
+   as `:seon.store.wire/id` and provenance) carry the tx-meta. NB: a
    card-one upsert's IMPLICIT old-value retraction shows up here (history is
    complete) even when the live `d/transact` report omitted it — replay is a
    superset, never a subset, of what landed; the extra retraction datom is
@@ -400,9 +519,9 @@
                                        (last dropped) ". A dropped wake is a correctness hazard.")))
                        (drop drop-n tx-ids))
                      tx-ids)]
-        (:events
+        (::events
          (reduce
-          (fn [{:keys [events prev-bt]} tx-id]
+          (fn [{events ::events prev-bt ::previous-basis-t} tx-id]
             (let [ds        (get by-tx tx-id)
                   tx-meta   (into {} (map (fn [^datahike.datom.Datom d] [(.-a d) (.-v d)]))
                                   (filter (fn [^datahike.datom.Datom d] (= (.-e d) tx-id)) ds))
@@ -410,15 +529,15 @@
                   retracted (count (remove :added ds))
                   ev (ok-event-from-report
                       db-name
-                      {:wire-data (tx-data->wire ds)
-                       :added     added
-                       :retracted retracted
-                       :bt        tx-id
-                       :bt-before prev-bt
-                       :tx-meta   (not-empty tx-meta)
-                       :write-id  (:seon.store.wire/write-id tx-meta)})]
-              {:events (conj events ev) :prev-bt tx-id}))
-          {:events [] :prev-bt since-t}
+                      {::wire-data (tx-data->wire ds)
+                       ::added added
+                       ::retracted retracted
+                       ::basis-t tx-id
+                       ::basis-t-before prev-bt
+                       ::tx-meta (not-empty tx-meta)
+                       ::wire-id (:seon.store.wire/id tx-meta)})]
+              {::events (conj events ev) ::previous-basis-t tx-id}))
+          {::events [] ::previous-basis-t since-t}
           kept))))))
 
 ;; ---------- ::raw-broadcast listener (the P1 hook) ----------
@@ -427,8 +546,8 @@
 ;; carries a `d/listen!`-registered `::raw-broadcast` callback that fires
 ;; synchronously on every commit and emits the db-name-tagged `tx` event. This
 ;; is the seam the reactive engine plugs a SECOND listener (`::reactive`) into
-;; — distinct keys, both fire off the same TxReport. The wire write-id rides
-;; tx-meta (`:seon.store.wire/write-id`) because the listener runs on the writer
+;; — distinct keys, both fire off the same TxReport. The durable wire id rides
+;; tx-meta (`:seon.store.wire/id`) because the listener runs on the writer
 ;; thread.
 
 (defn raw-broadcast-listener-fn
@@ -440,8 +559,8 @@
   (let [db-name-str (if (keyword? db-name) (subs (str db-name) 1) (str db-name))]
     (fn [report]
       (try
-        (let [write-id (:seon.store.wire/write-id (:tx-meta report))
-              r        (assoc (tx-report->ok-map report nil) :write-id write-id)]
+        (let [wire-id (:seon.store.wire/id (:tx-meta report))
+              r       (assoc (tx-report->ok-map report nil) ::wire-id wire-id)]
           (bcast/broadcast! (ok-event-from-report db-name-str r)))
         (catch Throwable _)))))
 
@@ -460,8 +579,16 @@
     (seed-base-schema! conn)
     (d/listen conn ::raw-broadcast (raw-broadcast-listener-fn db-name)))})
 
-(defn- ok-response-from-report [{:keys [wire-data added retracted bt bt-before
-                                        tempids tx-meta write-id]}]
+(defn- ok-response-from-report
+  [{wire-data ::wire-data
+    added ::added
+    retracted ::retracted
+    bt ::basis-t
+    bt-before ::basis-t-before
+    tempids ::tempids
+    tx-meta ::tx-meta
+    wire-id ::wire-id
+    recovered? ::recovered?}]
   ;; One uniform Transit frame: the structured fields ARE the response — the
   ;; pod reads them directly (no separate Transit-string `payload` to double-
   ;; decode). basis-t / datoms-* are ints; tempids / tx-meta / tx-data are
@@ -473,7 +600,153 @@
            :seon.store.wire/tx-meta           tx-meta
            :seon.store.wire/datoms-added      added
            :seon.store.wire/datoms-retracted  retracted}
-    write-id (assoc :seon.store.wire/write-id write-id)))
+    wire-id    (assoc :seon.store.wire/id wire-id)
+    recovered? (assoc :seon.store.wire/recovered? true)))
+
+(defn- committed-wire-transaction
+  [db wire-id]
+  (d/q '[:find ?tx .
+         :in $ ?wire-id
+         :where [?tx :seon.store.wire/id ?wire-id]]
+       db wire-id))
+
+(defn- transaction-datoms
+  [db tx]
+  (->> (d/datoms (d/since (d/history db) (dec tx)) :eavt)
+       (filterv (fn [^datahike.datom.Datom datom]
+                  (= tx (Math/abs (long (.-tx datom))))))))
+
+(defn- recovered-tempids
+  [db tx]
+  (into {}
+        (map (fn [[key-edn entity]]
+               [(edn/read-string key-edn) entity]))
+        (d/q '[:find ?key-edn ?entity
+               :in $ ?tx
+               :where
+               [?marker :seon.store.wire.tempid/key-edn ?key-edn ?tx]
+               [?marker :seon.store.wire.tempid/entity ?entity ?tx]]
+             db tx)))
+
+(defn- recovered-generated-eids
+  [datoms candidates]
+  (when (seq candidates)
+    (into {}
+          (map (fn [candidate]
+                 [(::id/key candidate)
+                  (some (fn [^datahike.datom.Datom datom]
+                          (when (and (:added datom)
+                                     (= (::id/identity-attr candidate)
+                                        (.-a datom))
+                                     (= (::id/value candidate) (.-v datom)))
+                            (.-e datom)))
+                        datoms)]))
+          candidates)))
+
+(defn- recovered-response
+  [db tx wire-id candidates]
+  (let [all-datoms (transaction-datoms db tx)
+        datoms (public-transaction-datoms all-datoms)
+        tx-meta (-> (into {}
+                          (map (fn [^datahike.datom.Datom datom]
+                                 [(.-a datom) (.-v datom)]))
+                          (filter (fn [^datahike.datom.Datom datom]
+                                    (= tx (.-e datom)))
+                                  all-datoms)))
+        response (ok-response-from-report
+                  {::wire-data (tx-data->wire datoms)
+                   ::added (count (filter :added datoms))
+                   ::retracted (count (remove :added datoms))
+                   ::basis-t tx
+                   ::basis-t-before (dec tx)
+                   ::tempids (recovered-tempids db tx)
+                   ::tx-meta (not-empty tx-meta)
+                   ::wire-id wire-id
+                   ::recovered? true})
+        generated-eids (recovered-generated-eids datoms candidates)]
+    (cond-> response
+      (seq generated-eids)
+      (assoc :seon.store.wire/generated-eids generated-eids))))
+
+(defn- id-reuse-error
+  [wire-id expected-hash actual-hash]
+  (ex-info "A wire transaction id was reused for different transaction data."
+           {:seon.server.wire/error :seon.server.wire.error/id-reuse
+            :seon.store.wire/id wire-id
+            :seon.store.wire/expected-request-hash expected-hash
+            :seon.store.wire/actual-request-hash actual-hash}))
+
+(defn- recover-committed
+  [db tx wire-id expected-hash candidates]
+  (let [actual-hash (:seon.store.wire/request-hash (d/entity db tx))]
+    (if (= expected-hash actual-hash)
+      (recovered-response db tx wire-id candidates)
+      (throw (id-reuse-error wire-id expected-hash actual-hash)))))
+
+(defn- transact-once!
+  "Commit or recover one logical wire transaction under its durable id."
+  [conn request]
+  (locking conn
+    (let [tx-data     (:seon.store.wire/tx-data request)
+          tx-meta     (:seon.store.wire/tx-meta request)
+          wire-id     (:seon.store.wire/id request)
+          candidates  (:seon.store.wire/generated-candidates request)
+          generated?  (contains? request
+                                 :seon.store.wire/generated-candidates)
+          identity-attrs
+          (:seon.store.wire/generated-identity-attrs request)
+          _           (assert-protocol-fields-free! tx-data tx-meta)
+          db-value    (d/db conn)
+          schema      (:schema db-value)
+          tx0         (coerce-tx-data-for-schema schema tx-data)
+          fingerprint (when wire-id
+                        (request-hash
+                         {:seon.store.wire.request/version 1
+                          :seon.store.wire.request/tx-data tx-data
+                          :seon.store.wire.request/tx-meta (or tx-meta {})
+                          :seon.store.wire.request/generated-candidates
+                          (or candidates [])
+                          :seon.store.wire.request/generated-identity-attrs
+                          (or identity-attrs [])}))
+          recover-current
+          (fn []
+            (let [db (d/db conn)]
+              (when-let [tx (and wire-id
+                                 (committed-wire-transaction db wire-id))]
+                (recover-committed db tx wire-id fingerprint candidates))))]
+      (or (recover-current)
+          (let [caller-tempids (id/transaction-tempids
+                                {::id/db-value db-value
+                                 ::id/transaction-data tx0})
+                tx*            (augment-tx conn tx0)
+                tx-with-receipt (into (vec tx*)
+                                      (tempid-receipts wire-id caller-tempids))
+                tx-meta*       (cond-> (or tx-meta {})
+                                 wire-id
+                                 (assoc :seon.store.wire/id wire-id
+                                        :seon.store.wire/request-hash
+                                        fingerprint
+                                        :seon.store.wire/protocol-version 1))
+                transaction    (cond-> {:tx-data tx-with-receipt}
+                                 (seq tx-meta*) (assoc :tx-meta tx-meta*)
+                                 generated?
+                                 (assoc ::id/generated-candidates candidates
+                                        ::id/generated-identity-attrs
+                                        identity-attrs))]
+            (try
+              (let [report (d/transact conn transaction)
+                    response (ok-response-from-report
+                              (tx-report->ok-map report wire-id))
+                    generated-eids (::id/generated-eids report)]
+                (cond-> response
+                  (some? generated-eids)
+                  (assoc :seon.store.wire/generated-eids generated-eids)))
+              (catch Throwable throwable
+                ;; Another writer process may have won the unique-id race, or
+                ;; this process may have committed before losing its callback.
+                ;; The durable receipt is authoritative in either case.
+                (or (recover-current)
+                    (throw throwable)))))))))
 
 ;; Generated ids use this same transaction operation. The registry configures
 ;; Datahike's serialized writer with `seon.db.id`; this handler only forwards
@@ -486,109 +759,110 @@
          :seon.store.wire/generated-candidate candidate))
 
 (defmethod handle-op "transact" [conn req]
-  (let [tx          (:seon.store.wire/tx-data req)
-        tx-meta-in  (:seon.store.wire/tx-meta req)
-        write-id    (let [candidate (:seon.store.wire/write-id req)]
-                      (when (and candidate (not= "" candidate)) candidate))
+  (let [wire-id     (let [candidate (:seon.store.wire/id req)]
+                      (when (and (string? candidate)
+                                 (not (str/blank? candidate)))
+                        candidate))
         candidates  (:seon.store.wire/generated-candidates req)
         generated?  (contains? req
                                :seon.store.wire/generated-candidates)
-        identity-attrs
-        (:seon.store.wire/generated-identity-attrs req)
-        schema      (schema-of conn)
-        tx0         (coerce-tx-data-for-schema schema tx)
-        ;; Embed-on-write happens before the one Datahike transaction. The
-        ;; configured writer owns generated-id preflight and rewrite.
-        tx*         (augment-tx conn tx0)
-        tx-meta*    (cond-> (or tx-meta-in {})
-                      write-id (assoc :seon.store.wire/write-id write-id))
-        transaction (cond-> {:tx-data tx*}
-                      (seq tx-meta*)
-                      (assoc :tx-meta tx-meta*)
-                      generated?
-                      (assoc ::id/generated-candidates candidates
-                             ::id/generated-identity-attrs identity-attrs))]
-    (when generated?
-      (id/assert-allocation-writer! conn))
-    (try
-      (let [report   (d/transact conn transaction)
-            response (ok-response-from-report
-                      (tx-report->ok-map report write-id))
-            generated-eids (::id/generated-eids report)]
-        ;; Broadcast is driven by the per-conn Datahike listener. The custom
-        ;; writer adds generated eids only for allocation-aware transactions.
-        (ok (cond-> response
-              (some? generated-eids)
-              (assoc :seon.store.wire/generated-eids
-                     generated-eids))))
-      (catch Throwable throwable
-        (if generated?
-          (let [classified (id/classify-allocation-error
-                            {::id/generated-candidates candidates
-                             ::id/throwable throwable})]
-            (case (::id/error-status classified)
-              :seon.db.id/candidate-conflict
-              (generated-candidate-conflict
-               (::id/generated-candidate classified))
+        transaction-request (assoc req :seon.store.wire/id wire-id)]
+    (if-not wire-id
+      (err "protocol" "transact requires a nonblank :seon.store.wire/id")
+      (try
+        (when generated?
+          (id/assert-allocation-writer! conn))
+        (ok (transact-once! conn transaction-request))
+        (catch Throwable throwable
+          (let [server-error (:seon.server.wire/error (ex-data throwable))]
+            (cond
+              (= :seon.server.wire.error/id-reuse server-error)
+              (err "wire-id-conflict" (.getMessage throwable))
 
-              :seon.db.id/protocol-error
-              (err "protocol" (::id/message classified))
+              (= :seon.server.wire.error/reserved-attribute server-error)
+              (err "protocol" (.getMessage throwable))
 
-              :seon.db.id/unrelated
-              (throw throwable)))
-          (throw throwable))))))
+              generated?
+              (let [classified (id/classify-allocation-error
+                                {::id/generated-candidates candidates
+                                 ::id/throwable throwable})]
+                (case (::id/error-status classified)
+                  :seon.db.id/candidate-conflict
+                  (generated-candidate-conflict
+                   (::id/generated-candidate classified))
+
+                  :seon.db.id/protocol-error
+                  (err "protocol" (::id/message classified))
+
+                  :seon.db.id/unrelated
+                  (throw throwable)))
+
+              :else
+              (throw throwable))))))))
 
 (defmethod handle-op "transact-batch" [conn req]
   (let [tx-data-list (vec (:seon.store.wire/tx-data-list req))
         tx-meta-list (some-> (:seon.store.wire/tx-meta-list req) vec)
-        write-ids    (:seon.store.wire/write-ids req)
+        wire-ids     (:seon.store.wire/ids req)
         n            (count tx-data-list)
-        schema       (schema-of conn)
         per-tx-report
-        (fn [idx tx tx-meta-in write-id]
-          (let [tx0      (coerce-tx-data-for-schema schema tx)
-                ;; Embed-on-write (per-tx in the batch): same seam as the
-                ;; single "transact" handler. Re-reads (d/db conn) each tx so
-                ;; an earlier batch tx's stored hash is visible to a later one.
-                tx*      (augment-tx conn tx0)
-                ;; Carry the wire write-id through tx-meta so the per-conn
-                ;; ::raw-broadcast listener emits it on the pub event (it
-                ;; fires on the writer thread, after the request thread).
-                tx-meta* (cond-> (or tx-meta-in {})
-                           write-id (assoc :seon.store.wire/write-id write-id))
-                report   (if (seq tx-meta*)
-                           (d/transact conn {:tx-data tx* :tx-meta tx-meta*})
-                           (d/transact conn tx*))
-                r        (tx-report->ok-map report write-id)]
-            ;; Broadcast is NOT imperative here — the ::raw-broadcast listener
-            ;; fires per commit. Response-side write-id flows via r.
-            (assoc (ok-response-from-report r) :seon.store.wire/index idx)))]
-    (loop [idx 0 wire-reports (transient [])]
-      (if (>= idx n)
-        (ok {:seon.store.wire/reports (persistent! wire-reports)
-             :seon.store.wire/applied idx
-             :seon.store.wire/total   n})
-        (let [tx         (nth tx-data-list idx)
-              tx-meta-in (some-> tx-meta-list (nth idx nil))
-              write-id   (let [r (some-> write-ids (nth idx nil))]
-                           (when (and r (not= "" r)) r))
-              result     (try
-                           {:ok (per-tx-report idx tx tx-meta-in write-id)}
-                           (catch clojure.lang.ExceptionInfo e
-                             {:err {:kind "datahike"
-                                    :msg  (str (.getMessage e) " " (pr-str (ex-data e)))}})
-                           (catch Throwable t
-                             {:err {:kind "internal"
-                                    :msg  (.toString t)}}))]
-          (if-let [ok-rep (:ok result)]
-            (recur (inc idx) (conj! wire-reports ok-rep))
-            (let [{:keys [kind msg]} (:err result)]
-              (ok {:seon.store.wire/reports    (persistent! wire-reports)
-                   :seon.store.wire/applied    idx
-                   :seon.store.wire/total      n
-                   :seon.store.wire/failed-at  idx
-                   :seon.store.wire/error      msg
-                   :seon.store.wire/error-kind kind}))))))))
+        (fn [idx tx tx-meta-in wire-id]
+          (assoc
+           (transact-once!
+            conn
+            (cond-> {:seon.store.wire/tx-data tx}
+              (seq tx-meta-in)
+              (assoc :seon.store.wire/tx-meta tx-meta-in)
+              (and (string? wire-id) (not (str/blank? wire-id)))
+              (assoc :seon.store.wire/id wire-id)))
+           :seon.store.wire/index idx))]
+    (if-not (and (vector? wire-ids)
+                 (= n (count wire-ids))
+                 (every? #(and (string? %) (not (str/blank? %))) wire-ids)
+                 (= n (count (distinct wire-ids))))
+      (err "protocol"
+           "transact-batch requires one distinct nonblank :seon.store.wire/id per transaction")
+      (locking conn
+        (loop [idx 0 wire-reports (transient [])]
+          (if (>= idx n)
+            (ok {:seon.store.wire/reports (persistent! wire-reports)
+                 :seon.store.wire/applied idx
+                 :seon.store.wire/total   n})
+            (let [tx         (nth tx-data-list idx)
+                  tx-meta-in (some-> tx-meta-list (nth idx nil))
+                  wire-id    (nth wire-ids idx)
+                  result     (try
+                               {::success (per-tx-report idx tx tx-meta-in wire-id)}
+                               (catch clojure.lang.ExceptionInfo e
+                                 (let [server-error (:seon.server.wire/error
+                                                     (ex-data e))]
+                                   {::failure
+                                    {::failure-kind
+                                     (case server-error
+                                       :seon.server.wire.error/id-reuse
+                                       "wire-id-conflict"
+
+                                       :seon.server.wire.error/reserved-attribute
+                                       "protocol"
+
+                                       "datahike")
+                                     ::failure-message
+                                     (str (.getMessage e) " "
+                                          (pr-str (ex-data e)))}}))
+                               (catch Throwable throwable
+                                 {::failure
+                                  {::failure-kind "internal"
+                                   ::failure-message (.toString throwable)}}))]
+              (if-let [ok-rep (::success result)]
+                (recur (inc idx) (conj! wire-reports ok-rep))
+                (let [{kind ::failure-kind
+                       msg ::failure-message} (::failure result)]
+                  (ok {:seon.store.wire/reports    (persistent! wire-reports)
+                       :seon.store.wire/applied    idx
+                       :seon.store.wire/total      n
+                       :seon.store.wire/failed-at  idx
+                       :seon.store.wire/error      msg
+                       :seon.store.wire/error-kind kind}))))))))))
 
 (defmethod handle-op "pull" [conn req]
   (let [selector (:seon.store.wire/selector req)

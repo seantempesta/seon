@@ -15,7 +15,7 @@
      synthesizes the tx-report from the ack + a local RYOW re-deref.
      The JVM is the SOLE writer on the store.
    - CHANGE NOTIFICATION: `start-listen-adapter!` subscribes to the
-     wire tx feed; on each FOREIGN tx event (own write-ids skipped —
+     wire tx feed; on each FOREIGN tx event (own wire ids skipped —
      own txs already fire the conn's native listeners via
      `datahike.writer/transact!`) it re-derefs and fires the conn's
      NATIVE `d/listen` listeners with a synthesized raw tx-report. So
@@ -277,71 +277,115 @@
 ;; returns a promise-chan the writer go-loop consumes.
 ;; ---------------------------------------------------------------------------
 
-(def !own-write-ids
-  "write-ids of txs THIS pod dispatched — the wire-protocol per-write
-   ECHO-SUPPRESSION set. The pod mints a UUID per forwarded write; the
-   wire-server threads it into the committed tx-meta under
-   `:seon.store.wire/write-id` and echoes it back on the broadcast feed.
-   The listen adapter skips a feed event whose write-id is in this set
-   (own txs already fired the conn's native listeners via
-   `datahike.writer/transact!`)."
-  (atom #{}))
+(def !transactions
+  "In-flight wire transactions keyed by their durable `:seon.store.wire/id`.
+
+   Each entry is pending or response-resolved and may carry the basis-t of an
+   already-suppressed feed event. Keeping this tiny state machine, instead of a
+   bare id set, lets a same-id retry recover a lost reply without either firing
+   native listeners twice or losing the feed event when every reply is lost."
+  (atom {}))
 
 (declare !adapter fire-own-tx-listeners!)
 
-(defn- committed-write-tx
-  "The basis-t at which `write-id` committed, or nil if not observed.
+(defn- begin-transaction!
+  [wire-id]
+  (swap! !transactions assoc wire-id {::status ::pending}))
 
-   Reads the LOCAL store (follow-the-store deref — no wire round-trip): the
-   wire-server threads every forwarded write's id into the committed tx-meta
-   as a `:seon.store.wire/write-id` datom on the tx entity, so a plain query
-   over the current db answers commit-or-not for a transact whose rpc reply
-   was lost."
-  [db write-id]
-  (d/q '[:find ?tx . :in $ ?wid :where [?tx :seon.store.wire/write-id ?wid]]
-       db write-id))
+(defn- resolve-transaction!
+  "Mark a successful response. Returns true when its feed was already skipped."
+  [wire-id basis-t]
+  (let [entry (get @!transactions wire-id)
+        feed? (some? (::feed-t entry))]
+    (if (or feed? (not (:started? @!adapter)))
+      (swap! !transactions dissoc wire-id)
+      (swap! !transactions assoc wire-id
+             (assoc entry ::status ::resolved ::basis-t basis-t)))
+    feed?))
 
-(defn- transact-rpc-failure
-  "DEFINED semantics for a transact whose rpc failed before a reply was read
-   (timeout / transport / socket closed): the server may or may not have
-   committed — resolve the ambiguity instead of reporting a silent maybe.
+(defn- prune-resolved-transactions!
+  [basis-t]
+  (swap! !transactions
+         (fn [transactions]
+           (into {}
+                 (remove (fn [[_ transaction]]
+                           (and (= ::resolved (::status transaction))
+                                (some? (::basis-t transaction))
+                                (<= (::basis-t transaction) basis-t))))
+                 transactions))))
 
-   1. Drop `write-id` from the echo-suppression set: IF the write did (or
-      later does) land, its feed event now dispatches as FOREIGN and fires
-      the conn's native listeners — the wake is not lost.
-   2. Check the local store for the committed write-id. If it committed and
-      the feed already applied it (own-skip, before step 1), fire the native
-      listeners now from local history — they were suppressed for a tx the
-      caller is about to be told failed.
-   3. Return an ex-info whose message AND ex-data state commit-or-not
-      (`:seon.store.wire/committed?` + `:seon.store.wire/basis-t`), so the
-      caller can retry a NOT-committed write and must NOT re-send a
-      committed one."
-  [conn write-id e]
-  (swap! !own-write-ids disj write-id)
-  (let [flavor     (:seon.store.wire/rpc-failure (ex-data e))
-        db         @conn
-        tx-t       (committed-write-tx db write-id)
-        committed? (some? tx-t)]
-    (when (and committed?
-               (some-> (:last-applied-t @!adapter) (>= tx-t)))
-      (fire-own-tx-listeners! conn tx-t))
+(defn- reject-transaction!
+  [wire-id]
+  (swap! !transactions dissoc wire-id))
+
+(defn- ambiguous-transaction-error
+  [conn wire-id attempts error]
+  (let [feed-t (::feed-t (get @!transactions wire-id))]
+    (swap! !transactions dissoc wire-id)
+    (when feed-t
+      (fire-own-tx-listeners! conn feed-t))
     (ex-info
-     (str "wire transact "
-          (case flavor
-            :timeout "TIMED OUT waiting for the reply"
-            :closed  "lost its connection before the reply"
-            "hit a transport error")
-          " (" (or (.-message e) (str e)) ") — commit status: "
-          (if committed?
-            (str "COMMITTED at basis-t " tx-t
-                 " (the reply was lost, not the write). Do NOT re-send this tx.")
-            (str "NOT observed in the store as of basis-t " (:max-tx db)
-                 ". Safe to retry; if it lands later, listeners still fire.")))
-     {:seon.store.wire/write-id   write-id
-      :seon.store.wire/committed? committed?
-      :seon.store.wire/basis-t    (or tx-t (:max-tx db))
-      :seon.error/kind            :core-bug})))
+     (str "wire transaction lost every reply after " attempts
+          " idempotent attempt(s); commit status remains unknown. "
+          "The transaction must only be retried with the same wire id.")
+     {:seon.store.wire/id wire-id
+      :seon.store.wire/status :seon.store.wire.status/unknown
+      :seon.store.wire/attempts attempts
+      :seon.store.wire/basis-t (:max-tx @conn)
+      :seon.store.wire/rpc-failure
+      (:seon.store.wire/rpc-failure (ex-data error))
+      :seon.error/kind :core-bug}
+     error)))
+
+(defn- transact-rpc!
+  "Send one frozen request, resubmitting the same durable id on reply loss."
+  [sock-path request attempt]
+  (-> (wire/rpc sock-path request {:timeout-ms wire/transact-timeout-ms})
+      (.catch
+       (fn [error]
+         (if (< attempt wire/transact-attempts)
+           (do
+             (js/console.warn
+              (str "[seon.store.wire] transaction reply lost; retrying the same id "
+                   (:seon.store.wire/id request) " (attempt " (inc attempt)
+                   "/" wire/transact-attempts ")"))
+             (transact-rpc! sock-path request (inc attempt)))
+           (js/Promise.reject error))))))
+
+(defn- rejected-response-error
+  [response generated?]
+  (let [error-kind (:seon.store.wire/error-kind response)
+        candidate  (:seon.store.wire/generated-candidate response)
+        allocator-protocol? (and generated? (= "protocol" error-kind))]
+    (ex-info
+     (str "wire transaction failed: " (:seon.store.wire/error response))
+     (cond->
+      {::error-kind error-kind
+       :seon.error/kind
+       (if (= "generated-candidate-conflict" error-kind)
+         :user-input
+         :core-bug)}
+       (= "generated-candidate-conflict" error-kind)
+       (assoc :seon.db.id/error :seon.db.id.error/candidate-conflict)
+       candidate
+       (assoc :seon.db.id/generated-candidate candidate)
+       allocator-protocol?
+       (assoc :seon.db.id/error
+              :seon.db.id.error/invalid-allocation-transaction)))))
+
+(defn- response-processing-error
+  [conn wire-id response error]
+  (let [feed-t (::feed-t (get @!transactions wire-id))]
+    (reject-transaction! wire-id)
+    (when feed-t
+      (fire-own-tx-listeners! conn feed-t))
+    (ex-info
+     "A committed wire transaction reply could not be materialized locally."
+     {:seon.store.wire/id wire-id
+      :seon.store.wire/status :seon.store.wire.status/committed
+      :seon.store.wire/basis-t (:seon.store.wire/basis-t response)
+      :seon.error/kind :core-bug}
+     error)))
 
 (defrecord SeonWireWriter [sock-path conn]
   w/PWriter
@@ -366,14 +410,14 @@
               generated-identity-attrs
               (when (map? arg-map)
                 (:seon.db.id/generated-identity-attrs arg-map))
-              write-id   (str (random-uuid))
+              wire-id    (str (random-uuid))
               ;; Every write is db-name-routed to THIS pod's cluster db —
               ;; N pods can share one wire-server without ambient-conn
               ;; cross-talk (the registry resolves the conn per request).
               req        (cond-> {:seon.store.wire/op       "transact"
                                   :seon.store.wire/db-name  cluster-name
                                   :seon.store.wire/tx-data  tx-data
-                                  :seon.store.wire/write-id write-id}
+                                  :seon.store.wire/id       wire-id}
                            (seq tx-meta)
                            (assoc :seon.store.wire/tx-meta tx-meta)
                            generated?
@@ -382,8 +426,8 @@
                            generated-attrs-present?
                            (assoc :seon.store.wire/generated-identity-attrs
                                   generated-identity-attrs))]
-          (swap! !own-write-ids conj write-id)
-          (-> (wire/rpc sock-path req {:timeout-ms wire/transact-timeout-ms})
+          (begin-transaction! wire-id)
+          (-> (transact-rpc! sock-path req 1)
               (.then
                (fn [resp]
                  ;; A reply WAS read — no commit ambiguity from here on. Any
@@ -391,21 +435,9 @@
                  ;; is put directly, so the .catch below stays rpc-layer-only.
                  (try
                    (if-not (:seon.store.wire/ok resp)
-                     (put! p (ex-info (str "wire transact failed: "
-                                           (:seon.store.wire/error resp))
-                                      (cond->
-                                        {::error-kind
-                                         (:seon.store.wire/error-kind resp)
-                                         :seon.error/kind :user-input}
-                                        (= "generated-candidate-conflict"
-                                           (:seon.store.wire/error-kind resp))
-                                        (assoc :seon.db.id/error
-                                               :seon.db.id.error/candidate-conflict)
-                                        (:seon.store.wire/generated-candidate resp)
-                                        (assoc
-                                          :seon.db.id/generated-candidate
-                                          (:seon.store.wire/generated-candidate
-                                           resp)))))
+                     (do
+                       (reject-transaction! wire-id)
+                       (put! p (rejected-response-error resp generated?)))
                      ;; RYOW: resolve only once a local deref is at/past
                      ;; the ack'd basis-t. The synthesized report carries
                      ;; the MATERIALIZED post-tx db value, so straight-line
@@ -415,11 +447,12 @@
                            tempids (:seon.store.wire/tempids resp)
                            tx-meta (:seon.store.wire/tx-meta resp)
                            generated-eids
-                           (:seon.store.wire/generated-eids resp)]
-                       (put! p (cond-> {:db-after db
-                                        :tx-data  (wire-datoms->datoms
-                                                   (:seon.store.wire/tx-data resp))
-                                        :tempids  (or tempids {})
+                           (:seon.store.wire/generated-eids resp)
+                           report
+                           (cond-> {:db-after db
+                                    :tx-data  (wire-datoms->datoms
+                                               (:seon.store.wire/tx-data resp))
+                                    :tempids  (or tempids {})
                                         ;; The sole writer (JVM wire-server)
                                         ;; computes the honest added/retracted
                                         ;; split over the REAL :added flags
@@ -428,27 +461,29 @@
                                         ;; `transact-success-envelope` reports
                                         ;; them verbatim instead of re-deriving
                                         ;; from reconstituted datoms.
-                                        :datoms-added     (:seon.store.wire/datoms-added resp)
-                                        :datoms-retracted (:seon.store.wire/datoms-retracted resp)}
-                                 (seq generated-eids)
-                                 (assoc :seon.db.id/generated-eids
-                                        generated-eids)
-                                 (some? tx-meta) (assoc :tx-meta tx-meta)
-                                 (:seon.store.wire/basis-t-before resp)
-                                 (assoc :db-before
-                                        (d/as-of db (:seon.store.wire/basis-t-before resp)))))))
+                                    :datoms-added     (:seon.store.wire/datoms-added resp)
+                                    :datoms-retracted (:seon.store.wire/datoms-retracted resp)}
+                             (seq generated-eids)
+                             (assoc :seon.db.id/generated-eids generated-eids)
+                             (:seon.store.wire/recovered? resp)
+                             (assoc :seon.store.wire/recovered? true)
+                             (some? tx-meta) (assoc :tx-meta tx-meta)
+                             (:seon.store.wire/basis-t-before resp)
+                             (assoc :db-before
+                                    (d/as-of db
+                                             (:seon.store.wire/basis-t-before
+                                              resp))))]
+                       (resolve-transaction! wire-id bt)
+                       (put! p report)))
                    (catch :default e
-                     (put! p e)))))
+                     (put! p (response-processing-error conn wire-id resp e))))))
               (.catch
                (fn [e]
-                 ;; The rpc failed BEFORE a reply was read — the write may or
-                 ;; may not have committed. Resolve the ambiguity honestly.
-                 (put! p (try
-                           (transact-rpc-failure conn write-id
-                                                 (if (instance? js/Error e)
-                                                   e
-                                                   (js/Error. (str e))))
-                           (catch :default e2 e2))))))))
+                 (put! p (ambiguous-transaction-error
+                          conn wire-id wire/transact-attempts
+                          (if (instance? js/Error e)
+                            e
+                            (js/Error. (str e))))))))))
       p))
   (-shutdown [_] nil)
   (-streaming? [_] false))
@@ -520,11 +555,9 @@
 (defn- fire-own-tx-listeners!
   "Fire the conn's native listeners for OWN tx `tx-t` from local history.
 
-   Used by [[transact-rpc-failure]] when a timed-out transact turns out to
-   have COMMITTED and the feed already echo-suppressed its event: the
-   listeners were skipped for a tx whose caller is being told 'failed', so
-   the wake must be synthesized here. Reads are local (follow-the-store),
-   so the committing tx's datoms come straight from the history index."
+   Used only when every same-id reply was lost after the feed already
+   suppressed the commit. Reads are local (follow-the-store), so the
+   committing tx's datoms come straight from the history index."
   [conn tx-t]
   (try
     (let [db (ryow-deref! conn tx-t)
@@ -538,7 +571,7 @@
                        tx-t ":" (str e)))))
 
 (defn- handle-feed-event! [conn ev]
-  (let [wid          (:seon.store.wire/write-id ev)
+  (let [wid          (:seon.store.wire/id ev)
         bt           (:seon.store.wire/basis-t ev)
         last-applied (:last-applied-t @!adapter)]
     (cond
@@ -551,14 +584,20 @@
       (and (some? bt) (some? last-applied) (<= bt last-applied))
       nil
 
-      ;; Own tx already fired the native listeners via writer/transact!;
-      ;; just advance the watermark + chain, drop the id.
-      (boolean (and wid (contains? @!own-write-ids wid)))
-      (do (swap! !own-write-ids disj wid)
-          (swap! !adapter #(-> %
-                               (update :own-skips (fnil inc 0))
-                               (assoc :last-db (ryow-deref! conn bt)
-                                      :last-applied-t bt))))
+      ;; An in-flight or response-resolved own transaction. Pending feed-first
+      ;; state retains the basis-t for terminal recovery; response-first state
+      ;; removes on this matching feed. In both cases the response-side native
+      ;; Datahike wrapper is the one listener delivery.
+      (boolean (and wid (get @!transactions wid)))
+      (let [transaction (get @!transactions wid)
+            db          (ryow-deref! conn bt)]
+        (if (= ::resolved (::status transaction))
+          (swap! !transactions dissoc wid)
+          (swap! !transactions assoc-in [wid ::feed-t] bt))
+        (swap! !adapter #(-> %
+                             (update :own-skips (fnil inc 0))
+                             (assoc :last-db db :last-applied-t bt)))
+        (prune-resolved-transactions! bt))
 
       ;; FOREIGN tx (another agent / a human message — incl. every tx that
       ;; landed during a feed gap, since the pod can't write while the UDS is
@@ -573,6 +612,7 @@
                                            (:seon.store.wire/tx-data ev))}
                         (some? tx-meta) (assoc :tx-meta tx-meta))]
         (swap! !adapter assoc :last-db db :last-applied-t bt)
+        (prune-resolved-transactions! bt)
         (fire-native-listeners! conn report)))))
 
 (defn- feed-event-dispatch!

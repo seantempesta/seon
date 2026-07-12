@@ -167,7 +167,7 @@
     :seon.db/agent-id
     :seon.db/eval-id
     :seon.db/origin
-    :seon.store.wire/write-id})
+    :seon.store.wire/id})
 
 (defn- source-attrs
   "LEGACY fallback: regex-scan `src` for qualified keyword literals.

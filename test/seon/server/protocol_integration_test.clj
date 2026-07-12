@@ -9,15 +9,14 @@
      - test-tx-data-shape-on-pub                    ~ datahike.test.listen-test (datom shape assertion)
      - test-pub-does-not-fire-on-read-ops           (new — protocol invariant)
      - test-transact-returns-updated-basis-t        ~ datahike.test.transact (basis-t monotonicity)
-     - test-request-id-round-trips                  (new — gap #2 prep)
+     - test-wire-id-round-trips                     (new — gap #2 prep)
      - test-schema-altering-tx-shape                ~ datahike.test.transact (schema attrs)
 
    Each test is independent; the writer subprocess is started in
    `(use-fixtures :each ...)` and killed in teardown."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [seon.server.test-util :as tu :refer [*ctx*]]
-            [seon.server.client :as client])
-  (:import [java.util UUID]))
+            [seon.server.client :as client]))
 
 (set! *warn-on-reflection* true)
 
@@ -31,16 +30,21 @@
   (with-open [ch (client/connect (:req-sock *ctx*))]
     (client/call! ch (merge {:seon.store.wire/op op} extra))))
 
+(defn- transact! [wire-id tx-data]
+  (req! "transact"
+        {:seon.store.wire/id wire-id
+         :seon.store.wire/tx-data tx-data}))
+
 (defn- attrs-of [tx-data]
   ;; Under the uniform Transit frame, each datom is [e a v t op] with a as a
   ;; native keyword attr and v native — no decode.
   (set (map #(nth % 1) tx-data)))
 
 (defn- install-person-schema! []
-  (req! "transact"
-        {:seon.store.wire/tx-data
-         [{:db/ident :person/name :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
-          {:db/ident :person/age  :db/valueType :db.type/long   :db/cardinality :db.cardinality/one}]}))
+  (transact!
+   "protocol/person-schema"
+   [{:db/ident :person/name :db/valueType :db.type/string :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}
+    {:db/ident :person/age  :db/valueType :db.type/long   :db/cardinality :db.cardinality/one}]))
 
 (defn- await-pub-events [n timeout-ms]
   (let [events (atom [])
@@ -66,8 +70,10 @@
 (deftest test-transact-returns-updated-basis-t
   (testing "every transact bumps basis-t (single-writer monotonicity)"
     (let [r1 (install-person-schema!)
-          r2 (req! "transact" {:seon.store.wire/tx-data [{:person/name "alice" :person/age 33}]})
-          r3 (req! "transact" {:seon.store.wire/tx-data [{:person/name "bob"   :person/age 41}]})]
+          r2 (transact! "protocol/monotonic/alice"
+                        [{:person/name "alice" :person/age 33}])
+          r3 (transact! "protocol/monotonic/bob"
+                        [{:person/name "bob" :person/age 41}])]
       (is (= true (:seon.store.wire/ok r1)))
       (is (= true (:seon.store.wire/ok r2)))
       (is (= true (:seon.store.wire/ok r3)))
@@ -85,8 +91,8 @@
           (client/start-pub-collector! (:pub-sock *ctx*) events)]
       (try
         (let [r1 (install-person-schema!)
-              r2 (req! "transact" {:seon.store.wire/tx-data [{:person/name "alex"}]})
-              r3 (req! "transact" {:seon.store.wire/tx-data [{:person/name "boris"}]})]
+              r2 (transact! "protocol/pub/alex" [{:person/name "alex"}])
+              r3 (transact! "protocol/pub/boris" [{:person/name "boris"}])]
           ;; Wait briefly for the pub fanout
           (Thread/sleep 250)
           (is (= 3 (count @events))
@@ -108,7 +114,8 @@
           ^java.nio.channels.SocketChannel pub-ch
           (client/start-pub-collector! (:pub-sock *ctx*) events)]
       (try
-        (let [r (req! "transact" {:seon.store.wire/tx-data [{:person/name "dima" :person/age 19}]})
+        (let [r (transact! "protocol/tx-data-shape/dima"
+                           [{:person/name "dima" :person/age 19}])
               _ (Thread/sleep 250)
               ev (first @events)
               tx-data (:seon.store.wire/tx-data ev)]
@@ -133,7 +140,8 @@
 (deftest test-pub-does-not-fire-on-read-ops
   (testing "protocol invariant: q and pull are pure reads, no pub event"
     (install-person-schema!)
-    (req! "transact" {:seon.store.wire/tx-data [{:person/name "alice" :person/age 33}]})
+    (transact! "protocol/read-ops/alice"
+               [{:person/name "alice" :person/age 33}])
     ;; Drain the events from the writes above, then watch for new ones during reads.
     (Thread/sleep 200)
     (let [events (atom [])
@@ -163,7 +171,7 @@
           ^java.nio.channels.SocketChannel pub-ch
           (client/start-pub-collector! (:pub-sock *ctx*) events)]
       (try
-        (let [r (req! "transact" {:seon.store.wire/tx-data [{:person/name "alex"}]})
+        (let [r (transact! "protocol/tx-meta/alex" [{:person/name "alex"}])
               _ (Thread/sleep 250)
               ev (first @events)
               r-meta  (:seon.store.wire/tx-meta r)
@@ -180,40 +188,50 @@
               "response and pub event carry identical tx-meta"))
         (finally (.close pub-ch))))))
 
-(deftest test-write-id-round-trips
-  (testing "a caller-supplied write-id is echoed on the response AND on the
+(deftest test-wire-id-round-trips
+  (testing "a caller-supplied wire-id is echoed on the response AND on the
             pub event. This is the primitive own-tx dedup is built on."
     (install-person-schema!)
     (let [events (atom [])
           ^java.nio.channels.SocketChannel pub-ch
           (client/start-pub-collector! (:pub-sock *ctx*) events)
-          rid    (str (UUID/randomUUID))]
+          rid    "protocol/wire-id-roundtrip"]
       (try
-        (let [r (req! "transact" {:seon.store.wire/tx-data [{:person/name "alex"}]
-                                  :seon.store.wire/write-id rid})
+        (let [r (transact! rid [{:person/name "alex"}])
               _ (Thread/sleep 250)
               ev (first @events)]
-          (is (= rid (:seon.store.wire/write-id r))
-              "response carries the same write-id")
-          (is (= rid (:seon.store.wire/write-id ev))
-              "pub event carries the same write-id"))
+          (is (= rid (:seon.store.wire/id r))
+              "response carries the same wire-id")
+          (is (= rid (:seon.store.wire/id ev))
+              "pub event carries the same wire-id"))
         (finally (.close pub-ch))))))
 
-(deftest test-write-id-absent-when-not-supplied
-  (testing "write-id is optional — when absent on the request, neither
-            response nor pub event includes it"
+(deftest test-missing-wire-id-rejects-without-a-commit
+  (testing "a transact without the required wire-id is rejected before commit"
     (install-person-schema!)
-    (let [events (atom [])
+    (let [before (req! "q"
+                       {:seon.store.wire/query
+                        '[:find ?e :where [?e :person/name "alex"]]
+                        :seon.store.wire/args []})
+          events (atom [])
           ^java.nio.channels.SocketChannel pub-ch
           (client/start-pub-collector! (:pub-sock *ctx*) events)]
       (try
         (let [r (req! "transact" {:seon.store.wire/tx-data [{:person/name "alex"}]})
               _ (Thread/sleep 250)
-              ev (first @events)]
-          (is (nil? (:seon.store.wire/write-id r))
-              "no write-id on response")
-          (is (nil? (:seon.store.wire/write-id ev))
-              "no write-id on pub event"))
+              after (req! "q"
+                          {:seon.store.wire/query
+                           '[:find ?e :where [?e :person/name "alex"]]
+                           :seon.store.wire/args []})]
+          (is (false? (:seon.store.wire/ok r)))
+          (is (= "protocol" (:seon.store.wire/error-kind r)))
+          (is (= (:seon.store.wire/basis-t before)
+                 (:seon.store.wire/basis-t after))
+              "the rejected request does not advance the database")
+          (is (empty? (:seon.store.wire/result after))
+              "the rejected person datom is absent")
+          (is (empty? @events)
+              "a rejected request emits no transaction event"))
         (finally (.close pub-ch))))))
 
 (deftest test-schema-altering-tx
@@ -239,8 +257,8 @@
 (deftest test-tempids-round-trip
   (testing "tempids in tx-data resolve to entity ids returned in the response"
     (install-person-schema!)
-    (let [r (req! "transact"
-                  {:seon.store.wire/tx-data [{:db/id -1 :person/name "alice" :person/age 33}]})
+    (let [r (transact! "protocol/tempids/alice"
+                       [{:db/id -1 :person/name "alice" :person/age 33}])
           tempids (:seon.store.wire/tempids r)]
       (is (= true (:seon.store.wire/ok r)))
       (is (map? tempids) "tempids is a map")
