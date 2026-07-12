@@ -15,9 +15,36 @@ operation meaning, and summaries from the graph whenever their processing cost
 is acceptable.
 
 This design is intentionally not an authentication or authorization system. It
-does not assign owners or permissions to domain entities. Future security may
-validate authenticated actors before submission, but provenance only records
-what asserted committed facts.
+does not assign owners or permissions to domain entities. “Database user” is a
+Unix-like provenance identity: the system, agent, or human execution identity
+that submitted the transaction. Future security may authenticate and authorize
+that user before submission, but provenance only records which user asserted
+committed facts.
+
+## Record resulting facts, not processing descriptions
+
+The durable database records what became true after processing. It does not
+record an imperative trace of how code arrived there merely because the trace
+was available at runtime.
+
+Examples:
+
+- store the route, function, message, error, or plan datoms that resulted;
+- store the transaction's database user because “this user asserted these
+  datoms” is itself a durable fact;
+- store the turn ref only when “this transaction occurred within this turn” is
+  needed to recover arbitrary turn work that domain refs cannot otherwise join;
+- do not store `replay?`, `resume-marker?`, `operation`, `generation`, or
+  `origin` when they only describe branches the program took;
+- do not store counts, summaries, status labels, or source classifications that
+  a query over the resulting graph can derive.
+
+This rule also constrains system users. A distinct user is justified by a
+durable identity that performs writes, not merely because two functions or
+lifecycle phases exist. “Boot” and “config” remain candidates until the audit
+proves whether they are genuinely distinct database users. If their resulting
+facts are already distinguishable by identity attributes and connections, one
+system user may be sufficient.
 
 ## The minimum missing fact
 
@@ -26,31 +53,35 @@ supply their normal links to agents, turns, evals, messages, and runs. The
 missing fact needed for provenance and scoped reconciliation is:
 
 ```text
-datom → transaction → actor
+datom → transaction → database user
 ```
 
 The fresh schema starts with only two proposed attributes:
 
 | Attribute | Shape | Purpose |
 |---|---|---|
-| `:seon.actor/id` | unique keyword identity | Lookup stable system actors |
-| `:seon.tx/actor` | cardinality-one ref | State which entity asserted the transaction's datoms |
+| `:seon.db.user/id` | unique keyword identity | Lookup stable system database users |
+| `:seon.db/user` | cardinality-one ref | Reference the database user that asserted the transaction's datoms |
 
-Initial candidate system actors:
+Initial candidate system database users:
 
-- `:seon.actor/root` — explicit administrative and root seed changes;
-- `:seon.actor/boot` — facts derived from compiled core code and required core
+- `:seon.db.user/root` — explicit administrative and root seed changes;
+- `:seon.db.user/boot` — facts derived from compiled core code and required core
   seed data;
-- `:seon.actor/config` — facts derived from configuration.
+- `:seon.db.user/config` — facts derived from configuration.
 
 Config is distinct from boot because its desired set changes independently and
-must be reconciled independently. Agent-originated transactions should point to
-the agent entity directly if the common ref schema permits it; do not create a
-duplicate actor row merely to restate agent identity.
+must be reconciled independently, but that does not by itself prove it is a
+different user. Reconciliation scope may follow the facts' identity attributes
+instead. Agent-originated transactions should point to the agent entity directly
+if the common ref schema permits it; do not create a duplicate user row merely
+to restate agent identity.
 
-The exact actor list remains draft until the transaction inventory proves the
-queries. A migration actor or human actor is added only when a real operation
-cannot be represented by root or an existing durable entity.
+The exact user list remains draft until the transaction inventory proves the
+queries. An agent or human may be referenced through its existing entity rather
+than duplicated as a second user entity; the shared-ref query and schema must be
+proven first. A migration or other system user is added only when a real query
+requires that distinction.
 
 ## Facts deliberately not stored
 
@@ -76,24 +107,24 @@ is not a derived classification.
 
 ### Assertions derived from core code
 
-Find current datoms whose transaction references the boot actor. This bounds
+Find current datoms whose transaction references the boot user. This bounds
 the current core reconciliation candidates without treating every program
 entity as core data.
 
 ### Assertions derived from configuration
 
-Find current datoms whose transaction references the config actor. Config can
+Find current datoms whose transaction references the config user. Config can
 then add, change, or remove its facts without scanning agent-authored data.
 
 ### Assertions made by an agent
 
-Join a datom's transaction through `:seon.tx/actor` to `:seon.agent/id`. This is
+Join a datom's transaction through `:seon.db/user` to `:seon.agent/id`. This is
 useful for debugging, UI recency, and protecting agent-authored program data
 from boot reconciliation.
 
 ### Previously asserted facts no longer current
 
-For deleted or replaced identities, run the same actor-constrained query over
+For deleted or replaced identities, run the same user-constrained query over
 Datahike history. It must also constrain known identity and relevant attribute
 sets. A generic scan over all live datoms and their earliest visible
 transactions is neither required nor correct.
@@ -103,7 +134,7 @@ fresh in-memory database before the schema is ratified.
 
 ## Provenance is per datom
 
-An entity can accumulate facts asserted by different actors. That is a feature,
+An entity can accumulate facts asserted by different database users. That is a feature,
 not a modeling failure. Reconciliation therefore compares and retracts specific
 attributes/datoms rather than declaring that one process owns an entire entity.
 
@@ -125,11 +156,11 @@ written.
 
 Each reconciliation process knows:
 
-- its actor;
+- its database user;
 - the identity attributes it may produce;
 - the attributes calculated by its input;
 - its complete desired value;
-- the relevant current/historical datoms asserted by that actor.
+- the relevant current/historical datoms asserted by that user.
 
 Pure functions calculate:
 
@@ -190,7 +221,7 @@ continue from durable run/FSM facts. Do not mint it or overwrite initial state.
 ### Agent eval
 
 Evaluate in the agent namespace, persist the eval/result and any newly authored
-program facts with the agent as transaction actor, and instrument only new or
+program facts with the agent as transaction user, and instrument only new or
 redefined functions.
 
 ## Current system to audit, not preserve by default
@@ -217,7 +248,7 @@ classification rather than maintaining two provenance systems.
 This design becomes an architecture decision only after:
 
 - all current transaction writers and readers are inventoried;
-- actor lookup and current/history queries are proven in Datahike;
+- database-user lookup and current/history queries are proven in Datahike;
 - mixed-origin attribute behavior is specified from real cases;
 - the minimal schema supports core, config, root, and agent transactions;
 - a converged reconciliation produces no transaction;

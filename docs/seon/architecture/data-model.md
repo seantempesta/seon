@@ -156,13 +156,13 @@ The connection nobody models but everybody gets: a datom's 4th field is its
 Datahike reifies `:tx-meta` onto the tx entity
 (`reference-code/datahike/src/datahike/db/transaction.cljc:802`
 `flush-tx-meta`) and auto-stamps a monotonic `:db/txInstant`. The durable
-provenance primitive is therefore a join from datom to transaction to the actor
-that asserted it. Provenance belongs on the transaction entity, not as an owner,
+provenance primitive is therefore a join from datom to transaction to the
+database user that asserted it. Provenance belongs on the transaction entity, not as an owner,
 creator, kind, or status attribute copied onto domain entities.
 
 The current pod carries a broader transaction-context/origin shape. The
 runtime-reliability chunk is auditing every field and consumer before replacing
-that shape with the minimum actor-reference model; see
+that shape with the minimum database-user-reference model; see
 [[docs/prds/runtime-reliability/provenance-and-lifecycle-design]]. Security,
 authentication, and authorization are deliberately outside that refactor.
 

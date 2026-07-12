@@ -48,6 +48,12 @@ The detailed sequence and provenance questions live in
 
 ## Phase 0 — inventory and falsifiable baseline
 
+**Audit complete 2026-07-12:** [[system-audit-2026-07-12]] maps the current
+writers, readers, lifecycle effects, retained mechanisms, and deletion targets.
+Live performance baselines are captured. The remaining Phase 0 work is a
+machine-readable effects table or instrumentation only where implementation
+needs finer attribution.
+
 - Enumerate every call made by boot, restart, mint, resume, hot reload, and eval.
 - Record its inputs, queries, transactions, source reads, runtime effects, and
   downstream listener work.
@@ -63,15 +69,15 @@ side effect.
 
 - Inventory the seven current transaction-context attributes and every query
   that consumes them.
-- Start from two candidate schema primitives only: `:seon.actor/id` and
-  `:seon.tx/actor`.
-- Seed only actors justified by distinct queries. Current candidates are root,
+- Start from two candidate schema primitives only: `:seon.db.user/id` and
+  `:seon.db/user`.
+- Seed only database users justified by distinct queries. Current candidates are root,
   boot, and config; agents should be referenced directly if one ref schema can
-  support both system actors and agent entities cleanly.
+  support both system-user and agent entities cleanly.
 - Prove current and historical queries for boot, config, root, and agent
   assertions in the REPL against vendored Datahike semantics.
 - Add another transaction attribute only when a named required query cannot be
-  answered from transaction actor plus normal entity links.
+  answered from transaction user plus normal entity links.
 - Explicitly defer credentials, principals, permissions, and authorization.
 
 Exit: a small schema and query table explains every retained provenance fact.
@@ -107,9 +113,9 @@ equal snapshot; the duplicate builder pass is gone.
   desired values.
 - Handle additions, changed cardinality-one values, cardinality-many set
   differences, omitted managed attributes, components, and removed identities.
-- Scope candidate facts using transaction actor provenance and known identity
+- Scope candidate facts using transaction-user provenance and known identity
   attributes; do not introduce entity ownership or kind attributes.
-- Preserve datoms asserted by other actors on mixed-origin entities.
+- Preserve datoms asserted by other database users on mixed-origin entities.
 - Return empty transaction data when converged and do not call `transact!`.
 - Use Datahike `with` only to falsify the compiled result in tests and REPL
   experiments.
@@ -146,7 +152,7 @@ agent invokes no global instrumentation.
   writing.
 - Respect Datahike ordering where newly installed attributes must precede their
   use.
-- Use one atomic transaction per genuinely distinct provenance actor when a
+- Use one atomic transaction per genuinely distinct provenance user when a
   delta exists.
 - Never use Datahike's raw import/load path for ordinary seed state.
 
