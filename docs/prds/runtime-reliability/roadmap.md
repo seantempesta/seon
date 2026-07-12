@@ -266,6 +266,22 @@ Commit: canonical schema-driven identity allocation and caller migration.
 
 Remove the largest known latency before changing the data model.
 
+Progress on 2026-07-12: the code split is committed; cold restart and live mint
+timing remain open until the concurrent instrumentation/fixture lanes finish and
+the default pod is rebuilt. `seon.client/start-runtime!` now owns cold cluster
+attachment, seed/replay/instrument/recovery, shared services, and roster resume.
+`seon.agent` owns one complete birth transaction, while
+`seon.agent.runtime/resume!` reconstructs only compiler namespace, listener,
+loop input, and process advertisement. `/agents/new`, `/agents/run`, and
+programmatic spawn call that same birth path directly. The two injected web
+callbacks, `:mint?` lifecycle mode, child-arm callback atom, and web creation
+lock are deleted. Identity, configured context components, scalar dials, parent,
+and structural home-namespace facts commit together; namespace reconstruction
+no longer writes analyzer-derived require edges. Focused proof is green at 50
+tests / 251 assertions, including a one-transaction birth and a resume whose
+database basis does not advance. The production client build completes with
+zero warnings.
+
 - Give cluster/runtime boot one owner that opens the connection, reconstructs
   global runtime state, installs services/listeners/ticker/hooks once, recovers
   crashed runs, and resumes eligible agents.
@@ -569,6 +585,13 @@ the current Seon coordination rather than creating a snapshot or versioning
 system.
 
 ### Phase 9a — exact coordinates and immutable reads
+
+Progress on 2026-07-12: the first truthful-coordinate correction is committed.
+`seon.db/basis-t` now reports an `AsOfDB`'s selected point rather than the
+origin database head, and JVM wire query/pull responses inherit that selected
+coordinate. CLJS and JVM behavioral proofs are green. The complete
+branch-qualified coordinate resolver/capture/cursor work below remains open;
+the writable phases are deliberately not exposed by this read-side correction.
 
 - Extend Phase 4's `{store-id, branch, commit-id, t}` schema/resolver through
   registry, wire, API, turn/error capture, bookmarks, and caches. Logical

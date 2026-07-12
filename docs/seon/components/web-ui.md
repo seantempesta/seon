@@ -52,4 +52,4 @@ On the consumer view, the debug view opens as a full-viewport OVERLAY with no UR
 ## Dependencies
 
 - Uses: `seon.db` (query/entity/listen!/`*conn*`), `seon.agent` (`message!` from `/chat`), `seon.agent.findings`, `seon.agent.inspect` (`ctx-preview`, `handlers`), `seon.agent-view`, `seon.render` + `seon.render.chat` + `seon.render.default`, `seon.web.brand`, `seon.ui.html`/`seon.ui.components`, `seon.platform` (artifact paths), Node `http`/`fs`/`path`.
-- Used by: `seon.client` injects its `start-agent!` closure via `serve/set-create-agent-fn!` (the `/agents/new` boot path — no parallel creation mechanism) and calls `serve/start!` + `seon.web.debug/install!` at pod boot.
+- Used by: `seon.client/start-runtime!` calls `serve/start!` + `seon.web.debug/install!` once during cold process start. `seon.web.serve` calls `seon.agent/start!` directly for `/agents/new` and `/agents/run`; there is no injected creation callback or second mint path.

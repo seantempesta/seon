@@ -54,7 +54,10 @@ sits below every consumer (the loop, the prompt render, the renderer, the UI, th
 ticker, the wake gate) and the `agent → ctx → render` require cycle evaporates.
 Every consumer reads `seon.derive/derive-state` over the db value it already
 holds; `agent-idle?` and `armable-agent-ids` are **filters** over that rule, never
-re-encodings of it, so the rule cannot fork.
+re-encodings of it, so the rule cannot fork. Process reconstruction uses the
+separate `resumable-agent-ids` projection: every agent without a termination
+fact, including running and paused agents, needs fresh transient handles after
+a cold start or reload.
 
 ## The run — the bounded unit of work
 

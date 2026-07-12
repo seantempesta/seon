@@ -343,6 +343,8 @@ bridge-storable. **Ground in** `src/seon/db/internal.cljs:286-360,1211` —
 | `:seon.agent/terminated-at` | `:inst` | instant / one | optional; presence ⇒ derived `:terminated` |
 | `:seon.agent/default-turn-limit` | `:int` | long / one | optional; seeds a run's work bound |
 | `:seon.agent/default-deadline-ms` | `:int` | long / one | optional; seeds a run's clock bound |
+| `:seon.agent.runtime/wake?` | `:boolean` | boolean / one | optional; false suppresses the process-local inbound listener while preserving manual hosting; absence means true |
+| `:seon.eval/home-requires` | serialized require-spec vector | string (EDN) / one | optional; exact per-agent home namespace declaration selected at birth and read during runtime reconstruction |
 | `:seon.agent/schedules` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | owned cron maps (cascade-retract) |
 | `:seon.agent/ctx` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | owned **blocks** (cascade-retract), seeded at creation, sorted by `:seon.agent.ctx/priority` at render |
 | `:seon.render/ai` | `:seon.render/ai` | string (EDN) / one | optional; the agent record's own ai render (absent by default) |
