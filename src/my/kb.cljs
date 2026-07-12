@@ -28,8 +28,13 @@
    (auto-injected); `db/transact!` returns a Promise — `(await …)` it inside
    a fn (the REPL top level auto-awaits)."
   (:require
+    [clojure.string :as str]
     [my.data :as data]
     [seon.db :as db]
+    [seon.embed :as embed]
+    ;; the shared `:seon.result/ok?` + `:seon.items/*` envelope shapes —
+    ;; Core owns them; [[recall]] REFERENCES them (required for load order).
+    [seon.items]
     [seon.schema :as schema]))
 
 ;;; SHARED PROVENANCE — registered ONCE, referenced by every domain (never
@@ -74,6 +79,31 @@
    [::count        :int]
    [::rating-total :int]
    [::topic-counts [:map-of :keyword :int]]])
+
+;; [[recall]]'s map-in / map-out — the symmetric ASK to [[remember]]'s
+;; store. `::match`/`::matched-tokens` are DERIVED response labels stamped
+;; on each returned item at return time, never stored on any row;
+;; `::matched` is the honest total before the `::limit` cap.
+(schema/register! ::about [:string {:min 1}])
+(schema/register! ::limit [:int {:min 1 :max 50}])
+(schema/register! ::recall-request
+  [:map
+   [::about ::about]
+   [::limit {:optional true} ::limit]])
+(schema/register! ::match [:enum :text :semantic])
+(schema/register! ::matched-tokens :int)
+(schema/register! ::matched :int)
+(schema/register! ::hint :string)
+(schema/register! ::error :string)
+(schema/register!
+  ::recall-response
+  [:map
+   [:seon.result/ok? :seon.result/ok?]
+   [:seon.items/items {:optional true} :seon.items/items]
+   [:seon.items/count {:optional true} :seon.items/count]
+   [::matched {:optional true} ::matched]
+   [::hint    {:optional true} ::hint]
+   [::error   {:optional true} ::error]])
 
 ;;; SCHEMA — register the attr; the system DERIVES datahike storage, and the
 ;;; FIRST transact! using an attr installs it (lazy). Inside a fn so reading
@@ -260,6 +290,108 @@
      ::rating-total (data/sum-by {:seon.items/items items
                                   :my.data/key :my.kb.source/rating})
      ::topic-counts (frequencies (mapcat :my.kb.source/topics items))}))
+
+;;; RECALL — the symmetric ASK to [[remember]]'s store: a question in,
+;;; ranked stored facts out, no datalog authoring.
+
+(defn- tokens
+  "Lowercase alphanumeric runs of length ≥ 2 — [[recall]]'s match unit."
+  [s]
+  (into #{} (filter #(>= (count %) 2)) (re-seq #"[a-z0-9]+" (str/lower-case s))))
+
+(defn- kb-text-rows
+  "Every `[eid attr text]` of a `my.kb`-family STRING attr on `db` — the
+   deterministic recall corpus: [[remember]] claims AND your own
+   `my.kb.<domain>` rows alike. Attrs come from the db's installed schema
+   (an attr installs at its first write); sorted for determinism."
+  [db]
+  (let [family? (fn [a] (when-let [ns (and (keyword? a) (namespace a))]
+                          (or (= ns "my.kb") (str/starts-with? ns "my.kb."))))
+        attrs   (->> (db/installed-schema db)
+                     (filter (fn [[a m]] (and (family? a)
+                                              (= :db.type/string (:db/valueType m)))))
+                     (map first)
+                     sort)]
+    (vec (for [a attrs
+               [e v] (sort (db/query '[:find ?e ?v :in $ ?a :where [?e ?a ?v]] db a))]
+           [e a v]))))
+
+(defn- text-matches
+  "Rank `[eid attr text]` rows against a question-token set: an entity's
+   score counts the DISTINCT question tokens matched across all its
+   texts (whole-token equality — no stemming). Returns `[[eid score]]`
+   best-first (ties: lower eid)."
+  [q-tokens rows]
+  (->> rows
+       (reduce (fn [m [e _ v]]
+                 (let [hit (filter (tokens v) q-tokens)]
+                   (if (seq hit) (update m e (fnil into #{}) hit) m)))
+               {})
+       (map (fn [[e ts]] [e (count ts)]))
+       (sort-by (fn [[e n]] [(- n) e]))
+       vec))
+
+(defn ^:async recall
+  "Find what you already know about a topic — ranked facts with sources.
+
+   \"What do we know about X?\" in ONE call. Map-in:
+     ::about  the topic/question, plain words.
+     ::limit  max facts returned (default 10).
+
+   Matching is DETERMINISTIC: your words (lowercased whole tokens, no
+   stemming) are matched against every stored `my.kb*` STRING value —
+   [[remember]] claims and your own `my.kb.<domain>` rows alike. Facts
+   rank by distinct words matched (`::matched-tokens`). When `SEON_EMBED`
+   is set, unfilled slots TOP UP with semantic neighbours via
+   `seon.embed/search-pull` (`::match :semantic`, distance attached);
+   unset, recall is purely deterministic.
+
+     (my.kb/recall {::about \"vendor API rate limits\"})
+     ; ⟹ «map: :seon.result/ok? true, :seon.items/items [{:db/id …,
+     ;    :my.kb/claim …, :my.kb/source-path …, ::match :text,
+     ;    ::matched-tokens 2} …], :seon.items/count int, ::matched int»
+
+   Each item is the FULL pulled row (claim + provenance + domain attrs)
+   plus the derived `::match`/`::matched-tokens` labels; `::matched` is
+   the honest total before the cap. No matches is SUCCESS (empty items) —
+   check [[inventory]] before concluding nothing is known."
+  {:malli/schema [:=> [:cat ::recall-request] ::recall-response]}
+  [{::keys [about limit]}]
+  (try
+    (let [limit (or limit 10)
+          db    @db/*conn*
+          rows  (kb-text-rows db)
+          hits  (text-matches (tokens about) rows)
+          items (mapv (fn [[e score]]
+                        (assoc (db/pull db '[*] e)
+                               ::match :text ::matched-tokens score))
+                      (take limit hits))
+          want  (- limit (count items))
+          seen  (into #{} (map :db/id) items)
+          scope (into #{} (map first) rows)
+          sem   (when (and (embed/enabled?) (pos? want) (seq scope))
+                  (await (embed/search-pull {:seon.embed/query about
+                                             :seon.embed/k     limit
+                                             :seon.embed/eids  scope
+                                             :seon.embed/db    db})))
+          items (into items
+                      (->> (:seon.embed/hits sem)
+                           (remove #(seen (:seon.embed/eid %)))
+                           (take want)
+                           (mapv (fn [{:seon.embed/keys [entity eid distance]}]
+                                   (assoc (or entity {:db/id eid})
+                                          ::match :semantic
+                                          :seon.embed/distance distance)))))]
+      (cond-> {:seon.result/ok?  true
+               :seon.items/items items
+               :seon.items/count (count items)
+               ::matched         (count hits)}
+        (:seon/error sem)
+        (assoc ::hint (str "semantic top-up failed — "
+                           (get-in sem [:seon/error :seon.error/message])))))
+    (catch :default e
+      {:seon.result/ok? false
+       ::error (str "recall failed: " (or (some-> e .-message) (str e)))})))
 
 ;;; PULL / ENTITY — read one entity by lookup-ref `[identity-attr value]`,
 ;;; which IS the "by name" addressing.
