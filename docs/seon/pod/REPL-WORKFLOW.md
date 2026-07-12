@@ -177,37 +177,41 @@ DATA (not parsed from stdout), use `seon.test.runner`. Same
 ;;        {:type :summary, :test 1, :pass 1, :fail 0, :error 0}]
 ;;     :seon.test.runner/summary {:test 1 :pass 1 :fail 0 :error 0}}
 
-;; Full surface — run + stash full result on agent's ns + record
-;; projection to DB. The convenience the agent's eval-batch uses
-;; after a (defn …) that touches a :seon.fn (spec D4).
+;; Full surface — run + retain the full result in bounded process history +
+;; record the per-test summary facts in the DB. This is the convenience the
+;; agent's eval-batch uses after a (defn …) that touches a :seon.fn (spec D4).
 (.then (runner/run-and-record! {:seon.test.runner/vars ['cljs.user/mytest]})
        prn)
-;; => Promise<{:seon.test.runner/run-id "Ab12Cd34Ef"
-;;             :seon.test.runner/run-result <same shape as above>
+;; => Promise<{:seon.test.runner/run-result
+;;              {<same events + summary as above>
+;;               :seon.test.runner/recorded? true
+;;               :seon.test.runner/recorded-syms ["cljs.user/mytest"]}
 ;;             :seon.test.runner/tx-report {:seon.db/ok? true ...}}>
 
-;; To dig into a stashed run later, the agent's home ns has a
-;; (result <id>) helper wired by seon.eval/setup-agent-ns! — the
-;; same helper used for eval results. The full event sequence is
-;; on globalThis, NOT in the DB.
-(result "Ab12Cd34Ef")
-;; => {:seon.test.runner/events [...] :seon.test.runner/summary {...}}
+;; The latest full recorded result is process-local and directly available.
+;; It is nil before a recorded run and after a process restart.
+(runner/last-result {})
+;; => {:seon.test.runner/events [...]
+;;     :seon.test.runner/summary {...}
+;;     :seon.test.runner/recorded? true
+;;     :seon.test.runner/recorded-syms ["cljs.user/mytest"]}
 
 ```
 
-**Storage model.** The full result lives on the agent's ns (via
-the run-id stash). The DB row carries ONLY the surfaced
-projection:
+**Storage model.** Full recorded results live oldest-first in one bounded
+process-local vector. `last-result` returns its newest entry directly, with no
+DB lookup. The vector is intentionally empty after restart. Each test's durable
+DB row carries only the surfaced projection:
 
 | Attr | Purpose |
 |---|---|
 | `:seon.test/sym` | "cljs.user/mytest" |
 | `:seon.test/last-passed-at` / `:last-failed-at` | timestamps |
-| `:seon.test/last-failure-summary` | ≤200-char rendered failure (for warnings tile) |
-| `:seon.test/last-run-id` | pointer back to the agent-ns stash |
+| `:seon.test/last-failure-summary` | ≤50-token rendered failure (for warnings tile) |
 
-Renderers read the projection via Datalog; the agent reaches the
-blob via `(result <run-id>)` when it wants to dig deeper.
+Renderers read those durable facts via Datalog. Live drill-down uses
+`(runner/last-result {})`; there is no generated test-run identity or durable
+pointer into process memory.
 
 **Reporter mechanism.** The runner claims the `::runner/capture`
 reporter keyword via per-event `defmethod`s. `cljs.test/test-vars`'

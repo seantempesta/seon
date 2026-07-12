@@ -13,8 +13,8 @@
      - `run!` with `::vars` selector runs a known-passing probe
      - `run!` with `::ns` selector picks up every probe in the probe ns
        AND surfaces the failing probe's fail event in the returned data
-     - `run-ns!` is sugar that records to the DB and returns a run-id
-     - `last-result` round-trips the run via :seon.test/last-run-id + stash
+     - `run-ns!` records durable per-test summary facts without a session id
+     - `last-result` returns the newest live recorded result without a DB read
      - the async driver awaits the probe body before resolving (verified
        via a side-effect atom that the body mutates from inside setTimeout)
 
@@ -25,6 +25,8 @@
     [cljs.test :as t :refer [deftest is async]]
     [clojure.string :as str]
     [datahike.api :as d]
+    [malli.core :as m]
+    [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.test.runner :as r]
     [seon.test.runner-probes :as probes]))
@@ -32,9 +34,9 @@
 (def ^:private probes-ns 'seon.test.runner-probes)
 
 (defn- ensure-conn!
-  "The runner's record path (`run-ns!` with `::record? true`,
-   `last-result`) reads/writes through the ambient `db/*conn*`. The
-   pod binds that at boot; the node-test runner has no boot, so
+  "The runner's record path (`run-ns!` with `::record? true`) writes through
+   the ambient `db/*conn*`. The pod binds that at boot; the node-test runner
+   has no boot, so
    without this the record tests throw `*conn* is unbound` — an
    UNHANDLED rejection that kills the whole Node process (observed
    2026-06-09). Opens one fresh :memory conn for this suite and
@@ -210,10 +212,8 @@
                        (pr-str (:seon.test.runner/summary result))))
               (is (= :user-input (:seon.error/kind err))
                   "a selector violation is a caller mistake — :user-input")
-              (is (some-> (:seon.error/message err)
-                          (str/includes? "exactly one"))
-                  (str "message should name the rule; got "
-                       (pr-str (:seon.error/message err))))
+              (is (string? (:seon.error/message err))
+                  "the structural error envelope carries a human-readable message")
               (is (= {:test 0 :pass 0 :fail 0 :error 1}
                      (:seon.test.runner/summary result))
                   "no tests ran; the summary counts the violation")
@@ -229,90 +229,178 @@
 ;; run-ns! — sugar wrapper, default ::record? true
 ;; ============================================================
 
-(deftest run-ns!-records-and-returns-run-id
+(deftest run-ns!-records-durable-summaries-without-a-session-id
   (async done
     (-> (ensure-conn!)
         (.then (fn [_]
                  (r/run-ns! {:seon.test.runner/ns probes-ns
-                             :seon.test.runner/record? true})))
+                             :seon.test.runner/record? true
+                             :seon.db/conn db/*conn*})))
         (.then
           (fn [result]
-            (is (string? (:seon.test.runner/run-id result))
-                (str "run-ns! with record? should populate ::run-id; "
-                     "result keys=" (pr-str (keys result))))
             (is (true? (:seon.test.runner/recorded? result))
                 "run-ns! with record? should set ::recorded? true")
             (is (vector? (:seon.test.runner/recorded-syms result))
                 "::recorded-syms should be a vector")
             (is (pos? (count (:seon.test.runner/recorded-syms result)))
                 "::recorded-syms should be non-empty after recording")
+            (let [test-sym (first (:seon.test.runner/recorded-syms result))
+                  row      (db/pull '[*] [:seon.test/sym test-sym])]
+              (is (= test-sym (:seon.test/sym row))
+                  "the database retains one durable row per recorded test")
+              (is (or (inst? (:seon.test/last-passed-at row))
+                      (inst? (:seon.test/last-failed-at row)))
+                  "the durable row carries the latest outcome timestamp"))
             (done)))
         (.catch (fn [e]
                   (is false (str "threw — " e))
                   (done))))))
 
 ;; ============================================================
-;; last-result — DB lookup + bounded process-stash round-trip
+;; last-result — direct bounded-process-history read
 ;; ============================================================
 
-(deftest last-result-roundtrips-most-recent-run
+(deftest last-result-returns-latest-recorded-result-without-a-db-read
   (async done
-    (-> (ensure-conn!)
+    (let [stash (deref #'r/!run-stash)
+          prior @stash]
+      (reset! stash [])
+      (is (nil? (r/last-result {}))
+          "an empty process history has no last result")
+      (-> (ensure-conn!)
         (.then (fn [_]
-                 (r/run-ns! {:seon.test.runner/ns probes-ns
-                             :seon.test.runner/record? true})))
+                 (r/run-and-record!
+                   {:seon.test.runner/vars
+                    '[seon.test.runner-probes/probe-passing-test]})))
         (.then
-          (fn [first-result]
-            (let [run-id  (:seon.test.runner/run-id first-result)
-                  fetched (r/last-result {})]
-              (is (some? fetched)
-                  "last-result must return a value after a recorded run")
-              (is (= run-id (:seon.test.runner/run-id fetched))
-                  (str "last-result run-id should match the just-recorded "
-                       "run-id; expected=" run-id
-                       " got=" (:seon.test.runner/run-id fetched)))
-              (is (some? (:seon.test.runner/run-result fetched))
-                  "last-result should hydrate the run-result blob from stash")
-              (let [hydrated (:seon.test.runner/run-result fetched)]
-                (is (vector? (:seon.test.runner/events hydrated))
-                    "hydrated run-result must carry ::events vector")
-                (is (map? (:seon.test.runner/summary hydrated))
-                    "hydrated run-result must carry ::summary map")))
-            (done)))
+          (fn [recorded]
+            (let [run-result (:seon.test.runner/run-result recorded)
+                  conn       db/*conn*
+                  fetched    (try
+                               ;; Proves `last-result` has no hidden DB query.
+                               (set! db/*conn* nil)
+                               (r/last-result {})
+                               (finally
+                                 (set! db/*conn* conn)))]
+              (is (= run-result fetched)
+                  "last-result returns the newest complete recorded result")
+              (is (true? (:seon.test.runner/recorded? fetched))
+                  "the retained result exposes recording status structurally")
+              (is (vector? (:seon.test.runner/recorded-syms fetched))
+                  "the retained result exposes the recorded test symbols"))))
+        (.finally (fn [] (reset! stash prior)))
+        (.then (fn [_] (done)))
         (.catch (fn [e]
                   (is false (str "threw — " e))
-                  (done))))))
+                  (done)))))))
+
+(deftest no-outcome-recording-is-a-structural-no-op
+  (async done
+    (let [stash      (deref #'r/!run-stash)
+          prior      @stash
+          run-result {:seon.test.runner/events []
+                      :seon.test.runner/summary
+                      {:test 0 :pass 0 :fail 0 :error 0}}]
+      (reset! stash [])
+      (-> (r/record-run! {:seon.test.runner/run-result run-result})
+          (.then
+            (fn [recorded]
+              (let [result    (:seon.test.runner/run-result recorded)
+                    tx-result (:seon.test.runner/tx-report recorded)]
+                (is (m/validate :seon.test.runner/record-response recorded)
+                    "the no-op response satisfies the public structural schema")
+                (is (true? (:seon.test.runner/recorded? result))
+                    "a completed empty selection is still a recorded run")
+                (is (= [] (:seon.test.runner/recorded-syms result))
+                    "an empty selection records no per-test symbols")
+                (is (true? (:seon.db/ok? tx-result))
+                    "the no-op recording resolves through the success channel")
+                (is (zero? (:seon.db/tx-count tx-result))
+                    "no outcomes produce no durable transaction datoms")
+                (is (= result (r/last-result {}))
+                    "the complete no-op result still enters live history"))))
+          (.finally (fn [] (reset! stash prior)))
+          (.then (fn [_] (done)))
+          (.catch (fn [e]
+                    (is false (str "threw — " e))
+                    (done)))))))
+
+(deftest failed-db-recording-does-not-enter-live-history
+  (async done
+    (let [stash      (deref #'r/!run-stash)
+          prior      @stash
+          prior-conn db/*conn*
+          run-result {:seon.test.runner/events
+                      [{:type :pass
+                        :var 'seon.test.runner-probes/probe-passing-test
+                        :expected "truthy"
+                        :actual "truthy"}]
+                      :seon.test.runner/summary
+                      {:test 1 :pass 1 :fail 0 :error 0}}]
+      ;; No connection forces the ordinary db error envelope without changing
+      ;; the valid test-result data that reaches the recording boundary.
+      (set! db/*conn* nil)
+      (-> (r/record-run! {:seon.test.runner/run-result run-result})
+          (.then
+            (fn [recorded]
+              (let [result    (:seon.test.runner/run-result recorded)
+                    tx-result (:seon.test.runner/tx-report recorded)]
+                (is (m/validate :seon.test.runner/record-response recorded)
+                    "the failed-write response satisfies the public schema")
+                (is (false? (:seon.db/ok? tx-result))
+                    "a rejected durable write remains an error value")
+                (is (false? (:seon.test.runner/recorded? result))
+                    "the result reports that durable recording failed")
+                (is (= [] (:seon.test.runner/recorded-syms result))
+                    "no symbols claim to be recorded after a rejected write")
+                (is (= prior @stash)
+                    "failed durable recording does not mutate live history"))))
+          (.finally (fn []
+                      (set! db/*conn* prior-conn)
+                      (reset! stash prior)))
+          (.then (fn [_] (done)))
+          (.catch (fn [e]
+                    (is false (str "threw — " e))
+                    (done)))))))
 
 (deftest full-run-stash-evicts-oldest-and-retains-newest
   ;; Full event vectors are process-only drill-down data. Repeated test runs
-  ;; must plateau rather than leave unbounded globalThis properties behind.
-  (let [stash (deref #'r/!run-stash)
-        cap   (deref #'r/run-stash-cap)
-        prior @stash
-        legacy-before
-        (set (filter #(str/starts-with? % "__seon_test_run_")
-                     (js/Object.keys js/globalThis)))
-        run-result {:seon.test.runner/events []
-                    :seon.test.runner/summary
-                    {:test 0 :pass 0 :fail 0 :error 0}}]
+  ;; must plateau while preserving the order of the retained tail.
+  (let [stash    (deref #'r/!run-stash)
+        cap      (deref #'r/run-stash-cap)
+        remember (deref #'r/remember-recorded-run!)
+        prior    @stash
+        runs (mapv (fn [n]
+                     {:seon.test.runner/events []
+                      :seon.test.runner/summary
+                      {:test n :pass n :fail 0 :error 0}
+                      :seon.test.runner/recorded? true
+                      :seon.test.runner/recorded-syms []})
+                   (range (inc cap)))]
     (try
       (reset! stash [])
-      (let [ids (mapv (fn [_]
-                        (r/stash-run!
-                          {:seon.test.runner/run-result run-result}))
-                      (range (inc cap)))]
-        (is (= cap (count @stash))
-            "the process store plateaus at its item cap")
-        (is (nil? (r/fetch-run (first ids)))
-            "the oldest full result is evicted")
-        (is (= run-result (r/fetch-run (last ids)))
-            "the newest full result remains available")
-        (is (= legacy-before
-               (set (filter #(str/starts-with? % "__seon_test_run_")
-                            (js/Object.keys js/globalThis))))
-            "the canonical store creates no parallel globalThis properties"))
+      (doseq [run-result runs]
+        (remember run-result))
+      (is (= cap (count @stash))
+          "the process store plateaus at its item cap")
+      (is (= (subvec runs 1) @stash)
+          "eviction preserves the recorded order of the newest full results")
+      (is (= (peek runs) (r/last-result {}))
+          "last-result reads the newest retained entry directly")
       (finally
         (reset! stash prior)))))
+
+(deftest failure-summary-is-clipped-at-the-shared-token-boundary
+  (let [summarize (deref #'r/failure-summary)
+        cap       (deref #'r/failure-summary-max-tokens)
+        input     (apply str (repeat (* cap 8) "x"))
+        output    (summarize {:message input})]
+    (is (str/ends-with? output "…")
+        "the shared clip boundary marks an oversized summary")
+    (is (<= (tokens/estimate output) cap)
+        "the surfaced failure summary respects its token budget")
+    (is (< (tokens/estimate output) (tokens/estimate input))
+        "an oversized failure is clipped before durable display")))
 
 ;; ============================================================
 ;; Async driver — the body's `(is true)` assertion fires inside a

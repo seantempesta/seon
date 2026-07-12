@@ -19,6 +19,7 @@
   (:refer-clojure :exclude [run!])
   (:require [cljs.test :as t]
             [clojure.string :as str]
+            [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]
@@ -62,8 +63,6 @@
 (schema/register! ::trigger
   [:enum ::manual ::on-fn-redef ::pre-victory ::cli])
 
-(schema/register! ::run-id :string)
-
 (schema/register! ::recorded-syms [:vector :string])
 
 ;; ::selector — "at least one of (::vars ::ns)" expressed as PURE DATA
@@ -89,13 +88,12 @@
    [:map
     [::record? {:optional true} ::record?]
     [::trigger {:optional true} ::trigger]
-    [::db/conn {:optional true} :seon.db/ref]]])
+    [::db/conn {:optional true} ::db/conn]]])
 
 (schema/register! ::run-result
   [:map
    [::events         [:vector ::test-event]]
    [::summary        ::summary]
-   [::run-id         {:optional true} ::run-id]
    [::selected-vars  {:optional true} ::vars]
    [::recorded?      {:optional true} :boolean]
    [::recorded-syms  {:optional true} ::recorded-syms]
@@ -110,18 +108,30 @@
      [:seon.error/message :seon.error/message]]]])
 
 (schema/register! ::last-result-response
-  [:maybe [:map
-           [::run-id ::run-id]
-           [::run-result ::run-result]]])
+  [:maybe ::run-result])
 
-;; record-run! takes a run-result + the run-id that stash-run! issued
-;; (so the DB row points at the bounded process stash). Conn is optional —
-;; falls back on db's dynamic *conn*.
+;; record-run! takes a run result. Conn is optional — falls back on db's
+;; dynamic *conn*.
 (schema/register! ::record-request
   [:map
    [::run-result ::run-result]
-   [::run-id     ::run-id]
-   [::db/conn    {:optional true} :seon.db/ref]])
+   [::db/conn    {:optional true} ::db/conn]])
+
+(schema/register! ::record-tx-response
+  [:or
+   ::db/transact-response
+   [:map
+    [::db/ok?        [:= true]]
+    [::db/tempids    [:map-of :any :int]]
+    [::db/tx-count   [:= 0]]
+    [::db/added      [:= 0]]
+    [::db/retracted  [:= 0]]]])
+
+(schema/register! ::tx-report ::record-tx-response)
+(schema/register! ::record-response
+  [:map
+   [::run-result ::run-result]
+   [::tx-report  ::tx-report]])
 
 ;; The persisted test entity's schema. Datahike valueTypes live in
 ;; seon.client/agent-bootstrap-schema; the Malli shapes here let
@@ -136,7 +146,6 @@
 (schema/register! :seon.test/last-passed-at :inst)
 (schema/register! :seon.test/last-failed-at :inst)
 (schema/register! :seon.test/last-failure-summary :string)
-(schema/register! :seon.test/last-run-id :string)
 ;; Phase 4 (mvp-completion-plan 2026-05-27): persist the deftest source
 ;; so we can later scan `:seon.test/source` to find tests that reference
 ;; a redefined fn (auto-test-on-fn-redef). `:seon.test/ns` is a lookup-ref
@@ -154,7 +163,7 @@
 ;; `:seon.test/sym` is the identity attr (the only required entry); every
 ;; other attr is `{:optional true}` so BOTH shapes validate + merge on the
 ;; sym identity: detect-and-tee source rows (sym+ns+source+created-at) and
-;; runner result rows (sym+last-*+run-id). Once registered, `:seon.test`
+;; runner result rows (sym+last-*). Once registered, `:seon.test`
 ;; lands in `entity-schema-keys`, decomposes into a `:seon.schema` row at
 ;; boot, and renders per-kind in render-namespace + the debug view panes.
 (schema/register! :seon.test
@@ -167,7 +176,6 @@
    [:seon.test/last-passed-at       {:optional true} :seon.test/last-passed-at]
    [:seon.test/last-failed-at       {:optional true} :seon.test/last-failed-at]
    [:seon.test/last-failure-summary {:optional true} :seon.test/last-failure-summary]
-   [:seon.test/last-run-id          {:optional true} :seon.test/last-run-id]
    [:seon.test/created-at           {:optional true} :seon.test/created-at]])
 
 ;; ============================================================
@@ -601,11 +609,9 @@
       {::events events ::summary summary})))
 
 ;; ============================================================
-;; Stash — one bounded process-local store for full test run results.
-;; The DB carries a pointer (:seon.test/last-run-id); the agent reads the
-;; most-recent live run via `(seon.test.runner/last-result {})`. A test run
-;; is not an eval, so it has no `result/<id>` handle. The store deliberately
-;; disappears on restart and retains no parallel globalThis properties.
+;; Live details — one bounded process-local store for full recorded results.
+;; Entries are kept oldest-first in recording order. `last-result` reads the
+;; newest entry directly; the store deliberately disappears on restart.
 ;; ============================================================
 
 (def ^:private run-stash-cap
@@ -614,62 +620,30 @@
   32)
 
 (defonce ^:private !run-stash
-  ;; Oldest first. Each entry is one fully namespaced run-id/result pair.
+  ;; Oldest first. Each entry is one complete recorded ::run-result.
   (atom []))
 
-(defn- new-run-id
-  "10-char base62 id — same shape as eval-id. Local copy to avoid a
-   require cycle with seon.eval (test.runner shouldn't depend on the
-   eval namespace). Phase 1 replaces every generated id through the one
-   schema-driven allocator."
-  []
-  (let [alphabet "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789"]
-    (apply str (repeatedly 10 #(nth alphabet (rand-int 62))))))
-
-(defn stash-run!
-  "Stash the full run-result in the bounded process store under a fresh run-id.
-   Returns the run-id. The agent reaches the blob through
-   `(seon.test.runner/last-result {})` — it resolves the latest
-   `:seon.test/last-run-id` from the DB and fetches this stash with `fetch-run`.
-
-   Keeping full events out of the DB is deliberate: huge
-   event sequences would balloon datahike's transit cost on every
-   read, and the agent typically only needs the latest run + a small
-   surfaced summary. The DB row points here via `:seon.test/last-run-id`.
-   Eviction is oldest-first and makes an old pointer an honest cache miss."
-  {:malli/schema [:=> [:cat [:map [::run-result ::run-result]]]
-                  ::run-id]}
-  [{::keys [run-result]}]
-  (let [id (new-run-id)]
-    (try
-      (swap! !run-stash
-             (fn [entries]
-               (let [entries' (conj (vec (remove #(= id (::run-id %)) entries))
-                                    {::run-id id ::run-result run-result})
-                     excess   (max 0 (- (count entries') run-stash-cap))]
-                 (subvec entries' excess))))
-      (catch :default e
-        (error/record! {:seon.error/raw e :seon.error/fault :core})))
-    id))
-
-(defn fetch-run
-  "Look up a stashed run-result by id. Returns nil if absent."
-  {:malli/schema [:=> [:catn [::run-id :string]] :any]}
-  [run-id]
-  (some (fn [entry]
-          (when (= run-id (::run-id entry))
-            (::run-result entry)))
-        (rseq @!run-stash)))
+(defn- remember-recorded-run!
+  "Append one recorded result to the bounded live detail store."
+  [run-result]
+  (try
+    (swap! !run-stash
+           (fn [entries]
+             (let [entries' (conj entries run-result)
+                   excess   (max 0 (- (count entries') run-stash-cap))]
+               (subvec entries' excess))))
+    (catch :default e
+      (error/record! {:seon.error/raw e :seon.error/fault :core})))
+  run-result)
 
 ;; ============================================================
 ;; Record — minimal projection to the DB. NEVER transacts events.
 ;; ============================================================
 
-(def ^:private failure-summary-cap
-  "Truncation cap for :seon.test/last-failure-summary. Keeps the
-   warnings tile renderable; the full event is on the agent's ns
-   via the run-id stash."
-  200)
+(def ^:private failure-summary-max-tokens
+  "Token cap for :seon.test/last-failure-summary. Keeps the warnings tile
+   renderable while the full event remains in the bounded live detail store."
+  50)
 
 (defn- failure-summary
   "Build a short renderable string from the last :fail/:error event."
@@ -680,26 +654,32 @@
                                      (str "expected " (:expected evt) " "))
                                    (when (:actual evt)
                                      (str "actual " (:actual evt)))))]
-    (if (> (count src) failure-summary-cap)
-      (str (subs src 0 failure-summary-cap) "…")
-      src)))
+    (tokens/clip-str src failure-summary-max-tokens)))
+
+(defn- recorded-syms
+  "Test symbols whose latest event in this result produced an outcome."
+  [run-result]
+  (let [per-var (group-by :var (filter #(some? (:var %)) (::events run-result)))]
+    (vec (for [[var-sym evts] per-var
+               :let [outcome (last (filter #(#{:pass :fail :error} (:type %)) evts))]
+               :when outcome]
+           (str var-sym)))))
 
 (defn ^:async record-run!
   "Transact the SURFACED projection for each test in `run-result`.
-   The full data is NOT here — `stash-run!` put it on globalThis;
-   the row carries `:seon.test/last-run-id` so the agent can fetch
-   the blob via `(seon.test.runner/last-result {})`.
+   Successful recordings append the full result to the bounded process store;
+   `(seon.test.runner/last-result {})` reads its newest live entry directly.
 
    Per-var DB fields:
      :seon.test/sym                    — \"agent.ns/my-test\"
      :seon.test/last-passed-at         — when the var most recently passed
      :seon.test/last-failed-at         — when the var most recently failed
-     :seon.test/last-failure-summary   — ≤200-char rendered failure (truncated)
-     :seon.test/last-run-id            — pointer to the full blob in the agent ns
+     :seon.test/last-failure-summary   — ≤50-token rendered failure
 
-   Returns the `db/transact!` Promise's value."
-  {:malli/schema [:=> [:cat ::record-request] :any]}
-  [{::keys [run-result run-id conn]}]
+   Returns the full result with structural recording fields plus the compact
+   database transaction envelope."
+  {:malli/schema [:=> [:cat ::record-request] ::record-response]}
+  [{::keys [run-result conn]}]
   (let [now     (js/Date.)
         events  (::events run-result)
         per-var (group-by :var (filter #(some? (:var %)) events))
@@ -709,33 +689,40 @@
                 :let [outcome (last (filter #(#{:pass :fail :error} (:type %)) evts))]
                 :when outcome
                 :let [failed? (#{:fail :error} (:type outcome))]]
-            (cond-> {:seon.test/sym         (str var-sym)
-                     :seon.test/last-run-id run-id}
+            (cond-> {:seon.test/sym (str var-sym)}
               failed?       (assoc :seon.test/last-failed-at        now
                                    :seon.test/last-failure-summary  (failure-summary outcome))
-              (not failed?) (assoc :seon.test/last-passed-at now))))]
-    (if (seq tx-data)
-      (await (db/transact!
-               (cond-> {:seon.db/tx-data tx-data}
-                 conn (assoc :seon.db/conn conn))))
-      ;; No test outcomes to record — return a no-op compact envelope
-      ;; matching seon.db/transact!'s success shape (#40).
-      {:seon.db/ok? true :seon.db/tempids {} :seon.db/tx-count 0
-       :seon.db/added 0 :seon.db/retracted 0})))
+              (not failed?) (assoc :seon.test/last-passed-at now))))
+        tx-report (if (seq tx-data)
+                    (await (db/transact!
+                             (cond-> {:seon.db/tx-data tx-data}
+                               conn (assoc :seon.db/conn conn))))
+                    ;; No test outcomes to record — return a no-op compact
+                    ;; envelope without inventing a transaction.
+                    {:seon.db/ok? true :seon.db/tempids {}
+                     :seon.db/tx-count 0 :seon.db/added 0
+                     :seon.db/retracted 0})
+        ok?       (true? (::db/ok? tx-report))
+        result'   (assoc run-result
+                         ::recorded? ok?
+                         ::recorded-syms (if ok?
+                                           (recorded-syms run-result)
+                                           []))]
+    (when ok?
+      (remember-recorded-run! result'))
+    {::run-result result'
+     ::tx-report  tx-report}))
 
 (defn ^:async run-and-record!
-  "Convenience: run vars, stash the full result, record the projection.
-   Returns `{::run-id ::run-result ::tx-report}`. This is the surface
-   the agent's eval-batch will typically call after a `(defn …)` that
-   touches a `:seon.fn` — see spec §D4 (targeted test auto-run)."
-  {:malli/schema [:=> [:cat [:map [::vars ::vars]]] :any]}
+  "Run vars, record summary facts, and retain the full live result.
+
+   Returns `{::run-result ::tx-report}`. This is the surface the agent's
+   eval-batch will typically call after a `(defn …)` that touches a
+   `:seon.fn` — see spec §D4 (targeted test auto-run)."
+  {:malli/schema [:=> [:cat [:map [::vars ::vars]]] ::record-response]}
   [{::keys [vars]}]
-  (let [result    (await (run-vars {::vars vars}))
-        run-id    (stash-run! {::run-result result})
-        tx-report (await (record-run! {::run-result result ::run-id run-id}))]
-    {::run-id     run-id
-     ::run-result result
-     ::tx-report  tx-report}))
+  (let [result (await (run-vars {::vars vars}))]
+    (await (record-run! {::run-result result}))))
 
 ;; ============================================================
 ;; Phase 1 universal entrypoints — vars-in-ns, run!, run-ns!, last-result
@@ -825,8 +812,8 @@
      (run! {::ns 'seon.db-test ::record? true})
 
    Returns a fully-populated `::run-result` with `::selected-vars`,
-   `::run-id` / `::recorded?` / `::recorded-syms` when `::record? true`,
-   and `::trigger` propagated through."
+   `::recorded?` / `::recorded-syms` when `::record? true`, and `::trigger`
+   propagated through."
   {:malli/schema [:=> [:cat ::run-request] ::run-result]}
   [{::keys [record? trigger] :as req}]
   (cond
@@ -846,73 +833,37 @@
           base     (cond-> (assoc result ::selected-vars selected)
                      trigger (assoc ::trigger trigger))]
       (if record?
-        (let [run-id (stash-run! {::run-result base})
-              _      (await (record-run! (cond-> {::run-result base
-                                                  ::run-id     run-id}
-                                           (::db/conn req)
-                                           (assoc ::db/conn (::db/conn req)))))
-              ;; Reconstruct recorded-syms from events that produced a
-              ;; pass/fail/error outcome (same logic as record-run!).
-              per-var      (group-by :var (filter #(some? (:var %)) (::events base)))
-              recorded     (vec (for [[var-sym evts] per-var
-                                      :let [outcome (last (filter #(#{:pass :fail :error}
-                                                                     (:type %)) evts))]
-                                      :when outcome]
-                                  (str var-sym)))]
-          (assoc base
-                 ::run-id        run-id
-                 ::recorded?     true
-                 ::recorded-syms recorded))
+        (::run-result
+          (await (record-run! (cond-> {::run-result base}
+                                (::db/conn req)
+                                (assoc ::db/conn (::db/conn req))))))
         base))))
 
 (defn ^:async run-ns!
   "Sugar: run every test var defined in `::ns`, recording the projection."
   {:malli/schema [:=> [:cat [:map [::ns ::ns]
                                   [::record? {:optional true} ::record?]
-                                  [::trigger {:optional true} ::trigger]]]
+                                  [::trigger {:optional true} ::trigger]
+                                  [::db/conn {:optional true} ::db/conn]]]
                   ::run-result]}
-  [{::keys [ns record? trigger] :or {record? true}}]
+  [{::keys [ns record? trigger] :or {record? true} :as request}]
   (await (run! (cond-> {::ns ns ::record? record?}
-                 trigger (assoc ::trigger trigger)))))
-
-(defn- last-run-id-from-db
-  "Return the `:seon.test/last-run-id` whose `:seon.test/last-*-at` is
-   the most recent. nil if no test runs have been recorded.
-
-   Strategy: scan rows that have a :seon.test/last-run-id, max-by the
-   later of last-passed-at / last-failed-at. We do this in CLJS rather
-   than as a fancier datalog (max-aggregate over two fields) because
-   the row count is small (one row per recorded test sym)."
-  []
-  (let [rows (db/query
-               {::db/query '[:find ?run-id ?passed ?failed
-                             :where
-                             [?e :seon.test/last-run-id ?run-id]
-                             [(get-else $ ?e :seon.test/last-passed-at #inst "1970-01-01") ?passed]
-                             [(get-else $ ?e :seon.test/last-failed-at #inst "1970-01-01") ?failed]]})]
-    (when (seq rows)
-      (let [pick (apply max-key (fn [[_ p f]]
-                                  (max (.getTime p) (.getTime f)))
-                        rows)]
-        (first pick)))))
+                 trigger (assoc ::trigger trigger)
+                 (::db/conn request) (assoc ::db/conn (::db/conn request))))))
 
 (defn last-result
-  "The `{::run-id ::run-result}` for the most recently recorded run, or nil.
+  "The most recent live recorded `::run-result`, or nil.
 
-   Scoped to this pod. Pulls the run-id from the DB projection, then
-   fetches the full event sequence from the bounded process stash that
-   `stash-run!` wrote. An evicted or prior-process run returns nil; database
-   summaries remain available independently.
+   Scoped to this process. Reads the newest entry directly from the bounded
+   recorded-run store; an empty or restarted process returns nil. Durable
+   per-test summaries remain independently queryable from the database.
 
    Used by humans at the REPL and by agents reading their own most-
    recent test outcome. NOT per-agent today — Phase 2+ will key by
    `:seon.agent/id`."
   {:malli/schema [:=> [:cat [:map]] ::last-result-response]}
   [_]
-  (when-let [run-id (last-run-id-from-db)]
-    (when-let [run-result (fetch-run run-id)]
-      {::run-id     run-id
-       ::run-result run-result})))
+  (peek @!run-stash))
 
 ;; ============================================================
 ;; Phase 4 (mvp-completion-plan 2026-05-27) — auto-test-on-fn-redef.
