@@ -80,47 +80,40 @@
  {;; ---------------------------------------------------------------------------
   ;; Shared building blocks for the datahike fork (de-dup; compose, never copy).
   ;;
-  ;; :fork-deps — the {datahike fork + konserve fork} pair. datahike is the
-  ;;   seantempesta/datahike@sync-upstream tip (proximum/secondary retain+restore
-  ;;   + query fixes + selective-Promise CLJS api). konserve is the header-fix
-  ;;   fork (CLJS meta-size BE32 + legacy 1-byte sniff), supplied via
-  ;;   :override-deps so it wins over any transitive konserve. The mvn upstream
-  ;;   datahike must appear NOWHERE — every JVM consumer composes :fork-deps.
-  ;;   IF YOU BUMP either sha, bump the reference-code/datahike submodule to the
-  ;;   matching datahike sha (src-secondary contents must stay byte-aligned).
+  ;; :fork-deps — the coordinated {datahike + konserve} source pair. Datahike
+  ;;   tracks upstream through 0.8.1729 and carries Seon's branch/restore,
+  ;;   secondary-index, connection-lifecycle, and writer-drain fixes. Konserve
+  ;;   tracks upstream 0.9.356 and retains the cross-runtime legacy-header
+  ;;   reader. Exact Git SHAs win over every transitive Maven version.
+  ;;   IF YOU BUMP either sha, bump both matching reference-code submodules.
   ;;
   ;; :simd — the launch surface proximum needs: jdk.incubator.vector + native
   ;;   access + G1GC/2g heap (proximum's SIMD distance kernels; class v66 ⇒
   ;;   JDK 22+ hard floor, builds pinned to JDK 25 via bin/_java-home-resolver),
-  ;;   plus the two repo-relative paths that expose the secondary-index
-  ;;   namespaces to a git/local datahike dep — src-secondary (the fork's :paths
-  ;;   EXCLUDES it, so it is unreachable via normal resolution) and the
-  ;;   konserve-shim (a fake META-INF pom.properties so datahike's version-check
-  ;;   sees a konserve version for the non-jar git dep, nil otherwise).
+  ;;   plus the repo-relative path that exposes the secondary-index namespaces
+  ;;   to a git datahike dep. The fork's :paths excludes src-secondary, so it is
+  ;;   unreachable through normal dependency resolution.
   ;;
   ;; Compose: `clojure -M:simd:fork-deps:writer`, `-M:simd:fork-deps:test`, etc.
   ;; ---------------------------------------------------------------------------
   :fork-deps
   {:extra-deps {org.replikativ/datahike
                 {:git/url "https://github.com/seantempesta/datahike"
-                 :git/sha "6e2d9beeb5002ba025e2f3aa69cd9111afd7abf8"}}
+                 :git/sha "30a154838ffcc270d32d03bfca7f6518c9ad9faf"}}
    :override-deps {org.replikativ/konserve
-                   {:mvn/version "0.9.353"}}}
+                   {:git/url "https://github.com/seantempesta/konserve"
+                    :git/sha "df6818d43ea3363a808cd051c0d68917f1b987a9"}}}
 
   :simd
   {:jvm-opts ["--add-modules" "jdk.incubator.vector"
               "--enable-native-access=ALL-UNNAMED"
               "-XX:+UseG1GC" "-Xmx2g"]
-   :extra-paths ["dev-resources/konserve-shim"
-                 "reference-code/datahike/src-secondary"]}
+   :extra-paths ["reference-code/datahike/src-secondary"]}
 
   ;; The dev JVM (paused track) runs embedded datahike. Compose the fork:
   ;;   clj -M:fork-deps:dev:nrepl   /   clj -M:fork-deps:dev:run
-  ;; konserve-shim lives here (not via :simd) so dev keeps its own heap/GC opts
-  ;; and skips the JDK-25 SIMD jvm-opts (dev doesn't load the proximum index);
-  ;; it gives datahike's version-check a konserve version for the non-jar fork.
-  :dev {:extra-paths ["env/dev/clj" "env/dev/resources" "test"
-                      "dev-resources/konserve-shim"]
+  ;; Dev keeps its own heap/GC opts and does not load the Proximum index.
+  :dev {:extra-paths ["env/dev/clj" "env/dev/resources" "test"]
         :extra-deps {integrant/repl {:mvn/version "0.4.0"}
                      djblue/portal {:mvn/version "0.57.3"}
                      org.clojure/tools.namespace {:mvn/version "1.5.0"}
@@ -144,7 +137,7 @@
   ;; upstream had neither, so tests used to run against DIFFERENT code than
   ;; production). Compose the fork + native launch surface:
   ;;   clojure -M:simd:fork-deps:test -m kaocha.runner unit
-  ;; :simd supplies src-secondary + konserve-shim + the JDK-25 SIMD jvm-opts;
+  ;; :simd supplies src-secondary + the JDK-25 SIMD jvm-opts;
   ;; :fork-deps supplies the datahike + konserve forks. proximum + transit + the
   ;; embeddings client are test-only here (the secondary-index nses need them).
   :test {:extra-paths ["env/dev/clj" "env/dev/resources" "test"]
@@ -189,7 +182,7 @@
   ;; The wire-server owns the single datahike connection. It COMPOSES the
   ;; shared fork + native launch surface — invoked as:
   ;;   clojure -M:simd:fork-deps:writer --backend file --path … --req-sock … …
-  ;; :simd supplies the SIMD jvm-opts + src-secondary + konserve-shim paths;
+  ;; :simd supplies the SIMD jvm-opts + src-secondary path;
   ;; :fork-deps supplies the datahike + konserve forks. Here we add only the
   ;; wire-server's OWN deps: transit-clj (Transit value payloads — the sole
   ;; control codec since the CBOR-envelope removal), proximum (HNSW vector
@@ -267,16 +260,12 @@
          ;; "not available" even though the .cljs files exist on disk.
          ;; The `seon.dev.test-preload` namespace requires the platform
          ;; CLJS tests so they're reachable from the live `:client` pod.
-         ;; dev-resources/konserve-shim: META-INF pom.properties so
-         ;; datahike's version-check (macro-baked into CLJS at compile
-         ;; time) sees a konserve version for the :local/root fork —
-         ;; without it old 0.9.346-stamped stores refuse to open.
-         :extra-paths   ["test" "dev-resources/konserve-shim"]
+         :extra-paths   ["test"]
          :extra-deps    {org.clojure/clojurescript            {:mvn/version "1.12.145"}
                          org.clojure/core.async               {:mvn/version "1.10.870-alpha2"}
                          thheller/shadow-cljs                 {:mvn/version "3.4.10"}
                          ;; Small Clojure Interpreter — runs AGENT-authored
-                         ;; live-tile fns under a wall-clock :interrupt-fn so a
+                         ;; canvas fns under a wall-clock :interrupt-fn so a
                          ;; non-terminating tile (a sync (loop [] (recur)) / (while
                          ;; true)) aborts in-process instead of freezing the single
                          ;; pod thread. v0.13.53 is the release where
@@ -310,14 +299,14 @@
          ;; PR-shaped pending upstream review.
          :override-deps {org.replikativ/datahike
                          {:git/url "https://github.com/seantempesta/datahike"
-                          :git/sha "6e2d9beeb5002ba025e2f3aa69cd9111afd7abf8"}
-                         ;; konserve: the header fix (CLJS meta-size BE32 +
-                         ;; legacy sniff) is UPSTREAMED (#143); 0.9.353 also
-                         ;; carries #144 per-write metadata REQUIRED by the
-                         ;; merged datahike (6e2d9bee). Fork carve-out retired
-                         ;; 2026-07-11.
+                          :git/sha "30a154838ffcc270d32d03bfca7f6518c9ad9faf"}
+                         ;; Konserve 0.9.356 plus the shared CLJ/CLJS legacy
+                         ;; one-byte metadata-header reader. The fork publishes
+                         ;; its own 0.9.356-seon.1 Maven resource, so no consumer
+                         ;; version shim is required.
                          org.replikativ/konserve
-                         {:mvn/version "0.9.353"}
+                         {:git/url "https://github.com/seantempesta/konserve"
+                          :git/sha "df6818d43ea3363a808cd051c0d68917f1b987a9"}
                          org.replikativ/superv.async
                          ;; Patched simple-supervisor's stale-pending
                          ;; watchdog to be LAZY: instead of starting a

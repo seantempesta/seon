@@ -281,3 +281,7 @@
 [submodule "reference-code/deepswe"]
 	path = reference-code/deepswe
 	url = https://github.com/datacurve-ai/deep-swe
+[submodule "reference-code/konserve"]
+	path = reference-code/konserve
+	url = https://github.com/seantempesta/konserve.git
+	ignore = dirty

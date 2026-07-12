@@ -639,6 +639,18 @@ Commit: canonical coordinate, immutable resolver, and capture migration.
 
 ### Phase 9b — correct the pinned Datahike primitives
 
+Implemented in the maintained forks on 2026-07-12 and pinned in Seon as one
+dependency unit. Datahike is current through upstream `0.8.1729`; Konserve is
+current through upstream `0.9.356`; Konserve-sync is `0.1.35`. The implementation
+also closes accepted-write callbacks on fatal writer exit, atomically reserves
+connection openings, scopes shared write hooks to one physical store, drains
+release before store/secondary cleanup, rejects deletion with active
+connections, restores historical secondary roots, and explicitly rejects a
+historical Scriptum fork that its storage API cannot perform honestly. The
+expected-head guard remains a stale-plan check, not a substitute for supervisor
+quiescence. Parent-level fresh-cluster and lifecycle service proofs remain in
+Phases 9c–9e.
+
 - Preflight effective commit-graph support and actual retained commit records;
   an absent literal `:commit-graph?` key may still mean the default true, while
   an effective false or missing record rejects commit branching. Also require

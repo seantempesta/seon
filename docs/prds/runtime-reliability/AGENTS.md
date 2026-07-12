@@ -25,7 +25,12 @@ requires an explicit identity-attribute scope so an empty desired population is
 both removable and isolated from other config-authored entities. The
 default-store transition proved all 177 historical transactions resolve through
 the final refs, then the one-shot classifier was deleted; normal startup now has
-only fresh genesis and convergence. The authoritative target is
+only fresh genesis and convergence. The coordinated storage forks are now
+integrated: Datahike through upstream 0.8.1729 plus the lifecycle/versioning
+fixes, Konserve through upstream 0.9.356 plus legacy cross-runtime header reads,
+and Konserve-sync 0.1.35. The fake Konserve version shim is gone and both fork
+sources are exact submodules. Parent and fresh-cluster acceptance are the active
+gate. The authoritative target is
 [[provenance-and-lifecycle-design]] and the ordered implementation/commit plan
 is [[roadmap]].
 
@@ -38,8 +43,9 @@ bin/test-cljs
 curl -fsS http://127.0.0.1:7890/agents >/dev/null
 ```
 
-Use the default pod/store for live proof. Leave the ACME pod alone unless its
-owner explicitly places it in scope. Use the `browser-automation` skill for UI
+Use the default pod/store for live proof. Prove a final build on a destructively
+reset default cluster before rebuilding/restarting ACME; the owner authorized
+that rollout only after default passes. Use the `browser-automation` skill for UI
 drives; verify long-lived gzip SSE with a Node gunzip client because the browser
 bridge does not proxy it reliably.
 

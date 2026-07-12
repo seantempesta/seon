@@ -285,23 +285,42 @@ external effects.
 | Proximum CoW | `reference-code/datahike/src-secondary/datahike/index/secondary/proximum.clj:121-187,307-320` | Live branch uses Proximum native branch; stored key-map path loads the chosen commit first |
 | Stratum CoW | `reference-code/datahike/src-secondary/datahike/index/secondary/stratum.clj:545-574,1093-1102` | Live path forks its current dataset; stored key-map path loads the chosen dataset commit |
 
-`deps.edn:99-104` pins Datahike commit
-`6e2d9beeb5002ba025e2f3aa69cd9111afd7abf8` and Konserve Maven
-`0.9.353`. The Datahike source is vendored at the matching clean commit.
-Konserve is not vendored, which is a source-grounding gap. This audit inspected
-official tag `0.9.353`, commit
-[`a50f949446aaf255828c81b877e3a73914dc115e`](https://github.com/replikativ/konserve/tree/a50f949446aaf255828c81b877e3a73914dc115e).
+The integrated source pair is now pinned and vendored exactly:
+
+- Datahike `30a154838ffcc270d32d03bfca7f6518c9ad9faf` in
+  `reference-code/datahike`, including upstream through `0.8.1729` plus the
+  branch/secondary, connection-lifecycle, force-branch, and fatal-writer fixes;
+- Konserve `df6818d43ea3363a808cd051c0d68917f1b987a9` in
+  `reference-code/konserve`, based on upstream `0.9.356` and retaining the
+  shared CLJ/CLJS legacy one-byte metadata-header reader; and
+- Konserve-sync `0.1.35` through Datahike's Kabel dependency, carrying ordered
+  handshake walks and `:always-send-mutable?` so a branch head is never
+  timestamp-deduplicated away.
+
+Konserve publishes its real `0.9.356-seon.1` classpath resource, so Seon's fake
+consumer version shim is deleted. A byte audit of the live default store found
+6,280 Konserve blobs and zero legacy-header patterns; compatibility remains for
+older stores and backups rather than being inferred unnecessary from one store.
+
+The final fork gates were green: Datahike JVM lifecycle/Kabel/writer and
+versioning/secondary/Stratum/GC suites, full Kabel integration, 102 CLJS tests
+with 814 assertions, Java compilation, and idempotent generated source. An
+independent combined versioning/lifecycle run added 135 tests and 681
+assertions. Konserve's complete JVM and Node suites passed at 77 tests/1,293
+assertions and 46 tests/331 assertions respectively.
 
 Konserve's file store provides atomicity per key, not across several keys:
 
 - `konserve.core/assoc` is a top-level key overwrite
-  (`src/konserve/core.cljc:346-372` at that tag);
+  (`reference-code/konserve/src/konserve/core.cljc`);
 - the default writer writes a `.new` blob, optionally syncs it, atomically moves
-  it, then syncs the store (`src/konserve/impl/defaults.cljc:84-124`);
+  it, then syncs the store
+  (`reference-code/konserve/src/konserve/impl/defaults.cljc`);
 - the file backend uses NIO `ATOMIC_MOVE`
-  (`src/konserve/filestore.clj:195-201`);
+  (`reference-code/konserve/src/konserve/filestore.clj`);
 - multi-key operations exist only when the backing implements both multi-write
-  and multi-read (`src/konserve/impl/defaults.cljc:576-579`), which the file
+  and multi-read (`reference-code/konserve/src/konserve/impl/defaults.cljc`),
+  which the file
   backing does not; and
 - the backend guide promises ACID per key-value pair
   (`doc/backend.org:55-70`).

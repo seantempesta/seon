@@ -45,8 +45,7 @@
 ;; target above uses — that one is the PAUSED JVM app `seon.core`, with no
 ;; embeddings classpath). Building off `:writer` bakes EVERYTHING the consumer
 ;; would otherwise have to assemble themselves into one jar:
-;;   - the datahike fork's `src-secondary` Proximum source (no git submodule);
-;;   - the `konserve-shim` `META-INF/maven/.../pom.properties` (no repo path);
+;;   - the datahike fork's `src-secondary` Proximum source;
 ;;   - the datahike fork's prep output (no `clojure -X:deps prep`);
 ;;   - the proximum + google-genai maven jars + the SHA-pinned forks.
 ;; The only things the jar can't bake (consumer must supply): Java 22+, the JVM
@@ -62,11 +61,11 @@
         wuber-file   "target/seon-wire-server-standalone.jar"]
     (b/delete {:path wclass-dir})
     (b/delete {:path wuber-file})
-    ;; src + resources + the two :writer extra-paths (src-secondary Proximum
-    ;; source, konserve-shim META-INF) → class-dir → jar.
+    ;; src + resources + the :writer src-secondary Proximum source →
+    ;; class-dir → jar. Konserve's real version resource comes from its
+    ;; pinned dependency and is included by the uber dependency basis.
     (b/copy-dir {:src-dirs ["src" "resources"
-                            "reference-code/datahike/src-secondary"
-                            "dev-resources/konserve-shim"]
+                            "reference-code/datahike/src-secondary"]
                  :target-dir wclass-dir})
     ;; AOT the secondary-index impl + the embed + boot namespaces. AOT itself
     ;; does NOT register :proximum (that swap! runs when boot.clj REQUIRES the
