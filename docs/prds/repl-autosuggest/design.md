@@ -137,6 +137,33 @@ Failed forms excluded for free — the db already knows.
   explicit v0 exclusions routed to the frontier/worker. "General at
   every turn" is the serving surface's north star, not the v0 model's
   contract; the per-form-kind gate confines v0 honestly.
+- **Function creation = delegation, not generation (owner,
+  2026-07-12).** KT5 carries a small defn ARM (test tranche only —
+  confirm the envelope prediction cheaply; if it fails while
+  plan/transact/register pass, DROP the kind, don't train against
+  it). The suggestion for "this situation needs a new function" is a
+  `(seon.ai/gen-fn {::intent …})` CALL — assembly of intent words
+  already present in the plan step/guidance, squarely inside the copy
+  envelope. gen-fn does the heavy lifting (below).
+
+## `seon.ai/gen-fn` — words into a function (owner, 2026-07-12)
+
+Agent-facing, valuable independent of the suggestion model: intent
+words in → a specced `defn` + test out, **eval-proven through the
+normal tee** — the same path as any agent-defined fn (instrumentation,
+`:seon.fn` program-graph persistence, the publish gate). Zero new
+mechanisms on the output side; errors as envelopes.
+
+- **Job-owned special context** (the web `search-model` precedent —
+  NOT the agent's turn context, which stays frozen): retrieved similar
+  specced fns from the program graph as real examples (deterministic
+  selection + existing `seon.embed` top-up), the relevant schema
+  registrations, the docstring/spec conventions. Code over prose.
+- **Role-routed model**: a `:seon.config/gen-fn` config section (same
+  shape as `:seon.config/suggest`). Measured local candidate: the
+  diffusion worker (domain demo 1.00 guided vs 0.00 free on
+  PRD→schemas→functions) — local + oracle-proven; frontier is the
+  config swap.
 
 **The plan-domain target (the flagship, existing `my.plan` surface
 ONLY — no new plan features):**
