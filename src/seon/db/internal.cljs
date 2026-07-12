@@ -1440,10 +1440,6 @@
           generated? (contains? arg :seon.db.id/generated-candidates)
           generated-candidates
           (:seon.db.id/generated-candidates arg)
-          generated-attrs-present?
-          (contains? arg :seon.db.id/generated-identity-attrs)
-          generated-identity-attrs
-          (:seon.db.id/generated-identity-attrs arg)
           c           (resolve-conn conn)
           ;; A symbol written where a keyword-typed IDENTITY value belongs
           ;; (`{:seon.ns/name 'my.agent.foo …}`, the prompted fn-registration
@@ -1478,10 +1474,7 @@
                              merged-opts)
                       generated?
                       (assoc :seon.db.id/generated-candidates
-                             generated-candidates)
-                      generated-attrs-present?
-                      (assoc :seon.db.id/generated-identity-attrs
-                             generated-identity-attrs))
+                             generated-candidates))
             report  (await (d/transact! c arg-map))]
         (transact-success-envelope report return-report?)))
     (catch :default e

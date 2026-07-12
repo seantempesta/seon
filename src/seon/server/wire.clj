@@ -693,21 +693,17 @@
           candidates  (:seon.store.wire/generated-candidates request)
           generated?  (contains? request
                                  :seon.store.wire/generated-candidates)
-          identity-attrs
-          (:seon.store.wire/generated-identity-attrs request)
           _           (assert-protocol-fields-free! tx-data tx-meta)
           db-value    (d/db conn)
           schema      (:schema db-value)
           tx0         (coerce-tx-data-for-schema schema tx-data)
           fingerprint (when wire-id
                         (request-hash
-                         {:seon.store.wire.request/version 1
+                         {:seon.store.wire.request/version 2
                           :seon.store.wire.request/tx-data tx-data
                           :seon.store.wire.request/tx-meta (or tx-meta {})
                           :seon.store.wire.request/generated-candidates
-                          (or candidates [])
-                          :seon.store.wire.request/generated-identity-attrs
-                          (or identity-attrs [])}))
+                          (or candidates [])}))
           recover-current
           (fn []
             (let [db (d/db conn)]
@@ -726,13 +722,11 @@
                                  (assoc :seon.store.wire/id wire-id
                                         :seon.store.wire/request-hash
                                         fingerprint
-                                        :seon.store.wire/protocol-version 1))
+                                        :seon.store.wire/protocol-version 2))
                 transaction    (cond-> {:tx-data tx-with-receipt}
                                  (seq tx-meta*) (assoc :tx-meta tx-meta*)
                                  generated?
-                                 (assoc ::id/generated-candidates candidates
-                                        ::id/generated-identity-attrs
-                                        identity-attrs))]
+                                 (assoc ::id/generated-candidates candidates))]
             (try
               (let [report (d/transact conn transaction)
                     response (ok-response-from-report

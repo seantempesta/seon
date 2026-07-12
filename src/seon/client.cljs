@@ -114,6 +114,7 @@
     ;; render symbols. Renderer kind-lookup queries these via
     ;; datalog instead of walking the in-memory *schemas atom.
     [seon.schema :as schema]
+    [seon.schema.internal :as schema.internal]
     ;; Phase 2 — test capture as data. Required so the bundle
     ;; includes the runner; agent code reaches it from
     ;; bootstrap-CLJS eval via the analyzer's globalThis fallback
@@ -536,6 +537,7 @@
    :seon.schema/id-attr
    :seon.schema/render-fn
    :seon.schema/render-html-fn
+   :seon.db.id/generator
 
    ;; --- Log (A-6) ---
    ;; REMOVED 2026-05-27 per storage discipline rule (Sean): logs are
@@ -1800,6 +1802,10 @@
                                     ;; (pr-str below); expected graceful
                                     ;; degradation, not a defect.
                                     (catch :default _ v))
+                          properties
+                          (schema.internal/attr-form-properties form)
+                          generator-present?
+                          (contains? properties :seon.db.id/generator)
                           s    (pr-str form)
                           src  (if (> (count s) schema-source-cap)
                                  (str (subs s 0 schema-source-cap) " …")
@@ -1807,6 +1813,9 @@
                       (cond-> {:seon.schema/key        k
                                :seon.schema/source     src
                                :seon.schema/created-at now}
+                        generator-present?
+                        (assoc :seon.db.id/generator
+                               (:seon.db.id/generator properties))
                         (namespace k)
                         (assoc :seon.schema/ns
                                {:seon.ns/name (keyword (namespace k))}))))))
@@ -1876,11 +1885,11 @@
 
    DRIFT-HEALING is uniform across every row kind: a stored row re-emits
    whenever ANY freshly-derived field differs from what the store holds —
-   `:seon.ns/source`, `:seon.schema/source`, `:seon.test/source`, and for
-   `:seon.fn` rows the WHOLE derived set (source, spec, doc, arglists,
-   private?). Identity upsert re-asserts the changed datoms in place; a
-   spec that DISAPPEARED from the live var meta is explicitly retracted
-   (upsert can't remove a datom). Fn/test re-emits are provenance-guarded
+   `:seon.ns/source`, schema source/generator policy, `:seon.test/source`, and
+   for `:seon.fn` rows the WHOLE derived set (source, spec, doc, arglists,
+   private?). Identity upsert re-asserts changed datoms in place; an optional
+   fn spec or schema generator policy that DISAPPEARED is explicitly retracted
+   (upsert cannot remove a datom). Fn/test re-emits are provenance-guarded
    the same way [[prune-core-ghosts!]] is: only rows whose `:source`
    datom's tx carries `:seon.db/origin :core-seed` are overwritten — an
    agent-authored row (detect-and-tee, runner) with a core sym is NEVER
@@ -1903,6 +1912,12 @@
                      :seon.fn/doc      (:seon.fn/doc row)
                      :seon.fn/arglists (:seon.fn/arglists row)
                      :seon.fn/private? (:seon.fn/private? row)})
+        no-generator :seon.db.id.generator/absent
+        schema-fields
+        (fn [row]
+          {:seon.schema/source (:seon.schema/source row)
+           :seon.db.id/generator
+           (get row :seon.db.id/generator no-generator)})
         have-fns  (into {}
                         (map (fn [[sym src spec doc args priv]]
                                [sym {:seon.fn/source   src
@@ -1942,21 +1957,25 @@
                                   [?n :seon.ns/name ?nm]
                                   [?n :seon.ns/source ?src]]
                                 db))
-        ;; Schema rows dedup on key AND source (mirrors the ns-row rule
-        ;; above): a boot-indexed `:seon.schema` row RE-EMITS when its
-        ;; stored `:seon.schema/source` differs from the freshly-built
-        ;; one — identity upsert on `:seon.schema/key` re-asserts the
-        ;; source in place. This is what HEALS a pre-existing store
-        ;; whose rows carry unreadable pre-pure-data-law sources (the
-        ;; 2026-06-11 `[:fn #object[…]]` poison). An agent's own
-        ;; `(seon.schema/register! …)` TEE row — a replayable `(…)`
-        ;; call form, the same discriminator replay uses — is still
-        ;; NEVER overwritten by the boot index.
-        have-schs (into {} (d/q '[:find ?k ?src
-                                  :where
-                                  [?s :seon.schema/key ?k]
-                                  [?s :seon.schema/source ?src]]
-                                db))
+        ;; Schema rows dedup on source AND persisted generator policy. A
+        ;; partial store missing the policy fact re-emits even when source is
+        ;; unchanged; removing a policy emits an explicit retract below because
+        ;; identity upsert cannot remove a card-one datom. An agent's own
+        ;; `(seon.schema/register! …)` TEE row remains protected by its
+        ;; replayable call-form source discriminator.
+        have-schs
+        (into {}
+              (map (fn [[k src generator]]
+                     [k {:seon.schema/source src
+                         :seon.db.id/generator generator}]))
+              (d/q '[:find ?k ?src ?generator
+                     :in $ ?absent
+                     :where
+                     [?s :seon.schema/key ?k]
+                     [?s :seon.schema/source ?src]
+                     [(get-else $ ?s :seon.db.id/generator ?absent)
+                      ?generator]]
+                   db no-generator))
         ;; Test rows dedup on sym AND source (same drift rule as ns rows).
         have-tsts (into {} (d/q '[:find ?t ?src
                                   :where
@@ -1972,8 +1991,9 @@
                                     (= (get have-nses (:seon.ns/name row))
                                        (:seon.ns/source row)))
                                (when-some [stored (get have-schs (:seon.schema/key row))]
-                                 (or (= stored (:seon.schema/source row))
-                                     (seval/registration-call-source? stored)))
+                                 (or (= stored (schema-fields row))
+                                     (seval/registration-call-source?
+                                       (:seon.schema/source stored))))
                                (when-some [stored (get have-tsts (:seon.test/sym row))]
                                  (or (= stored (:seon.test/source row))
                                      (not (contains? core-syms (:seon.test/sym row)))))))
@@ -1982,15 +2002,26 @@
         ;; stored row carries a spec: identity upsert re-asserts the other
         ;; fields but can't REMOVE a datom — retract the stale spec
         ;; explicitly so PRESENT ⇒ specced stays honest.
-        retracts  (into []
-                        (keep (fn [row]
-                                (when-some [sym (:seon.fn/sym row)]
-                                  (let [stored-spec (get-in have-fns [sym :seon.fn/spec])]
-                                    (when (and (not (contains? row :seon.fn/spec))
-                                               (seq stored-spec))
-                                      [:db/retract [:seon.fn/sym sym]
-                                       :seon.fn/spec stored-spec])))))
-                        kept)
+        retracts
+        (into []
+              (keep
+                (fn [row]
+                  (if-some [sym (:seon.fn/sym row)]
+                    (let [stored-spec (get-in have-fns [sym :seon.fn/spec])]
+                      (when (and (not (contains? row :seon.fn/spec))
+                                 (seq stored-spec))
+                        [:db/retract [:seon.fn/sym sym]
+                         :seon.fn/spec stored-spec]))
+                    (when-some [schema-key (:seon.schema/key row)]
+                      (let [stored-generator
+                            (get-in have-schs
+                                    [schema-key :seon.db.id/generator])]
+                        (when (and (not= no-generator stored-generator)
+                                   (not (contains? row
+                                                   :seon.db.id/generator)))
+                          [:db/retract [:seon.schema/key schema-key]
+                           :seon.db.id/generator stored-generator]))))))
+              kept)
         ;; `:seon.ns/require-edges` COMPONENT rows can't ride the plain
         ;; identity upsert: cardinality-many component maps have no
         ;; identity of their own, so a drift re-emit (changed

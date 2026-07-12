@@ -137,26 +137,39 @@ domain; generated package output is checked against the exact new grammar.
 
 `:seon.db/id` is the broad compatibility/transport union; generated identity
 attributes reference one of the two narrow value schemas above.
-`seon.db.id/allocate!` is the only allocator. It reads the identity attribute's
-registered `:seon.db.id/generator` metadata, privately adapts the platform
-package, and commits the complete candidate-dependent domain transaction before
-returning an id. Only `:seon.agent/id` may register the human-readable policy;
-all other generated persistent identities register compact. A matching
-structured Datahike `:transact/unique` or `:transact/upsert`
-conflict rebuilds and retries the whole transaction within the fixed bound;
-reconciliation of known ids is a separate intentional-upsert operation.
-Existing ids are never rewritten merely to change representation.
-Inside the writer operation, the canonical preparer performs indexed lookups
-for each candidate across every registered generator-managed identity attr and
-scans incoming identity assertions. It injects allocator-owned tempids and
-resolves final eids from Datahike's committed report. Local connections name
-the durable `:seon.db.id.writer/serialized` backend; its runtime multimethod
-delegates to Datahike's self writer with the private transaction operation in
-memory. No function enters the database config that Datahike persists on each
-commit. The JVM wire registry uses that same backend, so local and remote
-allocations run against the writer-supplied old database without another lock
-or transaction path. This supplies global generated-value uniqueness without
-storing a global identity entity; lookup refs remain attribute-qualified.
+`seon.db.id/allocate!` is the only allocator. The compiled Malli property is
+startup/declaration input: the schema index persists it as an ordinary
+`:seon.db.id/generator` datom on the corresponding `:seon.schema/key` entity.
+The serialized writer queries those database facts; no request carries a
+client-authored list of managed attributes. Only `:seon.agent/id` may hold the
+human-readable policy; all other generated persistent identities hold compact.
+
+Allocation privately adapts the platform package, then gives the caller's pure
+builder a candidate map for the complete domain transaction. The writer checks
+the candidate against the old database, injects allocator-owned tempids, runs
+Datahike's normal transaction function, and validates the complete
+**uncommitted TxReport** before returning it to Datahike's commit queue. That
+postflight sees assertions created by nested maps, transaction functions, and
+transaction metadata as well as literal input. A fresh current-grammar value
+must match the allocator manifest; an identical attr/value already present in
+`db-before` remains a normal exact upsert. The explicit root genesis and the
+14-character migration domain remain readable without pretending to be newly
+generated. Policy changes full-audit the resulting managed population, so a
+removal with live values, invalid grammar, or cross-attribute value collision
+cannot commit.
+
+A matching structured Datahike `:transact/unique` or `:transact/upsert`
+conflict rebuilds and retries the whole candidate-dependent transaction within
+the fixed bound; unrelated failures do not retry. Final eids come only from the
+accepted report. Local connections name the durable
+`:seon.db.id.writer/serialized` backend; its runtime multimethod delegates to
+Datahike's self writer with the private transaction operation in memory. No
+function enters the persisted database config. The JVM wire registry uses that
+same backend, so local and remote writes share one policy boundary without a
+second lock or transaction path. This supplies database-wide generated-value
+uniqueness without a global identity entity; lookup refs remain
+attribute-qualified. The wire transaction UUID is a separate idempotency
+receipt, not a domain identity.
 `:seon.agent.ctx/name` is NOT an identity (see §4.2): it is a plain `:keyword`, a
 per-agent upsert key, not a global identity.
 

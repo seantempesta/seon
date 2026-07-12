@@ -73,6 +73,7 @@
             [seon.repair.candidates :as candidates]
             [seon.repl.internal :as internal]
             [seon.schema :as schema]
+            [seon.schema.internal :as schema.internal]
             [seon.test.runner :as test-runner]))
 
 
@@ -1826,12 +1827,16 @@
    silently dropping the tee row (opus run2 live stack,
    open-issues-prd-2026-06-11 — resume-durability loss for every
    agent-authored entity schema)."
-  [k source at]
-  (cond-> {:seon.schema/key        k
-           :seon.schema/source     source
-           :seon.schema/created-at at}
-    (namespace k)
-    (assoc :seon.schema/ns {:seon.ns/name (keyword (namespace k))})))
+  [k form source at]
+  (let [properties (schema.internal/attr-form-properties form)]
+    (cond-> {:seon.schema/key        k
+             :seon.schema/source     source
+             :seon.schema/created-at at}
+      (contains? properties :seon.db.id/generator)
+      (assoc :seon.db.id/generator
+             (:seon.db.id/generator properties))
+      (namespace k)
+      (assoc :seon.schema/ns {:seon.ns/name (keyword (namespace k))}))))
 
 ;; ============================================================
 ;; Strict persistence policy (#7) — classify on the FORM HEAD.
@@ -2315,7 +2320,8 @@
         ;; one. Entity-kind keys (nil keyword namespace) carry NO ns
         ;; link at all — see [[schema-tee-row]].
         schema-entities (for [k new-schemas]
-                          (schema-tee-row k source at))
+                          (schema-tee-row k (schema/schema-definition k)
+                                          source at))
         ;; Phase 4 (mvp-completion-plan 2026-05-27): deftest defs carry
         ;; the analyzer's top-level `:test true` marker (see
         ;; [[deftest-def?]] — the old `(:test (:meta var-map))` check was
@@ -2738,7 +2744,7 @@
         (when-not (or (= origin :core-seed)
                       (= stored-src source))
           (-> (db/transact!
-                {:seon.db/tx-data [(schema-tee-row k source (js/Date.))]
+                {:seon.db/tx-data [(schema-tee-row k form source (js/Date.))]
                  :seon.db/conn    conn})
               (.then
                 (fn [r]
@@ -2935,12 +2941,25 @@
   (clip-result-body
     eval-id
     (try
-      (value/render-ai eval-id value)
+      (value/format-ai
+        {::value/eval-id eval-id
+         ::value/prepared (value/prepare-ai {::value/value value})})
       (catch :default _
-        ;; This function runs inside the allocator's retryable transaction
-        ;; builder, so it must be total and side-effect free. A renderer defect
-        ;; degrades to a bounded pointer; recording/logging here would repeat
-        ;; once per generated-candidate retry.
+        (str "; <value could not be rendered as data; the live value is "
+             "result/" eval-id ">")))))
+
+(defn- render-prepared-result-edn
+  "Format one already-prepared eval value under its final candidate id."
+  [eval-id prepared]
+  (clip-result-body
+    eval-id
+    (try
+      (value/format-ai {::value/eval-id eval-id
+                        ::value/prepared prepared})
+      (catch :default _
+        ;; Formatting runs inside the allocator's retryable transaction builder,
+        ;; so it must be total and side-effect free. The raw value was already
+        ;; prepared outside this function and is never revisited here.
         (str "; <value could not be rendered as data; the live value is "
              "result/" eval-id ">")))))
 
@@ -3005,6 +3024,9 @@
           (assoc :seon.eval/error-data
                  (einstrument/pr-str-readable
                    (-> result :seon/error :seon.error/data))))
+        prepared-value
+        (when (and (::ok? result) (not pending?))
+          (value/prepare-ai {::value/value (::value result)}))
         allocate-record!
         (fn ^:async allocate-record! [accepted-tee]
           (await
@@ -3022,8 +3044,11 @@
                                   (::ok? result)
                                   (assoc :seon.eval/result-edn
                                          (cap-edn
-                                           (render-result-edn eval-id
-                                                              stored-value))))]
+                                           (if pending?
+                                             (render-result-edn eval-id
+                                                                stored-value)
+                                             (render-prepared-result-edn
+                                               eval-id prepared-value)))))]
                    {:seon.db/tx-data
                     (into [{:seon.agent.turn/id turn-id
                             :seon.agent.turn/evals [eval-row]}]

@@ -58,6 +58,44 @@
 ;; (exactly the prod situation).
 ;; ---------------------------------------------------------------------------
 
+(defn- generator-policy-rows []
+  (into []
+        (comp
+          (filter #(contains? % :seon.db.id/generator))
+          (map #(select-keys % [:seon.schema/key
+                                :seon.db.id/generator])))
+        (client/index-schemas)))
+
+(def ^:private fixture-turn-marker 424242)
+
+(defn ^:async seed-fixture-turn! [conn]
+  (let [response
+        (await
+          (db.id/allocate!
+            {::db.id/allocations
+             [{::db.id/key :record-eval-test/turn
+               ::db.id/identity-attr :seon.agent.turn/id}]
+             ::db.id/transaction-builder
+             (fn [ids]
+               {:seon.db/tx-data
+                [{:seon.agent.turn/id
+                  (:record-eval-test/turn ids)
+                  :seon.agent.turn/at (js/Date.)
+                  :seon.agent.turn/status :running
+                  :seon.agent.turn/prompt-chars fixture-turn-marker}]})
+             :seon.db/conn conn}))]
+    (when-not (:seon.db/ok? response)
+      (throw (ex-info "fixture turn allocation failed" response)))
+    conn))
+
+(defn- fixture-turn-id [conn]
+  (d/q '[:find ?id .
+         :in $ ?marker
+         :where
+         [?turn :seon.agent.turn/prompt-chars ?marker]
+         [?turn :seon.agent.turn/id ?id]]
+       @conn fixture-turn-marker))
+
 (defn- fresh-conn
   "Promise of a fresh :memory datahike conn (history on — record-eval!'s
    tx-meta auto-tagging needs it on the real conn; keep parity), with the
@@ -76,8 +114,16 @@
                        {:tx-data (into
                                    (db/malli->datahike-schema
                                      client/agent-bootstrap-attrs)
-                                   (db/tx-meta-datahike-schema))})
+                                   (concat (db/tx-meta-datahike-schema)
+                                           (generator-policy-rows)))})
                      (.then (fn [_] conn))))))))
+
+(defn- open-agent-conn! []
+  (-> (client/open-agent-conn!)
+      (.then
+        (fn [conn]
+          (-> (d/transact! conn {:tx-data (generator-policy-rows)})
+              (.then (fn [_] (seed-fixture-turn! conn))))))))
 
 (defn- record!
   "Open a committed parent turn, then record one eval against `conn`."
@@ -174,10 +220,64 @@
                     (is false (str "ambiguous allocation test threw: " error))))
           (.finally done)))))
 
+(deftest allocation-retries-format-one-prepared-value-without-re-realizing-it
+  (async done
+    (let [!realized (atom 0)
+          value (map (fn [n]
+                       (swap! !realized inc)
+                       {:probe.row/index n})
+                     (range 1000))
+          first-id "a12345678901"
+          final-id "b12345678901"
+          !observation (atom nil)]
+      (-> (with-allocation-stub
+            (fn [request]
+              (let [builder (::db.id/transaction-builder request)
+                    after-prepare @!realized
+                    first-built (builder {:seon.eval/eval-allocation first-id})
+                    after-first @!realized
+                    final-built (builder {:seon.eval/eval-allocation final-id})
+                    after-final @!realized
+                    result-edn
+                    (fn [built]
+                      (get-in built [:seon.db/tx-data 0
+                                     :seon.agent.turn/evals 0
+                                     :seon.eval/result-edn]))]
+                (reset! !observation
+                        {:after-prepare after-prepare
+                         :after-first after-first
+                         :after-final after-final
+                         :first-result (result-edn first-built)
+                         :final-result (result-edn final-built)})
+                (js/Promise.resolve
+                  {:seon.db/ok? true
+                   ::db.id/ids {:seon.eval/eval-allocation final-id}})))
+            #(seval/record-eval!
+               (assoc (eval-args "(range 1000)" [])
+                      :seon.eval/result
+                      {:seon.eval/ok? true :seon.eval/value value}
+                      :seon.agent.turn/id-of-turn "turn-render-probe")))
+          (.then
+            (fn [response]
+              (let [{:keys [after-prepare after-first after-final
+                            first-result final-result]}
+                    @!observation]
+                (is (= final-id (:seon.eval/id response)))
+                (is (pos? after-prepare)
+                    "preparation realizes only the bounded view it needs")
+                (is (= after-prepare after-first after-final)
+                    "candidate formatting never touches the raw lazy value")
+                (is (str/includes? first-result first-id))
+                (is (str/includes? final-result final-id)))))
+          (.catch
+            (fn [error]
+              (is false (str "prepared render retry test threw: " error))))
+          (.finally done)))))
+
 (deftest eval-body-runs-once-when-identity-allocation-retries
   (async done
     (-> (js/Promise.all #js [(repl/ensure-bootstrap!)
-                             (client/open-agent-conn!)])
+                             (open-agent-conn!)])
         (.then
           (fn [values]
             (let [compile-state (aget values 0)
@@ -376,10 +476,11 @@
                                         :where [?e :seon.eval/id ?id]]
                                       db* eval-id))))
                         (testing "the unresolvable tee row was dropped, not half-written"
-                          (is (= #{}
-                                 (d/q '[:find ?k
-                                        :where [?s :seon.schema/key ?k]]
-                                      db*)))))))))))
+                          (is (empty?
+                                (d/q '[:find ?k
+                                       :in $ ?k
+                                       :where [?s :seon.schema/key ?k]]
+                                     db* :no.such.ns/attr)))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -487,6 +588,46 @@
                    :seon.eval/source         source
                    :seon.eval/at             (js/Date.)}))))))
 
+(deftest schema-tee-persists-generator-policy-from-the-registered-form
+  (async done
+    (let [policy-key :probe.generator.policy/id
+          plain-key  :probe.generator.policy/label
+          policy-src
+          (str "(seon.schema/register! " policy-key
+               " [:and {:seon.db/identity true "
+               ":seon.db.id/generator :seon.db.id.generator/compact} "
+               ":seon.db/id])")
+          plain-src (str "(seon.schema/register! " plain-key " :string)")]
+      (-> (repl/ensure-bootstrap!)
+          (.then
+           (fn [cs]
+             (-> (seval/eval
+                  cs "(ns probe.generator.policy)"
+                  {:seon.eval/starting-ns 'cljs.user
+                   :seon.eval/analyze-deps? false})
+                 (.then (fn [_]
+                          (tee-for cs 'probe.generator.policy policy-src)))
+                 (.then
+                  (fn [tee]
+                    (let [row (first
+                               (filter #(= policy-key (:seon.schema/key %))
+                                       tee))]
+                      (is (= :seon.db.id.generator/compact
+                             (:seon.db.id/generator row))
+                          "the tee row carries the form's generator policy")
+                      (tee-for cs 'probe.generator.policy plain-src))))
+                 (.then
+                  (fn [tee]
+                    (let [row (first
+                               (filter #(= plain-key (:seon.schema/key %))
+                                       tee))]
+                      (is (not (contains? row :seon.db.id/generator))
+                          "a form without generator policy gains no fact")))))))
+          (.catch (fn [error]
+                    (is false (str "schema generator tee test threw: " error))))
+          (.finally (fn [] (unregister! policy-key plain-key)))
+          (.finally done)))))
+
 (deftest agent-deftest-tees-a-seon-test-row-not-a-fn-row
   (async done
     (-> (repl/ensure-bootstrap!)
@@ -580,7 +721,7 @@
     ;; with those tx-meta attrs — they must be in the conn's
     ;; schema. open-agent-conn! installs pod-full-schema (entity + tx-meta);
     ;; fresh-conn here installs only entity attrs.
-    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (open-agent-conn!)])
         (.then
           (fn [res]
             (let [cs    (aget res 0)
@@ -596,7 +737,7 @@
                   ;; exercising eval-form-entry!'s failure-path cleanup wiring.
                   batch (fn [src] (seval/eval-batch! cs (repl-internal/parse-forms src)
                                                      (symbol uniq) "tee-retry-test"
-                                                     "turnteertry1" nil))]
+                                                     (fixture-turn-id conn) nil))]
               ;; set! (not binding) so *conn* spans the async eval-batch!
               ;; internals (record-eval! reads it post-await), mirroring how
               ;; the live pod root-set!s the conn. Restored in .finally.
@@ -643,7 +784,7 @@
   (async done
     ;; open-agent-conn! (like the body-retry test): eval-batch! tx-meta-tags
     ;; with the causality bundle, so the conn needs pod-full-schema.
-    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (open-agent-conn!)])
         (.then
           (fn [res]
             (let [cs    (aget res 0)
@@ -661,7 +802,7 @@
                   reg?  (fn [] (contains? (schema/current-keys) attr))
                   batch (fn [src] (seval/eval-batch! cs (repl-internal/parse-forms src)
                                                      (symbol uniq) "tee39-test"
-                                                     "turntee39001" nil))
+                                                     (fixture-turn-id conn) nil))
                   ;; the failed form: register! RUNS, then a deliberate throw
                   ;; fails the whole `do` (errors-are-values → :ok false).
                   fail-src (str "(do (seon.schema/register! " attr " :int)"
@@ -735,7 +876,7 @@
     (-> (repl/ensure-bootstrap!)
         (.then
           (fn [cs]
-            (-> (client/open-agent-conn!)
+            (-> (open-agent-conn!)
                 (.then
                   (fn [conn]
                     (binding [db/*conn* conn]
@@ -918,7 +1059,7 @@
 
 (deftest core-claimed-row-is-never-overwritten-by-the-self-tee
   (async done
-    (-> (client/open-agent-conn!)
+    (-> (open-agent-conn!)
         (.then
           (fn [conn]
             (let [prev db/*conn*
@@ -961,7 +1102,7 @@
 ;; in-memory registry until replay re-runs the stored call form).
 (deftest teed-registration-replays-after-registry-rebuild
   (async done
-    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (open-agent-conn!)])
         (.then
           (fn [res]
             (let [cs   (aget res 0)
@@ -1000,7 +1141,7 @@
 ;; a fully-qualified register! call eval'd from 'cljs.user.
 (deftest teed-entity-schema-row-replays-after-registry-rebuild
   (async done
-    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (open-agent-conn!)])
         (.then
           (fn [res]
             (let [cs   (aget res 0)
@@ -1160,7 +1301,7 @@
 
 (deftest eval-batch-tees-require-edges-and-read-attrs
   (async done
-    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (open-agent-conn!)])
         (.then
           (fn [res]
             (let [cs    (aget res 0)
@@ -1170,7 +1311,7 @@
                   fq    (str uniq "/watcher")
                   batch (fn [src] (seval/eval-batch! cs (repl-internal/parse-forms src)
                                                      (symbol uniq) "tee-edge-test"
-                                                     "turnteeedge1" nil))
+                                                     (fixture-turn-id conn) nil))
                   read-attrs (fn [] (set (:seon.fn/read-attrs
                                            (db/pull @conn [:seon.fn/read-attrs]
                                                     [:seon.fn/sym fq]))))]
@@ -1350,7 +1491,7 @@
 
 (deftest auto-resolved-keyword-defn-tees-fn-row-with-resolved-read-attrs
   (async done
-    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (open-agent-conn!)])
         (.then
           (fn [res]
             (let [cs    (aget res 0)
@@ -1360,7 +1501,7 @@
                   fq    (str uniq "/kw-user")
                   batch (fn [src] (seval/eval-batch! cs (repl-internal/parse-forms src)
                                                      (symbol uniq) "tee-autokw-test"
-                                                     "turnautokw01" nil))
+                                                     (fixture-turn-id conn) nil))
                   fn-row (fn [] (db/pull @conn [:seon.fn/sym :seon.fn/source
                                                 :seon.fn/read-attrs]
                                          [:seon.fn/sym fq]))]

@@ -110,7 +110,10 @@ counters in favor of one fiber-local AsyncLocalStorage map; focused behavioral
 coverage passes 14 tests / 79 assertions, including concurrent scope and pending
 write isolation. The unbounded test-run `globalThis` properties have also been
 replaced in place by one bounded recent-run process store with oldest-first
-eviction; durable test summaries remain database facts. Normal process boot no
+eviction. Full recorded results now live directly in that vector and
+`last-result` reads the newest entry without a DB lookup; the generated scalar
+run id and durable DB→process pointer are deleted rather than replaced. Durable
+per-test summaries remain database facts. Normal process boot no
 longer creates an unused second in-memory Datahike database—the real cluster
 attachment is the health proof. The first full CLJS gate took 348 seconds and
 exposed a cross-test pending-buffer fixture dependency; the fixture order is
@@ -184,6 +187,20 @@ Commit: baseline instrumentation and evidence only.
 Establish collision-safe creation before mint starts relying on the new agent
 grammar.
 
+Progress on 2026-07-12: implementation and focused mechanical proof are
+complete; cold default-cluster proof remains after the production rebuild. The
+single allocator now owns every generated domain identity. Generator policy is
+a database fact on each `:seon.schema/key` entity, not a client-supplied
+catalog. The writer validates the complete uncommitted Datahike report before
+commit, including nested maps, transaction-function output, transaction
+metadata, exact known-id upserts, policy transitions, and cross-attribute
+collisions. Wire protocol v2 carries only the candidate manifest and uses a
+durable UUID receipt plus frozen request hash for same-id recovery. Eval values
+are prepared once outside retryable builders, and an ambiguous/committed wire
+result can never allocate a replacement eval id. JVM writer tests pass 19 tests
+/ 112 assertions; the CLJ/CLJS allocator, wire, schema-index, and eval-record
+suites are green with zero compile warnings.
+
 - Add `src/seon/db/id.cljc` as the only owner of generated persistent
   identities, with named Malli request/response schemas and fully namespaced
   schema metadata `:seon.db.id/generator`.
@@ -202,8 +219,9 @@ grammar.
   without rewriting; remove time from newly generated values and project
   creation time from the identity datom's transaction.
 - Replace the query-then-entity-map `new-id!` path with `allocate!`: declarations
-  name identity attributes, registered metadata chooses the adapter, and a pure
-  builder receives candidates and produces the complete normal transaction.
+  name identity attributes, persisted generator-policy facts choose the
+  adapter, and a pure builder receives candidates and produces the complete
+  normal transaction.
 - Extend the existing wire transaction/result shape with a generated-candidate
   manifest and structured Datahike uniqueness details. Inside the serialized
   writer operation, the canonical CLJC preparer injects collision-free tempids;
@@ -214,16 +232,19 @@ grammar.
   transaction on each attempt; after sixteen rounds return a namespaced
   exhaustion error. Unrelated uniqueness/schema/domain failures return without
   retry.
-- At the serialized writer, preflight each candidate through indexed AVET
-  lookups over the registry-derived set of all generator-managed identity attrs
-  and scan the incoming transaction for cross-attribute reuse. Reject duplicate
-  candidates and any existing identity that would silently upsert a candidate
-  entity. A generated-value hit is a matching candidate conflict and retries;
-  it stores no global id entity. Local and JVM wire-registry connections name
-  the fully namespaced `:seon.db.id.writer/serialized` backend. Its runtime
-  multimethod installs the private operation in Datahike's self writer while
-  the persisted config contains only the keyword, so there is no
-  client-side query-then-transact path or unserializable live function.
+- At the serialized writer, derive the managed identity set from persisted
+  `:seon.schema/key` + `:seon.db.id/generator` facts. Preflight candidates
+  through indexed AVET lookups, then inspect Datahike's complete uncommitted
+  transaction report before it reaches the commit queue. Reject duplicate or
+  raw fresh current IDs, invalid policy changes, and cross-attribute reuse from
+  literal maps, nested entities, transaction functions, or transaction
+  metadata. A generated-value hit is a matching candidate conflict and
+  retries; it stores no global id entity. Local and JVM wire-registry
+  connections name the fully namespaced
+  `:seon.db.id.writer/serialized` backend. Its runtime multimethod installs the
+  private operation in Datahike's self writer while the persisted config
+  contains only the keyword, so there is no client-side query-then-transact
+  path or unserializable live function.
 - Gate creation of generator-managed identity attributes through `allocate!`;
   known-id exact reconciliation remains a separate intentional-upsert path.
   This is a consistency boundary, not an authorization system.
@@ -293,7 +314,8 @@ Install the final two-fact model atomically across writers/readers.
   transaction metadata and validate/resolve both refs before submission.
 - Migrate every author/recency/debug/warning/program query to joins through
   `:seon.db/user` and `:seon.db/process`.
-- Preserve `:seon.store.wire/write-id` for transport correlation.
+- Preserve `:seon.store.wire/id` as the durable idempotency receipt and
+  transport correlation key.
 - Remove all writers, readers, and public source registrations for the retiring
   transaction-metadata attributes `:seon.db/agent-id`, `:seon.db/turn-id`,
   `:seon.db/eval-id`, `:seon.db/session-id`, `:seon.db/origin`,

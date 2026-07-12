@@ -394,15 +394,36 @@
         "one :seon.schema row per registered schema key")
     (is (contains? ks :seon.db/id) "attr-level shape (:seon.db/id) indexed")
     (is (contains? ks :seon.eval) "entity kind (:seon.eval) indexed")
-    (is (= "[:string {:min 14, :max 14}]"
+    (is (= (pr-str (schema/schema-definition :seon.db/id))
            (:seon.schema/source (first (filter #(= :seon.db/id (:seon.schema/key %)) rows))))
-        ":seon.schema/source is the registered Malli form (pr-str)")
+        ":seon.schema/source is derived from the registered Malli form")
     (is (every? (fn [{k :seon.schema/key ns-ref :seon.schema/ns}]
                   (if (namespace k)
                     (= {:seon.ns/name (keyword (namespace k))} ns-ref)
                     (nil? ns-ref)))
                 rows)
         "namespaced keys carry the owning-ns nested ref; bare kinds don't")))
+
+(deftest index-schemas-persists-generator-policy-as-data
+  (let [rows      @schemas-tx
+        by-key    (into {} (map (juxt :seon.schema/key identity)) rows)
+        installed (first
+                   (filter #(= :seon.db.id/generator (:db/ident %))
+                           (db/malli->datahike-schema
+                            client/agent-bootstrap-attrs)))]
+    (is (= :seon.db.id.generator/human-readable
+           (:seon.db.id/generator (get by-key :seon.agent/id)))
+        "the agent identity row carries its registered generator policy")
+    (is (= :seon.db.id.generator/compact
+           (:seon.db.id/generator (get by-key :my.plan/id)))
+        "a compact identity row carries its registered generator policy")
+    (is (not (contains? (get by-key :seon.agent/parent)
+                        :seon.db.id/generator))
+        "an ordinary registered attr gains no generator fact")
+    (is (= {:db/valueType :db.type/keyword
+            :db/cardinality :db.cardinality/one}
+           (select-keys installed [:db/valueType :db/cardinality]))
+        "the persisted policy attr is installed by the pod bootstrap schema")))
 
 (deftest index-tests-builds-rows-from-deftest-vars
   ;; Fix b: deftest vars → :seon.test rows via the same file-read
@@ -456,6 +477,27 @@
                     ;; SECOND boot of the now-populated conn: clean no-op.
                     (is (= [] second-tx)
                         "second boot of an already-indexed conn is a no-op ([])")
+                    (db/transact!
+                      {:seon.db/conn conn
+                       :seon.db/tx-data
+                       [[:db/retract
+                         [:seon.schema/key :seon.agent/id]
+                         :seon.db.id/generator
+                         :seon.db.id.generator/human-readable]]})))
+                (.then (fn [_] (client/core-index-tx conn)))
+                (.then
+                  (fn [policy-gap]
+                    (let [rows (filter #(= :seon.agent/id
+                                           (:seon.schema/key %))
+                                       policy-gap)]
+                      (is (= 1 (count rows))
+                          "a missing persisted generator policy re-emits its schema row")
+                      (is (= :seon.db.id.generator/human-readable
+                             (:seon.db.id/generator (first rows)))))
+                    (db/transact! {:seon.db/conn conn
+                                   :seon.db/tx-data policy-gap})))
+                (.then
+                  (fn [_]
                     (db/transact!
                       {:seon.db/conn conn
                        :seon.db/tx-data

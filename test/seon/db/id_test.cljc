@@ -5,6 +5,7 @@
    #?(:clj  [clojure.test :refer [deftest is testing]]
       :cljs [cljs.test :refer [deftest is testing async]])
    [datahike.api :as d]
+   #?@(:cljs [[datahike.core :as datahike]])
    #?@(:clj [[datahike.writing :as writing]])
    [malli.core :as m]
    [seon.db.id :as id]
@@ -19,6 +20,38 @@
 (def ^:private other-identity-attr :idtest.record/other-id)
 (def ^:private dependent-identity-attr :idtest.namespace/name)
 (def ^:private dependent-source-attr :idtest.namespace/source)
+(def ^:private compact-generator :seon.db.id.generator/compact)
+
+(defn- allocation-schema-transaction []
+  [{:db/ident :seon.schema/key
+    :db/valueType :db.type/keyword
+    :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/identity}
+   {:db/ident :seon.db.id/generator
+    :db/valueType :db.type/keyword
+    :db/cardinality :db.cardinality/one}
+   {:db/ident identity-attr
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/identity}
+   {:db/ident other-identity-attr
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/identity}
+   {:db/ident :idtest.record/source
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}
+   {:db/ident dependent-identity-attr
+    :db/valueType :db.type/keyword
+    :db/cardinality :db.cardinality/one
+    :db/unique :db.unique/identity}
+   {:db/ident dependent-source-attr
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}
+   {:seon.schema/key identity-attr
+    :seon.db.id/generator compact-generator}
+   {:seon.schema/key other-identity-attr
+    :seon.db.id/generator compact-generator}])
 
 (defn- register-allocation-schema! []
   (schema/register!
@@ -187,26 +220,7 @@
           ;; only to the first connection for this store and branch.
           (d/create-database base-config)
           (let [conn (d/connect config)]
-            (d/transact
-             conn
-             [{:db/ident identity-attr
-               :db/valueType :db.type/string
-               :db/cardinality :db.cardinality/one
-               :db/unique :db.unique/identity}
-              {:db/ident other-identity-attr
-               :db/valueType :db.type/string
-               :db/cardinality :db.cardinality/one
-               :db/unique :db.unique/identity}
-              {:db/ident :idtest.record/source
-               :db/valueType :db.type/string
-               :db/cardinality :db.cardinality/one}
-              {:db/ident dependent-identity-attr
-               :db/valueType :db.type/keyword
-               :db/cardinality :db.cardinality/one
-               :db/unique :db.unique/identity}
-              {:db/ident dependent-source-attr
-               :db/valueType :db.type/string
-               :db/cardinality :db.cardinality/one}])
+            (d/transact conn (allocation-schema-transaction))
             conn))))
 
      (deftest direct-jvm-allocation-uses-the-canonical-preparation
@@ -397,15 +411,7 @@
            (d/create-database base-config)
            (let [conn (d/connect (id/allocation-connect-config base-config))
                  _ (reset! !conn conn)
-                 _ (d/transact
-                    conn
-                    [{:db/ident identity-attr
-                      :db/valueType :db.type/string
-                      :db/cardinality :db.cardinality/one
-                      :db/unique :db.unique/identity}
-                     {:db/ident :idtest.record/source
-                      :db/valueType :db.type/string
-                      :db/cardinality :db.cardinality/one}])
+                 _ (d/transact conn (allocation-schema-transaction))
                  first-response (allocate conn "before-reconnect")]
              (is (true? (:seon.db/ok? first-response)))
              (is (= :seon.db.id.writer/serialized
@@ -488,9 +494,22 @@
          (-> (js/Promise.resolve (body))
              (.finally (fn [] (set! db.internal/transact!* original))))))
 
+     (defn- stub-allocation-conn []
+       (let [db-value
+             (-> (datahike/empty-db
+                  nil
+                  {:schema-flexibility :write
+                   :keep-history? true})
+                 (d/with (allocation-schema-transaction))
+                 :db-after
+                 (assoc-in [:config :writer :backend] :seon-wire))]
+         (reify
+           IDeref
+           (-deref [_] db-value))))
+
      (defn- allocation-request
        ([builder]
-        (allocation-request #js {} builder))
+        (allocation-request (stub-allocation-conn) builder))
        ([conn builder]
         {::id/allocations
          [{::id/key allocation-key
@@ -505,7 +524,12 @@
              connect-config (id/allocation-connect-config base-config)]
          (-> (d/create-database base-config)
              (.then (fn [_]
-                      (d/connect connect-config {:sync? false}))))))
+                      (d/connect connect-config {:sync? false})))
+             (.then (fn [conn]
+                      (-> (d/transact! conn
+                                       {:tx-data
+                                        (allocation-schema-transaction)})
+                          (.then (fn [_] conn))))))))
 
      (deftest local-allocation-uses-the-canonical-preparation
        (async done
@@ -561,9 +585,7 @@
                                              ::id/identity-attr identity-attr
                                              ::id/value candidate-value}]
                                   arg-map {:tx-data [{identity-attr candidate-value}]
-                                           ::id/generated-candidates manifest
-                                           ::id/generated-identity-attrs
-                                           [identity-attr]}
+                                           ::id/generated-candidates manifest}
                                   settle (fn [promise]
                                            (.then promise
                                                   (fn [_report] true)
@@ -622,9 +644,7 @@
                                              ::id/identity-attr identity-attr
                                              ::id/value candidate
                                              ::id/dependent-lookup-refs
-                                             [[dependent-identity-attr home]]}]
-                                           ::id/generated-identity-attrs
-                                           [identity-attr]})
+                                             [[dependent-identity-attr home]]}]})
                                          (.then
                                           (fn [_]
                                             {::conn conn

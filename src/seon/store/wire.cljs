@@ -403,13 +403,6 @@
               generated-candidates
               (when (map? arg-map)
                 (:seon.db.id/generated-candidates arg-map))
-              generated-attrs-present?
-              (and (map? arg-map)
-                   (contains? arg-map
-                              :seon.db.id/generated-identity-attrs))
-              generated-identity-attrs
-              (when (map? arg-map)
-                (:seon.db.id/generated-identity-attrs arg-map))
               wire-id    (str (random-uuid))
               ;; Every write is db-name-routed to THIS pod's cluster db —
               ;; N pods can share one wire-server without ambient-conn
@@ -422,10 +415,7 @@
                            (assoc :seon.store.wire/tx-meta tx-meta)
                            generated?
                            (assoc :seon.store.wire/generated-candidates
-                                  generated-candidates)
-                           generated-attrs-present?
-                           (assoc :seon.store.wire/generated-identity-attrs
-                                  generated-identity-attrs))]
+                                  generated-candidates))]
           (begin-transaction! wire-id)
           (-> (transact-rpc! sock-path req 1)
               (.then

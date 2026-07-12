@@ -147,22 +147,30 @@ Identity attributes are declared via `{:seon.db/identity true}` on the
 registered shape — there is **no** magic `:seon/id` key:
 
 ```clojure
-(schema/register! ::doc-id [:string {:seon.db/identity true}])
-;; entities addressed by lookup-ref: [::doc-id "d1"]
+(schema/register! ::doc-id
+                  [:and {:seon.db/identity true
+                         :seon.db.id/generator
+                         :seon.db.id.generator/compact}
+                   :seon.db.id/compact-value])
+;; entities addressed by lookup-ref: [::doc-id "d1a2b3c4e5f6"]
 ```
 
-The 14-char id shape is minted with `seon.db/new-id!` — hand-written id strings
-fail validation.
+Generated creation goes through `seon.db.id/allocate!`. Its pure transaction
+builder receives a candidate matching the identity attribute's registered
+generator policy; the serialized writer rejects collisions before committing
+the complete entity. Known-id reconciliation remains an intentional upsert.
 
 ### Shared schema shapes — register once, reference everywhere
 
 If the same shape appears in two or more registered schemas, the shape itself
-must be a registered schema the others reference. Inlining the same
-`[:string {:min 14 :max 14}]` across multiple `register!` calls is a smell.
+must be a registered schema the others reference. Inlining compact, readable,
+or legacy identity syntax across multiple `register!` calls is a smell.
 
 ```clojure
 ;; ONE canonical shape (lives in its owning ns)
-(schema/register! :seon.db/id [:string {:min 14 :max 14}])
+(schema/register! :seon.db.id/compact-value
+                  [:or :seon.db.id/legacy-value
+                   [:and :string [:re #"^[a-z][a-z0-9]{11}$"]]])
 
 ;; EVERY id attr references it — no inline shape
 (schema/register! ::agent-id   :seon.db/id)
@@ -539,20 +547,29 @@ entities, the map-in pattern fits well when you expect to add optional context
 later without changing the signature:
 
 ```clojure
+(schema/register! ::sdk-message :any) ; third-party SDK boundary
+(schema/register! ::sdk-message-request
+                  [:map
+                   [::sdk-message ::sdk-message]
+                   [::ai/message-id :seon.db.id/compact-value]])
+
 (defn sdk-message->entity
   "Convert an SDK message to a seon.ai message entity.
 
    Request keys:
-     ::sdk-message   - Required. Raw SDK message map
-     ::ai/session-id - Optional. Parent session to attach
+   ::sdk-message   - Required. Raw SDK message map
+   ::ai/message-id - Required. Candidate supplied by the atomic allocator
 
    Returns an entity map addressed by an identity attr."
-  [{::keys [sdk-message] ::ai/keys [session-id]}]
-  (let [content (extract-content sdk-message)]
-    (cond-> {::ai/message-id (db/new-id!)
-             ::ai/content content}
-      session-id (assoc ::ai/session-id session-id))))
+  {:malli/schema [:=> [:cat ::sdk-message-request] ::ai/message]}
+  [{::keys [sdk-message] ::ai/keys [message-id]}]
+  {::ai/message-id message-id
+   ::ai/content (extract-content sdk-message)})
 ```
+
+The transaction boundary invokes `seon.db.id/allocate!` and calls this pure
+converter from its transaction builder. A converter never queries for or mints
+an identity on its own.
 
 Positional is fine when each slot is specced via `:catn`; prefer map-in for
 converters you expect to grow new optional inputs.

@@ -250,14 +250,14 @@
 
 (deftest definite-allocator-protocol-rejection-cleans-state-and-is-structural
   (async done
-    (let [!wire-id (atom nil)
+    (let [!request (atom nil)
           conn     (fake-conn 23)]
       (-> (with-wire-state
            {:started? false}
            (fn []
              (with-rpc-stub
                (fn [_sock-path request _opts]
-                 (reset! !wire-id (:seon.store.wire/id request))
+                 (reset! !request request)
                  (js/Promise.resolve
                   {:seon.store.wire/ok false
                    :seon.store.wire/error-kind "protocol"
@@ -277,7 +277,17 @@
                               "allocator protocol failure has a stable machine tag")
                           (is (= :core-bug (:seon.error/kind data))
                               "malformed allocator protocol is blamed on core")
-                          (is (nil? (get @store.wire/!transactions @!wire-id))
+                          (is (= ["mint-ember-otter"]
+                                 (:seon.store.wire/generated-candidates
+                                  @!request))
+                              "the candidate manifest crosses the wire unchanged")
+                          (is (not (contains?
+                                   @!request
+                                   :seon.store.wire/generated-identity-attrs))
+                              "the client-side identity catalog never crosses the wire")
+                          (is (nil?
+                               (get @store.wire/!transactions
+                                    (:seon.store.wire/id @!request)))
                               "a definite rejection removes its wire-id state")))))))))
           (.catch (fn [error]
                     (is false (str "allocator protocol rejection test threw: "
@@ -305,9 +315,7 @@
                  (-> (dispatch-transaction
                       conn
                       {:tx-data []
-                       :seon.db.id/generated-candidates [candidate]
-                       :seon.db.id/generated-identity-attrs
-                       #{:seon.store.wire-test/id}})
+                       :seon.db.id/generated-candidates [candidate]})
                      (.then
                       (fn [error]
                         (let [data (ex-data error)]

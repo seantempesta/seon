@@ -15,7 +15,6 @@
    [datahike.writing :as writing]
    [malli.core :as m]
    [seon.schema :as schema]
-   [seon.schema.internal :as schema.internal]
    #?@(:cljs [[seon.db.internal :as db.internal]])
    #?@(:cljs [["@paralleldrive/cuid2" :as cuid2]
               ["human-id" :as human-id]]))
@@ -99,8 +98,8 @@
                     ::dependent-lookup-refs]])
 (schema/register! ::generated-candidates
                   [:vector {:min 1} ::generated-candidate])
-(schema/register! ::generated-identity-attrs
-                  [:vector {:min 1} ::identity-attr])
+(schema/register! ::generator-policies
+                  [:map-of ::identity-attr ::generator])
 (schema/register! ::ids [:map-of ::key ::value])
 (schema/register! ::eids [:map-of ::key :int])
 (schema/register! ::recovered-commit? :boolean)
@@ -153,8 +152,11 @@
  [:map
   [::db-value ::db-value]
   [::transaction-data ::transaction-data]
-  [::generated-candidates ::generated-candidates]
-  [::generated-identity-attrs ::generated-identity-attrs]])
+  [::generated-candidates ::generated-candidates]])
+
+(schema/register!
+ ::generator-policies-request
+ [:map [::db-value ::db-value]])
 
 (schema/register!
  ::transaction-tempids-request
@@ -228,6 +230,56 @@
   [datahike-schema attr]
   (= :db.unique/identity (get-in datahike-schema [attr :db/unique])))
 
+(defn generator-policies
+  "Return the generated-identity policy facts stored in one database value.
+
+   Policy is ordinary EAV data on each `:seon.schema/key` entity. The database,
+   not a client manifest or process-global Malli registry, is authoritative for
+   the serialized writer. Every fact is validated against the installed native
+   identity schema and the reserved human-readable agent rule before use."
+  {:malli/schema [:=> [:cat ::generator-policies-request]
+                  ::generator-policies]}
+  [{::keys [db-value]}]
+  (let [rows (d/q '[:find ?identity-attr ?generator
+                    :where
+                    [?schema :seon.schema/key ?identity-attr]
+                    [?schema :seon.db.id/generator ?generator]]
+                  db-value)
+        policies (into {} rows)
+        installed-schema (:schema db-value)]
+    (when-not (= (count rows) (count policies))
+      (throw
+       (ex-info "A generated identity attribute has conflicting policy facts."
+                {::error :seon.db.id.error/conflicting-generator-policy
+                 :seon.error/kind :core-bug})))
+    (doseq [[identity-attr generator] policies]
+      (when-not (and (qualified-keyword? identity-attr)
+                     (m/validate ::generator generator)
+                     (identity-attr? installed-schema identity-attr))
+        (throw
+         (ex-info "A stored generator policy does not name an installed identity attribute."
+                  {::error :seon.db.id.error/invalid-generator-policy
+                   ::identity-attr identity-attr
+                   ::generator generator
+                   :seon.error/kind :core-bug})))
+      (when (and (= generator :seon.db.id.generator/human-readable)
+                 (not= identity-attr :seon.agent/id))
+        (throw
+         (ex-info "Human-readable generation is reserved for :seon.agent/id."
+                  {::error :seon.db.id.error/human-readable-non-agent
+                   ::identity-attr identity-attr
+                   ::generator generator
+                   :seon.error/kind :core-bug})))
+      (when (and (= identity-attr :seon.agent/id)
+                 (not= generator :seon.db.id.generator/human-readable))
+        (throw
+         (ex-info ":seon.agent/id must use the human-readable generator."
+                  {::error :seon.db.id.error/agent-generator
+                   ::identity-attr identity-attr
+                   ::generator generator
+                   :seon.error/kind :core-bug}))))
+    policies))
+
 (defn- lookup-ref?
   [datahike-schema value]
   (and (sequential? value)
@@ -296,10 +348,12 @@
   [candidates]
   (into #{} (map second) (dependent-identity-claims candidates)))
 
+(declare generated-candidate-valid?)
+
 (defn- manifest-error
-  [installed-schema tx-data candidates identity-attrs]
+  [installed-schema tx-data candidates policies]
   (let [datahike-schema (effective-schema installed-schema tx-data)
-        identity-attr-set (set identity-attrs)
+        identity-attr-set (set (keys policies))
         candidate-keys (map ::key candidates)
         candidate-attrs (map ::identity-attr candidates)
         dependent-claims (vec (dependent-identity-claims candidates))
@@ -310,16 +364,6 @@
 
       (empty? candidates)
       "generated candidates must not be empty"
-
-      (not (vector? identity-attrs))
-      "generated identity attrs must be a vector"
-
-      (or (empty? identity-attrs)
-          (some (complement qualified-keyword?) identity-attrs))
-      "generated identity attrs must contain qualified keywords"
-
-      (not= (count identity-attrs) (count (distinct identity-attrs)))
-      "generated identity attrs must be distinct"
 
       (some (fn [candidate]
               (or (not (map? candidate))
@@ -338,16 +382,16 @@
       "generated candidate keys must be distinct"
 
       (some #(not (contains? identity-attr-set %)) candidate-attrs)
-      "every candidate identity attr must be in generated identity attrs"
+      "every candidate identity attr must have a stored generator policy"
+
+      (some (fn [{::keys [identity-attr value]}]
+              (not (generated-candidate-valid? (get policies identity-attr)
+                                               value)))
+            candidates)
+      "every generated candidate must match its stored generator policy"
 
       (some #(not (identity-attr? datahike-schema %)) candidate-attrs)
       "every candidate identity attr must be installed or declared as identity"
-
-      (some (fn [attr]
-              (and (contains? installed-schema attr)
-                   (not (identity-attr? installed-schema attr))))
-            identity-attrs)
-      "an installed generated identity attr is not db.unique/identity"
 
       (not= (count dependent-lookups) (count (distinct dependent-lookups)))
       "dependent identity lookup refs must be distinct across candidates"
@@ -711,13 +755,14 @@
 (defn prepare-transaction
   "Prepare one collision-safe generated-identity transaction."
   {:malli/schema [:=> [:cat ::prepare-request] ::prepare-response]}
-  [{::keys [db-value transaction-data generated-candidates
-            generated-identity-attrs]}]
+  [{::keys [db-value transaction-data generated-candidates]}]
   (let [installed-schema (:schema db-value)
         datahike-schema (effective-schema installed-schema transaction-data)
+        policies (generator-policies {::db-value db-value})
+        generated-identity-attrs (vec (sort-by str (keys policies)))
         protocol-message (or (manifest-error installed-schema transaction-data
                                              generated-candidates
-                                             generated-identity-attrs)
+                                             policies)
                              (candidate-entity-error db-value installed-schema
                                                      datahike-schema
                                                      transaction-data
@@ -765,28 +810,155 @@
                             ::tempid tempid})))))
         allocation-tempids))
 
+(defn- policy-value-valid?
+  [generator value]
+  (case generator
+    :seon.db.id.generator/human-readable
+    (m/validate ::agent-value value)
+
+    :seon.db.id.generator/compact
+    (m/validate ::compact-value value)
+
+    false))
+
+(defn- managed-datoms
+  [db-value policies]
+  (mapcat (fn [identity-attr]
+            (d/datoms db-value :avet identity-attr))
+          (keys policies)))
+
+(defn- value-occurrences
+  [db-value policies value]
+  (mapcat (fn [identity-attr]
+            (d/datoms db-value :avet identity-attr value))
+          (keys policies)))
+
+(defn- policy-error!
+  [message error data]
+  (throw
+   (ex-info message
+            (merge {::error error
+                    :seon.error/kind :core-bug}
+                   data))))
+
+(defn- assert-policy-transition!
+  [db-after policies-before policies-after]
+  (let [removed (remove #(contains? policies-after %) (keys policies-before))]
+    (when-let [identity-attr
+               (some (fn [attr]
+                       (when (seq (d/datoms db-after :avet attr)) attr))
+                     removed)]
+      (policy-error!
+       "A generator policy cannot be removed while its identity values exist."
+       :seon.db.id.error/generator-policy-removal-in-use
+       {::identity-attr identity-attr})))
+  (let [all-datoms (vec (managed-datoms db-after policies-after))]
+    (when-let [datom
+               (some (fn [datom]
+                       (let [identity-attr (:a datom)
+                             generator (get policies-after identity-attr)]
+                         (when-not (policy-value-valid? generator (:v datom))
+                           datom)))
+                     all-datoms)]
+      (policy-error!
+       "A stored identity value does not match its generator policy."
+       :seon.db.id.error/invalid-managed-identity-value
+       {::identity-attr (:a datom)
+        ::generator (get policies-after (:a datom))
+        ::value (:v datom)}))
+    (when-let [[value occurrences]
+               (some (fn [[value datoms]]
+                       (when (> (count datoms) 1)
+                         [value datoms]))
+                     (group-by :v all-datoms))]
+      (policy-error!
+       "A generated identity value exists under more than one managed attribute."
+       :seon.db.id.error/cross-attribute-identity-collision
+       {::value value
+        ::identity-attr (mapv :a occurrences)}))))
+
+(defn- assert-generated-identity-report!
+  "Validate the complete uncommitted TxReport before Datahike queues it.
+
+   Report validation, rather than only input inspection, includes nested maps,
+   transaction-function output, and transaction metadata. Datahike may include
+   an exact existing identity reassertion as an added report datom, so the
+   before value distinguishes that ordinary upsert from a fresh identity.
+   Every fresh current-grammar value must be an exact allocator manifest
+   candidate, except the explicit root genesis identity."
+  [report candidates]
+  (let [db-before (:db-before report)
+        db-after (:db-after report)
+        policies-before (generator-policies {::db-value db-before})
+        policies-after (generator-policies {::db-value db-after})
+        policies (if (= policies-before policies-after)
+                   policies-before
+                   (do (assert-policy-transition! db-after policies-before
+                                                  policies-after)
+                       policies-after))
+        candidate-pairs (into #{}
+                              (map (juxt ::identity-attr ::value))
+                              candidates)
+        added-managed
+        (filterv (fn [datom]
+                   (and (:added datom)
+                        (contains? policies (:a datom))))
+                 (:tx-data report))]
+    (doseq [datom added-managed]
+      (let [identity-attr (:a datom)
+            value (:v datom)
+            generator (get policies identity-attr)
+            current-generated? (generated-candidate-valid? generator value)
+            allocated? (contains? candidate-pairs [identity-attr value])
+            preexisting? (seq (d/datoms db-before :avet identity-attr value))
+            root-genesis? (and (= :seon.agent/id identity-attr)
+                               (= "root" value))]
+        (when-not (policy-value-valid? generator value)
+          (policy-error!
+           "A generated identity value does not match its stored policy."
+           :seon.db.id.error/invalid-managed-identity-value
+           {::identity-attr identity-attr
+            ::generator generator
+            ::value value}))
+        (when (and current-generated?
+                   (not allocated?)
+                   (not preexisting?)
+                   (not root-genesis?))
+          (policy-error!
+           "A new generated identity must be created through seon.db.id/allocate!."
+           :seon.db.id.error/unallocated-generated-identity
+           {::identity-attr identity-attr
+            ::value value}))
+        (let [occurrences (vec (value-occurrences db-after policies value))]
+          (when (> (count occurrences) 1)
+            (policy-error!
+             "A generated identity value collides across managed attributes."
+             :seon.db.id.error/cross-attribute-identity-collision
+             {::value value
+              ::identity-attr (mapv :a occurrences)})))))
+    report))
+
 (defn- transact-with-generated-ids*
   ;; This private leaf is deliberately not Malli-instrumented. Datahike keeps
   ;; the function object in the connection's writer config; a public var that
   ;; instrumentation later replaces would make an identity guard lie about
   ;; the writer actually installed on that connection.
   [old arg-map]
-  (if (contains? arg-map ::generated-candidates)
-    (let [candidates (::generated-candidates arg-map)
-          prepared (prepare-transaction
-                    {::db-value old
-                     ::transaction-data (:tx-data arg-map)
-                     ::generated-candidates candidates
-                     ::generated-identity-attrs
-                     (::generated-identity-attrs arg-map)})]
+  (let [generated? (contains? arg-map ::generated-candidates)
+        candidates (or (::generated-candidates arg-map) [])]
+    (if generated?
+      (let [prepared (prepare-transaction
+                      {::db-value old
+                       ::transaction-data (:tx-data arg-map)
+                       ::generated-candidates candidates})]
       (case (::status prepared)
         :seon.db.id/ready
         (let [report (writing/transact!
                       old
                       (-> arg-map
                           (assoc :tx-data (::transaction-data prepared))
-                          (dissoc ::generated-candidates
-                                  ::generated-identity-attrs)))
+                          (dissoc ::generated-candidates)))
+              _ (assert-generated-identity-report! report candidates)
               eids (resolve-eids
                     {::allocation-tempids (::allocation-tempids prepared)
                      ::report-tempids (:tempids report)})]
@@ -805,7 +977,9 @@
                   {::error :seon.db.id.error/invalid-allocation-transaction
                    ::message (::message prepared)
                    :seon.error/kind :core-bug}))))
-    (writing/transact! old arg-map)))
+      (assert-generated-identity-report!
+       (writing/transact! old arg-map)
+       candidates))))
 
 (def ^:private allocation-writer-backend
   :seon.db.id.writer/serialized)
@@ -862,9 +1036,7 @@
          seen #{}]
     (when (and current (not (contains? seen current)))
       (let [data (ex-data current)]
-        (if (or (#{:seon.db.id.error/candidate-conflict
-                   :seon.db.id.error/invalid-allocation-transaction}
-                 (::error data))
+        (if (or (= "seon.db.id.error" (some-> (::error data) namespace))
                 (#{:transact/unique :transact/upsert} (:error data)))
           data
           (recur (throwable-cause current) (conj seen current)))))))
@@ -907,9 +1079,11 @@
       {::error-status ::candidate-conflict
        ::generated-candidate candidate}
 
-      (= :seon.db.id.error/invalid-allocation-transaction (::error data))
+      (= "seon.db.id.error" (some-> (::error data) namespace))
       {::error-status ::protocol-error
-       ::message (::message data)}
+       ::message (or (::message data)
+                     (some-> throwable ex-message)
+                     "invalid generated identity transaction")}
 
       :else
       {::error-status ::unrelated})))
@@ -961,46 +1135,6 @@
     :seon.error/kind kind
     :seon.error/data data}})
 
-(defn- form-generator
-  [identity-attr]
-  (some-> (schema/schema-definition identity-attr)
-          schema.internal/attr-form-properties
-          ::generator))
-
-(defn- generator-for!
-  [identity-attr]
-  (let [generator (form-generator identity-attr)]
-    (when-not (schema/identity-attr? identity-attr)
-      (throw
-       (ex-info "Generated identity attribute is not registered as an identity."
-                {::error :seon.db.id.error/not-an-identity
-                 ::identity-attr identity-attr
-                 :seon.error/kind :core-bug})))
-    (when-not (m/validate ::generator generator)
-      (throw
-       (ex-info "Generated identity attribute has no valid generator policy."
-                {::error :seon.db.id.error/missing-generator
-                 ::identity-attr identity-attr
-                 ::generator generator
-                 :seon.error/kind :core-bug})))
-    (when (and (= generator :seon.db.id.generator/human-readable)
-               (not= identity-attr :seon.agent/id))
-      (throw
-       (ex-info "Human-readable generation is reserved for :seon.agent/id."
-                {::error :seon.db.id.error/human-readable-non-agent
-                 ::identity-attr identity-attr
-                 ::generator generator
-                 :seon.error/kind :core-bug})))
-    (when (and (= identity-attr :seon.agent/id)
-               (not= generator :seon.db.id.generator/human-readable))
-      (throw
-       (ex-info ":seon.agent/id must use the human-readable generator."
-                {::error :seon.db.id.error/agent-generator
-                 ::identity-attr identity-attr
-                 ::generator generator
-                 :seon.error/kind :core-bug})))
-    generator))
-
 (defn- generated-candidate-valid?
   [generator candidate]
   (case generator
@@ -1016,10 +1150,16 @@
     false))
 
 (defn- candidate-round!
-  [allocations]
+  [policies allocations]
   (mapv
    (fn [{allocation-key ::key identity-attr ::identity-attr}]
-     (let [generator (generator-for! identity-attr)
+     (let [generator (get policies identity-attr)
+           _ (when-not generator
+               (throw
+                (ex-info "Generated identity attribute has no stored generator policy."
+                         {::error :seon.db.id.error/missing-generator-policy
+                          ::identity-attr identity-attr
+                          :seon.error/kind :core-bug})))
            candidate (generate-candidate generator)]
        (when-not (generated-candidate-valid? generator candidate)
          (throw
@@ -1033,21 +1173,6 @@
         ::identity-attr identity-attr
         ::value candidate}))
    allocations))
-
-(defn- generated-identity-attrs!
-  []
-  (->> (schema/registered-schemas)
-       (keep (fn [[identity-attr form]]
-               (when (some-> form
-                             schema.internal/attr-form-properties
-                             ::generator)
-                 ;; Validate every policy-bearing registration, not only the
-                 ;; attrs in this request. The writer's cross-attribute AVET
-                 ;; preflight is complete only when this derived set is sound.
-                 (generator-for! identity-attr)
-                 identity-attr)))
-       (sort-by str)
-       vec))
 
 (defn- candidate-map
   [manifest]
@@ -1186,7 +1311,6 @@
               {::error :seon.db.id.error/invalid-builder-output
                :seon.error/kind :core-bug})))
   (when (or (contains? built ::generated-candidates)
-            (contains? built ::generated-identity-attrs)
             (contains? built ::dependent-lookup-refs))
     (throw
      (ex-info "The allocation builder may not set allocator-owned fields."
@@ -1197,7 +1321,6 @@
         (when (map? opts)
           (filterv #(contains? opts %)
                    [:tx-data ::generated-candidates
-                    ::generated-identity-attrs
                     ::dependent-identities
                     ::dependent-lookup-refs]))]
     (when (and (contains? built ::dependent-identities)
@@ -1230,9 +1353,9 @@
    (defn ^:async ^:private allocate-attempt!
      [{::keys [allocations transaction-builder] conn :seon.db/conn :as request}
       attempt]
-     (let [candidate-manifest (candidate-round! allocations)
+     (let [policies (generator-policies {::db-value @conn})
+           candidate-manifest (candidate-round! policies allocations)
            ids            (candidate-map candidate-manifest)
-           managed-attrs  (generated-identity-attrs!)
            raw-built      (transaction-builder ids)]
        (when (instance? js/Promise raw-built)
          (throw
@@ -1245,8 +1368,7 @@
              transaction-request
              (-> built
                  (assoc :seon.db/conn conn)
-                 (assoc ::generated-candidates manifest)
-                 (assoc ::generated-identity-attrs managed-attrs))
+                 (assoc ::generated-candidates manifest))
              envelope (await (db.internal/transact!* transaction-request))]
          (cond
            (:seon.db/ok? envelope)
@@ -1296,14 +1418,13 @@
 #?(:clj
    (do
      (defn- transact-jvm-allocation!
-       [conn built manifest managed-attrs]
+       [conn built manifest]
        (try
          (let [report (d/transact
                        conn
                        (merge (:seon.db/opts built)
                               {:tx-data (:seon.db/tx-data built)
-                               ::generated-candidates manifest
-                               ::generated-identity-attrs managed-attrs}))
+                               ::generated-candidates manifest}))
                datoms (:tx-data report)]
            {:seon.db/ok? true
             :seon.db/tempids (or (:tempids report) {})
@@ -1329,14 +1450,13 @@
          conn :seon.db/conn
          :as request}
         attempt]
-       (let [candidate-manifest (candidate-round! allocations)
+       (let [policies (generator-policies {::db-value (d/db conn)})
+             candidate-manifest (candidate-round! policies allocations)
              ids (candidate-map candidate-manifest)
-             managed-attrs (generated-identity-attrs!)
              raw-built (transaction-builder ids)
              [built manifest]
              (normalize-built-allocation! candidate-manifest raw-built)]
-         (let [envelope (transact-jvm-allocation! conn built manifest
-                                                  managed-attrs)]
+         (let [envelope (transact-jvm-allocation! conn built manifest)]
            (cond
              (:seon.db/ok? envelope)
              (let [eids (::eids envelope)]
@@ -1366,11 +1486,11 @@
    (defn ^:async allocate!
      "Allocate all requested persistent identities inside one domain commit.
 
-      Declarations name allocation keys and identity attributes; registered
-      schema metadata chooses the private package adapter. The pure builder is
-      re-run from scratch after an exact generated-candidate conflict. Values
-      return only after the wire writer or configured local Datahike writer
-      commits and returns every allocated entity id."
+      Declarations name allocation keys and identity attributes; persisted
+      generator-policy facts choose the private package adapter. The pure
+      builder is re-run from scratch after an exact generated-candidate
+      conflict. Values return only after the wire writer or configured local
+      Datahike writer commits and returns every allocated entity id."
      {:malli/schema [:=> [:cat ::allocate-request] ::allocate-response]}
      [request]
      (try
@@ -1387,8 +1507,9 @@
      "Allocate identities through a configured serialized Datahike writer.
 
       Configure the first local connection with `allocation-connect-config`.
-      Direct Datahike writes that bypass this allocation entry point are
-      outside its retry and generated-identity guarantees."
+      The writer validates every managed identity assertion before commit;
+      this entry point additionally owns generation, collision retry, and the
+      returned allocation-key-to-entity mapping."
      {:malli/schema [:=> [:cat ::allocate-request] ::allocate-response]}
      [request]
      (try
