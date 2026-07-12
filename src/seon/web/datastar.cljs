@@ -2,12 +2,10 @@
   "Datastar gzip-morph SSE streamer — the hyperlith `view = f(db)` model
    ported into the pod.
 
-   ONE render fn produces the whole view; datastar's `idiomorph` diffs the
-   DOM client-side, so a re-render that pushes the whole element MORPHS only
-   what changed. The stream is long-lived and gzip-compressed: every
-   datahike commit re-renders `view = f(db)` and writes a
-   `datastar-patch-elements` event (flushed immediately) to every open
-   stream — a single whole-element morph (no per-tile `{id,html}` streaming).
+   Each route derives a view from the database. Initial paint sends the whole
+   `#app-view`; later commits use renderer read-sets to send only complete,
+   ID-addressed elements affected by the transaction. Equivalent open feeds
+   share that render and receive the same gzip-compressed event.
 
    ## The surfaces (seeded `:seon.route/*` datoms → this ns's handlers)
 
@@ -50,16 +48,13 @@
     [seon.web.brand :as brand]))
 
 ;; ============================================================
-;; Connection registry — every open gzip stream (a /view roster or a
-;; /agent/{id} view). Each entry carries its OWN `:view-fn` (a 0-arg
-;; thunk → hiccup, bound to its route's params) so a single commit
-;; re-renders DIFFERENT views per connection.
+;; Connection registry — one descriptor per open gzip stream. Render fns are
+;; grouped by `:seon.web.feed/key`, so equivalent tabs render once per tx.
 ;; ============================================================
 
-(defonce ^{:doc "Vector of `{:id <uuid> :gz <Gzip> :res <ServerResponse>
-                  :view-fn <0-arg thunk → hiccup> :opened-at <Date>}` — one
-                  entry per open feed. The tx-listener re-renders EACH
-                  connection's own view and morphs it."}
+(defonce ^{:doc "Vector of fully namespaced feed descriptors — one per open
+                  stream. Live descriptors sharing `:seon.web.feed/key` also
+                  share one transaction-derived render."}
   !feeds (atom []))
 
 ;; ============================================================
@@ -78,6 +73,14 @@
   (str "event: datastar-patch-elements\n"
        "data: elements " (str/replace html-str "\n" "\ndata: elements ")
        "\n\n"))
+
+(defn- patch-hiccup-elements
+  "Build one Datastar event containing complete, ID-addressed hiccup elements."
+  [elements]
+  (->> elements
+       (map html/->string)
+       (str/join "\n")
+       patch-elements))
 
 ;; ============================================================
 ;; view = f(db) — the live agent roster as `[:main#app-view …tiles…]`.
@@ -202,51 +205,77 @@
 ;; never throws.
 ;; ============================================================
 
-(defn- push-conn!
-  "Render `conn`'s OWN bound view and write it to its gzip stream, flushing
-   so the bytes hit the wire immediately. Guards a closed stream; logs
-   (never rethrows) on failure."
-  [{:keys [gz res view-fn]}]
+(defn- push-event!
+  "Write an already-rendered Datastar event to one gzip connection."
+  [{gz :seon.web.feed/gzip res :seon.web.feed/response} event]
   (try
     (when-not (or (.-writableEnded ^js gz) (.-writableEnded ^js res))
-      (.write ^js gz (view-fn-patch view-fn))
+      (.write ^js gz event)
       (.flush ^js gz (.. zlib -constants -Z_SYNC_FLUSH)))
     (catch :default e
-      (log/error-console! "seon.web.datastar" "push-conn! failed" e))))
+      (log/error-console! "seon.web.datastar" "push-event! failed" e))))
+
+(defn- push-full!
+  "Render and write one connection's initial full view."
+  [{render-full :seon.web.feed/render-full :as conn}]
+  (push-event! conn (view-fn-patch render-full)))
 
 (defn- broadcast!
-  "Re-render EACH open feed's OWN bound view and morph it — per connection,
-   so the /view roster and a /agent/{id} view reflect the same commit
-   through different views."
-  []
-  (when (seq @!feeds)
-    (let [conns @!feeds]
-      (doseq [conn conns]
-        (push-conn! conn))
-      (log/info-console! "seon.web.datastar" "broadcast"
-                         {:conns (count conns)}))))
+  "Render one targeted patch per unique live view and fan it to its feeds."
+  [change]
+  (let [groups (->> @!feeds
+                    (filter :seon.web.feed/live?)
+                    (group-by :seon.web.feed/key))]
+    (doseq [[view-key conns] groups]
+      (try
+        (let [started (.now js/performance)
+              render-change (:seon.web.feed/render-change (first conns))
+              elements (render-change change)
+              event (when (seq elements) (patch-hiccup-elements elements))
+              render-ms (- (.now js/performance) started)]
+          (when event
+            (doseq [conn conns] (push-event! conn event)))
+          (log/info-console! "seon.web.datastar" "broadcast"
+                             {:seon.web.broadcast/view view-key
+                              :seon.web.broadcast/connections (count conns)
+                              :seon.web.broadcast/targets (count elements)
+                              :seon.web.broadcast/render-ms
+                              (.round js/Math render-ms)}))
+        (catch :default e
+          (log/error-console! "seon.web.datastar"
+                              (str "broadcast failed for " view-key) e))))))
 
 ;; ============================================================
 ;; Coalescing — one trailing timer collapses a tx burst into one morph
 ;; (an agent turn commits many datoms; the human sees ONE re-render).
 ;; ============================================================
 
-(defonce ^:private !pending? (atom false))
+(defonce ^:private !pending-change (atom nil))
+(defonce ^:private !broadcast-scheduled? (atom false))
 
-(defn- schedule-broadcast! []
-  (when-not @!pending?
-    (reset! !pending? true)
+(defn- merge-change [pending change]
+  {:seon.db/db (:seon.db/db change)
+   :seon.db/changed-attrs
+   (into (or (:seon.db/changed-attrs pending) #{})
+         (keys (:seon.db/attr-index change)))})
+
+(defn- schedule-broadcast! [change]
+  (swap! !pending-change merge-change change)
+  (when-not @!broadcast-scheduled?
+    (reset! !broadcast-scheduled? true)
     (js/setTimeout
       (fn []
-        (reset! !pending? false)
-        (broadcast!))
-      50)))
+        (let [pending @!pending-change]
+          (reset! !pending-change nil)
+          (reset! !broadcast-scheduled? false)
+          (when pending (broadcast! pending))))
+      16)))
 
 ;; ============================================================
 ;; Lifecycle — db/listen! IS the refresh signal.
 ;; ============================================================
 
-(defn- on-tx [_] (schedule-broadcast!))
+(defn- on-tx [change] (schedule-broadcast! change))
 
 (defonce ^:private !installed? (atom false))
 
@@ -457,10 +486,8 @@
              (new-agent-bar-html)))
 
 (defn- open-feed!
-  "Open a long-lived gzip-compressed SSE stream bound to `view-fn` (a 0-arg
-   thunk → hiccup), register it, send the initial paint, and clean up on
-   close."
-  [^js req ^js res view-fn]
+  "Open a long-lived gzip SSE stream from one derived-view descriptor."
+  [^js req ^js res feed]
   (.writeHead res 200 #js {"Content-Type"      "text/event-stream; charset=utf-8"
                            "Content-Encoding"  "gzip"
                            "Cache-Control"     "no-store"
@@ -468,21 +495,29 @@
                            "X-Accel-Buffering" "no"})
   (let [gz   (.createGzip zlib)
         id   (random-uuid)
-        conn {:id id :gz gz :res res :view-fn view-fn :opened-at (js/Date.)}]
+        conn (assoc feed
+                    :seon.web.feed/id id
+                    :seon.web.feed/gzip gz
+                    :seon.web.feed/response res
+                    :seon.web.feed/opened-at (js/Date.))]
     (.on gz "error"  (fn [e] (log/error-console! "seon.web.datastar" "gz error" e)))
     (.on res "error" (fn [e] (log/error-console! "seon.web.datastar" "res error" e)))
     (.pipe gz res)
     (swap! !feeds conj conn)
     (log/info-console! "seon.web.datastar" "FEED OPEN"
-                       {:conn-id (str id) :total (count @!feeds)})
+                       {:seon.web.feed/id (str id)
+                        :seon.web.feed/count (count @!feeds)})
     ;; First paint immediately so the page populates without waiting for a tx.
-    (push-conn! conn)
+    (push-full! conn)
     (.on req "close"
          (fn []
-           (swap! !feeds (fn [cs] (vec (remove #(= (:id %) id) cs))))
+           (swap! !feeds
+                  (fn [cs]
+                    (vec (remove #(= (:seon.web.feed/id %) id) cs))))
            (try (.end gz) (catch :default _ nil))
            (log/info-console! "seon.web.datastar" "FEED CLOSE"
-                              {:conn-id (str id) :remaining (count @!feeds)})))))
+                              {:seon.web.feed/id (str id)
+                               :seon.web.feed/count (count @!feeds)})))))
 
 ;; ============================================================
 ;; Per-agent view (/agent/{id}) — the shim page + the feed bound to
@@ -595,10 +630,24 @@
         id      (get-in r [:path-params :id])]
     (if (and (safe-id? id) (agent-exists? id))
       (let [t (parse-t req)]
-        (open-feed! req res
-                    (if t
-                      #(agent-view/agent-view (db/as-of @db/*conn* t) id)
-                      #(agent-view/agent-view @db/*conn* id))))
+        (if t
+          (let [frozen (db/as-of @db/*conn* t)]
+            (open-feed!
+              req res
+              {:seon.web.feed/key [:agent id :as-of t]
+               :seon.web.feed/live? false
+               :seon.web.feed/render-full
+               #(agent-view/agent-view frozen id)
+               :seon.web.feed/render-change (constantly [])}))
+          (open-feed!
+            req res
+            {:seon.web.feed/key [:agent id]
+             :seon.web.feed/live? true
+             :seon.web.feed/render-full
+             #(agent-view/agent-view @db/*conn* id)
+             :seon.web.feed/render-change
+             (fn [{dbv :seon.db/db attrs :seon.db/changed-attrs}]
+               (agent-view/agent-view-changes dbv id attrs))})))
       (do (.writeHead res 404 #js {"Content-Type" "text/plain; charset=utf-8"
                                    "Cache-Control" "no-store"})
           (.end res "unknown agent id")))))
@@ -625,4 +674,9 @@
   (ensure-installed!)
   (let [^js req (:seon.http/node-req r)
         ^js res (:seon.http/node-res r)]
-    (open-feed! req res #(roster-view @db/*conn*))))
+    (open-feed! req res
+                {:seon.web.feed/key [:roster]
+                 :seon.web.feed/live? true
+                 :seon.web.feed/render-full #(roster-view @db/*conn*)
+                 :seon.web.feed/render-change
+                 (fn [{dbv :seon.db/db}] [(roster-view dbv)])})))

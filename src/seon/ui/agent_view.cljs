@@ -8,13 +8,19 @@
    panel. AI-only blocks are absent. Surface recency derives from database
    transactions and renderer read-sets; selection is browser-local state."
   (:require
+    [clojure.set :as set]
     [clojure.string :as str]
     [seon.agent.ctx :as agent-ctx]
     [seon.agent.ctx.render-fns :as render-fns]
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.render :as render]
+    [seon.schema :as schema]
     [seon.ui.header :as header]))
+
+(schema/register! ::changed-attrs [:set :qualified-keyword])
+
+(declare agent-view)
 
 (def ^:private state-display
   {:running    {:dot "●" :class "text-signal"   :label "running"}
@@ -158,6 +164,144 @@
     (max (agent-attr-touch dbv agent-id :seon.render.canvas/content)
          (renderer-touch dbv agent-id renderer))))
 
+(defn- canvas-renderer
+  "The symbolic renderer currently driving the canvas, when it has one."
+  [dbv agent-id]
+  (let [pinned (try
+                 (some-> (db/pull dbv [:seon.render.canvas/content]
+                                  [:seon.agent/id agent-id])
+                         :seon.render.canvas/content
+                         (db/decode-edn-value :seon.render.canvas/content))
+                 (catch :default _ nil))]
+    (let [derived (when-not (symbol? pinned)
+                    (::render-fns/tile-sym
+                      (render-fns/last-updated-tile
+                        {:seon.db/db dbv :seon.agent/id agent-id})))
+          renderer (or pinned derived)]
+      (when (symbol? renderer) renderer))))
+
+(defn- renderer-attrs [dbv renderer]
+  (if (symbol? renderer)
+    (set (::render-fns/attrs
+           (render-fns/renderer-read-attrs
+             {:seon.db/db dbv :seon.render/html renderer})))
+    #{}))
+
+(def ^:private structural-attrs
+  "Changes that can add/remove/rebind surfaces, requiring a shell morph."
+  #{:seon.agent/ctx
+    :seon.agent.ctx/name
+    :seon.agent.ctx/priority
+    :seon.render/html
+    :seon.fn/sym
+    :seon.fn/source
+    :seon.fn/spec
+    :seon.fn/read-attrs
+    :seon.fn/ns
+    :seon.ns/name
+    :seon.ns/source
+    :seon.ns/require-edges})
+
+(defn- context-surface-specs
+  "Unrendered HTML surface descriptors from the agent's context root."
+  [dbv agent-id]
+  (let [ctx  {:seon.db/db dbv :seon.agent/id agent-id}
+        root (agent-ctx/context-root ctx)]
+    (->> (:seon.agent.ctx/children root)
+         (keep
+           (fn [child]
+             (when (contains? child :seon.render/html)
+               (let [nm (:seon.agent.ctx/name child)
+                     displayed-renderer (:seon.render/html child)
+                     dependency-renderer (or (::render-fns/fn-sym child)
+                                             displayed-renderer)]
+                 {:seon.ui.surface/selection (selection-key nm)
+                  :seon.ui.surface/label (name nm)
+                  :seon.ui.surface/node child
+                  :seon.ui.surface/root root
+                  :seon.ui.surface/renderer displayed-renderer
+                  :seon.ui.surface/read-attrs
+                  (renderer-attrs dbv dependency-renderer)
+                  :seon.ui.surface/touch
+                  (renderer-touch dbv agent-id dependency-renderer)}))))
+         vec)))
+
+(defn- canvas-surface-spec [dbv agent-id]
+  (let [renderer (canvas-renderer dbv agent-id)]
+    {:seon.ui.surface/selection "canvas"
+     :seon.ui.surface/label "canvas"
+     :seon.ui.surface/renderer renderer
+     :seon.ui.surface/read-attrs
+     (conj (renderer-attrs dbv renderer) :seon.render.canvas/content)
+     :seon.ui.surface/touch (canvas-touch dbv agent-id)}))
+
+(defn- surface-specs [dbv agent-id]
+  (conj (context-surface-specs dbv agent-id)
+        (canvas-surface-spec dbv agent-id)))
+
+(defn- render-surface
+  "Render one descriptor once, then project its compact/expanded faces."
+  [dbv agent-id spec]
+  (let [selection (:seon.ui.surface/selection spec)
+        h (if (= selection "canvas")
+            (:seon.render/hiccup
+              (render/render-agent-canvas
+                {:seon.agent/id agent-id :seon.db/db dbv}))
+            (let [root (:seon.ui.surface/root spec)
+                  ctx  {:seon.db/db dbv
+                        :seon.agent/id agent-id
+                        :seon.agent/entity (:seon.agent/entity root)}]
+              (render/render :seon.render/html ctx
+                             (:seon.ui.surface/node spec))))
+        h (or h [:div {:class "p-2 text-text-500 text-xs"}
+                 "No render yet."])]
+    (assoc spec
+           :seon.ui.surface/compact (face h :compact)
+           :seon.ui.surface/expanded (face h :expanded))))
+
+(defn- focus-marker [selection touch]
+  [:div {:id "agent-view-focus-revision"
+         :style "display:none"
+         :data-effect
+         (str "if ($seenrevision !== " touch ") { "
+              "if (!$manualselection) $selected = '" selection "'; "
+              "$seenrevision = " touch " }")}])
+
+(defn- surface-elements [surface]
+  (let [selection (:seon.ui.surface/selection surface)
+        label (:seon.ui.surface/label surface)
+        touch (:seon.ui.surface/touch surface)]
+    [(primary-panel selection (:seon.ui.surface/expanded surface) touch)
+     (rail-button selection label (:seon.ui.surface/compact surface) touch)]))
+
+(defn agent-view-changes
+  "Complete ID-addressed elements affected by one coalesced transaction batch.
+
+   Structural program/context changes return the full `#app-view`. Ordinary
+   data changes render only intersecting surface read-sets plus the header and
+   focus-revision controller. Unknown/unrelated attrs never rerender a surface."
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+                             [:seon.agent/id :string]
+                             [::changed-attrs ::changed-attrs]]
+                  [:vector :any]]}
+  [dbv agent-id changed-attrs]
+  (if (seq (set/intersection structural-attrs changed-attrs))
+    [(agent-view dbv agent-id)]
+    (let [specs (surface-specs dbv agent-id)
+          affected (filterv
+                     #(seq (set/intersection
+                             changed-attrs
+                             (:seon.ui.surface/read-attrs %)))
+                     specs)
+          latest (last (sort-by (juxt :seon.ui.surface/touch
+                                      :seon.ui.surface/label)
+                                specs))]
+      (into [(header/system-header dbv)
+             (focus-marker (:seon.ui.surface/selection latest)
+                           (:seon.ui.surface/touch latest))]
+            (mapcat #(surface-elements (render-surface dbv agent-id %)))
+            affected))))
+
 (defn agent-view
   "Render one agent's canvas and HTML context blocks from `db`."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
@@ -201,19 +345,17 @@
           latest-touch (:seon.ui.surface/touch latest)]
       [:main {:id "app-view"
               :class "flex flex-col gap-2 w-full min-h-0 flex-1 overflow-hidden"
-              :data-signals (str "{selected: '" latest-selection
-                                 "', seenrevision: " latest-touch
-                                 ", manualselection: false}")
-              :data-effect (str "if ($seenrevision !== " latest-touch ") { "
-                                "if (!$manualselection) $selected = '"
-                                latest-selection "'; "
-                                "$seenrevision = " latest-touch "; } "
-                                "if ($selected !== 'canvas' && "
+              :data-signals__ifmissing
+              (str "{selected: '" latest-selection
+                   "', seenrevision: " latest-touch
+                   ", manualselection: false}")
+              :data-effect (str "if ($selected !== 'canvas' && "
                                 "!document.querySelector('[data-agent-primary=\"' + "
                                 "$selected + '\"]')) { $selected = 'canvas'; "
                                 "$manualselection = false }")}
        (header/system-header db)
        header/header-spacer
+       (focus-marker latest-selection latest-touch)
        [:header {:id "agent-view-header"
                  :class "flex items-center justify-between border-b border-base-800 pb-1"}
         [:div {:class "flex items-center gap-2 min-w-0"}

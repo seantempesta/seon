@@ -195,10 +195,43 @@
 
 (deftest broadcast-with-zero-connections-is-a-noop
   (with-redefs [datastar/!feeds (atom [])]
-    (is (nil? (@#'datastar/broadcast!))
+    (is (nil? (@#'datastar/broadcast!
+                {:seon.db/db nil :seon.db/changed-attrs #{}}))
         "broadcast! over an empty feed registry is a silent no-op (no throw)")
     (is (empty? @datastar/!feeds)
         "no connection was added or mutated")))
+
+(deftest broadcast-renders-once-per-live-view
+  (let [renders (atom 0)
+        pushes (atom 0)
+        render-change (fn [_]
+                        (swap! renders inc)
+                        [[:div {:id "first-target"} "one"]
+                         [:div {:id "second-target"} "two"]])
+        conn {:seon.web.feed/key [:agent agent-a]
+              :seon.web.feed/live? true
+              :seon.web.feed/render-change render-change}]
+    (with-redefs [datastar/!feeds (atom [(assoc conn :seon.web.feed/id #uuid "00000000-0000-0000-0000-000000000001")
+                                         (assoc conn :seon.web.feed/id #uuid "00000000-0000-0000-0000-000000000002")])
+                  datastar/push-event! (fn [_ event]
+                                         (is (str/includes? event "first-target"))
+                                         (is (str/includes? event "second-target"))
+                                         (swap! pushes inc))]
+      (@#'datastar/broadcast!
+        {:seon.db/db nil :seon.db/changed-attrs #{:example/value}})
+      (is (= 1 @renders) "equivalent feeds share one render")
+      (is (= 2 @pushes) "the shared event reaches every equivalent feed"))))
+
+(deftest broadcast-ignores-frozen-feeds
+  (let [renders (atom 0)]
+    (with-redefs [datastar/!feeds
+                  (atom [{:seon.web.feed/key [:agent agent-a :as-of 1]
+                          :seon.web.feed/live? false
+                          :seon.web.feed/render-change
+                          (fn [_] (swap! renders inc) [])}])]
+      (@#'datastar/broadcast!
+        {:seon.db/db nil :seon.db/changed-attrs #{:example/value}})
+      (is (zero? @renders) "as-of feeds never rerender on current commits"))))
 
 ;; ============================================================
 ;; 5. PER-CONNECTION views — the streamer renders EACH connection's OWN
