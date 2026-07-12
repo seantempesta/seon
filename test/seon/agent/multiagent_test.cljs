@@ -14,6 +14,7 @@
     [seon.client :as client]
     [seon.config :as config]
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.derive :as derive]
     [seon.error :as error]))
 
@@ -40,7 +41,9 @@
              :schema-flexibility :write
              :keep-history? true}]
     (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then (fn [_]
+                 (d/connect (db.id/allocation-connect-config cfg)
+                            {:sync? false})))
         (.then (fn [conn]
                  (-> (d/transact!
                        conn
@@ -193,8 +196,17 @@
     (-> (with-conn
           (fn ^:async af [_]
             (let [res (await (db/with-agent parent-id
-                               (fn ^:async af [] (await (agent/start! {:seon.agent/purpose "ok"})))))]
-              (is (string? (:seon.agent/id res)) "a depth-0 caller still spawns"))))
+                               (fn ^:async af []
+                                 (await (agent/start!
+                                          {:seon.agent/purpose "ok"})))))
+                  spawned-id (:seon.agent/id res)
+                  spawned (db/entity
+                            {:seon.db/ref [:seon.agent/id spawned-id]})]
+              (is (re-matches #"^[a-z0-9]+-[a-z0-9]+-[a-z0-9]+$" spawned-id)
+                  "a depth-0 caller gets a readable generated id")
+              (is (= parent-id
+                     (:seon.agent/id (:seon.agent/parent spawned)))
+                  "the allocating transaction also records the parent ref"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw " e)) (done))))))
 

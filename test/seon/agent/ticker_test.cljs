@@ -16,7 +16,8 @@
     [seon.agent.run :as run]
     [seon.agent.schedule :as schedule]
     [seon.client :as client]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.db.id :as db.id]))
 
 (def ^:private a-id "ticktest-26062")   ; exactly 14 chars (:seon.db/id)
 
@@ -41,7 +42,9 @@
              :schema-flexibility :write
              :keep-history? true}]
     (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then (fn [_]
+                 (d/connect (db.id/allocation-connect-config cfg)
+                            {:sync? false})))
         (.then (fn [conn]
                  (-> (d/transact!
                        conn

@@ -37,6 +37,7 @@
     [seon.agent.ctx.namespaces :as ctx-namespaces]
     [seon.agent.ctx.transcript :as transcript]
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.render :as render]
     [seon.repl.internal :as repl-internal]
     [seon.schema :as schema]
@@ -70,7 +71,9 @@
              :schema-flexibility :write
              :keep-history?      true}]
     (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then (fn [_]
+                 (d/connect (db.id/allocation-connect-config cfg)
+                            {:sync? false})))
         (.then (fn [conn]
                  (-> (d/transact!
                        conn

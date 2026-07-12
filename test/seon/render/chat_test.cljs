@@ -19,6 +19,7 @@
     [seon.agent :as agent]
     [seon.client :as client]
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.render.chat :as chat]
     [seon.render.canvas :as canvas]
     [seon.ui.html :as html]))
@@ -157,7 +158,9 @@
              :schema-flexibility :write
              :keep-history?      true}]
     (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then (fn [_]
+                 (d/connect (db.id/allocation-connect-config cfg)
+                            {:sync? false})))
         (.then (fn [conn]
                  (-> (d/transact!
                        conn

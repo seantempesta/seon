@@ -9,7 +9,8 @@
     [seon.agent.run :as run]
     [seon.ai.tokens :as tokens]
     [seon.client :as client]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.db.id :as db.id]))
 
 (def ^:private parent-id "parent-2607aa")
 (def ^:private child-id  "child-2607aaaa")
@@ -29,7 +30,9 @@
   (let [cfg {:store {:backend :memory :id (random-uuid)}
              :schema-flexibility :write :keep-history? true}]
     (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then (fn [_]
+                 (d/connect (db.id/allocation-connect-config cfg)
+                            {:sync? false})))
         (.then (fn [conn]
                  (-> (d/transact! conn {:tx-data (into (db/malli->datahike-schema
                                                          (into client/agent-bootstrap-attrs extra-attrs))

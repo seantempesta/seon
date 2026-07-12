@@ -18,6 +18,7 @@
     [malli.instrument :as mi]
     [seon.client :as client]
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.instrument :as inst]
     [seon.schema :as schema]
     [my.plan :as plan]
@@ -64,7 +65,9 @@
              :schema-flexibility :write
              :keep-history?      true}]
     (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then (fn [_]
+                 (d/connect (db.id/allocation-connect-config cfg)
+                            {:sync? false})))
         (.then (fn [conn]
                  (-> (d/transact!
                        conn
@@ -444,6 +447,11 @@
                            (is (string? root))
                            (is (= #{:root "a" "b" "syn"} (set (keys ids)))
                                "label→id map returned for the root + each :ref node")
+                           (is (every? #(re-matches #"^[a-z][a-z0-9]{11}$" %)
+                                       (vals ids))
+                               "every minted plan identity uses the compact policy")
+                           (is (= 4 (count (set (vals ids))))
+                               "one allocation round returns a distinct id per node")
                            (let [sub  (plan/tree {:my.plan/root? root})
                                  kids (:my.plan/_parent sub)
                                  syn  (some #(when (= (get ids "syn") (:my.plan/id %)) %) kids)]

@@ -12,7 +12,8 @@
     [seon.agent :as agent]
     [seon.agent.run :as run]
     [seon.client :as client]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.db.id :as db.id]))
 
 (def ^:private a-id "runtest-260625")   ; exactly 14 chars (:seon.db/id)
 (def ^:private a-ref [:seon.agent/id a-id])
@@ -35,7 +36,9 @@
              :schema-flexibility :write
              :keep-history? true}]
     (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then (fn [_]
+                 (d/connect (db.id/allocation-connect-config cfg)
+                            {:sync? false})))
         (.then (fn [conn]
                  (-> (d/transact!
                        conn
@@ -80,6 +83,9 @@
                   (fn [snap]
                     (is (= :open (:seon.agent.run/status snap)))
                     (is (= :message (:seon.agent.run/trigger snap)))
+                    (is (re-matches #"^[a-z][a-z0-9]{11}$"
+                                    (:seon.agent.run/id snap))
+                        "the fencing token uses the compact generated-id policy")
                     (is (= 20 (:seon.agent.run/turn-limit snap)) "default turn-limit")
                     (is (inst? (:seon.agent.run/deadline snap)) "wall-clock bound set")
                     (let [cur  (run/current-run {:seon.agent/id a-id})

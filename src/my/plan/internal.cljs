@@ -351,19 +351,23 @@
         (:my.plan/needs node)))
 
 (defn- collect-doc-nodes
-  "Depth-first `{:node :id :label :parent-idx}` entries over doc `forest` —
-   pass 1 of the compiler (tempids/minted ids assigned by the caller)."
+  "Depth-first internal entries over document `forest`."
   [forest]
-  (let [acc (volatile! [])]
-    (letfn [(walk [node parent-idx]
-              (let [idx (count @acc)]
-                (vswap! acc conj {:node       node
-                                  :id         (:my.plan/id node)
-                                  :label      (:my.plan/ref node)
-                                  :parent-idx parent-idx})
-                (doseq [c (doc-children node)] (walk c idx))))]
-      (doseq [n forest] (walk n nil)))
-    @acc))
+  (letfn [(walk [entries parent-index node]
+            (let [index   (count entries)
+                  entries (conj entries
+                                {::node         node
+                                 ::id           (:my.plan/id node)
+                                 ::label        (:my.plan/ref node)
+                                 ::parent-index parent-index})]
+              (reduce (fn [acc child]
+                        (walk acc index child))
+                      entries
+                      (doc-children node))))]
+    (reduce (fn [entries node]
+              (walk entries nil node))
+            []
+            forest)))
 
 (defn status-in
   "Current :my.plan/status of step `id` in db VALUE `db`, or nil."
@@ -400,8 +404,7 @@
   (into [] (keep #(prune-done (pull-subtree db %))) (root-ids db agent-eid)))
 
 (defn flatten-open
-  "Open forest → `{id → baseline row}` (scalar fields fully-qualified +
-   `:parent` id + `:needs` id set) — the diff baseline for the compiler."
+  "Open forest to the compiler's namespaced baseline rows."
   [forest]
   (letfn [(walk [acc parent-id node]
             (let [acc (assoc acc (:my.plan/id node)
@@ -410,9 +413,9 @@
                                                     :my.plan/expect
                                                     :my.plan/goal
                                                     :my.plan/pace])
-                                 (assoc :parent parent-id
-                                        :needs (into #{} (keep :my.plan/id)
-                                                     (:my.plan/needs node)))))]
+                                 (assoc ::parent-id parent-id
+                                        ::need-ids (into #{} (keep :my.plan/id)
+                                                         (:my.plan/needs node)))))]
               (reduce (fn [a c] (walk a (:my.plan/id node) c))
                       acc (:my.plan/_parent node))))]
     (reduce (fn [a n] (walk a nil n)) {} forest)))
@@ -434,12 +437,18 @@
                     (some #(when (map? %) (check %)) (doc-children node))))]
     (some #(when (map? %) (check %)) nodes)))
 
+(defn- allocation-key
+  "Stable request-local key for the generated id of document entry `idx`."
+  [idx]
+  (keyword "my.plan.internal" (str "id-" idx)))
+
 (defn compile-reconcile
   "Diff document `forest` against `agent`'s open tree → ONE flat tx.
 
-   Returns `{:tx … :labels {label/:root → id} :root-id …
-   :diff {:my.plan/added n :my.plan/dropped n :my.plan/updated n}}` or
-   `{:error msg}`. Identity rules: a node WITH `:my.plan/id` updates in
+   Returns a `:my.plan.internal/*` compiler result carrying transaction data,
+   allocation keys, labels, root id, and the public `:my.plan/diff`; failures
+   carry `:my.plan.internal/error`. Identity rules: a node WITH
+   `:my.plan/id` updates in
    place (scalars + parent + needs; STATUS is never edited here — active!/
    done! own it); a node WITHOUT one is minted; a baseline open node absent
    from the document is dropped (entity retract; its absent descendants
@@ -447,78 +456,85 @@
    empty baseline — plan!'s authoring path IS reconcile-against-empty.
    `:after` labels resolve to any node's `:my.plan/ref` (tempid for a
    minted node, lookup-ref for an existing one)."
-  [db fn-name agent forest]
+  [db fn-name agent forest ids now]
   (let [entries  (vec (map-indexed
                         (fn [i e]
-                          (if (:id e)
-                            (assoc e :idx i)
-                            (assoc e :idx i :tid (str "t" i) :new-id (db/new-id!))))
+                          (if (::id e)
+                            (assoc e ::index i)
+                            (let [allocation-token (allocation-key i)]
+                              (assoc e
+                                     ::index i
+                                     ::tempid (str "t" i)
+                                     ::allocation-key allocation-token
+                                     ::new-id (get ids allocation-token)))))
                         (collect-doc-nodes forest)))
-        target   (fn [{:keys [id tid]}] (if id [:my.plan/id id] tid))
-        l->t     (into {} (keep (fn [e] (when (:label e) [(:label e) (target e)])))
+        target   (fn [{::keys [id tempid]}]
+                   (if id [:my.plan/id id] tempid))
+        l->t     (into {} (keep (fn [e]
+                                  (when (::label e)
+                                    [(::label e) (target e)])))
                        entries)
-        doc-ids  (into [] (keep :id) entries)
+        doc-ids  (into [] (keep ::id) entries)
         oe       (when db (agent-eid db agent))
         baseline (if oe (flatten-open (open-forest db oe)) {})]
     (or
-      (some (fn [{:keys [node]}]
+      (some (fn [{::keys [node]}]
               (let [t (:my.plan/title node)]
                 (when (or (nil? t) (str/blank? t))
-                  {:error (str fn-name ": blank :my.plan/title refused — every "
-                               "step names itself.")})))
+                  {::error (str fn-name ": blank :my.plan/title refused — every "
+                                "step names itself.")})))
             entries)
       (when-let [dup (some (fn [[id n]] (when (< 1 n) id)) (frequencies doc-ids))]
-        {:error (str fn-name ": " (pr-str dup)
-                     " appears twice in the document — one node per step.")})
-      (some (fn [{:keys [id]}]
+        {::error (str fn-name ": " (pr-str dup)
+                      " appears twice in the document — one node per step.")})
+      (some (fn [{::keys [id]}]
               (when id
                 ;; db is nil only on the plan! path, whose node schema has
                 ;; no ::id — so `db` is always bound when ids appear.
                 (let [s (and db (status-in db id))]
                   (cond
                     (nil? s)
-                    {:error (str fn-name ": no step " (pr-str id) " — keep "
-                                 ":my.plan/id only on steps that exist; omit "
-                                 "it to mint a new one.")}
+                    {::error (str fn-name ": no step " (pr-str id) " — keep "
+                                  ":my.plan/id only on steps that exist; omit "
+                                  "it to mint a new one.")}
                     (= :done s)
-                    {:error (str fn-name ": " (pr-str id) " is :done — done steps "
-                                 "are immune (absent from the document by "
-                                 "construction); reopen! it first if it truly "
-                                 "isn't done.")}
+                    {::error (str fn-name ": " (pr-str id) " is :done — done steps "
+                                  "are immune (absent from the document by "
+                                  "construction); reopen! it first if it truly "
+                                  "isn't done.")}
                     (not (contains? baseline id))
-                    {:error (str fn-name ": step " (pr-str id) " is not in your "
-                                 "open tree — reconcile edits only your own "
-                                 "open steps.")}))))
+                    {::error (str fn-name ": step " (pr-str id) " is not in your "
+                                  "open tree — reconcile edits only your own "
+                                  "open steps.")}))))
             entries)
-      (let [unknown (->> entries (mapcat #(:my.plan/after (:node %)))
+      (let [unknown (->> entries (mapcat #(:my.plan/after (::node %)))
                          distinct (remove l->t) seq)]
         (when unknown
-          {:error (str fn-name ": :my.plan/after names unknown label(s) "
-                       (str/join ", " (map pr-str unknown))
-                       " — each :after must match some node's :my.plan/ref.")}))
-      (some (fn [{:keys [node]}]
+          {::error (str fn-name ": :my.plan/after names unknown label(s) "
+                        (str/join ", " (map pr-str unknown))
+                        " — each :after must match some node's :my.plan/ref.")}))
+      (some (fn [{::keys [node]}]
               (some (fn [nid]
                       (cond
                         (nil? nid)
-                        {:error (str fn-name ": unrecognizable :my.plan/needs "
-                                     "entry on «" (:my.plan/title node)
-                                     "» — use {:my.plan/id \"…\"}.")}
+                        {::error (str fn-name ": unrecognizable :my.plan/needs "
+                                      "entry on «" (:my.plan/title node)
+                                      "» — use {:my.plan/id \"…\"}.")}
                         (and db (nil? (status-in db nid)))
-                        {:error (str fn-name ": :my.plan/needs names unknown step "
-                                     (pr-str nid) ".")}))
+                        {::error (str fn-name ": :my.plan/needs names unknown step "
+                                      (pr-str nid) ".")}))
                     (doc-needs-ids node)))
             entries)
-      (let [now      (js/Date.)
-            parent-t (fn [{:keys [parent-idx]}]
-                       (when parent-idx (target (nth entries parent-idx))))
+      (let [parent-t (fn [{::keys [parent-index]}]
+                       (when parent-index (target (nth entries parent-index))))
             news     (into []
                            (keep
-                             (fn [{:keys [id tid new-id node] :as e}]
+                             (fn [{::keys [id tempid new-id node] :as e}]
                                (when-not id
                                  (let [needs (-> (mapv l->t (:my.plan/after node))
                                                  (into (map (fn [nid] [:my.plan/id nid]))
                                                        (doc-needs-ids node)))]
-                                   (cond-> {:db/id              tid
+                                   (cond-> {:db/id              tempid
                                             :my.plan/id         new-id
                                             :my.plan/title      (:my.plan/title node)
                                             :my.plan/status     :open
@@ -533,7 +549,7 @@
                            entries)
             updates  (into []
                            (keep
-                             (fn [{:keys [id node] :as e}]
+                             (fn [{::keys [id node] :as e}]
                                (when id
                                  (let [base   (baseline id)
                                        pt     (parent-t e)
@@ -546,7 +562,8 @@
                                                     doc-scalar-fields)
                                        sets   (cond-> sets
                                                 (and pt (or (string? pt)
-                                                            (not= (second pt) (:parent base))))
+                                                            (not= (second pt)
+                                                                  (::parent-id base))))
                                                 (assoc :my.plan/parent pt))
                                        rets   (into []
                                                     (keep (fn [[k retractable?]]
@@ -556,7 +573,7 @@
                                                               [:db/retract [:my.plan/id id] k])))
                                                     doc-scalar-fields)
                                        rets   (cond-> rets
-                                                (and (nil? pt) (:parent base))
+                                                (and (nil? pt) (::parent-id base))
                                                 (conj [:db/retract [:my.plan/id id]
                                                        :my.plan/parent]))
                                        want   (-> (mapv l->t (:my.plan/after node))
@@ -567,13 +584,13 @@
                                        need-ops (concat
                                                   (map (fn [nid] [:db/add [:my.plan/id id]
                                                                   :my.plan/needs [:my.plan/id nid]])
-                                                       (remove (:needs base) want-ids))
+                                                       (remove (::need-ids base) want-ids))
                                                   (map (fn [tid] [:db/add [:my.plan/id id]
                                                                   :my.plan/needs tid])
                                                        (filter string? want))
                                                   (map (fn [nid] [:db/retract [:my.plan/id id]
                                                                   :my.plan/needs [:my.plan/id nid]])
-                                                       (remove want-ids (:needs base))))
+                                                       (remove want-ids (::need-ids base))))
                                        ops    (concat
                                                 (when (seq sets) [(assoc sets :my.plan/id id)])
                                                 rets
@@ -582,23 +599,26 @@
                            entries)
             drops    (mapv (fn [i] [:db.fn/retractEntity [:my.plan/id i]])
                            (remove (set doc-ids) (keys baseline)))
-            root-id  (when-let [e (first entries)] (or (:id e) (:new-id e)))]
-        {:tx      (-> (vec news) (into cat updates) (into drops))
-         :labels  (into {:root root-id}
-                        (keep (fn [e] (when (:label e)
-                                        [(:label e) (or (:id e) (:new-id e))])))
+            root-id  (when-let [e (first entries)]
+                       (or (::id e) (::new-id e)))]
+        {::transaction-data (-> (vec news) (into cat updates) (into drops))
+         ::allocation-keys (into [] (keep ::allocation-key) entries)
+         ::labels (into {:root root-id}
+                        (keep (fn [e]
+                                (when (::label e)
+                                  [(::label e) (or (::id e) (::new-id e))])))
                         entries)
-         :root-id root-id
-         :diff    {:my.plan/added   (count news)
-                   :my.plan/dropped (count drops)
-                   :my.plan/updated (count updates)}}))))
+         ::root-id root-id
+         ::diff {:my.plan/added   (count news)
+                 :my.plan/dropped (count drops)
+                 :my.plan/updated (count updates)}}))))
 
 (defn compile-plan
   "plan!'s authoring compile — [[compile-reconcile]] with an EMPTY baseline
    (authoring IS reconciling against an empty tree; one code path). Same
-   `{:tx :labels :root-id}` contract plan! always consumed."
-  [agent root]
-  (compile-reconcile nil "plan!" agent [root]))
+   namespaced compiler contract as [[compile-reconcile]]."
+  [agent root ids now]
+  (compile-reconcile nil "plan!" agent [root] ids now))
 
 ;; --- Lenient markdown → document forest (reconcile!'s ::markdown path). ---
 
@@ -634,32 +654,35 @@
       expect (assoc :my.plan/expect (str/trim expect)))))
 
 (defn- fold-entries
-  "Flat `[{:depth :node}]` in document order → a nested forest under
+  "Flat namespaced parser entries in document order → a nested forest under
    `:my.plan/children` — a deeper entry nests under its nearest shallower
    predecessor (a skipped level still attaches to the previous node)."
   [entries]
   (letfn [(build [items depth]
             (loop [items items nodes []]
-              (let [{d :depth node :node :as it} (first items)]
+              (let [{d ::depth node ::node :as it} (first items)]
                 (cond
                   (nil? it)   [nodes nil]
                   (< d depth) [nodes items]
                   (= d depth)
-                  (let [[kids rest] (build (next items) (inc depth))]
-                    (recur rest (conj nodes (cond-> node
-                                              (seq kids)
-                                              (assoc :my.plan/children kids)))))
+                  (let [[kids remaining-items]
+                        (build (next items) (inc depth))]
+                    (recur remaining-items
+                           (conj nodes (cond-> node
+                                         (seq kids)
+                                         (assoc :my.plan/children kids)))))
                   :else
-                  (let [[kids rest] (build items (inc depth))]
+                  (let [[kids remaining-items] (build items (inc depth))]
                     (if (seq nodes)
-                      (recur rest (conj (pop nodes)
-                                        (update (peek nodes) :my.plan/children
-                                                (fnil into []) kids)))
-                      (recur rest (into nodes kids))))))))]
-    (first (build (seq entries) (reduce min (map :depth entries))))))
+                      (recur remaining-items
+                             (conj (pop nodes)
+                                   (update (peek nodes) :my.plan/children
+                                           (fnil into []) kids)))
+                      (recur remaining-items (into nodes kids))))))))]
+    (first (build (seq entries) (reduce min (map ::depth entries))))))
 
 (defn parse-markdown
-  "Lenient plan text → `{:nodes <document forest>}` or `{:error msg}`.
+  "Parse lenient plan text into a namespaced document result.
 
    Accepted shapes: `#`-headings nest by level; `-`/`*`/`1.` list items
    nest by indent under the nearest heading; a flat numbered list is
@@ -669,7 +692,7 @@
    sentence) becomes the step's `:my.plan/expect`."
   [text]
   (let [st (reduce
-             (fn [{:keys [hdepth indents] :as st} raw]
+             (fn [{::keys [heading-depth indents] :as st} raw]
                (let [line (str/trimr raw)]
                  (cond
                    (str/blank? line) st
@@ -678,8 +701,9 @@
                    (if-let [[_ hashes t] (re-find md-heading-re line)]
                      (let [d (dec (count hashes))]
                        (-> st
-                           (update :entries conj {:depth d :node (md-node t false)})
-                           (assoc :hdepth d :indents [] :had-heading? true)))
+                           (update ::entries conj {::depth d ::node (md-node t false)})
+                           (assoc ::heading-depth d ::indents []
+                                  ::had-heading? true)))
                      (if-let [[_ ind t] (re-find md-item-re line)]
                        (let [w       (count ind)
                              indents (loop [is indents]
@@ -688,24 +712,24 @@
                                          (or (empty? is) (> w (peek is))) (conj is w)
                                          :else is))]
                          (-> st
-                             (update :entries conj
-                                     {:depth (+ hdepth (count indents))
-                                      :node  (md-node t true)})
-                             (assoc :indents indents)))
+                             (update ::entries conj
+                                     {::depth (+ heading-depth (count indents))
+                                      ::node  (md-node t true)})
+                             (assoc ::indents indents)))
                        (if-let [[_ g] (re-find md-goal-re line)]
-                         (update st :goal #(or % (str/trim g)))
-                         (if (and (nil? (:title st)) (empty? (:entries st)))
-                           (assoc st :title (str/trim line))
+                         (update st ::goal #(or % (str/trim g)))
+                         (if (and (nil? (::title st)) (empty? (::entries st)))
+                           (assoc st ::title (str/trim line))
                            st)))))))
-             {:entries [] :indents [] :hdepth -1
-              :title nil :goal nil :had-heading? false}
+             {::entries [] ::indents [] ::heading-depth -1
+              ::title nil ::goal nil ::had-heading? false}
              (str/split-lines text))
-        {:keys [entries title goal had-heading?]} st]
+        {::keys [entries title goal had-heading?]} st]
     (if (empty? entries)
-      {:error (str "reconcile!: no plan steps found in the markdown — "
-                   "write headings or list items.")}
+      {::error (str "reconcile!: no plan steps found in the markdown — "
+                    "write headings or list items.")}
       (let [forest (fold-entries entries)]
-        {:nodes
+        {::nodes
          (if had-heading?
            (cond-> forest
              goal (update 0 (fn [r] (update r :my.plan/goal #(or % goal)))))

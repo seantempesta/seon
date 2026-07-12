@@ -24,9 +24,9 @@
    choke point that fires the Piece 2b parent/root OUTCOME notice.
 
    Dependency direction (acyclic): it transacts via `seon.db` directly and
-   references `:seon.agent/*` keywords from the global registry (the id slot is
-   typed `:seon.db/id`, not `:seon.agent/id`, so this ns has NO load-time
-   dependency on seon.agent). It requires the [[seon.derive]] leaf so
+   references `:seon.agent/*` keywords from the global registry (request agent
+   ids use `:string`, so this ns has NO load-time dependency on seon.agent). It
+   requires the [[seon.derive]] leaf so
    `current-run` is a thin `*conn*` adapter over the one derivation, plus
    [[seon.agent.message]] (to send outcome notices — that ns never requires run
    back, so acyclic) and the [[seon.error]] leaf (to record a wedge as a
@@ -37,16 +37,21 @@
     [seon.agent.message :as msg]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.derive :as derive]
     [seon.error :as error]
     [seon.schema :as schema]))
 
 ;; ============================================================
-;; Schema — the run entity, by owning namespace. Identity/ref shapes
-;; reference the canonical :seon.db/id / :seon.db/ref (never inlined).
+;; Schema — the run entity, by owning namespace. Its generated identity uses
+;; the compact policy; refs reuse the canonical :seon.db/ref shape.
 ;; ============================================================
 
-(schema/register! :seon.agent.run/id         [:and {:seon.db/identity true} :seon.db/id]) ; the FENCING TOKEN
+(schema/register!
+  :seon.agent.run/id
+  [:and {:seon.db/identity true
+         :seon.db.id/generator :seon.db.id.generator/compact}
+   ::db.id/compact-value]) ; the FENCING TOKEN
 (schema/register! :seon.agent.run/agent      :seon.db/ref)   ; back-ref → agent
 (schema/register! :seon.agent.run/started-at :inst)          ; the wake time
 (schema/register! :seon.agent.run/trigger    [:enum :message :schedule])
@@ -317,33 +322,37 @@
                                            (or (::default-deadline-ms a)
                                                (:seon.agent/default-deadline-ms a)
                                                default-deadline-ms))))
-            run-id     (db/new-id!)
-            run-row    (cond-> {:db/id                     "run"
-                                :seon.agent.run/id         run-id
-                                :seon.agent.run/agent      [:seon.agent/id id]
-                                :seon.agent.run/started-at now
-                                :seon.agent.run/trigger    trigger
-                                :seon.agent.run/status     :open
-                                :seon.agent.run/turn-limit turn-limit
-                                :seon.agent.run/deadline   deadline}
-                         cause (assoc :seon.agent.run/cause cause))
-            res        (await (db/transact!
-                                {:seon.db/tx-data
-                                 [run-row
-                                  ;; ATOMIC WAKE GUARD: point the agent at the
-                                  ;; just-created run ONLY IF it has no open run
-                                  ;; — a CAS with old-value nil ("the
-                                  ;; :seon.agent/run attr is ABSENT", which is
-                                  ;; exactly derived-:idle). The run-row above
-                                  ;; is processed first in THIS tx, so the
-                                  ;; lookup-ref resolves against the just-added
-                                  ;; run entity (a tempid is not resolvable in a
-                                  ;; CAS new-value slot). A racing second open
-                                  ;; sees the pointer set and the whole tx
-                                  ;; fails — no second :open run is committed.
-                                  [:db.fn/cas [:seon.agent/id id]
-                                   :seon.agent/run nil
-                                   [:seon.agent.run/id run-id]]]}))]
+            res
+            (await
+              (db.id/allocate!
+                {::db.id/allocations
+                 [{::db.id/key :seon.agent.run/id
+                   ::db.id/identity-attr :seon.agent.run/id}]
+                 ::db.id/transaction-builder
+                 (fn [ids]
+                   (let [run-id  (get ids :seon.agent.run/id)
+                         run-row
+                         (cond->
+                           {:db/id                     "run"
+                            :seon.agent.run/id         run-id
+                            :seon.agent.run/agent      [:seon.agent/id id]
+                            :seon.agent.run/started-at now
+                            :seon.agent.run/trigger    trigger
+                            :seon.agent.run/status     :open
+                            :seon.agent.run/turn-limit turn-limit
+                            :seon.agent.run/deadline   deadline}
+                           cause (assoc :seon.agent.run/cause cause))]
+                     {:seon.db/tx-data
+                      [run-row
+                       ;; ATOMIC WAKE GUARD: point the agent at the
+                       ;; just-created run ONLY IF it has no open run. The
+                       ;; run row leads, so the lookup ref resolves inside
+                       ;; this same allocation-aware transaction.
+                       [:db.fn/cas [:seon.agent/id id]
+                        :seon.agent/run nil
+                        [:seon.agent.run/id run-id]]]}))
+                 :seon.db/conn db/*conn*}))
+            run-id (get-in res [::db.id/ids :seon.agent.run/id])]
         (if (false? (:seon.db/ok? res))
           res
           (do (swap! !runs-this-process conj run-id)

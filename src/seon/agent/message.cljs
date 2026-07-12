@@ -21,6 +21,7 @@
     [clojure.string :as str]
     [seon.agent.message.internal :as internal]
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.schema :as schema]
     [seon.warn :as warn]))
 
@@ -28,7 +29,11 @@
 ;; + hops. Identity is the ref (`:seon.agent.message/from` points at the
 ;; sender entity — a `:seon.user/id` or `:seon.agent/id` entity).
 ;; "My conversation" is DERIVED: from = me OR to ∋ me.
-(schema/register! :seon.agent.message/id      [:and {:seon.db/identity true} :seon.db/id])
+(schema/register!
+  :seon.agent.message/id
+  [:and {:seon.db/identity true
+         :seon.db.id/generator :seon.db.id.generator/compact}
+   ::db.id/compact-value])
 (schema/register! :seon.agent.message/content :string)
 (schema/register! :seon.agent.message/from    :seon.db/ref)
 (schema/register! :seon.agent.message/to      [:vector :seon.db/ref])
@@ -211,32 +216,71 @@
             ;; otherwise derived — a user-ref send is :human, every
             ;; other send is :agent. Never stored as nil.
             origin (or origin (if from-user? :human :agent))
-            msg-id (db/new-id!)
-            row    {:seon.agent.message/id      msg-id
-                    :seon.agent.message/from    from
-                    :seon.agent.message/to      to
-                    :seon.agent.message/content content
-                    :seon.agent.message/at      (js/Date.)
-                    :seon.agent.message/hops    hops
-                    :seon.agent.message/origin  origin}
+            at     (js/Date.)
             ;; The message ↔ step safety net (WRITE half): a :human inbound
             ;; auto-mints ONE address-step per AGENT recipient, ATOMIC in
             ;; this same tx (no listener, no cascade). The step carries a
             ;; clipped preview + a back-ref to this message's identity —
             ;; same-tx lookup-refs resolve. "Addressed" is DERIVED from the
             ;; step's completion; there is no stored handled? flag.
-            agent-tos (when (= origin :human)
-                        (filter #(and (vector? %) (= :seon.agent/id (first %))) to))
-            steps  (mapv (fn [agent-ref]
-                           {:my.plan/id         (db/new-id!)
-                            :my.plan/title      (internal/clip-title content)
-                            :my.plan/status     :open
-                            :my.plan/created-at (js/Date.)
-                            :my.plan/agent      agent-ref
-                            :my.plan/from       from
-                            :my.plan/message    [:seon.agent.message/id msg-id]})
-                         agent-tos)
-            env    (await (db/transact! {:seon.db/tx-data (into [row] steps)}))]
+            agent-tos
+            (if (= origin :human)
+              (into []
+                    (comp
+                      (filter #(and (vector? %)
+                                    (= :seon.agent/id (first %))))
+                      (distinct))
+                    to)
+              [])
+            step-allocations
+            (mapv
+              (fn [idx agent-ref]
+                {:seon.agent.message/allocation-key
+                 (keyword "seon.agent.message" (str "plan-id-" idx))
+                 :seon.agent.message/agent-ref agent-ref})
+              (range)
+              agent-tos)
+            allocations
+            (into
+              [{::db.id/key :seon.agent.message/id
+                ::db.id/identity-attr :seon.agent.message/id}]
+              (map
+                (fn [{allocation-key :seon.agent.message/allocation-key}]
+                  {::db.id/key allocation-key
+                   ::db.id/identity-attr :my.plan/id}))
+              step-allocations)
+            env
+            (await
+              (db.id/allocate!
+                {::db.id/allocations allocations
+                 ::db.id/transaction-builder
+                 (fn [ids]
+                   (let [msg-id (get ids :seon.agent.message/id)
+                         row    {:seon.agent.message/id      msg-id
+                                 :seon.agent.message/from    from
+                                 :seon.agent.message/to      to
+                                 :seon.agent.message/content content
+                                 :seon.agent.message/at      at
+                                 :seon.agent.message/hops    hops
+                                 :seon.agent.message/origin  origin}
+                         steps
+                         (mapv
+                           (fn [{allocation-key
+                                 :seon.agent.message/allocation-key
+                                 agent-ref
+                                 :seon.agent.message/agent-ref}]
+                             {:my.plan/id         (get ids allocation-key)
+                              :my.plan/title      (internal/clip-title content)
+                              :my.plan/status     :open
+                              :my.plan/created-at at
+                              :my.plan/agent      agent-ref
+                              :my.plan/from       from
+                              :my.plan/message
+                              [:seon.agent.message/id msg-id]})
+                           step-allocations)]
+                     {:seon.db/tx-data (into [row] steps)}))
+                 :seon.db/conn db/*conn*}))
+            msg-id (get-in env [::db.id/ids :seon.agent.message/id])]
         (if (:seon.db/ok? env)
           ;; concise success — the tx-report stays off the agent
           ;; surface; the id is the durable handle

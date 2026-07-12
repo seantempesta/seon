@@ -36,6 +36,7 @@
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.error :as err]
     [seon.eval :as seval]
     [seon.render.canvas :as canvas]
@@ -127,8 +128,11 @@
 ;; `{:seon.db/identity true}` prop still yields :db.unique/identity.
 ;; Because the resolved head is `:and` (not `:or`), `edn-encoded-attr?`
 ;; is FALSE — "root" stores as a plain string, NOT pr-str'd EDN.
-(schema/register! :seon.agent/id
-  [:and {:seon.db/identity true} [:or [:= "root"] :seon.db/id]])
+(schema/register!
+  :seon.agent/id
+  [:and {:seon.db/identity true
+         :seon.db.id/generator :seon.db.id.generator/human-readable}
+   ::db.id/agent-value])
 
 (schema/register! ::derived-blocks-request
   [:map

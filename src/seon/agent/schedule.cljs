@@ -25,6 +25,7 @@
     [seon.agent.run :as run]
     [seon.config :as config]
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.derive :as derive]
     [seon.schema :as schema]))
 
@@ -32,7 +33,11 @@
 ;; Schema — the schedule entity (per agent-runtime-spec §seon.agent.schedule).
 ;; ============================================================
 
-(schema/register! :seon.agent.schedule/id       [:and {:seon.db/identity true} :seon.db/id])
+(schema/register!
+  :seon.agent.schedule/id
+  [:and {:seon.db/identity true
+         :seon.db.id/generator :seon.db.id.generator/compact}
+   ::db.id/compact-value])
 (schema/register! :seon.agent.schedule/cron     :string)   ; 5-field cron expression
 (schema/register! :seon.agent.schedule/fn       :symbol)   ; qualified fn invoked when due
 ;; The DUE schedule fn symbols handed to the injected executor at fire time
@@ -261,8 +266,8 @@
 
 ;; agent-id VALUE schema is base `:string` (not `:seon.agent/id`): LOAD-TIME
 ;; register! in a LEAF ns (seon.agent.schedule loads before seon.agent registers
-;; `:seon.agent/id`). `:string` admits the literal "root" id too; identity shape
-;; is enforced at create.
+;; `:seon.agent/id`). `:string` admits the literal "root" id too; the readable
+;; identity policy is enforced at create.
 (schema/register! ::fired-entry
   [:map
    [:seon.agent/id     :string]

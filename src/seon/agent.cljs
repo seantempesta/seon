@@ -67,6 +67,7 @@
     [seon.agent.ctx.warnings :as ctx-warnings]
     [seon.config :as config]
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.derive :as derive]
     [seon.error :as error]
     [seon.schema :as schema]))
@@ -83,9 +84,9 @@
 ;; rejects forward references; same precedent as `:seon.ns/name` living
 ;; in seon.agent.ctx.render-fns).
 (schema/register! :seon.agent/purpose       :string)
-;; Subagent → parent (optional; delivery is a thin conditional in
-;; `complete` — no spawn path sets this yet). References the canonical ref
-;; shape; never inline.
+;; Subagent → parent (optional; the atomic spawn transaction sets it and
+;; `complete` derives its delivery target through it). References the canonical
+;; ref shape; never inline.
 (schema/register! :seon.agent/parent        :seon.db/ref)
 
 ;; ── DERIVED-STATE primitives (the run model) ──────────────────────────────
@@ -130,7 +131,11 @@
 (def transcript-block ctx-transcript/transcript-block)
 (def context-root ctx/context-root)
 
-(schema/register! :seon.eval/id          [:and {:seon.db/identity true} :seon.db/id])
+(schema/register!
+  :seon.eval/id
+  [:and {:seon.db/identity true
+         :seon.db.id/generator :seon.db.id.generator/compact}
+   ::db.id/compact-value])
 (schema/register! :seon.eval/at          :inst)
 ;; Wall-clock duration of the eval in milliseconds. Populated by
 ;; seon.eval/eval-batch! per form. Source of truth for slow-eval warnings
@@ -397,7 +402,7 @@
                             my-eid)))
 
 ;; ============================================================
-;; Agent creation. Allocates an id, transacts the entity.
+;; Agent creation. Reconcile known ids; allocate genuinely new ids atomically.
 ;; ============================================================
 
 ;; purpose / default-turn-limit are :any (not their stored :string / :int):
@@ -417,8 +422,25 @@
    [:map [:seon.agent/id :seon.agent/id]]
    :seon.db/transact-response])
 
+(defn ^:async ^:private seed-default-context!
+  "Copy the default context block set into one genuinely new agent.
+
+   Creation already committed before this projection runs. A seed failure is
+   logged loudly but preserves the existing creation contract: the durable
+   agent identity remains the successful fact and config reconciliation can
+   repair its managed context subset later."
+  [id]
+  (let [seed (await (db/with-agent id
+                      (fn ^:async seed-ctx! []
+                        (await (ctx/seed-default-ctx!)))))]
+    (when (false? (:seon.agent.ctx/ok? seed))
+      (js/console.error
+        (str "seon.agent context seed FAILED for " id
+             ": " (:seon.agent.ctx/error seed))))
+    seed))
+
 (defn ^:async create!
-  "Allocate an agent entity — just its `:seon.agent/id`.
+  "Reconcile a known agent entity by its durable id.
 
    State is DERIVED: a fresh agent with no open run is `:idle`. Idempotent:
    re-calling with the
@@ -465,13 +487,51 @@
       ;; (creation-only — the fresh? gate keeps a resumed agent's edits).
       ;; Runs in the agent's scope so `seed-default-ctx!` targets it.
       (do (when fresh?
-            (let [seed (await (db/with-agent id
-                                (fn ^:async seed-ctx! []
-                                  (await (ctx/seed-default-ctx!)))))]
-              (when (false? (:seon.agent.ctx/ok? seed))
-                (js/console.error
-                  (str "seon.agent/create! seed-default-ctx! FAILED for " id
-                       ": " (:seon.agent.ctx/error seed))))))
+            (await (seed-default-context! id)))
+          {:seon.agent/id id}))))
+
+(schema/register!
+  ::mint-request
+  [:map
+   [:seon.agent/purpose            {:optional true} :seon.agent/purpose]
+   [:seon.agent/default-turn-limit {:optional true}
+    :seon.agent/default-turn-limit]
+   [:seon.agent/parent             {:optional true} :seon.db/ref]])
+
+(defn ^:async mint!
+  "Atomically allocate and create one genuinely new agent identity.
+
+   The registered `:seon.agent/id` policy selects the readable-word package;
+   the sole writer proves freshness before committing the complete initial
+   agent row. Known-id reconciliation remains [[create!]] and is intentionally
+   separate."
+  {:malli/schema [:=> [:cat ::mint-request] ::create-response]}
+  [{:seon.agent/keys [purpose default-turn-limit parent]}]
+  (let [env
+        (await
+          (db.id/allocate!
+            {::db.id/allocations
+             [{::db.id/key :seon.agent/id
+               ::db.id/identity-attr :seon.agent/id}]
+             ::db.id/transaction-builder
+             (fn [ids]
+               (let [id (get ids :seon.agent/id)]
+                 {:seon.db/tx-data
+                  [(cond-> {:seon.agent/id id}
+                     (and (string? purpose) (not (str/blank? purpose)))
+                     (assoc :seon.agent/purpose purpose)
+                     (some? default-turn-limit)
+                     (assoc :seon.agent/default-turn-limit default-turn-limit)
+                     parent
+                     (assoc :seon.agent/parent parent))]}))
+             :seon.db/conn db/*conn*}))
+        id (get-in env [::db.id/ids :seon.agent/id])]
+    (if (false? (:seon.db/ok? env))
+      (do (js/console.error
+            (str "seon.agent/mint! transact FAILED: "
+                 (:seon.error/message (:seon.db/error env))))
+          env)
+      (do (await (seed-default-context! id))
           {:seon.agent/id id}))))
 
 ;; ============================================================
@@ -542,45 +602,36 @@
 (defonce !arm-child-fn (atom nil))
 
 (defn ^:async ^:private spawn-child!
-  "The mint→create→parent-write→arm sequence for [[start!]], extracted so the
-   depth-cap refusal short-circuits BEFORE any entity is minted."
+  "The atomic mint→arm sequence for [[start!]], extracted so the depth-cap
+   refusal short-circuits before any entity is minted."
   [purpose default-turn-limit parent-id]
-  (let [child-id  (db/new-id!)
-        res       (await (create! {:seon.agent/id child-id
-                                   :seon.agent/purpose purpose
-                                   :seon.agent/default-turn-limit default-turn-limit}))]
+  (let [res (await
+              (mint!
+                (cond-> {}
+                  (some? purpose)
+                  (assoc :seon.agent/purpose purpose)
+                  (some? default-turn-limit)
+                  (assoc :seon.agent/default-turn-limit default-turn-limit)
+                  parent-id
+                  (assoc :seon.agent/parent [:seon.agent/id parent-id]))))
+        child-id (:seon.agent/id res)]
     (if (false? (:seon.db/ok? res))
       res
-      (let [penv (when parent-id
-                   (await (db/transact!
-                            {:seon.db/tx-data
-                             [{:seon.agent/id     child-id
-                               :seon.agent/parent [:seon.agent/id parent-id]}]})))]
-        (if (and penv (false? (:seon.db/ok? penv)))
-          (do (js/console.error
-                (str "seon.agent/start! parent-write FAILED for " child-id
-                     " (parent " parent-id "): "
-                     (:seon.error/message (:seon.db/error penv))))
-              penv)
-          ;; ARM the minted child IN-PROCESS (#30) so a message sent right
-          ;; after spawn wakes it. Injected hook (no require cycle); a nil hook
-          ;; (no live loop) leaves the child unarmed — the same shape as the
-          ;; pre-arm world, never an error.
-          (do (when-let [arm @!arm-child-fn]
-                (await (arm child-id)))
-              {:seon.agent/id child-id}))))))
+      ;; ARM the minted child IN-PROCESS (#30) so a message sent right after
+      ;; spawn wakes it. Injected hook (no require cycle); a nil hook (no live
+      ;; loop) leaves the child unarmed, never an error.
+      (do (when-let [arm @!arm-child-fn]
+            (await (arm child-id)))
+          {:seon.agent/id child-id}))))
 
 (defn ^:async start!
   "Spawn a child agent — the capability-gated spawn lifecycle function.
 
-   The spawn counterpart of `seon.agent.lifecycle/terminate`. An alias of `create!`
-   that ALSO writes `:seon.agent/parent` = the CALLING agent (read from the
-   ALS scope via `db/current-agent-id`). That parent write IS the activation
-   of `:seon.agent/parent` — no separate writer. ALWAYS mints a fresh
-   14-char child id (a child is never you; a chosen id goes through
-   `create!`). The child
-   is created IDLE: it does no work until it receives a message (which opens
-   its run #1).
+   The spawn counterpart of `seon.agent.lifecycle/terminate`. Unlike
+   `create!`, it ALWAYS mints a fresh readable three-segment id and writes
+   `:seon.agent/parent` = the CALLING agent (read from the ALS scope via
+   `db/current-agent-id`) in the same transaction. The child is IDLE: it does
+   no work until it receives a message (which opens its run #1).
 
    The minted child's wake trigger is ARMED IN-PROCESS before this returns
    (via the boot-registered `!arm-child-fn` hook — `seon.client/init-agent!`),

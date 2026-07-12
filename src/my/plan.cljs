@@ -41,12 +41,17 @@
     [my.plan.internal :as internal]
     [seon.agent]   ; load-order: request schemas reference :seon.agent/id
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.schema :as schema]))
 
 ;; --- Attribute schemas — one register! per attr; shared shapes referenced,
 ;; --- never inlined.
 
-(schema/register! ::id [:and {:seon.db/identity true} :seon.db/id])
+(schema/register! ::id
+                  [:and {:seon.db/identity true
+                         :seon.db.id/generator
+                         :seon.db.id.generator/compact}
+                   ::db.id/compact-value])
 (schema/register! ::title [:string {:min 1}])
 (schema/register! ::description :string)
 (schema/register! ::status [:enum :open :active :done :blocked]) ; :active = where you ARE
@@ -261,6 +266,13 @@
    [::steps {:optional true} ::steps]
    [::error {:optional true} ::error]])
 
+(defn- allocation-declarations
+  [allocation-keys]
+  (mapv (fn [allocation-key]
+          {::db.id/key allocation-key
+           ::db.id/identity-attr ::id})
+        allocation-keys))
+
 ;; --- Public API
 
 (defn ^:async step!
@@ -285,20 +297,30 @@
                             "from inside an agent turn (the boundary fills in you)."))
 
         :else
-        (let [id (db/new-id!)]
-          (->> (await (db/transact!
-                        {:seon.db/tx-data
-                         [(cond-> {::id         id
-                                   ::title      title
-                                   ::status     :open
-                                   ::created-at (js/Date.)
-                                   ::agent      agent}
-                            description (assoc ::description description)
-                            expect      (assoc ::expect expect)
-                            from        (assoc ::from from)
-                            parent      (assoc ::parent parent)
-                            (seq needs) (assoc ::needs needs))]}))
-               (internal/write-result "step!" id)))))))
+        (let [created-at (js/Date.)
+              env
+              (await
+                (db.id/allocate!
+                  {::db.id/allocations
+                   [{::db.id/key ::id
+                     ::db.id/identity-attr ::id}]
+                   ::db.id/transaction-builder
+                   (fn [ids]
+                     (let [id (get ids ::id)]
+                       {:seon.db/tx-data
+                        [(cond-> {::id         id
+                                  ::title      title
+                                  ::status     :open
+                                  ::created-at created-at
+                                  ::agent      agent}
+                           description (assoc ::description description)
+                           expect      (assoc ::expect expect)
+                           from        (assoc ::from from)
+                           parent      (assoc ::parent parent)
+                           (seq needs) (assoc ::needs needs))]}))
+                   :seon.db/conn db/*conn*}))
+              id (get-in env [::db.id/ids ::id])]
+          (internal/write-result "step!" id env))))))
 
 (defn ^:async plan!
   "Author a WHOLE plan in ONE transact — goal, pace, nested steps, deps.
@@ -323,14 +345,39 @@
                             "from inside an agent turn (the boundary fills in you)."))
 
         :else
-        (let [{:keys [tx labels root-id error]} (internal/compile-plan agent request)]
+        (let [now     (js/Date.)
+              preview (internal/compile-plan agent request {} now)
+              error   (::internal/error preview)]
           (if error
             (internal/fail error)
-            (let [env (await (db/transact! {:seon.db/tx-data tx}))]
+            (let [env
+                  (await
+                    (db.id/allocate!
+                      {::db.id/allocations
+                       (allocation-declarations
+                         (::internal/allocation-keys preview))
+                       ::db.id/transaction-builder
+                       (fn [ids]
+                         (let [compiled
+                               (internal/compile-plan agent request ids now)]
+                           (when-let [compile-error (::internal/error compiled)]
+                             (throw
+                               (ex-info "plan compilation changed during allocation"
+                                        {:my.plan/error compile-error
+                                         :seon.error/kind :core-bug})))
+                           {:seon.db/tx-data
+                            (::internal/transaction-data compiled)}))
+                       :seon.db/conn db/*conn*}))]
               (if (:seon.db/ok? env)
-                {::ok? true ::root root-id ::ids labels}
-                (internal/fail (str "plan!: store failed — "
-                                    (get-in env [:seon.db/error :seon.error/message])))))))))))
+                (let [compiled
+                      (internal/compile-plan agent request (::db.id/ids env) now)]
+                  {::ok? true
+                   ::root (::internal/root-id compiled)
+                   ::ids (::internal/labels compiled)})
+                (internal/fail
+                  (str "plan!: store failed — "
+                       (get-in env
+                               [:seon.db/error :seon.error/message])))))))))))
 
 (defn ^:async active!
   "Take a step up: mark it `:active` — your rendered position anchor.
@@ -480,22 +527,65 @@
         :else
         (let [doc (if markdown
                     (internal/parse-markdown markdown)
-                    {:nodes (if (map? tree) [tree] (vec tree))})]
-          (if (:error doc)
-            (internal/fail (:error doc))
+                    {::internal/nodes
+                     (if (map? tree) [tree] (vec tree))})]
+          (if (::internal/error doc)
+            (internal/fail (::internal/error doc))
             (or
-              (when tree (internal/check-doc-keys "reconcile!" (:nodes doc)))
-              (let [{:keys [tx labels root-id diff error]}
-                    (internal/compile-reconcile @db/*conn* "reconcile!"
-                                                agent (:nodes doc))]
+              (when tree
+                (internal/check-doc-keys "reconcile!"
+                                         (::internal/nodes doc)))
+              (let [db-value @db/*conn*
+                    now      (js/Date.)
+                    preview  (internal/compile-reconcile
+                               db-value "reconcile!" agent
+                               (::internal/nodes doc) {} now)
+                    tx       (::internal/transaction-data preview)
+                    labels   (::internal/labels preview)
+                    root-id  (::internal/root-id preview)
+                    diff     (::internal/diff preview)
+                    error    (::internal/error preview)]
                 (cond
                   error      (internal/fail error)
                   (empty? tx) {::ok? true ::root root-id ::ids labels
                                ::diff diff}
                   :else
-                  (let [env (await (db/transact! {:seon.db/tx-data tx}))]
+                  (let [allocation-keys (::internal/allocation-keys preview)
+                        env
+                        (if (seq allocation-keys)
+                          (await
+                            (db.id/allocate!
+                              {::db.id/allocations
+                               (allocation-declarations allocation-keys)
+                               ::db.id/transaction-builder
+                               (fn [ids]
+                                 (let [compiled
+                                       (internal/compile-reconcile
+                                         db-value "reconcile!" agent
+                                         (::internal/nodes doc) ids now)]
+                                   (when-let [compile-error
+                                              (::internal/error compiled)]
+                                     (throw
+                                       (ex-info
+                                         "plan reconciliation changed during allocation"
+                                         {:my.plan/error compile-error
+                                          :seon.error/kind :core-bug})))
+                                   {:seon.db/tx-data
+                                    (::internal/transaction-data compiled)}))
+                               :seon.db/conn db/*conn*}))
+                          (await (db/transact! {:seon.db/tx-data tx})))]
                     (if (:seon.db/ok? env)
-                      {::ok? true ::root root-id ::ids labels ::diff diff}
+                      (let [compiled
+                            (if (seq allocation-keys)
+                              (internal/compile-reconcile
+                                db-value "reconcile!" agent
+                                (::internal/nodes doc)
+                                (::db.id/ids env) now)
+                              preview)]
+                        {::ok? true
+                         ::root (::internal/root-id compiled)
+                         ::ids (::internal/labels compiled)
+                         ::diff (::internal/diff compiled)})
                       (internal/fail
                         (str "reconcile!: store failed — "
                              (get-in env [:seon.db/error

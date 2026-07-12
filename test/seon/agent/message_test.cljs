@@ -22,6 +22,7 @@
     [my.plan :as plan]
     [seon.client :as client]
     [seon.db :as db]
+    [seon.db.id :as db.id]
     [seon.warn :as warn]))
 
 (def ^:private a-id "msgtest-agent-a")
@@ -35,7 +36,9 @@
              :schema-flexibility :write
              :keep-history?      true}]
     (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then (fn [_]
+                 (d/connect (db.id/allocation-connect-config cfg)
+                            {:sync? false})))
         (.then (fn [conn]
                  (-> (d/transact!
                        conn
@@ -373,13 +376,20 @@
           (fn [conn]
             (-> (agent/message!
                   {:seon.agent.message/from    agent/user-ref
-                   :seon.agent.message/to      [:seon.agent/id a-id]
+                   ;; Duplicate refs collapse at the cardinality-many message
+                   ;; attr, so creation must also mint only one address-step.
+                   :seon.agent.message/to      [[:seon.agent/id a-id]
+                                                [:seon.agent/id a-id]]
                    :seon.agent.message/content "please audit the schemas\nthen tell me what you find"})
                 (.then
                   (fn [{mid :seon.agent.message/id}]
                     (let [ts (steps-for conn a-id)
                           t  (first ts)]
+                      (is (re-matches #"^[a-z][a-z0-9]{11}$" mid)
+                          "the message uses the compact generated-id policy")
                       (is (= 1 (count ts)) "exactly ONE address-step minted")
+                      (is (re-matches #"^[a-z][a-z0-9]{11}$" (:my.plan/id t))
+                          "the same transaction allocates a compact plan id")
                       (is (= :open (:my.plan/status t)) "minted open")
                       (is (= a-id (get-in t [:my.plan/agent :seon.agent/id]))
                           "owned by the agent recipient")
