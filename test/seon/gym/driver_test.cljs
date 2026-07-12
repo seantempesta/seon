@@ -246,9 +246,9 @@
 ;;     rendered 4/7 because the :test build never loaded
 ;;     seon.dev.test-preload and index-tests seeded nothing);
 ;;   - one :seon.test row per preload-roster deftest var;
-;;   - the scenario's prior-agent layer carries agent provenance
-;;     (agent-id + non-seed origin — the context-model classifier's
-;;     exact predicate).
+;;   - the scenario's prior-agent layer carries final transaction provenance:
+;;     its user ref resolves to the prior agent and its process resolves to
+;;     REPL, never boot/config.
 ;; ---------------------------------------------------------------------------
 
 (deftest seeded-world-carries-the-pod-boot-roster-exemplars-and-provenance
@@ -291,8 +291,11 @@
                                                    :seon.db/query
                                                    '[:find ?aid :where
                                                      [?s :seon.schema/key :my.workout/date ?tx]
-                                                     [?tx :seon.db/agent-id ?aid]
-                                                     (not [?tx :seon.db/origin :core-seed])]})]
+                                                     [?tx :seon.db/user ?user]
+                                                     [?user :seon.agent/id ?aid]
+                                                     [?tx :seon.db/process ?process]
+                                                     [?process :seon.db.process/id
+                                                      :seon.db.process/repl]]})]
                                   (is (= expected full-src)
                                       "every full-source ns the boot indexes carries real file text (my.* only)")
                                   (is (= (count @client/!indexed-test-vars) test-rows)
@@ -301,8 +304,9 @@
                                   ;; runtime tx-listener at the client boot
                                   ;; path — there is no longer a seeded
                                   ;; :seon.handler/* entity to assert on.)
-                                  (is (seq prior)
-                                      "the scenario layer carries prior-agent provenance (agent-id + non-seed origin)")))))))
+                                  (is (= #{[(:prior gym/recovered-agent-ids)]}
+                                         prior)
+                                      "the scenario layer resolves to the prior agent through REPL provenance")))))))
           (.then (fn [_]
                    (let [minted (remove keys-before (schema/current-keys))]
                      (when (seq minted)
@@ -472,7 +476,7 @@
   ;; REAL turn prompt does contain the asserted text.
   (async done
     (let [phantom (apply str (repeat 64 "0"))   ; valid hash shape, no file
-          run-id  "gymrun000001"
+          run-id  "GYMrun00000001"
           scenario
           (-> (prompt-blob-scenario)
               (assoc :seon.gym.scenario/id :gymtest-prompt-blob-missing
@@ -486,7 +490,7 @@
                      ;; the turn's lookup-ref resolves in-tx.
                      [{:seon.agent.run/id    run-id
                        :seon.agent.run/cause [:seon.user/id "user"]}
-                      {:seon.agent.turn/id          "gymturn00001"
+                      {:seon.agent.turn/id          "GYMturn0000001"
                        :seon.agent.turn/at          (js/Date.)
                        :seon.agent.turn/status      :done
                        :seon.agent.turn/run         [:seon.agent.run/id run-id]

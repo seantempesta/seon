@@ -23,6 +23,8 @@
   (:require
     [cljs.test :refer [deftest is async]]
     [datahike.api :as d]
+    [seon.agent]
+    [seon.agent.message]
     [seon.db :as db]
     [seon.schema :as schema]
     [seon.test.async :refer [settle!]]))
@@ -48,7 +50,10 @@
              :schema-flexibility :write
              :keep-history?      false}]
     (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false}))))))
+        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then (fn [conn]
+                 (-> (db/ensure-provenance! {:seon.db/conn conn})
+                     (.then (fn [_] conn))))))))
 
 (defn- seeded-conn
   "Promise of [conn eid]: a fresh conn holding one entity with ::name,

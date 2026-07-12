@@ -30,6 +30,8 @@
     [datahike.api :as d]
     [seon.ai :as ai]
     [seon.ai.openai-compat :as openai]
+    [seon.agent]
+    [seon.agent.message]
     [seon.db :as db]))
 
 ;; ============================================================
@@ -46,15 +48,17 @@
     (-> (d/create-database cfg)
         (.then (fn [_] (d/connect cfg {:sync? false})))
         (.then (fn [conn]
-                 (-> (d/transact!
-                       conn
-                       {:tx-data (into (db/malli->datahike-schema
-                                         [::ai/id ::ai/provider ::ai/model
-                                          ::ai/temperature ::ai/max-tokens
-                                          ::ai/thinking ::ai/timeout-ms
-                                          ::ai/base-url ::ai/api-key-env
-                                          ::ai/extra-body-edn])
-                                       (db/tx-meta-datahike-schema))})
+                 (-> (db/ensure-provenance! {:seon.db/conn conn})
+                     (.then (fn [_]
+                              (d/transact!
+                                conn
+                                {:tx-data (into (db/malli->datahike-schema
+                                                  [::ai/id ::ai/provider ::ai/model
+                                                   ::ai/temperature ::ai/max-tokens
+                                                   ::ai/thinking ::ai/timeout-ms
+                                                   ::ai/base-url ::ai/api-key-env
+                                                   ::ai/extra-body-edn])
+                                                (db/tx-meta-datahike-schema))})))
                      (.then (fn [_] conn))))))))
 
 (defn- with-conn

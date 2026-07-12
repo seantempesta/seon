@@ -81,9 +81,13 @@
     (-> (d/create-database cfg)
         (.then (fn [_] (d/connect cfg {:sync? false})))
         (.then (fn [conn]
-                 (-> (d/transact! conn {:tx-data (into (db/malli->datahike-schema
-                                                         client/agent-bootstrap-attrs)
-                                                       (db/tx-meta-datahike-schema))})
+                 (-> (db/ensure-provenance! {:seon.db/conn conn})
+                     (.then (fn [_]
+                              (d/transact!
+                                conn
+                                {:tx-data (into (db/malli->datahike-schema
+                                                  client/agent-bootstrap-attrs)
+                                                (db/tx-meta-datahike-schema))})))
                      (.then (fn [_] conn))))))))
 
 (defn- with-conn [body]

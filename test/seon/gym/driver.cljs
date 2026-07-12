@@ -1610,35 +1610,46 @@
                       :seon.agent/compile-state compile-state}
                      (:seon.agent.run/id opened)))))))))
 
+(def recovered-agent-ids
+  "Stable preserved identities for the legacy gym's isolated scratch store.
+   These exact 14-character values belong to the durable legacy value domain;
+   they are fixtures, not an alternative identity generator."
+  {:primary "GYMprimary0001"
+   :prior   "GYMprior000001"
+   :a       "GYMagent00000a"
+   :b       "GYMagent00000b"})
+
 (defn ^:async ^:private ensure-agent!
   "Lazily create the agent behind a turn DESIGNATOR (:a, :b, …) on the
    scratch store. Multi-agent sequencing (catalog §7): turns run in
    order and every drive awaits idle, so 'boot A → await idle → boot
    B on the same store' falls out of the sequential doseq.
 
-   Boot parity: a minted agent is `:idle` with ZERO runs the moment its
+   Boot parity: a recovered agent is `:idle` with ZERO runs the moment its
    entity + home ns exist — no turn 0 (the boot greeting turn was removed;
    `seon.client/init-agent!` is the ONE deterministic init, no ceremony).
    It wakes on the first message like a live minted agent.
 
-   `pre-id` (optional) pins the minted agent's id — run-scenario!
-   mints :a's id BEFORE seeding so the seed txs can carry it, then
-   boots :a here AFTER the seed (the live mint-onto-populated-store
-   order, so :a's creation evals see the seeded world)."
+   `pre-id` optionally selects the recovered primary fixture identity. The
+   agent is reconciled after seeding, so its compiler reconstruction sees the
+   populated store."
   [!agents compile-state designator & [pre-id]]
   (if-let [existing (get @!agents designator)]
     existing
-    ;; Scratch worlds are isolated per scenario. Designator-derived readable
-    ;; fixture ids are therefore intentional known ids, not a second identity
-    ;; generator; live agent creation goes through `seon.agent/mint!`.
-    (let [agent-id (or pre-id (str "gym-agent-" (name designator)))]
+    ;; Scratch stores are isolated per scenario. These preserved fixture ids
+    ;; are recovered known identities, not a second identity generator; live
+    ;; agent creation goes through `seon.agent/mint!`.
+    (let [agent-id (or pre-id (get recovered-agent-ids designator))]
+      (when-not agent-id
+        (throw (ex-info "gym: no recovered fixture identity for designator"
+                        {:seon.gym.turn/agent designator})))
       ;; The scratch transition mirrors durable birth then process-local
       ;; reconstruction: create! commits identity + home declaration first;
       ;; setup-agent-ns! restores only compiler state. There is no turn 0.
+      (await (agent/create! {:seon.agent/id agent-id}))
       (await
         (db/with-agent agent-id
           (fn ^:async boot-gym-agent! []
-            (await (agent/create! {:seon.agent/id agent-id}))
             (await (seval/setup-agent-ns! compile-state
                                           (home/home-ns agent-id)
                                           agent-id)))))
@@ -1690,19 +1701,23 @@
                                    env))))]
     (await (client/boot-seed! {:seon.db/conn conn}))
     ;; PRIOR-AGENT PROVENANCE: on a live store this layer was written by
-    ;; a real agent inside its own with-agent scope, so its txs carry
-    ;; `:seon.db/agent-id` (the context-model ns-leg classifies
-    ;; agent-authored nses on exactly agent-id-present + non-seed
-    ;; origin). Stamp the layer with a minted SYNTHETIC prior-agent id —
+    ;; a real agent inside its own with-agent scope, so its txs carry a
+    ;; `:seon.db/user` ref to that agent plus the REPL process. Stamp the layer
+    ;; with a preserved synthetic prior-agent id —
     ;; distinct from any designator the run boots — so classification
     ;; matches what a real prior agent's work looks like.
     (when (or (seq schema-registrations) (seq fixtures))
-      (await
-        (db/with-agent "gym-prior-agent"
-          (fn ^:async seed-prior-agent-layer! []
-            (when (seq schema-registrations)
-              (doseq [[k v] schema-registrations] (schema/register! k v))
-              (let [now  (js/Date.)
+      (let [prior-id (:prior recovered-agent-ids)]
+        (check! :prior-agent
+                (await (db/transact! {:seon.db/conn conn
+                                      :seon.db/tx-data
+                                      [{:seon.agent/id prior-id}]})))
+        (await
+          (db/with-agent prior-id
+            (fn ^:async seed-prior-agent-layer! []
+              (when (seq schema-registrations)
+                (doseq [[k v] schema-registrations] (schema/register! k v))
+                (let [now  (js/Date.)
                     tee  (vec (for [[k v] schema-registrations]
                                 (cond-> {:seon.schema/key        k
                                          :seon.schema/source     (pr-str
@@ -1723,11 +1738,11 @@
                   (check! :scenario-entity-schemas
                           (await (db/transact! {:seon.db/conn conn
                                                 :seon.db/tx-data deco}))))))
-            (when (seq fixtures)
-              (check! :fixtures
-                      (await (db/transact! {:seon.db/conn conn
-                                            :seon.db/tx-data
-                                            (resolve-fixture-dates fixtures)}))))))))
+              (when (seq fixtures)
+                (check! :fixtures
+                        (await (db/transact! {:seon.db/conn conn
+                                              :seon.db/tx-data
+                                              (resolve-fixture-dates fixtures)})))))))))
     {:seon.gym/ok? true}))
 
 (defn- env-get [k] (aget (.-env js/process) k))
@@ -1845,9 +1860,10 @@
             ;; The scenario's prior-agent layer inside
             ;; [[seed-scenario-world!]] scopes itself to a synthetic
             ;; prior-agent id (its own with-agent).
-            (let [primary "gym-primary-agent"]
+            (let [primary (:primary recovered-agent-ids)]
               (await (seed-scenario-world! {:seon.gym/scenario scenario
                                             :seon.db/conn conn}))
+              (await (agent/create! {:seon.agent/id primary}))
               ;; World-parity: a live boot syncs the :seon.ai/config
               ;; row from the SEON_AI_* env vars (start-agent! →
               ;; ai/sync!; env OWNS the row) inside its agent scope.
@@ -2032,11 +2048,12 @@
         (sfs/configure! {:seon.agent.fs/allowed-roots
                          [(str cwd "/src") (str cwd "/docs")]
                          :seon.agent.fs/read-only? true})
-        (let [primary "gym-primary-agent"]
+        (let [primary (:primary recovered-agent-ids)]
           ;; Seed outside any agent scope (live provenance shape — see
           ;; the origin-forge note at the run-scenario! seed site).
           (await (seed-scenario-world! {:seon.gym/scenario scenario
                                         :seon.db/conn conn}))
+          (await (agent/create! {:seon.agent/id primary}))
           (await
             (db/with-agent primary
               (fn ^:async sync-ai! []

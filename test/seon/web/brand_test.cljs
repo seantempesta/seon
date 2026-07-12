@@ -10,6 +10,8 @@
   (:require
     [cljs.test :refer [deftest is async]]
     [datahike.api :as d]
+    [seon.agent]
+    [seon.agent.message]
     [seon.db :as db]
     [seon.web.brand :as brand]))
 
@@ -106,12 +108,14 @@
     (-> (d/create-database cfg)
         (.then (fn [_] (d/connect cfg {:sync? false})))
         (.then (fn [conn]
-                 (-> (d/transact!
-                       conn
-                       {:tx-data (into (db/malli->datahike-schema
-                                         [::brand/id ::brand/name
-                                          ::brand/tagline ::brand/theme])
-                                       (db/tx-meta-datahike-schema))})
+                 (-> (db/ensure-provenance! {:seon.db/conn conn})
+                     (.then (fn [_]
+                              (d/transact!
+                                conn
+                                {:tx-data (into (db/malli->datahike-schema
+                                                  [::brand/id ::brand/name
+                                                   ::brand/tagline ::brand/theme])
+                                                (db/tx-meta-datahike-schema))})))
                      (.then (fn [_] conn))))))))
 
 (defn- with-conn

@@ -21,6 +21,8 @@
   (:require
     [cljs.test :as t :refer [deftest is testing async use-fixtures]]
     [datahike.api :as d]
+    [seon.agent]
+    [seon.agent.message]
     [seon.db :as db]
     [seon.db.internal :as internal]
     [seon.instrument :as si]
@@ -35,6 +37,7 @@
   (schema/register! ::name :string)
   (schema/register! ::rank :int)
   (schema/register! ::tags [:vector :keyword])
+  (schema/register! ::source :keyword)
   ;; ref attr for the as-of ref-join test; `db/transact!`'s gate needs it
   ;; registered (installation as :db.type/ref comes from `history-schema`).
   (schema/register! ::owner :seon.db/ref))
@@ -78,6 +81,9 @@
     :db/valueType   :db.type/long}
    {:db/ident       ::tags
     :db/cardinality :db.cardinality/many
+    :db/valueType   :db.type/keyword}
+   {:db/ident       ::source
+    :db/cardinality :db.cardinality/one
     :db/valueType   :db.type/keyword}])
 
 (defn- fresh-conn
@@ -90,8 +96,9 @@
     (-> (d/create-database cfg)
         (.then (fn [_] (d/connect cfg {:sync? false})))
         (.then (fn [conn]
-                 (.then (d/transact! conn smoke-schema)
-                        (fn [_] conn)))))))
+                 (-> (db/ensure-provenance! {:seon.db/conn conn})
+                     (.then (fn [_] (d/transact! conn smoke-schema)))
+                     (.then (fn [_] conn))))))))
 
 (defn- with-conn
   "Run `f` (1-arg conn → value or Promise) against a fresh conn, then
@@ -401,16 +408,16 @@
       (fn [conn]
         (-> (db/transact! conn
                           [{::name "Metaed" ::rank 3}]
-                          {:seon.db-test/source :import})
+                          {::source :import})
             (.then (fn [{::db/keys [ok?]}]
                      (is (true? ok?) "positional 3-arity commits")
                      (db/transact! {::db/tx-data        [{::name "Metaed2" ::rank 4}]
                                     ::db/conn           conn
-                                    ::db/opts           {:tx-meta {:seon.db-test/source :import}}
+                                    ::db/opts           {:tx-meta {::source :import}}
                                     ::db/return-report? true})))
             (.then (fn [{::db/keys [ok? tx-report]}]
                      (is (true? ok?))
-                     (is (= :import (:seon.db-test/source (:tx-meta tx-report)))
+                     (is (= :import (::source (:tx-meta tx-report)))
                          "tx-meta lands in the report under return-report?")))))
       done)))
 
@@ -695,8 +702,9 @@
     (-> (d/create-database cfg)
         (.then (fn [_] (d/connect cfg {:sync? false})))
         (.then (fn [conn]
-                 (.then (d/transact! conn history-schema)
-                        (fn [_] conn)))))))
+                 (-> (db/ensure-provenance! {:seon.db/conn conn})
+                     (.then (fn [_] (d/transact! conn history-schema)))
+                     (.then (fn [_] conn))))))))
 
 (deftest as-of-entity+aggregate-see-the-past-frame
   ;; p starts at rank 1 (t1), changes to rank 2 (t2). An as-of-t1 db value must

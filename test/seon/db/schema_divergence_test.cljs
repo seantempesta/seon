@@ -23,6 +23,8 @@
     [cljs.test :as t :refer [deftest is testing async]]
     [clojure.string :as str]
     [datahike.api :as d]
+    [seon.agent]
+    [seon.agent.message]
     [seon.db :as db]
     [seon.schema :as schema]))
 
@@ -41,10 +43,14 @@
     (-> (d/create-database cfg)
         (.then (fn [_] (d/connect cfg {:sync? false})))
         (.then (fn [conn]
-                 (let [prev db/*conn*]
-                   (set! db/*conn* conn)
-                   (-> (js/Promise.resolve (body))
-                       (.finally (fn [] (set! db/*conn* prev))))))))))
+                 (-> (db/ensure-provenance! {:seon.db/conn conn})
+                     (.then
+                       (fn [_]
+                         (let [prev db/*conn*]
+                           (set! db/*conn* conn)
+                           (-> (js/Promise.resolve (body))
+                               (.finally
+                                 (fn [] (set! db/*conn* prev)))))))))))))
 
 (deftest compatible-re-register-works
   (async done

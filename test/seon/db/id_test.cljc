@@ -2,8 +2,8 @@
   (:require
    #?(:clj  [clojure.edn :as edn]
       :cljs [cljs.reader :as edn])
-   #?(:clj  [clojure.test :refer [deftest is testing]]
-      :cljs [cljs.test :refer [deftest is testing async]])
+   #?(:clj  [clojure.test :refer [deftest is testing use-fixtures]]
+      :cljs [cljs.test :refer [deftest is testing async use-fixtures]])
    [datahike.api :as d]
    #?@(:cljs [[datahike.core :as datahike]])
    #?@(:clj [[datahike.writing :as writing]])
@@ -24,6 +24,28 @@
 (def ^:private dependent-identity-attr :idtest.namespace/name)
 (def ^:private dependent-source-attr :idtest.namespace/source)
 (def ^:private compact-generator :seon.db.id.generator/compact)
+
+(def ^:private allocation-schema-keys
+  #{identity-attr
+    other-identity-attr
+    :idtest.record/source
+    dependent-identity-attr
+    dependent-source-attr})
+
+#?(:clj
+   (use-fixtures
+     :once
+     (fn [run-tests]
+       (try
+         (run-tests)
+         (finally
+           (schema/discard-registrations! allocation-schema-keys)))))
+   :cljs
+   (use-fixtures
+     :once
+     {:after
+      (fn []
+        (schema/discard-registrations! allocation-schema-keys))}))
 
 (defn- allocation-schema-transaction []
   [{:db/ident :seon.schema/key

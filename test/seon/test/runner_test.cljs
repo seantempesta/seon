@@ -26,6 +26,8 @@
     [clojure.string :as str]
     [datahike.api :as d]
     [malli.core :as m]
+    [seon.agent]
+    [seon.agent.message]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.test.runner :as r]
@@ -51,8 +53,11 @@
       (-> (d/create-database cfg)
           (.then (fn [_] (d/connect cfg {:sync? false})))
           (.then (fn [conn]
-                   (set! db/*conn* conn)
-                   conn))))))
+                   (-> (db/ensure-provenance! {:seon.db/conn conn})
+                       (.then
+                         (fn [_]
+                           (set! db/*conn* conn)
+                           conn)))))))))
 
 ;; ============================================================
 ;; vars-in-ns

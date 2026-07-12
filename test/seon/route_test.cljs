@@ -10,6 +10,8 @@
   (:require
     [cljs.test :refer [deftest is async testing]]
     [datahike.api :as d]
+    [seon.agent]
+    [seon.agent.message]
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.route :as route]
@@ -80,7 +82,10 @@
              :schema-flexibility :write
              :keep-history?      true}]
     (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false}))))))
+        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then (fn [conn]
+                 (-> (db/ensure-provenance! {:seon.db/conn conn})
+                     (.then (fn [_] conn))))))))
 
 (deftest rows-round-trip-and-upsert-idempotently
   (async done

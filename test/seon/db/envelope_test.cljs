@@ -22,6 +22,8 @@
   (:require
     [cljs.test :as t :refer [deftest is testing async]]
     [datahike.api :as d]
+    [seon.agent]
+    [seon.agent.message]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.db.internal :as internal]
@@ -65,7 +67,10 @@
              :schema-flexibility :write
              :keep-history?      false}]
     (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false}))))))
+        (.then (fn [_] (d/connect cfg {:sync? false})))
+        (.then (fn [conn]
+                 (-> (db/ensure-provenance! {:seon.db/conn conn})
+                     (.then (fn [_] conn))))))))
 
 (defn- never-reject!
   "Attach a .catch that FAILS the test — the envelope contract says
