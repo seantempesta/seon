@@ -182,9 +182,6 @@
 [submodule "reference-code/swe-agent"]
 	path = reference-code/swe-agent
 	url = https://github.com/SWE-agent/SWE-agent
-[submodule "reference-code/swelancer"]
-	path = reference-code/swelancer
-	url = https://github.com/openai/SWELancer-Benchmark
 [submodule "reference-code/commit0"]
 	path = reference-code/commit0
 	url = https://github.com/commit-0/commit0
@@ -203,9 +200,6 @@
 [submodule "reference-code/gorilla-bfcl"]
 	path = reference-code/gorilla-bfcl
 	url = https://github.com/ShishirPatil/gorilla
-[submodule "reference-code/agentbench"]
-	path = reference-code/agentbench
-	url = https://github.com/THUDM/AgentBench
 [submodule "reference-code/webarena"]
 	path = reference-code/webarena
 	url = https://github.com/web-arena-x/webarena
@@ -215,12 +209,6 @@
 [submodule "reference-code/browsergym"]
 	path = reference-code/browsergym
 	url = https://github.com/ServiceNow/BrowserGym
-[submodule "reference-code/online-mind2web"]
-	path = reference-code/online-mind2web
-	url = https://github.com/OSU-NLP-Group/Online-Mind2Web
-[submodule "reference-code/webvoyager"]
-	path = reference-code/webvoyager
-	url = https://github.com/MinorJerry/WebVoyager
 [submodule "reference-code/inspect-ai"]
 	path = reference-code/inspect-ai
 	url = https://github.com/UKGovernmentBEIS/inspect_ai
@@ -233,9 +221,6 @@
 [submodule "reference-code/cybench"]
 	path = reference-code/cybench
 	url = https://github.com/andyzorigin/cybench
-[submodule "reference-code/openai-evals"]
-	path = reference-code/openai-evals
-	url = https://github.com/openai/evals
 [submodule "reference-code/reitit"]
 	path = reference-code/reitit
 	url = https://github.com/metosin/reitit.git
