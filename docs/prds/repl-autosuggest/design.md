@@ -158,6 +158,30 @@ ONLY — no new plan features):**
   proportions of incremental-asks-against-non-empty-trees,
   id-resolution cases, ordering-bearing lists.
 
+## The context holds the ingredients (owner, 2026-07-12)
+
+The 26M no-FFN model is an assembly machine — it pieces the target
+together from what the encoder shows it, it does not remember. Three
+standing rules:
+
+- **Ingredients-coverage gate (mechanical)**: for every training pair,
+  the target's identifiers (fn symbols, `::` keywords, plan ids,
+  entity names) must appear in the context+cards. Computed per pair at
+  export/data-build time; pairs below threshold are not trained on —
+  they are DIAGNOSED.
+- **Coverage misses are context-gap REPORTS, never unilateral fixes.**
+  The minimal context profile was hard-won; a single bad line can
+  poison the agent. NO change to context generation — block content,
+  wording, new sections — lands without an explicit owner clearance.
+  The profile mechanism itself is selection + caps ONLY; it never
+  rewrites what a block says. Gap reports go to the owner with the
+  evidence (which turns, which missing ingredients, which target
+  forms).
+- **Code over prose.** Cards and suggestions surface GOOD CODE from
+  this repo — real specced fns, docstring line-1 cards, real schema
+  registrations — not instructional text. Code with tests is
+  refinable; context that is words is not.
+
 ## Data sources (INVERTED 2026-07-12 — KT0 fired)
 
 Live census: **~224 ok-eval turns exist, all in acme** (default's
@@ -261,6 +285,12 @@ inspect-ai task. The spend-gated ladder (full thresholds in
 - **KT2 zero-shot copy fidelity** (hours): Clojure-shaped identifiers
   through the stock checkpoint; value-accuracy <~50% while English
   stays high ⇒ kill the retarget.
+- **KT2.5 ingredients coverage** ($0, mechanical, on A1's exported
+  rows): per-turn fraction of target identifiers present in
+  context+cards. Median <~80% ⇒ the profile lacks ingredients — file
+  the context-gap report and STOP for owner review before any
+  training; the fix is context generation (owner-gated), not model
+  capacity.
 - **KT3 frontier signal-ceiling** (hours, ~$5): frontier model given
   the EXACT profile+cards for the 224 held-out turns; <~30-40%
   useful-match ⇒ the projection is the defect — fix it before any

@@ -58,6 +58,14 @@ any training spend. Live status: [[roadmap.md]].
   fidelity → KT3 signal ceiling → KT4 channel uptake → KT5
   reachability → $0-baseline ship gate). Envelope 1024/512; no
   retokenize fallback exists (tied embeddings).
+- **Context generation is FROZEN to this lane** (owner, 2026-07-12):
+  the profile = block selection + caps ONLY, never content rewrites;
+  any context-generation change (wording, sections, block content) is
+  owner-gated — report gaps with evidence, do not fix. The context
+  must hold the INGREDIENTS (the model assembles, it doesn't
+  remember): ingredients-coverage is a mechanical dataset gate
+  (KT2.5) and coverage misses are context-gap reports. Code over
+  prose: cards/suggestions surface real repo code, not instructions.
 - Vocabulary: functions, never "verbs" — code surfaces renamed
   2026-07-12.
 
