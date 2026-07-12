@@ -116,6 +116,18 @@
         (set! db.internal/transact!* original)
         (js/Promise.reject e)))))
 
+(defn- with-allocation-stub
+  "Keep one allocation stub installed until an async body settles."
+  [stub body]
+  (let [original db.id/allocate!]
+    (set! db.id/allocate! stub)
+    (try
+      (-> (js/Promise.resolve (body))
+          (.finally (fn [] (set! db.id/allocate! original))))
+      (catch :default error
+        (set! db.id/allocate! original)
+        (js/Promise.reject error)))))
+
 (defn- schema-tee-row
   "The exact `:seon.schema` tee shape build-tee-entities emits for a
    registered key `k` — nested-map ns upsert, NOT a lookup-ref."
@@ -134,6 +146,33 @@
    :seon.eval/ending-ns        'cljs.user
    :seon.eval/result           {:seon.eval/ok? true :seon.eval/value :ok}
    :seon.eval/tee              tee})
+
+(deftest ambiguous-wire-result-never-starts-a-second-allocation
+  (async done
+    (let [!calls (atom 0)
+          ambiguous
+          {:seon.db/ok? false
+           :seon.db/error
+           {:seon.error/message "wire reply unavailable"
+            :seon.error/kind :core-bug
+            :seon.error/data
+            {:seon.store.wire/status :seon.store.wire.status/unknown}}}]
+      (-> (with-allocation-stub
+            (fn [_request]
+              (swap! !calls inc)
+              (js/Promise.resolve ambiguous))
+            #(seval/record-eval!
+               (assoc (eval-args "(+ 1 1)" [{:probe.tee/id "must-not-retry"}])
+                      :seon.agent.turn/id-of-turn "turn-probe")))
+          (.then
+            (fn [response]
+              (is (= ambiguous response)
+                  "the ambiguous allocation remains the returned fact")
+              (is (= 1 @!calls)
+                  "a possibly committed eval is never allocated under a new id")))
+          (.catch (fn [error]
+                    (is false (str "ambiguous allocation test threw: " error))))
+          (.finally done)))))
 
 (deftest eval-body-runs-once-when-identity-allocation-retries
   (async done

@@ -2944,11 +2944,15 @@
         (str "; <value could not be rendered as data; the live value is "
              "result/" eval-id ">")))))
 
-(defn- allocator-failure?
+(defn- unsafe-to-reallocate?
   [envelope]
-  (let [error-tag (get-in envelope
-                          [:seon.db/error :seon.error/data ::db.id/error])]
-    (= "seon.db.id.error" (some-> error-tag namespace))))
+  (let [data (get-in envelope [:seon.db/error :seon.error/data])
+        error-tag (::db.id/error data)
+        wire-status (:seon.store.wire/status data)]
+    (or (= "seon.db.id.error" (some-> error-tag namespace))
+        (contains? #{:seon.store.wire.status/unknown
+                     :seon.store.wire.status/committed}
+                   wire-status))))
 
 (defn ^:async record-eval!
   "Allocate and transact one eval as a component child of its turn.
@@ -3034,7 +3038,7 @@
         (js/console.error "[seon.eval/record-eval!] tx FAILED:"
                           (-> primary :seon.db/error :seon.error/message)
                           "— source:" source)
-        (if (and (seq tee) (not (allocator-failure? primary)))
+        (if (and (seq tee) (not (unsafe-to-reallocate? primary)))
           (let [fallback (await (allocate-record! []))]
             (if (:seon.db/ok? fallback)
               (let [eval-id (get-in fallback

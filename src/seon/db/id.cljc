@@ -1109,10 +1109,10 @@
 #?(:cljs
    (defn- committed-write?
      [envelope]
-     (true?
-      (get-in envelope
-              [:seon.db/error :seon.error/data
-               :seon.store.wire/committed?]))))
+     (= :seon.store.wire.status/committed
+        (get-in envelope
+                [:seon.db/error :seon.error/data
+                 :seon.store.wire/status]))))
 
 #?(:cljs
    (defn- committed-eids
@@ -1260,7 +1260,7 @@
                  ::ids ids
                  ::eids eids})))
 
-           ;; The ordinary wire write-id fence can prove that a reply was
+           ;; The durable wire receipt can prove that a reply was
            ;; lost after commit. The candidates are already durable: recover
            ;; their eids from the materialized local db and never mint again.
            (committed-write? envelope)
