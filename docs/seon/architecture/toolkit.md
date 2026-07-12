@@ -725,7 +725,9 @@ the tile re-derives every render. The tile / slot / render mechanism lives in
 benchmark run's full output, a scraped PDF, anything big the agent's domain code
 produces — keeping only a hash + small projection in the DB. The `Blobs` tier of
 the three-tier storage rule (DB datoms = small indexed projections; Blobs =
-persistent full content; the globalThis stash = volatile per-session values).
+persistent full content; the capped `result/<id>` process store = volatile
+per-session values). The agent-facing symbol and internal reader share one value
+slot, and eviction removes its analyzer handle with it.
 
 **Floor:** the protected `seon.blob` (content-addressed, on-disk zstd). `my.blob`
 is the thin `put!`/`get` wrapper, storing the hash on a typed projection entity.

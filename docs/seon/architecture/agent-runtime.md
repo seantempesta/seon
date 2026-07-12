@@ -572,9 +572,11 @@ mechanisms — extended, never duplicated — make every hang a value:
 - **One fence: the run-id CAS.** A late-settling await from a reaped or
   superseded run cannot corrupt state — its writes lead with the work-fence
   and abort at commit. Late results are values, absorbed or discarded.
-- **One leak-bound: the `result/<id>` stash.** A never-settling Promise is
-  retained under the capped result-var stash (oldest pruned), and dropped
-  on restart. Pending work is re-referenceable data, not a leak.
+- **One leak-bound: the `result/<id>` store.** A never-settling Promise occupies
+  the same capped runtime slot read by the analyzer-emitted `result/<id>` symbol
+  and the internal reader. Value and analyzer handle evict together
+  oldest-first and disappear on restart. A late settlement updates only a slot
+  that is still live; it cannot resurrect evicted work.
 
 The honest residual: a **synchronous CPU loop** blocks the event loop the
 watchdog itself lives on — no eval-level mechanism can preempt it. That is

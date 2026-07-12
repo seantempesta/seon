@@ -634,6 +634,8 @@ The CLJS adapter is
 - active repository and package-owned generation;
 - output begins with a lowercase letter and otherwise uses lowercase base36,
   so no custom alphabet, underscore, slash, or ClojureScript munge ambiguity;
+- the same grammar is valid as the name portion of `result/<eval-id>`; eval ids
+  use this general compact profile rather than a result-specific generator;
 - the 12-position grammar has about 61.57 bits;
 - its no-hyphen grammar is disjoint from both word output and legacy ids.
 

@@ -132,6 +132,15 @@ that could conceal the observed failure.
 Paused JVM UI/MCP, dormant shared UI, and the separately owned ACME-only tile
 remain explicitly deferred rather than gaining another estimator.
 
+The duplicated eval-result authority is removed in place. A successful eval now
+has one capped `globalThis.result.<id>` value slot shared by the analyzer-emitted
+`result/<id>` symbol and `lookup-result`; eviction removes the value and analyzer
+def together. Pending Promise settlement updates only a still-live slot, so
+late work cannot resurrect an evicted result and displace newer values. Focused
+coverage passes 20 tests / 75 assertions with no synthetic core-fault or
+data-loss output; the result-var fixture now owns the CLJS root connection for
+its complete asynchronous span.
+
 - Capture cold boot, converged restart, five sequential mints, one concurrent
   mint attempt, core reload, and config apply timings.
 - Record transaction/broadcast counts for each transition.

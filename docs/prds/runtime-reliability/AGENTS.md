@@ -20,8 +20,10 @@ process-global error scopes are now one fiber-local async scope; test-run detail
 is process-local and bounded; normal boot no longer allocates a disposable
 second Datahike database; active reporting uses the canonical token estimator;
 and the full-suite harness has one authoritative Node run with no retry-spliced
-green result. The remaining Phase 0 duplicate eval-result store and measured
-test-runtime consolidation precede the atomic ID allocator. The authoritative
+green result. Eval values now have one capped slot shared by `result/<id>` and
+the internal reader, with value/analyzer eviction coupled and late-settling
+Promises unable to resurrect an evicted result. The remaining measured
+test-runtime consolidation precedes the atomic ID allocator. The authoritative
 target is [[provenance-and-lifecycle-design]] and the ordered
 implementation/commit plan is [[roadmap]].
 

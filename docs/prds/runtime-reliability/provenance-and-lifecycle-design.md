@@ -776,6 +776,14 @@ compact syntax. Generator policy belongs to each registered identity attribute,
 not to an entity and not to a caller option. Values stay lowercase URL/DOM/
 CLJS-namespace safe; the schema does not copy package word lists.
 
+Compact syntax also has a direct runtime obligation: every eval id becomes the
+name portion of the real ClojureScript symbol `result/<eval-id>`. The reader
+rejects a digit-leading name, and ClojureScript munges hyphen to underscore.
+Therefore the compact profile is exactly `[a-z][a-z0-9]{11}`—letter first, no
+slash, colon, hyphen, underscore, whitespace, or reader punctuation. Eval ids do
+not get a separate generator; `:seon.eval/id` registers this compact profile
+with the same allocator.
+
 Datahike enforces uniqueness per fully namespaced identity attribute, while
 Seon's serialized allocator additionally guarantees that a newly generated
 value is unused under every registered generator-managed identity attribute in
