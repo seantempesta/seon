@@ -296,6 +296,16 @@ inspect-ai task. The spend-gated ladder (full thresholds in
 - **KT2 zero-shot copy fidelity** (hours): Clojure-shaped identifiers
   through the stock checkpoint; value-accuracy <~50% while English
   stays high ⇒ kill the retarget.
+- **KT2b legibility lint via JSON translation** (hours, stock
+  checkpoint, owner-endorsed 2026-07-12): a TEMPORARY translation
+  layer maps the fn index (`:seon.fn` + registered schemas) to
+  needle's native JSON tool format; hand-curated natural situations +
+  distractor menus, constrained decoding, needle's own F1 scoring.
+  Output = the per-fn legibility leaderboard v0 (which names/
+  docstrings/schemas a 26M can act on). Signal if name-selection ≫
+  chance (>~50% on 8-distractor menus); <~30% ⇒ weak zero-shot signal
+  (informs but doesn't kill — the finetune is the real test; the
+  LEADERBOARD is valuable either way).
 - **KT2.5 ingredients coverage** ($0, mechanical, on A1's exported
   rows): per-turn fraction of target identifiers present in
   context+cards. Median <~80% ⇒ the profile lacks ingredients — file
