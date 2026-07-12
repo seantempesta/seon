@@ -7,7 +7,7 @@
    agent re-arm from the GLOBAL provider — so an agent could NOT use a
    different provider than the cluster default.
 
-   The fix: `seon.client/current-llm-fn` returns a DISPATCHING closure that
+   The lower `seon.ai.dispatch/llm-fn` returns a dispatching closure that
    selects the adapter PER CALL via `(seon.ai/provider)`. Inside a turn the
    call runs in `db/with-agent id`, so `(seon.ai/provider)` resolves that
    agent's `:seon.ai/agent-provider` overlay — routing to ITS adapter. A
@@ -24,8 +24,8 @@
     [datahike.api :as d]
     [seon.ai :as ai]
     [seon.ai.anthropic :as anthropic]
+    [seon.ai.dispatch :as dispatch]
     [seon.ai.openai-compat :as openai]
-    [seon.client :as client]
     [seon.config :as config]
     [seon.db :as db]))
 
@@ -83,7 +83,7 @@
                                     openai/agent-adapter     (tagging-adapter :deepseek)
                                     config/anthropic-api-key (fn [] "test-key")
                                     openai/api-key-configured? (fn [] true)]
-                        (let [llm-fn (@#'client/current-llm-fn)]
+                        (let [llm-fn (dispatch/llm-fn)]
                           ;; Provider resolution proof (no scope = global).
                           (is (= :deepseek (ai/provider))
                               "outside an agent scope → the global provider")
@@ -134,7 +134,7 @@
                           (fn []
                             (is (= :anthropic (ai/provider))
                                 ":inherit resolves the GLOBAL provider")
-                            ((@#'client/current-llm-fn) "ctx"))))))
+                            ((dispatch/llm-fn) "ctx"))))))
                   (.then
                     (fn [r]
                       (is (= :anthropic (::provider r))
