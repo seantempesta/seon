@@ -72,8 +72,11 @@ mkdir -p tmp out/test
 TMPOUT="tmp/test-cljs-$(date +%Y%m%d-%H%M%S)-$$.log"
 
 START=$(date +%s)
+COMPILE_ELAPSED=0
+COMPILE_STATUS="skipped (--no-build)"
 
 if [ "$BUILD" = "1" ]; then
+  COMPILE_START=$(date +%s)
   # DEV compile (not `release`): the core resolves fns by walking
   # goog.global at munged paths (seon.eval/lookup-value, malli.instrument's
   # -get-ns). Closure :simple/:advanced flatten namespaces into the bundle's
@@ -100,13 +103,18 @@ if [ "$BUILD" = "1" ]; then
   fi
   echo "== Compiling :test build (shadow-cljs, dev) =="
   if ! "${COMPILE_CMD[@]}" 2>&1 | tee "$TMPOUT"; then
+    COMPILE_END=$(date +%s)
+    COMPILE_ELAPSED=$((COMPILE_END - COMPILE_START))
     echo ""
     echo "========================================"
-    echo "COMPILE FAIL"
+    echo "COMPILE FAIL (${COMPILE_ELAPSED}s)"
     echo "Full output: $TMPOUT"
     echo "========================================"
     exit 2
   fi
+  COMPILE_END=$(date +%s)
+  COMPILE_ELAPSED=$((COMPILE_END - COMPILE_START))
+  COMPILE_STATUS="${COMPILE_ELAPSED}s"
 fi
 
 if [ ! -f "out/test/test.js" ]; then
@@ -114,89 +122,16 @@ if [ ! -f "out/test/test.js" ]; then
   exit 2
 fi
 
-# ---------------------------------------------------------------------------
-# Truncation backstop, part 1 — DISCOVER how many test namespaces the runner
-# will iterate. This is the runner's OWN view (`env/get-test-namespaces`, what
-# `--list` prints), which is the authority because it INCLUDES probe nses that
-# register `deftest`s but don't match the `-test$` discovery regexp (e.g.
-# seon.test.*-probes). The compiled `_test.js` import set UNDER-counts those.
-#
-# `--list` never calls `js/process.exit` (shadow.test.node only exits from the
-# :end-run-tests report), so it would hang — we poll until the printed count
-# stabilises (~3s unchanged), then kill. A short/incomplete --list only WEAKENS
-# the ran<discovered cross-check; it can never false-FAIL a good run (the
-# summary-presence gate below is the hard stall detector, and an undercounted
-# DISCOVERED keeps RAN >= DISCOVERED).
-# ---------------------------------------------------------------------------
-LISTLOG="tmp/test-cljs-list-$$.log"
-: > "$LISTLOG"
-node out/test/test.js --list > "$LISTLOG" 2>&1 &
-LISTPID=$!
-PREV=-1; STABLE=0
-for _ in $(seq 1 90); do
-  sleep 1
-  kill -0 "$LISTPID" 2>/dev/null || break
-  CUR=$(grep -acE '^Namespace:' "$LISTLOG" 2>/dev/null); : "${CUR:=0}"
-  if [ "$CUR" -gt 0 ] && [ "$CUR" -eq "$PREV" ]; then
-    STABLE=$((STABLE + 1)); [ "$STABLE" -ge 3 ] && break
-  else
-    STABLE=0
-  fi
-  PREV=$CUR
-done
-kill -9 "$LISTPID" 2>/dev/null || true
-wait "$LISTPID" 2>/dev/null || true
-DISCOVERED=$(grep -acE '^Namespace:' "$LISTLOG" 2>/dev/null); : "${DISCOVERED:=0}"
-
-# ---------------------------------------------------------------------------
-# COLD-BOOT LOAD GATE — a successfully-COMPILED bundle that throws at module
-# load (`require`) time, before any test runs. The `--list` cold load above
-# already exercised real, fresh-process registration order; if it produced
-# ZERO namespaces AND emitted a load error, the bundle failed to LOAD.
-#
-# The dominant cause is a SCHEMA REGISTRATION-ORDER break: a
-# `seon.schema/register!` whose form references another schema keyword not yet
-# registered in cold-boot order — malli rejects it eagerly
-# (`:malli.core/invalid-schema`, "register that keyword first"), which aborts
-# the namespace's top-level load and crashes the whole bundle. The warm
-# dev-hook reload MASKS this (the prior registration survives in the defonce
-# `*schemas` atom), so ONLY a fresh process — this run, or a cold pod boot —
-# catches it. We diagnose it HERE, crisply, instead of falling through to the
-# verdict's TRUNCATED path, which assumes a hung async `done` (a STALL) and so
-# misreports a load crash as an async-runner stall.
-# ---------------------------------------------------------------------------
-if [ "$DISCOVERED" -eq 0 ] && \
-   grep -qaE 'SHADOW import error|malli\.core/invalid-schema|register that keyword first|is not a valid Malli schema' "$LISTLOG"; then
-  cat "$LISTLOG" >> "$TMPOUT" 2>/dev/null || true
-  echo ""
-  echo "========================================"
-  echo "FAIL — BUNDLE FAILED TO LOAD (cold-boot schema registration order)"
-  echo ""
-  echo "The compiled test bundle threw at module load (require), before any"
-  echo "test ran — so NOTHING was exercised (this is NOT an async-runner stall)."
-  echo "Almost always a schema load-order break: a seon.schema/register! form"
-  echo "references another schema keyword not registered yet in cold-boot order."
-  echo "Register the referent FIRST (in the SAME ns, ABOVE the referrer)."
-  echo ""
-  echo "The warm dev-hook reload MASKS this — the prior registration survives in"
-  echo "the defonce registry; only a fresh process (this run / a cold pod boot)"
-  echo "exercises real registration order. Load error:"
-  grep -aE 'is not a valid Malli schema|malli\.core/invalid-schema|SHADOW import error' "$LISTLOG" \
-    | head -3 | cut -c1-400 | sed 's/^/  /'
-  echo "========================================"
-  rm -f "$LISTLOG"
-  ln -sf "$(basename "$TMPOUT")" tmp/test-cljs-latest.log 2>/dev/null || true
-  echo "Full output: $TMPOUT (or tmp/test-cljs-latest.log)"
-  exit 1
-fi
-
 echo ""
 echo "== Running tests (node out/test/test.js) =="
+NODE_START=$(date +%s)
 node out/test/test.js 2>&1 | tee -a "$TMPOUT"
 NODE_EXIT=${PIPESTATUS[0]}
+NODE_END=$(date +%s)
+NODE_ELAPSED=$((NODE_END - NODE_START))
 
 # ---------------------------------------------------------------------------
-# Verdict — based on EXIT CODE + RAN-COUNT + SUMMARY-PRESENCE + cljs.test's own
+# Verdict — based on EXIT CODE + SUMMARY-PRESENCE + cljs.test's own
 # "FAIL in ("/"ERROR in (" reports, never a bare FAIL|ERROR log grep.
 #
 # WHY exit 0 alone is NOT a pass: the :node-test runner sequences EVERY test
@@ -210,10 +145,11 @@ NODE_EXIT=${PIPESTATUS[0]}
 # A COMPLETE run always prints cljs.test's summary ("Ran N tests containing M
 # assertions." + "F failures, E errors.") — emitted only by finish-test-run
 # after the LAST block fn. Its PRESENCE proves the run reached the end; its
-# ABSENCE proves truncation. We additionally require RAN == DISCOVERED. Real
-# failures are counted from cljs.test's own "FAIL in ("/"ERROR in (" report
-# lines (anchored, so datahike log lines / inline tx-data blobs that merely
-# contain the word "error" are not mistaken for failures).
+# ABSENCE proves the one authoritative run did not complete. Real failures are
+# counted from cljs.test's own "FAIL in ("/"ERROR in (" report lines (anchored,
+# so datahike log lines / inline tx-data blobs that merely contain the word
+# "error" are not mistaken for failures). A failed/incomplete run is never
+# retried or stitched together with output from another process.
 # ---------------------------------------------------------------------------
 # NOTE: `grep -c` already prints the count (0 when no match), it just exits 1
 # in that case — so NO `|| echo 0` (that would print a SECOND 0, yielding the
@@ -229,58 +165,16 @@ SUMMARY_LINE=$(parse_summary "$TMPOUT")
 COUNTS_LINE=$(parse_counts "$TMPOUT")
 REAL_FAILS=$(parse_realfail "$TMPOUT"); : "${REAL_FAILS:=0}"
 
-TRUNCATED=0
-[ -z "$SUMMARY_LINE" ] && TRUNCATED=1
-[ "$DISCOVERED" -gt 0 ] && [ "$RAN" -lt "$DISCOVERED" ] && TRUNCATED=1
+INCOMPLETE=0
+[ -z "$SUMMARY_LINE" ] && INCOMPLETE=1
 
-# ---------------------------------------------------------------------------
-# Tail-retry — recover an INTERMITTENT async-runner stall (NOT failures).
-#
-# The single-process :node-test runner is fragile under load: heavyweight
-# `^:async`/await tests near the END of the suite (peak event-loop pressure,
-# made worse by the preceding `compile test`) intermittently wedge the shared
-# run-block continuation, dropping every later namespace. The DROPPED
-# namespaces pass cleanly when run on their own (no cumulative pressure), so
-# when — and ONLY when — the run truncated with the clean-exit signature (node
-# exit 0, no summary) and ZERO real failures so far, re-run the un-completed
-# namespaces (the missing ones + the last one to start, which stalled mid-way)
-# in a FRESH process and merge. A real failure is never retried away; a stall
-# that re-stalls is reported. This is recovery, not green-washing — the
-# backstop above still fails the build if the retry doesn't fully complete.
-# ---------------------------------------------------------------------------
-RESCUED=0
-RETRY_NOTE=""
-if [ "$TRUNCATED" -ne 0 ] && [ "$REAL_FAILS" -eq 0 ] && [ "$NODE_EXIT" -eq 0 ] && [ "$DISCOVERED" -gt 0 ]; then
-  LAST_STARTED=$(grep -aE '^Testing ' "$TMPOUT" | tail -1 | sed -E 's/^Testing *//')
-  MISSING=$(comm -23 \
-    <(grep -aE '^Namespace:' "$LISTLOG" | sed -E 's/^Namespace: *//' | sort -u) \
-    <(grep -aE '^Testing '   "$TMPOUT"  | sed -E 's/^Testing *//'   | sort -u))
-  RETRY_NSES=$(printf '%s\n%s\n' "$MISSING" "$LAST_STARTED" | sed '/^$/d' | sort -u)
-  RETRY_CSV=$(printf '%s' "$RETRY_NSES" | tr '\n' ',' | sed 's/,$//')
-  RETRY_N=$(printf '%s\n' "$RETRY_NSES" | grep -c .)
-  if [ -n "$RETRY_CSV" ]; then
-    echo ""
-    echo "== Truncation detected — re-running ${RETRY_N} un-completed namespace(s) in a fresh process =="
-    echo "   ${RETRY_CSV}"
-    RETRYLOG="tmp/test-cljs-retry-$$.log"; : > "$RETRYLOG"
-    node out/test/test.js --test="$RETRY_CSV" > "$RETRYLOG" 2>&1 &
-    RP=$!
-    for _ in $(seq 1 180); do sleep 1; kill -0 "$RP" 2>/dev/null || break; done
-    if kill -0 "$RP" 2>/dev/null; then kill -9 "$RP" 2>/dev/null; RETRY_EXIT=137; else wait "$RP"; RETRY_EXIT=$?; fi
-    grep -aE '^Testing |^Ran [0-9]+ tests containing|^[0-9]+ failures, [0-9]+ errors\.|^(FAIL|ERROR) in \(' "$RETRYLOG" | cut -c1-200
-    cat "$RETRYLOG" >> "$TMPOUT"
-    RETRY_RAN=$(parse_ran "$RETRYLOG"); : "${RETRY_RAN:=0}"
-    RETRY_SUMMARY=$(parse_summary "$RETRYLOG")
-    RETRY_RF=$(parse_realfail "$RETRYLOG"); : "${RETRY_RF:=0}"
-    if [ -n "$RETRY_SUMMARY" ] && [ "$RETRY_EXIT" -eq 0 ] && [ "$RETRY_RAN" -ge "$RETRY_N" ] && [ "$RETRY_RF" -eq 0 ]; then
-      RESCUED=1; TRUNCATED=0
-      RETRY_NOTE="recovered: ${RETRY_RAN} un-completed namespace(s) re-ran cleanly in a fresh process (intermittent :node-test runner stall)"
-    else
-      RETRY_NOTE="retry did NOT recover — still truncated or now failing"
-      REAL_FAILS=$((REAL_FAILS + RETRY_RF))
-    fi
-    rm -f "$RETRYLOG"
-  fi
+# A missing summary can mean either a module-load failure or an async test that
+# never called its continuation. Diagnose known cold-load errors from the SAME
+# run without changing the verdict or launching a second process.
+LOAD_FAILED=0
+if [ "$INCOMPLETE" -ne 0 ] && \
+   grep -qaE 'SHADOW import error|malli\.core/invalid-schema|register that keyword first|is not a valid Malli schema' "$TMPOUT"; then
+  LOAD_FAILED=1
 fi
 
 # ---------------------------------------------------------------------------
@@ -310,7 +204,7 @@ fi
 
 VERDICT_FAIL=0
 [ "$NODE_EXIT" -ne 0 ] && VERDICT_FAIL=1
-[ "$TRUNCATED" -ne 0 ] && VERDICT_FAIL=1
+[ "$INCOMPLETE" -ne 0 ] && VERDICT_FAIL=1
 [ "$REAL_FAILS" -ne 0 ] && VERDICT_FAIL=1
 [ "$CORE_GATE_TRIPPED" -ne 0 ] && VERDICT_FAIL=1
 
@@ -319,27 +213,27 @@ ELAPSED=$((END - START))
 
 echo ""
 echo "========================================"
-if [ "$RESCUED" -ne 0 ]; then
-  echo "namespaces: all ${DISCOVERED} ran (after tail-retry; node exit ${NODE_EXIT})"
-else
-  echo "namespaces: ran ${RAN} of ${DISCOVERED} discovered  (node exit ${NODE_EXIT})"
-fi
-[ -n "$SUMMARY_LINE" ] && echo "first pass: ${SUMMARY_LINE}  ${COUNTS_LINE}"
-[ -n "$RETRY_NOTE" ] && echo "tail-retry: ${RETRY_NOTE}"
+echo "compile: ${COMPILE_STATUS}"
+echo "node: ${NODE_ELAPSED}s; namespaces started: ${RAN}; exit: ${NODE_EXIT}"
+[ -n "$SUMMARY_LINE" ] && echo "summary: ${SUMMARY_LINE}  ${COUNTS_LINE}"
 if [ "$VERDICT_FAIL" -eq 0 ]; then
-  echo "PASS (${ELAPSED}s)"
+  echo "PASS (${ELAPSED}s total)"
 else
-  echo "FAIL (${ELAPSED}s)"
-  if [ "$TRUNCATED" -ne 0 ]; then
+  echo "FAIL (${ELAPSED}s total)"
+  if [ "$INCOMPLETE" -ne 0 ]; then
     echo ""
-    echo "TRUNCATED: the run did not complete every namespace (no end-of-run"
-    echo "summary, or ran < discovered). A test stalled the shared async"
-    echo ":node-test runner (a hung async \`done\`) and the tail-retry did not"
-    echo "recover it. Namespaces that never completed:"
-    comm -23 \
-      <(grep -aE '^Namespace:' "$LISTLOG" | sed -E 's/^Namespace: *//' | sort -u) \
-      <(grep -aE '^Testing '   "$TMPOUT"  | sed -E 's/^Testing *//'   | sort -u) \
-      | sed 's/^/  - /'
+    if [ "$LOAD_FAILED" -ne 0 ]; then
+      echo "INCOMPLETE: the single Node run failed while loading the cold bundle;"
+      echo "no final cljs.test summary was emitted. Load error:"
+      grep -aE 'is not a valid Malli schema|malli\.core/invalid-schema|SHADOW import error' "$TMPOUT" \
+        | head -3 | cut -c1-400 | sed 's/^/  /' || true
+    else
+      LAST_STARTED=$(grep -aE '^Testing ' "$TMPOUT" | tail -1 | sed -E 's/^Testing *//' || true)
+      echo "INCOMPLETE: the single Node run emitted no final cljs.test summary."
+      echo "An async test may have failed to call its done continuation; the run"
+      echo "fails as observed and is not retried in a fresh process."
+      [ -n "$LAST_STARTED" ] && echo "Last namespace started: ${LAST_STARTED}"
+    fi
   fi
   if [ "$REAL_FAILS" -ne 0 ]; then
     echo ""
@@ -359,7 +253,6 @@ else
 fi
 echo "========================================"
 
-rm -f "$LISTLOG"
 ln -sf "$(basename "$TMPOUT")" tmp/test-cljs-latest.log
 echo "Full output: $TMPOUT (or tmp/test-cljs-latest.log)"
 
