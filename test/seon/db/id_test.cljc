@@ -10,7 +10,10 @@
    [malli.core :as m]
    [seon.db.id :as id]
    [seon.schema :as schema]
-   #?@(:cljs [[seon.db.internal :as db.internal]])))
+   #?@(:cljs [[seon.agent]
+              [seon.agent.message]
+              [seon.db :as db]
+              [seon.db.internal :as db.internal]])))
 
 (def ^:private generate-candidate #'id/generate-candidate)
 (def ^:private compact-syntax #"^[a-z][a-z0-9]{11}$")
@@ -507,6 +510,36 @@
            IDeref
            (-deref [_] db-value))))
 
+     (defn- split-view-conn
+       "Build a conn whose runtime and persisted writer configs differ."
+       [runtime-backend persisted-backend]
+       (let [runtime-db
+             (atom {:config {:writer {:backend runtime-backend}}})
+             persisted-db
+             {:config {:writer {:backend persisted-backend}}}]
+         (reify
+           IDeref
+           (-deref [_] persisted-db)
+           ILookup
+           (-lookup [_ key]
+             (when (= :wrapped-atom key) runtime-db)))))
+
+     (deftest allocation-writer-check-uses-the-live-connection-view
+       (testing "a non-streaming remote deref exposes the authority's config"
+         (is (nil?
+               (id/assert-allocation-writer!
+                 (split-view-conn :seon-wire
+                                  :seon.db.id.writer/serialized)))))
+       (testing "persisted config cannot disguise an unsafe live writer"
+         (let [failure
+               (try
+                 (id/assert-allocation-writer!
+                   (split-view-conn :self :seon-wire))
+                 nil
+                 (catch :default error error))]
+           (is (= :seon.db.id.error/unconfigured-allocation-writer
+                  (::id/error (ex-data failure)))))))
+
      (defn- allocation-request
        ([builder]
         (allocation-request (stub-allocation-conn) builder))
@@ -526,9 +559,13 @@
              (.then (fn [_]
                       (d/connect connect-config {:sync? false})))
              (.then (fn [conn]
-                      (-> (d/transact! conn
-                                       {:tx-data
-                                        (allocation-schema-transaction)})
+                      (-> (db/ensure-provenance! {:seon.db/conn conn})
+                          (.then
+                            (fn [_]
+                              (d/transact!
+                                conn
+                                {:tx-data
+                                 (allocation-schema-transaction)})))
                           (.then (fn [_] conn))))))))
 
      (deftest local-allocation-uses-the-canonical-preparation
@@ -577,7 +614,8 @@
               (-> (fresh-allocation-conn)
                   (.then
                    (fn [conn]
-                     (-> (db.internal/ensure-datahike-attrs! conn [identity-attr])
+                     (-> (db.internal/ensure-datahike-attrs!
+                           conn [identity-attr] nil)
                          (.then
                           (fn [_]
                             (let [candidate-value "q66ljwup2b5r"
@@ -618,7 +656,8 @@
                      (-> (db.internal/ensure-datahike-attrs!
                           conn
                           [identity-attr :idtest.record/source
-                           dependent-identity-attr dependent-source-attr])
+                           dependent-identity-attr dependent-source-attr]
+                          nil)
                          (.then
                           (fn [_]
                             (let [candidate "c12345678901"

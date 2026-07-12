@@ -1285,7 +1285,10 @@
    Remote `:seon-wire` connections delegate to the configured JVM authority.
    Local self-writer connections must be the first connection opened with
    `allocation-connect-config`; a later connect cannot upgrade Datahike's
-   cached writer for the same store and branch."
+   cached writer for the same store and branch. The check reads Datahike's
+   wrapped runtime db, not the public deref: a non-streaming remote writer's
+   public deref reloads the persisted db value, whose config correctly names
+   the remote JVM authority's writer rather than this connection's writer."
   {:malli/schema [:=> [:cat ::connection] :nil]}
   [conn]
   (let [derefable? #?(:clj  (instance? clojure.lang.IDeref conn)
@@ -1293,7 +1296,16 @@
     ;; Non-derefable test doubles exercise the wire retry state machine. Every
     ;; real Datahike connection is derefable and must name an atomic writer.
     (when derefable?
-      (let [writer (get-in @conn [:config :writer])
+      (let [wrapped-atom (try
+                           (:wrapped-atom conn)
+                           (catch #?(:clj Throwable :cljs :default) _ nil))
+            runtime-db   (if (and wrapped-atom
+                                  #?(:clj  (instance? clojure.lang.IDeref
+                                                      wrapped-atom)
+                                     :cljs (satisfies? IDeref wrapped-atom)))
+                           @wrapped-atom
+                           @conn)
+            writer (get-in runtime-db [:config :writer])
             backend (or (:backend writer) :self)]
         (when-not (or (= :seon-wire backend)
                       (= allocation-writer-backend backend))
