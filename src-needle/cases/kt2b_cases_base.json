@@ -1,0 +1,672 @@
+{
+ "comment": "KT2b base cases — hand-curated, harness-derived (owner directive 2026-07-12). Sources: BFCL v4 live_simple/live_irrelevance phrasing templates re-domained onto the seon fn index; agentbench os_interaction/dbbench; terminal-bench original-tasks; webvoyager tasks; tau2-bench user-turn style; the cljs test suites (call-shape grounding); src-inspect-ai milestone/planning contracts (REPHRASED where the contract literally names the fn — leakage guard); the orchestrator's 24 seeds as fallback overlay. kt2b_cases.json = this file + agy paraphrases (scripts/agy_paraphrase.md documents the run). expected_args are in TRANSLATED param space (snake keys, name-part of the malli keyword).",
+ "cases": [
+  {
+   "id": "plan-step",
+   "source": "test/my/plan_test.cljs:step-stores-a-fully-formed-open-step + seed#3",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Add a plan step titled \"write the rollback fn\" under the parent step dpl-2607121001.",
+   "expected": "my.plan/step!",
+   "expected_args": {
+    "title": "write the rollback fn"
+   }
+  },
+  {
+   "id": "plan-done",
+   "source": "inspect-ai:planning _LTP_CONTRACT (rephrased) + test:the-store-retrieve-arc-with-resume + seed#1",
+   "work_kind": "plan-mutation",
+   "rephrased": true,
+   "query": "Step kJm-2607121415 is finished and its outcome verified — record its completion.",
+   "expected": "my.plan/done!",
+   "expected_args": {
+    "id": "kJm-2607121415"
+   }
+  },
+  {
+   "id": "plan-active",
+   "source": "test/my/plan_test.cljs:active-sets-the-position-and-demotes-the-previous + seed#2",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Make step dbs-2607120944 the one I am working on right now.",
+   "expected": "my.plan/active!",
+   "expected_args": {
+    "id": "dbs-2607120944"
+   }
+  },
+  {
+   "id": "plan-needs",
+   "source": "test/my/plan_test.cljs:step-parent-and-needs-structure-and-block-the-queue + seed#4",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Step tst-2607121100 cannot start until step sch-2607121055 is finished — record that dependency.",
+   "expected": "my.plan/needs!",
+   "expected_args": {
+    "id": "tst-2607121100"
+   }
+  },
+  {
+   "id": "plan-reconcile",
+   "source": "test/my/plan_test.cljs:reconcile-updates-mints-and-drops-in-one-tx + seed#5",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Here is my whole open plan as an edited document — apply it so the stored plan matches this outline.",
+   "expected": "my.plan/reconcile!"
+  },
+  {
+   "id": "plan-next",
+   "source": "test/my/plan_test.cljs:plan-builds-tree-and-deps-and-derives-the-queue + seed#6",
+   "work_kind": "plan-read",
+   "rephrased": false,
+   "query": "Which of my steps should I pick up next?",
+   "expected": "my.plan/next"
+  },
+  {
+   "id": "plan-tree",
+   "source": "test/my/plan_test.cljs:depth-2-rollup + seed#7",
+   "work_kind": "plan-read",
+   "rephrased": false,
+   "query": "Show me my whole plan as a nested structure I can re-plan over.",
+   "expected": "my.plan/tree"
+  },
+  {
+   "id": "plan-move",
+   "source": "test/my/plan_test.cljs:move-reparents-a-node-in-the-tree + seed#8",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Move the caching step cch-2607120910 under the performance step prf-2607120905.",
+   "expected": "my.plan/move!",
+   "expected_args": {
+    "id": "cch-2607120910"
+   }
+  },
+  {
+   "id": "plan-drop",
+   "source": "seed#9 (no harness coverage: destructive subtree removal)",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Delete the abandoned migration step mig-2607111830 and everything under it.",
+   "expected": "my.plan/drop!",
+   "expected_args": {
+    "id": "mig-2607111830"
+   }
+  },
+  {
+   "id": "plan-reopen",
+   "source": "test/my/plan_test.cljs:the-store-retrieve-arc (reopen leg) + seed#24",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "I closed step kJm-2607121415 by mistake — open it back up.",
+   "expected": "my.plan/reopen!",
+   "expected_args": {
+    "id": "kJm-2607121415"
+   }
+  },
+  {
+   "id": "plan-plan",
+   "source": "inspect-ai:planning _LTP_CONTRACT (rephrased: 'record a durable plan for the WHOLE task, broken into steps')",
+   "work_kind": "plan-mutation",
+   "rephrased": true,
+   "query": "Before touching any data, lay down a durable plan for this whole task — the goal, the steps, and which steps depend on which — in one go.",
+   "expected": "my.plan/plan!",
+   "also_accept": [
+    "my.plan/reconcile!"
+   ]
+  },
+  {
+   "id": "db-transact",
+   "source": "inspect-ai:milestone_lift/db DB_MEMORY_CONTRACT (rephrased — contract names db/transact!)",
+   "work_kind": "db-write",
+   "rephrased": true,
+   "query": "Persist these three facts durably in one commit: cache KESTREL weighs 42.5 kg, cache MARMOT 17.0 kg, cache TERN 8.25 kg.",
+   "expected": "seon.db/transact!"
+  },
+  {
+   "id": "db-query",
+   "source": "inspect-ai:milestone_lift/db (rephrased) + agentbench:dbbench aggregation template",
+   "work_kind": "db-read",
+   "rephrased": true,
+   "query": "Computed from the database, not from memory: what is the total weight of all caches strictly heavier than 10 kg?",
+   "expected": "seon.db/query"
+  },
+  {
+   "id": "db-entity",
+   "source": "bfcl_live_simple_0-0-0 re-domained ('retrieve the details for the user with the ID 7890') + seed#12 (pull-by-name does not exist; reconciled to seon.db/entity)",
+   "work_kind": "db-read",
+   "rephrased": false,
+   "query": "Retrieve the full stored record for the agent with id ABi-2606280010.",
+   "expected": "seon.db/entity",
+   "also_accept": [
+    "seon.db/pull"
+   ]
+  },
+  {
+   "id": "db-as-of",
+   "source": "test/seon/db_test.cljs (as-of) + observability workflow",
+   "work_kind": "db-read",
+   "rephrased": false,
+   "query": "Give me the database exactly as it was at transaction 536876000, before the recent writes.",
+   "expected": "seon.db/as-of"
+  },
+  {
+   "id": "db-store-inventory",
+   "source": "test/seon/db_test.cljs (store-inventory); deliberate near-twin of my.kb/inventory",
+   "work_kind": "db-read",
+   "rephrased": false,
+   "query": "Which attributes actually hold data in this store right now?",
+   "expected": "seon.db/store-inventory",
+   "also_accept": [
+    "my.kb/inventory"
+   ],
+   "force_distractors": [
+    "my.kb/inventory"
+   ]
+  },
+  {
+   "id": "db-new-id",
+   "source": "test/seon/db_test.cljs (new-id!)",
+   "work_kind": "db-write",
+   "rephrased": false,
+   "query": "Mint a fresh human-readable id for the entity I am about to create.",
+   "expected": "seon.db/new-id!"
+  },
+  {
+   "id": "schema-register",
+   "source": "inspect-ai:milestone_lift/db (rephrased — contract names schema/register!) + seed#13",
+   "work_kind": "schema",
+   "rephrased": true,
+   "query": "Define a new attribute for a task's due date — it is a timestamp value.",
+   "expected": "seon.schema/register!"
+  },
+  {
+   "id": "schema-in-ns",
+   "source": "test/seon (schema tests): schemas-in-namespace",
+   "work_kind": "schema",
+   "rephrased": false,
+   "query": "What schemas are registered under the my.kb namespace?",
+   "expected": "seon.schema/schemas-in-namespace"
+  },
+  {
+   "id": "kb-remember",
+   "source": "test/my/kb_test.cljs:remember-stores-one-finding-with-parsed-provenance + seed#17",
+   "work_kind": "kb-write",
+   "rephrased": false,
+   "query": "Remember this finding for later: the vendor API rate limit is 60 requests per minute — source is their docs page, high confidence.",
+   "expected": "my.kb/remember"
+  },
+  {
+   "id": "kb-remember-sources",
+   "source": "test/my/kb_test.cljs:remember-sources-write-is-idempotent-upsert",
+   "work_kind": "kb-write",
+   "rephrased": false,
+   "query": "Add these two research papers as source entities, linked to their author entities.",
+   "expected": "my.kb/remember-sources!"
+  },
+  {
+   "id": "kb-source-detail",
+   "source": "test/my/kb_test.cljs:read-recipes-return-expected-shapes + seed#18 (no general my.kb recall fn exists — reconciled)",
+   "work_kind": "kb-read",
+   "rephrased": false,
+   "query": "Pull everything we have stored about the source whose id is vendor-api-docs.",
+   "expected": "my.kb/source-detail",
+   "also_accept": [
+    "my.kb/source-entity"
+   ]
+  },
+  {
+   "id": "kb-forget",
+   "source": "test/my/kb_test.cljs:mutation-recipes-modify-in-place (forget leg)",
+   "work_kind": "kb-write",
+   "rephrased": false,
+   "query": "That source is stale — delete it entirely, its findings should go with it.",
+   "expected": "my.kb/forget-source!"
+  },
+  {
+   "id": "blob-put",
+   "source": "test/my/blob_test.cljs:put-stat-text-roundtrip + seed#14",
+   "work_kind": "blob",
+   "rephrased": false,
+   "query": "Save this long build log somewhere durable that I can read back page by page later.",
+   "expected": "my.blob/put!"
+  },
+  {
+   "id": "blob-text",
+   "source": "test/my/blob_test.cljs:text-pages-with-honest-totals + seed#15",
+   "work_kind": "blob",
+   "rephrased": false,
+   "query": "Read back the first 40 lines of the stored log blob a3f9c1d27b, starting from line 1.",
+   "expected": "my.blob/text",
+   "expected_args": {
+    "hash": "a3f9c1d27b",
+    "from_line": 1,
+    "max_lines": 40
+   }
+  },
+  {
+   "id": "blob-stat",
+   "source": "test/my/blob_test.cljs:put-stat-text-roundtrip + seed#16",
+   "work_kind": "blob",
+   "rephrased": false,
+   "query": "How big is the stored blob a3f9c1d27b in tokens, and when was it written?",
+   "expected": "my.blob/stat",
+   "expected_args": {
+    "hash": "a3f9c1d27b"
+   }
+  },
+  {
+   "id": "blob-concat",
+   "source": "test/my/blob_test.cljs:concat-yields-the-canonical-hash-with-honest-totals",
+   "work_kind": "blob",
+   "rephrased": false,
+   "query": "Join the three blob chunks I just stored into one canonical blob, keeping their order.",
+   "expected": "my.blob/concat!"
+  },
+  {
+   "id": "shell-run",
+   "source": "agentbench:os_interaction dev.json ('How many hidden files are in /home?')",
+   "work_kind": "terminal",
+   "rephrased": false,
+   "query": "Count the hidden files directly in /home — not counting subdirectories — and give me the number.",
+   "expected": "seon.agent.shell/run"
+  },
+  {
+   "id": "shell-run-bg",
+   "source": "terminal-bench:build-linux-kernel-qemu (long build, re-domained)",
+   "work_kind": "terminal",
+   "rephrased": false,
+   "query": "Kick off the full kernel build now — it takes about forty minutes and I want to keep working while it runs.",
+   "expected": "seon.agent.shell/run-bg!"
+  },
+  {
+   "id": "shell-job-output",
+   "source": "terminal-bench long-job pattern + shell job tests",
+   "work_kind": "terminal",
+   "rephrased": false,
+   "query": "Show me what the background build job job-17 has printed since I last checked.",
+   "expected": "seon.agent.shell/job-output",
+   "expected_args": {
+    "job_id": "job-17"
+   }
+  },
+  {
+   "id": "shell-py-run",
+   "source": "terminal-bench:csv-to-parquet (re-domained to a snippet run)",
+   "work_kind": "terminal",
+   "rephrased": false,
+   "query": "Run this short Python snippet for me — it converts /app/data.csv into /app/data.parquet using pandas.",
+   "expected": "seon.agent.shell/py-run"
+  },
+  {
+   "id": "fs-read",
+   "source": "terminal-bench:analyze-access-logs (first move, re-domained)",
+   "work_kind": "files",
+   "rephrased": false,
+   "query": "Open the file /app/access_log so I can see what format its entries are in.",
+   "expected": "seon.agent.fs/read-file",
+   "also_accept": [
+    "seon.agent.fs/view"
+   ]
+  },
+  {
+   "id": "fs-edit",
+   "source": "swe-agent/swe-bench edit workflow (re-domained); near-twin pair with replace!",
+   "work_kind": "files",
+   "rephrased": false,
+   "query": "In src/server.py change the request timeout on line 214 from 30 seconds to 60.",
+   "expected": "seon.agent.fs/edit-file",
+   "also_accept": [
+    "seon.agent.fs/replace!"
+   ]
+  },
+  {
+   "id": "fs-list",
+   "source": "agentbench:os_interaction directory questions",
+   "work_kind": "files",
+   "rephrased": false,
+   "query": "What files are in the /app/project directory? Just the top level, names only.",
+   "expected": "seon.agent.fs/list-dir"
+  },
+  {
+   "id": "fs-write",
+   "source": "terminal-bench:analyze-access-logs (report step: 'create a summary report /app/report.txt')",
+   "work_kind": "files",
+   "rephrased": false,
+   "query": "Create /app/report.txt containing this four-line summary I just composed.",
+   "expected": "seon.agent.fs/write-file"
+  },
+  {
+   "id": "search-grep",
+   "source": "terminal-bench log/text tasks (re-domained)",
+   "work_kind": "search",
+   "rephrased": false,
+   "query": "Find every file under src/ whose contents mention \"timeout\".",
+   "expected": "seon.agent.search/grep",
+   "expected_args": {
+    "pattern": "timeout"
+   }
+  },
+  {
+   "id": "search-grep-graph",
+   "source": "seed#23 reconciled (no dedicated ns-listing fn; grep-graph is the program-graph search)",
+   "work_kind": "search",
+   "rephrased": false,
+   "query": "Search the live program graph for functions whose source mentions \"reconcile\".",
+   "expected": "seon.agent.search/grep-graph",
+   "expected_args": {
+    "pattern": "reconcile"
+   }
+  },
+  {
+   "id": "test-run-ns",
+   "source": "seed#21 + seon.test.runner tests",
+   "work_kind": "testing",
+   "rephrased": false,
+   "query": "Run the my.plan test namespace again — it was failing earlier and I want fresh results.",
+   "expected": "seon.test.runner/run-ns!",
+   "expected_args": {
+    "ns": "my.plan-test"
+   }
+  },
+  {
+   "id": "web-search",
+   "source": "webvoyager:BBC-News re-domained ('Find a report about recent developments in renewable energy')",
+   "work_kind": "web",
+   "rephrased": false,
+   "query": "Find recent reports about renewable energy developments in the UK.",
+   "expected": "seon.agent.web/search"
+  },
+  {
+   "id": "web-fetch",
+   "source": "webvoyager/GAIA_web fetch pattern",
+   "work_kind": "web",
+   "rephrased": false,
+   "query": "Fetch the page at https://example.com/pricing and give me a readable version of it.",
+   "expected": "seon.agent.web/fetch",
+   "expected_args": {
+    "url": "https://example.com/pricing"
+   }
+  },
+  {
+   "id": "msg-user",
+   "source": "inspect-ai:milestone_lift/db (rephrased — contract says 'report the total to your human with message/user')",
+   "work_kind": "messaging",
+   "rephrased": true,
+   "query": "Let my human know the final total came to 59.5 kg.",
+   "expected": "seon.agent.message/user"
+  },
+  {
+   "id": "msg-agent",
+   "source": "seed#22 + tau2 user-turn style",
+   "work_kind": "messaging",
+   "rephrased": false,
+   "query": "Tell the orchestrator agent orc-2606280001 that I am blocked on the schema step.",
+   "expected": "seon.agent.message/agent",
+   "expected_args": {
+    "to_id": "orc-2606280001"
+   }
+  },
+  {
+   "id": "lifecycle-complete",
+   "source": "inspect-ai:milestone_lift/db (rephrased — contract says 'end the task with complete')",
+   "work_kind": "lifecycle",
+   "rephrased": true,
+   "query": "Every step is done and verified — close out this run as finished with a short result summary.",
+   "expected": "seon.agent.lifecycle/complete"
+  },
+  {
+   "id": "canvas-show",
+   "source": "seed#19 reconciled (:seon.render.canvas/content path is my.canvas/show!)",
+   "work_kind": "ui",
+   "rephrased": false,
+   "query": "Put a live view of these results up on my canvas so my human can watch it.",
+   "expected": "my.canvas/show!",
+   "force_distractors": [
+    "my.ui/table"
+   ]
+  },
+  {
+   "id": "ui-table",
+   "source": "test/my/ui_test.cljs:table-mirrors-rows-aligned",
+   "work_kind": "ui",
+   "rephrased": false,
+   "query": "Build a three-column table titled \"Results\" from these row maps, as renderable hiccup.",
+   "expected": "my.ui/table"
+  },
+  {
+   "id": "data-group-sum",
+   "source": "test/my/data_test.cljs:group-sum-tallies-per-group-as-an-envelope",
+   "work_kind": "data",
+   "rephrased": false,
+   "query": "Sum the amount per distinct category across these item maps.",
+   "expected": "my.data/group-sum"
+  },
+  {
+   "id": "skills-load",
+   "source": "test/my/skills_test.cljs (load)",
+   "work_kind": "skills",
+   "rephrased": false,
+   "query": "Load the datahike skill's body into my context.",
+   "expected": "my.skills/load",
+   "expected_args": {
+    "skill_name": "datahike"
+   }
+  },
+  {
+   "id": "embed-search",
+   "source": "test/seon/embed_test.cljs (KNN search)",
+   "work_kind": "search",
+   "rephrased": false,
+   "query": "Semantically search the stored entities for ones about \"connection pooling failures\".",
+   "expected": "seon.embed/search",
+   "also_accept": [
+    "seon.embed/search-pull"
+   ],
+   "force_distractors": [
+    "seon.embed/search-pull"
+   ]
+  },
+  {
+   "id": "autocomplete-rate",
+   "source": "seed#20 (rate! exists — Track A landed)",
+   "work_kind": "curation",
+   "rephrased": false,
+   "query": "Mark the turn tng-2607121430 as a gold example for the suggestion corpus.",
+   "expected": "seon.repl.autocomplete/rate!",
+   "expected_args": {
+    "id": "tng-2607121430"
+   }
+  },
+  {
+   "id": "irr-bfcl-weather",
+   "source": "bfcl_live_irrelevance_666-212-0 (verbatim)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "I need to check weather for tomorrow please.",
+   "expected": null
+  },
+  {
+   "id": "irr-bfcl-music",
+   "source": "bfcl_live_irrelevance_404-86-0 (verbatim)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "play me cha cha cha by käärijä",
+   "expected": null
+  },
+  {
+   "id": "irr-bfcl-email",
+   "source": "bfcl_live_irrelevance_49-2-37 (verbatim)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Can you send to Mom an Email saying we should go out and play if Friday is okay.",
+   "expected": null
+  },
+  {
+   "id": "irr-bfcl-address",
+   "source": "bfcl_live_irrelevance_374-81-35 (verbatim)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Can you provide the address for latitude 37.4224764 and longitude -122.0842499 using the Geocoding API?",
+   "expected": null
+  },
+  {
+   "id": "irr-bfcl-dentist",
+   "source": "bfcl_live_irrelevance_519-157-0 (verbatim)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "I need to change the date of my dentist appointment. Could you please check when it's currently scheduled and move it to November 15?",
+   "expected": null
+  },
+  {
+   "id": "irr-bfcl-london",
+   "source": "bfcl_live_irrelevance_596-191-0 (verbatim)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Will you get me something fun in London, England?",
+   "expected": null
+  },
+  {
+   "id": "irr-bfcl-gcloud",
+   "source": "bfcl_live_irrelevance_548-169-1 (verbatim)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "write api call for creating a google cloud ec2 instacne with a rtx a6000gpu with ubuntu 20.04 LTS",
+   "expected": null
+  },
+  {
+   "id": "irr-bfcl-restock",
+   "source": "bfcl_live_irrelevance_219-34-8 (verbatim, code-switched)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Warna pink kapan restok kak",
+   "expected": null
+  },
+  {
+   "id": "irr-osworld-vlc",
+   "source": "osworld:vlc (GUI preference change — no GUI surface in the fn index)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Make my VLC player window always stay on top of other windows.",
+   "expected": null
+  },
+  {
+   "id": "irr-osworld-calc",
+   "source": "osworld:libreoffice_calc (GUI cell formatting)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "In LibreOffice Calc, set the background of cell A1 to red.",
+   "expected": null
+  },
+  {
+   "id": "irr-osworld-slides",
+   "source": "osworld:libreoffice_impress (GUI slide edit)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "On slide 3 of my presentation, enlarge the title text and center it.",
+   "expected": null
+  },
+  {
+   "id": "irr-osworld-thunderbird",
+   "source": "osworld:thunderbird (mail client GUI)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Set up my Thunderbird so messages from my boss land in a folder called Priority.",
+   "expected": null
+  },
+  {
+   "id": "irr-webarena-cart",
+   "source": "webvoyager:Amazon (interactive cart/checkout — no interactive-web surface)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Add the green Xbox wireless controller to my Amazon cart and check out with my saved card.",
+   "expected": null
+  },
+  {
+   "id": "irr-webarena-booking",
+   "source": "webvoyager:Booking (interactive reservation)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Book me the Mexico hotel deal for December 25-26, two adults, and confirm the reservation.",
+   "expected": null
+  },
+  {
+   "id": "irr-knowledge-capital",
+   "source": "BFCL irrelevance category style (pure knowledge question)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "What is the capital of Australia?",
+   "expected": null
+  },
+  {
+   "id": "irr-knowledge-rsa",
+   "source": "BFCL irrelevance category style (explanation ask)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Explain briefly how RSA public-key encryption works.",
+   "expected": null
+  },
+  {
+   "id": "irr-chat-haiku",
+   "source": "BFCL irrelevance category style (creative ask)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Write me a haiku about autumn rain.",
+   "expected": null
+  },
+  {
+   "id": "irr-chat-joke",
+   "source": "BFCL irrelevance category style (chit-chat)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Tell me a good joke about databases.",
+   "expected": null
+  },
+  {
+   "id": "irr-translate",
+   "source": "BFCL irrelevance category style (translation ask)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Translate 'the build is green' into French.",
+   "expected": null
+  },
+  {
+   "id": "irr-math",
+   "source": "BFCL irrelevance category style (mental math)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "What is 17 times 23?",
+   "expected": null
+  },
+  {
+   "id": "irr-timezone",
+   "source": "BFCL irrelevance category style",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "What time is it right now in Tokyo?",
+   "expected": null
+  },
+  {
+   "id": "irr-recipe",
+   "source": "webvoyager:Allrecipes re-domained to a bare recipe ask (no cooking surface)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Give me a quick recipe for vegetarian lasagna for six people.",
+   "expected": null
+  },
+  {
+   "id": "irr-stock",
+   "source": "bfcl irrelevance style (finance)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Should I buy NVDA stock this week?",
+   "expected": null
+  },
+  {
+   "id": "irr-sing",
+   "source": "generative-agents style social ask",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Sing happy birthday to my daughter Maya.",
+   "expected": null
+  }
+ ]
+}

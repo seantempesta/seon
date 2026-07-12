@@ -1,0 +1,1696 @@
+{
+ "comment": "KT2b base cases — hand-curated, harness-derived (owner directive 2026-07-12). Sources: BFCL v4 live_simple/live_irrelevance phrasing templates re-domained onto the seon fn index; agentbench os_interaction/dbbench; terminal-bench original-tasks; webvoyager tasks; tau2-bench user-turn style; the cljs test suites (call-shape grounding); src-inspect-ai milestone/planning contracts (REPHRASED where the contract literally names the fn — leakage guard); the orchestrator's 24 seeds as fallback overlay. kt2b_cases.json = this file + agy paraphrases (scripts/agy_paraphrase.md documents the run). expected_args are in TRANSLATED param space (snake keys, name-part of the malli keyword).",
+ "cases": [
+  {
+   "id": "plan-step",
+   "source": "test/my/plan_test.cljs:step-stores-a-fully-formed-open-step + seed#3",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Add a plan step titled \"write the rollback fn\" under the parent step dpl-2607121001.",
+   "expected": "my.plan/step!",
+   "expected_args": {
+    "title": "write the rollback fn"
+   }
+  },
+  {
+   "id": "plan-step-p1",
+   "source": "test/my/plan_test.cljs:step-stores-a-fully-formed-open-step + seed#3 (agy paraphrase)",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Under parent step dpl-2607121001, insert a plan step named \"write the rollback fn\".",
+   "expected": "my.plan/step!",
+   "expected_args": {
+    "title": "write the rollback fn"
+   },
+   "paraphrase_of": "plan-step"
+  },
+  {
+   "id": "plan-step-p2",
+   "source": "test/my/plan_test.cljs:step-stores-a-fully-formed-open-step + seed#3 (agy paraphrase)",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Can you put a new step titled \"write the rollback fn\" into the plan as a child of dpl-2607121001?",
+   "expected": "my.plan/step!",
+   "expected_args": {
+    "title": "write the rollback fn"
+   },
+   "paraphrase_of": "plan-step"
+  },
+  {
+   "id": "plan-done",
+   "source": "inspect-ai:planning _LTP_CONTRACT (rephrased) + test:the-store-retrieve-arc-with-resume + seed#1",
+   "work_kind": "plan-mutation",
+   "rephrased": true,
+   "query": "Step kJm-2607121415 is finished and its outcome verified — record its completion.",
+   "expected": "my.plan/done!",
+   "expected_args": {
+    "id": "kJm-2607121415"
+   }
+  },
+  {
+   "id": "plan-done-p1",
+   "source": "inspect-ai:planning _LTP_CONTRACT (rephrased) + test:the-store-retrieve-arc-with-resume + seed#1 (agy paraphrase)",
+   "work_kind": "plan-mutation",
+   "rephrased": true,
+   "query": "Mark step kJm-2607121415 as completed since it has been finished and verified.",
+   "expected": "my.plan/done!",
+   "expected_args": {
+    "id": "kJm-2607121415"
+   },
+   "paraphrase_of": "plan-done"
+  },
+  {
+   "id": "plan-done-p2",
+   "source": "inspect-ai:planning _LTP_CONTRACT (rephrased) + test:the-store-retrieve-arc-with-resume + seed#1 (agy paraphrase)",
+   "work_kind": "plan-mutation",
+   "rephrased": true,
+   "query": "I have completed step kJm-2607121415 and checked the results, so please log it as done.",
+   "expected": "my.plan/done!",
+   "expected_args": {
+    "id": "kJm-2607121415"
+   },
+   "paraphrase_of": "plan-done"
+  },
+  {
+   "id": "plan-active",
+   "source": "test/my/plan_test.cljs:active-sets-the-position-and-demotes-the-previous + seed#2",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Make step dbs-2607120944 the one I am working on right now.",
+   "expected": "my.plan/active!",
+   "expected_args": {
+    "id": "dbs-2607120944"
+   }
+  },
+  {
+   "id": "plan-active-p1",
+   "source": "test/my/plan_test.cljs:active-sets-the-position-and-demotes-the-previous + seed#2 (agy paraphrase)",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Set the active step to dbs-2607120944.",
+   "expected": "my.plan/active!",
+   "expected_args": {
+    "id": "dbs-2607120944"
+   },
+   "paraphrase_of": "plan-active"
+  },
+  {
+   "id": "plan-active-p2",
+   "source": "test/my/plan_test.cljs:active-sets-the-position-and-demotes-the-previous + seed#2 (agy paraphrase)",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Could you update my current focus to step dbs-2607120944?",
+   "expected": "my.plan/active!",
+   "expected_args": {
+    "id": "dbs-2607120944"
+   },
+   "paraphrase_of": "plan-active"
+  },
+  {
+   "id": "plan-needs",
+   "source": "test/my/plan_test.cljs:step-parent-and-needs-structure-and-block-the-queue + seed#4",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Step tst-2607121100 cannot start until step sch-2607121055 is finished — record that dependency.",
+   "expected": "my.plan/needs!",
+   "expected_args": {
+    "id": "tst-2607121100"
+   }
+  },
+  {
+   "id": "plan-needs-p1",
+   "source": "test/my/plan_test.cljs:step-parent-and-needs-structure-and-block-the-queue + seed#4 (agy paraphrase)",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Register a dependency showing tst-2607121100 requires sch-2607121055 to finish first.",
+   "expected": "my.plan/needs!",
+   "expected_args": {
+    "id": "tst-2607121100"
+   },
+   "paraphrase_of": "plan-needs"
+  },
+  {
+   "id": "plan-needs-p2",
+   "source": "test/my/plan_test.cljs:step-parent-and-needs-structure-and-block-the-queue + seed#4 (agy paraphrase)",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Please note down that step tst-2607121100 is waiting on step sch-2607121055 before it can begin.",
+   "expected": "my.plan/needs!",
+   "expected_args": {
+    "id": "tst-2607121100"
+   },
+   "paraphrase_of": "plan-needs"
+  },
+  {
+   "id": "plan-reconcile",
+   "source": "test/my/plan_test.cljs:reconcile-updates-mints-and-drops-in-one-tx + seed#5",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Here is my whole open plan as an edited document — apply it so the stored plan matches this outline.",
+   "expected": "my.plan/reconcile!"
+  },
+  {
+   "id": "plan-reconcile-p1",
+   "source": "test/my/plan_test.cljs:reconcile-updates-mints-and-drops-in-one-tx + seed#5 (agy paraphrase)",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Reconcile the stored plan to match the structure of this edited document.",
+   "expected": "my.plan/reconcile!",
+   "paraphrase_of": "plan-reconcile"
+  },
+  {
+   "id": "plan-reconcile-p2",
+   "source": "test/my/plan_test.cljs:reconcile-updates-mints-and-drops-in-one-tx + seed#5 (agy paraphrase)",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "I've revised the open plan in this document, so could you update the saved plan to reflect these changes?",
+   "expected": "my.plan/reconcile!",
+   "paraphrase_of": "plan-reconcile"
+  },
+  {
+   "id": "plan-next",
+   "source": "test/my/plan_test.cljs:plan-builds-tree-and-deps-and-derives-the-queue + seed#6",
+   "work_kind": "plan-read",
+   "rephrased": false,
+   "query": "Which of my steps should I pick up next?",
+   "expected": "my.plan/next"
+  },
+  {
+   "id": "plan-next-p1",
+   "source": "test/my/plan_test.cljs:plan-builds-tree-and-deps-and-derives-the-queue + seed#6 (agy paraphrase)",
+   "work_kind": "plan-read",
+   "rephrased": false,
+   "query": "Identify the next plan step to execute.",
+   "expected": "my.plan/next",
+   "paraphrase_of": "plan-next"
+  },
+  {
+   "id": "plan-next-p2",
+   "source": "test/my/plan_test.cljs:plan-builds-tree-and-deps-and-derives-the-queue + seed#6 (agy paraphrase)",
+   "work_kind": "plan-read",
+   "rephrased": false,
+   "query": "Can you tell me what task I should work on next?",
+   "expected": "my.plan/next",
+   "paraphrase_of": "plan-next"
+  },
+  {
+   "id": "plan-tree",
+   "source": "test/my/plan_test.cljs:depth-2-rollup + seed#7",
+   "work_kind": "plan-read",
+   "rephrased": false,
+   "query": "Show me my whole plan as a nested structure I can re-plan over.",
+   "expected": "my.plan/tree"
+  },
+  {
+   "id": "plan-tree-p1",
+   "source": "test/my/plan_test.cljs:depth-2-rollup + seed#7 (agy paraphrase)",
+   "work_kind": "plan-read",
+   "rephrased": false,
+   "query": "Display the complete plan as a hierarchical tree for re-planning.",
+   "expected": "my.plan/tree",
+   "paraphrase_of": "plan-tree"
+  },
+  {
+   "id": "plan-tree-p2",
+   "source": "test/my/plan_test.cljs:depth-2-rollup + seed#7 (agy paraphrase)",
+   "work_kind": "plan-read",
+   "rephrased": false,
+   "query": "Could you lay out the entire plan in a nested view so I can adjust the steps?",
+   "expected": "my.plan/tree",
+   "paraphrase_of": "plan-tree"
+  },
+  {
+   "id": "plan-move",
+   "source": "test/my/plan_test.cljs:move-reparents-a-node-in-the-tree + seed#8",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Move the caching step cch-2607120910 under the performance step prf-2607120905.",
+   "expected": "my.plan/move!",
+   "expected_args": {
+    "id": "cch-2607120910"
+   }
+  },
+  {
+   "id": "plan-move-p1",
+   "source": "test/my/plan_test.cljs:move-reparents-a-node-in-the-tree + seed#8 (agy paraphrase)",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Relocate step cch-2607120910 to be a child of step prf-2607120905.",
+   "expected": "my.plan/move!",
+   "expected_args": {
+    "id": "cch-2607120910"
+   },
+   "paraphrase_of": "plan-move"
+  },
+  {
+   "id": "plan-move-p2",
+   "source": "test/my/plan_test.cljs:move-reparents-a-node-in-the-tree + seed#8 (agy paraphrase)",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Would you please shift the caching task cch-2607120910 so that it sits underneath performance step prf-2607120905?",
+   "expected": "my.plan/move!",
+   "expected_args": {
+    "id": "cch-2607120910"
+   },
+   "paraphrase_of": "plan-move"
+  },
+  {
+   "id": "plan-drop",
+   "source": "seed#9 (no harness coverage: destructive subtree removal)",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Delete the abandoned migration step mig-2607111830 and everything under it.",
+   "expected": "my.plan/drop!",
+   "expected_args": {
+    "id": "mig-2607111830"
+   }
+  },
+  {
+   "id": "plan-drop-p1",
+   "source": "seed#9 (no harness coverage: destructive subtree removal) (agy paraphrase)",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Remove step mig-2607111830 along with all of its subtasks.",
+   "expected": "my.plan/drop!",
+   "expected_args": {
+    "id": "mig-2607111830"
+   },
+   "paraphrase_of": "plan-drop"
+  },
+  {
+   "id": "plan-drop-p2",
+   "source": "seed#9 (no harness coverage: destructive subtree removal) (agy paraphrase)",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Please get rid of the migration step mig-2607111830 and any steps nested beneath it, as we've abandoned it.",
+   "expected": "my.plan/drop!",
+   "expected_args": {
+    "id": "mig-2607111830"
+   },
+   "paraphrase_of": "plan-drop"
+  },
+  {
+   "id": "plan-reopen",
+   "source": "test/my/plan_test.cljs:the-store-retrieve-arc (reopen leg) + seed#24",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "I closed step kJm-2607121415 by mistake — open it back up.",
+   "expected": "my.plan/reopen!",
+   "expected_args": {
+    "id": "kJm-2607121415"
+   }
+  },
+  {
+   "id": "plan-reopen-p1",
+   "source": "test/my/plan_test.cljs:the-store-retrieve-arc (reopen leg) + seed#24 (agy paraphrase)",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "Reopen step kJm-2607121415.",
+   "expected": "my.plan/reopen!",
+   "expected_args": {
+    "id": "kJm-2607121415"
+   },
+   "paraphrase_of": "plan-reopen"
+  },
+  {
+   "id": "plan-reopen-p2",
+   "source": "test/my/plan_test.cljs:the-store-retrieve-arc (reopen leg) + seed#24 (agy paraphrase)",
+   "work_kind": "plan-mutation",
+   "rephrased": false,
+   "query": "I accidentally marked step kJm-2607121415 as closed, so could you activate it again?",
+   "expected": "my.plan/reopen!",
+   "expected_args": {
+    "id": "kJm-2607121415"
+   },
+   "paraphrase_of": "plan-reopen"
+  },
+  {
+   "id": "plan-plan",
+   "source": "inspect-ai:planning _LTP_CONTRACT (rephrased: 'record a durable plan for the WHOLE task, broken into steps')",
+   "work_kind": "plan-mutation",
+   "rephrased": true,
+   "query": "Before touching any data, lay down a durable plan for this whole task — the goal, the steps, and which steps depend on which — in one go.",
+   "expected": "my.plan/plan!",
+   "also_accept": [
+    "my.plan/reconcile!"
+   ]
+  },
+  {
+   "id": "plan-plan-p1",
+   "source": "inspect-ai:planning _LTP_CONTRACT (rephrased: 'record a durable plan for the WHOLE task, broken into steps') (agy paraphrase)",
+   "work_kind": "plan-mutation",
+   "rephrased": true,
+   "query": "Initialize a persistent plan detailing the objective, all steps, and their dependencies prior to any data modifications.",
+   "expected": "my.plan/plan!",
+   "also_accept": [
+    "my.plan/reconcile!"
+   ],
+   "paraphrase_of": "plan-plan"
+  },
+  {
+   "id": "plan-plan-p2",
+   "source": "inspect-ai:planning _LTP_CONTRACT (rephrased: 'record a durable plan for the WHOLE task, broken into steps') (agy paraphrase)",
+   "work_kind": "plan-mutation",
+   "rephrased": true,
+   "query": "Let's sketch out a solid plan before we start changing any data; we need to define the main goal, individual steps, and their order of dependency all at once.",
+   "expected": "my.plan/plan!",
+   "also_accept": [
+    "my.plan/reconcile!"
+   ],
+   "paraphrase_of": "plan-plan"
+  },
+  {
+   "id": "db-transact",
+   "source": "inspect-ai:milestone_lift/db DB_MEMORY_CONTRACT (rephrased — contract names db/transact!)",
+   "work_kind": "db-write",
+   "rephrased": true,
+   "query": "Persist these three facts durably in one commit: cache KESTREL weighs 42.5 kg, cache MARMOT 17.0 kg, cache TERN 8.25 kg.",
+   "expected": "seon.db/transact!"
+  },
+  {
+   "id": "db-transact-p1",
+   "source": "inspect-ai:milestone_lift/db DB_MEMORY_CONTRACT (rephrased — contract names db/transact!) (agy paraphrase)",
+   "work_kind": "db-write",
+   "rephrased": true,
+   "query": "Commit these three entries to database: cache KESTREL at 42.5 kg, cache MARMOT at 17.0 kg, and cache TERN at 8.25 kg.",
+   "expected": "seon.db/transact!",
+   "paraphrase_of": "db-transact"
+  },
+  {
+   "id": "db-transact-p2",
+   "source": "inspect-ai:milestone_lift/db DB_MEMORY_CONTRACT (rephrased — contract names db/transact!) (agy paraphrase)",
+   "work_kind": "db-write",
+   "rephrased": true,
+   "query": "Please save these three details in a single transaction: cache KESTREL has a weight of 42.5 kg, cache MARMOT is 17.0 kg, and cache TERN is 8.25 kg.",
+   "expected": "seon.db/transact!",
+   "paraphrase_of": "db-transact"
+  },
+  {
+   "id": "db-query",
+   "source": "inspect-ai:milestone_lift/db (rephrased) + agentbench:dbbench aggregation template",
+   "work_kind": "db-read",
+   "rephrased": true,
+   "query": "Computed from the database, not from memory: what is the total weight of all caches strictly heavier than 10 kg?",
+   "expected": "seon.db/query"
+  },
+  {
+   "id": "db-query-p1",
+   "source": "inspect-ai:milestone_lift/db (rephrased) + agentbench:dbbench aggregation template (agy paraphrase)",
+   "work_kind": "db-read",
+   "rephrased": true,
+   "query": "Query the database to calculate the combined weight of all caches exceeding 10 kg.",
+   "expected": "seon.db/query",
+   "paraphrase_of": "db-query"
+  },
+  {
+   "id": "db-query-p2",
+   "source": "inspect-ai:milestone_lift/db (rephrased) + agentbench:dbbench aggregation template (agy paraphrase)",
+   "work_kind": "db-read",
+   "rephrased": true,
+   "query": "Could you check the database rather than memory to find out the aggregate weight of any caches that are heavier than 10 kg?",
+   "expected": "seon.db/query",
+   "paraphrase_of": "db-query"
+  },
+  {
+   "id": "db-entity",
+   "source": "bfcl_live_simple_0-0-0 re-domained ('retrieve the details for the user with the ID 7890') + seed#12 (pull-by-name does not exist; reconciled to seon.db/entity)",
+   "work_kind": "db-read",
+   "rephrased": false,
+   "query": "Retrieve the full stored record for the agent with id ABi-2606280010.",
+   "expected": "seon.db/entity",
+   "also_accept": [
+    "seon.db/pull"
+   ]
+  },
+  {
+   "id": "db-entity-p1",
+   "source": "bfcl_live_simple_0-0-0 re-domained ('retrieve the details for the user with the ID 7890') + seed#12 (pull-by-name does not exist; reconciled to seon.db/entity) (agy paraphrase)",
+   "work_kind": "db-read",
+   "rephrased": false,
+   "query": "Fetch the complete database record matching agent id ABi-2606280010.",
+   "expected": "seon.db/entity",
+   "also_accept": [
+    "seon.db/pull"
+   ],
+   "paraphrase_of": "db-entity"
+  },
+  {
+   "id": "db-entity-p2",
+   "source": "bfcl_live_simple_0-0-0 re-domained ('retrieve the details for the user with the ID 7890') + seed#12 (pull-by-name does not exist; reconciled to seon.db/entity) (agy paraphrase)",
+   "work_kind": "db-read",
+   "rephrased": false,
+   "query": "Can you pull up all the details we have saved for the agent whose identifier is ABi-2606280010?",
+   "expected": "seon.db/entity",
+   "also_accept": [
+    "seon.db/pull"
+   ],
+   "paraphrase_of": "db-entity"
+  },
+  {
+   "id": "db-as-of",
+   "source": "test/seon/db_test.cljs (as-of) + observability workflow",
+   "work_kind": "db-read",
+   "rephrased": false,
+   "query": "Give me the database exactly as it was at transaction 536876000, before the recent writes.",
+   "expected": "seon.db/as-of"
+  },
+  {
+   "id": "db-as-of-p1",
+   "source": "test/seon/db_test.cljs (as-of) + observability workflow (agy paraphrase)",
+   "work_kind": "db-read",
+   "rephrased": false,
+   "query": "Access the database state at transaction 536876000 prior to subsequent modifications.",
+   "expected": "seon.db/as-of",
+   "paraphrase_of": "db-as-of"
+  },
+  {
+   "id": "db-as-of-p2",
+   "source": "test/seon/db_test.cljs (as-of) + observability workflow (agy paraphrase)",
+   "work_kind": "db-read",
+   "rephrased": false,
+   "query": "I'd like to look at the database at the point of transaction 536876000, right before the latest updates were written.",
+   "expected": "seon.db/as-of",
+   "paraphrase_of": "db-as-of"
+  },
+  {
+   "id": "db-store-inventory",
+   "source": "test/seon/db_test.cljs (store-inventory); deliberate near-twin of my.kb/inventory",
+   "work_kind": "db-read",
+   "rephrased": false,
+   "query": "Which attributes actually hold data in this store right now?",
+   "expected": "seon.db/store-inventory",
+   "also_accept": [
+    "my.kb/inventory"
+   ],
+   "force_distractors": [
+    "my.kb/inventory"
+   ]
+  },
+  {
+   "id": "db-store-inventory-p1",
+   "source": "test/seon/db_test.cljs (store-inventory); deliberate near-twin of my.kb/inventory (agy paraphrase)",
+   "work_kind": "db-read",
+   "rephrased": false,
+   "query": "List all database attributes that currently contain values.",
+   "expected": "seon.db/store-inventory",
+   "also_accept": [
+    "my.kb/inventory"
+   ],
+   "force_distractors": [
+    "my.kb/inventory"
+   ],
+   "paraphrase_of": "db-store-inventory"
+  },
+  {
+   "id": "db-store-inventory-p2",
+   "source": "test/seon/db_test.cljs (store-inventory); deliberate near-twin of my.kb/inventory (agy paraphrase)",
+   "work_kind": "db-read",
+   "rephrased": false,
+   "query": "Can you show me which attributes in the store are currently populated with data?",
+   "expected": "seon.db/store-inventory",
+   "also_accept": [
+    "my.kb/inventory"
+   ],
+   "force_distractors": [
+    "my.kb/inventory"
+   ],
+   "paraphrase_of": "db-store-inventory"
+  },
+  {
+   "id": "db-new-id",
+   "source": "test/seon/db_test.cljs (new-id!)",
+   "work_kind": "db-write",
+   "rephrased": false,
+   "query": "Mint a fresh human-readable id for the entity I am about to create.",
+   "expected": "seon.db/new-id!"
+  },
+  {
+   "id": "db-new-id-p1",
+   "source": "test/seon/db_test.cljs (new-id!) (agy paraphrase)",
+   "work_kind": "db-write",
+   "rephrased": false,
+   "query": "Generate a new human-readable identifier for a upcoming entity.",
+   "expected": "seon.db/new-id!",
+   "paraphrase_of": "db-new-id"
+  },
+  {
+   "id": "db-new-id-p2",
+   "source": "test/seon/db_test.cljs (new-id!) (agy paraphrase)",
+   "work_kind": "db-write",
+   "rephrased": false,
+   "query": "I'm about to create a new entity, so could you generate a friendly id for it?",
+   "expected": "seon.db/new-id!",
+   "paraphrase_of": "db-new-id"
+  },
+  {
+   "id": "schema-register",
+   "source": "inspect-ai:milestone_lift/db (rephrased — contract names schema/register!) + seed#13",
+   "work_kind": "schema",
+   "rephrased": true,
+   "query": "Define a new attribute for a task's due date — it is a timestamp value.",
+   "expected": "seon.schema/register!"
+  },
+  {
+   "id": "schema-register-p1",
+   "source": "inspect-ai:milestone_lift/db (rephrased — contract names schema/register!) + seed#13 (agy paraphrase)",
+   "work_kind": "schema",
+   "rephrased": true,
+   "query": "Register a timestamp attribute to represent task due dates.",
+   "expected": "seon.schema/register!",
+   "paraphrase_of": "schema-register"
+  },
+  {
+   "id": "schema-register-p2",
+   "source": "inspect-ai:milestone_lift/db (rephrased — contract names schema/register!) + seed#13 (agy paraphrase)",
+   "work_kind": "schema",
+   "rephrased": true,
+   "query": "Could you create a new schema attribute for when a task is due, configured as a timestamp?",
+   "expected": "seon.schema/register!",
+   "paraphrase_of": "schema-register"
+  },
+  {
+   "id": "schema-in-ns",
+   "source": "test/seon (schema tests): schemas-in-namespace",
+   "work_kind": "schema",
+   "rephrased": false,
+   "query": "What schemas are registered under the my.kb namespace?",
+   "expected": "seon.schema/schemas-in-namespace"
+  },
+  {
+   "id": "schema-in-ns-p1",
+   "source": "test/seon (schema tests): schemas-in-namespace (agy paraphrase)",
+   "work_kind": "schema",
+   "rephrased": false,
+   "query": "Retrieve all schemas defined within the my.kb namespace.",
+   "expected": "seon.schema/schemas-in-namespace",
+   "paraphrase_of": "schema-in-ns"
+  },
+  {
+   "id": "schema-in-ns-p2",
+   "source": "test/seon (schema tests): schemas-in-namespace (agy paraphrase)",
+   "work_kind": "schema",
+   "rephrased": false,
+   "query": "Can you tell me which schemas have been registered in the my.kb namespace?",
+   "expected": "seon.schema/schemas-in-namespace",
+   "paraphrase_of": "schema-in-ns"
+  },
+  {
+   "id": "kb-remember",
+   "source": "test/my/kb_test.cljs:remember-stores-one-finding-with-parsed-provenance + seed#17",
+   "work_kind": "kb-write",
+   "rephrased": false,
+   "query": "Remember this finding for later: the vendor API rate limit is 60 requests per minute — source is their docs page, high confidence.",
+   "expected": "my.kb/remember"
+  },
+  {
+   "id": "kb-remember-p1",
+   "source": "test/my/kb_test.cljs:remember-stores-one-finding-with-parsed-provenance + seed#17 (agy paraphrase)",
+   "work_kind": "kb-write",
+   "rephrased": false,
+   "query": "Store finding: vendor API rate limit is 60 requests per minute (source: docs page, confidence: high).",
+   "expected": "my.kb/remember",
+   "paraphrase_of": "kb-remember"
+  },
+  {
+   "id": "kb-remember-p2",
+   "source": "test/my/kb_test.cljs:remember-stores-one-finding-with-parsed-provenance + seed#17 (agy paraphrase)",
+   "work_kind": "kb-write",
+   "rephrased": false,
+   "query": "Please save this piece of information for future reference: their vendor API has a rate limit of 60 requests per minute, which I got from their docs page with high confidence.",
+   "expected": "my.kb/remember",
+   "paraphrase_of": "kb-remember"
+  },
+  {
+   "id": "kb-remember-sources",
+   "source": "test/my/kb_test.cljs:remember-sources-write-is-idempotent-upsert",
+   "work_kind": "kb-write",
+   "rephrased": false,
+   "query": "Add these two research papers as source entities, linked to their author entities.",
+   "expected": "my.kb/remember-sources!"
+  },
+  {
+   "id": "kb-remember-sources-p1",
+   "source": "test/my/kb_test.cljs:remember-sources-write-is-idempotent-upsert (agy paraphrase)",
+   "work_kind": "kb-write",
+   "rephrased": false,
+   "query": "Register two research papers as source entities and associate them with their respective authors.",
+   "expected": "my.kb/remember-sources!",
+   "paraphrase_of": "kb-remember-sources"
+  },
+  {
+   "id": "kb-remember-sources-p2",
+   "source": "test/my/kb_test.cljs:remember-sources-write-is-idempotent-upsert (agy paraphrase)",
+   "work_kind": "kb-write",
+   "rephrased": false,
+   "query": "Could you ingest these two research papers as sources and hook them up to the entities representing their authors?",
+   "expected": "my.kb/remember-sources!",
+   "paraphrase_of": "kb-remember-sources"
+  },
+  {
+   "id": "kb-source-detail",
+   "source": "test/my/kb_test.cljs:read-recipes-return-expected-shapes + seed#18 (no general my.kb recall fn exists — reconciled)",
+   "work_kind": "kb-read",
+   "rephrased": false,
+   "query": "Pull everything we have stored about the source whose id is vendor-api-docs.",
+   "expected": "my.kb/source-detail",
+   "also_accept": [
+    "my.kb/source-entity"
+   ]
+  },
+  {
+   "id": "kb-source-detail-p1",
+   "source": "test/my/kb_test.cljs:read-recipes-return-expected-shapes + seed#18 (no general my.kb recall fn exists — reconciled) (agy paraphrase)",
+   "work_kind": "kb-read",
+   "rephrased": false,
+   "query": "Retrieve all saved details for source id vendor-api-docs.",
+   "expected": "my.kb/source-detail",
+   "also_accept": [
+    "my.kb/source-entity"
+   ],
+   "paraphrase_of": "kb-source-detail"
+  },
+  {
+   "id": "kb-source-detail-p2",
+   "source": "test/my/kb_test.cljs:read-recipes-return-expected-shapes + seed#18 (no general my.kb recall fn exists — reconciled) (agy paraphrase)",
+   "work_kind": "kb-read",
+   "rephrased": false,
+   "query": "I need you to fetch all information associated with the source that has the ID vendor-api-docs.",
+   "expected": "my.kb/source-detail",
+   "also_accept": [
+    "my.kb/source-entity"
+   ],
+   "paraphrase_of": "kb-source-detail"
+  },
+  {
+   "id": "kb-forget",
+   "source": "test/my/kb_test.cljs:mutation-recipes-modify-in-place (forget leg)",
+   "work_kind": "kb-write",
+   "rephrased": false,
+   "query": "That source is stale — delete it entirely, its findings should go with it.",
+   "expected": "my.kb/forget-source!"
+  },
+  {
+   "id": "kb-forget-p1",
+   "source": "test/my/kb_test.cljs:mutation-recipes-modify-in-place (forget leg) (agy paraphrase)",
+   "work_kind": "kb-write",
+   "rephrased": false,
+   "query": "Remove the stale source and all associated findings.",
+   "expected": "my.kb/forget-source!",
+   "paraphrase_of": "kb-forget"
+  },
+  {
+   "id": "kb-forget-p2",
+   "source": "test/my/kb_test.cljs:mutation-recipes-modify-in-place (forget leg) (agy paraphrase)",
+   "work_kind": "kb-write",
+   "rephrased": false,
+   "query": "That source has gone out of date, so please delete it completely and clean up any findings linked to it.",
+   "expected": "my.kb/forget-source!",
+   "paraphrase_of": "kb-forget"
+  },
+  {
+   "id": "blob-put",
+   "source": "test/my/blob_test.cljs:put-stat-text-roundtrip + seed#14",
+   "work_kind": "blob",
+   "rephrased": false,
+   "query": "Save this long build log somewhere durable that I can read back page by page later.",
+   "expected": "my.blob/put!"
+  },
+  {
+   "id": "blob-put-p1",
+   "source": "test/my/blob_test.cljs:put-stat-text-roundtrip + seed#14 (agy paraphrase)",
+   "work_kind": "blob",
+   "rephrased": false,
+   "query": "Store this long build log persistently for future paginated retrieval.",
+   "expected": "my.blob/put!",
+   "paraphrase_of": "blob-put"
+  },
+  {
+   "id": "blob-put-p2",
+   "source": "test/my/blob_test.cljs:put-stat-text-roundtrip + seed#14 (agy paraphrase)",
+   "work_kind": "blob",
+   "rephrased": false,
+   "query": "I have a long build log that I need to store safely so I can browse through it page by page later on.",
+   "expected": "my.blob/put!",
+   "paraphrase_of": "blob-put"
+  },
+  {
+   "id": "blob-text",
+   "source": "test/my/blob_test.cljs:text-pages-with-honest-totals + seed#15",
+   "work_kind": "blob",
+   "rephrased": false,
+   "query": "Read back the first 40 lines of the stored log blob a3f9c1d27b, starting from line 1.",
+   "expected": "my.blob/text",
+   "expected_args": {
+    "hash": "a3f9c1d27b",
+    "from_line": 1,
+    "max_lines": 40
+   }
+  },
+  {
+   "id": "blob-text-p1",
+   "source": "test/my/blob_test.cljs:text-pages-with-honest-totals + seed#15 (agy paraphrase)",
+   "work_kind": "blob",
+   "rephrased": false,
+   "query": "Retrieve lines 1 through 40 of blob a3f9c1d27b.",
+   "expected": "my.blob/text",
+   "expected_args": {
+    "hash": "a3f9c1d27b",
+    "from_line": 1,
+    "max_lines": 40
+   },
+   "paraphrase_of": "blob-text"
+  },
+  {
+   "id": "blob-text-p2",
+   "source": "test/my/blob_test.cljs:text-pages-with-honest-totals + seed#15 (agy paraphrase)",
+   "work_kind": "blob",
+   "rephrased": false,
+   "query": "Could you display the first 40 lines of the saved log blob a3f9c1d27b, beginning at line 1?",
+   "expected": "my.blob/text",
+   "expected_args": {
+    "hash": "a3f9c1d27b",
+    "from_line": 1,
+    "max_lines": 40
+   },
+   "paraphrase_of": "blob-text"
+  },
+  {
+   "id": "blob-stat",
+   "source": "test/my/blob_test.cljs:put-stat-text-roundtrip + seed#16",
+   "work_kind": "blob",
+   "rephrased": false,
+   "query": "How big is the stored blob a3f9c1d27b in tokens, and when was it written?",
+   "expected": "my.blob/stat",
+   "expected_args": {
+    "hash": "a3f9c1d27b"
+   }
+  },
+  {
+   "id": "blob-stat-p1",
+   "source": "test/my/blob_test.cljs:put-stat-text-roundtrip + seed#16 (agy paraphrase)",
+   "work_kind": "blob",
+   "rephrased": false,
+   "query": "Get token count and creation timestamp for blob a3f9c1d27b.",
+   "expected": "my.blob/stat",
+   "expected_args": {
+    "hash": "a3f9c1d27b"
+   },
+   "paraphrase_of": "blob-stat"
+  },
+  {
+   "id": "blob-stat-p2",
+   "source": "test/my/blob_test.cljs:put-stat-text-roundtrip + seed#16 (agy paraphrase)",
+   "work_kind": "blob",
+   "rephrased": false,
+   "query": "Can you tell me how many tokens are in the blob a3f9c1d27b and when it was recorded?",
+   "expected": "my.blob/stat",
+   "expected_args": {
+    "hash": "a3f9c1d27b"
+   },
+   "paraphrase_of": "blob-stat"
+  },
+  {
+   "id": "blob-concat",
+   "source": "test/my/blob_test.cljs:concat-yields-the-canonical-hash-with-honest-totals",
+   "work_kind": "blob",
+   "rephrased": false,
+   "query": "Join the three blob chunks I just stored into one canonical blob, keeping their order.",
+   "expected": "my.blob/concat!"
+  },
+  {
+   "id": "blob-concat-p1",
+   "source": "test/my/blob_test.cljs:concat-yields-the-canonical-hash-with-honest-totals (agy paraphrase)",
+   "work_kind": "blob",
+   "rephrased": false,
+   "query": "Concatenate the three recently stored blob chunks in sequence into a single canonical blob.",
+   "expected": "my.blob/concat!",
+   "paraphrase_of": "blob-concat"
+  },
+  {
+   "id": "blob-concat-p2",
+   "source": "test/my/blob_test.cljs:concat-yields-the-canonical-hash-with-honest-totals (agy paraphrase)",
+   "work_kind": "blob",
+   "rephrased": false,
+   "query": "Please combine the three blob chunks I just saved into a single main blob, making sure to preserve their sequence.",
+   "expected": "my.blob/concat!",
+   "paraphrase_of": "blob-concat"
+  },
+  {
+   "id": "shell-run",
+   "source": "agentbench:os_interaction dev.json ('How many hidden files are in /home?')",
+   "work_kind": "terminal",
+   "rephrased": false,
+   "query": "Count the hidden files directly in /home — not counting subdirectories — and give me the number.",
+   "expected": "seon.agent.shell/run"
+  },
+  {
+   "id": "shell-run-p1",
+   "source": "agentbench:os_interaction dev.json ('How many hidden files are in /home?') (agy paraphrase)",
+   "work_kind": "terminal",
+   "rephrased": false,
+   "query": "Count non-directory hidden files directly under /home.",
+   "expected": "seon.agent.shell/run",
+   "paraphrase_of": "shell-run"
+  },
+  {
+   "id": "shell-run-p2",
+   "source": "agentbench:os_interaction dev.json ('How many hidden files are in /home?') (agy paraphrase)",
+   "work_kind": "terminal",
+   "rephrased": false,
+   "query": "Could you check /home and tell me the number of hidden files there, excluding any that are in subfolders?",
+   "expected": "seon.agent.shell/run",
+   "paraphrase_of": "shell-run"
+  },
+  {
+   "id": "shell-run-bg",
+   "source": "terminal-bench:build-linux-kernel-qemu (long build, re-domained)",
+   "work_kind": "terminal",
+   "rephrased": false,
+   "query": "Kick off the full kernel build now — it takes about forty minutes and I want to keep working while it runs.",
+   "expected": "seon.agent.shell/run-bg!"
+  },
+  {
+   "id": "shell-run-bg-p1",
+   "source": "terminal-bench:build-linux-kernel-qemu (long build, re-domained) (agy paraphrase)",
+   "work_kind": "terminal",
+   "rephrased": false,
+   "query": "Start the full kernel build in the background now (takes about forty minutes).",
+   "expected": "seon.agent.shell/run-bg!",
+   "paraphrase_of": "shell-run-bg"
+  },
+  {
+   "id": "shell-run-bg-p2",
+   "source": "terminal-bench:build-linux-kernel-qemu (long build, re-domained) (agy paraphrase)",
+   "work_kind": "terminal",
+   "rephrased": false,
+   "query": "Could you kick off the full kernel build? It will take about forty minutes, and I'd like to keep working while it's running.",
+   "expected": "seon.agent.shell/run-bg!",
+   "paraphrase_of": "shell-run-bg"
+  },
+  {
+   "id": "shell-job-output",
+   "source": "terminal-bench long-job pattern + shell job tests",
+   "work_kind": "terminal",
+   "rephrased": false,
+   "query": "Show me what the background build job job-17 has printed since I last checked.",
+   "expected": "seon.agent.shell/job-output",
+   "expected_args": {
+    "job_id": "job-17"
+   }
+  },
+  {
+   "id": "shell-job-output-p1",
+   "source": "terminal-bench long-job pattern + shell job tests (agy paraphrase)",
+   "work_kind": "terminal",
+   "rephrased": false,
+   "query": "Fetch incremental output for background job job-17.",
+   "expected": "seon.agent.shell/job-output",
+   "expected_args": {
+    "job_id": "job-17"
+   },
+   "paraphrase_of": "shell-job-output"
+  },
+  {
+   "id": "shell-job-output-p2",
+   "source": "terminal-bench long-job pattern + shell job tests (agy paraphrase)",
+   "work_kind": "terminal",
+   "rephrased": false,
+   "query": "Can you show me the latest output that's been printed by the background build job job-17 since I last looked?",
+   "expected": "seon.agent.shell/job-output",
+   "expected_args": {
+    "job_id": "job-17"
+   },
+   "paraphrase_of": "shell-job-output"
+  },
+  {
+   "id": "shell-py-run",
+   "source": "terminal-bench:csv-to-parquet (re-domained to a snippet run)",
+   "work_kind": "terminal",
+   "rephrased": false,
+   "query": "Run this short Python snippet for me — it converts /app/data.csv into /app/data.parquet using pandas.",
+   "expected": "seon.agent.shell/py-run"
+  },
+  {
+   "id": "shell-py-run-p1",
+   "source": "terminal-bench:csv-to-parquet (re-domained to a snippet run) (agy paraphrase)",
+   "work_kind": "terminal",
+   "rephrased": false,
+   "query": "Execute python code to convert /app/data.csv to /app/data.parquet with pandas.",
+   "expected": "seon.agent.shell/py-run",
+   "paraphrase_of": "shell-py-run"
+  },
+  {
+   "id": "shell-py-run-p2",
+   "source": "terminal-bench:csv-to-parquet (re-domained to a snippet run) (agy paraphrase)",
+   "work_kind": "terminal",
+   "rephrased": false,
+   "query": "Would you run this brief Python script to transform /app/data.csv into /app/data.parquet using the pandas library?",
+   "expected": "seon.agent.shell/py-run",
+   "paraphrase_of": "shell-py-run"
+  },
+  {
+   "id": "fs-read",
+   "source": "terminal-bench:analyze-access-logs (first move, re-domained)",
+   "work_kind": "files",
+   "rephrased": false,
+   "query": "Open the file /app/access_log so I can see what format its entries are in.",
+   "expected": "seon.agent.fs/read-file",
+   "also_accept": [
+    "seon.agent.fs/view"
+   ]
+  },
+  {
+   "id": "fs-read-p1",
+   "source": "terminal-bench:analyze-access-logs (first move, re-domained) (agy paraphrase)",
+   "work_kind": "files",
+   "rephrased": false,
+   "query": "Display /app/access_log to inspect its entry format.",
+   "expected": "seon.agent.fs/read-file",
+   "also_accept": [
+    "seon.agent.fs/view"
+   ],
+   "paraphrase_of": "fs-read"
+  },
+  {
+   "id": "fs-read-p2",
+   "source": "terminal-bench:analyze-access-logs (first move, re-domained) (agy paraphrase)",
+   "work_kind": "files",
+   "rephrased": false,
+   "query": "Could you open up the file at /app/access_log so I can check out how the log entries are formatted?",
+   "expected": "seon.agent.fs/read-file",
+   "also_accept": [
+    "seon.agent.fs/view"
+   ],
+   "paraphrase_of": "fs-read"
+  },
+  {
+   "id": "fs-edit",
+   "source": "swe-agent/swe-bench edit workflow (re-domained); near-twin pair with replace!",
+   "work_kind": "files",
+   "rephrased": false,
+   "query": "In src/server.py change the request timeout on line 214 from 30 seconds to 60.",
+   "expected": "seon.agent.fs/edit-file",
+   "also_accept": [
+    "seon.agent.fs/replace!"
+   ]
+  },
+  {
+   "id": "fs-edit-p1",
+   "source": "swe-agent/swe-bench edit workflow (re-domained); near-twin pair with replace! (agy paraphrase)",
+   "work_kind": "files",
+   "rephrased": false,
+   "query": "Modify src/server.py line 214 to update request timeout from 30 to 60.",
+   "expected": "seon.agent.fs/edit-file",
+   "also_accept": [
+    "seon.agent.fs/replace!"
+   ],
+   "paraphrase_of": "fs-edit"
+  },
+  {
+   "id": "fs-edit-p2",
+   "source": "swe-agent/swe-bench edit workflow (re-domained); near-twin pair with replace! (agy paraphrase)",
+   "work_kind": "files",
+   "rephrased": false,
+   "query": "Please go to line 214 of src/server.py and change the request timeout from 30 seconds to 60.",
+   "expected": "seon.agent.fs/edit-file",
+   "also_accept": [
+    "seon.agent.fs/replace!"
+   ],
+   "paraphrase_of": "fs-edit"
+  },
+  {
+   "id": "fs-list",
+   "source": "agentbench:os_interaction directory questions",
+   "work_kind": "files",
+   "rephrased": false,
+   "query": "What files are in the /app/project directory? Just the top level, names only.",
+   "expected": "seon.agent.fs/list-dir"
+  },
+  {
+   "id": "fs-list-p1",
+   "source": "agentbench:os_interaction directory questions (agy paraphrase)",
+   "work_kind": "files",
+   "rephrased": false,
+   "query": "List filenames at the root of /app/project.",
+   "expected": "seon.agent.fs/list-dir",
+   "paraphrase_of": "fs-list"
+  },
+  {
+   "id": "fs-list-p2",
+   "source": "agentbench:os_interaction directory questions (agy paraphrase)",
+   "work_kind": "files",
+   "rephrased": false,
+   "query": "Could you tell me which files are located in /app/project, just listing their names at the top level?",
+   "expected": "seon.agent.fs/list-dir",
+   "paraphrase_of": "fs-list"
+  },
+  {
+   "id": "fs-write",
+   "source": "terminal-bench:analyze-access-logs (report step: 'create a summary report /app/report.txt')",
+   "work_kind": "files",
+   "rephrased": false,
+   "query": "Create /app/report.txt containing this four-line summary I just composed.",
+   "expected": "seon.agent.fs/write-file"
+  },
+  {
+   "id": "fs-write-p1",
+   "source": "terminal-bench:analyze-access-logs (report step: 'create a summary report /app/report.txt') (agy paraphrase)",
+   "work_kind": "files",
+   "rephrased": false,
+   "query": "Write the four-line summary to /app/report.txt.",
+   "expected": "seon.agent.fs/write-file",
+   "paraphrase_of": "fs-write"
+  },
+  {
+   "id": "fs-write-p2",
+   "source": "terminal-bench:analyze-access-logs (report step: 'create a summary report /app/report.txt') (agy paraphrase)",
+   "work_kind": "files",
+   "rephrased": false,
+   "query": "Please create a file at /app/report.txt and put this four-line summary in it.",
+   "expected": "seon.agent.fs/write-file",
+   "paraphrase_of": "fs-write"
+  },
+  {
+   "id": "search-grep",
+   "source": "terminal-bench log/text tasks (re-domained)",
+   "work_kind": "search",
+   "rephrased": false,
+   "query": "Find every file under src/ whose contents mention \"timeout\".",
+   "expected": "seon.agent.search/grep",
+   "expected_args": {
+    "pattern": "timeout"
+   }
+  },
+  {
+   "id": "search-grep-p1",
+   "source": "terminal-bench log/text tasks (re-domained) (agy paraphrase)",
+   "work_kind": "search",
+   "rephrased": false,
+   "query": "Search src/ recursively for files containing the string \"timeout\".",
+   "expected": "seon.agent.search/grep",
+   "expected_args": {
+    "pattern": "timeout"
+   },
+   "paraphrase_of": "search-grep"
+  },
+  {
+   "id": "search-grep-p2",
+   "source": "terminal-bench log/text tasks (re-domained) (agy paraphrase)",
+   "work_kind": "search",
+   "rephrased": false,
+   "query": "Could you search through the src/ directory and locate all files that have the word \"timeout\" in their contents?",
+   "expected": "seon.agent.search/grep",
+   "expected_args": {
+    "pattern": "timeout"
+   },
+   "paraphrase_of": "search-grep"
+  },
+  {
+   "id": "search-grep-graph",
+   "source": "seed#23 reconciled (no dedicated ns-listing fn; grep-graph is the program-graph search)",
+   "work_kind": "search",
+   "rephrased": false,
+   "query": "Search the live program graph for functions whose source mentions \"reconcile\".",
+   "expected": "seon.agent.search/grep-graph",
+   "expected_args": {
+    "pattern": "reconcile"
+   }
+  },
+  {
+   "id": "search-grep-graph-p1",
+   "source": "seed#23 reconciled (no dedicated ns-listing fn; grep-graph is the program-graph search) (agy paraphrase)",
+   "work_kind": "search",
+   "rephrased": false,
+   "query": "Locate program graph functions containing the term \"reconcile\" in their source code.",
+   "expected": "seon.agent.search/grep-graph",
+   "expected_args": {
+    "pattern": "reconcile"
+   },
+   "paraphrase_of": "search-grep-graph"
+  },
+  {
+   "id": "search-grep-graph-p2",
+   "source": "seed#23 reconciled (no dedicated ns-listing fn; grep-graph is the program-graph search) (agy paraphrase)",
+   "work_kind": "search",
+   "rephrased": false,
+   "query": "Can you scan the running program graph to find any functions where the source text mentions \"reconcile\"?",
+   "expected": "seon.agent.search/grep-graph",
+   "expected_args": {
+    "pattern": "reconcile"
+   },
+   "paraphrase_of": "search-grep-graph"
+  },
+  {
+   "id": "test-run-ns",
+   "source": "seed#21 + seon.test.runner tests",
+   "work_kind": "testing",
+   "rephrased": false,
+   "query": "Run the my.plan test namespace again — it was failing earlier and I want fresh results.",
+   "expected": "seon.test.runner/run-ns!",
+   "expected_args": {
+    "ns": "my.plan-test"
+   }
+  },
+  {
+   "id": "web-search",
+   "source": "webvoyager:BBC-News re-domained ('Find a report about recent developments in renewable energy')",
+   "work_kind": "web",
+   "rephrased": false,
+   "query": "Find recent reports about renewable energy developments in the UK.",
+   "expected": "seon.agent.web/search"
+  },
+  {
+   "id": "web-search-p1",
+   "source": "webvoyager:BBC-News re-domained ('Find a report about recent developments in renewable energy') (agy paraphrase)",
+   "work_kind": "web",
+   "rephrased": false,
+   "query": "Search online for recent updates on UK renewable energy developments.",
+   "expected": "seon.agent.web/search",
+   "paraphrase_of": "web-search"
+  },
+  {
+   "id": "web-search-p2",
+   "source": "webvoyager:BBC-News re-domained ('Find a report about recent developments in renewable energy') (agy paraphrase)",
+   "work_kind": "web",
+   "rephrased": false,
+   "query": "Can you do a web search for latest articles or reports concerning renewable energy progress in the UK?",
+   "expected": "seon.agent.web/search",
+   "paraphrase_of": "web-search"
+  },
+  {
+   "id": "web-fetch",
+   "source": "webvoyager/GAIA_web fetch pattern",
+   "work_kind": "web",
+   "rephrased": false,
+   "query": "Fetch the page at https://example.com/pricing and give me a readable version of it.",
+   "expected": "seon.agent.web/fetch",
+   "expected_args": {
+    "url": "https://example.com/pricing"
+   }
+  },
+  {
+   "id": "web-fetch-p1",
+   "source": "webvoyager/GAIA_web fetch pattern (agy paraphrase)",
+   "work_kind": "web",
+   "rephrased": false,
+   "query": "Retrieve and format content from https://example.com/pricing.",
+   "expected": "seon.agent.web/fetch",
+   "expected_args": {
+    "url": "https://example.com/pricing"
+   },
+   "paraphrase_of": "web-fetch"
+  },
+  {
+   "id": "web-fetch-p2",
+   "source": "webvoyager/GAIA_web fetch pattern (agy paraphrase)",
+   "work_kind": "web",
+   "rephrased": false,
+   "query": "Please go to https://example.com/pricing and show me what's on that page in a format that's easy to read.",
+   "expected": "seon.agent.web/fetch",
+   "expected_args": {
+    "url": "https://example.com/pricing"
+   },
+   "paraphrase_of": "web-fetch"
+  },
+  {
+   "id": "msg-user",
+   "source": "inspect-ai:milestone_lift/db (rephrased — contract says 'report the total to your human with message/user')",
+   "work_kind": "messaging",
+   "rephrased": true,
+   "query": "Let my human know the final total came to 59.5 kg.",
+   "expected": "seon.agent.message/user"
+  },
+  {
+   "id": "msg-user-p1",
+   "source": "inspect-ai:milestone_lift/db (rephrased — contract says 'report the total to your human with message/user') (agy paraphrase)",
+   "work_kind": "messaging",
+   "rephrased": true,
+   "query": "Notify the user that the final weight is 59.5 kg.",
+   "expected": "seon.agent.message/user",
+   "paraphrase_of": "msg-user"
+  },
+  {
+   "id": "msg-user-p2",
+   "source": "inspect-ai:milestone_lift/db (rephrased — contract says 'report the total to your human with message/user') (agy paraphrase)",
+   "work_kind": "messaging",
+   "rephrased": true,
+   "query": "Could you send a message to my user letting them know that the final sum was 59.5 kg?",
+   "expected": "seon.agent.message/user",
+   "paraphrase_of": "msg-user"
+  },
+  {
+   "id": "msg-agent",
+   "source": "seed#22 + tau2 user-turn style",
+   "work_kind": "messaging",
+   "rephrased": false,
+   "query": "Tell the orchestrator agent orc-2606280001 that I am blocked on the schema step.",
+   "expected": "seon.agent.message/agent",
+   "expected_args": {
+    "to_id": "orc-2606280001"
+   }
+  },
+  {
+   "id": "msg-agent-p1",
+   "source": "seed#22 + tau2 user-turn style (agy paraphrase)",
+   "work_kind": "messaging",
+   "rephrased": false,
+   "query": "Inform agent orc-2606280001 that schema step is blocking progress.",
+   "expected": "seon.agent.message/agent",
+   "expected_args": {
+    "to_id": "orc-2606280001"
+   },
+   "paraphrase_of": "msg-agent"
+  },
+  {
+   "id": "msg-agent-p2",
+   "source": "seed#22 + tau2 user-turn style (agy paraphrase)",
+   "work_kind": "messaging",
+   "rephrased": false,
+   "query": "Please let the orchestrator agent orc-2606280001 know that I'm currently stuck on the schema step.",
+   "expected": "seon.agent.message/agent",
+   "expected_args": {
+    "to_id": "orc-2606280001"
+   },
+   "paraphrase_of": "msg-agent"
+  },
+  {
+   "id": "lifecycle-complete",
+   "source": "inspect-ai:milestone_lift/db (rephrased — contract says 'end the task with complete')",
+   "work_kind": "lifecycle",
+   "rephrased": true,
+   "query": "Every step is done and verified — close out this run as finished with a short result summary.",
+   "expected": "seon.agent.lifecycle/complete"
+  },
+  {
+   "id": "lifecycle-complete-p1",
+   "source": "inspect-ai:milestone_lift/db (rephrased — contract says 'end the task with complete') (agy paraphrase)",
+   "work_kind": "lifecycle",
+   "rephrased": true,
+   "query": "Terminate current run as successful and provide a brief summary of results.",
+   "expected": "seon.agent.lifecycle/complete",
+   "paraphrase_of": "lifecycle-complete"
+  },
+  {
+   "id": "lifecycle-complete-p2",
+   "source": "inspect-ai:milestone_lift/db (rephrased — contract says 'end the task with complete') (agy paraphrase)",
+   "work_kind": "lifecycle",
+   "rephrased": true,
+   "query": "All the steps have completed successfully, so let's mark this run as finished and write up a quick summary of what was achieved.",
+   "expected": "seon.agent.lifecycle/complete",
+   "paraphrase_of": "lifecycle-complete"
+  },
+  {
+   "id": "canvas-show",
+   "source": "seed#19 reconciled (:seon.render.canvas/content path is my.canvas/show!)",
+   "work_kind": "ui",
+   "rephrased": false,
+   "query": "Put a live view of these results up on my canvas so my human can watch it.",
+   "expected": "my.canvas/show!",
+   "force_distractors": [
+    "my.ui/table"
+   ]
+  },
+  {
+   "id": "canvas-show-p1",
+   "source": "seed#19 reconciled (:seon.render.canvas/content path is my.canvas/show!) (agy paraphrase)",
+   "work_kind": "ui",
+   "rephrased": false,
+   "query": "Display a live feed of these results on the canvas.",
+   "expected": "my.canvas/show!",
+   "force_distractors": [
+    "my.ui/table"
+   ],
+   "paraphrase_of": "canvas-show"
+  },
+  {
+   "id": "canvas-show-p2",
+   "source": "seed#19 reconciled (:seon.render.canvas/content path is my.canvas/show!) (agy paraphrase)",
+   "work_kind": "ui",
+   "rephrased": false,
+   "query": "Could you post a real-time view of these outcomes on my canvas for the user to monitor?",
+   "expected": "my.canvas/show!",
+   "force_distractors": [
+    "my.ui/table"
+   ],
+   "paraphrase_of": "canvas-show"
+  },
+  {
+   "id": "ui-table",
+   "source": "test/my/ui_test.cljs:table-mirrors-rows-aligned",
+   "work_kind": "ui",
+   "rephrased": false,
+   "query": "Build a three-column table titled \"Results\" from these row maps, as renderable hiccup.",
+   "expected": "my.ui/table"
+  },
+  {
+   "id": "ui-table-p1",
+   "source": "test/my/ui_test.cljs:table-mirrors-rows-aligned (agy paraphrase)",
+   "work_kind": "ui",
+   "rephrased": false,
+   "query": "Generate a three-column hiccup table named \"Results\" using the provided row maps.",
+   "expected": "my.ui/table",
+   "paraphrase_of": "ui-table"
+  },
+  {
+   "id": "ui-table-p2",
+   "source": "test/my/ui_test.cljs:table-mirrors-rows-aligned (agy paraphrase)",
+   "work_kind": "ui",
+   "rephrased": false,
+   "query": "Can you take these row maps and construct a 3-column table with the title \"Results\" in renderable hiccup format?",
+   "expected": "my.ui/table",
+   "paraphrase_of": "ui-table"
+  },
+  {
+   "id": "data-group-sum",
+   "source": "test/my/data_test.cljs:group-sum-tallies-per-group-as-an-envelope",
+   "work_kind": "data",
+   "rephrased": false,
+   "query": "Sum the amount per distinct category across these item maps.",
+   "expected": "my.data/group-sum"
+  },
+  {
+   "id": "data-group-sum-p1",
+   "source": "test/my/data_test.cljs:group-sum-tallies-per-group-as-an-envelope (agy paraphrase)",
+   "work_kind": "data",
+   "rephrased": false,
+   "query": "Aggregate amounts by category across the given item maps.",
+   "expected": "my.data/group-sum",
+   "paraphrase_of": "data-group-sum"
+  },
+  {
+   "id": "data-group-sum-p2",
+   "source": "test/my/data_test.cljs:group-sum-tallies-per-group-as-an-envelope (agy paraphrase)",
+   "work_kind": "data",
+   "rephrased": false,
+   "query": "Could you group these item maps by category and calculate the total amount for each one?",
+   "expected": "my.data/group-sum",
+   "paraphrase_of": "data-group-sum"
+  },
+  {
+   "id": "skills-load",
+   "source": "test/my/skills_test.cljs (load)",
+   "work_kind": "skills",
+   "rephrased": false,
+   "query": "Load the datahike skill's body into my context.",
+   "expected": "my.skills/load",
+   "expected_args": {
+    "skill_name": "datahike"
+   }
+  },
+  {
+   "id": "skills-load-p1",
+   "source": "test/my/skills_test.cljs (load) (agy paraphrase)",
+   "work_kind": "skills",
+   "rephrased": false,
+   "query": "Import datahike skill implementation into context.",
+   "expected": "my.skills/load",
+   "expected_args": {
+    "skill_name": "datahike"
+   },
+   "paraphrase_of": "skills-load"
+  },
+  {
+   "id": "skills-load-p2",
+   "source": "test/my/skills_test.cljs (load) (agy paraphrase)",
+   "work_kind": "skills",
+   "rephrased": false,
+   "query": "Could you please load the content of the datahike skill into my active context?",
+   "expected": "my.skills/load",
+   "expected_args": {
+    "skill_name": "datahike"
+   },
+   "paraphrase_of": "skills-load"
+  },
+  {
+   "id": "embed-search",
+   "source": "test/seon/embed_test.cljs (KNN search)",
+   "work_kind": "search",
+   "rephrased": false,
+   "query": "Semantically search the stored entities for ones about \"connection pooling failures\".",
+   "expected": "seon.embed/search",
+   "also_accept": [
+    "seon.embed/search-pull"
+   ],
+   "force_distractors": [
+    "seon.embed/search-pull"
+   ]
+  },
+  {
+   "id": "embed-search-p1",
+   "source": "test/seon/embed_test.cljs (KNN search) (agy paraphrase)",
+   "work_kind": "search",
+   "rephrased": false,
+   "query": "Perform semantic search over stored entities matching \"connection pooling failures\".",
+   "expected": "seon.embed/search",
+   "also_accept": [
+    "seon.embed/search-pull"
+   ],
+   "force_distractors": [
+    "seon.embed/search-pull"
+   ],
+   "paraphrase_of": "embed-search"
+  },
+  {
+   "id": "embed-search-p2",
+   "source": "test/seon/embed_test.cljs (KNN search) (agy paraphrase)",
+   "work_kind": "search",
+   "rephrased": false,
+   "query": "Can you search through the saved entities for any that are conceptually related to \"connection pooling failures\"?",
+   "expected": "seon.embed/search",
+   "also_accept": [
+    "seon.embed/search-pull"
+   ],
+   "force_distractors": [
+    "seon.embed/search-pull"
+   ],
+   "paraphrase_of": "embed-search"
+  },
+  {
+   "id": "autocomplete-rate",
+   "source": "seed#20 (rate! exists — Track A landed)",
+   "work_kind": "curation",
+   "rephrased": false,
+   "query": "Mark the turn tng-2607121430 as a gold example for the suggestion corpus.",
+   "expected": "seon.repl.autocomplete/rate!",
+   "expected_args": {
+    "id": "tng-2607121430"
+   }
+  },
+  {
+   "id": "autocomplete-rate-p1",
+   "source": "seed#20 (rate! exists — Track A landed) (agy paraphrase)",
+   "work_kind": "curation",
+   "rephrased": false,
+   "query": "Register turn tng-2607121430 as a gold standard example in the suggestion database.",
+   "expected": "seon.repl.autocomplete/rate!",
+   "expected_args": {
+    "id": "tng-2607121430"
+   },
+   "paraphrase_of": "autocomplete-rate"
+  },
+  {
+   "id": "autocomplete-rate-p2",
+   "source": "seed#20 (rate! exists — Track A landed) (agy paraphrase)",
+   "work_kind": "curation",
+   "rephrased": false,
+   "query": "Could you flag the conversation turn tng-2607121430 as a gold example to be included in our suggestion corpus?",
+   "expected": "seon.repl.autocomplete/rate!",
+   "expected_args": {
+    "id": "tng-2607121430"
+   },
+   "paraphrase_of": "autocomplete-rate"
+  },
+  {
+   "id": "irr-bfcl-weather",
+   "source": "bfcl_live_irrelevance_666-212-0 (verbatim)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "I need to check weather for tomorrow please.",
+   "expected": null
+  },
+  {
+   "id": "irr-bfcl-music",
+   "source": "bfcl_live_irrelevance_404-86-0 (verbatim)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "play me cha cha cha by käärijä",
+   "expected": null
+  },
+  {
+   "id": "irr-bfcl-email",
+   "source": "bfcl_live_irrelevance_49-2-37 (verbatim)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Can you send to Mom an Email saying we should go out and play if Friday is okay.",
+   "expected": null
+  },
+  {
+   "id": "irr-bfcl-address",
+   "source": "bfcl_live_irrelevance_374-81-35 (verbatim)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Can you provide the address for latitude 37.4224764 and longitude -122.0842499 using the Geocoding API?",
+   "expected": null
+  },
+  {
+   "id": "irr-bfcl-dentist",
+   "source": "bfcl_live_irrelevance_519-157-0 (verbatim)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "I need to change the date of my dentist appointment. Could you please check when it's currently scheduled and move it to November 15?",
+   "expected": null
+  },
+  {
+   "id": "irr-bfcl-london",
+   "source": "bfcl_live_irrelevance_596-191-0 (verbatim)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Will you get me something fun in London, England?",
+   "expected": null
+  },
+  {
+   "id": "irr-bfcl-gcloud",
+   "source": "bfcl_live_irrelevance_548-169-1 (verbatim)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "write api call for creating a google cloud ec2 instacne with a rtx a6000gpu with ubuntu 20.04 LTS",
+   "expected": null
+  },
+  {
+   "id": "irr-bfcl-restock",
+   "source": "bfcl_live_irrelevance_219-34-8 (verbatim, code-switched)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Warna pink kapan restok kak",
+   "expected": null
+  },
+  {
+   "id": "irr-osworld-vlc",
+   "source": "osworld:vlc (GUI preference change — no GUI surface in the fn index)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Make my VLC player window always stay on top of other windows.",
+   "expected": null
+  },
+  {
+   "id": "irr-osworld-calc",
+   "source": "osworld:libreoffice_calc (GUI cell formatting)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "In LibreOffice Calc, set the background of cell A1 to red.",
+   "expected": null
+  },
+  {
+   "id": "irr-osworld-slides",
+   "source": "osworld:libreoffice_impress (GUI slide edit)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "On slide 3 of my presentation, enlarge the title text and center it.",
+   "expected": null
+  },
+  {
+   "id": "irr-osworld-thunderbird",
+   "source": "osworld:thunderbird (mail client GUI)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Set up my Thunderbird so messages from my boss land in a folder called Priority.",
+   "expected": null
+  },
+  {
+   "id": "irr-webarena-cart",
+   "source": "webvoyager:Amazon (interactive cart/checkout — no interactive-web surface)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Add the green Xbox wireless controller to my Amazon cart and check out with my saved card.",
+   "expected": null
+  },
+  {
+   "id": "irr-webarena-booking",
+   "source": "webvoyager:Booking (interactive reservation)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Book me the Mexico hotel deal for December 25-26, two adults, and confirm the reservation.",
+   "expected": null
+  },
+  {
+   "id": "irr-knowledge-capital",
+   "source": "BFCL irrelevance category style (pure knowledge question)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "What is the capital of Australia?",
+   "expected": null
+  },
+  {
+   "id": "irr-knowledge-rsa",
+   "source": "BFCL irrelevance category style (explanation ask)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Explain briefly how RSA public-key encryption works.",
+   "expected": null
+  },
+  {
+   "id": "irr-chat-haiku",
+   "source": "BFCL irrelevance category style (creative ask)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Write me a haiku about autumn rain.",
+   "expected": null
+  },
+  {
+   "id": "irr-chat-joke",
+   "source": "BFCL irrelevance category style (chit-chat)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Tell me a good joke about databases.",
+   "expected": null
+  },
+  {
+   "id": "irr-translate",
+   "source": "BFCL irrelevance category style (translation ask)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Translate 'the build is green' into French.",
+   "expected": null
+  },
+  {
+   "id": "irr-math",
+   "source": "BFCL irrelevance category style (mental math)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "What is 17 times 23?",
+   "expected": null
+  },
+  {
+   "id": "irr-timezone",
+   "source": "BFCL irrelevance category style",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "What time is it right now in Tokyo?",
+   "expected": null
+  },
+  {
+   "id": "irr-recipe",
+   "source": "webvoyager:Allrecipes re-domained to a bare recipe ask (no cooking surface)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Give me a quick recipe for vegetarian lasagna for six people.",
+   "expected": null
+  },
+  {
+   "id": "irr-stock",
+   "source": "bfcl irrelevance style (finance)",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Should I buy NVDA stock this week?",
+   "expected": null
+  },
+  {
+   "id": "irr-sing",
+   "source": "generative-agents style social ask",
+   "work_kind": "irrelevance",
+   "rephrased": false,
+   "query": "Sing happy birthday to my daughter Maya.",
+   "expected": null
+  }
+ ]
+}
