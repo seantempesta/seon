@@ -347,6 +347,29 @@ Held/later: multi-agent decomposition as its own family (subagents
 exercise rides families 2/4 first), security/exploit (owner call),
 GUI/browser (no surface).
 
+**The scenario pipeline (owner + orchestrator, 2026-07-12).** One
+uniform shape for every mined-or-authored scenario: **Mine** (bench
+tasks + self-authored families) → **Convert** to a scenario CARD —
+data with a registered shape: `::goal` (user words,
+leakage-guarded), `::setup` (value-tier transacts or workspace
+assets), `::oracle` (runnable check; becomes the plan's `::expect`),
+`::tier` (:value | :cluster), `::family`, `::grounding`
+(reference-code pointers), `::provenance` (bench/task-id/license).
+Conversion is bulk agent-work behind a **falsifiability gate**: setup
+applies ∧ oracle runs ∧ oracle FAILS on the untouched world — so
+conversion itself is oracled and spot-curated, not hand-written. →
+**Execute** in three ISOLATED modes: hand-held (first of each
+family), frontier-driven (Muse/DeepSeek — NEVER shown the bridge
+output; unbiased plans, clean gold), bridge probe (stock needle →
+ordered FLAT call vector → reconstructed Clojure — measurement only).
+→ **Mint + harvest** (gold pairs with kind/coverage stamps,
+correction pairs, gap reports, keeper promotion, a run ledger).
+Cards live under src-inspect-ai's dataset discipline (freeze/lock —
+held-out honesty) with two sanctioned consumers: REPL data-gen runs
+and inspect-ai eval tasks. **v0 target grammar note**: the bridge's
+native output is ordered flat single calls — gold targets prefer that
+shape; nesting/chaining deferred (results by re-reference).
+
 **Keepers are promoted (owner, 2026-07-12).** A scenario run is not
 done when the task completes — it is done when its keepers are
 harvested: tools/fns that earned their keep are PROMOTED to real
