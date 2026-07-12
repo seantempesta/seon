@@ -39,6 +39,9 @@
               (is (str/includes? s "DUAL-HTML"))
               (is (not (str/includes? s "AI-ONLY-TEXT")))
               (is (str/includes? s "data-agent-primary=\"context-dual\""))
+              (testing "the global new-agent action avoids unsupported modal APIs"
+                (is (str/includes? s "fetch(&#39;/agents/new&#39;"))
+                (is (not (str/includes? s "prompt("))))
               (testing "the focused surface is reactively omitted from the rail"
                 (is (str/includes? s
                       "data-show=\"$selected !== &#39;context-dual&#39;\""))

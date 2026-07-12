@@ -28,8 +28,8 @@
    On the morphed app views the header rides inside `#app-view`, so every
    commit re-renders it and the stats tick LIVE. On the server-rendered
    `/data` and `/debug` pages it is a request-time snapshot. The `+ new
-   agent` button uses an inline `prompt()` for the optional purpose (no
-   persistent input that a live morph would clobber)."
+   agent` button creates immediately without a modal; the roster page owns the
+   optional-purpose input outside its live morph target."
   (:require
     [seon.agent.ctx.usage :as usage]
     [seon.db :as db]
@@ -186,24 +186,21 @@
         [:span {:class "text-text-500"} "erroring"]])]))
 
 (def ^:private new-agent-onclick
-  "Inline new-agent action: prompt for an optional purpose, POST `/agents/new`
-   (the same same-origin-gated door the roster bar uses), then SWITCH to the
-   new `/agent/{id}` on the id body. Inline JS (not datastar `@post`) because
-   the response is the new id we must READ + navigate to. Errors land in the
-   button text — never swallowed. No persistent input → nothing for a live
-   `#app-view` morph to clobber."
+  "Inline new-agent action: POST `/agents/new`, then switch to the new agent.
+
+   The universal header creates an unpurposed agent immediately. The roster's
+   outside-the-morph form is the one place for an optional purpose. Inline JS
+   (not Datastar `@post`) reads the returned id before navigating. Failures
+   stay visible in the button instead of depending on modal browser APIs."
   (str "var b=this;"
-       "var p=window.prompt('purpose for the new agent (optional)','');"
-       "if(p===null)return;"
        "b.disabled=true;b.textContent='booting…';"
-       "var body=p&&p.trim()?'purpose='+encodeURIComponent(p.trim()):'';"
        "fetch('/agents/new',{method:'POST',"
-       "headers:{'Content-Type':'application/x-www-form-urlencoded'},body:body})"
+       "headers:{'Content-Type':'application/x-www-form-urlencoded'},body:''})"
        ".then(function(r){if(r.ok){r.text().then(function(id){"
        "window.location='/agent/'+id.trim();});}"
        "else{r.text().then(function(t){b.disabled=false;"
-       "b.textContent='+ new agent';alert('create failed: '+(t||('HTTP '+r.status)));});}})"
-       ".catch(function(e){b.disabled=false;b.textContent='+ new agent';alert('create failed: '+e);});"))
+       "b.textContent='✗ '+(t||('HTTP '+r.status));});}})"
+       ".catch(function(e){b.disabled=false;b.textContent='✗ '+e;});"))
 
 (defn- actions-chunk
   "The right-side action cluster: `+ new agent`, the home + data links, and a

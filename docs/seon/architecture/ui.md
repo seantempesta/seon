@@ -206,7 +206,9 @@ re-derived); throughput; datom count (links `/data`) + `SEON_EMBED` on/off; and 
 (`/`, `/agents`, `/agent/{id}`) it lives INSIDE `#app-view`, so it rides the live
 morph and the stats tick on every commit; on the server-rendered `/data` +
 `/agent/{id}/debug` it is a request-time snapshot. The `+ new agent` button POSTs
-the same `/agents/new` create door and SWITCHES to the new `/agent/{id}`.
+the same `/agents/new` create door with an empty purpose and SWITCHES to the new
+`/agent/{id}`. It creates immediately without a browser modal; the `/agents`
+roster's outside-the-morph form owns optional-purpose entry.
 
 **Throughput is honest.** No per-turn duration is stored, so an instantaneous
 tokens/sec is not derivable. `header/throughput` instead reports a ROLLING rate —

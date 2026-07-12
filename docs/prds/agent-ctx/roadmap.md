@@ -6,6 +6,16 @@ tags: [prd, agent]
 
 # agent-ctx roadmap — we are here → the target
 
+## Universal new-agent action (2026-07-12)
+
+The global header's `+ new agent` action no longer calls `window.prompt`, which
+the in-app browser rejects before any request reaches the server. It now POSTs
+an empty purpose directly through the existing same-origin `/agents/new` door,
+shows failures in the button, and navigates on the returned id. Optional-purpose
+entry remains the roster's outside-the-morph form. Live proof from the shared
+header on the debug page created `opb-2607120712` and navigated to its agent view
+without a new console error.
+
 ## Cold-resume supervisor hardening (2026-07-12)
 
 A machine-reboot drive exposed two lifecycle failures in `bin/seon`: `nohup`
