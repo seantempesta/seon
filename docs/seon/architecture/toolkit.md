@@ -393,7 +393,8 @@ script, a `git` query — and get `{exit out err}` back as data.
    (read :seon.agent.shell/exit yourself); ok? false is reserved for COULD
    NOT RUN AT ALL. SIGTERM at timeout-ms. Output is FULL data (no function-level
    token cap — display economy is the render layer's, via result/<id>); the
-   only bound is a ~2MB/stream RAM ceiling (::truncated? + hint → run-bg!).
+   only bound is a private per-stream RAM ceiling (::truncated? + hint →
+   run-bg!).
    The cwd is gated by the seon.agent.fs allowlist; default-deny until the
    host grants SEON_SHELL."
   {:malli/schema [:=> [:cat :seon.agent.shell/run-request] :seon.agent.shell/run-response]}
@@ -413,7 +414,7 @@ python source string.
 **Background jobs** (`run-bg!` / `job-status` / `job-output` / `job-stop!` /
 `list-jobs`): for work that outlasts `run`'s timeout (a bench test run, a
 build). `run-bg!` returns a `::job-id` immediately; the child's stdout/stderr
-accumulate in a VOLATILE globalThis table (never datoms, ~2MB/stream RAM cap,
+accumulate in a volatile process table (never datoms, privately RAM-capped,
 oldest finished pruned, lost on pod restart — honest, the process dies too).
 `job-output` reads the full-so-far stream or only-new via a `::since` char
 cursor. The derived `:jobs` context section renders running + recent jobs
@@ -444,7 +445,9 @@ WebFetch class); no JS rendering (a browser tier is a later tool).
 **Floor:** `seon.agent.web` (+ `.internal`) — built-in `fetch`/undici transport,
 readability→markdown extraction (fetch), and raw-REST Gemini "Grounding with
 Google Search" (search). Both ride the SAME `SEON_WEB` host grant (default-deny;
-inspect with `grants`) and the same errors-as-values envelope.
+inspect with `grants`) and the same errors-as-values envelope. The streaming
+RAM guard is private; callers control decoded display size only through the
+token-denominated preview budget.
 
 ```clojure
 (defn ^:async fetch
@@ -525,10 +528,12 @@ as a block is still one `install!` ([[ui]]).
 fn I just (re)defined pass its `:test`?" — and score an edit the way every serious
 benchmark does: it fixed the broken case AND didn't break the working ones.
 
-**Floor:** `seon.test.runner` — the engine (cljs.test capture, fixtures, stash, DB
-projection) stays the protected floor; `my.test` is the lean wrapper. Authoring is
-a COLOCATION convention (`{:test (fn [] (is …))}` meta or `deftest` — no "register
-a test" call).
+**Floor:** `seon.test.runner` — the engine (cljs.test capture, fixtures, one
+bounded recent-run process store, and DB summary projection) stays the protected
+floor; `my.test` is the lean wrapper. Full event vectors are volatile drill-down
+data and evict oldest-first; the durable pass/fail projection remains queryable.
+Authoring is a COLOCATION convention (`{:test (fn [] (is …))}` meta or `deftest`
+— no "register a test" call).
 
 ```clojure
 (schema/register! :seon.test/pass?    :boolean)

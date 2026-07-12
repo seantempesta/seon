@@ -95,8 +95,8 @@ usable warm-pod decomposition:
 | Wire feed live | 15:47:52.489Z | 0.474 s |
 | Crash recovery closed two runs | 15:47:53.440Z | 1.425 s |
 | Agent roster derived | 15:47:53.556Z | 1.541 s |
-| Ghost pruning started | 15:48:03.431Z | 11.416 s |
-| Ghost pruning complete | 15:48:03.986Z | 11.971 s |
+| Ghost set identified and logged | 15:48:03.431Z | 11.416 s |
+| Ghost retraction complete | 15:48:03.986Z | 11.971 s |
 | Replay complete | 15:48:04.184Z | 12.169 s |
 | Global instrumentation complete | 15:48:04.355Z | 12.340 s |
 | HTTP listening | 15:48:04.477Z | 12.462 s |

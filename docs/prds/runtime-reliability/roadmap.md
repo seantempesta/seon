@@ -108,11 +108,29 @@ Progress on 2026-07-12: the integrated design/research package is committed.
 The first mutable-authority fix retired three process-global error-scope
 counters in favor of one fiber-local AsyncLocalStorage map; focused behavioral
 coverage passes 14 tests / 79 assertions, including concurrent scope and pending
-write isolation. The first full CLJS gate took 348 seconds and exposed a
-cross-test pending-buffer fixture dependency; the fixture order is corrected
-and its focused namespace is green. Baseline profiling is still partially
-contaminated by a separately owned research lane restarting the default pod, so
-clean mint/feed measurements remain open rather than being inferred.
+write isolation. The unbounded test-run `globalThis` properties have also been
+replaced in place by one bounded recent-run process store with oldest-first
+eviction; durable test summaries remain database facts. Normal process boot no
+longer creates an unused second in-memory Datahike database—the real cluster
+attachment is the health proof. The first full CLJS gate took 348 seconds and
+exposed a cross-test pending-buffer fixture dependency; the fixture order is
+corrected and its focused namespace is green. Baseline profiling is still
+partially contaminated by a separately owned research lane restarting the
+default pod, so clean mint/feed measurements remain open rather than being
+inferred.
+
+The token-reporting surface audit is also dispositioned: required active paths
+now use the single `seon.ai.tokens` estimator at reporting boundaries; public
+filesystem/web/shell contracts no longer expose private raw-size quantities;
+and operational substring/transport/RAM coordinates remain exact and private.
+The non-gym focused CLJS gate is green at 151 tests / 686 assertions, and the
+gym-driver gate is green at 33 tests / 165 assertions. The optional JVM
+embedding-writer log contract is green at 1 test / 3 assertions. The full-suite
+script now trusts one authoritative Node run: a missing final summary fails
+without a discovery process, polling, killing, or a fresh-process tail retry
+that could conceal the observed failure.
+Paused JVM UI/MCP, dormant shared UI, and the separately owned ACME-only tile
+remain explicitly deferred rather than gaining another estimator.
 
 - Capture cold boot, converged restart, five sequential mints, one concurrent
   mint attempt, core reload, and config apply timings.
