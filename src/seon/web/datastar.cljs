@@ -261,13 +261,15 @@
               event (when (seq elements) (patch-hiccup-elements elements))
               render-ms (- (.now js/performance) started)]
           (when event
-            (doseq [conn conns] (push-event! conn event)))
-          (log/info-console! "seon.web.datastar" "broadcast"
-                             {:seon.web.broadcast/view view-key
-                              :seon.web.broadcast/connections (count conns)
-                              :seon.web.broadcast/targets (count elements)
-                              :seon.web.broadcast/render-ms
-                              (.round js/Math render-ms)}))
+            (doseq [conn conns] (push-event! conn event))
+            (log/info-console! "seon.web.datastar" "broadcast"
+                               {:seon.web.broadcast/view view-key
+                                :seon.web.broadcast/connections (count conns)
+                                :seon.web.broadcast/targets (count elements)
+                                :seon.web.broadcast/changed-attrs
+                                (sort (:seon.db/changed-attrs change))
+                                :seon.web.broadcast/render-ms
+                                (.round js/Math render-ms)})))
         (catch :default e
           (log/error-console! "seon.web.datastar"
                               (str "broadcast failed for " view-key) e))))))
