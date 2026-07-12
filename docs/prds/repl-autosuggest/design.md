@@ -279,6 +279,18 @@ guidance. Therefore:
    KT4 (suggestion uptake by a real driven agent), agent-level lift,
    and benchmark-oracle runs. Plus agy paraphrase augmentation over
    the authored guidance texts.
+   **Frontier-draft mode (owner, 2026-07-12)**: Muse/DeepSeek may
+   DRAFT what a driven model would do in a staged situation (cheap;
+   anchors gold in the drivers' real output distribution — the
+   distribution the suggestions must match to be taken). Drafts are
+   raw material, never gold: the curation pass repairs square-peg
+   Clojure (imperative reflexes, bare keywords, kind fields, throw-y
+   handling, inlined shapes) to the idiom BEFORE minting — mechanical
+   gates (parse ∧ instrumented eval ∧ expected effects on the staged
+   db value) catch correctness; the orchestrator's
+   data-oriented-clojure pass catches idiom. Bad drafts are also kept
+   AS DATA (negative examples + the correction pairs the flywheel
+   wants).
    `reconcile!`-as-cheap-supervision applies NARROWLY: as a label
    source only for STRUCTURED frontier markdown where the parse is
    information-preserving; always as the oracle/filter (parse+compile
