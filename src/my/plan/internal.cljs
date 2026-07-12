@@ -896,17 +896,6 @@
          (when-let [w (wedge (evals-since db agent-eid stx) n)]
            (merge w {:my.plan/id sid :my.plan/title title})))))))
 
-(def local-diffusion-providers
-  "The `:seon.ai/provider` values that are the LOCAL diffusion worker
-   family — never the frontier. [[planner-for]] derives the cluster's
-   planner as an agent whose resolved provider is NOT one of these."
-  #{:diffusiongemma :typeahead})
-
-(defn frontier-provider?
-  "True when provider keyword `p` is a frontier LLM provider."
-  [p]
-  (and (some? p) (not (contains? local-diffusion-providers p))))
-
 (defn planner-for
   "The cluster's PLANNER for a flagged `worker-id`, derived — or nil.
 
@@ -925,7 +914,7 @@
                              (let [e (db/entity db [:seon.agent/id id])]
                                (nil? (:seon.agent/terminated-at e)))))
                    (filter (fn [id]
-                             (frontier-provider?
+                             (ai/frontier-provider?
                                (get-in (ai/resolved-config
                                          {:seon.db/db db :seon.agent/id id})
                                        [:seon.ai/resolved-config

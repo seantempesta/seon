@@ -192,7 +192,34 @@
 ;; :typeahead = the diffusion typeahead STEP-LOOP provider
 ;; (seon.ai.typeahead) — the same worker endpoint/key config as
 ;; :diffusiongemma (SEON_DG_ENDPOINT), a different wire mode (mode=step).
-(schema/register! ::provider [:enum :deepseek :anthropic :openai-compat :diffusiongemma :typeahead])
+;;
+;; Each provider is DEFINED here with its declared wire locality —
+;; :frontier = a hosted frontier chat LLM; :local-worker = the LOCAL
+;; diffusion-worker family, whose endpoint/key resolve from
+;; SEON_DG_ENDPOINT (seon.ai.diffusiongemma owns that wire; the worker
+;; owns its own model + gen-config caps, which is also why
+;; [[shipped-defaults]] ships none of the five for it). The ::provider
+;; enum derives from this map's keys, so a provider CANNOT be added
+;; without declaring its locality — one definition site, no drift.
+(def provider-locality
+  "Declared locality of every `::provider`, at its definition site."
+  {:deepseek       :frontier
+   :anthropic      :frontier
+   :openai-compat  :frontier
+   :diffusiongemma :local-worker
+   :typeahead      :local-worker})
+
+(schema/register! ::provider (into [:enum] (keys provider-locality)))
+
+(defn frontier-provider?
+  "True when provider `p` is a frontier LLM, not a local worker.
+
+   Reads the colocated [[provider-locality]] declaration — the planner
+   derivation (`my.plan.internal/planner-for`) uses this to require a
+   frontier provider for the consulted planner."
+  {:malli/schema [:=> [:cat ::provider] :boolean]}
+  [p]
+  (= :frontier (get provider-locality p)))
 ;; DiffusionGemma backend selector (env SEON_DG_BACKEND — the SEON_DG_*
 ;; names are kept for continuity; the local process is `diffusion-server`).
 ;; (DB-ownable like
