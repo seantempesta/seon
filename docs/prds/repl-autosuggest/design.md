@@ -154,6 +154,18 @@ schema registrations, fn calls). **gen-fn/worker: the
 generation-from-knowledge parts** (fn bodies, query joins), outsourced
 on demand. The little model drives the REPL; nothing asks it to think.
 
+**The recursive loop (owner, 2026-07-12):** oracled benchmark tasks
+drive seon agents → failures attribute mechanically (toolkit gap /
+lint leaderboard / ingredients coverage / planner-word specificity) →
+fixes land as TESTED CODE (tools, names, docstrings, schemas) that
+flows into the next render by construction → every model on the
+system improves at once (one context serves planner, worker, and the
+tiny model) → re-run the oracles, measure the delta. The tiny model
+is the sensitive instrument; the benchmarks are the ground truth; the
+repo is the optimization target. The guard: pressure routes into code
+(tested, reviewed), never into context prose (owner-gated) — the loop
+self-improves the system without the slop channel.
+
 Data modeling sits squarely in the tiny model's lane (`register!` ~70%
 copy): the malli type vocabulary is CLOSED (constrained decoding
 clamps most of the form), neighboring registrations in context are the
