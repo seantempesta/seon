@@ -347,6 +347,17 @@ Held/later: multi-agent decomposition as its own family (subagents
 exercise rides families 2/4 first), security/exploit (owner call),
 GUI/browser (no surface).
 
+**Keepers are promoted (owner, 2026-07-12).** A scenario run is not
+done when the task completes — it is done when its keepers are
+harvested: tools/fns that earned their keep are PROMOTED to real
+source (spec + test + docstring, normal review), docstring/schema
+improvements land in-place, scenario scaffolding is discarded by
+design. Extraction is mechanical (the defining forms are `:seon.fn`
+rows in the db value — code-as-data); the promotion filter is
+curation judgment (orchestrator/owner), same as gold data. Nothing
+scenario-specific leaks into the core; nothing good dies with the
+ephemeral world it was born in.
+
 ## Model roles (owner direction, 2026-07-12)
 
 Multiple models at work, each specifiable cleanly — zero new
