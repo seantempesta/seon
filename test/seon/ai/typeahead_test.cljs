@@ -756,3 +756,190 @@
                                         "work resumes after the pass"))))))))))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+;; ============================================================
+;; W3 prerequisite — scope-down + skip-with-reason. The pass document
+;; scopes to the ▶ active step's subtree + the root layer (titles only
+;; for non-active roots); a scoped edit writes back MERGED into the
+;; FULL document (reconcile! treats absence as drop, so the narrowed
+;; editor view must never reach it directly); a document over budget
+;; even scoped records :seon.typeahead/pass-skip — never silent.
+;; ============================================================
+
+(def ^:private scope-root-id "planscoperoot1")
+(def ^:private scope-step-id "planscopestep1")
+
+(deftest scoped-document-active-subtree-plus-root-titles
+  (let [forest [{:my.plan/id scope-root-id :my.plan/title "R1"
+                 :my.plan/status :open :my.plan/goal "g"
+                 :my.plan/description "R1 DESC"
+                 :my.plan/_parent
+                 [{:my.plan/id "planscopemidd1" :my.plan/title "M1"
+                   :my.plan/status :open :my.plan/description "M DESC"
+                   :my.plan/_parent
+                   [{:my.plan/id "planscopeactv1" :my.plan/title "A1"
+                     :my.plan/status :active :my.plan/expect "x holds"
+                     :my.plan/_parent
+                     [{:my.plan/id "planscopesubb1" :my.plan/title "S1"
+                       :my.plan/status :open}]}]}]}
+                {:my.plan/id "planscoperoot2" :my.plan/title "R2"
+                 :my.plan/status :open :my.plan/description "R2 DESC"
+                 :my.plan/expect "r2 out"}]
+        scoped (ta/scoped-document forest)
+        [r1 r2] scoped]
+    (is (= 2 (count scoped)))
+    (is (= "R1" (:my.plan/title r1)))
+    (is (nil? (:my.plan/description r1))
+        "non-title scalars drop from the root layer")
+    (is (= "g" (:my.plan/goal r1))
+        "the goal rides (the pass render points at it)")
+    (let [[a] (:my.plan/_parent r1)]
+      (is (= "planscopeactv1" (:my.plan/id a))
+          "the ▶ subtree hangs under its root")
+      (is (= "x holds" (:my.plan/expect a)))
+      (is (= "S1" (get-in a [:my.plan/_parent 0 :my.plan/title]))
+          "the ▶ subtree rides in FULL"))
+    (is (= {:my.plan/id "planscoperoot2" :my.plan/title "R2"
+            :my.plan/status :open}
+           r2)
+        "other roots are titles-only")))
+
+(defn- seed-big-plan!
+  "Program-graph rows + an over-budget plan: root (A's, `desc-chars`-char
+   description) with an ACTIVE child step (A's, `expect` outcome)."
+  [desc-chars expect]
+  (-> (db/transact!
+        {:seon.db/tx-data
+         [{:seon.fn/sym "my.plan/reconcile!" :seon.fn/fn-var? true
+           :seon.fn/spec reconcile-spec}
+          {:seon.fn/sym "my.plan/document" :seon.fn/fn-var? true
+           :seon.fn/spec document-spec}]})
+      (.then (fn [_]
+               (db/with-agent a-id
+                 (fn []
+                   (db/transact!
+                     {:seon.db/tx-data
+                      [{:my.plan/id scope-root-id :my.plan/title "big root"
+                        :my.plan/goal "the goal"
+                        :my.plan/description (apply str (repeat desc-chars "x"))
+                        :my.plan/status :open
+                        :my.plan/created-at (js/Date.)
+                        :my.plan/agent [:seon.agent/id a-id]}
+                       {:my.plan/id scope-step-id :my.plan/title "active step"
+                        :my.plan/expect expect
+                        :my.plan/status :active
+                        :my.plan/created-at (js/Date.)
+                        :my.plan/agent [:seon.agent/id a-id]
+                        :my.plan/parent [:my.plan/id scope-root-id]}]})))))))
+
+(deftest plan-pass-scoped-document-and-merge-back
+  ;; Over-budget forest → the pass template is the SCOPED document; the
+  ;; locked edit is re-emitted merged into the FULL document; the scoped
+  ;; template never rides the organic wire.
+  (async done
+    (let [calls (atom [])]
+      (-> (with-conn
+            (fn [_conn]
+              (-> (seed-big-plan! 1200 "the outcome holds")
+                  (.then
+                    (fn [_]
+                      (db/with-agent a-id
+                        (fn []
+                          (let [doc    (plan/document {:seon.agent/id a-id})
+                                scoped (ta/scoped-document doc)
+                                edited (mapv (fn [r]
+                                               (if (= scope-root-id (:my.plan/id r))
+                                                 (assoc r :my.plan/title
+                                                        "big root SHARPENED")
+                                                 r))
+                                             scoped)
+                                form   (str "(my.plan/reconcile! {:my.plan/tree "
+                                            (pr-str edited) "})")
+                                fetch  (scripted-fetch
+                                         calls
+                                         [(step-response
+                                            {:transition "expand"
+                                             :arm "prefill-edit"
+                                             :locked [form] :new_draft ""
+                                             :gen_s 0.7})
+                                          (step-response
+                                            {:transition "done"
+                                             :locked ["(def a 1)"]
+                                             :new_draft ""})])]
+                            (with-local-worker fetch
+                              (fn []
+                                (db/with-agent a-id
+                                  (fn []
+                                    ((ta/agent-adapter) "the rendered prompt"))))))))))
+                  (.then
+                    (fn [{:keys [text] :as resp}]
+                      (is (nil? (:seon.ai/error resp)))
+                      (let [pass-form (first (str/split text #"\n\n"))
+                            parsed    (reader/read-string pass-form)
+                            tree      (get (second parsed) :my.plan/tree)
+                            root      (first (filter #(= scope-root-id
+                                                         (:my.plan/id %))
+                                                     tree))]
+                        (is (str/includes? pass-form "big root SHARPENED")
+                            "the scoped edit survives the merge")
+                        (is (= 1200 (count (:my.plan/description root)))
+                            "merge-back reinstates the out-of-scope description")
+                        (is (= "active step"
+                               (get-in root [:my.plan/_parent 0 :my.plan/title]))
+                            "the merged form carries the full structure"))
+                      (let [[c1 c2] @calls]
+                        (is (= 2 (count @calls)) "pass + one work step")
+                        (is (str/starts-with? (get (:payload c1) "prompt")
+                                              "; PLAN PASS"))
+                        (let [tmpl  (get-in (:payload c1)
+                                            ["prefills" "my.plan/reconcile!"])
+                              ttext (apply str (map second tmpl))]
+                          (is (vector? tmpl) "the SCOPED template rides the pass")
+                          (is (not (str/includes? ttext "xxxxxxxx"))
+                              "the scoped template drops the long description"))
+                        (is (nil? (get (:payload c2) "prefills"))
+                            "a scoped template never rides the organic wire")))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest plan-pass-doc-over-budget-skips-with-reason
+  ;; Even the SCOPED document over budget → no pass call, and the skip
+  ;; records a marked step row with the reason (never a silent skip).
+  (async done
+    (let [calls (atom [])
+          fetch (scripted-fetch
+                  calls
+                  [(step-response {:transition "done"
+                                   :locked ["(def a 1)"] :new_draft ""})])]
+      (-> (with-conn
+            (fn [conn]
+              (-> (seed-big-plan! 1200 (apply str (repeat 1200 "y")))
+                  (.then
+                    (fn [_]
+                      (with-local-worker fetch
+                        (fn []
+                          (db/with-agent a-id
+                            (fn []
+                              ((ta/agent-adapter) "the rendered prompt")))))))
+                  (.then
+                    (fn [{:keys [text]}]
+                      (is (= "(def a 1)" text))
+                      (is (= 1 (count @calls)) "no pass call — skipped")
+                      (is (nil? (get (:payload (first @calls)) "prefills"))
+                          "no organic prefill for an over-budget scoped doc")
+                      (let [dbv  @conn
+                            rows (->> (db/query
+                                        {:seon.db/db dbv
+                                         :seon.db/query
+                                         '[:find [?e ...]
+                                           :where
+                                           [?e :seon.typeahead/pass-skip _]]})
+                                      (map #(db/pull dbv '[*] %)))]
+                        (is (= 1 (count rows)) "ONE skip row recorded")
+                        (let [row (first rows)]
+                          (is (true? (:seon.typeahead/plan-pass? row)))
+                          (is (re-find #"doc-over-budget \(\d+ tok\)"
+                                       (:seon.typeahead/pass-skip row)))
+                          (is (= -1 (:seon.typeahead/step-idx row))))))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))

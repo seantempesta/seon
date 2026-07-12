@@ -98,6 +98,9 @@
 ;; prefill-tokens is the prefilled document's size (tokens/estimate).
 (schema/register! :seon.typeahead/plan-pass? :boolean)
 (schema/register! :seon.typeahead/prefill-tokens :int)
+;; A budget-skipped pass records WHY (W3 scope-down follow-up: the
+;; demotion measurement needs skips visible, not silent).
+(schema/register! :seon.typeahead/pass-skip :string)
 
 (schema/register! :seon.typeahead/step
   [:map {:seon.db/entity true}
@@ -125,6 +128,7 @@
    [:seon.typeahead/committed-tokens {:optional true} :seon.typeahead/committed-tokens]
    [:seon.typeahead/plan-pass?    {:optional true} :seon.typeahead/plan-pass?]
    [:seon.typeahead/prefill-tokens {:optional true} :seon.typeahead/prefill-tokens]
+   [:seon.typeahead/pass-skip     {:optional true} :seon.typeahead/pass-skip]
    [:seon.typeahead/auto-offer-margin {:optional true} :seon.typeahead/auto-offer-margin]
    [:seon.typeahead/max-rounds    {:optional true} :seon.typeahead/max-rounds]
    [:seon.typeahead/agent         {:optional true} :seon.db/ref]])
@@ -629,9 +633,140 @@
 (def ^:private plan-pass-doc-token-budget
   "Estimated-token cap on a prefilled document. The worker's code buffer
    is 256 tokens; the head/closing clamps + per-hole slack need margin.
-   A document over this budget SKIPS the affordance for the call (the
-   honest v1 — scope-down lives with the demotion measurement)."
+   A document over this budget SCOPES DOWN to the ▶ active step's
+   subtree + the root layer (titles only for non-active roots); if even
+   the scoped document exceeds the budget the pass SKIPS with a recorded
+   `:seon.typeahead/pass-skip` reason — never silently."
   190)
+
+;; --- Scope-down (planner-worker-design W3 prerequisite). The scoped
+;; --- document is an EDITOR VIEW, never the reconcile argument: on lock
+;; --- the edited scalar values merge back by node id into the FULL
+;; --- document, and the emitted form carries the whole open forest —
+;; --- reconcile! treats absence as drop (+ absent scalars as retract),
+;; --- so a narrowed view must never reach it directly. For the same
+;; --- reason a scoped template is PASS-ONLY: it never rides the organic
+;; --- wire (an organic lock would eval the narrowed view unmerged).
+
+(defn- doc-child-entry?
+  "Whether a map entry's value is a non-empty seq of maps — the same
+   children rule [[render-doc-value]] renders with."
+  [[_ v]]
+  (and (sequential? v) (seq v) (every? map? v)))
+
+(defn- doc-node-id
+  "The value of a document node's identity-attr entry, or nil."
+  [node]
+  (some (fn [[k v]] (when (identity-attr? k) v)) node))
+
+(defn- doc-children
+  "Every child node of a document node (all children entries, flattened)."
+  [node]
+  (into [] (mapcat val) (filter doc-child-entry? node)))
+
+(defn- active-doc-node?
+  "Whether a document node's status-named entry says `:active` — the ▶."
+  [node]
+  (boolean (some (fn [[k v]]
+                   (and (keyword? k) (= "status" (name k)) (= :active v)))
+                 node)))
+
+(defn- find-active
+  "DFS: the first `:active` node in document `nodes` (its whole subtree)."
+  [nodes]
+  (some (fn [n]
+          (or (when (active-doc-node? n) n)
+              (find-active (doc-children n))))
+        nodes))
+
+(defn- subtree-contains?
+  "Whether `target` (by object identity — same walked tree) is in
+   `node`'s subtree."
+  [node target]
+  (or (identical? node target)
+      (boolean (some #(subtree-contains? % target) (doc-children node)))))
+
+(defn- title-layer
+  "A node reduced to identity + title/goal/status scalars — the scoped
+   document's rendering of a non-active root."
+  [node]
+  (into {}
+        (comp (remove doc-child-entry?)
+              (filter (fn [[k _]]
+                        (or (identity-attr? k)
+                            (contains? #{"title" "goal" "status"} (name k))))))
+        node))
+
+(defn scoped-document
+  "The pass document scoped to the ▶ subtree + the root layer.
+
+   The ▶ active step's subtree rides in full (nested under its root when
+   the active step isn't itself a root); every other root is titles-only
+   (identity + title/goal/status). Public for tests."
+  {:malli/schema [:=> [:catn [::doc ::doc]] ::doc]}
+  [doc]
+  (let [roots  (if (map? doc) [doc] (vec doc))
+        active (find-active roots)]
+    (into []
+          (map (fn [root]
+                 (if (and active (identical? root active))
+                   root
+                   (let [ck (when active
+                              (some (fn [[k v :as e]]
+                                      (when (and (doc-child-entry? e)
+                                                 (some #(subtree-contains? % active) v))
+                                        k))
+                                    root))]
+                     (cond-> (title-layer root)
+                       ck (assoc ck [active]))))))
+          roots)))
+
+(defn- scalar-edits
+  "Edited (scoped) document → `{node-id → its scalar entries}` — the
+   values the model may have changed (children entries stripped: the
+   pass is SHARPEN-only, structure clamps)."
+  [tree]
+  (letfn [(walk [acc node]
+            (let [acc (if-let [id (doc-node-id node)]
+                        (assoc acc id (into {} (remove doc-child-entry?) node))
+                        acc)]
+              (reduce walk acc (doc-children node))))]
+    (reduce walk {} (if (map? tree) [tree] tree))))
+
+(defn- merge-edits
+  "The FULL document with a scoped edit's scalar values merged in by
+   node id — the scoped pass's write-back: reconcile! always receives
+   the whole open forest, so the narrowed editor view can never read as
+   absence (which would drop/retract out-of-scope steps)."
+  [doc edits]
+  (letfn [(walk [node]
+            (let [node (if-let [e (some-> (doc-node-id node) edits)]
+                         (merge node e)
+                         node)]
+              (reduce-kv (fn [n k v]
+                           (if (doc-child-entry? [k v])
+                             (assoc n k (mapv walk v))
+                             n))
+                         node node)))]
+    (if (map? doc) (walk doc) (mapv walk doc))))
+
+(defn- merge-scoped-form
+  "A locked scoped-pass form rewritten against the FULL document.
+
+   Parses the locked `(head {arg-key <edited-scoped-tree> …})` call,
+   merges the edited scalar values into `doc` by node id, and re-emits
+   the call with the merged full document. nil when the locked text
+   doesn't parse to that shape — the pass is advisory, a malformed edit
+   is dropped, never eval'd."
+  [head arg-key doc form]
+  (let [parsed (try (reader/read-string form) (catch :default _ nil))
+        tree   (when (and (seq? parsed)
+                          (= head (str (first parsed)))
+                          (map? (second parsed)))
+                 (get (second parsed) arg-key))]
+    (when tree
+      (str "(" head " {" (pr-str arg-key) " "
+           (pr-str (merge-edits doc (scalar-edits tree))) "})"))))
 
 (defn- affordance-template
   "The full prefilled call template: head + arg key clamped open, the
@@ -675,22 +810,57 @@
                                        (some identity-attr? (keys n))))
                           nodes)))))
 
-(defn- prefill-wire
-  "head → prefilled template, for every affordance whose projection fn
-   resolves and returns a NON-EMPTY document within the token budget.
-   {} when nothing qualifies (the wire field is then omitted)."
+(defn- pass-entries
+  "head → pass entry, for every affordance whose projection fn resolves
+   and returns a NON-EMPTY document. Within budget →
+   `{::template … ::doc … ::arg-key … ::scoped? false}`; over budget the
+   document scopes down ([[scoped-document]]) → same shape with
+   `::scoped? true` and the FULL doc kept for the write-back merge;
+   still over → `{::skip \"doc-over-budget (N tok)\"}`. {} when nothing
+   qualifies."
   [db agent-id affordances]
   (into {}
         (keep (fn [{::keys [head arg-key prefill-fn]}]
                 (when-let [f (resolve-sym prefill-fn)]
                   (let [doc (f (injected-request db prefill-fn))]
-                    (when (and (projection-doc? doc)
-                               (<= (tokens/estimate (pr-str doc))
-                                   plan-pass-doc-token-budget))
-                      [head (affordance-template
-                              head arg-key
-                              (document-segments db agent-id doc))])))))
+                    (when (projection-doc? doc)
+                      (if (<= (tokens/estimate (pr-str doc))
+                              plan-pass-doc-token-budget)
+                        [head {::template (affordance-template
+                                            head arg-key
+                                            (document-segments db agent-id doc))
+                               ::doc      doc
+                               ::arg-key  arg-key
+                               ::scoped?  false}]
+                        (let [scoped (scoped-document doc)
+                              n      (tokens/estimate (pr-str scoped))]
+                          (if (<= n plan-pass-doc-token-budget)
+                            [head {::template (affordance-template
+                                                head arg-key
+                                                (document-segments db agent-id scoped))
+                                   ::doc      doc
+                                   ::arg-key  arg-key
+                                   ::scoped?  true}]
+                            [head {::skip (str "doc-over-budget (" n " tok)")}]))))))))
         affordances))
+
+(defn- entries->organic-wire
+  "head → template for the ORGANIC step wire — UNSCOPED templates only
+   (a scoped template is pass-only: an organic lock would eval the
+   narrowed view without the write-back merge)."
+  [entries]
+  (into {}
+        (keep (fn [[h e]]
+                (when (and (::template e) (not (::scoped? e)))
+                  [h (::template e)])))
+        entries))
+
+(defn- entries->skips
+  "head → skip reason, for the budget-skipped affordances."
+  [entries]
+  (into {}
+        (keep (fn [[h e]] (when-let [r (::skip e)] [h r])))
+        entries))
 
 (def ^:private pass-render
   "The plan pass's MINIMAL render — never the full context render. The
@@ -740,13 +910,13 @@
    — the form is nil on a no-change pass (dropping it is cheaper than a
    0/0/0 receipt: zero eval, zero transcript tokens; the unchanged
    `:plan` block is the confirmation) and on a failed edit."
-  [opts policy prefills call-id]
-  (let [head     (first (keys prefills))
-        template (get prefills head)
+  [opts policy entries call-id]
+  (let [head     (some (fn [[h e]] (when (::template e) h)) entries)
+        {::keys [template doc arg-key scoped?]} (get entries head)
         wire     (merge {::dg/mode      :step
                          ::dg/prompt    pass-render
                          ::dg/policy    (policy->wire policy)
-                         ::dg/prefills  prefills
+                         ::dg/prefills  {head template}
                          ::dg/committed ""
                          ::dg/draft     (str "(" head " ")}
                         opts)
@@ -758,6 +928,12 @@
       (let [out        (::dg/worker-output resp)
             form       (first (mapv str (:locked out)))
             unchanged? (boolean (and form (no-change? template form)))
+            ;; A SCOPED pass's edit writes back through the merge — the
+            ;; emitted form always carries the FULL document.
+            form'      (when (and form (not unchanged?))
+                         (if scoped?
+                           (merge-scoped-form head arg-key doc form)
+                           form))
             proj       (-> (step-projection call-id -1 out)
                            (assoc :seon.typeahead/plan-pass? true
                                   :seon.typeahead/prefill-tokens
@@ -765,9 +941,26 @@
                                   :seon.typeahead/prompt-tokens
                                   (tokens/estimate pass-render)))
             _          (await (record-step! proj))]
-        {::pass-form       (when (and form (not unchanged?)) form)
+        {::pass-form       form'
          ::pass-proj       proj
          ::pass-no-change? unchanged?}))))
+
+(defn- ^:async record-pass-skips!
+  "Record one marked pass row per budget-skipped affordance — the skip
+   is a step projection with `:seon.typeahead/pass-skip` carrying the
+   reason, so the demotion measurement sees skips, never silence."
+  [call-id skips]
+  (loop [ss (seq skips)]
+    (when ss
+      (let [[_head reason] (first ss)]
+        (await (record-step! {:seon.typeahead/call         call-id
+                              :seon.typeahead/step-idx     -1
+                              :seon.typeahead/at           (js/Date.)
+                              :seon.typeahead/transition   :pass-skip
+                              :seon.typeahead/locked-count 0
+                              :seon.typeahead/plan-pass?   true
+                              :seon.typeahead/pass-skip    reason}))
+        (recur (next ss))))))
 
 ;; ============================================================
 ;; The step loop — the provider body.
@@ -793,11 +986,15 @@
         offers     (if (and db agent-id) (menu/verb-offers db agent-id) [])
         ;; The draft-head prefill affordance (W2): registry+program-graph
         ;; derived, computed ONCE per call (the projection can only change
-        ;; after this call's forms eval). Rides EVERY step's wire so an
-        ;; ORGANIC opened head expands prefilled too.
-        prefills   (if (and db agent-id)
-                     (prefill-wire db agent-id (prefill-affordances db))
+        ;; after this call's forms eval). UNSCOPED templates ride EVERY
+        ;; step's wire so an ORGANIC opened head expands prefilled too;
+        ;; scoped templates are pass-only (write-back merge required).
+        entries    (if (and db agent-id)
+                     (pass-entries db agent-id (prefill-affordances db))
                      {})
+        prefills   (entries->organic-wire entries)
+        skips      (entries->skips entries)
+        passable?  (boolean (some ::template (vals entries)))
         pass-mode  (:seon.typeahead/plan-pass policy)
         ;; offers ride with the null-intent calibration render — the worker
         ;; gates the glyph baseline on BOTH (cursor.py: `offers and
@@ -813,9 +1010,12 @@
         ptoks      (tokens/estimate prompt)
         ;; The step-open PLAN PASS (:every-step; :on-stuck runs it inside
         ;; the loop instead; :off never). A no-change/failed pass yields no
-        ;; form and the loop proceeds straight to WORK.
-        pass       (when (and (= :every-step pass-mode) (seq prefills))
-                     (await (run-plan-pass! opts policy prefills call-id)))
+        ;; form and the loop proceeds straight to WORK. Budget-skipped
+        ;; affordances record their reason (never a silent skip).
+        pass       (when (and (= :every-step pass-mode) passable?)
+                     (await (run-plan-pass! opts policy entries call-id)))
+        _          (when (and (= :every-step pass-mode) (seq skips))
+                     (await (record-pass-skips! call-id skips)))
         pass-form  (::pass-form pass)]
     ;; `failed` = glyphs whose EXPANSION locked nothing — suppressed for the
     ;; rest of the call (P6). The worker is stateless by design; this loop's
@@ -882,14 +1082,17 @@
 
                 :else
                 ;; :on-stuck wiring — the demoted plan pass runs at the
-                ;; FIRST observed stuck round, once per call.
-                (let [pass' (when (and (= :on-stuck pass-mode)
-                                       (not passed?)
-                                       (= "stuck" transition)
-                                       (seq prefills))
-                              (await (run-plan-pass! opts policy prefills
-                                                     call-id)))
-                      pform (::pass-form pass')]
+                ;; FIRST observed stuck round, once per call (skips
+                ;; record at the same moment).
+                (let [moment? (and (= :on-stuck pass-mode)
+                                   (not passed?)
+                                   (= "stuck" transition))
+                      pass'   (when (and moment? passable?)
+                                (await (run-plan-pass! opts policy entries
+                                                       call-id)))
+                      _       (when (and moment? (seq skips))
+                                (await (record-pass-skips! call-id skips)))
+                      pform   (::pass-form pass')]
                   (recur (inc round)
                          (if pform
                            (->> [committed' pform]
@@ -901,7 +1104,7 @@
                          stuck'
                          (if pass' (conj steps' (::pass-proj pass')) steps')
                          failed'
-                         (or passed? (some? pass'))))))))))))
+                         (or passed? moment?)))))))))))
 
 (defn agent-adapter
   "A fn-of-ctx-string suitable for `seon.agent`'s `llm-fn`.

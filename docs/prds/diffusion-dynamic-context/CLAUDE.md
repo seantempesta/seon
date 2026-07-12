@@ -13,7 +13,32 @@ tags: [orchestrator, agent]
 > is that loop as a swap-in agent LLM. This file is the INDEX + runbook;
 > depth lives in the linked docs. Keep it tight + current.
 
-## ▸ Current state (2026-07-11 late-night)
+## ▸ Current state (2026-07-12)
+
+**P7 W3 RUN (2026-07-12): restart-resume PASSES uncoached; goal
+completion FAILS — and the drill named the two binding gaps.** Two
+small builds landed first (`seon.ai.typeahead`, suite 1225/5600/0/0):
+pass-doc SCOPE-DOWN (over-budget document → ▶ subtree + root
+title-layer; the scoped doc is an editor VIEW — locked edits merge back
+by node id into the FULL document before eval, because `reconcile!`
+drops absent open nodes; scoped templates are pass-only, never organic)
+and SKIP-WITH-REASON (`:seon.typeahead/pass-skip "doc-over-budget (N
+tok)"` step rows — no more silent skips). The drill (acme as-grown,
+worker `50c1163bb3b3`, 0 core faults, 0 coaching): the FULL two-agent
+shape worked first try — Muse planner landed both goals' plans INTO the
+worker's tree via `reconcile!` + `:seon.agent/id` scoping (2/2, 1:1
+steps, expects everywhere, `::pace :multi-session`), frontier-authored
+nodes clamped in every worker pass (zones held by construction);
+mid-goal `bin/acme restart pod` + bare "continue" → the worker's first
+reply took `active!` on exactly the ledger's next-ready step
+(blob-proven: prompt `ef0742e3…` → reply `9e072c59…`) — **continuity
+PASS**. But 12 turns produced NO goal data: the worker wedged 8+ turns
+redefining one broken `schema/register!` misuse, and its single `done!`
+was FALSE (expect not holding) — `done!` is docstring-gated only.
+Binding gaps now drive-evidenced: (1) a MECHANICAL expect gate on
+`done!` (closure by proof), (2) the stuck×N → frontier re-plan
+escalation (§separation of authority, unbuilt). Full evidence table:
+[[planner-worker-design]] §"W3 RUN".
 
 **P7 W2 per-step plan pass BUILT + live-measured (2026-07-11 late)**:
 the draft-head prefill affordance is real end-to-end — the step wire

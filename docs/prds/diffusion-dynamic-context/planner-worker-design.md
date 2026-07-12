@@ -398,6 +398,83 @@ One measurement per unit — the bench falsifies; it is not the work.
 - **W3 — multi-turn + restart**: `::pace :multi-session` goal, pod
   restarted mid-run, worker resumes from the ledger. Live proof: the
   restart drill passes uncoached.
+
+  **W3 RUN (2026-07-12) — restart-resume PASSES; goal completion does
+  not.** Two builds + the workhorse drill on acme (as-grown store,
+  worker `50c1163bb3b3`, zero core faults, zero coaching).
+
+  - *Builds (seon.ai.typeahead, suite 1225/5600/0/0)*: (1) **pass-doc
+    scope-down** — a document over the 190-tok budget now scopes to the
+    ▶ active step's subtree + the root layer (titles/goal/status only
+    for non-active roots) instead of silently skipping; the scoped
+    document is an EDITOR VIEW only — on lock the edited scalar values
+    MERGE BACK by node id into the FULL document and the emitted
+    `reconcile!` form carries the whole open forest (`compile-reconcile`
+    drops absent open nodes and retracts absent scalars, so a narrowed
+    view must never reach it; for the same reason a scoped template is
+    pass-only, never on the organic wire). (2) **skip-with-reason** — a
+    document over budget even scoped records a marked step row
+    (`:seon.typeahead/pass-skip "doc-over-budget (N tok)"`), never a
+    silent skip. 3 new cljs tests (scope shape, loop-level merge-back,
+    skip row).
+  - *Two-agent shape — the full version ran*: Muse (planner agent,
+    global provider) turned each host brief into the WORKER's plan via
+    `reconcile!` scoped to the worker's `:seon.agent/id`, then
+    `message/agent`'d it awake — 2/2 goals, 1:1 steps, `::expect` on
+    every node, root `::pace :multi-session` (goal A), all nodes
+    tx-provenance = planner ⇒ CLAMPED in the worker's pass (the
+    authority zones held by construction: 9 passes over the
+    Muse-authored tree, zero strategy edits possible, all no-change,
+    0.014–0.73 s). Scope-down fired live on EVERY pass (full doc > 190
+    tok from turn 0); zero pass-skips.
+  - *Restart drill (goal A, reading-log, 4 steps)*: run 1 = 5 turns /
+    104–134 s each, closed `:deadline-exceeded` (10-min run wall) with
+    ZERO plan engagement. `bin/acme restart pod` (03:46:39→:52), then an
+    uncoached "continue": the worker's FIRST post-restart reply was
+    `(my.plan/active! {:my.plan/id "zHT…"})` — ▶ taken on exactly the
+    ledger's `next ready` step, no re-planning, no repeat of closed
+    work, turn numbering continued (5). Byte-exact proof: prompt blob
+    `ef0742e38464d1c3…` (the surviving ☐ ledger, lines 693–705) → reply
+    blob `9e072c597af08881…`. **Continuity win condition: PASS.** The
+    #15 CAS race did not fire; the #16 staleness drop did not fire (the
+    address step predates the pass snapshot).
+  - *Goal completion: FAIL (the honest headline).* 12 worker turns
+    (~19 min wall), goal A finished 1/4 frontier steps — and that close
+    was FALSE: `done!` is docstring-gated only, and the worker closed
+    the schema step while `(count :my.kb.book/title rows)` = 0; the
+    final expects verify false (no book data exists). Plan integrity =
+    0 expect-verified closes / 1 close. The worker wedged for 8+ turns
+    redefining ONE broken form (`schema/register!` misused as a single
+    call with a `(map [...])` blob) and re-calling it — the eval error
+    envelope did not steer it. This is exactly the escalation case the
+    §separation-of-authority design names (stuck×N ⇒ frontier re-plans
+    the subtree) — unbuilt, and now drive-evidenced as the binding gap,
+    together with a mechanical expect gate on `done!` ("closure by
+    proof" is currently an honor system).
+  - *Goal B (standup snapshot, 3 steps, no restart)*: plan landed 1:1
+    (4 nodes) by the same two-agent path. Better plan discipline —
+    `active!` in turn 0, a `done!` (again unverified-false: zero task
+    rows exist), own substeps minted via `step!` (3 store-substeps
+    under an own parent), `active!` advanced — but the run closed
+    `:deadline-exceeded` at 7 turns / **10.2 min wall with the goal
+    NOT completed** (wall-per-goal = DNF at the 10-min run budget).
+    Plan integrity across both goals: 0 expect-verified closes / 2
+    closes. Pass economics across both goals: 16 passes, 0 skips,
+    all no-change; degenerate all-clamped 0.014–0.04 s, ▶-subtree
+    docs (125–160 tok) 0.69–0.94 s / 3–4 forwards. The live drives
+    never produced a pass EDIT, so the scoped merge-back write-back
+    is test-proven only (loop-level cljs test), not yet drive-proven.
+  - *Frontier economy*: one planner consult per goal — the plan landed
+    in the planner's FIRST turn (~7 s, ~18 k tok in); the planner then
+    burned 4 more turns before `complete` (bounded, but a leak worth a
+    halt-when-done nudge).
+  - *Ops findings*: run-deadline close logs "halt superseded — a newer
+    run owns the agent" (misleading for `:deadline-exceeded`; smell);
+    `logs/acme/pod.log` goes sparse/NUL-prefixed after a supervisor
+    restart so plain grep (ugrep) silently sees binary — use
+    `LC_ALL=C grep -a`; the "continue" chat auto-mints an open
+    `✉ continue` address step that nothing closes (ledger noise,
+    #16-adjacent).
 - **W4 — measure**: the `planner_worker` task, one full run, honest
   verdicts against the win conditions.
 
