@@ -329,6 +329,35 @@
                                                   :seon.agent/id agent-id})))))))))
         (.then done))))
 
+(deftest renderer-dependencies-exclude-transaction-plumbing
+  (async done
+    (-> (with-seeded
+          (fn [conn]
+            (-> (db/transact!
+                  {:seon.db/conn conn
+                   :seon.db/tx-data [{:seon.agent/id agent-id
+                                      :seon.agent/purpose "install attr"}]})
+                (.then
+                  (fn [_]
+                    (transact-as! conn agent-id
+                      [(fn-row (str cur-ns-str "/dependency-tile") render-spec
+                               purpose-tile-source
+                               :read-attrs [:seon.agent/purpose
+                                            :seon.db/agent-id
+                                            :seon.db/origin
+                                            :seon.store.wire/write-id])])))
+                (.then
+                  (fn [_]
+                    (is (= #{:seon.agent/purpose}
+                           (set (::rf/attrs
+                                  (rf/renderer-read-attrs
+                                    {:seon.db/db @conn
+                                     :seon.render/html
+                                     (symbol (str cur-ns-str
+                                                  "/dependency-tile"))}))))
+                        "provenance transport attrs do not invalidate views"))))))
+        (.then done))))
+
 (deftest last-updated-tile-gates-on-provenance-and-privacy
   (async done
     (-> (with-seeded

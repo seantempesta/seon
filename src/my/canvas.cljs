@@ -156,7 +156,8 @@
   [{::keys [values] agent-id :seon.agent/id}]
   (await
     (db/transact!
-      {:seon.db/tx-data [(assoc values :seon.agent/id agent-id)]})))
+      {:seon.db/tx-data
+       [(assoc values :seon.db/ref [:seon.agent/id agent-id])]})))
 
 (schema/register! ::button-request
   [:map

@@ -152,6 +152,19 @@
    `alias/k` tail, which the installed-attr intersection then discards."
   #":([A-Za-z][A-Za-z0-9_.$-]*/[A-Za-z0-9_.*+!?<>='-]+)")
 
+(def ^:private dependency-exclusions
+  "Transaction/delivery plumbing is not domain view data.
+
+   These attrs appear as qualified literals in generic database helpers and
+   provenance queries, but their presence on every commit must not invalidate
+   every renderer or steal surface focus. A renderer that intentionally shows
+   provenance should derive it behind a domain-facing function/read model."
+  #{:db/txInstant
+    :seon.db/agent-id
+    :seon.db/eval-id
+    :seon.db/origin
+    :seon.store.wire/write-id})
+
 (defn- source-attrs
   "LEGACY fallback: regex-scan `src` for qualified keyword literals.
 
@@ -180,8 +193,15 @@
    construction: an attr reached only dynamically is not watched."
   [installed stored-kws src]
   (if (some? stored-kws)
-    (->> stored-kws (filter installed) (remove twin-keys) distinct vec)
-    (source-attrs installed src)))
+    (->> stored-kws
+         (filter installed)
+         (remove twin-keys)
+         (remove dependency-exclusions)
+         distinct
+         vec)
+    (->> (source-attrs installed src)
+         (remove dependency-exclusions)
+         vec)))
 
 (schema/register! ::last-updated-request
   [:map
