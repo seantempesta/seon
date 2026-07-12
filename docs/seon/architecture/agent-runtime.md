@@ -437,6 +437,11 @@ capability state, not a config desired set. The renderer's entity-schema catalog
 is derived once from the validated Malli registry rather than stored as a second
 append-only decomposition. Compiled route/root-context defaults feed the config
 compiler; root/boot does not reassert them before root/config applies its value.
+Every reconciliation supplies both its process scope and its complete set of
+managed identity attributes. The identity-attribute scope remains explicit even
+when a desired population is empty, so removing the final route or skill still
+produces the correct retraction without sweeping another population written by
+the same process.
 
 Instrumentation follows effective definitions. Boot performs the one complete
 pass. Thereafter a new/redefined function is filtered-unstrumented from Malli's

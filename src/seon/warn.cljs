@@ -321,15 +321,14 @@
    `:seon.agent.ctx/agent-attrs` leg — ONE provenance query for the attr
    surface, shared by domain-attrs and the classifier.
 
-   The set of attr keywords whose `:seon.schema/key` row landed in a tx
-   that does NOT carry `:seon.db/origin :core-seed` — i.e. attrs
+   The set of attr keywords whose `:seon.schema/key` row did not land through
+   the boot process — i.e. attrs
    registered by an AGENT (every agent `register!` eval is teed into a
    `:seon.schema` row by `seon.eval/build-tee-entities`, in an
    agent-origin tx), as opposed to the core's own registrations
    (boot-seeded by `seon.client/index-schemas` /
    `all-entity-schemas-tx-data`, always inside the unscoped
-   `{:seon.db/origin :core-seed}` tx-context — a provenance the transact
-   boundary makes unforgeable from inside an agent scope).
+   root/boot transaction context).
 
    Provenance — not a keyword-namespace pattern — is the rule, so
    agent-authored `seon.*` data domains (e.g. `:my.workout/*`) stay
@@ -345,7 +344,9 @@
                                   :seon.db/query
                                   '[:find ?tx
                                     :where
-                                    [?tx :seon.db/origin :core-seed]]}))]
+                                    [?tx :seon.db/process ?process]
+                                    [?process :seon.db.process/id
+                                     :seon.db.process/boot]]}))]
     (into #{}
           (keep (fn [[k tx]] (when-not (contains? seed-txs tx) k)))
           (db/query {:seon.db/db db
@@ -363,7 +364,7 @@
    `seon.*` data domains like `:my.workout/*` — the reuse surface
    (seon.db/store-inventory) reports and [[check-parallel-attr]] guards.
    Core attrs (`:seon.db/*`, `:seon.agent/*`, …) stay hidden
-   because their rows land under `:seon.db/origin :core-seed`.
+   because their rows land through the boot process.
    Derived from the db value itself (NOT the live registry), so it
    survives pod restarts and stays per-conn. An attr appears once data
    (or schema installation via the first transact!) has landed."

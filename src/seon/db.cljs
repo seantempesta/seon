@@ -65,6 +65,7 @@
     [seon.config :as config]
     [seon.db.id]
     [seon.db.internal :as internal]
+    [seon.db.process :as process]
     [seon.error :as error]
     [seon.schema :as schema]))
 
@@ -286,21 +287,16 @@
   ::unlisten-response
   [:map [::ok? :boolean]])
 
-;; Tx-meta attrs (v1.md §2.3) — the causality bundle auto-merged into
-;; every tx (see [[with-tx-context]]). Id scalars reference the canonical
-;; :seon.db/id shape registered in seon.schema.
-(schema/register! ::agent-id        :seon.db/id)
-(schema/register! ::session-id      :seon.db/id)
-(schema/register! ::turn-id         :seon.db/id)
-(schema/register! ::eval-id         :seon.db/id)
-;; ::origin is STAMPED BY THE TRANSACT BOUNDARY from the ambient scope
-;; (`seon.db.internal/derive-origin`) — never passed by callers. Scopes
-;; establish it via [[with-tx-context]]; inside an agent scope the
-;; managed origins (:core-seed / :config) are unreachable (stamped
-;; :agent), so managed-core provenance cannot be forged.
-(schema/register! ::origin          [:enum :user :agent :system :replay :core-seed :config :test-run])
-(schema/register! ::replay?         :boolean)
-(schema/register! ::resume-marker?  :boolean)
+;; Final transaction provenance. Each normal post-genesis transaction relates
+;; the submitted facts to one EXISTING database user (root, human, or agent)
+;; and one stable process identity. The refs are deliberately heterogeneous;
+;; there is no duplicate database-user entity.
+(schema/register! ::user            :seon.db/ref)
+(schema/register! ::process         :seon.db/ref)
+
+;; Retired scalar/origin attrs are deliberately NOT registered. Existing
+;; stores retain their immutable native schema/history; [[ensure-provenance!]]
+;; reads those datoms only during migration and never reasserts them.
 
 ;; ---------------------------------------------------------------------------
 ;; The agent's universe + fiber-local context scopes
@@ -327,10 +323,9 @@
   "The active tx-context map, or nil outside [[with-tx-context]].
 
    Fiber-local across awaits (AsyncLocalStorage), safe under
-   concurrent agents. Auto-merged into every `transact!`'s `:tx-meta`;
-   explicit call-site `:tx-meta` keys win per-key — except `::origin`,
-   which the transact boundary STAMPS from the ambient scope
-   (`seon.db.internal/derive-origin`); callers never pass it."
+   concurrent agents. The map may carry runtime-only turn/eval/test/replay
+   values, but the transaction boundary persists only `::user` and
+   `::process`."
   {:malli/schema [:=> [:cat] [:maybe :map]]}
   []
   (internal/current-tx-context))
@@ -360,7 +355,7 @@
    you; you rarely call it — your own writes are already tagged.
 
      (db/with-agent agent-id
-       (fn [] (db/transact! {::db/tx-data [...]})))   ; tx tagged with agent-id"
+       (fn [] (db/transact! {::db/tx-data [...]}))) ; user=agent, process=REPL"
   {:malli/schema [:=> [:catn [::agent-id :string] [::thunk ::thunk]] :any]}
   [agent-id f]
   (internal/run-with-agent agent-id f))
@@ -370,16 +365,16 @@
 
    `f` is a 0-arg fn. Inside `f` — including across `await`s —
    `(current-agent-id)` is nil; the outer scope restores on exit. For
-   CORE writers that must not run under an inherited agent scope: the
-   boot's HTTP server is registered inside the primary agent's
-   [[with-agent]], so every request handler inherits that scope
-   (AsyncLocalStorage captures at registration) — the transact boundary
-   stamps every agent-scoped tx `::origin :agent`, so a `:core-seed`
-   write reached from a handler would otherwise lose its managed
-   provenance.
+   Core writers use this when they must not inherit an agent user. Clearing
+   the agent does not select root by itself: establish explicit `::user` and
+   `::process` facts with [[with-tx-context]].
 
      (db/without-agent
-       (fn [] (db/transact! {::db/tx-data [...]})))   ; tx carries NO agent-id"
+       (fn []
+         (db/with-tx-context
+           {::db/user [:seon.agent/id \"root\"]
+            ::db/process [:seon.db.process/id :seon.db.process/boot]}
+           (fn [] (db/transact! {::db/tx-data [...]})))))"
   {:malli/schema [:=> [:catn [::thunk ::thunk]] :any]}
   [f]
   (internal/run-without-agent f))
@@ -387,17 +382,15 @@
 (defn with-tx-context
   "Establish a tx-context for the dynamic extent of `f`.
 
-   `f` is a 0-arg fn; nested calls MERGE. Returns whatever `f` returns (context propagates
-   across `await` points). Keys are typically the 7 `:seon.db/*`
-   tx-meta attrs registered above; any registered scalar attr works.
-   The tx-context IS the ambient scope the transact boundary stamps
-   `::origin` from — but inside an agent scope the managed origins
-   (`:core-seed` / `:config`) are unreachable: the stamp overrides them
-   to `:agent` (`seon.db.internal/derive-origin`).
+   `f` is a 0-arg fn; nested calls merge and context propagates across awaits.
+   Runtime code may carry its own fully namespaced execution values here.
+   Ordinary transaction provenance reads only `::user` and `::process`;
+   everything else remains process-local.
 
      (db/with-tx-context
-       {::db/turn-id turn-id}
-       (fn [] (db/transact! {::db/tx-data [...]})))   ; auto-tagged"
+       {::db/user [:seon.agent/id \"root\"]
+        ::db/process [:seon.db.process/id :seon.db.process/config]}
+       (fn [] (db/transact! {::db/tx-data [...]})))"
   {:malli/schema [:=> [:catn [::tx-context ::tx-context] [::thunk ::thunk]] :any]}
   [ctx-map f]
   (internal/run-with-tx-context ctx-map f))
@@ -474,9 +467,9 @@
 
    Before committing it validates shape, attrs, and values; installs
    datahike schema for any newly-registered attr; and auto-merges the
-   active [[with-tx-context]] / [[with-agent]] context into `:tx-meta` —
-   including the derived `::origin` stamp (provenance comes from the
-   ambient scope; an `::origin` passed in `:tx-meta` is ignored).
+   active [[with-tx-context]] / [[with-agent]] context into `:tx-meta` as the
+   two resolvable refs `::user` and `::process`. Runtime execution values are
+   never copied to the transaction.
 
    Worked examples — REGISTER your attrs first, then transact (every key
    namespaced). NO `await`: an `^:async` call is auto-awaited for you, so
@@ -532,6 +525,186 @@
       (await (internal/transact!* (update arg ::conn #(or % *conn*)))))
     (catch :default e
       (internal/commit-error-envelope e))))
+
+;; ---------------------------------------------------------------------------
+;; Provenance genesis + existing-store migration.
+;; ---------------------------------------------------------------------------
+
+(schema/register! ::provenance-action
+                  [:enum :fresh-genesis :existing-store-migration :converged])
+(schema/register! ::genesis-tx :int)
+(schema/register! ::human-tx   :int)
+(schema/register! ::backfill-tx :int)
+(schema/register! ::backfilled :int)
+(schema/register! ::legacy-origin :keyword)
+(schema/register! ::legacy-agent-id :string)
+(schema/register! ::reason :keyword)
+(schema/register! ::ambiguous-row
+  [:map
+   [::tx :int]
+   [::legacy-origin   {:optional true} ::legacy-origin]
+   [::legacy-agent-id {:optional true} ::legacy-agent-id]
+   [::reason ::reason]])
+(schema/register! ::ambiguous [:vector ::ambiguous-row])
+(schema/register! ::ensure-provenance-request
+  [:map [::conn {:optional true} ::conn]])
+(schema/register! ::ensure-provenance-response
+  [:map
+   [::provenance-action ::provenance-action]
+   [::genesis-tx  {:optional true} :int]
+   [::human-tx    {:optional true} :int]
+   [::backfill-tx {:optional true} :int]
+   [::backfilled ::backfilled]
+   [::ambiguous ::ambiguous]])
+
+(def ^:private genesis-attrs
+  "The minimal native capabilities required before provenance can self-host."
+  [:seon.agent/id :seon.user/id ::user ::process ::process/id])
+
+(defn- attr-installed?
+  [db-value attr]
+  (contains? (:schema db-value) attr))
+
+(defn- lookup-present?
+  [db-value [attr value]]
+  (and (attr-installed? db-value attr)
+       (boolean (d/q '[:find ?e . :in $ ?a ?v :where [?e ?a ?v]]
+                     db-value attr value))))
+
+(defn- genesis-tx-data
+  [db-value]
+  (let [unregistered (into [] (remove schema/registered?) genesis-attrs)]
+    (when (seq unregistered)
+      (throw (ex-info
+               (str "Database genesis requires registered schemas for "
+                    (pr-str unregistered) ". Load their owning namespaces "
+                    "before opening the cluster store.")
+               {::error :seon.db/genesis-schema-unregistered
+                ::attrs unregistered
+                :seon.error/kind :core-bug})))
+    (let [missing-attrs (remove #(attr-installed? db-value %) genesis-attrs)
+          missing-root? (not (lookup-present? db-value [:seon.agent/id "root"]))
+          missing-processes
+          (remove #(lookup-present? db-value (process/lookup-ref %)) process/ids)]
+      (into (internal/malli->datahike-schema missing-attrs)
+            (concat
+              (when missing-root? [{:seon.agent/id "root"}])
+              (map (fn [id] {::process/id id}) missing-processes))))))
+
+(defn- legacy-tx-values
+  [db-value attr]
+  (if (attr-installed? db-value attr)
+    (into {} (d/q '[:find ?tx ?v :in $ ?a :where [?tx ?a ?v]]
+                  db-value attr))
+    {}))
+
+(defn- classify-legacy-tx
+  [tx origin agent-id agent-ids]
+  (let [ambiguous     (fn [reason]
+                        (cond-> {::tx tx ::reason reason}
+                          origin   (assoc ::legacy-origin origin)
+                          agent-id (assoc ::legacy-agent-id agent-id)))
+        agent-known? (contains? agent-ids agent-id)
+        agent-repl   (when agent-known?
+                       {::user [:seon.agent/id agent-id]
+                        ::process (process/lookup-ref ::process/repl)})]
+    (case origin
+      :core-seed {::user [:seon.agent/id "root"]
+                  ::process (process/lookup-ref ::process/boot)}
+      :config    {::user [:seon.agent/id "root"]
+                  ::process (process/lookup-ref ::process/config)}
+      :user      {::user [:seon.user/id "user"]
+                  ::process (process/lookup-ref ::process/repl)}
+      :agent     (or agent-repl (ambiguous :missing-agent-user))
+      :system    (or agent-repl (ambiguous :missing-agent-user))
+      :replay    (or agent-repl (ambiguous :missing-agent-user))
+      :test-run  (or agent-repl (ambiguous :missing-agent-user))
+      (ambiguous :unmapped-origin))))
+
+(defn- legacy-backfill
+  [db-value]
+  (let [origins      (legacy-tx-values db-value ::origin)
+        agent-ids    (legacy-tx-values db-value ::agent-id)
+        current-user (legacy-tx-values db-value ::user)
+        current-proc (legacy-tx-values db-value ::process)
+        known-agents (if (attr-installed? db-value :seon.agent/id)
+                       (into #{} (map first)
+                             (d/q '[:find ?id :where [_ :seon.agent/id ?id]]
+                                  db-value))
+                       #{})]
+    (reduce
+      (fn [{::keys [tx-data ambiguous] :as acc} tx]
+        (if (and (contains? current-user tx) (contains? current-proc tx))
+          acc
+          (let [classified (classify-legacy-tx tx (get origins tx)
+                                               (get agent-ids tx) known-agents)]
+            (if (::reason classified)
+              (update acc ::ambiguous conj classified)
+              (update acc ::tx-data conj
+                      {:db/id tx
+                       ::user (::user classified)
+                       ::process (::process classified)})))))
+      {::tx-data [] ::ambiguous []}
+      (sort (into #{} (concat (keys origins) (keys agent-ids)))))))
+
+(defn ^:async ensure-provenance!
+  "Establish provenance genesis and migrate every honestly mappable old tx.
+
+   Call once immediately after connecting a store and before any ordinary
+   `transact!`. Fresh genesis and the minimal existing-store capability repair
+   are explicitly un-attributed because their own ref attrs/targets do not yet
+   exist. The following root/boot transaction ensures the stable human, then a
+   root/boot transaction backfills old transaction entities whose scalar/origin
+   facts map unambiguously. Ambiguous rows are returned as data and never
+   guessed. A converged store emits no transaction."
+  {:malli/schema
+   [:=> [:cat ::ensure-provenance-request] ::ensure-provenance-response]}
+  [{::keys [conn] :or {conn *conn*}}]
+  (let [c             (internal/resolve-conn conn)
+        before        @c
+        fresh?        (not (lookup-present? before [:seon.agent/id "root"]))
+        base-data     (genesis-tx-data before)
+        base-report   (when (seq base-data)
+                        (await (d/transact! c {:tx-data base-data})))
+        after-base    @c
+        human-missing? (not (lookup-present? after-base [:seon.user/id "user"]))
+        human-env     (when human-missing?
+                        (await
+                          (with-tx-context
+                            {::user [:seon.agent/id "root"]
+                             ::process (process/lookup-ref ::process/boot)}
+                            (fn []
+                              (transact! {::conn c
+                                          ::tx-data [{:seon.user/id "user"}]})))))
+        _             (when (and human-env (false? (::ok? human-env)))
+                        (throw (ex-info
+                                 "Database provenance migration could not ensure the human user."
+                                 {::error (::error human-env)
+                                  :seon.error/kind :core-bug})))
+        {backfill-data ::tx-data ambiguous ::ambiguous}
+        (legacy-backfill @c)
+        backfill-env  (when (seq backfill-data)
+                        (await
+                          (with-tx-context
+                            {::user [:seon.agent/id "root"]
+                             ::process (process/lookup-ref ::process/boot)}
+                            (fn []
+                              (transact! {::conn c ::tx-data backfill-data})))))
+        _             (when (and backfill-env (false? (::ok? backfill-env)))
+                        (throw (ex-info
+                                 "Database provenance migration could not backfill old transactions."
+                                 {::error (::error backfill-env)
+                                  :seon.error/kind :core-bug})))
+        action        (cond fresh? :fresh-genesis
+                            (or base-report human-env backfill-env)
+                            :existing-store-migration
+                            :else :converged)]
+    (cond-> {::provenance-action action
+             ::backfilled (count backfill-data)
+             ::ambiguous ambiguous}
+      base-report  (assoc ::genesis-tx (:max-tx (:db-after base-report)))
+      human-env    (assoc ::human-tx (::tx human-env))
+      backfill-env (assoc ::backfill-tx (::tx backfill-env)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Read path — synchronous over a db value. Each op has a map-in arity
@@ -1144,7 +1317,7 @@
   (internal/malli->datahike-schema attr-keys))
 
 (defn tx-meta-datahike-schema
-  "Datahike schema entries for the 7 `:seon.db/*` tx-meta attrs."
+  "Datahike schema entries for user/process transaction provenance."
   {:malli/schema [:=> [:cat] [:vector :any]]}
   []
   (internal/tx-meta-datahike-schema))
@@ -1167,7 +1340,7 @@
 (defn assert-preconditions!
   "Validate boot preconditions; throws ex-info on failure.
 
-   Conn must have `:keep-history? true` and tx-meta attrs registered.
+   Conn must keep history and have both provenance attrs registered.
    Called at agent boot."
   {:malli/schema
    [:function
@@ -1225,13 +1398,12 @@
    [::datom-count   ::datom-count]
    [::topology      ::topology]])
 
-(defn- row-origin-scan
+(defn- row-provenance-scan
   "ONE pass over every live datom `[e a tx]` — the provenance facts the
    inventory split needs:
-     ::bootstrap-rows — entity ids whose IDENTITY datom (the entity's
-       first assertion, min tx) landed under a tx carrying a MANAGED-CORE
-       origin: `:core-seed` (the append-only boot index/seed) or `:config`
-       (the reconcile-managed declarative set — routes + skills). Both are
+    ::bootstrap-rows — entity ids whose IDENTITY datom (the entity's
+       first assertion, min tx) landed under the boot or config database
+       process. Both are
        core infrastructure the boot minted, as opposed to agent-authored data;
      ::tx-rows — entity ids that ARE transactions (they appear in a
        datom's tx slot) — provenance machinery, not data rows;
@@ -1239,12 +1411,16 @@
        so cardinality-many attrs count each entity once)."
   [db]
   (let [seed-txs (into #{}
-                       (comp (filter (fn [[_ o]] (#{:core-seed :config} o)))
-                             (map first))
+                       (map first)
                        (query {::db db
-                               ::query '[:find ?tx ?o
+                               ::query '[:find ?tx
                                          :where
-                                         [?tx :seon.db/origin ?o]]}))
+                                         [?tx :seon.db/process ?process]
+                                         (or
+                                           [?process :seon.db.process/id
+                                            :seon.db.process/boot]
+                                           [?process :seon.db.process/id
+                                            :seon.db.process/config])]}))
         triples  (query {::db db ::query '[:find ?e ?a ?tx :where [?e ?a _ ?tx]]})
         first-tx (reduce (fn [m [e _ tx]]
                            (update m e #(if % (min % tx) tx)))
@@ -1257,11 +1433,10 @@
      ::pairs          (into #{} (map (fn [[e a _]] [e a])) triples)}))
 
 (defn bootstrap-row-ids
-  "Entity ids whose first assertion carries a managed-core origin.
+  "Entity ids whose first assertion came through boot or config.
 
-   The IDENTITY datom was transacted under a tx whose origin is
-   `:core-seed` (the program-graph `:seon.fn`/`:seon.schema`/`:seon.test`/
-   `:seon.ns` index + the kb seed) or `:config` (the reconcile-managed
+   The IDENTITY datom was transacted through the boot process (the program
+   graph index + seed) or config process (the reconcile-managed
    declarative set: routes + skills) — the rows the boot minted.
    Everything else is data this cluster
    added AFTER bootstrap. Per-ROW, never per-kind-name: an
@@ -1271,24 +1446,26 @@
    browser all read this one mechanism."
   {:malli/schema [:=> [:catn [::db ::db-val]] ::row-ids]}
   [db]
-  (::bootstrap-rows (row-origin-scan db)))
+  (::bootstrap-rows (row-provenance-scan db)))
 
 ;; --- provenance-scoped managed population (the reconcile handle) ----------
-;; Generalizes [[row-origin-scan]]'s hard-wired `:core-seed` first-tx
-;; derivation to an ARBITRARY managed scope (a set of `:seon.db/origin`
-;; values) and pairs each managed entity with the `:db.unique/identity`
+;; Generalizes [[row-provenance-scan]]'s boot/config first-tx derivation to an
+;; arbitrary set of stable database process ids and pairs each managed entity
+;; with the `:db.unique/identity`
 ;; datom(s) it carries — the population `seon.state/reconcile!` diffs a
-;; desired set against. Same single `[?e ?a ?v ?tx]` scan + min-tx-origin
+;; desired set against. Same single `[?e ?a ?v ?tx]` scan + min-tx-process
 ;; reduce; NEVER a per-kind / per-identity-attr AEVT loop.
-(schema/register! ::managed-scope [:set ::origin])
+(schema/register! ::managed-scope [:set ::process/id])
+(schema/register! ::managed-identity-attrs [:set :keyword])
 ;; `[identity-attr identity-value]`. The value spans heterogeneous registered
 ;; id types (string ids, keyword route names), hence `:any` for the value.
 (schema/register! ::identity-pair [:tuple :keyword :any])
 (schema/register! ::managed-identities [:map-of :int [:set ::identity-pair]])
 (schema/register!
   ::managed-identities-request
-  [:map
+   [:map
    [::managed-scope ::managed-scope]
+   [::managed-identity-attrs {:optional true} ::managed-identity-attrs]
    [:seon.db/db   {:optional true} :seon.db/db]
    [::conn        {:optional true} ::conn]])
 
@@ -1296,33 +1473,43 @@
   "Map of `managed-eid → #{[identity-attr identity-value] …}`.
 
    Every entity
-   whose FIRST-assertion (min-tx) origin is in `:seon.db/managed-scope`,
+   whose FIRST-assertion (min-tx) process is in `:seon.db/managed-scope`,
    paired with the `:db.unique/identity` datom(s) it carries. PURE
-   PROVENANCE — ONE `[?e ?a ?v ?tx]` scan + a min-tx-origin reduce (the same
-   derivation as [[row-origin-scan]], generalized from the hard-wired
-   `:core-seed` to an arbitrary scope), never a per-kind / per-identity-attr
+   PROVENANCE — ONE `[?e ?a ?v ?tx]` scan + a min-tx-process reduce (the same
+   derivation as [[row-provenance-scan]], generalized to an arbitrary process
+   scope), never a per-kind / per-identity-attr
    AEVT loop. Eids carrying NO identity attr (component children, tx /
    schema-def rows) are OMITTED: they are removed via their parent's
    component cascade, never directly. THE managed-population
-   [[seon.state/reconcile!]] diffs a desired set against. Reads default to
-   `*conn*`; pass `:seon.db/db` or `:seon.db/conn` for another store."
+   [[seon.state/reconcile!]] diffs a desired set against. Optional
+   `:seon.db/managed-identity-attrs` limits the population to entities carrying
+   one of those identity attributes; this prevents a process that authors
+   several independent desired sets from sweeping facts outside the set being
+   reconciled. Reads default to `*conn*`; pass `:seon.db/db` or
+   `:seon.db/conn` for another store."
   {:malli/schema [:=> [:cat ::managed-identities-request] ::managed-identities]}
-  [{::keys [managed-scope conn] db :seon.db/db :or {conn *conn*}}]
+  [{::keys [managed-scope managed-identity-attrs conn]
+    db :seon.db/db :or {conn *conn*}}]
   (let [db        (or db @(internal/resolve-conn conn))
         triples   (query {::db db ::query '[:find ?e ?a ?v ?tx
                                             :where [?e ?a ?v ?tx]]})
-        tx-origin (into {} (query {::db db
-                                   ::query '[:find ?tx ?o
-                                             :where [?tx :seon.db/origin ?o]]}))
+        tx-process (into {} (query {::db db
+                                    ::query '[:find ?tx ?pid
+                                              :where
+                                              [?tx :seon.db/process ?process]
+                                              [?process :seon.db.process/id ?pid]]}))
         first-tx  (reduce (fn [m [e _ _ tx]]
                             (update m e #(if % (min % tx) tx)))
                           {} triples)
         managed   (into #{}
                         (keep (fn [[e tx]]
-                                (when (contains? managed-scope (get tx-origin tx)) e)))
+                                (when (contains? managed-scope (get tx-process tx)) e)))
                         first-tx)]
     (reduce (fn [m [e a v _]]
-              (if (and (contains? managed e) (schema/identity-attr? a))
+              (if (and (contains? managed e)
+                       (schema/identity-attr? a)
+                       (or (nil? managed-identity-attrs)
+                           (contains? managed-identity-attrs a)))
                 (update m e (fnil conj #{}) [a v])
                 m))
             {} triples)))
@@ -1409,7 +1596,7 @@
   ([] (store-inventory {}))
   ([{::keys [db conn system?] :or {conn *conn*}}]
    (let [db (or db @(internal/resolve-conn conn))
-         {::keys [bootstrap-rows tx-rows pairs]} (row-origin-scan db)
+         {::keys [bootstrap-rows tx-rows pairs]} (row-provenance-scan db)
          core-nses (core-attr-namespaces db bootstrap-rows)
          counts (reduce (fn [m [e a]]
                           (if (or (system-pull-attr? a) (nil? (namespace a))

@@ -343,8 +343,8 @@
                       [(fn-row (str cur-ns-str "/dependency-tile") render-spec
                                purpose-tile-source
                                :read-attrs [:seon.agent/purpose
-                                            :seon.db/agent-id
-                                            :seon.db/origin
+                                            :seon.db/user
+                                            :seon.db/process
                                             :seon.store.wire/id])])))
                 (.then
                   (fn [_]

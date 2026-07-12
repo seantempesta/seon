@@ -67,6 +67,12 @@
         (client/index-schemas)))
 
 (def ^:private fixture-turn-marker 424242)
+(def ^:private eval-collision-agent "evalcollisn001")
+(def ^:private record-eval-agent "recordevalt001")
+(def ^:private tee-autokw-agent "teeautokw00001")
+(def ^:private tee-edge-agent "teeedgetest001")
+(def ^:private tee-retry-agent "teeretrytest01")
+(def ^:private tee39-agent "tee39test00001")
 
 (defn ^:async seed-fixture-turn! [conn]
   (let [response
@@ -97,32 +103,31 @@
        @conn fixture-turn-marker))
 
 (defn- fresh-conn
-  "Promise of a fresh :memory datahike conn (history on — record-eval!'s
-   tx-meta auto-tagging needs it on the real conn; keep parity), with the
-   pod's boot schema transacted."
+  "Promise of a fresh isolated conn with provenance and full pod schema."
   []
-  (let [cfg {:store              {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history?      true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_]
-                 (d/connect (db.id/allocation-connect-config cfg)
-                            {:sync? false})))
-        (.then (fn [conn]
-                 (-> (d/transact!
-                       conn
-                       {:tx-data (into
-                                   (db/malli->datahike-schema
-                                     client/agent-bootstrap-attrs)
-                                   (concat (db/tx-meta-datahike-schema)
-                                           (generator-policy-rows)))})
-                     (.then (fn [_] conn))))))))
+  (client/open-agent-conn!))
 
 (defn- open-agent-conn! []
   (-> (client/open-agent-conn!)
       (.then
         (fn [conn]
-          (-> (d/transact! conn {:tx-data (generator-policy-rows)})
+          (-> (db/with-tx-context
+                {:seon.db/user [:seon.agent/id "root"]
+                 :seon.db/process
+                 [:seon.db.process/id :seon.db.process/boot]}
+                (fn []
+                  (db/transact!
+                    {:seon.db/conn conn
+                     :seon.db/tx-data
+                     (mapv (fn [id] {:seon.agent/id id})
+                           [eval-collision-agent
+                            record-eval-agent
+                            tee-autokw-agent
+                            tee-edge-agent
+                            tee-retry-agent
+                            tee39-agent])})))
+              (.then (fn [_]
+                       (d/transact! conn {:tx-data (generator-policy-rows)})))
               (.then (fn [_] (seed-fixture-turn! conn))))))))
 
 (defn- record!
@@ -283,7 +288,7 @@
             (let [compile-state (aget values 0)
                   conn          (aget values 1)
                   previous      db/*conn*
-                  agent-id      "eval-collision-test"
+                  agent-id      eval-collision-agent
                   !attempts     (atom 0)
                   !conflicted   (atom nil)
                   source
@@ -736,7 +741,7 @@
                   ;; one full eval-batch! per attempt (run-id nil → no fence),
                   ;; exercising eval-form-entry!'s failure-path cleanup wiring.
                   batch (fn [src] (seval/eval-batch! cs (repl-internal/parse-forms src)
-                                                     (symbol uniq) "tee-retry-test"
+                                                     (symbol uniq) tee-retry-agent
                                                      (fixture-turn-id conn) nil))]
               ;; set! (not binding) so *conn* spans the async eval-batch!
               ;; internals (record-eval! reads it post-await), mirroring how
@@ -801,7 +806,7 @@
                                     @conn attr))
                   reg?  (fn [] (contains? (schema/current-keys) attr))
                   batch (fn [src] (seval/eval-batch! cs (repl-internal/parse-forms src)
-                                                     (symbol uniq) "tee39-test"
+                                                     (symbol uniq) tee39-agent
                                                      (fixture-turn-id conn) nil))
                   ;; the failed form: register! RUNS, then a deliberate throw
                   ;; fails the whole `do` (errors-are-values → :ok false).
@@ -896,7 +901,7 @@
                             (fn [_]
                               (client/replay-program-graph!
                                 {:seon.client/conn conn :seon.client/compile-state cs
-                                 :seon.client/agent-id "record-eval-tee-test"})))
+                                 :seon.client/agent-id record-eval-agent})))
                           (.then
                             (fn [stats]
                               (is (= 1 (:seon.client/replay-n-total stats))
@@ -1064,10 +1069,13 @@
           (fn [conn]
             (let [prev db/*conn*
                   k    :probe.selftee.claimed/x]
-              ;; Boot-index claim: shape-literal source under a
-              ;; :core-seed-origin tx (same provenance rule
+              ;; Boot-index claim: shape-literal source under a boot-process
+              ;; transaction (same provenance rule
               ;; prune-core-ghosts! honors).
-              (-> (db/with-tx-context {:seon.db/origin :core-seed}
+              (-> (db/with-tx-context
+                    {:seon.db/user [:seon.agent/id "root"]
+                     :seon.db/process
+                     [:seon.db.process/id :seon.db.process/boot]}
                     (fn []
                       (db/transact!
                         {:seon.db/tx-data [{:seon.schema/key        k
@@ -1122,7 +1130,7 @@
                       (fn [_]
                         (client/replay-program-graph!
                           {:seon.client/conn conn :seon.client/compile-state cs
-                           :seon.client/agent-id "record-eval-tee-test"})))
+                           :seon.client/agent-id record-eval-agent})))
                     (.then
                       (fn [stats]
                         (is (= 0 (:seon.client/replay-n-fail stats))
@@ -1161,7 +1169,7 @@
                       (fn [_]
                         (client/replay-program-graph!
                           {:seon.client/conn conn :seon.client/compile-state cs
-                           :seon.client/agent-id "record-eval-tee-test"})))
+                           :seon.client/agent-id record-eval-agent})))
                     (.then
                       (fn [stats]
                         (is (= 0 (:seon.client/replay-n-fail stats))
@@ -1175,60 +1183,60 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Agent-no-override-core guard (db-is-the-running-system PRD; Sean: agents
-;; must NOT override compiled core/third-party fns). core-origin-fn-syms
-;; detects, by ORIGIN, which of the syms an agent eval just (re)defined are
-;; existing compiled-core fns (current source datom's tx is :core-seed);
+;; must NOT override compiled core/third-party fns). core-boot-fn-syms
+;; detects, by PROCESS, which of the syms an agent eval just (re)defined are
+;; existing compiled-core fns (current source datom's tx is boot-authored);
 ;; reject-core-overrides drops those :seon.fn tee rows so the core display
 ;; row stays intact and the override takes no ephemeral live effect. A NEW
 ;; sym, or one the agent itself owns, passes through.
 ;; ---------------------------------------------------------------------------
 
 (defn- seed-fn-row!
-  "Transact a :seon.fn row for `sym` under tx-origin `origin` on `conn`."
-  [conn origin sym]
-  (db/with-tx-context {:seon.db/origin origin}
+  "Transact a :seon.fn row for `sym` as `user` through `process` on `conn`."
+  [conn user process sym]
+  (db/with-tx-context {:seon.db/user user
+                       :seon.db/process process}
     (fn []
       (db/transact!
         {:seon.db/tx-data [{:seon.fn/sym        sym
-                            :seon.fn/source     (str "(defn x [] " (name origin) ")")
+                            :seon.fn/source
+                            (str "(defn x [] " (name (second process)) ")")
                             :seon.fn/created-at (js/Date.)}]
          :seon.db/conn    conn}))))
 
-(defn- install-tx-meta-schema!
-  "fresh-conn installs only agent-bootstrap-attrs (entity attrs); the
-   tx-meta attrs (`:seon.db/origin`, …) are a SEPARATE schema set that
-   the live pod installs at boot. The override guard reads
-   `[?tx :seon.db/origin :core-seed]`, so the test conn must install
-   it too (otherwise the origin datom never lands and the query is empty
-   — exactly the prod schema, just split across two install calls)."
-  [conn]
-  (db/transact! {:seon.db/tx-data (db/tx-meta-datahike-schema)
-                 :seon.db/conn    conn}))
-
-(deftest core-origin-fn-syms-detects-only-core-seed-syms
+(deftest core-boot-fn-syms-detects-only-boot-syms
   (async done
-    (-> (fresh-conn)
+    (-> (client/open-agent-conn!)
         (.then
           (fn [conn]
             (binding [db/*conn* conn]
-              (-> (install-tx-meta-schema! conn)
-                  (.then (fn [_] (seed-fn-row! conn :core-seed "seon.core.demo/corefn")))
-                  (.then (fn [_] (seed-fn-row! conn :agent "my.agent/agentfn")))
+              (-> (seed-fn-row!
+                    conn
+                    [:seon.agent/id "root"]
+                    [:seon.db.process/id :seon.db.process/boot]
+                    "seon.core.demo/corefn")
+                  (.then
+                    (fn [_]
+                      (seed-fn-row!
+                        conn
+                        [:seon.user/id "user"]
+                        [:seon.db.process/id :seon.db.process/repl]
+                        "my.agent/agentfn")))
                   (.then
                     (fn [_]
                       (let [db* @conn]
-                        (testing "only the :core-seed sym is flagged"
+                        (testing "only the boot-authored sym is flagged"
                           (is (= #{"seon.core.demo/corefn"}
-                                 (seval/core-origin-fn-syms
+                                 (seval/core-boot-fn-syms
                                    db* ["seon.core.demo/corefn"
                                         "my.agent/agentfn"
                                         "my.agent/brand-new-fn"]))))
-                        (testing "an agent-origin sym is NOT flagged"
+                        (testing "a REPL-authored sym is NOT flagged"
                           (is (= #{}
-                                 (seval/core-origin-fn-syms db* ["my.agent/agentfn"]))))
+                                 (seval/core-boot-fn-syms db* ["my.agent/agentfn"]))))
                         (testing "a sym with no row at all is NOT flagged"
                           (is (= #{}
-                                 (seval/core-origin-fn-syms db* ["my.agent/never-seen"])))))))))))
+                                 (seval/core-boot-fn-syms db* ["my.agent/never-seen"])))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -1310,7 +1318,7 @@
                   uniq  (str "probe.teeedge" (rand-int 1000000000))
                   fq    (str uniq "/watcher")
                   batch (fn [src] (seval/eval-batch! cs (repl-internal/parse-forms src)
-                                                     (symbol uniq) "tee-edge-test"
+                                                     (symbol uniq) tee-edge-agent
                                                      (fixture-turn-id conn) nil))
                   read-attrs (fn [] (set (:seon.fn/read-attrs
                                            (db/pull @conn [:seon.fn/read-attrs]
@@ -1500,7 +1508,7 @@
                   uniq  (str "probe.teeautokw" (rand-int 1000000000))
                   fq    (str uniq "/kw-user")
                   batch (fn [src] (seval/eval-batch! cs (repl-internal/parse-forms src)
-                                                     (symbol uniq) "tee-autokw-test"
+                                                     (symbol uniq) tee-autokw-agent
                                                      (fixture-turn-id conn) nil))
                   fn-row (fn [] (db/pull @conn [:seon.fn/sym :seon.fn/source
                                                 :seon.fn/read-attrs]

@@ -1012,30 +1012,16 @@
         100))))
 
 (defn- on-tx
-  "Fan a tx out to the watching agents it affects. Scope rules:
-   - core tx (no `:seon.db/agent-id`) → ALL watching agents;
-   - `:seon.db/origin :core-seed` → ALL watching agents EVEN when
-     agent-stamped (boot-seed runs inside the booting agent's `with-agent`
-     scope, but seed tx is core data every agent's render shows);
-   - otherwise → only the stamping agent.
-   The `::data` browser watches EVERY commit (its row counts tick on any
-   agent's work). All datoms in one commit share the tx, so the first
-   datom's tx eid is the commit's."
+  "Schedule every active view after a committed database change.
+
+   Transaction user/process provenance is historical truth, not a rendering
+   dependency graph: one agent's write may change another agent's derived
+   context. The later observed-read subscription layer narrows this candidate
+   set from actual query results; until then this correctness-first listener
+   batches all currently watched views through the existing trailing window."
   [{:seon.db/keys [db datoms]}]
-  (let [tx-eid   (some (fn [d] (:seon.db/tx d)) datoms)
-        tx-ent   (when tx-eid (d/entity db tx-eid))
-        scope-id (:seon.db/agent-id tx-ent)
-        ;; Core data every agent's render shows: the append-only seed
-        ;; (:core-seed) AND the reconcile-managed declarative set (:config —
-        ;; routes + skills). Both fan out to ALL watching agents.
-        seed?    (#{:core-seed :config} (:seon.db/origin tx-ent))
-        watching (watching-agents)
-        targets  (if (or (nil? scope-id) seed?)
-                   (disj watching ::data)
-                   (filter #(= % scope-id) watching))
-        targets  (cond-> (set targets)
-                   (contains? watching ::data) (conj ::data))]
-    (doseq [aid targets]
+  (when (seq datoms)
+    (doseq [aid (watching-agents)]
       (schedule-push! aid))))
 
 (defn install!

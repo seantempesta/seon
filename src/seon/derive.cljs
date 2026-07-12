@@ -197,24 +197,30 @@
   (= :idle (derive-state db agent-id)))
 
 (defn armable-agent-ids
-  "Agent ids whose DERIVED state is `:idle` — the agents a trigger can WAKE.
-   A FILTER over [[derive-state]] (one rule, never a re-encoded idle query),
-   sorted asc for deterministic boot logs."
+  "Born agent ids whose DERIVED state is `:idle` — the agents a trigger can
+   WAKE. Birth is the presence of the durable `:seon.eval/home-requires` fact;
+   an identity-only lookup target such as provenance genesis's reserved root
+   stub is not yet a runnable agent. A FILTER over [[derive-state]] (one rule,
+   never a re-encoded idle query), sorted asc for deterministic boot logs."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]] [:vector :seon.agent/id]]}
   [db]
   (->> (db/query {:seon.db/db db
-                  :seon.db/query '[:find [?id ...] :where [?a :seon.agent/id ?id]]})
+                  :seon.db/query '[:find [?id ...]
+                                   :where
+                                   [?a :seon.agent/id ?id]
+                                   [?a :seon.eval/home-requires _]]})
        (filter #(= :idle (derive-state db %)))
        sort
        vec))
 
 (defn resumable-agent-ids
-  "Agent ids whose derived state is not `:terminated`.
+  "Born agent ids whose derived state is not `:terminated`.
 
    This is the process-host roster, distinct from [[armable-agent-ids]]: a
    running or paused agent still needs its transient namespace, loop input, and
-   listener reconstructed after process start or code reload. The only
-   exclusion is the durable termination fact."
+   listener reconstructed after process start or code reload. Identity-only
+   lookup targets are not hosts; birth requires `:seon.eval/home-requires`.
+   Among born agents the only exclusion is the durable termination fact."
   {:malli/schema
    [:=> [:catn [:seon.db/db :seon.db/db-val]] [:vector :seon.agent/id]]}
   [db]
@@ -223,6 +229,7 @@
                   '[:find [?id ...]
                     :where
                     [?a :seon.agent/id ?id]
+                    [?a :seon.eval/home-requires _]
                     (not [?a :seon.agent/terminated-at _])]})
        sort
        vec))

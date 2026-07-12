@@ -288,17 +288,14 @@
                   (conj (db/cas-assert [:seon.agent/id id] :seon.agent/run
                                        [:seon.agent.run/id id-of-run]))
                   true
-                  (conj (assoc turn-row :seon.agent.turn/id turn-id)))
-                ;; Temporary debug provenance bridge: the id is now a committed
-                ;; candidate owned by this allocation, never a caller premint.
-                :seon.db/opts {:tx-meta {:seon.db/turn-id turn-id}}})
+                  (conj (assoc turn-row :seon.agent.turn/id turn-id)))})
              :seon.db/conn conn}))]
     (if (false? (:seon.db/ok? allocation))
       allocation
       (let [turn-id (get-in allocation [::db.id/ids ::turn-allocation])]
         (await
           (db/with-tx-context
-            {:seon.db/turn-id turn-id}
+            {::current-id turn-id}
             (fn ^:async close-allocated-turn! []
               (await (close-turn! id turn-id body-fn)))))))))
 
@@ -627,8 +624,9 @@
                      (db/with-agent id
                        (fn []
                          (db/with-tx-context
-                           {:seon.db/agent-id   id
-                            :seon.db/origin     :system}
+                           {:seon.db/user [:seon.agent/id id]
+                            :seon.db/process
+                            [:seon.db.process/id :seon.db.process/repl]}
                            (fn []
                              (open-turn!
                                (cond->

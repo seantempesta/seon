@@ -46,12 +46,13 @@
                      (.finally (fn [] (set! db/*conn* prev)))))))))
 
 (defn- seed-agents!
-  "Transact two bare agent entities (id only — derived :idle) + THE user
-   entity (complete's no-parent delivery target)."
+  "Transact two born idle agents plus the human delivery target."
   []
   (db/transact!
-    {:seon.db/tx-data [{:seon.agent/id "aaa-2606101200"}
-                       {:seon.agent/id "bbb-2606101200"}
+    {:seon.db/tx-data [{:seon.agent/id "aaa-2606101200"
+                        :seon.eval/home-requires []}
+                       {:seon.agent/id "bbb-2606101200"
+                        :seon.eval/home-requires []}
                        {:seon.user/id "user"}]}))
 
 (defn- user-messages-from
@@ -277,10 +278,10 @@
   (async done
     (-> (with-conn
           (fn ^:async run []
-            (testing "empty store = genuine first boot (mint path)"
+            (testing "the reserved identity-only root is not a born agent"
               (is (= [] (agent/armable-agent-ids {:seon.db/db @db/*conn*}))))
             (await (seed-agents!))
-            (testing "both bare agents (no run) are armable, sorted asc"
+            (testing "both born agents with no run are armable, sorted asc"
               (is (= ["aaa-2606101200" "bbb-2606101200"]
                      (agent/armable-agent-ids {:seon.db/db @db/*conn*}))))
             (testing "an agent with an OPEN run is :running → NOT armable"
@@ -436,5 +437,31 @@
                 (is (= :terminated (await (lifecycle/terminate id))))
                 (is (not (some #{id} (runtime-id/hosted)))
                     "durable termination removes every process advertisement")))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest create!-completes-the-bare-provenance-root-once
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (let [root-before (db/entity {:seon.db/ref [:seon.agent/id "root"]})
+                  t-before (db/basis-t)]
+              (is (= "root" (:seon.agent/id root-before))
+                  "provenance genesis installs the root lookup target")
+              (is (nil? (:seon.agent/ctx root-before))
+                  "genesis does not pretend the agent birth already happened")
+              (await (agent/create! {:seon.agent/id "root"}))
+              (let [root-after (db/entity
+                                 {:seon.db/ref [:seon.agent/id "root"]})
+                    t-born (db/basis-t)]
+                (is (> t-born t-before))
+                (is (seq (:seon.agent/ctx root-after)))
+                (is (string?
+                      (:seon.ns/source
+                        (db/entity
+                          {:seon.db/ref [:seon.ns/name :my.agent.root]}))))
+                (await (agent/create! {:seon.agent/id "root"}))
+                (is (= t-born (db/basis-t))
+                    "a born root is an exact no-op and keeps its edits")))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

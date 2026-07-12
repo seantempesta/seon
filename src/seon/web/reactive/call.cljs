@@ -150,8 +150,9 @@
   (await
     (db/with-agent agent-id
       (fn []
-        (db/with-tx-context {:seon.db/origin   :agent
-                             :seon.db/agent-id agent-id}
+        (db/with-tx-context {:seon.db/user [:seon.agent/id agent-id]
+                             :seon.db/process
+                             [:seon.db.process/id :seon.db.process/repl]}
           (fn []
             (let [f (seval/lookup-value fn-sym)]
               (if-not (fn? f)

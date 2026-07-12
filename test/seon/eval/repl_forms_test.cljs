@@ -496,8 +496,11 @@
   (async done
     (with-conn
       (fn []
-        (-> ;; a core-seed-origin row — the compiled-core case.
-            (db/with-tx-context {:seon.db/origin :core-seed}
+        (-> ;; a boot-process row — the compiled-core case.
+            (db/with-tx-context
+              {:seon.db/user [:seon.agent/id "root"]
+               :seon.db/process
+               [:seon.db.process/id :seon.db.process/boot]}
               (fn [] (db/transact!
                        {:seon.db/tx-data
                         [{:seon.fn/sym    "probe.rv.core/pf"
@@ -609,9 +612,10 @@
             (.then
               (fn [_]
                 (db/with-tx-context
-                  {:seon.db/agent-id fixture-agent-id
-                   :seon.db/turn-id  fixture-turn-id
-                   :seon.db/origin   :system}
+                  {:seon.db/user
+                   [:seon.agent/id fixture-agent-id]
+                   :seon.db/process
+                   [:seon.db.process/id :seon.db.process/repl]}
                   (fn ^:async run-two-batches! []
                     (let [cs @repl/!compile-state
                           r1 (await (seval/eval-batch!

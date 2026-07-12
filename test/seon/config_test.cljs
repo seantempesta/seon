@@ -396,10 +396,19 @@
              :schema-flexibility :write :keep-history? true}]
     (-> (d/create-database cfg)
         (.then (fn [_] (d/connect cfg {:sync? false})))
-        (.then (fn [conn]
-                 (-> (d/transact! conn {:tx-data (into (db/malli->datahike-schema attrs)
-                                                       (db/tx-meta-datahike-schema))})
-                     (.then (fn [_] conn))))))))
+        (.then
+          (fn ^:async install [conn]
+            (await (db/ensure-provenance! {:seon.db/conn conn}))
+            (await
+              (db/with-tx-context
+                {:seon.db/user [:seon.agent/id "root"]
+                 :seon.db/process
+                 [:seon.db.process/id :seon.db.process/boot]}
+                (fn []
+                  (db/transact!
+                    {:seon.db/conn conn
+                     :seon.db/tx-data (db/malli->datahike-schema attrs)}))))
+            conn)))))
 
 (deftest accessors-read-the-seeded-singleton-datom
   ;; Seed the singleton into a scratch conn (the boot path), pin `*conn*`, and
@@ -419,7 +428,9 @@
                   singleton (config/resolve-config-singleton manifest)
                   prev db/*conn*]
               (-> (db/with-tx-context
-                    {:seon.db/origin :config}
+                    {:seon.db/user [:seon.agent/id "root"]
+                     :seon.db/process
+                     [:seon.db.process/id :seon.db.process/config]}
                     (fn [] (db/transact! {:seon.db/conn conn :seon.db/tx-data [singleton]})))
                   (.then
                     (fn [_]

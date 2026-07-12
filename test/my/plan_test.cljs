@@ -30,16 +30,6 @@
 (def ^:private a-ref [:seon.agent/id a-id])
 (def ^:private b-ref [:seon.agent/id b-id])
 
-(def ^:private generated-id-policy-facts
-  "Database-authoritative generator facts derived from the runtime registry."
-  (delay
-    (into []
-          (comp
-            (filter #(contains? % :seon.db.id/generator))
-            (map #(select-keys % [:seon.schema/key
-                                  :seon.db.id/generator])))
-          (client/index-schemas))))
-
 (defn- allocate-facts!
   "Mint one identity per keyed fact and commit all facts atomically."
   [conn identity-attr keyed-facts]
@@ -96,32 +86,27 @@
   "Promise of a fresh :memory conn with the pod's boot schema + the user
    entity + agents A and B (the same rows seon.client seeds at boot)."
   []
-  (let [cfg {:store              {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history?      true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_]
-                 (d/connect (db.id/allocation-connect-config cfg)
-                            {:sync? false})))
-        (.then (fn [conn]
-                 (-> (d/transact!
-                       conn
-                       {:tx-data (into (db/malli->datahike-schema
-                                         client/agent-bootstrap-attrs)
-                                       (db/tx-meta-datahike-schema))})
-                     (.then (fn [_]
-                              (d/transact!
-                                conn
-                                {:tx-data @generated-id-policy-facts})))
-                     (.then (fn [_]
-                              ;; These are known recovered identities, not a
-                              ;; fresh-ID creation path under test.
-                              (d/transact!
-                                conn
-                                {:tx-data [{:seon.user/id "user"}
-                                           {:seon.agent/id a-id}
-                                           {:seon.agent/id b-id}]})))
-                     (.then (fn [_] conn))))))))
+  (-> (client/open-agent-conn!)
+      (.then
+        (fn [conn]
+          (-> (db/with-tx-context
+                {:seon.db/user [:seon.agent/id "root"]
+                 :seon.db/process
+                 [:seon.db.process/id :seon.db.process/boot]}
+                (fn []
+                  (db/transact!
+                    {:seon.db/conn conn
+                     ;; These are known recovered identities, not fresh-ID
+                     ;; creation paths under test.
+                     :seon.db/tx-data
+                     [{:seon.agent/id a-id
+                       :seon.eval/home-requires []}
+                      {:seon.agent/id b-id
+                       :seon.eval/home-requires []}]})))
+              (.then (fn [env]
+                       (when-not (:seon.db/ok? env)
+                         (throw (ex-info "plan fixture seed failed" env)))
+                       conn)))))))
 
 (defn- with-conn
   "Fresh seeded conn, `set!` as the ROOT db/*conn* for `body` (conn →

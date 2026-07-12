@@ -770,7 +770,7 @@
   [provider-label error-map]
   (try
     (let [agent-id (db/current-agent-id)
-          turn-id  (:seon.db/turn-id (db/current-tx-context))]
+          turn-id  (:seon.agent.turn/current-id (db/current-tx-context))]
       (log/error!
         (cond-> {:seon.log/source  ::complete
                  :seon.log/message (str provider-label " call failed"

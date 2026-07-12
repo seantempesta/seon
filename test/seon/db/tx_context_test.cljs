@@ -30,16 +30,19 @@
 (deftest inside-scope-returns-ctx
   (testing "inside with-tx-context, current-tx-context returns the established map"
     (let [observed (db/with-tx-context
-                     {:seon.db/origin :agent
-                      :seon.db/agent-id "abcdefgh1234"}
+                     {:seon.db/user [:seon.agent/id "abcdefgh1234"]
+                      :seon.db/process
+                      [:seon.db.process/id :seon.db.process/repl]}
                      #(db/current-tx-context))]
-      (is (= {:seon.db/origin :agent
-              :seon.db/agent-id "abcdefgh1234"}
+      (is (= {:seon.db/user [:seon.agent/id "abcdefgh1234"]
+              :seon.db/process
+              [:seon.db.process/id :seon.db.process/repl]}
              observed)))))
 
 (deftest scope-unwinds-cleanly
   (testing "after with-tx-context returns, current-tx-context is back to nil"
-    (db/with-tx-context {:seon.db/origin :agent}
+    (db/with-tx-context
+      {:seon.db/process [:seon.db.process/id :seon.db.process/repl]}
                         #(db/current-tx-context))
     (is (nil? (db/current-tx-context))
         "outer ctx must be nil after the with-tx-context body returns")))
@@ -48,33 +51,36 @@
   (testing "inner with-tx-context inherits parent keys + adds its own"
     (let [observed
           (db/with-tx-context
-            {:seon.db/origin :agent
-             :seon.db/agent-id "abcdefgh1234"}
+            {:seon.db/user [:seon.agent/id "abcdefgh1234"]}
             (fn []
               (db/with-tx-context
-                {:seon.db/turn-id "iiiiiiii5678"}
+                {:seon.db/process
+                 [:seon.db.process/id :seon.db.process/repl]}
                 #(db/current-tx-context))))]
-      (is (= {:seon.db/origin :agent
-              :seon.db/agent-id "abcdefgh1234"
-              :seon.db/turn-id "iiiiiiii5678"}
+      (is (= {:seon.db/user [:seon.agent/id "abcdefgh1234"]
+              :seon.db/process
+              [:seon.db.process/id :seon.db.process/repl]}
              observed)))))
 
 (deftest nested-with-tx-context-override
   (testing "inner with-tx-context can override a parent key by re-binding it"
     (let [observed
           (db/with-tx-context
-            {:seon.db/origin :agent}
+            {:seon.db/process [:seon.db.process/id :seon.db.process/repl]}
             (fn []
               (db/with-tx-context
-                {:seon.db/origin :replay}
+                {:seon.db/process [:seon.db.process/id :seon.db.process/boot]}
                 #(db/current-tx-context))))]
-      (is (= :replay (:seon.db/origin observed)))))
+      (is (= [:seon.db.process/id :seon.db.process/boot]
+             (:seon.db/process observed)))))
   (testing "after inner scope returns, parent ctx is restored"
     (let [outer-after-inner
           (db/with-tx-context
-            {:seon.db/origin :agent}
+            {:seon.db/process [:seon.db.process/id :seon.db.process/repl]}
             (fn []
-              (db/with-tx-context {:seon.db/origin :replay}
-                                  (constantly nil))
-              (:seon.db/origin (db/current-tx-context))))]
-      (is (= :agent outer-after-inner)))))
+              (db/with-tx-context
+                {:seon.db/process [:seon.db.process/id :seon.db.process/boot]}
+                (constantly nil))
+              (:seon.db/process (db/current-tx-context))))]
+      (is (= [:seon.db.process/id :seon.db.process/repl]
+             outer-after-inner)))))

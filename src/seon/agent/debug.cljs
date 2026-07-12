@@ -140,17 +140,14 @@
                   ":seon.agent/id or call inside (seon.db/with-agent id ...).")}))
 
 ;;; ============================================================
-;;; Turn replay — reconstruct any persisted turn from its capture:
-;;; rendered-as-of (the frozen basis-t), the prompt blob, the reply blob,
-;;; and the tx trail (the :seon.db/turn-id tx-meta join). Errors are
-;;; values throughout — an unknown id / missing blob is a guiding map.
+;;; Turn reconstruction — read one persisted turn from its frozen coordinate,
+;;; prompt blob, and reply blob. Arbitrary eval effects are never replayed.
 ;;; ============================================================
 
 (schema/register! ::prompt        :string)
 (schema/register! ::reply         :string)
 (schema/register! ::prompt-tokens :int)
 (schema/register! ::reply-tokens  :int)
-(schema/register! ::txs           [:vector :int])
 
 (schema/register! ::turn-request
   [:map [:seon.agent.turn/id :seon.agent.turn/id]])
@@ -167,8 +164,7 @@
    [::prompt        {:optional true} ::prompt]
    [::prompt-tokens {:optional true} ::prompt-tokens]
    [::reply         {:optional true} ::reply]
-   [::reply-tokens  {:optional true} ::reply-tokens]
-   [::txs           {:optional true} ::txs]])
+   [::reply-tokens  {:optional true} ::reply-tokens]])
 
 (defn- turn-eid
   "The entity id stored under a turn id, or nil — query, never a
@@ -196,10 +192,11 @@
    Map-in/map-out — `{:seon.agent.turn/id id}` returns the turn's
    `:seon.agent.turn/rendered-as-of` (re-derive its whole structured
    context with `(db/as-of conn t)`), the VERBATIM prompt and raw reply
-   read back from their blobs (with token estimates), the turn's stored
-   error (when it errored), and `::txs` — every tx this turn wrote (the
-   `:seon.db/turn-id` tx-meta join). An unknown id or unreadable blob
-   returns `::ok? false` plus a guiding `::error`; nothing throws."
+   read back from their blobs (with token estimates), and the turn's stored
+   error when present. The durable turn/eval graph is the record; this does not
+   claim that arbitrary database or external effects can be replayed. An
+   unknown id or unreadable blob returns `::ok? false` plus a guiding
+   `::error`; nothing throws."
   {:malli/schema [:=> [:cat ::turn-request] ::turn-response]}
   [{turn-id :seon.agent.turn/id}]
   (if-let [eid (turn-eid turn-id)]
@@ -212,9 +209,6 @@
                       :seon.db/ref eid})
           p (blob-text t :seon.agent.turn/prompt-blob ::prompt ::prompt-tokens)
           r (blob-text t :seon.agent.turn/reply-blob  ::reply  ::reply-tokens)
-          txs (vec (sort (db/query '[:find [?tx ...] :in $ ?tid
-                                     :where [?tx :seon.db/turn-id ?tid]]
-                                   turn-id)))
           errs (keep ::error [p r])]
       (cond-> (merge (select-keys t [:seon.agent.turn/id :seon.agent.turn/at
                                      :seon.agent.turn/status
@@ -222,7 +216,7 @@
                                      :seon.agent.turn/error])
                      (dissoc p ::error)
                      (dissoc r ::error)
-                     {::ok? (empty? errs) ::txs txs})
+                     {::ok? (empty? errs)})
         (seq errs) (assoc ::error (str/join "; " errs))))
     {::ok? false
      :seon.agent.turn/id turn-id
@@ -335,19 +329,12 @@
   20)
 
 (defn- tx-agent-id
-  "The `:seon.db/agent-id` tx-meta of the tx that wrote error `eid`."
+  "The agent user whose transaction wrote error `eid`."
   [db eid]
   (db/query '[:find ?aid . :in $ ?e
               :where [?e :seon.error/fault _ ?tx]
-                     [?tx :seon.db/agent-id ?aid]]
-            db eid))
-
-(defn- tx-turn-id
-  "The `:seon.db/turn-id` tx-meta of the tx that wrote error `eid`."
-  [db eid]
-  (db/query '[:find ?tid . :in $ ?e
-              :where [?e :seon.error/fault _ ?tx]
-                     [?tx :seon.db/turn-id ?tid]]
+                     [?tx :seon.db/user ?author]
+                     [?author :seon.agent/id ?aid]]
             db eid))
 
 (defn- top-frame-str
@@ -470,11 +457,9 @@
          first)))
 
 (defn- error-turn
-  "The turn linked to error `eid`: the tx's own `:seon.db/turn-id` when
-   the recording tx was turn-scoped, else the [[turn-active-at]] window."
-  [db eid aid at]
-  (or (turn-by-id db (tx-turn-id db eid))
-      (turn-active-at db aid at)))
+  "The turn active for agent `aid` at the error's persisted coordinate."
+  [db aid at]
+  (turn-active-at db aid at))
 
 (defn error
   "Full detail for one persisted error: envelope + turn/agent joins.
@@ -482,16 +467,15 @@
    Map-in/map-out — `{::eid eid}` (from [[errors]]) returns the whole
    persisted projection (message, fault, `at`, frames table sorted by
    index, args-edn, data-edn, stack) plus the JOINS: the recording
-   agent's id and the turn active at that basis-t (tx turn-id when the
-   write was turn-scoped, else the agent's turns' rendered-as-of
-   window) — `::turn-eid` + `:seon.agent.turn/id` so [[turn]] composes.
+   agent's id and the turn active at that basis-t — `::turn-eid` plus
+   `:seon.agent.turn/id` so [[turn]] composes.
    An unknown eid returns `::ok? false` with a guiding `::error`."
   {:malli/schema [:=> [:cat ::error-request] ::error-response]}
   [{eid ::eid}]
   (let [db @db/*conn*]
     (if-let [e (pull-error db eid)]
       (let [aid (tx-agent-id db eid)
-            [teid tid t-as-of] (error-turn db eid aid (:seon.error/at e))]
+            [teid tid t-as-of] (error-turn db aid (:seon.error/at e))]
         (cond-> (merge {::ok? true ::eid eid}
                        (select-keys e [:seon.error/fault :seon.error/message
                                        :seon.error/at :seon.error/stack
@@ -590,7 +574,7 @@
             aid      (tx-agent-id db eid)
             fn-sym   (fn-sym-from-data-edn data-edn)
             args-edn (readable-args-edn args-edn)
-            [teid tid t-as-of] (error-turn db eid aid at)]
+            [teid tid t-as-of] (error-turn db aid at)]
         (if-not at
           {::ok? false ::eid eid
            ::error (str "error " eid " has no :seon.error/at (recorded before "

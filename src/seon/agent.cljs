@@ -358,7 +358,7 @@
 (schema/register! ::resumable-agent-ids-response [:vector :seon.agent/id])
 
 (defn armable-agent-ids
-  "Agent ids whose DERIVED state is `:idle` — the ones a trigger can WAKE.
+  "Born agent ids whose DERIVED state is `:idle` — the ones a trigger can WAKE.
 
    `:idle` = not `:terminated` AND with no OPEN run. Open a fresh run for one;
 
@@ -371,10 +371,11 @@
   (derive/armable-agent-ids (or db @db/*conn*)))
 
 (defn resumable-agent-ids
-  "Agent ids this process must host: every agent without a termination fact.
+  "Born agent ids this process must host: each without a termination fact.
 
    Unlike [[armable-agent-ids]], this includes running and paused agents; those
-   states still require fresh process handles after a cold start or reload."
+   states still require fresh process handles after a cold start or reload.
+   An identity-only provenance-genesis target is not born and is omitted."
   {:malli/schema
    [:=> [:cat ::resumable-agent-ids-request]
     ::resumable-agent-ids-response]}
@@ -414,17 +415,26 @@
 
    Pure data. The caller commits this vector once, so no observer can see an
    identity without its configured context, scalar dials, and structural home
-   namespace."
-  [id purpose default-turn-limit parent]
+   namespace. `existing` is used only to finish the reserved root's bare
+   provenance-genesis stub: facts already present are preserved, never reset."
+  [id purpose default-turn-limit parent existing]
   (let [context       (ctx/initial-agent-context {:seon.agent/id id})
         home-requires (or (:seon.eval/home-requires context)
                           home/home-ns-require-specs)
-        agent-row     (cond-> (assoc context :seon.agent/id id)
-                        (and (string? purpose) (not (str/blank? purpose)))
+        missing-context
+        (reduce-kv (fn [m k v]
+                     (if (contains? existing k) m (assoc m k v)))
+                   {}
+                   context)
+        agent-row     (cond-> (assoc missing-context :seon.agent/id id)
+                        (and (not (contains? existing :seon.agent/purpose))
+                             (string? purpose) (not (str/blank? purpose)))
                         (assoc :seon.agent/purpose purpose)
-                        (some? default-turn-limit)
+                        (and (not (contains? existing
+                                                     :seon.agent/default-turn-limit))
+                             (some? default-turn-limit))
                         (assoc :seon.agent/default-turn-limit default-turn-limit)
-                        parent
+                        (and (not (contains? existing :seon.agent/parent)) parent)
                         (assoc :seon.agent/parent parent))]
     [agent-row
      (home/initial-ns-entity
@@ -434,8 +444,11 @@
   "Reconcile a known agent entity by its durable id.
 
    State is DERIVED: a fresh agent with no open run is `:idle`. Idempotent:
-   re-calling with the same id performs no transaction — a resumed agent keeps
-   its own purpose, dials, home declaration, and edited/removed context. A new entity
+   re-calling with the same born id performs no transaction — a resumed agent keeps
+   its own purpose, dials, home declaration, and edited/removed context. The one
+   exception is the reserved root lookup target installed by provenance genesis:
+   if it has no durable home declaration yet, this function completes that bare
+   stub without replacing any fact already present. A new entity
    gets `:seon.agent/purpose` ONLY when the human stated one; otherwise the
    attr stays ABSENT (optional = absent) until the agent derives a purpose and
    transacts it. Purpose is ENTITY DATA, never agent-directed instruction text
@@ -451,17 +464,24 @@
    entity; callers must branch instead of chasing a ghost."
   {:malli/schema [:=> [:cat ::create-request] ::create-response]}
   [{:seon.agent/keys [id purpose default-turn-limit]}]
-  (if (some? (db/entity {:seon.db/ref [:seon.agent/id id]}))
-    {:seon.agent/id id}
-    (let [res (await (db/transact!
-                       {:seon.db/tx-data
-                        (initial-agent-tx id purpose default-turn-limit nil)}))]
+  (let [entity (db/entity {:seon.db/ref [:seon.agent/id id]})
+        home-source (:seon.ns/source
+                      (db/entity {:seon.db/ref
+                                  [:seon.ns/name (keyword (str (home/home-ns id)))]}))
+        complete? (and entity
+                       (or (not= "root" id) (string? home-source)))]
+    (if complete?
+      {:seon.agent/id id}
+      (let [res (await (db/transact!
+                         {:seon.db/tx-data
+                          (initial-agent-tx id purpose default-turn-limit nil
+                                            entity)}))]
       (if (false? (:seon.db/ok? res))
         (do (js/console.error
               (str "seon.agent/create! transact FAILED for " id ": "
                    (:seon.error/message (:seon.db/error res))))
             res)
-        {:seon.agent/id id}))))
+          {:seon.agent/id id})))))
 
 (schema/register!
   ::mint-request
@@ -490,7 +510,7 @@
              (fn [ids]
                (let [id (get ids :seon.agent/id)]
                  {:seon.db/tx-data
-                  (initial-agent-tx id purpose default-turn-limit parent)}))
+                  (initial-agent-tx id purpose default-turn-limit parent nil)}))
              :seon.db/conn db/*conn*}))
         id (get-in env [::db.id/ids :seon.agent/id])]
     (if (false? (:seon.db/ok? env))

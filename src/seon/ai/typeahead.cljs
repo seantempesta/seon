@@ -538,7 +538,7 @@
 
 (defn- node-authors
   "attr → authoring agent-id of the node's CURRENT datoms, from the tx
-   provenance stamp (`:seon.db/agent-id` tx-meta). {} when the node's
+   user ref (`:seon.db/user` → `:seon.agent/id`). {} when the node's
    identity entry doesn't resolve."
   [db id-entry]
   (let [eid (when id-entry
@@ -551,7 +551,8 @@
                                         :in $ ?e
                                         :where
                                         [?e ?a _ ?tx]
-                                        [?tx :seon.db/agent-id ?aid]]
+                                        [?tx :seon.db/user ?author]
+                                        [?author :seon.agent/id ?aid]]
                        :seon.db/args [eid]}))
       {})))
 

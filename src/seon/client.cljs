@@ -52,6 +52,7 @@
     ;; Pull in the agent's required namespaces at compile time so all
     ;; schemas are registered before start-runtime! runs.
     [seon.agent :as agent]
+    [seon.agent.home :as home]
     ;; Lifecycle functions (wait/complete/terminate) — host-bundled so the agent
     ;; home ns can `:refer` them; required here so the build includes the ns.
     [seon.agent.lifecycle]
@@ -69,6 +70,7 @@
     [seon.ai.dispatch :as ai.dispatch]
     [seon.db :as db]
     [seon.db.id :as id]
+    [seon.db.process :as db.process]
     [seon.error :as error]
     [seon.eval :as seval]
     [seon.log :as log]
@@ -616,6 +618,29 @@
           (map #(select-keys % [:seon.schema/key :seon.db.id/generator])))
         (index-schemas)))
 
+(defn- ^:async install-runtime-schema!
+  "Install the complete runtime schema, plus optional identity-generator facts,
+   as root through the boot process. Provenance genesis must already exist."
+  [conn generator-facts?]
+  (await
+    (db/with-tx-context
+      {:seon.db/user [:seon.agent/id "root"]
+       :seon.db/process (db.process/lookup-ref :seon.db.process/boot)}
+      (fn ^:async install! []
+        (let [schema-env
+              (await (db/transact! {:seon.db/conn conn
+                                    :seon.db/tx-data (pod-full-schema)}))]
+          (when (false? (:seon.db/ok? schema-env))
+            (throw (ex-info "Runtime schema installation failed." schema-env))))
+        (when generator-facts?
+          (let [policy-env
+                (await (db/transact! {:seon.db/conn conn
+                                      :seon.db/tx-data
+                                      (generator-policy-facts)}))]
+            (when (false? (:seon.db/ok? policy-env))
+              (throw (ex-info "Generator-policy installation failed."
+                              policy-env)))))))))
+
 (defn ^:async open-agent-conn!
   "Open a FRESH ISOLATED `:memory` conn carrying the pod's full
    bootstrap schema. Test/diagnostic surface ONLY — the pod itself
@@ -631,11 +656,13 @@
     (await (d/create-database cfg))
     (let [conn (await (d/connect (id/allocation-connect-config cfg)))]
       (id/assert-allocation-writer! conn)
-      (await (d/transact! conn (pod-full-schema)))
-      ;; A fresh isolated database carries the same authoritative identity
-      ;; policies as a cold-started cluster, so diagnostics exercise the real
-      ;; allocation boundary without fixture-specific bypasses.
-      (await (d/transact! conn {:tx-data (generator-policy-facts)}))
+      ;; Establish the minimal root/process boundary first. Every subsequent
+      ;; schema/policy write is an ordinary attributed transaction, including
+      ;; on restarts of an existing store.
+      (await (db/ensure-provenance! {:seon.db/conn conn}))
+      ;; Isolated diagnostic databases carry the same authoritative identity
+      ;; policies as a cold-started cluster.
+      (await (install-runtime-schema! conn true))
       conn)))
 
 (defn ^:async open-cluster-conn!
@@ -650,10 +677,13 @@
         exists before the peer attaches.
      3. `d/connect` — reads go local from here; writes dispatch to the
         `:seon-wire` writer (db-name-routed to this cluster).
-     4. schema transact — the full Malli-derived attr schema goes OVER
-        THE WIRE to the JVM writer; idempotent `:db/ident` upserts, so
-        re-booting against the populated store re-asserts no-ops.
-     5. listen adapter — foreign writers' txs fire this conn's native
+     4. provenance genesis/migration — ensure the minimal root/process attrs
+        and refs before any ordinary transaction can be submitted.
+     5. schema transact — the full Malli-derived attr schema goes OVER
+        THE WIRE to the JVM writer as root/boot; `:db/ident` upserts make
+        repeated installation safe. Exact no-write reconciliation is a
+        later boot-state step, not an implied property of upsert.
+     6. listen adapter — foreign writers' txs fire this conn's native
         listeners (wake triggers + web UI SSE)."
   {:malli/schema [:=> [:cat] :any]}
   []
@@ -665,7 +695,8 @@
                        (str "cluster " store.wire/cluster-name
                             ": " store.wire/default-store-path
                             " (writer: " store.wire/default-sock-path ")"))
-    (await (d/transact! conn (pod-full-schema)))
+    (await (db/ensure-provenance! {:seon.db/conn conn}))
+    (await (install-runtime-schema! conn false))
     (await (store.wire/start-listen-adapter! {:seon.store.wire/conn conn}))
     conn))
 
@@ -694,9 +725,9 @@
 ;;     cycle detection + load-once.
 ;;   - Per-ns try/catch: a failing ns logs a `:seon.log` :warn and the load
 ;;     CONTINUES to the next ns. NO 2-pass retry, NO per-fn fallback.
-;;   - The replay-level (with-tx-context {:seon.db/origin :replay
-;;     :seon.db/replay? true}) tags only the log-write transactions — no
-;;     eval entities are written.
+;;   - Declaration loading runs as the owning agent through the REPL process.
+;;     Its runtime-only `:seon.eval/replay?` flag suppresses eval tee writes;
+;;     the flag never enters transaction metadata.
 ;; ---------------------------------------------------------------------------
 
 (declare core-ns-set)
@@ -886,9 +917,9 @@
                   :any]}
   [{::keys [conn compile-state agent-id]}]
   (db/with-tx-context
-    {:seon.db/origin   :replay
-     :seon.db/replay?  true
-     :seon.db/agent-id agent-id}
+    {:seon.db/user       [:seon.agent/id agent-id]
+     :seon.db/process    (db.process/lookup-ref :seon.db.process/repl)
+     :seon.eval/replay?  true}
     (fn ^:async run-replay! []
       (let [db       @conn
             agents   (agent-ns-set db)
@@ -982,8 +1013,8 @@
 ;;   3. index-core!   — :seon.ns + :seon.fn rows from REAL runtime
 ;;                           introspection (var meta + source file-read)
 ;;
-;; Each transact carries `:seon.db/origin :core-seed` in tx-meta so
-;; audit queries can isolate seed datoms from agent-produced ones.
+;; Each transaction carries root/boot provenance refs, so audit queries can
+;; isolate boot-managed datoms from agent-produced ones.
 ;; ---------------------------------------------------------------------------
 
 (defn seed-core!
@@ -999,8 +1030,8 @@
    carrying NO rows — re-running asserts zero new datoms and never
    clobbers runtime appends.
 
-   Pure fn. Caller transacts via `db/transact!` with
-   `:seon.db/origin :core-seed`."
+   Pure fn. Caller transacts via `db/transact!` as root through the boot
+   database process."
   {:malli/schema [:=> [:cat] :any]}
   []
   (into [{:seon.user/id "user"}]
@@ -1737,8 +1768,7 @@
    shape the index-core-test guards rely on).
 
    Fns whose source can't be read are OMITTED, not stubbed — the corpus stays
-   honest. Returns the tx-data vector; caller transacts under
-   `:seon.db/origin :core-seed`."
+   honest. Returns the tx-data vector; caller transacts as root/boot."
   {:malli/schema [:=> [:cat] :any]}
   []
   (let [now     (js/Date.)
@@ -1895,7 +1925,7 @@
    fn spec or schema generator policy that DISAPPEARED is explicitly retracted
    (upsert cannot remove a datom). Fn/test re-emits are provenance-guarded
    the same way [[prune-core-ghosts!]] is: only rows whose `:source`
-   datom's tx carries `:seon.db/origin :core-seed` are overwritten — an
+   datom's transaction refs the boot process are overwritten — an
    agent-authored row (detect-and-tee, runner) with a core sym is NEVER
    clobbered by the boot index. Returns a Promise of the tx-data vector."
   {:malli/schema [:=> [:catn [::conn :any]] :any]}
@@ -1948,7 +1978,8 @@
                                       [?f :seon.fn/source _ ?tx])
                                  (and [?f :seon.test/sym ?sym]
                                       [?f :seon.test/source _ ?tx]))
-                               [?tx :seon.db/origin :core-seed]]
+                               [?tx :seon.db/process ?process]
+                               [?process :seon.db.process/id :seon.db.process/boot]]
                              db))
         ;; ns rows dedup on name AND source: a `:seon.ns` row re-emits when
         ;; its stored `:seon.ns/source` differs from the freshly-built one —
@@ -1967,19 +1998,25 @@
         ;; identity upsert cannot remove a card-one datom. An agent's own
         ;; `(seon.schema/register! …)` TEE row remains protected by its
         ;; replayable call-form source discriminator.
+        schema-sources
+        (into {} (d/q '[:find ?k ?src
+                        :where
+                        [?s :seon.schema/key ?k]
+                        [?s :seon.schema/source ?src]]
+                      db))
+        schema-generators
+        (into {} (d/q '[:find ?k ?generator
+                        :where
+                        [?s :seon.schema/key ?k]
+                        [?s :seon.db.id/generator ?generator]]
+                      db))
         have-schs
         (into {}
-              (map (fn [[k src generator]]
+              (map (fn [[k src]]
                      [k {:seon.schema/source src
-                         :seon.db.id/generator generator}]))
-              (d/q '[:find ?k ?src ?generator
-                     :in $ ?absent
-                     :where
-                     [?s :seon.schema/key ?k]
-                     [?s :seon.schema/source ?src]
-                     [(get-else $ ?s :seon.db.id/generator ?absent)
-                      ?generator]]
-                   db no-generator))
+                         :seon.db.id/generator
+                         (get schema-generators k no-generator)}]))
+              schema-sources)
         ;; Test rows dedup on sym AND source (same drift rule as ns rows).
         have-tsts (into {} (d/q '[:find ?t ?src
                                   :where
@@ -2060,12 +2097,9 @@
 
    A stored row is a GHOST iff ALL of:
 
-     1. CORE-CLAIMED — its `:source` datom's tx carries
-        `:seon.db/origin :core-seed`, the provenance the boot-index
-        transacts land under (boundary-stamped from the unscoped
-        `:core-seed` tx-context — unforgeable from inside an agent
-        scope). Agent-authored rows (detect-and-tee,
-        replay, runner) carry other origins and are NEVER candidates —
+     1. CORE-CLAIMED — its `:source` datom's transaction refs the stable boot
+        process and root user. Agent-authored rows (detect-and-tee,
+        declaration loading, runner) use the REPL process and are NEVER candidates —
         even when their shape is identical and their ns is absent from
         this build.
      2. ABSENT FROM THIS BOOT — its ident (`:seon.ns/name` /
@@ -2114,7 +2148,8 @@
                         (and [?e :seon.schema/key    ?ident]
                              [?e :seon.schema/source ?source ?tx]
                              [(ground :schema) ?kind]))
-                      [?tx :seon.db/origin :core-seed]]
+                      [?tx :seon.db/process ?process]
+                      [?process :seon.db.process/id :seon.db.process/boot]]
                     db)
         ghosts (->> rows
                     (keep (fn [[e ident source kind]]
@@ -2137,14 +2172,14 @@
                      (str/join ", " (map (fn [{::keys [ghost-kind ident]}]
                                            (str (name ghost-kind) " " (pr-str ident)))
                                          ghosts)))}))
-      ;; `:core-seed` writer → runs OUTSIDE any (inherited) agent scope,
-      ;; same writer posture as boot-seed!: the transact boundary stamps
-      ;; the origin from the ambient scope, and a managed origin is only
-      ;; reachable outside an agent scope.
+      ;; Boot maintenance runs outside any inherited agent scope and names
+      ;; root/boot explicitly.
       (let [res (await (db/without-agent
                          (fn []
                            (db/with-tx-context
-                             {:seon.db/origin :core-seed}
+                             {:seon.db/user [:seon.agent/id "root"]
+                              :seon.db/process
+                              (db.process/lookup-ref :seon.db.process/boot)}
                              (fn []
                                (db/transact!
                                  conn
@@ -2239,15 +2274,8 @@
    is far worse than a crashed boot."
   {:malli/schema [:=> [:cat ::boot-seed-request] ::boot-seed-response]}
   [{conn :seon.db/conn}]
-  ;; WRITER-ENFORCED scope: the whole seed runs OUTSIDE any agent scope
-  ;; (`db/without-agent`, ALS exit). Its txs establish managed origins
-  ;; (`:core-seed` / `:config`) via `with-tx-context`, and the transact
-  ;; boundary stamps `:seon.db/origin` from that ambient scope. Under an
-  ;; INHERITED agent scope — e.g. a call reached from an HTTP handler
-  ;; (the boot registers the server inside the primary agent's
-  ;; `with-agent`, so every request handler inherits that scope) — the
-  ;; stamp would override the managed origins to `:agent` and the seed
-  ;; rows would lose their core provenance.
+  ;; The seed runs outside any inherited agent scope and explicitly selects
+  ;; root plus the boot/config process for each transaction.
   (await
     (db/without-agent
       (fn ^:async seed-unscoped! []
@@ -2269,11 +2297,13 @@
                                              (:seon.error/message error))
                                         {:seon.client/seed-step step
                                          :seon.db/error error}))))]
-              ;; APPEND-ONLY core (origin :core-seed): introspection that is
+              ;; APPEND-ONLY root/boot core: introspection that is
               ;; not a desired set, never retracted.
               (await
                 (db/with-tx-context
-                  {:seon.db/origin :core-seed}
+                  {:seon.db/user [:seon.agent/id "root"]
+                   :seon.db/process
+                   (db.process/lookup-ref :seon.db.process/boot)}
                   (fn ^:async seed! []
                     (check! :entity-schemas
                             (await (db/transact!
@@ -2300,12 +2330,11 @@
               ;; reconcile! — upsert-by-identity (idempotent on an Nth boot)
               ;; AND retract-stale, so a route dropped from the manifest / a
               ;; skill removed from disk is RETRACTED. The singleton rides the
-              ;; SAME `#{:config}` scope: folding it INTO the desired set is
-              ;; what keeps it retract-PROTECTED (a `:config`-origin row absent
-              ;; from desired is swept — the Phase-1 reconcile-retract trap the
-              ;; repl-mode seed hit; now the singleton owns the desired-set
-              ;; slot). reconcile! never rejects; its error-value is checked +
-              ;; thrown (surface-errors-loudly).
+              ;; SAME config-process scope: folding it INTO the desired set is
+              ;; what keeps it retract-PROTECTED. Identity-attr scope prevents
+              ;; that process from sweeping unrelated populations it authored.
+              ;; reconcile! never rejects; its error-value is checked + thrown
+              ;; (surface-errors-loudly).
               (let [singleton (config/resolve-config-singleton manifest)
                     desired (-> (vec (config/resolve-routes
                                        (route/core-routes-tx)
@@ -2314,11 +2343,18 @@
                                 (conj singleton))
                     recon   (await
                               (db/with-tx-context
-                                {:seon.db/origin :config}
+                                {:seon.db/user [:seon.agent/id "root"]
+                                 :seon.db/process
+                                 (db.process/lookup-ref :seon.db.process/config)}
                                 (fn ^:async reconcile-declarative! []
                                   (state/reconcile!
-                                    {:seon.state/desired    desired
-                                     :seon.db/managed-scope #{:config}
+                                    {:seon.state/desired desired
+                                     :seon.db/managed-scope
+                                     #{:seon.db.process/config}
+                                     :seon.db/managed-identity-attrs
+                                     #{:seon.route/name
+                                       :my.skills/name
+                                       :seon.config/id}
                                      :seon.db/conn          conn}))))]
                 (when (false? (:seon.state/ok? recon))
                   (throw (ex-info
@@ -2337,7 +2373,10 @@
                   (when (seq retracts)
                     (check! :config-heal
                             (await (db/with-tx-context
-                                     {:seon.db/origin :config}
+                                     {:seon.db/user [:seon.agent/id "root"]
+                                      :seon.db/process
+                                      (db.process/lookup-ref
+                                        :seon.db.process/config)}
                                      (fn ^:async heal-config! []
                                        (db/transact! {:seon.db/conn conn
                                                       :seon.db/tx-data retracts})))))))))
@@ -2381,24 +2420,32 @@
                              (str "crash recovery: closed " (count closed)
                                   " orphaned run(s) :crashed")
                              {:seon.agent.run/closed closed})))
-      (let [all-ids-before
-            (->> (db/query {:seon.db/db @conn
-                            :seon.db/query
-                            '[:find [?id ...] :where [?a :seon.agent/id ?id]]})
-                 sort vec)
-            created-ids
-            (if (empty? all-ids-before)
-              (let [created (await (agent/create! {:seon.agent/id "root"}))]
-                (when (false? (:seon.db/ok? created))
-                  (throw (ex-info "start-runtime!: root genesis failed" created)))
-                ["root"])
-              [])
+      (let [root-home [:seon.ns/name (keyword (str (home/home-ns "root")))]
+            root-ready-before?
+            (string? (:seon.ns/source (db/entity {:seon.db/ref root-home})))
+            ;; Provenance genesis necessarily creates a bare root lookup
+            ;; target before normal attributed writes are legal. Complete that
+            ;; reserved stub through the ordinary atomic birth compiler; an
+            ;; already-born root is an exact no-op and keeps its edits.
+            root-result
+            (await
+              (db/with-tx-context
+                {:seon.db/user [:seon.agent/id "root"]
+                 :seon.db/process
+                 (db.process/lookup-ref :seon.db.process/boot)}
+                (fn [] (agent/create! {:seon.agent/id "root"}))))
+            _ (when (false? (:seon.db/ok? root-result))
+                (throw (ex-info "start-runtime!: root birth failed" root-result)))
+            created-ids (if root-ready-before? [] ["root"])
             compile-state (await compile-promise)
             prune-stats (await (prune-core-ghosts! conn))
             resumable-ids (agent/resumable-agent-ids {:seon.db/db @conn})
-            all-ids (if (seq all-ids-before)
-                      all-ids-before
-                      created-ids)
+            all-ids (->> (db/query
+                           {:seon.db/db @conn
+                            :seon.db/query
+                            '[:find [?id ...]
+                              :where [?a :seon.agent/id ?id]]})
+                         sort vec)
             primary (or (first resumable-ids) (first all-ids) "root")]
         (log/info-console! "seon.client/start-runtime!"
                            (str "boot-index GC: "

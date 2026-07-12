@@ -164,9 +164,8 @@
    every renderer or steal surface focus. A renderer that intentionally shows
    provenance should derive it behind a domain-facing function/read model."
   #{:db/txInstant
-    :seon.db/agent-id
-    :seon.db/eval-id
-    :seon.db/origin
+    :seon.db/user
+    :seon.db/process
     :seon.store.wire/id})
 
 (defn- source-attrs
@@ -289,7 +288,8 @@
                            :in $ ?aid [?a ...]
                            :where
                            [?e ?a _ ?tx]
-                           [?tx :seon.db/agent-id ?aid]]
+                           [?tx :seon.db/user ?author]
+                           [?author :seon.agent/id ?aid]]
                          :seon.db/args [id (vec attrs)]})))
           source-by-agent?
           (boolean
@@ -298,7 +298,9 @@
                     :seon.db/query
                     '[:find ?tx
                       :in $ ?tx ?aid
-                      :where [?tx :seon.db/agent-id ?aid]]
+                      :where
+                      [?tx :seon.db/user ?author]
+                      [?author :seon.agent/id ?aid]]
                     :seon.db/args [src-tx id]})))
           touches (cond-> []
                     source-by-agent? (conj src-tx)
@@ -311,7 +313,7 @@
 
    Candidates are THIS agent's authored tile fns: `:seon.fn` rows whose
    `:seon.fn/source` datom's tx carries the agent's provenance
-   (`:seon.db/agent-id` tx-meta — the ONE who-wrote-what mechanism) and
+   (`:seon.db/user` ref — the one who-wrote-what mechanism) and
    whose registered spec's output declares `:seon.render/hiccup`
    ([[output-twin-keys]] — the same structural detection as auto-run).
    Each candidate's TOUCH coordinate is the max tx over (a) its own
@@ -330,7 +332,7 @@
   [{db :seon.db/db id :seon.agent/id}]
   (let [installed (db/installed-schema db)]
     (if-not (every? installed [:seon.fn/sym :seon.fn/source :seon.fn/spec
-                               :seon.db/agent-id])
+                               :seon.db/user])
       {}
       (let [;; `get-else` on a NEVER-INSTALLED attr yields NO rows at all
             ;; (not its default), so the privacy column joins the query
@@ -341,7 +343,8 @@
                      :in $ ?aid
                      :where
                      [?f :seon.fn/source ?src ?srctx]
-                     [?srctx :seon.db/agent-id ?aid]
+                     [?srctx :seon.db/user ?author]
+                     [?author :seon.agent/id ?aid]
                      [?f :seon.fn/sym ?sym]
                      [?f :seon.fn/spec ?spec]
                      [(get-else $ ?f :seon.fn/private? false) ?priv]]
@@ -349,7 +352,8 @@
                      :in $ ?aid
                      :where
                      [?f :seon.fn/source ?src ?srctx]
-                     [?srctx :seon.db/agent-id ?aid]
+                     [?srctx :seon.db/user ?author]
+                     [?author :seon.agent/id ?aid]
                      [?f :seon.fn/sym ?sym]
                      [?f :seon.fn/spec ?spec]])
             ;; stored read-set (C28) — nil for a pre-structural row (or

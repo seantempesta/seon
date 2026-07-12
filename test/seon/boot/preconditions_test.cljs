@@ -6,7 +6,7 @@
      1. The resolved conn was opened with `:keep-history? true`.
         Required for tx-meta-as-history (datahike drops tx-meta
         datoms on compaction when history is off).
-     2. All 7 `:seon.db/*` tx-meta attrs are registered in
+     2. Both `:seon.db/*` tx-meta attrs are registered in
         seon.schema. Datahike's `flush-tx-meta` rejects unregistered
         keys at write time; the first tx after boot would crash.
 
@@ -62,15 +62,9 @@
         (.then (fn [_] (done))))))
 
 (deftest precondition-tx-meta-attrs-registered
-  (testing "all 7 tx-meta attrs are registered at seon.db load time"
+  (testing "both provenance attrs are registered at seon.db load time"
     ;; This is a smoke check on the namespace-load registration.
     ;; If seon.db is reachable, the registrations have already run.
-    (doseq [attr [:seon.db/agent-id
-                  :seon.db/session-id
-                  :seon.db/turn-id
-                  :seon.db/eval-id
-                  :seon.db/origin
-                  :seon.db/replay?
-                  :seon.db/resume-marker?]]
+    (doseq [attr [:seon.db/user :seon.db/process]]
       (is (schema/registered? attr)
           (str attr " should be registered by seon.db's namespace load")))))

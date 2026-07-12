@@ -11,8 +11,8 @@
    skill' because it carries `:my.skills/name`; it is 'file-backed' because it
    carries `:seon.agent.ctx/file-path` (body stays in the SKILL.md, read fresh
    every render) and 'inline/agent-authored' because it carries
-   `:my.skills/body` instead. Where it came from is `:seon.db/origin` on the
-   tx, not a field.
+   `:my.skills/body` instead. Where it came from is the transaction's
+   `:seon.db/user` / `:seon.db/process` refs, not a field on the row.
 
    THREE SURFACES, three levels of disclosure (this slice ships L0 ⇄ L2):
      - L0 catalog — one always-on `;`-line per skill (name + description), the
@@ -160,8 +160,7 @@
    `:seon.agent.ctx/file-path` (the body stays in the file, read fresh at
    render). Identity-upsert on `:my.skills/name`, so a re-scan at every boot
    is idempotent. [] when the dir is absent or holds no readable SKILL.md.
-   Pure (file reads only); the boot path transacts it under
-   `:seon.db/origin :core-seed`."
+   Pure (file reads only); the boot path transacts it as root/boot."
   {:malli/schema [:function
                   [:=> [:cat] [:vector ::skill-row]]
                   [:=> [:catn [::dir :string]] [:vector ::skill-row]]]}

@@ -80,20 +80,21 @@
 (defn- fresh-conn
   "Promise of a fresh :memory conn with the pod's boot schema + one agent."
   []
-  (let [cfg {:store              {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history?      true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
-        (.then (fn [conn]
-                 (-> (d/transact!
-                       conn
-                       {:tx-data (into (db/malli->datahike-schema
-                                         client/agent-bootstrap-attrs)
-                                       (db/tx-meta-datahike-schema))})
-                     (.then (fn [_]
-                              (d/transact! conn {:tx-data [{:seon.agent/id a-id}]})))
-                     (.then (fn [_] conn))))))))
+  (-> (client/open-agent-conn!)
+      (.then
+        (fn [conn]
+          (-> (db/with-tx-context
+                {:seon.db/user [:seon.agent/id "root"]
+                 :seon.db/process
+                 [:seon.db.process/id :seon.db.process/boot]}
+                (fn []
+                  (db/transact! {:seon.db/conn conn
+                                 :seon.db/tx-data
+                                 [{:seon.agent/id a-id}]})))
+              (.then (fn [env]
+                       (when-not (:seon.db/ok? env)
+                         (throw (ex-info "typeahead fixture seed failed" env)))
+                       conn)))))))
 
 (defn- with-conn
   "Fresh seeded conn set! as the root db/*conn* for `body` (conn → Promise),

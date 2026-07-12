@@ -579,8 +579,9 @@
                                  fns))]
               (await
                 (db/with-tx-context
-                  {:seon.db/agent-id id
-                   :seon.db/origin   :system}
+                  {:seon.db/user [:seon.agent/id id]
+                   :seon.db/process
+                   [:seon.db.process/id :seon.db.process/repl]}
                   (fn ^:async open-scheduled-turn! []
                     (await
                       (turn/open-turn!

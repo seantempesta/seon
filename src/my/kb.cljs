@@ -15,8 +15,8 @@
        transact UPSERTS: same id ⇒ update in place, no duplicate.
      - FIND a set by ATTRIBUTE PRESENCE — `[?e :my.kb.source/id]` enumerates
        every source. There is no 'list all of kind K'.
-     - SCOPE / provenance with `:seon.db/origin` on the tx + the shared
-       `:my.kb/*` attrs, registered ONCE and referenced everywhere.
+     - ATTRIBUTE provenance through the tx's `:seon.db/user` and
+       `:seon.db/process` refs; domain ownership remains an explicit domain ref.
 
    Design one `my.kb.<domain>` schema per thing you learn (the same skill as
    modelling your human's data); never default to a memory-markdown blob.

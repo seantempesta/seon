@@ -140,7 +140,8 @@
            :where
            [?e :seon.agent/id ?aid]
            [?e ?attr _ ?tx]
-           [?tx :seon.db/agent-id ?aid]]
+           [?tx :seon.db/user ?author]
+           [?author :seon.agent/id ?aid]]
          :seon.db/args [agent-id attr]}))
     0))
 

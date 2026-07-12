@@ -61,6 +61,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.db.id :as db.id]
+            [seon.db.process :as db.process]
             [seon.diffusion.grammar :as grammar]
             [seon.error :as error]
             [seon.eval.bootstrap-cache :as bootstrap-cache]
@@ -2568,22 +2569,22 @@
 ;; must NOT override compiled core/third-party fns). An agent eval that
 ;; REDEFINES an EXISTING compiled-core fn must not persist a :seon.fn override
 ;; row — it would clobber the core display row and take ephemeral live effect.
-;; Detect by ORIGIN: a sym whose CURRENT `:seon.fn/source` datom's tx carries
-;; `:seon.db/origin :core-seed` is compiled core/third-party (same provenance
+;; Detect by process: a sym whose CURRENT `:seon.fn/source` datom's tx came
+;; through `:seon.db.process/boot` is compiled core/third-party (same provenance
 ;; rule [[tee-registered-schema!]] uses for the schema self-tee). A NEW sym
-;; (no row) or an agent-origin sym is NOT blocked — agents freely define and
-;; redefine in their OWN namespaces; only redefining an existing :core-seed
+;; (no row) or an agent-authored sym is NOT blocked — agents freely define and
+;; redefine in their OWN namespaces; only redefining an existing boot-authored
 ;; sym is denied.
 ;; ----------------------------------------------------------------------------
 
-(defn core-origin-fn-syms
-  "The `syms` subset whose source is `:core-seed` origin.
+(defn core-boot-fn-syms
+  "The `syms` subset whose source was written through boot.
 
    FQ `:seon.fn/sym` strings whose CURRENT
-   `:seon.fn/source` datom's tx carries `:seon.db/origin :core-seed` —
+   `:seon.fn/source` datom's tx refs `:seon.db.process/boot` —
    i.e. compiled core/third-party fns the agent must not override. A sym
    with no `:seon.fn` row, or whose latest source was written under any
-   non-core origin (`:agent`, `:replay`, …), is NOT included (it is the
+   non-boot process is NOT included (it is the
    agent's own / a free new def). Returns a set. `db` is a datahike db
    value (third-party boundary)."
   {:malli/schema
@@ -2597,15 +2598,16 @@
                       :where
                       [?e :seon.fn/sym ?sym]
                       [?e :seon.fn/source _ ?tx]
-                      [?tx :seon.db/origin :core-seed]]
+                      [?tx :seon.db/process ?process]
+                      [?process :seon.db.process/id :seon.db.process/boot]]
                     db))))
 
 (defn reject-core-overrides
   "Drop `tee-entities` rows that override a `blocked` core sym.
 
    The override guard: drop any `:seon.fn` row
-   whose `:seon.fn/sym` is in `blocked` (a set of core-origin syms from
-   [[core-origin-fn-syms]]) and, for each dropped sym, `js/console.warn`
+   whose `:seon.fn/sym` is in `blocked` (a set of core-boot syms from
+   [[core-boot-fn-syms]]) and, for each dropped sym, `js/console.warn`
    a specific, actionable one-liner. Non-`:seon.fn` rows (`:seon.ns`,
    `:seon.schema`, `:seon.test`, the diff-tx retract vectors)
    pass through untouched. Returns the filtered vector. Pure except for
@@ -2663,7 +2665,7 @@
      compile, the ~500 boot ns-load registrations before a conn
      exists — boot semantics unchanged; `seon.client/index-schemas`
      remains the owner of core rows).
-   - REPLAY scope (`:seon.db/replay? true` in the tx-context) → nil.
+   - REPLAY scope (`:seon.eval/replay? true` in execution context) → nil.
      Replayed `(seon.schema/register! …)` sources re-run register!;
      re-teeing them would write a no-op upsert per schema per boot,
      re-anchoring row tx-ids (the exact churn the replay design's
@@ -2677,7 +2679,7 @@
      is the durability path only for bare eval/REPL scope outside that
      boundary.
    - CORE-CLAIMED row (current `:seon.schema/source` datom's tx
-     carries `:seon.db/origin :core-seed`) → nil. The bootstrap
+     was written through `:seon.db.process/boot`) → nil. The bootstrap
      self-host compiler can re-execute compiled-bundle registrations
      at runtime (an agent's `(require …)` goog.globalEvals bundle JS,
      the relink-registry! incident class); without this guard those
@@ -2699,26 +2701,36 @@
    for deterministic test/proof awaiting."
   [k form]
   (when-some [conn db/*conn*]
-    (when-not (or (:seon.db/replay? (db/current-tx-context))
+    (when-not (or (::replay? (db/current-tx-context))
                   ;; #39: inside the private per-form record boundary the
                   ;; gated detect-and-tee path owns this schema row and writes
                   ;; it only with a successful eval. No pre-minted eval id is
                   ;; required merely to mark execution scope.
                   (record-boundary-active?))
       (let [source (pr-str (list 'seon.schema/register! k form))
-            [stored-src origin]
-            (first (db/query
-                     {:seon.db/query
-                      '[:find ?src ?origin
-                        :in $ ?k
-                        :where
-                        [?s :seon.schema/key ?k]
-                        [?s :seon.schema/source ?src ?tx]
-                        [(get-else $ ?tx :seon.db/origin :seon.db/untagged)
-                         ?origin]]
-                      :seon.db/conn conn
-                      :seon.db/args [k]}))]
-        (when-not (or (= origin :core-seed)
+            stored-src
+            (db/query {:seon.db/query
+                       '[:find ?src .
+                         :in $ ?k
+                         :where
+                         [?s :seon.schema/key ?k]
+                         [?s :seon.schema/source ?src]]
+                       :seon.db/conn conn
+                       :seon.db/args [k]})
+            boot-authored?
+            (boolean
+              (db/query {:seon.db/query
+                         '[:find ?s .
+                           :in $ ?k
+                           :where
+                           [?s :seon.schema/key ?k]
+                           [?s :seon.schema/source _ ?tx]
+                           [?tx :seon.db/process ?process]
+                           [?process :seon.db.process/id
+                            :seon.db.process/boot]]
+                         :seon.db/conn conn
+                         :seon.db/args [k]}))]
+        (when-not (or boot-authored?
                       (= stored-src source))
           (-> (db/transact!
                 {:seon.db/tx-data [(schema-tee-row k form source (js/Date.))]
@@ -3321,7 +3333,7 @@
                       a))))
           (rest form))))
 
-(defn- ns-source-core-origin?
+(defn- ns-source-core-boot?
   "True when `ns-kw`'s CURRENT `:seon.ns/source` datom was written by
    the core seed — a REPL-issued require must never rewrite a core ns's
    stored declaration (the [[reject-core-overrides]] symmetry)."
@@ -3330,7 +3342,9 @@
                              :where
                              [?e :seon.ns/name ?ns]
                              [?e :seon.ns/source _ ?tx]
-                             [?tx :seon.db/origin :core-seed]]
+                             [?tx :seon.db/process ?process]
+                             [?process :seon.db.process/id
+                              :seon.db.process/boot]]
                            db ns-kw))))
 
 (defn- stored-ns-source
@@ -3359,7 +3373,7 @@
     (if-not (seq specs)
       []
       (let [ns-src (stored-ns-source db ns-kw)]
-        (if (or (nil? ns-src) (ns-source-core-origin? db ns-kw))
+        (if (or (nil? ns-src) (ns-source-core-boot? db ns-kw))
           []
           (if-some [new-src (merge-requires-into-ns-source ns-src specs)]
             [{:seon.ns/name ns-kw :seon.ns/source new-src}]
@@ -3373,7 +3387,7 @@
    the declaration is core-seeded, or nothing changed."
   [db ns-kw alias-sym]
   (let [ns-src (stored-ns-source db ns-kw)
-        forms  (when (and ns-src (not (ns-source-core-origin? db ns-kw)))
+        forms  (when (and ns-src (not (ns-source-core-boot? db ns-kw)))
                  (try (read-all-forms ns-src) (catch :default _ nil)))
         form   (when (= 1 (count forms)) (first forms))]
     (if-not (and (seq? form) (= 'ns (first form)) (symbol? (second form)))
@@ -4049,7 +4063,7 @@
                 (if (and db/*conn* (seq fn-syms))
                   (reject-core-overrides
                     (vec tee-entities)
-                    (core-origin-fn-syms @db/*conn* fn-syms))
+                    (core-boot-fn-syms @db/*conn* fn-syms))
                   tee-entities))
               ;; Capture the `:seon.ns/require-edges` for the ENDING ns
               ;; on EVERY successful eval — not only `(ns …)` forms —
@@ -4189,7 +4203,7 @@
                   (try
                     (await
                       (db/with-tx-context
-                        {::db/origin :test-run}
+                        {:seon.test.runner/running? true}
                         (fn ^:async run-auto-tests! []
                           (await (test-runner/run!
                                    {:seon.test.runner/vars    (vec targets)
@@ -4372,7 +4386,7 @@
                    (assoc m ::error (str "`" sym-str "` is not defined — "
                                          "nothing to remove."))))
 
-          (and db (seq (core-origin-fn-syms db [sym-str])))
+          (and db (seq (core-boot-fn-syms db [sym-str])))
           (await (record-form-result!
                    (assoc m ::error
                           (str "`" sym-str "` is a compiled core fn — agents "
@@ -4601,10 +4615,10 @@
         happened); duration-ms = 0.
 
    Per-form work is wrapped in the private record boundary plus
-   `(db/with-tx-context {…} f)`. Transactions keep agent/process context;
-   eval identity is allocated only when the frozen outcome records. Callers
-   that establish a wider scope first (the turn runner adding turn-id) get
-   those keys layered in via with-tx-context's merge.
+   `(db/with-tx-context {…} f)`. Transactions keep only agent-user/REPL
+   provenance; eval identity is allocated only when the frozen outcome records.
+   Turn/eval/test control remains runtime context and is never copied to
+   transaction metadata.
 
    Args:
      compile-state — the bootstrap compile-state (defonce'd at boot)
@@ -4674,19 +4688,18 @@
         ;; of them escalates to an honest error instead of reading nil
         ;; with `ok? true` (the episode's false-confidence trap).
         failed-defs (volatile! #{})
-        ;; Phase 4 (mvp-completion-plan 2026-05-27): capture origin
-        ;; BEFORE the per-entry `with-tx-context` overwrites it with
-        ;; `:agent`. If an outer scope (an auto-test-run's
-        ;; `:origin :test-run` wrapper around a test body that itself
-        ;; calls `eval-batch!`) already established `:test-run`, the
+        ;; Capture the runtime test-running flag before the per-entry
+        ;; provenance scope. If an outer auto-test-run wrapper around a body
+        ;; that itself calls `eval-batch!` already established the flag, the
         ;; inner batch must skip auto-test-run to avoid recursion.
-        outer-test-run? (= :test-run (::db/origin (db/current-tx-context)))
+        outer-test-run? (true? (:seon.test.runner/running?
+                                 (db/current-tx-context)))
         run-entry!
         (fn ^:async run-entry! [body-fn]
           (await
             (db/with-tx-context
-              {:seon.db/agent-id agent-id
-               :seon.db/origin   :agent}
+              {::db/user [:seon.agent/id agent-id]
+               ::db/process (db.process/lookup-ref ::db.process/repl)}
               (fn ^:async run-in-record-boundary! []
                 (await (run-with-record-boundary body-fn))))))
         append-record!

@@ -12,9 +12,8 @@
         the prompt blob on the turn, plus `:seon.agent.turn/error` as
         data; capture never depends on turn success.
      3. `agent-debug/turn` ROUND-TRIP — one call reconstructs the turn:
-        the verbatim prompt/reply text back from the blobs, token
-        estimates from the ONE estimator, and the tx trail via the
-        `:seon.db/turn-id` tx-meta join. Unknown ids are error VALUES.
+        the verbatim prompt/reply text back from the blobs and token
+        estimates from the ONE estimator. Unknown ids are error VALUES.
      4. `agent-debug/turn-diff` — basis-t delta + prompt drift summary
         between two captured turns.
 
@@ -79,12 +78,12 @@
 (defn ^:async fresh-agent!
   "Create a booted agent on the current conn; resolves to its id + cs."
   []
-  (let [cs  (await (repl/ensure-bootstrap!))
-        aid "turn-capture-agent"]
+  (let [cs      (await (repl/ensure-bootstrap!))
+        created (await (agent/mint! {}))
+        aid     (:seon.agent/id created)]
     (await (db/with-agent aid
              (fn ^:async boot []
-               (await (seval/setup-agent-ns! cs (home/home-ns aid) aid))
-               (await (agent/create! {:seon.agent/id aid})))))
+               (await (seval/setup-agent-ns! cs (home/home-ns aid) aid)))))
     {:seon.agent/id aid :seon.agent/compile-state cs}))
 
 (defn ^:async drive-turn!
@@ -186,9 +185,7 @@
             (is (= (tokens/estimate (:seon.agent.debug/prompt b))
                    (:seon.agent.debug/prompt-tokens b))
                 "prompt size reports in TOKENS from the one estimator")
-            (is (= expected (:seon.agent.turn/rendered-as-of b)))
-            (is (pos? (count (:seon.agent.debug/txs b)))
-                "the tx trail joins via the :seon.db/turn-id tx-meta stamp"))))
+            (is (= expected (:seon.agent.turn/rendered-as-of b))))))
       done)))
 
 ;; ---------------------------------------------------------------------------

@@ -14,8 +14,8 @@
   (:require
     [cljs.test :refer [deftest is testing async]]
     [clojure.string :as str]
-    [datahike.api :as d]
     [seon.agent.debug :as agent-debug]
+    [seon.client :as client]
     [seon.db :as db]
     [seon.error :as error]
     [seon.store.wire :as store.wire]))
@@ -41,16 +41,27 @@
 
 (defn- fresh-conn
   []
-  (let [cfg {:store              {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history?      true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false}))))))
+  (client/open-agent-conn!))
 
-(defn- tick
-  "Promise resolving after `ms` — lets a fire-and-forget persist settle."
-  [ms]
-  (js/Promise. (fn [resolve _] (js/setTimeout resolve ms))))
+(defn- await-error-count!
+  "Resolve when at least `n` error facts exist, or reject after 50 polls."
+  ([n] (await-error-count! n 50))
+  ([n remaining]
+   (let [count* (db/query '[:find (count ?e) .
+                            :where [?e :seon.error/message]])]
+     (cond
+       (<= n count*) (js/Promise.resolve count*)
+       (pos? remaining)
+       (js/Promise.
+         (fn [resolve reject]
+           (js/setTimeout
+             (fn []
+               (-> (await-error-count! n (dec remaining))
+                   (.then resolve reject)))
+             10)))
+       :else
+       (js/Promise.reject
+         (js/Error. (str "timed out waiting for " n " persisted errors")))))))
 
 (defn- with-fresh-conn
   "Run `f` (conn → Promise) with db/*conn* set! to a fresh conn; restore
@@ -87,7 +98,7 @@
     (fn []
       (error/record! {:seon.error/raw (js/Error. "core fixture boom")
                       :seon.error/fault :core})))
-  (tick 100))
+  (await-error-count! 3))
 
 (defn- eid-of [msg]
   (db/query '[:find ?e . :in $ ?m :where [?e :seon.error/message ?m]] msg))

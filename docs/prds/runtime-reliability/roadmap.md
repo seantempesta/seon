@@ -312,6 +312,16 @@ Commit: lifecycle split and web wiring.
 
 Install the final two-fact model atomically across writers/readers.
 
+Implementation status: the genesis base, process namespace, writer selection,
+lazy-schema attribution, production reader cutover, and explicit
+identity-attribute reconciliation scope are implemented. The behavioral gates
+cover fresh genesis, human/REPL, agent/REPL, root/boot, ambiguous legacy facts,
+convergence, config retraction, turn capture, and current/history readers. The
+remaining phase boundary is a cold-start migration against the default store,
+followed immediately by deletion of the one-shot legacy classifier and its
+fixture. Historical retired datoms remain immutable data with no production
+reader or writer.
+
 - Colocate `:seon.db/user` and transaction-context selection in `seon.db`.
 - Colocate `:seon.db.process/id`, its boot/config/REPL rows, and lookup helpers
   in `seon.db.process`.

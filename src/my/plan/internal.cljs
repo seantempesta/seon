@@ -931,7 +931,9 @@
   [db worker-id flagged-step-id]
   (let [cands (->> (db/query {:seon.db/db db
                               :seon.db/query '[:find [?id ...]
-                                               :where [?a :seon.agent/id ?id]]})
+                                               :where
+                                               [?a :seon.agent/id ?id]
+                                               [?a :seon.eval/home-requires _]]})
                    sort
                    (remove #{worker-id})
                    (filter (fn [id]
@@ -946,7 +948,7 @@
                    vec)
         authors (when (and flagged-step-id
                            (contains? (db/installed-schema db)
-                                      :seon.db/agent-id))
+                                      :seon.db/user))
                   (set (db/query {:seon.db/db db
                                   :seon.db/query
                                   '[:find [?aid ...]
@@ -954,7 +956,8 @@
                                     :where
                                     [?t :my.plan/id ?sid]
                                     [?t _ _ ?tx]
-                                    [?tx :seon.db/agent-id ?aid]]
+                                    [?tx :seon.db/user ?author]
+                                    [?author :seon.agent/id ?aid]]
                                   :seon.db/args [flagged-step-id]})))]
     (or (first (filter (or authors #{}) cands))
         (first cands))))

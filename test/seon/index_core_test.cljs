@@ -47,14 +47,14 @@
 ;; snapshot per ns run via these delays (see freeze-builders! below).
 (def tests-tx (delay (client/index-tests)))
 
-(defn- transact-as
-  "Transact `tx-data` on `conn` under an unscoped `origin` tx-context.
-   The transact boundary STAMPS `:seon.db/origin` from the ambient scope
-   (caller `:tx-meta` origin is never consulted), so tests establish
-   provenance the same way the core writers do — via `with-tx-context`
-   outside any agent scope."
-  [conn origin tx-data]
-  (db/with-tx-context {:seon.db/origin origin}
+(defn- transact-through
+  "Transact `tx-data` on `conn` through a stable database process."
+  [conn process-id tx-data]
+  (db/with-tx-context
+    {:seon.db/user (if (= :seon.db.process/boot process-id)
+                     [:seon.agent/id "root"]
+                     [:seon.user/id "user"])
+     :seon.db/process [:seon.db.process/id process-id]}
     (fn [] (db/transact! conn tx-data))))
 
 ;;; -------------------------------------------------------------------------
@@ -69,7 +69,7 @@
 ;;; at a later instant (T2) and assert the two agree (idempotent no-op, exactly
 ;;; the seeded ghosts, only the drifted ns re-emits). When the overnight loop
 ;;; runs this suite concurrently with the gym scorecard (or another run), a
-;;; mutation of those globals between T1 and T2 reclassifies a stored core-seed
+;;; mutation of those globals between T1 and T2 reclassifies a boot-authored
 ;;; row as a ghost / re-emits a fn row, flaking the assertions — even though
 ;;; each conn here is a fresh per-test :memory store.
 ;;;
@@ -452,8 +452,7 @@
   (async done
     (let [restore! (freeze-builders!)
           done*    (fn [] (restore!) (done))]
-     (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
-                              (db/tx-meta-datahike-schema)))
+     (-> (client/open-agent-conn!)
         (.then
           (fn [conn]
             ;; Pass :seon.db/conn explicitly — a `binding` of the dynamic
@@ -470,7 +469,7 @@
                     (is (= (count @schemas-tx)
                            (count (filter :seon.schema/key first-tx)))
                         "first boot emits a :seon.schema row per registered schema")
-                    (db/transact! {:seon.db/conn conn :seon.db/tx-data first-tx})))
+                    (transact-through conn :seon.db.process/boot first-tx)))
                 (.then (fn [_] (client/core-index-tx conn)))
                 (.then
                   (fn [second-tx]
@@ -484,20 +483,22 @@
                          [:seon.schema/key :seon.agent/id]
                          :seon.db.id/generator
                          :seon.db.id.generator/human-readable]]})))
-                (.then (fn [_] (client/core-index-tx conn)))
                 (.then
-                  (fn [policy-gap]
-                    (let [rows (filter #(= :seon.agent/id
-                                           (:seon.schema/key %))
-                                       policy-gap)]
-                      (is (= 1 (count rows))
-                          "a missing persisted generator policy re-emits its schema row")
-                      (is (= :seon.db.id.generator/human-readable
-                             (:seon.db.id/generator (first rows)))))
-                    (db/transact! {:seon.db/conn conn
-                                   :seon.db/tx-data policy-gap})))
+                  (fn [removal]
+                    (is (false? (:seon.db/ok? removal))
+                        "an in-use identity policy cannot be removed")
+                    (is (= :seon.db.id.generator/human-readable
+                           (d/q '[:find ?g .
+                                  :where
+                                  [?s :seon.schema/key :seon.agent/id]
+                                  [?s :seon.db.id/generator ?g]]
+                                @conn))
+                        "the refused removal leaves the policy fact intact")
+                    (client/core-index-tx conn)))
                 (.then
-                  (fn [_]
+                  (fn [still-indexed]
+                    (is (= [] still-indexed)
+                        "the intact policy leaves the index converged")
                     (db/transact!
                       {:seon.db/conn conn
                        :seon.db/tx-data
@@ -521,12 +522,12 @@
   ;; Boot-index GC (open-issues 2026-06-11 row 5). Pins all four hard
   ;; constraints in one flow on one conn:
   ;;
-  ;;   (a) discriminator — ONLY rows whose source tx carries
-  ;;       `:seon.db/origin :core-seed` are candidates; an
+  ;;   (a) discriminator — ONLY rows whose source tx refs the boot process
+  ;;       are candidates; an
   ;;       agent-authored my.* row with the IDENTICAL shape is never
   ;;       pruned, and an agent's `(register! …)` tee schema row is
   ;;       protected by replay's registration-call-source? rule even
-  ;;       under a (forged) core-seed origin;
+  ;;       even when its shape resembles a boot row;
   ;;   (b) loudness is the log/info! inside the pruner (shape asserted
   ;;       via the returned pruned vector, the same data the message
   ;;       names);
@@ -536,18 +537,17 @@
   (async done
     (let [restore! (freeze-builders!)
           done*    (fn [] (restore!) (done))]
-     (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
-                              (db/tx-meta-datahike-schema)))
+     (-> (client/open-agent-conn!)
         (.then
           (fn [conn]
             (-> (client/core-index-tx conn)
                 (.then (fn [first-tx]
-                         (transact-as conn :core-seed first-tx)))
-                ;; GHOSTS: core-seeded rows whose ns/fn/schema no
+                         (transact-through conn :seon.db.process/boot first-tx)))
+                ;; GHOSTS: boot-authored rows whose ns/fn/schema no
                 ;; longer exists in the booting code (deleted/renamed).
                 (.then (fn [_]
-                         (transact-as
-                           conn :core-seed
+                         (transact-through
+                           conn :seon.db.process/boot
                            [{:seon.ns/name   :seon.ghost.deleted
                              :seon.ns/source "(ns seon.ghost.deleted)"}
                             {:seon.fn/sym    "seon.ghost.deleted/gone"
@@ -558,14 +558,14 @@
                              :seon.schema/source "[:string]"}
                             ;; agent register! TEE row — protected by the
                             ;; `(…)`-call discriminator even though the
-                            ;; origin here claims core-seed.
+                            ;; the row is intentionally boot-authored here.
                             {:seon.schema/key    :my.agentish/teed
                              :seon.schema/source "(seon.schema/register! :my.agentish/teed :string)"}])))
                 ;; AGENT-AUTHORED row with the IDENTICAL shape as the
                 ;; ghost ns — different (non-core) provenance.
                 (.then (fn [_]
-                         (transact-as
-                           conn :agent
+                         (transact-through
+                           conn :seon.db.process/repl
                            [{:seon.ns/name   :my.todo-app
                              :seon.ns/source "(ns my.todo-app)"}])))
                 (.then (fn [_] (client/prune-core-ghosts! conn)))
@@ -611,14 +611,13 @@
   (async done
     (let [restore! (freeze-builders!)
           done*    (fn [] (restore!) (done))]
-     (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
-                              (db/tx-meta-datahike-schema)))
+     (-> (client/open-agent-conn!)
         (.then
           (fn [conn]
             (-> (client/core-index-tx conn)
                 (.then (fn [first-tx]
-                         (db/transact! {:seon.db/conn conn
-                                        :seon.db/tx-data first-tx})))
+                         (transact-through
+                           conn :seon.db.process/boot first-tx)))
                 ;; Regress my.kb to a bare stub — the shape an existing
                 ;; durable store carries before a re-boot with a fresher build.
                 (.then (fn [_]
@@ -657,7 +656,7 @@
   ;;
   ;;   (a) HEAL — a core-claimed row whose stored :seon.fn/spec drifted
   ;;       from the live var meta re-emits with the fresh spec;
-  ;;   (b) GUARD — a drifted row whose :source tx is NOT core-seed
+  ;;   (b) GUARD — a drifted row whose :source tx is NOT boot-authored
   ;;       (agent-authored) is never overwritten by the boot index;
   ;;   (c) RETRACT — a stale spec on a fn whose fresh derivation is
   ;;       unspecced yields an explicit [:db/retract …] (upsert can't
@@ -668,29 +667,28 @@
           target   "seon.schema/register!"
           stale    "[:=> [:cat :seon.stale/req] :seon.stale/resp]"
           guarded  "seon.db/transact!"]
-     (-> (client/mem-db (into (db/malli->datahike-schema client/agent-bootstrap-attrs)
-                              (db/tx-meta-datahike-schema)))
+     (-> (client/open-agent-conn!)
         (.then
           (fn [conn]
             (-> (client/core-index-tx conn)
                 (.then (fn [first-tx]
-                         (transact-as conn :core-seed first-tx)))
+                         (transact-through conn :seon.db.process/boot first-tx)))
                 ;; (a) Regress the stored spec in place (identity upsert on
-                ;; sym; the row's :source datom keeps its :core-seed tx).
+                ;; sym; the row's :source datom keeps its boot transaction).
                 ;; (c) Forge a stale spec onto an UNSPECCED core fn (found
                 ;; dynamically — any row the fresh index emits without
                 ;; :seon.fn/spec).
-                ;; (b) Replace one core row wholesale under an AGENT origin
-                ;; (retractEntity kills the :core-seed source datom).
+                ;; (b) Replace one core row wholesale through REPL
+                ;; (retractEntity kills the boot-authored source datom).
                 (.then (fn [_]
-                         (transact-as conn :core-seed
+                         (transact-through conn :seon.db.process/boot
                                       [{:seon.fn/sym  target
                                         :seon.fn/spec stale}])))
                 (.then (fn [_]
-                         (transact-as conn :core-seed
+                         (transact-through conn :seon.db.process/boot
                                       [[:db/retractEntity [:seon.fn/sym guarded]]])))
                 (.then (fn [_]
-                         (transact-as conn :agent
+                         (transact-through conn :seon.db.process/repl
                                       [{:seon.fn/sym      guarded
                                         :seon.fn/ns       [:seon.ns/name :seon.db]
                                         :seon.fn/source   "(defn transact! [] :agent-owned)"
@@ -712,14 +710,14 @@
                           "the stale spec is gone from the re-emitted row")
                       ;; (b) GUARD
                       (is (nil? (fresh-fn guarded tx))
-                          "an agent-origin row with a core sym is NEVER re-emitted over")
+                          "a REPL-authored row with a core sym is NEVER re-emitted over")
                       ;; (c) RETRACT — dynamic: any unspecced fn in the fresh
                       ;; index (private helpers are indexed, so one exists).
                       (if-some [unspecced (:seon.fn/sym
                                             (first (remove #(or (contains? % :seon.fn/spec)
                                                                 (nil? (:seon.fn/sym %)))
                                                            @core-tx)))]
-                        (-> (transact-as conn :core-seed
+                        (-> (transact-through conn :seon.db.process/boot
                                          [{:seon.fn/sym  unspecced
                                            :seon.fn/spec stale}])
                             (.then (fn [_] (client/core-index-tx conn)))

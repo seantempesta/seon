@@ -195,8 +195,8 @@
      ;; ── domain data: the parallel-attr fork ──────────────────────
      ;; 2 entities on the ESTABLISHED attr (duration-seconds), 1 on the
      ;; fork (duration-minutes) — mirrors run 4's live :workout data.
-     ;; The tee-shaped :seon.schema rows give the attrs AGENT
-     ;; provenance (this whole seed tx is non-:core-seed), exactly
+     ;; The tee-shaped :seon.schema rows give the attrs repl-process
+     ;; provenance (this whole seed tx is not boot-authored), exactly
      ;; like seon.eval/build-tee-entities does for a real register!
      ;; eval — domain-attrs discriminates on that provenance.
      {:seon.schema/key :warntest.dom/duration-seconds
@@ -359,8 +359,8 @@
   ;; domains (then-live :seon.workout/* — domain since renamed
   ;; :my.workout/*, 2026-06-11) from the whole reuse surface.
   ;; Domain-attrs now discriminate by PROVENANCE: a
-  ;; :seon.schema/key row asserted OUTSIDE the :core-seed
-  ;; tx-context = agent-registered = domain; inside = core =
+  ;; :seon.schema/key row asserted outside root/boot provenance is an
+  ;; agent-registered domain; root/boot is core and
   ;; hidden — whatever the keyword namespace.
   (async done
     (-> (client/open-agent-conn!)
@@ -368,7 +368,9 @@
           (-> ;; core layer — :seon.agent/id's schema row + an
               ;; install of the attr, inside the seed tx-context (the
               ;; same provenance seon.client/start-agent! stamps).
-              (db/with-tx-context {:seon.db/origin :core-seed}
+              (db/with-tx-context {:seon.db/user [:seon.agent/id "root"]
+                                   :seon.db/process
+                                   [:seon.db.process/id :seon.db.process/boot]}
                 (fn []
                   (db/transact!
                     {:seon.db/conn conn
@@ -395,7 +397,7 @@
                   (is (contains? attrs :my.workout/date)
                       "agent-registered DATA domain renders as a domain attr")
                   (is (not (contains? attrs :seon.agent/id))
-                      "core-seeded seon.* attr stays hidden")
+                      "boot-authored seon.* attr stays hidden")
                   (is (not (contains? attrs :seon.schema/key))
                       "attrs with no :seon.schema row at all stay hidden")))))))
         (.then (fn [_] (done)))

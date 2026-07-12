@@ -1,9 +1,9 @@
 (ns seon.state-test
   "Contract tests for `seon.state/reconcile!` (the holistic declarative-state
-   sync primitive) and the #35 component-cascade fix in
+  sync primitive) and the #35 component-cascade fix in
    `seon.agent.ctx/upsert-ctx-tx`.
 
-   reconcile! is exercised on a FRESH :memory conn seeded with MIXED-origin,
+   reconcile! is exercised on a FRESH :memory conn seeded with mixed-process,
    MIXED-identity-attr rows (the manage-by-provenance contract). The #35 proof
    drives the REAL `install!` path on a fresh agent conn and counts orphaned
    block entities before/after a block-set replace.
@@ -38,8 +38,8 @@
    :seon.state.scratch.parent/kids])
 
 (defn- scratch-conn
-  "Promise of a fresh :memory conn with tx-meta + the scratch attr schema
-   installed. `:keep-history? true` is REQUIRED — provenance (origin) reads
+  "Promise of a fresh :memory conn with provenance + the scratch attr schema
+   installed. `:keep-history? true` is REQUIRED — provenance reads
    the tx entity."
   []
   (let [cfg {:store {:backend :memory :id (random-uuid)}
@@ -47,12 +47,20 @@
              :keep-history? true}]
     (-> (d/create-database cfg)
         (.then (fn [_] (d/connect cfg {:sync? false})))
-        (.then (fn [conn]
-                 (-> (d/transact!
-                       conn
-                       {:tx-data (into (db/malli->datahike-schema scratch-attrs)
-                                       (db/tx-meta-datahike-schema))})
-                     (.then (fn [_] conn))))))))
+        (.then
+          (fn ^:async install [conn]
+            (await (db/ensure-provenance! {:seon.db/conn conn}))
+            (await
+              (db/with-tx-context
+                {:seon.db/user [:seon.agent/id "root"]
+                 :seon.db/process
+                 [:seon.db.process/id :seon.db.process/boot]}
+                (fn []
+                  (db/transact!
+                    {:seon.db/conn conn
+                     :seon.db/tx-data
+                     (db/malli->datahike-schema scratch-attrs)}))))
+            conn)))))
 
 ;; ============================================================
 ;; reconcile! — upsert / add / retract-stale / leave-authored-alone +
@@ -64,9 +72,11 @@
     (-> (scratch-conn)
         (.then
           (fn [conn]
-            (-> ;; seed MANAGED rows (mixed identity attrs) under :core-seed
+            (-> ;; seed managed rows (mixed identity attrs) through boot
                 (db/with-tx-context
-                  {:seon.db/origin :core-seed}
+                  {:seon.db/user [:seon.agent/id "root"]
+                   :seon.db/process
+                   [:seon.db.process/id :seon.db.process/boot]}
                   (fn []
                     (db/transact!
                       {:seon.db/conn conn
@@ -78,20 +88,24 @@
                          :seon.state.scratch.parent/kids
                          [{:seon.state.scratch.child/name :gk1}
                           {:seon.state.scratch.child/name :gk2}]}]})))
-                ;; seed an AGENT-origin row — OUTSIDE the managed scope
+                ;; seed a human/repl row — OUTSIDE the managed process scope
                 (.then (fn [_]
                          (db/with-tx-context
-                           {:seon.db/origin :agent}
+                           {:seon.db/user [:seon.user/id "user"]
+                            :seon.db/process
+                            [:seon.db.process/id :seon.db.process/repl]}
                            (fn []
                              (db/transact!
                                {:seon.db/conn conn
                                 :seon.db/tx-data
                                 [{:seon.state.scratch.a/id "agent1"
                                   :seon.state.scratch.a/label "mine"}]})))))
-                ;; RECONCILE to a new desired set (under a managed origin)
+                ;; RECONCILE to a new desired set (under a managed process)
                 (.then (fn [_]
                          (db/with-tx-context
-                           {:seon.db/origin :core-seed}
+                           {:seon.db/user [:seon.agent/id "root"]
+                            :seon.db/process
+                            [:seon.db.process/id :seon.db.process/boot]}
                            (fn []
                              (state/reconcile!
                                {:seon.state/desired
@@ -100,7 +114,13 @@
                                  {:seon.state.scratch.b/id "keepB"}        ; KEEP
                                  {:seon.state.scratch.a/id "fresh1"
                                   :seon.state.scratch.a/label "added"}]    ; ADD
-                                :seon.db/managed-scope #{:core-seed :config}
+                                :seon.db/managed-scope
+                                #{:seon.db.process/boot
+                                  :seon.db.process/config}
+                                :seon.db/managed-identity-attrs
+                                #{:seon.state.scratch.a/id
+                                  :seon.state.scratch.b/id
+                                  :seon.state.scratch.parent/id}
                                 :seon.db/conn conn})))))
                 (.then
                   (fn [res]
@@ -137,9 +157,9 @@
                       (is (empty? (d/q '[:find [?n ...]
                                          :where [?c :seon.state.scratch.child/name ?n]] db))
                           "the stale parent's component children cascade-retract — NO orphans")
-                      ;; LEAVE-AUTHORED-ALONE — :agent row untouched
+                      ;; LEAVE-AUTHORED-ALONE — REPL row untouched
                       (is (contains? a-ids "agent1")
-                          "an :agent-origin row is PRESERVED (outside the managed scope)")
+                          "a REPL-authored row is PRESERVED outside the managed scope")
                       (is (= "mine" (label "agent1"))
                           "…and is left completely unchanged")))))))
         (.then (fn [_] (done)))
@@ -155,7 +175,10 @@
           (fn [conn]
             (state/reconcile!
               {:seon.state/desired    [{:seon.state.scratch.a/label "no-identity-attr"}]
-               :seon.db/managed-scope #{:core-seed :config}
+               :seon.db/managed-scope #{:seon.db.process/boot
+                                        :seon.db.process/config}
+               :seon.db/managed-identity-attrs
+               #{:seon.state.scratch.a/id}
                :seon.db/conn          conn})))
         (.then (fn [res]
                  (is (false? (:seon.state/ok? res))
@@ -169,21 +192,9 @@
 ;; ============================================================
 
 (defn- agent-conn
-  "Promise of a fresh :memory conn with the pod's agent-bootstrap schema —
-   enough for `agent/create!` + `ctx/install!`."
+  "Promise of a fresh isolated conn with provenance and full pod schema."
   []
-  (let [cfg {:store {:backend :memory :id (random-uuid)}
-             :schema-flexibility :write
-             :keep-history? true}]
-    (-> (d/create-database cfg)
-        (.then (fn [_] (d/connect cfg {:sync? false})))
-        (.then (fn [conn]
-                 (-> (d/transact!
-                       conn
-                       {:tx-data (into (db/malli->datahike-schema
-                                         client/agent-bootstrap-attrs)
-                                       (db/tx-meta-datahike-schema))})
-                     (.then (fn [_] conn))))))))
+  (client/open-agent-conn!))
 
 (defn- with-agent-conn
   "Fresh agent conn `set!` as the root `db/*conn*` for `body` (conn → Promise),

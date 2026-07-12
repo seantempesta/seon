@@ -15,17 +15,18 @@ cluster-wide work. A grown-store open feed repeatedly invokes expensive
 render/SCI work and produces transient RSS sawtoothing around 1.4–2.5 GB.
 
 The core source/live audits, integrated design, ID study, and Datahike
-fork/restore study are complete. Phase 0 implementation is underway: unsafe
-process-global error scopes are now one fiber-local async scope; test-run detail
-is process-local and bounded; normal boot no longer allocates a disposable
-second Datahike database; active reporting uses the canonical token estimator;
-and the full-suite harness has one authoritative Node run with no retry-spliced
-green result. Eval values now have one capped slot shared by `result/<id>` and
-the internal reader, with value/analyzer eviction coupled and late-settling
-Promises unable to resurrect an evicted result. The remaining measured
-test-runtime consolidation precedes the atomic ID allocator. The authoritative
-target is [[provenance-and-lifecycle-design]] and the ordered
-implementation/commit plan is [[roadmap]].
+fork/restore study are complete. The baseline runtime cleanup, exact
+instrumentation delta, cold-boot/mint split, immutable read coordinates, and
+wire shutdown drain have landed. The final transaction-provenance cutover is
+implemented and green in focused behavioral gates: one un-attributed genesis
+base installs root/process refs, then every normal write carries only the
+resolvable `:seon.db/user` and `:seon.db/process` refs. Reconciliation now
+requires an explicit identity-attribute scope so an empty desired population is
+both removable and isolated from other config-authored entities. The remaining
+Phase 3 boundary is a default-store cold-start proof followed immediately by
+deletion of the temporary legacy classifier. The authoritative target is
+[[provenance-and-lifecycle-design]] and the ordered implementation/commit plan
+is [[roadmap]].
 
 ## How to run it
 

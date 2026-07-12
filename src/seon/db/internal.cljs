@@ -24,7 +24,7 @@
     [seon.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
-;; AsyncLocalStorage core — fiber-local context for tx-meta + agent-id.
+;; AsyncLocalStorage core — fiber-local execution context + agent-id.
 ;;
 ;; We DO NOT use a CLJS `^:dynamic` Var here, even though that's the
 ;; idiomatic Clojure spelling. CLJS `binding` macroexpands to
@@ -99,19 +99,15 @@
   (.exit agent-id-als f))
 
 ;; ---------------------------------------------------------------------------
-;; Tx-meta attrs (v1.md §2.3) — the causality bundle attached to every tx.
-;; The attr keywords live in `:seon.db/*` and their Malli registrations
-;; happen in `seon.db` at namespace load (so they're registered before
-;; the first transact). This set drives `assert-preconditions!` and the
-;; bootstrap-schema derivation.
+;; Persisted transaction provenance. The generic ALS map remains useful to
+;; runtime control (turn/eval/replay/test state), but only these two facts cross
+;; the transaction boundary. Wire request correlation is stamped separately by
+;; the sole writer under `:seon.store.wire/*`.
 ;; ---------------------------------------------------------------------------
 
 (def tx-meta-attrs
-  "Set of attr keywords the tx-meta auto-merge writes. Used by
-   `assert-preconditions!` to confirm registration. Update together with
-   the `seon.db` registrations when adding new tx-meta attrs."
-  #{::db/agent-id ::db/session-id ::db/turn-id ::db/eval-id
-    ::db/origin ::db/replay? ::db/resume-marker?})
+  "The complete application-provenance whitelist for normal transactions."
+  #{::db/user ::db/process})
 
 ;; ---------------------------------------------------------------------------
 ;; Malli → datahike schema bridge.
@@ -424,7 +420,7 @@
           tx-data)))
 
 (defn tx-meta-datahike-schema
-  "The datahike schema entries for the 7 tx-meta attrs (v1.md §2.3).
+  "The datahike schema entries for the two transaction-provenance attrs.
    Built by running `tx-meta-attrs` through the bridge. Called by
    `seon.client/agent-bootstrap-schema` so the entries are derived
    from Malli, never hand-written."
@@ -1026,74 +1022,67 @@
               :seon.error/kind  :user-input}))))
 
 ;; ---------------------------------------------------------------------------
-;; Tx-meta auto-merge + origin stamp — derive-don't-claim provenance.
-;;
-;; `:seon.db/origin` on a committed tx is STAMPED here, at the transact
-;; boundary, from the ambient scope. Caller-passed `:tx-meta` origin is
-;; never consulted: the web UI's `on-tx` fan-out trusts a managed
-;; origin to push the tx to EVERY watching agent's pane, and the
-;; managed-row machinery (`seon.state/reconcile!`, boot-index GC) trusts
-;; it to classify rows as core — a caller-claimed origin would let an
-;; agent forge core provenance. The scope IS the claim.
+;; Execution context → durable transaction provenance.
 ;; ---------------------------------------------------------------------------
 
-(def managed-origins
-  "Origins reserved for UNSCOPED core writers — the boot seed
-   (`:core-seed`) and the declarative config reconcile (`:config`).
-   [[derive-origin]] never lets an agent-scoped tx carry one."
-  #{:core-seed :config})
+(defn selected-provenance
+  "Select the two durable refs from the current fiber-local context.
 
-(defn derive-origin
-  "The true `:seon.db/origin` for the ambient scope, or nil (no scope).
-
-   - No agent scope → the tx-context origin as established by
-     `with-tx-context` (the boot seed / reconcile run OUTSIDE any agent
-     scope and establish `:core-seed` / `:config` there).
-   - Agent scope active → the tx-context origin (`:system`,
-     `:test-run`, `:replay` … — core code narrows its own agent-scoped
-     writes), EXCEPT a managed origin, which is a forge and stamps as
-     `:agent`, the honest value. No tx-context origin → `:agent`.
-   - No scope at all → nil (the tx stays untagged)."
+   Explicit `:seon.db/user` / `:seon.db/process` values win. Otherwise an active
+   agent is its own database user through the REPL process; an unscoped host
+   operation belongs to the stable human through REPL. Boot/config callers must
+   establish their root/process pair explicitly. Runtime turn/eval/test/replay
+   values have no role in this selection and are never persisted."
   [ctx agent-id]
-  (let [claimed (get ctx ::db/origin)]
-    (cond
-      (nil? agent-id)                claimed
-      (or (nil? claimed)
-          (managed-origins claimed)) :agent
-      :else                          claimed)))
+  (let [process-ref   (or (::db/process ctx)
+                          [:seon.db.process/id :seon.db.process/repl])
+        user-ref      (or (::db/user ctx)
+                          (if agent-id
+                            [:seon.agent/id agent-id]
+                            [:seon.user/id "user"]))]
+    {::db/user user-ref ::db/process process-ref}))
 
 (defn merge-tx-context-into-opts
-  "Merge the ambient scope into `opts.:tx-meta` and stamp the derived
-   `:seon.db/origin`. Explicit `(:tx-meta opts)` keys win per-key —
-   EXCEPT `:seon.db/origin`, which is boundary-stamped from the scope
-   ([[derive-origin]]); a caller-passed origin is dropped.
+  "Attach only selected user/process refs to ordinary transaction metadata.
 
-   Precedence for every other key (highest → lowest):
-     1. explicit `:tx-meta` keys passed by the caller
-     2. `(current-tx-context)` keys
-     3. `(current-agent-id)` → `:seon.db/agent-id` (audit P1 — every
-        agent-scoped tx is auto-tagged with the originating agent)
-
-   Returns the (possibly-updated) opts, or nil if nothing to merge AND
-   nothing was passed."
+   The AsyncLocalStorage map is execution context, not a persistence roster:
+   turn, eval, replay, and test values never
+   cross this boundary. Explicit caller tx metadata may carry a genuine custom
+   transaction fact outside `:seon.db`; the selected provenance refs always
+   replace caller claims in the database namespace."
   [opts]
-  (let [ctx      (current-tx-context)
-        agent-id (current-agent-id)
-        origin   (derive-origin ctx agent-id)
-        als-meta (cond-> {}
-                   agent-id (assoc ::db/agent-id agent-id))
-        merged   (merge als-meta ctx)]
-    (if (and (empty? merged)
-             (nil? origin)
-             (not (contains? (:tx-meta opts) ::db/origin)))
-      opts
-      (let [m (merge merged (:tx-meta opts))
-            m (if (some? origin)
-                (assoc m ::db/origin origin)
-                (not-empty (dissoc m ::db/origin)))]
-        (if (nil? m)
-          (not-empty (dissoc (or opts {}) :tx-meta))
-          (assoc (or opts {}) :tx-meta m))))))
+  (let [ctx        (or (current-tx-context) {})
+        provenance (selected-provenance ctx (current-agent-id))
+        explicit   (into {}
+                         (remove (fn [[k _]] (= "seon.db" (namespace k))))
+                         (or (:tx-meta opts) {}))
+        tx-meta    (merge explicit provenance)]
+    (assoc (or opts {}) :tx-meta tx-meta)))
+
+(defn validate-provenance-refs!
+  "Require transaction user/process refs to resolve to their real entities."
+  [db-value tx-meta]
+  (let [user-ref    (::db/user tx-meta)
+        process-ref (::db/process tx-meta)
+        user        (try (d/entity db-value user-ref)
+                         (catch :default _ nil))
+        process     (try (d/entity db-value process-ref)
+                         (catch :default _ nil))]
+    (when-not (or (:seon.agent/id user) (:seon.user/id user))
+      (throw (ex-info
+               (str "Transaction user ref does not resolve to an existing "
+                    "root, human, or agent entity: " (pr-str user-ref))
+               {::db/error       :seon.db/unresolved-transaction-user
+                ::db/user        user-ref
+                :seon.error/kind :core-bug})))
+    (when-not (:seon.db.process/id process)
+      (throw (ex-info
+               (str "Transaction process ref does not resolve to a stable "
+                    "database process entity: " (pr-str process-ref))
+               {::db/error       :seon.db/unresolved-transaction-process
+                ::db/process     process-ref
+                :seon.error/kind :core-bug})))
+    true))
 
 ;; ---------------------------------------------------------------------------
 ;; Error envelopes — every failure path in the write pipeline resolves to
@@ -1280,7 +1269,7 @@
    hand-installed store entry is a pre-existing tolerated divergence
    (test scaffolding installs identity out of band), and datahike can
    legally ADD uniqueness later."
-  [conn attrs]
+  [conn attrs tx-meta]
   (let [installed  (:schema @conn)
         relevant   (->> attrs
                         (remove system-attr?)
@@ -1355,7 +1344,12 @@
                 ::db/failures    failures
                 :seon.error/kind :user-input})))
     (when (seq entries)
-      (await (d/transact! conn (vec entries))))))
+      ;; This is a normal post-genesis transaction too. Reuse the selected
+      ;; provenance so a first write of a newly registered attr does not leave
+      ;; an unattributed schema-install transaction immediately before an
+      ;; attributed data transaction.
+      (await (d/transact! conn {:tx-data (vec entries)
+                                :tx-meta tx-meta})))))
 
 (defn transact-success-envelope
   "Build the agent-visible success envelope from a raw datahike tx-report.
@@ -1452,17 +1446,20 @@
           ;; `:seon.db/ref` never reaches the store as a junk attr
           ;; (throws :user-input on a malformed ref value — caught below).
           tx-data     (normalize-entity-ref-keys tx-data)
-          attrs       (extract-tx-attrs tx-data)
-          merged-opts (merge-tx-context-into-opts opts)]
+          merged-opts (merge-tx-context-into-opts opts)
+          tx-meta     (:tx-meta merged-opts)
+          attrs       (into (extract-tx-attrs tx-data) (keys tx-meta))]
       ;; Validation gate — these THROW ex-info on bad input; the outer
       ;; catch below converts every throw to the failure envelope.
       (validate-attrs! attrs)
       (validate-values! tx-data)
+      (validate-values! [tx-meta])
+      (validate-provenance-refs! @c tx-meta)
       ;; Install datahike schema for any registered attr not yet in the
       ;; conn (e.g. one the agent just `seon.schema/register!`'d at
       ;; runtime). Schema-before-data in its own tx; skips attrs already
       ;; present. See `ensure-datahike-attrs!` for the why.
-      (await (ensure-datahike-attrs! c attrs))
+      (await (ensure-datahike-attrs! c attrs tx-meta))
       ;; Datahike-cljs `d/transact!` takes one arg-map combining
       ;; `:tx-data` + `:tx-meta` (see datahike.api.impl/transact! L29-41).
       ;; The previous shape `(d/transact! c tx-data opts)` passed opts
@@ -1488,13 +1485,12 @@
 ;; ---------------------------------------------------------------------------
 
 (defn assert-preconditions!
-  "Validate v1.md §7.1 boot preconditions. Throws ex-info on failure.
+  "Validate database provenance preconditions. Throws on failure.
 
    Preconditions:
      1. Resolved conn is opened with `:keep-history? true`. Without
-        history, tx-meta datoms don't persist (datahike drops them on
-        compaction) — the causality bundle silently degrades.
-     2. All tx-meta attrs in `tx-meta-attrs` are registered in
+        history, transaction provenance cannot be queried historically.
+     2. Both provenance attrs in `tx-meta-attrs` are registered in
         `seon.schema`. Datahike's `flush-tx-meta` rejects unregistered
         keys at write time; the first tx after boot would crash.
 
@@ -1511,7 +1507,7 @@
     (when-not (:keep-history? (:config @c))
       (throw (ex-info
                (str "seon.db: agent conn opened with `:keep-history? false`. "
-                    "v1's tx-meta-as-history mechanic requires history "
+                    "transaction provenance requires history "
                     "(see v1.md §7.1). Open the conn with "
                     "`:keep-history? true`.")
                {:kind     :seon.boot/precondition-failed
