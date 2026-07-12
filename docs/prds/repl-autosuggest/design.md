@@ -181,6 +181,17 @@ standing rules:
   this repo — real specced fns, docstring line-1 cards, real schema
   registrations — not instructional text. Code with tests is
   refinable; context that is words is not.
+- **The model is a lint for agent-legibility (owner, 2026-07-12).** A
+  frontier model papers over bad names and vague docstrings with its
+  own knowledge; the 26M assembly machine cannot — so suggestion
+  failures ATTRIBUTE to ingredients: the card, the name, the
+  docstring line-1, the schema keys involved. The trainer/eval
+  reports a per-fn/per-schema assembly-failure ranking (the
+  worst-ingredients leaderboard, derived). The fix loop is better
+  tools, better names, better docstrings, better schemas — ordinary
+  tested code changes that flow into the next render by construction
+  (docstrings render, cards derive from the program graph) — never
+  context prose. Performance shifts by refining the repo.
 
 ## Data sources (INVERTED 2026-07-12 — KT0 fired)
 
