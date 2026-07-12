@@ -187,16 +187,16 @@
 ;;; ============================================================
 
 ;; Agent-level keys are persisted on the agent entity and read reactively:
-;;       `:seon.client/wake?` (gates the wake trigger at init),
+;;       `:seon.agent.runtime/wake?` (gates the wake trigger at resume),
 ;;       `:seon.eval/home-requires` (the home-ns require list). These are
 ;;       declared HERE (referencing their owning ns's registered shape) so the
-;;       recursive decode fills the default AND `seed-default-ctx!` transacts
-;;       them onto the entity. Default = today's value ⇒ byte-parity.
+;;       recursive decode validates overrides before `seon.agent` includes
+;;       them in the atomic birth transaction. Default = today's value ⇒ parity.
 ;; (The per-agent LLM / capabilities / toolkit / transcript-scalar keys are the
 ;; owner's pending three-fates call — added here the same way once decided.)
-;; The persisted agent-level dials (`:seon.client/wake?`, `:seon.eval/home-requires`)
+;; The persisted agent-level dials (`:seon.agent.runtime/wake?`, `:seon.eval/home-requires`)
 ;; carry NO schema `:default` here — their DEFAULT lives ONCE at the CONSUMER
-;; (`seon.client/wake-armed?` → true; `seon.agent.home/home-requires-for` → the
+;; (`seon.agent.runtime/wake-armed?` → true; `seon.agent.home/home-requires-for` → the
 ;; `home-ns-require-specs` const). So a no-config agent never gets the datom
 ;; (the consumer's fallback = byte-parity), and the manifest sets the key ONLY to
 ;; OVERRIDE. Declared LEAF-shaped (NOT a keyword ref — `seon.config` is a leaf
@@ -205,7 +205,7 @@
 (schema/register! :seon.config/agent-context
   [:map
    ;; Persisted agent datoms — override-only (no default; consumer owns it).
-   [:seon.client/wake?       {:optional true} :boolean]
+   [:seon.agent.runtime/wake? {:optional true} :boolean]
    [:seon.eval/home-requires {:optional true} [:vector :any]]
    [:seon.agent/ctx {:optional true :default []} [:vector :map]]])
 
@@ -337,7 +337,7 @@
 (schema/register! :seon.agent.web/allowed-domains [:or [:vector :string] :nil])
 ;; The cluster system-prompt TEXT — OPTIONAL, no default (absent ⇒ not seeded
 ;; ⇒ `seon.ai/effective-system-prompt` falls through to the shipped
-;; `seon.agent.ctx/system-text`, byte-identical to the pre-datom world). The
+;; `seon.agent.ctx/system-text`, preserving the pre-datom behavior). The
 ;; read side IS wired: request override → THIS datom (via [[config-view]]) →
 ;; the shipped default. The value is the literal prompt string (a manifest
 ;; keeps it inline; `config/minimal.edn` is the worked example).

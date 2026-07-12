@@ -1524,9 +1524,9 @@
   []
   (str/join ", " (map (fn [spec] (name (nth spec 2))) authored-ns-require-specs)))
 
-;; Forward refs — the requires-edge tee (defined with the eval-batch machinery
-;; below) is reused here so a fresh agent records its home-ns requires at setup.
-(declare ns-require-edges-tx transient-ns-syms)
+;; Forward ref used by the eval tee below. Agent birth persists the durable
+;; home declaration; runtime setup only reconstructs analyzer state.
+(declare transient-ns-syms)
 
 (defn ^:async setup-agent-ns!
   "Create + initialize the agent's home namespace.
@@ -1567,7 +1567,11 @@
    materializes the home ns's runtime JS object, so a later `(defn …)` has a
    path to write into — hence NO bare-`(ns)` prime and NO `(fn? complete)`
    probe. A non-`::ok?` result now signals a REAL failure (the seed missing, or a
-   toolkit ns gone) and throws."
+   toolkit ns gone) and throws.
+
+   This is deliberately process-local reconstruction only. Durable home source
+   and require-edge facts are part of `seon.agent`'s atomic birth transaction;
+   resume never writes a second projection of analyzer state."
   {:malli/schema
    [:=> [:catn [::compile-state :any] [::agent-ns-sym :any] [::agent-id :any]] :any]}
   [compile-state agent-ns-sym agent-id]
@@ -1582,21 +1586,6 @@
                     "(in init-bootstrap!) must declare the refer'd toolkit "
                     "defs into the compile-state.")
                {:agent-ns agent-ns-sym :result r})))
-    ;; Record the home ns's `:seon.ns/require-edges` at SETUP time, so a
-    ;; genuinely fresh agent renders its required-ns cards + SCI cage env
-    ;; on turn 0 (before its first eval). The eval-batch path tees these
-    ;; on every eval, but a brand-new agent has no eval yet — reuse
-    ;; [[ns-require-edges-tx]] (the ONE requires-edge path) against the
-    ;; analyzer's edge set for the home ns.
-    (when (and db/*conn*
-               (not (contains? transient-ns-syms agent-ns-sym)))
-      (let [ns-kw  (keyword (str agent-ns-sym))
-            req-tx (ns-require-edges-tx
-                     @db/*conn* ns-kw
-                     (analyzer-info/ns-require-edges compile-state
-                                                     agent-ns-sym))]
-        (when (seq req-tx)
-          (await (db/transact! {:seon.db/tx-data req-tx})))))
     agent-ns-sym))
 
 ;; ============================================================

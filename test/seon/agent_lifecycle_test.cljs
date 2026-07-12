@@ -12,13 +12,11 @@
        takes an explicit id and sets `:seon.agent/terminated-at`. Each returns
        the new DERIVED state keyword. `wait` with no agent in scope returns a
        loud error envelope (errors are values).
-     - the RESUME query is `agent/armable-agent-ids` — every agent whose
-       DERIVED state is `:idle` (not terminated AND no open run), sorted; empty
-       store = [] (genuine first boot); a `:terminated` or `:running` agent is
-       excluded.
+     - `agent/armable-agent-ids` selects idle wake targets, while
+       `agent/resumable-agent-ids` selects every nonterminated process host.
      - `agent/create!` roundtrips `:seon.agent/default-turn-limit`; purpose is
-       never defaulted; a failed transact returns the db error envelope.
-     - `agent/boot!` propagates create!'s error envelope (no ghost agent).
+       never defaulted; a failed transact returns the db error envelope; and
+       all initial agent/context/home-namespace facts share one transaction.
 
    Tests open a FRESH `:memory` conn (via `seon.client/open-agent-conn!`,
    the same boot helper the pod uses) — nothing here touches the live agents."
@@ -31,7 +29,8 @@
     [seon.agent.run :as run]
     [seon.agent.testrun :as testrun]
     [seon.client :as client]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.dev.runtime-id :as runtime-id]))
 
 (defn- with-conn
   "Open a fresh schema-loaded conn, `set!` it as the ROOT `db/*conn*`
@@ -289,7 +288,10 @@
                                      :seon.agent.run/trigger :message}))
               (is (= ["bbb-2606101200"]
                      (agent/armable-agent-ids {:seon.db/db @db/*conn*}))
-                  "a running agent is mid-run, not wakeable"))
+                  "a running agent is mid-run, not wakeable")
+              (is (= ["aaa-2606101200" "bbb-2606101200"]
+                     (agent/resumable-agent-ids {:seon.db/db @db/*conn*}))
+                  "running state still needs process-local handles"))
             (testing "closing the run re-arms it (back to derived :idle)"
               (await (db/with-agent "aaa-2606101200"
                        (fn ^:async w [] (await (lifecycle/wait "park")))))
@@ -298,7 +300,9 @@
             (testing "a terminated agent is excluded (history, not roster)"
               (await (lifecycle/terminate "aaa-2606101200"))
               (is (= ["bbb-2606101200"]
-                     (agent/armable-agent-ids {:seon.db/db @db/*conn*}))))))
+                     (agent/armable-agent-ids {:seon.db/db @db/*conn*})))
+              (is (= ["bbb-2606101200"]
+                     (agent/resumable-agent-ids {:seon.db/db @db/*conn*}))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -380,34 +384,57 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ============================================================
-;; boot! — create!'s error envelope must propagate through the boot path.
+;; Complete birth facts are one atomic database transition.
 ;; ============================================================
 
-(deftest boot!-propagates-create!-error-envelope
+(deftest create!-commits-context-and-home-namespace-atomically
   (async done
     (-> (with-conn
           (fn ^:async run []
-            (let [stub-llm (fn [_] (js/Promise.resolve {:text ""}))]
-              (testing "forced create! failure (id violates :seon.db/id — 14 chars)
-                        surfaces the db error envelope"
-                (let [res (await (agent/boot!
-                                   {:seon.agent/id            "short"
-                                    :seon.agent/llm-fn        stub-llm
-                                    :seon.agent/compile-state nil}))]
-                  (is (false? (:seon.db/ok? res))
-                      "boot! hands the create! envelope up — errors are values;
-                       no nil id leaks downstream")
-                  (is (map? (:seon.db/error res)) "the error map rides along")
-                  (is (nil? (:seon.agent/ns res))
-                      "no success keys on the failure path")))
-              (testing "normal path unchanged"
-                (let [res (await (agent/boot!
-                                   {:seon.agent/id            "AGTbootok00001"
-                                    :seon.agent/llm-fn        stub-llm
-                                    :seon.agent/compile-state nil}))]
-                  (is (= "AGTbootok00001" (:seon.agent/id res)))
-                  (is (= 'my.agent.AGTbootok00001 (:seon.agent/ns res)))
-                  (is (some? (db/entity {:seon.db/ref [:seon.agent/id "AGTbootok00001"]}))
-                      "the entity exists on the success path"))))))
+            (let [id "AGTbirth000001"
+                  ns-name :my.agent.AGTbirth000001
+                  res (await (agent/create! {:seon.agent/id id}))
+                  entity (db/entity {:seon.db/ref [:seon.agent/id id]})
+                  ns-entity (db/entity {:seon.db/ref [:seon.ns/name ns-name]})
+                  txs (db/query
+                        {:seon.db/query
+                         '[:find [?tx ...]
+                           :in $ ?id ?ns
+                           :where
+                           (or-join [?tx ?id ?ns]
+                             [?a :seon.agent/id ?id ?tx]
+                             [?a :seon.agent/ctx _ ?tx]
+                             [?n :seon.ns/name ?ns ?tx]
+                             [?n :seon.ns/source _ ?tx]
+                             [?n :seon.ns/require-edges _ ?tx])]
+                         :seon.db/args [id ns-name]})]
+              (is (= {:seon.agent/id id} res))
+              (is (seq (:seon.agent/ctx entity))
+                  "the complete configured block tree exists immediately")
+              (is (string? (:seon.ns/source ns-entity))
+                  "the deterministic home declaration exists immediately")
+              (is (seq (:seon.ns/require-edges ns-entity))
+                  "structural home dependencies exist immediately")
+              (is (= 1 (count (set txs)))
+                  "agent identity, context link, and home namespace share one tx"))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest resume-reconstructs-process-state-without-writing-database-state
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (let [id "AGTresume00001"]
+              (await (agent/create! {:seon.agent/id id}))
+              (let [birth-t (db/basis-t)
+                    resumed (await (agent/resume! {:seon.agent/id id}))]
+                (is (true? (:seon.agent.runtime/resumed? resumed)))
+                (is (some #{id} (runtime-id/hosted))
+                    "resume advertises the durable agent in this process")
+                (is (= birth-t (db/basis-t))
+                    "compiler/listener reconstruction adds no database facts")
+                (is (= :terminated (await (lifecycle/terminate id))))
+                (is (not (some #{id} (runtime-id/hosted)))
+                    "durable termination removes every process advertisement")))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

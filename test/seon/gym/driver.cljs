@@ -1632,18 +1632,16 @@
     ;; fixture ids are therefore intentional known ids, not a second identity
     ;; generator; live agent creation goes through `seon.agent/mint!`.
     (let [agent-id (or pre-id (str "gym-agent-" (name designator)))]
-      ;; with-agent scope mirrors seon.client/init-agent! — on a
-      ;; live boot the agent's own create! tx carries its agent-id. The gym
-      ;; wires the home ns itself (setup-agent-ns!) + creates the entity; no
-      ;; turn 0 (the boot greeting turn was removed — a minted agent is
-      ;; :idle with zero runs the instant its entity + ns exist).
+      ;; The scratch transition mirrors durable birth then process-local
+      ;; reconstruction: create! commits identity + home declaration first;
+      ;; setup-agent-ns! restores only compiler state. There is no turn 0.
       (await
         (db/with-agent agent-id
           (fn ^:async boot-gym-agent! []
+            (await (agent/create! {:seon.agent/id agent-id}))
             (await (seval/setup-agent-ns! compile-state
                                           (home/home-ns agent-id)
-                                          agent-id))
-            (await (agent/create! {:seon.agent/id agent-id})))))
+                                          agent-id)))))
       (swap! !agents assoc designator agent-id)
       agent-id)))
 

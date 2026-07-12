@@ -208,6 +208,25 @@
        sort
        vec))
 
+(defn resumable-agent-ids
+  "Agent ids whose derived state is not `:terminated`.
+
+   This is the process-host roster, distinct from [[armable-agent-ids]]: a
+   running or paused agent still needs its transient namespace, loop input, and
+   listener reconstructed after process start or code reload. The only
+   exclusion is the durable termination fact."
+  {:malli/schema
+   [:=> [:catn [:seon.db/db :seon.db/db-val]] [:vector :seon.agent/id]]}
+  [db]
+  (->> (db/query {:seon.db/db db
+                  :seon.db/query
+                  '[:find [?id ...]
+                    :where
+                    [?a :seon.agent/id ?id]
+                    (not [?a :seon.agent/terminated-at _])]})
+       sort
+       vec))
+
 ;; ============================================================
 ;; Error-storm detection — a DERIVED health signal. An agent thrashing on
 ;; broken evals (a burst of consecutive failures, or a majority-failing

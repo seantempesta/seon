@@ -38,16 +38,16 @@
    two simultaneous idle wakes can't both open, the loser's open returns the
    db error envelope and it RENEWS the winner's run instead (no orphaned run).
 
-   Requires `seon.agent` (the wake gate `inbound-msg-datom?`), `seon.derive`
-   (the one derived-state/turn-count leaf), `seon.agent.run` (the run
+   Requires `seon.agent.message` (the wake gate `inbound-msg-datom?`),
+   `seon.derive` (the one derived-state/turn-count leaf), `seon.agent.run` (the run
    lifecycle), `seon.agent.turn` (`run-turn!`). The boot path (`seon.client`)
    requires THIS ns to `install-wake-trigger!`."
   (:require
     [clojure.string :as str]
     [my.plan.internal :as plan-internal]
-    [seon.agent :as agent]
     [seon.agent.ctx :as ctx]
     [seon.agent.home :as home]
+    [seon.agent.message :as message]
     [seon.agent.run :as run]
     [seon.agent.schedule :as schedule]
     [seon.agent.turn :as turn]
@@ -373,7 +373,7 @@
 
 ;; ============================================================
 ;; Wake — the per-tx listener fires on every transact; we filter for new
-;; INBOUND messages (to ∋ me, from ≠ me, waking origin — agent/inbound-msg-datom?)
+;; INBOUND messages (to ∋ me, from ≠ me, waking origin — message/inbound-msg-datom?)
 ;; and, if the agent's derived state is :idle, OPEN A RUN and start the loop.
 ;; An already-:running agent RENEWS its open run's lease (the new message
 ;; extends both bounds — the sliding window). The idle→running open is
@@ -390,7 +390,7 @@
   "Return the tx-listener handler for `input`'s agent.
 
    On an inbound datom
-   that passes [[seon.agent/inbound-msg-datom?]], derive the agent's state
+   that passes [[seon.agent.message/inbound-msg-datom?]], derive the agent's state
    from the local db snapshot; if :idle → open a `:message` run (cause = the
    waking message) and start `run-loop!`; if :running → `renew!` the open
    run's lease. The idle open is CAS-guarded; a wake that loses the race
@@ -402,7 +402,7 @@
           inbound (when my-eid
                     (->> (:seon.agent.message/to attr-index)
                          (filter :seon.db/added?)
-                         (filter #(agent/inbound-msg-datom? db % my-eid))))
+                         (filter #(message/inbound-msg-datom? db % my-eid))))
           {waking false exhausted true}
           (group-by (fn [{eid :seon.db/e}]
                       (>= (or (:seon.agent.message/hops
@@ -622,6 +622,26 @@
     (db/listen!
       {:seon.db/key     k
        :seon.db/handler (wake-handler input)})))
+
+(defn uninstall-wake-trigger!
+  "Remove one agent's wake listener and process-local loop input.
+
+   Idempotent. This is the inverse of [[install-wake-trigger!]] and is the
+   required process cleanup for termination or an explicit unhost. Removing
+   both cells is load-bearing: retaining only `!loop-input` would let a later
+   resume drive a terminated agent with stale provider/compiler handles."
+  {:malli/schema
+   [:=> [:catn [:input [:map [:seon.agent/id :seon.agent/id]]]]
+    [:map
+     [:seon.agent/id :seon.agent/id]
+     [:seon.agent.loop/uninstalled? [:= true]]]]}
+  [{:seon.agent/keys [id]}]
+  (swap! !loop-input dissoc id)
+  (try
+    (db/unlisten! {:seon.db/key [:seon.agent/user-message-trigger id]})
+    (catch :default _ nil))
+  {:seon.agent/id id
+   :seon.agent.loop/uninstalled? true})
 
 ;; ============================================================
 ;; The ONE ticker — the only active machinery. The DB is passive about

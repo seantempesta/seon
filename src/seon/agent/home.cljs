@@ -18,6 +18,12 @@
 (schema/register! ::require-spec
   [:cat :symbol [:enum :as :refer] [:or :symbol [:vector :symbol]]])
 (schema/register! ::require-specs [:vector ::require-spec])
+(schema/register! ::require-edge
+  [:map
+   [:seon.ns.require/target :keyword]
+   [:seon.ns.require/alias {:optional true} :symbol]
+   [:seon.ns.require/refers {:optional true} [:set :symbol]]])
+(schema/register! ::require-edges [:set ::require-edge])
 
 (defn home-ns
   "Return the deterministic home-ns symbol for an agent id.
@@ -106,3 +112,45 @@
    (str "(ns " (name home-ns-value) "\n  (:require "
         (str/join "\n            " (map pr-str specs))
         "))")))
+
+(defn require-edges
+  "Project canonical home require specs into durable require-edge facts.
+
+   The specs are already structured data; this function never parses the
+   rendered `(ns …)` text. Each `[target :as alias]` or
+   `[target :refer [symbols…]]` becomes the same component-map shape used by
+   the program graph."
+  {:malli/schema [:=> [:catn [::specs ::require-specs]] ::require-edges]}
+  [specs]
+  (into #{}
+        (map (fn [[target mode value]]
+               (cond-> {:seon.ns.require/target (keyword (str target))}
+                 (= :as mode)
+                 (assoc :seon.ns.require/alias value)
+
+                 (= :refer mode)
+                 (assoc :seon.ns.require/refers (set value)))))
+        specs))
+
+(defn initial-ns-entity
+  "Return the complete durable home-namespace entity for a new agent.
+
+   `home-requires` must be the exact creation-time require list selected for
+   the agent. Namespace source and structural dependency edges therefore
+   commit in the same transaction as the agent identity instead of being
+   discovered by a later analyzer side effect."
+  {:malli/schema
+   [:=>
+    [:catn [:request
+            [:map
+             [:seon.agent/id ::agent-id]
+             [:seon.eval/home-requires ::require-specs]]]]
+    [:map
+     [:seon.ns/name :keyword]
+     [:seon.ns/source :string]
+     [:seon.ns/require-edges [:vector ::require-edge]]]]}
+  [{:seon.agent/keys [id] :seon.eval/keys [home-requires]}]
+  (let [ns-sym (home-ns id)]
+    {:seon.ns/name (keyword (str ns-sym))
+     :seon.ns/source (home-ns-form ns-sym home-requires)
+     :seon.ns/require-edges (vec (require-edges home-requires))}))

@@ -14,8 +14,8 @@
        symbol = late-bound block fn); `:seon.render/html` is the
        optional debug-view twin.
      - `install!` / `remove!` — the ONE scope-aware mutation surface over the
-       agent's own `:seon.agent/ctx` block set; `seed-default-ctx!` copies the
-       manifest-declared tree into a fresh agent at creation.
+       agent's own `:seon.agent/ctx` block set; [[initial-agent-context]]
+       projects the manifest-declared tree into the atomic birth transaction.
        `context-root` reads the agent's COMPLETE `:seon.agent/ctx`, decoded
        + priority-sorted — NO render-time merge, NO separate default set, NO
        char budget. The render guard (a broken block renders an inline error
@@ -2139,6 +2139,24 @@
    [:map [::ok? [:= true]]  [::names ::names]]
    [:map [::ok? [:= false]] [::error ::error]]])
 
+(schema/register! ::initial-context-request
+  [:map
+   [:seon.agent/id :seon.agent/id]
+   [:seon.agent.ctx/override {:optional true} [:maybe :map]]])
+
+(defn initial-agent-context
+  "Return the complete creation-time context facts for one new agent.
+
+   This is a pure projection of the optional config manifest: agent-level
+   scalar dials and the entire `:seon.agent/ctx` component tree in one map.
+   The caller merges it into the new agent entity so identity, context blocks,
+   and dials commit atomically. Existing agents never call this function during
+   resume; their database facts remain authoritative."
+  {:malli/schema
+   [:=> [:cat ::initial-context-request] :seon.config/agent-context]}
+  [{:seon.agent/keys [id] :seon.agent.ctx/keys [override]}]
+  (config/resolve-agent-context id override))
+
 (defn- upsert-ctx-tx
   "Tx-data that REPLACES the scoped agent's :seon.agent/ctx with `blocks`:
    `:db.fn/retractAttribute` the whole component vector — which
@@ -2214,50 +2232,6 @@
            ::error (str "remove! transact failed: "
                         (:seon.error/message (:seon.db/error res)))}
           {::ok? true ::names [nm]})))))
-
-(def ^:private seed-consumed-keys
-  "Agent-context keys CONSUMED at seed rather than persisted as an agent datom,
-   so [[seed-default-ctx!]] drops them from the scalar transact:
-     - `:seon.agent/ctx` — `install!` owns the block-tree transact."
-  #{:seon.agent/ctx})
-
-(defn ^:async seed-default-ctx!
-  "SEED-COPY the resolved agent-context into the agent in scope.
-
-   The
-   creation-time copy that gives a fresh agent its COMPLETE `:seon.agent/ctx`
-   block set AND its agent-level config datoms, so render and every
-   config-on-record consumer read ONE place. Idempotent via install!'s
-   upsert-by-name; `seon.agent/create!` calls it ONLY for a genuinely new entity
-   (a resumed agent keeps its own edited config/blocks).
-
-   The seed is shaped by the OPTIONAL config manifest via the GENERIC loader
-   ([[seon.config/resolve-agent-context]]) selected by the scoped agent's IDENTITY
-   (root gets the root-context override). An absent context declaration produces
-   an empty block tree; a present declaration is copied exactly.
-
-   TWO seed writes: (1) `install!` upserts the block tree; (2) the surviving
-   AGENT-LEVEL keys (everything except [[seed-consumed-keys]]) are transacted
-   onto the agent ENTITY as its reactive config-on-record — so a consumer reads
-   the datom off the agent (e.g. `:seon.client/wake?`, `:seon.eval/home-requires`).
-   Declared scalar values land as data, which the consumer then reads.
-   GENERIC — it carries WHATEVER agent-level keys the resolved config holds, so a
-   newly-activated dial needs no change here (only its schema key + its reader)."
-  {:malli/schema [:=> [:cat] ::result]}
-  []
-  (let [id       (db/current-agent-id)
-        resolved (config/resolve-agent-context id nil)
-        scalars  (apply dissoc resolved seed-consumed-keys)
-        blk-res  (await (install! (:seon.agent/ctx resolved)))]
-    (if (or (empty? scalars) (false? (::ok? blk-res)))
-      blk-res
-      (let [res (await (db/transact!
-                         {:seon.db/tx-data [(assoc scalars :seon.agent/id id)]}))]
-        (if (false? (:seon.db/ok? res))
-          {::ok? false
-           ::error (str "seed-default-ctx! scalar transact failed: "
-                        (:seon.error/message (:seon.db/error res)))}
-          blk-res)))))
 
 ;; ============================================================
 ;; Render pipeline — the agent's OWN block set, decoded + priority-sorted,

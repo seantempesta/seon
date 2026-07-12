@@ -18,10 +18,8 @@
        adapter over the one [[seon.derive]] leaf); state is a projection of the
        run/terminated-at primitives, never stored
      - `derive-status` — the agent fingerprint, re-exported from [[seon.derive]]
-     - `inbound-msg-datom?` — the wake gate ([[seon.agent.loop]]'s trigger
-       and the transcript head-render both reuse it)
-     - `create!` / `boot!` — allocate the agent entity (boot! does NOT arm
-       the wake trigger — that's the client boot path)
+     - `create!` / `mint!` — reconcile or allocate the complete initial
+       durable agent fact set
      - `message!` / `user-ref` — re-exported from [[seon.agent.message]]
      - `set-purpose!` — sugar over a one-attr transact to the agent's own
        entity. The ctx-block editing surface is [[seon.agent.ctx/install!]] /
@@ -62,6 +60,7 @@
     [clojure.string :as str]
     [seon.agent.home :as home]
     [seon.agent.message :as msg]
+    [seon.agent.runtime :as runtime]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.namespaces :as ctx-namespaces]
     [seon.agent.ctx.transcript :as ctx-transcript]
@@ -251,8 +250,8 @@
 ;; on success, projections that may be nil) is `{:optional true}` per
 ;; CLAUDE.md "Optional = absent" rule. Never `[:maybe X]`.
 ;;
-;; These required-sets feed schemas-as-queryable-data: at boot,
-;; `seon.client/start-agent!` decomposes each :map into a `:seon.schema`
+;; These required-sets feed schemas-as-queryable-data: at cold runtime start,
+;; `seon.client/start-runtime!` decomposes each :map into a `:seon.schema`
 ;; entity whose `:seon.schema/required-attrs` is the set computed from
 ;; entries without `{:optional true}`. Kind-lookup in `seon.render`
 ;; queries those entities via datalog.
@@ -336,6 +335,9 @@
    [:seon.agent/default-turn-limit {:optional true} :seon.agent/default-turn-limit]
    [:seon.agent/default-deadline-ms {:optional true} :seon.agent/default-deadline-ms]
    [:seon.agent/schedules          {:optional true} :seon.agent/schedules]
+   [:seon.agent/ctx                {:optional true} :seon.agent/ctx]
+   [:seon.agent.runtime/wake?      {:optional true} :seon.agent.runtime/wake?]
+   [:seon.eval/home-requires       {:optional true} :seon.eval/home-requires]
    [:seon.render/ai   {:optional true} :seon.render/ai]
    [:seon.render/html {:optional true} :seon.render/html]])
 
@@ -351,6 +353,9 @@
 
 (schema/register! ::armable-agent-ids-request [:map [:seon.db/db {:optional true} :seon.db/db-val]])
 (schema/register! ::armable-agent-ids-response [:vector :seon.agent/id])
+(schema/register! ::resumable-agent-ids-request
+  [:map [:seon.db/db {:optional true} :seon.db/db-val]])
+(schema/register! ::resumable-agent-ids-response [:vector :seon.agent/id])
 
 (defn armable-agent-ids
   "Agent ids whose DERIVED state is `:idle` — the ones a trigger can WAKE.
@@ -365,6 +370,17 @@
   [{:seon.db/keys [db]}]
   (derive/armable-agent-ids (or db @db/*conn*)))
 
+(defn resumable-agent-ids
+  "Agent ids this process must host: every agent without a termination fact.
+
+   Unlike [[armable-agent-ids]], this includes running and paused agents; those
+   states still require fresh process handles after a cold start or reload."
+  {:malli/schema
+   [:=> [:cat ::resumable-agent-ids-request]
+    ::resumable-agent-ids-response]}
+  [{:seon.db/keys [db]}]
+  (derive/resumable-agent-ids (or db @db/*conn*)))
+
 ;; ============================================================
 ;; Derived status — the agent FINGERPRINT. The whole derived state in one map.
 ;; It is a pure DERIVED READ owned by [[seon.derive/derive-status]] (the one
@@ -377,38 +393,9 @@
 (def derive-status derive/derive-status)
 
 ;; ============================================================
-;; The wake GATE — the one predicate the loop trigger ([[seon.agent.loop]])
-;; and the transcript head-render both reuse so a message wakes (and renders
-;; as an inbound) under exactly ONE rule. The loop + the trigger themselves
-;; live in seon.agent.loop; this gate stays here (the agent owns 'what counts
-;; as a message TO me').
-;; ============================================================
-
-(defn inbound-msg-datom?
-  "True iff this datom is a waking inbound message for `my-eid`.
-
-   An added `:seon.agent.message/to` targeting `my-eid` from a
-   DIFFERENT sender with a WAKING origin (∈ {:human :agent}). The to-check is
-   load-bearing: every agent installs the wake listener, so without it ONE
-   message wakes EVERY agent's loop. The from/origin rule is the shared
-   [[seon.agent.message/waking-inbound?]] — ONE source of truth with the
-   transcript head-render. This datom adapter pulls the message entity, then
-   delegates. Hop-exhausted messages still pass here; the wake handler
-   partitions them out to refuse loudly (see [[seon.agent.loop/wake-handler]])."
-  {:malli/schema [:=> [:catn [:db :any] [:datom :any] [:my-eid :any]] :any]}
-  [db {eid :seon.db/e target :seon.db/v} my-eid]
-  (and (= target my-eid)
-       (msg/waking-inbound? (db/entity {:seon.db/db db :seon.db/ref eid})
-                            my-eid)))
-
-;; ============================================================
 ;; Agent creation. Reconcile known ids; allocate genuinely new ids atomically.
 ;; ============================================================
 
-;; purpose / default-turn-limit are :any (not their stored :string / :int):
-;; create! folds them in UNCONDITIONALLY, so a caller (boot!) that has no
-;; purpose passes an EXPLICIT nil — :any tolerates the absent-or-nil request
-;; slot without throwing (the cond-> guards what actually reaches the tx).
 (schema/register! ::create-request
   [:map
    [:seon.agent/id                  :seon.agent/id]
@@ -422,42 +409,40 @@
    [:map [:seon.agent/id :seon.agent/id]]
    :seon.db/transact-response])
 
-(defn ^:async ^:private seed-default-context!
-  "Copy the default context block set into one genuinely new agent.
+(defn- initial-agent-tx
+  "Complete creation facts for one new agent and its home namespace.
 
-   Creation already committed before this projection runs. A seed failure is
-   logged loudly but preserves the existing creation contract: the durable
-   agent identity remains the successful fact and config reconciliation can
-   repair its managed context subset later."
-  [id]
-  (let [seed (await (db/with-agent id
-                      (fn ^:async seed-ctx! []
-                        (await (ctx/seed-default-ctx!)))))]
-    (when (false? (:seon.agent.ctx/ok? seed))
-      (js/console.error
-        (str "seon.agent context seed FAILED for " id
-             ": " (:seon.agent.ctx/error seed))))
-    seed))
+   Pure data. The caller commits this vector once, so no observer can see an
+   identity without its configured context, scalar dials, and structural home
+   namespace."
+  [id purpose default-turn-limit parent]
+  (let [context       (ctx/initial-agent-context {:seon.agent/id id})
+        home-requires (or (:seon.eval/home-requires context)
+                          home/home-ns-require-specs)
+        agent-row     (cond-> (assoc context :seon.agent/id id)
+                        (and (string? purpose) (not (str/blank? purpose)))
+                        (assoc :seon.agent/purpose purpose)
+                        (some? default-turn-limit)
+                        (assoc :seon.agent/default-turn-limit default-turn-limit)
+                        parent
+                        (assoc :seon.agent/parent parent))]
+    [agent-row
+     (home/initial-ns-entity
+       {:seon.agent/id id :seon.eval/home-requires home-requires})]))
 
 (defn ^:async create!
   "Reconcile a known agent entity by its durable id.
 
    State is DERIVED: a fresh agent with no open run is `:idle`. Idempotent:
-   re-calling with the
-   same id is a no-op upsert that NEVER re-seeds — a resumed agent keeps its
-   own purpose and its own edited/removed ctx blocks. A GENUINELY NEW entity
+   re-calling with the same id performs no transaction — a resumed agent keeps
+   its own purpose, dials, home declaration, and edited/removed context. A new entity
    gets `:seon.agent/purpose` ONLY when the human stated one; otherwise the
    attr stays ABSENT (optional = absent) until the agent derives a purpose and
    transacts it. Purpose is ENTITY DATA, never agent-directed instruction text
    — the welcome tile shows it verbatim to the customer.
-   `:seon.agent/default-turn-limit`, when given, is transacted onto the entity
-   (it seeds a new run's WORK bound); absent leaves the stored value unchanged.
-
-   SEED-COPY: a genuinely-new entity gets the FULL default block set copied
-   into its own `:seon.agent/ctx` via `seon.agent.ctx/seed-default-ctx!` (run
-   in the new agent's `with-agent` scope), so render reads one collection and
-   needs no default fallback. The seed rides the SAME `fresh?` gate as purpose:
-   a resumed agent keeps whatever blocks it edited/removed.
+   `:seon.agent/default-turn-limit`, when given, is part of that initial entity.
+   Identity, the full configured context component tree, scalar dials, purpose,
+   parent, and the structural home-namespace entity commit in ONE transaction.
 
    Returns `{:seon.agent/id id}` on success; on a FAILED transact the
    db error envelope (`{:seon.db/ok? false :seon.db/error …}`) comes
@@ -466,29 +451,17 @@
    entity; callers must branch instead of chasing a ghost."
   {:malli/schema [:=> [:cat ::create-request] ::create-response]}
   [{:seon.agent/keys [id purpose default-turn-limit]}]
-  (let [fresh? (nil? (db/entity {:seon.db/ref [:seon.agent/id id]}))
-        res    (await (db/transact!
-                        {:seon.db/tx-data
-                         [(cond-> {:seon.agent/id id}
-                            (and fresh?
-                                 (string? purpose)
-                                 (not (str/blank? purpose)))
-                            (assoc :seon.agent/purpose purpose)
-                            (some? default-turn-limit)
-                            (assoc :seon.agent/default-turn-limit default-turn-limit))]}))]
-    (if (false? (:seon.db/ok? res))
-      ;; Surface-errors-loudly AND return the failure: a success-shaped
-      ;; map after a failed transact is a dishonest record.
-      (do (js/console.error
-            (str "seon.agent/create! transact FAILED for " id ": "
-                 (:seon.error/message (:seon.db/error res))))
-          res)
-      ;; SEED-COPY the default block set into the NEW agent's own ctx
-      ;; (creation-only — the fresh? gate keeps a resumed agent's edits).
-      ;; Runs in the agent's scope so `seed-default-ctx!` targets it.
-      (do (when fresh?
-            (await (seed-default-context! id)))
-          {:seon.agent/id id}))))
+  (if (some? (db/entity {:seon.db/ref [:seon.agent/id id]}))
+    {:seon.agent/id id}
+    (let [res (await (db/transact!
+                       {:seon.db/tx-data
+                        (initial-agent-tx id purpose default-turn-limit nil)}))]
+      (if (false? (:seon.db/ok? res))
+        (do (js/console.error
+              (str "seon.agent/create! transact FAILED for " id ": "
+                   (:seon.error/message (:seon.db/error res))))
+            res)
+        {:seon.agent/id id}))))
 
 (schema/register!
   ::mint-request
@@ -503,7 +476,7 @@
 
    The registered `:seon.agent/id` policy selects the readable-word package;
    the sole writer proves freshness before committing the complete initial
-   agent row. Known-id reconciliation remains [[create!]] and is intentionally
+   agent and home-namespace facts. Known-id reconciliation remains [[create!]] and is intentionally
    separate."
   {:malli/schema [:=> [:cat ::mint-request] ::create-response]}
   [{:seon.agent/keys [purpose default-turn-limit parent]}]
@@ -517,13 +490,7 @@
              (fn [ids]
                (let [id (get ids :seon.agent/id)]
                  {:seon.db/tx-data
-                  [(cond-> {:seon.agent/id id}
-                     (and (string? purpose) (not (str/blank? purpose)))
-                     (assoc :seon.agent/purpose purpose)
-                     (some? default-turn-limit)
-                     (assoc :seon.agent/default-turn-limit default-turn-limit)
-                     parent
-                     (assoc :seon.agent/parent parent))]}))
+                  (initial-agent-tx id purpose default-turn-limit parent)}))
              :seon.db/conn db/*conn*}))
         id (get-in env [::db.id/ids :seon.agent/id])]
     (if (false? (:seon.db/ok? env))
@@ -531,8 +498,7 @@
             (str "seon.agent/mint! transact FAILED: "
                  (:seon.error/message (:seon.db/error env))))
           env)
-      (do (await (seed-default-context! id))
-          {:seon.agent/id id}))))
+      {:seon.agent/id id})))
 
 ;; ============================================================
 ;; Spawn depth (multi-agent-context Piece 2) — the DEPTH-CAP backstop. The soft
@@ -587,22 +553,11 @@
   [:map
    [:seon.agent/purpose             {:optional true} :any]
    [:seon.agent/default-turn-limit  {:optional true} :any]])
-
-;; Boot-registered ARM hook (#30). A freshly-spawned child is created IDLE with
-;; NO wake trigger; a message to it strands silently until something installs
-;; one. The arming machinery (llm-fn + bootstrap compile-state +
-;; `seon.agent.loop/install-wake-trigger!`) lives in `seon.client`, which
-;; REQUIRES `seon.agent` — so `seon.agent` cannot require it back. The client
-;; registers a `(fn [child-id] -> Promise)` into this atom at boot;
-;; `start!` invokes it BEFORE returning, so a message the parent sends right
-;; after spawn actually wakes the child. INJECTION breaks the cycle (same
-;; pattern `seon.agent.schedule` uses for its drive!/exec-fn!). nil before the
-;; client registers it (gym/tests that don't need a live wake) ⇒ start! is a
-;; no-op on arming and just returns the id.
-(defonce !arm-child-fn (atom nil))
+(schema/register! ::start-response
+  [:or ::create-response :seon.agent.runtime/resume-response])
 
 (defn ^:async ^:private spawn-child!
-  "The atomic mint→arm sequence for [[start!]], extracted so the depth-cap
+  "The atomic mint→resume sequence for [[start!]], extracted so the depth-cap
    refusal short-circuits before any entity is minted."
   [purpose default-turn-limit parent-id]
   (let [res (await
@@ -617,12 +572,10 @@
         child-id (:seon.agent/id res)]
     (if (false? (:seon.db/ok? res))
       res
-      ;; ARM the minted child IN-PROCESS (#30) so a message sent right after
-      ;; spawn wakes it. Injected hook (no require cycle); a nil hook (no live
-      ;; loop) leaves the child unarmed, never an error.
-      (do (when-let [arm @!arm-child-fn]
-            (await (arm child-id)))
-          {:seon.agent/id child-id}))))
+      (let [resumed (await (runtime/resume! {:seon.agent/id child-id}))]
+        (if (:seon.agent.runtime/resumed? resumed)
+          {:seon.agent/id child-id}
+          resumed)))))
 
 (defn ^:async start!
   "Spawn a child agent — the capability-gated spawn lifecycle function.
@@ -633,12 +586,10 @@
    `db/current-agent-id`) in the same transaction. The child is IDLE: it does
    no work until it receives a message (which opens its run #1).
 
-   The minted child's wake trigger is ARMED IN-PROCESS before this returns
-   (via the boot-registered `!arm-child-fn` hook — `seon.client/init-agent!`),
+   The minted child's complete process runtime is resumed before this returns,
    so a message the parent sends RIGHT AFTER spawn actually wakes the child
-   (arming is reactive-only: a message sent before arming never wakes it, even
-   later — so arming must precede any inbound). Before the client registers the
-   hook (gym/tests with no live loop) arming is a no-op.
+   (wake observation is reactive-only: a message sent before listener install
+   never wakes it later, so resume must precede any inbound).
 
    RESOLVES to `{:seon.agent/id child-id}` — that id is the one you message to
    reach the child. On a failed transact the db error envelope comes back as-is
@@ -657,7 +608,7 @@
      2. TWO FORMS: eval `(start! {…})` alone, COPY the rendered literal id,
         then `(message/agent \"<that-id>\" \"<the task>\")` in the NEXT form.
    Never invent/guess a child id — read it back."
-  {:malli/schema [:=> [:cat ::start-request] ::create-response]}
+  {:malli/schema [:=> [:cat ::start-request] ::start-response]}
   [{:seon.agent/keys [purpose default-turn-limit]}]
   (let [parent-id   (db/current-agent-id)
         cap         (config/spawn-depth-cap)
@@ -690,6 +641,8 @@
    [:seon.agent.message/content     :string]
    [:seon.agent/purpose             {:optional true} :any]
    [:seon.agent/default-turn-limit  {:optional true} :any]])
+(schema/register! ::delegate-response
+  [:or ::create-response :seon.agent.runtime/resume-response])
 
 (defn ^:async delegate!
   "Spawn a child AND hand it its task in ONE call.
@@ -715,14 +668,15 @@
    back as-is; on a spawn-ok-but-message-failed the message error envelope plus
    `:seon.agent/id child-id` (the child exists — retry the message). Errors are
    values; branch on `:seon.db/ok?`."
-  {:malli/schema [:=> [:cat ::delegate-request] ::create-response]}
+  {:malli/schema [:=> [:cat ::delegate-request] ::delegate-response]}
   [{:seon.agent/keys [purpose default-turn-limit]
     content :seon.agent.message/content}]
   (let [spawn-args (cond-> {}
                      (some? purpose)            (assoc :seon.agent/purpose purpose)
                      (some? default-turn-limit) (assoc :seon.agent/default-turn-limit default-turn-limit))
         res        (await (start! spawn-args))]
-    (if (false? (:seon.db/ok? res))
+    (if (or (false? (:seon.db/ok? res))
+            (false? (:seon.agent.runtime/resumed? res)))
       res
       (let [child-id (:seon.agent/id res)
             menv     (await (msg/agent child-id content))]
@@ -735,57 +689,25 @@
           {:seon.agent/id child-id})))))
 
 ;; ============================================================
-;; Boot. The single entry point seon.client calls at startup. Agent
-;; identity flows via the `seon.db/agent-id-als` scope, not process-global
-;; atoms: the caller (seon.client/start-agent!) mints the id locally and
-;; wraps the boot pipeline in `(seon.db/with-agent id …)`. The home-ns
-;; stays deterministic via `(home/home-ns id)`.
+;; Process lifecycle. Durable birth is above; these delegate to the one
+;; process-local runtime owner.
 ;; ============================================================
 
-;; The input map ALSO carries :seon.agent/llm-fn + :seon.agent/compile-state
-;; (kept in the signature for the caller, unused here) — :map is open, so the
-;; extra runtime slots pass. purpose is :any (absent-or-nil tolerant).
-(schema/register! ::boot-request
-  [:map
-   [:seon.agent/id      :seon.agent/id]
-   [:seon.agent/purpose {:optional true} :any]])
+(defn ^:async resume!
+  "Reconstruct an existing nonterminated agent's process-local runtime."
+  {:malli/schema
+   [:=> [:cat :seon.agent.runtime/resume-request]
+    :seon.agent.runtime/resume-response]}
+  [request]
+  (await (runtime/resume! request)))
 
-;; Success = `{:seon.agent/id _ :seon.agent/ns <home-ns symbol>}`; on a failed
-;; create! the db error envelope propagates as-is. :seon.agent/ns is :any (the
-;; home-ns symbol — an opaque derived value, not a stored attr).
-(schema/register! ::boot-response
-  [:or
-   [:map [:seon.agent/id :seon.agent/id] [:seon.agent/ns :any]]
-   :seon.db/transact-response])
-
-(defn ^:async boot!
-  "Create the agent entity. Map-in / map-out.
-
-   Input:
-     :seon.agent/id             agent id string (REQUIRED — pass the id
-                                minted by the caller; no implicit default)
-     :seon.agent/llm-fn         ctx-string -> Promise<{:text \"…\"}> (kept in
-                                the signature for the caller; not used here)
-     :seon.agent/compile-state  defonce'd bootstrap compile-state (idem)
-
-   Does NOT arm the wake trigger — that is the CLIENT boot path's job
-   (`seon.agent.loop/install-wake-trigger!`), so `seon.agent` need not depend
-   on `seon.agent.loop` (acyclic). Returns `{:seon.agent/id _ :seon.agent/ns _}`.
-   On a FAILED create! the db error envelope propagates as-is (errors are
-   values): there is NO agent entity, so the caller must not arm a trigger."
-  {:malli/schema [:=> [:cat ::boot-request] ::boot-response]}
-  [{:seon.agent/keys [id purpose]}]
-  (let [res (await (create! {:seon.agent/id id :seon.agent/purpose purpose}))]
-    (if (false? (:seon.db/ok? res))
-      ;; create! already console.error'd the transact failure; name the
-      ;; boot path too, then hand the envelope up — callers branch.
-      (do (js/console.error
-            (str "seon.agent/boot! ABORTED for " id
-                 " — create! failed; propagating the error envelope"))
-          res)
-      (let [{:seon.agent/keys [id]} res]
-        {:seon.agent/id id
-         :seon.agent/ns (home/home-ns id)}))))
+(defn unhost!
+  "Remove an agent's listener, loop input, and runtime advertisement."
+  {:malli/schema
+   [:=> [:cat :seon.agent.runtime/unhost-request]
+    :seon.agent.runtime/unhost-response]}
+  [request]
+  (runtime/unhost! request))
 
 ;; ============================================================
 ;; message! lives in [[seon.agent.message]] (the keyword namespace matches

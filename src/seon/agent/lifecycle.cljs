@@ -33,6 +33,7 @@
     [seon.agent.internal :as internal]
     [seon.agent.loop :as loop]
     [seon.agent.message :as msg]
+    [seon.agent.runtime :as runtime]
     [seon.agent.run :as run]
     [seon.agent.testrun :as testrun]
     [seon.db :as db]
@@ -249,5 +250,6 @@
             (await (run/close-run!
                      {:seon.agent.run/id            (:seon.agent.run/id r)
                       :seon.agent.run/closed-reason :terminated})))
+          (runtime/unhost! {:seon.agent/id id})
           :terminated)
       env)))

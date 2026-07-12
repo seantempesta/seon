@@ -105,8 +105,8 @@
 
    `\"default/root\"` → `{::cluster \"default\" ::id \"root\"}`;
    `\"root\"` / `\"proc:wire\"` → `{::id …}` (no qualifier). Splits on the
-   FIRST `/` — safe because cluster names can't contain `/` and minted
-   agent ids are `<3 letters>-<10 digits>`."
+   FIRST `/` — safe because cluster names can't contain `/` and the canonical
+   agent-id grammar excludes it (human-facing agents use joined words)."
   {:malli/schema [:=> [:catn [:seon.dev.runtime-id/agent-id :string]]
                   [:map
                    [:seon.dev.runtime-id/id :string]

@@ -80,57 +80,10 @@
 ;; ============================================================
 ;; Agent creation — POST /agents/new
 ;;
-;; The pod's boot path (`seon.client/start-agent!`) is the ONE way an
-;; agent comes to life (conn, bootstrap-CLJS, replay, seed, boot!,
-;; trigger). serve.cljs can't require seon.client (require cycle:
-;; client → serve), so client INJECTS its start-agent! closure here at
-;; load time via `set-create-agent-fn!`. No parallel creation
-;; mechanism — the endpoint just calls the existing boot path.
+;; `seon.agent/start!` is the one birth→resume transition for both web and
+;; programmatic callers. The route requires the domain owner directly; no
+;; client boot callback, creation lock, or second mint seam exists.
 ;; ============================================================
-
-(defonce ^{:doc "0-arity fn returning a Promise of
-                  `{:seon.agent/id _ …}` — injected by seon.client at
-                  load time (its start-agent! with the current llm-fn).
-                  nil until the pod finishes loading."}
-  !create-agent-fn (atom nil))
-
-(defonce ^:private !create-in-flight (atom false))
-
-(defn set-create-agent-fn!
-  "Inject the agent-creation closure from seon.client.
-
-   The injected fn is seon.client/start-agent! with the pod's current
-   llm-fn. Called at namespace-load time from seon.client — re-runs on hot
-   reload so the closure tracks reloaded code."
-  {:malli/schema [:=> [:cat fn?] :nil]}
-  [f]
-  (reset! !create-agent-fn f)
-  nil)
-
-;; ============================================================
-;; POST /agents/run mint seam — injected by seon.client (same reason as
-;; !create-agent-fn: serve.cljs can't require seon.client). The one-shot
-;; composition door asks the injected closure to allocate, create, and wire one
-;; per-task agent against the pod's ONE cluster conn. The caller never chooses
-;; or observes an uncommitted candidate.
-;; ============================================================
-
-(defonce ^{:doc "0-arity fn returning a Promise of `{:seon.agent/id …}` or a
-                  db error envelope — injected by seon.client at load time.
-                  nil until the pod finishes loading (a POST /agents/run before
-                  then 503s)."}
-  !mint-agent-fn (atom nil))
-
-(defn set-mint-agent-fn!
-  "Inject the per-task agent mint closure from seon.client.
-
-   The injected fn wraps the atomic `seon.agent/mint!` owner and then the one
-   per-agent wiring path. Called at namespace-load time from seon.client;
-   re-runs on hot reload so the closure tracks reloaded code."
-  {:malli/schema [:=> [:cat fn?] :nil]}
-  [f]
-  (reset! !mint-agent-fn f)
-  nil)
 
 ;; ============================================================
 ;; Static serving
@@ -359,49 +312,38 @@
                        (str "clear failed: " e))))))
 
 (defn- handle-create-agent!
-  "POST /agents/new — mint + start a NEW live agent via the injected
-   boot path (`seon.client/start-agent!` — trigger armed, reachable via
-   /chat, identical to the auto-boot agent). Responds 200 with the new
-   agent id as plain text; the mission-control button navigates to
-   `/agent/<id>`. One create at a time (boot is heavyweight: replay +
-   core seed) — concurrent requests get 409."
+  "POST /agents/new — atomically mint, commit, and resume one live agent.
+
+   Responds 200 with the new id as plain text. This transition does no cluster
+   seed, program replay, or global instrumentation, so concurrent requests rely
+   on the sole writer's allocator serialization rather than a web-process lock."
   [req res]
-  (let [f @!create-agent-fn]
-    (cond
-      (nil? f)
-      (write-status! res 503 "text/plain; charset=utf-8"
-                     "agent creation not wired yet (pod still booting)")
-
-      @!create-in-flight
-      (write-status! res 409 "text/plain; charset=utf-8"
-                     "an agent is already being created — retry in a moment")
-
-      :else
-      (do
-        (reset! !create-in-flight true)
-        (log/info-console! "seon.web.serve" "POST /agents/new — creating agent" {})
-        (-> (read-body req)
-            (.then
-              (fn [body]
-                ;; Optional `purpose` form param (self-context spec
-                ;; 2026-06-10) — the human's words seed the new agent's
-                ;; :purpose section ("Your human created you for: …").
-                ;; Absent/blank → the acquire-your-purpose placeholder.
-                (let [purpose (some-> (get (parse-urlencoded (or body ""))
-                                           "purpose")
-                                      str/trim
-                                      not-empty)]
-                  (f (when purpose {:seon.agent/purpose purpose})))))
-            (.then (fn [{id :seon.agent/id}]
-                     (reset! !create-in-flight false)
-                     (log/info-console! "seon.web.serve" "POST /agents/new OK"
-                                        {:agent id})
-                     (write-status! res 200 "text/plain; charset=utf-8" (str id))))
-            (.catch (fn [err]
-                      (reset! !create-in-flight false)
-                      (log/error-console! "seon.web.serve" "/agents/new failed" err)
-                      (write-status! res 500 "text/plain; charset=utf-8"
-                                     (str "create agent failed: " err)))))))))
+  (log/info-console! "seon.web.serve" "POST /agents/new — creating agent" {})
+  (-> (read-body req)
+      (.then
+        (fn [body]
+          (let [purpose (some-> (get (parse-urlencoded (or body "")) "purpose")
+                                str/trim
+                                not-empty)]
+            (agent/start! (cond-> {}
+                            purpose (assoc :seon.agent/purpose purpose))))))
+      (.then
+        (fn [{id :seon.agent/id :as result}]
+          (if (and id (not= false (:seon.agent.runtime/resumed? result)))
+            (do
+              (log/info-console! "seon.web.serve" "POST /agents/new OK"
+                                 {:agent id})
+              (write-status! res 200 "text/plain; charset=utf-8" (str id)))
+            (let [message (or (get-in result [:seon.db/error :seon.error/message])
+                              (:seon.agent.runtime/error result)
+                              "agent creation returned no id")]
+              (log/error-console! "seon.web.serve" "/agents/new refused" message)
+              (write-status! res 500 "text/plain; charset=utf-8" message)))))
+      (.catch
+        (fn [err]
+          (log/error-console! "seon.web.serve" "/agents/new failed" err)
+          (write-status! res 500 "text/plain; charset=utf-8"
+                         (str "create agent failed: " err))))))
 
 (defn- handle-complete-agent!
   "POST /agent/<id>/complete — external control: CLOSE the agent's open run
@@ -469,8 +411,8 @@
 (defn- ^:async run-agent-task!
   "Drive ONE task through an agent in the pod's own cluster to completion.
 
-   Start-or-reuse: a nil `agent-id` mints + arms a fresh agent via the
-   injected `mint-agent` closure; a supplied `agent-id` reuses that agent —
+   Start-or-reuse: a nil `agent-id` calls [[seon.agent/start!]]; a supplied
+   `agent-id` reuses that agent —
    it must already exist, and because the cluster store is durable the same
    agent can be driven again after a pod restart (boot re-arms armable
    agents), which multi-phase drives rely on. `input` lands via the real
@@ -485,7 +427,7 @@
    `:timed_out true` (never a stale derived last-closed-reason), AND the
    still-open run is closed `:superseded` so it stops burning LLM tokens.
    A refusal (unknown agent-id, failed mint) returns `{:error <msg>}`."
-  [mint-agent agent-id input timeout-ms]
+  [agent-id input timeout-ms]
   (let [conn    db/*conn*
         reuse?  (some? agent-id)
         exists? (when reuse?
@@ -495,13 +437,16 @@
                                     :seon.db/args [agent-id]})))]
     (if (and reuse? (not exists?))
       {:error (str "unknown agent_id: " agent-id)}
-      (let [minted (when-not reuse? (await (mint-agent)))
+      (let [minted (when-not reuse? (await (agent/start! {})))
             aid    (or agent-id (:seon.agent/id minted))]
         (if (and (not reuse?)
-                 (or (false? (:seon.db/ok? minted)) (nil? aid)))
+                 (or (false? (:seon.db/ok? minted))
+                     (false? (:seon.agent.runtime/resumed? minted))
+                     (nil? aid)))
           {:error (str "agent mint failed: "
                        (or (get-in minted
                                    [:seon.db/error :seon.error/message])
+                           (:seon.agent.runtime/error minted)
                            "mint returned no committed agent id"))}
           ;; `injected-at` is stamped BEFORE the message lands, so the run the
           ;; wake opens can never predate the window the reads below scope to.
@@ -605,36 +550,32 @@
                         timeout? (assoc :timed_out true)))))))))))))
 
 (defn- handle-agent-run! [req res]
-  (let [mint-agent @!mint-agent-fn]
-    (if (nil? mint-agent)
-      (write-status! res 503 "application/json; charset=utf-8"
-                     (js/JSON.stringify #js {:error "pod still booting (mint seam not wired)"}))
-      (-> (read-body req)
-          (.then (fn [body]
-                   (let [parsed     (js->clj (js/JSON.parse body))
-                         input      (get parsed "input")
-                         agent-id   (get parsed "agent_id")
-                         timeout-ms (or (get parsed "timeout_ms") 300000)]
-                     (run-agent-task! mint-agent agent-id input timeout-ms))))
-          (.then (fn [result]
-                   (if (:error result)
-                     (do
-                       (log/error-console! "seon.web.serve" "/agents/run refused"
-                                           (:error result))
-                       (write-status! res 422 "application/json; charset=utf-8"
-                                      (js/JSON.stringify #js {:error (:error result)})))
-                     (do
-                       (log/info-console! "seon.web.serve" "POST /agents/run OK"
-                                          {:agent      (:agent_id result)
-                                           :turns      (:turns result)
-                                           :evals      (:evals result)
-                                           :elapsed-ms (:elapsed_ms result)})
-                       (write-status! res 200 "application/json; charset=utf-8"
-                                      (js/JSON.stringify (clj->js result)))))))
-          (.catch (fn [err]
-                    (log/error-console! "seon.web.serve" "/agents/run threw" err)
-                    (write-status! res 500 "application/json; charset=utf-8"
-                                   (js/JSON.stringify #js {:error (str err)}))))))))
+  (-> (read-body req)
+      (.then (fn [body]
+               (let [parsed     (js->clj (js/JSON.parse body))
+                     input      (get parsed "input")
+                     agent-id   (get parsed "agent_id")
+                     timeout-ms (or (get parsed "timeout_ms") 300000)]
+                 (run-agent-task! agent-id input timeout-ms))))
+      (.then (fn [result]
+               (if (:error result)
+                 (do
+                   (log/error-console! "seon.web.serve" "/agents/run refused"
+                                       (:error result))
+                   (write-status! res 422 "application/json; charset=utf-8"
+                                  (js/JSON.stringify #js {:error (:error result)})))
+                 (do
+                   (log/info-console! "seon.web.serve" "POST /agents/run OK"
+                                      {:agent      (:agent_id result)
+                                       :turns      (:turns result)
+                                       :evals      (:evals result)
+                                       :elapsed-ms (:elapsed_ms result)})
+                   (write-status! res 200 "application/json; charset=utf-8"
+                                  (js/JSON.stringify (clj->js result)))))))
+      (.catch (fn [err]
+                (log/error-console! "seon.web.serve" "/agents/run threw" err)
+                (write-status! res 500 "application/json; charset=utf-8"
+                               (js/JSON.stringify #js {:error (str err)}))))))
 
 (defn- handle-chat! [req res]
   ;; Agent-id resolution (audit P1 — 2026-05-24): query param wins,
@@ -885,7 +826,7 @@
    `tmp/seon-port`). Idempotent — when a server is already LISTENING
    the call resolves with the existing binding (restarting would drop
    every open SSE stream AND kill the in-flight request when a second
-   agent boots via POST /agents/new → start-agent! → start!). A dead
+   agent is born via POST /agents/new → seon.agent/start!). A dead
    (closed) server object is replaced.
 
    The server binds to 127.0.0.1 by default (loopback only — browsers on
@@ -903,12 +844,12 @@
       ;; (router/install!) ran at module load — before boot-seed! transacted
       ;; the :seon.route/* rows and before *conn* was set — so its router held
       ;; only the static supplement. start! runs AFTER boot-seed! (see
-      ;; seon.client/start-agent!), so the live conn now carries the six core
+      ;; seon.client/start-runtime!), so the live conn now carries the core
       ;; routes; rebuild before the server accepts its first request.
       (router/rebuild!)
       (if-let [live-addr (some-> @!server .address)]
         ;; Already listening — reuse (see docstring; a second
-        ;; start-agent! on the same pod must NOT bounce the server).
+        ;; start-runtime! on the same pod must NOT bounce the server).
         (resolve {:seon.web/port      (.-port live-addr)
                   :seon.web/port-file (or (.. js/process -env -SEON_PORT_FILE)
                                           "tmp/seon-port")})

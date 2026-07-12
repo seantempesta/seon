@@ -14,9 +14,10 @@
          `agent` — from = me, to = [agent-id]; REFUSES `to = me` (loud
                    error, no row). No self→self messaging, ever.
 
-   The WAKE side (the inbound-message trigger + the hop-cap refusal at
-   wake) stays in `seon.agent` — it drives the loop and would cycle
-   here. `seon.agent` re-exports `message!`/`user-ref` on the face."
+   The wake trigger itself lives in [[seon.agent.loop]], while this
+   message-data namespace owns [[inbound-msg-datom?]]: the one adapter from a
+   transaction datom to the shared waking-inbound rule. `seon.agent`
+   re-exports `message!`/`user-ref` on the face."
   (:require
     [clojure.string :as str]
     [seon.agent.message.internal :as internal]
@@ -119,7 +120,7 @@
 
 ;; The waking-inbound RULE — ONE source of truth for "this message wakes
 ;; (and renders as an inbound) for the agent whose eid is `my-eid`". Both
-;; the wake gate ([[seon.agent/inbound-msg-datom?]]) and the transcript
+;; the wake gate ([[inbound-msg-datom?]]) and the transcript
 ;; head-render ([[seon.agent.ctx.transcript]]) call these so a message wakes
 ;; under exactly the rule it renders under — no drift. PUBLIC (cross-ns
 ;; callers): lives here, the message-data owner, not in `.internal`.
@@ -139,6 +140,24 @@
   [m my-eid]
   (and (not= my-eid (:db/id (:seon.agent.message/from m)))
        (not= :core (:seon.agent.message/origin m))))
+
+(defn inbound-msg-datom?
+  "True iff `datom` adds a waking inbound message target for `my-eid`.
+
+   The target check belongs in this adapter because every agent receives the
+   same transaction report. It then pulls the message entity and delegates to
+   [[waking-inbound?]], so loop wakeups and transcript classification share one
+   rule. Hop exhaustion deliberately remains outside this predicate: the loop
+   must receive exhausted messages in order to refuse them loudly."
+  {:malli/schema
+   [:=> [:catn [:seon.db/db :seon.db/db-val]
+                  [:seon.db/datom :any]
+                  [:seon.agent/eid :int]]
+    :boolean]}
+  [db {eid :seon.db/e target :seon.db/v} my-eid]
+  (and (= target my-eid)
+       (waking-inbound? (db/entity {:seon.db/db db :seon.db/ref eid})
+                        my-eid)))
 
 (defn hop-live?
   "True iff message `m`'s hop count is under `seon.warn/hop-cap`.
