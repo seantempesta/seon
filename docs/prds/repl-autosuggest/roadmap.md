@@ -118,6 +118,28 @@ kept: extended `kt3_score.clj` (legacy mode byte-stable),
 rowcards controls), `src-needle/data/kt3redux/STATUS.md` (arm
 inventory).
 
+## Scorer false-negative audit — RUN (2026-07-12)
+
+Adversarial audit of the useful-match frame itself
+([[research/scorer-false-negative-audit-2026-07-12.md]]): 40 zero-scored
+predictions, two blind-then-target LLM judges + adjudication, scorer
+self-test 214/214 = 1.0 (PASS). **Frontier zeros are 40% reasonable
+alternatives (8/20, Wilson .22–.61) — every one a `my.plan`-family call
+on context-visible ids, 6/8 the block's own prescribed `active!` on the
+next-ready id; small-model zeros are 0% (0/20) — real errors** (verbatim
+repeats 14/32, invented fns, exemplar-leaked ids, template copies).
+Corrected DeepSeek ceiling ≈ .36–.46 (vs measured .261) — KT3's
+below-band STOP arithmetic softens to at-or-above the band floor; the
+KT3b "1.5B ties the frontier" headline is a scorer artifact (corrected,
+the frontier leads ~.10–.20; the $0 B3 bar itself is unchanged).
+Low-coverage ".105 = noise" is partly artifact (3/4 judged low-cov
+frontier zeros were the prescribed act). 3/214 junk targets found (31,
+184 pure prose-as-call). Recommendation: NO LLM judge inside the metric;
+add a mechanical prescribed-act accept-set (plan-block state-guarded —
+signature alone is only .47 precise) as a separate reported column, drop
+the junk targets, and calibrate any future band-gated verdict with a
+~$0.50 judge pass. Script: `src-needle/scripts/fn_audit.py`.
+
 ## Extended-context prep — RUN (2026-07-12)
 
 Prep unit for the 2048-vs-4096 extension decision
