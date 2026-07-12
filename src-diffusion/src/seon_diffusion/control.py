@@ -67,18 +67,27 @@ def _result_comment(tok, value):
 
 
 class _Workspace:
-    """Next-round code_buffer plan: clamped segments + free (noise) segments."""
+    """Next-round code_buffer plan: clamped segments + free (noise) segments.
+
+    A free segment may carry INIT ids (the prefill affordance,
+    planner-worker-design §draft-head argument affordance): those positions
+    start the denoise holding the given tokens instead of noise — mask
+    stays False, so the model may EDIT them (clamp is the only hard
+    guarantee). No init → byte-identical to the old noise start."""
 
     def __init__(self):
         self.segs = []                      # ("clamp", [ids]) | ("free", n)
+        self.init = {}                      # seg index -> init ids (free segs)
 
     def clamp(self, ids):
         if ids:
             self.segs.append(("clamp", ids))
 
-    def free(self, n):
+    def free(self, n, init=None):
         if n > 0:
             self.segs.append(("free", n))
+            if init:
+                self.init[len(self.segs) - 1] = list(init)[:n]
 
     def used(self):
         return sum(len(p) if k == "clamp" else p for k, p in self.segs)
@@ -100,12 +109,13 @@ class _Workspace:
         leaves the tail free (the guided-loop workspace, unchanged)."""
         ids, mask = [], []
         overflow = False
-        for kind, payload in self.segs:
+        for si, (kind, payload) in enumerate(self.segs):
             if kind == "clamp":
                 ids += payload
                 mask += [True] * len(payload)
             else:
-                ids += [None] * payload
+                init = self.init.get(si) or []
+                ids += list(init[:payload]) + [None] * (payload - min(len(init), payload))
                 mask += [False] * payload
         if len(ids) > CL:                   # too much kept material: shed tail
             overflow = True
@@ -119,20 +129,35 @@ class _Workspace:
             mask += [False] * pad
         noise = mx.random.randint(0, vocab_size, (1, CL))
         code_buffer = mx.array([[i if i is not None else 0 for i in ids]])
+        have = mx.array([[i is not None for i in ids]])
         m = mx.array([mask])
-        code_buffer = mx.where(m, code_buffer, noise)
+        code_buffer = mx.where(have, code_buffer, noise)
+        # STICKY prefill: init positions renoise back to their init ids
+        # (not random) — an unaccepted edit means UNCHANGED text, so the
+        # model must actively overwrite to change the document.
+        soft_mask = [bool(i is not None and not mk) for i, mk in zip(ids, mask)]
+        self._soft = ((mx.array([soft_mask]), code_buffer)
+                      if any(soft_mask) else None)
         return code_buffer, m, code_buffer, overflow
+
+    def soft(self):
+        """(soft_mask[1,CL], soft_ids[1,CL]) of the last build's prefill
+        positions, or None when nothing was initialized."""
+        return getattr(self, "_soft", None)
 
 
 def _denoise_round(model, code_buffer, clamp_mask, clamp_ids, cache, cur_len, gen,
-                   probe=None, probe_every=2, bias=None):
+                   probe=None, probe_every=2, bias=None, soft=None):
     """One denoise run, holding clamped positions. Ends on the model's own
     stability+confidence — OR EARLIER when `probe(belief)` proves the
     code_buffer (validation-as-early-stop: a ~0.4ms parse probe against a
     ~114ms forward; proof beats model confidence).
     `bias`, when given, is applied to the raw logits each forward
     (additive logit masks — the typeahead slot-masking seam; None keeps
-    the guided baseline byte-identical).
+    the guided baseline byte-identical). `soft`, when given, is the
+    (mask, ids) pair of STICKY-prefill positions ([[_Workspace.soft]]):
+    they renoise back to their init ids instead of random noise, so an
+    unaccepted position keeps the prefilled text (edit ⇒ small deltas).
     Returns (belief_ids[1,CL], forwards, raw_logits[1,CL,V]) — the raw
     (biased, pre-temperature) logits of the FINAL forward, the logit
     readout surface."""
@@ -155,6 +180,8 @@ def _denoise_round(model, code_buffer, clamp_mask, clamp_ids, cache, cur_len, ge
         argmax_code_buffer = mx.argmax(logits, axis=-1)
         accepted, m = _accept(current, denoiser, logits, gen.entropy_bound)
         renoise = mx.random.randint(0, model.cfg.vocab_size, current.shape)
+        if soft is not None:
+            renoise = mx.where(soft[0], soft[1], renoise)
         current = mx.where(m, accepted, renoise)
         current = mx.where(clamp_mask, clamp_ids, current)
 

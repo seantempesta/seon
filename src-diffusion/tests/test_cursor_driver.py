@@ -123,6 +123,9 @@ class SpyOracle:
         self.seen.append(code)
         return self.o.refine(code, phase=phase)
 
+    def cursor(self, text, cursor):
+        return self.o.cursor(text, cursor)
+
 
 def driver(targets, oracle, policy=None):
     tok = GlyphTok()
@@ -665,3 +668,105 @@ def test_fill_returns_piece_spans(oracle):
     assert any(k in ("settled", "resolving") for k in kinds)
     # spans tile the text exactly
     assert "".join(r["text"][s["start"]:s["end"]] for s in r["spans"]) == r["text"]
+
+
+# ---------------------------------------------------------------------------
+# W2 — the draft-head prefill affordance (planner-worker-design)
+# ---------------------------------------------------------------------------
+
+RECONCILE_HEAD = "my.plan/reconcile!"
+DOC_ENTRY = ':my.plan/title "t1"'
+PREFILL_TMPL = [["clamp", "(my.plan/reconcile! {:my.plan/tree {"],
+                ["clamp", ':my.plan/id "a1" '],
+                ["prefill", DOC_ENTRY],
+                ["clamp", "}})"]]
+
+
+def test_norm_segments_prefill():
+    from seon_diffusion.cursor import norm_segments
+    out = norm_segments([["clamp", "(f "], ["prefill", "x"], ["free", 4]])
+    assert out == [("clamp", "(f "), ("prefill", "x"), ("free", 4)]
+    with pytest.raises(ValueError):
+        norm_segments([["nope", 1]])
+
+
+def test_workspace_prefill_init_not_noise():
+    """A prefill hole starts holding its ids (mask False — editable), while
+    a plain free hole starts as noise. Clamp stays the only guarantee."""
+    from seon_diffusion.control import _Workspace
+    mx.random.seed(7)
+    ws = _Workspace()
+    ws.clamp([9, 9])
+    ws.free(4, init=[101, 102, 103])     # prefill: 3 init ids + 1 noise slot
+    ws.free(4)                            # plain free: all noise
+    cb, mask, _, overflow = ws.build(16, VOCAB)
+    assert not overflow
+    row = [int(t) for t in cb[0]]
+    m = [bool(b) for b in mask[0]]
+    assert row[0:2] == [9, 9] and m[0] and m[1]
+    assert row[2:5] == [101, 102, 103], "init ids seed the hole"
+    assert m[2:6] == [False] * 4, "prefill positions stay editable (unclamped)"
+
+
+def test_prefill_match_opened_head_only(oracle):
+    d, _, _ = driver([], oracle)
+    pf = {RECONCILE_HEAD: PREFILL_TMPL}
+    # opened call, args not begun → fires
+    got = d._prefill_match("(my.plan/reconcile! ", pf)
+    assert got is not None and got[0] == RECONCILE_HEAD
+    # opening brace only still counts as "args not begun"
+    assert d._prefill_match("(my.plan/reconcile! {", pf) is not None
+    # args begun → never clobber typed content
+    assert d._prefill_match(
+        "(my.plan/reconcile! {:my.plan/tree {}", pf) is None
+    # a different head → normal path
+    assert d._prefill_match("(todo/add! ", pf) is None
+    # prior content before the call → normal path
+    assert d._prefill_match("(def x 1) (my.plan/reconcile! ", pf) is None
+    # empty draft / no prefills → no fire
+    assert d._prefill_match("", pf) is None
+    assert d._prefill_match("(my.plan/reconcile! ", {}) is None
+
+
+def test_step_prefill_edit_locks_document(oracle):
+    """The pass shape: seeded head draft + prefills → EDIT-WITH-PREFILL
+    expand; the filled reconcile! form locks parse-gated in the same step;
+    clamp segments (the ids) survive verbatim."""
+    d, model, spy = driver([(DOC_ENTRY, False)], oracle)
+    r = d.step("ctx", draft="(my.plan/reconcile! ",
+               prefills={RECONCILE_HEAD: PREFILL_TMPL})
+    assert r["transition"] == "expand"
+    assert r["arm"] == "prefill-edit"
+    assert r["prefill_head"] == RECONCILE_HEAD
+    assert any(e["event"] == "prefill-expand" for e in r["events"])
+    assert len(r["locked"]) == 1
+    form = r["locked"][0]
+    assert form.startswith("(my.plan/reconcile! {:my.plan/tree {")
+    assert ':my.plan/id "a1"' in form, "id clamp survives verbatim"
+    assert ':my.plan/title "t1"' in form
+    assert r["new_draft"] == ""
+    # buffer picture rides: clamped id spans + locked overlay
+    statuses = {s["status"] for s in r["buffer_spans"]}
+    assert "locked" in statuses
+
+
+def test_step_prefill_broken_edit_keeps_caller_draft(oracle):
+    """A junk edit never rides forward: the ids stay clamped in the
+    assembled text, the oracle rejects the broken fill, the caller keeps
+    its OWN draft (the typed head), hints report why."""
+    d, model, spy = driver([("]]]]", False)], oracle)
+    r = d.step("ctx", draft="(my.plan/reconcile! ",
+               prefills={RECONCILE_HEAD: PREFILL_TMPL})
+    assert r["transition"] == "expand" and r["arm"] == "prefill-edit"
+    assert r["locked"] == []
+    assert r["new_draft"] == "(my.plan/reconcile! "
+    assert any(e["event"] == "expand-failed" for e in r["events"])
+
+
+def test_step_no_prefill_takes_normal_path(oracle):
+    """No prefills on the wire → the plain step path, byte-identical
+    behavior (progress arm)."""
+    d, _, _ = driver(["(def a 1)"], oracle)
+    r = d.step("ctx", draft="")
+    assert r["transition"] in ("progress", "done")
+    assert not any(e["event"] == "prefill-expand" for e in r["events"])

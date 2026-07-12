@@ -90,11 +90,18 @@
 ;; so only KNOWN knobs may ride).
 (schema/register! ::committed :string)               ; locked forms so far
 (schema/register! ::draft :string)                   ; the in-progress code-buffer text
+;; "prefill" is the EDIT-WITH-PREFILL segment (planner-worker-design W2):
+;; the hole starts holding the given text — the model edits, not regenerates.
 (schema/register! ::template-segment
-  [:or [:tuple [:= "clamp"] :string] [:tuple [:= "free"] :int]])
+  [:or [:tuple [:= "clamp"] :string] [:tuple [:= "free"] :int]
+   [:tuple [:= "prefill"] :string]])
 (schema/register! ::offer
   [:map-of :string [:or :string [:vector ::template-segment]]])
 (schema/register! ::offers [:vector ::offer])
+;; The draft-head argument affordance map: head fn sym → its prefilled
+;; template. Registry-derived seon-side (seon.ai.typeahead); the worker
+;; expands it when the draft is an opened call to a listed head.
+(schema/register! ::prefills [:map-of :string [:vector ::template-segment]])
 (schema/register! ::policy [:map-of :string [:or :double :int :boolean]])
 (schema/register! ::null-render :string)             ; glyph-calibration baseline render
 
@@ -127,6 +134,7 @@
    [::committed           {:optional true} ::committed]
    [::draft               {:optional true} ::draft]
    [::offers              {:optional true} ::offers]
+   [::prefills            {:optional true} ::prefills]
    [::policy              {:optional true} ::policy]
    [::null-render         {:optional true} ::null-render]])
 
@@ -160,7 +168,12 @@
 
 ;; Poll cadence — overridable for tests (root set!, like *fetch*). The
 ;; cold-start (~66s) lives in this loop; 200 × 3s ≈ 10min total budget.
+;; A LOCAL (full-URL) worker answers in ~0.5–3 s per step, so a 3 s poll
+;; quantizes EVERY step's wall (W2 plan-pass measurement: 0.9 s of gen
+;; billed ~3 s of wall) — local endpoints poll at *local-poll-ms* with a
+;; proportionally larger budget (same ~10 min total).
 (def ^:dynamic *poll-ms* 3000)
+(def ^:dynamic *local-poll-ms* 250)
 (def ^:dynamic *max-polls* 200)
 
 ;; Test seam ONLY — bound to a `(fn [url init]) → Promise<js/Response>`,
@@ -258,6 +271,7 @@
    ::committed           "committed"
    ::draft               "draft"
    ::offers              "offers"
+   ::prefills            "prefills"
    ::policy              "policy"
    ::null-render         "null_render"})
 
@@ -412,19 +426,26 @@
    exhausted; map the terminal state to a `::response`. A throw here
    propagates to [[complete]]'s catch (→ transport, retried)."
   [base key jid mode]
-  (loop [polls 0]
-    (let [{:keys [status retry-after body]} (await (status! base key jid))]
-      (if (>= status 400)
-        (http-error "status" status retry-after body)
-        (case (:status body)
-          "COMPLETED"           (normalize-output mode (:output body))
-          ("FAILED" "CANCELLED") (job-error (str "job " (:status body) ": " (pr-str body)))
-          ;; IN_QUEUE / IN_PROGRESS / unknown → keep polling within budget.
-          (if (>= polls *max-polls*)
-            (job-error (str "job " jid " did not complete within " *max-polls*
-                            " polls (last status " (pr-str (:status body)) ")"))
-            (do (await (sleep! *poll-ms*))
-                (recur (inc polls)))))))))
+  (let [poll-ms   (if (local-endpoint?)
+                    (min *poll-ms* *local-poll-ms*)   ; a test's 0 stays 0
+                    *poll-ms*)
+        max-polls (if (local-endpoint?)
+                    (max *max-polls*
+                         (quot (* *max-polls* *poll-ms*) (max poll-ms 1)))
+                    *max-polls*)]
+    (loop [polls 0]
+      (let [{:keys [status retry-after body]} (await (status! base key jid))]
+        (if (>= status 400)
+          (http-error "status" status retry-after body)
+          (case (:status body)
+            "COMPLETED"           (normalize-output mode (:output body))
+            ("FAILED" "CANCELLED") (job-error (str "job " (:status body) ": " (pr-str body)))
+            ;; IN_QUEUE / IN_PROGRESS / unknown → keep polling within budget.
+            (if (>= polls max-polls)
+              (job-error (str "job " jid " did not complete within " max-polls
+                              " polls (last status " (pr-str (:status body)) ")"))
+              (do (await (sleep! poll-ms))
+                  (recur (inc polls))))))))))
 
 (defn ^:async complete
   "Submit a control-worker job and poll it to completion.

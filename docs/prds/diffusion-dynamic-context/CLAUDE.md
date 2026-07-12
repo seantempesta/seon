@@ -13,7 +13,25 @@ tags: [orchestrator, agent]
 > is that loop as a swap-in agent LLM. This file is the INDEX + runbook;
 > depth lives in the linked docs. Keep it tight + current.
 
-## ▸ Current state (2026-07-11 PM)
+## ▸ Current state (2026-07-11 late-night)
+
+**P7 W2 per-step plan pass BUILT + live-measured (2026-07-11 late)**:
+the draft-head prefill affordance is real end-to-end — the step wire
+gained `prefills` (+ the `"prefill"` STICKY segment kind: unaccepted
+positions renoise to their init ids, not noise), the driver's
+`PREFILL-EDIT` arm (cursor-oracle head resolution, zero fn knowledge),
+and the seon-side derivation (`seon.ai.typeahead/prefill-affordances` —
+registry `:seon.render/prefill-fn` scan + program-graph join;
+structure/keys/ids/foreign-authored entries CLAMP per tx provenance,
+only OWN scalar values are editable holes). The pass runs at step-open
+under the `:seon.typeahead/plan-pass` knob (`:every-step` default |
+`:on-stuck` | `:off`). Measured: **0.83–0.89 s worker gen / 4 forwards,
+3/3 seeds parse-clean `reconcile!` edits** on a synthetic 3-node plan;
+the degenerate all-clamped no-change pass ~0.03 s. Two root-cause fixes
+en route: free structure invited node merges (→ clamp structure + keys),
+slack newlines drew accepted junk (→ `PREFILL_SLACK 0`; growth stays
+with the DELTA fns). Full note + live-proof detail:
+[[planner-worker-design]] §W2.
 
 **NEW (2026-07-11): the `:typeahead-steps` ctx block** — one block, both
 slots (live step-trace tile + provider-gated ai instructions), in

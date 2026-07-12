@@ -306,6 +306,95 @@ One measurement per unit — the bench falsifies; it is not the work.
   active-step-derived retrieval feeding the render; `done!`/`active!`
   transitions driven by the worker. Live proof: a 3-step plan executed
   end-to-end in one session, each `done!` expect-verified.
+
+  **W2 per-step plan pass BUILT + measured (2026-07-11 late).**
+
+  - *The affordance (general, instance #1 = reconcile!)*: the step wire
+    gained `prefills` (`head → template` with the new `"prefill"`
+    segment kind) — derived seon-side by ONE computed rule
+    (`seon.ai.typeahead/prefill-affordances`: registry scan for
+    `:seon.render/prefill-fn` entry properties + program-graph join to
+    the fn whose spec input IS that request schema; the projection fn
+    resolves via `seon.instrument/find-js-var`, its injectable keys
+    filled per its own spec). The driver (`cursor.py`) carries zero fn
+    knowledge: an OPENED call to a listed head (cursor-oracle
+    `slot-kind.head`, args not begun) skips the open-tail denoise and
+    fills the template (`PREFILL-EDIT` arm); the pass = this affordance
+    invoked at step-open by seeding `(head ` as the draft
+    (`:seon.typeahead/plan-pass` policy knob: `:every-step` default /
+    `:on-stuck` — fires once at the first stuck round / `:off`; the
+    organic wire rides regardless).
+  - *Two mechanical findings (live-measured, fixed at the root)*:
+    (1) free-region document text invited RESTRUCTURE — one denoise
+    round merged nodes and rewrote `:my.plan/_parent` to
+    `:my.plan/steps`, unbalanced EDN every seed. Fix = **clamp
+    structure and vocabulary** (braces, key names, ids, and every
+    foreign-authored entry per `:seon.db/agent-id` tx provenance);
+    ONLY the caller's own scalar VALUES are editable holes. (2) plain
+    noise-renoise washed the prefill out after forward 1; slack
+    newlines drew accepted junk (`: * :`). Fix = **sticky prefill**
+    (unaccepted positions renoise to their INIT ids — unchanged by
+    construction) + `PREFILL_SLACK 0` (growth stays with the DELTA
+    functions `step!`/`move!`/`drop!` — the design's other update
+    shape; the v1 pass is SHARPEN-only).
+  - *Clamp-simplification choice (documented per the W2 brief)*:
+    authorship is per-ENTRY tx provenance (the current datom's
+    `:seon.db/agent-id` vs the editing agent) — mechanical, no v1
+    shortcut needed; unattributed datoms clamp (unverifiable is
+    unforgeable).
+  - *Affordability (the gate)*: synthetic 3-node plan on the real
+    worker — **0.83–0.89 s worker gen / 4 forwards, 3/3 seeds locked a
+    parse-clean `reconcile!` form carrying real small edits** (title
+    sharpening), well under the 2–3 s target; the all-clamped
+    degenerate pass (nothing editable) costs ~0.03 s. Verdict:
+    `:every-step` STANDS at small-document scale; the doc-size guard
+    (`plan-pass-doc-token-budget` 190 est-tokens, the CL=256 buffer
+    reality) SKIPS the pass for oversized documents — scope-down
+    (active-subtree documents) is the W3-adjacent follow-up.
+  - *No-change semantics*: a pass whose locked form equals the template
+    text modulo whitespace is DROPPED (cheaper than a 0/0/0 receipt —
+    zero eval, zero transcript tokens; the unchanged `:plan` block is
+    the confirmation). A changed form is PREPENDED to the reply and
+    threads into `committed`, so the diff receipt rides the transcript
+    as its `⟹` row and the work loop sees the edit.
+  - *Tests*: 5 new driver pytests (prefill segments, sticky workspace
+    init, head-match rules, lock + broken-edit-keeps-draft) — 73
+    passed; 5 new cljs tests (affordance derivation, clamp zones,
+    pass-at-open, no-change drop, `:off`/`:on-stuck` knob).
+  - *Live proof (acme, as-grown store ~18k-token renders, worker
+    `50c1163bb3b3`, agent `qKW-2607112253`, 0 core faults)*: the pass
+    fired at EVERY step-open across 7 turns. Wall per pass (worker
+    `gen_s`, from the `:seon.typeahead/plan-pass? true` step rows):
+    **0.027 / 0.038 / 0.040 s** (all-clamped degenerate no-change — the
+    only open step was the user's address step, zero editable holes,
+    0 forwards), **0.53 s / 2 fwd** (full 173-est-token document,
+    no-change → form DROPPED), **2.35 s / 10 fwd** (real edit). The
+    edit pass locked a parse-clean `reconcile!` that EVAL'd through the
+    normal pipeline — receipt on the transcript:
+    `{:my.plan/ok? true :my.plan/root "planw2root0001"
+    :my.plan/diff {:added 0 :dropped 1 :updated 2}}` — and the DB
+    shows the edits (root title → "Expense tracker MVP"; the typo'd
+    own step title rewritten). Work proceeded after the pass (turn
+    closed 4-ok: the reconcile + 3 work forms). **Gate verdict:
+    median well under 5 s — `:every-step` STANDS**; the store-scale
+    cost is the RENDER (unchanged ~60–90 s turns), not the pass.
+  - *Found in the drive (report, not built)*: (1) **pass-doc
+    staleness** — the pass document snapshots at step-open; a message
+    arriving MID-TURN mints an open address step that is absent from
+    the document, and the reconcile then legitimately DROPS it
+    (`:dropped 1` above was exactly that). Candidate root fix:
+    `reconcile!` scoping drops to nodes at-or-before the document's
+    basis-t (needs a basis argument — a W3 design question, not a
+    hack site). (2) **poll-cadence quantization** — the dg adapter's
+    RunPod-era 3 s poll billed every local step ~3 s of wall for
+    sub-second gens; fixed at the root in the same unit
+    (`seon.ai.diffusiongemma/*local-poll-ms*` 250 ms for full-URL
+    local workers, budget rescaled). (3) The doc-size budget
+    (190 est-tokens) silently skipped passes once the forest grew
+    past ~4 nodes + a long address step — the skip is correct
+    (CL=256), but scope-down (active-subtree document) is needed
+    before W3's multi-session plans; today the skip is silent, and a
+    logged skip-reason would make the demotion measurement honest.
 - **W3 — multi-turn + restart**: `::pace :multi-session` goal, pod
   restarted mid-run, worker resumes from the ledger. Live proof: the
   restart drill passes uncoached.

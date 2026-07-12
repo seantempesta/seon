@@ -28,6 +28,7 @@
     [cljs.test :refer [deftest is async]]
     [clojure.string :as str]
     [datahike.api :as d]
+    [my.plan :as plan]
     [seon.agent.ctx.menu :as menu]
     [seon.ai.diffusiongemma :as dg]
     [seon.ai.typeahead :as ta]
@@ -459,3 +460,299 @@
 
 ;; (Tile + ai-slot render tests live with the block family:
 ;; seon.agent.ctx.typeahead-steps-test.)
+
+;; ============================================================
+;; W2 — the draft-head prefill affordance + the per-step PLAN PASS
+;; (planner-worker-design). my.plan is the test FIXTURE (instance #1);
+;; the mechanism under test is registry+graph derived and generic.
+;; ============================================================
+
+(def ^:private b-id "typeaheadtestB")   ; the "frontier" author
+(def ^:private root-id "planroottestaa")
+(def ^:private step-id "planchildtestb")
+
+(def ^:private reconcile-spec
+  "[:=> [:cat :my.plan/reconcile-request] :my.plan/reconcile-response]")
+(def ^:private document-spec
+  "[:=> [:cat :my.plan/tree-request] :my.plan/tree-response]")
+
+(defn- seed-plan!
+  "Program-graph rows for the affordance + a two-node open plan: the root
+   authored BY agent A, the child step authored BY agent B (foreign)."
+  []
+  (-> (db/transact!
+        {:seon.db/tx-data
+         [{:seon.fn/sym "my.plan/reconcile!" :seon.fn/fn-var? true
+           :seon.fn/spec reconcile-spec}
+          {:seon.fn/sym "my.plan/document" :seon.fn/fn-var? true
+           :seon.fn/spec document-spec}
+          {:seon.agent/id b-id}]})
+      (.then (fn [_]
+               (db/with-agent a-id
+                 (fn []
+                   (db/transact!
+                     {:seon.db/tx-data
+                      [{:my.plan/id root-id :my.plan/title "root plan"
+                        :my.plan/goal "the goal" :my.plan/status :open
+                        :my.plan/created-at (js/Date.)
+                        :my.plan/agent [:seon.agent/id a-id]}]})))))
+      (.then (fn [_]
+               (db/with-agent b-id
+                 (fn []
+                   (db/transact!
+                     {:seon.db/tx-data
+                      [{:my.plan/id step-id :my.plan/title "frontier step"
+                        :my.plan/expect "the outcome holds"
+                        :my.plan/status :open
+                        :my.plan/created-at (js/Date.)
+                        :my.plan/agent [:seon.agent/id a-id]
+                        :my.plan/parent [:my.plan/id root-id]}]})))))))
+
+(deftest prefill-affordance-derived-from-registry-and-graph
+  ;; ONE computed rule: the registered request schema's entry property
+  ;; (:seon.render/prefill-fn) + the program-graph fn whose spec input IS
+  ;; that schema. No fn list anywhere.
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (seed-plan!)
+                (.then
+                  (fn [_]
+                    (let [affs (ta/prefill-affordances @conn)
+                          aff  (first (filter #(= "my.plan/reconcile!"
+                                                  (:seon.ai.typeahead/head %))
+                                              affs))]
+                      (is (some? aff) "reconcile! affordance derived")
+                      (is (= :my.plan/tree (:seon.ai.typeahead/arg-key aff)))
+                      (is (= 'my.plan/document
+                             (:seon.ai.typeahead/prefill-fn aff)))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest document-segments-clamp-ids-and-foreign-entries
+  ;; Authority is CLAMPS, not prose: identity attrs clamp everywhere;
+  ;; a scalar entry whose current datom ANOTHER agent authored clamps;
+  ;; the caller's own entries stay editable prefill text.
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (seed-plan!)
+                (.then
+                  (fn [_]
+                    (db/with-agent a-id
+                      (fn []
+                        (let [doc  (plan/document {:seon.agent/id a-id})
+                              segs (ta/document-segments @conn a-id doc)
+                              kind-of (fn [needle]
+                                        (some (fn [[k s]]
+                                                (when (str/includes? s needle) k))
+                                              segs))]
+                          (is (vector? segs))
+                          (is (= "clamp" (kind-of root-id))
+                              "the root id clamps")
+                          (is (= "clamp" (kind-of step-id))
+                              "the child id clamps")
+                          (is (= "prefill" (kind-of "root plan"))
+                              "A's own title is editable")
+                          (is (= "clamp" (kind-of "frontier step"))
+                              "B's (foreign) title clamps")
+                          (is (= "clamp" (kind-of "the outcome holds"))
+                              "B's (foreign) expect clamps")
+                          ;; the segments reassemble to one readable doc
+                          (let [text (apply str (map second segs))]
+                            (is (str/includes? text ":my.plan/goal"))
+                            (is (str/includes? text root-id)))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest step-loop-runs-plan-pass-at-open
+  ;; :every-step (the default): call 1 IS the pass — minimal render, the
+  ;; head seeded as the draft, the prefilled template on the wire; its
+  ;; locked reconcile! form rides the reply FIRST and threads into the
+  ;; work step's committed.
+  (async done
+    (let [edited "(my.plan/reconcile! {:my.plan/tree [{:my.plan/id \"planroottestaa\" :my.plan/title \"root plan EDITED\"}]})"
+          calls (atom [])
+          fetch (scripted-fetch
+                  calls
+                  [(step-response {:transition "expand" :arm "prefill-edit"
+                                   :prefill_head "my.plan/reconcile!"
+                                   :locked [edited] :new_draft ""
+                                   :forwards 4 :gen_s 1.2})
+                   (step-response {:transition "done"
+                                   :locked ["(def a 1)"] :new_draft ""})])]
+      (-> (with-conn
+            (fn [conn]
+              (-> (seed-plan!)
+                  (.then
+                    (fn [_]
+                      (with-local-worker fetch
+                        (fn []
+                          (db/with-agent a-id
+                            (fn [] ((ta/agent-adapter) "the rendered prompt")))))))
+                  (.then
+                    (fn [{:keys [text] :as resp}]
+                      (is (nil? (:seon.ai/error resp)))
+                      (is (= (str edited "\n\n(def a 1)") text)
+                          "the pass form rides the reply FIRST")
+                      (let [[c1 c2] @calls]
+                        (is (= 2 (count @calls)) "pass + one work step")
+                        (is (str/starts-with? (get (:payload c1) "prompt")
+                                              "; PLAN PASS")
+                            "the pass render is MINIMAL, not the context")
+                        (is (= "(my.plan/reconcile! " (get (:payload c1) "draft"))
+                            "the head is seeded as the draft")
+                        (let [tmpl (get-in (:payload c1)
+                                           ["prefills" "my.plan/reconcile!"])]
+                          (is (vector? tmpl) "the prefilled template rides")
+                          (is (and (= "clamp" (ffirst tmpl))
+                                   (str/starts-with?
+                                     (second (first tmpl))
+                                     "(my.plan/reconcile! {:my.plan/tree "))
+                              "the call opening clamps (coalesced with doc structure)")
+                          (is (some (fn [[k s]]
+                                      (and (= k "clamp")
+                                           (str/includes? s root-id)))
+                                    tmpl)
+                              "id spans ride as clamp segments"))
+                        (is (= "the rendered prompt" (get (:payload c2) "prompt"))
+                            "the WORK step uses the real render")
+                        (is (= edited (get (:payload c2) "committed"))
+                            "the pass form threads into committed")
+                        (is (some? (get (:payload c2) "prefills"))
+                            "the organic affordance rides every step"))
+                      ;; the pass row is a marked step projection
+                      (let [dbv @conn
+                            rows (->> (db/query
+                                        {:seon.db/db dbv
+                                         :seon.db/query
+                                         '[:find [?e ...]
+                                           :where [?e :seon.typeahead/plan-pass? true]]})
+                                      (map #(db/pull dbv '[*] %)))]
+                        (is (= 1 (count rows)))
+                        (let [row (first rows)]
+                          (is (= -1 (:seon.typeahead/step-idx row))
+                              "the pass precedes round 0")
+                          (is (pos? (:seon.typeahead/prefill-tokens row))
+                              "prefill size recorded, in tokens")
+                          (is (= 1.2 (:seon.typeahead/gen-s row))
+                              "pass wall recorded"))))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest plan-pass-no-change-drops-the-form
+  ;; A no-change pass (model leaves the document) DROPS the form —
+  ;; cheaper than a 0/0/0 receipt: zero eval, zero transcript tokens;
+  ;; the unchanged :plan block is the confirmation. The pass row still
+  ;; records the cost honestly.
+  (async done
+    (let [calls (atom [])]
+      (-> (with-conn
+            (fn [conn]
+              (-> (seed-plan!)
+                  (.then
+                    (fn [_]
+                      (db/with-agent a-id
+                        (fn []
+                          ;; reproduce the exact template text, then answer the
+                          ;; pass with it (extra whitespace — normalization)
+                          (let [doc  (plan/document {:seon.agent/id a-id})
+                                segs (ta/document-segments @conn a-id doc)
+                                tmpl-text (str "(my.plan/reconcile! {:my.plan/tree "
+                                               (apply str (map second segs))
+                                               "})")
+                                unchanged (str/replace tmpl-text #"\} *\{" "}\n  {")
+                                fetch (scripted-fetch
+                                        calls
+                                        [(step-response
+                                           {:transition "expand"
+                                            :arm "prefill-edit"
+                                            :locked [unchanged] :new_draft ""
+                                            :gen_s 0.9})
+                                         (step-response
+                                           {:transition "done"
+                                            :locked ["(def a 1)"] :new_draft ""})])]
+                            (with-local-worker fetch
+                              (fn []
+                                (db/with-agent a-id
+                                  (fn [] ((ta/agent-adapter) "the rendered prompt"))))))))))
+                  (.then
+                    (fn [{:keys [text]}]
+                      (is (= "(def a 1)" text)
+                          "no-change pass: the form is DROPPED from the reply")
+                      (is (= 2 (count @calls)) "the pass still ran")
+                      (let [dbv @conn
+                            rows (db/query
+                                   {:seon.db/db dbv
+                                    :seon.db/query
+                                    '[:find [?e ...]
+                                      :where [?e :seon.typeahead/plan-pass? true]]})]
+                        (is (= 1 (count rows))
+                            "the no-change pass records its cost")))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest plan-pass-policy-off-and-on-stuck
+  ;; The demotion switch (:seon.typeahead/plan-pass): :off never passes
+  ;; (but the ORGANIC affordance still rides the wire); :on-stuck passes
+  ;; once, at the first observed stuck round.
+  (async done
+    (let [calls (atom [])
+          edited "(my.plan/reconcile! {:my.plan/tree [{:my.plan/id \"planroottestaa\" :my.plan/title \"replanned\"}]})"
+          fetch (scripted-fetch
+                  calls
+                  ;; :off leg — one work step
+                  [(step-response {:transition "done"
+                                   :locked ["(def a 1)"] :new_draft ""})
+                   ;; :on-stuck leg — stuck, then the pass, then done
+                   (step-response {:transition "stuck" :locked []
+                                   :new_draft ""})
+                   (step-response {:transition "expand" :arm "prefill-edit"
+                                   :locked [edited] :new_draft ""})
+                   (step-response {:transition "done"
+                                   :locked ["(def b 2)"] :new_draft ""})])]
+      (-> (with-conn
+            (fn [_conn]
+              (-> (seed-plan!)
+                  (.then (fn [_]
+                           (db/transact!
+                             {:seon.db/tx-data
+                              [{:seon.typeahead/id "policy"
+                                :seon.typeahead/plan-pass :off}]})))
+                  (.then
+                    (fn [_]
+                      (with-local-worker fetch
+                        (fn []
+                          (-> (db/with-agent a-id
+                                (fn [] ((ta/agent-adapter) "render A")))
+                              (.then
+                                (fn [{:keys [text]}]
+                                  (is (= "(def a 1)" text))
+                                  (let [c1 (first @calls)]
+                                    (is (= "render A" (get (:payload c1) "prompt"))
+                                        ":off → no pass call")
+                                    (is (some? (get (:payload c1) "prefills"))
+                                        "organic affordance still rides"))
+                                  (db/transact!
+                                    {:seon.db/tx-data
+                                     [{:seon.typeahead/id "policy"
+                                       :seon.typeahead/plan-pass :on-stuck}]})))
+                              (.then
+                                (fn [_]
+                                  (db/with-agent a-id
+                                    (fn [] ((ta/agent-adapter) "render B")))))
+                              (.then
+                                (fn [{:keys [text]}]
+                                  (is (= (str edited "\n\n(def b 2)") text)
+                                      "on-stuck pass form rides the reply")
+                                  (let [[_ c2 c3 c4] @calls]
+                                    (is (= 4 (count @calls)))
+                                    (is (= "render B" (get (:payload c2) "prompt"))
+                                        "first :on-stuck call is WORK")
+                                    (is (str/starts-with?
+                                          (get (:payload c3) "prompt") "; PLAN PASS")
+                                        "the pass fires after the stuck round")
+                                    (is (= "render B" (get (:payload c4) "prompt"))
+                                        "work resumes after the pass"))))))))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))

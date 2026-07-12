@@ -85,6 +85,11 @@
 ;; may make before it stops with whatever locked (the P3b driver's cap;
 ;; mirrors the worker Policy's max_rounds default).
 (schema/register! :seon.typeahead/max-rounds :int)
+;; The per-step PLAN PASS scheduling (planner-worker-design W2): the step
+;; loop's edit-with-prefill plan-document pass runs at every call open
+;; (:every-step), only after an observed stuck round (:on-stuck), or
+;; never (:off). LOOP-side knob — never rides the worker Policy wire.
+(schema/register! :seon.typeahead/plan-pass [:enum :every-step :on-stuck :off])
 
 ;; The stored row shape — every knob optional (absent = code default;
 ;; optional = absent, never a stored nil).
@@ -96,7 +101,8 @@
    [:seon.typeahead/probe-budget      {:optional true} :seon.typeahead/probe-budget]
    [:seon.typeahead/menu-cap          {:optional true} :seon.typeahead/menu-cap]
    [:seon.typeahead/toolkit-cap       {:optional true} :seon.typeahead/toolkit-cap]
-   [:seon.typeahead/max-rounds        {:optional true} :seon.typeahead/max-rounds]])
+   [:seon.typeahead/max-rounds        {:optional true} :seon.typeahead/max-rounds]
+   [:seon.typeahead/plan-pass         {:optional true} :seon.typeahead/plan-pass]])
 
 ;; The EFFECTIVE policy view [[policy]] returns — every knob present.
 (schema/register! ::policy-view
@@ -106,7 +112,8 @@
    [:seon.typeahead/probe-budget      :seon.typeahead/probe-budget]
    [:seon.typeahead/menu-cap          :seon.typeahead/menu-cap]
    [:seon.typeahead/toolkit-cap       :seon.typeahead/toolkit-cap]
-   [:seon.typeahead/max-rounds        :seon.typeahead/max-rounds]])
+   [:seon.typeahead/max-rounds        :seon.typeahead/max-rounds]
+   [:seon.typeahead/plan-pass         :seon.typeahead/plan-pass]])
 
 (def policy-row-id
   "The `:seon.typeahead/id` of the ONE policy singleton row."
@@ -119,7 +126,8 @@
    :seon.typeahead/probe-budget      3
    :seon.typeahead/menu-cap          8
    :seon.typeahead/toolkit-cap       4
-   :seon.typeahead/max-rounds        8})
+   :seon.typeahead/max-rounds        8
+   :seon.typeahead/plan-pass         :every-step})
 
 (defn policy
   "The effective typeahead driver policy in db value `db`.

@@ -52,6 +52,7 @@ The model is stateless; the driver is the machine. State =
 | DENOISE | rounds to stability / proof-probe; logit masks active | INTERPRET |
 | INTERPRET | total partition of the round output | ↓ |
 | EXPAND | glyph seen (token scan) or auto-offer fired → clamp template | RENDER |
+| PREFILL-EDIT | draft = an OPENED call to a `prefills` head (cursor-oracle head resolution) → skip the open-tail denoise, fill the registry-derived template whose argument hole is PRE-FILLED with the live projection (sticky init: unaccepted = unchanged; structure/keys/ids clamped) — the W2 plan pass invokes this by seeding the head as the draft | RENDER |
 | GROW | clean-but-unfinished, or ⤵ → grant free space | DENOISE |
 | REPAIR/SCRAMBLE | broken spans (existing) | DENOISE |
 | LOCK/HARVEST | eval-proven prefix → encoder (existing) | RENDER |
@@ -182,9 +183,14 @@ default arm is always plain guided generation.
   trims out.
 - `mode=rank` — segments + candidates in → calibrated ranked list out.
 - `mode=step` — one full FSM turn: `{committed, draft, context-render,
-  policy}` → `{transition, new-draft, locks, glyph?, posteriors}`.
-  The driver loop can then live either side of the wire; seon owns
-  RENDER (it has the DB), the worker owns DENOISE.
+  policy, prefills?}` → `{transition, new-draft, locks, glyph?,
+  posteriors, prefill_head?}`. `prefills` is the draft-head argument
+  affordance map (`head → [["clamp",s]|["prefill",s]|["free",n]]`,
+  registry-derived seon-side); "prefill" segments start holding their
+  text (STICKY: unaccepted positions renoise back to the init ids, so
+  an edit is small deltas by construction). The driver loop can then
+  live either side of the wire; seon owns RENDER (it has the DB), the
+  worker owns DENOISE.
 
 In-band errors (`gen_error`), same contract as today.
 

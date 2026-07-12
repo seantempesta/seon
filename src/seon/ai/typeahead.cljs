@@ -48,11 +48,13 @@
   (:require
     [cljs.reader :as reader]
     [clojure.string :as str]
+    [malli.core :as m]
     [seon.agent.ctx.menu :as menu]
     [seon.ai :as ai]
     [seon.ai.diffusiongemma :as dg]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
+    [seon.instrument :as instrument]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -91,6 +93,11 @@
 (schema/register! :seon.typeahead/rounds-used :int)        ; expansion settle rounds burned
 (schema/register! :seon.typeahead/round-budget :int)       ; expansion settle round budget
 (schema/register! :seon.typeahead/committed-tokens :int)   ; committed text after this step, tokens/estimate
+;; The per-step PLAN PASS (planner-worker-design W2) — pass rows are step
+;; projections marked plan-pass?, step-idx -1 (they precede round 0);
+;; prefill-tokens is the prefilled document's size (tokens/estimate).
+(schema/register! :seon.typeahead/plan-pass? :boolean)
+(schema/register! :seon.typeahead/prefill-tokens :int)
 
 (schema/register! :seon.typeahead/step
   [:map {:seon.db/entity true}
@@ -116,6 +123,8 @@
    [:seon.typeahead/rounds-used   {:optional true} :seon.typeahead/rounds-used]
    [:seon.typeahead/round-budget  {:optional true} :seon.typeahead/round-budget]
    [:seon.typeahead/committed-tokens {:optional true} :seon.typeahead/committed-tokens]
+   [:seon.typeahead/plan-pass?    {:optional true} :seon.typeahead/plan-pass?]
+   [:seon.typeahead/prefill-tokens {:optional true} :seon.typeahead/prefill-tokens]
    [:seon.typeahead/auto-offer-margin {:optional true} :seon.typeahead/auto-offer-margin]
    [:seon.typeahead/max-rounds    {:optional true} :seon.typeahead/max-rounds]
    [:seon.typeahead/agent         {:optional true} :seon.db/ref]])
@@ -411,10 +420,299 @@
       (assoc proj :seon.typeahead/offers-edn (pr-str rows)))))
 
 ;; ============================================================
-;; Step-row persistence. (The `:typeahead-steps` render block lives in
-;; `seon.agent.ctx.typeahead-steps` and is installed EXPLICITLY, never
-;; by this loop — owner constraint.)
+;; The draft-head prefill affordance + the per-step PLAN PASS
+;; (planner-worker-design W2). One computed rule, no fn list: a
+;; registered request schema whose argument entry carries
+;; `:seon.render/prefill-fn` names the projection of that argument's
+;; CURRENT value. This loop derives the affordance from the registry +
+;; the program graph, renders the projection as EDIT-WITH-PREFILL wire
+;; segments (structure + key names + identity-attr entries CLAMPED —
+;; ids and shape unforgeable by construction; entries whose current
+;; datom ANOTHER agent authored CLAMPED — the separation-of-authority
+;; zones, derived from `db/with-agent` tx provenance; only the
+;; caller's OWN scalar values are editable holes), and ships them as
+;; the step wire's `prefills` map. The worker expands an opened call to a listed head;
+;; the PLAN PASS is the same affordance invoked at step-open by seeding
+;; the head as the draft. `my.plan/reconcile!` is instance #1; any
+;; future document-shaped fn gets this by declaring the property.
 ;; ============================================================
+
+(schema/register! ::head :string)
+(schema/register! ::req-schema :keyword)
+(schema/register! ::arg-key :keyword)
+(schema/register! ::prefill-fn :symbol)
+(schema/register! ::affordance
+  [:map
+   [::head       {:optional true} ::head]
+   [::req-schema ::req-schema]
+   [::arg-key    ::arg-key]
+   [::prefill-fn ::prefill-fn]])
+(schema/register! ::affordances [:vector ::affordance])
+(schema/register! ::doc [:or :map [:vector :map]])
+(schema/register! ::segments [:vector :seon.ai.diffusiongemma/template-segment])
+(schema/register! ::prefills-wire
+  [:map-of ::head ::segments])
+
+(defn- schema-props
+  "The property map of a registered schema definition, or nil."
+  [definition]
+  (when (and (vector? definition) (map? (second definition)))
+    (second definition)))
+
+(defn- identity-attr?
+  "Whether attr keyword `k`'s registered schema carries
+   `:seon.db/identity` — the computed clamp rule (never a name list)."
+  [k]
+  (boolean (:seon.db/identity (schema-props (schema/schema-definition k)))))
+
+(defn- prefill-entries
+  "Every registered `:map` request schema entry declaring
+   `:seon.render/prefill-fn` — the registry half of the affordance."
+  []
+  (into []
+        (mapcat (fn [[k definition]]
+                  (when (and (vector? definition) (= :map (first definition)))
+                    (keep (fn [e]
+                            (when (and (vector? e) (map? (second e))
+                                       (:seon.render/prefill-fn (second e)))
+                              {::req-schema k
+                               ::arg-key    (first e)
+                               ::prefill-fn (:seon.render/prefill-fn (second e))}))
+                          (rest definition)))))
+        (schema/registered-schemas)))
+
+(defn- affordance-head
+  "The program-graph fn whose specced request IS `req-schema`
+   (`[:=> [:cat <req-schema>] …]`) — its full sym string, or nil."
+  [db req-schema]
+  (when (and db
+             (contains? (db/installed-schema db) :seon.fn/sym)
+             (contains? (db/installed-schema db) :seon.fn/spec))
+    (let [needle (str req-schema)]
+      (->> (db/query {:seon.db/db db
+                      :seon.db/query '[:find ?sym ?spec
+                                       :where
+                                       [?e :seon.fn/sym ?sym]
+                                       [?e :seon.fn/spec ?spec]]})
+           (some (fn [[sym spec]]
+                   (when (str/includes? (str spec) needle)
+                     (let [form (try (reader/read-string spec)
+                                     (catch :default _ nil))]
+                       (when (and (vector? form) (= :=> (first form))
+                                  (= [:cat req-schema] (second form)))
+                         sym)))))))))
+
+(defn prefill-affordances
+  "The live prefill affordances in db value `db` — registry entries
+   joined to their program-graph head fn (entries with no resolvable
+   head are dropped: no head, no draft to match)."
+  {:malli/schema [:=> [:catn [::db :seon.db/db]] ::affordances]}
+  [db]
+  (into []
+        (keep (fn [{::keys [req-schema] :as entry}]
+                (when-let [head (affordance-head db req-schema)]
+                  (assoc entry ::head head))))
+        (prefill-entries)))
+
+(defn- resolve-sym
+  "The live fn for a full `ns/name` symbol via the ONE symbol→fn
+   mechanism (`seon.instrument/find-js-var`), or nil."
+  [sym]
+  (let [s (str sym)]
+    (when-let [i (str/index-of s "/")]
+      (instrument/find-js-var (symbol (subs s 0 i))
+                              (symbol (subs s (inc i)))))))
+
+(defn- emit-seg
+  "Append text `s` of `kind` (\"clamp\"/\"prefill\") to wire segments
+   `segs`, coalescing consecutive same-kind chunks."
+  [segs kind s]
+  (let [lst (peek segs)]
+    (if (and lst (= kind (first lst)))
+      (conj (pop segs) [kind (str (second lst) s)])
+      (conj segs [kind s]))))
+
+(defn- node-authors
+  "attr → authoring agent-id of the node's CURRENT datoms, from the tx
+   provenance stamp (`:seon.db/agent-id` tx-meta). {} when the node's
+   identity entry doesn't resolve."
+  [db id-entry]
+  (let [eid (when id-entry
+              (:db/id (db/entity-lazy {:seon.db/db db
+                                       :seon.db/ref (vec id-entry)})))]
+    (if eid
+      (into {}
+            (db/query {:seon.db/db db
+                       :seon.db/query '[:find ?a ?aid
+                                        :in $ ?e
+                                        :where
+                                        [?e ?a _ ?tx]
+                                        [?tx :seon.db/agent-id ?aid]]
+                       :seon.db/args [eid]}))
+      {})))
+
+(defn- render-doc-value
+  "Render EDN `v` into edit-with-prefill segments (functional over
+   `segs`). STRUCTURE AND VOCABULARY CLAMP — braces/brackets, key
+   names, identity entries, and any scalar entry whose current datom
+   ANOTHER agent authored (or that carries no provenance — unverifiable
+   is unforgeable). ONLY the caller's OWN scalar VALUES ride as
+   editable prefill holes (each with the worker's slack to grow into).
+   Live-measured root cause: with node boundaries editable, the model
+   merged nodes and rewrote key names — one denoise round, unbalanced
+   EDN; clamped structure makes a parse-clean edit the construction,
+   not a hope. Structural edits (split/drop/reorder) stay with the
+   DELTA functions in the WORK loop — the design's other update shape."
+  [db agent-id v segs]
+  (cond
+    (map? v)
+    (let [id-entry (some (fn [[k val]] (when (identity-attr? k) [k val])) v)
+          authors  (if id-entry (node-authors db id-entry) {})
+          own?     (fn [k] (= agent-id (get authors k)))
+          coll?*   (fn [val] (and (sequential? val) (seq val) (every? map? val)))
+          scalars  (->> (dissoc v (first id-entry))
+                        (remove (fn [[_ val]] (coll?* val)))
+                        (sort-by (fn [[k _]] (name k))))
+          colls    (->> v
+                        (filter (fn [[_ val]] (coll?* val)))
+                        (sort-by (fn [[k _]]
+                                   [(if (str/starts-with? (name k) "_") 1 0)
+                                    (name k)])))]
+      (as-> segs segs
+        (emit-seg segs "clamp" "{")
+        (if id-entry
+          (emit-seg segs "clamp" (str (pr-str (first id-entry)) " "
+                                      (pr-str (second id-entry)) " "))
+          segs)
+        (reduce (fn [segs [k val]]
+                  (if (own? k)
+                    (-> segs
+                        (emit-seg "clamp" (str (pr-str k) " "))
+                        (emit-seg "prefill" (pr-str val))
+                        (emit-seg "clamp" " "))
+                    (emit-seg segs "clamp"
+                              (str (pr-str k) " " (pr-str val) " "))))
+                segs scalars)
+        (reduce (fn [segs [k val]]
+                  (-> (reduce (fn [segs c]
+                                (-> (render-doc-value db agent-id c segs)
+                                    (emit-seg "clamp" "\n")))
+                              (emit-seg segs "clamp" (str (pr-str k) " ["))
+                              val)
+                      (emit-seg "clamp" "] ")))
+                segs colls)
+        (emit-seg segs "clamp" "}")))
+
+    (sequential? v)
+    (-> (reduce (fn [segs c]
+                  (-> (render-doc-value db agent-id c segs)
+                      (emit-seg "clamp" "\n")))
+                (emit-seg segs "clamp" "[")
+                v)
+        (emit-seg "clamp" "]"))
+
+    :else (emit-seg segs "prefill" (pr-str v))))
+
+(defn document-segments
+  "A projection document as edit-with-prefill wire segments.
+
+   Structure, key names, identity entries, and foreign-authored entries
+   CLAMP; only the caller's OWN scalar values ride as editable prefill
+   holes. Public for tests."
+  {:malli/schema [:=> [:catn [::db :seon.db/db]
+                       [:seon.agent/id :string]
+                       [::doc ::doc]]
+                  ::segments]}
+  [db agent-id doc]
+  (render-doc-value db agent-id doc []))
+
+(def ^:private plan-pass-doc-token-budget
+  "Estimated-token cap on a prefilled document. The worker's code buffer
+   is 256 tokens; the head/closing clamps + per-hole slack need margin.
+   A document over this budget SKIPS the affordance for the call (the
+   honest v1 — scope-down lives with the demotion measurement)."
+  190)
+
+(defn- affordance-template
+  "The full prefilled call template: head + arg key clamped open, the
+   document segments, the closing clamp."
+  [head arg-key doc-segs]
+  (-> (into [["clamp" (str "(" head " {" (pr-str arg-key) " ")]] doc-segs)
+      (conj ["clamp" "})"])))
+
+(defn- injected-request
+  "The standard empty request for projection fn `sym`, its DECLARED
+   injectable keys filled from the ambient scope — the same boundary
+   rule `seon.instrument/injecting-fschema` applies at eval time (works
+   whether or not the live var is wrapped; explicit keys win in the
+   wrapper). {} when the fn's program-graph spec is unavailable."
+  [db sym]
+  (let [spec (when (contains? (db/installed-schema db) :seon.fn/spec)
+               (ffirst (db/query {:seon.db/db db
+                                  :seon.db/query
+                                  '[:find ?spec
+                                    :in $ ?sym
+                                    :where
+                                    [?e :seon.fn/sym ?sym]
+                                    [?e :seon.fn/spec ?spec]]
+                                  :seon.db/args [(str sym)]})))
+        inj  (try (some-> spec reader/read-string m/schema
+                          instrument/declared-injectables)
+                  (catch :default _ nil))]
+    (reduce (fn [request k]
+              (let [v ((instrument/injectables k) nil)]
+                (if (some? v) (assoc request k v) request)))
+            {} (or inj #{}))))
+
+(defn- projection-doc?
+  "Whether a projection result is a renderable document: node map(s)
+   each carrying an identity-attr entry (an error ENVELOPE has none —
+   the computed validity rule, no envelope-shape knowledge)."
+  [doc]
+  (let [nodes (cond (map? doc) [doc] (sequential? doc) doc :else nil)]
+    (boolean (and (seq nodes)
+                  (every? (fn [n] (and (map? n)
+                                       (some identity-attr? (keys n))))
+                          nodes)))))
+
+(defn- prefill-wire
+  "head → prefilled template, for every affordance whose projection fn
+   resolves and returns a NON-EMPTY document within the token budget.
+   {} when nothing qualifies (the wire field is then omitted)."
+  [db agent-id affordances]
+  (into {}
+        (keep (fn [{::keys [head arg-key prefill-fn]}]
+                (when-let [f (resolve-sym prefill-fn)]
+                  (let [doc (f (injected-request db prefill-fn))]
+                    (when (and (projection-doc? doc)
+                               (<= (tokens/estimate (pr-str doc))
+                                   plan-pass-doc-token-budget))
+                      [head (affordance-template
+                              head arg-key
+                              (document-segments db agent-id doc))])))))
+        affordances))
+
+(def ^:private pass-render
+  "The plan pass's MINIMAL render — never the full context render. The
+   goal rides inside the prefilled document itself (the root node's
+   `goal` entry)."
+  (str "; PLAN PASS — refine your OPEN plan document before working the\n"
+       "; ▶ step: split a too-big step, sharpen the active step's expect,\n"
+       "; reorder, drop a dead branch — or leave it unchanged. Step ids\n"
+       "; are fixed; edit titles/expects/structure only.\n"))
+
+(defn- template-text
+  "The template's full assembled text — what a NO-CHANGE fill decodes to
+   (modulo whitespace)."
+  [template]
+  (apply str (map second template)))
+
+(defn- no-change?
+  "Whether a locked pass form equals the prefilled template text modulo
+   whitespace/commas — the model left the document alone."
+  [template form]
+  (letfn [(norm [s] (str/trim (str/replace s #"[\s,]+" " ")))]
+    (= (norm (template-text template)) (norm form))))
 
 (defn- ^:async record-step!
   "Transact one step projection row; never throws, never blocks the loop.
@@ -431,6 +729,45 @@
       (js/console.warn "[seon.ai.typeahead] step projection failed:"
                        (pr-str (:seon.db/error res))))
     nil))
+
+(defn- ^:async run-plan-pass!
+  "Run ONE plan pass (planner-worker-design W2): a small worker call —
+   the minimal pass render, the head seeded as the draft, the prefilled
+   template on the wire — whose locked result is the whole-document
+   reconcile form. ADVISORY: any worker error skips the pass (nil), it
+   never fails the provider call. Returns
+   {::pass-form <form|nil> ::pass-proj <step row> ::pass-no-change? b}
+   — the form is nil on a no-change pass (dropping it is cheaper than a
+   0/0/0 receipt: zero eval, zero transcript tokens; the unchanged
+   `:plan` block is the confirmation) and on a failed edit."
+  [opts policy prefills call-id]
+  (let [head     (first (keys prefills))
+        template (get prefills head)
+        wire     (merge {::dg/mode      :step
+                         ::dg/prompt    pass-render
+                         ::dg/policy    (policy->wire policy)
+                         ::dg/prefills  prefills
+                         ::dg/committed ""
+                         ::dg/draft     (str "(" head " ")}
+                        opts)
+        resp     (await (dg/complete wire))]
+    (if (:seon.ai/error resp)
+      (do (js/console.warn "[seon.ai.typeahead] plan pass skipped —"
+                           (pr-str (:seon.ai/msg (:seon.ai/error resp))))
+          nil)
+      (let [out        (::dg/worker-output resp)
+            form       (first (mapv str (:locked out)))
+            unchanged? (boolean (and form (no-change? template form)))
+            proj       (-> (step-projection call-id -1 out)
+                           (assoc :seon.typeahead/plan-pass? true
+                                  :seon.typeahead/prefill-tokens
+                                  (tokens/estimate (template-text template))
+                                  :seon.typeahead/prompt-tokens
+                                  (tokens/estimate pass-render)))
+            _          (await (record-step! proj))]
+        {::pass-form       (when (and form (not unchanged?)) form)
+         ::pass-proj       proj
+         ::pass-no-change? unchanged?}))))
 
 ;; ============================================================
 ;; The step loop — the provider body.
@@ -454,6 +791,14 @@
         agent-id   (db/current-agent-id)
         policy     (menu/policy db)
         offers     (if (and db agent-id) (menu/verb-offers db agent-id) [])
+        ;; The draft-head prefill affordance (W2): registry+program-graph
+        ;; derived, computed ONCE per call (the projection can only change
+        ;; after this call's forms eval). Rides EVERY step's wire so an
+        ;; ORGANIC opened head expands prefilled too.
+        prefills   (if (and db agent-id)
+                     (prefill-wire db agent-id (prefill-affordances db))
+                     {})
+        pass-mode  (:seon.typeahead/plan-pass policy)
         ;; offers ride with the null-intent calibration render — the worker
         ;; gates the glyph baseline on BOTH (cursor.py: `offers and
         ;; null_render`), so auto-offers can actually fire (P5; P4 measured
@@ -461,16 +806,29 @@
         wire       (cond-> {::dg/mode   :step
                             ::dg/prompt prompt
                             ::dg/policy (policy->wire policy)}
-                     (seq offers) (assoc ::dg/null-render (null-render prompt)))
+                     (seq offers)   (assoc ::dg/null-render (null-render prompt))
+                     (seq prefills) (assoc ::dg/prefills prefills))
         max-rounds (max 1 (:seon.typeahead/max-rounds policy))
         call-id    (str (random-uuid))
-        ptoks      (tokens/estimate prompt)]
+        ptoks      (tokens/estimate prompt)
+        ;; The step-open PLAN PASS (:every-step; :on-stuck runs it inside
+        ;; the loop instead; :off never). A no-change/failed pass yields no
+        ;; form and the loop proceeds straight to WORK.
+        pass       (when (and (= :every-step pass-mode) (seq prefills))
+                     (await (run-plan-pass! opts policy prefills call-id)))
+        pass-form  (::pass-form pass)]
     ;; `failed` = glyphs whose EXPANSION locked nothing — suppressed for the
     ;; rest of the call (P6). The worker is stateless by design; this loop's
     ;; step trace is the driver's memory. Without it the P5 p1 trace shows
     ;; the identical failed auto-offer re-firing 4x at the same margin.
-    (loop [round 0, committed "", draft "", locked-all [], stuck 0, steps []
-           failed #{}]
+    (loop [round 0
+           committed (or pass-form "")
+           draft ""
+           locked-all (if pass-form [pass-form] [])
+           stuck 0
+           steps (if pass [(::pass-proj pass)] [])
+           failed #{}
+           passed? (some? pass)]
       (if (>= round max-rounds)
         (let [reply (assemble-reply locked-all draft)]
           {:text reply :seon.ai/raw (loop-raw reply call-id :round-cap steps)})
@@ -523,8 +881,27 @@
                   {:text reply :seon.ai/raw (loop-raw reply call-id :gave-up steps')})
 
                 :else
-                (recur (inc round) committed' draft' locked-all' stuck' steps'
-                       failed')))))))))
+                ;; :on-stuck wiring — the demoted plan pass runs at the
+                ;; FIRST observed stuck round, once per call.
+                (let [pass' (when (and (= :on-stuck pass-mode)
+                                       (not passed?)
+                                       (= "stuck" transition)
+                                       (seq prefills))
+                              (await (run-plan-pass! opts policy prefills
+                                                     call-id)))
+                      pform (::pass-form pass')]
+                  (recur (inc round)
+                         (if pform
+                           (->> [committed' pform]
+                                (remove str/blank?)
+                                (str/join "\n"))
+                           committed')
+                         draft'
+                         (if pform (conj locked-all' pform) locked-all')
+                         stuck'
+                         (if pass' (conj steps' (::pass-proj pass')) steps')
+                         failed'
+                         (or passed? (some? pass'))))))))))))
 
 (defn agent-adapter
   "A fn-of-ctx-string suitable for `seon.agent`'s `llm-fn`.

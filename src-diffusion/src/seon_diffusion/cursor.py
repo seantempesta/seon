@@ -54,6 +54,13 @@ from .repair import (hint_for as _hint_for, orient_for,
 SELECT_GLYPHS = tuple("①②③④⑤⑥⑦⑧⑨⑩")   # model → driver: select offer N
 GROW_GLYPH = "⤵"                            # model → driver: more space now
 NEG = -1e9                                   # additive logit ban
+PREFILL_SLACK = 0                            # extra editable tokens per prefill
+                                             # hole. Live-measured at 6: the
+                                             # newline-initialized slack drew
+                                             # accepted junk (": * :") that
+                                             # broke EDN every seed — growth
+                                             # stays with the DELTA fns; a
+                                             # prefill hole is content-sized
 
 
 @dataclass
@@ -90,7 +97,12 @@ class Policy:
 # ---------------------------------------------------------------------------
 
 def norm_segments(segments):
-    """JSON/wire segments → [("clamp", str) | ("free", int)]."""
+    """JSON/wire segments → [("clamp", str) | ("free", int) | ("prefill", str)].
+
+    "prefill" is the EDIT-WITH-PREFILL hole (planner-worker-design): the
+    hole starts holding the given text (plus PREFILL_SLACK editable
+    newlines) instead of noise — the model makes small deltas or none.
+    Only "clamp" is a hard guarantee."""
     out = []
     for s in segments:
         kind, payload = s[0], s[1]
@@ -98,6 +110,8 @@ def norm_segments(segments):
             out.append(("clamp", str(payload)))
         elif kind == "free":
             out.append(("free", int(payload)))
+        elif kind == "prefill":
+            out.append(("prefill", str(payload)))
         else:
             raise ValueError(f"unknown segment kind {kind!r}")
     return out
@@ -376,7 +390,7 @@ class CursorDriver:
             return segments, [], 0
         segments = list(segments)
         probes, forwards = [], 0
-        hole_at = [i for i, s in enumerate(segments) if s[0] == "free"]
+        hole_at = [i for i, s in enumerate(segments) if s[0] != "clamp"]
         for hn, si in enumerate(hole_at):
             if hn in skip:
                 continue
@@ -416,6 +430,11 @@ class CursorDriver:
         for kind, payload in segments:
             if kind == "clamp":
                 ws.clamp(_tok_ids(self.tok, payload))
+            elif kind == "prefill":
+                ids = _tok_ids(self.tok, payload)
+                nl = _tok_ids(self.tok, "\n")
+                init = ids + nl * PREFILL_SLACK
+                ws.free(len(init), init=init)
             else:
                 ws.free(payload)
         return ws
@@ -435,16 +454,19 @@ class CursorDriver:
         # candidate (kills the slack that invites the echo/repeat junk —
         # the dg_typeahead2 rank recipe) and skip the CAL probe for it
         sized = set()
-        hole_at = [i for i, s in enumerate(segments) if s[0] == "free"]
+        hole_at = [i for i, s in enumerate(segments) if s[0] != "clamp"]
         for hi, cands in _cand_items(candidates):
             if cands and hi < len(hole_at):
                 n = max(len(_tok_ids(self.tok, c)) for c in cands)
                 segments[hole_at[hi]] = ("free", n)
                 sized.add(hi)
+        # prefill holes are content-sized (the text + slack) — never probed
+        sized |= {hn for hn, si in enumerate(hole_at)
+                  if segments[si][0] == "prefill"}
         segments, probes, probe_fwd = self._probe_hole_lengths(
             cache, cur_len, segments, skip=sized)
         cand_map = dict(_cand_items(candidates))
-        hole_seg = [i for i, s in enumerate(segments) if s[0] == "free"]
+        hole_seg = [i for i, s in enumerate(segments) if s[0] != "clamp"]
         n_holes = len(hole_seg)
         # per-ORIGINAL-hole state; settled holes CLAMP on later rounds and
         # only unsettled ones re-noise (per-FIELD locking — the fields of a
@@ -475,7 +497,9 @@ class CursorDriver:
                     if cand_map.get(h):
                         cur_cand[len(order)] = cand_map[h]
                     order.append((h, i))
-                    cur_segments.append(("free", payload))
+                    # an unsettled prefill hole RETRIES from its original
+                    # text, never from round junk (kind rides through)
+                    cur_segments.append((kind, payload))
             ws = self._workspace(cur_segments)
             code_buffer, clamp_mask, clamp_ids, ovf = ws.build(
                 cfg.code_buffer_length, cfg.vocab_size,
@@ -501,7 +525,7 @@ class CursorDriver:
 
             belief, fwd, logits = control._denoise_round(
                 self.model, code_buffer, clamp_mask, clamp_ids, cache, cur_len,
-                self.gen, bias=bias, probe=holes_stable)
+                self.gen, bias=bias, probe=holes_stable, soft=ws.soft())
             total_fwd += fwd
             ent = _entropy(logits)
             toks = [int(t) for t in belief[0]]
@@ -701,6 +725,93 @@ class CursorDriver:
             events.append({"event": "lock", "form": src[:80]})
         return locked, harvest_end, eval_broke
 
+    # ---- shared EXPAND/PREFILL harvest --------------------------------------
+
+    def _harvest_fill(self, fr, tmpl, own_draft, tag, events, eval_session,
+                      result):
+        """Harvest one template fill `fr` (glyph EXPAND or prefill edit):
+        oracle-refine the assembled text, lock the maximal clean prefix
+        (eval-gated when a session rides), or report a failed fill keeping
+        the caller's OWN draft (never the junk) with hints + the repaired
+        buffer picture. Updates and returns `result` (transition always
+        \"expand\"); the caller adds arm/glyph/head fields."""
+        etext = fr["text"]
+        eref = (self.oracle.refine(etext) if etext.strip()
+                else {"renoise_spans": [], "clamps": []})
+        eerrors = list(eref["renoise_spans"])
+        elocked, eharvest_end, _ = self._lock_prefix(
+            etext, eref, eerrors, eval_session, events)
+        eremainder = etext[eharvest_end:].strip()
+        # A trailing eof error is normally "unfinished, growable" — but when
+        # the template ENDS with a closing clamp the assembled text is
+        # complete by construction, so any eof left standing was injected by
+        # a hole (live-measured: `ready")` broke the string balance and the
+        # junk rode forward as an eof-only draft).
+        template_closed = bool(tmpl) and tmpl[-1][0] == "clamp"
+        hard = [e for e in eerrors
+                if e["span"][1] > eharvest_end
+                and not (not template_closed
+                         and e.get("error-kind") == "eof"
+                         and e["span"][1] >= len(etext))]
+        if not elocked and hard:
+            hints, seen = [], set()
+            for e in sorted(hard, key=lambda e: e["span"][0]):
+                h = _hint_for(e)
+                if h not in seen and len(seen) < 2:
+                    seen.add(h)
+                    hints.append(h)
+            events.append({"event": "expand-failed", **tag,
+                           "kinds": sorted({e.get("error-kind")
+                                            for e in hard})})
+            espans = fr["spans"]
+            for e in hard:
+                espans = spans_overlay(
+                    espans, max(e["span"][0], 0),
+                    min(e["span"][1], len(etext)), "repaired")
+            result.update({"transition": "expand", "new_draft": own_draft,
+                           "hints": hints, "expansion": fr,
+                           **buffer_view(etext, espans)})
+            return result
+        result.update({"transition": "expand", "locked": elocked,
+                       "new_draft": eremainder, "expansion": fr,
+                       **buffer_view(
+                           etext,
+                           spans_overlay(fr["spans"], 0,
+                                         eharvest_end, "locked"),
+                           frontier=len(etext))})
+        return result
+
+    # ---- draft-head prefill affordance --------------------------------------
+
+    def _prefill_match(self, draft, prefills):
+        """The draft-head argument affordance (planner-worker-design): when
+        the draft is an OPENED call to a head with a caller-supplied prefill
+        template and its argument region is still empty, return
+        (head, template) — else None. Head resolution is the cursor
+        oracle's (op:\"cursor\" slot-kind.head, ~3ms); the driver carries NO
+        fn knowledge — the registry-derived `prefills` map does."""
+        d = (draft or "").strip()
+        if not prefills or not d:
+            return None
+        cursor_fn = getattr(self.oracle, "cursor", None)
+        if cursor_fn is None:
+            return None
+        try:
+            # a trailing space pins the cursor to the ARG slot (a cursor
+            # inside the head token would splice the head away)
+            sk = (cursor_fn(d + " ", len(d) + 1) or {}).get("slot-kind") or {}
+        except Exception:
+            return None
+        head = sk.get("head")
+        if head not in prefills:
+            return None
+        at = d.find(head)
+        if at < 0 or d[:at].strip(" \n\t(") != "":
+            return None          # prior content in the draft — normal path
+        if d[at + len(head):].strip(" \n\t{") != "":
+            return None          # args begun — never clobber typed content
+        return head, prefills[head]
+
     # ---- INTERPRET ----------------------------------------------------------
 
     @staticmethod
@@ -731,7 +842,7 @@ class CursorDriver:
     # ---- step ---------------------------------------------------------------
 
     def step(self, context_render, committed="", draft="", offers=None,
-             eval_session=None, null_render=None, seed=None):
+             eval_session=None, null_render=None, prefills=None, seed=None):
         """One full FSM turn (mode=step): RENDER → DENOISE → INTERPRET →
         arm action. STATELESS per call — the caller passes back
         `committed` (+ this step's `locked`) and `new_draft` next time;
@@ -739,6 +850,11 @@ class CursorDriver:
 
         offers: [{"glyph": "①", "label": str,
                   "template": [["clamp", str] | ["free", n]]}].
+        prefills: {head: [["clamp", str] | ["prefill", str] | ["free", n]]}
+        — the draft-head argument affordance: an opened call to `head`
+        (resolved via the cursor oracle) expands its registry-derived
+        template with the argument hole PRE-FILLED (edit, not regenerate);
+        the template REPLACES the typed head, ids ride as clamp segments.
         Locking is parse-gated by the bb oracle; pass `eval_session` for
         the eval-proven lock (the full guided-loop guarantee).
         Returns {transition, arm, new_draft, locked, glyph, posteriors,
@@ -759,6 +875,26 @@ class CursorDriver:
             mx.random.seed(seed)
         cfg = self.model.cfg
         CL = cfg.code_buffer_length
+
+        # draft-head PREFILL affordance (planner-worker-design): an opened
+        # call to a registered prefill head skips the open-tail denoise and
+        # goes straight to an EDIT-WITH-PREFILL template fill — the argument
+        # hole starts as the live projection (ids clamped by the caller's
+        # template), the model makes small deltas or none.
+        pf = self._prefill_match(draft, prefills)
+        if pf is not None:
+            head, tmpl = pf
+            tmpl = norm_segments(tmpl)
+            cache, cur_len = self._encode(context_render, committed)
+            events.append({"event": "prefill-expand", "head": head})
+            fr = self._fill_on(cache, cur_len, tmpl,
+                               settle_rounds=p.expand_settle_rounds)
+            result = {"posteriors": {}, "readouts": {}, "glyph": None,
+                      "locked": [], "hints": [], "events": events,
+                      "arm": "prefill-edit", "prefill_head": head}
+            self._harvest_fill(fr, tmpl, draft, {"head": head}, events,
+                               eval_session, result)
+            return self._finish(result, fr["forwards"], t0)
 
         # calibration baseline BEFORE the main denoise (deterministic order)
         offer_glyphs = [o["glyph"] for o in offers if o.get("glyph") in self.glyphs]
@@ -915,66 +1051,14 @@ class CursorDriver:
                                "trims": fr["trims"], "probes": fr["probes"]})
                 # P6: harvest the expansion IMMEDIATELY (parse-gated, eval-
                 # gated with a session) instead of handing an unchecked fill
-                # forward as draft. Live-measured failure mode: a junk-args
-                # fill rode out as new_draft, the NEXT step's repair arm
-                # dropped the whole broken region (the clamped verb call
-                # included), the state returned to its pre-step value, and
-                # the identical auto-offer re-fired forever. A clean
-                # expansion now LOCKS in the same step; a broken one keeps
-                # the caller's own draft (never the junk) and reports
-                # expand-failed + hints, so the caller's offer memory can
-                # suppress the glyph.
-                etext = fr["text"]
-                eref = (self.oracle.refine(etext) if etext.strip()
-                        else {"renoise_spans": [], "clamps": []})
-                eerrors = list(eref["renoise_spans"])
-                elocked, eharvest_end, _ = self._lock_prefix(
-                    etext, eref, eerrors, eval_session, events)
-                eremainder = etext[eharvest_end:].strip()
-                # A trailing eof error is normally "unfinished, growable" —
-                # but when the offer template ENDS with a closing clamp the
-                # assembled text is complete by construction, so any eof
-                # left standing was injected by the hole (live-measured:
-                # `ready")` broke the string balance and the junk rode
-                # forward as an eof-only draft).
-                template_closed = bool(tmpl) and tmpl[-1][0] == "clamp"
-                hard = [e for e in eerrors
-                        if e["span"][1] > eharvest_end
-                        and not (not template_closed
-                                 and e.get("error-kind") == "eof"
-                                 and e["span"][1] >= len(etext))]
-                if not elocked and hard:
-                    hints, seen = [], set()
-                    for e in sorted(hard, key=lambda e: e["span"][0]):
-                        h = _hint_for(e)
-                        if h not in seen and len(seen) < 2:
-                            seen.add(h)
-                            hints.append(h)
-                    events.append({"event": "expand-failed", "glyph": chosen,
-                                   "kinds": sorted({e.get("error-kind")
-                                                    for e in hard})})
-                    # buffer picture: the failed expansion with the oracle-
-                    # rejected regions marked repaired (the caller keeps its
-                    # own draft — this view shows WHY)
-                    espans = fr["spans"]
-                    for e in hard:
-                        espans = spans_overlay(
-                            espans, max(e["span"][0], 0),
-                            min(e["span"][1], len(etext)), "repaired")
-                    result.update({"transition": "expand",
-                                   "arm": "glyph-select", "glyph": chosen,
-                                   "new_draft": draft, "hints": hints,
-                                   "expansion": fr,
-                                   **buffer_view(etext, espans)})
-                    return self._finish(result, total_fwd, t0)
-                result.update({"transition": "expand", "arm": "glyph-select",
-                               "glyph": chosen, "locked": elocked,
-                               "new_draft": eremainder, "expansion": fr,
-                               **buffer_view(
-                                   etext,
-                                   spans_overlay(fr["spans"], 0,
-                                                 eharvest_end, "locked"),
-                                   frontier=len(etext))})
+                # forward as draft — [[_harvest_fill]], shared with the
+                # prefill-edit path. A clean expansion LOCKS in the same
+                # step; a broken one keeps the caller's own draft (never the
+                # junk) and reports expand-failed + hints, so the caller's
+                # offer memory can suppress the glyph.
+                result.update({"arm": "glyph-select", "glyph": chosen})
+                self._harvest_fill(fr, tmpl, draft, {"glyph": chosen},
+                                   events, eval_session, result)
                 return self._finish(result, total_fwd, t0)
             events.append({"event": "glyph-no-offer", "glyph": chosen})
 

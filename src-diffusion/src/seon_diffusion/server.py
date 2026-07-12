@@ -273,7 +273,7 @@ def _cursor(mode, payload, info):
       rank  {prompt, prefix, candidates, suffix, null_prompt?, seed?}
             → calibrated ranked list
       step  {prompt (the context render), committed?, draft?, offers?,
-             policy?, null_render?, seed?}
+             policy?, null_render?, prefills?, seed?}
             → {transition, arm, new_draft, locked, glyph, posteriors,
                readouts, hints, events}
 
@@ -306,7 +306,8 @@ def _cursor(mode, payload, info):
                          committed=payload.get("committed", ""),
                          draft=payload.get("draft", ""),
                          offers=payload.get("offers"),
-                         null_render=payload.get("null_render"), seed=seed)
+                         null_render=payload.get("null_render"),
+                         prefills=payload.get("prefills"), seed=seed)
             r["events"] = r["events"][:40]
         _STATE["gens"] += 1
         info.update(r)

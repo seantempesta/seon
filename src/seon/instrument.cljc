@@ -128,10 +128,15 @@
        (not (contains? #{"0" "false" "off" "no"} v)))))
 
 #?(:cljs
-   (defn- -find-js-var
-     "Resolve the live JS fn object for `[ns-sym fn-sym]` by walking the
-      munged goog.global path — same lookup malli.instrument uses to find
-      the var it wraps. nil if not found (e.g. fn not yet loaded)."
+   (defn find-js-var
+     "Resolve the live JS fn object for `[ns-sym fn-sym]`, or nil.
+
+      Walks the munged goog.global path — the same lookup malli.instrument
+      uses to find the var it wraps. THE one symbol→live-fn mechanism
+      (`seon.ai.typeahead`'s prefill-fn resolution reuses it); nil when the
+      fn is not loaded. The result is a raw JS object — a third-party
+      boundary, hence `:any`."
+     {:malli/schema [:=> [:catn [::ns-sym :symbol] [::fn-sym :symbol]] :any]}
      [ns-sym fn-sym]
      (try
        (gobj/getValueByKeys
@@ -491,7 +496,7 @@
      ;; that is already a malli wrapper is a plain variadic Function, so
      ;; without the unwrap a re-registration would mis-route every simple
      ;; fixed-arity fn to the stock wrapper.
-     (let [the-fn (-original-fn (-find-js-var ns-sym fn-sym))]
+     (let [the-fn (-original-fn (find-js-var ns-sym fn-sym))]
        (cond
          ;; STRUCTURAL opt-out — async with no correct wrapper available.
          (async-unwrappable? async? the-fn schema-form) nil
@@ -585,7 +590,7 @@
                  ;; variadic Function), which would mis-detect every `^:async`
                  ;; fn as sync and route its Promise through the sync output
                  ;; validator (the old pod-wedge class).
-                 the-fn (-original-fn (-find-js-var ns-sym fn-sym))
+                 the-fn (-original-fn (find-js-var ns-sym fn-sym))
                  schema (try (reader/read-string spec-str)
                              (catch :default _ ::bad))
                  ;; Resolve-check (errors-as-values): build the schema
@@ -658,7 +663,7 @@
                    (when-let [slash (str/index-of (str sym-str) "/")]
                      (let [ns-sym   (symbol (subs sym-str 0 slash))
                            fn-sym   (symbol (subs sym-str (inc slash)))
-                           f        (-find-js-var ns-sym fn-sym)
+                           f        (find-js-var ns-sym fn-sym)
                            ;; Wrapped = the wrapper's recorded original
                            ;; (simple path), OR malli's `instrumented?` flag
                            ;; on a NON-simple fn (the wrap-in-place path,
