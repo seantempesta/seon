@@ -9,7 +9,7 @@
 # where neither agent "owns" a process — both invoke this script.
 #
 # Subcommands:
-#   start <name|all>   Idempotent. Spawns via nohup; logs to logs/<name>.log
+#   start <name|all>   Idempotent. Spawns detached; logs to logs/<name>.log
 #                      `all` = cljs-watch → wire-server → pod, each gated on
 #                      REAL readiness before the next (jvm NOT included)
 #
@@ -378,6 +378,44 @@ ready_check() {
         || grep -q 'Build completed' "$(log_file cljs-watch)" 2>/dev/null
       ;;
     *) return 0 ;;
+  esac
+}
+
+clear_readiness_artifacts() {
+  # Readiness files and Unix sockets describe a PARTICULAR process lifetime.
+  # A reboot, SIGKILL, or interrupted supervisor can leave them behind.  Clear
+  # them before every fresh spawn so readiness can only be asserted by the new
+  # process.  This is deliberately after the is_running check: never remove a
+  # live process's artifacts.
+  case "$1" in
+    pod)         rm -f "$SEON_PORT_FILE" ;;
+    pod-*)       rm -f "tmp/seon-port-${1#pod-}" ;;
+    wire-server) rm -f "$SEON_WRITER_REPL_PORT_FILE" "$SEON_REQ_SOCK" "$SEON_PUB_SOCK" ;;
+  esac
+}
+
+assert_no_unmanaged_listener() {
+  # Never "recover" stale artifacts by unlinking a socket that is actually
+  # serving an unregistered process. Fail with an adoption path instead of
+  # creating two writers or obscuring a port collision.
+  local name="$1"
+  case "$name" in
+    wire-server)
+      if [ -S "$SEON_REQ_SOCK" ] && nc_supports_uds \
+         && nc -U "$SEON_REQ_SOCK" -w 1 </dev/null >/dev/null 2>&1; then
+        echo "✗ $name is accepting on $SEON_REQ_SOCK but has no live managed PID" >&2
+        echo "  inspect it, then register it with: bin/seon adopt $name <pid>" >&2
+        return 1
+      fi
+      ;;
+    pod)
+      local port="${SEON_PORT:-7890}"
+      if curl -fsS -m 1 -o /dev/null "http://127.0.0.1:$port/" 2>/dev/null; then
+        echo "✗ port $port already serves HTTP but pod has no live managed PID" >&2
+        echo "  inspect it, then register it with: bin/seon adopt pod <pid>" >&2
+        return 1
+      fi
+      ;;
   esac
 }
 
@@ -819,6 +857,39 @@ is_running() {
   kill -0 "$pid" 2>/dev/null
 }
 
+spawn_detached() {
+  # `nohup ... &` ignores SIGHUP but remains in the launcher's session/process
+  # group. Some terminal hosts (including Codex after a machine reboot) reap
+  # that whole group when the command session closes. Python's
+  # start_new_session performs the portable setsid(2) step missing from macOS
+  # userland, while preserving the exact bash command and PID we supervise.
+  local cmd="$1"
+  local log="$2"
+  command -v python3 >/dev/null 2>&1 || {
+    echo "✗ python3 is required to detach managed processes safely" >&2
+    return 1
+  }
+  python3 - "$cmd" "$log" "$SEON_ROOT" <<'PY'
+import os
+import subprocess
+import sys
+
+cmd, log_path, cwd = sys.argv[1:]
+with open(log_path, "ab", buffering=0) as log:
+    process = subprocess.Popen(
+        ["/bin/bash", "-c", cmd],
+        cwd=cwd,
+        env=os.environ.copy(),
+        stdin=subprocess.DEVNULL,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        close_fds=True,
+        start_new_session=True,
+    )
+print(process.pid)
+PY
+}
+
 # ============================================================
 # Subcommands.
 #
@@ -840,8 +911,13 @@ _start_unlocked() {
   local cmd
   cmd="$(process_command "$name")" || { echo "unknown process: $name" >&2; return 1; }
 
+  assert_no_unmanaged_listener "$name" || return 1
+
   # Fresh log on each start so tail isn't polluted with prior runs.
   : > "$(log_file "$name")"
+
+  # A stale port/socket file must never satisfy this process's ready gate.
+  clear_readiness_artifacts "$name"
 
   # Sha-bump guard: download + prep git deps BEFORE spawn so they never
   # build inside the process's own ready window (no-op when unchanged).
@@ -879,9 +955,10 @@ _start_unlocked() {
       fi ;;
   esac
 
-  # nohup + & detaches from this shell; bash -c handles multi-word cmds.
-  nohup bash -c "$cmd" >> "$(log_file "$name")" 2>&1 &
-  local pid=$!
+  # Start in a new OS session so the process survives the invoking terminal,
+  # SSH session, CI runner, or agent tool closing after this command returns.
+  local pid
+  pid="$(spawn_detached "$cmd" "$(log_file "$name")")" || return 1
 
   echo "$pid"        > "$(pid_file "$name")"
   echo "$cmd"        > "$(cmd_file "$name")"
@@ -944,6 +1021,7 @@ _stop_unlocked() {
   # port, and a reader polling the stale file (a harness, a curl loop) races
   # the old port. Remove it on stop so "port file exists" ⇒ "pod wrote it".
   case "$name" in
+    pod)   rm -f "$SEON_PORT_FILE" ;;
     pod-*) rm -f "tmp/seon-port-${name#pod-}" ;;
     # Same rule for the wire-server's REPL port file: deleteOnExit covers a
     # graceful JVM exit, but a SIGKILL leaves a stale file — remove it so
@@ -958,8 +1036,7 @@ start_all() {
   # in cmd_start and (being ready) pass their gate immediately.
   local name
   for name in $(stack_processes); do
-    cmd_start "$name"
-    wait_ready "$name" || {
+    cmd_start "$name" || {
       echo "✗ start all ABORTED at $name (later stages not started)" >&2
       exit 1
     }
@@ -990,6 +1067,10 @@ cmd_start() {
   acquire_lock "$name"
   _start_unlocked "$name"
   release_lock "$name"
+  # A successful `start` means usable, not merely forked. This also checks an
+  # already-running process and gives every entry point the same readiness
+  # contract as restart/start-all/cluster operations.
+  wait_ready "$name"
 }
 
 cmd_stop() {

@@ -6,6 +6,20 @@ tags: [prd, agent]
 
 # agent-ctx roadmap — we are here → the target
 
+## Cold-resume supervisor hardening (2026-07-12)
+
+A machine-reboot drive exposed two lifecycle failures in `bin/seon`: `nohup`
+children remained in the launching tool's process session and were reaped when
+it closed, while a stale `tmp/seon-port` let a replacement pod report ready
+roughly eleven seconds before it actually bound HTTP. The existing supervisor
+now launches every process in a new OS session, clears lifetime-specific
+readiness files/sockets before each fresh spawn, refuses to trample an
+unregistered live listener, removes the default pod's port file on stop, and
+makes every `start` return only after its normal readiness gate passes. Live
+proof used an injected stale port, a non-persistent launch session, and the real
+default store: the pod waited eleven seconds, survived session closure, served
+all core/debug routes, and emitted a gzip Datastar initial morph.
+
 ## Targeted live agent surfaces and canvas controls (2026-07-11)
 
 The agent feed now derives one compact/expanded projection per surface, omits

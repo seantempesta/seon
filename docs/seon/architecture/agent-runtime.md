@@ -393,6 +393,16 @@ functions in [[toolkit]]). The derived open-todo count feeds the fingerprint abo
 
 ## Cluster boot — the core seed (`boot-seed!` → `reconcile!`)
 
+`bin/seon start` has a usability boundary, not a fork boundary. Every managed
+process starts in a new operating-system session, so closing the invoking
+terminal cannot reap it, and the command returns only after that process's real
+readiness probe succeeds. Port files, REPL-port files, and Unix sockets belong
+to one process lifetime: a fresh spawn removes stale artifacts before waiting
+and refuses to unlink an artifact that is still serving an unregistered live
+process. Thus a reboot cannot turn an old port file into a false-positive boot,
+and an unmanaged listener is reported for inspection/adoption rather than
+silently replaced.
+
 Before any agent runs, the pod seeds the view a cluster boots into. There is ONE
 boot entry — `seon.client/boot-seed!` (the gym's scratch views call the SAME fn, so
 they can't drift) — and it writes **two provenance layers**, never a stack of
