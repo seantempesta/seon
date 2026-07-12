@@ -7,7 +7,7 @@ tags: [architecture, agent]
 # Context — functions applied to the db
 
 > **Target design** (present tense). The block/render machinery lives in
-> [[ui]]; turn replay + inspection in [[observability]]; the measured laws
+> [[ui]]; historical turn reconstruction + inspection in [[observability]]; the measured laws
 > that constrain this in [[laws]]. We-are-here: [[roadmap]]. This doc keeps
 > to Clojure primitives — `ns`, `defn`, `require`, var metadata, a db value
 > — and reserves only the names backed by real code (`block` =
@@ -67,12 +67,14 @@ always renders:
   work-tracking that still carries a live lifecycle status is not a settled
   finding and never renders as one.
 - **what changed since I last looked** — the **delta**, derived from the
-  previous turn's `:seon.agent.turn/rendered-as-of` basis-t: the datoms
-  transacted since I last saw the view (new messages, newly-completed
-  children, newly-failed items). A series of independent snapshots becomes a
-  felt continuity precisely because each turn can name what is new — the
-  basis-t is already recorded per turn ([[observability]]); the delta is a
-  query over it, not new state.
+  previous turn's rendered `{store-id, branch, commit-id, t}` coordinate: the
+  datoms transacted since I last saw the view when that commit is an ancestor
+  of the current head (new messages, newly-completed children, newly-failed
+  items). A series of independent snapshots becomes a felt continuity because
+  each turn can name what is new. The exact coordinate is already recorded per
+  turn ([[observability]]); the delta is a query over it, not new state. A
+  lineage change renders a reset/diff boundary instead of pretending bare t is
+  continuous.
 
 **Situation, never the answer.** The projection renders the agent's operational
 situation and the operations available on it — "a child is idle at its
@@ -188,18 +190,23 @@ The **canvas** is a distinct, focal tile. Default: it shows the
 (`seon.agent.ctx.render-fns/last-updated-tile`): among the agent's own
 authored tile fns (its `:seon.fn` rows whose tx provenance names the agent
 and whose output schema declares the hiccup twin), the one most recently
-*touched* — redefined, or a write (or retraction — the history view) to any
-attr in its declared read-set (the stored `:seon.fn/read-attrs` — the
-qualified keyword literals the tee walked off the read form; a regex over
-the source text only for pre-structural rows), read off the datoms'
-tx column. So the human's focus follows what the agent is actively doing
+*touched*—redefined, or a transaction by that agent that touches a scoped input
+captured by the tile's **current** runtime-observed database reads. Initial/cold
+render captures actual `seon.db` query/pull/entity calls (including current
+helpers/conditional branches), then runs a bounded indexed history lookup for
+the newest matching user+entity/attr datom. It does not reconstruct every past
+conditional dependency or evaluate every historical before/after result. A
+broad/unknown observation gets definition recency only; the agent can make its
+read selective or pin the canvas. No literal keyword read-set is stored. So the
+human's focus follows what the current tile most plausibly received from the
+agent's recent work
 with zero ceremony: author a plan tile, write plan data, and the plan tile
 is the canvas. Override: the agent pins the canvas to a specific tile
 (`:seon.render.canvas/content`) to feature it regardless of recency;
 retract the pin to fall back to derived; with neither, the core welcome.
 Derive the default, store only the pin — the same rule as everywhere else.
-(Honest bound: a tile that reaches attrs only dynamically — never naming
-them — follows only its own redefinitions.)
+(Unknown/dynamic reads are conservatively compared for live invalidation, but do
+not claim precise historical focus.)
 
 This is the block's two renders (`:seon.render/ai` / `:seon.render/hiccup`),
 now emitted by any in-scope `defn`, not only by seeded blocks. Its args are
@@ -207,7 +214,8 @@ the db value (all data is reachable from it — [[think-in-clojure]]); it
 `require`s only the *code* it calls. It is pure over the frozen db, so it
 re-runs safely every turn, is bounded + errors-as-values through the exec
 service (a throw becomes a `:seon/error` tile, never a crash), and replays
-byte-identically at `as-of t` ([[observability]]).
+from database state at a resolved coordinate ([[observability]]). The historical prompt
+blob—not a re-executed effect—is the byte ground truth.
 
 ## Shared view — the agent knows the human sees it
 
@@ -245,18 +253,19 @@ boundary** — never read from an ambient dynamic var deep in the body. The
 contract:
 
 - A map-in fn declares an injectable as an **optional** request key —
-  `:seon.db/db`, `:seon.agent/id` ("me"), `:seon.render/at` (now/basis-t),
+  `:seon.db/db`, `:seon.agent/id` ("me"), `:seon.render/at` (the branch-local t
+  display aid; the db/attachment carries the resolved coordinate),
   and whatever else the registry grows to hold. It is `{:optional true}` to
   the *caller* (may omit) but the wrapper guarantees it *present in the body*.
 - On an agent call, the eval boundary inspects the fn's request schema, and
   for every **injectable key the schema declares that the caller left
   absent**, fills the current value from the eval context. Declared-and-
   present is never overwritten (explicit args win — the agent, a test, or a
-  forensic replay can pass a different db/agent).
+  forensic inspection can pass a different db/agent).
 - The injectable **registry** is a small explicit map `injectable-key → (fn
   [eval-ctx] value)`: `:seon.db/db` → the turn's frozen db, `:seon.agent/id`
-  → whose turn is running, etc. Adding a dependency = add one registry entry
-  + fns declare the key. One mechanism; no second wrapper.
+  → whose turn is running, etc. Adding a dependency means adding one registry
+  entry and having fns declare the key. One mechanism; no second wrapper.
 - The injectable contract has **one named request shape**:
   `:seon.render/section-request` (registered in `seon.render`) — an OPEN map
   naming exactly the registry's keys, each `{:optional true}` and referencing
@@ -269,15 +278,17 @@ contract:
   richer request (e.g. `:seon.agent.debug/request`) stays its own schema.
 
 This rides the **one instrumentation layer** (every schema'd fn whose shape
-takes a wrapper is Malli-instrumented off the program graph — at boot, on
-`start-agent!`, and re-asserted after every hot reload; the structural
+takes a wrapper is Malli-instrumented off the program graph—once after runtime
+boot/declaration loading, immediately for a newly evaluated/redefined fn, and
+only for changed or currently unwrapped fn objects after hot reload; agent mint
+never runs global instrumentation. The structural
 exception is `^:async` non-simple shapes like `transact!`/`eval`, which
 validate in their own body — and coverage is itself a derived invariant:
 the root view's `:instrumentation-gaps` section recomputes the census per
 render) — inject-then-validate-input, so the filled map satisfies
 the `:map`. The result: a fn's spec IS the honest statement of what it needs,
-the eval log shows real data flowing, and the value is reproducible at
-`as-of t`. This is the one boundary of "clear magic" that lets `with-agent`
+the eval log shows real data flowing, and the value is reproducible at its
+resolved coordinate. This is the one boundary of "clear magic" that lets `with-agent`
 / ALS stay the core's internal *source* for the injection without leaking
 into every fn body.
 
@@ -362,38 +373,45 @@ The `:html` twin means every context position has a view the human can
 inspect: the per-block prompt-text + hiccup panes with per-block token counts
 (`/agent/{id}/debug`), the agent's page showing the same tiles, and — through
 [[observability]] — the exact historical context of any turn (`agent-debug/turn`,
-`turn-diff`, the prompt at `as-of t`, the prompt blob as byte ground truth).
+`turn-diff`, the prompt at its resolved commit, the prompt blob as byte ground truth).
 The human debugging an agent and the forensic agent debugging it read the
 same derived views.
 
 ## Configuration
 
-Every dial is manifest data (`:seon.config/*`): which namespaces render full,
+Every effective dial is database data (`:seon.config/*`): which namespaces render full,
 the presence-set pins, the transcript band schedule + decay, render caps, the
-predicted-relevance token cap, per-agent overrides in agent scope. Absent
-config = the default seed, byte-identical. No env-var side doors.
+predicted-relevance token cap, per-agent overrides in agent scope. A manifest is
+an optional desired-state input explicitly selected for one startup/apply
+operation; no selection preserves DB facts and never falls back to
+`config/system.edn`. Environment overrides are captured only while compiling a
+selected input and never become a side-door runtime dependency.
 
-**Config-through-DB (the whole surface, not one dial).** The manifest is a
-SEED FILE, not a runtime dependency. At boot `seon.config/resolve-config-singleton`
-resolves EVERY knob to its effective value (env→manifest→default) and the
-`#{:config}` `state/reconcile!` transacts them as ONE `:seon.config` singleton
-entity (`[:seon.config/id "cluster"]`) — the SAME reconcile routes and skills
-ride, so a removed key heals on the next boot and the singleton is
-retract-protected by riding the desired set. From there EVERY runtime read is a
+**Config-through-DB (the whole surface, not one dial).** A selected manifest is
+a transition input, not a runtime dependency. At a selected startup/apply,
+`seon.config/resolve-config-singleton` resolves every knob (environment overrides
+manifest, which overrides defaults), and the exact population reconciler
+restores the declared config singleton/routes/root-context subset. Omitted managed attributes and
+stale exclusive rows retract; outside facts remain untouched; equal state emits
+no transaction. A config-free boot skips this transition. The write is
+`{user root, process config}`. From attachment onward every
+runtime read is a
 db query: the accessors (`config/eval-render-cap`, `config/on-core-error`,
 `config/web-policy`, `config/namespaces-policy`, the dials …) keep their names
-+ arities but read `config/config-view` — the seeded singleton datom (a
-db-value-keyed memo collapses a turn's reads to one entity pull), falling back
-to the boot manifest resolve only for the pre-conn sliver (the `on-core-error`
-dial can fire during store-connect). `seon.config` cannot require `seon.db`
+and arities but read `config/config-view` — the seeded singleton datom (a
+projection is threaded once per snapshot or cached only by a branch-qualified
+basis/commit coordinate—never by a db value). Only a tiny compiled kernel policy
+may serve the pre-connection store-connect/error path; after attachment, missing
+required config is a typed readiness error, never manifest/default fallback.
+`seon.config` cannot require `seon.db`
 (the require dir is db→error→config), so `seon.db` INJECTS the reader — the
 same seam pattern as `seon.error`'s db-hooks. Three collection knobs
 (`:seon.config/always`, `:seon.config.repair/classes`,
 `:seon.agent.web/allowed-domains`) ride the mixed-`:or` EDN-slot bridge (the
 `home-requires` precedent) — one cardinality-one datom that upsert replaces.
 
-Two payoffs this unlocks: a dial is now **replay-visible** (a `cluster fork`
-at a basis-t BEFORE a dial change renders with the OLD value — config lives in
+Two payoffs this unlocks: a dial is now **history-visible** (a `cluster fork`
+at the resolved commit before a dial change renders with the old value—config lives in
 history) and **live-tunable** (a `db/transact` of the singleton changes the
 next prompt with no file edit). `:seon.config/repl-mode` and the transcript's
 tier/decay datoms are the precedents this generalizes to the whole config

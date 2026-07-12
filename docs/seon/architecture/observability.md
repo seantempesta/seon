@@ -19,18 +19,23 @@ derive-everything principle pointed backwards in time.
 
 ## The turn record
 
-Most of the record already rides for free on datahike's reified tx metadata:
-every seon transaction carries `:seon.db/turn-id` / `agent-id` / `origin` /
-`eval-id` as datoms ON the tx entity (preserved across the wire), so "which
-turn wrote this datom" is a join on the datom's tx field — never a stored
-back-reference. What every turn additionally persists — always on, no debug
+Every datom already names its Datahike transaction. Normal Seon transactions
+add `:seon.db/user` and `:seon.db/process` refs on that transaction, so
+“who/through which execution path wrote this datom?” is a join, never a stored
+domain back-reference. Turn/eval causality is intentionally not copied onto
+arbitrary transactions: ordinary run/turn/eval/message refs record the modeled
+facts, but Seon does not claim it can enumerate or replay every external effect
+caused inside a turn. What every turn additionally persists—always on, no debug
 flag:
 
-- **`:seon.agent.turn/rendered-as-of`** — the basis-t of the frozen db value
-  the prompt rendered from. This is the ONE coordinate datahike does not
-  record: the prompt renders BEFORE the turn's own tx, with other agents'
-  commits interleaving on the shared conn, so the turn's creation-tx is not
-  what the model saw. `render-prompt` over `(db/as-of conn rendered-as-of)`
+- **The rendered database coordinate** —
+  `:seon.agent.turn/rendered-store-id`, `rendered-branch`,
+  `rendered-commit-id`, and `rendered-as-of` persist the exact
+  `{store-id, branch, commit-id, t}` of the frozen db value the prompt rendered
+  from. This is the ONE coordinate the turn transaction cannot provide: the
+  prompt renders before its own tx, with other agents' commits interleaving.
+  Commit id is canonical; t remains an ordered display/query aid.
+  `render-prompt` resolves that retained commit on the named branch and
   reproduces the structured context exactly.
 - **`:seon.agent.turn/prompt-blob`** — the assembled prompt verbatim, in the
   blob store. The as-of re-render is the *structured, queryable* view; the blob
@@ -77,13 +82,16 @@ Three functions make a turn a first-class object of study:
 - **`agent-debug/turn`** — one call returns the whole bundle for agent X, turn N:
   the exact prompt (blob), the structured context (as-of re-render, per-block),
   the reply, the evals with results, usage, and the messages visible at that
-  basis-t. No joins by hand, no filesystem.
+  resolved coordinate. No joins by hand, no filesystem.
 - **`agent-debug/turn-diff`** — what changed between two turns: a block-level diff
-  of the two rendered contexts plus the datom delta between the two basis-ts
-  (`db/since`). This is also the cache-stability instrument: bytes that should
-  have been frozen but moved show up here.
+  of the two rendered contexts plus the datom delta when both commits share the
+  required ancestry (`db/since`). Different lineages use two immutable snapshot
+  results and report that no linear since-range exists. This is also the
+  cache-stability instrument: bytes that should have been frozen but moved show
+  up here.
 - **`agent-debug/ctx-preview`** — generalized over time: preview any agent's
-  context at any t, not just now.
+  context at any resolved coordinate, not just now. A legacy `{branch, t}`
+  selector must resolve to exactly one retained commit before rendering.
 
 Search runs at two ends, one door each, and nothing in between:
 
@@ -101,14 +109,16 @@ Errors join turn replay as first-class DB objects. `seon.error/record!`
 is the catch-site function (the iron rule as a fn: nothing is caught without
 becoming data): it classifies `:seon.error/fault` (`:agent` — expected,
 the agent's learning signal; `:core` — our bug), stamps
-`:seon.error/at` (the basis-t live at the catch site — `(db/as-of at)`
-is the frozen db the failing code saw, composing directly with
+the full `:seon.error/store-id`, `:seon.error/branch`,
+`:seon.error/commit-id`, `:seon.error/at` coordinate live at the catch site—the
+resolved immutable db is the frozen state the failing code saw, composing directly with
 `agent-debug/turn` replay), parses the stack into `:seon.error/frames`
 component entities (Datalog-queryable traces), and keeps the full args
 of malli contract violations as bounded `:seon.error/args-edn`.
 Persistence is fire-and-forget (never throws, never awaits; a bounded
-drop-oldest buffer rides out conn-less windows) and ONE error yields
-ONE datom (propagating rejections are dedup-tagged).
+drop-oldest buffer rides out conn-less windows) and one caught failure yields
+one deduplicated error record in one recording transaction (propagating
+rejections are dedup-tagged).
 
 Two capture layers need zero per-site work: the malli instrumentation
 wrapper's async arms (rejections + resolved-value output violations —
@@ -128,45 +138,56 @@ acknowledgement state. Design + rulings:
 
 The persisted message is the DEEPEST real cause (`seon.error/deepest-message`
 walks the `:seon.error/cause` chain past cljs.js's generic wrappers), so the
-`SEON-CORE-FAULT <message> @t=<basis-t>` marker and every triage surface name
+`SEON-CORE-FAULT <message> @t=<t> commit=<abbrev>` marker and every triage surface name
 the actual failure, never `"ERROR"`.
 
 Triage runs through three `seon.agent.debug` functions, three altitudes over
 the same datoms:
 
 - **`errors`** — compact recent list, newest first (optional
-  `:seon.error/fault` filter + limit): per row the error eid, fault, `at`,
+  `:seon.error/fault` filter + limit): per row the error eid, fault, full
+  store/branch/commit/t coordinate,
   deepest-cause short message, top stack frame, and the recording agent.
-- **`error`** — one full envelope by eid (message, fault, `at`, frames
+- **`error`** — one full envelope by eid (message, fault, full coordinate, frames
   table, args-edn, data-edn, stack) plus the JOINS: the recording agent and
-  the turn active at that basis-t (the tx's own turn-id when the write was
-  turn-scoped, else the agent's turns' `rendered-as-of` window) — the turn
-  eid composes with `agent-debug/turn` replay.
-- **`repro`** — the work-backwards bundle: the LIVE as-of db value frozen at
-  `:seon.error/at` (REPL material — render its basis-t, never print the db),
+  the turn active at that resolved coordinate (derived from the agent's turn windows and
+  ordinary domain refs) — the turn eid composes with `agent-debug/turn`
+  inspection.
+- **`repro`** — the work-backwards bundle: the LIVE immutable db value resolved
+  from the error's full coordinate (REPL material—render t + abbreviated commit,
+  never print the db),
   the failing fn sym + args-edn when the malli envelope captured them, the
   linked turn, a ready-to-eval reproduction expression string built from
   what is actually stored (an honest note when args were not captured —
   nothing fabricated), and the `::fork-hint` — the exact supervisor command
   that boots this error's view as a live cluster (below).
 
-The as-of db is read-only; when the fix needs a WRITABLE view — re-running
-the failing code, patching data, letting a forensic agent act — the fourth
-step is **fork**: `bin/seon cluster fork <cluster> <at>` (the command
-`repro` hands back verbatim) copies the cluster's store at the konserve
-layer via `datahike.api/fork-database`, points the fork's head at the
-commit whose `:max-tx` equals `at`, and boots it as a normal disposable
-cluster (own store dir, own pod, own port). Entity ids and tx ids are
-byte-identical, so every stored basis-t (`rendered-as-of`, another error's
-`at`) means the same thing inside the fork, and the inspect functions work
-there unchanged. The at-semantics are precise: `:seon.error/at` is captured
-at the CATCH site — the db value the failing code SAW — while the error
-datom itself commits in a later tx, so **the error datom does not exist
-inside its own fork**; the fork is the view the failure arose from, not
-the view that records it. The full flow is find (`watch-faults`) →
-`errors` → `error` → `repro` → **fork** → fix, then
-`bin/seon cluster destroy <fork>` (the fork store is independent by
-construction — destroying it cannot touch the source).
+The as-of db is read-only; when the fix needs a WRITABLE view—re-running
+safe code, patching data, letting a forensic agent act—the fourth step is
+**fork**: `bin/seon cluster fork <cluster> --commit <commit-id>` creates a
+Datahike same-store copy-on-write branch with `branch!` at that retained commit,
+then boots a branch-qualified debug pod/writer on its own port. It does not copy
+Konserve or define another versioning model. Entity/transaction ids through the
+fork point are identical, but coordinates are always store+branch+commit
+qualified because later transaction ids can diverge/reuse after a reset.
+
+A convenience `--branch <branch> --t <t>` selector is accepted only when graph
+resolution finds exactly one matching retained commit. Zero or multiple matches
+is a typed ambiguity, never “pick the first max-tx.” The debug pod starts
+non-autonomously: opening history installs no ticker, wake trigger, or agent
+host and never resumes agents, schedules, providers, or external-effect workers.
+
+The coordinate semantics are precise: it is captured at the catch site—the db
+value the failing code saw—while the error datom itself commits later, so the
+error datom does not exist inside its own branch. Prompt/reply blobs are
+content-addressed: the branch reads the source blob layer read-only and writes to
+a branch-local overlay, so destroying the branch cannot delete/mutate source
+content. Before promotion, every target-referenced overlay hash is verified and
+materialized into main's base; blob GC treats every retained branch as a root.
+The full flow is find (`watch-faults`) → `errors` → `error` → `repro` →
+**fork** → fix, then branch destroy stops/releases the branch pod/connection,
+calls `delete-branch!`, and removes only its overlay. The generic physical-store
+destroy door refuses branch-qualified targets.
 
 The standing alarm is `bin/seon watch-faults` — a dependency-free supervisor
 subcommand that tails the pod log from end-of-file (following across
@@ -181,9 +202,8 @@ background task at session start; when it fires, triage `errors` → `error`
 Debugging an agent is done **by another agent given the exact db the target
 saw**, not by a human reading logs:
 
-- Mint a forensic agent in an **ephemeral cluster** (`bin/seon cluster
-  create`, its own pod + db) seeded from the target's history — its db value
-  is `as-of` the target's basis-t at the turn under investigation, so it
+- Mint a forensic agent in an **ephemeral writable branch** (`bin/seon cluster
+  fork`, its own pod/branch connection) rooted at the target's resolved commit, so it
   sees exactly what the target saw at that moment.
 - Seed its ctx with the target's **reconstructed context blocks** plus one
   extra **debug-brief block**: the behavior in question and the ask —
@@ -194,8 +214,8 @@ saw**, not by a human reading logs:
 - **Per-agent LLM config** selects a cheap reasoning model with thinking ON
   for these runs, so forensic passes are routine, not precious.
 
-This is a composition of existing mechanisms — cluster isolation (one pod +
-one db per cluster), seed-copy ctx override via `install!`, as-of replay,
+This is a composition of existing mechanisms—pod isolation, Datahike branch
+roots, seed-copy ctx override via `install!`, as-of reconstruction,
 per-agent provider routing — not a new runtime. A forensic pass is cheap
 enough to run on every puzzling drive.
 
@@ -210,6 +230,13 @@ ops, never agent-exposed). The supervisor owns the lifecycle:
 - `bin/seon cluster create <name> [--ephemeral]` — a db entry (`:file`,
   ensured at pod boot) + a pod on its own ephemeral HTTP port. ~10s warm,
   ~25s cold.
+- `bin/seon cluster fork <source> --commit <commit-id> [name]` — same physical
+  store, new Datahike branch + branch-qualified registry/wire/pod target + blob
+  overlay. `--branch <branch> --t <t>` is a legacy convenience only when it
+  resolves uniquely.
+- `bin/seon cluster destroy <branch-name>` — for a branch target, stop/release
+  its pod/conn, `delete-branch!`, and remove only its overlay; never delete the
+  shared store/source blobs.
 - `bin/seon cluster destroy <name>` — stop the pod, delete the db from the
   registry (`registry/delete-db!`), remove `data/clusters/<name>/`
   including `blobs/` (turn capture is per-cluster).
@@ -232,12 +259,14 @@ vocabulary is harness-side only.
 
 ## Build path
 
-Turn capture is LIVE (2026-07-02): every turn persists `rendered-as-of` +
-prompt/reply blob refs (always on), and `seon.agent.debug/turn` /
+Turn capture is partly LIVE (2026-07-02): every turn persists legacy
+`rendered-as-of` + prompt/reply blob refs (always on), and
+`seon.agent.debug/turn` /
 `turn-diff` reconstruct/compare turns from them. The blob refs are the ONE
 capture path — the old gated `seon.debug` file tree (`SEON_DEBUG_CAPTURE`,
 `logs/turns/`) is deleted; the gym driver reads prompts back by blob hash.
-Remaining gaps — the as-of per-block re-render inside `agent-debug/turn`, the
+Remaining gaps—the full store/branch/commit coordinate and honest legacy-t
+migration, the as-of per-block re-render inside `agent-debug/turn`, the
 volatile prompt inputs as recorded data, grep/embedding targets not yet
 widened, the forensic seed function — live in [[roadmap]].
 Source-grounded verification of what datahike's tx metadata already provides

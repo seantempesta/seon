@@ -110,7 +110,7 @@ surfaces the banked budget, not `deadline − now` (which would keep decaying).
 
 Each **turn** threads **one frozen db value** (re-read once at the top) through
 `next-event`, the prompt render, and the bound checks, so the LLM reasons over a
-single consistent basis-t. The **next** turn re-reads the latest store — and
+single resolved `{store-id, branch, commit-id, t}` coordinate/view. The **next** turn re-reads the latest store — and
 because there is a single writer, that read sees every other writer's commits, so
 a turn never runs in a private view.
 
@@ -299,8 +299,8 @@ reload never doubles up). On every commit the listener inspects the added
 The `to`-check is load-bearing (every agent installs the listener; without it one
 message wakes everyone). Hop-exhausted messages are the **dead-letter** — they
 stay as datoms, render as a reactive warning, and never wake. `:core`-origin
-messages and eval rows are **quiet** by construction — they neither wake nor count
-toward a run (this is what makes seeded bootstrap forms silent; see below).
+messages are substrate nudges and are **quiet** by construction: they never wake
+an idle agent. Durable agent initialization does not manufacture eval rows.
 
 **Fencing is two-layered, both via the single writer:**
 
@@ -354,36 +354,32 @@ this fn is its sole data source.
 
 ## Creation = an idle agent entity
 
-**Creating an agent does not start a loop.** Creation transacts an **idle agent
-entity** and nothing more: its `:seon.agent/id`, optional
+**Creating an agent does not start a loop.** Creation transacts one complete
+initial **idle agent value**: its `:seon.agent/id`, optional
 `:seon.agent/default-turn-limit` / `:seon.agent/default-deadline-ms` seeds, the
-seeded `:seon.agent/ctx` block set, and a fresh `my.agent.<id>` home namespace.
+configured `:seon.agent/ctx` component set, purpose, and the durable namespace/
+safe declaration facts for a fresh `my.agent.<id>` home namespace.
 There is no run, no turn, no wake until a **trigger** arrives. This keeps creation
-pure and the loop strictly trigger-driven: "start an agent" (create + bootstrap,
-idle) and "run an agent" (trigger-driven) are two separate acts. To make a freshly
+explicit and the loop strictly trigger-driven: "start an agent" (create + runtime
+host, idle) and "run an agent" (trigger-driven) are two separate acts. To make a freshly
 created agent work, **send it a message** — that message is the trigger that opens
 run #1.
 
-## Bootstrap = seeded forms, run quiet before any trigger
+## Initialization = facts first, safe runtime projection second
 
-An agent's **bootstrap is a form-vector** carried with its seed. Immediately after
-creation transacts the idle entity, those forms are eval'd **synchronously in the
-new agent's own scope, before any trigger can open a run**, each recorded as a
-`:seon.eval` row with **`:core` origin**. The `:core` origin is what makes them
-**quiet**: the wake gate and the turn counter ignore them, so no run opens and no
-turn is consumed — yet because they are real eval rows in the agent's own scope,
-**the agent sees its own startup** in its transcript and program graph. Bootstrap
-is not hidden core magic; it is the agent's first, visible, replayable commands.
+Agent creation compiles configured initial EDN into the same canonical entity/
+component/program maps every later reader uses, validates all of them, and
+commits them atomically with the actual submitting user and REPL process. The
+runtime then establishes the analyzer namespace, loads only the safe persisted
+declarations, installs one wake trigger, and hosts the agent. Initial context and
+functions appear because those facts exist, not because Seon manufactured quiet
+eval transcript rows or replayable seed commands.
 
-The bootstrap forms **are** the seed commands themselves:
-
-- the batched `(ctx/install! [ … ])` that seeds the agent's complete block set
-  (the install!/seed-copy mechanism is owned by [[ui]]);
-- `(schema/register! :my.agent/purpose …)` plus its **refine** fn and a
-  self-refining block — `:my.agent/purpose` (a markdown goal string) is the
-  canonical **first per-agent seed worked-example**: the agent owns, sees, and can
-  rewrite its own purpose (schema in [[data-model]], the function in [[toolkit]]);
-- the home-namespace `defn`s the agent starts life knowing.
+`:my.agent/purpose` and the reusable home-namespace functions/schemas are normal
+canonical schema/program facts. The purpose value lives on the agent and remains
+agent-editable. A crash after the durable creation transaction needs only the
+ordinary resume path to finish transient hosting; a crash before commit created
+nothing.
 
 **Planning rides the same data.** An agent plans with its **`my.plan` tree** — a
 todo carries a `:my.plan/parent` ref plus status, and parent progress is a derived
@@ -391,7 +387,7 @@ roll-up of its children (top = plans/milestones, leaves = actions). There is no
 separate plan entity; the work-list *is* the plan tree (schema in [[data-model]],
 functions in [[toolkit]]). The derived open-todo count feeds the fingerprint above.
 
-## Cluster boot — the core seed (`boot-seed!` → `reconcile!`)
+## Cluster boot — exact durable deltas + runtime reconstruction
 
 `bin/seon start` has a usability boundary, not a fork boundary. Every managed
 process starts in a new operating-system session, so closing the invoking
@@ -403,36 +399,80 @@ process. Thus a reboot cannot turn an old port file into a false-positive boot,
 and an unmanaged listener is reported for inspection/adoption rather than
 silently replaced.
 
-Before any agent runs, the pod seeds the view a cluster boots into. There is ONE
-boot entry — `seon.client/boot-seed!` (the gym's scratch views call the SAME fn, so
-they can't drift) — and it writes **two provenance layers**, never a stack of
-independent per-step seeders:
+The cluster runtime has one boot entry and a strict durable/runtime split:
 
-- **Append-only introspection (origin `:core-seed`).** The entity-schema decomposition,
-  the user + `my.kb.shared` seed, and the program-graph index (`:seon.fn` / `:seon.ns`
-  / `:seon.schema` / `:seon.test` rows). This is NOT a desired set — it is conn-deduped
-  introspection that only grows; it is never retracted.
-- **The declarative desired set (origin `:config`).** The routes (`:seon.route/*`,
-  curated by the manifest) + the scanned skills corpus (`:my.skills/*`, curated by the
-  manifest) are the ONE managed declarative population, synced through
-  `seon.state/reconcile!` (scope `#{:config}`). reconcile UPSERTS each row by its own
-  `:db.unique/identity` (`:seon.route/name` / `:my.skills/name`) — idempotent on an Nth
-  boot — AND RETRACTS any managed row absent from the desired set. So **dropping a route
-  from the manifest, or a skill from disk, removes the stale datom** (it can no longer
-  persist across boots); the `:core-seed` introspection is outside the scope and is
-  never touched. `seon.state/reconcile!` is the ONE declarative-state primitive (seed,
-  config-override, reset, restore are all expressions of it); the manifest is the config
-  seam ([[data-model]] §5.6, which also holds the per-test recipe).
+1. Open the durable Datahike store. A fresh store performs the one explicit
+   un-attributed genesis transaction that installs root and the transaction
+   user/process refs; a populated store reuses its native schema/index roots.
+2. Read the branch-qualified attachment descriptor. A fresh-store request
+   explicitly supplies current core and an initial canonical config value
+   (`{}` is valid and materializes the safe floor). A
+   populated-store startup compiles core/config candidates only when that
+   operation explicitly supplies them. Overlay only selected candidates on the
+   current database value in memory; absence never implies current source,
+   environment, or `config/system.edn`.
+3. Validate the complete candidate before any post-genesis write: every Malli
+   reference resolves, every native schema signature is compatible, every
+   program declaration compiles, every selected population contract is valid,
+   and every configured lookup ref has a target in the candidate. Root/boot and
+   root/config managed attributes/component subtrees must be disjoint.
+4. Commit only the validated durable delta: missing compatible native
+   attributes and core facts as `{user root, process boot}`, then any selected
+   config subset as `{user root, process config}`. Equal state emits no
+   transaction. Omitted/removed managed facts are ordinary retractions, so
+   there is no ghost-pruning or config-healing pass.
+5. Atomically swap in the complete Malli registry, load only safe persisted
+   declarations, instrument the complete loaded program once, install global services/listeners once,
+   recover fenced runs, and resume eligible agents.
 
-Each agent's block loadout is shaped from the same manifest at create
-(the `install!`/seed-copy mechanism owned by [[ui]]). The identity file-blocks
-(`file-block`/`-ai`/`-html`, `config/identity-file-blocks`) that re-read SOUL.md /
-AGENTS.md every render are **DEPRECATED and out of the running tree** (their render
-fns carry `DEPRECATED` docstrings): AGENTS.md's operating rules are being MINED
-per-line into the `:seon.config/system-text` datom + the relevant block's own
-teaching, and `soul` returns as a capability milestone (identity as DB state,
-possibly inside system-text), not a re-read file. See [[context-rebuild]] ("The
-idea inventory").
+Config is an exact recovery surface for its declared populations/attributes,
+not an owner of the whole database. Native Datahike schema is accumulating
+capability state, not a config desired set. The renderer's entity-schema catalog
+is derived once from the validated Malli registry rather than stored as a second
+append-only decomposition. Compiled route/root-context defaults feed the config
+compiler; root/boot does not reassert them before root/config applies its value.
+
+Instrumentation follows effective definitions. Boot performs the one complete
+pass. Thereafter a new/redefined function is filtered-unstrumented from Malli's
+recorded original and instrumented once; a changed schema key reinstruments only
+the transitive function-contract dependents derived through Malli schema refs.
+Mint, resume, config apply, and render do no instrumentation work.
+
+A warm agent mint never calls this sequence. Mint commits the complete durable
+birth value in one transaction under the actual submitting user/REPL process:
+the agent, initial components, home namespace, home-require rows, and safe
+declarations. Only after that commit does it create the transient wake trigger
+and runtime host. Resume is a third explicit operation that reconstructs one
+existing host without minting or overwriting initial state.
+
+Runtime “replay” is limited to declaration loading. Scratch/effectful evals,
+Promises, handles, sockets, and external effects are never re-executed to mimic
+a prior runtime; database `as-of` means database state at that coordinate only.
+The complete transition contract is
+[[docs/prds/runtime-reliability/provenance-and-lifecycle-design]].
+
+The external cluster supervisor performs process recovery; the in-pod root agent
+cannot survive stopping its own pod. The supervisor acts as the logical root
+database user for any repair transaction. It derives terminated, idle, paused,
+expired/exhausted, stranded-running-turn, and safely resumable open-run outcomes
+from durable FSM facts/CAS fences, records only necessary repairs as `{user root,
+process boot}`, rebuilds small transient host/wake state, and resumes what
+remains valid. An in-bounds stranded turn/eval is marked terminal error without
+replaying it; the same open run remains current and continues at its next turn
+behind the existing CAS fence. Deadline/exhaustion/watchdog cases still close
+and retract the run pointer. There is no stored per-agent resume checklist.
+
+The same external supervisor quiesces writers/hosts, records durable restore
+intent outside the branch being replaced, preserves an undo head, and
+reconstructs the runtime when an operator promotes a historical Datahike root
+into the live cluster. Runtime reconstruction reads canonical facts from that
+database. Core and config overlays are independently selected, frozen operation
+inputs, not a persistent boot mode. Preserving both is valid; after any overlay
+commits, later no-overlay cold boots use the resulting database facts without
+falling back to current source or `config/system.edn`. Read-only `as-of` and
+isolated debug branches do not disturb the source runtime and start with all
+autonomous loops/schedules/external-effect workers disabled: no ticker, wake
+trigger, or agent host is installed until an explicit forensic action.
 
 ## The orchestrator-root + agent lifecycle
 
@@ -441,13 +481,16 @@ machinery.** There is exactly **one** `:seon.agent/id "root"`, and it is **both*
 the `/`-view owner (the UI role — its system-scoped blocks derive the all-agents
 overview at `/`) **and** the system orchestrator (the lifecycle role — it starts
 and manages other agents). These are two facets of the same elevated grant and the
-same bootstrap; there is **never** a second supervisor or overview entity.
+same initialization; there is **never** a second in-database orchestrator agent
+or overview entity. The external cluster process supervisor is not an agent.
 
 - **`seon.agent/start!` — the spawn function, a SOFT gate + a hard depth-cap backstop.**
   `start!` is a core function (an alias of `create!`) that transacts a new **idle** child
   agent and **writes `:seon.agent/parent` = the caller**. That write *is* the
-  activation of `:seon.agent/parent`; no separate writer exists. Two gates, both
-  real (there is **no `/call` capability gate** in the pod — that was aspirational):
+  activation of `:seon.agent/parent`; no separate writer exists. Two spawn
+  controls are real. The `/call` HTTP gate separately admits only registered
+  home-namespace browser callbacks; it neither grants nor mediates an agent's
+  direct call to this core function:
   - **Soft gate — home-requires.** The spawn functions (`start!`/`delegate!` via the
     `seon.agent` alias) sit only in **root's** `:seon.eval/home-requires`
     (`config/system.edn`'s `:seon.config/root-context`), so an ordinary agent's
@@ -461,25 +504,28 @@ same bootstrap; there is **never** a second supervisor or overview entity.
     child minted), never a throw. It is a **config-dialed number, never a name
     list** — raise the dial + add the spawn requires to the general agent-context to
     deepen the tree.
-- **Start = create + quiet bootstrap, leaving the child idle.** `start!` runs the
-  child's bootstrap form-vector (quiet `:core` evals, as above) and stops. The child
-  does no work until it receives a trigger; to make it work, root (or anyone) sends
-  it a message — that message opens its run #1. Two steps, one entry function.
-- **Roles are capability-SETS, not a stored `:kind`/`:role`.** A role = (the set of
-  granted `:seon.fn` capabilities) + (which bootstrap form-vector ran).
-  "Orchestrator" = an agent granted the spawn/terminate/system fns; "worker" = an
-  agent without them. The difference is **Datomic presence/absence** of grants,
-  queried at the `/call` gate — never a discriminator field (the entity-kind rule,
+- **Start = durable creation + transient host, leaving the child idle.** `start!`
+  commits the child's complete initial facts, establishes its safe runtime
+  projection, and stops. The child does no work until it receives a trigger; to
+  make it work, root (or anyone) sends it a message—that message opens run #1.
+  Two steps, one entry function.
+- **Roles are capability-SETS, not a stored `:kind`/`:role`.** A role is the set
+  of functions its home requires/context makes discoverable plus the guarded
+  operations those functions allow. "Orchestrator" discovers spawn/terminate/
+  system functions; "worker" does not. Discovery is not enforcement: `start!`
+  itself checks caller/depth. The `/call` HTTP gate protects interactive
+  agent-owned callbacks only; it does not grant core lifecycle functions to an
+  eval. No discriminator field is involved (the attribute-presence rule is
   owned by [[data-model]]).
-- **Root's own bootstrap = the cluster-boot base case.** Cluster boot seeds root the
-  same way `start!` seeds a child, except root has **no parent** —
-  `:seon.agent/parent` is absent, root *is* the base case of the recursion. Boot
-  runs root's elevated bootstrap form-vector: install its system-scoped blocks, seed
-  the `/`-view layout on root's route, grant the spawn/terminate/system fns. The
-  recursion bottoms out cleanly: **boot → seed-root → root.start!(child) →
-  seed-child → …** The "start an agent" affordance on the `/`-view is simply this
-  orchestrator capability exposed for the human — it calls root's `start!` through
-  `/call`.
+- **Root initialization follows genesis; it is not genesis.** The un-attributed
+  base transaction creates only root's identity plus provenance ref targets.
+  Idempotent root/boot and root/config desired-state transitions then install
+  root's program facts, system-scoped blocks, `/` route/layout, and elevated
+  capabilities. Root identity presence never skips those deltas. Root has no
+  `:seon.agent/parent`, so later `root.start!(child)` recursion still bottoms out
+  cleanly. The `/`-view's "start an agent" affordance invokes a registered root
+  home-namespace callback through `/call`; that callback calls `start!`, whose
+  own body enforces the lifecycle rule.
 
 ## Message intake — auto-todo (write-side)
 
@@ -497,8 +543,9 @@ owned here.
 The activity timeline — created, woken-by, turn counts, why each run ended — is a
 **derived query** over the bitemporal tx-log: walk the agent's run entities
 (`started-at`, `trigger`, `cause`, `closed-reason`) plus each transition's
-`:db/txInstant` and the loop's transition tx-meta (`:seon.agent.loop/cause` →
-the triggering message). Nothing is stored that the log doesn't already hold; the
+`:db/txInstant`. `:seon.agent.run/cause` already refs the triggering message;
+`:seon.agent.loop/cause` is only a derived response-map text key, not transaction
+metadata. Nothing is stored that the graph/log doesn't already hold; the
 timeline is a function of the DB at render time, self-healing (no log to clear).
 The rendered timeline view lives in [[ui]]; this doc owns only the run-lifecycle
 facts it reads.
@@ -516,10 +563,11 @@ mechanisms — extended, never duplicated — make every hang a value:
   warnings — never a throw, never a silent park. The bound frees the
   *awaiter*; it does not pretend to cancel the work (nothing can, on one
   event loop) — that's what the next two mechanisms absorb.
-- **One reaper: the ticker.** The run deadline + `close-overdue-runs!` on
+- **One in-pod reaper: the ticker.** The run deadline + `close-overdue-runs!` on
   the one 30s beat is the outer watchdog; per-await bounds are the inner
-  one. There is no separate supervisor process, heartbeat service, or
-  in-flight registry — in-flight work is DERIVED (open runs, pending
+  one. There is no second in-pod watchdog, heartbeat service, or in-flight
+  registry—the external cluster supervisor only owns process/restore/crash
+  lifecycle. In-flight work is DERIVED (open runs, pending
   `result/<id>` stashes), queryable like everything else.
 - **One fence: the run-id CAS.** A late-settling await from a reaped or
   superseded run cannot corrupt state — its writes lead with the work-fence
@@ -620,5 +668,6 @@ bitemporal, reactive DB. We have one, so:
 - [[roadmap]] — current code state, the gap, and the dependency-ordered,
   replace-in-place migration to this target.
 - [[datahike-primer]] — the source-grounded "work in datahike's grain" mindset (db
-  is a value, only values cross the wire, CAS-as-assertion, basis-t caching). Read
+  is a value, only values cross the wire, CAS-as-assertion,
+  resolved-coordinate caching). Read
   before touching the loop.

@@ -14,7 +14,7 @@ source dump. The agent's tools live in **`my.*` namespaces, fully agent-owned an
 editable** (`my.files`, `my.search`, `my.shell`, `my.plan`, `my.test`, `my.kb`,
 `my.code`, `my.schedule`, `my.recall`, `my.canvas`, `my.blob`). Each is a THIN
 wrapper over a protected `seon.*` substrate — the real syscalls, db engine,
-compiler, and wire stay `seon.*` and are `:core-seed`-guarded (un-clobberable).
+compiler, and wire stay `seon.*` and are namespace-guarded (un-clobberable).
 Build-your-environment extends to the tools themselves: the agent tweaks
 `my.files`, and if it breaks a wrapper, the protected floor still stands and
 `forget!` / the bitemporal store recover it.
@@ -31,7 +31,7 @@ the run, `start!`, and isolation tiers live in [[agent-runtime]].
   (= upserts), composes, and tests in a live REPL, with code and knowledge
   persisting as datoms. Every function is a REPL one-liner whose value is data the
   agent reads back and threads onward.
-- **Two tiers.** A PROTECTED FLOOR (`seon.*`, `:core-seed`-guarded): the db
+- **Two tiers.** A PROTECTED FLOOR (`seon.*`, namespace-guarded): the db
   engine (`seon.db`, aliased `db`), the compiler (`seon.eval`), the loop's
   control functions (`seon.agent.message`, `seon.agent.lifecycle`, and root's
   `seon.agent/start!`), and the `*.internal` syscall namespaces + the wire. An AGENT-OWNED
@@ -50,13 +50,13 @@ the run, `start!`, and isolation tiers live in [[agent-runtime]].
 ## The two tiers — protected floor vs. owned toolkit
 
 A namespace is `my.*` (owned, editable) iff redefining it cannot break a runtime
-invariant; it is `seon.*` (protected, `:core-seed`-guarded) iff it is
+invariant; it is `seon.*` (protected by the namespace rule) iff it is
 load-bearing for the substrate's correctness.
 
-| Tier | Namespaces | Origin | Agent may edit? | Renders full in context? |
+| Tier | Namespaces | Initial/current provenance | Agent may edit? | Renders full in context? |
 |---|---|---|---|---|
-| **Protected floor** | `seon.db` (aliased `db`), `seon.eval`, `seon.agent.message` (aliased `message`), `seon.agent.lifecycle` (refer'd functions) + root's `seon.agent/start!`, the `*.internal` syscall nses + the wire | `:core-seed` | NO — `forget!`/override guard refuse | NO — indexed + grep-able only |
-| **Owned toolkit** | `my.files`, `my.search`, `my.shell`, `my.plan`, `my.test`, `my.kb`, `my.code`, `my.schedule`, `my.recall`, `my.canvas`, `my.blob` | `:toolkit-seed` → `:agent` on first edit | YES — redefine or `forget!` | YES — full source every turn |
+| **Protected floor** | `seon.db` (aliased `db`), `seon.eval`, `seon.agent.message` (aliased `message`), `seon.agent.lifecycle` (refer'd functions) + root's `seon.agent/start!`, the `*.internal` syscall nses + the wire | root/boot compiled facts | NO — `forget!`/override guard refuse | NO — indexed + grep-able only |
+| **Owned toolkit** | `my.files`, `my.search`, `my.shell`, `my.plan`, `my.test`, `my.kb`, `my.code`, `my.schedule`, `my.recall`, `my.canvas`, `my.blob` | root/boot seed → agent/REPL on edit | YES — redefine or `forget!` | YES — full source every turn |
 
 `message` and `lifecycle` stay on the floor because they are the loop's control
 functions — the wake gate / hop-cap (`message!`) and the run-FSM mutations
@@ -65,17 +65,16 @@ functions — the wake gate / hop-cap (`message!`) and the run-FSM mutations
 The agent talks THROUGH them (aliased/refer'd into its home ns), it does not own
 them.
 
-**The protection mechanism.** The override guard `seon.eval/core-origin-fn-syms`
-blocks redefining or `forget!`-ing any symbol whose current `:seon.fn/source` tx
-carries `:seon.db/origin :core-seed`. So:
+**The protection mechanism.** One `seon.eval/protected-fn-syms` guard derives the
+floor from the qualified program symbol/namespace and compiled floor set. It
+does not treat provenance as authorization:
 
-- The floor's syscall fns are `:core-seed` → un-clobberable. An agent that
+- The floor's `seon.*` syscall fns are un-clobberable. An agent that
   `(defn seon.agent.fs/read-file …)` is refused with the actionable warning and
   the row is not persisted.
-- The `my.*` wrappers are seeded under `:toolkit-seed` (NOT `:core-seed`), so the
-  guard leaves them editable and forgettable; an agent's edit flips the row's
-  origin to `:agent`. The distinction is one origin keyword on the seed, not a
-  separate mechanism.
+- The `my.*` wrappers are outside the floor, so the guard leaves them editable
+  and forgettable. Their current source datom's user/process records who changed
+  them, but that history does not decide the namespace policy.
 
 **Recovery is free.** Break `my.files/read-file` and: `(forget!
 'my.files/read-file)` removes the broken def; or re-transact its prior
@@ -90,14 +89,14 @@ see and evolve the same `my.files`. Seon is a personal, single-user cluster —
 shared toolkit evolution is the intended dynamic, not a leak between distrusting
 tenants. The short name is the point: `my.files` is catchy and reflexive
 (`(files/read-file …)` via the home-ns alias). The only real hazard — a broken
-wrapper — cannot touch the `:core-seed` floor and is recoverable. And it is
+wrapper — cannot touch the protected `seon.*` floor and is recoverable. And it is
 leaner: one seeded, indexed, and rendered toolkit, not N identical copies
 multiplying render cost on every agent's every turn.
 
 Two `my.*` axes do NOT collide:
 
 - **Shared fn definitions** — `my.files`/`my.search`/… are one `:seon.fn` corpus
-  the whole cluster calls.
+the whole cluster calls.
 - **Scoped data** — global vs per-agent is the DATA's agent-ref, never the ns and
   never a stored kind: `:my.kb.*` rows carry no ref → global (one KB, all
   agents); `:my.plan/*` rows carry `:my.plan/agent` → per-agent (each sees its
@@ -237,15 +236,30 @@ renders whole every turn for every agent).
 The engine: one bound conn, synchronous reads, a never-throwing write envelope.
 A thin wrapper would buy nothing and put the agent's most-used,
 correctness-critical surface one editable layer away from the real
-datahike/wire boundary — so `db` stays `seon.db`, `:core-seed`-guarded.
+datahike/wire boundary — so `db` stays in the protected `seon.db` floor.
 
-Surface: `new-id!`, `transact!`, `query`, `pull`, `entity`,
-`as-of`/`since`/`history`, `listen!`/`unlisten!`, `store-inventory`,
+Surface: `transact!`, `query`, `pull`, `entity`,
+`as-of`/`since`/`history`, `resolve-coordinate`/`at-coordinate`,
+`listen!`/`unlisten!`, `store-inventory`,
 `installed-schema`. **Composes:** `store-inventory` → `query`; `pull`/`entity`
 emit maps; `transact!`'s `:seon.db/tempids` resolves new refs. **Budget:** ≤ 2.5k
 tok — `db` is the one heavy ns; render its docstring + cheat sheet + function
 signatures, keep guard/bridge bodies in `seon.db.internal`. The worked DB chains
 and the cheat sheet live in `my.kb` (the DB manual), not a separate examples ns.
+
+`resolve-coordinate` turns a full coordinate or branch-local selector into the
+one canonical `{store-id, branch, commit-id, t}` value; zero/ambiguous matches
+are errors-as-values. `at-coordinate` returns the corresponding immutable db
+value. Durable bookmarks/caches retain the coordinate, never the db handle or
+bare t.
+
+Generated persistent identities use the protected `seon.db.id/allocate!`
+operation. The identity attribute's registered schema metadata—not a caller
+option—selects readable agent words or the compact adapter. `allocate!` accepts
+a pure transaction builder and returns ids only after the whole domain
+transaction commits; there is no public candidate generator and no second RPC.
+Ordinary domain helpers call it internally when they create messages, runs,
+turns, plans, or agents.
 
 #### `message` — `seon.agent.message`, aliased `message`
 
@@ -263,15 +277,15 @@ makes on its OWN run; the agent's state is DERIVED from those primitives via
 `seon.derive/derive-state`, never stored. They return a bare `:seon.derive/state`
 keyword on success ("keyword ⇒ ok, map ⇒ error"), the envelope only on failure.
 
-`seon.agent/start!` is the lifecycle SPAWN function — a core function GRANTED to root (and to any
-agent holding the spawn capability), an alias of `create!`, called through the
-SAME `/call` capability gate. It transacts an IDLE child agent and writes
-`:seon.agent/parent` = the caller; the child's quiet bootstrap runs and leaves it
-IDLE — a message is its first trigger. Roles are capability-SETS (which `:seon.fn`s
-are granted + which bootstrap ran), differentiated by Datomic presence/absence at
-the gate, NOT a stored `:kind`/`:role`. The full lifecycle — `:seon.agent/parent`,
-roles-as-capabilities, the root base case, bootstrap-as-seeded-forms — lives in
-[[agent-runtime]]. **Budget:** ~1.8k tok.
+`seon.agent/start!` is the lifecycle spawn function — a core function surfaced
+to root (and any agent whose context deliberately exposes it), and an alias of
+`create!`. It atomically transacts the complete idle child's durable birth facts,
+including `:seon.agent/parent` = caller, then builds its runtime host; a message
+is its first trigger. The function's own caller/depth check is the enforcement
+backstop. `/call` separately gates registered agent-owned browser callbacks; a
+root callback may call `start!`, but the HTTP gate does not grant the core
+operation. Roles are capability sets, never a stored `:kind`/`:role`. The full
+lifecycle lives in [[agent-runtime]]. **Budget:** ~1.8k tok.
 
 ### Owned toolkit — `my.*` (thin, editable wrappers)
 
@@ -280,10 +294,11 @@ roles-as-capabilities, the root base case, bootstrap-as-seeded-forms — lives i
 **Why it exists:** the one place a single agent's own state and code live. It
 carries `:my.agent/purpose` (a markdown goal string), a `refine` fn, a
 self-refining purpose block, and the `defn`s the agent authors for itself. It is
-the first per-agent seed worked-example: the bootstrap registers the
-`:my.agent/purpose` schema + the refine fn + the block, so the agent OWNS and SEES
-its own purpose and can rewrite it. The schema lives in [[data-model]];
-purpose-as-seed and the quiet bootstrap that installs it live in [[agent-runtime]].
+the first per-agent worked example: root/boot establishes the shared purpose
+schema once; agent birth commits its purpose, home function, and context facts
+atomically, then loads the safe home declaration after commit. A later mint does
+not overwrite the shared schema, and no fabricated eval is needed. The schema
+lives in [[data-model]]; initialization lives in [[agent-runtime]].
 **Budget:** the home ns renders full every turn — keep authored fns lean.
 
 #### `my.files` — floor: `seon.agent.fs`
@@ -564,38 +579,43 @@ fn/schema/test, but otherwise has no way to REMOVE one — a wrong `(defn …)`
 lingers as a live binding AND a `:seon.fn` row. `forget!` is the missing third
 function of define→redefine→forget, so the agent cleans up its own toolkit.
 
-Every defined thing is an entity with a UNIQUE identity sym (`:seon.fn/sym`,
-`:seon.schema/key`, `:seon.test/sym`), so ONE general function covers all three:
+Every defined thing has a unique natural identity. Function/test APIs use
+symbols (stored as qualified strings); schema identity is a keyword. One
+request union covers both without coercion:
 
 ```clojure
-(schema/register! :seon.code/sym  :symbol)
+(schema/register! :seon.code/identity [:or :symbol :keyword])
 ;; :seon.code/kind is a DERIVED response label, NEVER stored on any row.
 (schema/register! :seon.code/kind [:enum :seon.fn :seon.schema :seon.test])
 (schema/register! :seon.code/forget-response
-  [:or [:map [:seon.code/ok? [:= true]] [:seon.code/sym :seon.code/sym]
+  [:or [:map [:seon.code/ok? [:= true]]
+             [:seon.code/identity :seon.code/identity]
              [:seon.code/kind :seon.code/kind]]
        [:map [:seon.code/ok? [:= false]] [:seon.error/message :string]]])
 (defn ^:async forget!
-  "Remove a symbol you defined: retract whichever entity owns it
-   (:seon.fn/:seon.schema/:seon.test) AND drop the live binding (undef from
-   globalThis + the analyzer, via the same compile-state your evals use). REFUSES
-   a :core-seed sym (you cannot delete the protected floor). Errors are values.
-   (forget! 'my.x/old-helper)" )
+  "Remove a function/test symbol or schema keyword you defined. Function/test
+   removal also drops the live binding from globalThis + the analyzer; schema
+   removal rides the guarded schema-registry mutation. REFUSES the protected
+   seon.* floor. Errors are values. (forget! 'my.x/old-helper)" )
 ```
 
 Behavior:
 
-- **Resolve the owning entity** by which identity attr the sym carries; an
-  unknown sym → a legible `{:seon.code/ok? false :seon.error/message …}`.
-- **Core guard.** `forget!` calls `seon.eval/core-origin-fn-syms` (+ the schema
-  sibling) and refuses a floor sym whose source tx is `:seon.db/origin
-  :core-seed`. A `:toolkit-seed`/`:agent` `my.*` wrapper is NOT `:core-seed`, so
-  it is forgettable — the owned-tool semantics.
-- **Retract the entity** with `[:db.fn/retractEntity [<identity-attr> s]]` — a
-  normal `db/transact!`, so history retains every prior value.
-- **Drop the live binding** by undef'ing from BOTH globalThis and the analyzer via
-  the agent's compile-state. Retracting the row without undef'ing would leave a
-  callable ghost — both halves are load-bearing.
+- **Resolve the owning entity** from the request shape: a symbol checks
+  `:seon.fn/sym`/`:seon.test/sym`; a keyword checks `:seon.schema/key`. An
+  unknown identity → a legible error envelope.
+- **Core guard.** `forget!` calls `seon.eval/protected-fn-syms` (+ the schema
+  sibling) and refuses a symbol in the protected `seon.*` floor. A `my.*`
+  wrapper is outside that derived set, so it is forgettable—the owned-tool
+  semantics. Transaction user/process remains provenance, not the policy.
+- **Function/test deletion** retracts the entity normally and drops the live
+  binding from BOTH globalThis and the analyzer. Retracting a function row
+  without undef'ing would leave a callable ghost—both halves are load-bearing.
+- **Schema deletion** delegates to the sole colocated guarded
+  `seon.schema/remove!` mutation. It builds/validates the complete candidate,
+  refuses protected/installed/referenced attr schemas until an explicit
+  migration, commits the canonical removal when safe, then atomically swaps the
+  registry/catalog. `forget!` never directly retracts a schema row.
 
 **`:seon.code/kind` is a DERIVED response label, never stored.** The forget
 response names which kind was removed, and that value is COMPUTED from which
@@ -607,8 +627,9 @@ entity-kind-vs-value-enum distinction (a stored field that selects a row's schem
 is banned; a derived/value label is fine — [[data-model]]).
 
 **Undo is free — no new function.** The store is bitemporal: re-transact the sym's
-prior `:seon.fn/source` from `(db/history)` and re-eval it, or read `(db/as-of t)`
-before the forget. The recipe lives in `my.kb` (the DB manual). **Composes:** a
+prior `:seon.fn/source` from `(db/history)` and re-eval it, or resolve the prior
+commit and read `(db/at-coordinate coordinate)` before the forget. The recipe
+lives in `my.kb` (the DB manual). **Composes:** a
 bare sym OR `{:seon.code/sym 'my.x/foo}` → the RESULT envelope. **Budget:** ~900
 tok.
 
@@ -716,8 +737,8 @@ is the thin `put!`/`get` wrapper, storing the hash on a typed projection entity.
 - [[data-model]] — the `:my.kb.*` / `:my.plan/*` (tree) / `:my.agent/*` schemas +
   data-agent-ref scoping; the `:seon/error` value; the entity-kind-vs-value-enum
   rule; index-everything / show-`my.*`-full.
-- [[agent-runtime]] — the loop/run/turn/FSM; creation-as-idle; bootstrap-as-seeded
-  forms; `start!` / `:seon.agent/parent` / roles-as-capabilities / root base case;
+- [[agent-runtime]] — the loop/run/turn/FSM; creation-as-idle; fact-first
+  initialization; `start!` / `:seon.agent/parent` / roles-as-capabilities / root base case;
   the ticker; isolation tiers.
 - [[ui]] — block / render / tile / slot / layout; reitit routing + the `/call`
   capability gate; the seed-copy + variadic `install!`/`remove!` model.

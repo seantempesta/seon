@@ -8,176 +8,738 @@ tags: [prd, database, flow, agent]
 
 ## Goal
 
-Make the proven CLJS pod reliable, fast, and easy to extend by giving every
-state transition one explicit lifecycle, every durable write the minimum useful
-provenance, and every reconciliation one exact transaction compiled from plain
-Clojure data. The finish line is less code and fewer mechanisms: no cluster
-boot during agent mint, no duplicate program scan, no ghost-pruning pass, no
-config-heal pass, and no write when desired state is already present.
+Turn the proven CLJS pod into one explicit, restart-safe system:
+
+- one process lifecycle and one agent lifecycle;
+- one minimal transaction provenance model;
+- one exact desired-state compiler for declared populations;
+- one durable schema/program source with deterministic runtime reconstruction;
+- one reactive web feed driven by actual database dependencies; and
+- no compensating pruner, healer, duplicate SSE registry, or converged write.
+
+This refactor succeeds by deleting overlap. It does not introduce a lifecycle
+framework, ownership layer, event-sourcing promise, persisted dependency graph,
+or authorization system.
+
+The authoritative target semantics and exact transition sequences are in
+[[provenance-and-lifecycle-design]]. The dated research documents contain the
+source proofs and measurements behind this order.
+
+## Settled target
+
+- `:seon.db/user` refs the existing root, human, or agent identity.
+- `:seon.db/process` refs one of boot, config, or REPL.
+- Every normal post-genesis production transaction carries both refs.
+- Turn/eval/session/origin/replay/resume transaction metadata is not persisted;
+  ordinary run/turn/eval/message domain facts remain.
+- When selected for startup/apply, config restores a declared subset exactly;
+  outside facts are untouched and converged state emits no transaction. A
+  populated store can boot from its canonical DB facts without config.
+- Native Datahike schema is reopened, not reinstalled wholesale.
+- Full canonical Malli forms live in the database; the runtime registry is one
+  validated projection of them.
+- Arbitrary evals and external effects are never replayed.
+- Read-only `as-of`, isolated writable forks, quiesced live restore, and undo are
+  one database/supervisor lifecycle; the external supervisor acts as root for
+  crash-recovery transactions.
+- UI invalidation derives from runtime-observed database reads, never from
+  transaction provenance.
+- The persistent header is transaction-driven; interval usage rates are queried
+  from timestamped facts on demand.
+- Only `:seon.agent/id` uses package-owned readable words. Every other actual
+  generated persistent identity uses the compact package adapter behind the
+  same schema-driven `seon.db.id/allocate!` operation. The serialized writer
+  enforces each Datahike identity constraint plus generated-value uniqueness
+  across all generator-managed identity attrs in that logical DB/branch.
 
 ## Measured starting point
 
 Three warm new-agent requests took 8.43–8.89 seconds. Roughly 7.8–8.1 seconds
-was cluster maintenance rather than agent-specific work. Live profiling found:
+was cluster maintenance rather than agent-specific work:
 
 - core function indexing: about 3.1 seconds for 1,044 rows;
 - test indexing: about 0.6 seconds for 282 rows;
 - schema indexing: about 0.004 seconds for 1,180 rows;
 - the complete builders run again inside ghost pruning;
-- replay: about 0.07 seconds;
-- global instrumentation: about 0.10 seconds;
-- actual agent-specific initialization: about 0.44–0.58 seconds.
+- declaration loading: about 0.07 seconds;
+- global instrumentation: about 0.10 seconds; and
+- actual one-agent initialization: about 0.44–0.58 seconds.
 
-The current shape is therefore a lifecycle bug first and a micro-optimization
-problem second.
+On a grown store of roughly 192,000 datoms, an open SSE feed caused repeated
+SCI deadline overruns and transient RSS sawtoothing around 1.4–2.5 GB. The pod
+remained responsive, pointing to broad repeated render/query allocation rather
+than a proven retained leak.
 
-## State transitions to make explicit
+## Implementation rules
 
-| Transition | Durable work | Runtime work | Must not run |
+- Observe live state before and after every phase.
+- Preserve the current branch/store; leave the ACME pod alone.
+- Use source-grounded Datahike/Malli/Reitit/Datastar behavior.
+- Keep public inputs/outputs and all map keys fully namespaced and schema'd.
+- A migration may transform an old store once; it must not leave two live
+  semantic paths.
+- Each replacement deletes the compensating old path in the same phase after
+  proof.
+- Tests assert datoms, query results, calls, transaction counts, and rendered
+  units—not exact context prose.
+- Commit each phase independently after unit, REPL/live, restart, and relevant
+  browser/feed proof.
+
+## Transition acceptance table
+
+| Transition | Durable work | Runtime work | Forbidden work |
 |---|---|---|---|
-| Cold cluster boot | Install missing schema; reconcile core and config deltas | Open DB; replay persisted code; instrument; install global services; resume agents | Duplicate snapshot/prune passes |
-| Warm pod restart | Only nonempty core/config deltas | Rebuild process-local runtime; replay; instrument; install services; resume | Converged seed writes |
-| Config change | Exact config delta | Normal listeners react | Core replay, program scan, instrumentation |
-| Core hot reload | Exact changed core delta | Rewrap changed live functions | Cluster restart, agent mint |
-| Agent mint | Agent and initial agent context | Establish namespace, wake, and host | Seed, prune, replay, global instrumentation/services |
-| Agent resume | Normally none | Reconstruct one host from persisted state | Mint or overwrite initial state |
-| Agent eval | Eval/result and newly authored program datoms | Evaluate and instrument only new/redefined functions | Whole-program reconciliation |
+| Fresh store | Genesis; missing native schema; exact core/config deltas | Build Malli/analyzer/program runtime; services; resume | Circular genesis attribution; duplicate scans |
+| Converged restart | No seed transaction | Rebuild only process-local state; recover/resume | Full schema reassert; arbitrary eval replay |
+| Changed config | Exact managed-subset delta | Affected listeners/projections | Core scan, global instrumentation, service restart |
+| Core hot reload | Exact program/schema delta | Load/instrument changed declarations | Cluster restart; ghost-pruning pass |
+| Agent mint | Agent + initial components | Home namespace, wake, host | Seed/config/program reload/global services |
+| Agent resume | Normally none | Rebuild one host/wake from durable facts | Mint/overwrite initial state |
+| Agent eval | Eval/result/domain/declaration facts | Evaluate once; instrument changed defs | Whole-program reconcile; effect replay |
+| Route/view fact change | Ordinary fact transaction | Recompile affected route/plan and units | Stored dirty flags; provenance fan-out |
 
-The detailed sequence and provenance questions live in
-[[provenance-and-lifecycle-design]].
+## Phase 0 — freeze the baseline and add observability
 
-## Phase 0 — inventory and falsifiable baseline
+The transaction/lifecycle audit is complete. Before implementation, finish the
+mutable-authority/display inventory and make the existing failure measurable
+without persisting derived counters.
 
-**Audit complete 2026-07-12:** [[system-audit-2026-07-12]] maps the current
-writers, readers, lifecycle effects, retained mechanisms, and deletion targets.
-Live performance baselines are captured. The remaining Phase 0 work is a
-machine-readable effects table or instrumentation only where implementation
-needs finer attribution.
+- Capture cold boot, converged restart, five sequential mints, one concurrent
+  mint attempt, core reload, and config apply timings.
+- Record transaction/broadcast counts for each transition.
+- Add runtime-only UI counters for commits, batches, live sockets, unique view
+  keys, candidate reads, compared reads, dirty units, renderer/SCI invocations,
+  suppressed output, event-loop delay, heap/GC, and RSS.
+- Break render cost down by view/unit, database read, SCI setup/body, hiccup
+  serialization, and gzip.
+- Reproduce the grown-store feed case on the default-store copy/synthetic store
+  and identify the exact route and renderer for every over-budget event.
+- Inventory every `atom`, `volatile!`, `defonce`, AsyncLocalStorage value, and
+  in-memory registry. Classify it as an irreducible process handle, a DB-derived
+  cache with named invalidation/cold rebuild, a missing durable fact, or
+  duplicated authority; move/delete the latter two before their owning phase
+  graduates.
+- Inventory every human/agent-visible size in logs, persisted transcript text,
+  debug/UI output, and error messages. Route all reporting through
+  `seon.ai.tokens/estimate`; raw character counts may remain storage facts but
+  never displayed. Remove existing `N chars` elision/log output, not only new
+  violations.
 
-- Enumerate every call made by boot, restart, mint, resume, hot reload, and eval.
-- Record its inputs, queries, transactions, source reads, runtime effects, and
-  downstream listener work.
-- Measure cold boot, converged restart, five sequential mints, source reload,
-  CPU, RSS, transaction count, and open-feed rendering.
-- Add only temporary or log-derived timing needed to attribute costs; do not
-  create persisted counters or status flags.
+Exit proof: every current global side effect/write and the grown-store render
+cost has a named runtime call site; every mutable cell has a documented owner,
+loss behavior, and disposition. No human or agent surface reports raw character
+counts.
 
-Exit: one effects matrix accounts for every observed write and process-global
-side effect.
+Commit: baseline instrumentation and evidence only.
 
-## Phase 1 — minimal provenance design
+## Phase 1 — replace candidate IDs with one atomic allocator
 
-- Inventory the seven current transaction-context attributes and every query
-  that consumes them.
-- Start from two candidate schema primitives only: `:seon.db.user/id` and
-  `:seon.db/user`.
-- Seed only database users justified by distinct queries. Current candidates are root,
-  boot, and config; agents should be referenced directly if one ref schema can
-  support both system-user and agent entities cleanly.
-- Prove current and historical queries for boot, config, root, and agent
-  assertions in the REPL against vendored Datahike semantics.
-- Add another transaction attribute only when a named required query cannot be
-  answered from transaction user plus normal entity links.
-- Explicitly defer credentials, principals, permissions, and authorization.
+Establish collision-safe creation before mint starts relying on the new agent
+grammar.
 
-Exit: a small schema and query table explains every retained provenance fact.
+- Add `src/seon/db/id.cljc` as the only owner of generated persistent
+  identities, with named Malli request/response schemas and fully namespaced
+  schema metadata `:seon.db.id/generator`.
+- Make `:seon.db/id` the broad legacy/word/compact transport union, while
+  `:seon.agent/id` uses the narrow root/legacy/word value schema and every other
+  generator-managed identity attr uses the narrow legacy/compact schema. Policy
+  metadata constrains generation; narrow values also reject explicit
+  wrong-grammar writes.
+- Add the pinned package adapters: npm `human-id` 4.2.0 and JVM
+  `com.github.kkuegler:human-readable-ids-java` 0.4 for `:seon.agent/id` only;
+  npm `@paralleldrive/cuid2` 3.3.0 and JVM
+  `io.github.thibaultmeyer:cuid` 2.0.5 for every other
+  actual generated persistent identity. Put JVM deps in `deps.edn`, Node deps in
+  `package.json`, and keep adapter differences private in the one `.cljc` file.
+- Reserve `root`; accept exact legacy values without rewriting; remove time from
+  newly generated values and project creation time from the identity datom's
+  transaction.
+- Replace the query-then-entity-map `new-id!` path with `allocate!`: declarations
+  name identity attributes, registered metadata chooses the adapter, and a pure
+  builder receives candidates and produces the complete normal transaction.
+- Extend the existing wire transaction/result shape with a generated-candidate
+  manifest and structured Datahike uniqueness details. The JVM writer assigns
+  concrete fresh eids so collisions raise `:transact/unique` rather than
+  upserting.
+- Retry only when the normalized error attribute and attempted value exactly
+  match the generated manifest. Rebuild the whole candidate-dependent
+  transaction on each attempt; after sixteen rounds return a namespaced
+  exhaustion error. Unrelated uniqueness/schema/domain failures return without
+  retry.
+- At the serialized writer, preflight each candidate through indexed AVET
+  lookups over the registry-derived set of all generator-managed identity attrs
+  and reject duplicate candidates inside the request. A hit is a matching
+  generated-candidate conflict and retries; it stores no global id entity.
+- Gate creation of generator-managed identity attributes through `allocate!`;
+  known-id exact reconciliation remains a separate intentional-upsert path.
+  This is a consistency boundary, not an authorization system.
+- Remove the old timestamp/`Math.random` generator and retiring scalar session
+  metadata generator. Do not invent a replacement session identity.
 
-## Phase 2 — lifecycle separation
+Exit proof: package adapters match registered syntax; legacy reads still work;
+forced candidate repetition exhausts with zero datoms; an unrelated unique
+conflict does not retry; the same compact candidate already stored under a
+different generator-managed attr retries without a global id datom; a forced
+agent-id collision rebuilds all home namespace,
+function/schema identity, ref, nested source, and response values and commits no
+part of the rejected attempt; URLs, DOM ids, and CLJS namespace munging work;
+concurrent allocation never upserts an existing entity.
 
-- Make cluster boot/resume its own operation.
-- Make agent mint a namespaced map-in/map-out operation used by the web action,
-  programmatic spawn, and any CLI path.
-- Make existing-agent resume distinct from mint.
-- Keep common one-agent runtime setup in one helper without a `:mint?` mode.
-- Install the server, database listeners, debug hooks, ticker, spawn hook, and
-  provider synchronization once per runtime.
+Commit: canonical schema-driven identity allocation and caller migration.
 
-Exit: five warm mints perform no seed, prune, replay, global instrumentation,
-or global-service calls and complete below one second at the current store size.
+## Phase 2 — split process, mint, and resume lifecycles
 
-## Phase 3 — one program snapshot
+Remove the largest known latency before changing the data model.
 
-- Group compiled vars and tests by source file.
-- Read each source file once per compiled generation.
-- Extract namespaces, functions, schemas, tests, source, and specifications into
-  one deterministic desired value.
-- Preserve stable creation metadata instead of manufacturing differences.
-- Reuse the snapshot for core reconciliation and instrumentation selection.
+- Give cluster/runtime boot one owner that opens the connection, reconstructs
+  global runtime state, installs services/listeners/ticker/hooks once, recovers
+  crashed runs, and resumes eligible agents.
+- Replace `init-agent!`'s `:mint?` mode with explicit mint and resume operations
+  sharing a small host/wake setup helper.
+- Wire `/agents/new`, `/agents/run`, programmatic spawn, and CLI creation through
+  one schema'd namespaced mint service.
+- Ensure runtime namespace selection does not enter the unborn agent as the
+  transaction submitter.
+- Compile agent identity, purpose/defaults, complete context components,
+  home-namespace/require rows, and safe initial declarations into one atomic
+  writer allocation transaction before creating transient host/wake state.
+  Initial declarations must have identities unique to that agent; rely on the
+  already validated root/boot program contract for shared schemas/defaults and
+  never reassert a shared row on each mint.
+- Make hot reload replace only reload-scoped hooks and definitions.
+- Remove the duplicate create/mint injection seams and remove the global create
+  lock if no shared mutable resource remains after the split.
 
-Exit: an injected reader proves one read per file; unchanged source produces an
-equal snapshot; the duplicate builder pass is gone.
+Exit proof: five warm mints run no seed, prune, declaration-load, global
+instrumentation, server/listener/ticker, or global provider synchronization and
+remain below one second at the current store size. Cold restart still resumes
+the same agents.
 
-## Phase 4 — exact transaction compilation
+Commit: lifecycle split and web wiring.
 
-- Replace reassert-all reconciliation with pure functions over current and
-  desired values.
-- Handle additions, changed cardinality-one values, cardinality-many set
-  differences, omitted managed attributes, components, and removed identities.
-- Scope candidate facts using transaction-user provenance and known identity
-  attributes; do not introduce entity ownership or kind attributes.
-- Preserve datoms asserted by other database users on mixed-origin entities.
-- Return empty transaction data when converged and do not call `transact!`.
-- Use Datahike `with` only to falsify the compiled result in tests and REPL
-  experiments.
+## Phase 3 — establish genesis and transaction provenance
 
-Exit: exact structural tests pass and a converged warm restart advances no seed
-transaction and emits no seed-driven SSE broadcast.
+Install the final two-fact model atomically across writers/readers.
 
-## Phase 5 — delete compensating mechanisms
+- Colocate `:seon.db/user` and transaction-context selection in `seon.db`.
+- Colocate `:seon.db.process/id`, its boot/config/REPL rows, and lookup helpers
+  in `seon.db.process`.
+- Split AsyncLocalStorage execution context from the explicit persisted metadata
+  whitelist.
+- Add one fresh-store genesis operation and one existing-store migration
+  boundary. Both install the minimal native schema and root/process refs before
+  normal metadata is required.
+- In the first normal root/boot desired-state transition, ensure the stable
+  human `:seon.user/id` row before enabling web/REPL writes; repeat the check on
+  cold boot/migration.
+- Backfill old transaction entities only where the existing scalar/origin facts
+  map honestly to user/process refs; report ambiguous rows rather than inventing
+  provenance.
+- Make the ordinary transaction compiler account for attributes used in final
+  transaction metadata and validate/resolve both refs before submission.
+- Migrate every author/recency/debug/warning/program query to joins through
+  `:seon.db/user` and `:seon.db/process`.
+- Preserve `:seon.store.wire/write-id` for transport correlation.
+- Remove all writers, readers, and public source registrations for the retiring
+  transaction-metadata attributes `:seon.db/agent-id`, `:seon.db/turn-id`,
+  `:seon.db/eval-id`, `:seon.db/session-id`, `:seon.db/origin`,
+  `:seon.db/replay?`, and `:seon.db/resume-marker?` after the migration proof.
+  Historical datoms may remain in the immutable store but have no live semantic
+  path. Keep their minimal compatibility validators as canonical DB schema
+  facts while installed/history-referenced native attrs still require them;
+  remove those only through an explicit proven data migration. Keep ordinary
+  domain identity attributes and separately audit
+  `:seon.agent.message/origin`, which currently controls wake behavior.
 
-- Use the exact core reconciliation to remove deleted and renamed core rows.
-- Delete `prune-core-ghosts!` and the second full program build.
-- Use exact config reconciliation to retract omitted config attributes.
-- Delete singleton config healing and generic broad provenance scans.
-- Remove stale comments and tests that encode the duplicate sequence.
+Exit proof: a live query shows every post-boundary transaction has resolvable
+user/process refs; root/boot, root/config, agent/REPL, and human/REPL current and
+history queries work; no production code names a removed metadata field.
 
-Exit: deletion and rename drives work through ordinary reconciliation, and code
-search finds one path for each behavior.
+Commit: provenance schema, migration, writer/reader cutover, and deletion.
 
-## Phase 6 — replay and instrumentation scope
+## Phase 4 — build the exact population reconciler
 
-- Replay persisted agent-authored code once when constructing a new runtime.
-- Instrument core and replayed functions once during runtime boot.
-- Instrument new/redefined agent functions at eval time.
-- On hot reload, instrument changed or currently unwrapped live function
-  objects without restoring the broken once-per-process gate.
-- Keep async original-function detection and Malli wrapping idempotent.
+Replace broad origin scans and reassert-all upserts with one pure compiler.
 
-Exit: instrumentation coverage is complete after boot and reload; minting an
-agent invokes no global instrumentation.
+- Introduce the canonical fully namespaced database coordinate projection
+  `{store-id, branch, commit-id, t}` and writer-side expected-head comparison
+  now. The current main branch uses the same shape that forks/restores extend in
+  Phase 9; do not build a temporary numeric-basis fence.
+- Define schema'd population contracts with identity attributes, managed
+  attributes, exclusivity, component attributes, and user/process metadata.
+- Validate active contracts as pairwise disjoint by managed attribute and
+  recursive component subtree. A fact may have one desired-state authority;
+  overlap fails before compilation.
+- Query only contract identities/managed values for normal retained-entity
+  deltas; destructive candidates take the full guard read below.
+- Compile scalar replacement/omission, cardinality-many set differences,
+  component replacement, new identities, and guarded stale-identity removal.
+- Before `:db.fn/retractAttribute`/`:db.fn/retractEntity`, inspect every current
+  attr, the recursive component closure, and incoming refs; fail loudly on any
+  fact outside the explicit contract.
+- Return an empty vector when current and desired values are equal; do not call
+  `transact!`.
+- Submit the compiled delta with an expected full-head commit fence. On a
+  mismatch, re-read and recompile from the new head under a bounded retry;
+  writer serialization alone does not make the preceding CLJS read atomic.
+  Schema/config/program registry publication uses the same transition owner and
+  occurs only after its matching fenced transaction commits.
+- Route writes to canonical config/program/schema-managed populations through
+  this transition owner. Direct `db/transact!` rejects a write that would bypass
+  those contracts; ordinary schema-valid domain facts remain writable. This is
+  a consistency invariant for exact projections, not an authorization layer.
+- Use `datahike.api/with` in tests/REPL to prove the transaction's resulting
+  facts, not in production to discover the diff.
 
-## Phase 7 — seed transaction consolidation
+Exit proof: focused generative/structural cases cover every cardinality and
+component transition; a converged reconciliation creates no transaction and no
+listener event; a write injected after read but before submit forces a clean
+re-read/recompile and cannot leave a stale cardinality-many value, retract a
+new outside fact, or publish an incomplete runtime registry.
 
-- Calculate missing schema, core desired data, and config desired data before
-  writing.
-- Respect Datahike ordering where newly installed attributes must precede their
-  use.
-- Use one atomic transaction per genuinely distinct provenance user when a
-  delta exists.
-- Never use Datahike's raw import/load path for ordinary seed state.
+Commit: pure exact-delta engine and transact-if-nonempty wrapper.
 
-Exit: cold boot uses the minimum proven transaction count and converged restart
-uses zero seed transactions.
+## Phase 5 — make config an exact recovery surface
 
-## Phase 8 — system acceptance
+- Compile defaults + selected manifest + environment overrides into one
+  canonical desired value before touching the database.
+- Make config selection operation-scoped. No input means no config transaction
+  and never implies `config/system.edn`; remove the startup script's ambient
+  default export. A successful apply leaves canonical DB facts that later
+  config-free boots preserve.
+- Add one explicit operator/API door: `bin/seon config apply --config <path>`
+  (or an explicitly present `SEON_CONFIG`) snapshots and applies that input;
+  `--empty` supplies literal `{}`; ordinary `bin/seon restart pod` supplies no
+  overlay and preserves DB config. The result reports action, canonical digest,
+  expected/committed coordinate, changed-fact count, and convergence.
+- Require an explicit initial canonical config value for a fresh store; `{}` is
+  valid and materializes the schema-owned safe floor. A restored target missing
+  that non-optional database floor is inspection/fork-only unless an explicit
+  config migration overlay supplies it. “Config optional” means no external
+  artifact is needed once canonical DB facts exist, not that writable runtime
+  behavior silently projects today's defaults over missing historical facts.
+- Introduce the one schema'd external lifecycle-intent store/scanner using temp
+  write, file fsync, atomic rename, and directory fsync. Before accepting an
+  apply/startup overlay, persist an intent containing its action, immutable
+  canonical desired payload, digest, target attachment coordinate, and expected
+  head. Fenced reconciliation verifies the result and clears the intent
+  atomically; crash recovery resumes from the payload rather than rereading a
+  path or environment. Phase 9 extends this same schema/mechanism with branch,
+  undo, and confirmation facts; it does not add a restore-intent path. This is
+  not a stored config mode.
+- Validate every map against its registered schema and require exactly one
+  identity attribute.
+- Declare exactly: the config singleton attrs, the AI config singleton attrs,
+  the web-brand singleton attrs, complete route entities/components, and root's
+  configured context component subtree/explicit root defaults. The general
+  agent-context is a mint template;
+  existing non-root agent context copies remain agent-owned and unchanged.
+- Treat compiled route/root-context defaults as config-compiler inputs only.
+  Root/boot owns program/schema and named non-config root capability facts;
+  root/config alone owns routes, the root context instance, and templates.
+- Retire the old `:seon.config/skills` manifest key, corpus scan, seeded skills
+  block, load/unload default, and config prune path together. One guarded
+  migration retracts only still-current config-authored `my.skills` defaults;
+  later agent-authored facts and intentional retractions are not overwritten.
+  No skills/loadout population remains in the target config contract.
+- Convert procedural route removal to absence in the canonical desired set and
+  remove the old syntax/path in the same phase.
+- Validate every managed population first, combine their deltas, and apply one
+  atomic root/config transaction when nonempty.
+- Delete singleton config healing, `managed-identities`, first-live-transaction
+  classification used for management, unconditional desired upserts, and the
+  separate catch-and-continue `seon.web.brand/sync-from-env!` boot healer.
+- Inject missing, changed, extra, and partially written managed facts before a
+  restart and prove config restores the declared subset while agent/domain data
+  remains byte-for-byte equivalent as facts.
 
-- Cold boot and converged restart on the default cluster.
-- Five sequential web-created agents with correct navigation.
-- Durable multi-step planning across a pod restart.
-- Schema-backed knowledge write and later retrieval across a restart.
-- Core function edit, deletion, and rename through hot reload/reconciliation.
-- Agent-authored function definition and instrumentation.
-- Agent view, debug view, context blocks, transcript, canvas, buttons, and forms.
-- Grown-store gzip SSE profiling for CPU, RSS, render caps, coalescing, and
-  irrelevant-transaction suppression.
-- Full CLJS suite plus focused structural tests; no context-wording snapshots.
+Exit proof: config repairs every injected managed-state fault, removes stale
+managed values/entities, preserves outside data, respects env precedence, and
+performs zero writes when already converged; a crash before/after intent,
+fenced commit, result readback, and intent clear deterministically completes or
+recognizes the same apply, and the next no-config cold boot performs no config
+write.
 
-Exit: no known lifecycle duplication, unexplained transaction churn, or
-unbounded repeated render work remains.
+Commit: config compiler/reconciler cutover and healer deletion.
 
-## Commit discipline
+## Phase 6 — restore native and Malli schema correctly
 
-Commit the inventory/design separately, then each behavior-preserving
-extraction, lifecycle fix, reconciliation replacement, deletion, and live-proof
-update. Never accumulate the whole refactor into one commit, and never keep an
-old path beside its replacement after the replacement is proven.
+- Prove a populated Konserve/Datahike reopen restores native schema/index roots;
+  remove complete `pod-full-schema` retransactions and the hand-maintained full
+  bootstrap attribute list.
+- Derive/install a native attribute declaration only when its ident is absent;
+  compare value type, cardinality, uniqueness, and component semantics and treat
+  any storage-facet divergence as an explicit migration.
+- Replace truncated/overloaded schema source with one full canonical EDN form
+  fact per `:seon.schema/key`.
+- Query current forms and build one complete in-memory candidate before any
+  durable change. Overlay compiled core registrations only for fresh-store
+  genesis or an explicitly selected current-core/hot-reload/reset transition;
+  a populated no-overlay runtime uses canonical DB forms alone.
+- Parse/validate every candidate form and its complete native storage signature,
+  reject protected core-key collisions, commit only the valid canonical/native
+  delta, then atomically swap/relink the already validated registry/catalog.
+- Make runtime agent schema registration transact the canonical form/native
+  declaration before swapping the validated live registry; leave runtime state
+  unchanged on transaction failure.
+- Guard schema deletion/rename through dependencies on other forms, fn specs,
+  installed native attrs, and current/history facts. Installed/referenced attr
+  validators remain until an explicit migration; do not generic-stale-retract
+  them with program rows.
+- Derive the entity/render catalog once per registry generation and delete the
+  persisted schema-decomposition projection.
+
+Exit proof: forward references restore on cold restart; one invalid schema
+leaves the prior live registry intact; agent schemas are immediately renderable;
+native schema is not rewritten on a converged restart.
+
+Commit: canonical schema facts, atomic registry restore, and decomposition
+deletion.
+
+## Phase 7 — build one program snapshot and delete ghost pruning
+
+- Group compiled vars/tests by source file and read each file once per
+  selected current-core generation. Do not build this source snapshot during a
+  populated preserve-target/no-overlay restart.
+- Extract namespace, function, schema, test, source, spec, and requires into one
+  deterministic desired graph. Its schema slice replaces Phase 6's temporary
+  compiled-registration input and is submitted only through the one fenced
+  canonical-schema transition; program reconciliation is never a second schema
+  writer. Omit derivable `created-at` metadata; identity/source datom
+  transactions already provide time.
+- Audit other stored creation timestamps under the same rule; retain only true
+  domain event/pre-event coordinates that a transaction join cannot project.
+- Validate required snapshot populations before compiling any mass retraction.
+- Make every namespace/function/schema/test definition an exact whole-row
+  replacement over its declared program attrs/components. Retract omitted
+  declaration fields in the same transaction; prohibit partial source/spec/doc/
+  arglists/ns/require patches. Audit legacy mixed-author rows datom-by-datom and
+  normalize or preserve/report them before source-datom authorship is used.
+- Reconcile the protected `seon.*` program population exactly as root/boot,
+  including removed and renamed identities, only for fresh-store genesis or an
+  explicit current-core/hot-reload/reset transition. Treat shipped editable `my.*`
+  definitions as history-aware defaults: seed never-seen identities; preserve
+  agent/REPL-authored current definitions and agent/REPL retractions; reinstall
+  a desired-but-absent default when the latest relevant retraction was
+  root/boot; retract removed defaults only when their current row is
+  root/boot-authored; and reassert everything on explicit reset. Leave
+  `my.agent.<id>` outside core reconciliation.
+- Reuse the same snapshot to select hot-reload definitions/instrumentation.
+- Delete `prune-core-ghosts!`, the second complete builder pass,
+  `core-index-tx`'s parallel partial-diff policy, and stale comments/tests.
+
+Exit proof: injected reader counts one source read per file for a selected
+generation and zero source-snapshot reads/reconciliation writes for a populated
+no-overlay restart; unchanged selected source is an equal value and no write;
+edit/delete/rename produce one exact transaction;
+all declaration-managed datoms for a row share one authoring transaction;
+agent-authored program facts survive; unsafe schema deletion fails before the
+durable decision.
+
+Commit: deterministic snapshot/reconciliation and pruner deletion.
+
+## Phase 8 — make runtime reconstruction honest and bounded
+
+- Rename program “replay” to declaration/program loading in public docs and
+  runtime APIs.
+- Keep the strict one-literal namespace/function/test declaration persistence
+  gate; do not persist arbitrary eval source as reconstructable code.
+- Load durable namespace/function/test declarations once per fresh JS runtime
+  after Malli restoration. Exclude schema registration calls; canonical schema
+  EDN has exactly one registry reconstruction path.
+- Instrument the complete runtime once after loading by passing Malli one exact
+  explicit `:data` map. Stop populating/reading Malli's process-global
+  function-schema atom as a second roster; remove the bulk pass from agent
+  mint/resume/start and Shadow reload.
+- Add one delta operation that unions direct body/spec additions, changes,
+  removals, and deletions; filtered-unstruments exact old entries from Malli's
+  recorded originals; and instruments the exact remaining map once. Wire eval
+  and the Shadow build-notify transition through it only after their fenced
+  canonical facts commit.
+- During candidate-registry validation, derive schema-reference dependencies
+  with Malli's walk/ref API, including local recursive registries and cycles. On
+  a same-key or add/remove schema change, union the old/new transitive dependent
+  sets into the one delta; do not use key-set snapshots, keyword regexes, or a
+  global safety pass.
+- Require complete multi-arity/variadic contract coverage before any filtered
+  unstrument. An invalid candidate changes neither durable facts nor the live
+  registry/wrappers; a post-commit install failure closes readiness and rebuilds
+  the committed generation.
+- Audit detached Promise callbacks against the live run/CAS fence so stale work
+  cannot commit merely because it retained ALS context.
+- Implement the explicit supervisor recovery matrix for terminated, idle,
+  stale-closed-pointer, paused, expired/exhausted, stranded-running-turn, and
+  safely resumable open-run states. An in-bounds stranded turn is CAS-fenced and
+  marked terminal error without replay, while the same open run continues at
+  the next turn. Every genuinely destructive root/boot repair begins with
+  old→old run-pointer CAS, then retracts the exact ref and writes closing facts
+  in the same transaction; never CAS a ref to nil.
+- Render prior-session process-local result values as missing or elided without
+  executing source.
+- Keep replication gap recovery terminology/logic isolated to the wire reader.
+
+Exit proof: an effectful scratch eval runs once across restart; a declaration
+returns after restart; prior result lookup is honest; turn inspection is
+read-only; feed recovery applies committed datoms once; mint/resume invoke zero
+instrumentation work; a redefinition replaces exactly one wrapper without
+stacking; a referenced schema change rewraps exactly its dependent functions.
+
+Commit: reconstruction naming/scope, async fence, and result behavior.
+
+## Phase 9 — one upstream Datahike versioning path
+
+Use exactly Datahike's existing immutable/versioned-store primitives; improve
+the current Seon coordination rather than creating a snapshot or versioning
+system.
+
+### Phase 9a — exact coordinates and immutable reads
+
+- Extend Phase 4's `{store-id, branch, commit-id, t}` schema/resolver through
+  registry, wire, API, turn/error capture, bookmarks, and caches. Logical
+  db-name remains routing data beside the coordinate.
+- Keep `as-of` a read-only database value accepted by ordinary fully schema'd
+  queries/renders/simulations. Upgrade `basis-t` to return the selected view
+  time for an `AsOfDB`; never mistake its origin head for the selected point.
+- Resolve convenience `{branch, t}` only by walking retained ancestry and
+  requiring exactly one commit. Responses always echo all four fields; commit
+  id is canonical.
+- Migrate legacy turn/error t-only facts only when resolution is unique. Leave
+  ambiguous history honest and use the prompt blob as byte ground truth.
+- Make cursor/feed continuation commit-ancestry aware. Attachment mismatch or
+  non-ancestor cursor means full reset, never numeric `since-t` replay.
+
+Exit proof: immutable reads create no writer/transaction; two lineages reusing t
+resolve to different commits; an ambiguous legacy t fails; new turn/error facts
+round-trip the exact coordinate; frozen caches/bookmarks never key on bare t.
+
+Commit: canonical coordinate, immutable resolver, and capture migration.
+
+### Phase 9b — correct the pinned Datahike primitives
+
+- Preflight effective commit-graph support and actual retained commit records;
+  an absent literal `:commit-graph?` key may still mean the default true, while
+  an effective false or missing record rejects commit branching. Also require
+  history retention, readable ancestry, and the selected commit's primary and
+  secondary key maps before intent/admission. A store created with commit graph
+  disabled cannot be repaired by flipping the config flag or backfilled in
+  place; it requires an explicit supported migration/export outside this path.
+- Fix the pinned Datahike `branch!` in place: only an exact current-branch source
+  may reuse live secondary state; a commit UUID or non-current branch must use
+  the selected stored commit's `secondary-index-keys`.
+- Make connection release await writer shutdown before reporting success.
+- Add an expected-current-commit guard/readback to `force-branch!`; do not add a
+  Seon-only root-pointer mutation. Keep the upstream API shape and add focused
+  regression tests suitable for a later Datahike PR.
+
+Exit proof: a branch from historical T returns T in primary and secondary
+indexes even after head H adds indexed facts; stale force is rejected; no old
+writer can commit after release; commit-graph-disabled/missing-record stores
+fail before mutation.
+
+Commit: pinned Datahike branch/release/force correctness gates.
+
+### Phase 9c — branch-qualified attachment and runtime resources
+
+- Make `[store-id branch]` the connection identity. Maintain a bijection between
+  logical db-name and that attachment while connected; every registry/wire/MCP/
+  UI request verifies both instead of routing by bare agent id or path.
+- Key filtered DB handles, route/render/config caches, live feeds, wire
+  correlations, and agent host registries by attachment/commit or adapter
+  generation as appropriate; clear/rebuild them on root change.
+- Give a branch blob store a read-only source base plus branch-local write
+  overlay. Before guarded promotion, verify and materialize every
+  target-referenced overlay hash into main's base; extra content-addressed files
+  after a pre-force crash are harmless. Release removes only that branch's
+  overlay, and GC treats every retained branch as a root before deleting only
+  content unreachable after explicit branch release.
+- Persist an attachment-only runtime descriptor by temp write, fsync, atomic
+  rename, and parent-directory fsync. It contains logical db-name, backend/store
+  path, store-id, branch, source attachment/blob read base, overlay write path,
+  and launch endpoints. Core/config overlay policy never lives in it.
+
+Exit proof: duplicate agent ids on main/debug route to their qualified hosts;
+cross-attachment frames/writes are rejected; cold branch attach reconstructs
+from descriptor without config; destroying its overlay cannot mutate/delete a
+source blob.
+
+Commit: branch-qualified registry/wire/runtime/blob attachment.
+
+### Phase 9d — writable fork and release lifecycle
+
+- Expose one plan/apply lifecycle service for `:fork`, `:restore`, and
+  `:release`; keep pure `as-of` separate. Database calls stay in `seon.db`; the
+  external supervisor owns process coordination.
+- Make same-store `branch!` the only normal writable fork. Retire Seon's
+  `fork-database` physical-copy path; physical export/clone is a different,
+  unproven requirement.
+- Freeze the plan's source/target commit and require its confirmation token at
+  apply. Briefly gate/drain source writes while creating/verifying the branch.
+- Start every debug/fork runtime non-autonomously: no ticker, wake-trigger
+  or agent-host registration, agent-loop resume, schedule execution, provider
+  synchronization, or external-effect worker runs merely because history was
+  opened. Explicit forensic actions alone may drive it.
+- Release stops the branch pod, drains/releases its handles, calls upstream
+  `delete-branch!`, and removes only its descriptor/overlay.
+
+Exit proof: a same-store branch shares immutable index storage, diverges under
+writes without moving source, remains exact while idle, and releases without
+touching source; a stale confirmation token mutates nothing.
+
+Commit: lifecycle plan/apply fork and release.
+
+### Phase 9e — quiesced restore, undo, and crash recovery
+
+- Plan against immutable heads, validate the target reconstruction floor and
+  optional current-core/supplied-config candidates, and freeze canonical
+  overlay payloads/digests. Absence of config is valid and never falls back to
+  `config/system.edn`.
+- Before apply, extend Phase 5's one external lifecycle intent with requester,
+  exact source/target coordinates, policies/payloads, undo branch/head, and
+  confirmation. Derive
+  progress from actual heads, fences, connections, and reconciliation results;
+  do not persist a procedural checklist.
+- Reject admission, fence active runs/actions, drain submitted writes, stop
+  hosts/listeners/readers/writer, create/verify undo and target branches, then
+  guarded-`force-branch!` main. Reopen every handle from the new attachment and
+  discard old write ids, feeds, caches, and cursors.
+- Reconstruct only safe canonical runtime state, apply the independently
+  selected frozen overlays through exact fenced reconciliation, recover valid
+  runs, record completion, clear intent, and reopen traffic. The stopped root
+  agent never coordinates its own restore; later repair txs use root/boot or
+  root/config provenance.
+- Undo is the same planned restore to the preserved head. State plainly that DB
+  restore cannot undo emails, API calls, files, or other external effects.
+
+Exit proof: preserve-target boots the selected DB with no core/config input and
+does so again after a second cold boot; explicit overlays repair only their
+declared subsets; undo returns the saved head; process kill at every boundary
+resumes or safely refuses; stale writers/cursors cannot cross the moved head;
+no arbitrary eval or external effect re-executes.
+
+Commit: guarded restore/undo supervisor and full crash matrix.
+
+## Phase 10 — one live subscription owner and lossless batches
+
+- Keep the initial observability counters and replace per-connection dependency
+  state with one subscription per normalized Reitit view key.
+- Delete the replaced per-connection main-feed state/refresh ownership in this
+  phase; existing debug/data paths remain untouched until their own cutover and
+  no new parallel registry is introduced.
+- Attach socket/gzip/backpressure handles to that subscription; keep
+  latest-event-per-socket behavior.
+- Retain earliest `db-before`, latest `db-after`, and unioned datoms/entities/
+  attributes for each coalesced batch.
+- Replace reset-forever trailing debounce with frame coalescing plus a bounded
+  maximum wait.
+- Add the missing route-projection listener and rebuild the cached Reitit router
+  exactly once when that projection changes.
+
+Exit proof: two equivalent tabs cause one render/two pushes and remain correct
+after either tab closes; continuous writes cannot starve the latest view; frozen
+`as-of` feeds do no current work.
+
+Commit: shared subscription/batch/router foundation.
+
+## Phase 11 — stable render units and one Datastar feed
+
+- Decompose the global header, roster membership/rows/previews, agent shell,
+  each surface pair, focus controller, debug raw/HTML/diagnostic panes, and data
+  browser result into stable ID-addressed units.
+- Render the shared header once per relevant batch, not per page/socket.
+- Add one ephemeral normalized-unit registry (unit id + params + full resolved
+  coordinate, or live attachment generation)
+  whose read/output cache and refcount may be shared by several view
+  subscriptions; evict when the last subscriber closes.
+- Move each debug/data surface onto the gzip Datastar subscription path and
+  delete that surface's old listener/registry/timer/framing in the same cutover.
+- Preserve one full `#app-view` morph as the correctness fallback when unit
+  membership/disappearance changes.
+- Use tests/server-side captured output for equivalence before routing the live
+  surface; do not commit a production dual-feed toggle. Delete the unused `/sse`
+  registry/route and duplicate full-page paths with the last cutover.
+
+Exit proof: agent, roster, debug, and data pages share one transport; a local
+update renders only its stable units; conditional disappearance removes stale
+DOM; inputs, focus, and transcript scroll anchoring survive morphs.
+
+Commit: render units/feed unification and duplicate-path deletion.
+
+## Phase 12 — runtime read observation and exact invalidation
+
+- Add a synchronous observer at every `seon.db` read boundary with no
+  meaningful overhead when unbound.
+- Normalize query/pull/entity requests and reuse/expose Datahike's conservative
+  query attribute-dependency extractor; wildcard/dynamic/unknown reads become
+  broad candidates.
+- Move render-layer direct Datahike access and lazy entity walks behind explicit
+  bounded `seon.db` reads.
+- Compile read-to-unit and attribute-to-read reverse indexes per view plan.
+- Evaluate each candidate normalized read once on batch `db-before` and
+  `db-after`; render only units with unequal results.
+- Recapture conditional reads after a dirty render and suppress identical
+  serialized complete-element output.
+- Use user provenance only to fix deliberate surface recency/focus scope.
+- On cold restart, capture current scoped reads and prove the bounded indexed
+  user+entity/attr history heuristic; broad reads get definition recency rather
+  than claiming historical precision.
+- After that recency proof, delete `:seon.fn/read-attrs`, literal/regex
+  extraction, hard-coded header/surface/structural sets, and provenance-based
+  debug fan-out in the same production cutover. Runtime capture may be exercised
+  privately in tests first, but no committed route chooses between two
+  dependency implementations.
+
+Exit proof: unrelated attributes invoke zero renderers; same attribute on an
+unrelated entity may compare one read but invokes no renderer; shared facts
+update every actual dependent regardless of writer; change-then-revert emits
+nothing; renderer redefinition/current namespace changes recapture the correct
+plan.
+
+Commit: observed-read compiler/invalidation and stored-read-set deletion.
+
+## Phase 13 — bound legitimate work and profile the grown store
+
+- Replace the header's whole-store inventory with an honest index count and
+  shared bounded projections.
+- Window/page roster previews, transcript/debug HTML twins, and data results
+  before building hidden hiccup; keep exact raw AI text available on demand.
+- Add a render-scoped database-read/allocation budget for agent-authored HTML
+  and fail loudly with selective-query guidance rather than silently changing
+  domain meaning.
+- Remove the rolling clock-driven token-rate metric. Derive usage/rates on
+  demand from timestamped turn/log facts.
+- Profile Datahike result-cache retention separately from transient
+  query/SCI/serialization allocations.
+- Consider worker isolation only if exact invalidation and bounded reads still
+  leave measured event-loop stalls.
+
+Exit proof: one and several open grown-store feeds stay within agreed CPU/RSS/
+event-loop bounds; work scales with dirty unique units, not sockets multiplied
+by whole views; no SCI budget increase masks unbounded work.
+
+Commit: bounded render/read paths and profiling evidence.
+
+## Phase 14 — system acceptance and graduation
+
+Run from a cold process and a converged restart:
+
+- fresh genesis and existing-store provenance migration;
+- config fault injection/recovery and zero-write convergence;
+- five sequential and concurrent web-created agents with correct navigation;
+- durable multi-step planning across restart;
+- schema-backed knowledge write and later retrieval;
+- core function/schema edit, deletion, rename, and agent-authored declaration;
+- honest prior-session eval results and no effect replay;
+- read-only as-of simulation, isolated writable fork/divergence, live restore,
+  crash-boundary recovery, and undo;
+- agent canvas, transcript, context twins, debug view, buttons, and forms;
+- route fact add/change/remove;
+- equivalent tabs, time-travel feed, server-side gzip morph verification;
+- CPU/RSS/event-loop/profile matrix on the grown store; and
+- full CLJS suite plus focused structural/generative tests.
+
+Exit: no known lifecycle duplication, unexplained transaction churn, stale
+reactive path, unbounded repeated render, or compatibility implementation
+remains. Update the architecture docs to match live proof and mark the PRD
+complete only then.
+
+Commit: acceptance evidence, final deletions, and documentation graduation.

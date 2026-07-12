@@ -23,17 +23,19 @@ passes, and metadata fields whose only production purpose is to control code
 while it is running.
 
 The refactor should retain the proven runtime mechanisms and make their
-boundaries explicit. It should not replace them with a framework. The minimum
-durable provenance currently justified is:
+boundaries explicit. It should not replace them with a framework. Follow-up
+source research and owner decisions corrected this audit's initial turn-ref
+hypothesis. The minimum durable transaction facts are:
 
-- a transaction database-user ref;
-- a transaction turn ref, because turn replay requires all transactions that
-  occurred inside a turn, including arbitrary domain writes;
+- `:seon.db/user`, a ref to the existing root, human, or agent identity;
+- `:seon.db/process`, a ref to boot, config, or REPL; and
 - the wire write id, because it correlates a submitted write with the writer's
   committed transaction and reactive feed.
 
-Everything else is either replaceable by those refs and normal domain links,
-runtime-only context, dead, or still requires a named query before retention.
+Turn/eval association is not a complete or safe effect-replay boundary. Normal
+turn/eval entities retain their domain links; arbitrary transaction causality is
+not promised. All other legacy transaction-context fields are runtime-only,
+dead, or derived classifications.
 
 ## Scope and method
 
@@ -148,12 +150,12 @@ small whitelist of schema-registered refs.
 | Current field | Writers | Production readers | Finding | Proposed disposition |
 |---|---|---|---|---|
 | `:seon.db/agent-id` | `with-agent`, turn/eval/web scopes | plan blame, typeahead authors, agent canvas functions, UI recency, debug error attribution, web fan-out | Real authorship/scoping need, but stored as a scalar duplicate of the agent entity | Replace with `:seon.db/user` ref to the agent |
-| `:seon.db/turn-id` | turn and scheduled-run scopes | turn replay, debug error linkage, AI logging reads runtime context | Real query: every transaction performed during a turn, including unrelated domain entities | Replace persisted scalar with `:seon.db/turn` ref; runtime logging may read the same scoped ref |
+| `:seon.db/turn-id` | turn and scheduled-run scopes | turn inspection lists tx ids; debug/logging also has ordinary turn/eval links | The initial audit overclaimed a complete causal/replay query. Arbitrary eval effects cannot be reconstructed safely | Keep current turn in runtime context; remove persisted transaction field |
 | `:seon.db/eval-id` | per-form eval scopes | no provenance query; render code merely excludes it; runtime schema tee checks its presence | Primarily a runtime control marker today | Keep runtime eval context; do not persist unless a concrete “all transactions in eval” forensic query is ratified |
 | `:seon.db/session-id` | no production writer found | no production reader; precondition test only | Dead legacy session concept | Delete schema, precondition, tests, and documentation |
 | `:seon.db/resume-marker?` | no production writer found | no production reader; precondition test only | Dead marker | Delete schema, precondition, tests, and documentation |
 | `:seon.db/replay?` | replay scope | eager schema tee suppression reads current runtime context | Necessary runtime guard, not durable provenance | Move to execution context not copied into transaction metadata |
-| `:seon.db/origin` | derived at transact boundary from claimed runtime keyword | reconciliation, core overwrite/prune guards, warnings, inventory grouping, web fan-out, eval override guards | Overloaded classification combining user, operation, security posture, and UI scope | Replace core/config/agent cases with database-user refs and direct datom queries; keep runtime-only test/replay distinctions outside persisted metadata |
+| `:seon.db/origin` | derived at transact boundary from claimed runtime keyword | reconciliation, core overwrite/prune guards, warnings, inventory grouping, web fan-out, eval override guards | Overloaded classification combining user, operation, security posture, and UI scope | Replace core/config/agent cases with user/process refs and direct datom queries; keep runtime-only test/replay distinctions outside persisted metadata |
 | `:seon.store.wire/write-id` | pod wire client/writer | response correlation, replayed feed, reactive server | Necessary transport correlation across asynchronous request, commit, and broadcast | Keep in the wire namespace; it is not application provenance |
 
 ### Origin enum audit
@@ -161,11 +163,11 @@ small whitelist of schema-registered refs.
 The registered enum is `:user`, `:agent`, `:system`, `:replay`, `:core-seed`,
 `:config`, and `:test-run`.
 
-- `:core-seed` maps to the boot database user.
-- `:config` maps to the config database user.
-- `:agent` maps to the relevant agent entity as database user.
-- `:system` is used inside an agent turn and does not identify a distinct
-  user. The turn and agent refs already state its durable context.
+- `:core-seed` maps to `{user root, process boot}`.
+- `:config` maps to `{user root, process config}`.
+- `:agent` maps to `{user agent, process repl}`.
+- `:system` inside an agent turn maps to the actual submitting user and REPL
+  process; it is not a separate user or operation class.
 - `:replay` is used to suppress runtime tee behavior; replay writes only logs
   in the current design and does not need a permanent classification field.
 - `:test-run` is used as nested runtime context so eval behavior can distinguish
@@ -184,29 +186,25 @@ record of what processing accomplished.
 
 ### `:seon.db/user`
 
-A cardinality-one ref on the transaction entity. Stable system database users
-have `:seon.db.user/id`; agent writes may point directly to the agent entity.
+A cardinality-one ref on the transaction entity. It points directly to the
+existing root agent, human user, or agent entity. There is no
+`:seon.db.user/id` and no duplicate actor table.
 Required
 queries:
 
-- current and historical boot assertions;
-- current and historical config assertions;
-- assertions made by a particular agent;
+- assertions submitted by root, a human, or a particular agent;
 - per-agent UI recency and agent-authored function discovery;
 - error attribution when ordinary domain links do not reach the database user.
 
-The audit has not yet proven that boot and config must be separate users. Their
-resulting entities use distinguishable identity/attribute sets, so one stable
-system database user may support both reconciliation queries without storing a
-processing-stage distinction. Resolve this with concrete queries before seeding
-either identity.
+Root authors boot/config work; the process ref distinguishes their ingress.
 
-### `:seon.db/turn`
+### `:seon.db/process`
 
-A cardinality-one ref to `:seon.agent.turn/id`. This is justified because an
-agent can transact arbitrary domain facts during a turn; those entities do not
-all need a duplicated turn attribute, yet forensic replay must enumerate the
-turn's transactions.
+A cardinality-one ref to a stable `:seon.db.process/id` entity. Seed exactly
+`:seon.db.process/boot`, `:seon.db.process/config`, and
+`:seon.db.process/repl`. This records the execution path that produced the
+facts without turning root/config/boot into separate users or persisting a
+generic operation enum.
 
 ### Runtime-only execution context
 
@@ -218,9 +216,10 @@ The runtime still needs fiber-local values:
 - replaying?;
 - test-running?.
 
-Only the first two currently have proven persisted consumers. The context API
-must stop equating “present in AsyncLocalStorage” with “copy this attribute onto
-the transaction.”
+Only the selected user/process refs cross the transaction boundary. Current
+turn/eval/replay/test state remains useful to runtime control and logging, but
+the context API must stop equating “present in AsyncLocalStorage” with “copy
+this attribute onto the transaction.”
 
 ### Wire write id
 
@@ -267,15 +266,17 @@ identity attributes. It is both broad and historically imprecise: retracted or
 replaced original datoms are absent from the current database, so the minimum
 currently-live transaction is not necessarily the entity's first assertion.
 
-Delete it after the new database-user-constrained candidate queries are proven.
+Delete it after population-specific identity/attribute queries are proven.
+Config authority comes from its explicit population contract, not from who last
+wrote a value. Provenance remains available for audit and mixed-fact guards.
 
 ### `row-origin-scan` and bootstrap inventory
 
 `row-origin-scan`, `bootstrap-row-ids`, and `core-attr-namespaces` reuse the
 same first-live-transaction assumption to classify the data browser and warning
 surface. These are display classifications rather than domain state. Replace
-them with direct database-user-constrained datom queries or a cheaper attribute-presence
-read model; do not preserve the current broad scan merely for UI grouping.
+them with direct user/process datom queries or a cheaper attribute-presence read
+model; do not preserve the current broad scan merely for UI grouping.
 
 ### Config healing
 
@@ -301,9 +302,10 @@ The snapshot should group var metadata by `:file`, read each file once, and
 extract all referenced forms from the shared text.
 
 Creation instants are generated on every snapshot. Existing comparison code
-selectively ignores them. The desired snapshot should instead distinguish
-stable calculated content from insert-only metadata so a fresh timestamp never
-manufactures drift.
+selectively ignores them. Remove those derivable program `created-at` fields;
+the identity/source datom transaction and `:db/txInstant` already provide
+creation/change time. Retain a domain timestamp only when it is a genuine event
+or pre-event coordinate that cannot be projected from the entity's transaction.
 
 ### `core-index-tx`
 
@@ -381,10 +383,12 @@ a demonstrated shared mutable resource.
 
 The target should clarify ownership without introducing parallel versions:
 
-- `seon.db.user` owns `:seon.db.user/id`, system database-user seed data, and
-  user lookup helpers.
-- `seon.db` owns `:seon.db/user`, `:seon.db/turn`, execution-context → durable
-  metadata selection, provenance queries, and transaction submission.
+- existing `seon.agent` and `seon.user` namespaces continue to own their
+  identity attributes;
+- `seon.db.process` owns `:seon.db.process/id`, the boot/config/REPL seed data,
+  and process lookup helpers;
+- `seon.db` owns `:seon.db/user`, `:seon.db/process`, execution-context to
+  durable-metadata selection, provenance queries, and transaction submission;
 - `seon.state` owns pure exact-diff compilation and the transact-if-nonempty
   operation.
 - `seon.client` should retain runtime composition, not hundreds of lines of
@@ -415,27 +419,27 @@ converge. The final result must have one transaction-provenance model.
   - skip transaction submission for empty tx-data.
 - `src/seon/db.cljs` and `src/seon/db/internal.cljs`
   - separate execution context from persisted metadata;
-  - replace scalar agent/turn provenance with refs;
+  - replace scalar agent/origin provenance with user/process refs;
   - remove origin derivation and broad managed scans after migration;
   - update preconditions to the minimal schema.
 - `src/seon/config.cljs`
   - remove stale-singleton special handling after exact reconciliation.
 - `src/seon/eval.cljs`
-  - replace core-origin queries with boot-user queries;
+  - replace core-origin queries with root/boot queries;
   - keep replay/eval guards runtime-only;
-  - stamp agent user and turn ref through the common transaction context;
-  - decide whether eval ref persistence has a proven forensic consumer.
+  - stamp agent user and REPL process through the common transaction context;
+  - remove persisted turn/eval correlation.
 - `src/seon/agent/turn.cljs` and `src/seon/agent/loop.cljs`
-  - establish agent user and turn ref once for downstream work;
+  - establish agent user and REPL process once for downstream writes;
   - remove `:system` origin classification.
 - `src/seon/web/reactive/call.cljs`
   - establish the agent user without an origin keyword.
 - `src/seon/web/debug.cljs`
-  - route invalidation from transaction user and changed attributes;
-  - remove origin-specific global-fanout rules where the datoms themselves
-    identify shared core/config changes.
+  - move onto the shared Datastar subscription/read-dependency graph;
+  - remove origin-specific fan-out entirely.
 - `src/seon/agent/debug.cljs`
-  - query transaction turn ref and database-user ref.
+  - query ordinary turn/eval facts and transaction user/process where useful;
+  - do not imply arbitrary transaction/effect replay.
 - `src/seon/agent/ctx/render_fns.cljs`, `src/seon/ui/agent_view.cljs`,
   `src/seon/ai/typeahead.cljs`, and `src/my/plan/internal.cljs`
   - replace scalar agent-id joins with database-user-ref joins;
@@ -458,6 +462,8 @@ converge. The final result must have one transaction-provenance model.
 - `seon.config/stale-singleton-retractions`;
 - the config-heal transaction;
 - `:seon.db/session-id`;
+- `:seon.db/turn-id`;
+- `:seon.db/eval-id`;
 - `:seon.db/resume-marker?`;
 - persisted `:seon.db/replay?`;
 - `:seon.db/origin`, `managed-origins`, and `derive-origin` after all consumers
@@ -479,6 +485,90 @@ converge. The final result must have one transaction-provenance model.
 - one ticker, listener set, server, and spawn hook per runtime;
 - inline instrumentation of newly evaluated functions;
 - structural tests and Datahike `with` as a correctness oracle.
+
+### Required in-memory authority audit
+
+The writer/reader inventory above does not yet classify every `atom`,
+`volatile!`, `defonce`, AsyncLocalStorage value, or in-memory registry. That is
+a required Phase 0 source audit, not an assumption that all current mutable
+state is legitimate. For each cell record its owner, complete value shape,
+writers/readers, whether loss on process death is harmless, database inputs,
+invalidation trigger, and cold-rebuild function. Its disposition must be one of:
+
+- irreducible process handle/state such as a live connection, socket, timer, or
+  analyzer object;
+- a DB-derived cache/projection with one explicit rebuild/invalidation path;
+- a missing durable fact that moves to Datahike; or
+- duplicated authority that is deleted.
+
+There is no goal of forcing unrelated handles into one global atom. A small
+self-contained subscriber registry or in-flight dedupe set is valid when it is
+safe to lose. A generated-id history set, lifecycle status, durable routing
+registry, schema/program inventory, or last-seen flag is suspect until proven.
+The Malli registry is the reference pattern: canonical forms are database facts;
+one complete validated runtime projection swaps atomically and can always be
+rebuilt.
+
+The first source pass has already found these concrete cells; Phase 0 completes
+this census instead of rediscovering them:
+
+- `src/seon/eval.cljs` keeps `!timeout-ms` and `!next-budget-ms` globally, so
+  concurrent agents can change one another's eval budget. Durable defaults and
+  overrides belong in config/agent facts; a one-shot override is lexical or
+  AsyncLocalStorage execution context.
+- `src/seon/error.cljs` keeps `!expecting-core-fault`, `!dev-eval-depth`, and a
+  process-global `!persists-inflight`. The first two assume sequential fibers
+  and move to AsyncLocalStorage; persistence suppression must tag the actual
+  persistence attempt rather than dropping an unrelated concurrent fault.
+- `src/seon/client.cljs` keeps `!agent-conn` beside `seon.db/*conn*`, plus
+  `!indexed-test-vars` and `!extra-core-vars` beside the database program graph.
+  Delete these duplicate authorities after their callers use the canonical
+  connection/program projection.
+- `src/seon/agent/run.cljs` keeps `!runs-this-process`, which becomes false
+  history across resume. Inspect the actual live result/host handle instead of
+  remembering a semantic run set.
+- `src/seon/schema.cljc` keeps a mutable registry, asynchronous tee, and
+  `!last-tee` as overlapping schema paths. Canonical database forms produce one
+  validated registry generation; there is no second durable tee authority.
+- `src/seon/server/reactive.clj` persists `:seon.subscription/*` while
+  `src/seon/server/boot.clj` also keeps `!engines`, and the CLJS web surface has
+  three SSE registries across serve, Datastar, and debug. Subscriptions and
+  dependency state are ephemeral projections; consolidate them under one
+  branch-qualified live-channel owner and persist none of them.
+- `!create-agent-fn`, `!mint-agent-fn`, `!create-in-flight`, and the agent
+  `!arm-child-fn` are overlapping creation seams. One lifecycle entry point and
+  one post-commit host constructor replace them.
+- Embedding hit identities currently live only in `src/seon/embed/stash.cljs`
+  AsyncLocalStorage. Persist the selected hit refs/ids on the turn because they
+  are durable evidence of what the model saw; keep only the in-flight payload
+  handle lexical.
+- Loop input/ticker handles, REPL compiler state, sockets, and wire connections
+  are legitimate process handles, but every one needs an explicit stop and
+  cold-rebuild owner. Agent/server registries are branch-qualified DB-derived
+  caches, never routing authority.
+- `!config-view-cache`, render/route caches, filtered database handles, the blob
+  `!dir`, and `!own-write-ids` must be keyed by the full branch/commit or adapter
+  generation that makes their values valid and cleared on root replacement.
+  `!own-write-ids` in particular must not be reinitialized mid-flight; its
+  lifecycle belongs to one wire-adapter generation.
+
+Exact reconciliation has one additional shared-state hazard: its current read,
+pure delta compilation, and writer submission are not atomic merely because the
+JVM serializes submitted writes. Config/program/schema transitions must include
+an expected full-head commit fence. A mismatch returns conflict, re-reads the
+new head, recompiles the candidate, and retries within a bounded policy. The
+validated Malli registry swap is serialized by the same transition owner and
+may publish only after its matching fenced transaction commits. A mechanical
+test injects a concurrent write between read and submit and proves that no stale
+many-set omission, destructive entity retraction, or incomplete registry can
+land.
+
+The same Phase 0 pass must remove existing token-reporting violations rather
+than grandfather them. Known examples are `src/seon/eval.cljs` emitting
+`N chars elided` into agent-visible persisted EDN and `src/seon/embed.clj`
+logging raw characters beside tokens. Storage-tier character fields may remain;
+every log, transcript, debug, UI, and error display uses the one
+`seon.ai.tokens/estimate` boundary.
 
 ## Test migration inventory
 
@@ -507,47 +597,56 @@ agent workflows.
 
 ## Implementation order derived from the audit
 
-1. Ratify `:seon.db/user` and `:seon.db/turn` with manual current/history
-   queries on a fresh in-memory Datahike database.
-2. Separate runtime execution context from the metadata map without changing
+1. Finish the runtime-authority/token/performance baseline and name every
+   mutable owner.
+2. Replace candidate ID generation with the one schema-driven atomic allocator.
+3. Split process boot, mint, and resume to remove the measured warm-mint
+   lifecycle bug without waiting on the database migration.
+4. Separate runtime execution context from the metadata map without changing
    existing persisted fields yet.
-3. Split process boot, mint, and resume; immediately remove eight-second mint
-   behavior while leaving seed/index internals unchanged.
-4. Add one file-grouped deterministic program snapshot.
-5. Build exact pure reconciliation functions and verify them with Datahike
-   `with`.
-6. Move config onto exact reconciliation and delete config healing.
-7. Move the program graph onto exact reconciliation and delete ghost pruning.
-8. Introduce database-user/turn ref metadata and migrate all readers atomically.
-9. Delete origin and dead metadata fields after a code-search and live-query
-   proof finds no consumers.
-10. Refine hot reload and instrumentation using the single snapshot.
-11. Profile cold boot, converged restart, sequential/concurrent mint, SSE CPU,
-   and RSS; then remove any remaining broad scans or redundant broadcasts.
+5. Install/migrate `:seon.db/user`, `:seon.db/process`, and the three process
+   refs; migrate all metadata readers/writers atomically and remove the old live
+   model.
+6. Build exact pure reconciliation functions with the full-head fence and
+   verify them with Datahike `with`.
+7. Move config onto exact reconciliation and the one crash-safe operation
+   intent; delete config/AI/brand healing.
+8. Replace schema reassertion/truncated schema source/decomposition with native
+   reopen plus canonical Malli facts and one atomic runtime registry projection.
+9. Add one file-grouped deterministic program snapshot, move the program graph
+   onto exact reconciliation, and delete ghost pruning.
+10. Refine declaration loading, hot reload, async fencing, and incremental
+    exact-data instrumentation.
+11. Correct/extend Datahike's coordinate, branch, attachment, fork, and guarded
+    restore path.
+12. Unify live subscriptions/feeds, introduce observed-read result-diff routing,
+   and delete provenance fan-out/stored literal read sets.
+13. Bound legitimate render queries/units and profile cold boot, converged
+    restart, sequential/concurrent mint, SSE CPU, event-loop delay, and RSS.
 
 The lifecycle split deliberately precedes the provenance migration. It is a
 small, independently falsifiable correction that removes most observed mint
 latency without requiring the database model refactor to be rushed.
 
-## Remaining questions before schema implementation
+## Questions resolved after the audit
 
-- Should `:seon.db/user` accept both system-user and agent lookup refs through
-  the shared `:seon.db/ref`, or should agents also carry `:seon.db.user/id`? The
-  former avoids duplicating identity; prove the query and validation shape.
-- Are root, boot, and config genuinely distinct database users, or are some of
-  them operation names? Begin with the fewest identities and prove each one
-  through a query that cannot be expressed from the resulting domain facts.
-- Does turn replay require transactions from nested asynchronous work after a
-  turn closes, and if so, what fence determines whether they legitimately
-  retain the turn ref?
-- Is “all transactions caused by one eval” a real required forensic query? If
-  yes, retain it as a ref; if not, keep eval id runtime-only.
-- Which core/config entities currently contain attributes later asserted by
-  another database user? Query the live store before choosing entity versus
-  attribute-level retraction for each desired set.
-- Should entity-schema decomposition be boot-user data reconciled from the
-  current Malli registry, or append-only Datahike installation facts? Its
-  current dual role must be separated before consolidation.
-- Which UI invalidations truly require global fan-out after changed-attribute
-  routing is considered? User provenance should not become a substitute for
-  dependency tracking.
+- `:seon.db/user` points directly to existing agent/human/root entities through
+  `:seon.db/ref`; there is no duplicate user identity.
+- Root is the user; boot, config, and REPL are process refs.
+- Turn/eval domain identities remain ordinary durable facts. They are removed
+  only from transaction metadata/runtime provenance, which does not promise
+  complete causal effect reconstruction or replay.
+- Config authority is an explicit population/attribute contract and repairs
+  that subset regardless of the last writer. Exclusive deletion has a
+  mixed-fact guard.
+- Entity-schema decomposition is removed as a stored projection. Native
+  Datahike schema remains durable installation state; canonical Malli forms
+  rebuild the runtime registry/catalog.
+- UI invalidation uses observed database read results. Provenance is not a
+  dependency graph.
+
+Only agent identities use readable package words; all other generated
+persistent identities use the compact package adapter behind the same atomic
+allocator. The rolling header rate is removed. Read-only `as-of`, isolated
+writable forks, and a quiesced live restore/undo lifecycle are all in this PRD
+and have completed Datahike/Konserve source audits.

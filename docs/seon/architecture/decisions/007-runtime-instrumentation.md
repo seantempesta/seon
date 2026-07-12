@@ -1,16 +1,28 @@
 ---
 type: decision
-status: implemented
+status: active
 date: 2026-02-20
 tags: [decision, architecture, schema]
 ---
 
-# ADR 007: Always-On Runtime Instrumentation
+# ADR 007: Always-on runtime instrumentation
+
+> **Revision 2026-07-12 (runtime-reliability target).** The always-on contract
+> stands, but the CLJS mechanism is now database-canonical and incremental. One
+> fresh runtime reconstruction passes Malli an exact explicit `:data` map once.
+> A committed program/schema change then unstruments/instruments only directly
+> changed/spec-removed/deleted functions plus the union of old/new transitive
+> schema dependents. Agent mint/resume and ordinary Shadow reload do no global
+> pass; Shadow's accepted canonical delta drives the same operation. Seon does
+> not populate Malli's process-global function-schema atom as a second roster.
+> The implementation/deletion proof is tracked in
+> `docs/prds/runtime-reliability/roadmap.md` Phase 8.
 
 > **Revision 2026-07-05 (C44/C46 — the pod-era coverage contract).** The
-> decision stands (always-on, default-validated), but the absolute wording
+> paragraph below records the mechanism being replaced. The decision stands
+> (always-on, default-validated), but the absolute wording
 > below ("all fns", "no off switch") predates the CLJS pod and overclaims.
-> The real semantics on the active track: instrumentation rides the
+> The then-current semantics on the active track were: instrumentation rides the
 > **program graph** (`seon.instrument/instrument-from-db!` at boot /
 > `start-agent!`, re-asserted after every hot reload via
 > `seon.client/after-reload`; the eval-tee wraps agent fns inline).

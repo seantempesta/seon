@@ -36,15 +36,15 @@ Agent clusters run on user devices, each a replica the writer feeds datoms to �
 indexes are materialized once per cluster, all writes forwarded to the one writer
 (total order). A **local "system" cluster** does system work; **user clusters** do
 local data processing. A threaded db *value* is location-agnostic; the work-fence is
-arbitrated at the single writer; `since-t` replay is the network-blip recovery
-primitive. A client cluster is a **trailing applier**: bootstrap the indexes ONCE,
+arbitrated at the single writer; a full attachment/commit cursor plus verified
+branch-local replay is the network-blip recovery primitive. A client cluster is a **trailing applier**: bootstrap the indexes ONCE,
 then each pushed tx is an incremental index update (persistent structures — never a
 rebuild), so a client applying the writer's stream in order is deterministically
-identical to the writer at that t. **Bootstrap (settled 2026-07-02): compressed
-full tx-log replay** — the same `since-t` machinery with watermark 0, ONE
+identical to the writer at that resolved commit. **Bootstrap (settled 2026-07-02): compressed
+full tx-log replay**—the same branch-local replay machinery from the attachment origin, ONE
 mechanism for bootstrap and blip recovery both. Device-scale optimization path
 (cost changes, semantics never): current-state-first (history-less replay or
-filtered snapshot, stamped with its basis-t so the trailing applier starts
+filtered snapshot, stamped with its full coordinate so the trailing applier starts
 exactly there) + lazy history backfill — `as-of`/history queries route to the
 writer until backfill completes. An index-root snapshot copy (content-addressed
 konserve nodes, git-style incremental) is equally complete — a persistent value
@@ -142,8 +142,10 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
   UI) AND the system orchestrator (lifecycle) — the same elevated grant, never two
   entities. Its view IS the all-agents overview at route `/`, rendered by the
   IDENTICAL block/layout/route machinery as any agent's view. It holds the elevated
-  capability grant — system-level `:seon.fn`s (`start!`, terminate, cross-agent) —
-  through the SAME `/call` gate, not a bypass. It is the root of the render + route
+  system-level lifecycle functions (`start!`, terminate, cross-agent) in its
+  discoverable context; those functions enforce their own caller rules. Its
+  registered home callbacks still pass through the ordinary `/call` browser
+  gate. It is the root of the render + route
   tree (`/` → `/agent/{id}` → apps) and the base case of the bootstrap recursion
   (root has no `:seon.agent/parent`). See [[agent-runtime]].
 - **app** — an agent-authored sub-page, route `/agent/{id}/app/{x}`.
@@ -188,7 +190,7 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
    NODE UI-HOST ── read-only replica + ONE tx-listener + the route table (reitit)
         │  listen! → derive view → whole-element morph → push  the only browser-facing HTTP/SSE
         ▲                                                    (derives every page; runs NO agent code)
-        │  wire (RPC + tx-feed, since-t replay)
+        │  wire (RPC + tx-feed, attachment/commit cursor)
    JVM WIRE-SERVER ── single-writer datahike + heavy processing (embeddings/LLM/indexing) + Integrant
         ▲   the bus + authoritative writer; handles only DATA, never agent code
         │
@@ -230,13 +232,14 @@ all of them" = read the one DB they all write to — there are no silos to aggre
 The reactive loop, end to end: a browser action POSTs a fact → the writer commits and
 fans the tx out → the relevant unit's `listen!` fires, it computes and writes its
 **facts** back → the writer fans out → the Node UI-host's `listen!` fires,
-re-renders the WHOLE element (`view = f(db-as-of t)`) and pushes one gzip datastar
+re-renders the WHOLE element (`view = f(db-at-coordinate)`) and pushes one gzip datastar
 **morph**, which idiomorph diffs client-side (a coalescing throttle collapses a tx
 burst into one morph). Two channels ride the wire with different reliability:
 reads/writes/heavy calls ride a **request-reply RPC** (only *values* cross —
 `:db.fn/cas` is data and crosses fine, closures can't); the **tx feed** is a separate
-broadcast made lossless across reconnect by per-subscriber `since-t` replay from the
-bitemporal tx-log (this is the pod↔writer wire-replication layer — the dropped event
+broadcast made lossless across reconnect by a full attachment/commit cursor and
+branch-local tx replay from the bitemporal log (this is the pod↔writer
+wire-replication layer—the dropped event
 is the wake trigger, so it must not be lost; the browser stream needs no UI-side
 `since-t`, it just repaints `view = f(db)` on reconnect). **No agent code ever touches
 an SSE connection** — agents write facts; the UI-host derives and streams.
@@ -250,8 +253,9 @@ primitives (an open run, `paused-at`, `terminated-at`), never a stored field. Th
 work bound is `default-turn-limit` + the inbound-message count, not a per-message
 write. Renders are projections, never persisted. New ways to surface data are new
 block render fns, not new mechanisms — when the underlying problem is fixed, the
-query returns empty and the surface vanishes (self-healing). Caching keys on basis-t,
-never on a db value.
+query returns empty and the surface vanishes (self-healing). Frozen caches key
+on the full resolved `{store-id, branch, commit-id, t}` coordinate, never on a db
+value or bare t.
 
 ### Never crash, always surface
 
@@ -274,11 +278,12 @@ and are batch-installed at seed. See [[ui]].
 
 ### Roles are capabilities
 
-A role = the set of `:seon.fn` capabilities granted to an agent + which bootstrap
-form-vector ran, NEVER a stored `:kind`/`:role` enum. "Orchestrator" = an agent
-granted the spawn/terminate/system fns; "worker" = an agent without them.
-Differentiation is Datomic presence/absence of grants, queried at the `/call` gate —
-root is superuser by grant, not by a special code path. This is the entity-level case
+A role = the discoverable functions/context plus the guarded operations an agent
+can perform, NEVER a stored `:kind`/`:role` enum. "Orchestrator" sees the
+spawn/terminate/system functions; "worker" does not, while each operation owns
+its enforcement. The `/call` gate covers registered browser callbacks in an
+agent's home namespace; it does not authorize direct REPL/eval calls to core
+lifecycle functions. This is the entity-level case
 of the general rule: an entity's kind is the attributes it carries, never a stored
 discriminator (see [[data-model]]).
 
@@ -287,11 +292,11 @@ discriminator (see [[data-model]]).
 The core's source, the agent's eval log, and the analyzer state are three views of
 one code corpus. Agent-defining forms persist as `:seon.fn` / `:seon.ns` /
 `:seon.schema` entities; the DB IS the running system (query → reconstitute →
-topo-sort by `:seon.ns/require-edges` → eval; redefine = upsert). An agent's **bootstrap**
-is seeded eval'd forms run quietly (`:core` origin, no wake, no turn-count) in the new
-agent's scope before any trigger — the batched `(ctx/install! […])`, the
-`:my.agent/purpose` schema + refine fn, the home-ns `defn`s — so the agent SEES its
-own startup, not hidden core magic. See [[agent-runtime]].
+topo-sort by `:seon.ns/require-edges` → load; redefine = upsert). Agent birth
+commits its context components, home namespace/require rows, and safe declaration
+facts atomically. After commit, the runtime loads those declarations without
+manufacturing quiet eval/transcript rows. The agent sees the resulting facts and
+code through ordinary context projections. See [[agent-runtime]].
 
 ## The domains
 
@@ -318,9 +323,9 @@ seeds + the ctx seed + the home ns); the loop opens a **run** only on a **trigge
 (turn-limit + wall-clock deadline). A **turn** threads one frozen db value and leads
 every work tx with an in-tx `:db.fn/cas` work-fence, so a superseded run's writes
 abort at commit. The doc owns the run/turn/FSM/derived-state mechanics, creation-as-
-idle-entity, bootstrap-as-seeded-forms, the **orchestrator-root** lifecycle
-(`start!` = a core function granted to root, aliasing `create!` through `/call`, writing
-`:seon.agent/parent`; roles-as-capabilities; root = the cluster-boot base case;
+idle-entity, fact-first initialization, the **orchestrator-root** lifecycle
+(`start!` = a core function surfaced to root, writing `:seon.agent/parent` and
+enforcing its own caller/depth rule; roles-as-capabilities; root = the cluster-boot base case;
 UI-root == orchestrator-root), and the isolation tiers. See [[agent-runtime]].
 
 ### UI — [[ui]]
@@ -329,8 +334,9 @@ The human UI is **pages** — a **layout** placing block html renders into named
 **slots**, each filled slot a **tile**; all pages are agent **views**, a tree of
 routes: the root agent’s view (`/`), per-agent views (`/agent/{id}`), and apps
 (`/agent/{id}/app/{x}`). Routing is data via **reitit** over `:seon.route/*` datoms;
-`/call` is the one action door and the capability gate authorizes the fn (namespace
-is the route). The **live channel is ours**: one tx-listener on a read-replica derives
+`/call` is the one browser-action door and its gate authorizes registered
+agent-owned home callbacks (it is not lifecycle authorization). The **live
+channel is ours**: one tx-listener on a read-replica derives
 every view and streams it as a per-connection gzip whole-element **morph**
 (idiomorph-diffed client-side); reconnect just repaints `view = f(db)`, no UI-side
 `since-t` replay. The doc owns block/render/canvas/slot/layout, the page tree,
@@ -349,8 +355,8 @@ envelope). See [[toolkit]].
 
 Every question about agent behavior — what an agent saw at turn N, what changed
 between turns, why it acted — is answered by a **query against the DB plus the
-blob store**, never by hunting log files: each turn persists its `basis-t` (the
-frozen db coordinate that makes the context re-derivable), the assembled prompt
+blob store**, never by hunting log files: each turn persists the frozen
+`{store-id, branch, commit-id, t}` coordinate that makes context re-derivable, the assembled prompt
 verbatim as a blob, and the raw reply. `agent-debug/turn` reconstructs any turn;
 `turn-diff` shows what changed between two; a dedicated **forensic agent** runs
 these queries on demand; the `/agents/run` door drives a reproducible task
@@ -374,7 +380,7 @@ doc; this one stays pure target.
 - [[ui]] — block/render/canvas/slot/layout, the page tree, reitit + the capability gate,
   the gzip-morph SSE live channel, the seed-copy + `install!`/`remove!` override.
 - [[toolkit]] — the `my.*` function catalog over the protected `seon.*` floor.
-- [[observability]] — turn replay (basis-t + prompt blob + reply), `agent-debug/turn` /
+- [[observability]] — historical turn reconstruction (resolved coordinate + prompt blob + reply), `agent-debug/turn` /
   `turn-diff`, the blob store, the forensic agent, cluster lifecycle + the
   `/agents/run` door.
 - [[context]] — the dynamic context system: `context = f(db, location,
@@ -386,7 +392,7 @@ doc; this one stays pure target.
   constrain every design above. Not principles — measurements.
 - [[roadmap]] — we-are-here → the gap → the migration checklist + the final gate.
 - [[datahike-primer]] — the source-grounded "work in datahike's grain" mindset (db is
-  a value, only values cross the wire, CAS-as-assertion, basis-t caching). Read before
+  a value, only values cross the wire, CAS-as-assertion, resolved-coordinate caching). Read before
   touching the loop.
 - [[library-grounding]] — the concrete `reference-code/…:LINE` read-map (datahike,
   malli, SCI, reitit) per phase: every load-bearing claim grounded in real source +
