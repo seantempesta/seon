@@ -2473,3 +2473,19 @@ threshold, fresh agents minted and driven, RSS observed at 1s intervals.
 4. **Heap-snapshot history strip: deferred to next push-need (owner).**
    Until it runs THE BRANCH CANNOT PUSH (2.9GB blob in 4a612150). Ping
    here when you need a push; I'll run the strip with a freeze window.
+
+**Addendum (same drive, ~00:06–00:10Z):** the acme pod was restarted
+externally at 00:05:59Z (new pid; an agent `kpc-2607112000` was minted
+at 00:00Z by another actor — acme is not exclusively this lane's right
+now). Two post-restart observations on the grown store: (1) the
+boot+resume of all 4 agents against 52k keys came up clean in ~12s —
+another bounded-at-scale proof; (2) a NEW scale smell, distinct from
+the planner rule: with one SSE feed open, per-broadcast HTML renders
+repeatedly exceed the SCI render budget (`seon.render/sci` interrupt →
+`push-conn! failed "Interrupted"`, 51 and counting) and RSS sawtooths
+1.4–2.5GB (allocate → interrupt → GC; NOT monotonic, pod stays
+responsive, HTTP 200). Likely some feed render scales with total
+datoms (192k, mostly synthetic `:seon.eval/source` rows). Left
+as-grown deliberately — this is exactly what the realistic-scale
+testbed is for — but whoever owns the render caps should look before
+long feed sessions on acme.
