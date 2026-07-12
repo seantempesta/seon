@@ -82,11 +82,17 @@ owner-gated (context frozen). Probe: `src-needle/…/lint_probe.py`,
    profile caps were denominated in `chars/4` (worth 1.86× needle
    tokens; "678 est" ≈ 1,265 real) + 15.2% context byte-fallback from
    render glyphs (~110-165 tok/row) + fat cards (−151 median when
-   compacted). OWNER DECISION pending: (a) re-cap ~800 real tokens +
-   compact cards + owner-gated glyph dial, re-export, re-measure;
-   (b) 2048-RoPE-extension finetune (tied embeddings forbid
-   retokenizing, NOT longer-context finetuning); (c) kill as
-   designed.
+   compacted). **OWNER DECISION (2026-07-12): extend the context** —
+   B2 finetunes at 2048/4096 via position-interpolation RoPE (legal:
+   tied embeddings forbid retokenizing, not longer contexts; ~26M
+   makes it cheap — 4096 prefill ≈ 130ms). The extra window = CARD
+   BUDGET (40-60 compact cards — "surface better data"). Contexts
+   stay as rendered (no re-cap squeeze, glyph dial moot for now).
+   Prep unit in flight: dataset v2 (compact cards + next-form
+   targets per KT3 + junk filter), fit tables at 1024/2048/4096,
+   extension-finetune scaffold + 2048 overfit smoke. KT3 anchor
+   stands: coverage binds harder than window size — context-gap
+   fixes travel WITH extension.
 2. **KT2 zero-shot copy fidelity** — stock checkpoint, hours (KT2b's
    0.73 per-key copy accuracy on ids/strings is favorable adjacent
    evidence).
