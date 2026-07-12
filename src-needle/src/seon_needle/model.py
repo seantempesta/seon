@@ -49,6 +49,12 @@ class NeedleConfig:
     pad_token_id: int = 0
     rope_theta: float = 10000.0
     contrastive_dim: int = 128
+    # Position-interpolation factor for the ENCODER rope path (extension
+    # finetune, seon_needle.extend): positions are divided by this, so a
+    # scale*1024 input lands in the trained [0, 1024) rotary range.
+    # 1.0 = stock behavior, byte-parity (the decoder never scales — its
+    # self-attn stays inside the trained 512, cross-attn has no rope).
+    enc_rope_scale: float = 1.0
 
     @property
     def head_dim(self):
@@ -62,10 +68,14 @@ class NeedleConfig:
         return cls(**{k: v for k, v in raw.items() if k in valid})
 
 
-def rope_freqs(head_dim, seq_len, theta=10000.0):
-    """cos/sin tables, float32, shape (seq_len, head_dim // 2)."""
+def rope_freqs(head_dim, seq_len, theta=10000.0, scale=1.0):
+    """cos/sin tables, float32, shape (seq_len, head_dim // 2).
+
+    `scale` is position interpolation (Chen et al. 2023): positions are
+    divided by it, compressing an extended sequence into the trained
+    rotary range. scale=1.0 is exactly the stock table."""
     freqs = 1.0 / (theta ** (mx.arange(0, head_dim, 2).astype(mx.float32) / head_dim))
-    t = mx.arange(seq_len).astype(mx.float32)
+    t = mx.arange(seq_len).astype(mx.float32) / scale
     angles = t[:, None] * freqs[None, :]
     return mx.cos(angles), mx.sin(angles)
 
@@ -185,16 +195,19 @@ class NeedleModel(nn.Module):
 
     # -- pieces ------------------------------------------------------------
 
-    def _rope(self, seq_len):
-        # one table, grown to a power of two; apply_rope slices what it needs
-        n = self._rope_cache.get("n", 0)
-        if n < seq_len:
+    def _rope(self, seq_len, scale=1.0):
+        # one table per scale, grown to a power of two; apply_rope slices
+        # what it needs
+        ent = self._rope_cache.get(scale)
+        if ent is None or ent["n"] < seq_len:
             n = max(512, 1 << (seq_len - 1).bit_length())
-            self._rope_cache = {
+            ent = {
                 "n": n,
-                "cos_sin": rope_freqs(self.config.head_dim, n, self.config.rope_theta),
+                "cos_sin": rope_freqs(self.config.head_dim, n,
+                                      self.config.rope_theta, scale=scale),
             }
-        return self._rope_cache["cos_sin"]
+            self._rope_cache[scale] = ent
+        return ent["cos_sin"]
 
     def _embed(self, tokens):
         emb = self.w["embedding"]["embedding"]
@@ -204,7 +217,7 @@ class NeedleModel(nn.Module):
         """Encoder forward. src: (B, T) int. Returns (encoder_out, src_mask)."""
         c = self.config
         x = self._embed(src)
-        rope = self._rope(src.shape[1])
+        rope = self._rope(src.shape[1], scale=c.enc_rope_scale)
         for lw in self.w["encoder"]["layers"]:
             gate = mx.sigmoid(lw["attn_gate"]).astype(DTYPE)
             h = zcrms_norm(x, lw["ZCRMSNorm_0"]["scale"])

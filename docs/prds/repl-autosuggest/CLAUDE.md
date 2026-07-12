@@ -23,8 +23,15 @@ checkpoint on the fn index in needle-home JSON — 0.283 @8-tool menus vs
 BFCL anchor 0.65 (weak band, informs not kills); leaderboard v0 +
 per-fn attributions shipped; arg copy 0.73; false-suggestion 0.25;
 16-tool menus bust the 1024 envelope. Fix list = docstrings/schemas,
-owner-gated. Next: KT1/KT3-KT4 before any training spend. Live status:
-[[roadmap.md]].
+owner-gated. **KT1 FIRED** (envelope-fit, not tokenizer) → owner ruled
+EXTEND the context; **extended-context prep RUN**
+([[research/extended-context-prep-2026-07-12.md]]): v2 dataset
+(`data/tune/acme-2026-07-12-v2.jsonl` — compact cards, next-form
+targets, JSON-native `json_tools`/`json_target` via the KT2b layer),
+fit tables (2048 holds 100% of rows; card budget +14 @2048 / +55
+@4096), and the `enc_rope_scale` position-interpolation scaffold
+(`seon_needle.extend`, default byte-parity) with a green 2048 overfit
+smoke in both arms — recommendation 2048. Live status: [[roadmap.md]].
 
 ## Settled — do NOT re-litigate
 

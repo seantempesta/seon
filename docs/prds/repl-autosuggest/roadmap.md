@@ -73,6 +73,29 @@ non-projecting opaque request schemas; fix list in the report,
 owner-gated (context frozen). Probe: `src-needle/…/lint_probe.py`,
 `cases/kt2b_cases.json`, `scripts/dump_fn_index.clj` (`ccf6abba`).
 
+## Extended-context prep — RUN (2026-07-12)
+
+Prep unit for the 2048-vs-4096 extension decision
+([[research/extended-context-prep-2026-07-12.md]] — fit/card-budget
+tables + smoke evidence). **v2 dataset built**
+(`data/tune/acme-2026-07-12-v2.jsonl`, 213 rows + provenance sidecar):
+compact cards (KT1 compaction), next-form targets (byte-exact edamame
+split, bundle kept as an ablation column), junk filtered (prose-form
+rule; 1 row + 2 forms dropped), and JSON-NATIVE columns per owner ruling
+— `json_tools` + `json_target` via KT2b's translation layer (full 47.4%
+/ partial 20.2% / none 32.4%, the ns-move/def-form fallout as expected;
+those rows are the coder arm's food). **Fit (real tokenizer): 2048 holds
+100% of rows** in both slot encodings (1024: 7-10%); card budget median
+**+14 compact cards @2048, +55 @4096** (measured median card 50 tok;
+rows carry 4 today). **Extension scaffold SHIPPED**
+(`seon_needle.extend` + `enc_rope_scale` position-interpolation in
+`model.py`, default byte-parity — suite 11/11 incl. JAX parity): 2048
+overfit smoke green in BOTH arms (Clojure and JSON-native) on real
+>1024-token rows — loss 5.46→0.006, **10/10 token-exact**, peak 3.3-3.6
+GB, single process. **Recommendation: 2048** (numbers in the research
+file); 4096 re-runs the same scaffold at scale 4 if card-budget evidence
+later demands it (needs attention-memory surgery to train gently).
+
 ## Ordered path (spend-gated; thresholds in design.md §Measurement)
 
 1. **KT1 tokenizer envelope — FIRED 2026-07-12**
@@ -88,11 +111,9 @@ owner-gated (context frozen). Probe: `src-needle/…/lint_probe.py`,
    makes it cheap — 4096 prefill ≈ 130ms). The extra window = CARD
    BUDGET (40-60 compact cards — "surface better data"). Contexts
    stay as rendered (no re-cap squeeze, glyph dial moot for now).
-   Prep unit in flight: dataset v2 (compact cards + next-form
-   targets per KT3 + junk filter), fit tables at 1024/2048/4096,
-   extension-finetune scaffold + 2048 overfit smoke. KT3 anchor
-   stands: coverage binds harder than window size — context-gap
-   fixes travel WITH extension.
+   **Prep unit RUN** — see "Extended-context prep" below;
+   recommendation 2048. KT3 anchor stands: coverage binds harder
+   than window size — context-gap fixes travel WITH extension.
 2. **KT2 zero-shot copy fidelity** — stock checkpoint, hours (KT2b's
    0.73 per-key copy accuracy on ids/strings is favorable adjacent
    evidence).

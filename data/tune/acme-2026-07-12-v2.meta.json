@@ -1,0 +1,48 @@
+{
+ "source": "data/tune/acme-2026-07-12.jsonl",
+ "source_sha256": "debdfe0d918f19ffcf3fcdbec96d567b9ca377203c55b467242bc61c2e529397",
+ "generated": "2026-07-12",
+ "generator": "src-needle/src/seon_needle/build_v2.py + src-needle/scripts/split_forms.clj",
+ "transform": [
+  "cards: KT1 compaction (name + docstring line-1 + arglist; {:malli/schema ...} stripped) — kt1_envelope.compact_card",
+  "target: FIRST clean form (next-form granularity, KT3); target_substantive: first clean non-ns-move form (absent when none); target_bundle: cleaned whole-turn bundle (ablation)",
+  "junk filter: parses-clean via bb/edamame (rows) + prose-form rule (a list of >=2 bare all-alphabetic symbols) per-form",
+  "json_tools: cards -> needle tool defs via KT2b's fn_to_tool + normalize_tools (snake names); encoder tools slot = json.dumps(row['json_tools'], separators=(',', ':'))",
+  "json_target: next-form target -> needle-home [{name, arguments}]; name joined to the row's tools-slot snake name (KT3 symbol rule); arg keys last-segment snake_case (collision -> qualified); keyword values keep their ':kw' string; non-JSON values (quoted forms, symbols) -> byte-exact EDN source string + json_status partial; null when the next form is a def-form/ns-move/control/interop",
+  "contexts: UNCHANGED (context generation frozen; no re-render)"
+ ],
+ "rows_in": 214,
+ "rows_out": 213,
+ "card_translation": {
+  "distinct_cards": 487,
+  "index_matched": 111,
+  "card_local": 376,
+  "unparseable": 0,
+  "alias_hits": 62,
+  "tools_with_notes": 309
+ },
+ "dropped_rows": [
+  {
+   "v1_row": 184,
+   "reason": "all forms junk"
+  }
+ ],
+ "forms_dropped": 2,
+ "join_fidelity_mismatches": 0,
+ "json_target_status": {
+  "none": 69,
+  "full": 101,
+  "partial": 43
+ },
+ "json_none_reasons": {
+  "ns-move": 52,
+  "def-form": 17
+ },
+ "bundle_form_shapes": {
+  "ns-move": 72,
+  "call": 296,
+  "def-form": 31,
+  "control-form": 4,
+  "interop": 1
+ }
+}
