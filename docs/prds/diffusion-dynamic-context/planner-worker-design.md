@@ -204,10 +204,21 @@ One measurement per unit — the bench falsifies; it is not the work.
 - **W4 — measure**: the `planner_worker` task, one full run, honest
   verdicts against the win conditions.
 
-## Open questions (resolve during W1, owner rulings where marked)
+## Rulings landed (owner, 2026-07-11 evening)
 
-- `:plan` vs `:plan-ledger` block overlap (both render open steps today)
-  — OWNER ruling pending; W1 should land with ONE plan surface.
+- **`:plan` is THE plan surface** — the ▶/☐ ledger rendering and
+  done-dropped behavior fold into `my.plan.internal/plan-block`;
+  `:plan-ledger` retires (unit queued; the `verb-offers` glyph
+  alignment moves with it).
+- **Acme testbed loadout**: acme.edn declares the full diffusion tree —
+  minimal tree + menu blocks + `:typeahead-steps` (tile on by default
+  on the TESTBED only; the default cluster stays minimal).
+- **P7 frontier = BOTH**: DeepSeek (topped up; key verified live) as
+  the reference arm, scheduled off-peak per the pricing memory; Muse
+  as the planner.
+- Heap-snapshot history strip: deferred to next push-need (owner).
+
+## Open questions (resolve during W1)
 - Where the planner call lives for the bench: a real second agent via
   `::agent-provider`, or host-side plan text in the corpus. Start
   host-side (deterministic, cheaper), graduate to live two-agent.
