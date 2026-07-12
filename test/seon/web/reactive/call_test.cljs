@@ -159,7 +159,16 @@
     #js {:method "POST"
          :url    (if args-str
                    (str base "&args=" (js/encodeURIComponent args-str))
-                   base)}))
+                   base)
+         :headers #js {}}))
+
+(deftest datastar-success-is-an-empty-acknowledgement
+  (let [{state ::state res ::res} (mock-res)
+        req #js {:headers #js {"datastar-request" "true"}}]
+    (@#'call/write-success! req res)
+    (is (= 204 (:code @state)))
+    (is (true? (:ended? @state)))
+    (is (nil? (:body @state)) "the live feed, not a duplicate body, updates UI")))
 
 (defn- with-seeded-conn
   "Open a fresh agent conn, seed!, run `(f conn)` (a Promise), restore *conn*."

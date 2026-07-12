@@ -181,6 +181,20 @@
                             "Cache-Control" "no-store"})
   (.end res (js/JSON.stringify (clj->js m))))
 
+(defn- datastar-request? [^js req]
+  (= "true" (some-> (aget (.-headers req) "datastar-request") str/lower-case)))
+
+(defn- write-success!
+  "End a successful browser action without a redundant response payload.
+
+   The database listener owns the visible update. Direct API callers retain
+   the small JSON acknowledgement for compatibility."
+  [^js req ^js res]
+  (if (datastar-request? req)
+    (do (.writeHead res 204 #js {"Cache-Control" "no-store"})
+        (.end res))
+    (write-json! res 200 {::ok? true})))
+
 (defn- query-val [^js req k]
   (try
     (let [u (js/URL. (str "http://x" (.-url req)))]
@@ -253,7 +267,7 @@
          (if-let [reason (::refused cap)]
            (do
              (log/info-console! "seon.web.reactive.call" "/call REFUSED"
-                                {:fn fn-str})
+                                {:seon.web.call/fn fn-str})
              (write-json! res 403 {::ok?      false
                                    ::refused  reason}))
            (let [agent-id (::agent-id cap)
@@ -277,7 +291,8 @@
                      (if arg-error
                        (do
                          (log/info-console! "seon.web.reactive.call" "/call BAD ARGS"
-                                            {:fn fn-str :error arg-error})
+                                            {:seon.web.call/fn fn-str
+                                             :seon.web.call/error arg-error})
                          (write-json! res 422 {::ok?   false
                                                ::error (str "bad args: " arg-error)}))
                        (-> (invoke! agent-id fn-sym args)
@@ -286,8 +301,9 @@
                                (if ok?
                                  (do
                                    (log/info-console! "seon.web.reactive.call" "/call OK"
-                                                      {:fn fn-str :agent agent-id})
-                                   (write-json! res 200 {::ok? true}))
+                                                      {:seon.web.call/fn fn-str
+                                                       :seon.agent/id agent-id})
+                                   (write-success! req res))
                                  (do
                                    (log/error-console! "seon.web.reactive.call"
                                                        "/call invoke error" (str err))
