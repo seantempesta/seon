@@ -595,7 +595,8 @@ def score_arm(cases, records):
 # Arms
 # ---------------------------------------------------------------------------
 
-def run_seon_arm(model, tokenizer, cases, tools, n_distractors, batch=16):
+def run_seon_arm(model, tokenizer, cases, tools, n_distractors, batch=16,
+                 max_enc_len=DEFAULT_MAX_ENC_LEN):
     records = []
     for start in range(0, len(cases), batch):
         chunk = cases[start:start + batch]
@@ -609,7 +610,8 @@ def run_seon_arm(model, tokenizer, cases, tools, n_distractors, batch=16):
             tools_norm.append(tj)
             maps.append(name_map)
             menus.append(menu)
-        out = constrained_generate_batch(model, tokenizer, queries, tools_norm)
+        out = constrained_generate_batch(model, tokenizer, queries, tools_norm,
+                                         max_enc_len=max_enc_len)
         for i, case in enumerate(chunk):
             calls, parsed = parse_calls(out["texts"][i])
             restore_names(calls, maps[i])
@@ -622,24 +624,54 @@ def run_seon_arm(model, tokenizer, cases, tools, n_distractors, batch=16):
     return records
 
 
-def cmd_run(menu_sizes=(0, 7, 15)):
+def position_accuracy(cases, records):
+    """Selection accuracy by the expected tool's POSITION tercile in the
+    menu (early/middle/late) — the deep-menu lens the extension train
+    must move. Computed from each record's stored menu."""
+    by_case = {c["id"]: c for c in cases}
+    buckets = {"early": [0, 0], "middle": [0, 0], "late": [0, 0]}
+    for rec in records:
+        case = by_case[rec["id"]]
+        expected = case.get("expected")
+        if expected is None or expected not in rec["menu"]:
+            continue
+        frac = rec["menu"].index(expected) / max(len(rec["menu"]) - 1, 1)
+        b = "early" if frac < 1 / 3 else ("middle" if frac < 2 / 3 else "late")
+        calls, parsed = parse_calls(rec["text"])
+        hit = [c.get("name") for c in calls] == [expected]
+        buckets[b][0] += hit
+        buckets[b][1] += 1
+    return {k: {"n": n, "acc": round(c / n, 4) if n else None}
+            for k, (c, n) in buckets.items()}
+
+
+def cmd_run(menu_sizes=(0, 7, 15), model=None, tokenizer=None,
+            max_enc_len=DEFAULT_MAX_ENC_LEN, max_enc_by_size=None,
+            out_name="seon_probe_results.json", tag="stock"):
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     _, tools, gaps = load_index()
     cases = load_cases()
-    model, tokenizer = load_model(), load_tokenizer()
-    results = {"gaps": gaps, "arms": {}}
+    if model is None:
+        model, tokenizer = load_model(), load_tokenizer()
+    results = {"tag": tag, "gaps": gaps, "arms": {}}
     for nd in menu_sizes:
         arm_cases = [c for c in cases if not (nd == 0 and c.get("expected") is None)]
         label = f"menu{nd + 1}"
-        print(f"== arm {label}: {len(arm_cases)} cases, {nd} distractors")
-        records = run_seon_arm(model, tokenizer, arm_cases, tools, nd)
+        arm_max_enc = (max_enc_by_size or {}).get(nd, max_enc_len)
+        print(f"== arm {label}: {len(arm_cases)} cases, {nd} distractors, "
+              f"max_enc {arm_max_enc}")
+        records = run_seon_arm(model, tokenizer, arm_cases, tools, nd,
+                               max_enc_len=arm_max_enc)
         scores = score_arm(arm_cases, records)
         cut = sum(1 for r in records if r["tools_cut_tokens"] > 0)
         scores["menus_truncated"] = cut
-        results["arms"][label] = {"scores": scores, "records": records}
+        scores["by_position"] = position_accuracy(arm_cases, records)
+        results["arms"][label] = {"scores": scores, "records": records,
+                                  "max_enc_len": arm_max_enc}
         print(f"  name_acc={scores['name_acc']} parse={scores['parse_rate']} "
-              f"F1={scores['name_f1']} truncated={cut}/{len(records)}")
-    path = OUT_DIR / "seon_probe_results.json"
+              f"F1={scores['name_f1']} truncated={cut}/{len(records)} "
+              f"pos={scores['by_position']}")
+    path = OUT_DIR / out_name
     path.write_text(json.dumps(results, indent=1))
     print("wrote", path)
 
@@ -712,11 +744,14 @@ def score_bfcl(rows, answers, records):
             "args_key_acc": round(pkey_ok / max(pkey_total, 1), 4)}
 
 
-def cmd_calibrate(n=100, distractor_arms=(0, 7)):
+def cmd_calibrate(n=100, distractor_arms=(0, 7), model=None, tokenizer=None,
+                  max_enc_len=DEFAULT_MAX_ENC_LEN,
+                  out_name="bfcl_calibration.json", tag="stock"):
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     rows, answers, all_fns = load_bfcl(n=n)
-    model, tokenizer = load_model(), load_tokenizer()
-    results = {}
+    if model is None:
+        model, tokenizer = load_model(), load_tokenizer()
+    results = {"tag": tag}
     for nd in distractor_arms:
         queries, tools_norm, maps = [], [], []
         for row in rows:
@@ -735,7 +770,7 @@ def cmd_calibrate(n=100, distractor_arms=(0, 7)):
         for start in range(0, len(rows), 16):
             out = constrained_generate_batch(
                 model, tokenizer, queries[start:start + 16],
-                tools_norm[start:start + 16])
+                tools_norm[start:start + 16], max_enc_len=max_enc_len)
             for i in range(len(out["texts"])):
                 calls, parsed = parse_calls(out["texts"][i])
                 restore_names(calls, maps[start + i])
@@ -747,7 +782,7 @@ def cmd_calibrate(n=100, distractor_arms=(0, 7)):
         results[label] = {"scores": score_bfcl(rows, answers, records),
                           "records": records}
         print(label, results[label]["scores"])
-    path = OUT_DIR / "bfcl_calibration.json"
+    path = OUT_DIR / out_name
     path.write_text(json.dumps(results, indent=1))
     print("wrote", path)
 
