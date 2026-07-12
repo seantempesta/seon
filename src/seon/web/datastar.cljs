@@ -278,25 +278,30 @@
 ;; ============================================================
 
 (defonce ^:private !pending-change (atom nil))
-(defonce ^:private !broadcast-scheduled? (atom false))
+(defonce ^:private !broadcast-timer (atom nil))
 
 (defn- merge-change [pending change]
   {:seon.db/db (:seon.db/db change)
    :seon.db/changed-attrs
    (into (or (:seon.db/changed-attrs pending) #{})
-         (keys (:seon.db/attr-index change)))})
+         (keys (:seon.db/attr-index change)))
+   :seon.web.broadcast/structural?
+   (or (:seon.web.broadcast/structural? pending)
+       (agent-view/structural-change?
+         (set (keys (:seon.db/attr-index change)))))})
 
 (defn- schedule-broadcast! [change]
-  (swap! !pending-change merge-change change)
-  (when-not @!broadcast-scheduled?
-    (reset! !broadcast-scheduled? true)
-    (js/setTimeout
-      (fn []
-        (let [pending @!pending-change]
-          (reset! !pending-change nil)
-          (reset! !broadcast-scheduled? false)
-          (when pending (broadcast! pending))))
-      16)))
+  (let [pending (swap! !pending-change merge-change change)
+        delay-ms (if (:seon.web.broadcast/structural? pending) 300 16)]
+    (when-let [timer @!broadcast-timer] (js/clearTimeout timer))
+    (reset! !broadcast-timer
+            (js/setTimeout
+              (fn []
+                (let [ready @!pending-change]
+                  (reset! !pending-change nil)
+                  (reset! !broadcast-timer nil)
+                  (when ready (broadcast! ready))))
+              delay-ms))))
 
 ;; ============================================================
 ;; Lifecycle — db/listen! IS the refresh signal.

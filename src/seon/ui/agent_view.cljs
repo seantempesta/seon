@@ -224,13 +224,14 @@
     :seon.agent.ctx/priority
     :seon.render/html
     :seon.fn/sym
-    :seon.fn/source
     :seon.fn/spec
-    :seon.fn/read-attrs
-    :seon.fn/ns
-    :seon.ns/name
-    :seon.ns/source
-    :seon.ns/require-edges})
+    :seon.fn/ns})
+
+(defn structural-change?
+  "Whether changed attrs can add, remove, or rebind an agent-view surface."
+  {:malli/schema [:=> [:catn [::changed-attrs ::changed-attrs]] :boolean]}
+  [changed-attrs]
+  (boolean (seq (set/intersection structural-attrs changed-attrs))))
 
 (def ^:private header-attrs
   "Stored inputs that materially change the fleet status header.
@@ -268,9 +269,14 @@
                 (filter #(contains? % :seon.render/html))
                 (map #(or (::render-fns/fn-sym %)
                           (:seon.render/html %)))
-                (mapcat #(renderer-attrs dbv %)))
+                (mapcat #(cond-> (renderer-attrs dbv %)
+                           (symbol? %)
+                           (conj :seon.fn/source :seon.fn/read-attrs))))
               (:seon.agent.ctx/children root))
-        canvas-attrs (renderer-attrs dbv (canvas-renderer dbv agent-id))]
+        canvas-renderer* (canvas-renderer dbv agent-id)
+        canvas-attrs (cond-> (renderer-attrs dbv canvas-renderer*)
+                       (symbol? canvas-renderer*)
+                       (conj :seon.fn/source :seon.fn/read-attrs))]
     {::surface-attrs (into #{:seon.render.canvas/content}
                            (concat context-attrs canvas-attrs))
      ::structural-attrs structural-attrs
@@ -295,7 +301,9 @@
                   :seon.ui.surface/root root
                   :seon.ui.surface/renderer displayed-renderer
                  :seon.ui.surface/read-attrs
-                  (renderer-attrs dbv dependency-renderer)
+                  (cond-> (renderer-attrs dbv dependency-renderer)
+                    (symbol? dependency-renderer)
+                    (conj :seon.fn/source :seon.fn/read-attrs))
                   :seon.ui.surface/touch
                   (renderer-touch dbv agent-id dependency-renderer)
                   :seon.ui.surface/focus-touch
@@ -310,7 +318,9 @@
      :seon.ui.surface/label "canvas"
      :seon.ui.surface/renderer renderer
      :seon.ui.surface/read-attrs
-     (conj (renderer-attrs dbv renderer) :seon.render.canvas/content)
+     (cond-> (conj (renderer-attrs dbv renderer)
+                   :seon.render.canvas/content)
+       (symbol? renderer) (conj :seon.fn/source :seon.fn/read-attrs))
      :seon.ui.surface/touch (canvas-touch dbv agent-id)
      :seon.ui.surface/focus-touch (canvas-touch dbv agent-id)}))
 
@@ -376,7 +386,7 @@
                              [::changed-attrs ::changed-attrs]]
                   [:vector :any]]}
   [dbv agent-id changed-attrs]
-  (if (seq (set/intersection structural-attrs changed-attrs))
+  (if (structural-change? changed-attrs)
     [(agent-view dbv agent-id)]
     (let [specs (surface-specs dbv agent-id)
           affected-specs
