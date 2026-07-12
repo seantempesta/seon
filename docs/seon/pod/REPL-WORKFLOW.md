@@ -35,12 +35,11 @@ bound HTTP port to `tmp/seon-port` (default `7890`; override via
 The active CLJS MCP server is registered as `seon_cljs`:
 
 ```clojure
-;; Smoke — proves the runtime is alive
+;; Smoke — proves the real cluster database is attached
 mcp__seon_cljs__eval {
-  code: "(require '[cljs.core.async :as a])
-         (a/go (println (a/<! (seon.client/datahike-smoke-test!))))"
+  code: "(seon.db/basis-t)"
 }
-;; => {:rows #{["Alpha" 1] ["Seon" 2] ["Datahike" 3]}, :status :pass, :datoms 6}
+;; => <current transaction id>
 
 ;; Inspect process-lifetime state
 mcp__seon_cljs__eval { code: "@seon.client/!state" }

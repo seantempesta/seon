@@ -23,7 +23,11 @@ mcp__seon_cljs__eval { code: "@seon.client/!state" }
 
 ```
 
-After `clj -M:cljs watch client` reports `[:client] Build completed`, the watcher writes `.shadow-cljs/nrepl.port` (pinned to `:7889`). `node out/client/main.js` should print `[client] datahike-cljs smoke test PASS — 6 datoms` on boot. Then `mcp__seon_cljs__eval` reaches the runtime via shadow-cljs's nREPL piggyback.
+After `clj -M:cljs watch client` reports `[:client] Build completed`, the
+watcher writes `.shadow-cljs/nrepl.port` (pinned to `:7889`).
+`node out/client/main.js` attaches the real cluster database and starts the
+agent/web runtime; it does not create a second in-memory smoke database. Then
+`mcp__seon_cljs__eval` reaches the runtime via shadow-cljs's nREPL piggyback.
 
 ## Verify in detail
 
@@ -39,19 +43,16 @@ mcp sessions: 0
 
 If `runtime_status` returns `<no watcher>`, the watcher isn't running. Restart Terminal 1.
 
-### 2. The datahike-cljs smoke is alive
+### 2. The cluster database is attached
 
 ```clojure
 ;; Pass session_id from a fresh mcp__seon_cljs__create_session {build: ":client"}
 mcp__seon_cljs__eval {
-  code: "(require '[cljs.core.async :as a])
-         (a/go (println (a/<! (seon.client/datahike-smoke-test!))))"
+  code: "(seon.db/basis-t)"
   session_id: "<your sid>"
 }
 
-;; Expected stdout:
-;; [client] datahike-cljs smoke test ...
-;; {:rows #{["Alpha" 1] ["Seon" 2] ["Datahike" 3]}, :status :pass, :datoms 6}
+;; Expected: the current cluster transaction id (an integer).
 
 ```
 

@@ -1,10 +1,8 @@
 (ns seon.client
   "V0 CLJS pod entry point. Long-running Node process; the V0 client.
 
-   Two responsibilities:
-
-     1. Run the smoke test on boot — proves datahike-cljs is alive.
-     2. Boot the V0 agent on demand via `start-agent!`.
+   Responsibility: attach the cluster runtime and boot agents via
+   `start-agent!`.
 
    How to run it:
 
@@ -316,67 +314,10 @@
                          (str "reload: re-instrumented " (pr-str stats)))))
   (start-heartbeat!))
 
-;; ---------------------------------------------------------------------------
-;; datahike-cljs smoke test — proves the core works end-to-end.
-;;
-;; This is the canonical 'is datahike-cljs alive?' check. Useful as:
-;;   - boot-time verification (`-main` runs it),
-;;   - REPL-callable health probe (`(datahike-smoke-test!)`),
-;;   - reference for how to use datahike-cljs from agent code.
-;; ---------------------------------------------------------------------------
-
-(def ^:private smoke-schema
-  [{:db/ident       :name
-    :db/cardinality :db.cardinality/one
-    :db/index       true
-    :db/unique      :db.unique/identity
-    :db/valueType   :db.type/string}
-   {:db/ident       :rank
-    :db/cardinality :db.cardinality/one
-    :db/valueType   :db.type/long}])
-
-(def ^:private smoke-seed
-  [{:name "Alpha"    :rank 1}
-   {:name "Seon"     :rank 2}
-   {:name "Datahike" :rank 3}])
-
-(def ^:private smoke-expected
-  #{["Alpha" 1] ["Seon" 2] ["Datahike" 3]})
-
-(defn ^:async datahike-smoke-test!
-  "Create a fresh :memory datahike-cljs DB, transact schema + seed entities,
-   query, compare to expected. Returns a Promise resolving to
-   {:status :pass :datoms <n> :rows <set>} or
-   {:status :fail :got <set> :expected <set>}.
-
-   REPL usage:
-     (.then (datahike-smoke-test!) println)"
-  {:malli/schema [:=> [:cat] :any]}
-  []
-  (let [cfg {:store              {:backend :memory
-                                  :id (random-uuid)}
-             :schema-flexibility :write
-             ;; Smoke + dev conns share the same history posture as the
-             ;; agent conn so behavior parity holds across diagnostics
-             ;; (Phase 2.5, 2026-05-22 — per Sean: storage overhead
-             ;; trivial, consistency wins).
-             :keep-history?      true}]
-    (await (d/create-database cfg))
-    (let [conn (await (d/connect cfg))
-          _    (await (d/transact! conn smoke-schema))
-          tx   (await (d/transact! conn smoke-seed))
-          rows (d/q '[:find ?name ?rank
-                      :where
-                      [?e :name ?name]
-                      [?e :rank ?rank]]
-                    @conn)]
-      (if (= rows smoke-expected)
-        {:status :pass :datoms (count (:tx-data tx)) :rows rows}
-        {:status :fail :got rows :expected smoke-expected}))))
-
 (defn ^:async mem-db
   "REPL convenience — open a fresh :memory datahike-cljs DB with optional
-   schema. Returns a Promise resolving to a conn atom."
+   schema. Returns a Promise resolving to a caller-owned conn atom; call
+   `(datahike.api/release conn)` when finished."
   {:malli/schema [:function
                   [:=> [:cat] :any]
                   [:=> [:catn [::schema :any]] :any]]}
@@ -385,7 +326,7 @@
    (let [cfg {:store              {:backend :memory
                                    :id (random-uuid)}
               :schema-flexibility :write
-              ;; Match agent + smoke conn history posture (Phase 2.5).
+              ;; Match the agent connection's history posture (Phase 2.5).
               :keep-history?      true}]
      (await (d/create-database cfg))
      (let [conn (await (d/connect cfg))]
@@ -396,10 +337,9 @@
 ;; ---------------------------------------------------------------------------
 ;; Agent boot
 ;;
-;; The V0 agent runs against a long-lived :memory datahike conn distinct
-;; from the smoke-test's ephemeral conn. start-agent! opens it, bootstraps
-;; the datahike schema (idents needed for lookup-refs), binds seon.db/*conn*
-;; at the var root, and hands off to seon.agent/boot!.
+;; start-agent! opens the cluster connection, bootstraps the datahike schema
+;; (idents needed for lookup-refs), binds seon.db/*conn* at the var root, and
+;; hands off to seon.agent/boot!.
 ;;
 ;; Idempotent: re-calling start-agent! reuses the existing conn (stored in
 ;; !agent-conn) and re-arms the wake trigger. Useful during dev hot-
@@ -2871,8 +2811,8 @@
   [& _args]
   ;; FIRST: gate datahike-cljs/konserve trace+debug (per-index-node
   ;; `:datahike/index-access` traces flooded pod.log to 813 MB on one
-  ;; cold-store web UI render, 2026-06-09). Must run before the
-  ;; smoke test / start-agent! open any store.
+  ;; cold-store web UI render, 2026-06-09). Must run before start-agent!
+  ;; opens the store.
   (log/quiet-library-logs!)
   (install-process-safety-net!)
   (log/info-console! "seon.client" "-main boot" {:boot-at (:boot-at @!state)})
@@ -2881,18 +2821,9 @@
   ;; indexed — the DB is the complete, ordering-independent source of every
   ;; fn + spec (issue instrumentation-collect-clean-build-empty). The
   ;; eval-tee path instruments newly-defined fns inline between boots.
-  (-> (datahike-smoke-test!)
-      (.then (fn [result]
-               (case (:status result)
-                 :pass (log/info-console! "seon.client" "datahike-cljs smoke test PASS"
-                                          {:datoms (:datoms result)})
-                 :fail (log/error-console! "seon.client" "datahike-cljs smoke test FAIL"
-                                           {:got (:got result) :expected (:expected result)}))))
-      (.catch (fn [err]
-                (log/error-console! "seon.client" "datahike-cljs smoke test THREW" err))))
   ;; A-5: auto-boot the V0 agent + HTTP server unless SEON_NO_AUTO_BOOT.
   ;; Cheap default for dev iteration — browser hits the loopback port,
-  ;; no REPL needed. Disable when running the bare smoke test alone.
+  ;; no REPL needed. Disable for a compiler-only/dev-eval process.
   (when-not (config/no-auto-boot?)
     (let [llm-fn   (current-llm-fn)
           provider (ai/provider)
