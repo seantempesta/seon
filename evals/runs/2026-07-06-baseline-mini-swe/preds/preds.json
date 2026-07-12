@@ -1,0 +1,52 @@
+{
+  "pallets__flask-5014": {
+    "model_name_or_path": "openai/deepseek-v4-pro",
+    "instance_id": "pallets__flask-5014",
+    "model_patch": "diff --git a/src/flask/blueprints.py b/src/flask/blueprints.py\nindex eb50585d..1aa82562 100644\n--- a/src/flask/blueprints.py\n+++ b/src/flask/blueprints.py\n@@ -190,6 +190,9 @@ class Blueprint(Scaffold):\n             root_path=root_path,\n         )\n \n+        if not name:\n+            raise ValueError(\"'name' may not be empty.\")\n+\n         if \".\" in name:\n             raise ValueError(\"'name' may not contain a dot '.' character.\")\n \n"
+  },
+  "django__django-11299": {
+    "model_name_or_path": "openai/deepseek-v4-pro",
+    "instance_id": "django__django-11299",
+    "model_patch": "diff --git a/django/db/models/sql/query.py b/django/db/models/sql/query.py\nindex b99f03cd88..d69c24419b 100644\n--- a/django/db/models/sql/query.py\n+++ b/django/db/models/sql/query.py\n@@ -1338,7 +1338,7 @@ class Query(BaseExpression):\n             if isinstance(child, Node):\n                 child_clause, needed_inner = self._add_q(\n                     child, used_aliases, branch_negated,\n-                    current_negated, allow_joins, split_subq)\n+                    current_negated, allow_joins, split_subq, simple_col)\n                 joinpromoter.add_votes(needed_inner)\n             else:\n                 child_clause, needed_inner = self.build_filter(\n"
+  },
+  "psf__requests-1921": {
+    "model_name_or_path": "openai/deepseek-v4-pro",
+    "instance_id": "psf__requests-1921",
+    "model_patch": "diff --git a/requests/sessions.py b/requests/sessions.py\nindex a023e4ec..07ef3bee 100644\n--- a/requests/sessions.py\n+++ b/requests/sessions.py\n@@ -54,11 +54,17 @@ def merge_setting(request_setting, session_setting, dict_class=OrderedDict):\n     merged_setting = dict_class(to_key_val_list(session_setting))\n     merged_setting.update(to_key_val_list(request_setting))\n \n-    # Remove keys that are set to None.\n+    # Remove keys that are set to None. Do this for both session\n+    # and request settings so that setting a key to None in either\n+    # will remove it from the merged dictionary.\n     for (k, v) in request_setting.items():\n         if v is None:\n             del merged_setting[k]\n \n+    for (k, v) in session_setting.items():\n+        if v is None:\n+            del merged_setting[k]\n+\n     return merged_setting\n \n \n"
+  },
+  "pylint-dev__pylint-4604": {
+    "model_name_or_path": "openai/deepseek-v4-pro",
+    "instance_id": "pylint-dev__pylint-4604",
+    "model_patch": "diff --git a/pylint/checkers/variables.py b/pylint/checkers/variables.py\nindex 3ddafd599..83854c810 100644\n--- a/pylint/checkers/variables.py\n+++ b/pylint/checkers/variables.py\n@@ -1822,11 +1822,17 @@ class VariablesChecker(BaseChecker):\n \n     def _store_type_annotation_node(self, type_annotation):\n         \"\"\"Given a type annotation, store all the name nodes it refers to\"\"\"\n+        if type_annotation is None:\n+            return\n         if isinstance(type_annotation, astroid.Name):\n             self._type_annotation_names.append(type_annotation.name)\n             return\n \n         if not isinstance(type_annotation, astroid.Subscript):\n+            self._type_annotation_names.extend(\n+                annotation.name\n+                for annotation in type_annotation.nodes_of_class(astroid.Name)\n+            )\n             return\n \n         if (\n"
+  },
+  "pytest-dev__pytest-7490": {
+    "model_name_or_path": "openai/deepseek-v4-pro",
+    "instance_id": "pytest-dev__pytest-7490",
+    "model_patch": "diff --git a/src/_pytest/skipping.py b/src/_pytest/skipping.py\nindex 335e10996..b9e9b5d91 100644\n--- a/src/_pytest/skipping.py\n+++ b/src/_pytest/skipping.py\n@@ -16,6 +16,7 @@ from _pytest.config.argparsing import Parser\n from _pytest.mark.structures import Mark\n from _pytest.nodes import Item\n from _pytest.outcomes import fail\n+from _pytest.outcomes import Failed\n from _pytest.outcomes import skip\n from _pytest.outcomes import xfail\n from _pytest.reports import BaseReport\n@@ -262,6 +263,11 @@ def pytest_runtest_makereport(item: Item, call: CallInfo[None]):\n     outcome = yield\n     rep = outcome.get_result()\n     xfailed = item._store.get(xfailed_key, None)\n+    if xfailed is None:\n+        try:\n+            xfailed = evaluate_xfail_marks(item)\n+        except Failed:\n+            xfailed = None\n     # unittest special case, see setting of unexpectedsuccess_key\n     if unexpectedsuccess_key in item._store and rep.when == \"call\":\n         reason = item._store[unexpectedsuccess_key]\n"
+  },
+  "sphinx-doc__sphinx-8269": {
+    "model_name_or_path": "openai/deepseek-v4-pro",
+    "instance_id": "sphinx-doc__sphinx-8269",
+    "model_patch": "diff --git a/sphinx/builders/linkcheck.py b/sphinx/builders/linkcheck.py\nindex 9b54afc7c..1083e82ec 100644\n--- a/sphinx/builders/linkcheck.py\n+++ b/sphinx/builders/linkcheck.py\n@@ -166,6 +166,7 @@ class CheckExternalLinksBuilder(Builder):\n                     # Read the whole document and see if #anchor exists\n                     response = requests.get(req_url, stream=True, config=self.app.config,\n                                             auth=auth_info, **kwargs)\n+                    response.raise_for_status()\n                     found = check_anchor(response, unquote(anchor))\n \n                     if not found:\n"
+  },
+  "mwaskom__seaborn-3187": {
+    "model_name_or_path": "openai/deepseek-v4-pro",
+    "instance_id": "mwaskom__seaborn-3187",
+    "model_patch": "diff --git a/seaborn/_core/scales.py b/seaborn/_core/scales.py\nindex 55874bf2..78d088b0 100644\n--- a/seaborn/_core/scales.py\n+++ b/seaborn/_core/scales.py\n@@ -379,6 +379,9 @@ class ContinuousBase(Scale):\n             locs = axis.major.locator()\n             locs = locs[(vmin <= locs) & (locs <= vmax)]\n             labels = axis.major.formatter.format_ticks(locs)\n+            offset = axis.major.formatter.get_offset()\n+            if offset:\n+                labels = [f\"{l}\" if not l else f\"{l}\u00d7{offset}\" for l in labels]\n             new._legend = list(locs), list(labels)\n \n         return new\ndiff --git a/seaborn/utils.py b/seaborn/utils.py\nindex 2407853c..90f127f8 100644\n--- a/seaborn/utils.py\n+++ b/seaborn/utils.py\n@@ -707,6 +707,13 @@ def locator_to_legend_entries(locator, limits, dtype):\n     formatter.set_locs(raw_levels)\n     formatted_levels = [formatter(x) for x in raw_levels]\n \n+    offset = formatter.get_offset()\n+    if offset:\n+        formatted_levels = [\n+            f\"{l}\" if not l else f\"{l}\u00d7{offset}\"\n+            for l in formatted_levels\n+        ]\n+\n     return raw_levels, formatted_levels\n \n \n"
+  },
+  "sympy__sympy-15875": {
+    "model_name_or_path": "openai/deepseek-v4-pro",
+    "instance_id": "sympy__sympy-15875",
+    "model_patch": "diff --git a/sympy/core/add.py b/sympy/core/add.py\nindex 83a5f2aedc..06bcb85b7a 100644\n--- a/sympy/core/add.py\n+++ b/sympy/core/add.py\n@@ -561,7 +561,7 @@ def _eval_is_zero(self):\n             if not im_or_z and not im:\n                 return True\n             if im and not im_or_z:\n-                return False\n+                return None\n         if b.is_zero is False:\n             return False\n \n"
+  },
+  "sphinx-doc__sphinx-10614": {
+    "model_name_or_path": "openai/deepseek-v4-pro",
+    "instance_id": "sphinx-doc__sphinx-10614",
+    "model_patch": "diff --git a/sphinx/ext/inheritance_diagram.py b/sphinx/ext/inheritance_diagram.py\nindex 6e3985512..e0df6c7c4 100644\n--- a/sphinx/ext/inheritance_diagram.py\n+++ b/sphinx/ext/inheritance_diagram.py\n@@ -36,6 +36,7 @@ import inspect\n import re\n from collections.abc import Iterable\n from importlib import import_module\n+import posixpath\n from typing import Any, cast\n \n from docutils import nodes\n@@ -407,18 +408,21 @@ def html_visit_inheritance_diagram(self: HTML5Translator, node: inheritance_diag\n \n     # Create a mapping from fully-qualified class names to URLs.\n     graphviz_output_format = self.builder.env.config.graphviz_output_format.upper()\n+    doc_dir = posixpath.dirname(self.builder.current_docname)\n     current_filename = self.builder.current_docname + self.builder.out_suffix\n     urls = {}\n     pending_xrefs = cast(Iterable[addnodes.pending_xref], node)\n     for child in pending_xrefs:\n         if child.get('refuri') is not None:\n             if graphviz_output_format == 'SVG':\n-                urls[child['reftitle']] = \"../\" + child.get('refuri')\n+                # Make the path relative to outdir so that fix_svg_relative_paths\n+                # can correctly convert it to be relative to the SVG file location.\n+                urls[child['reftitle']] = posixpath.join(doc_dir, child.get('refuri'))\n             else:\n                 urls[child['reftitle']] = child.get('refuri')\n         elif child.get('refid') is not None:\n             if graphviz_output_format == 'SVG':\n-                urls[child['reftitle']] = '../' + current_filename + '#' + child.get('refid')\n+                urls[child['reftitle']] = current_filename + '#' + child.get('refid')\n             else:\n                 urls[child['reftitle']] = '#' + child.get('refid')\n \n"
+  },
+  "sympy__sympy-20916": {
+    "model_name_or_path": "openai/deepseek-v4-pro",
+    "instance_id": "sympy__sympy-20916",
+    "model_patch": "diff --git a/sympy/printing/conventions.py b/sympy/printing/conventions.py\nindex 9a3be6bbe9..83d8896421 100644\n--- a/sympy/printing/conventions.py\n+++ b/sympy/printing/conventions.py\n@@ -7,7 +7,7 @@\n from collections.abc import Iterable\n from sympy import Derivative\n \n-_name_with_digits_p = re.compile(r'^([a-zA-Z]+)([0-9]+)$')\n+_name_with_digits_p = re.compile(r'^([^\\W\\d_]+)(\\d+)$', re.U)\n \n \n def split_super_sub(text):\n"
+  }
+}

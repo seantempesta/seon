@@ -4,7 +4,7 @@ status: draft
 tags: [research, agent]
 ---
 
-# ui-live-tiles live drive — does the skill move an agent from "telling" to "showing"?
+# ui-canvas live drive — does the skill move an agent from "telling" to "showing"?
 
 Live DeepSeek drive on the fresh default pod (7890), 2026-06-28. One child agent
 (`AIC-2606281626`, parent `root`) given the human message:
@@ -14,24 +14,24 @@ Live DeepSeek drive on the fresh default pod (7890), 2026-06-28. One child agent
 
 No coaching, no naming the skill. Driven to completion (run closed via
 `lifecycle/complete`). Evidence below is observed from the live store — eval log,
-the `:seon.render.live-tile/content` datom, `render-agent-tile` output, the
+the `:seon.render.live-canvas/content` datom, `render-agent-tile` output, the
 rendered transcript block.
 
 ## TL;DR
 
 - **The agent SHOWED, not just told.** It defined a real tile fn
   `my.agent.AIC-2606281626/capabilities-tile`, wired it onto
-  `:seon.render.live-tile/content` (eval #4), and `render-agent-tile` produces
+  `:seon.render.live-canvas/content` (eval #4), and `render-agent-tile` produces
   valid hiccup + an `:seon.render/ai` twin. It ALSO sent a rich markdown message
   pointing at the tile ("Your canvas shows a live capabilities card. What would
   you like me to do first?"). This is exactly the tile+message pattern the owner
   wanted — the "only messaging" failure mode did **not** happen.
 - **But the skill itself was never loaded.** Loaded skills = `[:repl]` only. The
   agent wired the tile from the **always-on `:live-tile` context block**, not from
-  `(my.skills/load :ui-live-tiles)`. The skill was *discoverable* (`:ui-live-tiles ○`
+  `(my.skills/load :ui-canvas)`. The skill was *discoverable* (`:ui-canvas ○`
   in its catalog, referenced in its narration + ai-twin) but never opened. So this
   drive validates the always-on block + the tile mechanism — it does **not** prove
-  the `ui-live-tiles` SKILL added marginal value here.
+  the `ui-canvas` SKILL added marginal value here.
 - **Two failure costs, both real:** (1) the agent guessed **non-safelisted CSS**
   for its status dots (`inline-block w-2 h-2 rounded-full bg-signal`,
   `border-border-100`) — confirmed absent from `input.css` `@source inline`, so the
@@ -47,16 +47,16 @@ rendered transcript block.
 ## Did it see / load / use the skill?
 
 - **Saw it:** the always-on skills-catalog block rendered
-  `; - :ui-live-tiles  ○ — Show your human a live VIEW, don't just message them…`.
+  `; - :ui-canvas  ○ — Show your human a live VIEW, don't just message them…`.
   Its eval-#0 narration: *"The skills catalog is already rendered above — I have
   :repl loaded and four others available."* The tile's ai-twin lists all five
-  including `ui-live-tiles`.
+  including `ui-canvas`.
 - **Did NOT load it:** `(my.skills/list)` for this agent →
-  loaded = `[:repl]`. No `(my.skills/load :ui-live-tiles)` ever ran. `:repl` is the
+  loaded = `[:repl]`. No `(my.skills/load :ui-canvas)` ever ran. `:repl` is the
   default-seeded skill, not one the agent chose.
 - **Used the tile mechanism anyway:** from the always-on `:live-tile` block, which
   carries copy-paste examples. So the agent learned the ONE move (`wire
-  :seon.render.live-tile/content`) without the deep skill — good for the mechanism,
+  :seon.render.live-canvas/content`) without the deep skill — good for the mechanism,
   but it means the skill's richer guidance (safelist, faces, `seon.render/block`)
   never reached the agent.
 
@@ -70,7 +70,7 @@ and computes `loaded-count` live every render, returns both
 ai => "Your human sees a capabilities card: 7 bullet points covering database,
        knowledge storage, on-demand skills (1/5 loaded), todo planning, live
        tiles, messaging, and Node interop. Skills available: clojurescript,
-       data-oriented-clojure, datahike, repl, ui-live-tiles."
+       data-oriented-clojure, datahike, repl, ui-canvas."
 hiccup => [:div {:class "p-3 flex flex-col gap-3"}
             [:h2 {:class "text-sm font-bold text-signal"} "What I Can Do"] …]
 ```
@@ -131,7 +131,7 @@ skill's safelist section warns about — but the agent never loaded that section
 **Mechanism: PASS. Skill attribution: UNPROVEN.** The agent moved from telling to
 showing — it led with a live tile AND messaged — which is the owner's win
 condition. But it did so from the **always-on `:live-tile` block**, never loading
-`ui-live-tiles`. So this drive proves the always-on surface + tile wiring work
+`ui-canvas`. So this drive proves the always-on surface + tile wiring work
 end-to-end; it does not yet prove the *skill* changes behavior, because the agent
 got enough from the always-on block to never feel it needed the deeper skill. The
 clearest place the loaded skill *would* have helped — the safelist — is exactly

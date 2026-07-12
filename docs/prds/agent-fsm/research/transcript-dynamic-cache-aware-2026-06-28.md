@@ -121,7 +121,7 @@ recent window in the volatile tail:
 Concretely: give `:transcript-history` a priority ≤ `stable-priority-max` (raise
 `stable-priority-max` to e.g. 21 and seed history at 21 so it renders just after
 `:namespaces`), and keep `:transcript-recent` at priority 100. The small
-volatile blocks (live-tile/warnings/todos/inventory, ~few-k tok) stay below the
+volatile blocks (live-canvas/warnings/todos/inventory, ~few-k tok) stay below the
 boundary, as today. The cached prefix becomes `namespaces (7,813) +
 history (1,673) = 9,486 tok` — over the 4,096 Opus minimum, so it actually
 caches. A spare breakpoint (2 remain) could later split soul/namespaces from

@@ -14,7 +14,7 @@ primitives, how an agent is **created** and **bootstrapped**, how the
 **orchestrator-root** starts and manages other agents, and the **isolation**
 backend that runs agent code. The entity schemas it reads live in
 [[data-model]]; the blocks/renders/pages it feeds live in [[ui]]; the agent's
-action verbs live in [[toolkit]]; the cross-cutting principles and the glossary
+action functions live in [[toolkit]]; the cross-cutting principles and the glossary
 live in [[architecture]].
 
 ## The model in one paragraph
@@ -73,13 +73,19 @@ their run via `:seon.agent.turn/run`.
 The two bounds are deliberately separate (the k8s split: a `backoffLimit` count
 vs an `activeDeadlineSeconds` clock):
 
-- **Work-quantity bound (derived).** The effective turn budget is **base
-  `:seon.agent/default-turn-limit` plus the count of inbound messages received
-  during the run** — nothing per-message is stored. Every inbound that lands
-  mid-run earns +1 turn, so a message arriving during an LLM call always earns a
-  turn to be **seen and answered**. The current turn is itself a derived count of
-  `:seon.agent.turn/run` datoms — `seon.derive/run-turn-count`. A stored
-  override appears only when a process *explicitly* bumps or stops the budget.
+- **Work-quantity bound (derived) — denominated by the REPL mode.** The unit is
+  **turns under `:batch`, forms under `:stream`** (the `:seon.config/repl-mode`
+  datom — [[context]] §"The REPL mode is a datom"; the manifest-absent default is
+  per-model, DeepSeek → `:stream`). Under `:batch` the effective budget is base
+  `:seon.agent/default-turn-limit` (20) and the current turn is a derived count of
+  `:seon.agent.turn/run` datoms — `seon.derive/run-turn-count`. Under `:stream` a
+  turn evals at most one form, so the budget is **form-denominated**
+  (`seon.agent.run/default-form-limit` 60) and the count is
+  `seon.derive/run-form-count` — so prose/orientation turns burn nothing. Either
+  way, **plus the count of inbound messages received during the run** — nothing
+  per-message is stored. Every inbound that lands mid-run earns +1, so a message
+  arriving during an LLM call always earns a unit to be **seen and answered**. A
+  stored override appears only when a process *explicitly* bumps or stops the budget.
 - **Wall-clock bound (`deadline`).** A run opens with `deadline = started-at +`
   the agent's `:seon.agent/default-deadline-ms` (or a generous global default).
   It is an **absolute instant**, so it survives restart and is a pure DB read;
@@ -106,7 +112,7 @@ Each **turn** threads **one frozen db value** (re-read once at the top) through
 `next-event`, the prompt render, and the bound checks, so the LLM reasons over a
 single consistent basis-t. The **next** turn re-reads the latest store — and
 because there is a single writer, that read sees every other writer's commits, so
-a turn never runs in a private world.
+a turn never runs in a private view.
 
 **The in-tx work-fence.** Every WORK transaction (`beat!`, `open-turn!`,
 `eval-batch!`) **leads** with an in-tx assertion:
@@ -127,6 +133,36 @@ result write. **Ground in** `transaction.cljc:873` (`compare-and-swap`) +
 only values cross the wire, CAS-as-assertion, never memoize on a db value — is
 [[datahike-primer]].)
 
+### REPL forms — namespaces are places (settled 2026-07-10)
+
+The eval boundary (`seon.eval/dispatch-repl-form!`) implements the real-REPL
+movement/update semantics the transcript teaches, so an agent's reflexive
+REPL moves work:
+
+- **`(in-ns 'foo)` is THE movement form** — state-preserving switch of the
+  current-ns accumulator (the cursor + namespaces block follow via the
+  recorded `:seon.eval/ns`). A DB-known-but-unloaded ns loads through the
+  one load-fn; a genuinely fresh name is CREATED with the canonical toolkit
+  requires (deliberately richer than the JVM's blank-slate `in-ns`) — never
+  a blank slate, never an error.
+- **`(ns foo …)` declares/UPDATES** — re-eval REPLACES the require set;
+  the stored `:seon.ns/source` + `:seon.ns/require-edges` heal wholesale
+  (component retract cascade, no orphans).
+- **A bare top-level `(require …)` is durable by default** — it loads now
+  AND persists into the ns's stored declaration (`require-decl-tx` merges
+  the specs into `:seon.ns/source`), so resume replays it. `(alias 'a 'ns)`
+  is the same mechanism (rewritten to a require; error-as-value when the
+  target exists nowhere). `:as-alias` aliases keywords WITHOUT loading and
+  round-trips as an `:seon.ns.require/as-alias?` edge.
+- **Redefinition IS update** — defn/schema/deftest re-eval upserts the
+  projection row in place (body-only redefs rescued for deftests too); an
+  incompatible `register!` re-shape of an installed attr surfaces as a
+  `:seon.db/schema-divergence` envelope naming the migration move.
+- **`ns-unmap` removes** — live var + analyzer def gone, the
+  `:seon.fn`/`:seon.test` row retracted (resume + instrumentation forget
+  it); compiled-core fns are refused (the override-guard symmetry).
+  `ns-unalias` drops an alias from the analyzer, declaration, and edges.
+
 ## The loop as data — the FSM table + the fold
 
 The loop lives in `seon.agent.loop`, shaped like a flow process for the parts
@@ -140,8 +176,8 @@ parallelism; isolation is the worker tier below.
 (def transitions
   {:idle       {:trigger     :running}     ; a wake (message/schedule) opens a run
    :running    {:turn-ok     :running      ; within both bounds → another turn
-                :wait        :idle          ; verb: park, wakeable
-                :complete    :idle          ; verb: finished; result delivered as a message
+                :wait        :idle          ; function: park, wakeable
+                :complete    :idle          ; function: finished; result delivered as a message
                 :turn-limit  :idle          ; work bound hit (clean)
                 :deadline    :idle          ; clock bound hit (ticker; :deadline-exceeded)
                 :superseded  :idle          ; a newer run won the fence
@@ -172,7 +208,7 @@ run-loop!(agent, run):
 ```
 
 `next-event` reads the event off the run's data: still `:running`, within both
-bounds, and still owning the fence → `:turn-ok` (beat + run a turn); a verb inside
+bounds, and still owning the fence → `:turn-ok` (beat + run a turn); a function inside
 the turn emits `:wait`/`:complete`/`:pause`/`:terminate`; a bound or the ticker
 emits `:turn-limit`/`:deadline`/`:superseded`. Because every branch is data, the
 machine is itself inspectable and renderable.
@@ -183,7 +219,73 @@ a quiet stop — it recurs so the next turn surfaces the errors. Two consecutive
 "thinking mode" of up to two empty turns before the loop concludes there is no
 more work. A `wait` parks the agent (wakeable) with its reason on the run's
 `closed-reason`; a `complete` delivers its result as a **message** (to the parent
-or the human) and parks — the result is a message, never a held state.
+or the human) and parks — *unless* the agent already messaged that recipient this
+run: the earlier message IS the answer (derived from the run's message log, no
+stored flag), so `complete` closes without sending a second, answer-clobbering
+message.
+
+**Complete-gate — a success claim must be BACKED by a real green test run.**
+`complete` is the one function that asserts *success*, so it is REFUSED (an honest
+errors-as-value envelope, never a throw, the run left OPEN so the agent keeps
+working) when the agent's **latest** recognized test run is RED. This is purely
+DERIVED from the agent's own `:seon.agent.testrun` datoms at call time — the max
+testrun eid scoped to the agent (`seon.agent.testrun/latest-run`), refused when
+its `failed > 0` or `errors > 0`; no stored gate flag. It is correctly SCOPED: an
+agent that ran **no** recognized suite (a root orchestrator, a research agent, a
+gsm8k solver) has no testrun datom, so `latest-run` is nil and `complete`
+proceeds normally — the gate never touches non-test work. Latest-wins: a later
+green run supersedes an earlier red (and vice versa) by higher eid. This closes
+the **fabrication hole** (T4): an agent that runs a real red pytest, then in the
+SAME reply fabricates an "all tests pass" echo and calls `complete`, is refused —
+the real red testrun entity persisted via `testrun/record!` (forms eval
+sequentially) BEFORE `complete` evaluated, so the gate reads the truth the
+runtime rendered — the persisted datoms — not the
+model's claim. The refusal is honest and actionable ("your latest test run is
+RED (N failed) … a result you did not see the runtime render does not count"),
+converting an early false-stop into a continued drive. An agent that honestly
+wants to STOP with tests still red is NOT forced to lie: `complete` is the
+success claim, but `pause` and `(message/user …)` are ungated — the agent reports
+its real status through those, and only the success assertion is withheld.
+
+**Durable result + outcome routing (multi-agent).** A `complete` also writes the
+result as **DATA on the run** — `:seon.agent.run/result` (the short answer /
+pointer) and optional `:seon.agent.run/result-ref` — *unconditionally* (even when
+the answered-this-run guard skips the message). Message = wake signal; datom = the
+value a parent reads back at **any** later time (a subagents-section render, a
+query), surviving turns and restarts. Beyond `complete`, **every abnormal close is a
+task OUTCOME the PARENT owns**: `close-run!` (the ONE choke point all closes funnel
+through) messages the parent — child id + `closed-reason` + turn count, `origin
+:agent` **from the child** so it WAKES the parent (never `:core`, which the wake gate
+excludes) — for `:turn-limit`/`:deadline-exceeded` (with a *continue* affordance —
+budget exhausted is not death, re-message to open a fresh run),
+`:error`/`:no-forms`, and `:crashed`. A `:crashed` (wedge) **also escalates to
+root** (deduped when the parent IS root; root's own wedge is parentless → the user).
+`:waited`/`:terminated`/`:superseded` message no one. Every close stamps
+`:seon.agent.run/closed-at` (the breaker's window instant; run duration is
+derivable).
+
+**Heartbeat watchdog (`:crashed`).** A wedged agent never closes its own run, so a
+core scan rides the **one ticker** (`run/close-stale-runs!` — no parallel timer;
+the detection core `run/stale-run-ids` is a **pure fn of (db, now)**): an OPEN,
+non-paused run whose freshness anchor (`last-beat-at`, else `started-at` for a
+never-beat wedge) is older than `:seon.config/watchdog-stale-ms` (default 20 min,
+above the per-turn bound) is closed `:crashed` (→ the parent/root outcome notice +
+the pointer retract that unsticks the agent) **and** recorded as a `:core` fault via
+`seon.error/record!` — a wedge is OUR bug, so it enters the standard triage chain
+(watch-faults → inspect → repro → fork; the dev `:crash` dial exits loudly). Fencing
+already covers the false-positive: a late-beating driver's leading CAS aborts
+against the retracted pointer (a no-op, never a double-drive). **Root self-heals
+through the same path but does NOT auto-rewake** — the close unsticks it (idle +
+wakeable); it resumes on the next natural contact.
+
+**Schedule-wake circuit breaker.** With no auto-rewake, the one autonomous
+repeat-wake source is schedules — a deterministic wedge + a periodic schedule is a
+crash loop. The schedule wake-gate refuses to fire for an agent with ≥N `:crashed`
+closes in a recent window (`derive/schedule-breaker-tripped?`, windowed over
+`closed-at`; dials `:seon.config/schedule-breaker`, default N=3 / 30 min) — **derived,
+no stored state**: the window sliding past re-enables it. Human/agent MESSAGES still
+wake it (deliberate contact is not a loop); only schedules are gated. The refusal is
+visible in the subagents-section line.
 
 ## Triggering + fencing — the reactive wake
 
@@ -219,7 +321,7 @@ CAS (hard-aborting an in-flight LLM call is the worker-kill of the isolation tie
 
 ## The one ticker — schedules + overdue runs
 
-The DB is **passive about wall-clock**: `now > deadline` is true in the world but
+The DB is **passive about wall-clock**: `now > deadline` is true in the view but
 nothing fires until something checks. So exactly **one periodic ticker** (wired at
 boot beside the wake trigger) does the only active work in the system. Every N
 seconds it:
@@ -280,19 +382,29 @@ The bootstrap forms **are** the seed commands themselves:
 - `(schema/register! :my.agent/purpose …)` plus its **refine** fn and a
   self-refining block — `:my.agent/purpose` (a markdown goal string) is the
   canonical **first per-agent seed worked-example**: the agent owns, sees, and can
-  rewrite its own purpose (schema in [[data-model]], the verb in [[toolkit]]);
+  rewrite its own purpose (schema in [[data-model]], the function in [[toolkit]]);
 - the home-namespace `defn`s the agent starts life knowing.
 
 **Planning rides the same data.** An agent plans with its **`my.plan` tree** — a
 todo carries a `:my.plan/parent` ref plus status, and parent progress is a derived
 roll-up of its children (top = plans/milestones, leaves = actions). There is no
 separate plan entity; the work-list *is* the plan tree (schema in [[data-model]],
-verbs in [[toolkit]]). The derived open-todo count feeds the fingerprint above.
+functions in [[toolkit]]). The derived open-todo count feeds the fingerprint above.
 
 ## Cluster boot — the core seed (`boot-seed!` → `reconcile!`)
 
-Before any agent runs, the pod seeds the world a cluster boots into. There is ONE
-boot entry — `seon.client/boot-seed!` (the gym's scratch worlds call the SAME fn, so
+`bin/seon start` has a usability boundary, not a fork boundary. Every managed
+process starts in a new operating-system session, so closing the invoking
+terminal cannot reap it, and the command returns only after that process's real
+readiness probe succeeds. Port files, REPL-port files, and Unix sockets belong
+to one process lifetime: a fresh spawn removes stale artifacts before waiting
+and refuses to unlink an artifact that is still serving an unregistered live
+process. Thus a reboot cannot turn an old port file into a false-positive boot,
+and an unmanaged listener is reported for inspection/adoption rather than
+silently replaced.
+
+Before any agent runs, the pod seeds the view a cluster boots into. There is ONE
+boot entry — `seon.client/boot-seed!` (the gym's scratch views call the SAME fn, so
 they can't drift) — and it writes **two provenance layers**, never a stack of
 independent per-step seeders:
 
@@ -313,29 +425,46 @@ independent per-step seeders:
   seam ([[data-model]] §5.6, which also holds the per-test recipe).
 
 Each agent's block loadout is shaped from the same manifest at create
-(`resolve-loadout`, the install!/seed-copy mechanism owned by [[ui]]); SOUL.md /
-AGENTS.md are NOT seed steps — they are reactive `file-block`s re-read every render.
+(the `install!`/seed-copy mechanism owned by [[ui]]). The identity file-blocks
+(`file-block`/`-ai`/`-html`, `config/identity-file-blocks`) that re-read SOUL.md /
+AGENTS.md every render are **DEPRECATED and out of the running tree** (their render
+fns carry `DEPRECATED` docstrings): AGENTS.md's operating rules are being MINED
+per-line into the `:seon.config/system-text` datom + the relevant block's own
+teaching, and `soul` returns as a capability milestone (identity as DB state,
+possibly inside system-text), not a re-read file. See [[context-rebuild]] ("The
+idea inventory").
 
 ## The orchestrator-root + agent lifecycle
 
 **Root is one ordinary agent holding capabilities others don't — not special core
 machinery.** There is exactly **one** `:seon.agent/id "root"`, and it is **both**
-the `/`-world owner (the UI role — its system-scoped blocks derive the all-agents
+the `/`-view owner (the UI role — its system-scoped blocks derive the all-agents
 overview at `/`) **and** the system orchestrator (the lifecycle role — it starts
 and manages other agents). These are two facets of the same elevated grant and the
 same bootstrap; there is **never** a second supervisor or overview entity.
 
-- **`seon.agent/start!` — the capability-gated lifecycle verb.** `start!` is a core
-  verb (an alias of `create!`) **granted to root**, called through the **same
-  `/call` capability gate** as any other fn — not a bypass. It transacts a new
-  **idle** child agent and **writes `:seon.agent/parent` = the caller** (root). That
-  write *is* the activation of `:seon.agent/parent`; no separate writer exists. The
-  gate check is ordinary: the caller must hold the spawn capability — root does by
-  grant, a normal agent does not unless granted.
+- **`seon.agent/start!` — the spawn function, a SOFT gate + a hard depth-cap backstop.**
+  `start!` is a core function (an alias of `create!`) that transacts a new **idle** child
+  agent and **writes `:seon.agent/parent` = the caller**. That write *is* the
+  activation of `:seon.agent/parent`; no separate writer exists. Two gates, both
+  real (there is **no `/call` capability gate** in the pod — that was aspirational):
+  - **Soft gate — home-requires.** The spawn functions (`start!`/`delegate!` via the
+    `seon.agent` alias) sit only in **root's** `:seon.eval/home-requires`
+    (`config/system.edn`'s `:seon.config/root-context`), so an ordinary agent's
+    rendered context never surfaces them. It catches the honest case.
+  - **Hard backstop — a computed depth cap.** A full-qualified
+    `(seon.agent/start! …)` slips past the soft gate, so `start!`'s **own body**
+    walks the `:seon.agent/parent` chain (`seon.agent/spawn-depth`, cycle-guarded)
+    and **refuses** when the caller's depth ≥ `:seon.config/spawn-depth-cap`
+    (default **1**: root at depth 0 spawns, a depth-1 subagent may not). The refusal
+    is the standard **error ENVELOPE** (`{:seon.db/ok? false …}`), datom-free (no
+    child minted), never a throw. It is a **config-dialed number, never a name
+    list** — raise the dial + add the spawn requires to the general agent-context to
+    deepen the tree.
 - **Start = create + quiet bootstrap, leaving the child idle.** `start!` runs the
   child's bootstrap form-vector (quiet `:core` evals, as above) and stops. The child
   does no work until it receives a trigger; to make it work, root (or anyone) sends
-  it a message — that message opens its run #1. Two steps, one entry verb.
+  it a message — that message opens its run #1. Two steps, one entry function.
 - **Roles are capability-SETS, not a stored `:kind`/`:role`.** A role = (the set of
   granted `:seon.fn` capabilities) + (which bootstrap form-vector ran).
   "Orchestrator" = an agent granted the spawn/terminate/system fns; "worker" = an
@@ -346,9 +475,9 @@ same bootstrap; there is **never** a second supervisor or overview entity.
   same way `start!` seeds a child, except root has **no parent** —
   `:seon.agent/parent` is absent, root *is* the base case of the recursion. Boot
   runs root's elevated bootstrap form-vector: install its system-scoped blocks, seed
-  the `/`-world layout on root's route, grant the spawn/terminate/system fns. The
+  the `/`-view layout on root's route, grant the spawn/terminate/system fns. The
   recursion bottoms out cleanly: **boot → seed-root → root.start!(child) →
-  seed-child → …** The "start an agent" affordance on the `/`-world is simply this
+  seed-child → …** The "start an agent" affordance on the `/`-view is simply this
   orchestrator capability exposed for the human — it calls root's `start!` through
   `/call`.
 
@@ -483,10 +612,10 @@ bitemporal, reactive DB. We have one, so:
   `:seon/error` model, and the `my.kb` / `my.plan` (tree) / `my.agent` domain
   schemas + data-agent-ref scoping.
 - [[ui]] — the block / render / tile / slot / layout system, the seed-copy +
-  variadic `install!`/`remove!` override model, the pages (root world / world /
+  variadic `install!`/`remove!` override model, the pages (root agent view / view /
   app), routing-as-data via reitit + the capability gate, and the gzip-morph
   SSE live channel.
-- [[toolkit]] — the agent's `my.*` verb catalog (purpose, the my.plan planning
+- [[toolkit]] — the agent's `my.*` function catalog (purpose, the my.plan planning
   tree, schedules, code lifecycle, recall).
 - [[roadmap]] — current code state, the gap, and the dependency-ordered,
   replace-in-place migration to this target.

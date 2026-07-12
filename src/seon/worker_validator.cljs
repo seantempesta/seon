@@ -2,7 +2,7 @@
   "LEAN, STANDALONE parse/syntactic oracle for CO-LOCATION on the diffusion
    GPU worker.
 
-   The eval-renoise loop validates a PARTIAL canvas every diffusion
+   The eval-renoise loop validates a PARTIAL code-buffer every diffusion
    checkpoint. Done over the internet that is a ~100ms round-trip per
    checkpoint; co-located ON the worker it is a ~0.4ms local Node call.
    This ns is the bundle the worker spawns to get that local call.
@@ -10,7 +10,7 @@
    Scope (FIRST version): the PARSE/SYNTACTIC tier ONLY — `parse-forms`
    from `seon.repl.internal`. That is the immediate need: the failure
    SPANS (`:error-kind` + char `[start end]`) drive the renoise (the
-   Python side maps char-spans → canvas token positions via
+   Python side maps char-spans → code-buffer token positions via
    `build_offset_map`/`span_to_positions`). The heavier EVAL / program-graph
    tier is deliberately NOT pulled in here — see [[validate]]'s `:tier`
    seam and the design note
@@ -66,15 +66,17 @@
 (defn validate
   "Parse `code` and return a plain (JS-serializable) clj map.
 
-       {:forms  <int>            ; count of evaluable top-level forms
-        :tier   :parse           ; which oracle tier ran (seam for :eval)
-        :errors [{:error-kind <kw>    ; :eof / :unmatched-delimiter /
-                                      ;   :invalid-token / :odd-map / …
-                  :span [<start> <end>]  ; ABSOLUTE char offsets in `code`
-                  :source <string>}]}    ; byte-faithful bad span
+       {::forms  <int>           ; count of evaluable top-level forms
+        ::tier   :parse          ; which oracle tier ran (seam for :eval)
+        ::errors [{::error-kind <kw>   ; :eof / :unmatched-delimiter /
+                                       ;   :invalid-token / :odd-map / …
+                  ::span [<start> <end>] ; ABSOLUTE char offsets in `code`
+                  ::source <string>}]}   ; byte-faithful bad span
 
-   Keywords/vectors stay clj here; [[->js]] flattens them to JSON shapes
-   at the wire boundary. A clean parse → `{:forms n :tier :parse :errors []}`.
+   Keywords/vectors stay clj here; [[->js]] flattens them to the JSON wire
+   shape (bare `forms`/`tier`/`errors`/`error-kind`/`span`/`source` keys —
+   the Python worker's contract, UNCHANGED) at the wire boundary. A clean
+   parse → `{::forms n ::tier :parse ::errors []}`.
 
    EVAL-TIER SEAM: a later version adds `(defn validate-eval …)` (or a
    `:tier` arg dispatch) that, AFTER a clean parse, compiles/evals the
@@ -83,22 +85,22 @@
    bundle — the parse tier must stay sub-millisecond and dependency-light.
 
    `strip-fences?` (default true) controls markdown fence stripping. Pass
-   false for the CANVAS-TEXT basis: spans then index the EXACT input
+   false for the CODE-BUFFER-TEXT basis: spans then index the EXACT input
    string, aligning with the diffusion worker's `offset_map`. Mirrors the
    bb `bin/oracle-server` `parse-raw` op (closed-loop renoise). See
    `closed-loop-span-alignment-2026-06-28.md`."
   [code & [strip-fences?]]
   (let [entries (internal/parse-forms code {:strip-fences? (not (false? strip-fences?))})
-        forms   (filterv #(= :form (:kind %)) entries)
+        forms   (filterv #(= :form (:seon.repl/kind %)) entries)
         errors  (->> entries
-                     (filter #(= :read (:kind %)))
-                     (mapv (fn [{:keys [error-kind span source]}]
-                             {:error-kind error-kind
-                              :span       span
-                              :source     source})))]
-    {:forms  (count forms)
-     :tier   :parse
-     :errors errors}))
+                     (filter #(= :read (:seon.repl/kind %)))
+                     (mapv (fn [{:seon.repl/keys [span source] :as entry}]
+                             {::error-kind (-> entry :seon/error :seon.error/kind)
+                              ::span       span
+                              ::source     source})))]
+    {::forms  (count forms)
+     ::tier   :parse
+     ::errors errors}))
 
 ;; ============================================================
 ;; Wire boundary — clj map → JS-serializable plain object.
@@ -110,11 +112,11 @@
    Keywords → their NAME strings (`:unmatched-delimiter` → \"unmatched-delimiter\"),
    the span vector → a JS array. Done explicitly (not `clj->js`) so the
    exact wire shape the Python worker parses is visible and stable."
-  [{:keys [forms tier errors]}]
+  [{::keys [forms tier errors]}]
   #js {:forms  forms
        :tier   (name tier)
        :errors (clj->js
-                 (mapv (fn [{:keys [error-kind span source]}]
+                 (mapv (fn [{::keys [error-kind span source]}]
                          {:error-kind (name error-kind)
                           :span       span
                           :source     source})
@@ -127,7 +129,7 @@
    transform the subprocess performs. Exposed (and instrument-free) so a
    test / the REPL can exercise the whole wire path without a subprocess.
    `strip-fences?` (default true) is threaded to [[validate]] — pass false
-   for the canvas_text (no-fence-strip) basis."
+   for the code_buffer_text (no-fence-strip) basis."
   [code & [strip-fences?]]
   (.stringify js/JSON (->js (validate code (not (false? strip-fences?))))))
 
@@ -148,7 +150,7 @@
      historical framing);
    - a JSON OBJECT (`{\"code\":\"…\",\"op\":\"parse-raw\"}` /
      `{\"code\":\"…\",\"strip-fences\":false}`) → `op` `parse-raw` OR an
-     explicit `strip-fences:false` selects the no-fence-strip canvas_text
+     explicit `strip-fences:false` selects the no-fence-strip code_buffer_text
      basis. `op`/`id` are NOT echoed here (the lean bundle's result shape
      stays `{forms,tier,errors}`); the bb server echoes them.
 

@@ -27,6 +27,8 @@
 
 (defonce ^:private state (atom nil))
 
+(declare ambient-db-name)
+
 ;; ---------- Configuration ----------
 
 (defn- parse-args [args]
@@ -42,28 +44,16 @@
       "--req-sock"  (recur (assoc acc :req-sock (second xs)) (drop 2 xs))
       "--pub-sock"  (recur (assoc acc :pub-sock (second xs)) (drop 2 xs))
       "--repl-port" (recur (assoc acc :repl-port (Long/parseLong (second xs))) (drop 2 xs))
+      ;; --repl-port-file: where the dev REPL's bound port is written for
+      ;; discovery. Per-supervisor (registry C48) — a shared path let a second
+      ;; supervisor's wire-server (bin/acme) clobber the first's file.
+      "--repl-port-file" (recur (assoc acc :repl-port-file (second xs)) (drop 2 xs))
       ;; --preflight: a flag (no value). boot/-main intercepts it and runs the
       ;; embedding self-check BEFORE starting the server. parse-args records it
       ;; so the default "Unknown arg" branch no longer exit-2s on it.
       "--preflight" (recur (assoc acc :preflight? true) (drop 1 xs))
       nil acc
       (do (println "Unknown arg:" (first xs)) (System/exit 2)))))
-
-(defn- opts->config-for-request
-  "Translate CLI opts (string backend, optional :db-name/:path) into the
-   namespaced map `seon.server.store/config-for` expects. Derives a
-   default db-name from the req-sock basename when --db-name is absent,
-   so two standalone wire-servers on different sockets get distinct
-   per-name stores. Omits ::path when nil/for :memory (the schema is
-   [:string {:min 1}], so passing nil would fail instrumentation)."
-  [{:keys [backend db-name path req-sock]}]
-  (let [db-name-kw (keyword (or db-name
-                                (str "seon.server/"
-                                     (.getName (java.io.File. ^String req-sock)))))]
-    (cond-> {:seon.server.store/db-name db-name-kw
-             :seon.server.store/backend (keyword backend)}
-      (and path (not= "memory" backend))
-      (assoc :seon.server.store/path path))))
 
 ;; ---------- DB lifecycle ----------
 
@@ -84,21 +74,6 @@
   (d/transact conn [{:db/ident       :seon.store.wire/write-id
                      :db/valueType   :db.type/string
                      :db/cardinality :db.cardinality/one}]))
-
-(defn- ensure-db!
-  "Open (creating if needed) the conn for `cfg`, seed the wire base-schema,
-   and register the per-conn `::raw-broadcast` `d/listen!` that emits the raw
-   db-name-tagged tx event on every commit. db-name is derived from cfg's
-   `:name` (the single-DB / test path); the multi-DB registry path installs
-   the same listener via the on-ensure-db hook with its real db-name."
-  [cfg]
-  (when-not (d/database-exists? cfg)
-    (d/create-database cfg))
-  (let [conn    (d/connect cfg)
-        db-name (or (:name cfg) "default")]
-    (seed-base-schema! conn)
-    (d/listen conn ::raw-broadcast (raw-broadcast-listener-fn db-name))
-    conn))
 
 ;; ---------- Response helpers ----------
 
@@ -246,8 +221,9 @@
 (defmethod handle-op "ensure-db" [_conn req]
   ;; Materialize (or look up) a cluster's DB. Idempotent — a re-ensure of the
   ;; same db-name returns the existing conn's current basis-t without
-  ;; reseeding. db-name's VALUE is a string on the wire; default backend
-  ;; :memory for testability, override via :seon.store.wire/backend. On open,
+  ;; reseeding. db-name's VALUE is a string on the wire (the CLUSTER name);
+  ;; default backend :file (the settled pod-attachable default — pass
+  ;; `backend "memory"` explicitly for a JVM-side ephemeral). On open,
   ;; registry's on-ensure-db hook installs this conn's ::raw-broadcast listener
   ;; (+ any ::reactive one).
   (let [db-name (some-> (:seon.store.wire/db-name req) keyword)
@@ -257,11 +233,49 @@
       (err "protocol" "ensure-db requires :seon.store.wire/db-name")
       (let [entry (registry/ensure-db!
                    (cond-> {:seon.server.registry/db-name db-name
-                            :seon.server.registry/backend (or backend :memory)}
+                            :seon.server.registry/backend (or backend :file)}
                      path (assoc :seon.server.registry/path path)))
             conn  (:seon.server.registry/conn entry)]
         (ok {:seon.store.wire/db-name (subs (str db-name) 1)
              :seon.store.wire/basis-t (basis-t-of (d/db conn))})))))
+
+;; ---------- Supervisor-facing cluster-lifecycle ops ----------
+;;
+;; `list-dbs` / `remove-db` are SUPERVISOR/REPL-surface ops: they ride the
+;; host-local UDS req socket (and the 7891 wire REPL), and NOTHING pod-side
+;; wraps them — `seon.db` has no function for them and the agent toolkit never
+;; sees them, so an agent's capability surface stays one-cluster by
+;; construction. `bin/seon cluster destroy` is the caller.
+
+(defmethod handle-op "list-dbs" [_conn _req]
+  (let [{:seon.server.registry/keys [sessions]} (registry/list-sessions {})]
+    (ok {:seon.store.wire/dbs
+         (mapv (fn [{:seon.server.registry/keys [db-name backend path]}]
+                 (cond-> {:seon.store.wire/db-name (subs (str db-name) 1)
+                          :seon.store.wire/backend (name backend)}
+                   path (assoc :seon.store.wire/path path)))
+               sessions)})))
+
+(defmethod handle-op "remove-db" [_conn req]
+  ;; Release the conn, drop the registry entry, and DELETE the database in
+  ;; its store (`registry/delete-db!`). The process's own ambient cluster is
+  ;; refused — removing the db under the ambient conn would wedge every
+  ;; unrouted request.
+  (let [db-name (some-> (:seon.store.wire/db-name req) keyword)]
+    (cond
+      (nil? db-name)
+      (err "protocol" "remove-db requires :seon.store.wire/db-name")
+
+      (= (name db-name) (ambient-db-name))
+      (err "protocol" (str "refusing to remove the ambient cluster db: "
+                           (name db-name)))
+
+      :else
+      (let [{:seon.server.registry/keys [removed? deleted?]}
+            (registry/delete-db! {:seon.server.registry/db-name db-name})]
+        (ok {:seon.store.wire/db-name (subs (str db-name) 1)
+             :seon.store.wire/removed removed?
+             :seon.store.wire/deleted deleted?})))))
 
 (defmethod handle-op "q" [conn req]
   (let [query   (:seon.store.wire/query req)
@@ -314,20 +328,20 @@
 
 ;; ---------- since-t replay (the DE-2 lossless-wake fix) ----------
 ;;
-;; The tx FEED is a polled per-handle bounded queue: a dropped/missed event is
+;; The tx FEED is a push over the pub socket: a dropped/missed event is
 ;; harmless for RENDERING (the subscriber re-reads latest) but FATAL for the
 ;; WAKE edge (the event IS the trigger to act — drop it and an idle agent sits
-;; with unread mail). On UDS reconnect the old subscription handle is gone, so
-;; the gap is lost. `replay-tx-events` makes the wake edge lossless: a
+;; with unread mail). Live frames in a disconnect gap are simply never
+;; delivered. `replay-tx-events` makes the wake edge lossless: a
 ;; reconnecting subscriber passes its last-applied basis-t as `since-t`, and the
 ;; writer replays every tx committed after it — reconstructed from the
 ;; bitemporal tx-log — shaped EXACTLY like a live `tx` event. Per-subscriber by
 ;; construction: it is a pure function of (conn, db-name, since-t), so any
-;; number of independent feed processes (loop, live-tile, debug, chat) each
+;; number of independent feed processes (loop, canvas, debug, chat) each
 ;; recover their OWN gap. No pod-singleton assumption.
 
 (def ^:private max-replay-txs
-  "Upper bound on how many missed txs one `subscribe-tx` replay materializes. A
+  "Upper bound on how many missed txs one `replay-tx` reply materializes. A
    reconnect gap is normally a few txs; this caps a pathological gap (a
    subscriber gone a very long time) so one replay can't build an unbounded
    event list. On overflow only the most RECENT `max-replay-txs` are replayed
@@ -705,30 +719,42 @@
 ;; Opt-in diagnostic plane. OFF by default — only starts when `--repl-port N`
 ;; is passed (the Rust host does NOT pass it; it's a dev-only escape hatch).
 ;; Binds 127.0.0.1 ONLY (loopback) so the REPL is never reachable off-host.
-;; Writes the chosen port to a file (like the sockets) so a connecting tool
-;; can discover it. One REPL reaches the live `state` atom / conn(s).
+;; Writes the chosen port to a PER-SUPERVISOR file (like the sockets) so a
+;; connecting tool can discover it. One REPL reaches the live `state` atom /
+;; conn(s). The path is per-supervisor (registry C48): a single shared
+;; `tmp/seon-writer-repl-port` was clobbered by whichever cluster's JVM
+;; (default vs acme) started LAST, routing file-based consumers to the wrong
+;; writer. Resolution: `--repl-port-file` arg > `$SEON_WRITER_REPL_PORT_FILE`
+;; env > `tmp/seon-writer-repl-port-<db-name>` (db-name = the cluster name,
+;; so even a bare launch is collision-free).
 
-(def ^:private repl-port-file "tmp/seon-writer-repl-port")
+(defn- repl-port-file
+  "Per-supervisor REPL port-file path: arg > env > derived from db-name."
+  [{:keys [opts db-name]}]
+  (or (:repl-port-file opts)
+      (System/getenv "SEON_WRITER_REPL_PORT_FILE")
+      (str "tmp/seon-writer-repl-port-" db-name)))
 
 (defn- start-repl-server!
-  "Start a loopback-only Clojure socket REPL on `port`. Returns the
-   server-socket so it can be closed on shutdown."
-  [port]
+  "Start a loopback-only Clojure socket REPL on `port`, writing the port
+   to `port-file` for discovery. Returns the server-socket so it can be
+   closed on shutdown."
+  [port port-file]
   (let [server (srv/start-server
                 {:name "seon-writer-repl"
                  :address "127.0.0.1"
                  :port port
                  :accept 'clojure.core.server/repl})]
-    (spit (io/file repl-port-file) (str port))
-    (.deleteOnExit (io/file repl-port-file))
+    (spit (io/file port-file) (str port))
+    (.deleteOnExit (io/file port-file))
     server))
 
 ;; ---------- Main ----------
 
 (defn ambient-db-name
   "The db-name string the ambient conn broadcasts under (the same value
-   `ensure-db!` passed to its `::raw-broadcast` listener). The raw tx-feed
-   subscribe ops (`seon.server.boot`) use this to route a `subscribe-tx` with
+   `ensure-db!` passed to its `::raw-broadcast` listener). The tx-feed ops
+   (`seon.server.boot`) use this to route a `replay-tx` with
    no agent-id/db-name to the ambient conn's pub events. Defaults to
    \"default\" when not yet booted (matches `ensure-db!`'s fallback)."
   []
@@ -741,30 +767,37 @@
   ;; that never started — an empty wire.log means we died BEFORE this line.
   (println "[writer] booting pid=" (.pid (java.lang.ProcessHandle/current)))
   (let [opts (parse-args args)
-        cfg  (store/config-for (opts->config-for-request opts))
+        ;; db-name = the CLUSTER NAME (registry C15) — `--db-name` from the
+        ;; supervisor (bin/seon passes the basename of $SEON_CLUSTER_DIR),
+        ;; default "default". Never a socket-path artifact.
+        db-name-kw (keyword (or (:db-name opts) "default"))
+        db-name    (name db-name-kw)
         _    (println "[writer] starting with" opts)
-        conn (ensure-db! cfg)
-        db-name (or (:name cfg) "default")
-        ;; The ambient conn is created directly by ensure-db! (outside the
-        ;; registry), so the registry's on-ensure-db hooks never fired for it.
-        ;; Run them now so the ambient conn ALSO gets the reactive engine's
-        ;; ::reactive listener + subscription schema (boot.clj registers that
-        ;; hook). ::raw-broadcast is re-installed under the same key (datahike
-        ;; replaces, not duplicates) — idempotent.
-        _    (registry/run-on-ensure-db-hooks! conn db-name)
+        ;; The ambient conn is a REGISTRY entry like every other cluster db —
+        ;; one open mechanism. ensure-db! creates/connects and fires the
+        ;; on-ensure-db hooks (::raw-broadcast + ::reactive + schema seeds),
+        ;; and db-name-routed requests to this cluster resolve to the SAME
+        ;; conn the unrouted (ambient) path uses.
+        entry (registry/ensure-db!
+               (cond-> {:seon.server.registry/db-name db-name-kw
+                        :seon.server.registry/backend (keyword (:backend opts))}
+                 (and (:path opts) (not= "memory" (:backend opts)))
+                 (assoc :seon.server.registry/path (:path opts))))
+        conn  (:seon.server.registry/conn entry)
         _    (println "[writer] datahike ready; basis-t=" (basis-t-of (d/db conn)))
         pub-server (bcast/start-pub-server! (:pub-sock opts))
         _    (println "[writer] pub socket:" (:pub-sock opts))
         req-server (start-req-server! conn (:req-sock opts))
         _    (println "[writer] req socket:" (:req-sock opts))
         repl-server (when-let [p (:repl-port opts)]
-                      (let [s (start-repl-server! p)]
-                        (println "[writer] dev REPL (127.0.0.1):" p)
+                      (let [pf (repl-port-file {:opts opts :db-name db-name})
+                            s  (start-repl-server! p pf)]
+                        (println "[writer] dev REPL (127.0.0.1):" p "port-file:" pf)
                         s))]
     (reset! state {:conn conn :req-server req-server :pub-server pub-server
                    :repl-server repl-server
-                   ;; same db-name ensure-db! gave the ambient ::raw-broadcast
-                   ;; listener — the raw tx-feed subscribe ops route to it.
-                   :ambient-db-name (or (:name cfg) "default")})
+                   ;; the cluster name — the tx-feed replay op and the
+                   ;; remove-db ambient guard route/compare against it.
+                   :ambient-db-name db-name})
     (println "[writer] ready. PID=" (.pid (java.lang.ProcessHandle/current)))
     (.. (Thread/currentThread) join)))

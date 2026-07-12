@@ -7,7 +7,7 @@ tags: [research, agent]
 # Skills + config-driven context — does it land in a real agent's prompt?
 
 Read-only context-observer pass on the LIVE default pod (7890), 2026-06-28.
-Grounding: the two trigger drives — `050a215b` (ui-live-tiles drive: "agent
+Grounding: the two trigger drives — `050a215b` (ui-canvas drive: "agent
 SHOWS a view; message-verb undiscoverable") and `89201467` (acme A/B:
 "repl-skill guidance is null"). Both predate the config-driven loadout +
 skills going live on the DEFAULT pod (`525bd0f0`, `aba1b5dd`). This pass
@@ -73,7 +73,7 @@ Default-loaded via `config/system.edn` `:seon.config/default-load [:repl]`.
 ## Q2 — Is the catalog present + does it reflect config curation? YES.
 
 `(my.skills/list)` → `[:clojurescript :data-oriented-clojure :datahike :repl
-:ui-live-tiles]`. `browser-automation` + `clojure-testing` are correctly
+:ui-canvas]`. `browser-automation` + `clojure-testing` are correctly
 absent (the `:seon.config/skills :exclude` list). The catalog renders with a
 clear how-to header:
 
@@ -88,7 +88,7 @@ clear how-to header:
 
 `● loaded` for repl (derived from the agent's own `:skill/*` blocks — correct).
 An agent would know to `(my.skills/load :name)`. **Catalog: PASS.** (Note:
-`ui-live-tiles` is the frontmatter `name` of the `datastar-web-ui/` skill dir
+`ui-canvas` is the frontmatter `name` of the `datastar-web-ui/` skill dir
 — name ≠ dirname, no silent drop.)
 
 ## Q3 — Can an agent discover how to message its human?
@@ -120,7 +120,7 @@ example remains.
 ```
 
 So `(message/user …)` / `(db/transact! …)` / `(todo/add! …)` / `(wait)` /
-`(complete)` all resolve without the agent doing anything. The ui-live-tiles
+`(complete)` all resolve without the agent doing anything. The ui-canvas
 drive's "~100 evals to find `(require '[seon.agent.message :as message])`" was
 on acme's OLD pre-config bundle; on the DEFAULT pod the alias is pre-wired.
 **The runtime half of that finding is fixed.**
@@ -165,7 +165,7 @@ Skeptical read:
   models.** ~860 always-on tokens on every agent every turn. Two A/B drives
   (`89201467` acme-DeepSeek; the earlier gemini null) found NO read-error
   reduction — the parser-repair guidance targets noisy/weak generation;
-  DeepSeek/Gemini write clean Clojure. The ui-live-tiles drive agent never
+  DeepSeek/Gemini write clean Clojure. The ui-canvas drive agent never
   loaded a non-default skill at all (got enough from always-on blocks). So the
   catalog+load SYSTEM is proven; the marginal value of the repl BODY being
   default-ON is not. Candidate: drop repl from `:default-load` (keep it
@@ -201,8 +201,8 @@ Skeptical read:
 
 ### (c) Content gaps to route to UI (skill/toolkit text)
 
-- None blocking from this pass. The repl + ui-live-tiles skill BODIES are
-  UI/toolkit's lane to refine (the ui-live-tiles drive already filed the
+- None blocking from this pass. The repl + ui-canvas skill BODIES are
+  UI/toolkit's lane to refine (the ui-canvas drive already filed the
   safelist/status-dot hoist). The message-verb gap is NOT content — do not
   route it to UI.
 

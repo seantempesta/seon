@@ -4,9 +4,9 @@ status: active
 tags: [architecture, agent, schema, flow]
 ---
 
-# The verified canvas — diffusion dynamic-context architecture
+# The verified code-buffer — diffusion dynamic-context architecture
 
-> **The map** (present tense — the system as it is). The **verified canvas is
+> **The map** (present tense — the system as it is). The **verified code-buffer is
 > BUILT on both sides**: the Seon control surface (`src/seon/diffusion/*` +
 > `seon.worker-eval` + the shared `seon.diffusion.grammar.cljc`) and the worker
 > (`gpu_worker.py` `refine_loop` over co-located persistent bb+node oracles) —
@@ -28,16 +28,16 @@ orienting pass per piece, each with a pointer to its depth.
 ## Thesis
 
 A strong **autoregressive** model (Opus) sets DIRECTION; a **diffusion** model
-(DiffusionGemma) drives **the verified canvas** — guided, verified generation
+(DiffusionGemma) drives **the verified code-buffer** — guided, verified generation
 that refines whole blocks of Clojure *fast*, taking feedback **between denoise
 steps**. The control signal is Seon itself —
 its **parser**, its **eval cage**, and its **program-graph retrieval** — fed back
 into the generation loop, not waited on after it. AR completion is left-to-right
-and blind to what comes after the cursor; a diffusion canvas is **bidirectional
+and blind to what comes after the cursor; a diffusion code-buffer is **bidirectional
 and revisable in place**, so Seon can pin the good spans, re-noise the bad ones,
 and inject the right fn-spec mid-generation. The unit the loop works on is a
 **block/form** — a Seon context block becomes the encoder prompt, the 256-token
-canvas becomes the form being shaped.
+code-buffer becomes the form being shaped.
 
 The bet is narrow and explicit: this apparatus earns its keep on **NOISY**
 generation (a diffusion model's per-step commits, a weak model), NOT on a capable
@@ -65,17 +65,17 @@ steering direction is the **phased-constraint gate** below. ([[roadmap]] P1.)
 
 One vocabulary, each name grounded in an artifact.
 
-- **canvas** — the 256-token block the diffusion decoder refines with bidirectional
-  attention, cross-attending the AR-encoded prompt's KV cache. `canvas_length` is
-  the inner-loop unit; long output chains canvases block-autoregressively.
+- **code-buffer** — the 256-token block the diffusion decoder refines with bidirectional
+  attention, cross-attending the AR-encoded prompt's KV cache. `code_buffer_length` is
+  the inner-loop unit; long output chains code-buffers block-autoregressively.
   `generation_diffusion_gemma.py:638`.
-- **commit (emergent, not a lock)** — a position "sticks" because `accept_canvas`
-  keeps the lowest-entropy positions and `renoise_canvas` re-randomizes the rest
+- **commit (emergent, not a lock)** — a position "sticks" because `accept_code-buffer`
+  keeps the lowest-entropy positions and `renoise_code-buffer` re-randomizes the rest
   with **uniformly random vocab ids** — there is **no mask token** in the
   generation path. "Commit" is emergent low-entropy persistence. `EntropyBoundSampler`,
   `generation_diffusion_gemma.py:388/400/444`. See [[grounding]].
-- **clamp** — holding chosen canvas positions fixed every denoise step by forcing
-  their logits to a near-one-hot, so `accept_canvas` always keeps them. The
+- **clamp** — holding chosen code-buffer positions fixed every denoise step by forcing
+  their logits to a near-one-hot, so `accept_code-buffer` always keeps them. The
   primitive behind infill and span-renoise. `ClampLogitsProcessor`,
   `tmp/flash-diffgemma/diffgemma_common.py:35-78`, applied per-step at
   `generation_diffusion_gemma.py:1034`. PROVEN ([[roadmap]]).
@@ -84,16 +84,16 @@ One vocabulary, each name grounded in an artifact.
   clamped suffix). PROVEN: both ends held, middle co-conditioned.
   `gpu_worker.py` infill mode.
 - **span-renoise** — on a failed gate, map a parser/eval `:span` `[start end]` to
-  canvas positions (`span_to_positions`/`build_offset_map`,
+  code-buffer positions (`span_to_positions`/`build_offset_map`,
   `diffgemma_common.py:184-222`) and DROP those from the clamp set so the entropy
   bound re-decides only them. The loop's revise-in-place dial. BUILT Seon-side:
   `parse-forms` now emits `:span` on every `:form` (not just `:read`) so good and
   broken spans share one basis (`seon.repl.internal`).
 - **refine (the unified oracle call)** — `seon.diffusion.oracle/refine`
   (`src/seon/diffusion/oracle.cljs`): ONE call the worker makes per denoise
-  checkpoint K — `{::canvas-text ::offset-map}` in, `{::clamps ::renoise-spans
+  checkpoint K — `{::code-buffer-text ::offset-map}` in, `{::clamps ::renoise-spans
   ::injections ::legs}` out. It runs all three control legs (parse, retrieve,
-  eval-fold) and returns ONE combined control set that PARTITIONS the canvas: a
+  eval-fold) and returns ONE combined control set that PARTITIONS the code-buffer: a
   clamp is a good form whose span overlaps NEITHER an injection NOR a renoise span,
   so no region is double-covered. BUILT + offline-proven. See the oracle-loop
   section + [[research/unified-control-oracle-2026-06-29]].
@@ -112,7 +112,7 @@ One vocabulary, each name grounded in an artifact.
   persistence-side rungs (**instrument → generative-test**) are the same ladder
   continued at the DB boundary when code lands as `:seon.fn` entities. [[grounding]].
 - **validation-as-early-stop** — the loop's termination criterion: STOP when the
-  canvas is oracle-proven (parse-clean AND eval-clean AND behavioral-clean), not
+  code-buffer is oracle-proven (parse-clean AND eval-clean AND behavioral-clean), not
   when entropy/step-count says the model is confident. The model's probability is
   irrelevant once the code is proven to run. `refine_loop`'s gate, `gpu_worker.py`.
 - **the phased grammar gate** — per-phase grammar enforcement as a renoise
@@ -166,12 +166,12 @@ The whole thesis rests on one fact, source-verified against transformers v5.11.0
 step**, at `generation_diffusion_gemma.py:1034`, BEFORE the built-in temperature
 schedule. A custom `LogitsProcessor` (our `ClampLogitsProcessor`) therefore gets a
 per-step vote on every position, every step. That is the between-step control
-surface the verified canvas needs, and it is a **supported public seam**, no fork of
+surface the verified code-buffer needs, and it is a **supported public seam**, no fork of
 `generate()`.
 
 Two corollaries that are easy to get wrong (both grounded, [[grounding]]):
 
-- **Commit is emergent, not a mask.** The canvas inits and renoises with random
+- **Commit is emergent, not a mask.** The code-buffer inits and renoises with random
   vocab ids; `mask_token_id=4` is vestigial for text generation. Build infill by
   CLAMPING kept spans + random-noising the hole — never on a mask token.
 - **`max_denoising_steps` is a CAP, not a checkpoint.** Shrinking it COMPRESSES
@@ -190,16 +190,16 @@ per-step diagnostics out; the 50 GB weights stay GPU-resident, no tensors cross
 the wire. Its modes lower the architecture onto the proven primitives:
 
 - `probe` / `introspect` — cheap env + live-model reflection (no 50 GB load /
-  one load): output fields, sampler, gen-config, `canvas_length`.
+  one load): output fields, sampler, gen-config, `code_buffer_length`.
 - `generate` — plain generation + the denoise-step / commit-per-step trajectory.
 - `clamp_smoke` — the decisive proof the clamp holds positions fixed (PROVEN).
 - `infill` — clamp prefix+suffix, denoise the hole (PROVEN, incl. the spec-slot).
 - `denoise_to_step` / `resume_renoise` — the eval-renoise round-trip: stop the
   real N-step schedule at step K via an external `StepCountStopping`, hand the
-  partial canvas to Seon to parse/eval, clamp the GOOD spans + free the BAD span,
+  partial code-buffer to Seon to parse/eval, clamp the GOOD spans + free the BAD span,
   resume. Built, not yet GPU-tested. See [[grounding]], `eval-renoise-worker-build`.
 - `refine` (the unified op) — at each checkpoint K the worker calls the oracle
-  ONCE with the current `canvas_text` (+ its `offset_map`) and applies the ONE
+  ONCE with the current `code_buffer_text` (+ its `offset_map`) and applies the ONE
   combined control set in a single pass: **clamp** the good-form spans, **steer**
   each retrieval injection (force its span toward `replacement`, append
   `spec_text` to the encoder KV via W1/W2/W3), **re-noise** the broken /
@@ -214,7 +214,7 @@ the wire. Its modes lower the architecture onto the proven primitives:
   bottleneck, [[colocation-performance-plan]]), with
   **validation-as-early-stop as its gate**: parse → eval → behavioral
   (`eval_gate` default on; `behavioral` = `[{call,expect}]`), stopping at the
-  cheapest tier that proves the canvas correct. Wired + proven with the real
+  cheapest tier that proves the code-buffer correct. Wired + proven with the real
   bb+node oracles; what awaits the A100 is the MEASUREMENT of its lift.
 
 **Deployment discipline (load-bearing):** a warm worker keeps serving OLD code
@@ -230,7 +230,7 @@ is [[research/flash-warm-reuse-2026-06-28]].
 
 The three control signals are not three round-trips — they fold into ONE call the
 worker makes per denoise checkpoint: `seon.diffusion.oracle/refine`
-(`src/seon/diffusion/oracle.cljs`). `{::canvas-text ::offset-map}` in, ONE combined
+(`src/seon/diffusion/oracle.cljs`). `{::code-buffer-text ::offset-map}` in, ONE combined
 control set out:
 
 ```clojure
@@ -254,12 +254,12 @@ control set out:
   a `defn` in the `:schemas` phase, a `register!` in the `:functions` phase →
   renoise). Because the predicates are the SAME ns bb loads, bb `op:"refine"`
   answers all of parse+structural+phase in one ~0.05 ms call.
-- **RETRIEVE** — `seon.diffusion.retrieval/retrieve-for-canvas` reads
+- **RETRIEVE** — `seon.diffusion.retrieval/retrieve-for-code-buffer` reads
   `:seon.fn/sym` from the program graph and yields the hallucinated-symbol
   injections (`{::span ::replacement ::spec-text}`) — a confidently-wrong name
   (`db/transct!`) → the real API (`db/transact!`, edit-distance 1) + its signature.
   Pure over a db value; the `SEON_EMBED` semantic enhancement
-  (`retrieve-for-canvas+semantic`) augments candidates from the Proximum/Vertex fn
+  (`retrieve-for-code-buffer+semantic`) augments candidates from the Proximum/Vertex fn
   index, fail-soft.
 - **EVAL** — `seon.worker-eval` (`src/seon/worker_eval.cljs`) is a SEPARATE node
   self-host bundle (cljs.js, NOT SCI, NOT bb — it must compile `^:async`/interop
@@ -280,7 +280,7 @@ covers only the PARSE tier (clamps + renoise, `injections: []`); the full three-
 `refine` runs in the pod (or is assembled by the Python `Oracle` shim from the bb
 parse call + the node eval call + a pod retrieve call).
 
-**Offline-proven, no GPU.** `test/seon/diffusion/oracle_test.cljs` feeds one canvas
+**Offline-proven, no GPU.** `test/seon/diffusion/oracle_test.cljs` feeds one code-buffer
 carrying BOTH a syntax error AND a `db/transct!` hallucination and asserts the
 combined set: the eof renoise span, the `db/transct! → db/transact!` injection, and
 clamp spans for the clean forms ONLY — plus disjointness and the wire object; the
@@ -291,7 +291,7 @@ Full suite green. The worker side is WIRED (`refine_loop` over the persistent bb
 
 **Char-span → token-position is the worker's job, via `offset_map`.** Every span
 Seon emits — clamp, renoise, injection, scaffold infill — is absolute CHAR offsets
-`[start end)`. The worker maps each to canvas TOKEN positions by overlap
+`[start end)`. The worker maps each to code-buffer TOKEN positions by overlap
 (`diffgemma_common.py span_to_positions`/`build_offset_map`). A boundary that falls
 mid-token would put one token in BOTH the clamp and the infill set, so the two ops
 can't separate cleanly. Measured offline (CPU tokenizer only, no GPU): the
@@ -307,7 +307,7 @@ alignment".)
 Seon-side template generator that CONSTRUCTS the clamp frame a fn is generated INTO,
 before any GPU call (where the retrieval leg CORRECTS a symbol mid-denoise). Given
 `{::fn-name ::ns ::intent}` it emits the roadmap's MVP frame: a `defn` plus its
-map-in/map-out `:malli/schema` contract as a partially-fixed canvas —
+map-in/map-out `:malli/schema` contract as a partially-fixed code-buffer —
 
 - `::frame-text` — valid Clojure with placeholder slots: the two
   `(schema/register! ::name-request [:map …])` / `::name-response` forms + the
@@ -417,11 +417,11 @@ run-mode!(mode, op, target):                                 ; ENGINE: not yet b
   ctx      = render(mode.context-fns, db, mode-state)        ; §reactive, re-queried
   for attempt in 0 .. mode.renoise.max-retries:
     for K in checkpoints:                                    ; the built refine_loop drives this
-      canvas   = control-worker.denoise_to_step(prompt=ctx, clamp=scaffold, K)
-      ctrl     = refine({canvas_text canvas, offset_map})    ; BUILT — one call, the three legs fold
+      code-buffer   = control-worker.denoise_to_step(prompt=ctx, clamp=scaffold, K)
+      ctrl     = refine({code_buffer_text code-buffer, offset_map})    ; BUILT — one call, the three legs fold
       control-worker.apply(ctrl)                             ; clamp / steer injections / renoise spans
     if ctrl.renoise-spans empty AND ctrl.injections empty:
-      persist(canvas); advance(mode.next-mode); return       ; detect-and-tee → program graph
+      persist(code-buffer); advance(mode.next-mode); return       ; detect-and-tee → program graph
     ctx = render(mode.context-fns, db, mode-state')          ; error+span now in view
   flag-unresolved(target)                                    ; honesty > completion
 ```
@@ -458,7 +458,7 @@ transducer body defined AND instrumented cleanly). And the ladder polices ITSELF
 a dead tier must fail loud, never silently zero (the voided-E1 lesson — the
 `assert_oracle_live` golden-sample gate). **Termination is
 validation-as-early-stop:** the `refine_loop` gate is parse → eval → behavioral,
-and the loop stops the moment the canvas is PROVEN — proven by
+and the loop stops the moment the code-buffer is PROVEN — proven by
 `eval_gate_earlystop_proof.py` with the real bb+node oracles (won't stop on
 parses-but-fails-eval, won't stop on runs-but-wrong, stops at iter 0 on correct).
 
@@ -496,18 +496,18 @@ The compile ceiling is characterized, not closed
 2-line worker-side monkeypatch away (the shipped `assume_constant_result` patch
 is inert — Dynamo unwraps the `@lru_cache` wrapper past the mark; a transformers
 bump does NOT fix it); the batched_mm device-side assert is most plausibly
-static-cache under-sizing on multi-canvas runs (probe: `max_length=288`,
+static-cache under-sizing on multi-code-buffer runs (probe: `max_length=288`,
 payload-only); and the per-step `ClampLogitsProcessor` is compile-COMPATIBLE (it
 runs eager between compiled units) — only a custom Python StoppingCriteria
 forfeits compile, so a compiled refine shape exists without forking the sampler.
 The compiled path has never actually been measured; it is a $0-rebuild probe
 chain on the measurement path, not a settled wall.
 
-The verified-canvas speed lever is sampler-side and UNIQUE to a diffusion canvas with a
+The verified code-buffer speed lever is sampler-side and UNIQUE to a diffusion code-buffer with a
 free oracle: **crank `entropy_bound` (over-commit — more tokens per forward, 2-3×
 fewer forwards) and let the ~0.05 ms co-located oracle renoise exactly the wrong
 spans.** An AR model cannot un-commit position 47 and keep the other 200; the
-canvas + the free oracle give us that primitive. Net win iff forwards saved by
+code-buffer + the free oracle give us that primitive. Net win iff forwards saved by
 over-commit exceed forwards spent re-denoising flagged spans — the §3 three-arm
 sweep is the measurement. The hardware ranking: A100-BF16 sampler-tuned is the
 control path today; TPU v5e via the native JAX DiffusionGemma (whose
@@ -560,7 +560,7 @@ consumer drives the gym against THEIR config/provider via `SEON_CONFIG` +
 ## Cross-cutting principles
 
 - **AR guides, diffusion refines, the ORACLE decides.** The strong model sets
-  direction; the canvas loop iterates blocks as fast as Seon can
+  direction; the code-buffer loop iterates blocks as fast as Seon can
   parse/lint/eval/test. The oracle carries the thesis — it gates context
   before generation, renoises the wrong spans during it, terminates it on
   proof, and proves its OWN liveness first. Steering is on trial: phased
@@ -595,7 +595,7 @@ consumer drives the gym against THEIR config/provider via `SEON_CONFIG` +
 - [[research/mode-driven-guided-generation-2026-06-28]] — THE design: the mode
   abstraction, the four modes, the convergent-pass frame, the experiment ladder.
 - [[research/mode-design-critique-2026-06-28]] — the adversarial review that shapes
-  the roadmap (the missing arm-3 baseline, the vacuity gap, canvas-length gating,
+  the roadmap (the missing arm-3 baseline, the vacuity gap, code-buffer-length gating,
   cut the sentinel/op-axis/multi-pass until one forced infill wins).
 - [[research/transformers-diffusion-source-grounding-2026-06-28]] — the per-step
   seam, the stopping ABC, the temperature caveat, the streamer verdict.

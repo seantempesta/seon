@@ -280,7 +280,7 @@ todo block — and that is correct separation, not a gap.
 
 The html twin is the inspector right-pane card the USER glances at to follow the
 agent (sibling to `transcript-block-html`). It returns BARE hiccup (NOT the live
-tile's compact/expanded contract — that is `:seon.render.live-tile/content`, a
+tile's compact/expanded contract — that is `:seon.render.live-canvas/content`, a
 different surface). It renders the SAME `todo-view` map as the ai block. Layout,
 top to bottom:
 
@@ -448,7 +448,7 @@ ai text and the html card can never disagree about state.
       (render-todo-ai v))))
 
 (defn todo-block-html       ; :seon.render/html → bare hiccup
-  {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-tile/hiccup]]}
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-canvas/hiccup]]}
   [input]
   (let [v (view-for input)]
     (if (or (nil? v) (and (empty? (:my.todo/tree v)) (empty? (:my.todo/recent v))))

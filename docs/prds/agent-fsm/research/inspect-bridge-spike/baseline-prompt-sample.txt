@@ -119,7 +119,7 @@
 ; real source (no signatures, no clipping). What renders is CURATED: YOUR
 ; CURRENT namespace (your live workspace, the most important thing here)
 ; and the nses it :requires, the my.* toolkit (my.kb / my.data / my.ui /
-; my.tile) and your core verbs (todo / message / lifecycle). Everything
+; my.canvas) and your core verbs (todo / message / lifecycle). Everything
 ; else — the rest of the seon framework AND your other my.* nses — is
 ; deliberately NOT dumped; it stays QUERYABLE and SEARCHABLE, one step
 ; away, so you are not buried in code you don't need. Never hallucinate a
@@ -142,7 +142,7 @@
 ; — design a schema (schema/register!), and COLOCATE the functions that
 ; operate on that data in the same namespace. Your code is my.*, your
 ; knowledge is my.kb.*; the core is seon.* (call it, never redefine it).
-; The my.* toolkit (my.ui / my.tile / my.data) is FULL-QUALIFIED — call
+; The my.* toolkit (my.ui / my.canvas / my.data) is FULL-QUALIFIED — call
 ; my.ui/card etc. directly, no alias needed. If a tool you need doesn't
 ; exist, write it and run it — don't wait to be given one. Namespaces are
 ; workspaces: moving to (ns my.domain.thing …) makes it your current ns,
@@ -283,7 +283,7 @@
 ; - :data-oriented-clojure  ○ — Foundational mindset for writing Clojure/ClojureScript the Seon way — data-oriented, immutable, schema-first, EAV, errors-as-values, derive-don't-store. Use this BEFORE writing or reviewing ANY seon .clj/.cljs, designing a data model, or implementing an agent verb, AND whenever you catch an imperative/OO reflex: a mutable accumulator loop, a :type/:kind discriminator, a 'table' of records, bare (non-namespaced) map keys, a thrown exception in an agent-facing fn, :pre/:post or hand-rolled validation, stored/cached derived state or a 'mark-as-seen' flag, threading a db/conn through call sites, a bare top-level await, or a foo-v2/parallel namespace to 'house a fix'. Use when you're about to guess a library's behavior from memory instead of reading reference-code/. For EAV query syntax see the datahike skill; for ^:async/self-host see the clojurescript skill — this is the mindset that links them.
 ; - :datahike  ○ — Seon database patterns. Use when writing Datalog queries, transacting data, debugging empty/unexpected results, designing a schema, or working with seon.db / seon.schema. Use for schema/register!, db/transact!, db/query, db/pull, db/entity, db/store-inventory, lookup-refs, refs/components/identity, upsert, retract, cardinality-many, CAS fences, as-of/since history, listen!/triggers, or any 'where do I put this data / how do I read it back' question in the CLJS pod.
 ; - :repl  ● loaded — How the Seon REPL reads, repairs, and evaluates the Clojure forms you write. Use when an eval fails to parse, when your form comes back as a :read error, when a value you typed didn't run, when you're unsure whether to write a `(` form vs `;` prose vs a `{}` map, when a paren/bracket is unbalanced, or when you want your forms to land correctly on the first try.
-; - :ui-live-tiles  ○ — Show your human a live VIEW, don't just message them. Use this BEFORE you reply to your human with a wall of text — when you have data, a query result, a table, a plan, a status, a recommendation, or progress to convey; when you want to build a tile / dashboard / canvas / chart / view for your human to SEE; when you're about to dump a result map or a list as prose; when you catch yourself narrating numbers you could render; when you want a button / form / input the human can click or type into. Your human watches your CANVAS (the focal tile on your /agent/{id} page), not a chat log — render to it. Covers wiring :seon.render.live-tile/content (literal hiccup OR a tile fn returning {:seon.render/hiccup … :seon.render/ai …}), the my.ui (static) / my.tile (INTERACTIVE controls) / my.data (aggregation) toolkit, semantic-hiccup styling, the safelisted utility vocabulary, compact/expanded faces, and seon.render/block for typed data. Cross-links data-oriented-clojure (derive-don't-store) + datahike (the data you'd show).
+; - :ui-canvas  ○ — Show your human a live VIEW, don't just message them. Use this BEFORE you reply to your human with a wall of text — when you have data, a query result, a table, a plan, a status, a recommendation, or progress to convey; when you want to build a tile / dashboard / canvas / chart / view for your human to SEE; when you're about to dump a result map or a list as prose; when you catch yourself narrating numbers you could render; when you want a button / form / input the human can click or type into. Your human watches your CANVAS (the focal tile on your /agent/{id} page), not a chat log — render to it. Covers wiring :seon.render.live-canvas/content (literal hiccup OR a tile fn returning {:seon.render/hiccup … :seon.render/ai …}), the my.ui (static) / my.canvas (INTERACTIVE controls) / my.data (aggregation) toolkit, semantic-hiccup styling, the safelisted utility vocabulary, compact/expanded faces, and seon.render/block for typed data. Cross-links data-oriented-clojure (derive-don't-store) + datahike (the data you'd show).
 ;;; └─ end skills-catalog ─
 
 ;;; ┌─ repl ─
@@ -662,7 +662,7 @@
 (defn titles-by-author "`:in`-bound input + REF-JOIN." {:malli/schema [:=> [:catn [::author-name :string]] [:vector :string]]} [author-name] …)
 ;;; └─ end namespace my.kb ─
 
-;;; ┌─ namespace my.tile ─
+;;; ┌─ namespace my.canvas ─
 (register! ::action [:or :symbol [:sequential :any]])
 (register! ::button-request [:map [::label ::label] [::action ::action]])
 (register! ::field :string)
@@ -682,7 +682,7 @@
 (defn input "A labelled text field BOUND to a signal (`data-bind`)." {:malli/schema [:=> [:cat ::input-request] :seon.render/html-response]} [{::keys [field label placeholder]}] …)
 (defn select "A labelled dropdown BOUND to a signal. `options` is `[[value label] …]`." {:malli/schema [:=> [:cat ::select-request] :seon.render/html-response]} [{::keys [field options label]}] …)
 (defn toggle "A labelled checkbox BOUND to a boolean signal." {:malli/schema [:=> [:cat ::toggle-request] :seon.render/html-response]} [{::keys [field label]}] …)
-;;; └─ end namespace my.tile ─
+;;; └─ end namespace my.canvas ─
 
 ;;; ┌─ namespace my.ui ─
 (register! ::badge-request [:map [::label ::label] [::tone {:optional true} ::tone]])
@@ -734,14 +734,14 @@
 ;;; ┌─ live-tile ─
 ; Your live tile — what your human currently sees (as-of this
 ; turn's render; the human's view live-updates between turns).
-; Wired: seon.render.live-tile/welcome (the core default — wire your own)
+; Wired: seon.render.live-canvas/welcome (the core default — wire your own)
 ;
-; Welcome — your tile is showing the core default (point :seon.render.live-tile/content at your own fn to replace it). Your human currently sees — in the root grid (compact): a note that you're still acquiring your purpose, your id, and your last reply ("Memory test passed. I can see all the facts I stored from your message:
+; Welcome — your tile is showing the core default (point :seon.render.live-canvas/content at your own fn to replace it). Your human currently sees — in the root grid (compact): a note that you're still acquiring your purpose, your id, and your last reply ("Memory test passed. I can see all the facts I stored from your message:
 ;
 ; - **Tidal plant**: generates 220 GWh/year, managed by Lucas Moreau (engineer), sits in an estuary
 ; - **Gale plant**: generates 90 GWh/year
 ;
-; Plus the earlier test facts from the previous agent (red fox, blue elephant, Pinnacle tower, Ingrid Solberg, Summit tower). Everything persisted across turns — the store-then-retrieve loop is intact."); expanded (the agent view): "Good evening." with Wednesday, July 1 09:59 PM, your purpose line, and: "I'll update this tile as I work — charts, statuses, whatever you ask for." To replace it, transact :seon.render.live-tile/content onto your agent entity — a qualified fn symbol or literal hiccup.
+; Plus the earlier test facts from the previous agent (red fox, blue elephant, Pinnacle tower, Ingrid Solberg, Summit tower). Everything persisted across turns — the store-then-retrieve loop is intact."); expanded (the agent view): "Good evening." with Wednesday, July 1 09:59 PM, your purpose line, and: "I'll update this tile as I work — charts, statuses, whatever you ask for." To replace it, transact :seon.render.live-canvas/content onto your agent entity — a qualified fn symbol or literal hiccup.
 ;
 ; Source driving your canvas (redefine it to change what
 ; your human sees):
@@ -823,7 +823,7 @@
 ;          [:div {:class "text-xs text-text-400 italic"} tile-line]])]
 ;      :seon.render/ai
 ;      (str "Welcome — your tile is showing the core default "
-;           "(point :seon.render.live-tile/content at your own fn to "
+;           "(point :seon.render.live-canvas/content at your own fn to "
 ;           "replace it). Your human currently sees — in the root grid "
 ;           "(compact): "
 ;           (if purpose
@@ -836,7 +836,7 @@
 ;           "; expanded (the agent view): \"" greet-line "\" with "
 ;           date-str " " time-str ", your purpose line, and: \""
 ;           tile-line "\" "
-;           "To replace it, transact :seon.render.live-tile/content onto "
+;           "To replace it, transact :seon.render.live-canvas/content onto "
 ;           "your agent entity — a qualified fn symbol or literal hiccup.")}))
 ;
 ; ── THIS canvas is your PRIMARY surface ── your human WATCHES
@@ -853,17 +853,17 @@
 ;   (seon.db/transact!
 ;     {:seon.db/tx-data
 ;      [{:seon.agent/id (seon.db/current-agent-id)
-;        :seon.render.live-tile/content
+;        :seon.render.live-canvas/content
 ;        <hiccup-vector  OR  'my.agent.MvI-2607012157/your-tile-fn>}]})
 ;
 ; COMPOSE it from the toolkit instead of hand-rolling [:div …]:
 ;   my.ui   — dual-render status-line / kv-table / section (static)
-;   my.tile — INTERACTIVE button / input / select / toggle / form
+;   my.canvas — INTERACTIVE button / input / select / toggle / form
 ;             (controls that call YOUR fns back — buttons WORK)
 ;   my.data — sum-by / max-by / group-sum over stored rows
 ; A tile fn returns {:seon.render/hiccup … :seon.render/ai …}: the
 ; human sees the hiccup, YOU see the :ai twin (above). The
-; `ui-live-tiles` skill is the full cookbook + the CSS safelist
+; `ui-canvas` skill is the full cookbook + the CSS safelist
 ; (only safelisted classes exist at runtime; classless semantic
 ; hiccup — [:table] [:ul] [:h2] [:p] [:pre [:code …]] — is styled
 ; for free). Evolve YOUR fn; never edit the shared core welcome tile.

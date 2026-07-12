@@ -140,7 +140,6 @@ Session management, agent environment, helpers.
 | Namespace | File | Purpose | Status |
 |-----------|------|---------|--------|
 | `seon.orchestrator.session` | `src/seon/orchestrator/session.clj` | Agent session management: runtime + ctx + pool JVM lifecycle | mature |
-| `seon.agent.helpers` | `src/seon/agent/helpers.clj` | SQL helpers for agents using implicit *ctx* | deprecated |
 | `seon.agent.env` | `src/seon/agent/env.clj` | Agent environment toolkit: graph search, schema discovery, context persistence | stable |
 
 ## REPL Layer
@@ -151,7 +150,6 @@ REPL-specific utilities for interactive development.
 |-----------|------|---------|--------|
 | `seon.repl` | `src/seon/repl.clj` | REPL form router: classifies forms, stores in Datahike, routes eval through flow topology | stable |
 | `seon.repl.context` | `src/seon/repl/context.clj` | Context cockpit for AI agents (wraps graph context + render) | stable |
-| `seon.repl.graduate` | `src/seon/repl/graduate.clj` | Namespace graduation: Datahike-stored forms to .clj file on disk | experimental |
 
 ## Dev Layer
 
@@ -173,7 +171,6 @@ Development tooling: hook, testing, linting, instrumentation.
 | `seon.dev.compliance` | `src/seon/dev/compliance.clj` | Convention compliance checking (missing schemas, positional args) | stable |
 | `seon.dev.suggestions` | `src/seon/dev/suggestions.clj` | Symbol suggestion via Levenshtein distance ("Did you mean?") | stable |
 | `seon.dev.clojure-replace` | `src/seon/dev/clojure_replace.clj` | Comment-aware s-expression match/replace via rewrite-clj | mature |
-| `seon.dev.hook-test-ns` | `src/seon/dev/hook_test_ns.clj` | Test namespace for dev hook experimentation | experimental |
 | `seon.dev.markdown` | `src/seon/dev/markdown.clj` | Pure markdown analysis: parse, validate, auto-fix docs files (Seon-native linter) | stable |
 
 ## Domain Layer
@@ -182,7 +179,6 @@ Application-specific namespaces (test cases for the infrastructure).
 
 | Namespace | File | Purpose | Status |
 |-----------|------|---------|--------|
-| `seon.health.metrics` | `src/seon/health/metrics.clj` | Body composition metrics (BMI computation, categorization) | stable |
 | `seon.health.workout` | `src/seon/health/workout.clj` | Workout tracking schemas and sample data | stable |
 | `seon.health.workout.render` | `src/seon/health/workout/render.clj` | Render companion for workout tracking (page + item renderers) | stable |
 | `seon.getting-started` | `src/seon/getting_started.clj` | Interactive 4-step walkthrough demonstrating living document UX | stable |

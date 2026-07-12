@@ -1,0 +1,7 @@
+$ git apply --verbose
+
+Checking patch seaborn/_core/scales.py...
+Checking patch seaborn/utils.py...
+Applied patch seaborn/_core/scales.py cleanly.
+Applied patch seaborn/utils.py cleanly.
+

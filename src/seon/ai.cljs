@@ -94,6 +94,36 @@
 (schema/register! ::provider-fields [:map])
 (schema/register! ::extra-body     [:map])
 
+;; Streaming (repl-mode `:stream`, Phase 1). `::stream?` on the llm-fn arg
+;; asks the adapter to consume the SDK stream delta-by-delta and ABORT the
+;; moment one complete top-level form has streamed (one form per turn).
+;; `::estimated?` marks a response whose `::usage` is a CLIENT-SIDE
+;; `seon.ai.tokens/estimate` (an aborted stream loses the provider's final
+;; usage chunk), so the turn record is honest that its token counts are
+;; estimates, not provider-reported.
+(schema/register! ::stream?    :boolean)
+(schema/register! ::estimated? :boolean)
+
+(defn llm-arg->ctx
+  "The ctx string from a bare-string or request-map llm-fn argument.
+
+   The argument is EITHER a bare ctx string (the back-compat shape every
+   adapter still accepts) OR a request map carrying `:seon.ai/ctx` (the
+   widened shape the turn loop passes when it needs streaming). Coerce,
+   never break: a plain string passes through."
+  {:malli/schema [:=> [:catn [::arg :any]] :string]}
+  [arg]
+  (if (map? arg) (str (::ctx arg)) (str arg)))
+
+(defn llm-arg->stream?
+  "Whether the llm-fn argument requested streaming.
+
+   `:seon.ai/stream?` true on a request-map arg, false for a bare string
+   (back-compat)."
+  {:malli/schema [:=> [:catn [::arg :any]] :boolean]}
+  [arg]
+  (boolean (and (map? arg) (::stream? arg))))
+
 ;; The errors-are-values envelope for LLM calls. Every failure mode
 ;; (timeout, fetch throw, HTTP non-2xx, unparseable body, refusal)
 ;; resolves to a response map carrying this under :seon.ai/error —
@@ -159,8 +189,40 @@
 ;; (enterprise, bearer-keyed). Same wire path as :deepseek
 ;; (seon.ai.openai-compat) with endpoint + key resolved from ::base-url /
 ;; ::api-key-env instead of the shipped deepseek defaults.
-(schema/register! ::provider [:enum :deepseek :anthropic :openai-compat :diffusiongemma])
-;; DiffusionGemma backend selector (env SEON_DG_BACKEND, DB-ownable like
+;; :typeahead = the diffusion typeahead STEP-LOOP provider
+;; (seon.ai.typeahead) — the same worker endpoint/key config as
+;; :diffusiongemma (SEON_DG_ENDPOINT), a different wire mode (mode=step).
+;;
+;; Each provider is DEFINED here with its declared wire locality —
+;; :frontier = a hosted frontier chat LLM; :local-worker = the LOCAL
+;; diffusion-worker family, whose endpoint/key resolve from
+;; SEON_DG_ENDPOINT (seon.ai.diffusiongemma owns that wire; the worker
+;; owns its own model + gen-config caps, which is also why
+;; [[shipped-defaults]] ships none of the five for it). The ::provider
+;; enum derives from this map's keys, so a provider CANNOT be added
+;; without declaring its locality — one definition site, no drift.
+(def provider-locality
+  "Declared locality of every `::provider`, at its definition site."
+  {:deepseek       :frontier
+   :anthropic      :frontier
+   :openai-compat  :frontier
+   :diffusiongemma :local-worker
+   :typeahead      :local-worker})
+
+(schema/register! ::provider (into [:enum] (keys provider-locality)))
+
+(defn frontier-provider?
+  "True when provider `p` is a frontier LLM, not a local worker.
+
+   Reads the colocated [[provider-locality]] declaration — the planner
+   derivation (`my.plan.internal/planner-for`) uses this to require a
+   frontier provider for the consulted planner."
+  {:malli/schema [:=> [:cat ::provider] :boolean]}
+  [p]
+  (= :frontier (get provider-locality p)))
+;; DiffusionGemma backend selector (env SEON_DG_BACKEND — the SEON_DG_*
+;; names are kept for continuity; the local process is `diffusion-server`).
+;; (DB-ownable like
 ;; ::provider). :control = the transformers RunPod worker that keeps the
 ;; per-step LogitsProcessor seam (seon.ai.diffusiongemma); :vllm = an
 ;; OpenAI-compatible serving endpoint (reuses seon.ai.openai-compat).
@@ -193,6 +255,42 @@
 ;; unreachable there (task #30, 2026-06-16). ::tools / ::tool-choice stay
 ;; request-opt-only (inherently per-call; no persisted form yet).
 (schema/register! ::extra-body-edn [:string {:min 1}])
+
+;; The RESOLVED five-key LLM config as a VALUE — what an agent runs
+;; under. NEVER stored (owner correction 2026-07-04, derive-don't-store:
+;; the per-turn `llm-*` stamping this shape once fed is deleted);
+;; [[resolved-config]] derives it from ANY db value on demand — the live
+;; db for current intent, `db/as-of` a past turn's `rendered-as-of`
+;; basis for historical exactness. `::thinking` is the row-shape STRING
+;; ("false"/"true"/effort — the [[thinking-mode]] vocabulary). Keys with
+;; no value at any resolution tier (anthropic never sends temperature;
+;; the diffusiongemma worker owns its own model + caps) are ABSENT.
+(schema/register! ::resolved-config
+  [:map
+   [::provider    ::provider]
+   [::model       {:optional true} ::model]
+   [::temperature {:optional true} ::temperature]
+   [::max-tokens  {:optional true} ::max-tokens]
+   [::thinking    {:optional true} ::thinking]])
+
+;; The SHIPPED per-provider defaults for the `::resolved-config` keys —
+;; the LAST tier of the ONE resolution chain (request opt → agent
+;; override → config row → THIS). Single source: the adapters read their
+;; default constants FROM here (seon.ai.openai-compat, seon.ai.anthropic)
+;; and [[resolved-config]] reports them — one map, zero drift.
+;; :openai-compat shares the deepseek adapter's wire path and fallbacks.
+;; :diffusiongemma ships NONE of the five (the worker owns the weights
+;; and its gen-config caps). Endpoint/timeout/key-env defaults stay
+;; adapter-private — they are not part of the resolved-config surface.
+(def shipped-defaults
+  "Per-provider shipped defaults for the `:seon.ai/resolved-config` keys."
+  {:deepseek       {::model "deepseek-v4-pro" ::temperature 0.7
+                    ::max-tokens 4096 ::thinking "false"}
+   :openai-compat  {::model "deepseek-v4-pro" ::temperature 0.7
+                    ::max-tokens 4096 ::thinking "false"}
+   :anthropic      {::model "claude-opus-4-8" ::max-tokens 16000
+                    ::thinking "false"}
+   :diffusiongemma {}})
 
 ;; The config attrs a row (or the env) may carry — shared shape for
 ;; [[sync-tx-data]]'s two inputs and the row read.
@@ -237,8 +335,14 @@
 ;; value arm REUSES the existing global-row value shape by keyword (the
 ;; register-once rule) — `::provider`/`::model`/`::temperature`/
 ;; `::max-tokens`/`::thinking`. `::agent-max-retries` replaces the
-;; SEON_AI_MAX_RETRIES env read (seon.agent.turn). Nothing reads these
-;; yet (CP-1 is purely additive).
+;; SEON_AI_MAX_RETRIES env read (seon.agent.turn). READ per call:
+;; [[current]] lays the ambient agent's overrides over the global row
+;; ([[overlay-agent-overrides]]), so every adapter's resolution chain is
+;; explicit request opt → the AGENT's own config → the global row →
+;; shipped defaults. What an agent resolves to is a QUERY, never a
+;; stored stamp: [[resolved-config]] derives the effective config (with
+;; per-key provenance) from any db value — live, or `db/as-of` a past
+;; turn's basis-t (derive-don't-store).
 ;; ============================================================
 
 (schema/register! ::agent-provider    [:or {:default :inherit} [:enum :inherit] ::provider])
@@ -274,6 +378,7 @@
     "anthropic"     :anthropic
     "openai-compat" :openai-compat
     "diffusiongemma" :diffusiongemma
+    "typeahead"     :typeahead
     nil))
 
 (defn- parse-dg-backend
@@ -372,18 +477,17 @@
 (schema/register! ::agent-id [:string {:min 1}])
 (schema/register! ::effective-config-request [:map [::agent-id ::agent-id]])
 
-(defn- overlay-agent-overrides
-  "Lay agent `id`'s `::agent-*` override datoms over `global` (a `::row`),
-   `:inherit`/absent → keep the global value. Per-attr install-gated (querying a
-   never-installed attr THROWS on datahike-cljs). Nil id / no agent → `global`
-   unchanged."
-  [global id]
-  (let [db        (some-> db/*conn* deref)
-        installed (when db (db/installed-schema db))
+(defn- agent-override-values
+  "Agent `id`'s non-`:inherit` `::agent-*` override VALUES from db value
+   `db`, keyed by the global attr each overrides. Per-attr install-gated
+   (querying a never-installed attr THROWS on datahike-cljs). Nil db /
+   nil id / no such agent → {}."
+  [db id]
+  (let [installed (when db (db/installed-schema db))
         agent     (when (and db id)
                     (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))]
     (if-not agent
-      global
+      {}
       (reduce-kv
         (fn [m agent-attr global-attr]
           ;; `::agent-*` overrides are MIXED-`:or` schemas → stored pr-str'd by
@@ -394,8 +498,15 @@
             (if (or (nil? v) (= :inherit v))
               m
               (assoc m global-attr v))))
-        global
+        {}
         agent-override-attrs))))
+
+(defn- overlay-agent-overrides
+  "Lay agent `id`'s `::agent-*` override datoms over `global` (a `::row`),
+   `:inherit`/absent → keep the global value. Reads the ambient conn's
+   current db. Nil id / no agent → `global` unchanged."
+  [global id]
+  (merge global (agent-override-values (some-> db/*conn* deref) id)))
 
 (defn current
   "The EFFECTIVE LLM config the adapters read PER CALL.
@@ -423,6 +534,68 @@
   {:malli/schema [:=> [:cat ::effective-config-request] ::row]}
   [{::keys [agent-id]}]
   (overlay-agent-overrides (global-config) agent-id))
+
+;; WHERE a resolved value came from — provenance by DERIVATION (the
+;; resolver re-walks the chain), never storage. Same key set as
+;; `::resolved-config`.
+(schema/register! ::source [:enum :agent-override :config-row :default])
+(schema/register! ::provenance
+  [:map
+   [::provider    ::source]
+   [::model       {:optional true} ::source]
+   [::temperature {:optional true} ::source]
+   [::max-tokens  {:optional true} ::source]
+   [::thinking    {:optional true} ::source]])
+(schema/register! ::resolved-config-request
+  [:map
+   [:seon.db/db :seon.db/db-val]
+   [:seon.agent/id {:optional true} ::agent-id]])
+(schema/register! ::resolved-config-response
+  [:map
+   [::resolved-config ::resolved-config]
+   [::provenance      ::provenance]])
+
+(defn resolved-config
+  "The effective LLM config an agent runs under, derived from a db value.
+
+   Pure fn of `:seon.db/db` — derive-don't-store: nothing persists this,
+   asking again re-derives it. Per key the chain is the agent's own
+   `::agent-*` override datom → the global `::config` row → the
+   provider's [[shipped-defaults]] entry (`::provider` itself falls back
+   to `:deepseek`). Returns the `::resolved-config` VALUE plus
+   `::provenance` — the same keys mapped to where each value came from
+   (`:agent-override` / `:config-row` / `:default`). A key with no value
+   at any tier is absent from both. Omit `:seon.agent/id` for the
+   global-only view. (A section fn surfacing this per agent is the
+   natural UI follow-on.)
+
+   Time travel — datahike is bitemporal, so the config a PAST turn ran
+   under is this same fn over that turn's frozen basis:
+
+     (resolved-config
+       {:seon.db/db    (db/as-of db (:seon.agent.turn/rendered-as-of turn))
+        :seon.agent/id agent-id})"
+  {:malli/schema [:=> [:cat ::resolved-config-request] ::resolved-config-response]}
+  [{db :seon.db/db id :seon.agent/id}]
+  (let [overrides (agent-override-values db id)
+        row-cfg   (global-config db)
+        pick      (fn [k defaults]
+                    (cond
+                      (contains? overrides k) [(get overrides k) :agent-override]
+                      (contains? row-cfg k)   [(get row-cfg k)   :config-row]
+                      (contains? defaults k)  [(get defaults k)  :default]))
+        [prov prov-src] (or (pick ::provider {}) [:deepseek :default])
+        defaults  (get shipped-defaults prov {})]
+    (reduce
+      (fn [acc k]
+        (if-let [[v src] (pick k defaults)]
+          (-> acc
+              (assoc-in [::resolved-config k] v)
+              (assoc-in [::provenance k] src))
+          acc))
+      {::resolved-config {::provider prov}
+       ::provenance      {::provider prov-src}}
+      [::model ::temperature ::max-tokens ::thinking])))
 
 (defn agent-max-retries
   "The per-agent LLM retry COUNT for agent `id`.
@@ -506,15 +679,22 @@
       :control))
 
 ;; ============================================================
-;; Shared system-prompt resolution — the HARDCODED, system-specific seon
-;; mechanics. Both providers send the same one.
+;; Shared system-prompt resolution — request override → the cluster's
+;; `:seon.config/system-text` DATOM → the shipped default. Both providers
+;; send the same one.
 ;;
 ;; The system role message is NOT the soul and NOT any file: it is the
-;; environment orientation + REPL doctrine + common DB ops + standing
-;; teachings hardcoded in `seon.agent.ctx/system-text`. SOUL.md / AGENTS.md are
-;; FILE-LOADED CONTEXT sections (`seon.agent.ctx/file-block`), wired into
-;; `seon.config/default-ctx-blocks` — they ride the user-message context, not
-;; here. There is NO file read and NO fallback in this path.
+;; environment orientation + REPL doctrine the cluster runs under. A cluster
+;; that seeds `:seon.config/system-text` (manifest → the `:seon.config`
+;; singleton datom at boot — config-through-DB) owns its system message as
+;; DB state (live-tunable by a transact, replay-visible); absent the datom,
+;; the shipped default is `seon.agent.ctx/system-text` (byte-identical to
+;; the pre-datom world). SOUL.md / AGENTS.md are FILE-LOADED CONTEXT
+;; sections (`seon.agent.ctx/file-block`), wired into
+;; the manifest-declared context blocks — they ride the user-message context,
+;; not here. There is NO per-call file read in this path: the datom read is
+;; `seon.config/config-view` (the db singleton post-conn; the boot manifest
+;; resolve is only the pre-conn sliver).
 ;; ============================================================
 
 (schema/register! ::prompt-request
@@ -540,23 +720,28 @@
 (defn effective-system-prompt
   "The system message content for a call.
 
-   The request's explicit
-   `:seon.ai/system-prompt` override when given, else the HARDCODED
-   system-specific seon mechanics (`seon.agent.ctx/system-text` — byte-stable,
-   the same for every agent and turn, so it caches as the system block).
-   This is NOT the soul and NOT a file — SOUL.md / AGENTS.md are context
-   sections, decoupled from the system message. Never throws."
+   One `or` chain: the request's explicit `:seon.ai/system-prompt` override
+   when given, else the cluster's `:seon.config/system-text` datom (the
+   `:seon.config` singleton via `seon.config/config-view` —
+   config-through-DB, seeded from the manifest at boot, live-tunable by a
+   transact), else the shipped default (`seon.agent.ctx/system-text`). All
+   three are byte-stable within a cluster, the same for every agent and
+   turn, so the system block caches. This is NOT the soul and NOT a file —
+   SOUL.md / AGENTS.md are context sections, decoupled from the system
+   message. Never throws."
   {:malli/schema [:=> [:cat ::prompt-request] ::system-prompt]}
   [{::keys [system-prompt]}]
-  (or system-prompt ctx/system-text))
+  (or system-prompt
+      (:seon.config/system-text (config/config-view))
+      ctx/system-text))
 
 (defn debug-full-prompt
   "The FULL prompt as the agent sees it.
 
-   The hardcoded system block
+   The resolved system block
    ([[effective-system-prompt]]), a boundary, then the assembled context
-   (block 2). THE single source both the inspector preview
-   (`seon.agent.inspect/ctx-preview`) and the persisted per-turn log use,
+   (block 2). THE single source both the debug view preview
+   (`seon.agent.debug/ctx-preview`) and the persisted per-turn log use,
    so the two debug surfaces are byte-identical to each other and to what
    the adapters wire. This is a DEBUG representation only — it is NEVER
    sent to the LLM (the adapters add the system block themselves; sending

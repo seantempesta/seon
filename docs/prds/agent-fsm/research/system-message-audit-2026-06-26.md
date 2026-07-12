@@ -49,7 +49,7 @@ This document is a normal markdown doc, so it uses code fences/backticks freely;
   vs the `:inventory` section that IS that data; errors-are-values (system msg) vs the
   `:warnings` section that shows one live.
 - **Render-twins block (system msg L92–98): CUT.** It's pipeline theory assuming
-  tile/section/hiccup vocabulary the agent lacks at boot; the `:live-tile` section
+  canvas/section/hiccup vocabulary the agent lacks at boot; the `:live-tile` section
   already SHOWS the tile and teaches how to change it. Move the mechanic there.
 - **THREE content gaps the system message should fill (NEW vs current, flagged in
   §7):** (a) turn-position/sliding-window clarity — present but buried + the readline
@@ -231,9 +231,9 @@ message's "write notes to yourself" in BUILD-YOUR-ENVIRONMENT can defer to it.
 ### 1.4 `:live-tile` — 1,104 chars / ~276 tok
 
 **Claim inventory:** (i) this is your live tile = what your human currently sees;
-(ii) the wired fn (`seon.render.live-tile/welcome`, the core default); (iii) the
+(ii) the wired fn (`seon.render.live-canvas/welcome`, the core default); (iii) the
 rendered welcome-card text the human sees now; (iv) how to change it — redefine the
-wired fn, or transact `:seon.render.live-tile/content` (a qualified fn symbol or
+wired fn, or transact `:seon.render.live-canvas/content` (a qualified fn symbol or
 literal hiccup) onto your entity.
 
 **Cut/keep:** KEEP — this is the live SHOW of the tile mechanism and the correct home
@@ -391,7 +391,7 @@ Block (L92–98): "render twins `:seon.render/ai` (text for you) + `:seon.render
 3. **It's on-demand knowledge** — that a section can carry an HTML panel matters only
    when the agent builds a rich panel, not at boot.
 4. **The live section already teaches it better** — `:live-tile` (L2247–2256) SHOWS
-   the tile and gives the actionable move ("transact `:seon.render.live-tile/content`
+   the tile and gives the actionable move ("transact `:seon.render.live-canvas/content`
    — a qualified fn symbol or literal hiccup"). The hiccup-splice tip
    (system-msg L249–252) belongs with it.
 

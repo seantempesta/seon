@@ -6,7 +6,7 @@ tags: [component, web]
 
 # Web Brand Surface
 
-> The product name, tagline, and theme the web UI renders are DATA in the cluster store, not compiled constants. `seon.web.brand` (`src/seon/web/brand.cljs`, CLJS pod lane) lets a downstream consumer rebrand every inspector page — name, tagline, `data-theme`, and a full stylesheet override — without touching `src/`. Shipped as fix-everything PRD C-17 (commit 24671ca).
+> The product name, tagline, and theme the web UI renders are DATA in the cluster store, not compiled constants. `seon.web.brand` (`src/seon/web/brand.cljs`, CLJS pod lane) lets a downstream consumer rebrand every web UI page — name, tagline, `data-theme`, and a full stylesheet override — without touching `src/`. Shipped as fix-everything PRD C-17 (commit 24671ca).
 
 ## Data model
 
@@ -31,7 +31,7 @@ All schemas registered via `schema/register!` in the ns. Optional = absent: a mi
 
 ## Env sync — env OWNS the row
 
-`sync!` runs at boot (kicked from `seon.web.inspector/install!`, after `boot-seed!` with the root conn bound, fire-and-forget). Per attr against `SEON_BRAND_NAME` / `SEON_BRAND_TAGLINE` / `SEON_BRAND_THEME`:
+`sync!` runs at boot (kicked from `seon.web.debug/install!`, after `boot-seed!` with the root conn bound, fire-and-forget). Per attr against `SEON_BRAND_NAME` / `SEON_BRAND_TAGLINE` / `SEON_BRAND_THEME`:
 
 - env set and ≠ row value → assert (identity upsert)
 - env unset but row has a value → retract
@@ -41,13 +41,13 @@ This deliberately differs from `my.soul`'s seed-only-if-absent: booting WITHOUT 
 
 ## The CSS hook
 
-`SEON_BRAND_CSS=<abs path>` names a stylesheet that the inspector inlines as a `[:style]` AFTER the `/css/output.css` link in every page head (`seon.web.inspector/brand-css-style`), so its token overrides (`--color-base-*`, `--color-amber-*`, fonts) win the cascade. Read fresh per render — a css edit shows on the next page load. Example downstream use: an "Acme" deploy sets the four env vars and ships one css file; nothing in this repo changes.
+`SEON_BRAND_CSS=<abs path>` names a stylesheet that the web UI inlines as a `[:style]` AFTER the `/css/output.css` link in every page head (`seon.web.debug/brand-css-style`), so its token overrides (`--color-base-*`, `--color-amber-*`, fonts) win the cascade. Read fresh per render — a css edit shows on the next page load. Example downstream use: an "Acme" deploy sets the four env vars and ships one css file; nothing in this repo changes.
 
-## Consumers (seon.web.inspector)
+## Consumers (seon.web)
 
 All four page shells read `brand/info` for `<title>`, `data-theme` on `[:html]`, and the brand stylesheet:
 
-- `inspector-shell` (`/agent/<id>/debug`) — title `"<name> · agent <id> · debug"`
+- `debug-shell` (`/agent/<id>/debug`) — title `"<name> · agent <id> · debug"`
 - the consumer agent shell (`/agent/<id>`) — title `"<name> · agent <id>"`
 - `agents-index-page` (`/agents`) — title `"<name> · agents"`
 - `agent-not-found-page` — title `"<name> · agent <id> not found"`
@@ -57,7 +57,7 @@ The cluster dashboard fragment additionally renders the brand h1 (`page-title b 
 ## Dependencies
 
 - Uses: `seon.db` (query/entity/transact!/listen-side conn), `seon.schema`, `seon.log`, Node `process.env` + `fs` (pod lane only — no `.clj` sibling).
-- Used by: `seon.web.inspector` (page shells, `brand-css-style`, `install!` boot kick).
+- Used by: `seon.web.serve`/`seon.web.debug`/`seon.web.datastar` (page shells, `brand-css-style`, `install!` boot kick).
 
 ## Design decisions
 

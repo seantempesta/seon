@@ -1,0 +1,84 @@
+{
+ "endpoint": "http://127.0.0.1:17860",
+ "worker_health": {
+  "ok": true,
+  "worker_sha": "e3e4fc3668d3",
+  "model_loaded": true,
+  "idle_s": 98.4,
+  "idle_timeout_s": 900,
+  "gens": 20,
+  "unloads": 1,
+  "jobs": 20
+ },
+ "corpus_sha": "796e81c981476ee3915df42afb3970b3fff5c5aefc0f8cf669cdbb779422badb",
+ "epochs": 3,
+ "elapsed_s": 4282.0,
+ "summaries": {
+  "arm0_deepseek": {
+   "n_exec": 10,
+   "n_scored": 10,
+   "outcome_mean": 0.7,
+   "form_validity": 1.0,
+   "verb_accuracy": 0.7142857142857143,
+   "tokens_to_valid_form_median": 91.0,
+   "wall_s_median": null,
+   "uptake_mean": null,
+   "rounds_to_lock_median": null
+  },
+  "arm0b_deepseek_oneshot": {
+   "n_exec": 10,
+   "n_scored": 10,
+   "outcome_mean": 0.7,
+   "form_validity": 1.0,
+   "verb_accuracy": 0.5714285714285714,
+   "tokens_to_valid_form_median": 22.5,
+   "wall_s_median": 22.9125,
+   "uptake_mean": null,
+   "rounds_to_lock_median": null
+  },
+  "arm1_guided": {
+   "n_exec": 30,
+   "n_scored": 28,
+   "outcome_mean": 0.2857142857142857,
+   "form_validity": 0.4642857142857143,
+   "verb_accuracy": 0.0,
+   "tokens_to_valid_form_median": 9,
+   "wall_s_median": 20.519,
+   "uptake_mean": null,
+   "rounds_to_lock_median": null
+  },
+  "arm2_typeahead": {
+   "n_exec": 30,
+   "n_scored": 30,
+   "outcome_mean": 0.5333333333333333,
+   "form_validity": 0.9,
+   "verb_accuracy": 0.3333333333333333,
+   "tokens_to_valid_form_median": 6,
+   "wall_s_median": 3.0465,
+   "uptake_mean": 0.0,
+   "rounds_to_lock_median": 1
+  },
+  "arm3_degraded": {
+   "n_exec": 30,
+   "n_scored": 30,
+   "outcome_mean": 0.26666666666666666,
+   "form_validity": 0.36666666666666664,
+   "verb_accuracy": 0.0,
+   "tokens_to_valid_form_median": 9,
+   "wall_s_median": 33.408500000000004,
+   "uptake_mean": null,
+   "rounds_to_lock_median": null
+  }
+ },
+ "kill_criteria": {
+  "protocol_leak": {
+   "degraded_minus_baseline": -0.019,
+   "verdict": "LEAK (menus-as-text regress baseline)"
+  },
+  "dead_weight": {
+   "uptake_mean": 0.0,
+   "accuracy_gain": 0.248,
+   "verdict": "earns its render"
+  }
+ }
+}

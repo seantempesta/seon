@@ -37,13 +37,13 @@
 (deftest frame-parses-as-valid-clojure
   (testing "the scaffold is well-formed Clojure — three top-level forms, no read error"
     (let [entries (internal/parse-forms frame {:strip-fences? false})
-          kinds   (map :kind entries)
-          forms   (filter #(= :form (:kind %)) entries)]
+          kinds   (map :seon.repl/kind entries)
+          forms   (filter #(= :form (:seon.repl/kind %)) entries)]
       (is (not-any? #{:read :error} kinds)
           (str "frame must parse cleanly, got kinds " (vec kinds)))
       ;; two schema/register! + one defn
       (is (= 3 (count forms)) "expected exactly three top-level forms")
-      (is (= '#{schema/register! defn} (set (map (comp first :form) forms)))
+      (is (= '#{schema/register! defn} (set (map (comp first :seon.repl/form) forms)))
           "the three forms are two register! and one defn"))))
 
 (deftest infill-spans-land-on-real-slots

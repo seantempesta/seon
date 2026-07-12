@@ -27,7 +27,19 @@ must persist). The `claude-api` dev skill covers Anthropic specifics.
   provider change that reorders or re-flows prompt parts silently destroys
   the cache hit rate; check `llm-usage` cached-token counts after changes.
 
+**Model catalog** (recommended models + working configs per provider):
+`docs/seon/reference/llm-adapters.md` §"Model catalog" — update it when a
+provider ships/deprecates a model.
+
 Adapters: `openai_compat.cljs` (DeepSeek et al — the pod default),
 `anthropic.cljs`, `diffusiongemma.cljs` (the diffusion-worker provider).
+Verified `:openai-compat` gateways: OpenRouter (acme), Meta Model API
+(Muse Spark 1.1 — config recipe, measured speed, and the
+`SEON_AI_THINKING=minimal` dial in
+`docs/prds/agent-ctx/research/meta-model-api-muse-spark-2026-07-10.md`).
+On `:openai-compat` a string thinking goes out as the STANDARD
+`reasoning_effort` and the vendor `:thinking` field is NEVER sent
+(strict gateways 400 unknown params); `:deepseek` keeps its explicit
+toggle. Vendor-specific request fields ride `:extra-body` only.
 Vendored SDK grounding: `reference-code/openai-node/`,
 `reference-code/anthropic-sdk-typescript/`, `reference-code/js-genai/`.

@@ -19,6 +19,18 @@
      (b) <= 78 chars (72 ideal — the fill-column already in use),
      (c) ends in terminal punctuation (`.`/`?`/`!`).
 
+   PLUS a body rule (any docstring line): a docstring must carry NO reserved
+   RESULT-GRAMMAR glyph literal (result-open/close, status-open/close, prompt —
+   the five `seon.agent.ctx/reserved-glyphs`). Those glyphs are RUNTIME-ONLY
+   (the transcript emits them from the constants); a docstring renders into
+   agent context, so a literal example there both models the fabrication shape
+   the pod's `strip-result-claims` strips AND drifts if the glyph ever
+   changes (static text can't reference the constant). Static agent-facing text
+   shows the CALL and describes the return in PROSE. Computed via
+   [[wrong-echo-re]] (a structural regex over the glyph set, never a file
+   list). The value-VOCABULARY glyphs (`⟨N tok⟩`/`‹…›`/`«…»`) are NOT reserved
+   and NOT flagged.
+
    WARN-ONLY, by design NEVER blocks: ~560 existing docstrings are
    non-compliant; a blocking lint would wedge the shared multi-agent tree.
    It REPORTS and lets the edit through. It does NOT auto-fix — the cleanup
@@ -52,6 +64,20 @@
   "A complete sentence ends in one of these."
   #{\. \? \!})
 
+(def ^:private wrong-echo-re
+  "A RESERVED result-grammar glyph literal in a docstring — result-open `⟹`
+   (U+27F9), result-close `⟸` (U+27F8), status-open/close `⋘`/`⋙`
+   (U+22D8/U+22D9), or prompt `❯` (U+276F). These are RUNTIME-ONLY glyphs
+   (`seon.agent.ctx/reserved-glyphs`) the transcript emits from its constants;
+   a docstring renders into agent context, so a literal one both models the
+   fabrication shape the pod's `strip-result-claims` strips AND drifts if
+   the glyph changes (static text can't reference the constant). A char class
+   over exactly the five reserves — the value-VOCABULARY glyphs
+   (`⟨⟩`/`‹›`/`«»`) are NOT reserved and NOT matched. Any occurrence on a line
+   is flagged (this is the anti-fabrication inversion of the old
+   require-a-`; ⟹`-echo rule)."
+  #"[\x{27F9}\x{27F8}\x{22D8}\x{22D9}\x{276F}]")
+
 ;;; ---------------------------------------------------------------------------
 ;;; Schema Registration
 ;;; ---------------------------------------------------------------------------
@@ -73,7 +99,8 @@
                    :missing-docstring
                    :blank-first-line
                    :first-line-too-long
-                   :no-terminal-punctuation])
+                   :no-terminal-punctuation
+                   :reserved-glyph-literal])
 
 (schema/register! ::line
                   [:int {:min 1 :description "1-based line of the defn form"}])
@@ -175,7 +202,7 @@
                     (str/includes? ns-name ".internal.")))))
 
 (defn- test-ns?
-  "A `*-test` namespace — its deftests are not public verbs, skip linting."
+  "A `*-test` namespace — its deftests are not public functions, skip linting."
   [ns-name]
   (boolean (and ns-name (str/ends-with? ns-name "-test"))))
 
@@ -260,6 +287,34 @@
 
           :else nil)))))
 
+(defn- check-echoes
+  "Findings for a public defn's docstring BODY lines carrying a RESERVED
+   result-grammar glyph literal (`⟹`/`⟸`/`⋘`/`⋙`/`❯` — [[wrong-echo-re]]).
+   Those glyphs are runtime-only; a docstring must show the CALL and describe
+   the return in PROSE, never render a literal result line. One finding per
+   offending line; empty when the docstring is clean or nil."
+  [{:keys [fn-name doc line]}]
+  (when doc
+    (into []
+          (comp (filter #(re-find wrong-echo-re %))
+                (map (fn [ln]
+                       {::fn-name fn-name
+                        ::rule :reserved-glyph-literal
+                        ::line line
+                        ::first-line (str/trim ln)
+                        ::message (str fn-name ": docstring carries a reserved"
+                                       " runtime result-grammar glyph — describe"
+                                       " the return in prose; the runtime alone"
+                                       " emits the glyph from its constant")})))
+          (str/split-lines doc))))
+
+(defn- check-fn
+  "All findings for one public defn: the line-1 finding (if any) plus every
+   reserved-glyph-literal in the body."
+  [defn-map]
+  (concat (some-> (check-one defn-map) vector)
+          (check-echoes defn-map)))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Public API
 ;;; ---------------------------------------------------------------------------
@@ -288,7 +343,7 @@
        ::findings []}
       (let [findings (into []
                            (comp (keep public-defn)
-                                 (keep check-one))
+                                 (mapcat check-fn))
                            top-nodes)]
         {::clean? (empty? findings)
          ::skipped? false
@@ -325,7 +380,7 @@
                      (str "  L" (::line v) " " (::message v)))
                    findings)
         full (str "Docstring lint (WARN, non-blocking): "
-                  (count findings) " public-fn line-1 issue(s)\n"
+                  (count findings) " public-fn docstring issue(s)\n"
                   (str/join "\n" lines))]
     {::formatted (let [suffix "\n... (truncated)"]
                    (if (> (count full) max-len)
@@ -360,7 +415,7 @@
              acc
              (let [defns (into [] (keep public-defn) top-nodes)
                    findings (into []
-                                  (comp (keep check-one)
+                                  (comp (mapcat check-fn)
                                         (map #(assoc % ::file-path path)))
                                   defns)]
                (-> acc

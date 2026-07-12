@@ -2,13 +2,16 @@
   "Private plumbing for `my.plan` — fail/agent-scoping helpers, the
    write-result envelope mapper, the shared Datalog rule set, the derived
    work-queue queries (ready leaves, roll-up, blocked/ready), the position
-   ANCHOR derivation, the reverse-ref tree pull, the plan! tempid compiler,
-   the drop! subtree walk, and the WINDOWED plan-block context render
-   (anchor + open frontier + recently-completed tail; the completed
-   interior stays in the DB, out of the prompt).
+   ANCHOR derivation, the reverse-ref tree pull, the ONE document compiler
+   behind plan! AND reconcile! (plus the lenient markdown parse),
+   the drop! subtree walk, the derived stuck×N → frontier re-plan
+   ESCALATION (flag query + STUCK band + once-per-episode planner
+   consult), and the WINDOWED plan-block context render (anchor + open
+   frontier + recently-completed tail; the completed interior stays in
+   the DB, out of the prompt).
 
-   Factored out of the public verb surface so the teaching ns shows ONLY the
-   verbs + their register! schemas (the `*.internal` convention drops these
+   Factored out of the public function surface so the teaching ns shows ONLY the
+   functions + their register! schemas (the `*.internal` convention drops these
    from rendered agent context — see
    `seon.agent.ctx.namespaces/hidden-ns-name?`).
 
@@ -18,18 +21,27 @@
    (the render fns need it and the dep is one-way); `my.plan/rules` re-defs
    the same value so an agent can still read and extend it."
   (:require
+    [cljs.reader :as edn]
     [clojure.string :as str]
-    [seon.db :as db]))
+    [clojure.walk :as walk]
+    [seon.agent.message :as msg]
+    [seon.ai :as ai]
+    [seon.ai.tokens :as tokens]
+    [seon.db :as db]
+    [seon.repair.candidates :as cand]
+    [seon.repl.internal :as repl-internal]
+    [seon.schema :as schema]))
 
 (def rules
   "Datalog rules over the plan graph — `my.plan/rules` re-defs this value:
    descendant (transitive tree closure, cycle-safe), leaf (no children),
    unfinished (:open/:active/:blocked — anything not :done), open-work
    (unfinished leaf in the subtree), blocked (an explicit :blocked status OR
-   a `needs` target with open work), ready (open unblocked leaf — work to do
-   now; an :active step is in hand, not re-listed as ready). Negations
-   (`leaf`, `not blocked`) only FILTER bound tuples, so bind the entity
-   positively BEFORE invoking these."
+   a `needs` target with open work), ready (work to do now — an open unblocked
+   leaf, OR an open unblocked non-leaf whose subtree is fully drained: its one
+   remaining action is verify-and-close). An :active step is in hand, not
+   re-listed as ready. Negations (`leaf`, `not blocked`, `not open-work`) only
+   FILTER bound tuples, so bind the entity positively BEFORE invoking these."
   '[[(descendant ?a ?n) [?n :my.plan/parent ?a]]
     [(descendant ?a ?n) [?m :my.plan/parent ?a] (descendant ?m ?n)]
     [(leaf ?t) (not-join [?t] [?c :my.plan/parent ?t])]
@@ -40,14 +52,20 @@
     [(open-work ?t) (descendant ?t ?l) (unfinished ?l) (leaf ?l)]
     [(blocked ?t) [?t :my.plan/status :blocked]]
     [(blocked ?t) [?t :my.plan/needs ?d] (open-work ?d)]
-    [(ready ?t) [?t :my.plan/status :open] (leaf ?t) (not (blocked ?t))]])
+    [(ready ?t) [?t :my.plan/status :open] (leaf ?t) (not (blocked ?t))]
+    [(ready ?t) [?t :my.plan/status :open] (not (leaf ?t))
+     (not (open-work ?t)) (not (blocked ?t))]])
 
 (defn fail [msg] {:my.plan/ok? false :my.plan/error msg})
 
-(defn scoped-agent
-  "Explicit agent ref, else the calling agent from the ALS scope."
-  [agent]
-  (or agent (when-let [id (db/current-agent-id)] [:seon.agent/id id])))
+(defn agent-ref
+  "Lookup ref for agent id `id` — nil when no id resolved.
+
+   The id arrives as the functions' DECLARED `:seon.agent/id` request key
+   (filled at the eval boundary when the caller omits it — see
+   `seon.instrument/injectables`); no ambient read happens here."
+  [id]
+  (when id [:seon.agent/id id]))
 
 (defn agent-eid
   "Resolve an agent ref (lookup-ref/eid) to its eid in db value `db`, or nil."
@@ -69,17 +87,89 @@
   [verb id env]
   (if (:seon.db/ok? env)
     {:my.plan/ok? true :my.plan/id id}
-    (fail (str verb ": store failed — "
+    (fail (str verb ": db write failed — "
                (get-in env [:seon.db/error :seon.error/message])))))
+
+;; --- Loud unknown-key guard (registry class: silent unknown-key acceptance
+;; --- in my.* request maps). A request map is OPEN — the eval boundary
+;; --- composes injectable keys in, and foreign-namespace keys pass through —
+;; --- so a MISSPELLED `:my.plan/*` key (e.g. `:my.plan/steps` for
+;; --- `:my.plan/children`) is silently dropped and mints a childless plan.
+;; --- The accepted key set is DERIVED from the registered schemas (never a
+;; --- hand list), so it can't drift; the fix suggestion reuses the ONE
+;; --- candidate ranker (`seon.repair.candidates`).
+
+(defn schema-map-keys
+  "The accepted map-entry keys of registered schema `k`, DERIVED from its
+   definition — every key of every nested `[:map …]` (so a `:schema`/
+   registry-wrapped node contributes its keys). Never a hand list."
+  [k]
+  (let [acc (volatile! #{})]
+    (walk/postwalk
+      (fn [x]
+        (when (and (vector? x) (= :map (first x)))
+          (doseq [e (rest x)]
+            (when (and (vector? e) (keyword? (first e)))
+              (vswap! acc conj (first e)))))
+        x)
+      (schema/schema-definition k))
+    @acc))
+
+(defn my-plan-key?
+  "True iff keyword `k` is namespaced under `my.plan` (or `my.plan.*`)."
+  [k]
+  (boolean (when-let [ns (namespace k)]
+             (or (= ns "my.plan") (str/starts-with? ns "my.plan.")))))
+
+(defn unknown-key-fail
+  "Fail envelope for the FIRST `my.plan`-namespaced key in `request` that
+   `accepted` doesn't contain — naming the key + a did-you-mean over the
+   accepted `my.plan` keys ([[cand/rank-candidates]]) + the full accepted
+   set — or nil when every my.plan key is accepted. Foreign-namespace and
+   injectable keys pass (the open-map convention stays intact)."
+  [verb request accepted]
+  (when-let [bad (->> (keys request)
+                      (filter my-plan-key?)
+                      (remove accepted)
+                      first)]
+    (let [targets (filterv my-plan-key? accepted)
+          sugg    (->> (cand/rank-candidates (name bad) (mapv name targets))
+                       (mapv (fn [{to :seon.repair/to}] (str ":my.plan/" to))))]
+      (fail (str verb ": unknown key " bad
+                 (when (seq sugg)
+                   (str " — did you mean " (str/join " or " sugg) "?"))
+                 " Accepted my.plan keys: "
+                 (str/join " " (sort targets)) ".")))))
+
+(defn check-request-keys
+  "Nil, or a fail envelope, when `request` carries an unknown `my.plan` key —
+   accepted set DERIVED from the registered `schema-kw` request schema."
+  [verb request schema-kw]
+  (unknown-key-fail verb request (schema-map-keys schema-kw)))
+
+(defn check-plan-keys
+  "The recursive plan! key guard: the top `request` map against
+   `:my.plan/plan-request`, then every `:my.plan/children` node (at any
+   depth) against `:my.plan/plan-node` — first offender → fail envelope,
+   else nil. Catches a misspelled key that would otherwise vanish and mint
+   a childless plan."
+  [verb request]
+  (let [node-keys (schema-map-keys :my.plan/plan-node)
+        check-node (fn check-node [node]
+                     (or (unknown-key-fail verb node node-keys)
+                         (some #(when (map? %) (check-node %))
+                               (:my.plan/children node))))]
+    (or (unknown-key-fail verb request (schema-map-keys :my.plan/plan-request))
+        (some #(when (map? %) (check-node %)) (:my.plan/children request)))))
 
 ;; --- Derived work-queue queries — all pure Datalog over the graph, with
 ;; --- [[rules]] as `%`. Nothing here is stored; blocked-ness, ready-ness,
 ;; --- roll-up, and the position anchor recompute from the facts every read.
 
 (defn ready-leaves
-  "Ready leaves (open, childless, unblocked) owned by `agent-eid`, oldest
-   first, as `[{:id :title :created-at} …]`. Sorted in CLJS —
-   `:seon.db/order-by` is not a `seon.db/query` request key."
+  "Ready steps (open, unblocked — a leaf, or a drained non-leaf to verify and
+   close) owned by `agent-eid`, oldest first, as `[{:id :title :created-at} …]`.
+   Sorted in CLJS — `:seon.db/order-by` is not a `seon.db/query` request key."
   [db agent-eid]
   (->> (db/query {:seon.db/db db
                   :seon.db/query
@@ -191,7 +281,8 @@
                            :seon.db/args [rules id]}))))
 
 (defn ready?
-  "True iff `id` is an open, unblocked leaf — real work to do now."
+  "True iff `id` is open, unblocked, and ready — an actionable leaf or a
+   drained non-leaf whose only remaining action is verify-and-close."
   [db id]
   (boolean (seq (db/query {:seon.db/db db
                            :seon.db/query
@@ -232,66 +323,395 @@
          :my.plan/active?  (some? active)
          :my.plan/progress (rollup db (:my.plan/id root))}))))
 
-;; --- plan! — compile a nested plan to ONE flat, tempid-linked transact. ----
+;; --- The document compiler — ONE compile for plan! AND reconcile!. --------
+;; --- Authoring IS reconciling against an empty tree: plan! delegates via
+;; --- [[compile-plan]] with a nil db (empty baseline), reconcile! diffs the
+;; --- edited document against the caller's live open tree. Cross-sibling
+;; --- edges link by STRING TEMPID, never same-tx lookup-refs (a lookup-ref
+;; --- to a not-yet-asserted sibling throws `:entity-id/missing`).
+
+(declare pull-subtree root-ids)   ; the tree-pull section below — one-way dep
+
+(defn doc-children
+  "A document node's children — the pull shape (`:my.plan/_parent`) and the
+   authoring shape (`:my.plan/children`) both accepted."
+  [node]
+  (vec (concat (:my.plan/_parent node) (:my.plan/children node))))
+
+(defn- doc-needs-ids
+  "The step ids a doc node's `:my.plan/needs` names — accepts the pull shape
+   `{:my.plan/id x}`, a `[:my.plan/id x]` lookup-ref, or a bare id string; an
+   unrecognizable entry yields nil (the compiler fails loudly on it)."
+  [node]
+  (mapv (fn [n]
+          (cond
+            (map? n) (:my.plan/id n)
+            (and (vector? n) (= :my.plan/id (first n))) (second n)
+            (string? n) n))
+        (:my.plan/needs node)))
+
+(defn- collect-doc-nodes
+  "Depth-first `{:node :id :label :parent-idx}` entries over doc `forest` —
+   pass 1 of the compiler (tempids/minted ids assigned by the caller)."
+  [forest]
+  (let [acc (volatile! [])]
+    (letfn [(walk [node parent-idx]
+              (let [idx (count @acc)]
+                (vswap! acc conj {:node       node
+                                  :id         (:my.plan/id node)
+                                  :label      (:my.plan/ref node)
+                                  :parent-idx parent-idx})
+                (doseq [c (doc-children node)] (walk c idx))))]
+      (doseq [n forest] (walk n nil)))
+    @acc))
+
+(defn status-in
+  "Current :my.plan/status of step `id` in db VALUE `db`, or nil."
+  [db id]
+  (ffirst (db/query {:seon.db/db db
+                     :seon.db/query '[:find ?s :in $ ?id
+                                      :where
+                                      [?t :my.plan/id ?id]
+                                      [?t :my.plan/status ?s]]
+                     :seon.db/args [id]})))
+
+(defn prune-done
+  "Tree/forest with every `:done` node (and its whole subtree) removed —
+   the OPEN projection behind `my.plan/document`. History can't be edited
+   away: open descendants of a done step leave the document WITH it and
+   stay untouched by any reconcile."
+  [t]
+  (letfn [(prune [node]
+            (when (and node (not= :done (:my.plan/status node)))
+              (let [kids (into [] (keep prune) (:my.plan/_parent node))]
+                (if (seq kids)
+                  (assoc node :my.plan/_parent kids)
+                  (dissoc node :my.plan/_parent)))))]
+    (cond
+      (map? t)    (prune t)
+      (vector? t) (into [] (keep prune) t)
+      :else       t)))
+
+(defn open-forest
+  "The `agent-eid`'s OPEN plan forest — [[pull-subtree]] per root, `:done`
+   pruned. The SAME projection `my.plan/document` returns, so a round-trip
+   reconcile is a no-op by construction."
+  [db agent-eid]
+  (into [] (keep #(prune-done (pull-subtree db %))) (root-ids db agent-eid)))
+
+(defn flatten-open
+  "Open forest → `{id → baseline row}` (scalar fields fully-qualified +
+   `:parent` id + `:needs` id set) — the diff baseline for the compiler."
+  [forest]
+  (letfn [(walk [acc parent-id node]
+            (let [acc (assoc acc (:my.plan/id node)
+                             (-> (select-keys node [:my.plan/title
+                                                    :my.plan/description
+                                                    :my.plan/expect
+                                                    :my.plan/goal
+                                                    :my.plan/pace])
+                                 (assoc :parent parent-id
+                                        :needs (into #{} (keep :my.plan/id)
+                                                     (:my.plan/needs node)))))]
+              (reduce (fn [a c] (walk a (:my.plan/id node) c))
+                      acc (:my.plan/_parent node))))]
+    (reduce (fn [a n] (walk a nil n)) {} forest)))
+
+(def ^:private doc-scalar-fields
+  "The reconcilable scalar fields: `[attr retract-when-absent?]`. Title is
+   required on every node, so it is never retracted."
+  [[:my.plan/title false] [:my.plan/description true] [:my.plan/expect true]
+   [:my.plan/goal true] [:my.plan/pace true]])
+
+(defn check-doc-keys
+  "First unknown `my.plan` key anywhere in document `nodes` → fail
+   envelope, else nil — the recursive analog of [[check-plan-keys]] with
+   the accepted set DERIVED from the registered `:my.plan/doc-node`."
+  [verb nodes]
+  (let [ks    (schema-map-keys :my.plan/doc-node)
+        check (fn check [node]
+                (or (unknown-key-fail verb node ks)
+                    (some #(when (map? %) (check %)) (doc-children node))))]
+    (some #(when (map? %) (check %)) nodes)))
+
+(defn compile-reconcile
+  "Diff document `forest` against `agent`'s open tree → ONE flat tx.
+
+   Returns `{:tx … :labels {label/:root → id} :root-id …
+   :diff {:my.plan/added n :my.plan/dropped n :my.plan/updated n}}` or
+   `{:error msg}`. Identity rules: a node WITH `:my.plan/id` updates in
+   place (scalars + parent + needs; STATUS is never edited here — active!/
+   done! own it); a node WITHOUT one is minted; a baseline open node absent
+   from the document is dropped (entity retract; its absent descendants
+   drop the same way); a `:done` or foreign id → `:error`. `db` nil ⇒
+   empty baseline — plan!'s authoring path IS reconcile-against-empty.
+   `:after` labels resolve to any node's `:my.plan/ref` (tempid for a
+   minted node, lookup-ref for an existing one)."
+  [db verb agent forest]
+  (let [entries  (vec (map-indexed
+                        (fn [i e]
+                          (if (:id e)
+                            (assoc e :idx i)
+                            (assoc e :idx i :tid (str "t" i) :new-id (db/new-id!))))
+                        (collect-doc-nodes forest)))
+        target   (fn [{:keys [id tid]}] (if id [:my.plan/id id] tid))
+        l->t     (into {} (keep (fn [e] (when (:label e) [(:label e) (target e)])))
+                       entries)
+        doc-ids  (into [] (keep :id) entries)
+        oe       (when db (agent-eid db agent))
+        baseline (if oe (flatten-open (open-forest db oe)) {})]
+    (or
+      (some (fn [{:keys [node]}]
+              (let [t (:my.plan/title node)]
+                (when (or (nil? t) (str/blank? t))
+                  {:error (str verb ": blank :my.plan/title refused — every "
+                               "step names itself.")})))
+            entries)
+      (when-let [dup (some (fn [[id n]] (when (< 1 n) id)) (frequencies doc-ids))]
+        {:error (str verb ": " (pr-str dup)
+                     " appears twice in the document — one node per step.")})
+      (some (fn [{:keys [id]}]
+              (when id
+                ;; db is nil only on the plan! path, whose node schema has
+                ;; no ::id — so `db` is always bound when ids appear.
+                (let [s (and db (status-in db id))]
+                  (cond
+                    (nil? s)
+                    {:error (str verb ": no step " (pr-str id) " — keep "
+                                 ":my.plan/id only on steps that exist; omit "
+                                 "it to mint a new one.")}
+                    (= :done s)
+                    {:error (str verb ": " (pr-str id) " is :done — done steps "
+                                 "are immune (absent from the document by "
+                                 "construction); reopen! it first if it truly "
+                                 "isn't done.")}
+                    (not (contains? baseline id))
+                    {:error (str verb ": step " (pr-str id) " is not in your "
+                                 "open tree — reconcile edits only your own "
+                                 "open steps.")}))))
+            entries)
+      (let [unknown (->> entries (mapcat #(:my.plan/after (:node %)))
+                         distinct (remove l->t) seq)]
+        (when unknown
+          {:error (str verb ": :my.plan/after names unknown label(s) "
+                       (str/join ", " (map pr-str unknown))
+                       " — each :after must match some node's :my.plan/ref.")}))
+      (some (fn [{:keys [node]}]
+              (some (fn [nid]
+                      (cond
+                        (nil? nid)
+                        {:error (str verb ": unrecognizable :my.plan/needs "
+                                     "entry on «" (:my.plan/title node)
+                                     "» — use {:my.plan/id \"…\"}.")}
+                        (and db (nil? (status-in db nid)))
+                        {:error (str verb ": :my.plan/needs names unknown step "
+                                     (pr-str nid) ".")}))
+                    (doc-needs-ids node)))
+            entries)
+      (let [now      (js/Date.)
+            parent-t (fn [{:keys [parent-idx]}]
+                       (when parent-idx (target (nth entries parent-idx))))
+            news     (into []
+                           (keep
+                             (fn [{:keys [id tid new-id node] :as e}]
+                               (when-not id
+                                 (let [needs (-> (mapv l->t (:my.plan/after node))
+                                                 (into (map (fn [nid] [:my.plan/id nid]))
+                                                       (doc-needs-ids node)))]
+                                   (cond-> {:db/id              tid
+                                            :my.plan/id         new-id
+                                            :my.plan/title      (:my.plan/title node)
+                                            :my.plan/status     :open
+                                            :my.plan/agent      agent
+                                            :my.plan/created-at now}
+                                     (:my.plan/goal node)        (assoc :my.plan/goal (:my.plan/goal node))
+                                     (:my.plan/pace node)        (assoc :my.plan/pace (:my.plan/pace node))
+                                     (:my.plan/description node) (assoc :my.plan/description (:my.plan/description node))
+                                     (:my.plan/expect node)      (assoc :my.plan/expect (:my.plan/expect node))
+                                     (parent-t e)                (assoc :my.plan/parent (parent-t e))
+                                     (seq needs)                 (assoc :my.plan/needs needs))))))
+                           entries)
+            updates  (into []
+                           (keep
+                             (fn [{:keys [id node] :as e}]
+                               (when id
+                                 (let [base   (baseline id)
+                                       pt     (parent-t e)
+                                       sets   (into {}
+                                                    (keep (fn [[k _]]
+                                                            (let [dv (get node k)]
+                                                              (when (and (some? dv)
+                                                                         (not= dv (get base k)))
+                                                                [k dv]))))
+                                                    doc-scalar-fields)
+                                       sets   (cond-> sets
+                                                (and pt (or (string? pt)
+                                                            (not= (second pt) (:parent base))))
+                                                (assoc :my.plan/parent pt))
+                                       rets   (into []
+                                                    (keep (fn [[k retractable?]]
+                                                            (when (and retractable?
+                                                                       (nil? (get node k))
+                                                                       (some? (get base k)))
+                                                              [:db/retract [:my.plan/id id] k])))
+                                                    doc-scalar-fields)
+                                       rets   (cond-> rets
+                                                (and (nil? pt) (:parent base))
+                                                (conj [:db/retract [:my.plan/id id]
+                                                       :my.plan/parent]))
+                                       want   (-> (mapv l->t (:my.plan/after node))
+                                                  (into (map (fn [nid] [:my.plan/id nid]))
+                                                        (doc-needs-ids node)))
+                                       want-ids (into #{} (keep (fn [t] (when (vector? t) (second t))))
+                                                      want)
+                                       need-ops (concat
+                                                  (map (fn [nid] [:db/add [:my.plan/id id]
+                                                                  :my.plan/needs [:my.plan/id nid]])
+                                                       (remove (:needs base) want-ids))
+                                                  (map (fn [tid] [:db/add [:my.plan/id id]
+                                                                  :my.plan/needs tid])
+                                                       (filter string? want))
+                                                  (map (fn [nid] [:db/retract [:my.plan/id id]
+                                                                  :my.plan/needs [:my.plan/id nid]])
+                                                       (remove want-ids (:needs base))))
+                                       ops    (concat
+                                                (when (seq sets) [(assoc sets :my.plan/id id)])
+                                                rets
+                                                need-ops)]
+                                   (when (seq ops) (vec ops))))))
+                           entries)
+            drops    (mapv (fn [i] [:db.fn/retractEntity [:my.plan/id i]])
+                           (remove (set doc-ids) (keys baseline)))
+            root-id  (when-let [e (first entries)] (or (:id e) (:new-id e)))]
+        {:tx      (-> (vec news) (into cat updates) (into drops))
+         :labels  (into {:root root-id}
+                        (keep (fn [e] (when (:label e)
+                                        [(:label e) (or (:id e) (:new-id e))])))
+                        entries)
+         :root-id root-id
+         :diff    {:my.plan/added   (count news)
+                   :my.plan/dropped (count drops)
+                   :my.plan/updated (count updates)}}))))
 
 (defn compile-plan
-  "Nested plan spec `root` → `{:tx <flat tempid-keyed tx-data>
-                               :labels <author-label/:root → minted id>
-                               :root-id <id>}`, or `{:error msg}` when an
-   `:my.plan/after` names an unknown label.
-
-   `root` carries the root's title/goal/pace; every node may carry
-   `:my.plan/expect` and its own `:children`. Cross-sibling edges link by
-   STRING TEMPID, never same-tx lookup-refs (a lookup-ref to a
-   not-yet-asserted sibling throws `:entity-id/missing`). Tempids are
-   order-independent, so an `:after` may name any label in the plan. Pass 1
-   assigns every node a tempid + a minted `:my.plan/id` and records its
-   author label; pass 2 emits one tx-map per node."
+  "plan!'s authoring compile — [[compile-reconcile]] with an EMPTY baseline
+   (authoring IS reconciling against an empty tree; one code path). Same
+   `{:tx :labels :root-id}` contract plan! always consumed."
   [agent root]
-  (let [nodes      (volatile! [])
-        label->tid (volatile! {})]
-    (letfn [(walk [node parent-tid]
-              (let [tid   (str "t" (count @nodes))
-                    id    (db/new-id!)
-                    label (:my.plan/ref node)]
-                (when label (vswap! label->tid assoc label tid))
-                (vswap! nodes conj {:tid        tid
-                                    :id         id
-                                    :title      (:my.plan/title node)
-                                    :goal       (:my.plan/goal node)
-                                    :pace       (:my.plan/pace node)
-                                    :expect     (:my.plan/expect node)
-                                    :parent-tid parent-tid
-                                    :after      (:my.plan/after node)
-                                    :label      label})
-                (doseq [c (:my.plan/children node)] (walk c tid))
-                tid))]
-      (walk root nil)
-      (let [l->t    @label->tid
-            ns      @nodes
-            unknown (->> ns (mapcat :after) distinct (remove l->t) seq)]
-        (if unknown
-          {:error (str "plan!: :my.plan/after names unknown label(s) "
-                       (str/join ", " (map pr-str unknown))
-                       " — each :after must match some node's :my.plan/ref.")}
-          {:tx      (mapv (fn [{:keys [tid id title goal pace expect
-                                       parent-tid after]}]
-                            (cond-> {:db/id              tid
-                                     :my.plan/id         id
-                                     :my.plan/title      title
-                                     :my.plan/status     :open
-                                     :my.plan/agent      agent
-                                     :my.plan/created-at (js/Date.)}
-                              goal        (assoc :my.plan/goal goal)
-                              pace        (assoc :my.plan/pace pace)
-                              expect      (assoc :my.plan/expect expect)
-                              parent-tid  (assoc :my.plan/parent parent-tid)
-                              (seq after) (assoc :my.plan/needs
-                                                 (mapv l->t after))))
-                          ns)
-           :labels  (into {:root (:id (first ns))}
-                          (keep (fn [{:keys [label id]}] (when label [label id])) ns))
-           :root-id (:id (first ns))})))))
+  (compile-reconcile nil "plan!" agent [root]))
+
+;; --- Lenient markdown → document forest (reconcile!'s ::markdown path). ---
+
+(def ^:private md-heading-re #"^(#{1,6})\s+(.+)$")
+(def ^:private md-item-re    #"^(\s*)(?:[-*+]|\d+[.)])\s+(.+)$")
+(def ^:private md-goal-re    #"(?i)^\s*goal\s*[:—–-]\s*(.+)$")
+(def ^:private md-id-re      #"^\[([^\[\]\s]+)\]\s*(.+)$")
+(def ^:private md-checkbox-re #"^\[[ xX]\]\s+(.+)$")
+(def ^:private md-enum-re     #"^\d+[.)]\s+(.+)$")
+(def ^:private md-expect-re  #"(?i)^(.+?)\s*[—–-]+\s*expect:?\s+(.+)$")
+
+(defn- md-node
+  "One markdown item/heading text → a doc node: a leading `[id]` keeps
+   identity; an explicit `— expect: …` suffix (or, for a list item, a
+   trailing second sentence) becomes `:my.plan/expect`. Cosmetic frontier
+   markers — a task-list checkbox (`[ ]`/`[x]`) and a redundant `N.`
+   enumerator inside a bullet — are stripped, never part of the title
+   (and a checked box never closes a step: reconcile edits no status)."
+  [text sentence-expect?]
+  (let [text           (or (second (re-find md-checkbox-re text)) text)
+        text           (or (second (re-find md-enum-re text)) text)
+        [id text]      (if-let [[_ i r] (re-find md-id-re text)]
+                         [i r] [nil text])
+        [title expect] (if-let [[_ t e] (re-find md-expect-re text)]
+                         [t e]
+                         (let [sents (when sentence-expect?
+                                       (str/split text #"(?<=[.!?])\s+"))]
+                           (if (> (count sents) 1)
+                             [(str/join " " (butlast sents)) (last sents)]
+                             [text nil])))]
+    (cond-> {:my.plan/title (str/trim title)}
+      id     (assoc :my.plan/id id)
+      expect (assoc :my.plan/expect (str/trim expect)))))
+
+(defn- fold-entries
+  "Flat `[{:depth :node}]` in document order → a nested forest under
+   `:my.plan/children` — a deeper entry nests under its nearest shallower
+   predecessor (a skipped level still attaches to the previous node)."
+  [entries]
+  (letfn [(build [items depth]
+            (loop [items items nodes []]
+              (let [{d :depth node :node :as it} (first items)]
+                (cond
+                  (nil? it)   [nodes nil]
+                  (< d depth) [nodes items]
+                  (= d depth)
+                  (let [[kids rest] (build (next items) (inc depth))]
+                    (recur rest (conj nodes (cond-> node
+                                              (seq kids)
+                                              (assoc :my.plan/children kids)))))
+                  :else
+                  (let [[kids rest] (build items (inc depth))]
+                    (if (seq nodes)
+                      (recur rest (conj (pop nodes)
+                                        (update (peek nodes) :my.plan/children
+                                                (fnil into []) kids)))
+                      (recur rest (into nodes kids))))))))]
+    (first (build (seq entries) (reduce min (map :depth entries))))))
+
+(defn parse-markdown
+  "Lenient plan text → `{:nodes <document forest>}` or `{:error msg}`.
+
+   Accepted shapes: `#`-headings nest by level; `-`/`*`/`1.` list items
+   nest by indent under the nearest heading; a flat numbered list is
+   valid; with no heading, a plain first line titles (and a `Goal: …`
+   line goals) ONE synthesized root holding every item. Per item: a
+   leading `[id]` keeps identity; `— expect: …` (or a trailing second
+   sentence) becomes the step's `:my.plan/expect`."
+  [text]
+  (let [st (reduce
+             (fn [{:keys [hdepth indents] :as st} raw]
+               (let [line (str/trimr raw)]
+                 (cond
+                   (str/blank? line) st
+
+                   :else
+                   (if-let [[_ hashes t] (re-find md-heading-re line)]
+                     (let [d (dec (count hashes))]
+                       (-> st
+                           (update :entries conj {:depth d :node (md-node t false)})
+                           (assoc :hdepth d :indents [] :had-heading? true)))
+                     (if-let [[_ ind t] (re-find md-item-re line)]
+                       (let [w       (count ind)
+                             indents (loop [is indents]
+                                       (cond
+                                         (and (seq is) (< w (peek is))) (recur (pop is))
+                                         (or (empty? is) (> w (peek is))) (conj is w)
+                                         :else is))]
+                         (-> st
+                             (update :entries conj
+                                     {:depth (+ hdepth (count indents))
+                                      :node  (md-node t true)})
+                             (assoc :indents indents)))
+                       (if-let [[_ g] (re-find md-goal-re line)]
+                         (update st :goal #(or % (str/trim g)))
+                         (if (and (nil? (:title st)) (empty? (:entries st)))
+                           (assoc st :title (str/trim line))
+                           st)))))))
+             {:entries [] :indents [] :hdepth -1
+              :title nil :goal nil :had-heading? false}
+             (str/split-lines text))
+        {:keys [entries title goal had-heading?]} st]
+    (if (empty? entries)
+      {:error (str "reconcile!: no plan steps found in the markdown — "
+                   "write headings or list items.")}
+      (let [forest (fold-entries entries)]
+        {:nodes
+         (if had-heading?
+           (cond-> forest
+             goal (update 0 (fn [r] (update r :my.plan/goal #(or % goal)))))
+           [(cond-> {:my.plan/title    (or title goal "Plan")
+                     :my.plan/children forest}
+              goal (assoc :my.plan/goal goal))])}))))
 
 (defn ^:async retract-subtree!
   "Retract `id` AND its whole subtree (the plain `parent` ref does NOT
@@ -318,7 +738,7 @@
    under `:my.plan/_parent`, the reverse of the plain `parent` ref → a
    vector) + each node's dependency ids inline."
   '[:my.plan/id :my.plan/title :my.plan/status :my.plan/goal :my.plan/expect
-    :my.plan/pace
+    :my.plan/pace :my.plan/description
     {:my.plan/_parent ...}
     {:my.plan/needs [:my.plan/id]}])
 
@@ -349,6 +769,317 @@
                     :where
                     [?t :my.plan/id ?id]
                     (not-join [?t] [?t :my.plan/parent _])]})))
+
+;; --- The stuck×N → frontier re-plan ESCALATION (all DERIVED). -------------
+;; --- A wedge = the ▶ :active step under which the SAME failure root has
+;; --- repeated ≥ N times since the step went :active, with no success of
+;; --- that root's own call between. Everything is a query over the eval
+;; --- log + plan datoms — flagged IS "the query returns the step now";
+;; --- nothing is stored, nothing needs clearing. Three faces, one
+;; --- derivation: [[escalation]] (the flag query), [[escalation-section]]
+;; --- (the reactive band in [[plan-body]]), [[maybe-consult!]] (the
+;; --- once-per-episode planner message, fired post-turn by
+;; --- `seon.agent.loop/run-loop!`). Episode identity is the FIRST failing
+;; --- eval's id of the live streak — derived from the query's own inputs,
+;; --- never a stored notified-flag; the consult message embeds it
+;; --- ([[consult-marker]]) so "already consulted" is a message-log read.
+
+(def escalation-stuck-n
+  "The policy knob: same-root failures since the ▶ step went :active that
+   flag the step for a frontier re-plan (the W3 wedge ran 8+ before this
+   existed). [[escalation]] takes an explicit override for tests/tuning."
+  3)
+
+(defn head-sym-str
+  "The head symbol of `source`'s first form, AS THE AGENT TYPED IT
+   (alias-qualified, e.g. \"schema/register!\"), or nil. Structural read
+   (`repl-internal/read-forms` — the ONE whole-source read), never a
+   regex over the text; a broken source yields nil (fails closed)."
+  [source]
+  (let [f (first (repl-internal/read-forms (or source "")))]
+    (when (and (seq? f) (symbol? (first f)))
+      (str (first f)))))
+
+(defn- eval-error-kind
+  "The `:seon.error/kind` of a failed eval row, read from its persisted
+   `:seon.eval/error-data` ENVELOPE projection (structured EDN via
+   `pr-str-readable` — never parsed out of the message string). nil when
+   the row carries no envelope data or it doesn't read back."
+  [row]
+  (when-let [s (:seon.eval/error-data row)]
+    (try (:seon.error/kind (edn/read-string s))
+         (catch :default _ nil))))
+
+(defn- evals-since
+  "The agent's eval rows transacted AFTER tx `since-tx`, oldest first.
+
+   Pulled projections (`id/ok?/source/error/error-data`) ordered by the
+   eval datom's own tx — monotonic tx eids, no wall-clock comparison."
+  [db agent-eid since-tx]
+  (->> (db/query {:seon.db/db db
+                  :seon.db/query
+                  '[:find ?e ?etx
+                    :in $ ?a ?stx
+                    :where
+                    [?e :seon.eval/agent ?a]
+                    [?e :seon.eval/ok? _ ?etx]
+                    [(> ?etx ?stx)]]
+                  :seon.db/args [agent-eid since-tx]})
+       (sort-by second)
+       (mapv (fn [[e _]]
+               (db/pull db [:seon.eval/id :seon.eval/ok? :seon.eval/source
+                            :seon.eval/error :seon.eval/error-data]
+                        e)))))
+
+(defn wedge
+  "The dominant live failure streak in ordered eval `rows`, or nil.
+
+   A row's ROOT is `[head-sym error-kind]` — the call the agent typed +
+   the envelope's kind class. Failures accumulate per root; a SUCCESS of
+   the same head sym is progress on that root and resets every streak
+   under it (a successful defn-redefine or unrelated form is not — the
+   wedge is 'the same broken call keeps failing'). Returns the root with
+   the most live failures when it reaches `n`:
+   `{::root-sym ::root-kind ::fail-count ::episode ::last-error}` —
+   `::episode` = the streak's FIRST failing eval id (stable while the
+   streak grows; a broken-then-reformed wedge is a NEW episode)."
+  [rows n]
+  (let [streaks (reduce
+                  (fn [acc {:seon.eval/keys [ok? source] :as row}]
+                    (let [h (head-sym-str source)]
+                      (cond
+                        (nil? h) acc
+                        ok?      (into {} (remove (fn [[[rh _] _]] (= rh h))) acc)
+                        :else    (update acc [h (eval-error-kind row)]
+                                         (fnil conj []) row))))
+                  {}
+                  rows)
+        [[sym kind] fails]
+        (->> streaks
+             (filter (fn [[_ fs]] (>= (count fs) n)))
+             (sort-by (fn [[_ fs]] (- (count fs))))
+             first)]
+    (when sym
+      (cond-> {:my.plan/root-sym   sym
+               :my.plan/fail-count (count fails)
+               :my.plan/episode    (:seon.eval/id (first fails))
+               :my.plan/last-error (or (:seon.eval/error (peek fails)) "")}
+        kind (assoc :my.plan/root-kind kind)))))
+
+(defn escalation
+  "The `agent-eid`'s escalation-flagged ▶ step, or nil — pure query.
+
+   Flagged = since the current `:active` assertion's tx (the datom's own
+   tx — no history walk, no stored activated-at), the agent's eval log
+   shows a [[wedge]] of ≥ `n` (default [[escalation-stuck-n]]) same-root
+   failures with no same-call success between. Gated on the queried
+   attrs being installed (a fresh cluster with no evals renders no
+   band, never throws)."
+  ([db agent-eid] (escalation db agent-eid escalation-stuck-n))
+  ([db agent-eid n]
+   (let [installed (db/installed-schema db)]
+     (when (every? #(contains? installed %)
+                   [:my.plan/status :seon.eval/agent :seon.eval/ok?])
+       (when-let [[sid title stx]
+                  (->> (db/query {:seon.db/db db
+                                  :seon.db/query
+                                  '[:find ?id ?title ?tx
+                                    :in $ ?a
+                                    :where
+                                    [?t :my.plan/agent ?a]
+                                    [?t :my.plan/status :active ?tx]
+                                    [?t :my.plan/id ?id]
+                                    [?t :my.plan/title ?title]]
+                                  :seon.db/args [agent-eid]})
+                       (sort-by #(nth % 2) >)
+                       first)]
+         (when-let [w (wedge (evals-since db agent-eid stx) n)]
+           (merge w {:my.plan/id sid :my.plan/title title})))))))
+
+(defn planner-for
+  "The cluster's PLANNER for a flagged `worker-id`, derived — or nil.
+
+   A live (non-terminated) agent ≠ the worker whose RESOLVED provider
+   (`seon.ai/resolved-config` over this db — agent override → config row
+   → default) is a frontier one. When several qualify, the one whose tx
+   provenance shows it AUTHORED the flagged step wins (the W3 shape: the
+   planner authored the worker's plan); ties break by sorted id."
+  [db worker-id flagged-step-id]
+  (let [cands (->> (db/query {:seon.db/db db
+                              :seon.db/query '[:find [?id ...]
+                                               :where [?a :seon.agent/id ?id]]})
+                   sort
+                   (remove #{worker-id})
+                   (filter (fn [id]
+                             (let [e (db/entity db [:seon.agent/id id])]
+                               (nil? (:seon.agent/terminated-at e)))))
+                   (filter (fn [id]
+                             (ai/frontier-provider?
+                               (get-in (ai/resolved-config
+                                         {:seon.db/db db :seon.agent/id id})
+                                       [:seon.ai/resolved-config
+                                        :seon.ai/provider]))))
+                   vec)
+        authors (when (and flagged-step-id
+                           (contains? (db/installed-schema db)
+                                      :seon.db/agent-id))
+                  (set (db/query {:seon.db/db db
+                                  :seon.db/query
+                                  '[:find [?aid ...]
+                                    :in $ ?sid
+                                    :where
+                                    [?t :my.plan/id ?sid]
+                                    [?t _ _ ?tx]
+                                    [?tx :seon.db/agent-id ?aid]]
+                                  :seon.db/args [flagged-step-id]})))]
+    (or (first (filter (or authors #{}) cands))
+        (first cands))))
+
+(defn consult-marker
+  "The episode-identity line a consult message embeds — derived from the
+   flag query's own inputs (step id + first-fail eval id), so
+   [[consult-sent?]] is a message-log read, never a stored flag."
+  [step-id episode]
+  (str "[escalation :my.plan/step " (pr-str step-id)
+       " :my.plan/episode " (pr-str episode) "]"))
+
+(defn consult-sent?
+  "Whether `agent-eid` already sent a message carrying `marker` — the
+   fired-once-per-episode check, derived from the message log."
+  [db agent-eid marker]
+  (->> (db/query {:seon.db/db db
+                  :seon.db/query
+                  '[:find ?m ?c
+                    :in $ ?from
+                    :where
+                    [?m :seon.agent.message/from ?from]
+                    [?m :seon.agent.message/content ?c]]
+                  :seon.db/args [agent-eid]})
+       (some (fn [[_ c]] (str/includes? c marker)))
+       boolean))
+
+(defn- comment-lines
+  "String `s` as `; `-prefixed comment lines (the context is eval'able
+   Clojure — prose rides `;`)."
+  [s]
+  (->> (str/split-lines (str s))
+       (map #(str ";   " %))
+       (str/join "\n")))
+
+(defn escalation-section
+  "The reactive STUCK band for [[plan-body]] — \"\" unless [[escalation]]
+   flags the ▶ step right now. One factual block: the step, the repeated
+   failure ONCE (root + latest error, clipped), and the consult status —
+   planner consulted (derived from the message log) / consult pending /
+   no frontier planner in this cluster. Vanishes the moment the wedge
+   breaks (a same-call success, a step change, a re-plan)."
+  [db agent-eid agent-id]
+  (if-let [{:my.plan/keys [id title root-sym root-kind fail-count
+                           last-error episode]}
+           (escalation db agent-eid)]
+    (let [planner (planner-for db agent-id id)
+          sent?   (and planner
+                       (consult-sent? db agent-eid
+                                      (consult-marker id episode)))]
+      (str "; STUCK ▶ " id " «" title "» — the same call has failed "
+           fail-count "× since this step went active (root " root-sym
+           (when root-kind (str ", kind " root-kind)) "):\n"
+           (comment-lines (tokens/clip-str last-error 60)) "\n"
+           (cond
+             sent?
+             (str "; The planner (" planner ") has been consulted to "
+                  "revise this subtree; its\n"
+                  "; revision lands in this plan. Do not re-run the "
+                  "failing form — work a\n"
+                  "; different angle or await the revised plan.")
+
+             planner
+             (str "; The planner (" planner ") is being consulted to "
+                  "revise this subtree.")
+
+             :else
+             (str "; No frontier planner agent exists in this cluster — "
+                  "no consult sent.\n"
+                  "; Revise this subtree yourself "
+                  "(my.plan/reconcile!) before retrying the form."))))
+    ""))
+
+(defn- consult-content
+  "The consult message body: the episode marker, the distilled failure
+   envelope (once), the flagged subtree document, and the ask — revise
+   THIS subtree via reconcile!, planner zone only, then `complete` the
+   moment the receipt renders (the W3 turn-economy fix: the ask CARRIES
+   its completion condition, so fulfilling it ends the run instead of
+   leaking idle turns)."
+  [db worker-id {:my.plan/keys [id title root-sym root-kind fail-count
+                                last-error episode]}]
+  (let [doc (prune-done (pull-subtree db id))]
+    (str (consult-marker id episode) "\n"
+         "Worker " worker-id " is stuck on plan step " id " «" title
+         "» — the same root has failed " fail-count
+         "× since the step went :active (root " root-sym
+         (when root-kind (str ", kind " root-kind)) "):\n"
+         (tokens/clip-str last-error 80) "\n"
+         "Flagged subtree (the worker's open document, EDN):\n"
+         (tokens/clip-str (pr-str doc) 400) "\n"
+         "The ask — your zone only: read the worker's full open plan with "
+         "(my.plan/document {:seon.agent/id \"" worker-id "\"}); revise "
+         "ONLY this subtree — split it, sharpen its expects, reroute — and "
+         "write the edited document back with (my.plan/reconcile! "
+         "{:my.plan/tree <edited> :seon.agent/id \"" worker-id "\"}). "
+         "Optionally send the worker ONE line of guidance: (message/agent "
+         "\"" worker-id "\" \"…\"). When the reconcile receipt renders, "
+         "the ask is fulfilled — call (complete \"re-planned " id "\") in "
+         "that SAME turn; further turns add nothing.")))
+
+(defn ^:async maybe-consult!
+  "Fire the once-per-episode planner consult for a flagged agent.
+
+   Called post-turn by the loop. Recomputes [[escalation]] from the
+   current db (a transition is 'flagged now AND no consult message for
+   this episode yet' — both derived); when it fires, ONE message goes
+   from the worker to the derived [[planner-for]] via the existing
+   `message!` path (no new channel). Returns a value envelope:
+   `{:my.plan/consulted? bool :my.plan/consult-reason kw …}` — reasons
+   `:not-flagged` / `:no-planner` / `:already-consulted` / `:sent` /
+   `:send-failed`. Never throws."
+  [{agent-id :seon.agent/id}]
+  (try
+    (let [db  @db/*conn*
+          oe  (agent-eid db [:seon.agent/id agent-id])
+          esc (when oe (escalation db oe))]
+      (if-not esc
+        {:my.plan/consulted? false :my.plan/consult-reason :not-flagged}
+        (let [{:my.plan/keys [id episode]} esc
+              planner (planner-for db agent-id id)
+              marker  (consult-marker id episode)]
+          (cond
+            (nil? planner)
+            {:my.plan/consulted? false :my.plan/consult-reason :no-planner}
+
+            (consult-sent? db oe marker)
+            {:my.plan/consulted? false
+             :my.plan/consult-reason :already-consulted}
+
+            :else
+            (let [env (await (msg/message!
+                               {:seon.agent.message/content
+                                (consult-content db agent-id esc)
+                                :seon.agent.message/from
+                                [:seon.agent/id agent-id]
+                                :seon.agent.message/to
+                                [[:seon.agent/id planner]]}))]
+              (if (:seon.agent.message/ok? env)
+                {:my.plan/consulted?     true
+                 :my.plan/consult-reason :sent
+                 :my.plan/planner        planner
+                 :my.plan/episode        episode}
+                (merge env {:my.plan/consulted?     false
+                            :my.plan/consult-reason :send-failed})))))))
+    (catch :default e
+      (js/console.error "my.plan.internal/maybe-consult! failed:"
+                        (or (.-message e) e))
+      {:my.plan/consulted? false :my.plan/consult-reason :send-failed})))
 
 ;; --- The WINDOWED plan-block render (`:plan` context section). ------------
 ;; --- Constant-size for any plan depth: position anchor + open frontier +
@@ -450,10 +1181,13 @@
            (when expect (str "\n;   verify before done!: " expect))))))
 
 (defn frontier-section
-  "The open-frontier lines: `actives` (▸-marked) then up to
-   [[frontier-limit]] `readies`, one `; <id> [<created-at>] <title>` line
-   each (a `✉` marks a step auto-minted from your human's message) — or
-   \"\" when both are empty."
+  "The open-frontier lines: `actives` (`▶` — the step you are on) then up
+   to [[frontier-limit]] `readies` (`☐` — open), one
+   `; <glyph> <id> [<created-at>] <title>` line each (a `✉` marks a step
+   auto-minted from your human's message) — or \"\" when both are empty.
+   DONE steps never render here (the ▶/☐/done-dropped compactness
+   contract, absorbed from the retired `:plan-ledger` block 2026-07-11);
+   the recently-completed `✓` band is the only done recall."
   [actives readies]
   (if (and (empty? actives) (empty? readies))
     ""
@@ -463,11 +1197,15 @@
                   (str "; " marker (when message "✉ ") id
                        (when created-at (str " [" (stamp created-at) "]"))
                        " " title))]
-      (str "; Open frontier — close one with (my.plan/done! {:my.plan/id \"<id>\"}),\n"
-           "; take one up with (my.plan/active! {:my.plan/id \"<id>\"}):\n"
+      (str "; Open frontier (▶ = the step you are on, ☐ = open) — close each\n"
+           "; step with (my.plan/done! {:my.plan/id \"<id>\"})\n"
+           "; the MOMENT its work lands (never batch closes at the end);\n"
+           "; take one up with (my.plan/active! {:my.plan/id \"<id>\"}); add a\n"
+           "; DISCOVERED step UNDER this plan (never a new parentless root):\n"
+           "; (my.plan/step! {:my.plan/title \"…\" :my.plan/parent [:my.plan/id \"<an id here>\"]})\n"
            (str/join "\n"
-                     (concat (map #(line "▸ " %) actives)
-                             (map #(line "" %) shown)))
+                     (concat (map #(line "▶ " %) actives)
+                             (map #(line "☐ " %) shown)))
            (when (pos? more)
              (str "\n; … and " more " more ready — (my.plan/next {}) lists them all."))))))
 
@@ -484,42 +1222,386 @@
                           (str "; ✓ [" (stamp completed-at) "] " title))
                         dones)))))
 
-(defn plan-body
-  "Windowed plan text for `agent` in db value `db` — \"\" when no plan data.
+(def empty-plan-teaching
+  "The `:plan` block's OWN teaching for the no-plan-yet state.
 
-   Three bands, all DERIVED, nothing stored: (1) the position anchor —
-   where you ARE in which goal, (2) the open frontier — the :active step +
-   the ready queue (capped), (3) a small recently-completed tail (resume
-   grounding). A 1000-step plan renders at constant size: the completed
+   Colocation (owner directive 2026-07-10): the empty state is exactly
+   when decompose-first must be taught — once a plan exists the anchor +
+   frontier lines carry the workflow themselves, and this header is
+   absent. Byte-stable (cache-safe)."
+  (str "; ── plan ── (empty)\n"
+       "; Multi-step work: decompose FIRST, before starting the work —\n"
+       ";   (my.plan/plan! {:my.plan/title \"…\" :my.plan/goal \"…\"\n"
+       ";                   :my.plan/children [{:my.plan/title \"step 1\"} …]})\n"
+       "; mints the whole plan in one call; it renders here and survives\n"
+       "; restarts. Close each step the MOMENT its work lands\n"
+       "; ((my.plan/done! {:my.plan/id \"<id>\"})); add a discovered step\n"
+       "; UNDER the plan: (my.plan/step! {:my.plan/title \"…\"\n"
+       ";                                 :my.plan/parent [:my.plan/id \"<id>\"]})."))
+
+(defn plan-body
+  "Windowed plan text for `agent` in db value `db`.
+
+   Four bands, all DERIVED, nothing stored: (1) the position anchor —
+   where you ARE in which goal, (2) the STUCK escalation band — present
+   ONLY while [[escalation]] flags the ▶ step (vanishes when the wedge
+   breaks), (3) the open frontier — the :active step + the ready queue
+   (capped), (4) a small recently-completed tail (resume grounding). A 1000-step plan renders at constant size: the completed
    interior is dropped from the prompt but stays queryable (`tree`,
    `status`, `db/query`). Rides as `;` comments so the whole context reads
-   as eval'able Clojure."
+   as eval'able Clojure. NO plan data ⇒ [[empty-plan-teaching]] — the
+   block teaches its own workflow exactly when nothing else can."
   [db agent]
-  (if-let [oe (agent-eid db agent)]
-    (let [a          (anchor db oe)
-          actives    (active-steps db oe)
-          active-ids (into #{} (map :my.plan/id) actives)
-          unfinished (open-steps db oe)
-          actives*   (filterv #(active-ids (:my.plan/id %)) unfinished)
-          readies    (filterv (fn [{:my.plan/keys [id status]}]
-                                (and (not (active-ids id))
-                                     (= :open status)
-                                     (ready? db id)))
-                              unfinished)]
-      (str/join "\n" (remove str/blank?
-                             [(anchor-section a)
-                              (frontier-section actives* readies)
-                              (done-section (recent-done db oe))])))
-    ""))
+  (let [body
+        (if-let [oe (agent-eid db agent)]
+          (let [a          (anchor db oe)
+                aid        (:seon.agent/id (db/entity db agent))
+                actives    (active-steps db oe)
+                active-ids (into #{} (map :my.plan/id) actives)
+                unfinished (open-steps db oe)
+                actives*   (filterv #(active-ids (:my.plan/id %)) unfinished)
+                readies    (filterv (fn [{:my.plan/keys [id status]}]
+                                      (and (not (active-ids id))
+                                           (= :open status)
+                                           (ready? db id)))
+                                    unfinished)]
+            (str/join "\n" (remove str/blank?
+                                   [(anchor-section a)
+                                    (escalation-section db oe aid)
+                                    (frontier-section actives* readies)
+                                    (done-section (recent-done db oe))])))
+          "")]
+    (if (str/blank? body) empty-plan-teaching body)))
 
 (defn plan-block
-  "Context-section fn (`:plan`, seon.config/default-ctx-blocks priority 45):
+  "Context-section fn (`:plan`, config manifest priority 45):
    [[plan-body]] for the CALLING agent — the `:seon.agent/id` in the render
    input, resolved as a `[:seon.agent/id id]` ref against the render's db
    value — absent `:seon.db/db` defaults to the current conn, the same
-   convention as every other core section fn. Returns \"\" when the agent
-   has no plan data (the section vanishes — derived, nothing stored,
-   nothing to acknowledge)."
+   convention as every other core section fn. An agent with no plan data
+   gets [[empty-plan-teaching]] — the block's own decompose-first
+   workflow header (colocation, 2026-07-10); everything else is derived,
+   nothing stored, nothing to acknowledge."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db] :seon.agent/keys [id]}]
   (plan-body (or db @db/*conn*) [:seon.agent/id id]))
+
+;; --- The `:seon.render/html` TWIN — the human's live plan tile. -----------
+;; --- Colocated with [[plan-block]] (the transcript precedent). Zero prompt
+;; --- cost: `*.internal` nses never render into agent context
+;; --- (seon.agent.ctx.namespaces/hidden-ns-name?). Where the :ai block
+;; --- WINDOWS (anchor + capped frontier + recent-done tail), the tile shows
+;; --- the WHOLE forest — the human explores what the prompt windows away.
+;; ---
+;; --- STRUCTURE vs SIGNAL (2026-07-11): [[build-forest]] assembles ONLY the
+;; --- renderable nested TREE (parent→children layout, waiters from the
+;; --- inverted `needs` edges, timestamps + message-origin, oldest-first) —
+;; --- a projection the windowing :ai block never needs and the flat shared
+;; --- fns cannot give (they answer counts/positions, not a tree). Every
+;; --- derived SIGNAL — roll-up, done-ness, ready, blocked, the you-are-here
+;; --- position — comes from the SAME shared db fns the :ai block uses
+;; --- ([[rollup]] / [[ready?]] / [[blocked?]] / [[anchor]]), ONE derivation
+;; --- mechanism over the fixed recursive `descendant` rule. (Until the
+;; --- datahike-CLJS recursive-rule engine fix — fork 1598a824 — those rules
+;; --- yielded nothing past depth 1, so the tile carried a parallel pure-walk
+;; --- re-derivation; that workaround is now deleted and the tile agrees with
+;; --- the :ai block on every tree by construction.) Plain pulled data only
+;; --- (no lazy Entity walk): a `my.*` render symbol is SCI-re-interpreted
+;; --- from its stored source at render time, and the plain-data primitives
+;; --- are the SCI-proven path ([[plan-body]] uses the same ones).
+;; ---
+;; --- Interactivity rides Datastar SIGNALS (the client-side signal store
+;; --- survives the SSE whole-element morph; `__ifmissing` keeps a re-morph
+;; --- from resetting them): $planstep = the one expanded step id,
+;; --- $planclosed = collapsed subtree ids (space-delimited), $planfull =
+;; --- reveal the completed interior, $plandone = the recent-done list.
+
+(defn- toggle-step-expr
+  "The `data-on:click` expression toggling step `id`'s detail panel."
+  [id]
+  (str "$planstep = ($planstep === '" id "' ? '' : '" id "')"))
+
+(defn- toggle-closed-expr
+  "The `data-on:click` expression toggling subtree `id`'s collapse."
+  [id]
+  (str "$planclosed = ($planclosed.includes(' " id " ') ? "
+       "$planclosed.replace(' " id " ', ' ') : $planclosed + ' " id " ')"))
+
+(defn- step-order
+  "Rows/nodes sorted oldest-first (created-at, then id — stable)."
+  [rows]
+  (sort-by (fn [r] [(or (some-> (:my.plan/created-at r) .getTime) 0)
+                    (:my.plan/id r)])
+           rows))
+
+(defn- row->node
+  "Pulled step row `r` → one walked node map (children filled by caller)."
+  [eid->row waiters r children]
+  (let [needs (->> (:my.plan/needs r)
+                   (keep (fn [n] (eid->row (:db/id n))))
+                   (mapv (fn [nr] {:my.plan/id    (:my.plan/id nr)
+                                   :my.plan/title (:my.plan/title nr)})))]
+    (cond-> {:my.plan/id       (:my.plan/id r)
+             :my.plan/title    (:my.plan/title r)
+             :my.plan/status   (:my.plan/status r)
+             :my.plan/children children}
+      (:my.plan/goal r)         (assoc :my.plan/goal (:my.plan/goal r))
+      (:my.plan/pace r)         (assoc :my.plan/pace (:my.plan/pace r))
+      (:my.plan/expect r)       (assoc :my.plan/expect (:my.plan/expect r))
+      (:my.plan/description r)  (assoc :my.plan/description
+                                       (:my.plan/description r))
+      (:my.plan/message r)      (assoc :my.plan/message? true)
+      (:my.plan/created-at r)   (assoc :my.plan/created-at
+                                       (:my.plan/created-at r))
+      (:my.plan/completed-at r) (assoc :my.plan/completed-at
+                                       (:my.plan/completed-at r))
+      (seq needs)               (assoc :my.plan/needs needs)
+      (seq (waiters (:db/id r))) (assoc :my.plan/waiters
+                                        (waiters (:db/id r))))))
+
+(defn- build-forest
+  "The `agent-eid`'s whole plan forest as nested node maps.
+
+   ONE query for the step eids, one `[*]` pull per step (plain data —
+   the same primitives [[open-steps]] uses), then a pure assembly:
+   children from the forward `parent` ref, `waiters` (what waits on a
+   step) from the inverted `needs` edges. Cycle-safe; oldest-first."
+  [db agent-eid]
+  (let [rows     (->> (db/query {:seon.db/db db
+                                 :seon.db/query
+                                 '[:find [?t ...]
+                                   :in $ ?a
+                                   :where
+                                   [?t :my.plan/agent ?a]
+                                   [?t :my.plan/id _]]
+                                 :seon.db/args [agent-eid]})
+                      (mapv #(db/pull db '[*] %)))
+        eid->row (into {} (map (fn [r] [(:db/id r) r])) rows)
+        kids     (group-by #(get-in % [:my.plan/parent :db/id]) rows)
+        waiters  (reduce (fn [m r]
+                           (reduce (fn [m n]
+                                     (update m (:db/id n) (fnil conj [])
+                                             (:my.plan/title r)))
+                                   m (:my.plan/needs r)))
+                         {} rows)
+        node     (fn node [r seen]
+                   (let [seen (conj seen (:my.plan/id r))
+                         children
+                         (->> (kids (:db/id r))
+                              step-order
+                              (remove #(seen (:my.plan/id %)))
+                              (mapv #(node % seen)))]
+                     (row->node eid->row waiters r children)))]
+    (->> rows
+         (remove :my.plan/parent)
+         step-order
+         (mapv #(node % #{})))))
+
+;; --- Per-node SIGNALS delegate to the shared rule-backed db fns
+;; --- ([[rollup]] / [[ready?]] / [[blocked?]]) — the SAME derivations the
+;; --- :ai block uses. `db` is the frozen render db value; a node carries its
+;; --- `:my.plan/id` so every signal is one shared-fn call keyed by that id.
+;; --- (Roll-up self-includes a leaf, so `(:my.plan/done? (rollup db id))` is
+;; --- the done-ness of BOTH a leaf and a drained non-leaf — one call.)
+
+(defn- need-line-html
+  "One `waits on` line for need `n` — done-glyph + title + id (done-ness of
+   the target derived via the shared [[rollup]] over db value `db`)."
+  [db n]
+  (let [done? (:my.plan/done? (rollup db (:my.plan/id n)))]
+    [:li {:class "flex items-center gap-1"}
+     [:span {:class (str "shrink-0 " (if done? "text-success" "text-warning"))}
+      (if done? "✓" "○")]
+     [:span {:class "text-text-200 truncate"} (:my.plan/title n)]
+     [:span {:class "text-text-500 shrink-0"} (:my.plan/id n)]]))
+
+(defn- step-detail-html
+  "Walked `node`'s expand-in-place detail panel — `data-show`n by $planstep."
+  [db node]
+  (let [id  (:my.plan/id node)
+        row (fn [label body]
+              [:div {:class "flex gap-2"}
+               [:span {:class "text-text-500 shrink-0"} label]
+               [:div {:class "text-text-200 min-w-0"} body]])]
+    [:div {:data-show (str "$planstep === '" id "'")
+           :style "display:none;border-left:1px solid #3d3a36;margin-left:3px;padding-left:10px"
+           :class "flex flex-col gap-1 text-2xs py-1"}
+     [:div {:class "text-text-500"}
+      (str id
+           (when-let [c (:my.plan/created-at node)]
+             (str " · created " (stamp c)))
+           (when-let [d (:my.plan/completed-at node)]
+             (str " · done " (stamp d))))]
+     (when-let [g (:my.plan/goal node)] (row "goal" g))
+     (when-let [d (:my.plan/description node)] (row "desc" d))
+     (when-let [x (:my.plan/expect node)] (row "verify" x))
+     (when-let [needs (seq (:my.plan/needs node))]
+       (row "waits on"
+            (into [:ul {:class "flex flex-col gap-1"}]
+                  (map #(need-line-html db %))
+                  needs)))
+     (when-let [ws (seq (:my.plan/waiters node))]
+       (row "blocks" (str/join ", " ws)))
+     (when (:my.plan/message? node)
+       (row "origin" "✉ auto-minted from a message"))]))
+
+(defn- step-row-html
+  "One tree row (+ its detail panel + its children `ul`) for walked `node`.
+
+   Glyphs: `●` active (amber, NOW), `✓` done (dim; hidden until $planfull),
+   `○` open (`ready` tag when actionable), `◌` blocked. A non-leaf carries
+   its subtree `done/total` roll-up and a collapse chevron ($planclosed,
+   click-stopped so it doesn't also toggle the detail). Signals delegate to
+   the shared [[rollup]]/[[ready?]]/[[blocked?]] over db value `db`."
+  [db node next-id depth]
+  (let [id       (:my.plan/id node)
+        children (:my.plan/children node)
+        leaf?    (empty? children)
+        ru       (rollup db id)
+        done?    (:my.plan/done? ru)
+        active?  (= :active (:my.plan/status node))
+        next?    (= id next-id)
+        blocked? (and (not done?) (blocked? db id))
+        [glyph gcls] (cond
+                       active?  ["●" "text-signal"]
+                       done?    ["✓" "text-text-500"]
+                       blocked? ["◌" "text-warning"]
+                       :else    ["○" "text-text-400"])
+        tcls     (cond
+                   active?  "text-text-50"
+                   done?    "text-text-500"
+                   blocked? "text-text-400"
+                   :else    "text-text-200")]
+    [:li (cond-> {:class "flex flex-col"}
+           done? (assoc :data-show "$planfull" :style "display:none"))
+     [:div {:class (str "flex items-center gap-2 py-0.5 rounded cursor-pointer"
+                        (when active? " bg-base-850"))
+            :style (str "padding-left:" (* 12 depth) "px;box-sizing:border-box;"
+                        "border-left:2px solid "
+                        (if active? "#f0b429" "transparent"))
+            (keyword "data-on:click") (toggle-step-expr id)}
+      (if leaf?
+        [:span {:class "shrink-0" :style "display:inline-block;width:1ch"}]
+        [:span {:class "text-text-500 shrink-0 select-none"
+                (keyword "data-on:click__stop") (toggle-closed-expr id)
+                :data-text (str "$planclosed.includes(' " id " ') ? '▸' : '▾'")}
+         "▾"])
+      [:span {:class (str "shrink-0 " gcls)} glyph]
+      (when (:my.plan/message? node) [:span {:class "text-info shrink-0"} "✉"])
+      [:span {:class (str "truncate " tcls)} (:my.plan/title node)]
+      (when active? [:span {:class "text-2xs text-signal shrink-0"} "NOW"])
+      (when (and next? (not active?))
+        [:span {:class "text-2xs text-signal shrink-0"} "next"])
+      (when (and (not done?) (not active?) (not next?)
+                 (ready? db id))
+        [:span {:class "text-2xs text-success shrink-0"} "ready"])
+      (when-not leaf?
+        [:span {:class "text-2xs text-text-500 tabular-nums shrink-0"}
+         (str (:my.plan/done ru) "/" (:my.plan/total ru))])]
+     (step-detail-html db node)
+     (when-not leaf?
+       [:ul {:class "flex flex-col"
+             :data-show (str "!$planclosed.includes(' " id " ')")}
+        (map #(step-row-html db % next-id (inc depth)) children)])]))
+
+(defn- root-card-html
+  "One bounded, collapsible plan-root card."
+  [db root next-id focused-root-id]
+  (let [{:my.plan/keys [done total]} (rollup db (:my.plan/id root))
+        pct  (if (pos? total) (quot (* 100 done) total) 0)
+        goal (:my.plan/goal root)
+        pace (:my.plan/pace root)]
+    [:details (cond-> {:class (str "plan-root rounded border border-base-800 "
+                                   "bg-base-950/30 overflow-hidden")}
+                (= (:my.plan/id root) focused-root-id) (assoc :open true))
+     [:summary {:class (str "cursor-pointer px-2 py-1.5 min-w-0 "
+                            "hover:bg-base-900")}
+      [:div {:class "plan-root-heading"}
+       [:span {:class "plan-title text-xs font-semibold text-text-50"}
+        (:my.plan/title root)]
+       [:span {:class "text-2xs text-text-400 tabular-nums shrink-0"}
+        (str done "/" total " done")]]
+      [:div {:class "flex items-center gap-2 min-w-0"}
+       (when pace
+         [:span {:class "text-2xs text-text-500 shrink-0"}
+          (str "[" (name pace) "]")])
+       (when goal
+         [:span {:class "plan-goal text-2xs text-text-500"} goal])]
+      [:div {:class "bg-base-800 w-full mt-1"
+             :style "height:2px;border-radius:2px;overflow:hidden"}
+       [:div {:style (str "height:2px;background:#f0b429;width:" pct "%")}]]]
+     [:div {:class "plan-tree px-2 py-1 border-t border-base-800"}
+      [:ul {:class "flex flex-col"}
+       (map #(step-row-html db % next-id 0) (:my.plan/children root))]]]))
+
+(defn plan-block-html
+  "Live, explorable HTML twin of [[plan-block]] — the `/agent/{id}` tile.
+
+   Renders the agent's WHOLE plan forest behind bounded root disclosures (the
+   :ai block windows by content). The focused root starts open; other roots are
+   summary rows until selected. Each root carries a title/goal/pace header with
+   a done/total roll-up and a thin amber progress bar, then the step tree — `●` active (NOW,
+   highlighted), `○` open (`ready`-tagged), `◌` blocked, `✓` done (hidden
+   until the show-completed toggle), `✉` message-minted. STRUCTURE comes
+   from [[build-forest]] (the renderable nested tree); every SIGNAL —
+   roll-up, done, ready, blocked, and the you-are-here position — derives
+   from the SAME shared db fns the :ai block uses ([[rollup]]/[[ready?]]/
+   [[blocked?]]/[[anchor]], see the derivation note above); the
+   recently-completed tail reuses [[recent-done]]. Interactivity is
+   Datastar signals (they live
+   client-side, so they survive the SSE whole-element morph): click a
+   step to expand its detail in place (description, verify-before-done
+   `expect`, needs edges both ways, timestamps, id); chevrons collapse
+   subtrees; $planfull reveals the completed interior; the recently-
+   completed tail expands on click. No plan → a quiet one-liner (the
+   teaching text in [[empty-plan-teaching]] is for the model, not the
+   human)."
+  {:malli/schema [:=> [:cat :seon.render/section-request]
+                  :seon.render.canvas/hiccup]}
+  [{:seon.db/keys [db] :seon.agent/keys [id]}]
+  (let [db     (or db @db/*conn*)
+        oe     (agent-eid db [:seon.agent/id id])
+        forest (if oe (build-forest db oe) [])]
+    (if (empty? forest)
+      [:div {:class "text-text-500 italic text-2xs font-mono py-1"}
+       "no plan yet"]
+      (let [;; The you-are-here — the SAME [[anchor]] the :ai block reads:
+            ;; an :active step wins; else the oldest ready leaf is next.
+            a          (anchor db oe)
+            focused-root-id (some-> a :my.plan/chain first :my.plan/id)
+            next-id    (when-not (:my.plan/active? a)
+                         (:my.plan/id (:my.plan/step a)))
+            ;; Rows hidden behind $planfull = the done non-root nodes;
+            ;; done-ness derives from the shared [[rollup]].
+            done-count (count (filter #(:my.plan/done? (rollup db (:my.plan/id %)))
+                                      (mapcat #(tree-seq (fn [_] true)
+                                                         :my.plan/children %)
+                                              (mapcat :my.plan/children
+                                                      forest))))
+            dones      (recent-done db oe)]
+        [:div {:class "flex flex-col gap-2 text-xs font-mono"
+               :data-signals__ifmissing
+               "{planstep: '', planclosed: '', planfull: false, plandone: false}"}
+         (map #(root-card-html db % next-id focused-root-id) forest)
+         (when (pos? done-count)
+           [:div {:class (str "flex items-center gap-1 text-2xs text-text-400 "
+                              "cursor-pointer select-none")
+                  (keyword "data-on:click") "$planfull = !$planfull"}
+            [:span {:data-text "$planfull ? '▾' : '▸'"} "▸"]
+            [:span {:data-text (str "$planfull ? 'hide completed steps' : "
+                                    "'show all " done-count
+                                    " completed steps in place'")}
+             (str "show all " done-count " completed steps in place")]])
+         (when (seq dones)
+           [:div {:class "flex flex-col"}
+            [:div {:class (str "flex items-center gap-1 text-2xs text-text-500 "
+                               "cursor-pointer select-none")
+                   (keyword "data-on:click") "$plandone = !$plandone"}
+             [:span {:data-text "$plandone ? '▾' : '▸'"} "▸"]
+             [:span (str "recently completed (" (count dones) ")")]]
+            [:ul {:class "flex flex-col" :data-show "$plandone"
+                  :style "display:none"}
+             (map (fn [{:my.plan/keys [title completed-at]}]
+                    [:li {:class "text-2xs text-text-500 truncate"}
+                     (str "✓ [" (stamp completed-at) "] " title)])
+                  dones)]])]))))

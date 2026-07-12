@@ -36,7 +36,7 @@ it), then `start pod`, then `status`. The blocking wire-server start is why
 one shell line CAN race (the pod's 5-attempt ping fails in ~10s if the socket
 isn't up yet — it then exits, see logs/acme/pod.log).
 
-The granular verbs still work if you want them:
+The granular commands still work if you want them:
 
 ```bash
 bin/acme build              # one-off compile :acme-client -> out-acme/client/main.js
@@ -53,9 +53,9 @@ process restart on `store_dir == $SEON_CLUSTER_DIR/store` (the cluster THIS
 invocation manages), not the literal name `default`. It wipes
 `data/clusters/acme/store` and race-safely restarts acme (wait_ready's the
 wire-server before the pod), and can never touch the live default cluster. PLUS
-the three cluster-level convenience verbs `bin/acme` adds on top:
+the three cluster-level convenience commands `bin/acme` adds on top:
 
-| verb | what it does |
+| command | what it does |
 |---|---|
 | `bin/acme up` | `build` + `start wire-server` + `start pod` + `status` |
 | `bin/acme down` | stop the whole cluster (pod first, then wire-server) |
@@ -91,6 +91,18 @@ NEVER `bin/seon start/stop/restart` it or write to its store. Use **only**
   `SEON_CLIENT_OUT`, `SEON_EXTRA_SRC`, `SEON_EXTRA_PRELOAD`,
   `SEON_BRAND_NAME/TAGLINE/CSS`, `SEON_EMBED`. All default to today's values
   when unset, so seon's own usage is byte-identical.
+- **Config = minimal overrides (owner directive 2026-07-02).**
+  `SEON_CONFIG=config/acme.edn`, and that file is now `#merge [#include
+  "system.edn" {…}]` — the default cluster's manifest verbatim plus ONE
+  delta: the agent toolbelt gains `acme.helpers`/`acme.notes` (the
+  `SEON_EXTRA_SRC` namespaces, which must be in `:seon.eval/home-requires`
+  or their cards never render). The old demo divergences (max skill corpus,
+  custom block tree + transcript decay, toolkit trims) are GONE: per-cluster
+  configurability is proven and documented, and while acme is the live
+  testing/dev harness those divergences cost fidelity (the `my.kb` trim
+  blocker was exactly such a case). This holds until acme stops being the
+  live-testing harness; system.edn edits flow to acme automatically via the
+  `#include`.
 - `SEON_EXTRA_SRC=acme/` is injected as a `:local/root` dep so `acme/src`
   joins the build classpath; `acme.*` compiles INTO the pod bundle.
 - The acme pod runs its OWN bundle (`out-acme/client/main.js`) from the
@@ -136,7 +148,7 @@ NEVER `bin/seon start/stop/restart` it or write to its store. Use **only**
   renders under the SCI-bounded path (proven: "N installed schemas", no
   "could not run under SCI bounding" warn).
 - **Function overrides** — `acme.overrides` `set!`s
-  `seon.render.live-tile/error-response` (and is the place to override
+  `seon.render.live-canvas/error-response` (and is the place to override
   `seon.ctx/core-default-ctx` to inject sections) — the universal
   extend-without-fork mechanism.
 - **CSS / branding** — `acme/branding/acme.css` + `SEON_BRAND_NAME/TAGLINE`.
@@ -157,7 +169,14 @@ bin/acme restart pod          # acme pod picks it up
 
 ## Inspecting / driving the acme pod
 
-- **HTTP:** `curl -s 127.0.0.1:7980/agents`, `…/agent/<id>`, etc.
+- **HTTP:** there is NO `/agents` route (removed in the db->routes reitit
+  cutover; an unmatched path 302s to `/`). The real surface is the seeded
+  core routes — `curl -s 127.0.0.1:7980/` (root dashboard),
+  `…/agent/<id>` (agent page), `…/agent/<id>/feed` (SSE) — plus the
+  operator datom browser `curl -s 127.0.0.1:7980/data` (verified live:
+  HTTP 200). List the seeded routes from the wire REPL:
+  `[?e :seon.route/pattern]` datoms (verified live 2026-07-02: `/`,
+  `/agent/{id}`, `/agent/{id}/call`, `/agent/{id}/feed`).
 - **Wire-server REPL:** `nc -U`-style on `127.0.0.1:7981` (the loopback socket
   REPL) for writer-side queries.
 - **NOT MCP:** the `mcp__seon_cljs__*` tools only see the live `:client`
@@ -173,8 +192,10 @@ bin/acme restart pod          # acme pod picks it up
   race (the pod ping-fails in ~10s and exits if the writer socket isn't
   accepting yet). Use `bin/acme up` — it blocks on wire-server readiness
   between the two starts. After a bare `start pod` always poll
-  `curl -s 127.0.0.1:7980/agents` to HTTP 200 (the start command returns
-  before the pod is actually ready).
+  `curl -fsS -o /dev/null 127.0.0.1:7980/` until it exits 0 — the same
+  probe `bin/seon`'s `ready_check` uses (`-f` passes on 200 AND on the
+  302 an unmatched path gets, so it won't false-fail; the start command
+  returns before the pod is actually ready).
 - Acme's 7980/7981 were chosen because 7990/7991 collided with another
   deployment on the dev machine; override with `SEON_PORT=… bin/acme …` if
   needed.

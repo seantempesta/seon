@@ -72,8 +72,8 @@ a structural/contract-token check, not delete the deftest.
 | `seon.repl.context-test` | `for-data-test` | `test/seon/repl/context_test.clj:118` | `(str/includes? result "No matching renderers")` | Pins exact empty-state prose of a render surface. PAUSED JVM track (lower stakes). |
 | `seon.render.code-test` | `render-ns-docs-no-functions-test` | `test/seon/render/code_test.clj:202` | `(re-find #"No functions found" doc)` | Pins exact empty-state prose of the doc-render surface. PAUSED JVM track. |
 | `seon.render.chat-test` | `provider-failure-renders-a-system-line` | `test/seon/render/chat_test.cljs:409` | `(str/includes? content "resume on your next message")` | Pins the exact synthesized system-notice phrase. PRIMARY contract (exactly the :error turn surfaces, in time order) is strong behavioral; the phrase pin is incidental. |
-| `seon.render.live-tile-test` | `welcome-compact-shows-purpose-id-and-truthful-twin` | `test/seon/render/live_tile_test.cljs:142` | `(re-find #"core default" ai)` + `(not (re-find #"haven't wired" ai))` | "core default" is welcome-twin prose; the rest of the deftest anchors on contract token `:seon.render.live-tile/content` (fine) and the agent id (fine). |
-| `seon.render.live-tile-test` | `welcome-emits-tagged-blocks-and-twin` | `test/seon/render/live_tile_test.cljs:111` | `(re-find #"update this panel" ai)` | Prose pin of the panel line's twin (note: the hiccup side uses the `tile/panel-line` CONST — good; only the `ai` twin pins the lowercased phrase). Rest of deftest = zoom-block/greeting/date mechanism (KEEP). |
+| `seon.render.live-tile-test` | `welcome-compact-shows-purpose-id-and-truthful-twin` | `test/seon/render/live_tile_test.cljs:142` | `(re-find #"core default" ai)` + `(not (re-find #"haven't wired" ai))` | "core default" is welcome-twin prose; the rest of the deftest anchors on contract token `:seon.render.live-canvas/content` (fine) and the agent id (fine). |
+| `seon.render.live-tile-test` | `welcome-emits-tagged-blocks-and-twin` | `test/seon/render/live_tile_test.cljs:111` | `(re-find #"update this panel" ai)` | Prose pin of the panel line's twin (note: the hiccup side uses the `canvas/panel-line` CONST — good; only the `ai` twin pins the lowercased phrase). Rest of deftest = zoom-block/greeting/date mechanism (KEEP). |
 | `seon.render.live-tile-test` | `welcome-compact-shows-the-last-reply` | `test/seon/render/live_tile_test.cljs:387` (via `render_test.cljs` sibling) | `(re-find #"reply!" ...)` negative + reply-string positive | Reply string is fixture-supplied (behavioral). The `#"reply!"` exclusion is a structural-ish guard. Marginal — listed for completeness. |
 | `seon.web.inspector-chips-test` | `default-header-is-user-meaningful-no-machinery` / `system-toggle-reveals-the-machinery-row` | `test/seon/web/inspector_chips_test.cljs:108,207` | enumerates chip labels by name (`datoms/fns/schemas/tests/findings`) | Matches the "pin exact labels of a tunable surface" pattern. BUT it is fundamentally an appear/vanish + toggle-behavior test, and the labels are the feature's own contract tokens, not refactoring-prone prose. Leans KEEP. |
 
@@ -131,7 +131,7 @@ a refactoring-prone render surface.
   `.disabled`) for: `system-text|render-context|render-prompt|ctx-preview`,
   `taught|teaching|run-example|replay`, `is (= "..."` over render output,
   and multiword prose inside `str/includes?`/`re-find`. Read in full every
-  file on the owner's list plus chat/live-tile/value/code/transform/kb/
+  file on the owner's list plus chat/live-canvas/value/code/transform/kb/
   todo/openai-compat/anthropic/inspector-chips.
 - One already-handled disabled sibling worth noting: `inspector_chips_test.cljs`
   `completed-agents-hidden-by-default-toggle-reveals` is already

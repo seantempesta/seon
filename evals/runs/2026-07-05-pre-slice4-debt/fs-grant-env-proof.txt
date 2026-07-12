@@ -1,0 +1,3 @@
+pod pid 132 env:
+SEON_FS_ROOT=/testbed
+SEON_FS_READ_ONLY=0

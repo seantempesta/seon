@@ -77,7 +77,7 @@ JVM track resumes they re-activate.
 | context-derived-not-stored.md | resolved | RESOLVED | self-resolved 5f2a564 + keystone single-producer 5144707c | Archive |
 | context-loop-regression-sweep-2026-06-25.md | active | RESOLVED/SUPERSEDED | your-entity section removed (37c47f27); single byte-identical `render-context` producer; effective-cap gone | Archive |
 | warnings-misfire-core-schemas.md | active | RESOLVED | warn.cljs:514 core-kinds remove + `:dev-only?` drops from prompt | Mark resolved |
-| live-tile-nil-entity-render-failed.md | completed | RESOLVED | live-tile resolves entity from db; agent/ctx/live_tile.cljs + guard test | Archive |
+| canvas-nil-entity-render-failed.md | completed | RESOLVED | canvas resolves entity from db; agent/ctx/live_tile.cljs + guard test | Archive |
 | dead-render-example.md | open | RESOLVED | `render/example.clj` no longer exists | Archive |
 | nippy-transitive-dep.md | open | **RESOLVED** | `com.taoensso/nippy 3.4.2` explicit deps.edn:37 | Mark resolved |
 | agents-als-tests-fail-under-mcp.md | open | **RESOLVED/STALE** | `seon.agents` ns + test deleted (248f2193); ALS now in seon.agent.* | Close |
@@ -165,7 +165,7 @@ resolve only if/when the JVM core-systems integration resumes.
 - agents-als-tests-fail-under-mcp — ns+test deleted 248f2193
 - flow-pool-integrant-surgical — body "APPLIED"
 - naming-health — `domains/health/` deleted
-- context-derived-not-stored, context-loop-regression-sweep, warnings-misfire-core-schemas, live-tile-nil-entity-render-failed, dead-render-example — all fixed/superseded by the agent-ctx keystone + your-entity removal
+- context-derived-not-stored, context-loop-regression-sweep, warnings-misfire-core-schemas, canvas-nil-entity-render-failed, dead-render-example — all fixed/superseded by the agent-ctx keystone + your-entity removal
 - Already correctly closed (leave as-is): any-in-wire-protocol, db-ops-any-returns, dup-connection-error, map-in-map-out-compliance, raw-datalevin-conn, routes-conn-vs-dbname, instrumentation-collect-clean-build-empty, coupling-render-db, datahike-migration-history
 
 **STALE/SUPERSEDED — JVM-paused lane or design moved (close/re-scope):**

@@ -5,7 +5,7 @@
 
    ## What this answers
 
-   Parse asks \"is the canvas structurally well-formed?\" (rewrite-clj spans).
+   Parse asks \"is the code-buffer structurally well-formed?\" (rewrite-clj spans).
    EVAL asks the next question: \"does the generated code actually RUN?\" — does
    the form COMPILE, and (for a self-contained form) EVALUATE without an
    unbound var / arity error / throw, inside a wall-clock budget. That verdict
@@ -27,12 +27,13 @@
    ## Dependency surface
 
    `cljs.js` (self-host compiler) + `shadow.cljs.bootstrap.node` (the analysis
-   cache loader) + `cljs.analyzer` (warning capture). NO `seon.db`,
-   NO `seon.eval`, NO `seon.schema`, NO pod state, NO datahike — those are
-   pod-coupled (`src/seon/render/sci.cljs:69-70`, `src/seon/eval.cljs:36-58`).
-   The two tiny bootstrap-cache helpers are copied from `seon.eval` BY DESIGN:
-   this is a separate leaf bundle so the self-host weight never bloats the lean
-   parse bundle, and it must not drag the pod cage onto the worker image.
+   cache loader) + `cljs.analyzer` (warning capture) +
+   `seon.eval.bootstrap-cache` (the shared LEAF cache loader — deliberately
+   free of seon.db/seon.schema/pod state). NO `seon.eval`, NO datahike —
+   those are pod-coupled (`src/seon/render/sci.cljs:69-70`,
+   `src/seon/eval.cljs:36-58`); this is a separate leaf bundle so the
+   self-host weight never bloats the lean parse bundle, and it must not drag
+   the pod cage onto the worker image.
 
    ## Non-termination is BOUNDED
 
@@ -77,9 +78,10 @@
     [clojure.string :as str]
     [cljs.js :as cljs]
     [cljs.analyzer :as ana]
+    [seon.repair.candidates :as candidates]
+    [seon.eval.bootstrap-cache :as bootstrap-cache]
     [shadow.cljs.bootstrap.node :as boot]
     ["fs" :as fs]
-    ["path" :as path]
     ["vm" :as vm]
     ["readline" :as readline]))
 
@@ -99,41 +101,6 @@
    build output."
   (or (some-> js/process .-env .-SEON_BOOTSTRAP)
       "out/bootstrap"))
-
-;; ============================================================
-;; Bootstrap analysis-cache load (copied leaf helpers — see ns docstring;
-;; seon.eval's are pod-coupled, this bundle must stay DB-free).
-;; ============================================================
-
-(defn- bootstrap-cache-files
-  "Enumerate `<bootstrap>/ana/*.transit.json` as `[ns-sym path]` pairs,
-   cljs.core + cljs.core$macros sorted first (cosmetic)."
-  [bootstrap-path]
-  (let [path-mod (js/require "path")
-        ana-dir  (.resolve path-mod bootstrap-path "ana")
-        names    (.readdirSync fs ana-dir)
-        suffix   ".transit.json"]
-    (->> (array-seq names)
-         (filter #(str/ends-with? % suffix))
-         (map (fn [filename]
-                (let [ns-name (subs filename 0 (- (count filename) (count suffix)))]
-                  [(symbol ns-name) (.resolve path-mod ana-dir filename)])))
-         (sort-by (fn [[ns-sym _]]
-                    (case (str ns-sym)
-                      "cljs.core"        0
-                      "cljs.core$macros" 1
-                      2))))))
-
-(defn- load-all-analysis-caches!
-  "Read every `<bootstrap>/ana/*.transit.json` and
-   `cljs.js/load-analysis-cache!` it into `state`, so every bootstrap entry
-   (cljs.core, clojure.string, malli, …) is resolvable by the analyzer
-   without a hand-maintained load-list."
-  [state bootstrap-path]
-  (doseq [[ns-sym path] (bootstrap-cache-files bootstrap-path)]
-    (let [txt  (.readFileSync fs path "utf8")
-          data (boot/transit-read txt)]
-      (cljs/load-analysis-cache! state ns-sym data))))
 
 ;; ============================================================
 ;; Warm self-host state + per-eval warning capture
@@ -177,7 +144,7 @@
                      {:path bootstrap-path :load-on-init '#{cljs.core}}
                      (fn []
                        (try
-                         (load-all-analysis-caches! state bootstrap-path)
+                         (bootstrap-cache/load-all! state bootstrap-path)
                          ;; Route analyzer warnings through our per-eval sink
                          ;; instead of stderr; undeclared-var is the
                          ;; authoritative \"does not compile\" signal.
@@ -248,52 +215,72 @@
                             (reverse chain))
                       (ex-message e)
                       (str e))]
-    {:kind    (cond timed-out :interrupt
-                    compile?  :compile
-                    :else     :throw)
-     :message msg}))
+    {:seon.error/kind    (cond timed-out :interrupt
+                               compile?  :compile
+                               :else     :throw)
+     :seon.error/message msg}))
 
-(defn eval-form
-  "Compile + eval `code` under the warm self-host state.
+(defn- eval-in-session
+  "The ONE compile(+eval) core over the warm self-host state.
 
-   Bounded by
-   `budget-ms`. Returns a Promise of a plain clj map:
+   Two modes, one code path:
 
-       {:ok true  :value <pr-str of the value>}
-       {:ok false :error {:kind :compile|:throw|:interrupt :message s}}
+   - `compile-only?` FALSE (the default) — compile AND execute under the vm
+     watchdog (`budget-ms`), exactly the historical eval semantics;
+   - `compile-only?` TRUE — the repair pipeline's TRIAL: the `:eval` fn is a
+     no-op, so NOTHING executes (no side effects, no vm), but the analyzer
+     still runs and the warning sink still captures undeclared-var /
+     fn-arity / … verdicts. Analyzer state does accumulate defs from a
+     trial — acceptable (a re-def by the winning real eval lands the same
+     vars).
 
-   `:compile` = the analyzer flagged an unresolved var / bad arity (the form
-   does not legally compile); `:throw` = it compiled but threw at runtime;
-   `:interrupt` = it exceeded the wall-clock budget (non-termination). A clean
-   compile+eval → `{:ok true …}`.
+   Resolves a Promise of a plain clj map:
 
-   PURE w.r.t. the worker's domain state (no DB, no pod). The only mutable
-   touch is the per-eval warning sink, reset here under the sequential
-   single-eval invariant."
-  [code budget-ms]
+       {:seon.eval/ok? true  :seon.eval/raw-value v :seon.eval/warnings []}
+       {:seon.eval/ok? false :seon/error {:seon.error/kind … :seon.error/message …}
+        :seon.eval/warnings [s …] :seon.eval/thrown? bool}
+
+   `:seon.eval/warnings` is the raw captured warning list (the repair
+   pipeline parses undeclared names out of it); `:seon.eval/thrown?` marks a
+   THROWN analysis/runtime error as opposed to a warnings-only failure."
+  [code budget-ms {:keys [compile-only?]}]
   (js/Promise.
     (fn [resolve _reject]
       (let [state @!state]
         (cond
           (nil? state)
-          (resolve {:ok false :error {:kind :throw :message "eval state not initialized"}})
+          (resolve {:seon.eval/ok? false
+                    :seon.eval/warnings []
+                    :seon.eval/thrown? true
+                    :seon/error {:seon.error/kind :throw
+                                 :seon.error/message "eval state not initialized"}})
 
           ;; Empty/blank code is a malformed request, NOT a passing eval. A
           ;; non-JSON or empty line otherwise reads as the empty form and
           ;; evals to nil → a SILENT ok:true FALSE PASS, which would let the
           ;; kill-gate wave garbage through. Reject it as a compile error.
           (str/blank? code)
-          (resolve {:ok false :error {:kind :compile :message "empty or unparseable code"}})
+          (resolve {:seon.eval/ok? false
+                    :seon.eval/warnings []
+                    :seon.eval/thrown? false
+                    :seon/error {:seon.error/kind :compile
+                                 :seon.error/message "empty or unparseable code"}})
 
           :else
           (do
             (vreset! !warnings [])
             (try
               (cljs/eval-str state code 'seon.worker-eval.user
-                {:eval          (bounded-eval-fn (or budget-ms default-budget-ms))
+                {:eval          (if compile-only?
+                                  (fn [_] nil)   ; trial: analyze/compile, execute NOTHING
+                                  (bounded-eval-fn (or budget-ms default-budget-ms)))
                  :context       :expr
                  :def-emits-var true
-                 :analyze-deps  false}
+                 :analyze-deps  false
+                 ;; the bootstrap loader — lets a session (require '[seon.schema
+                 ;; :as schema]) etc. from the analysis cache, so EVERY phase
+                 ;; gate can parse->EVAL (owner: no parse-only locks)
+                 :load          (partial boot/load state)}
                 (fn [{:keys [error value]}]
                   (let [warns @!warnings]
                     (cond
@@ -305,42 +292,378 @@
                       ;; ReferenceError). Checking `error` first would mask the
                       ;; analyzer verdict as a coarser `:throw`.
                       (seq warns)
-                      (resolve {:ok false :error {:kind :compile :message (str/join "; " warns)}})
+                      (resolve {:seon.eval/ok? false
+                                :seon.eval/warnings warns
+                                :seon.eval/thrown? false
+                                :seon/error {:seon.error/kind :compile
+                                             :seon.error/message (str/join "; " warns)}})
 
                       error
-                      (resolve {:ok false :error (classify-error error)})
+                      (resolve {:seon.eval/ok? false
+                                :seon.eval/warnings warns
+                                :seon.eval/thrown? true
+                                :seon/error (classify-error error)})
 
                       :else
-                      (resolve {:ok true
-                                :value (try (pr-str value)
-                                            (catch :default _ "<unprintable>"))})))))
+                      (resolve {:seon.eval/ok? true
+                                :seon.eval/warnings warns
+                                :seon.eval/raw-value value})))))
               (catch :default e
-                (resolve {:ok false :error (classify-error e)})))))))))
+                (resolve {:seon.eval/ok? false
+                          :seon.eval/warnings @!warnings
+                          :seon.eval/thrown? true
+                          :seon/error (classify-error e)})))))))))
+
+(defn ^:async eval-form
+  "Compile + eval `code` under the warm self-host state.
+
+   Bounded by
+   `budget-ms`. Returns a Promise of a plain clj map:
+
+       {:seon.eval/ok? true  :seon.eval/value <pr-str of the value>}
+       {:seon.eval/ok? false
+        :seon/error {:seon.error/kind :compile|:throw|:interrupt
+                     :seon.error/message s}}
+
+   `:compile` = the analyzer flagged an unresolved var / bad arity (the form
+   does not legally compile); `:throw` = it compiled but threw at runtime;
+   `:interrupt` = it exceeded the wall-clock budget (non-termination). A clean
+   compile+eval → `{:seon.eval/ok? true …}`.
+
+   PURE w.r.t. the worker's domain state (no DB, no pod). The only mutable
+   touch is the per-eval warning sink, reset here under the sequential
+   single-eval invariant."
+  [code budget-ms]
+  (let [{ok? :seon.eval/ok? v :seon.eval/raw-value :as res}
+        (await (eval-in-session code budget-ms {}))]
+    (if ok?
+      {:seon.eval/ok? true
+       :seon.eval/value (try (pr-str v) (catch :default _ "<unprintable>"))}
+      (select-keys res [:seon.eval/ok? :seon/error]))))
+
+;; JSON-boundary helpers (shared by every op's result builder).
+(defn- gobj-set [o k v] (aset o k v) o)
+(defn- gobj-get [o k] (when (some? o) (aget o k)))
+
+;; ============================================================
+;; op:"run-tests" — run the session's deftest vars.
+;;
+;; The session's code evals into `cljs.user` (eval-str's third arg is the
+;; source NAME; cljs.js's eval ns is the `:ns` opt, defaulting to
+;; cljs.user); the compiled deftest emits `var.cljs$lang$test =
+;; <test-body-fn>` on the def's VALUE
+;; (reference-code/clojurescript/src/main/clojure/cljs/compiler.cljc:901),
+;; and the ns object lives on the shared vm global (`globalThis.cljs.user`)
+;; because bounded evals run in the current global context. The RUNNER itself is evaluated IN-SESSION (not
+;; host-side) so every cljs.test value it touches belongs to the ONE
+;; bootstrap-loaded cljs.test instance the deftests reference — host-side
+;; keyword/map access on bootstrap-world values would cross two cljs.core
+;; instances and silently fail equality.
+;; ============================================================
+
+(def ^:private session-ns-path
+  "The munged JS global path of the session eval ns."
+  ["cljs" "user"])
+
+(defn- session-ns-obj
+  "The session ns JS object on the vm global, or nil before any eval."
+  []
+  (reduce (fn [o k] (when (some? o) (gobj-get o k))) js/globalThis session-ns-path))
+
+(defn- test-var-names
+  "Munged JS names of the session defs carrying `cljs$lang$test`, optionally
+   filtered by `vars` (demunged \"name\" or \"ns/name\" strings)."
+  [vars]
+  (let [ns-obj (session-ns-obj)
+        wanted (when (seq vars)
+                 (into #{} (map (fn [s]
+                                  (let [i (.lastIndexOf s "/")]
+                                    (if (>= i 0) (subs s (inc i)) s))))
+                       vars))]
+    (if (nil? ns-obj)
+      []
+      (->> (js/Object.keys ns-obj)
+           (filter (fn [k]
+                     (let [v (gobj-get ns-obj k)]
+                       (and (some? v) (some? (gobj-get v "cljs$lang$test"))))))
+           (filter (fn [k] (or (nil? wanted) (contains? wanted (str (demunge k))))))
+           vec))))
+
+(defn- test-runner-source
+  "The CLJS source of the in-session test runner over the munged `names`.
+
+   ONE top-level form (a multi-form string containing `set!` emits broken
+   JS under eval-str — verified live), evaluated AFTER a separate
+   `(require '[cljs.test])` call. Swaps `cljs.test/report` — the compiled
+   `is` calls `cljs.test.report` DIRECTLY (decompiled live; `do-report` is
+   bypassed) — for a capturing fn (counters + failure maps read INSIDE the
+   session world), restores it in a `finally`, and returns a
+   `js/JSON.stringify` STRING — the one value shape that crosses the
+   bootstrap/host boundary losslessly. Async deftests are reported as
+   errors (the strictly-sequential line server cannot await a CPS test)."
+  [names]
+  (str
+    "(let [ns-obj (reduce (fn [o k] (when o (aget o k))) js/globalThis " (pr-str session-ns-path) ")\n"
+    "      names " (pr-str names) "\n"
+    "      reports (volatile! [])\n"
+    "      orig cljs.test/report]\n"
+    "  (cljs.test/set-env! (cljs.test/empty-env))\n"
+    "  (set! cljs.test/report (fn [m] (vswap! reports conj m) nil))\n"
+    "  (let [results\n"
+    "        (try\n"
+    "          (vec (for [n names]\n"
+    "                 (let [f (aget ns-obj n)\n"
+    "                       t (aget f \"cljs$lang$test\")\n"
+    "                       before (count @reports)\n"
+    "                       err (try (let [r (t)]\n"
+    "                                  (when (cljs.test/async? r)\n"
+    "                                    \"async deftest not supported by op:run-tests\"))\n"
+    "                                (catch :default e (str e)))\n"
+    "                       ms (subvec @reports before)]\n"
+    "                   {:var (str (demunge n))\n"
+    "                    :pass (count (filter #(= :pass (:type %)) ms))\n"
+    "                    :fail (vec (filter #(= :fail (:type %)) ms))\n"
+    "                    :error (cond-> (vec (filter #(= :error (:type %)) ms))\n"
+    "                             err (conj {:message err}))})))\n"
+    "          (finally (set! cljs.test/report orig) (cljs.test/clear-env!)))]\n"
+    "    (js/JSON.stringify\n"
+    "      (clj->js {:pass (reduce + 0 (map :pass results))\n"
+    "                :fail (reduce + 0 (map (comp count :fail) results))\n"
+    "                :error (reduce + 0 (map (comp count :error) results))\n"
+    "                :failures (vec (for [r results, m (concat (:fail r) (:error r))]\n"
+    "                                 {:var (:var r)\n"
+    "                                  :message (str (when-let [msg (:message m)] (str msg \" \"))\n"
+    "                                                (when (contains? m :expected)\n"
+    "                                                  (str \"expected: \" (pr-str (:expected m))\n"
+    "                                                       \" actual: \" (pr-str (:actual m)))))}))}))))\n"))
+
+(defn- ^:async run-tests
+  "`op:\"run-tests\"` — run the session's deftest vars, machine-readable,
+   never throws. Resolves the JSON-ready JS result object."
+  [{:keys [id vars]}]
+  (let [base #js {:op "run-tests" :tier "test"}
+        _    (when (some? id) (gobj-set base "id" id))
+        names (test-var-names vars)]
+    (if (empty? names)
+      (doto base
+        (gobj-set "ok" true) (gobj-set "pass" 0) (gobj-set "fail" 0)
+        (gobj-set "error" 0) (gobj-set "failures" #js []))
+      (let [_ (await (eval-in-session "(require '[cljs.test])" default-budget-ms {}))
+            {ok? :seon.eval/ok? v :seon.eval/raw-value err :seon/error}
+            (await (eval-in-session (test-runner-source names) default-budget-ms {}))]
+        (if (and ok? (string? v))
+          (let [summary (.parse js/JSON v)
+                fails   (gobj-get summary "fail")
+                errs    (gobj-get summary "error")]
+            (doto base
+              (gobj-set "ok" (and (zero? fails) (zero? errs)))
+              (gobj-set "pass" (gobj-get summary "pass"))
+              (gobj-set "fail" fails)
+              (gobj-set "error" errs)
+              (gobj-set "failures" (gobj-get summary "failures"))))
+          ;; the runner itself failed — surface as one error row, never throw
+          (doto base
+            (gobj-set "ok" false) (gobj-set "pass" 0) (gobj-set "fail" 0)
+            (gobj-set "error" 1)
+            (gobj-set "failures"
+                      #js [#js {:var "<runner>"
+                                :message (str (:seon.error/message err))}])))))))
+
+;; ============================================================
+;; op:"repair" — detect → candidates → compile-only trials → winner eval.
+;;
+;; The shared autofix design (docs/prds/agent-ctx/research/
+;; form-autofix-system-2026-07-05.md): a fix applies only when EXACTLY ONE
+;; candidate passes a compile-only trial; 2+ passers = ambiguous (hint, no
+;; fix); trials execute NOTHING; the single winner is eval'd for real so
+;; its defs land in the session. The candidate/distance/threshold/tier
+;; intelligence is the SHARED `seon.repair.candidates` (one mechanism —
+;; the pod's pre-flight gate rides the same code); this op supplies only
+;; its OWN candidate sources (session defs + cached core + graph names)
+;; and its compile-only trial.
+;; ============================================================
+
+(def ^:private default-repair-budget-ms
+  "Whole-pipeline wall for one repair call — a slow fix is a worse product
+   than a fast error (the research's <10ms/form target)."
+  10)
+
+(def ^:private max-repair-fixes
+  "Chained-fix cap: at most this many DISTINCT undeclared vars per call."
+  3)
+
+(def ^:private undeclared-var-re
+  "Matches the captured analyzer warning for an unresolved symbol."
+  #"undeclared-var: Use of undeclared Var (\S+)")
+
+(defn- undeclared-names
+  "Distinct unresolved var NAMES parsed out of the captured warnings."
+  [warnings]
+  (into [] (distinct)
+        (keep #(some-> (re-find undeclared-var-re %) second candidates/name-part)
+              warnings)))
+
+(defonce ^:private !core-names (atom nil))
+
+(defn- core-names
+  "All `cljs.core` public NAMES, from the loaded analysis cache — computed
+   once per process (the analyzer state is HOST data, safe to read here)."
+  []
+  (or @!core-names
+      (let [st    @!state
+            names (when st
+                    (mapv str (keys (get-in @st [:cljs.analyzer/namespaces
+                                                 'cljs.core :defs]))))]
+        (when (seq names) (reset! !core-names names))
+        (or names []))))
+
+(defn- session-def-names
+  "NAMES already defined in the session eval ns (analyzer state)."
+  []
+  (when-let [st @!state]
+    (mapv str (keys (get-in @st [:cljs.analyzer/namespaces
+                                 'cljs.user :defs])))))
+
+(defn- candidates-for
+  "Ranked fix candidates (k ≤ 5) for the unresolved `from` over THIS
+   worker's sources: session defs + cljs.core + `graph-names` (name
+   parts). Ranking/threshold (Levenshtein ≤ ⌈n/3⌉, nearest first) is the
+   SHARED `seon.repair.candidates/rank-candidates` — see its docstring
+   for why ⌈n/3⌉ (the `transct!` → `tapset` deep-tier lesson)."
+  [from graph-names]
+  (candidates/rank-candidates
+    from
+    (concat (session-def-names) (core-names)
+            (map candidates/name-part graph-names))))
+
+(defn- ^:async trial
+  "Compile-only trial of `code` → `{:repair/clean? :repair/undeclared
+   :repair/thrown?}` (nothing executes)."
+  [code]
+  (let [{ok? :seon.eval/ok? warns :seon.eval/warnings thrown? :seon.eval/thrown?}
+        (await (eval-in-session code nil {:compile-only? true}))]
+    {:repair/clean?     (boolean ok?)
+     :repair/thrown?    (boolean thrown?)
+     :repair/undeclared (set (undeclared-names warns))
+     :repair/warnings   (vec warns)}))
+
+(defn- trial-passes?
+  "A candidate trial PASSES when nothing threw, `from` is fixed, `to`
+   resolves, and every remaining warning is an undeclared-var for some
+   OTHER name (the chained-typo case) — any other warning class fails."
+  [{:repair/keys [thrown? undeclared warnings]} from to]
+  (and (not thrown?)
+       (not (contains? undeclared from))
+       (not (contains? undeclared to))
+       (every? #(re-find undeclared-var-re %) warnings)))
+
+(defn- pick-winner
+  "The SHARED nearest-tier / unique-winner pick
+   (`seon.repair.candidates/pick-winner`) wired to THIS worker's
+   compile-only [[trial]]. Resolves `{:seon.repair/winner …}` /
+   `{:seon.repair/ambiguous [..]}` / `{:seon.repair/none? true}` /
+   `{:seon.repair/budget? true}`. `over?` is the budget check."
+  [code from cands over?]
+  (candidates/pick-winner
+    {:seon.repair/cands cands
+     :seon.repair/over? over?
+     :seon.repair/passes?
+     (fn ^:async candidate-passes? [c]
+       (let [to (:seon.repair/to c)
+             t  (await (trial (candidates/substitute-symbol code from to)))]
+         (trial-passes? t from to)))}))
+
+(defn- suggestions-js
+  [cands]
+  (clj->js (mapv (fn [{:seon.repair/keys [to distance]}]
+                   {"sym" to "distance" distance})
+                 cands)))
+
+(defn- repair-fail-js
+  [base reason cands]
+  (doto base
+    (gobj-set "ok" false)
+    (gobj-set "reason" reason)
+    (gobj-set "suggestions" (suggestions-js cands))))
+
+(defn- ^:async repair
+  "`op:\"repair\"` — the detect → candidates → compile-only trials →
+   winner-eval pipeline over ONE form's source. Resolves the JSON-ready JS
+   result object; ambiguity or exhaustion is a hint, never a guess."
+  [{:keys [id code graph-names budget-ms]}]
+  (let [base   #js {:op "repair" :tier "repair"}
+        _      (when (some? id) (gobj-set base "id" id))
+        budget (or budget-ms default-repair-budget-ms)
+        start  (js/Date.now)
+        over?  #(> (- (js/Date.now) start) budget)]
+    (loop [code* code fixes []]
+      (let [{:repair/keys [clean? undeclared] :as t} (await (trial code*))]
+        (cond
+          ;; clean — nothing (left) to repair; a winner eval'd = fixes recorded
+          clean?
+          (if (empty? fixes)
+            (doto base (gobj-set "ok" true) (gobj-set "fixed_code" nil)
+                       (gobj-set "fixes" #js []))
+            (let [{ok? :seon.eval/ok? v :seon.eval/value err :seon/error}
+                  (await (eval-form code* nil))]   ; the REAL eval — defs land
+              (doto base
+                (gobj-set "ok" true)
+                (gobj-set "fixed_code" code*)
+                (gobj-set "fixes" (clj->js (mapv (fn [{:seon.repair/keys [from to]}]
+                                                   {"from" from "to" to})
+                                                 fixes))))
+              (if ok?
+                (gobj-set base "value" v)
+                (gobj-set base "eval_error"
+                          #js {:kind    (name (:seon.error/kind err))
+                               :message (:seon.error/message err)}))
+              base))
+
+          (over?)
+          (repair-fail-js base "budget" [])
+
+          ;; not an undeclared-var failure (or chained cap hit) — can't repair
+          (or (empty? undeclared) (>= (count fixes) max-repair-fixes))
+          (repair-fail-js base "no-candidate" [])
+
+          :else
+          (let [from  (first undeclared)
+                cands (candidates-for from graph-names)
+                pick  (await (pick-winner code* from cands over?))]
+            (cond
+              (:seon.repair/budget? pick)   (repair-fail-js base "budget" [])
+              (:seon.repair/ambiguous pick) (repair-fail-js base "ambiguous"
+                                                            (:seon.repair/ambiguous pick))
+              (:seon.repair/none? pick)     (repair-fail-js base "no-candidate" cands)
+              :else
+              (let [to (:seon.repair/to (:seon.repair/winner pick))]
+                (recur (candidates/substitute-symbol code* from to)
+                       (conj fixes {:seon.repair/from from
+                                    :seon.repair/to   to}))))))))))
 
 ;; ============================================================
 ;; Wire boundary — clj result → JSON-serializable JS object.
 ;; ============================================================
 
-(defn- gobj-set [o k v] (aset o k v) o)
-(defn- gobj-get [o k] (when (some? o) (aget o k)))
-
 (defn- result->js
   "Flatten an [[eval-form]] result + the echoed `op`/`id` to a
    `JSON.stringify`-able JS value. Keyword `:kind` → its NAME string."
-  [op id {:keys [ok value error]}]
+  [op id {ok? :seon.eval/ok? value :seon.eval/value error :seon/error}]
   (let [base #js {:op   op
                   :tier "eval"
-                  :ok   (boolean ok)}]
+                  :ok   (boolean ok?)}]
     (when (some? id) (gobj-set base "id" id))
-    (if ok
+    (if ok?
       (gobj-set base "value" value)
-      (gobj-set base "error" #js {:kind    (name (:kind error))
-                                  :message (:message error)}))
+      (gobj-set base "error" #js {:kind    (name (:seon.error/kind error))
+                                  :message (:seon.error/message error)}))
     base))
 
 (defn- parse-request
-  "Parse one stdin line into `{:op :id :code :budget-ms}`. Accepts a JSON
-   OBJECT `{op,id,code,budget-ms}` OR a bare JSON STRING (treated as
+  "Parse one stdin line into
+   `{:op :id :code :budget-ms :vars :graph-names}`. Accepts a JSON OBJECT
+   (`budget_ms`/`budget-ms` both honored; `vars` filters run-tests;
+   `graph_names` feeds repair candidates) OR a bare JSON STRING (treated as
    `{op:\"eval\", code:<string>}`, matching the parse-server framing)."
   [line]
   (let [parsed (try (.parse js/JSON line) (catch :default _ nil))]
@@ -349,21 +672,32 @@
       {:op "eval" :id nil :code parsed :budget-ms nil}
 
       (and (object? parsed) (some? parsed))
-      {:op        (or (gobj-get parsed "op") "eval")
-       :id        (gobj-get parsed "id")
-       :code      (or (gobj-get parsed "code") "")
-       :budget-ms (gobj-get parsed "budget-ms")}
+      {:op          (or (gobj-get parsed "op") "eval")
+       :id          (gobj-get parsed "id")
+       :code        (or (gobj-get parsed "code") "")
+       :budget-ms   (or (gobj-get parsed "budget_ms") (gobj-get parsed "budget-ms"))
+       :vars        (some-> (gobj-get parsed "vars") vec)
+       :graph-names (some-> (gobj-get parsed "graph_names") vec)}
 
       :else
       {:op "eval" :id nil :code "" :budget-ms nil})))
 
 (defn handle-line
-  "One request line → a Promise of one JSON result line (string)."
+  "One request line → a Promise of one JSON result line (string).
+
+   Ops: `eval` (the default — compile + bounded execute), `run-tests` (the
+   session's deftest vars), `repair` (the autofix pipeline). Every op is
+   machine-readable and never rejects."
   [line]
-  (let [{:keys [op id code budget-ms]} (parse-request line)]
-    (-> (eval-form code budget-ms)
-        (.then (fn [result]
-                 (.stringify js/JSON (result->js op id result)))))))
+  (let [{:keys [op id code budget-ms] :as req} (parse-request line)]
+    (case op
+      "run-tests" (-> (run-tests req)
+                      (.then (fn [out] (.stringify js/JSON out))))
+      "repair"    (-> (repair req)
+                      (.then (fn [out] (.stringify js/JSON out))))
+      (-> (eval-form code budget-ms)
+          (.then (fn [result]
+                   (.stringify js/JSON (result->js op id result))))))))
 
 ;; ============================================================
 ;; Subprocess entry.

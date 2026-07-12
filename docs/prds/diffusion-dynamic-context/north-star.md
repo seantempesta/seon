@@ -9,7 +9,7 @@ tags: [vision, diffusion, agent]
 > The dream, stated plainly: **every piece of an agent's context earns its place by
 > measured lift on generation correctness.** Skills, namespace code, context
 > sections — each is A/B-tested against the diffusion model and kept, refined, or
-> cut based on whether it makes generation *more correct*. And the verified canvas makes
+> cut based on whether it makes generation *more correct*. And the verified code-buffer makes
 > this LIVE: **the same oracle that gates context BEFORE generation steers and
 > TERMINATES it DURING** — renoising the spans it proves wrong between denoise
 > steps and stopping the moment the code is proven correct (parses + runs +
@@ -27,7 +27,7 @@ ordered GPU session is [[owner-gpu-runbook]].** This section keeps only the prov
 headline + what superseded the older handoff inventory.
 
 **PROVEN (fingerprint-verified, committed):** context lifts generation **0→100% on
-6/6 skills** (the deep finding: context overrides confident-wrong priors); the canvas control
+6/6 skills** (the deep finding: context overrides confident-wrong priors); the code-buffer control
 primitives (clamp, infill, spec-slot, denoise_to_step, resume_renoise); the
 **short-circuit closed loop** (denoise→K → local oracle → stop, ~67% steps saved);
 the **full validation ladder** (T0 parse → T1 structural lint → phase grammar → T2
@@ -104,7 +104,7 @@ correctness metric.
 | `repl` skill | EXPLAIN a parser error (prose) | 0/8 real-parser, **8/8 hallucinated JSON/XML** | 7/8 real `parse-forms`/parinfer, 0/8 hallucinated | KEEP — huge lift; works for PROSE/explanation too, not just code-gen |
 | `data-oriented-clojure` skill | design session-history storage (mindset) | 1/8 EAV, 0/8 namespaced, **8/8 hallucinated commercial-Seon SaaS** | 8/8 EAV + namespaced, 1/8 hallucinated | KEEP — huge lift; redirects the commercial-Seon prior to our EAV model |
 | `seon.*` required-API render (feat `844ec448`) | (context section, not a skill) | — | shipped, ~2.9k tok/turn | **LIFT UNMEASURED** — must A/B to justify the token cost or trim the cap |
-| `ui-live-tiles` skill | render a live todos tile | 0/8 real-render-ns, 0/8 namespaced, 7/8 hallucinated tile-map | 8/8 `:seon.render` + namespaced + `:malli/schema` | KEEP — huge lift |
+| `ui-canvas` skill | render a live todos tile | 0/8 real-render-ns, 0/8 namespaced, 7/8 hallucinated tile-map | 8/8 `:seon.render` + namespaced + `:malli/schema` | KEEP — huge lift |
 
 **▸ SWEEP COMPLETE — 6/6 skills, ALL ~0→100% structural.** The north-star's
 structural thesis is proven: context takes this model from ~0% correct (confidently
@@ -116,7 +116,7 @@ on-worker. Still open in the ledger: the required-API render's lift (must justif
 its ~2.9k tok or trim the cap) and the ladder's own measured lift on GPU
 ([[roadmap]] "The GPU-measurement path").
 
-### Capability — the verified-canvas eval-renoise loop (PRIMITIVES PROVEN, GPU-verified)
+### Capability — the verified code-buffer eval-renoise loop (PRIMITIVES PROVEN, GPU-verified)
 
 Round-trip test on the live worker (`33d2`, fingerprint-verified):
 - **`denoise_to_step` fires PRECISELY at K** (`denoise_steps_fired: 24`). The
@@ -179,7 +179,7 @@ plausible-but-wrong answer the model already "knows" — JSON/XML for "parser," 
 model's strong wrong priors** and redirecting them to Seon's actual reality. This is
 *why* dynamic context is load-bearing for THIS model: a small, capable model has
 confident defaults, and the right context is what reroutes them. (Implication for
-the verified canvas: the per-step parse/eval/renoise control signal is doing the same job
+the verified code-buffer: the per-step parse/eval/renoise control signal is doing the same job
 *during* generation that the skill does *before* it — overriding a wrong commit.)
 
 **Read of the data so far (3/3 skills, all ~0→100%):** without context the model knows
@@ -213,7 +213,7 @@ surprising metric against the raw sample before recording it — falsify, don't 
   CI-style, a change that drops generation quality fails the gate.
 - **Self-justifying context**: nothing renders into an agent's prompt that hasn't earned
   it on the measured-lift ledger (this is the reactive-context principle made empirical).
-- **Reliable capabilities**: the verified-canvas loop (denoise → parse/eval → renoise) and the
+- **Reliable capabilities**: the verified code-buffer loop (denoise → parse/eval → renoise) and the
   modes are gated on passing their kill-experiments, not on hope.
 - The agent **builds software in convergent, quality-gated passes** ([[architecture]],
   [[roadmap]]) — and we trust it because each rung is measured.
@@ -246,10 +246,10 @@ When iterating autonomously (e.g. overnight), each cycle:
 ### Work queue (durable, test-gated — reorder by measured value)
 
 - **Skill-lift sweep:** A/B each existing skill (`datahike`, `clojurescript`, `repl`,
-  `ui-live-tiles`, `data-oriented-clojure`) for generation lift; refine the laggards;
+  `ui-canvas`, `data-oriented-clojure`) for generation lift; refine the laggards;
   re-test. (`data-modeling` = done, 0→100%.) Build the (task, scorer) pair per skill.
 - **Close the eval-renoise loop:** `resume_renoise` (clamp good / re-noise garbled
-  spans) + tune K (~24-32, not 8 — the canvas is still noise early). Gate: the loop
+  spans) + tune K (~24-32, not 8 — the code-buffer is still noise early). Gate: the loop
   takes a `def`→`defn` / `length`→`count` miss to a correct form.
 - **Three-arm kill-gate** (the critique's #1): guided-infill vs naked prompt vs
   prompt+post-hoc-oracle, scored on FAITHFULNESS not just shape. Decides whether
@@ -264,8 +264,8 @@ When iterating autonomously (e.g. overnight), each cycle:
 
 - **Engine: stay on raw transformers INDEFINITELY as the control backend** (`pytorch-vs-vllm-roadmap`).
   vLLM's diffusion sampler is sealed, AND its custom-logits-processor API has the WRONG SHAPE —
-  `apply(logits: (num_requests, vocab_size))`, **no canvas/position axis**; the verified canvas needs
-  `(req, canvas_len, vocab)`. vLLM physically can't address canvas positions. And on A100 **BF16**
+  `apply(logits: (num_requests, vocab_size))`, **no code-buffer/position axis**; the verified code-buffer needs
+  `(req, code_buffer_len, vocab)`. vLLM physically can't address code-buffer positions. And on A100 **BF16**
   vLLM = **375 tok/s** vs our compiled **~450** — vLLM's win is **FP8+Hopper, not the engine**.
   vLLM = a SERVING-only second endpoint, gated on 3 triggers (thesis-cleared + serving-scale-bound +
   Hopper-FP8). Forking the sampler = PARTIAL (pure-Python+compiled, no CUDA → a compile-compatible
@@ -275,7 +275,7 @@ When iterating autonomously (e.g. overnight), each cycle:
   DiffusionGemma (`diffusion_gemma.py` causal encoder writes KV; APC on) → it gives the shared-skill
   prefix-cache win FOR FREE, but **serving-only (no control)**. So: **serving-without-control → vLLM APC**
   (likely nets ahead on our repeated-context workload despite 375<450 raw BF16); **control+caching (the
-  verified-canvas path) → CUSTOM KV caching on transformers** (the `kv-section-caching-design` work) — the only
+  verified code-buffer path) → CUSTOM KV caching on transformers** (the `kv-section-caching-design` work) — the only
   way to get both the caching win AND per-step control. **GREEN LIGHT (source-proven):** the prompt
   encoder is CAUSAL (incremental KV append, `modeling_diffusion_gemma.py:281`), so **exact full-prefix
   caching is feasible with ZERO accuracy loss** — the position-dependence worry doesn't apply to the
@@ -328,7 +328,7 @@ When iterating autonomously (e.g. overnight), each cycle:
   in-process with PyTorch → ~66s reload). IPC tax (~50-100µs) is noise vs the ~100ms hop killed. Shape:
   `op`-dispatched (`parse` / `eval` / `retrieve`-stub), identical JSON-line API across runtimes.
   **TIER SPLIT (resolved): parse-tier → BABASHKA** — parse-forms is purely STRUCTURAL (rewrite-clj, no
-  semantics) so bb parses CLJS-flavored canvas forms BIT-IDENTICALLY to the pod (zero fidelity loss),
+  semantics) so bb parses CLJS-flavored code-buffer forms BIT-IDENTICALLY to the pod (zero fidelity loss),
   simplest deploy (native binary + `.cljc`, no build, ~0.1ms warm); **bb SUPERSEDES the Node
   `:worker-validator` for the parse-only hot loop**. **eval-tier → Node/cljs.js** self-host (the only
   true-CLJS eval; bb-SCI/GraalVM eval Clojure → false-negatives on `^:async`/interop). Python `Oracle`
@@ -346,7 +346,7 @@ When iterating autonomously (e.g. overnight), each cycle:
 
 ## Pointers
 
-- [[architecture]] — the verified-canvas system + the modes this serves.
+- [[architecture]] — the verified code-buffer system + the modes this serves.
 - [[roadmap]] — the kill-gate-first build path (this loop executes its NEXT items).
 - [[grounding]] — every mechanism cited to `reference-code/`.
 - The proven A/B: the `data-modeling` skill, 0→100% (the loop's existence proof).

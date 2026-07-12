@@ -5,7 +5,7 @@
    `seon.gym.driver/measure-context!`), WITHOUT spending on the LLM, then
    prints a greppable table. The A/B arm re-measures a memory + a planning
    scenario under `:default` (full) vs `:minimal` vs a lean
-   manifest that drops `:live-tile` but keeps `:namespaces`.
+   manifest that drops `:canvas` but keeps `:namespaces`.
 
    GATED: the heavy sweep runs ONLY under `SEON_GYM_MEASURE=1` so the
    normal `bin/test-cljs` suite stays fast (unset = a one-assertion
@@ -85,9 +85,9 @@
                          (.then (run "minimal"
                                      {:seon.gym.config/profile :minimal})
                                 (fn [b]
-                                  (.then (run "lean-no-live-tile"
+                                  (.then (run "lean-no-canvas"
                                               {:seon.gym.config/path
-                                               "test/seon/gym/configs/lean-no-live-tile.edn"})
+                                               "test/seon/gym/configs/lean-no-canvas.edn"})
                                          (fn [c]
                                            {:name name :kind kind :arms [a b c]}))))))))]
         (-> (measure-seq all-scenarios measure-default)
@@ -106,7 +106,7 @@
                      (doseq [{:keys [name kind arms]} ab]
                        (let [byl (into {} (map (juxt :label :total)) arms)
                              d (get byl "default") m (get byl "minimal")
-                             l (get byl "lean-no-live-tile")]
+                             l (get byl "lean-no-canvas")]
                          (println "SEON-GYM-MEASURE-TABLE" (pad name 38) kind
                                   "default=" (pad d 7) "minimal=" (pad m 7)
                                   "lean=" (pad l 7)

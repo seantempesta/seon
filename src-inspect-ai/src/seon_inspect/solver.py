@@ -1,79 +1,180 @@
-"""Seon-pod-as-inspect-solver — the canonical /solve bridge (Option B).
+"""Seon-pod-as-inspect-solver — the canonical `POST /agents/run` bridge.
 
-Promoted from the Phase-0 spike (docs/prds/agent-fsm/research/inspect-bridge-
-spike/seon_solver.py — kept there as history; THIS module is the maintained
-home). Mechanism, unchanged and proven: inspect supplies dataset + host-side
-scorer; the Seon pod agent is the SOLVER, driven through the productionized
-`POST /solve` door in `seon.web.serve`. The pod's OWN FSM runs every turn —
-inspect never caps or manages turns. Deliberately NOT the model-proxy /
-sandbox_agent_bridge path (that routes the agent's LLM calls through inspect
-and replaces Seon's loop — rejected; see the spike doc §1).
+Mechanism (Option B, unchanged in shape since the Phase-0 spike): inspect
+supplies dataset + host-side scorer; the Seon pod agent does the work, driven
+through the pod door `POST /agents/run` in `seon.web.serve` — start-or-reuse
+an agent IN THE POD'S OWN CLUSTER, deliver the input via the real wake path,
+run the agent's OWN FSM to idle. Inspect never caps or manages turns.
+Deliberately NOT the model-proxy / sandbox_agent_bridge path (that routes the
+agent's LLM calls through inspect and replaces Seon's loop — rejected; see the
+spike doc §1). Isolation is a whole CLUSTER (one pod per cluster); per-sample
+isolation = one ephemeral cluster per sample (`seon_cluster_solver`), while
+`seon_pod_solver` drives a LONG-LIVED cluster's pod at a static URL (acme).
 
-The pod records honestly under the clock: `/solve` returns `timed_out` +
+The pod records honestly under the clock: the door returns `timed_out` +
 `closed_reason "timeout"` on a clock cut-off (never a stale :completed/greeting
-reply), and `timeout_honesty()` is the scorer that asserts exactly that.
+reply), and `timeout_honesty()` is the scorer that asserts exactly that. A
+refusal (unknown `agent_id`, failed mint) is HTTP 422 `{"error": …}` — raised
+as `AgentRunRefused`, a distinct class: a harness/wiring defect, never a model
+score.
 """
 
 from __future__ import annotations
 
 import json
-import os
+import urllib.error
 import urllib.request
 
 from inspect_ai.scorer import Score, Scorer, Target, accuracy, scorer
 from inspect_ai.solver import Generate, TaskState, solver
 
-POD_SOLVE_URL = os.environ.get("SEON_SOLVE_URL", "http://127.0.0.1:7890/solve")
-# Wall-clock budget the pod may run its own multi-turn loop to idle.
-SOLVE_TIMEOUT_S = int(os.environ.get("SEON_SOLVE_TIMEOUT_S", "300"))
+from seon_inspect import config
 
 
-def pod_solve(prompt: str, timeout_ms: int) -> dict:
-    """One request/response call to the pod's /solve door.
+class AgentRunRefused(Exception):
+    """The pod REFUSED the run (HTTP 422: unknown agent_id / failed mint).
 
-    POST {input, timeout_ms} → the pod mints an ISOLATED scratch agent (fresh
-    :memory conn per request — serve.cljs `solve-once!`), injects the input as
-    a real user message, awaits idle, returns the reply + honest metadata
-    (turns / evals / closed_reason / timed_out). Serial-only for benchmarks:
-    run with `--max-samples 1` (the async wake path reads the root conn).
-    """
-    body = json.dumps({"input": prompt, "timeout_ms": timeout_ms}).encode()
+    Distinct from a timeout or transport error: the sample never ran, so the
+    caller must treat it as harness wiring to fix, not a model result."""
+
+
+def pod_run(prompt: str, timeout_ms: int, url: str | None = None,
+            agent_id: str | None = None) -> dict:
+    """One request/response call to a cluster pod's /agents/run door.
+
+    POST {input, timeout_ms[, agent_id]} → the pod starts (or, with
+    `agent_id`, REUSES — it survives pod restarts, the cluster store is
+    durable) an agent in its own cluster, injects the input as a real user
+    message, awaits idle, returns the reply + honest metadata (agent_id /
+    turns / evals / closed_reason / timed_out), scoped to THIS request's
+    window. SERIAL-ONLY per pod (config.POD_MAX_SAMPLES = 1 by construction:
+    one cluster = one sample's isolation unit); parallelism = more clusters,
+    one URL each. HTTP 422 → AgentRunRefused."""
+    payload: dict = {"input": prompt, "timeout_ms": timeout_ms}
+    if agent_id is not None:
+        payload["agent_id"] = agent_id
     req = urllib.request.Request(
-        POD_SOLVE_URL, data=body, headers={"Content-Type": "application/json"}
+        config.cluster_url(url), data=json.dumps(payload).encode(),
+        headers={"Content-Type": "application/json"},
     )
-    # HTTP read budget stays generous — the POD bails on ITS timeout_ms.
-    with urllib.request.urlopen(req, timeout=SOLVE_TIMEOUT_S + 30) as resp:
-        return json.loads(resp.read().decode())
+    try:
+        # HTTP read budget = pod budget + margin — the POD bails on ITS timeout_ms.
+        with urllib.request.urlopen(
+            req, timeout=timeout_ms / 1000 + config.HTTP_MARGIN_S
+        ) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        if e.code == 422:
+            body = e.read().decode(errors="replace")
+            try:
+                msg = json.loads(body).get("error", body)
+            except json.JSONDecodeError:
+                msg = body
+            raise AgentRunRefused(msg) from None
+        raise
+
+
+def _resolve_timeout_ms(state: TaskState, timeout_s: int | None) -> int:
+    """Per-sample metadata["timeout_ms"] > timeout_s arg > config default."""
+    default_ms = (timeout_s or config.DEFAULT_RUN_TIMEOUT_S) * 1000
+    return int((state.metadata or {}).get("timeout_ms", default_ms))
+
+
+def _prompt_text(state: TaskState) -> str:
+    """The prompt the pod agent gets: the TEMPLATED user prompt.
+
+    A bench's answer-format contract (e.g. gsm8k's "ANSWER: $ANSWER") is
+    applied by its prompt_template solver onto `state.user_prompt` — the raw
+    `input_text` never carries it. `catalog.swap_generate` keeps those
+    template solvers ahead of us; reading user_prompt here delivers their
+    work. With no template solvers, user_prompt IS the input."""
+    try:
+        return state.user_prompt.text
+    except Exception:  # non-user-message inputs (defensive; case-1 is text)
+        return state.input_text
+
+
+def _record_result(state: TaskState, result: dict) -> TaskState:
+    """Set the completion + the pod-side honesty metadata on the state."""
+    state.output.completion = result.get("reply", "")
+    state.metadata = state.metadata or {}
+    state.metadata.update({
+        "pod_agent_id": result.get("agent_id"),
+        "pod_turns": result.get("turns"),
+        "pod_closed_reason": result.get("closed_reason"),
+        "pod_evals": result.get("evals"),
+        "pod_timed_out": result.get("timed_out", False),
+        "pod_elapsed_ms": result.get("elapsed_ms"),
+        # Runtime-derived model provenance (2026-07-04): the door COMPUTES
+        # model_config at response time via the pod's pure config resolver
+        # (seon.ai/resolved-config: agent overrides → config row → shipped
+        # defaults) — derive-don't-store; always present on a run response.
+        # scorecard.model_provenance_from_run maps it onto ledger-row fields.
+        "pod_model_config": result.get("model_config"),
+    })
+    if result.get("evidence_blobs") is not None:
+        state.metadata["pod_evidence_blobs"] = result["evidence_blobs"]
+    return state
 
 
 @solver
-def seon_pod_solver():
-    """Drive the Seon pod agent as the solver for one sample.
+def seon_pod_solver(cluster_url: str | None = None,
+                    timeout_s: int | None = None):
+    """Drive ONE long-lived cluster's pod as the solver (static URL mode).
 
-    Sets state.output.completion to the pod agent's final reply and records the
-    pod-side metadata (turns / closed_reason / evals / timed_out / elapsed) so
-    the eval log proves the multi-turn loop ran AND recorded honestly. A sample
-    may set metadata["timeout_ms"] to force a short pod-side budget.
-    """
+    `cluster_url` (or SEON_CLUSTER_URL) selects the cluster's pod door —
+    e.g. acme. Every sample lands on the SAME cluster serially. Records the
+    pod-side metadata (turns / closed_reason / evals / timed_out / elapsed)
+    so the eval log proves the multi-turn loop ran AND recorded honestly."""
 
     async def solve(state: TaskState, generate: Generate) -> TaskState:
         import anyio
 
-        prompt = state.input_text
-        timeout_ms = int((state.metadata or {}).get("timeout_ms",
-                                                    SOLVE_TIMEOUT_S * 1000))
-        result = await anyio.to_thread.run_sync(pod_solve, prompt, timeout_ms)
-        state.output.completion = result.get("reply", "")
-        state.metadata = state.metadata or {}
-        state.metadata.update({
-            "pod_agent_id": result.get("agent_id"),
-            "pod_turns": result.get("turns"),
-            "pod_closed_reason": result.get("closed_reason"),
-            "pod_evals": result.get("evals"),
-            "pod_timed_out": result.get("timed_out", False),
-            "pod_elapsed_ms": result.get("elapsed_ms"),
-        })
-        return state
+        result = await anyio.to_thread.run_sync(
+            pod_run, _prompt_text(state),
+            _resolve_timeout_ms(state, timeout_s), cluster_url)
+        return _record_result(state, result)
+
+    return solve
+
+
+@solver
+def seon_cluster_solver(timeout_s: int | None = None,
+                        cluster_prefix: str = "bench",
+                        evidence_root=None):
+    """One EPHEMERAL cluster per sample: create → drive → destroy.
+
+    True per-sample isolation by construction — each sample gets a fresh
+    cluster (own db, own pod, own blobs), destroyed afterwards even on
+    failure. `evidence_root` (a Path; evidence-retention fix 2026-07-04)
+    copies each cluster's blob store (rendered prompts + verbatim replies)
+    to `evidence_root/e<epoch>/<sample_id>/blobs` BEFORE destroy — a wrong
+    reply stays attributable after the cluster is gone. Serial per solver
+    call (bench-cluster-N dispatches N samples concurrently). Budget per
+    sample = cluster boot (config.CLUSTER_BOOT_BUDGET_S) + the row timeout."""
+
+    async def solve(state: TaskState, generate: Generate) -> TaskState:
+        import anyio
+
+        from seon_inspect.cluster import ephemeral_cluster
+
+        timeout_ms = _resolve_timeout_ms(state, timeout_s)
+
+        def drive() -> dict:
+            from seon_inspect.cluster import bench_cluster_name
+            with ephemeral_cluster(bench_cluster_name(cluster_prefix)) as c:
+                out = pod_run(_prompt_text(state), timeout_ms, c.url)
+                if evidence_root is not None:
+                    from seon_inspect.tool_rows import preserve_cluster_evidence
+                    epoch = getattr(state, "epoch", 1)
+                    dest = (evidence_root / f"e{epoch}"
+                            / str(state.sample_id))
+                    out["evidence_blobs"] = preserve_cluster_evidence(
+                        c.name, dest)
+                return out
+
+        result = await anyio.to_thread.run_sync(drive)
+        return _record_result(state, result)
 
     return solve
 

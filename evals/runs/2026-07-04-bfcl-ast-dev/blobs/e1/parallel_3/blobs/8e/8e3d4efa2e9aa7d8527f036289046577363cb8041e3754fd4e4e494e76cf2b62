@@ -1,0 +1,3 @@
+I see the issue — the bare JSON array was treated as prose and dropped, and the second attempt hit a read error. I need to wrap it in a form that sends it as a message. The user's request says "ONLY a JSON array" — so I'll send exactly that.
+
+(message/user "[{\"name\": \"protein_info.get_sequence_and_3D\", \"arguments\": {\"protein_name\": \"human HbA1c\", \"model_3d\": true}}, {\"name\": \"protein_info.get_sequence_and_3D\", \"arguments\": {\"protein_name\": \"human normal hemoglobin\", \"model_3d\": true}}, {\"name\": \"protein_info.get_sequence_and_3D\", \"arguments\": {\"protein_name\": \"rat hemoglobin\", \"model_3d\": true}}]")

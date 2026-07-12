@@ -1,0 +1,3 @@
+(court_records.search_cases {:location "New York" :query "Theft" :year 2021 :limit 5})
+(court_records.search_cases {:location "San Francisco" :query "Theft" :year 2021 :limit 5})
+(briefs.display_cases {:case_id ["<case_ids_from_results>"]})

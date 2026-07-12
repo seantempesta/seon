@@ -22,9 +22,15 @@
   (let [{snap :seon.server.registry/snapshot}
         (server.session/snapshot-registry {})]
     (try
-      ;; Start from a clean slate so prior test pollution can't leak in.
+      ;; Start from a clean slate so prior test pollution can't leak in —
+      ;; empty registry + agents, but the LIVE hooks kept (restoring an
+      ;; empty hook vector would strand the JVM's ::raw-broadcast/::reactive
+      ;; hooks for the duration of the test).
       (server.session/restore-registry!
-       {:seon.server.registry/snapshot {:registry {} :agents {}}})
+       {:seon.server.registry/snapshot
+        (assoc snap
+               :seon.server.registry/registry {}
+               :seon.server.registry/agents {})})
       (t)
       (finally
         (server.session/restore-registry!

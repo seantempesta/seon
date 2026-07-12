@@ -228,9 +228,9 @@ tests, history, issues. `(seon/persist!)` graduates from `:live` to
   The Datalevin schema for form storage (`:form/id`, `:form/namespace`,
   `:form/type`, `:form/name`, `:form/source`, `:form/agent-id`,
   `:form/version`, `:form/created-at`) is the persistence layer M6 needs.
-- **Current `seon` repo / `main`:** `src/seon/repl/graduate.clj` —
-  *literally* the M6 graduation step. This is the persisted name of what
-  the spec calls `(seon/persist!)`.
+- **Historical `seon` repo / `main`:** `src/seon/repl/graduate.clj` —
+  was the standalone M6 graduation-step prototype. It was removed after
+  the active CLJS pod path superseded it.
 - **Current `seon` repo / `main`:** `src/seon/repl/context.clj` — the
   `*ctx*` container for REPL session state.
 - **Current `seon` repo / `main` (CLJS pod):** `src/seon/eval.cljs`

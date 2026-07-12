@@ -1,0 +1,25 @@
+# Baseline-arm override config for `mini-extra swebench`, merged OVER the
+# builtin benchmarks/swebench.yaml (tool-calling bash surface). Matches the
+# Seon arm's wire-level model EXACTLY: provider deepseek over its
+# OpenAI-compatible /v1 root, model deepseek-v4-pro (the pod's shipped
+# default — src/seon/ai.cljs:225), temperature 0.7, max_tokens 4096,
+# thinking DISABLED via the {"thinking":{"type":"disabled"}} struct the pod
+# sends (src/seon/ai/openai_compat.cljs:216). API key comes from the env
+# (OPENAI_API_KEY set to $DEEPSEEK_API_KEY at launch) — never in this file.
+#
+# cost_tracking: ignore_errors — deepseek-v4-pro is not in litellm's price
+# registry, so the default cost tracker would RAISE; the scaffold's step_limit
+# (250, from the builtin config) is the run backstop. Nothing else about the
+# mini-swe scaffold is altered.
+model:
+  model_name: "openai/deepseek-v4-pro"
+  cost_tracking: "ignore_errors"
+  model_kwargs:
+    api_base: "https://api.deepseek.com/v1"
+    temperature: 0.7
+    max_tokens: 4096
+    drop_params: true
+    parallel_tool_calls: true
+    extra_body:
+      thinking:
+        type: "disabled"

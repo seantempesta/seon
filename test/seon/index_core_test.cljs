@@ -47,6 +47,16 @@
 ;; snapshot per ns run via these delays (see freeze-builders! below).
 (def tests-tx (delay (client/index-tests)))
 
+(defn- transact-as
+  "Transact `tx-data` on `conn` under an unscoped `origin` tx-context.
+   The transact boundary STAMPS `:seon.db/origin` from the ambient scope
+   (caller `:tx-meta` origin is never consulted), so tests establish
+   provenance the same way the core writers do — via `with-tx-context`
+   outside any agent scope."
+  [conn origin tx-data]
+  (db/with-tx-context {:seon.db/origin origin}
+    (fn [] (db/transact! conn tx-data))))
+
 ;;; -------------------------------------------------------------------------
 ;;; HERMETICITY (issue #69 — same env-coupling class as the search_test fix
 ;;; b5c3a3a4).
@@ -490,13 +500,12 @@
           (fn [conn]
             (-> (client/core-index-tx conn)
                 (.then (fn [first-tx]
-                         (db/transact! conn first-tx
-                                       {:seon.db/origin :core-seed})))
+                         (transact-as conn :core-seed first-tx)))
                 ;; GHOSTS: core-seeded rows whose ns/fn/schema no
                 ;; longer exists in the booting code (deleted/renamed).
                 (.then (fn [_]
-                         (db/transact!
-                           conn
+                         (transact-as
+                           conn :core-seed
                            [{:seon.ns/name   :seon.ghost.deleted
                              :seon.ns/source "(ns seon.ghost.deleted)"}
                             {:seon.fn/sym    "seon.ghost.deleted/gone"
@@ -509,16 +518,14 @@
                             ;; `(…)`-call discriminator even though the
                             ;; origin here claims core-seed.
                             {:seon.schema/key    :my.agentish/teed
-                             :seon.schema/source "(seon.schema/register! :my.agentish/teed :string)"}]
-                           {:seon.db/origin :core-seed})))
+                             :seon.schema/source "(seon.schema/register! :my.agentish/teed :string)"}])))
                 ;; AGENT-AUTHORED row with the IDENTICAL shape as the
                 ;; ghost ns — different (non-core) provenance.
                 (.then (fn [_]
-                         (db/transact!
-                           conn
+                         (transact-as
+                           conn :agent
                            [{:seon.ns/name   :my.todo-app
-                             :seon.ns/source "(ns my.todo-app)"}]
-                           {:seon.db/origin :agent})))
+                             :seon.ns/source "(ns my.todo-app)"}])))
                 (.then (fn [_] (client/prune-core-ghosts! conn)))
                 (.then
                   (fn [{pruned :seon.client/pruned}]
@@ -625,8 +632,7 @@
           (fn [conn]
             (-> (client/core-index-tx conn)
                 (.then (fn [first-tx]
-                         (db/transact! conn first-tx
-                                       {:seon.db/origin :core-seed})))
+                         (transact-as conn :core-seed first-tx)))
                 ;; (a) Regress the stored spec in place (identity upsert on
                 ;; sym; the row's :source datom keeps its :core-seed tx).
                 ;; (c) Forge a stale spec onto an UNSPECCED core fn (found
@@ -635,23 +641,20 @@
                 ;; (b) Replace one core row wholesale under an AGENT origin
                 ;; (retractEntity kills the :core-seed source datom).
                 (.then (fn [_]
-                         (db/transact! conn
-                                       [{:seon.fn/sym  target
-                                         :seon.fn/spec stale}]
-                                       {:seon.db/origin :core-seed})))
+                         (transact-as conn :core-seed
+                                      [{:seon.fn/sym  target
+                                        :seon.fn/spec stale}])))
                 (.then (fn [_]
-                         (db/transact! conn
-                                       [[:db/retractEntity [:seon.fn/sym guarded]]]
-                                       {:seon.db/origin :core-seed})))
+                         (transact-as conn :core-seed
+                                      [[:db/retractEntity [:seon.fn/sym guarded]]])))
                 (.then (fn [_]
-                         (db/transact! conn
-                                       [{:seon.fn/sym      guarded
-                                         :seon.fn/ns       [:seon.ns/name :seon.db]
-                                         :seon.fn/source   "(defn transact! [] :agent-owned)"
-                                         :seon.fn/arglists "([])"
-                                         :seon.fn/doc      ""
-                                         :seon.fn/private? false}]
-                                       {:seon.db/origin :agent})))
+                         (transact-as conn :agent
+                                      [{:seon.fn/sym      guarded
+                                        :seon.fn/ns       [:seon.ns/name :seon.db]
+                                        :seon.fn/source   "(defn transact! [] :agent-owned)"
+                                        :seon.fn/arglists "([])"
+                                        :seon.fn/doc      ""
+                                        :seon.fn/private? false}])))
                 (.then (fn [_] (client/core-index-tx conn)))
                 (.then
                   (fn [tx]
@@ -674,10 +677,9 @@
                                             (first (remove #(or (contains? % :seon.fn/spec)
                                                                 (nil? (:seon.fn/sym %)))
                                                            @core-tx)))]
-                        (-> (db/transact! conn
-                                          [{:seon.fn/sym  unspecced
-                                            :seon.fn/spec stale}]
-                                          {:seon.db/origin :core-seed})
+                        (-> (transact-as conn :core-seed
+                                         [{:seon.fn/sym  unspecced
+                                           :seon.fn/spec stale}])
                             (.then (fn [_] (client/core-index-tx conn)))
                             (.then
                               (fn [tx2]

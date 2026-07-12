@@ -4,7 +4,7 @@
 
    The route vector is `(into (db->routes db) (static-supplement h))`:
    [[db->routes]] is a PURE projection of the seeded `:seon.route/*` datoms
-   (the six core routes — `/`, `/world`, `/world/feed`, `/agent/{id}`,
+   (the core routes — `/`, `/agents`, `/agents/feed`, `/agent/{id}`,
    `/agent/{id}/feed`, `/agent/{id}/call`), and the static supplement carries
    the routes NOT yet seeded as datoms (static assets, the secondary POST
    doors, `/sse`, the flat `/call`). The router is cached in `!ring-handler`
@@ -31,7 +31,7 @@
    `req` (method, uri sans query, query-string, headers) AND injects the raw
    node `req`/`res` under `:seon.http/node-req` / `:seon.http/node-res` so the
    streaming + static handlers can reach the socket. A handler that takes over
-   the socket itself (the SSE open, a static file pipe, the gzip /world feed,
+   the socket itself (the SSE open, a static file pipe, the gzip /agent-view feed,
    a /call JSON write) returns the **hijack sentinel** `{:seon.http/hijacked
    true}`; [[handle-request]] sees it and writes NOTHING (the handler already
    owns the stream). A handler that returns a plain Ring response map is
@@ -53,9 +53,10 @@
     [seon.eval :as seval]
     [seon.log :as log]
     ;; Build-inclusion only (no alias): db->routes resolves datastar's core
-    ;; handler SYMBOLS (`handle!`, `serve-agent-page!`, `open-agent-feed!`) at
-    ;; request time via eval/lookup-value, so the ns must be compiled into the
-    ;; build. router is its sole requirer.
+    ;; handler SYMBOLS (`serve-root!`, `serve-agents-page!`, `open-roster-feed!`,
+    ;; `serve-agent-page!`, `open-agent-feed!`) at request time via
+    ;; eval/lookup-value, so the ns must be compiled into the build. router is
+    ;; its sole requirer.
     [seon.web.datastar]
     [seon.web.debug :as debug]
     [seon.web.reactive.call :as call]
@@ -246,13 +247,13 @@
    (serve's handlers) + the directly-required `call` leaf handler."
   [h]
   (let [{::keys [sse static chat stop resume clear log create-agent
-                 complete solve]} h]
+                 complete agent-run]} h]
     [["/css/{*path}" {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
      ["/js/{*path}"  {:get {:handler (fn [r] (static (node-res r) (:uri r)) hijacked)}}]
      ["/sse"         {:get {:handler (fn [r] (sse (node-req r) (node-res r)) hijacked)}}]
 
      ;; Operator dev tools (seon.web.debug) — the datom browser + the
-     ;; per-agent two-pane debug inspector. Plain leaf handlers (no serve
+     ;; per-agent two-pane debug view. Plain leaf handlers (no serve
      ;; state), required directly; distinct paths from the seeded
      ;; `/agent/{id}` family, so no reitit conflict.
      ["/data"     {:get {:handler (fn [r] (debug/data-page! (node-req r) (node-res r)) hijacked)}}]
@@ -270,10 +271,11 @@
      ["/clear"       {:post {:middleware [:seon.route/same-origin] :handler (post-handler clear)}}]
      ["/log"         {:post {:middleware [:seon.route/same-origin] :handler (post-handler log)}}]
      ["/agents/new"  {:post {:middleware [:seon.route/same-origin] :handler (post-handler create-agent)}}]
-     ;; The external-eval-harness boundary door (inspect-ai): mint a fresh
-     ;; scratch agent, run its OWN FSM to idle on the injected input, return
-     ;; the final reply + metadata as JSON. same-origin-gated like the others.
-     ["/solve"       {:post {:middleware [:seon.route/same-origin] :handler (post-handler solve)}}]
+     ;; The one-shot composition door: start-or-reuse an agent in THE pod's
+     ;; own cluster, deliver the input via the real wake path, run its OWN
+     ;; FSM to idle, return the truthful reply + turn/eval metadata as JSON.
+     ;; same-origin-gated like the others.
+     ["/agents/run"  {:post {:middleware [:seon.route/same-origin] :handler (post-handler agent-run)}}]
      ;; The flat `/call` (back-compat this unit) hands the raw (req,res) to the
      ;; unchanged capability gate; the per-agent `/agent/{id}/call` is the
      ;; SEEDED core door (db->routes) → the same gate.

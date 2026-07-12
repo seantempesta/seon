@@ -69,7 +69,7 @@ work.
 
 For each persisted `:seon.ns`, reconstitute one source string from
 DB (ns form + all schemas + all defs in `:created-at` order).
-Topo-sort over `:seon.ns/requires`; bulk-eval each ns-string as a
+Topo-sort over `:seon.ns/require-edges`; bulk-eval each ns-string as a
 single file. The analyzer handles intra-file ordering itself.
 Same model `cider.nrepl.middleware.load-file` uses when you hit
 ctrl+enter in an editor.

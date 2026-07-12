@@ -30,7 +30,7 @@
     [seon.agent :as agent]
     [seon.client :as client]
     [seon.db :as db]
-    [seon.render.live-tile :as tile]
+    [seon.render.canvas :as canvas]
     [seon.repl.internal :as repl-internal]))
 
 ;; ---------------------------------------------------------------------------
@@ -167,7 +167,7 @@
                   hiccup (:seon.render/hiccup res)]
               (is (vector? hiccup) ":html form is a hiccup vector")
               (is (= :div (first hiccup)) "outer container is a :div")
-              (is (tile/valid-hiccup? hiccup) "passes valid-hiccup?")
+              (is (canvas/valid-hiccup? hiccup) "passes valid-hiccup?")
               (is (str/includes? (pr-str hiccup) "test.parent/greet")
                   "fn sym appears somewhere in the hiccup"))))
         (.then (fn [_] (done)))
@@ -399,13 +399,13 @@
                   ;; the parser the agent loop runs over its OWN reply — the
                   ;; exact path that re-executed echoed render text in #84.
                   forms (->> (repl-internal/parse-forms text)
-                             (filter #(= :form (:kind %))))]
+                             (filter #(= :form (:seon.repl/kind %))))]
               (is (str/includes? text "(test.parent/greet [x])")
                   "the fn header arglist is still SHOWN to the agent")
-              (is (not-any? #(str/includes? (str (:source %)) "(test.parent/greet [x])")
+              (is (not-any? #(str/includes? (str (:seon.repl/source %)) "(test.parent/greet [x])")
                             forms)
                   "the header arglist is a `;` comment — never a parsed callable form")
-              (is (some #(str/includes? (str (:source %)) "(defn greet")
+              (is (some #(str/includes? (str (:seon.repl/source %)) "(defn greet")
                         forms)
                   "the real (defn) source IS a form — re-eval redefines, harmless"))))
         (.then (fn [_] (done)))

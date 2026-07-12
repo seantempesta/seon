@@ -68,9 +68,9 @@
    the ns doc for the one-transact append shape); re-run this whenever
    you want the current set. Returns [] when none exist yet.
 
-   ;; read the current set (db injected automatically):
+   ; read the current set (db injected automatically):
    (my.kb.shared/instructions)
-   ;; => [\"Always store provenance (:my.kb/source-path) with findings.\"]"
+   ; returns «vector: [\"Always store provenance (:my.kb/source-path) with findings.\"]»"
   {:malli/schema [:function
                   [:=> [:cat] [:vector ::text]]
                   [:=> [:catn [::db :seon.db/db]] [:vector ::text]]]}
@@ -98,7 +98,7 @@
    append a row and it appears next turn; retract it and the line is gone
    — nothing stored that needs clearing. Empty string when none exist, so
    the whole section vanishes until the first instruction lands.
-   Symbol-wired into the composer (`seon.config/default-ctx-blocks`) as
+   Symbol-wired into the composer (`config manifest`) as
    `'my.kb.shared/instructions-block`."
   {:malli/schema [:=> [:cat :map] :string]}
   [{:seon.db/keys [db]}]

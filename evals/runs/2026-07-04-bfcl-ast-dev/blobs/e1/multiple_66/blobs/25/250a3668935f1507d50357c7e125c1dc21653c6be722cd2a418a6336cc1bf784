@@ -1,0 +1,7 @@
+The request asks for traffic from Las Vegas to Los Angeles this weekend. The function `traffic_estimate` matches — it takes `start_location`, `end_location`, and an optional `time_period`. The request specifies "this weekend", so I need the optional `time_period` parameter set to "weekend".
+
+The answer must be ONLY a JSON array with exactly one call object.
+
+```json
+[{"name": "traffic_estimate", "arguments": {"start_location": "Las Vegas", "end_location": "Los Angeles", "time_period": "weekend"}}]
+```

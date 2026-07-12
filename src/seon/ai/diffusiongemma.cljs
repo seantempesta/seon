@@ -1,6 +1,7 @@
 (ns seon.ai.diffusiongemma
   "DiffusionGemma CONTROL backend — the transformers RunPod worker that
-   keeps the per-step LogitsProcessor/accept_canvas seam (clamp / infill /
+   keeps the per-step LogitsProcessor/accept_canvas seam (the FROZEN cuda
+   worker's identifier — its code-buffer accept hook) (clamp / infill /
    eval-renoise). ^:async — returns Promises.
 
    TRANSPORT is a RunPod ASYNC JOB, not one round-trip: SUBMIT a job to
@@ -40,6 +41,7 @@
             [seon.ai :as ai]
             [seon.config :as config]
             [seon.error :as error]
+            [seon.platform :as platform]
             [seon.schema :as schema]))
 
 ;; ============================================================
@@ -48,10 +50,11 @@
 ;; vocabulary (text, error envelope) lives in seon.ai.
 ;; ============================================================
 
-(schema/register! ::mode [:enum :generate :clamp-smoke :infill :introspect :probe])
+(schema/register! ::mode [:enum :generate :guided :clamp-smoke :infill :introspect :probe
+                          :fill :rank :step])
 (schema/register! ::prompt :string)
 (schema/register! ::max-new-tokens :int)
-(schema/register! ::trace [:enum :canvas :entropy])
+(schema/register! ::trace [:enum :code-buffer :entropy])
 ;; denoise tuning — the worker's _gen_overrides. entropy_bound is the
 ;; commit-rate dial; all optional, absent = the worker's gen-config defaults.
 (schema/register! ::entropy-bound :double)
@@ -60,13 +63,47 @@
 (schema/register! ::t-max :double)
 (schema/register! ::stability-threshold :int)
 (schema/register! ::confidence-threshold :double)
-;; clamp_smoke / infill inputs — third-party-shaped (the worker's canvas
+;; clamp_smoke / infill inputs — third-party-shaped (the worker's code-buffer
 ;; positions), so a :map boundary.
-(schema/register! ::clamp-text [:map-of :string :string])  ; {canvas-pos → token-string}
+(schema/register! ::clamp-text [:map-of :string :string])  ; {code-buffer-pos → token-string}
 (schema/register! ::prefix :string)
 (schema/register! ::suffix :string)
 (schema/register! ::max-hole-tokens :int)
 (schema/register! ::expect-contains :string)
+;; guided-mode inputs (the worker's guided loop — round-denoise → oracle
+;; check → repair → lock-and-execute → hint-scramble → in-loop checks).
+;; JSON-ready third-party shapes: strings/numbers/bools/arrays only, the
+;; checks entries string-keyed ({"call" …, "expect" …}) — NO kebab maps.
+(schema/register! ::phase :string)                       ; grammar phase, e.g. "schemas"|"tests"|"functions"
+(schema/register! ::hints :boolean)                      ; clamp `; fix:` hint comments on scrambled spans
+(schema/register! ::repair :boolean)                     ; auto-repair provable near-misses ($0 forwards)
+(schema/register! ::checks [:vector [:map-of :string :string]]) ; T3 behavioral [{call, expect}]
+(schema/register! ::prelude :string)                     ; forms eval'd into the session before checks
+(schema/register! ::max-rounds :int)
+(schema/register! ::max-attempts :int)
+(schema/register! ::seed :int)
+;; typeahead cursor inputs (mode=step, worker.py `_cursor` — see
+;; typeahead-design.md "Wire modes"). All wire-shaped: string-keyed offer
+;; maps ({"glyph" "①" "label" … "template" [["clamp" "…"]["free" 24]]})
+;; and a string-keyed policy map of the worker Policy's snake_case knobs
+;; (Policy(**payload["policy"]) — an unknown key TypeErrors worker-side,
+;; so only KNOWN knobs may ride).
+(schema/register! ::committed :string)               ; locked forms so far
+(schema/register! ::draft :string)                   ; the in-progress code-buffer text
+;; "prefill" is the EDIT-WITH-PREFILL segment (planner-worker-design W2):
+;; the hole starts holding the given text — the model edits, not regenerates.
+(schema/register! ::template-segment
+  [:or [:tuple [:= "clamp"] :string] [:tuple [:= "free"] :int]
+   [:tuple [:= "prefill"] :string]])
+(schema/register! ::offer
+  [:map-of :string [:or :string [:vector ::template-segment]]])
+(schema/register! ::offers [:vector ::offer])
+;; The draft-head argument affordance map: head fn sym → its prefilled
+;; template. Registry-derived seon-side (seon.ai.typeahead); the worker
+;; expands it when the draft is an opened call to a listed head.
+(schema/register! ::prefills [:map-of :string [:vector ::template-segment]])
+(schema/register! ::policy [:map-of :string [:or :double :int :boolean]])
+(schema/register! ::null-render :string)             ; glyph-calibration baseline render
 
 ;; The generic control request: a mode + the knobs it uses.
 (schema/register! ::request
@@ -85,7 +122,21 @@
    [::prefix              {:optional true} ::prefix]
    [::suffix              {:optional true} ::suffix]
    [::max-hole-tokens     {:optional true} ::max-hole-tokens]
-   [::expect-contains     {:optional true} ::expect-contains]])
+   [::expect-contains     {:optional true} ::expect-contains]
+   [::phase               {:optional true} ::phase]
+   [::hints               {:optional true} ::hints]
+   [::repair              {:optional true} ::repair]
+   [::checks              {:optional true} ::checks]
+   [::prelude             {:optional true} ::prelude]
+   [::max-rounds          {:optional true} ::max-rounds]
+   [::max-attempts        {:optional true} ::max-attempts]
+   [::seed                {:optional true} ::seed]
+   [::committed           {:optional true} ::committed]
+   [::draft               {:optional true} ::draft]
+   [::offers              {:optional true} ::offers]
+   [::prefills            {:optional true} ::prefills]
+   [::policy              {:optional true} ::policy]
+   [::null-render         {:optional true} ::null-render]])
 
 ;; The worker `output` map is Google/RunPod's shape, not seon's — a :map
 ;; boundary (like :seon.ai/provider-fields). We surface a normalized
@@ -117,7 +168,12 @@
 
 ;; Poll cadence — overridable for tests (root set!, like *fetch*). The
 ;; cold-start (~66s) lives in this loop; 200 × 3s ≈ 10min total budget.
+;; A LOCAL (full-URL) worker answers in ~0.5–3 s per step, so a 3 s poll
+;; quantizes EVERY step's wall (W2 plan-pass measurement: 0.9 s of gen
+;; billed ~3 s of wall) — local endpoints poll at *local-poll-ms* with a
+;; proportionally larger budget (same ~10 min total).
 (def ^:dynamic *poll-ms* 3000)
+(def ^:dynamic *local-poll-ms* 250)
 (def ^:dynamic *max-polls* 200)
 
 ;; Test seam ONLY — bound to a `(fn [url init]) → Promise<js/Response>`,
@@ -128,42 +184,58 @@
 ;; synchronous unwind.
 (def ^:dynamic *fetch* nil)
 
-(defn- env*
-  "process.env value for `var-name`, or nil when unset/blank."
-  [var-name]
-  (let [v (some-> js/process .-env (aget var-name))]
-    (when (and (string? v) (seq v)) v)))
-
 (defn- endpoint-id
   "The RunPod endpoint id — `SEON_DG_ENDPOINT`, falling back to
    `DIFFGEMMA_EP` (the diffusion experiment driver's var) so ONE endpoint
    id set in `.env` serves BOTH the Python driver and this provider. nil
    when neither is set."
   []
+  ;; SEON_DG_* names kept for continuity — the local process is now
+  ;; named `diffusion-server` (bin/seon), but the env contract is frozen.
   (or (config/env-string "SEON_DG_ENDPOINT")
       (config/env-string "DIFFGEMMA_EP")))
 
 (defn- base-url
-  "The endpoint's RunPod base `…/v2/{EP}`, or nil when no endpoint id."
+  "The worker base URL, or nil when no endpoint is configured.
+
+   A bare RunPod endpoint id (`\"u50y7khhos5t7o\"`) resolves under
+   `https://api.runpod.ai/v2/{EP}`; a full `http(s)://…` value is used
+   AS the base — that is how a LOCAL worker speaking the same wire
+   contract (e.g. the dg_mlx MLX worker on
+   `http://127.0.0.1:17860`) plugs in with zero other changes."
   []
   (when-let [ep (endpoint-id)]
-    (str runpod-root "/" ep)))
+    (if (str/starts-with? ep "http")
+      ep
+      (str runpod-root "/" ep))))
 
 (defn- resolved-api-key
   "The bearer key for this call, or nil — read from process.env at call
    time off the var NAMED by SEON_DG_API_KEY_ENV (default RUNPOD_API_KEY).
    The key value is never transacted or logged."
   []
-  (env* (or (config/env-string "SEON_DG_API_KEY_ENV") default-key-env)))
+  ;; SEON_DG_* env names kept for continuity (process renamed diffusion-server).
+  (platform/env-val (or (config/env-string "SEON_DG_API_KEY_ENV") default-key-env)))
+
+(defn- local-endpoint?
+  "Whether the configured endpoint is a full `http(s)://…` worker URL.
+
+   A LOCAL worker (e.g. dg_mlx on `http://127.0.0.1:17860`) speaks the
+   same wire contract but needs NO RunPod bearer key — the key
+   requirement applies only to bare RunPod endpoint ids."
+  []
+  (boolean (some-> (endpoint-id) (str/starts-with? "http"))))
 
 (defn api-configured?
-  "Whether BOTH the endpoint id and a bearer key resolve.
+  "Whether the endpoint id resolves, plus a bearer key when required.
 
-   For the control backend. `seon.client/current-llm-fn` uses this to fall
+   A bare RunPod endpoint id needs the bearer key too; a full-URL local
+   worker needs no key. `seon.client/current-llm-fn` uses this to fall
    back to the stub llm-fn when the worker isn't configured."
   {:malli/schema [:=> [:cat] :boolean]}
   []
-  (boolean (and (endpoint-id) (resolved-api-key))))
+  (boolean (and (endpoint-id)
+                (or (local-endpoint?) (resolved-api-key)))))
 
 ;; ============================================================
 ;; Request → the worker's snake_case JSON payload.
@@ -187,7 +259,21 @@
    ::prefix              "prefix"
    ::suffix              "suffix"
    ::max-hole-tokens     "max_hole_tokens"
-   ::expect-contains     "expect_contains"})
+   ::expect-contains     "expect_contains"
+   ::phase               "phase"
+   ::hints               "hints"
+   ::repair              "repair"
+   ::checks              "checks"
+   ::prelude             "prelude"
+   ::max-rounds          "max_rounds"
+   ::max-attempts        "max_attempts"
+   ::seed                "seed"
+   ::committed           "committed"
+   ::draft               "draft"
+   ::offers              "offers"
+   ::prefills            "prefills"
+   ::policy              "policy"
+   ::null-render         "null_render"})
 
 (defn- ->json-value
   "A field value as the worker's JSON wants it: a keyword (mode / trace)
@@ -219,10 +305,14 @@
 
 ;; mode → the worker output field carrying the generated text.
 (def ^:private text-key-by-mode
-  {:generate :text :clamp-smoke :completion_text :infill :middle_text})
+  {:generate :text :guided :text :clamp-smoke :completion_text :infill :middle_text})
 
 ;; in-band per-mode failure keys the worker returns on a COMPLETED job
 ;; (it does NOT raise to the HTTP layer for a generation failure).
+;; :guided errors ride `gen_error` too; a guided `done:false` is NOT an
+;; error — it is an honest partial whose `text` + loop metadata (done,
+;; attempts, rounds, locked_forms, repairs, checks_passed, decoder_forwards,
+;; tok_per_s) surface via `::worker-output` on `:seon.ai/raw` unchanged.
 (def ^:private mode-error-keys [:gen_error :clamp_smoke_error :infill_error])
 
 (defn normalize-output
@@ -308,7 +398,13 @@
      :retry-after (some-> resp .-headers (.get "retry-after"))
      :body        (js->clj body :keywordize-keys true)}))
 
-(defn- auth-headers [key] #js{"Authorization" (str "Bearer " key)})
+(defn- auth-headers
+  "Bearer headers when a `key` resolved; bare headers for a keyless
+   LOCAL worker (see [[local-endpoint?]])."
+  [key]
+  (if key
+    #js{"Authorization" (str "Bearer " key)}
+    #js{}))
 
 (defn- ^:async submit!
   "POST the job; returns the parsed `{:status :retry-after :body}`."
@@ -330,19 +426,26 @@
    exhausted; map the terminal state to a `::response`. A throw here
    propagates to [[complete]]'s catch (→ transport, retried)."
   [base key jid mode]
-  (loop [polls 0]
-    (let [{:keys [status retry-after body]} (await (status! base key jid))]
-      (if (>= status 400)
-        (http-error "status" status retry-after body)
-        (case (:status body)
-          "COMPLETED"           (normalize-output mode (:output body))
-          ("FAILED" "CANCELLED") (job-error (str "job " (:status body) ": " (pr-str body)))
-          ;; IN_QUEUE / IN_PROGRESS / unknown → keep polling within budget.
-          (if (>= polls *max-polls*)
-            (job-error (str "job " jid " did not complete within " *max-polls*
-                            " polls (last status " (pr-str (:status body)) ")"))
-            (do (await (sleep! *poll-ms*))
-                (recur (inc polls)))))))))
+  (let [poll-ms   (if (local-endpoint?)
+                    (min *poll-ms* *local-poll-ms*)   ; a test's 0 stays 0
+                    *poll-ms*)
+        max-polls (if (local-endpoint?)
+                    (max *max-polls*
+                         (quot (* *max-polls* *poll-ms*) (max poll-ms 1)))
+                    *max-polls*)]
+    (loop [polls 0]
+      (let [{:keys [status retry-after body]} (await (status! base key jid))]
+        (if (>= status 400)
+          (http-error "status" status retry-after body)
+          (case (:status body)
+            "COMPLETED"           (normalize-output mode (:output body))
+            ("FAILED" "CANCELLED") (job-error (str "job " (:status body) ": " (pr-str body)))
+            ;; IN_QUEUE / IN_PROGRESS / unknown → keep polling within budget.
+            (if (>= polls max-polls)
+              (job-error (str "job " jid " did not complete within " max-polls
+                              " polls (last status " (pr-str (:status body)) ")"))
+              (do (await (sleep! poll-ms))
+                  (recur (inc polls))))))))))
 
 (defn ^:async complete
   "Submit a control-worker job and poll it to completion.
@@ -366,7 +469,9 @@
         (str label " endpoint not configured — set SEON_DG_ENDPOINT (or "
              "DIFFGEMMA_EP) to the RunPod endpoint id (e.g. \"u50y7khhos5t7o\")"))
 
-      (nil? key)
+      ;; A bare RunPod endpoint id needs the bearer key; a full-URL local
+      ;; worker does not (its wire has no auth).
+      (and (nil? key) (not (local-endpoint?)))
       (config-error
         (str label " API key not found in process.env — set RUNPOD_API_KEY "
              "(or point SEON_DG_API_KEY_ENV at the env var holding the key)"))
@@ -423,4 +528,6 @@
     [:=> [:cat] :any]
     [:=> [:catn [::opts ::opts]] :any]]}
   ([] (agent-adapter {}))
-  ([opts] (fn [ctx-text] (complete+wrap opts ctx-text))))
+  ;; Accept the widened string-or-map llm-fn arg (repl-mode); this adapter
+  ;; buffers, so it uses the ctx and ignores `:seon.ai/stream?`.
+  ([opts] (fn [arg] (complete+wrap opts (ai/llm-arg->ctx arg)))))

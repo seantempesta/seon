@@ -1,0 +1,545 @@
+{
+  "bespoke": {
+    "clojure_codegen_specs": {
+      "canary_guid": "SEON-CANARY-7dfe4642-8f97-4c1d-bd48-a677b1d8c60e",
+      "dev_n": 10,
+      "dev_seed": 1,
+      "epochs": 4,
+      "milestone_seed": 2,
+      "status": "pending-generator",
+      "test_seed": "fresh-per-draw"
+    },
+    "file_edit": {
+      "artifact": "evals/file_edit.dev.jsonl",
+      "canary_guid": "SEON-CANARY-1e699ae3-aaec-41fc-b3de-93275b26f334",
+      "dev_n": 8,
+      "dev_seed": 1,
+      "dev_sha256": "4d4c2ca5310f10a72aa2a0668172380f3c8e10ce46ace15556c4f67f8cb45d59",
+      "epochs": 4,
+      "generator": "seon_inspect.generators:file_edit",
+      "milestone_seed": 2,
+      "milestone_sha256": "97a81ba8ff4cdb4d0995822bb62f543d9b3381f19c1bfe959a805a7b8af0daea",
+      "status": "generated",
+      "test_seed": "fresh-per-draw"
+    },
+    "long_term_planning": {
+      "artifact": "evals/long_term_planning.dev.jsonl",
+      "canary_guid": "SEON-CANARY-22c6919d-7697-4d0b-b8e4-96cedb1bd0c5",
+      "dev_n": 10,
+      "dev_seed": 1,
+      "dev_sha256": "4cd47394eadfb190b3a3103c535d072203c71fac543ce8eca84a86df00994bd0",
+      "epochs": 4,
+      "generator": "seon_inspect.generators:long_term_planning",
+      "milestone_seed": 2,
+      "milestone_sha256": "baaca635fc8eb1496efec4a0faf38bb94d5c88ce31fbd2840c3c3debe5bdf0c2",
+      "status": "generated",
+      "test_seed": "fresh-per-draw"
+    },
+    "memory_store_recall": {
+      "canary_guid": "SEON-CANARY-54573edc-cea4-456d-9aa4-16a0af04d5d1",
+      "dev_n": 10,
+      "dev_seed": 1,
+      "epochs": 4,
+      "milestone_seed": 2,
+      "status": "pending-generator",
+      "test_seed": "fresh-per-draw"
+    },
+    "shell_use": {
+      "artifact": "evals/shell_use.dev.jsonl",
+      "canary_guid": "SEON-CANARY-686a159d-802e-40ec-8249-30714e5b74fb",
+      "dev_n": 8,
+      "dev_seed": 1,
+      "dev_sha256": "829d5f77380ebf644a93b6d3cdce2c15d243520fc9d8fb64ca158a69a7a31bdc",
+      "epochs": 4,
+      "generator": "seon_inspect.generators:shell_use",
+      "milestone_seed": 2,
+      "milestone_sha256": "6a4acad36f5bb6282d0a1df4af0018716e370185df979a8c62147e6417ba448d",
+      "status": "generated",
+      "test_seed": "fresh-per-draw"
+    },
+    "ui_tiles": {
+      "canary_guid": "SEON-CANARY-b9fffae7-9667-448f-b175-e06120f2e213",
+      "dev_n": 5,
+      "dev_seed": 1,
+      "epochs": 2,
+      "milestone_seed": 2,
+      "status": "pending-generator",
+      "test_seed": "fresh-per-draw"
+    },
+    "web_fetch": {
+      "artifact": "evals/web_fetch.dev.jsonl",
+      "canary_guid": "SEON-CANARY-197a6a55-8a32-40be-9ff1-98ff5313316c",
+      "dev_n": 8,
+      "dev_seed": 1,
+      "dev_sha256": "68c23d249c5da020d56c79a7927c225360af87606ae59c59720644eac5433b0c",
+      "epochs": 4,
+      "generator": "seon_inspect.generators:web_fetch",
+      "milestone_seed": 2,
+      "milestone_sha256": "812f9e0749f2e3f4b9cfa5e26f253cdc6aec018cf1c44ad36ed0479606cb993f",
+      "status": "generated",
+      "test_seed": "fresh-per-draw"
+    }
+  },
+  "command": "cd src-inspect-ai && .venv/bin/python -m seon_inspect.freeze",
+  "global_seed": 20260702,
+  "image_pins": {
+    "seon_runtime": {
+      "digest": "sha256:63db32776190f88411542a1415a6eb44bdb17c6b809f2d1fdab39b6a2c0a0557",
+      "image": "seon:slice1",
+      "note": "A-overlay composition; slice-4 freeze (2026-07-05) pinned the frozen dev slice's 10 instance digests below alongside the slice-3 probe's",
+      "overlay_volume": "seon-runtime-slice3",
+      "pinned_at": "2026-07-05"
+    },
+    "swe_bench_instances": {
+      "django__django-11299": {
+        "digest": "sha256:422f68c2699b814a614f0da78bf8b11c21cb8fc83a1f22b509af61e89b8a8b48",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.django__django-11299:latest"
+      },
+      "mwaskom__seaborn-3187": {
+        "digest": "sha256:c6b65d4b707df98040cae3e137ad23b104e40a8999ec2e01bcd427c7bd010ef5",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.mwaskom__seaborn-3187:latest"
+      },
+      "pallets__flask-5014": {
+        "digest": "sha256:eecfb236c0343eba8b0d477c6c8d72106920e032f8c0ce02ba4cff1e7c83f8c8",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.pallets__flask-5014:latest"
+      },
+      "psf__requests-1921": {
+        "digest": "sha256:6125049fb44bcbb471008e1853f8c85df8f59fa2d1ae186533fe9831259f9f63",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.psf__requests-1921:latest"
+      },
+      "pylint-dev__pylint-4604": {
+        "digest": "sha256:462e88bf758ebf305a04d929b207a2179fdca4050a7cab5433a2fa76d407590d",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.pylint-dev__pylint-4604:latest"
+      },
+      "pytest-dev__pytest-7490": {
+        "digest": "sha256:f049336c9c8201e8c61280685655078ee5fdd2c8e087c9830816af9e54e92fe9",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.pytest-dev__pytest-7490:latest"
+      },
+      "sphinx-doc__sphinx-10614": {
+        "digest": "sha256:e8d452a33791b8c89998f01dc6110a7708facb33544ffbfb4538d51d44bae5fb",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.sphinx-doc__sphinx-10614:latest"
+      },
+      "sphinx-doc__sphinx-8269": {
+        "digest": "sha256:5dd4ff0ac27fff6fdeb88bc9475f57112bdf98d638d3e890137c06aba949dda0",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.sphinx-doc__sphinx-8269:latest"
+      },
+      "sympy__sympy-15875": {
+        "digest": "sha256:d8fba036b978176223f5173e97e76435b88e6fe01d62b78da2315c264754bba1",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.sympy__sympy-15875:latest"
+      },
+      "sympy__sympy-20916": {
+        "digest": "sha256:9b4e744e61da530e77856634d27b5e29dd0e211034b528784083518ea16106ba",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.sympy__sympy-20916:latest"
+      },
+      "sympy__sympy-22914": {
+        "digest": "sha256:ca24e98226cb7434dde2b9381401d5dff9439854eb5950dac54d567887db95ef",
+        "image": "ghcr.io/epoch-research/swe-bench.eval.arm64.sympy__sympy-22914:latest"
+      }
+    }
+  },
+  "sampling_procedure": "per source: sort samples by str(id); shuffle with random.Random(f'{GLOBAL_SEED}:{source}'); where a stratify label exists, shuffle stratum order + within-stratum order with the same rng and interleave round-robin; slice the resulting order: first dev_n = dev, next milestone_n = milestone, remainder = blind test reserve",
+  "schema_version": 1,
+  "sources": {
+    "arc_challenge": {
+      "bench": "arc_challenge",
+      "capability_row": "science_qa",
+      "content_sha256": "89ebf51fc680c20a01a96f566f7c9b5ab5a88834197072f173bbd8ad31cff41f",
+      "dev": {
+        "n": 15,
+        "sample_ids": [
+          "Mercury_SC_405931",
+          "MEA_2010_8_1",
+          "Mercury_411732",
+          "Mercury_SC_400683",
+          "Mercury_7216248",
+          "Mercury_400803",
+          "MEA_2016_5_4",
+          "Mercury_7234378",
+          "MCAS_2013_8_29416",
+          "Mercury_7159250",
+          "Mercury_7250058",
+          "ACTAAP_2010_5_7",
+          "Mercury_SC_400324",
+          "MCAS_2003_8_29",
+          "Mercury_400699"
+        ]
+      },
+      "milestone": {
+        "n": 15,
+        "sample_ids": [
+          "MDSA_2007_8_30",
+          "NAEP_2005_4_S14+3",
+          "Mercury_SC_400383",
+          "Mercury_7026355",
+          "Mercury_403930",
+          "Mercury_LBS10131",
+          "MDSA_2009_4_1",
+          "ACTAAP_2010_7_12",
+          "NYSEDREGENTS_2012_8_42",
+          "Mercury_LBS10814",
+          "Mercury_7017045",
+          "MDSA_2009_4_34",
+          "ACTAAP_2007_7_36",
+          "TIMSS_2003_8_pg85",
+          "Mercury_SC_405726"
+        ]
+      },
+      "pin": {
+        "inspect_evals.arc.arc.ARC_DATASET_REVISION": "210d026faf9955653af8916fad021475a3f00453"
+      },
+      "seed": "20260702:arc_challenge",
+      "stratify": null,
+      "test": {
+        "canary_guid": "SEON-CANARY-1a54ea17-e564-4246-8a13-e82d33ca4072",
+        "n": 1142,
+        "sample_ids_sha256": "862f6537c8e2d676ae6976a46969770118d18d515d6dd696421353d3b83d86a2"
+      },
+      "total_n": 1172
+    },
+    "bfcl_ast": {
+      "bench": "bfcl_ast",
+      "capability_row": "tool_calling",
+      "content_sha256": "c5ffcb0a878827e7ec884337fe4102df68b6bb6d5782b2b91405ff98b7449ad5",
+      "dev": {
+        "n": 10,
+        "sample_ids": [
+          "parallel_multiple_29",
+          "multiple_66",
+          "simple_python_189",
+          "parallel_3",
+          "parallel_multiple_174",
+          "multiple_130",
+          "simple_python_103",
+          "parallel_191",
+          "parallel_multiple_106",
+          "multiple_168"
+        ]
+      },
+      "milestone": {
+        "n": 10,
+        "sample_ids": [
+          "simple_python_212",
+          "parallel_44",
+          "parallel_multiple_73",
+          "multiple_87",
+          "simple_python_36",
+          "parallel_32",
+          "parallel_multiple_94",
+          "multiple_7",
+          "simple_python_13",
+          "parallel_89"
+        ]
+      },
+      "pin": {
+        "inspect_evals.bfcl.bfcl.BFCL_GITHUB_COMMIT": "dac44e7ac9db5ff26a01ab0c1ec5de5a1e703b7a"
+      },
+      "seed": "20260702:bfcl_ast",
+      "stratify": "category_name",
+      "test": {
+        "canary_guid": "SEON-CANARY-d8df3200-8696-4480-b0b1-91df90f54407",
+        "n": 980,
+        "sample_ids_sha256": "41fcd505122b51e7d6a41ed2a122071a7d26649138e7fe99f032c6eb955eae79"
+      },
+      "total_n": 1000
+    },
+    "gpqa_diamond": {
+      "bench": "gpqa_diamond",
+      "capability_row": "hard_calibration",
+      "content_sha256": "203c374afd29ef6aa00e96064bd8d3012f1dfe6249db5467e80f538045ab8074",
+      "dev": {
+        "n": 10,
+        "sample_ids": [
+          "recGFNRVl1qBZGwyU",
+          "recyl3usDqb7ruXJx",
+          "recaXdGn3FAIkxLGM",
+          "reck1zKeCssmN82Ga",
+          "rec4L69T0Y1AS4AFS",
+          "reczQ4I0VpENdMtIj",
+          "recjgMJaMxz4ESDF2",
+          "recNu3MXkvWUzHZr9",
+          "recINGR1z01Fh1Z3A",
+          "recUBgVlkKzcRPDdK"
+        ]
+      },
+      "milestone": {
+        "n": 10,
+        "sample_ids": [
+          "recnTTKdBzfuoZ7w7",
+          "rec2fsnzUuvNtUYK8",
+          "recK9F5aqdaybl8bb",
+          "rec7C06XOB2h298ue",
+          "recypVp2NmPlBKVTp",
+          "reca44yABeO2fx7UB",
+          "recnjViFrqlZNL3fY",
+          "recr3VHM4zYf6dMFY",
+          "recb2M22zaD3tL6Qc",
+          "recnawZPumSCLMVgp"
+        ]
+      },
+      "pin": {
+        "inspect_evals.gpqa.gpqa.GPQA_DIAMOND_DATASET_SHA256": "41d1213cd7a4998605a26c2798500652572007161b3a92817ba46b35befcd305"
+      },
+      "seed": "20260702:gpqa_diamond",
+      "stratify": null,
+      "test": {
+        "canary_guid": "SEON-CANARY-efc705fc-3dd0-40ca-bd89-77a1fe93a0c4",
+        "n": 178,
+        "sample_ids_sha256": "890417a13d885d8b381c8fd618a47a9b56accbc90794c27269f8667b56126fb0"
+      },
+      "total_n": 198
+    },
+    "gsm8k": {
+      "bench": "gsm8k",
+      "capability_row": "reasoning",
+      "content_sha256": "d8bf2ce9eadc323db5e0ac056ec64fd4c768885fa67e341cd3604a893b8cc01e",
+      "dev": {
+        "n": 15,
+        "sample_ids": [
+          "gsm8k_90a2b650",
+          "gsm8k_a8e9303c",
+          "gsm8k_5602e6ac",
+          "gsm8k_875bab2d",
+          "gsm8k_f4e225e3",
+          "gsm8k_eb422e6a",
+          "gsm8k_6ef4718b",
+          "gsm8k_2c6abaf1",
+          "gsm8k_3e40ebb3",
+          "gsm8k_7c47c2fb",
+          "gsm8k_d1e09e8d",
+          "gsm8k_c7e0bdd1",
+          "gsm8k_4237339d",
+          "gsm8k_5757ab62",
+          "gsm8k_79fb6a0f"
+        ]
+      },
+      "milestone": {
+        "n": 15,
+        "sample_ids": [
+          "gsm8k_1b095c55",
+          "gsm8k_541c7f67",
+          "gsm8k_da754693",
+          "gsm8k_2af617d1",
+          "gsm8k_e4f8493e",
+          "gsm8k_6061e715",
+          "gsm8k_46dee388",
+          "gsm8k_76ccb2f8",
+          "gsm8k_2ea4ced0",
+          "gsm8k_f0b47b3a",
+          "gsm8k_8c590b91",
+          "gsm8k_e5f5504d",
+          "gsm8k_1df883fe",
+          "gsm8k_ea51f809",
+          "gsm8k_62f64ff5"
+        ]
+      },
+      "pin": {
+        "inspect_evals.gsm8k.gsm8k.GSM8K_DATASET_REVISION": "cc7b047b6e5bb11b4f1af84efc572db110a51b3c"
+      },
+      "seed": "20260702:gsm8k",
+      "stratify": null,
+      "test": {
+        "canary_guid": "SEON-CANARY-b08e5fa9-dea6-4859-b004-8460daf97176",
+        "n": 1289,
+        "sample_ids_sha256": "39552078251dcbd530546b0f7415b211c97eb9a7fbd44ba7d140198ad4ec7ed3"
+      },
+      "total_n": 1319
+    },
+    "mmlu_0_shot": {
+      "bench": "mmlu_0_shot",
+      "capability_row": "knowledge",
+      "content_sha256": "9faf3d2bca2e471be71311ada189333fc85be28b62c3b9db10b2b21daef3e67b",
+      "dev": {
+        "n": 15,
+        "sample_ids": [
+          "mmlu_49c090f6",
+          "mmlu_5b8e6777",
+          "mmlu_92d90ca7",
+          "mmlu_41dc895c",
+          "mmlu_e09bd1ad",
+          "mmlu_ab2bafa2",
+          "mmlu_fbc8ec71",
+          "mmlu_2b7700d0",
+          "mmlu_ee8915ef",
+          "mmlu_01d40a52",
+          "mmlu_eb19bf84",
+          "mmlu_c8ff2c7c",
+          "mmlu_066ee214",
+          "mmlu_50ed4bef",
+          "mmlu_affe19cd"
+        ]
+      },
+      "milestone": {
+        "n": 15,
+        "sample_ids": [
+          "mmlu_64081c9f",
+          "mmlu_56f8cd1f",
+          "mmlu_88842698",
+          "mmlu_374c6505",
+          "mmlu_b4f048e8",
+          "mmlu_fbb9e3bf",
+          "mmlu_d53c6174",
+          "mmlu_54383d25",
+          "mmlu_87c6cb15",
+          "mmlu_1928aa3b",
+          "mmlu_9797afa7",
+          "mmlu_5bb6d81d",
+          "mmlu_f7fe6523",
+          "mmlu_e0e06404",
+          "mmlu_6f2a7880"
+        ]
+      },
+      "pin": {
+        "inspect_evals.mmlu.mmlu.MMLU_REVISION": "c30699e8356da336a370243923dbaf21066bb9fe"
+      },
+      "seed": "20260702:mmlu_0_shot",
+      "stratify": "subject",
+      "test": {
+        "canary_guid": "SEON-CANARY-193be83b-85a5-4102-92e6-c5113d35317f",
+        "n": 13907,
+        "sample_ids_sha256": "62b1e45c0bfb9fbeb6e7e0703410cdac229265f050521e80a7b97a5a0756eac2"
+      },
+      "total_n": 13937
+    },
+    "swe_bench_verified": {
+      "bench": "swe_bench_verified",
+      "capability_row": "swe_bench",
+      "content_sha256": "d8f25a5d2a103e82397e7d9ff2d516cbde54420c84a7f184f418c9bc8de7283c",
+      "dev": {
+        "n": 10,
+        "sample_ids": [
+          "sympy__sympy-20916",
+          "sphinx-doc__sphinx-10614",
+          "django__django-11299",
+          "pallets__flask-5014",
+          "mwaskom__seaborn-3187",
+          "psf__requests-1921",
+          "pytest-dev__pytest-7490",
+          "pylint-dev__pylint-4604",
+          "sympy__sympy-15875",
+          "sphinx-doc__sphinx-8269"
+        ]
+      },
+      "excluded": {
+        "n": 6,
+        "reasons": {
+          "astropy__astropy-12907": "spent as a slice-2 de-risk smoke probe; solution published in evals/runs/ evidence",
+          "matplotlib__matplotlib-22719": "no arm64 epoch instance image on ghcr (not found, authenticated pull, 2026-07-05)",
+          "pydata__xarray-4629": "no arm64 epoch instance image on ghcr (not found, authenticated pull, 2026-07-05)",
+          "pydata__xarray-6721": "no arm64 epoch instance image on ghcr (not found, authenticated pull, 2026-07-05)",
+          "scikit-learn__scikit-learn-14629": "no arm64 epoch instance image on ghcr (not found, authenticated pull, 2026-07-05)",
+          "sympy__sympy-22914": "spent as the slice-2 smoke + slice-3 composition probe; solution/patch published in evals/runs/ evidence"
+        }
+      },
+      "milestone": {
+        "n": 25,
+        "sample_ids": [
+          "django__django-12713",
+          "matplotlib__matplotlib-25287",
+          "astropy__astropy-13579",
+          "mwaskom__seaborn-3069",
+          "psf__requests-2931",
+          "scikit-learn__scikit-learn-13328",
+          "pytest-dev__pytest-10356",
+          "pylint-dev__pylint-4661",
+          "sympy__sympy-22714",
+          "pydata__xarray-7393",
+          "sphinx-doc__sphinx-7889",
+          "django__django-10999",
+          "matplotlib__matplotlib-26342",
+          "astropy__astropy-14539",
+          "psf__requests-1142",
+          "scikit-learn__scikit-learn-11310",
+          "pytest-dev__pytest-10081",
+          "pylint-dev__pylint-4970",
+          "sympy__sympy-21379",
+          "pydata__xarray-6992",
+          "sphinx-doc__sphinx-8721",
+          "django__django-13568",
+          "matplotlib__matplotlib-20676",
+          "astropy__astropy-13236",
+          "psf__requests-2317"
+        ]
+      },
+      "pin": {
+        "inspect_evals.swe_bench.swe_bench.SWE_BENCH_VERIFIED_REVISION": "c104f840cc67f8b6eec6f759ebc8b2693d585d4a"
+      },
+      "seed": "20260702:swe_bench_verified",
+      "stratify": "repo",
+      "test": {
+        "canary_guid": "SEON-CANARY-62085748-1500-4d7a-a9e0-11c495778ef5",
+        "n": 459,
+        "sample_ids_sha256": "2945dc6ec480b1d1963493864f84f32f2898417c1c9a3fe55f4f890b654ee9af"
+      },
+      "total_n": 500
+    },
+    "terminal_bench_2": {
+      "arm64": {
+        "native_runnable_n": 0,
+        "note": "All 89 prebuilt docker_image manifests are amd64-only (verified docker manifest inspect --verbose, 2026-07-06). Zero native arm64. On an arm64 host TB-2 runs amd64-emulated; faithful scoring needs Rosetta (Docker Desktop) or native amd64 hardware.",
+        "total_n": 89
+      },
+      "bench": "terminal_bench_2",
+      "capability_row": "terminal_bench",
+      "content_sha256": "ca76aef90ff059013eca434050076218ac8d8c3252794a8d75575e63c3e1cb6f",
+      "dev": {
+        "n": 10,
+        "sample_ids": [
+          "constraints-scheduling",
+          "largest-eigenval",
+          "video-processing",
+          "merge-diff-arc-agi-task",
+          "db-wal-recovery",
+          "portfolio-optimization",
+          "mteb-retrieve",
+          "chess-best-move",
+          "pytorch-model-recovery",
+          "log-summary-date-ranges"
+        ]
+      },
+      "milestone": {
+        "n": 25,
+        "sample_ids": [
+          "vulnerable-secret",
+          "git-multibranch",
+          "modernize-scientific-stack",
+          "headless-terminal",
+          "sparql-university",
+          "distribution-search",
+          "feal-linear-cryptanalysis",
+          "custom-memory-heap-crash",
+          "gcode-to-text",
+          "mteb-leaderboard",
+          "pytorch-model-cli",
+          "multi-source-data-merger",
+          "sanitize-git-repo",
+          "configure-git-webserver",
+          "protein-assembly",
+          "polyglot-c-py",
+          "caffe-cifar-10",
+          "feal-differential-cryptanalysis",
+          "sqlite-db-truncate",
+          "extract-moves-from-video",
+          "rstan-to-pystan",
+          "train-fasttext",
+          "financial-document-processor",
+          "password-recovery",
+          "mailman"
+        ]
+      },
+      "pin": {
+        "corpus_manifest": "evals/tb2_terminal_bench_2.corpus.json",
+        "corpus_manifest_sha256": "f22450ac6f71d3625c06160529b7ae9feb5e4b821c94bdfbd0041dd1203b8a12",
+        "harbor_dataset_ref": "terminal-bench/terminal-bench-2@latest",
+        "harbor_version": "0.17.1"
+      },
+      "seed": "20260702:terminal_bench_2",
+      "stratify": "category",
+      "test": {
+        "canary_guid": "SEON-CANARY-b778c568-22e6-4471-8cba-4079e3888120",
+        "n": 54,
+        "sample_ids_sha256": "654e60868faac0fb22d10bbf6ade49897b59628755d7251fdc4af7d32aff4c8d"
+      },
+      "total_n": 89
+    }
+  }
+}

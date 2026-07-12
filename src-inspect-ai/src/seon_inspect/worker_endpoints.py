@@ -7,6 +7,9 @@ endpoint is a task parameter string:
   "runpod"           — the real A100 worker (env DIFFGEMMA_EP + RUNPOD_API_KEY),
                        verify_fresh discipline is the RUNBOOK's job (step 0);
                        this transport mirrors the fixed e1 harness verbatim.
+  "http(s)://…"      — a LOCAL worker speaking the same /run + /status/{id}
+                       wire contract (src-diffusion worker.py on :17860) —
+                       the same full-URL convention as SEON_DG_ENDPOINT.
 """
 
 from __future__ import annotations
@@ -46,6 +49,35 @@ class RunPodEndpoint:
         return {"_timeout": True}
 
 
+class LocalWorkerEndpoint:
+    """A local worker on a full URL — same async /run + /status contract as
+    RunPod, no auth (the src-diffusion MLX worker). worker_sha rides every
+    response; the CALLER owns freshness discipline (restart + /health)."""
+
+    def __init__(self, base: str):
+        self.base = base.rstrip("/")
+
+    def _api(self, path, method="GET", body=None):
+        req = urllib.request.Request(
+            f"{self.base}/{path}",
+            data=json.dumps(body).encode() if body else None,
+            headers={"Content-Type": "application/json"}, method=method)
+        return json.load(urllib.request.urlopen(req, timeout=120))
+
+    def health(self) -> dict:
+        return self._api("health")
+
+    def call(self, payload, poll=0.5, maxpoll=2400):
+        j = self._api("run", "POST", {"input": payload})
+        jid = j["id"]
+        for _ in range(maxpoll):
+            s = self._api(f"status/{jid}")
+            if s.get("status") == "COMPLETED":
+                return s.get("output") or {}
+            time.sleep(poll)
+        return {"_timeout": True}
+
+
 class CallableEndpoint:
     """Wrap a plain callable (the mock) behind the same .call() surface."""
 
@@ -63,4 +95,7 @@ def resolve_endpoint(spec: str):
         return CallableEndpoint(make_mock_endpoint(spec.split(":", 1)[1]))
     if spec == "runpod":
         return RunPodEndpoint()
-    raise ValueError(f"unknown endpoint spec: {spec!r} (want mock:<scenario> | runpod)")
+    if spec.startswith(("http://", "https://")):
+        return LocalWorkerEndpoint(spec)
+    raise ValueError(f"unknown endpoint spec: {spec!r} "
+                     "(want mock:<scenario> | runpod | http(s)://…)")

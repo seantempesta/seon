@@ -22,4 +22,4 @@ None.
 ## Related
 
 - Components: [[components/dev-tools]]
-- PRDs: [[prds/mcp-resilience/prd]]
+- PRDs: `prds/mcp-resilience/prd`

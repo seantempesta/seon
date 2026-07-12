@@ -22,9 +22,7 @@ without `bin/seon` keeps the deny posture until their launcher opts in.
 | Var | Read at (live?) | Values | Default (unset) | Gates |
 |---|---|---|---|---|
 | `SEON_SHELL` | `seon.agent.shell.internal/granted?` — live, every call | any non-blank value but `"0"` grants | **DENY** | `seon.agent.shell/run` + `py-run` (all shell execution) |
-| `SEON_WEB` | `seon.agent.web.internal/granted?` — live, every call | any value but `"0"` grants | **DENY** | `seon.agent.web/fetch` (SSRF guard is ALWAYS on, un-configurable) |
-| `SEON_WEB_DOMAINS` | `seon.agent.web.internal` — seeds the `!config` atom at ns load | comma-separated domains (subdomains match) | empty = ALL domains when granted | web-fetch domain allowlist |
-| `SEON_WEB_LOCK` | `seon.agent.web.internal/locked?` — live | any value but `"0"` locks | unlocked | makes `(seon.agent.web/configure! …)` a no-op error |
+| `SEON_WEB` | `seon.agent.web.internal/granted?` — live, every call | any value but `"0"` grants | **DENY** | `seon.agent.web/fetch` availability (the master on/off gate; reachability is the config policy below) |
 | `SEON_FS_ROOT` | `seon.agent.fs.internal/env-bootstrap` — ns load | path-list (`:`-split, like `$PATH`) | **DENY** (no allowed roots) | fs read/write/search + the shell `cwd` gate (shell delegates to fs) |
 | `SEON_FS_READ_ONLY` | `seon.agent.fs.internal` — ns load | `"1"` = read-only | writable | `write-file` on the granted roots |
 | `SEON_FS_LOCK` | `seon.agent.fs.internal/locked?` — live | any value but `"0"` locks | unlocked | makes `(seon.agent.fs/configure! …)` a no-op error |
@@ -38,7 +36,30 @@ Related feature/kill switches (same env seam, not capability grants):
 | `SEON_SOUL` | `false`/`0`/`off`/`no` disables; `SEON_SOUL_FILE` overrides path | ON when SOUL.md exists | the SOUL.md identity context block |
 | `SEON_TILE_SCI` | `"0"` disables | ON | layer-1 SCI bounding of agent live tiles |
 | `SEON_RENDER_STRICT` | `1`/`true`/`on`/`yes` enables | OFF | fail-loud render dial |
-| `SEON_DEBUG_CAPTURE` (+`_DIR`) | truthy enables | OFF in code (bin/seon pod sets `1`) | per-turn prompt/response capture |
+
+## Web-access policy — reachability is CONFIG, not env
+
+`SEON_WEB` (above) is only the master on/off gate. WHICH targets a granted
+`seon.agent.web/fetch` can reach is a host-owned CONFIG policy — the cluster
+manifest's `:seon.config/web` key, read via `seon.config/web-policy`. This
+UNIFIES the two former web restrictions (the private-range SSRF guard + the
+domain allowlist) into one `:seon.agent.web/policy` mode:
+
+| Mode | Reaches |
+|---|---|
+| `:open` | everything — public AND private/loopback |
+| `:public-only` | public only — blocks loopback/RFC-1918/link-local/ULA on every redirect hop (the SSRF-safe posture) |
+| `:allowlist` | only hosts matching `:seon.agent.web/allowed-domains` (exact host or subdomain; an IP literal matches itself). A private host is reachable IFF it is explicitly listed — private membership rides the list, it is not special-cased. An empty list reaches nowhere. |
+
+- **Code/schema default (no config):** `:public-only` — a downstream inheritor
+  is never SSRF-open by accident.
+- **The shipped clusters:** `config/system.edn` and `config/acme.edn` both set
+  `:seon.agent.web/policy :open` — zero friction, and the web_fetch bench's
+  loopback fixtures work with no special grant.
+- **Host-owned:** the agent READS its policy via `(seon.agent.web/grants)` but
+  nothing in the pod can widen it (there is no runtime `configure!`).
+- The retired `SEON_WEB_ALLOW_PRIVATE` / `SEON_WEB_DOMAINS` / `SEON_WEB_LOCK`
+  env vars are GONE — config over env, env never shadows config.
 
 ## Where granted today
 
@@ -66,9 +87,13 @@ Related feature/kill switches (same env seam, not capability grants):
   `SEON_SHELL=0` in the gitignored `.env` / `.env.acme`). Shell-set values
   win over the supervisor `${:-1}` defaults; `.env` values win too (sourced
   before the defaults are applied).
-- **Narrow web:** set `SEON_WEB_DOMAINS=docs.example.com,clojure.org`
-  (+ `SEON_WEB_LOCK=1` to freeze it) in the env/.env — passed through by both
-  supervisors when set.
+- **Shape web reachability:** this is CONFIG, not env — set
+  `:seon.config/web {:seon.agent.web/policy :public-only}` (block internal/
+  loopback) or `{:seon.agent.web/policy :allowlist :seon.agent.web/allowed-domains
+  ["docs.example.com" "clojure.org"]}` in the cluster manifest
+  (`config/system.edn` / `config/acme.edn`), then `bin/seon restart pod`. The
+  SEON_WEB env var only gates whether web fetch is available at all. (See the
+  web-access policy section below.)
 - **Downstream consumer:** set the vars in YOUR launcher env before starting
   the pod. The gates are plain `process.env` reads — no seon config file or
   source edit is involved. `SEON_CONFIG` (the context manifest) is a separate
@@ -86,7 +111,8 @@ are re-read live per call, but the pod inherits its env at spawn — so editing
 ```clojure
 ;; via the pod REPL / an agent eval — both must show granted:
 (seon.agent.shell/grants)  ;; => {... :seon.agent.shell/granted? true ...}
-(seon.agent.web/grants)    ;; => {... :seon.agent.web/enabled? true ...}
+(seon.agent.web/grants)    ;; => {... :seon.agent.web/enabled? true
+                           ;;      :seon.agent.web/policy :open ...}
 ```
 
 Or end-to-end: `(seon.agent.shell/run {:seon.agent.shell/command "pwd"

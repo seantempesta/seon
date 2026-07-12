@@ -1,0 +1,3 @@
+The request is a pure decision task — pick the function and emit the call form. The function is `weather_forecast_detailed`, the required params are `:location` (string) and `:days` (integer), and the optional `:details` (boolean) is requested. The answer is the call form itself — no eval needed, no definition needed. I'll deliver it now.
+
+(message/user "(weather_forecast_detailed {:location \"New York, USA\" :days 3 :details true})")

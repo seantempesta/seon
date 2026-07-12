@@ -8,7 +8,7 @@
        (no owning agent or no `:seon.fn` row) — never invoked.
 
    (c) A /call that invokes a granted fn which transacts → the datom is
-       written (the reactive push is the inspector feed's job). Proven
+       written (the reactive push is the debug view feed's job). Proven
        in-process (ensure-bootstrap! + open-agent-conn! + transact :seon.ns
        / :seon.fn rows + replay-program-graph! + invoke!), the same harness
        the SCI tile tests use — no live pod."
@@ -112,7 +112,7 @@
                     (.then
                       (fn [_]
                         (client/replay-program-graph!
-                          {:conn conn :compile-state cs :agent-id agent-id})))
+                          {:seon.client/conn conn :seon.client/compile-state cs :seon.client/agent-id agent-id})))
                     (.then
                       (fn [stats]
                         (testing "the agent ns + fn replay cleanly"
@@ -159,7 +159,16 @@
     #js {:method "POST"
          :url    (if args-str
                    (str base "&args=" (js/encodeURIComponent args-str))
-                   base)}))
+                   base)
+         :headers #js {}}))
+
+(deftest datastar-success-is-an-empty-acknowledgement
+  (let [{state ::state res ::res} (mock-res)
+        req #js {:headers #js {"datastar-request" "true"}}]
+    (@#'call/write-success! req res)
+    (is (= 204 (:code @state)))
+    (is (true? (:ended? @state)))
+    (is (nil? (:body @state)) "the live feed, not a duplicate body, updates UI")))
 
 (defn- with-seeded-conn
   "Open a fresh agent conn, seed!, run `(f conn)` (a Promise), restore *conn*."

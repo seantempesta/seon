@@ -100,7 +100,7 @@
                       (.then
                         (fn [_]
                           (client/replay-program-graph!
-                            {:conn conn :compile-state cs :agent-id "extra-core-test"})))
+                            {:seon.client/conn conn :seon.client/compile-state cs :seon.client/agent-id "extra-core-test"})))
                       (.then
                         (fn [stats]
                           (testing "the reconstituted ns replays cleanly through the agent-corpus lane"
@@ -108,42 +108,42 @@
                                 (str "replay had failures — " (pr-str stats))))
                           ;; BASELINE — caller reflects the original callee.
                           (seval/eval cs "(probe.demo/greet-loudly)"
-                                      {:ns 'cljs.user :analyze-deps? false})))
+                                      {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})))
                       (.then
                         (fn [r]
                           (testing "BASELINE: late-bound caller reflects the original callee"
-                            (is (:ok r) (str "baseline eval not ok — " (pr-str (:error r))))
-                            (is (= "hello from core!" (:value r))))
+                            (is (:seon.eval/ok? r) (str "baseline eval not ok — " (pr-str (:seon/error r))))
+                            (is (= "hello from core!" (:seon.eval/value r))))
                           ;; REDEFINE — the converged redefine=upsert path: re-eval
                           ;; `(defn greeting …)` IN ns probe.demo (live-proven on the
                           ;; pod against these exact rows, 2026-06-21).
                           (seval/eval cs "(defn greeting [] \"redefined\")"
-                                      {:ns 'probe.demo :analyze-deps? false})))
+                                      {:seon.eval/starting-ns 'probe.demo :seon.eval/analyze-deps? false})))
                       (.then
                         (fn [r]
                           (testing "the redefine evals cleanly in ns probe.demo"
-                            (is (:ok r) (str "redefine eval not ok — " (pr-str (:error r)))))
+                            (is (:seon.eval/ok? r) (str "redefine eval not ok — " (pr-str (:seon/error r)))))
                           (seval/eval cs "(probe.demo/greet-loudly)"
-                                      {:ns 'cljs.user :analyze-deps? false})))
+                                      {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})))
                       (.then
                         (fn [r]
                           (testing "REDEFINE flows through the UNCHANGED late-bound caller"
-                            (is (:ok r) (str "post-redefine eval not ok — " (pr-str (:error r))))
-                            (is (= "redefined!" (:value r))))
+                            (is (:seon.eval/ok? r) (str "post-redefine eval not ok — " (pr-str (:seon/error r))))
+                            (is (= "redefined!" (:seon.eval/value r))))
                           ;; SET! — reassign the callee's global slot directly.
                           (seval/eval cs "(set! probe.demo/greeting (fn [] \"set-bang\"))"
-                                      {:ns 'cljs.user :analyze-deps? false})))
+                                      {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})))
                       (.then
                         (fn [r]
                           (testing "the set! evals cleanly"
-                            (is (:ok r) (str "set! eval not ok — " (pr-str (:error r)))))
+                            (is (:seon.eval/ok? r) (str "set! eval not ok — " (pr-str (:seon/error r)))))
                           (seval/eval cs "(probe.demo/greet-loudly)"
-                                      {:ns 'cljs.user :analyze-deps? false})))
+                                      {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})))
                       (.then
                         (fn [r]
                           (testing "SET! flows through the UNCHANGED late-bound caller"
-                            (is (:ok r) (str "post-set! eval not ok — " (pr-str (:error r))))
-                            (is (= "set-bang!" (:value r)))))))))))
+                            (is (:seon.eval/ok? r) (str "post-set! eval not ok — " (pr-str (:seon/error r))))
+                            (is (= "set-bang!" (:seon.eval/value r)))))))))))
           (.then (fn [_]
                    (reset! client/!extra-core-vars before)
                    (done)))

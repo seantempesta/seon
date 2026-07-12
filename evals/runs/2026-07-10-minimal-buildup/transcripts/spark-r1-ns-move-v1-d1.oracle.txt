@@ -1,0 +1,7 @@
+movement: PASS
+schema-after-move: PASS
+bare-require: PASS
+redefine-in-place: PASS
+no-parallel-fork: PASS
+report-values: PASS
+GREEN: ns-movement verified (moved, registered, required, redefined in place, reported)

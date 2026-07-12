@@ -52,7 +52,7 @@
    the `x*` keys are the cross-session A→B baseline scenarios; the
    `canvas-*` keys are the :ui-competency canvas-as-primary (read-only
    DISPLAY) scenarios; `:tile` is the :ui-competency INTERACTIVE-control
-   scenario (my.tile button/form wired to the agent's own fn)."
+   scenario (my.canvas button/form wired to the agent's own fn)."
   [:s32 :s21 :s12 :todo :resume :err :err2 :calib :x1 :x3 :x12 :xcat :ab
    :canvas-budget :canvas-goal :tile :honesty])
 
@@ -316,7 +316,7 @@
 ;; ---------------------------------------------------------------------------
 ;; CONFIG A/B — the context-improvement loop's LIVE proof. Drives ONE
 ;; memory scenario under :default (full ctx) then under the lean
-;; manifest (drops :live-tile, keeps :namespaces), BOTH via the real
+;; manifest (drops :canvas, keeps :namespaces), BOTH via the real
 ;; provider, and prints both scorecards' pass? + turn-1 ctx token totals.
 ;; pass/fail is NOT asserted (honest reds are the data); the measurement
 ;; is whether the lean context still passes the memory scenario at a
@@ -347,7 +347,7 @@
               (.then (fn [full]
                        (gym/print-scorecard! full)
                        (.then (run {:seon.gym.config/path
-                                    "test/seon/gym/configs/lean-no-live-tile.edn"})
+                                    "test/seon/gym/configs/lean-no-canvas.edn"})
                               (fn [lean] [full lean]))))
               (.then (fn [[full lean]]
                        (reset! !paid-in-flight? false)

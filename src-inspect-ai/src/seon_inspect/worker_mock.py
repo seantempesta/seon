@@ -178,9 +178,9 @@ def make_mock_endpoint(scenario: str):
         prefix = payload.get("prefix", "")
         suffix = payload.get("suffix", "")
         body = BODY[body_kind]
-        canvas = prefix + body + suffix
+        code_buffer = prefix + body + suffix
         return {"worker_sha": WORKER_SHA, "tok_per_s": 132.0, "_mock_kind": body_kind,
-                "middle_text": body, "canvas_text": canvas,
+                "middle_text": body, "code_buffer_text": code_buffer,
                 "body_span": [len(prefix), len(prefix) + len(body)],
                 "argmax_per_position": list(range(8)), "offset_map": [],
                 "prefix_held": True, "suffix_held": True}

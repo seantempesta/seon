@@ -121,7 +121,7 @@ agents already know this vocabulary):
   every render via `seon.eval/lookup-value` (works for substrate AND
   agent-defined fns — same single path as today).
 
-**Key naming — DECIDED(user 2026-06-11): `:seon.render.live-tile/content`**,
+**Key naming — DECIDED(user 2026-06-11): `:seon.render.live-canvas/content`**,
 homed in the ns that owns the mechanism (schemas-live-with-their-owner).
 Used everywhere as of U1 — including the migration of the agent
 entity's current tile use of `:seon.render/html`, which today
@@ -145,7 +145,7 @@ form-roundtrip threw `:malli.core/sci-not-available`). If a shape
 can't be expressed as data, the shape is wrong or the validation
 belongs at a fn boundary — instrumentation on a fn in compiled code
 never round-trips as a form. Consequences in U1 code:
-`:seon.render.live-tile/content` is `[:or :symbol ::hiccup]` where
+`:seon.render.live-canvas/content` is `[:or :symbol ::hiccup]` where
 `::hiccup` is the pure-data shallow bound
 `[:and [:vector :any] [:cat :keyword [:* :any]]]` (a recursive
 ref-based schema was tested and rejected: register! throws
@@ -264,7 +264,7 @@ matching the `:seon.render/html` semantics agents already know:
 (seon.db/transact!
   {:seon.db/tx-data
    [{:seon.agent/id (seon.db/current-agent-id)
-     :seon.render.live-tile/content 'my.workouts/chart-tile}]})
+     :seon.render.live-canvas/content 'my.workouts/chart-tile}]})
 ```
 
 Sugar only if friction shows later. The ctx.cljs "Your live tile"
@@ -317,7 +317,7 @@ DECIDED(user 2026-06-11) — welcome personalization: greet the human
 by name when a user attr exists in the store (`:seon.user/name` on
 the user entity) — "Good evening, Sean." — gracefully generic
 otherwise. U1 implements the read side (installed-schema-gated query
-in `seon.render.live-tile/user-name`); registering `:seon.user/name`
+in `seon.render.live-canvas/user-name`); registering `:seon.user/name`
 itself belongs with the `:seon.user` entity schema in
 `seon.agent.message` (follow-up one-liner — until it lands, the
 generic branch is the live behavior).
@@ -375,7 +375,7 @@ path on demo day).
 ### U1 — `seon.render.live-tile`: key, twin, welcome, container CSS
 
 **LANDED 2026-06-11 (this unit).** The mechanism. New ns with:
-`register!` of the tile key (DECIDED `:seon.render.live-tile/content`,
+`register!` of the tile key (DECIDED `:seon.render.live-canvas/content`,
 §2) and the optional `:seon.render/ai` entry on
 `:seon.render/html-response`; `render-tile` resolution (delegating to
 `seon.render/html-render` — value-or-fn, one dispatch); the error

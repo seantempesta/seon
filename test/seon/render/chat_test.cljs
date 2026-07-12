@@ -1,6 +1,6 @@
 (ns seon.render.chat-test
   "Tests for seon.render.chat — the consumer bubble surface
-   (live-tiles PRD 2026-06-11, U2):
+   (canvas PRD 2026-06-11, U2):
 
      • message-kind — from-kind label classification
      • bubble — human right/amber, agent markdown-rendered, peer
@@ -20,7 +20,7 @@
     [seon.client :as client]
     [seon.db :as db]
     [seon.render.chat :as chat]
-    [seon.render.live-tile :as tile]
+    [seon.render.canvas :as canvas]
     [seon.ui.html :as html]))
 
 ;; ============================================================
@@ -50,7 +50,7 @@
 (deftest bubble-human-is-right-aligned-amber
   (let [h (chat/bubble {::chat/at at ::chat/kind ::chat/human
                         ::chat/label "user" ::chat/content "hello there"})]
-    (is (tile/valid-hiccup? h))
+    (is (canvas/valid-hiccup? h))
     (is (some #(re-find #"justify-end" %) (hiccup-classes h))
         "the human's words sit on the right")
     (is (some #(re-find #"amber" %) (hiccup-classes h)))
@@ -66,7 +66,7 @@
         h (chat/bubble {::chat/at at ::chat/kind ::chat/agent
                         ::chat/label "assistant" ::chat/content content})
         s (html/->string h)]
-    (is (tile/valid-hiccup? h)
+    (is (canvas/valid-hiccup? h)
         "md->hiccup output satisfies the strict authoring shape")
     (is (some #(re-find #"justify-start" %) (hiccup-classes h)))
     (is (re-find #"<strong[^>]*>bold</strong>" s)
@@ -87,7 +87,7 @@
                         ::chat/label "user"
                         ::chat/content "please **check** the list"})
         s (html/->string h)]
-    (is (tile/valid-hiccup? h))
+    (is (canvas/valid-hiccup? h))
     (is (re-find #"<strong[^>]*>check</strong>" s))
     (is (some #(re-find #"justify-end" %) (hiccup-classes h))
         "still the human's side")))
@@ -111,7 +111,7 @@
   (let [h (chat/bubble {::chat/at at ::chat/kind ::chat/peer
                         ::chat/label "agent-b2-000001"
                         ::chat/content "peer ping"})]
-    (is (tile/valid-hiccup? h))
+    (is (canvas/valid-hiccup? h))
     (is (some #(= "agent-b2-000001" %) (hiccup-strings h))
         "labeled with the peer's id")
     (is (some #(re-find #"text-xs" %) (hiccup-classes h)) "smaller")
@@ -132,7 +132,7 @@
             {::chat/at at ::chat/kind ::chat/agent
              ::chat/label "assistant" ::chat/content "second"}]})
         s (str/join " " (hiccup-strings hiccup))]
-    (is (tile/valid-hiccup? hiccup))
+    (is (canvas/valid-hiccup? hiccup))
     (is (< (str/index-of s "first") (str/index-of s "second"))
         "stream preserves conversation order")))
 
@@ -248,7 +248,7 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ============================================================
-;; last-reply — the default root tile's derived read (live-tiles U3).
+;; last-reply — the default root tile's derived read (canvas U3).
 ;; ============================================================
 
 ;; The EXTRACTION mechanism, not the literal text: bind the reply, the peer
@@ -420,7 +420,7 @@
   (let [h (chat/bubble {::chat/at at ::chat/kind ::chat/system
                         ::chat/label "system"
                         ::chat/content "agent's turn failed: provider unreachable — it will resume on your next message"})]
-    (is (tile/valid-hiccup? h))
+    (is (canvas/valid-hiccup? h))
     (is (some #(re-find #"justify-center" %) (hiccup-classes h))
         "system lines sit centered — neither voice in the conversation")
     (is (some #(re-find #"amber" %) (hiccup-classes h)))

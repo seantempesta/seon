@@ -1,0 +1,3 @@
+I've already delivered the answer. The user asked me to report the function call, and I sent exactly one Clojure form: `(mathematics.calculate_area_under_curve {:polynomial [3.0 2.0 -4.0] :limits [-1.0 2.0]})`. The task is done — I'll complete now.
+
+(complete "(mathematics.calculate_area_under_curve {:polynomial [3.0 2.0 -4.0] :limits [-1.0 2.0]})")

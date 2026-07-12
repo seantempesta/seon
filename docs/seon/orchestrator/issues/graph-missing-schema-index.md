@@ -3,7 +3,7 @@ type: issue
 status: open
 severity: blocker
 milestone: M3
-tags: [issue, schema, jvm-track, paused]
+tags: [issue, schema]
 ---
 # Graph Missing Generalized Discovery API
 

@@ -1,0 +1,99 @@
+minisweagent: INFO: Results will be saved to                                    
+evals/runs/2026-07-06-baseline-mini-swe/preds                                   
+Logging to 'evals/runs/2026-07-06-baseline-mini-swe/preds/minisweagent.log'
+minisweagent: INFO: Loading dataset princeton-nlp/SWE-Bench_Verified, split     
+test...                                                                         
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+minisweagent: INFO: Instance filter: 500 -> 10 instances                        
+minisweagent: INFO: Running on 10 instances...                                  
+minisweagent: INFO: Building agent config from specs:                           
+['tmp/mini-swe-venv/lib/python3.14/site-packages/minisweagent/config/benchmarks/
+swebench.yaml',                                                                 
+'evals/runs/2026-07-06-baseline-mini-swe/mini-swe-deepseek.yaml']               
+minisweagent.environment: DEBUG: Starting container with command: docker run -d 
+--name minisweagent-c060a5eb -w /testbed --rm                                   
+docker.io/swebench/sweb.eval.x86_64.mwaskom_1776_seaborn-3187:latest sleep 2h   
+minisweagent.environment: DEBUG: Starting container with command: docker run -d 
+--name minisweagent-2944c939 -w /testbed --rm                                   
+docker.io/swebench/sweb.eval.x86_64.pallets_1776_flask-5014:latest sleep 2h     
+minisweagent.environment: DEBUG: Starting container with command: docker run -d 
+--name minisweagent-2b4e1355 -w /testbed --rm                                   
+docker.io/swebench/sweb.eval.x86_64.django_1776_django-11299:latest sleep 2h    
+minisweagent.environment: INFO: Started container minisweagent-c060a5eb with ID 
+3e4bcb2298cc117f972fe234bdb549e6837f20931167b392cf42a15109af015e                
+minisweagent.environment: INFO: Started container minisweagent-2944c939 with ID 
+466af7fa8ec7160dac2e0d9c8d806b19b83e7404999a8547156962c69dd99773                
+minisweagent.environment: INFO: Started container minisweagent-2b4e1355 with ID 
+4c339a9af4082a00936341ac7240b17bc9d0f34f1b91561079fce7d485548677                
+minisweagent: INFO: Saved trajectory to                                         
+'evals/runs/2026-07-06-baseline-mini-swe/preds/pallets__flask-5014/pallets__flas
+k-5014.traj.json'                                                               
+minisweagent.environment: DEBUG: Starting container with command: docker run -d 
+--name minisweagent-3792d281 -w /testbed --rm                                   
+docker.io/swebench/sweb.eval.x86_64.psf_1776_requests-1921:latest sleep 2h      
+minisweagent.environment: INFO: Started container minisweagent-3792d281 with ID 
+1c393ec376c55555a1ef1b662dc2be89b34fd4a6d9116e213ebefe2d1d6c97c0                
+minisweagent: INFO: Saved trajectory to                                         
+'evals/runs/2026-07-06-baseline-mini-swe/preds/django__django-11299/django__djan
+go-11299.traj.json'                                                             
+minisweagent.environment: DEBUG: Starting container with command: docker run -d 
+--name minisweagent-107c22c1 -w /testbed --rm                                   
+docker.io/swebench/sweb.eval.x86_64.pylint-dev_1776_pylint-4604:latest sleep 2h 
+minisweagent.environment: INFO: Started container minisweagent-107c22c1 with ID 
+a3b204c6d0bd7362067e5db134e7c83697a02b2b43bef8c3fbddff0e85daee0d                
+minisweagent: INFO: Saved trajectory to                                         
+'evals/runs/2026-07-06-baseline-mini-swe/preds/psf__requests-1921/psf__requests-
+1921.traj.json'                                                                 
+minisweagent.environment: DEBUG: Starting container with command: docker run -d 
+--name minisweagent-bce34e83 -w /testbed --rm                                   
+docker.io/swebench/sweb.eval.x86_64.pytest-dev_1776_pytest-7490:latest sleep 2h 
+minisweagent.environment: INFO: Started container minisweagent-bce34e83 with ID 
+908dc31b673a1e0579622da66b9cbc9345126c10a92de2e861b7f5586773e26f                
+minisweagent: INFO: Saved trajectory to                                         
+'evals/runs/2026-07-06-baseline-mini-swe/preds/pylint-dev__pylint-4604/pylint-de
+v__pylint-4604.traj.json'                                                       
+minisweagent.environment: DEBUG: Starting container with command: docker run -d 
+--name minisweagent-c2bce01c -w /testbed --rm                                   
+docker.io/swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-10614:latest sleep 2h
+minisweagent.environment: INFO: Started container minisweagent-c2bce01c with ID 
+f4c92ce8bffe8b7f1b07b54f48fd8308eda90aac539edd369535901f99e1aa0f                
+minisweagent: INFO: Saved trajectory to                                         
+'evals/runs/2026-07-06-baseline-mini-swe/preds/pytest-dev__pytest-7490/pytest-de
+v__pytest-7490.traj.json'                                                       
+minisweagent.environment: DEBUG: Starting container with command: docker run -d 
+--name minisweagent-bb0ae287 -w /testbed --rm                                   
+docker.io/swebench/sweb.eval.x86_64.sphinx-doc_1776_sphinx-8269:latest sleep 2h 
+minisweagent.environment: INFO: Started container minisweagent-bb0ae287 with ID 
+164fd886efc1268018b6e2a6719100dd10e9e931ba7d7aaeb6205585cb55a932                
+minisweagent: INFO: Saved trajectory to                                         
+'evals/runs/2026-07-06-baseline-mini-swe/preds/sphinx-doc__sphinx-8269/sphinx-do
+c__sphinx-8269.traj.json'                                                       
+minisweagent.environment: DEBUG: Starting container with command: docker run -d 
+--name minisweagent-2c40e732 -w /testbed --rm                                   
+docker.io/swebench/sweb.eval.x86_64.sympy_1776_sympy-15875:latest sleep 2h      
+minisweagent.environment: INFO: Started container minisweagent-2c40e732 with ID 
+9212eae4c911911c605dcf8755d0078a94d5c5ef18314960004b2a1ccb6320aa                
+minisweagent: INFO: Saved trajectory to                                         
+'evals/runs/2026-07-06-baseline-mini-swe/preds/mwaskom__seaborn-3187/mwaskom__se
+aborn-3187.traj.json'                                                           
+minisweagent.environment: DEBUG: Starting container with command: docker run -d 
+--name minisweagent-ebc8a4b7 -w /testbed --rm                                   
+docker.io/swebench/sweb.eval.x86_64.sympy_1776_sympy-20916:latest sleep 2h      
+minisweagent.environment: INFO: Started container minisweagent-ebc8a4b7 with ID 
+bf952c1e58020e44b8ccb68763109b490b49104271f6f603bf3660c305b9233d                
+minisweagent: INFO: Saved trajectory to                                         
+'evals/runs/2026-07-06-baseline-mini-swe/preds/sympy__sympy-15875/sympy__sympy-1
+5875.traj.json'                                                                 
+minisweagent: INFO: Saved trajectory to                                         
+'evals/runs/2026-07-06-baseline-mini-swe/preds/sphinx-doc__sphinx-10614/sphinx-d
+oc__sphinx-10614.traj.json'                                                     
+minisweagent: INFO: Saved trajectory to                                         
+'evals/runs/2026-07-06-baseline-mini-swe/preds/sympy__sympy-20916/sympy__sympy-2
+0916.traj.json'                                                                 
+  Overall Progress ($0.00) ━━━━━━━━━━━━━━━━━━━━━ 10/10 100% 0:10:41 eta: 0:00:00
+┏━━━━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┓
+┃ Exit Status ┃ Count ┃ Most recent instances                                  ┃
+┡━━━━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┩
+│ Submitted   │    10 │ sympy__sympy-20916, sphinx-doc__sphinx-10614,          │
+│             │       │ sympy_...                                              │
+└─────────────┴───────┴────────────────────────────────────────────────────────┘

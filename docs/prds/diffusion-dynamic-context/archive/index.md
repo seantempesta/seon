@@ -22,7 +22,7 @@ tags: [archive, agent, research]
   Clojure forms fast**, taking feedback *between denoising steps*.
 - **Decided:** run **BF16 on an A100-80GB** via **runpod-flash** (serverless
   Python `@Endpoint`), using HF `transformers` **directly** (PyTorch) because the
-  `accept_canvas` hook — the whole point — lives in the transformers decode loop.
+  `accept_code-buffer` hook — the whole point — lives in the transformers decode loop.
 - **Status: PREP COMPLETE — one gate left, the image push.** The env-fix recipe is
   fully implemented and validated (custom cu128 base image push-ready; unified
   `gpu_worker.py` = probe + generate + full introspect in ONE cold load, C1/C3/C4
@@ -50,10 +50,10 @@ model *mid-generation* guides generation. Four capabilities, in build order:
    SCI cage, and on `:seon/error` **re-noise only the failing span** and
    re-denoise in place (AR must regenerate forward).
 3. **Retrieval-augmented denoising** — when a symbol region commits with high
-   entropy, embed the partial canvas, hit Seon's Vertex + Proximum/HNSW program
+   entropy, embed the partial code-buffer, hit Seon's Vertex + Proximum/HNSW program
    graph, and inject the right fn-spec into the encoder for the next steps. RAG
    *inside* the generation loop.
-4. **Live human feedback into the denoiser** — accept/clamp/re-noise canvas
+4. **Live human feedback into the denoiser** — accept/clamp/re-noise code-buffer
    regions between steps, streamed over Seon's SSE. Most novel, most fork.
 
 The vision: a strong AR model (Opus) sets direction; the diffusion model is the
@@ -65,16 +65,16 @@ The vision: a strong AR model (Opus) sets direction; the diffusion model is the
   2026-06-10, Apache 2.0. HF: `google/diffusiongemma-26B-A4B-it` (BF16, gated);
   NVFP4 4-bit at `nvidia/diffusiongemma-26B-A4B-it-NVFP4` (~18 GB, Blackwell).
 - **Encoder/decoder:** an AR **encoder** processes the prompt → KV cache (once,
-  prefill). A **decoder** refines a **256-token canvas** with **bidirectional**
-  attention, cross-attending the cached prompt. Masked discrete diffusion: canvas
+  prefill). A **decoder** refines a **256-token code-buffer** with **bidirectional**
+  attention, cross-attending the cached prompt. Masked discrete diffusion: code-buffer
   starts masked → each denoise step commits low-entropy tokens, re-noises the
   rest, ≤48 steps; ~15–20 tokens/forward pass. Sliding window 1024; context up to
-  262k. **block-autoregressive multi-canvas** chains 256-blocks for long output.
-- **Why it fits Seon:** the diffusion **canvas ≈ a Seon block/form**; the prompt
+  262k. **block-autoregressive multi-code-buffer** chains 256-blocks for long output.
+- **Why it fits Seon:** the diffusion **code-buffer ≈ a Seon block/form**; the prompt
   becomes the encoder KV cache (= Seon's *ai render*); refinement is in-place.
 
 ### The control seam (the whole point)
-`EntropyBoundSampler.accept_canvas(current_canvas, denoiser_canvas, logits,
+`EntropyBoundSampler.accept_code-buffer(current_code-buffer, denoiser_code-buffer, logits,
 cur_step)` — `logits` shape `[1, 256, 262144]` — is the per-step commit
 decision, in **open `transformers`** (model class `DiffusionGemmaForBlockDiffusion`,
 `model_type: diffusion_gemma`, no `trust_remote_code`). Override it (clamp,
@@ -88,7 +88,7 @@ arXiv id**, they won't survive a context restart). Detailed write-up:
 
 - **arXiv:2606.14620** — "Neither Parallel Nor Sequential: How DiffusionGemma
   Actually Commits Tokens" (Transformer Lab). The most useful paper. Inference-only
-  hook study. Findings: the `accept_canvas` hook + signature (above); decode is a
+  hook study. Findings: the `accept_code-buffer` hook + signature (above); decode is a
   **partial, granularity-dependent L→R bias** (Kendall τ ≈ 0.43–0.60), NOT clean
   block-AR; **commits are NOT frozen** (positions re-mask, ~7.5/gen) → in-place
   revision is native; **commit-entropy predicts correctness on math/code (GSM8K
@@ -110,7 +110,7 @@ Full analysis: `docs/prds/agent-fsm/research/diffusion-gpu-cost-comparison-2026-
 
 - **Both requirements force an 80 GB card:** ≥100k context needs Flash Attention
   (disabled on the 5090's Blackwell SM120 → 5090 caps ~10k via llama.cpp), and the
-  BF16 `accept_canvas` experiments need ~50 GB weights. → **A100-80GB.**
+  BF16 `accept_code-buffer` experiments need ~50 GB weights. → **A100-80GB.**
 - **Why BF16 first:** confound-free quality baseline (the thesis hinges on the
   model's entropy/commit dynamics, which quantization perturbs). Then sweep
   Q4_K_M/Q6_K/NVFP4 for speed + bigger KV/context, measured vs the BF16 baseline.
@@ -180,7 +180,7 @@ Root cause, grounded in the vendored SDK source (full detail +
 
 (Fallback if the custom image stalls: RunPod's official **vLLM serverless** for
 black-box "does it run / context / tok/s" measurements, keeping the transformers
-path for `accept_canvas`.)
+path for `accept_code-buffer`.)
 
 ## Next steps (ordered)
 
@@ -224,7 +224,7 @@ Pick one, set `REGISTRY`, run `build-image.sh`, then the remaining ordered steps
 3. **First real generate** — the Clojure `mean` prompt → coherence + tok/s. The
    milestone we haven't hit yet.
 4. **Max-context measurement** on A100-80 BF16 (how far past 100k).
-5. **`accept_canvas` observability** — surface the per-step canvas/entropy.
+5. **`accept_code-buffer` observability** — surface the per-step code-buffer/entropy.
 6. **The 4 dynamic-context experiments** (infill → eval-renoise → retrieval →
    live feedback), wiring Seon's eval cage + Proximum index as oracles over HTTP.
 
@@ -241,7 +241,7 @@ Pick one, set `REGISTRY`, run `build-image.sh`, then the remaining ordered steps
 - [[research/retrieval-denoising-experiment-plan-2026-06-28]] — capability #3 (RAG-in-loop / W1–W3).
 - [[infra-flash-runpod]] — full infra + the complete debugging log (12 issues).
 - `docs/prds/agent-fsm/research/diffusion-llm-live-context-2026-06-27.md` — papers
-  + the 4 ideas assessed + the `accept_canvas` mechanism.
+  + the 4 ideas assessed + the `accept_code-buffer` mechanism.
 - `docs/prds/agent-fsm/research/diffusion-llm-test-plan-2026-06-27.md` — the T0–T5
   test ladder + go/no-go gates.
 - `docs/prds/agent-fsm/research/diffusion-llm-runpod-runbook-2026-06-27.md` — the

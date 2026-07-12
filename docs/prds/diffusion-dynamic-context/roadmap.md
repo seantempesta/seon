@@ -6,7 +6,7 @@ tags: [prd, agent, flow]
 
 # Diffusion roadmap — we are here → the target
 
-The single **we-are-here** doc. [[architecture]] describes the verified canvas in present
+The single **we-are-here** doc. [[architecture]] describes the verified code-buffer in present
 tense (the target as it IS when built); [[grounding]] cites every load-bearing
 claim in real source. THIS doc holds what is PROVEN, the gap, and the
 kill-gate-first, dependency-ordered path to close it.
@@ -22,7 +22,23 @@ MEASURED lift on behavioral correctness under the now-FIXED harness — starting
 with the E1 re-run and the phased grammar gate after the ladder's own lift is
 proven on GPU.
 
-## ▸ WE ARE HERE
+## ▸ WE ARE HERE (2026-07-05 — local-first reboot)
+
+**The verified code-buffer v2 is LIVE on the local MLX model and lifting every
+gate.** The approved plan (verified code-buffer v2) superseded the GPU-gated
+path below: the loop now locks-and-EXECUTES forms as they parse (stateful
+eval session), harvests them into the encoder KV, auto-repairs provable
+near-misses for $0 forwards, hints via clamped `; fix:` comments, and
+terminates on T3 proof. **LIVE PROOF #1 (N=18/arm): parse 0.94→1.00, eval
+0.78→1.00, behavioral 0.72→0.94 vs free.** Maintained home =
+`src-diffusion/` (`seon.diffusion.loop` retired → pytest fixtures; CUDA
+worker frozen). Remaining phases: P2 wire (guided mode + provider +
+`:tests` grammar + worker-eval `run-tests`/`repair` ops), P3 pod
+`diffusion/build!` + TDD phases, P4 planning/multi-model + throughput
+sweeps (perf ALWAYS in tok/s). The section below is the pre-reboot state,
+kept for history.
+
+## ▸ WE WERE HERE (2026-07-02, pre-reboot — GPU-gated)
 
 **The offline control surface is COMPLETE and wired on-worker; what remains is GPU
 MEASUREMENT.** The validation ladder — T0 parse → T1 structural lint → phased
@@ -63,7 +79,7 @@ Each is live-verified on the A100 worker (endpoint `kzonsp5b18hpq5`) with
   2.9.1; the `def`-vs-`defn` thesis demo passed (parser passes, eval catches).
   The ~12-cycle "broken torch" saga was a hallucinated smoke-test symbol —
   [[research/custom-image-and-seon-colocation-2026-06-28]].
-- **Clamp holds.** `clamp_smoke` — chosen canvas positions survive denoising while
+- **Clamp holds.** `clamp_smoke` — chosen code-buffer positions survive denoising while
   the rest denoise. The `LogitsProcessor` clamp is real.
 - **Infill works.** Clamp prefix AND suffix → both ends held, the middle denoises
   co-conditioning on the suffix (the move AR cannot make).
@@ -89,13 +105,13 @@ Each is live-verified on the A100 worker (endpoint `kzonsp5b18hpq5`) with
 
 The first full battery ran on a verified worker (~$2-3, 122 jobs) — **6/7 wins**:
 
-- **The verified-canvas mechanics hold live.** Baseline ~360 tok/s; the canvas-length probe
-  (the scaffold fits one 256-token canvas, boundaries token-aligned); clamp + infill
+- **The verified code-buffer mechanics hold live.** Baseline ~360 tok/s; the code-buffer-length probe
+  (the scaffold fits one 256-token code-buffer, boundaries token-aligned); clamp + infill
   re-held; the closed loop's renoise REDUCES errors; injection turns a hallucinated
   symbol into the real API; **`unified_refine` converges end-to-end** — the full
-  verified-canvas loop runs. The model reproducibly makes the def-vs-defn error (the thesis case).
+  verified code-buffer loop runs. The model reproducibly makes the def-vs-defn error (the thesis case).
 - **The batched_mm compiled-path probe RAN and FAILED:** it clears find_spec but hits
-  a CUDA device-side assert on the whole-canvas compiled forward → the compiled
+  a CUDA device-side assert on the whole-code-buffer compiled forward → the compiled
   ~1000 tok/s path stays blocked. Settled: no kernel lever on the A100 (below).
 - **THE E1 KILL-GATE MEASUREMENT (N=6, all three arms): behavioral_rate = 0.0
   everywhere — Δ +0.000 → VOIDED, a PROVEN harness defect
@@ -174,7 +190,7 @@ The first full battery ran on a verified worker (~$2-3, 122 jobs) — **6/7 wins
   the ~$5 v5e-4 spike is the de-risk
   ([[research/fastest-tok-per-dollar-hardware-2026-06-30]]).
 
-Superseded gaps (closed or transformed): canvas sizing (probe ran — fits,
+Superseded gaps (closed or transformed): code-buffer sizing (probe ran — fits,
 token-aligned); the arm-3 baseline (E1 ran — VOIDED by a dead eval bundle, see
 P1; the open gap is now the ~$0.50 re-run on the fixed harness); Seon-side
 wiring (the `:diffusiongemma` provider is wired core+acme, graceful-down proven).
@@ -191,7 +207,7 @@ the design):
    on the same A100; prepped in `battery.py` (`D` alias); find the knee.
 3. **The compile-ceiling payload probes** ($0-rebuild, one chain, after D):
    `battery.py 1 --param max_length=288` tests the top device-assert hypothesis
-   (static-cache under-sizing → unchecked `index_copy_` OOB on multi-canvas
+   (static-cache under-sizing → unchecked `index_copy_` OOB on multi-code-buffer
    runs), and the 2-line worker-side find_spec monkeypatch is deployable without
    an image rebuild — the compiled path was never actually measured
    ([[research/compile-control-ceiling-2026-07-02]]).
@@ -215,10 +231,10 @@ the **TPU v5e-4 spike** (~$5, one real tok/s number for the high-ceiling path).
 
 ## The build path (executed — kill-gate first, dependency-ordered)
 
-### P0 — Canvas-length probe — **DONE (fits)**
+### P0 — Code-buffer-length probe — **DONE (fits)**
 
-Ran live: `canvas_length` = 256 and the `:defn-with-specs` scaffold FITS one
-canvas; the offline BPE check found + fixed 4 straddled boundaries (the `]]`
+Ran live: `code_buffer_length` = 256 and the `:defn-with-specs` scaffold FITS one
+code-buffer; the offline BPE check found + fixed 4 straddled boundaries (the `]]`
 closers) — all spans land on token edges. (Critique F3, closed.)
 
 ### P0 — Speed bench — **PARTIAL (exp D still unrun)**
@@ -329,7 +345,7 @@ build target.
 
 **BPE token-boundary alignment — MEASURED, $0, CPU tokenizer-only (2026-06-29).**
 The clamp/infill/inject control primitives are CHAR-spans but the worker maps each
-to canvas TOKEN positions by OVERLAP (`diffgemma_common.py span_to_positions`): a
+to code-buffer TOKEN positions by OVERLAP (`diffgemma_common.py span_to_positions`): a
 boundary that falls mid-token puts that one token in BOTH the clamp and the infill
 set, so the two ops can't be cleanly separated. An offline checker
 (`tmp/flash-diffgemma/span_token_align_check.py`, gitignored — loads only the
@@ -337,7 +353,7 @@ tokenizer, ~MBs, no model, no GPU: `AutoTokenizer.from_pretrained(
 "google/diffusiongemma-26B-A4B-it")` gives a `GemmaTokenizer`, vocab 262144)
 tokenizes a real `build-scaffold` frame with `return_offsets_mapping=True,
 add_special_tokens=False` (mirroring the worker's `skip_special_tokens=False`
-canvas basis) and asserts every span boundary lands on a token edge. **Measured: 4
+code-buffer basis) and asserts every span boundary lands on a token edge. **Measured: 4
 of the scaffold's boundaries STRADDLED** — at each `:map` body slot's end the slot's
 trailing `]` abutted the clamp's `])`, and BPE merges `]])` into ONE token, so the
 slot end and the `map-close` start shared a token. **Fix (applied to
@@ -380,7 +396,7 @@ re-opens. The full design exists
   `torch.compile` (mutually exclusive) — measure the throughput cost of being
   allowed to gate. (Critique F1's mechanism.)
 - **E4 — span re-noise hits the right region:** the parser `:span` overlaps the
-  known-bad region AND `span_to_positions` selects the right canvas positions.
+  known-bad region AND `span_to_positions` selects the right code-buffer positions.
 - **E5 — the four-mode staged build, single pass:** the first capstone demo on a
   real "build a small domain" scenario.
 - **E6 — multi-pass convergence:** the iterative-refinement proof (CREATE/UPSERT/
@@ -472,7 +488,7 @@ context — the safe half of the bet.
 
 ## Detail docs
 
-- [[architecture]] — the target verified canvas, the glossary, the mode abstraction.
+- [[architecture]] — the target verified code-buffer, the glossary, the mode abstraction.
 - [[grounding]] — the source-cited claims table per area.
 - [[research/mode-driven-guided-generation-2026-06-28]] — THE design (the engine,
   the four modes, the convergent-pass frame, E0–E6).

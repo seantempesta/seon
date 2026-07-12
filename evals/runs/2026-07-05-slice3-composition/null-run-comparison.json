@@ -1,0 +1,21 @@
+{
+  "runs": {
+    "mounted=False": {
+      "log": "2026-07-05T20-02-12-00-00_swe-bench-null_Wb3LE5RfBny5w7MNRZaJeS.eval",
+      "value": 0.0,
+      "model_patch": "",
+      "explanation": "PASS_TO_PASS:\n\n{\n  \"success\": [\n    \"test_PythonCodePrinter_standard\",\n    \"test_MpmathPrinter\",\n    \"test_NumPyPrinter\",\n    \"test_SciPyPrinter\",\n    \"test_pycode_reserved_words\",\n    \"test_sqrt\",\n    \"test_frac\",\n    \"test_printmethod\",\n    \"test_codegen_ast_nodes\",\n    \"test_issue_14283\",\n    \"test_NumPyPrinter_print_seq\",\n    \"test_issue_16535_16536\",\n    \"test_Integral\",\n    \"test_fresnel_integrals\",\n    \"test_beta\",\n    \"test_airy\",\n    \"test_airy_prime\"\n  ],\n  \"failure\": []\n}\n\nFAIL_TO_PASS:\n\n{\n  \"success\": [],\n  \"failure\": [\n    \"test_PythonCodePrinter\"\n  ]\n}\n\n"
+    },
+    "mounted=True": {
+      "log": "2026-07-05T20-02-29-00-00_swe-bench-null_75d3ZoAjZa35KFkDeaANyx.eval",
+      "value": 0.0,
+      "model_patch": "",
+      "explanation": "PASS_TO_PASS:\n\n{\n  \"success\": [\n    \"test_PythonCodePrinter_standard\",\n    \"test_MpmathPrinter\",\n    \"test_NumPyPrinter\",\n    \"test_SciPyPrinter\",\n    \"test_pycode_reserved_words\",\n    \"test_sqrt\",\n    \"test_frac\",\n    \"test_printmethod\",\n    \"test_codegen_ast_nodes\",\n    \"test_issue_14283\",\n    \"test_NumPyPrinter_print_seq\",\n    \"test_issue_16535_16536\",\n    \"test_Integral\",\n    \"test_fresnel_integrals\",\n    \"test_beta\",\n    \"test_airy\",\n    \"test_airy_prime\"\n  ],\n  \"failure\": []\n}\n\nFAIL_TO_PASS:\n\n{\n  \"success\": [],\n  \"failure\": [\n    \"test_PythonCodePrinter\"\n  ]\n}\n\n"
+    }
+  },
+  "comparison": {
+    "verdict_identical": true,
+    "explanation_identical": true,
+    "patch_identical": true
+  }
+}

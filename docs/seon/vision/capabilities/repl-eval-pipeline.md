@@ -16,11 +16,11 @@ Agents eval forms through a pipeline that validates, persists to Datahike with v
 ## Gaps
 
 - No constraint enforcement before accepting forms (schema presence, concrete types, map-in/map-out)
-- Graduation (`repl/graduate.clj`) has no callers -- dead code
+- The standalone graduation prototype was removed; the CLJS pod eval path is
+  the active implementation.
 - Filesystem is still the source of truth, not the graph
 
 ## Related
 
 - Components: [[components/dev-tools]], [[components/code-graph]]
-- PRDs: [[prds/super-repl/prd]], [[prds/agent-repl-interface/prd]]
-- Issues: [[orchestrator/issues/dead-repl-graduate]]
+- PRDs: `prds/super-repl/prd`, `prds/agent-repl-interface/prd`

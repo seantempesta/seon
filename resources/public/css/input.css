@@ -374,6 +374,72 @@ details.tool-call-details[open] .tool-preview {
 .tile-hero .seon-tile-compact { display: none; }
 .tile-hero .seon-tile-expanded { display: block; }
 
+/* Agent surfaces accept authored and model-produced content. Keep every child
+   inside its column even when it contains long symbols, URLs, maps, or code. */
+.agent-view-surface,
+.agent-view-surface * {
+  min-width: 0;
+  max-width: 100%;
+}
+.agent-view-surface :is(p, li, dd, dt, summary, blockquote, td, th) {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.agent-view-surface pre {
+  max-width: 100%;
+  overflow-x: auto;
+  font-size: clamp(0.65rem, 0.15vw + 0.62rem, 0.75rem);
+}
+.agent-view-surface .markdown {
+  font-size: clamp(0.75rem, 0.15vw + 0.72rem, 0.875rem);
+  line-height: 1.45;
+}
+.agent-view-rail .seon-bubble {
+  max-width: 100%;
+}
+.agent-view-rail pre,
+.agent-view-rail code {
+  font-size: 0.625rem;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+.agent-activity > summary {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.agent-activity[open] > summary {
+  white-space: normal;
+}
+
+/* Plans are summaries first, trees second. Long titles/goals stay compact and
+   an expanded root gets its own bounded scroll area instead of growing the
+   entire context surface. */
+.plan-root > summary::marker {
+  color: var(--color-text-500);
+}
+.plan-root-heading {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0.5rem;
+}
+.plan-title,
+.plan-goal {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.plan-title { -webkit-line-clamp: 2; line-clamp: 2; }
+.plan-goal { -webkit-line-clamp: 1; line-clamp: 1; }
+.plan-tree {
+  max-height: min(42vh, 24rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
 /* Compact-tile last reply (live-tiles U3): the default root tile
    shows the agent's last reply as readable text — clamp it so a
    long reply never blows the grid cell. */

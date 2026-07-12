@@ -53,6 +53,7 @@
             [seon.ai :as ai]
             [seon.agent.ctx :as ctx]
             [seon.error :as error]
+            [seon.platform :as platform]
             [seon.schema :as schema]))
 
 ;; ============================================================
@@ -92,11 +93,15 @@
 ;; call) overrides these; explicit request opts override the row.
 ;; ============================================================
 
-(def ^:private default-model      "claude-opus-4-8")
-;; max_tokens is REQUIRED by the Messages API. 16000 keeps long
-;; replies from truncating mid-thought (current API guidance) while
-;; staying under HTTP timeouts.
-(def ^:private default-max-tokens 16000)
+;; Model/max-tokens defaults live in the ONE per-provider map
+;; `seon.ai/shipped-defaults` (:anthropic entry), so the queryable
+;; resolver (`seon.ai/resolved-config`) reports exactly what this
+;; adapter falls back to. max_tokens is REQUIRED by the Messages API;
+;; 16000 keeps long replies from truncating mid-thought (current API
+;; guidance) while staying under HTTP timeouts.
+(def ^:private defaults           (:anthropic ai/shipped-defaults))
+(def ^:private default-model      (:seon.ai/model defaults))
+(def ^:private default-max-tokens (:seon.ai/max-tokens defaults))
 (def ^:private default-timeout-ms 60000)
 
 (defn- api-key
@@ -104,8 +109,7 @@
    nil — read at call time, never transacted. [[complete]] turns a nil
    into a legible config-error envelope (never a throw)."
   []
-  (let [v (some-> js/process .-env .-ANTHROPIC_API_KEY)]
-    (when (and (string? v) (seq v)) v)))
+  (platform/env-val "ANTHROPIC_API_KEY"))
 
 (defn- config-error
   "Errors-as-values envelope for a CALL-TIME config gap (no API key).
@@ -328,28 +332,34 @@
     (if (nil? key)
       (config-error
         "ANTHROPIC_API_KEY not set in process.env — set it to the Anthropic bearer key")
-      (let [ms      (or (:seon.ai/timeout-ms (ai/current)) default-timeout-ms)
-            ^js client (make-client key ms)
-            extra   (request-extra-body request)
-            ;; :extra-body is MERGED into the request PARAMS (1st arg) —
-            ;; the SDK's 2nd-arg RequestOptions :body REPLACES the body
-            ;; (drops model/messages), so it must NOT be used. Same fix
-            ;; as seon.ai.openai-compat (verified live there).
-            params  (clj->js (cond-> (request-params request)
-                               (seq extra) (merge extra)))
-            ^js messages (.. client -messages)]
-        (try
-          (let [^js stream (.stream messages params)
-                message (await (.finalMessage stream))
-                result  (parse-completion message)]
-            (when-let [err (:seon.ai/error result)]
-              (ai/log-error! "Anthropic" err))
-            result)
-          (catch :default e
-            (let [err (error->envelope e)]
-              (ai/log-error! "Anthropic" err)
-              {:seon.ai/text  ""
-               :seon.ai/error err})))))))
+      ;; The WHOLE build+call rides inside the try — the params build reads
+      ;; config-provided data (the config row, SEON_AI_EXTRA_BODY extra-body
+      ;; merged into the params, the ctx split), so a throw there is an
+      ;; EXPECTED error and must resolve to an envelope, never reject: the
+      ;; instrument wrapper records a rejection as a :core fault (crashes
+      ;; the dev pod). Same class as the stream-until-form! fix (e6295ecd).
+      (try
+        (let [ms      (or (:seon.ai/timeout-ms (ai/current)) default-timeout-ms)
+              ^js client (make-client key ms)
+              extra   (request-extra-body request)
+              ;; :extra-body is MERGED into the request PARAMS (1st arg) —
+              ;; the SDK's 2nd-arg RequestOptions :body REPLACES the body
+              ;; (drops model/messages), so it must NOT be used. Same fix
+              ;; as seon.ai.openai-compat (verified live there).
+              params  (clj->js (cond-> (request-params request)
+                                 (seq extra) (merge extra)))
+              ^js messages (.. client -messages)
+              ^js stream (.stream messages params)
+              message (await (.finalMessage stream))
+              result  (parse-completion message)]
+          (when-let [err (:seon.ai/error result)]
+            (ai/log-error! "Anthropic" err))
+          result)
+        (catch :default e
+          (let [err (error->envelope e)]
+            (ai/log-error! "Anthropic" err)
+            {:seon.ai/text  ""
+             :seon.ai/error err}))))))
 
 ;; ============================================================
 ;; Adapter for seon.agent — same bridge shape as deepseek's.
@@ -382,4 +392,6 @@
     [:=> [:catn [::opts ::opts]] :any]]}
   ([] (agent-adapter {}))
   ([opts]
-   (fn [ctx-text] (complete+wrap opts ctx-text))))
+   ;; Accept the widened string-or-map llm-fn arg (repl-mode); this adapter
+   ;; buffers, so it uses the ctx and ignores `:seon.ai/stream?`.
+   (fn [arg] (complete+wrap opts (ai/llm-arg->ctx arg)))))

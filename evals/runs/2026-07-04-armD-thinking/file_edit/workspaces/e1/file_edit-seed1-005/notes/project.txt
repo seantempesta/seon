@@ -1,0 +1,5 @@
+project: juniper
+owner: yarrow
+
+The juniper pipeline runs nightly.
+Contact the yarrow desk about juniper issues.

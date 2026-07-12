@@ -131,7 +131,7 @@
 
       ;; Lists splice their <li> children as VECTOR children (not one
       ;; lazy-seq child) so the whole tree satisfies the strict
-      ;; authoring shape `seon.render.live-tile/valid-hiccup?`.
+      ;; authoring shape `seon.render.canvas/valid-hiccup?`.
       :bullets
       (into [:ul {:class "list-disc pl-5 my-1 space-y-0.5"}]
             (for [ln lines]

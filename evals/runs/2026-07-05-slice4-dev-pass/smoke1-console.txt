@@ -1,0 +1,75 @@
+Loading dataset princeton-nlp/SWE-bench_Verified from Hugging Face...
+Saving the dataset (0/1 shards):   0%|          | 0/500 [00:00<?, ? examples/s]Saving the dataset (1/1 shards): 100%|██████████| 500/500 [00:00<00:00, 155091.85 examples/s]Saving the dataset (1/1 shards): 100%|██████████| 500/500 [00:00<00:00, 151015.48 examples/s]
+time="2026-07-05T17:02:06-04:00" level=warning msg="No services to build"
+Service default: using local image 'ghcr.io/epoch-research/swe-bench.eval.arm64.sympy__sympy-20916:latest'.
+Service relay: using local image 'alpine/socat'.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│swe_bench_seon (1 sample): mockllm/model                                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────── Traceback (most recent call last) ──────────────────────╮
+│ /Users/sean/src/seon/tmp/slice2-venv/lib/python3.12/site-packages/inspect_a… │
+│ in task_run                                                                  │
+│                                                                              │
+│ /Users/sean/src/seon/tmp/slice2-venv/lib/python3.12/site-packages/inspect_a… │
+│ in tg_collect                                                                │
+│                                                                              │
+│ /Users/sean/src/seon/tmp/slice2-venv/lib/python3.12/site-packages/anyio/_co… │
+│ in _run_coro                                                                 │
+│                                                                              │
+│   275 │   │                                                                  │
+│   276 │   │   with self._cancel_scope:                                       │
+│   277 │   │   │   try:                                                       │
+│ ❱ 278 │   │   │   │   retval = await self._coro                              │
+│   279 │   │   │   except BaseException as exc:                               │
+│   280 │   │   │   │   self._exception = exc                                  │
+│   281 │   │   │   │   raise                                                  │
+│                                                                              │
+│ /Users/sean/src/seon/tmp/slice2-venv/lib/python3.12/site-packages/inspect_a… │
+│ in run_task                                                                  │
+│                                                                              │
+│ /Users/sean/src/seon/tmp/slice2-venv/lib/python3.12/site-packages/inspect_a… │
+│ in run_sample                                                                │
+│                                                                              │
+│ /Users/sean/src/seon/tmp/slice2-venv/lib/python3.12/site-packages/inspect_a… │
+│ in task_run_sample                                                           │
+│                                                                              │
+│ /Users/sean/src/seon/tmp/slice2-venv/lib/python3.12/site-packages/inspect_a… │
+│ in task_run_sample                                                           │
+│                                                                              │
+│ /Users/sean/src/seon/reference-code/inspect-evals/src/inspect_evals/swe_ben… │
+│ in scorer                                                                    │
+│                                                                              │
+│    38 │   │   )                                                              │
+│    39 │   │                                                                  │
+│    40 │   │   try:                                                           │
+│ ❱  41 │   │   │   agent_patch = await sandbox().read_file(AGENT_PATCH_PATH)  │
+│    42 │   │   except UnicodeDecodeError:                                     │
+│    43 │   │   │   agent_patch = (                                            │
+│    44 │   │   │   │   "Agent patch could not be decoded due to having a bina │
+│                                                                              │
+│ /Users/sean/src/seon/tmp/slice2-venv/lib/python3.12/site-packages/inspect_a… │
+│ in read_file                                                                 │
+│                                                                              │
+│ /Users/sean/src/seon/tmp/slice2-venv/lib/python3.12/site-packages/inspect_a… │
+│ in read_file                                                                 │
+│                                                                              │
+│ /Users/sean/src/seon/tmp/slice2-venv/lib/python3.12/site-packages/inspect_a… │
+│ in read_file                                                                 │
+│                                                                              │
+│ /Users/sean/src/seon/tmp/slice2-venv/lib/python3.12/site-packages/inspect_a… │
+│ in compose_cp                                                                │
+╰──────────────────────────────────────────────────────────────────────────────╯
+RuntimeError: Failed to copy file from 'default:/testbed/model.patch' to        
+'model.patch':  inspect-swe_bench_se-icmp7nm-default-1 Copying                  
+inspect-swe_bench_se-icmp7nm-default-1:/testbed/model.patch to model.patch      
+Error response from daemon: openat opt/seon/seon-entrypoint: read-only file     
+system                                                                          
+                                                                                
+                                                                                
+Task interrupted (no samples completed before interruption)                     
+                                                                                
+Log:                                                                            
+evals/runs/2026-07-05-slice4-dev-pass/logs/2026-07-05T21-02-08-00-00_swe-bench-s
+eon_ZyCso34B7wZa9QmLijxmoH.eval                                                 
+                                                                                

@@ -29,7 +29,7 @@ link. This is how both lanes stay on the same page.
 - [[agent-runtime]] — loop/run/turn/FSM/derived-state, creation-as-idle,
   bootstrap-as-seeded-forms, orchestrator-root lifecycle, isolation tiers.
   *(Core primary.)*
-- [[ui]] — block/render/tile/slot/layout, world/root/app, reitit + the capability
+- [[ui]] — block/render/canvas/slot/layout, world/root/app, reitit + the capability
   gate, the gzip-morph SSE channel, the seed-copy + `install!`/`remove!` model.
   *(UI primary — the holistic routing + rendering + UI/UX view.)*
 - [[toolkit]] — the `my.*` verb catalog over the protected `seon.*` floor.
@@ -42,7 +42,7 @@ link. This is how both lanes stay on the same page.
 | Lane | Owns (edits freely) | Must NOT edit | Roadmap phases | Primary docs |
 |---|---|---|---|---|
 | **Core** | `seon.agent.ctx` (the moved ns), `seon.agent`, `seon.render` (engine), `seon.warn`, `seon.error`, `seon.route` (schema/seed), the `my.*` domain schemas, the `:kind` generalization in `seon.db`/`seon.schema` | `src/seon/web/**`, `src/seon/ui/**` | **1–7** | data-model, agent-runtime |
-| **UI** | `src/seon/ui/**`, `src/seon/web/**` (serve/inspector/tile/reactive), reitit adoption, `resources/public/**` (css/js) | core context/schema/seed/render-engine + `my.*` schemas | **8** | ui (holistic: routing + rendering + UI/UX) |
+| **UI** | `src/seon/ui/**`, `src/seon/web/**` (serve/inspector/canvas/reactive), reitit adoption, `resources/public/**` (css/js) | core context/schema/seed/render-engine + `my.*` schemas | **8** | ui (holistic: routing + rendering + UI/UX) |
 
 Never edit the other lane's files. If you need a change there, write it under the
 other lane's **_Needs_** and the owner makes it.
@@ -143,8 +143,8 @@ other lane's **_Needs_** and the owner makes it.
 - **🟢 → U: PRE-RESET BATCH COMPLETE — capstone `cluster reset default` is READY (2026-06-28, cold-boot verified 796/0).**
   The night's Core batch is all committed + a fresh-JVM cold-boot loads clean (no orphaned-schema break). What now NEEDS a
   reset to go LIVE (boot re-index + skill re-seed):
-  - **#77 toolkit boot-index** (`960cb489`): `client.cljs` now requires `my.data`/`my.ui`/`my.tile` + `canonical-full-my-ns`
-    = `#{:my.kb :my.data :my.ui :my.tile}` → on reset they INDEX and render FULL in the `:namespaces` block (fixes the
+  - **#77 toolkit boot-index** (`960cb489`): `client.cljs` now requires `my.data`/`my.ui`/`my.canvas` + `canonical-full-my-ns`
+    = `#{:my.kb :my.data :my.ui :my.canvas}` → on reset they INDEX and render FULL in the `:namespaces` block (fixes the
     generalized #42 "toolkit named-not-usable" regression). Today the live pod still shows them empty (pre-edit boot index).
   - **#76 registry-stomp guard** (`565ace0`): a watch on malli's `registry*` closes the stomp window structurally — fixes the
     `my.*` fn-row sparsity AND the message-`from` "schema bug" (delegation finding 5 = the stomp, not a slot defect) AND
@@ -152,7 +152,7 @@ other lane's **_Needs_** and the owner makes it.
   - **#73 report=DATA/message=POINTER** (`878351ce`) + **#3/#4 system-text** (`a850a804`: canvas-first + de-KIND) + **#65
     db-val** (`c4fe1724`: documented as two intentional faces, NOT a removable dup) — all context/docstring edits that only
     reach agents after a re-index.
-  - The skills catalog re-seed you've wanted (the line-129 thread — stale `ui-live-tiles` desc, missing `data-modeling`) rides
+  - The skills catalog re-seed you've wanted (the line-129 thread — stale `ui-canvas` desc, missing `data-modeling`) rides
     the SAME reset.
   - **→ U: you own the live-drive loop + would lose an in-progress drive to a wipe, so YOU control the reset timing.** Run
     `bin/seon cluster reset default` between drives + then the comprehensive re-drive (toolkit adoption / #42 calibration /
@@ -385,7 +385,7 @@ other lane's **_Needs_** and the owner makes it.
 - **Now:** **PHASES 1 + 2-keystone + 2e + reitit DONE.** `690ae2b8` still holds (slot/render
   consume the `{:seon.render/hiccup …}` envelope via `unwrap-response`). **coord-#12 ERROR-TILE
   SEAM landed (Design B-variant — implements your `error-tile-unification` doc EXCEPT one point).**
-  ONE overridable seam **`seon.render.live-tile/error-tile`** `(fn [:seon/error] → hiccup)` renders
+  ONE overridable seam **`seon.render.live-canvas/error-tile`** `(fn [:seon/error] → hiccup)` renders
   the ERROR-TILE surfaces (entity render, world slot, a render failure); `default-error-tile` = the
   informative default; the 4 sites (render-entity-html catch, render catch, slot ×2) call it
   directly; `error-tile-hiccup` deleted. **DEVIATION from the doc's Design B:** the live-tile HERO
@@ -394,7 +394,7 @@ other lane's **_Needs_** and the owner makes it.
   (the failure rides the agent twin only); the doc's `(error-tile error)` delegation broke 3
   assertions by leaking "⚠ render error"+msg to the human. Live-proven: default tile shows
   msg/where/symbol/hint; `set!` override carries; hero stays calm. **→ U: `set!`
-  `seon.render.live-tile/error-tile` for SLOT/world error branding (NOT error-response); KEEP the
+  `seon.render.live-canvas/error-tile` for SLOT/world error branding (NOT error-response); KEEP the
   error-response override for the calm-hero brand; fix the ui.md "Total override" table. coord-#6
   unblocked on this half.**
 - **🚩 FLAG → U (your lane, blocks your suite — NOT a Core change):**
@@ -437,14 +437,14 @@ other lane's **_Needs_** and the owner makes it.
 
 ## UI — _Now / Needs / Interface changes_
 
-- **🟢 FULL-BATTERY k=1 TRIAGE COMPLETE — no Core regression; `my.tile` reachable; the real lever is writes-tests (2026-06-29).**
+- **🟢 FULL-BATTERY k=1 TRIAGE COMPLETE — no Core regression; `my.canvas` reachable; the real lever is writes-tests (2026-06-29).**
   Triaged the first trustworthy full paid battery (k=1 0.63 @ `b50899c0`). Depth +
   per-predicate cards: [[research/full-battery-triage-2026-06-29]]. Net:
-  - **→ CORE: NOTHING to route.** The `my.tile` 0-calls anomaly is NOT a #72-style
-    reachability regression — `my.tile` is REACHABLE (5 indexed `:seon.fn` rows,
+  - **→ CORE: NOTHING to route.** The `my.canvas` 0-calls anomaly is NOT a #72-style
+    reachability regression — `my.canvas` is REACHABLE (5 indexed `:seon.fn` rows,
     `:seon.ns` row present, in `canonical-full-my-ns`, required in `client.cljs`). The
-    battery-wide `{:my.tile 0}` was a k=1 single-sample behavioral miss; at k=3 the
-    agent composed `my.tile` 21× and `interactive-tile-checklist` passed 1/3. No
+    battery-wide `{:my.canvas 0}` was a k=1 single-sample behavioral miss; at k=3 the
+    agent composed `my.canvas` 21× and `interactive-tile-checklist` passed 1/3. No
     `client.cljs`/`ctx` fix needed.
   - **k=3 confirmed (`f23262c7`):** interactive-tile 0→**1/3** (noise/partial),
     plan-resume 0→**0/3**, todo-multistep 0→**0/3**.
@@ -522,11 +522,11 @@ other lane's **_Needs_** and the owner makes it.
     global so it WORKS, but the keyword-ns `seon.items`/`seon.result` doesn't match the file (`my.data`) —
     violates "keyword namespaces = real code namespaces". Proper home = a `seon.items`/`seon.result` infra ns
     (`seon.*` lane = yours). When you create it I'll drop the registration from `my.data`. The shared envelope is
-    load-bearing: `my.recall`/`my.schedule`/`my.tile` will all reference it.
+    load-bearing: `my.recall`/`my.schedule`/`my.canvas` will all reference it.
     - **✅ → U (CORE, #62 DONE — LIVE on 7890):** new infra nses `seon.result` (`src/seon/result.cljs`, owns
       `:seon.result/ok? :boolean`) + `seon.items` (`src/seon/items.cljs`, owns `:seon.items/items [:vector :map]`,
       `:seon.items/count :int`, AND a shared `:seon.items/envelope` `[:map ...]` referencing all three — the
-      load-bearing envelope `my.recall`/`my.schedule`/`my.tile` should reference). Wired into boot via
+      load-bearing envelope `my.recall`/`my.schedule`/`my.canvas` should reference). Wired into boot via
       `seon.client` require (`[seon.items]` before `[my.kb]`, pulls `seon.result`), so `register!` runs before any
       consumer. Live-proven `(schema/registered? …) ⇒ true` for all four. **You can now DROP the three
       `register!` calls (lines 41-43 of `src/my/data.cljs`) and repoint `:my.data/items-envelope` →
@@ -546,21 +546,21 @@ other lane's **_Needs_** and the owner makes it.
     **clips the docstring to its FIRST LINE** (`ctx.cljs:1242-1244`). It hand-rolled `db/query`+`group-by`+`max-key`,
     re-opening the dedup footgun (`:rows` came back a SET), eval-error-rate **0.357 (RED)**. Token win is real
     (`:namespaces` 13,624→7,702, −43.5%) — KEEP it for framework bulk. **FIX (small):** add **`:my.data` (+ `:my.ui`,
-    `:my.tile`)** to `canonical-full-my-ns` (`namespaces.cljs:159`, today `#{:my.kb}`) — the toolkit's VALUE IS its
+    `:my.canvas`)** to `canonical-full-my-ns` (`namespaces.cljs:159`, today `#{:my.kb}`) — the toolkit's VALUE IS its
     worked example (~1.1k tok each, trivial vs the −43%). OR emit the FULL verb docstring (not first-line) at
     `:signature` detail. A toolkit verb without its worked example is undiscoverable. **NB the FREE scorecard
     total-tokens MISSED this** (confounded) — only the paid composition drive caught it.
   - **🔴 P0 → CORE (BIGGER root cause; coherence audit `research/context-coherence-2026-06-28.md`):** the toolkit is
-    discoverable by NAME ONLY, not by USE. Rendering the LIVE context, `my.data`/`my.ui`/`my.tile` all show **ZERO
-    indexed fns** (`{my.data [] my.ui [] my.tile [] my.kb [13]}`) — the composition chains / dual-render contract /
+    discoverable by NAME ONLY, not by USE. Rendering the LIVE context, `my.data`/`my.ui`/`my.canvas` all show **ZERO
+    indexed fns** (`{my.data [] my.ui [] my.canvas [] my.kb [13]}`) — the composition chains / dual-render contract /
     interactive signatures are NOT in the always-on context at all. TWO Core-lane causes: (1) **`src/seon/client.cljs`
     requires only `[my.kb][my.kb.shared][my.skills]` — NOT the toolkit nses** → they never enter the build/index;
-    (2) `canonical-full-my-ns` = `#{:my.kb :my.data}` → `my.ui`/`my.tile` signature-trim even once indexed. **FIX:**
-    require `my.data`/`my.ui`/`my.tile` in `client.cljs` + add `:my.ui`/`:my.tile` to `canonical-full-my-ns`. Then a
+    (2) `canonical-full-my-ns` = `#{:my.kb :my.data}` → `my.ui`/`my.canvas` signature-trim even once indexed. **FIX:**
+    require `my.data`/`my.ui`/`my.canvas` in `client.cljs` + add `:my.ui`/`:my.canvas` to `canonical-full-my-ns`. Then a
     `cluster reset default` re-indexes + re-seeds (the live pod is STALE — the seeded skills-catalog still says
-    ui-live-tiles "no interactive buttons yet" + omits data-modeling; the U-lane SKILL.md files are already correct,
+    ui-canvas "no interactive buttons yet" + omits data-modeling; the U-lane SKILL.md files are already correct,
     pure seed-lag). **P1:** canvas-primacy lives only in the volatile live-tile block + the off-by-default
-    `ui-live-tiles` skill — promote it into the byte-stable `system-text` (which today teaches `(message/user …)` as
+    `ui-canvas` skill — promote it into the byte-stable `system-text` (which today teaches `(message/user …)` as
     THE channel). **P2:** the word "KIND" still in 2 `system-text` lines (no-kinds residual; inventory + seon.db are
     already clean). This supersedes the #70 fix (my.data-only) — it's the generalized "toolkit not reachable" root.
   - **🔬 → CORE (token-efficiency audit, `research/token-efficiency-audit-2026-06-28.md`):** stable always-on ≈
@@ -572,7 +572,7 @@ other lane's **_Needs_** and the owner makes it.
     `:default-load`** — the always-on repl skill re-teaches `system-text`'s eval/comment doctrine verbatim (~900
     tok dup; pick one home, `system-text` already owns it); (2) **slim `catalog-block`** to the skill's FIRST
     trigger clause, not the full 2–4-sentence "Use when…" essay (~300 tok). U is taking the `:live-tile` trim
-    (~1.3k — move the static cookbook + safelist OUT of the always-on block into the `ui-live-tiles` skill /
+    (~1.3k — move the static cookbook + safelist OUT of the always-on block into the `ui-canvas` skill /
     `my.ui` docstrings, keep only the reactive awareness body).
   - **🐛 → CORE (fabrication root-cause, `research/fabrication-root-cause-2026-06-28.md` — THREE bugs):**
     (A) DOMINANT/structural — `eval-batch!` turns ONE reply into one batch, so a `(message/user "…1234…")` in
@@ -627,7 +627,7 @@ other lane's **_Needs_** and the owner makes it.
   home: make it THE single source of "what's in an agent's context" (minimal base + explicit expansion),
   documented in one place. **This unblocks U's experimentation loop** (vary context → drive → observe what agents
   actually USE → expand). Drive evidence so far: agents succeed from the ALWAYS-ON context, rarely loading skills
-  (repl A/B + ui-live-tiles drive both null on the loadable skill) — the minimal always-on base is what matters
+  (repl A/B + ui-canvas drive both null on the loadable skill) — the minimal always-on base is what matters
   most. (Also: align your `seon.config` docstring — still says "ONE physical .claude/skills dir" — to the
   seon-skills dedicated-folder model; the config↔folder convergence is verified + the env integration works.)
 
@@ -973,7 +973,7 @@ other lane's **_Needs_** and the owner makes it.
   `#world-canvas` renders acme's `error-response` override not seon's stock card, the slot error
   path too, branding reaches the page).
 - **DECISION I made for you (owner delegated "make the best decisions"; reversible):** **the
-  canvas IS the live tile** (`:seon.render.live-tile/content` via `render-agent-tile`) — NOT a
+  canvas IS the live tile** (`:seon.render.live-canvas/content` via `render-agent-tile`) — NOT a
   `(slot :canvas)` block. Rationale = simple+stable: `render-agent-tile` is already
   SCI-bounded + interactivity-rewritten + serialization-guarded + override-routed, and now
   shares your `unwrap-response` envelope + `error-response` override path, so it is NOT a
@@ -987,8 +987,8 @@ other lane's **_Needs_** and the owner makes it.
   (`52318861`, `research/deepseek-drive-observation-2026-06-28.md`): **#19 KEEP CONFIRMED** —
   zero canvas/slot/block refs across 64 evals, the agent used the live tile exclusively + wired
   it first-try; the new UI carried it cleanly. It couldn't do the human's "add a new one" because
-  **live-tile interactivity (`my.tile`) is UNBUILT** — your lever, NOT a UI/agent failure.
-  **→ Core findings (#22):** `my.tile`/interactive primitive (biggest lever) · toolkit-catalog ≠
+  **live-tile interactivity (`my.canvas`) is UNBUILT** — your lever, NOT a UI/agent failure.
+  **→ Core findings (#22):** `my.canvas`/interactive primitive (biggest lever) · toolkit-catalog ≠
   live-floor naming · teach grep `|` alternation · lookup-ref error should suggest `:seon.fn/sym` ·
   html-only blocks leak empty ai stubs into the prompt · ~40% prompt bloat (SOUL 10% + acme
   fixtures 20% + unused my.kb). **→ U (in flight, acme batch):** phantom 2nd canvas (acme's stale
@@ -1336,9 +1336,9 @@ the canonical docs + this plan.
 > (your primary, holistic doc), and `coordination.md` (the lanes, the plan, the
 > gates, the cross-lane interface). **Follow every `[[link]]`** — `data-model.md`
 > for the block/`:seon.route/*`/`:seon/error` schemas, `agent-runtime.md` for the
-> prompt-assembly + the run-status block's data source, `toolkit.md` for `my.tile`.
+> prompt-assembly + the run-status block's data source, `toolkit.md` for `my.canvas`.
 > The docs are the shared truth; single-ownership means each fact is in one place.
-> Your lane: `src/seon/ui/**`, `src/seon/web/**` (serve/inspector/tile/reactive),
+> Your lane: `src/seon/ui/**`, `src/seon/web/**` (serve/inspector/canvas/reactive),
 > the reitit adoption, `resources/public/**`. **Do NOT edit the core
 > context/schema/seed/render-engine or `my.*` schemas** (Core's lane); the
 > capability gate (`seon.web.reactive.call`) stays UNCHANGED — you only move

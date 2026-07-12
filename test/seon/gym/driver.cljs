@@ -87,7 +87,7 @@
     [seon.agent.ctx.namespaces :as ctx-ns]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
-    [seon.debug :as debug]
+    [my.blob :as blob]
     ;; World-parity (2026-06-10 deep audit): the :test build has no
     ;; :devtools preload slot, so without this require
     ;; `client/!indexed-test-vars` stays [] and `client/index-tests`
@@ -131,7 +131,7 @@
 ;; The two CURATION axes (context-curation Phase A) extend the §7
 ;; behavioral vocabulary: `:makes-few-errors` (eval-error-rate below a
 ;; threshold — fewer REPL mistakes) and `:drives-canvas` (the agent set
-;; its OWN `:seon.render.live-tile/content` — it used the live tile as
+;; its OWN `:seon.render.canvas/content` — it used the canvas as
 ;; the primary surface, not just messages). Both are measured every run
 ;; and surfaced on the scorecard; a scenario opts into asserting them
 ;; via the `:eval-error-rate` / `:canvas-updated` predicate kinds.
@@ -171,17 +171,17 @@
 ;;   = "the seeded reuse surface is actually visible".
 ;; :prompt-includes / :prompt-excludes / :prompt-every-turn — the
 ;;   referee's EYES (gym-upgrade PRD §2.1 / U1): assert against what
-;;   the agent ACTUALLY SAW. run-turn! persists every full prompt (via
-;;   seon.debug capture, forced ON for gym runs) to
-;;   <debug-dir>/<agent-id>/<turn-idx>-<turn-id>/prompt.txt (the turn
-;;   datom carries :seon.agent.turn/prompt-file); the driver collects the run's turns
-;;   from the post-run store and reads those blobs. :prompt-includes =
+;;   the agent ACTUALLY SAW. run-turn!'s ALWAYS-ON observability capture
+;;   persists every full prompt to the content-addressed blob store (the
+;;   turn datom carries a :seon.agent.turn/prompt-blob ref); the driver
+;;   collects the run's turns from the post-run store and reads those
+;;   blobs back by hash (my.blob/get). :prompt-includes =
 ;;   SOME turn's prompt contains :text; :prompt-excludes = NO turn's
 ;;   prompt contains :text; :prompt-every-turn = EVERY turn's prompt
 ;;   contains :text (the catalog's standing G2 sees-question shape).
 ;;   Optional :seon.gym.predicate/turn pins ONE turn by chronological
 ;;   index; :seon.gym.predicate/agent scopes to one designator's turns.
-;;   A turn with no prompt-file datom, an unreadable blob, an
+;;   A turn with no prompt-blob ref, an unreadable blob, an
 ;;   out-of-range index, or a run with zero turns ALL score RED naming
 ;;   the path/turn — NEVER a silent pass (a referee blind to its own
 ;;   missing eyes would hide the exact regression class this exists
@@ -194,9 +194,9 @@
 ;;   too, so this also catches malformed-form noise). Zero evals = 0.0
 ;;   (no errors), passes any threshold.
 ;; :canvas-updated — pass iff the (optionally agent-scoped, default :a)
-;;   agent drove its OWN canvas: :seon.render.live-tile/content is
+;;   agent drove its OWN canvas: :seon.render.canvas/content is
 ;;   present on [:seon.agent/id <agent>] in the post-run store. The
-;;   instrument for "agents drive the live tile as the primary surface,
+;;   instrument for "agents drive the canvas as the primary surface,
 ;;   messages only a backup".
 (schema/register! :seon.gym.predicate/kind
   [:enum :datalog :transcript-includes :transcript-excludes
@@ -357,25 +357,26 @@
 ;; `:eval-error-rate` predicate; references the canonical rate shape.
 (schema/register! :seon.gym.scorecard/eval-error-rate :seon.gym/eval-error-rate)
 ;; Did the PRIMARY agent (:a) drive its own canvas this run — i.e. set
-;; :seon.render.live-tile/content on its own entity? The "agents drive
-;; the live tile as the primary surface" instrument.
+;; :seon.render.canvas/content on its own entity? The "agents drive
+;; the canvas as the primary surface" instrument.
 (schema/register! :seon.gym.scorecard/canvas-updated? :boolean)
 ;; Toolkit-ADOPTION signal (the axis that would've caught #42): per `my.*`
 ;; toolkit namespace, how many times the run-driven evals REFERENCE it
-;; (`my.data/`, `my.ui/`, `my.tile/`) — did the agent CALL the taught
+;; (`my.data/`, `my.ui/`, `my.canvas/`) — did the agent CALL the taught
 ;; toolkit, or hand-roll the equivalent footgun path? A SIGNAL, never a
 ;; gate: a context change that drops these toward 0 is a render-prominence
 ;; regression (the #42 namespaces signature-trim regressed my.data adoption
 ;; to 0×, which the confounded total-tokens axis missed). Reads eval SOURCE
 ;; only (anti-cheat: never an answer). FREE-mode-blind — stub scripts don't
 ;; call tools, so it fills on --paid drives.
-(schema/register! :seon.gym/toolkit-ns [:enum :my.data :my.ui :my.tile])
+(schema/register! :seon.gym/toolkit-ns [:enum :my.data :my.ui :my.canvas])
 (schema/register! :seon.gym.scorecard/toolkit-calls
   [:map-of :seon.gym/toolkit-ns [:int {:min 0}]])
 ;; Per-turn prompt-blob evidence (gym-upgrade PRD §6.6, default-on):
-;; every persisted prompt-file path for the run, chronological — a
-;; moved number is diffable to the exact context bytes the agent saw.
-(schema/register! :seon.gym.scorecard/prompt-files [:vector :string])
+;; every persisted prompt-blob hash for the run, chronological — a
+;; moved number is diffable to the exact context bytes the agent saw
+;; (read back via my.blob/get).
+(schema/register! :seon.gym.scorecard/prompt-blobs [:vector :string])
 ;; --- per-turn context telemetry (informational, NEVER gates pass?) ----------
 ;; Captured once per driven gym turn from the per-block render path's OWN
 ;; output against the PRE-TURN db value (user message landed, turn not
@@ -436,8 +437,8 @@
    [:seon.gym.scorecard/toolkit-calls   :seon.gym.scorecard/toolkit-calls]
    [:seon.gym.scorecard/axes     :seon.gym.scorecard/axes]
    [:seon.gym.scorecard/results  :seon.gym.scorecard/results]
-   [:seon.gym.scorecard/prompt-files {:optional true}
-    :seon.gym.scorecard/prompt-files]
+   [:seon.gym.scorecard/prompt-blobs {:optional true}
+    :seon.gym.scorecard/prompt-blobs]
    ;; one context-telemetry profile per driven turn, chronological —
    ;; informational evidence only, never part of the verdict.
    [:seon.gym.scorecard/turn-profiles :seon.gym.scorecard/turn-profiles]
@@ -550,7 +551,7 @@
                        :seon.gym.turn/message             msg})))))
 
 ;; --- ALIAS-BLIND PREDICATE GUARD --------------------------------------------
-;; This bug class has bitten three times (my.tile e6aaf9f0; three seon.db/
+;; This bug class has bitten three times (my.canvas e6aaf9f0; three seon.db/
 ;; store-read predicates fc557fbf): a predicate :pattern regexes a
 ;; FULLY-QUALIFIED `seon.<ns>/` name, but the agent's home ns aliases that
 ;; ns to a SHORT prefix (seon.db -> db, seon.agent.message -> message, …),
@@ -569,7 +570,7 @@
 
 (defn- dotted-prefix-esc
   "The regex-escaped leading PREFIX of a dotted ns name — everything up to
-   and including the final dot (\"seon.db\" -> \"seon\\.\", \"my.tile\" ->
+   and including the final dot (\"seon.db\" -> \"seon\\.\", \"my.canvas\" ->
    \"my\\.\", \"my.plan\" -> \"my\\.\"). Used to build the
    per-ns optional-prefix idiom `(?:<prefix>)?<alias>` an alias-tolerant
    pattern may use — `(?:seon\\.)?db` for a seon verb, `(?:my\\.)?tile` for
@@ -600,12 +601,12 @@
    (seon.agent.ctx.namespaces/always-full-my-nses) (the my.* members of the
    resolved config `:seon.config/always` policy — the toolkit set the agent
    composes its canvas/memory from). The alias is the last dotted segment —
-   the CONVENTION every agent writes the toolkit by (`my.tile` → `tile`,
+   the CONVENTION every agent writes the toolkit by (`my.canvas` → `tile`,
    `my.ui` → `ui`, `my.data` → `data`, `my.kb` → `kb`), confirmed by the
-   toolkit test nses' `(:require [my.tile :as tile] …)` heads. These are NOT in
+   toolkit test nses' `(:require [my.canvas :as tile] …)` heads. These are NOT in
    [[home-ns-seon-aliases]] (a DIFFERENT wiring than the seon.* verbs in
    home-ns-require-specs), yet the ORIGINAL alias-blind instance was a
-   `my.tile/button` predicate — so without them the guard misses the whole
+   `my.canvas/button` predicate — so without them the guard misses the whole
    toolkit-alias class. Derives from the policy, never hardcodes."
   []
   (into {}
@@ -629,9 +630,9 @@
   "True when `pattern` references `dotted` (its regex-escaped form `esc`) as
    a FN-CALL alias target — `<esc>/` or `<esc>\\b` — at a position that is
    NOT part of a namespaced KEYWORD (`:<esc>/…`). A namespaced keyword like
-   `:my.tile/action` is an un-aliasable DATA KEY (the tile map's key), never
-   a `tile/action` alias call, so a `:my\\.tile/(action|submit)` data-key
-   predicate must NOT read as an alias-blind `my.tile/button` fn call. We
+   `:my.canvas/action` is an un-aliasable DATA KEY (the tile map's key), never
+   a `canvas/action` alias call, so a `:my\\.canvas/(action|submit)` data-key
+   predicate must NOT read as an alias-blind `my.canvas/button` fn call. We
    strip the `:<esc>` keyword occurrences first, then test the remainder for
    the bare fn-call form."
   [pattern esc]
@@ -645,7 +646,7 @@
    regexes WITHOUT also accepting the short alias the agent actually writes.
 
    For each aliased ns ([[home-ns-aliases]] — the seon.* verbs db/message/
-   schema/agent/plan AND the my.* toolkit tile/ui/data/kb): if the pattern
+   schema/agent/plan AND the my.* toolkit canvas/ui/data/kb): if the pattern
    references the qualified FN-CALL form `<long>\\<ns>/` (or `<long>\\b`) —
    [[qualified-fn-ref?]], which ignores un-aliasable `:<long>/…` keyword
    data-keys — it points at the long name directly; that is alias-BLIND
@@ -657,10 +658,10 @@
    No false positives: a fully-qualified pattern for a ns that is NOT
    aliased (seon.agent.search/grep, seon.agent.fs/read-file — agents write
    those qualified) is CORRECT, as is a namespaced-keyword data-key
-   (`:my.tile/action`). The qualified test demands a `/` or `\\b` right
+   (`:my.canvas/action`). The qualified test demands a `/` or `\\b` right
    after `<ns>` and discounts keyword occurrences, so `seon\\.agent\\.search/`
-   never trips the `seon.agent` alias and `:my\\.tile/action` never trips
-   the `my.tile` alias."
+   never trips the `seon.agent` alias and `:my\\.canvas/action` never trips
+   the `my.canvas` alias."
   [{:seon.gym.predicate/keys [id pattern]}]
   (when pattern
     (some (fn [[dotted alias]]
@@ -842,7 +843,7 @@
 
 (def ^:private toolkit-nses
   "The `my.*` toolkit namespaces the toolkit-adoption signal watches."
-  [:my.data :my.ui :my.tile])
+  [:my.data :my.ui :my.canvas])
 
 (defn- count-substring
   "How many (non-overlapping) times `sub` occurs in `s`."
@@ -854,7 +855,7 @@
 
 (defn- toolkit-calls*
   "Per `my.*` toolkit namespace, how many times the RUN-DRIVEN evals
-   REFERENCE it (`my.data/`, `my.ui/`, `my.tile/`) — the toolkit-ADOPTION
+   REFERENCE it (`my.data/`, `my.ui/`, `my.canvas/`) — the toolkit-ADOPTION
    signal (did the agent CALL the taught toolkit, or hand-roll it?). Reads
    eval SOURCE only (same caused-run scoping as [[eval-at+source]];
    anti-cheat: never an answer). Always returns all three keys (0 when the
@@ -867,26 +868,26 @@
 
 (defn- agent-canvas-updated?
   "Did the agent drive its OWN canvas — i.e. is
-   `:seon.render.live-tile/content` present on `[:seon.agent/id agent-id]`
+   `:seon.render.canvas/content` present on `[:seon.agent/id agent-id]`
    in the post-run store? (Fresh gym agents — designators :a, :b — start
    with the attr ABSENT; only the live 'root' agent is seeded a default
    tile, and the gym never boots root.)"
   [dbv agent-id]
   (boolean
     (and agent-id
-         (some? (:seon.render.live-tile/content
+         (some? (:seon.render.canvas/content
                   (db/entity {:seon.db/ref [:seon.agent/id agent-id]
                               :seon.db/db  dbv}))))))
 
-(defn- turn-prompt-files
-  "Chronological [turn-id prompt-file-or-nil] pairs for every RUN-DRIVEN
-   turn (stamped with a `:seon.agent.turn/run` whose run carries a
-   `:seon.agent.run/cause` — the bootstrap turn's run has no cause and
-   renders no prompt, so prompt predicates range over the turns the agent
-   was actually prompted on) in the post-run store — optionally scoped to
-   one agent's turns via agent ← run ← turn. A nil prompt-file means the
-   blob was never written (capture failure, or a seeded turn without one)
-   — prompt-predicate callers MUST treat that as RED."
+(defn- turn-prompt-blobs
+  "Chronological [turn-id prompt-blob-hash-or-nil] pairs for every
+   RUN-DRIVEN turn (stamped with a `:seon.agent.turn/run` whose run
+   carries a `:seon.agent.run/cause` — the bootstrap turn's run has no
+   cause and renders no prompt, so prompt predicates range over the turns
+   the agent was actually prompted on) in the post-run store — optionally
+   scoped to one agent's turns via agent ← run ← turn. A nil hash means
+   the always-on blob capture never landed (write failure, or a seeded
+   turn without one) — prompt-predicate callers MUST treat that as RED."
   [dbv agent-id]
   (->> (if agent-id
          (db/query {:seon.db/query '[:find ?at ?tid ?t
@@ -912,37 +913,43 @@
        ;; the canonical sub-ms order, eid is the cheap proxy here).
        (sort-by (fn [[at _ eid]] [(.getTime ^js at) eid]))
        (mapv (fn [[_ tid _]]
-               [tid (:seon.agent.turn/prompt-file
-                     (db/entity {:seon.db/ref [:seon.agent.turn/id tid]
-                                 :seon.db/db  dbv}))]))))
+               [tid (get-in (db/pull {:seon.db/pull-pattern
+                                      [{:seon.agent.turn/prompt-blob
+                                        [:my.blob/hash]}]
+                                      :seon.db/ref [:seon.agent.turn/id tid]
+                                      :seon.db/db  dbv})
+                            [:seon.agent.turn/prompt-blob :my.blob/hash])]))))
 
 (defn- read-prompt-blob
-  "Read one persisted prompt blob. Returns [:ok text] or
-   [:unreadable reason] — the caller turns :unreadable into a RED
-   result naming the path; this fn never throws."
-  [path]
+  "Read one persisted prompt blob back by content hash (my.blob/get).
+   Returns [:ok text] or [:unreadable reason] — the caller turns
+   :unreadable into a RED result naming the hash; this fn never throws."
+  [hash]
   (try
-    [:ok (.readFileSync (js/require "node:fs") path "utf8")]
+    (let [{:my.blob/keys [ok? content error]} (blob/get {:my.blob/hash hash})]
+      (if ok?
+        [:ok content]
+        [:unreadable (str hash " — " error)]))
     (catch :default e
-      [:unreadable (str path " — " (or (.-message e) e))])))
+      [:unreadable (str hash " — " (or (.-message e) e))])))
 
 (defn- eval-prompt-predicate
   "Evaluate one prompt-blob predicate (:prompt-includes /
    :prompt-excludes / :prompt-every-turn — gym-upgrade PRD §2.1/U1)
-   against the prompts the agent ACTUALLY SAW: the blobs run-turn!
-   persisted (via seon.debug capture, forced ON for gym runs) to
-   <debug-dir>/<agent-id>/<turn-idx>-<turn-id>/prompt.txt, located via
-   the post-run store's :seon.agent.turn/prompt-file datoms. Returns
-   [pass? actual]. Every blind spot is RED, never a silent pass: zero
-   turns, an out-of-range :turn index, a turn with no prompt-file
-   datom, an unreadable blob — each named in the actual.
+   against the prompts the agent ACTUALLY SAW: the content-addressed
+   blobs run-turn!'s ALWAYS-ON observability capture persisted, located
+   via the post-run store's :seon.agent.turn/prompt-blob refs and read
+   back by hash (my.blob/get). Returns [pass? actual]. Every blind spot
+   is RED, never a silent pass: zero turns, an out-of-range :turn index,
+   a turn with no prompt-blob ref, an unreadable blob — each named in
+   the actual.
 
    Containment is WHITESPACE-NORMALIZED ([[normalize-ws]]): rendered
    prompts line-wrap source text, so verbatim matching missed real
    contamination (the s32 salience text split by a docstring line
    break) and flaked on wrapping."
   [dbv agent-id kind text turn-idx]
-  (let [all (turn-prompt-files dbv agent-id)]
+  (let [all (turn-prompt-blobs dbv agent-id)]
     (cond
       (empty? all)
       [false (str "RED — NO turns" (when agent-id (str " for agent " agent-id))
@@ -954,18 +961,17 @@
                   " out of range; run has " (count all) " turn(s)")]
 
       :else
-      (let [reads  (mapv (fn [[tid path]]
-                           (if (nil? path)
+      (let [reads  (mapv (fn [[tid hash]]
+                           (if (nil? hash)
                              {:tid tid
                               :missing (str "turn " tid " has NO "
-                                            ":seon.agent.turn/prompt-file — "
-                                            "blob never written (expected "
-                                            "under the debug-capture dir, "
-                                            "default logs/turns/)")}
-                             (let [[status payload] (read-prompt-blob path)]
+                                            ":seon.agent.turn/prompt-blob — "
+                                            "the always-on blob capture "
+                                            "never landed")}
+                             (let [[status payload] (read-prompt-blob hash)]
                                (if (= :ok status)
-                                 {:tid tid :path path :text payload}
-                                 {:tid tid :path path
+                                 {:tid tid :hash hash :text payload}
+                                 {:tid tid :hash hash
                                   :missing (str "prompt blob unreadable: "
                                                 payload)}))))
                          (if turn-idx [(nth all turn-idx)] all))
@@ -977,7 +983,7 @@
                                reads)
                 stat  (str (count hits) "/" (count reads)
                            " prompt blob(s) contain " (pr-str text)
-                           "; blobs: " (pr-str (mapv :path reads)))]
+                           "; blobs: " (pr-str (mapv :hash reads)))]
             (case kind
               :prompt-includes   [(boolean (seq hits)) stat]
               :prompt-excludes   [(empty? hits) (str stat " (must be 0)")]
@@ -1025,9 +1031,7 @@
                                                       (resolve-predicate-args
                                                         agents args)))))
                          (catch :default e
-                           (if (get-in (ex-data e)
-                                       [:seon.error/data
-                                        :seon.db/missing-attrs])
+                           (if (:seon.db/missing-attrs (ex-data e))
                              []
                              (throw e))))]
               [(expect-pass? expect rows)
@@ -1077,7 +1081,7 @@
             (let [aid (or agent-id (get agents :a))]
               [(agent-canvas-updated? dbv aid)
                (str "agent " (or agent :a)
-                    " :seon.render.live-tile/content "
+                    " :seon.render.canvas/content "
                     (if (agent-canvas-updated? dbv aid)
                       "PRESENT (canvas driven)"
                       "ABSENT (canvas not driven)"))])
@@ -1116,12 +1120,11 @@
   "One `:seon.gym/turn-profile` for the turn about to run — context BLOCK
    names in render order + per-block TOKEN estimates (the hard
    size-reporting rule: tokens via `seon.ai.tokens/estimate`, never
-   chars) from [[ctx/ctx-sections]] (the SAME per-block render path the
-   prompt and the inspector take) against the pre-turn db value."
+   tokens) from [[ctx/rendered-context-blocks]] (the SAME per-block render path the
+   prompt and the debug view take) against the pre-turn db value."
   [dbv agent-id designator]
-  (let [texts (:seon.render/section-texts
-                (ctx/ctx-sections {:seon.db/db dbv
-                                   :seon.agent/id agent-id}))]
+  (let [texts (ctx/rendered-context-blocks
+                {:seon.db/db dbv :seon.agent/id agent-id} #{:ai})]
     {:seon.gym.profile/agent  designator
      :seon.gym.profile/blocks (mapv :seon.agent.ctx/name texts)
      :seon.gym.profile/block-tokens
@@ -1210,17 +1213,17 @@
        "\n\n== Reference facts (ground truth) ==\n" reference))
 
 (defn- agent-canvas-ai
-  "The agent's resolved live-tile `:seon.render/ai` twin — what the human
+  "The agent's resolved canvas `:seon.render/ai` twin — what the human
    actually SEES on the canvas — so a canvas-content judge grades the
    RENDERED tile, not just the reply prose. Goes through the public
-   `seon.render/render-agent-tile` path (the ONE tile entry point the
-   inspector + the live-tile awareness block use), NEVER render-engine
+   `seon.render/render-agent-canvas` path (the ONE tile entry point the
+   debug view + the canvas awareness block use), NEVER render-engine
    internals. Falls back to the error message + twin when the renderer
    threw, the hiccup pr-str when a tile carries no ai twin, and the empty
    string when nothing resolves (no canvas → nothing to append)."
   [dbv agent-id]
   (let [{:seon.render/keys [ai error hiccup]}
-        (render/render-agent-tile {:seon.agent/id agent-id :seon.db/db dbv})]
+        (render/render-agent-canvas {:seon.agent/id agent-id :seon.db/db dbv})]
     (cond
       (some? error) (str "⚠ canvas renderer threw: " (:seon.error/message error)
                          (when (some? ai) (str "\n" ai)))
@@ -1231,7 +1234,7 @@
 (defn- judge-ctx
   "Assemble the grading context for one :llm-judge predicate: the
    designated agent's question(s), its verbatim reply, its RENDERED
-   CANVAS (the resolved live-tile `:seon.render/ai` twin — so a
+   CANVAS (the resolved canvas `:seon.render/ai` twin — so a
    canvas-content judge grades what the human actually sees, not the
    reply prose alone), the rubric, the reference facts."
   [turns agents dbv {:seon.gym.predicate/keys [agent rubric reference]}]
@@ -1451,10 +1454,10 @@
   [compile-state sources]
   (loop [sources sources]
     (when-let [[src & more] (seq sources)]
-      (let [res (await (seval/eval compile-state src {:ns 'cljs.user}))]
-        (when-not (:ok res)
+      (let [res (await (seval/eval compile-state src {:seon.eval/starting-ns 'cljs.user}))]
+        (when-not (:seon.eval/ok? res)
           (throw (ex-info "gym: fixture source eval failed"
-                          {:seon.gym/error      (pr-str (:error res))
+                          {:seon.gym/error      (pr-str (:seon/error res))
                            :seon.gym.run/source src}))))
       (recur more))))
 
@@ -1654,8 +1657,9 @@
       extraction). The seed-origin tx-context matters:
       `seon.warn/domain-attrs` discriminates core vs agent attrs
       by exactly that provenance. The caller (run-scenario!) invokes
-      this inside `(db/with-agent <:a's id>)` so the seed txs carry
-      the primary agent's id like a live boot's do. The test roster
+      this OUTSIDE any agent scope, like the live boot does — a
+      `:core-seed` claim inside an agent scope trips the
+      origin-forge guard. The test roster
       comes from the `seon.dev.test-preload` require in this ns — the
       SAME mechanism the pod build uses.
 
@@ -1798,13 +1802,9 @@
             ;; resolve-agent-context pick up the run's chosen manifest.
             ;; nil config → no-op. Restored in finally.
             prev-env     (apply-run-config! config)]
-        ;; The gym's prompt-blob evidence (§6.6) IS debug capture — it
-        ;; reads back the verbatim prompt the agent saw. run-turn!'s
-        ;; capture is OFF by default (live pods don't want the disk
-        ;; growth), so the gym forces it ON for the run and restores the
-        ;; prior knob in `finally`. Without this the prompt-* predicates
-        ;; would silently lose their eyes (a turn with no prompt-file).
-        (debug/set-override! :on)
+        ;; The gym's prompt-blob evidence (§6.6) rides run-turn!'s
+        ;; ALWAYS-ON observability capture (:seon.agent.turn/prompt-blob
+        ;; → the content-addressed blob store) — no gate to force on.
         (try
           (let [conn          (await (client/open-agent-conn!))
                 _             (set! db/*conn* conn)
@@ -1828,30 +1828,30 @@
               (sfs/configure! {:seon.agent.fs/allowed-roots
                                [(str cwd "/src") (str cwd "/docs")]
                                :seon.agent.fs/read-only?    true}))
-            ;; Mint :a's id FIRST and run the boot seed inside its
-            ;; with-agent scope — the seed txs carry the PRIMARY
-            ;; agent's id alongside the :core-seed origin (the
-            ;; live store's provenance shape, which the context-model
-            ;; classifier keys on). :a's actual BOOT (create! +
+            ;; Run the boot seed OUTSIDE any agent scope — the live
+            ;; store's provenance shape: `start-agent!` seeds before
+            ;; entering its with-agent scope, because a `:core-seed`
+            ;; origin claim from inside an agent scope is what the
+            ;; origin-forge guard warns on. :a's actual BOOT (create! +
             ;; creation evals) happens AFTER the seed + fixtures, so
             ;; its creation-turn `store-inventory`/instructions evals
             ;; see the seeded world — the live mint-onto-populated-
             ;; store order (a scenario's fixtures ARE prior state).
             ;; The scenario's prior-agent layer inside
-            ;; [[seed-scenario-world!]] re-scopes itself to a synthetic
-            ;; prior-agent id (nested with-agent — inner wins).
+            ;; [[seed-scenario-world!]] scopes itself to a synthetic
+            ;; prior-agent id (its own with-agent).
             (let [primary (db/new-id!)]
+              (await (seed-scenario-world! {:seon.gym/scenario scenario
+                                            :seon.db/conn conn}))
+              ;; World-parity: a live boot syncs the :seon.ai/config
+              ;; row from the SEON_AI_* env vars (start-agent! →
+              ;; ai/sync!; env OWNS the row) inside its agent scope.
+              ;; The gym never ran the sync, so env knobs
+              ;; (SEON_AI_TIMEOUT_MS, _MODEL, _THINKING) were silently
+              ;; DEAD in gym worlds while live pods honored them.
               (await
                 (db/with-agent primary
-                  (fn ^:async seed-and-sync! []
-                    (await (seed-scenario-world! {:seon.gym/scenario scenario
-                                                  :seon.db/conn conn}))
-                    ;; World-parity: a live boot syncs the :seon.ai/config
-                    ;; row from the SEON_AI_* env vars (start-agent! →
-                    ;; ai/sync!; env OWNS the row). The gym never ran the
-                    ;; sync, so env knobs (SEON_AI_TIMEOUT_MS, _MODEL,
-                    ;; _THINKING) were silently DEAD in gym worlds while
-                    ;; live pods honored them.
+                  (fn ^:async sync-ai! []
                     (await (ai/sync!)))))
               (await (eval-fixture-sources! compile-state fixture-sources))
               (await (ensure-agent! !agents compile-state :a primary)))
@@ -1945,13 +1945,14 @@
                           (axes-rollup axes results)
                           :seon.gym.scorecard/results  results
                           ;; gym-upgrade §6.6 (default-on): the run's
-                          ;; per-turn prompt-blob paths, chronological —
+                          ;; per-turn prompt-blob hashes, chronological —
                           ;; a moved number diffs to the exact context
-                          ;; bytes the agent saw. nil paths (blob write
-                          ;; failures) are dropped here; the prompt
-                          ;; PREDICATES are where missing blobs go RED.
-                          :seon.gym.scorecard/prompt-files
-                          (into [] (keep second) (turn-prompt-files dbv nil))
+                          ;; bytes the agent saw (my.blob/get). nil
+                          ;; hashes (blob write failures) are dropped
+                          ;; here; the prompt PREDICATES are where
+                          ;; missing blobs go RED.
+                          :seon.gym.scorecard/prompt-blobs
+                          (into [] (keep second) (turn-prompt-blobs dbv nil))
                           ;; context telemetry: one profile per driven
                           ;; turn, chronological — informational only.
                           :seon.gym.scorecard/turn-profiles profiles}
@@ -1966,16 +1967,15 @@
                                  (pr-str (m/explain :seon.gym/scorecard card))})))
               card))
           (finally
-            ;; Restore the root conn + fs capability config + debug-capture
-            ;; knob + the FULL schema registry snapshot so one scenario can't
-            ;; leak into the next (or into non-gym tests sharing the process).
+            ;; Restore the root conn + fs capability config + the FULL
+            ;; schema registry snapshot so one scenario can't leak into
+            ;; the next (or into non-gym tests sharing the process).
             ;; Resetting to the captured map reverts BOTH keys the run minted
             ;; (scenario registrations AND agent-eval register!s) AND any
             ;; pre-existing key whose value a scenario re-registered — the
             ;; latter is what a key-only diff-reap silently left mutated.
             (set! db/*conn* prev-conn)
             (reset! sfs-int/!config prev-fs)
-            (debug/set-override! :env)
             (env-set! "SEON_CONFIG" prev-env)
             (reset! schema/*schemas schemas-before)))))))
 
@@ -2028,11 +2028,13 @@
                          [(str cwd "/src") (str cwd "/docs")]
                          :seon.agent.fs/read-only? true})
         (let [primary (db/new-id!)]
+          ;; Seed outside any agent scope (live provenance shape — see
+          ;; the origin-forge note at the run-scenario! seed site).
+          (await (seed-scenario-world! {:seon.gym/scenario scenario
+                                        :seon.db/conn conn}))
           (await
             (db/with-agent primary
-              (fn ^:async seed-and-sync! []
-                (await (seed-scenario-world! {:seon.gym/scenario scenario
-                                              :seon.db/conn conn}))
+              (fn ^:async sync-ai! []
                 (await (ai/sync!)))))
           (await (eval-fixture-sources! compile-state fixture-sources))
           (await (ensure-agent! !agents compile-state :a primary)))

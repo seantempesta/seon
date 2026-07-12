@@ -1,0 +1,40 @@
+2026-07-05T19:37:44.767Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.protocols/-supports-multi-key? (file "konserve/protocols.cljc" line 14) — OMITTING
+2026-07-05T19:37:44.767Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.protocols/-update-in (file "konserve/protocols.cljc" line 4) — OMITTING
+2026-07-05T19:37:44.767Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.serializers/->FressianSerializer (file "konserve/serializers.cljc" line 29) — OMITTING
+2026-07-05T19:37:44.767Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.serializers/->StringSerializer (file "konserve/serializers.cljc" line 61) — OMITTING
+2026-07-05T19:37:44.767Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.serializers/construct->byte (file "konserve/serializers.cljc" line 98) — OMITTING
+2026-07-05T19:37:44.767Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.serializers/construct->class (file "konserve/serializers.cljc" line 76) — OMITTING
+2026-07-05T19:37:44.767Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.serializers/construct->keys (file "konserve/serializers.cljc" line 89) — OMITTING
+2026-07-05T19:37:44.767Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.serializers/fressian-serializer (file "konserve/serializers.cljc" line 56) — OMITTING
+2026-07-05T19:37:44.767Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.serializers/map->FressianSerializer (file "konserve/serializers.cljc" line 29) — OMITTING
+2026-07-05T19:37:44.767Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.serializers/map->StringSerializer (file "konserve/serializers.cljc" line 61) — OMITTING
+2026-07-05T19:37:44.767Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.serializers/string-serializer (file "konserve/serializers.cljc" line 73) — OMITTING
+2026-07-05T19:37:44.767Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.store/connect-store (file "konserve/store.cljc" line 123) — OMITTING
+2026-07-05T19:37:44.767Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.store/create-store (file "konserve/store.cljc" line 142) — OMITTING
+2026-07-05T19:37:44.767Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.store/delete-store (file "konserve/store.cljc" line 173) — OMITTING
+2026-07-05T19:37:44.767Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.store/release-store (file "konserve/store.cljc" line 187) — OMITTING
+2026-07-05T19:37:44.767Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.store/store-exists? (file "konserve/store.cljc" line 159) — OMITTING
+2026-07-05T19:37:44.767Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.store/validate-store-config (file "konserve/store.cljc" line 43) — OMITTING
+2026-07-05T19:37:44.768Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.tiered/->TieredStore (file "konserve/tiered.cljc" line 144) — OMITTING
+2026-07-05T19:37:44.768Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.tiered/connect-tiered-store (file "konserve/tiered.cljc" line 429) — OMITTING
+2026-07-05T19:37:44.768Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.tiered/full-sync-strategy (file "konserve/tiered.cljc" line 33) — OMITTING
+2026-07-05T19:37:44.768Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.tiered/map->TieredStore (file "konserve/tiered.cljc" line 144) — OMITTING
+2026-07-05T19:37:44.768Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.tiered/perform-sync (file "konserve/tiered.cljc" line 63) — OMITTING
+2026-07-05T19:37:44.768Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.tiered/perform-walk-sync (file "konserve/tiered.cljc" line 99) — OMITTING
+2026-07-05T19:37:44.768Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.tiered/populate-missing-strategy (file "konserve/tiered.cljc" line 28) — OMITTING
+2026-07-05T19:37:44.768Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.tiered/sync-keys-to-frontend! (file "konserve/tiered.cljc" line 93) — OMITTING
+2026-07-05T19:37:44.768Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.tiered/sync-on-connect (file "konserve/tiered.cljc" line 88) — OMITTING
+2026-07-05T19:37:44.768Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.utils/invert-map (file "konserve/utils.cljc" line 6) — OMITTING
+2026-07-05T19:37:44.768Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.utils/invoke-write-hooks! (file "konserve/utils.cljc" line 43) — OMITTING
+2026-07-05T19:37:44.768Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.utils/meta-update (file "konserve/utils.cljc" line 14) — OMITTING
+2026-07-05T19:37:44.768Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.utils/multi-key-capable? (file "konserve/utils.cljc" line 26) — OMITTING
+2026-07-05T19:37:44.768Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.utils/now (file "konserve/utils.cljc" line 10) — OMITTING
+2026-07-05T19:37:44.768Z  ERROR [seon.client/var->fn-row] could not read real source for konserve.utils/write-hooks-capable? (file "konserve/utils.cljc" line 34) — OMITTING
+2026-07-05T19:37:49.051Z  INFO  [seon.client/start-agent!] boot-index GC: 0 ghost row(s) pruned
+2026-07-05T19:37:49.146Z  INFO  [seon.client/start-agent!] replay: {:seon.client/replay-n-total 11, :seon.client/replay-n-ok 11, :seon.client/replay-n-fail 0}
+2026-07-05T19:37:49.321Z  INFO  [seon.client/start-agent!] instrumentation: {:seon.instrument/registered 600, :seon.instrument/skipped 3, :seon.instrument/no-var 0, :seon.instrument/bad-spec 0, :seon.instrument/unresolvable-schema 0, :seon.instrument/enabled? true, :seon.instrument/n-instrumented 600}
+2026-07-05T19:37:49.399Z  INFO  [seon.web.serve] listening on http://127.0.0.1:7890 {:port-file "/seon-data/tmp/seon-port"}
+2026-07-05T19:37:49.404Z  INFO  [seon.agent.loop/install-ticker!] ticker installed {:seon.agent.loop/tick-ms 30000}
+2026-07-05T19:37:49.405Z  INFO  [seon.client] agents started {:resumed ["Yxu-2607051816" "root" "uBb-2607051814"], :minted [], :port 7890, :port-file "/seon-data/tmp/seon-port"}
+2026-07-05T19:37:49.405Z  INFO  [seon.client] auto-boot ready {:agent "Yxu-2607051816", :ns "", :resumed ["Yxu-2607051816" "root" "uBb-2607051814"], :minted [], :url "http://127.0.0.1:7890", :port-file "/seon-data/tmp/seon-port"}
+[seon-entrypoint] signal received — stopping pod + wire-server

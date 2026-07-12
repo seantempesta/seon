@@ -39,7 +39,7 @@ map, (3) the message-verb gap status, (4) a minimal-context recommendation.
   pid 4810) while the *stored* facts were later recomputed to the REAL values
   (`v24.2.0`, `/Users/sean/src/seon`, pid 77124). Message-text and stored-data
   decoupled.
-- **`ui-live-tiles` ignored:** the task was a "tell me / recommend" — the exact
+- **`ui-canvas` ignored:** the task was a "tell me / recommend" — the exact
   case the catalog tells the agent to render a tile for — but it replied with a
   wall-of-text markdown message and never loaded the skill or rendered a tile.
 
@@ -119,7 +119,7 @@ Per-block token cost (estimated, `chars/4`):
   with a text message, not a canvas render.
 - **`my.kb.shared`** block — an empty-stub namespace section the agent never
   touched.
-- **`ui-live-tiles`** skill — advertised in the catalog for exactly this
+- **`ui-canvas`** skill — advertised in the catalog for exactly this
   "recommend/tell me" task; the agent never loaded it. Either the catalog blurb
   isn't persuasive enough or the text-reply reflex is too strong.
 
@@ -192,11 +192,11 @@ deliberately:
 **DROP / DEFER from the minimal base:**
 
 - `live-tile` always-on block (1,282 tok) — unreferenced; fold it into the
-  `ui-live-tiles` skill so it only costs tokens when the agent opts in.
+  `ui-canvas` skill so it only costs tokens when the agent opts in.
 - `my.kb.shared` empty-stub section — emit only when it has rows.
 - Don't pre-load any skill: the agent loads the right ones itself. The
   always-on cost should be catalog + repl + todo + kb-manual, ~4-5k tokens,
-  with datahike/clojurescript/ui-live-tiles strictly on-demand.
+  with datahike/clojurescript/ui-canvas strictly on-demand.
 
 **WATCH when expanding:** the `namespaces` block (12.4k) is where bloat hides —
 every manual's prose renders in full every turn. Measure each manual's token

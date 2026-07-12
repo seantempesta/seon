@@ -6,7 +6,7 @@
    grant read, and the errors-as-values envelope helpers.
 
    This namespace is INTERNAL: the `*.internal` ns name IS the render
-   filter — agents call the public verbs in `seon.agent.web`, never these.
+   filter — agents call the public functions in `seon.agent.web`, never these.
    All map keys stay in the `:seon.agent.web/*` namespace (via
    `:as-alias`): the keyword namespace tracks the OWNING DATA namespace
    (`seon.agent.web`), not the file the code lives in — the same rule
@@ -25,6 +25,7 @@
     [my.blob :as blob]
     [seon.agent.web :as-alias web]
     [seon.ai.tokens :as tokens]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.platform :as platform]))
 
@@ -37,6 +38,9 @@
 (def default-max-preview-tokens "Preview cap — deliberately small; the full doc is one blob/text away." 2000)
 (def default-max-redirects   "Redirect-hop cap; every hop re-passes the SSRF guard." 5)
 (def default-links-cap       "Max link rows carried in the response." 25)
+
+(def default-search-results  "Result rows returned when unspecified." 10)
+(def max-search-results      "Hard cap on search result rows (safety constraint)." 20)
 
 (def max-html-chars     "Skip the DOM parse above this HTML size (fall back to regex)." 1000000)
 (def max-nesting-depth  "Skip the DOM parse above this estimated tag nesting." 3000)
@@ -53,35 +57,50 @@
   (let [v (platform/env-val "SEON_WEB")]
     (boolean (and v (not= "0" v)))))
 
-(defn locked?
-  "True when the HOST locked the grant via SEON_WEB_LOCK (any value but
-   \"0\")."
+;; ============================================================
+;; The web-access POLICY — host-owned CONFIG, NOT env. The master on/off
+;; gate (SEON_WEB, above) decides WHETHER web fetch is available; this policy
+;; decides which TARGETS are reachable once it is. It lives in the cluster
+;; manifest (`config/system.edn`'s `:seon.config/web`), read via seon.config,
+;; and resolves to
+;;   {:seon.agent.web/policy <mode> :seon.agent.web/allowed-domains [<host>…]}
+;; where <mode> is one of:
+;;   :open        — no restriction (public AND private/loopback reachable);
+;;   :public-only — refuse internal targets (loopback/RFC-1918/link-local/ULA)
+;;                  on every redirect hop (the SSRF-safe posture);
+;;   :allowlist   — reachable ONLY if the host matches `allowed-domains`
+;;                  (private membership is governed by the list itself).
+;; Host-owned: the agent READS its policy (via [[web/grants]]) but nothing in
+;; the pod can widen it. The code/schema fallback (no config) is :public-only,
+;; so a downstream inheritor is never SSRF-open by accident.
+;; ============================================================
+
+;; Test seam — a hermetic test resets this to a literal policy map instead of
+;; staging a config file (the [[!fetch-impl]]/[[!lookup-impl]] pattern). nil =
+;; read the live config.
+(defonce !policy-override (atom nil))
+
+(defn policy
+  "The resolved web-access policy map (mode + allowed-domains) every hop
+   enforces — the config value, or the [[!policy-override]] test seam.
+   Normalized so both keys are always present (allowed-domains defaults to
+   `[]`), regardless of a sparse override."
   []
-  (let [v (platform/env-val "SEON_WEB_LOCK")]
-    (boolean (and v (not= "0" v)))))
-
-;; The configurable domain allowlist. Empty = all domains allowed (when
-;; SEON_WEB is granted). Seeded from SEON_WEB_DOMAINS (comma-separated).
-(defn- env-domains []
-  (when-let [v (platform/env-val "SEON_WEB_DOMAINS")]
-    (->> (str/split v #",") (map str/trim) (remove str/blank?) vec)))
-
-(defonce !config (atom {::web/allowed-domains (or (env-domains) [])}))
-
-(defn allowed-domains [] (vec (::web/allowed-domains @!config)))
+  (let [p (or @!policy-override (config/web-policy))]
+    {::web/policy          (::web/policy p)
+     ::web/allowed-domains (vec (::web/allowed-domains p))}))
 
 (defn domain-allowed?
-  "True iff `hostname` is permitted by the allowlist — always true when
-   the allowlist is empty (allow-all-when-granted). A domain matches its
-   exact host or any subdomain of it."
-  [hostname]
-  (let [allow (allowed-domains)]
-    (or (empty? allow)
-        (boolean (some (fn [d]
-                         (let [d (str/lower-case d)]
-                           (or (= hostname d)
-                               (str/ends-with? hostname (str "." d)))))
-                       allow)))))
+  "True iff `hostname` matches the `allow` list — its exact host or any
+   subdomain of a listed domain (an IP literal matches itself). Only
+   consulted in :allowlist mode; an empty list matches NOTHING (a
+   :allowlist policy with no domains reaches nowhere)."
+  [hostname allow]
+  (boolean (some (fn [d]
+                   (let [d (str/lower-case d)]
+                     (or (= hostname d)
+                         (str/ends-with? hostname (str "." d)))))
+                 allow)))
 
 ;; ============================================================
 ;; Error / denial envelopes — errors are values, never a throw.
@@ -105,11 +124,33 @@
                 "pod starts; nothing inside the pod can grant it. Inspect "
                 "with (seon.agent.web/grants).")))
 
+(defn search-err
+  "ok?-false SEARCH envelope — the same :seon.error/* shape as [[err]], but
+   keyed on `::web/query` (the search request has no url). `data` optional."
+  ([query msg] (search-err query msg nil))
+  ([query msg data]
+   (cond-> {::web/ok?           false
+            ::web/query         query
+            :seon.error/message msg}
+     (seq data) (assoc :seon.error/data data))))
+
+(defn search-ungranted
+  "The guiding default-deny SEARCH envelope — search IS web access, so it
+   rides the SAME SEON_WEB grant as fetch (no second gate)."
+  [query]
+  (search-err query
+              (str "web access is not granted (default-deny) — search rides "
+                   "the SAME SEON_WEB grant as fetch; the host must set "
+                   "SEON_WEB (any value but \"0\") before the pod starts. "
+                   "Inspect with (seon.agent.web/grants).")))
+
 ;; ============================================================
-;; SSRF guard — block private / loopback / link-local targets. Always on,
-;; un-configurable; the soft boundary against LLM-emitted accidents
-;; (DNS-rebinding-grade evasion is out of scope — process isolation is the
-;; real boundary). Checked on the resolved address of EVERY redirect hop.
+;; SSRF / target guard — the ONE per-hop reachability check, driven by the
+;; host-owned [[policy]] (never agent-configurable). :public-only blocks
+;; private/loopback/link-local/ULA targets (the SSRF soft boundary against
+;; LLM-emitted accidents — DNS-rebinding-grade evasion is out of scope,
+;; process isolation is the real boundary); :allowlist blocks any host not
+;; in the list; :open blocks nothing. Checked on EVERY redirect hop.
 ;; ============================================================
 
 (def blocked-hostnames #{"localhost" "localhost.localdomain" "metadata.google.internal"})
@@ -163,27 +204,46 @@
     (catch :default _ nil)))
 
 (defn ^:async host-block-reason
-  "A reason string if the parsed URL's host is a blocked (private) target;
-   `:seon.agent.web.internal/dns-fail` when the host cannot be resolved;
-   nil when the host is a public, reachable address."
-  [^js parsed]
+  "A short reason string when the parsed URL's host is refused by `policy`,
+   `:seon.agent.web.internal/dns-fail` when it cannot be resolved, or nil
+   when it is reachable. Dispatches on the policy mode:
+     :open        — never refuses (only DNS failure surfaces);
+     :public-only — refuses loopback/RFC-1918/link-local/ULA (checked on
+                    the resolved address of the host);
+     :allowlist   — refuses any host not in `allowed-domains` (a private
+                    host is reachable IFF it is explicitly listed — private
+                    membership is governed by the list, not special-cased)."
+  [^js parsed policy]
   (let [hostname (-> (.-hostname parsed) str/lower-case
-                     (str/replace #"^\[" "") (str/replace #"\]$" ""))]
-    (cond
-      (contains? blocked-hostnames hostname)
-      (str "blocked host name: " hostname)
+                     (str/replace #"^\[" "") (str/replace #"\]$" ""))
+        mode     (::web/policy policy)
+        allow    (::web/allowed-domains policy)]
+    (case mode
+      :allowlist
+      (when-not (domain-allowed? hostname allow)
+        (str "host " hostname " is not in the web allowlist (policy :allowlist)"))
 
-      (ip-literal? hostname)
-      (when (private-ip? hostname)
-        (str "private/loopback IP address: " hostname))
+      :open
+      (when (and (not (ip-literal? hostname))
+                 (empty? (await (resolve-addrs hostname))))
+        ::dns-fail)
 
-      :else
-      (let [addrs (await (resolve-addrs hostname))]
-        (cond
-          (empty? addrs)          ::dns-fail
-          (some private-ip? addrs) (str "host " hostname
-                                         " resolves to a private/loopback address")
-          :else                    nil)))))
+      ;; :public-only (the default) — the SSRF private-range guard.
+      (cond
+        (contains? blocked-hostnames hostname)
+        (str "blocked host name: " hostname)
+
+        (ip-literal? hostname)
+        (when (private-ip? hostname)
+          (str "private/loopback IP address: " hostname))
+
+        :else
+        (let [addrs (await (resolve-addrs hostname))]
+          (cond
+            (empty? addrs)           ::dns-fail
+            (some private-ip? addrs) (str "host " hostname
+                                          " resolves to a private/loopback address")
+            :else                    nil))))))
 
 ;; ============================================================
 ;; HTML → markdown — the regex converter ported from openclaw's
@@ -349,7 +409,7 @@
 
 ;; ============================================================
 ;; Transport — the redirect-following, SSRF-re-checked, capped-body
-;; fetch. Returns a clj map, never throws; the public verb decides the
+;; fetch. Returns a clj map, never throws; the public function decides the
 ;; output discipline on top of it.
 ;; ============================================================
 
@@ -414,23 +474,18 @@
         (err url (str "only http/https URLs are supported (got "
                       (.-protocol parsed) ") — file: is seon.agent.fs's job."))
 
-        (not (domain-allowed? (str/lower-case (.-hostname parsed))))
-        (err url (str "host " (.-hostname parsed) " is not in the configured "
-                      "domain allowlist — inspect it with (seon.agent.web/grants).")
-             {::web/allowed-domains (allowed-domains)})
-
         :else
-        (let [block (await (host-block-reason parsed))]
+        (let [pol   (policy)
+              block (await (host-block-reason parsed pol))]
           (cond
             (= block ::dns-fail)
             (err url (str "could not resolve host " (.-hostname parsed)
                           " (DNS lookup failed)."))
 
             (string? block)
-            (err url (str "blocked by the private-range guard: " block
-                          ". Loopback/RFC-1918/link-local/ULA targets are "
-                          "always refused (SSRF soft boundary).")
-                 {::web/final-url current})
+            (err url (str "web policy refused this target: " block
+                          " — inspect the policy with (seon.agent.web/grants).")
+                 {::web/final-url current ::web/policy (::web/policy pol)})
 
             :else
             (let [ctrl   (js/AbortController.)
@@ -505,3 +560,241 @@
       (let [[e at] (apply max-key #(.getTime ^js (second %)) rows)]
         (when (< (- (.now js/Date) (.getTime ^js at)) max-age-ms)
           (db/entity e))))))
+
+;; ============================================================
+;; WEB SEARCH — the `seon.agent.web/search` backend. Backend + model are
+;; host-owned CONFIG (`config/system.edn`'s `:seon.config/web`, read via
+;; seon.config); the API KEY is read LIVE from env at call time (never
+;; stored, never logged). First wire = Gemini "Grounding with Google Search"
+;; over raw REST `generateContent` + `{"google_search": {}}`; the response is
+;; backend-agnostic rows + an optional grounded ::answer so Serper slots in
+;; behind the SAME schema later.
+;; ============================================================
+
+;; Test seam — a hermetic test resets this to a literal
+;; {::web/search-backend <kw> ::web/search-model <s>} map instead of staging
+;; a config file. nil = read the live config.
+(defonce !search-config-override (atom nil))
+
+(defn search-config
+  "The resolved search backend + model — the config value (via
+   [[seon.config/web-search-config]]) or the [[!search-config-override]]
+   test seam, normalized to `{::web/search-backend <kw> ::web/search-model
+   <s>}`."
+  []
+  (let [c (or @!search-config-override (config/web-search-config))]
+    {::web/search-backend (:seon.agent.web/search-backend c)
+     ::web/search-model   (:seon.agent.web/search-model c)}))
+
+(defn gemini-key
+  "The `GEMINI_API_KEY` env value, or nil when unset/blank. Read LIVE at
+   call time — the key is NEVER stored in a datom, config, or log."
+  []
+  (platform/env-val "GEMINI_API_KEY"))
+
+;; ---- Response parsing (PURE) ----------------------------------------------
+;; `parse-grounding` turns a keywordized Gemini grounding body into the
+;; backend-agnostic response arms — rows from `groundingChunks`, per-row
+;; snippets joined from the `groundingSupports` segments citing that chunk,
+;; the grounded `::answer`, and the executed `::queries`. No I/O; unit-tested
+;; against fixture JSON.
+
+(defn- support-snippets
+  "Index `groundingSupports` → {chunk-index [segment-text …]}. A support's
+   `segment.text` is attributed to every chunk in its
+   `groundingChunkIndices` — that is the only per-source snippet the
+   grounding API exposes."
+  [supports]
+  (reduce
+    (fn [acc s]
+      (let [t (get-in s [:segment :text])]
+        (if (str/blank? t)
+          acc
+          (reduce (fn [a i] (update a i (fnil conj []) t))
+                  acc (:groundingChunkIndices s)))))
+    {} supports))
+
+(defn parse-grounding
+  "Parse a keywordized Gemini grounding body into the search-response arms.
+
+   Returns `{::web/results [row…] ::web/result-count n ::web/queries [q…]
+   ::web/answer s?}` where each row is `{::web/url ::web/rank (::web/title)
+   (::web/snippet)}`. `::result-count` is the HONEST pre-cap total (chunks
+   with a url); `::results` is capped at `max-results`. Rank = the chunk's
+   0-based groundingChunks position. Snippet joins the groundingSupports
+   segments citing that chunk. Pure — no I/O."
+  [body max-results]
+  (let [cand     (get-in body [:candidates 0])
+        gm       (:groundingMetadata cand)
+        answer   (->> (get-in cand [:content :parts]) (keep :text) (apply str))
+        queries  (vec (:webSearchQueries gm))
+        chunks   (vec (:groundingChunks gm))
+        snip-idx (support-snippets (:groundingSupports gm))
+        all-rows (->> chunks
+                      (map-indexed
+                        (fn [i c]
+                          (let [uri   (get-in c [:web :uri])
+                                title (get-in c [:web :title])
+                                snip  (some->> (get snip-idx i) distinct (str/join " "))]
+                            (when-not (str/blank? uri)
+                              (cond-> {::web/url uri ::web/rank i}
+                                (not (str/blank? title)) (assoc ::web/title title)
+                                (not (str/blank? snip))  (assoc ::web/snippet snip))))))
+                      (remove nil?)
+                      vec)]
+    (cond-> {::web/results      (vec (take max-results all-rows))
+             ::web/result-count (count all-rows)
+             ::web/queries      queries}
+      (not (str/blank? answer)) (assoc ::web/answer answer))))
+
+;; ---- Gemini grounding transport -------------------------------------------
+
+(def gemini-base
+  "The consumer Gemini API generateContent base (model + method appended)."
+  "https://generativelanguage.googleapis.com/v1beta/models/")
+
+;; Test seam — a hermetic test resets this to a fake returning a Promise of
+;; either {::web/ok? true ::web/body <keywordized-clj>} or a search-err
+;; envelope, so the parse + envelope path runs with NO network. nil = the
+;; real REST POST below.
+(defonce !gemini-impl (atom nil))
+
+(defn ^:async gemini-request
+  "POST `generateContent` + `{google_search:{}}` for `query`; resolve to
+   `{::web/ok? true ::web/body <keywordized-clj>}` or a [[search-err]]
+   envelope (timeout, transport failure, non-2xx/quota). Never throws. The
+   `api-key` rides the `x-goog-api-key` header only — never logged."
+  [query model api-key timeout-ms]
+  (if-let [f @!gemini-impl]
+    (await (f query model api-key timeout-ms))
+    (let [ctrl    (js/AbortController.)
+          tid     (js/setTimeout #(.abort ctrl) timeout-ms)
+          url     (str gemini-base model ":generateContent")
+          payload #js {:contents #js [#js {:parts #js [#js {:text query}]}]
+                       :tools    #js [#js {:google_search #js {}}]}
+          result  (try
+                    #js {:resp (await ((fetch-fn) url
+                                       #js {:method  "POST"
+                                            :signal  (.-signal ctrl)
+                                            :headers #js {"x-goog-api-key" api-key
+                                                          "Content-Type"   "application/json"}
+                                            :body    (.stringify js/JSON payload)}))}
+                    (catch :default e #js {:error e}))
+          _       (js/clearTimeout tid)]
+      (if-let [e (.-error result)]
+        (if (= "AbortError" (.-name ^js e))
+          (search-err query (str "search timed out after " timeout-ms
+                                 " ms — raise :seon.agent.web/timeout-ms if grounding is slow."))
+          (search-err query (str "search transport error: " (or (some-> ^js e .-message) (str e)))))
+        (let [resp   (.-resp result)
+              status (.-status resp)
+              text   (await (.text resp))]
+          (if (>= status 400)
+            ;; Surface the provider's message verbatim (quota/400/etc).
+            (let [pmsg (try (get-in (js->clj (.parse js/JSON text) :keywordize-keys true)
+                                    [:error :message])
+                            (catch :default _ nil))]
+              (search-err query
+                          (str "gemini grounding HTTP " status
+                               (when pmsg (str " — " pmsg)))
+                          {::web/status status}))
+            (let [body (try (js->clj (.parse js/JSON text) :keywordize-keys true)
+                            (catch :default _ nil))]
+              (if (nil? body)
+                (search-err query "gemini grounding returned a non-JSON body.")
+                {::web/ok? true ::web/body body}))))))))
+
+(defn serper-key
+  "The `SERPER_API_KEY` env value, or nil when unset/blank. Read LIVE at
+   call time — the key is NEVER stored in a datom, config, or log."
+  []
+  (platform/env-val "SERPER_API_KEY"))
+
+;; ---- Serper response parsing (PURE) ---------------------------------------
+;; `parse-serper` turns a keywordized Serper body into the SAME
+;; backend-agnostic rows as `parse-grounding`, minus the grounding-only arms
+;; (`::answer`/`::queries` stay absent — Serper is a raw SERP). No I/O;
+;; unit-tested against a fixture `organic[]` body.
+
+(defn parse-serper
+  "Parse a keywordized Serper body into the search-response result arms.
+
+   Returns `{::web/results [row…] ::web/result-count n}` where each row is
+   `{::web/url link ::web/rank (dec position) (::web/title) (::web/snippet)}`.
+   `::result-count` is the HONEST pre-cap total (organic rows with a link);
+   `::results` is capped at `max-results`. Rank = Serper's 1-based
+   `position` mapped to 0-based (clamped ≥0); when `position` is missing it
+   falls back to the 0-based organic index. Pure — no I/O."
+  [body max-results]
+  (let [all-rows (->> (:organic body)
+                      (map-indexed
+                        (fn [i o]
+                          (let [link  (:link o)
+                                title (:title o)
+                                snip  (:snippet o)
+                                pos   (:position o)
+                                rank  (if (number? pos) (max 0 (dec pos)) i)]
+                            (when-not (str/blank? link)
+                              (cond-> {::web/url link ::web/rank rank}
+                                (not (str/blank? title)) (assoc ::web/title title)
+                                (not (str/blank? snip))  (assoc ::web/snippet snip))))))
+                      (remove nil?)
+                      vec)]
+    {::web/results      (vec (take max-results all-rows))
+     ::web/result-count (count all-rows)}))
+
+;; ---- Serper transport -----------------------------------------------------
+
+(def serper-base
+  "The Serper Google-SERP search endpoint (one POST per query)."
+  "https://google.serper.dev/search")
+
+;; Test seam — a hermetic test resets this to a fake returning a Promise of
+;; either {::web/ok? true ::web/body <keywordized-clj>} or a search-err
+;; envelope, so the parse + envelope path runs with NO network. nil = the
+;; real REST POST below.
+(defonce !serper-impl (atom nil))
+
+(defn ^:async serper-request
+  "POST `query` to Serper's Google-SERP endpoint; resolve to
+   `{::web/ok? true ::web/body <keywordized-clj>}` or a [[search-err]]
+   envelope (timeout, transport failure, non-2xx, non-JSON body). Never
+   throws. The `api-key` rides the `X-API-KEY` header only — never logged."
+  [query n timeout-ms]
+  (if-let [f @!serper-impl]
+    (await (f query n timeout-ms))
+    (let [ctrl    (js/AbortController.)
+          tid     (js/setTimeout #(.abort ctrl) timeout-ms)
+          api-key (serper-key)
+          payload #js {:q query :num n}
+          result  (try
+                    #js {:resp (await ((fetch-fn) serper-base
+                                       #js {:method  "POST"
+                                            :signal  (.-signal ctrl)
+                                            :headers #js {"X-API-KEY"    api-key
+                                                          "Content-Type" "application/json"}
+                                            :body    (.stringify js/JSON payload)}))}
+                    (catch :default e #js {:error e}))
+          _       (js/clearTimeout tid)]
+      (if-let [e (.-error result)]
+        (if (= "AbortError" (.-name ^js e))
+          (search-err query (str "search timed out after " timeout-ms
+                                 " ms — raise :seon.agent.web/timeout-ms if serper is slow."))
+          (search-err query (str "search transport error: " (or (some-> ^js e .-message) (str e)))))
+        (let [resp   (.-resp result)
+              status (.-status resp)
+              text   (await (.text resp))]
+          (if (>= status 400)
+            ;; Surface the provider's message verbatim (bad key/quota/etc).
+            (let [pmsg (try (get-in (js->clj (.parse js/JSON text) :keywordize-keys true)
+                                    [:message])
+                            (catch :default _ nil))]
+              (search-err query
+                          (str "serper HTTP " status
+                               (when pmsg (str " — " pmsg)))
+                          {::web/status status}))
+            (let [body (try (js->clj (.parse js/JSON text) :keywordize-keys true)
+                            (catch :default _ nil))]
+              (if (nil? body)
+                (search-err query "serper returned a non-JSON body.")
+                {::web/ok? true ::web/body body}))))))))

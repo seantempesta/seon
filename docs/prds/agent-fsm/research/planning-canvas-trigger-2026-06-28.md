@@ -28,13 +28,13 @@ to the always-on live-tile block (not scenario-specific coaching) and re-measure
   adding a new section.
 
 Verdict: **KEPT** — committed the `live_tile.cljs` block change + the mirrored
-`ui-live-tiles` skill line.
+`ui-canvas` skill line.
 
 ## The gap
 
 `canvas-goal-board` asks: *"Three goals for me this quarter … give me a status
 board I can glance at and keep an eye on as things move."* The honest answer is a
-status board on the agent's OWN canvas (`:seon.render.live-tile/content`), ideally
+status board on the agent's OWN canvas (`:seon.render.live-canvas/content`), ideally
 a tile fn so it re-derives. pass^k (sha 394520d1) found:
 
 | run | canvas-driven? | toolkit | judge |
@@ -80,7 +80,7 @@ board FIRST, then narrate.* It names planning/goals/checklist/recommendation as
 canvas content (a board/view), not just data tables, and makes "prose-or-todos
 only" the explicit failure mode.
 
-Mirrored in `seon-skills/ui-live-tiles/SKILL.md` ("When to message vs when to set
+Mirrored in `seon-skills/ui-canvas/SKILL.md` ("When to message vs when to set
 the tile") with the same general trigger: a plan / goals / checklist / status /
 recommendation are canvas content too; a planning/goal/status ask answered only in
 prose or todos leaves the canvas blank — render the board first, then narrate.
@@ -123,7 +123,7 @@ The minor eval-error-rate (0.046) is from two tile fns hitting `Unable to resolv
 symbol` under SCI bounding (`todo/status`, `db/query` — unqualified aliases inside
 a `my.agent.*` tile fn); both fell back to the unbounded compiled path and rendered
 fine. Pre-existing alias-qualification footgun, NOT introduced by this change —
-flagged for the toolkit/skill lane (the `ui-live-tiles` skill already warns to
+flagged for the toolkit/skill lane (the `ui-canvas` skill already warns to
 fully-qualify inside a `my.*` ns).
 
 ## No regression — data-display stays canvas-driven

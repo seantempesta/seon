@@ -1,0 +1,5 @@
+Loading dataset princeton-nlp/SWE-bench_Verified from Hugging Face...
+Saving the dataset (0/1 shards):   0%|          | 0/500 [00:00<?, ? examples/s]Saving the dataset (1/1 shards): 100%|██████████| 500/500 [00:00<00:00, 54087.95 examples/s]Saving the dataset (1/1 shards): 100%|██████████| 500/500 [00:00<00:00, 53572.57 examples/s]
+time="2026-07-05T17:13:08-04:00" level=warning msg="No services to build"
+/Users/sean/.local/share/uv/python/cpython-3.12.13-macos-aarch64-none/lib/python3.12/multiprocessing/resource_tracker.py:279: UserWarning: resource_tracker: There appear to be 1 leaked semaphore objects to clean up at shutdown
+  warnings.warn('resource_tracker: There appear to be %d '

@@ -158,9 +158,8 @@
                            "message points at the gate")
                        (is (not (re-find #"resolve-datom" msg))
                            "never the raw datahike resolve-datom text")
-                       (is (= :user-input
-                              (:seon.error/kind (:seon.error/data data)))
-                           "ex-data carries the envelope-shaped error map"))))))
+                       (is (= :user-input (:seon.error/kind data))
+                           "kind is FLAT in ex-data (the ONE convention, C43)"))))))
         (settle! done))))
 
 ;; ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 (ns seon.diffusion.oracle-test
   "Offline proof for the UNIFIED control-signal oracle
-   (`seon.diffusion.oracle/refine`) — NO GPU, NO embeddings. A single canvas
+   (`seon.diffusion.oracle/refine`) — NO GPU, NO embeddings. A single code-buffer
    carries BOTH a syntax error (an unbalanced form) AND a hallucinated symbol
    (`db/transct!`, a near-name of the seeded `seon.db/transact!`). One `refine`
    call must return the COMBINED control set:
@@ -65,14 +65,14 @@
       (.catch (fn [e] (is false (str "test chain threw — " e))))
       (.then (fn [_] (done)))))
 
-(defn- span-source [canvas [s e]] (subs canvas s e))
+(defn- span-source [code-buffer [s e]] (subs code-buffer s e))
 
 ;; ---------------------------------------------------------------------------
-;; THE crux canvas: a clean ns + a clean defn (CLAMP), a hallucinated call
+;; THE crux code-buffer: a clean ns + a clean defn (CLAMP), a hallucinated call
 ;; (INJECTION, not a clamp), and an unbalanced tail (RENOISE).
 ;; ---------------------------------------------------------------------------
 
-(def ^:private canvas
+(def ^:private code-buffer
   (str "(ns my.work (:require [seon.db :as db]))\n"  ; 0  — clean clamp
        "(defn good [x] (inc x))\n"                    ; 1  — clean clamp
        "(db/transct! {:seon.db/tx-data []})\n"        ; 2  — hallucination → injection
@@ -83,7 +83,7 @@
     (with-db
       (fn [db]
         (let [{::oracle/keys [clamps renoise-spans injections legs]}
-              (oracle/refine {::oracle/canvas-text canvas ::oracle/db db})
+              (oracle/refine {::oracle/code-buffer-text code-buffer ::oracle/db db})
               clamp-srcs   (set (map ::oracle/source clamps))
               by-unres     (into {} (map (juxt :seon.diffusion.retrieval/unresolved identity)) injections)]
 
@@ -96,7 +96,7 @@
             (let [r (first renoise-spans)]
               (is (= :eof (::oracle/error-kind r)))
               (is (str/includes? (::oracle/source r) "(defn broken"))
-              (is (= (::oracle/source r) (span-source canvas (::oracle/span r))))))
+              (is (= (::oracle/source r) (span-source code-buffer (::oracle/span r))))))
 
           ;; (b) the hallucination is an injection toward the real API
           (testing "(b) injection corrects db/transct! → db/transact! with span + spec"
@@ -104,7 +104,7 @@
               (is (some? inj))
               (is (= :clamp (:seon.diffusion.retrieval/op inj)))
               (is (= "db/transact!" (:seon.diffusion.retrieval/replacement inj)))
-              (is (= "db/transct!" (span-source canvas (:seon.diffusion.retrieval/span inj))))
+              (is (= "db/transct!" (span-source code-buffer (:seon.diffusion.retrieval/span inj))))
               (is (str/includes? (:seon.diffusion.retrieval/spec-text inj) "seon.db/transact!"))))
 
           ;; (c) clamps cover the good forms ONLY
@@ -112,7 +112,7 @@
             (is (contains? clamp-srcs "(ns my.work (:require [seon.db :as db]))"))
             (is (contains? clamp-srcs "(defn good [x] (inc x))"))
             (doseq [c clamps]
-              (is (= (::oracle/source c) (span-source canvas (::oracle/span c))))))
+              (is (= (::oracle/source c) (span-source code-buffer (::oracle/span c))))))
 
           (testing "(c') the hallucination form is NOT clamped (it overlaps an injection)"
             (is (not-any? #(str/includes? % "db/transct!") clamp-srcs)))
@@ -150,7 +150,7 @@
 ;; vector-binding def and a docstring def stay valid CLAMPS.
 ;; ---------------------------------------------------------------------------
 
-(def ^:private struct-canvas
+(def ^:private struct-code-buffer
   (str "(def mean [v] (/ (reduce + v) (count v)))\n"  ; 0 — def-vs-defn → RENOISE
        "(def xs [1 2 3])\n"                            ; 1 — real vector binding → clamp
        "(def cfg \"the config\" 42)\n"                 ; 2 — docstring def → clamp
@@ -161,7 +161,7 @@
     (with-db
       (fn [db]
         (let [{::oracle/keys [clamps renoise-spans legs]}
-              (oracle/refine {::oracle/canvas-text struct-canvas ::oracle/db db})
+              (oracle/refine {::oracle/code-buffer-text struct-code-buffer ::oracle/db db})
               clamp-srcs (set (map ::oracle/source clamps))]
 
           (testing "no eval verdicts supplied → structural tier rides the PARSE leg"
@@ -172,7 +172,7 @@
             (let [r (first renoise-spans)]
               (is (= :def-vs-defn (::oracle/error-kind r)))
               (is (str/includes? (::oracle/source r) "(def mean [v]"))
-              (is (= (::oracle/source r) (span-source struct-canvas (::oracle/span r))))))
+              (is (= (::oracle/source r) (span-source struct-code-buffer (::oracle/span r))))))
 
           (testing "valid defs (vector binding, docstring) and the clean defn are CLAMPED"
             (is (contains? clamp-srcs "(def xs [1 2 3])"))
@@ -189,7 +189,7 @@
 ;; A disallowed head renoises; an allowed one clamps.
 ;; ---------------------------------------------------------------------------
 
-(def ^:private phase-canvas
+(def ^:private phase-code-buffer
   (str "(ns my.work)\n"                                   ; allowed in BOTH
        "(schema/register! ::id :string)\n"                ; schemas-only
        "(defn mean [v] (/ (reduce + v) (count v)))\n"     ; functions-only
@@ -201,7 +201,7 @@
       (fn [db]
         (letfn [(run [phase]
                   (let [cs (oracle/refine
-                             (cond-> {::oracle/canvas-text phase-canvas ::oracle/db db}
+                             (cond-> {::oracle/code-buffer-text phase-code-buffer ::oracle/db db}
                                phase (assoc ::oracle/phase phase)))]
                     {:violations (->> (::oracle/renoise-spans cs)
                                       (filter #(= :phase-violation (::oracle/error-kind %)))
@@ -226,6 +226,36 @@
             (is (empty? (:violations (run nil)))))))
       done)))
 
+;; :tests phase — model-written cljs.test deftests. ns + deftest + comment
+;; clamp; a defn (implementation before the pin) and register! both renoise.
+
+(def ^:private tests-phase-code-buffer
+  (str "(ns my.work-test (:require [cljs.test :refer [deftest is]]))\n" ; allowed
+       "(deftest mean-test (is (= 2 (mean [1 2 3]))))\n"                ; allowed
+       "(comment (mean []))\n"                                          ; allowed
+       "(defn mean [v] (/ (reduce + v) (count v)))\n"                   ; violation
+       "(schema/register! ::id :string)"))                              ; violation
+
+(deftest tests-phase-gate
+  (async done
+    (with-db
+      (fn [db]
+        (let [cs (oracle/refine {::oracle/code-buffer-text tests-phase-code-buffer
+                                 ::oracle/db db
+                                 ::oracle/phase :tests})
+              violations (->> (::oracle/renoise-spans cs)
+                              (filter #(= :phase-violation (::oracle/error-kind %)))
+                              (map ::oracle/source) set)
+              clamps (set (map ::oracle/source (::oracle/clamps cs)))]
+          (testing ":tests phase — ns + deftest + comment clamp"
+            (is (contains? clamps "(ns my.work-test (:require [cljs.test :refer [deftest is]]))"))
+            (is (contains? clamps "(deftest mean-test (is (= 2 (mean [1 2 3]))))"))
+            (is (contains? clamps "(comment (mean []))")))
+          (testing ":tests phase — defn + register! are violations"
+            (is (contains? violations "(defn mean [v] (/ (reduce + v) (count v)))"))
+            (is (contains? violations "(schema/register! ::id :string)")))))
+      done)))
+
 ;; ---------------------------------------------------------------------------
 ;; EVAL FOLD — a syntactically-clean form retrieval cannot fix (the symbol has
 ;; no near candidate in the graph) is a CLAMP, until an eval verdict (`:compile`
@@ -233,13 +263,13 @@
 ;; we take the clamp span the parse leg produced and feed it back as the verdict.
 ;; ---------------------------------------------------------------------------
 
-(def ^:private eval-canvas "(defn f [] (zzzqqq))")
+(def ^:private eval-code-buffer "(defn f [] (zzzqqq))")
 
 (deftest eval-verdict-demotes-clean-form-to-renoise
   (async done
     (with-db
       (fn [db]
-        (let [base (oracle/refine {::oracle/canvas-text eval-canvas ::oracle/db db})]
+        (let [base (oracle/refine {::oracle/code-buffer-text eval-code-buffer ::oracle/db db})]
           (testing "with NO eval verdict, the clean (but semantically-dubious) form is a CLAMP"
             (is (= [:parse :retrieve] (::oracle/legs base)))
             (is (= 1 (count (::oracle/clamps base))))
@@ -248,7 +278,7 @@
             (is (empty? (::oracle/renoise-spans base))))
 
           (let [clamp-span (::oracle/span (first (::oracle/clamps base)))
-                folded (oracle/refine {::oracle/canvas-text eval-canvas
+                folded (oracle/refine {::oracle/code-buffer-text eval-code-buffer
                                        ::oracle/db db
                                        ::oracle/eval-verdicts
                                        [{::oracle/span clamp-span
@@ -274,9 +304,9 @@
     (with-db
       (fn [db]
         (let [c "(db/transct! {})"
-              base (oracle/refine {::oracle/canvas-text c ::oracle/db db})
+              base (oracle/refine {::oracle/code-buffer-text c ::oracle/db db})
               inj-span (:seon.diffusion.retrieval/span (first (::oracle/injections base)))
-              folded (oracle/refine {::oracle/canvas-text c ::oracle/db db
+              folded (oracle/refine {::oracle/code-buffer-text c ::oracle/db db
                                      ::oracle/eval-verdicts
                                      [{::oracle/span inj-span
                                        ::oracle/ok? false

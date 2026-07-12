@@ -22,4 +22,4 @@ Database writes handle transient failures gracefully. Timeouts prevent hung writ
 ## Related
 
 - Components: [[components/database]], [[components/system-lifecycle]]
-- PRDs: [[prds/startup-reliability/prd]]
+- PRDs: `prds/startup-reliability/prd`

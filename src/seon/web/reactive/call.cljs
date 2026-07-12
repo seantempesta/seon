@@ -172,7 +172,7 @@
                     (js/Promise.resolve {::ok? false ::error (err->msg e)})))))))))))
 
 ;; ============================================================
-;; HTTP handler — POST /call. Opaque (req,res), like the inspector +
+;; HTTP handler — POST /call. Opaque (req,res), like the debug +
 ;; serve handlers (no Malli schema on the Ring-style boundary).
 ;; ============================================================
 
@@ -180,6 +180,20 @@
   (.writeHead res code #js {"Content-Type"  "application/json; charset=utf-8"
                             "Cache-Control" "no-store"})
   (.end res (js/JSON.stringify (clj->js m))))
+
+(defn- datastar-request? [^js req]
+  (= "true" (some-> (aget (.-headers req) "datastar-request") str/lower-case)))
+
+(defn- write-success!
+  "End a successful browser action without a redundant response payload.
+
+   The database listener owns the visible update. Direct API callers retain
+   the small JSON acknowledgement for compatibility."
+  [^js req ^js res]
+  (if (datastar-request? req)
+    (do (.writeHead res 204 #js {"Cache-Control" "no-store"})
+        (.end res))
+    (write-json! res 200 {::ok? true})))
 
 (defn- query-val [^js req k]
   (try
@@ -197,12 +211,30 @@
 
 (defn- parse-signals
   "Datastar sends current signals as a JSON body on POST. Parse to a map with
-   keyword keys; blank/garbled → {}."
+   keyword keys; blank/garbled → {}.
+
+   `my.canvas` fields use a `seon_` + base64url encoding so Datastar receives a
+   safe identifier while agent handlers receive the original fully-qualified
+   keyword. When at least one encoded canvas field is present, return ONLY
+   those fields: page-level signals (`:t`, `:live`, chat text) are transport
+   state, not domain input. Raw non-canvas forms keep their existing map."
   [body]
   (try
-    (if (str/blank? body)
-      {}
-      (js->clj (js/JSON.parse body) :keywordize-keys true))
+    (let [raw (if (str/blank? body)
+                {}
+                (js->clj (js/JSON.parse body) :keywordize-keys true))
+          canvas-fields
+          (into {}
+                (keep (fn [[k v]]
+                        (let [n (name k)]
+                          (when (str/starts-with? n "seon_")
+                            (let [decoded (.toString
+                                            (.from js/Buffer (subs n 5) "base64url")
+                                            "utf8")]
+                              (when (str/starts-with? decoded ":")
+                                [(keyword (subs decoded 1)) v]))))))
+                raw)]
+      (if (seq canvas-fields) canvas-fields raw))
     (catch :default _ {})))
 
 (defn ^:async handle!
@@ -218,7 +250,7 @@
    fn. Every path through here writes exactly one response — a bad `?args=`
    decode is caught inside the promise chain, never a hung request. The UI
    update is the reactive feed's job — the invoked fn's transact fans out via
-   the inspector tx-listener."
+   the web UI tx-listener."
   ([r]
    ;; The router's calling convention: self-extract node-req/node-res from the
    ;; Ring request and delegate to the (req res) gate UNCHANGED. The seeded
@@ -235,7 +267,7 @@
          (if-let [reason (::refused cap)]
            (do
              (log/info-console! "seon.web.reactive.call" "/call REFUSED"
-                                {:fn fn-str})
+                                {:seon.web.call/fn fn-str})
              (write-json! res 403 {::ok?      false
                                    ::refused  reason}))
            (let [agent-id (::agent-id cap)
@@ -259,7 +291,8 @@
                      (if arg-error
                        (do
                          (log/info-console! "seon.web.reactive.call" "/call BAD ARGS"
-                                            {:fn fn-str :error arg-error})
+                                            {:seon.web.call/fn fn-str
+                                             :seon.web.call/error arg-error})
                          (write-json! res 422 {::ok?   false
                                                ::error (str "bad args: " arg-error)}))
                        (-> (invoke! agent-id fn-sym args)
@@ -268,8 +301,9 @@
                                (if ok?
                                  (do
                                    (log/info-console! "seon.web.reactive.call" "/call OK"
-                                                      {:fn fn-str :agent agent-id})
-                                   (write-json! res 200 {::ok? true}))
+                                                      {:seon.web.call/fn fn-str
+                                                       :seon.agent/id agent-id})
+                                   (write-success! req res))
                                  (do
                                    (log/error-console! "seon.web.reactive.call"
                                                        "/call invoke error" (str err))

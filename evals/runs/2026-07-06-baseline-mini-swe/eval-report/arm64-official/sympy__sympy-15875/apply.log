@@ -1,0 +1,5 @@
+$ git apply --verbose
+
+Checking patch sympy/core/add.py...
+Applied patch sympy/core/add.py cleanly.
+

@@ -1,0 +1,18 @@
+Only in tmp/t4-drive/py/poker: .pytest_cache
+diff -ru '--exclude=__pycache__' tmp/t4-masters/py/poker/poker.py tmp/t4-drive/py/poker/poker.py
+--- tmp/t4-masters/py/poker/poker.py	2026-07-06 16:58:42.596262356 -0400
++++ tmp/t4-drive/py/poker/poker.py	2026-07-10 18:00:36.124478915 -0400
+@@ -16,11 +16,11 @@
+ 
+ def hand_rank(hand):
+     hand = hand.replace('10', 'T').split()
+-    card_ranks = ['..23456789TJQK'.index(idx) for idx, _ in hand]
++    card_ranks = ['..23456789TJQKA'.index(idx) for idx, _ in hand]
+     groups = [(card_ranks.count(idx), idx) for idx in set(card_ranks)]
+     groups.sort(reverse=True)
+     counts, ranks = zip(*groups)
+-    if ranks == tuple(sorted(('..23456789TJQK'.index(c) for c in 'A5432'), reverse=True)):
++    if ranks == tuple(sorted(('..23456789TJQKA'.index(c) for c in 'A5432'), reverse=True)):
+         ranks = (5, 4, 3, 2, 1)
+     straight = (len(counts) == 5) and (max(ranks) - min(ranks) == 4)
+     flush = len({idx for _, idx in hand}) == 1

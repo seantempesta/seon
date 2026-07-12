@@ -68,7 +68,7 @@ The data and language foundation:
 
 The real-time UI:
 
-- **Datastar** (Star Federation, MIT). The hypermedia framework behind Seon's SSE-driven live tiles — declarative `data-*` attributes, one connection up, the server streams HTML and the DOM patches itself.
+- **Datastar** (Star Federation, MIT). The hypermedia framework behind Seon's SSE-driven canvas — declarative `data-*` attributes, one connection up, the server streams HTML and the DOM patches itself.
 - **[hyperlith](https://github.com/andersmurphy/hyperlith)** (Anders Murphy, MIT). The render-loop design Seon's live-feed layer adopts: render the view as a pure function of state, stream the compressed result, let the client apply it — no client-side state machine. Anders's "send the whole render down and diff on arrival" approach (and his poor-man's-datastar experiment) shaped how Seon builds composable feeds and interactive tiles.
 
 Resilience:
@@ -105,12 +105,24 @@ Run the core, talk to an agent, watch it work:
 ```bash
 git clone https://github.com/seantempesta/seon && cd seon
 npm install
-bin/seon prep             # one-time: clones + Java-preps the datahike fork (:writer + :cljs)
+bin/seon prep             # one-time full build prep: clones + Java-preps the
+                          #   datahike fork (:writer + :cljs), warms the
+                          #   classpath, builds the bootstrap-CLJS bundle
 cp .env.example .env      # the config surface — edit it for keys/provider/ports
 export DEEPSEEK_API_KEY=sk-...   # (env vars override .env; either works)
 bin/seon start all        # cljs build → wire-server → agent pod, ready-gated
 open http://localhost:7890/agents
 ```
+
+Every build artifact is supervised: `bin/seon start` checks for missing or
+stale pieces (git deps, the bootstrap-CLJS bundle the pod's self-host eval
+loads from `out/bootstrap`, the CSS) and builds them synchronously before
+spawning — so `bin/seon start all` on a fresh clone works even if you skip
+`prep`; `prep` just does the slow parts up front, loudly. The first pod boot
+also seeds the cluster store from the indexed codebase (a few seconds);
+`bin/seon status` shows what's alive, `bin/seon tail pod` follows the boot.
+To verify a build end-to-end, `bin/test-cljs` runs the full suite in a
+fresh process (~3 min).
 
 `.env` (gitignored) is Seon's entire config surface — there is no config
 file, every knob is an env var. `bin/seon` sources `.env` at boot with shell
@@ -119,7 +131,7 @@ env vars taking precedence. `.env.example` documents every setting
 `.env`, not `.env.example`.
 
 Mint an agent on that page and talk to it: the left pane is the
-conversation, the right pane is the agent's **live tile** — the thing
+conversation, the right pane is the agent's **canvas** — the thing
 it is currently showing you, which it updates by writing code. Press
 backtick (or the ⚙ button) for the debug overlay: the exact context
 the agent sees each turn, because the prompt IS a REPL session over

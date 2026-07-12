@@ -46,6 +46,8 @@ hs_err_pid*.log
 # shadow-cljs build outputs + per-build state
 .shadow-cljs/
 out/
+# frozen bench bundle (:bench-client) — built on demand by bin/seon
+out-bench/
 
 # Symlink into out/ — convenience for local dev; resolves to nothing elsewhere
 /bootstrap
@@ -90,3 +92,10 @@ docs/.obsidian/plugins/
 *.ksv
 target/
 scratchpad/
+out-acme/
+evals/runs/*/*/blobs/
+evals/runs/*/*/*/blobs/
+# Raw drive transcripts (byte-exact LLM replays) are on-disk working artifacts,
+# never committed — the distilled README.md/defects.md carry the cited excerpts.
+evals/runs/*/transcripts/
+*.heapsnapshot

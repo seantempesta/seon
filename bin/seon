@@ -9,7 +9,7 @@
 # where neither agent "owns" a process — both invoke this script.
 #
 # Subcommands:
-#   start <name|all>   Idempotent. Spawns via nohup; logs to logs/<name>.log
+#   start <name|all>   Idempotent. Spawns detached; logs to logs/<name>.log
 #                      `all` = cljs-watch → wire-server → pod, each gated on
 #                      REAL readiness before the next (jvm NOT included)
 #
@@ -89,6 +89,9 @@ mkdir -p "$PROC_DIR" "$LOG_DIR"
 #   SEON_REQ_SOCK           wire-server request UDS path
 #   SEON_PUB_SOCK           wire-server publish UDS path
 #   SEON_WRITER_REPL_PORT   wire-server loopback socket-REPL port
+#   SEON_WRITER_REPL_PORT_FILE  per-supervisor wire REPL port file (default
+#                           tmp/seon-writer-repl-port-<cluster>); wire-server
+#                           writes it, ready_check/seon-server-call read it
 #   SEON_PORT               pod HTTP port (read by the pod itself —
 #                           seon.web.serve; inherits through nohup)
 #   SEON_PORT_FILE          per-cluster pod port file (default tmp/seon-port);
@@ -108,6 +111,18 @@ SEON_CLUSTER_DIR="${SEON_CLUSTER_DIR:-data/clusters/default}"
 SEON_REQ_SOCK="${SEON_REQ_SOCK:-tmp/seon-cluster-default-req.sock}"
 SEON_PUB_SOCK="${SEON_PUB_SOCK:-tmp/seon-cluster-default-pub.sock}"
 SEON_WRITER_REPL_PORT="${SEON_WRITER_REPL_PORT:-7891}"
+
+# Per-supervisor wire-server REPL port file (registry C48). The wire-server
+# writes its bound REPL port here on boot; ready_check and bin/seon-server-call
+# read it. A SINGLE shared file (the old tmp/seon-writer-repl-port) was
+# clobbered by a second supervisor's wire-server (bin/acme), routing file-based
+# consumers to whichever JVM started LAST — so namespace it by cluster like the
+# pod's $SEON_PORT_FILE: default = tmp/seon-writer-repl-port-default, acme
+# derives tmp/seon-writer-repl-port-acme automatically from its
+# SEON_CLUSTER_DIR. Exported so bin/seon-server-call (and any manual consumer)
+# resolves the SAME file this supervisor's wire-server writes.
+SEON_WRITER_REPL_PORT_FILE="${SEON_WRITER_REPL_PORT_FILE:-tmp/seon-writer-repl-port-$(basename "$SEON_CLUSTER_DIR")}"
+export SEON_WRITER_REPL_PORT_FILE
 
 # Per-cluster pod port file. The pod (seon.web.serve/write-port-file!) writes
 # its bound HTTP port here on boot; the supervisor's ready_check/status read it.
@@ -149,15 +164,13 @@ esac
 # Full gate table: docs/seon/components/capability-gates.md
 # ============================================================
 export SEON_SHELL="${SEON_SHELL:-1}"   # seon.agent.shell/run + py-run
-export SEON_WEB="${SEON_WEB:-1}"       # seon.agent.web/fetch (SSRF guard stays always-on)
-# Optional narrowing knobs — exported only when set (unset = open-when-granted):
-#   SEON_WEB_DOMAINS  comma-separated domain allowlist (empty/unset = all domains)
-#   SEON_WEB_LOCK     "1" locks the web allowlist against runtime configure!
-#   SEON_FS_LOCK      "1" locks the fs grant against runtime configure!
-# (SEON_FS_ROOT / SEON_FS_READ_ONLY are set on the pod command below — the pod
-# gets a durable read-only grant on the repo; shell cwd gating rides on it.)
-[ -n "${SEON_WEB_DOMAINS:-}" ] && export SEON_WEB_DOMAINS
-[ -n "${SEON_WEB_LOCK:-}" ] && export SEON_WEB_LOCK
+export SEON_WEB="${SEON_WEB:-1}"       # seon.agent.web/fetch (master on/off gate)
+# Web REACHABILITY is now a config POLICY, not an env knob: config/system.edn's
+#   :seon.config/web {:seon.agent.web/policy :open|:public-only|:allowlist}
+# (:open here; code fallback :public-only). Narrow web per cluster by editing
+# that manifest, NOT env — SEON_WEB just gates availability. SEON_FS_LOCK still
+# locks the fs grant against runtime configure!; SEON_FS_ROOT / SEON_FS_READ_ONLY
+# are set on the pod command below (durable read-only repo grant; shell cwd rides on it).
 [ -n "${SEON_FS_LOCK:-}" ] && export SEON_FS_LOCK
 
 # ── Config manifest selection — the ONE config seam (read by seon.config) ──
@@ -240,19 +253,47 @@ process_command() {
     # out/'s location and would otherwise only see seon's node_modules).
     # SEON_EXTRA_SRC itself needs no mapping here: it inherits through
     # nohup to the pod, where the boot indexer's read-src-file probes it.
-    # SEON_DEBUG_CAPTURE=1 — per-turn prompt+response capture ON by default for
-    # EVERY agent (logs/turns/<agent>/<turn-idx>-<id>/: prompt.txt, response.txt,
-    # response.edn). NOTE: currently UNBOUNDED — nothing calls seon.debug/prune!
-    # yet; add a per-agent keep-N cap before long-running production use.
-    pod)         echo "npm run css:build && exec env SEON_FS_ROOT=\"$SEON_ROOT\" SEON_FS_READ_ONLY=1 SEON_DEBUG_CAPTURE=1$(extra_npm_node_path) node \"${SEON_CLIENT_OUT:-out/client/main.js}\"" ;;
+    # Turn observability is ALWAYS-ON in-process (prompt/reply blob refs on
+    # every :seon.agent.turn — see observability.md); no capture env var.
+    pod)         echo "npm run css:build && exec env SEON_FS_ROOT=\"$SEON_ROOT\" SEON_FS_READ_ONLY=1$(extra_npm_node_path) node \"${SEON_CLIENT_OUT:-out/client/main.js}\"" ;;
+    # pod-<cluster> — a NON-default cluster's pod (bin/seon cluster create).
+    # Same node process as `pod`, re-pointed per cluster: its OWN
+    # SEON_CLUSTER_DIR (store id / blobs / feed db-name all derive from it —
+    # the ONE cluster-name derivation, seon.store.wire/cluster-name), an
+    # EPHEMERAL HTTP port (SEON_PORT=0; the bound port lands in the
+    # per-cluster $SEON_PORT_FILE), and THIS supervisor's wire sockets made
+    # explicit (one wire-server JVM hosts every cluster's db; the pod's
+    # boot ensure-db registers/creates its db there). css:build only when
+    # the shared artifact is missing (the default pod's start owns it).
+    pod-*)
+      local cname="${1#pod-}"
+      # A FROZEN cluster (marker written by cluster_create; the default for
+      # --ephemeral) execs the UNWATCHED bench bundle — cljs-watch rebuilds
+      # out/client/main.js and hot-patches :client runtimes, and a bench pod
+      # must never reload mid-sample. Watched clusters keep the
+      # SEON_CLIENT_OUT seam / the live default bundle.
+      local cbundle="${SEON_CLIENT_OUT:-out/client/main.js}"
+      [ -f "data/clusters/$cname/frozen" ] && cbundle="$BENCH_BUNDLE"
+      # fs grant: default = the durable read-only repo grant; a caller-set
+      # SEON_FS_ROOT/SEON_FS_READ_ONLY is HONORED (mirrors the bench
+      # compose, which already scopes the grant per container — e.g. a
+      # drive cluster granting a writable tmp/ workspace).
+      echo "{ [ -f resources/public/css/output.css ] || npm run css:build; } && exec env SEON_CLUSTER_DIR=\"data/clusters/$cname\" SEON_PORT=0 SEON_PORT_FILE=\"tmp/seon-port-$cname\" SEON_REQ_SOCK=\"$SEON_REQ_SOCK\" SEON_PUB_SOCK=\"$SEON_PUB_SOCK\" SEON_FS_ROOT=\"${SEON_FS_ROOT:-$SEON_ROOT}\" SEON_FS_READ_ONLY=\"${SEON_FS_READ_ONLY:-1}\"$(extra_npm_node_path) node \"$cbundle\"" ;;
     cljs-watch)  echo "clj$(extra_src_sdeps) -M:cljs watch client$(extra_preload_merge)" ;;
     jvm)         echo "./bin/run" ;;
-    # V2 platform Host — JVM datahike wire-server (single-DB today).
-    # Socket/path strings use "cluster" naming for the eventual multi-DB
-    # layout (P1); they're CLI args, not code identifiers. The --repl-port
-    # opens a loopback-only socket REPL on 127.0.0.1 for diagnostics, and
-    # the chosen port is written to tmp/seon-writer-repl-port.
-    wire-server) echo "clojure -M:simd:fork-deps:writer --backend file --path $SEON_CLUSTER_DIR/store --req-sock $SEON_REQ_SOCK --pub-sock $SEON_PUB_SOCK --repl-port $SEON_WRITER_REPL_PORT" ;;
+    # Local DiffusionGemma MLX server (src-diffusion, full 26B-A4B) — the
+    # RunPod wire contract on 127.0.0.1:17860; seon targets it via
+    # SEON_DG_ENDPOINT (env var name kept for wire-contract continuity).
+    # Model lazy-loads on first job; idle-unload frees RSS after 900s.
+    diffusion-server) echo "exec src-diffusion/.venv/bin/python -m seon_diffusion.server --port 17860" ;;
+    # V2 platform Host — JVM datahike wire-server (hosts EVERY cluster's db
+    # via the registry; extra clusters are ensured onto it at pod boot).
+    # --db-name = the CLUSTER NAME (basename of $SEON_CLUSTER_DIR) — the ONE
+    # identity both sides derive the konserve store :id from (registry C15);
+    # never a socket-path artifact. The --repl-port opens a loopback-only
+    # socket REPL on 127.0.0.1 for diagnostics, and the chosen port is
+    # written to the PER-SUPERVISOR $SEON_WRITER_REPL_PORT_FILE (C48).
+    wire-server) echo "clojure -M:simd:fork-deps:writer --backend file --db-name $(basename "$SEON_CLUSTER_DIR") --path $SEON_CLUSTER_DIR/store --req-sock $SEON_REQ_SOCK --pub-sock $SEON_PUB_SOCK --repl-port $SEON_WRITER_REPL_PORT --repl-port-file $SEON_WRITER_REPL_PORT_FILE" ;;
     *) return 1 ;;
   esac
 }
@@ -260,14 +301,24 @@ process_command() {
 process_ready_hint() {
   case "$1" in
     pod)         echo "  ready: $SEON_PORT_FILE written + HTTP answers on /" ;;
+    pod-*)       echo "  ready: tmp/seon-port-${1#pod-} written + HTTP answers on /" ;;
     cljs-watch)  echo "  ready: 'Build completed' appears in logs/cljs-watch.log" ;;
     jvm)         echo "  ready: logs/app.log shows 'Server started'" ;;
-    wire-server) echo "  ready: $SEON_REQ_SOCK ACCEPTING; REPL on 127.0.0.1:$SEON_WRITER_REPL_PORT (tmp/seon-writer-repl-port)" ;;
+    wire-server) echo "  ready: $SEON_REQ_SOCK ACCEPTING; REPL on 127.0.0.1:$SEON_WRITER_REPL_PORT ($SEON_WRITER_REPL_PORT_FILE)" ;;
+    diffusion-server) echo "  ready: 'seon_diffusion server on' in logs/diffusion-server.log; /health answers" ;;
     *) echo "" ;;
   esac
 }
 
-all_processes() { echo "pod cljs-watch jvm wire-server"; }
+all_processes() {
+  # The static registry + any cluster pods this supervisor has spawned
+  # (pod-<name> state dirs under $PROC_DIR — bin/seon cluster create).
+  local names="pod cljs-watch jvm wire-server diffusion-server" d
+  for d in "$PROC_DIR"/pod-*/; do
+    [ -d "$d" ] && names="$names $(basename "$d")"
+  done
+  echo "$names"
+}
 
 stack_processes() {
   # Dependency-ordered stack for `start all` (stop reverses the order):
@@ -292,7 +343,7 @@ ready_check() {
   case "$name" in
     wire-server)
       [ -S "$SEON_REQ_SOCK" ] || return 1
-      [ -f tmp/seon-writer-repl-port ] || return 1
+      [ -f "$SEON_WRITER_REPL_PORT_FILE" ] || return 1
       if nc_supports_uds; then
         # A real connect with immediate EOF. NOT `nc -z -U`: macOS nc's
         # -z returns 1 even against a live, accepting UDS (verified
@@ -302,6 +353,12 @@ ready_check() {
       else
         grep -q '\[writer\] ready' "$(log_file wire-server)" 2>/dev/null
       fi
+      ;;
+    pod-*)
+      # A cluster pod writes its ephemeral bound port to its own file.
+      [ -f "tmp/seon-port-${name#pod-}" ] || return 1
+      curl -fsS -m 2 -o /dev/null \
+        "http://127.0.0.1:$(cat "tmp/seon-port-${name#pod-}")/" 2>/dev/null
       ;;
     pod)
       [ -f "$SEON_PORT_FILE" ] || return 1
@@ -324,10 +381,48 @@ ready_check() {
   esac
 }
 
+clear_readiness_artifacts() {
+  # Readiness files and Unix sockets describe a PARTICULAR process lifetime.
+  # A reboot, SIGKILL, or interrupted supervisor can leave them behind.  Clear
+  # them before every fresh spawn so readiness can only be asserted by the new
+  # process.  This is deliberately after the is_running check: never remove a
+  # live process's artifacts.
+  case "$1" in
+    pod)         rm -f "$SEON_PORT_FILE" ;;
+    pod-*)       rm -f "tmp/seon-port-${1#pod-}" ;;
+    wire-server) rm -f "$SEON_WRITER_REPL_PORT_FILE" "$SEON_REQ_SOCK" "$SEON_PUB_SOCK" ;;
+  esac
+}
+
+assert_no_unmanaged_listener() {
+  # Never "recover" stale artifacts by unlinking a socket that is actually
+  # serving an unregistered process. Fail with an adoption path instead of
+  # creating two writers or obscuring a port collision.
+  local name="$1"
+  case "$name" in
+    wire-server)
+      if [ -S "$SEON_REQ_SOCK" ] && nc_supports_uds \
+         && nc -U "$SEON_REQ_SOCK" -w 1 </dev/null >/dev/null 2>&1; then
+        echo "✗ $name is accepting on $SEON_REQ_SOCK but has no live managed PID" >&2
+        echo "  inspect it, then register it with: bin/seon adopt $name <pid>" >&2
+        return 1
+      fi
+      ;;
+    pod)
+      local port="${SEON_PORT:-7890}"
+      if curl -fsS -m 1 -o /dev/null "http://127.0.0.1:$port/" 2>/dev/null; then
+        echo "✗ port $port already serves HTTP but pod has no live managed PID" >&2
+        echo "  inspect it, then register it with: bin/seon adopt pod <pid>" >&2
+        return 1
+      fi
+      ;;
+  esac
+}
+
 ready_bound() {
   case "$1" in
     wire-server) echo 180 ;;   # matches cluster reset's historical wait
-    pod)         echo 120 ;;
+    pod|pod-*)   echo 120 ;;
     cljs-watch)  echo 300 ;;   # cold shadow-cljs build
     *)           echo 0 ;;
   esac
@@ -346,13 +441,13 @@ wait_ready() {
     if ! is_running "$name"; then
       echo ""
       echo "✗ $name DIED while waiting for readiness — read its log:" >&2
-      echo "    bin/seon logs $name   (logs/$name.log)" >&2
+      echo "    bin/seon logs $name   ($(log_file "$name"))" >&2
       return 1
     fi
     if [ "$waited" -ge "$bound" ]; then
       echo ""
       echo "✗ $name not ready after ${bound}s — read its log:" >&2
-      echo "    bin/seon logs $name   (logs/$name.log)" >&2
+      echo "    bin/seon logs $name   ($(log_file "$name"))" >&2
       return 1
     fi
     sleep 1
@@ -423,7 +518,7 @@ maybe_prep_deps() {
   echo "  ▶ deps changed (or git libs unprepped) for $name — running"
   echo "    clojure -X:deps prep :aliases '$prep_vec' && clojure -P -M:$alias"
   echo "    SYNCHRONOUSLY before spawn (a fresh git dep can take minutes)"
-  echo "    progress: logs/$name.log"
+  echo "    progress: $(log_file "$name")"
   {
     echo "== [bin/seon] auto-prep :$alias started $(date -u +%FT%TZ) =="
     # prep BEFORE -P: a prep-requiring git dep (e.g. datahike, which compiles
@@ -438,6 +533,140 @@ maybe_prep_deps() {
   }
   echo "$current" > "$fp_file"
   echo "  ● deps prepped for :$alias"
+}
+
+# The pod's self-host eval path (seon.eval / cljs.js) loads the
+# bootstrap-CLJS bundle from out/bootstrap (shadow :bootstrap target). A
+# fresh clone doesn't have it, and the pod dies at boot with an OPAQUE
+# "uncaught exception transit-load failed" (the shadow bootstrap loader's
+# readFile against the missing bundle). Build it synchronously and loudly
+# BEFORE spawning — same reasoning as maybe_prep_deps: a minute-long build
+# inside the pod's ready window blows the boot timeout. Presence-gated
+# (index.transit.json), so a warm tree is a no-op; rebuild explicitly with
+# `clj -M:cljs compile bootstrap && bin/fix-bootstrap-macros` after
+# changing what the bundle ships.
+maybe_build_bootstrap() {
+  # Cluster pods (pod-<name>) load the same out/bootstrap bundle — gate them
+  # too (cljs-watch never touches out/bootstrap, so it is not a hot-reload
+  # contamination vector; one shared copy is correct even for frozen pods).
+  case "$1" in pod|pod-*) ;; *) return 0 ;; esac
+  [ ! -f "$SEON_ROOT/out/bootstrap/index.transit.json" ] || return 0
+  echo "  ▶ out/bootstrap missing — building the bootstrap-CLJS bundle"
+  echo "    (one-time on a fresh clone, ~1 min; the pod's self-host eval needs it)"
+  {
+    echo "== [bin/seon] bootstrap build started $(date -u +%FT%TZ) =="
+    (cd "$SEON_ROOT" && clj -M:cljs compile bootstrap && bin/fix-bootstrap-macros) \
+      && echo "== [bin/seon] bootstrap build done $(date -u +%FT%TZ) =="
+  } >> "$(log_file "$1")" 2>&1 || {
+    echo "  ✗ bootstrap build FAILED — the pod cannot start without out/bootstrap; read: bin/seon logs $1" >&2
+    return 1
+  }
+  echo "  ● bootstrap bundle built (out/bootstrap)"
+}
+
+# ============================================================
+# Frozen bench bundle (out-bench/client/main.js — the :bench-client
+# shadow build, a byte-for-byte mirror of :client with its OWN build id
+# and output dir). Frozen clusters (cluster create — the DEFAULT for
+# --ephemeral) exec THIS bundle, so cljs-watch's rebuilds of
+# out/client/main.js can never hot-patch a bench pod mid-sample (first
+# dev pass 2026-07-03: `reloading…` → `run-turn! error No matching
+# clause` voided the whole web_fetch row). Same mechanism as bin/acme's
+# out-acme bundle; NEVER a copy of the watch bundle — a copy taken
+# mid-recompile is the same corruption this exists to prevent.
+#
+# The build step writes $BENCH_BUNDLE.sha256 — the bundle IDENTITY a
+# bench run records at start and asserts unchanged at end (harness:
+# seon_inspect.cluster.bundle_identity), so contamination is detectable,
+# not just prevented.
+# ============================================================
+
+BENCH_BUNDLE="out-bench/client/main.js"
+
+bench_bundle_stale() {
+  # acme's staleness rule: bundle missing, OR any core/overlay source OR a
+  # dependency/build config newer than it (a dep bump needs a re-compile
+  # just as much as a src change does).
+  [ -f "$BENCH_BUNDLE" ] || return 0
+  if [ -n "$(find src ${SEON_EXTRA_SRC:+"$SEON_EXTRA_SRC"} \
+               \( -name '*.cljs' -o -name '*.cljc' \) \
+               -newer "$BENCH_BUNDLE" -print -quit 2>/dev/null)" ]; then
+    return 0
+  fi
+  if [ -n "$(find deps.edn shadow-cljs.edn \
+               -newer "$BENCH_BUNDLE" -print -quit 2>/dev/null)" ]; then
+    return 0
+  fi
+  return 1
+}
+
+write_bench_sha() {
+  # Identity = the WHOLE compiled corpus, not just the loader. main.js is a
+  # ~70KB bootstrap that loads .shadow-cljs/builds/bench-client/dev/out/
+  # cljs-runtime/*.js — code changes land THERE and leave main.js
+  # byte-identical (observed 2026-07-03: a mid-run rebuild after src edits
+  # kept main.js's sha; only mtime moved). Hash the loader + every runtime
+  # chunk (paths included, so renames count).
+  {
+    shasum -a 256 "$BENCH_BUNDLE"
+    find .shadow-cljs/builds/bench-client/dev/out/cljs-runtime \
+         -type f -name '*.js' 2>/dev/null | LC_ALL=C sort \
+      | xargs shasum -a 256 2>/dev/null
+  } | shasum -a 256 | awk '{print $1}' > "$BENCH_BUNDLE.sha256"
+}
+
+build_bench_bundle() {
+  # ONE build mechanism: the SAME clj -M:cljs invocation cljs-watch uses
+  # (identical SEON_EXTRA_* injection), one-off `compile` of the mirror
+  # build id instead of `watch client`. Safe alongside a running watch —
+  # the :client worker ignores unwatched builds (acme-proven).
+  #
+  # MUTEXED (bench-cluster-N): concurrent `cluster create`s must NEVER
+  # build concurrently — two compilers writing out-bench/ corrupt the
+  # bundle. Waiters block up to 300s (a cold build), then RE-CHECK
+  # staleness: a peer that just built while we waited makes this a no-op.
+  acquire_lock bench-bundle 300
+  if ! bench_bundle_stale; then
+    [ -f "$BENCH_BUNDLE.sha256" ] || write_bench_sha
+    release_lock bench-bundle
+    return 0
+  fi
+  local cmd
+  cmd="clj$(extra_src_sdeps) -M:cljs compile bench-client$(extra_preload_merge)"
+  echo "  ▶ building the frozen bench bundle ($BENCH_BUNDLE, ~30s warm)"
+  (cd "$SEON_ROOT" && bash -c "$cmd") || {
+    echo "  ✗ bench bundle build FAILED (clj -M:cljs compile bench-client)" >&2
+    release_lock bench-bundle
+    return 1
+  }
+  write_bench_sha
+  release_lock bench-bundle
+  echo "  ● bench bundle built — sha256 $(cat "$BENCH_BUNDLE.sha256")"
+}
+
+ensure_bench_bundle() {
+  # mode=fresh   → rebuild when STALE (`bin/seon bench-bundle` ONLY — the
+  #                RUN-level pre-build the harness fires once before
+  #                dispatching samples, so a bench run starts on current
+  #                code; the end-of-run identity assertion then catches
+  #                any mid-run change).
+  # mode=present → build only if MISSING (cluster create AND pod-<n>
+  #                start/restart: a bundle is pinned for a whole RUN, so
+  #                neither a create nor the planning row's mid-sample pod
+  #                restart may rebuild — a per-create staleness rebuild
+  #                swaps code under a run whenever src/ is saved mid-run).
+  local mode="${1:-fresh}"
+  case "$mode" in
+    fresh)   if ! bench_bundle_stale; then
+               [ -f "$BENCH_BUNDLE.sha256" ] || write_bench_sha
+               return 0
+             fi ;;
+    present) if [ -f "$BENCH_BUNDLE" ]; then
+               [ -f "$BENCH_BUNDLE.sha256" ] || write_bench_sha
+               return 0
+             fi ;;
+  esac
+  build_bench_bundle
 }
 
 cmd_prep() {
@@ -521,6 +750,18 @@ cmd_prep() {
   else
     echo "● classpath warm for aliases: $prep_aliases"
   fi
+
+  # Complete the first-time build: the pod's bootstrap-CLJS bundle
+  # (out/bootstrap). Presence-gated no-op on a warm tree; `start pod`
+  # also self-heals this, but prep-then-start should never surprise.
+  if [ ! -f "$SEON_ROOT/out/bootstrap/index.transit.json" ]; then
+    echo "▶ building the bootstrap-CLJS bundle (out/bootstrap, ~1 min)"
+    (cd "$SEON_ROOT" && clj -M:cljs compile bootstrap && bin/fix-bootstrap-macros) || {
+      echo "✗ bootstrap build FAILED — the pod cannot run without out/bootstrap" >&2
+      return 1
+    }
+    echo "● bootstrap bundle built"
+  fi
 }
 
 # ============================================================
@@ -547,7 +788,12 @@ ensure_state() { mkdir -p "$(state_dir "$1")"; }
 # ============================================================
 
 acquire_lock() {
+  # $2 (optional) = max seconds to wait (default 10). Long-running critical
+  # sections (the bench-bundle build, ~30-60s) pass a bigger bound so a
+  # concurrent waiter WAITS the build out instead of dying at 10s.
   local name="$1"
+  local max_wait_s="${2:-10}"
+  local max_tries=$((max_wait_s * 10))
   ensure_state "$name"
   local lock
   lock="$(lock_dir "$name")"
@@ -576,8 +822,8 @@ acquire_lock() {
       continue
     fi
     tries=$((tries + 1))
-    if [ "$tries" -gt 100 ]; then
-      echo "  ✗ could not acquire lock for $name after 10s" >&2
+    if [ "$tries" -gt "$max_tries" ]; then
+      echo "  ✗ could not acquire lock for $name after ${max_wait_s}s" >&2
       echo "  held by pid ${owner_pid:-unknown};" >&2
       echo "  if confirmed stale: rm -rf $lock" >&2
       exit 1
@@ -611,6 +857,39 @@ is_running() {
   kill -0 "$pid" 2>/dev/null
 }
 
+spawn_detached() {
+  # `nohup ... &` ignores SIGHUP but remains in the launcher's session/process
+  # group. Some terminal hosts (including Codex after a machine reboot) reap
+  # that whole group when the command session closes. Python's
+  # start_new_session performs the portable setsid(2) step missing from macOS
+  # userland, while preserving the exact bash command and PID we supervise.
+  local cmd="$1"
+  local log="$2"
+  command -v python3 >/dev/null 2>&1 || {
+    echo "✗ python3 is required to detach managed processes safely" >&2
+    return 1
+  }
+  python3 - "$cmd" "$log" "$SEON_ROOT" <<'PY'
+import os
+import subprocess
+import sys
+
+cmd, log_path, cwd = sys.argv[1:]
+with open(log_path, "ab", buffering=0) as log:
+    process = subprocess.Popen(
+        ["/bin/bash", "-c", cmd],
+        cwd=cwd,
+        env=os.environ.copy(),
+        stdin=subprocess.DEVNULL,
+        stdout=log,
+        stderr=subprocess.STDOUT,
+        close_fds=True,
+        start_new_session=True,
+    )
+print(process.pid)
+PY
+}
+
 # ============================================================
 # Subcommands.
 #
@@ -632,23 +911,61 @@ _start_unlocked() {
   local cmd
   cmd="$(process_command "$name")" || { echo "unknown process: $name" >&2; return 1; }
 
+  assert_no_unmanaged_listener "$name" || return 1
+
   # Fresh log on each start so tail isn't polluted with prior runs.
   : > "$(log_file "$name")"
+
+  # A stale port/socket file must never satisfy this process's ready gate.
+  clear_readiness_artifacts "$name"
 
   # Sha-bump guard: download + prep git deps BEFORE spawn so they never
   # build inside the process's own ready window (no-op when unchanged).
   maybe_prep_deps "$name" || return 1
 
-  # nohup + & detaches from this shell; bash -c handles multi-word cmds.
-  nohup bash -c "$cmd" >> "$(log_file "$name")" 2>&1 &
-  local pid=$!
+  # Fresh-clone guard: the pod needs the bootstrap-CLJS bundle
+  # (out/bootstrap) — build it before spawn (no-op when present).
+  maybe_build_bootstrap "$name" || return 1
+
+  # Frozen-cluster guard: a frozen pod-<n> execs the bench bundle — build it
+  # only if MISSING (presence, not staleness: the bundle is PINNED for the
+  # cluster's lifetime; a restart mid-sample must not swap code under it).
+  case "$name" in
+    pod-*)
+      if [ -f "data/clusters/${name#pod-}/frozen" ]; then
+        ensure_bench_bundle present || return 1
+      fi ;;
+  esac
+
+  # Writer-warmup guard (C16 root fix): a pod spawned right after
+  # `restart wire-server` races the writer's warmup — the pod's boot ping
+  # is fail-loud (~10s), so it exited and needed a SECOND start. Gate every
+  # pod spawn on the SAME wire-server ready_check that `start all` /
+  # `cluster create` / `cluster reset` use (one mechanism), bounded + loud
+  # via wait_ready. Only when a wire-server is actually running under THIS
+  # supervisor — a missing writer keeps today's honest fail-loud pod boot.
+  case "$name" in
+    pod|pod-*)
+      if is_running wire-server && ! ready_check wire-server; then
+        wait_ready wire-server || {
+          echo "✗ $name NOT started — this supervisor's wire-server never became accept-ready" >&2
+          echo "  read its log: bin/seon logs wire-server   ($(log_file wire-server))" >&2
+          return 1
+        }
+      fi ;;
+  esac
+
+  # Start in a new OS session so the process survives the invoking terminal,
+  # SSH session, CI runner, or agent tool closing after this command returns.
+  local pid
+  pid="$(spawn_detached "$cmd" "$(log_file "$name")")" || return 1
 
   echo "$pid"        > "$(pid_file "$name")"
   echo "$cmd"        > "$(cmd_file "$name")"
   date -u +%FT%TZ    > "$(started_file "$name")"
 
   echo "● $name started (pid $pid)"
-  echo "  log: logs/$name.log"
+  echo "  log: $(log_file "$name")"
   process_ready_hint "$name"
 }
 
@@ -699,6 +1016,18 @@ _stop_unlocked() {
   fi
 
   rm -f "$(pid_file "$name")"
+
+  # A dead pod's port file is a LIE — the next pod binds a fresh ephemeral
+  # port, and a reader polling the stale file (a harness, a curl loop) races
+  # the old port. Remove it on stop so "port file exists" ⇒ "pod wrote it".
+  case "$name" in
+    pod)   rm -f "$SEON_PORT_FILE" ;;
+    pod-*) rm -f "tmp/seon-port-${name#pod-}" ;;
+    # Same rule for the wire-server's REPL port file: deleteOnExit covers a
+    # graceful JVM exit, but a SIGKILL leaves a stale file — remove it so
+    # "file exists" ⇒ "this supervisor's wire-server wrote it".
+    wire-server) rm -f "$SEON_WRITER_REPL_PORT_FILE" ;;
+  esac
 }
 
 start_all() {
@@ -707,8 +1036,7 @@ start_all() {
   # in cmd_start and (being ready) pass their gate immediately.
   local name
   for name in $(stack_processes); do
-    cmd_start "$name"
-    wait_ready "$name" || {
+    cmd_start "$name" || {
       echo "✗ start all ABORTED at $name (later stages not started)" >&2
       exit 1
     }
@@ -739,6 +1067,10 @@ cmd_start() {
   acquire_lock "$name"
   _start_unlocked "$name"
   release_lock "$name"
+  # A successful `start` means usable, not merely forked. This also checks an
+  # already-running process and gives every entry point the same readiness
+  # contract as restart/start-all/cluster operations.
+  wait_ready "$name"
 }
 
 cmd_stop() {
@@ -754,12 +1086,30 @@ cmd_restart() {
   # they see "stopped" or "started" but never an intermediate state
   # where another agent could race in and start a competing instance.
   # (`restart all` is per-process atomic, not stack-atomic.)
+  #
+  # Ready-gate parity with `create` / `start all`: after the fresh process
+  # spawns, BLOCK on the SAME wait_ready/ready_check the create path uses,
+  # so `restart pod-<n>` returns only once the pod has WRITTEN its port file
+  # AND answers HTTP on `/` — not the instant the process forks. Without
+  # this the entire re-boot had to fit inside the harness's tight 60s
+  # CLUSTER_BOOT_BUDGET_S with zero slack, so a tail-latency reboot that
+  # `create`'s internal 120s gate would have absorbed hard-failed as a
+  # cluster_boot_timeout (root cause:
+  # docs/prds/agent-ctx/research/cluster-boot-timeout-2026-07-04.md).
+  # Processes with no ready_check (jvm) have ready_bound 0 → wait_ready
+  # returns immediately, so this never hangs them.
   local name="${1:?restart requires a process name}"
   if [ "$name" = "all" ]; then stop_all; start_all; return 0; fi
   acquire_lock "$name"
   _stop_unlocked "$name"
   _start_unlocked "$name"
   release_lock "$name"
+  # Gate AFTER releasing the lock — readiness is observation, not a shared
+  # mutation, so another agent needn't wait behind it; the process is
+  # already spawned + recorded. wait_ready is loud on timeout/early death
+  # and names the log to read; propagate its exit so a failed reboot is a
+  # failed `restart`.
+  wait_ready "$name"
 }
 
 cmd_status() {
@@ -836,20 +1186,235 @@ merged_logs() {
 }
 
 cmd_cluster() {
-  # Cluster lifecycle. Today: `reset [name]` (name defaults to
-  # "default"). One command = stop pod → stop wire-server → wipe the
-  # cluster's STORE DIR ONLY → start wire-server (mints a fresh DB) →
-  # start pod (boot re-seeds the core idempotently).
+  # Cluster lifecycle.
+  #   reset [name]              wipe + reboot ONE cluster's store (default
+  #                             "default") — see cluster_reset.
+  #   create <name> [--ephemeral]  a NEW cluster on THIS supervisor's
+  #                             wire-server: db entry + its own pod.
+  #   fork <src> <t|--at t> [fork-name]  a NEW cluster whose db is the
+  #                             source cluster's world at basis-t <t> —
+  #                             independent, writable, disposable
+  #                             (error forensics: t = :seon.error/at).
+  #   destroy <name>            stop its pod, delete its db from the
+  #                             wire-server registry, remove
+  #                             data/clusters/<name>/ INCLUDING blobs/.
   #
-  # The store is the durable home of every agent/message/finding in
-  # the cluster — reset is DESTRUCTIVE and deliberate; there is no
-  # confirmation prompt because the caller already typed "reset".
-  local sub="${1:?cluster requires a subcommand (reset)}"
+  # A cluster = one shared DB + its agents, one Node pod per cluster —
+  # isolation is the process boundary + the wire capability surface. One
+  # wire-server JVM hosts every cluster's db (the registry), so create is
+  # cheap: a db entry + a node process. All lifecycle ops are DESTRUCTIVE
+  # where they say so and deliberate; no confirmation prompts.
+  local sub="${1:?cluster requires a subcommand (reset|create|fork|destroy)}"
   shift
   case "$sub" in
-    reset) cluster_reset "${1:-default}" ;;
-    *) echo "unknown cluster subcommand: $sub (try: reset [name])" >&2; exit 1 ;;
+    reset)   cluster_reset "${1:-default}" ;;
+    create)  cluster_create "$@" ;;
+    fork)    cluster_fork "$@" ;;
+    destroy) cluster_destroy "${1:?cluster destroy requires a name}" ;;
+    *) echo "unknown cluster subcommand: $sub (try: reset [name] | create <name> [--ephemeral] [--frozen|--watched] | fork <src> <t|--at t> [fork-name] | destroy <name>)" >&2; exit 1 ;;
   esac
+}
+
+valid_cluster_name() {
+  # The name becomes a path segment under data/clusters/ and a wire db-name.
+  case "$1" in
+    */*|.|..|""|*[!a-zA-Z0-9_-]*) return 1 ;;
+    *) return 0 ;;
+  esac
+}
+
+cluster_create() {
+  local name="${1:?cluster create requires a name}"
+  shift
+  if ! valid_cluster_name "$name"; then
+    echo "✗ invalid cluster name: '$name' (a-zA-Z0-9_- only)" >&2; exit 1
+  fi
+  if [ "$name" = "$(basename "$SEON_CLUSTER_DIR")" ]; then
+    echo "✗ '$name' is this supervisor's own cluster — it already exists" >&2; exit 1
+  fi
+  local ephemeral=0 frozen="" flag
+  for flag in "$@"; do
+    case "$flag" in
+      --ephemeral) ephemeral=1 ;;
+      --frozen)    frozen=1 ;;
+      --watched)   frozen=0 ;;
+      "") ;;
+      *) echo "✗ unknown cluster create flag: $flag (try --ephemeral | --frozen | --watched)" >&2; exit 1 ;;
+    esac
+  done
+  # Bundle-mode DEFAULTS: ephemeral ⇒ FROZEN (the canonical consumer is a
+  # bench sample, where a cljs-watch hot-patch mid-sample voided a whole
+  # capability row — 2026-07-03; wanting hot-reload is the conscious
+  # exception: --watched). Durable ⇒ WATCHED (a long-lived dev cluster rides
+  # cljs-watch like the default pod; pin it explicitly with --frozen).
+  [ -z "$frozen" ] && frozen=$ephemeral
+
+  local mode_desc="watched bundle"
+  [ "$frozen" = 1 ] && mode_desc="frozen bench bundle"
+  echo "▶ cluster create: $name ($mode_desc)"
+
+  # C16 (pod-after-wire-server warmup): the new cluster's db lives on THIS
+  # supervisor's wire-server — bring it up and gate on REAL readiness
+  # BEFORE the pod spawns (idempotent no-op when already running). The pod's
+  # own boot then ping-gates the socket AND ensure-db's its cluster db
+  # (backend :file, path data/clusters/<name>/store) before attaching its
+  # read conn — no bash-side db call needed, one creation path.
+  cmd_start wire-server
+  wait_ready wire-server || exit 1
+
+  mkdir -p "data/clusters/$name"
+  # `--ephemeral` records INTENT (this cluster is disposable — a bench
+  # sample, a one-shot drive); create/destroy behave identically either
+  # way (the store is :file, destroy always removes everything). The
+  # marker lets sweeps find leftover disposable clusters.
+  [ "$ephemeral" = 1 ] && date -u +%FT%TZ > "data/clusters/$name/ephemeral"
+  if [ "$frozen" = 1 ]; then
+    # The frozen marker is what process_command (pod-<n>) keys the bundle
+    # choice on — it lives with the cluster and dies with destroy.
+    date -u +%FT%TZ > "data/clusters/$name/frozen"
+    # PRESENCE only — never a staleness rebuild here. Freshness is a
+    # RUN-level concern (`bin/seon bench-bundle` up front, which the
+    # harness runs before dispatching samples): with per-sample creates, a
+    # staleness rebuild AT CREATE swaps code under a run whenever anyone
+    # saves src/ mid-run — the exact contamination the frozen bundle exists
+    # to prevent (observed voiding a web_fetch row, 2026-07-03). A create
+    # with no bundle at all still builds one.
+    ensure_bench_bundle present || exit 1
+  fi
+
+  cmd_start "pod-$name"
+  wait_ready "pod-$name" || exit 1
+  local port
+  port="$(cat "tmp/seon-port-$name" 2>/dev/null || echo '?')"
+  echo "▶ cluster $name created — pod http://127.0.0.1:$port (db-name $name, store data/clusters/$name/store)"
+}
+
+cluster_fork() {
+  # Fork an existing cluster's db at a basis-t (tx id) into a NEW live,
+  # writable, disposable cluster — the error-forensics door: an error's
+  # :seon.error/at is exactly this t, so the fork boots the world the
+  # failing code SAW. (:seon.error/at is captured at the CATCH site; the
+  # error datom itself was recorded in a LATER tx, so it is NOT inside
+  # its own fork.) Mechanism: seon.server.registry/fork-db! over the
+  # loopback socket REPL — the same supervisor channel cluster destroy
+  # uses for delete-db!; never agent-exposed. It wraps
+  # datahike.api/fork-database: konserve-layer copy + head at the :at
+  # commit + a fresh deterministic store identity. eids/tx-eids are
+  # byte-identical, so every stored basis-t means the same thing inside
+  # the fork. Boot then follows cluster create exactly: the fork's own
+  # pod (pod-<fork-name>, free port), whose boot ensure-db registers the
+  # fork db on the wire-server — one creation path. The fork store is
+  # fully independent by construction (own dir, own store id):
+  # `cluster destroy <fork>` removes it without touching the source.
+  local src="${1:?cluster fork requires a source cluster name}"
+  shift
+  [ "${1:-}" = "--at" ] && shift
+  local t="${1:?cluster fork requires a basis-t: bin/seon cluster fork <src> <t|--at t> [fork-name]}"
+  shift || true
+  local fork_name="${1:-fork-$src-$t}"
+  if ! valid_cluster_name "$src"; then
+    echo "✗ invalid source cluster name: '$src'" >&2; exit 1
+  fi
+  case "$t" in
+    *[!0-9]*|"") echo "✗ basis-t must be a tx id (integer), got: '$t'" >&2; exit 1 ;;
+  esac
+  if ! valid_cluster_name "$fork_name"; then
+    echo "✗ invalid fork name: '$fork_name' (a-zA-Z0-9_- only)" >&2; exit 1
+  fi
+  if [ -d "data/clusters/$fork_name" ]; then
+    echo "✗ data/clusters/$fork_name already exists — destroy it first: bin/seon cluster destroy $fork_name" >&2
+    exit 1
+  fi
+
+  echo "▶ cluster fork: $src @t=$t → $fork_name"
+  # The source db lives on THIS supervisor's wire-server; the fork op
+  # runs inside that JVM (registry fn over the loopback REPL).
+  cmd_start wire-server
+  wait_ready wire-server || exit 1
+
+  local expr out
+  # Port from THIS supervisor's env: $SEON_WRITER_REPL_PORT is exactly what
+  # this supervisor passed via --repl-port at wire-server start. (The port
+  # FILE is per-supervisor too since C48 — $SEON_WRITER_REPL_PORT_FILE — but
+  # the env port is still the most direct source here.)
+  expr="$(printf '(seon.server.registry/fork-db! {:seon.server.registry/db-name :%s :seon.server.registry/fork-name :%s :seon.server.registry/at %s :seon.server.registry/path "data/clusters/%s/store"})' \
+           "$src" "$fork_name" "$t" "$fork_name")"
+  # Structured RPC: bin/seon-server-call parses the REPL's printed EDN as
+  # data and keys success on fork-db!'s own namespaced flag — bash never
+  # pattern-matches printed EDN. Nonzero = the reply map (usually carrying
+  # ::error) on stdout, or a transport failure explained on stderr.
+  if ! out="$(bin/seon-server-call --port "$SEON_WRITER_REPL_PORT" --timeout 60 \
+                "$expr" ':seon.server.registry/forked?')"; then
+    echo "✗ fork failed — wire-server replied:" >&2
+    [ -n "$out" ] && printf '  %s\n' "$out" >&2
+    echo "  (an unresolved-symbol reply means the running wire-server predates fork-db! — bin/seon restart wire-server)" >&2
+    rm -rf "data/clusters/$fork_name"
+    exit 1
+  fi
+
+  # The forensic world includes the source's turn-capture blobs (prompt/
+  # reply content the store only REFERENCES by hash) — copy them alongside
+  # so inspect/turn replay works inside the fork.
+  [ -d "data/clusters/$src/blobs" ] && cp -R "data/clusters/$src/blobs" "data/clusters/$fork_name/blobs"
+  # Forks are disposable by intent (same marker create --ephemeral writes);
+  # WATCHED bundle (no frozen marker): a fork is a dev-triage world, and
+  # fixing the bug usually means iterating on src/ against it.
+  date -u +%FT%TZ > "data/clusters/$fork_name/ephemeral"
+
+  cmd_start "pod-$fork_name"
+  wait_ready "pod-$fork_name" || exit 1
+  local port
+  port="$(cat "tmp/seon-port-$fork_name" 2>/dev/null || echo '?')"
+  echo "▶ cluster $fork_name forked from $src @t=$t — pod http://127.0.0.1:$port (store data/clusters/$fork_name/store)"
+  echo "  triage inside: (seon.agent.inspect/errors) etc. — this world is what the failing code saw at t=$t; done: bin/seon cluster destroy $fork_name"
+}
+
+cluster_destroy() {
+  local name="$1"
+  if ! valid_cluster_name "$name"; then
+    echo "✗ invalid cluster name: '$name'" >&2; exit 1
+  fi
+  if [ "$name" = "default" ] || [ "data/clusters/$name" = "$SEON_CLUSTER_DIR" ]; then
+    echo "✗ refusing to destroy this supervisor's own cluster '$name' — use: bin/seon cluster reset $name" >&2
+    exit 1
+  fi
+
+  echo "▶ cluster destroy: $name"
+
+  cmd_stop "pod-$name"
+
+  # Delete the db from the LIVE wire-server registry (release the conn +
+  # datahike delete-database) via the loopback socket REPL — the
+  # supervisor-facing channel; no pod-side verb reaches this (agents never
+  # see other clusters). Skipped when the wire-server is down: the
+  # directory wipe below is the backstop, and a restarted wire-server only
+  # re-registers dbs that are ensured again.
+  if is_running wire-server; then
+    local out
+    # Structured RPC (bin/seon-server-call): success = delete-db!'s own
+    # ::deleted? flag. A false/failed reply is reported honestly but does
+    # not abort — the directory wipe below is the backstop either way.
+    # Port from $SEON_WRITER_REPL_PORT (this supervisor's own --repl-port);
+    # the port file is per-supervisor too since C48.
+    if out="$(bin/seon-server-call --port "$SEON_WRITER_REPL_PORT" --timeout 15 \
+                "(seon.server.registry/delete-db! {:seon.server.registry/db-name :$name})" \
+                ':seon.server.registry/deleted?')"; then
+      echo "  registry delete: $out"
+    else
+      echo "  ⚠ registry delete did not confirm (wiping the dir anyway — that is the backstop)" >&2
+      [ -n "$out" ] && printf '  %s\n' "$out" >&2
+    fi
+  else
+    echo "  (wire-server not running — skipping registry delete; wiping the dir)"
+  fi
+
+  # The WHOLE cluster dir — store/ AND blobs/ (per-cluster turn-capture
+  # blobs) AND any future per-cluster artifacts — plus the pod's port file
+  # and supervisor state.
+  rm -rf "data/clusters/$name"
+  rm -f "tmp/seon-port-$name"
+  rm -rf "$PROC_DIR/pod-$name"
+  echo "▶ cluster $name destroyed — data/clusters/$name removed (blobs included), registry entry deleted"
 }
 
 cluster_reset() {
@@ -886,6 +1451,16 @@ cluster_reset() {
   # store and printed "no processes registered for it".
   local bounce=0
   [ "$store_dir" = "$SEON_CLUSTER_DIR/store" ] && bounce=1
+
+  # A supervisor-CREATED cluster (pod-<name> + a registry db entry on the
+  # LIVE wire-server) can't be reset by a bare store wipe — the wire-server
+  # still holds the old conn and would write into the wiped dir. Its
+  # lifecycle is destroy + create.
+  if [ "$bounce" = 0 ] && [ -d "$(state_dir "pod-$name")" ]; then
+    echo "✗ '$name' is a created cluster (pod-$name) — reset it with:" >&2
+    echo "    bin/seon cluster destroy $name && bin/seon cluster create $name" >&2
+    exit 1
+  fi
 
   echo "▶ cluster reset: $name"
 
@@ -965,10 +1540,17 @@ cmd_nuke() {
   echo "▶ nuke: tearing the world down"
 
   # 1. Stop every managed process (jvm included — full clean slate, unlike
-  #    `start/stop all` which excludes it). Idempotent no-ops if not running.
+  #    `start/stop all` which excludes it), cluster pods too (their stores
+  #    are wiped below). Idempotent no-ops if not running.
   for name in pod wire-server cljs-watch jvm; do
     cmd_stop "$name"
   done
+  for d in "$PROC_DIR"/pod-*/; do
+    [ -d "$d" ] || continue
+    cmd_stop "$(basename "$d")"
+    rm -rf "$d"
+  done
+  rm -f tmp/seon-port-* 2>/dev/null || true
 
   # 2. Drop the default cluster's stale UDS sockets + the published port file
   #    (recreated on the fresh start).
@@ -996,6 +1578,87 @@ cmd_nuke() {
   echo "▶ restarting the default stack fresh"
   start_all
   echo "▶ nuke complete — fresh world, core re-seeded on pod boot"
+}
+
+cmd_watch_faults() {
+  # Block until the pod records a NEW :core fault, then exit 0.
+  #
+  # Designed to run as a BACKGROUND task in an orchestrator session: when it
+  # exits, the harness re-invokes the orchestrator, which triages via
+  #   (seon.agent.inspect/errors) → (seon.agent.inspect/error {…/eid N})
+  #   → (seon.agent.inspect/repro {…/eid N}).
+  #
+  # Mechanics: `tail -F -n 0` the pod log (follows across truncation/rotation
+  # AND a pod restart's fresh log; -n 0 = start at end-of-file, so old markers
+  # are never replayed) until the FIRST `SEON-CORE-FAULT` marker line
+  # (seon.error/escalate! prints one per :core fault). The
+  # `SEON-EXPECTED-CORE-FAULT` marker (a test fixture's deliberately-provoked
+  # fault, bracketed by seon.error/expecting-core-fault!) is NOT an alarm and
+  # is explicitly excluded. Prints the marker + the last ~20 log lines of
+  # context, exits 0. Dependency-free shell (tail/grep only).
+  #
+  #   bin/seon watch-faults                    # default cluster (logs/pod.log)
+  #   bin/seon watch-faults --cluster acme2    # a created cluster (logs/pod-acme2.log)
+  local proc="pod"
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      --cluster)
+        shift
+        local cname="${1:?--cluster requires a name}"
+        [ "$cname" = "default" ] || proc="pod-$cname"
+        shift ;;
+      *) echo "unknown watch-faults arg: $1 (try: --cluster <name>)" >&2; exit 1 ;;
+    esac
+  done
+  local lf
+  lf="$(log_file "$proc")"
+  echo "● watching $lf for SEON-CORE-FAULT (new markers only; expected-bracket markers ignored)"
+  # tail -F retries a missing/rotated/truncated file forever, so this survives
+  # `bin/seon restart pod` (fresh truncated log) mid-watch. The tail runs in
+  # the background so we can kill it the moment the first marker lands —
+  # a `$(pipeline)` capture would otherwise block on tail never exiting.
+  local fifo
+  fifo="$(mktemp -u "${TMPDIR:-/tmp}/seon-watch-faults.XXXXXX")"
+  mkfifo "$fifo"
+  tail -F -n 0 "$lf" 2>/dev/null > "$fifo" &
+  local tail_pid=$!
+  # `|| true` is load-bearing: the script runs under set -e, and the trap
+  # re-fires at exit AFTER the explicit kill below — a failing re-kill of the
+  # already-dead tail would flip the exit code to 1.
+  # shellcheck disable=SC2064
+  trap "kill $tail_pid 2>/dev/null || true; rm -f '$fifo'" EXIT INT TERM
+  local marker=""
+  local line
+  while IFS= read -r line; do
+    case "$line" in
+      *SEON-EXPECTED-CORE-FAULT*) continue ;;             # anchored exclusion
+      *SEON-CORE-FAULT*)          marker="$line"; break ;;
+    esac
+  done < "$fifo"
+  kill "$tail_pid" 2>/dev/null || true
+  rm -f "$fifo"
+  # EOF without a match (tail killed, watch TERM'd, fifo closed) is NOT a
+  # fault — falling through to the alarm here printed a FALSE "✗ CORE FAULT
+  # detected" with an EMPTY marker and exit 0 (found by the error-workflow
+  # drill 2026-07-05, registry C52). Report honestly and exit 3 so a
+  # background-task harness never triages a ghost.
+  if [ -z "$marker" ]; then
+    echo ""
+    echo "○ watch ended without a fault marker (log stream closed / watch terminated) — NO core fault detected"
+    trap - EXIT INT TERM
+    exit 3
+  fi
+  echo ""
+  echo "✗ CORE FAULT detected in $lf:"
+  echo "  $marker"
+  echo ""
+  echo "--- last 20 log lines ($lf) ---"
+  tail -n 20 "$lf" 2>/dev/null || true
+  echo "-------------------------------"
+  echo "triage: (seon.agent.inspect/errors) → (seon.agent.inspect/error {:seon.agent.inspect/eid N}) → (seon.agent.inspect/repro {:seon.agent.inspect/eid N})"
+  echo "(dev dial is :crash — the pod exited after persisting the fault datom; restart: bin/seon restart pod)"
+  trap - EXIT INT TERM
+  exit 0
 }
 
 cmd_adopt() {
@@ -1039,11 +1702,20 @@ case "${1:-help}" in
   # the verification verb for the gate table in
   # docs/seon/components/capability-gates.md. Unset var = code default (deny).
   print-env)
-    for v in SEON_SHELL SEON_WEB SEON_WEB_DOMAINS SEON_WEB_LOCK \
+    for v in SEON_SHELL SEON_WEB \
              SEON_FS_LOCK SEON_EMBED SEON_INSTRUMENT SEON_SOUL SEON_CONFIG; do
       if [ -n "${!v+x}" ]; then echo "$v=${!v}"; else echo "$v (unset)"; fi
     done ;;
   cluster) shift; cmd_cluster "$@" ;;
+  # Block until the pod's log records a NEW un-expected SEON-CORE-FAULT
+  # marker, print it + context, exit 0 — the orchestrator's background
+  # core-fault alarm (see cmd_watch_faults).
+  watch-faults) shift; cmd_watch_faults "$@" ;;
+  # Ensure the frozen bench bundle is BUILT + FRESH, without creating a
+  # cluster — the harness's up-front pre-build for bench-cluster-N runs
+  # (build ONCE, then create N clusters concurrently; each create's own
+  # staleness check no-ops). Mutexed against concurrent builds.
+  bench-bundle) shift; ensure_bench_bundle "${1:-fresh}" ;;
   nuke)    shift; cmd_nuke "$@" ;;
   help|--help|-h|*)
     cat <<'EOF'
@@ -1081,6 +1753,41 @@ Commands:
   cluster reset [n]  DESTRUCTIVE: stop pod+wire-server, wipe
                      data/clusters/<n>/store (default "default"),
                      restart both — fresh DB, core re-seeds
+  cluster create <n> [--ephemeral] [--frozen|--watched]
+                     NEW cluster on this supervisor's wire-server: one
+                     db entry (backend :file, ensured at pod boot) + its
+                     own pod (process pod-<n>, ephemeral HTTP port in
+                     tmp/seon-port-<n>). --ephemeral marks intent
+                     (a disposable bench/drive cluster) AND defaults the
+                     pod to the FROZEN bench bundle
+                     (out-bench/client/main.js, :bench-client build) —
+                     unwatched, so cljs-watch can never hot-patch it
+                     mid-sample; rebuilt when stale at create, PINNED
+                     across restarts, identity in
+                     out-bench/client/main.js.sha256. Durable clusters
+                     default --watched (live out/client/main.js);
+                     --frozen/--watched override either default
+  cluster fork <source> <basis-t|--at basis-t> [fork-name]
+                     Copy a source cluster at an exact transaction id into
+                     a NEW writable, disposable cluster: its own store,
+                     blobs, pod, and ephemeral HTTP port. Use the
+                     `::fork-hint` from seon.agent.inspect/repro for a core
+                     fault; the error datom itself is after that basis and
+                     is therefore absent inside the fork. The source is
+                     untouched. Destroy the named fork when done.
+  cluster destroy <n>
+                     DESTRUCTIVE: stop pod-<n>, delete the db from the
+                     wire-server registry (REPL → registry/delete-db!),
+                     remove data/clusters/<n>/ INCLUDING blobs/. Refuses
+                     the supervisor's own cluster (use reset)
+  watch-faults [--cluster <n>]
+                     BLOCK until the pod log records a NEW un-expected
+                     SEON-CORE-FAULT marker (starts at end-of-file, follows
+                     across rotation/restart; SEON-EXPECTED-CORE-FAULT is
+                     ignored), print the marker + last 20 log lines, exit 0.
+                     Run as a background task at session start so a :core
+                     fault re-invokes you; triage via seon.agent.inspect/
+                     errors → error → repro
   nuke --yes         DESTRUCTIVE (full clean slate): stop EVERY process
                      (jvm too), wipe ALL cluster stores + transient data,
                      clear ALL logs, restart the default stack fresh.
@@ -1106,6 +1813,9 @@ Env overrides (downstream parametrization — defaults = today's values):
   SEON_REQ_SOCK           wire-server request UDS (default tmp/seon-cluster-default-req.sock)
   SEON_PUB_SOCK           wire-server publish UDS (default tmp/seon-cluster-default-pub.sock)
   SEON_WRITER_REPL_PORT   wire-server loopback REPL port (default 7891)
+  SEON_WRITER_REPL_PORT_FILE  per-supervisor wire REPL port file (default
+                          tmp/seon-writer-repl-port-<cluster>); wire-server
+                          writes it, ready_check/seon-server-call read it
   SEON_PORT               pod HTTP port (default 7890; read by the pod)
   SEON_PORT_FILE          per-cluster pod port file (default tmp/seon-port);
                           pod writes its bound port, status/ready_check read it

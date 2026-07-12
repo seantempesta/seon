@@ -186,7 +186,7 @@ is now technically safe, but it is unused → DELETE it.
 ### SOME — keep seon defaults, drop one, add one
 
 ```clojure
-;; acme/src/acme/overrides.cljs — sibling of the EXISTING (set! live-tile/error-response …)
+;; acme/src/acme/overrides.cljs — sibling of the EXISTING (set! live-canvas/error-response …)
 ;; override. acme.pod already (:require [acme.overrides]) at preload [pod.cljs:18], so this
 ;; fires BEFORE the first agent turn calls context-root. NO seon/ src edit, NO data hack.
 (ns acme.overrides
@@ -355,7 +355,7 @@ Tested against the owner's exact words.
    existing single call site `ctx.cljs:1849`, the override goes in
    `acme/src/acme/overrides.cljs` which `acme.pod` already requires at preload,
    exactly where acme already does `(reset! client/!extra-core-vars …)` and
-   `(set! live-tile/error-response …)`.
+   `(set! live-canvas/error-response …)`.
 3. The override IS a genuine one-liner for both SOME (call the stable public
    `core-panels` and conj) and ALL (return a literal vector) — and crucially
    AVOIDS the `(defonce orig)` self-recursion capture-dance that a raw

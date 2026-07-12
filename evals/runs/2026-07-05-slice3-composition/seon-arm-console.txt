@@ -1,0 +1,21 @@
+Loading dataset princeton-nlp/SWE-bench_Verified from Hugging Face...
+Saving the dataset (0/1 shards):   0%|          | 0/500 [00:00<?, ? examples/s]Saving the dataset (1/1 shards): 100%|██████████| 500/500 [00:00<00:00, 136729.17 examples/s]Saving the dataset (1/1 shards): 100%|██████████| 500/500 [00:00<00:00, 132563.34 examples/s]
+time="2026-07-05T16:03:09-04:00" level=warning msg="No services to build"
+Service default: using local image 'ghcr.io/epoch-research/swe-bench.eval.arm64.sympy__sympy-22914:latest'.
+
+╭──────────────────────────────────────────────────────────────────────────────╮
+│swe_bench_seon (1 sample): mockllm/model                                      │
+╰──────────────────────────────────────────────────────────────────────────────╯
+sample_id: sympy__sympy-22914, message_limit: 30, dataset:                      
+princeton-nlp/SWE-bench_Verified                                                
+                                                                                
+total time:                                   0:03:09                           
+                                                                                
+swe_bench_scorer                                                                
+mean              0.000                                                         
+std               0.000                                                         
+                                                                                
+Log:                                                                            
+evals/runs/2026-07-05-slice3-composition/logs/2026-07-05T20-03-11-00-00_swe-benc
+h-seon_gDkZkGSSKhLytCLYdSUZww.eval                                              
+                                                                                

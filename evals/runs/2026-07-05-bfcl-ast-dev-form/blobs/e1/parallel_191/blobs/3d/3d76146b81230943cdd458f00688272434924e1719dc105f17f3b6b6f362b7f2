@@ -1,0 +1,11 @@
+The user wants me to report function calls, not execute them. They want three separate calls to `public_library.find_nearby` — one for each city with different facilities.
+
+I'll write the three call forms as plain text (not evaluated), then complete.
+
+```
+(public_library.find_nearby {:location "New York, NY" :facilities ["Reading Room" "Fiction"]})
+(public_library.find_nearby {:location "Los Angeles, CA" :facilities ["Wi-Fi" "Children Section"]})
+(public_library.find_nearby {:location "Chicago, IL" :facilities ["Cafe" "Reading Room"]})
+```
+
+These are the three calls the request implies — one per city, with the exact function name and parameter names from the schema. I'll deliver them now.

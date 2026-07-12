@@ -10,15 +10,17 @@
    NOT containers — there are no per-turn headers; the only structural
    marker is the session-resume boundary, interleaved by time.
 
-   It reads as an eval'able REPL transcript: `;` comments + forms +
-   `;=>`-commented results + `;;;`-bracketed sections / `;;; ◀`/`;;; ▶`
-   message lines + a live `ns=>`
-   readline. Re-evaluating the forms (comments pass through) reproduces the
-   agent's state — the context IS a replayable program (the north star).
+   It reads as a REPL transcript: `;` comments + forms + BARE
+   `⟹ <value> ⟸ result/<id>` runtime result lines (NOT comment-shaped, so a
+   model can't fabricate one) + `;;;`-bracketed sections / `;;; ◀`/`;;; ▶`
+   message lines + a live `ns=>` readline. Settled tradeoff
+   (transcript-render redesign): the transcript is no longer re-evaluable
+   Clojure — clarity + anti-fabrication win, because the old `; ⟹` shape was
+   copied by agents into fabricated results.
 
    The masthead opens it, the events stream in time order, and the folded
    live readline at the very bottom carries the cursor (current ns) + this
-   turn's status/steering. Symbol-wired into `seon.config/default-ctx-blocks` as
+   turn's status/steering. Symbol-wired into `config manifest` as
    `'seon.agent.ctx.transcript/transcript-block` (+ the html twin
    `'…/transcript-block-html`).
 
@@ -84,11 +86,7 @@
                                                      {::from-turn-offset 5 ::token-cap 200}]}
                                   :seon.db/ref]) ; of ::decay-level entities
 
-;; scalars on the transcript block. `::turns-retained` is wired in CP-5 (the
-;; transcript window). `::summary-head?` + `::cite-card?` were registered but had
-;; NO consumer (the summary head + cite-card render unconditionally) — REMOVED as
-;; inert per the "no dangling code" rule (the cite-card fabrication guard #63 is
-;; unconditionally on, which is the intended behavior; no toggle needed).
+;; The transcript window (turns kept verbatim before eviction into summaries).
 (schema/register! ::turns-retained [:int {:default 8 :min 0}])
 
 ;; ============================================================
@@ -211,22 +209,48 @@
 ;; FIRST lines of the block. Block-specific cues ONLY (the surface label,
 ;; the oldest-first ordering, append-below); the live-REPL-session framing
 ;; lives ONCE in `seon.agent.ctx/system-text` (no re-teaching here). Never a
-;; `don't write ;=>` prohibition — a negative example primes the mimicry it
+;; `don't write ⟹` prohibition — a negative example primes the mimicry it
 ;; forbids (standing owner rule). The ns slot rides the masthead so the
 ;; agent sees its own session name.
 ;; ------------------------------------------------------------
 
+(defn mode-fragment
+  "The COLOCATED one-line REPL-mode teaching for `mode` (`:batch` | `:stream`).
+
+   Colocation principle: the instruction that describes the mode's behavior
+   lives WITH the transcript block that renders under it, gated by the live
+   `:seon.config/repl-mode` datom — so exactly ONE mode's text renders and
+   the other mode's is ABSENT (never contradicted). `:batch` teaches that a
+   typed result is stripped and the real value arrives interleaved next
+   turn; `:stream` teaches that the turn ends at the first complete form and
+   its value is already in the transcript on continuation (making the
+   aborted-at-form boundary legible, not a silent cutoff). No reserved glyph
+   is shown (a negative example primes the mimicry it forbids)."
+  {:malli/schema [:=> [:catn [::mode :seon.config/repl-mode]] :string]}
+  [mode]
+  (case mode
+    :stream
+    (str "; Your turn ends at your first complete form — the runtime evaluates it and its\n"
+         "; real value is already in the log when you continue. Write one form and stop.\n"
+         "; A reply with NO form does nothing and a few in a row end your run — to say\n"
+         "; something, (message/user \"…\"); to deliver a final answer, (complete \"…\").")
+    ;; :batch (default)
+    (str "; Write the forms you want run; never write out a result yourself — a result you\n"
+         "; type is stripped, and the real value arrives interleaved on your next turn.")))
+
 (defn masthead
   "The transcript's in-band opener for namespace label `ns-str`, rendered
    every turn as the block's first lines. Block-specific cues only — the
-   surface label and the flat, time-ordered event log (messages + evals,
-   oldest-first, append-below); the live-REPL-session framing lives once in
-   [[seon.agent.ctx/system-text]]."
-  {:malli/schema [:=> [:catn [::ns-str :string]] :string]}
-  [ns-str]
+   surface label, the flat time-ordered event log (messages + evals,
+   oldest-first, append-below), and the COLOCATED [[mode-fragment]] for the
+   live `mode` (`:batch` | `:stream`); the live-REPL-session framing lives
+   once in [[seon.agent.ctx/system-text]]."
+  {:malli/schema [:=> [:catn [::ns-str :string] [::mode :seon.config/repl-mode]] :string]}
+  [ns-str mode]
   (str "; seon · " ns-str " · live REPL\n"
        "; The flat, time-ordered log below is this REPL's history — your\n"
-       "; messages and evals interleaved, oldest-first. Append below."))
+       "; messages and evals interleaved, oldest-first. Append below.\n"
+       (mode-fragment mode)))
 
 (def resume-marker-line
   "The session-resume boundary: rendered ONCE per resume, between the
@@ -301,7 +325,7 @@
    it. Content bounded by [[seon.agent.ctx/message-render-cap]]. `new?` marks an
    UNANSWERED inbound — one that arrived after the agent's last action (a
    fresh wake or a mid-call arrival) so the agent re-orients to it."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{node :seon.render/node}]
   (let [{::keys [at from-label to-labels content id new? outbound?]} node
         ;; CP-5 escape-clipping (#43, owner: "render the blocks in full"):
@@ -319,14 +343,13 @@
 (defn eval->renderable
   "The `:seon.render/ai` converter for a transcript EVAL event — the
    canonical eval row. Delegates to [[seon.agent.ctx/format-eval-row]], which
-   carries the fabrication-guard ([[seon.agent.ctx/neutralize-result-claims]])
-   and the component caps ([[seon.agent.ctx/eval-render-cap]] /
+   carries the component caps ([[seon.agent.ctx/eval-render-cap]] /
    [[seon.agent.ctx/result-body-render-cap]]) forward. A `::ns-marker?` true
    event prepends a `; in <ns>` line (emitted only where the eval ns
    changes from the prior eval). PRIOR-SESSION evals (`::prior?` true)
    render their value WITHOUT the `result/<id>` handle (their vars died
    with the restart; the resume marker says so once)."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{node :seon.render/node}]
   (let [{::keys [entity prior? ns-marker]} node
         row (ctx/format-eval-row entity (boolean prior?))]
@@ -389,15 +412,14 @@
             str/trim)))))
 
 (defn coalesced->renderable
-  "The `:seon.render/ai` converter for a COALESCED error run: ONE `;` summary
-   line standing in for N identical consecutive failures, so a thrash burst
-   never floods the agent's own context. Flat + eval'able (a pure comment —
-   re-evaluating runs nothing, which is correct: every collapsed form DEFINED
-   NOTHING)."
-  {:malli/schema [:=> [:cat :map] :string]}
+  "The `:seon.render/ai` converter for a COALESCED error run: ONE bare
+   `⟹ ✗ N× …` runtime summary line standing in for N identical consecutive
+   failures, so a thrash burst never floods the agent's own context (every
+   collapsed form DEFINED NOTHING)."
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{node :seon.render/node}]
   (let [{::keys [signature count]} node]
-    (str ";=> ✗ " count "× " signature
+    (str ctx/result-marker " ✗ " count "× " signature
          " — " count " consecutive failures collapsed; each DEFINED NOTHING. "
          "Fix the form once, not " count " times.")))
 
@@ -540,13 +562,21 @@
         n-turns (count turns)
         run     (derive/current-run db id)
         run-eid (:db/id run)
-        ;; loop-k = turns stamped with the CURRENT open run (the run's
-        ;; derived current-turn); 0 when idle. cap = the run's bumpable
-        ;; turn-limit (renew! grows it), else the default when idle.
-        loop-k  (if run-eid
-                  (count (filter #(= run-eid (:db/id (:seon.agent.turn/run %)))
-                                 turns))
-                  0)
+        ;; loop-k = work spent in the CURRENT open run, in the SAME
+        ;; denomination the loop's bound checks (mode-denominated, repl-milestone rung-0
+        ;; verdict 2026-07-10): `:batch` counts the run's turns, `:stream`
+        ;; counts its FORMS (evals) — one form per stream turn, so prose
+        ;; turns don't move the meter. 0 when idle. cap = the run's
+        ;; bumpable turn-limit (renew! grows it), else the default when idle.
+        run-turns (when run-eid
+                    (filter #(= run-eid (:db/id (:seon.agent.turn/run %)))
+                            turns))
+        loop-k  (cond
+                  (nil? run-eid) 0
+                  (= :stream (ctx/repl-mode db))
+                  (reduce + 0 (map (comp count :seon.agent.turn/evals)
+                                   (remove :seon.agent.turn/scheduled? run-turns)))
+                  :else (count run-turns))
         cap     (or (:seon.agent.run/turn-limit run) ctx/default-turn-limit)
         ;; localized full date+tz so the agent can judge what's expensive.
         ;; This is the ONE legitimate live `now` in the transcript.
@@ -568,107 +598,6 @@
          "; " ns-str " · turn " n-turns " · loop " loop-k "/" cap
          " · " (name (or state :idle)) " · " now " · agent " id "\n"
          ns-str "=> ")))
-
-;; ------------------------------------------------------------
-;; Cite-card — the anti-fabrication surface. A DERIVED list of the agent's
-;; last few SUCCESSFUL, non-trivial eval VALUES rendered as compact `;`
-;; lines IMMEDIATELY ABOVE the readline (the composition point), so the real
-;; number it just computed sits in the nearest tokens to where it writes
-;; `(message/user …)`. Honesty becomes the EASY path: cite the handle that's
-;; right there, never retype a figure from memory.
-;;
-;; Pure derivation over the already-ordered THIS-PROCESS eval stream — stores
-;; NOTHING, self-heals (no recent values → no card). Each line carries the
-;; live `result/<id>` handle, so the agent can also re-reference the WHOLE
-;; value (a clipped preview points back at it).
-;; ------------------------------------------------------------
-
-(def cite-card-max-rows
-  "Most cite-card rows shown — the last N citeable values. Tight: it is
-   always-on context, immediately above the readline."
-  5)
-
-(def cite-value-cap
-  "Per-value char cap for a cite-card line. A bigger value is clipped to a
-   shape hint; its `result/<id>` handle (the line prefix) holds it whole."
-  140)
-
-(def cite-source-cap
-  "Per-source char cap for the trailing `; <form>` hint on a cite-card line."
-  56)
-
-(def cite-card-token-cap
-  "Total token budget for the whole cite-card (header + rows). Oldest rows
-   drop first when over budget — it stays small. Measured in TOKENS."
-  320)
-
-(def ^:private cite-card-header
-  "; values you JUST computed this run — cite THESE exact figures; never retype a number from memory:")
-
-(defn- citeable-eval?
-  "True iff an OK eval carries a VALUE worth re-surfacing for citation: real
-   computed data, not a no-op, echo, side-effect receipt, or opaque object.
-   Skips blank/`nil`/`:idle`/boolean results, pure echoes (value == source),
-   bare `result/<id>` re-references, seon verb ACK receipts (`…/ok? …`), and
-   opaque `#‹fn›`/`#object` values."
-  [e]
-  (let [src (str/trim (str (:seon.eval/source e)))
-        res (str/trim (str (:seon.eval/result-edn e)))]
-    (and (true? (:seon.eval/ok? e))
-         (not (str/blank? src))
-         (not (str/blank? res))
-         (not (#{"nil" ":idle" "true" "false"} res))
-         (not= res src)
-         (not (re-matches #"result/\S+" src))
-         (not (re-find #"/ok\?\s+(?:true|false)" res))
-         (not (str/starts-with? res "#‹fn›"))
-         (not (str/starts-with? res "#object")))))
-
-(defn- collapse
-  "One-line, whitespace-collapsed, char-capped projection of `s` (a value or
-   a form) — keeps a cite line tight; nil-safe."
-  [s cap]
-  (let [one (str/replace (str/trim (str s)) #"\s+" " ")
-        n   (count one)]
-    (if (> n cap) (str (subs one 0 cap) "…") one)))
-
-(defn- cite-line
-  "One cite-card row for OK eval `e`: `;   result/<id> => <value>   ; <form>`.
-   The value preview collapses to one line + caps at [[cite-value-cap]]; a clip
-   points back at the live handle (the line prefix) for the whole value."
-  [e]
-  (let [id  (:seon.eval/id e)
-        raw (str/replace (str/trim (str (:seon.eval/result-edn e))) #"\s+" " ")
-        val (if (> (count raw) cite-value-cap)
-              (str (subs raw 0 cite-value-cap)
-                   " …⟨clipped — result/" id " holds it whole⟩")
-              raw)]
-    (str ";   result/" id " => " val
-         "   ; " (collapse (:seon.eval/source e) cite-source-cap))))
-
-(defn cite-card
-  "The DERIVED anti-fabrication cite-card: the agent's last
-   [[cite-card-max-rows]] SUCCESSFUL, non-trivial eval values (oldest-first)
-   as compact `;` lines under [[cite-card-header]], bounded by
-   [[cite-card-token-cap]] (oldest rows drop first). `eval-rows` are
-   THIS-PROCESS eval entity maps in time order (their `result/<id>` vars are
-   live). Returns \"\" when there is nothing to cite — the card then vanishes
-   (reactive, self-heals)."
-  {:malli/schema [:=> [:catn [::eval-rows [:sequential :map]]] :string]}
-  [eval-rows]
-  (let [lines (->> eval-rows
-                   (filter citeable-eval?)
-                   (take-last cite-card-max-rows)
-                   (mapv cite-line))
-        fit   (loop [ls lines]
-                (if (and (next ls)
-                         (> (tokens/estimate (str/join "\n" (cons cite-card-header ls)))
-                            cite-card-token-cap))
-                  (recur (rest ls))
-                  ls))]
-    (if (seq fit)
-      (str/join "\n" (cons cite-card-header fit))
-      "")))
 
 (defn- ordered-events
   "The agent's full flat event stream — messages + evals UNIONed, sorted
@@ -707,7 +636,7 @@
    events; the sliding window lands later. Every past event renders
    byte-identical turn-to-turn (times from FIXED stored `:at`), so the
    prefix caches — only the readline's `now` changes between turns."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{:seon.agent/keys [id] db :seon.db/db render-fn :seon.render/render :as input}]
   (let [db       (or db @db/*conn*)
         a        (agent-rec id db)
@@ -799,22 +728,14 @@
              first
              (remove str/blank?)
              (str/join "\n"))
-        head (masthead ns-str)
-        ;; The cite-card derives from THIS-PROCESS ok evals (live
-        ;; result/<id> handles) and renders DIRECTLY ABOVE the readline —
-        ;; the real values in the nearest tokens to where the agent composes
-        ;; its reply. Empty (and dropped) when there is nothing to cite.
-        card (cite-card (->> events
-                             (filter #(= :eval (::kind %)))
-                             (remove ::prior?)
-                             (map ::entity)))
+        head (masthead ns-str (ctx/repl-mode db))
         tail (readline input)]
-    (->> [head body card tail]
+    (->> [head body tail]
          (remove str/blank?)
          (str/join "\n\n"))))
 
 ;; ------------------------------------------------------------
-;; HTML twin — the inspector's right-pane transcript card. The same flat
+;; HTML twin — the debug view's right-pane transcript card. The same flat
 ;; event stream, each event rendered through the recursive html handle via
 ;; its kind's html converter (`seon.handlers.message/render-html` /
 ;; `seon.handlers.eval/render-html` — resolved by the entity's schema
@@ -848,7 +769,7 @@
    `:seon.eval`) is rendered through `seon.render/render-entity-html`,
    which resolves the entity's schema-kind html converter. Returns BARE
    hiccup; an empty transcript renders a friendly placeholder."
-  {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-tile/hiccup]]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.canvas/hiccup]]}
   [{:seon.agent/keys [id] db :seon.db/db :as input}]
   (let [db       (or db @db/*conn*)
         a        (agent-rec id db)
@@ -857,6 +778,17 @@
         ;; Same coalescing as the :ai twin — content-free noise dropped,
         ;; consecutive same-error runs collapsed (here: expandable cards).
         events   (coalesce-events (ordered-events db own-id my-eid))
+        render-message
+        (fn [ev]
+          (when-let [mid (::id ev)]
+            (render/render-entity-html
+              (assoc input :seon.db/db db
+                     :seon.render/node
+                     (db/pull db '[* {:seon.agent.message/from
+                                      [:db/id :seon.user/id :seon.agent/id]
+                                      :seon.agent.message/to
+                                      [:db/id :seon.user/id :seon.agent/id]}]
+                              [:seon.agent.message/id mid])))))
         cards
         (->> events
              (keep
@@ -866,21 +798,21 @@
                    ;; Message events carry projected fields, not the raw
                    ;; entity — re-pull the message by id so the html
                    ;; converter sees its full shape.
-                   :message   (when-let [mid (::id ev)]
-                                (render/render-entity-html
-                                  (assoc input :seon.db/db db
-                                         :seon.render/node
-                                         (db/pull db '[* {:seon.agent.message/from
-                                                          [:db/id :seon.user/id :seon.agent/id]
-                                                          :seon.agent.message/to
-                                                          [:db/id :seon.user/id :seon.agent/id]}]
-                                                   [:seon.agent.message/id mid]))))
+                   :message   (render-message ev)
                    :eval      (render/render-entity-html
                                 (assoc input :seon.render/node (::entity ev)
                                        :seon.db/db db))
                    nil)))
-             vec)]
+             vec)
+        latest-reply (some->> events
+                              (filter #(and (= :message (::kind %))
+                                            (::outbound? %)))
+                              last
+                              render-message)]
     (if (seq cards)
-      (into [:div {:class "flex flex-col"}] cards)
+      [:div {:class "seon-tile"}
+       [:div {:class "seon-tile-compact"}
+        (or latest-reply (last cards))]
+       (into [:div {:class "seon-tile-expanded flex flex-col"}] cards)]
       [:div {:class "text-text-500 italic p-2 text-xs font-mono"}
        "no events yet — every message and eval this agent makes appears here live"])))

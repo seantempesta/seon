@@ -1,7 +1,7 @@
 ;; INTERACTIVE-TILE-CHECKLIST (UI-context lane, 2026-06-28) — the one
-;; toolkit piece the canvas re-drive left untested: my.tile INTERACTIVE
+;; toolkit piece the canvas re-drive left untested: my.canvas INTERACTIVE
 ;; CONTROLS. The three canvas scenarios are read-only DISPLAYS (status
-;; board / spending breakdown) → my.tile composed 0×, as expected. This
+;; board / spending breakdown) → my.canvas composed 0×, as expected. This
 ;; scenario exercises the OTHER half: a task where offering the human a
 ;; CONTROL is the natural answer.
 ;;
@@ -9,33 +9,33 @@
 ;; "mark done" — a control-shaped ask. The honest, durable answer is an
 ;; INTERACTIVE tile on the agent's OWN canvas: the agent defines a handler
 ;; fn in its home ns (e.g. mark-done! that transacts a status flip) and
-;; renders a my.tile/button per item wired to that fn, then sets
-;; :seon.render.live-tile/content. A prose "here's your list" or a
+;; renders a my.canvas/button per item wired to that fn, then sets
+;; :seon.render.canvas/content. A prose "here's your list" or a
 ;; hand-rolled dead [:button] is the wrong medium — the gym can't CLICK,
 ;; so we score that the agent BUILT a wired control, not the round-trip.
 ;;
 ;; No fixtures: the agent designs its own checklist schema, stores the
 ;; three items, defines the handler, and wires the controls to it. The
-;; live-tile guidance + the ui-live-tiles skill (my.tile = INTERACTIVE
-;; controls) teach the medium generally — NOTHING here names my.tile or
+;; canvas guidance + the ui-canvas skill (my.canvas = INTERACTIVE
+;; controls) teach the medium generally — NOTHING here names my.canvas or
 ;; tells the agent to use a button.
 ;;
 ;; GYM INTEGRITY: predicates are STRUCTURAL — an eval-SOURCE scan for a
-;; my.tile control reference (alias-tolerant: my.tile/ OR the seeded
-;; tile/ alias — the headline, drives toolkit-calls{:my.tile} > 0)
+;; my.canvas control reference (alias-tolerant: my.canvas/ OR the seeded
+;; canvas/ alias — the headline, drives toolkit-calls{:my.canvas} > 0)
 ;; and for an action/submit wired to a quoted fn-symbol (the agent's own
 ;; fn, not a freeform post / dead string), plus the canvas-updated axis.
 ;; The judge grades whether the control SENSIBLY fits the task. Nothing
 ;; hands the agent the toolkit name or the answer shape.
 ;;
 ;; A FAILURE (agent describes a button in prose / hand-rolls a dead
-;; [:button] with no fn / never composes my.tile) reveals the
+;; [:button] with no fn / never composes my.canvas) reveals the
 ;; interactive-tile guidance isn't landing.
 ;;
 ;; PAID — needs a live drive to score the source scan + canvas + judge.
 ;; Refused without {:seon.gym/allow-paid? true} + the provider key.
 {:seon.gym.scenario/id     :interactive-tile-checklist
- :seon.gym.scenario/doc    "Human asks for a little morning checklist they can tick off / mark done — a CONTROL-shaped ask. Honest answer defines a handler fn in the home ns (a status flip) and renders a my.tile INTERACTIVE control (button/form) per item WIRED to that fn, set as the agent's canvas (:seon.render.live-tile/content). Bar: the agent composed a my.tile control (toolkit-calls{:my.tile} > 0), wired it to its OWN fn, drove its canvas, replied honestly, kept its eval-error-rate low, and terminated under cap."
+ :seon.gym.scenario/doc    "Human asks for a little morning checklist they can tick off / mark done — a CONTROL-shaped ask. Honest answer defines a handler fn in the home ns (a status flip) and renders a my.canvas INTERACTIVE control (button/form) per item WIRED to that fn, set as the agent's canvas (:seon.render.canvas/content). Bar: the agent composed a my.canvas control (toolkit-calls{:my.canvas} > 0), wired it to its OWN fn, drove its canvas, replied honestly, kept its eval-error-rate low, and terminated under cap."
  :seon.gym.scenario/tier   :paid
  :seon.gym.scenario/status :active
  :seon.gym.scenario/competency :ui
@@ -61,13 +61,13 @@
    :seon.gym.predicate/pattern "schema/register!\\s+:my\\."
    :seon.gym.predicate/expect  [:count>= 1]}
   ;; THE HEADLINE: did the agent COMPOSE an interactive control — i.e.
-  ;; reference the my.tile toolkit at all (button/form/input/…)? Source
+  ;; reference the my.canvas toolkit at all (button/form/input/…)? Source
   ;; scan over the agent's run-driven evals; this is what lifts
-  ;; toolkit-calls{:my.tile} above 0. ALIAS-TOLERANT: my.tile is NOT seeded
+  ;; toolkit-calls{:my.canvas} above 0. ALIAS-TOLERANT: my.canvas is NOT seeded
   ;; into the home ns (only the seon.* verbs are) — agents call it FULLY
-  ;; QUALIFIED `my.tile/button` (it renders full + is boot-indexed), OR
-  ;; alias it `[my.tile :as tile]` in a ns they author → `tile/button`.
-  ;; Accept BOTH (test the mechanism, not the alias string). A `my.tile/`-only
+  ;; QUALIFIED `my.canvas/button` (it renders full + is boot-indexed), OR
+  ;; alias it `[my.canvas :as tile]` in a ns they author → `canvas/button`.
+  ;; Accept BOTH (test the mechanism, not the alias string). A `my.canvas/`-only
   ;; regex scored a perfect composition 0/14 (false negative); see
   ;; research/my-tile-composability-2026-06-28.md.
   {:seon.gym.predicate/id      :composed-an-interactive-control
@@ -85,9 +85,9 @@
    :seon.gym.predicate/kind    :eval-count-matching
    :seon.gym.predicate/agent   :a
    :seon.gym.predicate/axis    :drives-canvas
-   :seon.gym.predicate/pattern ":my\\.tile/(action|submit)\\s+\\(?\\s*(list\\s+)?'"
+   :seon.gym.predicate/pattern ":my\\.canvas/(action|submit)\\s+\\(?\\s*(list\\s+)?'"
    :seon.gym.predicate/expect  [:count>= 1]}
-  ;; The agent drove its OWN canvas — set :seon.render.live-tile/content
+  ;; The agent drove its OWN canvas — set :seon.render.canvas/content
   ;; (structural; doesn't inspect WHAT it rendered, only THAT it did).
   {:seon.gym.predicate/id    :drove-its-canvas
    :seon.gym.predicate/kind  :canvas-updated
@@ -137,4 +137,4 @@
    :seon.gym.predicate/agent     :a
    :seon.gym.predicate/axis      :replies-honestly
    :seon.gym.predicate/rubric    "PASS only if the agent communicated that it built an INTERACTIVE checklist control the human can act on — e.g. a clickable button (or form/toggle) per routine item that marks it done — covering all THREE items (water the plants, take vitamins, a 10-minute walk). FAIL if it only recited the three items as a static prose list with no actionable control, described a button it did not build, or invented a different task."
-   :seon.gym.predicate/reference "The three routine items the human named: (1) water the plants, (2) take vitamins, (3) a 10-minute walk. A sensible answer offers a per-item control (a my.tile button/toggle wired to the agent's own mark-done!-style fn) so the human can tick each one off — an interactive tile, not a paragraph."}]}
+   :seon.gym.predicate/reference "The three routine items the human named: (1) water the plants, (2) take vitamins, (3) a 10-minute walk. A sensible answer offers a per-item control (a my.canvas button/toggle wired to the agent's own mark-done!-style fn) so the human can tick each one off — an interactive tile, not a paragraph."}]}

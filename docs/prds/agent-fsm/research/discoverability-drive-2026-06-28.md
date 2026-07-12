@@ -100,7 +100,7 @@ the fabrication contradicted the agent's OWN already-successful query.
                        | root |1| … |fFy|1| - Alive: 6 of 6 (none terminated) …")
                                                             ; {:seon.agent.message/ok? true …}   <-- FABRICATED (see below)
 10  ok  (todo/done! {:seon.agent.todo/id "Awj-2606282011"}) ; closed the address-todo
-11  ok  (db/transact! … :seon.render.live-tile/content [a table of the SAME 1-each numbers])
+11  ok  (db/transact! … :seon.render.live-canvas/content [a table of the SAME 1-each numbers])
                                                             ; live-tile rendered the fabricated table to the human
 12  ok  ""                                                  ; blank
 13 FAIL (turns reference runs, runs reference agents)       ; UNCOMMENTED PROSE parsed-as-form — undefined var
@@ -136,7 +136,7 @@ work, 1 turn each, Alive: 6 of 6 (none terminated)."* At that moment:
   **FAILED** (guessed a non-existent `:seon.agent.turn/agent` ref). So "1 turn each"
   was backed by **zero successful queries** — pure invention. (Ground truth: 54 turns
   total across the fleet, nowhere near 6×1.)
-- It then transacted the SAME fabricated table into its `:seon.render.live-tile/content`
+- It then transacted the SAME fabricated table into its `:seon.render.live-canvas/content`
   (eval #11) — the human's canvas showed invented numbers.
 
 **Self-correction (later) = ACCURATE, CITED.** After discovering the real

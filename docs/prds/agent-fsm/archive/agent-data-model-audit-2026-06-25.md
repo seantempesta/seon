@@ -36,7 +36,7 @@ needs already exists as derivations in `seon.agent.loop`.
 | `:seon.agent/parent` | `:seon.db/ref` opt | lineage — **currently has no writer** (see §2) |
 | `:seon.agent/sessions` | `[:vector {component} :ref]` | durable turn history |
 | `:seon.agent/ctx` *(rename candidate)* | `[:vector {component} :ref]` | the agent's own context sections |
-| `:seon.render.live-tile/content` | symbol/hiccup | tile wiring |
+| `:seon.render.live-canvas/content` | symbol/hiccup | tile wiring |
 | **`:seon.agent/cron`** *(NEW)* | `:string` opt | 5-field cron expr → self-wake schedule |
 
 Per-wake/turn-stamped (own namespaces, correctly stored as coordination

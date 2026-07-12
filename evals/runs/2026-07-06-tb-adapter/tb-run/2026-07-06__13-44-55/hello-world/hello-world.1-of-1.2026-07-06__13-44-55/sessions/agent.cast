@@ -1,0 +1,8 @@
+{"version": 2, "width": 160, "height": 40, "timestamp": 1783359901, "env": {"SHELL": "/bin/bash", "TERM": "tmux-256color"}}
+[0.00188, "o", "\u001b[?2004hroot@c3862b73a697:/app# "]
+[3.003978, "i", "clear\r"]
+[3.004172, "o", "clear\r\n\u001b[?2004l\r"]
+[3.004708, "o", "\u001b[H\u001b[J\u001b[3J"]
+[3.004955, "o", "\u001b[?2004hroot@c3862b73a697:/app# "]
+[6.03, "m", "seon: runtime injected (put_archive)"]
+[20.84, "m", "seon: cluster ready"]

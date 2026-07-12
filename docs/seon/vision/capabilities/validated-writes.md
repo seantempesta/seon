@@ -21,4 +21,4 @@ None.
 ## Related
 
 - Components: [[components/database]], [[components/schema-system]]
-- PRDs: [[prds/schema-unification/design]], [[prds/flow-datalevin-writer/prd]]
+- PRDs: `prds/schema-unification/design`, `prds/flow-datalevin-writer/prd`

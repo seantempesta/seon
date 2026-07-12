@@ -42,7 +42,7 @@ tags: [research, agent, toolkit]
   `status` 49 tok), `my.data` reducers (`sum-by`/`max-by`/`group-sum` return a
   scalar/one row), `my.kb/source-stats` (15 tok), the inventory context block
   (142 tok). The todo surface is the model the others should copy.
-- **Live-state finding (flag):** `my.data`, `my.tile`, `my.ui` are BUILT on disk
+- **Live-state finding (flag):** `my.data`, `my.canvas`, `my.ui` are BUILT on disk
   (Jun 28) but have **zero fn rows in the live program graph** — the pod has not
   been `cluster reset` since they were added, so **agents on the live pod cannot
   see their bodies** (render-namespace shows only their schemas). Verified:
@@ -74,7 +74,7 @@ token offender to fix first.
 | `my.kb/source-stats` | (recipe) | built+tested | **15** | (in my.kb) | CONCISE | leave |
 | `schema/register!` | yes | built+tested | tx envelope | (in seon.schema) | CONCISE | leave |
 | `seon.agent.fs` (`my.files`) | yes | built | paged | (sig) 1,369 | CONCISE (honest paging) | leave |
-| `my.tile` / `my.ui` | yes (`my.tile`) | BUILT, NOT live-indexed | dual-render envelope | 0 live | unmeasured live (not seeded) | flag |
+| `my.canvas` / `my.ui` | yes (`my.canvas`) | BUILT, NOT live-indexed | dual-render envelope | 0 live | unmeasured live (not seeded) | flag |
 | `seon.agent.schedule` (`my.schedule`) | yes | built | envelope | — | not measured | — |
 | `seon.embed` (`my.recall`) | yes | built, gated OFF (`SEON_EMBED`) | ok?-false fallback | — | n/a | — |
 | `my.files`/`my.shell`/`my.test`/`my.code`/`my.blob`/`my.agent` (the `my.*` names) | yes | **NOT built as `my.*`** (live as `seon.agent.*`/`seon.test.runner`; some absent) | — | — | spec-only rename pending | — |
@@ -148,7 +148,7 @@ full-source contributions (sum of `:seon.fn/source` tokens, measured):
 ```clojure
 {"my.kb" {:n 13 :tok 1615}  "my.kb.shared" {:n 3 :tok 684}
  "my.skills" {:n 6 :tok 1401}  "seon.agent.todo" {:n 11 :tok 1914}
- "my.data" {:n 0 :tok 0}  "my.tile" {:n 0 :tok 0}  "my.ui" {:n 0 :tok 0}}
+ "my.data" {:n 0 :tok 0}  "my.canvas" {:n 0 :tok 0}  "my.ui" {:n 0 :tok 0}}
 ;; (the 0-row nses are built-but-not-seeded; see live-state finding)
 ```
 
@@ -264,7 +264,7 @@ install/discoverability removes the cause. Both are needed; they are orthogonal.
 ;; fn-source totals from the program graph (full-source render unit):
 {"my.kb" {:n 13 :tok 1615} "my.kb.shared" {:n 3 :tok 684}
  "my.skills" {:n 6 :tok 1401} "seon.agent.todo" {:n 11 :tok 1914}
- "my.data" {:n 0 :tok 0} "my.tile" {:n 0 :tok 0} "my.ui" {:n 0 :tok 0}}
+ "my.data" {:n 0 :tok 0} "my.canvas" {:n 0 :tok 0} "my.ui" {:n 0 :tok 0}}
 
 ;; grep broad:
 {:ok true :match-count 100 :truncated? true :rendered-value-tok 4246 :per-match-avg 42}
@@ -282,7 +282,7 @@ install/discoverability removes the cause. Both are needed; they are orthogonal.
 ;; always-on context blocks:
 {:inventory-block 142 :skills-catalog-block 886 :skills-list-tok 890}
 
-;; live-state: my.data/my.tile/my.ui have zero fn rows on the pod (built post-reset)
+;; live-state: my.data/my.canvas/my.ui have zero fn rows on the pod (built post-reset)
 (nsfns-tok "my.data") ;=> {:n 0 :tok 0}
 ```
 
@@ -292,7 +292,7 @@ install/discoverability removes the cause. Both are needed; they are orthogonal.
   `:line-text`); a single long matched line can blow a row. Add a preview cap.
 - **`my.skills` violates the "`my.*` is thin" invariant** (toolkit.md §thin
   wrappers) — 1,401 tok of fn bodies + the SKILL.md scan inline. Floor-split candidate.
-- **`my.data`/`my.tile`/`my.ui` built but unseeded on the live pod** — agents can't
+- **`my.data`/`my.canvas`/`my.ui` built but unseeded on the live pod** — agents can't
   see their bodies until `bin/seon cluster reset default`. The `my-data-gym-drive`
   doc already noted adoption tracks render-prominence; on the live pod right now
   `my.data` renders schemas-only, so live agents won't reach for it.

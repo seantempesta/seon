@@ -91,15 +91,15 @@
 
 (defn- eval-args
   [eval-id turn-id source tee]
-  {:eval-id     eval-id
-   :turn-id     turn-id
-   :at          (js/Date.)
-   :duration-ms 1
-   :narration   ""
-   :source      source
-   :ns          'cljs.user
-   :result      {:ok true :value :ok}
-   :tee         tee})
+  {:seon.eval/id-of-eval       eval-id
+   :seon.agent.turn/id-of-turn turn-id
+   :seon.eval/at               (js/Date.)
+   :seon.eval/duration-ms      1
+   :seon.eval/narration        ""
+   :seon.eval/source           source
+   :seon.eval/ending-ns        'cljs.user
+   :seon.eval/result           {:seon.eval/ok? true :seon.eval/value :ok}
+   :seon.eval/tee              tee})
 
 ;; ---------------------------------------------------------------------------
 ;; THE fix, half (a): a data-namespace schema registration tees in the SAME
@@ -312,15 +312,15 @@
   [cs ns-sym source]
   (let [defs-before    (analyzer-info/snapshot-defs cs)
         schemas-before (schema/current-keys)]
-    (-> (seval/eval cs source {:ns ns-sym :analyze-deps? false})
+    (-> (seval/eval cs source {:seon.eval/starting-ns ns-sym :seon.eval/analyze-deps? false})
         (.then (fn [r]
-                 (is (:ok r) (str "eval ok: " source))
+                 (is (:seon.eval/ok? r) (str "eval ok: " source))
                  ((deref #'seval/build-tee-entities)
-                  {:compile-state  cs
-                   :defs-before    defs-before
-                   :schemas-before schemas-before
-                   :source         source
-                   :at             (js/Date.)}))))))
+                  {:seon.eval/compile-state  cs
+                   :seon.eval/defs-before    defs-before
+                   :seon.eval/schemas-before schemas-before
+                   :seon.eval/source         source
+                   :seon.eval/at             (js/Date.)}))))))
 
 (deftest agent-deftest-tees-a-seon-test-row-not-a-fn-row
   (async done
@@ -328,8 +328,8 @@
         (.then
           (fn [cs]
             (-> (seval/eval cs "(ns probe.teetest (:require [cljs.test]))"
-                            {:ns 'cljs.user :analyze-deps? false})
-                (.then (fn [r] (is (:ok r) "probe ns evals")))
+                            {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
+                (.then (fn [r] (is (:seon.eval/ok? r) "probe ns evals")))
                 (.then (fn [_]
                          (tee-for cs 'probe.teetest
                                   "(cljs.test/deftest tee-probe-test (cljs.test/is (= 1 1)))")))
@@ -373,7 +373,7 @@
     (-> (repl/ensure-bootstrap!)
         (.then
           (fn [cs]
-            (-> (seval/eval cs "(ns probe.teefn)" {:ns 'cljs.user :analyze-deps? false})
+            (-> (seval/eval cs "(ns probe.teefn)" {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
                 (.then (fn [_]
                          (tee-for cs 'probe.teefn "(defn tee-probe-fn [n] (+ n 1))")))
                 (.then
@@ -429,7 +429,7 @@
                                     @conn fq))
                   ;; one full eval-batch! per attempt (run-id nil → no fence),
                   ;; exercising eval-form-entry!'s failure-path cleanup wiring.
-                  batch (fn [src] (seval/eval-batch! cs (repl/parse-forms src)
+                  batch (fn [src] (seval/eval-batch! cs (repl-internal/parse-forms src)
                                                      (symbol uniq) "tee-retry-test"
                                                      (db/new-id!) nil))]
               ;; set! (not binding) so *conn* spans the async eval-batch!
@@ -437,7 +437,7 @@
               ;; the live pod root-set!s the conn. Restored in .finally.
               (set! db/*conn* conn)
               (-> (seval/eval cs (str "(ns " uniq ")")
-                              {:ns 'cljs.user :analyze-deps? false})
+                              {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
                   (.then (fn [_] (batch "(defn recover [x] (zzz-undeclared-probe x))")))
                   (.then
                     (fn [b1]
@@ -494,7 +494,7 @@
                                       :where [?s :seon.schema/key ?k]]
                                     @conn attr))
                   reg?  (fn [] (contains? (schema/current-keys) attr))
-                  batch (fn [src] (seval/eval-batch! cs (repl/parse-forms src)
+                  batch (fn [src] (seval/eval-batch! cs (repl-internal/parse-forms src)
                                                      (symbol uniq) "tee39-test"
                                                      (db/new-id!) nil))
                   ;; the failed form: register! RUNS, then a deliberate throw
@@ -504,7 +504,7 @@
                   ok-src   (str "(seon.schema/register! " attr " :int)")]
               (set! db/*conn* conn)
               (-> (seval/eval cs (str "(ns " uniq ")")
-                              {:ns 'cljs.user :analyze-deps? false})
+                              {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
                   (.then (fn [_] (batch fail-src)))
                   (.then
                     (fn [b1]
@@ -546,7 +546,7 @@
     (-> (repl/ensure-bootstrap!)
         (.then
           (fn [cs]
-            (-> (seval/eval cs "(ns probe.teeexample)" {:ns 'cljs.user :analyze-deps? false})
+            (-> (seval/eval cs "(ns probe.teeexample)" {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
                 (.then (fn [_]
                          (tee-for cs 'probe.teeexample
                                   "(defn tee-example-fn {:test (fn [] (assert true))} [a b] (+ a b))")))
@@ -589,8 +589,8 @@
                           (.then
                             (fn [_]
                               (client/replay-program-graph!
-                                {:conn conn :compile-state cs
-                                 :agent-id "record-eval-tee-test"})))
+                                {:seon.client/conn conn :seon.client/compile-state cs
+                                 :seon.client/agent-id "record-eval-tee-test"})))
                           (.then
                             (fn [stats]
                               (is (= 1 (:seon.client/replay-n-total stats))
@@ -598,11 +598,11 @@
                               (is (= 0 (:seon.client/replay-n-fail stats))
                                   "the deftest reconstitutes via the ns's whole-source load")
                               (seval/eval cs "(some? probe.teereplay/replayed-test)"
-                                          {:ns 'cljs.user :analyze-deps? false})))
+                                          {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})))
                           (.then
                             (fn [r]
-                              (is (:ok r) "replayed corpus is live")
-                              (is (true? (:value r))
+                              (is (:seon.eval/ok? r) "replayed corpus is live")
+                              (is (true? (:seon.eval/value r))
                                   "deftest var reconstituted on the compile-state"))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -623,11 +623,11 @@
     (-> (repl/ensure-bootstrap!)
         (.then
           (fn [cs]
-            (-> (seval/eval cs "(ns probe.garden)" {:ns 'cljs.user :analyze-deps? false})
+            (-> (seval/eval cs "(ns probe.garden)" {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
                 (.then (fn [_]
                          (seval/eval cs "(seon.schema/register! :probe.garden.plant/id [:and {:seon.db/identity true} :seon.db/id])"
-                                     {:ns 'probe.garden :analyze-deps? false})))
-                (.then (fn [r] (is (:ok r) "id-attr registers")))
+                                     {:seon.eval/starting-ns 'probe.garden :seon.eval/analyze-deps? false})))
+                (.then (fn [r] (is (:seon.eval/ok? r) "id-attr registers")))
                 (.then (fn [_]
                          (tee-for cs 'probe.garden
                                   "(seon.schema/register! :probe.garden.plant [:map {:seon.db/entity true} [:probe.garden.plant/id :probe.garden.plant/id]])")))
@@ -732,7 +732,7 @@
               ;; (start-agent! root-set!s *conn*): the self-tee fires
               ;; during the eval AND record-eval! writes the eval tee.
               (set! db/*conn* conn)
-              (-> (seval/eval cs "(ns probe.teeagent)" {:ns 'cljs.user :analyze-deps? false})
+              (-> (seval/eval cs "(ns probe.teeagent)" {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
                   (.then (fn [_] (tee-for cs 'probe.teeagent src)))
                   (.then
                     (fn [tee]
@@ -816,8 +816,8 @@
                     (.then
                       (fn [_]
                         (client/replay-program-graph!
-                          {:conn conn :compile-state cs
-                           :agent-id "record-eval-tee-test"})))
+                          {:seon.client/conn conn :seon.client/compile-state cs
+                           :seon.client/agent-id "record-eval-tee-test"})))
                     (.then
                       (fn [stats]
                         (is (= 0 (:seon.client/replay-n-fail stats))
@@ -855,8 +855,8 @@
                     (.then
                       (fn [_]
                         (client/replay-program-graph!
-                          {:conn conn :compile-state cs
-                           :agent-id "record-eval-tee-test"})))
+                          {:seon.client/conn conn :seon.client/compile-state cs
+                           :seon.client/agent-id "record-eval-tee-test"})))
                     (.then
                       (fn [stats]
                         (is (= 0 (:seon.client/replay-n-fail stats))
@@ -933,7 +933,7 @@
                  {:seon.fn/sym "my.agent/agentfn"
                   :seon.fn/source "(defn agentfn [] :mine)"}
                  {:seon.ns/name :my.agent :seon.ns/source "(ns my.agent)"}
-                 [:db/retract [:seon.ns/name :my.agent] :seon.ns/requires :foo]]
+                 [:db/retract [:seon.ns/name :my.agent] :seon.fn/read-attrs :foo/bar]]
         blocked #{"seon.core.demo/corefn"}
         out     (seval/reject-core-overrides tee blocked)]
     (testing "the blocked core-override :seon.fn row is removed"
@@ -980,7 +980,244 @@
     (let [entries (repl-internal/parse-forms
                     "(defn f1 [] 1)\n(defn f2 [] 2)\n(+ 1 2)")]
       (is (= 3 (count entries)))
-      (is (= [:form :form :form] (mapv :kind entries)))
+      (is (= [:form :form :form] (mapv :seon.repl/kind entries)))
       (is (= [true true false]
-             (mapv #(seval/defn-form? (:source %)) entries))
+             (mapv #(seval/defn-form? (:seon.repl/source %)) entries))
           "both defns tee; the trailing expr does not — single-lane resume"))))
+
+;; ---------------------------------------------------------------------------
+;; M4 + C28 structural store: the eval-batch! tee writes the reified
+;; require edges for the ending ns (:seon.ns/require-edges — alias/refer
+;; facts from the ANALYZER, seon.analyzer-info/ns-require-edges) and the
+;; declared read-set for every teed fn (:seon.fn/read-attrs — qualified
+;; keyword literals walked off the READ form), and a REDEF diffs both
+;; (stale keywords are retracted, never accumulated).
+;; ---------------------------------------------------------------------------
+
+(deftest eval-batch-tees-require-edges-and-read-attrs
+  (async done
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+        (.then
+          (fn [res]
+            (let [cs    (aget res 0)
+                  conn  (aget res 1)
+                  prev  db/*conn*
+                  uniq  (str "probe.teeedge" (rand-int 1000000000))
+                  fq    (str uniq "/watcher")
+                  batch (fn [src] (seval/eval-batch! cs (repl-internal/parse-forms src)
+                                                     (symbol uniq) "tee-edge-test"
+                                                     (db/new-id!) nil))
+                  read-attrs (fn [] (set (:seon.fn/read-attrs
+                                           (db/pull @conn [:seon.fn/read-attrs]
+                                                    [:seon.fn/sym fq]))))]
+              (set! db/*conn* conn)
+              (-> (batch (str "(ns " uniq " (:require [seon.db :as pdb]"
+                              " [clojure.string :as pstr]))"))
+                  (.then
+                    (fn [b1]
+                      (testing "the ns form evals ok"
+                        (is (= 1 (:seon.eval/n-ok b1)) (pr-str b1)))
+                      (testing "the tee stored the reified require edges (aliases as DATOMS)"
+                        (let [edges (seval/stored-require-edges @conn (keyword uniq))]
+                          (is (contains? edges {:seon.ns.require/target :seon.db
+                                                :seon.ns.require/alias  'pdb})
+                              (str "seon.db edge with alias — got " (pr-str edges)))
+                          (is (contains? edges {:seon.ns.require/target :clojure.string
+                                                :seon.ns.require/alias  'pstr}))))
+                      ;; the attr-map is an ANNOTATION (C38): neither the
+                      ;; :malli/schema key nor the schema-ref keywords in
+                      ;; its value may land in the stored read-set.
+                      (batch (str "(defn watcher"
+                                  " {:malli/schema [:=> [:cat :map] [:vector :keyword]]}"
+                                  " [m]"
+                                  " [(:seon.agent/purpose m) :probe.teeedge.data/metric])"))))
+                  (.then
+                    (fn [b2]
+                      (testing "the defn evals ok"
+                        (is (= 1 (:seon.eval/n-ok b2)) (pr-str b2)))
+                      (testing "the fn row carries its declared read-set — annotation kws excluded"
+                        (is (= #{:seon.agent/purpose :probe.teeedge.data/metric}
+                               (read-attrs))))
+                      ;; REDEF dropping one literal — the stale keyword must
+                      ;; be RETRACTED (diff, not accumulate).
+                      (batch (str "(defn watcher [m] [(:seon.agent/purpose m) :redef])"))))
+                  (.then
+                    (fn [b3]
+                      (testing "the redef evals ok"
+                        (is (= 1 (:seon.eval/n-ok b3)) (pr-str b3)))
+                      (testing "the read-set tracks the redef exactly (stale literal retracted)"
+                        (is (= #{:seon.agent/purpose} (read-attrs))))))
+                  (.finally (fn [] (set! db/*conn* prev)))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; C24 — the body-only-redef rescue, GENERALIZED. var-digest covers only the
+;; load-bearing META, so a redefinition changing ONLY the body is
+;; digest-invisible to defs-since. The flagship rescue (c5d6f985) covered a
+;; lone `(defn …)` source; a body-only redef via `(def f (fn …))` or inside a
+;; multi-form source still reported NOTHING — silently dropping the
+;; re-instrument (the redef replaced the wrapped var with a fresh unwrapped
+;; fn) and the auto-test pass. A body-sensitive var-digest is not available
+;; as the root (the analyzer var-map carries no body; snapshot-defs has no
+;; source in scope), so the rescue is the mechanism: EVERY sym the source's
+;; top-level def/defn/defn- forms define that produced no diff row is
+;; synthesized from the live analyzer state.
+;; ---------------------------------------------------------------------------
+
+(deftest body-only-redef-rescue-covers-def-fn-and-multi-form
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+          (fn [cs]
+            (let [uniq  (str "probe.c24rescue" (rand-int 1000000000))
+                  nssym (symbol uniq)
+                  ev    (fn [src] (seval/eval cs src
+                                              {:seon.eval/starting-ns nssym
+                                               :seon.eval/analyze-deps? false}))
+                  cd    (fn [before src]
+                          (mapv :seon.analyzer-info/sym
+                                ((deref #'seval/changed-defs) cs before src nssym)))]
+              (-> (seval/eval cs (str "(ns " uniq ")")
+                              {:seon.eval/starting-ns 'cljs.user
+                               :seon.eval/analyze-deps? false})
+                  ;; VERSION-A of all three shapes — these land in :defs.
+                  (.then (fn [_] (ev "(def dfn (fn [x] (+ x 1)))")))
+                  (.then (fn [_] (ev "(defn ma [x] (+ x 1)) (defn mb [x] (+ x 2))")))
+                  (.then
+                    (fn [_]
+                      (let [before (analyzer-info/snapshot-defs cs)
+                            srcA   "(def dfn (fn [x] (* x 10)))"
+                            srcB   "(defn ma [x] (* x 100)) (defn mb [x] (* x 200))"]
+                        ;; BODY-ONLY redefs: same names, same arglists, same
+                        ;; (absent) meta — digest-identical, defs-since = ().
+                        (-> (ev srcA)
+                            (.then
+                              (fn [_]
+                                (testing "a (def f (fn …)) body-only redef is rescued"
+                                  (is (= '[dfn] (cd before srcA))))
+                                (ev srcB)))
+                            (.then
+                              (fn [_]
+                                (testing "EVERY defn in a multi-form body-only redef is rescued"
+                                  (is (= '[ma mb] (cd before srcB))))
+                                (testing "a sym the analyzer never registered synthesizes nothing"
+                                  (is (= [] (cd before "(defn ghost-c24 [x] x)"))))))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; C14 (owner RULED 2026-07-05: transient stays transient) — a def in a
+;; TRANSIENT scratch ns (cljs.user / seon.dynamic / result — the SAME
+;; `transient-ns-syms` rule the requires-tee uses) evals fine and returns
+;; its value, but mints NO program-graph rows: no :seon.fn / :seon.test /
+;; :seon.ns persistence, so no instrumentation and no resume. A def in a
+;; real ns still tees (pinned by plain-defn-still-tees… above; re-pinned
+;; here as the contrast half).
+;; ---------------------------------------------------------------------------
+
+(deftest scratch-ns-def-evals-but-tees-nothing
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+          (fn [cs]
+            (-> (tee-for cs 'cljs.user "(defn c14-scratch-probe [x] (inc x))")
+                (.then
+                  (fn [tee]
+                    (testing "a cljs.user defn mints ZERO program-graph rows"
+                      (is (= [] (vec tee))))
+                    (seval/eval cs "(c14-scratch-probe 41)"
+                                {:seon.eval/starting-ns 'cljs.user
+                                 :seon.eval/analyze-deps? false})))
+                (.then
+                  (fn [r]
+                    (testing "the scratch def still RAN and returns its value"
+                      (is (:seon.eval/ok? r))
+                      (is (= 42 (:seon.eval/value r))))
+                    ;; contrast half: the SAME defn in a real ns tees.
+                    (-> (seval/eval cs "(ns probe.c14real)"
+                                    {:seon.eval/starting-ns 'cljs.user
+                                     :seon.eval/analyze-deps? false})
+                        (.then (fn [_]
+                                 (tee-for cs 'probe.c14real
+                                          "(defn c14-real-probe [x] (inc x))"))))))
+                (.then
+                  (fn [tee]
+                    (testing "a real-ns defn still tees a :seon.fn row"
+                      (is (= ["probe.c14real/c14-real-probe"]
+                             (mapv :seon.fn/sym (filter :seon.fn/sym tee))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest transient-ns-form-tees-no-seon-ns-row
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+          (fn [cs]
+            (tee-for cs 'cljs.user "(ns cljs.user)")))
+        (.then
+          (fn [tee]
+            (testing "(ns cljs.user) is eval scaffolding — no :seon.ns row"
+              (is (= [] (vec (filter :seon.ns/name tee)))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; C37 — the `::`-keyword read-gate flywheel gap. cljs.tools.reader has NO
+;; current-ns hook (a bare `::kw` is 'Invalid token' on every CLJS build;
+;; `::alias/kw` needs *alias-map*), so a defn whose source used auto-resolved
+;; keywords failed read-all-forms → defn-form? FALSE → NO :seon.fn row → the
+;; fn was silently exempt from persist/auto-run/instrument/resume. The read
+;; now rides seon.repl.internal/read-forms (rewrite-clj :auto-resolve): the
+;; gate passes, and the tee resolves the keywords against the ending ns's
+;; analyzer require-edges for the stored read-set.
+;; ---------------------------------------------------------------------------
+
+(deftest auto-resolved-keywords-pass-the-tee-gate
+  (testing "defn-form? TRUE for a defn using ::kw / ::alias/kw (was FALSE)"
+    (is (true? (seval/defn-form? "(defn f [m] (::purpose m))")))
+    (is (true? (seval/defn-form? "(defn g [m] (::pdb/tx-data m))"))))
+  (testing "read-all-forms reads ::-keyword sources (placeholder resolution)"
+    (is (= 2 (count (#'seval/read-all-forms
+                      "(defn f [] ::a) (defn g [] ::x/b)")))))
+  (testing "the strict gates still hold on ::-keyword sources"
+    (is (false? (seval/defn-form? "(def y ::a)")))
+    (is (false? (seval/defn-form? "(defn f [] ::a) (defn g [] ::b)")))))
+
+(deftest auto-resolved-keyword-defn-tees-fn-row-with-resolved-read-attrs
+  (async done
+    (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
+        (.then
+          (fn [res]
+            (let [cs    (aget res 0)
+                  conn  (aget res 1)
+                  prev  db/*conn*
+                  uniq  (str "probe.teeautokw" (rand-int 1000000000))
+                  fq    (str uniq "/kw-user")
+                  batch (fn [src] (seval/eval-batch! cs (repl-internal/parse-forms src)
+                                                     (symbol uniq) "tee-autokw-test"
+                                                     (db/new-id!) nil))
+                  fn-row (fn [] (db/pull @conn [:seon.fn/sym :seon.fn/source
+                                                :seon.fn/read-attrs]
+                                         [:seon.fn/sym fq]))]
+              (set! db/*conn* conn)
+              (-> (batch (str "(ns " uniq " (:require [seon.db :as pdb]))"))
+                  (.then
+                    (fn [b1]
+                      (testing "the ns form evals ok"
+                        (is (= 1 (:seon.eval/n-ok b1)) (pr-str b1)))
+                      ;; The C37 shape: bare `::kw` AND aliased `::pdb/kw`.
+                      (batch (str "(defn kw-user [m]"
+                                  " [(::purpose m) (::pdb/tx-data m)])"))))
+                  (.then
+                    (fn [b2]
+                      (testing "the ::-keyword defn evals ok"
+                        (is (= 1 (:seon.eval/n-ok b2)) (pr-str b2)))
+                      (testing "the :seon.fn row EXISTS (the flywheel gap: absent before)"
+                        (is (= fq (:seon.fn/sym (fn-row)))))
+                      (testing "and its read-set carries the RESOLVED keywords"
+                        (is (= #{(keyword uniq "purpose") :seon.db/tx-data}
+                               (set (:seon.fn/read-attrs (fn-row))))))))
+                  (.finally (fn [] (set! db/*conn* prev)))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))

@@ -9,7 +9,7 @@
        The current ns is gated by the `::current-full?` flag (default true).
      - COMPACT CARD — every ns the CURRENT ns `:require`s (ALL of them), that
        isn't already full: its `register!` block + one-line `defn` heads (body
-       elided). Self-healing on the `:seon.ns/requires` edges — write a real
+       elided). Self-healing on the `:seon.ns/require-edges` rows — write a real
        `(:require [x …])` and `x` joins as a card; drop the require → it
        vanishes ([[render-one-ns-compact]]).
      - DROPPED — everything else. Still INDEXED (its `:seon.ns/name` +
@@ -157,7 +157,7 @@
 (defn always-full-my-nses
   "The `my.*` members of the config `:seon.config/always` set.
 
-   The toolkit exemplars `my.kb`/`my.data`/`my.ui`/`my.tile` by default. DERIVED from
+   The toolkit exemplars `my.kb`/`my.data`/`my.ui`/`my.canvas` by default. DERIVED from
    config, never hardcoded. NOT a render-selection input (the `:namespaces`
    section no longer pins `:always`); used by the GYM harness
    (`seon.gym.driver`) to derive the toolkit aliases it seeds."
@@ -169,23 +169,32 @@
   "True when `ns-name` carries its REAL FULL FILE TEXT as `:seon.ns/source`.
 
    Accepts a string, symbol, or ns-name keyword. Every `my.*` ns (the
-   human's world — always inlined), including `-test` siblings (the
-   `-test` suffix is stripped to the subject ns first), AND every seon.* ns
-   the config policy lists in `:seon.config/always` ([[always-full?]] — e.g.
-   `:seon.agent.message`, so its REAL body is stored). Used by the boot indexer
-   (`seon.client/ns-row`) to decide which rows get the file read: it stores
-   source for a SUPERSET of what any one agent renders full, so a per-agent
-   `::full-source` pin (or the current ns) has real source to show. It does
-   NOT drive per-agent SELECTION — that is [[namespaces-block]]'s three-rule
-   model. Third-party (`acme`) roots are full-source too, gated separately by
+   human's world — always inlined), INCLUDING `.internal` siblings and
+   `-test` siblings (the `-test` suffix is stripped to the subject ns
+   first), AND every non-hidden seon.* ns the config policy lists in
+   `:seon.config/always` ([[always-full?]] — e.g. `:seon.agent.message`, so
+   its REAL body is stored; for seon.* the `.internal` suffix beats the
+   config policy). Used by the boot indexer (`seon.client/ns-row`) to
+   decide which rows get the file read: it stores source for a SUPERSET of
+   what any one agent renders full, so a per-agent `::full-source` pin (or
+   the current ns) has real source to show. It does NOT drive per-agent
+   SELECTION — that is [[namespaces-block]]'s three-rule model
+   ([[included-ns?]] keeps `.internal` out of the prompt regardless of what
+   is stored). `my.*.internal` MUST store real source even though it never
+   renders: its fns are agent-editable render fns
+   (`seon.error/agent-authored-sym?` routes every `my.*` fn through
+   the SCI cage) and the cage rebuilds a fn's lexical environment — its
+   `:require` `:as` aliases — from the stored `:seon.ns/source`; a
+   `(ns x)` stub loses the aliases and the fn cannot run BOUNDED.
+   Third-party (`acme`) roots are full-source too, gated separately by
    `seon.client/extra-src-ns-strs` (the same file read). Every other ns gets
    the minimal `(ns x)` stub at boot (still indexed + searchable)."
   {:malli/schema [:=> [:cat [:or :string :keyword :symbol]] :boolean]}
   [ns-name]
   (let [s    (if (keyword? ns-name) (name ns-name) (str ns-name))
         base (base-ns-name s)]
-    (boolean (and (not (hidden-ns-name? s))
-                  (or (my-ns-name? base)
+    (boolean (or (my-ns-name? base)
+                 (and (not (hidden-ns-name? s))
                       (always-full? base))))))
 
 (defn- seon-framework-ns?
@@ -200,25 +209,16 @@
   "The nses the CURRENT ns `:require`s — ALL of them (no full-source gate),
    each rendered as a COMPACT CARD. Pure fn of the DB: a real
    `(:require [x …])` on the current ns pulls `x` into context as a card; drop
-   the require → it leaves the set (self-healing on the `:seon.ns/requires`
-   edges). `*.internal` / `*-test` are excluded ([[included-ns?]]); non-keyword
-   rows are skipped. Empty when `cur-ns` is nil."
+   the require → it leaves the set (self-healing on the
+   `:seon.ns/require-edges` rows, via `seon.eval/stored-require-targets`).
+   `*.internal` / `*-test` are excluded ([[included-ns?]]). Empty when
+   `cur-ns` is nil."
   [db cur-ns]
   (if-not cur-ns
     #{}
     (into #{}
-          (comp (map first)
-                (filter keyword?)
-                (filter included-ns?))
-          (db/query
-            {:seon.db/db db
-             :seon.db/query
-             '[:find ?r
-               :in $ ?ns
-               :where
-               [?e :seon.ns/name ?ns]
-               [?e :seon.ns/requires ?r]]
-             :seon.db/args [cur-ns]}))))
+          (filter included-ns?)
+          (seval/stored-require-targets db cur-ns))))
 
 (defn- full?
   "True when an included ns `nm` renders FULL (its whole real source); false
@@ -240,7 +240,7 @@
 (defn- ns-block-entity
   "The agent's `:namespaces` block entity (raw datahike Entity, lazy ILookup),
    or nil when the agent has no id / no such block. Mirrors
-   [[seon.agent.ctx.live-tile/block-content]]: read the agent's
+   [[seon.agent.ctx.canvas/block-content]]: read the agent's
    `:seon.agent/ctx` set and find the block named `:namespaces`. The
    config-driven-agent-init lane transacts the render-dial datoms
    (`::full-source` / `::with-tests` / `::current-full?` / `::current-tests?`)
@@ -260,7 +260,7 @@
    BLOCK entity if present, else the value on its AGENT entity (datom
    fallback), else `default`. `some?` (not truthiness) draws the present/absent
    line so a legit `false`/empty value overrides. Mirrors
-   [[seon.agent.ctx.live-tile/live-tile-block]]'s block→agent→default read."
+   [[seon.agent.ctx.canvas/canvas-block]]'s block→agent→default read."
   [block agent-ent k default]
   (let [bv (get block k)]
     (if (some? bv)
@@ -292,11 +292,24 @@
       (str "\n\n; tests:\n" (str/join "\n\n" srcs)))))
 
 (def ^:private namespaces-header
-  ;; Block-specific cue ONLY — the FULL-vs-queryable policy (what renders in
-  ;; full, what stays indexed/searchable) lives once in
-  ;; `seon.agent.ctx/system-text` (§"THE NAMESPACES BELOW"); don't re-teach it.
+  ;; Block-specific teaching, COLOCATED (the namespaces surface teaches its
+  ;; own functions AND its own render policy — owner rulings 2026-07-10; runtime =
+  ;; seon.eval/dispatch-repl-form!): movement/update functions + the full-vs-cards
+  ;; distinction + "more namespaces exist in the db". Under minimal context
+  ;; the system-text §"THE NAMESPACES BELOW" never renders, so this header is
+  ;; the ONE place the policy is taught. Keep it tight.
   (str "; The loaded namespaces below, ordered by recency"
-       " (most-recently-modified last)."))
+       " (most-recently-modified last).\n"
+       "; Namespaces are PLACES — (in-ns 'the.ns) moves you there (your state\n"
+       "; is preserved; a NEW name is created with your toolkit requires).\n"
+       "; (ns the.ns (:require …)) declares/UPDATES a namespace's requires.\n"
+       "; A bare (require '[x :as y]) adds a dependency now AND records it in\n"
+       "; the declaration. Redefining a fn/schema/test IS how you update it;\n"
+       "; (ns-unmap 'name) removes one.\n"
+       "; Your CURRENT namespace renders in FULL; its required namespaces\n"
+       "; render as COMPACT CARDS (fn head + docstring line 1 + :malli/schema,\n"
+       "; bodies elided as …). More namespaces exist in the db than render\n"
+       "; here — query rather than guess."))
 
 (defn- cur-ns-workspace-stub
   "The never-omit block for the agent's CURRENT ns when it has no members
@@ -308,8 +321,8 @@
    form [[seon.eval/setup-agent-ns!]] actually installed — `[seon.agent.message
    :as message]` / `[seon.agent.lifecycle :refer [wait complete …]]` / … WITH
    the aliases + refers — straight from the ONE canonical
-   [[seon.eval/home-ns-form]], NOT a bare-name reconstruction from
-   `:seon.ns/requires`. No hidden aliasing: the agent reads the form and knows
+   [[seon.eval/home-ns-form]], NOT a bare-name reconstruction from the
+   stored edges. No hidden aliasing: the agent reads the form and knows
    `message/user`, `db/transact!`, `schema/register!`, `wait`, `complete`
    exist and how to call them. `nm` is a ns-name keyword whose `:seon.ns/name`
    row the caller already matched (an included, current-ns row). `id` is the
@@ -319,7 +332,9 @@
   (ctx/ns-demarc
     nm
     (str (seval/home-ns-form nm (seval/home-requires-for id)) "\n"
-         "; (your workspace — nothing defined here yet; define schemas + fns and they appear here)")))
+         "; (your workspace — nothing defined here yet; define schemas + fns and they appear here.\n"
+         ";  a defn whose :malli/schema output declares :seon.render/ai (and/or :seon.render/hiccup)\n"
+         ";  AUTO-RUNS every turn: its output becomes a live section of your context + a tile on your page)")))
 
 (defn- render-one
   "Render ONE included ns FULL through the SINGLE renderer
@@ -385,7 +400,7 @@
      - COMPACT CARD — every ns the CURRENT ns `:require`s ([[required-ns-set]])
        that isn't already full ([[render-one-ns-compact]]): its `register!`
        schema block + every public fn's one-line `defn` head (body elided),
-       ~3–5× smaller than full. Self-healing on the `:seon.ns/requires` edges.
+       ~3–5× smaller than full. Self-healing on the `:seon.ns/require-edges` rows.
      - DROPPED — everything else, reachable via grep /
        [[seon.agent.ctx/render-namespace]]. (`*.internal` / `*-test` excluded
        outright, [[included-ns?]]; empty cards dropped.)
@@ -409,12 +424,12 @@
 
    NEVER a render-time file read — the boot indexer is the one reader; both the
    full renderer and the compact card read only indexed rows."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{:seon.db/keys [db] id :seon.agent/id}]
   (let [policy (config/namespaces-policy)
         ;; The agent's current ns (latest successful eval's ns) → rendered per
         ;; the policy's :current-ns even if it is a framework ns. nil id
-        ;; (inspector path) → nil → no ns is forced current.
+        ;; (web UI path) → nil → no ns is forced current.
         cur-ns (when id
                  (try (when-let [c (ctx/current-ns {:seon.agent/id id :seon.db/db db})]
                         ;; current-ns yields a KEYWORD from a recorded eval but
@@ -504,7 +519,7 @@
 ;; I/O contract + its arglist, and elides only the fn BODY (`…`) and
 ;; the deep multiline prose (all but docstring line 1). This is the
 ;; coverage lever — for the budget of ~11 full nses the agent instead
-;; sees its ENTIRE verb surface as cards.
+;; sees its ENTIRE function surface as cards.
 ;;
 ;; It reads INDEXED ROWS ONLY (`:seon.fn/_ns`, `:seon.schema/_ns`),
 ;; never a file read — code-as-data, the boot indexer is the one reader.
@@ -550,12 +565,17 @@
                   :else                     "<not registered>")]
     (str "(register! " key-str " " (abbrev-ns-kws form ns-str) ")")))
 
-(defn- compact-arities
-  "The arity portion of a compact `defn` head, derived from the stored
-   `:seon.fn/arglists` string (`\"([{:my.kb/keys [a]}])\"`). Single arity →
-   `[args] …`; multi-arity → `([a] …) ([a b] …)`. Errors-as-values: an
-   unreadable arglists string falls back to its raw text (outer parens
-   stripped) with an elided body."
+(defn compact-arities
+  "The arity portion of a compact fn head, from an arglists string.
+
+   Derived from the stored `:seon.fn/arglists` string
+   (`\"([{:my.kb/keys [a]}])\"`). Single arity → `[args] …`; multi-arity →
+   `([a] …) ([a b] …)`. Errors-as-values: an unreadable arglists string
+   falls back to its raw text (outer parens stripped) with an elided
+   body. Public: the `:recent-verbs` menu section
+   (`seon.agent.ctx.menu`) renders its glyph entries with the SAME
+   arity grammar as these compact cards."
+  {:malli/schema [:=> [:catn [::arglists [:maybe :string]]] :string]}
   [arglists]
   (let [parsed (try (edn/read-string arglists) (catch :default _ nil))]
     (cond

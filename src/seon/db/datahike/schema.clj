@@ -43,8 +43,13 @@
    'boolean? :db.type/boolean
    :keyword  :db.type/keyword
    'keyword? :db.type/keyword
+   ;; qualified variants narrow Malli validation only — one datahike
+   ;; keyword/symbol type. MIRRORS the CLJS bridge
+   ;; (seon.db.internal/malli-type->datahike-type) — keep in lockstep.
+   :qualified-keyword :db.type/keyword
    :symbol   :db.type/symbol
    'symbol?  :db.type/symbol
+   :qualified-symbol :db.type/symbol
    :uuid     :db.type/uuid
    'uuid?    :db.type/uuid
    :inst     :db.type/instant

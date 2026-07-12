@@ -55,6 +55,8 @@
             [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
             [seon.error :as error]
+            [seon.platform :as platform]
+            [seon.repl.internal :as repl-internal]
             [seon.schema :as schema]))
 
 ;; ============================================================
@@ -72,6 +74,7 @@
    [:seon.ai/max-tokens    {:optional true} :seon.ai/max-tokens]
    [:seon.ai/tools         {:optional true} :seon.ai/tools]
    [:seon.ai/tool-choice   {:optional true} :seon.ai/tool-choice]
+   [:seon.ai/stream?       {:optional true} :seon.ai/stream?]
    [:seon.ai/extra-body    {:optional true} :seon.ai/extra-body]])
 
 (schema/register!
@@ -81,6 +84,7 @@
    [:seon.ai/error                      {:optional true} :seon.ai/error]
    [:seon.ai.openai-compat/finish-reason {:optional true} :string]
    [:seon.ai/usage                      {:optional true} :seon.ai/usage]
+   [:seon.ai/estimated?                 {:optional true} :seon.ai/estimated?]
    [:seon.ai/tool-calls                 {:optional true} :seon.ai/tool-calls]
    [:seon.ai/provider-fields            {:optional true} :seon.ai/provider-fields]])
 
@@ -92,12 +96,18 @@
 ;; call) overrides these; explicit request opts override the row.
 ;; ============================================================
 
-(def ^:private default-model       "deepseek-v4-pro")
+;; Model/temperature/max-tokens defaults live in the ONE per-provider map
+;; `seon.ai/shipped-defaults` (:deepseek entry — :openai-compat shares
+;; this wire path and the same fallbacks), so the queryable resolver
+;; (`seon.ai/resolved-config`) reports exactly what this adapter falls
+;; back to. Endpoint + timeout stay adapter-private.
+(def ^:private defaults            (:deepseek ai/shipped-defaults))
+(def ^:private default-model       (:seon.ai/model defaults))
 ;; The /v1 ROOT (not the full chat-completions URL) — the SDK appends
 ;; /chat/completions itself.
 (def ^:private default-endpoint    "https://api.deepseek.com/v1")
-(def ^:private default-temperature 0.7)
-(def ^:private default-max-tokens  4096)
+(def ^:private default-temperature (:seon.ai/temperature defaults))
+(def ^:private default-max-tokens  (:seon.ai/max-tokens defaults))
 ;; Wall-clock timeout for the HTTP call. A hung API stops wedging the
 ;; agent loop — turn fails with a timeout error and the next user
 ;; message kicks again. Override via the config row's
@@ -109,15 +119,14 @@
 ;; timeout (observed 2026-06-10). For :deepseek we send {"thinking":
 ;; {"type": "disabled"}} unless the config row's :seon.ai/thinking
 ;; (SEON_AI_THINKING) turns it on: "true" → enabled, "high"/"max" →
-;; enabled + that reasoning_effort. For :openai-compat the thinking
-;; field is sent ONLY when set truthy — absent/"false" sends NOTHING
-;; (graceful no-op on gateways that don't know the field).
-
-(defn- env*
-  "process.env value for `var-name`, or nil when unset/blank."
-  [var-name]
-  (let [v (some-> js/process .-env (aget var-name))]
-    (when (and (string? v) (seq v)) v)))
+;; enabled + that reasoning_effort. For :openai-compat we send ONLY
+;; the STANDARD OpenAI param — an effort string ("minimal"…"xhigh")
+;; goes out as :reasoning_effort; the vendor :thinking field is NEVER
+;; sent (strict gateways — Meta Model API, vLLM — HTTP-400 unknown
+;; params; verified live against api.meta.ai 2026-07-10). "true" has
+;; no standard wire form on a generic gateway (reasoning models reason
+;; by default) → nothing is sent; use an effort string, or
+;; :extra-body for a gateway's vendor field.
 
 (defn- openai-compat?
   "Is this pod's active provider :openai-compat? Read per call
@@ -161,9 +170,9 @@
   []
   (let [key-env (or (:seon.ai/api-key-env (ai/current))
                     (:seon.ai/api-key-env (ai/env-row)))]
-    (or (some-> key-env env*)
-        (when-not (openai-compat?) (env* "DEEPSEEK_API_KEY"))
-        (env* "SEON_AI_API_KEY"))))
+    (or (some-> key-env platform/env-val)
+        (when-not (openai-compat?) (platform/env-val "DEEPSEEK_API_KEY"))
+        (platform/env-val "SEON_AI_API_KEY"))))
 
 (defn api-key-configured?
   "Whether a bearer API key resolves for the ACTIVE provider.
@@ -205,11 +214,11 @@
        :temperature    (or temperature (:seon.ai/temperature cfg) default-temperature)
        :max_tokens     (or max-tokens (:seon.ai/max-tokens cfg) default-max-tokens)
        :stream_options {:include_usage true}}
-      ;; :deepseek always sends the explicit toggle (the API defaults
-      ;; to enabled); :openai-compat sends the field ONLY when truthy.
-      (not compat?)          (assoc :thinking {:type (if thinking "enabled" "disabled")})
-      (and compat? thinking) (assoc :thinking {:type "enabled"})
-      (string? thinking)     (assoc :reasoning_effort thinking)
+      ;; :deepseek always sends the vendor :thinking toggle (that API
+      ;; defaults to enabled); :openai-compat never sends it — only the
+      ;; standard :reasoning_effort (see the thinking-mode note above).
+      (not compat?)      (assoc :thinking {:type (if thinking "enabled" "disabled")})
+      (string? thinking) (assoc :reasoning_effort thinking)
       (some? tools*)         (assoc :tools tools*)
       (some? choice*)        (assoc :tool_choice choice*))))
 
@@ -234,8 +243,11 @@
    Post-`.finalChatCompletion` → a
    `:seon.ai.openai-compat/complete-response`.
    `:seon.ai/text` from choices[0].message.content; finish_reason →
-   `:seon.ai.openai-compat/finish-reason`; usage ALWAYS set;
-   message.tool_calls → `:seon.ai/tool-calls` when present; the
+   `:seon.ai.openai-compat/finish-reason`; usage set WHEN the provider
+   sent it (we request it via `:stream_options {:include_usage true}`,
+   but a gateway may omit the usage chunk — optional-is-absent, never
+   a present nil); message.tool_calls → `:seon.ai/tool-calls` when
+   present; the
    unrecognized top-level fields → `:seon.ai/provider-fields` (omitted
    when empty — optional-is-absent). Public for tests."
   {:malli/schema [:=> [:catn [:seon.ai.openai-compat/completion :any]]
@@ -261,10 +273,10 @@
              " tokens) — thinking-mode tokens landed in the reasoning"
              " field; dropping it (parsed as before)")))
     (cond-> {:seon.ai/text                        (or msg "")
-             :seon.ai.openai-compat/finish-reason (:finish_reason choice)
-             :seon.ai/usage                       (:usage body)}
-      (seq tool-calls) (assoc :seon.ai/tool-calls tool-calls)
-      (seq extras)     (assoc :seon.ai/provider-fields extras))))
+             :seon.ai.openai-compat/finish-reason (:finish_reason choice)}
+      (some? (:usage body)) (assoc :seon.ai/usage (:usage body))
+      (seq tool-calls)      (assoc :seon.ai/tool-calls tool-calls)
+      (seq extras)          (assoc :seon.ai/provider-fields extras))))
 
 (defn- config-error
   "Errors-as-values envelope for a CALL-TIME config gap (no endpoint /
@@ -323,6 +335,77 @@
                    :maxRetries 0}
          *fetch* (doto (aset "fetch" *fetch*)))))
 
+(schema/register! ::text     :string)
+(schema/register! ::aborted? :boolean)
+;; The captured SDK throwable when the stream failed mid-consume — a
+;; third-party boundary value (:any is allowed exactly here).
+(schema/register! ::error    :any)
+(schema/register! ::stream-result
+  [:map [::text ::text] [::aborted? ::aborted?]
+   [::error {:optional true} ::error]])
+
+(defn ^:async stream-until-form!
+  "Consume the SDK stream, aborting once one top-level form has streamed.
+
+   The repl-mode `:stream` consumer. Per content delta: append to the accumulator, run the cheap
+   [[seon.repl.internal/first-top-level-close]] delimiter gate, and — only
+   when a top-level group has closed — CONFIRM with the real `parse-forms`
+   that a genuine evaluable `:form` is present (a bare `{…}`/`[…]` closes at
+   depth 0 but demotes to prose, so keep streaming). On confirm: `.abort()`
+   the stream and resolve the `::stream-result` `{::text … ::aborted? true}`
+   — the text through the delta that COMPLETED the first form (delta
+   granularity: a same-delta tail rides along; `:batch`'s reply-boundary strip
+   still cleans any fabricated remainder). On natural end (no form ever
+   completes): `{::text <all> ::aborted? false}`. The usage-only final chunk
+   (`:stream_options {:include_usage true}`) has no `choices` — guarded.
+
+   NEVER rejects. A transport/SDK failure mid-consume (timeout, connection
+   reset — the iterator's `.next` Promise rejects) is returned as the
+   `::error` VALUE, converted to the `:seon.ai/error` envelope by
+   [[complete]]. This fn is instrumented, and a rejection crossing the
+   wrapper records a `:seon.error/fault :core` datom — pod-fatal under the
+   dev `:crash` dial — even though [[complete]] catches it one frame up
+   (the P4-bench acme pod crashes, 2026-07-10). Errors-as-values at this
+   boundary is the root fix, not an exception to the fault net: an
+   external provider failure is the caller's expected error, not our bug."
+  {:malli/schema [:=> [:cat :any] :any]}
+  [^js stream]
+  (try
+    (let [it (js-invoke stream js/Symbol.asyncIterator)]
+      (loop [acc ""]
+        (let [step (await (.next it))]
+          (if (.-done step)
+            {::text acc ::aborted? false}
+            (let [^js chunk (.-value step)
+                  choices   (.-choices chunk)
+                  ^js choice (when (and choices (pos? (.-length choices)))
+                               (aget choices 0))
+                  ^js delta  (some-> choice .-delta)
+                  piece      (some-> delta .-content)
+                  acc'    (if piece (str acc piece) acc)]
+              (if (and piece
+                       (repl-internal/first-top-level-close acc')
+                       (some #(= :form (:seon.repl/kind %))
+                             (repl-internal/parse-forms acc')))
+                (do (.abort stream) {::text acc' ::aborted? true})
+                (recur acc')))))))
+    (catch :default e
+      {::text "" ::aborted? false ::error e})))
+
+(defn- estimated-usage
+  "A CLIENT-SIDE usage map for an ABORTED stream (the provider's final usage
+   chunk is lost on abort). Prompt tokens = estimate over the system +
+   user content actually sent; completion tokens = estimate over the text
+   streamed through the first form. DeepSeek-shaped keys so the turn's
+   `llm-usage` projection is uniform; the response also flags
+   `:seon.ai/estimated? true` so the numbers are never mistaken for
+   provider-reported."
+  [request text]
+  (let [p (+ (tokens/estimate (ai/effective-system-prompt request))
+             (tokens/estimate (str (:seon.ai/ctx request))))
+        c (tokens/estimate (str text))]
+    {:prompt_tokens p :completion_tokens c :total_tokens (+ p c)}))
+
 (defn ^:async complete
   "Send a chat-completions request to the active provider's endpoint.
 
@@ -374,29 +457,57 @@
                     ":seon.ai/api-key-env / SEON_AI_API_KEY_ENV)"))))
 
       :else
-      (let [ms      (or (:seon.ai/timeout-ms (ai/current)) default-timeout-ms)
-            ^js client (make-client url key ms)
-            extra   (request-extra-body request)
-            ;; :extra-body is MERGED into the request PARAMS (1st arg).
-            ;; openai-node passes unknown top-level params through
-            ;; verbatim. The 2nd-arg RequestOptions :body REPLACES the
-            ;; body (does NOT merge) — using it dropped model/messages
-            ;; and 400'd every extra-body call (verified live).
-            params  (clj->js (cond-> (request-params request)
-                               (seq extra) (merge extra)))
-            ^js completions (.. client -chat -completions)]
-        (try
-          (let [^js stream (.stream completions params)
-                completion (await (.finalChatCompletion stream))
-                result     (parse-completion completion)]
-            (when-let [err (:seon.ai/error result)]
-              (ai/log-error! label err))
-            result)
-          (catch :default e
-            (let [err (error->envelope label e)]
-              (ai/log-error! label err)
-              {:seon.ai/text  ""
-               :seon.ai/error err})))))))
+      ;; The WHOLE build+call rides inside the try — the params build reads
+      ;; config-provided data (the config row, extra-body EDN merged into the
+      ;; params, make-client), so a throw there is an EXPECTED error and must
+      ;; resolve to an envelope, never reject: the instrument wrapper records
+      ;; a rejection as a :core fault (crashes the dev pod). Same class as the
+      ;; stream-until-form! fix (e6295ecd) and the anthropic fix (06615941).
+      (try
+        (let [ms      (or (:seon.ai/timeout-ms (ai/current)) default-timeout-ms)
+              ^js client (make-client url key ms)
+              extra   (request-extra-body request)
+              ;; :extra-body is MERGED into the request PARAMS (1st arg).
+              ;; openai-node passes unknown top-level params through
+              ;; verbatim. The 2nd-arg RequestOptions :body REPLACES the
+              ;; body (does NOT merge) — using it dropped model/messages
+              ;; and 400'd every extra-body call (verified live).
+              params  (clj->js (cond-> (request-params request)
+                                 (seq extra) (merge extra)))
+              ^js completions (.. client -chat -completions)
+              stream?  (boolean (:seon.ai/stream? request))
+              ^js stream (.stream completions params)]
+          (if stream?
+            ;; repl-mode :stream — consume deltas, abort at the first
+            ;; complete top-level form (one form per turn).
+            (let [{::keys [text aborted? error]} (await (stream-until-form! stream))]
+              (cond
+                ;; The consumer captured an SDK failure as a VALUE (it
+                ;; never rejects — see its docstring); re-raise into
+                ;; THIS fn's catch, the one error->envelope site.
+                (some? error) (throw error)
+
+                aborted?
+                {:seon.ai/text                        text
+                 :seon.ai.openai-compat/finish-reason "abort"
+                 :seon.ai/usage                       (estimated-usage request text)
+                 :seon.ai/estimated?                  true}
+
+                ;; Natural end before any form completed — fall back to
+                ;; the assembled completion for real usage + full text.
+                :else
+                (parse-completion (await (.finalChatCompletion stream)))))
+            ;; repl-mode :batch — buffer to the assembled completion.
+            (let [completion (await (.finalChatCompletion stream))
+                  result     (parse-completion completion)]
+              (when-let [err (:seon.ai/error result)]
+                (ai/log-error! label err))
+              result)))
+        (catch :default e
+          (let [err (error->envelope label e)]
+            (ai/log-error! label err)
+            {:seon.ai/text  ""
+             :seon.ai/error err}))))))
 
 ;; ============================================================
 ;; Adapter for seon.agent.
@@ -408,11 +519,17 @@
 
 (defn ^:async ^:private complete+wrap
   "Internal — call complete with merged opts, wrap response into the
-   shape the turn loop expects. On failure `:seon.ai/error` is lifted
-   to the TOP level (alongside `:text`) so the turn loop can surface
-   it without digging into `:seon.ai/raw`."
-  [opts ctx-text]
-  (let [resp (await (complete (assoc opts :seon.ai/ctx ctx-text)))]
+   shape the turn loop expects. `arg` is EITHER a bare ctx string
+   (back-compat) OR a request map carrying `:seon.ai/ctx` +
+   `:seon.ai/stream?` (the widened shape the turn loop passes for
+   repl-mode `:stream`). On failure `:seon.ai/error` is lifted to the TOP
+   level (alongside `:text`) so the turn loop can surface it without
+   digging into `:seon.ai/raw`."
+  [opts arg]
+  (let [ctx-text (ai/llm-arg->ctx arg)
+        stream?  (ai/llm-arg->stream? arg)
+        resp (await (complete (cond-> (assoc opts :seon.ai/ctx ctx-text)
+                                stream? (assoc :seon.ai/stream? true))))]
     (cond-> {:text        (:seon.ai/text resp)
              :seon.ai/raw resp}
       (:seon.ai/error resp) (assoc :seon.ai/error (:seon.ai/error resp)))))
@@ -432,4 +549,4 @@
     [:=> [:catn [::opts ::opts]] :any]]}
   ([] (agent-adapter {}))
   ([opts]
-   (fn [ctx-text] (complete+wrap opts ctx-text))))
+   (fn [arg] (complete+wrap opts arg))))

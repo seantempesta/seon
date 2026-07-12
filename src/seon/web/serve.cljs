@@ -6,7 +6,7 @@
    prod) can reach the agent UI without intermediate infrastructure.
 
    Routes (V0.5):
-     GET  /                  → 302 redirect to /world (the converged human surface)
+     GET  /                  → root.s agent view (seeded :seon.route/root → datastar)
      GET  /css/output.css    → resources/public/css/output.css
      GET  /js/datastar.js    → resources/public/js/datastar.js
      GET  /sse               → SSE stream
@@ -45,6 +45,7 @@
     [clojure.string :as str]
     [goog.object :as gobj]
     [seon.agent :as agent]
+    [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
     [seon.agent.lifecycle :as lifecycle]
     [seon.agent.run :as run]
@@ -107,42 +108,28 @@
   nil)
 
 ;; ============================================================
-;; /solve scratch-store deps — injected by seon.client (same reason as
-;; !create-agent-fn: serve.cljs can't require seon.client). Each /solve
-;; request runs in its OWN fresh core-seeded :memory store so sample N
-;; never sees samples 1..N-1's facts (cross-sample contamination). The
-;; three fns that build that world live in seon.client and are injected:
-;;   :open-conn   open-agent-conn! — fresh :memory conn w/ the full schema.
-;;   :boot-seed   boot-seed!       — seed the core into it (instruction rows +
-;;                                    :seon.ns/:seon.fn program-graph so the
-;;                                    agent's my.kb toolkit + blocks exist).
-;;   :mint-agent  init-agent!      — mint + arm the scratch agent AGAINST THE
-;;                                    CURRENT *conn* (the scratch conn). NOT
-;;                                    start-agent! (which re-`set!`s *conn* to
-;;                                    the cluster store — that would defeat
-;;                                    isolation, driving the scratch agent's
-;;                                    turns against the shared wire store).
+;; POST /agents/run mint seam — injected by seon.client (same reason as
+;; !create-agent-fn: serve.cljs can't require seon.client). The one-shot
+;; composition door mints its per-task agent via seon.client/init-agent!
+;; (entity + home ns + wake trigger — the same per-agent wiring
+;; start-agent! runs) against the pod's ONE cluster conn.
 ;; ============================================================
 
-(defonce ^{:doc "Map `{:open-conn <0-arity ⇒ Promise<conn>>
-                  :boot-seed <1-arity {:seon.db/conn conn} ⇒ Promise>
-                  :mint-agent <1-arity {:seon.agent/id … ::mint? … } ⇒
-                  Promise<{:seon.agent/id …}>>}` — injected by seon.client at
-                  load time. nil until the pod finishes loading (a /solve
-                  before then 503s)."}
-  !solve-deps (atom nil))
+(defonce ^{:doc "1-arity fn (agent-id ⇒ Promise of `{:seon.agent/id …}` or a
+                  db error envelope) — injected by seon.client at load time
+                  (init-agent! with mint). nil until the pod finishes loading
+                  (a POST /agents/run before then 503s)."}
+  !mint-agent-fn (atom nil))
 
-(defn set-solve-deps!
-  "Inject the /solve scratch-store deps from seon.client.
+(defn set-mint-agent-fn!
+  "Inject the per-task agent mint closure from seon.client.
 
-   `{:open-conn client/open-agent-conn! :boot-seed client/boot-seed!
-     :mint-agent client/init-agent!}` — the three seon.client fns serve.cljs
-   cannot require directly (cycle: client → serve). Called at namespace-load
-   time from seon.client; re-runs on hot reload so the closures track reloaded
-   code."
-  {:malli/schema [:=> [:cat [:map [:open-conn fn?] [:boot-seed fn?] [:mint-agent fn?]]] :nil]}
-  [deps]
-  (reset! !solve-deps deps)
+   The injected fn wraps `seon.client/init-agent!` (`mint? true`) — the
+   one per-agent wiring path. Called at namespace-load time from
+   seon.client; re-runs on hot reload so the closure tracks reloaded code."
+  {:malli/schema [:=> [:cat fn?] :nil]}
+  [f]
+  (reset! !mint-agent-fn f)
   nil)
 
 ;; ============================================================
@@ -151,8 +138,7 @@
 ;; Map URL prefix → disk root. The roots are seon BUILD ARTIFACTS, so
 ;; they resolve through `seon.platform/artifact-path`: CWD-relative
 ;; when the pod runs from the seon repo root (today's usage), under
-;; SEON_RUNTIME_ROOT when a downstream pod runs from its own world
-;; root.
+;; SEON_RUNTIME_ROOT when a downstream pod runs from its own runtime root.
 ;; ============================================================
 
 (def ^:private static-roots
@@ -203,22 +189,6 @@
 ;; Route handlers
 ;; ============================================================
 
-(defn serve-root!
-  "GET / — 302 redirect to the world roster (/world).
-
-   A Ring handler: takes the Ring request `r`, self-extracts the node res.
-   Resolved LATE by the router (db->routes) from the seeded :seon.route/root
-   datom, so it is PUBLIC — its symbol must resolve via eval/lookup-value at
-   request time."
-  [r]
-  ;; `/world` (seon.web.datastar) is the converged human surface — the live
-  ;; agent roster + per-agent canvas/tiles/chat. The root just lands the user
-  ;; there.
-  (let [^js res (:seon.http/node-res r)]
-    (.writeHead res 302 #js {"Location"      "/world"
-                             "Cache-Control" "no-store, no-cache, must-revalidate"})
-    (.end res "")))
-
 (defn- open-sse! [^js req ^js res]
   (.writeHead res 200 #js {"Content-Type"      "text/event-stream"
                            "Cache-Control"     "no-cache"
@@ -245,7 +215,7 @@
 ;; ============================================================
 ;; POST /chat — inject a user message into the named agent's log.
 ;; The message tx wakes the agent's loop; it runs a turn, the LLM
-;; responds, and the inspector morphs the view via SSE.
+;; responds, and the web UI morphs the view via SSE.
 ;;
 ;; Body is application/x-www-form-urlencoded (Datastar's
 ;; `@post('/chat', {contentType:'form'})` posts FormData). `agent` is
@@ -437,7 +407,7 @@
   "POST /agent/<id>/complete — external control: CLOSE the agent's open run
    `:completed` (derived state falls to `:idle`, the single wakeable parked
    state — a new message opens a fresh run). Same effect as the agent's own
-   `complete` verb. When the agent has no open run it is already idle → 200
+   `complete` function. When the agent has no open run it is already idle → 200
    no-op. 200 + id on success, 500 with the store error otherwise."
   [_req res agent-id]
   (-> (js/Promise.resolve
@@ -464,24 +434,28 @@
                                (str "complete failed: " err))))))
 
 ;; ============================================================
-;; POST /solve — the external-eval-harness boundary door (inspect-ai). Mint a
-;; FRESH agent (per-sample isolation = a clean per-agent namespace
-;; `my.agent.<id>`), inject `input` as a user message via the REAL wake path
-;; (message!, from = user-ref — identical to /chat), then POLL the DERIVED agent
-;; state to :idle (the agent's OWN multi-turn FSM decides turns, NOT the harness)
-;; or until timeout_ms. Read back the final reply text + turn/eval/closed-reason
-;; metadata and return JSON. NO agent-loop/FSM/context/eval code is touched — a
-;; boundary add only. No Malli schema (opaque node req/res, same as the sibling
-;; handlers). Body is application/json `{"input": "<task>", "timeout_ms": <int?>}`.
+;; POST /agents/run — the one-shot composition door, built purely from the
+;; agent/message primitives: start-or-reuse an agent IN THE POD'S OWN CLUSTER,
+;; deliver `input` as a user message via the REAL wake path (message!, from =
+;; user-ref — identical to /chat), await the DERIVED state falling back to
+;; :idle (the agent's OWN multi-turn FSM decides turns, never the caller) or
+;; the request timeout, then reply with truthful turn/eval/reply metadata read
+;; from the ONE conn. No scratch store, no conn/schema root swap — a CLUSTER
+;; is the isolation unit (one pod per cluster; the supervisor mints per-task
+;; clusters when isolation is wanted, `bin/seon cluster create`). The cluster
+;; store is durable, so passing an existing `agent_id` drives THE SAME agent
+;; again — including across a pod restart (boot re-arms armable agents).
+;; No Malli schema (opaque node req/res, same as the sibling handlers).
+;; Body: application/json {"input" str, "timeout_ms" int?, "agent_id" str?}.
 ;; ============================================================
 
 (defn- latest-run-start-ms
   "Wall-clock ms of the agent's MOST-RECENTLY-STARTED run (open or closed) over
-   the db value `db`, or 0 when none. The /solve poll uses this to reject the
-   agent's PRE-INJECTION state: `:idle` alone is ambiguous (a just-minted agent
-   is idle with zero runs BEFORE our message wakes it), so we only accept an
-   idle whose latest run started at/after the injection — i.e. the run our
-   message woke has opened and closed."
+   the db value `db`, or 0 when none. The /agents/run poll uses this to reject
+   the agent's PRE-INJECTION state: `:idle` alone is ambiguous (an idle agent
+   has no open run BEFORE our message wakes it), so we only accept an idle
+   whose latest run started at/after the injection — i.e. the run our message
+   woke has opened and closed."
   [db aid]
   (->> (db/query {:seon.db/db db
                   :seon.db/query '[:find ?started :in $ ?aid :where
@@ -492,147 +466,170 @@
        (map (fn [[^js started]] (.getTime started)))
        (reduce max 0)))
 
-(defn- ^:async solve-once!
-  "Run ONE /solve sample in a FRESH, CORE-SEEDED scratch `:memory` store, then
-   restore the live shared store — mirrors the gym's `run-scenario!`. This is
-   what stops cross-sample contamination: sample N gets a clean world, never
-   samples 1..N-1's facts (a benchmark scored 37.5% purely from pollution).
+(defn- ^:async run-agent-task!
+  "Drive ONE task through an agent in the pod's own cluster to completion.
 
-   Isolation: save the live `*conn*` + FULL schema-registry snapshot, `set!`
-   `*conn*` to a fresh conn, seed the core into it (so the agent has its my.kb
-   toolkit + blocks — an unseeded void agent is useless), then run the existing
-   mint+message+poll+read logic against the scratch conn; the `finally` restores
-   `*conn*` + the registry. SERIAL-ONLY: the async wake path reads the ROOT
-   `@db/*conn*` binding, so this relies on the benchmark running one sample at a
-   time (`--max-samples 1`). Making the conn fiber-local is a separate future
-   item — do NOT attempt it here.
+   Start-or-reuse: a nil `agent-id` mints + arms a fresh agent via the
+   injected `mint-agent` closure; a supplied `agent-id` reuses that agent —
+   it must already exist, and because the cluster store is durable the same
+   agent can be driven again after a pod restart (boot re-arms armable
+   agents), which multi-phase drives rely on. `input` lands via the real
+   wake path (`agent/message!`, from = the user ref); the DERIVED state is
+   polled to the `:idle` of the run our message woke (see
+   [[latest-run-start-ms]]) or `timeout-ms`; the returned map carries
+   turn/eval/reply metadata scoped to THIS request's window (runs started
+   at/after injection — a reused agent's earlier work never inflates the
+   counts). The agent's OWN FSM decides turns; this caller never does.
 
-   Inside the scratch store: mint + arm a fresh scratch agent via `mint-agent`
-   (seon.client/init-agent! — the SAME per-agent wiring start-agent! runs, but
-   against the current scratch *conn*; NOT start-agent! itself, which re-`set!`s
-   *conn* to the cluster store and would break isolation), inject `input` via the
-   REAL wake path (message!, from = user-ref), poll the DERIVED state to :idle OF
-   THE RUN OUR MESSAGE WOKE (see [[latest-run-start-ms]]) or `timeout-ms`, then
-   read back the final reply + turn/eval/closed-reason metadata. The pod's OWN
-   FSM manages turns — the harness never does. Returns a Promise of the result
-   map.
+   Timeout honesty: a timeout exit carries `:closed_reason \"timeout\"` +
+   `:timed_out true` (never a stale derived last-closed-reason), AND the
+   still-open run is closed `:superseded` so it stops burning LLM tokens.
+   A refusal (unknown agent-id, failed mint) returns `{:error <msg>}`."
+  [mint-agent agent-id input timeout-ms]
+  (let [conn    db/*conn*
+        reuse?  (some? agent-id)
+        exists? (when reuse?
+                  (some? (db/query {:seon.db/db @conn
+                                    :seon.db/query '[:find ?e . :in $ ?id :where
+                                                     [?e :seon.agent/id ?id]]
+                                    :seon.db/args [agent-id]})))]
+    (if (and reuse? (not exists?))
+      {:error (str "unknown agent_id: " agent-id)}
+      (let [aid    (or agent-id (db/new-id!))
+            minted (when-not reuse? (await (mint-agent aid)))]
+        (if (false? (:seon.db/ok? minted))
+          {:error (str "agent mint failed: "
+                       (get-in minted [:seon.db/error :seon.error/message]))}
+          ;; `injected-at` is stamped BEFORE the message lands, so the run the
+          ;; wake opens can never predate the window the reads below scope to.
+          (let [start       (js/Date.now)
+                injected-at start]
+            (log/info-console! "seon.web.serve" "POST /agents/run — task in"
+                               {:agent aid :reused reuse?
+                                :tokens (tokens/estimate (str input))})
+            (await (agent/message!
+                     {:seon.agent.message/from    agent/user-ref
+                      :seon.agent.message/to      [[:seon.agent/id aid]]
+                      :seon.agent.message/content input}))
+            (loop []
+              (await (js/Promise. (fn [r] (js/setTimeout r 1500))))
+              ;; ONE db snapshot per poll — every read below sees the same
+              ;; snapshot (a mid-poll write must not split state vs reply reads).
+              (let [db       @conn
+                    st       (derive/derive-state db aid)
+                    elapsed  (- (js/Date.now) start)
+                    done?    (and (= :idle st)
+                                  (>= (latest-run-start-ms db aid) injected-at))
+                    timeout? (> elapsed timeout-ms)]
+                (if-not (or done? timeout?)
+                  (recur)
+                  (do
+                    ;; TIMEOUT HONESTY: close the run we woke (if still open)
+                    ;; so it stops driving turns after we've given up.
+                    (when timeout?
+                      (when-let [run (derive/current-run db aid)]
+                        (await (run/close-run!
+                                 {:seon.agent.run/id            (:seon.agent.run/id run)
+                                  :seon.agent.run/closed-reason :superseded}))))
+                    (let [agent-eid (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id aid]}))
+                          user-eid  (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.user/id "user"]}))
+                          ;; the runs THIS request opened (window scoping)
+                          run-eids  (->> (db/query {:seon.db/db db
+                                                    :seon.db/query '[:find ?r ?started :in $ ?ag :where
+                                                                     [?r :seon.agent.run/agent ?ag]
+                                                                     [?r :seon.agent.run/started-at ?started]]
+                                                    :seon.db/args [agent-eid]})
+                                         (keep (fn [[r ^js started]]
+                                                 (when (>= (.getTime started) injected-at) r)))
+                                         set)
+                          turn-eids (->> (db/query {:seon.db/db db
+                                                    :seon.db/query '[:find ?t ?r :in $ ?ag :where
+                                                                     [?r :seon.agent.run/agent ?ag]
+                                                                     [?t :seon.agent.turn/run ?r]]
+                                                    :seon.db/args [agent-eid]})
+                                         (keep (fn [[t r]] (when (contains? run-eids r) t)))
+                                         set)
+                          evals     (->> (db/query {:seon.db/db db
+                                                    :seon.db/query '[:find ?e ?t :in $ ?ag :where
+                                                                     [?r :seon.agent.run/agent ?ag]
+                                                                     [?t :seon.agent.turn/run ?r]
+                                                                     [?t :seon.agent.turn/evals ?e]]
+                                                    :seon.db/args [agent-eid]})
+                                         (filter (fn [[_ t]] (contains? turn-eids t)))
+                                         count)
+                          ;; Model config — COMPUTED at response time by the
+                          ;; ONE resolver (seon.ai/resolved-config), a pure fn
+                          ;; of this poll's db snapshot: the agent's own
+                          ;; :seon.ai/agent-* overrides → the global config
+                          ;; row → shipped defaults. Derive-don't-store (owner
+                          ;; correction 2026-07-04 — supersedes the per-turn
+                          ;; llm-* stamping). Honest CURRENT intent for a
+                          ;; just-finished run; per-turn historical exactness
+                          ;; is the same resolver over (db/as-of db <turn's
+                          ;; rendered-as-of>) — see the resolver docstring.
+                          model-cfg (let [{:seon.ai/keys [resolved-config]}
+                                          (ai/resolved-config
+                                            {:seon.db/db db :seon.agent/id aid})
+                                          {:seon.ai/keys [provider model temperature
+                                                          max-tokens thinking]}
+                                          resolved-config]
+                                      (cond-> {:provider (name provider)}
+                                        model       (assoc :model model)
+                                        temperature (assoc :temperature temperature)
+                                        max-tokens  (assoc :max_tokens max-tokens)
+                                        thinking    (assoc :thinking thinking)))
+                          reply     (->> (db/query {:seon.db/db db
+                                                    :seon.db/query '[:find ?f ?to ?at ?c :where
+                                                                     [?m :seon.agent.message/from ?f]
+                                                                     [?m :seon.agent.message/to ?to]
+                                                                     [?m :seon.agent.message/at ?at]
+                                                                     [?m :seon.agent.message/content ?c]]})
+                                         (filter (fn [[from to ^js at _]]
+                                                   (and (= from agent-eid) (= to user-eid)
+                                                        (>= (.getTime at) injected-at))))
+                                         (sort-by (fn [[_ _ at _]] (.getTime ^js at)))
+                                         (map (fn [[_ _ _ c]] c)) last)]
+                      ;; On timeout report the HONEST reason — never a stale
+                      ;; derived last-closed-reason from an earlier close.
+                      (cond-> {:agent_id aid :turns (count turn-eids) :evals evals
+                               :reply (or reply "") :elapsed_ms elapsed
+                               ;; always present — the resolver always resolves
+                               ;; (worst case: all shipped defaults).
+                               :model_config model-cfg
+                               :closed_reason (if timeout?
+                                                "timeout"
+                                                (str (derive/last-closed-reason db aid)))}
+                        timeout? (assoc :timed_out true)))))))))))))
 
-   Timeout honesty: on a timeout exit the result carries `:closed_reason
-   \"timeout\"` + `:timed_out true` (NEVER the stale derived last-closed-reason),
-   AND the orphaned run our message woke is CLOSED (`:superseded`) so it stops
-   burning LLM tokens after we've given up on it."
-  [open-conn boot-seed mint-agent input timeout-ms]
-  (let [prev-conn      db/*conn*
-        schemas-before @schema/*schemas]
-    (try
-      (let [conn (await (open-conn))]
-        (set! db/*conn* conn)
-        ;; Boot the scratch store into THE WORLD A POD BOOTS INTO: bootstrap the
-        ;; CLJS compile-state, then seed the core (instruction rows +
-        ;; :seon.ns/:seon.fn program-graph). The seed runs inside a primary
-        ;; agent-id scope so its txs carry the live provenance shape — identical
-        ;; to the gym. (We skip the gym's fs-configure + ai/sync unless a drive
-        ;; shows /solve agents need them — minimal but correct.)
-        (let [compile-state (await (repl/ensure-bootstrap!))
-              seed-primary  (db/new-id!)
-              _             (await (db/with-agent seed-primary
-                                     (fn ^:async seed-core! []
-                                       (await (boot-seed {:seon.db/conn conn})))))
-              ;; Mint + arm the scratch agent ON THE SCRATCH conn. init-agent!
-              ;; resolves *conn* (scratch) + current-llm-fn and installs the wake
-              ;; trigger on the scratch conn, so message! below actually wakes it
-              ;; and its turns run against the scratch store — the whole point.
-              started       (await (mint-agent
-                                     {:seon.agent/id             (db/new-id!)
-                                      :seon.client/mint?         true
-                                      :seon.client/compile-state compile-state}))
-              start         (js/Date.now)
-              aid           (:seon.agent/id started)]
-          (log/info-console! "seon.web.serve" "POST /solve — minted scratch agent"
-                             {:agent aid :tokens (tokens/estimate (str input))})
-          (await (agent/message!
-                   {:seon.agent.message/from    agent/user-ref
-                    :seon.agent.message/to      [[:seon.agent/id aid]]
-                    :seon.agent.message/content input}))
-          ;; `injected-at` = the instant our message landed. The run that
-          ;; PROCESSES it starts at/after this; accept idle only once the latest
-          ;; run began after injection (the task run has run to completion).
-          (loop [injected-at (js/Date.now)]
-            (await (js/Promise. (fn [r] (js/setTimeout r 1500))))
-            ;; ONE db snapshot per poll, passed to every read below (a mid-poll
-            ;; write must not split state vs run-start vs reply reads).
-            (let [db       @db/*conn*
-                  st       (derive/derive-state db aid)
-                  elapsed  (- (js/Date.now) start)
-                  done?    (and (= :idle st) (>= (latest-run-start-ms db aid) injected-at))
-                  timeout? (> elapsed timeout-ms)]
-              (if (or done? timeout?)
-                (do
-                  ;; TIMEOUT HONESTY: close the run we woke (if still open) so it
-                  ;; stops driving turns + burning tokens after we've given up.
-                  (when timeout?
-                    (when-let [run (derive/current-run db aid)]
-                      (await (run/close-run!
-                               {:seon.agent.run/id            (:seon.agent.run/id run)
-                                :seon.agent.run/closed-reason :superseded}))))
-                  (let [agent-eid (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id aid]}))
-                        user-eid  (:db/id (db/entity {:seon.db/db db :seon.db/ref [:seon.user/id "user"]}))
-                        turns (->> (db/query {:seon.db/db db
-                                              :seon.db/query '[:find ?t :in $ ?ag :where
-                                                               [?r :seon.agent.run/agent ?ag]
-                                                               [?t :seon.agent.turn/run ?r]]
-                                              :seon.db/args [agent-eid]}) count)
-                        evals (->> (db/query {:seon.db/db db
-                                              :seon.db/query '[:find ?e :in $ ?ag :where
-                                                               [?r :seon.agent.run/agent ?ag]
-                                                               [?t :seon.agent.turn/run ?r]
-                                                               [?t :seon.agent.turn/evals ?e]]
-                                              :seon.db/args [agent-eid]}) count)
-                        reply (->> (db/query {:seon.db/db db
-                                              :seon.db/query '[:find ?f ?to ?at ?c :where
-                                                               [?m :seon.agent.message/from ?f]
-                                                               [?m :seon.agent.message/to ?to]
-                                                               [?m :seon.agent.message/at ?at]
-                                                               [?m :seon.agent.message/content ?c]]})
-                                   (filter (fn [[from to _ _]] (and (= from agent-eid) (= to user-eid))))
-                                   (sort-by (fn [[_ _ at _]] (.getTime ^js at)))
-                                   (map (fn [[_ _ _ c]] c)) last)]
-                    ;; On timeout report the HONEST reason — never a stale derived
-                    ;; last-closed-reason from an unrelated earlier close.
-                    (cond-> {:agent_id aid :turns turns :evals evals
-                             :reply (or reply "") :elapsed_ms elapsed
-                             :closed_reason (if timeout?
-                                              "timeout"
-                                              (str (derive/last-closed-reason db aid)))}
-                      timeout? (assoc :timed_out true))))
-                (recur injected-at))))))
-      (finally
-        ;; Restore the live shared store + full registry — the next /solve (or
-        ;; any live agent, /chat, /world) must see the untouched world.
-        (set! db/*conn* prev-conn)
-        (reset! schema/*schemas schemas-before)))))
-
-(defn- handle-solve! [req res]
-  (let [{:keys [open-conn boot-seed mint-agent]} @!solve-deps]
-    (if (or (nil? open-conn) (nil? boot-seed) (nil? mint-agent))
+(defn- handle-agent-run! [req res]
+  (let [mint-agent @!mint-agent-fn]
+    (if (nil? mint-agent)
       (write-status! res 503 "application/json; charset=utf-8"
-                     (js/JSON.stringify #js {:error "pod still booting (solve deps not wired)"}))
+                     (js/JSON.stringify #js {:error "pod still booting (mint seam not wired)"}))
       (-> (read-body req)
           (.then (fn [body]
                    (let [parsed     (js->clj (js/JSON.parse body))
                          input      (get parsed "input")
+                         agent-id   (get parsed "agent_id")
                          timeout-ms (or (get parsed "timeout_ms") 300000)]
-                     (solve-once! open-conn boot-seed mint-agent input timeout-ms))))
+                     (run-agent-task! mint-agent agent-id input timeout-ms))))
           (.then (fn [result]
-                   (log/info-console! "seon.web.serve" "POST /solve OK"
-                                      {:agent      (:agent_id result)
-                                       :turns      (:turns result)
-                                       :evals      (:evals result)
-                                       :elapsed-ms (:elapsed_ms result)})
-                   (write-status! res 200 "application/json; charset=utf-8"
-                                  (js/JSON.stringify (clj->js result)))))
+                   (if (:error result)
+                     (do
+                       (log/error-console! "seon.web.serve" "/agents/run refused"
+                                           (:error result))
+                       (write-status! res 422 "application/json; charset=utf-8"
+                                      (js/JSON.stringify #js {:error (:error result)})))
+                     (do
+                       (log/info-console! "seon.web.serve" "POST /agents/run OK"
+                                          {:agent      (:agent_id result)
+                                           :turns      (:turns result)
+                                           :evals      (:evals result)
+                                           :elapsed-ms (:elapsed_ms result)})
+                       (write-status! res 200 "application/json; charset=utf-8"
+                                      (js/JSON.stringify (clj->js result)))))))
           (.catch (fn [err]
-                    (log/error-console! "seon.web.serve" "/solve threw" err)
+                    (log/error-console! "seon.web.serve" "/agents/run threw" err)
                     (write-status! res 500 "application/json; charset=utf-8"
                                    (js/JSON.stringify #js {:error (str err)}))))))))
 
@@ -792,7 +789,7 @@
    `Host` header (so it holds for loopback dev AND a Caddy/Tauri front that
    preserves Host). When no Host is available we fall back to allowing loopback
    origins only. `req` is an opaque Node IncomingMessage (Ring-style boundary,
-   no Malli schema — same as the /call, inspector, and serve handlers)."
+   no Malli schema — same as the /call, debug, and serve handlers)."
   [^js req]
   (let [headers (.-headers req)
         origin  (when headers (gobj/get headers "origin"))]
@@ -815,9 +812,10 @@
 ;; `router/handle-request`.
 ;; ============================================================
 
-;; `serve-root!` is NOT injected here — it is a SEEDED core route
-;; (:seon.route/root → seon.web.serve/serve-root!), resolved late by the
-;; router's db->routes. Only the non-core supplement handlers are injected.
+;; `/` is NOT a serve handler — it is a SEEDED core route
+;; (:seon.route/root → seon.web.datastar/serve-root!, root's own agent view),
+;; resolved late by the router's db->routes. Only the non-core supplement
+;; handlers are injected here.
 (router/install!
   {:seon.web.router/sse           open-sse!
    :seon.web.router/static        serve-static!
@@ -828,7 +826,7 @@
    :seon.web.router/log           handle-log!
    :seon.web.router/create-agent  handle-create-agent!
    :seon.web.router/complete      handle-complete-agent!
-   :seon.web.router/solve         handle-solve!
+   :seon.web.router/agent-run     handle-agent-run!
    :seon.web.router/same-origin?  same-origin?})
 
 ;; ============================================================
@@ -864,6 +862,15 @@
       (let [n (js/parseInt raw 10)]
         (if (js/Number.isNaN n) 7890 n)))))
 
+(defn- bind-host
+  "Pick the bind interface. Default loopback (`127.0.0.1` — nothing on the
+   LAN sees a dev pod). Override via SEON_BIND — a containerized pod sets
+   `SEON_BIND=0.0.0.0` so docker's published-port forward (which targets the
+   container's own interface, never its loopback) can reach the server.
+   Infra-wiring env read at point of use, same category as SEON_PORT."
+  []
+  (or (.. js/process -env -SEON_BIND) "127.0.0.1"))
+
 (defn start!
   "Start the HTTP+SSE server on a loopback port.
 
@@ -878,8 +885,9 @@
    agent boots via POST /agents/new → start-agent! → start!). A dead
    (closed) server object is replaced.
 
-   The server binds to 127.0.0.1 (loopback only). Browsers on the
-   same machine can connect; nothing on the LAN sees the pod.
+   The server binds to 127.0.0.1 by default (loopback only — browsers on
+   the same machine can connect; nothing on the LAN sees the pod). A
+   containerized pod overrides via SEON_BIND=0.0.0.0 (see [[bind-host]]).
 
    If the requested port is in use, the listen fails fast — that's
    the expected behavior for a dev pod (only one instance at a time).
@@ -920,7 +928,7 @@
                      (log/error-console! "seon.web.serve"
                                          (str "listen failed on port " port) err)
                      (reject err)))
-            (.listen server port "127.0.0.1"
+            (.listen server port (bind-host)
                      (fn []
                        (let [addr      (.address server)
                              bound     (.-port addr)

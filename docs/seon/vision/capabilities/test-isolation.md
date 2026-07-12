@@ -22,4 +22,4 @@ Tests run against isolated database state so they cannot interfere with each oth
 ## Related
 
 - Components: [[components/testing]]
-- PRDs: [[prds/test-infrastructure/design]]
+- PRDs: `prds/test-infrastructure/design`

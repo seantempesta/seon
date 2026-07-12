@@ -75,6 +75,53 @@
            (rules "(ns foo)\n(defn bar \"\n  Real content on line 2.\" [x] x)")))))
 
 ;;; ---------------------------------------------------------------------------
+;;; Reserved-glyph-literal rule (INVERTED, transcript-render redesign) — a
+;;; docstring must carry NO reserved runtime result-grammar glyph (⟹ ⟸ ⋘ ⋙ ❯);
+;;; static agent-facing text shows the CALL and describes the return in PROSE.
+;;; ---------------------------------------------------------------------------
+
+(deftest reserved-glyph-literal-test
+  (testing "a result-open ⟹ echo in the docstring body is flagged"
+    (is (contains?
+         (rules (str "(ns foo)\n(defn bar\n  \"Store one thing.\n\n"
+                     "     (bar 1)\n     ; ⟹ 1\"\n  [x] x)"))
+         :reserved-glyph-literal)))
+
+  (testing "a result-close ⟸ literal is flagged"
+    (is (contains?
+         (rules (str "(ns foo)\n(defn bar\n  \"Store one thing.\n\n"
+                     "     (bar 1) ⟹ 1 ⟸ result/x\"\n  [x] x)"))
+         :reserved-glyph-literal)))
+
+  (testing "a status/prompt glyph (⋘ ⋙ ❯) literal is flagged"
+    (doseq [g ["⋘" "⋙" "❯"]]
+      (is (contains?
+           (rules (str "(ns foo)\n(defn bar\n  \"Store one thing.\n\n"
+                       "     a " g " glyph here.\"\n  [x] x)"))
+           :reserved-glyph-literal)
+          (str g " is a reserved glyph"))))
+
+  (testing "a stale `;; =>` echo is NO LONGER flagged (rule inverted)"
+    (is (empty?
+         (rules (str "(ns foo)\n(defn bar\n  \"Store one thing.\n\n"
+                     "     (bar 1)\n     ;; => 1\"\n  [x] x)")))))
+
+  (testing "prose showing the CALL and describing the return is CLEAN"
+    (is (empty?
+         (rules (str "(ns foo)\n(defn bar\n  \"Store one thing.\n\n"
+                     "     (bar 1)  ; returns 1\"\n  [x] x)")))))
+
+  (testing "the value-VOCABULARY glyphs («» ⟨⟩ ‹›) are NOT reserved, not flagged"
+    (is (empty?
+         (rules (str "(ns foo)\n(defn bar\n  \"Store one thing.\n\n"
+                     "     (bar 1)  ; returns «map: ok» ⟨812 tok⟩\"\n  [x] x)")))))
+
+  (testing "a `:malli/schema [:=> …]` line in prose is not flagged"
+    (is (empty?
+         (rules (str "(ns foo)\n(defn bar\n  \"Store one thing.\n\n"
+                     "     the schema is [:=> [:cat ::req] ::resp] here.\"\n  [x] x)"))))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Skips
 ;;; ---------------------------------------------------------------------------
 

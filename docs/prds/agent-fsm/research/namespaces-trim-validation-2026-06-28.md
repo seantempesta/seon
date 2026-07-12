@@ -168,7 +168,7 @@ merge-arrow chain. The agent got the verb NAMES and arglists but not the
    ~137 lines (~1.1k tok) vs its signature block — a cheap add that protects
    the one ns whose worked example drives adoption, while the rest of `my.*`
    stays signature-trimmed (most of the −43% win preserved). If `my.ui` /
-   `my.tile` show the same "named but not composed" pattern in their drives,
+   `my.canvas` show the same "named but not composed" pattern in their drives,
    extend the set to the toolkit nses.
 2. **OR** make the `:signature` render of `my.*` nses emit the FULL verb
    docstring (not just the clipped first line) so the worked `;;` chain

@@ -4,7 +4,7 @@
    (konserve.indexeddb under the fake-indexeddb polyfill).
 
    Methodology is ported from upstream datahike's JVM benchmark suite
-   (`~/src/datahike/benchmark/src/benchmark/{measure,config}.clj`):
+   (`reference-code/datahike/benchmark/src/benchmark/{measure,config}.clj`):
 
      - Multi-iteration measurement with mean/median/std/min/max/count/observations
      - Query taxonomy: simple, limit, e-join (free + first-fixed + second-fixed),

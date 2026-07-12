@@ -22,4 +22,4 @@ None.
 ## Related
 
 - Components: [[components/flow-topology]]
-- PRDs: [[prds/unified-flow/prd]], [[prds/flow-datalevin-writer/prd]]
+- PRDs: [[prds/unified-flow/prd]], `prds/flow-datalevin-writer/prd`

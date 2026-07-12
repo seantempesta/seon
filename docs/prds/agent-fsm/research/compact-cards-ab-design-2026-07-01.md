@@ -73,7 +73,7 @@ config-driven) — this A/B varies ONLY the full-vs-compact DETAIL axis.
 
 **Held full in BOTH arms (controls):**
 
-- The `my.*` exemplars (`#{:my.kb :my.data :my.ui :my.tile}` —
+- The `my.*` exemplars (`#{:my.kb :my.data :my.ui :my.canvas}` —
   `canonical-full-my-ns`). They stay full because the prominence law says
   COMPOSITION verbs need their worked example; they are the "how to think in this
   system" anchor, not the thing under test.
@@ -223,7 +223,7 @@ scenario count + non-namespaces blocks). Guard against the same class:
   is NOT in `::full-source`. Home-ns aliases (`db/`/`todo/`/`message/`) are
   always-on regardless of arm (#73) — counting an aliased call as "card-taught"
   would false-positive B. The extraction must be alias-tolerant (the
-  `[my.tile :as tile]` false-negative lesson) AND alias-EXCLUDING for the
+  `[my.canvas :as tile]` false-negative lesson) AND alias-EXCLUDING for the
   card-only metric.
 - **Exemplars held full in both arms** — `my.*` and current-ns identical A↔B, so
   the delta is purely the long-tail detail level. `toolkit-calls` should be flat

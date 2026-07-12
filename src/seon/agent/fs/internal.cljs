@@ -1,10 +1,10 @@
 (ns seon.agent.fs.internal
   "Filesystem-capability internals — the private data-manipulation +
-   allowlist plumbing behind [[seon.agent.fs]]'s public verbs.
+   allowlist plumbing behind [[seon.agent.fs]]'s public functions.
 
    Split out so the teaching namespace stays a clean list of map-in /
    map-out capability fns. Loaded + indexed + grep-able, but NOT
-   whitelisted for full-source rendering: agents call the public verbs
+   whitelisted for full-source rendering: agents call the public functions
    in [[seon.agent.fs]], not these.
 
    ## Capability config — default-deny allowlist
@@ -28,12 +28,28 @@
    ops hand the agent the resolved map. Local-file perf cost is
    irrelevant; WASI fd reads are sync too, so this survives convergence."
   (:require
+    ["node:crypto" :as crypto]
     ["node:fs" :as fs]
     ["node:path" :as np]
     [clojure.string :as str]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.platform :as platform]))
+
+;; ============================================================
+;; Content addressing — the sha guard's currency.
+;; ============================================================
+
+(defn file-sha
+  "SHA-256 hex digest of `content` (utf-8) — the file's content address.
+
+   Same primitive my.blob names a blob by; here it fences an anchored
+   edit against a stale read: read → sha → the agent echoes it back on
+   the next replace!, a mismatch means the file moved under them."
+  [content]
+  (-> (.createHash crypto "sha256")
+      (.update content "utf8")
+      (.digest "hex")))
 
 ;; ============================================================
 ;; Error / denial envelopes — errors are values, never a throw.
@@ -288,6 +304,53 @@
          (str "old-string is AMBIGUOUS (" n " matches) — include more "
               "surrounding context to make it unique, or use the "
               "from-line/to-line range mode")}))))
+
+(defn glob->re
+  "Compile a shell glob to an anchored regex.
+
+   `**/` → zero or more path segments (globstar), `**` → any run (incl.
+   `/`), `*` → any run of non-`/`, `?` → one non-`/`. Every other regex
+   metacharacter is escaped so a literal `.` or `(` matches itself. One
+   ordered token pass — no placeholder round-trip."
+  [glob]
+  (let [pat (str/replace
+              glob
+              #"\*\*/|\*\*|\*|\?|[.+^${}()|\[\]\\]|[^*?]"
+              (fn [m]
+                (case m
+                  "**/" "(?:.*/)?"
+                  "**"  ".*"
+                  "*"   "[^/]*"
+                  "?"   "[^/]"
+                  (if (re-matches #"[.+^${}()|\[\]\\]" m) (str "\\" m) m))))]
+    (re-pattern (str "^" pat "$"))))
+
+
+(defn walk-pred
+  "A file-path predicate combining an optional `match-ext` suffix and an
+   optional `glob`. The glob matches the root-RELATIVE path (forward
+   slashes); a slash-free glob (e.g. `*.md`) also matches the basename, so
+   it selects those files at any depth. Absent filters pass everything."
+  [root match-ext glob]
+  (let [re        (when glob (glob->re glob))
+        basename? (and glob (not (str/includes? glob "/")))]
+    (fn [full]
+      (and (or (nil? match-ext) (str/ends-with? full match-ext))
+           (or (nil? re)
+               (let [rel (.relative np root full)]
+                 (boolean (or (re-matches re rel)
+                              (and basename? (re-matches re (.basename np full)))))))))))
+
+(defn sort-by-mtime
+  "Order absolute `paths` newest-first by mtime; an unstatable path sinks
+   to the end (mtime 0). Statting is bounded — the caller already capped
+   `paths` at max-results."
+  [paths]
+  (->> paths
+       (map (fn [p] [p (try (.getTime (.-mtime (.statSync fs p)))
+                            (catch :default _ 0))]))
+       (sort-by (comp - second))
+       (mapv first)))
 
 (defn walk-dir-recursive!
   "Depth-first recursive walk (sync). Mutates `!out` (vector of matching

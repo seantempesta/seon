@@ -36,7 +36,7 @@
 (defn- value
   "Read `result/<id>` in `ns-sym` on `cs`; returns the eval result map."
   [cs ns-sym id]
-  (seval/eval cs (str "result/" id) {:ns ns-sym :analyze-deps? false}))
+  (seval/eval cs (str "result/" id) {:seon.eval/starting-ns ns-sym :seon.eval/analyze-deps? false}))
 
 (defn- run-batch
   "Run `source` (one form) through eval-batch! in a fresh agent ns.
@@ -84,9 +84,9 @@
                    (is (= 1 (:seon.eval/n-ok r)) "the eval succeeded")
                    (-> (value cs hns (first (:seon.eval/ids r)))
                        (.then (fn [r2]
-                                (is (:ok r2)
+                                (is (:seon.eval/ok? r2)
                                     "result/<id> resolves — no undeclared-var error")
-                                (is (= 42 (:value r2))
+                                (is (= 42 (:seon.eval/value r2))
                                     "the value var reads the eval's value")))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -99,14 +99,14 @@
   (async done
     (-> (repl/ensure-bootstrap!)
         (.then (fn [cs]
-                 (-> (seval/eval cs "(ns probe.resultmiss)" {:ns 'cljs.user :analyze-deps? true})
+                 (-> (seval/eval cs "(ns probe.resultmiss)" {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? true})
                      (.then (fn [_] (value cs 'probe.resultmiss "zzz-9999999999")))
                      (.then (fn [r]
-                              (is (:ok r) "a miss is a VALUE, not a failed error")
-                              (is (string? (:value r)) "the miss value is the guidance string")
-                              (is (str/includes? (:value r) "isn't live")
+                              (is (:seon.eval/ok? r) "a miss is a VALUE, not a failed error")
+                              (is (string? (:seon.eval/value r)) "the miss value is the guidance string")
+                              (is (str/includes? (:seon.eval/value r) "isn't live")
                                   "names the not-live condition")
-                              (is (str/includes? (:value r) "re-run its form")
+                              (is (str/includes? (:seon.eval/value r) "re-run its form")
                                   "tells the agent the next action"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -119,7 +119,7 @@
   (async done
     (-> (repl/ensure-bootstrap!)
         (.then (fn [cs]
-                 (-> (seval/eval cs "(ns probe.resultcap)" {:ns 'cljs.user :analyze-deps? true})
+                 (-> (seval/eval cs "(ns probe.resultcap)" {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? true})
                      (.then (fn [_]
                               (reset! (deref #'seval/!result-var-ids) [])
                               (let [n   (+ cap 5)
@@ -134,13 +134,13 @@
                                            (value cs 'probe.resultcap (last ids))])
                                     (.then (fn [rs]
                                              (testing "oldest pruned → graceful miss"
-                                               (is (:ok (aget rs 0)))
-                                               (is (string? (:value (aget rs 0))))
-                                               (is (str/includes? (:value (aget rs 0)) "isn't live")))
+                                               (is (:seon.eval/ok? (aget rs 0)))
+                                               (is (string? (:seon.eval/value (aget rs 0))))
+                                               (is (str/includes? (:seon.eval/value (aget rs 0)) "isn't live")))
                                              (testing "first survivor still resolves"
-                                               (is (= 500 (:value (aget rs 1)))))
+                                               (is (= 500 (:seon.eval/value (aget rs 1)))))
                                              (testing "newest resolves"
-                                               (is (= (* 100 (dec n)) (:value (aget rs 2))))))))))))))
+                                               (is (= (* 100 (dec n)) (:seon.eval/value (aget rs 2))))))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -156,10 +156,10 @@
                    (is (= 1 (:seon.eval/n-fail r)) "the eval failed")
                    (-> (value cs hns (first (:seon.eval/ids r)))
                        (.then (fn [r2]
-                                (is (:ok r2) "the read itself is a value")
-                                (is (string? (:value r2))
+                                (is (:seon.eval/ok? r2) "the read itself is a value")
+                                (is (string? (:seon.eval/value r2))
                                     "a failed eval's id is a graceful miss — no value bound")
-                                (is (str/includes? (:value r2) "isn't live"))))))))
+                                (is (str/includes? (:seon.eval/value r2) "isn't live"))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -178,7 +178,7 @@
                    (-> (value cs hns id)
                        (.then (fn [r]
                                 (testing "result/<id> VAR resolves — no shadow, no alias"
-                                  (is (:ok r))
-                                  (is (= 42 (:value r))))))))))
+                                  (is (:seon.eval/ok? r))
+                                  (is (= 42 (:seon.eval/value r))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

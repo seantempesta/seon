@@ -1,7 +1,7 @@
 (ns seon.agent.ctx.findings
   "The stored-findings context section — the CONTENT counterpart to
    `seon.agent.ctx.inventory` (which renders COUNTS for discoverability).
-   A fresh agent must SEE the knowledge already in the store, not just be
+   A fresh agent must SEE the knowledge already in the db, not just be
    told how many rows exist — otherwise it under-stores and re-researches
    instead of consulting (the DB-memory regression this restores). So this
    renders the TOP-N most-recent user-domain `my.*`/consumer rows' actual
@@ -14,13 +14,13 @@
    embeddings/Proximum — see `seon.agent.ctx.relevant`).
 
    Symbol-wired into the composer layout
-   (`seon.config/default-ctx-blocks`) as
+   (`config manifest`) as
    `'seon.agent.ctx.findings/findings-block`; loaded at boot so the
    symbol resolves for `seon.eval/lookup-value`. Rides the VOLATILE band
    (priority > cache-breakpoint) so a newly-stored finding never busts
    the cached stable prefix.
 
-   REACTIVE: returns \"\" when the store holds no user-domain rows → the
+   REACTIVE: returns \"\" when the db holds no user-domain rows → the
    composer drops the section (no empty shell)."
   (:require
     [clojure.string :as str]
@@ -28,7 +28,7 @@
 
 (def ^:private max-rows
   "How many most-recent findings to render inline. Bounded so the section
-   never grows unbounded as the store accumulates — older rows live behind
+   never grows unbounded as the db accumulates — older rows live behind
    the read-back query in the truncation footer."
   10)
 
@@ -72,22 +72,41 @@
            (not (str/starts-with? ns "db"))
            (not (str/starts-with? ns "datahike"))))))
 
+(defn- lifecycle-status?
+  "True when datom `[a v]` is a lifecycle STATUS — an attribute whose local
+   name is `status` carrying a keyword state (`:my.plan/status :open`, …).
+   The entity is WORK-TRACKING with a lifecycle, not a settled fact, so it is
+   swept OUT of findings (plan/todo already have their own status-aware
+   sections). A single COMPUTED convention over the attr's local name — NOT a
+   namespace allowlist: any future `my.<domain>/status` is covered with no
+   edit, while genuine knowledge enums (`:my.kb/confidence`) are untouched
+   because their local name is not `status`."
+  [a v]
+  (and (= "status" (name a)) (keyword? v)))
+
 (defn- finding-eids
   "The most-recent user-domain entity ids in `db`, newest first (sort by
    `:db/id` desc — the same monotonic boot-scope exclusion `inventory`
-   uses). An entity is user-domain when it carries any [[user-attr?]]
-   attribute and is NOT a boot-scope row (`boot-ids`,
-   [[seon.db/bootstrap-row-ids]]). Returns `[capped-eids total-count]` so
-   the caller knows whether to render the truncation footer."
+   uses). An entity is a FINDING (settled knowledge) when it carries a
+   [[user-attr?]] attribute, is NOT a boot-scope row (`boot-ids`,
+   [[seon.db/bootstrap-row-ids]]), and carries NO lifecycle status
+   ([[lifecycle-status?]]) — work-tracking rows (an `:open` plan step) never
+   read as accumulated knowledge. Returns `[capped-eids total-count]` so the
+   caller knows whether to render the truncation footer."
   [db boot-ids]
-  (let [pairs (db/query {:seon.db/db db
-                         :seon.db/query '[:find ?e ?a :where [?e ?a ?v]]})
+  (let [triples  (db/query {:seon.db/db db
+                            :seon.db/query '[:find ?e ?a ?v :where [?e ?a ?v]]})
+        work-eids (into #{}
+                        (keep (fn [[e a v]]
+                                (when (lifecycle-status? a v) e)))
+                        triples)
         eids  (into #{}
-                    (keep (fn [[e a]]
+                    (keep (fn [[e a _v]]
                             (when (and (not (contains? boot-ids e))
+                                       (not (contains? work-eids e))
                                        (user-attr? a))
                               e)))
-                    pairs)
+                    triples)
         sorted (sort > eids)]
     [(take max-rows sorted) (count eids)]))
 
@@ -143,7 +162,9 @@
          content (provenance-str m))))
 
 (defn findings-block
-  "The stored-findings content surface: recent claims + `:my.kb` provenance.
+  "DEPRECATED — reference for the `db` milestone; see context-rebuild.
+
+   The stored-findings content surface: recent claims + `:my.kb` provenance.
 
    Volatile tail — the TOP-N most-recent user-domain rows' actual
    claim/answer TEXT + their `:my.kb/source-*` provenance, one
@@ -158,9 +179,9 @@
    BOUNDED: at most [[max-rows]] rows, each clipped to [[content-char-cap]];
    when more findings exist than are shown, a loud-truncation footer carries
    the read-back query so the agent can pull the rest. REACTIVE: returns
-   \"\" when the store holds no user-domain rows → the composer drops the
+   \"\" when the db holds no user-domain rows → the composer drops the
    section."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{:seon.db/keys [db]}]
   (let [boot-ids       (db/bootstrap-row-ids db)
         [eids total]   (finding-eids db boot-ids)]

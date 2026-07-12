@@ -48,6 +48,7 @@
    [clojure.walk :as walk]
    [malli.core :as m]
    [malli.error :as me]
+   [seon.ai.tokens :as tokens]
    [seon.schema :as schema]))
 
 ;; ============================================================
@@ -94,6 +95,16 @@
   (and (map? env)
        (contains? kind-set (:seon.error/kind env))))
 
+(def caller-fault-kinds
+  "The instrumentation kinds where the CALLER broke the contract —
+   invalid input or arity means the wrapped fn never ran, so the mistake
+   is the calling side's by construction. `seon.instrument/wrapper-fault`
+   reads this to classify a dev-eval-scoped violation of a core fn as
+   `:agent` (caller mistake). An invalid OUTPUT (or guard) is NOT here:
+   the fn itself broke its contract, and stays with its own population."
+  #{:seon.error.kind/malli-instrument-input
+    :seon.error.kind/malli-instrument-arity})
+
 (defn pr-str-readable
   "pr-str a value with fn-objects replaced by readable placeholders.
 
@@ -139,14 +150,6 @@
        :cljs (try (.. v -constructor -name)
                   (catch :default _ "unknown")))))
 
-(defn- truncate-pr
-  "pr-str + middle-ellipsize at `limit` chars. Keeps the start and end
-   visible, ellipsis in the middle — most useful for big maps."
-  [v limit]
-  (let [s (pr-str v)]
-    (if (> (count s) limit)
-      (str (subs s 0 (- limit 3)) "...")
-      s)))
 
 ;; ============================================================
 ;; Hint inference
@@ -164,13 +167,25 @@
 (defn- hint-for
   "Compute a one-line hint for a leaf error. Returns nil when no hint
    pattern matches; the renderer skips the line then."
-  [{:keys [type schema value]} present-keys]
+  [{:keys [type schema value in]} present-keys]
   (cond
     (= type :malli.core/missing-key)
-    (when (and (seq present-keys) (keyword? schema))
-      ;; Spell-check style hint — name only the missing key for now;
-      ;; deeper spell-check would compare against present-keys.
-      (str "did you mean " (pr-str schema) "?"))
+    ;; The missing key is the LAST :in segment (malli's :map explain
+    ;; conj's the key onto in; the leaf's :schema is the whole map
+    ;; schema, never the keyword). Spell-check against the keys the
+    ;; caller actually passed: same NAME + different NAMESPACE is the
+    ;; classic wrong-ns call, so name the exact mistake.
+    (let [missing (peek (vec in))]
+      (when (and (seq present-keys) (keyword? missing))
+        (if-let [near (some (fn [k]
+                              (when (and (keyword? k)
+                                         (= (name k) (name missing))
+                                         (not= k missing))
+                                k))
+                            present-keys)]
+          (str "you passed " (pr-str near)
+               " — the key is " (pr-str missing))
+          (str "did you mean " (pr-str missing) "?"))))
 
     (and (string? value) (get coercion-hints schema))
     (get coercion-hints schema)))
@@ -225,14 +240,24 @@
                         :seon.error.malli/path (vec (:in first-leaf))
                         :seon.error.malli/explain-path (vec (:path first-leaf))
                         :seon.error.malli/leaf-type (:type first-leaf)
-                        :seon.error.malli/expected (truncate-pr (m/form (:schema first-leaf)) 200)
-                        :seon.error.malli/got-edn (truncate-pr leaf-value 200)
+                        :seon.error.malli/expected (tokens/bounded-pr-str (m/form (:schema first-leaf)) 50)
+                        :seon.error.malli/got-edn (tokens/bounded-pr-str leaf-value 50)
                         :seon.error.malli/got-type (got-type leaf-value))
       humanized  (assoc :seon.error.malli/humanized humanized)
       (seq leafs) (assoc :seon.error.malli/errors (mapv #(into {} %) leafs))
+      ;; The FULL args vector — malli hands it over on EVERY report type
+      ;; (core.cljc:2210-2220); it was destructured and discarded here.
+      ;; Push-button re-invocation wants all args, not just the failing
+      ;; leaf. fn-stubbed THEN clipped (plain bounded-pr-str would print
+      ;; unreadable #object[…] for fn-valued args); the generous budget
+      ;; (vs got-edn's 50) is deliberate — under budget it round-trips
+      ;; through read-string. `seon.error/record!` lifts this onto the
+      ;; persisted error datom as `:seon.error/args-edn`.
+      args       (assoc :seon.error/args-edn
+                        (tokens/clip-str (pr-str-readable args) 200))
       arg-index  (assoc :seon.error.malli/arg-index arg-index)
       (= kind :seon.error.kind/malli-instrument-output)
-      (assoc :seon.error.malli/return-value-edn (truncate-pr value 200))
+      (assoc :seon.error.malli/return-value-edn (tokens/bounded-pr-str value 50))
       (= kind :seon.error.kind/malli-instrument-arity)
       (cond->
         arity   (assoc :seon.error.malli/arity arity)
@@ -264,13 +289,31 @@
   (let [s (str s)]
     (str s (apply str (repeat (max 0 (- n (count s))) " ")))))
 
+;; The render request — the malli-error envelope keys `render-malli-error`
+;; reads. Open map (the envelope carries more), every column key optional
+;; (missing keys render gracefully); references the registered field
+;; shapes (shared-shape rule).
+(schema/register! :seon.error.malli/render-request
+  [:map
+   [:seon.error/kind             {:optional true} :seon.error/kind]
+   [:seon.error.malli/fn-sym     {:optional true} :seon.error.malli/fn-sym]
+   [:seon.error.malli/arg-index  {:optional true} :seon.error.malli/arg-index]
+   [:seon.error.malli/expected   {:optional true} :seon.error.malli/expected]
+   [:seon.error.malli/path       {:optional true} :seon.error.malli/path]
+   [:seon.error.malli/got-edn    {:optional true} :seon.error.malli/got-edn]
+   [:seon.error.malli/got-type   {:optional true} :seon.error.malli/got-type]
+   [:seon.error.malli/humanized  {:optional true} :seon.error.malli/humanized]
+   [:seon.error.malli/hint       {:optional true} :seon.error.malli/hint]
+   [:seon.error.malli/arity      {:optional true} :seon.error.malli/arity]
+   [:seon.error.malli/arities    {:optional true} :seon.error.malli/arities]])
+
 (defn render-malli-error
   "Format the envelope into the multi-line ;; ERROR block.
 
    Returns
    a string (no trailing newline). Renders missing keys gracefully —
    if a column's source key is absent, that line is omitted."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.error.malli/render-request] :string]}
   [{kind   :seon.error/kind
     fn-sym :seon.error.malli/fn-sym
     arg-i  :seon.error.malli/arg-index

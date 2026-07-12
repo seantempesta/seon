@@ -20,7 +20,7 @@
 
    ```clojure
    (seon.repl/dev-init!)
-   ;; => Promise<{:compile-state #<atom> :conn #<conn>}>
+   ; ⟹ Promise<{:compile-state #<atom> :conn #<conn>}>
 
    (rewrite-clj.parser/parse-string-all \";; hi\\n(+ 1 2)\\n\")
 
@@ -53,17 +53,24 @@
     [rewrite-clj.parser]
     [rewrite-clj.node]
     [rewrite-clj.zip]
-    [seon.repl.internal]))
+    [seon.schema :as schema]))
 
 ;; ============================================================
-;; parse-forms re-export — historical compat. New callers should
-;; require seon.repl.internal directly.
+;; The parse-entry envelope (produced by seon.repl.internal/parse-forms —
+;; the .internal machinery of THIS ns, which owns the data). In-memory
+;; only, never transacted whole. `::form` is deliberately UNREGISTERED —
+;; it carries an arbitrary read sexpr (same reasoning as the unregistered
+;; :seon.eval/value). A `:read` entry's failure is the ONE :seon/error
+;; value: {:seon.error/kind <classified> :seon.error/message <parser msg>}.
+;; Registered here, not in the .cljc producer, because seon.repl.internal
+;; must stay loadable by bare babashka (bin/oracle-server) — no malli.
 ;; ============================================================
 
-(def parse-forms
-  "Re-exported from [[seon.repl.internal/parse-forms]] for callers that still
-   reference `seon.repl/parse-forms`. New code: `seon.repl.internal/parse-forms`."
-  seon.repl.internal/parse-forms)
+(schema/register! ::kind [:enum :form :read :comment])
+(schema/register! ::ok? :boolean)
+(schema/register! ::narration :string)
+(schema/register! ::source :string)
+(schema/register! ::span [:tuple :int :int])
 
 ;; ============================================================
 ;; Iteration-surface — dev-init! opens an agent conn (history-on) +

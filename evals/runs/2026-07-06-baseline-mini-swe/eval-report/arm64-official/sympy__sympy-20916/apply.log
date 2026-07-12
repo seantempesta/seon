@@ -1,0 +1,5 @@
+$ git apply --verbose
+
+Checking patch sympy/printing/conventions.py...
+Applied patch sympy/printing/conventions.py cleanly.
+

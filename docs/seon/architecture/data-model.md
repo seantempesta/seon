@@ -13,7 +13,7 @@ the three relationship kinds; how an entity's kind is identified; the
 `my.*` domain schemas; and the one general `:seon/error` value. Vocabulary is
 locked in [[architecture]] (the glossary). This doc owns the **schema**; it
 points at [[ui]] for the render/route/slot machinery, at [[agent-runtime]] for
-the loop/lifecycle that mutates these rows, and at [[toolkit]] for the verbs an
+the loop/lifecycle that mutates these rows, and at [[toolkit]] for the functions an
 agent calls over them.
 
 ## 1. TL;DR — the entity graph in one paragraph
@@ -33,7 +33,7 @@ the agent that started it (`:seon.agent/parent`); a run points back
 schedules reference its members by **symbol value** (late-resolved, NOT a
 datahike ref). **Routes** (`:seon.route`) are datoms a `db->routes` fn projects
 into reitit. The **root agent** (`:seon.agent/id "root"`) is the seeded base
-agent whose world is the `/` overview and who holds the lifecycle grant (see
+agent whose view is the `/` overview and who holds the lifecycle grant (see
 [[agent-runtime]]). The agent's **state is never stored** — it is derived
 (`seon.derive/derive-state`) from its primitives. The **`my.*` domain schemas**
 carry the agent's actual data: `my.kb` (a global knowledge base — rows carry no
@@ -141,7 +141,7 @@ Two storage encodings, both VALUES:
   (`:db.type/string`), because datahike's typed schema cannot hold a scalar
   union; the bridge encodes on write and `seon.db/decode-edn-value` decodes on
   read. Used by `:seon.render/ai` (`[:or :string :symbol]`) and
-  `:seon.render/html` (references `:seon.render.live-tile/content`,
+  `:seon.render/html` (references `:seon.render.canvas/content`,
   `[:or :symbol ::hiccup]`).
 
 The render path resolves these through ONE engine: `ai-render` / `html-render`
@@ -160,7 +160,12 @@ Datahike reifies `:tx-meta` onto the tx entity
 `:tx-meta` (`src/seon/db/internal.cljs` `merge-tx-context-into-opts`; the seven
 attrs: `:seon.db/agent-id`, `session-id`, `turn-id`, `eval-id`, `origin`,
 `replay?`, `resume-marker?`), and the stamps survive the wire to the JVM
-writer.
+writer. `:seon.db/origin` is DERIVED at that boundary
+(`seon.db.internal/derive-origin`) — callers never pass it: an agent scope
+stamps `:agent` (a tx-context claim of a non-managed origin like `:system` /
+`:test-run` / `:replay` is trusted), and the managed origins
+`:core-seed`/`:config` are only reachable from an UNSCOPED `with-tx-context`,
+so managed-core provenance cannot be forged from inside an agent scope.
 
 Consequence for modeling: WHO/WHEN-wrote-this is a **join**
 (`[?e attr _ ?tx] [?tx :seon.db/turn-id ?turn]`), never a domain attribute — a
@@ -261,7 +266,7 @@ bridge-storable. **Ground in** `src/seon/db/internal.cljs:286-360,1211` —
 | `:seon.agent/schedules` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | owned cron maps (cascade-retract) |
 | `:seon.agent/ctx` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | owned **blocks** (cascade-retract), seeded at creation, sorted by `:seon.agent.ctx/priority` at render |
 | `:seon.render/ai` | `:seon.render/ai` | string (EDN) / one | optional; the agent record's own ai render (absent by default) |
-| `:seon.render/html` | `:seon.render.live-tile/content` | string (EDN) / one | optional; per-entity tile-render override |
+| `:seon.render/html` | `:seon.render.canvas/content` | string (EDN) / one | optional; per-entity tile-render override |
 
 The `:seon.agent` entity map (`{:seon.db/entity true}`) lists `id` required,
 everything else optional. **State is derived, never stored** — there is no
@@ -347,6 +352,30 @@ The run model + FSM live in [[agent-runtime]].
 | `:seon.agent.turn/llm-usage` | `:string` | string / one | |
 | `:seon.agent.turn/evals` | `[:vector {:seon.db/component true} :seon.db/ref]` | ref / many / **component** | owned evals (cascade-retract) |
 
+**Model config is DERIVED, never stored.** The config an agent runs under is
+a pure function of the db: `seon.ai/resolved-config` takes
+`{:seon.db/db db :seon.agent/id id}` and resolves each of the five keys
+(provider/model/temperature/max-tokens/thinking) through the ONE chain — the
+agent's own override datom → the global `{:seon.ai/id "config"}` row →
+`seon.ai/shipped-defaults` — returning the `:seon.ai/resolved-config` value
+PLUS `:seon.ai/provenance` (per-key `:agent-override`/`:config-row`/
+`:default`, derived by re-walking the chain, not stored). No per-turn
+config datoms exist; datahike is bitemporal, so the config any PAST turn ran
+under is the same fn over that turn's frozen basis:
+`(ai/resolved-config {:seon.db/db (db/as-of db (:seon.agent.turn/rendered-as-of turn)) :seon.agent/id id})`.
+The `POST /agents/run` door computes `model_config` this way at response
+time; the bench ledger consumes that runtime-derived value.
+
+**Per-agent config = intent, one chain.** The agent entity carries optional
+`:seon.ai/agent-provider`/`-model`/`-temperature`/`-max-tokens`/`-thinking`
+override attrs (absent/`:inherit` = inherit); `seon.ai/current` lays the
+CALLING agent's overrides over the global row per call: **explicit call opts
+→ the agent's own attrs → the cluster config row → shipped defaults**. This
+resolution shape is the general pattern for every agent-related config
+family (skills, render caps, ctx blocks, capability sets): agent attrs are
+the override point, one chain, absent = inherit — new families add an attr
+pair to the resolver's data map, never a second mechanism.
+
 ### 4.5 message + user — `:seon.agent.message/*`, `:seon.user/*`
 
 | attribute | malli | datahike facet | notes |
@@ -395,7 +424,7 @@ trigger, recorded but not waking a run) is owned by [[agent-runtime]].
 ### 4.8 route — `:seon.route/*`
 
 Each row is a datom a `db->routes` fn projects into a reitit route vector. The
-schema lives here; reitit, `db->routes`, the capability gate, and the root-world
+schema lives here; reitit, `db->routes`, the capability gate, and the root-agent-view
 (`/`) are owned by [[ui]].
 
 | attribute | malli | datahike facet | notes |
@@ -425,8 +454,8 @@ only the identities and core refs matter here.
 
 | entity | identity attr | valueType | other refs |
 |---|---|---|---|
-| `:seon.ns` | `:seon.ns/name` `[:keyword {:seon.db/identity true}]` | keyword | `:seon.ns/requires [:vector :keyword]` (cardinality-many), `:seon.ns/source :string` |
-| `:seon.fn` | `:seon.fn/sym` `[:string {:seon.db/identity true}]` | string | `:seon.fn/ns :seon.db/ref`, + source/spec/arglists/doc strings |
+| `:seon.ns` | `:seon.ns/name` `[:keyword {:seon.db/identity true}]` | keyword | `:seon.ns/requires [:vector :keyword]` (cardinality-many), `:seon.ns/require-edges` (component rows `{:seon.ns.require/target :keyword, alias :symbol, refers [:set :symbol]}` — the reified `:as`/`:refer` facts the SCI cage env is built from AND boot replay's synthesized `(ns …)` head for a sourceless member-bearing row — the agent HOME ns, whose requires are wired at runtime; teed from the analyzer, boot-indexed for full-source nses), `:seon.ns/source :string` |
+| `:seon.fn` | `:seon.fn/sym` `[:string {:seon.db/identity true}]` | string | `:seon.fn/ns :seon.db/ref`, + source/spec/arglists/doc strings, `:seon.fn/read-attrs [:vector :qualified-keyword]` (the declared read-set — keyword literals walked off the read form at tee time; the canvas derivation's watch set) |
 | `:seon.schema` | `:seon.schema/key` `[:keyword {:seon.db/identity true}]` | keyword | `:seon.schema/ns :seon.db/ref`, source |
 | `:seon.test` | `:seon.test/sym` `[:string {:seon.db/identity true}]` | string | `:seon.test/ns :seon.db/ref`, last-passed-at/last-failed-at insts |
 
@@ -447,9 +476,9 @@ is the data fact here.
 ## 5. Domain schemas — `my.*` (the agent's data)
 
 The `my.*` namespaces carry the agent's actual domain data and are seeded as
-worked-examples at creation (the seed registers the schema, defines the verbs,
+worked-examples at creation (the seed registers the schema, defines the functions,
 and installs the rendering block — see [[agent-runtime]] for the bootstrap and
-[[toolkit]] for the verbs). They demonstrate the two scoping patterns.
+[[toolkit]] for the functions). They demonstrate the two scoping patterns.
 
 ### 5.1 Global vs per-agent = the DATA's agent-ref
 
@@ -464,22 +493,51 @@ ROW's agent-ref, never of the block and never of a stored `:kind`:
 
 Same block registration in both cases; the render fn scopes by WHAT it queries.
 
+**The ref direction is settled: per-agent data points DATA→AGENT** (the row
+carries the scoping ref, e.g. `:my.plan/agent`; there is no `:seon.agent/plan`).
+Grounds, in force order:
+
+1. **Schema authority.** The scoping ref registers in the OWNING `my.*` ns — the
+   ns IS the schema authority. An agent-side attr would force the core
+   `seon.agent` schema to learn every `my.*` domain (inverted dependency); with
+   data→agent, adding a per-agent domain = one new ns, the core stays closed.
+2. **Write locality.** Many rows → one agent. An agent-side
+   cardinality-many vector would rewrite the HOT agent entity (the one the
+   run/turn FSM fences on) on every domain write; data→agent writes only the new
+   rows — `my.plan/plan!` stays one flat tempid tx that never touches the agent.
+3. **Query parity.** One VAET-indexed ref reads both ways: forward
+   `[?t :my.plan/agent ?a]`, reverse pull `:my.plan/_agent`. An owner-side
+   vector adds no query power.
+4. **Scope-by-signature** ([[context]]) falls out: the function that declares
+   `:seon.agent/id` stamps and filters the data-side ref.
+
+**Agent-retract semantics (no cascade, by design):** agents are terminated
+(`:seon.agent/terminated-at`), not retracted. If an agent entity IS retracted,
+datahike's `retract-entity` (`transaction.cljc:897`) also retracts every
+incoming v-datom — the scoping edges vanish and the rows are ORPHANED: their own
+datoms survive, they match no agent-scoped read, and history keeps everything
+(`db/as-of` recovers). Component cascade is reserved for OWNED bounded sets
+(`:seon.agent/ctx`, `:seon.agent/schedules`), never for open-ended domain data.
+
 ### 5.2 my.kb — the global knowledge base (no agent ref)
 
 `my.kb` is the shared, queryable manual every agent reads — the DB's own
-self-documentation. Rows carry no agent ref, so the base is global.
+self-documentation. No attribute in the ns carries an agent ref, so the base is
+global: every fn signature omits `:seon.agent/id` (scope-by-signature, read the
+arglist). The worked shape is claim + graded provenance:
 
 ```clojure
-;; ns my.kb — global: no agent-ref attribute exists on the entity.
-(schema/register! :my.kb.shared/id    [:string {:seon.db/identity true}])
-(schema/register! :my.kb.shared/title :string)
-(schema/register! :my.kb.shared/body  :string)            ; markdown
-(schema/register! :my.kb.shared
-  [:map {:seon.db/entity true}
-   [:my.kb.shared/id    :my.kb.shared/id]
-   [:my.kb.shared/title :my.kb.shared/title]
-   [:my.kb.shared/body  :my.kb.shared/body]])
+;; ns my.kb — global: no agent-ref attribute exists on any row.
+(schema/register! ::source-path :string)     ; file the fact was read from
+(schema/register! ::source-line :int)        ; 1-based first line of a range
+(schema/register! ::verified-at :inst)
+(schema/register! ::confidence  [:enum :verified :inferred])
+(schema/register! ::claim [:string {:seon.db/identity true}])  ; upsert key
 ```
+
+(`my.kb.shared` — the append-only shared-instructions singleton — is the one
+declared entity kind there: `::shared` with an `::instructions` component
+vector.)
 
 ### 5.3 my.plan — the per-agent planning graph
 
@@ -511,17 +569,24 @@ retry through. Each attribute below targets one of those measured failures.)
 | `:my.plan/message` | `:seon.db/ref` | optional; → the inbound message it tracks |
 
 ```clojure
-;; ns my.plan — per-agent dependency graph.
-(schema/register! :my.plan
+;; ns my.plan — per-agent dependency graph. The entity kind is
+;; :my.plan/step; required = what step!/plan! write unconditionally.
+(schema/register! ::step
   [:map {:seon.db/entity true}
-   [:my.plan/id      :my.plan/id]
-   [:my.plan/title   :my.plan/title]
-   [:my.plan/status  :my.plan/status]
-   [:my.plan/agent   :my.plan/agent]
-   [:my.plan/parent  {:optional true} :my.plan/parent]
-   [:my.plan/needs   {:optional true} :my.plan/needs]
-   [:my.plan/goal    {:optional true} :my.plan/goal]
-   [:my.plan/expect  {:optional true} :my.plan/expect]])
+   [::id           ::id]
+   [::title        ::title]
+   [::status       ::status]
+   [::agent        ::agent]          ; the DATA→AGENT scoping ref
+   [::created-at   ::created-at]
+   [::description  {:optional true} ::description]
+   [::goal         {:optional true} ::goal]
+   [::expect       {:optional true} ::expect]
+   [::pace         {:optional true} ::pace]
+   [::from         {:optional true} ::from]
+   [::message      {:optional true} ::message]
+   [::parent       {:optional true} ::parent]
+   [::needs        {:optional true} ::needs]
+   [::completed-at {:optional true} ::completed-at]])
 ```
 
 **Everything about progress and position is DERIVED — nothing rolls up a stored
@@ -548,7 +613,7 @@ a resumed agent re-grounds from plan-state, not transcript archaeology. Evidence
 
 `:my.agent/purpose` is a markdown goal string carried on the agent entity — the
 agent's stated objective. It is the first per-agent seed worked-example: the seed
-registers the schema, defines a `refine` verb, and installs a self-refining block
+registers the schema, defines a `refine` function, and installs a self-refining block
 into the agent's `:seon.agent/ctx` so the agent owns and SEES its own purpose and
 can revise it.
 
@@ -558,96 +623,89 @@ can revise it.
 ```
 
 The bootstrap that seeds the schema, the refine fn, and the block is owned by
-[[agent-runtime]]; the refine verb is owned by [[toolkit]].
+[[agent-runtime]]; the refine function is owned by [[toolkit]].
 
-### 5.5 my.skills — loadable knowledge (no `:kind`; file-backed vs inline is attribute presence)
+### 5.5 knowledge-on-demand — cards, state-gated teaching, pull references
 
-A skill is a unit of knowledge an agent loads into context on demand. The row is
-tiny — identity + the catalog line; the BODY is not duplicated into the DB:
+An agent needs domain knowledge WHERE it is working, without a curated catalog.
+The target surface has three pieces, none of them a loadable-skill row:
 
-```clojure
-;; ns my.skills
-(schema/register! :my.skills/name        [:keyword {:seon.db/identity true}]) ; catalog key + load/unload handle
-(schema/register! :my.skills/description [:string {:min 1}])                  ; the catalog line (its "Use when…" IS the trigger)
-(schema/register! :my.skills/body        [:string {:min 1}])                  ; inline body — ONLY agent-authored skills
-```
+- **Compact cards** — a home-required namespace renders as function heads +
+  docstring line 1 + schema (§4.2, the `:namespaces` block). The card IS the
+  discoverable expertise: the agent reads the fn contract and calls it. (Proven
+  at the `repl`/`namespaces` milestones — cards suffice for correct first calls.)
+- **State-gated block teaching** — each block carries its OWN teaching, rendered
+  exactly when its state holds (colocation; the reactive rule). Knowledge about a
+  thing lives with the block that surfaces that thing, not in a separate skill.
+- **Pull references** — deeper worked manuals (`my.kb`) are PULLED on demand — the
+  db is self-describing; the agent reads them when it needs them, never pushed.
 
-A skill row carries exactly ONE body source, and **attribute presence is the
-discriminator — there is no `:kind`** (§3): a **file-backed** skill (an imported
-`SKILL.md`) carries `:seon.agent.ctx/file-path` (the body stays in the file, read
-fresh at render — lossless, live-edited); an **inline** skill (agent-authored at
-runtime) carries `:my.skills/body`. Provenance (seeded vs authored) is the
-transaction's `:seon.db/origin` (`:core-seed`/`:config` for the dir scan, `:agent`
-for authored), never a row field.
+> **DEPRECATED — the loadable-skills SYSTEM is retiring.** The former `my.skills`
+> catalog + loadable bodies (`:my.skills/name`/`description`/`body`, the
+> `SEON_SKILLS_DIR` corpus scan, `load`/`unload` = `install!`/`remove!` of a
+> `:skill/<name>` block) still exists in code and its render fns carry
+> `DEPRECATED` docstrings. Its job dissolves into the three pieces above — see
+> [[context-rebuild]] ("The idea inventory" + "Deliberately NOT blocks"). Do not
+> build against it as the target. The `install!`/`remove!` block mechanism it
+> rode on is unaffected — that stays the sole seed/override path ([[ui]]).
 
-A LOADED skill is a `:seon.agent.ctx/block` (§4.2) named `:skill/<name>` in the
-agent's own `:seon.agent/ctx` — `load`/`unload` are `install!`/`remove!`. **The
-block does NOT carry `:my.skills/name`**: that attr is `:db.unique/identity`, so
-storing it on the block would collide-merge with the skill row — the block NAME
-`:skill/<name>` is the handle, and the render fn + catalog `loaded?` derive the
-skill name from it. The catalog marker and the token-cost footer are DERIVED
-projections, never stored.
+### 5.6 config manifest — `:seon.config/*` resolves at boot into the DB singleton
 
-The corpus is the dedicated AGENT skills dir: at boot the `:core-skills` seed scans
-`SEON_SKILLS_DIR` (default `seon-skills/`) for `<name>/SKILL.md`, reading only the
-frontmatter `name`+`description` (no YAML/markdown parser — the body stays in the
-file). ONE corpus, split by consumer on disk: `seon-skills/` holds the agent-facing
-skills (datahike, clojurescript, repl, data-oriented-clojure, ui-live-tiles…), while
-`.claude/skills/` holds the Claude-Code/dev skills (browser-automation,
-clojure-testing) **plus symlinks back to the shared ones** — so both consumers read
-one physical source, curated by directory rather than by an exclude list.
-`seon.config` ([[loadable-skills]]) optionally curates the scanned corpus per cluster
-(`include`/`exclude`) and seeds always-on bodies (`default-load`). The
-`load`/`unload`/`list` verbs + the catalog/footer render live in [[toolkit]].
+The startup-load customization seam is ONE consolidated manifest
+(`config/system.edn`, path overridable by `SEON_CONFIG`), read by `seon.config`.
+It is a SEED FILE, not a runtime dependency: at boot `resolve-config-singleton`
+resolves EVERY knob to its effective value (env → manifest → default) and
+`state/reconcile!` (scope `#{:config}`) transacts them as ONE `:seon.config`
+singleton entity (`[:seon.config/id "cluster"]`) — every dial a datom. **From
+there every RUNTIME read is a db query** via `config/config-view` (the accessors
+keep their names + arities; a db-value-keyed memo collapses a turn's reads to
+one entity pull), falling back to the boot manifest resolve only for the pre-conn
+sliver. Absent or `{}` ⇒ byte-identical to a no-config boot; every section key is
+`{:optional true}`, so the empty manifest validates; an UNKNOWN key fails LOUD at
+validation (a config typo is a crash, never a silent ignore). The full boot/read
+mechanics — the require-direction db→error→config, `seon.db` injecting the
+reader, replay-visible + live-tunable dials — live in [[context]]
+§"Config-through-DB"; this section is the schema of record.
 
-### 5.6 config manifest — `:seon.config/*` (the ONE config schema)
-
-The startup-load customization seam is ONE consolidated manifest (`config/system.edn`,
-path overridable by `SEON_CONFIG`, variant by `SEON_PROFILE` aero `#profile`), read
-by `seon.config` (`config.cljs:55-95`). It is a pure OPTIONAL override: absent or `{}`
-⇒ byte-identical to a no-config boot. Every section key is `{:optional true}`, so the
-empty manifest validates; an UNKNOWN key fails LOUD at validation (a config typo is a
-crash, never a silent ignore). A new config concern = ONE `:seon.config/<section>`
-schema + one resolver fn + one key here.
+The real manifest carries a dial per config concern (not just seeds) — a new
+concern = ONE `:seon.config/<section>` schema + one resolver fn + one key here:
 
 ```clojure
-;; ns seon.config — the registry of known sections
-(schema/register! :seon.config/skills-spec
-  [:map
-   [:seon.config/dirs    {:optional true} [:vector :string]]          ; corpus dir(s) — :seon.config/dirs (SEON_SKILLS_DIR)
-   [:seon.config/include {:optional true} [:vector :keyword]]         ; allowlist (absent = all scanned)
-   [:seon.config/exclude {:optional true} [:vector :keyword]]])       ; denylist
-(schema/register! :seon.config/loadout
-  [:map
-   [:seon.config/role         :seon.config/role]                      ; :default | :root | :worker (SELECTOR, not a stored :kind)
-   [:seon.config/default-load {:optional true} [:vector :keyword]]    ; skill bodies always-on (priority-16 :skill/<name> blocks)
-   [:seon.config/blocks       {:optional true} [:vector :map]]        ; extra :seon.agent.ctx/block maps
-   [:seon.config/removes      {:optional true} [:vector :keyword]]    ; block names to drop from the default seed
-   [:seon.config/strategy     {:optional true} [:enum :override :replace]]])
-(schema/register! :seon.config/route-spec
-  [:map
-   [:seon.config/strategy {:optional true} [:enum :override :replace]]
-   [:seon.config/removes  {:optional true} [:vector :keyword]]])      ; :seon.route/name values to drop
+;; ns seon.config — the registry of known sections (config.cljs)
 (schema/register! :seon.config/manifest
   [:map
-   [:seon.config/skills   {:optional true} :seon.config/skills-spec]
-   [:seon.config/loadouts {:optional true} [:vector :seon.config/loadout]]
-   [:seon.config/routes   {:optional true} [:vector :seon.config/route-spec]]])
+   [:seon.config/skills          {:optional true} :seon.config/skills-spec]
+   [:seon.config/repl-mode        {:optional true} :seon.config/repl-mode]         ; :batch | :stream (per-model default when absent)
+   [:seon.config/namespaces       {:optional true} :seon.config/namespaces-spec]   ; which nses render full
+   [:seon.config/routes           {:optional true} [:vector :seon.config/route-spec]]
+   [:seon.config/render           {:optional true} :seon.config/render]            ; the render caps (store-edn/eval/message/value…)
+   [:seon.config/system-text      {:optional true} :seon.config/system-text]       ; the system-prompt string → the datom
+   [:seon.config/on-core-error    {:optional true} :seon.config/on-core-error]     ; :crash | :gate | :log (the ONE fault dial)
+   [:seon.config/web              {:optional true} :seon.config/web-spec]
+   [:seon.config/repair           {:optional true} :seon.config/repair]
+   [:seon.config/spawn-depth-cap  {:optional true} :seon.config/spawn-depth-cap]
+   [:seon.config/watchdog         {:optional true} :seon.config/watchdog]
+   [:seon.config/schedule-breaker {:optional true} :seon.config/schedule-breaker]
+   [:seon.config/agent-context    {:optional true} :seon.config/agent-context]     ; the per-agent block tree + dials
+   [:seon.config/root-context     {:optional true} :seon.config/root-context]])    ; a sparse override merged for root
 ```
 
-The manifest's resolvers feed the boot: `resolve-routes` + `resolve-skill-rows`
-produce the DECLARATIVE desired set reconciled at boot (origin `:config`, §4.8 / the
-seeding model in [[agent-runtime]]), and `resolve-loadout` shapes each agent's block
-set at create. `:seon.config/dirs` is the home for `SEON_SKILLS_DIR`; the `#env` knob
-sections (the rest of the scattered `SEON_*` reads) fold onto `seon.config` accessors
-so it is the single env surface (tracked in [[config-loader-2026-06-28]]).
+Each key resolves onto the flat `:seon.config/singleton` entity (`config.cljs`,
+every knob `{:optional true}`, `:seon.config/id` the only required key), so the
+render caps, `repl-mode`, `system-text`, `on-core-error`, and the multi-agent
+dials are all datoms an agent's turn reads through `config-view`. `resolve-routes`
++ `resolve-skill-rows` produce the DECLARATIVE desired set reconciled at boot
+(origin `:config`, §4.8 / the seeding model in [[agent-runtime]]); the manifest is
+the single env surface (its `#env` tags let a var override a manifest default).
+`SEON_PROFILE` / aero `#profile` is INERT — variants are separate manifest FILES
+selected by `SEON_CONFIG`, never in-file profiles.
 
 **Per-test / per-cluster recipe** — name your own manifest, zero src edits:
 
 - `SEON_CONFIG=config/test.edn bin/test-cljs` — a test run loads its own
-  loadout / routes / skills.
-- `SEON_PROFILE=minimal bin/seon restart pod` — select a `#profile` variant of
-  `config/system.edn`.
+  loadout / routes / render caps (pins `:batch`).
+- `SEON_CONFIG=config/minimal.edn bin/seon restart pod` — the minimal-tree
+  variant (`#include`s `system.edn`, inherits the graduated system-text).
 - `bin/acme` exports `SEON_CONFIG=config/acme.edn` — the isolated cluster
   curates independently.
 
@@ -825,10 +883,10 @@ transient render values.
 - [[agent-runtime]] — loop / run / turn / FSM / derived-state, creation-as-idle,
   bootstrap-as-seeded-forms, orchestrator-root lifecycle, the `:core`-origin
   quietness, isolation tiers.
-- [[ui]] — block / render / tile / slot / layout, world / root-world / app,
+- [[ui]] — block / render / tile / slot / layout, view / root-agent-view / app,
   reitit routing + the capability gate, the gzip-morph SSE channel, the
   seed-copy + variadic `install!`/`remove!` override model.
-- [[toolkit]] — the `my.*` verb catalog (the agent's action surface over these
+- [[toolkit]] — the `my.*` function catalog (the agent's action surface over these
   schemas).
 - [[roadmap]] — current code state, the gap, and the dependency-ordered
   migration to this target.

@@ -1,0 +1,5 @@
+I can see the request. The function is `protein_info.get_sequence_and_3D` with parameters `:protein_name` (required, string) and `:model_3d` (optional, boolean). The request asks for three proteins with 3D models, so I need three calls.
+
+(protein_info.get_sequence_and_3D {:protein_name "human HbA1c" :model_3d true})
+(protein_info.get_sequence_and_3D {:protein_name "normal hemoglobin" :model_3d true})
+(protein_info.get_sequence_and_3D {:protein_name "rat hemoglobin" :model_3d true})

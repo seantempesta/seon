@@ -31,7 +31,7 @@ Working tree has uncommitted edits to `src/seon/ctx/your_entity.cljs`,
 "context-loop-regression-sweep-2026-06-25" issue). It is actively curing F2:
 `your-entity-section` now **resolves the entity from the db by id** when
 `:seon.agent/entity` is absent (your_entity.cljs:28-47), and a NEW prompt-path
-test was added (`live-tile-section-stable-on-composer-input`, ctx_test.cljs:387).
+test was added (`canvas-section-stable-on-composer-input`, ctx_test.cljs:387).
 This audit accounts for that in-flight state; the test-WEAKNESS findings below
 survive the source fix (they describe what the tests can/can't catch, not the
 current source bug).
@@ -49,7 +49,7 @@ INSPECTOR path (`seon.ctx/ctx-sections`, ctx.cljs:1922) does
 `(assoc ctx :seon.agent/entity (:seon.agent/entity root))` BEFORE rendering. So
 any section fn that reads `:seon.agent/entity` from ctx renders fine in the
 inspector and gets nil in the real prompt. `your-entity-section` returned `""`
-on nil entity (silent vanish from the model's prompt); `live-tile-section` was
+on nil entity (silent vanish from the model's prompt); `canvas-section` was
 already robust (resolves from db itself, live_tile.cljs:82-89).
 
 | # | Test (ns:line) | What it SETS UP | What the runtime ACTUALLY produces | Bug it hides |
@@ -59,10 +59,10 @@ already robust (resolves from db itself, live_tile.cljs:82-89).
 | B3 | the `assemble` helper itself (ctx_test.cljs:314-339) | computes BOTH `:seon.render/text` (prompt path, :322) AND `:seon.render/section-texts` (inspector path, :324) but every section-content assertion reads the **inspector** slice via `section-text` (:336) | the two paths can diverge on entity-dependent sections | structurally enables B1/B2; no test asserts the two slices AGREE |
 
 GOOD pattern to copy (already added by the sweep):
-`seon.ctx-test/live-tile-section-stable-on-composer-input` (ctx_test.cljs:387)
+`seon.ctx-test/canvas-section-stable-on-composer-input` (ctx_test.cljs:387)
 exercises the section directly with `{:seon.db/db … :seon.agent/id …}` (no
 entity) AND the real `render/render … (context-root ctx)` path. It only checks
-for "render failed" absence though — it does **not** assert your-entity/live-tile
+for "render failed" absence though — it does **not** assert your-entity/canvas
 CONTENT is present in the prompt-path render (see Coverage gaps).
 
 ---
@@ -82,7 +82,7 @@ CONTENT is present in the prompt-path render (see Coverage gaps).
 | agent/turns_test.cljs.disabled | DEAD (section + fns gone) | n/a (disabled) | DELETE — `<turns>` section, `task-in-progress?`, `:seon.agent/turns-cap`, `default-turns-cap`, `run-agentic-loop!` all removed; successor is `seon.ctx.usage`/P6. |
 | inspector_chips_test.cljs:157 (`#_`-discarded) | STALE, correctly parked | Low | Already `#_`-discarded with a clear note; rewrite vs the activity-log derivation when it lands. No run risk. |
 | gym/driver.cljs:307-321 (comments + capture) | STALE comment / inspector-path capture | Low | Comments still say "assemble-context"; capture now via `ctx-sections` `:seon.render/section-texts` (INSPECTOR path) — informational telemetry only, never gates `pass?`. Verify the gym still captures post-keystone; refresh the comments. |
-| live_tile_test.cljs:139-144 | FRAGILE-ish prose pins | Low | Pins welcome wording (`#"haven't wired"`, `#"core default"`). live-tile is a fairly stable surface, but prefer the contract token `:seon.render.live-tile/content` (already also asserted) over prose. |
+| live_tile_test.cljs:139-144 | FRAGILE-ish prose pins | Low | Pins welcome wording (`#"haven't wired"`, `#"core default"`). canvas is a fairly stable surface, but prefer the contract token `:seon.render.canvas/content` (already also asserted) over prose. |
 | ctx_test.cljs:545 (`"[broken] render failed:"`) | FRAGILE exact render-line pin | Low | Acceptable as an error contract, but it pins the exact render-error format of an actively-reshaped surface. |
 
 NOTE — schema_test.cljs:148 is NOT stale: it asserts `:seon.handler/input` is
@@ -139,7 +139,7 @@ re-activate all four and break the suite. They are safe only in the main tree.
    same (db,id), the joined `render/render … (context-root ctx)` text and the
    inspector's reassembly from `ctx-sections` must agree section-for-section
    (the "ONE composer, divergence impossible" invariant).
-3. **live-tile always valid-or-clear-loading** in the PROMPT path: a throwing /
+3. **canvas always valid-or-clear-loading** in the PROMPT path: a throwing /
    unresolvable tile → a clean `; …loading…` / "Wired: <sym>" message, never a
    bare `⚠`, never a malli keyword, never a vanish. (ctx_test:387 checks "render
    failed" absence; extend to assert the POSITIVE content + the broken-fn name
@@ -159,7 +159,7 @@ re-activate all four and break the suite. They are safe only in the main tree.
   identity) would have caught **F2** (your-entity / any entity-dependent
   section vanishing from the real model prompt while green in the inspector) —
   the exact class B1/B2 mask today, and the highest-leverage addition.
-- Adding **gap #3** prevents the live-tile "render failed / malli code / vanish"
+- Adding **gap #3** prevents the canvas "render failed / malli code / vanish"
   regressions from reaching the model prompt (only the direct-call shape is
   guarded now).
 - Porting **gap #4** restores loop-stop coverage lost when agent_loop_test was

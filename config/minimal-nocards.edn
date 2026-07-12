@@ -1,0 +1,14 @@
+;; minimal.edn WITHOUT the namespaces block — the v0-shaped context (system
+;; text + transcript only) on top of the CURRENT v1 system-text. Probe: does
+;; a stronger model need the tool cards at all? (cross-model milestone variant)
+#merge
+[#include "minimal.edn"
+ {:seon.config/agent-context
+  {:seon.agent/ctx
+   [{:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
+     :seon.render/ai seon.agent.ctx.transcript/transcript-block
+     :seon.render/html seon.agent.ctx.transcript/transcript-block-html
+     :seon.agent.ctx.transcript/result-decay
+     [{:seon.agent.ctx.transcript/from-turn-offset 0 :seon.agent.ctx.transcript/token-cap 16384}
+      {:seon.agent.ctx.transcript/from-turn-offset 2 :seon.agent.ctx.transcript/token-cap 1500}
+      {:seon.agent.ctx.transcript/from-turn-offset 5 :seon.agent.ctx.transcript/token-cap 200}]}]}}]

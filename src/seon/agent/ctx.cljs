@@ -13,9 +13,9 @@
        one slot attr is `:seon.render/ai` (string = verbatim doctrine,
        symbol = late-bound block fn); `:seon.render/html` is the
        optional debug-view twin.
-     - `install!` / `remove!` — the ONE scope-aware override + seed verb
-       over the agent's own `:seon.agent/ctx` block set; `seed-default-ctx!`
-       SEED-COPIES `seon.config/default-ctx-blocks` into a fresh agent at creation.
+     - `install!` / `remove!` — the ONE scope-aware mutation surface over the
+       agent's own `:seon.agent/ctx` block set; `seed-default-ctx!` copies the
+       manifest-declared tree into a fresh agent at creation.
        `context-root` reads the agent's COMPLETE `:seon.agent/ctx`, decoded
        + priority-sorted — NO render-time merge, NO separate default set, NO
        char budget. The render guard (a broken block renders an inline error
@@ -37,22 +37,25 @@
        every read takes the composer's `:seon.db/db` snapshot so one
        render is one db view. The other core sections live in their own
        `seon.agent.ctx.<name>` nses: :namespaces → `seon.agent.ctx.namespaces`,
-       :live-tile → `seon.agent.ctx.live-tile`, :warnings →
+       :canvas → `seon.agent.ctx.canvas`, :warnings →
        `seon.agent.ctx.warnings`,
        :inventory → `seon.agent.ctx.inventory`, :relevant-source →
        `seon.agent.ctx.relevant`, :transcript → `seon.agent.ctx.transcript`;
-       `seon.config/default-ctx-blocks` wires them by SYMBOL (late lookup-value
+       `config/system.edn` wires active blocks by SYMBOL (late lookup-value
        resolution), so this ns does NOT require them — they require this
        ns for the shared read API.
      - `render-namespace` — the standalone whole-namespace render
        (ns + fns + schemas + tests, :ai or :html), an agent-callable
        core capability the system prompt documents by name.
 
-   Section fns receive ONE map:
+   Section fns receive ONE map — the registered OPEN
+   `:seon.render/section-request` shape (its named keys are the
+   `seon.instrument/injectables` contract):
      {:seon.db/db        <db value>
       :seon.agent/id     <id string>          ; convenience, = entity id
+      :seon.render/at    <basis-t int>        ; \"now\" — the turn's time coordinate
       :seon.agent/entity <the agent's own entity, pulled ONCE>
-      :seon.agent.ctx/block  <this section's map>} ; per-section overrides
+      :seon.render/node  <this section's map>} ; per-section overrides
    and return a string; \"\" suppresses the section.
 
    seon.agent requires this ns and re-exports the agent-facing read API
@@ -60,6 +63,8 @@
   (:require
     [clojure.string :as str]
     [cljs.reader :as edn]
+    [seon.agent.ctx.render-fns :as render-fns]
+    [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.db :as db]
     [seon.error.instrument :as einstrument]
@@ -69,36 +74,32 @@
     [seon.handlers.schema :as h-schema]
     [seon.handlers.test :as h-test]
     [seon.render :as render]
+    [seon.repl.internal :as repl-internal]
     [seon.schema :as schema]
     [seon.ui.markdown :as md]
     [seon.warn :as warn]))
 
 ;; ============================================================
-;; Block schemas. A block is a plain map — the SAME shape whether it lives
-;; in code (the default seed set) or as a component entity on the agent's
-;; :seon.agent/ctx vector.
+;; Block schemas. A block is a plain map in config and a component entity on
+;; the agent's :seon.agent/ctx vector.
 ;; ============================================================
 
 (declare decode-block)
 
-;; Program-graph ns rows — registered HERE (not seon.agent) because
-;; this ns loads first and its render-namespace schemas reference
-;; :seon.ns/name. The rest of the :seon.fn/:seon.schema attr family
-;; stays in seon.agent until the P6 split finds them a real home.
-(schema/register! :seon.ns/name    [:keyword {:seon.db/identity true}])
+;; Program-graph ns rows. :seon.ns/name itself is registered in
+;; seon.agent.ctx.render-fns — the FIRST-loading ns whose load-time
+;; schemas reference it (this ns requires render-fns, so render-fns
+;; loads before line 90 here would run; registering it here broke
+;; every COLD pod boot while hot reloads sailed). The rest of the
+;; :seon.fn/:seon.schema attr family stays in seon.agent until the P6
+;; split finds them a real home.
 (schema/register! :seon.ns/source  :string)
-;; The dependency-edge SET for a namespace: the required ns-NAMES as
-;; keywords (aliases dropped — those are reconstituted from
-;; :seon.ns/source's ns form in Phase 2). Captured + diff-upserted at
-;; the tee from the analyzer (seon.analyzer-info/ns-requires). A
-;; `[:vector :keyword]` maps to :db.cardinality/many keyword via the
-;; bridge (db/internal form->cardinality) — INTENDED: a queryable set
-;; of dep edges, so the load can topo-sort by requires (the one fix
-;; that unblocks DB-layer load — see db-is-the-running-system PRD).
-;; Cardinality-many means a plain upsert ACCUMULATES; the tee writes a
-;; diff (additions + explicit retractions) so the stored set EXACTLY
-;; matches the analyzer's current requires.
-(schema/register! :seon.ns/requires [:vector :keyword])
+;; The ns dependency edges live in ONE store: the reified
+;; `:seon.ns/require-edges` component rows (registered in seon.eval,
+;; written by the tee — target/alias/refers per required ns). The flat
+;; "required ns-names" view is DERIVED from them at read time via
+;; `seon.eval/stored-require-targets` — the parallel flat
+;; `:seon.ns/requires` attr is deleted (C36).
 
 (schema/register! :seon.agent.ctx/name     :keyword)
 (schema/register! :seon.agent.ctx/priority :int)
@@ -136,7 +137,7 @@
 ;;   search[grep]/fs/http. Registered + kept so the shape is stable, but there
 ;;   is deliberately NO consumer YET: grep/fs are unconditionally available
 ;;   today, and per-agent capability ENFORCEMENT is a phase-2 mechanism (a
-;;   check at each provider verb). Tracked here as the single park note; wire the
+;;   check at each provider function). Tracked here as the single park note; wire the
 ;;   enforcement when the owner greenlights per-agent capability scoping.
 ;; ============================================================
 
@@ -151,7 +152,7 @@
 ;; file PATH (not soul, not agents — any `.md`), returns a section when
 ;; the file currently exists, else nil (REACTIVE: an absent file is no
 ;; section, NO fallback). SOUL.md and AGENTS.md are two `file-block`s
-;; wired in `seon.config/default-ctx-blocks`; a third party adds another the same way.
+;; declared in the manifest; a third party adds another the same way.
 ;;
 ;; The file is read FRESH on every render (the path lives on the section
 ;; node; the slot fns re-read it), so a user's edit lands next render
@@ -238,29 +239,35 @@
         (str/join "\n"))))
 
 (defn file-block-ai
-  "The `:seon.render/ai` slot for a file-block.
+  "DEPRECATED — reference for the `soul` milestone; see context-rebuild.
+
+   The `:seon.render/ai` slot for a file-block.
 
    The node's file read
    FRESH and `;`-commented (via [[quote-lines]]). Blank when the file
    vanished between wiring and render (the section then renders empty and
    is dropped upstream)."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{{path :seon.agent.ctx/file-path} :seon.render/node}]
   (let [text (read-file-text path)]
     (if (str/blank? text) "" (quote-lines text))))
 
 (defn file-block-html
-  "The `:seon.render/html` slot for a file-block.
+  "DEPRECATED — reference for the `soul` milestone; see context-rebuild.
+
+   The `:seon.render/html` slot for a file-block.
 
    The node's file read
    FRESH and rendered as markdown hiccup. Empty `[:div]` when the file
    vanished."
-  {:malli/schema [:=> [:cat :map] :seon.render.live-tile/content]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :seon.render.canvas/content]}
   [{{path :seon.agent.ctx/file-path} :seon.render/node}]
   (md/md->hiccup (or (read-file-text path) "")))
 
 (defn file-block
-  "A renderable context SECTION backed by a markdown file.
+  "DEPRECATED — reference for the `soul` milestone; see context-rebuild.
+
+   A renderable context SECTION backed by a markdown file.
 
    At
    `:seon.agent.ctx/file-path`, named `:seon.agent.ctx/name`, ordered at
@@ -271,8 +278,8 @@
    slot fns ([[file-block-ai]] / [[file-block-html]]) re-read the file
    fresh on every render so a user's edit lands next turn with no
    seed/restart. GENERIC: any markdown file is a section — SOUL.md and
-   AGENTS.md are two `file-block`s prepended by `seon.config/identity-file-blocks`,
-   nothing file-name-specific lives here."
+   AGENTS.md may each be declared as `file-block`s in a manifest; nothing
+   file-name-specific lives here."
   {:malli/schema [:=> [:cat [:map
                              [:seon.agent.ctx/file-path :seon.agent.ctx/file-path]
                              [:seon.agent.ctx/name :keyword]
@@ -291,8 +298,8 @@
      :seon.render/ai     'seon.agent.ctx/file-block-ai
      :seon.render/html   'seon.agent.ctx/file-block-html}))
 
-;; The repo-relative identity files surfaced to every agent as
-;; file-blocks prepended by `seon.config/identity-file-blocks`. The primary file is
+;; Repo-relative identity-file helpers retained for explicitly declared
+;; file-blocks. The primary file is
 ;; `SEON_SOUL_FILE` (override) else `SOUL.md`; AGENTS.md is the cross-tool
 ;; standard repo/work-instructions file, read alongside it. They are
 ;; CONTEXT, NOT the LLM system message — that is the hardcoded mechanics
@@ -335,7 +342,7 @@
 
 ;; `current-run` + `derived-state` are the [[seon.derive]] leaf — call
 ;; `seon.derive/current-run` / `seon.derive/derive-state` with the db value the
-;; caller holds (the readline + inspector + loop + wake gate all share that one
+;; caller holds (the readline + web UI + loop + wake gate all share that one
 ;; rule). They were duplicated here only to dodge the agent→ctx→render cycle.
 
 (defn agent-turns
@@ -442,19 +449,20 @@
    applied, so the `:seon.render/full?` no-clip opt-out lives in ONE spot.
    Returns `s` UNCUT when `full?` (a block / value / eval-row pinned
    `:seon.render/full? true` to keep its content whole past the cap) OR
-   when `s` already fits `limit`. Otherwise truncates to `limit` chars and
-   appends `(marker limit total-chars)` — the call site's LOUD marker, so a
+   when `s` already fits `limit`. Otherwise the cut is
+   `seon.ai.tokens/clip-str` at the limit's token equivalent and the call
+   site's LOUD `(marker budget-tokens total-tokens)` is appended, so a
    clipped display can never pass for complete content. The safety cap thus
    still fires for UNFLAGGED, genuinely-huge dumps; the flag only bypasses
-   it. Nil-safe."
+   it. `limit` is CHARS (the ctx cap plumbing — `seon.config` render caps);
+   markers speak TOKENS (Token Reporting rule). Nil-safe."
   {:malli/schema [:=> [:catn [::s :any] [::limit :int]
                        [::full? :boolean] [::marker [:fn fn?]]] :string]}
   [s limit full? marker]
-  (let [s (str s)
-        n (count s)]
-    (if (or full? (<= n limit))
+  (let [s (str s)]
+    (if (or full? (<= (count s) limit))
       s
-      (str (subs s 0 limit) (marker limit n)))))
+      (tokens/clip-str s (tokens/chars->tokens limit) marker))))
 
 (defn truncate-edn
   "pr-str a value and truncate to ~2 KB for the eval log.
@@ -470,8 +478,8 @@
   ([v limit] (truncate-edn v limit false))
   ([v limit full?]
    (clip-or-full (pr-str v) limit full?
-     (fn [limit n]
-       (str " …⟨⚠ TRUNCATED at " limit " of " n " chars — display clip, "
+     (fn [budget total]
+       (str " …⟨⚠ TRUNCATED at " budget " of " total " tokens — display clip, "
             "the underlying value is complete⟩")))))
 
 (defn message-label
@@ -511,7 +519,7 @@
   (config/eval-render-cap))
 
 (def result-body-render-cap
-  "Render cap for the CITABLE RESULT BODY — the `;;=> <value>` line every
+  "Render cap for the CITABLE RESULT BODY — the `; ⟹ <value>` line every
    successful eval renders (`cap-result-body`). The result body alone gets
    this LARGER cap (vs [[eval-render-cap]] for echoed source + stdout)
    because it is the one component that (a) carries a `result/<id>`
@@ -520,7 +528,7 @@
    (`seon.eval/render-result-edn`), so a body this size is STRUCTURED, not
    a wall of text.
 
-   16384 currently EQUALS `seon.eval/store-edn-cap`, so a stored result
+   The default 16384 currently EQUALS `store-edn-cap`, so a stored result
    renders WHOLE — but this is a CROSS-REFERENCE, NOT an alias. The render
    cap (an LLM-facing read-time projection) and `store-edn-cap` (the
    write-time per-datom anti-OOM RAM ceiling) are different tiers.
@@ -528,13 +536,18 @@
    This is the FALLBACK cap (the decay default-cap): the transcript's
    `:seon.agent.ctx.transcript/result-decay` schedule caps a result body by AGE
    (CP-3), and this const is the near-full / no-decay default level (offset 0 =
-   16384). Config a decay schedule on the transcript block to age-band it."
-  16384)
+   16384). Config a decay schedule on the transcript block to age-band it.
+
+   The VALUE has one owner — `seon.config/result-body-render-cap` (C32):
+   `seon.eval/clip-result-body` (the write-time persistence clip) reads
+   the same knob as a chars/4 TOKEN budget; this def keeps the ctx-side
+   char-denominated contract (`clip-or-full` plumbing)."
+  (config/result-body-render-cap))
 
 (defn cap-result
   "Truncate a rendered eval-result string to `eval-render-cap`.
 
-   Appends a LOUD truncation marker (shown of full chars) so a
+   Appends a LOUD truncation marker (shown of full tokens) so a
    clipped display can never pass for complete content — the observed
    failure mode is an agent summarizing INVENTED content from a
    silently-clipped render. Operates on the ALREADY-stringified result
@@ -548,8 +561,8 @@
   ([s limit] (cap-result s limit false))
   ([s limit full?]
    (clip-or-full s limit full?
-     (fn [limit n]
-       (str " …⟨⚠ TRUNCATED at " limit " of " n " chars — the DISPLAY is "
+     (fn [budget total]
+       (str " …⟨⚠ TRUNCATED at " budget " of " total " tokens — the DISPLAY is "
             "clipped, the underlying data is complete; do not summarize "
             "or quote beyond what is shown⟩")))))
 
@@ -596,21 +609,75 @@
   ([s limit eid] (cap-result-body s limit eid false))
   ([s limit eid full?]
    (clip-or-full s limit full?
-     (fn [limit n]
+     (fn [budget total]
        (let [ref (if eid (str "result/" eid) "result/<id>")]
-         (str " …⟨⚠ TRUNCATED at " limit " of " n " chars — the DISPLAY "
+         (str " …⟨⚠ TRUNCATED at " budget " of " total " tokens — the DISPLAY "
               "is clipped, the live value is COMPLETE⟩"
-              "\n; Never summarize or quote beyond the shown " limit
-              " chars — bind and process the value with code: " ref
-              " holds it whole; (count " ref "), subs, get-in/filter, or "
-              "paged take/drop. To get less next time: a :find aggregate, "
-              "a tighter :where, or pull fewer attrs."))))))
+              "\n; bind " ref " for the full value — process it with code: "
+              "(count " ref "), subs, get-in/filter, or paged take/drop. To "
+              "get less next time: a :find aggregate, a tighter :where, or "
+              "pull fewer attrs."))))))
 
-(def unverified-narration-marker
-  "What a model-authored result-claim comment is rewritten to in the
-   transcript. Deliberately does NOT match [[result-claim-re]] itself
-   (no `=>`/`⇒` after the semicolons), so the rewrite is idempotent."
-  ";; [unverified narration — not a real result]")
+(def result-marker
+  "The reserved RUNTIME result-OPEN glyph `⟹` — the SINGLE SOURCE OF TRUTH.
+
+   The runtime writes it BARE (no leading `;`) in front of a real eval
+   result: `(form) ⟹ <value> ⟸ result/<id>` — everything from `⟹` through
+   the `⟸` handle is the runtime's; the value is deliberately NOT
+   comment-shaped, so a model can't fabricate one by writing a `;` comment
+   (the `; ⟹` shape that agents copied — T4 6/24). It is RUNTIME OUTPUT
+   ONLY: an agent never authors it, and a model-typed `⟹` is DELETED at the
+   reply boundary (`:batch` [[strip-result-claims]], via [[first-result-claim]]
+   /[[reserved-glyph-re]]) before the reply is persisted. The emit site
+   ([[format-eval-row]] + `seon.agent.ctx.transcript`), the detector
+   ([[reserved-glyph-re]]), and [[system-text]]'s teaching all reference
+   THIS def — never a bare `\"⟹\"` literal, so the marker is one swappable
+   edit and can never drift between what the runtime emits, what the strip
+   catches, and what the context teaches."
+  "⟹")
+
+(def result-close
+  "The reserved RUNTIME result-CLOSE glyph `⟸` — CARRIES THE HANDLE.
+
+   Fences the end of a real result and precedes its live-var handle:
+   `⟹ <value> ⟸ result/<id>`. Reserved like [[result-marker]] (the runtime
+   is its only writer; [[reserved-glyph-re]] flags a model-typed one for the
+   reply-boundary strip).
+   ONE swappable edit — every emit site references THIS def, never a bare
+   `\"⟸\"` literal."
+  "⟸")
+
+(def status-open
+  "The reserved RUNTIME per-turn-status OPEN glyph `⋘`.
+
+   Opens the byte-stable per-turn status masthead
+   `⋘ <turn-ts> · turn N · <ctx-tok> · <ns> ⋙ ❯` whose fields are each
+   turn's FIXED stored values (never live-recomputed). Reserved runtime
+   chrome — an agent never writes it; referenced from THIS def only."
+  "⋘")
+
+(def status-close
+  "The reserved RUNTIME per-turn-status CLOSE glyph `⋙` — see [[status-open]]."
+  "⋙")
+
+(def prompt
+  "The reserved RUNTIME prompt glyph `❯` — the last symbol of a status line.
+
+   Marks where the REPL awaits input. Reserved runtime chrome (an agent
+   never authors it); referenced from THIS def only, so it can never drift."
+  "❯")
+
+(def reserved-glyphs
+  "The FIVE reserved result-grammar glyphs, as a set of the single-source
+   constants: result-open [[result-marker]] `⟹`, result-close
+   [[result-close]] `⟸`, status [[status-open]]/[[status-close]] `⋘`/`⋙`,
+   and [[prompt]] `❯`. The runtime is the ONLY writer of any of these; the
+   detector ([[reserved-glyph-re]]) flags a model-typed one for the strip, and
+   the no-mixed-references lint (`seon.dev.docstring`) flags a literal outside
+   the constant defs. Distinct from the value-VOCABULARY glyphs
+   (`⟨N tok⟩` · `‹partial›` · `#‹…›` · `{…N keys}` · `«…»`) which are NOT
+   reserved and appear legitimately elsewhere (inventory / `my.plan`)."
+  #{result-marker result-close status-open status-close prompt})
 
 (def ^:private result-claim-re
   "A comment posing as a REPL result read: one-or-more `;`, optional
@@ -640,45 +707,163 @@
    line, not the trailer."
   #"(?m)^[ \t]*(?:=>|⇒)[^\n]*")
 
-(defn neutralize-result-claims
-  "Rewrite every model-authored result-claim in `s` to a marker.
+(def ^:private reserved-glyph-re
+  "A RESERVED runtime result-grammar glyph appearing in model-authored text
+   — ALWAYS a fabrication, because the runtime is the only writer of a real
+   `⟹ <value> ⟸ result/<id>` result line or a `⋘ … ⋙` status line (a real
+   one is composed by [[format-eval-row]] at render time, never fed through
+   the reply-boundary strip this feeds). Unlike `=>`, these glyphs are
+   RESERVED, so this needs none of the fragile `;`-counting or column-0
+   `:=>`-collision anchoring the two `=>` regexes carry — any one of them,
+   with its optional leading `;` comment markers, through end of line, is a
+   match.
 
-   Rewritten to [[unverified-narration-marker]], dropping the claimed value
-   entirely (the claimed value is the poison: a later turn reads
-   `;; => {...}` or a bare `=> 61` as a real result and trusts data that
-   was never computed — two live fabrication incidents, F13/F14, plus the
-   bare-`=>` headline case in gwM-2606211132).
+   Keys on the VALUE/STATUS-bearing reserves only —
+   [[result-marker]] `⟹`, [[result-close]] `⟸`, [[status-open]] `⋘`,
+   [[status-close]] `⋙` — the ones that carry (or fence) a fabricatable
+   value or a turn's status. [[prompt]] `❯` is DELIBERATELY EXCLUDED: it is
+   a common shell-prompt glyph an agent may legitimately paste (a pasted
+   terminal transcript), carries no value, and matching it would be a
+   false positive (owner-flagged 2026-07-07). Built from a char class over
+   the constants so each glyph is defined in exactly one place. One of the
+   three [[result-claim-res]] the detector/strip single-source from."
+  (re-pattern (str "(?:;+[ \\t]*)?["
+                   result-marker result-close status-open status-close
+                   "][^\\n]*")))
 
-   TWO shapes: the bare line ([[bare-result-claim-re]], `=> value` at
-   column 0 — the DOMINANT fabrication) is rewritten FIRST, then the
-   commented line ([[result-claim-re]], `;; =>`/inline `;; => 3`). The
-   marker carries no `=>`/`⇒` so neither regex re-matches it — idempotent.
+;; ============================================================
+;; The fabrication DETECTOR + reply-boundary STRIP (repl-mode Phase 1).
+;; ONE source of truth: the three shape regexes
+;; ([[reserved-glyph-re]] / [[bare-result-claim-re]] / [[result-claim-re]]).
+;; The detector reports the offset of the first MODEL-AUTHORED result-claim
+;; — a match whose start falls OUTSIDE every successfully-parsed form span
+;; (so a `(println "⟹")` string literal or a `[:=> …]` malli schema never
+;; fires). `:batch` uses [[strip-result-claims]] to DELETE those
+;; spans at the reply boundary before the reply is persisted + eval'd, so
+;; the fabricated value never enters the record and the next turn shows the
+;; real `⟹` rows interleaved.
+;; ============================================================
 
-   PROVENANCE GATE, not regex luck: this runs ONLY on the
-   model-authored transcript channels — `:seon.eval/narration` and
-   `:seon.eval/source` — BEFORE [[format-eval-row]] composes the row.
-   Real result lines (`=> <value> ;; result/<id>`) are appended by the
-   composer itself AFTER this rewrite and never pass through it, so the
-   bare-`=>` rule can never touch a genuine runtime-written result line.
+(defn repl-mode
+  "The cluster's live REPL mode datom — `:batch` (default) | `:stream`.
 
-   Input is `:any`, not `:string`, ON PURPOSE: this is the sanitizer for
-   UNTRUSTED model-authored content, fed straight from a stored
-   `:seon.eval/narration` / `:seon.eval/source`. An off-shape row (a
-   non-string value that slipped past the write boundary) must be
-   NEUTRALIZED, not thrown on — a strict `:string` input turned a bad
-   datom into a whole-transcript render failure. Coerce with `(str s)`
-   at the boundary: nil→\"\", any value → its printed form."
-  {:malli/schema [:=> [:cat :any] :string]}
-  [s]
-  (-> (str s)
-      (str/replace bare-result-claim-re unverified-narration-marker)
-      (str/replace result-claim-re unverified-narration-marker)))
+   Reads `:seon.config/repl-mode` off the `:seon.config` singleton entity
+   (`seon.config/cluster-config-id`) in db value `db`; `:batch` when the
+   datom is absent (config-through-DB: the manifest was reconciled there at
+   boot, so the turn loop + masthead read THIS db value — pinned to the
+   turn's frozen db — never the config accessor). Guarded: nil db / no such
+   attr / no entity → `:batch`."
+  {:malli/schema [:=> [:catn [:seon.db/db :any]] :seon.config/repl-mode]}
+  [db]
+  (or (when (and db (contains? (db/installed-schema db) :seon.config/repl-mode))
+        (:seon.config/repl-mode
+          (db/entity {:seon.db/db db :seon.db/ref [:seon.config/id config/cluster-config-id]})))
+      :batch))
+
+(def ^:private result-claim-res
+  "The three fabrication-detection regexes — the ONE definition each is
+   built from ([[reserved-glyph-re]] / [[bare-result-claim-re]] /
+   [[result-claim-re]]), single-sourced here for the detector + strip."
+  [reserved-glyph-re bare-result-claim-re result-claim-re])
+
+(defn- form-spans
+  "Absolute `[start end)` char spans of every successfully-parsed evaluable
+   `:form` entry in `text` (via `seon.repl.internal/parse-forms`) — the
+   regions a result-claim match must be SKIPPED inside (a legit `⟹`/`=>`
+   the agent typed as code, not a fabricated result). Read/broken `:read`
+   spans are excluded: a match inside broken source is still narration."
+  [text]
+  (->> (repl-internal/parse-forms text)
+       (keep (fn [e] (when (= :form (:seon.repl/kind e))
+                       (:seon.repl/span e))))
+       vec))
+
+(defn- span-containing
+  "The `[s e)` span in `spans` containing char offset `o`, nil when none."
+  [spans o]
+  (some (fn [[s e :as span]] (when (and (<= s o) (< o e)) span)) spans))
+
+(defn- claim-ranges
+  "Sorted, merged `[start end)` ranges of every MODEL-AUTHORED result-claim
+   in `text` — a match of any [[result-claim-res]] regex whose START is
+   NOT inside a parsed `:form` span. A match that DOES start inside a form
+   span (a legit in-code glyph — its `[^\\n]*` trailer would swallow the
+   rest of the line) resumes the scan at that span's END, so a fabrication
+   AFTER the form on the same line is still caught. Merges overlapping/
+   adjacent matches so a line caught by two regexes counts once."
+  [text]
+  (let [spans (form-spans text)
+        raw   (mapcat
+                (fn [re]
+                  ;; "gm" restores each regex's own flags: `g` for the exec
+                  ;; walk, `m` so bare-result-claim-re's col-0 `^` anchor
+                  ;; stays per-line (its source drops the (?m) into a flag).
+                  (let [g (js/RegExp. (.-source re) "gm")]
+                    (loop [acc []]
+                      (if-let [mm (.exec g text)]
+                        (let [start (.-index mm)]
+                          (if-let [[_ e] (span-containing spans start)]
+                            (do (set! (.-lastIndex g) e) (recur acc))
+                            (recur (conj acc [start (+ start (count (aget mm 0)))]))))
+                        acc))))
+                result-claim-res)]
+    (reduce (fn [acc [s e]]
+              (if-let [[ps pe] (peek acc)]
+                (if (<= s pe)
+                  (conj (pop acc) [ps (max pe e)])
+                  (conj acc [s e]))
+                (conj acc [s e])))
+            []
+            (sort-by first raw))))
+
+(defn first-result-claim
+  "Char offset of the first model-authored result-claim, nil when none.
+
+   A result-claim is a match of any of the three shape regexes
+   ([[reserved-glyph-re]] `⟹⟸⋘⋙`, [[bare-result-claim-re]] col-0
+   `=>`/`⇒`, [[result-claim-re]] `;+ =>`) whose START falls OUTSIDE every
+   successfully-parsed form span — so a `(println \"⟹\")` string literal
+   does NOT fire, a `:=>` inside a `:malli/schema` vector does NOT fire,
+   and the shell-prompt `❯` stays excluded (never in the regex set). The
+   detector behind `:batch`'s strip and the anti-fabrication telemetry;
+   nil ⇒ a clean reply."
+  {:malli/schema [:=> [:catn [::reply :string]] [:maybe :int]]}
+  [reply]
+  (some-> (claim-ranges reply) first first))
+
+(schema/register! ::strip-text   :string)
+(schema/register! ::strip-count  :int)
+(schema/register! ::strip-result-response
+  [:map [::strip-text ::strip-text] [::strip-count ::strip-count]])
+
+(defn strip-result-claims
+  "Delete every model-authored result-claim from `reply` (`:batch` fix-up).
+
+   Returns the cleaned text + the count stripped, applied at the reply
+   boundary before persist + eval. For each fabrication range
+   ([[claim-ranges]] — a `⟹ …`/`=> …` tail to the right of a form or a
+   standalone fabricated result line, never a match inside a parsed form)
+   the span is spliced out (the match runs to
+   end-of-line, so the fabricated value + its fake `result/<id>` handle go
+   with it; the form to its left survives). Idempotent — a cleaned reply
+   has zero ranges. The forms eval as normal and the next turn's transcript
+   interleaves the REAL `⟹ <value> ⟸ result/<id>` rows in those positions."
+  {:malli/schema [:=> [:catn [::reply :string]] ::strip-result-response]}
+  [reply]
+  (let [ranges (claim-ranges reply)]
+    (if (empty? ranges)
+      {::strip-text reply ::strip-count 0}
+      (let [cleaned (loop [rs (reverse ranges) s reply]
+                      (if-let [[a b] (first rs)]
+                        (recur (rest rs) (str (subs s 0 a) (subs s b)))
+                        s))]
+        {::strip-text cleaned ::strip-count (count ranges)}))))
 
 (defn- error-lines
   "Render an error/guidance body `s` as the REPL FAILURE shape: the FIRST
-   non-blank line becomes the `;=> ✗ <headline>` output line (a COMMENTED
-   result — re-evaluating the transcript runs only the forms, never an
-   echoed value), every CONTINUATION line a plain `;` comment (via
+   non-blank line becomes the bare `⟹ ✗ <headline>` output line (a RUNTIME
+   failure line, not comment-shaped, so it can't be mimicked), every
+   CONTINUATION line a plain `;` comment (via
    [[quote-lines]], so a read-error's source slice + `^` caret stay
    ALIGNED — only the leading comment marker is stripped, never the
    interior indentation the caret depends on). One crystal-clear guidance
@@ -695,7 +880,7 @@
                      (str/replace #"^[⚠✗][ \t]?" ""))
             rest-body (quote-lines (str/join "\n" (rest lines))
                                    {:seon.agent.ctx/strip-markers? true})]
-        (cond-> (str ";=> ✗ " head)
+        (cond-> (str result-marker " ✗ " head)
           (seq (rest lines)) (str "\n" rest-body))))))
 
 (defn format-eval-row
@@ -704,29 +889,30 @@
    The form's comment-preamble as
    `;` lines (via [[quote-lines]]), the form verbatim (or the
    parinfer-repaired source), captured print output, then the value as a
-   `;=> <value>` COMMENTED output line trailing ` ; result/<id>` (or the
-   error as a `;=> ✗ <guidance>` line). NO history prompt prefix — the live
-   `<your-ns>=>` cursor lives once at the very END of the context; each
-   row reads as plain
-   comments + form + commented REPL output, the exact shape the system
-   prompt teaches.
+   BARE `⟹ <value> ⟸ result/<id>` RUNTIME line (or the error as a bare
+   `⟹ ✗ <guidance>` line). The `⟹`/`⟸` glyphs are the reserved
+   [[result-marker]]/[[result-close]] (see their docstrings — the runtime
+   is their only writer, so a model can't fabricate a result by writing a
+   `;` comment). A SHORT single-line value inlines onto the form's own
+   line; a large one spans lines and its `⟸ result/<id>` handle fences it.
+   NO history prompt prefix — the live
+   `<your-ns>=>` cursor lives once at the very END of the context.
 
      ; add 1 and 2
-     (+ 1 2)
-     ;=> 3 ; result/EVLabc-123
+     (+ 1 2) ⟹ 3 ⟸ result/EVLabc-123
 
-   The result line is a COMMENT (`;=>`) so re-evaluating the whole
-   transcript runs ONLY the forms — the values are history the runtime
-   wrote, not inputs (north star: the context IS eval'able Clojure). The
-   trailing ` ; result/<id>` is the LIVE VAR HANDLE: the agent references
+   The result is NOT comment-shaped (the settled tradeoff: the transcript
+   is no longer re-evaluable Clojure — clarity + anti-fabrication win,
+   because the old `; ⟹` shape was mimicked by agents). The trailing
+   `⟸ result/<id>` is the LIVE VAR HANDLE: the agent references
    `result/<id>` directly to reuse the value. PRIOR-SESSION evals
    (`prior?` true) render the value WITHOUT the handle (their vars died
    with the restart; the resume boundary marker says so once). A clipped
    value appends `(N of M)` to the handle so the agent knows the display
    is a partial view.
 
-   FAILURES render `;=> ✗ <crystal-clear guidance>` (never a stack trace,
-   never a `; result/<id>` — there is no value to reuse): the
+   FAILURES render bare `⟹ ✗ <crystal-clear guidance>` (never a stack trace,
+   never a `⟸ result/<id>` — there is no value to reuse): the
    pre-rendered legible `:seon.eval/error` string (read/compile/runtime —
    crystal-clear at the source) or a Malli instrumentation envelope via
    `render-malli-error`. A COMMENT-ONLY row (blank source — trailing
@@ -789,15 +975,19 @@
          ;; body below gets its age-decayed `result-body-cap`.
          limit       eval-render-cap
          comment-only? (str/blank? (str src))
-         ;; Comment-preamble — the agent's `;`/prose thinking, neutralized
-         ;; against fabricated result-claims BEFORE we re-prefix to `;`.
+         ;; Comment-preamble — the agent's `;`/prose thinking, re-prefixed to
+         ;; `;`. Fabricated result-claims are stripped at the reply boundary
+         ;; (`:batch` `strip-result-claims`), so the stored narration is clean.
+         ;; `(str narr)` coerces an off-shape stored narration (a non-string
+         ;; that slipped past the write boundary) so a bad datom renders
+         ;; instead of sinking the whole transcript — never throw into render.
          preamble    (when (and narr (not (str/blank? narr)))
-                       (quote-lines (neutralize-result-claims narr)
+                       (quote-lines (str narr)
                                     {:seon.agent.ctx/strip-markers? true}))
-         ;; The form, verbatim (or repaired) — neutralized for any inline
-         ;; result-claim, capped. Omitted for a comment-only row.
+         ;; The form, verbatim (or repaired), capped. Omitted for a
+         ;; comment-only row. `(str src)` coerces an off-shape source too.
          form-ln     (when-not comment-only?
-                       (cap-result (neutralize-result-claims src) limit small-full?))
+                       (cap-result (str src) limit small-full?))
          ;; Captured println/prn output — shown above the value like a
          ;; real REPL prints before returning. Bounded by the same cap.
          out-ln      (when (and (string? out) (not (str/blank? out)))
@@ -833,15 +1023,26 @@
                  ;; directly. Prior-session rows carry NO handle (their
                  ;; vars died with the process). A clip appends `(N of M)`
                  ;; so the agent knows the shown value is partial.
+                 ;; The `(N of M)` clip marker is TOKENS (Token Reporting
+                 ;; rule): `body-cap`/`full` are CHAR budgets (the ctx clip
+                 ;; plumbing), converted here at the display site so this
+                 ;; marker speaks the SAME unit as the inline `⟨… tokens⟩`
+                 ;; guide `cap-result-body` appends (no mixed units in one
+                 ;; row). Render-time-computed off `raw`, so aging is
+                 ;; unaffected (byte-stable per fixed age).
                  handle  (when-not prior?
-                           (str " ; result/" eid
-                                (when clipped? (str " (" body-cap " of " full ")"))))
+                           (str " " result-close " result/" eid
+                                (when clipped?
+                                  (str " (" (tokens/chars->tokens body-cap)
+                                       " of " (tokens/chars->tokens full)
+                                       " tokens)"))))
                  lines   (str/split-lines v)]
-             ;; Prefix ONLY the first line with `;=>` + handle; continuation
-             ;; lines (a clip's own `;` guide) stay as the body wrote them.
-             ;; `;=>` is a COMMENT — the value is runtime history, never a
-             ;; form to re-run.
-             (str ";=> " (first lines) handle
+             ;; BARE `⟹ <value> ⟸ result/<id>` — the result-open marker + the
+             ;; result-close handle ride the FIRST line; continuation lines (a
+             ;; clip's own `;` guide, or a multi-line value's rest) stay as the
+             ;; body wrote them. NOT comment-shaped: the runtime is the only
+             ;; writer of a `⟹`/`⟸` line, so a model can't fabricate one.
+             (str result-marker " " (first lines) handle
                   (when (next lines)
                     (str "\n" (str/join "\n" (rest lines))))))
 
@@ -856,17 +1057,35 @@
            ;; line, plain-clip (NOT the "narrow your query" result guide).
            (cap-result (error-lines err) limit small-full?)
 
-           :else ";=> ✗ <no result>")
+           :else (str result-marker " ✗ <no result>"))
          ;; Reactive 'won't persist' note (#7) — DERIVED from source, no
          ;; stored attr; recomputed each render so it follows the form.
          note   (when (and ok? (not comment-only?))
-                  (seval/scratch-def-note src))]
-     (->> [(when (not (str/blank? preamble)) preamble)
-           form-ln
-           out-ln
-           result-ln
-           (when (and note (not (str/blank? note)))
-             (quote-lines note {:seon.agent.ctx/strip-markers? true}))]
+                  (seval/scratch-def-note src))
+         ;; INLINE the result onto the form's OWN line — the PRD grammar
+         ;; `(form) ⟹ <value> ⟸ result/<id>` — when everything is
+         ;; single-line: a form present + single-line, no captured stdout
+         ;; between them, and a single-line result line. A multi-line form,
+         ;; multi-line/clipped value, or intervening stdout keeps the result
+         ;; on its own line (still bare `⟹ …`), so the fence stays legible.
+         inline? (and form-ln
+                      (not (str/includes? form-ln "\n"))
+                      (str/blank? (str out-ln))
+                      (string? result-ln)
+                      (not (str/blank? result-ln))
+                      (not (str/includes? result-ln "\n")))
+         form+result (when inline? (str form-ln " " result-ln))]
+     (->> (if inline?
+            [(when (not (str/blank? preamble)) preamble)
+             form+result
+             (when (and note (not (str/blank? note)))
+               (quote-lines note {:seon.agent.ctx/strip-markers? true}))]
+            [(when (not (str/blank? preamble)) preamble)
+             form-ln
+             out-ln
+             result-ln
+             (when (and note (not (str/blank? note)))
+               (quote-lines note {:seon.agent.ctx/strip-markers? true}))])
           (remove nil?)
           (str/join "\n")))))
 
@@ -910,7 +1129,7 @@
                   [:=> [:cat] [:vector :any]]
                   [:=> [:catn [::opts [:map
                                        [:seon.agent/n  {:optional true} :int]
-                                       [:seon.agent/id {:optional true} :string]
+                                       [:seon.agent/id {:optional true} :seon.agent/id]
                                        [:seon.db/db    {:optional true} :any]]]]
                    [:vector :any]]]}
   ([] (messages {}))
@@ -947,7 +1166,7 @@
   {:malli/schema [:function
                   [:=> [:cat] :any]
                   [:=> [:catn [::opts [:map
-                                       [:seon.agent/id {:optional true} :string]
+                                       [:seon.agent/id {:optional true} :seon.agent/id]
                                        [:seon.db/db    {:optional true} :any]]]]
                    :any]]}
   ([] (current-turn {}))
@@ -982,7 +1201,7 @@
                   [:=> [:cat] [:vector :any]]
                   [:=> [:catn [::opts [:map
                                        [:seon.agent/n  {:optional true} :int]
-                                       [:seon.agent/id {:optional true} :string]
+                                       [:seon.agent/id {:optional true} :seon.agent/id]
                                        [:seon.db/db    {:optional true} :any]]]]
                    [:vector :any]]]}
   ([] (evals {}))
@@ -1005,7 +1224,7 @@
   {:malli/schema [:function
                   [:=> [:cat] :any]
                   [:=> [:catn [::opts [:map
-                                       [:seon.agent/id {:optional true} :string]
+                                       [:seon.agent/id {:optional true} :seon.agent/id]
                                        [:seon.db/db    {:optional true} :any]]]]
                    :any]]}
   ([] (current-ns {}))
@@ -1029,7 +1248,7 @@
   {:malli/schema [:function
                   [:=> [:cat] [:vector :map]]
                   [:=> [:catn [::opts [:map
-                                       [:seon.agent/id {:optional true} :string]]]]
+                                       [:seon.agent/id {:optional true} :seon.agent/id]]]]
                    [:vector :map]]]}
   ([] (ctx-entities {}))
   ([{:seon.agent/keys [id]}]
@@ -1052,10 +1271,14 @@
 ;; ------------------------------------------------------------
 
 (def system-text
-  "The ONE universal system block — the concept paragraphs plus the
-   standing behavioral teachings, and nothing else. Usage teaching lives
-   in the rendered namespace sources (docstrings + `;;` comments) and the
-   startup tutorial evals, never here.
+  "The ONE always-on instruction floor — the concept paragraphs, the
+   REPL/eval mechanics, and the universal load-bearing rules every agent
+   needs EVERY turn (async-reads-as-synchronous, register!-before-transact,
+   every-map-key-namespaced, :malli/schema-is-enforced, entities-are-
+   attributes-not-kinds). Per-VERB usage examples live in the rendered
+   namespace sources (docstrings + `;;` comments); DEEP reference lives in
+   the skill bodies, reachable by (my.skills/load :name). This block is the
+   floor, not the depth — a skill only DEEPENS a floor rule.
 
    BYTE-IDENTICAL for every agent and every turn — a `def`, not a fn of
    the agent: the agent id lives in the transcript readline at the very
@@ -1080,15 +1303,16 @@
     "; (<your-ns>=>) are the very END of this context — your reply is the\n"
     "; next REPL input.\n"
     ";\n"
-    "; THE TRANSCRIPT IS ONE EVAL'ABLE REPL SESSION. The whole bottom of\n"
-    "; this context is your live REPL history: ; comments, the forms you\n"
-    "; wrote, and each form's value on the next line as a ;=> ... comment.\n"
-    "; Re-evaluating it would run only the forms (the comments pass through),\n"
-    "; reproducing your state — it is a replayable program. You write two\n"
-    "; things: Clojure (forms) and ; comments. The runtime writes the rest\n"
+    "; THE TRANSCRIPT IS YOUR LIVE REPL HISTORY. The whole bottom of this\n"
+    "; context is what you wrote (; comments and forms) with the runtime's\n"
+    "; output woven around it. Each form's value is written on its own line\n"
+    "; as a BARE `" result-marker " <value> " result-close " result/<id>` line — NOT a\n"
+    "; comment: everything from " result-marker " through the " result-close " handle is the\n"
+    "; runtime's, and the next line is yours again. You write two things\n"
+    "; only: Clojure (forms) and ; comments. The runtime writes the rest\n"
     "; around your forms: each section's ;;; ┌─ … ─ / ;;; └─ end … ─\n"
     "; fold-brackets, the ;;; ◀ from / ;;; ▶ to message lines, each form's\n"
-    "; ;=> value result, and the <your-ns>=> cursor at the very end. To\n"
+    "; " result-marker " value line, and the <your-ns>=> cursor at the very end. To\n"
     "; reuse a value, name its result/<id> var (below) — that is how\n"
     "; results flow forward.\n"
     ";\n"
@@ -1100,7 +1324,7 @@
     "; (def x {...}) or (identity {...}).\n"
     ";\n"
     "; After your LAST form, STOP. The runtime runs each form and shows you\n"
-    "; the real ;=> value next turn — read it then. If a reply DEPENDS on\n"
+    "; the real " result-marker " value next turn — read it then. If a reply DEPENDS on\n"
     "; a value you have not computed yet, query this turn and reply from the\n"
     "; REAL result on a later turn; the runtime writes the values, you write\n"
     "; the forms.\n"
@@ -1122,14 +1346,37 @@
     "; a (message/user \"...\") string is fine, though — that renders on your\n"
     "; human's screen.\n"
     ";\n"
+    "; RAW FOREIGN CODE — #code HEREDOC. To pass code in another language\n"
+    "; (Python, a diff, YAML) as DATA with NO escaping of its quotes or\n"
+    "; backslashes, write #code/<lang> <<WORD, the payload lines, then a line\n"
+    "; that is exactly WORD — usable INLINE as any argument (e.g. fs/replace!\n"
+    "; :seon.agent.fs/find / :seon.agent.fs/replace):\n"
+    ";   (fs/replace! {:seon.agent.fs/path \"a.py\"\n"
+    ";                 :seon.agent.fs/find #code/python <<PY\n"
+    "; def f(x): return x\n"
+    "; PY})              ; reads to inert data, never runs as Clojure\n"
+    "; ANCHORED EDITS never guess: an ambiguous fs/replace! returns CANDIDATES\n"
+    "; with line ranges instead of mutating — re-issue with :seon.agent.fs/near\n"
+    "; [from to] or a longer :seon.agent.fs/find to disambiguate; never guess.\n"
+    ";\n"
     "; REPORT THE VALUE YOUR LAST EVAL RETURNED. A number you state to your\n"
-    "; human — a count, a total, an id — must be the ;=> value the runtime\n"
+    "; human — a count, a total, an id — must be the " result-marker " value the runtime\n"
     "; just wrote, never one you remember or read off source. To confirm a\n"
     "; figure, eval the form and quote its real result; do not retype a\n"
     "; value you have not just seen returned.\n"
     ";\n"
+    "; " result-marker " marks a REAL result — only the runtime writes it,\n"
+    "; on the turn AFTER you submit a form. " result-marker " and " result-close " (and the\n"
+    "; " status-open " " status-close " status glyphs) are RESERVED for the runtime —\n"
+    "; NEVER type them yourself: a result you type (a " result-marker " line, or a\n"
+    "; bare `=> value`) is STRIPPED from your reply at the boundary before it\n"
+    "; is recorded — it never becomes a result and never reaches a later turn.\n"
+    "; To see what a form returns, submit it and read the runtime's bare\n"
+    "; " result-marker " line next turn. Never (complete ...) claiming a result you have not seen the\n"
+    "; runtime print.\n"
+    ";\n"
     "; RESULT VARS. Every eval's value is a live var result/<id>, where the\n"
-    "; id is the short handle the runtime prints on that form's ;=> result\n"
+    "; id is the short handle the runtime prints on that form's " result-marker " result\n"
     "; line in the transcript history. Reference result/<id> directly to\n"
     "; reuse a value — it is faster and surer than re-running a form you\n"
     "; already computed. A clipped display is NOT a clipped value: dig into a\n"
@@ -1146,6 +1393,12 @@
     "; turn (a self-host limitation); hold mutable values in an atom, not a\n"
     "; bare def.\n"
     ";\n"
+    "; ASYNC READS AS SYNCHRONOUS. (await x) works only INSIDE an ^:async\n"
+    "; fn — a bare top-level (await x) throws. You rarely need it: an\n"
+    "; ^:async function (db/transact!, plan/*) auto-resolves to its DATA value,\n"
+    "; so it reads as an ordinary synchronous call — use what it returns\n"
+    "; directly.\n"
+    ";\n"
     "; ERRORS ARE VALUES. Core calls never throw at you — a failure\n"
     "; comes back as data, e.g. {:seon.db/ok? false :seon.db/error ...}.\n"
     "; Read the error map; it names the defect and the fix. Telling your\n"
@@ -1155,28 +1408,41 @@
     ";\n"
     "; THE RENDERING SYSTEM. You show your human things with render\n"
     "; twins: :seon.render/ai (text for you) + :seon.render/html (hiccup\n"
-    "; for their screen) — one render, two surfaces. Your live tile and\n"
+    "; for their screen) — one render, two surfaces. Your canvas and\n"
     "; your context sections both ride this shape. A *section* (not just\n"
     "; the tile) can carry an :seon.render/html twin — that is where rich\n"
     "; panels (tables, images, SVG) go: the agent reads the :ai text, the\n"
     "; human sees the :html panel, one section row serving both.\n"
-    "; SHOW, DON'T TELL: your live tile (the live-tile section below) is\n"
+    "; AUTO-RUN: a defn in your CURRENT ns whose :malli/schema OUTPUT is a\n"
+    "; map declaring :seon.render/ai (and/or :seon.render/hiccup) runs\n"
+    "; automatically every turn — its output becomes a live section of your\n"
+    "; own context AND a tile on your page, no call needed. Declare\n"
+    "; :seon.db/db / :seon.agent/id as optional request keys and the\n"
+    "; current values arrive by themselves. Writing such a specced view fn\n"
+    "; IS building a live, always-current view.\n"
+    "; SHOW, DON'T TELL: your canvas (the canvas section below) is\n"
     "; your PRIMARY surface for showing your human data, results, and\n"
     "; status; (message/user \"...\") is narration/backup that scrolls away.\n"
+    "; One carve-out: a tile is never a REPLY — a final answer must still\n"
+    "; be SENT with (message/user \"...\") or (complete \"...\").\n"
     ";\n"
     "; THE SHARED STORE. All agents are wired to ONE shared datahike\n"
-    "; (datomic-style) database. Two laws worth stating once: register an\n"
+    "; (datomic-style) database. Laws worth stating once: register an\n"
     "; attribute (schema/register!) BEFORE the first transact that uses it,\n"
     "; and give every attribute keyword a namespace of at least two\n"
     "; dot-separated segments (:my.kb.doc/title — never :doc/title, never\n"
-    "; :title).\n"
+    "; :title) — and MORE: every key in every map you write (not just DB\n"
+    "; attrs) is a namespaced keyword; bare :status / :ok are refused. An\n"
+    "; entity has no kind or type — it IS its attributes + refs; never model\n"
+    "; a :kind or :type field, and FIND entities by attribute presence, not\n"
+    "; by a type tag.\n"
     ";\n"
     "; THE NAMESPACES BELOW are real loaded code, each delimited by its own\n"
     "; ;;; ┌─ namespace X ─ / ;;; └─ end namespace X ─ brackets, all in FULL\n"
     "; real source (no signatures, no clipping). What renders is CURATED: YOUR\n"
     "; CURRENT namespace (your live workspace, the most important thing here)\n"
     "; and the nses it :requires, the my.* toolkit (my.kb / my.data / my.ui /\n"
-    "; my.tile) and your core verbs (plan / message / lifecycle). Everything\n"
+    "; my.canvas) and your core functions (plan / message / lifecycle). Everything\n"
     "; else — the rest of the seon framework AND your other my.* nses — is\n"
     "; deliberately NOT dumped; it stays QUERYABLE and SEARCHABLE, one step\n"
     "; away, so you are not buried in code you don't need. Never hallucinate a\n"
@@ -1199,10 +1465,14 @@
     "; — design a schema (schema/register!), and COLOCATE the functions that\n"
     "; operate on that data in the same namespace. Your code is my.*, your\n"
     "; knowledge is my.kb.*; the core is seon.* (call it, never redefine it).\n"
-    "; The my.* toolkit (my.ui / my.tile / my.data) is FULL-QUALIFIED — call\n"
+    "; A public fn's :malli/schema is INSTRUMENTED — it validates the args\n"
+    "; and the return on EVERY call and throws on a mismatch, so a wrong\n"
+    "; schema is a runtime bug, not a doc nit.\n"
+    "; The my.* toolkit (my.ui / my.canvas / my.data) is FULL-QUALIFIED — call\n"
     "; my.ui/card etc. directly, no alias needed. If a tool you need doesn't\n"
     "; exist, write it and run it — don't wait to be given one. Namespaces are\n"
-    "; workspaces: moving to (ns my.domain.thing …) makes it your current ns,\n"
+    "; PLACES: (in-ns 'my.domain.thing) moves you there (state preserved; a\n"
+    "; fresh name is created with your toolkit), making it your current ns,\n"
     "; which renders in full along with the nses it :requires.\n"
     ";\n"
     "; EVERY rendered element shows its id — you can (db/pull '[*] <id>)\n"
@@ -1245,9 +1515,17 @@
     "; - A task with 2+ steps: lay the WHOLE plan down FIRST with\n"
     ";   my.plan/plan! — a :goal (why), :pace :multi-session when it spans\n"
     ";   sessions, an :expect per step (how you'd know it failed). Then\n"
-    ";   active! the step you take up, VERIFY its expect, done! it. Your\n"
-    ";   plan renders every turn: where you are, the ready frontier, and\n"
-    ";   what you just finished — after a restart, re-ground from it.\n"
+    ";   active! the step you take up, VERIFY its expect, and done! it the\n"
+    ";   MOMENT it is verified — an open step you actually finished reads\n"
+    ";   as unfinished. Your plan renders every turn: where you are, the\n"
+    ";   ready frontier, and what you just finished.\n"
+    "; - AFTER A RESTART your plan is still rendered above you: RESUME it —\n"
+    ";   take up its open steps and done! each as you finish. Do NOT create\n"
+    ";   a new plan for work you already planned; re-planning from scratch\n"
+    ";   discards your own progress. Close the finished steps FIRST, then\n"
+    ";   continue from the frontier. And before you complete, SWEEP your\n"
+    ";   plan: done! every step whose work is in fact finished — including\n"
+    ";   the deliver step, the moment you have delivered.\n"
     "; - When your human messages you, an address-step (marked ✉) is\n"
     ";   auto-minted for you. The natural turn: done! that message-step\n"
     ";   AND do the work AND (often) step! sub-steps from what they said —\n"
@@ -1258,16 +1536,29 @@
     ";   code or data); plain prose otherwise.\n"
     ";\n"
     "; MESSAGING + LIFECYCLE. You talk to people and you end your work with\n"
-    "; explicit verbs — all plain Clojure, all through the DB:\n"
+    "; explicit functions — all plain Clojure, all through the DB:\n"
     ";   (message/user \"...\")            ; tell your one human — they see it now\n"
     ";   (message/agent \"<id>\" \"...\")    ; tell a specific peer agent\n"
     ";   (wait \"note\")                   ; deliberately park; resume when a message arrives\n"
-    ";   (complete \"result\")             ; finish this work cleanly\n"
+    ";   (complete \"<the answer>\")       ; finish cleanly — delivers the string IF you haven't already messaged this run\n"
     "; - TELL YOUR HUMAN with (message/user \"...\"). They see exactly what you\n"
     ";   send, when you send it — so send the answer when you have it, and a\n"
     ";   SHORT progress note when a longer task is still running. You can\n"
     ";   message every turn when they need to stay informed; silence across\n"
     ";   many turns is the failure, a one-line update is cheap.\n"
+    "; - YOUR DELIVERED ANSWER IS WHAT YOU SEND, never what you merely\n"
+    ";   computed or narrated. A value sitting in a result, a line of prose,\n"
+    ";   or an answer typed raw on its own line (ANSWER: 4) is NOT delivered\n"
+    ";   — raw text is a NOTE, dropped, never sent. Put the answer INSIDE a\n"
+    ";   sending form: (message/user \"...\") or (complete \"...\"). Whoever\n"
+    ";   asked reads your LAST sent string, so the last thing you send must\n"
+    ";   BE the answer. If a specific output format was asked for, that\n"
+    ";   exact format is your ENTIRE final string — (message/user\n"
+    ";   \"ANSWER: C\") — nothing appended after it, no restating around it.\n"
+    ";   Once you HAVE messaged this run, a closing (complete \"...\") sends\n"
+    ";   NOTHING more — the message you already sent IS the delivered\n"
+    ";   answer, and complete just closes; a filler string cannot clobber\n"
+    ";   it.\n"
     "; - TALK TO A PEER with (message/agent \"<agent-id>\" \"...\"). Messaging\n"
     ";   YOURSELF is refused — your notes-to-self are just ; comments in\n"
     ";   your turn.\n"
@@ -1281,8 +1572,10 @@
     ";   QUERIES the stored data; the message just points at it.\n"
     "; - IF YOU WERE SPAWNED BY ANOTHER AGENT (you have a parent), finishing\n"
     ";   MEANS reporting back. (complete \"...\") sends its result string to\n"
-    ";   your parent and wakes them — so store your findings, then complete\n"
-    ";   with the POINTER (the id + a one-line summary), never the whole\n"
+    ";   your parent and wakes them (unless you already messaged your parent\n"
+    ";   this run — that message is then the report and complete just\n"
+    ";   closes). So store your findings, then complete with the POINTER\n"
+    ";   (the id + a one-line summary), never the whole\n"
     ";   report inline. Doing the work but going idle without a complete\n"
     ";   leaves your parent waiting on a delivery that never comes.\n"
     "; - DELEGATE WITH ONE FORM. To hand a task to a fresh worker, use\n"
@@ -1306,10 +1599,12 @@
     ";   they burn turns on a finished task. The done-signal is the GOAL\n"
     ";   being satisfied, not your open steps or the turn cap. Ask each turn:\n"
     ";   \"do I already have what was asked for?\" If yes, deliver it and stop.\n"
-    "; - WHEN YOU ARE DONE, say so with a verb. (complete \"result\") marks\n"
-    ";   the work finished — call it the turn the goal is met, right after you\n"
-    ";   deliver the answer; it is how you close, whoever asked (a human or a\n"
-    ";   parent agent). (wait \"what you're waiting for\") parks you\n"
+    "; - WHEN YOU ARE DONE, say so with a function. (complete \"<the answer>\")\n"
+    ";   marks the work finished AND — if you have not already messaged\n"
+    ";   whoever asked (your human, or your parent agent) this run —\n"
+    ";   delivers that exact string to them; so its argument is the\n"
+    ";   ANSWER (or the pointer), never filler like \"done\"/\"result\". Call\n"
+    ";   it the turn the goal is met. (wait \"what you're waiting for\") parks you\n"
     ";   until the next message wakes you — use it after you've asked a\n"
     ";   question and need their answer to continue. If you simply have\n"
     ";   nothing more to do this loop, emit NO forms — the loop ends cleanly\n"
@@ -1573,7 +1868,7 @@
 (defn- render-one-ns-html
   "Render a single namespace block to hiccup. Reuses the per-kind
    `seon.handlers.{ns,fn,schema}/render-html` for each member so the
-   webview card styling stays consistent with the inspector panes."
+   webview card styling stays consistent with the debug view panes."
   [db ns-kw data]
   (if (nil? data)
     [:div {:class "py-1 text-xs font-mono text-text-500 italic"}
@@ -1637,7 +1932,7 @@
 (schema/register! :seon.render/detail [:enum :full])
 
 ;; The member-drill handle: name ONE fn within the rendered ns to pull its
-;; FULL source (the common case — the agent wants a specific verb, not the
+;; FULL source (the common case — the agent wants a specific function, not the
 ;; whole namespace). Accepts a bare name ("store-fact"), a qualified name
 ;; ("my.kb/store-fact"), or a symbol — normalized + matched against
 ;; :seon.fn/sym in [[render-member]].
@@ -1679,9 +1974,9 @@
   [:map
    [:seon.render/text   {:optional true} :string]
    ;; Pure-data shallow hiccup bound — registered forms must not embed
-   ;; fns (platform law; see seon.render.live-tile). Deep validation
+   ;; fns (platform law; see seon.render.canvas). Deep validation
    ;; stays at the render boundary.
-   [:seon.render/hiccup {:optional true} :seon.render.live-tile/hiccup]])
+   [:seon.render/hiccup {:optional true} :seon.render.canvas/hiccup]])
 
 (defn render-namespace
   "Render a WHOLE namespace — its source plus every owned entity.
@@ -1709,13 +2004,13 @@
    → {:seon.render/text <string>}     for :ai
    → {:seon.render/hiccup <hiccup>}   for :html
 
-   FULL by default — signatures are retired: the verb returns the ns's whole
+   FULL by default — signatures are retired: the function returns the ns's whole
    real source (plus every member), unclipped. Token budget is bound by
    CURATION (the always-on `:namespaces` section curates WHICH nses it routes
    here), never by compression.
 
    `:seon.ns/member` is the DRILL handle — the common case where the agent
-   wants ONE specific verb, not the whole ns. Naming a member (bare
+   wants ONE specific function, not the whole ns. Naming a member (bare
    \"store-fact\" or qualified \"my.kb/store-fact\") returns just that fn's
    FULL source, ignoring depth. An unknown member returns a one-line note
    listing the public fns (errors-as-values), never a throw.
@@ -1806,13 +2101,13 @@
 ;; the dormant `:seon.render/html` slot, resolved through
 ;; `seon.render/html-render` + the throw-to-banner guard, paired with its
 ;; section name. Hiccup is genuinely arbitrary agent-authored data at this
-;; boundary — `:seon.render.live-tile/hiccup` is the registered shallow
+;; boundary — `:seon.render.canvas/hiccup` is the registered shallow
 ;; bound (vector with keyword head); the deep walk happens at the render
 ;; boundary, same as every `:seon.render/html-response`.
 (schema/register! :seon.agent.ctx/block-html
   [:map
    [:seon.agent.ctx/name :seon.agent.ctx/name]
-   [:seon.render/hiccup :seon.render.live-tile/hiccup]])
+   [:seon.render/hiccup :seon.render.canvas/hiccup]])
 
 (schema/register! :seon.render/stable-text   :string)
 (schema/register! :seon.render/volatile-text :string)
@@ -1826,7 +2121,7 @@
   "The in-band cache-boundary line the composer joins between the
    STABLE prefix (every section through :namespaces — byte-stable
    within a session given the deterministic rendering) and the
-   VOLATILE tail (everything after: live-tile, warnings,
+   VOLATILE tail (everything after: canvas, warnings,
    plan, relevant-source, inventory, transcript).
 
    In-band because the agent loop hands providers ONE assembled
@@ -1859,16 +2154,15 @@
       {:seon.render/stable-text   (subs text 0 i)
        :seon.render/volatile-text (subs text (+ i (count stable-boundary-delim)))})))
 
-;; The default block layout lives in `seon.config/default-ctx-blocks` (the seed
-;; source `seon.config/resolve-agent-context` fills); the soul/agents identity
-;; file-blocks are prepended by `seon.config/identity-file-blocks`. This ns owns
+;; The default block layout lives in the manifest resolved by
+;; `seon.config/resolve-agent-context`. This ns still owns
 ;; the file-block RENDER fns ([[file-block-ai]]/[[file-block-html]]) + the
 ;; identity-file PATH consts ([[soul-file-path]]/[[agents-file-path]], read by
 ;; [[identity-files-text]]) — config emits the block DATA (literal render
 ;; symbols) and this ns renders it.
 
 ;; ============================================================
-;; install! / remove! — the ONE scope-aware override + seed verb over the
+;; install! / remove! — the ONE scope-aware override + seed function over the
 ;; agent's own :seon.agent/ctx block set. Errors are values. Both target the
 ;; agent in scope (db/current-agent-id): an agent shapes its OWN context, and
 ;; the boot seed-copy runs them inside the new agent's with-agent scope.
@@ -1965,10 +2259,8 @@
 (def ^:private seed-consumed-keys
   "Agent-context keys CONSUMED at seed rather than persisted as an agent datom,
    so [[seed-default-ctx!]] drops them from the scalar transact:
-     - `:seon.agent/ctx`   — `install!` owns the block-tree transact.
-     - `:my.skills/load`   — already expanded into `:skill/<name>` blocks by the
-                             loader; block presence is its persisted truth."
-  #{:seon.agent/ctx :my.skills/load})
+     - `:seon.agent/ctx` — `install!` owns the block-tree transact."
+  #{:seon.agent/ctx})
 
 (defn ^:async seed-default-ctx!
   "SEED-COPY the resolved agent-context into the agent in scope.
@@ -1982,15 +2274,14 @@
 
    The seed is shaped by the OPTIONAL config manifest via the GENERIC loader
    ([[seon.config/resolve-agent-context]]) selected by the scoped agent's IDENTITY
-   (root gets the root-context canvas override) — config absent → the schema's
-   defaults (byte-identical to today); present → whatever the manifest specifies.
+   (root gets the root-context override). An absent context declaration produces
+   an empty block tree; a present declaration is copied exactly.
 
    TWO seed writes: (1) `install!` upserts the block tree; (2) the surviving
    AGENT-LEVEL keys (everything except [[seed-consumed-keys]]) are transacted
    onto the agent ENTITY as its reactive config-on-record — so a consumer reads
    the datom off the agent (e.g. `:seon.client/wake?`, `:seon.eval/home-requires`).
-   Defaults land as data ⇒ byte-identical behavior for a no-config agent; a
-   manifest override lands its non-default value, which the consumer then reads.
+   Declared scalar values land as data, which the consumer then reads.
    GENERIC — it carries WHATEVER agent-level keys the resolved config holds, so a
    newly-activated dial needs no change here (only its schema key + its reader)."
   {:malli/schema [:=> [:cat] ::result]}
@@ -2026,19 +2317,17 @@
 ;; ============================================================
 
 (defn decode-block
-  "Decode a PULLED section entity's render slots to value shapes.
+  "Decode a PULLED section entity's EDN-encoded attrs to value shapes.
 
-   The mixed-:or slots, back to
-   their value shapes (`seon.db/decode-edn-value` — the inverse of the
-   bridge's EDN-string storage encoding). Code-default sections pass
-   through unchanged."
+   Every attr runs through `seon.db/decode-edn-value` (the inverse of the
+   bridge's mixed-:or EDN-string storage encoding) — the encoded set is the
+   COMPUTED `edn-encoded-attr?` rule, never a key list here, so new encoded
+   slots (e.g. :seon.render.canvas/content) decode without this fn
+   changing. Non-encoded attrs pass through unchanged."
   {:malli/schema [:=> [:catn [::block :map]] :map]}
   [section]
-  (cond-> section
-    (contains? section :seon.render/ai)
-    (update :seon.render/ai #(db/decode-edn-value :seon.render/ai %))
-    (contains? section :seon.render/html)
-    (update :seon.render/html #(db/decode-edn-value :seon.render/html %))))
+  (reduce-kv (fn [m k v] (assoc m k (db/decode-edn-value k v)))
+             {} section))
 
 (defn agent-blocks
   "The agent's COMPLETE set of `:seon.agent.ctx/block` maps.
@@ -2059,14 +2348,14 @@
 ;; ── the root's children = the agent's OWN complete block set ─────────────
 ;; The ROOT renderable's children are exactly the agent's `:seon.agent/ctx`
 ;; blocks, one priority sort. There is no render-time merge over a separate
-;; default catalog — `seon.config/default-ctx-blocks` was copied into the agent at
-;; creation, so render reads one collection and stops.
+;; default catalog — the manifest tree was copied into the agent at creation,
+;; so render reads one collection and stops.
 
 
 (defn- block-bracket-ai
   "The ai-view bracket the ROOT section renderer wraps each child in — the
    self-demarcating boundary that REPLACES the old per-section `;; ── x ──`
-   headers. The agent can fold the left inspector pane on these lines."
+   headers. The agent can fold the left debug view pane on these lines."
   [section-name body]
   (str ";;; ┌─ " (name section-name) " ─\n"
        body
@@ -2079,24 +2368,35 @@
    re-pulling. Registered-but-uninstalled attrs (e.g. the tile slot on a
    store predating it) are silently filtered by the pull guard — safe."
   [db id]
-  (db/pull {:seon.db/db db
-            :seon.db/pull-pattern
-            '[:db/id :seon.agent/id
-              :seon.agent/purpose
-              :seon.agent/default-turn-limit
-              :seon.render/ai :seon.render/html
-              :seon.render.live-tile/content
-              {:seon.agent/ctx [*]}]
-            :seon.db/ref [:seon.agent/id id]}))
+  (if-let [eid (ffirst
+                 (db/query {:seon.db/db db
+                            :seon.db/query '[:find ?a
+                                             :in $ ?id
+                                             :where [?a :seon.agent/id ?id]]
+                            :seon.db/args [id]}))]
+    (db/pull {:seon.db/db db
+              :seon.db/pull-pattern
+              '[:db/id :seon.agent/id
+                :seon.agent/purpose
+                :seon.agent/default-turn-limit
+                :seon.render/ai :seon.render/html
+                :seon.render.canvas/content
+                {:seon.agent/ctx [*]}]
+              :seon.db/ref eid})
+    {}))
 
 (defn context-root
-  "The ROOT renderable — the agent's OWN complete block set.
+  "The ROOT renderable — the agent's block set plus the current ns's
+   auto-run render fns.
 
    Its children are the agent's OWN
    `:seon.agent/ctx` block set — slot-decoded and priority-sorted by
    [[agent-blocks]], with NO render-time merge over a separate default
-   catalog (every block was seed-copied into the agent at creation, so
-   render reads one collection and stops). The agent entity is pulled once
+   catalog (every block was seed-copied into the agent at creation) —
+   PLUS the DERIVED auto-run blocks ([[seon.agent.ctx.render-fns/derived-blocks]]):
+   one block/tile twin per current-ns fn whose output schema declares a
+   render type, computed per render, never stored. One ordered list.
+   The agent entity is pulled once
    and stashed so every child reads it without re-pulling.
 
    Producing the prompt is rendering the root per view — there is no
@@ -2110,7 +2410,50 @@
   {:malli/schema [:=> [:catn [::ctx :map]] :map]}
   [{:seon.db/keys [db] :seon.agent/keys [id] :as ctx}]
   (let [entity   (pull-agent-entity db id)
-        children (agent-blocks entity)]
+        stored   (agent-blocks entity)
+        ;; AUTO-RUN (context.md §"Auto-run") — the current ns's render fns
+        ;; join the SAME ordered list as DERIVED blocks (derive-don't-store;
+        ;; seon.agent.ctx.render-fns). A fn already pinned by a stored
+        ;; block's slot is the install! override — skipped here. GUARDED:
+        ;; a discovery failure degrades to the stored set, never breaks
+        ;; context assembly.
+        derived  (try
+                   (let [cur-ns (some-> (current-ns {:seon.agent/id id
+                                                     :seon.db/db db})
+                                        name keyword)
+                         ;; A fn already pinned — as a STORED block's slot
+                         ;; (install!) or as the agent's CANVAS content — is
+                         ;; the explicit override: it renders there, so it is
+                         ;; NOT re-derived as its own auto-run block.
+                         canvas (some->> (:seon.render.canvas/content entity)
+                                         (db/decode-edn-value
+                                           :seon.render.canvas/content))
+                         ;; No pin → the canvas is the DERIVED last-updated
+                         ;; tile (render-fns/last-updated-tile — the same
+                         ;; resolution render-agent-canvas applies), so that fn
+                         ;; is equally "already rendering on the canvas" and
+                         ;; is skipped as its own auto-run block.
+                         canvas (or canvas
+                                    (when id
+                                      (::render-fns/tile-sym
+                                        (render-fns/last-updated-tile
+                                          {:seon.db/db db :seon.agent/id id}))))
+                         pinned (cond-> (into #{}
+                                              (comp (mapcat (juxt :seon.render/ai
+                                                                  :seon.render/html))
+                                                    (filter symbol?))
+                                              stored)
+                                  (symbol? canvas) (conj canvas))]
+                     (render-fns/derived-blocks
+                       (cond-> {:seon.db/db db
+                                ::render-fns/pinned-syms pinned}
+                         id     (assoc :seon.agent/id id)
+                         cur-ns (assoc ::render-fns/current-ns cur-ns))))
+                   (catch :default _ []))
+        children (->> (concat stored derived)
+                      (sort-by (juxt :seon.agent.ctx/priority
+                                     (comp str :seon.agent.ctx/name)))
+                      vec)]
     {:seon.agent.ctx/name     :context
      :seon.agent/entity       entity
      :seon.agent.ctx/children children
@@ -2127,10 +2470,10 @@
 
    The SINGLE producer
    the prompt path ([[seon.agent.turn/render-prompt]]) AND the human
-   inspector ([[seon.agent.inspect/ctx-preview]]) both route through. Both
+   web UI ([[seon.agent.debug/ctx-preview]]) both route through. Both
    render the `:seon.render/ai` side of ONE render ([[seon.render/render]])
    over the SAME `context-root` over the SAME db value, so the model's
-   prompt and the inspector's context pane are byte-identical BY
+   prompt and the web UI's context pane are byte-identical BY
    CONSTRUCTION (the only per-render-moment difference is the single live
    `now` in the transcript readline).
 
@@ -2156,18 +2499,10 @@
                                         (context-root ctx))
                          ""))))
 
-(defn- render-child-text
-  "Render ONE child block to its ai text via the injected handle, carrying
-   its name + priority forward for the cache split."
-  [render child]
-  {:seon.agent.ctx/name     (:seon.agent.ctx/name child)
-   :seon.agent.ctx/priority (:seon.agent.ctx/priority child)
-   :seon.render/text  (or (render child) "")})
-
 (defn- block-renders-ai?
   "A context block contributes to the agent's PROMPT only when it declares an
    `:seon.render/ai` render. An html-only block (a human-facing widget — the
-   live-tile/canvas, an acme dashboard tile) has nothing to say to the agent:
+   canvas/canvas, an acme dashboard tile) has nothing to say to the agent:
    it is OMITTED from the prompt entirely — no self-demarcating bracket, no
    generic data-dump stub (`;; :canvas {:db/id … :seon.agent.ctx/name …}`).
    This is the inverse of the html view's 'ai-only block contributes no tile'
@@ -2180,19 +2515,57 @@
   [block]
   (contains? block :seon.render/ai))
 
-(defn- rendered-block-texts
-  "Render each ai-contributing child block to its ai text via `render`, drop
-   blanks — the per-block text vector shared by the joined prompt
-   ([[render-context-ai]]) and the inspector ([[ctx-sections]]) so the two can
-   never disagree on what each block contributes. A block with no
-   `:seon.render/ai` render ([[block-renders-ai?]]) contributes NO prompt
-   section."
-  [render children]
+(defn- rendered-child-blocks
+  "Render `children` in the requested formats as one block-oriented view.
+
+   `render-ai` and `render-html` are format-bound render handles. A format is
+   evaluated only when requested and declared on the block. Blank AI and nil
+   HTML results disappear independently; a block remains when either requested
+   format produced content. This is the one projection consumed by prompt,
+   agent view, and debug view — no parallel text/html collections to correlate."
+  [children formats render-ai render-html]
   (->> children
-       (filter block-renders-ai?)
-       (map #(render-child-text render %))
-       (remove (comp str/blank? :seon.render/text))
+       (keep
+         (fn [child]
+           (let [base {:seon.agent.ctx/name     (:seon.agent.ctx/name child)
+                       :seon.agent.ctx/priority (:seon.agent.ctx/priority child)}
+                 text (when (and (contains? formats :ai)
+                                 (block-renders-ai? child))
+                        (render-ai child))
+                 html (when (and (contains? formats :html)
+                                 (contains? child :seon.render/html))
+                        (render-html child))
+                 out  (cond-> base
+                        (and (string? text) (not (str/blank? text)))
+                        (assoc :seon.render/text text
+                               :seon.render/token-estimate (tokens/estimate text))
+
+                        (some? html)
+                        (assoc :seon.render/hiccup html
+                               :seon.render/html (:seon.render/html child)))]
+             (when (or (contains? out :seon.render/text)
+                       (contains? out :seon.render/hiccup))
+               out))))
        vec))
+
+(defn rendered-context-blocks
+  "Resolved context blocks for one agent and frozen db snapshot.
+
+   Reads the database-owned block collection, adds DB-derived auto-run blocks,
+   and renders only `formats` (`:ai`, `:html`, or both). Output stays block-
+   oriented so every consumer sees the same ordered identities. Rendering is a
+   pure projection and writes no datoms."
+  {:malli/schema [:=> [:catn [::ctx :map]
+                       [:seon.render/formats [:set [:enum :ai :html]]]]
+                  [:vector :map]]}
+  [ctx formats]
+  (let [root (context-root ctx)
+        ctx* (assoc ctx :seon.agent/entity (:seon.agent/entity root))]
+    (rendered-child-blocks
+      (:seon.agent.ctx/children root)
+      formats
+      #(render/render :seon.render/ai ctx* %)
+      #(render/render :seon.render/html ctx* %))))
 
 (defn render-context-ai
   "The ROOT renderable's `:ai` slot — the block renderer.
@@ -2207,7 +2580,8 @@
   {:malli/schema [:=> [:catn [::input :map]] :string]}
   [{:seon.render/keys [node render]}]
   (let [breakpoint (cache-breakpoint)
-        rendered  (rendered-block-texts render (:seon.agent.ctx/children node))
+        rendered  (rendered-child-blocks
+                    (:seon.agent.ctx/children node) #{:ai} render (constantly nil))
         bracketed (mapv (fn [s]
                           (assoc s :seon.render/bracketed
                                  (block-bracket-ai (:seon.agent.ctx/name s)
@@ -2234,15 +2608,13 @@
    Renders each child's html twin via the
    injected handle, one card per renderable (eval cards short, per-item — NOT
    a section-level dump), in render order."
-  {:malli/schema [:=> [:catn [::input :map]] :seon.render.live-tile/hiccup]}
+  {:malli/schema [:=> [:catn [::input :map]] :seon.render.canvas/hiccup]}
   [{:seon.render/keys [node render]}]
   (into [:div {:class "flex flex-col gap-2"}]
-        (->> (:seon.agent.ctx/children node)
-             (keep (fn [child]
-                     (when-let [h (render child)]
-                       [:section {:data-section (clojure.core/name
-                                                  (:seon.agent.ctx/name child :unnamed))}
-                        h]))))))
+        (map (fn [{nm :seon.agent.ctx/name h :seon.render/hiccup}]
+               [:section {:data-context-block (clojure.core/name nm)} h]))
+        (rendered-child-blocks
+          (:seon.agent.ctx/children node) #{:html} (constantly nil) render)))
 
 ;; ============================================================
 ;; Block-chain KV cache keys — the Seon half of the prefix-KV reuse win.
@@ -2328,8 +2700,8 @@
    (`::blocks`, `:seon.agent/id`) only — no I/O, no GPU.
 
    `::blocks` is the turn's `:seon.render/text`-bearing blocks in prompt order
-   (static→volatile, the `seon.config/default-ctx-blocks` ordering — soul…:namespaces
-   then the volatile tail), as produced by [[rendered-block-texts]]. The
+   (static→volatile by stored priority), as produced by
+   [[rendered-context-blocks]]. The
    output `::chain-hashes` is parallel to `::blocks`: hash i fingerprints the
    exact block prefix 0..i, salted at the root by `:seon.agent/id`.
 
@@ -2353,32 +2725,3 @@
                (conj acc (block-chain-hash parent (:seon.render/text block) salt))))
            []
            (map-indexed vector blocks))})
-
-(defn ctx-sections
-  "Structured per-section breakdown for the INSPECTOR.
-
-   One entry per
-   non-blank section, each carrying its name + the exact ai text it
-   contributes (left pane, foldable) + its html twin (right pane, one card
-   per renderable). Derives from the SAME `context-root` + `render` the
-   prompt uses, so the debug view can never drift from the agent's context."
-  {:malli/schema [:=> [:catn [::ctx :map]] :map]}
-  [{:as ctx}]
-  (let [root     (context-root ctx)
-        children (:seon.agent.ctx/children root)
-        ctx*     (assoc ctx :seon.agent/entity (:seon.agent/entity root))
-        rh       #(render/render :seon.render/html ctx* %)
-        ra       #(render/render :seon.render/ai   ctx* %)
-        ;; Per-block texts — the SAME path the joined prompt takes, so the
-        ;; inspector's left pane shows exactly what each block contributes.
-        texts    (->> (rendered-block-texts ra children)
-                      (mapv #(select-keys % [:seon.agent.ctx/name :seon.render/text])))
-        htmls    (->> children
-                      (keep (fn [c]
-                              (when-let [h (rh c)]
-                                {:seon.agent.ctx/name      (:seon.agent.ctx/name c)
-                                 :seon.render/hiccup h})))
-                      vec)]
-    {:seon.render/section-texts texts
-     :seon.render/section-html  htmls}))
-

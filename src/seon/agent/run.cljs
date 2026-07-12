@@ -17,19 +17,28 @@
    This namespace OWNS the `:seon.agent.run/*` schemas and the lifecycle:
    `open-run!` / `close-run!` / `renew!` / `beat!` / `current-run` /
    `snapshot` / `turn-limit-reached?` / `deadline-passed?` /
-   `close-overdue-runs!` — the deadline WATCHDOG, the wall-clock half of the
-   one ticker ([[seon.agent.loop/install-ticker!]]; the schedule half is
-   `seon.agent.schedule/fire-due-schedules!`).
+   `close-overdue-runs!` — the deadline WATCHDOG — and `close-stale-runs!` —
+   the HEARTBEAT watchdog (both scans run each pass of the one ticker,
+   [[seon.agent.loop/run-tick!]]; the schedule half is
+   `seon.agent.schedule/fire-due-schedules!`). `close-run!` is also the ONE
+   choke point that fires the Piece 2b parent/root OUTCOME notice.
 
    Dependency direction (acyclic): it transacts via `seon.db` directly and
-   references `:seon.agent/*` keywords from the global registry (no require —
-   the id slot is typed `:seon.db/id`, not `:seon.agent/id`, so this ns has NO
-   load-time dependency on seon.agent). It requires the [[seon.derive]] leaf so
-   `current-run` is a thin `*conn*` adapter over the one derivation; seon.agent
-   requires THIS ns, so the edge runs agent → run → derive, never the reverse."
+   references `:seon.agent/*` keywords from the global registry (the id slot is
+   typed `:seon.db/id`, not `:seon.agent/id`, so this ns has NO load-time
+   dependency on seon.agent). It requires the [[seon.derive]] leaf so
+   `current-run` is a thin `*conn*` adapter over the one derivation, plus
+   [[seon.agent.message]] (to send outcome notices — that ns never requires run
+   back, so acyclic) and the [[seon.error]] leaf (to record a wedge as a
+   `:core` fault). seon.agent requires THIS ns, so the edge runs
+   agent → run → {derive, message, error}, never the reverse."
   (:require
+    [seon.agent.ctx :as ctx]
+    [seon.agent.message :as msg]
+    [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.derive :as derive]
+    [seon.error :as error]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -62,6 +71,24 @@
                   [:enum :completed :waited :turn-limit :deadline-exceeded
                          :terminated :superseded :error :no-forms :crashed])
 
+;; DURABLE RETURN VALUE (multi-agent-context Piece 1). `complete` writes these
+;; onto the run when it closes it `:completed`: `result` is the short answer or
+;; a pointer one-liner — the DURABLE counterpart to the wake MESSAGE `complete`
+;; also sends (message = wake signal, datom = the value a parent reads back at
+;; any later time, even after a restart); `result-ref` OPTIONALLY points at the
+;; stored work product (a `my.kb` source, a blob entity, a plan root). Both
+;; reference the canonical shapes; never inline.
+(schema/register! :seon.agent.run/result     :string)
+(schema/register! :seon.agent.run/result-ref :seon.db/ref)
+;; The close instant — written in EVERY close tx alongside `closed-reason`
+;; (whichever reason). Run duration is derivable (`closed-at − started-at`),
+;; and the Piece 2d circuit breaker windows over THIS (datahike `:db/txInstant`
+;; cannot be backdated, so a stored close instant is what tests window over).
+(schema/register! :seon.agent.run/closed-at  :inst)
+;; Watchdog staleness threshold (ms) — a slot label for `close-stale-runs!`'s
+;; request (the value is config-dialed; see `seon.config/watchdog-stale-ms`).
+(schema/register! :seon.agent.run/stale-ms   :int)
+
 ;; Stored entity kind — required attrs reflect what `open-run!` writes
 ;; unconditionally; everything conditional is {:optional true} (absent = no
 ;; key, never nil).
@@ -78,7 +105,10 @@
    [:seon.agent.run/last-beat-at  {:optional true} :seon.agent.run/last-beat-at]
    [:seon.agent.run/paused-at     {:optional true} :seon.agent.run/paused-at]
    [:seon.agent.run/remaining-ms  {:optional true} :seon.agent.run/remaining-ms]
-   [:seon.agent.run/closed-reason {:optional true} :seon.agent.run/closed-reason]])
+   [:seon.agent.run/closed-reason {:optional true} :seon.agent.run/closed-reason]
+   [:seon.agent.run/result        {:optional true} :seon.agent.run/result]
+   [:seon.agent.run/result-ref    {:optional true} :seon.agent.run/result-ref]
+   [:seon.agent.run/closed-at     {:optional true} :seon.agent.run/closed-at]])
 
 ;; Slot schemas for the positional predicates below (registered so the
 ;; :catn labels resolve — the shared-shape / named-arg conventions).
@@ -90,8 +120,23 @@
 ;; ============================================================
 
 (def default-turn-limit
-  "Work-bound seed when the agent has no `:seon.agent/default-turn-limit`."
+  "Work-bound seed when the agent has no `:seon.agent/default-turn-limit`.
+
+   Denominated in the loop's work unit for repl-mode `:batch`: TURNS."
   20)
+
+(def default-form-limit
+  "Work-bound seed under repl-mode `:stream` — denominated in FORMS.
+
+   One stream turn evals at most one form, so the bound is form-count
+   ([[seon.derive/run-form-count]]). 3× the batch default: a `:batch` turn
+   averaged ~5.6 forms in the repl-milestone rung-0 matrix, and the
+   namespaces-milestone rung-1 gate drive
+   showed a 20-form budget strands a multi-phase task short of its
+   report (evals/runs/2026-07-10-minimal-buildup, ds-r1-ns-move-v1-d1).
+   An agent-level `:seon.agent/default-turn-limit` or an explicit
+   request seed still wins, whatever the mode."
+  60)
 
 (def default-deadline-ms
   "Wall-clock-bound seed (10 min) when the agent has no
@@ -263,7 +308,11 @@
             turn-limit (or tl
                            (:seon.agent.run/default-turn-limit a)
                            (:seon.agent/default-turn-limit a)
-                           default-turn-limit)
+                           ;; mode-denominated const fallback: forms under
+                           ;; :stream, turns under :batch (repl-milestone rung-0 verdict).
+                           (if (= :stream (ctx/repl-mode @db/*conn*))
+                             default-form-limit
+                             default-turn-limit))
             deadline   (or dl (js/Date. (+ (.getTime now)
                                            (or (::default-deadline-ms a)
                                                (:seon.agent/default-deadline-ms a)
@@ -312,16 +361,104 @@
    pointer, all in ONE tx — so a supersede landing in the owns?-read→commit
    window aborts the whole tx instead of retracting the NEW owner's pointer
    (the pointer only moves off this run via a concurrent close, which already
-   closed it). Pure (no db read) so the fence wiring is unit-testable."
-  [owns? agent-id run-id reason]
+   closed it). Pure (no db read) so the fence wiring is unit-testable. Every
+   close stamps `:seon.agent.run/closed-at` = `closed-at` alongside the reason."
+  [owns? agent-id run-id reason closed-at]
   (let [close-row {:seon.agent.run/id            run-id
                    :seon.agent.run/status        :closed
-                   :seon.agent.run/closed-reason reason}]
+                   :seon.agent.run/closed-reason reason
+                   :seon.agent.run/closed-at     closed-at}]
     (if owns?
       [(run-fence agent-id run-id)
        close-row
        [:db/retract [:seon.agent/id agent-id] :seon.agent/run]]
       [close-row])))
+
+;; ============================================================
+;; Outcome routing (multi-agent-context Piece 2b) — a closed run is a TASK
+;; OUTCOME, and the task's owner is the PARENT. `close-run!` is the ONE choke
+;; point every abnormal close funnels through (the loop's bound closes, the
+;; deadline watchdog, the heartbeat watchdog, boot crash-recovery all call it),
+;; so the parent notice lives HERE, once — never sprinkled across the close
+;; sites. Notices go out only for the OUTCOME reasons below; `:completed` is
+;; excluded (`seon.agent.lifecycle/complete` sends the result itself),
+;; `:waited`/`:terminated`/`:superseded` are not outcomes. A notice is an
+;; `:agent`-origin message `from` the child — the loop/watchdog sends ON THE
+;; CHILD'S BEHALF (same authorship model as `complete`), so it WAKES the parent
+;; through the normal inbound gate. NOT `:core`: `waking-inbound?` (message.cljs)
+;; excludes `:core`-origin messages from waking, and an outcome notice that
+;; can't wake a parked parent defeats the design. `:crashed` (a wedge) ALSO
+;; escalates to root, deduped when the parent already IS root. Root's OWN wedge
+;; is parentless → the notice goes to the user and root stays idle (the
+;; stay-idle ruling: a self-message would be refused and no rewake is wanted).
+;; ============================================================
+
+(def ^:private outcome-reasons
+  "The `closed-reason`s that message the PARENT (Piece 2b). `:completed` is
+   NOT here — `complete` owns the result message; `:waited`/`:terminated`/
+   `:superseded` are not task outcomes."
+  #{:turn-limit :deadline-exceeded :error :no-forms :crashed})
+
+(def ^:private root-id
+  "The orchestrator-root's literal id (carved into `:seon.agent/id`)." "root")
+
+(defn- outcome-notice-content
+  "The short parent-facing notice text for a closed run outcome."
+  [child-id reason turns purpose]
+  (str "run for " child-id " closed :" (name reason)
+       " after " turns " turn" (when (not= 1 turns) "s")
+       (when (and (string? purpose) (seq purpose))
+         ;; TOKEN-budgeted clip (the one estimator) — never a raw char subs.
+         (str " — " (tokens/clip-str purpose 20)))
+       (when (contains? #{:turn-limit :deadline-exceeded} reason)
+         (str " · budget exhausted, not death: message me again to open a "
+              "fresh run (my context + plan persist)."))))
+
+(defn ^:async ^:private notify-outcome!
+  "Message the parent (or the user) that the run closed with `reason`.
+
+   On `:crashed` also escalate to root. `origin :agent`, `from` the child — so
+   it WAKES the parent through the normal inbound gate. A no-op for
+   non-outcome reasons. Errors are values — a failed notice is logged, never
+   re-thrown into the close."
+  [db child-id reason run-id]
+  (when (contains? outcome-reasons reason)
+    (let [child     (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id child-id]})
+          parent-id (:seon.agent/id (:seon.agent/parent child))
+          purpose   (:seon.agent/purpose child)
+          turns     (derive/run-turn-count db run-id)
+          content   (outcome-notice-content child-id reason turns purpose)
+          parent-to (if parent-id [:seon.agent/id parent-id] msg/user-ref)
+          ;; Sent IN THE CHILD'S SCOPE: the notice goes out on the child's
+          ;; behalf, so hop derivation uses the child's per-pair depth (the
+          ;; ping-pong guard applies to a notice storm exactly as to any
+          ;; agent send — the message always TRANSACTS; only waking is
+          ;; hop-gated at the trigger).
+          send!     (fn ^:async send-notice! [to]
+                      (db/with-agent child-id
+                        (fn ^:async notice! []
+                          (await
+                            (msg/message! {:seon.agent.message/content content
+                                           :seon.agent.message/from    [:seon.agent/id child-id]
+                                           :seon.agent.message/to       [to]
+                                           :seon.agent.message/origin  :agent})))))]
+      (let [env (await (send! parent-to))]
+        (when (false? (:seon.db/ok? env))
+          (js/console.error
+            (str "seon.agent.run/notify-outcome!: parent notice FAILED for "
+                 child-id " (" (name reason) "): "
+                 (:seon.error/message (:seon.db/error env))))))
+      ;; Wedge escalation: a :crashed run additionally tells root — but never
+      ;; a self-message (child IS root) and never a duplicate (parent IS root).
+      (when (and (= reason :crashed)
+                 (not= child-id root-id)
+                 (not= parent-id root-id)
+                 (some? (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id root-id]})))
+        (let [env (await (send! [:seon.agent/id root-id]))]
+          (when (false? (:seon.db/ok? env))
+            (js/console.error
+              (str "seon.agent.run/notify-outcome!: root escalation FAILED for "
+                   child-id ": " (:seon.error/message (:seon.db/error env))))))))))
 
 (defn ^:async close-run!
   "Close a run — `:status :closed` + `closed-reason`.
@@ -357,9 +494,16 @@
             ;; mark this run closed but leave the live pointer untouched.
             owns?     (and agent-id
                            (= run-id (:seon.agent.run/id
-                                       (derive/current-run @db/*conn* agent-id))))]
-        (await (db/transact!
-                 {:seon.db/tx-data (close-tx-data owns? agent-id run-id reason)}))))))
+                                       (derive/current-run @db/*conn* agent-id))))
+            env       (await (db/transact!
+                               {:seon.db/tx-data
+                                (close-tx-data owns? agent-id run-id reason (js/Date.))}))]
+        ;; Piece 2b — route the parent/root OUTCOME notice through this one
+        ;; choke point (only after the close committed; only for an outcome
+        ;; reason; never for :completed, which `complete` messages itself).
+        (when (and (:seon.db/ok? env) agent-id)
+          (await (notify-outcome! @db/*conn* agent-id reason run-id)))
+        env))))
 
 (schema/register! ::renew-request
   [:map
@@ -472,7 +616,7 @@
 ;; ============================================================
 ;; The deadline WATCHDOG — the wall-clock half of the one ticker
 ;; ([[seon.agent.loop/install-ticker!]]). The DB is passive about wall-clock:
-;; `now > deadline` is true in the world, but nothing fires until something
+;; `now > deadline` is true in the cluster, but nothing fires until something
 ;; checks. This scan IS that check — the EXTERNAL enforcement of the clock
 ;; bound (a stalled LLM burns the clock and can't self-detect). A run whose
 ;; async turn overran its deadline is closed here; when the await returns the
@@ -514,6 +658,93 @@
                             :seon.agent.run/closed-reason :deadline-exceeded}))
         (recur more)))
     {:seon.agent.run/closed overdue}))
+
+;; ============================================================
+;; The HEARTBEAT WATCHDOG (multi-agent-context Piece 2c) — a WEDGED agent
+;; never closes its own run (no event ever fires), so a stale heartbeat needs
+;; an observer OUTSIDE the agent. This is a stateless SCAN (no per-run armed
+;; timers — everything derived from datoms each pass, so it survives a pod
+;; restart and catches a pre-restart wedge on the first scan). Reuses the ONE
+;; ticker ([[seon.agent.loop/run-tick!]] calls this each pass) — no parallel
+;; setInterval. On an OPEN, non-paused run whose freshness anchor
+;; (`last-beat-at`, else `started-at`) is older than `stale-ms`:
+;;   1. close it `:crashed` (→ [[close-run!]] retracts the pointer so the
+;;      agent falls to :idle+wakeable AND fires the Piece 2b parent/root
+;;      notice via the one choke point), then
+;;   2. `seon.error/record!` a `:core` fault so the wedge enters the standard
+;;      triage chain (watch-faults → inspect → repro → fork). Under the dev
+;;      `:crash` dial the pod exits loudly on a wedge — the house posture.
+;; Fencing already covers the false-positive case: the pointer retract in
+;; close-run! means a late-beating driver's leading CAS aborts (lost authority
+;; → the loop terminates) — a no-op, never a double-drive. PAUSED runs are
+;; SKIPPED (a paused agent legitimately does not beat).
+;; ============================================================
+
+(defn stale-run-ids
+  "Open, non-paused run-ids whose heartbeat is stale at `now`.
+
+   A PURE fn of (db, now, stale-ms) — `now` is an argument, never an inline
+   clock, so the scan is deterministic (a test backdates beats + passes a
+   chosen `now`; zero timers). The freshness anchor is `:last-beat-at`, or
+   `:started-at` for a run that NEVER beat (a wedge before the first beat must
+   not be invisible). PAUSED runs are excluded (they legitimately don't beat)."
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+                             [:seon.agent/now :inst]
+                             [:seon.agent.run/stale-ms :seon.agent.run/stale-ms]]
+                  [:vector :seon.agent.run/id]]}
+  [db now stale-ms]
+  (let [cutoff (- (.getTime ^js now) stale-ms)]
+    (->> (db/query
+           {:seon.db/db db
+            :seon.db/query
+            '[:find ?rid ?started
+              :where
+              [?r :seon.agent.run/status :open]
+              [?r :seon.agent.run/id ?rid]
+              [?r :seon.agent.run/started-at ?started]
+              (not [?r :seon.agent.run/paused-at _])]})
+         (keep (fn [[rid started]]
+                 (let [beat   (:seon.agent.run/last-beat-at
+                                (db/entity {:seon.db/db db
+                                            :seon.db/ref [:seon.agent.run/id rid]}))
+                       anchor (or beat started)]
+                   (when (< (.getTime ^js anchor) cutoff) rid))))
+         vec)))
+
+(schema/register! ::close-stale-request
+  [:map
+   [:seon.agent/now           :inst]
+   [:seon.agent.run/stale-ms  :seon.agent.run/stale-ms]])
+
+(defn ^:async close-stale-runs!
+  "Close every open run whose heartbeat is stale at `now` as `:crashed`.
+
+   The effectful SHELL over the pure [[stale-run-ids]] scan.
+   For each stale run close it `:crashed` (via [[close-run!]] — the Piece 2b
+   parent/root outcome notice + the pointer retract that unsticks the agent)
+   and `seon.error/record!` a `:core` fault (the wedge is OUR bug — it plugs
+   into the triage chain: watch-faults → inspect → repro → fork). Close FIRST
+   so the notice + retract land regardless of the dial, THEN record — on the
+   dev `:crash` dial the loud exit happens AFTER the agent is unstuck. Returns
+   the run-ids it closed (map-out). IDEMPOTENT — a re-scan finds the
+   now-`:closed` runs gone. `^:async`."
+  {:malli/schema [:=> [:cat ::close-stale-request] ::close-overdue-response]}
+  [{now :seon.agent/now stale-ms :seon.agent.run/stale-ms}]
+  (let [stale (stale-run-ids @db/*conn* now stale-ms)]
+    (loop [[rid & more] stale]
+      (when rid
+        (let [r    (db/entity {:seon.db/ref [:seon.agent.run/id rid]})
+              a-id (:seon.agent/id (db/entity (:db/id (:seon.agent.run/agent r))))]
+          (await (close-run! {:seon.agent.run/id            rid
+                              :seon.agent.run/closed-reason :crashed}))
+          (error/record!
+            {:seon.error/raw
+             (js/Error. (str "heartbeat watchdog: run " rid
+                             " (agent " a-id ") wedged — no heartbeat progress "
+                             "for ≥" stale-ms "ms; closed :crashed"))
+             :seon.error/fault :core}))
+        (recur more)))
+    {:seon.agent.run/closed stale}))
 
 ;; ============================================================
 ;; Boot CRASH-RECOVERY — the "restart to a known-good state" the run model

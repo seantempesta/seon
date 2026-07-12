@@ -1,0 +1,5 @@
+$ git apply --verbose
+
+Checking patch pylint/checkers/variables.py...
+Applied patch pylint/checkers/variables.py cleanly.
+

@@ -22,7 +22,7 @@ A TWO-LAYER toolkit on ONE markdown path:
   `seon.ui.components` (cljc). No effects, just `map → hiccup`.
 - **Layer 2 (R)** — thin effectful agent VERBS in a new `seon.agent.ui` that
   build a Layer-1 component and transact the resulting LITERAL hiccup onto the
-  calling agent's `:seon.render.live-tile/content` (the welcome-wiring move at
+  calling agent's `:seon.render.live-canvas/content` (the welcome-wiring move at
   `live_tile.cljs`; literal hiccup bypasses SCI). So an agent calls
   `(explain-pros-cons! {…})` and the human's hero tile shows the card — zero
   hiccup authoring by the agent.
@@ -58,7 +58,7 @@ Switch the 5 raw sites the mapping found:
 Safety: the serializer escapes the OWASP-5 by default and `md->hiccup` blocks
 `javascript:`/`data:` URLs — markdown-everywhere opens no injection surface even
 though the text is agent-authored. Constraint: splice `md/inline`'s seq with
-`into` (never a bare lazy `for`) so `live-tile/valid-hiccup?` accepts the tile.
+`into` (never a bare lazy `for`) so `live-canvas/valid-hiccup?` accepts the tile.
 
 ### 2. Message→todo visibility — derive, don't store
 
@@ -111,7 +111,7 @@ building" should drive the rest.
 
 1. Agree to own `seon.agent.ui` (the effectful verbs), the `:seon.ui/*` schema,
    and `seon.derive/agent-todos`?
-2. The verbs transact LITERAL hiccup onto `:seon.render.live-tile/content` — is
+2. The verbs transact LITERAL hiccup onto `:seon.render.live-canvas/content` — is
    that the right write path, or should it route through `/call`? (Literal hiccup
    bypasses SCI; the welcome-wiring already does this with a symbol.)
 3. `seon.ui.components` is shared cljc — fine for U to own, or co-own?

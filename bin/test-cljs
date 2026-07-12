@@ -9,9 +9,10 @@
 # Config seam (per-test manifest): the node test process inherits this shell's
 # env, so a run names its own manifest via SEON_CONFIG / SEON_PROFILE — the SAME
 # seam bin/seon + bin/acme expose (seon.config reads them):
-#   SEON_CONFIG=config/test.edn bin/test-cljs        # custom loadout/routes/skills
-#   SEON_PROFILE=minimal        bin/test-cljs        # a #profile variant of system.edn
-# Unset ⇒ config/system.edn / :default profile (today's behavior, unchanged).
+#   SEON_CONFIG=config/system.edn bin/test-cljs      # the dev-pod manifest
+#   SEON_CONFIG=config/other.edn  bin/test-cljs      # any custom loadout
+# Unset ⇒ config/test.edn (the :gate surface — see the on-core-error note
+# below; an explicit SEON_CONFIG always wins).
 #
 # Exit codes: 0 = pass, 1 = fail, 2 = compile/build error
 #
@@ -23,6 +24,19 @@
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
+# A Ctrl-C during the final `node | tee` pipeline used to leave the Node test
+# child reparented to launchd, where it kept a CPU core busy indefinitely.
+# Kill every direct child while this shell still owns them; normal completion
+# has no live children, so the EXIT arm is a no-op.
+cleanup_children() {
+  local children
+  children="$(pgrep -P $$ 2>/dev/null || true)"
+  if [ -n "$children" ]; then
+    kill $children 2>/dev/null || true
+  fi
+}
+trap cleanup_children EXIT INT TERM
+
 # Fail-loud render dial (seon.config/render-strict?): ON by default in the
 # test harness so a swallowed render/converter failure SCREAMS (throws with
 # the offending block + the full malli explain) the moment it happens,
@@ -30,6 +44,16 @@ cd "$(dirname "$0")/.."
 # prod pod boots WITHOUT this var → graceful guard-and-continue (a prod
 # agent must not hard-crash on one bad block). Respect an explicit override.
 export SEON_RENDER_STRICT="${SEON_RENDER_STRICT:-1}"
+
+# Core-fault dial per surface (error-blame-strict-gate, RULED 2026-07-04):
+# the SUITE/CI runner MUST stay :gate (a mid-run :core fault must NOT .exit
+# the shared node-test runner), while the dev pod may run :crash. The
+# sanctioned ONE-manifest path for a per-surface divergence is a SEPARATE
+# file (no #profile, env must not shadow config): config/test.edn leaves
+# :seon.config/on-core-error UNSET → the :gate default. Both the node-test
+# RUNTIME (seon.error/escalate! reads config/on-core-error) and the gate
+# below read this file, so they agree. An explicit SEON_CONFIG still wins.
+export SEON_CONFIG="${SEON_CONFIG:-config/test.edn}"
 
 BUILD=1
 
@@ -259,10 +283,36 @@ if [ "$TRUNCATED" -ne 0 ] && [ "$REAL_FAILS" -eq 0 ] && [ "$NODE_EXIT" -eq 0 ] &
   fi
 fi
 
+# ---------------------------------------------------------------------------
+# Core-fault strict gate (error-blame-strict-gate, RULED 2026-07-04).
+# seon.error/record! prints one `SEON-CORE-FAULT …` marker line per
+# :seon.error/fault :core error — a CORE bug (never an agent error; :agent
+# faults never print the marker, never gate). A run can be assertion-green
+# and still have accumulated one; under the manifest dial
+# :seon.config/on-core-error :gate (the default) that run FAILS. :log
+# disables the gate (prod/demo posture). The transcript IS the run bracket
+# here — the node-test world is hermetic per-test in-memory conns, so datom
+# counting has no stable store to bracket; the marker is the observable.
+# ---------------------------------------------------------------------------
+# Count SEON-CORE-FAULT markers but NOT the SEON-EXPECTED-CORE-FAULT variant
+# (a deliberately-provoked fault bracketed by seon.error/expecting-core-fault!
+# — datom still written, gate not counted). The two markers do not collide as
+# substrings, but the -v filter makes the intent explicit and robust.
+CORE_FAULTS=$(grep -a 'SEON-CORE-FAULT' "$TMPOUT" | grep -vac 'SEON-EXPECTED-CORE-FAULT')
+: "${CORE_FAULTS:=0}"
+CORE_MANIFEST="${SEON_CONFIG:-config/system.edn}"
+CORE_DIAL=$(grep -oE ':seon\.config/on-core-error[[:space:]]+:[a-z]+' "$CORE_MANIFEST" 2>/dev/null | awk '{print $2}' | head -1)
+CORE_DIAL="${CORE_DIAL:-:gate}"
+CORE_GATE_TRIPPED=0
+if [ "$CORE_DIAL" != ":log" ] && [ "$CORE_FAULTS" -gt 0 ]; then
+  CORE_GATE_TRIPPED=1
+fi
+
 VERDICT_FAIL=0
 [ "$NODE_EXIT" -ne 0 ] && VERDICT_FAIL=1
 [ "$TRUNCATED" -ne 0 ] && VERDICT_FAIL=1
 [ "$REAL_FAILS" -ne 0 ] && VERDICT_FAIL=1
+[ "$CORE_GATE_TRIPPED" -ne 0 ] && VERDICT_FAIL=1
 
 END=$(date +%s)
 ELAPSED=$((END - START))
@@ -297,6 +347,14 @@ else
     # cut guards against MB-sized single lines (datahike tx blobs inline whole
     # tx-data). Anchored to cljs.test's own "FAIL in ("/"ERROR in (".
     grep -aE '^(FAIL|ERROR) in \(' "$TMPOUT" | cut -c1-400 | head -40 || true
+  fi
+  if [ "$CORE_GATE_TRIPPED" -ne 0 ]; then
+    echo ""
+    echo "CORE-FAULT GATE (:seon.config/on-core-error ${CORE_DIAL}): the run"
+    echo "accumulated ${CORE_FAULTS} :seon.error/fault :core error(s) — CORE bugs,"
+    echo "independent of the assertions above. Fix the underlying defect (each"
+    echo "line below is one seon.error/record! marker):"
+    grep -a 'SEON-CORE-FAULT' "$TMPOUT" | grep -v 'SEON-EXPECTED-CORE-FAULT' | cut -c1-300 | head -20 || true
   fi
 fi
 echo "========================================"

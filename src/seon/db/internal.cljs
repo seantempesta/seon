@@ -18,6 +18,7 @@
     [datahike.api :as d]
     [datahike.db.interface :as dbi]
     [malli.core :as m]
+    [seon.ai.tokens :as tokens]
     [seon.db :as-alias db]
     [seon.error :as error]
     [seon.schema :as schema]))
@@ -45,7 +46,7 @@
 ;; fails loudly at ns load instead of silently at first transact.
 ;;
 ;; `agent-id-als` is distinct from `als-instance` (tx-context) so non-DB
-;; code paths (inspectors, section fns, web handlers) can read the active
+;; code paths (web UI, section fns, web handlers) can read the active
 ;; agent-id without depending on tx-context machinery.
 ;; ---------------------------------------------------------------------------
 
@@ -89,6 +90,13 @@
    returns `agent-id`; the inner scope wins under nesting."
   [agent-id f]
   (.run agent-id-als agent-id f))
+
+(defn run-without-agent
+  "Impl of `seon.db/without-agent`. Inside `f` — including across
+   `await`s and any async work `f` starts — `(current-agent-id)` is nil
+   (ALS `.exit`). The outer scope restores on return."
+  [f]
+  (.exit agent-id-als f))
 
 ;; ---------------------------------------------------------------------------
 ;; Tx-meta attrs (v1.md §2.3) — the causality bundle attached to every tx.
@@ -187,18 +195,24 @@
    :double  :db.type/double
    :float   :db.type/float
    :keyword :db.type/keyword
+   ;; The qualified variants narrow Malli VALIDATION only — datahike has
+   ;; one keyword/symbol type. (:seon.fn/read-attrs is [:set
+   ;; :qualified-keyword]; MIRRORED in the CLJ bridge leaf-type-map,
+   ;; seon.db.datahike.schema — keep the two lanes in lockstep.)
+   :qualified-keyword :db.type/keyword
    :boolean :db.type/boolean
    :inst    :db.type/instant
    :uuid    :db.type/uuid
-   :symbol  :db.type/symbol})
+   :symbol  :db.type/symbol
+   :qualified-symbol :db.type/symbol})
 
 (def bridge-supported-types
   "Human-readable list of the attr types the Malli→datahike bridge can
    store. Surfaced in the ensure-datahike-attrs! error so an agent that
    registered an unstorable type sees exactly what IS storable."
-  (str ":string :int :double :float :boolean :keyword :inst :uuid "
-       ":symbol :seon.db/ref, [:enum :a :b], or a container "
-       "[:vector|:set|:sequential <one of those>]"))
+  (str ":string :int :double :float :boolean :keyword :qualified-keyword "
+       ":inst :uuid :symbol :qualified-symbol :seon.db/ref, [:enum :a :b], "
+       "or a container [:vector|:set|:sequential <one of those>]"))
 
 (defn form-head
   "The head of a Malli form. For `[:string {:min 1}]` returns `:string`;
@@ -385,7 +399,7 @@
    map entities (including nested component maps) and `[:db/add e a v]`
    vector forms. ALWAYS pr-str's (strings included — `\"x\"` stores as
    `\"\\\"x\\\"\"`), so decode by `read-string` is unambiguous. Callers
-   re-transacting a PULLED value must decode first (the section verbs
+   re-transacting a PULLED value must decode first (the section functions
    do) — double-encoding is on them."
   [tx-data]
   (letfn [(encode-map [m]
@@ -505,14 +519,14 @@
                        :seon.error/kind      :user-input})))))
 
 (defn truncate-value
-  "Truncate a value's `pr-str` representation to 100 chars for error
-   messages — keeps error payloads readable when a malformed value is
-   large (e.g. a stringified pull pattern)."
+  "Bounded `pr-str` of `v` (~25 tokens) for quoting in error messages.
+
+   `seon.ai.tokens/bounded-pr-str` with this file's error-payload budget —
+   keeps error payloads readable when a malformed value is large (e.g. a
+   stringified pull pattern)."
+  {:malli/schema [:=> [:catn [::value :any]] :string]}
   [v]
-  (let [s (pr-str v)]
-    (if (> (count s) 100)
-      (str (subs s 0 97) "...")
-      s)))
+  (tokens/bounded-pr-str v 25))
 
 (defn normalize-entity-ref-keys
   "Rewrite the taught entity-identity shorthand — an entity map keyed by
@@ -1012,15 +1026,49 @@
               :seon.error/kind  :user-input}))))
 
 ;; ---------------------------------------------------------------------------
-;; Tx-meta auto-merge + origin-forge guard.
+;; Tx-meta auto-merge + origin stamp — derive-don't-claim provenance.
+;;
+;; `:seon.db/origin` on a committed tx is STAMPED here, at the transact
+;; boundary, from the ambient scope. Caller-passed `:tx-meta` origin is
+;; never consulted: the web UI's `on-tx` fan-out trusts a managed
+;; origin to push the tx to EVERY watching agent's pane, and the
+;; managed-row machinery (`seon.state/reconcile!`, boot-index GC) trusts
+;; it to classify rows as core — a caller-claimed origin would let an
+;; agent forge core provenance. The scope IS the claim.
 ;; ---------------------------------------------------------------------------
 
-(defn merge-tx-context-into-opts
-  "Merge `(current-tx-context)` AND `(current-agent-id)` into
-   `opts.:tx-meta`. Explicit `(:tx-meta opts)` keys win per-key; the
-   tx-context fills the next layer; the agent-id ALS fills the last.
+(def managed-origins
+  "Origins reserved for UNSCOPED core writers — the boot seed
+   (`:core-seed`) and the declarative config reconcile (`:config`).
+   [[derive-origin]] never lets an agent-scoped tx carry one."
+  #{:core-seed :config})
 
-   Precedence (highest → lowest):
+(defn derive-origin
+  "The true `:seon.db/origin` for the ambient scope, or nil (no scope).
+
+   - No agent scope → the tx-context origin as established by
+     `with-tx-context` (the boot seed / reconcile run OUTSIDE any agent
+     scope and establish `:core-seed` / `:config` there).
+   - Agent scope active → the tx-context origin (`:system`,
+     `:test-run`, `:replay` … — core code narrows its own agent-scoped
+     writes), EXCEPT a managed origin, which is a forge and stamps as
+     `:agent`, the honest value. No tx-context origin → `:agent`.
+   - No scope at all → nil (the tx stays untagged)."
+  [ctx agent-id]
+  (let [claimed (get ctx ::db/origin)]
+    (cond
+      (nil? agent-id)                claimed
+      (or (nil? claimed)
+          (managed-origins claimed)) :agent
+      :else                          claimed)))
+
+(defn merge-tx-context-into-opts
+  "Merge the ambient scope into `opts.:tx-meta` and stamp the derived
+   `:seon.db/origin`. Explicit `(:tx-meta opts)` keys win per-key —
+   EXCEPT `:seon.db/origin`, which is boundary-stamped from the scope
+   ([[derive-origin]]); a caller-passed origin is dropped.
+
+   Precedence for every other key (highest → lowest):
      1. explicit `:tx-meta` keys passed by the caller
      2. `(current-tx-context)` keys
      3. `(current-agent-id)` → `:seon.db/agent-id` (audit P1 — every
@@ -1029,58 +1077,23 @@
    Returns the (possibly-updated) opts, or nil if nothing to merge AND
    nothing was passed."
   [opts]
-  (let [ctx       (current-tx-context)
-        agent-id  (current-agent-id)
-        als-meta  (cond-> {}
-                    agent-id (assoc ::db/agent-id agent-id))
-        merged    (merge als-meta ctx)]
-    (cond
-      (and (nil? opts) (empty? merged))  nil
-      (empty? merged)                    opts
-      :else                              (update (or opts {}) :tx-meta
-                                                 #(merge merged %)))))
-
-;; ---------------------------------------------------------------------------
-;; Origin-forge guard (verifier rec, 2026-06-09). An AGENT-scoped tx that
-;; claims `:seon.db/origin :core-seed` is forging core
-;; provenance — the inspector's `on-tx` fan-out trusts that origin to
-;; push the tx to EVERY watching agent's pane, so a forging agent could
-;; spuriously wake all of its peers' renders.
-;;
-;; The intended enforcement is to OVERRIDE the origin to `:agent` (the
-;; honest value) and log. But TODAY the legitimate boot-seed path
-;; (`seon.client/seed-core!`) still runs INSIDE the booting agent's
-;; `with-agent` scope (known client.cljs issue, other lane), so the
-;; override would silently re-stamp every boot-seed tx and break the
-;; cross-agent visibility the seed depends on. Until the seed moves
-;; outside agent scope this guard is WARN-ONLY: log + count, commit
-;; unchanged.
-;;
-;; TODO(after client.cljs runs seed-core! OUTSIDE with-agent —
-;; #23's lane): flip to enforcement — override the origin to :agent
-;; (keep the warn), gated on a private `*core-seed-allowed*`
-;; binding the seed path establishes.
-;; ---------------------------------------------------------------------------
-
-(defonce !seed-origin-forge-count
-  ;; Public so tests can reset/read it. Counts agent-scoped tx that
-  ;; claimed :core-seed origin since pod boot.
-  (atom 0))
-
-(defn warn-on-seed-origin-forge!
-  "WARN-ONLY guard: when an agent scope is active and the merged
-   tx-meta claims `:seon.db/origin :core-seed`, log a console
-   warning and bump `!seed-origin-forge-count`. Returns `merged-opts`
-   unchanged (see the enforcement TODO above)."
-  [merged-opts]
-  (when (and (some? (current-agent-id))
-             (= :core-seed (get-in merged-opts [:tx-meta ::db/origin])))
-    (swap! !seed-origin-forge-count inc)
-    (js/console.warn
-      "seon.db/transact!: agent-scoped tx claims :seon.db/origin :core-seed — core provenance from inside an agent scope (warn-only; see warn-on-seed-origin-forge!)"
-      #js {:agent (current-agent-id)
-           :count @!seed-origin-forge-count}))
-  merged-opts)
+  (let [ctx      (current-tx-context)
+        agent-id (current-agent-id)
+        origin   (derive-origin ctx agent-id)
+        als-meta (cond-> {}
+                   agent-id (assoc ::db/agent-id agent-id))
+        merged   (merge als-meta ctx)]
+    (if (and (empty? merged)
+             (nil? origin)
+             (not (contains? (:tx-meta opts) ::db/origin)))
+      opts
+      (let [m (merge merged (:tx-meta opts))
+            m (if (some? origin)
+                (assoc m ::db/origin origin)
+                (not-empty (dissoc m ::db/origin)))]
+        (if (nil? m)
+          (not-empty (dissoc (or opts {}) :tx-meta))
+          (assoc (or opts {}) :tx-meta m))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Error envelopes — every failure path in the write pipeline resolves to
@@ -1089,16 +1102,17 @@
 
 (defn error-envelope
   "Build a `{::ok? false ::error <error-map>}` failure envelope from a
-   thrown error. Ensures `:seon.error/data` carries a `:seon.error/kind`
-   tag (defaulting to `:core-bug` when the throw didn't ship one).
+   thrown error. Ensures the envelope carries a top-level
+   `:seon.error/kind` tag (`error/->map` lifts a thrown ex-data kind
+   there — C45; `:core-bug` when the throw didn't ship one).
    `:user-input` is reserved for caller-fault paths — invocation shape,
    unregistered attr, value Malli failure. Anything else (datahike
    internals, store I/O, schema bridge bug) defaults to `:core-bug`."
   [e]
   (let [emap (error/->map e)
-        data (or (:seon.error/data emap) {})
-        kind (:seon.error/kind data :core-bug)
-        emap (assoc emap :seon.error/data (assoc data :seon.error/kind kind))]
+        emap (cond-> emap
+               (nil? (:seon.error/kind emap))
+               (assoc :seon.error/kind :core-bug))]
     {::db/ok? false ::db/error emap}))
 
 (def ^:private verbose-data-keys
@@ -1169,8 +1183,7 @@
                   (-> envelope
                       (assoc ::db/raw-error msg)
                       (assoc-in [::db/error :seon.error/message] guiding)
-                      (assoc-in [::db/error :seon.error/data :seon.error/kind]
-                                :user-input)))]
+                      (assoc-in [::db/error :seon.error/kind] :user-input)))]
     (cond
       (not (string? msg))
       envelope
@@ -1248,15 +1261,52 @@
    in current schema\". Now the whole transact fails with a legible
    `:user-input` error naming the attrs, their registered forms, and the
    supported type list — which `transact!`'s catch turns into the
-   `{::ok? false}` envelope the agent can SEE and act on."
+   `{::ok? false}` envelope the agent can SEE and act on.
+
+   RE-REGISTER DIVERGENCE GATE (real-REPL semantics, 2026-07-10): a
+   `schema/register!` that changed an ALREADY-INSTALLED attr's derived
+   `:db/valueType` / `:db/cardinality` used to be silently IGNORED
+   here (the attr was skipped as installed) — the Malli registry and
+   the store diverged until a value crashed the writer. Datahike
+   constitutionally REJECTS altering those in place
+   (`datahike.schema/find-invalid-schema-updates` — even with zero
+   datoms), so the divergence is surfaced as the same legible
+   `:user-input` error, naming the installed vs registered shape, the
+   live datom count, and the migration move: register the new shape
+   under a NEW attribute name, copy the old attr's values across, then
+   retract the old datoms. A re-register with the SAME derived shape
+   (tightened Malli constraints, docs) passes untouched. `:db/unique`
+   is deliberately NOT gated: an identity-flag mismatch against a
+   hand-installed store entry is a pre-existing tolerated divergence
+   (test scaffolding installs identity out of band), and datahike can
+   legally ADD uniqueness later."
   [conn attrs]
   (let [installed  (:schema @conn)
-        candidates (->> attrs
+        relevant   (->> attrs
                         (remove system-attr?)
                         (remove #(= :seon.db/ref %))
                         (filter schema/registered?)
-                        (remove #(contains? installed %))
                         distinct)
+        candidates (remove #(contains? installed %) relevant)
+        divergent  (into []
+                         (keep (fn [attr]
+                                 (when-some [cur (get installed attr)]
+                                   (let [derived (try (malli->datahike-attr attr)
+                                                      ;; unbridgeable NEW shape for an
+                                                      ;; installed attr — the divergence
+                                                      ;; message below names it too.
+                                                      (catch :default _ nil))
+                                         diff    (into {}
+                                                       (keep (fn [k]
+                                                               (let [o (get cur k)
+                                                                     n (get derived k)]
+                                                                 (when (and derived (not= o n))
+                                                                   [k [o n]]))))
+                                                       [:db/valueType
+                                                        :db/cardinality])]
+                                     (when (seq diff)
+                                       {::db/attr attr ::db/diff diff})))))
+                         (filter #(contains? installed %) relevant))
         {:keys [entries failures]}
         (reduce
           (fn [acc attr]
@@ -1269,6 +1319,28 @@
                          ::db/reason (or (.-message e) (str e))}))))
           {:entries [] :failures []}
           candidates)]
+    (when (seq divergent)
+      (let [with-counts
+            (mapv (fn [{attr ::db/attr :as d}]
+                    (assoc d ::db/datom-count
+                           (count (d/q '[:find ?e :in $ ?a :where [?e ?a _]]
+                                       @conn attr))))
+                  divergent)]
+        (throw (ex-info
+                 (str "Re-registering these attrs changed their stored shape, "
+                      "but they are already installed in datahike, which cannot "
+                      "alter :db/valueType / :db/cardinality in place: "
+                      (pr-str (mapv (fn [{attr ::db/attr diff ::db/diff
+                                          n ::db/datom-count}]
+                                      [attr diff {:datoms n}])
+                                    with-counts))
+                      " (per diff key: [installed registered-now]). Migration "
+                      "move: register the NEW shape under a NEW attribute name, "
+                      "copy the old attr's values across, then retract the old "
+                      "datoms — or re-register the original shape to converge.")
+                 {::db/error       :seon.db/schema-divergence
+                  ::db/divergent   with-counts
+                  :seon.error/kind :user-input}))))
     (when (seq failures)
       (throw (ex-info
                (str "These attrs are registered in seon.schema but their "
@@ -1365,8 +1437,7 @@
           ;; (throws :user-input on a malformed ref value — caught below).
           tx-data     (normalize-entity-ref-keys tx-data)
           attrs       (extract-tx-attrs tx-data)
-          merged-opts (warn-on-seed-origin-forge!
-                        (merge-tx-context-into-opts opts))]
+          merged-opts (merge-tx-context-into-opts opts)]
       ;; Validation gate — these THROW ex-info on bad input; the outer
       ;; catch below converts every throw to the failure envelope.
       (validate-attrs! attrs)

@@ -8,17 +8,17 @@ tags: [issue, agent, flow]
 # Context + loop wiring regression sweep — 2026-06-25
 
 Read-only audit of the CLJS pod's context composer + agentic loop on
-`feature/agent-fsm`. Hunt: wiring regressions of the live-tile class (a
+`feature/agent-fsm`. Hunt: wiring regressions of the canvas class (a
 section destructuring a ctx key the composer never supplies) and adjacent
-drift. The live-tile section itself is OUT of scope (already being fixed) —
+drift. The canvas section itself is OUT of scope (already being fixed) —
 it is the template for the bug class.
 
 ## Prioritized summary
 
 | # | Finding | Sev | Location |
 |---|---------|-----|----------|
-| F1 | `your-entity` section SILENTLY vanishes from the real prompt — same root cause as live-tile (ctx lacks `:seon.agent/entity`) | P0 | `seon/ctx/your_entity.cljs:26-27` + `seon/agent/turn.cljs:188` |
-| F2 | Entity-injection asymmetry: inspector path injects `:seon.agent/entity`, prompt path does NOT → the two diverge (the thing shared-render claims is impossible). One central fix resolves F1 + live-tile together | P1 | `seon/ctx.cljs:1922` vs `seon/agent/turn.cljs:188`; root pull at `ctx.cljs:1840-1847` |
+| F1 | `your-entity` section SILENTLY vanishes from the real prompt — same root cause as canvas (ctx lacks `:seon.agent/entity`) | P0 | `seon/ctx/your_entity.cljs:26-27` + `seon/agent/turn.cljs:188` |
+| F2 | Entity-injection asymmetry: inspector path injects `:seon.agent/entity`, prompt path does NOT → the two diverge (the thing shared-render claims is impossible). One central fix resolves F1 + canvas together | P1 | `seon/ctx.cljs:1922` vs `seon/agent/turn.cljs:188`; root pull at `ctx.cljs:1840-1847` |
 | F3 | Stale agent-facing contract: `add-section!` docstring promises section fns get `{:seon.db/db … :seon.agent/entity …}`; prompt path supplies only db+id | P1 | `seon/agent.cljs:633` |
 | F4 | Render guard masks regressions asymmetrically: a throw shows `;; ⚠ … render failed` (loud), but a section returning `""` on nil input vanishes with NO marker (silent) | P2 | `seon/render.cljs:643-648`; `your_entity.cljs:27` |
 | F5 | Duplicated sliding-window cap logic (drift risk between enforced cap and displayed cap) — justified by a require cycle but flagged | P2 | `seon/ctx.cljs:285` vs `seon/agent/loop.cljs:175` |
@@ -30,7 +30,7 @@ sections; the loop / lifecycle / message / todo FSM. Details at the bottom.
 ## Live proof
 
 Rendered prompt dump (`tmp/ctx-dump.txt`, 3037 lines) contains ONLY four
-section brackets: `soul` (1-51), `namespaces` (53-3007), `live-tile`
+section brackets: `soul` (1-51), `namespaces` (53-3007), `canvas`
 (3011-3013, the `⚠ render failed: :malli.core/invalid-input`), `transcript`
 (3015-3038). Missing entirely: `shared-instructions`, `your-entity`,
 `warnings`, `open-todos`, `inventory`.
@@ -74,21 +74,21 @@ dropped.
 **Expected:** the agent sees its own entity ("this map IS you") every turn —
 the surface the SOUL leans on ("transact onto your own entity", "add the
 section to your own context"). **Actual:** the section is absent from every
-real prompt. Identical root cause to the live-tile bug; live-tile THROWS
+real prompt. Identical root cause to the canvas bug; canvas THROWS
 (its `:malli/schema` requires the key), your-entity silently returns `""`,
 which is worse (no `⚠`).
 
 **Fix direction:** inject `:seon.agent/entity` into the ctx threaded to
-children (see F2 — one fix covers live-tile + your-entity).
+children (see F2 — one fix covers canvas + your-entity).
 
 ## F2 — entity-injection asymmetry: inspector ≠ prompt (P1, the root cause)
 
 The inspector path (`ctx-sections`, `ctx.cljs:1920-1922`) pulls the root and
 does `ctx* (assoc ctx :seon.agent/entity (:seon.agent/entity root))`, then
 renders each child with `ctx*` — so `:seon.agent/entity` IS in scope and
-your-entity/live-tile render there. The prompt path (`render-prompt`,
+your-entity/canvas render there. The prompt path (`render-prompt`,
 `turn.cljs:188`) does NOT do this assoc. Result: the inspector's debug view
-shows `your-entity` (and a working live-tile), the model's actual prompt
+shows `your-entity` (and a working canvas), the model's actual prompt
 drops both — the exact divergence the shared-render design claims is
 impossible ("the human's debug view and the model's prompt can never
 diverge", `turn.cljs:177-178`).
@@ -97,8 +97,8 @@ diverge", `turn.cljs:177-178`).
 neither caller can forget — e.g. have `render-context-ai`/`context-root`
 re-inject the pulled `:seon.agent/entity` into the ctx its children render
 under, or pull-once-and-assoc inside `render-prompt` exactly as
-`ctx-sections` already does. A single central fix resolves F1, live-tile,
-and any future entity-reading section at once. Do NOT fix live-tile
+`ctx-sections` already does. A single central fix resolves F1, canvas,
+and any future entity-reading section at once. Do NOT fix canvas
 narrowly (e.g. re-pulling inside the tile) — that leaves your-entity broken.
 
 ## F3 — stale agent-facing contract in `add-section!` (P1)
@@ -121,7 +121,7 @@ this when F2 is fixed.)
 
 `render.cljs:643-648`: a section fn that THROWS is caught and rendered as
 `;; ⚠ [name] render failed: <msg>` — loud, self-healing, good (this is how
-live-tile is visible). But a section that returns `""` (your-entity on nil
+canvas is visible). But a section that returns `""` (your-entity on nil
 entity, `your_entity.cljs:27`) is indistinguishable from a legitimately
 empty section (warnings/todos/inventory on clean state) and vanishes with no
 marker. So the guard surfaces throw-class regressions but HIDES
@@ -190,7 +190,7 @@ pure window computation into a cycle-free helper ns both require, or accept
 ## One-line fix ordering for the orchestrator
 
 F2 is the keystone — fixing entity-injection centrally resolves F1
-(your-entity), the in-flight live-tile bug, and makes F3's contract true.
+(your-entity), the in-flight canvas bug, and makes F3's contract true.
 F4 disappears once F2 lands. F5 is independent cleanup.
 
 ## Resolution (2026-06-28 audit)

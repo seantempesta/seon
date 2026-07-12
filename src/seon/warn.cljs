@@ -54,7 +54,7 @@
 (schema/register! :seon.warn/example :string)
 (schema/register! :seon.warn/urgent? :boolean)
 ;; DEV-ONLY tier: a check sets this true when its defect is a
-;; schema-hygiene / display concern for the dev/inspector surface, NOT an
+;; schema-hygiene / display concern for the dev/web-UI surface, NOT an
 ;; agent task. render-warnings drops dev-only clusters from the agent
 ;; render unless :seon.warn/include-dev? is passed (the dev surface opts
 ;; in). Absent ≡ false (agent-actionable). Derived classification, nothing
@@ -74,7 +74,7 @@
   [:map
    [:seon.db/db   :seon.db/db]
    [:seon.warn/ns {:optional true} :seon.warn/ns]
-   ;; When truthy, dev-only clusters are KEPT (the dev/inspector surface
+   ;; When truthy, dev-only clusters are KEPT (the dev/web-UI surface
    ;; opts in). The agent render path passes nothing → dev-only suppressed.
    [:seon.warn/include-dev? {:optional true} :seon.warn/include-dev?]])
 
@@ -85,7 +85,7 @@
    [:seon.warn/explain  :seon.warn/explain]
    [:seon.warn/example  :seon.warn/example]
    ;; URGENCY tier: a check sets this true when its defect is one the
-   ;; human is hitting RIGHT NOW (e.g. a broken live tile). render-warnings
+   ;; human is hitting RIGHT NOW (e.g. a broken canvas). render-warnings
    ;; renders urgent clusters FIRST with a louder template. Absent ≡ false.
    [:seon.warn/urgent?  {:optional true} :seon.warn/urgent?]
    ;; DEV-ONLY tier: a schema-hygiene/display concern for the dev surface,
@@ -99,7 +99,9 @@
 (defn- fn-rows
   "Every `:seon.fn` row joined to its owning ns name, optionally
    filtered to `ns-kw` (compared by `name` so :my.ns ≡ 'my.ns).
-   Each row: {:sym :ns :spec :fn-var? :private? :schema-error}.
+   Each row is a projection speaking the PERSISTED attr keys
+   (`:seon.fn/sym`/`:seon.ns/name`/`:seon.fn/spec`/`:seon.fn/fn-var?`/
+   `:seon.fn/private?`/`:seon.fn/schema-error` — C39, no bare twins).
    Absent attrs come back as \"\" / sentinel defaults via get-else."
   [db ns-kw]
   (let [rows (db/query
@@ -115,11 +117,12 @@
                   [(get-else $ ?f :seon.fn/private? false) ?priv]
                   [(get-else $ ?f :seon.fn/schema-error "") ?err]]})
         all  (map (fn [[sym nm spec fnvar priv err]]
-                    {:sym sym :ns (name nm) :spec spec
-                     :fn-var? fnvar :private? priv :schema-error err})
+                    {:seon.fn/sym sym :seon.ns/name nm :seon.fn/spec spec
+                     :seon.fn/fn-var? fnvar :seon.fn/private? priv
+                     :seon.fn/schema-error err})
                   rows)]
     (if ns-kw
-      (filter #(= (name ns-kw) (:ns %)) all)
+      (filter #(= (name ns-kw) (name (:seon.ns/name %))) all)
       all)))
 
 (defn- public-fn-rows
@@ -127,8 +130,8 @@
    apply to. Private helpers and non-fn defs are exempt."
   [db ns-kw]
   (->> (fn-rows db ns-kw)
-       (filter :fn-var?)
-       (remove :private?)))
+       (filter :seon.fn/fn-var?)
+       (remove :seon.fn/private?)))
 
 (defn- parse-spec
   "Read a `:seon.fn/spec` string (pr-str'd Malli form) back to data.
@@ -163,17 +166,17 @@
 
 (defn- arg-entries
   "The argument slots of an arity's input form, each
-   `{:label <string> :schema <form>}`. `[:catn [name spec]…]` slots are
-   labelled by name; `[:cat …]` slots by 1-based position."
+   `{::label <string> ::schema <form>}`. `[:catn [name spec]…]` slots
+   are labelled by name; `[:cat …]` slots by 1-based position."
   [input-form]
   (let [input (strip-props input-form)]
     (when (and (vector? input) (#{:cat :catn} (first input)))
       (if (= :catn (first input))
         (for [entry (rest input)
               :when (vector? entry)]
-          {:label  (str "arg " (first entry))
-           :schema (last entry)})
-        (map-indexed (fn [i s] {:label (str "arg " (inc i)) :schema s})
+          {::label  (str "arg " (first entry))
+           ::schema (last entry)})
+        (map-indexed (fn [i s] {::label (str "arg " (inc i)) ::schema s})
                      (rest input))))))
 
 (defn- form-contains-maybe?
@@ -215,7 +218,7 @@
          "  {:malli/schema [:=> [:cat :string] :string]}\n"
          "  [who]\n"
          "  (str \"hi \" who))")
-    (fn [{:keys [sym spec schema-error]}]
+    (fn [{:seon.fn/keys [sym spec schema-error]}]
       (when (and (str/blank? spec) (str/blank? schema-error))
         [{:seon.warn/sym sym}]))))
 
@@ -231,7 +234,7 @@
          "third-party library returns that you don't control.")
     (str ";; before: [:=> [:cat :string] :any]\n"
          ";; after:  [:=> [:cat :string] :string]")
-    (fn [{:keys [sym spec]}]
+    (fn [{:seon.fn/keys [sym spec]}]
       (for [arity (arity-forms (parse-spec spec))
             :when (= :any (last arity))]
         {:seon.warn/sym sym :seon.warn/where "return"}))))
@@ -247,9 +250,9 @@
          "allowed only for third-party boundary values.")
     (str ";; before: [:=> [:catn [:kb.doc/title :any]] :string]\n"
          ";; after:  [:=> [:catn [:kb.doc/title :string]] :string]")
-    (fn [{:keys [sym spec]}]
+    (fn [{:seon.fn/keys [sym spec]}]
       (for [arity (arity-forms (parse-spec spec))
-            {:keys [label schema]} (arg-entries (second arity))
+            {::keys [label schema]} (arg-entries (second arity))
             :when (= :any schema)]
         {:seon.warn/sym sym :seon.warn/where label}))))
 
@@ -264,7 +267,7 @@
          "Use {:optional true} on the map entry, or a concrete type.")
     (str ";; before: [:map [:kb.doc/title [:maybe :string]]]\n"
          ";; after:  [:map [:kb.doc/title {:optional true} :string]]")
-    (fn [{:keys [sym spec]}]
+    (fn [{:seon.fn/keys [sym spec]}]
       (when-let [form (parse-spec spec)]
         (when (form-contains-maybe? form)
           [{:seon.warn/sym sym :seon.warn/where "schema"}])))))
@@ -279,7 +282,7 @@
          "[:=> [:cat …inputs…] <return>] — add the return.")
     (str ";; before: [:=> [:cat :string]]\n"
          ";; after:  [:=> [:cat :string] :string]")
-    (fn [{:keys [sym spec]}]
+    (fn [{:seon.fn/keys [sym spec]}]
       (for [arity (arity-forms (parse-spec spec))
             :let [input (strip-props (second arity))]
             ;; only when the input IS present (a [:cat …] form) — a
@@ -299,7 +302,7 @@
          "Every arity specs ALL its arguments — a 0-arg fn uses [:cat].")
     (str ";; before: [:=> :string]\n"
          ";; after:  [:=> [:cat] :string]")
-    (fn [{:keys [sym spec]}]
+    (fn [{:seon.fn/keys [sym spec]}]
       (for [arity (arity-forms (parse-spec spec))
             :let [input (strip-props (second arity))]
             :when (and (some? input)
@@ -324,9 +327,9 @@
    `:seon.schema` row by `seon.eval/build-tee-entities`, in an
    agent-origin tx), as opposed to the core's own registrations
    (boot-seeded by `seon.client/index-schemas` /
-   `all-entity-schemas-tx-data`, always inside the
-   `{:seon.db/origin :core-seed}` tx-context, forge-guarded in
-   `seon.db`).
+   `all-entity-schemas-tx-data`, always inside the unscoped
+   `{:seon.db/origin :core-seed}` tx-context — a provenance the transact
+   boundary makes unforgeable from inside an agent scope).
 
    Provenance — not a keyword-namespace pattern — is the rule, so
    agent-authored `seon.*` data domains (e.g. `:my.workout/*`) stay
@@ -414,9 +417,9 @@
   (let [groups (->> (domain-attrs req)
                     (keep (fn [attr]
                             (when-let [[stem _] (unit-split attr)]
-                              {:attr attr
-                               :group [(namespace attr) stem]})))
-                    (group-by :group)
+                              {::attr  attr
+                               ::group [(namespace attr) stem]})))
+                    (group-by ::group)
                     vals
                     (filter #(> (count %) 1)))]
     {:seon.warn/kind :parallel-attr
@@ -425,13 +428,13 @@
           (mapcat
             (fn [members]
               (let [ranked (->> members
-                                (map (fn [{:keys [attr]}]
-                                       {:attr attr
-                                        :n    (attr-instance-count db attr)}))
-                                (sort-by (fn [{:keys [attr n]}]
+                                (map (fn [{::keys [attr]}]
+                                       {::attr attr
+                                        ::n    (attr-instance-count db attr)}))
+                                (sort-by (fn [{::keys [attr n]}]
                                            [(- n) (str attr)])))
-                    {established :attr est-n :n} (first ranked)]
-                (for [{:keys [attr]} (rest ranked)]
+                    {established ::attr est-n ::n} (first ranked)]
+                (for [{::keys [attr]} (rest ranked)]
                   {:seon.warn/sym   (str attr)
                    :seon.warn/where (str "vs established " established
                                          " (" est-n " entit"
@@ -508,13 +511,13 @@
    source, which is a core change, not an agent one.)
 
    DEV-ONLY: this is the one check that is purely about the
-   entity-renderer marker — a dev/inspector display concern, not an agent
+   entity-renderer marker — a dev/web-UI display concern, not an agent
    task (the rows ARE queryable and DO show in store-inventory, as the
    explain text itself says). It is tagged `:seon.warn/dev-only? true` so
    [[render-warnings]] drops it from the AGENT prompt (the agent is told to
    store my.kb.* facts under identity attrs — nagging that a correct write
    is \"invisible\" frames the right action as broken). The check still
-   runs globally and stays visible in the dev/inspector surface via
+   runs globally and stays visible in the dev/web-UI surface via
    `:seon.warn/include-dev? true`."
   {:malli/schema [:=> [:cat ::check-request] ::check-response]}
   [{:seon.db/keys [db]}]
@@ -577,10 +580,15 @@
    rounds (parent→A then parent→B) never accumulate."
   4)
 
-(defn- latest-user-at
+(defn latest-user-at
   "Wall-clock of the latest message FROM the user anywhere, or nil.
+
    Identity is the ref: a user message is one whose
-   `:seon.agent.message/from` resolves to a `:seon.user/id` entity."
+   `:seon.agent.message/from` resolves to a `:seon.user/id` entity. THE
+   \"since the latest user message\" cutoff every runtime check (and the
+   root-agent-view core-faults section) shares — public so section fns
+   outside this registry reuse it instead of forking the query."
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]] [:maybe :inst]]}
   [db]
   (ffirst (db/query
             {:seon.db/db db
@@ -758,8 +766,7 @@
         "those roots.")
    :seon.warn/example
    (str "(seon.agent.fs/grants)\n"
-        ";; => {:seon.agent.fs/allowed-roots [\"/Users/me/work\"]\n"
-        ";;     :seon.agent.fs/read-only?    false}")})
+        "; ⟹ «map: :seon.agent.fs/allowed-roots [\"/Users/me/work\"], :seon.agent.fs/read-only? false»")})
 
 (defn check-hop-exhausted
   "Messages dropped at the hop cap since the last user message.
@@ -916,9 +923,9 @@
    "(seon.test.runner/run-vars {:seon.test.runner/vars ['my.ns/my-test]})"})
 
 (defn check-tile-unresolved
-  "Live tiles pointing at a fn symbol not loaded in the runtime.
+  "Canvass pointing at a fn symbol not loaded in the runtime.
 
-   `:seon.render.live-tile/content` names a qualified fn symbol that
+   `:seon.render.canvas/content` names a qualified fn symbol that
    `seon.eval/lookup-value` can't resolve, so the human sees a calm
    \"preparing this view…\" placeholder instead of the real view. Literal
    hiccup tiles (vectors) and resolving symbols (incl. the welcome
@@ -932,23 +939,23 @@
                 '[:find ?aid ?content
                   :where
                   [?e :seon.agent/id ?aid]
-                  [?e :seon.render.live-tile/content ?content]]})]
+                  [?e :seon.render.canvas/content ?content]]})]
     {:seon.warn/kind :tile-unresolved
      :seon.warn/urgent? true
      :seon.warn/affected
      (->> rows
           (keep (fn [[aid content]]
                   (let [decoded (db/decode-edn-value
-                                  :seon.render.live-tile/content content)]
+                                  :seon.render.canvas/content content)]
                     (when (and (qualified-symbol? decoded)
                                (nil? (eval/lookup-value decoded)))
                       {:seon.warn/sym   (str decoded)
-                       :seon.warn/where (str "live tile of " aid)}))))
+                       :seon.warn/where (str "canvas of " aid)}))))
           (sort-by :seon.warn/sym)
           vec)
      :seon.warn/explain
-     (str "Your live tile is BROKEN RIGHT NOW: "
-          ":seon.render.live-tile/content points at a fn that isn't loaded "
+     (str "Your canvas is BROKEN RIGHT NOW: "
+          ":seon.render.canvas/content points at a fn that isn't loaded "
           "in the runtime, so the human is staring at a calm \"preparing "
           "this view…\" placeholder INSTEAD of your view — this very "
           "render. The fn does not exist (most likely its defn failed to "
@@ -965,7 +972,7 @@
           "(seon.db/transact!\n"
           "  {:seon.db/tx-data\n"
           "   [{:seon.agent/id \"<id>\"\n"
-          "     :seon.render.live-tile/content `my.agent.<id>/my-kb-tile}]})")}))
+          "     :seon.render.canvas/content `my.agent.<id>/my-kb-tile}]})")}))
 
 ;; ============================================================
 ;; Registry + clustered renderer
@@ -1053,7 +1060,7 @@
 
 (defn- render-urgent-cluster
   "A LOUD cluster for a `:seon.warn/urgent? true` check — something the
-   human is hitting THIS render (e.g. a broken live tile). Unmistakable
+   human is hitting THIS render (e.g. a broken canvas). Unmistakable
    `‼ URGENT` banner as a single-`;` line, then the same explanation + fix
    example + affected list. Rendered at the TOP of the WARNINGS block,
    ahead of the ordinary contract/runtime clusters."
@@ -1080,7 +1087,7 @@
    DEV-ONLY clusters (`:seon.warn/dev-only? true`, e.g.
    [[check-unmarked-entity-kinds]]) are DROPPED unless the request carries
    `:seon.warn/include-dev? true`. The AGENT render path (ctx/warnings.cljs)
-   passes nothing → dev-hygiene is hidden from agents; the dev/inspector
+   passes nothing → dev-hygiene is hidden from agents; the dev/web-UI
    surface opts in to still see it. Derived classification + render-time
    filter — nothing stored (reactive-context model)."
   {:malli/schema [:=> [:cat ::check-request] :string]}

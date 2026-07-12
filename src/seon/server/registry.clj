@@ -1,35 +1,22 @@
 (ns seon.server.registry
-  "Path B cluster RUNTIME registry — atom of `{db-name -> entry}` where
-   each entry is `{::conn <datahike-conn> ::backend kw ::path str-or-nil}`.
+  "The wire-server's cluster RUNTIME registry — atom of `{db-name -> entry}`
+   where each entry is `{::conn <datahike-conn> ::backend kw ::path
+   str-or-nil}`.
 
-   Direct `datahike.api/connect`. No flow. The wire-server looks up
-   conns here on every request. Multiple sessions, one process, all
-   in-memory atoms — no coordination overhead.
-
-   ## Sibling NS: `seon.session`
-
-   `seon.session` (Wave 3a, Path A) is a SEPARATE namespace and separate
-   concern. It owns the canonical session-as-entity record + the
-   start/stop/list lifecycle that persists to the `:seon.orchestrator`
-   DB via `seon.db/transact!` (goes through `:seon.db/flow`).
-
-   - **`seon.session`** (other ns)       → entity (datoms in `:seon.orchestrator`)
-   - **`seon.server.registry`** (this ns) → runtime (atom of live conns)
-
-   Don't confuse them. Both can exist for the same logical session: the
-   ENTITY records identity + lifecycle metadata; the REGISTRY (here)
-   holds the live conn for wire-server routing.
+   ONE wire-server JVM hosts every cluster's db: a db-name here IS a
+   cluster name (`:default`, `:acme`, an ephemeral bench cluster), and
+   the wire-server resolves each request's conn from this registry. The
+   ambient conn (`wire/-main`) is a registry entry like any other —
+   there is no second open path. Direct `datahike.api/connect`, no flow;
+   one process, in-memory atoms, no coordination overhead.
 
    ## Idempotent semantics
 
    `ensure-db!` on an existing db-name returns the same entry (identical?
    conn). `remove-db!` on an absent name is a no-op returning
-   `{::removed? false}`. Concurrent ensures on the same name race
-   exactly once — losers see the winner's conn.
-
-   See `docs/prds/agent-runtime/integration-architecture-2026-05-26.md`
-   §1.5 (Path B) and §5 (session registration). Lifecycle is the
-   wire-server's per-cluster connection registry, one conn to N.
+   `{::removed? false}`. `delete-db!` additionally drops the database in
+   its store. Concurrent ensures on the same name race exactly once —
+   losers see the winner's conn.
 
    ## On-ensure-db extension point (the reactive seam)
 
@@ -75,6 +62,32 @@
 (schema/register! ::remove-db!-response
                   [:map [::removed? :boolean]])
 
+(schema/register! ::delete-db!-response
+                  [:map
+                   [::removed? :boolean]
+                   [::deleted? :boolean]
+                   [::error {:optional true} :string]])
+
+;; Fork point: a transaction id (basis-t / tx eid — datahike's :max-tx).
+;; `:seon.error/at` carries exactly this value, so an error row's `at`
+;; plugs straight into a fork request.
+(schema/register! ::at :int)
+
+(schema/register! ::fork-db!-request
+                  [:map
+                   [::db-name ::db-name]
+                   [::fork-name ::db-name]
+                   [::at {:optional true} ::at]
+                   [::path {:optional true} ::path]])
+
+(schema/register! ::fork-db!-response
+                  [:map
+                   [::forked? :boolean]
+                   [::db-name {:optional true} ::db-name]
+                   [::basis-t {:optional true} :int]
+                   [::path {:optional true} ::path]
+                   [::error {:optional true} :string]])
+
 (schema/register! ::session-summary
                   [:map
                    [::db-name ::db-name]
@@ -110,10 +123,21 @@
 ;; (`wire/-main`). Spec'd as reality until that mismatch is unified.
 (schema/register! ::hook-db-name [:or ::db-name :string])
 
-(schema/register! ::snapshot-registry-request [:map])
-(schema/register! ::snapshot-registry-response [:map [::snapshot :map]])
+;; The ONE snapshot shape (test seam) — registry map + agent map + the
+;; on-ensure-db hook vector, all captured together. In-memory only (it
+;; holds live conns/fns); never persisted, so there is no legacy on-disk
+;; shape to migrate — the old bare-map / hookless reader branches are gone
+;; (registry M22).
+(schema/register! ::snapshot
+                  [:map
+                   [::registry :map]
+                   [::agents :map]
+                   [::hooks [:vector ::hook-entry]]])
 
-(schema/register! ::restore-registry-request [:map [::snapshot :map]])
+(schema/register! ::snapshot-registry-request [:map])
+(schema/register! ::snapshot-registry-response [:map [::snapshot ::snapshot]])
+
+(schema/register! ::restore-registry-request [:map [::snapshot ::snapshot]])
 (schema/register! ::restore-registry-response [:map [::restored? :boolean]])
 
 ;; Shared agent-id shape. Platform registers it ONCE here (during the
@@ -269,10 +293,9 @@
 
 (defn run-on-ensure-db-hooks!
   "Fire every registered on-ensure-db hook for `conn`/`db-name`. `ensure-db!`
-   calls this once per newly-opened registry conn. The wire-server also calls it
-   for its AMBIENT conn (created directly by `wire/ensure-db!`, outside the
-   registry) so that conn ALSO gets the `::reactive` listener + subscription
-   schema the hooks install — not just the `::raw-broadcast` it wires itself.
+   calls this once per newly-opened registry conn (the ambient conn included —
+   `wire/-main` opens it through the registry). Test fixtures that build a
+   conn outside the registry call it directly to install the same listeners.
    A hook exception is caught so one bad hook can't wedge the caller, but it
    is LOGGED LOUDLY (never swallowed) — a failed hook means the conn is
    missing its listener/schema and downstream ops will misbehave."
@@ -344,6 +367,145 @@
                (fn [m] (into {} (remove (fn [[_ d]] (= d db-name)) m))))
         {::removed? true})
       {::removed? false})))
+
+(defn delete-db!
+  "Release `db-name`'s conn, drop its entry, and DELETE its database.
+
+   The destructive half of the cluster lifecycle (`remove-db!` +
+   `datahike.api/delete-database` over the entry's stored backend/path) —
+   `bin/seon cluster destroy` reaches this via the wire `remove-db` op or
+   the 7891 REPL; it is never agent-exposed. Idempotent: an absent name
+   returns `{::removed? false ::deleted? false}`. A delete failure after
+   a successful remove is reported in `::error`, never thrown — the
+   supervisor's directory wipe is the backstop."
+  {:malli/schema [:=> [:cat [:map [::db-name ::db-name]]]
+                  ::delete-db!-response]}
+  [{::keys [db-name]}]
+  (locking !registry
+    (if-let [{::keys [backend path]} (get @!registry db-name)]
+      (let [{::keys [removed?]} (remove-db! {::db-name db-name})
+            cfg (store/config-for
+                 (cond-> {:seon.server.store/db-name db-name
+                          :seon.server.store/backend backend}
+                   path (assoc :seon.server.store/path path)))]
+        (try
+          (d/delete-database cfg)
+          {::removed? removed? ::deleted? true}
+          (catch Throwable t
+            (log/warn t "delete-db!: delete-database failed after remove"
+                      {::db-name db-name ::path path})
+            {::removed? removed? ::deleted? false
+             ::error (str (.getMessage t))})))
+      {::removed? false ::deleted? false})))
+
+(defn- fork-verify!
+  "Connect `cfg`, prove the fork is whole, release. Returns its basis-t.
+
+   Two checks, both real reads: the head sits exactly at the fork point
+   (`:max-tx` == `at`; skipped for a head fork), and a full history
+   `:eavt` scan completes — the scan forces every index node to load,
+   so a torn konserve copy (source written to mid-copy) surfaces HERE
+   as a throw instead of later inside the fork pod. Throws on failure;
+   the caller deletes the torn target and retries once."
+  [cfg at]
+  (let [conn (d/connect cfg)]
+    (try
+      (let [db (d/db conn)
+            bt (:max-tx db)]
+        (when (and at (not= (long at) (long bt)))
+          (throw (ex-info "fork head is not at the fork point"
+                          {::at at ::basis-t bt})))
+        ;; Force-load the whole index (history includes retractions).
+        (count (d/datoms (d/history db) :eavt))
+        bt)
+      (finally
+        (try (d/release conn) (catch Throwable _))))))
+
+(defn fork-db!
+  "Fork a registered db at basis-t `::at` into a NEW independent store.
+
+   Wraps `datahike.api/fork-database`: copies the source store at the
+   konserve layer, points the fork's head at the commit whose `:max-tx`
+   equals `::at` (absent = the current head), and mints the fork's own
+   deterministic store identity (`store/config-for` on `::fork-name`).
+   The fork is fully writable and byte-faithful as of the fork point —
+   eids/tx-eids identical, so every stored basis-t (`:seon.error/at`,
+   `rendered-as-of`) means the same thing inside it.
+
+   Semantics of `::at` for error forensics: `:seon.error/at` is the
+   basis-t at the CATCH site — the db value the failing code SAW. The
+   error datom itself was recorded in a LATER tx, so it does NOT exist
+   inside its own fork; the fork is the world the failure arose from,
+   not the world that already contains its record.
+
+   The fork is NOT registered here — the fork pod's own boot `ensure-db`
+   registers/connects it, the same one creation path `cluster create`
+   uses, so the end state is indistinguishable from a normal cluster.
+   `::path` defaults via the store layer (cluster callers pass
+   `data/clusters/<fork-name>/store` explicitly).
+
+   Copy-while-live: the source keeps taking writes during the copy
+   (fork-point commits are immutable, so this is normally safe); the
+   fork is VERIFIED after the copy (head at `::at` + a full history
+   index scan) and re-forked once on a torn copy. Supervisor-facing
+   (`bin/seon cluster fork` via the 7891 REPL) — never agent-exposed.
+   Errors return as values: `{::forked? false ::error msg}`."
+  {:malli/schema [:=> [:cat ::fork-db!-request] ::fork-db!-response]}
+  [{::keys [db-name fork-name at path]}]
+  (let [entry (get @!registry db-name)]
+    (cond
+      (nil? entry)
+      {::forked? false
+       ::error (str "source db-name not registered: " db-name
+                    " — ensure-db! it first (a cluster's db registers when"
+                    " its pod boots; the ambient cluster is always registered)")}
+
+      (= db-name fork-name)
+      {::forked? false ::error "fork-name must differ from the source db-name"}
+
+      (contains? @!registry fork-name)
+      {::forked? false
+       ::error (str "fork-name already registered: " fork-name)}
+
+      :else
+      (let [{::keys [backend] src-path ::path} entry
+            src-cfg (store/config-for
+                     (cond-> {:seon.server.store/db-name db-name
+                              :seon.server.store/backend backend}
+                       src-path (assoc :seon.server.store/path src-path)))
+            tgt-cfg (store/config-for
+                     (cond-> {:seon.server.store/db-name fork-name
+                              :seon.server.store/backend :file}
+                       path (assoc :seon.server.store/path path)))
+            store-path (get-in tgt-cfg [:store :path])
+            fork-once! (fn []
+                         (store/ensure-parent-dir!
+                          {:seon.server.store/path store-path})
+                         (d/fork-database src-cfg tgt-cfg
+                                          (cond-> {} at (assoc :at at)))
+                         (fork-verify! tgt-cfg at))]
+        (try
+          (if (d/database-exists? tgt-cfg)
+            {::forked? false
+             ::error (str "fork target store already exists: " store-path)}
+            (let [bt (try
+                       (fork-once!)
+                       (catch Throwable t
+                         ;; Torn copy (source written to mid-copy) or a
+                         ;; transient store error — wipe the partial target
+                         ;; and retry ONCE; a second failure surfaces.
+                         (log/warn t "fork-db!: first fork attempt failed — retrying once"
+                                   {::db-name db-name ::fork-name fork-name ::at at})
+                         (try (d/delete-database tgt-cfg) (catch Throwable _))
+                         (fork-once!)))]
+              {::forked? true
+               ::db-name fork-name
+               ::basis-t (long bt)
+               ::path store-path}))
+          (catch Throwable t
+            {::forked? false
+             ::error (str "fork failed: " (.getMessage t)
+                          " " (pr-str (ex-data t)))}))))))
 
 (defn get-conn
   "Return `{::conn <conn>}` if `db-name` is registered, else `{}`.
@@ -456,34 +618,31 @@
    restore instead of stranding an empty hook vector."
   {:malli/schema [:=> [:cat ::snapshot-registry-request] ::snapshot-registry-response]}
   [{}]
-  {::snapshot {:registry @!registry
-               :agents @!agents
-               :hooks @!on-ensure-db-hooks}})
+  {::snapshot {::registry @!registry
+               ::agents @!agents
+               ::hooks @!on-ensure-db-hooks}})
 
 (defn ^:no-doc restore-registry!
-  "Test helper: replace registry + agent map with `::snapshot`.
-   Releases any conns that were added since the snapshot was taken.
-   When the snapshot carries `:hooks` (as `snapshot-registry` now
-   produces), the on-ensure-db hook vector is restored too — a fixture
-   that resets hooks for isolation puts the live hooks back. Accepts
-   the new shape (`{:registry ... :agents ... :hooks ...}`), the
-   hookless shape, and the legacy bare-map shape."
+  "Test helper: replace registry + agents + hooks with `::snapshot`.
+
+   Releases any conns that were added since the snapshot was taken, then
+   restores all three atoms — a fixture that resets hooks for isolation
+   puts the live JVM's hooks (::raw-broadcast, ::reactive, ...) back.
+   Speaks the ONE `::snapshot` shape `snapshot-registry` produces (M22:
+   the legacy bare-map and hookless reader branches are deleted —
+   snapshots are in-memory values, never persisted, so no old shape can
+   arrive from disk)."
   {:malli/schema [:=> [:cat ::restore-registry-request] ::restore-registry-response]}
   [{::keys [snapshot]}]
   (locking !registry
-    (let [;; legacy snapshots were a bare {db-name -> entry} map; new
-          ;; snapshots wrap registry + agents (+ hooks).
-          legacy?       (not (contains? snapshot :registry))
-          registry-snap (if legacy? snapshot (:registry snapshot))
-          agents-snap   (if legacy? {} (:agents snapshot))
-          current       @!registry
-          extra-names   (set/difference (set (keys current))
-                                        (set (keys registry-snap)))]
+    (let [{::keys [registry agents hooks]} snapshot
+          current     @!registry
+          extra-names (set/difference (set (keys current))
+                                      (set (keys registry)))]
       (doseq [n extra-names]
         (when-let [{::keys [conn]} (get current n)]
           (try (d/release conn) (catch Throwable _))))
-      (reset! !registry registry-snap)
-      (reset! !agents agents-snap)
-      (when (contains? snapshot :hooks)
-        (reset! !on-ensure-db-hooks (:hooks snapshot)))
+      (reset! !registry registry)
+      (reset! !agents agents)
+      (reset! !on-ensure-db-hooks hooks)
       {::restored? true})))

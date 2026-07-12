@@ -1,0 +1,12 @@
+I need to analyze the user's request and output only the JSON array of function calls.
+
+The user wants:
+1. Search for "Theft" cases in New York (2021)
+2. Search for "Theft" cases in San Francisco (2021)
+3. Display briefs of the top 5 relevant cases
+
+The request says to search both cities and then display the top 5. The `court_records.search_cases` function has a `limit` parameter. The `briefs.display_cases` function takes `case_id` (array). Since we need to display briefs of the top 5, we'd need the case IDs from the search results first — but the request asks me to decide which functions to call, not to execute. The display call would need the IDs returned from the searches.
+
+Since the request says "display briefs of top 5 relevant cases" and the searches are across two cities, the display call would need the combined top 5 case IDs. I'll include all three calls: two searches (one per city) and one display.
+
+(message/user "[{\"name\": \"court_records.search_cases\", \"arguments\": {\"location\": \"New York\", \"query\": \"Theft\", \"year\": 2021, \"limit\": 5}}, {\"name\": \"court_records.search_cases\", \"arguments\": {\"location\": \"San Francisco\", \"query\": \"Theft\", \"year\": 2021, \"limit\": 5}}, {\"name\": \"briefs.display_cases\", \"arguments\": {\"case_id\": [\"<case_ids_from_results>\"]}}]")

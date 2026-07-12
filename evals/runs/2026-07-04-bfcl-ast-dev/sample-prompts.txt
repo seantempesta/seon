@@ -1,0 +1,88 @@
+
+
+SAMPLE parallel_multiple_29  (category=parallel_multiple)
+
+You are given a set of candidate functions and a user request. Decide which function(s) to call and with what arguments to satisfy the request. Do NOT execute anything or explain — only report the call(s).
+
+Candidate functions:
+
+Function: briefs.display_cases
+  Display briefs of the cases Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - case_id (array) [required]: A list of unique identifiers for cases.  (element type: string)
+
+Function: court_records.search_cases
+  Search for court cases based on specific criteria. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - location (string) [required]: The city where the court is located
+    - query (string) [required]: Search string to look for specific cases
+    - year (integer) [required]: Year the case was filed
+    - limit (integer): Limits the number of results returned
+
+User request:
+Find cases that pertain to 'Theft' from court record in 'New York' and from 'San Francisco', filed in year 2021, and display briefs of top 5 relevant cases.
+
+Reply with ONLY a JSON array of call objects, each shaped {"name": "<function name>", "arguments": {<arg name>: <value>}}. Rules the answer must satisfy:
+- Use the EXACT function name and parameter names from the schema above (no renaming, no extra parameters).
+- Include every REQUIRED parameter; include an optional one only when the request calls for it.
+- Give each argument its schema JSON type (integer, number/float, string, boolean, array, object) — a value taken from the request.
+- This request may require SEVERAL function calls. Emit one JSON object per call the request implies (there can be more than one).
+- Output the JSON array and nothing else (no prose, no code fence needed).
+==============================================================================
+SAMPLE multiple_66  (category=multiple)
+
+You are given a set of candidate functions and a user request. Decide which function(s) to call and with what arguments to satisfy the request. Do NOT execute anything or explain — only report the call(s).
+
+Candidate functions:
+
+Function: calculate_distance
+  Calculate distance between two locations. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - start_point (string) [required]: Starting point of the journey.
+    - end_point (string) [required]: Ending point of the journey.
+
+Function: traffic_estimate
+  Estimate traffic from one location to another for a specific time period. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - start_location (string) [required]: Starting location for the journey.
+    - end_location (string) [required]: Ending location for the journey.
+    - time_period (string): Specify a time frame to estimate the traffic, 'now' for current, 'weekend' for the coming weekend. Default 'now'
+
+Function: weather_forecast
+  Retrieve a weather forecast for a specific location and time frame. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - location (string) [required]: The city that you want to get the weather for.
+    - days (integer) [required]: Number of days for the forecast.
+
+User request:
+How much traffic should I expect from Las Vegas to Los Angeles this weekend?
+
+Reply with ONLY a JSON array of call objects, each shaped {"name": "<function name>", "arguments": {<arg name>: <value>}}. Rules the answer must satisfy:
+- Use the EXACT function name and parameter names from the schema above (no renaming, no extra parameters).
+- Include every REQUIRED parameter; include an optional one only when the request calls for it.
+- Give each argument its schema JSON type (integer, number/float, string, boolean, array, object) — a value taken from the request.
+- Choose the single correct function and emit EXACTLY ONE call.
+- Output the JSON array and nothing else (no prose, no code fence needed).
+==============================================================================
+SAMPLE simple_python_189  (category=simple_python)
+
+You are given a set of candidate functions and a user request. Decide which function(s) to call and with what arguments to satisfy the request. Do NOT execute anything or explain — only report the call(s).
+
+Candidate functions:
+
+Function: weather_forecast_detailed
+  Retrieve a detailed weather forecast for a specific city like Boston and time frame. Note that the provided function is in Python 3 syntax.
+  Parameters:
+    - location (string) [required]: The city that you want to get the weather for.
+    - days (integer) [required]: Number of days for the forecast.
+    - details (boolean): Provide detailed weather information or not.
+
+User request:
+Get weather information for New York, USA for the next 3 days with details.
+
+Reply with ONLY a JSON array of call objects, each shaped {"name": "<function name>", "arguments": {<arg name>: <value>}}. Rules the answer must satisfy:
+- Use the EXACT function name and parameter names from the schema above (no renaming, no extra parameters).
+- Include every REQUIRED parameter; include an optional one only when the request calls for it.
+- Give each argument its schema JSON type (integer, number/float, string, boolean, array, object) — a value taken from the request.
+- Choose the single correct function and emit EXACTLY ONE call.
+- Output the JSON array and nothing else (no prose, no code fence needed).

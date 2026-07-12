@@ -1,0 +1,85 @@
+{
+ "endpoint": "http://127.0.0.1:17860",
+ "worker_health": {
+  "ok": true,
+  "worker_sha": "c88acc1913c4",
+  "model_loaded": true,
+  "idle_s": 93.0,
+  "idle_timeout_s": 900,
+  "gens": 1,
+  "unloads": 0,
+  "jobs": 1
+ },
+ "corpus_sha": "2a31a33d31e7bb941ff662f45a96e292fedabb4bbe0f9b100b7a073c11b02dae",
+ "epochs": 3,
+ "elapsed_s": 1435.0,
+ "summaries": {
+  "arm0_deepseek": {
+   "n_exec": 10,
+   "n_scored": 10,
+   "outcome_mean": 0.4,
+   "form_validity": 0.8,
+   "fn_call_accuracy": 0.5714285714285714,
+   "tokens_to_valid_form_median": 64.5,
+   "wall_s_median": null,
+   "uptake_mean": null,
+   "rounds_to_lock_median": null
+  },
+  "arm1_guided": {
+   "n_exec": 30,
+   "n_scored": 28,
+   "outcome_mean": 0.2857142857142857,
+   "form_validity": 0.4642857142857143,
+   "fn_call_accuracy": 0.0,
+   "tokens_to_valid_form_median": 9,
+   "wall_s_median": 22.439,
+   "uptake_mean": null,
+   "rounds_to_lock_median": null
+  },
+  "arm2_typeahead": {
+   "n_exec": 30,
+   "n_scored": 30,
+   "outcome_mean": 0.6333333333333333,
+   "form_validity": 0.8666666666666667,
+   "fn_call_accuracy": 0.5238095238095238,
+   "tokens_to_valid_form_median": 9.0,
+   "wall_s_median": 3.7815,
+   "uptake_mean": 0.019444444444444445,
+   "rounds_to_lock_median": 1.0
+  },
+  "arm3_degraded": {
+   "n_exec": 30,
+   "n_scored": 30,
+   "outcome_mean": 0.26666666666666666,
+   "form_validity": 0.3333333333333333,
+   "fn_call_accuracy": 0.0,
+   "tokens_to_valid_form_median": 9.0,
+   "wall_s_median": 24.8485,
+   "uptake_mean": null,
+   "rounds_to_lock_median": null
+  },
+  "arm0b_deepseek_oneshot": {
+   "n_exec": 10,
+   "n_scored": 10,
+   "outcome_mean": 0.4,
+   "form_validity": 1.0,
+   "fn_call_accuracy": 0.14285714285714285,
+   "tokens_to_valid_form_median": 14.5,
+   "wall_s_median": 12.9215,
+   "uptake_mean": null,
+   "rounds_to_lock_median": null
+  }
+ },
+ "kill_criteria": {
+  "protocol_leak": {
+   "degraded_minus_baseline": -0.019,
+   "verdict": "LEAK (menus-as-text regress baseline)"
+  },
+  "dead_weight": {
+   "uptake_mean": 0.019444444444444445,
+   "accuracy_gain": 0.348,
+   "verdict": "earns its render"
+  }
+ },
+ "notes": "P6 close run 2026-07-11 (second invocation): arm1/arm2/arm3 under the fixed runner + worker sha post canvas->code_buffer boundary fix (model.py adapter reads mlx_vlm's own `canvas_length`). The first close invocation (worker 4aebe06c3248) flaked 100% on that AttributeError; its flake_rate=1.0 rows stay in the ledger under the `2026-07-11-typeahead-p6:` label \u2014 THIS run's rows carry `2026-07-11-typeahead-p6-close:`. arm0 recomputed free from corpus replay replies; arm0b merged from the frozen 07-11 jsonl (old verb_* keys, read-side compat; DeepSeek key 402 - not re-runnable). The PARTIAL arm2 jsonl (worker dffbc439cd6a) is superseded by this run."
+}

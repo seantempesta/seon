@@ -1,0 +1,5 @@
+The user wants function calls for `protein_info.get_sequence_and_3D` to get protein sequences and 3D models for human HbA1c, normal hemoglobin, and rat hemoglobin. The function takes `protein_name` (required) and `model_3d` (optional boolean). Since they want 3D models, I'll include `:model_3d true` for each call. That's three calls — one per protein.
+
+(protein_info.get_sequence_and_3D {:protein_name "human HbA1c" :model_3d true})
+(protein_info.get_sequence_and_3D {:protein_name "normal hemoglobin" :model_3d true})
+(protein_info.get_sequence_and_3D {:protein_name "rat hemoglobin" :model_3d true})

@@ -21,8 +21,8 @@ reactively. Isolation, aggregation, and recovery all fall out of that one choice
 units share *data*, not memory, so they run in parallel, can't corrupt each other,
 and restart cleanly from the DB (which is itself reversible). The loop is data; the
 prompt is a render of data; the UI is a reactive projection of data. The context
-unit is the **block** (`:seon.agent.ctx/block`); the prompt, an agent's **world**,
-and the **root agent's** world (`/`) are each a derivation of the same blocks.
+unit is the **block** (`:seon.agent.ctx/block`); the prompt, an agent’s **view**,
+and the **root agent's** view (`/`) are each a derivation of the same blocks.
 
 It is **dual-track**: a CLJ **JVM server** (the DB writer + render/serve + Integrant
 lifecycle + heavy processing, data-only) and CLJS **agent executors** (isolated),
@@ -37,7 +37,76 @@ indexes are materialized once per cluster, all writes forwarded to the one write
 (total order). A **local "system" cluster** does system work; **user clusters** do
 local data processing. A threaded db *value* is location-agnostic; the work-fence is
 arbitrated at the single writer; `since-t` replay is the network-blip recovery
-primitive.
+primitive. A client cluster is a **trailing applier**: bootstrap the indexes ONCE,
+then each pushed tx is an incremental index update (persistent structures — never a
+rebuild), so a client applying the writer's stream in order is deterministically
+identical to the writer at that t. **Bootstrap (settled 2026-07-02): compressed
+full tx-log replay** — the same `since-t` machinery with watermark 0, ONE
+mechanism for bootstrap and blip recovery both. Device-scale optimization path
+(cost changes, semantics never): current-state-first (history-less replay or
+filtered snapshot, stamped with its basis-t so the trailing applier starts
+exactly there) + lazy history backfill — `as-of`/history queries route to the
+writer until backfill completes. An index-root snapshot copy (content-addressed
+konserve nodes, git-style incremental) is equally complete — a persistent value
+transferred instead of recomputed — and stays available as a later optimization.
+
+## The core ideas
+
+The thesis, unpacked into the ideas everything else serves. Each is backed by
+a mechanism — a principle without a code anchor is a slogan. When designing
+anything, ask: which of these does it serve, and which existing primitive
+already expresses it? (A new noun is a parallel-system risk — map every
+concept to `ns`/`defn`/`require`/refs/var-meta/a db value.)
+
+1. **Everything is data in one graph.** One bitemporal db; every moving part —
+   the loop, the prompt, a tile, the plan, the code itself — is a function of a
+   frozen db snapshot. Replay, debugging, diffing, and time-travel are queries,
+   not archaeology. Entities are attributes + refs (no kinds); provenance rides
+   the tx entity. Anchors: `seon.db` (sole API), the single writer, [[data-model]].
+2. **The language is the harness.** No hand-crafted tool catalog: agents act by
+   writing Clojure against fully-specced fns over namespaced data. Every fn's
+   in/out is schema'd in the program graph, so "what can process what I'm
+   holding" is a Datalog join — relevance is computed, not curated. Prose only
+   for what cannot execute. Anchors: `schema/register!` + `:malli/schema`,
+   `:seon.fn`/`:seon.ns`, [[toolkit]]. (Trajectory, bounded by the measured
+   present: always-on context beats loadable skills, and composition functions
+   render FULL — [[laws]].)
+3. **The agent authors its own environment.** A `defn` returning
+   `:seon.render/ai` and/or `:seon.render/hiccup` is a block and/or tile —
+   writing a function IS authoring context, tools, and UI at once. Both keys =
+   twins: agent and human look at ONE derived value; shared situational
+   awareness is structural, not messaged (canvas-first mitigates fabrication —
+   prose is where agents lie, [[laws]]). Every specced fn an agent writes
+   teaches the system when to surface it. Anchors: the render twins,
+   `install!`/`remove!`, current-ns auto-run — [[context]].
+4. **Perpetual motion = plan + location + window.** Grounding that survives
+   forever: purpose + the `my.plan` anchor (WHAT I'm doing) + current-ns
+   (WHERE I am) + the sliding transcript window (what I'm doing RIGHT NOW). A
+   1000-turn agent behaves like a turn-3 agent because context is derived,
+   windowed, and cache-stable — never accumulated. (The claim under test: the
+   plan-survives-restart bench is its measurement.) Anchors: [[context]] §order.
+5. **Measured, not asserted.** The context/tool surface is a fitness landscape:
+   every dial is config data, so contexts are A/B'd and selected against frozen
+   benchmarks (`pass^k`, the eval ledger). The laws in [[laws]] are
+   measurements, not opinions. Every scorer check must be stated in the agent's
+   context, or the bench measures prompt-omission. Endgame: the agent adjusts
+   its own initial-context config and the loop selects what works.
+6. **Never crash, always surface; isolate by process, share only data.** The
+   operational spine that keeps 1–5 alive: every failure is a `:seon/error`
+   value in a derived surface; units share *data, never memory*; one writer
+   arbitrates total order; late writes die on the CAS work-fence. Nothing
+   wedges, nothing lies about wedging. Anchors: the cross-cutting principles
+   below, [[agent-runtime]] isolation tiers.
+7. **One human, one bond.** The runtime serves ONE human; the canvas is the
+   shared value the pair looks at together. Infrastructure choices answer to
+   that relationship — on-device privacy, honest termination, the agent's own
+   code as the compounding asset serving its human. Anchors: the root agent,
+   `docs/seon/vision/` (the Seon premise).
+8. **The horizon: think in Clojure, translate out.** Index ANY codebase into
+   the same graph (LSP); plan/solve in Clojure and translate into the client's
+   language — the Clojure artifact is the executable spec; seon-writes-seon
+   behind the tests-and-validations publish gate. Vision tier:
+   `docs/seon/vision/think-in-clojure.md`.
 
 ## Glossary
 
@@ -54,23 +123,25 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
   via `seon.eval/lookup-value`). `:seon.render/ai`.
 - **html render** — a block's hiccup output → a tile. `:seon.render/html`.
 - **prompt** — the agent's assembled context: ai renders concatenated by priority
-  (`seon.agent.ctx/render-context`), prefixed by a fixed system role
-  (`seon.agent.ctx/system-text`, a code const — not a block, not per-request
-  overridable).
+  (`seon.agent.ctx/render-context`), prefixed by a system role resolved by
+  `seon.ai/effective-system-prompt` — the per-request `:seon.ai/system-prompt`
+  override → the cluster's `:seon.config/system-text` datom → the shipped
+  `seon.agent.ctx/system-text` default. The system prompt is DB state and
+  per-request overridable ([[context]] §"The system prompt itself is DB state").
 - **page** — the human's UI: a layout placing html renders into slots. `seon.ui.*`.
 - **tile** — an html render placed in a slot (the live UI element).
 - **slot** — a named, DB-keyed hole in a layout: `(slot :name)` →
   `[:div {:id "tile-<name>" :data-slot :name}]`, keyed on `:seon.agent.ctx/name`.
 - **layout** — a render whose hiccup contains slots (it nests tiles); a role, not a
   stored kind. A render with no slots is a leaf tile.
-- **canvas** — the focal block on an agent's world: the agent↔human communication
+- **canvas** — the focal block on an agent's view: the agent↔human communication
   block.
-- **world** — an agent's page, route `/agent/{id}`: the canvas plus a
+- **view** — an agent's page, route `/agent/{id}`: the canvas plus a
   `:seon.agent.ctx/priority` scroll of the agent's tiles.
-- **root agent** — ONE `:seon.agent/id "root"` that is BOTH the `/`-world owner (the
+- **root agent** — ONE `:seon.agent/id "root"` that is BOTH the `/`-view owner (the
   UI) AND the system orchestrator (lifecycle) — the same elevated grant, never two
-  entities. Its world IS the all-agents overview at route `/`, rendered by the
-  IDENTICAL block/layout/route machinery as any agent's world. It holds the elevated
+  entities. Its view IS the all-agents overview at route `/`, rendered by the
+  IDENTICAL block/layout/route machinery as any agent's view. It holds the elevated
   capability grant — system-level `:seon.fn`s (`start!`, terminate, cross-agent) —
   through the SAME `/call` gate, not a bypass. It is the root of the render + route
   tree (`/` → `/agent/{id}` → apps) and the base case of the bootstrap recursion
@@ -92,7 +163,7 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
 - **seed-copy** — the seed/override mechanism: ALL blocks are copied into the agent's
   own `:seon.agent/ctx` at creation; render reads that COMPLETE set sorted by
   priority. There is no render-merge, no separate default set, no provider.
-- **`install!` / `remove!`** — the sole seed/override verbs, in `seon.agent.ctx`.
+- **`install!` / `remove!`** — the sole seed/override functions, in `seon.agent.ctx`.
   `install!` is scope-aware + variadic (a single map OR a vector-of-maps); idempotent
   upsert-by-`:seon.agent.ctx/name`; at boot/no-scope it builds the default seed set,
   in an agent's scope it targets that agent's `:seon.agent/ctx`. `remove!` drops by
@@ -115,7 +186,7 @@ One vocabulary, each name grounded in a namespace + a schema/fn.
         │  SSE down (the live channel), POST up (actions)
         ▼
    NODE UI-HOST ── read-only replica + ONE tx-listener + the route table (reitit)
-        │  listen! → derive world → whole-element morph → push  the only browser-facing HTTP/SSE
+        │  listen! → derive view → whole-element morph → push  the only browser-facing HTTP/SSE
         ▲                                                    (derives every page; runs NO agent code)
         │  wire (RPC + tx-feed, since-t replay)
    JVM WIRE-SERVER ── single-writer datahike + heavy processing (embeddings/LLM/indexing) + Integrant
@@ -131,7 +202,7 @@ Three roles, decoupled in principle, co-located in one pod for v1:
   plus heavy processing (embeddings, LLM, indexing) and Integrant lifecycle. Data
   only; it never executes agent code.
 - **Node UI-host** — the browser's single front door: a read-only replica + one
-  tx-listener that derives every agent's **world** (including the root agent's world
+  tx-listener that derives every agent’s **view** (including the root agent’s view
   at `/`) from `:seon.agent/ctx`, holds the route table, and streams patches. The
   streamer is a **role, not a process** — any process holding a replica + a
   tx-listener can play it, so the UI-host is relocatable.
@@ -172,7 +243,7 @@ an SSE connection** — agents write facts; the UI-host derives and streams.
 
 ### Derive everything
 
-Everything — the loop, the prompt, an agent's world, a status view, the work
+Everything — the loop, the prompt, an agent's view, a status view, the work
 bound, the agent's state — is a **function of the DB at render time**; nothing
 derivable is stored. Agent state is the `seon.derive/derive-state` projection of
 primitives (an open run, `paused-at`, `terminated-at`), never a stored field. The
@@ -216,7 +287,7 @@ discriminator (see [[data-model]]).
 The core's source, the agent's eval log, and the analyzer state are three views of
 one code corpus. Agent-defining forms persist as `:seon.fn` / `:seon.ns` /
 `:seon.schema` entities; the DB IS the running system (query → reconstitute →
-topo-sort by `:seon.ns/requires` → eval; redefine = upsert). An agent's **bootstrap**
+topo-sort by `:seon.ns/require-edges` → eval; redefine = upsert). An agent's **bootstrap**
 is seeded eval'd forms run quietly (`:core` origin, no wake, no turn-count) in the new
 agent's scope before any trigger — the batched `(ctx/install! […])`, the
 `:my.agent/purpose` schema + refine fn, the home-ns `defn`s — so the agent SEES its
@@ -248,29 +319,29 @@ seeds + the ctx seed + the home ns); the loop opens a **run** only on a **trigge
 every work tx with an in-tx `:db.fn/cas` work-fence, so a superseded run's writes
 abort at commit. The doc owns the run/turn/FSM/derived-state mechanics, creation-as-
 idle-entity, bootstrap-as-seeded-forms, the **orchestrator-root** lifecycle
-(`start!` = a core verb granted to root, aliasing `create!` through `/call`, writing
+(`start!` = a core function granted to root, aliasing `create!` through `/call`, writing
 `:seon.agent/parent`; roles-as-capabilities; root = the cluster-boot base case;
 UI-root == orchestrator-root), and the isolation tiers. See [[agent-runtime]].
 
 ### UI — [[ui]]
 
 The human UI is **pages** — a **layout** placing block html renders into named
-**slots**, each filled slot a **tile**; all pages are agent **worlds**, a tree of
-routes: the root agent's world (`/`), per-agent worlds (`/agent/{id}`), and apps
+**slots**, each filled slot a **tile**; all pages are agent **views**, a tree of
+routes: the root agent’s view (`/`), per-agent views (`/agent/{id}`), and apps
 (`/agent/{id}/app/{x}`). Routing is data via **reitit** over `:seon.route/*` datoms;
 `/call` is the one action door and the capability gate authorizes the fn (namespace
 is the route). The **live channel is ours**: one tx-listener on a read-replica derives
-every world and streams it as a per-connection gzip whole-element **morph**
+every view and streams it as a per-connection gzip whole-element **morph**
 (idiomorph-diffed client-side); reconnect just repaints `view = f(db)`, no UI-side
-`since-t` replay. The doc owns block/render/tile/slot/layout, the page tree,
+`since-t` replay. The doc owns block/render/canvas/slot/layout, the page tree,
 reitit + the gate, the SSE channel, and the seed-copy + variadic `install!`/`remove!`
 override model. See [[ui]].
 
 ### Toolkit — [[toolkit]]
 
-The agent's action surface is the **`my.*` verb catalog** — thin, agent-owned,
+The agent's action surface is the **`my.*` function catalog** — thin, agent-owned,
 editable wrappers (`my.code`, `my.recall`/`my.kb`, `my.plan`, `my.schedule`,
-`my.tile`, `my.shell`, `my.test`, `my.search`, `my.files`) over a protected `seon.*`
+`my.canvas`, `my.shell`, `my.test`, `my.search`, `my.files`) over a protected `seon.*`
 floor, composed on four shared shapes (path, ref, items, the never-throw result
 envelope). See [[toolkit]].
 
@@ -280,10 +351,11 @@ Every question about agent behavior — what an agent saw at turn N, what change
 between turns, why it acted — is answered by a **query against the DB plus the
 blob store**, never by hunting log files: each turn persists its `basis-t` (the
 frozen db coordinate that makes the context re-derivable), the assembled prompt
-verbatim as a blob, and the raw reply. `inspect/turn` reconstructs any turn;
+verbatim as a blob, and the raw reply. `agent-debug/turn` reconstructs any turn;
 `turn-diff` shows what changed between two; a dedicated **forensic agent** runs
-these queries on demand; the `/solve` door hands a reproducible turn to an
-external solver. See [[observability]].
+these queries on demand; the `/agents/run` door drives a reproducible task
+through an agent in the pod's own cluster for an external harness. See
+[[observability]].
 
 ## Build path — [[roadmap]]
 
@@ -299,15 +371,16 @@ doc; this one stays pure target.
   agent-ref scoping, index-everything.
 - [[agent-runtime]] — loop/run/turn/FSM/derived-state/two-bounds, creation-as-idle,
   bootstrap-as-seeded-forms, orchestrator-root lifecycle, isolation tiers.
-- [[ui]] — block/render/tile/slot/layout, the page tree, reitit + the capability gate,
+- [[ui]] — block/render/canvas/slot/layout, the page tree, reitit + the capability gate,
   the gzip-morph SSE live channel, the seed-copy + `install!`/`remove!` override.
-- [[toolkit]] — the `my.*` verb catalog over the protected `seon.*` floor.
-- [[observability]] — turn replay (basis-t + prompt blob + reply), `inspect/turn` /
-  `turn-diff`, the blob store, the forensic agent, the `/solve` door.
+- [[toolkit]] — the `my.*` function catalog over the protected `seon.*` floor.
+- [[observability]] — turn replay (basis-t + prompt blob + reply), `agent-debug/turn` /
+  `turn-diff`, the blob store, the forensic agent, cluster lifecycle + the
+  `/agents/run` door.
 - [[context]] — the dynamic context system: `context = f(db, location,
   window, tail)`, the three-band cache gradient (stable prefix / sliding
-  transcript window / free dynamic tail), namespace-as-location, the
-  affordance tail, and the UI twin of every band.
+  transcript window / free dynamic tail), namespace-as-location, pull-first
+  relevance retrieval, and the UI twin of every band.
 - [[laws]] — the drive-measured empirical laws (render-prominence,
   cache-stability, canvas-first, pass^k, keep-iff-lifts-battery) that
   constrain every design above. Not principles — measurements.

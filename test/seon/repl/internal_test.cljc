@@ -24,34 +24,34 @@
 
 (def basic-cases
   [{:in "(+ 1 2)"
-    :expected [{:kind :form
-                :narration ""
-                :source "(+ 1 2)"
-                :form '(+ 1 2)}]
+    :expected [{:seon.repl/kind :form
+                :seon.repl/narration ""
+                :seon.repl/source "(+ 1 2)"
+                :seon.repl/form '(+ 1 2)}]
     :note "single bare form"}
 
    {:in ";; narration\n(+ 1 2)"
-    :expected [{:kind :form
-                :narration "narration"
-                :source "(+ 1 2)"
-                :form '(+ 1 2)}]
+    :expected [{:seon.repl/kind :form
+                :seon.repl/narration "narration"
+                :seon.repl/source "(+ 1 2)"
+                :seon.repl/form '(+ 1 2)}]
     :note "comment attaches to following form"}
 
    {:in ";; line 1\n;; line 2\n(foo)"
-    :expected [{:kind :form
-                :narration "line 1\nline 2"
-                :source "(foo)"
-                :form '(foo)}]
+    :expected [{:seon.repl/kind :form
+                :seon.repl/narration "line 1\nline 2"
+                :seon.repl/source "(foo)"
+                :seon.repl/form '(foo)}]
     :note "consecutive comments accumulate"}
 
    {:in "(+ 1 2)\n(+ 3 4)"
-    :expected [{:kind :form :narration "" :source "(+ 1 2)" :form '(+ 1 2)}
-               {:kind :form :narration "" :source "(+ 3 4)" :form '(+ 3 4)}]
+    :expected [{:seon.repl/kind :form :seon.repl/narration "" :seon.repl/source "(+ 1 2)" :seon.repl/form '(+ 1 2)}
+               {:seon.repl/kind :form :seon.repl/narration "" :seon.repl/source "(+ 3 4)" :seon.repl/form '(+ 3 4)}]
     :note "multiple forms, no narration"}
 
    {:in ";; first\n(a)\n;; second\n(b)"
-    :expected [{:kind :form :narration "first"  :source "(a)" :form '(a)}
-               {:kind :form :narration "second" :source "(b)" :form '(b)}]
+    :expected [{:seon.repl/kind :form :seon.repl/narration "first"  :seon.repl/source "(a)" :seon.repl/form '(a)}
+               {:seon.repl/kind :form :seon.repl/narration "second" :seon.repl/source "(b)" :seon.repl/form '(b)}]
     :note "per-form narration"}
 
    {:in ""
@@ -59,12 +59,12 @@
     :note "empty text"}
 
    {:in ";; trailing comment with no form"
-    :expected [{:kind :comment :narration "trailing comment with no form"}]
+    :expected [{:seon.repl/kind :comment :seon.repl/narration "trailing comment with no form"}]
     :note "trailing comment with no form → a comment-only entry (NOT dropped)"}
 
    {:in "(+ 1 2)\n;; afterthought"
-    :expected [{:kind :form :narration "" :source "(+ 1 2)" :form '(+ 1 2)}
-               {:kind :comment :narration "afterthought"}]
+    :expected [{:seon.repl/kind :form :seon.repl/narration "" :seon.repl/source "(+ 1 2)" :seon.repl/form '(+ 1 2)}
+               {:seon.repl/kind :comment :seon.repl/narration "afterthought"}]
     :note "trailing comment after a form → its own comment entry, form kept"}])
 
 (defn- strip-form-span
@@ -72,7 +72,7 @@
    compare stays about narration/source/form. The span itself is proven
    behaviorally in [[form-span-indexes-source]] (no brittle magic numbers)."
   [entries]
-  (mapv (fn [e] (if (= :form (:kind e)) (dissoc e :span) e)) entries))
+  (mapv (fn [e] (if (= :form (:seon.repl/kind e)) (dissoc e :seon.repl/span) e)) entries))
 
 (deftest basic-shapes
   (doseq [{:keys [in expected note]} basic-cases]
@@ -80,7 +80,7 @@
       (is (= expected (strip-form-span (parse/parse-forms in)))))))
 
 ;; ============================================================
-;; Form `:span` is canvas-aligned — every `:kind :form` entry carries an
+;; Form `:span` is code-buffer-aligned — every `:kind :form` entry carries an
 ;; ABSOLUTE `[start end)` char span whose substring IS its byte-faithful
 ;; :source. This is the closed-loop oracle's clamp-to-HOLD basis (the same
 ;; basis the :read renoise spans already use). Asserted as a MECHANISM
@@ -94,12 +94,12 @@
               "(seon.db/transact!\n  {:seon.db/tx-data\n   [{:foo/bar 1}]})"
               "prose (a)\n;; c\n(b)"]]
     (testing (str "form :span substring == :source — " (pr-str in))
-      (doseq [e (filter #(= :form (:kind %)) (parse/parse-forms in))]
-        (let [[s end] (:span e)]
-          (is (vector? (:span e)))
-          (is (= 2 (count (:span e))))
-          (is (= (:source e) (subs in s end))
-              (str "span " (pr-str (:span e)) " must index :source for " (pr-str in))))))))
+      (doseq [e (filter #(= :form (:seon.repl/kind %)) (parse/parse-forms in))]
+        (let [[s end] (:seon.repl/span e)]
+          (is (vector? (:seon.repl/span e)))
+          (is (= 2 (count (:seon.repl/span e))))
+          (is (= (:seon.repl/source e) (subs in s end))
+              (str "span " (pr-str (:seon.repl/span e)) " must index :source for " (pr-str in))))))))
 
 ;; ============================================================
 ;; Byte-faithful :source — load-bearing for resume re-eval
@@ -131,7 +131,7 @@
     (testing (str note " — " (pr-str in))
       (let [entries (parse/parse-forms in)]
         (is (= 1 (count entries)))
-        (is (= expected-source (:source (first entries))))))))
+        (is (= expected-source (:seon.repl/source (first entries))))))))
 
 ;; ============================================================
 ;; Forms-and-prose-only (#50/#52) — a top-level read form is EVALUATED
@@ -255,9 +255,9 @@
                   first-form first-narration warned?]} prose-cases]
     (testing (str note " — " (pr-str in))
       (let [entries (parse/parse-forms in)
-            forms   (filter #(= :form (:kind %)) entries)
-            warning? (some #(and (= :comment (:kind %))
-                                 (str/includes? (str (:narration %)) "⚠"))
+            forms   (filter #(= :form (:seon.repl/kind %)) entries)
+            warning? (some #(and (= :comment (:seon.repl/kind %))
+                                 (str/includes? (str (:seon.repl/narration %)) "⚠"))
                            entries)]
         (is (= form-count (count forms))
             (str "form-count mismatch for " (pr-str in)
@@ -267,9 +267,9 @@
               (str "entry-count mismatch for " (pr-str in)
                    " — got " (pr-str entries))))
         (when first-form
-          (is (= first-form (:form (first forms)))))
+          (is (= first-form (:seon.repl/form (first forms)))))
         (when (some? first-narration)
-          (is (= first-narration (:narration (first forms)))))
+          (is (= first-narration (:seon.repl/narration (first forms)))))
         (when (some? warned?)
           (is (= warned? (boolean warning?))
               (str "demoted-literal warning expected=" warned?
@@ -300,12 +300,12 @@
     (testing (str "reader macro evaluates — " (pr-str in))
       (let [entries (parse/parse-forms in)]
         (is (= 1 (count entries)))
-        (is (= :form (:kind (first entries))))
+        (is (= :form (:seon.repl/kind (first entries))))
         ;; fn-literal gensyms differ; compare structurally where exact,
         ;; else just assert it's a seq form.
         (when (not (str/starts-with? in "#("))
-          (is (= form (:form (first entries)))))
-        (is (seq? (:form (first entries))))))))
+          (is (= form (:seon.repl/form (first entries)))))
+        (is (seq? (:seon.repl/form (first entries))))))))
 
 ;; ============================================================
 ;; #39 — a bare `result/<id>` symbol is a stash RE-REFERENCE, NOT prose.
@@ -321,19 +321,19 @@
   (testing "a bare `result/<id>` symbol evaluates (is a :form, not dropped)"
     (let [entries (parse/parse-forms "result/abc123def456")]
       (is (= 1 (count entries)))
-      (is (= :form (:kind (first entries))))
-      (is (= 'result/abc123def456 (:form (first entries))))
+      (is (= :form (:seon.repl/kind (first entries))))
+      (is (= 'result/abc123def456 (:seon.repl/form (first entries))))
       ;; byte-faithful source is what the eval path re-references
-      (is (= "result/abc123def456" (:source (first entries))))))
+      (is (= "result/abc123def456" (:seon.repl/source (first entries))))))
   (testing "a leading `;;` comment attaches as narration to the re-reference"
     (let [entries (parse/parse-forms ";; recall the earlier value\nresult/auC2606")
-          form    (first (filter #(= :form (:kind %)) entries))]
-      (is (= 'result/auC2606 (:form form)))
-      (is (= "recall the earlier value" (:narration form)))))
+          form    (first (filter #(= :form (:seon.repl/kind %)) entries))]
+      (is (= 'result/auC2606 (:seon.repl/form form)))
+      (is (= "recall the earlier value" (:seon.repl/narration form)))))
   (testing "a result-ref between two real forms — all three evaluate in order"
     (let [forms (->> (parse/parse-forms "(+ 1 2)\nresult/xyz999\n(inc 4)")
-                     (filter #(= :form (:kind %)))
-                     (mapv :form))]
+                     (filter #(= :form (:seon.repl/kind %)))
+                     (mapv :seon.repl/form))]
       (is (= ['(+ 1 2) 'result/xyz999 '(inc 4)] forms))))
   (testing "a NON-result bare symbol is still prose (dropped)"
     (is (= [] (parse/parse-forms "other/abc123")))
@@ -359,9 +359,9 @@
   (testing "a real bare form after dropped backtick prose still evaluates"
     ;; `;;` comment carries through the dropped syntax-quote to the form.
     (let [entries (parse/parse-forms ";; using a quote\n`(noise)\n(+ 1 2)")
-          forms   (filter #(= :form (:kind %)) entries)]
+          forms   (filter #(= :form (:seon.repl/kind %)) entries)]
       (is (= 1 (count forms)))
-      (is (= '(+ 1 2) (:form (first forms)))))))
+      (is (= '(+ 1 2) (:seon.repl/form (first forms)))))))
 
 ;; ============================================================
 ;; Multiline / indented forms are indent-safe — the reader groups a
@@ -373,15 +373,15 @@
   (let [entries (parse/parse-forms
                   "(seon.db/transact!\n  {:seon.db/tx-data\n   [{:foo/bar 1}]})")]
     (is (= 1 (count entries)))
-    (is (= :form (:kind (first entries))))
+    (is (= :form (:seon.repl/kind (first entries))))
     (is (= '(seon.db/transact! {:seon.db/tx-data [{:foo/bar 1}]})
-           (:form (first entries)))))
+           (:seon.repl/form (first entries)))))
   ;; A bare multiline map is ONE demoted datum (NOT a form), with a warning.
   (let [entries (parse/parse-forms "{:a 1\n :b 2\n :c 3}")]
     (is (= 1 (count entries)))
-    (is (= :comment (:kind (first entries))))
-    (is (str/includes? (str (:narration (first entries))) "⚠"))
-    (is (empty? (filter #(= :form (:kind %)) entries)))))
+    (is (= :comment (:seon.repl/kind (first entries))))
+    (is (str/includes? (str (:seon.repl/narration (first entries))) "⚠"))
+    (is (empty? (filter #(= :form (:seon.repl/kind %)) entries)))))
 
 ;; ============================================================
 ;; Read-error recovery — bad form becomes a :read entry; subsequent
@@ -417,7 +417,7 @@
   (doseq [{:keys [in note expected-kinds expected-kinds-contain]} recovery-cases]
     (testing (str note " — " (pr-str in))
       (let [entries (parse/parse-forms in)
-            kinds   (mapv :kind entries)]
+            kinds   (mapv :seon.repl/kind entries)]
         (when expected-kinds
           (is (= expected-kinds kinds)
               (str "kinds mismatch: got " (pr-str kinds))))
@@ -426,14 +426,14 @@
               (str "expected kinds " (pr-str expected-kinds-contain)
                    " all present, got " (pr-str kinds))))
         ;; Every :read entry must have :ok? false + non-blank :source + :error
-        ;; + the re-noise/repair fields (:span absolute offsets, :error-kind).
-        (doseq [e entries :when (= :read (:kind e))]
-          (is (false? (:ok? e)))
-          (is (string? (:source e)))
-          (is (string? (:error e)))
-          (is (vector? (:span e)))
-          (is (= 2 (count (:span e))))
-          (is (keyword? (:error-kind e))))))))
+        ;; + the re-noise/repair fields (:seon.repl/span absolute offsets, :error-kind).
+        (doseq [e entries :when (= :read (:seon.repl/kind e))]
+          (is (false? (:seon.repl/ok? e)))
+          (is (string? (:seon.repl/source e)))
+          (is (string? (-> e :seon/error :seon.error/message)))
+          (is (vector? (:seon.repl/span e)))
+          (is (= 2 (count (:seon.repl/span e))))
+          (is (keyword? (-> e :seon/error :seon.error/kind))))))))
 
 ;; ============================================================
 ;; :error-kind classification — every rewrite-clj read-throw the
@@ -462,11 +462,11 @@
 (deftest error-kind-classification
   (doseq [{:keys [in kind note]} error-kind-cases]
     (testing (str note " — " (pr-str in))
-      (let [reads (filter #(= :read (:kind %)) (parse/parse-forms in))
-            ek    (:error-kind (first reads))]
+      (let [reads (filter #(= :read (:seon.repl/kind %)) (parse/parse-forms in))
+            ek    (-> (first reads) :seon/error :seon.error/kind)]
         (is (= kind ek)
             (str "expected :error-kind " kind " got " (pr-str ek)
-                 " (msg: " (:error (first reads)) ")"))))))
+                 " (msg: " (-> (first reads) :seon/error :seon.error/message) ")"))))))
 
 ;; ============================================================
 ;; Borrowed false-positive guard — inputs the real ClojureScript reader
@@ -488,7 +488,7 @@
 (deftest reader-accepted-never-misflagged
   (doseq [in reader-accepted-corpus]
     (testing (str "valid reader input must not :read-fail — " (pr-str in))
-      (is (not-any? #(= :read (:kind %)) (parse/parse-forms in))
+      (is (not-any? #(= :read (:seon.repl/kind %)) (parse/parse-forms in))
           (str "mis-flagged valid input as broken: " (pr-str in))))))
 
 ;; ============================================================
@@ -507,8 +507,8 @@
 (deftest prong1-closer-only-spans-dropped
   (doseq [{:keys [in kinds note]} closer-only-cases]
     (testing (str note " — " (pr-str in))
-      (is (= kinds (mapv :kind (parse/parse-forms in)))
-          (str "kinds: " (pr-str (mapv :kind (parse/parse-forms in))))))))
+      (is (= kinds (mapv :seon.repl/kind (parse/parse-forms in)))
+          (str "kinds: " (pr-str (mapv :seon.repl/kind (parse/parse-forms in))))))))
 
 ;; ============================================================
 ;; PRONG 2 (eval-segmenter research) — recovery anchors narrowed to `(`/`;`
@@ -530,27 +530,27 @@
 (deftest prong2-shred-collapses-to-one-read
   (doseq [{:keys [in kinds note]} prong2-cases]
     (testing (str note " — " (pr-str in))
-      (is (= kinds (mapv :kind (parse/parse-forms in)))
-          (str "kinds: " (pr-str (mapv :kind (parse/parse-forms in))))))))
+      (is (= kinds (mapv :seon.repl/kind (parse/parse-forms in)))
+          (str "kinds: " (pr-str (mapv :seon.repl/kind (parse/parse-forms in))))))))
 
 (deftest prong1-never-hides-a-real-failure
   ;; risk #1: a genuinely broken FORM (leading `(` + bad token) must STILL
   ;; surface as a :read with non-blank source + :error.
   (testing "real broken form still recorded"
-    (let [r (first (filter #(= :read (:kind %)) (parse/parse-forms "(+ 1 3x)")))]
+    (let [r (first (filter #(= :read (:seon.repl/kind %)) (parse/parse-forms "(+ 1 3x)")))]
       (is (some? r))
-      (is (not (str/blank? (:source r))))
-      (is (string? (:error r)))))
+      (is (not (str/blank? (:seon.repl/source r))))
+      (is (string? (-> r :seon/error :seon.error/message)))))
   ;; risk #2: incomplete final form (EOF mid-form) is ONE honest :read,
   ;; NOT a dropped orphan (its span is the whole form, not pure closers).
   (testing "EOF mid-form stays one honest :read"
     (let [es (parse/parse-forms "(db/transact! :seon [{:a 1}")]
-      (is (= [:read] (mapv :kind es)))
-      (is (not (str/blank? (:source (first es)))))))
+      (is (= [:read] (mapv :seon.repl/kind es)))
+      (is (not (str/blank? (:seon.repl/source (first es)))))))
   ;; risk #3: a closer INSIDE a string of a GOOD form is never stripped
   ;; (closer-only? runs on failed spans only; this form reads clean).
   (testing "closer inside a string literal is not stripped"
-    (is (= [:form] (mapv :kind (parse/parse-forms "(str \"}\")"))))))
+    (is (= [:form] (mapv :seon.repl/kind (parse/parse-forms "(str \"}\")"))))))
 
 ;; ============================================================
 ;; Narration semantics on recovery — narration accumulated before a
@@ -559,12 +559,12 @@
 
 (deftest narration-attaches-to-failure-not-next-good
   (let [entries (parse/parse-forms ";; about-to-fail\n(unbalanced\n;; about-next-good\n(good)")
-        read-entry (first (filter #(= :read (:kind %)) entries))
-        form-entry (first (filter #(= :form (:kind %)) entries))]
+        read-entry (first (filter #(= :read (:seon.repl/kind %)) entries))
+        form-entry (first (filter #(= :form (:seon.repl/kind %)) entries))]
     (is (some? read-entry))
-    (is (= "about-to-fail" (:narration read-entry)))
+    (is (= "about-to-fail" (:seon.repl/narration read-entry)))
     (is (some? form-entry))
-    (is (= "about-next-good" (:narration form-entry)))))
+    (is (= "about-next-good" (:seon.repl/narration form-entry)))))
 
 ;; ============================================================
 ;; :eof recovery never splits an UNCLOSED form at an interior `;`. An
@@ -577,14 +577,14 @@
   (let [entries (parse/parse-forms "(defn foo []\n;; do the thing\n  (bar)")]
     ;; the load-bearing safety property: the whole thing is ONE broken read,
     ;; NO :form entry exists, so (bar) is never emitted as an executing form.
-    (is (= [:read] (mapv :kind entries))
-        (str "expected one broken :read, got " (pr-str (mapv :kind entries))))
-    (is (not-any? #(= :form (:kind %)) entries))
+    (is (= [:read] (mapv :seon.repl/kind entries))
+        (str "expected one broken :read, got " (pr-str (mapv :seon.repl/kind entries))))
+    (is (not-any? #(= :form (:seon.repl/kind %)) entries))
     (let [read-entry (first entries)]
-      (is (false? (:ok? read-entry)))
-      (is (= :eof (:error-kind read-entry)))
+      (is (false? (:seon.repl/ok? read-entry)))
+      (is (= :eof (-> read-entry :seon/error :seon.error/kind)))
       ;; the inner (bar) stays INSIDE the broken span's source, not a form
-      (is (str/includes? (:source read-entry) "(bar)")))))
+      (is (str/includes? (:seon.repl/source read-entry) "(bar)")))))
 
 ;; ============================================================
 ;; Recovery STRICTLY advances — a recovery hop must move PAST the failing
@@ -618,8 +618,8 @@
     ;; `;`-comment block must still return a finite, clean result.
     (let [entries (parse/parse-forms ";; lead\n(open \"unclosed\n;; mid\n(inner)")]
       (is (vector? entries))
-      (is (some #(= :read (:kind %)) entries)
-          (str "expected a :read failure, got " (pr-str (mapv :kind entries)))))))
+      (is (some #(= :read (:seon.repl/kind %)) entries)
+          (str "expected a :read failure, got " (pr-str (mapv :seon.repl/kind entries)))))))
 
 ;; ============================================================
 ;; A.1 — prose-vs-code classification. A reader THROW on a prose token
@@ -670,8 +670,8 @@
                   expected-kinds narration-includes]} prose-token-cases]
     (testing (str note " — " (pr-str in))
       (let [entries (parse/parse-forms in)
-            kinds   (mapv :kind entries)
-            forms   (filter #(= :form (:kind %)) entries)]
+            kinds   (mapv :seon.repl/kind entries)
+            forms   (filter #(= :form (:seon.repl/kind %)) entries)]
         (when expected-kinds
           (is (= expected-kinds kinds)
               (str "kinds mismatch: got " (pr-str kinds))))
@@ -680,7 +680,7 @@
               (str "a :read failure leaked for prose: " (pr-str kinds))))
         (when narration-includes
           ;; The real `;;` comment attaches to the form it precedes.
-          (let [narr (str/join "\n" (keep :narration entries))]
+          (let [narr (str/join "\n" (keep :seon.repl/narration entries))]
             (doseq [frag narration-includes]
               (is (clojure.string/includes? narr frag)
                   (str "narration must include " (pr-str frag)
@@ -706,7 +706,7 @@
    `;;` comment-preamble as `;;` lines, then (for a form/read) the source.
    A demoted-literal warning (`⚠`) entry is a comment, so it round-trips
    as a `;;` line — but it is NOT a form, so it never re-evaluates."
-  [{:keys [kind narration source]}]
+  [{:seon.repl/keys [kind narration source]}]
   (let [pre (when (and narration (not (str/blank? narration)))
               (->> (str/split-lines narration)
                    (map #(str ";; " (str/replace % #"^[\s;]+" "")))
@@ -729,20 +729,20 @@
             rendered (str/join "\n" (map render-entry entries))
             reparsed (parse/parse-forms rendered)]
         ;; forms survive byte-faithfully + in order
-        (is (= (mapv :form (filter #(= :form (:kind %)) entries))
-               (mapv :form (filter #(= :form (:kind %)) reparsed)))
+        (is (= (mapv :seon.repl/form (filter #(= :form (:seon.repl/kind %)) entries))
+               (mapv :seon.repl/form (filter #(= :form (:seon.repl/kind %)) reparsed)))
             (str "forms changed across round-trip — " (pr-str rendered)))
         ;; every real `;;` comment line re-appears as a `;;` line
         (doseq [e entries
-                ln (when (:narration e) (str/split-lines (:narration e)))
+                ln (when (:seon.repl/narration e) (str/split-lines (:seon.repl/narration e)))
                 :when (not (str/blank? ln))]
           (is (str/includes? rendered (str ";; " (str/replace ln #"^[\s;]+" "")))
               (str "comment line " (pr-str ln) " missing from "
                    (pr-str rendered))))
         ;; re-parsed narration equals the original (idempotent)
-        (is (= (mapv :narration entries) (mapv :narration reparsed))
+        (is (= (mapv :seon.repl/narration entries) (mapv :seon.repl/narration reparsed))
             (str "narration drifted across round-trip — got "
-                 (pr-str (mapv :narration reparsed))))))))
+                 (pr-str (mapv :seon.repl/narration reparsed))))))))
 
 ;; ============================================================
 ;; form-source-at — one-node source extraction (program-graph
@@ -832,21 +832,21 @@
   (doseq [{:keys [in note expected-kinds error-kind no-read? no-form?]} mined-agent-cases]
     (testing (str note " — " (pr-str in))
       (let [entries (parse/parse-forms in)
-            kinds   (mapv :kind entries)
-            reads   (filter #(= :read (:kind %)) entries)]
+            kinds   (mapv :seon.repl/kind entries)
+            reads   (filter #(= :read (:seon.repl/kind %)) entries)]
         (when expected-kinds
           (is (= expected-kinds kinds)
               (str "kinds mismatch: got " (pr-str kinds))))
         (when error-kind
-          (is (= error-kind (:error-kind (first reads)))
+          (is (= error-kind (-> (first reads) :seon/error :seon.error/kind))
               (str "error-kind mismatch: got "
-                   (pr-str (:error-kind (first reads))))))
+                   (pr-str (-> (first reads) :seon/error :seon.error/kind)))))
         (when no-read?
-          (is (not-any? #(= :read (:kind %)) entries)
+          (is (not-any? #(= :read (:seon.repl/kind %)) entries)
               (str "a :read failure leaked for backtick markdown prose: "
                    (pr-str kinds))))
         (when no-form?
-          (is (not-any? #(= :form (:kind %)) entries)
+          (is (not-any? #(= :form (:seon.repl/kind %)) entries)
               (str "a spurious :form was evaluated from agent narration: "
                    (pr-str kinds))))))))
 
@@ -878,7 +878,7 @@
 ;; `:strip-fences? true` must give a span shifted by EXACTLY the fence-prefix
 ;; length the strip leaves before the form — a uniform shift on BOTH
 ;; endpoints, nothing distorted. That is what lets the driver translate a
-;; good-form clamp span between the stripped basis and the raw `canvas_text`
+;; good-form clamp span between the stripped basis and the raw `code_buffer_text`
 ;; the worker's `offset_map` indexes.
 ;;
 ;; (Note the asymmetry the strip exists to absorb: a BARE ``` fence with no
@@ -915,9 +915,9 @@
   "The `:span` of the SINGLE `:kind :form` entry from parsing `text`, or nil
    when the parse yields anything other than exactly one form."
   [text strip?]
-  (let [forms (filter #(= :form (:kind %))
+  (let [forms (filter #(= :form (:seon.repl/kind %))
                       (parse/parse-forms text {:strip-fences? strip?}))]
-    (when (= 1 (count forms)) (:span (first forms)))))
+    (when (= 1 (count forms)) (:seon.repl/span (first forms)))))
 
 (deftest strip-fences-span-basis-property
   (let [result
@@ -951,3 +951,180 @@
         (str "strip-fences span-basis property falsified — shrunk: "
              (pr-str (-> result :shrunk :smallest))
              " | result: " (pr-str result)))))
+
+;; ============================================================
+;; `#code` heredoc literal (Unit A1) — the T1 battery.
+;;
+;; A `#code/<lang> <<SENTINEL … SENTINEL` region reads to the inert value
+;; `{:seon.code/lang :<lang> :seon.code/text "<verbatim payload>"}`. The
+;; assertions are behavioral: byte-fidelity on `::text`, the block map
+;; reaching the read `:seon.repl/form`, original-basis source/span, and
+;; malformed/unterminated openers surfacing as `:read` entries NAMING the
+;; sentinel (not silently dropped).
+;; ============================================================
+
+(defn- code-blocks
+  "Every `seon.code` block map nested anywhere in a read `form`."
+  [form]
+  (->> (tree-seq coll? seq form)
+       (filter #(and (map? %) (contains? % :seon.code/text)))))
+
+(defn- first-form [in]
+  (:seon.repl/form (first (parse/parse-forms in))))
+
+(defn- one-text
+  "The `::text` of the single block nested in the first form of `in`."
+  [in]
+  (:seon.code/text (first (code-blocks (first-form in)))))
+
+;; Each case: the raw payload BYTES and the `#code` opener/closer wrapping
+;; it inside a top-level call form, so the block lands in `:seon.repl/form`.
+(def heredoc-fidelity-cases
+  [{:note    "Python docstrings / f-strings / \\d regexes"
+    :payload "def f(x):\n    \"\"\"Docs with \"quotes\" and \\d regexes.\"\"\"\n    return f\"{x}!\"\n"
+    :lang    "python"}
+   {:note    "Rust lifetimes + raw strings r#\"...\"#"
+    :payload "let s = r#\"a \"b\" c\"#;\nfn longest<'a>(x: &'a str, y: &'a str) -> &'a str { x }\n"
+    :lang    "rust"}
+   {:note    "Go backtick raw strings"
+    :payload "s := `raw \"string\" with \\n no escapes`\nt := `line1\nline2`\n"
+    :lang    "go"}
+   {:note    "YAML with quotes and nesting"
+    :payload "key: \"value\"\nnested:\n  - a\n  - b: \"c\"\n"
+    :lang    "yaml"}
+   {:note    "payload CONTAINING the sentinel word mid-line"
+    :payload "return \"ENDPOINT\" and END_TOKEN here\nnot END either\n"
+    :lang    "txt"}
+   {:note    "empty payload"
+    :payload ""
+    :lang    "txt"}
+   {:note    "CRLF payload — bytes preserved"
+    :payload "line1\r\nline2\r\n"
+    :lang    "txt"}])
+
+(deftest heredoc-text-byte-faithful
+  (doseq [{:keys [note payload lang]} heredoc-fidelity-cases]
+    (testing note
+      (let [in (str "(identity #code/" lang " <<SENT\n" payload "SENT\n)")]
+        (is (= payload (one-text in))
+            (str "::text must equal the payload byte-for-byte — " note))))))
+
+(deftest heredoc-reads-to-block-value
+  (testing "the block map lands in :seon.repl/form, lang + text populated"
+    (let [in   "(identity #code/python <<PY\nprint(1)\nPY\n)"
+          form (first-form in)
+          blk  (first (code-blocks form))]
+      (is (= 'identity (first form)))
+      (is (= :python (:seon.code/lang blk)))
+      (is (= "print(1)\n" (:seon.code/text blk))))))
+
+(deftest heredoc-nested-in-call-map
+  (testing "primary use — a #code value as a value inside a fs/replace! map"
+    (let [in   (str "(seon.agent.fs/replace!"
+                    " {:seon.agent.fs/path \"a.py\""
+                    "  :seon.agent.fs/find #code/python <<F\ndef f():\n    pass\nF\n"
+                    "  :seon.agent.fs/replace \"x\"})")
+          form (first-form in)
+          blk  (first (code-blocks form))]
+      (is (= 'seon.agent.fs/replace! (first form)))
+      (is (= "def f():\n    pass\n" (:seon.code/text blk)))
+      (is (= :python (:seon.code/lang blk))))))
+
+(deftest heredoc-two-in-one-form
+  (testing "two heredocs in one form both round-trip"
+    (let [in   "(list #code/a <<A\nhello\nA\n #code/b <<B\nworld\nB\n)"
+          form (first-form in)
+          blks (code-blocks form)]
+      (is (= 2 (count blks)))
+      (is (= #{"hello\n" "world\n"} (set (map :seon.code/text blks))))
+      (is (= #{:a :b} (set (map :seon.code/lang blks)))))))
+
+(deftest heredoc-sentinel-word-midline-does-not-close
+  (testing "a sentinel word mid-line or indented does not close the block"
+    (let [in "(identity #code/txt <<END\nreturn END_TOKEN\n    END\nEND\n)"]
+      (is (= 1 (count (parse/parse-forms in))))
+      (is (= "return END_TOKEN\n    END\n" (one-text in))))))
+
+(deftest heredoc-source-is-byte-faithful-and-span-original
+  (testing ":source keeps the RAW heredoc; :span indexes the ORIGINAL text"
+    (let [in "(identity #code/python <<PY\ndef f(): pass\nPY\n)"
+          e  (first (parse/parse-forms in))
+          [s end] (:seon.repl/span e)]
+      (is (= in (:seon.repl/source e)))
+      (is (= (:seon.repl/source e) (subs in s end))
+          "span must index the ORIGINAL text, not the rewritten one"))))
+
+(deftest heredoc-eval-source-is-cljs-readable
+  (testing ":eval-source is present for a heredoc form and reads to the block"
+    (let [in       "(identity #code/python <<PY\ndef f(): pass\nPY\n)"
+          e        (first (parse/parse-forms in))
+          eval-src (:seon.repl/eval-source e)]
+      (is (string? eval-src))
+      (is (not= eval-src (:seon.repl/source e)))
+      ;; the rewritten eval-source is plain valid Clojure the reader accepts
+      ;; and yields the SAME block value as the entry's :form.
+      (let [re (parse/parse-forms eval-src)]
+        (is (= 1 (count re)))
+        (is (= (:seon.repl/form e) (:seon.repl/form (first re))))))))
+
+(deftest heredoc-no-eval-source-on-plain-forms
+  (testing "a form without a heredoc carries no :eval-source key"
+    (let [e (first (parse/parse-forms "(+ 1 2)"))]
+      (is (not (contains? e :seon.repl/eval-source))))))
+
+(deftest eval-source-tracks-rewrite-not-heredoc-block
+  (testing (str ":eval-source fires whenever the cljs-readable rewrite differs "
+                "from the byte-faithful original — including a form adjacent to "
+                "a malformed #code marker that carries no seon.code block")
+    (let [in      "(identity #code/python)\n(+ 1 2)"
+          entries (parse/parse-forms in)
+          ;; the malformed marker itself surfaces as a :read entry,
+          e       (first (filter #(= :form (:seon.repl/kind %)) entries))]
+      ;; the (identity …) form's source region was rewritten (the marker
+      ;; stripped), so rewritten ≠ original → :eval-source present, even
+      ;; though the form contains NO seon.code block.
+      (is (= "(identity #code/python)" (:seon.repl/source e)))
+      (is (contains? e :seon.repl/eval-source))
+      (is (not= (:seon.repl/eval-source e) (:seon.repl/source e)))
+      ;; and re-parsing that cljs-readable eval-source yields the SAME form.
+      (let [re (parse/parse-forms (:seon.repl/eval-source e))]
+        (is (= 1 (count re)))
+        (is (= (:seon.repl/form e) (:seon.repl/form (first re))))))))
+
+(deftest heredoc-top-level-def
+  (testing "a #code arg to a top-level (def …) evaluates and round-trips"
+    (let [in   "(def snippet #code/python <<PY\nprint(\"hi\")\nPY\n)"
+          form (first-form in)]
+      (is (= 'def (first form)))
+      (is (= "print(\"hi\")\n" (:seon.code/text (first (code-blocks form))))))))
+
+(deftest heredoc-unterminated-is-read-naming-sentinel
+  (testing "unterminated heredoc → a :read entry naming the awaited sentinel"
+    (let [in      "#code/python <<NOPE\ndef f(): pass\nno closer here\n"
+          entries (parse/parse-forms in)
+          reads   (filter #(= :read (:seon.repl/kind %)) entries)
+          msgs    (map #(get-in % [:seon/error :seon.error/message]) reads)]
+      (is (seq reads) "must not be silently dropped as prose")
+      (is (false? (:seon.repl/ok? (first reads))))
+      ;; the SENTINEL appears in some :read message (not exact wording)
+      (is (some #(str/includes? % "NOPE") msgs)
+          "the awaited sentinel must be named in the :read message"))))
+
+(deftest heredoc-malformed-no-arrows-is-read
+  (testing "a #code/lang with no <<SENTINEL surfaces as :read, forms survive"
+    (let [in      "(identity #code/python)\n(+ 1 2)"
+          entries (parse/parse-forms in)
+          reads   (filter #(= :read (:seon.repl/kind %)) entries)
+          forms   (filter #(= :form (:seon.repl/kind %)) entries)]
+      (is (seq reads) "malformed #code must not vanish")
+      (is (some #(str/includes?
+                   (get-in % [:seon/error :seon.error/message]) "#code")
+                reads))
+      ;; the enclosing `)` is not swallowed — both real forms still parse
+      (is (= '[(identity) (+ 1 2)] (mapv :seon.repl/form forms))))))
+
+(deftest heredoc-contains-opener?-predicate
+  (testing "contains-heredoc-opener? gates parinfer repair"
+    (is (parse/contains-heredoc-opener? "(f #code/py <<X\nbody\nX\n)"))
+    (is (not (parse/contains-heredoc-opener? "(f {:a 1})")))
+    (is (not (parse/contains-heredoc-opener? "(f #code/py no-arrows)")))))

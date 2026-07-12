@@ -120,7 +120,7 @@
 ;; `(log/trace :datahike/index-access …)` (persistent_set.cljc:343)
 ;; floods stdout on every uncached store read — observed live
 ;; 2026-06-09: logs/pod.log hit 813 MB / 39 M lines during one
-;; inspector render against the cold file store. Gate trace/debug from
+;; web UI render against the cold file store. Gate trace/debug from
 ;; the replikativ stack to noop; info/warn/error still pass. Seon's own
 ;; logging does NOT route through trove (it uses [[console!]] below),
 ;; so this gate affects library logs only.
@@ -201,6 +201,19 @@
    [:seon.log/stack   {:optional true} :string]
    [:seon.log/data    {:optional true} :seon.log/data]])
 
+;; The caller-facing request shape for `error!`/`warn!`/`info!`/`debug!`
+;; — the entry MINUS the `:at`/`:level` fields (both STAMPED inside
+;; `log!`). ONE shape shared by all four level fns (shared-shape rule).
+;; Open map: `log!` composes `:at`/`:level` and callers may pass extra
+;; keys through to `:seon.log/data`.
+(schema/register! :seon.log/entry-request
+  [:map
+   [:seon.log/source  :seon.log/source]
+   [:seon.log/message :seon.log/message]
+   [:seon.log/agent   {:optional true} :seon.log/agent]
+   [:seon.log/stack   {:optional true} :seon.log/stack]
+   [:seon.log/data    {:optional true} :seon.log/data]])
+
 (schema/register! :seon.log/n     :int)
 (schema/register! :seon.log/tail-request
   [:map
@@ -211,6 +224,17 @@
 
 (schema/register! :seon.log/tail-response
   [:vector :seon.log/entry])
+
+;; The active-log-file config keys ([[!config]]) + the [[configure!]]
+;; request shape. Open map — pass only the keys you want to change.
+(schema/register! :seon.log/file     :string)
+(schema/register! :seon.log/file-cap :int)
+(schema/register! :seon.log/keep     :int)
+(schema/register! :seon.log/config-request
+  [:map
+   [:seon.log/file     {:optional true} :seon.log/file]
+   [:seon.log/file-cap {:optional true} :seon.log/file-cap]
+   [:seon.log/keep     {:optional true} :seon.log/keep]])
 
 ;; ============================================================
 ;; Configuration — single source of truth for the log file path.
@@ -249,7 +273,7 @@
      :seon.log/keep     — number of rotated files retained.
 
    Returns the new config map."
-  {:malli/schema [:=> [:cat :map] :map]}
+  {:malli/schema [:=> [:cat :seon.log/config-request] :map]}
   [updates]
   (let [next (merge @!config
                     (select-keys updates
@@ -357,26 +381,20 @@
      1. stderr line via console.error
      2. append NDJSON-EDN line to the active log file
         (`:seon.log/file` in [[!config]])."
-  {:malli/schema [:=> [:cat [:map
-                             [:seon.log/source :keyword]
-                             [:seon.log/message :string]
-                             [:seon.log/agent {:optional true} :string]
-                             [:seon.log/stack {:optional true} :string]
-                             [:seon.log/data {:optional true} :seon.log/data]]]
-                  :any]}
+  {:malli/schema [:=> [:cat :seon.log/entry-request] :any]}
   [data] (log! :error data))
 
 (defn warn!
   "Emit a `:seon.log/level :warn` entry (see [[error!]])."
-  {:malli/schema [:=> [:cat :map] :any]}
+  {:malli/schema [:=> [:cat :seon.log/entry-request] :any]}
   [data] (log! :warn data))
 (defn info!
   "Emit a `:seon.log/level :info` entry (see [[error!]])."
-  {:malli/schema [:=> [:cat :map] :any]}
+  {:malli/schema [:=> [:cat :seon.log/entry-request] :any]}
   [data] (log! :info data))
 (defn debug!
   "Emit a `:seon.log/level :debug` entry (see [[error!]])."
-  {:malli/schema [:=> [:cat :map] :any]}
+  {:malli/schema [:=> [:cat :seon.log/entry-request] :any]}
   [data] (log! :debug data))
 
 ;; ============================================================

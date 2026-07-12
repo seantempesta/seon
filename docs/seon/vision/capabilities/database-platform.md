@@ -23,4 +23,4 @@ None.
 ## Related
 
 - Components: [[components/database]]
-- PRDs: [[prds/datahike-migration/prd]] (historical: [[prds/datalevin-migration/prd]], [[prds/flow-datalevin-writer/prd]])
+- PRDs: `prds/datahike-migration/prd` (historical: `prds/datalevin-migration/prd`, `prds/flow-datalevin-writer/prd`)

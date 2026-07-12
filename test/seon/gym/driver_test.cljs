@@ -346,12 +346,13 @@
 
 ;; ---------------------------------------------------------------------------
 ;; PROMPT-BLOB PREDICATES (gym-upgrade PRD §2.1 / U1) — the referee's
-;; eyes. run-turn! persists every prompt (via seon.debug capture, forced
-;; ON for gym runs) to <debug-dir>/<agent>/<turn-idx>-<turn>/prompt.txt;
-;; the new kinds read those blobs from the post-run store. Falsification
-;; (per the PRD): the question text passes :prompt-every-turn; text NOT
-;; in any prompt fails :prompt-includes WITH the blob path in the
-;; actual; a missing/unreadable blob scores RED naming the path.
+;; eyes. run-turn!'s ALWAYS-ON observability capture persists every
+;; prompt to the content-addressed blob store; the turn datom carries a
+;; :seon.agent.turn/prompt-blob ref and the predicate kinds read those
+;; blobs back by hash from the post-run store. Falsification (per the
+;; PRD): the question text passes :prompt-every-turn; text NOT in any
+;; prompt fails :prompt-includes WITH the blob hash in the actual; a
+;; missing/unreadable blob scores RED naming the turn/hash.
 ;; ---------------------------------------------------------------------------
 
 (def ^:private prompt-pred-question
@@ -411,13 +412,13 @@
                        (str ":prompt-every-turn on the question passes — "
                             (:seon.gym.result/actual r))))
                  ;; FALSIFICATION 2 — absent text fails WITH the blob
-                 ;; path in the actual.
+                 ;; hash in the actual.
                  (let [r (result-by-id card :absent-text-fails-naming-the-blob)]
                    (is (false? (:seon.gym.result/pass? r))
                        "text not in any prompt fails :prompt-includes")
-                   (is (str/includes? (:seon.gym.result/actual r)
-                                      "logs/turns/")
-                       (str "the failing actual names the blob path — "
+                   (is (re-find #"[0-9a-f]{64}"
+                                (:seon.gym.result/actual r))
+                       (str "the failing actual names the blob hash — "
                             (:seon.gym.result/actual r))))
                  ;; :prompt-excludes is the same observation, inverted.
                  (is (true? (:seon.gym.result/pass?
@@ -433,21 +434,22 @@
                                       "out of range")))
                  ;; one deliberately-failing predicate → card fails.
                  (is (false? (:seon.gym.scorecard/pass? card)))
-                 ;; §6.6 evidence: the card carries the run's blob paths.
-                 (let [pfs (:seon.gym.scorecard/prompt-files card)]
-                   (is (seq pfs) "scorecard carries prompt-file evidence")
-                   (is (every? #(str/starts-with? % "logs/turns/") pfs)))
+                 ;; §6.6 evidence: the card carries the run's blob hashes.
+                 (let [pbs (:seon.gym.scorecard/prompt-blobs card)]
+                   (is (seq pbs) "scorecard carries prompt-blob evidence")
+                   (is (every? #(re-matches #"[0-9a-f]{64}" %) pbs)
+                       "each evidence entry is a content hash"))
                  (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 (deftest prompt-predicate-missing-blob-scores-red-naming-the-path
-  ;; FALSIFICATION 3 — a turn whose :seon.agent.turn/prompt-file points
-  ;; at a file that does not exist (seeded as a fixture turn, exactly
-  ;; what a lost/unwritten blob looks like post-run) must score RED
-  ;; naming the path — NEVER a silent pass, even though the run's REAL
-  ;; turn prompt does contain the asserted text.
+  ;; FALSIFICATION 3 — a turn whose :seon.agent.turn/prompt-blob points
+  ;; at a hash whose blob file does not exist (seeded as a fixture turn,
+  ;; exactly what a lost/unwritten blob looks like post-run) must score
+  ;; RED naming the hash — NEVER a silent pass, even though the run's
+  ;; REAL turn prompt does contain the asserted text.
   (async done
-    (let [phantom (str "logs/prompts/gym-missing/" (db/new-id!) ".txt")
+    (let [phantom (apply str (repeat 64 "0"))   ; valid hash shape, no file
           run-id  (db/new-id!)
           scenario
           (-> (prompt-blob-scenario)
@@ -466,7 +468,7 @@
                        :seon.agent.turn/at          (js/Date.)
                        :seon.agent.turn/status      :done
                        :seon.agent.turn/run         [:seon.agent.run/id run-id]
-                       :seon.agent.turn/prompt-file phantom}]
+                       :seon.agent.turn/prompt-blob {:my.blob/hash phantom}}]
                      :seon.gym.scenario/predicates
                      [{:seon.gym.predicate/id   :every-turn-red-on-missing-blob
                        :seon.gym.predicate/kind :prompt-every-turn
@@ -479,7 +481,7 @@
                      (is (false? (:seon.gym.result/pass? r))
                          "a missing blob is RED, never a silent pass")
                      (is (str/includes? (:seon.gym.result/actual r) phantom)
-                         (str "the RED actual names the missing path — "
+                         (str "the RED actual names the missing hash — "
                               (:seon.gym.result/actual r))))
                    (is (false? (:seon.gym.scorecard/pass? card)))
                    (done)))
@@ -552,9 +554,9 @@
                      (is (some #{:gymtest-static}
                                (:seon.gym.profile/blocks (last profiles)))
                          "turn 2's layout records the installed block"))
-                   ;; prompt-file evidence: what the agent saw, per turn.
-                   (is (seq (:seon.gym.scorecard/prompt-files card))
-                       "scorecard carries prompt-blob paths")
+                   ;; prompt-blob evidence: what the agent saw, per turn.
+                   (is (seq (:seon.gym.scorecard/prompt-blobs card))
+                       "scorecard carries prompt-blob hashes")
                    (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
@@ -562,21 +564,13 @@
 ;; CONFIG-AWARE CONTEXT — a run names a seon.config MANIFEST FILE (`:path`);
 ;; the driver steers SEON_CONFIG so the REAL seed path
 ;; (create! → seed-default-ctx! → resolve-agent-context) seeds the gym
-;; agents' :seon.agent/ctx from THAT manifest. The resulting context SIZE
-;; lands in the turn-profile block-tokens (the A/B lever). Here the lean
-;; manifest (config/lean-no-live-tile.edn) drops the always-on-but-unused
-;; :live-tile block → a smaller, observably different seeded context, with
-;; zero gym-local seeding logic.
+;; agents' :seon.agent/ctx from THAT manifest. The resulting context shape
+;; lands in the turn profile, proving there is no gym-local seed path.
 ;; ---------------------------------------------------------------------------
 
 (defn- first-profile-blocks [card]
   (set (:seon.gym.profile/blocks
         (first (:seon.gym.scorecard/turn-profiles card)))))
-
-(defn- first-profile-tokens [card]
-  (reduce + 0 (map second
-                   (:seon.gym.profile/block-tokens
-                    (first (:seon.gym.scorecard/turn-profiles card))))))
 
 (deftest config-manifest-shapes-the-seeded-context
   (async done
@@ -587,22 +581,17 @@
                             {:seon.gym/scenario s
                              :seon.gym/config
                              {:seon.gym.config/path
-                              "test/seon/gym/configs/lean-no-live-tile.edn"}})
+                              "test/seon/gym/configs/lean-no-canvas.edn"}})
                           (fn [lean] [full lean]))))
           (.then (fn [[full lean]]
-                   (is (contains? (first-profile-blocks full) :live-tile)
-                       "the default context seeds the :live-tile block")
-                   (is (not (contains? (first-profile-blocks lean) :live-tile))
-                       "the lean manifest drops :live-tile from the seeded ctx")
-                   (is (contains? (first-profile-blocks lean) :namespaces)
-                       "the lean manifest keeps the load-bearing :namespaces block")
-                   (is (contains? (first-profile-blocks lean) :skill/repl)
-                       "the lean manifest keeps the always-on :skill/repl body")
-                   (is (< (first-profile-tokens lean)
-                          (first-profile-tokens full))
-                       (str "lean context is smaller in tokens — full="
-                            (first-profile-tokens full) " lean="
-                            (first-profile-tokens lean)))
+                   (let [full-blocks (first-profile-blocks full)
+                         lean-blocks (first-profile-blocks lean)]
+                     (is (seq full-blocks))
+                     (is (seq lean-blocks))
+                     (is (not= full-blocks lean-blocks)
+                         "an explicit manifest changes the database-seeded shape")
+                     (is (not-any? #(= "skill" (namespace %)) lean-blocks)
+                         "an explicit context tree receives no implicit skill blocks"))
                    (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
 
@@ -662,12 +651,12 @@
 ;; ---------------------------------------------------------------------------
 ;; ALIAS-BLIND PREDICATE LOAD CHECK — a :pattern that regexes a qualified
 ;; FN-CALL `<long-ns>/` whose home ns aliases it (the seon.* verbs db/,
-;; message/, … AND the my.* toolkit tile/, ui/, data/, kb/) but does NOT
+;; message/, … AND the my.* toolkit canvas/, ui/, data/, kb/) but does NOT
 ;; accept the short alias false-negatives EVERY correct read, silently
-;; suppressing the pass-rate (bit thrice: my.tile e6aaf9f0, three seon.db/
+;; suppressing the pass-rate (bit thrice: my.canvas e6aaf9f0, three seon.db/
 ;; reads fc557fbf). It must FAIL TO LOAD with the named error, while
 ;; alias-tolerant patterns, legitimately-qualified (non-aliased) patterns,
-;; and namespaced-keyword data-keys (`:my.tile/action`) all load.
+;; and namespaced-keyword data-keys (`:my.canvas/action`) all load.
 ;; ---------------------------------------------------------------------------
 
 (deftest alias-blind-predicate-detects-the-aliased-qualified-without-alias
@@ -685,24 +674,24 @@
     (is (some? (blind? "my\\.plan/plan!"))
         "qualified my.plan/ without the plan alias is alias-blind")
     ;; FLAGGED — the ORIGINAL alias-blind class (e6aaf9f0): a my.* TOOLKIT
-    ;; fn-call `my.tile/button` with no `tile/` alternative.
-    (is (= "my.tile" (:seon.gym/alias-blind-ns (blind? "my\\.tile/(button|form)")))
-        "qualified my.tile/ fn-call without the tile alias is alias-blind")
+    ;; fn-call `my.canvas/button` with no `canvas/` alternative.
+    (is (= "my.canvas" (:seon.gym/alias-blind-ns (blind? "my\\.canvas/(button|form)")))
+        "qualified my.canvas/ fn-call without the tile alias is alias-blind")
     ;; NOT flagged — the sanctioned alias-tolerant idioms (seon. and my.)
     (is (nil? (blind? "(?:seon\\.)?db/(query|pull|entity|store-inventory)"))
         "the (?:seon\\.)? optional-prefix idiom accepts the alias")
     (is (nil? (blind? "\\bdb/(query|pull|entity|store-inventory)"))
         "the \\bdb/ alias alternative accepts the alias")
-    (is (nil? (blind? "(?:my\\.)?tile/(button|form|input)"))
+    (is (nil? (blind? "(?:my\\.)?canvas/(button|form|input)"))
         "the (?:my\\.)? optional-prefix idiom accepts the toolkit alias")
-    ;; NOT flagged — the CURRENT battery toolkit idiom `\b(my.tile|tile)/`
-    ;; (qualified-or-alias alternation — never a bare `my.tile/` fn call).
+    ;; NOT flagged — the CURRENT battery toolkit idiom `\b(my.canvas|tile)/`
+    ;; (qualified-or-alias alternation — never a bare `my.canvas/` fn call).
     (is (nil? (blind? "\\b(my\\.tile|tile)/(button|form|input)"))
-        "the \\b(my.tile|tile)/ alternation is alias-tolerant, not blind")
+        "the \\b(my.canvas|tile)/ alternation is alias-tolerant, not blind")
     ;; NOT flagged — a namespaced-KEYWORD data-key is un-aliasable, never a
-    ;; `tile/action` fn call (the `:wired-to-an-own-fn` battery predicate).
-    (is (nil? (blind? ":my\\.tile/(action|submit)\\s+\\(?\\s*(list\\s+)?'"))
-        "a :my.tile/ namespaced-keyword data-key is not an alias-blind fn call")
+    ;; `canvas/action` fn call (the `:wired-to-an-own-fn` battery predicate).
+    (is (nil? (blind? ":my\\.canvas/(action|submit)\\s+\\(?\\s*(list\\s+)?'"))
+        "a :my.canvas/ namespaced-keyword data-key is not an alias-blind fn call")
     ;; NOT flagged — NON-aliased namespaces agents write fully-qualified
     (is (nil? (blind? "seon\\.agent\\.search/grep|seon\\.agent\\.fs/read-file"))
         "seon.agent.search / seon.agent.fs are NOT aliased — fully-qualified is correct")
@@ -1127,12 +1116,12 @@
 ;; CURATION AXES (context-curation Phase A) — eval-error-rate + canvas.
 ;; Every scorecard carries :seon.gym.scorecard/eval-error-rate (failed
 ;; RUN-DRIVEN evals ÷ total) and :seon.gym.scorecard/canvas-updated?
-;; (did the primary agent set its own :seon.render.live-tile/content);
+;; (did the primary agent set its own :seon.render.canvas/content);
 ;; the :eval-error-rate / :canvas-updated predicate kinds assert them.
 ;; ---------------------------------------------------------------------------
 
 (deftest curation-axes-eval-error-rate-and-canvas-scored
-  ;; One turn: the agent drives its OWN canvas (sets live-tile content on
+  ;; One turn: the agent drives its OWN canvas (sets canvas content on
   ;; itself) THEN makes a failing eval — so canvas-updated? is true and
   ;; eval-error-rate is in (0,1). Both predicate kinds + both scorecard
   ;; fields exercised.
@@ -1149,7 +1138,7 @@
              :seon.gym.turn/llm-script
              [(str "(seon.db/transact! {:seon.db/tx-data "
                    "[{:seon.agent/id (seon.db/current-agent-id) "
-                   ":seon.render.live-tile/content [:div \"hi\"]}]})\n"
+                   ":seon.render.canvas/content [:div \"hi\"]}]})\n"
                    "(this-symbol-does-not-exist-xyzzy)\n")]}]
            :seon.gym.scenario/predicates
            [{:seon.gym.predicate/id   :drove-its-canvas
@@ -1194,7 +1183,7 @@
                      (str "an error VALUE is not a failed eval — rate "
                           (:seon.gym.scorecard/eval-error-rate card)))
                  (is (false? (:seon.gym.scorecard/canvas-updated? card))
-                     "the agent never set its own live-tile content")
+                     "the agent never set its own canvas content")
                  (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

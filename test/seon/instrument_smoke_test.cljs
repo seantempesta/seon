@@ -32,6 +32,7 @@
    boots, never the live pod."
   (:require
     [cljs.test :refer [deftest is async use-fixtures]]
+    [clojure.string :as str]
     [datahike.api :as d]
     [malli.core :as m]
     [malli.instrument :as mi]
@@ -189,6 +190,31 @@
      :args    ["x"]
      :schema  (m/schema [:int])
      :fn-name 'seon.foo/bar}))
+
+(deftest missing-key-hint-names-the-wrong-namespace-mistake
+  ;; The wrong-ns key mistake (e.g. :seon.web/url for :seon.agent.web/url)
+  ;; burns an agent turn unless the instrument error carries the fix. The
+  ;; hint is derived generically (missing key = last :in segment; near-miss
+  ;; = a present key with the SAME name, different namespace) — no
+  ;; hand-maintained alias list, and the wrong key is never accepted.
+  (let [input (m/schema [:cat [:map [:seon.agent.web/url :string]]])]
+    (let [hint (:seon.error.malli/hint
+                 (einst/explain-payload
+                   :malli.core/invalid-input
+                   {:input input :args [{:seon.web/url "http://x"}]
+                    :schema input :fn-name 'seon.agent.web/fetch}))]
+      (is (string? hint) "a wrong-ns near-miss produces a hint")
+      (is (str/includes? (str hint) ":seon.web/url")
+          "the hint names the key the caller actually passed")
+      (is (str/includes? (str hint) ":seon.agent.web/url")
+          "the hint names the correct key"))
+    (let [hint (:seon.error.malli/hint
+                 (einst/explain-payload
+                   :malli.core/invalid-input
+                   {:input input :args [{:seon.agent.web/timeout-ms 1}]
+                    :schema input :fn-name 'seon.agent.web/fetch}))]
+      (is (str/includes? (str hint) ":seon.agent.web/url")
+          "no near-miss present → still names the missing key"))))
 
 (deftest pure-render-fns-instrument-clean
   ;; seon.render.value — the value renderer (the 7b9e771 home).

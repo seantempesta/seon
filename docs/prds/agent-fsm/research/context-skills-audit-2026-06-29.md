@@ -74,7 +74,7 @@ boundary (`stable-boundary`, `ctx.cljs:1684`) sits after `:namespaces`.
 | 12 | `:skills-catalog` | `my.skills/catalog-block` (`my/skills.cljs:281`) | one name+desc line per loadable skill | none |
 | 16 | `:skill/<name>` | `my.skills/skill-block` (seeded per `:default-load`) | a loaded skill BODY | none |
 | **20** | **`:namespaces`** | **`seon.agent.ctx.namespaces/namespaces-block`** | **THE prompt body — curated ns source** | **HEAVY: signatures, member-doc-clip, fn-size gate, required-api signature dump — the whole A1 target** |
-| 35 | `:live-tile` | `seon.agent.ctx.live-tile/live-tile-block` | the agent's current canvas | (separate concern) |
+| 35 | `:live-tile` | `seon.agent.ctx.live-canvas/live-tile-block` | the agent's current canvas | (separate concern) |
 | 40 | `:warnings` | `seon.agent.ctx.warnings/warnings-block` | current derived problems | (separate) |
 | 45 | `:open-todos` | `seon.agent.todo.internal/open-todos-block` | open work items | none |
 | 48 | `:relevant-source` | `seon.agent.ctx.relevant/relevant-source-block` (`relevant.cljs`) | KNN hits, **default-OFF (SEON_EMBED)** | `source-char-cap` 1500/hit, loud marker |
@@ -92,7 +92,7 @@ requires** (`:1016-1023`) — an A2 example-fix site.
 ### Skills corpus (`seon-skills/*/SKILL.md`)
 
 Six agent skills: `clojurescript`, `data-modeling`, `data-oriented-clojure`,
-`datahike`, `repl`, `ui-live-tiles`. Default-loaded = `config/system.edn`
+`datahike`, `repl`, `ui-canvas`. Default-loaded = `config/system.edn`
 `:seon.config/loadouts` → `:default-load [:repl]` (only `repl` body always-on;
 `:minimal` profile loads none). Standing law: **agents rarely load skills → the
 always-on base is what matters.**
@@ -101,7 +101,7 @@ always-on base is what matters.**
 |---|---|---|
 | `repl` | YES (`:default-load [:repl]`) | OK (REPL mechanics) — verify no signature/alias teaching |
 | `data-oriented-clojure` | no | **CONTRADICTS** — L182-202 teaches "qualify, not re-require" (rejected). Also L204-215 HAS the `deftest` worked example (relevant to writes-tests). |
-| `ui-live-tiles` | no | borderline — L82-85 "Fully-qualify inside a `my.*` ns" (the floor, compatible) but should also mention real requires now |
+| `ui-canvas` | no | borderline — L82-85 "Fully-qualify inside a `my.*` ns" (the floor, compatible) but should also mention real requires now |
 | `data-modeling` | no | OK (schema design); uses `(require '[seon.schema :as schema])` top-level examples — fine |
 | `datahike` | no | OK; `(require '[seon.db :as db] …)` examples — fine |
 | `clojurescript` | no | OK (async/self-host) |
@@ -196,7 +196,7 @@ EXTERNAL dumps (eval result bodies, inbound message payloads, KNN hit bodies);
   + `current-ns :signature` enum (`config.cljs:86/88-102/107-111`); keep
   `:seon.config/always [:vector :symbol]` + `:seon.config/current-ns [:enum :full :off]`.
 - `default-namespaces-policy` (`config.cljs:203-213`) → `{:always '[my.kb my.data
-  my.ui my.tile seon.agent.todo seon.agent.message seon.agent.lifecycle seon.agent]
+  my.ui my.canvas seon.agent.todo seon.agent.message seon.agent.lifecycle seon.agent]
   :current-ns :full}` (the former signature nses move into `:always` as full, or
   stay out and surface via requires).
 - **CONSUME it:** `namespaces.cljs` `body-detail` reads
@@ -266,9 +266,9 @@ stops rendering.
   - `seon-skills/data-oriented-clojure/SKILL.md:182-202`: **rewrite** the
     "qualify, not re-require" section to "write the real require + short alias"
     (this is the load-bearing contradiction).
-  - `seon-skills/ui-live-tiles/SKILL.md:82-85`: add the real-require option
+  - `seon-skills/ui-canvas/SKILL.md:82-85`: add the real-require option
     alongside the full-qualify floor.
-  - `my.kb` recipes (the always-full DB manual) and `my.data`/`my.ui`/`my.tile`
+  - `my.kb` recipes (the always-full DB manual) and `my.data`/`my.ui`/`my.canvas`
     worked examples: prefer full namespace paths in shown code per the owner's
     "full paths in examples" rule.
 
@@ -314,7 +314,7 @@ No always-on change required.
    keep the config policy memoized and union the DB set fresh each render.
 
 4. **Skill silent-contradiction sweep.** Confirmed contradiction:
-   `data-oriented-clojure/SKILL.md:182-202`. Lower-risk: `ui-live-tiles/SKILL.md:82`
+   `data-oriented-clojure/SKILL.md:182-202`. Lower-risk: `ui-canvas/SKILL.md:82`
    (full-qualify floor — compatible but incomplete under the new model). The
    `repl` skill (the only default-loaded one) was not fully read for alias/signature
    teaching — **recommend a quick grep of `seon-skills/repl/SKILL.md`** for any

@@ -87,7 +87,7 @@
     (try
       (.writeFileSync fs path ":root{--color-amber-400:#f0f;}")
       (is (= ":root{--color-amber-400:#f0f;}" (brand/css-text path))
-          "existing file → its text, inlined after output.css by the inspector")
+          "existing file → its text, inlined after output.css by the debug view")
       (finally
         (try (.unlinkSync fs path) (catch :default _ nil))))))
 

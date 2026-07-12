@@ -10,7 +10,8 @@
    test get released by `restore-registry!`."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as d]
-            [seon.server.registry :as ss]))
+            [seon.server.registry :as ss])
+  (:import [java.io File]))
 
 ;;; --- Fixture ---------------------------------------------------------------
 
@@ -30,6 +31,13 @@
    so absolute counts are not stable."
   []
   (count (::ss/sessions (ss/list-sessions {}))))
+
+(defn- delete-tree!
+  "Remove a disposable file-store directory after an isolated test."
+  [path]
+  (let [root (File. ^String path)]
+    (when (.exists root)
+      (run! (fn [^File f] (.delete f)) (reverse (file-seq root))))))
 
 ;;; --- Tests -----------------------------------------------------------------
 
@@ -139,3 +147,44 @@
           "DB B should not see DB A's datom")
       (ss/remove-db! {::ss/db-name :test/iso-a})
       (ss/remove-db! {::ss/db-name :test/iso-b}))))
+
+(deftest fork-is-registrable-under-its-own-store-identity
+  (testing "a file fork opens as its own cluster and preserves the fork point"
+    (let [root        (str (System/getProperty "java.io.tmpdir") "/seon-registry-fork-"
+                           (random-uuid))
+          source-name :test/fork-source
+          fork-name   :test/fork-target
+          source-path (str root "/source")
+          fork-path   (str root "/fork")]
+      (try
+        (let [source-entry (ss/ensure-db! {::ss/db-name source-name
+                                           ::ss/backend :file
+                                           ::ss/path source-path})
+              source-conn  (::ss/conn source-entry)
+              _            (d/transact source-conn
+                                        [{:db/ident       :test/fork-value
+                                          :db/valueType   :db.type/string
+                                          :db/cardinality :db.cardinality/one}
+                                         {:test/fork-value "at-fork"}])
+              basis-t      (:max-tx @source-conn)
+              forked       (ss/fork-db! {::ss/db-name source-name
+                                          ::ss/fork-name fork-name
+                                          ::ss/at basis-t
+                                          ::ss/path fork-path})
+              fork-entry   (ss/ensure-db! {::ss/db-name fork-name
+                                           ::ss/backend :file
+                                           ::ss/path fork-path})
+              fork-conn    (::ss/conn fork-entry)]
+          (is (true? (::ss/forked? forked)))
+          (is (= basis-t (::ss/basis-t forked)))
+          (is (not= (get-in @source-conn [:config :store :id])
+                    (get-in @fork-conn [:config :store :id]))
+              "the fork must never reuse the source store identity")
+          (is (= "at-fork"
+                 (d/q '[:find ?value . :where [_ :test/fork-value ?value]]
+                      @fork-conn))
+              "the fork is queryable at the captured basis"))
+        (finally
+          (ss/delete-db! {::ss/db-name fork-name})
+          (ss/delete-db! {::ss/db-name source-name})
+          (delete-tree! root))))))

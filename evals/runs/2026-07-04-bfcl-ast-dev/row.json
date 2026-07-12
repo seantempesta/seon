@@ -1,0 +1,29 @@
+{
+  "run_id": "2026-07-04:bfcl_ast:dev:k1:armD-full",
+  "row": "tool_calling",
+  "tier": "dev",
+  "n": 10,
+  "k": 1,
+  "mean": 0.7,
+  "pass_at_k": 0.7,
+  "pass_hat_k": 0.7,
+  "flake_rate": 0.0,
+  "flakes_by_class": {},
+  "attribution": {
+    "arm": "armD-full",
+    "bench": "bfcl (Berkeley Function-Calling Leaderboard), single-turn AST subset (simple_python/multiple/parallel/parallel_multiple), scorer=inspect_evals.bfcl ast_match",
+    "adapter": "text->tool_call bridge (seon_inspect.bfcl_adapter): pod emits a JSON call, parsed into synthesized ToolCalls the bench's own ast_match harvests",
+    "leaderboard_band": "report-only vs the PUBLIC BFCL leaderboard (no DeepSeek non-think anchor exists for any door-fitting agentic bench); NOT a fabricated anchor column",
+    "parse_miss": [],
+    "model_miss": 3
+  },
+  "git_sha": "8b7f22a306f487cbb04298c040e63af6c7092511",
+  "datasets_lock_sha": "bad75811a5c8e0a3aa824827e5d8c750a8835854d0098a8672de0939f8365eb1",
+  "elapsed_s": 212.7,
+  "timestamp": "2026-07-04T21:26:20.877343+00:00",
+  "model_config_source": "runtime-derived (pod resolver via /agents/run model_config)",
+  "model": "deepseek",
+  "model_id": "deepseek-v4-pro",
+  "model_thinking": "false",
+  "model_temperature": 0.7
+}

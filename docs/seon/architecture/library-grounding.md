@@ -159,10 +159,14 @@ Read: `src/seon/render/sci.cljs:335-430` (`invoke-bounded`), `:92`
   **capability-by-grant** (architecture / agent-runtime isolation §). ✓
 - `:interrupt-fn deadline-interrupt-fn` + the `!deadline` volatile (413-421): the
   wall-clock bounded eval IS SCI's interrupt. ✓
-- The OUTER `try` (374-377): *"invoke-bounded must NEVER throw"* → degrade to the
-  compiled path. ✓ never-crash for Phase 2e's render engine. SCI is a safety net
-  for hangs, never a correctness gate (returns `{…/interrupt true}` or
-  `{…/fallthrough true}`, caller recovers).
+- The OUTER `try`: *"invoke-bounded must NEVER throw"* → any failure becomes the
+  `{…/error <:seon.db/error>}` envelope. ✓ never-crash for the render engine.
+  Bounding is FAIL-LOUD: when SCI can't run a `my.*` render fn (missing source,
+  an alias the stored `:seon.ns/source` doesn't carry, a runtime throw), the
+  caller renders a `:seon/error` block IN PLACE — there is NO fallback to the
+  unbounded compiled path (a hang there would wedge the single-threaded pod;
+  the never-wedge property holds unconditionally). `{…/interrupt true}` still
+  signals the deadline trip (caller recovers the tile).
 - The agent ns env is reconstituted from `:seon.fn/source`/`:seon.ns/source` rows
   each call — **code-as-data: the runtime IS the database**.
 
@@ -209,12 +213,17 @@ Read: `src/seon/instrument.cljc:109-161` (`collect-registrations` + `collect!`).
   `register-target!` calls. So **a `:malli/schema` on a public fn IS collected and
   instrumented at every rebuild** — the old "analyzer strips fn-meta" worry is
   handled by reading at compile time.
-- What the analyzer DOES strip is custom metadata MARKERS — so **opt-out is a
-  FQ-symbol set `seon.instrument/skip-syms`, never a per-fn marker** (db.cljs:499).
-- `^:async` fns: the `:malli/schema` describes the RESOLVED value; the runtime
-  routes them to an **await-then-validate** wrapper (simple fns get input+output;
-  variadic/multi-arity get input+arity). So an `^:async` fn returning a Promise of
-  `::transact-response` is schema'd as `… ::transact-response` (db.cljs:501-506).
+- What the analyzer DOES strip is custom metadata MARKERS — so opt-out is
+  **computed structurally** (`seon.instrument/async-unwrappable?`: the async
+  flag + the live fn's arity shape + the schema form), never a per-fn marker
+  and never a name list.
+- `^:async` fns: the `:malli/schema` describes the RESOLVED value; simple
+  fixed-arity `:=>` fns get the Promise-aware **injecting wrapper**
+  (input sync + output on resolution); async variadic/multi-arity fns
+  (e.g. `seon.db/transact!`) have NO correct wrapper today and register
+  nothing — their bodies are the validation boundary. So an `^:async` fn
+  returning a Promise of `::transact-response` is schema'd as
+  `… ::transact-response` (db.cljs:501-506).
 - `SEON_INSTRUMENT` is the kill-switch (default ON).
 
 ## reitit — routing-as-data (Phase 5 schema design)
@@ -281,9 +290,11 @@ The machinery already shipped:
 - The `result/<id>` mechanism (eval.cljs:736-784): every eval value is stashed in
   `globalThis.result.<id>` (+ an analyzer def), last 200 kept; the agent drills with
   `(get-in result/<id> […])` / `filter` / `count` WITHOUT re-running.
-- Current caps (ctx.cljs): `eval-render-cap` 1500 (echoed source+stdout),
+- Current caps (owned by `seon.config`, `:seon.config/render` manifest section;
+  ctx.cljs reads them): `eval-render-cap` 1500 (echoed source+stdout),
   `result-body-render-cap` 16384 ≈ 4k tokens (the citable `;;=>` body, skeleton'd +
-  row-capped 50), `message-render-cap` 4000.
+  row-capped 50; ONE owner since C32 — eval's persistence clip reads the same knob
+  as a chars/4 token budget), `message-render-cap` 4000.
 
 **The target model — three tiers, bound the VIEW not the storage:**
 
@@ -348,8 +359,9 @@ Concrete examples (file:line) of the patterns to imitate:
    `:db.fn/cas` vector. The CAS executes at the SOLE writer, so the fence is sound
    across the wire (store.wire.cljs:12-21).
 2b. ✓ Instrumentation: write `:malli/schema` normally (collected at compile time,
-   instrument.cljc:109); opt out via `seon.instrument/skip-syms` (FQ-symbol set),
-   NOT a metadata marker; `^:async` fns are schema'd on the RESOLVED value.
+   instrument.cljc:109); opt-out is STRUCTURAL (`seon.instrument/async-unwrappable?`
+   — async fns with no correct wrapper shape), NOT a metadata marker and NOT a
+   name list; `^:async` fns are schema'd on the RESOLVED value.
 3. ✓ Make explicit in data-model: `register!` ≠ datahike-bridge; in-memory `:map`
    value shapes (the `:seon/error` family, `:seon.warn/check-response`,
    `:seon.derive/status`) never bridge — only transacted attrs do.
@@ -470,7 +482,7 @@ Read: `reference-code/hyperlith/src/hyperlith/core.clj:88-110`
   shim-vs-stream by HTTP METHOD (GET=page, POST=stream), so its `on-load-js` does
   `@post(window.location.pathname …)` with a `&u=` cache-buster (its comment: GET/POST
   cache headers collide on one URL). ⚠ **We DIVERGED — and the divergence is correct:**
-  our shim and feed are SEPARATE paths (`/world` GET → `/world/feed` GET; `/agent/{id}`
+  our shim and feed are SEPARATE paths (`/view` GET → `/view/feed` GET; `/agent/{id}`
   GET → `/agent/{id}/feed` GET). This matches datastar-clojure's OWN canonical example
   (`tiny_gzip.clj:31` — page at `/`, stream at a separate GET `/updates` via
   `(d*/sse-get "/updates")`), and because the two URLs differ there is NO GET/POST
@@ -518,14 +530,14 @@ Chrome.
 
 Re-read hyperlith (`core.clj`, `impl/datastar.clj`), reitit (`reitit-ring/.../ring.cljc`),
 datastar-clojure (`consts.clj`, `tiny_gzip.clj`) against `web/datastar.cljs`,
-`web/router.cljs`, `ui/world.cljs`. The wire framing + view=f(db) + crash-guards all
+`web/router.cljs`, `ui/view.cljs`. The wire framing + view=f(db) + crash-guards all
 hold. Findings, by severity:
 
 - 🔴 **A — feed routing: doc/contract was WRONG, would 404 the feed at Phase 5.** The code
-  uses separate GET feed paths (`/world/feed`, `/agent/{id}/feed`); the doc said "no /feed,
+  uses separate GET feed paths (`/view/feed`, `/agent/{id}/feed`); the doc said "no /feed,
   same path." The code is the idiomatic choice (datastar-clojure `tiny_gzip.clj:31`). FIXED
   the routing contract here + [[ui]] + coordination Handoff #3 / Interface #2 so Phase-5
-  `db->routes` SEEDS the feed routes (`/world/feed`, `/agent/{id}/feed` GET). Without this
+  `db->routes` SEEDS the feed routes (`/view/feed`, `/agent/{id}/feed` GET). Without this
   fix the feeds vanish when the static route vector is replaced by the db projection.
 - 🟠 **B — no reconnect/retry hardening on the feed.** `shim-html`'s `data-init="@get('…')"`
   relies on datastar defaults; hyperlith sets `{retryMaxCount: Infinity, openWhenHidden:

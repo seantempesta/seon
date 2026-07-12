@@ -1,12 +1,6 @@
-;; A custom TEST manifest — proof that a test run can name its own config file:
-;;   SEON_CONFIG=config/test.edn bin/test-cljs
-;;   SEON_CONFIG=config/test.edn bin/acme restart pod   ; verify on the isolated cluster
-;;
-;; Read by seon.config via the same aero reader as system.edn. It exercises two
-;; manifest seams at once:
-;;   - agent-context : a lean :my.skills/load set (the always-on skill bodies)
-;;   - routes        : DROP the POST action route — boot-seed!'s reconcile RETRACTS
-;;                     it (proving stale rows can't persist across a config change),
-;;                     not merely skips it.
-{:seon.config/agent-context {:my.skills/load [:repl]}
- :seon.config/routes        [{:seon.config/removes [:seon.route/agent-call]}]}
+;; Test manifest: inherit the production block tree, then pin deterministic
+;; :batch behavior and remove the action route for reconciliation coverage.
+#merge
+[#include "system.edn"
+ {:seon.config/repl-mode :batch
+  :seon.config/routes [{:seon.config/removes [:seon.route/agent-call]}]}]

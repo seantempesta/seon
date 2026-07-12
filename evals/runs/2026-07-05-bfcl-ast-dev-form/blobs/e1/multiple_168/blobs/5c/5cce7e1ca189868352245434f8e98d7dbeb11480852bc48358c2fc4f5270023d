@@ -1,0 +1,3 @@
+The request is clear: get the lyrics to "Bohemian Rhapsody" by Queen. The correct function is `get_song_lyrics` with the required parameters `song_title` and `artist_name`. The optional `lang` parameter is not needed since the request doesn't specify a language.
+
+(get_song_lyrics {:song_title "Bohemian Rhapsody" :artist_name "Queen"})

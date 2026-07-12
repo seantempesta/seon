@@ -20,8 +20,8 @@ Source of truth (read before changing): `src/seon/config.cljs`,
   overrides). **A per-cluster variant is a SEPARATE edn file** — there is NO
   `#profile`, and **`SEON_PROFILE` is INERT in the pod config path** (`bin/seon`
   still exports it, but nothing in `seon.config` reads it; memoization keys on
-  `SEON_CONFIG` only). `config/acme.edn` = the max-context harness variant,
-  `config/acme-minimal.edn` = the lean one, `config/test.edn` = tests.
+  `SEON_CONFIG` only). `config/acme.edn` = the harness variant (minimal
+  overrides), `config/test.edn` = tests.
 - **Absent/empty manifest → the pod boots byte-identically to a no-config world**
   (every key optional; defaults live in the schemas + accessors). Present → it
   overrides only the keys it lists.
@@ -126,8 +126,8 @@ in the renderer; token budget is bound by CURATION (which nses, via requires +
   `:seon.config/agent-context` (acme loads the full set; `[]` = none).
 - **Change a fresh agent's verb surface:** edit `:seon.eval/home-requires`
   (acme swaps in `acme.helpers`/`acme.notes` with zero src edits).
-- **Lean-context A/B:** point at a separate file —
-  `SEON_CONFIG=config/acme-minimal.edn bin/acme restart pod`.
+- **Lean-context A/B:** a variant = a SEPARATE edn file (override only the
+  keys you change) — `SEON_CONFIG=config/<variant>.edn bin/acme restart pod`.
 - **Pin a ns full for one agent:** transact `::full-source` onto its
   `:namespaces` block (or agent entity) — reactive, no restart.
 - **Per-agent LLM:** set `:seon.ai/agent-provider` etc. in the agent-context

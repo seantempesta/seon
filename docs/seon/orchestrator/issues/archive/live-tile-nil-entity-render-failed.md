@@ -2,18 +2,18 @@
 type: issue
 status: resolved
 severity: friction
-tags: [issue, agent, render]
+tags: [issue, agent]
 ---
 
 # Live-tile section rendered "⚠ render failed: :malli.core/invalid-input"
 
 ## Symptom
 
-On every fresh boot the `:live-tile` context section rendered, into the
+On every fresh boot the `:canvas` context section rendered, into the
 agent's own prompt:
 
 ```
-;; ⚠ [:live-tile] render failed: :malli.core/invalid-input
+;; ⚠ [:canvas] render failed: :malli.core/invalid-input
 ```
 
 A bare, swallowed malli code — the exact unactionable placeholder the owner
@@ -22,7 +22,7 @@ nor how to fix it.
 
 ## Root cause
 
-`seon.ctx.live-tile/live-tile-section` destructured `entity
+`seon.ctx.canvas/canvas-section` destructured `entity
 :seon.agent/entity` from its ctx arg, but the composer's PROMPT path
 (`seon.agent.turn/render-prompt`) injects only `{:seon.db/db …
 :seon.agent/id …}` — it never supplies `:seon.agent/entity`. (The recursion
@@ -30,10 +30,10 @@ handle in `seon.render/render` threads the original ctx to children; the
 agent entity is pulled onto the ROOT node only, so it never reaches a child
 section.) So `entity` was nil.
 
-On a fresh world `:seon.render.live-tile/content` is not yet installed (lazy
+On a fresh world `:seon.render.canvas/content` is not yet installed (lazy
 schema install at first transact), so the `installed-schema` gate was false
 and the section used the nil `entity` directly. It then called
-`live-tile/wired-content {:seon.render/entity nil}`; that fn's instrumented
+`canvas/wired-content {:seon.render/entity nil}`; that fn's instrumented
 input schema requires `:seon.render/entity` be a `:map`, so it threw
 `:malli.core/invalid-input`. The section's outer guard (`seon.render/render`,
 render.cljs:643-648) caught the throw and reported it as the `⚠` placeholder.
@@ -47,7 +47,7 @@ entity.
 `seon.ctx.your-entity/your-entity-section` had the SAME root cause but failed
 SILENTLY: it returned `""` on the nil entity, so the section vanished from
 the prompt with no marker (the agent never saw its own entity — "this map IS
-you"). Confirmed via the prompt dump: only `soul`, `namespaces`, `live-tile`,
+you"). Confirmed via the prompt dump: only `soul`, `namespaces`, `canvas`,
 `transcript` brackets appeared; `your-entity` was missing.
 
 The asymmetry that hid F1: the inspector path (`seon.ctx/ctx-sections`,
@@ -61,11 +61,11 @@ Both sections now resolve the agent entity from the db value passed in, as a
 pure function of state — no reliance on a `:seon.agent/entity` ctx key the
 prompt path doesn't pass, no stored state, no cache, no atom, no globalThis.
 
-- `src/seon/ctx/live_tile.cljs` — `live-tile-section`:
+- `src/seon/ctx/live_tile.cljs` — `canvas-section`:
   - resolves `::content` by `:seon.agent/id` via `seon.db/pull` behind the
     `installed-schema` gate (falls back to `{}` → the welcome default when
     the attr is uninstalled or absent), so `wired-content` always gets a map;
-  - the body still flows through `seon.render/render-agent-tile` — the ONE
+  - the body still flows through `seon.render/render-agent-canvas` — the ONE
     SCI+timer-safe tile entry point;
   - the whole section is wrapped in a `try` that degrades any unexpected
     throw to a CLEAR loading/safe-state message (what's loading, that the
@@ -85,11 +85,11 @@ cleanly with reactive render-once-and-transact).
 
 ## Stability contract (owner requirement)
 
-The live-tile section must ALWAYS show valid content OR a clear
+The canvas section must ALWAYS show valid content OR a clear
 loading/safe-state message that is actionable to the agent — NEVER a bare
 `⚠ render failed` with a swallowed error code. Held by two layers:
 
-1. `render-agent-tile` is throw-safe: a tile fn that throws or hangs returns
+1. `render-agent-canvas` is throw-safe: a tile fn that throws or hangs returns
    `error-response` (a calm "updating this panel" card for the human +
    `"YOUR LIVE TILE IS BROKEN — … Fix the fn"` twin for the agent).
 2. the section's own `try` backstop turns any other unexpected failure into
@@ -106,11 +106,11 @@ per-render deadline), so a non-terminating tile (`(loop [] (recur))`) aborts
 in-process instead of freezing the single pod thread; on a tripped deadline
 `recover-hung-tile!` resets the tile to welcome and warns the agent.
 
-`seon.render/render-agent-tile` (render.cljs:414-474) already routes through
+`seon.render/render-agent-canvas` (render.cljs:414-474) already routes through
 this: it SCI-bounds agent-authored tile symbols, falls back to the compiled
 path for core symbols, runs a serializer-faithful structural check on the
-hiccup, and wraps everything in a `try` → `error-response`. The live-tile
-SECTION's body comes from `render-agent-tile`, so the body path was ALWAYS
+hiccup, and wraps everything in a `try` → `error-response`. The canvas
+SECTION's body comes from `render-agent-canvas`, so the body path was ALWAYS
 through the safety — the regression was only in the section's separate header
 resolution (`wired-content` for the wired-label), which is pure resolution
 and can't hang. The fix keeps the body on the safe path and removes the nil
@@ -123,8 +123,8 @@ from the header path.
 - After fix (fresh world, prompt ctx `{:seon.db/db … :seon.agent/id …}`, NO
   injected entity): full context render has `:has-warn false`,
   `:has-render-failed false`, brackets `["soul" "namespaces" "your-entity"
-  "live-tile" "transcript"]`; `your-entity` direct call = 717 chars.
-- Throw-safety: wiring `:seon.render.live-tile/content` to a broken
+  "canvas" "transcript"]`; `your-entity` direct call = 717 chars.
+- Throw-safety: wiring `:seon.render.canvas/content` to a broken
   vector-of-vectors hiccup → section shows `YOUR LIVE TILE IS BROKEN — …
   Splice the children …`, `has-warn false`, `has-malli false`; retracted →
   back to welcome.
@@ -132,7 +132,7 @@ from the header path.
 ## Regression guard
 
 `test/seon/ctx_test.cljs` →
-`live-tile-section-stable-on-composer-input`: creates an agent, calls both
+`canvas-section-stable-on-composer-input`: creates an agent, calls both
 sections with the EXACT composer input shape (db + id only, no entity),
 asserts no `⚠`, no `malli`, `Wired:` present, your-entity present
 (`YOUR OWN ENTITY`); the broken-tile case asserts a clear message naming the

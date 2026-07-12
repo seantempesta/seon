@@ -1,0 +1,3 @@
+The request is straightforward: find lyrics for "Bohemian Rhapsody" by Queen. Only `get_song_lyrics` matches. The required params are `song_title` and `artist_name`; `lang` is optional and not requested, so omit it.
+
+(get_song_lyrics {:song_title "Bohemian Rhapsody" :artist_name "Queen"})

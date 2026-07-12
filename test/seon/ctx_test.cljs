@@ -14,17 +14,18 @@
    All on a FRESH :memory conn seeded like the pod boots — never the
    live agent conn."
   (:require
-    [cljs.test :refer [deftest is async]]
+    [cljs.test :refer [deftest is async use-fixtures]]
     [clojure.string :as str]
     [clojure.test.check :as tc]
     [clojure.test.check.generators :as gen]
     [clojure.test.check.properties :as prop :include-macros true]
     [datahike.api :as d]
     [seon.agent :as agent]
-    [seon.agent.inspect :as inspect]
+    [seon.agent.debug :as agent-debug]
     [seon.agent.run :as run]
     [seon.agent.turn :as turn]
     [seon.ai :as llm]
+    [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.ai.openai-compat :as openai]
     [seon.analyzer-info :as ai]
@@ -32,14 +33,37 @@
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.findings :as ctx-findings]
     [seon.agent.ctx.inventory :as ctx-inventory]
-    [seon.agent.ctx.live-tile :as ctx-live-tile]
+    [seon.agent.ctx.canvas :as ctx-canvas]
     [seon.agent.ctx.namespaces :as ctx-namespaces]
     [seon.agent.ctx.relevant :as ctx-relevant]
     [seon.agent.ctx.transcript :as transcript]
     [seon.db :as db]
     [seon.embed.stash :as embed-stash]
     [seon.render :as render]
-    [seon.schema :as schema]))
+    [seon.repl.internal :as repl-internal]
+    [seon.schema :as schema]
+    [seon.test-seed :as test-seed]))
+
+;; This ns asserts STRICT-dial behavior (canvas-block-stable-on-composer-
+;; input's "no bare ⚠" contract holds because under SEON_RENDER_STRICT=1 a
+;; broken tile yields the legible fail-loud message, not the graceful
+;; ⚠ CANVAS-BROKEN guard). `bin/test-cljs` exports the dial, but a bare
+;; `node out/test/test.js --test=seon.ctx-test` inherits the ambient env —
+;; a test asserting dial-dependent behavior must SET the dial itself
+;; (hermetic fixtures or flaky truth). Pin ON for the ns; restore the
+;; caller's value after (process-global env, async-safe — a scoped
+;; with-redefs would restore before an async body runs).
+(defonce ^:private prior-strict-env
+  (atom nil))
+
+(use-fixtures :once
+  {:before (fn []
+             (reset! prior-strict-env
+                     (.. js/globalThis -process -env -SEON_RENDER_STRICT))
+             (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT) "1"))
+   :after  (fn []
+             (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT)
+                   (or @prior-strict-env "")))})
 
 (defn- fresh-conn
   "Promise of a fresh :memory conn with the pod's boot schema."
@@ -55,6 +79,14 @@
                        {:tx-data (into (db/malli->datahike-schema
                                          client/agent-bootstrap-attrs)
                                        (db/tx-meta-datahike-schema))})
+                     ;; the my.* slice of the boot index — SCI bounding is
+                     ;; fail-loud, so the default ctx blocks' my.* render fns
+                     ;; need their stored source rows to render BOUNDED here.
+                     ;; db/transact! (not raw d/transact!) so any :seon.fn/*
+                     ;; attr missing from the bootstrap set auto-installs.
+                     (.then (fn [_] (db/transact!
+                                      {:seon.db/conn    conn
+                                       :seon.db/tx-data (test-seed/my-core-rows)})))
                      (.then (fn [_] conn))))))))
 
 (defn- with-conn
@@ -118,16 +150,24 @@
   ;; nses the config policy lists in `:seon.config/always`. The policy CONTENTS
   ;; are not mirrored here (that drifts every prune) — derive the expected set
   ;; from the source of truth so the RULE is tested, not a hand-copy.
-  (doseq [n ["my.kb" "my.kb.shared" "my.notes" "my.notes-test"]]
+  ;; my.* INCLUDING .internal: hidden keeps it out of the PROMPT
+  ;; (included-ns? above), but the boot indexer still stores its REAL
+  ;; source — the SCI cage rebuilds a my.* render fn's require aliases
+  ;; from :seon.ns/source, and a stub would strand the fn UNBOUNDED
+  ;; (the my.plan.internal/plan-block defect).
+  (doseq [n ["my.kb" "my.kb.shared" "my.notes" "my.notes-test"
+             "my.foo.internal"]]
     (is (true? (ctx-namespaces/full-source-ns? n)) (str n " is full-source")))
   (doseq [kw    (filter #(str/starts-with? (name %) "seon.")
                         (:seon.config/always (config/namespaces-policy)))
           n     [(name kw) (str (name kw) "-test")]]
     (is (true? (ctx-namespaces/full-source-ns? n))
         (str n " (an :seon.config/always seon.* ns / its -test sibling) is full-source")))
+  ;; seon.* internals stay stubs — the .internal suffix beats the config
+  ;; policy for framework nses (internal-boundary-test pins the same).
   (doseq [n ["seon.client" "seon.eval" "seon.agent" "seon.agent.ctx"
              "seon.warn" "seon.ai" "seon.agent.search" "seon.agent.fs"
-             "seon.agent.searcher" "seon.db" "my.foo.internal"]]
+             "seon.agent.searcher" "seon.db" "seon.db.internal"]]
     (is (false? (ctx-namespaces/full-source-ns? n)) (str n " is NOT full-source"))))
 
 ;; ------------------------------------------------------------
@@ -226,8 +266,8 @@
                                          :fn-var true
                                          :arglists '(quote ([x]))}}}}})
         new    (ai/defs-since before cs)
-        nses   (set (map :ns new))
-        syms   (set (map :sym new))]
+        nses   (set (map :seon.analyzer-info/ns new))
+        syms   (set (map :seon.analyzer-info/sym new))]
     (is (not (contains? nses 'result))
         "the reserved result ns must not produce a new-def entry")
     (is (not (contains? syms 'OKf))
@@ -241,7 +281,7 @@
 
 (defn- assemble
   "The assembled context as a map, derived from the keystone ONE-render
-   (`context-root` + `render` + `ctx-sections`) — the shape the old
+   (`context-root` + `rendered-context-blocks`) — the shape the old
    `assemble-context` returned, rebuilt from the new system so these tests
    keep asserting against the agent's real context."
   [id]
@@ -249,7 +289,9 @@
         root  (ctx/context-root ctx)
         text  (or (render/render :seon.render/ai ctx root) "")
         split (ctx/split-context text)
-        {:seon.render/keys [section-texts section-html]} (ctx/ctx-sections ctx)]
+        blocks (ctx/rendered-context-blocks ctx #{:ai :html})
+        section-texts (filterv #(contains? % :seon.render/text) blocks)
+        section-html  (filterv #(contains? % :seon.render/hiccup) blocks)]
     {:seon.render/text           text
      :seon.render/stable-text    (:seon.render/stable-text split)
      :seon.render/volatile-text  (:seon.render/volatile-text split)
@@ -266,8 +308,8 @@
   (some #(when (= nm (:seon.agent.ctx/name %)) (:seon.render/text %))
         (:seon.render/section-texts (assemble id))))
 
-(deftest live-tile-block-stable-on-composer-input
-  ;; REGRESSION GUARD (live-tile-nil-entity-render-failed): the composer
+(deftest canvas-block-stable-on-composer-input
+  ;; REGRESSION GUARD (canvas-nil-entity-render-failed): the composer
   ;; injects ONLY {:seon.db/db … :seon.agent/id …} — it does NOT pass
   ;; :seon.agent/entity. The section must resolve the agent entity from
   ;; the db by id itself; it must NEVER surface a bare "⚠ render failed"
@@ -279,7 +321,7 @@
                (.then
                  (fn [_]
                    ;; (a) the EXACT composer input shape — db + id, no entity.
-                   (let [out (str (ctx-live-tile/live-tile-block
+                   (let [out (str (ctx-canvas/canvas-block
                                     {:seon.db/db    @db/*conn*
                                      :seon.agent/id "AGTctxtile00p1"}))]
                      (is (seq out) "section renders content, never blank")
@@ -290,7 +332,7 @@
                      (is (str/includes? out "Wired:")
                          "the wired-label header resolves (welcome by default)"))
                    ;; (b) the REAL prompt path (render-context-ai, NOT the
-                   ;; inspector's ctx-sections) must also be render-failure-free.
+                   ;; debug view's rendered-context-blocks) must also be render-failure-free.
                    (let [ctx  {:seon.db/db @db/*conn* :seon.agent/id "AGTctxtile00p1"}
                          text (str (render/render :seon.render/ai ctx
                                                   (ctx/context-root ctx)))]
@@ -303,11 +345,11 @@
                         (db/transact!
                           {:seon.db/tx-data
                            [{:seon.db/ref [:seon.agent/id "AGTctxtile00p1"]
-                             :seon.render.live-tile/content
+                             :seon.render.canvas/content
                              'my.broken/does-not-exist}]})))
                (.then
                  (fn [_]
-                   (let [out (str (ctx-live-tile/live-tile-block
+                   (let [out (str (ctx-canvas/canvas-block
                                     {:seon.db/db    @db/*conn*
                                      :seon.agent/id "AGTctxtile00p1"}))]
                      (is (not (str/includes? out "⚠"))
@@ -442,7 +484,7 @@
 
 ;; ------------------------------------------------------------
 ;; Prompt-bloat guard: an html-only block (a human-facing widget — the
-;; live-tile/canvas, an acme dashboard tile) has nothing to say to the
+;; canvas/canvas, an acme dashboard tile) has nothing to say to the
 ;; agent, so it contributes NO prompt section — no self-demarcating
 ;; bracket, no generic data-dump stub. The inverse of the html view's
 ;; "ai-only block contributes no tile" rule.
@@ -848,23 +890,7 @@
                 (.then
                   (fn [_]
                     (let [r1 (assemble "AGTctxrel0001p")
-                          r2 (assemble "AGTctxrel0001p")
-                          texts-of (fn [r]
-                                     (into {} (map (juxt :seon.agent.ctx/name
-                                                         :seon.render/text))
-                                           (:seon.render/section-texts r)))]
-                      ;; :relevant-source IS in the LAYOUT provenance (every
-                      ;; merged section name, blank or not — assemble-context
-                      ;; docstring) ...
-                      (is (some #{:relevant-source}
-                                (:seon.render/sections r1))
-                          ":relevant-source is part of the core layout")
-                      ;; ... but with NO retrieval stash active (default-OFF —
-                      ;; run-turn! never called with-hits) it renders BLANK, so
-                      ;; it contributes NO :seon.render/section-texts entry and
-                      ;; NO text to the prompt — the composer drops it.
-                      (is (not (contains? (texts-of r1) :relevant-source))
-                          ":relevant-source contributes no text (blank → dropped)")
+                          r2 (assemble "AGTctxrel0001p")]
                       ;; byte-identical across two assemblies (the section
                       ;; is not pulling query-dependent content into the
                       ;; prompt when off). The byte-stability contract is the
@@ -884,7 +910,7 @@
 ;; ------------------------------------------------------------
 ;; THE single render path — prompt == view, byte-identical by
 ;; construction. The model's prompt (the loop's `render-prompt`) and the
-;; human inspector's context pane (`ctx-preview`) both route through the
+;; human debug view's context pane (`ctx-preview`) both route through the
 ;; ONE producer `seon.agent.ctx/render-context` over the SAME unfiltered db, so
 ;; the `:ai` side is byte-identical by construction. Asserted THROUGH the
 ;; real fns — never a hand-built ctx string (the trap that let the old
@@ -897,15 +923,15 @@
    readline status line (`; <ns> · turn N · loop K/cap · <state> · <now> ·
    agent <id>`), the only render output that depends on `now` rather than
    the db (transcript ns docstring). Everything else is a pure fn of the db
-   value and must be byte-identical across the prompt + inspector paths."
+   value and must be byte-identical across the prompt + debug view paths."
   [s]
   (str/replace s #"(?m)^;[^\n]* · loop [^\n]*$" "; <READLINE NOW NORMALIZED>"))
 
-(deftest prompt-and-inspector-are-byte-identical
+(deftest prompt-and-debug-view-are-byte-identical
   ;; THE headline property. `render-context` is the SINGLE producer; the
-  ;; loop's `render-prompt` and the inspector's `ctx-preview` both call it
+  ;; loop's `render-prompt` and the debug view's `ctx-preview` both call it
   ;; over the SAME `@*conn*`. Prove: (1) render-prompt IS render-context;
-  ;; (2) the inspector's full prompt text ENDS WITH the exact prompt bytes
+  ;; (2) the debug view's full prompt text ENDS WITH the exact prompt bytes
   ;; (system + boundary + context, the context byte-identical); (3) every
   ;; per-section `:ai` twin appears verbatim in the prompt (one render, two
   ;; consumers); (4) derived-never-stored — rendering writes NO datoms.
@@ -920,13 +946,13 @@
                           loop-txt (strip-readline-now (turn/render-prompt id))
                           prod-txt (strip-readline-now
                                      (ctx/render-context {:seon.agent/id id}))
-                          preview  (inspect/ctx-preview {:seon.agent/id id})
+                          preview  (agent-debug/ctx-preview {:seon.agent/id id})
                           full     (strip-readline-now (:seon.render/text preview))]
                       (is (pos? (count prod-txt)) "the prompt is non-empty")
                       (is (= loop-txt prod-txt)
                           "render-prompt IS render-context (the loop routes through the one producer)")
                       (is (str/ends-with? full prod-txt)
-                          "inspector context pane is byte-identical to the prompt (full = system + boundary + the EXACT context bytes)")
+                          "debug view context pane is byte-identical to the prompt (full = system + boundary + the EXACT context bytes)")
                       (doseq [{nm  :seon.agent.ctx/name
                                txt :seon.render/text} (:seon.render/section-texts preview)
                               :when (not= nm :system)]
@@ -934,12 +960,16 @@
                             (str "section " nm " :ai twin appears verbatim in the prompt")))
                       (let [before (count (d/datoms @db/*conn* :eavt))]
                         (turn/render-prompt id)
-                        (inspect/ctx-preview {:seon.agent/id id})
+                        (agent-debug/ctx-preview {:seon.agent/id id})
                         (ctx/render-context {:seon.agent/id id})
                         (is (= before (count (d/datoms @db/*conn* :eavt)))
                             "rendering wrote NO datoms — derived, never stored"))
-                      (is (not (str/includes? prod-txt "malli"))
-                          "no swallowed malli code leaks into the prompt")))))))
+                      ;; the word "malli" appears legitimately (the system
+                      ;; text teaches :malli/schema; error lines carry the
+                      ;; HUMANIZED explain) — the leak signature is raw
+                      ;; validator internals, never the taught vocabulary
+                      (is (not (str/includes? prod-txt ":malli.core/"))
+                          "no raw malli internals leak into the prompt")))))))
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 
@@ -1031,12 +1061,11 @@
   (let [text (ctx/identity-files-text)]
     (is (string? text) "identity-files-text returns a string")))
 
-(deftest system-message-is-hardcoded-mechanics-not-the-soul
-  ;; THE decoupling: the LLM system message is the hardcoded mechanics.
-  (is (= ctx/system-text (llm/effective-system-prompt {}))
-      "system message = the hardcoded seon mechanics (seon.agent.ctx/system-text)")
-  (is (= ctx/system-text (llm/effective-system-prompt {:seon.ai/system-prompt nil}))
-      "no override → still the hardcoded mechanics (no fallback const)")
+(deftest system-message-comes-from-config-state-not-identity-files
+  (let [expected (or (:seon.config/system-text (config/config-view))
+                     ctx/system-text)]
+    (is (= expected (llm/effective-system-prompt {})))
+    (is (= expected (llm/effective-system-prompt {:seon.ai/system-prompt nil}))))
   (is (= "OVERRIDE" (llm/effective-system-prompt {:seon.ai/system-prompt "OVERRIDE"}))
       "an explicit override still wins")
   ;; The system message is NOT the identity-file text (decoupled).
@@ -1047,16 +1076,46 @@
   (is (not (contains? (ns-publics 'seon.ai) 'fallback-system-prompt))
       "fallback-system-prompt is DELETED — no fallback path"))
 
+(deftest system-message-or-chain-reads-the-config-datom
+  ;; agent-ctx Phase 3: request override > the cluster's
+  ;; :seon.config/system-text datom (config-through-DB via config-view) >
+  ;; the shipped default. The datom is transacted here exactly as the boot
+  ;; reconcile seeds it (the :seon.config singleton, identity "cluster").
+  (async done
+    (-> (with-conn
+          (fn [conn]
+            (-> (db/transact!
+                  {:seon.db/conn conn
+                   :seon.db/tx-data [{:seon.config/id "cluster"
+                                      :seon.config/system-text "; minimal prompt"}]})
+                (.then
+                  (fn [tx]
+                    (is (:seon.db/ok? tx) "singleton system-text datom transacts")
+                    (is (= "; minimal prompt" (llm/effective-system-prompt {}))
+                        "the seeded :seon.config/system-text datom wins over the shipped default")
+                    (is (= "OVERRIDE"
+                           (llm/effective-system-prompt {:seon.ai/system-prompt "OVERRIDE"}))
+                        "the per-request override still wins over the datom"))))))
+        (.then (fn [_]
+                 ;; The ambient conn is restored, so resolution returns to the
+                 ;; ambient config state. Do not pin the prompt's wording.
+                 (is (= (or (:seon.config/system-text (config/config-view))
+                            ctx/system-text)
+                        (llm/effective-system-prompt {})))
+                 (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 (deftest llm-call-system-message-is-the-hardcoded-mechanics
   (async done
     (-> (with-conn
           (fn [_conn]
-            ;; The adapter's system message IS the hardcoded mechanics —
-            ;; NOT the live identity text, NOT a fallback.
-            (let [body (openai/request-params {:seon.ai/ctx "hi"})
-                  sys  (-> body :messages first :content)]
-              (is (= sys ctx/system-text)
-                  "the system message sent to the API is the hardcoded mechanics")
+            ;; The adapter must use the same config-backed resolution path as
+            ;; the agent loop; this test deliberately does not pin its wording.
+            (let [body     (openai/request-params {:seon.ai/ctx "hi"})
+                  sys      (-> body :messages first :content)
+                  expected (llm/effective-system-prompt {})]
+              (is (= sys expected)
+                  "the API adapter and agent loop resolve the same system prompt")
               (is (= "OVERRIDE"
                      (-> (openai/request-params {:seon.ai/ctx "hi"
                                                  :seon.ai/system-prompt "OVERRIDE"})
@@ -1227,56 +1286,6 @@
         (and (= (subvec k 0 i) (subvec k' 0 i))           ; 0..i-1 untouched
              (every? true? (map not= (subvec k i) (subvec k' i)))))))) ; i..n changed
 
-;; ── cite-card — the anti-fabrication surface ─────────────────────────────
-;; A pure derivation over OK eval entity maps: surface the agent's last few
-;; COMPUTED values (with their live result/<id> handle) so honesty is the
-;; nearest-token path. No DB needed — the fn is pure over eval maps.
-
-(defn- ev
-  "A minimal OK eval entity map for cite-card tests."
-  [id src res]
-  {:seon.eval/id id :seon.eval/ok? true
-   :seon.eval/source src :seon.eval/result-edn res})
-
-(deftest cite-card-derives-recent-values
-  (let [card (transcript/cite-card
-               [(ev "yRn" "(db/store-inventory {:seon.db/system? true})"
-                    "{:seon.db/attr-groups [...]}")
-                (ev "Lbv" "(seon.db/query '[:find ?a (count ?e) ...])"
-                    "[{:agent-id \"XeG-2606282241\", :eval-count 69}]")])]
-    (is (str/includes? card "result/Lbv")
-        "the value's live handle is surfaced")
-    (is (str/includes? card "XeG-2606282241")
-        "the real computed figure (the one fabrication invents) is right there")
-    (is (str/includes? card "cite THESE")
-        "the header steers toward citing, not retyping")
-    (is (str/includes? card "(seon.db/query")
-        "the producing form rides the line as a hint")))
-
-(deftest cite-card-empty-when-nothing-citeable
-  ;; nil / echo / verb-ack receipt / opaque fn / failed eval ⇒ nothing to cite
-  (is (= "" (transcript/cite-card []))
-      "no evals ⇒ no card")
-  (is (= "" (transcript/cite-card
-              [(ev "a" "nil" "nil")
-               (ev "b" ":idle" ":idle")
-               (ev "c" "(message/user \"hi\")"
-                   "{:seon.agent.message/ok? true, :seon.agent.message/id \"x\"}")
-               (ev "d" "result/Lbv" "[{:agent-id \"X\", :eval-count 69}]")
-               (ev "e" "(recommendation-tile)" "#‹fn›")
-               (assoc (ev "f" "(/ 1 0)" "boom") :seon.eval/ok? false)]))
-      "trivial / receipt / re-reference / opaque / failed rows all skipped"))
-
-(deftest cite-card-clips-big-value-keeps-handle
-  (let [big  (apply str (repeat 2000 "x"))
-        card (transcript/cite-card [(ev "Big" "(huge)" big)])]
-    (is (str/includes? card "result/Big")
-        "the handle to the whole value survives the clip")
-    (is (str/includes? card "holds it whole")
-        "a clipped preview points back at the live handle")
-    (is (< (count card) (count big))
-        "the card is a bounded preview, never the flood")))
-
 ;; ------------------------------------------------------------
 ;; :seon.render/full? — the no-clip opt-out (#43). A flagged
 ;; value/block/eval-row renders WHOLE past the cap; unflagged still
@@ -1316,3 +1325,244 @@
         ":seon.render/full? on the eval row renders the result WHOLE")
     (is (str/includes? whole big)
         "the full value is present uncut in the row")))
+
+(deftest eval-row-clip-marker-is-tokens-not-chars
+  ;; The `(N of M)` handle marker must speak the SAME unit as the inline
+  ;; ⟨… tokens⟩ guide — both TOKENS (no mixed units in one row). body-cap /
+  ;; full are CHAR budgets converted at the display site via chars->tokens.
+  (let [big-edn (str "[" (str/join " " (repeat 300 "\"item-value\"")) "]")
+        row     {:seon.eval/source "(get-stuff)" :seon.eval/ok? true
+                 :seon.eval/result-edn big-edn :seon.eval/id "tok0000001a"
+                 :seon.render/result-body-cap 200}
+        out     (ctx/format-eval-row row false)
+        handle  (first (filter #(str/includes? % "result/tok0000001a")
+                               (str/split-lines out)))]
+    (is (str/includes? handle (str "(" (tokens/chars->tokens 200)
+                                   " of " (tokens/chars->tokens (count big-edn))
+                                   " tokens)"))
+        "the handle marker is token-denominated and labeled 'tokens'")
+    ;; the OLD char-denominated marker must be gone
+    (is (not (str/includes? out (str "(200 of " (count big-edn) ")")))
+        "no bare char marker survives")
+    ;; and it matches the inline TRUNCATED guide's unit
+    (is (str/includes? out (str "of " (tokens/chars->tokens (count big-edn))
+                                " tokens"))
+        "the inline TRUNCATED guide speaks the same token unit")))
+
+;; ------------------------------------------------------------
+;; format-eval-row — the REPL-faithful transcript row (ported 2026-07-02
+;; from agent_context_test.cljs.disabled; assertions retargeted to the
+;; CURRENT glyphs: `;` prose preamble, `; ⟹ value ; result/<id>` output
+;; comment, `; ⟹ ✗ guidance` failures). These behaviors had no live
+;; coverage beyond the full?-flag clip path above.
+;; ------------------------------------------------------------
+
+(deftest eval-row-repl-faithful-stream
+  ;; success: preamble as `;` prose, form verbatim, the value on a BARE
+  ;; `⟹ <value> ⟸ result/<id>` line INLINED onto the form (not comment-shaped).
+  (let [row (ctx/format-eval-row
+              {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
+               :seon.eval/result-edn "3" :seon.eval/id "sm0000001a"
+               :seon.eval/narration "add 1 and 2"})
+        lines (str/split-lines row)]
+    (is (= "; add 1 and 2" (first lines))
+        "narration prose renders as a single-`;` comment line")
+    (is (str/includes? row "(+ 1 2)")
+        "the form renders verbatim")
+    (is (str/includes? row (str "(+ 1 2) " ctx/result-marker " 3 "
+                                ctx/result-close " result/sm0000001a"))
+        "the value inlines onto the form as `(form) ⟹ <value> ⟸ result/<id>`")
+    (is (not (some #(str/starts-with? % "; ⟹") lines))
+        "the result is NOT comment-shaped — no `; ⟹` line for a model to mimic")
+    (is (not (str/includes? row "=> (+ 1 2)"))
+        "no <ns>=> history prompt prefix on the form"))
+  ;; prior-session rows render the value WITHOUT the handle (the var
+  ;; died with the process) — so no `⟸ result/` close.
+  (let [row (ctx/format-eval-row
+              {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
+               :seon.eval/result-edn "3" :seon.eval/id "sm0000001a"}
+              true)]
+    (is (str/includes? row (str ctx/result-marker " 3")) "prior rows still show the value")
+    (is (not (str/includes? row "result/"))
+        "prior-session rows carry NO result/<id> handle")
+    (is (not (str/includes? row ctx/result-close))
+        "no close handle without a live var to point at"))
+  ;; failures render a bare `⟹ ✗ <guidance>` line — and no handle (no value).
+  (let [row (ctx/format-eval-row
+              {:seon.eval/source "(boom)" :seon.eval/ok? false
+               :seon.eval/error "kaput" :seon.eval/id "er0000001a"})]
+    (is (str/includes? row (str ctx/result-marker " ✗ kaput"))
+        "failure rows render the form then a crystal-clear bare `⟹ ✗` line")
+    (is (not (some #(str/starts-with? % "; ⟹") (str/split-lines row)))
+        "the failure line is not comment-shaped either")
+    (is (not (str/includes? row "result/"))
+        "a FAILED eval gets NO result/<id> — there is no value to reuse"))
+  ;; a comment-only row (blank source) renders just its prose preamble.
+  (let [row (ctx/format-eval-row
+              {:seon.eval/source "" :seon.eval/ok? true
+               :seon.eval/id "cm0000001a"
+               :seon.eval/narration "just a trailing thought"})]
+    (is (= "; just a trailing thought" row)
+        "comment-only row → only the `;` preamble, no form, no value")))
+
+(deftest eval-row-shows-captured-print-output
+  (let [row (ctx/format-eval-row
+              {:seon.eval/source "(println \"hi\")" :seon.eval/ok? true
+               :seon.eval/result-edn "nil" :seon.eval/output "hi\n"
+               :seon.eval/id "pr0000001a"})]
+    (is (str/includes? row "(println \"hi\")\nhi\n⟹ nil")
+        "captured output renders between the form and the bare `⟹` value line,
+         REPL-style (stdout present ⇒ result stays on its own line, not inlined)"))
+  (let [row (ctx/format-eval-row
+              {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
+               :seon.eval/result-edn "3" :seon.eval/id "pr0000002b"})]
+    (is (str/includes? row "(+ 1 2) ⟹ 3")
+        "no output attr → single-line result inlines onto the form")))
+
+(deftest eval-row-clipped-value-annotates-shown-of-full
+  ;; a clipped value appends `(N of M tokens)` to the result/<id> handle so
+  ;; the agent knows the shown display is a partial view of a live whole
+  ;; value. The marker speaks TOKENS (Token Reporting rule) — same unit as
+  ;; the inline ⟨… tokens⟩ guide. The result body clips at
+  ;; result-body-render-cap (the store ceiling), so the value must exceed
+  ;; THAT to clip.
+  (let [full (+ ctx/result-body-render-cap 5000)
+        huge (apply str (repeat full "z"))
+        row  (ctx/format-eval-row
+               {:seon.eval/source "(big)" :seon.eval/ok? true
+                :seon.eval/result-edn huge :seon.eval/id "cp0000001a"})]
+    (is (str/includes? row (str "result/cp0000001a ("
+                                (tokens/chars->tokens ctx/result-body-render-cap)
+                                " of " (tokens/chars->tokens full) " tokens)"))
+        "the handle carries (shown of full tokens) so the clip is unambiguous")
+    (is (str/includes? row (str "bind result/cp0000001a for the full value"))
+        "the size guide still fires for the clipped scalar")))
+
+;; ------------------------------------------------------------
+;; Transcript-render redesign — the bare `⟹ … ⟸` grammar and its
+;; single-source glyph constants (the reply-boundary strip detects them).
+;; ------------------------------------------------------------
+
+(deftest reserved-glyphs-are-single-source-and-distinct
+  ;; the five reserved runtime glyphs, each a distinct one-char constant —
+  ;; the emit sites, detector, and lint all reference THESE, never a literal.
+  (is (= #{ctx/result-marker ctx/result-close ctx/status-open
+           ctx/status-close ctx/prompt}
+         ctx/reserved-glyphs)
+      "the constant set IS the five glyphs")
+  (is (every? #(and (string? %) (= 1 (count %))) ctx/reserved-glyphs)
+      "each reserve is a single glyph")
+  (is (= 5 (count ctx/reserved-glyphs)) "five distinct reserves"))
+
+(deftest bare-grammar-emits-from-the-constants
+  ;; a real result is a BARE `⟹ <value> ⟸ result/<id>` line built from the
+  ;; glyph constants — NOT comment-shaped, so a model can't fabricate one by
+  ;; writing a `;` comment (the T4 6/24 `; ⟹` mimicry).
+  (let [row (ctx/format-eval-row
+              {:seon.eval/source "(+ 1 2)" :seon.eval/ok? true
+               :seon.eval/result-edn "3" :seon.eval/id "bg0000001a"})]
+    (is (str/includes? row (str ctx/result-marker " 3 " ctx/result-close
+                                " result/bg0000001a"))
+        "value + handle emit from the result-open/close constants")
+    (is (not (str/includes? row (str "; " ctx/result-marker)))
+        "the result line is NOT comment-shaped")))
+
+;; ------------------------------------------------------------
+;; repl-mode Phase 1 — the fabrication DETECTOR (`first-result-claim`) and
+;; the `:batch` reply-boundary STRIP (`strip-result-claims`). The detector
+;; SKIPS matches inside a successfully-parsed form span (so a legit `⟹`
+;; string literal / `:=>` malli schema never fires); the strip DELETES the
+;; fabricated tails/lines so the clean forms eval and the real rows arrive
+;; next turn.
+;; ------------------------------------------------------------
+
+(deftest first-result-claim-detects-fabrications-skips-in-form
+  ;; a fabricated tail / bare line / commented claim → the offset of the
+  ;; first claim; a string literal or `:=>` malli schema → nil (in-form).
+  (is (= 8 (ctx/first-result-claim "(+ 1 2) ⟹ 3 ⟸ result/FAKE"))
+      "fabricated ⟹ tail after a form is detected at its offset")
+  (is (= 0 (ctx/first-result-claim "=> 61 ;; result/LFd"))
+      "a bare col-0 fabrication is detected at offset 0")
+  (is (= 6 (ctx/first-result-claim "(foo) ;; => 3"))
+      "an inline commented claim is detected")
+  (is (nil? (ctx/first-result-claim "(println \"⟹\")"))
+      "a ⟹ inside a string literal does NOT fire (in a parsed form span)")
+  (is (nil? (ctx/first-result-claim
+              "(defn f {:malli/schema [:=> [:cat :int] :int]} [x] x)"))
+      ":=> inside a :malli/schema vector does NOT fire")
+  (is (nil? (ctx/first-result-claim "(+ 1 2)\n(message/user \"hi\")"))
+      "a clean multi-form reply has no claim")
+  (is (nil? (ctx/first-result-claim (str "the " ctx/prompt " shell prompt")))
+      "❯ is never a claim (excluded glyph)")
+  ;; a glyph inside a #code heredoc payload sits inside the enclosing form's
+  ;; ORIGINAL-coordinate span (parse-forms maps spans back through the
+  ;; heredoc rewrite), so the strip can never truncate a heredoc payload.
+  (is (nil? (ctx/first-result-claim
+              "(fs/replace! {:my.fs/find #code/py <<PY\nprint(1) ⟹ 2\nPY\n})"))
+      "a ⟹ inside a #code heredoc payload never fires (in the form span)")
+  ;; an in-form glyph must not SHADOW a fabrication after the form on the
+  ;; SAME line — the scan resumes at the form span's end, not the match end.
+  (is (= 14 (ctx/first-result-claim "(println \"⟹\") ⟹ 99"))
+      "a fabricated tail after an in-form glyph on the same line still fires")
+  (let [{t :seon.agent.ctx/strip-text n :seon.agent.ctx/strip-count}
+        (ctx/strip-result-claims "(println \"⟹\") ⟹ 99")]
+    (is (= 1 n) "the shadowed fabrication is stripped")
+    (is (str/includes? t "(println \"⟹\")") "the form (and its legit glyph) survives")
+    (is (not (str/includes? t "99")) "the fabricated value is gone")))
+
+(deftest strip-result-claims-removes-fabrications-keeps-forms
+  ;; `:batch` boundary fix-up: the fabricated tail is spliced out, the form
+  ;; to its left survives, and the count is honest.
+  (let [{t :seon.agent.ctx/strip-text n :seon.agent.ctx/strip-count}
+        (ctx/strip-result-claims "(+ 1 2) ⟹ 3 ⟸ result/FAKE")]
+    (is (= 1 n) "one fabrication stripped")
+    (is (str/starts-with? t "(+ 1 2)") "the form survives")
+    (is (not (str/includes? t "⟹")) "the fabricated value is gone")
+    ;; the surviving text parses to exactly the real form, no fabricated tail
+    (is (= 1 (count (filter #(= :form (:seon.repl/kind %))
+                            (repl-internal/parse-forms t))))))
+  ;; multi-form, multi-fabrication → both stripped, both forms kept
+  (let [{t :seon.agent.ctx/strip-text n :seon.agent.ctx/strip-count}
+        (ctx/strip-result-claims "(+ 1 2) ⟹ 3\n(* 2 3) ⟹ 6")]
+    (is (= 2 n) "both fabricated tails stripped")
+    (is (and (str/includes? t "(+ 1 2)") (str/includes? t "(* 2 3)"))
+        "both forms survive"))
+  ;; a standalone bare fabrication line is removed
+  (let [{t :seon.agent.ctx/strip-text n :seon.agent.ctx/strip-count}
+        (ctx/strip-result-claims "(db/transact! x)\n=> {:ok true} ;; result/AAA\n(message/user \"hi\")")]
+    (is (= 1 n))
+    (is (not (str/includes? t "{:ok true}")) "the fabricated result line is gone")
+    (is (str/includes? t "(db/transact! x)")))
+  ;; clean reply is byte-identical, count 0 (idempotent)
+  (let [clean "(println \"⟹\")"
+        {t :seon.agent.ctx/strip-text n :seon.agent.ctx/strip-count}
+        (ctx/strip-result-claims clean)]
+    (is (= 0 n) "nothing to strip")
+    (is (= clean t) "a clean reply passes through byte-identical")))
+
+(deftest large-value-decay-is-display-only-value-unchanged
+  ;; DISPLAY-ONLY central decay: a fixed eval rendered at a SMALLER result-body
+  ;; cap (an aged row) clips its DISPLAY but the live value behind result/<id>
+  ;; is unchanged — the row still points at the whole value, and a bigger cap
+  ;; renders more of the SAME value (never a different one).
+  (let [big  (apply str (repeat 8000 "q"))
+        row  {:seon.eval/id "dk0000001a" :seon.eval/ok? true
+              :seon.eval/source "(big)" :seon.eval/result-edn (pr-str big)}
+        aged (ctx/format-eval-row (assoc row :seon.render/result-body-cap 200))
+        recent (ctx/format-eval-row (assoc row :seon.render/result-body-cap 16384))]
+    (is (< (count aged) (count recent))
+        "the aged display is smaller — decay reduces render resolution")
+    (is (and (str/includes? aged "result/dk0000001a")
+             (str/includes? recent "result/dk0000001a"))
+        "both resolutions point at the SAME live value handle")
+    (is (str/includes? aged "TRUNCATED")
+        "the aged row says its DISPLAY is clipped, the value COMPLETE")))
+
+(deftest aged-eval-row-is-byte-identical-at-a-fixed-cap
+  ;; byte-stability law #62: a FIXED eval at a FIXED age (result-body-cap)
+  ;; renders byte-identically across renders — the prompt cache prefix holds.
+  (let [row {:seon.eval/id "bs0000001a" :seon.eval/ok? true
+             :seon.eval/source "(+ 1 2)" :seon.eval/result-edn "3"}
+        r1  (ctx/format-eval-row (assoc row :seon.render/result-body-cap 200))
+        r2  (ctx/format-eval-row (assoc row :seon.render/result-body-cap 200))]
+    (is (= r1 r2) "same eval + same cap ⇒ byte-identical render")))

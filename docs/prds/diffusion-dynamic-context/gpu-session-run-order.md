@@ -55,12 +55,12 @@ scorecard table + total cost. Experiment ids accept aliases (`1`/`batched`,
 
 | # | experiment | exact command | win condition | rough cost | tune (`--param`) |
 |---|---|---|---|---|---|
-| 0 | **fresh + baseline** | `python3 battery.py 0` | introspect returns `canvas_length` + a baseline `tok_per_s` | ~1 drive (~$0.02) | `max_new_tokens` |
+| 0 | **fresh + baseline** | `python3 battery.py 0` | introspect returns `code_buffer_length` + a baseline `tok_per_s` | ~1 drive (~$0.02) | `max_new_tokens` |
 | 1 | **batched_mm probe** | `python3 battery.py 1` | `find_spec` break GONE **and** compiled-batched steady `tok_per_s` > eager (strong: ≥1.8×); fail = OOM or `≤ eager` | eager×2 + reload+compiled×3 (~$0.10) | `max_length` |
-| 2 | **canvas-length** | `python3 battery.py 2` | scaffold frame fits `canvas_length` (256) **and** every clamp/infill span boundary lands on a token edge | 1 introspect + tokenizer-only (~$0.01) | `fn_name`, `intent` |
+| 2 | **code-buffer-length** | `python3 battery.py 2` | scaffold frame fits `code_buffer_length` (256) **and** every clamp/infill span boundary lands on a token edge | 1 introspect + tokenizer-only (~$0.01) | `fn_name`, `intent` |
 | 3 | **primitives** | `python3 battery.py 3` | `clamp_smoke.all_held` **and** infill `prefix_held` ∧ `suffix_held` | 2 drives (~$0.04) | — |
 | 4 | **closed_loop** | `python3 battery.py 4` | per K: `errors_after < errors_before` with `good_held`, or clean short-circuit | denoise+renoise per K (~$0.10) | `K` (int/list) |
-| 5 | **inject (W2/W3)** | `python3 battery.py 5` | the canvas commits `replacement` over the hallucination (`injections_held`) | denoise + inject (~$0.05) | `prompt`, `K`, `replacement`, `spec_text` |
+| 5 | **inject (W2/W3)** | `python3 battery.py 5` | the code-buffer commits `replacement` over the hallucination (`injections_held`) | denoise + inject (~$0.05) | `prompt`, `K`, `replacement`, `spec_text` |
 | 6 | **unified refine** | `python3 battery.py 6` | the parse→renoise loop converges to `errors==0` within `max_iters` | denoise + N renoise (~$0.10) | `prompt`, `fn_name`, `K`, `max_iters` |
 | 7 | **three-arm kill-gate (E1)** | `python3 battery.py 7` | **THE thesis verdict** — `EARNS`: arm1 (guided) beats arm3 (naked+oracle) on `faithful_rate` by ≥0.10 (eval tier live) | 3 arms × n (~$0.05–0.15) | `n` (samples/arm) |
 | 8 | **skill-lift sweep** | `python3 battery.py 8` | every swept skill shows `lift > 0` (treatment − control, scored through the local oracle) | 2×N per skill × 6 skills (~$0.20) | `skills` (list), `N`, `max_new_tokens` |

@@ -71,7 +71,7 @@ law) — the card carries the full data model + typed contract.
 >    no Malli-generated samples. Gone.
 > 2. **The `:map-of ::render` shape is REPLACED by cardinality-many presence-set
 >    attrs** — because **datahike has no map value type.** A `{ns → set}` value can
->    only serialize (like `:seon.render.live-tile/content` stores hiccup), which
+>    only serialize (like `:seon.render.live-canvas/content` stores hiccup), which
 >    kills per-ns queryability + reactivity. The datahike-native shape already
 >    exists in-tree: `:seon.agent.ctx/render-namespaces` is `[:vector :keyword]`
 >    (cardinality-many). We extend THAT pattern, we don't invent a map.

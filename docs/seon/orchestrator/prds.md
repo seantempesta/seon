@@ -30,33 +30,33 @@ The embedded-datahike JVM main app is the paused track; its PRDs resume with it.
 | PRD | Status | Summary |
 |-----|--------|---------|
 | [[prds/refinement/prd]] | paused | Unified end-to-end JVM system: flow topology, agent runtime, MCP REPL, Observatory (~98% done when paused). |
-| [[prds/startup-reliability/prd]] | paused | Zero-issue JVM startup: cascading failures, agent OOM, MCP blocking. |
+| `prds/startup-reliability/prd` | paused | Zero-issue JVM startup: cascading failures, agent OOM, MCP blocking. |
 | [[prds/namespace-ui/prd]] | paused | Namespace-as-app UI on the JVM track. The design system (Phosphor Terminal) remains the live UI reference. |
-| [[prds/render-pipeline/prd]] | paused | Spec-driven rendering on the JVM track; superseded in spirit by the block/render model in [[ui]]. |
-| [[prds/mcp-resilience/prd]] | paused | MCP server resilience (Phase 1 done). |
-| [[prds/agent-repl-interface/prd]] | paused | Agent REPL-only development with composable `*ctx*` atom. |
-| [[prds/test-infrastructure/design]] | paused | Unified JVM test fixtures + generative testing. |
+| `prds/render-pipeline/prd` | paused | Spec-driven rendering on the JVM track; superseded in spirit by the block/render model in [[ui]]. |
+| `prds/mcp-resilience/prd` | paused | MCP server resilience (Phase 1 done). |
+| `prds/agent-repl-interface/prd` | paused | Agent REPL-only development with composable `*ctx*` atom. |
+| `prds/test-infrastructure/design` | paused | Unified JVM test fixtures + generative testing. |
 
 ## Completed
 
 | PRD | Status | Summary |
 |-----|--------|---------|
-| [[prds/datahike-migration/prd]] | complete | Datalevin → embedded Datahike; Phase 3 demo shipped 2026-04-25. |
-| [[prds/schema-unification/design]] | complete | Malli as single schema source: validation gate, Nippy serialization, bridge. |
-| [[prds/graph-cleanup/prd]] | complete | Removed derived attrs from the graph; resolution via Datalog. |
+| `prds/datahike-migration/prd` | complete | Datalevin → embedded Datahike; Phase 3 demo shipped 2026-04-25. |
+| `prds/schema-unification/design` | complete | Malli as single schema source: validation gate, Nippy serialization, bridge. |
+| `prds/graph-cleanup/prd` | complete | Removed derived attrs from the graph; resolution via Datalog. |
 | [[prds/unified-flow/design]] | complete | core.async.flow as the JVM routing backbone (superseded on the pod — see ADR 005 banner). |
-| [[prds/flow-datalevin-writer/prd]] | complete | Single-writer flow for Datalevin writes (Datalevin since removed). |
-| [[prds/datalevin-migration/prd]] | complete | Datalevin platform (since replaced by Datahike). |
-| [[prds/super-repl/prd]] | complete | Federated agent runtime with JVM pool (evolved into unified-flow + seon.repl; separate-JVM isolation superseded — see ADR 006 banner). |
-| [[prds/stability-improvements/prd]] | complete | Health checks, error boundaries, session cleanup. |
+| `prds/flow-datalevin-writer/prd` | complete | Single-writer flow for Datalevin writes (Datalevin since removed). |
+| `prds/datalevin-migration/prd` | complete | Datalevin platform (since replaced by Datahike). |
+| `prds/super-repl/prd` | complete | Federated agent runtime with JVM pool (evolved into unified-flow + seon.repl; separate-JVM isolation superseded — see ADR 006 banner). |
+| `prds/stability-improvements/prd` | complete | Health checks, error boundaries, session cleanup. |
 
 ## Abandoned / superseded
 
 | PRD | Status | Summary |
 |-----|--------|---------|
-| [[prds/spec-driven-rendering/prd]] | abandoned | Absorbed into render-pipeline and graph-cleanup. |
-| [[prds/test-coverage-audit/findings]] | superseded | ml-options-era audit; references code that no longer exists. |
-| [[prds/logging-system/prd]] | not started | Agent-safe log fns + web log viewer. |
-| [[prds/data-viewer/prd]] | not started | Expand/collapse for nested Clojure data in browser. |
-| [[prds/schema-viewer/prd]] | not started | Web-based Malli schema browser. |
-| [[prds/dashboard-polish/prd]] | not started | Terminal-style dashboard polish. |
+| `prds/spec-driven-rendering/prd` | abandoned | Absorbed into render-pipeline and graph-cleanup. |
+| `prds/test-coverage-audit/findings` | superseded | ml-options-era audit; references code that no longer exists. |
+| `prds/logging-system/prd` | not started | Agent-safe log fns + web log viewer. |
+| `prds/data-viewer/prd` | not started | Expand/collapse for nested Clojure data in browser. |
+| `prds/schema-viewer/prd` | not started | Web-based Malli schema browser. |
+| `prds/dashboard-polish/prd` | not started | Terminal-style dashboard polish. |

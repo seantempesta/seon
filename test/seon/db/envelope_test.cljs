@@ -262,7 +262,8 @@
                         "current schema")
                    {:attribute :seon.nope/x}))]
     (is (false? ok?))
-    (is (= :user-input (:seon.error/kind (:seon.error/data error))))
+    (is (= :user-input (:seon.error/kind error))
+        "kind at the envelope TOP — the ONE read position (C45)")
     (is (re-find #"seon\.schema/register!" (:seon.error/message error))
         "guiding message points at register!")
     (is (some? raw-error) "raw message preserved")
@@ -289,8 +290,8 @@
                      error     :seon.db/error
                      raw-error :seon.db/raw-error}]
                  (is (false? ok?))
-                 (is (= :user-input
-                        (:seon.error/kind (:seon.error/data error))))
+                 (is (= :user-input (:seon.error/kind error))
+                     "kind at the envelope TOP — the ONE read position (C45)")
                  (is (re-find #"seon\.db/identity true"
                               (:seon.error/message error))
                      "guiding message names the identity fix")

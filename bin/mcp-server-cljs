@@ -35,6 +35,21 @@
   (or (System/getenv "SEON_CLJS_PROJECT")
       "/Users/sean/src/seon"))
 
+;; The resolution GRAMMAR (parse-id / select-runtime) is the SAME code the
+;; runtimes compile in and the CLJS suite tests — seon.dev.runtime-id is
+;; CLJC precisely so this bb process can load it (registry C27: one
+;; resolution rule, zero mirrored logic).
+(require '[babashka.classpath :as cp])
+(cp/add-classpath (str project-root "/src"))
+(require '[seon.dev.runtime-id :as rid])
+
+(def own-cluster
+  ;; The cluster THIS supervisor serves — basename of SEON_CLUSTER_DIR
+  ;; (the same rule as seon.store.wire/cluster-name, registry C15). The
+  ;; singleton `default` session pins to the runtime advertising it.
+  (rid/dir->cluster-name (or (System/getenv "SEON_CLUSTER_DIR")
+                             "data/clusters/default")))
+
 (def shadow-port-file (str project-root "/.shadow-cljs/nrepl.port"))
 
 (def default-build-id ":client")
@@ -47,16 +62,20 @@
 (def sessions (atom {}))
 
 ;; Multi-runtime addressing — the UNIFIED id scheme (mcp-agent-id-unification
-;; PRD, 2026-06-10): agent_id IS the core :seon.agent/id (e.g.
-;; "iCg-2606101519"), or "proc:<name>" for non-agent infrastructure runtimes
-;; (wire-node = "proc:wire"). A runtime answers the probe
-;; `(seon.dev.runtime-id/hosted)` with the VECTOR of ids it hosts; resolution
-;; is MEMBERSHIP across ALL active builds (no hardwired build id) — the pod
-;; hosts every agent it resumed/minted. client-id is internal shadow plumbing
-;; and is NOT stable across a crash+restart, so we re-resolve agent-id ->
-;; {build, client-id} per cache miss and re-pin when it changes. This atom is
-;; a resolution CACHE keyed by the unified id, not a second id scheme.
-;; agent-id (string) -> {:nrepl-session "<uuid>" :client-id <int> :build "<:client>"}
+;; PRD 2026-06-10; cluster-qualified per registry C27): agent_id IS the core
+;; :seon.agent/id (e.g. "iCg-2606101519"), optionally cluster-qualified as
+;; "<cluster>/<id>" (e.g. "default/root"), or "proc:<name>" for non-agent
+;; infrastructure runtimes (wire-node = "proc:wire"). A runtime answers the
+;; probe `(seon.dev.runtime-id/advertisement)` with its cluster + the VECTOR
+;; of ids it hosts; resolution is MEMBERSHIP across ALL active builds (no
+;; hardwired build id) via seon.dev.runtime-id/select-runtime — a bare id
+;; hosted by SEVERAL runtimes FAILS LOUD with the candidates (every cluster
+;; hosts a "root"; never pick arbitrarily). client-id is internal shadow
+;; plumbing and is NOT stable across a crash+restart, so we re-resolve
+;; agent-id -> {build, client-id} per cache miss and re-pin when it changes.
+;; This atom is a resolution CACHE keyed by the raw agent_id argument, not a
+;; second id scheme.
+;; agent-id (string) -> {:nrepl-session "<uuid>" :client-id <int> :build "<:client>" (:cluster "<name>")}
 (def agent-sessions (atom {}))
 
 (def stdout-lock (Object.))
@@ -215,6 +234,75 @@
       nil)))
 
 ;;; ---------------------------------------------------------------------------
+;;; Runtime probing — cluster-qualified addressing (registry C27)
+;;; ---------------------------------------------------------------------------
+
+(defn pin-session!
+  "Clone a fresh nREPL session and pin it to a specific runtime (client-id)
+   of the given build via `(shadow/nrepl-select build {:runtime-id cid})`.
+   Returns the nREPL session id, or nil on failure. Evals on the returned
+   session target ONLY that runtime (never the worker-global default)."
+  [port build-id cid]
+  (when-let [nrepl-sid (nrepl-clone-session port)]
+    (nrepl-eval port nrepl-sid
+                (str "(require '[shadow.cljs.devtools.api :as shadow]) "
+                     "(shadow/nrepl-select " build-id " {:runtime-id " cid "})")
+                10000)
+    nrepl-sid))
+
+(def probe-form
+  ;; Evaled into each runtime. `exists?` guards runtimes still running a
+  ;; pre-C27 bundle — they answer the legacy bare id vector, normalized
+  ;; into an advertisement (no cluster) by probe-advertisements!.
+  (str "(if (exists? seon.dev.runtime-id/advertisement) "
+       "(seon.dev.runtime-id/advertisement) "
+       "{:seon.dev.runtime-id/ids (seon.dev.runtime-id/hosted)})"))
+
+(defn probe-advertisements!
+  "Probe EVERY runtime of every active build (no hardwired build id).
+   Returns candidate maps: the runtime's advertisement
+   (:seon.dev.runtime-id/cluster + :seon.dev.runtime-id/ids) merged with
+   {:build \"<:client>\" :client-id <int>}. Runtimes that error on the
+   probe (ns not loaded) are skipped. Probe sessions are closed after use
+   (they historically leaked in the shadow JVM until a watcher restart)."
+  [port]
+  (let [clj-sid (nrepl-clone-session port)
+        bs-res  (nrepl-eval port clj-sid
+                            (str "(require '[shadow.cljs.devtools.api :as shadow]) "
+                                 "(mapv (fn [b] [b (mapv :client-id (shadow/repl-runtimes b))]) "
+                                 "(shadow/active-builds))")
+                            10000)
+        build->cids (try (read-string (or (:value bs-res) "[]"))
+                         (catch Exception _ []))
+        cands (vec (for [[build cids] build->cids
+                         cid cids
+                         :let [psid (pin-session! port (str build) cid)
+                               v    (when psid
+                                      (:value (nrepl-eval port psid probe-form 10000)))
+                               _    (when psid (nrepl-close-session port psid))
+                               adv  (try (when (and v (not (str/blank? v)))
+                                           (read-string v))
+                                         (catch Exception _ nil))
+                               adv  (cond
+                                      (map? adv)        adv
+                                      (sequential? adv) {:seon.dev.runtime-id/ids (vec adv)}
+                                      :else             nil)]
+                         :when adv]
+                     (merge adv {:build (str build) :client-id cid})))]
+    (when clj-sid (nrepl-close-session port clj-sid))
+    cands))
+
+(defn find-cluster-runtime!
+  "client-id of the SINGLE runtime of `build-id` advertising `cluster`,
+   or nil when none or several do (never pick arbitrarily)."
+  [port build-id cluster]
+  (let [cands (filterv #(and (= (:build %) build-id)
+                             (= cluster (:seon.dev.runtime-id/cluster %)))
+                       (probe-advertisements! port))]
+    (when (= 1 (count cands))
+      (:client-id (first cands)))))
+
+;;; ---------------------------------------------------------------------------
 ;;; Session lifecycle (pivot a fresh nREPL session into CLJS)
 ;;; ---------------------------------------------------------------------------
 
@@ -225,13 +313,18 @@
 (defn create-cljs-session!
   "Clone a fresh nREPL session and pivot it into the given shadow build's
    CLJS REPL. Returns a sid (short id) the orchestrator passes back on
-   subsequent evals. Stores {sid -> nrepl-session/build} in `sessions`."
-  [port build-id]
+   subsequent evals. Stores {sid -> nrepl-session/build} in `sessions`.
+   With `cid` the session is PINNED to that runtime (cluster-qualified
+   addressing, C27); without it shadow's :runtime-select :latest picks."
+  ([port build-id] (create-cljs-session! port build-id nil))
+  ([port build-id cid]
   (let [nrepl-sid (nrepl-clone-session port)]
     (when nrepl-sid
       (let [pivot-resp (nrepl-eval port nrepl-sid
                                    (str "(require '[shadow.cljs.devtools.api :as shadow]) "
-                                        "(shadow/nrepl-select " build-id ")")
+                                        (if cid
+                                          (str "(shadow/nrepl-select " build-id " {:runtime-id " cid "})")
+                                          (str "(shadow/nrepl-select " build-id ")")))
                                    10000)]
         (log-debug "pivot result:" pivot-resp)
         ;; Validate the pivot. shadow/nrepl-select returns [:selected <build>]
@@ -242,14 +335,15 @@
         (if (some-> (:value pivot-resp) (str/includes? ":selected"))
           (let [sid (gen-sid)]
             (swap! sessions assoc sid
-                   {:nrepl-session nrepl-sid
-                    :build build-id
-                    :created-at (System/currentTimeMillis)
-                    :pivot-value (:value pivot-resp)})
+                   (cond-> {:nrepl-session nrepl-sid
+                            :build build-id
+                            :created-at (System/currentTimeMillis)
+                            :pivot-value (:value pivot-resp)}
+                     cid (assoc :client-id cid)))
             sid)
           (do (log-error "pivot into" build-id "failed:" (pr-str (dissoc pivot-resp :out)))
               (nrepl-close-session port nrepl-sid)
-              nil))))))
+              nil)))))))
 
 (defn require-port! []
   (or (read-shadow-port)
@@ -266,13 +360,42 @@
     (or (when-let [s (get @sessions sid)]
           {:sid sid :session-info s})
         (if (= sid "default")
-          (if-let [new-sid (create-cljs-session! port default-build-id)]
+          ;; C27: the default session pins to the runtime advertising THIS
+          ;; supervisor's own cluster — :runtime-select :latest used to pin
+          ;; whichever pod connected last (a watched bench pod, not the
+          ;; default pod). When OTHER clusters' runtimes are live but ours
+          ;; isn't, FAIL LOUD (an unpinned fallback would silently ride
+          ;; :latest onto a foreign pod — the exact C27 hazard). The
+          ;; unpinned fallback remains only for the legacy world where NO
+          ;; runtime advertises a cluster (pre-C27 bundles, mid-boot).
+          (let [cands (try (filterv #(= (:build %) default-build-id)
+                                    (probe-advertisements! port))
+                           (catch Exception e
+                             (log-error "advertisement probe failed:" (.getMessage e))
+                             []))
+                own   (filterv #(= own-cluster (:seon.dev.runtime-id/cluster %)) cands)
+                foreign? (boolean (some :seon.dev.runtime-id/cluster cands))]
+            (when (and (empty? own) foreign?)
+              (throw (ex-info (str "no " default-build-id " runtime advertises this "
+                                   "supervisor's cluster '" own-cluster "' — refusing "
+                                   "to fall back to :runtime-select :latest while other "
+                                   "clusters' runtimes are connected. Live advertisements: "
+                                   (pr-str (mapv #(select-keys % [:client-id
+                                                                  :seon.dev.runtime-id/cluster
+                                                                  :seon.dev.runtime-id/ids])
+                                                 cands))
+                                   ". Is the default pod up? bin/seon status / start pod.")
+                              {:cluster own-cluster})))
+            (if-let [new-sid (or (when (= 1 (count own))
+                                   (create-cljs-session! port default-build-id
+                                                         (:client-id (first own))))
+                                 (create-cljs-session! port default-build-id))]
             (let [info (get @sessions new-sid)]
               (swap! sessions (fn [m] (-> m (dissoc new-sid) (assoc "default" info))))
               {:sid "default" :session-info info})
             (throw (ex-info (str "failed to create default CLJS session — pivot into "
                                  default-build-id " failed (watcher up? build watched?)")
-                            {:build default-build-id})))
+                            {:build default-build-id}))))
           (throw (ex-info (str "unknown session id: " sid
                                " (it may have been swept after a watcher restart — "
                                "use create_session for a fresh one)")
@@ -310,68 +433,45 @@
 ;;; Multi-runtime: resolve agent-id -> current client-id, pin a session to it
 ;;; ---------------------------------------------------------------------------
 
-(defn pin-session!
-  "Clone a fresh nREPL session and pin it to a specific runtime (client-id)
-   of the given build via `(shadow/nrepl-select build {:runtime-id cid})`.
-   Returns the nREPL session id, or nil on failure. Evals on the returned
-   session target ONLY that runtime (never the worker-global default)."
-  [port build-id cid]
-  (when-let [nrepl-sid (nrepl-clone-session port)]
-    (nrepl-eval port nrepl-sid
-                (str "(require '[shadow.cljs.devtools.api :as shadow]) "
-                     "(shadow/nrepl-select " build-id " {:runtime-id " cid "})")
-                10000)
-    nrepl-sid))
-
 (defn resolve-agent-runtime!
-  "Probe-resolve agent-id -> {:build \"<:client>\" :client-id <int>} by
-   MEMBERSHIP. Enumerates EVERY active build's runtimes (no hardwired build
-   id) and, for each, pins it and asks `(seon.dev.runtime-id/hosted)` — a
-   vector of the ids that runtime hosts (core :seon.agent/id strings,
-   or proc:<name> for infra runtimes). The first runtime whose answer
-   contains `agent-id` wins. Runtimes that error on the probe (ns not
-   loaded) are skipped, exactly like a non-matching id. Survives restart
-   for free: a respawned process reports the same ids under its new
-   client-id. Returns nil when nothing hosts the id."
+  "Probe-resolve `agent-id` — bare (\"root\", \"proc:wire\") or
+   cluster-qualified (\"default/root\") — against EVERY active build's
+   runtimes via their advertisements, applying THE decision rule
+   (seon.dev.runtime-id/select-runtime): returns its envelope —
+   ::resolution :match (+ ::runtime, the advertisement merged with
+   {:build :client-id}), :ambiguous (+ ::runtimes, all matches), or
+   :none. A bare id hosted by SEVERAL runtimes (every cluster hosts a
+   \"root\") is ambiguous and FAILS LOUD upstream — never an arbitrary
+   pick (registry C27). Survives restart for free: a respawned process
+   advertises the same ids under its new client-id."
   [port agent-id]
-  (let [clj-sid (nrepl-clone-session port)
-        bs-res  (nrepl-eval port clj-sid
-                            (str "(require '[shadow.cljs.devtools.api :as shadow]) "
-                                 "(mapv (fn [b] [b (mapv :client-id (shadow/repl-runtimes b))]) "
-                                 "(shadow/active-builds))")
-                            10000)
-        build->cids (try (read-string (or (:value bs-res) "[]"))
-                         (catch Exception _ []))]
-    (some (fn [[build cids]]
-            (some (fn [cid]
-                    (let [psid   (pin-session! port (str build) cid)
-                          v      (:value (nrepl-eval port psid
-                                                     "(seon.dev.runtime-id/hosted)" 10000))
-                          hosted (try (when (and v (not (str/blank? v)))
-                                        (read-string v))
-                                      (catch Exception _ nil))]
-                      (when (and (sequential? hosted)
-                                 (some #(= agent-id %) hosted))
-                        {:build (str build) :client-id cid})))
-                  cids))
-          build->cids)))
+  (let [parsed (rid/parse-id agent-id)
+        cands  (probe-advertisements! port)]
+    (rid/select-runtime (assoc parsed :seon.dev.runtime-id/candidates cands))))
 
 (defn ensure-agent-session!
-  "Return {:nrepl-session sid :client-id cid :build b} pinned to agent-id's
-   CURRENT runtime. Reuses the cached pinned session if the agent's
-   build+client-id are unchanged; otherwise re-resolves and re-pins (the
-   no-restart survival path after a crash+respawn). Returns nil if no live
-   runtime hosts the id."
+  "Return {:nrepl-session sid :client-id cid :build b (:cluster c)} pinned
+   to agent-id's CURRENT runtime, {:ambiguous [cands]} when several live
+   runtimes host it, or nil when none does. Reuses the cached pinned
+   session if the agent's build+client-id are unchanged; otherwise
+   re-resolves and re-pins (the no-restart survival path after a
+   crash+respawn)."
   [port agent-id]
-  (let [{:keys [build client-id] :as resolved} (resolve-agent-runtime! port agent-id)]
-    (when resolved
-      (let [cached (get @agent-sessions agent-id)]
+  (let [res (resolve-agent-runtime! port agent-id)]
+    (case (:seon.dev.runtime-id/resolution res)
+      :none nil
+      :ambiguous {:ambiguous (:seon.dev.runtime-id/runtimes res)}
+      :match
+      (let [{:keys [build client-id] :as m} (:seon.dev.runtime-id/runtime res)
+            cluster (:seon.dev.runtime-id/cluster m)
+            cached  (get @agent-sessions agent-id)]
         (if (and cached
                  (= client-id (:client-id cached))
                  (= build (:build cached)))
           cached
           (when-let [nrepl-sid (pin-session! port build client-id)]
-            (let [info {:nrepl-session nrepl-sid :client-id client-id :build build}]
+            (let [info (cond-> {:nrepl-session nrepl-sid :client-id client-id :build build}
+                         cluster (assoc :cluster cluster))]
               (swap! agent-sessions assoc agent-id info)
               info)))))))
 
@@ -471,32 +571,65 @@
        "  - Pod just started and websocket is still connecting "
        "(wait 1-2s, retry)."))
 
+(defn- ambiguous-runtime-message
+  "The FAIL-LOUD text when a bare agent_id matches several live runtimes:
+   every candidate as its cluster-qualified handle, so the caller can
+   re-address deterministically (registry C27)."
+  [agent-id cands]
+  (let [bare (:seon.dev.runtime-id/id (rid/parse-id agent-id))
+        line (fn [{:keys [build client-id] :as c}]
+               (str "  " (or (:seon.dev.runtime-id/cluster c) "?") "/" bare
+                    "  (build " build ", client-id " client-id ")"))]
+    (str "agent_id '" agent-id "' is AMBIGUOUS — " (count cands)
+         " live runtimes host it:\n"
+         (str/join "\n" (map line cands))
+         "\nRefusing to pick one arbitrarily. Qualify the id with its cluster"
+         " — e.g. '" (or (some :seon.dev.runtime-id/cluster cands) "default")
+         "/" bare "'. A candidate shown as ?/" bare
+         " advertises no cluster (pre-C27 bundle: restart it on current code"
+         " to make it cluster-addressable).")))
+
 (defn- execute-agent-eval
-  "Eval `code` in the runtime owning `agent-id`, addressed by the public
-   agent-id handle (client-id is resolved + pinned under the hood). On a stale
-   runtime (agent crashed/respawned with a new client-id), drop the cached
-   pinned session, re-resolve, re-pin, and retry — with a short reconnect
-   window so a just-respawned agent's websocket has time to re-register.
-   No MCP-server or shadow restart is involved."
+  "Eval `code` in the runtime owning `agent-id` — bare or cluster-qualified
+   ('default/root'); client-id is resolved + pinned under the hood. A bare
+   id hosted by several runtimes fails loud with the candidate list. On a
+   stale runtime (agent crashed/respawned with a new client-id), drop the
+   cached pinned session, re-resolve, re-pin, and retry — with a short
+   reconnect window so a just-respawned agent's websocket has time to
+   re-register. No MCP-server or shadow restart is involved."
   [port agent-id code timeout]
-  (loop [tries 0]
-    (if-let [{:keys [nrepl-session client-id]} (ensure-agent-session! port agent-id)]
-      (let [result (nrepl-eval port nrepl-session code timeout)]
-        (if (and (stale-runtime? result) (< tries 10))
-          (do (swap! agent-sessions dissoc agent-id)
-              (Thread/sleep 200)
-              (recur (inc tries)))
-          (render-eval-result result (str "agent:" agent-id "#" client-id))))
-      ;; No live runtime for this agent yet — it may be (re)connecting.
-      (if (< tries 10)
-        (do (Thread/sleep 200) (recur (inc tries)))
-        (mcp-error (str "No live runtime hosts agent-id '" agent-id "'. "
-                        "agent_id is the core :seon.agent/id (the pod "
-                        "hosts every agent it resumed/minted — check "
-                        "(seon.dev.runtime-id/hosted) on the :client runtime, "
-                        "or bin/seon status / restart pod), or proc:<name> "
-                        "for infra runtimes (proc:wire needs the :wire-node "
-                        "build watched + node out/wire-node/main.js running)."))))))
+  (let [bare (:seon.dev.runtime-id/id (rid/parse-id agent-id))]
+    (loop [tries 0]
+      (let [sess (ensure-agent-session! port agent-id)]
+        (cond
+          (:ambiguous sess)
+          (mcp-error (ambiguous-runtime-message agent-id (:ambiguous sess)))
+
+          sess
+          (let [{:keys [nrepl-session client-id cluster]} sess
+                result (nrepl-eval port nrepl-session code timeout)]
+            (if (and (stale-runtime? result) (< tries 10))
+              (do (swap! agent-sessions dissoc agent-id)
+                  (Thread/sleep 200)
+                  (recur (inc tries)))
+              (render-eval-result
+                result
+                (str "agent:" (when cluster (str cluster "/")) bare "#" client-id))))
+
+          ;; No live runtime for this agent yet — it may be (re)connecting.
+          (< tries 10)
+          (do (Thread/sleep 200) (recur (inc tries)))
+
+          :else
+          (mcp-error (str "No live runtime hosts agent_id '" agent-id "'. "
+                          "agent_id is the core :seon.agent/id, optionally "
+                          "cluster-qualified as '<cluster>/<id>' (e.g. "
+                          "'default/root' — a qualified id only matches a "
+                          "runtime ADVERTISING that cluster), or 'proc:<name>' "
+                          "for infra runtimes (proc:wire needs the :wire-node "
+                          "build watched + node out/wire-node/main.js running). "
+                          "Check (seon.dev.runtime-id/advertisement) on the "
+                          ":client runtime, or bin/seon status / restart pod.")))))))
 
 (defn execute-eval [{:keys [code session_id timeout_ms agent_id]}]
   (let [port (require-port!)
@@ -525,16 +658,32 @@
             (mcp-error (diagnose-no-runtime)))))
       (render-eval-result result sid))))))
 
-(defn execute-create-session [{:keys [build]}]
+(defn execute-create-session [{:keys [build cluster]}]
   (sweep-dead-sessions!)
   (let [port (require-port!)
-        build-id (or build default-build-id)
-        sid (create-cljs-session! port build-id)]
-    (if sid
-      (mcp-success (str "session=" sid " build=" build-id
-                        " (use this sid in mcp__seon_cljs__eval's session_id)"))
-      (mcp-error (str "failed to clone/pivot CLJS session into " build-id
-                      " (watcher up? build watched? see stderr log)")))))
+        build-id (or build default-build-id)]
+    (if (and cluster (not (str/blank? cluster)))
+      ;; C27: cluster-pinned session — refuse to guess when the cluster's
+      ;; runtime isn't uniquely identifiable on this build.
+      (if-let [cid (find-cluster-runtime! port build-id cluster)]
+        (if-let [sid (create-cljs-session! port build-id cid)]
+          (mcp-success (str "session=" sid " build=" build-id
+                            " cluster=" cluster " client-id=" cid
+                            " (use this sid in mcp__seon_cljs__eval's session_id)"))
+          (mcp-error (str "failed to clone/pivot CLJS session into " build-id
+                          " pinned to cluster " cluster
+                          " (watcher up? build watched? see stderr log)")))
+        (mcp-error (str "no SINGLE runtime of build " build-id
+                        " advertises cluster '" cluster "'. Live advertisements: "
+                        (pr-str (mapv #(select-keys % [:build :client-id
+                                                       :seon.dev.runtime-id/cluster
+                                                       :seon.dev.runtime-id/ids])
+                                      (probe-advertisements! port))))))
+      (if-let [sid (create-cljs-session! port build-id)]
+        (mcp-success (str "session=" sid " build=" build-id
+                          " (use this sid in mcp__seon_cljs__eval's session_id)"))
+        (mcp-error (str "failed to clone/pivot CLJS session into " build-id
+                        " (watcher up? build watched? see stderr log)"))))))
 
 (defn execute-list-sessions [_args]
   (let [{:keys [swept agent-swept]} (sweep-dead-sessions!)
@@ -578,10 +727,25 @@
                (let [sid (nrepl-clone-session port)
                      code "(do (require '[shadow.cljs.devtools.api :as shadow]) (pr-str (mapv (fn [b] {:build b :runtimes (count (shadow/repl-runtimes b))}) (shadow/active-builds))))"
                      r (nrepl-eval port sid code 10000)]
-                 (:value r)))]
+                 (:value r)))
+        ;; C27: per-runtime advertisements — which cluster + ids each
+        ;; connected runtime answers to, i.e. what agent_id resolution sees.
+        adverts (when port
+                  (try (probe-advertisements! port)
+                       (catch Exception e
+                         (log-error "advertisement probe failed:" (.getMessage e))
+                         nil)))
+        advert-lines (map (fn [{:keys [build client-id] :as c}]
+                            (str "  " build "#" client-id
+                                 "  cluster=" (or (:seon.dev.runtime-id/cluster c) "?")
+                                 "  ids=" (pr-str (:seon.dev.runtime-id/ids c))))
+                          adverts)]
     (mcp-success (str "shadow nREPL port: " (or port "<no watcher>")
                       "\nbuilds: " (or info "<unable to query>")
-                      "\nmcp sessions: " (count @sessions)))))
+                      "\nruntime advertisements (cluster + hosted ids):\n"
+                      (if (seq advert-lines) (str/join "\n" advert-lines) "  (none)")
+                      "\nmcp sessions: " (count @sessions)
+                      "\nown cluster (default session pins to it): " own-cluster))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Tool registry
@@ -594,7 +758,7 @@
                   :properties {:code {:type "string"
                                       :description "ClojureScript code to evaluate. Must reference fully-qualified names (cljs.user has no implicit aliases beyond core)."}
                                :agent_id {:type "string"
-                                          :description "Address the runtime hosting a specific agent: the core :seon.agent/id (e.g. 'iCg-2606101519' — the same id in the cluster store, message refs, and /agent/<id> URLs), or 'proc:<name>' for non-agent infrastructure runtimes (e.g. 'proc:wire'). Resolution is by membership: every active build's runtimes are probed via (seon.dev.runtime-id/hosted) and the one hosting this id is pinned. Survives process crash+restart (re-resolves the new client-id) with no MCP/shadow restart. Omit to use the default :client runtime."}
+                                          :description "Address the runtime hosting a specific agent: the core :seon.agent/id (e.g. 'iCg-2606101519' — the same id in the cluster store, message refs, and /agent/<id> URLs), optionally CLUSTER-QUALIFIED as '<cluster>/<id>' (e.g. 'default/root' — required when several pods host the same id: every cluster has a 'root'), or 'proc:<name>' for non-agent infrastructure runtimes (e.g. 'proc:wire'). Resolution is by membership: every active build's runtimes are probed via (seon.dev.runtime-id/advertisement) and the one hosting this id (in the named cluster, when qualified) is pinned. A bare id matching SEVERAL runtimes errors with the candidate list — it never picks arbitrarily. Survives process crash+restart (re-resolves the new client-id) with no MCP/shadow restart. Omit to use the default session (pinned to this checkout's own cluster when advertised)."}
                                :session_id {:type "string"
                                             :description "Session sid. 'default' for the singleton :repl build session (auto-created). Or a sid from create_session. Ignored when agent_id is set."}
                                :timeout_ms {:type "integer"
@@ -602,10 +766,12 @@
                   :required ["code"]}}
 
    {:name "create_session"
-    :description "Clone a fresh nREPL session and pivot it into the named shadow-cljs build's CLJS REPL. Returns a 6-char sid. Use this when you want a session distinct from 'default'."
+    :description "Clone a fresh nREPL session and pivot it into the named shadow-cljs build's CLJS REPL. Returns a 6-char sid. Use this when you want a session distinct from 'default'. Pass cluster to PIN the session to a specific cluster's runtime — without it, shadow's :runtime-select :latest picks whichever runtime of the build connected last (with several pods on one build that may be another cluster's pod)."
     :inputSchema {:type "object"
                   :properties {:build {:type "string"
-                                       :description "Shadow build id keyword string, e.g. ':repl' or ':bench'. Defaults to ':repl'."}}
+                                       :description "Shadow build id keyword string, e.g. ':client'. Defaults to ':client'."}
+                               :cluster {:type "string"
+                                         :description "Cluster name (e.g. 'default'). Pins the session to the single runtime of the build advertising this cluster; errors (listing live advertisements) when none or several do."}}
                   :required []}}
 
    {:name "list_sessions"

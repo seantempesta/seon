@@ -10,7 +10,7 @@
      turn count, error banner, recent messages). Agents repoint their
      tile by transacting a different symbol onto the slot.
    - Read helpers (`recent-messages`, `recent-errors`) used by `view`
-     and the inspector.
+     and the web UI.
 
    This namespace renders the tile and reads the message log; it does
    NOT compose the agent's prompt (that is `seon.agent.ctx`'s job).
@@ -34,7 +34,7 @@
 
 (defn pretty-ai
   "Universal AI-side fallback. Emits the input map as edn."
-  {:malli/schema [:=> [:cat :map] :seon.render/ai-response]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :seon.render/ai-response]}
   [input]
   {:seon.render/ai (pr-str input)})
 
@@ -42,19 +42,19 @@
   "Universal HTML-side fallback — wraps an edn dump in monospace.
 
    The container ensures the user at least sees the data structure."
-  {:malli/schema [:=> [:cat :map] :seon.render/html-response]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :seon.render/html-response]}
   [input]
   {:seon.render/hiccup
    [:pre {:class "p-3 text-xs font-mono bg-base-900 text-text-200 overflow-auto"}
     (pr-str input)]})
 
 (defn pending-html
-  "Calm IN-PROGRESS placeholder for a live tile still loading.
+  "Calm IN-PROGRESS placeholder for a canvas still loading.
 
    Its content symbol
    names an agent-authored render fn that ISN'T loaded in the runtime
    right now (`seon.eval/lookup-value` returned nil). Mirrors the
-   `seon.render.live-tile/welcome` tile shape (compact + expanded,
+   `seon.render.canvas/welcome` tile shape (compact + expanded,
    muted text) so the human sees \"preparing this view…\", NOT an error
    dump of the render-context map. Self-heals: the moment the fn is
    (re)defined the symbol resolves and the real tile renders again."
@@ -71,15 +71,15 @@
       "This panel points at a render fn that isn't loaded yet."]
      [:div {:class "text-[10px] font-mono text-text-500"} (str sym)]]]
    :seon.render/ai
-   (str "Your live tile points at " sym ", but that fn isn't loaded in "
+   (str "Your canvas points at " sym ", but that fn isn't loaded in "
         "the runtime right now — so the human sees a calm "
         "\"preparing this view…\" placeholder instead of your view. "
         "(Re)define the fn (eval its defn) so the symbol resolves, or "
-        "point :seon.render.live-tile/content at a fn that exists "
+        "point :seon.render.canvas/content at a fn that exists "
         "(or at literal hiccup).")})
 
 ;; ============================================================
-;; DB query helpers — used by `view` and the inspector.
+;; DB query helpers — used by `view` and the web UI.
 ;; All synchronous; reads resolve against the input map's `:seon.db/db`
 ;; when present, else fall back to `@seon.db/*conn*`.
 ;; ============================================================
@@ -104,7 +104,7 @@
                   [:=> [:cat :any :string :int] :any]]}
   ([db id] (recent-messages db id 20))
   ([db id n]
-   (let [;; All reads via QUERY, not d/entity — the inspector hands
+   (let [;; All reads via QUERY, not d/entity — the web UI hands
          ;; `view` a FilteredDB, and datahike-cljs FilteredDB doesn't
          ;; implement -lookup (entity-by-lookup-ref throws); queries
          ;; work fine.
@@ -200,7 +200,7 @@
               :seon.log/agent id})))
 
 ;; Turn-count + derived-state are the [[seon.derive]] leaf — `view` (and the
-;; inspector) call `seon.derive/agent-turn-count` / `seon.derive/derive-state`
+;; web UI) call `seon.derive/agent-turn-count` / `seon.derive/derive-state`
 ;; with the db value they hold. They were duplicated here only to dodge the
 ;; seon.agent require cycle; the armable-roster lives once in
 ;; `seon.derive/armable-agent-ids` (state = :idle).
@@ -231,7 +231,7 @@
        (comp/status-dot state id)
        [:span {:class "text-xs text-text-400 ml-auto"} (str "turn " turns)]]
       ;; NOTE: children are built with `into` (vectors), NOT bare
-      ;; `(for …)` lazy seqs — `seon.render.live-tile/valid-hiccup?`
+      ;; `(for …)` lazy seqs — `seon.render.canvas/valid-hiccup?`
       ;; (the render-boundary validator) accepts only
       ;; string/int/nil/vector children, so a lazy-seq child makes
       ;; instrumentation reject the whole tile.

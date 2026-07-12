@@ -1,0 +1,9 @@
+The user wants me to output the function calls as Clojure forms. The function is `public_library.find_nearby` with parameters `location` and `facilities`. The request asks for three separate searches:
+
+1. New York, NY — Reading Room and Fiction section
+2. Los Angeles, CA — Wi-Fi and Children Section
+3. Chicago, IL — Cafe and Reading Room
+
+(public_library.find_nearby {:location "New York, NY" :facilities ["Reading Room" "Fiction"]})
+(public_library.find_nearby {:location "Los Angeles, CA" :facilities ["Wi-Fi" "Children Section"]})
+(public_library.find_nearby {:location "Chicago, IL" :facilities ["Cafe" "Reading Room"]})

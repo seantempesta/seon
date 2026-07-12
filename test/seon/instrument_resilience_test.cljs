@@ -13,7 +13,8 @@
 
    The fix (errors-as-values applied to boot): `instrument-from-db!` BUILDS
    each schema against the live registry before registering it; a spec that
-   can't resolve is counted `:unresolvable-schema` and left UNINSTRUMENTED,
+   can't resolve is counted `:seon.instrument/unresolvable-schema` and left
+   UNINSTRUMENTED,
    so boot proceeds. This ns proves the degrade: a conn carrying only an
    unresolvable fn row returns a stats map (never throws) and registers
    nothing.
@@ -31,13 +32,14 @@
     [malli.core :as m]
     [seon.instrument :as instrument]
     ;; loaded so `seon.render.value/sample` is a LIVE var the row resolves
-    ;; to (clearing the `:no-var` branch) — the ghost path needs a real fn.
+    ;; to (clearing the `:seon.instrument/no-var` branch) — the ghost path
+    ;; needs a real fn.
     [seon.render.value]))
 
 (def ^:private bad-sym
   "A REAL live var (resolves via the munged global path) so the row clears
-   the `:no-var` branch and reaches the schema-resolve check — the exact
-   path the live ghost took."
+   the `:seon.instrument/no-var` branch and reaches the schema-resolve
+   check — the exact path the live ghost took."
   "seon.render.value/sample")
 
 (def ^:private bad-spec
@@ -87,9 +89,9 @@
                   (is (map? stats)
                       "instrument-from-db! returns a stats map, never throws")
                   (when (:seon.instrument/enabled? stats)
-                    (is (= 1 (:unresolvable-schema stats))
-                        "the one ghost row is counted as :unresolvable-schema")
-                    (is (= 0 (:registered stats))
+                    (is (= 1 (:seon.instrument/unresolvable-schema stats))
+                        "the one ghost row is counted as :seon.instrument/unresolvable-schema")
+                    (is (= 0 (:seon.instrument/registered stats))
                         "the ghost row is NEVER registered for instrumentation")
                     (is (nil? (get-in (m/function-schemas :cljs)
                                       ['seon.render.value 'sample]))

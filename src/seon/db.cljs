@@ -61,7 +61,9 @@
     [datahike.constants :as dconst]
     [datahike.db.interface :as dbi]
     [datahike.impl.entity :as dentity]
+    [seon.config :as config]
     [seon.db.internal :as internal]
+    [seon.error :as error]
     [seon.schema :as schema]))
 
 ;;; ──────────────────────────────────────────────────────────────────────
@@ -69,10 +71,10 @@
 ;;; (`db` is OMITTED everywhere — it auto-injects from *conn*.)
 ;;;
 ;;; FIND shapes — pick by what you want back:
-;;;   relation    [:find ?n :where [?e ::name ?n]]            ;=> #{["A"] ["B"]}
-;;;   scalar  `.` [:find (count ?e) . :where [?e ::name]]     ;=> «one scalar — a count»
-;;;   collection  [:find [?n ...] :where [?e ::name ?n]]      ;=> ["A" "B"]
-;;;   tuple       [:find [?n ?r] :where [?e ::name ?n] [?e ::rank ?r]] ;=> ["A" 1]
+;;;   relation    [:find ?n :where [?e ::name ?n]]            ; ⟹ #{["A"] ["B"]}
+;;;   scalar  `.` [:find (count ?e) . :where [?e ::name]]     ; ⟹ «one scalar — a count»
+;;;   collection  [:find [?n ...] :where [?e ::name ?n]]      ; ⟹ ["A" "B"]
+;;;   tuple       [:find [?n ?r] :where [?e ::name ?n] [?e ::rank ?r]] ; ⟹ ["A" 1]
 ;;;
 ;;; PREDICATE — filter inside :where:  [(> ?l 400)]
 ;;;   [:find ?s :where [?e ::doc ?d] [(count ?d) ?l] [(> ?l 400)] [?e ::sym ?s]]
@@ -89,7 +91,7 @@
 ;;; GROUPED AGGREGATE — pull the group's name in the SAME query (group var must
 ;;; be a NAME, not a ref-eid, or you can't read the result):
 ;;;   [:find ?nm (count ?t) :where [?t :seon.test/ns ?n] [?n :seon.ns/name ?nm]]
-;;;   ;=> «set of [ns-name count] tuples»   (then sort/max in Clojure)
+;;;   ; ⟹ «set of [ns-name count] tuples»   (then sort/max in Clojure)
 ;;;
 ;;; LOOKUP-REF — address an entity by an identity attr instead of a raw eid.
 ;;; The value must be the STORED type. :seon.fn/sym is a :string, so use the
@@ -108,7 +110,7 @@
 ;;; The attr keyword is almost certainly misspelled — copy it exactly from a
 ;;; rendered ns source or (keys (installed-schema @*conn*)).
 ;;;
-;;; REPORT WHAT YOU COMPUTED. Every `;=>` below is a SHAPE, not an answer —
+;;; REPORT WHAT YOU COMPUTED. Every `; ⟹` below is a SHAPE, not an answer —
 ;;; the numbers belong to a different db than yours. State only the value your
 ;;; LAST eval returned; if a count matters, re-eval and read it back. Never
 ;;; quote a number you remember or saw in source/an example.
@@ -212,7 +214,7 @@
 ;;
 ;;   - This schema is `'map?` — the only form that is BOTH clean
 ;;     pure-data (re-readable WITHOUT sci, no embedded fn object — the
-;;     pure-data platform law, see seon.render.live-tile + the
+;;     pure-data platform law, see seon.render.canvas + the
 ;;     `registered-forms-are-pure-data` test) AND true for every db
 ;;     flavor (DB / FilteredDB / HistoricalDB / AsOfDB / SinceDB are all
 ;;     `defrecord`s ⇒ `map?`-true). At these slots the arity has ALREADY
@@ -289,6 +291,11 @@
 (schema/register! ::session-id      :seon.db/id)
 (schema/register! ::turn-id         :seon.db/id)
 (schema/register! ::eval-id         :seon.db/id)
+;; ::origin is STAMPED BY THE TRANSACT BOUNDARY from the ambient scope
+;; (`seon.db.internal/derive-origin`) — never passed by callers. Scopes
+;; establish it via [[with-tx-context]]; inside an agent scope the
+;; managed origins (:core-seed / :config) are unreachable (stamped
+;; :agent), so managed-core provenance cannot be forged.
 (schema/register! ::origin          [:enum :user :agent :system :replay :core-seed :config :test-run])
 (schema/register! ::replay?         :boolean)
 (schema/register! ::resume-marker?  :boolean)
@@ -309,7 +316,7 @@
    :max 14}]`, so a hand-written string fails validation. Datahike's
    tx-id remains the canonical creation order for sub-minute sorting.
 
-     (db/new-id!)   ;=> \"Kpx-2605232138\"
+     (db/new-id!)   ; ⟹ \"Kpx-2605232138\"
      (db/transact! {::db/tx-data [{::my-id (db/new-id!) ::title \"…\"}]})"
   {:malli/schema [:=> [:cat] :seon.db/id]}
   []
@@ -357,7 +364,9 @@
 
    Fiber-local across awaits (AsyncLocalStorage), safe under
    concurrent agents. Auto-merged into every `transact!`'s `:tx-meta`;
-   explicit call-site `:tx-meta` keys win per-key."
+   explicit call-site `:tx-meta` keys win per-key — except `::origin`,
+   which the transact boundary STAMPS from the ambient scope
+   (`seon.db.internal/derive-origin`); callers never pass it."
   {:malli/schema [:=> [:cat] [:maybe :map]]}
   []
   (internal/current-tx-context))
@@ -367,7 +376,7 @@
    Fiber-local across awaits. The standard accessor for any code that
    needs to know whose universe it's running in.
 
-     (db/current-agent-id)   ;=> \"iCg-2606101519\"   (your own id)"
+     (db/current-agent-id)   ; ⟹ \"iCg-2606101519\"   (your own id)"
   {:malli/schema [:=> [:cat] [:maybe :string]]}
   []
   (internal/current-agent-id))
@@ -392,15 +401,38 @@
   [agent-id f]
   (internal/run-with-agent agent-id f))
 
+(defn without-agent
+  "Clear the agent-id scope for the dynamic extent of `f`.
+
+   `f` is a 0-arg fn. Inside `f` — including across `await`s —
+   `(current-agent-id)` is nil; the outer scope restores on exit. For
+   CORE writers that must not run under an inherited agent scope: the
+   boot's HTTP server is registered inside the primary agent's
+   [[with-agent]], so every request handler inherits that scope
+   (AsyncLocalStorage captures at registration) — the transact boundary
+   stamps every agent-scoped tx `::origin :agent`, so a `:core-seed`
+   write reached from a handler would otherwise lose its managed
+   provenance.
+
+     (db/without-agent
+       (fn [] (db/transact! {::db/tx-data [...]})))   ; tx carries NO agent-id"
+  {:malli/schema [:=> [:catn [::thunk ::thunk]] :any]}
+  [f]
+  (internal/run-without-agent f))
+
 (defn with-tx-context
   "Establish a tx-context for the dynamic extent of `f`.
 
    `f` is a 0-arg fn; nested calls MERGE. Returns whatever `f` returns (context propagates
    across `await` points). Keys are typically the 7 `:seon.db/*`
    tx-meta attrs registered above; any registered scalar attr works.
+   The tx-context IS the ambient scope the transact boundary stamps
+   `::origin` from — but inside an agent scope the managed origins
+   (`:core-seed` / `:config`) are unreachable: the stamp overrides them
+   to `:agent` (`seon.db.internal/derive-origin`).
 
      (db/with-tx-context
-       {::db/origin :agent ::db/agent-id agent-id}
+       {::db/turn-id turn-id}
        (fn [] (db/transact! {::db/tx-data [...]})))   ; auto-tagged"
   {:malli/schema [:=> [:catn [::tx-context ::tx-context] [::thunk ::thunk]] :any]}
   [ctx-map f]
@@ -472,13 +504,15 @@
    `::db/tx-report` (escape hatch — needs `:db-after`/`:db-before`); the
    default omits it so the agent value stays small.
 
-   The error's `:seon.error/data` carries `:seon.error/kind` —
+   The error map carries a top-level `:seon.error/kind` —
    `:user-input` (fix tx-data and retry) vs `:core-bug` (the pod
    survived; report it, don't retry blindly).
 
    Before committing it validates shape, attrs, and values; installs
    datahike schema for any newly-registered attr; and auto-merges the
-   active [[with-tx-context]] / [[with-agent]] context into `:tx-meta`.
+   active [[with-tx-context]] / [[with-agent]] context into `:tx-meta` —
+   including the derived `::origin` stamp (provenance comes from the
+   ambient scope; an `::origin` passed in `:tx-meta` is ignored).
 
    Worked examples — REGISTER your attrs first, then transact (every key
    namespaced). NO `await`: an `^:async` call is auto-awaited for you, so
@@ -514,12 +548,12 @@
      (schema/register! ::author :seon.db/ref)
      (db/transact! {::db/tx-data [{:db/id \"p1\" ::person-id \"alice\"}
                                   {::doc-id \"d2\" ::author \"p1\"}]})"
-  ;; Opted OUT of instrumentation — listed in `seon.instrument/skip-syms`.
-  ;; SAFE BY DEFAULT means a bad invocation shape returns an error ENVELOPE
-  ;; (`assert-invocation-shape!`), never throws; an instrumentation throw on
-  ;; bad input would break that tested contract. The opt-out lives in
-  ;; skip-syms (a FQ-symbol set) because the analyzer strips schema/metadata
-  ;; markers. This schema stays the discoverable contract; guards enforce.
+  ;; Opted OUT of instrumentation — caught by the computed predicate
+  ;; `seon.instrument/async-unwrappable?` (by SHAPE: variadic + :function
+  ;; schema — not by name). SAFE BY DEFAULT means a bad invocation shape
+  ;; returns an error ENVELOPE (`assert-invocation-shape!`), never throws;
+  ;; an instrumentation throw on bad input would break that tested
+  ;; contract. This schema stays the discoverable contract; guards enforce.
   {:malli/schema
    [:function
     [:=> [:cat ::transact-request] ::transact-response]
@@ -565,31 +599,31 @@
    full idiom set):
 
      ;; scalar count — when you only need a number, COUNT, don't list
-     ;; (results are clipped ~50 rows). The `;=>` is a SHAPE; report the
+     ;; (results are clipped ~50 rows). The `; ⟹` is a SHAPE; report the
      ;; number YOUR eval returns, not the one written here:
-     (db/query '[:find (count ?e) . :where [?e :seon.fn/sym]])  ;=> «a scalar count»
+     (db/query '[:find (count ?e) . :where [?e :seon.fn/sym]])  ; ⟹ «a scalar count»
      ;; CLIPPED results — when a render shows a banner like «N rows; showing
      ;; first 50, +M more clipped», that N IS the total; READ it. Do NOT
      ;; recount the printed rows, and do NOT re-narrow the query to fit. Need
      ;; only the count? COUNT in the query (above), don't list-then-count.
      ;; registered-schema count — ONE :seon.schema/key row per registered
      ;; schema; this IS the count of registered schemas. Read it back live:
-     (db/query '[:find (count ?e) . :where [?e :seon.schema/key]]) ;=> «a scalar count»
+     (db/query '[:find (count ?e) . :where [?e :seon.schema/key]]) ; ⟹ «a scalar count»
      ;; collection — one value per row:
-     (db/query '[:find [?n ...] :where [?e :seon.ns/name ?n]]) ;=> «vector of ns-name keywords»
+     (db/query '[:find [?n ...] :where [?e :seon.ns/name ?n]]) ; ⟹ «vector of ns-name keywords»
      ;; predicate + binding-expr:
      (db/query '[:find ?s :where [?e :seon.fn/doc ?d] [(count ?d) ?l]
                                  [(> ?l 400)] [?e :seon.fn/sym ?s]])
      ;; REF-JOIN — :seon.fn/ns is a ref (stores an eid); match the target
      ;; by joining through its name, NOT by putting the keyword in the slot:
      (db/query '[:find (count ?e) . :where [?e :seon.fn/ns ?n]
-                                           [?n :seon.ns/name :seon.db]]) ;=> «a scalar count»
+                                           [?n :seon.ns/name :seon.db]]) ; ⟹ «a scalar count»
      ;;   (the keyword form [?e :seon.fn/ns :seon.db] THROWS.)
      ;; GROUPED AGGREGATE with the name pulled in the SAME query, so the
      ;; group is readable (a bare ref-eid is not):
      (db/query '[:find ?nm (count ?t)
                  :where [?t :seon.test/ns ?n] [?n :seon.ns/name ?nm]])
-     ;;   ;=> «set of [ns-name count] tuples»   then (sort-by second > …) in Clojure
+     ;;   ; ⟹ «set of [ns-name count] tuples»   then (sort-by second > …) in Clojure
 
    GUARDED against silent typos (the sibling of [[pull]]'s guard): a
    `:where` clause naming an attribute that is neither installed on
@@ -650,7 +684,7 @@
    not defensive fluff. ([[pull]] gates its own patterns with this
    automatically.)
 
-   The wrapper db values — FilteredDB (the inspector's per-agent view),
+   The wrapper db values — FilteredDB (the web UI's per-agent view),
    AsOfDB/SinceDB/HistoricalDB (the time-travel values) — don't
    implement ILookup, so `(:schema db)` THROWS on them. Schema is
    conn-level (a filter or time-point can't change which attrs are
@@ -671,8 +705,8 @@
 
      (filter #(= \"my.plan\" (namespace %))
              (keys (db/installed-schema @db/*conn*)))
-     ;;=> (:my.plan/id :my.plan/title :my.plan/status …)
-     ;;   — registered, queryable, just no rows yet. Reuse it; don't fork."
+     ; ⟹ «(:my.plan/id :my.plan/title :my.plan/status …)»
+     ;   — registered, queryable, just no rows yet. Reuse it; don't fork."
   {:malli/schema [:=> [:catn [::db :any]] :map]}
   [db]
   (or (when (some? db)
@@ -794,12 +828,13 @@
                        "(seon.db/installed-schema db). If the attr is new, "
                        "(seon.schema/register! <attr> <type>) and transact "
                        "data first.")]
+          ;; FLAT ex-data — `:seon.error/kind` at the top level, the ONE
+          ;; convention every kind-bearing throw uses (C43); ->map lifts
+          ;; it to the envelope top (the ONE read position, C45).
           (throw (ex-info msg
-                          {:seon.error/message msg
-                           :seon.error/data
-                           {:seon.error/kind :user-input
-                            ::missing-attrs  (vec (sort unknown))
-                            ::query          q}})))))))
+                          {:seon.error/kind :user-input
+                           ::missing-attrs  (vec (sort unknown))
+                           ::query          q})))))))
 
 (defn- pull-pattern-attrs
   "Every attr keyword an explicit pull pattern names, recursively
@@ -874,12 +909,11 @@
                      "(seon.schema/register! <attr> <type>) and transact "
                      "data first — datahike installs attr schema lazily at "
                      "first transact!.")]
+        ;; FLAT ex-data — same convention as the query guard above (C43).
         (throw (ex-info msg
-                        {:seon.error/message msg
-                         :seon.error/data
-                         {:seon.error/kind :user-input
-                          ::missing-attrs  (vec (sort unregistered))
-                          ::pull-pattern   pattern}}))))
+                        {:seon.error/kind :user-input
+                         ::missing-attrs  (vec (sort unregistered))
+                         ::pull-pattern   pattern}))))
     (if (empty? registered)
       (d/pull db pattern ref)
       (let [pattern' (filter-pull-pattern pattern (set registered))]
@@ -989,7 +1023,7 @@
    (a quoted symbol THROWS \"Cannot compare String to Symbol\"):
 
      (db/entity {::db/ref [:seon.fn/sym \"seon.db/transact!\"]})
-     ;;=> {:db/id N :seon.fn/sym \"seon.db/transact!\" :seon.fn/arglists \"…\" …}"
+     ; ⟹ «map: :db/id N, :seon.fn/sym \"seon.db/transact!\", :seon.fn/arglists \"…\", …»"
   ;; The 1-arg arity accepts EITHER a request map OR a bare eid/lookup-ref
   ;; (auto-inject from *conn*) — one arity-1 `:=>` (the body branches on
   ;; map?); a separate eid-only `:=>` would collide with the request arity.
@@ -1265,7 +1299,7 @@
    added AFTER bootstrap. Per-ROW, never per-kind-name: an
    agent-authored `:seon.fn` row is NOT in this set; a boot-indexed
    one is. THE shared provenance derivation — [[store-inventory]]'s
-   user/system split, [[core-attr-namespaces]], and the inspector's /data
+   user/system split, [[core-attr-namespaces]], and the /data
    browser all read this one mechanism."
   {:malli/schema [:=> [:catn [::db ::db-val]] ::row-ids]}
   [db]
@@ -1435,3 +1469,60 @@
       ::attr-count    (count counts)
       ::datom-count   (reduce + 0 (vals counts))
       ::topology      entity-topology})))
+
+;; ---------------------------------------------------------------------------
+;; Error-persistence hooks — `seon.error/record!`'s write path, INJECTED here
+;; because the require direction is db→error (seon.db.internal requires
+;; seon.error, so seon.error can never require this ns). Runs at namespace
+;; load; a hot reload re-installs closures over the current fns. Both hooks
+;; are nil-safe pre-boot (no conn yet ⇒ record! buffers in memory).
+;; ---------------------------------------------------------------------------
+
+(error/set-db-hooks!
+  {:seon.error/transact! (fn [tx-data]
+                           (when *conn*
+                             (transact! {::tx-data tx-data})))
+   :seon.error/basis-t   (fn []
+                           (when *conn*
+                             (basis-t)))})
+
+;; ---------------------------------------------------------------------------
+;; Config-view seam — `seon.config`'s accessors read the `:seon.config`
+;; singleton through this INJECTED reader (require dir is db→config, so config
+;; can't require db; mirror the error-hook seam above). Returns the DECODED
+;; singleton map (the three mixed-`:or` collection knobs decoded) or nil when
+;; no conn / the singleton is not yet seeded — `seon.config/config-view` then
+;; falls back to the boot manifest resolve (the pre-conn sliver).
+;; ---------------------------------------------------------------------------
+
+;; Single-slot memo keyed on the IMMUTABLE db value (identical?) — the config
+;; accessors are hot (value.cljs reads several caps per rendered node), and the
+;; conn's head is stable across a synchronous render stretch, so this collapses
+;; those reads to ONE entity lookup. Self-invalidating: a new db value (a
+;; transact) recomputes. NB the key is the LIVE `@*conn*` head, NOT the turn's
+;; frozen db (the zero-arg accessors carry no db) — a transact landing mid-turn
+;; means later accessor reads see the newer singleton; acceptable for dials.
+;; Same sanctioned pattern as `render.cljs` `!schema-cache`.
+(defonce ^:private !config-view-cache (atom {:db nil :view nil}))
+
+(defn- read-config-singleton
+  "Decode the `:seon.config` singleton off `db`, or nil when unseeded."
+  [db]
+  (when (contains? (installed-schema db) :seon.config/id)
+    (let [ent (entity {::ref [:seon.config/id config/cluster-config-id] ::db db})]
+      (when (:seon.config/id ent)
+        (into {}
+              (map (fn [[k v]]
+                     [k (if (internal/edn-encoded-attr? k) (decode-edn-value k v) v)]))
+              ent)))))
+
+(config/set-db-config-view!
+  (fn config-singleton-view []
+    (when *conn*
+      (let [db @*conn*
+            c  @!config-view-cache]
+        (if (identical? db (:db c))
+          (:view c)
+          (let [view (read-config-singleton db)]
+            (reset! !config-view-cache {:db db :view view})
+            view))))))

@@ -20,4 +20,4 @@ None.
 ## Related
 
 - Components: [[components/code-graph]], [[components/renderer]]
-- PRDs: [[prds/graph-cleanup/prd]]
+- PRDs: `prds/graph-cleanup/prd`

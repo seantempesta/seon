@@ -25,7 +25,7 @@ paused but not deleted, and the convergence target.
 
 - **What runs today:** the CLJS pod (in `src/seon/*.cljs`) — the agent FSM
   (run/turn/loop with run-id fencing), block-rendered context, the Datastar SSE
-  inspector UI, schema-first `seon.db` over the wire, and a boot-time
+  web UI, schema-first `seon.db` over the wire, and a boot-time
   program-graph index. Drive it from `http://localhost:7890/agents`.
 - **In flight (agent-fsm):** agent-correctness on the shared default pod —
   presentation arc (block renderer, markdown/clojure tiles, root dashboard,
@@ -42,7 +42,7 @@ paused but not deleted, and the convergence target.
 The component tables below still describe the **JVM core** (Datahike + Integrant
 + flow topology) — `[JVM track — paused]`. Those `.clj` files live under
 `src/seon/`; the live `.cljs` surfaces are documented in the CLJS-pod component
-notes (web-inspector, agent-system, reply-segmenter, loadable-skills) and in
+notes (web-ui, agent-system, reply-segmenter, loadable-skills) and in
 [[../prds/agent-fsm/roadmap]].
 
 ## How to Use This Vault
@@ -92,7 +92,7 @@ notes (web-inspector, agent-system, reply-segmenter, loadable-skills) and in
 | [[components/namespace-lifecycle]] | production | Dynamic ns startup, ctx injection |
 | [[components/web-layer]] | stable | HTTP, SSE, Datastar, Phosphor Terminal |
 | [[components/web-brand]] | stable | Downstream brand surface — env-synced rows, titles/h1/theme, CSS hook |
-| [[components/web-inspector]] | active | CLJS pod web lane — four page shells, SSE morphing, findings pane, debug overlay |
+| [[components/web-ui]] | active | CLJS pod web lane — dashboard/roster/agent/debug pages, SSE morphing, findings pane, debug overlay |
 | [[components/agent-system]] | stable | AI providers, sessions, observatory |
 | [[components/agent-reply-segmenter]] | active | CLJS pod — LLM reply → form/prose/read entries (`parse-forms`) |
 | [[components/loadable-skills]] | active | CLJS pod — `my.skills`, dial knowledge into agent ctx, drop when done |

@@ -1,0 +1,7 @@
+movement: FAIL
+schema-after-move: FAIL
+bare-require: FAIL
+redefine-in-place: FAIL
+no-parallel-fork: PASS
+report-values: FAIL
+RED: failed ['movement', 'schema-after-move', 'bare-require', 'redefine-in-place', 'report-values']

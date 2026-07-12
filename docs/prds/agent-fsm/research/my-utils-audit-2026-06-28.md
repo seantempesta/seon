@@ -57,7 +57,7 @@ tags: [research, agent]
 
 That is the **entire** real `my.*` surface today. The catalog in [[toolkit]]
 (`my.files`, `my.search`, `my.shell`, `my.todo`, `my.test`, `my.code`,
-`my.schedule`, `my.recall`, `my.tile`, `my.blob`, `my.agent`) is a **TARGET
+`my.schedule`, `my.recall`, `my.canvas`, `my.blob`, `my.agent`) is a **TARGET
 design** — those namespaces are **not yet renamed/built**. The live agent verbs
 the scenarios actually call still live under `seon.agent.*` and `seon.*`:
 

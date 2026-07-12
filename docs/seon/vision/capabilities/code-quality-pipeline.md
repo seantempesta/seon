@@ -25,4 +25,4 @@ None.
 ## Related
 
 - Components: [[components/dev-tools]]
-- PRDs: [[prds/agent-repl-interface/prd]]
+- PRDs: `prds/agent-repl-interface/prd`

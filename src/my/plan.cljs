@@ -39,6 +39,7 @@
   (:require
     [clojure.string :as str]
     [my.plan.internal :as internal]
+    [seon.agent]   ; load-order: request schemas reference :seon.agent/id
     [seon.db :as db]
     [seon.schema :as schema]))
 
@@ -89,33 +90,36 @@
 
 (schema/register! ::step-request
   [:map
-   [::title       ::title]
-   [::description {:optional true} ::description]
-   [::expect      {:optional true} ::expect]
-   [::agent       {:optional true} :seon.db/ref]   ; default: the ALS agent
-   [::from        {:optional true} :seon.db/ref]
-   [::parent      {:optional true} ::parent]
-   [::needs       {:optional true} ::needs]])
+   [::title         ::title]
+   [::description   {:optional true} ::description]
+   [::expect        {:optional true} ::expect]
+   [:seon.agent/id  {:optional true} :seon.agent/id]  ; injected: you (omit) — or another agent's id
+   [::from          {:optional true} :seon.db/ref]
+   [::parent        {:optional true} ::parent]
+   [::needs         {:optional true} ::needs]])
 
 ;; plan! node shape — recursive: each child may carry its own :children.
 (schema/register! ::plan-node
   [:schema {:registry {::node [:map
                                [::title ::title]
-                               [::ref      {:optional true} :string]
-                               [::after    {:optional true} [:vector :string]]
-                               [::expect   {:optional true} ::expect]
-                               [::children {:optional true} [:vector [:ref ::node]]]]}}
+                               [::ref         {:optional true} :string]
+                               [::after       {:optional true} [:vector :string]]
+                               [::description {:optional true} ::description]
+                               [::expect      {:optional true} ::expect]
+                               [::children    {:optional true} [:vector [:ref ::node]]]]}}
    [:ref ::node]])
 
 (schema/register! ::plan-request
   [:map
-   [::title    ::title]
-   [::goal     {:optional true} ::goal]
-   [::pace     {:optional true} ::pace]
-   [::expect   {:optional true} ::expect]
-   [::children {:optional true} [:vector ::plan-node]]])
+   [::title        ::title]
+   [::goal         {:optional true} ::goal]
+   [::pace         {:optional true} ::pace]
+   [::expect       {:optional true} ::expect]
+   [:seon.agent/id {:optional true} :seon.agent/id]  ; injected: you (omit)
+   [::children     {:optional true} [:vector ::plan-node]]])
 
-(schema/register! ::ids [:map-of :any ::id])   ; author-label / :root → minted id
+(schema/register! ::ids
+  [:map-of [:or :string [:= :root]] ::id])     ; author-label / :root → minted id
 
 (schema/register! ::plan-response
   [:map
@@ -144,36 +148,112 @@
 (schema/register! ::step-ref
   [:map [::id ::id] [::title ::title] [::created-at ::created-at]])
 
+(schema/register! ::next-request
+  [:map [:seon.agent/id {:optional true} :seon.agent/id]])  ; injected: you (omit)
+
 (schema/register! ::tree-request
   [:map
-   [::root? {:optional true} ::id]
-   [::all?  {:optional true} ::all?]])
+   [::root?        {:optional true} ::id]
+   [::all?         {:optional true} ::all?]
+   [:seon.agent/id {:optional true} :seon.agent/id]])  ; injected: you (omit)
 
 ;; root? → one subtree map; else → a vector of root subtrees; nil when nothing.
 (schema/register! ::tree-response [:maybe [:or :map [:vector :map]]])
 
+;; reconcile! — edit your whole OPEN plan as ONE document. A document node is
+;; `tree`/`document`'s shape (children under ::_parent; ::children accepted
+;; too when authoring by hand); ::status rides along read-only (active!/done!
+;; own it); ::ref/::after label deps exactly as in plan!.
+(schema/register! ::doc-node
+  [:schema {:registry {::dnode [:map
+                                [::id          {:optional true} ::id]
+                                [::title       ::title]
+                                [::status      {:optional true} ::status]
+                                [::description {:optional true} ::description]
+                                [::expect      {:optional true} ::expect]
+                                [::goal        {:optional true} ::goal]
+                                [::pace        {:optional true} ::pace]
+                                [::ref         {:optional true} :string]
+                                [::after       {:optional true} [:vector :string]]
+                                [::needs       {:optional true}
+                                 [:vector [:map [::id ::id]]]]
+                                [::children    {:optional true}
+                                 [:vector [:ref ::dnode]]]
+                                [::_parent     {:optional true}
+                                 [:vector [:ref ::dnode]]]]}}
+   [:ref ::dnode]])
+
+(schema/register! ::markdown [:string {:min 1}])
+(schema/register! ::added :int)
+(schema/register! ::updated :int)
+(schema/register! ::diff
+  [:map [::added ::added] [::dropped ::dropped] [::updated ::updated]])
+
+;; ::tree stays structurally permissive at the boundary — a malformed
+;; document is EXPECTED input (frontier markdown, model edits) and must come
+;; back as a guiding fail envelope, never an instrumentation throw. The
+;; `:seon.render/prefill-fn` PROPERTY names the projection of this argument's
+;; CURRENT value (`document`) — the registry-driven draft-head affordance:
+;; a driver that resolves this request schema can pre-fill the ::tree hole
+;; with the live open tree so the model EDITS instead of regenerating.
+(schema/register! ::reconcile-request
+  [:map
+   [::tree         {:optional true
+                    :seon.render/prefill-fn 'my.plan/document}
+    [:or :map [:vector :map]]]
+   [::markdown     {:optional true} ::markdown]
+   [:seon.agent/id {:optional true} :seon.agent/id]])  ; injected: you (omit)
+
+(schema/register! ::reconcile-response
+  [:map
+   [::ok?   ::ok?]
+   [::root  {:optional true} ::id]
+   [::ids   {:optional true} ::ids]
+   [::diff  {:optional true} ::diff]
+   [::error {:optional true} ::error]])
+
 ;; --- The stored entity kind. `{:seon.db/entity true}` DECLARES that rows of
-;; --- this shape live in the DB (puts the kind in the catalog).
+;; --- this shape live in the DB (puts the kind in the catalog). Required =
+;; --- what step!/plan! write unconditionally. ::agent is the SCOPING ref:
+;; --- per-agent data points DATA→AGENT (the step refs its owner; the agent
+;; --- entity is never edited to gain a domain) — read it back either way:
+;; --- forward [?t :my.plan/agent ?a], reverse pull :my.plan/_agent.
 
 (schema/register! ::step
   [:map {:seon.db/entity true}
+   [::id           ::id]
+   [::title        ::title]
+   [::status       ::status]
+   [::agent        ::agent]
+   [::created-at   ::created-at]
+   [::description  {:optional true} ::description]
+   [::goal         {:optional true} ::goal]
+   [::expect       {:optional true} ::expect]
+   [::pace         {:optional true} ::pace]
+   [::from         {:optional true} ::from]
+   [::message      {:optional true} ::message]
+   [::parent       {:optional true} ::parent]
+   [::needs        {:optional true} ::needs]
+   [::completed-at {:optional true} ::completed-at]])
+
+;; list-open's PROJECTION of one unfinished step (internal/open-keys) — the
+;; windowed read, not the stored row (no ::agent: the read is already scoped;
+;; a PULLED ref renders as {:db/id n}, not the transact-side ref form).
+(schema/register! ::open-step
+  [:map
    [::id          ::id]
    [::title       ::title]
+   [::status      ::status]
    [::created-at  ::created-at]
    [::description {:optional true} ::description]
-   [::goal        {:optional true} ::goal]
-   [::expect      {:optional true} ::expect]
-   [::pace        {:optional true} ::pace]
-   [::message     {:optional true} ::message]
-   [::parent      {:optional true} ::parent]
-   [::needs       {:optional true} ::needs]])
+   [::message     {:optional true} [:map [:db/id :int]]]])
 
-(schema/register! ::steps [:vector ::step])
+(schema/register! ::steps [:vector ::open-step])
 
 (schema/register! ::list-request
   [:map
-   [::agent {:optional true} :seon.db/ref]   ; default: the ALS agent
-   [::all?  {:optional true} ::all?]])       ; true = every agent's steps
+   [:seon.agent/id {:optional true} :seon.agent/id]  ; injected: you (omit)
+   [::all?         {:optional true} ::all?]])        ; true = every agent's steps
 
 (schema/register! ::list-response
   [:map
@@ -186,35 +266,39 @@
 (defn ^:async step!
   "Mint one OPEN plan step (agent = caller; blank title refused).
 
-   `:parent`/`:needs` lookup-refs place it in the tree/DAG; `:expect`
-   states its falsifiable outcome — all optional.
+   Omit `:seon.agent/id` and the boundary fills in YOU; pass another id
+   to scope elsewhere. `:parent`/`:needs` lookup-refs place it in the
+   tree/DAG; `:expect` states its falsifiable outcome — all optional.
    → {::ok? true ::id _} or a fail envelope."
   {:malli/schema [:=> [:cat ::step-request] ::write-response]}
-  [{::keys [title description expect agent from parent needs]}]
-  (let [agent (internal/scoped-agent agent)]
-    (cond
-      (or (nil? title) (str/blank? title))
-      (internal/fail "step!: blank :my.plan/title refused — say what the step is.")
+  [{::keys [title description expect from parent needs] agent-id :seon.agent/id
+    :as request}]
+  (or
+    (internal/check-request-keys "step!" request ::step-request)
+    (let [agent (internal/agent-ref agent-id)]
+      (cond
+        (or (nil? title) (str/blank? title))
+        (internal/fail "step!: blank :my.plan/title refused — say what the step is.")
 
-      (nil? agent)
-      (internal/fail (str "step!: no :my.plan/agent and no agent in scope — pass an "
-                          "agent ref or call inside (db/with-agent …)."))
+        (nil? agent)
+        (internal/fail (str "step!: no :seon.agent/id resolved — pass one, or call "
+                            "from inside an agent turn (the boundary fills in you)."))
 
-      :else
-      (let [id (db/new-id!)]
-        (->> (await (db/transact!
-                      {:seon.db/tx-data
-                       [(cond-> {::id         id
-                                 ::title      title
-                                 ::status     :open
-                                 ::created-at (js/Date.)
-                                 ::agent      agent}
-                          description (assoc ::description description)
-                          expect      (assoc ::expect expect)
-                          from        (assoc ::from from)
-                          parent      (assoc ::parent parent)
-                          (seq needs) (assoc ::needs needs))]}))
-             (internal/write-result "step!" id))))))
+        :else
+        (let [id (db/new-id!)]
+          (->> (await (db/transact!
+                        {:seon.db/tx-data
+                         [(cond-> {::id         id
+                                   ::title      title
+                                   ::status     :open
+                                   ::created-at (js/Date.)
+                                   ::agent      agent}
+                            description (assoc ::description description)
+                            expect      (assoc ::expect expect)
+                            from        (assoc ::from from)
+                            parent      (assoc ::parent parent)
+                            (seq needs) (assoc ::needs needs))]}))
+               (internal/write-result "step!" id)))))))
 
 (defn ^:async plan!
   "Author a WHOLE plan in ONE transact — goal, pace, nested steps, deps.
@@ -226,24 +310,27 @@
    any node may carry `:expect`. → {::ok? true ::root <root-id>
    ::ids <label→id>} or a fail envelope."
   {:malli/schema [:=> [:cat ::plan-request] ::plan-response]}
-  [{::keys [title] :as request}]
-  (let [agent (internal/scoped-agent nil)]
-    (cond
-      (or (nil? title) (str/blank? title))
-      (internal/fail "plan!: blank :my.plan/title refused — name the plan.")
+  [{::keys [title] agent-id :seon.agent/id :as request}]
+  (or
+    (internal/check-plan-keys "plan!" request)
+    (let [agent (internal/agent-ref agent-id)]
+      (cond
+        (or (nil? title) (str/blank? title))
+        (internal/fail "plan!: blank :my.plan/title refused — name the plan.")
 
-      (nil? agent)
-      (internal/fail (str "plan!: no agent in scope — call inside (db/with-agent …)."))
+        (nil? agent)
+        (internal/fail (str "plan!: no :seon.agent/id resolved — pass one, or call "
+                            "from inside an agent turn (the boundary fills in you)."))
 
-      :else
-      (let [{:keys [tx labels root-id error]} (internal/compile-plan agent request)]
-        (if error
-          (internal/fail error)
-          (let [env (await (db/transact! {:seon.db/tx-data tx}))]
-            (if (:seon.db/ok? env)
-              {::ok? true ::root root-id ::ids labels}
-              (internal/fail (str "plan!: store failed — "
-                                  (get-in env [:seon.db/error :seon.error/message]))))))))))
+        :else
+        (let [{:keys [tx labels root-id error]} (internal/compile-plan agent request)]
+          (if error
+            (internal/fail error)
+            (let [env (await (db/transact! {:seon.db/tx-data tx}))]
+              (if (:seon.db/ok? env)
+                {::ok? true ::root root-id ::ids labels}
+                (internal/fail (str "plan!: store failed — "
+                                    (get-in env [:seon.db/error :seon.error/message])))))))))))
 
 (defn ^:async active!
   "Take a step up: mark it `:active` — your rendered position anchor.
@@ -251,23 +338,25 @@
    One position at a time: any other `:active` step of the same agent is
    demoted back to `:open`. A `:done` step must be `reopen!`ed first."
   {:malli/schema [:=> [:cat ::id-request] ::write-response]}
-  [{::keys [id]}]
-  (case (internal/status-of id)
-    nil     (internal/fail (str "active!: no step " (pr-str id)
-                                " — (my.plan/next {}) shows the ready ids."))
-    :done   (internal/fail (str "active!: " (pr-str id)
-                                " is :done — reopen! it first."))
-    :active {::ok? true ::id id}
-    (let [db     @db/*conn*
-          agent  (:db/id (::agent (db/entity db [::id id])))
-          others (when agent
-                   (mapv :my.plan/id (internal/active-steps db agent)))]
-      (->> (await (db/transact!
-                    {:seon.db/tx-data
-                     (into [{::id id ::status :active}]
-                           (map (fn [o] {::id o ::status :open}))
-                           (remove #{id} others))}))
-           (internal/write-result "active!" id)))))
+  [{::keys [id] :as request}]
+  (or
+    (internal/check-request-keys "active!" request ::id-request)
+    (case (internal/status-of id)
+      nil     (internal/fail (str "active!: no step " (pr-str id)
+                                  " — (my.plan/next {}) shows the ready ids."))
+      :done   (internal/fail (str "active!: " (pr-str id)
+                                  " is :done — reopen! it first."))
+      :active {::ok? true ::id id}
+      (let [db     @db/*conn*
+            agent  (:db/id (::agent (db/entity db [::id id])))
+            others (when agent
+                     (mapv :my.plan/id (internal/active-steps db agent)))]
+        (->> (await (db/transact!
+                      {:seon.db/tx-data
+                       (into [{::id id ::status :active}]
+                             (map (fn [o] {::id o ::status :open}))
+                             (remove #{id} others))}))
+             (internal/write-result "active!" id))))))
 
 (defn ^:async done!
   "Mark a step done; may unblock its dependents next turn.
@@ -276,31 +365,35 @@
    that you performed an action. Stamps `::completed-at`. Already-done is
    idempotent success; unknown id → fail envelope."
   {:malli/schema [:=> [:cat ::id-request] ::write-response]}
-  [{::keys [id]}]
-  (case (internal/status-of id)
-    nil   (internal/fail (str "done!: no step " (pr-str id)
-                              " — (my.plan/list-open {}) shows the open ids."))
-    :done {::ok? true ::id id}
-    (->> (await (db/transact!
-                  {:seon.db/tx-data [{::id           id
-                                      ::status       :done
-                                      ::completed-at (js/Date.)}]}))
-         (internal/write-result "done!" id))))
+  [{::keys [id] :as request}]
+  (or
+    (internal/check-request-keys "done!" request ::id-request)
+    (case (internal/status-of id)
+      nil   (internal/fail (str "done!: no step " (pr-str id)
+                                " — (my.plan/list-open {}) shows the open ids."))
+      :done {::ok? true ::id id}
+      (->> (await (db/transact!
+                    {:seon.db/tx-data [{::id           id
+                                        ::status       :done
+                                        ::completed-at (js/Date.)}]}))
+           (internal/write-result "done!" id)))))
 
 (defn ^:async reopen!
   "Flip a done/blocked step back to open; retract its `::completed-at`.
 
    Absent means absent — nil is never stored."
   {:malli/schema [:=> [:cat ::id-request] ::write-response]}
-  [{::keys [id]}]
-  (case (internal/status-of id)
-    nil   (internal/fail (str "reopen!: no step " (pr-str id) "."))
-    :open {::ok? true ::id id}
-    (->> (await (db/transact!
-                  {:seon.db/tx-data
-                   [{::id id ::status :open}
-                    [:db/retract [::id id] ::completed-at]]}))
-         (internal/write-result "reopen!" id))))
+  [{::keys [id] :as request}]
+  (or
+    (internal/check-request-keys "reopen!" request ::id-request)
+    (case (internal/status-of id)
+      nil   (internal/fail (str "reopen!: no step " (pr-str id) "."))
+      :open {::ok? true ::id id}
+      (->> (await (db/transact!
+                    {:seon.db/tx-data
+                     [{::id id ::status :open}
+                      [:db/retract [::id id] ::completed-at]]}))
+           (internal/write-result "reopen!" id)))))
 
 (defn ^:async needs!
   "Add dependency edge(s) — the step is ready only after each `:on` is done.
@@ -308,24 +401,28 @@
    Cardinality-many. Remove one via
    `[:db/retract [:my.plan/id id] :my.plan/needs ref]`."
   {:malli/schema [:=> [:cat ::needs-request] ::write-response]}
-  [{::keys [id on]}]
-  (case (internal/status-of id)
-    nil (internal/fail (str "needs!: no step " (pr-str id) "."))
-    (->> (await (db/transact!
-                  {:seon.db/tx-data
-                   (mapv (fn [ref] [:db/add [::id id] ::needs ref]) on)}))
-         (internal/write-result "needs!" id))))
+  [{::keys [id on] :as request}]
+  (or
+    (internal/check-request-keys "needs!" request ::needs-request)
+    (case (internal/status-of id)
+      nil (internal/fail (str "needs!: no step " (pr-str id) "."))
+      (->> (await (db/transact!
+                    {:seon.db/tx-data
+                     (mapv (fn [ref] [:db/add [::id id] ::needs ref]) on)}))
+           (internal/write-result "needs!" id)))))
 
 (defn ^:async move!
   "Re-parent a step — the new parent replaces the old.
 
    `:parent` is cardinality-one. Identity, status, and deps unchanged."
   {:malli/schema [:=> [:cat ::move-request] ::write-response]}
-  [{::keys [id parent]}]
-  (case (internal/status-of id)
-    nil (internal/fail (str "move!: no step " (pr-str id) "."))
-    (->> (await (db/transact! {:seon.db/tx-data [{::id id ::parent parent}]}))
-         (internal/write-result "move!" id))))
+  [{::keys [id parent] :as request}]
+  (or
+    (internal/check-request-keys "move!" request ::move-request)
+    (case (internal/status-of id)
+      nil (internal/fail (str "move!: no step " (pr-str id) "."))
+      (->> (await (db/transact! {:seon.db/tx-data [{::id id ::parent parent}]}))
+           (internal/write-result "move!" id)))))
 
 (defn ^:async drop!
   "Retract a step AND its whole subtree.
@@ -334,17 +431,84 @@
    them (undo via db/as-of). → {::ok? true ::dropped <count>} or a fail
    envelope."
   {:malli/schema [:=> [:cat ::id-request] ::drop-response]}
-  [{::keys [id]}]
-  (await (internal/retract-subtree! id)))
+  [{::keys [id] :as request}]
+  (or
+    (internal/check-request-keys "drop!" request ::id-request)
+    (await (internal/retract-subtree! id))))
+
+(defn ^:async reconcile!
+  "Reconcile your OPEN plan against ONE edited whole-plan document.
+
+   Pass exactly one of `:my.plan/tree` (an edited `document` value — the
+   same nested shape; `:my.plan/children` also accepted when authoring by
+   hand) or `:my.plan/markdown` (lenient plain text: `#`-headings and/or
+   nested `-`/`1.` list items — a flat numbered list is valid; with no
+   heading a plain first line titles, and a `Goal: …` line goals, one
+   synthesized root; a leading `[id]` on an item keeps identity; a
+   `— expect: …` suffix or a trailing second sentence becomes the step's
+   `:my.plan/expect`; cosmetic `[ ]`/`[x]` checkboxes and redundant `N.`
+   enumerators are stripped — a checked box never closes a step). Identity: a node WITH `:my.plan/id` updates in
+   place (title/description/expect/goal/pace/parent/needs — never status:
+   `active!`/`done!` own that); a node WITHOUT one is minted; an open
+   step ABSENT from the document is dropped (`drop!` semantics); `:done`
+   steps are immune — absent from the document by construction, and
+   submitting one fails. `:ref`/`:after` label deps work as in `plan!`.
+   ONE transaction for the whole delta. Against an EMPTY tree this IS
+   plan authoring — one code path with `plan!`.
+   → {::ok? true ::root _ ::ids _ ::diff {::added _ ::dropped _
+   ::updated _}} or a fail envelope."
+  {:malli/schema [:=> [:cat ::reconcile-request] ::reconcile-response]}
+  [{::keys [tree markdown] agent-id :seon.agent/id :as request}]
+  (or
+    (internal/check-request-keys "reconcile!" request ::reconcile-request)
+    (let [agent (internal/agent-ref agent-id)]
+      (cond
+        (and tree markdown)
+        (internal/fail (str "reconcile!: pass exactly ONE of :my.plan/tree "
+                            "or :my.plan/markdown — got both."))
+
+        (and (nil? tree) (nil? markdown))
+        (internal/fail (str "reconcile!: pass the edited document as "
+                            ":my.plan/tree (EDN) or :my.plan/markdown (text) "
+                            "— got neither."))
+
+        (nil? agent)
+        (internal/fail (str "reconcile!: no :seon.agent/id resolved — pass "
+                            "one, or call from inside an agent turn (the "
+                            "boundary fills in you)."))
+
+        :else
+        (let [doc (if markdown
+                    (internal/parse-markdown markdown)
+                    {:nodes (if (map? tree) [tree] (vec tree))})]
+          (if (:error doc)
+            (internal/fail (:error doc))
+            (or
+              (when tree (internal/check-doc-keys "reconcile!" (:nodes doc)))
+              (let [{:keys [tx labels root-id diff error]}
+                    (internal/compile-reconcile @db/*conn* "reconcile!"
+                                                agent (:nodes doc))]
+                (cond
+                  error      (internal/fail error)
+                  (empty? tx) {::ok? true ::root root-id ::ids labels
+                               ::diff diff}
+                  :else
+                  (let [env (await (db/transact! {:seon.db/tx-data tx}))]
+                    (if (:seon.db/ok? env)
+                      {::ok? true ::root root-id ::ids labels ::diff diff}
+                      (internal/fail
+                        (str "reconcile!: store failed — "
+                             (get-in env [:seon.db/error
+                                          :seon.error/message]))))))))))))))
 
 (defn next
   "Your focus queue: READY leaves (open, unblocked), oldest first.
 
-   For the calling agent — the work to act on now. [] outside an agent
-   scope. `active!` the one you take up."
-  {:malli/schema [:=> [:cat :map] [:vector ::step-ref]]}
-  [_]
-  (if-let [agent (internal/scoped-agent nil)]
+   Omit `:seon.agent/id` and the boundary fills in YOU — the work to act
+   on now. [] when no agent id resolves. `active!` the one you take up."
+  {:malli/schema [:=> [:cat ::next-request] [:vector ::step-ref]]}
+  [{agent-id :seon.agent/id}]
+  (if-let [agent (internal/agent-ref agent-id)]
     (let [db @db/*conn*]
       (if-let [oe (internal/agent-eid db agent)]
         (internal/ready-leaves db oe)
@@ -358,16 +522,28 @@
    subtree; {::all? true} → every agent's forest; default → the calling
    agent's forest."
   {:malli/schema [:=> [:cat ::tree-request] ::tree-response]}
-  [{::keys [root? all?]}]
+  [{::keys [root? all?] agent-id :seon.agent/id}]
   (let [db @db/*conn*]
     (cond
       root? (internal/pull-subtree db root?)
       all?  (mapv #(internal/pull-subtree db %) (internal/all-root-ids db))
-      :else (if-let [agent (internal/scoped-agent nil)]
+      :else (if-let [agent (internal/agent-ref agent-id)]
               (if-let [oe (internal/agent-eid db agent)]
                 (mapv #(internal/pull-subtree db %) (internal/root-ids db oe))
                 [])
               []))))
+
+(defn document
+  "Your OPEN plan as ONE editable document — edit it, then `reconcile!`.
+
+   `tree`'s nested shape (children under `:my.plan/_parent`, dep ids
+   inline) with every `:done` step EXCLUDED — history can't be edited
+   away. Every node keeps its `:my.plan/id`, so the edit round-trips:
+   (my.plan/reconcile! {:my.plan/tree (my.plan/document {})}) is a no-op.
+   {::root? id} → that open subtree; default → your whole open forest."
+  {:malli/schema [:=> [:cat ::tree-request] ::tree-response]}
+  [request]
+  (internal/prune-done (tree request)))
 
 (defn status
   "Derived view of one step — done/blocked/ready + subtree roll-up.
@@ -380,21 +556,21 @@
   (internal/status-view @db/*conn* id))
 
 (defn list-open
-  "Unfinished steps (open/active/blocked), oldest first, for `::agent`.
+  "Unfinished steps (open/active/blocked), oldest first, per agent.
 
-   Default scope: the caller; {::all? true} lists every agent's. Flat —
-   includes parents and blocked steps (use `next` for the ready-leaf focus
-   queue)."
+   Omit `:seon.agent/id` and the boundary fills in YOU; {::all? true}
+   lists every agent's. Flat — includes parents and blocked steps (use
+   `next` for the ready-leaf focus queue)."
   {:malli/schema [:=> [:cat ::list-request] ::list-response]}
-  [{::keys [agent all?]}]
-  (let [agent (internal/scoped-agent agent)]
+  [{::keys [all?] agent-id :seon.agent/id}]
+  (let [agent (internal/agent-ref agent-id)]
     (cond
       (nil? db/*conn*)
       (internal/fail "list-open: no conn bound — runs inside an agent's universe.")
 
       (and (nil? agent) (not all?))
-      (internal/fail (str "list-open: no :my.plan/agent and no agent in scope — pass "
-                          "an agent ref, {::all? true}, or use (db/with-agent …)."))
+      (internal/fail (str "list-open: no :seon.agent/id resolved — pass one, "
+                          "{::all? true}, or call from inside an agent turn."))
 
       :else
       (let [db @db/*conn*]

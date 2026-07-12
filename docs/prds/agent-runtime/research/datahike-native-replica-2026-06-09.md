@@ -402,3 +402,20 @@ opens stays locked as it likes — the flag is per-connection).
    at boot.
 4. Keep `clj -M:replica-peer-jvm` (+ `clj -M:replica-probe-jvm`) as the
    regression pair; re-run both after the flip.
+
+## Harness retired (2026-07-02)
+
+The Stage A/B regression harness itself (`seon.dev.replica-probe`,
+`seon.dev.replica-peer`, the `seon.probe.replica-*` JVM drivers, the
+`:replica-probe-jvm`/`:replica-peer-jvm` deps.edn aliases, and the
+`:replica-probe`/`:replica-peer` shadow builds) was DELETED — recoverable at
+seon commit `2ef14d1276`. Everything it validated is production behavior
+now: the pod IS the DIS peer (`seon.store.wire` — follow-the-store lazy
+reads, the `:seon-wire` PWriter over UDS, RYOW-on-ack), and change
+notification moved off the polled `subscribe-tx`/`next-tx-event` queue onto
+the pub-socket push feed + `replay-tx` gap recovery (commit `a24b172f`),
+which deleted the server polling ops the harness was the last consumer of.
+The findings above (fressian byte-compat, lazy node fetch, root-follow,
+flush-before-ack, `:lock-blob? false`, the konserve header fix) remain the
+durable record; regression coverage lives in the live pod + the JVM wire
+tests (`seon.server.tx-feed-replay-test`, `seon.server.boot-test`).

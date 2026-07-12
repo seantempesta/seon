@@ -1,7 +1,8 @@
 # src/seon/web — the pod's HTTP/SSE front door (.cljs = active; .clj = paused JVM track)
 
 **Read before editing:** `docs/seon/architecture/ui.md` (the live channel +
-routing + page tree), `observability.md` (the `/solve` door + debug surfaces),
+routing + page tree), `observability.md` (cluster lifecycle, the
+`/agents/run` door + debug surfaces),
 `docs/prds/namespace-ui/design-system.md` (Phosphor Terminal theme). Skills:
 `datastar-web-ui` (SSE/morph/signals), `browser-automation` (verification —
 note the browser 503s long-lived SSE; verify feeds with a node gunzip client).
@@ -9,14 +10,22 @@ note the browser 503s long-lived SSE; verify feeds with a node gunzip client).
 ## Systems at play
 
 - **`serve.cljs`** — the one browser-facing HTTP+SSE server, and the
-  **`/solve` door** (`handle-solve!`): mint a scratch agent on an isolated
-  conn, inject input via the real wake path, await derived `:idle`, return
-  reply + honest termination metadata. The inspect.ai bridge, the gym, and
-  forensic agents are all clients of this recipe — extend it, don't fork it.
+  **`POST /agents/run` door** (`handle-agent-run!`): start-or-reuse an agent
+  IN THE POD'S OWN CLUSTER (optional `agent_id`; durable store, survives pod
+  restarts), deliver input via the real wake path, await derived `:idle`,
+  return the truthful reply + termination metadata. NO scratch store, NO
+  conn/schema root swap — isolation is a whole cluster (`bin/seon cluster
+  create`). Extend this recipe, don't fork it.
 - **`router.cljs`** — reitit router derived from `:seon.route/*` datoms; the
   route table is data. `/call` is the ONE action door; the capability gate
   authorizes the fn. New pages = new route datoms + layouts, not new
   handlers.
+- **Route truth (the ONE place — link here, don't restate):** `/` is root's
+  agent view (`datastar/serve-root!`, not a redirect); `/agents` +
+  `/agents/feed` is the fleet roster (`roster-view`); `/agent/{id}` +
+  `/agent/{id}/feed` is a per-agent view; `/agent/{id}/call` is the action
+  door. Route changes are `:seon.route/*` datom seeds, so a
+  `bin/seon cluster reset default` is required for a new/renamed route to land.
 - **`datastar.cljs`** — the live channel: one tx-listener on the replica
   derives the WHOLE element (`view = f(db-as-of t)`) and pushes one gzip
   datastar **morph**; idiomorph diffs client-side; a coalescing throttle
@@ -24,7 +33,7 @@ note the browser 503s long-lived SSE; verify feeds with a node gunzip client).
   dead — don't rebuild it). The time-travel bar here is the worked example
   of as-of rendering.
 - **`debug.cljs`** — `/agent/{id}/debug`: per-block prompt text + HTML twins
-  + token context-bar, derived via `inspect/ctx-preview` (present-tense
+  + token context-bar, derived via `agent-debug/ctx-preview` (present-tense
   today; historical turns come via the observability build).
 
 ## Rules that bite

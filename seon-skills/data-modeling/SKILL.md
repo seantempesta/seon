@@ -21,6 +21,9 @@ Read both — this skill assumes their mindset and won't repeat it.
 
 ## Step 0 — there are NO entity kinds; you model ATTRIBUTES + connections
 
+The no-`:kind` floor rule is always in your context; here is how it plays out in
+schema design.
+
 The single biggest design error from an OO/table background: reaching for a
 `:type`/`:kind`/class. Datahike has none — an entity is just an id plus the
 datoms it carries. What an entity "is" comes from **which attributes are present**
@@ -90,8 +93,8 @@ What the bridge installs for each (verify live with
 | natural key | `[:string {:seon.db/identity true}]` | + `:db/unique :db.unique/identity` |
 
 The bridge maps `:enum` (keyword members only), `:and` (bridges on its base),
-and same-type `:or`; an unmappable shape THROWS — extend the bridge
-(`src/seon/db/internal.cljs`), never hand-write a `:db.type/*`. Full table +
+and same-type `:or`; an unmappable shape THROWS instead of silently
+guessing — never hand-write a `:db.type/*` yourself. Full table +
 query/transact mechanics: the **`datahike`** skill.
 
 ### Three design rules the type system enforces
@@ -223,9 +226,10 @@ specced positional one.
   [id new-title] …)
 ```
 
-Every schema'd public fn is instrumented and THROWS on a mismatch — a wrong
-schema is a runtime bug, not a doc nit. (Agent-facing verbs return their `::ok?`
-response map instead of throwing — see `data-oriented-clojure`.)
+The `:malli/schema`-is-enforced floor rule is always in your context; the design
+angle here: every schema'd public fn is instrumented and THROWS on a mismatch — a
+wrong schema is a runtime bug, not a doc nit. (Agent-facing verbs return their
+`::ok?` response map instead of throwing — see `data-oriented-clojure`.)
 
 ## The schema IS the generator — generative testing
 
@@ -240,11 +244,9 @@ tests. The loop: design schema → generate example data → assert a property.
 ```
 
 Use it to round-trip your model before writing real code: generate an entity,
-`transact!` it, query it back, check it matches. On the **active pod (CLJS)**,
-write *example* tests (the schema is still the unit you assert against — see
-`clojure-testing`); the `mg/sample` + `user/run-tests` generative-property idiom
-is the **paused JVM track**. Either way the schema, not a hand-built fixture, is
-the source of test data.
+`transact!` it, query it back, check it matches. Write a real
+`cljs.test/deftest` in a `my.<domain>-test` ns that asserts against the
+schema (not a hand-built fixture) — the schema is the source of test data.
 
 ## Worked example — a small domain end to end
 
@@ -268,7 +270,7 @@ shared **author**).
 ;; 2. derived datahike schema (what got installed — no hand-writing):
 (seon.db/malli->datahike-schema
   [:my.kb.source/id :my.kb.source/topics :my.kb.source/author :my.kb.source/findings])
-;;=> [{:db/ident :my.kb.source/id     :db/valueType :db.type/string :db/cardinality :db.cardinality/one
+; ⟹ [{:db/ident :my.kb.source/id     :db/valueType :db.type/string :db/cardinality :db.cardinality/one
 ;;     :db/unique :db.unique/identity}
 ;;    {:db/ident :my.kb.source/topics  :db/valueType :db.type/keyword :db/cardinality :db.cardinality/many}
 ;;    {:db/ident :my.kb.source/author  :db/valueType :db.type/ref     :db/cardinality :db.cardinality/one}
@@ -289,20 +291,10 @@ shared **author**).
                    [:my.kb.source/rating :my.kb.source/rating]])
 ```
 
-`src/my/kb.cljs` is the runnable, test-exercised version of exactly this — read
-it for live idiom. `src/seon/agent/todo.cljs` is the exemplar for refs + tree/DAG
-modeling.
-
-## Key files
-
-| File | What it gives you |
-|---|---|
-| `src/seon/schema.cljc` | `register!`, the registry, entity-schema decomposition |
-| `src/seon/db/internal.cljs` | `malli->datahike-attr` — the bridge (extend it here) |
-| `src/my/kb.cljs` | runnable schema-design manual — copy a recipe |
-| `docs/conventions.md` | Malli patterns, base+provider, request/response, `:any` boundary |
-| `reference-code/malli/src/malli/{core,generator}.cljc` | schema syntax + generator derivation |
-| `reference-code/spectomic`, `reference-code/malli-datomic` | the upstream spec/malli→datomic bridges this generalizes |
+The `my.kb` namespace carries exactly this pattern, running live — its
+`ns-publics` and docstrings are worth browsing for the recipe; `my.plan`
+is the exemplar for refs + tree/DAG modeling (identity, parent/needs
+refs, derived ready/blocked queries).
 
 For querying / transacting / upsert / retract / refs-at-read-time → the
 **`datahike`** skill. For the mindset → **`data-oriented-clojure`**.

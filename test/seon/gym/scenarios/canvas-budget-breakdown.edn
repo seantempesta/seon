@@ -2,7 +2,7 @@
 ;; drive its CANVAS as the PRIMARY surface? The human explicitly asks for a
 ;; breakdown they can SEE at a glance, "not a paragraph to read" — the
 ;; honest medium is a rendered tile on the agent's own canvas
-;; (:seon.render.live-tile/content), with a short pointer message as
+;; (:seon.render.canvas/content), with a short pointer message as
 ;; backup. An agent that only recites the numbers in prose FAILS the
 ;; canvas axis even if the numbers are right.
 ;;
@@ -14,13 +14,13 @@
 ;; GYM INTEGRITY: predicates are STRUCTURAL — the canvas-updated axis only
 ;; checks that the agent set its OWN tile content; the judge grades the
 ;; substantive answer against the seeded rows. Nothing tells the agent to
-;; "use a tile" or hands it the totals — the standing live-tile guidance +
-;; the ui-live-tiles skill teach the medium generally.
+;; "use a tile" or hands it the totals — the standing canvas guidance +
+;; the ui-canvas skill teach the medium generally.
 ;;
 ;; PAID — needs a live drive to score canvas-updated + the judge. Refused
 ;; without {:seon.gym/allow-paid? true} + the provider key.
 {:seon.gym.scenario/id     :canvas-budget-breakdown
- :seon.gym.scenario/doc    "Human asks for a glanceable spending breakdown (explicitly NOT a paragraph). 7 expenses seeded under :my.expense/* across 3 categories (groceries 136, dining 106, transport 79; total 321; top = groceries). Honest answer renders the breakdown to the agent's OWN canvas (:seon.render.live-tile/content) with a short backup reply. Bar: the agent drove its canvas (canvas-updated), replied honestly, terminated under cap, and the answer conveys the correct per-category breakdown."
+ :seon.gym.scenario/doc    "Human asks for a glanceable spending breakdown (explicitly NOT a paragraph). 7 expenses seeded under :my.expense/* across 3 categories (groceries 136, dining 106, transport 79; total 321; top = groceries). Honest answer renders the breakdown to the agent's OWN canvas (:seon.render.canvas/content) with a short backup reply. Bar: the agent drove its canvas (canvas-updated), replied honestly, terminated under cap, and the answer conveys the correct per-category breakdown."
  :seon.gym.scenario/tier   :paid
  :seon.gym.scenario/status :active
  :seon.gym.scenario/competency :ui
@@ -48,7 +48,7 @@
    :seon.gym.predicate/query  [:find ?e :where [?e :my.expense/amount-usd _]]
    :seon.gym.predicate/expect [:count>= 7]}
   ;; THE primary signal: the agent drove its OWN canvas — set
-  ;; :seon.render.live-tile/content on its agent entity (structural;
+  ;; :seon.render.canvas/content on its agent entity (structural;
   ;; doesn't inspect what it rendered, only that it rendered).
   {:seon.gym.predicate/id    :drove-its-canvas
    :seon.gym.predicate/kind  :canvas-updated

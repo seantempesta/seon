@@ -20,6 +20,7 @@ from inspect_ai import eval as inspect_eval
 
 from seon_inspect.tasks.e1_spec_fn import e1_spec_fn
 from seon_inspect.tasks.ladder_lift import ladder_lift
+from seon_inspect.tasks.milestone_lift import milestone_lift
 from seon_inspect.tasks.skill_lift import skill_lift
 
 RUNS = [
@@ -35,6 +36,14 @@ RUNS = [
                                            endpoint="mock:skill_lift")),
     ("ladder ON", lambda: ladder_lift(ladder=True, endpoint="mock:ladder")),
     ("ladder OFF", lambda: ladder_lift(ladder=False, endpoint="mock:ladder")),
+    ("milestone ns good", lambda: milestone_lift(milestone="namespaces",
+                                                 endpoint="mock:good")),
+    ("milestone ns bad", lambda: milestone_lift(milestone="namespaces",
+                                                endpoint="mock:bad")),
+    ("milestone db good", lambda: milestone_lift(milestone="db",
+                                                 endpoint="mock:good")),
+    ("milestone db bad", lambda: milestone_lift(milestone="db",
+                                                endpoint="mock:bad")),
 ]
 
 

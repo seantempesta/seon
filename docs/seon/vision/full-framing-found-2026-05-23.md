@@ -190,7 +190,7 @@ This is the original specification of "two-tier rendering" — same function emi
 >
 > WinboxJS provides the windowing framework, allowing fluid resizing with appropriate UI adaptation.
 
-A primitive lost from current Seon: **size-adaptive rendering**. One render function returns five layouts. Compare to the current renderer system which has no concept of "render at micro/tile/full." This is a feature that could come back — it would let a user pinning a namespace to a sidebar tile get a compact render while the same namespace's full-page route renders richly. **Worth flagging as a candidate capability** for the M4/M5 work.
+A primitive lost from current Seon: **size-adaptive rendering**. One render function returns five layouts. Compare to the current renderer system which has no concept of "render at micro/canvas/full." This is a feature that could come back — it would let a user pinning a namespace to a sidebar tile get a compact render while the same namespace's full-page route renders richly. **Worth flagging as a candidate capability** for the M4/M5 work.
 
 **§2.5 Database-Driven Development:**
 
@@ -336,7 +336,7 @@ Five repos, each with a publication-grade README rewrite dated 2026-04-21. The L
 Specifically (from the 1936-line `seon-biff/README.md`):
 
 1. **Two-tier rendering** (ctx → `{:markdown-text-summary "..." :htmx "..." :tile-htmx "..."}`) — current `:seon.render/html` + `:seon.render/ai` is a direct descendant.
-2. **Multi-size rendering** (micro/tile/small/medium/full) — NOT in current Seon. Lost feature.
+2. **Multi-size rendering** (micro/canvas/small/medium/full) — NOT in current Seon. Lost feature.
 3. **Namespace-isolation with randomized sub-ns per session** (`seon.sessions.{uuid}`) — current namespace-stewardship architecture is the heir, with stable namespaces instead of random ones.
 4. **App-registry + db-persisted apps** — current `function-discovery.md` / `code-graph.md` is the broader generalization.
 5. **WebSocket out-of-band updates from ctx changes** — current SSE+Datastar architecture is the heir.

@@ -73,7 +73,7 @@ floor. Two real jobs, both pure CLJS:
 
 1. **Reshape** `:seon.embed/hits` → the `:seon.items/*` envelope; per item, lift
    the pulled entity to the top, add `:seon.db/ref` (the eid — the REF backbone, so
-   the item threads into `db/pull`/`db/entity`/`my.tile`), and add
+   the item threads into `db/pull`/`db/entity`/`my.canvas`), and add
    `:my.recall/distance` + `:my.recall/similarity`.
 2. **Gate gracefully** — catch the `SEON_EMBED`-off wire failure (`seon.embed/search`
    throws on the not-ok envelope) and the unbound-`*conn*` case, returning a legible
@@ -190,7 +190,7 @@ Aligned to the four backbone shapes so outputs thread into inputs with no rekey.
 (defn ^:async recall
   "Semantic KNN over your store: nearest entities to QUERY by MEANING (not exact
    attr/keyword). Returns the :seon.items/items envelope, distance-ascending; each
-   item is the pulled entity + :seon.db/ref (thread into db/pull, my.tile, transact!)
+   item is the pulled entity + :seon.db/ref (thread into db/pull, my.canvas, transact!)
    + :my.recall/distance (raw, lower = nearer) + :my.recall/similarity (0..1, higher
    = nearer). The NEAREST is not necessarily RELEVANT — read the score; pass
    :my.recall/min-similarity to drop far matches. :my.recall/within scopes by a
@@ -226,8 +226,8 @@ Aligned to the four backbone shapes so outputs thread into inputs with no rekey.
      (map #(assoc % :my.kb/verified-at (js/Date.)))    ; entity attrs already present
      (hash-map :seon.db/tx-data) db/transact!)
 
-;; recall → one human tile (the item is plain namespaced data; my.tile takes it)
-(tile/card! {:seon.ui/title "Closest match" :seon.ui/body (-> (recall {…}) :seon.items/items first)})
+;; recall → one human tile (the item is plain namespaced data; my.canvas takes it)
+(canvas/card! {:seon.ui/title "Closest match" :seon.ui/body (-> (recall {…}) :seon.items/items first)})
 
 ;; within-scope by kind, threading the same datalog vocabulary db/query speaks:
 (recall {:my.recall/query "deadlines" :my.recall/within '[[?e :my.kb.codebase/question _]]})
@@ -236,7 +236,7 @@ Aligned to the four backbone shapes so outputs thread into inputs with no rekey.
 `:my.recall/within` accepts the **same** `:where` clauses the agent already writes
 for `db/query`; `:my.recall/eids` threads a prior `(map :seon.db/ref items)` back in
 as a scope. The output's `:seon.db/ref` is the REF backbone — addresses straight
-into `db/entity`/`db/pull`/`my.tile`.
+into `db/entity`/`db/pull`/`my.canvas`.
 
 ## Gotchas
 

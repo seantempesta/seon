@@ -2,14 +2,14 @@
   "The `:relevant-source` context section — the top-k embedding-retrieval
    hits for THIS turn's query, surfaced (as a single-`;` `relevant context`
    comment-block) as source the agent can read inline.
-   Symbol-wired into the composer layout (`seon.config/default-ctx-blocks`) as
+   Symbol-wired into the composer layout (`config manifest`) as
    `'seon.agent.ctx.relevant/relevant-source-block` at priority 48 (the VOLATILE
    half — query-dependent content must stay out of the cacheable stable prefix).
 
    The HITS are NOT computed here. They are PREFETCHED by the async
    `seon.agent/run-turn!` (which awaits the wire `knn-search`) and stashed in a
    fiber-local `seon.embed.stash` so this SYNCHRONOUS section can read them
-   without making `assemble-context` async (which would ripple to the inspector
+   without making `assemble-context` async (which would ripple to the web UI
    + the gym). This section is a pure reader of the stash.
 
    REACTIVE + default-OFF: when no prefetch ran (the `SEON_EMBED`
@@ -22,7 +22,7 @@
    `source-char-cap` are constants here — worst case ~7.5k chars.
 
    The section name `:relevant-source` is CORE-RESERVED (it lives in
-   `seon.config/default-ctx-blocks`); an agent that names a section `:relevant-source`
+   `config manifest`); an agent that names a section `:relevant-source`
    overrides this by the composer's override-by-name merge."
   (:require
     [clojure.string :as str]
@@ -97,7 +97,9 @@
     (block title (when (not= title body) body))))
 
 (defn relevant-source-block
-  "The `:relevant-source` section — top retrieval-stash hits for this turn.
+  "DEPRECATED — pull-first idea (relevant-source); see context-rebuild.
+
+   The `:relevant-source` section — top retrieval-stash hits for this turn.
 
    PURE reader of the per-turn retrieval
    stash ([[seon.embed.stash/current-hits]]) — renders the top-`top-k` hits,
@@ -108,7 +110,7 @@
    REACTIVE: returns \"\" when no hits are stashed (default-OFF — no prefetch
    ran — OR the prefetch found nothing), so the composer drops the section and
    the prompt is unchanged. Self-bound; not charged to the agent budget."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [_input]
   (let [hits (stash/current-hits)]
     (if (seq hits)

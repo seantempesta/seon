@@ -4,20 +4,21 @@
    The loop is a FOLD of [[transition]] (the FSM transition table, which lives
    HERE with the loop that folds it) over events derived from the RUN's data.
    A trigger (an inbound message) opens a RUN ([[seon.agent.run/open-run!]]);
-   `run-loop!` then drives turns until a bound fires or a verb closes the run:
+   `run-loop!` then drives turns until a bound fires or a function closes the run:
 
      each iteration re-reads ONE frozen db value (§8a) and `next-event` derives
      the event from it:
-       - run already :closed (a verb ran inside a turn) → :wait / :complete /
-         :terminate (from the run's closed-reason) — the verb owns the close
+       - run already :closed (a function ran inside a turn) → :wait / :complete /
+         :terminate (from the run's closed-reason) — the function owns the close
        - the agent's `:seon.agent/run` points at a DIFFERENT run → :superseded
        - the run carries :paused-at                       → :pause
-       - turn-count ≥ turn-limit (the WORK bound)         → :turn-limit
+       - work ≥ turn-limit (the WORK bound: turns in repl-mode
+         :batch, FORMS in :stream)                        → :turn-limit
        - now > deadline (the WALL-CLOCK bound)            → :deadline
        - else                                             → :turn-ok
      `(transition state event)` gives the next state; the EFFECT of
        :turn-ok is `beat!` + `run-turn!`; the LOOP closes the run on
-       :turn-limit/:deadline/:error (the bounds it owns), while verb closes
+       :turn-limit/:deadline/:error (the bounds it owns), while function closes
        and supersede are already handled (no re-close). The loop ends when the
        state leaves :running.
 
@@ -43,6 +44,7 @@
    requires THIS ns to `install-wake-trigger!`."
   (:require
     [clojure.string :as str]
+    [my.plan.internal :as plan-internal]
     [seon.agent :as agent]
     [seon.agent.ctx :as ctx]
     [seon.agent.run :as run]
@@ -54,6 +56,7 @@
     [seon.eval :as seval]
     [seon.log :as seon-log]
     [seon.repl :as repl]
+    [seon.repl.internal :as repl-internal]
     [seon.schema :as schema]
     [seon.warn :as warn]))
 
@@ -78,7 +81,7 @@
 
 (def transitions
   "The whole FSM as data — `{state {event → next-state}}`. A wake (`:trigger`)
-   opens a run (`:idle`→`:running`); verbs/bounds/fences close it back to
+   opens a run (`:idle`→`:running`); functions/bounds/fences close it back to
    `:idle`; `:pause`/`:resume` hold without killing; `:terminate` is terminal.
    An event absent from a state's row leaves the state unchanged (see
    [[transition]])."
@@ -120,7 +123,7 @@
 ;; ============================================================
 ;; The loop — a fold of [[transition]] over run-derived events. Each
 ;; iteration re-reads the run; :turn-ok runs a turn, the bounds close the
-;; run, verb closes / supersede are already settled.
+;; run, function closes / supersede are already settled.
 ;; ============================================================
 
 (def no-forms-streak-limit
@@ -137,7 +140,7 @@
 (defn- next-event
   "Derive the loop event from the run's data over the FROZEN db value `db`
    (§8a — one basis-t per turn) + the consecutive empty-turn `streak` (no side
-   effects). One of :wait/:complete/:terminate (a verb closed the run inside a
+   effects). One of :wait/:complete/:terminate (a function closed the run inside a
    turn), :superseded (a newer run owns the agent OR the pointer was
    retracted), :pause, :turn-limit, :deadline, :no-forms (the LLM produced zero
    actionable forms for [[no-forms-streak-limit]] turns running), or :turn-ok
@@ -166,7 +169,14 @@
       (:seon.agent.run/paused-at r)
       :pause
 
-      (run/turn-limit-reached? (derive/run-turn-count db run-id)
+      ;; The WORK bound is mode-denominated (repl-milestone rung-0 verdict, 2026-07-10):
+      ;; `:batch` counts turns (one turn = many forms of work); `:stream`
+      ;; counts FORMS (one form per turn — a prose/orientation turn burns
+      ;; nothing, so a green agent is never parked at :turn-limit by its
+      ;; own narration).
+      (run/turn-limit-reached? (if (= :stream (ctx/repl-mode db))
+                                 (derive/run-form-count db run-id)
+                                 (derive/run-turn-count db run-id))
                                (:seon.agent.run/turn-limit r))
       :turn-limit
 
@@ -210,7 +220,7 @@
    `input` carries `:seon.agent/id` / `:seon.agent/llm-fn` / `:seon.agent/compile-state`.
    A fold of [[seon.agent.transition]] over [[next-event]]: :turn-ok beats
    + runs a turn; the loop closes the run on the bounds it owns (:turn-limit /
-   :deadline / :error / :no-forms); verb closes (:wait/:complete/:terminate)
+   :deadline / :error / :no-forms); function closes (:wait/:complete/:terminate)
    and :superseded are already settled (no re-close). The consecutive empty-turn
    STREAK is folded alongside the state: a turn with zero actionable forms
    increments it, a productive turn resets it, and [[no-forms-streak-limit]]
@@ -294,10 +304,21 @@
                   ;; (next-event halts at the cap). eval-count counts ATTEMPTED
                   ;; forms (ok + failed), so a turn whose forms all ERRORED is
                   ;; NOT empty — it yields a next turn that shows the error.
-                  (recur (transition state :turn-ok)
-                         (if (zero? (or (:seon.agent/eval-count r) 0))
-                           (inc streak)
-                           0))))))
+                  (do
+                    ;; stuck×N → frontier re-plan escalation: the turn's evals
+                    ;; just landed, so the derived flag can only TRANSITION
+                    ;; here. maybe-consult! recomputes the wedge query and
+                    ;; fires the once-per-episode planner message (both sides
+                    ;; derived — see my.plan.internal's escalation section);
+                    ;; errors are values, a failed consult never stops the
+                    ;; loop.
+                    (await (await-bounded
+                             "plan/maybe-consult!"
+                             (plan-internal/maybe-consult! {:seon.agent/id id})))
+                    (recur (transition state :turn-ok)
+                           (if (zero? (or (:seon.agent/eval-count r) 0))
+                             (inc streak)
+                             0)))))))
 
           (= :no-forms event)
           (do (log id "halt"
@@ -333,10 +354,10 @@
               (transition state :superseded))
 
           ;; :wait / :complete / :terminate / :pause — the run is already
-          ;; closed/paused by the verb; the loop just stops, recording the
-          ;; FSM state the verb moved to.
+          ;; closed/paused by the function; the loop just stops, recording the
+          ;; FSM state the function moved to.
           :else
-          (do (log id "halt" (str "verb — " (name event)))
+          (do (log id "halt" (str "function — " (name event)))
               (transition state event)))))))
 
 (defn ^:async ^:private renew-current-run!
@@ -572,7 +593,7 @@
                         (fn ^:async eval-scheduled! []
                           (await (seval/eval-batch!
                                    compile-state
-                                   (repl/parse-forms source)
+                                   (repl-internal/parse-forms source)
                                    (ctx/home-ns id)
                                    id turn-id run-id)))))))))))))))
 
@@ -606,7 +627,7 @@
 
 ;; ============================================================
 ;; The ONE ticker — the only active machinery. The DB is passive about
-;; wall-clock: a `deadline` is past or a cron is due in the world, but nothing
+;; wall-clock: a `deadline` is past or a cron is due in the cluster, but nothing
 ;; fires until something CHECKS. This single `setInterval` is that check —
 ;; each tick (1) closes overdue runs ([[seon.agent.run/close-overdue-runs!]],
 ;; the deadline watchdog) then (2) fires due schedules
@@ -628,12 +649,18 @@
   30000)
 
 (defn- run-tick!
-  "ONE ticker pass at `now`: close overdue runs, then fire due schedules
-   (driving each opened run). Returns a Promise; a throw anywhere is caught +
-   logged so the interval survives."
+  "ONE ticker pass at `now`: close overdue runs, close STALE (wedged) runs
+   (the heartbeat watchdog — Piece 2c), then fire due schedules (driving each
+   opened run). Returns a Promise; a throw anywhere is caught + logged so the
+   interval survives. The watchdog rides THIS one ticker — no parallel
+   setInterval; the scan core (`run/stale-run-ids`) is a pure fn of (db, now)."
   [now]
   (-> (js/Promise.resolve
         (run/close-overdue-runs! {:seon.agent/now now}))
+      (.then (fn [_]
+               (run/close-stale-runs!
+                 {:seon.agent/now          now
+                  :seon.agent.run/stale-ms (config/watchdog-stale-ms)})))
       (.then (fn [_]
                (schedule/fire-due-schedules!
                  {:seon.agent/now               now
@@ -677,7 +704,7 @@
 ;; ordered by `:seon.agent.run/started-at`: the wake (trigger + cause-message
 ;; content) and, when the run is closed, its `closed-reason` as the
 ;; stop-reason. A function of the DB; nothing stored that isn't already a run
-;; datom (the inspector's lifecycle split reads the latest row's stop-reason).
+;; datom (the web UI's lifecycle split reads the latest row's stop-reason).
 ;; ============================================================
 
 (schema/register! :seon.agent.loop/activity-request

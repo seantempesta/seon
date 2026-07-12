@@ -1,0 +1,9 @@
+I see the problem — the JSON array I wrote wasn't wrapped in a form, so it was treated as prose and dropped. And the warning shows a READ ERROR from a bare colon. Let me fix this by wrapping the JSON in a proper form.
+
+```
+[
+  {"name": "protein_info.get_sequence_and_3D", "arguments": {"protein_name": "human HbA1c", "model_3d": true}},
+  {"name": "protein_info.get_sequence_and_3D", "arguments": {"protein_name": "human normal hemoglobin", "model_3d": true}},
+  {"name": "protein_info.get_sequence_and_3D", "arguments": {"protein_name": "rat hemoglobin", "model_3d": true}}
+]
+```

@@ -23,6 +23,7 @@
   (:require
     [clojure.string :as str]
     [seon.agent.run :as run]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.schema :as schema]))
@@ -340,24 +341,47 @@
                        '[:find [?id ...]
                          :where
                          [?a :seon.agent/id ?id]
-                         [?a :seon.agent/schedules _]]})]
+                         [?a :seon.agent/schedules _]]})
+        ;; Piece 2d dials read ONCE per pass (config is boot-stable); the pure
+        ;; breaker check takes them as args.
+        breaker-n  (config/schedule-breaker-crash-count)
+        breaker-w  (config/schedule-breaker-window-ms)]
     (loop [[id & more] ids
            fired []]
       (if (nil? id)
         {:seon.agent.schedule/fired fired}
         (let [a-eid (:db/id (db/entity {:seon.db/ref [:seon.agent/id id]}))
-              ;; The DUE schedules' fns at `now` (idle + double-fire gated). A
-              ;; non-empty vector both decides `fire?` AND is what exec-fn! runs;
-              ;; an agent with two schedules due this minute runs BOTH on the one
-              ;; per-minute run.
-              due-fns (when (and a-eid
+              ;; SCHEDULE-WAKE CIRCUIT BREAKER (Piece 2d): with no auto-rewake,
+              ;; a schedule is the ONE autonomous repeat-wake source — so a
+              ;; deterministic wedge + a periodic schedule is a crash loop.
+              ;; Refuse the schedule wake for an agent with ≥N recent :crashed
+              ;; closes (derived, no stored state — the window sliding past
+              ;; re-enables it). Human/agent MESSAGES still wake it (that path
+              ;; is untouched); only THIS schedule gate is gated.
+              tripped? (derive/schedule-breaker-tripped? @db/*conn* id now
+                                                         breaker-n breaker-w)
+              ;; The DUE schedules' fns at `now` (idle + double-fire gated),
+              ;; BEFORE the breaker. A non-empty vector both decides `fire?` AND
+              ;; is what exec-fn! runs; an agent with two schedules due this
+              ;; minute runs BOTH on the one per-minute run.
+              due-raw (when (and a-eid
                                  (derive/agent-idle? @db/*conn* id)
                                  (not (fired-this-minute? a-eid now)))
                         (->> (agent-schedule-pairs id)
                              (filter (fn [[cron _]]
                                        (due? {:seon.agent.schedule/cron cron
                                               :seon.agent.schedule/now  now})))
-                             (mapv second)))]
+                             (mapv second)))
+              ;; Breaker refusal (Piece 2d): visible on an ACTUAL refusal (a
+              ;; schedule WAS due) — not per idle tick.
+              _        (when (and tripped? (seq due-raw))
+                         (js/console.warn
+                           (str "seon.agent.schedule: schedule wake REFUSED for "
+                                id " — circuit breaker tripped (≥" breaker-n
+                                " :crashed closes in the last " breaker-w
+                                "ms). A human/agent message still wakes it; the "
+                                "window sliding past re-enables schedules.")))
+              due-fns  (when-not tripped? due-raw)]
           (if-not (seq due-fns)
             (recur more fired)
             (let [snap (await (run/open-run!

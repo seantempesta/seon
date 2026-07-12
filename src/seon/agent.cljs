@@ -1,5 +1,5 @@
 (ns seon.agent
-  "The agent RECORD + the agent-facing verbs — 'what an agent IS' (the loop
+  "The agent RECORD + the agent-facing functions — 'what an agent IS' (the loop
    that runs it lives in [[seon.agent.loop]], one turn in [[seon.agent.turn]]).
 
    The agent operates as a real REPL: bootstrap-CLJS evaluates its forms,
@@ -41,16 +41,16 @@
      :running    — an open run, not paused (the loop is driving turns)
    A trigger (inbound message / due schedule) opens a RUN
    ([[seon.agent.run/open-run!]]); the loop drives turns until a bound fires
-   or a verb closes the run (see [[seon.agent.loop/run-loop!]]).
+   or a function closes the run (see [[seon.agent.loop/run-loop!]]).
 
    ## Prompt assembly
 
    The LLM ctx is ONE recursive render of the ROOT renderable
    (`seon.agent.ctx/context-root`): `seon.agent.turn/render-prompt` calls
    `(seon.render/render :seon.render/ai ctx (seon.agent.ctx/context-root ctx))`,
-   shared byte-for-byte with the inspector (`seon.agent.inspect/ctx-preview`).
-   The default block set (`seon.config/default-ctx-blocks`) is SEED-COPIED
-   into a new agent's own `:seon.agent/ctx` at creation; render reads that one
+   shared byte-for-byte with the debug view (`seon.agent.debug/ctx-preview`).
+   The manifest-declared block set is copied into a new agent's own
+   `:seon.agent/ctx` at creation; render reads that one
    complete collection priority-sorted — no merge, no separate default set.
    Each block's `:seon.render/ai` slot is a verbatim string or a fn symbol
    resolved late via `seon.eval/lookup-value`.
@@ -65,8 +65,10 @@
     [seon.agent.ctx.namespaces :as ctx-namespaces]
     [seon.agent.ctx.transcript :as ctx-transcript]
     [seon.agent.ctx.warnings :as ctx-warnings]
+    [seon.config :as config]
     [seon.db :as db]
     [seon.derive :as derive]
+    [seon.error :as error]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -74,17 +76,12 @@
 ;; stored on the entity — it's deterministic from the id via `home-ns`.
 ;; ============================================================
 
-;; The literal "root" id (the orchestrator-root base case) is the ONE
-;; agent id exempt from the 14-char minted-id shape — every other agent id
-;; is a `:seon.db/id`. The `:or` bridges to the SAME datahike schema:
-;; the CLJS bridge (seon.db.internal/form->datahike-value-type) walks
-;; `:and` → base, then the `:or` (one mappable type :db.type/string via
-;; :seon.db/id + the unmappable `[:= "root"]`) → :db.type/string; the
-;; `{:seon.db/identity true}` prop still yields :db.unique/identity. Because
-;; the resolved head is `:and` (not `:or`), `edn-encoded-attr?` is FALSE —
-;; "root" stores as a plain string, NOT pr-str'd EDN. Net datahike schema:
-;; byte-identical to before; only Malli validation broadens.
-(schema/register! :seon.agent/id            [:and {:seon.db/identity true} [:or [:= "root"] :seon.db/id]])
+;; `:seon.agent/id` itself is registered in `seon.render` — the
+;; FIRST-loading ns whose load-time schema references it
+;; (`:seon.render/section-request` — this ns loads after seon.render via
+;; the seon.agent.ctx require chain, and register!'s compilability guard
+;; rejects forward references; same precedent as `:seon.ns/name` living
+;; in seon.agent.ctx.render-fns).
 (schema/register! :seon.agent/purpose       :string)
 ;; Subagent → parent (optional; delivery is a thin conditional in
 ;; `complete` — no spawn path sets this yet). References the canonical ref
@@ -169,7 +166,7 @@
 ;; so an eval row can be found in ONE hop). Written by record-eval! from
 ;; `(seon.db/current-agent-id)` when the eval runs inside a `with-agent` scope
 ;; (every agent turn does); ABSENT for evals with no agent scope (boot index,
-;; inspector REPL) — optional, never nil. A ref so `[:seon.agent/id id]` value
+;; web UI REPL) — optional, never nil. A ref so `[:seon.agent/id id]` value
 ;; lookup-refs resolve and `/clear`'s `[?e :seon.eval/agent [:seon.agent/id …]]`
 ;; query matches by eid.
 (schema/register! :seon.eval/agent       :seon.db/ref)
@@ -279,15 +276,21 @@
    [:seon.fn/sym    :seon.fn/sym]
    [:seon.fn/ns     :seon.fn/ns]
    [:seon.fn/source :seon.fn/source]
-   ;; analyzer projections — present when the eval defined a var; null
-   ;; on schema-only registrations. Optional rather than always-present
-   ;; because var-projection returns nil for non-var defs.
+   ;; analyzer projections — the tee stamps all four on every row it
+   ;; mints (strict persistence: only literal `(defn …)` sources get a
+   ;; :seon.fn row). Optional because boot-indexed and legacy rows may
+   ;; omit them.
    [:seon.fn/fn-var?    {:optional true} :seon.fn/fn-var?]
    [:seon.fn/arglists   {:optional true} :seon.fn/arglists]
    [:seon.fn/doc        {:optional true} :seon.fn/doc]
    [:seon.fn/private?   {:optional true} :seon.fn/private?]
    [:seon.fn/spec       {:optional true} :seon.fn/spec]
    [:seon.fn/schema-error {:optional true} :seon.fn/schema-error]
+   ;; The declared read-set (qualified keyword literals in the source,
+   ;; extracted from the already-read form at tee time — C28). ABSENT =
+   ;; no literals OR a pre-structural row (readers regex-fallback).
+   ;; Registered in seon.eval (the tee that writes it).
+   [:seon.fn/read-attrs {:optional true} :seon.fn/read-attrs]
    [:seon.fn/created-at {:optional true} :seon.fn/created-at]])
 
 (schema/register! :seon.schema
@@ -472,15 +475,56 @@
           {:seon.agent/id id}))))
 
 ;; ============================================================
-;; start! — the spawn verb. Alias of create! that ALSO writes the caller as
-;; the new agent's `:seon.agent/parent`. The base case of the spawn recursion
-;; is the orchestrator-root ("root", parentless); every other agent is spawned
-;; by some parent via this verb.
+;; Spawn depth (multi-agent-context Piece 2) — the DEPTH-CAP backstop. The soft
+;; gate (spawn functions only in root's home-requires) keeps ordinary agents from
+;; REACHING start!, but a full-qualified `(seon.agent/start! …)` slips past it;
+;; this is the hard, computed structural rule that refuses it. `spawn-depth`
+;; walks the `:seon.agent/parent` chain to a number; `start!` refuses a caller
+;; already AT the config cap (default 1 — root spawns, a subagent does not).
+;; No name list — a config-dialed number; raise the dial to deepen the tree.
 ;; ============================================================
 
+(defn spawn-depth
+  "Depth of `agent-id` in the spawn tree over `db` — root/parentless = 0.
+
+   Walks `:seon.agent/parent` refs (child = parent + 1) with a visited-set
+   cycle guard: a cycle is a `:core`-fault-worthy invariant break (recorded via
+   `seon.error/record!`, never thrown — the fn returns the depth walked so
+   far). Pure read over the passed db value."
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+                             [:seon.agent/id :seon.agent/id]]
+                  :int]}
+  [db agent-id]
+  (loop [id agent-id depth 0 seen #{}]
+    (if (contains? seen id)
+      (do (error/record!
+            {:seon.error/raw
+             (js/Error. (str "spawn-depth: :seon.agent/parent cycle detected at "
+                             (pr-str id) " — the spawn tree must be acyclic"))
+             :seon.error/fault :core})
+          depth)
+      (let [parent (:seon.agent/id
+                     (:seon.agent/parent
+                       (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]})))]
+        (if (nil? parent)
+          depth
+          (recur parent (inc depth) (conj seen id)))))))
+
+;; ============================================================
+;; start! — the spawn function. Alias of create! that ALSO writes the caller as
+;; the new agent's `:seon.agent/parent`. The base case of the spawn recursion
+;; is the orchestrator-root ("root", parentless); every other agent is spawned
+;; by some parent via this function.
+;; ============================================================
+
+;; NO `:seon.agent/id` slot: under the ONE required-key convention a
+;; DECLARED-optional `:seon.agent/id` is resolved to the CALLING agent at
+;; the eval boundary ("me") — but here the slot meant the CHILD, so every
+;; agent-scoped spawn silently self-upserted instead of minting (live-caught
+;; 2026-07-02). A child id is always minted; a chosen id goes through
+;; `create!` (which REQUIRES the id, so nothing resolves into it).
 (schema/register! ::start-request
   [:map
-   [:seon.agent/id                  {:optional true} :seon.agent/id]
    [:seon.agent/purpose             {:optional true} :any]
    [:seon.agent/default-turn-limit  {:optional true} :any]])
 
@@ -497,14 +541,44 @@
 ;; no-op on arming and just returns the id.
 (defonce !arm-child-fn (atom nil))
 
+(defn ^:async ^:private spawn-child!
+  "The mint→create→parent-write→arm sequence for [[start!]], extracted so the
+   depth-cap refusal short-circuits BEFORE any entity is minted."
+  [purpose default-turn-limit parent-id]
+  (let [child-id  (db/new-id!)
+        res       (await (create! {:seon.agent/id child-id
+                                   :seon.agent/purpose purpose
+                                   :seon.agent/default-turn-limit default-turn-limit}))]
+    (if (false? (:seon.db/ok? res))
+      res
+      (let [penv (when parent-id
+                   (await (db/transact!
+                            {:seon.db/tx-data
+                             [{:seon.agent/id     child-id
+                               :seon.agent/parent [:seon.agent/id parent-id]}]})))]
+        (if (and penv (false? (:seon.db/ok? penv)))
+          (do (js/console.error
+                (str "seon.agent/start! parent-write FAILED for " child-id
+                     " (parent " parent-id "): "
+                     (:seon.error/message (:seon.db/error penv))))
+              penv)
+          ;; ARM the minted child IN-PROCESS (#30) so a message sent right
+          ;; after spawn wakes it. Injected hook (no require cycle); a nil hook
+          ;; (no live loop) leaves the child unarmed — the same shape as the
+          ;; pre-arm world, never an error.
+          (do (when-let [arm @!arm-child-fn]
+                (await (arm child-id)))
+              {:seon.agent/id child-id}))))))
+
 (defn ^:async start!
-  "Spawn a child agent — the capability-gated spawn lifecycle verb.
+  "Spawn a child agent — the capability-gated spawn lifecycle function.
 
    The spawn counterpart of `seon.agent.lifecycle/terminate`. An alias of `create!`
    that ALSO writes `:seon.agent/parent` = the CALLING agent (read from the
    ALS scope via `db/current-agent-id`). That parent write IS the activation
-   of `:seon.agent/parent` — no separate writer. Mints a fresh 14-char child
-   id when `:seon.agent/id` is absent (a child is never \"root\"). The child
+   of `:seon.agent/parent` — no separate writer. ALWAYS mints a fresh
+   14-char child id (a child is never you; a chosen id goes through
+   `create!`). The child
    is created IDLE: it does no work until it receives a message (which opens
    its run #1).
 
@@ -533,32 +607,22 @@
         then `(message/agent \"<that-id>\" \"<the task>\")` in the NEXT form.
    Never invent/guess a child id — read it back."
   {:malli/schema [:=> [:cat ::start-request] ::create-response]}
-  [{:seon.agent/keys [id purpose default-turn-limit]}]
-  (let [child-id  (or id (db/new-id!))
-        parent-id (db/current-agent-id)
-        res       (await (create! {:seon.agent/id child-id
-                                   :seon.agent/purpose purpose
-                                   :seon.agent/default-turn-limit default-turn-limit}))]
-    (if (false? (:seon.db/ok? res))
-      res
-      (let [penv (when parent-id
-                   (await (db/transact!
-                            {:seon.db/tx-data
-                             [{:seon.agent/id     child-id
-                               :seon.agent/parent [:seon.agent/id parent-id]}]})))]
-        (if (and penv (false? (:seon.db/ok? penv)))
-          (do (js/console.error
-                (str "seon.agent/start! parent-write FAILED for " child-id
-                     " (parent " parent-id "): "
-                     (:seon.error/message (:seon.db/error penv))))
-              penv)
-          ;; ARM the minted child IN-PROCESS (#30) so a message sent right
-          ;; after spawn wakes it. Injected hook (no require cycle); a nil hook
-          ;; (no live loop) leaves the child unarmed — the same shape as the
-          ;; pre-arm world, never an error.
-          (do (when-let [arm @!arm-child-fn]
-                (await (arm child-id)))
-              {:seon.agent/id child-id}))))))
+  [{:seon.agent/keys [purpose default-turn-limit]}]
+  (let [parent-id   (db/current-agent-id)
+        cap         (config/spawn-depth-cap)
+        caller-depth (when parent-id (spawn-depth @db/*conn* parent-id))]
+    (if (and caller-depth (>= caller-depth cap))
+      ;; DEPTH-CAP BACKSTOP (Piece 2): the caller is already at/over the cap —
+      ;; refuse as data (never a throw), mint no child. A subagent may not spawn
+      ;; subagents; it does the work itself or reports back to its parent.
+      {:seon.db/ok? false
+       :seon.db/error
+       {:seon.error/message
+        (str "start!: refused — you (" (pr-str parent-id) ") are at spawn "
+             "depth " caller-depth " (cap " cap "); subagents may not spawn "
+             "subagents. Do the work yourself, or report back to your parent "
+             "and let it delegate.")}}
+      (spawn-child! purpose default-turn-limit parent-id))))
 
 ;; ============================================================
 ;; delegate! — the one-form spawn→message combinator. `start!` is `^:async`,
@@ -568,10 +632,11 @@
 ;; the ergonomic path agents reach for when delegating a task to a worker.
 ;; ============================================================
 
+;; NO `:seon.agent/id` slot — same reason as [[::start-request]]: the
+;; declared-optional key resolves to the CALLER, and the child is never you.
 (schema/register! ::delegate-request
   [:map
    [:seon.agent.message/content     :string]
-   [:seon.agent/id                  {:optional true} :seon.agent/id]
    [:seon.agent/purpose             {:optional true} :any]
    [:seon.agent/default-turn-limit  {:optional true} :any]])
 
@@ -592,18 +657,17 @@
 
    `:seon.agent/purpose` is the child's stated reason-for-being (shown to your
    human verbatim); `:seon.agent.message/content` is the actual task you hand
-   it. `:seon.agent/id` (optional) pins a specific child id instead of minting
-   one; `:seon.agent/default-turn-limit` (optional) seeds the child's work
+   it. The child id is always minted (spawn a chosen id via `create!`);
+   `:seon.agent/default-turn-limit` (optional) seeds the child's work
    bound. RESOLVES to `{:seon.agent/id child-id}` on success — the id you
    address for any follow-up. On a failed SPAWN the start! error envelope comes
    back as-is; on a spawn-ok-but-message-failed the message error envelope plus
    `:seon.agent/id child-id` (the child exists — retry the message). Errors are
    values; branch on `:seon.db/ok?`."
   {:malli/schema [:=> [:cat ::delegate-request] ::create-response]}
-  [{:seon.agent/keys [id purpose default-turn-limit]
+  [{:seon.agent/keys [purpose default-turn-limit]
     content :seon.agent.message/content}]
   (let [spawn-args (cond-> {}
-                     (some? id)                 (assoc :seon.agent/id id)
                      (some? purpose)            (assoc :seon.agent/purpose purpose)
                      (some? default-turn-limit) (assoc :seon.agent/default-turn-limit default-turn-limit))
         res        (await (start! spawn-args))]
@@ -675,7 +739,7 @@
 ;; ============================================================
 ;; message! lives in [[seon.agent.message]] (the keyword namespace matches
 ;; the code namespace). Re-exported here so `seon.agent/message!` resolves;
-;; the agent-facing messaging verbs are `seon.agent.message/user` + `/agent`
+;; the agent-facing messaging functions are `seon.agent.message/user` + `/agent`
 ;; via the `message/` alias. Same caveat as the ctx aliases above — a def
 ;; alias captures the fn value at load time (pre-instrumentation); call
 ;; `seon.agent.message/*` directly for the validated entry point.
@@ -685,25 +749,25 @@
 (def user-ref msg/user-ref)
 
 ;; ============================================================
-;; Lifecycle verbs — wait / complete / pause / resume / terminate — live in
+;; Lifecycle functions — wait / complete / pause / resume / terminate — live in
 ;; [[seon.agent.lifecycle]] (a lean, whitelisted teaching ns). They are the
-;; agent-facing run-lifecycle verbs; each MUTATES the agent's RUN (close /
+;; agent-facing run-lifecycle functions; each MUTATES the agent's RUN (close /
 ;; pause / set terminated-at), and the derived state follows. The agent home
 ;; ns `:refer`s them directly.
 ;; ============================================================
 
 ;; ============================================================
 ;; The agent's ctx-LAYOUT surface is `seon.agent.ctx/install!` /
-;; `seon.agent.ctx/remove!` — the scope-aware override + seed verbs over the
+;; `seon.agent.ctx/remove!` — the scope-aware override + seed functions over the
 ;; agent's own `:seon.agent/ctx` block set. The block fns + the render
 ;; pipeline live in seon.agent.ctx (read API re-exported above).
 ;; ============================================================
 
 ;; ============================================================
-;; Self-context verbs — the validated path onto YOUR OWN entity. Errors are
+;; Self-context functions — the validated path onto YOUR OWN entity. Errors are
 ;; values; default scope = the calling agent; explicit :seon.agent/id allowed
 ;; (a human or another agent can configure an agent — it is all just
-;; transacts; the verb is the validated path).
+;; transacts; the function is the validated path).
 ;; ============================================================
 
 ;; Shared response shapes for set-purpose! (errors are values).
@@ -728,7 +792,7 @@
    tutorial demonstrates."
   {:malli/schema [:=> [:cat [:map
                              [:seon.render/ai :string]
-                             [:seon.agent/id {:optional true} :string]]]
+                             [:seon.agent/id {:optional true} :seon.agent/id]]]
                   ::section-response]}
   [{text :seon.render/ai id :seon.agent/id}]
   (let [id (or id (db/current-agent-id))]

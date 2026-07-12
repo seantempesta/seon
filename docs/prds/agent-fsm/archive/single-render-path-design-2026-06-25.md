@@ -88,7 +88,7 @@ Register near `ctx.cljs:1557` (reuse inspector keys `:seon.render/text` /
    [:seon.render/status [:enum :ok :empty :failed]]
    [:seon.render/text :string]        ; post-budget section ai (unbracketed)
    [:seon.render/bracketed :string]   ; exact bytes joined into the prompt
-   [:seon.render/hiccup [:or :nil :seon.render.live-tile/hiccup]]]
+   [:seon.render/hiccup [:or :nil :seon.render.live-canvas/hiccup]]]
 
 :seon.render/context
   [:map

@@ -8,8 +8,8 @@
      `defs-since` + `var-projection` to build `:seon.fn` entities.
    - Phase C item 11: `seed-from-source!` — walks the analyzer's
      known seon.* nses at boot.
-   - Phase D item 15: bulk-load resume — uses `ns-deps` for
-     topo-sort.
+   - Phase D item 15: bulk-load resume — topo-sorts over the stored
+     `:seon.ns/require-edges` the tee writes from [[ns-require-edges]].
 
    `compile-state` is the CLJS-bootstrap inner atom (the one cljs.js
    threads through `eval-str`). The seon process holds it boxed in
@@ -21,8 +21,7 @@
    both throw `TypeError: undefined`. We read
    `(:cljs.analyzer/namespaces @compile-state)` directly. The
    research note's reference impl is wrong on that point."
-  (:require [clojure.set :as set]
-            [malli.core :as m]
+  (:require [malli.core :as m]
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
@@ -43,22 +42,24 @@
 ;; Output of `defs-since` — one entry per newly-added OR re-defined def.
 (schema/register! ::new-def
                   [:map
-                   [:ns :symbol]
-                   [:sym :symbol]
-                   [:var-map [:map-of :any :any]]])
+                   [::ns :symbol]
+                   [::sym :symbol]
+                   [::var-map [:map-of :any :any]]])
 
 ;; Output of `var-projection`. Matches `:seon.fn/*` attrs per v1.md §2.2.
+;; Owner-ns keys (C34, C33-residue) — this ns produces the map, so the
+;; keys speak `:seon.analyzer-info/*` like every internal envelope.
 (schema/register! ::var-projection
                   [:map
-                   [:sym :string]
-                   [:fn-var? :boolean]
-                   [:arglists :string]
-                   [:doc :string]
-                   [:private? :boolean]
-                   ;; `:spec` = `(pr-str (m/form <:malli/schema>))` when
+                   [::sym :string]
+                   [::fn-var? :boolean]
+                   [::arglists :string]
+                   [::doc :string]
+                   [::private? :boolean]
+                   ;; `::spec` = `(pr-str (m/form <:malli/schema>))` when
                    ;; present and parseable; ABSENT = unspecced (or the
                    ;; schema failed to parse — caller stamps schema-error).
-                   [:spec {:optional true} :string]])
+                   [::spec {:optional true} :string]])
 
 ;;; ---------------------------------------------------------------------------
 ;;; Internals
@@ -118,7 +119,7 @@
                              [sym (var-digest var-map)]))])))
 
 (defn defs-since
-  "Seq of `{:ns :sym :var-map}` for defs changed since a snapshot.
+  "Seq of `{::ns ::sym ::var-map}` maps for defs changed since a snapshot.
 
    Every def present now whose digest
    differs from `before-snapshot` — i.e. brand-new defs AND re-defs
@@ -156,7 +157,7 @@
                      (not (true? (:declared var-map)))
                      (not (true? (:seon.eval/result-var? var-map)))
                      (not= before-digest now-digest))]
-      {:ns ns-sym :sym sym :var-map var-map})))
+      {::ns ns-sym ::sym sym ::var-map var-map})))
 
 (defn remove-phantom-defs!
   "Failure-path counterpart to [[defs-since]].
@@ -203,53 +204,86 @@
              (fn [defs] (apply dissoc defs phantoms))))
     phantoms))
 
-(defn- raw-ns-deps
-  "The UNFILTERED set of ns-NAME symbols `ns-sym` depends on, read
-   straight from the analyzer. Composes the VALUES of the analyzer's
-   `:requires` + `:uses` + `:require-macros` maps (each `{alias→ns,
-   ns→ns}`, so `(vals …)` yields ns names; aliases are values, not
-   keys, and drop out by taking vals — LIVE-verified 2026-06-17, see
-   phase0-live-verification). Self is removed. `:require-macros` is
-   included because macro-only deps don't appear in `:requires` yet
-   still load first. Returns `#{}` for an unknown / never-eval'd ns.
-   Shared raw extraction for [[ns-deps]] (filtered) and
-   [[ns-requires]] (unfiltered, keyword-ized)."
+;; ---------------------------------------------------------------------------
+;; Reified require edges (M4/C28 structural store — code-as-data: the
+;; analyzer already produced the alias/refer facts at eval time; store
+;; them on the `:seon.ns` row instead of re-parsing `:seon.ns/source`
+;; text at render time). One edge per required ns, carrying the `:as`
+;; alias and `:refer` set when present. The attr registrations live HERE
+;; (this ns loads before seon.eval → seon.render.sci → seon.client, so
+;; every reader/writer sees them registered on a cold boot).
+;; ---------------------------------------------------------------------------
+
+(schema/register! :seon.ns.require/target :keyword)
+(schema/register! :seon.ns.require/alias  :symbol)
+(schema/register! :seon.ns.require/refers [:set :symbol])
+;; `:refer :all` — never produced by the analyzer (CLJS has no
+;; `:refer :all`); only the SOURCE-parse path
+;; (seon.eval/require-edges-from-source, over legacy/handwritten ns
+;; text) can yield it. Registered so a parsed edge round-trips.
+(schema/register! :seon.ns.require/refer-all? :boolean)
+;; `[x :as-alias y]` — a READER alias for qualified keywords with NO
+;; load of the target (Clojure 1.11 semantics; the analyzer stores it
+;; in the ns entry's `:as-aliases`, never `:requires`). The flag keeps
+;; the edge distinguishable so [[seon.eval/synthesized-ns-head]] emits
+;; `:as-alias` back (a plain `:as` would LOAD the target on resume) and
+;; the SCI env never treats the target as a loaded ns.
+(schema/register! :seon.ns.require/as-alias? :boolean)
+
+(schema/register! ::require-edge
+                  [:map
+                   [:seon.ns.require/target :seon.ns.require/target]
+                   [:seon.ns.require/alias {:optional true} :seon.ns.require/alias]
+                   [:seon.ns.require/refers {:optional true} :seon.ns.require/refers]
+                   [:seon.ns.require/refer-all? {:optional true} :seon.ns.require/refer-all?]
+                   [:seon.ns.require/as-alias? {:optional true} :seon.ns.require/as-alias?]])
+(schema/register! ::require-edges [:set ::require-edge])
+
+(defn ns-require-edges
+  "The reified require-edge set for `ns-sym`, read from the analyzer.
+
+   One `::require-edge` map per RUNTIME-required ns (the analyzer's
+   `:requires` vals ∪ `:uses` vals, self excluded — macro-only
+   `:require-macros` deps are NOT edges; the SCI env rebuild has no
+   macro surface, and resume's load-fn satisfies transitive requires
+   on demand regardless of topo edges). The `:as` alias is the `:requires` KEY mapping to the
+   target where key ≠ target; the `:refer` set is the `:uses` keys
+   grouped by target. `#{}` for an unknown / never-eval'd ns. The ns
+   entry's `:as-aliases` (the `:as-alias` reader aliases — no load)
+   each yield an edge flagged `:seon.ns.require/as-alias? true`, unless
+   the same target is also genuinely required. This is
+   what the tee stores as `:seon.ns/require-edges` (component rows) so
+   `seon.render.sci` rebuilds the lexical env from datoms, never from a
+   reader over `:seon.ns/source` text (M4)."
+  {:malli/schema [:=> [:cat ::compile-state :symbol] ::require-edges]}
   [compile-state ns-sym]
-  (let [ns-info (get-in @compile-state [:cljs.analyzer/namespaces ns-sym])]
-    (-> (set (concat (vals (:requires ns-info))
-                     (vals (:uses ns-info))
-                     (vals (:require-macros ns-info))))
-        (disj ns-sym))))
-
-(defn ns-deps
-  "Set of agent-ns syms `ns-sym` depends on.
-
-   Intersected with
-   `known-ns-set` (so cljs.core / clojure.* / bootstrap nses drop
-   out). Reads the analyzer's `:requires` + `:uses` + `:require-macros`
-   maps directly. Excludes self. Used by Phase D bulk-load resume for
-   topo-sort. `:require-macros` matters because macro-only deps
-   (e.g. `(:require-macros [foo.macros :as fm])`) don't show up in
-   `:requires` but DO need to load first on resume."
-  {:malli/schema [:=> [:cat ::compile-state :symbol [:set :symbol]] [:set :symbol]]}
-  [compile-state ns-sym known-ns-set]
-  (set/intersection (raw-ns-deps compile-state ns-sym) known-ns-set))
-
-(defn ns-requires
-  "The UNFILTERED dependency-edge set for `ns-sym`, as keywords.
-
-   Read from the analyzer (no source parsing). This is what the tee
-   stores as `:seon.ns/requires` so the DB-layer load can topo-sort by
-   requires (the one unblocking fix — see the db-is-the-running-system
-   PRD). Unlike [[ns-deps]] it is NOT intersected with a known-set: the
-   full required-ns set is stored, and the load-time topo intersects
-   with the DB-layer ns set. Excludes self. Returns `#{}` for an
-   unknown / never-eval'd ns. Aliases are dropped (vals, not keys) —
-   reconstitution rebuilds the alias-bearing `(ns …)` form from
-   `:seon.ns/source` (Phase 2)."
-  {:malli/schema [:=> [:cat ::compile-state :symbol] [:set :keyword]]}
-  [compile-state ns-sym]
-  (into #{} (map #(keyword (str %))) (raw-ns-deps compile-state ns-sym)))
+  (let [ns-info    (get-in @compile-state [:cljs.analyzer/namespaces ns-sym])
+        reqs       (:requires ns-info)
+        uses       (:uses ns-info)
+        as-aliases (:as-aliases ns-info)
+        targets    (-> (set (concat (vals reqs) (vals uses)))
+                       (disj ns-sym))
+        alias-of   (into {}
+                         (keep (fn [[k v]] (when (not= k v) [v k])))
+                         reqs)
+        refers-of  (reduce-kv (fn [m sym target]
+                                (update m target (fnil conj #{}) sym))
+                              {} uses)]
+    (into (into #{}
+                (map (fn [t]
+                       (cond-> {:seon.ns.require/target (keyword (str t))}
+                         (alias-of t)  (assoc :seon.ns.require/alias (alias-of t))
+                         (refers-of t) (assoc :seon.ns.require/refers (refers-of t)))))
+                targets)
+          ;; `:as-alias` reader aliases — targets NOT also required stay
+          ;; load-free edges; a target that IS required already carries
+          ;; its real edge above (the reader alias adds nothing).
+          (keep (fn [[a t]]
+                  (when-not (contains? targets t)
+                    {:seon.ns.require/target    (keyword (str t))
+                     :seon.ns.require/alias     a
+                     :seon.ns.require/as-alias? true})))
+          (or as-aliases {}))))
 
 (defn var-projection
   "Persistable subset of an analyzer var-map for `:seon.fn` storage.
@@ -265,8 +299,7 @@
    shapes — callers that read-string the value back get a usable
    arglists structure either way."
   {:malli/schema [:=> [:cat [:map-of :any :any]] ::var-projection]}
-  [{:keys [name fn-var arglists meta] :as var-map}]
-  {:pre [(map? var-map)]}
+  [{:keys [name fn-var arglists meta]}]
   (let [al (if (and (seq? arglists) (= 'quote (first arglists)))
              (second arglists)
              arglists)
@@ -279,9 +312,9 @@
         spec        (when (some? schema-meta)
                       (try (-> schema-meta m/schema m/form pr-str)
                            (catch :default _ nil)))]
-    (cond-> {:sym       (str name)
-             :fn-var?   (boolean fn-var)
-             :arglists  (pr-str al)
-             :doc       (or (:doc meta) "")
-             :private?  (boolean (:private meta))}
-      (some? spec) (assoc :spec spec))))
+    (cond-> {::sym       (str name)
+             ::fn-var?   (boolean fn-var)
+             ::arglists  (pr-str al)
+             ::doc       (or (:doc meta) "")
+             ::private?  (boolean (:private meta))}
+      (some? spec) (assoc ::spec spec))))

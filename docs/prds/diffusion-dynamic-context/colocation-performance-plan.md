@@ -188,7 +188,7 @@ swap with ZERO handler changes. Do not reach for HTTP.
   CLJS-flavored code, so fidelity is load-bearing — a faster-but-wrong eval poisons
   the control signal. And 2.6 ms is ~1 % of a forward, so its speed is irrelevant.
   - **A cheaper parse-only fast path already exists** and IS worth using: when a
-    checkpoint only needs "is the canvas well-formed" (the per-step renoise
+    checkpoint only needs "is the code-buffer well-formed" (the per-step renoise
     signal), call the bb **parse** server (0.05 ms), NOT eval. Reserve the 2.6 ms
     eval for the sparser "does it RUN" checkpoint. This is the natural
     parse-per-step / eval-at-checkpoint split (`colocated-oracle-package-design
@@ -208,13 +208,13 @@ Both are about removing round-trips, not making the computation faster.
 - **Parse (0.05 ms):** run it serially between steps. It is 0.02 % of a forward —
   pipelining buys nothing and adds async complexity. Keep it inline.
 - **Eval (2.6 ms) + retrieve:** these CAN overlap the next GPU forward. The denoise
-  loop is `forward → (oracle) → forward`; the eval verdict for step N's canvas is
+  loop is `forward → (oracle) → forward`; the eval verdict for step N's code-buffer is
   only needed to decide step N+1's renoise. So FIRE the eval async right after step
   N's forward, let it compute (~2.6 ms) WHILE step N+1's forward is already running
   (~130-140 ms), and consume the verdict before step N+1 completes. The eval thus hides
   entirely under the next forward — its 2.6 ms becomes free.
 - **Is the loop serial or pipelineable?** The *generate* steps are serial (each
-  forward depends on the prior canvas). But the *oracle* call for step N is
+  forward depends on the prior code-buffer). But the *oracle* call for step N is
   independent of step N+1's forward START — only its RENOISE decision depends on the
   oracle. So: pipeline = launch the oracle async, begin the next forward
   immediately, apply renoise when the verdict lands. This is a clean overlap because
@@ -329,7 +329,7 @@ driver pays).
 
 - **Win condition:** co-located persistent per-call oracle latency ≤ 0.2 ms (parse)
   / ≤ 5 ms (eval), AND ≥ 100× faster than the network-driver path on the same
-  canvases.
+  code-buffers.
 - **GPU action:** drive `denoise_to_step` with the in-worker `_oracle()` wired
   (image), have the worker time each oracle call and return `oracle_ms` per
   checkpoint in the result; compare against a network-driver run on the same prompt.
@@ -464,7 +464,7 @@ harness.
 |---|---|---|---|---|
 | **O1** | Build + push the **co-location image** (bb parse layer + node eval layer + minimal `.cljc` + `oracle_shim.py`). Stage the 3 files into the build context (§6 step 1), append the §3 Dockerfile layer for bb AND a sibling layer for node + `out/worker-oracle-eval/main.js` + `out/bootstrap/`. | `tmp/flash-diffgemma/{Dockerfile,build-image.sh}`, `bin/oracle-server`, `src/seon/repl/internal.cljc`, `out/worker-oracle-eval/main.js`, `out/bootstrap/` | build-time oracle gate passes (`… \| grep -q '"forms":1'`); `docker run` drives BOTH `bb …oracle-server` (parse) and `node …oracle-eval.js --serve` (eval) inside the image (image-build §4b) | A, B, C |
 | **O2 ✅** | Harden `_oracle(kind)` in the worker warm-up: cache BOTH servers; eval **ready-wait** on the `"ready\n"` stderr sentinel (`worker_eval.cljs:381`); `p.poll()` **liveness respawn**; node **V8 warmup eval** at boot. Update `oracle_shim.py` with `ready_after()` + a liveness flag. | `tmp/flash-diffgemma/gpu_worker.py` (`_oracle`), `oracle_shim.py` | DONE — `_oracle(kind)` caches BOTH (`oracle_parse`/`oracle_eval`); eval `ready_after()` blocks on the stderr sentinel; `warmup()` primes the hot path; dead-child lazy respawn in `Oracle._ensure`. `refine_loop_dryrun.py`: ready-wait blocked 191 ms then warm eval 0.06 ms; kill→respawn (new pid); shim self-test still green | A, B |
-| **O3 ✅** | **In-worker refine loop** — a `mode:"refine_loop"` in `gpu_worker.py`: denoise_to_step → local `_oracle("parse")` → resume_renoise → local re-parse, tight Python loop, persistent shim (NOT `subprocess.run`). Return per-iteration `errors_before/after`, `tok_per_s`, `oracle_ms`. This is the §3-item-1 fix. | `tmp/flash-diffgemma/gpu_worker.py` | DONE — `mode:"refine_loop"` + `_denoise_canvas` helper, bounded by `max_iters`, short-circuits on a clean checkpoint. `refine_loop_dryrun.py` (mock GPU forward, REAL bb oracle over the persistent pipe): ONE persistent server (same pid) every iteration, **0.045 ms** warm vs **25.9 ms** spawn-per-call (~572×) | B |
+| **O3 ✅** | **In-worker refine loop** — a `mode:"refine_loop"` in `gpu_worker.py`: denoise_to_step → local `_oracle("parse")` → resume_renoise → local re-parse, tight Python loop, persistent shim (NOT `subprocess.run`). Return per-iteration `errors_before/after`, `tok_per_s`, `oracle_ms`. This is the §3-item-1 fix. | `tmp/flash-diffgemma/gpu_worker.py` | DONE — `mode:"refine_loop"` + `_denoise_code-buffer` helper, bounded by `max_iters`, short-circuits on a clean checkpoint. `refine_loop_dryrun.py` (mock GPU forward, REAL bb oracle over the persistent pipe): ONE persistent server (same pid) every iteration, **0.045 ms** warm vs **25.9 ms** spawn-per-call (~572×) | B |
 | **O4 ✅** | Keep `closed_loop.py` (network driver) as the **baseline arm** for B's before-number — unchanged, just confirm it still runs as the contrast. | `tmp/flash-diffgemma/closed_loop.py` | DONE — runs offline against a mocked endpoint (denoise→parse→renoise→re-parse, real bb oracle), import-safe; docstring marks it "NETWORK BASELINE — the slow spawn-per-call contrast, not the production path (see O3)" | B |
 | **O5 ✅** | Worker returns **`oracle_ms`** (per-checkpoint oracle timing) in every refine/denoise result, so A measures the in-worker round-trip directly. | `tmp/flash-diffgemma/gpu_worker.py` | DONE — every `refine_loop` iteration carries `oracle_ms` (per-checkpoint pipe round-trip), plus a top-level `oracle_ms_mean`; dry-run shows warm parse ~0.05–0.18 ms (the first call folds the bb classpath load) | A |
 | **O6 ✅** | **entropy_bound sweep** experiment in `battery.py` (grid loop, score each through the local oracle, scorecard line per setting). | `tmp/flash-diffgemma/battery.py` | DONE — `exp9`/alias `D`: sweeps `entropy_bound` (dflt grid 0.05/0.1/0.2/0.3/0.5) × optional `max_denoising_steps`, captures `tok_per_s` + `tokens_per_forward` (list→mean) + `faithful_rate` per point, one scorecard line each, finds the knee. `battery.py D --dry-run` prints the grid plan; `--param entropy_bound=… steps=…` tunable; `--selfcheck` green | D |
@@ -490,7 +490,7 @@ correctness depends on.
 - `src/seon/worker_eval.cljs:381` — the node eval `serve!` ready sentinel + the
   strictly-sequential chained eval; ns docstring — why cljs.js (faithful CLJS).
 - `tmp/flash-diffgemma/gpu_worker.py:31,50` — `_CACHE` + `_load` (where `_oracle()`
-  caches beside the model); `:818,:862` — the `build_offset_map` canvas spans the
+  caches beside the model); `:818,:862` — the `build_offset_map` code-buffer spans the
   parse result maps to renoise positions.
 - [[research/colocated-oracle-package-design-2026-06-28]] — the oracle package
   shape, bb-vs-node split, `{op,…}` wire, eval ladder (the architecture this

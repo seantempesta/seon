@@ -3,7 +3,7 @@ type: issue
 status: open
 severity: cleanup
 milestone: M4
-tags: [issue, web, architecture, jvm-track, paused]
+tags: [issue, web, architecture]
 ---
 # Dead Code: web/namespace.clj and ui/viewer.clj
 

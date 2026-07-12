@@ -22,4 +22,4 @@ None.
 ## Related
 
 - Components: [[components/system-lifecycle]]
-- PRDs: [[prds/stability-improvements/prd]], [[prds/startup-reliability/prd]]
+- PRDs: `prds/stability-improvements/prd`, `prds/startup-reliability/prd`

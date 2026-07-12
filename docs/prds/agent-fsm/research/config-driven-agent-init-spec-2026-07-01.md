@@ -77,7 +77,7 @@ context TODAY, and what the ONE manifest subsumes.
 | 2 | `seed-default-ctx!` | `seon.agent.ctx` 1879-1895 | `install!` with `(resolve-loadout (default-seed-blocks) (agent-role id) (load-manifest))`. The one place config shapes the seed. Called from `seon.agent/create!` (mint only). |
 | 3 | `resolve-loadout` | `seon.config` 501-538 | Per-role loadout: always-on skill bodies, extra `:blocks`, `:removes`, `:strategy :replace`. |
 | 4 | `namespaces-policy` | `seon.config` 195-244 + `seon.agent.ctx.namespaces` 117-234 | Which nses render FULL — `:always` ∪ current-ns ∪ required-full ∪ third-party ∪ live-DB override. |
-| 5 | hardcoded ROOT branch | `seon.client` 2367-2379 | `(when (= "root" aid) …)` transacts `:seon.render.live-tile/content 'seon.render.system/system-view`. Carries "removed when Core finishes the config + data loader". THE branch to rip. |
+| 5 | hardcoded ROOT branch | `seon.client` 2367-2379 | `(when (= "root" aid) …)` transacts `:seon.render.live-canvas/content 'seon.render.system/system-view`. Carries "removed when Core finishes the config + data loader". THE branch to rip. |
 
 Supporting hardcodes: `home-ns-require-specs` (`seon.eval` 1274-1291),
 `stable-priority-max` const (`seon.agent.ctx` 1946), the `SEON_*` tuning env family
@@ -123,13 +123,13 @@ and root's tile is patched AFTER the loop by the hardcoded branch. v3 makes
 | Surface | Current default | Source |
 |---------|-----------------|--------|
 | blocks | the 11-block list + inline priorities | `default-seed-blocks` |
-| namespaces render-set | `[my.kb my.data my.ui my.tile seon.agent.todo seon.agent.message seon.agent.lifecycle]` | `default-namespaces-policy` |
+| namespaces render-set | `[my.kb my.data my.ui my.canvas seon.agent.todo seon.agent.message seon.agent.lifecycle]` | `default-namespaces-policy` |
 | current-ns | rendered full | `default-namespaces-policy` |
 | skills always-on | `[:repl]` | manifest `:skills/load` |
 | soul/agents | present-file→block | `default-seed-blocks` filterv |
 | transcript clip | `:none` (OFF) | transcript.cljs 544 |
 | home requires | the 6-spec list | `home-ns-require-specs` |
-| toolkit | `my.data`/`my.ui`/`my.tile`/`my.kb` | client requires + `:always` |
+| toolkit | `my.data`/`my.ui`/`my.canvas`/`my.kb` | client requires + `:always` |
 | root canvas | `system-view` | hardcoded client.cljs:2374 |
 | inventory block | DISABLED (omitted) | default-seed-blocks comment |
 | eval-result cap | fixed 16384, NO decay | `format-eval-row` (ctx.cljs 592) |
@@ -161,7 +161,7 @@ AGENT entity  ─┬─ agent-level config attrs (scalar / presence-set on the a
                     │                  :seon.agent.ctx.transcript/tiers        [<tier-ent> …]  ← reified refs
                     │                  :seon.agent.ctx.transcript/result-decay [<level-ent> …]} ← reified refs
                     └─ BLOCK entity  {:seon.agent.ctx/name :live-tile
-                                       :seon.render.live-tile/content 'system-view}
+                                       :seon.render.live-canvas/content 'system-view}
 ```
 
 - **Agent-level config** (model, turn-limit, home-requires, toolkit, capabilities,
@@ -173,7 +173,7 @@ AGENT entity  ─┬─ agent-level config attrs (scalar / presence-set on the a
 - **Block identity = `:seon.agent.ctx/name`** — an upsert/order handle (decision
   17), NEVER a `:kind`. What a block DOES follows from its attributes: a block
   carrying `:seon.agent.ctx.namespaces/full-source` is what the namespaces renderer
-  picks up; a block carrying `:seon.render.live-tile/content` is the canvas. The
+  picks up; a block carrying `:seon.render.live-canvas/content` is the canvas. The
   renderer already dispatches on `:seon.render/ai` (a symbol slot), not on name —
   name is purely identity+order. **No `:kind` sneaks in.**
 
@@ -266,7 +266,7 @@ global. Registered IN `seon.ai`, reusing the existing global-row value shapes.
 
 ;; toolkit: a flat keyword SET → cardinality-many presence attr (decision 22a).
 (schema/register! ::toolkit
-  [:vector {:default [:my.ui :my.data :my.tile :my.kb]} :keyword])
+  [:vector {:default [:my.ui :my.data :my.canvas :my.kb]} :keyword])
 ```
 
 #### 2.1.3 `seon.agent.run` — run bounds
@@ -472,7 +472,7 @@ so a real manifest writes only what DIFFERS. Shown near-full for visibility:
  {;; ── agent-level scalars / presence-sets ──
   :seon.ai/agent-provider          :inherit
   :seon.agent.run/default-turn-limit 20
-  :seon.eval/toolkit               [:my.ui :my.data :my.tile :my.kb]
+  :seon.eval/toolkit               [:my.ui :my.data :my.canvas :my.kb]
   :seon.eval/home-requires         [[seon.agent.message :as message]
                                     [seon.agent :as agent]
                                     [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
@@ -490,12 +490,12 @@ so a real manifest writes only what DIFFERS. Shown near-full for visibility:
    {:seon.agent.ctx/name :namespaces :seon.agent.ctx/priority 20
     :seon.render/ai 'seon.agent.ctx.namespaces/namespaces-block
     ;; presence-sets (namespace-display lane owns the shape)
-    :seon.agent.ctx.namespaces/full-source [:my.kb :my.data :my.ui :my.tile
+    :seon.agent.ctx.namespaces/full-source [:my.kb :my.data :my.ui :my.canvas
                                             :seon.agent.todo :seon.agent.message :seon.agent.lifecycle]
     :seon.agent.ctx.namespaces/current-full? true}
    {:seon.agent.ctx/name :live-tile :seon.agent.ctx/priority 35
-    :seon.render/ai 'seon.agent.ctx.live-tile/live-tile-block
-    :seon.render.live-tile/content :none}
+    :seon.render/ai 'seon.agent.ctx.live-canvas/live-tile-block
+    :seon.render.live-canvas/content :none}
    {:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
     :seon.render/ai 'seon.agent.ctx.transcript/transcript-block
     :seon.agent.ctx.transcript/turns-retained 8
@@ -509,7 +509,7 @@ so a real manifest writes only what DIFFERS. Shown near-full for visibility:
  :seon.config/root-context
  {:seon.agent/ctx
   [{:seon.agent.ctx/name :live-tile
-    :seon.render.live-tile/content seon.render.system/system-view}]}}   ; upsert-by-name onto the base
+    :seon.render.live-canvas/content seon.render.system/system-view}]}}   ; upsert-by-name onto the base
 ```
 
 Root-context is a SPARSE override merged over agent-context (decision 11); the
@@ -539,7 +539,7 @@ NO `#profile`:
 {:seon.config/loadouts
  #profile {:default [{:seon.config/role         :default
                       :seon.config/default-load [:repl :data-oriented-clojure :datahike
-                                                 :data-modeling :clojurescript :ui-live-tiles]}]
+                                                 :data-modeling :clojurescript :ui-canvas]}]
            :minimal []}}
 ```
 
@@ -553,16 +553,16 @@ new model unlocks (a leaner ns render, a per-agent model):
 {:seon.config/agent-context
  {;; agent-level — acme overrides per-agent LLM (was ONLY the .env.acme global row)
   :seon.ai/agent-provider :inherit          ; still honors .env.acme SEON_AI_PROVIDER (dual default, §2.5.2)
-  :seon.eval/toolkit      [:my.ui :my.data :my.tile :my.kb]
+  :seon.eval/toolkit      [:my.ui :my.data :my.canvas :my.kb]
   ;; acme = MAX skill corpus always-on (the old :default-load, now a set)
   :my.skills/load         [:repl :data-oriented-clojure :datahike
-                           :data-modeling :clojurescript :ui-live-tiles]
+                           :data-modeling :clojurescript :ui-canvas]
   :seon.agent/ctx
   [{:seon.agent.ctx/name :namespaces :seon.agent.ctx/priority 20
     :seon.render/ai 'seon.agent.ctx.namespaces/namespaces-block
     ;; acme can pin its OWN nses full (incl. its own acme.* third-party code) — the
     ;; presence-set proves third-party ns render is configurable per-cluster
-    :seon.agent.ctx.namespaces/full-source [:my.kb :my.data :my.ui :my.tile
+    :seon.agent.ctx.namespaces/full-source [:my.kb :my.data :my.ui :my.canvas
                                             :seon.agent.todo :seon.agent.message :seon.agent.lifecycle]
     :seon.agent.ctx.namespaces/current-full? true}
    {:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
@@ -640,7 +640,7 @@ turn). The refactor = move these 11 hardcoded-default reads to datom reads:
 | clip gate (ctx.cljs 349 `clip-or-full`) | per-value cap default | `:seon.agent.ctx/escape-clipping?` → `:seon.render/full?` |
 | run bounds (run.cljs 93) | `default-turn-limit` const / `SEON_DEFAULT_TURN_LIMIT` | `:seon.agent.run/default-turn-limit` agent datom |
 | LLM call (turn.cljs) | the global `:seon.ai/config` row | `effective-config-for id` = per-agent `:seon.ai/agent-*` over the global row |
-| root canvas (client.cljs 2374 branch) | the hardcoded `(when (= "root" aid) …)` | the root `:live-tile` block's `:seon.render.live-tile/content`, seeded from root-context |
+| root canvas (client.cljs 2374 branch) | the hardcoded `(when (= "root" aid) …)` | the root `:live-tile` block's `:seon.render.live-canvas/content`, seeded from root-context |
 
 Uniform: a renderer that reads a module-level const instead reads the attr off the
 entity it already pulls. Where a renderer calls `config/namespaces-policy` (a
@@ -722,7 +722,7 @@ manifest. A resumed agent keeps its own edited config (never re-seeded, matching
 
 | Deleted | file:line | Replaced by |
 |---------|-----------|-------------|
-| hardcoded root branch | `seon.client` 2367-2379 | root-context `:live-tile` block `:seon.render.live-tile/content` |
+| hardcoded root branch | `seon.client` 2367-2379 | root-context `:live-tile` block `:seon.render.live-canvas/content` |
 | `#profile` + `SEON_PROFILE` read | `seon.config` 164 | named configs (agent-context/root-context) |
 | `config/acme.edn` `:loadouts`+`#profile {:default … :minimal []}`+`:role`/`:default-load` | `config/acme.edn` | v3 `:seon.config/agent-context` (`:default-load`→`:my.skills/load` set); `:minimal`→`config/acme-minimal.edn` (§2.5.1) |
 | `config/test.edn` `:skills/exclude`+`:loadouts` | `config/test.edn` | v3 `:seon.config/agent-context {:my.skills/load [:repl]}`; routes stay (§2.5.3) |
@@ -875,7 +875,7 @@ read it back live:
 - Block-level: `[ ]` `:seon.agent.ctx.transcript/tier` (shared) `[ ]`
   `/decay-level` (shared) `[ ]` `/tiers` (component ref) `[ ]` `/result-decay`
   (component ref) `[ ]` `/turns-retained` `[ ]` `/summary-head?` `[ ]` `/cite-card?`
-  `[ ]` `:seon.render.live-tile/content` (widen to `:none`) `[ ]` `:my.skills/load`.
+  `[ ]` `:seon.render.live-canvas/content` (widen to `:none`) `[ ]` `:my.skills/load`.
   VERIFY reified: `[ ]` a tier/level nested map transacts to its OWN entity +
   per-element query returns it (NOT a blob — the decision-22 proof).
 - Cross-lane (namespace-display OWNS; foundation must not block): `[ ]`
@@ -931,7 +931,7 @@ datom (live) + parity holds:
     Per-agent PROVIDER/MODEL selection is RESOLVED but not yet threaded into
     the adapters — a parity-safe follow-on (`:inherit`=today; see note below).
   - move 11 root canvas→root-context: `live-tile-block` reads
-    `:seon.render.live-tile/content` off the `:live-tile` BLOCK (root's block
+    `:seon.render.live-canvas/content` off the `:live-tile` BLOCK (root's block
     carries `system-view` via root-context), falling back to the agent-entity
     datom when the block is `:none`/absent (non-root welcome = parity). For
     root the block-read == agent-entity-read == `system-view` (byte-neutral).

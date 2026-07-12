@@ -6,9 +6,9 @@
    ## The three legs
 
    - PARSE — `seon.repl.internal/parse-forms` (no-fence basis, spans index the
-     raw `canvas_text`, the `offset_map` basis). Yields the GOOD form spans (to
+     raw `code_buffer_text`, the `offset_map` basis). Yields the GOOD form spans (to
      HOLD) and the BROKEN-syntax spans (to RE-NOISE).
-   - RETRIEVE — `seon.diffusion.retrieval/retrieve-for-canvas`. Yields the
+   - RETRIEVE — `seon.diffusion.retrieval/retrieve-for-code-buffer`. Yields the
      hallucinated-symbol corrections (`{span,replacement,spec_text}`) — each a
      clamp-toward-the-real-API.
    - EVAL — `seon.worker-eval` (a SEPARATE node self-host bundle; NOT pod- or
@@ -44,7 +44,7 @@
 ;; Schemas — reuse the retrieval leg's shapes (register-once-reference)
 ;; ============================================================
 
-;; The worker's `offset_map`: token-index → canvas char offset. It is the
+;; The worker's `offset_map`: token-index → code-buffer char offset. It is the
 ;; WORKER's artifact (it maps our char spans back to token positions); the
 ;; Seon side emits char spans directly, so it is carried through but not
 ;; required here.
@@ -85,7 +85,7 @@
 (schema/register!
   ::checkpoint
   [:map
-   [::canvas-text :seon.diffusion.retrieval/canvas-text]
+   [::code-buffer-text :seon.diffusion.retrieval/code-buffer-text]
    [::offset-map {:optional true} ::offset-map]
    [::aliases {:optional true} :seon.diffusion.retrieval/aliases]
    [::k {:optional true} :seon.diffusion.retrieval/k]
@@ -137,27 +137,29 @@
    - `::injections` = retrieval's hallucinated-symbol corrections.
    - `::legs` = `[:parse :retrieve]`, plus `:eval` when verdicts were folded."
   {:malli/schema [:=> [:cat ::checkpoint] ::control-set]}
-  [{::keys [canvas-text aliases k eval-verdicts phase db]}]
-  (let [entries  (internal/parse-forms canvas-text {:strip-fences? false})
-        forms    (filter #(= :form (:kind %)) entries)
-        reads    (filter #(= :read (:kind %)) entries)
+  [{::keys [code-buffer-text aliases k eval-verdicts phase db]}]
+  (let [entries  (internal/parse-forms code-buffer-text {:strip-fences? false})
+        forms    (filter #(= :form (:seon.repl/kind %)) entries)
+        reads    (filter #(= :read (:seon.repl/kind %)) entries)
         ;; RETRIEVE leg — hallucinated-symbol injections (reads the graph).
         {::retrieval/keys [injections]}
-        (retrieval/retrieve-for-canvas
-          (cond-> {:seon.diffusion.retrieval/canvas-text canvas-text}
+        (retrieval/retrieve-for-code-buffer
+          (cond-> {:seon.diffusion.retrieval/code-buffer-text code-buffer-text}
             aliases (assoc :seon.diffusion.retrieval/aliases aliases)
             k       (assoc :seon.diffusion.retrieval/k k)
             db      (assoc :seon.diffusion.retrieval/db db)))
         inj-spans     (mapv :seon.diffusion.retrieval/span injections)
         ;; PARSE-tier renoise spans (broken syntax).
-        parse-renoise (mapv (fn [{:keys [span error-kind source]}]
-                              {::span span ::error-kind error-kind ::source source})
+        parse-renoise (mapv (fn [{:seon.repl/keys [span source] :as entry}]
+                              {::span span
+                               ::error-kind (-> entry :seon/error :seon.error/kind)
+                               ::source source})
                             reads)
         ;; STRUCTURAL-tier (T1) renoise spans — a form that READS clean but has a
         ;; wrong SHAPE the AST alone proves (def-vs-defn). Renoises the offending
         ;; form WITHOUT paying the eval tier.
         struct-renoise (->> forms
-                            (keep (fn [{:keys [span source form]}]
+                            (keep (fn [{:seon.repl/keys [span source form]}]
                                     (when (and span (grammar/malformed-def? form))
                                       {::span span ::error-kind :def-vs-defn
                                        ::source source})))
@@ -168,7 +170,7 @@
         ;; the model regenerates within the phase grammar.
         phase-renoise (if phase
                         (->> forms
-                             (keep (fn [{:keys [span source form]}]
+                             (keep (fn [{:seon.repl/keys [span source form]}]
                                      (when (and span (grammar/phase-violation? phase form))
                                        {::span span ::error-kind :phase-violation
                                         ::source source})))
@@ -183,7 +185,7 @@
                            (mapv (fn [{::keys [span error-kind]}]
                                    {::span span
                                     ::error-kind (or error-kind :throw)
-                                    ::source (subs canvas-text (first span) (second span))})))
+                                    ::source (subs code-buffer-text (first span) (second span))})))
         renoise-spans (-> parse-renoise
                           (into struct-renoise)
                           (into phase-renoise)
@@ -191,7 +193,7 @@
         bad-spans     (into inj-spans (map ::span renoise-spans))
         ;; CLAMPS — good forms that carry no hallucination and are not broken.
         clamps        (->> forms
-                           (keep (fn [{:keys [span source]}]
+                           (keep (fn [{:seon.repl/keys [span source]}]
                                    (when (and span
                                               (not (some #(overlaps? span %) bad-spans)))
                                      {::span span ::source source})))

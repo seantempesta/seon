@@ -5,111 +5,82 @@ description: "ClojureScript semantics for the Seon CLJS pod. Use when writing or
 
 # ClojureScript -- Seon CLJS Pod Semantics
 
-> Full grounded write-up (file:line + live proofs): `docs/prds/agent-fsm/research/cljs-async-await-2026-06-28.md`
-> Library source (authoritative -- read it, don't guess): `reference-code/clojurescript/`
-
-The pod is a long-running Node CLJS process. It compiles itself two ways, and
-the difference is the source of almost every surprise:
-
-- **The shadow build** (`.cljs` files in `src/seon/`) is compiled ahead-of-time
-  by the JVM shadow-cljs compiler. This is the pod's own code.
-- **Agent-eval'd forms** are compiled at runtime by the **self-host / bootstrap
-  compiler** (`cljs.js`, a cljs-in-cljs compiler) against the process-shared
-  compile-state `@seon.repl/!compile-state`. `seon.eval/eval` ->
-  `seon.eval/raw-eval` -> `cljs/eval-str` runs here. This is NOT the JVM
-  compiler; it has its own gotchas.
-
-Versions: CLJS `1.12.145`, shadow-cljs `3.4.10` (`deps.edn`). Vendored
-reference source is `1.12.41` -- the `await` macro and `:async` flag are
-identical.
+You run inside a long-running Node CLJS process (the pod). Every form you
+submit is compiled and run at RUNTIME by the pod's **self-host / bootstrap
+compiler** (`cljs.js`, a cljs-in-cljs compiler) against the process-shared
+compile-state. This is a real, full-featured CLJS compiler -- but it is not
+identical to how the pod's own core code was built ahead-of-time, and that
+gap is the source of almost every surprise below.
 
 ## `^:async` and `await` -- the core feature
 
-The pod is **core.async-free**. Asynchrony is native JS `async`/`await` via
-CLJS's built-in support (see `reference_cljs_async_await` memory note).
+The one-line rule (`await` only inside an `^:async` fn; `^:async` verbs
+auto-resolve to data, so they read as synchronous) is ALWAYS in your context.
+This section is the depth: the mechanics and gotchas below.
 
-### How they compile (read the source)
+You have no `core.async`. Asynchrony is native JS `async`/`await`:
 
-- `await` is a **macro**, not a special form: `cljs/core.cljc:975-977`. It
-  asserts `(:async &env)` and emits raw JS `(await ~{})` via `js*`. **It only
-  expands inside an `^:async` fn body.**
-- `^:async` is an analyzer flag set in `parse 'fn*`
-  (`cljs/analyzer.cljc:2336-2341`) from the fn name's metadata. `defn ^:async`
-  threads it through: `defn` merges name meta onto the def symbol
-  (`cljs/core.cljc:3419`), and `parse 'def` analyzes the fn init passing that
-  symbol as `name` (`cljs/analyzer.cljc:2118-2120`).
-- The compiler emits a native `async function` when `(:async env)`
-  (`cljs/compiler.cljc:945-959`, variadic `:975-1069`, iife `:704-708`).
-- Runtime shape: a `^:async` fn is a JS `AsyncFunction` (its
-  `.constructor.name` is `"AsyncFunction"`) and returns a `js/Promise`.
+- `await` is a **macro**, not a special form. It asserts it is inside an
+  `^:async` fn body and emits raw JS `(await ~{})`. **It only expands inside
+  an `^:async` fn body.**
+- A `^:async` fn compiles to a native JS `async function` and returns a
+  `js/Promise` at the JS level.
 
 ```clojure
-;; In pod .cljs source -- the normal pattern (replaces core.async go-blocks):
-(defn ^:async fetch-thing [url]
-  (let [resp (await (js/fetch url))]
-    (await (.json resp))))
+;; the normal pattern for a fn that needs to await something -- e.g. a
+;; verb you write in your own home ns that waits on a write:
+(defn ^:async bump! [_]
+  (let [env (await (seon.db/transact! {:seon.db/tx-data [{:my.agent.me/counter 1}]}))]
+    (:seon.db/ok? env)))
 ```
 
-### Self-host verdict (the part that bites agents)
+**Defining a `^:async` fn with internal `(await ...)` WORKS** in your eval —
+proven live: evaluating `(defn ^:async f [x] (await (js/Promise.resolve (inc
+x))))` then `(f 41)` compiles and runs cleanly.
 
-When a form is eval'd through the bootstrap compile-state (the agent path):
+**A top-level `(await x)` in a single form you submit FAILS.** A top-level
+form has no async env, so macroexpansion throws `"await can only be used in
+async contexts"` — proven live: submitting a bare `(await (js/Promise.resolve
+1))` throws exactly that. Do NOT write a bare top-level `(await result/<id>)`
+-- it cannot work. Either wrap the `await` inside an `^:async` fn, or let the
+auto-await mechanism (below) resolve the Promise for you.
 
-- **Defining a `^:async` fn with internal `(await ...)` WORKS.** Self-host uses
-  the same analyzer/compiler/macros (`cljs/js.cljs:17-18,121-124,843`).
-- **A top-level `(await x)` in a single eval'd form FAILS.** The macro asserts
-  `(:async &env)`, and a top-level form has no async env -> macroexpansion
-  throws `"await can only be used in async contexts"`. (Even if it expanded,
-  `js/eval` of top-level `await` is a JS SyntaxError outside a module.)
+## Promise handling in your eval -- data by default
 
-Implication: do NOT design agent ergonomics around a bare `(await result/<id>)`
--- it cannot work. Either wrap the `await` inside a `^:async` fn, or let the
-auto-await mechanism (below) resolve it.
+You get DATA, not Promises. Every form you submit in a normal turn: if its
+value is a `js/Promise`, the runtime awaits it and records the **resolved
+value** for you. You never type `await` at the top level; calls to `^:async`
+verbs (`seon.db/transact!`, `my.plan/plan!`, `my.plan/done!`, …) feel
+synchronous — you write `(seon.db/transact! {...})` and read back the
+envelope directly, same turn.
 
-## Promise handling in agent eval -- data by default
-
-Agents should get DATA, not Promises. `seon.eval` enforces this:
-
-- `maybe-await-value` (`src/seon/eval.cljs:1192-1226`), called on the
-  eval-batch path (`eval-form-entry!`, `eval.cljs:2433`): if a form's value is
-  `(instance? js/Promise v)`, it awaits and records the **resolved value**.
-  Agents never type `await`; calls to `^:async` core verbs (`seon.db/transact!`,
-  `seon.agent.todo/add!`) feel synchronous.
-- Bounded by `@seon.eval/!timeout-ms` (default 10000ms) or a one-shot
-  `(seon.eval/budget <ms> <expr>)` override (`eval.cljs:97-120`) for a
+- Bounded by a default timeout (~10s) or a one-shot longer budget for a
   legitimately slow op.
-- On timeout it returns `{:ok false :error <timeout>}`. **Known gap:** the
-  pending Promise is currently dropped, not stashed -- so it can't be awaited
-  later. (See research doc D for the stash-on-timeout + re-reference design.)
-
-Note: bare `seon.eval/eval` does NOT auto-await; only the
-`eval-batch!`/`eval-form-entry!` path does. New ergonomics plug in there.
+- On timeout the recorded value is a `:seon.eval/pending` placeholder and
+  the still-running Promise is stashed at `result/<id>` — re-reference
+  `result/<id>` in a LATER eval and it auto-awaits to data. Nothing is
+  dropped; for a slow op you can also split it into smaller units.
 
 ## Promise-detection gotchas
 
-- `(instance? js/Promise v)` is sound for native `^:async` returns and
-  `js/Promise.*`, but **blind to non-`js/Promise` thenables** (a `{:then fn}`
-  object) and **cross-realm Promises** (constructed in a different JS
-  realm/`vm` context -- `instanceof` fails). The malli async wrapper instead
-  duck-types `(fn? (.-then ret))` (`instrument.cljc:258`). For the
-  single-realm pod the `instance?` test is adequate; flag it if foreign
-  thenables ever enter agent forms.
-- `seon.instrument/async-fn?` (`instrument.cljc:307-313`) checks
-  `(= "AsyncFunction" (.. f -constructor -name))`. **Sound on a freshly
-  compiled `^:async` var, UNSOUND on an already-instrumented wrapper:** malli's
-  `-instrument-f` returns a plain `(fn [& args] ...)` (`instrument.cljc:247`)
-  whose constructor is `"Function"` even though it still returns a Promise. A
-  second instrument pass then mis-detects async as sync and routes the Promise
-  through malli's SYNC output validator -> `:malli.core/invalid-output` -> pod
-  wedges. This is the P0 double-instrument wedge, gated by the once-per-process
-  `!instrumented?` atom (`instrument.cljc:365-376`). **Never run a second
-  instrument pass over the program graph in one process.**
+- Auto-await detects a Promise via `(instance? js/Promise v)` -- sound for a
+  native `^:async` return, but blind to a foreign thenable (a plain `{:then
+  fn}` object built by hand). If you construct your own thenable instead of
+  returning a real `^:async` fn's result, it will NOT be auto-awaited and
+  will leak into your eval result as a raw object. Return real Promises.
+- If a fn you call returns `:malli.core/invalid-output` on what looks like a
+  Promise, that is the async/sync instrumentation-detection wedge: a fn
+  compiled once as `^:async`, then re-instrumented, can be mis-detected as
+  sync and have its Promise routed through the sync validator. This is a
+  core-level concern, not something you cause from your eval -- if you see
+  it, report it rather than working around it.
 
 ## Callable gotchas -- arity-0 thunks and keyword callbacks
 
 Two silent footguns from "what is actually callable" in CLJS:
 
 - **`(fn [])` is a strict zero-arity fn; `constantly` is variadic.** A callback
-  the caller invokes WITH args (a `.then` handler, a tile/render fn, a
+  the caller invokes WITH args (a `.then` handler, a canvas/render fn, a
   multimethod/`reduce` step, an event handler) blows up on `(fn [] body)` with
   an `Invalid arity: 1` -- the fn declares exactly zero params. Use
   `(constantly v)` (-> `(fn [& _] v)`, swallows any args) for a value-returning
@@ -122,59 +93,22 @@ Two silent footguns from "what is actually callable" in CLJS:
   `(.then promise #(:some-keyword %))` or `(.then promise (fn [v] (:some-keyword v)))`.
   Same trap for any JS API taking a callback (`.map`, `.forEach`, `setTimeout`).
 
-## Self-host eval / REPL gotchas (cross-`eval-str`)
+## Values don't persist as bare defs across turns/forms
 
-These are from the `seon.eval` namespace docstring (`eval.cljs:26-34`) and are
-self-host-specific -- they do NOT apply to ahead-of-time `.cljs`:
+Each form you submit is a separate compile against the shared namespace
+state -- fns and vars land, but a bare value-`def` does not reliably read
+back in a LATER form:
 
-- **Bare value-def reads don't resolve across `eval-str` calls.** `(def x 42)`
-  then `x` returns nil. Use an atom: `(def !x (atom 42))` + `@!x`. **Fns are
-  unaffected** -- they cross namespaces fine.
-- **`(in-ns 'foo)` is not bootstrapped.** Use `(ns foo)` to switch namespaces.
-- A successful eval's value is stashed on `globalThis` and bound as the var
-  `result/<id>` (`eval.cljs:962-1095`) -- that is the agent's value-reuse
-  surface. The stash is process-scoped: it does NOT survive a pod restart
-  (`lookup-result` then returns the honest "prior session -- re-run the form"
-  miss).
-- **A bare `result/<id>` on its own line is a RE-REFERENCE, not a fresh eval.**
-  It is a SYMBOL, and a bare symbol is otherwise PROSE (dropped by
-  `seon.repl.internal/parse-forms`). The parser special-cases the `result`
-  namespace (`result-ref-symbol?`) so the bare ref survives as a `:kind :form`
-  entry and self-evaluates into its stashed value via `eval.cljs`'s
-  `result-var-ref?` (eval'd in `:expr` context so the value actually returns,
-  and a dead/pruned id reads the graceful-miss string instead of throwing). It
-  is NOT a call -- do NOT wrap it in `(await ...)` (see the `await`-only-in-
-  `^:async` rule above) or `(identity ...)`; the bare symbol IS the surface.
-  A digit-leading id (`result/0xO-...`) is an INVALID token that throws at read
-  time and stays a `:read` failure -- re-run its form.
-
-## Verifying CLJS behavior live
-
-Eval against the pod. To test the AGENT path specifically (self-host), go
-through the bootstrap compile-state, not the shadow runtime:
-
-```clojure
-;; Through the bootstrap compile-state (what agents actually hit).
-;; seon.eval/eval is ^:async -> returns a Promise; .then it into an atom
-;; because the MCP eval does NOT await Promises.
-(-> (seon.eval/eval @seon.repl/!compile-state
-      "(defn ^:async f [x] (await (js/Promise.resolve (inc x))))")
-    (.then (fn [_] (seon.eval/eval @seon.repl/!compile-state "(f 41)")))
-    (.then (fn [r] (swap! !probe assoc :result r))))
-```
-
-Restart hygiene: `bin/seon restart pod` for a bad pod state, or
-`bin/seon cluster reset default` for a fresh world (does not restart
-cljs-watch). Never restart cljs-watch standalone -- it detaches the pod from
-shadow.
-
-## When to read which reference file
-
-| Question | Read |
-|----------|------|
-| `await` semantics / why it throws | `reference-code/clojurescript/src/main/clojure/cljs/core.cljc:975` |
-| `:async` analyzer flag / `defn` meta threading | `cljs/analyzer.cljc:2336`, `:2118`; `cljs/core.cljc:3374` |
-| `async function` emission | `reference-code/clojurescript/src/main/clojure/cljs/compiler.cljc:945` |
-| self-host compile/eval pipeline | `reference-code/clojurescript/src/main/cljs/cljs/js.cljs:843,1138` |
-| seon's eval / auto-await / result stash | `src/seon/eval.cljs` (`maybe-await-value` :1192, `eval-form-entry!` :2358) |
-| async instrumentation + the wedge | `src/seon/instrument.cljc:202-376` |
+- **`(def x 42)` then `x` on its own returns `nil`.** Proven live. Use an
+  atom instead: `(def !x (atom 42))`, then `@!x` reads it back. **Fns are
+  unaffected** -- `(defn f [x] (inc x))` then `(f 41)` works fine, in the
+  same eval or a later one.
+- **`(in-ns 'foo)` does not work.** Use `(ns foo)` to switch your current
+  namespace.
+- A successful eval's return value is stashed for you and bound as
+  `result/<id>` -- that is YOUR value-reuse surface across forms. It does
+  NOT survive a pod restart; a dead id reads back a graceful "re-run the
+  form" message instead of throwing.
+- **A bare `result/<id>` on its own line RE-REFERENCES the stashed value —
+  it is not a call.** Do not wrap it in `(await ...)` or `(identity ...)`;
+  writing the bare symbol on its own line IS how you use it.

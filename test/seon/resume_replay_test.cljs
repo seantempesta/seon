@@ -6,7 +6,7 @@
    the runtime — its `:seon.ns`/`:seon.fn` rows are DISPLAY-only and are NOT
    loaded. Only the agent-authored DB LAYER is loaded:
    `replay-program-graph!` queries the agent ns set (every `:seon.ns/name`
-   row minus `(core-ns-set)`), topo-sorts by the STORED `:seon.ns/requires`,
+   row minus `(core-ns-set)`), topo-sorts by the STORED `:seon.ns/require-edges`,
    and for each ns evals its reconstituted whole source
    (`seon.eval/reconstitute-ns-source` — ns form + every current
    `:seon.fn`/`:seon.schema`/`:seon.test` source). cljs.js's own load-fn
@@ -170,7 +170,7 @@
             (with-seeded-conn
               (fn [conn]
                 (-> (client/replay-program-graph!
-                      {:conn conn :compile-state cs :agent-id "resume-replay-test"})
+                      {:seon.client/conn conn :seon.client/compile-state cs :seon.client/agent-id "resume-replay-test"})
                     (.then
                       (fn [stats]
                         ;; ONLY the one agent ns loads; core nses excluded.
@@ -181,19 +181,153 @@
                     (.then
                       (fn [_]
                         (seval/eval cs "(my.agent.t1/agent-fn 21)"
-                                    {:ns 'cljs.user :analyze-deps? false})))
+                                    {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})))
                     (.then
                       (fn [r]
-                        (is (:ok r) "agent-fn loaded without error")
-                        (is (= 42 (:value r))
+                        (is (:seon.eval/ok? r) "agent-fn loaded without error")
+                        (is (= 42 (:seon.eval/value r))
                             "loaded agent-fn is callable: (agent-fn 21) => 42")
                         (seval/eval cs "(some? my.agent.t1/my-test)"
-                                    {:ns 'cljs.user :analyze-deps? false})))
+                                    {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})))
                     (.then
                       (fn [r]
-                        (is (:ok r) "agent deftest loaded without error")
-                        (is (true? (:value r))
+                        (is (:seon.eval/ok? r) "agent deftest loaded without error")
+                        (is (true? (:seon.eval/value r))
                             "deftest var reconstituted into the agent ns"))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; C37 resume leg — a SOURCELESS member-bearing ns row (the agent HOME ns:
+;; its requires are wired at runtime by setup-agent-ns!, which runs AFTER
+;; the boot replay, so no :seon.ns/source is ever stored) reconstitutes
+;; with a head SYNTHESIZED from the stored :seon.ns/require-edges. Without
+;; it the unit is headless: member defns land in cljs.user and a member
+;; using `::alias/kw` cannot even READ (live-caught 2026-07-03 — the first
+;; ::-keyword home-ns fn to survive the C37 gate failed the whole unit's
+;; replay with 'Invalid keyword: ::db/tx-data').
+;; ---------------------------------------------------------------------------
+
+(deftest sourceless-home-ns-resumes-via-synthesized-head
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+          (fn [cs]
+            (-> (client/open-agent-conn!)
+                (.then
+                  (fn [conn]
+                    (binding [db/*conn* conn]
+                      (let [uniq  (str "my.agent.kwresume" (rand-int 1000000000))
+                            ns-kw (keyword uniq)]
+                        (-> (db/transact!
+                              {:seon.db/tx-data
+                               ;; NO :seon.ns/source — edges only (the home-ns
+                               ;; shape the setup-agent-ns! tee writes).
+                               [{:seon.ns/name ns-kw
+                                 :seon.ns/require-edges
+                                 [{:seon.ns.require/target :clojure.string
+                                   :seon.ns.require/alias  'pstr}]}
+                                {:seon.fn/sym (str uniq "/kw-resumer")
+                                 :seon.fn/ns  [:seon.ns/name ns-kw]
+                                 :seon.fn/source
+                                 "(defn kw-resumer [m] [(::marker m) (::pstr/mk m)])"
+                                 :seon.fn/arglists "([m])"
+                                 :seon.fn/doc ""
+                                 :seon.fn/private? false}]})
+                            (.then
+                              (fn [_]
+                                (let [src (seval/reconstitute-ns-source @conn ns-kw)]
+                                  (testing "the head is synthesized from the stored edges"
+                                    (is (str/starts-with? src (str "(ns " uniq))
+                                        (str "head present — got: " (subs src 0 60)))
+                                    (is (str/includes? src "[clojure.string :as pstr]")
+                                        "the :as alias is carried")))
+                                (client/replay-program-graph!
+                                  {:seon.client/conn conn
+                                   :seon.client/compile-state cs
+                                   :seon.client/agent-id "kw-resume-test"})))
+                            (.then
+                              (fn [stats]
+                                (is (= 0 (:seon.client/replay-n-fail stats))
+                                    (str "the ::-keyword home-ns unit loads — "
+                                         (pr-str stats)))
+                                (seval/eval cs
+                                            (str "(" uniq "/kw-resumer"
+                                                 " {" ns-kw "/marker 1"
+                                                 " :clojure.string/mk 2})")
+                                            {:seon.eval/starting-ns 'cljs.user
+                                             :seon.eval/analyze-deps? false})))
+                            (.then
+                              (fn [r]
+                                (is (:seon.eval/ok? r)
+                                    "resumed fn is callable IN ITS OWN ns")
+                                (is (= [1 2] (:seon.eval/value r))
+                                    "::marker and ::pstr/mk resolved against the synthesized head")))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ---------------------------------------------------------------------------
+;; C30 — keyword-namespace schema STUBS are excluded from the replay set.
+;; `index-schemas` mints a `:seon.ns/name` row per NAMESPACED schema key as
+;; a `:seon.schema/ns` backref (`:seon.fn/spec` → `:seon.ns/name :seon.fn`).
+;; Those namespaces are NOT compiled nses, so `agent-ns-set` (which only
+;; subtracts `core-ns-set`) keeps them — but they reconstitute to "" (no
+;; source, no fn/test members, their core shape-literal schema rows fail
+;; `registration-call-source?`). The computed blank-source filter drops
+;; them from the replay count without a name list; real agent nses stay.
+;; ---------------------------------------------------------------------------
+
+(deftest c30-blank-source-stub-nses-excluded-from-replay
+  (async done
+    (-> (repl/ensure-bootstrap!)
+        (.then
+          (fn [cs]
+            (-> (client/open-agent-conn!)
+                (.then
+                  (fn [conn]
+                    (binding [db/*conn* conn]
+                      (-> (db/transact!
+                            {:seon.db/tx-data
+                             [;; a REAL agent ns — must replay.
+                              {:seon.ns/name :my.agent.c30
+                               :seon.ns/source "(ns my.agent.c30)"}
+                              {:seon.fn/sym "my.agent.c30/f"
+                               :seon.fn/ns [:seon.ns/name :my.agent.c30]
+                               :seon.fn/source "(defn f [] 1)"
+                               :seon.fn/arglists "([])" :seon.fn/doc "" :seon.fn/private? false}
+                              ;; a C30 STUB ns — keyword-only, no source; its
+                              ;; only member a CORE shape-literal schema row
+                              ;; (source "[…]" fails registration-call-source?),
+                              ;; exactly what index-schemas' :seon.schema/ns
+                              ;; backref mints.
+                              {:seon.ns/name :seon.fn}
+                              {:seon.schema/key    :seon.fn/spec
+                               :seon.schema/source "[:vector :any]"
+                               :seon.schema/ns     [:seon.ns/name :seon.fn]}]})
+                          (.then
+                            (fn [_]
+                              (is (contains? ((deref #'client/agent-ns-set) @conn) :seon.fn)
+                                  "the stub IS in agent-ns-set — only the replay filter drops it")
+                              (is (str/blank? (seval/reconstitute-ns-source @conn :seon.fn))
+                                  "the keyword-only stub ns reconstitutes to nothing")
+                              (is (not (str/blank? (seval/reconstitute-ns-source @conn :my.agent.c30)))
+                                  "a real agent ns reconstitutes non-blank")
+                              (client/replay-program-graph!
+                                {:seon.client/conn conn :seon.client/compile-state cs
+                                 :seon.client/agent-id "c30-test"})))
+                          (.then
+                            (fn [stats]
+                              (is (= 1 (:seon.client/replay-n-total stats))
+                                  (str "only the real agent ns is a replay unit — the "
+                                       "blank-source stub is skipped — " (pr-str stats)))
+                              (is (= 0 (:seon.client/replay-n-fail stats))
+                                  "no load failures")
+                              (seval/eval cs "(my.agent.c30/f)"
+                                          {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})))
+                          (.then
+                            (fn [r]
+                              (is (:seon.eval/ok? r) "the real agent ns still loaded")
+                              (is (= 1 (:seon.eval/value r)) "(f) => 1"))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -298,19 +432,19 @@
                           (.then
                             (fn [_]
                               (client/replay-program-graph!
-                                {:conn conn :compile-state cs
-                                 :agent-id "resume-replay-test"})))
+                                {:seon.client/conn conn :seon.client/compile-state cs
+                                 :seon.client/agent-id "resume-replay-test"})))
                           (.then
                             (fn [stats]
                               (is (= 0 (:seon.client/replay-n-fail stats))
                                   (str "ns row requiring my.kb loads clean "
                                        "(host-bundle load-fn branch) — " (pr-str stats)))
                               (seval/eval cs "(seon.replay.kbreq/kb-fn 35)"
-                                          {:ns 'cljs.user :analyze-deps? false})))
+                                          {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})))
                           (.then
                             (fn [r]
-                              (is (:ok r) "fn in the requiring ns is callable")
-                              (is (= 42 (:value r)) "(kb-fn 35) => 42"))))))))))
+                              (is (:seon.eval/ok? r) "fn in the requiring ns is callable")
+                              (is (= 42 (:seon.eval/value r)) "(kb-fn 35) => 42"))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -318,7 +452,7 @@
 ;; Two-ns agent dependency chain — the spine. An agent ns A requires agent
 ;; ns B (with an `:as b` alias); both load from the DB, topo-ordered, and
 ;; B's fn is callable through A. This is the cross-ns dep edge the stored
-;; `:seon.ns/requires` orders and the DB load-fn satisfies.
+;; `:seon.ns/require-edges` orders and the DB load-fn satisfies.
 ;; ---------------------------------------------------------------------------
 
 (deftest load-two-ns-agent-dependency-chain
@@ -340,7 +474,9 @@
                                :seon.fn/arglists "([])" :seon.fn/doc "" :seon.fn/private? false}
                               {:seon.ns/name :seon.replay.chaina
                                :seon.ns/source "(ns seon.replay.chaina (:require [seon.replay.chainb :as b]))"
-                               :seon.ns/requires [:seon.replay.chainb]}
+                               :seon.ns/require-edges
+                               [{:seon.ns.require/target :seon.replay.chainb
+                                 :seon.ns.require/alias  'b}]}
                               {:seon.fn/sym "seon.replay.chaina/av"
                                :seon.fn/ns {:seon.ns/name :seon.replay.chaina}
                                :seon.fn/source "(defn av [] (b/bv))"
@@ -348,8 +484,8 @@
                           (.then
                             (fn [_]
                               (client/replay-program-graph!
-                                {:conn conn :compile-state cs
-                                 :agent-id "resume-replay-test"})))
+                                {:seon.client/conn conn :seon.client/compile-state cs
+                                 :seon.client/agent-id "resume-replay-test"})))
                           (.then
                             (fn [stats]
                               (is (= 2 (:seon.client/replay-n-total stats))
@@ -357,11 +493,11 @@
                               (is (= 0 (:seon.client/replay-n-fail stats))
                                   (str "topo-ordered chain loads clean — " (pr-str stats)))
                               (seval/eval cs "(seon.replay.chaina/av)"
-                                          {:ns 'cljs.user :analyze-deps? false})))
+                                          {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})))
                           (.then
                             (fn [r]
-                              (is (:ok r) "cross-ns call resolves")
-                              (is (= 7 (:value r))
+                              (is (:seon.eval/ok? r) "cross-ns call resolves")
+                              (is (= 7 (:seon.eval/value r))
                                   "av -> b/bv via the :as alias => 7"))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

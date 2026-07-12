@@ -31,7 +31,7 @@
    chain, joined with ` <- ` — the same view `seon.client`'s
    replay-failure warn surfaces."
   [r]
-  (->> (iterate :seon.error/cause (:error r))
+  (->> (iterate :seon.error/cause (:seon/error r))
        (take-while some?)
        (keep :seon.error/message)
        (str/join " <- ")))
@@ -53,10 +53,10 @@
                             (str "(ns scratch.require-b4 "
                                  "(:require [my.kb :as kb] "
                                  "[seon.error :as err]))")
-                            {:ns 'cljs.user :analyze-deps? false})
+                            {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
                 (.then
                   (fn [r]
-                    (is (:ok r)
+                    (is (:seon.eval/ok? r)
                         (str "require of host-bundled nses succeeds — "
                              (err-chain r)))
                     ;; The alias must actually WORK — wired from the ns
@@ -64,13 +64,13 @@
                     ;; munged globalThis path.
                     (seval/eval cs
                                 "(err/->message (js/Error. \"b4-alias\"))"
-                                {:ns 'scratch.require-b4
-                                 :analyze-deps? false})))
+                                {:seon.eval/starting-ns 'scratch.require-b4
+                                 :seon.eval/analyze-deps? false})))
                 (.then
                   (fn [r]
-                    (is (:ok r)
+                    (is (:seon.eval/ok? r)
                         (str "alias call evals — " (err-chain r)))
-                    (is (= "b4-alias" (:value r))
+                    (is (= "b4-alias" (:seon.eval/value r))
                         "aliased var resolves to the live host fn"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -81,10 +81,10 @@
         (.then
           (fn [cs]
             (-> (seval/eval cs "(require '[my.kb])"
-                            {:ns 'cljs.user :analyze-deps? false})
+                            {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
                 (.then
                   (fn [r]
-                    (is (:ok r)
+                    (is (:seon.eval/ok? r)
                         (str "bare (require '[my.kb]) succeeds — "
                              (err-chain r))))))))
         (.then (fn [_] (done)))
@@ -95,13 +95,16 @@
     (-> (repl/ensure-bootstrap!)
         (.then
           (fn [cs]
+            ;; A genuinely-absent ns fails cljs.js analysis → :agent fault
+            ;; (the agent's own require typo — classified by
+            ;; seon.instrument/wrapper-fault, never gates, never crashes).
             (-> (seval/eval cs
                             (str "(ns scratch.require-absent "
                                  "(:require [no.such.namespace :as nope]))")
-                            {:ns 'cljs.user :analyze-deps? false})
+                            {:seon.eval/starting-ns 'cljs.user :seon.eval/analyze-deps? false})
                 (.then
                   (fn [r]
-                    (is (false? (:ok r))
+                    (is (false? (:seon.eval/ok? r))
                         "an absent ns is still a real error")
                     (is (str/includes? (err-chain r) "no.such.namespace")
                         "the error names the missing namespace"))))))

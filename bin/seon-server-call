@@ -1,0 +1,184 @@
+#!/usr/bin/env bb
+
+;; bin/seon-server-call — structured RPC helper for the bin/seon supervisor.
+;;
+;; Sends ONE Clojure expression to the wire-server's loopback socket REPL
+;; (the same supervisor channel `cluster fork`/`cluster destroy` have always
+;; used — clojure.core.server/repl on 127.0.0.1, port in the per-supervisor
+;; $SEON_WRITER_REPL_PORT_FILE) and PARSES the printed reply as EDN instead of
+;; pattern-matching it. Owner directive: the moment structure crosses a
+;; boundary it is parsed as data — bash never greps printed EDN (the grep
+;; approach broke once already: the REPL prints namespaced-map literals
+;; `#:seon.server.registry{:forked? true …}`, so a grep for the fully
+;; qualified keyword never matched; 7c83cec9 papered over it).
+;;
+;; Usage:
+;;   bin/seon-server-call [--port N] [--timeout SECS] [--get KEY] EXPR [SUCCESS-KEY]
+;;
+;;   EXPR         one Clojure expression; its VALUE must be a map (the
+;;                registry fns' errors-as-values contract).
+;;   SUCCESS-KEY  optional fully-qualified keyword (with or without the
+;;                leading ':'); exit 0 iff (get result key) is truthy.
+;;                Omitted = any map reply is success.
+;;   --port       socket REPL port (default: read the per-supervisor port
+;;                file — $SEON_WRITER_REPL_PORT_FILE when set, else the
+;;                default cluster's tmp/seon-writer-repl-port-default).
+;;   --timeout    overall deadline in seconds (default 30).
+;;   --get        print ONLY (get result key) to stdout (strings raw,
+;;                everything else pr-str'd) instead of the whole map.
+;;
+;; stdout: the parsed result map as ONE EDN form (or the --get value).
+;; stderr: diagnostics only.
+;; Exit:  0 = map reply, success-key truthy (or no key given)
+;;        1 = map reply, success-key falsy/absent (server said no —
+;;            the map, usually carrying ::error, is on stdout)
+;;        2 = transport/protocol failure: wire-server unreachable, deadline
+;;            exceeded, or the reply isn't a single EDN map (e.g. the REPL
+;;            printed an exception) — raw reply dumped to stderr.
+
+(require '[clojure.edn :as edn]
+         '[clojure.java.io :as io]
+         '[clojure.string :as str])
+
+(import '(java.net Socket InetSocketAddress SocketTimeoutException ConnectException)
+        '(java.io PushbackReader StringReader))
+
+;; Resolve everything from the repo root (same convention as bin/seon-hook):
+;; callers may invoke this from any cwd.
+(def repo-root
+  (or (some-> *file* io/file .getCanonicalFile .getParentFile .getParentFile .getPath)
+      (System/getProperty "user.dir")))
+
+;; Per-supervisor port file (registry C48): $SEON_WRITER_REPL_PORT_FILE (repo-
+;; root-relative unless absolute; bin/seon exports it), defaulting to the
+;; default cluster's file. NEVER the old shared tmp/seon-writer-repl-port —
+;; a second supervisor's wire-server (bin/acme) clobbered that.
+(def port-file
+  (let [p (or (System/getenv "SEON_WRITER_REPL_PORT_FILE")
+              "tmp/seon-writer-repl-port-default")
+        f (io/file p)]
+    (if (.isAbsolute f) f (io/file repo-root p))))
+
+(defn die [code & msgs]
+  (binding [*out* *err*]
+    (doseq [m msgs] (println m)))
+  (System/exit code))
+
+;; ---------------------------------------------------------------------------
+;; Args
+;; ---------------------------------------------------------------------------
+
+(defn parse-args [args]
+  (loop [acc {} [a & more :as xs] args]
+    (cond
+      (empty? xs) acc
+      (= a "--port") (recur (assoc acc :port (parse-long (first more))) (rest more))
+      (= a "--timeout") (recur (assoc acc :timeout-secs (parse-long (first more))) (rest more))
+      (= a "--get") (recur (assoc acc :get-key (first more)) (rest more))
+      (nil? (:expr acc)) (recur (assoc acc :expr a) more)
+      (nil? (:success-key acc)) (recur (assoc acc :success-key a) more)
+      :else (die 2 (str "✗ seon-server-call: unexpected argument: " a)))))
+
+(defn ->kw [s]
+  (let [s (cond-> s (str/starts-with? s ":") (subs 1))]
+    (keyword s)))
+
+;; ---------------------------------------------------------------------------
+;; Socket REPL round trip
+;; ---------------------------------------------------------------------------
+
+(defn repl-round-trip
+  "Send `expr` to the socket REPL on `port`; return everything it prints
+   until EOF (the REPL exits when it reads EOF after our one form).
+   Bounded by `deadline-ms` (epoch millis) — a hung server can't wedge us."
+  [port expr deadline-ms]
+  (let [sock (Socket.)]
+    (try
+      (.connect sock (InetSocketAddress. "127.0.0.1" (int port)) 3000)
+      (let [out (.getOutputStream sock)
+            in (.getInputStream sock)
+            buf (byte-array 65536)
+            sb (StringBuilder.)]
+        (.write out (.getBytes (str expr "\n") "UTF-8"))
+        (.flush out)
+        ;; Half-close: the REPL sees EOF after evaluating our form and exits,
+        ;; which closes the socket and ends our read loop at a clean EOF.
+        (.shutdownOutput sock)
+        (loop []
+          (let [remaining (- deadline-ms (System/currentTimeMillis))]
+            (when (neg? remaining)
+              (throw (ex-info "deadline exceeded" {:partial (str sb)})))
+            (.setSoTimeout sock (int (min 1000 (max 1 remaining))))
+            (let [n (try (.read in buf)
+                         (catch SocketTimeoutException _ 0))]
+              (when-not (neg? n)
+                (when (pos? n) (.append sb (String. buf 0 n "UTF-8")))
+                (recur)))))
+        (str sb))
+      (finally
+        (try (.close sock) (catch Exception _))))))
+
+;; ---------------------------------------------------------------------------
+;; Reply parsing
+;; ---------------------------------------------------------------------------
+
+(defn strip-prompts
+  "Remove clojure.main REPL prompt framing (`user=> ` at line starts; the
+   final prompt has no trailing newline) and CRs."
+  [s]
+  (-> s
+      (str/replace "\r" "")
+      (str/replace #"(?m)^[\w.\-]+=> " "")))
+
+(defn read-result
+  "Read every EDN form in the prompt-stripped reply; the result is the LAST
+   form and must be a map (the server fns' response contract). Unknown
+   tagged literals read as tagged-literal values instead of throwing.
+   Returns the map, or nil when the reply doesn't honor the contract
+   (e.g. the REPL printed an exception)."
+  [cleaned]
+  (try
+    (let [rdr (PushbackReader. (StringReader. cleaned))
+          eof (Object.)]
+      (loop [last-form nil saw-form? false]
+        (let [form (edn/read {:default tagged-literal :eof eof} rdr)]
+          (if (identical? form eof)
+            (when (and saw-form? (map? last-form)) last-form)
+            (recur form true)))))
+    (catch Exception _ nil)))
+
+;; ---------------------------------------------------------------------------
+;; Main
+;; ---------------------------------------------------------------------------
+
+(let [{:keys [port timeout-secs get-key expr success-key]} (parse-args *command-line-args*)
+      _ (when (str/blank? (or expr ""))
+          (die 2 "usage: seon-server-call [--port N] [--timeout SECS] [--get KEY] EXPR [SUCCESS-KEY]"))
+      port (or port
+               (when (.exists port-file)
+                 (some-> port-file slurp str/trim parse-long))
+               (die 2 (str "✗ seon-server-call: no --port and no " port-file
+                           " — is the wire-server running? (bin/seon start wire-server)")))
+      deadline (+ (System/currentTimeMillis) (* 1000 (or timeout-secs 30)))
+      raw (try (repl-round-trip port expr deadline)
+               (catch ConnectException _
+                 (die 2 (str "✗ seon-server-call: wire-server REPL not reachable on 127.0.0.1:" port
+                             " — is the wire-server running? (bin/seon start wire-server)")))
+               (catch SocketTimeoutException _
+                 (die 2 (str "✗ seon-server-call: connect to 127.0.0.1:" port " timed out")))
+               (catch clojure.lang.ExceptionInfo e
+                 (die 2 (str "✗ seon-server-call: no complete reply within "
+                             (or timeout-secs 30) "s from 127.0.0.1:" port)
+                      (str "  partial reply: " (pr-str (:partial (ex-data e)))))))
+      result (read-result (strip-prompts raw))]
+  (when-not result
+    (die 2 (str "✗ seon-server-call: reply is not a single EDN map — the server likely "
+                "printed an exception. Raw reply:")
+         (str/trim-newline (strip-prompts raw))))
+  (if get-key
+    (let [v (get result (->kw get-key))]
+      (if (string? v) (println v) (prn v)))
+    (prn result))
+  (if (and success-key (not (get result (->kw success-key))))
+    (System/exit 1)
+    (System/exit 0)))

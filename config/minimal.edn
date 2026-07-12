@@ -1,0 +1,63 @@
+;; The STRICTLY MINIMAL agent-context manifest (agent-ctx Phase 3) — the
+;; `repl`-milestone measurement cluster: ONE context block (the transcript) plus a
+;; ~20-line system prompt, nothing else. Every knob lands as DB state at boot
+;; (config-through-DB); iterate the prompt text freely — it is v0 of a
+;; measured artifact, not doctrine.
+;;
+;; HOW TO RUN a minimal cluster (verified 2026-07-10): SEON_CONFIG is
+;; exported by bin/seon (caller value wins via ${:-}) and inherits into the
+;; pod-<name> process, so the whole boot is:
+;;
+;;   bin/seon bench-bundle                 # once per src change (ephemeral ⇒ frozen bundle)
+;;   SEON_CONFIG=config/minimal.edn bin/seon cluster create min-0 --ephemeral
+;;   # pod port: cat tmp/seon-port-min-0 ; context: /agent/root/debug on it
+;;   bin/seon cluster destroy min-0
+;;
+;; GOTCHA: SEON_CONFIG must ride EVERY later start/restart of that pod too
+;; (`SEON_CONFIG=config/minimal.edn bin/seon restart pod-min-0`) — a bare
+;; restart re-exports the default config/system.edn and the boot reconcile
+;; would re-seed the singleton from it (retracting the system-text datom).
+;;
+;; Structure: aero #include pulls system.edn verbatim; #merge (shallow,
+;; top-level keys) applies the minimal deltas. Whole-key REPLACEMENT is the
+;; point here: :seon.config/agent-context and :seon.config/root-context below
+;; REPLACE system.edn's (so no default blocks, no home-requires override —
+;; the home-ns toolbelt falls back to the consumer default,
+;; seon.eval/home-ns-require-specs, which is exactly what the prompt's
+;; message/complete/wait forms resolve against).
+#merge
+[#include "system.edn"
+
+ {;; system-text: INHERITED from system.edn (the graduated v3.1 — one
+  ;; source since the 2026-07-11 cutover). Override here only when testing
+  ;; a text variant; tag the variant in the ledger.
+
+
+  ;; ── REPL MODE — the per-variant dial (harness flips :batch | :stream
+  ;; per experiment). Seeded → the singleton datom → gates BOTH the turn
+  ;; behavior and the mode's colocated masthead fragment.
+  :seon.config/repl-mode :batch
+
+  ;; ── AGENT-CONTEXT — TWO blocks (v0+ns): the namespaces block + the
+  ;; transcript. Supplying :seon.agent/ctx declares the COMPLETE tree
+  ;; (replaces-wholesale). The transcript block includes the result-decay
+  ;; schedule and the HTML twin that drives the agent view.
+  ;; The namespaces block teaches its own render policy + movement functions
+  ;; in its colocated header (owner directive 2026-07-10 — under minimal
+  ;; context nothing else teaches it).
+  :seon.config/agent-context
+  {:seon.agent/ctx
+   [{:seon.agent.ctx/name :namespaces :seon.agent.ctx/priority 20
+     :seon.render/ai seon.agent.ctx.namespaces/namespaces-block}
+    {:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
+     :seon.render/ai seon.agent.ctx.transcript/transcript-block
+     :seon.render/html seon.agent.ctx.transcript/transcript-block-html
+     :seon.agent.ctx.transcript/result-decay
+     [{:seon.agent.ctx.transcript/from-turn-offset 0 :seon.agent.ctx.transcript/token-cap 16384}
+      {:seon.agent.ctx.transcript/from-turn-offset 2 :seon.agent.ctx.transcript/token-cap 1500}
+      {:seon.agent.ctx.transcript/from-turn-offset 5 :seon.agent.ctx.transcript/token-cap 200}]}]}
+
+  ;; ── ROOT-CONTEXT — root gets the SAME stripped tree (no canvas /
+  ;; core-faults / instrumentation-gaps / orphaned-agents upserts, no
+  ;; orchestration home-requires). Empty override = agent-context as-is.
+  :seon.config/root-context {}}]

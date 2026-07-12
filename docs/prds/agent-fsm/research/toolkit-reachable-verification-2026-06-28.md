@@ -9,7 +9,7 @@ tags: [research, agent, ui, dashboard]
 Hermetic gym re-drive measuring whether Core's two fixes made the `my.*` canvas
 toolkit COMPOSABLE for a live agent:
 
-- `960cb489` (P0) — require `my.data` / `my.ui` / `my.tile` at boot in
+- `960cb489` (P0) — require `my.data` / `my.ui` / `my.canvas` at boot in
   `seon.client` + add them to `canonical-full-my-ns`, so the toolkit indexes and
   renders FULL (worked examples) instead of `(no public fns indexed yet)`.
 - `a850a804` — canvas-first (show-don't-tell) + de-KIND in the byte-stable
@@ -32,8 +32,8 @@ The P0 fix WORKED. `my.ui` rose from **0× → 9× (budget) / 11× (xcat)**. On 
 scenarios where the agent built a tile it COMPOSED `my.ui/section` +
 `my.ui/status-line` + `my.ui/kv-table` — the safelisted dual-render helpers —
 instead of hand-rolling raw `[:div]…[:table]` with guessed classes (the
-pre-fix failure mode). `my.ui` and `my.tile` now render FULL in the prompt
-(my.tile lines 982-1219, my.ui 1221-1510, both WITH worked examples); pre-fix
+pre-fix failure mode). `my.ui` and `my.canvas` now render FULL in the prompt
+(my.canvas lines 982-1219, my.ui 1221-1510, both WITH worked examples); pre-fix
 they were ABSENT entirely. `my.data` re-confirmed strong post-churn (15 / 23).
 The budget judge-fabrication ($155 prose vs correct canvas) did NOT recur — the
 judge now PASSES at 100 ($136 groceries correct). One scenario (goal-board)
@@ -41,7 +41,7 @@ regressed to 0/no-canvas, but that is single-sample DeepSeek variance (the agent
 never modelled the goals — `domain attrs: []` — in the SAME build the other two
 agents composed the toolkit), NOT a reachability barrier.
 
-## Before/after — toolkit-calls `{my.data my.ui my.tile}` (the headline)
+## Before/after — toolkit-calls `{my.data my.ui my.canvas}` (the headline)
 
 | scenario | canvas-updated? | toolkit-calls BEFORE | toolkit-calls AFTER | eval-err-rate | judge |
 |---|---|---|---|---|---|
@@ -51,12 +51,12 @@ agents composed the toolkit), NOT a reachability barrier.
 
 - **`my.ui`: 0 → 9 / 11.** The headline. The render-full fix landed for the agent.
 - **`my.data`: stays 15, climbs to 23 on xcat.** Composes strongly post-churn — re-confirmed.
-- **`my.tile`: 0 across all three — EXPECTED, not a miss.** `my.tile` is INTERACTIVE
+- **`my.canvas`: 0 across all three — EXPECTED, not a miss.** `my.canvas` is INTERACTIVE
   controls (buttons/forms). All three scenarios are read-only data DISPLAYS
   (budget breakdown, goal board, category argmax) — there is nothing to wire a
   button/form to. The static-display surface is `my.ui`, which is exactly what
   rose. A scenario that asks for a clickable control would be needed to exercise
-  `my.tile`.
+  `my.canvas`.
 
 ## The proof — the agent COMPOSES my.ui (was hand-rolling raw hiccup)
 
@@ -84,12 +84,12 @@ In the xcat agent's prompt (`logs/turns/Faw-2606282214/2-…/prompt.txt`) the
 namespace section now carries:
 
 ```
-;;; ┌─ namespace my.tile ─        (lines 982-1219 — FULL body, worked examples)
+;;; ┌─ namespace my.canvas ─        (lines 982-1219 — FULL body, worked examples)
 ;;; ┌─ namespace my.ui ─          (lines 1221-1510 — FULL body, worked examples)
 ;;; ┌─ namespace my.data ─        (lines 571-698 — FULL, group-sum/max-by recipes)
 ```
 
-Pre-fix, `my.ui`/`my.tile` did not appear AT ALL (not even signature-trimmed) —
+Pre-fix, `my.ui`/`my.canvas` did not appear AT ALL (not even signature-trimmed) —
 this is the `(no public fns indexed yet — query by name)` state that still
 applies to the un-canonical `my.*` nses (e.g. `my.kb.source`, `my.workout`).
 
@@ -126,6 +126,6 @@ context miss. A `pass^k` (k>1) re-run would average this out.
 **TOOLKIT NOW COMPOSABLE.** `960cb489` + `a850a804` land for the agent: `my.ui`
 went 0 → 9/11, composed via the safelisted helpers (`section`/`status-line`/
 `kv-table`), `my.data` re-confirmed strong (15/23), and the budget honesty
-regression is fixed (judge 0→100). `my.tile` stays 0 because no scenario here
+regression is fixed (judge 0→100). `my.canvas` stays 0 because no scenario here
 asks for an interactive control — render an interactive-control scenario to
 exercise it. The night's toolkit work LANDS.

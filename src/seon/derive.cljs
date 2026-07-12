@@ -90,7 +90,7 @@
    One of :idle/:running/:paused/:terminated. Reads `terminated-at`,
    whether it has an OPEN run
    ([[current-run]]), and that run's `paused-at`, then applies
-   [[state-from-primitives]]. The ONE reader the readline / inspector / loop /
+   [[state-from-primitives]]. The ONE reader the readline / web UI / loop /
    wake gate share."
   {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
                              [:seon.agent/id :seon.agent/id]]
@@ -126,6 +126,30 @@
                    [?r :seon.agent.run/id ?rid]
                    [?t :seon.agent.turn/run ?r]
                    (not [?t :seon.agent.turn/scheduled? true])]
+                 :seon.db/args [run-id]})
+      0))
+
+(defn run-form-count
+  "How many FORMS (persisted evals) ran under run `run-id`.
+
+   The repl-mode `:stream` work budget: a stream turn evals at most one
+   form, so counting TURNS makes the cap a form budget that prose and
+   orientation turns burn for nothing (repl-milestone rung-0 verdict, 2026-07-10) —
+   under `:stream` the loop bounds work by THIS count instead. Joins
+   `:seon.agent.turn/run` → `:seon.agent.turn/evals` over the explicit
+   db value; excludes schedule-fire turns like [[run-turn-count]]."
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+                             [:seon.agent.run/id :seon.agent.run/id]]
+                  :int]}
+  [db run-id]
+  (or (db/query {:seon.db/db db
+                 :seon.db/query
+                 '[:find (count ?e) . :in $ ?rid
+                   :where
+                   [?r :seon.agent.run/id ?rid]
+                   [?t :seon.agent.turn/run ?r]
+                   (not [?t :seon.agent.turn/scheduled? true])
+                   [?t :seon.agent.turn/evals ?e]]
                  :seon.db/args [run-id]})
       0))
 
@@ -279,6 +303,58 @@
        (keep #(error-storm db %))
        (sort-by :seon.agent/id)
        vec))
+
+;; ============================================================
+;; Schedule-wake circuit breaker (multi-agent-context Piece 2d) — a derived
+;; crash-loop guard. With no auto-rewake, the ONE autonomous repeat-wake source
+;; is schedules; a deterministic wedge + a periodic schedule is a slow crash
+;; loop. `recent-crash-count` windows over the STORED `:seon.agent.run/closed-at`
+;; instant (NOT `:db/txInstant`, which can't be backdated in tests);
+;; `schedule-breaker-tripped?` compares it to a config-supplied N. Pure over
+;; (db, now, dials) — nothing stored, so the window sliding past re-enables
+;; schedules on its own (worst case one wedge per window while the cause lasts).
+;; ============================================================
+
+(defn recent-crash-count
+  "Count of this agent's runs closed `:crashed` at/after `since` over `db`.
+
+   Windows over the stored `:seon.agent.run/closed-at` instant (`:db/txInstant`
+   can't be backdated, so a stored close instant is what a test windows over).
+   A pure count — the breaker's state IS the run log, nothing stored."
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+                             [:seon.agent/id :seon.agent/id]
+                             [:since :inst]]
+                  :int]}
+  [db agent-id since]
+  (->> (db/query {:seon.db/db db
+                  :seon.db/query
+                  '[:find [?at ...] :in $ ?aid
+                    :where
+                    [?a :seon.agent/id ?aid]
+                    [?r :seon.agent.run/agent ?a]
+                    [?r :seon.agent.run/closed-reason :crashed]
+                    [?r :seon.agent.run/closed-at ?at]]
+                  :seon.db/args [agent-id]})
+       (filter #(>= (.getTime ^js %) (.getTime ^js since)))
+       count))
+
+(defn schedule-breaker-tripped?
+  "Is the schedule-wake circuit breaker TRIPPED for this agent at `now`?
+
+   True when ≥`n` of its runs closed `:crashed` within the last `window-ms`
+   (via [[recent-crash-count]]). Pure over (db, now, dials) — the caller
+   supplies the config-dialed N + window; nothing stored. Human/agent MESSAGES
+   still wake a tripped agent — only SCHEDULE wakes are refused (the caller
+   gates on this)."
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+                             [:seon.agent/id :seon.agent/id]
+                             [:seon.agent/now :inst]
+                             [:seon.config.breaker/crash-count :int]
+                             [:seon.config.breaker/window-ms :int]]
+                  :boolean]}
+  [db agent-id now n window-ms]
+  (>= (recent-crash-count db agent-id (js/Date. (- (.getTime ^js now) window-ms)))
+      n))
 
 ;; ============================================================
 ;; The agent FINGERPRINT — one map of the whole derived state. A pure DERIVED

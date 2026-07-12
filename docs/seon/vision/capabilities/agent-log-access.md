@@ -21,4 +21,4 @@ Agents can query and search their own logs through safe REPL functions and a web
 ## Related
 
 - Components: [[components/web-layer]], [[components/dev-tools]]
-- PRDs: [[prds/logging-system/prd]]
+- PRDs: `prds/logging-system/prd`

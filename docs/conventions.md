@@ -56,7 +56,7 @@ where the code runs:
 
 - **`.cljs`** — on-device code: the agent loop, `seon.eval`, `seon.ctx`,
   `seon.render`, `seon.db` (the pod's read-local + write-forwarding face),
-  `seon.agent.*`, the inspector UI (`seon.web.inspector`/`serve`).
+  `seon.agent.*`, the web UI (`seon.web.serve`/`debug`).
 - **`.clj`** — server/heavy code: the authoritative datahike writer and the
   Integrant-managed JVM app.
 - **`.cljc`** — only genuinely platform-portable code (e.g. `seon.schema`,
@@ -82,7 +82,7 @@ intricate as it needs to be. The public ns is the discoverable contract; the
 
 Reach for `.internal` whenever a public fn's helpers would otherwise bloat the
 context the agent reads. Keep the public surface to the named request/response
-schemas plus the verb fns.
+schemas plus the function fns.
 
 ---
 
@@ -309,9 +309,9 @@ retract it explicitly — omitting a key means "leave unchanged".)
 
 ---
 
-## Errors Are Values (agent-facing verb boundaries)
+## Errors Are Values (agent-facing function boundaries)
 
-Functions an agent calls directly — the capability verbs — **return an
+Functions an agent calls directly — the capability functions — **return an
 envelope, they do NOT throw**. The canonical shape:
 
 ```clojure
@@ -324,14 +324,26 @@ This is a hard convention, not a style: an agent's eval must survive a bad call
 and read the failure as data, the same way `seon.db/transact!` and
 `seon.agent.search/grep` do. Two consequences:
 
-1. **`^:async` verbs are excluded from instrumentation's throwing validator**
-   (it would break the never-throws contract) — they're listed in
-   `seon.instrument/skip-syms`. The `:malli/schema` stays as the discoverable
-   contract; the function body's guards enforce shape and return the error
-   envelope instead.
+1. **The fn's body owns SEMANTIC failures; instrumentation owns SHAPE.** A
+   semantically-bad call (blank content, denied path, unknown id) returns the
+   `::ok? false` envelope from the body's guards; a shape-invalid call trips
+   the instrumentation validator, which the eval boundary surfaces as a
+   structured `:seon/error` value — data, never a crash. The only fns with NO
+   wrapper are the structurally unwrappable async shapes
+   (`seon.instrument/async-unwrappable?` — an `^:async` fn that is variadic /
+   multi-arity, e.g. `seon.db/transact!`); for those the `:malli/schema` stays
+   the discoverable contract and the body's guards enforce shape too.
 2. **Callers MUST read the envelope.** An eval can succeed while the write
    didn't happen (`::ok? false`). Translate cryptic underlying errors into a
    guiding `::error` and preserve the original at `::raw-error`.
+3. **A specced `^:async` fn must NEVER reject with an expected error.** The
+   instrument wrapper records a Promise rejection as a `:core` fault — under
+   the dev pod's `:seon.config/on-core-error :crash` dial that EXITS the pod.
+   Expected errors (transport failures, timeouts, non-2xx, invalid input) ride
+   the VALUE channel as the surface's existing envelope (`:seon.ai/error`,
+   `{:seon.db/ok? false}`, `:seon/error`). Rejection is reserved for genuine
+   bugs and the deliberate boot fail-loud gates. Canonical fix:
+   `seon.ai.openai-compat/stream-until-form!` (e6295ecd).
 
 When an error is genuinely a caller bug to fix vs. a core bug to report, tag it:
 `:seon.error/data` carries `:seon.error/kind` (`:user-input` vs `:core-bug`).
@@ -361,9 +373,10 @@ instrumentation error, **read it and fix the root cause** — either you called
 the function wrong, or the schema doesn't match reality. A wrong schema is a
 bug.
 
-**Opt-out** for the errors-as-values verbs lives in `seon.instrument/skip-syms`
-(a set of fully-qualified symbols / `[ns fn]` pairs), because the CLJS analyzer
-strips schema-prop markers from `:malli/schema` metadata.
+**Opt-out is structural, never a name list**: `seon.instrument/async-unwrappable?`
+computes it from real properties (the `^:async` flag + the live fn's arity shape +
+the schema form) — an async fn that cannot take the Promise-aware injecting
+wrapper registers no wrapper at all. There is no hand-maintained symbol set.
 
 ### Schema Introspection
 
@@ -640,7 +653,7 @@ schema's edges; generative tests alone don't show real-world usage.)
 - **Live verification:** to verify a single behavior fast, eval the fn directly
   against the live pod rather than running a whole test namespace. **Live proof,
   not inference** — read a datom back, observe the running system.
-- **JVM track (paused):** tests run inside the running JVM via REPL verbs —
+- **JVM track (paused):** tests run inside the running JVM via REPL functions —
   `(user/run-tests 'seon.foo-test)`, `(user/test-affected 'seon.foo)` — never by
   spawning a separate process.
 
@@ -650,7 +663,7 @@ See the `/clojure-testing` skill for fixtures, generators, and debugging.
 
 Show the intended workflow — executable documentation. For a behavior that
 doesn't touch the DB, a plain `cljs.test/async` test is enough — the
-capability verbs return Promises, so await them (`<p!` / `.then`) and read the
+capability functions return Promises, so await them (`<p!` / `.then`) and read the
 envelope:
 
 ```clojure
@@ -731,7 +744,7 @@ on the pod.
 ;;      on a registered attr, addressed by lookup-ref [::doc-id "d1"]
 {:seon/id "abc" ::title "x"}
 
-;; BAD: an agent-facing verb that THROWS instead of returning an envelope
+;; BAD: an agent-facing function that THROWS instead of returning an envelope
 (defn grep [req] (throw (ex-info "no match" {})))   ; must return {::ok? false …}
 
 ;; BAD: using :or in destructuring for optional API values
@@ -871,8 +884,8 @@ the prose `;` lines; don't hand-roll a `(str ";; " …)` prefixer in a section f
 ## SSE Patterns
 
 See the `/datastar-web-ui` skill for SSE patterns (direct response vs background
-push, buffer design, refresh triggers, handler hot reload). The pod's UI is
-`seon.web.inspector` + `serve` (hiccup, `.cljs`).
+push, buffer design, refresh triggers, handler hot reload). The pod's web UI is
+`seon.web.serve` + `debug` (hiccup, `.cljs`).
 
 ---
 

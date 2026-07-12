@@ -9,6 +9,7 @@
   (:require
     [cljs.test :as t :refer [deftest is testing]]
     [clojure.string :as str]
+    [seon.error :as error]
     [seon.render :as render]
     [seon.render.value :as rv]
     [seon.ui.clojure :as cljhl]
@@ -21,9 +22,19 @@
 ;; fallback (throw → error card, never an exception). Under the harness
 ;; strict default (SEON_RENDER_STRICT=1) that render THROWS by design, so
 ;; force the fail-loud dial OFF for this ns (process-global env, async-safe).
+;; Restore the CALLER's value, not a hardcoded "1" — an isolated bare-node run
+;; (env unset) must not leave the dial flipped ON for whatever runs next.
+(defonce ^:private prior-strict-env
+  (atom nil))
+
 (t/use-fixtures :once
-  {:before (fn [] (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT) "0"))
-   :after  (fn [] (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT) "1"))})
+  {:before (fn []
+             (reset! prior-strict-env
+                     (.. js/globalThis -process -env -SEON_RENDER_STRICT))
+             (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT) "0"))
+   :after  (fn []
+             (set! (.. js/globalThis -process -env -SEON_RENDER_STRICT)
+                   (or @prior-strict-env "")))})
 
 ;; ============================================================
 ;; clj->hiccup — the server-side Clojure highlighter.
@@ -121,8 +132,16 @@
 
 (deftest block-throwing-delegate-yields-error-card
   (testing "a throwing delegate becomes an error card (html) / error text (ai), not an exception"
-    (with-redefs [md/md->hiccup (fn [& _] (throw (js/Error. "boom")))]
-      (let [out (s (render/block :html {:seon.render/markdown "hi"}))]
+    ;; A proper MULTI-ARITY throwing fn: the render path calls md->hiccup via
+    ;; its compiled arity-1 method, so a variadic-only (fn [& _]) fails with
+    ;; "arity$1 is not a function" (a DIFFERENT error than the intended "boom").
+    ;; Declaring both arities makes the fixture provoke the real throw.
+    (with-redefs [md/md->hiccup (fn ([_]   (throw (js/Error. "boom")))
+                                  ([_ _] (throw (js/Error. "boom"))))]
+      ;; The throwing delegate is a :core fault (md is seon.*); deliberate here,
+      ;; so bracket it EXPECTED (render/block guards+records synchronously).
+      (let [out (error/expecting-core-fault!
+                  (fn [] (s (render/block :html {:seon.render/markdown "hi"}))))]
         (is (str/includes? out "render error"))
         (is (str/includes? out "block render failed"))))))
 

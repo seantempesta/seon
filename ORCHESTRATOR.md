@@ -8,7 +8,7 @@ tags: [orchestrator]
 
 **This file is for the main Claude Code instance** — the one the human interacts with directly. You coordinate work, delegate to agents via the Task/Agent tool, and protect your context window. Implementation happens in agents, not here.
 
-Read `CLAUDE.md` first — it has the shared principles everyone follows. The current focus lives there too: the **CLJS pod is ACTIVE** (Node runtime, agent loop, inspector UI on `http://127.0.0.1:7890`, backed by the `wire-server` datahike writer), and the **JVM main-app track is PAUSED**. Assume pod context unless a task is explicitly JVM-track.
+Read `CLAUDE.md` first — it has the shared principles everyone follows. The current focus lives there too: the **CLJS pod is ACTIVE** (Node runtime, agent loop, web UI on `http://127.0.0.1:7890`, backed by the `wire-server` datahike writer), and the **JVM main-app track is PAUSED**. Assume pod context unless a task is explicitly JVM-track.
 
 ---
 
@@ -22,7 +22,7 @@ You coordinate work and delegate to agents. Handle only trivial edits (typos, re
 
 ### Johnson's Rules (Adapted for Seon)
 
-1. **Small teams of excellent people.** Scope tasks tight. Max ~7 files per agent. Small complete > large half-done.
+1. **Small teams of excellent people.** Scope each agent to one coherent unit of work — a task it can own end-to-end and verify. Agents are more capable than a file-count cap implies; scope by coherence, not by counting files. Complete > half-done.
 2. **Full accountability.** Every agent owns their work end-to-end. They run tests, report honest results, and flag what they don't understand. No "it compiles so it's done."
 3. **Walk the floor.** When an agent reports completion, verify. Launch a verification agent with specific doubts. Read the diff. Don't take "done" at face value.
 4. **Reject substandard work.** If an agent's work introduces warnings, skips tests, ignores lint, or sweeps complexity under the rug — send it back. Be specific about what's wrong and what "done" actually looks like.
@@ -143,7 +143,7 @@ Subagents receive `CLAUDE.md` automatically and the `seon-agent` / `seon-verifie
 
 ## Two-Lane Build — Keep Lanes Unblocked
 
-The active work is a **two-lane build: Core and UI**, coordinating through `docs/prds/agent-fsm/coordination.md` plus git on the shared `feature/agent-fsm` tree. Your job includes keeping both lanes unblocked and **not racing pod restarts** — only one lane reboots the live pod at a time, and a `cluster reset` is coordinated, never reflexive. When a lane lands a keystone the other depends on, surface it (commit + coordination note) before dispatching dependent work.
+The active work is a **two-lane build: Tooling/engine and Eval/measurement**, coordinating through `docs/prds/agent-ctx/coordination.md` plus git on the shared `feature/agent-ctx` tree. Your job includes keeping both lanes unblocked and **not racing pod restarts** — the default pod (7890) is shared, so a `cluster reset default` is coordinated, never reflexive; acme (7980) is the eval lane's disposable harness. When a lane lands a keystone the other depends on, surface it (commit + coordination note) before dispatching dependent work.
 
 ---
 
@@ -165,7 +165,7 @@ The pod does **not** embed datahike. It forwards every write over a Unix socket 
 
 | Process | Role | Endpoint |
 |---------|------|----------|
-| `pod` | CLJS runtime — agent loop + inspector UI | HTTP `7890` |
+| `pod` | CLJS runtime — agent loop + web UI | HTTP `7890` |
 | `cljs-watch` | recompiles `.cljs` on save, feeds the pod's build | `logs/cljs-watch.log` |
 | `wire-server` | central datahike writer (sole writer) | socket REPL `7891` (`nc` only); store `data/clusters/default/store` |
 
@@ -199,7 +199,7 @@ tail -f logs/wire-server.log    # datahike writer
 
 ### `[JVM track — paused]`
 
-The embedded-datahike JVM app (`./bin/run`, nREPL 7888 / HTTP 8080, `(user/reset)` / `(user/restart-db!)` / `(user/db-reset!)`) is paused. Don't drive it for active work. If a task is explicitly JVM-track, see `CLAUDE.md` "Code Reloading" and "REPL verbs + recovery" rather than duplicating those verbs here.
+The embedded-datahike JVM app (`./bin/run`, nREPL 7888 / HTTP 8080, `(user/reset)` / `(user/restart-db!)` / `(user/db-reset!)`) is paused. Don't drive it for active work. If a task is explicitly JVM-track, see `CLAUDE.md` "Code Reloading" and "REPL fns + recovery" rather than duplicating those fns here.
 
 ---
 
@@ -213,7 +213,7 @@ bin/test-cljs                   # fresh :node-test JVM (no live-pod contention),
 
 To verify a single behavior fast, **eval the fn directly against the live pod** rather than running a whole test ns. **Never fire overlapping `cljs.test/run-tests` in the live pod** — it wedges the shared async continuation; restart the pod for a pristine run.
 
-Run the full suite **once**, at the natural checkpoint after a unit of work completes — never after each sub-step (token economy; everything is in git and reverts are cheap). `[JVM track — paused]` test verbs (`(user/run-tests …)`) live in `CLAUDE.md`.
+Run the full suite **once**, at the natural checkpoint after a unit of work completes — never after each sub-step (token economy; everything is in git and reverts are cheap). `[JVM track — paused]` test fns (`(user/run-tests …)`) live in `CLAUDE.md`.
 
 **Third-party harness:** a fully isolated second cluster (`bin/acme`, pod 7980, wire REPL 7981) reproduces downstream-consumer bugs without touching the live default cluster. Never `bin/seon start/stop/restart` the live cluster to chase a consumer bug — use the harness. See `docs/seon/components/acme-harness.md`.
 

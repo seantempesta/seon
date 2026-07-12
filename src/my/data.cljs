@@ -1,7 +1,7 @@
 (ns my.data
   "Turn stored rows into the number your human asked for — SUM, argMAX,
    group-then-sum — WITHOUT hand-rolling a datalog aggregate. Datalog's
-   aggregates have two traps these verbs make unreachable:
+   aggregates have two traps these functions make unreachable:
 
      - the `(sum ?x)` DEDUP collapse — an aggregate runs over the
        deduplicated projected tuples, so two rows of 5 sum to 5, not 10,
@@ -23,7 +23,7 @@
 
    The universal arrow is `(reducer (merge (producer …) {:my.data/key k}))`:
    a producer's envelope already carries `:seon.items/items`, so merging in
-   the key gives a valid reducer request. All four verbs are SYNC (reads
+   the key gives a valid reducer request. All four functions are SYNC (reads
    only — no `^:async`, no Promise to trip on) and map-in/map-out.
 
    NB rows does NOT clip — aggregation needs every row, so a truncated
@@ -68,7 +68,7 @@
          totals (group-sum (merge exp {:my.data/group-key :my.expense/category
                                        :my.data/key       :my.expense/amount-usd}))]
      (max-by (merge totals {:my.data/key :my.data/total})))
-   ;; => {:my.data/group :dining :my.data/total 106}"
+   ; returns «map: :my.data/group :dining, :my.data/total 106»"
   {:malli/schema [:=> [:cat ::rows-request] :seon.items/envelope]}
   [{::keys [attr]}]
   (let [items (vec (db/query '[:find [(pull ?e [*]) ...] :in $ ?a :where [?e ?a]] attr))]
@@ -86,7 +86,7 @@
 
    ;; (merge a producer envelope with the key, then reduce):
    (sum-by (merge (rows {:my.data/attr :my.subscription/name})
-                  {:my.data/key :my.subscription/monthly-usd}))  ;=> 101"
+                  {:my.data/key :my.subscription/monthly-usd}))  ; returns 101"
   {:malli/schema [:=> [:cat ::reduce-request] ::total]}
   [{::keys [key] :seon.items/keys [items]}]
   (reduce + 0 (keep key items)))
@@ -100,7 +100,7 @@
    ;; the priciest subscription ENTITY (read its name off the row):
    (:my.subscription/name
      (max-by (merge (rows {:my.data/attr :my.subscription/name})
-                    {:my.data/key :my.subscription/monthly-usd})))  ;=> \"Adobe CC\""
+                    {:my.data/key :my.subscription/monthly-usd})))  ; returns \"Adobe CC\""
   {:malli/schema [:=> [:cat ::reduce-request] [:maybe :map]]}
   [{::keys [key] :seon.items/keys [items]}]
   (when (seq items)
@@ -119,7 +119,7 @@
                                     {:my.data/group-key :my.expense/category
                                      :my.data/key       :my.expense/amount-usd}))
                   {:my.data/key :my.data/total}))
-   ;; => {:my.data/group :dining :my.data/total 106}"
+   ; returns «map: :my.data/group :dining, :my.data/total 106»"
   {:malli/schema [:=> [:cat ::group-request] :seon.items/envelope]}
   [{::keys [group-key key] :seon.items/keys [items]}]
   (let [rows (->> items

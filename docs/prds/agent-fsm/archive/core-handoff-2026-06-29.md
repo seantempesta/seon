@@ -26,7 +26,7 @@ Evidence: [[research/core-queue-verification-2026-06-29]] (commit `eb955006`).
 | #40 turn at/status | ✅ **CLOSE — not real** | `seon.db` validates per-attribute, never entity-level; the "required" prop is never enforced (`close-turn!` omits `at` and succeeds). |
 | **Rendering / #74 / #42** | 🔴 REAL — signature-trim active | `seon.agent` + long-tail `my.*` render `:signature` (inert comments); owner-rejected. |
 | #73 alias collision | 🔴 REAL (softened by an error-hint) | `db/`/`todo/` undefined in agent-authored `my.*` nses. |
-| #56 toolkit unqualified | 🔴 REAL | `my.ui`/`my.data`/`my.tile` need full qualification. |
+| #56 toolkit unqualified | 🔴 REAL | `my.ui`/`my.data`/`my.canvas` need full qualification. |
 | #83 writes-tests | 🔴 REAL/OPEN | no test-writing cue in always-on; `namespaces.cljs:89` calls deftests "noise". |
 | #71 cljs skill gotcha | 🟡 PENDING (doc) | `(fn [])` vs `constantly` arity-0. |
 | #43 / #45 / #66 / #81 / #88 | 🟡 OWNER-DECISION pending | do NOT implement without the owner (see § B). |

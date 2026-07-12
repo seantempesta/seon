@@ -24,9 +24,21 @@
 
 (set! *warn-on-reflection* true)
 
-;; Socket subscribers: a flat set of OutputStreams. Each gets every event;
-;; the host demuxes the single tagged stream by db-name.
+;; Socket subscribers: a flat set of `{::ch <SocketChannel> ::out <OutputStream>}`
+;; entries. Each gets every event; the host demuxes the single tagged stream by
+;; db-name. The CHANNEL is retained alongside the stream so a dropped (dead)
+;; subscriber's underlying FD can be explicitly `.close`d — dropping only the
+;; OutputStream reference leaks the SocketChannel FD until GC finalizes it,
+;; which on a long-lived low-churn writer JVM may be never (measured: +1 FD per
+;; ephemeral-cluster create/destroy cycle, the pub subscription never reclaimed).
 (defonce ^:private socket-subscribers (atom #{}))
+
+(defn- close-subscriber!
+  "Close a dropped subscriber's SocketChannel (its FD). Idempotent + never
+   throws — a broadcast write already failed on this peer, so the close is
+   best-effort reclamation, not correctness."
+  [{::keys [^SocketChannel ch]}]
+  (when ch (try (.close ch) (catch Throwable _))))
 
 ;; In-process per-DB subscribers: {db-name -> {sub-id -> (fn [event])}}.
 ;; Routed: a subscriber only fires for its own db-name's events.
@@ -74,13 +86,23 @@
   ;; (a) socket subscribers — every one gets every (tagged) event.
   (let [snap @socket-subscribers
         dead (volatile! [])]
-    (doseq [^OutputStream out snap]
+    (doseq [{::keys [^OutputStream out] :as sub} snap]
       (try
-        (codec/write-frame! out event)
+        ;; Datahike may invoke listeners concurrently on writer threads.
+        ;; A frame is two writes (length + Transit payload); without a
+        ;; per-subscriber lock, concurrent broadcasts interleave those bytes
+        ;; and the Node subscriber reads a valid length followed by fragments
+        ;; of two payloads. That creates a reconnect/replay loop which pegs the
+        ;; pod CPU and repeatedly re-renders every open feed.
+        (locking out
+          (codec/write-frame! out event))
         (catch Throwable _
-          (vswap! dead conj out))))
+          (vswap! dead conj sub))))
     (when (seq @dead)
-      (swap! socket-subscribers #(reduce disj % @dead))))
+      ;; Drop dead subscribers from the set AND close their channels — a bare
+      ;; disj would leak the SocketChannel FD (see socket-subscribers docstring).
+      (swap! socket-subscribers #(reduce disj % @dead))
+      (run! close-subscriber! @dead)))
   ;; (b) in-process per-DB subscribers — only those keyed by this event's
   ;; db-name. A nil/absent db-name routes to no per-DB subscriber.
   (when-let [db-name (:seon.store.wire/db-name event)]
@@ -103,7 +125,7 @@
                        (loop []
                          (let [^SocketChannel ch (.accept server)
                                out (Channels/newOutputStream ch)]
-                           (swap! socket-subscribers conj out))
+                           (swap! socket-subscribers conj {::ch ch ::out out}))
                          (recur))
                        (catch java.nio.channels.AsynchronousCloseException _ nil)
                        (catch Throwable t

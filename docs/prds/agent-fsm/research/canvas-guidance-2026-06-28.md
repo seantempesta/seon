@@ -9,7 +9,7 @@ tags: [agent, ui, research, gym]
 ## TL;DR
 
 Phase A of the gym proved `canvas-updated? false` on EVERY scenario — agents
-almost never set `:seon.render.live-tile/content`. This arc closes that gap and
+almost never set `:seon.render.live-canvas/content`. This arc closes that gap and
 makes it measured, all in the UI-context lane (no Core edits):
 
 1. **Strengthened the always-on live-tile block** (`src/seon/agent/ctx/live_tile.cljs`)
@@ -69,7 +69,7 @@ render threw:
 ;
 ; ⚠ YOUR CANVAS IS BROKEN — your human currently sees an
 ; error tile, not your content. Fix the fn/hiccup driving
-; :seon.render.live-tile/content (its source is below).
+; :seon.render.live-canvas/content (its source is below).
 ; Why: <the exception message>
 ; {…flattened ex-data…}
 ;
@@ -91,7 +91,7 @@ Then the canvas-primary guidance + compose pointer + the hoisted safelist:
 ;   ; EASIEST — COMPOSE my.ui dual-render helpers …
 ;   (seon.db/transact! {:seon.db/tx-data
 ;     [{:seon.agent/id (seon.db/current-agent-id)
-;       :seon.render.live-tile/content
+;       :seon.render.live-canvas/content
 ;       (:seon.render/hiccup (my.ui/section { … }))}]})
 ;
 ;   ; (a) literal hiccup …   ; (b) a tile FN (re-derives) …
@@ -145,7 +145,7 @@ EXISTING `:canvas-updated` predicate kind (per-agent, axis `:drives-canvas`):
   ends-idle, under-cap, + `:llm-judge` the board conveys all three goals.
 
 No-cheating: nothing tells the agent to "use a tile" or hands it the answer; the
-standing live-tile guidance + the `ui-live-tiles` skill teach the medium generally.
+standing live-tile guidance + the `ui-canvas` skill teach the medium generally.
 
 ## What the post-drive observation should confirm
 

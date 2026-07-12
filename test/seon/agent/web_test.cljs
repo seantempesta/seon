@@ -16,11 +16,14 @@
    4. Binary content is a legible refusal naming the content-type.
    5. An oversized body is read up to the byte cap with :truncated? true.
 
-   Hermetic: the transport (int/!fetch-impl) and DNS resolver
-   (int/!lookup-impl) are FAKED — no network. Blobs go to a pid-scoped
+   Hermetic: the transport (int/!fetch-impl), DNS resolver
+   (int/!lookup-impl), and web-access POLICY (int/!policy-override) are
+   FAKED — no network, no config file staged. Blobs go to a pid-scoped
    tmp dir; each test runs against a fresh :memory conn root-set! as
    db/*conn* (the my.blob-test pattern). SEON_WEB is granted for the run
-   and restored after."
+   and restored after; the policy baseline is :public-only (each :after
+   restores it), individual tests override to :open / :allowlist to prove
+   those modes."
   (:require
     ["node:fs" :as nfs]
     ["node:path" :as npath]
@@ -44,16 +47,21 @@
 (defonce ^:private !saved-dir (atom nil))
 (defonce ^:private !saved-env (atom nil))
 
+;; The :public-only baseline every test starts from — the SSRF-safe policy.
+(def ^:private public-only {:seon.agent.web/policy :public-only})
+
 (use-fixtures :once
   {:before (fn []
              (reset! !saved-dir @blob/!dir)
              (reset! blob/!dir fixture-dir)
              (.rmSync nfs fixture-dir #js {:recursive true :force true})
              (reset! !saved-env (aget (.-env js/process) "SEON_WEB"))
-             (aset (.-env js/process) "SEON_WEB" "1"))
+             (aset (.-env js/process) "SEON_WEB" "1")
+             (reset! int/!policy-override public-only))
    :after  (fn []
              (reset! blob/!dir @!saved-dir)
              (.rmSync nfs fixture-dir #js {:recursive true :force true})
+             (reset! int/!policy-override nil)
              (if-some [v @!saved-env]
                (aset (.-env js/process) "SEON_WEB" v)
                (js-delete (.-env js/process) "SEON_WEB")))})
@@ -61,7 +69,8 @@
 (use-fixtures :each
   {:after (fn []
             (reset! int/!fetch-impl nil)
-            (reset! int/!lookup-impl nil))})
+            (reset! int/!lookup-impl nil)
+            (reset! int/!policy-override public-only))})
 
 (defn- fresh-conn []
   (let [cfg {:store              {:backend :memory :id (random-uuid)}
@@ -167,6 +176,54 @@
                      (is (false? ok?))
                      (is (re-find #"(?i)private|blocked" msg) "names the SSRF refusal")
                      (is (str/includes? msg "127.0.0.1") "names the offending address")))))
+      done)))
+
+;; ---------------------------------------------------------------------------
+;; 2a'. The :open policy reaches loopback — bench clusters serving loopback
+;; fixtures. Policy is host-owned config; grants surfaces the resolved mode.
+;; ---------------------------------------------------------------------------
+
+(deftest open-policy-permits-loopback
+  (async done
+    (reset! int/!fetch-impl
+            (fake-fetch (fn [_] (html-response "<html><body><p>Established in 1920.</p></body></html>"))))
+    (reset! int/!policy-override {:seon.agent.web/policy :open})
+    (run-test
+      (fn [_]
+        (-> (web/fetch {:seon.agent.web/url "http://127.0.0.1:64999/history.html"})
+            (.then (fn [{ok?     :seon.agent.web/ok?
+                         preview :seon.agent.web/preview}]
+                     (is (true? ok?) "loopback fetch RUNS under the :open policy")
+                     (is (str/includes? (str preview) "1920") "the fixture body came through")
+                     (is (= :open (:seon.agent.web/policy (web/grants)))
+                         "grants surfaces the resolved policy")))))
+      done)))
+
+;; ---------------------------------------------------------------------------
+;; 2a''. The :allowlist policy gates by domain — an in-list host (or its
+;; subdomain) is reachable, an out-of-list host is refused.
+;; ---------------------------------------------------------------------------
+
+(deftest allowlist-policy-gates-by-domain
+  (async done
+    (reset! int/!lookup-impl (public-dns))
+    (reset! int/!fetch-impl (fake-fetch (fn [_] (html-response "<html><body><p>allowed body</p></body></html>"))))
+    (reset! int/!policy-override
+            {:seon.agent.web/policy :allowlist
+             :seon.agent.web/allowed-domains ["example.com"]})
+    (run-test
+      (fn [_]
+        (-> (web/fetch {:seon.agent.web/url "https://docs.example.com/page"})
+            (.then (fn [{ok? :seon.agent.web/ok?}]
+                     (is (true? ok?) "a subdomain of a listed domain is reachable")
+                     (is (= ["example.com"] (:seon.agent.web/allowed-domains (web/grants)))
+                         "grants surfaces the allowlist")))
+            (.then (fn [_]
+                     (web/fetch {:seon.agent.web/url "https://evil.org/page"})))
+            (.then (fn [{ok? :seon.agent.web/ok?
+                         msg :seon.error/message}]
+                     (is (false? ok?) "an out-of-list host is refused")
+                     (is (re-find #"(?i)allowlist" msg) "the refusal names the allowlist")))))
       done)))
 
 ;; ---------------------------------------------------------------------------

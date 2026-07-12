@@ -247,7 +247,7 @@ the observable success signal. These are the iteration yardstick.
 - `pull-by-name` named in the brief does not exist — confirm the intended read
   verb is `pull`/`entity` and scrub any docs/teaching that reference it.
 - How much of `seon.agent` layout-editing (`add-section!`/`set-purpose!`/
-  `update-ctx!`) is worth teaching tier-2? The live-tile/section surface is
+  `update-ctx!`) is worth teaching tier-2? The live-canvas/section surface is
   powerful but unproven with DeepSeek — defer to a later battery once the core
   verbs are fluent.
 - Does `render-namespace` reliably land for DeepSeek (does the model reach for

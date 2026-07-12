@@ -1,0 +1,3 @@
+I need to deliver the answer. The request asks for a JSON array with one call object. I'll send it as a message to the user.
+
+(message/user "[{\"name\": \"get_song_lyrics\", \"arguments\": {\"song_title\": \"Bohemian Rhapsody\", \"artist_name\": \"Queen\"}}]")

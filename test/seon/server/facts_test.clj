@@ -8,12 +8,14 @@
    - query by :fact/subject and :fact/predicate work
    - record-fact upsert by :fact/id
 
-   Each test spawns its own JVM writer (in-memory backend) and tears it down."
+   Each test spawns its own JVM writer (in-memory backend) and tears it
+   down. Requests/responses ride the uniform Transit envelope
+   (`:seon.store.wire/*` keys, data-in/data-out — 13e379a4); the old
+   string-keyed pr-str protocol is gone."
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [seon.server.test-util :as tu]
-            [seon.server.transit :as transit]))
+            [seon.server.test-util :as tu]))
 
 (set! *warn-on-reflection* true)
 
@@ -23,7 +25,9 @@
 
 (defn- req! [op extra] (tu/req! op extra))
 
-(defn- result-of [resp] (transit/read-str (get resp "result")))
+(defn- ok? [resp] (= true (:seon.store.wire/ok resp)))
+
+(defn- result-of [resp] (:seon.store.wire/result resp))
 
 ;; ---------- Loaders ----------
 
@@ -35,7 +39,7 @@
 
 (defn- install-schema! []
   (let [schema (read-edn (subs schema-path (count "resources/")))]
-    (req! "transact" {"tx-data" (pr-str schema)})))
+    (req! "transact" {:seon.store.wire/tx-data schema})))
 
 (defn- normalize-fact
   "Match the guest's sidecar-poc.facts/normalize-seed-fact behavior: :fact/object
@@ -48,43 +52,40 @@
 (defn- transact-seed! []
   (let [raw   (read-edn (subs seed-path (count "resources/")))
         norms (mapv normalize-fact raw)]
-    (req! "transact" {"tx-data" (pr-str norms)})))
+    (req! "transact" {:seon.store.wire/tx-data norms})))
+
+(defn- fact-count []
+  (result-of (req! "q" {:seon.store.wire/query '[:find (count ?e) .
+                                                 :where [?e :fact/id _]]
+                        :seon.store.wire/args  []})))
 
 ;; ---------- Tests ----------
 
 (deftest test-schema-installs
   (testing "facts-schema.edn parses and transacts cleanly"
     (let [r (install-schema!)]
-      (is (= true (get r "ok"))
-          (str "schema install failed: " (pr-str r)))
-      (is (pos? (get r "datoms-added"))))))
+      (is (ok? r) (str "schema install failed: " (pr-str r)))
+      (is (pos? (:seon.store.wire/datoms-added r))))))
 
 (deftest test-seed-installs
   (testing "facts-seed.edn parses, normalizes, and transacts cleanly"
     (install-schema!)
     (let [r (transact-seed!)]
-      (is (= true (get r "ok"))
-          (str "seed transact failed: " (pr-str r))))
+      (is (ok? r) (str "seed transact failed: " (pr-str r))))
     ;; Total fact count matches the seed.
-    (let [raw (read-edn (subs seed-path (count "resources/")))
-          q   (req! "q" {"query" "[:find (count ?e) . :where [?e :fact/id _]]"
-                         "args"  []})]
-      (is (= true (get q "ok")))
-      (is (= (count raw) (result-of q))
+    (let [raw (read-edn (subs seed-path (count "resources/")))]
+      (is (= (count raw) (fact-count))
           "all seed facts present"))))
 
 (deftest test-seed-idempotent
   (testing "re-running the seed is a no-op (upsert by :fact/id)"
     (install-schema!)
     (transact-seed!)
-    (let [first-count (result-of (req! "q" {"query" "[:find (count ?e) . :where [?e :fact/id _]]"
-                                            "args"  []}))]
+    (let [first-count (fact-count)]
       (transact-seed!)
       (transact-seed!)
-      (let [final-count (result-of (req! "q" {"query" "[:find (count ?e) . :where [?e :fact/id _]]"
-                                              "args"  []}))]
-        (is (= first-count final-count)
-            "re-seeding did not duplicate facts")))))
+      (is (= first-count (fact-count))
+          "re-seeding did not duplicate facts"))))
 
 (deftest test-query-by-subject
   (testing "query facts by :fact/subject returns all facts about that subject.
@@ -92,13 +93,13 @@
             no more string coercion at the boundary."
     (install-schema!)
     (transact-seed!)
-    (let [q (req! "q" {"query" "[:find ?id ?p
-                                  :where
-                                  [?e :fact/subject :seon/project]
-                                  [?e :fact/id ?id]
-                                  [?e :fact/predicate ?p]]"
-                       "args" []})]
-      (is (= true (get q "ok")))
+    (let [q (req! "q" {:seon.store.wire/query '[:find ?id ?p
+                                                :where
+                                                [?e :fact/subject :seon/project]
+                                                [?e :fact/id ?id]
+                                                [?e :fact/predicate ?p]]
+                       :seon.store.wire/args  []})]
+      (is (ok? q))
       (let [rows (result-of q)]
         (is (pos? (count rows))
             "at least one fact about :seon/project")
@@ -110,13 +111,13 @@
   (testing "query facts by :fact/predicate returns all facts with that predicate"
     (install-schema!)
     (transact-seed!)
-    (let [q (req! "q" {"query" "[:find ?id ?s
-                                  :where
-                                  [?e :fact/predicate :uses-library]
-                                  [?e :fact/id ?id]
-                                  [?e :fact/subject ?s]]"
-                       "args" []})]
-      (is (= true (get q "ok")))
+    (let [q (req! "q" {:seon.store.wire/query '[:find ?id ?s
+                                                :where
+                                                [?e :fact/predicate :uses-library]
+                                                [?e :fact/id ?id]
+                                                [?e :fact/subject ?s]]
+                       :seon.store.wire/args  []})]
+      (is (ok? q))
       (let [rows (result-of q)]
         (is (pos? (count rows))
             "at least one :uses-library fact")
@@ -134,18 +135,17 @@
               :fact/recorded-by :test/bot
               :fact/recorded-at (java.util.Date.)}
           f2 (assoc f1 :fact/object "\"v2\"" :fact/confidence 100)]
-      (req! "transact" {"tx-data" (pr-str [f1])})
-      (req! "transact" {"tx-data" (pr-str [f2])})
-      (let [q (req! "q" {"query" "[:find ?o ?c
-                                    :where
-                                    [?e :fact/id \"test-upsert-1\"]
-                                    [?e :fact/object ?o]
-                                    [?e :fact/confidence ?c]]"
-                         "args" []})
+      (req! "transact" {:seon.store.wire/tx-data [f1]})
+      (req! "transact" {:seon.store.wire/tx-data [f2]})
+      (let [q (req! "q" {:seon.store.wire/query '[:find ?o ?c
+                                                  :where
+                                                  [?e :fact/id "test-upsert-1"]
+                                                  [?e :fact/object ?o]
+                                                  [?e :fact/confidence ?c]]
+                         :seon.store.wire/args  []})
             rows (result-of q)]
         (is (= 1 (count rows))
             "exactly one fact entity with the id")
         (let [[o c] (first rows)]
           (is (= "\"v2\"" o))
-          ;; Float comparison.
           (is (= 100 c) "confidence was updated to 100"))))))

@@ -27,6 +27,40 @@ prose.
 structure (don't author these). Write your reasoning as `;` lines — never type
 `;;` when you actually mean data.
 
+## `#code` — raw foreign-source blocks with ZERO escaping
+
+To pass a chunk of another language (Python, Rust, Go, YAML, a diff…) as data
+WITHOUT escaping its quotes and backslashes, write a `#code` heredoc:
+
+```
+(seon.agent.fs/replace!
+  {:seon.agent.fs/path "app.py"
+   :seon.agent.fs/find #code/python <<PY
+def f(x):
+    """Docs with "quotes" and \d regexes."""
+    return x
+PY
+   :seon.agent.fs/replace #code/python <<PY
+def f(x):
+    return x + 1
+PY
+   })
+```
+
+- Opener `#code/<lang> <<SENTINEL`, then the payload on the next lines, then a
+  line that is **exactly** `SENTINEL` (you pick the word — any `[A-Za-z0-9_-]+`
+  that won't appear alone on a line in your payload). It reads to the inert
+  value `{:seon.code/lang :python :seon.code/text "…"}` — DATA, never run as
+  Clojure. The text is byte-faithful: no quote/backslash escaping, ever.
+- Use it **nested inside a call form** (an argument or map value), as above —
+  that's the point. A bare top-level `#code` is a lone value and gets dropped
+  like any bare literal.
+- Forget the closing `SENTINEL` line and you get a `:read` error naming the
+  sentinel it's still waiting for — fix it the same way you'd close a paren.
+- `seon.agent.fs/replace!`/`insert!`/`write-file` accept a `#code` value
+  anywhere they take a string (`::find`/`::replace`/`::content`), so foreign
+  source crosses into an edit untouched.
+
 ## What the REPL AUTO-FIXES for you (don't sweat these)
 
 A delimiter mistake is repaired in place via parinfer indent-mode and then

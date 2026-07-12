@@ -1,17 +1,23 @@
 ;; The consolidated pod context manifest — read by seon.config via aero
 ;; (`SEON_CONFIG` overrides the path; a per-cluster variant is a SEPARATE file,
-;; not a `#profile`). ABSENT → the pod boots byte-identically to a no-config
-;; world (full env-dir skill scan + the default context tree). PRESENT → the
-;; OPTIONAL override below. Every key fully namespaced. Add a new concern = add
+;; not a `#profile`). ABSENT → no context blocks are seeded. PRESENT → the
+;; declared context tree is reconciled into the database. Every key fully
+;; namespaced. Add a new concern = add
 ;; ONE key here + a resolver in seon.config (the "add more things to it"
 ;; contract).
-{;; ── SKILL CORPUS ──
- ;; The env-dir scan (`SEON_SKILLS_DIR`, default `.claude/skills`) IS the corpus:
- ;; every skill it finds is scanned into the catalog. The always-on skill BODIES
- ;; are the agent-context's `:my.skills/load` presence-set (default `[:repl]`,
- ;; seeded as the `:skill/repl` block). No include/exclude curation — a cluster
- ;; that wants a different corpus points SEON_SKILLS_DIR at its own dir. This
- ;; section carries only the optional `:seon.config/dirs` corpus-dir override:
+;;
+;; CONFIG → DB (config-db-migration 2026-07-10): this manifest is a SEED FILE,
+;; not a runtime dependency. At boot `seon.config/resolve-config-singleton`
+;; resolves every knob to its effective value and the `#{:config}` reconcile
+;; transacts them into the `:seon.config` singleton entity; from then on EVERY
+;; runtime read is a db query (`seon.config/config-view`). So a knob is a DATOM
+;; — replay-visible (a `cluster fork` at a past basis-t sees the caps that were
+;; in force then) and live-tunable (a `db/transact!` to the singleton reaches
+;; every agent with no restart). "Config edit → restart pod" applies a file
+;; edit uniformly; a removed key heals on the next boot reconcile.
+{;; ── PULL-REFERENCE CORPUS ──
+ ;; Corpus files remain available for explicit lookup. They do not install
+ ;; default context blocks. This section carries only the optional directory:
  ;;   :seon.config/skills {:seon.config/dirs ["path/to/skills"]}
  ;; Owner rule (2026-07-02): values the manifest can own do NOT also live in
  ;; .env (env must never shadow config) — the corpus dir moved here from
@@ -27,16 +33,15 @@
  ;;   RUNPOD_API_KEY=<key>
  ;; A live switch is a transact: {:seon.ai/id "config" :seon.ai/provider :diffusiongemma}.
 
- ;; ── NAMESPACES render policy — the EXPLICIT list of WHICH nses render in the
- ;; agent prompt BODY (#42). Every rendered ns shows its REAL FULL SOURCE — the
- ;; budget is bound by CURATION (which nses), never compression (how each):
- ;;   :seon.config/always     → the always-present FULL-source nses
- ;;   :seon.config/current-ns → :full (default — the agent's own ns) | :off
- ;; The agent's current ns + the nses it :require's + third-party (acme) code
- ;; render full ON TOP of this list. Trim `:always` to go lean. (Mirrors
- ;; seon.config/default-namespaces-policy.)
+ ;; ── NAMESPACES policy (#42) — :always is BOOT-STORAGE only (owner decision
+ ;; 2026-07-01, 2eeb3bd9): the boot indexer stores these nses' REAL FULL file
+ ;; source so a per-agent ::full-source pin CAN promote them to full. It does
+ ;; NOT drive render selection — an agent renders its CURRENT ns full
+ ;; (:seon.config/current-ns :full, default; :off → compact) plus its home-ns
+ ;; :require's as compact cards; render selection is the home-requires list
+ ;; below. (Mirrors seon.config/default-namespaces-policy.)
  :seon.config/namespaces
- {:seon.config/always     [my.kb my.data my.ui my.tile
+ {:seon.config/always     [my.kb my.data my.ui my.canvas seon.render.canvas
                            my.plan seon.agent.message seon.agent.lifecycle]
   :seon.config/current-ns :full}
 
@@ -53,33 +58,165 @@
  {:seon.config.render/store-edn-cap      16384
   :seon.config.render/eval-cap           1500
   :seon.config.render/message-cap        4000
+  ;; The citable RESULT BODY of one eval row (chars; seon.eval's persistence
+  ;; clip reads the same knob as a chars/4 token budget — registry row C32).
+  :seon.config.render/result-body-cap    16384
   :seon.config.render/value-max-depth    3
   :seon.config.render/value-max-keys     8
   :seon.config.render/value-max-items    8
   :seon.config.render/value-max-string   80
   :seon.config.render/value-shape-sample 8
   :seon.config.render/value-verbatim-cap 1500
-  :seon.config.render/value-width        72}
+  :seon.config.render/value-width        72
+  ;; TOKEN cap (the caps above are chars) for ONE current-ns auto-run render
+  ;; fn's ai output (seon.agent.ctx.render-fns).
+  :seon.config.render/render-fn-token-cap 2000
+
+  ;; EXPLICIT-CHARACTER render knobs (transcript-render redesign). Each value
+  ;; below IS the default the accessor applies when absent — so this section is
+  ;; byte-identical to omitting it. Flip a knob then `bin/seon restart pod`.
+  :seon.config.render/whitespace     :raw          ; :raw | :visible (·/→ glyphs)
+  :seon.config.render/tabs           :literal      ; :literal | :arrow (→)
+  :seon.config.render/trailing-ws    :off          ; :off | :dot (· on trailing ws)
+  :seon.config.render/content-layout :structured   ; :structured | :single-line
+  :seon.config.render/line-numbers   false}        ; true → 1-based line gutter
+
+ ;; ── CORE-FAULT ESCALATION DIAL (error-blame-strict-gate, RULED 2026-07-04) ──
+ ;; What a :core-fault seon.error/record! does BEYOND persisting its datom:
+ ;;   :crash — persist the datom FIRST, then loud pod exit (dev, only after the
+ ;;            4-file catch-site sweep drains the backlog)
+ ;;   :gate  — pod stays alive; bin/test-cljs + the dev hook fail any run that
+ ;;            accumulated a new :core-fault (SEON-CORE-FAULT marker). SHIPPED.
+ ;;   :log   — datom + the root-agent derived block only (prod/demo).
+ ;; :agent faults never escalate in ANY mode. The SUITE/CI runner stays :gate
+ ;; via config/test.edn (bin/test-cljs default) — a mid-run :core fault must
+ ;; not .exit the shared node-test runner. This DEV manifest flips to :crash
+ ;; (RULED crash-after-sweep, 2026-07-04): the 4-file catch-site sweep + the
+ ;; C41 expected-fault bracket + the C42 agent-form-fault classification fix
+ ;; all landed, so the only thing that reaches the crash path is a genuine,
+ ;; un-bracketed :core bug — fail fast + loud on our own fuckups.
+ :seon.config/on-core-error :crash
+
+ ;; ── FORM-AUTOFIX (repair) — owner rulings 2026-07-05 ──
+ ;; Pre-flight repair of provable near-misses at the agent eval path: a form
+ ;; that fails COMPILE with a unique, compile-proven near match is FIXED and
+ ;; evaluated (visible `↻ fixed: even → even?` note; no silent mutation, no
+ ;; wasted turn). Ambiguity ALWAYS refuses (error + did-you-mean instead).
+ ;; Levels: :off | :safe-syntax (parinfer delimiters only — the pre-ruling
+ ;; behavior) | :symbols (+ def-vs-defn + unique-winner undeclared-var fixes)
+ ;; | :aggressive (enum slot only — NOT implemented). Absent section =
+ ;; :symbols (the ruled default; this mirror is for visibility). Per-class
+ ;; kill switches, e.g. {:seon.repair/undeclared-var false}; class registry =
+ ;; seon.repair/class-levels (enablement is computed, never a call-site list).
+ :seon.config/repair
+ {:seon.config.repair/level :symbols}
+
+ ;; ── WEB-ACCESS POLICY (web-access-policy, RULED 2026-07-04) — the
+ ;; host-owned reachability policy for seon.agent.web/fetch. UNIFIES the old
+ ;; private-range SSRF guard + domain allowlist into ONE config mode:
+ ;;   :open        — no restriction (public AND private/loopback reachable)
+ ;;   :public-only — block internal targets (loopback/RFC-1918/link-local/ULA)
+ ;;                  on every redirect hop — the SSRF-safe posture
+ ;;   :allowlist   — reachable ONLY if the host matches :allowed-domains
+ ;;                  (add :seon.agent.web/allowed-domains ["docs.example.com" …])
+ ;; This (owner's) cluster runs :open — zero friction, and the web_fetch
+ ;; bench's loopback fixtures work with NO special env grant. The CODE/SCHEMA
+ ;; fallback (unset section) is :public-only, so a downstream inheritor is
+ ;; never SSRF-open by accident. Host-owned: the agent reads its policy
+ ;; (web/grants) but nothing in the pod can widen it. The SEON_WEB env var is
+ ;; a SEPARATE concern — it gates whether web fetch is available at all.
+ ;; The same section carries the web-SEARCH backend (seon.agent.web/search):
+ ;; which SERP/grounded provider. Backend is host-owned config; the function is
+ ;; backend-agnostic ({::url ::title ::snippet ::rank} rows). The API key is
+ ;; read live from env, never here — :serper reads SERPER_API_KEY,
+ ;; :gemini-grounding reads GEMINI_API_KEY. Absent ⇒ :gemini-grounding.
+ ;;   :serper           — real Google SERP JSON (google.serper.dev); 2,500
+ ;;                       free/mo then ~$0.30-1/1k; reliable raw {url,title,
+ ;;                       snippet} rows for pick-then-web/fetch. THE DEFAULT.
+ ;;   :gemini-grounding — an LLM ::answer + grounding-redirect URIs; ~2/3 of
+ ;;                       queries return no fetchable URLs (T4 O5). Kept
+ ;;                       config-selectable for synthesize-what-changed queries.
+ :seon.config/web {:seon.agent.web/policy         :open
+                   :seon.agent.web/search-backend :serper
+                   :seon.agent.web/search-model   "gemini-3.1-flash-lite"}
 
  ;; ── AGENT-CONTEXT (v3, config-driven-agent-init) — the two-level context
  ;; config the GENERIC loader (seon.config/resolve-agent-context) consumes. A
- ;; sparse map: every unspecified key (incl. the whole :seon.agent/ctx block
- ;; tree) is filled from its schema :default by the recursive
- ;; default-value-transformer, so `{}` reproduces the byte-parity default. Add a
- ;; key here only to DIFFER from the default (e.g. a lean block set, a per-agent
- ;; scalar). Empty = byte-identical to the no-config default tree.
+ ;; sparse map: the explicit :seon.agent/ctx vector is the complete tree seeded
+ ;; for an agent. There is no hidden code fallback and no implicit skill block.
  ;;
  ;; `:seon.eval/home-requires` — the DEFAULT toolbelt every agent's home ns is
  ;; wired with (OVERRIDES the `seon.eval/home-ns-require-specs` const). Since the
  ;; namespaces block renders "the current ns's requires as compact cards", these
- ;; ARE what a fresh agent sees as its verb surface. Each entry must match
- ;; `seon.eval/require-spec` (`[ns :as alias]` or `[ns :refer [verbs…]]`) — a
+ ;; ARE what a fresh agent sees as its function surface. Each entry must match
+ ;; `seon.eval/require-spec` (`[ns :as alias]` or `[ns :refer [fns…]]`) — a
  ;; bare `[ns]` is rejected by the transact schema, so the `my.*` toolkit carries
  ;; its conventional short alias (kb/data/ui/tile) even though it is called
  ;; full-qualified. `seon.agent` (the orchestration surface) is deliberately
  ;; NOT here — it belongs to root only (see note on :seon.config/root-context).
+ ;; ── SYSTEM TEXT — GRADUATED from the measured minimal arc (v3.1,
+ ;; 2026-07-11; line provenance: docs/prds/agent-ctx/context-rebuild.md).
+ ;; Seeded as the :seon.config/system-text datom at boot; replaces the shipped
+ ;; ctx/system-text guess. minimal*.edn inherit THIS text (one source) and
+ ;; override only when testing a variant.
+ :seon.config/system-text
+  "; ── system ──
+; You are at a live ClojureScript REPL in a long-running Node process —
+; your namespace and definitions persist across turns.
+; ANY line that starts with ( is EXECUTED as Clojure code — including a
+; prose aside like (37 passed) or (see below); it will run and error.
+; A ; line is a comment — ALL prose and reasoning live in ; comments;
+; a prose line must never start with (.
+; The runtime writes each form's value into the transcript, interleaved
+; where the form ran, as a bare  ⟹ <value> ⟸ result/<id>  line. Those
+; glyphs are the runtime's alone — never type ⟹ or ⟸, never start a
+; line with =>, never type a my.ns=> prompt; the runtime writes those.
+; Write forms whose inputs you already have, and push independent
+; threads forward in parallel; anything that depends on a value you
+; have not seen yet waits for its interleaved line.
+; The same goes for result KNOWLEDGE — job-ids, file shas, result/<id>
+; handles, candidate lists arrive only in the runtime's interleaved
+; lines; never invent one to keep a chain going in the same turn —
+; launch, end your turn, read the real id, then poll.
+; result/<id> re-references any prior value — reach for it instead of
+; re-running a form you already computed.
+; in-ns moves you; ns declares or updates a namespace; require loads
+; now and records the dependency; redefining IS updating; ns-unmap
+; removes.
+; Everything you define persists across turns. Across a RESTART only
+; (defn ...), (deftest ...) and (schema/register! ...) survive; a bare
+; (def x ...) and every atom's VALUE are lost — state that must outlive
+; a restart belongs in the db.
+; Errors come back as data — read the error map; nothing throws at you.
+; (message/user \"...\") reaches your human. (complete \"...\") ends the
+; task. (wait) parks until something new arrives.
+; A reply with NO form runs nothing, and several formless replies in a
+; row end your run — deliver every result through (message/user \"...\")
+; or (complete \"...\"), never as bare prose."
+
+ ;; ── THE CONTEXT TREE — the evidenced minimal base (owner cutover
+ ;; 2026-07-11: untested legacy blocks deprecated OUT; ideas return as
+ ;; tested blocks per context-rebuild.md; the old tree is frozen in
+ ;; config/legacy.edn for comparison drives only). Blocks: namespaces
+ ;; (repl+namespaces milestones) · plan (plan milestone, html twin = the
+ ;; human's live plan tile) · transcript (the spine).
  :seon.config/agent-context
- {:seon.eval/home-requires
+ {:seon.agent/ctx
+  [{:seon.agent.ctx/name :namespaces :seon.agent.ctx/priority 20
+    :seon.render/ai seon.agent.ctx.namespaces/namespaces-block}
+   {:seon.agent.ctx/name :canvas :seon.agent.ctx/priority 35
+    :seon.render/ai seon.agent.ctx.canvas/canvas-block}
+   {:seon.agent.ctx/name :plan :seon.agent.ctx/priority 45
+    :seon.render/ai my.plan.internal/plan-block
+    :seon.render/html my.plan.internal/plan-block-html}
+   {:seon.agent.ctx/name :transcript :seon.agent.ctx/priority 100
+    :seon.render/ai seon.agent.ctx.transcript/transcript-block
+    :seon.render/html seon.agent.ctx.transcript/transcript-block-html
+    :seon.agent.ctx.transcript/result-decay
+    [{:seon.agent.ctx.transcript/from-turn-offset 0 :seon.agent.ctx.transcript/token-cap 16384}
+     {:seon.agent.ctx.transcript/from-turn-offset 2 :seon.agent.ctx.transcript/token-cap 1500}
+     {:seon.agent.ctx.transcript/from-turn-offset 5 :seon.agent.ctx.transcript/token-cap 200}]}]
+  :seon.eval/home-requires
   [[seon.agent.message :as message]
    [my.plan :as plan]
    [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
@@ -88,14 +225,15 @@
    [my.kb :as kb]
    [my.data :as data]
    [my.ui :as ui]
-   [my.tile :as tile]
+   [my.canvas :as canvas]
    [my.blob :as blob]
    [seon.agent.search :as search]
+   [seon.agent.fs :as fs]
    [seon.agent.shell :as shell]
    [seon.agent.web :as web]]}
 
  ;; ── ROOT-CONTEXT — a SPARSE override merged over :seon.config/agent-context
- ;; by IDENTITY (id "root"), block upsert-by-:seon.agent.ctx/name. The :live-tile
+ ;; by IDENTITY (id "root"), block upsert-by-:seon.agent.ctx/name. The :canvas
  ;; block sets root's canvas = the system/fleet dashboard, the config-driven
  ;; replacement for the hardcoded client.cljs root branch.
  ;;
@@ -116,10 +254,47 @@
    [my.kb :as kb]
    [my.data :as data]
    [my.ui :as ui]
-   [my.tile :as tile]
+   [my.canvas :as canvas]
    [seon.agent.search :as search]
+   [seon.agent.fs :as fs]
    [seon.agent :as agent]]
   :seon.agent/ctx
-  [{:seon.agent.ctx/name :live-tile :seon.agent.ctx/priority 35
-    :seon.render/ai seon.agent.ctx.live-tile/live-tile-block
-    :seon.render.live-tile/content seon.render.system/system-view}]}}
+  ;; Cutover 2026-07-11: root's :canvas dashboard override DEPRECATED with
+  ;; the legacy tree (returns at the canvas milestone). The three blocks
+  ;; below are KEPT: derived, 0-token-when-healthy fault surfaces (the
+  ;; warnings idea already working reactively); first formally validated at
+  ;; the warnings milestone.
+  [;; ROOT-ONLY (owner ruling, error-blame-strict-gate 2026-07-04): the
+   ;; :core-fault block renders on the root agent only — other agents see
+   ;; nothing (core bugs are not theirs to fix; the affected agent already
+   ;; got its in-place :seon/error envelope). Derived; vanishes when the
+   ;; last :core fault predates the latest user message.
+   {:seon.agent.ctx/name :core-faults :seon.agent.ctx/priority 41
+    :seon.render/ai seon.agent.ctx.warnings/core-faults-block}
+   ;; ROOT-ONLY (C46): the derived instrumentation-coverage invariant —
+   ;; specced fns whose live var lost its malli wrapper (structural async
+   ;; opt-outs excluded). Recomputed from the db + live JS vars at render;
+   ;; vanishes when coverage is re-asserted. A gap is system-wide, so it
+   ;; rides the root agent only, like :core-faults.
+   {:seon.agent.ctx/name :instrumentation-gaps :seon.agent.ctx/priority 42
+    :seon.render/ai seon.agent.ctx.warnings/instrumentation-gaps-block}
+   ;; ROOT-ONLY (multiagent-context Piece 4): live agents whose parent is
+   ;; TERMINATED. Derived; vanishes when there are no orphans. No action
+   ;; machinery — root/human decides per case with the existing functions.
+   {:seon.agent.ctx/name :orphaned-agents :seon.agent.ctx/priority 43
+    :seon.render/ai seon.agent.ctx.subagents/orphaned-agents-block}]}
+
+ ;; ── MULTI-AGENT dials (multiagent-context-spec) — all OPTIONAL; each absent
+ ;; key falls back to the accessor default (byte-identical to today). Shown
+ ;; here for visibility (tune without hunting the source):
+ ;;   spawn-depth-cap    — how deep the spawn tree may go (Piece 2); root at
+ ;;                        depth 0 spawns, a depth-1 subagent may not.
+ ;;   watchdog stale-ms  — a run with no heartbeat progress for longer is
+ ;;                        closed :crashed (Piece 2c); 20 min is above the
+ ;;                        15-min per-turn inner bound.
+ ;;   schedule-breaker   — refuse SCHEDULE wakes for an agent with ≥N :crashed
+ ;;                        closes in the window (Piece 2d); messages still wake.
+ :seon.config/spawn-depth-cap 1
+ :seon.config/watchdog {:seon.config.watchdog/stale-ms 1200000}
+ :seon.config/schedule-breaker {:seon.config.breaker/crash-count 3
+                                :seon.config.breaker/window-ms   1800000}}

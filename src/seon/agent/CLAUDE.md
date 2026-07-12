@@ -2,8 +2,9 @@
 
 **Read before editing:** `docs/seon/architecture/agent-runtime.md` (loop/run/
 turn/FSM/bounds), `data-model.md` (every attr you'll touch), `observability.md`
-(what each turn must persist), `toolkit.md` (verb conventions). We-are-here:
-`docs/prds/agent-fsm/roadmap.md`. Skills: `datahike`, `clojurescript`,
+(what each turn must persist), `toolkit.md` (function conventions). We-are-here:
+`docs/prds/agent-ctx/roadmap.md` (+ `context-rebuild.md`, the
+context-rebuild plan of record). Skills: `datahike`, `clojurescript`,
 `data-oriented-clojure`.
 
 ## Systems at play
@@ -23,7 +24,7 @@ turn/FSM/bounds), `data-model.md` (every attr you'll touch), `observability.md`
   complete set by `:seon.agent.ctx/priority` and stops. Override =
   `install!`/`remove!`, period. No render-merge, no default set, no provider.
   Each `ctx/*` file is one block family (namespaces, transcript, warnings,
-  live_tile, usage, findings, inventory, relevant).
+  canvas, usage, findings, inventory, relevant).
 - **`inspect.cljs`** — `ctx-preview` renders the agent's context through the
   SAME `render-context` path (byte-identical to the real prompt). Extend
   inspection here (`turn`, `turn-diff`), never as a second render path.
@@ -50,25 +51,28 @@ turn/FSM/bounds), `data-model.md` (every attr you'll touch), `observability.md`
 - **Transcript clips must render byte-identical as they age** (age-band
   eviction, not recency-weighting) or the LLM prompt cache is busted every
   turn.
-- **Agents reach verbs by full qualification** in their own nses; home-ns
-  aliases (`db/`, `plan/`) resolve only in the home ns (#73).
+- **Home-ns data/function aliases (`db/`, `plan/`, `message/`, `schema/`) resolve
+  in agent-authored `my.*` nses too** — `seon.eval/augment-ns-source` writes
+  the real `(:require …)` into every authored `(ns …)` form (no magic; stored
+  + resume-safe, #73/#56 CLOSED). The `my.*` toolkit, the `agent/` alias, and
+  the lifecycle refers are NOT auto-aliased — full-qualify those.
 - **Provenance is on the TX entity** — `transact!` auto-stamps agent/turn/eval
   tx-meta; never add `created-by`/`created-at` domain attrs (datahike skill).
 - `^:async`/`await` only inside `^:async` fns (self-host asserts); returned
   Promises auto-await via `seon.eval/maybe-await-value`.
-
-## Known gaps (in flight — check roadmap before "fixing")
-
-- Turn stores wall-clock `at` but not yet `:seon.agent.turn/rendered-as-of`
-  (the PRE-turn frozen basis-t — the one coordinate tx-meta doesn't give
-  free); prompt/reply capture is moving onto the blob store (always-on).
-  See `observability.md`.
-- Embedding hits enter the prompt via a volatile stash (`seon.embed.stash`)
-  — being made a recorded turn input.
-- `shell.cljs` (run + py-run, `SEON_SHELL` default-deny), `my.blob`, and
-  `web.cljs` (`fetch`, `SEON_WEB` default-deny, undici + readability→markdown,
-  blob-stored, SSRF-gated) shipped 2026-07-02 — live-drive verification in
-  flight. Design: `docs/prds/agent-fsm/research/web-fetch-design-2026-07-02.md`.
+- **Eval batches seed from the agent's DERIVED current-ns, never home.** The
+  turn threads the current-ns over the turn's frozen db
+  (`ctx/current-ns`, `run-turn!` → `ask-and-eval!` → `eval-batch!` in
+  `turn.cljs`), so an `(in-ns …)` from a PRIOR turn holds across the boundary
+  — home-seeding silently defined into `my.agent.*` and broke cross-ns
+  resolution.
+- **repl-mode `:batch`/`:stream` is a DB datom** (`ctx/repl-mode` off the
+  `:seon.config` singleton; manifest-absent default is per-MODEL,
+  `config/default-repl-mode`). `:stream` aborts the LLM stream at the first
+  complete top-level form and evals ONE form per turn, so the run's work
+  bound counts FORMS (`derive/run-form-count`, `run/default-form-limit` 60);
+  `:batch` evals the full parse but strips model-typed result claims at the
+  reply boundary (`ctx/strip-result-claims`) before persist + eval.
 
 ## Vendored grounding
 

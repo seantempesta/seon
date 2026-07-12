@@ -51,7 +51,7 @@ tags: [prd, agent]
 
 The pod is a single Node thread shared by the agent loop, the cljs.js eval
 substrate, the HTTP+SSE server, and the heartbeat. A tile fn is wired by the
-agent into `:seon.render.live-tile/content` on its DB entity and invoked
+agent into `:seon.render.live-canvas/content` on its DB entity and invoked
 synchronously on the shared thread.
 
 - The synchronous call site: `html-render` resolves the wired symbol via
@@ -243,7 +243,7 @@ to the fallback. No worker, no thread, no setTimeout.
 Fallback-to-welcome + agent warning:
 
 - On interrupt (or any tile throw), render the known-good core
-  `seon.render.live-tile/welcome` instead — already the wired-content resolution
+  `seon.render.live-canvas/welcome` instead — already the wired-content resolution
   floor (`src/seon/render.cljs:400-401`,
   `src/seon/render/live_tile.cljs` wired-content / welcome).
 - Surface the failure to the agent via the existing legible `error-response`

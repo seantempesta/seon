@@ -60,7 +60,7 @@ Measured candidates (chars, on-disk 2026-06-10):
 | `seon.db` | 80,621 | **OUT as full source** — 4.3× the entire current turn-0. Stays taught via capabilities worked examples + the schema-catalog; its key fns remain `:seon.fn` rows one pull away. |
 | `seon.schema` | 18,968 | **OUT.** It is the registry *mechanism*, not a usage exemplar; agents must call `register!`, not reimplement it. Usage sites are already modeled in capabilities and in both included nses. |
 | `seon.test.runner` | 35,222 | **OUT** (size; runner internals are not what agents write). `run!` stays in the curated fn index. |
-| `seon.handlers.message` / `seon.render.default` | 5,402 / 9,100 | **DEFERRED** — tile/render exemplars are a candidate second tier once the gym shows tile-authoring is the bottleneck. |
+| `seon.handlers.message` / `seon.render.default` | 5,402 / 9,100 | **DEFERRED** — canvas/render exemplars are a candidate second tier once the gym shows tile-authoring is the bottleneck. |
 
 Total exemplar payload: **44,756 chars ≈ 11.2k tokens.**
 

@@ -1,0 +1,16 @@
+2026/07/05 20:44:48 socat[8] W connect(5, AF=2 172.19.0.3:7890, 16): Connection refused
+2026/07/05 20:44:48 socat[8] E TCP:default:7890: Connection refused
+2026/07/05 20:44:49 socat[9] W connect(5, AF=2 172.19.0.3:7890, 16): Connection refused
+2026/07/05 20:44:49 socat[9] E TCP:default:7890: Connection refused
+2026/07/05 20:44:50 socat[10] W connect(5, AF=2 172.19.0.3:7890, 16): Connection refused
+2026/07/05 20:44:50 socat[10] E TCP:default:7890: Connection refused
+2026/07/05 20:44:51 socat[11] W connect(5, AF=2 172.19.0.3:7890, 16): Connection refused
+2026/07/05 20:44:51 socat[11] E TCP:default:7890: Connection refused
+2026/07/05 20:44:52 socat[12] W connect(5, AF=2 172.19.0.3:7890, 16): Connection refused
+2026/07/05 20:44:52 socat[12] E TCP:default:7890: Connection refused
+2026/07/05 20:44:53 socat[13] W connect(5, AF=2 172.19.0.3:7890, 16): Connection refused
+2026/07/05 20:44:53 socat[13] E TCP:default:7890: Connection refused
+2026/07/05 20:44:54 socat[14] W connect(5, AF=2 172.19.0.3:7890, 16): Connection refused
+2026/07/05 20:44:54 socat[14] E TCP:default:7890: Connection refused
+2026/07/05 20:44:55 socat[15] W connect(5, AF=2 172.19.0.3:7890, 16): Connection refused
+2026/07/05 20:44:55 socat[15] E TCP:default:7890: Connection refused

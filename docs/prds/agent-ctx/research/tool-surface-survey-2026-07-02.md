@@ -26,7 +26,7 @@ inspect.ai-suite tool (gates GAIA-class benchmarks)" (`f1692eac`).
 | `my.kb` | schema'd DB knowledge: runnable recipes, attrs+refs, no kinds (`src/my/kb.cljs:1-14`) | shipped | `test/my/kb_test.cljs` (recipes compile+run); preflight §5 recall drive |
 | `my.blob` | content-addressed disk tier (SHA-256 = name, idempotent, `concat!` for chunks `2f51958c`) (`src/my/blob.cljs:1-14`) | shipped | `test/my/blob_test.cljs` |
 | `my.skills` | load/drop knowledge as ctx blocks; cost derived at render (`src/my/skills.cljs:1-15`) | shipped; `:my.skills/load` presence-set in config | `test/my/skills_test.cljs` |
-| `my.ui` / `my.tile` | dual-render canvas pieces (hiccup + `:seon.render/ai` mirrored from one input); tile = interactive controls calling agent fns (`src/my/ui.cljs`, `src/my/tile.cljs`) | shipped; canvas = last-updated tile w/ pin override (`146c52f6`) | `test/my/ui_test.cljs`, `test/my/tile_test.cljs`; ui-live-tiles skill A/B (ledger) |
+| `my.ui` / `my.canvas` | dual-render canvas pieces (hiccup + `:seon.render/ai` mirrored from one input); tile = interactive controls calling agent fns (`src/my/ui.cljs`, `src/my/tile.cljs`) | shipped; canvas = last-updated tile w/ pin override (`146c52f6`) | `test/my/ui_test.cljs`, `test/my/tile_test.cljs`; ui-canvas skill A/B (ledger) |
 | `my.data` | dedup-safe aggregates (sum/max-by over maps — datalog footguns unreachable) (`src/my/data.cljs:1-14`) | shipped | `test/my/data_test.cljs` |
 | `seon.agent.shell` | argv-only process exec, `{exit out err}` as data; `ok?` = RAN not zero-exit (`src/seon/agent/shell.cljs:1-15`) | shipped; **default-deny `SEON_SHELL` grant — UNGRANTED on acme today** (no grant in `.env.acme`/`bin/acme`) | `test/seon/agent/shell_test.cljs`; live-verification research `3d916708` |
 | `seon.agent.web/fetch` | undici fetch → readability→markdown, blob-stored full doc + token-capped preview; SSRF guard every hop; 2MB cap; non-2xx = `ok? true` w/ status (`5bd3dac2`) | shipped `f1692eac`, wired into boot + home-requires; **default-deny `SEON_WEB` — UNGRANTED on acme today** | `test/seon/agent/web_test.cljs` (hermetic, 6 behaviors) + real-network proof |
@@ -44,8 +44,8 @@ Token estimates are chars/4 over the escaped capture — treat as ±20%:
 - system preamble ≈350 · skills-catalog ≈2.7k · `repl` skill ≈1.1k
 - namespaces block: header ≈0.9k, then cards — lifecycle 22 · message 269 ·
   search 383 · shell 848 · todo 563 · **seon.db 1.2k · seon.schema 2.4k** ·
-  my.data 787 · my.kb 323 · my.tile 682 · my.ui 435 · my.blob 663 · home-ns 655
-- live-tile ≈200 · warnings ≈1.0k · open-todos ≈356 · findings ≈91 · transcript tail
+  my.data 787 · my.kb 323 · my.canvas 682 · my.ui 435 · my.blob 663 · home-ns 655
+- canvas ≈200 · warnings ≈1.0k · open-todos ≈356 · findings ≈91 · transcript tail
 - whole render ≈15–18k tokens.
 
 Fresh-world caveat (preflight §7): on a just-reset store the `my.kb` card

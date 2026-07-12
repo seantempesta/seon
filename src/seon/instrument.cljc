@@ -1,31 +1,30 @@
 (ns seon.instrument
-  "Phase A item 7 — collect + install Malli instrumentation for every
-   seon.* fn with `:malli/schema` metadata. (T15 positional read ops.)
+  "Malli instrumentation for every specced first-party fn — registration
+   routing (`register-target!`), the injecting wrapper, the structural
+   async opt-out, and the coverage census.
 
    Why this exists: `malli.instrument/collect!` is JVM-only — it reads
    source files at JVM build time. CLJS has no built-in equivalent;
    `:malli/schema` metadata does NOT auto-populate
-   `malli.core/-function-schemas*` at namespace load. So at boot,
+   `malli.core/-function-schemas*` at namespace load. So without help,
    `malli.instrument/instrument!` finds no schemas and instruments
    nothing.
 
-   The seon-native fix: a compile-time macro that reads the CLJS
-   analyzer's view of every loaded namespace via
-   `cljs.analyzer.api/all-ns` + `ns-publics`, filters to `seon.*`,
-   walks each ns's defs, and for every def whose metadata carries
-   `:malli/schema` emits one
-   `(malli.core/-register-function-schema! ns name schema {})` call.
-   The macro expands to a flat `(do …)` of registration calls —
-   evaluated at runtime, populates the atom that `instrument!` reads.
+   TWO registration sources, ONE routing (`register-target!`):
 
-   The runtime `install!` fn calls the macro then
-   `malli.instrument/instrument!`. Idempotent — re-registering is a
-   no-op (same key, last-write-wins, same value).
-
-   Per CLAUDE.md: we don't have to use packages the way the original
-   author intended. The end goal is `:malli/schema`-annotated fns get
-   their inputs+outputs validated at runtime; the original `collect!`
-   path is JVM-only; we ship the CLJS path that achieves the same end."
+   - **The pod (the live path):** `instrument-from-db!` — the PROGRAM
+     GRAPH is the roster (`:seon.fn/sym` + `:seon.fn/spec` rows; core fns
+     seeded by `index-core!`, agent fns by the eval-tee). Runs at boot /
+     `start-agent!` and re-asserts after every hot reload
+     (`seon.client/after-reload` — a ns re-eval replaces wrapped vars
+     with fresh unwrapped fns, C46). `coverage-gaps` is the derived
+     invariant over the same roster.
+   - **The compile-time `collect!` macro** — walks the CLJS analyzer's
+     view of every loaded first-party namespace at macroexpand time and
+     emits the same `register-target!` calls. NOT on the pod boot path
+     (the program graph replaced it); its remaining consumers are the
+     test harness (`instrument_smoke_test`, `db_test`), which has no db
+     to read a roster from."
   #?(:cljs (:require-macros [seon.instrument :refer [collect!]]))
   (:require
     #?@(:clj  [[cljs.analyzer.api :as ana]
@@ -38,56 +37,8 @@
                [malli.instrument :as mi]
                [seon.config :as config]
                [seon.db :as db]
+               [seon.error :as error]
                [seon.error.instrument :as ei]])))
-
-(def skip-syms
-  "Fns that OPT OUT of instrumentation because they are the agent-facing
-   'errors are values' surface: every call RESOLVES to an envelope
-   (`{::ok? true/false …}`), never throws. A throwing validator on their
-   input would break that contract — agents are taught to branch on
-   `::ok?`, so a throw (even one the eval boundary catches as data) aborts
-   their in-eval code instead of returning the envelope it expects.
-
-   These fns own their own validation / degrade-to-envelope; the
-   instrumentation is redundant for them. Instrumentation stays ON for
-   INTERNAL fns (where it earns its keep — it caught `result-var-ref?`).
-
-   Two entry shapes:
-     - a bare `ns-sym` skips EVERY public fn in that ns (use for the pure
-       capability-wrapper namespaces — by the wrapper doctrine, all their
-       public fns are envelope verbs).
-     - a `[ns-sym fn-sym]` pair skips one fn (use in a MIXED ns that also
-       has internal/render fns which SHOULD stay instrumented).
-
-   The opt-out lives here (a symbol set), NOT as fn metadata or a schema
-   property: the CLJS analyzer strips both from the `:malli/schema` value
-   the `collect!` macro reads, so only a FQ-symbol match is reliable. Each
-   verb fn/ns carries a comment pointing back here. New capability wrappers
-   add themselves (see the wrapper doctrine in `seon.agent.search`).
-   Plain `.cljc` so the compile-time macro and the runtime tee path agree."
-  #{;; Pure capability-wrapper namespaces — all public fns are verbs.
-    'seon.agent.search                 ; grep
-    'seon.agent.fs                     ; read-file/write-file/list-dir/stat/…
-    'seon.agent.message                ; message!/user/agent
-    ;; Mixed ns — skip the envelope verbs; its plan-block/plan-body RENDER fns stay
-    ;; instrumented.
-    ['my.plan 'step!]
-    ['my.plan 'done!]
-    ['my.plan 'reopen!]
-    ['my.plan 'list-open]
-    ;; Safe-by-default core write — assert-invocation-shape! returns an
-    ;; envelope; tested in db-test. (seon.db has many non-verb read fns
-    ;; that DO stay instrumented, so this is fn-level.)
-    ['seon.db 'transact!]})
-
-(defn skip?
-  "True when `[ns-sym fn-sym]` is opted out of instrumentation.
-
-   Either its whole ns is in [[skip-syms]] or the specific pair is."
-  {:malli/schema [:=> [:cat :symbol :symbol] :boolean]}
-  [ns-sym fn-sym]
-  (or (contains? skip-syms ns-sym)
-      (contains? skip-syms [ns-sym fn-sym])))
 
 #?(:clj
    (defn- first-party-file?
@@ -131,9 +82,9 @@
                       schema   (:malli/schema meta-map)
                       async?   (boolean (:async meta-map))
                       file     (or (:file ana-info) (:file meta-map))]
-             ;; Opt-out ([[skip-syms]], e.g. `seon.db/transact!`) is applied
-             ;; downstream in [[register-target!]] — a FQ-symbol match, since
-             ;; the analyzer strips schema/metadata markers from this view.
+             ;; Opt-out is STRUCTURAL, applied downstream in
+             ;; [[register-target!]] ([[async-unwrappable?]] — computed from
+             ;; the async flag + the live fn's arity shape + the schema form).
              :when   (and schema (first-party-file? file))]
          [ns-sym fn-sym schema async?]))))
 
@@ -177,10 +128,15 @@
        (not (contains? #{"0" "false" "off" "no"} v)))))
 
 #?(:cljs
-   (defn- -find-js-var
-     "Resolve the live JS fn object for `[ns-sym fn-sym]` by walking the
-      munged goog.global path — same lookup malli.instrument uses to find
-      the var it wraps. nil if not found (e.g. fn not yet loaded)."
+   (defn find-js-var
+     "Resolve the live JS fn object for `[ns-sym fn-sym]`, or nil.
+
+      Walks the munged goog.global path — the same lookup malli.instrument
+      uses to find the var it wraps. THE one symbol→live-fn mechanism
+      (`seon.ai.typeahead`'s prefill-fn resolution reuses it); nil when the
+      fn is not loaded. The result is a raw JS object — a third-party
+      boundary, hence `:any`."
+     {:malli/schema [:=> [:catn [::ns-sym :symbol] [::fn-sym :symbol]] :any]}
      [ns-sym fn-sym]
      (try
        (gobj/getValueByKeys
@@ -188,6 +144,21 @@
          (into-array (map munge (conj (str/split (str ns-sym) #"\.")
                                       (name fn-sym)))))
        (catch :default _ nil))))
+
+#?(:cljs
+   (defn- -original-fn
+     "See through malli's per-var instrumentation record: a wrapped var's
+      live fn carries the ORIGINAL under `malli$instrument$original`
+      (set by `malli.instrument/-replace-fn` at wrap time — the same
+      record `mi/instrument!` itself re-wraps from). Returns the original
+      when `f` is a wrapper, `f` unchanged otherwise. Every shape/async
+      detection in this ns goes through this, so re-detection on an
+      already-instrumented var reads the REAL fn, never the wrapper —
+      the root fix for the old \"wrappers erase asyncness\" class (a
+      wrapper is a plain variadic `Function`, so ctor-name async
+      detection and `-simple-fixed-arity-fn?` both mis-read it)."
+     [f]
+     (or (when f (gobj/get f "malli$instrument$original")) f)))
 
 #?(:cljs
    (defn- -simple-fixed-arity-fn?
@@ -202,25 +173,215 @@
      (and (fn? f) (nil? (gobj/get f "cljs$lang$maxFixedArity")))))
 
 #?(:cljs
-   (defn async-fschema
-     "A malli function-schema OBJECT (not a form) for a single `:=>`
-      schema whose fn is `^:async`. Delegates every `Schema`/
-      `FunctionSchema` method to the real `:=>` schema EXCEPT
-      `-instrument-f`, which it overrides to await-then-validate:
+   (defn- -arrow-schema?
+     "True when `schema-form` resolves to a single-arity `:=>` fn schema
+      (as opposed to a multi-arity `:function`). Errors-as-values: an
+      unresolvable form is simply not an arrow."
+     [schema-form]
+     (try (= :=> (m/type (m/schema schema-form)))
+          (catch :default _ false))))
 
+#?(:cljs
+   (defn async-unwrappable?
+     "True when an `^:async` fn has NO correct wrapper today — the
+      STRUCTURAL instrumentation opt-out (computed from real properties;
+      never a name list).
+
+      An async fn returns a `js/Promise`, so only the Promise-aware
+      [[injecting-fschema]] wrapper validates it correctly — and that
+      wrapper handles exactly the simple single-fixed-arity `:=>` shape.
+      For any OTHER async shape (variadic / multi-arity / `:function`
+      schema / live var unresolvable) every available wrapper is wrong:
+
+        - malli's stock SYNC wrapper validates the returned Promise
+          against the output schema → `:malli.core/invalid-output` on
+          EVERY call;
+        - the input-only stock wrapper (`{:scope #{:input}}`) THROWS on a
+          shape-invalid call, which breaks the errors-as-values contract
+          async envelope functions carry — the canonical instance is
+          `seon.db/transact!`, whose bad-invocation-shape → `{::ok?
+          false}` ENVELOPE behavior is documented and pinned by
+          `db_test/transact!-returns-envelope-on-bad-invocation-shape`,
+          and which core internals (boot, tickers, the loop) call under
+          the never-throw-into-the-loop invariant.
+
+      So: async ∧ not(injecting-wrappable) ⇒ register NOTHING. The
+      `:malli/schema` stays the discoverable contract; the fn's own body
+      is the validation boundary. When a Promise-aware wrapper for
+      variadic/multi-arity shapes exists, this rule collapses to false
+      and those fns instrument like everything else."
+     {:malli/schema [:=> [:cat :boolean :any :any] :boolean]}
+     [async? the-fn schema-form]
+     (boolean
+       (and async?
+            (not (and the-fn
+                      (-arrow-schema? schema-form)
+                      (-simple-fixed-arity-fn? the-fn)))))))
+
+#?(:cljs
+   (def injectables
+     "The injectable REGISTRY — `injectable-key → (fn [eval-ctx] value)`.
+
+      The ONE extension surface for explicit dependency injection at the eval
+      boundary (`docs/seon/architecture/context.md` §\"Explicit dependencies\").
+      A map-in fn declares an injectable as an `{:optional true}` request key;
+      [[injecting-fschema]]'s wrapper fills every DECLARED-BUT-ABSENT key from
+      the current eval context — explicit caller args always win. Adding a
+      dependency is ONE entry here + fns declaring the key.
+
+      The eval-context SOURCE is the ALS/`*conn*` the loop already establishes
+      (`seon.agent.turn/run-turn!` wraps eval in `db/with-agent id`), so the
+      fn body never reads an invisible dynamic var — the boundary does it once,
+      visibly, and the fn's spec is the honest statement of what it needs. A
+      provider yielding nil leaves the key ABSENT (never store nil — optional =
+      absent). `eval-ctx` is reserved for future per-call context; today the
+      providers read ALS/`*conn*` directly and it is passed `nil`."
+     {:seon.db/db     (fn [_] (some-> db/*conn* deref))
+      :seon.agent/id  (fn [_] (db/current-agent-id))
+      ;; \"now\" — the basis-t (tx-id int) of the current db value, the turn's
+      ;; reproducible time coordinate (replay = pass a past t explicitly;
+      ;; explicit wins). Schema registered in `seon.render`.
+      :seon.render/at (fn [_] (some-> db/*conn* deref db/basis-t))}))
+
+#?(:cljs
+   (defn- inject-into
+     "Fill each DECLARED injectable `k` ABSENT from request map `m` with its
+      [[injectables]] value from the eval context. Explicit keys WIN (a
+      present key is untouched); a provider yielding nil leaves the key
+      absent. `inj-keys` is the pre-computed declared∩registry set."
+     [m inj-keys]
+     (reduce (fn [acc k]
+               (if (contains? acc k)
+                 acc
+                 (let [v ((injectables k) nil)]
+                   (if (some? v) (assoc acc k v) acc))))
+             m inj-keys)))
+
+#?(:cljs
+   (defn declared-injectables
+     "The set of injectable request-keys a fn's `:=>` `schema-obj` DECLARES on
+      its FIRST (map) argument — the intersection of that arg map's keys with
+      the [[injectables]] registry. Computed ONCE per fn at register time
+      (rides on [[injecting-fschema]]'s closure), never per call.
+
+      Reads the arg schema via `m/-function-info` → first `:input` child →
+      `m/deref` (resolves a registered `::req` ref OR passes an inline `:map`
+      through) → `m/entries` (all entries, optional included). Empty for a fn
+      whose first arg is not a `:map` or declares no injectable key.
+      Errors-as-values: any malli mishap yields `#{}` (the fn is simply not
+      injected)."
+     {:malli/schema [:=> [:cat :any] [:set :keyword]]}
+     [schema-obj]
+     (try
+       (let [info (m/-function-info schema-obj)
+             arg0 (first (m/children (:input info)))
+             d    (when arg0 (m/deref arg0))]
+         (if (and d (= :map (m/type d)))
+           (into #{} (comp (map first) (filter injectables)) (m/entries d))
+           #{}))
+       (catch :default _ #{}))))
+
+#?(:cljs
+   (defn wrapper-fault
+     "Refine a wrapper-arm `coarse` fault by the ERROR'S OWN content.
+
+      An AGENT form's failure first surfaces as a rejection inside the
+      WRAPPED fns of the eval path (`seon.eval/eval-batch!`,
+      `record-eval!`, …) — the outer conduits themselves are NOT
+      instrumented (`seon.eval/eval` is a structural [[async-unwrappable?]]
+      opt-out; `raw-eval` is private, never in the roster). So the wrapped
+      fn's symbol alone ('what were we calling') misclassifies agent typos
+      as `:core` and reds the strict gate forever. Content wins when it
+      identifies the population:
+
+        - agent-form eval diagnostics → `:agent` — the agent's own error,
+          already enveloped for it downstream (a mistyped attr / bad form /
+          undeclared var must NEVER crash the pod). Detected by ANY of:
+          `:seon.eval/warning-type`; a `:cljs/analysis-error` `:tag` (a
+          cljs.js self-host analysis/compile failure ONLY ever arises from an
+          AGENT-submitted form — the core is AOT-compiled by shadow, never
+          self-host); or an agent-input `:seon.error/kind`
+          (`:user-input`/`:compile`/`:read`/`:seon.eval/repl-parity`, i.e.
+          `seon.error/agent-fault-kinds`) at the envelope TOP — every
+          kind-bearing throw puts the kind FLAT in its ex-data (one
+          convention, C43), `seon.error/->map` flattens deepest-wins and
+          LIFTS the kind to the envelope top (the ONE read position,
+          C45), so the DEEPEST kind (the real cause) decides;
+        - a PROPAGATED malli contract violation → the VIOLATED fn's
+          population when agent-authored; else `:agent` when an agent
+          turn is in scope (the agent was the caller); else `:agent`
+          when a dev/MCP REPL eval is in scope
+          (`seon.error/in-dev-eval?`) AND the violation is an INPUT
+          contract (`seon.error.instrument/caller-fault-kinds` —
+          invalid input/arity is the caller's fault by construction; an
+          invalid OUTPUT or a non-contract internal throw stays
+          `coarse` — dev presence never excuses our fn breaking); else
+          `coarse`. Coarse at the boundary by design —
+          misclassifications surface as data (a `:core` datom whose
+          frames are all `my.*`) and get re-blamed as follow-up, not
+          argued up front;
+        - anything else → `coarse` (unclassified bugs stay loud)."
+     {:malli/schema [:=> [:cat :any :seon.error/fault] :seon.error/fault]}
+     [e coarse]
+     (try
+       (let [env  (error/->map e)
+             data (:seon.error/data env)
+             kind (:seon.error/kind env)]
+         (cond
+           (or (some? (:seon.eval/warning-type data))
+               (= :cljs/analysis-error (:tag data))
+               (contains? error/agent-fault-kinds kind))
+           :agent
+
+           (ei/instrument-error? data)
+           (let [violated (:seon.error.malli/fn-sym data)]
+             (cond
+               (and violated (error/agent-authored-sym? violated)) :agent
+               (some? (db/current-agent-id))                       :agent
+               (and (error/in-dev-eval?)
+                    (contains? ei/caller-fault-kinds kind))        :agent
+               :else coarse))
+
+           :else coarse))
+       (catch :default _ coarse))))
+
+#?(:cljs
+   (defn injecting-fschema
+     "A malli function-schema OBJECT (not a form) for a single simple
+      fixed-arity `:=>` schema — SYNC or `^:async`. Delegates every `Schema`/
+      `FunctionSchema` method to the real `:=>` schema EXCEPT `-instrument-f`,
+      which it overrides to INJECT-then-validate:
+
+        - INJECT: every DECLARED-BUT-ABSENT injectable key ([[injectables]],
+          pre-computed via [[declared-injectables]]) is filled into the first
+          (map) arg from the eval context BEFORE input validation, so the
+          filled map satisfies the `:map` and explicit caller args win;
         - input + arity validated synchronously (throws via `report`);
-        - the call's return (a Promise) gets a `.then` that validates the
-          RESOLVED value against the output schema and `report`s a
-          mismatch, re-resolving the value unchanged. A non-thenable
-          return is passed through untouched.
+        - the call's return, if a Promise, gets a `.then` validating the
+          RESOLVED value against the output schema; a non-thenable return
+          validates output synchronously (the sync path). Either way the
+          value re-resolves unchanged.
 
-      Registering this object (via `m/-register-function-schema!` with the
-      `identity` transformer) makes malli's stock `mi/instrument!` reuse
-      ALL its var-surgery and simply call this `-instrument-f` — no custom
-      registry, no var-install code of our own."
-     {:malli/schema [:=> [:cat :any] :any]}
-     [inner-form]
-     (let [s (m/schema inner-form)]
+      Replaces the older async-only wrapper: it handles BOTH sync and async
+      map-in fns (a fn declaring no injectable key is behavior-identical to
+      the stock wrapper — no injection, same input+output validation), so
+      `register-target!` routes every simple fixed-arity `:=>` fn here. This
+      is the ONE injecting boundary — no second wrapper. Registering it (via
+      `m/-register-function-schema!` with the `identity` transformer) makes
+      malli's stock `mi/instrument!` reuse ALL its var-surgery and simply call
+      this `-instrument-f`.
+
+      `fn-sym` (the wrapped fn's QUALIFIED symbol) decides the
+      `:seon.error/fault` population once, at register time — \"what were
+      we calling\": `my.*`/agent-authored → `:agent`, everything else →
+      `:core`. The async arms below call `seon.error/record!` with it so
+      both async failure modes become datoms regardless of caller
+      behavior (research: malli-instrument-error-data-2026-07-04 §4)."
+     {:malli/schema [:=> [:cat :any :qualified-symbol] :any]}
+     [inner-form fn-sym]
+     (let [s        (m/schema inner-form)
+           inj-keys (declared-injectables s)
+           fault    (error/fault-for fn-sym)]
        (reify
          m/Schema
          (-validator [_] (m/-validator s))
@@ -247,7 +408,13 @@
                  wrap-in  (contains? scope :input)
                  wrap-out (contains? scope :output)]
              (fn [& args]
-               (let [args (vec args), n (count args)]
+               (let [args (vec args)
+                     ;; INJECT declared-absent deps into the request map before
+                     ;; validation; explicit args win, nil providers no-op.
+                     args (if (and (seq inj-keys) (map? (first args)))
+                            (assoc args 0 (inject-into (first args) inj-keys))
+                            args)
+                     n    (count args)]
                  (when wrap-in
                    (when-not (<= min n (or max js/Number.MAX_SAFE_INTEGER))
                      (report :malli.core/invalid-arity
@@ -258,61 +425,107 @@
                              {:input input :args args :schema s})))
                  (let [ret (apply f args)]
                    (if (and ret (fn? (.-then ret)))
-                     (.then ret (fn [v]
+                     ;; REJECTION arm FIRST (upstream of the .then, so an
+                     ;; output-violation throw below is not double-recorded):
+                     ;; a rejected Promise from an instrumented `^:async` fn
+                     ;; was previously observed by NO instrumentation layer.
+                     ;; Class rule for the wrapped fns: docs/conventions.md
+                     ;; "Errors Are Values" consequence 3 (never reject with
+                     ;; an expected error — it records as :core here).
+                     ;; record! persists the datom; the re-throw re-rejects
+                     ;; the chained Promise with the SAME reason, preserving
+                     ;; caller semantics (eval's auto-await / .catch still
+                     ;; see the original error).
+                     (-> ret
+                         (.catch (fn [e]
+                                   ;; ONE error → ONE datom: skip when an
+                                   ;; inner wrapper already recorded this
+                                   ;; propagating rejection.
+                                   (when-not (error/recorded? e)
+                                     (error/record!
+                                       {:seon.error/raw   e
+                                        :seon.error/fault (wrapper-fault e fault)}))
+                                   (throw e)))
+                         (.then (fn [v]
                                   (when (and wrap-out (not (vout v)))
-                                    (report :malli.core/invalid-output
-                                            {:output output :value v
-                                             :args args :schema s}))
-                                  v))
-                     ret)))))))))) ; non-thenable return — pass through
+                                    ;; An async invalid-output becomes a
+                                    ;; REJECTION, not a sync throw — visible
+                                    ;; only if the caller awaits/catches. So
+                                    ;; record! runs HERE, before the report
+                                    ;; throw rides the rejected Promise.
+                                    ;; No refinement: the wrapped fn ITSELF
+                                    ;; broke its output contract, so its own
+                                    ;; population is the right fault.
+                                    (try (report :malli.core/invalid-output
+                                                 {:output output :value v
+                                                  :args args :schema s})
+                                         (catch :default e
+                                           (error/record! {:seon.error/raw   e
+                                                           :seon.error/fault fault})
+                                           (throw e))))
+                                  v)))
+                     (do (when (and wrap-out (not (vout ret)))
+                           (report :malli.core/invalid-output
+                                   {:output output :value ret
+                                    :args args :schema s}))
+                         ret)))))))))))
 
 #?(:cljs
    (defn register-target!
      "Register ONE schema'd fn into malli's `:cljs` function-schema
-      registry with the wrapper that fits its shape, then return. Three
-      routes:
+      registry with the wrapper that fits its shape, then return. Routes:
 
-        - fn is in [[skip-syms]] → register NOTHING (self-validating).
-        - sync fn → register the raw schema form; malli's stock wrapper
-          validates input + output synchronously (the original behavior).
-        - async fn that is a simple single-fixed-arity `:=>` → register an
-          [[async-fschema]] object so input validates synchronously and
-          output validates on Promise resolution.
-        - async fn that is variadic or multi-arity (e.g. a self-validating
-          fn that did NOT opt out) → register the raw form with per-fn
-          `{:scope #{:input}}`, so malli's stock wrapper (which correctly
-          handles the arg marshalling) validates input + arity only.
-          Output validation for these shapes is deferred — a wrapper that
-          returns a derived Promise across malli's variadic marshalling is
-          a separate piece of work.
+        - [[async-unwrappable?]] (async fn that cannot take the injecting
+          wrapper) → register NOTHING; the fn's own body is the validation
+          boundary and its schema stays the discoverable contract.
+        - simple single-fixed-arity `:=>` (SYNC or `^:async`) → register an
+          [[injecting-fschema]] object: it injects declared-absent deps into
+          the request map, validates input synchronously, and validates
+          output synchronously (sync return) or on Promise resolution (async
+          return). This is the map-in case where dependency injection applies.
+        - sync variadic / multi-arity (or a fn whose live var isn't
+          resolvable yet) → register the raw schema form; malli's stock
+          wrapper validates input + output synchronously (no injection —
+          injection is the single-map-arg case only).
 
       `mi/instrument!` (called once afterward) reads this registry and
       installs each wrapper in place."
      {:malli/schema [:=> [:cat :symbol :symbol :any :boolean] :any]}
      [ns-sym fn-sym schema-form async?]
-     (cond
-       (skip? ns-sym fn-sym) nil
-       (not async?)
-       (m/-register-function-schema! ns-sym fn-sym schema-form {} :cljs identity)
-       :else
-       (let [the-fn (-find-js-var ns-sym fn-sym)
-             arrow? (try (= :=> (m/type (m/schema schema-form)))
-                         (catch :default _ false))]
-         (if (and the-fn arrow? (-simple-fixed-arity-fn? the-fn))
-           (m/-register-function-schema! ns-sym fn-sym (async-fschema schema-form)
-                                         {} :cljs identity)
-           (m/-register-function-schema! ns-sym fn-sym schema-form
-                                         {:scope #{:input}} :cljs identity))))))
+     ;; Shape checks read the ORIGINAL fn ([[-original-fn]]): a live var
+     ;; that is already a malli wrapper is a plain variadic Function, so
+     ;; without the unwrap a re-registration would mis-route every simple
+     ;; fixed-arity fn to the stock wrapper.
+     (let [the-fn (-original-fn (find-js-var ns-sym fn-sym))]
+       (cond
+         ;; STRUCTURAL opt-out — async with no correct wrapper available.
+         (async-unwrappable? async? the-fn schema-form) nil
+         ;; simple fixed-arity :=> (sync OR async) → the injecting wrapper.
+         (and the-fn (-arrow-schema? schema-form) (-simple-fixed-arity-fn? the-fn))
+         (m/-register-function-schema! ns-sym fn-sym
+                                       (injecting-fschema
+                                         schema-form
+                                         (symbol (str ns-sym) (str fn-sym)))
+                                       {} :cljs identity)
+         ;; sync variadic/multi-arity (or unresolvable var) → stock wrapper.
+         :else
+         (m/-register-function-schema! ns-sym fn-sym schema-form {} :cljs identity)))))
 
 
 #?(:cljs
    (defn async-fn?
-     "True when `f` is a JS async function (the runtime shape `^:async`
-      compiles to). Lets [[instrument-from-db!]] route async wrappers
-      without the analyzer's `:async` flag — the live var carries the fact."
+     "True when `f` is (or wraps) a JS async function — the runtime shape
+      `^:async` compiles to. Lets [[instrument-from-db!]] route async
+      wrappers without the analyzer's `:async` flag. Sees THROUGH a malli
+      instrumentation wrapper ([[-original-fn]]): the ctor-name check is
+      only ever applied to the real fn, so an already-instrumented
+      `^:async` fn (whose wrapper is a plain `Function` returning a
+      Promise) is still detected async — re-instrumentation is
+      detection-safe by construction."
      {:malli/schema [:=> [:cat :any] :boolean]}
      [f]
-     (and (fn? f) (= "AsyncFunction" (.. f -constructor -name)))))
+     (let [f (-original-fn f)]
+       (and (fn? f) (= "AsyncFunction" (.. f -constructor -name))))))
 
 #?(:cljs
    (defn instrument-from-db!
@@ -324,15 +537,30 @@
       canonical index of EVERY core + agent-authored fn — `index-core!`
       seeds core fns, the eval-tee seeds agent fns), resolves each live JS
       var, reads its spec, and routes it through [[register-target!]]
-      (async detected from the var via [[async-fn?]]; [[skip-syms]]
-      honored), then `mi/instrument!` once.
+      (async detected from the var via [[async-fn?]]; the structural
+      [[async-unwrappable?]] opt-out honored — counted as `::skipped`),
+      then `mi/instrument!` once.
 
       Runs at boot AFTER the core is indexed. The eval-tee path keeps
       instrumenting newly-defined fns inline between boots. No-op when
       [[enabled?]] is false. Returns a stats map.
 
-      `:no-var` counts rows whose var isn't live (a prior session's fn);
-      `:bad-spec` counts unreadable spec strings; `:unresolvable-schema`
+      IDEMPOTENT on re-run (a later `start-agent!` in the same process):
+      detection sees through malli's per-var wrapper record
+      ([[-original-fn]] / [[async-fn?]]), so an already-wrapped var
+      re-registers from its REAL shape, and `mi/instrument!` runs with
+      `:skip-instrumented? true` — simple fns re-wrap from the recorded
+      original (one wrapper, never stacked); multi-arity/variadic fns,
+      whose live object carries malli's `instrumented?` flag, are left
+      alone. This retired the old once-per-process gate
+      (`instrument-from-db-once!`), whose only job was to fence the
+      wrapper mis-detection this now fixes at the root. A row whose
+      persisted spec changes without a var redefinition still keeps its
+      old wrapper until the var is redefined (tee) or the process
+      restarts — same accepted limit the once-gate had.
+
+      `::no-var` counts rows whose var isn't live (a prior session's fn);
+      `::bad-spec` counts unreadable spec strings; `::unresolvable-schema`
       counts rows whose spec READS but references a schema name that no
       longer resolves in the registry (a renamed/pruned schema ghost) —
       ALL THREE are skipped, never fatal. The last is the boot-resilience
@@ -350,14 +578,19 @@
                                :where [?e :seon.fn/sym ?sym]
                                       [?e :seon.fn/spec ?spec]]
                              db)
-             stats (volatile! {:registered 0 :skipped 0 :no-var 0
-                               :bad-spec 0 :unresolvable-schema 0})]
+             stats (volatile! {::registered 0 ::skipped 0 ::no-var 0
+                               ::bad-spec 0 ::unresolvable-schema 0})]
          (doseq [[sym-str spec-str] rows
                  :let [slash (str/index-of (str sym-str) "/")]
                  :when slash]
            (let [ns-sym (symbol (subs sym-str 0 slash))
                  fn-sym (symbol (subs sym-str (inc slash)))
-                 the-fn (-find-js-var ns-sym fn-sym)
+                 ;; Detection reads the ORIGINAL fn ([[-original-fn]]) — on a
+                 ;; re-run the live var may be a malli wrapper (a plain
+                 ;; variadic Function), which would mis-detect every `^:async`
+                 ;; fn as sync and route its Promise through the sync output
+                 ;; validator (the old pod-wedge class).
+                 the-fn (-original-fn (find-js-var ns-sym fn-sym))
                  schema (try (reader/read-string spec-str)
                              (catch :default _ ::bad))
                  ;; Resolve-check (errors-as-values): build the schema
@@ -369,49 +602,104 @@
                           (try (m/schema schema) true
                                (catch :default _ false)))]
              (cond
-               (nil? the-fn)    (vswap! stats update :no-var inc)
-               (= ::bad schema) (vswap! stats update :bad-spec inc)
+               (nil? the-fn)    (vswap! stats update ::no-var inc)
+               (= ::bad schema) (vswap! stats update ::bad-spec inc)
                (not ok?)        (do (js/console.warn
                                       (str "seon.instrument/instrument-from-db!: "
                                            sym-str " has a persisted :malli/schema that "
                                            "no longer resolves (renamed/pruned schema) — "
                                            "leaving it UNINSTRUMENTED so boot proceeds: "
                                            spec-str))
-                                     (vswap! stats update :unresolvable-schema inc))
-               (skip? ns-sym fn-sym) (vswap! stats update :skipped inc)
+                                     (vswap! stats update ::unresolvable-schema inc))
+               (async-unwrappable? (async-fn? the-fn) the-fn schema)
+               (vswap! stats update ::skipped inc)
                :else (do (register-target! ns-sym fn-sym schema (async-fn? the-fn))
-                         (vswap! stats update :registered inc)))))
-         (mi/instrument! {:report ei/report-fn})
+                         (vswap! stats update ::registered inc)))))
+         ;; `:skip-instrumented? true` is malli's own per-var guard: a live
+         ;; object carrying the `malli$instrument$instrumented?` flag (the
+         ;; multi-arity/variadic wrap-in-place case) is left alone instead of
+         ;; having its arity slots double-wrapped; a simple wrapped fn (flag
+         ;; lives on its recorded original, not the wrapper) re-wraps FROM
+         ;; that original — one wrapper either way.
+         (mi/instrument! {:report ei/report-fn :skip-instrumented? true})
          (assoc @stats
                 :seon.instrument/enabled? true
                 :seon.instrument/n-instrumented
                 (reduce + (map count (vals (m/function-schemas :cljs)))))))))
 
 #?(:cljs
-   ;; P0 (double-instrument async wedge) — instrument the program graph ONCE
-   ;; per process. The 1st pass (boot, after index + replay) wraps core +
-   ;; every replayed agent fn from its FRESH var. A 2nd pass (a later POST
-   ;; /agents/new → start-agent!) would re-read the 1st pass's WRAPPER var,
-   ;; whose constructor is `Function` not `AsyncFunction`, so `async-fn?`
-   ;; mis-detects every `^:async` fn as sync and re-routes its Promise return
-   ;; through malli's SYNC output validator → `:malli.core/invalid-output`
-   ;; and the pod wedges (ticker + wake loop throw every agent). Agent fns
-   ;; defined AFTER boot are wrapped inline by the eval-tee, so the once-gate
-   ;; loses nothing. Resets on a fresh process (a cluster reset re-boots).
-   (defonce ^:private !instrumented? (atom false)))
+   (defn coverage-gaps
+     "Specced program-graph fns whose LIVE var carries no malli wrapper.
 
-#?(:cljs
-   (defn instrument-from-db-once!
-     "Idempotent [[instrument-from-db!]] — the `start-agent!` entry point.
-      Runs the full pass the FIRST time per process, then short-circuits so a
-      later agent-creation never re-instruments already-wrapped vars (which
-      would mis-route every async fn and wedge the pod — see [[!instrumented?]])."
-     {:malli/schema [:=> [:cat :any] :map]}
+      The derived coverage invariant (C46): after [[instrument-from-db!]]
+      (boot, `start-agent!`, or the hot-reload re-assert in
+      `seon.client/after-reload`) every specced fn whose live var is
+      resolvable is either malli-wrapped or a STRUCTURAL
+      [[async-unwrappable?]] opt-out. This census recomputes that from the
+      db + the live JS vars at call time — nothing stored — so a non-empty
+      result IS a violation (typically a ns re-eval that replaced wrapped
+      vars without a re-instrument pass, or a spec that no longer
+      reads/resolves). Rows whose var is not live (a prior session's fn)
+      are not gaps — an uncallable fn has no coverage risk. Returns `[]`
+      when the `SEON_INSTRUMENT` kill-switch is off (no invariant to hold)
+      and, in a healthy runtime, `[]` always. Each gap carries the
+      qualified sym string and a reason: `::unwrapped` (wrappable but not
+      wrapped), `::bad-spec` (spec string unreadable), or
+      `::unresolvable-schema` (spec references a pruned/renamed schema)."
+     {:malli/schema [:=> [:cat :any]
+                     [:vector [:map
+                               [:seon.instrument/sym :string]
+                               [:seon.instrument/reason :keyword]]]]}
      [db]
-     (if @!instrumented?
-       {:seon.instrument/enabled?       (enabled?)
-        :seon.instrument/already-done?  true
-        :seon.instrument/n-instrumented (reduce + (map count (vals (m/function-schemas :cljs))))}
-       (let [stats (instrument-from-db! db)]
-         (reset! !instrumented? true)
-         stats))))
+     (if-not (enabled?)
+       []
+       (let [rows (db/query '[:find ?sym ?spec
+                              :where [?e :seon.fn/sym ?sym]
+                                     [?e :seon.fn/spec ?spec]]
+                            db)]
+         (into []
+               (keep
+                 (fn [[sym-str spec-str]]
+                   (when-let [slash (str/index-of (str sym-str) "/")]
+                     (let [ns-sym   (symbol (subs sym-str 0 slash))
+                           fn-sym   (symbol (subs sym-str (inc slash)))
+                           f        (find-js-var ns-sym fn-sym)
+                           ;; Wrapped = the wrapper's recorded original
+                           ;; (simple path), OR malli's `instrumented?` flag
+                           ;; on a NON-simple fn (the wrap-in-place path,
+                           ;; where the live object stays the original with
+                           ;; wrapped arity slots). The flag alone is NOT
+                           ;; proof for a simple fn: malli stamps it on the
+                           ;; ORIGINAL too, so a restored/stripped original
+                           ;; still carries it while validating nothing.
+                           wrapped? (and f
+                                         (or (some? (gobj/get f "malli$instrument$original"))
+                                             (and (some? (gobj/get f "malli$instrument$instrumented?"))
+                                                  (not (-simple-fixed-arity-fn? f)))))]
+                       (when (and f (not wrapped?))
+                         ;; Schema work only for the (rare) unwrapped
+                         ;; candidates — the healthy-path cost is pure
+                         ;; var walking.
+                         (let [schema (try (reader/read-string spec-str)
+                                           (catch :default _ ::bad))
+                               ok?    (when-not (= ::bad schema)
+                                        (try (m/schema schema) true
+                                             (catch :default _ false)))]
+                           (cond
+                             (= ::bad schema)
+                             {:seon.instrument/sym    sym-str
+                              :seon.instrument/reason ::bad-spec}
+
+                             (not ok?)
+                             {:seon.instrument/sym    sym-str
+                              :seon.instrument/reason ::unresolvable-schema}
+
+                             ;; STRUCTURAL opt-out — the fn's own body is
+                             ;; the validation boundary; not a gap.
+                             (async-unwrappable? (async-fn? f) f schema)
+                             nil
+
+                             :else
+                             {:seon.instrument/sym    sym-str
+                              :seon.instrument/reason ::unwrapped})))))))
+               (sort-by first rows))))))

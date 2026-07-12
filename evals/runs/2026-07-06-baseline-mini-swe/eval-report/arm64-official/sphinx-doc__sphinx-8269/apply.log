@@ -1,0 +1,5 @@
+$ git apply --verbose
+
+Checking patch sphinx/builders/linkcheck.py...
+Applied patch sphinx/builders/linkcheck.py cleanly.
+

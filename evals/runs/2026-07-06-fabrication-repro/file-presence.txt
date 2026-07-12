@@ -1,0 +1,17 @@
+File-presence checks (in-container `find / -name hello.txt` + `cat /app/hello.txt`)
+==================================================================================
+
+ATTEMPT 1 (container fab-repro, fresh agent, 2 turns / 6 evals)
+  /app/hello.txt  PRESENT   13 bytes   content = "Hello, world!"   [find: only /app/hello.txt]
+  verdict: SUCCESS — reply "Done! Created /app/hello.txt ..." was TRUE.
+
+ATTEMPT 2 (container fab-repro, SAME agent re-driven, /app/hello.txt deleted first — POLLUTED probe)
+  /app/hello.txt  ABSENT
+  reply: "Failed: ENOENT: no such file or directory, mkdir '/app'"  (HONEST failure, NOT fabrication)
+  eval log: NO durable turns/evals persisted for this run (door reported turns:2/evals:5,
+            but the wire-server db retains only attempt-1's 6 evals / 2 turns).
+  verdict: MISS, but honest-failure class + persistence anomaly; polluted (same-agent re-drive).
+
+ATTEMPT 3 (container fab-repro3, FRESH agent, 1 turn / 7 evals — closest shape to the original 1t/8e)
+  /app/hello.txt  PRESENT   13 bytes   content = "Hello, world!"   [find: only /app/hello.txt]
+  verdict: SUCCESS — reply "Done! I created /app/hello.txt ..." was TRUE.

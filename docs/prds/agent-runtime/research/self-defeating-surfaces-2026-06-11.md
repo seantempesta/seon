@@ -78,7 +78,7 @@ GC keys off exactly that provenance.
   (`src/seon/web/inspector.cljs:221-226`) is DEAD CODE for fn throws,
   because the inner catch in `render-entity-html` eats the exception
   before the inspector's catch can show it.
-- **Fix sketch:** same shape as `live-tile/error-response` — return an
+- **Fix sketch:** same shape as `live-canvas/error-response` — return an
   error-carrying response (or at minimum re-throw so inspector's
   existing catch fires); the AI twin says "renderer X threw: msg" so
   the owning agent sees its breakage next render.

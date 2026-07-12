@@ -57,7 +57,7 @@
   "Format a single message as a single line of LLM-readable text.
 
    `[<from>] <content>`  — e.g. `[user] Define a fn that adds two numbers.`"
-  {:malli/schema [:=> [:cat :map] [:maybe :string]]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :string]]}
   [{:seon.db/keys [db] :seon.render/keys [node entity] :seon.agent/keys [id]}]
   (let [entity (or node entity)
         from (resolve-ref db (:seon.agent.message/from entity))
@@ -77,9 +77,9 @@
      `seon.ui.markdown/md->hiccup`). XSS-safe end-to-end: every text node
      is HTML-escaped by seon.ui.html at serialization, so agent-authored
      inline HTML renders as visible text, never DOM. No client-side
-     `data-markdown`/marked.js pass — the world shim loads only
+     `data-markdown`/marked.js pass — the agent-view shim loads only
      datastar.js, so the markdown must be hiccup by the time it ships."
-  {:malli/schema [:=> [:cat :map] [:maybe :seon.render.live-tile/hiccup]]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] [:maybe :seon.render.canvas/hiccup]]}
   [{:seon.db/keys [db] :seon.render/keys [node entity] :seon.agent/keys [id]}]
   (let [entity (or node entity)
         from   (resolve-ref db (:seon.agent.message/from entity))
@@ -107,7 +107,7 @@
                        :else
                        "mr-auto bg-base-900 border border-amber-900/50")]
     [:div {:class "py-1 flex"}
-     [:div {:class (str "max-w-[85%] min-w-40 rounded px-2.5 py-1.5 "
+     [:div {:class (str "seon-bubble max-w-[78%] min-w-0 rounded px-2.5 py-1.5 "
                         bubble-class)}
       [:div {:class "flex items-baseline gap-2 flex-wrap"}
        [:span {:class (str "text-xs font-mono font-semibold " from-class)}
@@ -117,5 +117,5 @@
           (str "→ " (str/join ", " tos))])
        (when (instance? js/Date at)
          [:span {:class "text-xs text-text-500"} (hh-mm-ss at)])]
-      [:div {:class "markdown mt-0.5"}
+      [:div {:class "markdown mt-0.5 min-w-0"}
        (render/block :html {:seon.render/markdown (str/trim body)})]]]))

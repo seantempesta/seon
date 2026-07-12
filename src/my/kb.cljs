@@ -155,7 +155,7 @@
        {::claim \"transact! Malli-validates every entity value before the tx reaches datahike\"
         ::source \"src/seon/db/internal.cljs:694\"
         ::confidence :verified})
-     ;=> {:my.kb/id 1234}
+     ; returns «map: :my.kb/id 1234»
 
    For a multi-field DOMAIN model (linked refs, component children, your own
    identity key) design a my.kb.<domain> schema instead — see

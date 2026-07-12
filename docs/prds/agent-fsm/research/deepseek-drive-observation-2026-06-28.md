@@ -17,7 +17,7 @@ tags: [research, agent, ui]
 The agent SUCCEEDED at the buildable half and the new UI carried it cleanly:
 it discovered the tile contract by reading source, wrote a correctly-specced
 `my-todos-tile` fn (eval `msi`), wired it with one raw transact to
-`:seon.render.live-tile/content` (eval `WgQ`, first try, no error), and that fn
+`:seon.render.live-canvas/content` (eval `WgQ`, first try, no error), and that fn
 is the focal `#world-canvas` on `/agent/zeG-2606272150` — rendering "todos /
 0 open / 2 done". **The live-tile-as-canvas mechanism is well-taught and worked.**
 
@@ -33,7 +33,7 @@ ctx-block (0 mentions of canvas/slot/block/install across 64 evals); it reached
 for the live tile exclusively. The only canvas-vs-block artifact is a HUMAN-facing
 phantom "Acme canvas" tile from stale acme code, not agent confusion.
 
-**Biggest single lever: build `my.tile` (esp. an interactive `show!`/action
+**Biggest single lever: build `my.canvas` (esp. an interactive `show!`/action
 primitive). It does not exist in the live system; its absence is what turned a
 ~5-eval task into a 64-eval one.**
 
@@ -71,11 +71,11 @@ attr."* The agent did exactly that (eval `WgQ`) and got
 positive signal in the run.
 
 **(c) Toolkit verbs — the catalog the agent was promised does NOT exist.**
-`toolkit.md` describes `my.todo`, `my.tile`, `my.search`, etc. The live system
+`toolkit.md` describes `my.todo`, `my.canvas`, `my.search`, etc. The live system
 renders **`seon.agent.todo`** (not `my.todo`), the agent searched with floor
-**`seon.agent.search/grep`** (not `my.search`), and **`my.tile` is entirely
+**`seon.agent.search/grep`** (not `my.search`), and **`my.canvas` is entirely
 absent** from the loaded namespaces. The agent used `seon.agent.todo/complete!`
-correctly (it was in context) but had to hand-roll a tile because no `my.tile/show!`
+correctly (it was in context) but had to hand-roll a tile because no `my.canvas/show!`
 exists. The toolkit catalog is an aspirational TARGET, and the gap between it and
 the live floor is the run's central cost (see §5).
 
@@ -148,7 +148,7 @@ prompt L1261) should show the actual fn identity attr.
 ctx-blocks/slots/world-layout.** Across 64 evals there are **zero** mentions of
 `canvas`, `world-layout`, `slot`, `:seon.agent.ctx/name`, or `ctx/install!`
 (`grep -ic` = 0). Its mental model was clean and correct: it read
-`seon.agent.ctx.live-tile/live-tile-block` (eval `RYT`/`Drn`), summarized it
+`seon.agent.ctx.live-canvas/live-tile-block` (eval `RYT`/`Drn`), summarized it
 accurately — *"A tile fn takes a system-input map ... and returns
 `{:seon.render/hiccup ... :seon.render/ai ...}`"* (eval `Lyo` narration) — defined
 its fn, and wired the ONE attr. It never tried to install a block, never confused
@@ -206,7 +206,7 @@ Render/layout issues to route to U:
 
 ## 5. What's MISSING — one addition that would have collapsed the run
 
-**Build `my.tile` with an interactivity primitive, and teach the live-tile
+**Build `my.canvas` with an interactivity primitive, and teach the live-tile
 interactivity boundary in the contract.** This is the single highest-value change.
 
 The agent's task was 90% spent discovering that live tiles can't be interactive.
@@ -221,9 +221,9 @@ plus a silent contract boundary.
 
 Two concrete fixes, either of which pays for itself:
 
-1. **(preferred) Build `my.tile/show!` + an action/form primitive** so a tile can
+1. **(preferred) Build `my.canvas/show!` + an action/form primitive** so a tile can
    emit a button/input that calls back into the agent (message or fn). The
-   `toolkit.md` catalog already designs `my.tile/show!`; shipping it — with one
+   `toolkit.md` catalog already designs `my.canvas/show!`; shipping it — with one
    prebuilt interactive view — turns this whole task into ~5 evals.
 2. **(minimum) State the boundary in the live-tile contract**: "live tiles are
    read-only rendered queries; for human input, render an instruction to message
@@ -234,13 +234,13 @@ Two concrete fixes, either of which pays for itself:
 
 ### → Core (prompt / context / toolkit / schema-teaching / eval-ergonomics)
 
-1. **`my.tile` (esp. interactive `show!`/action) is unbuilt** — the run's central
+1. **`my.canvas` (esp. interactive `show!`/action) is unbuilt** — the run's central
    cost; the human's "add" ask was unmeetable. Build it, or at minimum document
    the live-tile read-only boundary in `src/seon/render/live_tile.cljs`'s ns doc.
    (§5)
 2. **Toolkit catalog ≠ live floor.** `toolkit.md` promises `my.todo`/`my.search`/
-   `my.tile`; the live system renders `seon.agent.todo` + `seon.agent.search` +
-   raw `:seon.render.live-tile/content`. Either ship the wrappers or stop
+   `my.canvas`; the live system renders `seon.agent.todo` + `seon.agent.search` +
+   raw `:seon.render.live-canvas/content`. Either ship the wrappers or stop
    describing them as present. (§1c)
 3. **grep pattern contract invisible** → 5 `\|` errors. Teach "alternation is a
    plain `|`, no backslash" at the existing grep discovery example (system prompt

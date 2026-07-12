@@ -1225,14 +1225,14 @@
                                :seon.embed/distance (double distance)})
                             rows)}))
 
-;;; --- wire verb: "knn-search" -----------------------------------------------
+;;; --- wire function: "knn-search" -----------------------------------------------
 ;;;
 ;;; The query-side SEAM, mirroring the write-side augmenter seam: `seon.embed`
-;;; requires `seon.server.wire` (never the reverse), so the verb is defined HERE
+;;; requires `seon.server.wire` (never the reverse), so the function is defined HERE
 ;;; as a `wire/handle-op` defmethod — wire.clj stays Proximum/Gemini-free and
 ;;; loadable on the plain :test/:dev JVM. The conn arrives PRE-RESOLVED
 ;;; (handle-req resolves agent-id/db-name before dispatching handle-op). Value
-;;; payloads (eids in, hits out) ride Transit-JSON like every other verb.
+;;; payloads (eids in, hits out) ride Transit-JSON like every other function.
 
 (defmethod wire/handle-op "knn-search" [conn req]
   (let [query (:seon.store.wire/query req)

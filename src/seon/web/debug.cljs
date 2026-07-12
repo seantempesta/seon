@@ -1,10 +1,10 @@
 (ns seon.web.debug
-  "Operator dev tools — the two surfaces that have NO world-page equivalent:
+  "Operator dev tools — the two surfaces that have NO agent-view equivalent:
 
-     GET /agent/<id>/debug      — the two-pane debug inspector: the EXACT
+     GET /agent/<id>/debug      — the two-pane debug view: the EXACT
                                   bytes the LLM receives (left) beside the
-                                  rendered context-section html twins (right),
-                                  plus the per-section token + cache-line
+                                  rendered context-block html twins (right),
+                                  plus the per-block token + cache-line
                                   audit bar along the bottom.
      GET /agent/<id>/debug/sse  — SSE stream that re-morphs the debug panes.
      GET /data                  — the live datom browser: the kinds the
@@ -13,22 +13,13 @@
      GET /data/sse              — SSE stream that re-morphs `#data-browser`.
 
    These are the operator/developer introspection surfaces (raw prompt,
-   cache-line audit, stored datoms) — distinct from the agent-WORLD renderers
-   (`seon.web.datastar`), which own `/`, `/world`, `/agent/<id>`. The routes
+   cache-line audit, stored datoms) — distinct from the agent-view renderers
+   (`seon.web.datastar`), which own `/`, `/agents`, `/agent/<id>`. The routes
    are wired into `seon.web.router`'s static supplement as plain reitit routes.
 
-   Both per-agent panes derive from `inspect/ctx-preview` (soul system block
-   via `seon.ai/effective-system-prompt` + the ONE composer
-   `seon.agent.ctx/assemble-context`), so they share their sources and cannot
-   structurally diverge:
-     - LEFT  `:seon.render/ai`   — the EXACT bytes the LLM would receive on its
-       next render: the live SOUL system block FIRST, then the context
-       sections as per-section texts (`:seon.render/section-texts`).
-     - RIGHT `:seon.render/html` — the CONTEXT sections' html twins
-       (`:seon.render/section-html`), each rendered as one right-pane card in
-       render order. (The soul is the system MESSAGE, not a context section, so
-       it has no html twin — the rendered view is the context surface; the full
-       prompt text is the left pane.)
+   Both panes derive from `agent-debug/ctx-preview`, whose rendered context blocks
+   come from the same frozen DB projection as the prompt. The left pane shows
+   exact AI text; the right pane shows only blocks declaring an HTML twin.
 
    Reactive: a single tx-listener subscribes to every commit. Per-agent tx fan
    out to that agent's open debug streams; core/seed tx fan out to ALL watching
@@ -42,7 +33,7 @@
     [seon.agent.ctx.usage :as ctx-usage]
     [seon.db :as db]
     [seon.derive :as derive]
-    [seon.agent.inspect :as inspect]
+    [seon.agent.debug :as agent-debug]
     [seon.log :as log]
     [seon.render :as render]
     [seon.ui.components :as comp]
@@ -93,51 +84,31 @@
                                      :where [?e :seon.agent/id ?id]]
                     :seon.db/args  [agent-id]}))))
 
-(defn- truncate-val [v n]
-  (let [s (pr-str v)]
-    (if (> (count s) n) (str (subs s 0 n) " …") s)))
-
 ;; ============================================================
-;; Context bar — the per-section token + cache-line audit instrument.
-;; DISPLAY-ONLY, all DERIVED at render time: per-section estimated tokens
-;; (seon.ai.tokens/estimate over the SAME section-texts the LLM prompt is
+;; Context bar — the per-block token + cache-line audit instrument.
+;; DISPLAY-ONLY, all DERIVED at render time: per-block estimated tokens
+;; (seon.ai.tokens/estimate over the SAME block texts the LLM prompt is
 ;; built from — one render, two consumers), the STRUCTURAL cache breakpoint
 ;; (end of the byte-stable prefix = after :namespaces), and the LIVE cached
 ;; extent (exact, off the last turn's persisted :seon.agent.turn/llm-usage).
 ;; The divergence between the two markers is the point.
 ;; ============================================================
 
-(def ^:private stable-section-names
-  "Section names that form the byte-stable cacheable PREFIX (the composer
-   caches sections with `:seon.agent.ctx/priority` ≤ `seon.agent.ctx/cache-breakpoint`
-   = soul → :system → :namespaces). The structural cache-line falls right
-   after the LAST of these in render order. Mirrors `core-default-ctx`."
-  #{:soul-system :system :namespaces})
-
-(defn- stable-section?
-  "True when section `nm` belongs to the byte-stable cacheable prefix —
-   one of [[stable-section-names]], OR any per-namespace split entry
-   (`:namespaces/seon.db`), since the whole :namespaces body is part of
-   the prefix."
-  [nm]
-  (or (contains? stable-section-names nm)
-      (= "namespaces" (namespace nm))))
-
-(defn- ns-section-name
-  "Display name for one namespace block of the :namespaces section:
+(defn- ns-block-name
+  "Display name for one namespace block of the :namespaces block:
    `; namespace seon.db` → `:namespaces/seon.db`. nil for a chunk
-   with no namespace header (the section's preamble line)."
+   with no namespace header (the block's preamble line)."
   [block]
   (when-let [m (re-find #"(?m)^; namespace (\S+)" block)]
     (keyword "namespaces" (second m))))
 
-(defn- expand-namespaces-section
-  "Display-only: explode the single `:namespaces` section into ONE entry
+(defn- expand-namespaces-block
+  "Display-only: explode the single `:namespaces` block into ONE entry
    per namespace block, so the debug view lists each ns separately instead
    of one giant `:namespaces` blob. The LLM prompt is untouched — this only
-   reshapes the per-section breakdown both panes + the context bar consume.
-   Every other section passes through unchanged, in render order."
-  [section-texts]
+   reshapes the per-block breakdown both panes + the context bar consume.
+   Every other block passes through unchanged, in render order."
+  [block-texts]
   (into []
         (mapcat
           (fn [{nm :seon.agent.ctx/name txt :seon.render/text :as sec}]
@@ -145,14 +116,16 @@
               (->> (str/split (or txt "") #"(?m)(?=^; namespace )")
                    (remove str/blank?)
                    (map (fn [chunk]
-                          {:seon.agent.ctx/name    (or (ns-section-name chunk) :namespaces)
-                           :seon.render/text chunk})))
+                          (assoc sec
+                                 :seon.agent.ctx/name
+                                 (or (ns-block-name chunk) :namespaces)
+                                 :seon.render/text chunk))))
               [sec])))
-        section-texts))
+        block-texts))
 
 (defn- context-bar-data
-  "Derive the context-bar model for `agent-id` from the SAME per-section
-   texts the LLM prompt is built from (`section-texts`):
+  "Derive the context-bar model for `agent-id` from the SAME per-block
+   texts the LLM prompt is built from (`block-texts`):
 
      {::segments [{::name ::tokens ::stable?} …]  ; render order
       ::total-tokens N
@@ -161,16 +134,19 @@
       ::provider-shape kw|nil}
 
    `::live-cached-tokens` is nil when no turn has run / usage is absent."
-  [agent-id section-texts]
-  (let [segs   (mapv (fn [{nm :seon.agent.ctx/name txt :seon.render/text}]
+  [agent-id block-texts]
+  (let [segs   (mapv (fn [{nm :seon.agent.ctx/name
+                            priority :seon.agent.ctx/priority
+                            txt :seon.render/text}]
                        (let [t (or txt "")]
                          {::name    nm
                           ::tokens  (tokens/estimate t)
-                          ::stable? (stable-section? nm)}))
-                     section-texts)
+                          ::stable? (<= (or priority js/Number.MAX_SAFE_INTEGER)
+                                        (ctx/cache-breakpoint))}))
+                     block-texts)
         total  (reduce + 0 (map ::tokens segs))
-        ;; Structural cache-line = cumulative tokens of every section up to
-        ;; AND INCLUDING the last stable one, in render order. (Sections
+        ;; Structural cache-line = cumulative tokens of every block up to
+        ;; AND INCLUDING the last stable one, in render order. (Blocks
         ;; sort static→volatile, so the stable prefix is contiguous.)
         last-stable-idx (->> (map-indexed vector segs)
                              (filter (comp ::stable? second))
@@ -194,37 +170,41 @@
 (defn- snapshot
   "Compute one render snapshot for `agent-id`:
      {:ai-text <string>
-      :section-texts [{:seon.agent.ctx/name … :seon.render/text …} ...]
+      :block-texts [{:seon.agent.ctx/name … :seon.render/text …} ...]
       :token-est <int>
-      :html-cards [<card-map> ...]  ; one per SECTION html twin, in render order
+      :html-cards [<card-map> ...]  ; one per BLOCK html twin, in render order
       :agent <pulled entity or nil>}
-   Each card-map: `{::hiccup ::kind ::card-key}` — the section's html
+   Each card-map: `{::hiccup ::kind ::card-key}` — the block's html
    twin, its name, and a stable card-key for idiomorph (the right pane
-   mirrors the left's section set)."
+   mirrors the left's block set)."
   [agent-id]
   (let [db @db/*conn*
-        {:seon.render/keys [text token-estimate section-texts section-html]}
-        (inspect/ctx-preview {:seon.agent/id agent-id})
+        {:seon.render/keys [text token-estimate]
+         rendered-blocks :seon.agent.ctx/rendered-blocks}
+        (agent-debug/ctx-preview {:seon.agent/id agent-id})
         ;; Display-only: the single 49k-token :namespaces blob dwarfs every
-        ;; other section into an unreadable sliver — split it into one entry
+        ;; other block into an unreadable sliver — split it into one entry
         ;; per ns so the breakdown (both panes + the bottom bar) shows the
         ;; real per-ns distribution. The LLM prompt + token-estimate are
         ;; unchanged (they derive from `text`).
-        section-texts (expand-namespaces-section (or section-texts []))
-        ;; Each section twin → one right-pane card, in render order. The
-        ;; card-key is the section name so idiomorph preserves the node
-        ;; across SSE morphs.
-        cards (->> section-html
-                   (mapv (fn [{nm :seon.agent.ctx/name h :seon.render/hiccup}]
-                           {::hiccup   h
+        block-texts (expand-namespaces-block
+                        (filterv #(contains? % :seon.render/text)
+                                 (or rendered-blocks [])))
+        ;; HTML cards are the same resolved blocks filtered by format presence.
+        cards (->> rendered-blocks
+                   (keep (fn [{nm :seon.agent.ctx/name h :seon.render/hiccup}]
+                           (when h
+                           {::name     nm
+                            ::hiccup   h
                             ::kind     (str nm)
-                            ::card-key (str "section-" (clojure.core/name nm))})))
+                            ::card-key (str "context-block-" (clojure.core/name nm))})))
+                   vec)
         turn-durs []
         ;; The agent's OWN tile — rendered explicitly (the agent entity is
-        ;; not a context section, so it has no section twin). Wired
-        ;; `:seon.render.live-tile/content` wins; default is the core welcome.
+        ;; not a context block, so it has no block twin). Wired
+        ;; `:seon.render.canvas/content` wins; default is the core welcome.
         tile  (:seon.render/hiccup
-                (render/render-agent-tile {:seon.db/db db
+                (render/render-agent-canvas {:seon.db/db db
                                            :seon.agent/id agent-id}))
         ;; Just the ONE agent entity. State is DERIVED (no stored enum), so
         ;; the snapshot carries the projected state + turn count the header
@@ -235,13 +215,13 @@
     {:ai-text   (or text "")
      :agent-state state
      :agent-turn-count turn-count
-     :section-texts (or section-texts [])
+     :block-texts (or block-texts [])
      :token-est  (or token-estimate 0)
-     :context-bar (context-bar-data agent-id (or section-texts []))
+     :context-bar (context-bar-data agent-id (or block-texts []))
      :html-cards cards
      :turn-durs  turn-durs
-     ;; No render-cap elision on the right pane — the section twins ARE the
-     ;; prompt sections (the transcript twin self-bounds via the transcript
+     ;; No render-cap elision on the right pane — the block twins ARE the
+     ;; prompt blocks (the transcript twin self-bounds via the transcript
      ;; block's :seon.agent.ctx.transcript/tiers). Kept at 0 so the pane's
      ;; existing elided-note branch is a no-op.
      :elided    0
@@ -250,13 +230,13 @@
 
 ;; ============================================================
 ;; Page rendering — full page (for initial GET) AND morph fragments
-;; (for SSE pushes). The two panes use stable ids `#inspect-ai-<id>` and
-;; `#inspect-html-<id>` so datastar morphs by id.
+;; (for SSE pushes). The two panes use stable ids `#debug-ai-<id>` and
+;; `#debug-html-<id>` so datastar morphs by id.
 ;; ============================================================
 
-(defn- ai-pane-id   [agent-id] (str "inspect-ai-" agent-id))
-(defn- html-pane-id [agent-id] (str "inspect-html-" agent-id))
-(defn- header-id    [agent-id] (str "inspect-header-" agent-id))
+(defn- ai-pane-id   [agent-id] (str "debug-ai-" agent-id))
+(defn- html-pane-id [agent-id] (str "debug-html-" agent-id))
+(defn- header-id    [agent-id] (str "debug-header-" agent-id))
 
 (defn- fmt-ms
   "`1234` → `\"1.2s\"`, `53` → `\"53ms\"`."
@@ -300,15 +280,15 @@
       (str "~" token-est " tokens")]
      [:a {:href (str "/agent/" agent-id)
           :class "text-xs text-amber-500 hover:text-amber-300"} "← agent"]
-     [:a {:href "/world"
+     [:a {:href "/agents"
           :class "text-xs text-amber-500 hover:text-amber-300"} "← all agents"]]))
 
-(def ^:private open-ai-sections
-  "Left-pane sections that render EXPANDED by default — the dynamic
+(def ^:private open-ai-blocks
+  "Left-pane blocks that render EXPANDED by default — the dynamic
    tail. Everything else (system, capabilities, catalogs, ns-context,
    warnings) is static bulk the user has already read; it collapses to
    a one-line summary. `:context` is the divergence-fallback pseudo-
-   section carrying the whole joined text; `:soul-system` is the live
+   block carrying the whole joined text; `:soul-system` is the live
    SOUL system message (block 1 of every LLM call) — kept open so the
    debug view shows the soul the agent actually receives."
   #{:soul-system :transcript :prompt :context})
@@ -323,11 +303,11 @@
          (str/join ",")
          (str/reverse))))
 
-(defn- ai-section-details
-  "One `<details>` per context section. `data-seon-key` keys the
+(defn- ai-block-details
+  "One `<details>` per context block. `data-seon-key` keys the
    client-side open-state guard (user toggles survive SSE morphs)."
   [{sec-name :seon.agent.ctx/name sec-text :seon.render/text}]
-  (let [open? (contains? open-ai-sections sec-name)]
+  (let [open? (contains? open-ai-blocks sec-name)]
     [:details (cond-> {:class "mb-1"
                        :data-seon-key (str "ai-sec-" (name sec-name))}
                 open? (assoc :open true))
@@ -338,7 +318,7 @@
       sec-text]]))
 
 (defn- ai-pane-fragment
-  [agent-id {:keys [ai-text section-texts]}]
+  [agent-id {:keys [ai-text block-texts]}]
   [:div {:id (ai-pane-id agent-id)
          :class "flex flex-col h-full overflow-hidden border-r border-base-800"}
    [:div {:class "px-2 py-1 text-xs font-mono text-text-400 bg-base-900 border-b border-base-800"}
@@ -349,29 +329,34 @@
                         "whitespace-pre-wrap text-text-100 bg-base-950")}
       "(empty context)"]
 
-     (seq section-texts)
+     (seq block-texts)
      (into [:div {:class "flex-1 overflow-auto p-3 bg-base-950"}]
-           (map ai-section-details)
-           section-texts)
+           (map ai-block-details)
+           block-texts)
 
      :else
      [:pre {:class (str "flex-1 overflow-auto p-3 text-xs font-mono "
                         "whitespace-pre-wrap text-text-100 bg-base-950")}
       ai-text])])
 
-(defn- section-card
-  "Render one SECTION HTML TWIN as a right-pane card: a section-name label
-   + the section's hiccup. Stable `:id` (`section-<name>`) so idiomorph
-   PRESERVES the node across SSE morphs and only genuinely-new sections
-   animate in. The hiccup is the section's `:seon.render/html` twin (or a
+(defn- context-block-card
+  "Render one BLOCK HTML TWIN as a right-pane card: a block-name label
+   + the block's hiccup. Stable `:id` (`block-<name>`) so idiomorph
+   PRESERVES the node across SSE morphs and only genuinely-new blocks
+   animate in. The hiccup is the block's `:seon.render/html` twin (or a
    banner if it threw — the composer's guard never hands us nil)."
-  [{::keys [hiccup kind card-key]}]
+  [{::keys [name hiccup kind card-key]}]
   [:div {:id card-key
          :class (str "border-l-2 border-amber-700/40 pl-2 py-1 "
                      "animate-appear")}
    [:div {:class "text-xs font-mono font-semibold text-text-400 mb-0.5"}
     kind]
-   [:div {:class "mt-0.5"} hiccup]])
+   [:div (cond-> {:class "mt-0.5"}
+           (= name :transcript)
+           (assoc :data-seon-scroll "1"
+                  :class "mt-0.5 overflow-auto"
+                  :style "max-height:min(55vh,36rem)"))
+    hiccup]])
 
 (defn- thinking-bubble
   "Placeholder bubble pinned under the newest card while the agent is
@@ -392,8 +377,7 @@
            :class "flex flex-col h-full overflow-hidden"}
      [:div {:class "px-2 py-1 text-xs font-mono text-text-400 bg-base-900 border-b border-base-800"}
       ":seon.render/html  (rendered view)"]
-     [:div {:id (str "inspect-cards-" agent-id)
-            :data-seon-scroll "1"
+     [:div {:id (str "debug-cards-" agent-id)
             :class "seon-agent-content flex-1 overflow-auto p-2 text-xs bg-base-950"}
       (when agent-tile
         [:div {:class (str "border border-amber-700/60 rounded p-1 mb-2 "
@@ -405,27 +389,27 @@
               " elided")])
       (if (seq html-cards)
         (into [:div {:class "flex flex-col gap-2"}]
-              (map section-card html-cards))
+              (map context-block-card html-cards))
         [:div {:class "text-text-500 italic p-2"}
-         "ask this agent something ↓ — every section the agent sees renders its html twin here live"])
+         "ask this agent something ↓ — every block the agent sees renders its html twin here live"])
       (when running?
         (thinking-bubble (or agent-turn-count 0)))]]))
 
 ;; ============================================================
-;; The context bar — per-section token + cache-line viz along the bottom
-;; of the debug inspector. A horizontal stacked bar: one segment per
-;; rendered section (width ∝ estimated tokens), the STRUCTURAL cache
+;; The context bar — per-block token + cache-line viz along the bottom
+;; of the debug view. A horizontal stacked bar: one segment per
+;; rendered block (width ∝ estimated tokens), the STRUCTURAL cache
 ;; breakpoint as one marker, the LIVE cached extent as a second marker.
 ;; Display-only — re-rendered every SSE push (stable id so idiomorph
 ;; preserves it).
 ;; ============================================================
 
-(defn- context-bar-id [agent-id] (str "inspect-ctxbar-" agent-id))
+(defn- context-bar-id [agent-id] (str "debug-ctxbar-" agent-id))
 
 (defn- bar-segment
-  "One section segment of the stacked bar. Width is a flex-grow weight
-   (∝ tokens). Stable-prefix sections read amber (the cached prefix);
-   volatile-tail sections read cooler. The section name + token count
+  "One block segment of the stacked bar. Width is a flex-grow weight
+   (∝ tokens). Stable-prefix blocks read amber (the cached prefix);
+   volatile-tail blocks read cooler. The block name + token count
    show inline when the segment is wide enough; always in the title."
   [{::keys [name tokens stable?]} total]
   (let [pct (if (pos? total) (* 100.0 (/ tokens total)) 0)
@@ -466,7 +450,7 @@
       label]]))
 
 (defn- context-bar-fragment
-  "The bottom context bar for the debug inspector. Stacked per-section
+  "The bottom context bar for the debug view. Stacked per-block
    token segments + structural cache-line + live cached overlay. Stable
    `:id` so SSE morphs preserve it."
   [agent-id {:keys [context-bar]}]
@@ -479,7 +463,7 @@
     [:div {:id (context-bar-id agent-id)
            :class (str "shrink-0 border-t border-base-800 bg-base-900 "
                        "px-2 pt-5 pb-1.5")}
-     [:div {:class "flex items-center gap-3 mb-1 text-[10px] font-mono text-text-400"}
+     [:div {:class "flex flex-wrap items-center gap-x-3 gap-y-0.5 mb-1 text-[10px] font-mono text-text-400"}
       [:span {:class "text-text-200"} "context"]
       [:span {:class "text-amber-400"}
        (str "~" total-tokens " tok total")]
@@ -490,7 +474,7 @@
          (str "live cached " live-cached-tokens " tok"
               (when provider-shape (str " · " (clojure.core/name provider-shape))))]
         [:span {:class "text-text-600 italic"} "no live usage yet"])
-      [:span {:class "ml-auto text-text-600"} "stable prefix amber · volatile tail grey"]]
+      [:span {:class "shrink-0 text-text-600"} "stable prefix amber · volatile tail grey"]]
      [:div {:class "relative h-6 w-full flex rounded-sm overflow-visible bg-base-950 border border-base-800"}
       (if (seq segments)
         (into [:div {:class "flex w-full h-full rounded-sm overflow-hidden"}]
@@ -655,10 +639,10 @@
        "if(f){e.preventDefault();f.requestSubmit();}}});"))
 
 (defn- debug-shell
-  "The full page for `/agent/<id>/debug` — the two-pane debug inspector
-   (raw context sections left, rendered cards right) + the context-bar
+  "The full page for `/agent/<id>/debug` — the two-pane debug view
+   (raw context blocks left, rendered cards right) + the context-bar
    audit instrument + a chat bar. The header is inside the morph zone so
-   it updates too; Esc returns to the agent's world page."
+   it updates too; Esc returns to the agent's agent view."
   [agent-id snap]
   (let [b (brand/info)]
     (str
@@ -826,7 +810,7 @@
                          (map (fn [c]
                                 [:td {:class "pr-3 py-0.5 text-text-100 break-all"}
                                  (if (contains? row c)
-                                   (truncate-val (get row c) 120)
+                                   (tokens/bounded-pr-str (get row c) 30)
                                    "")]))
                          cols)))
             rows)]]))
@@ -887,11 +871,11 @@
        "data"]
       [:span {:class "text-xs font-mono text-text-500"}
        (if data-system?
-         "every row in the store — the whole system is data"
+         "every row in the db — the whole system is data"
          "what this cluster stored after bootstrap")]
       [:div {:class "ml-auto flex items-baseline gap-4"}
        (data-toggle-link params)
-       [:a {:href "/world"
+       [:a {:href "/agents"
             :class "text-xs font-mono text-amber-500 hover:text-amber-300"}
         "← all agents"]]]
      (if data-ns
@@ -957,7 +941,7 @@
             (str "agent " agent-id " is not in this cluster store")]
            [:div {:class "text-text-500 text-xs mb-4"}
             "it belonged to a previous store — this tab is stale"]
-           [:a {:href "/world"
+           [:a {:href "/agents"
                 :class "text-amber-500 hover:text-amber-300 text-xs underline"}
             "← all live agents"]]]]))))
 
@@ -1133,7 +1117,7 @@
         (log/error-console! "seon.web.debug" "data initial render failed" e)))))
 
 (defn debug-page!
-  "GET /agent/<id>/debug — render the two-pane debug inspector.
+  "GET /agent/<id>/debug — render the two-pane debug view.
 
    Guards a stale `<id>` (no entity in this store) with a clean 404 page
    rather than a 500 out of `snapshot`'s lookup-ref pull."

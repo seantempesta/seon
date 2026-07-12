@@ -160,6 +160,42 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
+(deftest compat-thinking-sends-only-standard-reasoning-effort
+  ;; :openai-compat NEVER sends the vendor :thinking field — strict
+  ;; gateways (Meta Model API, vLLM) HTTP-400 unknown params (verified
+  ;; live against api.meta.ai 2026-07-10). An effort STRING goes out as
+  ;; the standard :reasoning_effort; "true" has no standard wire form on
+  ;; a generic gateway and sends NEITHER field.
+  ;; NESTING: with-conn OUTERMOST, with-env INSIDE (see
+  ;; request-params-default-shape for why with-env must not head the thread).
+  (async done
+    (-> (with-conn
+          (fn [_conn]
+           (with-env {"SEON_AI_PROVIDER" nil}
+            (fn []
+              (-> (db/transact!
+                    {:seon.db/tx-data [{::ai/id       "config"
+                                        ::ai/provider :openai-compat
+                                        ::ai/thinking "minimal"}]})
+                  (.then (fn [{ok? :seon.db/ok?}]
+                           (is (true? ok?))
+                           (let [p (openai/request-params {:seon.ai/ctx "hi"})]
+                             (is (= "minimal" (:reasoning_effort p))
+                                 "effort string → the STANDARD param")
+                             (is (not (contains? p :thinking))
+                                 "vendor :thinking never sent on compat"))
+                           (db/transact!
+                             {:seon.db/tx-data [{::ai/id       "config"
+                                                 ::ai/thinking "true"}]})))
+                  (.then (fn [_]
+                           (let [p (openai/request-params {:seon.ai/ctx "hi"})]
+                             (is (not (contains? p :thinking))
+                                 "\"true\" on compat → no vendor field")
+                             (is (not (contains? p :reasoning_effort))
+                                 "\"true\" on compat → no invented effort")))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
 (deftest tools-included-only-when-passed
   (async done
     (-> (with-conn
@@ -562,3 +598,141 @@
             (is (not (contains? error :seon.ai/transport?)))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ============================================================
+;; repl-mode :stream — the delta-by-delta consumer that ABORTS at the first
+;; complete top-level form. Scripted async-iterable stub (no network): the
+;; cheap delimiter-balance gate + the parse-forms confirm + the abort, all
+;; exercised on `stream-until-form!`.
+;; ============================================================
+
+(defn- scripted-stream
+  "A minimal SDK-stream STUB: async-iterable emitting one content delta per
+   `pieces` element, plus an `.abort` recorded in `aborted`. Mirrors the
+   ChatCompletionStream surface `stream-until-form!` touches
+   (`[Symbol.asyncIterator]` → chunks with `.choices[0].delta.content`)."
+  [pieces aborted]
+  (let [i (atom 0)
+        mk (fn [c] #js{:choices #js[#js{:delta #js{:content c}}]})]
+    (js-obj
+      "abort" (fn [] (reset! aborted true))
+      js/Symbol.asyncIterator
+      (fn []
+        (js-obj "next"
+                (fn []
+                  (js/Promise.resolve
+                    (let [n @i]
+                      (if (< n (count pieces))
+                        (do (swap! i inc) #js{:value (mk (nth pieces n)) :done false})
+                        #js{:value js/undefined :done true})))))))))
+
+(deftest stream-aborts-at-first-complete-form
+  ;; the form streams across two deltas; the third delta (a fabricated tail)
+  ;; must NEVER be reached — the stream aborts the instant the form closes.
+  (async done
+    (let [aborted (atom false)
+          s (scripted-stream ["(+ 1" " 2)" " ⟹ 3 fabricated"] aborted)]
+      (-> (openai/stream-until-form! s)
+          (.then (fn [{::openai/keys [text aborted?]}]
+                   (is (= "(+ 1 2)" text) "accumulated exactly through the first form")
+                   (is (true? aborted?) "reported aborted")
+                   (is (true? @aborted) "the SDK stream .abort was called")))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest stream-keeps-going-past-a-demoted-data-literal
+  ;; a bare {…} closes at delimiter-depth 0 but demotes to prose — the
+  ;; consumer must keep streaming until a REAL evaluable form completes.
+  (async done
+    (let [aborted (atom false)
+          s (scripted-stream [";; think\n" "{:a 1}\n" "(message/user \"hi\")"] aborted)]
+      (-> (openai/stream-until-form! s)
+          (.then (fn [{::openai/keys [text aborted?]}]
+                   (is (true? aborted?))
+                   (is (str/includes? text "(message/user \"hi\")")
+                       "streamed through the real form, past the demoted literal")
+                   (is (str/includes? text ";; think")
+                       "leading comment (thinking) is kept with the form")))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest stream-natural-end-when-no-form-completes
+  ;; only comments stream — no top-level form ever closes, so the consumer
+  ;; runs to the stream's natural end and reports NOT aborted.
+  (async done
+    (let [aborted (atom false)
+          s (scripted-stream [";; just\n" ";; comments\n"] aborted)]
+      (-> (openai/stream-until-form! s)
+          (.then (fn [{::openai/keys [aborted?]}]
+                   (is (false? aborted?) "no form → natural end, not aborted")
+                   (is (false? @aborted) ".abort never called")))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(defn- rejecting-stream
+  "A minimal SDK-stream STUB whose iterator REJECTS on `.next` — the shape
+   a transport failure (timeout / connection reset) takes on the
+   ChatCompletionStream async-iteration surface."
+  [err]
+  (js-obj
+    "abort" (fn [])
+    js/Symbol.asyncIterator
+    (fn [] (js-obj "next" (fn [] (js/Promise.reject err))))))
+
+(deftest stream-transport-failure-is-a-value-not-a-rejection
+  ;; THE P4-BENCH CRASH GUARD (2026-07-10): stream-until-form! is an
+  ;; instrumented ^:async fn — a rejection propagating out of it records a
+  ;; :core fault datom at the wrapper (pod-fatal under the dev :crash
+  ;; dial) even though complete catches it one frame up. So the contract
+  ;; is: NEVER reject; the SDK failure comes back as the ::error VALUE.
+  ;; The process-level hook also asserts no rejection escapes to Node.
+  (async done
+    (let [escaped (atom [])
+          handler (fn [reason _] (swap! escaped conj reason))
+          _       (.on js/process "unhandledRejection" handler)
+          s       (rejecting-stream (js/Error. "Request timed out."))]
+      (-> (openai/stream-until-form! s)
+          (.then (fn [{::openai/keys [text aborted? error]}]
+                   (is (= "" text))
+                   (is (false? aborted?))
+                   (is (= "Request timed out." (some-> error .-message))
+                       "the SDK failure rides the result map as ::error"))
+                 (fn [e]
+                   (is false (str "REJECTED — must be errors-as-values: " e))))
+          ;; two macrotasks so Node would have fired any escaped rejection
+          (.then (fn [_] (js/Promise. (fn [res] (js/setTimeout res 0)))))
+          (.then (fn [_] (js/Promise. (fn [res] (js/setTimeout res 0)))))
+          (.then (fn [_]
+                   (.off js/process "unhandledRejection" handler)
+                   (is (empty? @escaped)
+                       (str "unhandledRejection escaped: "
+                            (pr-str (mapv #(some-> ^js % .-message) @escaped))))
+                   (done)))))))
+
+(deftest stream-mode-transport-failure-is-errors-as-values
+  ;; the whole complete path in repl-mode :stream — a transport-level
+  ;; fetch rejection resolves to the retryable envelope, never a throw.
+  (async done
+    (let [escaped (atom [])
+          handler (fn [reason _] (swap! escaped conj reason))
+          _       (.on js/process "unhandledRejection" handler)]
+      (-> (with-stubbed
+            (fn [_ _] (js/Promise.reject (js/TypeError. "fetch failed")))
+            #(openai/complete {:seon.ai/ctx "hi" :seon.ai/stream? true}))
+          (.then
+            (fn [{:seon.ai/keys [text error]}]
+              (is (= "" text) "errors-as-values — empty text, never a rejection")
+              (is (true? (:seon.ai/transport? error))
+                  "stream-mode transport failure is the retryable class")))
+          (.then (fn [_] (js/Promise. (fn [res] (js/setTimeout res 0)))))
+          (.then (fn [_] (js/Promise. (fn [res] (js/setTimeout res 0)))))
+          (.then (fn [_]
+                   (.off js/process "unhandledRejection" handler)
+                   (is (empty? @escaped)
+                       (str "unhandledRejection escaped: "
+                            (pr-str (mapv #(some-> ^js % .-message) @escaped))))
+                   (done)))
+          (.catch (fn [e]
+                    (.off js/process "unhandledRejection" handler)
+                    (is false (str "threw — " e))
+                    (done)))))))

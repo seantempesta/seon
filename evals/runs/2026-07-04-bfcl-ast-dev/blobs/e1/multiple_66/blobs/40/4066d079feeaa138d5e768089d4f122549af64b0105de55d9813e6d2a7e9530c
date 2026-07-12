@@ -1,0 +1,10 @@
+I see the problem — the JSON uses colons as key-value separators, and the Clojure reader chokes on bare colons. I need to write the JSON as a string instead.
+
+```clojure
+; The request asks for a JSON array with one call object. The correct function
+; is traffic_estimate with all three parameters (two required + the optional
+; time_period since "this weekend" calls for "weekend"). I'll deliver it as a
+; string so the colon-format JSON doesn't break the Clojure reader.
+
+(message/user "[{\"name\": \"traffic_estimate\", \"arguments\": {\"start_location\": \"Las Vegas\", \"end_location\": \"Los Angeles\", \"time_period\": \"weekend\"}}]")
+```

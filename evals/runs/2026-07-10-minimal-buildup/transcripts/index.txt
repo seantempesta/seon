@@ -1,0 +1,30 @@
+min-a-poker-d1 agent=tBU-2607101254 outcome=GREEN wall=148s sha_ok=yes
+min-a-poker-d2 agent=vwa-2607101256 outcome=GREEN wall=81s sha_ok=yes
+min-a-poker-d3 agent=CKi-2607101257 outcome=GREEN wall=NA(client-detached) sha_ok=yes
+min-a-two-bucket-d1 agent=utX-2607101301 outcome=RED wall=475s sha_ok=yes
+min-a-two-bucket-d2 agent=tlr-2607101310 outcome=RED wall=359s sha_ok=yes
+min-a-two-bucket-d3 agent=Xra-2607101316 outcome=FLAKE-402-EXCLUDED (DeepSeek insufficient balance, 0 evals — redrive pending top-up)
+min-a-two-bucket-ns-d1 agent=phy-2607101442 outcome=GREEN wall=330s started=2026-07-10T18:42:08Z sha_ok=yes
+min-a-db-memory-d1 agent=hmE-2607101456 outcome=GREEN wall=19s started=2026-07-10T18:56:42Z sha_ok=yes
+min-a-db-memory-d2 agent=eDs-2607101457 outcome=GREEN wall=18s started=2026-07-10T18:57:19Z sha_ok=yes
+min-a-db-memory-d3 agent=mdw-2607101458 outcome=GREEN wall=20s started=2026-07-10T18:58:07Z sha_ok=yes
+min-b-poker-v1-d1 agent=ZLv-2607101526 outcome=GREEN wall=73s started=2026-07-10T19:26:20Z sha_ok=yes
+min-b-two-bucket-v1-d1 agent=cMu-2607101618 outcome=GREEN wall=95s started=2026-07-10T20:18:56Z sha_ok=yes
+min-b-db-memory-v1-d1 agent=iHM-2607101645 outcome=GREEN wall=28s started=2026-07-10T20:45:59Z sha_ok=yes
+spark-a-poker-v1-d1 agent=hlb-2607101714 outcome=GREEN wall=43s started=2026-07-10T21:14:08Z sha_ok=yes
+spark-a-two-bucket-v1-d1 agent=lAc-2607101716 outcome=GREEN wall=60s started=2026-07-10T21:16:07Z sha_ok=yes
+spark-a-db-memory-v1-d1 agent=EHX-2607101717 outcome=GREEN wall=26s started=2026-07-10T21:17:28Z sha_ok=yes
+spark-b-poker-v1-d1 agent=WSc-2607101718 outcome=GREEN wall=61s started=2026-07-10T21:18:42Z sha_ok=yes
+spark-v0-two-bucket-v1-d1 agent=IOJ-2607101723 outcome=RED wall=112s started=2026-07-10T21:23:56Z sha_ok=yes
+ds-think-poker-v1-d1 agent=IRq-2607101758 outcome=GREEN wall=117s started=2026-07-10T21:58:41Z sha_ok=yes
+ds-think-two-bucket-v1-d1 agent=RCA-2607101800 outcome=GREEN wall=461s started=2026-07-10T22:00:56Z sha_ok=yes
+ds-v2-poker-v1-d1 agent=Xpe-2607101810 outcome=GREEN wall=75s started=2026-07-10T22:10:07Z sha_ok=yes
+min-b2-two-bucket-v1-d1 agent=FhT-2607101919 outcome=GREEN wall=66s started=2026-07-10T23:19:16Z sha_ok=yes
+spark-r1-ns-move-v1-d1 agent=WUK-2607101924 outcome=GREEN (oracle fixed, rescored) wall=44s started=2026-07-10T23:24:39Z sha_ok=yes
+ds-r1-ns-move-v1-d1 agent=OTU-2607101927 outcome=RED wall=76s started=2026-07-10T23:27:42Z sha_ok=yes
+ds-r1-ns-move-v1-d2 agent=pLE-2607101931 outcome=RED wall=235s started=2026-07-10T23:31:39Z sha_ok=yes
+ds-r1-ns-probe-d1 agent=UCv-2607101955 outcome=RED wall=127s started=2026-07-10T23:55:56Z sha_ok=yes
+ds-r1-ns-probe-d2 agent=HFI-2607102012 outcome=RED wall=56s started=2026-07-11T00:12:56Z sha_ok=yes
+ds-r1-ns-move-v1-d3 agent=gXn-2607102014 outcome=GREEN wall=68s started=2026-07-11T00:14:06Z sha_ok=yes
+spark-r1-ns-move-v1-d2 agent=Loj-2607102015 outcome=GREEN wall=57s started=2026-07-11T00:15:47Z sha_ok=yes
+spark-p-introspect-probe-d1 agent=Fku-2607102053 outcome=RED wall=11s started=2026-07-11T00:53:29Z sha_ok=yes

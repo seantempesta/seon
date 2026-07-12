@@ -1,9 +1,11 @@
 (ns seon.server.boot-test
-  "Tests for the boot-layer wire ops: the raw tx-feed (subscribe-tx /
-   next-tx-event / unsubscribe-tx — the guest `listen!` model) and the query
-   subscriptions (register-subscription / unregister-subscription — the reactive
-   engine). Driven in-process through the public `wire/handle-op` multimethod
-   the boot ns extends.
+  "Tests for the boot-layer wire ops: the query subscriptions
+   (register-subscription / unregister-subscription — the reactive engine).
+   Driven in-process through the public `wire/handle-op` multimethod the boot
+   ns extends; changed-summaries delivery is observed on the in-process
+   broadcast fanout (`bcast/subscribe!`) — the same per-DB routing the pub
+   socket rides. (The tx-feed `replay-tx` op is covered by
+   seon.server.tx-feed-replay-test.)
 
    Wire shape: the uniform Transit frame (`seon.server.codec`) — every request
    extra AND every response field is a `:seon.store.wire/*` NAMESPACED-KEYWORD
@@ -18,6 +20,7 @@
   (:require [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as d]
             [seon.server.boot]                 ; registers ops + hook (side-effecting)
+            [seon.server.broadcast :as bcast]
             [seon.server.wire :as wire]
             [seon.server.registry :as registry]
             [seon.server.test-util :as tu :refer [*ctx*]]))
@@ -25,7 +28,7 @@
 (set! *warn-on-reflection* true)
 
 ;; One ambient db-name PER FIXTURE INVOCATION so the conn's ::raw-broadcast,
-;; the ::reactive listener, and subscribe-tx's db-name resolution all agree.
+;; the ::reactive listener, and the ops' db-name resolution all agree.
 ;; In production wire/-main sets wire's state :ambient-db-name to the conn's
 ;; cfg :name and runs the hooks under it; the in-process fixture mirrors that.
 ;; The name must be UNIQUE per test: boot's `!engines` defonce caches engine
@@ -62,62 +65,18 @@
 
 (defn- op! [op extra] (tu/req! op extra))
 
-(defn- drain-events
-  "Poll next-tx-event for `handle` until `n` real events arrive or `tries`
-   polls elapse. The in-process datahike writer commits on an async thread, so
-   the first poll(s) may legitimately return no-event — exactly the bounded
-   retry the guest's listen! loop performs. Returns the vector of event names."
-  ([handle n] (drain-events handle n 20))
-  ([handle n tries]
-   (loop [acc [] t 0]
-     (if (or (>= (count acc) n) (>= t tries))
-       acc
-       (let [ev (op! "next-tx-event" {:seon.store.wire/handle handle})]
-         (if (:seon.store.wire/ok ev)
-           (recur (conj acc (:seon.store.wire/event ev)) (inc t))
-           (recur acc (inc t))))))))
-
-(deftest raw-tx-feed-delivers-commit-events
-  (testing "subscribe-tx → commit → next-tx-event delivers the raw tx event"
-    (let [sub  (op! "subscribe-tx" {})
-          h    (:seon.store.wire/handle sub)]
-      (is (true? (:seon.store.wire/ok sub)))
-      (is (integer? h))
-      ;; commit a tx; the ambient conn's ::raw-broadcast feeds the sub's queue.
-      (op! "transact" {:seon.store.wire/tx-data [{:db/ident :ft/v :db/valueType :db.type/string
-                                                  :db/cardinality :db.cardinality/one}]})
-      (op! "transact" {:seon.store.wire/tx-data [{:ft/v "hello"}]})
-      ;; drain with bounded retries (async writer → broadcast latency). Both
-      ;; the schema tx and the data tx surface as "tx" events.
-      (let [evs (drain-events h 1)]
-        (is (seq evs) (str "expected at least one tx event; saw " (pr-str evs)))
-        (is (every? #(= "tx" %) evs))))))
-
-(deftest next-tx-event-times-out-cleanly-when-empty
-  (testing "no-event is a typed not-found, not an exception (guest swallows it)"
-    (let [sub (op! "subscribe-tx" {})
-          h   (:seon.store.wire/handle sub)
-          ev  (op! "next-tx-event" {:seon.store.wire/handle h})]
-      (is (false? (:seon.store.wire/ok ev)))
-      (is (= "no-event" (:seon.store.wire/error ev)))
-      (is (= "not-found" (:seon.store.wire/error-kind ev))))))
-
-(deftest unknown-handle-is-typed-error
-  (let [ev (op! "next-tx-event" {:seon.store.wire/handle 999999})]
-    (is (false? (:seon.store.wire/ok ev)))
-    (is (= "not-found" (:seon.store.wire/error-kind ev)))))
-
-(deftest unsubscribe-stops-the-feed
-  (let [sub (op! "subscribe-tx" {})
-        h   (:seon.store.wire/handle sub)]
-    (op! "unsubscribe-tx" {:seon.store.wire/handle h})
-    (op! "transact" {:seon.store.wire/tx-data [{:db/ident :ft2/v :db/valueType :db.type/string
-                                                :db/cardinality :db.cardinality/one}]})
-    (op! "transact" {:seon.store.wire/tx-data [{:ft2/v "x"}]})
-    ;; after unsubscribe the handle is gone → unknown-handle error, not events
-    (let [ev (op! "next-tx-event" {:seon.store.wire/handle h})]
-      (is (false? (:seon.store.wire/ok ev)))
-      (is (= "not-found" (:seon.store.wire/error-kind ev))))))
+(defn- await-event
+  "Block (bounded) until an event named `event-name` shows up in `!evs`
+   (an atom of event-name strings) or ~3s elapse. Returns the vector of
+   event names seen. The in-process datahike writer commits on an async
+   thread, so delivery is legitimately delayed."
+  [!evs event-name]
+  (let [deadline (+ (System/currentTimeMillis) 3000)]
+    (loop []
+      (if (or (some #{event-name} @!evs)
+              (>= (System/currentTimeMillis) deadline))
+        @!evs
+        (do (Thread/sleep 20) (recur))))))
 
 (deftest register-subscription-returns-initial-rows-and-fires-changed
   (testing "register-subscription persists + seeds rows; a matching commit emits changed-summaries"
@@ -132,14 +91,19 @@
       (is (= "s1" (:seon.store.wire/sub-id reg)))
       (is (= #{["A"]} (set (:seon.server.reactive/rows payload)))
           "initial rows seeded from the current db")
-      (testing "a matching commit emits a changed-summaries event on the feed"
-        (let [sub (op! "subscribe-tx" {})
-              h   (:seon.store.wire/handle sub)]
-          (op! "transact" {:seon.store.wire/tx-data [{:unit/name "B"}]})
-          ;; expect a raw "tx" AND a reactive "changed-summaries" for the commit
-          (let [evs (drain-events h 2)]
-            (is (some #{"changed-summaries"} evs)
-                (str "expected a changed-summaries event; saw " (pr-str evs)))))))))
+      (testing "a matching commit emits a changed-summaries event on the fanout"
+        (let [db-name (wire/ambient-db-name)
+              !evs    (atom [])
+              sub     (bcast/subscribe!
+                       db-name
+                       (fn [ev] (swap! !evs conj (:seon.store.wire/event ev))))]
+          (try
+            (op! "transact" {:seon.store.wire/tx-data [{:unit/name "B"}]})
+            ;; the commit surfaces as a raw "tx" AND a reactive "changed-summaries"
+            (let [evs (await-event !evs "changed-summaries")]
+              (is (some #{"changed-summaries"} evs)
+                  (str "expected a changed-summaries event; saw " (pr-str evs))))
+            (finally (bcast/unsubscribe! db-name sub))))))))
 
 (deftest unregister-subscription-stops-changed-events
   (op! "transact" {:seon.store.wire/tx-data [{:db/ident :unit2/name :db/valueType :db.type/string

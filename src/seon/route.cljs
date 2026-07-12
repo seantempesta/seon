@@ -63,16 +63,16 @@
 ;; The seeded CORE route set (coordination Interface #2 — authoritative).
 ;;
 ;; `root = /` (root-os-vision, owner 2026-06-28): the all-agents overview IS the
-;; root agent's world, so `/` IS the dashboard and `/agent/{id}` is uniform for
-;; EVERY agent incl `/agent/root`. `/world` + `/world/feed` are RETIRED. `/`'s
-;; handler is `seon.web.datastar/serve-root!` — it serves root's world shim page
+;; root agent's view, so `/` IS the dashboard and `/agent/{id}` is uniform for
+;; EVERY agent including `/agent/root`. The fleet roster lives at `/agents` +
+;; `/agents/feed`. `/`'s handler serves root's agent-view shim page
 ;; (the per-agent page bound to the literal id "root"); the page's feed opens
-;; `/agent/root/feed`, whose world-layout renders root's canvas =
+;; `/agent/root/feed`, whose agent-view renders root's canvas =
 ;; `seon.render.system/system-view`. (`/` stays a CORE route datom here; if root's
 ;; bootstrap/config later OWNS `/`, only its `:seon.route/owner` ref + which
 ;; seed-step writes it changes — still a datom, no shape change.)
 ;;
-;; Each agent world is TWO GET routes — the shim page and its long-lived SSE feed
+;; Each agent view is TWO GET routes — the shim page and its long-lived SSE feed
 ;; at a SEPARATE `…/feed` sibling path (the datastar-clojure `tiny_gzip.clj`
 ;; separate-GET-stream idiom; the shim's `data-init="@get('…/feed')"` opens the
 ;; stream). If `db->routes` dropped the `/feed` routes the live stream would 404
@@ -84,10 +84,7 @@
 ;; (`seon.web.router`) wires today, so the db projection is behaviour-preserving
 ;; for the cutover.
 ;;
-;; NOTE: dropping `/world` from the seed stops NEW boots from getting those
-;; rows; an EXISTING store keeps them until a `bin/seon cluster reset` (the seed
-;; upserts, it does not retract — fresh-via-reset, no migration shim). UI's
-;; graceful no-match → 302 `/` covers any lingering `/world` hit meanwhile.
+;; Reconciliation retracts routes removed from this desired set on boot.
 ;; ---------------------------------------------------------------------------
 
 (defn core-routes-tx
@@ -101,6 +98,13 @@
   []
   [{::pattern "/"                ::method :get  ::name ::root
     ::handler 'seon.web.datastar/serve-root!}
+   ;; The explicit fleet roster — id + DERIVED state + purpose line-1 per
+   ;; agent, linking to each `/agent/{id}` view. `/` stays root's own dashboard;
+   ;; `/agents` is where the fleet enumerates. Shim page + gzip feed sibling.
+   {::pattern "/agents"          ::method :get  ::name ::agents
+    ::handler 'seon.web.datastar/serve-agents-page!}
+   {::pattern "/agents/feed"     ::method :get  ::name ::agents-feed
+    ::handler 'seon.web.datastar/open-roster-feed!}
    {::pattern "/agent/{id}"      ::method :get  ::name ::agent
     ::handler 'seon.web.datastar/serve-agent-page!}
    {::pattern "/agent/{id}/feed" ::method :get  ::name ::agent-feed

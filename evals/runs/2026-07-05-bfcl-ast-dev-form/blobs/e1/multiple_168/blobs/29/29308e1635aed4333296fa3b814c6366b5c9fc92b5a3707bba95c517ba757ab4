@@ -1,0 +1,10 @@
+I need to identify the correct function and its required parameters.
+
+The request is: "Find the lyrics to the song 'Bohemian Rhapsody' by Queen."
+
+The matching function is `get_song_lyrics` with:
+- `song_title` (required): "Bohemian Rhapsody"
+- `artist_name` (required): "Queen"
+- `lang` (optional, not requested): omit
+
+(get_song_lyrics {:song_title "Bohemian Rhapsody" :artist_name "Queen"})

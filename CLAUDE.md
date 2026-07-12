@@ -14,7 +14,7 @@ task is explicitly JVM-track. Operational sections below that describe the
 paused world are tagged **[JVM track — paused]**.
 
 - **CLJS pod (ACTIVE)** — `src/seon/*.cljs`, a long-running Node process:
-  agent loop, bootstrap CLJS compiler, loopback HTTP+SSE inspector UI on
+  agent loop, bootstrap CLJS compiler, loopback HTTP+SSE web UI on
   `http://127.0.0.1:7890`. Backed by the **central JVM datahike store**
   (the `wire-server` process; file-backed datahike on
   `data/clusters/default/store`). The JVM is the sole writer — the pod
@@ -43,7 +43,12 @@ consumer-specific references in `src/`, `docs/`, or `pod-host/`.
 
 ## Agent Model Policy
 
-**Never use haiku for coding tasks.** Only use haiku for quick file reads or context gathering. All implementation, bug fixes, and verification that involves writing code must use opus (the default coding model).
+**Implementation work uses Opus** (owner directive 2026-07-11, superseding the
+2026-07-10 Fable ruling — Fable token budget is constrained). Delegate coding
+to opus agents; compensate with MORE up-front investment in the written
+artifacts opus executes against: clear PRDs, tight specs, updated plans and
+docs. Fable is reserved for when the owner explicitly asks. **Never use haiku
+for coding tasks** — haiku only for quick file reads or context gathering.
 
 ---
 
@@ -105,7 +110,7 @@ Two kinds of docs, one rule each. Do NOT create a third doc system.
   - `agent-runtime.md` — loop/run/turn/FSM, lifecycle, isolation, "nothing wedges"
   - `ui.md` — blocks/renders/tiles/slots/pages, the live channel
   - `observability.md` — turn replay, the blob store, the forensic agent, `/solve`
-  - `toolkit.md` — the agent verb surface
+  - `toolkit.md` — the agent function surface
   - `laws.md` — drive-measured empirical laws · `library-grounding.md` — the
     `reference-code/…:LINE` read-map · `decisions/` — settled ADRs
   This is where the ideal is kept current as it changes — ONE place, present
@@ -121,9 +126,43 @@ Supporting: `docs/conventions.md` (API/schema patterns), `docs/seon/vision/`
 `docs/seon/components/` (per-component notes).
 
 **After a change:** update the architecture doc it touches (the ideal stays
-current) AND the active PRD's `roadmap.md` (the we-are-here stays honest) — same
-discipline as code. The `src/seon/CLAUDE.md` ONE-mechanism table auto-loads on
-any `src/` edit; check it before building a second version of anything.
+current) AND the active PRD's `roadmap.md` (the we-are-here stays honest) AND
+any nested `CLAUDE.md` whose tree you changed (the standard below) — same
+discipline as code, same unit, same commit. The `src/seon/CLAUDE.md`
+ONE-mechanism table auto-loads on any `src/` edit; check it before building a
+second version of anything.
+
+### Nested `CLAUDE.md` files — the standard (owner directive, 2026-07-11)
+
+These auto-load whenever anyone works in their tree, so a stale one actively
+misleads every future agent. The audit that produced this standard
+(`docs/prds/agent-ctx/research/claude-md-audit-2026-07-11.md`) found a clean
+split: every MISLEADING section was a dated status snapshot ("current state",
+"in flight", "known gaps", "open tensions", "build order"); every
+reliably-current section was timeless (ownership tables, invariants, gotchas).
+Hence:
+
+- **Source-tree `CLAUDE.md`s carry ONLY what stays true between commits:**
+  orientation (what lives here, which files are the active lane), mechanism
+  ownership tables, invariants-that-bite, hard-won gotchas, runbook commands,
+  and pointers to the docs that hold depth. **NO status sections** — status
+  lives in the active PRD's `roadmap.md`, linked, never duplicated.
+- **PRD-folder `CLAUDE.md`s** may carry ONE dated current-state paragraph
+  (they are the folder's index) — the date is mandatory, and refreshing it is
+  part of closing any unit in that PRD.
+- **Maintenance is part of the unit, not a chore for later:** if your change
+  invalidates a claim, adds an invariant/gotcha, or moves a mechanism, the
+  CLAUDE.md update lands in the SAME commit. A report that doesn't mention
+  the CLAUDE.md check for a touched tree is incomplete.
+- **One fact, one file:** a rule lives in the deepest CLAUDE.md that owns it;
+  other files link rather than restate (restatement is how the audit's
+  three-way contradictions happened). When two files disagree, the deeper one
+  wins and the shallower one gets fixed.
+- **Tight:** these files spend context on every load — `src/my/CLAUDE.md`
+  (~35 lines) is the model. If a section needs more than a screen, it belongs
+  in `docs/` with a pointer.
+- The Vocabulary section above applies verbatim (functions, not "verbs"; the
+  code's real names).
 
 ### PRD folder context — auto-loaded `CLAUDE.md`
 
@@ -205,7 +244,7 @@ The personal domains (trading, health, finance) are eventual product domains, no
 
 **When you test or drive an agent, use scenarios that exercise two capabilities —
 long-term planning and database-backed memory — NOT the old health / "workout" /
-trading toy domains.** Don't hardcode the verbs to call here; the API moves and
+trading toy domains.** Don't hardcode the functions to call here; the API moves and
 the agent discovers it from its own context (the todo namespace and the `my.kb`
 manual ns are self-describing). What stays fixed is the SHAPE of a good drive:
 
@@ -224,6 +263,37 @@ manual ns are self-describing). What stays fixed is the SHAPE of a good drive:
 
 ---
 
+## Vocabulary — use the code's names, never coin new ones (owner, 2026-07-11)
+
+**Every concept is referred to by its REAL, REPL-discoverable name — the
+namespace, block, attribute, or config value that implements it. Do NOT
+invent synonyms, metaphors, or umbrella nouns.** An agent reading "rungs",
+"collaboration", or "the store" has no way to find what you mean; an agent
+reading `db`, `subagents`, or `:batch` can look it up. A new name for an
+existing thing is the same defect as a parallel mechanism.
+
+The canonical names (retired coinages in parens — fix on sight):
+
+| say | never | it IS |
+|---|---|---|
+| functions, schemas, tests | "verbs" | what Clojure has; `my.plan/done!` is a function |
+| the `db` | "the store", "memory" | `seon.db` — `db/query`, `db/transact!`, `schema/register!` |
+| `warnings` | "attention" | the `:warnings` block / `seon.warn` |
+| `canvas` (agent-side block) / `canvas` (the human's focal slot showing it) | — | `:seon.render.canvas/content`; `#world-canvas` in `seon.ui.world` — the canvas IS the agent's canvas; every other html block is a supporting TILE. (The diffusion lane's generation workspace is named `code-buffer` — renamed 2026-07-11 from "canvas" to resolve the clash; "canvas" means ONLY this UI surface.) |
+| the `web UI` (pages: `dashboard` `/`, `roster` `/agents`, `agent page` `/agent/{id}`, `debug view` `/agent/{id}/debug`, `data browser` `/data`) | "the inspector" | `seon.web` serves it, `seon.ui` renders it (owner, 2026-07-11) |
+| `subagents` | "collaboration", "multi-agent block" | the `:subagents` block |
+| `soul` | "identity" (as a block name) | the `:soul` block / SOUL.md |
+| `:shared-instructions` | "instructions block" | the block's registered name |
+| `:batch` / `:stream` | "Mode A / Mode B" | the `:seon.config/repl-mode` values |
+| capability **milestones**: `repl`, `namespaces`, `plan`, `db`, `warnings`, `canvas`, `subagents`, `soul` | "rungs", "the ladder" | each named by the block/namespace it validates (docs/prds/agent-ctx/context-rebuild.md) |
+| **cluster** | "world", "environment" | one shared DB + one pod + agents (already a settled ruling) |
+| attributes + connections | "kind", "type", "entity taxonomy" | the datahike model (settled) |
+
+When you're about to name something new: the name is the namespace/attr you
+are creating — pick THAT well and use it everywhere, including prose. If two
+existing names seem to compete (like canvas/canvas), read the code and
+document the real distinction — don't mint a third.
+
 ## Slow Is Fast
 
 **Your default training rewards task completion. Override that instinct.** Charging forward and declaring victory is worse than pausing to verify. Three agents "fixing" the same bug is more expensive than one agent understanding the problem first.
@@ -239,6 +309,27 @@ If a generator, fn, schema, or namespace already exists and you're "fixing" it, 
 - "I'll add `do-thing-new` and deprecate `do-thing`." → wrong; change `do-thing`'s implementation.
 
 The whole repo is on a feature branch. Atomic refactors are the cheap option, not the expensive one.
+
+### DO NOT WRITE HACKS (owner directive, 2026-07-10)
+
+**When an LLM agent misbehaves, find the root cause and fix it. The root is
+always one of two things: the CONTEXT is wrong, or our CODE is wrong. Hacks
+are never a solution.**
+
+A hack is anything that operates on the SYMPTOM after the fact instead of the
+cause: regex-rewriting model output, marker/warning text scolding the model,
+post-hoc containment layers, "teach the model harder" prose for a behavior the
+mechanics invite. The anti-fabrication arc is the cautionary tale — a
+neutralizer, two marker variants, a recap card, and triplicated scold
+paragraphs were layered on, and the measured fabrication rate did not move,
+because the transcript's own grammar was inviting the behavior. The fix was
+mechanical (strip/abort at the reply boundary), not persuasive.
+
+Before shipping any mitigation for agent misbehavior, answer: what is the
+root cause, and does this change remove it? If it only intercepts, marks,
+rewrites, or scolds the symptom — stop and fix the context or the code
+instead. If you cannot find the root, report it (per "Report Code Smells");
+do not paper over it.
 
 ### Before writing code:
 
@@ -324,7 +415,7 @@ rule in `docs/conventions.md` "Comment levels — prose vs code".
 seon/
 ├── src/seon/
 │   ├── *.cljs                ; CLJS pod (ACTIVE) — client, agent, eval, db,
-│   │                         ;   ctx, render, repl, warn, web/ (inspector/serve)
+│   │                         ;   ctx, render, repl, warn, web/ (serve/debug)
 │   ├── core.clj              ; [JVM track] system entry, protocols
 │   ├── system.clj            ; [JVM track] Integrant system map
 │   ├── config.clj            ; [JVM track] Aero config loading
@@ -377,6 +468,30 @@ git-ignored by location; it is never committed. The whole feature is gated by
 `SEON_EMBED`. Full verified usage, pricing, and the content-addressed cache/archive
 design: `docs/prds/embeddings/vertex-usage-reference-2026-06-25.md`.
 
+### DiffusionGemma provider — RunPod OR a local MLX worker (optional)
+
+The `:diffusiongemma` LLM provider (`seon.ai.diffusiongemma`) is **OFF by
+default** — the shipped provider is `deepseek`. It is opt-in via
+`SEON_AI_PROVIDER=diffusiongemma` (or per-agent routing), and NOTHING in a
+default `.env` activates it. Do not switch it on as a side effect.
+
+`SEON_DG_ENDPOINT` selects the worker: a **bare id** (`"u50y7khhos5t7o"`)
+resolves under RunPod (`…/v2/{EP}`); a **full `http(s)://` URL** is used AS
+the worker base. That URL form is how a **local worker speaking the same
+wire contract** plugs in with zero seon changes — the reference one is
+`dg_mlx` (a from-scratch MLX port of DiffusionGemma block-diffusion for
+Apple Silicon; 8-bit, ~120 tok/s), which lives in its OWN repo
+(`~/ml/diffusion-gemma`, not this tree — it is model-inference infra, not
+seon core) and serves `POST /run` + `GET /status/{id}` on `127.0.0.1:17860`.
+Manage it with its own `./dg` script — `dg start` / `dg status` (shows PID +
+summed RSS + model loaded?/idle time) / `dg stop` / `dg gen "…"`. A WARM
+worker pins the model in unified memory (tens of GB), but it **auto-unloads
+after 15 min idle** (RSS → ~0.5 GB) and reloads on the next request, so a
+forgotten worker self-cleans; `dg stop` frees it immediately. One provider,
+one wire contract — the SAME `SEON_AI_PROVIDER=diffusiongemma` config runs
+against an A100/H100 on RunPod or the local Mac by swapping `SEON_DG_ENDPOINT`
+alone.
+
 ### Flow Topology (routing backbone) `[JVM track — paused]`
 
 In the JVM app, all cross-boundary calls — namespace function calls, database writes, REPL eval — route through `topology/request!` (core.async.flow): register promise → inject → step-fn → reply-router → deliver promise. See `docs/prds/unified-flow/design.md`. The **pod is core.async-free** — it uses native CLJS `^:async`/`await` instead.
@@ -386,8 +501,8 @@ In the JVM app, all cross-boundary calls — namespace function calls, database 
 New CLJS surface that keeps tripping people — read the source before changing it: `docs/prds/agent-fsm/research/cljs-async-await-2026-06-28.md` + `reference-code/clojurescript/` (the `await` macro + `cljs/js.cljs` self-host).
 
 - **Await only inside a `^:async` fn — never a bare top-level `(await x)`.** Self-host (the pod's bootstrap compiler that evals agent forms) is conditional: a `^:async` fn with an internal `(await …)` works (returns a native `js/Promise`); a top-level `(await x)` throws "await can only be used in async contexts" (the macro asserts `(:async &env)`, false at top level). Resolve a stashed Promise by **re-reference**, not `await`.
-- **Agents get data, not Promises.** `seon.eval/maybe-await-value` auto-awaits a returned Promise, so quick `^:async` verbs (`db/transact!`, `todo/add!`) read as synchronous; a long/timed-out Promise lands in `result/<id>` and resolves on re-reference.
-- **`async-fn?` (ctor name == `"AsyncFunction"`) mis-detects an already-instrumented malli wrapper** — a plain `Function` that still returns a Promise — routing it through the SYNC output validator. This is why instrumentation runs ONCE per process.
+- **Agents get data, not Promises.** `seon.eval/maybe-await-value` auto-awaits a returned Promise, so quick `^:async` fns (`db/transact!`, `todo/add!`) read as synchronous; a long/timed-out Promise lands in `result/<id>` and resolves on re-reference.
+- **Async/shape detection sees THROUGH malli's wrapper record** — `seon.instrument` reads `malli$instrument$original` before any ctor-name (`"AsyncFunction"`) or arity-shape check, so an already-instrumented var re-detects from its REAL fn and `instrument-from-db!` is idempotent (re-run on a later `start-agent!` re-wraps from originals; `:skip-instrumented? true` keeps multi-arity fns single-wrapped). The old once-per-process gate is retired.
 
 ---
 
@@ -409,7 +524,7 @@ Any git operation that changes branch, discards files, or modifies history affec
 
 `seon.*` surfaces use **`.cljs` files alongside `.clj` files** — CLJS reads `.cljs`, CLJ reads `.clj`, neither compiler sees the other's. Two lanes:
 
-- **CLJS pod (active):** owns the `.cljs` files (`seon.client`, `seon.db`, `seon.eval`, `seon.ctx`, `seon.agent.*`, `seon.web.inspector`/`serve`, …) and the genuinely-shared `.cljc` files.
+- **CLJS pod (active):** owns the `.cljs` files (`seon.client`, `seon.db`, `seon.eval`, `seon.ctx`, `seon.agent.*`, `seon.web.serve`/`debug`, …) and the genuinely-shared `.cljc` files.
 - **`[JVM track — paused]`:** owns the `.clj` files under `src/seon/`.
 
 Promote a file to `.cljc` only when it's genuinely platform-portable (e.g. `seon.schema`, `seon.instrument`); don't author a `.cljc` for a namespace that has a live `.clj` sibling on the other track unless both sides converge on its shape.
@@ -436,7 +551,7 @@ stop: reframe in attributes + connections. Mindset primer (read it):
 **Maps with namespaced keywords. Every key. No exceptions.** This is the load-bearing rule the rest of the system depends on:
 
 - **Every public function** fully specs and validates ALL its arguments and its return value via `:malli/schema`. Two argument shapes are allowed: (1) **map-in / map-out** — one namespaced-keyword map in, one out, where the request and response are named Malli schemas (`::foo-request`, `::foo-response`) registered via `seon.schema/register!` — **preferred for API-like surfaces** (discoverable, extensible); or (2) **named positional** — each argument is a fully-namespaced-keyword-spec'd slot via Malli `:catn` (named positional) inside a `:=>`/`:function` schema — fine for ordinary data-processing fns and for mimicking a well-known API (e.g. datahike). The invariant: every argument is NAMED, SPECCED, and VALIDATED, whether it sits in a map or a positional slot. The violation is an UNSPECCED or BARE-keyword argument, not a positional one. Every key in any map is fully namespaced (`:seon.runtime/status`, never `:status`).
-- **Every datom persisted to the DB** uses a fully-namespaced attribute keyword whose Malli schema is registered. `seon.db/transact!` enforces this at the boundary — unregistered or unspec'd attrs throw before the tx reaches the DB.
+- **Every datom persisted to the DB** uses a fully-namespaced attribute keyword whose Malli schema is registered. `seon.db/transact!` enforces this at the boundary — in its OWN body (it is a structural instrumentation opt-out, see "Function Instrumentation"): an unregistered/unspec'd attr or invalid value is rejected before the tx reaches the writer, returned as a `{:seon.db/ok? false}` error ENVELOPE (never a throw — the never-throw-into-the-loop invariant).
 - **Every map handed to a callback** (tx-listener handlers, trigger handlers, flow step-fns, async channel envelopes) — fully namespaced. The reason: a single Datalog query should be able to join function specs to the data those functions operate on. `:tx-data` carries no information about which fn owns it; `:seon.db/tx-data` does.
 - **Specificity, not single keywords.** Bare keywords (`:status`, `:ok`, `:tx-data`, `:e`, `:a`, `:v`) are banned in any seon-authored map. If a key feels too generic to namespace, namespace it anyway — that's a signal the schema isn't precise enough yet.
 
@@ -481,6 +596,10 @@ Pattern (canonical example, lives in `seon.db`):
 
 The same rule applies to id shapes, length constraints, enum values, and any other property cluster you'd otherwise repeat. If a shape would be repeated, register it under a `:seon.<domain>/<name>` keyword first, then reference it. If the Malli bridge or our `seon.db/malli->datahike-schema` doesn't yet handle the reference shape you need (e.g. adding a property to a referenced schema), **fix the bridge** — do NOT duct-tape by inlining the shape at each site. Duplicated definitions guarantee drift; bridge fixes are one-time.
 
+### Configuration resolves into the DB
+
+The manifest (`config/system.edn`, `SEON_CONFIG` picks the file) resolves **ONCE at boot** into the `:seon.config` DB **singleton** — `:seon.config/system-text` and every dial stored as datoms. **Runtime reads the DB**, never the env or the file: the accessors keep their names/arities but read `config/config-view`. So a dial is replay-visible (`as-of` a past `t` sees the old value) and live-tunable (a `db/transact!` reaches every accessor, no restart). See the `src/seon/CLAUDE.md` Config row for the owner detail.
+
 ---
 
 ## Skills (IMPORTANT)
@@ -495,7 +614,7 @@ The same rule applies to id shapes, length constraints, enum values, and any oth
 | `/clojurescript` | Pod CLJS semantics: `^:async`/`await`, self-host eval (agent forms compile via `cljs.js`, NOT the JVM), Promise auto-await, async instrumentation wedge |
 | `/repl` | How the REPL reads/repairs/evals the forms you write; parse errors, unbalanced forms |
 | `/seon-context-config` | `config/system.edn`/`acme.edn`, manifest sections, which skills/blocks/nses an agent sees, render caps |
-| `/ui-live-tiles` | Show your human a live VIEW not prose — `:seon.render.live-tile/content`, `my.ui`/`my.tile`/`my.data`, the canvas |
+| `/ui-canvas` | Show your human a live VIEW not prose — `:seon.render.canvas/content`, `my.ui`/`my.canvas`/`my.data`, the canvas |
 | `/datastar-web-ui` | SSE handlers, `data-*` attributes, the gzip-morph channel, the `seon.render/block` + slot renderer |
 | `/browser-automation` | Verifying the pod's OWN web UI in a browser (note: browser 503s long-lived SSE — verify feeds server-side) |
 | `/clojure-testing` | Pod-first `.cljs` test patterns: fixtures, `cljs.test/async`, hermetic in-memory conns |
@@ -523,7 +642,7 @@ running pod picks up the new build. If the pod gets into a bad state,
 `bin/seon restart pod` (wait for `agent roster` in `logs/pod.log`). A
 fresh world is `bin/seon cluster reset default`.
 
-**`[JVM track — paused]`** uses the dev hook + REPL verbs (you rarely reload manually):
+**`[JVM track — paused]`** uses the dev hook + REPL fns (you rarely reload manually):
 
 ```clojure
 (user/reload)  ; Fast reload via clj-reload
@@ -541,6 +660,22 @@ fresh world is `bin/seon cluster reset default`.
 ---
 
 ## Testing
+
+**DO NOT INVENT NEW WAYS OF TESTING (owner directive, 2026-07-10).** There
+are exactly THREE testing surfaces; every test you write or run belongs to
+one of them, and creating a fourth is a violation:
+
+1. **Code correctness** → `bin/test-cljs` (cljs.test). Unit/integration
+   tests of our Clojure.
+2. **Model/agent evaluation** → `src-inspect-ai/` (the Inspect AI bench;
+   ledger `evals/scorecard.jsonl`, `pass^k` alarm, dated evidence under
+   `evals/runs/<date>/`). A new eval = a new TASK/scorer INSIDE this bench,
+   never a new drive script or bespoke harness. (The historical
+   `tmp/*-drive.sh` lineage is being retired into it — do not extend it.)
+3. **Free smoke battery** → `bin/gym-scorecard` (no LLM spend, inner loop).
+
+If a measurement seems to need a mechanism none of these provide, STOP and
+report — extend the bench, don't mint a harness.
 
 **CLJS pod (active):** the full `.cljs` suite runs via `bin/test-cljs` — a
 fresh `:node-test` JVM (no live-pod contention), ~160s. Use it as the
@@ -590,7 +725,7 @@ checkpoint, not per edit.
 
 ## UI Development
 
-Seon uses a **Phosphor Terminal** theme — warm blacks, cream text, amber accents. Read `docs/prds/namespace-ui/design-system.md`. The pod's UI is `src/seon/web/inspector.cljs` + `serve.cljs` (hiccup); the JVM track uses `src/seon/web/components.clj`. Invoke `/datastar-web-ui` for SSE patterns.
+Seon uses a **Phosphor Terminal** theme — warm blacks, cream text, amber accents. Read `docs/prds/namespace-ui/design-system.md`. The pod's web UI is `src/seon/web/serve.cljs` + `debug.cljs` (hiccup); the JVM track uses `src/seon/web/components.clj`. Invoke `/datastar-web-ui` for SSE patterns.
 
 Key rules: density over whitespace (`p-3` not `p-6`), small text (`text-xs` primary), warm colors (`bg-base-*`, never `bg-white`), dot+text status (`● running`), monospace everywhere.
 
@@ -609,9 +744,14 @@ See `docs/conventions.md` for full patterns.
 
 ## Function Instrumentation (IMPORTANT)
 
-All public functions with `:malli/schema` metadata are **instrumented at runtime**. Every call is validated — inputs, outputs, and arity. There is no "off" mode.
+**Give every public fn you write or modify a correct `:malli/schema` — it WILL be enforced at runtime.** On the pod, instrumentation rides the **program graph**: `instrument-from-db!` wraps every specced `:seon.fn` row at boot / `start-agent!` and **re-asserts after every hot reload** (`seon.client/after-reload`); the eval-tee wraps agent-defined fns inline. Every call through a wrapper validates inputs, outputs, and arity. Wrong schemas are bugs — when you see an instrumentation error, **read it and fix the root cause**: either you called the function wrong, or the schema doesn't match reality.
 
-**Every public function you write or modify MUST have a correct `:malli/schema`.** Wrong schemas are bugs — instrumentation will throw at runtime. When you see an instrumentation error, **read it and fix the root cause**: either you called the function wrong, or the schema doesn't match reality.
+The precise coverage contract (don't overclaim it):
+
+- **Structural async opt-out** (`seon.instrument/async-unwrappable?`, computed — never a name list): a `^:async` fn with a non-simple shape (`:function` / multi-arity / variadic) registers NO wrapper — today `seon.db/transact!`, `seon.eval/eval`, `seon.client/mem-db`. Their `:malli/schema` stays the discoverable contract; **their own body is the validation boundary** and they return error ENVELOPES, never throw (the C40 net: an observe-only Promise-aware wrapper would collapse the rule — deferred, owner-gated).
+- **`*.internal` fns are deliberately unspecced** — they are private machinery, outside the contract surface.
+- **Coverage is a derived invariant, not a snapshot**: the root world's `:instrumentation-gaps` section (`seon.instrument/coverage-gaps`) recomputes "specced fn with a live var but no wrapper" at every render and surfaces any gap; empty in a healthy runtime.
+- **`SEON_INSTRUMENT=0/false/off/no` is a kill-switch** (boot + tee). It exists ONLY to bail out if a wrapper ever destabilizes the pod — never set it to silence a validation error; fix the schema or the call.
 
 Public functions fully spec and validate every argument and the return. Two shapes are allowed: **map-in / map-out** (one namespaced-keyword map in, one out — preferred for API-like surfaces) OR **named positional** (each slot specced via Malli `:catn` inside a `:=>`/`:function` schema — fine for ordinary data-processing fns and for mimicking a well-known API). Multi-arity is allowed when every arity is fully specced (use a `:function` schema). The invariant is completeness of specs, not map-wrapping; an unspecced or bare-keyword argument is the violation, not a positional one.
 
@@ -628,7 +768,76 @@ Public functions fully spec and validate every argument and the return. Two shap
   ...)
 ```
 
-Instrumentation is managed by Integrant (`:seon.dev/instrumentation`), survives `(user/reset)`, and picks up schema changes automatically on reload.
+`[JVM track — paused]` instrumentation there is separate machinery: managed by Integrant (`:seon.dev/instrumentation`), survives `(user/reset)`, picks up schema changes on reload.
+
+---
+
+## Errors are data — the fault workflow (IMPORTANT)
+
+**Nothing is caught without becoming data.** Every caught error becomes a
+datom via `seon.error/record!`: `:seon.error/fault` (`:agent` | `:core`),
+`:seon.error/at` (the basis-t the failing code SAW), EDN stack frames,
+bounded full args. Two populations, one shape:
+
+- **`:agent` = caller mistake** (an agent's typo'd function call, a dev-REPL probe
+  with bad args). Recorded, surfaced to the caller as its learning signal,
+  **never escalates in any mode** — an agent (or your REPL typo) cannot
+  take the pod down.
+- **`:core` = our bug.** What happens next is the
+  `:seon.config/on-core-error` dial — the ONE knob, set per config file:
+
+| Surface | Config | Dial | Consequence of a `:core` fault |
+|---------|--------|------|-------------------------------|
+| Dev pod (7890) | `config/system.edn` | **`:crash`** | persist the datom, print `SEON-CORE-FAULT <cause> @t=<basis-t>`, EXIT loudly |
+| Suite / CI | `config/test.edn` (via `bin/test-cljs`) | **`:gate`** | run FAILS on any un-expected marker, even with green assertions |
+| Prod / demo | downstream config | **`:log`** | datom + derived warnings surface only; never-crash intact |
+
+**Writing code (the loop you live in):** the dev hook reloads + tests every
+edit AND blocks if your change produced a NEW `:core` fault on the live pod.
+Error-path tests that DELIBERATELY provoke core faults wrap the provocation
+in `seon.error/expecting-core-fault!` (prints the `-EXPECTED-` marker; the
+gates ignore it; the datom still writes). A fault-provoking test WITHOUT the
+bracket reds the gate — that's the forcing function, never blanket-suppress.
+
+**Testing:** targeted runs while iterating; ONE full `bin/test-cljs` per
+unit. Green now means two things: assertions pass AND zero un-expected core
+faults accumulated during the run.
+
+**When a core fault fires (the triage chain — use it, don't log-dig):**
+`bin/seon watch-faults` (the orchestrator's standing background task) hands
+you the marker → `(seon.agent.inspect/errors)` → `(… /error {::eid N})`
+(envelope + frames + the turn join; `inspect/turn` replays the byte-exact
+prompt) → `(… /repro {::eid N})` (the frozen as-of db + a ready-to-eval
+repro expression + a `::fork-hint`) → run the hint verbatim:
+`bin/seon cluster fork default <t>` boots a LIVE, WRITABLE copy of the
+world at the failure moment (own pod/store; the error datom is absent
+inside its own fork — `at` precedes the recording tx). Fix there, verify,
+`bin/seon cluster destroy <fork>` — the source store is untouched by
+construction. This whole loop is acceptance-drill-proven end to end
+(`docs/prds/agent-ctx/research/error-workflow-drill-2026-07-05.md`).
+
+**Forking a cluster (supervisor-only):** use this for a counterfactual, never
+for a normal fresh sample. First obtain the source basis-t — preferably the
+`::fork-hint` from `inspect/repro`, whose `:seon.error/at` is the exact db
+value the failure saw — then run:
+
+```bash
+bin/seon cluster fork default <basis-t> fork-default-<basis-t>
+# patch source/config as needed; drive the same stimulus against the fork pod
+bin/seon cluster destroy fork-default-<basis-t>
+```
+
+`cluster fork` copies the source store and turn-capture blobs, preserves eids
+and tx ids at the requested basis, starts a separate writable pod on a fresh
+port, and marks the fork disposable. It restores **durable state only**: pin
+the bundle, manifest, model configuration, and replay stimulus in the
+experiment record. Never modify the source store; always destroy the named
+fork in a `finally`/context-manager cleanup. Inspect callers use
+`seon_inspect.cluster.ephemeral_fork` for exactly that lifecycle.
+
+**Production:** same recording, same datoms, same triage chain — the dial
+just says `:log`. A prod fault is a fork-and-reproduce away from a fix; the
+DB's history IS the bug report.
 
 ---
 
@@ -693,6 +902,21 @@ Registered processes: `pod` (CLJS pod via Node), `cljs-watch` (CLJS rebuild watc
 codebase on boot. Use for a fresh world. Wipes agent-authored work in that
 store (agent fns, soul edits, chat) — the core seed regenerates, that does not.
 
+### Core-fault watch (active track)
+
+The dev pod runs `:seon.config/on-core-error :crash` — a `:core` fault
+persists its datom, prints `SEON-CORE-FAULT <deepest cause> @t=<basis-t>`,
+and EXITS the pod. **At session start the orchestrator runs
+`bin/seon watch-faults` as a background task**: it blocks until the first
+NEW un-expected marker (starts at end-of-file; `SEON-EXPECTED-CORE-FAULT`
+fixture prints are NOT alarms), prints it + the last ~20 log lines, and
+exits 0 — so the harness re-invokes you when the pod dies on our own bug.
+Triage via `seon.agent.inspect`: `(errors)` (compact recent list) →
+`(error {:seon.agent.inspect/eid N})` (full envelope + turn/agent joins) →
+`(repro {:seon.agent.inspect/eid N})` (the as-of db frozen at the failure +
+a ready-to-eval repro expression). Then `bin/seon restart pod`.
+`--cluster <name>` watches another cluster's pod log.
+
 ### Log Files for Debugging
 
 ```bash
@@ -701,7 +925,7 @@ tail -f logs/cljs-watch.log                      # CLJS rebuild status
 tail -f logs/wire-server.log                     # datahike writer
 ```
 
-### `[JVM track — paused]` REPL verbs + recovery
+### `[JVM track — paused]` REPL fns + recovery
 
 These apply to the embedded-datahike JVM app (`./bin/run`), NOT the pod:
 

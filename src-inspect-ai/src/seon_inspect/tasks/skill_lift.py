@@ -79,7 +79,7 @@ def skill_lift_solver(condition: str, endpoint: str):
         r = await anyio.to_thread.run_sync(
             ep.call, {"mode": "generate", "prompt": prompt, "max_new_tokens": 320,
                       "_cond": condition, "_idx": idx})
-        state.output.completion = (r.get("text") or r.get("canvas_text") or "")
+        state.output.completion = (r.get("text") or r.get("code_buffer_text") or "")
         state.metadata.update({"worker_sha": r.get("worker_sha"),
                                "tok_per_s": r.get("tok_per_s"),
                                "condition": condition})

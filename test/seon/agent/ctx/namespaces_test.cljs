@@ -44,7 +44,8 @@
    ;; CURRENT ns: real source (with a body marker) + a require edge → my.helper.
    {:seon.ns/name     cur-ns
     :seon.ns/source   "(ns my.agent.tst-2606260000 (:require [my.helper :as h])) (defn plan [x] (CUR-BODY x))"
-    :seon.ns/requires [:my.helper]}
+    :seon.ns/require-edges [{:seon.ns.require/target :my.helper
+                             :seon.ns.require/alias  'h}]}
    (fn-row "my.agent.tst-2606260000/plan" cur-ns "CUR-BODY")
    ;; REQUIRED by the current ns → COMPACT card.
    {:seon.ns/name :my.helper :seon.ns/source "(ns my.helper)"}

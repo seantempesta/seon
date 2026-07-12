@@ -169,7 +169,7 @@ capability the namespaces block underwrites.
 **Drop from the always-on base:**
 
 - **`:live-tile`** (~638–1,300 tok) — never used by a "tell me" task. Surface it
-  via the `ui-live-tiles` skill on demand, not always-on.
+  via the `ui-canvas` skill on demand, not always-on.
 
 **Needs Core render-trim (NOT removal) — `:namespaces` #42:**
 

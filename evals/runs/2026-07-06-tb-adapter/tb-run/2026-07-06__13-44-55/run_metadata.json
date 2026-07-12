@@ -1,0 +1,30 @@
+{
+    "run_id": "2026-07-06__13-44-55",
+    "uuid": "cd63b812-afe0-4dad-b93e-775fd7635cb6",
+    "dataset_path": "/Users/sean/src/seon/reference-code/terminal-bench/original-tasks",
+    "dataset_name": null,
+    "dataset_version": null,
+    "output_path": "/Users/sean/src/seon/evals/runs/2026-07-06-tb-adapter/tb-run",
+    "agent_name": "seon",
+    "no_rebuild": false,
+    "cleanup": true,
+    "log_level": 20,
+    "task_ids": [
+        "hello-world"
+    ],
+    "exclude_task_ids": null,
+    "n_tasks": null,
+    "n_concurrent_trials": 1,
+    "n_attempts": 1,
+    "dataset_size": 1,
+    "accuracy": 0.0,
+    "model_name": "deepseek/deepseek-chat",
+    "start_time": "2026-07-06T17:44:55.999585+00:00",
+    "end_time": "2026-07-06T17:45:51.188387+00:00",
+    "commit_hash": "570fe426bc5c5449f07a5466fabdd542781f07f3",
+    "username": "Sean Tempesta",
+    "s3_bucket": null,
+    "agent_kwargs": null,
+    "pass_at_k": {},
+    "resumed_at": null
+}

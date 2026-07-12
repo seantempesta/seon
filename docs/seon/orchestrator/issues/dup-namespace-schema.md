@@ -3,7 +3,7 @@ type: issue
 status: open
 severity: friction
 milestone: M2
-tags: [issue, schema, architecture, jvm-track, paused]
+tags: [issue, schema, architecture]
 ---
 # Duplication: ::namespace Schema Registered 20+ Times
 

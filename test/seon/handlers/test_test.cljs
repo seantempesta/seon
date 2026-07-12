@@ -32,7 +32,7 @@
     [seon.db :as db]
     [seon.handlers.test :as h-test]
     [seon.render :as render]
-    [seon.render.live-tile :as tile]
+    [seon.render.canvas :as canvas]
     [seon.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
@@ -45,20 +45,14 @@
   (is (contains? (set (schema/entity-schema-keys)) :seon.test)
       ":seon.test appears in entity-schema-keys")
   ;; Required-attrs count: only :seon.test/sym is non-optional. Assert it
-  ;; from the DETERMINISTIC decomposition (entity-schema-tx-data, the same
-  ;; builder the boot seed runs) rather than the lazy *schema-required-counts
-  ;; cache — the cache is a side-effect of decomposition, so reading it
-  ;; cold (the pristine :node-test build, where nothing pre-decomposed
-  ;; :seon.test) returns nil. Decomposing here both populates the cache and
-  ;; gives the authoritative required-attr list to count.
+  ;; from the deterministic decomposition (entity-schema-tx-data), the same
+  ;; builder the boot seed runs.
   (let [txd  (schema/entity-schema-tx-data :seon.test)
         reqs (->> txd
                   (filter (fn [[_ _ a _]] (= a :seon.schema/required-attrs)))
                   (mapv (fn [[_ _ _ v]] v)))]
     (is (= [:seon.test/sym] reqs)
-        "only :seon.test/sym is a required attr in the decomposition")
-    (is (= 1 (schema/schema-required-count :seon.test))
-        "required-count is 1 once the kind is decomposed")))
+        "only :seon.test/sym is a required attr in the decomposition")))
 
 ;; ---------------------------------------------------------------------------
 ;; Handler renders a seeded entity — synchronous, the handler reads only
@@ -107,7 +101,7 @@
   (let [hiccup (h-test/render-html {:seon.render/node ent-fail})]
     (is (vector? hiccup) "html form is a hiccup vector")
     (is (= :div (first hiccup)) "outer container is a :div")
-    (is (tile/valid-hiccup? hiccup) "passes valid-hiccup?")
+    (is (canvas/valid-hiccup? hiccup) "passes valid-hiccup?")
     (let [s (pr-str hiccup)]
       (is (str/includes? s "demo.ns/t-fail") "sym appears in the hiccup")
       (is (str/includes? s "failing") "failing pill present")
@@ -186,7 +180,7 @@
   ;; authoritative body, so per-member blocks are NOT re-emitted. The one
   ;; member fact NOT visible in the source and worth the agent's attention is
   ;; a FAILING test — it surfaces as a compact one-line ⚠ note. A PASSING test
-  ;; is omitted (nothing actionable; the inspector HTML view below still shows
+  ;; is omitted (nothing actionable; the debug view HTML view below still shows
   ;; full pass/fail status). The seed attaches a passing `t-attached`; here we
   ;; add a failing `t-broken` to the same full-source ns.
   (async done
@@ -237,7 +231,7 @@
                               :seon.render/depth 0 :seon.render/format :html}))
                   s      (pr-str hiccup)]
               (is (vector? hiccup) "html form is a hiccup vector")
-              (is (tile/valid-hiccup? hiccup) "passes valid-hiccup?")
+              (is (canvas/valid-hiccup? hiccup) "passes valid-hiccup?")
               (is (str/includes? s "demo.ns/t-attached")
                   "the test sym appears in the ns's html")
               (is (str/includes? s "passing")

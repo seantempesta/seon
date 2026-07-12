@@ -99,10 +99,9 @@
   :fork-deps
   {:extra-deps {org.replikativ/datahike
                 {:git/url "https://github.com/seantempesta/datahike"
-                 :git/sha "e6d196d52003ef0453d601ea3192d6f7e9dd3dae"}}
+                 :git/sha "6e2d9beeb5002ba025e2f3aa69cd9111afd7abf8"}}
    :override-deps {org.replikativ/konserve
-                   {:git/url "https://github.com/seantempesta/konserve"
-                    :git/sha "32e3c59847184c3b4a3acea87797ed9c864a0ff7"}}}
+                   {:mvn/version "0.9.353"}}}
 
   :simd
   {:jvm-opts ["--add-modules" "jdk.incubator.vector"
@@ -204,51 +203,6 @@
   ;; Usage (JDK 25+, pinned via bin/_java-home-resolver):
   ;;   clojure -M:simd:fork-deps:test -m kaocha.runner unit --focus seon.server.wire-types-test …
 
-  ;; 2.2c DIS-replica probe — JVM writer side. Self-contained on purpose
-  ;; (`:replace-deps`/`:replace-paths`): runs the SAME datahike fork sha the
-  ;; pod's :cljs alias overrides to (seantempesta/datahike@e6d196d5), so the
-  ;; probe falsifies fressian/store compat WITHOUT version skew and WITHOUT
-  ;; touching the main JVM deps the dev JVM / wire-server resolve
-  ;; (:writer runs the SAME fork sha since 156a53e — converged).
-  ;; Usage: clj -M:replica-probe-jvm   (after `clj -M:cljs compile replica-probe`)
-  ;; Store: tmp/replica-probe/store (throwaway, wiped each run).
-  :replica-probe-jvm
-  {:replace-deps  {org.clojure/clojure {:mvn/version "1.12.0"}
-                   org.replikativ/datahike
-                   {:git/url "https://github.com/seantempesta/datahike"
-                    :git/sha "e6d196d52003ef0453d601ea3192d6f7e9dd3dae"}
-                   ;; konserve header fix (2.2d Stage A): CLJS meta-size
-                   ;; BE32 + legacy 1-byte sniff. The fork repo has no
-                   ;; pushable remote (mvn 0.9.346 was deployed from it),
-                   ;; so :local/root until the fix ships as a new mvn
-                   ;; version. Konserve repo commit: 32e3c598.
-                   org.replikativ/konserve
-                   {:git/url "https://github.com/seantempesta/konserve"
-                            :git/sha "32e3c59847184c3b4a3acea87797ed9c864a0ff7"}}
-   ;; konserve-shim: pom.properties so datahike's version-check sees a
-   ;; konserve version (nil with :local/root) — see the file's comments.
-   :replace-paths ["probe" "dev-resources/konserve-shim"]
-   :main-opts     ["-m" "seon.probe.replica-jvm"]}
-
-  ;; 2.2d Stage B peer oracle — JVM orchestrator. Spawns a SECOND wire-server
-  ;; (`clojure -M:writer`, sha-aligned, throwaway store tmp/replica-peer/) and
-  ;; drives Node DIS peers (out/replica-peer/main.js — reader on the same
-  ;; store + the :seon-wire PWriter forwarding transacts over UDS). Same
-  ;; self-contained dep set as :replica-probe-jvm so the orchestrator can
-  ;; independently read the store root via konserve. The LIVE wire-server,
-  ;; pod, cljs-watch and dev JVM are never touched.
-  ;; Usage: clj -M:replica-peer-jvm   (after `clj -M:cljs compile replica-peer`)
-  :replica-peer-jvm
-  {:replace-deps  {org.clojure/clojure {:mvn/version "1.12.0"}
-                   org.replikativ/datahike
-                   {:git/url "https://github.com/seantempesta/datahike"
-                    :git/sha "e6d196d52003ef0453d601ea3192d6f7e9dd3dae"}
-                   org.replikativ/konserve
-                   {:git/url "https://github.com/seantempesta/konserve"
-                            :git/sha "32e3c59847184c3b4a3acea87797ed9c864a0ff7"}}
-   :replace-paths ["probe" "dev-resources/konserve-shim"]
-   :main-opts     ["-m" "seon.probe.replica-peer"]}
-
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
           :ns-default build}
 
@@ -328,7 +282,7 @@
                          ;; NB distinct from the JVM-only 0.8.43 pin in :dev.
                          org.babashka/sci                     {:mvn/version "0.13.53"}
                          org.replikativ/datahike              {:mvn/version "0.8.1681"}
-                         org.replikativ/persistent-sorted-set {:mvn/version "0.4.122"}
+                         org.replikativ/persistent-sorted-set {:mvn/version "0.4.137"}
                          ;; Transit-JSON for wire value payloads
                          ;; (keywords, sets, instants, ratios) crossing the
                          ;; CLJS guest <-> JVM wire-server boundary. Mirrored by
@@ -352,17 +306,14 @@
          ;; PR-shaped pending upstream review.
          :override-deps {org.replikativ/datahike
                          {:git/url "https://github.com/seantempesta/datahike"
-                          :git/sha "e6d196d52003ef0453d601ea3192d6f7e9dd3dae"}
-                         ;; konserve header fix (2.2d Stage A): CLJS
-                         ;; meta-size BE32 at bytes 4-7 + legacy 1-byte
-                         ;; sniff in parse-header, so JVM- and Node-written
-                         ;; stores are mutually readable. Fork repo has no
-                         ;; pushable remote (mvn 0.9.346 deployed from it)
-                         ;; => :local/root until a new mvn deploy.
-                         ;; Konserve repo commit: 32e3c598 (sync-only).
+                          :git/sha "6e2d9beeb5002ba025e2f3aa69cd9111afd7abf8"}
+                         ;; konserve: the header fix (CLJS meta-size BE32 +
+                         ;; legacy sniff) is UPSTREAMED (#143); 0.9.353 also
+                         ;; carries #144 per-write metadata REQUIRED by the
+                         ;; merged datahike (6e2d9bee). Fork carve-out retired
+                         ;; 2026-07-11.
                          org.replikativ/konserve
-                         {:git/url "https://github.com/seantempesta/konserve"
-                            :git/sha "32e3c59847184c3b4a3acea87797ed9c864a0ff7"}
+                         {:mvn/version "0.9.353"}
                          org.replikativ/superv.async
                          ;; Patched simple-supervisor's stale-pending
                          ;; watchdog to be LAZY: instead of starting a
@@ -379,8 +330,8 @@
                          {:git/url "https://github.com/seantempesta/superv.async"
                           :git/sha "3e6ed755f83634c9e9bbb58707f9446420d32ce9"}
                          is.simm/partial-cps
-                         {:git/url "https://github.com/seantempesta/partial-cps"
-                          :git/sha "c0d941d4b591351267bc828fdfdf029be53a132f"}}
+                         {:git/url "https://github.com/simm-is/partial-cps"
+                          :git/sha "1e119b03ea908ad925b98f9ba0a26371c65441e3"}}
          :main-opts     ["-m" "shadow.cljs.devtools.cli"]}
 
   :nrepl {:jvm-opts ["-Xms512m"

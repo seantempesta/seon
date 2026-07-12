@@ -22,7 +22,7 @@ The shape: two long-running processes per cluster.
 
 - **wire-server** — a JVM datahike WRITER (sole writer; embedding-backed). You
   ship this as a self-contained uberjar. It owns the durable store.
-- **pod** — a Node process (Seon's CLJS runtime: agent loop, inspector UI). It
+- **pod** — a Node process (Seon's CLJS runtime: agent loop, web UI). It
   forwards writes to the wire-server over a Unix socket and reads local lazy
   db values. Your own source is COMPILED INTO this pod bundle via the overlay.
 
@@ -158,18 +158,18 @@ slot. An EXISTING compiled caller reads that slot at call time, so your
 override flows through without editing seon's source. Side effects fire when
 your preload requires the overriding ns. This works for ANY seon fn —
 inject context sections (`seon.ctx/core-default-ctx`), reshape a tile's error
-card (`seon.render.live-tile/error-response`), etc.
+card (`seon.render.canvas/error-response`), etc.
 
 Worked example — `acme/src/acme/overrides.cljs` reshapes the broken-tile card
 so the human sees a calm Acme-branded placeholder instead of seon's stock one:
 
 ```clojure
 (ns acme.overrides
-  (:require [seon.render.live-tile :as live-tile]))
+  (:require [seon.render.canvas :as canvas]))
 
-(defonce ^:private orig-error-response live-tile/error-response)
+(defonce ^:private orig-error-response canvas/error-response)
 
-(set! live-tile/error-response
+(set! canvas/error-response
       (fn acme-error-response [req]
         (assoc (orig-error-response req)            ; keep the :seon.render/ai twin
                :seon.render/hiccup
@@ -202,7 +202,7 @@ export SEON_BRAND_TAGLINE="Acme — the third-party harness"
 export SEON_BRAND_CSS=/path/to/acme/branding/acme.css
 ```
 
-`SEON_BRAND_CSS` is inlined into the inspector page head AFTER seon's
+`SEON_BRAND_CSS` is inlined into the web UI page head AFTER seon's
 `output.css`, so its token overrides win. Seon's theme is CSS custom
 properties (`--color-*`); remap them for a visibly-own deployment, and use
 selector rules for finer control. From `acme/branding/acme.css`:
@@ -231,11 +231,11 @@ clean state:
 bin/acme down                        # stop anything stale (ignore errors)
 bin/acme cluster reset default       # wipe data/clusters/acme/store (acme env)
 bin/acme up                          # build + wire-server + pod + status
-curl -s 127.0.0.1:7980/agents        # 200 — your branded inspector
+curl -s 127.0.0.1:7980/agents        # 200 — your branded roster
 ```
 
 Then drive a turn (`SEON_AI_PROVIDER=deepseek DEEPSEEK_API_KEY=…`) and read
-`/agent/<id>` to see your overlay namespaces in context, your live tiles
+`/agent/<id>` to see your overlay namespaces in context, your canvas
 rendering, and your overrides and branding applied. Full acceptance-check
 list + isolation table: [[../components/acme-harness.md]].
 

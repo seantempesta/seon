@@ -24,4 +24,4 @@ Each agent operates in its own JVM with isolated nREPL and database connections.
 ## Related
 
 - Components: [[components/harness]], [[components/flow-topology]], [[components/agent-system]]
-- PRDs: [[prds/super-repl/prd]], [[prds/unified-flow/prd]]
+- PRDs: `prds/super-repl/prd`, [[prds/unified-flow/prd]]

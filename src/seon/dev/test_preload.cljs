@@ -61,7 +61,7 @@
     ;; Required here so the deftest-vars roster carries my.kb-test and
     ;; its full source renders as the exemplar test sibling.
     [my.kb-test]
-    ;; UI lane (agent-fsm): the /world datastar streamer framing + the
+    ;; UI lane (agent-fsm): the Datastar app-view streamer framing + the
     ;; view=f(db) roster (appear/vanish, determinism, never-crash) and the
     ;; /call capability gate. Required here so seon.test.runner can drive
     ;; them against the live pod (the munged ns object must be in the build).

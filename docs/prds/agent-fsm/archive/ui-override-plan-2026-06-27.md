@@ -33,7 +33,7 @@ retract/replace rows.
 | Layer | Override mechanism | Default |
 |---|---|---|
 | **Shell** (head/grid/header) | `:seon.console/shell` SYMBOL, resolved like a tile | shipped `console-shell` fn |
-| **Layout** (tiles/order/span) | `:seon.tile/*` rows (seeded, editable) | seeded `default-tiles` rows |
+| **Layout** (tiles/order/span) | `:seon.canvas/*` rows (seeded, editable) | seeded `default-tiles` rows |
 | **Views** (tile content) | `:seon.render/html` symbol (already works) | the 9 core views |
 | **Routes** | `:seon.route/*` registry rows (method/pattern/handler-symbol), consulted before the hardcoded dispatch | seeded default routes |
 | **Client** | shell references client script(s) from `:seon.console/scripts` data; `SEON_EXTRA_PUBLIC` serves consumer `/js` | `packetstar.js` |
@@ -42,14 +42,14 @@ retract/replace rows.
 ## Phases (build order; lands incrementally)
 
 **Phase 0 — Foundation (R schema/seed + U resolver).** *Keystone; everything sits on it.*
-- **[R]** `schema/register!` + boot-seed: `:seon.tile/id [:string {:seon.db/identity true}]` (fixes the lookup-ref throw), `:seon.tile/console :string`, `:seon.tile/span :int`; `:seon.console/shell`, `:seon.console/scripts`; `:seon.route/method :seon.route/pattern :seon.render/html`. Install in the boot-seed lane.
+- **[R]** `schema/register!` + boot-seed: `:seon.canvas/id [:string {:seon.db/identity true}]` (fixes the lookup-ref throw), `:seon.canvas/console :string`, `:seon.canvas/span :int`; `:seon.console/shell`, `:seon.console/scripts`; `:seon.route/method :seon.route/pattern :seon.render/html`. Install in the boot-seed lane.
 - **[R]** Propagate the **silent write rejection** — pod `db/transact!` of an unregistered attr currently resolves SUCCESS but no-ops at the `:write` store; make it throw so overrides fail loudly.
 - **[R]** `seed-default-console!` — the "default function": transact the default shell symbol + default tile rows + default route rows + default scripts on agent creation.
 - **[U]** Generalize `resolve-view` into ONE resolver used for shell + tiles + routes (symbol → core/SCI/lookup-value).
 
 **Phase 1 — Shell-as-symbol (U).** Promote `console-shell`/`head`/`header-bar` to overridable (a resolved `:seon.console/shell` symbol, default = shipped). The default fn loads the default shell + wires the live tiles.
 
-**Phase 2 — CSS reaches the tile pages (U).** Unify all 6 page heads onto ONE head fn that injects the `SEON_BRAND_CSS` brand CSS — fixes the bug where it only reaches the inspector, not the tile/console UI. (Owner's choice: keep env+file, not a datom.)
+**Phase 2 — CSS reaches the tile pages (U).** Unify all 6 page heads onto ONE head fn that injects the `SEON_BRAND_CSS` brand CSS — fixes the bug where it only reaches the inspector, not the canvas/console UI. (Owner's choice: keep env+file, not a datom.)
 
 **Phase 3 — Routes-as-data (U + R schema).** `serve.cljs` consults the `:seon.route/*` registry before the hardcoded dispatch; default routes seeded; a consumer adds/overrides a route by transacting a row (handler code via `SEON_EXTRA_SRC`).
 
@@ -59,13 +59,13 @@ retract/replace rows.
 
 ## Lane split
 
-- **R** (schema/seed/db/boot): the `:seon.tile/*` + `:seon.console/*` + `:seon.route/*` schema install + the `seed-default-console!` default-seed + the write-rejection fix. *(Foundation — requested via coordination; fits R's `my.*`/seed lane.)*
+- **R** (schema/seed/db/boot): the `:seon.canvas/*` + `:seon.console/*` + `:seon.route/*` schema install + the `seed-default-console!` default-seed + the write-rejection fix. *(Foundation — requested via coordination; fits R's `my.*`/seed lane.)*
 - **U** (`src/seon/web/**` + CSS/JS): the unified resolver, shell-as-symbol, CSS head-unification, route-registry consult in `serve.cljs`, client-as-data + `SEON_EXTRA_PUBLIC`, and the acme override + the full test. *(The bulk.)*
 
 ## Sequencing / dependency
 
 Phase 0 (R's schema/seed) gates the rest. R is mid `my.*` convergence — the
-tile/console/route schema install fits the same seed lane; I'll request it and
+canvas/console/route schema install fits the same seed lane; I'll request it and
 sequence. U can build the resolver + CSS fix (Phase 1-2 partial) in parallel
 since they don't need new schema. Biggest-bang-first: Phases 0-2 deliver
 layout + shell + CSS overridability; Phases 3-4 are the maximal routes + client.

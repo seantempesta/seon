@@ -191,29 +191,38 @@
 ;; ============================================================
 ;; run! — selector exclusivity (enforced in the body, not the schema:
 ;; `::selector` is the pure-data "at least one" :or-of-maps shape, so
-;; both-keys passes instrumentation and must die HERE with a legible
-;; envelope)
+;; both-keys passes instrumentation and must RESOLVE here to a legible
+;; error ENVELOPE. Never a rejection: `run!` is a specced ^:async fn,
+;; and the instrument wrapper records a rejection as a :core fault —
+;; expected caller mistakes ride the value channel.)
 ;; ============================================================
 
-(deftest run!-rejects-ambiguous-selector-with-legible-envelope
+(deftest run!-resolves-ambiguous-selector-to-error-envelope
   (async done
     (-> (r/run! {:seon.test.runner/vars
                  '[seon.test.runner-probes/probe-passing-test]
                  :seon.test.runner/ns probes-ns})
         (.then
           (fn [result]
-            (is false (str "expected ambiguous-selector throw, got result "
-                           (pr-str (:seon.test.runner/summary result))))
-            (done)))
-        (.catch
+            (let [err (:seon/error result)]
+              (is (some? err)
+                  (str "expected a :seon/error envelope, got "
+                       (pr-str (:seon.test.runner/summary result))))
+              (is (= :user-input (:seon.error/kind err))
+                  "a selector violation is a caller mistake — :user-input")
+              (is (some-> (:seon.error/message err)
+                          (str/includes? "exactly one"))
+                  (str "message should name the rule; got "
+                       (pr-str (:seon.error/message err))))
+              (is (= {:test 0 :pass 0 :fail 0 :error 1}
+                     (:seon.test.runner/summary result))
+                  "no tests ran; the summary counts the violation")
+              (is (= [] (:seon.test.runner/events result))
+                  "envelope is a schema-valid ::run-result"))
+            (done))
           (fn [e]
-            (is (= :seon.test.runner/ambiguous-selector (:type (ex-data e)))
-                (str "expected ::ambiguous-selector envelope, got "
-                     (pr-str (ex-data e)) " / " e))
-            (is (some-> (ex-message e) (str/includes? "exactly one"))
-                (str "message should name the rule; got " (ex-message e)))
-            (is (contains? (:request (ex-data e)) :seon.test.runner/vars)
-                "envelope should carry the offending request")
+            (is false (str "run! must NEVER reject on an expected error "
+                           "(selector violation) — got rejection: " e))
             (done))))))
 
 ;; ============================================================

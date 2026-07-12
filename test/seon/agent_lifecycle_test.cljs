@@ -23,10 +23,13 @@
    Tests open a FRESH `:memory` conn (via `seon.client/open-agent-conn!`,
    the same boot helper the pod uses) — nothing here touches the live agents."
   (:require
+    [clojure.string :as str]
     [cljs.test :refer [deftest is testing async]]
     [seon.agent :as agent]
     [seon.agent.lifecycle :as lifecycle]
+    [seon.agent.message :as msg]
     [seon.agent.run :as run]
+    [seon.agent.testrun :as testrun]
     [seon.client :as client]
     [seon.db :as db]))
 
@@ -44,11 +47,30 @@
                      (.finally (fn [] (set! db/*conn* prev)))))))))
 
 (defn- seed-agents!
-  "Transact two bare agent entities (id only — derived :idle)."
+  "Transact two bare agent entities (id only — derived :idle) + THE user
+   entity (complete's no-parent delivery target)."
   []
   (db/transact!
     {:seon.db/tx-data [{:seon.agent/id "aaa-2606101200"}
-                       {:seon.agent/id "bbb-2606101200"}]}))
+                       {:seon.agent/id "bbb-2606101200"}
+                       {:seon.user/id "user"}]}))
+
+(defn- user-messages-from
+  "Contents of messages FROM agent `id` TO the user, in db order."
+  [id]
+  (let [db      @db/*conn*
+        agent-e (:db/id (db/entity {:seon.db/db db
+                                    :seon.db/ref [:seon.agent/id id]}))
+        user-e  (:db/id (db/entity {:seon.db/db db
+                                    :seon.db/ref [:seon.user/id "user"]}))]
+    (->> (db/query {:seon.db/db db
+                    :seon.db/query '[:find ?m ?c :in $ ?from ?to :where
+                                     [?m :seon.agent.message/from ?from]
+                                     [?m :seon.agent.message/to ?to]
+                                     [?m :seon.agent.message/content ?c]]
+                    :seon.db/args [agent-e user-e]})
+         (sort-by first)
+         (mapv second))))
 
 (defn- derived [id]
   (:seon.agent/state (agent/derive-status {:seon.agent/id id})))
@@ -73,13 +95,39 @@
                                (fn ^:async w [] (await (lifecycle/wait "need an answer")))))]
                 (is (= :idle r) "wait returns the new derived state")
                 (is (= :idle (derived "aaa-2606101200")) "the run closed → :idle")))
-            (testing "complete closes the SCOPED agent's run :completed → :idle"
+            (testing "complete closes the SCOPED agent's run :completed → :idle
+                      AND (no parent) DELIVERS the result to the human"
               (await (run/open-run! {:seon.agent/id "bbb-2606101200"
                                      :seon.agent.run/trigger :message}))
               (let [r (await (db/with-agent "bbb-2606101200"
                                (fn ^:async c [] (await (lifecycle/complete "done")))))]
                 (is (= :idle r))
-                (is (= :idle (derived "bbb-2606101200")))))
+                (is (= :idle (derived "bbb-2606101200")))
+                (is (= ["done"] (user-messages-from "bbb-2606101200"))
+                    "a parentless complete messages its result string to the
+                     user — the string is delivered, never discarded")))
+            (testing "a BLANK complete result delivers nothing and just closes"
+              (await (run/open-run! {:seon.agent/id "bbb-2606101200"
+                                     :seon.agent.run/trigger :message}))
+              (let [r (await (db/with-agent "bbb-2606101200"
+                               (fn ^:async c [] (await (lifecycle/complete "  ")))))]
+                (is (= :idle r) "blank result still closes the run cleanly")
+                (is (= ["done"] (user-messages-from "bbb-2606101200"))
+                    "no second (blank) message was stored")))
+            (testing "a message already sent THIS RUN suppresses complete's
+                      delivery — the prior message IS the answer (no clobber)"
+              (await (run/open-run! {:seon.agent/id "bbb-2606101200"
+                                     :seon.agent.run/trigger :message}))
+              (let [r (await (db/with-agent "bbb-2606101200"
+                               (fn ^:async c []
+                                 (await (msg/user "the answer"))
+                                 (await (lifecycle/complete "filler")))))]
+                (is (= :idle r) "complete still closes the run cleanly")
+                (is (= :idle (derived "bbb-2606101200")))
+                (is (= ["done" "the answer"] (user-messages-from "bbb-2606101200"))
+                    "exactly ONE message landed this run — the filler complete
+                     string was NOT sent (the earlier message is the delivered
+                     answer; last-message-wins can no longer clobber it)")))
             (testing "pause/resume HOLD the run without killing it"
               (await (run/open-run! {:seon.agent/id "bbb-2606101200"
                                      :seon.agent.run/trigger :message}))
@@ -99,6 +147,80 @@
               (let [env (await (lifecycle/wait "orphan"))]
                 (is (false? (:seon.db/ok? env)))
                 (is (string? (:seon.error/message (:seon.db/error env))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ============================================================
+;; complete-gate — a SUCCESS claim is refused while the agent's latest real
+;; test run is RED. Derived from the agent's own :seon.agent.testrun datoms
+;; (no stored gate flag); scoped so a non-test agent (no testrun) completes
+;; normally. Fabrication fix: a fabricated "all pass" + complete in one reply
+;; is caught because the real red testrun datom persisted BEFORE complete evals.
+;; ============================================================
+
+(defn- run-result
+  "A recognized `::result` map with the given failed/errors counts."
+  [failed errors]
+  {:seon.agent.testrun/ok?       true
+   :seon.agent.testrun/framework :pytest
+   :seon.agent.testrun/passed    3
+   :seon.agent.testrun/failed    failed
+   :seon.agent.testrun/errors    errors
+   :seon.agent.testrun/failures
+   (if (pos? (+ failed errors))
+     [{:seon.agent.testrun/test-name "test_x"
+       :seon.agent.testrun/path      "tests/test_x.py"
+       :seon.agent.testrun/message   "assert 1 == 2"}]
+     [])})
+
+(deftest complete-gate-refuses-a-success-claim-while-tests-are-red
+  (async done
+    (-> (with-conn
+          (fn ^:async run []
+            (await (seed-agents!))
+            (let [aid       "aaa-2606101200"
+                  reopen    (fn ^:async _ []
+                              (await (run/open-run! {:seon.agent/id           aid
+                                                     :seon.agent.run/trigger  :message})))
+                  complete! (fn ^:async _ []
+                              (await (db/with-agent aid
+                                       (fn ^:async c [] (await (lifecycle/complete "done"))))))
+                  record!   (fn ^:async _ [res]
+                              (await (testrun/record!
+                                       {:seon.agent.testrun/agent-id aid
+                                        :seon.agent.testrun/result   res})))]
+              (testing "NO testrun → complete allowed (non-test task scoping)"
+                (await (reopen))
+                (is (= :idle (await (complete!)))
+                    "an agent that ran no tests completes normally"))
+              (testing "GREEN latest testrun → complete allowed"
+                (await (record! (run-result 0 0)))
+                (await (reopen))
+                (is (= :idle (await (complete!)))
+                    "a green run is a real terminal-green → success is honest"))
+              (testing "RED latest testrun → complete REFUSED (honest envelope), run stays open"
+                (await (record! (run-result 2 0)))
+                (await (reopen))
+                (let [env (await (complete!))
+                      msg (:seon.error/message (:seon.db/error env))]
+                  (is (false? (:seon.db/ok? env)) "refusal is an errors-as-value envelope")
+                  (is (string? msg))
+                  (is (str/includes? msg "RED") "the message names the RED state")
+                  (is (str/includes? msg "2 failed") "and the actual failing count")
+                  (is (= :running (derived aid))
+                      "the run is NOT closed — the agent keeps working, not falsely done")))
+              (testing "RED then GREEN (latest green) → complete allowed"
+                (await (record! (run-result 0 0)))
+                (is (= :idle (await (complete!)))
+                    "a later real green supersedes the earlier red (latest-wins)"))
+              (testing "GREEN then RED (latest red) → complete refused"
+                (await (reopen))
+                (await (record! (run-result 0 1)))
+                (let [env (await (complete!))]
+                  (is (false? (:seon.db/ok? env))
+                      "the newest run is red (1 error) → refused even after a prior green")
+                  (is (str/includes? (:seon.error/message (:seon.db/error env)) "1 error")
+                      "errors count, not just failures, gate completion"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 

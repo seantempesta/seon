@@ -5,7 +5,7 @@
    comment-block. Entities have no kind: this groups the live attributes
    by their namespace so the agent knows which attr's index to scan
    (attribute-presence) to FIND data. Symbol-wired into the composer
-   layout (`seon.config/default-ctx-blocks`) as
+   layout (`config manifest`) as
    `'seon.agent.ctx.inventory/inventory-block`; loaded at boot so the
    symbol resolves for `seon.eval/lookup-value`."
   (:require
@@ -139,9 +139,11 @@
       (str (name a) " " c))))
 
 (defn inventory-block
-  "The stored-data discovery surface: what the shared store holds right now.
+  "DEPRECATED — shelf idea (inventory); reference only, see context-rebuild.
 
-   An always-changing volatile tail — a CHEAP map of the store's current
+   The stored-data discovery surface: what the shared store holds right now.
+
+   An always-changing volatile tail — a CHEAP map of the db's current
    contents, derived from [[seon.db/store-inventory]] (user-domain
    namespaces first). ONE
    line per attribute NAMESPACE — the namespace is the line label, then
@@ -160,11 +162,11 @@
    next turn and a fully-retracted one vanishes (see
    docs/seon/concepts/reactive-context).
 
-   REACTIVE: returns \"\" (composer drops the section) when the store
+   REACTIVE: returns \"\" (composer drops the section) when the db
    holds no post-bootstrap data — no empty shell. The whole section for
    a typical store is only a few hundred chars (~300 tokens), so it
    stays out of the cacheable prefix and rides near the prompt tail."
-  {:malli/schema [:=> [:cat :map] :string]}
+  {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{:seon.db/keys [db]}]
   (let [;; Show DOMAIN KNOWLEDGE only — `my.*` and any third-party (acme)
         ;; namespaces the human/agents stored. The framework's own runtime

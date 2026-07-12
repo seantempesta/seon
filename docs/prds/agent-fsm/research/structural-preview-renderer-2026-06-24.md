@@ -367,7 +367,7 @@ iteration" preference):
 - **never throws** — opaque/record fixture degrades to a summary, no
   exception (mirrors `render`'s catch at `render.cljs:628`).
 
-For `:html`, assert the hiccup passes `live-tile/valid-hiccup?`, the root
+For `:html`, assert the hiccup passes `live-canvas/valid-hiccup?`, the root
 label carries the shape header text, and deep nodes are collapsed
 (present-but-not-expanded) rather than fully materialized.
 

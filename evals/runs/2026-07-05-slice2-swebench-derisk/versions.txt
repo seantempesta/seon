@@ -1,0 +1,9 @@
+inspect-ai==0.3.244
+inspect-evals==0.0.1.dev1+unknown.gce900d638
+swebench==4.1.0
+datasets==5.0.0
+openai==2.44.0
+docker==7.1.0
+jsonlines==4.0.0
+inspect-evals editable from reference-code/inspect-evals @ ce900d6389860acbadec4b5176634b37fcf76070
+python==Python 3.12.13

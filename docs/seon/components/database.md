@@ -169,4 +169,5 @@ Each db-name has one conn-process that owns the embedded Datahike connection and
 
 - **`transact!` schema uses `:any`** — `[:sequential :any]` for tx-data and `:any` for return. These are the correct dynamic types for Datahike tx-data, but the `:malli/schema` metadata is aspirational rather than enforced.
 - **`*conn-manager*` dynamic var** — Exists for test override but is separate from `*direct-mode*`. The two testing mechanisms could potentially be unified.
-- **`seon.agent.helpers`** — References SQL helpers that predate the migration. Marked deprecated in the namespace inventory.
+- **Removed stale SQL helpers** — The old `seon.agent.helpers` namespace was
+  deleted; agent-facing database access goes through `seon.db`.

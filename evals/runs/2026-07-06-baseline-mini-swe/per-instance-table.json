@@ -1,0 +1,87 @@
+{
+  "n": 10,
+  "resolved": 7,
+  "mean": 0.7,
+  "table": [
+    {
+      "instance_id": "sympy__sympy-20916",
+      "resolved": true,
+      "steps": 41,
+      "patch_len": 424,
+      "score_runtime_s": 3.2,
+      "error": null
+    },
+    {
+      "instance_id": "sphinx-doc__sphinx-10614",
+      "resolved": false,
+      "steps": 78,
+      "patch_len": 1774,
+      "score_runtime_s": 4.1,
+      "error": null
+    },
+    {
+      "instance_id": "django__django-11299",
+      "resolved": true,
+      "steps": 33,
+      "patch_len": 668,
+      "score_runtime_s": 7.0,
+      "error": null
+    },
+    {
+      "instance_id": "pallets__flask-5014",
+      "resolved": true,
+      "steps": 16,
+      "patch_len": 435,
+      "score_runtime_s": 4.2,
+      "error": null
+    },
+    {
+      "instance_id": "mwaskom__seaborn-3187",
+      "resolved": false,
+      "steps": 89,
+      "patch_len": 1130,
+      "score_runtime_s": 32.0,
+      "error": null
+    },
+    {
+      "instance_id": "psf__requests-1921",
+      "resolved": true,
+      "steps": 23,
+      "patch_len": 834,
+      "score_runtime_s": 17.1,
+      "error": null
+    },
+    {
+      "instance_id": "pytest-dev__pytest-7490",
+      "resolved": true,
+      "steps": 54,
+      "patch_len": 996,
+      "score_runtime_s": 7.6,
+      "error": null
+    },
+    {
+      "instance_id": "pylint-dev__pylint-4604",
+      "resolved": false,
+      "steps": 48,
+      "patch_len": 860,
+      "score_runtime_s": 2.6,
+      "error": null
+    },
+    {
+      "instance_id": "sympy__sympy-15875",
+      "resolved": true,
+      "steps": 36,
+      "patch_len": 404,
+      "score_runtime_s": 7.2,
+      "error": null
+    },
+    {
+      "instance_id": "sphinx-doc__sphinx-8269",
+      "resolved": true,
+      "steps": 16,
+      "patch_len": 629,
+      "score_runtime_s": 3.7,
+      "error": null
+    }
+  ]
+}

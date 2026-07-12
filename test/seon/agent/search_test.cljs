@@ -325,6 +325,68 @@
         (settle! done))))
 
 ;; ---------------------------------------------------------------------------
+;; 8b. context-lines — N lines around each hit; context flagged, not counted.
+;; ---------------------------------------------------------------------------
+
+(deftest context-lines-full-mode-interleaves-flagged-context
+  (async done
+    ;; alpha.md: "# Title\n\nthe needle-alpha is here\n" — hit on line 3.
+    (-> (resolves! (search/grep {:seon.agent.search/pattern       "needle-alpha"
+                                 :seon.agent.search/context-lines 1
+                                 :seon.agent.search/full?         true}))
+        (.then (fn [{ok?     :seon.agent.search/ok?
+                     matches :seon.agent.search/matches
+                     n       :seon.agent.search/match-count}]
+                 (is (true? ok?))
+                 (is (= 1 n) "match-count counts the HIT only, not context lines")
+                 (let [by-line (into {} (map (juxt :seon.agent.search/line-number identity) matches))]
+                   (is (contains? by-line 2) "the line-2 context is emitted")
+                   (is (contains? by-line 3) "the hit line 3 is emitted")
+                   (is (true? (:seon.agent.search/context? (by-line 2)))
+                       "context line flagged :context? true")
+                   (is (nil? (:seon.agent.search/context? (by-line 3)))
+                       "the actual match is NOT flagged context"))))
+        (settle! done))))
+
+(deftest context-lines-by-file-widens-the-sample
+  (async done
+    (-> (resolves! (search/grep {:seon.agent.search/pattern       "needle-alpha"
+                                 :seon.agent.search/context-lines 1}))
+        (.then (fn [{ok?     :seon.agent.search/ok?
+                     by-file :seon.agent.search/by-file}]
+                 (is (true? ok?))
+                 (let [lt (:seon.agent.search/line-text (first by-file))]
+                   (is (re-find #"3\tthe needle-alpha is here" lt)
+                       "the sample widens to a numbered window incl. the hit")
+                   (is (re-find #"\n" lt) "…and spans more than one line"))))
+        (settle! done))))
+
+;; ---------------------------------------------------------------------------
+;; 8c. multiline? — a pattern may span newlines (rg -U --multiline-dotall).
+;; ---------------------------------------------------------------------------
+
+(deftest multiline-lets-a-pattern-span-lines
+  (async done
+    ;; beta.cljs: "(ns beta)\n\n(defn hello [] :needle-beta)\n" — the pattern
+    ;; spans the ns form to the defn across a blank line.
+    (-> (resolves! (search/grep {:seon.agent.search/pattern    "ns beta.*defn hello"
+                                 :seon.agent.search/multiline? true}))
+        (.then (fn [{ok? :seon.agent.search/ok?
+                     n   :seon.agent.search/match-count
+                     bf  :seon.agent.search/by-file}]
+                 (is (true? ok?))
+                 (is (= 1 n) ". crosses line boundaries under multiline?")
+                 (is (str/ends-with? (:seon.agent.search/path (first bf)) "beta.cljs"))))
+        (settle! done))))
+
+(deftest multiline-off-by-default-no-cross-line-match
+  (async done
+    (-> (resolves! (search/grep {:seon.agent.search/pattern "ns beta.*defn hello"}))
+        (.then (fn [{n :seon.agent.search/match-count}]
+                 (is (= 0 n) "without multiline?, . does not cross newlines")))
+        (settle! done))))
+
+;; ---------------------------------------------------------------------------
 ;; Sanity: defaults documented in the request schema actually apply
 ;; (paths default = allowed roots — test 1 already proves it implicitly;
 ;; this one pins the testing label for readers).

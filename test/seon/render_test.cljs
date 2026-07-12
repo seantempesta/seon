@@ -20,10 +20,11 @@
     [seon.client :as client]
     [seon.config :as config]
     [seon.db :as db]
+    [seon.error :as error]
     [seon.eval :as eval]
     [seon.render :as render]
     [seon.render.default :as default]
-    [seon.render.live-tile :as live-tile]
+    [seon.render.canvas :as canvas]
     [seon.schema :as schema]
     [seon.ui.html :as html]))
 
@@ -147,7 +148,7 @@
 ;; ============================================================
 
 (deftest pretty-ai-returns-ai-string
-  ;; Render-key convergence (PRD live-tiles §8.2): the ai render is
+  ;; Render-key convergence (PRD canvas §8.2): the ai render is
   ;; :seon.render/ai — pretty-ai emits it, never the retired producer
   ;; key :seon.render/text.
   (let [out (default/pretty-ai {:seon.db/db nil :seon.agent/id "x"})]
@@ -165,10 +166,10 @@
       (is (= :pre (first h))))))
 
 ;; ============================================================
-;; render-agent-tile (unit 1.4) — the agent's ONE live tile.
-;;   • default: unwired agent → seon.render.live-tile/welcome.
-;;   • override: :seon.render.live-tile/content (covered in
-;;     seon.render.live-tile-test; the legacy :seon.render/html tile
+;; render-agent-canvas (unit 1.4) — the agent's ONE canvas.
+;;   • default: unwired agent → seon.render.canvas/welcome.
+;;   • override: :seon.render.canvas/content (covered in
+;;     seon.render.canvas-test; the legacy :seon.render/html tile
 ;;     fallback was DELETED in the render sweep — PRD §8.1, no legacy).
 ;;   • missing agent → {:seon.render/hiccup nil}, never a throw.
 ;; Fresh isolated conn per test (client/open-agent-conn!) — NEVER the
@@ -190,16 +191,16 @@
                               (binding [db/*conn* conn]
                                 (body conn))))))))))
 
-(deftest render-agent-tile-default-renders-welcome
-  ;; live-tiles U1: an UNWIRED agent's tile is the core welcome
-  ;; (seon.render.live-tile/welcome), no longer the :seon.agent kind
+(deftest render-agent-canvas-default-renders-welcome
+  ;; canvas U1: an UNWIRED agent's tile is the core welcome
+  ;; (seon.render.canvas/welcome), no longer the :seon.agent kind
   ;; default seon.render.default/view — the tile slot and the generic
   ;; entity-card slot are separate roles now (PRD §8.1).
   (async done
     (-> (with-tile-conn "tiletest-00001"
           (fn [conn]
             (let [{:seon.render/keys [hiccup ai]}
-                  (render/render-agent-tile {:seon.db/db @conn
+                  (render/render-agent-canvas {:seon.db/db @conn
                                              :seon.agent/id "tiletest-00001"})]
               (is (vector? hiccup) "default tile renders hiccup")
               (is (= "seon-tile" (:class (second hiccup)))
@@ -210,12 +211,12 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest render-agent-tile-ignores-legacy-html-slot
+(deftest render-agent-canvas-ignores-legacy-html-slot
   ;; Render sweep 2026-06-11 (PRD §8.1, no legacy): a per-entity
   ;; :seon.render/html value is the generic ENTITY-CARD slot only —
   ;; the tile ignores it and falls through to the welcome. The
   ;; positive ::content override path is pinned in
-  ;; seon.render.live-tile-test.
+  ;; seon.render.canvas-test.
   (async done
     (-> (with-tile-conn "tileovr-000001"
           (fn [conn]
@@ -226,7 +227,7 @@
                 (.then (fn [_]
                          (binding [db/*conn* conn]
                            (let [{:seon.render/keys [hiccup]}
-                                 (render/render-agent-tile
+                                 (render/render-agent-canvas
                                    {:seon.db/db @conn
                                     :seon.agent/id "tileovr-000001"})]
                              (is (= "seon-tile" (:class (second hiccup)))
@@ -241,7 +242,7 @@
 ;; legible, never a silent vanish (demo-polish 2026-06-12; the old
 ;; `(catch … nil)` made a broken agent-authored renderer's card
 ;; indistinguishable from "no renderer" and dead-coded the
-;; inspector's render-error fallback).
+;; debug view's render-error fallback).
 ;; ============================================================
 
 (defn throwing-renderer
@@ -268,7 +269,11 @@
                                  {:seon.db/db @conn
                                   :seon.agent/id "rethrow-00001"
                                   :seon.render/entity entity}))
-                  banner (html/->string (render-one broken))
+                  ;; The throwing renderer is a seon.* sym → :core fault;
+                  ;; deliberate here, so bracket it as EXPECTED (the render is
+                  ;; synchronous — record! fires inside this call).
+                  banner (html/->string
+                           (error/expecting-core-fault! (fn [] (render-one broken))))
                   sib    (html/->string (render-one good))]
               (is (re-find #"render error" banner)
                   "throwing renderer → legible banner, not a vanish")
@@ -285,12 +290,14 @@
   (async done
     (-> (with-tile-conn "rethrow-00002"
           (fn [conn]
-            (let [out (render/render-entity-ai
-                        {:seon.db/db @conn
-                         :seon.agent/id "rethrow-00002"
-                         :seon.render/entity
-                         {:db/id 1
-                          :seon.render/ai 'seon.render-test/throwing-renderer}})]
+            (let [out (error/expecting-core-fault!
+                        (fn []
+                          (render/render-entity-ai
+                            {:seon.db/db @conn
+                             :seon.agent/id "rethrow-00002"
+                             :seon.render/entity
+                             {:db/id 1
+                              :seon.render/ai 'seon.render-test/throwing-renderer}})))]
               (is (string? out) "throwing AI renderer → string, never nil")
               (is (re-find #"render error" out))
               (is (re-find #"boom-renderer" out)
@@ -298,11 +305,11 @@
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest render-agent-tile-missing-agent-renders-nothing
+(deftest render-agent-canvas-missing-agent-renders-nothing
   (async done
     (-> (with-tile-conn "tilesome-00001"
           (fn [conn]
-            (let [out (render/render-agent-tile {:seon.db/db @conn
+            (let [out (render/render-agent-canvas {:seon.db/db @conn
                                                  :seon.agent/id "no-such-agent0"})]
               (is (= {:seon.render/hiccup nil} out)
                   "missing agent → nil hiccup, no throw"))))
@@ -374,16 +381,16 @@
 
 (deftest slot-missing-block-routes-through-overridable-error-never-throws
   ;; CONVERGENCE: a missing (or throwing) block surfaces THROUGH the
-  ;; overridable seon.render.live-tile/error-tile seam — not a hardcoded
+  ;; overridable seon.render.canvas/error-tile seam — not a hardcoded
   ;; div — so a consumer's set! override (acme's branded card) applies on
-  ;; the world page too. Never throws; stable id + sibling kept.
+  ;; the agent view too. Never throws; stable id + sibling kept.
   (async done
     (-> (with-block-conn "slottest-00002"
           (fn [conn]
             (let [ctx  {:seon.db/db @conn :seon.agent/id "slottest-00002"}
-                  orig live-tile/error-tile]
+                  orig canvas/error-tile]
               (try
-                (set! live-tile/error-tile
+                (set! canvas/error-tile
                       (fn [_] [:div.acme-override "OVERRIDE CARD"]))
                 (let [missing (render/slot ctx :no-such-block)
                       sibling (render/slot ctx :mytile)]
@@ -395,7 +402,7 @@
                       "the error tile routes through the overridable error-tile seam")
                   (is (re-find #"tile!" (html/->string sibling))
                       "a sibling slot renders untouched (never-crash-always-surface)"))
-                (finally (set! live-tile/error-tile orig))))))
+                (finally (set! canvas/error-tile orig))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
@@ -407,7 +414,7 @@
     (-> (with-blocks-conn "slotmap-00001"
           [{:seon.agent.ctx/name     :wtile
             :seon.agent.ctx/priority 50
-            :seon.render/html        'seon.render.live-tile/welcome}]
+            :seon.render/html        'seon.render.canvas/welcome}]
           (fn [conn]
             (let [out  (render/slot {:seon.db/db @conn :seon.agent/id "slotmap-00001"}
                                     :wtile)
@@ -427,24 +434,15 @@
 ;; Fail-loud render dial (seon.config/render-strict?) — a render/converter
 ;; failure SCREAMS under strict (throws with the offending block + the full
 ;; malli explain), guards gracefully in prod. Plus the specific transcript
-;; root-cause fix: neutralize-result-claims tolerates an off-shape (non-
-;; string) stored narration/source instead of throwing invalid-input.
+;; root-cause fix: format-eval-row tolerates an off-shape (non-string) stored
+;; narration/source instead of throwing invalid-input.
 ;; ============================================================
 
 (defn ^:no-doc boom-ai-render
   "A converter that throws — the induced render failure for the dial tests."
   [_] (throw (js/Error. "boom-detail-XYZ")))
 
-(deftest neutralize-tolerates-off-shape-rows
-  (testing "neutralize-result-claims coerces any value → string (the transcript
-            root-cause fix: an off-shape stored narration/source must be
-            NEUTRALIZED, not throw invalid-input and sink the whole transcript)"
-    (is (= "" (ctx/neutralize-result-claims nil)) "nil → empty string")
-    (is (= "42" (ctx/neutralize-result-claims 42)) "number → its printed form")
-    (is (= ":x" (ctx/neutralize-result-claims :x)) "keyword → its printed form")
-    (is (re-find #"unverified narration"
-                 (ctx/neutralize-result-claims "; note\n=> 5"))
-        "still rewrites a real bare result-claim on strings"))
+(deftest eval-row-tolerates-off-shape-rows
   (testing "the previously-failing eval-row shape (non-string narration) now
             renders instead of throwing"
     (let [row (ctx/format-eval-row {:seon.eval/source "(+ 1 2)"
@@ -461,13 +459,20 @@
               :seon.agent.ctx/name   :demoblock}]
     (testing "STRICT OFF → graceful one-line guard, no throw (prod behavior)"
       (with-redefs [config/render-strict? (constantly false)]
-        (let [out (render/render :seon.render/ai {} node)]
+        ;; boom-ai-render throws → :core fault (seon.* converter); deliberate
+        ;; in both dial branches, so bracket as EXPECTED (sync render call —
+        ;; STRICT OFF returns the guard string, STRICT ON re-throws; the
+        ;; bracket re-propagates either way).
+        (let [out (error/expecting-core-fault!
+                    (fn [] (render/render :seon.render/ai {} node)))]
           (is (string? out))
           (is (re-find #"⚠ \[:demoblock\] render failed" out)
               "the graceful guard renders the calm one-liner"))))
     (testing "STRICT ON → THROWS loud, naming the offending block"
       (with-redefs [config/render-strict? (constantly true)]
-        (let [caught (try (render/render :seon.render/ai {} node) ::no-throw
+        (let [caught (try (error/expecting-core-fault!
+                            (fn [] (render/render :seon.render/ai {} node)))
+                          ::no-throw
                           (catch :default e e))]
           (is (not= ::no-throw caught) "strict mode re-throws, never swallows")
           (is (re-find #"\[demoblock\] render failed: boom-detail-XYZ"

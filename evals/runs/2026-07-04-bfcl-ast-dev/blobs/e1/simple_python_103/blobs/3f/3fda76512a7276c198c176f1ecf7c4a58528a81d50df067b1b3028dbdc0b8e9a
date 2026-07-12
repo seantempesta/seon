@@ -1,0 +1,6 @@
+;; The user wants exactly one call object in a JSON array.
+;; polynomial coefficients for y = 3x^2 + 2x - 4: [3.0, 2.0, -4.0]
+;; limits: [-1.0, 2.0]
+;; Function name: mathematics.calculate_area_under_curve
+;; Required params: polynomial (array of floats), limits (array of floats)
+(message/user "[{\"name\": \"mathematics.calculate_area_under_curve\", \"arguments\": {\"polynomial\": [3.0, 2.0, -4.0], \"limits\": [-1.0, 2.0]}}]")

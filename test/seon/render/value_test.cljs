@@ -7,6 +7,7 @@
   (:require
     [cljs.test :as t :refer [deftest is testing]]
     [clojure.string :as str]
+    [seon.config :as config]
     [seon.render.value :as v]))
 
 ;; Stand-ins for opaque runtime handles (the real ones are datahike's).
@@ -72,6 +73,27 @@
       (is (= :more (:seon.render.value/elided skel)))
       ;; head+1 probe only — never the whole infinite seq
       (is (<= @realized 50)))))
+
+(deftest poisoned-lazy-seq-never-crashes-the-walk
+  ;; Regression — T4 D1 pod crash (error-workflow 2026-07-06). An agent eval
+  ;; can return a lazy seq that THROWS when forced, e.g. `(keys non-map)` →
+  ;; a KeySeq whose -first calls `(key non-map-entry)`. The eval records
+  ;; `ok? true` (lazy, unrealized); forcing it in the renderer must NOT
+  ;; propagate — a propagated throw is recorded `:core` and CRASHES the pod.
+  (testing "sample degrades a throw-on-realize seq to an opaque marker"
+    (let [skel (v/sample (keys [[1 2] [3 4]]))]
+      (is (contains? skel :seon.eval/opaque))
+      (is (str/includes? (:seon.eval/opaque skel) "realization threw"))))
+  (testing "render-ai NEVER throws on a poisoned value — top / nested / deep"
+    (doseq [val [(keys [[1 2] [3 4]])
+                 (vals [[1 2]])
+                 {:a (map (fn [_] (throw (js/Error. "boom"))) [1 2 3])}
+                 {:a {:b (keys [[9 9]])}}]]
+      (let [out (v/render-ai "rid" val)]
+        (is (string? out))
+        (is (str/includes? out "result/rid")))))
+  (testing "a normal value still renders verbatim (guard is inert)"
+    (is (= "{:a 1, :b [1 2 3]}" (v/render-ai "n" {:a 1 :b [1 2 3]})))))
 
 (deftest homogeneous-collection-shows-shared-keys
   (testing "a big collection of uniform maps carries its shared key-set"
@@ -158,6 +180,75 @@
       (is (str/includes? out "result/xyz123"))
       (is (str/includes? out "get-in")))))
 
+(deftest map-elision-keeps-smallest-load-bearing-keys
+  (testing "over the key bound, tiny keys (hashes/counts) survive and the bulk
+            payload strings are elided — ranked by rendered size, not first-N"
+    (let [big  (apply str (repeat 400 "X"))   ; huge payload
+          mid  (apply str (repeat 30 "m"))    ; medium filler (> a hash)
+          m    (into {:seon.agent.shell/out-blob "c4685deadbeefc4685deadbeef"
+                      :seon.agent.shell/err-tokens 17}
+                     (concat [[:payload-a big] [:payload-b big] [:payload-c big]]
+                             (for [i (range 8)] [(keyword (str "f" i)) mid])))
+          out  (v/render-ai "eid1" m)]
+      ;; the two tiny load-bearing keys survive
+      (is (str/includes? out "c4685deadbeefc4685deadbeef"))
+      (is (str/includes? out "err-tokens"))
+      ;; the huge payloads are elided (never rendered whole)
+      (is (not (str/includes? out big)))
+      ;; honest elision marker
+      (is (str/includes? out "more keys"))
+      ;; every retained key still resolves against the live value (path valid)
+      (is (str/includes? out "out-blob")))))
+
+(deftest dominant-string-renders-as-body-not-stub
+  (testing "a map whose payload is ONE dominant string (a read verb's content)
+            renders that string as a bounded BODY BLOCK — many lines, honest
+            ⟨N tokens⟩, header keys intact — not a 2-line stub (O1)"
+    (let [content (apply str (for [i (range 1 54)]
+                               (str " " i "\t# line " i " of the file body\n")))
+          env     {:seon.agent.fs/ok? true
+                   :seon.agent.fs/path "/testbed/two_bucket.py"
+                   :seon.agent.fs/content content
+                   :seon.agent.fs/from-line 1
+                   :seon.agent.fs/lines-returned 53
+                   :seon.agent.fs/total-lines 53
+                   :seon.agent.fs/file-sha "f1b6e41cabc123"}
+          out     (v/render-ai "yPy-1" env)]
+      ;; a real body is shown — not just the first ~80 chars (the old stub
+      ;; stopped around line 3; the body now reaches deep into the file)
+      (is (str/includes? out "line 30 of the file body"))
+      ;; honest truncation marker on the dominant string
+      (is (str/includes? out "tokens⟩"))
+      ;; header keys survive verbatim next to the body
+      (is (str/includes? out "f1b6e41cabc123"))
+      (is (str/includes? out ":seon.agent.fs/total-lines 53"))
+      ;; recovery handle present (result/<id> + keep + get-in)
+      (is (str/includes? out "result/yPy-1"))
+      (is (str/includes? out "get-in")))))
+
+(deftest dominant-rule-does-not-fire-on-many-similar-strings
+  (testing "a map of several comparably-sized strings has NO dominant payload,
+            so each stays inline-clipped — the body-block rule must not fire"
+    (let [s   (fn [n] (apply str (repeat 500 (str n))))
+          m   {:a (s 1) :b (s 2) :c (s 3)}
+          out (v/render-ai "m1" m)]
+      ;; no single string is shown as a 500-char body block
+      (is (not (str/includes? out (s 1))))
+      (is (not (str/includes? out (s 2))))
+      ;; still a partial view with the handle
+      (is (str/includes? out "result/m1")))))
+
+(deftest render-ai-hint-teaches-durability-promotion
+  (testing "a partial view's drill hint names BOTH recovery and the my.blob/put!
+            keep idiom when a result id exists"
+    (let [out (v/render-ai "keep1" (vec (range 2000)))]
+      (is (str/includes? out "partial view"))
+      ;; recovery idiom
+      (is (str/includes? out "get-in"))
+      ;; durability idiom
+      (is (str/includes? out "keep:"))
+      (is (str/includes? out "my.blob/put! result/keep1")))))
+
 (deftest render-ai-long-string-reports-length
   (let [out (v/render-ai "s1" (apply str (repeat 2000 "x")))]
     (is (str/includes? out "tokens⟩"))
@@ -188,3 +279,57 @@
     (is (contains? data :seon.render.value/tree))
     ;; the tree is the same skeleton render-ai emits
     (is (= (v/sample (vec (range 100))) (:seon.render.value/tree data)))))
+
+;; ------------------------------------------------------------
+;; Explicit-whitespace rendering (transcript-render redesign) — the central
+;; capability for surgical edits. Gated by config; default is byte-identical.
+;; ------------------------------------------------------------
+
+(deftest visible-whitespace-is-gated-and-central
+  (testing "all knobs off (default) → byte-identical passthrough"
+    (with-redefs [config/render-whitespace   (constantly :raw)
+                  config/render-tabs         (constantly :literal)
+                  config/render-trailing-ws  (constantly :off)
+                  config/render-line-numbers? (constantly false)]
+      (is (= "a\tb c\n  x " (v/visible-whitespace "a\tb c\n  x ")))))
+  (testing ":visible → every space `·` and every tab `→`"
+    (with-redefs [config/render-whitespace   (constantly :visible)
+                  config/render-tabs         (constantly :literal)
+                  config/render-trailing-ws  (constantly :off)
+                  config/render-line-numbers? (constantly false)]
+      (is (= "a→b·c" (v/visible-whitespace "a\tb c")))))
+  (testing ":tabs :arrow alone → tabs `→`, spaces untouched"
+    (with-redefs [config/render-whitespace   (constantly :raw)
+                  config/render-tabs         (constantly :arrow)
+                  config/render-trailing-ws  (constantly :off)
+                  config/render-line-numbers? (constantly false)]
+      (is (= "a→b c" (v/visible-whitespace "a\tb c")))))
+  (testing ":trailing-ws :dot marks ONLY trailing whitespace"
+    (with-redefs [config/render-whitespace   (constantly :raw)
+                  config/render-tabs         (constantly :literal)
+                  config/render-trailing-ws  (constantly :dot)
+                  config/render-line-numbers? (constantly false)]
+      (is (= "a b·\nx" (v/visible-whitespace "a b \nx"))
+          "interior space kept, trailing space dotted")))
+  (testing ":line-numbers prepends a 1-based gutter"
+    (with-redefs [config/render-whitespace   (constantly :raw)
+                  config/render-tabs         (constantly :literal)
+                  config/render-trailing-ws  (constantly :off)
+                  config/render-line-numbers? (constantly true)]
+      (is (= "1  a\n2  b" (v/visible-whitespace "a\nb"))))))
+
+(deftest render-ai-string-value-uses-whitespace-view-only-when-active
+  (testing "default → string value renders as quoted pr-str (byte-identical)"
+    (with-redefs [config/render-whitespace   (constantly :raw)
+                  config/render-tabs         (constantly :literal)
+                  config/render-trailing-ws  (constantly :off)
+                  config/render-line-numbers? (constantly false)]
+      (is (= (pr-str "a\tb") (v/render-ai "eidX" "a\tb"))
+          "quoted/escaped form, exactly as today")))
+  (testing "whitespace active → string value renders RAW bytes with glyphs"
+    (with-redefs [config/render-whitespace   (constantly :visible)
+                  config/render-tabs         (constantly :literal)
+                  config/render-trailing-ws  (constantly :off)
+                  config/render-line-numbers? (constantly false)]
+      (is (= "a→b" (v/render-ai "eidX" "a\tb"))
+          "raw content with tab→ glyph, not the quoted pr-str form"))))

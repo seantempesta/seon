@@ -40,6 +40,8 @@
    functions once the contract is fixed."
   {:schemas   {:allow #{"ns" "register!" "comment"}
                :intent "schemas only — register! the data shape before any fn body"}
+   :tests     {:allow #{"ns" "deftest" "comment"}
+               :intent "tests only — cljs.test deftests pin behavior before any fn body"}
    :functions {:allow #{"ns" "defn" "comment"}
                :intent "functions only — defn with specs; the schema contract is locked"}})
 
@@ -53,6 +55,34 @@
   [form]
   (let [h (and (seq? form) (first form))]
     (when (symbol? h) (name h))))
+
+(defn levenshtein
+  "Classic edit distance between strings `a` and `b`.
+
+   Lives HERE (the shared dependency-free ns) because it is the ONE distance
+   fn for near-name candidate scoring on BOTH sides of the wire: the pod's
+   retrieval leg (`seon.diffusion.retrieval`) and the co-located worker's
+   `op:\"repair\"` candidate sweep (`seon.worker-eval`) — one mechanism, no
+   per-bundle copy."
+  {:malli/schema [:=> [:catn [::a :string] [::b :string]] :int]}
+  [a b]
+  (let [m (count a) n (count b)]
+    (cond
+      (zero? m) n
+      (zero? n) m
+      :else
+      (loop [i 1 prev (vec (range (inc n)))]
+        (if (> i m)
+          (peek prev)
+          (let [ca (nth a (dec i))
+                cur (reduce
+                      (fn [row j]
+                        (let [cost (if (= ca (nth b (dec j))) 0 1)]
+                          (conj row (min (inc (peek row))             ; insertion
+                                         (inc (nth prev j))           ; deletion
+                                         (+ cost (nth prev (dec j))))))) ; substitution
+                      [i] (range 1 (inc n)))]
+            (recur (inc i) cur)))))))
 
 (defn phase-violation?
   "True when `form` is a top-level call whose head is NOT allowed in `phase`.

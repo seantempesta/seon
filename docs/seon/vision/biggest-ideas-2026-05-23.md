@@ -69,7 +69,7 @@ can preserve the original ambition.
   read 1–200. Platform.md read 1–200 + 400–571.
 
 Honest gaps: 8 of 28 PRDs (the smaller status/polish ones listed above) only previewed,
-not read line-by-line. v2.md sections after line 200 (blob / hard-rules / curation verbs)
+not read line-by-line. v2.md sections after line 200 (blob / hard-rules / curation functions)
 not exhaustively read — the v1 deferral table tells us what's in them. Archive triage
 across `feature/mcp-resilience`, `feature/namespace-ui`, `feature/sse-live-reload`,
 `feature/stability-improvements`, `feature/unified-dev-hook` not done — those branches
@@ -738,7 +738,7 @@ needs to say this clearly — without it the M8 framing reads as
 
 `docs/prds/agent-runtime/v1.md` ships with `:keep-history? true` and no
 GC. `v2.md` adds `:db/noHistory` opt-outs on high-churn scalars and `forget!`
-/ `forget-ns!` curation verbs. `v3.md` adds blob GC and per-blob TTL.
+/ `forget-ns!` curation functions. `v3.md` adds blob GC and per-blob TTL.
 
 For the README: "all history retained forever" is a wonderful claim until the
 disk fills. The story is "v1 keeps everything; v2 lets you curate; v3 has

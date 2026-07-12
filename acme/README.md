@@ -25,11 +25,11 @@ the place we iterate on the "consume Seon without forking it" story.
   ```clojure
   (seon.db/transact!
     {:seon.db/tx-data [{:seon.agent/id "<id>"
-                        :seon.render.live-tile/content 'acme.widget/dash}]})
+                        :seon.render.canvas/content 'acme.widget/dash}]})
   ```
 
 - **Function override** — `acme.overrides` `set!`s
-  `seon.render.live-tile/error-response` (late-binding through the global
+  `seon.render.canvas/error-response` (late-binding through the global
   var slot) for a calm broken-tile card. No seon-src edit.
 - **CSS / branding** — `acme/branding/acme.css` (via `SEON_BRAND_CSS`) plus
   `SEON_BRAND_NAME` / `SEON_BRAND_TAGLINE`, all set by `bin/acme`.

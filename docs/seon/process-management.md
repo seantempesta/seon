@@ -33,8 +33,46 @@ bin/seon cluster reset [n]  DESTRUCTIVE: wipe data/clusters/<n>/store; bounce
                             wire-server + pod when <n> is the cluster THIS
                             supervisor manages (store == $SEON_CLUSTER_DIR/store),
                             else wipe only (fresh DB)
+bin/seon cluster create <n> [--ephemeral] [--frozen|--watched]
+                            NEW cluster on this supervisor's wire-server:
+                            its own store dir + its own pod (pod-<n>, free port)
+bin/seon cluster fork <src> <t|--at t> [fork-name]
+                            NEW cluster = <src>'s world at basis-t <t> —
+                            independent, writable, disposable (see below)
+bin/seon cluster destroy <n> stop pod-<n>, delete the db from the live
+                            wire-server registry, remove data/clusters/<n>/
 
 ```
+
+## `cluster fork` — a cluster's world at a basis-t, live and writable
+
+`bin/seon cluster fork <src> <t|--at t> [fork-name]` (default fork-name
+`fork-<src>-<t>`) boots a NEW disposable cluster whose database is `<src>`'s
+world exactly at transaction id `<t>`. The primary consumer is error
+forensics: `seon.agent.inspect/repro` returns this command verbatim as its
+`::fork-hint`, with `t` = the error's `:seon.error/at` (the basis-t the
+failing code saw — the error datom itself commits later, so it is not
+inside the fork).
+
+Mechanism: `seon.server.registry/fork-db!`, invoked over the wire-server's
+loopback socket REPL (7891 — the same supervisor channel `cluster destroy`
+uses; never agent-exposed) via `bin/seon-server-call`, the babashka helper
+that parses the REPL's printed reply as EDN and keys success on the fn's
+own namespaced flag (`::forked?` / `::deleted?`) — the supervisor never
+pattern-matches printed EDN. It wraps `datahike.api/fork-database`: a
+konserve-layer store copy, the fork's head pointed at the commit whose
+`:max-tx` equals `t`, and a fresh deterministic store identity — verified
+after the copy (head at `t` + a full history index scan; one retry covers
+a copy that raced a live write). Entity ids and tx ids are byte-identical,
+so every stored basis-t means the same thing inside the fork. The source's
+`blobs/` (turn prompt/reply content) is copied alongside so turn replay
+works. Boot then follows `cluster create` exactly — the fork pod's own
+`ensure-db` registers the db, so the fork is indistinguishable from a
+normal cluster (feed, replay, inspect verbs all work; the pod's boot-seed
+appends its usual idempotent txs, moving the head slightly past `t` while
+the world-state at `t` stays intact). The fork store is independent by
+construction: `bin/seon cluster destroy <fork-name>` removes it without
+touching the source.
 
 ## `start all` / `restart all` / `stop all` — the whole stack, ordered + gated
 
@@ -45,7 +83,7 @@ Ready gates (`wait_ready` in the script — observed signals, not just log lines
 | Process | Ready when | Bound |
 |---|---|---|
 | `cljs-watch` | `out/client/main.js` newer than this start, or `Build completed` in the fresh log | 300s |
-| `wire-server` | `tmp/seon-cluster-default-req.sock` ACCEPTS a connection (real `nc -U` connect — macOS `nc -z -U` is broken) + `tmp/seon-writer-repl-port` written | 180s |
+| `wire-server` | `tmp/seon-cluster-default-req.sock` ACCEPTS a connection (real `nc -U` connect — macOS `nc -z -U` is broken) + `$SEON_WRITER_REPL_PORT_FILE` (default `tmp/seon-writer-repl-port-default`) written | 180s |
 | `pod` | `$SEON_PORT_FILE` (default `tmp/seon-port`) written + HTTP answers on `/` | 120s |
 
 On timeout or early death the wait fails LOUD, naming the log to read, and later stages are not started. `bin/seon cluster reset` shares the same `wait_ready` helper.
@@ -63,7 +101,7 @@ Real failure 2026-06-10: a datahike `:git/sha` bump made the first wire-server s
 | `pod` | `node out/client/main.js` | `logs/pod.log` | `$SEON_PORT_FILE` (default `tmp/seon-port`) written + HTTP answers on `/` |
 | `cljs-watch` | `clj -M:cljs watch client` | `logs/cljs-watch.log` | "Build completed" appears in log |
 | `jvm` | `./bin/run` | `logs/jvm.log` | `logs/app.log` shows "Server started" |
-| `wire-server` | `clojure -M:writer ...` | `logs/wire-server.log` | `tmp/seon-cluster-default-req.sock` accepting + `tmp/seon-writer-repl-port` written |
+| `wire-server` | `clojure -M:writer ...` | `logs/wire-server.log` | `tmp/seon-cluster-default-req.sock` accepting + `$SEON_WRITER_REPL_PORT_FILE` (default `tmp/seon-writer-repl-port-default`) written |
 
 ### IMPORTANT — pod ↔ cljs-watch dependency
 

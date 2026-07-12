@@ -135,10 +135,11 @@
       (is (true? (::compliance/complete-spec? result)))
       (is (empty? (::compliance/violations result)))))
 
-  (testing "checks a function lacking :malli/schema (schema/register!)"
+  (testing "checks a function lacking :malli/schema (local fixture — every
+            seon.schema public fn is specced since 530335ed)"
     (let [result (compliance/check-function
-                  {::compliance/var #'seon.schema/register!})]
-      (is (= "register!" (::compliance/fn-name result)))
+                  {::compliance/var #'sample-unspecced-args})]
+      (is (= "sample-unspecced-args" (::compliance/fn-name result)))
       (is (true? (::compliance/has-docstring? result)))
       (is (false? (::compliance/complete-spec? result)))
       (is (seq (::compliance/violations result)))

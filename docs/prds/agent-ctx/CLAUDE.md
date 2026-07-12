@@ -4,176 +4,128 @@ status: active
 tags: [orchestrator, agent]
 ---
 
-# agent-ctx — the shared chunk (two lanes, one context)
+# agent-ctx — compose context from functions over the db, then measure
 
-**Auto-loads for BOTH lanes. This is the shared, LIVE coordination surface —
-update it when a tension resolves or a new one appears, so the other lane sees
-it.** The chunk: **compose the agent's context from functions over the db, then
-MEASURE whether that context + the tool surface actually let agents get shit
-done.** Two lanes, one contract, one ledger.
+**The chunk:** compose the agent's context from functions applied to the db,
+then MEASURE whether that context + the tool surface actually let agents get
+work done. The idealized system is `docs/seon/architecture/` (read
+[[architecture]] + [[context]] FIRST — don't restate them). This folder is
+the roadmap chunk. **Status lives in [[roadmap]] and [[context-rebuild]]
+(the plan of record) — not here.** Cross-lane channel: [[coordination]].
+Shared ledger: `evals/scorecard.jsonl`.
 
-The idealized system is `docs/seon/architecture/` (read `architecture.md` +
-`context.md` FIRST — don't restate them). This folder is the roadmap chunk.
-Cross-lane channel: **[[coordination]]**. Shared truth: **`evals/scorecard.jsonl`**.
+## Current state (2026-07-11)
 
-## The two lanes
+**The context-rebuild cutover is DONE — the default cluster runs the rebuilt
+minimal tree.** `system.edn` carries the graduated **v3.1 system-text** (the
+`:seon.config/system-text` datom — one source; `minimal.edn` inherits it) plus
+the evidenced tree: `:namespaces` + `:plan` (with its html twin — the human's
+live plan tile) + `:transcript`, and root's three KEPT derived fault surfaces
+(`:core-faults`, `:instrumentation-gaps`, `:orphaned-agents` — 0 tokens when
+healthy). Every legacy block is OUT of the running tree; the old tree is frozen
+in `config/legacy.edn` (comparison drives only, expiry-dated). Capability
+milestones `repl` / `namespaces` / `plan` are GREEN (both model classes); **`db`
+is next**. See [[context-rebuild]] for the milestone table, the target
+block set, and the inclusion bar; [[roadmap]] for detailed status.
 
-- **Tooling / engine lane (agent-fsm continuation).** Owns: the runtime + FSM
-  (`seon.agent.*`), the **context engine** (`seon.agent.ctx`, `seon.render`,
-  `seon.eval`, `seon.instrument`), and the **`my.*` tool surface**
-  (`my.plan`, `my.blob`, `seon.agent.{shell,web,fs}`). Builds what agents
-  *have* and *how* context renders. Flagship: required-key resolution → the
-  current-ns render-fn auto-run → block/tile twins → `my.*`-as-namespace-scribed
-  entities → canvas = last-updated. Design:
-  [[research/explicit-deps-injection-2026-07-02]]; carryover patch in
-  `scratchpad/agent-scope-carryover/`.
-- **Eval / measurement lane.** Owns: the standing inspect-ai suite over the
-  `/solve` door (`src-inspect-ai/`), the dev/milestone/test tiers, `pass^k`
-  stability, the flake taxonomy, and the context-refinement A/Bs those numbers
-  drive (per-row rendered-context audits; every trim/skill-edit/tool-tune is an
-  A/B against frozen samples — the ledger decides, not taste). Measures whether
-  it works and refines *what* agents see. Spec: [[eval-design]]; plan:
-  [[eval-lane-plan]].
+## The three lanes (all active as of 2026-07-11)
+
+- **Context / tooling lane** — the runtime + FSM (`seon.agent.*`), the context
+  engine (`seon.agent.ctx`, `seon.render`, `seon.eval`, `seon.instrument`), the
+  `my.*` tool surface, and the context-rebuild arc itself. Owns the **default
+  pod (7890)**.
+- **Eval / measurement lane** — the standing inspect-ai suite over the
+  `POST /agents/run` door (`src-inspect-ai/`), `pass^k` stability, the flake
+  taxonomy, and the context-refinement A/Bs those numbers drive (every
+  trim/skill-edit/tool-tune is an A/B against frozen samples — the ledger
+  decides, not taste).
+- **Diffusion-typeahead lane** (owner-directed since 2026-07-10) — menu/plan
+  affordances (`seon.agent.ctx.menu`) + a local-DiffusionGemma step-loop
+  provider, measured in `src-inspect-ai`. Owns **acme (7980)** as its testbed.
+  See the [[coordination]] 2026-07-11 entries.
 
 ## The contract between the lanes
 
-- **Boundary (as drawn in [[eval-lane-plan]], agreed):** the eval lane does NOT
-  touch tool/runtime/ctx-engine internals; the tooling lane does NOT touch the
-  harness — it gets the numbers. When a row fails, the eval lane **attributes**
-  it (context defect vs tool defect vs flake vs model) and hands tool defects to
-  the tooling lane **with captured rendered-context evidence**.
-- **Shared surface = the CONTEXT.** The eval lane tunes context CONTENT (which
-  nses/skills render, trims — via `config/system.edn`, measured); the tooling
-  lane owns the render MECHANISM (the engine, required-keys, auto-run). A change
-  to *which* content renders is eval-lane; a change to *how* it renders is
-  tooling-lane. When in doubt, flag in [[coordination]] before editing the other
-  lane's file.
-- **Shared truth:** `evals/scorecard.jsonl` (one row per capability per run).
-  **Cross-lane flags + handoffs:** [[coordination]].
-
-## Open tensions & issues — LIVE (update as they resolve)
-
-Tool defects queued for the tooling lane (with rendered-context evidence — eval lane):
-
-- **Fresh-world `my.kb` renders "0 fns, 0 schemas"** — a boot/indexing gap; the
-  kb card is empty on a fresh cluster. Tooling lane. (eval blocker #4)
-- **Turn-6 recall visibility gap during `/solve`** — candidate root = the
-  `seon.db/*conn*` single dynamic root (not fiber-local); documented in
-  `docs/seon/orchestrator/issues/tx-feed-pump-timeouts.md`. Tooling lane +
-  parallel-scoring lever.
-
-Tooling-lane build issues:
-
-- **`my.plan` verbs are in `seon.instrument/skip-syms`** → they get no wrapper
-  and no required-key resolution. Resolve first (remove from skip-syms, or read
-  `db/current-agent-id` in-body) before the auto-run work. (tooling lane)
-- **The agent↔`my.plan`-entity ref direction** — a design detail to nail during
-  the entity-ref build.
-
-Post-merge units (slotted, both lanes care):
-
-- **pub-socket feed migration** — the tx-feed follow-up in
-  `docs/seon/orchestrator/issues/tx-feed-pump-timeouts.md`; a real post-merge
-  unit (tooling lane; de-flakes the whole chunk).
-- **transact-timeout ambiguity** — the second scoped follow-up in the same
-  issue note; clarify RPC-timeout semantics for transacts.
-
-Eval-lane blockers before the first dev pass (from [[eval-CLAUDE-notes]]):
-
-1. `SEON_SHELL`/`SEON_WEB` grants — ✅ GRANTED in both supervisors (code
-   defaults stay deny-when-unset); table in
-   `docs/seon/components/capability-gates.md`.
-2. Planning bench re-grounded on the redesigned `my.plan` (deps/pace/expect —
-   the old bench references pre-rename verbs).
-3. Tool-row generators (shell / web-fixture / file-edit) authored.
-4. Fresh-world `my.kb` empty render + turn-6 recall (the two tool defects above).
-5. One calibration run (pod concurrency, latency medians → timeouts).
-
-## Settled — do NOT re-litigate (both lanes)
-
-- Chunk name = `agent-ctx` (ctx is the established word). Vocabulary maps to
-  Clojure primitives: **required-keys** (not injection/ALS), **current-ns**
-  (not "workspace"), **refs** link the agent entity to namespace-scribed
-  entities. A new noun = parallel-system risk.
-- `docs/seon/architecture/` is the SINGLE idealized-system set; this folder is
-  the roadmap chunk, not a second doc system.
-- **Eval:** tier names dev/milestone/test; milestone is aggregate-only. Scorers
-  gate CORRECTNESS (parses ∧ spec validates ∧ runs ∧ right answer) — idiom/style
-  is reported data, never a gate. Established benches over homemade; bespoke
-  only where no standard bench exists (plan-survives-restart has no public
-  equivalent — stays ours). Flakes are classified + excluded from capability
-  means. Long-term planning is the headline row. Bench utility is pod-agnostic;
-  grants/endpoints are cluster config.
-- **Owner rule:** no maintained code in PRD dirs (`src-inspect-ai/` is the
-  precedent — a real top-level package). Env never shadows config. Uniform
-  0-scores → suspect the harness/context first, not a model ceiling.
+- **Boundary:** the eval lane does NOT touch tool/runtime/ctx-engine internals;
+  the tooling lane does NOT touch the harness — it gets the numbers. When a row
+  fails, the eval lane **attributes** it (context defect vs tool defect vs flake
+  vs model) and hands tool defects to the tooling lane **with captured
+  rendered-context evidence**.
+- **Shared surface = the CONTEXT.** A change to *which* content renders (via
+  `config/system.edn`, measured) is eval/context-lane; a change to *how* it
+  renders (the engine, required-keys, auto-run) is tooling-lane. When in doubt,
+  flag in [[coordination]] before editing another lane's file.
+- **Pod ownership (owner rulings):** default 7890 = context/tooling; acme 7980 =
+  typeahead lane. Separate systems — neither lane coordinates restarts/resets of
+  the other's pod; keep your OWN pod on the latest build + context. Never touch
+  another lane's pod, never the JVM track.
 
 ## The load-bearing finding (binds the whole chunk)
 
 **Every check a scorer makes MUST be stated in the agent's context, or the bench
 measures prompt-omission, not capability.** (DeepSeek preflight: 0/2 → ~1.0 on
-the contract sentence alone —
-`docs/prds/diffusion-dynamic-context/research/deepseek-preflight-drives-2026-07-02.md`.)
-This is why the two lanes are one chunk: the eval lane's numbers are only
-meaningful if the tooling lane's context actually says what the task needs.
+the contract sentence alone.) The eval lane's numbers are only meaningful if the
+context actually says what the task needs. The rebuild's corollary (the poison
+principle): omission is recoverable and attributable, inclusion is neither — so
+evidence attaches at INSERTION time and the safest posture is minimal (see the
+inclusion bar in [[context-rebuild]]).
+
+## Settled — do NOT re-litigate
+
+- Chunk name = `agent-ctx`. Vocabulary maps to Clojure primitives:
+  **required-keys** (not injection/ALS), **current-ns** (not "workspace"),
+  **refs** link the agent entity to namespace-scribed entities; **functions**
+  never "verbs"; **`:batch`/`:stream`** never "Mode A/B"; milestones named by
+  the block/namespace they validate (`repl`/`namespaces`/`plan`/`db`/`warnings`/
+  `canvas`/`subagents`/`soul`). A new noun = parallel-system risk.
+- `docs/seon/architecture/` is the SINGLE idealized-system set; this folder is
+  the roadmap chunk, not a second doc system.
+- **Eval:** scorers gate CORRECTNESS (parses ∧ spec validates ∧ runs ∧ right
+  answer) — idiom/style is reported data, never a gate. Established benches over
+  homemade; bespoke only where no public bench exists. Flakes are classified +
+  excluded from capability means. Uniform 0-scores → suspect the harness/context
+  first, not a model ceiling.
+- **No maintained code in PRD dirs** (`src-inspect-ai/` is the precedent — a real
+  top-level package). Env never shadows config; config resolves into the
+  `:seon.config` DB singleton at boot, runtime reads the db.
+- **The cluster is the isolation unit** (owner-ratified): one shared DB + one
+  Node pod + agents; isolation = the process boundary + the wire capability
+  surface. One wire-server JVM hosts ALL clusters' dbs (the shipped registry) —
+  never build a second registry. `POD_MAX_SAMPLES=1` is LOCKED.
+- **Implementation = opus seon-agents against a written spec.** Iterate wording
+  on Spark, gate on DeepSeek; no symptom-side hacks (root cause = wrong context
+  or wrong code).
 
 ## How to run
 
 ```bash
 bin/seon status                       # pods/pids/port (7890 default)
 bin/seon restart pod                  # wait for "auto-boot ready" in logs/pod.log
-bin/seon cluster reset default        # fresh world (shared pod: coordinate)
-bin/seon print-env                    # verify SEON_SHELL/SEON_WEB grants
-bin/gym-scorecard                     # free fitness signal (tooling-lane inner loop)
-# eval suite (once live): src-inspect-ai/README.md run matrix → evals/scorecard.jsonl
+bin/seon cluster reset default        # fresh world — WIPES the store; re-seeds
+bin/gym-scorecard                     # free fitness signal (no LLM spend)
+# eval suite: src-inspect-ai/README.md run matrix → evals/scorecard.jsonl
 # live-drive: (seon.db/with-agent "root" (fn [] (seon.agent/start! {:seon.agent/purpose "…"}))) ; then rearm-wake-triggers!
 ```
 
-Pod ownership: default pod (7890) shared by both lanes — coordinate resets in
-[[coordination]]. acme (7980) = the downstream-proof harness (eval lane's
-disposable-cluster pattern). Never the JVM track.
+`SEON_CONFIG` + the provider key must be exported on every cluster create AND
+restart; check `logs/pod.log` for `SEON-STUB-LLM` after a provider boots (a
+configured provider with its key unset drives on the stub). `cluster reset
+default` after a context/block change to re-seed the shared pod.
 
-## Good practices (structurally enforced — inherited, not restated here)
+## Pointer index
 
-Read `docs/seon/architecture/architecture.md` + `context.md` first; the
-`src/seon/CLAUDE.md` ONE-mechanism table auto-loads on any `src/` edit. Live-drive
-don't infer; slow-is-fast (read `reference-code/`, verify in the REPL);
-errors-as-values, derive-don't-store, one-mechanism-in-place; commit per unit
-with EXPLICIT pathspecs (peers share the tree); `bin/test-cljs` green once per
-unit; `cluster reset default` after a context/verb change.
-
-## Metadata — the pointer index (docs · research · files-to-update · tests)
-
+- **Plan of record:** [[context-rebuild]] (the milestone table, target
+  block set, idea inventory, inclusion bar, cutover status) · **we-are-here:**
+  [[roadmap]] · **cross-lane channel:** [[coordination]]
 - **Architecture (idealized system):** [[architecture]] · [[context]] ·
-  [[data-model]] · [[agent-runtime]] · [[ui]] · [[observability]] · [[toolkit]] ·
-  [[laws]]
-- **Eval-lane docs:** [[eval-design]] (the spec) · [[eval-lane-plan]] (work
-  plan A–E + the boundary) · [[eval-CLAUDE-notes]] (absorbed above) ·
-  [[research/tool-surface-survey-2026-07-02]] (per-row readiness + flake taxonomy)
-- **Tooling-lane design:** [[research/explicit-deps-injection-2026-07-02]] ·
-  the Phase-1 patch in `scratchpad/agent-scope-carryover/`
-- **Harness (code — eval lane, do not maintain from the tooling lane):**
-  `src-inspect-ai/` (`seon_inspect.solver`, `oracle_scorers.py`, `catalog.py`,
-  `README.md` run matrix)
-- **Issue notes to update as they resolve:**
-  `docs/seon/orchestrator/issues/tx-feed-pump-timeouts.md` (pub-socket
-  migration + transact-timeout) · `docs/seon/components/capability-gates.md`
-  (gate table)
-- **Evidence base:** the DeepSeek preflight battery (7/7) ·
-  `docs/prds/agent-fsm/roadmap.md` (the shipped-2026-07-02 capstone this chunk
-  builds on)
-- **Ledger / shared truth:** `evals/scorecard.jsonl` · **channel:** [[coordination]]
-
-## Build order
-
-- **Tooling lane:** apply the Phase-1 required-key patch → register
-  `:seon.render/at` + resolve `my.plan` skip-syms → current-ns render-fn
-  auto-run (block/tile twins) → `my.*` entity-ref composition (`my.plan` worked
-  example) → canvas = last-updated → then the queued tool defects (my.kb empty
-  render, recall visibility) + the pub-socket migration.
-- **Eval lane:** calibration run → dataset freeze (three-way splits +
-  `datasets.lock` + canary GUIDs) → tool-row generators → planning bench
-  re-ground on the new `my.plan` → first dev pass → the ledger + `pass^k`
-  regression alarm → cadence + per-row context A/Bs.
-
-Each lands with a live DeepSeek drive / an eval row proving it — not inference.
+  [[data-model]] · [[agent-runtime]] · [[ui]] · [[observability]] · [[toolkit]]
+- **Eval-lane docs:** [[eval-design]] (the spec) · [[eval-lane-plan]] (work plan
+  + the boundary) · harness code in `src-inspect-ai/` (do not maintain from the
+  tooling lane)
+- **Audits (2026-07-11):** [[research/claude-md-audit-2026-07-11]] ·
+  [[research/vocabulary-audit-2026-07-11]]
+- **Evidence ledger:** `evals/runs/2026-07-10-minimal-buildup/README.md`
+  (per-drive milestone evidence) · `evals/scorecard.jsonl` (the shared truth)
+- **Tracked open work:** `docs/seon/orchestrator/issues/dual-code-paths-registry.md`
+  (the ONE list of dual-code-path / complexity-artifact rows; closes only with
+  the fixing sha)

@@ -213,7 +213,7 @@ Revert point if the experiment goes sideways: `c84e8fc`.
   `bin/test-cljs` **PASS (73s)** incl. the new `prompt-and-inspector-are-byte-identical` test.
 - **Flagged follow-ups (minor/forward):** turn has no tx-basis `t` yet (so exact
   `db-as-of(t)` re-render of "what the agent saw at turn N" is future); `inspector/snapshot`
-  still uses the filtered `agent-view` for the tile/state (equivalent today — own entity);
+  still uses the filtered `agent-view` for the canvas/state (equivalent today — own entity);
   `prompt-file` kept (the sanctioned audit-exception / gym evidence hook).
 - **Commit:** `2b9a9c4`
 
@@ -311,7 +311,7 @@ Revert point if the experiment goes sideways: `c84e8fc`.
 
 - **Move:** refine (the "one mechanism" north star — kill the last divergent db source).
 - **Did:** rewired `inspector/snapshot` from the `d/filter`ed `agent-view` to the one unfiltered
-  `@db/*conn*` (the tile/state read the agent's OWN entity — behavior unchanged, but now ONE db
+  `@db/*conn*` (the canvas/state read the agent's OWN entity — behavior unchanged, but now ONE db
   source matching the loop + the context pane). **DELETED `src/seon/agent_view.cljs`** (grep
   confirmed zero remaining callers — it was the only divergent-db mechanism left). Retargeted 3
   stale comments (inspector `on-tx`, client, db/internal) that named the deleted ns.

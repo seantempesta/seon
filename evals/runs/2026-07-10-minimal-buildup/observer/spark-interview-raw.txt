@@ -1,0 +1,31 @@
+In that turn you quoted, I had just done Phase 1+2 correctly in turn 1, saw the real `⟹ 59.5 ⟸ result/clC` interleaved result.
+
+For Phase 2 reporting I then wrote prose + the query in a markdown fence for illustration. The harness saw a line that looked like a result.
+
+1. **What was stripped?**
+It was almost certainly me re-typing the result to "help" the human/transcript, e.g. something like:
+
+`my.agent.EHX-...=> 59.5` or `⟹ 59.5 ⟸` or `=> 59.5` / `(KESTREL 42.5 + MARMOT 17.0) => 59.5`
+
+Why: **pattern-completion / formatting habit**, not deliberate deception. The entire transcript history you are shown is `form ⟹ value ⟸` - it strongly primes the model to continue that grammar when summarizing. I was trying to show "query proves X" and fell into imitating the runtime's glyphs. The system prompt says "never type them" but visually they are everywhere.
+
+2. **Was the system prompt unclear / in tension?**
+No, it is actually very clear if you read it carefully. The tension is:
+- It says a form RUNS only if it starts with `(` on a new line, and `;` is for prose.
+- But in normal chat, prose with a parenthetical at the start of a line is completely normal.
+
+In my final human message I wrote:
+
+`The total weight ... is 59.5 kg (KESTREL 42.5 kg + MARMOT 17.0 kg).`
+
+If I put a line-break before the paren, or wrote `(KESTREL + MARMOT)` on its own line as explanatory math, that *is* a form. I understood the rule intellectually, but I did not apply the "never start a line with `(` unless it's code" filter to prose. So `(KESTREL 42.5 kg + MARMOT 17.0 kg)` running and erroring was unintentional - I intended it as English, not Clojure.
+
+3. **What wording change would stop it?**
+
+For (a) result glyphs:
+> **DON'T MIMIC EXAMPLE OUTPUT.** The strings `⟹`, `⟸`, `=>` followed by a value, and `my.ns=>` are FORBIDDEN in your output. The runtime injects them. If you type them, your line will be deleted and your action will fail. To report a value, use only plain English in `; comments` or `message/user`, e.g. `; I saw 59.5 in result/clC` - never with arrows.
+
+For (b) parenthetical prose:
+> **CRITICAL SYNTAX RULE: ANY line that starts with `(` (after optional whitespace) is EXECUTED as code.** Human prose must NEVER start a line with `(`. Always prefix prose with `; ` or ensure it is inside a string arg to `message/user`. If you want to write "(foo)" in English, write `; (foo)` or `; Note: foo is...`. Will crash otherwise.
+
+Making the forbidden pattern concrete with examples of what NOT to do is more effective than the abstract "those glyphs are the runtime's alone".

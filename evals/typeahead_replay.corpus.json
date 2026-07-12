@@ -1,0 +1,1721 @@
+{
+ "generated_at": "2026-07-11T16:31:45Z",
+ "generator": "seon_inspect.typeahead_corpus",
+ "cluster": "acme",
+ "n": 10,
+ "failures": [],
+ "samples": [
+  {
+   "id": "r1",
+   "rung": "repl",
+   "intent": "Compute the sum of squares of the integers 1 through 12 and reply with just the number.",
+   "warmups": [
+    "Reply with the single word ready."
+   ],
+   "restart_between": false,
+   "agent_id": "RKr-2607111120",
+   "replay": {
+    "prompt_blob": "724433c33027b9d2579d3ff605247fabc36c1bdb6aa3be4e92ad2d3fec330d56",
+    "prompt_chars": 148420,
+    "turn_at_ms": 1783783285995,
+    "reply_blob": "73d8c76462c86188042a8ef6ce72de0e49e452a901bf9f172af6e65ab59782d4"
+   },
+   "drive_reply": "650",
+   "drive_model_config": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
+    "temperature": 0.7,
+    "max_tokens": 4096,
+    "thinking": "false"
+   },
+   "sections": {
+    "recent-verbs": ";;; ┌─ recent-verbs ─\n; recent verbs — the fns you have been calling, most-used first.\n; A MENU, never a mandate: select an entry by outputting its glyph\n; alone (e.g. ①), or ignore this and write any Clojure — both work.\n; Example: to select entry ①, output the single character ① and\n; nothing else — its call template is expanded for you to fill.\n; ① (seon.agent.message/user [content] …) — Send a message to your human — `message!` with `to` := THE one user.\n; ② (seon.agent.lifecycle/complete ([result] …) ([result result-ref] …)) — Finish the calling agent's work; close the open run `:completed`.\n; ③ (my.plan/done! [{:my.plan/keys [id]}] …) — Mark a step done; may unblock its dependents next turn.\n; toolkit — more verbs from your required namespaces:\n; ④ (seon.db/query [& args] …) — Run a Datalog query, returning the result set.\n; ⑤ (seon.agent.lifecycle/wait [note] …) — Park the calling agent: close its open run `:waited` → derived `:idle`.\n; ⑥ (acme.helpers/greet [who] …) — A specced helper so acme.helpers owns at least one indexed fn.\n; ⑦ (my.blob/concat! [{:my.blob/keys [hashes media]}] …) — Join stored blobs, in order, into ONE new canonical blob.\n;;; └─ end recent-verbs ─",
+    "plan-ledger": ";;; ┌─ plan-ledger ─\n; plan ledger — your plan's open steps (done steps are dropped;\n; the full tree stays queryable via my.plan/tree). ▶ = the step\n; you are on, ☐ = open. Select one by outputting its glyph alone,\n; or ignore this and write any Clojure — both work.\n; ☐ ① Compute the sum of squares of the integers 1 through 12 and reply with just the …\n;;; └─ end plan-ledger ─"
+   },
+   "offers": [
+    {
+     "glyph": "①",
+     "label": "seon.agent.message/user [content] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.message/user "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "②",
+     "label": "seon.agent.lifecycle/complete ([result] …) ([result result-ref] …)",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.lifecycle/complete "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "③",
+     "label": "my.plan/done! [{:my.plan/keys [id]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.plan/done! "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "④",
+     "label": "seon.db/query [& args] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.db/query "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑤",
+     "label": "seon.agent.lifecycle/wait [note] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.lifecycle/wait "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑥",
+     "label": "acme.helpers/greet [who] …",
+     "template": [
+      [
+       "clamp",
+       "(acme.helpers/greet "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑦",
+     "label": "my.blob/concat! [{:my.blob/keys [hashes media]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.blob/concat! "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    }
+   ],
+   "contract_nses": [],
+   "predicate": {
+    "kind": "eval-answer",
+    "expect": [
+     "650"
+    ]
+   },
+   "replay_reply": "I need to compute the sum of squares of integers 1 through 12 and reply with just the number. Let me compute this and send the answer.\n\n```clojure\n; Sum of squares: 1² + 2² + ... + 12² = 1 + 4 + 9 + 16 + 25 + 36 + 49 + 64 + 81 + 100 + 121 + 144 = 650\n(message/user \"650\")\n"
+  },
+  {
+   "id": "r2",
+   "rung": "repl",
+   "intent": "Compute 21*2 plus the remainder of 100 divided by 7; reply with just the number.",
+   "warmups": [
+    "Reply with the single word ready."
+   ],
+   "restart_between": false,
+   "agent_id": "vrw-2607111122",
+   "replay": {
+    "prompt_blob": "b97913b5a8b93ce581ffb166ee5f037b092ba6b93b77397e0670bc549bb63e33",
+    "prompt_chars": 147276,
+    "turn_at_ms": 1783783348916,
+    "reply_blob": "d6d8f3127e76cf1a3494340608d5cd8ae5c135c24ffc1adcd69c948f670f5f03"
+   },
+   "drive_reply": "44",
+   "drive_model_config": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
+    "temperature": 0.7,
+    "max_tokens": 4096,
+    "thinking": "false"
+   },
+   "sections": {
+    "recent-verbs": ";;; ┌─ recent-verbs ─\n; recent verbs — the fns you have been calling, most-used first.\n; A MENU, never a mandate: select an entry by outputting its glyph\n; alone (e.g. ①), or ignore this and write any Clojure — both work.\n; Example: to select entry ①, output the single character ① and\n; nothing else — its call template is expanded for you to fill.\n; ① (seon.agent.lifecycle/complete ([result] …) ([result result-ref] …)) — Finish the calling agent's work; close the open run `:completed`.\n; ② (seon.agent.message/user [content] …) — Send a message to your human — `message!` with `to` := THE one user.\n; toolkit — more verbs from your required namespaces:\n; ③ (seon.db/query [& args] …) — Run a Datalog query, returning the result set.\n; ④ (my.plan/done! [{:my.plan/keys [id]}] …) — Mark a step done; may unblock its dependents next turn.\n; ⑤ (seon.agent.lifecycle/wait [note] …) — Park the calling agent: close its open run `:waited` → derived `:idle`.\n; ⑥ (acme.helpers/greet [who] …) — A specced helper so acme.helpers owns at least one indexed fn.\n;;; └─ end recent-verbs ─",
+    "plan-ledger": ";;; ┌─ plan-ledger ─\n; plan ledger — your plan's open steps (done steps are dropped;\n; the full tree stays queryable via my.plan/tree). ▶ = the step\n; you are on, ☐ = open. Select one by outputting its glyph alone,\n; or ignore this and write any Clojure — both work.\n; ☐ ① Reply with the single word ready.\n; ☐ ② Compute 21*2 plus the remainder of 100 divided by 7; reply with just the number.\n;;; └─ end plan-ledger ─"
+   },
+   "offers": [
+    {
+     "glyph": "①",
+     "label": "seon.agent.lifecycle/complete ([result] …) ([result result-ref] …)",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.lifecycle/complete "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "②",
+     "label": "seon.agent.message/user [content] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.message/user "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "③",
+     "label": "seon.db/query [& args] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.db/query "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "④",
+     "label": "my.plan/done! [{:my.plan/keys [id]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.plan/done! "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑤",
+     "label": "seon.agent.lifecycle/wait [note] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.lifecycle/wait "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑥",
+     "label": "acme.helpers/greet [who] …",
+     "template": [
+      [
+       "clamp",
+       "(acme.helpers/greet "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    }
+   ],
+   "contract_nses": [],
+   "predicate": {
+    "kind": "eval-answer",
+    "expect": [
+     "44"
+    ]
+   },
+   "replay_reply": ";; 21*2 = 42, 100/7 remainder = 2 (7*14=98, 100-98=2), 42+2=44\n(message/user \"44\")"
+  },
+  {
+   "id": "r3",
+   "rung": "repl",
+   "intent": "Define a function mean that averages a collection of numbers, verify it on [1 2 3 4], and reply with the verified result.",
+   "warmups": [
+    "Reply with the single word ready."
+   ],
+   "restart_between": false,
+   "agent_id": "caF-2607111122",
+   "replay": {
+    "prompt_blob": "ca7a0dab481590b8acb2da496a8cc0f3b74f90733814ad23fe3f35e5c1b5cdcf",
+    "prompt_chars": 148260,
+    "turn_at_ms": 1783783378922,
+    "reply_blob": "fc46dd31e0dff876acadb5b9af8a8f59f80c3a6395376d67105407fbfef582ff"
+   },
+   "drive_reply": "The mean of [1 2 3 4] is 2.5.",
+   "drive_model_config": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
+    "temperature": 0.7,
+    "max_tokens": 4096,
+    "thinking": "false"
+   },
+   "sections": {
+    "recent-verbs": ";;; ┌─ recent-verbs ─\n; recent verbs — the fns you have been calling, most-used first.\n; A MENU, never a mandate: select an entry by outputting its glyph\n; alone (e.g. ①), or ignore this and write any Clojure — both work.\n; Example: to select entry ①, output the single character ① and\n; nothing else — its call template is expanded for you to fill.\n; ① (seon.agent.lifecycle/complete ([result] …) ([result result-ref] …)) — Finish the calling agent's work; close the open run `:completed`.\n; ② (my.plan/done! [{:my.plan/keys [id]}] …) — Mark a step done; may unblock its dependents next turn.\n; ③ (seon.agent.message/user [content] …) — Send a message to your human — `message!` with `to` := THE one user.\n; toolkit — more verbs from your required namespaces:\n; ④ (seon.db/query [& args] …) — Run a Datalog query, returning the result set.\n; ⑤ (seon.agent.lifecycle/wait [note] …) — Park the calling agent: close its open run `:waited` → derived `:idle`.\n; ⑥ (acme.helpers/greet [who] …) — A specced helper so acme.helpers owns at least one indexed fn.\n; ⑦ (my.blob/concat! [{:my.blob/keys [hashes media]}] …) — Join stored blobs, in order, into ONE new canonical blob.\n;;; └─ end recent-verbs ─",
+    "plan-ledger": ";;; ┌─ plan-ledger ─\n; plan ledger — your plan's open steps (done steps are dropped;\n; the full tree stays queryable via my.plan/tree). ▶ = the step\n; you are on, ☐ = open. Select one by outputting its glyph alone,\n; or ignore this and write any Clojure — both work.\n; ☐ ① Define a function mean that averages a collection of numbers, verify it on [1 2 …\n;;; └─ end plan-ledger ─"
+   },
+   "offers": [
+    {
+     "glyph": "①",
+     "label": "seon.agent.lifecycle/complete ([result] …) ([result result-ref] …)",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.lifecycle/complete "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "②",
+     "label": "my.plan/done! [{:my.plan/keys [id]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.plan/done! "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "③",
+     "label": "seon.agent.message/user [content] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.message/user "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "④",
+     "label": "seon.db/query [& args] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.db/query "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑤",
+     "label": "seon.agent.lifecycle/wait [note] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.lifecycle/wait "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑥",
+     "label": "acme.helpers/greet [who] …",
+     "template": [
+      [
+       "clamp",
+       "(acme.helpers/greet "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑦",
+     "label": "my.blob/concat! [{:my.blob/keys [hashes media]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.blob/concat! "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    }
+   ],
+   "contract_nses": [],
+   "predicate": {
+    "kind": "eval-answer",
+    "expect": [
+     "5/2",
+     "2.5"
+    ]
+   },
+   "replay_reply": ";;; ◀ from user @ 11:22:57 [zOZ-2607111122] (NEW — unanswered; respond to this) — \"Define a function mean that averages a collection of numbers, verify it on [1 2 3 4], and reply with the verified result.\"\n\n; my.agent.caF-2607111122 · turn 4 · loop 0/60 · running · 2026-07-11 11:22:58 America/New_York · agent caF-2607111122\nmy.agent.caF-2607111122=> \n; The user wants me to define a mean function, verify it on [1 2 3 4],\n; and reply with the result. I'll define the fn in my workspace, test it,\n; then message the result.\n\n(defn mean\n  \"Compute the arithmetic mean of a collection of numbers.\"\n  {:malli/schema [:=> [:cat [:sequential number?]] number?]}\n  [xs]\n  (/ (reduce + xs) (count xs)))"
+  },
+  {
+   "id": "m1",
+   "rung": "movement",
+   "intent": "Find which namespace defines a function named tagline and reply with the namespace name.",
+   "warmups": [
+    "Reply with the single word ready."
+   ],
+   "restart_between": false,
+   "agent_id": "UHA-2607111123",
+   "replay": {
+    "prompt_blob": "e73cd3013e2e512e98b2e871f3b973fca4c3bdd2a9df011428693ee8e3d58612",
+    "prompt_chars": 147217,
+    "turn_at_ms": 1783783428530,
+    "reply_blob": "8485e9464deeafd2b7f9b48273383eba2d4a27fe8ab2fd12ce5b8b55278fde9c"
+   },
+   "drive_reply": "acme.brand",
+   "drive_model_config": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
+    "temperature": 0.7,
+    "max_tokens": 4096,
+    "thinking": "false"
+   },
+   "sections": {
+    "recent-verbs": ";;; ┌─ recent-verbs ─\n; recent verbs — the fns you have been calling, most-used first.\n; A MENU, never a mandate: select an entry by outputting its glyph\n; alone (e.g. ①), or ignore this and write any Clojure — both work.\n; Example: to select entry ①, output the single character ① and\n; nothing else — its call template is expanded for you to fill.\n; ① (seon.agent.lifecycle/complete ([result] …) ([result result-ref] …)) — Finish the calling agent's work; close the open run `:completed`.\n; ② (seon.agent.message/user [content] …) — Send a message to your human — `message!` with `to` := THE one user.\n; toolkit — more verbs from your required namespaces:\n; ③ (my.plan/done! [{:my.plan/keys [id]}] …) — Mark a step done; may unblock its dependents next turn.\n; ④ (seon.db/query [& args] …) — Run a Datalog query, returning the result set.\n; ⑤ (seon.agent.lifecycle/wait [note] …) — Park the calling agent: close its open run `:waited` → derived `:idle`.\n; ⑥ (acme.helpers/greet [who] …) — A specced helper so acme.helpers owns at least one indexed fn.\n;;; └─ end recent-verbs ─",
+    "plan-ledger": ";;; ┌─ plan-ledger ─\n; plan ledger — your plan's open steps (done steps are dropped;\n; the full tree stays queryable via my.plan/tree). ▶ = the step\n; you are on, ☐ = open. Select one by outputting its glyph alone,\n; or ignore this and write any Clojure — both work.\n; ☐ ① Reply with the single word ready.\n; ☐ ② Find which namespace defines a function named tagline and reply with the namespa…\n;;; └─ end plan-ledger ─",
+    "namespace seon.agent.search": ";;; ┌─ namespace seon.agent.search ─\n(register! ::by-file [:vector ::file-row])\n(register! ::by-ns [:vector ::ns-row])\n(register! ::case-insensitive? :boolean)\n(register! ::context-lines [:int {:min 0, :max 10}])\n(register! ::context? :boolean)\n(register! ::count :int)\n(register! ::error :string)\n(register! ::file-count :int)\n(register! ::file-row [:map [::path ::path] [::count ::count] [::line-number ::line-number] [::line-text ::line-text]])\n(register! ::full? :boolean)\n(register! ::glob :string)\n(register! ::graph-match [:map [::ns ::ns] [::member ::member] [::target ::target] [::line-text ::line-text]])\n(register! ::graph-matches [:vector ::graph-match])\n(register! ::grep-graph-request [:map [::pattern ::pattern] [::targets {:optional true} ::targets] [::max-results {:optional true} ::max-results] [::full? {:optional true} ::full?] [::case-insensitive? {:optional true} ::case-insensitive?]])\n(register! ::grep-graph-response [:map [::ok? ::ok?] [::match-count {:optional true} ::match-count] [::ns-count {:optional true} ::ns-count] [::returned {:optional true} ::returned] [::by-ns {:optional true} ::by-ns] [::matches {:optional true} ::graph-matches] [::truncated? {:optional true} ::truncated?] [::hint {:optional true} ::hint] [::error {:optional true} ::error] [::raw-error {:optional true} ::raw-error]])\n(register! ::grep-request [:map [::pattern ::pattern] [::paths {:optional true} ::paths] [::glob {:optional true} ::glob] [::max-results {:optional true} ::max-results] [::full? {:optional true} ::full?] [::context-lines {:optional true} ::context-lines] [::multiline? {:optional true} ::multiline?] [::case-insensitive? {:optional true} ::case-insensitive?]])\n(register! ::grep-response [:map [::ok? ::ok?] [::match-count {:optional true} ::match-count] [::file-count {:optional true} ::file-count] [::returned {:optional true} ::returned] [::by-file {:optional true} ::by-file] [::matches {:optional true} ::matches] [::truncated? {:optional true} ::truncated?] [::hint {:optional true} ::hint] [::error {:optional true} ::error] [::raw-error {:optional true} ::raw-error]])\n(register! ::hint :string)\n(register! ::line-number :int)\n(register! ::line-text :string)\n(register! ::match [:map [::path ::path] [::line-number ::line-number] [::line-text ::line-text] [::context? {:optional true} ::context?]])\n(register! ::match-count :int)\n(register! ::matches [:vector ::match])\n(register! ::max-results :int)\n(register! ::member :string)\n(register! ::multiline? :boolean)\n(register! ::ns :string)\n(register! ::ns-count :int)\n(register! ::ns-row [:map [::ns ::ns] [::count ::count] [::member ::member] [::target ::target] [::line-text ::line-text]])\n(register! ::ok? :boolean)\n(register! ::path :string)\n(register! ::paths [:vector :string])\n(register! ::pattern [:string {:min 1}])\n(register! ::raw-error :string)\n(register! ::returned :int)\n(register! ::target :keyword)\n(register! ::targets [:vector [:enum :seon.fn :seon.schema :seon.ns :seon.eval]])\n(register! ::truncated? :boolean)\n\n; fns (body elided):\n(defn grep \"Search file CONTENTS under the seon.agent.fs allowed roots.\" {:malli/schema [:=> [:cat ::grep-request] ::grep-response]} [{::keys [pattern paths glob max-results full? context-lines multiline? case-insensitive?], :or {max-results in/default-max-results}}] …)\n(defn grep-graph \"Text-search the LIVE PROGRAM GRAPH — the literal counterpart of `grep`.\" {:malli/schema [:=> [:cat ::grep-graph-request] ::grep-graph-response]} [{::keys [pattern targets max-results full? case-insensitive?], :or {max-results in/default-max-results, targets in/default-graph-targets}}] …)\n;;; └─ end namespace seon.agent.search ─",
+    "namespace seon.db": ";;; ┌─ namespace seon.db ─\n(register! ::agent-id ::id)\n(register! ::attr-count :int)\n(register! ::attr-ns :keyword)\n(register! ::attr-ns-count :int)\n(register! ::attr-ns-set [:set ::attr-ns])\n(register! ::attrs [:map-of :keyword :int])\n(register! ::cas-attr :keyword)\n(register! ::cas-op [:vector :any])\n(register! ::cas-ref :any)\n(register! ::cas-value :any)\n(register! ::conn :any)\n(register! ::datom [:map [::e :int] [::a :keyword] [::v :any] [::tx :int] [::added? :boolean]])\n(register! ::datom-count :int)\n(register! ::db :any)\n(register! ::db-val map?)\n(register! ::entity-request [:map [::ref :any] [::db {:optional true} :any] [::conn {:optional true} ::conn]])\n(register! ::error [:map [:seon.error/message :string] [:seon.error/data {:optional true} :map] [:seon.error/ex-data {:optional true} :map] [:seon.error/stack {:optional true} :string] [:seon.error/cause {:optional true} :map] [:seon.error/raw {:optional true} :any] [:seon.error/truncated {:optional true} :boolean]])\n(register! ::eval-id ::id)\n(register! ::handler-input [:map [::tx-report :any] [::db :any] [::db-before :any] [::datoms [:vector ::datom]] [::attr-index [:map-of :keyword [:vector ::datom]]] [::trigger {:optional true} :any]])\n(register! ::id [:string {:min 14, :max 14}])\n(register! ::identity-pair [:tuple :keyword :any])\n(register! ::inventory [:map [::attr-groups [:vector ::inventory-row]] [::attr-ns-count ::attr-ns-count] [::attr-count ::attr-count] [::datom-count ::datom-count] [::topology ::topology]])\n(register! ::inventory-row [:map [::attr-ns ::attr-ns] [::attrs ::attrs]])\n(register! ::listen-request [:map [::handler fn?] [::key {:optional true} :any] [::conn {:optional true} ::conn]])\n(register! ::listen-response [:map [::key :any]])\n(register! ::lookup-ref-value [:or :string :uuid :keyword :int])\n(register! ::managed-identities [:map-of :int [:set ::identity-pair]])\n(register! ::managed-identities-request [:map [::managed-scope ::managed-scope] [::db {:optional true} ::db] [::conn {:optional true} ::conn]])\n(register! ::managed-scope [:set ::origin])\n(register! ::namespace :keyword)\n(register! ::opts :map)\n(register! ::origin [:enum :user :agent :system :replay :core-seed :config :test-run])\n(register! ::pull-request [:map [::pull-pattern :any] [::ref :any] [::db {:optional true} :any] [::conn {:optional true} ::conn]])\n(register! ::query-request [:map [::query :any] [::args {:optional true} [:vector :any]] [::db {:optional true} :any] [::conn {:optional true} ::conn]])\n(register! ::ref [:or :int :string [:tuple :keyword ::lookup-ref-value]])\n(register! ::replay? :boolean)\n(register! ::resume-marker? :boolean)\n(register! ::return-report? :boolean)\n(register! ::row-ids [:set :int])\n(register! ::session-id ::id)\n(register! ::system? :boolean)\n(register! ::thunk :any)\n(register! ::time-point :any)\n(register! ::topology :string)\n(register! ::transact-request [:map [::tx-data ::tx-data] [::opts {:optional true} ::opts] [::conn {:optional true} ::conn] [::return-report? {:optional true} ::return-report?]])\n(register! ::transact-response [:or [:map [::ok? [:= true]] [::tempids [:map-of :any :int]] [::tx :int] [::tx-count :int] [::added :int] [::retracted :int] [::tx-report {:optional true} :any]] [:map [::ok? [:= false]] [::error ::error] [::raw-error {:optional true} :string]]])\n(register! ::turn-id ::id)\n(register! ::tx-context :map)\n(register! ::tx-data [:vector :any])\n(register! ::tx-meta :map)\n(register! ::unlisten-request [:map [::key :any] [::conn {:optional true} ::conn]])\n(register! ::unlisten-response [:map [::ok? :boolean]])\n\n; fns (body elided):\n(defn as-of \"A db value as it was AT `t` — time-travel for reads.\" {:malli/schema [:function [:=> [:cat ::time-point] :any] [:=> [:catn [::db ::db-val] [::time-point ::time-point]] :any]]} ([t] …) ([db t] …))\n(defn assert-preconditions! \"Validate boot preconditions; throws ex-info on failure.\" {:malli/schema [:function [:=> :cat :boolean] [:=> [:catn [::opts [:map [::conn {:optional true} ::conn]]]] :boolean]]} ([] …) ([{::keys [conn], :or {conn *conn*}}] …))\n(defn basis-t \"The basis tx-id of a db value — the latest tx it reflects.\" {:malli/schema [:function [:=> :cat ::time-point] [:=> [:catn [::db ::db-val]] ::time-point]]} ([] …) ([db] …))\n(defn bootstrap-row-ids \"Entity ids whose first assertion carries a managed-core origin.\" {:malli/schema [:=> [:catn [::db ::db-val]] ::row-ids]} [db] …)\n(defn cas-assert \"Build a no-op compare-and-swap op asserting `ref`'s `attr` is `value`.\" {:malli/schema [:=> [:catn [::cas-ref ::cas-ref] [::cas-attr ::cas-attr] [::cas-value ::cas-value]] ::cas-op]} ([ref attr value] …) ([:db.fn/cas ref attr value value] …))\n(defn core-attr-namespaces \"Attr namespaces whose `:seon.schema/key` row is a bootstrap row.\" {:malli/schema [:function [:=> [:catn [::db ::db-val]] ::attr-ns-set] [:=> [:catn [::db ::db-val] [::bootstrap-rows ::row-ids]] ::attr-ns-set]]} ([db] …) ([db bootstrap-rows] …))\n(defn current-agent-id \"The active agent-id (string), or nil outside a [[with-agent]] scope.\" {:malli/schema [:=> :cat [:maybe :string]]} [] …)\n(defn current-tx-context \"The active tx-context map, or nil outside [[with-tx-context]].\" {:malli/schema [:=> :cat [:maybe :map]]} [] …)\n(defn decode-edn-value \"Read-side inverse of the bridge's mixed-`:or` EDN-string storage.\" {:malli/schema [:=> [:catn [::attr :keyword] [::value :any]] :any]} [attr v] …)\n(defn entity \"Look up an entity by eid or lookup-ref, as a plain map (sync).\" {:malli/schema [:function [:=> [:cat [:or ::entity-request :any]] :any] [:=> [:catn [::db ::db-val] [::eid :any]] :any]]} ([req] …) ([db eid] …))\n(defn entity-lazy \"INTERNAL: return the RAW datahike Entity for a ref (lazy, map-like).\" {:malli/schema [:function [:=> [:cat [:or ::entity-request :any]] :any] [:=> [:catn [::db ::db-val] [::eid :any]] :any]]} ([req] …) ([db eid] …))\n(defn history \"A db value spanning ALL of time — assertions and retractions.\" {:malli/schema [:function [:=> :cat :any] [:=> [:catn [::db ::db-val]] :any]]} ([] …) ([db] …))\n(defn id->time-str \"The YYMMDDHHmm portion of an id, for time sorting/comparison.\" {:malli/schema [:=> [:catn [::id [:maybe :string]]] [:maybe :string]]} [id] …)\n(defn installed-schema \"The datahike schema map actually INSTALLED on `db`.\" {:malli/schema [:=> [:catn [::db :any]] :map]} [db] …)\n(defn listen! \"Install a tx-listener — safe by default, never crashes the pod.\" {:malli/schema [:=> [:cat ::listen-request] ::listen-response]} [{::keys [handler key conn], :or {conn *conn*}}] …)\n(defn listen-async! \"Intent-revealing alias for [[listen!]] (Promise handler, fire-and-forget).\" {:malli/schema [:=> [:cat ::listen-request] ::listen-response]} [request] …)\n(defn listen-sync! \"Intent-revealing alias for [[listen!]] (sync handler, back-pressure).\" {:malli/schema [:=> [:cat ::listen-request] ::listen-response]} [request] …)\n(defn malli->datahike-schema \"Derive datahike attr declarations from seon.schema registrations.\" {:malli/schema [:=> [:catn [::attr-keys [:sequential :keyword]]] [:vector :any]]} [attr-keys] …)\n(defn managed-identities \"Map of `managed-eid → #{[identity-attr identity-value] …}`.\" {:malli/schema [:=> [:cat ::managed-identities-request] ::managed-identities]} [{::keys [managed-scope conn], db ::db, :or {conn *conn*}}] …)\n(defn new-id! \"Fresh 14-char LLM-readable id, `<3-letter-random>-<YYMMDDHHmm>`.\" {:malli/schema [:=> :cat ::id]} [] …)\n(defn pull \"Pull an entity by ref using a pull pattern (sync).\" {:malli/schema [:function [:=> [:cat ::pull-request] :any] [:=> [:catn [::selector [:vector :any]] [::eid :any]] :any] [:=> [:catn [::db ::db-val] [::selector [:vector :any]] [::eid :any]] :any]]} ([req] …) ([selector eid] …) ([db selector eid] …))\n(defn query \"Run a Datalog query, returning the result set.\" {:malli/schema [:function [:=> [:cat [:or [:vector :any] :map :string]] :any] [:=> [:catn [::query [:or [:vector :any] :map :string]] [::rest [:+ :any]]] :any]]} [& args] …)\n(defn since \"The complement of [[as-of]] — a db value of datoms added after `t`.\" {:malli/schema [:function [:=> [:cat ::time-point] :any] [:=> [:catn [::db ::db-val] [::time-point ::time-point]] :any]]} ([t] …) ([db t] …))\n(defn store-inventory \"Discovery call: which attributes hold data in this store right now.\" {:malli/schema [:function [:=> :cat ::inventory] [:=> [:cat [:map [::db {:optional true} :any] [::conn {:optional true} ::conn] [::system? {:optional true} ::system?]]] ::inventory]]} ([] …) ([{::keys [db conn system?], :or {conn *conn*}}] …))\n(defn transact! \"Commit tx-data — forwarded to the JVM writer, returns an envelope.\" {:malli/schema [:function [:=> [:cat ::transact-request] ::transact-response] [:=> [:catn [::conn ::conn] [::tx-data ::tx-data]] ::transact-response] [:=> [:catn [::conn ::conn] [::tx-data ::tx-data] [::tx-meta ::tx-meta]] ::transact-response]]} [& call-args] …)\n(defn tx-meta-datahike-schema \"Datahike schema entries for the 7 `::*` tx-meta attrs.\" {:malli/schema [:=> :cat [:vector :any]]} [] …)\n(defn unlisten! \"Remove a listener by key; returns `{::ok? true}`.\" {:malli/schema [:=> [:cat ::unlisten-request] ::unlisten-response]} [{::keys [key conn], :or {conn *conn*}}] …)\n(defn with-agent \"Establish an agent-id scope for the dynamic extent of `f`.\" {:malli/schema [:=> [:catn [::agent-id :string] [::thunk ::thunk]] :any]} [agent-id f] …)\n(defn with-tx-context \"Establish a tx-context for the dynamic extent of `f`.\" {:malli/schema [:=> [:catn [::tx-context ::tx-context] [::thunk ::thunk]] :any]} [ctx-map f] …)\n(defn without-agent \"Clear the agent-id scope for the dynamic extent of `f`.\" {:malli/schema [:=> [:catn [::thunk ::thunk]] :any]} [f] …)\n;;; └─ end namespace seon.db ─"
+   },
+   "offers": [
+    {
+     "glyph": "①",
+     "label": "seon.agent.lifecycle/complete ([result] …) ([result result-ref] …)",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.lifecycle/complete "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "②",
+     "label": "seon.agent.message/user [content] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.message/user "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "③",
+     "label": "my.plan/done! [{:my.plan/keys [id]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.plan/done! "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "④",
+     "label": "seon.db/query [& args] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.db/query "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑤",
+     "label": "seon.agent.lifecycle/wait [note] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.lifecycle/wait "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑥",
+     "label": "acme.helpers/greet [who] …",
+     "template": [
+      [
+       "clamp",
+       "(acme.helpers/greet "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    }
+   ],
+   "contract_nses": [
+    "seon.agent.search",
+    "seon.db"
+   ],
+   "predicate": {
+    "kind": "verb-call",
+    "heads": [
+     "db/query",
+     "seon.db/query",
+     "db/pull",
+     "seon.db/pull",
+     "db/entity",
+     "seon.db/entity",
+     "search/grep-graph",
+     "seon.agent.search/grep-graph"
+    ],
+    "head_nses": [
+     "seon.agent.search",
+     "search"
+    ]
+   },
+   "replay_reply": "I need to find which namespace defines a function named `tagline`. Let me search the program graph first.\n\n```clojure\n(search/grep-graph {:seon.agent.search/pattern \"tagline\" :seon.agent.search/targets [:seon.fn]})\n"
+  },
+  {
+   "id": "m2",
+   "rung": "movement",
+   "intent": "Count how many :seon.fn rows the database holds for namespace my.plan; reply with the number.",
+   "warmups": [
+    "Reply with the single word ready."
+   ],
+   "restart_between": false,
+   "agent_id": "pNv-2607111124",
+   "replay": {
+    "prompt_blob": "26e758f088cd960a7d46213d1e72b9744e009d1079fe2c3a928ee321994afa61",
+    "prompt_chars": 147394,
+    "turn_at_ms": 1783783484388,
+    "reply_blob": "31024ff055c2ea4e02e95b3c11f96676118d1474a67ff6ee93efd366e3dcb767"
+   },
+   "drive_reply": "12",
+   "drive_model_config": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
+    "temperature": 0.7,
+    "max_tokens": 4096,
+    "thinking": "false"
+   },
+   "sections": {
+    "recent-verbs": ";;; ┌─ recent-verbs ─\n; recent verbs — the fns you have been calling, most-used first.\n; A MENU, never a mandate: select an entry by outputting its glyph\n; alone (e.g. ①), or ignore this and write any Clojure — both work.\n; Example: to select entry ①, output the single character ① and\n; nothing else — its call template is expanded for you to fill.\n; ① (seon.agent.lifecycle/complete ([result] …) ([result result-ref] …)) — Finish the calling agent's work; close the open run `:completed`.\n; ② (seon.agent.message/user [content] …) — Send a message to your human — `message!` with `to` := THE one user.\n; toolkit — more verbs from your required namespaces:\n; ③ (my.plan/done! [{:my.plan/keys [id]}] …) — Mark a step done; may unblock its dependents next turn.\n; ④ (seon.db/query [& args] …) — Run a Datalog query, returning the result set.\n; ⑤ (seon.agent.lifecycle/wait [note] …) — Park the calling agent: close its open run `:waited` → derived `:idle`.\n; ⑥ (seon.agent.search/grep-graph [{:seon.agent.search/keys [pattern targets max-results full? case-insensitive?], :or {max-results in/default-max-results, targets in/default-graph-targets}}] …) — Text-search the LIVE PROGRAM GRAPH — the literal counterpart of `grep`.\n;;; └─ end recent-verbs ─",
+    "plan-ledger": ";;; ┌─ plan-ledger ─\n; plan ledger — your plan's open steps (done steps are dropped;\n; the full tree stays queryable via my.plan/tree). ▶ = the step\n; you are on, ☐ = open. Select one by outputting its glyph alone,\n; or ignore this and write any Clojure — both work.\n; ☐ ① Reply with the single word ready.\n; ☐ ② Count how many :seon.fn rows the database holds for namespace my.plan; reply wit…\n;;; └─ end plan-ledger ─",
+    "namespace seon.db": ";;; ┌─ namespace seon.db ─\n(register! ::agent-id ::id)\n(register! ::attr-count :int)\n(register! ::attr-ns :keyword)\n(register! ::attr-ns-count :int)\n(register! ::attr-ns-set [:set ::attr-ns])\n(register! ::attrs [:map-of :keyword :int])\n(register! ::cas-attr :keyword)\n(register! ::cas-op [:vector :any])\n(register! ::cas-ref :any)\n(register! ::cas-value :any)\n(register! ::conn :any)\n(register! ::datom [:map [::e :int] [::a :keyword] [::v :any] [::tx :int] [::added? :boolean]])\n(register! ::datom-count :int)\n(register! ::db :any)\n(register! ::db-val map?)\n(register! ::entity-request [:map [::ref :any] [::db {:optional true} :any] [::conn {:optional true} ::conn]])\n(register! ::error [:map [:seon.error/message :string] [:seon.error/data {:optional true} :map] [:seon.error/ex-data {:optional true} :map] [:seon.error/stack {:optional true} :string] [:seon.error/cause {:optional true} :map] [:seon.error/raw {:optional true} :any] [:seon.error/truncated {:optional true} :boolean]])\n(register! ::eval-id ::id)\n(register! ::handler-input [:map [::tx-report :any] [::db :any] [::db-before :any] [::datoms [:vector ::datom]] [::attr-index [:map-of :keyword [:vector ::datom]]] [::trigger {:optional true} :any]])\n(register! ::id [:string {:min 14, :max 14}])\n(register! ::identity-pair [:tuple :keyword :any])\n(register! ::inventory [:map [::attr-groups [:vector ::inventory-row]] [::attr-ns-count ::attr-ns-count] [::attr-count ::attr-count] [::datom-count ::datom-count] [::topology ::topology]])\n(register! ::inventory-row [:map [::attr-ns ::attr-ns] [::attrs ::attrs]])\n(register! ::listen-request [:map [::handler fn?] [::key {:optional true} :any] [::conn {:optional true} ::conn]])\n(register! ::listen-response [:map [::key :any]])\n(register! ::lookup-ref-value [:or :string :uuid :keyword :int])\n(register! ::managed-identities [:map-of :int [:set ::identity-pair]])\n(register! ::managed-identities-request [:map [::managed-scope ::managed-scope] [::db {:optional true} ::db] [::conn {:optional true} ::conn]])\n(register! ::managed-scope [:set ::origin])\n(register! ::namespace :keyword)\n(register! ::opts :map)\n(register! ::origin [:enum :user :agent :system :replay :core-seed :config :test-run])\n(register! ::pull-request [:map [::pull-pattern :any] [::ref :any] [::db {:optional true} :any] [::conn {:optional true} ::conn]])\n(register! ::query-request [:map [::query :any] [::args {:optional true} [:vector :any]] [::db {:optional true} :any] [::conn {:optional true} ::conn]])\n(register! ::ref [:or :int :string [:tuple :keyword ::lookup-ref-value]])\n(register! ::replay? :boolean)\n(register! ::resume-marker? :boolean)\n(register! ::return-report? :boolean)\n(register! ::row-ids [:set :int])\n(register! ::session-id ::id)\n(register! ::system? :boolean)\n(register! ::thunk :any)\n(register! ::time-point :any)\n(register! ::topology :string)\n(register! ::transact-request [:map [::tx-data ::tx-data] [::opts {:optional true} ::opts] [::conn {:optional true} ::conn] [::return-report? {:optional true} ::return-report?]])\n(register! ::transact-response [:or [:map [::ok? [:= true]] [::tempids [:map-of :any :int]] [::tx :int] [::tx-count :int] [::added :int] [::retracted :int] [::tx-report {:optional true} :any]] [:map [::ok? [:= false]] [::error ::error] [::raw-error {:optional true} :string]]])\n(register! ::turn-id ::id)\n(register! ::tx-context :map)\n(register! ::tx-data [:vector :any])\n(register! ::tx-meta :map)\n(register! ::unlisten-request [:map [::key :any] [::conn {:optional true} ::conn]])\n(register! ::unlisten-response [:map [::ok? :boolean]])\n\n; fns (body elided):\n(defn as-of \"A db value as it was AT `t` — time-travel for reads.\" {:malli/schema [:function [:=> [:cat ::time-point] :any] [:=> [:catn [::db ::db-val] [::time-point ::time-point]] :any]]} ([t] …) ([db t] …))\n(defn assert-preconditions! \"Validate boot preconditions; throws ex-info on failure.\" {:malli/schema [:function [:=> :cat :boolean] [:=> [:catn [::opts [:map [::conn {:optional true} ::conn]]]] :boolean]]} ([] …) ([{::keys [conn], :or {conn *conn*}}] …))\n(defn basis-t \"The basis tx-id of a db value — the latest tx it reflects.\" {:malli/schema [:function [:=> :cat ::time-point] [:=> [:catn [::db ::db-val]] ::time-point]]} ([] …) ([db] …))\n(defn bootstrap-row-ids \"Entity ids whose first assertion carries a managed-core origin.\" {:malli/schema [:=> [:catn [::db ::db-val]] ::row-ids]} [db] …)\n(defn cas-assert \"Build a no-op compare-and-swap op asserting `ref`'s `attr` is `value`.\" {:malli/schema [:=> [:catn [::cas-ref ::cas-ref] [::cas-attr ::cas-attr] [::cas-value ::cas-value]] ::cas-op]} ([ref attr value] …) ([:db.fn/cas ref attr value value] …))\n(defn core-attr-namespaces \"Attr namespaces whose `:seon.schema/key` row is a bootstrap row.\" {:malli/schema [:function [:=> [:catn [::db ::db-val]] ::attr-ns-set] [:=> [:catn [::db ::db-val] [::bootstrap-rows ::row-ids]] ::attr-ns-set]]} ([db] …) ([db bootstrap-rows] …))\n(defn current-agent-id \"The active agent-id (string), or nil outside a [[with-agent]] scope.\" {:malli/schema [:=> :cat [:maybe :string]]} [] …)\n(defn current-tx-context \"The active tx-context map, or nil outside [[with-tx-context]].\" {:malli/schema [:=> :cat [:maybe :map]]} [] …)\n(defn decode-edn-value \"Read-side inverse of the bridge's mixed-`:or` EDN-string storage.\" {:malli/schema [:=> [:catn [::attr :keyword] [::value :any]] :any]} [attr v] …)\n(defn entity \"Look up an entity by eid or lookup-ref, as a plain map (sync).\" {:malli/schema [:function [:=> [:cat [:or ::entity-request :any]] :any] [:=> [:catn [::db ::db-val] [::eid :any]] :any]]} ([req] …) ([db eid] …))\n(defn entity-lazy \"INTERNAL: return the RAW datahike Entity for a ref (lazy, map-like).\" {:malli/schema [:function [:=> [:cat [:or ::entity-request :any]] :any] [:=> [:catn [::db ::db-val] [::eid :any]] :any]]} ([req] …) ([db eid] …))\n(defn history \"A db value spanning ALL of time — assertions and retractions.\" {:malli/schema [:function [:=> :cat :any] [:=> [:catn [::db ::db-val]] :any]]} ([] …) ([db] …))\n(defn id->time-str \"The YYMMDDHHmm portion of an id, for time sorting/comparison.\" {:malli/schema [:=> [:catn [::id [:maybe :string]]] [:maybe :string]]} [id] …)\n(defn installed-schema \"The datahike schema map actually INSTALLED on `db`.\" {:malli/schema [:=> [:catn [::db :any]] :map]} [db] …)\n(defn listen! \"Install a tx-listener — safe by default, never crashes the pod.\" {:malli/schema [:=> [:cat ::listen-request] ::listen-response]} [{::keys [handler key conn], :or {conn *conn*}}] …)\n(defn listen-async! \"Intent-revealing alias for [[listen!]] (Promise handler, fire-and-forget).\" {:malli/schema [:=> [:cat ::listen-request] ::listen-response]} [request] …)\n(defn listen-sync! \"Intent-revealing alias for [[listen!]] (sync handler, back-pressure).\" {:malli/schema [:=> [:cat ::listen-request] ::listen-response]} [request] …)\n(defn malli->datahike-schema \"Derive datahike attr declarations from seon.schema registrations.\" {:malli/schema [:=> [:catn [::attr-keys [:sequential :keyword]]] [:vector :any]]} [attr-keys] …)\n(defn managed-identities \"Map of `managed-eid → #{[identity-attr identity-value] …}`.\" {:malli/schema [:=> [:cat ::managed-identities-request] ::managed-identities]} [{::keys [managed-scope conn], db ::db, :or {conn *conn*}}] …)\n(defn new-id! \"Fresh 14-char LLM-readable id, `<3-letter-random>-<YYMMDDHHmm>`.\" {:malli/schema [:=> :cat ::id]} [] …)\n(defn pull \"Pull an entity by ref using a pull pattern (sync).\" {:malli/schema [:function [:=> [:cat ::pull-request] :any] [:=> [:catn [::selector [:vector :any]] [::eid :any]] :any] [:=> [:catn [::db ::db-val] [::selector [:vector :any]] [::eid :any]] :any]]} ([req] …) ([selector eid] …) ([db selector eid] …))\n(defn query \"Run a Datalog query, returning the result set.\" {:malli/schema [:function [:=> [:cat [:or [:vector :any] :map :string]] :any] [:=> [:catn [::query [:or [:vector :any] :map :string]] [::rest [:+ :any]]] :any]]} [& args] …)\n(defn since \"The complement of [[as-of]] — a db value of datoms added after `t`.\" {:malli/schema [:function [:=> [:cat ::time-point] :any] [:=> [:catn [::db ::db-val] [::time-point ::time-point]] :any]]} ([t] …) ([db t] …))\n(defn store-inventory \"Discovery call: which attributes hold data in this store right now.\" {:malli/schema [:function [:=> :cat ::inventory] [:=> [:cat [:map [::db {:optional true} :any] [::conn {:optional true} ::conn] [::system? {:optional true} ::system?]]] ::inventory]]} ([] …) ([{::keys [db conn system?], :or {conn *conn*}}] …))\n(defn transact! \"Commit tx-data — forwarded to the JVM writer, returns an envelope.\" {:malli/schema [:function [:=> [:cat ::transact-request] ::transact-response] [:=> [:catn [::conn ::conn] [::tx-data ::tx-data]] ::transact-response] [:=> [:catn [::conn ::conn] [::tx-data ::tx-data] [::tx-meta ::tx-meta]] ::transact-response]]} [& call-args] …)\n(defn tx-meta-datahike-schema \"Datahike schema entries for the 7 `::*` tx-meta attrs.\" {:malli/schema [:=> :cat [:vector :any]]} [] …)\n(defn unlisten! \"Remove a listener by key; returns `{::ok? true}`.\" {:malli/schema [:=> [:cat ::unlisten-request] ::unlisten-response]} [{::keys [key conn], :or {conn *conn*}}] …)\n(defn with-agent \"Establish an agent-id scope for the dynamic extent of `f`.\" {:malli/schema [:=> [:catn [::agent-id :string] [::thunk ::thunk]] :any]} [agent-id f] …)\n(defn with-tx-context \"Establish a tx-context for the dynamic extent of `f`.\" {:malli/schema [:=> [:catn [::tx-context ::tx-context] [::thunk ::thunk]] :any]} [ctx-map f] …)\n(defn without-agent \"Clear the agent-id scope for the dynamic extent of `f`.\" {:malli/schema [:=> [:catn [::thunk ::thunk]] :any]} [f] …)\n;;; └─ end namespace seon.db ─"
+   },
+   "offers": [
+    {
+     "glyph": "①",
+     "label": "seon.agent.lifecycle/complete ([result] …) ([result result-ref] …)",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.lifecycle/complete "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "②",
+     "label": "seon.agent.message/user [content] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.message/user "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "③",
+     "label": "my.plan/done! [{:my.plan/keys [id]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.plan/done! "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "④",
+     "label": "seon.db/query [& args] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.db/query "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑤",
+     "label": "seon.agent.lifecycle/wait [note] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.lifecycle/wait "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑥",
+     "label": "seon.agent.search/grep-graph [{:seon.agent.search/keys [pattern targets max-results full? case-insensitive?], :or {max-results in/default-max-results, targets in/default-graph-targets}}] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.search/grep-graph "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    }
+   ],
+   "contract_nses": [
+    "seon.db"
+   ],
+   "predicate": {
+    "kind": "verb-call",
+    "heads": [
+     "db/query",
+     "seon.db/query",
+     "db/pull",
+     "seon.db/pull",
+     "db/entity",
+     "seon.db/entity",
+     "search/grep-graph",
+     "seon.agent.search/grep-graph"
+    ],
+    "head_nses": []
+   },
+   "replay_reply": "I need to count `:seon.fn` rows for namespace `my.plan`. Let me query the database for this.(seon.db/query '[:find (count ?e) :where [?e :seon.fn/ns :my.plan]])"
+  },
+  {
+   "id": "p1",
+   "rung": "planning",
+   "intent": "Create a durable 3-step plan for auditing your toolkit namespaces, then mark the first step as the one you are working on.",
+   "warmups": [
+    "Reply with the single word ready."
+   ],
+   "restart_between": false,
+   "agent_id": "NAb-2607111125",
+   "replay": {
+    "prompt_blob": "e01ca293da33575ec2693abc2227c42366d9a796a77dec95b89d69e8efbff5b0",
+    "prompt_chars": 147279,
+    "turn_at_ms": 1783783567801,
+    "reply_blob": "f57a95a5e42ad6d456232a64827d71da462d0211169224862025113770601c15"
+   },
+   "drive_reply": "**Toolkit audit: inventory complete.**\n\n| Namespace | Fns | Schemas | Unspecced |\n|---|---|---|---|\n| my.ui | 7 | 17 | 0 |\n| my.tile | 5 | 16 | 0 |\n| my.data | 4 | 9 | 0 |\n| my.blob | 5 | 18 | 0 |\n| my.kb | 14 | 19 | 0 |\n| my.plan | 12 | 22 | 0 |\n\n**Zero unspecced fns in the toolkit.** All 47 public fns carry `:malli/schema`. The 5 unspecced fns found are all in `acme.*` (the downstream consumer harness), not in the toolkit.\n\nMoving to live verification next.",
+   "drive_model_config": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
+    "temperature": 0.7,
+    "max_tokens": 4096,
+    "thinking": "false"
+   },
+   "sections": {
+    "recent-verbs": ";;; ┌─ recent-verbs ─\n; recent verbs — the fns you have been calling, most-used first.\n; A MENU, never a mandate: select an entry by outputting its glyph\n; alone (e.g. ①), or ignore this and write any Clojure — both work.\n; Example: to select entry ①, output the single character ① and\n; nothing else — its call template is expanded for you to fill.\n; ① (seon.agent.lifecycle/complete ([result] …) ([result result-ref] …)) — Finish the calling agent's work; close the open run `:completed`.\n; ② (seon.agent.message/user [content] …) — Send a message to your human — `message!` with `to` := THE one user.\n; toolkit — more verbs from your required namespaces:\n; ③ (my.plan/done! [{:my.plan/keys [id]}] …) — Mark a step done; may unblock its dependents next turn.\n; ④ (seon.db/query [& args] …) — Run a Datalog query, returning the result set.\n; ⑤ (seon.schema/schema-definition [k] …) — The raw definition for a registered schema, or nil if not registered.\n; ⑥ (seon.agent.lifecycle/wait [note] …) — Park the calling agent: close its open run `:waited` → derived `:idle`.\n;;; └─ end recent-verbs ─",
+    "plan-ledger": ";;; ┌─ plan-ledger ─\n; plan ledger — your plan's open steps (done steps are dropped;\n; the full tree stays queryable via my.plan/tree). ▶ = the step\n; you are on, ☐ = open. Select one by outputting its glyph alone,\n; or ignore this and write any Clojure — both work.\n; ☐ ① Reply with the single word ready.\n; ☐ ② Create a durable 3-step plan for auditing your toolkit namespaces, then mark the…\n;;; └─ end plan-ledger ─",
+    "namespace my.plan": ";;; ┌─ namespace my.plan ─\n(register! ::agent :seon.db/ref)\n(register! ::all? :boolean)\n(register! ::blocked? :boolean)\n(register! ::completed-at :inst)\n(register! ::created-at :inst)\n(register! ::description :string)\n(register! ::done? :boolean)\n(register! ::drop-response [:map [::ok? ::ok?] [::dropped {:optional true} ::dropped] [::error {:optional true} ::error]])\n(register! ::dropped :int)\n(register! ::error :string)\n(register! ::expect :string)\n(register! ::from :seon.db/ref)\n(register! ::goal :string)\n(register! ::id [:and {:seon.db/identity true} :seon.db/id])\n(register! ::id-request [:map [::id ::id]])\n(register! ::ids [:map-of [:or :string [:= :root]] ::id])\n(register! ::list-request [:map [:seon.agent/id {:optional true} :seon.agent/id] [::all? {:optional true} ::all?]])\n(register! ::list-response [:map [::ok? ::ok?] [::steps {:optional true} ::steps] [::error {:optional true} ::error]])\n(register! ::message :seon.db/ref)\n(register! ::move-request [:map [::id ::id] [::parent ::parent]])\n(register! ::needs [:vector :seon.db/ref])\n(register! ::needs-request [:map [::id ::id] [::on ::on]])\n(register! ::next-request [:map [:seon.agent/id {:optional true} :seon.agent/id]])\n(register! ::ok? :boolean)\n(register! ::on [:vector :seon.db/ref])\n(register! ::open-step [:map [::id ::id] [::title ::title] [::status ::status] [::created-at ::created-at] [::description {:optional true} ::description] [::message {:optional true} [:map [:db/id :int]]]])\n(register! ::pace [:enum :one-shot :multi-session])\n(register! ::parent :seon.db/ref)\n(register! ::plan-node [:schema {:registry {::node [:map [::title ::title] [::ref {:optional true} :string] [::after {:optional true} [:vector :string]] [::expect {:optional true} ::expect] [::children {:optional true} [:vector [:ref ::node]]]]}} [:ref ::node]])\n(register! ::plan-request [:map [::title ::title] [::goal {:optional true} ::goal] [::pace {:optional true} ::pace] [::expect {:optional true} ::expect] [:seon.agent/id {:optional true} :seon.agent/id] [::children {:optional true} [:vector ::plan-node]]])\n(register! ::plan-response [:map [::ok? ::ok?] [::root {:optional true} ::id] [::ids {:optional true} ::ids] [::error {:optional true} ::error]])\n(register! ::progress [:map [::done :int] [::total :int]])\n(register! ::ready? :boolean)\n(register! ::status [:enum :open :active :done :blocked])\n(register! ::status-response [:map [::id ::id] [::done? ::done?] [::blocked? ::blocked?] [::ready? ::ready?] [::progress ::progress]])\n(register! ::step [:map {:seon.db/entity true, :seon.entity/id-attr ::id} [::id ::id] [::title ::title] [::status ::status] [::agent ::agent] [::created-at ::created-at] [::description {:optional true} ::description] [::goal {:optional true} ::goal] [::expect {:optional true} ::expect] [::pace {:optional true} ::pace] [::from {:optional true} ::from] [::message {:optional true} ::message] [::parent {:optional true} ::parent] [::needs {:optional true} ::needs] [::completed-at {:optional true} ::completed-at]])\n(register! ::step-ref [:map [::id ::id] [::title ::title] [::created-at ::created-at]])\n(register! ::step-request [:map [::title ::title] [::description {:optional true} ::description] [::expect {:optional true} ::expect] [:seon.agent/id {:optional true} :seon.agent/id] [::from {:optional true} :seon.db/ref] [::parent {:optional true} ::parent] [::needs {:optional true} ::needs]])\n(register! ::steps [:vector ::open-step])\n(register! ::title [:string {:min 1}])\n(register! ::tree-request [:map [::root? {:optional true} ::id] [::all? {:optional true} ::all?] [:seon.agent/id {:optional true} :seon.agent/id]])\n(register! ::tree-response [:maybe [:or :map [:vector :map]]])\n(register! ::write-response [:map [::ok? ::ok?] [::id {:optional true} ::id] [::error {:optional true} ::error]])\n\n; fns (body elided):\n(defn active! \"Take a step up: mark it `:active` — your rendered position anchor.\" {:malli/schema [:=> [:cat ::id-request] ::write-response]} [{::keys [id]}] …)\n(defn done! \"Mark a step done; may unblock its dependents next turn.\" {:malli/schema [:=> [:cat ::id-request] ::write-response]} [{::keys [id]}] …)\n(defn drop! \"Retract a step AND its whole subtree.\" {:malli/schema [:=> [:cat ::id-request] ::drop-response]} [{::keys [id]}] …)\n(defn list-open \"Unfinished steps (open/active/blocked), oldest first, per agent.\" {:malli/schema [:=> [:cat ::list-request] ::list-response]} [{::keys [all?], agent-id :seon.agent/id}] …)\n(defn move! \"Re-parent a step — the new parent replaces the old.\" {:malli/schema [:=> [:cat ::move-request] ::write-response]} [{::keys [id parent]}] …)\n(defn needs! \"Add dependency edge(s) — the step is ready only after each `:on` is done.\" {:malli/schema [:=> [:cat ::needs-request] ::write-response]} [{::keys [id on]}] …)\n(defn next \"Your focus queue: READY leaves (open, unblocked), oldest first.\" {:malli/schema [:=> [:cat ::next-request] [:vector ::step-ref]]} [{agent-id :seon.agent/id}] …)\n(defn plan! \"Author a WHOLE plan in ONE transact — goal, pace, nested steps, deps.\" {:malli/schema [:=> [:cat ::plan-request] ::plan-response]} [{::keys [title], agent-id :seon.agent/id, :as request}] …)\n(defn reopen! \"Flip a done/blocked step back to open; retract its `::completed-at`.\" {:malli/schema [:=> [:cat ::id-request] ::write-response]} [{::keys [id]}] …)\n(defn status \"Derived view of one step — done/blocked/ready + subtree roll-up.\" {:malli/schema [:=> [:cat ::id-request] ::status-response]} [{::keys [id]}] …)\n(defn step! \"Mint one OPEN plan step (agent = caller; blank title refused).\" {:malli/schema [:=> [:cat ::step-request] ::write-response]} [{::keys [title description expect from parent needs], agent-id :seon.agent/id}] …)\n(defn tree \"The plan as nested EDN — the structural read you re-plan over.\" {:malli/schema [:=> [:cat ::tree-request] ::tree-response]} [{::keys [root? all?], agent-id :seon.agent/id}] …)\n;;; └─ end namespace my.plan ─"
+   },
+   "offers": [
+    {
+     "glyph": "①",
+     "label": "seon.agent.lifecycle/complete ([result] …) ([result result-ref] …)",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.lifecycle/complete "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "②",
+     "label": "seon.agent.message/user [content] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.message/user "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "③",
+     "label": "my.plan/done! [{:my.plan/keys [id]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.plan/done! "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "④",
+     "label": "seon.db/query [& args] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.db/query "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑤",
+     "label": "seon.schema/schema-definition [k] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.schema/schema-definition "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑥",
+     "label": "seon.agent.lifecycle/wait [note] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.lifecycle/wait "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    }
+   ],
+   "contract_nses": [
+    "my.plan"
+   ],
+   "predicate": {
+    "kind": "verb-call",
+    "heads": [],
+    "head_nses": [
+     "my.plan",
+     "plan",
+     "todo"
+    ]
+   },
+   "replay_reply": "; The human wants a 3-step plan for auditing my toolkit namespaces, with the first step marked active. Let me create the plan and then activate the first step.\n\n(my.plan/plan! {:my.plan/title \"Audit toolkit namespaces\"\n                :my.plan/goal \"Verify every toolkit namespace (my.ui, my.tile, my.data, my.blob, my.kb, my.plan) has correct schemas, docstrings, and instrumentation — no gaps.\"\n                :my.plan/pace :one-shot\n                :my.plan/children [{:my.plan/title \"Inventory: count fns, schemas, and instrumentation gaps per toolkit ns\"\n                                    :my.plan/expect \"A table of each my.* ns with fn count, schema count, and any missing specs — zero gaps.\"}\n                                   {:my.plan/title \"Fix any gap found — missing spec, broken docstring, or unregistered attr\"\n                                    :my.plan/expect \"Every public fn in the toolkit has a valid :malli/schema; every attr is registered; docstrings pass the first-line rule.\"}\n                                   {:my.plan/title \"Verify with a live exercise — call one fn from each ns and confirm it returns valid data\"\n                                    :my.plan/expect \"Each call returns a well-formed envelope without instrumentation errors.\"}]})"
+  },
+  {
+   "id": "p2",
+   "rung": "planning",
+   "intent": "You were interrupted by a restart. Resume your plan: complete the next open step and say which steps remain.",
+   "warmups": [
+    "Create a durable plan with three steps — inventory your verbs, summarize them, report to me — and complete only the first step."
+   ],
+   "restart_between": true,
+   "agent_id": "zMw-2607111225",
+   "replay": {
+    "prompt_blob": "e8329bacf9c58b169a5a1865a89fd796d78262c7884190ac84b90f571cd2266f",
+    "prompt_chars": 158765,
+    "turn_at_ms": 1783787246231,
+    "reply_blob": "ffe2c39795d1a19b87b044ecfceb5cb0a213e5f3313b0f01c9187fec8e26b7bc"
+   },
+   "drive_reply": "run for zMw-2607111225 closed :no-forms after 14 turns",
+   "drive_model_config": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
+    "temperature": 0.7,
+    "max_tokens": 4096,
+    "thinking": "false"
+   },
+   "sections": {
+    "recent-verbs": ";;; ┌─ recent-verbs ─\n; recent verbs — the fns you have been calling, most-used first.\n; A MENU, never a mandate: select an entry by outputting its glyph\n; alone (e.g. ①), or ignore this and write any Clojure — both work.\n; Example: to select entry ①, output the single character ① and\n; nothing else — its call template is expanded for you to fill.\n; ① (my.plan/done! [{:my.plan/keys [id]}] …) — Mark a step done; may unblock its dependents next turn.\n; ② (my.plan/active! [{:my.plan/keys [id]}] …) — Take a step up: mark it `:active` — your rendered position anchor.\n; ③ (seon.agent.message/user [content] …) — Send a message to your human — `message!` with `to` := THE one user.\n; ④ (my.plan/list-open [{:my.plan/keys [all?], agent-id :seon.agent/id}] …) — Unfinished steps (open/active/blocked), oldest first, per agent.\n; ⑤ (my.kb/remember [{:my.kb/keys [claim source confidence]}] …) — Store ONE finding as a durable, provenance-stamped knowledge row.\n; ⑥ (seon.agent.search/grep-graph [{:seon.agent.search/keys [pattern targets max-results full? case-insensitive?], :or {max-results in/default-max-results, targets in/default-graph-targets}}] …) — Text-search the LIVE PROGRAM GRAPH — the literal counterpart of `grep`.\n; ⑦ (my.plan/plan! [{:my.plan/keys [title], agent-id :seon.agent/id, :as request}] …) — Author a WHOLE plan in ONE transact — goal, pace, nested steps, deps.\n; toolkit — more verbs from your required namespaces:\n; ⑧ (acme.helpers/greet [who] …) — A specced helper so acme.helpers owns at least one indexed fn.\n; ⑨ (my.blob/concat! [{:my.blob/keys [hashes media]}] …) — Join stored blobs, in order, into ONE new canonical blob.\n; ⑩ (my.data/group-sum [{:my.data/keys [group-key key], :seon.items/keys [items]}] …) — Sum `key` per distinct `group-key` value → a `:seon.items/*` envelope.\n;;; └─ end recent-verbs ─",
+    "plan-ledger": ";;; ┌─ plan-ledger ─\n; plan ledger — your plan's open steps (done steps are dropped;\n; the full tree stays queryable via my.plan/tree). ▶ = the step\n; you are on, ☐ = open. Select one by outputting its glyph alone,\n; or ignore this and write any Clojure — both work.\n; ☐ ① You were interrupted by a restart. Resume your plan: complete the next open step…\n;;; └─ end plan-ledger ─",
+    "namespace my.plan": ";;; ┌─ namespace my.plan ─\n(register! ::agent :seon.db/ref)\n(register! ::all? :boolean)\n(register! ::blocked? :boolean)\n(register! ::completed-at :inst)\n(register! ::created-at :inst)\n(register! ::description :string)\n(register! ::done? :boolean)\n(register! ::drop-response [:map [::ok? ::ok?] [::dropped {:optional true} ::dropped] [::error {:optional true} ::error]])\n(register! ::dropped :int)\n(register! ::error :string)\n(register! ::expect :string)\n(register! ::from :seon.db/ref)\n(register! ::goal :string)\n(register! ::id [:and {:seon.db/identity true} :seon.db/id])\n(register! ::id-request [:map [::id ::id]])\n(register! ::ids [:map-of [:or :string [:= :root]] ::id])\n(register! ::list-request [:map [:seon.agent/id {:optional true} :seon.agent/id] [::all? {:optional true} ::all?]])\n(register! ::list-response [:map [::ok? ::ok?] [::steps {:optional true} ::steps] [::error {:optional true} ::error]])\n(register! ::message :seon.db/ref)\n(register! ::move-request [:map [::id ::id] [::parent ::parent]])\n(register! ::needs [:vector :seon.db/ref])\n(register! ::needs-request [:map [::id ::id] [::on ::on]])\n(register! ::next-request [:map [:seon.agent/id {:optional true} :seon.agent/id]])\n(register! ::ok? :boolean)\n(register! ::on [:vector :seon.db/ref])\n(register! ::open-step [:map [::id ::id] [::title ::title] [::status ::status] [::created-at ::created-at] [::description {:optional true} ::description] [::message {:optional true} [:map [:db/id :int]]]])\n(register! ::pace [:enum :one-shot :multi-session])\n(register! ::parent :seon.db/ref)\n(register! ::plan-node [:schema {:registry {::node [:map [::title ::title] [::ref {:optional true} :string] [::after {:optional true} [:vector :string]] [::expect {:optional true} ::expect] [::children {:optional true} [:vector [:ref ::node]]]]}} [:ref ::node]])\n(register! ::plan-request [:map [::title ::title] [::goal {:optional true} ::goal] [::pace {:optional true} ::pace] [::expect {:optional true} ::expect] [:seon.agent/id {:optional true} :seon.agent/id] [::children {:optional true} [:vector ::plan-node]]])\n(register! ::plan-response [:map [::ok? ::ok?] [::root {:optional true} ::id] [::ids {:optional true} ::ids] [::error {:optional true} ::error]])\n(register! ::progress [:map [::done :int] [::total :int]])\n(register! ::ready? :boolean)\n(register! ::status [:enum :open :active :done :blocked])\n(register! ::status-response [:map [::id ::id] [::done? ::done?] [::blocked? ::blocked?] [::ready? ::ready?] [::progress ::progress]])\n(register! ::step [:map {:seon.db/entity true, :seon.entity/id-attr ::id} [::id ::id] [::title ::title] [::status ::status] [::agent ::agent] [::created-at ::created-at] [::description {:optional true} ::description] [::goal {:optional true} ::goal] [::expect {:optional true} ::expect] [::pace {:optional true} ::pace] [::from {:optional true} ::from] [::message {:optional true} ::message] [::parent {:optional true} ::parent] [::needs {:optional true} ::needs] [::completed-at {:optional true} ::completed-at]])\n(register! ::step-ref [:map [::id ::id] [::title ::title] [::created-at ::created-at]])\n(register! ::step-request [:map [::title ::title] [::description {:optional true} ::description] [::expect {:optional true} ::expect] [:seon.agent/id {:optional true} :seon.agent/id] [::from {:optional true} :seon.db/ref] [::parent {:optional true} ::parent] [::needs {:optional true} ::needs]])\n(register! ::steps [:vector ::open-step])\n(register! ::title [:string {:min 1}])\n(register! ::tree-request [:map [::root? {:optional true} ::id] [::all? {:optional true} ::all?] [:seon.agent/id {:optional true} :seon.agent/id]])\n(register! ::tree-response [:maybe [:or :map [:vector :map]]])\n(register! ::write-response [:map [::ok? ::ok?] [::id {:optional true} ::id] [::error {:optional true} ::error]])\n\n; fns (body elided):\n(defn active! \"Take a step up: mark it `:active` — your rendered position anchor.\" {:malli/schema [:=> [:cat ::id-request] ::write-response]} [{::keys [id]}] …)\n(defn done! \"Mark a step done; may unblock its dependents next turn.\" {:malli/schema [:=> [:cat ::id-request] ::write-response]} [{::keys [id]}] …)\n(defn drop! \"Retract a step AND its whole subtree.\" {:malli/schema [:=> [:cat ::id-request] ::drop-response]} [{::keys [id]}] …)\n(defn list-open \"Unfinished steps (open/active/blocked), oldest first, per agent.\" {:malli/schema [:=> [:cat ::list-request] ::list-response]} [{::keys [all?], agent-id :seon.agent/id}] …)\n(defn move! \"Re-parent a step — the new parent replaces the old.\" {:malli/schema [:=> [:cat ::move-request] ::write-response]} [{::keys [id parent]}] …)\n(defn needs! \"Add dependency edge(s) — the step is ready only after each `:on` is done.\" {:malli/schema [:=> [:cat ::needs-request] ::write-response]} [{::keys [id on]}] …)\n(defn next \"Your focus queue: READY leaves (open, unblocked), oldest first.\" {:malli/schema [:=> [:cat ::next-request] [:vector ::step-ref]]} [{agent-id :seon.agent/id}] …)\n(defn plan! \"Author a WHOLE plan in ONE transact — goal, pace, nested steps, deps.\" {:malli/schema [:=> [:cat ::plan-request] ::plan-response]} [{::keys [title], agent-id :seon.agent/id, :as request}] …)\n(defn reopen! \"Flip a done/blocked step back to open; retract its `::completed-at`.\" {:malli/schema [:=> [:cat ::id-request] ::write-response]} [{::keys [id]}] …)\n(defn status \"Derived view of one step — done/blocked/ready + subtree roll-up.\" {:malli/schema [:=> [:cat ::id-request] ::status-response]} [{::keys [id]}] …)\n(defn step! \"Mint one OPEN plan step (agent = caller; blank title refused).\" {:malli/schema [:=> [:cat ::step-request] ::write-response]} [{::keys [title description expect from parent needs], agent-id :seon.agent/id}] …)\n(defn tree \"The plan as nested EDN — the structural read you re-plan over.\" {:malli/schema [:=> [:cat ::tree-request] ::tree-response]} [{::keys [root? all?], agent-id :seon.agent/id}] …)\n;;; └─ end namespace my.plan ─"
+   },
+   "offers": [
+    {
+     "glyph": "①",
+     "label": "my.plan/done! [{:my.plan/keys [id]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.plan/done! "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "②",
+     "label": "my.plan/active! [{:my.plan/keys [id]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.plan/active! "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "③",
+     "label": "seon.agent.message/user [content] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.message/user "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "④",
+     "label": "my.plan/list-open [{:my.plan/keys [all?], agent-id :seon.agent/id}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.plan/list-open "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑤",
+     "label": "my.kb/remember [{:my.kb/keys [claim source confidence]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.kb/remember "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑥",
+     "label": "seon.agent.search/grep-graph [{:seon.agent.search/keys [pattern targets max-results full? case-insensitive?], :or {max-results in/default-max-results, targets in/default-graph-targets}}] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.search/grep-graph "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑦",
+     "label": "my.plan/plan! [{:my.plan/keys [title], agent-id :seon.agent/id, :as request}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.plan/plan! "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑧",
+     "label": "acme.helpers/greet [who] …",
+     "template": [
+      [
+       "clamp",
+       "(acme.helpers/greet "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑨",
+     "label": "my.blob/concat! [{:my.blob/keys [hashes media]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.blob/concat! "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑩",
+     "label": "my.data/group-sum [{:my.data/keys [group-key key], :seon.items/keys [items]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.data/group-sum "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    }
+   ],
+   "contract_nses": [
+    "my.plan"
+   ],
+   "predicate": {
+    "kind": "verb-call",
+    "heads": [],
+    "head_nses": [
+     "my.plan",
+     "plan",
+     "todo"
+    ]
+   },
+   "replay_reply": "I'm back after the restart. Let me check what's actually open in my plan right now.\n\n```\n(my.plan/list-open {})\n"
+  },
+  {
+   "id": "p3",
+   "rung": "planning",
+   "intent": "Break the task 'inventory your my.kb manual' into two durable plan steps and start the first.",
+   "warmups": [
+    "Reply with the single word ready."
+   ],
+   "restart_between": false,
+   "agent_id": "nDM-2607111135",
+   "replay": {
+    "prompt_blob": "025de99638376cf55e61b01accf92c4dc2d728667806e4fb7a157115d9c9c3c5",
+    "prompt_chars": 147752,
+    "turn_at_ms": 1783784161519,
+    "reply_blob": "cb1d7af682d3cd45f8959d44af03e03501620ee8dbe9aa358d14f04d80b7f1c7"
+   },
+   "drive_reply": "",
+   "drive_model_config": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
+    "temperature": 0.7,
+    "max_tokens": 4096,
+    "thinking": "false"
+   },
+   "sections": {
+    "recent-verbs": ";;; ┌─ recent-verbs ─\n; recent verbs — the fns you have been calling, most-used first.\n; A MENU, never a mandate: select an entry by outputting its glyph\n; alone (e.g. ①), or ignore this and write any Clojure — both work.\n; Example: to select entry ①, output the single character ① and\n; nothing else — its call template is expanded for you to fill.\n; ① (seon.agent.lifecycle/complete ([result] …) ([result result-ref] …)) — Finish the calling agent's work; close the open run `:completed`.\n; ② (seon.agent.message/user [content] …) — Send a message to your human — `message!` with `to` := THE one user.\n; toolkit — more verbs from your required namespaces:\n; ③ (my.plan/done! [{:my.plan/keys [id]}] …) — Mark a step done; may unblock its dependents next turn.\n; ④ (seon.agent.search/grep-graph [{:seon.agent.search/keys [pattern targets max-results full? case-insensitive?], :or {max-results in/default-max-results, targets in/default-graph-targets}}] …) — Text-search the LIVE PROGRAM GRAPH — the literal counterpart of `grep`.\n; ⑤ (seon.db/query [& args] …) — Run a Datalog query, returning the result set.\n; ⑥ (my.kb/remember [{:my.kb/keys [claim source confidence]}] …) — Store ONE finding as a durable, provenance-stamped knowledge row.\n;;; └─ end recent-verbs ─",
+    "plan-ledger": ";;; ┌─ plan-ledger ─\n; plan ledger — your plan's open steps (done steps are dropped;\n; the full tree stays queryable via my.plan/tree). ▶ = the step\n; you are on, ☐ = open. Select one by outputting its glyph alone,\n; or ignore this and write any Clojure — both work.\n; ☐ ① Reply with the single word ready.\n; ☐ ② Break the task 'inventory your my.kb manual' into two durable plan steps and sta…\n;;; └─ end plan-ledger ─",
+    "namespace my.plan": ";;; ┌─ namespace my.plan ─\n(register! ::agent :seon.db/ref)\n(register! ::all? :boolean)\n(register! ::blocked? :boolean)\n(register! ::completed-at :inst)\n(register! ::created-at :inst)\n(register! ::description :string)\n(register! ::done? :boolean)\n(register! ::drop-response [:map [::ok? ::ok?] [::dropped {:optional true} ::dropped] [::error {:optional true} ::error]])\n(register! ::dropped :int)\n(register! ::error :string)\n(register! ::expect :string)\n(register! ::from :seon.db/ref)\n(register! ::goal :string)\n(register! ::id [:and {:seon.db/identity true} :seon.db/id])\n(register! ::id-request [:map [::id ::id]])\n(register! ::ids [:map-of [:or :string [:= :root]] ::id])\n(register! ::list-request [:map [:seon.agent/id {:optional true} :seon.agent/id] [::all? {:optional true} ::all?]])\n(register! ::list-response [:map [::ok? ::ok?] [::steps {:optional true} ::steps] [::error {:optional true} ::error]])\n(register! ::message :seon.db/ref)\n(register! ::move-request [:map [::id ::id] [::parent ::parent]])\n(register! ::needs [:vector :seon.db/ref])\n(register! ::needs-request [:map [::id ::id] [::on ::on]])\n(register! ::next-request [:map [:seon.agent/id {:optional true} :seon.agent/id]])\n(register! ::ok? :boolean)\n(register! ::on [:vector :seon.db/ref])\n(register! ::open-step [:map [::id ::id] [::title ::title] [::status ::status] [::created-at ::created-at] [::description {:optional true} ::description] [::message {:optional true} [:map [:db/id :int]]]])\n(register! ::pace [:enum :one-shot :multi-session])\n(register! ::parent :seon.db/ref)\n(register! ::plan-node [:schema {:registry {::node [:map [::title ::title] [::ref {:optional true} :string] [::after {:optional true} [:vector :string]] [::expect {:optional true} ::expect] [::children {:optional true} [:vector [:ref ::node]]]]}} [:ref ::node]])\n(register! ::plan-request [:map [::title ::title] [::goal {:optional true} ::goal] [::pace {:optional true} ::pace] [::expect {:optional true} ::expect] [:seon.agent/id {:optional true} :seon.agent/id] [::children {:optional true} [:vector ::plan-node]]])\n(register! ::plan-response [:map [::ok? ::ok?] [::root {:optional true} ::id] [::ids {:optional true} ::ids] [::error {:optional true} ::error]])\n(register! ::progress [:map [::done :int] [::total :int]])\n(register! ::ready? :boolean)\n(register! ::status [:enum :open :active :done :blocked])\n(register! ::status-response [:map [::id ::id] [::done? ::done?] [::blocked? ::blocked?] [::ready? ::ready?] [::progress ::progress]])\n(register! ::step [:map {:seon.db/entity true, :seon.entity/id-attr ::id} [::id ::id] [::title ::title] [::status ::status] [::agent ::agent] [::created-at ::created-at] [::description {:optional true} ::description] [::goal {:optional true} ::goal] [::expect {:optional true} ::expect] [::pace {:optional true} ::pace] [::from {:optional true} ::from] [::message {:optional true} ::message] [::parent {:optional true} ::parent] [::needs {:optional true} ::needs] [::completed-at {:optional true} ::completed-at]])\n(register! ::step-ref [:map [::id ::id] [::title ::title] [::created-at ::created-at]])\n(register! ::step-request [:map [::title ::title] [::description {:optional true} ::description] [::expect {:optional true} ::expect] [:seon.agent/id {:optional true} :seon.agent/id] [::from {:optional true} :seon.db/ref] [::parent {:optional true} ::parent] [::needs {:optional true} ::needs]])\n(register! ::steps [:vector ::open-step])\n(register! ::title [:string {:min 1}])\n(register! ::tree-request [:map [::root? {:optional true} ::id] [::all? {:optional true} ::all?] [:seon.agent/id {:optional true} :seon.agent/id]])\n(register! ::tree-response [:maybe [:or :map [:vector :map]]])\n(register! ::write-response [:map [::ok? ::ok?] [::id {:optional true} ::id] [::error {:optional true} ::error]])\n\n; fns (body elided):\n(defn active! \"Take a step up: mark it `:active` — your rendered position anchor.\" {:malli/schema [:=> [:cat ::id-request] ::write-response]} [{::keys [id]}] …)\n(defn done! \"Mark a step done; may unblock its dependents next turn.\" {:malli/schema [:=> [:cat ::id-request] ::write-response]} [{::keys [id]}] …)\n(defn drop! \"Retract a step AND its whole subtree.\" {:malli/schema [:=> [:cat ::id-request] ::drop-response]} [{::keys [id]}] …)\n(defn list-open \"Unfinished steps (open/active/blocked), oldest first, per agent.\" {:malli/schema [:=> [:cat ::list-request] ::list-response]} [{::keys [all?], agent-id :seon.agent/id}] …)\n(defn move! \"Re-parent a step — the new parent replaces the old.\" {:malli/schema [:=> [:cat ::move-request] ::write-response]} [{::keys [id parent]}] …)\n(defn needs! \"Add dependency edge(s) — the step is ready only after each `:on` is done.\" {:malli/schema [:=> [:cat ::needs-request] ::write-response]} [{::keys [id on]}] …)\n(defn next \"Your focus queue: READY leaves (open, unblocked), oldest first.\" {:malli/schema [:=> [:cat ::next-request] [:vector ::step-ref]]} [{agent-id :seon.agent/id}] …)\n(defn plan! \"Author a WHOLE plan in ONE transact — goal, pace, nested steps, deps.\" {:malli/schema [:=> [:cat ::plan-request] ::plan-response]} [{::keys [title], agent-id :seon.agent/id, :as request}] …)\n(defn reopen! \"Flip a done/blocked step back to open; retract its `::completed-at`.\" {:malli/schema [:=> [:cat ::id-request] ::write-response]} [{::keys [id]}] …)\n(defn status \"Derived view of one step — done/blocked/ready + subtree roll-up.\" {:malli/schema [:=> [:cat ::id-request] ::status-response]} [{::keys [id]}] …)\n(defn step! \"Mint one OPEN plan step (agent = caller; blank title refused).\" {:malli/schema [:=> [:cat ::step-request] ::write-response]} [{::keys [title description expect from parent needs], agent-id :seon.agent/id}] …)\n(defn tree \"The plan as nested EDN — the structural read you re-plan over.\" {:malli/schema [:=> [:cat ::tree-request] ::tree-response]} [{::keys [root? all?], agent-id :seon.agent/id}] …)\n;;; └─ end namespace my.plan ─"
+   },
+   "offers": [
+    {
+     "glyph": "①",
+     "label": "seon.agent.lifecycle/complete ([result] …) ([result result-ref] …)",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.lifecycle/complete "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "②",
+     "label": "seon.agent.message/user [content] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.message/user "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "③",
+     "label": "my.plan/done! [{:my.plan/keys [id]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.plan/done! "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "④",
+     "label": "seon.agent.search/grep-graph [{:seon.agent.search/keys [pattern targets max-results full? case-insensitive?], :or {max-results in/default-max-results, targets in/default-graph-targets}}] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.search/grep-graph "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑤",
+     "label": "seon.db/query [& args] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.db/query "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑥",
+     "label": "my.kb/remember [{:my.kb/keys [claim source confidence]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.kb/remember "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    }
+   ],
+   "contract_nses": [
+    "my.plan"
+   ],
+   "predicate": {
+    "kind": "verb-call",
+    "heads": [],
+    "head_nses": [
+     "my.plan",
+     "plan",
+     "todo"
+    ]
+   },
+   "replay_reply": ";; The task: inventory my.kb manual, break into two plan steps, start the first.\n;; First, let me read what my.kb exposes — I can see the namespace card above\n;; but I need to understand what's stored vs what the manual demonstrates.\n(my.kb/inventory)"
+  },
+  {
+   "id": "k1",
+   "rung": "kb",
+   "intent": "From your stored knowledge: when does Zephyr launch and who owns it? Answer from the database.",
+   "warmups": [
+    "Store durably, with provenance, these facts: project Zephyr launches 2026-09-14; its owner is Rivera."
+   ],
+   "restart_between": false,
+   "agent_id": "hWN-2607111228",
+   "replay": {
+    "prompt_blob": "aa05c7e54fb9281e8b5e27462eec39377813326f23df0903ec730fd67e0250ad",
+    "prompt_chars": 152246,
+    "turn_at_ms": 1783787395744,
+    "reply_blob": "ed575511175280386707c339ae9a712c4d9ddcec26280c1abdbb8922a552d44f"
+   },
+   "drive_reply": "From stored knowledge (source: your message, verified):\n\n- **Zephyr launches 2026-09-14**\n- **Owner: Rivera**",
+   "drive_model_config": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
+    "temperature": 0.7,
+    "max_tokens": 4096,
+    "thinking": "false"
+   },
+   "sections": {
+    "recent-verbs": ";;; ┌─ recent-verbs ─\n; recent verbs — the fns you have been calling, most-used first.\n; A MENU, never a mandate: select an entry by outputting its glyph\n; alone (e.g. ①), or ignore this and write any Clojure — both work.\n; Example: to select entry ①, output the single character ① and\n; nothing else — its call template is expanded for you to fill.\n; ① (my.plan/done! [{:my.plan/keys [id]}] …) — Mark a step done; may unblock its dependents next turn.\n; ② (seon.agent.message/user [content] …) — Send a message to your human — `message!` with `to` := THE one user.\n; ③ (my.kb/remember [{:my.kb/keys [claim source confidence]}] …) — Store ONE finding as a durable, provenance-stamped knowledge row.\n; ④ (my.data/rows [{:my.data/keys [attr]}] …) — Every entity carrying `attr`, pulled to self-describing maps.\n; ⑤ (my.plan/plan! [{:my.plan/keys [title], agent-id :seon.agent/id, :as request}] …) — Author a WHOLE plan in ONE transact — goal, pace, nested steps, deps.\n; toolkit — more verbs from your required namespaces:\n; ⑥ (my.plan/active! [{:my.plan/keys [id]}] …) — Take a step up: mark it `:active` — your rendered position anchor.\n; ⑦ (my.ui/status-line [{:my.ui/keys [label value tone]}] …) — One labelled status line — `label: value`, value tinted by `tone`.\n; ⑧ (seon.db/current-agent-id [] …) — The active agent-id (string), or nil outside a [[with-agent]] scope.\n; ⑨ (seon.agent.search/grep-graph [{:seon.agent.search/keys [pattern targets max-results full? case-insensitive?], :or {max-results in/default-max-results, targets in/default-graph-targets}}] …) — Text-search the LIVE PROGRAM GRAPH — the literal counterpart of `grep`.\n;;; └─ end recent-verbs ─",
+    "plan-ledger": ";;; ┌─ plan-ledger ─\n; plan ledger — your plan's open steps (done steps are dropped;\n; the full tree stays queryable via my.plan/tree). ▶ = the step\n; you are on, ☐ = open. Select one by outputting its glyph alone,\n; or ignore this and write any Clojure — both work.\n; ☐ ① Store durably, with provenance, these facts: project Zephyr launches 2026-09-14;…\n; ☐ ② From your stored knowledge: when does Zephyr launch and who owns it? Answer from…\n;;; └─ end plan-ledger ─",
+    "namespace my.kb": ";;; ┌─ namespace my.kb ─\n(register! ::claim [:string {:seon.db/identity true}])\n(register! ::confidence [:enum :verified :inferred])\n(register! ::id :int)\n(register! ::remember-request [:map [::claim ::claim] [::source ::source] [::confidence ::confidence]])\n(register! ::remember-response [:or ::remembered :seon.db/transact-response])\n(register! ::remembered [:map [::id ::id]])\n(register! ::source :string)\n(register! ::source-line :int)\n(register! ::source-line-end :int)\n(register! ::source-path :string)\n(register! ::source-summary [:map [::count :int] [::rating-total :int] [::topic-counts [:map-of :keyword :int]]])\n(register! ::verified-at :inst)\n\n; fns (body elided):\n(defn build-kb-example! \"End-to-end: register the schema, seed rows, run [[source-stats]] over them.\" {:malli/schema [:=> :cat :any]} [] …)\n(defn clear-rating! \"Clear ONE attr — retraction is EXPLICIT.\" {:malli/schema [:=> [:catn [::id :string]] :any]} [id] …)\n(defn forget-source! \"Delete the whole entity — component children (findings) cascade with it.\" {:malli/schema [:=> [:catn [::id :string]] :any]} [id] …)\n(defn inventory \"Which attribute namespaces hold data, with per-attr counts.\" {:malli/schema [:=> :cat :map]} [] …)\n(defn remember \"Store ONE finding as a durable, provenance-stamped knowledge row.\" {:malli/schema [:=> [:cat ::remember-request] ::remember-response]} [{::keys [claim source confidence]}] …)\n(defn remember-sources! \"Add source entities, linking two refs the idiomatic way.\" {:malli/schema [:=> :cat :any]} [] …)\n(defn replace-topics! \"Replace a cardinality-many attr.\" {:malli/schema [:=> [:catn [::id :string] [::topics [:vector :keyword]]] :any]} [id topics] …)\n(defn retitle-source! \"UPSERT by identity — the same `:my.kb.source/id` updates in place.\" {:malli/schema [:=> [:catn [::id :string] [::new-title :string]] :any]} [id new-title] …)\n(defn source-detail \"Pull by LOOKUP-REF.\" {:malli/schema [:=> [:catn [::id :string]] :any]} [id] …)\n(defn source-entity \"Look up an entity by lookup-ref — a touched map, nil if unresolved.\" {:malli/schema [:=> [:catn [::id :string]] :any]} [id] …)\n(defn source-stats \"Aggregate toward a question — the analysis built ON TOP of stored data.\" {:malli/schema [:=> :cat ::source-summary]} [] …)\n(defn title+rating \"Relation find — a SET of `[title rating]` tuples.\" {:malli/schema [:=> :cat [:set [:tuple :string :int]]]} [] …)\n(defn titles \"FIND by attribute presence: every entity asserting `:my.kb.source/title`.\" {:malli/schema [:=> :cat [:vector :string]]} [] …)\n(defn titles-by-author \"`:in`-bound input + REF-JOIN.\" {:malli/schema [:=> [:catn [::author-name :string]] [:vector :string]]} [author-name] …)\n;;; └─ end namespace my.kb ─",
+    "namespace seon.db": ";;; ┌─ namespace seon.db ─\n(register! ::agent-id ::id)\n(register! ::attr-count :int)\n(register! ::attr-ns :keyword)\n(register! ::attr-ns-count :int)\n(register! ::attr-ns-set [:set ::attr-ns])\n(register! ::attrs [:map-of :keyword :int])\n(register! ::cas-attr :keyword)\n(register! ::cas-op [:vector :any])\n(register! ::cas-ref :any)\n(register! ::cas-value :any)\n(register! ::conn :any)\n(register! ::datom [:map [::e :int] [::a :keyword] [::v :any] [::tx :int] [::added? :boolean]])\n(register! ::datom-count :int)\n(register! ::db :any)\n(register! ::db-val map?)\n(register! ::entity-request [:map [::ref :any] [::db {:optional true} :any] [::conn {:optional true} ::conn]])\n(register! ::error [:map [:seon.error/message :string] [:seon.error/data {:optional true} :map] [:seon.error/ex-data {:optional true} :map] [:seon.error/stack {:optional true} :string] [:seon.error/cause {:optional true} :map] [:seon.error/raw {:optional true} :any] [:seon.error/truncated {:optional true} :boolean]])\n(register! ::eval-id ::id)\n(register! ::handler-input [:map [::tx-report :any] [::db :any] [::db-before :any] [::datoms [:vector ::datom]] [::attr-index [:map-of :keyword [:vector ::datom]]] [::trigger {:optional true} :any]])\n(register! ::id [:string {:min 14, :max 14}])\n(register! ::identity-pair [:tuple :keyword :any])\n(register! ::inventory [:map [::attr-groups [:vector ::inventory-row]] [::attr-ns-count ::attr-ns-count] [::attr-count ::attr-count] [::datom-count ::datom-count] [::topology ::topology]])\n(register! ::inventory-row [:map [::attr-ns ::attr-ns] [::attrs ::attrs]])\n(register! ::listen-request [:map [::handler fn?] [::key {:optional true} :any] [::conn {:optional true} ::conn]])\n(register! ::listen-response [:map [::key :any]])\n(register! ::lookup-ref-value [:or :string :uuid :keyword :int])\n(register! ::managed-identities [:map-of :int [:set ::identity-pair]])\n(register! ::managed-identities-request [:map [::managed-scope ::managed-scope] [::db {:optional true} ::db] [::conn {:optional true} ::conn]])\n(register! ::managed-scope [:set ::origin])\n(register! ::namespace :keyword)\n(register! ::opts :map)\n(register! ::origin [:enum :user :agent :system :replay :core-seed :config :test-run])\n(register! ::pull-request [:map [::pull-pattern :any] [::ref :any] [::db {:optional true} :any] [::conn {:optional true} ::conn]])\n(register! ::query-request [:map [::query :any] [::args {:optional true} [:vector :any]] [::db {:optional true} :any] [::conn {:optional true} ::conn]])\n(register! ::ref [:or :int :string [:tuple :keyword ::lookup-ref-value]])\n(register! ::replay? :boolean)\n(register! ::resume-marker? :boolean)\n(register! ::return-report? :boolean)\n(register! ::row-ids [:set :int])\n(register! ::session-id ::id)\n(register! ::system? :boolean)\n(register! ::thunk :any)\n(register! ::time-point :any)\n(register! ::topology :string)\n(register! ::transact-request [:map [::tx-data ::tx-data] [::opts {:optional true} ::opts] [::conn {:optional true} ::conn] [::return-report? {:optional true} ::return-report?]])\n(register! ::transact-response [:or [:map [::ok? [:= true]] [::tempids [:map-of :any :int]] [::tx :int] [::tx-count :int] [::added :int] [::retracted :int] [::tx-report {:optional true} :any]] [:map [::ok? [:= false]] [::error ::error] [::raw-error {:optional true} :string]]])\n(register! ::turn-id ::id)\n(register! ::tx-context :map)\n(register! ::tx-data [:vector :any])\n(register! ::tx-meta :map)\n(register! ::unlisten-request [:map [::key :any] [::conn {:optional true} ::conn]])\n(register! ::unlisten-response [:map [::ok? :boolean]])\n\n; fns (body elided):\n(defn as-of \"A db value as it was AT `t` — time-travel for reads.\" {:malli/schema [:function [:=> [:cat ::time-point] :any] [:=> [:catn [::db ::db-val] [::time-point ::time-point]] :any]]} ([t] …) ([db t] …))\n(defn assert-preconditions! \"Validate boot preconditions; throws ex-info on failure.\" {:malli/schema [:function [:=> :cat :boolean] [:=> [:catn [::opts [:map [::conn {:optional true} ::conn]]]] :boolean]]} ([] …) ([{::keys [conn], :or {conn *conn*}}] …))\n(defn basis-t \"The basis tx-id of a db value — the latest tx it reflects.\" {:malli/schema [:function [:=> :cat ::time-point] [:=> [:catn [::db ::db-val]] ::time-point]]} ([] …) ([db] …))\n(defn bootstrap-row-ids \"Entity ids whose first assertion carries a managed-core origin.\" {:malli/schema [:=> [:catn [::db ::db-val]] ::row-ids]} [db] …)\n(defn cas-assert \"Build a no-op compare-and-swap op asserting `ref`'s `attr` is `value`.\" {:malli/schema [:=> [:catn [::cas-ref ::cas-ref] [::cas-attr ::cas-attr] [::cas-value ::cas-value]] ::cas-op]} ([ref attr value] …) ([:db.fn/cas ref attr value value] …))\n(defn core-attr-namespaces \"Attr namespaces whose `:seon.schema/key` row is a bootstrap row.\" {:malli/schema [:function [:=> [:catn [::db ::db-val]] ::attr-ns-set] [:=> [:catn [::db ::db-val] [::bootstrap-rows ::row-ids]] ::attr-ns-set]]} ([db] …) ([db bootstrap-rows] …))\n(defn current-agent-id \"The active agent-id (string), or nil outside a [[with-agent]] scope.\" {:malli/schema [:=> :cat [:maybe :string]]} [] …)\n(defn current-tx-context \"The active tx-context map, or nil outside [[with-tx-context]].\" {:malli/schema [:=> :cat [:maybe :map]]} [] …)\n(defn decode-edn-value \"Read-side inverse of the bridge's mixed-`:or` EDN-string storage.\" {:malli/schema [:=> [:catn [::attr :keyword] [::value :any]] :any]} [attr v] …)\n(defn entity \"Look up an entity by eid or lookup-ref, as a plain map (sync).\" {:malli/schema [:function [:=> [:cat [:or ::entity-request :any]] :any] [:=> [:catn [::db ::db-val] [::eid :any]] :any]]} ([req] …) ([db eid] …))\n(defn entity-lazy \"INTERNAL: return the RAW datahike Entity for a ref (lazy, map-like).\" {:malli/schema [:function [:=> [:cat [:or ::entity-request :any]] :any] [:=> [:catn [::db ::db-val] [::eid :any]] :any]]} ([req] …) ([db eid] …))\n(defn history \"A db value spanning ALL of time — assertions and retractions.\" {:malli/schema [:function [:=> :cat :any] [:=> [:catn [::db ::db-val]] :any]]} ([] …) ([db] …))\n(defn id->time-str \"The YYMMDDHHmm portion of an id, for time sorting/comparison.\" {:malli/schema [:=> [:catn [::id [:maybe :string]]] [:maybe :string]]} [id] …)\n(defn installed-schema \"The datahike schema map actually INSTALLED on `db`.\" {:malli/schema [:=> [:catn [::db :any]] :map]} [db] …)\n(defn listen! \"Install a tx-listener — safe by default, never crashes the pod.\" {:malli/schema [:=> [:cat ::listen-request] ::listen-response]} [{::keys [handler key conn], :or {conn *conn*}}] …)\n(defn listen-async! \"Intent-revealing alias for [[listen!]] (Promise handler, fire-and-forget).\" {:malli/schema [:=> [:cat ::listen-request] ::listen-response]} [request] …)\n(defn listen-sync! \"Intent-revealing alias for [[listen!]] (sync handler, back-pressure).\" {:malli/schema [:=> [:cat ::listen-request] ::listen-response]} [request] …)\n(defn malli->datahike-schema \"Derive datahike attr declarations from seon.schema registrations.\" {:malli/schema [:=> [:catn [::attr-keys [:sequential :keyword]]] [:vector :any]]} [attr-keys] …)\n(defn managed-identities \"Map of `managed-eid → #{[identity-attr identity-value] …}`.\" {:malli/schema [:=> [:cat ::managed-identities-request] ::managed-identities]} [{::keys [managed-scope conn], db ::db, :or {conn *conn*}}] …)\n(defn new-id! \"Fresh 14-char LLM-readable id, `<3-letter-random>-<YYMMDDHHmm>`.\" {:malli/schema [:=> :cat ::id]} [] …)\n(defn pull \"Pull an entity by ref using a pull pattern (sync).\" {:malli/schema [:function [:=> [:cat ::pull-request] :any] [:=> [:catn [::selector [:vector :any]] [::eid :any]] :any] [:=> [:catn [::db ::db-val] [::selector [:vector :any]] [::eid :any]] :any]]} ([req] …) ([selector eid] …) ([db selector eid] …))\n(defn query \"Run a Datalog query, returning the result set.\" {:malli/schema [:function [:=> [:cat [:or [:vector :any] :map :string]] :any] [:=> [:catn [::query [:or [:vector :any] :map :string]] [::rest [:+ :any]]] :any]]} [& args] …)\n(defn since \"The complement of [[as-of]] — a db value of datoms added after `t`.\" {:malli/schema [:function [:=> [:cat ::time-point] :any] [:=> [:catn [::db ::db-val] [::time-point ::time-point]] :any]]} ([t] …) ([db t] …))\n(defn store-inventory \"Discovery call: which attributes hold data in this store right now.\" {:malli/schema [:function [:=> :cat ::inventory] [:=> [:cat [:map [::db {:optional true} :any] [::conn {:optional true} ::conn] [::system? {:optional true} ::system?]]] ::inventory]]} ([] …) ([{::keys [db conn system?], :or {conn *conn*}}] …))\n(defn transact! \"Commit tx-data — forwarded to the JVM writer, returns an envelope.\" {:malli/schema [:function [:=> [:cat ::transact-request] ::transact-response] [:=> [:catn [::conn ::conn] [::tx-data ::tx-data]] ::transact-response] [:=> [:catn [::conn ::conn] [::tx-data ::tx-data] [::tx-meta ::tx-meta]] ::transact-response]]} [& call-args] …)\n(defn tx-meta-datahike-schema \"Datahike schema entries for the 7 `::*` tx-meta attrs.\" {:malli/schema [:=> :cat [:vector :any]]} [] …)\n(defn unlisten! \"Remove a listener by key; returns `{::ok? true}`.\" {:malli/schema [:=> [:cat ::unlisten-request] ::unlisten-response]} [{::keys [key conn], :or {conn *conn*}}] …)\n(defn with-agent \"Establish an agent-id scope for the dynamic extent of `f`.\" {:malli/schema [:=> [:catn [::agent-id :string] [::thunk ::thunk]] :any]} [agent-id f] …)\n(defn with-tx-context \"Establish a tx-context for the dynamic extent of `f`.\" {:malli/schema [:=> [:catn [::tx-context ::tx-context] [::thunk ::thunk]] :any]} [ctx-map f] …)\n(defn without-agent \"Clear the agent-id scope for the dynamic extent of `f`.\" {:malli/schema [:=> [:catn [::thunk ::thunk]] :any]} [f] …)\n;;; └─ end namespace seon.db ─"
+   },
+   "offers": [
+    {
+     "glyph": "①",
+     "label": "my.plan/done! [{:my.plan/keys [id]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.plan/done! "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "②",
+     "label": "seon.agent.message/user [content] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.message/user "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "③",
+     "label": "my.kb/remember [{:my.kb/keys [claim source confidence]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.kb/remember "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "④",
+     "label": "my.data/rows [{:my.data/keys [attr]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.data/rows "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑤",
+     "label": "my.plan/plan! [{:my.plan/keys [title], agent-id :seon.agent/id, :as request}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.plan/plan! "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑥",
+     "label": "my.plan/active! [{:my.plan/keys [id]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.plan/active! "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑦",
+     "label": "my.ui/status-line [{:my.ui/keys [label value tone]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.ui/status-line "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑧",
+     "label": "seon.db/current-agent-id [] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.db/current-agent-id "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑨",
+     "label": "seon.agent.search/grep-graph [{:seon.agent.search/keys [pattern targets max-results full? case-insensitive?], :or {max-results in/default-max-results, targets in/default-graph-targets}}] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.search/grep-graph "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    }
+   ],
+   "contract_nses": [
+    "my.kb",
+    "seon.db"
+   ],
+   "predicate": {
+    "kind": "verb-call",
+    "heads": [
+     "db/query",
+     "seon.db/query",
+     "db/pull",
+     "seon.db/pull",
+     "db/entity",
+     "seon.db/entity",
+     "search/grep-graph",
+     "seon.agent.search/grep-graph"
+    ],
+    "head_nses": []
+   },
+   "replay_reply": "; The user wants me to answer from stored knowledge — the claims I just stored. I can see them directly in the findings section above (ids 3311 and 3316), so I don't need to re-query. Answer this turn.\n(message/user \"From stored knowledge (source: your message, verified):\n\n- **Zephyr launches 2026-09-14**\n- **Owner: Rivera**\")"
+  },
+  {
+   "id": "k2",
+   "rung": "kb",
+   "intent": "What port does the wire REPL use, per your stored facts? Answer from the database.",
+   "warmups": [
+    "Record durably: the acme pod listens on port 7980 and the wire REPL on 7981."
+   ],
+   "restart_between": false,
+   "agent_id": "oJv-2607111230",
+   "replay": {
+    "prompt_blob": "afbfab51ec99fd0ee2ceb98625c0d3e4d690211e881d3be9d2767ab7d3de148b",
+    "prompt_chars": 148593,
+    "turn_at_ms": 1783787474327,
+    "reply_blob": "9b13b1c5d031a6fb3de6676ccadb4660006708a1926c474f0f69b721f0d628d3"
+   },
+   "drive_reply": "The wire REPL listens on port 7981.",
+   "drive_model_config": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-pro",
+    "temperature": 0.7,
+    "max_tokens": 4096,
+    "thinking": "false"
+   },
+   "sections": {
+    "recent-verbs": ";;; ┌─ recent-verbs ─\n; recent verbs — the fns you have been calling, most-used first.\n; A MENU, never a mandate: select an entry by outputting its glyph\n; alone (e.g. ①), or ignore this and write any Clojure — both work.\n; Example: to select entry ①, output the single character ① and\n; nothing else — its call template is expanded for you to fill.\n; ① (seon.agent.lifecycle/complete ([result] …) ([result result-ref] …)) — Finish the calling agent's work; close the open run `:completed`.\n; ② (my.plan/done! [{:my.plan/keys [id]}] …) — Mark a step done; may unblock its dependents next turn.\n; ③ (my.kb/remember [{:my.kb/keys [claim source confidence]}] …) — Store ONE finding as a durable, provenance-stamped knowledge row.\n; toolkit — more verbs from your required namespaces:\n; ④ (seon.agent.message/user [content] …) — Send a message to your human — `message!` with `to` := THE one user.\n; ⑤ (my.plan/active! [{:my.plan/keys [id]}] …) — Take a step up: mark it `:active` — your rendered position anchor.\n; ⑥ (my.ui/status-line [{:my.ui/keys [label value tone]}] …) — One labelled status line — `label: value`, value tinted by `tone`.\n; ⑦ (seon.db/current-agent-id [] …) — The active agent-id (string), or nil outside a [[with-agent]] scope.\n;;; └─ end recent-verbs ─",
+    "plan-ledger": ";;; ┌─ plan-ledger ─\n; plan ledger — your plan's open steps (done steps are dropped;\n; the full tree stays queryable via my.plan/tree). ▶ = the step\n; you are on, ☐ = open. Select one by outputting its glyph alone,\n; or ignore this and write any Clojure — both work.\n; ☐ ① What port does the wire REPL use, per your stored facts? Answer from the databas…\n;;; └─ end plan-ledger ─",
+    "namespace my.kb": ";;; ┌─ namespace my.kb ─\n(register! ::claim [:string {:seon.db/identity true}])\n(register! ::confidence [:enum :verified :inferred])\n(register! ::id :int)\n(register! ::remember-request [:map [::claim ::claim] [::source ::source] [::confidence ::confidence]])\n(register! ::remember-response [:or ::remembered :seon.db/transact-response])\n(register! ::remembered [:map [::id ::id]])\n(register! ::source :string)\n(register! ::source-line :int)\n(register! ::source-line-end :int)\n(register! ::source-path :string)\n(register! ::source-summary [:map [::count :int] [::rating-total :int] [::topic-counts [:map-of :keyword :int]]])\n(register! ::verified-at :inst)\n\n; fns (body elided):\n(defn build-kb-example! \"End-to-end: register the schema, seed rows, run [[source-stats]] over them.\" {:malli/schema [:=> :cat :any]} [] …)\n(defn clear-rating! \"Clear ONE attr — retraction is EXPLICIT.\" {:malli/schema [:=> [:catn [::id :string]] :any]} [id] …)\n(defn forget-source! \"Delete the whole entity — component children (findings) cascade with it.\" {:malli/schema [:=> [:catn [::id :string]] :any]} [id] …)\n(defn inventory \"Which attribute namespaces hold data, with per-attr counts.\" {:malli/schema [:=> :cat :map]} [] …)\n(defn remember \"Store ONE finding as a durable, provenance-stamped knowledge row.\" {:malli/schema [:=> [:cat ::remember-request] ::remember-response]} [{::keys [claim source confidence]}] …)\n(defn remember-sources! \"Add source entities, linking two refs the idiomatic way.\" {:malli/schema [:=> :cat :any]} [] …)\n(defn replace-topics! \"Replace a cardinality-many attr.\" {:malli/schema [:=> [:catn [::id :string] [::topics [:vector :keyword]]] :any]} [id topics] …)\n(defn retitle-source! \"UPSERT by identity — the same `:my.kb.source/id` updates in place.\" {:malli/schema [:=> [:catn [::id :string] [::new-title :string]] :any]} [id new-title] …)\n(defn source-detail \"Pull by LOOKUP-REF.\" {:malli/schema [:=> [:catn [::id :string]] :any]} [id] …)\n(defn source-entity \"Look up an entity by lookup-ref — a touched map, nil if unresolved.\" {:malli/schema [:=> [:catn [::id :string]] :any]} [id] …)\n(defn source-stats \"Aggregate toward a question — the analysis built ON TOP of stored data.\" {:malli/schema [:=> :cat ::source-summary]} [] …)\n(defn title+rating \"Relation find — a SET of `[title rating]` tuples.\" {:malli/schema [:=> :cat [:set [:tuple :string :int]]]} [] …)\n(defn titles \"FIND by attribute presence: every entity asserting `:my.kb.source/title`.\" {:malli/schema [:=> :cat [:vector :string]]} [] …)\n(defn titles-by-author \"`:in`-bound input + REF-JOIN.\" {:malli/schema [:=> [:catn [::author-name :string]] [:vector :string]]} [author-name] …)\n;;; └─ end namespace my.kb ─",
+    "namespace seon.db": ";;; ┌─ namespace seon.db ─\n(register! ::agent-id ::id)\n(register! ::attr-count :int)\n(register! ::attr-ns :keyword)\n(register! ::attr-ns-count :int)\n(register! ::attr-ns-set [:set ::attr-ns])\n(register! ::attrs [:map-of :keyword :int])\n(register! ::cas-attr :keyword)\n(register! ::cas-op [:vector :any])\n(register! ::cas-ref :any)\n(register! ::cas-value :any)\n(register! ::conn :any)\n(register! ::datom [:map [::e :int] [::a :keyword] [::v :any] [::tx :int] [::added? :boolean]])\n(register! ::datom-count :int)\n(register! ::db :any)\n(register! ::db-val map?)\n(register! ::entity-request [:map [::ref :any] [::db {:optional true} :any] [::conn {:optional true} ::conn]])\n(register! ::error [:map [:seon.error/message :string] [:seon.error/data {:optional true} :map] [:seon.error/ex-data {:optional true} :map] [:seon.error/stack {:optional true} :string] [:seon.error/cause {:optional true} :map] [:seon.error/raw {:optional true} :any] [:seon.error/truncated {:optional true} :boolean]])\n(register! ::eval-id ::id)\n(register! ::handler-input [:map [::tx-report :any] [::db :any] [::db-before :any] [::datoms [:vector ::datom]] [::attr-index [:map-of :keyword [:vector ::datom]]] [::trigger {:optional true} :any]])\n(register! ::id [:string {:min 14, :max 14}])\n(register! ::identity-pair [:tuple :keyword :any])\n(register! ::inventory [:map [::attr-groups [:vector ::inventory-row]] [::attr-ns-count ::attr-ns-count] [::attr-count ::attr-count] [::datom-count ::datom-count] [::topology ::topology]])\n(register! ::inventory-row [:map [::attr-ns ::attr-ns] [::attrs ::attrs]])\n(register! ::listen-request [:map [::handler fn?] [::key {:optional true} :any] [::conn {:optional true} ::conn]])\n(register! ::listen-response [:map [::key :any]])\n(register! ::lookup-ref-value [:or :string :uuid :keyword :int])\n(register! ::managed-identities [:map-of :int [:set ::identity-pair]])\n(register! ::managed-identities-request [:map [::managed-scope ::managed-scope] [::db {:optional true} ::db] [::conn {:optional true} ::conn]])\n(register! ::managed-scope [:set ::origin])\n(register! ::namespace :keyword)\n(register! ::opts :map)\n(register! ::origin [:enum :user :agent :system :replay :core-seed :config :test-run])\n(register! ::pull-request [:map [::pull-pattern :any] [::ref :any] [::db {:optional true} :any] [::conn {:optional true} ::conn]])\n(register! ::query-request [:map [::query :any] [::args {:optional true} [:vector :any]] [::db {:optional true} :any] [::conn {:optional true} ::conn]])\n(register! ::ref [:or :int :string [:tuple :keyword ::lookup-ref-value]])\n(register! ::replay? :boolean)\n(register! ::resume-marker? :boolean)\n(register! ::return-report? :boolean)\n(register! ::row-ids [:set :int])\n(register! ::session-id ::id)\n(register! ::system? :boolean)\n(register! ::thunk :any)\n(register! ::time-point :any)\n(register! ::topology :string)\n(register! ::transact-request [:map [::tx-data ::tx-data] [::opts {:optional true} ::opts] [::conn {:optional true} ::conn] [::return-report? {:optional true} ::return-report?]])\n(register! ::transact-response [:or [:map [::ok? [:= true]] [::tempids [:map-of :any :int]] [::tx :int] [::tx-count :int] [::added :int] [::retracted :int] [::tx-report {:optional true} :any]] [:map [::ok? [:= false]] [::error ::error] [::raw-error {:optional true} :string]]])\n(register! ::turn-id ::id)\n(register! ::tx-context :map)\n(register! ::tx-data [:vector :any])\n(register! ::tx-meta :map)\n(register! ::unlisten-request [:map [::key :any] [::conn {:optional true} ::conn]])\n(register! ::unlisten-response [:map [::ok? :boolean]])\n\n; fns (body elided):\n(defn as-of \"A db value as it was AT `t` — time-travel for reads.\" {:malli/schema [:function [:=> [:cat ::time-point] :any] [:=> [:catn [::db ::db-val] [::time-point ::time-point]] :any]]} ([t] …) ([db t] …))\n(defn assert-preconditions! \"Validate boot preconditions; throws ex-info on failure.\" {:malli/schema [:function [:=> :cat :boolean] [:=> [:catn [::opts [:map [::conn {:optional true} ::conn]]]] :boolean]]} ([] …) ([{::keys [conn], :or {conn *conn*}}] …))\n(defn basis-t \"The basis tx-id of a db value — the latest tx it reflects.\" {:malli/schema [:function [:=> :cat ::time-point] [:=> [:catn [::db ::db-val]] ::time-point]]} ([] …) ([db] …))\n(defn bootstrap-row-ids \"Entity ids whose first assertion carries a managed-core origin.\" {:malli/schema [:=> [:catn [::db ::db-val]] ::row-ids]} [db] …)\n(defn cas-assert \"Build a no-op compare-and-swap op asserting `ref`'s `attr` is `value`.\" {:malli/schema [:=> [:catn [::cas-ref ::cas-ref] [::cas-attr ::cas-attr] [::cas-value ::cas-value]] ::cas-op]} ([ref attr value] …) ([:db.fn/cas ref attr value value] …))\n(defn core-attr-namespaces \"Attr namespaces whose `:seon.schema/key` row is a bootstrap row.\" {:malli/schema [:function [:=> [:catn [::db ::db-val]] ::attr-ns-set] [:=> [:catn [::db ::db-val] [::bootstrap-rows ::row-ids]] ::attr-ns-set]]} ([db] …) ([db bootstrap-rows] …))\n(defn current-agent-id \"The active agent-id (string), or nil outside a [[with-agent]] scope.\" {:malli/schema [:=> :cat [:maybe :string]]} [] …)\n(defn current-tx-context \"The active tx-context map, or nil outside [[with-tx-context]].\" {:malli/schema [:=> :cat [:maybe :map]]} [] …)\n(defn decode-edn-value \"Read-side inverse of the bridge's mixed-`:or` EDN-string storage.\" {:malli/schema [:=> [:catn [::attr :keyword] [::value :any]] :any]} [attr v] …)\n(defn entity \"Look up an entity by eid or lookup-ref, as a plain map (sync).\" {:malli/schema [:function [:=> [:cat [:or ::entity-request :any]] :any] [:=> [:catn [::db ::db-val] [::eid :any]] :any]]} ([req] …) ([db eid] …))\n(defn entity-lazy \"INTERNAL: return the RAW datahike Entity for a ref (lazy, map-like).\" {:malli/schema [:function [:=> [:cat [:or ::entity-request :any]] :any] [:=> [:catn [::db ::db-val] [::eid :any]] :any]]} ([req] …) ([db eid] …))\n(defn history \"A db value spanning ALL of time — assertions and retractions.\" {:malli/schema [:function [:=> :cat :any] [:=> [:catn [::db ::db-val]] :any]]} ([] …) ([db] …))\n(defn id->time-str \"The YYMMDDHHmm portion of an id, for time sorting/comparison.\" {:malli/schema [:=> [:catn [::id [:maybe :string]]] [:maybe :string]]} [id] …)\n(defn installed-schema \"The datahike schema map actually INSTALLED on `db`.\" {:malli/schema [:=> [:catn [::db :any]] :map]} [db] …)\n(defn listen! \"Install a tx-listener — safe by default, never crashes the pod.\" {:malli/schema [:=> [:cat ::listen-request] ::listen-response]} [{::keys [handler key conn], :or {conn *conn*}}] …)\n(defn listen-async! \"Intent-revealing alias for [[listen!]] (Promise handler, fire-and-forget).\" {:malli/schema [:=> [:cat ::listen-request] ::listen-response]} [request] …)\n(defn listen-sync! \"Intent-revealing alias for [[listen!]] (sync handler, back-pressure).\" {:malli/schema [:=> [:cat ::listen-request] ::listen-response]} [request] …)\n(defn malli->datahike-schema \"Derive datahike attr declarations from seon.schema registrations.\" {:malli/schema [:=> [:catn [::attr-keys [:sequential :keyword]]] [:vector :any]]} [attr-keys] …)\n(defn managed-identities \"Map of `managed-eid → #{[identity-attr identity-value] …}`.\" {:malli/schema [:=> [:cat ::managed-identities-request] ::managed-identities]} [{::keys [managed-scope conn], db ::db, :or {conn *conn*}}] …)\n(defn new-id! \"Fresh 14-char LLM-readable id, `<3-letter-random>-<YYMMDDHHmm>`.\" {:malli/schema [:=> :cat ::id]} [] …)\n(defn pull \"Pull an entity by ref using a pull pattern (sync).\" {:malli/schema [:function [:=> [:cat ::pull-request] :any] [:=> [:catn [::selector [:vector :any]] [::eid :any]] :any] [:=> [:catn [::db ::db-val] [::selector [:vector :any]] [::eid :any]] :any]]} ([req] …) ([selector eid] …) ([db selector eid] …))\n(defn query \"Run a Datalog query, returning the result set.\" {:malli/schema [:function [:=> [:cat [:or [:vector :any] :map :string]] :any] [:=> [:catn [::query [:or [:vector :any] :map :string]] [::rest [:+ :any]]] :any]]} [& args] …)\n(defn since \"The complement of [[as-of]] — a db value of datoms added after `t`.\" {:malli/schema [:function [:=> [:cat ::time-point] :any] [:=> [:catn [::db ::db-val] [::time-point ::time-point]] :any]]} ([t] …) ([db t] …))\n(defn store-inventory \"Discovery call: which attributes hold data in this store right now.\" {:malli/schema [:function [:=> :cat ::inventory] [:=> [:cat [:map [::db {:optional true} :any] [::conn {:optional true} ::conn] [::system? {:optional true} ::system?]]] ::inventory]]} ([] …) ([{::keys [db conn system?], :or {conn *conn*}}] …))\n(defn transact! \"Commit tx-data — forwarded to the JVM writer, returns an envelope.\" {:malli/schema [:function [:=> [:cat ::transact-request] ::transact-response] [:=> [:catn [::conn ::conn] [::tx-data ::tx-data]] ::transact-response] [:=> [:catn [::conn ::conn] [::tx-data ::tx-data] [::tx-meta ::tx-meta]] ::transact-response]]} [& call-args] …)\n(defn tx-meta-datahike-schema \"Datahike schema entries for the 7 `::*` tx-meta attrs.\" {:malli/schema [:=> :cat [:vector :any]]} [] …)\n(defn unlisten! \"Remove a listener by key; returns `{::ok? true}`.\" {:malli/schema [:=> [:cat ::unlisten-request] ::unlisten-response]} [{::keys [key conn], :or {conn *conn*}}] …)\n(defn with-agent \"Establish an agent-id scope for the dynamic extent of `f`.\" {:malli/schema [:=> [:catn [::agent-id :string] [::thunk ::thunk]] :any]} [agent-id f] …)\n(defn with-tx-context \"Establish a tx-context for the dynamic extent of `f`.\" {:malli/schema [:=> [:catn [::tx-context ::tx-context] [::thunk ::thunk]] :any]} [ctx-map f] …)\n(defn without-agent \"Clear the agent-id scope for the dynamic extent of `f`.\" {:malli/schema [:=> [:catn [::thunk ::thunk]] :any]} [f] …)\n;;; └─ end namespace seon.db ─"
+   },
+   "offers": [
+    {
+     "glyph": "①",
+     "label": "seon.agent.lifecycle/complete ([result] …) ([result result-ref] …)",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.lifecycle/complete "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "②",
+     "label": "my.plan/done! [{:my.plan/keys [id]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.plan/done! "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "③",
+     "label": "my.kb/remember [{:my.kb/keys [claim source confidence]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.kb/remember "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "④",
+     "label": "seon.agent.message/user [content] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.agent.message/user "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑤",
+     "label": "my.plan/active! [{:my.plan/keys [id]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.plan/active! "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑥",
+     "label": "my.ui/status-line [{:my.ui/keys [label value tone]}] …",
+     "template": [
+      [
+       "clamp",
+       "(my.ui/status-line "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    },
+    {
+     "glyph": "⑦",
+     "label": "seon.db/current-agent-id [] …",
+     "template": [
+      [
+       "clamp",
+       "(seon.db/current-agent-id "
+      ],
+      [
+       "free",
+       24
+      ],
+      [
+       "clamp",
+       ")"
+      ]
+     ]
+    }
+   ],
+   "contract_nses": [
+    "my.kb",
+    "seon.db"
+   ],
+   "predicate": {
+    "kind": "verb-call",
+    "heads": [
+     "db/query",
+     "seon.db/query",
+     "db/pull",
+     "seon.db/pull",
+     "db/entity",
+     "seon.db/entity",
+     "search/grep-graph",
+     "seon.agent.search/grep-graph"
+    ],
+    "head_nses": []
+   },
+   "replay_reply": "I already have this fact stored — the answer is in my findings from the previous turn. Let me confirm by pulling the stored entity.\n\n(my.kb/source-entity \"3478\")\n"
+  }
+ ]
+}

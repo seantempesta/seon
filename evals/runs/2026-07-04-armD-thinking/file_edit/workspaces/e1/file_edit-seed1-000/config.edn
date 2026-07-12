@@ -1,0 +1,4 @@
+{:service "ember"
+ :retries 7
+ :timeout-ms 2000
+ :verbose false}
