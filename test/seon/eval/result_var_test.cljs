@@ -21,7 +21,7 @@
      (cljs.test/run-tests 'seon.eval.result-var-test)"
   (:require
     [cljs.test :refer [deftest is testing async]]
-    [seon.agent :as agent]
+    [seon.agent.home :as home]
     [seon.client :as client]
     [seon.db :as db]
     [seon.eval :as seval]
@@ -41,7 +41,7 @@
   "Run `source` (one form) through eval-batch! in a fresh agent ns.
    Returns a Promise of `#js {:cs … :hns … :result <eval-batch! map>}`."
   [aid source]
-  (let [hns (agent/home-ns aid)
+  (let [hns (home/home-ns aid)
         tid "turnresvar01"]
     (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
         (.then (fn [pair]

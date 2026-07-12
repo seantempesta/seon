@@ -20,12 +20,12 @@
     [cljs.test :refer [deftest is testing async use-fixtures]]
     [my.blob :as blob]
     [seon.agent :as agent]
+    [seon.agent.home :as home]
     [seon.agent.loop :as loop]
     [seon.agent.message :as msg]
     [seon.agent.run :as run]
     [seon.agent.schedule :as schedule]
     [seon.client :as client]
-    [seon.agent.ctx :as ctx]
     [seon.db :as db]
     [seon.derive :as derive]
     [seon.eval :as seval]
@@ -90,7 +90,7 @@
     (await (db/transact! {:seon.db/tx-data [{:seon.user/id "user"}]}))
     (await (db/with-agent agent-id
              (fn ^:async boot []
-               (await (seval/setup-agent-ns! cs (ctx/home-ns agent-id) agent-id))
+               (await (seval/setup-agent-ns! cs (home/home-ns agent-id) agent-id))
                (await (agent/create! {:seon.agent/id agent-id})))))
     cs))
 
@@ -367,7 +367,7 @@
                                     (fn ^:async eb []
                                       (await (seval/eval-batch!
                                                cs (repl-internal/parse-forms "(def fenced-marker 42)")
-                                               (ctx/home-ns agent-id)
+                                               (home/home-ns agent-id)
                                                agent-id "turnloop0001" r1)))))]
                 (testing "the superseded run's batch is fenced — skipped, nothing recorded"
                   (is (true? (:seon.eval/fenced? fenced)))
@@ -381,7 +381,7 @@
                                       (fn ^:async eb2 []
                                         (await (seval/eval-batch!
                                                  cs (repl-internal/parse-forms "(+ 1 1)")
-                                                 (ctx/home-ns agent-id)
+                                                 (home/home-ns agent-id)
                                                  agent-id "turnloop0002" r2)))))]
                 (testing "the CURRENT run's batch is NOT fenced — it commits"
                   (is (nil? (:seon.eval/fenced? ok-batch)))
@@ -488,7 +488,7 @@
                 (fn ^:async arm! [cid]
                   (await (db/with-agent cid
                            (fn ^:async setup []
-                             (await (seval/setup-agent-ns! cs (ctx/home-ns cid) cid)))))
+                             (await (seval/setup-agent-ns! cs (home/home-ns cid) cid)))))
                   (loop/install-wake-trigger!
                     {:seon.agent/id            cid
                      :seon.agent/llm-fn        (scripted-llm "(complete \"ok\")")

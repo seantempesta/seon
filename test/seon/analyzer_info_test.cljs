@@ -99,6 +99,30 @@
   (is (= #{} (ai/ns-require-edges (atom {:cljs.analyzer/namespaces {}}) 'no.such))
       "unknown / never-eval'd ns yields the empty edge set"))
 
+(deftest source-require-edges-match-the-structural-edge-contract
+  (let [edges (ai/require-edges-from-source
+                "(ns my.probe (:require [seon.db :as db]
+                                        [seon.agent.lifecycle :refer [wait complete]]
+                                        [my.types :as-alias types]
+                                        [legacy.all :refer :all]
+                                        plain.ns))")]
+    (is (m/validate :seon.analyzer-info/require-edges edges))
+    (is (= #{{:seon.ns.require/target :seon.db
+              :seon.ns.require/alias 'db}
+             {:seon.ns.require/target :seon.agent.lifecycle
+              :seon.ns.require/refers #{'wait 'complete}}
+             {:seon.ns.require/target :my.types
+              :seon.ns.require/alias 'types
+              :seon.ns.require/as-alias? true}
+             {:seon.ns.require/target :legacy.all
+              :seon.ns.require/refer-all? true}
+             {:seon.ns.require/target :plain.ns}}
+           edges))))
+
+(deftest source-require-edges-fail-soft
+  (is (= #{} (ai/require-edges-from-source "not an ns form")))
+  (is (= #{} (ai/require-edges-from-source "(ns broken"))))
+
 ;; ---------------------------------------------------------------------------
 ;; var-projection — owner-ns keys (C34): the projection map speaks
 ;; :seon.analyzer-info/* like every internal envelope, and validates

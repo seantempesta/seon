@@ -23,7 +23,7 @@
 ;; point here: :seon.config/agent-context and :seon.config/root-context below
 ;; REPLACE system.edn's (so no default blocks, no home-requires override —
 ;; the home-ns toolbelt falls back to the consumer default,
-;; seon.eval/home-ns-require-specs, which is exactly what the prompt's
+;; seon.agent.home/home-ns-require-specs, which is exactly what the prompt's
 ;; message/complete/wait forms resolve against).
 #merge
 [#include "system.edn"

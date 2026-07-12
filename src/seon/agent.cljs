@@ -60,6 +60,7 @@
    onto the agent's `:seon.render/ai` slot."
   (:require
     [clojure.string :as str]
+    [seon.agent.home :as home]
     [seon.agent.message :as msg]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.namespaces :as ctx-namespaces]
@@ -113,7 +114,6 @@
 ;; want the validated entry point.
 ;; ============================================================
 
-(def home-ns ctx/home-ns)
 (def messages ctx/messages)
 (def current-turn ctx/current-turn)
 (def evals ctx/evals)
@@ -739,7 +739,7 @@
 ;; identity flows via the `seon.db/agent-id-als` scope, not process-global
 ;; atoms: the caller (seon.client/start-agent!) mints the id locally and
 ;; wraps the boot pipeline in `(seon.db/with-agent id …)`. The home-ns
-;; stays deterministic via `(home-ns id)`.
+;; stays deterministic via `(home/home-ns id)`.
 ;; ============================================================
 
 ;; The input map ALSO carries :seon.agent/llm-fn + :seon.agent/compile-state
@@ -785,7 +785,7 @@
           res)
       (let [{:seon.agent/keys [id]} res]
         {:seon.agent/id id
-         :seon.agent/ns (home-ns id)}))))
+         :seon.agent/ns (home/home-ns id)}))))
 
 ;; ============================================================
 ;; message! lives in [[seon.agent.message]] (the keyword namespace matches

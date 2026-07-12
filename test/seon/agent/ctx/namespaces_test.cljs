@@ -19,10 +19,10 @@
     [cljs.test :refer [deftest is testing async]]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.namespaces :as nss]
+    [seon.agent.home :as home]
     [seon.ai.tokens :as tokens]
     [seon.client :as client]
-    [seon.db :as db]
-    [seon.eval :as seval]))
+    [seon.db :as db]))
 
 ;; A valid agent id (`:seon.agent/id` is a strict shape) and its home ns —
 ;; a fresh agent's current ns falls back to `(home-ns id)`.
@@ -130,8 +130,9 @@
 (deftest workspace-stub-reflects-configured-requires-not-const
   ;; Turn-0 regression: a FRESH agent (no home-ns source yet) renders the
   ;; workspace stub. Its `(ns … (:require …))` prose must reflect THIS agent's
-  ;; CONFIG-RESOLVED requires ([[seon.eval/home-requires-for]]), NOT the const
-  ;; default ([[seon.eval/home-ns-require-specs]]) the old 1-arg call used.
+  ;; CONFIG-RESOLVED requires ([[seon.agent.home/home-requires-for]]), NOT the
+  ;; const default ([[seon.agent.home/home-ns-require-specs]]) the old 1-arg
+  ;; call used.
   (async done
     (-> (client/open-agent-conn!)
         (.then (fn [conn]
@@ -142,9 +143,9 @@
                          (.then (fn [_]
                                   (let [out       (nss/namespaces-block
                                                     {:seon.db/db @conn :seon.agent/id fresh})
-                                        resolved  (seval/home-requires-for fresh)
-                                        cfg-form  (seval/home-ns-form home resolved)
-                                        const-form (seval/home-ns-form home)]
+                                        resolved  (home/home-requires-for fresh)
+                                        cfg-form  (home/home-ns-form home resolved)
+                                        const-form (home/home-ns-form home)]
                                     (is (contains? (section-nses out) "my.agent.tst-cfg-2606260000")
                                         "the fresh agent's home ns renders (the workspace stub)")
                                     (is (str/includes? out cfg-form)

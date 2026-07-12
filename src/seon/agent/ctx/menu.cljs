@@ -277,7 +277,7 @@
 ;;     (the stored `:seon.ns/require-edges` — the SAME set whose compact
 ;;     cards the `:namespaces` section renders, mirroring its
 ;;     `required-ns-set`; for a home ns that is the canonical
-;;     `seon.eval/home-ns-require-specs` wiring). No hand list: the
+;;     `seon.agent.home/home-ns-require-specs` wiring). No hand list: the
 ;;     require edges are data, `included-ns?` is the structural filter.
 ;;   - the CANDIDATES are those nses' public SPECCED `:seon.fn` rows
 ;;     (the program graph; a specced public fn is the agent-facing

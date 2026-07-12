@@ -29,6 +29,7 @@
     [clojure.string :as str]
     [my.blob :as blob]
     [seon.agent :as agent]
+    [seon.agent.home :as home]
     [seon.agent.run :as run]
     [seon.agent.debug :as agent-debug]
     [seon.agent.turn :as turn]
@@ -82,7 +83,7 @@
         aid "turn-capture-agent"]
     (await (db/with-agent aid
              (fn ^:async boot []
-               (await (seval/setup-agent-ns! cs (agent/home-ns aid) aid))
+               (await (seval/setup-agent-ns! cs (home/home-ns aid) aid))
                (await (agent/create! {:seon.agent/id aid})))))
     {:seon.agent/id aid :seon.agent/compile-state cs}))
 

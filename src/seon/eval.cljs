@@ -56,6 +56,7 @@
             [malli.core :as m]
             [malli.instrument :as mi]
             [shadow.cljs.bootstrap.node :as boot]
+            [seon.agent.home :as home]
             [seon.ai.tokens :as tokens]
             [seon.analyzer-info :as analyzer-info]
             [seon.config :as config]
@@ -1062,9 +1063,8 @@
        result-vars-cap " results) — re-run its form to recompute it. "
        "Only recent results stay referenceable as `result/<id>` vars."))
 
-;; Defined after `home-ns-require-specs` (the single source of home-ns
-;; aliases it derives from); declared here so `raw-eval`'s not-defined
-;; branch can append the "did you mean `plan/plan!`?" hint.
+;; Defined later; declared here so `raw-eval`'s not-defined branch can append
+;; the "did you mean `plan/plan!`?" hint.
 (declare home-ns-alias-hint)
 
 ;;; The eval-result ENVELOPE (in-memory, never transacted whole):
@@ -1441,55 +1441,27 @@
       (error/record! {:seon.error/raw e :seon.error/fault :core})))
   nil)
 
-(def home-ns-require-specs
-  "THE canonical require list every agent's home namespace is wired with —
-   the single source of truth, shared by [[setup-agent-ns!]] (which INSTALLS
-   it) and `seon.agent.ctx.namespaces/cur-ns-workspace-stub` (which RENDERS it
-   VERBATIM into the agent's workspace block). No parallel reconstruction, no
-   hidden aliasing: the agent SEES the exact aliases/refers its reflexive
-   `(message/user …)` / `(wait …)` / `(schema/register! …)` / `(db/transact! …)`
-   forms resolve against.
-
-   Each entry is a `(require …)`-style spec — `[ns :as alias]` or
-   `[ns :refer [functions…]]` — `pr-str`'d straight into the `(ns … (:require …))`
-   head by [[home-ns-form]]."
-  '[[seon.agent.message :as message]
-    [seon.agent :as agent]
-    [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
-    [seon.schema :as schema]
-    [seon.db :as db]
-    [my.plan :as plan]])
-
 ;; ============================================================
 ;; Config-driven agent-init CP-1 — home-ns wiring + toolkit (agent-level
 ;; attrs on the agent entity). Nothing reads these yet (purely additive).
 ;; ============================================================
 
-;; SHARED shape, register-once (decision 5): one `(require …)`-style spec —
-;; `[ns :as alias]` or `[ns :refer [functions…]]`.
-(schema/register! ::require-spec
-  [:cat :symbol [:enum :as :refer] [:or :symbol [:vector :symbol]]])
-
 ;; home-requires: set-once, read WHOLE by setup-agent-ns!, never queried
 ;; per-element → the ONE decision-22(c) serialized-blob case. The spec's
-;; `[:vector ::require-spec]` does NOT bridge — the seon.db bridge maps a
-;; `:vector`'s CHILD to a datahike column, and `::require-spec` (a `:cat`)
+;; `[:vector :seon.agent.home/require-spec]` does NOT bridge — the seon.db bridge maps a
+;; `:vector`'s CHILD to a datahike column, and
+;; `:seon.agent.home/require-spec` (a `:cat`)
 ;; has no column type, so it hard-rejects (`:seon.db/unbridgeable-attrs`).
 ;; The EDN-blob path the spec names ("stored as a pr-str'd EDN string") is
 ;; the bridge's MIXED-`:or` branch (db/internal `form->datahike-value-type`
 ;; `:or`) — the SAME mechanism `:seon.render.canvas/content` /
 ;; `:seon.render/ai` use. So this is a mixed `:or` (the require-spec vector
 ;; arm + a scalar `:symbol` arm) → `:db.type/string` EDN, decoded on read
-;; via `seon.db/decode-edn-value`. Default = the live [[home-ns-require-specs]]
-;; list (verbatim).
+;; via `seon.db/decode-edn-value`. Default = the live
+;; [[seon.agent.home/home-ns-require-specs]] list (verbatim).
 (schema/register! ::home-requires
-  [:or {:default '[[seon.agent.message :as message]
-                   [seon.agent :as agent]
-                   [seon.agent.lifecycle :refer [wait complete pause resume terminate]]
-                   [seon.schema :as schema]
-                   [seon.db :as db]
-                   [my.plan :as plan]]}
-   [:vector ::require-spec]
+  [:or {:default home/home-ns-require-specs}
+   [:vector :seon.agent.home/require-spec]
    :symbol])
 
 (defn home-ns-alias-hint
@@ -1498,9 +1470,10 @@
    Given a bare function NAME that failed to resolve (e.g. \"plan!\",
    \"user\", \"complete\") — the form the agent SHOULD have
    written — a string like \"plan/plan!\" — or nil if no home-ns alias/refer
-   exposes that name. Derived from [[home-ns-require-specs]] (the single
-   source of which aliases/refers every agent's home ns carries) so it can
-   never drift from what the agent's prompt teaches:
+   exposes that name. Derived from
+   [[seon.agent.home/home-ns-require-specs]] (the single source of which
+   aliases/refers every agent's home ns carries) so it can never drift from
+   what the agent's prompt teaches:
 
      - `[ns :as alias]` — if `ns`'s live publics ([[ns-fn-members]]) include
        the name, suggest `alias/<name>` (the function lives behind the alias).
@@ -1519,75 +1492,13 @@
                 (and (= :as (second spec))
                      (contains? (ns-fn-members (name ns-sym)) nm))
                 (str (name (nth spec 2)) "/" short-name))))
-          home-ns-require-specs)))
-
-(defn home-requires-for
-  "The require specs for agent `id`'s home ns.
-
-   REACTIVE config-on-record
-   (decision 2), resolved in precedence:
-
-     1. the agent's `:seon.eval/home-requires` DATOM, when present — the
-        re-arm case (the entity exists). A live
-        `(db/transact! {:seon.agent/id id :seon.eval/home-requires […]})`
-        drives the next `setup-agent-ns!`, so the dial is reactive, not
-        write-only. (Mixed-`:or` schema → stored `pr-str`'d → decode on read.)
-        The attr is NOT in the boot schema; it self-installs on that first
-        override transact (`ensure-datahike-attrs!` runs inside `transact!`),
-        so by read time the `installed-schema` gate below is TRUE whenever a
-        datom exists. The gate is not a no-op: on a fresh pod with no override
-        yet, the attr is uninstalled and querying it would THROW — the gate
-        makes the read fall to (2) instead. VERIFIED live (scratch conn):
-        transact → attr installs, value round-trips through decode.
-     2. else the `:seon.eval/home-requires` from `resolve-agent-context` — the
-        fresh-MINT case, before the datom is written (the config/manifest value).
-     3. else the [[home-ns-require-specs]] const (= byte-parity for a no-config
-        agent). The const is the DEFAULT VALUE only."
-  {:malli/schema [:=> [:catn [::id [:maybe :string]]] [:vector :any]]}
-  [id]
-  (or (when id
-        ;; (1) the persisted datom, if the entity carries it (re-arm).
-        (let [db (some-> db/*conn* deref)]
-          (when (and db (contains? (db/installed-schema db) :seon.eval/home-requires))
-            (some->> (:seon.eval/home-requires
-                       (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]}))
-                     (db/decode-edn-value :seon.eval/home-requires)
-                     seq
-                     vec))))
-      ;; (2) the config/manifest value (fresh mint — datom not yet written).
-      (when id
-        (let [reqs (:seon.eval/home-requires (config/resolve-agent-context id nil))]
-          (when (seq reqs) (vec reqs))))
-      ;; (3) the const default.
-      home-ns-require-specs))
-
-(defn home-ns-form
-  "The exact `(ns …)` SOURCE wired into an agent's home ns.
-
-   The one form [[setup-agent-ns!]] evaluates AND the one the
-   workspace block renders verbatim, with every alias/refer visible (no
-   bare-name reconstruction). `home-ns` is the home-ns symbol/string/keyword
-   (e.g. `my.agent.<id>`).
-
-   Two arities: the 1-arg renders the DEFAULT [[home-ns-require-specs]] (the
-   stub/preview shape); the 2-arg takes the resolved `specs` for a specific
-   agent ([[home-requires-for]]) — `setup-agent-ns!` passes the per-agent list
-   so a `:seon.eval/home-requires` override actually wires the agent's ns."
-  {:malli/schema [:function
-                  [:=> [:catn [::home-ns [:or :symbol :string :keyword]]] :string]
-                  [:=> [:catn [::home-ns [:or :symbol :string :keyword]]
-                              [::specs [:vector :any]]] :string]]}
-  ([home-ns] (home-ns-form home-ns home-ns-require-specs))
-  ([home-ns specs]
-   (str "(ns " (name home-ns) "\n  (:require "
-        (str/join "\n            " (map pr-str specs))
-        "))")))
+          home/home-ns-require-specs)))
 
 (def authored-ns-require-nses
-  "The [[home-ns-require-specs]] NAMESPACES whose short alias an agent's
+  "The [[seon.agent.home/home-ns-require-specs]] NAMESPACES whose short alias an agent's
    AUTHORED (non-home) namespace also carries — the data + function namespaces
    every authored ns reaches through (`db/`, `plan/`, `message/`, `schema/`).
-   A SELECTION over [[home-ns-require-specs]] (the single source of the
+   A SELECTION over [[seon.agent.home/home-ns-require-specs]] (the single source of the
    alias↔ns mapping) — the alias names are never re-spelled here. Excludes
    `seon.agent` (the home orchestration alias) and the lifecycle `:refer`
    functions (home-ns only). The `my.*` toolkit stays FULL-QUALIFIED (`my.ui/…`),
@@ -1597,14 +1508,14 @@
 (def authored-ns-require-specs
   "The `(:require …)` specs merged into an agent-authored `(ns …)` form
    ([[augment-ns-source]]) so its short aliases resolve because they are
-   GENUINELY required (no magic) — the `:as` specs of [[home-ns-require-specs]]
-   selected by [[authored-ns-require-nses]]. Derived, never a second hardcoded
-   copy."
+   GENUINELY required (no magic) — the `:as` specs of
+   [[seon.agent.home/home-ns-require-specs]] selected by
+   [[authored-ns-require-nses]]. Derived, never a second hardcoded copy."
   (filterv (fn [spec]
              (and (vector? spec)
                   (= :as (second spec))
                   (contains? authored-ns-require-nses (first spec))))
-           home-ns-require-specs))
+           home/home-ns-require-specs))
 
 (defn- authored-ns-alias-names
   "Comma-joined `:as` alias names from [[authored-ns-require-specs]]
@@ -1659,7 +1570,8 @@
   {:malli/schema
    [:=> [:catn [::compile-state :any] [::agent-ns-sym :any] [::agent-id :any]] :any]}
   [compile-state agent-ns-sym agent-id]
-  (let [setup-src (home-ns-form agent-ns-sym (home-requires-for agent-id))
+  (let [setup-src (home/home-ns-form agent-ns-sym
+                                     (home/home-requires-for agent-id))
         r (await (eval compile-state setup-src
                        {::starting-ns user-ns-sym ::analyze-deps? true}))]
     (when-not (::ok? r)
@@ -2508,61 +2420,6 @@
                             (some? (namespace %))
                             (not (str/starts-with? (namespace %) "?")))))
         (or (read-all-forms source resolve-opts) [])))
-
-(defn require-edges-from-source
-  "Parse an `(ns …)` `source` string into the reified require-edge set.
-
-   The SOURCE-side counterpart of
-   `seon.analyzer-info/ns-require-edges` — same `::analyzer-info/
-   require-edge` maps, derived by reading the form's `:require` clause.
-   Used where no analyzer state exists: the boot indexer's full-source
-   ns rows and the SCI cage's legacy fallback for pre-structural rows.
-   Also carries `:seon.ns.require/refer-all? true` for a
-   `:refer :all` clause (legacy text only — CLJS can't compile one).
-   Fail-soft → `#{}` on any read error or a non-`(ns …)` form."
-  {:malli/schema [:=> [:cat :string] :seon.analyzer-info/require-edges]}
-  [source]
-  (try
-    (let [form (reader/read-string source)]
-      (if (and (seq? form) (= 'ns (first form)))
-        (let [reqs (->> form
-                        (filter seq?)
-                        (some #(when (= :require (first %)) (rest %))))]
-          (into #{}
-                (keep (fn [r]
-                        (cond
-                          (symbol? r)
-                          {:seon.ns.require/target (keyword (str r))}
-
-                          (and (vector? r) (symbol? (first r)))
-                          (let [tns  (first r)
-                                opts (try (apply hash-map (rest r))
-                                          ;; probe: a malformed require clause
-                                          ;; (odd-count opts) yields no opts —
-                                          ;; expected for agent-authored source,
-                                          ;; not a defect.
-                                          (catch :default _ {}))
-                                as   (:as opts)
-                                asa  (:as-alias opts)
-                                refr (:refer opts)]
-                            (cond-> {:seon.ns.require/target (keyword (str tns))}
-                              (symbol? as)       (assoc :seon.ns.require/alias as)
-                              ;; `:as-alias` — reader alias, no load; when
-                              ;; both `:as` and `:as-alias` appear the real
-                              ;; alias wins (the ns IS loaded).
-                              (and (symbol? asa) (not (symbol? as)))
-                              (assoc :seon.ns.require/alias asa
-                                     :seon.ns.require/as-alias? true)
-                              (sequential? refr) (assoc :seon.ns.require/refers
-                                                        (set refr))
-                              (= :all refr)      (assoc :seon.ns.require/refer-all?
-                                                        true)))
-                          :else nil)))
-                (or reqs [])))
-        #{}))
-    ;; probe: fail-soft over agent-authored source — an unreadable /
-    ;; non-(ns …) form has no require edges; #{} is the expected answer.
-    (catch :default _ #{})))
 
 (schema/register! ::aliases   [:map-of :symbol :symbol])
 (schema/register! ::nses      [:set :symbol])

@@ -146,10 +146,10 @@
  ;; for an agent. There is no hidden code fallback and no implicit skill block.
  ;;
  ;; `:seon.eval/home-requires` — the DEFAULT toolbelt every agent's home ns is
- ;; wired with (OVERRIDES the `seon.eval/home-ns-require-specs` const). Since the
+ ;; wired with (OVERRIDES the `seon.agent.home/home-ns-require-specs` const). Since the
  ;; namespaces block renders "the current ns's requires as compact cards", these
  ;; ARE what a fresh agent sees as its function surface. Each entry must match
- ;; `seon.eval/require-spec` (`[ns :as alias]` or `[ns :refer [fns…]]`) — a
+ ;; `seon.agent.home/require-spec` (`[ns :as alias]` or `[ns :refer [fns…]]`) — a
  ;; bare `[ns]` is rejected by the transact schema, so the `my.*` toolkit carries
  ;; its conventional short alias (kb/data/ui/tile) even though it is called
  ;; full-qualified. `seon.agent` (the orchestration surface) is deliberately
@@ -277,7 +277,7 @@
  ;; `seon.agent` orchestration card. `context-config-for` merges root-context's
  ;; scalar keys over the defaulted base; the `:seon.agent/ctx` block vector below
  ;; is upserted by name (not overwritten). Every entry must carry `:as`/`:refer`
- ;; (bare `[ns]` is rejected by `seon.eval/require-spec`).
+ ;; (bare `[ns]` is rejected by `seon.agent.home/require-spec`).
  :seon.config/root-context
  {:seon.eval/home-requires
   [[seon.agent.message :as message]

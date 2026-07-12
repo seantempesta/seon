@@ -23,7 +23,7 @@
   (:require
     [cljs.test :refer [deftest is async]]
     [clojure.string :as str]
-    [seon.agent :as agent]
+    [seon.agent.home :as home]
     [seon.client :as client]
     [seon.db :as db]
     [seon.eval :as seval]
@@ -71,7 +71,7 @@
   [aid turn-id source]
   (-> (repl/ensure-bootstrap!)
       (.then (fn [cs]
-               (let [hns (agent/home-ns aid)]
+               (let [hns (home/home-ns aid)]
                  (-> (seval/setup-agent-ns! cs hns aid)
                      (.then (fn [_]
                               (seval/eval-batch!

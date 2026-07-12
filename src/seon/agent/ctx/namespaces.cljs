@@ -38,6 +38,7 @@
     [cljs.reader :as edn]
     [clojure.string :as str]
     [seon.agent.ctx :as ctx]
+    [seon.agent.home :as home]
     [seon.config :as config]
     [seon.db :as db]
     [seon.eval :as seval]
@@ -321,17 +322,17 @@
    form [[seon.eval/setup-agent-ns!]] actually installed — `[seon.agent.message
    :as message]` / `[seon.agent.lifecycle :refer [wait complete …]]` / … WITH
    the aliases + refers — straight from the ONE canonical
-   [[seon.eval/home-ns-form]], NOT a bare-name reconstruction from the
+   [[seon.agent.home/home-ns-form]], NOT a bare-name reconstruction from the
    stored edges. No hidden aliasing: the agent reads the form and knows
    `message/user`, `db/transact!`, `schema/register!`, `wait`, `complete`
    exist and how to call them. `nm` is a ns-name keyword whose `:seon.ns/name`
    row the caller already matched (an included, current-ns row). `id` is the
    agent id, threaded so the stub prose shows THIS agent's actual configured
-   requires ([[seon.eval/home-requires-for]]) — not the const default."
+   requires ([[seon.agent.home/home-requires-for]]) — not the const default."
   [_db nm id]
   (ctx/ns-demarc
     nm
-    (str (seval/home-ns-form nm (seval/home-requires-for id)) "\n"
+    (str (home/home-ns-form nm (home/home-requires-for id)) "\n"
          "; (your workspace — nothing defined here yet; define schemas + fns and they appear here.\n"
          ";  a defn whose :malli/schema output declares :seon.render/ai (and/or :seon.render/hiccup)\n"
          ";  AUTO-RUNS every turn: its output becomes a live section of your context + a tile on your page)")))

@@ -21,7 +21,8 @@
    both throw `TypeError: undefined`. We read
    `(:cljs.analyzer/namespaces @compile-state)` directly. The
    research note's reference impl is wrong on that point."
-  (:require [malli.core :as m]
+  (:require [cljs.reader :as reader]
+            [malli.core :as m]
             [seon.schema :as schema]))
 
 ;;; ---------------------------------------------------------------------------
@@ -219,8 +220,8 @@
 (schema/register! :seon.ns.require/refers [:set :symbol])
 ;; `:refer :all` — never produced by the analyzer (CLJS has no
 ;; `:refer :all`); only the SOURCE-parse path
-;; (seon.eval/require-edges-from-source, over legacy/handwritten ns
-;; text) can yield it. Registered so a parsed edge round-trips.
+;; ([[require-edges-from-source]], over legacy/handwritten ns text) can yield
+;; it. Registered so a parsed edge round-trips.
 (schema/register! :seon.ns.require/refer-all? :boolean)
 ;; `[x :as-alias y]` — a READER alias for qualified keywords with NO
 ;; load of the target (Clojure 1.11 semantics; the analyzer stores it
@@ -238,6 +239,61 @@
                    [:seon.ns.require/refer-all? {:optional true} :seon.ns.require/refer-all?]
                    [:seon.ns.require/as-alias? {:optional true} :seon.ns.require/as-alias?]])
 (schema/register! ::require-edges [:set ::require-edge])
+
+(defn require-edges-from-source
+  "Parse an `(ns …)` `source` string into the reified require-edge set.
+
+   The SOURCE-side counterpart of
+   `seon.analyzer-info/ns-require-edges` — same `::analyzer-info/
+   require-edge` maps, derived by reading the form's `:require` clause.
+   Used where no analyzer state exists: the boot indexer's full-source
+   ns rows and the SCI cage's legacy fallback for pre-structural rows.
+   Also carries `:seon.ns.require/refer-all? true` for a
+   `:refer :all` clause (legacy text only — CLJS can't compile one).
+   Fail-soft → `#{}` on any read error or a non-`(ns …)` form."
+  {:malli/schema [:=> [:cat :string] :seon.analyzer-info/require-edges]}
+  [source]
+  (try
+    (let [form (reader/read-string source)]
+      (if (and (seq? form) (= 'ns (first form)))
+        (let [reqs (->> form
+                        (filter seq?)
+                        (some #(when (= :require (first %)) (rest %))))]
+          (into #{}
+                (keep (fn [r]
+                        (cond
+                          (symbol? r)
+                          {:seon.ns.require/target (keyword (str r))}
+
+                          (and (vector? r) (symbol? (first r)))
+                          (let [tns  (first r)
+                                opts (try (apply hash-map (rest r))
+                                          ;; probe: a malformed require clause
+                                          ;; (odd-count opts) yields no opts —
+                                          ;; expected for agent-authored source,
+                                          ;; not a defect.
+                                          (catch :default _ {}))
+                                as   (:as opts)
+                                asa  (:as-alias opts)
+                                refr (:refer opts)]
+                            (cond-> {:seon.ns.require/target (keyword (str tns))}
+                              (symbol? as)       (assoc :seon.ns.require/alias as)
+                              ;; `:as-alias` — reader alias, no load; when
+                              ;; both `:as` and `:as-alias` appear the real
+                              ;; alias wins (the ns IS loaded).
+                              (and (symbol? asa) (not (symbol? as)))
+                              (assoc :seon.ns.require/alias asa
+                                     :seon.ns.require/as-alias? true)
+                              (sequential? refr) (assoc :seon.ns.require/refers
+                                                        (set refr))
+                              (= :all refr)      (assoc :seon.ns.require/refer-all?
+                                                        true)))
+                          :else nil)))
+                (or reqs [])))
+        #{}))
+    ;; probe: fail-soft over agent-authored source — an unreadable /
+    ;; non-(ns …) form has no require edges; #{} is the expected answer.
+    (catch :default _ #{})))
 
 (defn ns-require-edges
   "The reified require-edge set for `ns-sym`, read from the analyzer.

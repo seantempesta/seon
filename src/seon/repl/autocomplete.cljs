@@ -34,10 +34,10 @@
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.namespaces :as ns-cards]
     [seon.agent.ctx.transcript]
+    [seon.agent.home :as home]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.db :as db]
-    [seon.eval :as eval]
     [seon.schema :as schema]))
 
 ;; ============================================================
@@ -197,7 +197,7 @@
    `aliases` maps alias-string → ns-string (`\"db\"` → `\"seon.db\"`);
    `refers` maps bare-name → full-sym (`\"complete\"` →
    `\"seon.agent.lifecycle/complete\"`). Derived from
-   `seon.eval/home-requires-for` — the SAME list that wires the agent's ns."
+   `seon.agent.home/home-requires-for` — the SAME list that wires the agent's ns."
   [agent-id]
   (reduce (fn [[aliases refers] spec]
             (let [ns-sym (first spec)]
@@ -209,7 +209,7 @@
                                 refers (nth spec 2))]
                 [aliases refers])))
           [{} {}]
-          (eval/home-requires-for agent-id)))
+          (home/home-requires-for agent-id)))
 
 (defn- indexed-fn-syms
   "The set of every `:seon.fn/sym` string in db value `db`."

@@ -359,6 +359,9 @@ initial **idle agent value**: its `:seon.agent/id`, optional
 `:seon.agent/default-turn-limit` / `:seon.agent/default-deadline-ms` seeds, the
 configured `:seon.agent/ctx` component set, purpose, and the durable namespace/
 safe declaration facts for a fresh `my.agent.<id>` home namespace.
+`seon.agent.home` is the one lower owner of the id→namespace projection, its
+canonical require specs, the reactive per-agent require read, and the exact
+namespace form; creation, eval, and context rendering consume that same data.
 There is no run, no turn, no wake until a **trigger** arrives. This keeps creation
 explicit and the loop strictly trigger-driven: "start an agent" (create + runtime
 host, idle) and "run an agent" (trigger-driven) are two separate acts. To make a freshly

@@ -67,6 +67,8 @@
     [clojure.walk :as walk]
     [sci.core :as sci]
     [sci.interrupt :as interrupt]
+    [seon.agent.home :as home]
+    [seon.analyzer-info :as analyzer-info]
     [seon.config :as config]
     [seon.db :as db]
     [seon.error :as err]
@@ -286,7 +288,7 @@
 
 (defn- home-agent-id
   "The agent id when `ns-str` names an agent HOME ns (`my.agent.<id>` — the
-   deterministic `seon.agent.ctx/home-ns` shape, structural, no list), else
+   deterministic `seon.agent.home/home-ns` shape, structural, no list), else
    nil."
   [ns-str]
   (let [prefix "my.agent."]
@@ -298,13 +300,13 @@
   "The canonical home-ns `(ns …)` source for a HOME ns with no stored
    `:seon.ns/source`. A fresh home ns (`my.agent.<id>`) is WIRED by
    `seon.eval/setup-agent-ns!` from the ONE canonical
-   `seon.eval/home-ns-form` but only gets a stored source datom when the
+   `seon.agent.home/home-ns-form` but only gets a stored source datom when the
    agent re-evals an `(ns …)` form itself — so derive the SAME form here
    (per-agent `home-requires-for` honored) and the cage rebuilds the exact
    aliases/refers the compiled fn had. nil for a non-home ns."
   [ns-str]
   (when-let [id (home-agent-id ns-str)]
-    (try (seval/home-ns-form ns-str (seval/home-requires-for id))
+    (try (home/home-ns-form ns-str (home/home-requires-for id))
          (catch :default e
            ;; deriving the canonical home-ns form is OUR machinery — a
            ;; throw is a core defect; caller still degrades to nil.
@@ -362,7 +364,9 @@
           (let [ns-src (or (ns-source db (keyword agent-ns))
                            (derived-home-ns-source agent-ns))]
             (seval/edges->require-info
-              (if ns-src (seval/require-edges-from-source ns-src) #{})))))))
+              (if ns-src
+                (analyzer-info/require-edges-from-source ns-src)
+                #{})))))))
 
 (defn- expose-ns
   "`{simple-sym <value>}` for namespace `ns-sym`, UNIONing three sources:

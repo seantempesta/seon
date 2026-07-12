@@ -22,6 +22,7 @@
     [clojure.string :as str]
     [my.blob :as blob]
     [seon.agent :as agent]
+    [seon.agent.home :as home]
     [seon.agent.ctx :as ctx]
     [seon.agent.run :as run]
     [seon.agent.turn :as turn]
@@ -81,7 +82,7 @@
         aid    (:seon.agent/id minted)]
     (await (db/with-agent aid
              (fn ^:async boot []
-               (await (seval/setup-agent-ns! cs (agent/home-ns aid) aid)))))
+               (await (seval/setup-agent-ns! cs (home/home-ns aid) aid)))))
     (let [r (await (run/open-run! {:seon.agent/id aid
                                    :seon.agent.run/trigger :message}))]
       {:seon.agent/id aid :seon.agent/compile-state cs

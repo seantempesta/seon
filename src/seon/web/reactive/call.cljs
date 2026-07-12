@@ -16,7 +16,7 @@
    The JVM `seon.web.reactive.actions/resolve-action` allowed ONLY `seon.*`
    namespaces — exactly wrong for agent code, which lives in `my.agent.<id>`.
    Here the name is the route: a fn symbol `my.agent.<id>/foo` resolves to
-   agent `<id>` (`seon.agent.ctx/home-ns` is the canonical id↔ns mapping). No
+   agent `<id>` (`seon.agent.home/home-ns` is the canonical id↔ns mapping). No
    routing table.
 
    ## The capability gate (the security boundary)
@@ -50,7 +50,7 @@
    refused before invoke — belt-and-suspenders behind resolve-and-apply."
   (:require
     [clojure.string :as str]
-    [seon.agent.ctx :as ctx]
+    [seon.agent.home :as home]
     [seon.db :as db]
     [seon.eval :as seval]
     [seon.log :as log]
@@ -63,7 +63,7 @@
 (defn resolve-owning-agent
   "The agent id that OWNS `fn-sym`, via namespace-as-route, or nil.
 
-   The namespace must be `my.agent.<id>` (the canonical `seon.agent.ctx/home-ns`
+   The namespace must be `my.agent.<id>` (the canonical `seon.agent.home/home-ns`
    mapping) AND a live agent `<id>` must exist (`:seon.agent/id` row). Any
    other namespace — `fs`, `seon.*`, a domain ns, a dead/absent agent —
    resolves to nil, and the caller refuses the call."
@@ -74,7 +74,7 @@
     (when (and ns-str (str/starts-with? ns-str prefix))
       (let [id (subs ns-str (count prefix))]
         (when (and (seq id)
-                   (= (str (ctx/home-ns id)) ns-str)   ; exact round-trip
+                   (= (str (home/home-ns id)) ns-str)   ; exact round-trip
                    (seq (db/query '[:find ?a :in $ ?id :where
                                     [?a :seon.agent/id ?id]]
                                   db id)))
@@ -95,7 +95,7 @@
                      [?f :seon.fn/sym ?sym]
                      [?f :seon.fn/ns ?n]
                      [?n :seon.ns/name ?nsname]]
-                   db (str fn-sym) (keyword (str (ctx/home-ns agent-id)))))))
+                   db (str fn-sym) (keyword (str (home/home-ns agent-id)))))))
 
 (defn capability-check
   "Resolve and gate `fn-sym` against `db`.
@@ -111,7 +111,7 @@
       {::refused
        (str "`" fn-sym "` is not a granted :seon.fn of agent " agent-id
             " — an interactive handler must be a fn the agent defined in its "
-            "home ns " (ctx/home-ns agent-id) ".")})
+            "home ns " (home/home-ns agent-id) ".")})
     {::refused
      (str "no agent owns the namespace of `" fn-sym
           "` — /call routes only into an agent's home ns (my.agent.<id>); "

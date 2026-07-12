@@ -55,6 +55,7 @@
     ;; Lifecycle functions (wait/complete/terminate) — host-bundled so the agent
     ;; home ns can `:refer` them; required here so the build includes the ns.
     [seon.agent.lifecycle]
+    [seon.agent.home :as home]
     ;; The agent loop + wake trigger: the client boot path ARMS the wake
     ;; trigger (seon.agent does NOT, to stay acyclic).
     [seon.agent.loop :as agent-loop]
@@ -222,7 +223,7 @@
     ;; Phase B item 9 — shared read-side wrapper over the analyzer
     ;; state. Required here so the build includes it; item 10's
     ;; detect-and-tee in seon.eval/eval-batch! consumes it.
-    [seon.analyzer-info]
+    [seon.analyzer-info :as analyzer-info]
     ;; THE FLIP (unit 2.2e): the cluster-store DIS-peer seam — the
     ;; :seon-wire PWriter, cluster connect config, and the foreign-tx
     ;; listen adapter. open-cluster-conn! below builds on it.
@@ -1283,7 +1284,7 @@
         ;; ONCE here at INDEX time from the real file's (ns …) form —
         ;; write-time extraction, never a render-time re-parse. Stub
         ;; nses (compiled seon.* — never SCI-rendered) skip the edges.
-        edges (when full? (seval/require-edges-from-source src))]
+        edges (when full? (analyzer-info/require-edges-from-source src))]
     (cond-> {:seon.ns/name   (keyword ns-sym-str)
              :seon.ns/source src}
       (seq edges) (assoc :seon.ns/require-edges (vec edges)))))
@@ -2263,7 +2264,7 @@
               llm (or llm-fn (current-llm-fn))]
           ;; 2. wire the home ns FIRST (both mint + re-arm need it before
           ;;    anything that assumes the ns exists).
-          (await (seval/setup-agent-ns! cs (agent/home-ns id) id))
+          (await (seval/setup-agent-ns! cs (home/home-ns id) id))
           ;; 3. MINT ONLY: create the entity. On a FAILED create the db error
           ;;    envelope propagates as-is (task #21): NO entity → do NOT arm a
           ;;    trigger or host the id (no ghost on the roster).

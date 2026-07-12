@@ -27,6 +27,7 @@
   (:require
     [cljs.test :refer [deftest is testing async]]
     [clojure.string :as str]
+    [seon.agent.home :as home]
     [seon.client :as client]
     [seon.db :as db]
     [seon.eval :as seval]
@@ -86,8 +87,8 @@
     (let [src "(ns my.recall) (defn f [] 1)"]
       (is (identical? src (seval/augment-ns-source src)))))
   (testing "an already-complete ns form is a no-op (nothing to add)"
-    (let [home (seval/home-ns-form 'my.agent.x)]
-      (is (identical? home (seval/augment-ns-source home))))))
+    (let [home-source (home/home-ns-form 'my.agent.x)]
+      (is (identical? home-source (seval/augment-ns-source home-source))))))
 
 ;; ---------------------------------------------------------------------------
 ;; LIVE self-host: a fn in a NEW agent ns referencing db/query.

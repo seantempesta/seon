@@ -28,6 +28,7 @@
     [seon.config :as config]
     [seon.retry :as retry]
     [seon.agent.ctx :as ctx]
+    [seon.agent.home :as home]
     [my.blob :as blob]
     [seon.db :as db]
     [seon.db.id :as db.id]
@@ -416,7 +417,7 @@
         ;; `:stream` turn silently define into my.agent.*, cursor flip-flop,
         ;; ns-interns nil, cross-ns resolution failures).
         batch      (await (seval/eval-batch! compile-state parsed
-                                             (or start-ns (ctx/home-ns id))
+                                             (or start-ns (home/home-ns id))
                                              id id-of-turn run-id))]
     (cond->
       ;; ATTEMPTED forms (ok + failed), not just n-ok: the loop's zero-forms

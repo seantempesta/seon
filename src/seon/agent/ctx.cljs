@@ -63,6 +63,7 @@
   (:require
     [clojure.string :as str]
     [cljs.reader :as edn]
+    [seon.agent.home :as home]
     [seon.agent.ctx.render-fns :as render-fns]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
@@ -376,13 +377,6 @@
           (mapcat :seon.agent.turn/_run)
           (sort-by #(.getTime ^js (:seon.agent.turn/at %)))
           vec))))
-
-(defn home-ns
-  "Return the deterministic home-ns symbol for an agent id.
-   `(home-ns \"seon\") => 'my.agent.seon`."
-  {:malli/schema [:=> [:catn [::agent-id :string]] :symbol]}
-  [agent-id]
-  (symbol (str "my.agent." agent-id)))
 
 ;; The namespace-display selection rules (hidden-ns-name?,
 ;; included-ns?, full-source-ns?, …) live in their rightful home,
@@ -1236,7 +1230,7 @@
   "The agent's current namespace.
 
    Derived from the latest successful
-   eval's :seon.eval/ns. Falls back to (home-ns id) when no successful
+   eval's :seon.eval/ns. Falls back to (home/home-ns id) when no successful
    eval has run yet. Reactive: the next successful eval that switches
    ns (via `(ns …)`) shows up here on the next call. See
    docs/seon/concepts/reactive-context. Optional `:seon.db/db`
@@ -1257,7 +1251,7 @@
                :when (true? (:seon.eval/ok? e))]
            e)
          latest (last (sort-by :seon.eval/at all-evals))]
-     (or (:seon.eval/ns latest) (home-ns id)))))
+     (or (:seon.eval/ns latest) (home/home-ns id)))))
 
 (defn ctx-entities
   "Pull the agent's `:seon.agent/ctx` vector, entities inlined.

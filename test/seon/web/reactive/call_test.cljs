@@ -15,15 +15,15 @@
   (:require
     [clojure.string :as str]
     [cljs.test :refer [deftest is testing async]]
+    [seon.agent.home :as home]
     [seon.client :as client]
-    [seon.agent.ctx :as ctx]
     [seon.db :as db]
     [seon.repl :as repl]
     [seon.web.reactive.call :as call]))
 
 ;; A valid 14-char id (`:seon.db/id` is [:string {:min 14 :max 14}]).
 (def ^:private agent-id "tst-2606260000")
-(def ^:private home-ns (ctx/home-ns agent-id))            ; my.agent.tst-2606260000
+(def ^:private home-ns (home/home-ns agent-id))            ; my.agent.tst-2606260000
 (def ^:private home-kw (keyword (str home-ns)))           ; :my.agent.tst-2606260000
 
 (def ^:private granted-sym (symbol (str home-ns) "set-purpose!"))

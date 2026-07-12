@@ -86,6 +86,7 @@
     [seon.agent.loop :as aloop]
     [seon.agent.ctx :as ctx]
     [seon.agent.ctx.namespaces :as ctx-ns]
+    [seon.agent.home :as home]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [my.blob :as blob]
@@ -582,7 +583,7 @@
 
 (defn- home-ns-seon-aliases
   "Map of `seon.*` dotted-ns-name -> its short `:as` alias, DERIVED from
-   seon.eval/home-ns-require-specs (the single source of truth for how
+   seon.agent.home/home-ns-require-specs (the single source of truth for how
    every agent's home ns is wired). Only the `:as`-aliased `seon.*`
    namespaces — these are the ones an agent writes by the seeded SHORT
    alias (db/, message/, schema/, agent/, plan/) yet a predicate may regex
@@ -595,7 +596,7 @@
                 (when (and (= :as (second spec))
                            (str/starts-with? (name (first spec)) "seon."))
                   [(name (first spec)) (name (nth spec 2))])))
-        seval/home-ns-require-specs))
+        home/home-ns-require-specs))
 
 (defn- home-ns-toolkit-aliases
   "Map of `my.*` TOOLKIT dotted-ns-name -> its short alias, DERIVED from
@@ -1640,7 +1641,7 @@
         (db/with-agent agent-id
           (fn ^:async boot-gym-agent! []
             (await (seval/setup-agent-ns! compile-state
-                                          (agent/home-ns agent-id)
+                                          (home/home-ns agent-id)
                                           agent-id))
             (await (agent/create! {:seon.agent/id agent-id})))))
       (swap! !agents assoc designator agent-id)

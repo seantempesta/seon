@@ -47,6 +47,7 @@
     [my.plan.internal :as plan-internal]
     [seon.agent :as agent]
     [seon.agent.ctx :as ctx]
+    [seon.agent.home :as home]
     [seon.agent.run :as run]
     [seon.agent.schedule :as schedule]
     [seon.agent.turn :as turn]
@@ -591,7 +592,7 @@
                           (await (seval/eval-batch!
                                    compile-state
                                    (repl-internal/parse-forms source)
-                                   (ctx/home-ns id)
+                                   (home/home-ns id)
                                    id turn-id run-id)))))))))))))))
 
 (defn install-wake-trigger!
