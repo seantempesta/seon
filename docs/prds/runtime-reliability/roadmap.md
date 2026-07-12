@@ -532,6 +532,21 @@ Commit: deterministic snapshot/reconciliation and pruner deletion.
 
 ## Phase 8 — make runtime reconstruction honest and bounded
 
+Progress on 2026-07-12: the instrumentation authority split is implemented.
+Cold reconstruction queries the canonical function facts once and passes Malli
+one explicit exact `:data` map; Seon no longer populates or reads Malli's global
+function-schema roster. Committed eval definitions call one changed-symbol
+delta that unstruments/removes and reinstruments only the affected functions;
+unaffected wrapper identity is stable and spec removal restores the original.
+Shadow's zero-argument `after-load` hook exposes no changed-source set, so the
+current hot-reload integration derives live wrapper gaps from the canonical
+rows once and sends only those gaps through the same delta. A second scan on
+the same definition performs zero Malli mutation. The exact-data suite is green
+at 91 tests / 714 assertions; the reload integration adds 3 tests / 28
+assertions with zero warnings. Schema-ref transitive dependent selection and
+the Phase 7 accepted program snapshot remain open; when that snapshot supplies
+the reload delta directly, it can remove the gap-discovery fallback.
+
 - Rename program “replay” to declaration/program loading in public docs and
   runtime APIs.
 - Keep the strict one-literal namespace/function/test declaration persistence

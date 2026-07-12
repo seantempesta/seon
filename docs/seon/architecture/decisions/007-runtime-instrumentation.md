@@ -12,9 +12,12 @@ tags: [decision, architecture, schema]
 > fresh runtime reconstruction passes Malli an exact explicit `:data` map once.
 > A committed program/schema change then unstruments/instruments only directly
 > changed/spec-removed/deleted functions plus the union of old/new transitive
-> schema dependents. Agent mint/resume and ordinary Shadow reload do no global
-> pass; Shadow's accepted canonical delta drives the same operation. Seon does
-> not populate Malli's process-global function-schema atom as a second roster.
+> schema dependents. Agent mint/resume do no instrumentation work. Agent evals
+> supply their accepted definitions directly. Until the deterministic program
+> snapshot owns Shadow publication, Shadow's zero-argument `after-load` hook
+> derives live unwrapped gaps from the canonical rows once and feeds only those
+> symbols through the same delta; healthy wrappers are never replaced. Seon
+> does not populate Malli's process-global function-schema atom as a second roster.
 > The implementation/deletion proof is tracked in
 > `docs/prds/runtime-reliability/roadmap.md` Phase 8.
 
