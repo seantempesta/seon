@@ -154,6 +154,28 @@ schema registrations, fn calls). **gen-fn/worker: the
 generation-from-knowledge parts** (fn bodies, query joins), outsourced
 on demand. The little model drives the REPL; nothing asks it to think.
 
+**Two vehicles, one seam (owner, 2026-07-12).** The suggestion tier is
+a measured race, each arm in its native format: **needle arm =
+JSON-native end-to-end** ("don't break its brain" — train in its home
+`[{name,arguments}]` grammar; the invertible bridge does JSON↔Clojure
+at the boundary both directions; constrained trie / loss weighting /
+tool-shuffle all work unchanged; KT2b's parse-1.0/copy-0.73 evidence
+was measured in this format); **coder arm (Qwen-tiny base) =
+Clojure-native continuation** over the transcript document. Same
+scorer post-bridge; winner decided on useful-match + latency. The
+mined distribution quantifies the prize: ~93% of real turn forms are
+call-shaped ops/navigation (defn = 15/214) — the tier a sub-1B model
+can own, reserving smart models for planning and `gen-fn`.
+
+**The economics + the dial (owner, 2026-07-12).** Speed AND cheap is
+the win — user LLM bills are the product pressure. Every op the
+suggestion tier absorbs is frontier tokens unspent (~93% of real
+forms are in-tier); the run ledger reports the measured $/task delta.
+And the tier is CONFIGURATION, not commitment: `:seon.config/suggest`
+absent ⇒ no tier; per-agent provider overlays ⇒ frontier-powered
+careful work whenever the user wants it. Config→DB means live
+switching, no restart.
+
 **The recursive loop (owner, 2026-07-12):** oracled benchmark tasks
 drive seon agents → failures attribute mechanically (toolkit gap /
 lint leaderboard / ingredients coverage / planner-word specificity) →
