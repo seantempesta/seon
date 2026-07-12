@@ -259,6 +259,49 @@ One measurement per unit — the bench falsifies; it is not the work.
     provider — if it lands correct `plan!` forms at a similar rate,
     W1's step machinery added nothing for this shape (report the
     number; the value would then be W2's focus loop, not authoring).
+
+  **W1 SHIPPED (2026-07-11 late) — `reconcile!` + the authoring live proof.**
+
+  - *Landed (general planning code, zero diffusion knowledge)*:
+    `my.plan/reconcile!` (`::tree` EDN OR `::markdown`, lenient parse:
+    headings/nested lists/flat numbered lists; `[id]` prefixes keep
+    identity; `— expect:` suffix or trailing second sentence → `::expect`;
+    checkbox/enumerator markers stripped), `my.plan/document` (the OPEN
+    projection — `tree`'s shape, done pruned; `tree-pattern` gained
+    `::description` so ONE canonical node shape round-trips), and ONE
+    compiler: `internal/compile-reconcile` — `plan!` now delegates
+    (`compile-plan` = reconcile-against-empty, one code path). The
+    `::tree` entry carries `:seon.render/prefill-fn 'my.plan/document`
+    (the W2 affordance, declared only). 8 new tests in `my.plan-test`.
+  - *Live proof (acme, as-grown store, worker `d43be833dac3`, k=2/arm,
+    zero core faults)*: **Muse (frontier/falsification arm): 3/3 correct
+    trees**, choosing the NEW `reconcile!` `::markdown` path unprompted
+    in 3 of 4 authoring events (the one plan!-EDN event inlined
+    "— expect:" into titles; the markdown path parsed expects cleanly) —
+    1:1 steps, `::expect` on every leaf, 213–260 s to authored+executed.
+    **Typeahead worker: 0/2 whole-document authoring** — both runs
+    planned INCREMENTALLY via `step!` (1–3 flat condensed steps, expects
+    on 1 of 2 runs), did real schema/store work, took a step `:active`,
+    and timed out at 540 s (~60–67 s/turn on the grown store). The ▶/☐
+    ledger + authored steps verified in the byte-exact prompt blob.
+  - *Falsification verdict, plainly*: the frontier lands correct plan
+    trees at a far higher rate than the diffusion worker — W1's measured
+    value is the GENERAL function surface (frontier import via
+    `reconcile!` markdown works end-to-end today) + W2's focus loop, NOT
+    diffusion whole-form authoring. The "ONE large nested form" build
+    (GROW budget / buffer capacity) is the remaining gap; first blocker
+    found and fixed: the CAL length probe crashed on a hole clipped past
+    the code-buffer end (`mx.max` zero-size, `cursor.py`
+    `_first_step_confidence` — an empty span now scores 0.0).
+  - *Drive-hygiene findings*: acme's global provider resolves Muse (env
+    `SEON_AI_PROVIDER=typeahead` is shadowed by the manifest config
+    row) — the typeahead arm needs the per-agent
+    `:seon.ai/agent-provider :typeahead` overlay; keep the warmup
+    `timeout_ms` SHORT (~12 s) — a 180 s warmup let Muse wander 15
+    turns and author an unrelated plan. Acceptance (5) fresh-store was
+    superseded by the as-grown-testbed ruling (store-scale OOM close,
+    2026-07-11). Fixtures:
+    `src-inspect-ai/src/seon_inspect/planner_worker_fixtures.py`.
 - **W2 — keep-in-focus execution**: the step loop keyed to the ▶ step;
   active-step-derived retrieval feeding the render; `done!`/`active!`
   transitions driven by the worker. Live proof: a 3-step plan executed

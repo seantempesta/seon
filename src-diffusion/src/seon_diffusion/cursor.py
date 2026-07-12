@@ -347,6 +347,14 @@ class CursorDriver:
             self.model.cfg.code_buffer_length, self.model.cfg.vocab_size,
             pad_clamp_id=self.gen.pad_token_id)
         a, b = ws.hole_spans()[hole_idx]
+        # A hole pushed past the code-buffer end (big template + long
+        # prefix) clips to an EMPTY span; mx.max over a zero-size slice
+        # raises. No positions = no signal: report zero confidence so the
+        # probe never picks this length (W1 live crash, 2026-07-11:
+        # "ValueError: [max] Cannot max reduce zero size array").
+        b = min(b, self.model.cfg.code_buffer_length)
+        if b <= a:
+            return 0.0
         logits = self.model.decode(code_buffer, cache, code_buffer_start=cur_len)
         lp = logits - mx.logsumexp(logits, axis=-1, keepdims=True)
         conf = mx.mean(mx.exp(mx.max(lp[0, a:b, :], axis=-1)))

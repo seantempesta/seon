@@ -160,6 +160,58 @@
 ;; root? → one subtree map; else → a vector of root subtrees; nil when nothing.
 (schema/register! ::tree-response [:maybe [:or :map [:vector :map]]])
 
+;; reconcile! — edit your whole OPEN plan as ONE document. A document node is
+;; `tree`/`document`'s shape (children under ::_parent; ::children accepted
+;; too when authoring by hand); ::status rides along read-only (active!/done!
+;; own it); ::ref/::after label deps exactly as in plan!.
+(schema/register! ::doc-node
+  [:schema {:registry {::dnode [:map
+                                [::id          {:optional true} ::id]
+                                [::title       ::title]
+                                [::status      {:optional true} ::status]
+                                [::description {:optional true} ::description]
+                                [::expect      {:optional true} ::expect]
+                                [::goal        {:optional true} ::goal]
+                                [::pace        {:optional true} ::pace]
+                                [::ref         {:optional true} :string]
+                                [::after       {:optional true} [:vector :string]]
+                                [::needs       {:optional true}
+                                 [:vector [:map [::id ::id]]]]
+                                [::children    {:optional true}
+                                 [:vector [:ref ::dnode]]]
+                                [::_parent     {:optional true}
+                                 [:vector [:ref ::dnode]]]]}}
+   [:ref ::dnode]])
+
+(schema/register! ::markdown [:string {:min 1}])
+(schema/register! ::added :int)
+(schema/register! ::updated :int)
+(schema/register! ::diff
+  [:map [::added ::added] [::dropped ::dropped] [::updated ::updated]])
+
+;; ::tree stays structurally permissive at the boundary — a malformed
+;; document is EXPECTED input (frontier markdown, model edits) and must come
+;; back as a guiding fail envelope, never an instrumentation throw. The
+;; `:seon.render/prefill-fn` PROPERTY names the projection of this argument's
+;; CURRENT value (`document`) — the registry-driven draft-head affordance:
+;; a driver that resolves this request schema can pre-fill the ::tree hole
+;; with the live open tree so the model EDITS instead of regenerating.
+(schema/register! ::reconcile-request
+  [:map
+   [::tree         {:optional true
+                    :seon.render/prefill-fn 'my.plan/document}
+    [:or :map [:vector :map]]]
+   [::markdown     {:optional true} ::markdown]
+   [:seon.agent/id {:optional true} :seon.agent/id]])  ; injected: you (omit)
+
+(schema/register! ::reconcile-response
+  [:map
+   [::ok?   ::ok?]
+   [::root  {:optional true} ::id]
+   [::ids   {:optional true} ::ids]
+   [::diff  {:optional true} ::diff]
+   [::error {:optional true} ::error]])
+
 ;; --- The stored entity kind. `{:seon.db/entity true}` DECLARES that rows of
 ;; --- this shape live in the DB (puts the kind in the catalog). Required =
 ;; --- what step!/plan! write unconditionally. ::agent is the SCOPING ref:
@@ -384,6 +436,71 @@
     (internal/check-request-keys "drop!" request ::id-request)
     (await (internal/retract-subtree! id))))
 
+(defn ^:async reconcile!
+  "Reconcile your OPEN plan against ONE edited whole-plan document.
+
+   Pass exactly one of `:my.plan/tree` (an edited `document` value — the
+   same nested shape; `:my.plan/children` also accepted when authoring by
+   hand) or `:my.plan/markdown` (lenient plain text: `#`-headings and/or
+   nested `-`/`1.` list items — a flat numbered list is valid; with no
+   heading a plain first line titles, and a `Goal: …` line goals, one
+   synthesized root; a leading `[id]` on an item keeps identity; a
+   `— expect: …` suffix or a trailing second sentence becomes the step's
+   `:my.plan/expect`; cosmetic `[ ]`/`[x]` checkboxes and redundant `N.`
+   enumerators are stripped — a checked box never closes a step). Identity: a node WITH `:my.plan/id` updates in
+   place (title/description/expect/goal/pace/parent/needs — never status:
+   `active!`/`done!` own that); a node WITHOUT one is minted; an open
+   step ABSENT from the document is dropped (`drop!` semantics); `:done`
+   steps are immune — absent from the document by construction, and
+   submitting one fails. `:ref`/`:after` label deps work as in `plan!`.
+   ONE transaction for the whole delta. Against an EMPTY tree this IS
+   plan authoring — one code path with `plan!`.
+   → {::ok? true ::root _ ::ids _ ::diff {::added _ ::dropped _
+   ::updated _}} or a fail envelope."
+  {:malli/schema [:=> [:cat ::reconcile-request] ::reconcile-response]}
+  [{::keys [tree markdown] agent-id :seon.agent/id :as request}]
+  (or
+    (internal/check-request-keys "reconcile!" request ::reconcile-request)
+    (let [agent (internal/agent-ref agent-id)]
+      (cond
+        (and tree markdown)
+        (internal/fail (str "reconcile!: pass exactly ONE of :my.plan/tree "
+                            "or :my.plan/markdown — got both."))
+
+        (and (nil? tree) (nil? markdown))
+        (internal/fail (str "reconcile!: pass the edited document as "
+                            ":my.plan/tree (EDN) or :my.plan/markdown (text) "
+                            "— got neither."))
+
+        (nil? agent)
+        (internal/fail (str "reconcile!: no :seon.agent/id resolved — pass "
+                            "one, or call from inside an agent turn (the "
+                            "boundary fills in you)."))
+
+        :else
+        (let [doc (if markdown
+                    (internal/parse-markdown markdown)
+                    {:nodes (if (map? tree) [tree] (vec tree))})]
+          (if (:error doc)
+            (internal/fail (:error doc))
+            (or
+              (when tree (internal/check-doc-keys "reconcile!" (:nodes doc)))
+              (let [{:keys [tx labels root-id diff error]}
+                    (internal/compile-reconcile @db/*conn* "reconcile!"
+                                                agent (:nodes doc))]
+                (cond
+                  error      (internal/fail error)
+                  (empty? tx) {::ok? true ::root root-id ::ids labels
+                               ::diff diff}
+                  :else
+                  (let [env (await (db/transact! {:seon.db/tx-data tx}))]
+                    (if (:seon.db/ok? env)
+                      {::ok? true ::root root-id ::ids labels ::diff diff}
+                      (internal/fail
+                        (str "reconcile!: store failed — "
+                             (get-in env [:seon.db/error
+                                          :seon.error/message]))))))))))))))
+
 (defn next
   "Your focus queue: READY leaves (open, unblocked), oldest first.
 
@@ -415,6 +532,18 @@
                 (mapv #(internal/pull-subtree db %) (internal/root-ids db oe))
                 [])
               []))))
+
+(defn document
+  "Your OPEN plan as ONE editable document — edit it, then `reconcile!`.
+
+   `tree`'s nested shape (children under `:my.plan/_parent`, dep ids
+   inline) with every `:done` step EXCLUDED — history can't be edited
+   away. Every node keeps its `:my.plan/id`, so the edit round-trips:
+   (my.plan/reconcile! {:my.plan/tree (my.plan/document {})}) is a no-op.
+   {::root? id} → that open subtree; default → your whole open forest."
+  {:malli/schema [:=> [:cat ::tree-request] ::tree-response]}
+  [request]
+  (internal/prune-done (tree request)))
 
 (defn status
   "Derived view of one step — done/blocked/ready + subtree roll-up.

@@ -19,6 +19,7 @@
     [seon.client :as client]
     [seon.db :as db]
     [seon.instrument :as inst]
+    [seon.schema :as schema]
     [my.plan :as plan]
     [my.plan.internal :as plan-int]))
 
@@ -38,10 +39,12 @@
    'needs!    (:malli/schema (meta #'plan/needs!))
    'move!     (:malli/schema (meta #'plan/move!))
    'drop!     (:malli/schema (meta #'plan/drop!))
-   'next      (:malli/schema (meta #'plan/next))
-   'tree      (:malli/schema (meta #'plan/tree))
-   'status    (:malli/schema (meta #'plan/status))
-   'list-open (:malli/schema (meta #'plan/list-open))})
+   'next       (:malli/schema (meta #'plan/next))
+   'tree       (:malli/schema (meta #'plan/tree))
+   'document   (:malli/schema (meta #'plan/document))
+   'reconcile! (:malli/schema (meta #'plan/reconcile!))
+   'status     (:malli/schema (meta #'plan/status))
+   'list-open  (:malli/schema (meta #'plan/list-open))})
 
 (defn- instrument-verbs! []
   (doseq [[fn-sym schema] verb-schemas]
@@ -876,6 +879,253 @@
                               "the phase-A row shows its nested 2/2 (depth>1 count correct)"))))))))
           (.then (fn [_] (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+;; --- reconcile! — the whole-plan document round-trip (planner-worker W1).
+;; --- Authoring = reconcile against empty (ONE code path with plan!); a node
+;; --- with id updates in place, without id mints, an absent open node drops,
+;; --- done steps are immune. `document` is the projection the edit starts
+;; --- from; a round-trip reconcile of an unedited document is a no-op.
+
+(deftest reconcile-authors-from-empty-like-plan
+  (async done
+    (-> (with-agent-conn
+          (fn []
+            (-> (plan/reconcile!
+                  {:my.plan/tree
+                   {:my.plan/title "Ship the tracker"
+                    :my.plan/goal  "a tracker my human keeps using"
+                    :my.plan/children
+                    [{:my.plan/title "design the schema" :my.plan/ref "schema"
+                      :my.plan/expect "register! returns and a row transacts"}
+                     {:my.plan/title "store seed rows" :my.plan/ref "rows"
+                      :my.plan/after ["schema"]}]}})
+                (.then
+                  (fn [{:my.plan/keys [ok? root ids diff]}]
+                    (is (true? ok?) "authoring against an empty tree succeeds")
+                    (is (string? root))
+                    (is (= {:my.plan/added 3 :my.plan/dropped 0 :my.plan/updated 0}
+                           diff)
+                        "diff counts the 3 minted nodes, nothing else")
+                    (let [sub  (plan/tree {:my.plan/root? root})
+                          kids (:my.plan/_parent sub)
+                          rows (some #(when (= (get ids "rows") (:my.plan/id %)) %)
+                                     kids)]
+                      (is (= "Ship the tracker" (:my.plan/title sub)))
+                      (is (= "a tracker my human keeps using" (:my.plan/goal sub)))
+                      (is (= 2 (count kids)) "both children landed in ONE tx")
+                      (is (= 1 (count (:my.plan/needs rows)))
+                          ":after label compiled to a needs edge, as in plan!")))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest reconcile-round-trip-of-unedited-document-is-a-noop
+  (async done
+    (-> (with-agent-conn
+          (fn []
+            (-> (plan/plan! {:my.plan/title "root"
+                             :my.plan/children
+                             [{:my.plan/title "a" :my.plan/ref "a"
+                               :my.plan/expect "a holds"}
+                              {:my.plan/title "b" :my.plan/ref "b"
+                               :my.plan/after ["a"]
+                               :my.plan/description "second"}]})
+                (.then (fn [{ok? :my.plan/ok?}]
+                         (is (true? ok?))
+                         (plan/reconcile! {:my.plan/tree (plan/document {})})))
+                (.then
+                  (fn [{:my.plan/keys [ok? diff]}]
+                    (is (true? ok?))
+                    (is (= {:my.plan/added 0 :my.plan/dropped 0
+                            :my.plan/updated 0}
+                           diff)
+                        "an unedited document reconciles to ZERO delta — the projection and the diff share one shape"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest reconcile-updates-mints-and-drops-in-one-tx
+  (async done
+    (let [st (atom {})]
+      (-> (with-agent-conn
+            (fn []
+              (-> (plan/plan! {:my.plan/title "root"
+                               :my.plan/children
+                               [{:my.plan/title "keep me" :my.plan/ref "a"}
+                                {:my.plan/title "drop me" :my.plan/ref "b"}]})
+                  (.then
+                    (fn [{:my.plan/keys [ok? root ids]}]
+                      (is (true? ok?))
+                      (reset! st {:root root :a (get ids "a") :b (get ids "b")})
+                      (let [[doc-root] (plan/document {})
+                            kids (:my.plan/_parent doc-root)
+                            a    (some #(when (= (get ids "a") (:my.plan/id %)) %)
+                                       kids)
+                            ;; edit a's title + expect, DROP b, MINT c
+                            doc  (assoc doc-root :my.plan/_parent
+                                        [(assoc a
+                                                :my.plan/title "keep me (renamed)"
+                                                :my.plan/expect "renamed row reads back")
+                                         {:my.plan/title "minted later"}])]
+                        (plan/reconcile! {:my.plan/tree doc}))))
+                  (.then
+                    (fn [{:my.plan/keys [ok? diff]}]
+                      (is (true? ok?))
+                      (is (= {:my.plan/added 1 :my.plan/dropped 1
+                              :my.plan/updated 1}
+                             diff)
+                          "one delta: a updated, b dropped, c minted")
+                      (let [{:keys [root a b]} @st
+                            sub  (plan/tree {:my.plan/root? root})
+                            kids (:my.plan/_parent sub)
+                            a*   (some #(when (= a (:my.plan/id %)) %) kids)]
+                        (is (= 2 (count kids)) "root has a + the minted child")
+                        (is (= "keep me (renamed)" (:my.plan/title a*))
+                            "update happened IN PLACE — same :my.plan/id")
+                        (is (= "renamed row reads back" (:my.plan/expect a*))
+                            "the added ::expect landed")
+                        (is (nil? (plan-int/status-of b))
+                            "the absent open node was dropped (drop! semantics)")
+                        (is (some #(= "minted later" (:my.plan/title %)) kids)
+                            "the id-less node was minted under the root")))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest reconcile-done-steps-are-immune
+  (async done
+    (let [st (atom {})]
+      (-> (with-agent-conn
+            (fn []
+              (-> (plan/plan! {:my.plan/title "root"
+                               :my.plan/children
+                               [{:my.plan/title "finished" :my.plan/ref "f"}
+                                {:my.plan/title "open" :my.plan/ref "o"}]})
+                  (.then (fn [{:my.plan/keys [ids]}]
+                           (reset! st ids)
+                           (plan/done! {:my.plan/id (get ids "f")})))
+                  (.then
+                    (fn [_]
+                      (let [[doc-root] (plan/document {})
+                            kid-ids (set (map :my.plan/id
+                                              (:my.plan/_parent doc-root)))]
+                        (is (not (contains? kid-ids (get @st "f")))
+                            "document EXCLUDES the done step by construction")
+                        ;; hand-submit the done id anyway → fail, no mutation
+                        (plan/reconcile!
+                          {:my.plan/tree
+                           (update doc-root :my.plan/_parent conj
+                                   {:my.plan/id (get @st "f")
+                                    :my.plan/title "rewriting history"})}))))
+                  (.then
+                    (fn [{ok? :my.plan/ok? error :my.plan/error}]
+                      (is (false? ok?) "a done id in the document is refused")
+                      (is (str/includes? error (get @st "f"))
+                          "the envelope NAMES the immune step")
+                      (is (re-find #"reopen!" error) "and names the fix")
+                      (is (= "finished"
+                             (:my.plan/title
+                               (d/pull @db/*conn* '[*]
+                                       [:my.plan/id (get @st "f")])))
+                          "history was not mutated"))))))
+          (.then (fn [_] (done)))
+          (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest reconcile-parses-markdown-heading-and-nested-list
+  (async done
+    (-> (with-agent-conn
+          (fn []
+            (-> (plan/reconcile!
+                  {:my.plan/markdown
+                   ;; frontier-real markup (live F1 sample 2026-07-11): task-
+                   ;; list checkboxes + redundant enumerators inside bullets
+                   ;; are cosmetic and must never leak into titles.
+                   (str "# Ship the tracker\n"
+                        "Goal: a tracker my human keeps using\n"
+                        "- [ ] 1. design the schema — expect: register! returns and a row transacts\n"
+                        "- [ ] 2. store seed rows. The three rows read back.\n"
+                        "  - backfill the old rows\n"
+                        "- summary tile\n")})
+                (.then
+                  (fn [{:my.plan/keys [ok? root diff]}]
+                    (is (true? ok?))
+                    (is (= 5 (:my.plan/added diff))
+                        "root + 3 steps + 1 nested substep minted")
+                    (let [sub   (plan/tree {:my.plan/root? root})
+                          kids  (:my.plan/_parent sub)
+                          k     (fn [t] (some #(when (str/starts-with?
+                                                       (:my.plan/title %) t) %)
+                                              kids))]
+                      (is (= "Ship the tracker" (:my.plan/title sub))
+                          "the heading titles the root")
+                      (is (= "a tracker my human keeps using"
+                             (:my.plan/goal sub))
+                          "the Goal: line goals the root")
+                      (is (= 3 (count kids)))
+                      (is (= "register! returns and a row transacts"
+                             (:my.plan/expect (k "design the schema")))
+                          "an explicit — expect: suffix becomes ::expect")
+                      (is (= "The three rows read back."
+                             (:my.plan/expect (k "store seed rows")))
+                          "a trailing second sentence becomes ::expect")
+                      (is (= 1 (count (:my.plan/_parent (k "store seed rows"))))
+                          "the indented item nested under its parent"))))))
+          )
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest reconcile-parses-a-flat-numbered-list
+  (async done
+    (-> (with-agent-conn
+          (fn []
+            (-> (plan/reconcile!
+                  {:my.plan/markdown
+                   (str "Goal: recall beats re-derivation\n"
+                        "1. design a schema for findings\n"
+                        "2. store the findings — expect: a query returns them\n"
+                        "3. answer from the store\n")})
+                (.then
+                  (fn [{:my.plan/keys [ok? root diff]}]
+                    (is (true? ok?) "a flat numbered list is a valid document")
+                    (is (= 4 (:my.plan/added diff))
+                        "a synthesized root + the 3 steps")
+                    (let [sub (plan/tree {:my.plan/root? root})]
+                      (is (= "recall beats re-derivation" (:my.plan/title sub))
+                          "no heading → the goal line titles the root")
+                      (is (= 3 (count (:my.plan/_parent sub))))
+                      (is (some #(= "a query returns them" (:my.plan/expect %))
+                                (:my.plan/_parent sub))))))))
+          )
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest reconcile-requires-exactly-one-document-argument
+  (async done
+    (-> (with-agent-conn
+          (fn []
+            (-> (plan/reconcile! {:my.plan/tree {:my.plan/title "t"}
+                                  :my.plan/markdown "- t"})
+                (.then (fn [{ok? :my.plan/ok? error :my.plan/error}]
+                         (is (false? ok?))
+                         (is (re-find #"both" error) "both args refused")
+                         (plan/reconcile! {})))
+                (.then (fn [{ok? :my.plan/ok? error :my.plan/error}]
+                         (is (false? ok?))
+                         (is (re-find #"neither" error) "neither arg refused")
+                         (is (empty? (:my.plan/steps (plan/list-open {})))
+                             "nothing minted on either failure"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest reconcile-tree-entry-declares-the-prefill-affordance
+  ;; The registry-driven draft-head affordance (planner-worker-design): the
+  ;; ::tree entry's :seon.render/prefill-fn PROPERTY names the projection of
+  ;; the argument's current value. W2's driver consumes it; here we only
+  ;; assert the declaration is discoverable from the registered schema.
+  (let [definition (schema/schema-definition :my.plan/reconcile-request)
+        entry      (some (fn [e] (when (and (vector? e)
+                                            (= :my.plan/tree (first e)))
+                                   e))
+                         (rest definition))]
+    (is (= 'my.plan/document (:seon.render/prefill-fn (second entry)))
+        "::tree declares my.plan/document as its prefill projection")))
 
 (deftest plan-rejects-misspelled-my-plan-keys
   ;; Registry class (silent unknown-key acceptance in my.* request maps): an

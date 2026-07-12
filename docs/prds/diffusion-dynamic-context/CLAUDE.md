@@ -62,6 +62,22 @@ grammar; bare `⟹` is real).
 diffusion-testbed `:seon.agent/ctx` tree (mirrored by hand from
 system.edn + `:recent-verbs` + `:typeahead-steps`).
 
+**P7 W1 SHIPPED (2026-07-11 late)**: `my.plan/reconcile!` +
+`my.plan/document` landed (whole-plan document round-trip, EDN or
+lenient markdown; ONE compiler — `plan!` now compiles through
+`compile-reconcile` against an empty baseline; the `::tree` entry
+declares the `:seon.render/prefill-fn 'my.plan/document` W2
+affordance). Live proof on acme (worker `d43be833dac3`, k=2/arm, 0
+core faults): Muse 3/3 correct trees — picking `reconcile!`
+`::markdown` unprompted; typeahead worker 0/2 whole-document (plans
+incrementally via `step!`, ~60–67 s/turn, 540 s timeouts on the grown
+store). Falsification verdict: W1's value = the general function + W2's
+focus loop, not diffusion authoring; the one-large-form gap
+(GROW/buffer capacity) is the W2-adjacent build. Worker fix in the same
+unit: CAL probe crash on an end-clipped hole (`cursor.py`, zero-size
+`mx.max`). Numbers + drive hygiene (Muse-resolving global, short
+warmups): [[planner-worker-design]] §"W1 SHIPPED".
+
 ## How to run it
 
 - **Local model server**: `bin/seon start diffusion-server` (runs
