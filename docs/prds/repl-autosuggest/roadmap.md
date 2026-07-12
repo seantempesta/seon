@@ -6,52 +6,65 @@ tags: [prd, agent]
 
 # REPL autosuggest — roadmap (we-are-here)
 
-Design: [[design.md]]. Started 2026-07-12. Scope widened same day
-(owner): general REPL autocomplete for EVERY turn — data modeling,
-querying, transacting, defn-writing, plans — not plan-only.
+Design: [[design.md]] · Review: [[research/design-review-2026-07-12.md]].
+Started 2026-07-12; scope = general REPL autocomplete (owner), v0 model
+contract = copy-heavy form kinds (plan/transact/register).
 
 ## Built
 
-- `reference-code/needle` vendored as a submodule; architecture,
-  dataset pipeline, finetune loop, constrained decoder fully read.
-- Prior art confirmed shipped and reused (NOT rebuilt here):
-  `my.plan/reconcile!` markdown round-trip (P7 W1/W2), turn capture
+- `reference-code/needle` vendored (submodule); source fully read.
+- **B1 SHIPPED** (`5481ab36`, `src-needle/`): MLX port, parity 20/20
+  greedy-exact vs JAX; prefill ~128k tok/s @1024 (8ms), decode 428
+  tok/s single-stream → ~0.25s per full suggestion; Clojure 2.45
+  chars/token (1.82× English/JSON), envelope tight-but-workable;
+  overfit smoke green (f32 master weights). Findings: pretrained
+  contrastive head is all zeros (retrieval must be trained or stay
+  deterministic); constrained decoding is load-bearing.
+- **KT0 census FIRED**: ~224 ok-eval turns total (all acme; default
+  history wiped). Data recipe inverted — synthetic/gold primary, mined
+  turns = held-out eval only.
+- Adversarial design review (9 agents): right-track-with-changes; all
+  11 changes folded into design.md.
+- Reused, not rebuilt: `my.plan/reconcile!` round-trip, turn capture
   (`prompt-blob`/`reply-blob`/`rendered-as-of`), per-form eval rows,
-  `#code` heredocs, program-graph `:seon.fn` cards.
+  program-graph cards, the menu candidate derivation.
 
-## The gap
+## In flight
 
-No projection fn, no curation attrs, no exporter, no `src-needle`, no
-trained checkpoint, no `:suggest` section.
+- **A1** — `seon.repl.autocomplete` (context profile via ONE renderer
+  `seon.agent.ctx/render-context` + `:seon.agent.ctx/profile` key,
+  config→DB profiles, curation attrs, exporter). Acceptance now
+  includes the three determinism holes (result-handles, warnings
+  wall-clock, `@db/*conn*` reads).
+- Vocabulary cleanup: "verbs"-named surfaces → functions names;
+  deprecated `:relevant-source` deletion.
 
-## Ordered path
+## Ordered path (spend-gated; thresholds in design.md §Measurement)
 
-1. **A1 — `seon.repl.autocomplete` context + curation + exporter**
-   (pod-side, CLJS). Context = `render-context` with a small block
-   profile (no second renderer); exporter walks
-   `agent-turns`, renders at `rendered-as-of`, extracts ALL ok forms
-   (no domain filter), emits JSONL. Prove on acme store first (this
-   lane's harness; mind commits on the shared branch).
-2. **B1 — `src-needle` MLX inference port** + pkl→safetensors +
-   JAX-CPU parity proof (parallel with A1). Measure Clojure token
-   efficiency against the 1024 budget here.
-3. **A2 — gold exemplars** per domain (schema/query/transact/defn/
-   plan) once A1's format is proven on real mined rows.
-4. **B2 — MLX finetune loop** (AdamW first) + Clojure-grammar
-   constrained decoding + contrastive fn-retrieval finetune; train v0
-   on mined+gold.
-5. **B3 — serve + `:suggest` section**, fail-soft, every turn;
-   held-out gate (parses ∧ evals-clean ∧ matches, per form-kind).
-   Inspect-AI task for agent-level lift.
+1. **KT1 tokenizer envelope** — needs A1's real exported rows; hours.
+2. **KT2 zero-shot copy fidelity** — stock checkpoint, hours.
+3. **KT3 frontier signal-ceiling on the profile** — the 224 held-out
+   turns; fixes the projection before any training.
+4. **KT4 oracle-injection uptake** (inspect-ai) — proves the channel
+   before training spend.
+5. **A2 data build** — synthetic/gold primary (staged db states +
+   real profile renders; structured-markdown cheap supervision with
+   reconcile-oracle filtering; quotas per design.md), agy
+   augmentation.
+6. **KT5 finetune reachability** (plan domain) → **B2 full train**
+   (incl. Clojure-grammar constrained decoding; retrieval stays
+   deterministic v0).
+7. **B3 serve + `:suggest`** — call-once-then-derive, volatile-segment
+   priority, diffusion offer channel; ship gate = $0 baseline loses +
+   dead-weight criterion + frontier with/without arm.
 
 ## Open questions
 
-- Prompt-blob capture volume in prod (dial to disable capture while
-  keeping `rendered-as-of`?) — flagged 2026-07-12, not blocking.
-- Tokenizer efficiency on Clojure text vs the 1024 budget — measure in
-  B1; retrain tokenizer only if measured to blow the budget.
-- Sibling ordering: created-at only today; add an ordinal only if
-  subagent dispatch proves to need it.
-- Retrieval candidate pool size vs contrastive-encode latency at
-  inference (whole fn surface each turn? cache card embeddings —
-  content-addressed, embed once).
+- Any persisted needle-embedding index = second index next to
+  `seon.embed` — **owner-ruling gate**, must not land silently.
+- ~200-line Python server scaffold copy from src-diffusion: recommend
+  accept-for-v0, extract on a third server (flagged to owner).
+- One `:openai-compat` gateway per cluster / one `SEON_DG_ENDPOINT`
+  per pod — extend `agent-override-attrs` only when a second is
+  actually needed.
+- Prompt-blob capture volume in prod — dial idea, not blocking.
