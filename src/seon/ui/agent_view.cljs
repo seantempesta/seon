@@ -39,19 +39,29 @@
        (when-let [ns (namespace block-name)] (str ns "-"))
        (name block-name)))
 
+(defn- transcript-selection? [selection]
+  (= selection "context-transcript"))
+
+(defn- bottom-effect
+  "Datastar effect that re-anchors a transcript scroller after its revision morph."
+  [touch]
+  (str "setTimeout(() => { $el.scrollTop = $el.scrollHeight }, 0); " touch))
+
 (defn- primary-panel
-  "One selectable primary-panel body."
-  [selection hiccup]
-  [:section {:id (str "agent-view-primary-" selection)
-             :data-agent-primary selection
-             :data-show (str "$selected === '" selection "'")
-             :class (str "agent-view-surface tile-hero min-h-0 overflow-auto border "
-                         "border-base-800 rounded-md bg-base-900 p-2 h-full")}
+  "One selectable primary-panel body. Transcript bodies follow their tail."
+  [selection hiccup touch]
+  [:section (cond-> {:id (str "agent-view-primary-" selection)
+                     :data-agent-primary selection
+                     :data-show (str "$selected === '" selection "'")
+                     :class (str "agent-view-surface tile-hero min-h-0 overflow-auto border "
+                                 "border-base-800 rounded-md bg-base-900 p-2 h-full")}
+              (transcript-selection? selection)
+              (assoc :data-effect (bottom-effect touch)))
    hiccup])
 
 (defn- rail-button
   "A compact selectable card for a non-focused primary-panel body."
-  [selection label hiccup]
+  [selection label hiccup touch]
   [:div {:role "button"
          :tabindex "0"
          :aria-label (str "Show " label " in the primary view")
@@ -59,17 +69,21 @@
                      "bg-base-900 overflow-hidden hover:border-base-700")
          :data-show (str "$selected !== '" selection "'")
          :data-class (str "{'border-amber-700': $selected === '" selection "'}")
-         (keyword "data-on:click") (str "$selected = '" selection "'")
+         (keyword "data-on:click") (str "$selected = '" selection
+                                         "'; $manualselection = true")
          (keyword "data-on:keydown")
          (str "if ($event.key === 'Enter' || $event.key === ' ') "
-              "{ $event.preventDefault(); $selected = '" selection "' }")}
+              "{ $event.preventDefault(); $selected = '" selection
+              "'; $manualselection = true }")}
    [:div {:class "px-2 py-1 border-b border-base-800 text-2xs text-text-400 font-mono"}
     label]
    ;; The HTML twin may itself contain buttons/forms. The rail is a visual
    ;; preview; interaction belongs to the selected primary render.
-   [:div {:class "overflow-hidden"
-          :aria-hidden "true"
-          :style "max-height:20rem;pointer-events:none"}
+   [:div (cond-> {:class "overflow-hidden"
+                  :aria-hidden "true"
+                  :style "max-height:20rem;pointer-events:none"}
+           (transcript-selection? selection)
+           (assoc :data-effect (bottom-effect touch)))
     hiccup]])
 
 (defn- agent-attr-touch
@@ -153,13 +167,16 @@
       [:main {:id "app-view"
               :class "flex flex-col gap-2 w-full min-h-0 flex-1 overflow-hidden"
               :data-signals (str "{selected: '" latest-selection
-                                 "', seenrevision: " latest-touch "}")
+                                 "', seenrevision: " latest-touch
+                                 ", manualselection: false}")
               :data-effect (str "if ($seenrevision !== " latest-touch ") { "
-                                "$selected = '" latest-selection "'; "
+                                "if (!$manualselection) $selected = '"
+                                latest-selection "'; "
                                 "$seenrevision = " latest-touch "; } "
                                 "if ($selected !== 'canvas' && "
                                 "!document.querySelector('[data-agent-primary=\"' + "
-                                "$selected + '\"]')) $selected = 'canvas'")}
+                                "$selected + '\"]')) { $selected = 'canvas'; "
+                                "$manualselection = false }")}
        (header/system-header db)
        header/header-spacer
        [:header {:id "agent-view-header"
@@ -178,15 +195,15 @@
         [:div {:id "agent-view-primary"
                :class "col-span-2 min-h-0 h-full overflow-hidden"}
          (doall
-           (map (fn [{:keys [selection hiccup]}]
-                  (primary-panel selection hiccup))
+           (map (fn [{:keys [selection hiccup touch]}]
+                  (primary-panel selection hiccup touch))
                 surfaces))]
         [:aside {:id "agent-view-context"
                  :class (str "agent-view-rail col-span-1 flex flex-col gap-2 "
                              "min-h-0 h-full overflow-y-auto")}
          (doall
-           (map (fn [{:keys [selection label hiccup]}]
-                  (rail-button selection label hiccup))
+           (map (fn [{:keys [selection label hiccup touch]}]
+                  (rail-button selection label hiccup touch))
                 surfaces))]]])
     (catch :default e
       [:main {:id "app-view" :class "flex flex-col gap-3 w-full"}
