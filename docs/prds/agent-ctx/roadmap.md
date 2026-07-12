@@ -1,10 +1,26 @@
 ---
 type: prd
-status: active
+status: completed
 tags: [prd, agent]
 ---
 
 # agent-ctx roadmap — we are here → the target
+
+## Chunk closeout (2026-07-12)
+
+This branch is complete. It proved and shipped the database-derived context
+block model, the unified agent/debug web surfaces, the minimal context cutover,
+the `my.canvas` interaction path, durable planning improvements, targeted live
+render invalidation, and cold-resume supervisor hardening. Open research and
+deferred experiments below remain an honest historical record; they are not a
+reason to keep this broad branch open.
+
+The next chunk starts from this merged base and focuses on reliability through
+explicit runtime lifecycles, minimal transaction provenance, exact state
+reconciliation, and removal of duplicated boot/index/prune paths. That work has
+its own PRD because it changes foundational database and process boundaries and
+will be designed and proven incrementally rather than rushed into this context
+chunk.
 
 ## Universal new-agent action (2026-07-12)
 
