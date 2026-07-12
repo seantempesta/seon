@@ -13,11 +13,13 @@ launching in parallel. Live status: [[roadmap.md]].
 
 ## Settled — do NOT re-litigate
 
-- **Byte-exact contract**: encoder input = `seon.tune/projection`, ONE
-  fn pure over a db value, used identically at export (as-of
-  `rendered-as-of`) and inference (live db). Prompt blobs are debug
-  ground truth, never the training input. Stale exports are re-derived,
-  never patched.
+- **Byte-exact contract, no second renderer**: encoder input =
+  `seon.repl.autocomplete/context`, a thin wrapper over the pod's ONE
+  prompt producer (`seon.ctx/render-context`) with a small
+  config-defined block profile + tight caps; pure over a db value,
+  used identically at export (as-of `rendered-as-of`) and inference
+  (live db). Prompt blobs are debug ground truth, never the training
+  input. Stale exports are re-derived, never patched.
 - **Scope is the whole REPL surface** (owner, 2026-07-12): suggestions
   at every turn for data modeling, querying, transacting, defns,
   plans. Target = the turn's ok multi-form output; plan markdown →
@@ -43,7 +45,7 @@ launching in parallel. Live status: [[roadmap.md]].
   (545M). This lane uses the ACME pod (7980/7981) —
   `bin/acme build && bin/acme start wire-server && bin/acme start pod`.
 - Shared branch: commit with explicit pathspecs only
-  (`docs/prds/repl-autosuggest/`, `src-needle/`, `src/seon/tune*`,
+  (`docs/prds/repl-autosuggest/`, `src-needle/`, `src/seon/repl/autocomplete*`,
   `src/my/plan*`, `.gitmodules` + `reference-code/needle`).
 
 ## Entry points

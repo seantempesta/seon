@@ -26,8 +26,9 @@ trained checkpoint, no `:suggest` section.
 
 ## Ordered path
 
-1. **A1 — `seon.tune` projection + curation + exporter** (pod-side,
-   CLJS). Projection pure over db value; exporter walks
+1. **A1 — `seon.repl.autocomplete` context + curation + exporter**
+   (pod-side, CLJS). Context = `render-context` with a small block
+   profile (no second renderer); exporter walks
    `agent-turns`, renders at `rendered-as-of`, extracts ALL ok forms
    (no domain filter), emits JSONL. Prove on acme store first (this
    lane's harness; mind commits on the shared branch).

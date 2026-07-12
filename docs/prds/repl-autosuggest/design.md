@@ -51,12 +51,17 @@ Ours is the same shape with each slot re-based:
 Training context MUST match inference context byte-for-byte, and MUST
 be regenerable from a database point in time. Therefore:
 
-- **One projection function** (`seon.tune/projection`, Track A) renders
-  the encoder input. Pure over a db VALUE — at inference the live db,
-  at export `(db/as-of conn rendered-as-of)` per historical turn. Same
-  function, same bytes, by construction. Retrieval-selected cards are
-  part of the rendered output (the card render is itself derived from
-  the db, one mechanism with the `:namespaces` compact cards).
+- **No second context renderer** (owner, 2026-07-12). The encoder
+  input is the pod's ONE prompt producer — `seon.ctx/render-context` —
+  invoked with a small autocomplete PROFILE: a config-defined block
+  list (reusing the registered blocks: `:plan`, `:warnings`, the
+  recent tail, pending guidance) under tight per-block render caps.
+  `seon.repl.autocomplete/context` is a thin wrapper: db value in,
+  render-context with the profile, text out. Pure over a db VALUE —
+  live db at inference, `(db/as-of conn rendered-as-of)` at export.
+  Same producer, same bytes, by construction. Retrieval-selected cards
+  reuse the existing compact-card render (one mechanism with the
+  `:namespaces` cards).
 - The projection is NOT the prompt blob. Prompt/reply blobs
   (`:seon.agent.turn/prompt-blob` / `reply-blob` — content-addressed
   `my.blob` files on disk; datoms hold only hash/token projections)
@@ -98,8 +103,8 @@ decoder budget. Failed forms excluded for free — the db already knows.
 1. **Mined turns** — every turn with ok eval rows across the `acme`
    and `default` stores via `seon.agent.ctx/agent-turns`. No domain
    filter: querying, transacting, schema work, defns, plans all land
-   in the same JSONL. Curation datoms (`:seon.tune/rating`,
-   `:seon.tune/tag`) mark gold sessions (genuine judgments — stored,
+   in the same JSONL. Curation datoms (`:seon.repl.autocomplete/rating`,
+   `:seon.repl.autocomplete/tag`) mark gold sessions (genuine judgments — stored,
    with provenance); training weights gold higher, excludes flagged.
 2. **Gold exemplars** — orchestrator-authored: realistic seon
    situations mapped to exemplary form sequences, per domain (a
