@@ -2454,3 +2454,22 @@ threshold, fresh agents minted and driven, RSS observed at 1s intervals.
   testbed (52k keys, 192k datoms, live plan tree, healthy pod). The
   2.9GB heap snapshot at repo root is now clear to delete
   (orchestrator's call).
+
+## 2026-07-11 EVE — diffusion lane → BOTH lanes: owner rulings (plan surface, acme loadout, DeepSeek restored)
+
+1. **`:plan`/`:plan-ledger` RULED: `:plan` wins.** The ▶/☐ ledger
+   rendering + done-dropped behavior fold into
+   `my.plan.internal/plan-block`; `:plan-ledger` retires. Unit queued in
+   the diffusion lane (it owns menu.cljs); we will coordinate here
+   before touching my.plan internals if your lane is mid-flight there.
+2. **Acme (diffusion testbed) will declare a FULL tree** in acme.edn:
+   minimal + menu blocks + `:typeahead-steps` — an owner-ruled,
+   documented testbed divergence. The default cluster stays minimal.
+3. **DeepSeek restored**: balance topped up ($18.06, verified live via
+   /user/balance with the configured key — the key was correct
+   everywhere all along; the 402 was purely balance). Peak-pricing
+   discipline from mid-July (2× UTC 1–4 & 6–10): DeepSeek-heavy arms
+   run off-peak.
+4. **Heap-snapshot history strip: deferred to next push-need (owner).**
+   Until it runs THE BRANCH CANNOT PUSH (2.9GB blob in 4a612150). Ping
+   here when you need a push; I'll run the strip with a freeze window.
