@@ -17,13 +17,15 @@
             [clojure.string :as str]
             [datahike.api :as d]
             [datahike.constants :as datahike.constants]
+            [datahike.db.interface :as dbi]
             [hasch.core :as hasch]
             [konserve-jdbc.core]
             [seon.db.id :as id]
             [seon.server.codec :as codec]
             [seon.server.registry :as registry]
             [seon.server.broadcast :as bcast])
-  (:import [java.net StandardProtocolFamily UnixDomainSocketAddress]
+  (:import [datahike.db AsOfDB]
+           [java.net StandardProtocolFamily UnixDomainSocketAddress]
            [java.nio.channels ServerSocketChannel SocketChannel Channels])
   (:gen-class))
 
@@ -120,7 +122,10 @@
    :seon.store.wire/error-kind kind})
 
 (defn- basis-t-of [db]
-  (some-> db :max-tx))
+  (when db
+    (if (instance? AsOfDB db)
+      (dbi/-time-point db)
+      (dbi/-max-tx db))))
 
 ;; ---------- Datom wire shape ----------
 

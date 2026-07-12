@@ -59,6 +59,7 @@
     [cljs.reader :as reader]
     [datahike.api :as d]
     [datahike.constants :as dconst]
+    [datahike.db :refer [AsOfDB]]
     [datahike.db.interface :as dbi]
     [datahike.impl.entity :as dentity]
     [seon.config :as config]
@@ -1067,15 +1068,19 @@
   origin-t dconst/tx0)
 
 (defn basis-t
-  "The basis tx-id of a db value — the latest tx it reflects.
+  "The selected tx coordinate of a db value.
 
-   The \"now\" end of a time-travel domain. Omit db ⇒ your `*conn*`'s current basis. A
+   For an [[as-of]] value this is its selected time point, not the later head
+   of its origin database. For current, history, and [[since]] values this is
+   the origin head. Omit db ⇒ your `*conn*`'s current basis. The result is a
    [[time-point]] usable directly with `as-of`/`since`."
   {:malli/schema [:function
                   [:=> [:cat] ::time-point]
                   [:=> [:catn [::db ::db-val]] ::time-point]]}
   ([]   (basis-t @(internal/resolve-conn *conn*)))
-  ([db] (dbi/-max-tx db)))
+  ([db] (if (instance? AsOfDB db)
+          (dbi/-time-point db)
+          (dbi/-max-tx db))))
 
 ;; ---------------------------------------------------------------------------
 ;; Listeners

@@ -148,9 +148,8 @@
           r   (agent-debug/repro {:seon.agent.debug/eid eid})]
       (is (true? (:seon.agent.debug/ok? r)))
       (is (some? (:seon.db/db r)) "the frozen as-of db VALUE is in the bundle")
-      ;; NB: (db/basis-t as-of-db) reports the ORIGIN db's max-tx, not the
-      ;; as-of point (datahike-primer §1) — frozenness is proven by the
-      ;; differs-from-head query below, not by basis-t.
+      (is (= (:seon.error/at r) (db/basis-t (:seon.db/db r)))
+          "the frozen database reports the error's selected coordinate")
       (is (= 'my.probe/f (:seon.agent.debug/fn-sym r)))
       (is (= "[{:my.probe/arg 42}]" (:seon.error/args-edn r)))
       (is (str/includes? (:seon.agent.debug/repro-expr r)
