@@ -342,6 +342,17 @@
 ;; the shipped default. The value is the literal prompt string (a manifest
 ;; keeps it inline; `config/minimal.edn` is the worked example).
 (schema/register! :seon.config/system-text :string)
+;; Named context RENDER PROFILES — `{profile-kw → [block-patch …]}`, each
+;; patch a `:seon.agent.ctx/profile` entry (block name + per-block config
+;; overrides) that `seon.agent.ctx/render-context` renders as a curated
+;; subset of the agent's blocks. Config-through-DB so an as-of render
+;; regenerates under the profile IN FORCE at that t (the byte-exact
+;; contract — `seon.repl.autocomplete` reads its `:autocomplete` profile
+;; off the passed db value, code default when absent). OPTIONAL, no
+;; default (absent ⇒ not seeded ⇒ consumers use their code defaults).
+;; EDN-slot bridged (mixed `:or`, the ::home-requires pattern).
+(schema/register! :seon.config/context-profiles
+  [:or [:map-of :keyword [:vector :map]] :nil])
 
 ;; The singleton entity schema — every knob optional (a `{}` manifest seeds the
 ;; resolved defaults; `:seon.config/id` is the only required key).
@@ -354,6 +365,7 @@
    [:seon.config/spawn-depth-cap    {:optional true} :seon.config/spawn-depth-cap]
    [:seon.config/always             {:optional true} :seon.config/always]
    [:seon.config/system-text        {:optional true} :seon.config/system-text]
+   [:seon.config/context-profiles   {:optional true} :seon.config/context-profiles]
    [:seon.config.render/store-edn-cap      {:optional true} :seon.config/cap]
    [:seon.config.render/eval-cap           {:optional true} :seon.config/cap]
    [:seon.config.render/message-cap        {:optional true} :seon.config/cap]
@@ -417,6 +429,7 @@
    [:seon.config/routes        {:optional true} [:vector :seon.config/route-spec]]
    [:seon.config/render        {:optional true} :seon.config/render]
    [:seon.config/system-text   {:optional true} :seon.config/system-text]
+   [:seon.config/context-profiles {:optional true} :seon.config/context-profiles]
    [:seon.config/on-core-error {:optional true} :seon.config/on-core-error]
    [:seon.config/web           {:optional true} :seon.config/web-spec]
    [:seon.config/repair        {:optional true} :seon.config/repair]
@@ -675,7 +688,9 @@
              :seon.config.breaker/window-ms
              (get-in manifest [:seon.config/schedule-breaker :seon.config.breaker/window-ms] 1800000)}
       (contains? manifest :seon.config/system-text)
-      (assoc :seon.config/system-text (:seon.config/system-text manifest)))))
+      (assoc :seon.config/system-text (:seon.config/system-text manifest))
+      (contains? manifest :seon.config/context-profiles)
+      (assoc :seon.config/context-profiles (:seon.config/context-profiles manifest)))))
 
 (defn stale-singleton-retractions
   "Retract ops for stored singleton attrs absent from `desired`.

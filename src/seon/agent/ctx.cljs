@@ -103,6 +103,18 @@
 (schema/register! :seon.agent.ctx/name     :keyword)
 (schema/register! :seon.agent.ctx/priority :int)
 
+;; Per-BLOCK render token cap — the block-level rung of the ONE cap
+;; mechanism (the per-value clip caps above it, the eval-component caps
+;; below). ABSENT (every default block) → no block-level clip, byte-parity.
+;; PRESENT → the block's rendered :ai text is clipped to this many tokens
+;; in `rendered-child-blocks` (prompt + web UI see the same clip), with a
+;; deterministic token-denominated marker at the cut. `::cap-keep` picks
+;; which END survives the cut: :head (default) keeps the opening, :tail
+;; keeps the newest lines (a transcript-shaped block wants the tail).
+;; First consumer: the `seon.repl.autocomplete` projection profile.
+(schema/register! :seon.agent.ctx/token-cap [:int {:min 0}])
+(schema/register! :seon.agent.ctx/cap-keep  [:enum :head :tail])
+
 ;; The block map contract (validated at seon.agent.ctx/install! AND
 ;; at transact! like everything else). :seon.render/ai is the ONE slot:
 ;; a string renders verbatim (doctrine — content as source); a
@@ -112,6 +124,8 @@
   [:map
    [:seon.agent.ctx/name     :seon.agent.ctx/name]
    [:seon.agent.ctx/priority :seon.agent.ctx/priority]
+   [:seon.agent.ctx/token-cap {:optional true} :seon.agent.ctx/token-cap]
+   [:seon.agent.ctx/cap-keep  {:optional true} :seon.agent.ctx/cap-keep]
    [:seon.render/ai    {:optional true} :seon.render/ai]
    [:seon.render/html  {:optional true} :seon.render/html]])
 
@@ -952,7 +966,12 @@
      ;; transcript converter (which reads the block) and threaded in here.
      ;; ABSENT (every non-transcript caller: gym, tests, direct calls) →
      ;; `result-body-render-cap` (16384) = byte-identical to today.
-     result-body-cap :seon.render/result-body-cap}
+     result-body-cap :seon.render/result-body-cap
+     ;; Escape-clipping THREADED on the row (byte-exact path): the transcript
+     ;; converter computes it once off ITS render db and stamps it here, so an
+     ;; as-of render never reads the live conn. ABSENT (direct callers) →
+     ;; the live [[escape-clipping?]] read, byte-identical to today.
+     escape-override :seon.agent.ctx/escape-clipping?}
     prior?]
    (let [envelope    (read-error-envelope err-data)
          ;; `:seon.render/full?` (the no-clip opt-out, pinned on this eval
@@ -967,7 +986,9 @@
          ;; age-decay `result-body-cap` (the "start larger, shrink over time"
          ;; safety net that keeps full rendering bounded), so escape-clipping
          ;; and the decay are COMPLEMENTARY, not in conflict.
-         escape?     (escape-clipping?)
+         escape?     (if (some? escape-override)
+                       (boolean escape-override)
+                       (escape-clipping?))
          small-full? (or full? escape?)
          ;; Echoed source + stdout + error/guidance bodies cap at the
          ;; smaller `eval-render-cap` (1500); only the citable result
@@ -2329,6 +2350,16 @@
               :seon.db/ref eid})
     {}))
 
+;; A render PROFILE — an ordered list of block PATCH maps, each carrying at
+;; least the block `::name`. Present on a render request ⇒ the root's
+;; children are exactly these entries, each MERGED over the agent's stored
+;; block of the same name (patch keys win; a name with no stored block
+;; renders from the patch alone); derived auto-run blocks are skipped.
+;; ABSENT ⇒ byte-parity with the ordinary full-context render. First
+;; consumer: the `seon.repl.autocomplete` projection.
+(schema/register! :seon.agent.ctx/profile
+  [:vector [:map [:seon.agent.ctx/name :seon.agent.ctx/name]]])
+
 (defn context-root
   "The ROOT renderable — the agent's block set plus the current ns's
    auto-run render fns.
@@ -2343,6 +2374,11 @@
    The agent entity is pulled once
    and stashed so every child reads it without re-pulling.
 
+   A `:seon.agent.ctx/profile` on `ctx` narrows the root: children become
+   the profile's entries, each merged over the stored block of the same
+   name (patch wins; no derived blocks) — the ONE producer rendering a
+   curated subset. Absent ⇒ byte-parity with today.
+
    Producing the prompt is rendering the root per view — there is no
    bespoke composer:
      (seon.render/render :seon.render/ai   ctx (context-root ctx))  ; String
@@ -2352,7 +2388,7 @@
    the root's slot fns ([[render-context-ai]] / [[render-context-html]])
    render each child through the injected recursion handle."
   {:malli/schema [:=> [:catn [::ctx :map]] :map]}
-  [{:seon.db/keys [db] :seon.agent/keys [id] :as ctx}]
+  [{:seon.db/keys [db] :seon.agent/keys [id] profile :seon.agent.ctx/profile :as ctx}]
   (let [entity   (pull-agent-entity db id)
         stored   (agent-blocks entity)
         ;; AUTO-RUN (context.md §"Auto-run") — the current ns's render fns
@@ -2362,6 +2398,7 @@
         ;; a discovery failure degrades to the stored set, never breaks
         ;; context assembly.
         derived  (try
+                   (when (seq profile) (throw (ex-info "profile render — no derived blocks" {})))
                    (let [cur-ns (some-> (current-ns {:seon.agent/id id
                                                      :seon.db/db db})
                                         name keyword)
@@ -2394,20 +2431,41 @@
                          id     (assoc :seon.agent/id id)
                          cur-ns (assoc ::render-fns/current-ns cur-ns))))
                    (catch :default _ []))
-        children (->> (concat stored derived)
-                      (sort-by (juxt :seon.agent.ctx/priority
-                                     (comp str :seon.agent.ctx/name)))
-                      vec)]
-    {:seon.agent.ctx/name     :context
-     :seon.agent/entity       entity
-     :seon.agent.ctx/children children
-     :seon.render/ai          'seon.agent.ctx/render-context-ai
-     :seon.render/html        'seon.agent.ctx/render-context-html}))
+        children (if (seq profile)
+                   ;; PROFILE render: exactly the listed blocks, each patch
+                   ;; merged over the agent's stored block of that name
+                   ;; (patch keys win; unmatched names render from the patch
+                   ;; alone). No derived auto-run blocks.
+                   (let [by-name (into {} (map (juxt :seon.agent.ctx/name
+                                                     identity))
+                                       stored)]
+                     (->> profile
+                          (mapv (fn [patch]
+                                  (merge (get by-name
+                                              (:seon.agent.ctx/name patch) {})
+                                         patch)))
+                          (sort-by (juxt :seon.agent.ctx/priority
+                                         (comp str :seon.agent.ctx/name)))
+                          vec))
+                   (->> (concat stored derived)
+                        (sort-by (juxt :seon.agent.ctx/priority
+                                       (comp str :seon.agent.ctx/name)))
+                        vec))]
+    (cond-> {:seon.agent.ctx/name     :context
+             :seon.agent/entity       entity
+             :seon.agent.ctx/children children
+             :seon.render/ai          'seon.agent.ctx/render-context-ai
+             :seon.render/html        'seon.agent.ctx/render-context-html}
+      ;; Flag a profile render on the root so [[render-context-ai]] skips
+      ;; the provider cache-boundary split (and its live-conn breakpoint
+      ;; read) — profile renders are deterministic over the db value.
+      (seq profile) (assoc :seon.agent.ctx/profile-render? true))))
 
 (schema/register! ::render-context-request
   [:map
    [:seon.agent/id :string]
-   [:seon.db/db    {:optional true} :seon.db/db]])
+   [:seon.db/db    {:optional true} :seon.db/db]
+   [:seon.agent.ctx/profile {:optional true} :seon.agent.ctx/profile]])
 
 (defn render-context
   "THE agent's full LLM context, as a bare String.
@@ -2426,14 +2484,21 @@
    renders verbatim, a SYMBOL renders through the same render (a custom
    prompt fn returning a bare String). `:seon.db/db` is the render snapshot
    (defaults to `@*conn*`); pass the SAME db to both consumers to keep them
-   byte-identical."
+   byte-identical.
+
+   An optional `:seon.agent.ctx/profile` (a list of block patches, see the
+   schema above) renders a CURATED subset through the same root — the
+   per-agent slot override is bypassed (a profile asks for exactly those
+   blocks). Absent ⇒ byte-parity with today."
   {:malli/schema [:=> [:cat ::render-context-request] :string]}
-  [{:seon.agent/keys [id] :seon.db/keys [db]}]
+  [{:seon.agent/keys [id] :seon.db/keys [db] profile :seon.agent.ctx/profile}]
   (let [db   (or db @db/*conn*)
         ent  (db/entity {:seon.db/db db :seon.db/ref [:seon.agent/id id]})
-        slot (some->> (:seon.render/ai ent)
-                      (db/decode-edn-value :seon.render/ai))
-        ctx  {:seon.db/db db :seon.agent/id id}]
+        slot (when-not (seq profile)
+               (some->> (:seon.render/ai ent)
+                        (db/decode-edn-value :seon.render/ai)))
+        ctx  (cond-> {:seon.db/db db :seon.agent/id id}
+               (seq profile) (assoc :seon.agent.ctx/profile (vec profile)))]
     (cond
       (string? slot) slot
       (symbol? slot) (or (render/render :seon.render/ai ctx
@@ -2459,14 +2524,36 @@
   [block]
   (contains? block :seon.render/ai))
 
+(defn- cap-block-text
+  "Clip a rendered block's :ai text to its `:seon.agent.ctx/token-cap`.
+
+   ABSENT cap (every default block) or a fitting text → unchanged
+   (byte-parity). Over-cap → cut at the cap's char equivalent with a
+   deterministic token-denominated marker at the cut;
+   `:seon.agent.ctx/cap-keep` `:tail` keeps the END (newest lines — the
+   transcript shape), default `:head` keeps the opening."
+  [child text]
+  (let [cap (:seon.agent.ctx/token-cap child)]
+    (if-not (and (int? cap) (string? text) (> (tokens/estimate text) cap))
+      text
+      (let [limit  (tokens/estimate-chars cap)
+            marker (str "…⟨block clipped to " cap " of "
+                        (tokens/estimate text) " tokens⟩")]
+        (if (= :tail (:seon.agent.ctx/cap-keep child))
+          (str marker (subs text (- (count text) limit)))
+          (str (subs text 0 limit) marker))))))
+
 (defn- rendered-child-blocks
   "Render `children` in the requested formats as one block-oriented view.
 
    `render-ai` and `render-html` are format-bound render handles. A format is
    evaluated only when requested and declared on the block. Blank AI and nil
    HTML results disappear independently; a block remains when either requested
-   format produced content. This is the one projection consumed by prompt,
-   agent view, and debug view — no parallel text/html collections to correlate."
+   format produced content. A block carrying `:seon.agent.ctx/token-cap`
+   has its :ai text clipped here ([[cap-block-text]]) so prompt, agent
+   view, and debug view all see the same bounded text. This is the one
+   projection consumed by prompt, agent view, and debug view — no parallel
+   text/html collections to correlate."
   [children formats render-ai render-html]
   (->> children
        (keep
@@ -2475,7 +2562,7 @@
                        :seon.agent.ctx/priority (:seon.agent.ctx/priority child)}
                  text (when (and (contains? formats :ai)
                                  (block-renders-ai? child))
-                        (render-ai child))
+                        (cap-block-text child (render-ai child)))
                  html (when (and (contains? formats :html)
                                  (contains? child :seon.render/html))
                         (render-html child))
@@ -2523,28 +2610,35 @@
    provider side."
   {:malli/schema [:=> [:catn [::input :map]] :string]}
   [{:seon.render/keys [node render]}]
-  (let [breakpoint (cache-breakpoint)
-        rendered  (rendered-child-blocks
+  (let [rendered  (rendered-child-blocks
                     (:seon.agent.ctx/children node) #{:ai} render (constantly nil))
         bracketed (mapv (fn [s]
                           (assoc s :seon.render/bracketed
                                  (block-bracket-ai (:seon.agent.ctx/name s)
                                                      (:seon.render/text s))))
-                        rendered)
-        stable   (->> bracketed
-                      (filter #(<= (or (:seon.agent.ctx/priority %) 999)
-                                   breakpoint))
-                      (map :seon.render/bracketed)
-                      (str/join "\n\n"))
-        volatile (->> bracketed
-                      (remove #(<= (or (:seon.agent.ctx/priority %) 999)
-                                   breakpoint))
-                      (map :seon.render/bracketed)
-                      (str/join "\n\n"))]
-    (cond
-      (str/blank? stable)   volatile
-      (str/blank? volatile) stable
-      :else (str stable "\n\n" stable-boundary "\n\n" volatile))))
+                        rendered)]
+    ;; PROFILE render (the root node is flagged by [[context-root]]): a
+    ;; curated-subset render has no provider cache line — no breakpoint
+    ;; read (a live-conn read — nondeterministic over a db value), no
+    ;; [[stable-boundary]]; just the bracketed blocks in priority order.
+    ;; The DEFAULT path below is byte-identical to before profiles existed.
+    (if (:seon.agent.ctx/profile-render? node)
+      (->> bracketed (map :seon.render/bracketed) (str/join "\n\n"))
+      (let [breakpoint (cache-breakpoint)
+            stable   (->> bracketed
+                          (filter #(<= (or (:seon.agent.ctx/priority %) 999)
+                                       breakpoint))
+                          (map :seon.render/bracketed)
+                          (str/join "\n\n"))
+            volatile (->> bracketed
+                          (remove #(<= (or (:seon.agent.ctx/priority %) 999)
+                                       breakpoint))
+                          (map :seon.render/bracketed)
+                          (str/join "\n\n"))]
+        (cond
+          (str/blank? stable)   volatile
+          (str/blank? volatile) stable
+          :else (str stable "\n\n" stable-boundary "\n\n" volatile))))))
 
 (defn render-context-html
   "The ROOT renderable's `:html` slot — each child's html twin.

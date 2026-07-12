@@ -232,6 +232,40 @@
    [seon.agent.shell :as shell]
    [seon.agent.web :as web]]}
 
+ ;; ── CONTEXT RENDER PROFILES (repl-autosuggest A1) — named curated-subset
+ ;; renders through the ONE producer (seon.agent.ctx/render-context takes
+ ;; :seon.agent.ctx/profile). Config-through-DB: this map seeds the
+ ;; :seon.config/context-profiles singleton datom, so an as-of export
+ ;; regenerates under the profile IN FORCE at that t. The :autocomplete
+ ;; profile is the byte-exact encoder input for the tiny form-prediction
+ ;; model (docs/prds/repl-autosuggest/design.md): plan window + the
+ ;; recent-tail transcript with every wall-clock/process-identity byte OFF
+ ;; (no readline, no result/<id> handles, no resume markers; warnings
+ ;; excluded — impure over a db value). KEEP IN SYNC with the code default
+ ;; `seon.repl.autocomplete/context-blocks` (used when this section or the
+ ;; singleton datom is absent — fresh stores, hermetic test conns).
+ :seon.config/context-profiles
+ {:autocomplete
+  [{:seon.agent.ctx/name      :plan
+    :seon.agent.ctx/priority  45
+    :seon.agent.ctx/token-cap 200
+    :seon.render/ai           my.plan.internal/plan-block}
+   {:seon.agent.ctx/name      :transcript
+    :seon.agent.ctx/priority  100
+    :seon.agent.ctx/token-cap 440
+    :seon.agent.ctx/cap-keep  :tail
+    :seon.render/ai           seon.agent.ctx.transcript/transcript-block
+    :seon.agent.ctx.transcript/turns-retained 1
+    :seon.agent.ctx.transcript/tiers
+    [{:seon.agent.ctx.transcript/from-turn 1
+      :seon.agent.ctx.transcript/token-cap 0}]
+    :seon.agent.ctx.transcript/result-decay
+    [{:seon.agent.ctx.transcript/from-turn-offset 0
+      :seon.agent.ctx.transcript/token-cap 48}]
+    :seon.agent.ctx.transcript/readline? false
+    :seon.agent.ctx.transcript/result-handles? false
+    :seon.agent.ctx/escape-clipping? true}]}
+
  ;; ── ROOT-CONTEXT — a SPARSE override merged over :seon.config/agent-context
  ;; by IDENTITY (id "root"), block upsert-by-:seon.agent.ctx/name. The :canvas
  ;; block sets root's canvas = the system/fleet dashboard, the config-driven

@@ -103,6 +103,10 @@
     ;; so char/regex/string-literal parens are balanced correctly (a raw
     ;; depth counter truncates such a form). Same parser `parse-forms` uses.
     [seon.repl.internal :as repl-internal]
+    ;; REPL autocomplete (repl-autosuggest lane): the byte-exact situation
+    ;; projection + the turn-mining exporter. Required so the build includes
+    ;; it (curation attrs registered, export!/context callable + indexed).
+    [seon.repl.autocomplete]
     ;; Schemas-as-queryable-data (research file
     ;; schemas-as-queryable-data-2026-05-26.md). At boot,
     ;; start-agent! decomposes every entity-shape :map schema into

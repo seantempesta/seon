@@ -590,13 +590,30 @@
                     s)]
         (str inner " …")))))
 
-(defn- compact-fn-head
-  "One public fn condensed to a single-line `defn` HEAD: `(defn name
-   \"<doc line 1>\" {:malli/schema <spec>} [args] …)` — real Clojure, body
-   elided with `…`. Docstring line 1 is soft-clipped at 78; a fn with no
+(schema/register! ::ns-str :string)
+;; Concrete value shapes, NOT references to the :seon.fn/* attr schemas —
+;; those register in `seon.agent`, which loads AFTER this ns at boot, and
+;; register! validates compilability eagerly (forward refs throw here).
+(schema/register! ::fn-row
+  [:map
+   [:seon.fn/sym      :string]
+   [:seon.fn/arglists {:optional true} :string]
+   [:seon.fn/doc      {:optional true} :string]
+   [:seon.fn/spec     {:optional true} :string]])
+
+(defn compact-fn-head
+  "One fn condensed to a single-line `defn` head with the body elided.
+
+   `(defn name \"<doc line 1>\" {:malli/schema <spec>} [args] …)` — real
+   Clojure. Docstring line 1 is soft-clipped at 78; a fn with no
    docstring omits the string; a fn with no `:malli/schema` omits the
    metadata map; ns-local keywords in the spec + arglist abbreviate to
-   `::`. Multi-arity specs/arglists pass through unchanged."
+   `::`. Multi-arity specs/arglists pass through unchanged. `ns-str` is
+   the fn's own namespace (drives the `::` abbreviation); the row is the
+   indexed `:seon.fn` map. PUBLIC: the ONE per-fn card renderer — the
+   compact ns cards below and the `seon.repl.autocomplete` exporter's
+   fn cards both render through it."
+  {:malli/schema [:=> [:catn [::ns-str ::ns-str] [::fn-row ::fn-row]] :string]}
   [ns-str {:seon.fn/keys [sym arglists doc spec]}]
   (let [nm      (if-let [i (str/index-of sym "/")] (subs sym (inc i)) sym)
         doc-1   (when (and doc (not (str/blank? doc)))

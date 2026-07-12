@@ -89,6 +89,23 @@
 ;; The transcript window (turns kept verbatim before eviction into summaries).
 (schema/register! ::turns-retained [:int {:default 8 :min 0}])
 
+;; The folded live readline at the very bottom — the ONE line of the block
+;; that reads the live `now`. Default true (byte-parity). `false` drops it:
+;; the `seon.repl.autocomplete` projection profile renders the transcript
+;; as a byte-exact function of the db VALUE alone (as-of replay), so the
+;; one moving line is switched off there.
+(schema/register! ::readline? [:boolean {:default true}])
+
+;; PROCESS-IDENTITY bytes — the `⟸ result/<id>` handles and the
+;; session-resume marker both depend on which PROCESS is rendering
+;; (`run/this-process-run?`): the same db value renders different bytes
+;; before and after a pod restart. Default true (byte-parity). `false`
+;; renders every eval in the process-INDEPENDENT form (no handles, no
+;; resume marker — as a prior-session eval renders), so an as-of export
+;; reproduces inference bytes regardless of restarts — the
+;; `seon.repl.autocomplete` profile sets it off.
+(schema/register! ::result-handles? [:boolean {:default true}])
+
 ;; ============================================================
 ;; Config-driven agent-init CP-3 — reactive config-on-record reads.
 ;; The transcript block's `::result-decay` (move 4) and `::tiers` (move 5)
@@ -327,11 +344,15 @@
    fresh wake or a mid-call arrival) so the agent re-orients to it."
   {:malli/schema [:=> [:cat :seon.render/section-request] :string]}
   [{node :seon.render/node}]
-  (let [{::keys [at from-label to-labels content id new? outbound?]} node
+  (let [{::keys [at from-label to-labels content id new? outbound? escape?]} node
         ;; CP-5 escape-clipping (#43, owner: "render the blocks in full"):
         ;; when the agent's `:seon.agent.ctx/escape-clipping?` is on (default
         ;; true), message content renders WHOLE past the per-message cap.
-        body (ctx/cap-result content ctx/message-render-cap (ctx/escape-clipping?))
+        ;; The flag rides the event (threaded off the RENDER db by
+        ;; [[transcript-block]] — byte-exact); a direct call with no
+        ;; threaded flag falls back to the live read.
+        body (ctx/cap-result content ctx/message-render-cap
+                             (if (some? escape?) escape? (ctx/escape-clipping?)))
         who  (if outbound?
                (str "▶ to " (str/join ", " to-labels))
                (str "◀ from " from-label))]
@@ -676,13 +697,21 @@
         ;; same-error runs to one line (a thrash burst can't flood the ctx).
         events*c (coalesce-events events*)
         ;; CP-3 moves 4+5: read the transcript block's reactive config once.
+        ;; The injected node (this block's OWN map, `:seon.render/node` —
+        ;; same convention as the warnings block's :seon.warn/ns override)
+        ;; takes precedence; the stored block entity is the fallback for
+        ;; direct callers (gym driver, tests) with no injected node. On the
+        ;; render-context path node = the stored block, so this is
+        ;; byte-identical — it additionally lets a PROFILE caller (the
+        ;; seon.repl.autocomplete projection) pass per-render config.
+        node     (:seon.render/node input)
         tblock   (block-ent db my-eid :transcript)
         ;; move 5 / CP-5 — the clip POLICY off `::tiers` + `::turns-retained`:
         ;; empty tiers (v1 default) → render-all (byte-parity); non-empty →
         ;; the age-banded window (last `retained` turns verbatim, older evals
         ;; kept within each tier's token budget).
-        tiers    (::tiers tblock)
-        retained (or (::turns-retained tblock) 8)
+        tiers    (or (::tiers node) (::tiers tblock))
+        retained (or (::turns-retained node) (::turns-retained tblock) 8)
         events*t (clip-events-by-tiers (mapv #(into {} %) tiers) retained events*c)
         ;; move 4 / CP-5 — the per-eval RESULT-BODY cap off `::result-decay` ×
         ;; the eval's AGE (turn-offset = newest turn − the eval's `::turn-idx`).
@@ -693,7 +722,23 @@
         ;; (the cap changes only at a level boundary). Injected as
         ;; `:seon.render/result-body-cap` onto each eval event's `::entity`,
         ;; which `eval->renderable` forwards to `format-eval-row`.
-        levels   (::result-decay tblock)
+        levels   (or (::result-decay node) (::result-decay tblock))
+        ;; Process-identity bytes OFF (`::result-handles?` false, node first):
+        ;; every eval renders in the prior-session form — no `result/<id>`
+        ;; handle, no resume marker — so the render is a pure function of the
+        ;; db value across pod restarts (the autocomplete profile's setting).
+        handles? (let [nv (::result-handles? node)
+                       tv (::result-handles? tblock)]
+                   (cond (some? nv) nv
+                         (some? tv) tv
+                         :else      true))
+        ;; A PROFILE may PIN escape-clipping as a block-config CONSTANT
+        ;; (`:seon.agent.ctx/escape-clipping?` on the profile's block map) —
+        ;; threaded onto each event so the converters never re-read the live
+        ;; conn (deterministic over the db value). ABSENT (every stored
+        ;; block — the attr lives on the AGENT entity, not blocks) → nil →
+        ;; nothing stamped → the converters' live read, byte-parity.
+        esc      (:seon.agent.ctx/escape-clipping? node)
         max-turn (transduce (keep ::turn-idx) max -1 events*t)
         events** (mapv (fn [ev]
                          (if (= :eval (::kind ev))
@@ -702,9 +747,16 @@
                                  cap    (decay-cap-for-offset
                                           (mapv #(into {} %) levels) offset
                                           ctx/result-body-render-cap)]
-                             (update ev ::entity assoc
-                                     :seon.render/result-body-cap cap))
-                           ev))
+                             (cond-> (update ev ::entity assoc
+                                             :seon.render/result-body-cap cap)
+                               (some? esc)
+                               (update ::entity assoc
+                                       :seon.agent.ctx/escape-clipping? esc)
+                               (not handles?) (assoc ::prior? true)))
+                           (cond-> ev
+                             (some? esc) (assoc ::escape? esc)
+                             (and (not handles?) (= :coalesced (::kind ev)))
+                             (assoc ::prior? true))))
                        events*t)
         ;; Render each event, interleaving the resume marker ONCE at the
         ;; process boundary — before the first THIS-PROCESS eval that follows
@@ -729,7 +781,15 @@
              (remove str/blank?)
              (str/join "\n"))
         head (masthead ns-str (ctx/repl-mode db))
-        tail (readline input)]
+        ;; ::readline? false (node first, stored block fallback) drops the
+        ;; folded live readline — the ONE moving (`now`-reading) line — so a
+        ;; profile render is a pure function of the db value. Default true.
+        readline? (let [nv (::readline? node)
+                        tv (::readline? tblock)]
+                    (cond (some? nv) nv
+                          (some? tv) tv
+                          :else      true))
+        tail (when readline? (readline input))]
     (->> [head body tail]
          (remove str/blank?)
          (str/join "\n\n"))))
