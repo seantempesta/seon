@@ -77,8 +77,8 @@ namespace.
 Genesis installs the native `:seon.user/id` capability but does not need to
 claim the human authored itself. The first normal root/boot desired-state
 transition ensures the stable human row before web/REPL admission opens. The
-same ensure runs on existing-store migration/cold boot, so `{user human,
-process repl}` always resolves before a human write.
+same ensure runs on every cold boot, so `{user human, process repl}` always
+resolves before a human write.
 
 The user ref is provenance, not ownership, authentication, authorization,
 credentials, or a role. Those concerns may later use trusted transaction
@@ -152,9 +152,10 @@ genesis transaction:
 5. Enable the normal transaction boundary, which requires user and process.
 
 This is a mathematical base case, not a bypass API. It is more accurate than
-claiming root authored root. On an existing store, a one-time migration performs
-the equivalent minimal installation before any transaction starts using the new
-metadata.
+claiming root authored root. The default store's one-time transition installed
+the equivalent base and backfilled its historical transactions; after the live
+proof, that classifier was deleted. Runtime startup now implements only fresh
+genesis and exact convergence.
 
 Root identity presence proves genesis only; it never means root initialization
 finished. The next idempotent root/boot and root/config desired-state transitions

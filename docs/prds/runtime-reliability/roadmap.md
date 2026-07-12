@@ -312,15 +312,14 @@ Commit: lifecycle split and web wiring.
 
 Install the final two-fact model atomically across writers/readers.
 
-Implementation status: the genesis base, process namespace, writer selection,
-lazy-schema attribution, production reader cutover, and explicit
-identity-attribute reconciliation scope are implemented. The behavioral gates
-cover fresh genesis, human/REPL, agent/REPL, root/boot, ambiguous legacy facts,
-convergence, config retraction, turn capture, and current/history readers. The
-remaining phase boundary is a cold-start migration against the default store,
-followed immediately by deletion of the one-shot legacy classifier and its
-fixture. Historical retired datoms remain immutable data with no production
-reader or writer.
+Implementation status: complete. The default-store proof began at
+`t=536871159` with 177 historical transactions and no process rows. The
+one-shot transition installed boot/config/REPL, the human user, and resolvable
+user/process refs for all 177 transactions; at `t=536871162`, the unjoined
+count was zero. The migration classifier and fixture were then deleted. The
+remaining runtime supports only minimal fresh genesis and exact convergence;
+historical retired datoms remain immutable data with no production reader or
+writer.
 
 - Colocate `:seon.db/user` and transaction-context selection in `seon.db`.
 - Colocate `:seon.db.process/id`, its boot/config/REPL rows, and lookup helpers
@@ -347,10 +346,10 @@ reader or writer.
   `:seon.db/eval-id`, `:seon.db/session-id`, `:seon.db/origin`,
   `:seon.db/replay?`, and `:seon.db/resume-marker?` after the migration proof.
   Historical datoms may remain in the immutable store but have no live semantic
-  path. Keep their minimal compatibility validators as canonical DB schema
-  facts while installed/history-referenced native attrs still require them;
-  remove those only through an explicit proven data migration. Keep ordinary
-  domain identity attributes and separately audit
+  path. The retired Malli registrations are deleted; the installed native
+  Datahike attributes remain accumulating schema/history facts and require no
+  runtime compatibility path. Keep ordinary domain identity attributes and
+  separately audit
   `:seon.agent.message/origin`, which currently controls wake behavior.
 
 Exit proof: a live query shows every post-boundary transaction has resolvable

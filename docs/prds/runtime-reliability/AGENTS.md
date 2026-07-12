@@ -22,9 +22,10 @@ implemented and green in focused behavioral gates: one un-attributed genesis
 base installs root/process refs, then every normal write carries only the
 resolvable `:seon.db/user` and `:seon.db/process` refs. Reconciliation now
 requires an explicit identity-attribute scope so an empty desired population is
-both removable and isolated from other config-authored entities. The remaining
-Phase 3 boundary is a default-store cold-start proof followed immediately by
-deletion of the temporary legacy classifier. The authoritative target is
+both removable and isolated from other config-authored entities. The
+default-store transition proved all 177 historical transactions resolve through
+the final refs, then the one-shot classifier was deleted; normal startup now has
+only fresh genesis and convergence. The authoritative target is
 [[provenance-and-lifecycle-design]] and the ordered implementation/commit plan
 is [[roadmap]].
 

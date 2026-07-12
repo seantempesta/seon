@@ -295,8 +295,8 @@
 (schema/register! ::process         :seon.db/ref)
 
 ;; Retired scalar/origin attrs are deliberately NOT registered. Existing
-;; stores retain their immutable native schema/history; [[ensure-provenance!]]
-;; reads those datoms only during migration and never reasserts them.
+;; stores retain their immutable native schema/history, but no live source path
+;; reads or writes those datoms.
 
 ;; ---------------------------------------------------------------------------
 ;; The agent's universe + fiber-local context scopes
@@ -527,35 +527,20 @@
       (internal/commit-error-envelope e))))
 
 ;; ---------------------------------------------------------------------------
-;; Provenance genesis + existing-store migration.
+;; Provenance genesis.
 ;; ---------------------------------------------------------------------------
 
 (schema/register! ::provenance-action
-                  [:enum :fresh-genesis :existing-store-migration :converged])
+                  [:enum :fresh-genesis :converged])
 (schema/register! ::genesis-tx :int)
 (schema/register! ::human-tx   :int)
-(schema/register! ::backfill-tx :int)
-(schema/register! ::backfilled :int)
-(schema/register! ::legacy-origin :keyword)
-(schema/register! ::legacy-agent-id :string)
-(schema/register! ::reason :keyword)
-(schema/register! ::ambiguous-row
-  [:map
-   [::tx :int]
-   [::legacy-origin   {:optional true} ::legacy-origin]
-   [::legacy-agent-id {:optional true} ::legacy-agent-id]
-   [::reason ::reason]])
-(schema/register! ::ambiguous [:vector ::ambiguous-row])
 (schema/register! ::ensure-provenance-request
   [:map [::conn {:optional true} ::conn]])
 (schema/register! ::ensure-provenance-response
   [:map
    [::provenance-action ::provenance-action]
    [::genesis-tx  {:optional true} :int]
-   [::human-tx    {:optional true} :int]
-   [::backfill-tx {:optional true} :int]
-   [::backfilled ::backfilled]
-   [::ambiguous ::ambiguous]])
+   [::human-tx    {:optional true} :int]])
 
 (def ^:private genesis-attrs
   "The minimal native capabilities required before provenance can self-host."
@@ -591,78 +576,19 @@
               (when missing-root? [{:seon.agent/id "root"}])
               (map (fn [id] {::process/id id}) missing-processes))))))
 
-(defn- legacy-tx-values
-  [db-value attr]
-  (if (attr-installed? db-value attr)
-    (into {} (d/q '[:find ?tx ?v :in $ ?a :where [?tx ?a ?v]]
-                  db-value attr))
-    {}))
-
-(defn- classify-legacy-tx
-  [tx origin agent-id agent-ids]
-  (let [ambiguous     (fn [reason]
-                        (cond-> {::tx tx ::reason reason}
-                          origin   (assoc ::legacy-origin origin)
-                          agent-id (assoc ::legacy-agent-id agent-id)))
-        agent-known? (contains? agent-ids agent-id)
-        agent-repl   (when agent-known?
-                       {::user [:seon.agent/id agent-id]
-                        ::process (process/lookup-ref ::process/repl)})]
-    (case origin
-      :core-seed {::user [:seon.agent/id "root"]
-                  ::process (process/lookup-ref ::process/boot)}
-      :config    {::user [:seon.agent/id "root"]
-                  ::process (process/lookup-ref ::process/config)}
-      :user      {::user [:seon.user/id "user"]
-                  ::process (process/lookup-ref ::process/repl)}
-      :agent     (or agent-repl (ambiguous :missing-agent-user))
-      :system    (or agent-repl (ambiguous :missing-agent-user))
-      :replay    (or agent-repl (ambiguous :missing-agent-user))
-      :test-run  (or agent-repl (ambiguous :missing-agent-user))
-      (ambiguous :unmapped-origin))))
-
-(defn- legacy-backfill
-  [db-value]
-  (let [origins      (legacy-tx-values db-value ::origin)
-        agent-ids    (legacy-tx-values db-value ::agent-id)
-        current-user (legacy-tx-values db-value ::user)
-        current-proc (legacy-tx-values db-value ::process)
-        known-agents (if (attr-installed? db-value :seon.agent/id)
-                       (into #{} (map first)
-                             (d/q '[:find ?id :where [_ :seon.agent/id ?id]]
-                                  db-value))
-                       #{})]
-    (reduce
-      (fn [{::keys [tx-data ambiguous] :as acc} tx]
-        (if (and (contains? current-user tx) (contains? current-proc tx))
-          acc
-          (let [classified (classify-legacy-tx tx (get origins tx)
-                                               (get agent-ids tx) known-agents)]
-            (if (::reason classified)
-              (update acc ::ambiguous conj classified)
-              (update acc ::tx-data conj
-                      {:db/id tx
-                       ::user (::user classified)
-                       ::process (::process classified)})))))
-      {::tx-data [] ::ambiguous []}
-      (sort (into #{} (concat (keys origins) (keys agent-ids)))))))
-
 (defn ^:async ensure-provenance!
-  "Establish provenance genesis and migrate every honestly mappable old tx.
+  "Establish the minimal transaction-provenance genesis.
 
    Call once immediately after connecting a store and before any ordinary
-   `transact!`. Fresh genesis and the minimal existing-store capability repair
-   are explicitly un-attributed because their own ref attrs/targets do not yet
-   exist. The following root/boot transaction ensures the stable human, then a
-   root/boot transaction backfills old transaction entities whose scalar/origin
-   facts map unambiguously. Ambiguous rows are returned as data and never
-   guessed. A converged store emits no transaction."
+   `transact!`. The minimal native capability/root/process transaction is
+   explicitly un-attributed because its own ref attrs and targets do not yet
+   exist. The following root/boot transaction ensures the stable human. A
+   converged store emits no transaction."
   {:malli/schema
    [:=> [:cat ::ensure-provenance-request] ::ensure-provenance-response]}
   [{::keys [conn] :or {conn *conn*}}]
   (let [c             (internal/resolve-conn conn)
         before        @c
-        fresh?        (not (lookup-present? before [:seon.agent/id "root"]))
         base-data     (genesis-tx-data before)
         base-report   (when (seq base-data)
                         (await (d/transact! c {:tx-data base-data})))
@@ -678,33 +604,15 @@
                                           ::tx-data [{:seon.user/id "user"}]})))))
         _             (when (and human-env (false? (::ok? human-env)))
                         (throw (ex-info
-                                 "Database provenance migration could not ensure the human user."
+                                 "Database provenance genesis could not ensure the human user."
                                  {::error (::error human-env)
                                   :seon.error/kind :core-bug})))
-        {backfill-data ::tx-data ambiguous ::ambiguous}
-        (legacy-backfill @c)
-        backfill-env  (when (seq backfill-data)
-                        (await
-                          (with-tx-context
-                            {::user [:seon.agent/id "root"]
-                             ::process (process/lookup-ref ::process/boot)}
-                            (fn []
-                              (transact! {::conn c ::tx-data backfill-data})))))
-        _             (when (and backfill-env (false? (::ok? backfill-env)))
-                        (throw (ex-info
-                                 "Database provenance migration could not backfill old transactions."
-                                 {::error (::error backfill-env)
-                                  :seon.error/kind :core-bug})))
-        action        (cond fresh? :fresh-genesis
-                            (or base-report human-env backfill-env)
-                            :existing-store-migration
-                            :else :converged)]
-    (cond-> {::provenance-action action
-             ::backfilled (count backfill-data)
-             ::ambiguous ambiguous}
+        action        (if (or base-report human-env)
+                        :fresh-genesis
+                        :converged)]
+    (cond-> {::provenance-action action}
       base-report  (assoc ::genesis-tx (:max-tx (:db-after base-report)))
-      human-env    (assoc ::human-tx (::tx human-env))
-      backfill-env (assoc ::backfill-tx (::tx backfill-env)))))
+      human-env    (assoc ::human-tx (::tx human-env)))))
 
 ;; ---------------------------------------------------------------------------
 ;; Read path — synchronous over a db value. Each op has a map-in arity

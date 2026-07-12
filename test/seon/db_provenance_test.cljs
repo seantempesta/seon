@@ -1,5 +1,5 @@
 (ns seon.db-provenance-test
-  "Behavioral proof for transaction provenance genesis and migration."
+  "Behavioral proof for transaction provenance genesis and convergence."
   (:require
     [cljs.test :refer [async deftest is testing]]
     [datahike.api :as d]
@@ -104,60 +104,3 @@
                      (tx-provenance @conn (:seon.db/tx write)))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "agent provenance threw: " e)) (done))))))
-
-(deftest existing-store-backfills-only-honest-legacy-mappings
-  (async done
-    (-> (fresh-conn)
-        (.then
-          (fn ^:async prove-migration [conn]
-            (let [legacy-agent "agentlegacy001"
-                  old-schema  (into
-                                (db/malli->datahike-schema
-                                  [:seon.agent/id :seon.user/id
-                                   ::item-id ::value])
-                                [{:db/ident :seon.db/origin
-                                  :db/valueType :db.type/keyword
-                                  :db/cardinality :db.cardinality/one}
-                                 {:db/ident :seon.db/agent-id
-                                  :db/valueType :db.type/string
-                                  :db/cardinality :db.cardinality/one}])]
-              (await (d/transact! conn {:tx-data old-schema}))
-              (await (d/transact! conn {:tx-data [{:seon.agent/id "root"}
-                                                   {:seon.agent/id legacy-agent}
-                                                   {:seon.user/id "user"}]}))
-              (let [core-report
-                    (await (d/transact! conn
-                             {:tx-data [{::item-id "old-core" ::value "core"}]
-                              :tx-meta {:seon.db/origin :core-seed}}))
-                    agent-report
-                    (await (d/transact! conn
-                             {:tx-data [{::item-id "old-agent" ::value "agent"}]
-                              :tx-meta {:seon.db/origin :agent
-                                        :seon.db/agent-id legacy-agent}}))
-                    ambiguous-report
-                    (await (d/transact! conn
-                             {:tx-data [{::item-id "old-ambiguous"
-                                        ::value "ambiguous"}]
-                              :tx-meta {:seon.db/origin :system}}))
-                    core-tx (:max-tx (:db-after core-report))
-                    agent-tx (:max-tx (:db-after agent-report))
-                    ambiguous-tx (:max-tx (:db-after ambiguous-report))
-                    migrated (await (db/ensure-provenance!
-                                      {:seon.db/conn conn}))]
-                (is (= :existing-store-migration
-                       (:seon.db/provenance-action migrated)))
-                (is (= 2 (:seon.db/backfilled migrated)))
-                (is (= [{:seon.db/tx ambiguous-tx
-                         :seon.db/legacy-origin :system
-                         :seon.db/reason :missing-agent-user}]
-                       (:seon.db/ambiguous migrated)))
-                (is (= #{[:seon.agent/id "root" :seon.db.process/boot]}
-                       (tx-provenance @conn core-tx)))
-                (is (= #{[:seon.agent/id legacy-agent :seon.db.process/repl]}
-                       (tx-provenance @conn agent-tx)))
-                (is (empty? (tx-provenance @conn ambiguous-tx))
-                    "ambiguous old provenance is reported, never invented")
-                (is (= #{[:seon.agent/id "root" :seon.db.process/boot]}
-                       (tx-provenance @conn (:seon.db/backfill-tx migrated))))))))
-        (.then (fn [_] (done)))
-        (.catch (fn [e] (is false (str "existing migration threw: " e)) (done))))))
