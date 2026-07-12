@@ -32,9 +32,9 @@
 ;; `eval-batch!` is `^:async` and its `record-eval!` transacts run AFTER
 ;; awaits, so `db/*conn*` must be `set!` as the ROOT (a plain `binding`
 ;; does NOT survive a Promise/await boundary in CLJS — same reason the pod
-;; boot + agent_loop_test use set!). Turn-ids must be real `:seon.db/id`
-;; shapes (`(db/new-id!)`), not arbitrary strings, or the turn entity
-;; fails Malli validation and the eval row is lost.
+;; boot + agent_loop_test use set!). Turn ids must satisfy the registered
+;; compact identity schema, or the turn entity fails Malli validation and the
+;; eval row is lost.
 ;; ---------------------------------------------------------------------------
 
 (defn- with-conn
@@ -48,6 +48,8 @@
                  (set! db/*conn* conn)
                  (-> (js/Promise.resolve (body))
                      (.finally (fn [] (set! db/*conn* prev)))))))))
+
+(def ^:private fixture-turn-id "turnrepair01")
 
 (defn- run-batch!
   "Parse `source` and run it through `eval-batch!` against the root-bound
@@ -105,7 +107,7 @@
   (async done
     (-> (with-conn
           (fn ^:async run []
-            (let [res  (await (run-batch! real-high-scores-form (db/new-id!)))
+            (let [res  (await (run-batch! real-high-scores-form fixture-turn-id))
                   db*  @db/*conn*
                   rows (eval-rows db*)
                   row  (first rows)]
@@ -143,7 +145,7 @@
           (fn ^:async run []
             ;; A bare unterminated string: parinfer can't infer intent,
             ;; so repair is rejected and we fall through to A.3.
-            (let [res  (await (run-batch! "\"half-typed" (db/new-id!)))
+            (let [res  (await (run-batch! "\"half-typed" fixture-turn-id))
                   rows (eval-rows @db/*conn*)
                   row  (first rows)]
               (testing "recorded as a failed eval (defined nothing)"
@@ -169,7 +171,7 @@
             (let [src (str "(defn f [x]\n"
                            "  (let [y 1]\n"
                            "    (str \"unterminated")
-                  _   (await (run-batch! src (db/new-id!)))
+                  _   (await (run-batch! src fixture-turn-id))
                   row (first (eval-rows @db/*conn*))]
               (testing "unrepairable → failed eval"
                 (is (some? row))
@@ -193,7 +195,7 @@
   (async done
     (-> (with-conn
           (fn ^:async run []
-            (let [res (await (run-batch! "(defn g [x] (+ x 1]" (db/new-id!)))
+            (let [res (await (run-batch! "(defn g [x] (+ x 1]" fixture-turn-id))
                   row (first (eval-rows @db/*conn*))]
               (testing "mismatched closer repaired + auto-eval'd ok"
                 (is (= 1 (:seon.eval/n-ok res)))
@@ -222,7 +224,7 @@
     (-> (with-conn
           (fn ^:async run []
             (let [;; missing close paren → triggers repair → (in-ns 'probe.rvp.a)
-                  rep-res  (await (run-batch! "(in-ns 'probe.rvp.a" (db/new-id!)))
+                  rep-res  (await (run-batch! "(in-ns 'probe.rvp.a" fixture-turn-id))
                   rep-row  (first (eval-rows @db/*conn*))
                   rep-narr (ffirst
                              (d/q '[:find ?n
@@ -247,7 +249,7 @@
   (async done
     (-> (with-conn
           (fn ^:async run []
-            (let [res (await (run-batch! "(in-ns 'probe.rvp.b)" (db/new-id!)))
+            (let [res (await (run-batch! "(in-ns 'probe.rvp.b)" fixture-turn-id))
                   row (first (eval-rows @db/*conn*))]
               (testing "normal (in-ns 'probe.rvp.b) also runs as the movement form"
                 (is (= 1 (:seon.eval/n-ok res)))
@@ -275,7 +277,7 @@
                                 (str "(def tile-content (zzz-undefined-fn-2606 nil))\n"
                                      "(get tile-content :seon.render/hiccup)\n"
                                      "(+ 1 2)")
-                                (db/new-id!)))
+                                fixture-turn-id))
                   rows (eval-rows @db/*conn*)]
               (testing "def fails, reference escalates, good form runs"
                 ;; 1 ok (the (+ 1 2)), 2 fail (def + reference)
@@ -310,7 +312,7 @@
                                 (str "(def aaa 1)\n"
                                      "\"unterminated\n"
                                      "(def bbb 2)")
-                                (db/new-id!)))
+                                fixture-turn-id))
                   rows (eval-rows @db/*conn*)
                   srcs (map :source rows)
                   oks  (zipmap srcs (map :ok? rows))]
@@ -338,7 +340,7 @@
   (async done
     (-> (with-conn
           (fn ^:async run []
-            (let [res (await (run-batch! "(my-undefined-fn-2606 nil)" (db/new-id!)))
+            (let [res (await (run-batch! "(my-undefined-fn-2606 nil)" fixture-turn-id))
                   row (first (eval-rows @db/*conn*))]
               (testing "a bare undeclared call fails (ok? false)"
                 (is (= 0 (:seon.eval/n-ok res)))

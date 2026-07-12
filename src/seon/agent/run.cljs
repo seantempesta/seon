@@ -215,7 +215,7 @@
 ;; `:seon.agent/id`: every register! here is LOAD-TIME, and seon.agent.run is a
 ;; LEAF (requires only db/derive/schema) that loads BEFORE seon.agent registers
 ;; `:seon.agent/id` — referencing it at cold boot throws. `:string` also admits
-;; the literal "root" orchestrator-root id (the 14-char minted shape is enforced
+;; the literal "root" orchestrator-root id (the generated shape is enforced
 ;; at CREATE, via `:seon.agent/id` itself); these are run OPS over an existing id.
 (schema/register! ::current-run-request [:map [:seon.agent/id :string]])
 

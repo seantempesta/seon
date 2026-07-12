@@ -562,9 +562,9 @@
 ;; ============================================================
 
 (def ^:private safe-id-re
-  ;; Agent ids are alphanumeric + `._:-` (`:seon.db/id` 14-char ids, plus
-  ;; \"root\"). Validating the id before it lands in the shim page's HTML /
-  ;; URL closes any injection via the path segment; anything else 404s.
+  ;; Limit current and preserved agent ids to URL/HTML-safe alphanumerics and
+  ;; separators at this boundary (including the reserved `root`). Anything
+  ;; else 404s before the path value reaches the shim page's HTML.
   #"[A-Za-z0-9._:-]+")
 
 (defn- safe-id? [id] (boolean (and id (re-matches safe-id-re id))))

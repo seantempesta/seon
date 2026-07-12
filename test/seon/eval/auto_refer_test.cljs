@@ -136,7 +136,7 @@
                                   (set! db/*conn* conn)
                                   (seval/eval-batch!
                                     cs (repl-int/parse-forms src) hns aid
-                                    (db/new-id!) nil)))
+                                    "turnrefer001" nil)))
                          (.then (fn [r]
                                   (is (= 0 (:seon.eval/n-fail r))
                                       "no form failed — db/query resolved in the new ns")

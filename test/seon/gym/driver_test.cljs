@@ -472,7 +472,7 @@
   ;; REAL turn prompt does contain the asserted text.
   (async done
     (let [phantom (apply str (repeat 64 "0"))   ; valid hash shape, no file
-          run-id  (db/new-id!)
+          run-id  "gymrun000001"
           scenario
           (-> (prompt-blob-scenario)
               (assoc :seon.gym.scenario/id :gymtest-prompt-blob-missing
@@ -486,7 +486,7 @@
                      ;; the turn's lookup-ref resolves in-tx.
                      [{:seon.agent.run/id    run-id
                        :seon.agent.run/cause [:seon.user/id "user"]}
-                      {:seon.agent.turn/id          (db/new-id!)
+                      {:seon.agent.turn/id          "gymturn00001"
                        :seon.agent.turn/at          (js/Date.)
                        :seon.agent.turn/status      :done
                        :seon.agent.turn/run         [:seon.agent.run/id run-id]

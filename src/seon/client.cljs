@@ -72,6 +72,7 @@
     [seon.ai.diffusiongemma :as diffusiongemma]
     [seon.ai.typeahead :as typeahead]
     [seon.db :as db]
+    [seon.db.id :as id]
     [seon.error :as error]
     [seon.eval :as seval]
     [seon.log :as log]
@@ -329,7 +330,8 @@
               ;; Match the agent connection's history posture (Phase 2.5).
               :keep-history?      true}]
      (await (d/create-database cfg))
-     (let [conn (await (d/connect cfg))]
+     (let [conn (await (d/connect (id/allocation-connect-config cfg)))]
+       (id/assert-allocation-writer! conn)
        (when (seq schema)
          (await (d/transact! conn schema)))
        conn))))
@@ -566,7 +568,6 @@
    :seon.test/last-passed-at
    :seon.test/last-failed-at
    :seon.test/last-failure-summary
-   :seon.test/last-run-id
    ;; Phase 4 (mvp-completion-plan 2026-05-27)
    :seon.test/source
    :seon.test/ns
@@ -625,7 +626,8 @@
              :schema-flexibility :write
              :keep-history?      true}]
     (await (d/create-database cfg))
-    (let [conn (await (d/connect cfg))]
+    (let [conn (await (d/connect (id/allocation-connect-config cfg)))]
+      (id/assert-allocation-writer! conn)
       (await (d/transact! conn (pod-full-schema)))
       conn)))
 
@@ -651,6 +653,7 @@
   (await (store.wire/ping!))
   (await (store.wire/ensure-cluster-db!))
   (let [conn (await (d/connect (store.wire/cluster-config)))]
+    (id/assert-allocation-writer! conn)
     (log/info-console! "seon.client/open-cluster-conn!"
                        (str "cluster " store.wire/cluster-name
                             ": " store.wire/default-store-path
@@ -2569,21 +2572,7 @@
         compile-state (await (repl/ensure-bootstrap!))
         ;; RESUME, DON'T MINT (P3.5/#31): the store is the identity
         ;; source. Mint only on genuine first boot or explicit create.
-        resumed-ids   (if mint? [] (agent/armable-agent-ids {:seon.db/db @conn}))
-        ;; First boot mints the orchestrator-root ("root", no parent — the
-        ;; spawn-recursion base case); `mint?` (`/agents/new`) mints a normal
-        ;; 14-char child id instead.
-        minted-ids    (cond
-                        mint?                [(db/new-id!)]
-                        (empty? resumed-ids) ["root"]
-                        :else                [])
-        agent-ids     (into resumed-ids minted-ids)
-        ;; The PRIMARY agent (return-shape + shared-boot tx scope):
-        ;; the minted one when minting, else the first resumed.
-        primary       (first agent-ids)]
-    (log/info-console! "seon.client/start-agent!" "agent roster"
-                       {:seon.client/resumed resumed-ids
-                        :seon.client/minted  minted-ids})
+        resumed-ids   (if mint? [] (agent/armable-agent-ids {:seon.db/db @conn}))]
     ;; THE core boot seed — handlers + the four seed transacts, extracted
     ;; to [[boot-seed!]] so scratch worlds (the gym) run the
     ;; boot's OWN code path (one mechanism — the hand-mirrored copy
@@ -2609,8 +2598,34 @@
         (str "boot-index GC: "
              (count (:seon.client/pruned prune-stats))
              " ghost row(s) pruned")))
-    (await
-      (db/with-agent primary
+    ;; Explicit creation happens only after the selected config/core seed is
+    ;; present, so even a first-call `:mint? true` copies the complete default
+    ;; context. `seon.agent/mint!` owns the readable identity and commits the
+    ;; agent row before its id is returned. The reserved root remains the one
+    ;; known-id genesis reconciliation.
+    (let [mint-result (when mint?
+                        (await
+                          (agent/mint!
+                            (cond-> {}
+                              (some? purpose)
+                              (assoc :seon.agent/purpose purpose)))))
+          _ (when (and mint? (false? (:seon.db/ok? mint-result)))
+              (throw
+                (ex-info "start-agent!: atomic agent mint failed"
+                         mint-result)))
+          minted-ids (cond
+                       mint?                [(:seon.agent/id mint-result)]
+                       (empty? resumed-ids) ["root"]
+                       :else                [])
+          create-on-init-ids
+          (if (and (not mint?) (empty? resumed-ids)) #{"root"} #{})
+          agent-ids (into resumed-ids minted-ids)
+          primary   (first agent-ids)]
+      (log/info-console! "seon.client/start-agent!" "agent roster"
+                         {:seon.client/resumed resumed-ids
+                          :seon.client/minted  minted-ids})
+      (await
+        (db/with-agent primary
         (fn ^:async boot-with-agent! []
           (let [;; Load the agent-authored DB LAYER on top of the compiled
                 ;; package: each agent ns's reconstituted whole source, in
@@ -2654,7 +2669,7 @@
                                           (await (init-agent!
                                                    (cond->
                                                      {:seon.agent/id       aid
-                                                      ::mint?              (boolean (some #{aid} minted-ids))
+                                                      ::mint?              (contains? create-on-init-ids aid)
                                                       ::compile-state      compile-state}
                                                      ;; ::llm-fn is optional (init-agent!
                                                      ;; falls back to current-llm-fn) — only
@@ -2665,7 +2680,7 @@
                                                      ;; ONLY a minted agent
                                                      ;; (create! never re-seeds
                                                      ;; an existing entity).
-                                                     (some #{aid} minted-ids)
+                                                     (contains? create-on-init-ids aid)
                                                      (assoc :seon.agent/purpose purpose))))))
                                 @!acc)
                 ;; Task #21: an init-agent! that came back as an
@@ -2712,7 +2727,7 @@
              :seon.client/resumed-ids resumed-ids
              :seon.client/minted-ids  minted-ids
              :seon.web/port           port
-             :seon.web/port-file      port-file}))))))
+             :seon.web/port-file      port-file})))))))
 
 (defn start-agent-with-stub!
   "Bring up the V0 agent with the canned stub LLM. Useful for verifying
@@ -2740,13 +2755,18 @@
     (start-agent! (cond-> {:llm-fn (current-llm-fn) :mint? true}
                     (some? purpose) (assoc :purpose purpose)))))
 
-;; POST /agents/run (the one-shot composition door) mints its per-task agent
-;; via init-agent! — THE per-agent wiring (create! + wake trigger) against the
-;; pod's ONE cluster conn. serve.cljs can't require this ns (cycle), so the
-;; mint closure is injected; same seam + hot-reload behavior as
-;; set-create-agent-fn! above.
+;; POST /agents/run (the one-shot composition door) asks this closure to own the
+;; whole mint boundary: `agent/mint!` allocates + commits the readable id, then
+;; `init-agent!` wires the already-created entity. serve.cljs cannot require
+;; this ns (cycle), so the closure is injected and refreshed on hot reload.
 (web.serve/set-mint-agent-fn!
-  (fn [id] (init-agent! {:seon.agent/id id ::mint? true})))
+  (fn ^:async mint-task-agent! []
+    (let [minted (await (agent/mint! {}))]
+      (if (false? (:seon.db/ok? minted))
+        minted
+        (await
+          (init-agent! {:seon.agent/id (:seon.agent/id minted)
+                        ::mint? false}))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Entry point

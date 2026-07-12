@@ -12,15 +12,15 @@
        :none, 1 → :match, 2+ → :ambiguous — NEVER an arbitrary pick
        (every cluster hosts a \"root\").
      - host!/unhost!/cluster! are idempotent; the id populations are
-       disjoint by construction (`seon.db/new-id!` never emits `:`,
-       cluster names never contain `/`).
+       disjoint by construction (persistent id schemas reject `:`, cluster
+       names reject `/`).
 
    Tests snapshot + restore the defonce'd roster + cluster so the LIVE
    pod's hosted set (the booted agents) is never disturbed."
   (:require
-    [clojure.string :as str]
     [cljs.test :refer [deftest is testing]]
-    [seon.db :as db]
+    [malli.core :as m]
+    [seon.db.id]
     [seon.dev.runtime-id :as runtime-id]))
 
 (defn- with-clean-roster
@@ -142,10 +142,11 @@
         (is (= :match (:seon.dev.runtime-id/resolution res)))
         (is (= default-pod (:seon.dev.runtime-id/runtime res)))))))
 
-(deftest proc-grammar-disjoint-from-minted-ids
-  ;; The `proc:` prefix is impossible to mint — `seon.db/new-id!` never
-  ;; emits `:` — so the two id populations can never collide.
-  (dotimes [_ 20]
-    (let [id (db/new-id!)]
-      (is (not (str/includes? id ":"))
-          "new-id! never emits ':' — proc:<name> is disjoint by construction"))))
+(deftest proc-grammar-disjoint-from-persistent-id-schemas
+  (testing "every accepted persistent representation excludes the proc separator"
+    (is (m/validate :seon.db.id/agent-value "lantern-copper-falcon"))
+    (is (m/validate :seon.db.id/agent-value "root"))
+    (is (m/validate :seon.db.id/compact-value "evalfixture1")))
+  (testing "proc ids are rejected by both generated identity schemas"
+    (is (not (m/validate :seon.db.id/agent-value "proc:wire")))
+    (is (not (m/validate :seon.db.id/compact-value "proc:wire")))))

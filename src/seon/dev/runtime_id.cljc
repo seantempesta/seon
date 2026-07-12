@@ -13,8 +13,8 @@
    and resolution FAILS LOUD with the candidate list (never an arbitrary
    pick); `\"<cluster>/<id>\"` (e.g. `\"default/root\"`) pins exactly one.
 
-   The `proc:` prefix can never collide with a real agent id —
-   `seon.db/new-id!` never emits `:` — and cluster names can never
+   The `proc:` prefix can never collide with a real agent id — the registered
+   `:seon.agent/id` grammar excludes `:` — and cluster names can never
    contain `/` (`bin/seon valid_cluster_name`), so the qualified grammar
    splits unambiguously on the FIRST `/`.
 

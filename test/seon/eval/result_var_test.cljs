@@ -42,7 +42,7 @@
    Returns a Promise of `#js {:cs … :hns … :result <eval-batch! map>}`."
   [aid source]
   (let [hns (agent/home-ns aid)
-        tid (db/new-id!)]
+        tid "turnresvar01"]
     (-> (js/Promise.all #js [(repl/ensure-bootstrap!) (client/open-agent-conn!)])
         (.then (fn [pair]
                  (let [cs   (aget pair 0)

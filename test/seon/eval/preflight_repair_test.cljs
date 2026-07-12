@@ -33,6 +33,8 @@
                  (-> (js/Promise.resolve (body))
                      (.finally (fn [] (set! db/*conn* prev)))))))))
 
+(def ^:private fixture-turn-id "turnpreflt01")
+
 (defn- run-batch!
   [source turn-id]
   (-> (repl/ensure-bootstrap!)
@@ -82,7 +84,7 @@
   (async done
     (-> (with-conn
           (fn ^:async run []
-            (let [res (await (run-batch! "(filter even [1 2 3 4])" (db/new-id!)))
+            (let [res (await (run-batch! "(filter even [1 2 3 4])" fixture-turn-id))
                   db* @db/*conn*
                   row (first (eval-rows db*))]
               (testing "fixed + evaluated — no wasted turn"
@@ -116,7 +118,7 @@
     (-> (with-conn
           (fn ^:async run []
             (let [res (await (run-batch!
-                               "(def pf-dvd-fn [x] (+ x 1))" (db/new-id!)))
+                               "(def pf-dvd-fn [x] (+ x 1))" fixture-turn-id))
                   db* @db/*conn*
                   row (first (eval-rows db*))]
               (testing "rewritten to defn + evaluated ok"
@@ -147,7 +149,7 @@
                                (str "(defn pf-thing-aa [x] x)\n"
                                     "(defn pf-thing-ab [x] x)\n"
                                     "(pf-thing-ax 3)")
-                               (db/new-id!)))
+                               fixture-turn-id))
                   rows (eval-rows @db/*conn*)
                   ;; ids are random — select the call row by SOURCE, never
                   ;; by lexical id order.
@@ -188,7 +190,7 @@
     (-> (with-conn
           (fn ^:async run []
             (let [_   (await (run-batch!
-                               "(zz-nothing-near-this-9x7q 1)" (db/new-id!)))
+                               "(zz-nothing-near-this-9x7q 1)" fixture-turn-id))
                   db* @db/*conn*
                   row (first (eval-rows db*))]
               (is (false? (:ok? row)))

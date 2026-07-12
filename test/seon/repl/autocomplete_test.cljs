@@ -76,12 +76,12 @@
    invisible — the live loop always drives under a run, and these
    tests must too (the turn-capture test's rung-1 lesson)."
   []
-  (let [cs  (await (repl/ensure-bootstrap!))
-        aid (db/new-id!)]
+  (let [cs     (await (repl/ensure-bootstrap!))
+        minted (await (agent/mint! {}))
+        aid    (:seon.agent/id minted)]
     (await (db/with-agent aid
              (fn ^:async boot []
-               (await (seval/setup-agent-ns! cs (agent/home-ns aid) aid))
-               (await (agent/create! {:seon.agent/id aid})))))
+               (await (seval/setup-agent-ns! cs (agent/home-ns aid) aid)))))
     (let [r (await (run/open-run! {:seon.agent/id aid
                                    :seon.agent.run/trigger :message}))]
       {:seon.agent/id aid :seon.agent/compile-state cs
@@ -243,7 +243,7 @@
   (async done
     (run-test
       (fn ^:async run []
-        (let [r (await (auto/rate! {:seon.agent.turn/id "20990101-nope"
+        (let [r (await (auto/rate! {:seon.agent.turn/id "turnunknown1"
                                     :seon.repl.autocomplete/rating :gold}))]
           (is (false? (:seon.repl.autocomplete/ok? r)))
           (is (str/includes? (str (:seon.repl.autocomplete/error r)) "no turn")

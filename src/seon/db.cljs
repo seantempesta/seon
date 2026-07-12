@@ -302,44 +302,6 @@
 (schema/register! ::resume-marker?  :boolean)
 
 ;; ---------------------------------------------------------------------------
-;; ID generation
-;; ---------------------------------------------------------------------------
-
-(def ^:private id-letters
-  "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-
-(defn- id-pad-2 [n]
-  (if (< n 10) (str "0" n) (str n)))
-
-(defn new-id!
-  "Fresh 14-char LLM-readable id, `<3-letter-random>-<YYMMDDHHmm>`.
-   USE THIS for every id you store — id attrs are `[:string {:min 14
-   :max 14}]`, so a hand-written string fails validation. Datahike's
-   tx-id remains the canonical creation order for sub-minute sorting.
-
-     (db/new-id!)   ; ⟹ \"Kpx-2605232138\"
-     (db/transact! {::db/tx-data [{::my-id (db/new-id!) ::title \"…\"}]})"
-  {:malli/schema [:=> [:cat] :seon.db/id]}
-  []
-  (let [d        (js/Date.)
-        time-str (str (id-pad-2 (mod (.getFullYear d) 100))
-                      (id-pad-2 (inc (.getMonth d)))  ; JS month 0-based
-                      (id-pad-2 (.getDate d))
-                      (id-pad-2 (.getHours d))
-                      (id-pad-2 (.getMinutes d)))
-        rand-str (apply str (repeatedly 3 #(nth id-letters (rand-int 52))))]
-    (str rand-str "-" time-str)))
-
-(defn id->time-str
-  "The YYMMDDHHmm portion of an id, for time sorting/comparison.
-
-   Returns nil if the id doesn't match the expected shape."
-  {:malli/schema [:=> [:catn [::id [:maybe :string]]] [:maybe :string]]}
-  [id]
-  (when (and (string? id) (= 14 (count id)) (= \- (nth id 3)))
-    (subs id 4)))
-
-;; ---------------------------------------------------------------------------
 ;; The agent's universe + fiber-local context scopes
 ;; ---------------------------------------------------------------------------
 

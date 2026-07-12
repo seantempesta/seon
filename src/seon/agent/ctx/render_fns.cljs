@@ -118,9 +118,9 @@
 ;; it (`::derived-blocks-request` below; seon.render + seon.agent load
 ;; after this ns, and register!'s compilability guard rejects forward
 ;; references — same precedent as `:seon.ns/name` above). Moved
-;; seon.agent → seon.render in C54, → here in C58. The literal "root" id
-;; (the orchestrator-root base case) is the ONE agent id exempt from the
-;; 14-char minted-id shape — every other agent id is a `:seon.db/id`.
+;; seon.agent → seon.render in C54, → here in C58. The value schema admits the
+;; reserved orchestrator `root`, preserved legacy ids, and newly generated
+;; readable ids; only the readable branch is generated now.
 ;; The `:or` bridges to the SAME datahike schema: the CLJS bridge
 ;; (seon.db.internal/form->datahike-value-type) walks `:and` → base, then
 ;; the `:or` (one mappable type :db.type/string via :seon.db/id + the

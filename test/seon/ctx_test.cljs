@@ -571,7 +571,7 @@
                   (.then (fn [opened]
                            (db/transact!
                              {:seon.db/tx-data
-                              [{:seon.agent.turn/id (db/new-id!)
+                              [{:seon.agent.turn/id "turnctx00001"
                                 :seon.agent.turn/at (js/Date.)
                                 :seon.agent.turn/status :running
                                 :seon.agent.turn/prompt-chars 1

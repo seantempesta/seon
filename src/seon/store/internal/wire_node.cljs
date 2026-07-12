@@ -375,8 +375,8 @@
                  :else (recur (inc i))))
         id   (str "proc:" name)]
     ;; Answer the MCP probe under the `proc:<name>` grammar — non-agent
-    ;; infrastructure runtimes share the agent resolver but can never
-    ;; collide with core agent ids (new-id! never emits `:`).
+    ;; infrastructure runtimes share the agent resolver but can never collide
+    ;; with core agent ids (the registered agent-id grammar excludes `:`).
     (runtime-id/host! id)
     (js/console.log (str "wire-node ready: id=" id
                          " pid=" (.-pid js/process)

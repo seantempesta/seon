@@ -1192,6 +1192,20 @@
 (def ^:private wedge-src
   "(schema/register! :my.exp/rows (map [:string]))")
 
+(def ^:private wedge-eval-ids
+  ["evalwedge001"
+   "evalwedge002"
+   "evalwedge003"
+   "evalwedge004"
+   "evalwedge005"
+   "evalwedge006"
+   "evalwedge007"])
+
+(defn- wedge-eval-id
+  "Return the nth fixed compact eval id for an isolated wedge fixture."
+  [n]
+  (nth wedge-eval-ids (dec n)))
+
 (defn- eval-tx
   "One synthetic :seon.eval row for agent A — its OWN tx (ordering =
    the real per-form record-eval! shape)."
@@ -1234,12 +1248,12 @@
           (fn []
             (-> (active-wedge-step!)
                 (.then (fn [sid]
-                         (-> (transact-rows! [(eval-tx "evalwedge00001" false wedge-src)
-                                              (eval-tx (db/new-id!) false wedge-src)])
+                         (-> (transact-rows! [(eval-tx (wedge-eval-id 1) false wedge-src)
+                                              (eval-tx (wedge-eval-id 2) false wedge-src)])
                              (.then (fn [_]
                                       (is (nil? (esc-now))
                                           "N-1 same-root failures do NOT flag")
-                                      (db/transact! (eval-tx (db/new-id!) false wedge-src))))
+                                      (db/transact! (eval-tx (wedge-eval-id 3) false wedge-src))))
                              (.then (fn [_]
                                       (let [esc (esc-now)]
                                         (is (some? esc) "N same-root failures flag NOW")
@@ -1247,7 +1261,7 @@
                                         (is (= 3 (:my.plan/fail-count esc)))
                                         (is (= "schema/register!" (:my.plan/root-sym esc))
                                             "root = the head symbol the agent typed, structurally read")
-                                        (is (= "evalwedge00001" (:my.plan/episode esc))
+                                        (is (= (wedge-eval-id 1) (:my.plan/episode esc))
                                             "episode identity = the streak's FIRST failing eval id"))))))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
@@ -1259,21 +1273,21 @@
             (-> (active-wedge-step!)
                 (.then (fn [_]
                          (transact-rows!
-                           [(eval-tx (db/new-id!) false wedge-src)
-                            (eval-tx (db/new-id!) false wedge-src)
+                           [(eval-tx (wedge-eval-id 1) false wedge-src)
+                            (eval-tx (wedge-eval-id 2) false wedge-src)
                             ;; the failing CALL finally succeeds — progress on
                             ;; this root; every prior failure stops counting
-                            (eval-tx (db/new-id!) true wedge-src)
-                            (eval-tx (db/new-id!) false wedge-src)
-                            (eval-tx (db/new-id!) false wedge-src)])))
+                            (eval-tx (wedge-eval-id 3) true wedge-src)
+                            (eval-tx (wedge-eval-id 4) false wedge-src)
+                            (eval-tx (wedge-eval-id 5) false wedge-src)])))
                 (.then (fn [_]
                          (is (nil? (esc-now))
                              "a same-call success resets the streak (2 live fails < N)")
                          ;; an UNRELATED success (a defn redefine — the W3 wedge
                          ;; interleaved these) is NOT progress on the root
                          (transact-rows!
-                           [(eval-tx (db/new-id!) true "(defn broken-loader [] 1)")
-                            (eval-tx (db/new-id!) false wedge-src)])))
+                           [(eval-tx (wedge-eval-id 6) true "(defn broken-loader [] 1)")
+                            (eval-tx (wedge-eval-id 7) false wedge-src)])))
                 (.then (fn [_]
                          (let [esc (esc-now)]
                            (is (some? esc)
@@ -1292,12 +1306,12 @@
                              :my.plan/children [{:my.plan/title "the step"}]
                              :seon.agent/id a-id})
                 (.then (fn [_]
-                         (transact-rows! [(eval-tx (db/new-id!) false wedge-src)
-                                          (eval-tx (db/new-id!) false wedge-src)])))
+                         (transact-rows! [(eval-tx (wedge-eval-id 1) false wedge-src)
+                                          (eval-tx (wedge-eval-id 2) false wedge-src)])))
                 (.then (fn [_]
                          (let [sid (:my.plan/id (first (plan/next {:seon.agent/id a-id})))]
                            (plan/active! {:my.plan/id sid}))))
-                (.then (fn [_] (db/transact! (eval-tx (db/new-id!) false wedge-src))))
+                (.then (fn [_] (db/transact! (eval-tx (wedge-eval-id 3) false wedge-src))))
                 (.then (fn [_]
                          (is (nil? (esc-now))
                              "pre-activation failures do not count toward the wedge"))))))
@@ -1310,9 +1324,9 @@
           (fn []
             (-> (active-wedge-step!)
                 (.then (fn [_]
-                         (transact-rows! [(eval-tx (db/new-id!) false wedge-src)
-                                          (eval-tx (db/new-id!) false wedge-src)
-                                          (eval-tx (db/new-id!) false wedge-src)])))
+                         (transact-rows! [(eval-tx (wedge-eval-id 1) false wedge-src)
+                                          (eval-tx (wedge-eval-id 2) false wedge-src)
+                                          (eval-tx (wedge-eval-id 3) false wedge-src)])))
                 (.then (fn [_]
                          (let [body (plan-int/plan-body @db/*conn* a-ref)]
                            (is (str/includes? body "STUCK ▶")
@@ -1323,7 +1337,7 @@
                                "the derived planner (B — default frontier provider) is named")
                            ;; break the wedge — the band must VANISH (nothing
                            ;; stored, nothing to acknowledge)
-                           (db/transact! (eval-tx (db/new-id!) true wedge-src)))))
+                           (db/transact! (eval-tx (wedge-eval-id 4) true wedge-src)))))
                 (.then (fn [_]
                          (is (not (str/includes? (plan-int/plan-body @db/*conn* a-ref)
                                                  "STUCK"))
@@ -1337,9 +1351,9 @@
           (fn []
             (-> (active-wedge-step!)
                 (.then (fn [_]
-                         (transact-rows! [(eval-tx (db/new-id!) false wedge-src)
-                                          (eval-tx (db/new-id!) false wedge-src)
-                                          (eval-tx (db/new-id!) false wedge-src)])))
+                         (transact-rows! [(eval-tx (wedge-eval-id 1) false wedge-src)
+                                          (eval-tx (wedge-eval-id 2) false wedge-src)
+                                          (eval-tx (wedge-eval-id 3) false wedge-src)])))
                 (.then (fn [_] (plan-int/maybe-consult! {:seon.agent/id a-id})))
                 (.then (fn [env]
                          (is (true? (:my.plan/consulted? env)) "flag transition ⇒ consult fires")
@@ -1351,7 +1365,7 @@
                          (is (= :already-consulted (:my.plan/consult-reason env2))
                              "episode identity is derived — no second message, no stored flag")
                          ;; the wedge deepens WITHIN the episode — still no re-fire
-                         (db/transact! (eval-tx (db/new-id!) false wedge-src))))
+                         (db/transact! (eval-tx (wedge-eval-id 4) false wedge-src))))
                 (.then (fn [_] (plan-int/maybe-consult! {:seon.agent/id a-id})))
                 (.then (fn [env3]
                          (is (= :already-consulted (:my.plan/consult-reason env3))
@@ -1387,9 +1401,9 @@
                                  :seon.ai/agent-provider :typeahead}]})
                 (.then (fn [_] (active-wedge-step!)))
                 (.then (fn [_]
-                         (transact-rows! [(eval-tx (db/new-id!) false wedge-src)
-                                          (eval-tx (db/new-id!) false wedge-src)
-                                          (eval-tx (db/new-id!) false wedge-src)])))
+                         (transact-rows! [(eval-tx (wedge-eval-id 1) false wedge-src)
+                                          (eval-tx (wedge-eval-id 2) false wedge-src)
+                                          (eval-tx (wedge-eval-id 3) false wedge-src)])))
                 (.then (fn [_] (plan-int/maybe-consult! {:seon.agent/id a-id})))
                 (.then (fn [env]
                          (is (false? (:my.plan/consulted? env)))

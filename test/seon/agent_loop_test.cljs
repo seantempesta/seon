@@ -164,10 +164,10 @@
   "Transact a fully-formed inbound message row DIRECTLY (bypassing
    `message!`'s defaulting + step-minting, so the test controls from / hops /
    origin). `to` is the recipient agent-id; `from` a resolving lookup-ref."
-  [from to-agent-id content hops origin]
+  [message-id from to-agent-id content hops origin]
   (await (db/transact!
            {:seon.db/tx-data
-            [{:seon.agent.message/id      (db/new-id!)
+            [{:seon.agent.message/id      message-id
               :seon.agent.message/from    from
               :seon.agent.message/to      [[:seon.agent/id to-agent-id]]
               :seon.agent.message/content content
@@ -368,7 +368,7 @@
                                       (await (seval/eval-batch!
                                                cs (repl-internal/parse-forms "(def fenced-marker 42)")
                                                (ctx/home-ns agent-id)
-                                               agent-id (db/new-id!) r1)))))]
+                                               agent-id "turnloop0001" r1)))))]
                 (testing "the superseded run's batch is fenced — skipped, nothing recorded"
                   (is (true? (:seon.eval/fenced? fenced)))
                   (is (= 0 (:seon.eval/n-ok fenced)))
@@ -382,7 +382,7 @@
                                         (await (seval/eval-batch!
                                                  cs (repl-internal/parse-forms "(+ 1 1)")
                                                  (ctx/home-ns agent-id)
-                                                 agent-id (db/new-id!) r2)))))]
+                                                 agent-id "turnloop0002" r2)))))]
                 (testing "the CURRENT run's batch is NOT fenced — it commits"
                   (is (nil? (:seon.eval/fenced? ok-batch)))
                   (is (= 1 (:seon.eval/n-ok ok-batch)))
@@ -435,7 +435,8 @@
               (testing "no run before any message; agent is derived :idle"
                 (is (= [] (runs-for agent-id)))
                 (is (= :idle (derived agent-id))))
-              (await (send-inbound! [:seon.user/id "user"] agent-id "wake up" 0 :human))
+              (await (send-inbound! "msgloop00001" [:seon.user/id "user"]
+                                    agent-id "wake up" 0 :human))
               ;; the handler schedules setTimeout(0) → open-run! + run-loop!;
               ;; the scripted (complete …) closes the run on turn 1.
               (let [ok? (await (wait-until
@@ -503,7 +504,8 @@
                       "the returned id names a real entity — not a ghost"))
                 (testing "the minted child is ARMED in-process: a message wakes it"
                   (is (= [] (runs-for child-id)) "idle, no run before any message")
-                  (await (send-inbound! [:seon.user/id "user"] child-id "wake up" 0 :human))
+                  (await (send-inbound! "msgloop00002" [:seon.user/id "user"]
+                                        child-id "wake up" 0 :human))
                   (let [woke? (await (wait-until
                                        (fn [] (seq (runs-for child-id)))
                                        8000 25))]
@@ -533,7 +535,8 @@
                 (is (= :running (derived agent-id)))
                 (is (= 5 (:seon.agent.run/turn-limit
                            (run/snapshot {:seon.agent.run/id run-id}))))
-                (await (send-inbound! [:seon.user/id "user"] agent-id "more please" 0 :human))
+                (await (send-inbound! "msgloop00003" [:seon.user/id "user"]
+                                      agent-id "more please" 0 :human))
                 (let [ok? (await (wait-until
                                    (fn [] (= 6 (:seon.agent.run/turn-limit
                                                  (run/snapshot {:seon.agent.run/id run-id}))))
@@ -558,7 +561,8 @@
                  :seon.agent/llm-fn        (scripted-llm "(complete \"ok\")")
                  :seon.agent/compile-state cs})
               (testing "a hop-CAP message wakes NOTHING (loud refusal, no run)"
-                (await (send-inbound! [:seon.agent/id "AGTpeerrun0001"] agent-id
+                (await (send-inbound! "msgloop00004"
+                                      [:seon.agent/id "AGTpeerrun0001"] agent-id
                                       "ping-pong" warn/hop-cap :agent))
                 ;; the exhausted branch schedules NO setTimeout; a short poll
                 ;; confirms no run materialized on the macrotask queue either.
@@ -567,7 +571,8 @@
                     "hop-exhausted ⇒ refused at wake; no run opened")
                 (is (= :idle (derived agent-id))))
               (testing "a fresh hops=0 human message DOES wake (opens + drives)"
-                (await (send-inbound! [:seon.user/id "user"] agent-id "fresh start" 0 :human))
+                (await (send-inbound! "msgloop00005" [:seon.user/id "user"]
+                                      agent-id "fresh start" 0 :human))
                 (let [ok? (await (wait-until (fn [] (seq (runs-for agent-id))) 8000 25))]
                   (is ok? "the hops=0 message opened a run")
                   (is (= 1 (count (runs-for agent-id)))
@@ -846,7 +851,7 @@
               ;; seed the {child,parent} pair AT the cap: a prior parent→child
               ;; message carrying hops = hop-cap ⇒ the child's next send to the
               ;; parent derives hops = cap + 1 (≥ cap ⇒ not wake-eligible).
-              (await (send-inbound! [:seon.agent/id agent-id] child-id
+              (await (send-inbound! "msgloop00006" [:seon.agent/id agent-id] child-id
                                     "pair at the cap" warn/hop-cap :agent))
               (let [snap (await (run/open-run! {:seon.agent/id child-id
                                                 :seon.agent.run/trigger :message}))]

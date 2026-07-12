@@ -46,15 +46,14 @@
    current root conn. Returns a Promise of the eval-batch! result map. The
    live-result store (`result/<id>`) is process-global, so a later run-batch
    re-references a handle a prior one bound."
-  [aid source]
+  [aid turn-id source]
   (-> (repl/ensure-bootstrap!)
       (.then (fn [cs]
-               (let [hns (agent/home-ns aid)
-                     tid (db/new-id!)]
+               (let [hns (agent/home-ns aid)]
                  (-> (seval/setup-agent-ns! cs hns aid)
                      (.then (fn [_]
                               (seval/eval-batch!
-                                cs (repl-int/parse-forms source) hns aid tid nil)))))))))
+                                cs (repl-int/parse-forms source) hns aid turn-id nil)))))))))
 
 (defn- row
   "The :seon.eval entity for `id` (read against the current root conn)."
@@ -83,7 +82,7 @@
     (let [!id (atom nil)]
       (-> (with-conn
             (fn []
-              (-> (run-batch "pe-defer-t"
+              (-> (run-batch "pe-defer-t" "turnprom0001"
                     "(seon.eval/defer (js/Promise. (fn [resolve _] (js/setTimeout (fn [] (resolve {:deferred/data 42})) 150))))")
                   (.then (fn [r]
                            (is (= 1 (:seon.eval/n-ok r))
@@ -101,7 +100,8 @@
                                  "the placeholder names result/<id> so the agent knows how to await it")
                              handle)))         ; return the handle → next .then waits for it to resolve
                   (.then (fn [_]
-                           (run-batch "pe-defer-ref-t" (str "(identity result/" @!id ")"))))
+                           (run-batch "pe-defer-ref-t" "turnprom0002"
+                                      (str "(identity result/" @!id ")"))))
                   (.then (fn [r2]
                            (is (= 1 (:seon.eval/n-ok r2)))
                            (is (str/includes? (:seon.eval/result-edn (row (first (:seon.eval/ids r2))))
@@ -121,7 +121,7 @@
     (let [!id (atom nil)]
       (-> (with-conn
             (fn []
-              (-> (run-batch "pe-timeout-t"
+              (-> (run-batch "pe-timeout-t" "turnprom0003"
                     "(seon.eval/budget 50 (js/Promise. (fn [resolve _] (js/setTimeout (fn [] (resolve {:timeout/data 7})) 500))))")
                   (.then (fn [r]
                            (is (= 1 (:seon.eval/n-ok r))
@@ -135,7 +135,8 @@
                                  "timeout records the placeholder")
                              handle)))         ; return the handle → next .then waits for it to resolve
                   (.then (fn [_]
-                           (run-batch "pe-timeout-ref-t" (str "(identity result/" @!id ")"))))
+                           (run-batch "pe-timeout-ref-t" "turnprom0004"
+                                      (str "(identity result/" @!id ")"))))
                   (.then (fn [r2]
                            (is (str/includes? (:seon.eval/result-edn (row (first (:seon.eval/ids r2))))
                                               ":timeout/data")

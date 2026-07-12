@@ -436,7 +436,7 @@
    ;; Leaf-purity (see note below): this is a LOAD-TIME register! in a leaf ns
    ;; — seon.agent requires THIS, so `:seon.agent/id` is NOT registered yet at
    ;; cold boot and can't be referenced here. The base type `:string` still
-   ;; admits the literal "root" id (the orchestrator-root); the 14-char minted
+   ;; admits the literal "root" id (the orchestrator-root); the generated
    ;; shape is enforced where the agent is CREATED (`:seon.agent/id` itself).
    ;; This is a derived READ. The defn `:malli/schema` slots below (resolved at
    ;; instrumentation time, after seon.agent loads) DO reference `:seon.agent/id`.

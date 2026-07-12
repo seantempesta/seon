@@ -110,23 +110,23 @@
 ;; ============================================================
 ;; POST /agents/run mint seam — injected by seon.client (same reason as
 ;; !create-agent-fn: serve.cljs can't require seon.client). The one-shot
-;; composition door mints its per-task agent via seon.client/init-agent!
-;; (entity + home ns + wake trigger — the same per-agent wiring
-;; start-agent! runs) against the pod's ONE cluster conn.
+;; composition door asks the injected closure to allocate, create, and wire one
+;; per-task agent against the pod's ONE cluster conn. The caller never chooses
+;; or observes an uncommitted candidate.
 ;; ============================================================
 
-(defonce ^{:doc "1-arity fn (agent-id ⇒ Promise of `{:seon.agent/id …}` or a
-                  db error envelope) — injected by seon.client at load time
-                  (init-agent! with mint). nil until the pod finishes loading
-                  (a POST /agents/run before then 503s)."}
+(defonce ^{:doc "0-arity fn returning a Promise of `{:seon.agent/id …}` or a
+                  db error envelope — injected by seon.client at load time.
+                  nil until the pod finishes loading (a POST /agents/run before
+                  then 503s)."}
   !mint-agent-fn (atom nil))
 
 (defn set-mint-agent-fn!
   "Inject the per-task agent mint closure from seon.client.
 
-   The injected fn wraps `seon.client/init-agent!` (`mint? true`) — the
-   one per-agent wiring path. Called at namespace-load time from
-   seon.client; re-runs on hot reload so the closure tracks reloaded code."
+   The injected fn wraps the atomic `seon.agent/mint!` owner and then the one
+   per-agent wiring path. Called at namespace-load time from seon.client;
+   re-runs on hot reload so the closure tracks reloaded code."
   {:malli/schema [:=> [:cat fn?] :nil]}
   [f]
   (reset! !mint-agent-fn f)
@@ -495,11 +495,14 @@
                                     :seon.db/args [agent-id]})))]
     (if (and reuse? (not exists?))
       {:error (str "unknown agent_id: " agent-id)}
-      (let [aid    (or agent-id (db/new-id!))
-            minted (when-not reuse? (await (mint-agent aid)))]
-        (if (false? (:seon.db/ok? minted))
+      (let [minted (when-not reuse? (await (mint-agent)))
+            aid    (or agent-id (:seon.agent/id minted))]
+        (if (and (not reuse?)
+                 (or (false? (:seon.db/ok? minted)) (nil? aid)))
           {:error (str "agent mint failed: "
-                       (get-in minted [:seon.db/error :seon.error/message]))}
+                       (or (get-in minted
+                                   [:seon.db/error :seon.error/message])
+                           "mint returned no committed agent id"))}
           ;; `injected-at` is stamped BEFORE the message lands, so the run the
           ;; wake opens can never predate the window the reads below scope to.
           (let [start       (js/Date.now)

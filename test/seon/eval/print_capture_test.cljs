@@ -68,15 +68,14 @@
   "Run `source` (one form) through eval-batch! in `aid`'s home ns against the
    current root conn. Returns a Promise of the eval-batch! result map. Goes
    through eval-form-entry! — the real per-eval print-capture site."
-  [aid source]
+  [aid turn-id source]
   (-> (repl/ensure-bootstrap!)
       (.then (fn [cs]
-               (let [hns (agent/home-ns aid)
-                     tid (db/new-id!)]
+               (let [hns (agent/home-ns aid)]
                  (-> (seval/setup-agent-ns! cs hns aid)
                      (.then (fn [_]
                               (seval/eval-batch!
-                                cs (repl-int/parse-forms source) hns aid tid nil)))))))))
+                                cs (repl-int/parse-forms source) hns aid turn-id nil)))))))))
 
 (defn- output-containing
   "The `:seon.eval/output` string of the eval row whose output contains
@@ -109,13 +108,14 @@
               (fn []
                 (-> (js/Promise.all
                       #js [;; A: starts now, awaits 150ms.
-                           (run-batch "print-a-64" a-src)
+                           (run-batch "print-a-64" "turnprint001" a-src)
                            ;; B: starts 40ms in (during A's await), runs entirely
                            ;; inside A's await window — the exact bleed condition.
                            (js/Promise.
                              (fn [res rej]
                                (js/setTimeout
-                                 (fn [] (.then (run-batch "print-b-64" b-src) res rej))
+                                 (fn [] (.then (run-batch "print-b-64" "turnprint002" b-src)
+                                               res rej))
                                  40)))])
                     ;; Assert INSIDE with-conn — the rows live on the :memory
                     ;; conn it set! as root; with-conn restores the prior conn

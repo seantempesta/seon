@@ -22,7 +22,6 @@
      (cljs.test/run-tests 'seon.eval.prose-demote-test)"
   (:require
     [cljs.test :as t :refer [deftest is testing async]]
-    [clojure.string :as str]
     [datahike.api :as d]
     [seon.agent]                          ; :seon.eval / :seon.agent.turn registrations
     [seon.client :as client]
@@ -48,6 +47,8 @@
                  (set! db/*conn* conn)
                  (-> (js/Promise.resolve (body))
                      (.finally (fn [] (set! db/*conn* prev)))))))))
+
+(def ^:private fixture-turn-id "turnprose001")
 
 (defn- run-batch!
   "Parse `source` and run it through `eval-batch!` against the root-bound
@@ -105,7 +106,7 @@
       (with-conn
         (fn ^:async run []
           (doseq [src demote-cases]
-            (let [res (await (run-batch! src (db/new-id!)))
+            (let [res (await (run-batch! src fixture-turn-id))
                   row (row-for src)]
               (testing (str "DEMOTE: " src)
                 (is (= 0 (:seon.eval/n-ok res))
@@ -137,14 +138,14 @@
       (with-conn
         (fn ^:async run []
           (testing "(+ 1 2) — core head resolves → eval'd, succeeds"
-            (let [res (await (run-batch! "(+ 1 2)" (db/new-id!)))
+            (let [res (await (run-batch! "(+ 1 2)" fixture-turn-id))
                   row (row-for "(+ 1 2)")]
               (is (= 1 (:seon.eval/n-ok res)))
               (is (= 0 (:seon.eval/n-fail res)))
               (is (true? (:ok? row)))
               (is (not (re-find prose-note-re (str (:narration row)))) "NOT demoted")))
           (testing "(vals totals) — core head resolves → eval'd (errors on undefined arg, KEPT)"
-            (let [res (await (run-batch! "(vals totals)" (db/new-id!)))
+            (let [res (await (run-batch! "(vals totals)" fixture-turn-id))
                   row (row-for "(vals totals)")]
               ;; `vals` resolves so it is real code; `totals` is undefined, so
               ;; the eval is a genuine error — counted as one (KEPT).
@@ -169,13 +170,13 @@
       (with-conn
         (fn ^:async run []
           (testing "(ns-interns 'cljs.user) — macro head → eval'd, returns a map"
-            (let [res (await (run-batch! "(ns-interns 'cljs.user)" (db/new-id!)))
+            (let [res (await (run-batch! "(ns-interns 'cljs.user)" fixture-turn-id))
                   row (row-for "(ns-interns 'cljs.user)")]
               (is (= 1 (:seon.eval/n-ok res)) "evaluated, not demoted")
               (is (true? (:ok? row)))
               (is (not (re-find prose-note-re (str (:narration row)))) "NOT demoted")))
           (testing "(ns-publics 'cljs.user) — same, the sibling macro"
-            (let [res (await (run-batch! "(ns-publics 'cljs.user)" (db/new-id!)))
+            (let [res (await (run-batch! "(ns-publics 'cljs.user)" fixture-turn-id))
                   row (row-for "(ns-publics 'cljs.user)")]
               (is (= 1 (:seon.eval/n-ok res)) "evaluated, not demoted")
               (is (not (re-find prose-note-re (str (:narration row)))) "NOT demoted")))))
@@ -190,7 +191,7 @@
       (with-conn
         (fn ^:async run []
           (let [res (await (run-batch! "(clojure.string/upper-case \"ok\")"
-                                       (db/new-id!)))
+                                       fixture-turn-id))
                 row (first (eval-rows @db/*conn*))]
             (testing "namespaced head → real code, eval'd ok (not demoted)"
               (is (= 1 (:seon.eval/n-ok res)))
@@ -210,7 +211,7 @@
           (let [res  (await (run-batch!
                               (str "(defn my-prose-fn-2606 [x] x)\n"
                                    "(my-prose-fn-2606 some-undefined-arg)")
-                              (db/new-id!)))
+                              fixture-turn-id))
                 call (row-for "(my-prose-fn-2606 some-undefined-arg)")]
             (testing "defn succeeds; the defined-head call is KEPT (errors, counted)"
               (is (= 1 (:seon.eval/n-ok res)) "the defn ok")
@@ -229,7 +230,8 @@
     (settle!
       (with-conn
         (fn ^:async run []
-          (let [res (await (run-batch! "(when zzz-foo-2606 zzz-bar-2606)" (db/new-id!)))
+          (let [res (await (run-batch! "(when zzz-foo-2606 zzz-bar-2606)"
+                                       fixture-turn-id))
                 row (first (eval-rows @db/*conn*))]
             (testing "macro head → code, KEPT even with all-undefined operands"
               (is (= 0 (:seon.eval/n-ok res)))
@@ -248,7 +250,8 @@
     (settle!
       (with-conn
         (fn ^:async run []
-          (let [res (await (run-batch! "(zzz-undefined-fn-2606 1 2)" (db/new-id!)))
+          (let [res (await (run-batch! "(zzz-undefined-fn-2606 1 2)"
+                                       fixture-turn-id))
                 row (first (eval-rows @db/*conn*))]
             (testing "undefined head + literal args → KEPT as a typo'd call"
               (is (= 0 (:seon.eval/n-ok res)))

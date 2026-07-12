@@ -54,7 +54,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; Fixtures — mirrors repair_batch_test: root `set!` of db/*conn* (a
-;; `binding` does not survive await boundaries), real minted ids.
+;; `binding` does not survive await boundaries), fixed valid turn identity.
 ;; ---------------------------------------------------------------------------
 
 (defn- with-conn
@@ -68,6 +68,8 @@
                  (-> (js/Promise.resolve (body))
                      (.finally (fn [] (set! db/*conn* prev)))))))))
 
+(def ^:private fixture-turn-id "turnrepl0001")
+
 (defn- run-batch!
   "Parse `source` and run it through `eval-batch!` against the
    root-bound conn, starting from `start-ns`. Returns Promise<result>."
@@ -78,7 +80,7 @@
                                   (internal/parse-forms source)
                                   start-ns
                                   "rv-agent-2607"
-                                  (db/new-id!)
+                                  fixture-turn-id
                                   nil)))))
 
 (defn- eval-rows
@@ -587,7 +589,7 @@
               (fn [_]
                 (db/with-tx-context
                   {:seon.db/agent-id "rv-agent-2607"
-                   :seon.db/turn-id  (db/new-id!)
+                   :seon.db/turn-id  fixture-turn-id
                    :seon.db/origin   :system}
                   (fn ^:async run-two-batches! []
                     (let [cs @repl/!compile-state
@@ -596,13 +598,13 @@
                                       (internal/parse-forms
                                         "(ns probe.rv.c59c)\n(defn fc [x] (- x 1))")
                                       'my.agent.rv "rv-agent-2607"
-                                      (db/new-id!) nil))
+                                      fixture-turn-id nil))
                           r2 (await (seval/eval-batch!
                                       cs
                                       (internal/parse-forms
                                         "(ns probe.rv.c59d)\n(defn fd [x] (* x 3))")
                                       'my.agent.rv "rv-agent-2607"
-                                      (db/new-id!) nil))]
+                                      fixture-turn-id nil))]
                       {:r1 r1 :r2 r2})))))
             (.then
               (fn [{:keys [r1 r2]}]

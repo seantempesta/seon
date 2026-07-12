@@ -45,6 +45,7 @@
   (:require
     ;; --- Iteration-surface deps ---
     [datahike.api :as d]
+    [seon.db.id :as id]
     [seon.eval :as seval]
     ;; Pulled in so the :client bundle can reach rewrite-clj via the
     ;; host REPL (mcp__seon_cljs__eval) for ad-hoc core probes
@@ -125,7 +126,8 @@
                  :schema-flexibility :write
                  :keep-history?      true}]
         (await (d/create-database cfg))
-        (let [conn (await (d/connect cfg))]
+        (let [conn (await (d/connect (id/allocation-connect-config cfg)))]
+          (id/assert-allocation-writer! conn)
           (reset! !conn conn)
           conn))))
 

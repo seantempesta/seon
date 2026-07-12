@@ -1627,7 +1627,10 @@
   [!agents compile-state designator & [pre-id]]
   (if-let [existing (get @!agents designator)]
     existing
-    (let [agent-id (or pre-id (db/new-id!))]
+    ;; Scratch worlds are isolated per scenario. Designator-derived readable
+    ;; fixture ids are therefore intentional known ids, not a second identity
+    ;; generator; live agent creation goes through `seon.agent/mint!`.
+    (let [agent-id (or pre-id (str "gym-agent-" (name designator)))]
       ;; with-agent scope mirrors seon.client/init-agent! — on a
       ;; live boot the agent's own create! tx carries its agent-id. The gym
       ;; wires the home ns itself (setup-agent-ns!) + creates the entity; no
@@ -1696,7 +1699,7 @@
     ;; matches what a real prior agent's work looks like.
     (when (or (seq schema-registrations) (seq fixtures))
       (await
-        (db/with-agent (db/new-id!)
+        (db/with-agent "gym-prior-agent"
           (fn ^:async seed-prior-agent-layer! []
             (when (seq schema-registrations)
               (doseq [[k v] schema-registrations] (schema/register! k v))
@@ -1843,7 +1846,7 @@
             ;; The scenario's prior-agent layer inside
             ;; [[seed-scenario-world!]] scopes itself to a synthetic
             ;; prior-agent id (its own with-agent).
-            (let [primary (db/new-id!)]
+            (let [primary "gym-primary-agent"]
               (await (seed-scenario-world! {:seon.gym/scenario scenario
                                             :seon.db/conn conn}))
               ;; World-parity: a live boot syncs the :seon.ai/config
@@ -2030,7 +2033,7 @@
         (sfs/configure! {:seon.agent.fs/allowed-roots
                          [(str cwd "/src") (str cwd "/docs")]
                          :seon.agent.fs/read-only? true})
-        (let [primary (db/new-id!)]
+        (let [primary "gym-primary-agent"]
           ;; Seed outside any agent scope (live provenance shape — see
           ;; the origin-forge note at the run-scenario! seed site).
           (await (seed-scenario-world! {:seon.gym/scenario scenario
