@@ -8,6 +8,7 @@
    panel. AI-only blocks are absent. Surface recency derives from database
    transactions and renderer read-sets; selection is browser-local state."
   (:require
+    [clojure.string :as str]
     [seon.agent.ctx :as agent-ctx]
     [seon.agent.ctx.render-fns :as render-fns]
     [seon.db :as db]
@@ -39,6 +40,30 @@
        (when-let [ns (namespace block-name)] (str ns "-"))
        (name block-name)))
 
+(defn- class-token?
+  [attrs token]
+  (boolean
+    (some #{token}
+          (some-> (:class attrs "") (str/split #"\s+")))))
+
+(defn- find-face
+  "First hiccup node carrying `class-token`, or nil."
+  [node class-token]
+  (when (vector? node)
+    (let [attrs (when (map? (second node)) (second node))
+          children (if attrs (drop 2 node) (drop 1 node))]
+      (if (class-token? attrs class-token)
+        node
+        (some #(find-face % class-token) children)))))
+
+(defn- face
+  "Project an existing dual-face tile without invoking its renderer again."
+  [hiccup view]
+  (or (find-face hiccup (case view
+                          :compact "seon-tile-compact"
+                          :expanded "seon-tile-expanded"))
+      hiccup))
+
 (defn- transcript-selection? [selection]
   (= selection "context-transcript"))
 
@@ -49,7 +74,7 @@
 
 (defn- primary-panel
   "One selectable primary-panel body. Transcript bodies follow their tail."
-  [selection hiccup touch]
+  [selection expanded touch]
   [:section (cond-> {:id (str "agent-view-primary-" selection)
                      :data-agent-primary selection
                      :data-show (str "$selected === '" selection "'")
@@ -57,16 +82,18 @@
                                  "border-base-800 rounded-md bg-base-900 p-2 h-full")}
               (transcript-selection? selection)
               (assoc :data-effect (bottom-effect touch)))
-   hiccup])
+   expanded])
 
 (defn- rail-button
   "A compact selectable card for a non-focused primary-panel body."
-  [selection label hiccup touch]
-  [:div {:role "button"
+  [selection label compact touch]
+  [:div {:id (str "agent-view-rail-" selection)
+         :role "button"
          :tabindex "0"
          :aria-label (str "Show " label " in the primary view")
          :class (str "w-full text-left border border-base-800 rounded-md cursor-pointer "
                      "bg-base-900 overflow-hidden hover:border-base-700")
+         :style (str "order:" (- touch))
          :data-show (str "$selected !== '" selection "'")
          :data-class (str "{'border-amber-700': $selected === '" selection "'}")
          (keyword "data-on:click") (str "$selected = '" selection
@@ -84,7 +111,7 @@
                   :style "max-height:20rem;pointer-events:none"}
            (transcript-selection? selection)
            (assoc :data-effect (bottom-effect touch)))
-    hiccup]])
+    compact]])
 
 (defn- agent-attr-touch
   "Latest transaction by this agent touching `attr` on its own entity."
@@ -147,23 +174,31 @@
           (mapv (fn [{nm :seon.agent.ctx/name
                       h  :seon.render/hiccup
                       renderer :seon.render/html}]
-                              {:selection (selection-key nm)
-                               :label (name nm)
-                               :hiccup h
-                               :touch (renderer-touch db agent-id renderer)})
+                  (let [selection (selection-key nm)]
+                    {:seon.ui.surface/selection selection
+                     :seon.ui.surface/label (name nm)
+                     :seon.ui.surface/compact (face h :compact)
+                     :seon.ui.surface/expanded (face h :expanded)
+                     :seon.ui.surface/touch (renderer-touch db agent-id renderer)
+                     :seon.ui.surface/renderer renderer}))
                 blocks)
           surfaces (->> (conj context-surfaces
-                              {:selection "canvas"
-                               :label "canvas"
-                               :hiccup (or canvas
-                                           [:div {:class "p-2 text-text-500 text-xs"}
-                                            "No canvas render yet."])
-                               :touch (canvas-touch db agent-id)})
-                        (sort-by (juxt (comp - :touch) :label))
+                              (let [h (or canvas
+                                          [:div {:class "p-2 text-text-500 text-xs"}
+                                           "No canvas render yet."])]
+                                {:seon.ui.surface/selection "canvas"
+                                 :seon.ui.surface/label "canvas"
+                                 :seon.ui.surface/compact (face h :compact)
+                                 :seon.ui.surface/expanded (face h :expanded)
+                                 :seon.ui.surface/touch (canvas-touch db agent-id)}))
+                        (sort-by (juxt (comp - :seon.ui.surface/touch)
+                                       :seon.ui.surface/label))
                         vec)
-          latest (or (first surfaces) {:selection "canvas" :touch 0})
-          latest-selection (:selection latest)
-          latest-touch (:touch latest)]
+          latest (or (first surfaces)
+                     {:seon.ui.surface/selection "canvas"
+                      :seon.ui.surface/touch 0})
+          latest-selection (:seon.ui.surface/selection latest)
+          latest-touch (:seon.ui.surface/touch latest)]
       [:main {:id "app-view"
               :class "flex flex-col gap-2 w-full min-h-0 flex-1 overflow-hidden"
               :data-signals (str "{selected: '" latest-selection
@@ -195,15 +230,20 @@
         [:div {:id "agent-view-primary"
                :class "col-span-2 min-h-0 h-full overflow-hidden"}
          (doall
-           (map (fn [{:keys [selection hiccup touch]}]
-                  (primary-panel selection hiccup touch))
+           (map (fn [{selection :seon.ui.surface/selection
+                      expanded :seon.ui.surface/expanded
+                      touch :seon.ui.surface/touch}]
+                  (primary-panel selection expanded touch))
                 surfaces))]
         [:aside {:id "agent-view-context"
                  :class (str "agent-view-rail col-span-1 flex flex-col gap-2 "
                              "min-h-0 h-full overflow-y-auto")}
          (doall
-           (map (fn [{:keys [selection label hiccup touch]}]
-                  (rail-button selection label hiccup touch))
+           (map (fn [{selection :seon.ui.surface/selection
+                      label :seon.ui.surface/label
+                      compact :seon.ui.surface/compact
+                      touch :seon.ui.surface/touch}]
+                  (rail-button selection label compact touch))
                 surfaces))]]])
     (catch :default e
       [:main {:id "app-view" :class "flex flex-col gap-3 w-full"}

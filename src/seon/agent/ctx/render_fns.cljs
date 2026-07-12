@@ -217,6 +217,24 @@
           {::src-tx src-tx
            ::attrs (declared-read-attrs installed stored src)})))))
 
+(schema/register! ::renderer-read-attrs-request
+  [:map
+   [:seon.db/db :seon.db/db]
+   [:seon.render/html :symbol]])
+(schema/register! ::renderer-read-attrs-response
+  [:map [::attrs [:vector :qualified-keyword]]])
+
+(defn renderer-read-attrs
+  "A symbolic renderer's declared database read-set.
+
+   This is the dependency projection used by both recency and live UI
+   invalidation. It reads the stored analyzer-produced `:seon.fn/read-attrs`
+   and retains the existing legacy source fallback through [[fn-row]]."
+  {:malli/schema [:=> [:cat ::renderer-read-attrs-request]
+                  ::renderer-read-attrs-response]}
+  [{db :seon.db/db renderer :seon.render/html}]
+  {::attrs (vec (or (::attrs (fn-row db renderer)) []))})
+
 (schema/register! ::renderer-touch-request
   [:map
    [:seon.db/db :seon.db/db]
