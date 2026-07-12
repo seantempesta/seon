@@ -155,21 +155,20 @@ The connection nobody models but everybody gets: a datom's 4th field is its
 **transaction id**, and the transaction is a real entity carrying real datoms.
 Datahike reifies `:tx-meta` onto the tx entity
 (`reference-code/datahike/src/datahike/db/transaction.cljc:802`
-`flush-tx-meta`) and auto-stamps a monotonic `:db/txInstant`. Seon's
-`transact!` auto-merges the active `with-agent`/`with-tx-context` scope into
-`:tx-meta` (`src/seon/db/internal.cljs` `merge-tx-context-into-opts`; the seven
-attrs: `:seon.db/agent-id`, `session-id`, `turn-id`, `eval-id`, `origin`,
-`replay?`, `resume-marker?`), and the stamps survive the wire to the JVM
-writer. `:seon.db/origin` is DERIVED at that boundary
-(`seon.db.internal/derive-origin`) — callers never pass it: an agent scope
-stamps `:agent` (a tx-context claim of a non-managed origin like `:system` /
-`:test-run` / `:replay` is trusted), and the managed origins
-`:core-seed`/`:config` are only reachable from an UNSCOPED `with-tx-context`,
-so managed-core provenance cannot be forged from inside an agent scope.
+`flush-tx-meta`) and auto-stamps a monotonic `:db/txInstant`. The durable
+provenance primitive is therefore a join from datom to transaction to the actor
+that asserted it. Provenance belongs on the transaction entity, not as an owner,
+creator, kind, or status attribute copied onto domain entities.
 
-Consequence for modeling: WHO/WHEN-wrote-this is a **join**
-(`[?e attr _ ?tx] [?tx :seon.db/turn-id ?turn]`), never a domain attribute — a
-`created-by`/`created-at`/`source-turn` attr duplicates the tx record. The one
+The current pod carries a broader transaction-context/origin shape. The
+runtime-reliability chunk is auditing every field and consumer before replacing
+that shape with the minimum actor-reference model; see
+[[docs/prds/runtime-reliability/provenance-and-lifecycle-design]]. Security,
+authentication, and authorization are deliberately outside that refactor.
+
+Consequence for modeling: who/when-wrote-this is a **join** through the
+transaction, never a domain attribute — a `created-by`/`created-at`/`source-turn`
+attribute duplicates the transaction record. The one
 exception is a PRE-event snapshot coordinate: a fact about a db value observed
 *before* the entity's own tx (`:seon.agent.turn/rendered-as-of` — other agents'
 txs interleave on the shared conn, so the turn's creation-tx is not that
