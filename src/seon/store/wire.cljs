@@ -38,7 +38,7 @@
    harness since retired — findings + retirement note in
    docs/prds/agent-runtime/research/datahike-native-replica-2026-06-09.md)."
   (:require
-   [cljs.core.async :refer [promise-chan put!]]
+   [cljs.core.async :refer [promise-chan put! <! go]]
    [clojure.string :as str]
    [datahike.api :as d]
    [datahike.connector :as connector]
@@ -387,17 +387,51 @@
       :seon.error/kind :core-bug}
      error)))
 
-(defrecord SeonWireWriter [sock-path conn]
+(defn- register-writer-operation!
+  "Atomically admit `completion` while this writer remains open."
+  [lifecycle completion]
+  (let [[before _]
+        (swap-vals! lifecycle
+                    (fn [state]
+                      (if (::writer-open? state)
+                        (update state ::writer-pending conj completion)
+                        state)))]
+    (::writer-open? before)))
+
+(defn- finish-writer-operation!
+  "Resolve one admitted operation before removing it from the drain set."
+  [lifecycle completion value]
+  (put! completion value)
+  (swap! lifecycle update ::writer-pending disj completion))
+
+(defn- shutdown-writer!
+  "Close admission and resolve only after every admitted RPC has completed."
+  [lifecycle]
+  (let [[before _] (swap-vals! lifecycle assoc ::writer-open? false)
+        pending (::writer-pending before)
+        done (promise-chan)]
+    (go
+      (doseq [completion pending]
+        (<! completion))
+      (put! done true))
+    done))
+
+(defrecord SeonWireWriter [sock-path conn lifecycle]
   w/PWriter
   (-dispatch! [_ {:keys [op args]}]
     (let [p (promise-chan)]
-      (if (not= op 'transact!)
-        (put! p (ex-info "seon-wire writer supports only transact!"
-                         {::op op}))
-        (let [arg-map    (first args)
-              tx-data    (if (map? arg-map) (:tx-data arg-map) arg-map)
-              tx-meta    (when (map? arg-map) (:tx-meta arg-map))
-              generated? (and (map? arg-map)
+      (if-not (register-writer-operation! lifecycle p)
+        (put! p (ex-info "seon-wire writer is shut down."
+                         {::op op
+                          :seon.error/kind :core-bug}))
+        (if (not= op 'transact!)
+          (finish-writer-operation!
+            lifecycle p
+            (ex-info "seon-wire writer supports only transact!" {::op op}))
+          (let [arg-map    (first args)
+                tx-data    (if (map? arg-map) (:tx-data arg-map) arg-map)
+                tx-meta    (when (map? arg-map) (:tx-meta arg-map))
+                generated? (and (map? arg-map)
                               (contains? arg-map
                                          :seon.db.id/generated-candidates))
               generated-candidates
@@ -427,7 +461,9 @@
                    (if-not (:seon.store.wire/ok resp)
                      (do
                        (reject-transaction! wire-id)
-                       (put! p (rejected-response-error resp generated?)))
+                       (finish-writer-operation!
+                        lifecycle p
+                        (rejected-response-error resp generated?)))
                      ;; RYOW: resolve only once a local deref is at/past
                      ;; the ack'd basis-t. The synthesized report carries
                      ;; the MATERIALIZED post-tx db value, so straight-line
@@ -464,23 +500,30 @@
                                              (:seon.store.wire/basis-t-before
                                               resp))))]
                        (resolve-transaction! wire-id bt)
-                       (put! p report)))
+                       (finish-writer-operation! lifecycle p report)))
                    (catch :default e
-                     (put! p (response-processing-error conn wire-id resp e))))))
+                     (finish-writer-operation!
+                       lifecycle p
+                       (response-processing-error conn wire-id resp e))))))
               (.catch
                (fn [e]
-                 (put! p (ambiguous-transaction-error
-                          conn wire-id wire/transact-attempts
-                          (if (instance? js/Error e)
-                            e
-                            (js/Error. (str e))))))))))
+                 (finish-writer-operation!
+                   lifecycle p
+                   (ambiguous-transaction-error
+                     conn wire-id wire/transact-attempts
+                     (if (instance? js/Error e)
+                       e
+                       (js/Error. (str e)))))))))))
       p))
-  (-shutdown [_] nil)
+  (-shutdown [_] (shutdown-writer! lifecycle))
   (-streaming? [_] false))
 
 (defmethod w/create-writer :seon-wire
   [{:keys [sock-path]} connection]
-  (->SeonWireWriter (or sock-path default-sock-path) connection))
+  (->SeonWireWriter (or sock-path default-sock-path)
+                    connection
+                    (atom {::writer-open? true
+                           ::writer-pending #{}})))
 
 (defmethod connector/-connect* :seon-wire [config opts]
   (connector/-connect-impl* config opts))

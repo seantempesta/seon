@@ -14,7 +14,7 @@
      (require 'seon.store.wire-test :reload)
      (cljs.test/run-tests 'seon.store.wire-test)"
   (:require
-   [cljs.core.async :refer [take!]]
+   [cljs.core.async :refer [take! poll!]]
    [cljs.test :refer [deftest is async]]
    [datahike.writer :as writer]
    [seon.store.internal.wire-node :as wire]
@@ -82,8 +82,18 @@
   [conn arg-map]
   (channel->promise
    (writer/-dispatch!
-    (store.wire/->SeonWireWriter "stub.sock" conn)
+    (store.wire/->SeonWireWriter
+     "stub.sock" conn
+     (atom {:seon.store.wire/writer-open? true
+            :seon.store.wire/writer-pending #{}}))
     {:op 'transact! :args [arg-map]})))
+
+(defn- test-writer
+  [conn]
+  (store.wire/->SeonWireWriter
+   "stub.sock" conn
+   (atom {:seon.store.wire/writer-open? true
+          :seon.store.wire/writer-pending #{}})))
 
 (defn- success-response
   [basis-t]
@@ -139,6 +149,51 @@
    :seon.store.wire/done? done?
    :seon.store.wire/events events
    :seon.store.wire/replayed (count events)})
+
+(deftest wire-writer-shutdown-closes-admission-and-drains-accepted-rpcs
+  (async done
+    (let [conn (fake-conn 17)
+          respond (atom nil)]
+      (-> (with-wire-state
+           {:started? false}
+           (fn []
+             (with-rpc-stub
+              (fn [_sock-path _request _opts]
+                (js/Promise.
+                 (fn [deliver _reject]
+                   (reset! respond deliver))))
+              (fn []
+                (let [wire-writer (test-writer conn)
+                      result (writer/-dispatch!
+                              wire-writer
+                              {:op 'transact!
+                               :args [{:tx-data
+                                       [{:seon.store.wire-test/value
+                                         "accepted"}]}]})
+                      shutdown (writer/-shutdown wire-writer)]
+                  (is (nil? (poll! shutdown))
+                      "shutdown waits for the already-admitted RPC")
+                  (@respond (success-response 17))
+                  (-> (channel->promise result)
+                      (.then
+                       (fn [report]
+                         (is (= 17 (get-in report [:db-after :max-tx])))
+                         (channel->promise shutdown)))
+                      (.then
+                       (fn [drained]
+                         (is (true? drained))
+                         (channel->promise
+                          (writer/-dispatch!
+                           wire-writer
+                           {:op 'transact!
+                            :args [{:tx-data []}]}))))
+                      (.then
+                       (fn [error]
+                         (is (instance? js/Error error))
+                         (is (re-find #"shut down" (.-message error)))))))))))
+          (.catch (fn [error]
+                    (is false (str "wire writer drain test threw: " error))))
+          (.finally done)))))
 
 (deftest ping-retries-through-transient-failure
   ;; First two rpcs fail (socket not accepting yet — the start-all
