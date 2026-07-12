@@ -4,8 +4,8 @@
    (`:seon.items/items`) plus their `:seon.items/count`, tagged with the
    `:seon.result/ok?` discriminator. Registered ONCE here and referenced
    (never inlined) by every producer/consumer of a collection result —
-   `my.data` (the aggregation toolkit), and the upcoming
-   `my.recall`/`my.schedule`/`my.canvas`.
+   `my.data` (the aggregation toolkit), `my.kb/recall`, and the upcoming
+   `my.schedule`/`my.canvas`.
 
    Keyword namespaces = real code namespaces: the `:seon.items/*` shapes
    live in `seon.items`, the ns whose name the keywords carry — not in
