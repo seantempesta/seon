@@ -39,6 +39,26 @@
     (-> (js/Promise.resolve (body))
         (.finally (fn [] (set! wire/rpc orig))))))
 
+(defn- with-feed-stubs
+  "Run an async body with the pub connector and paginated replay stubbed."
+  [connect-stub replay-stub body]
+  (let [original-connect wire/connect-pub
+        original-replay  wire/replay-tx
+        wrapped-replay   (fn wrapped-replay-tx
+                           ([opts] (replay-stub nil opts))
+                           ([sock-path opts] (replay-stub sock-path opts)))
+        restore!         (fn []
+                           (set! wire/connect-pub original-connect)
+                           (set! wire/replay-tx original-replay))]
+    (set! wire/connect-pub connect-stub)
+    (set! wire/replay-tx wrapped-replay)
+    (try
+      (-> (js/Promise.resolve (body))
+          (.finally restore!))
+      (catch :default error
+        (restore!)
+        (js/Promise.reject error)))))
+
 (defn- channel->promise
   "Resolve a Promise with the one value delivered on a promise-chan."
   [channel]
@@ -99,6 +119,26 @@
   (js/Promise.
    (fn [deliver _reject]
      (js/setTimeout deliver 25))))
+
+(defn- replay-event
+  [db-name basis-t basis-t-before]
+  {:seon.store.wire/event "tx"
+   :seon.store.wire/db-name db-name
+   :seon.store.wire/basis-t basis-t
+   :seon.store.wire/basis-t-before basis-t-before
+   :seon.store.wire/tx-data
+   [[basis-t :seon.store.wire-test/value basis-t basis-t true]]})
+
+(defn- replay-page
+  [db-name since-t through-t continuation-t done? events]
+  {:seon.store.wire/ok true
+   :seon.store.wire/db-name db-name
+   :seon.store.wire/since-t since-t
+   :seon.store.wire/through-t through-t
+   :seon.store.wire/continuation-t continuation-t
+   :seon.store.wire/done? done?
+   :seon.store.wire/events events
+   :seon.store.wire/replayed (count events)})
 
 (deftest ping-retries-through-transient-failure
   ;; First two rpcs fail (socket not accepting yet — the start-all
@@ -206,6 +246,183 @@
           (reset! store.wire/!transactions saved-transactions)
           (done))
         25))))
+
+(deftest connect-feed!-walks-pages-then-dedups-the-buffered-live-overlap
+  (async done
+    (let [db-name       store.wire/cluster-name
+          !requests     (atom [])
+          !callbacks    (atom nil)
+          !destroyed?   (atom false)
+          !deliveries   (atom 0)
+          listeners     (atom {:listener (fn [_] (swap! !deliveries inc))})
+          conn          (fake-conn 104 listeners)
+          socket        #js {:destroy (fn [] (reset! !destroyed? true))}
+          connect-stub  (fn [_ {:keys [on-event] :as callbacks}]
+                          (reset! !callbacks callbacks)
+                          (is (fn? on-event))
+                          (js/Promise.resolve socket))
+          replay-stub   (fn [_ opts]
+                          (swap! !requests conj opts)
+                          (case (count @!requests)
+                            1 (do
+                                ;; These frames arrive while both replay pages
+                                ;; are in flight. They overlap page two and must
+                                ;; be discarded by the monotonic watermark.
+                                ((:on-event @!callbacks)
+                                 (replay-event db-name 103 102))
+                                ((:on-event @!callbacks)
+                                 (replay-event db-name 104 103))
+                                (js/Promise.resolve
+                                 (replay-page
+                                  db-name 100 104 102 false
+                                  [(replay-event db-name 101 100)
+                                   (replay-event db-name 102 101)])))
+                            2 (js/Promise.resolve
+                               (replay-page
+                                db-name 102 104 104 true
+                                [(replay-event db-name 103 102)
+                                 (replay-event db-name 104 103)]))))]
+      (-> (with-wire-state
+           {:started? true :last-db {:max-tx 100} :last-applied-t 100}
+           (fn []
+             (with-feed-stubs
+              connect-stub replay-stub
+              (fn []
+                (-> (#'store.wire/connect-feed!
+                     conn "req.sock" "pub.sock" (fn [_] nil))
+                    (.then
+                     (fn [result]
+                       (is (= 4 (::store.wire/replayed result)))
+                       (is (= db-name (::store.wire/db-name result)))
+                       (is (= [{:since-t 100 :db-name db-name}
+                               {:since-t 102 :through-t 104 :db-name db-name}]
+                              (mapv #(select-keys % [:since-t :through-t :db-name])
+                                    @!requests))
+                           "only continuations carry the fixed upper watermark")
+                       (is (= 104 (:last-applied-t
+                                   @(deref #'store.wire/!adapter)))
+                           "every replay page advanced the durable reconnect cursor")
+                       (is (false? @!destroyed?))
+                       (-> (after-macrotask)
+                           (.then
+                            (fn []
+                              (is (= 4 @!deliveries)
+                                  "four replay txs fired once; buffered duplicates did not")))))))))))
+          (.catch (fn [error]
+                    (is false (str "paginated feed test threw: " error))))
+          (.finally done)))))
+
+(deftest connect-feed!-rejects-a-non-final-empty-page-without-advancing
+  (async done
+    (let [db-name      store.wire/cluster-name
+          !destroyed?  (atom false)
+          !calls       (atom 0)
+          conn         (fake-conn 102)
+          socket       #js {:destroy (fn [] (reset! !destroyed? true))}
+          connect-stub (fn [_ _] (js/Promise.resolve socket))
+          replay-stub  (fn [_ _]
+                         (swap! !calls inc)
+                         (js/Promise.resolve
+                          (replay-page db-name 100 102 100 false [])))]
+      (-> (with-wire-state
+           {:started? true :last-db {:max-tx 100} :last-applied-t 100}
+           (fn []
+             (with-feed-stubs
+              connect-stub replay-stub
+              (fn []
+                (-> (#'store.wire/connect-feed!
+                     conn "req.sock" "pub.sock" (fn [_] nil))
+                    (.then (fn [_]
+                             (is false "a no-progress page must not go live")))
+                    (.catch
+                     (fn [error]
+                       (is (= :core-bug (:seon.error/kind (ex-data error))))
+                       (is (= 1 @!calls) "the client cannot spin on an empty page")
+                       (is (= 100 (:last-applied-t
+                                   @(deref #'store.wire/!adapter)))
+                           "an invalid page never advances past unseen txs")
+                       (is (true? @!destroyed?)))))))))
+          (.catch (fn [error]
+                    (is false (str "empty-page safety test threw: " error))))
+          (.finally done)))))
+
+(deftest reconnect-during-replay-resumes-from-the-last-complete-page
+  (async done
+    (let [db-name       store.wire/cluster-name
+          !connects     (atom 0)
+          !replays      (atom 0)
+          !callbacks    (atom nil)
+          !drops        (atom [])
+          !deliveries   (atom 0)
+          listeners     (atom {:listener (fn [_] (swap! !deliveries inc))})
+          conn          (fake-conn 104 listeners)
+          connect-stub  (fn [_ callbacks]
+                          (swap! !connects inc)
+                          (reset! !callbacks callbacks)
+                          (js/Promise.resolve #js {:destroy (fn [] nil)}))
+          replay-stub   (fn [_ opts]
+                          (case (swap! !replays inc)
+                            1 (do
+                                (is (= 100 (:since-t opts)))
+                                (js/Promise.resolve
+                                 (replay-page
+                                  db-name 100 104 102 false
+                                  [(replay-event db-name 101 100)
+                                   (replay-event db-name 102 101)])))
+                            2 (do
+                                (is (= 102 (:since-t opts)))
+                                (is (= 104 (:through-t opts)))
+                                ((:on-close @!callbacks) "drop during replay")
+                                (js/Promise.resolve
+                                 (replay-page
+                                  db-name 102 104 104 true
+                                  [(replay-event db-name 103 102)
+                                   (replay-event db-name 104 103)])))
+                            3 (do
+                                (is (= 102 (:since-t opts))
+                                    "the new connection resumes after the applied page")
+                                (is (not (contains? opts :through-t))
+                                    "a reconnect captures a fresh upper watermark")
+                                (js/Promise.resolve
+                                 (replay-page
+                                  db-name 102 104 104 true
+                                  [(replay-event db-name 103 102)
+                                   (replay-event db-name 104 103)])))))]
+      (-> (with-wire-state
+           {:started? true :last-db {:max-tx 100} :last-applied-t 100}
+           (fn []
+             (with-feed-stubs
+              connect-stub replay-stub
+              (fn []
+                (-> (#'store.wire/connect-feed!
+                     conn "req.sock" "pub.sock" #(swap! !drops conj %))
+                    (.then (fn [_]
+                             (is false "the dropped replay must not go live")))
+                    (.catch
+                     (fn [error]
+                       (is (= "drop during replay"
+                              (::store.wire/drop-reason (ex-data error))))
+                       (is (= 102 (:last-applied-t
+                                   @(deref #'store.wire/!adapter)))
+                           "only the fully applied page advances the watermark")
+                       (#'store.wire/connect-feed!
+                        conn "req.sock" "pub.sock" #(swap! !drops conj %))))
+                    (.then
+                     (fn [result]
+                       (is (= 2 (::store.wire/replayed result)))
+                       (is (= 2 @!connects))
+                       (is (empty? @!drops)
+                           "a pre-live drop rejects the attempt; only a live feed calls on-drop")
+                       (is (= 104 (:last-applied-t
+                                   @(deref #'store.wire/!adapter))))
+                       (-> (after-macrotask)
+                           (.then
+                            (fn []
+                              (is (= 4 @!deliveries)
+                                  "each transaction was delivered once across attempts")))))))))))
+          (.catch (fn [error]
+                    (is false (str "mid-replay reconnect test threw: " error))))
+          (.finally done)))))
 
 ;; ── Durable transaction ids + reply/feed ordering ─────────────────────────
 

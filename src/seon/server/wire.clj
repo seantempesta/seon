@@ -16,6 +16,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [datahike.api :as d]
+            [datahike.constants :as datahike.constants]
             [hasch.core :as hasch]
             [konserve-jdbc.core]
             [seon.db.id :as id]
@@ -445,100 +446,191 @@
            :seon.store.wire/tx-meta tx-meta}
     wire-id (assoc :seon.store.wire/id wire-id)))
 
-;; ---------- since-t replay (the DE-2 lossless-wake fix) ----------
+;; ---------- paginated since-t replay (the DE-2 lossless-wake fix) ----------
 ;;
 ;; The tx FEED is a push over the pub socket: a dropped/missed event is
 ;; harmless for RENDERING (the subscriber re-reads latest) but FATAL for the
 ;; WAKE edge (the event IS the trigger to act — drop it and an idle agent sits
 ;; with unread mail). Live frames in a disconnect gap are simply never
-;; delivered. `replay-tx-events` makes the wake edge lossless: a
-;; reconnecting subscriber passes its last-applied basis-t as `since-t`, and the
-;; writer replays every tx committed after it — reconstructed from the
-;; bitemporal tx-log — shaped EXACTLY like a live `tx` event. Per-subscriber by
-;; construction: it is a pure function of (conn, db-name, since-t), so any
-;; number of independent feed processes (loop, canvas, debug, chat) each
-;; recover their OWN gap. No pod-singleton assumption.
+;; delivered. `replay-tx-page` makes the wake edge lossless without building
+;; one unbounded reply: the first request captures a fixed upper watermark,
+;; subsequent requests retain it, and each page advances an explicit cursor.
+;; A reconnecting subscriber keeps its pub socket open and buffers live frames
+;; until the final page; replay/live overlap is removed by its monotonic
+;; basis-t watermark. Per-subscriber by construction — no pod singleton.
 
-(def ^:private max-replay-txs
-  "Upper bound on how many missed txs one `replay-tx` reply materializes. A
-   reconnect gap is normally a few txs; this caps a pathological gap (a
-   subscriber gone a very long time) so one replay can't build an unbounded
-   event list. On overflow only the most RECENT `max-replay-txs` are replayed
-   and the dropped older range is logged LOUDLY — a dropped wake IS a
-   correctness hazard, so it is surfaced, never silent."
-  50000)
+(def ^:private replay-page-size
+  "Maximum committed transactions materialized in one replay reply. Pagination
+   makes the total gap unbounded while each history reconstruction and Transit
+   frame stays bounded."
+  256)
 
-(defn replay-tx-events
-  "Replay committed tx events for `conn` whose basis-t is strictly greater than
-   `since-t`, up to the conn's current basis-t, in ascending commit order. Each
-   event is shaped EXACTLY like the live `::raw-broadcast` `tx` event
-   (`ok-event-from-report`/`datom->wire`) so a reconnecting subscriber applies
-   replayed and live events through ONE code path: `:seon.store.wire/event
-   \"tx\"`, native 5-vector `tx-data`, `tx-meta`/wire id recovered from the
-   committing tx entity.
+(defn- replay-protocol-error
+  [message data]
+  (throw (ex-info message (assoc data :seon.store.wire/error-kind "protocol"))))
 
-   Source: the bitemporal tx-log via `(d/since (d/history db) since-t)`. Datoms
-   (assertions AND retractions) are grouped by their committing tx — retraction
-   datoms carry a NEGATIVE tx, so we group by its absolute value but keep the
-   signed tx verbatim in the wire vector (byte-identical to a live retraction).
-   The committing tx's own datoms (`:db/txInstant` + any seon tx-meta attrs such
-   as `:seon.store.wire/id` and provenance) carry the tx-meta. NB: a
-   card-one upsert's IMPLICIT old-value retraction shows up here (history is
-   complete) even when the live `d/transact` report omitted it — replay is a
-   superset, never a subset, of what landed; the extra retraction datom is
-   `:added false` so it never falsely fires a wake.
+(defn- tx-id
+  "Return a history datom's committing transaction id.
 
-   `db-name` tags each event for the subscriber's broadcast routing. Returns a
-   vector of events (empty when nothing to replay). Bounded by `max-replay-txs`
-   (keep newest + loud-log the dropped older range on overflow)."
-  [conn db-name since-t]
+   Datahike encodes a retraction's tx as negative; the basis-t identity is its
+   absolute value while the signed value remains unchanged in the wire datom."
+  [^datahike.datom.Datom datom]
+  (Math/abs (long (.-tx datom))))
+
+(defn- page-tx-ids
+  "Read at most `page-size + 1` transaction ids in `(since-t, through-t]`.
+
+   Datahike allocates every successful transaction as `(inc :max-tx)`; a failed
+   transaction does not advance the head. The reachable branch is therefore a
+   contiguous basis-t range after the `tx0` bootstrap sentinel. Deriving the
+   page from that fact is both O(page-size) and independent of mutable prior
+   transaction metadata. If a later edit makes a transaction unreconstructable
+   (for example, retracting its no-history `:db/txInstant`), replay fails at that
+   basis-t instead of silently omitting it and advancing. The extra id
+   establishes whether another page exists."
+  [since-t through-t page-size]
+  (->> (range (max (inc since-t) (inc datahike.constants/tx0))
+              (inc through-t))
+       (take (inc page-size))
+       vec))
+
+(defn- history-by-tx
+  "Reconstruct only `selected-tx-ids` from immutable transaction history."
+  [db since-t selected-tx-ids]
+  (let [selected (set selected-tx-ids)]
+    (reduce
+     (fn [by-tx ^datahike.datom.Datom datom]
+       (let [basis-t (tx-id datom)]
+         (if (contains? selected basis-t)
+           (update by-tx basis-t (fnil conj []) datom)
+           by-tx)))
+     {}
+     (-> db d/history (d/since since-t) (d/datoms :eavt)))))
+
+(defn- replay-events
+  "Build ascending live-shaped events for one selected transaction page."
+  [db db-name since-t selected-tx-ids]
+  (let [by-tx (history-by-tx db since-t selected-tx-ids)]
+    (::events
+     (reduce
+      (fn [{events ::events previous-basis-t ::previous-basis-t} basis-t]
+        (let [datoms    (get by-tx basis-t)
+              _         (when (empty? datoms)
+                          (replay-protocol-error
+                           "replay-tx could not reconstruct a selected transaction"
+                           {:seon.store.wire/basis-t basis-t}))
+              tx-meta   (into {}
+                              (map (fn [^datahike.datom.Datom datom]
+                                     [(.-a datom) (.-v datom)]))
+                              (filter (fn [^datahike.datom.Datom datom]
+                                        (= (long (.-e datom)) basis-t))
+                                      datoms))
+              event     (ok-event-from-report
+                         db-name
+                         {::wire-data (tx-data->wire datoms)
+                          ::added (count (filter :added datoms))
+                          ::retracted (count (remove :added datoms))
+                          ::basis-t basis-t
+                          ::basis-t-before previous-basis-t
+                          ::tx-meta (not-empty tx-meta)
+                          ::wire-id (:seon.store.wire/id tx-meta)})]
+          {::events (conj events event)
+           ::previous-basis-t basis-t}))
+      {::events [] ::previous-basis-t since-t}
+      selected-tx-ids))))
+
+(defn- replay-tx-page*
+  "Return one bounded, lossless page of committed tx events.
+
+   `since-t` is the exclusive cursor. On the first request `through-t` is nil,
+   so this function captures the connection's current basis-t. Every following
+   request MUST send that returned `:seon.store.wire/through-t`; concurrent
+   commits are then outside this replay and remain buffered on the live socket.
+
+   The response contains ascending live-shaped `:seon.store.wire/events`, the
+   fixed upper watermark, an explicit `:seon.store.wire/continuation-t`, and
+   `:seon.store.wire/done?`. A non-final page continues from its last event; a
+   final page continues at the fixed upper watermark. Repeating the same
+   `(since-t, through-t)` request is deterministic. No range is truncated.
+
+   History reconstruction preserves assertions, retractions (including their
+   negative tx value), transaction metadata, and the durable wire id."
+  [conn db-name since-t through-t page-size]
+  (when-not (and (integer? since-t) (<= 0 since-t))
+    (replay-protocol-error
+     "replay-tx since-t must be a non-negative integer"
+     {:seon.store.wire/since-t since-t}))
+  (when-not (and (integer? page-size) (pos? page-size))
+    (replay-protocol-error
+     "replay-tx page-size must be a positive integer"
+     {:seon.store.wire/page-size page-size}))
   (let [db        (d/db conn)
         current-t (long (or (basis-t-of db) 0))
-        since-t   (long since-t)]
-    (if (>= since-t current-t)
-      []
-      (let [datoms (-> db d/history (d/since since-t) (d/datoms :eavt))
-            txid   (fn [^datahike.datom.Datom d] (Math/abs (long (.-tx d))))
-            by-tx  (->> datoms
-                        (filter (fn [d] (let [t (txid d)]
-                                          (and (> t since-t) (<= t current-t)))))
-                        (group-by txid))
-            tx-ids (sort (keys by-tx))
-            n      (count tx-ids)
-            ;; cap: keep the most recent max-replay-txs; LOUD-log the dropped
-            ;; older range (a dropped wake is a correctness hazard — surface it).
-            kept   (if (> n max-replay-txs)
-                     (let [drop-n  (- n max-replay-txs)
-                           dropped (take drop-n tx-ids)]
-                       (binding [*out* *err*]
-                         (println (str "[wire replay] db-name=" db-name " since-t="
-                                       since-t " gap of " n " txs exceeds max-replay-txs="
-                                       max-replay-txs " — DROPPING the oldest " drop-n
-                                       " (basis-t " (first dropped) ".." (last dropped)
-                                       "); subscriber will only see basis-t > "
-                                       (last dropped) ". A dropped wake is a correctness hazard.")))
-                       (drop drop-n tx-ids))
-                     tx-ids)]
-        (::events
-         (reduce
-          (fn [{events ::events prev-bt ::previous-basis-t} tx-id]
-            (let [ds        (get by-tx tx-id)
-                  tx-meta   (into {} (map (fn [^datahike.datom.Datom d] [(.-a d) (.-v d)]))
-                                  (filter (fn [^datahike.datom.Datom d] (= (.-e d) tx-id)) ds))
-                  added     (count (filter :added ds))
-                  retracted (count (remove :added ds))
-                  ev (ok-event-from-report
-                      db-name
-                      {::wire-data (tx-data->wire ds)
-                       ::added added
-                       ::retracted retracted
-                       ::basis-t tx-id
-                       ::basis-t-before prev-bt
-                       ::tx-meta (not-empty tx-meta)
-                       ::wire-id (:seon.store.wire/id tx-meta)})]
-              {::events (conj events ev) ::previous-basis-t tx-id}))
-          {::events [] ::previous-basis-t since-t}
-          kept))))))
+        since-t   (long since-t)
+        through-t (if (some? through-t)
+                    (do
+                      (when-not (and (integer? through-t) (<= 0 through-t))
+                        (replay-protocol-error
+                         "replay-tx through-t must be a non-negative integer"
+                         {:seon.store.wire/through-t through-t}))
+                      (long through-t))
+                    current-t)]
+    (when (> through-t current-t)
+      (replay-protocol-error
+       "replay-tx through-t is ahead of the writer"
+       {:seon.store.wire/through-t through-t
+        :seon.store.wire/current-t current-t}))
+    (when (> since-t through-t)
+      (replay-protocol-error
+       "replay-tx since-t is ahead of through-t"
+       {:seon.store.wire/since-t since-t
+        :seon.store.wire/through-t through-t}))
+    (if (= since-t through-t)
+      {:seon.store.wire/since-t since-t
+       :seon.store.wire/through-t through-t
+       :seon.store.wire/continuation-t through-t
+       :seon.store.wire/done? true
+       :seon.store.wire/events []
+       :seon.store.wire/replayed 0}
+      (let [candidate-tx-ids (page-tx-ids since-t through-t page-size)
+            selected-tx-ids  (vec (take page-size candidate-tx-ids))
+            more?            (> (count candidate-tx-ids) page-size)]
+        (when (empty? selected-tx-ids)
+          (replay-protocol-error
+           "replay-tx found no transaction before its upper watermark"
+           {:seon.store.wire/since-t since-t
+            :seon.store.wire/through-t through-t}))
+        (let [events       (replay-events db db-name since-t selected-tx-ids)
+              continuation (if more? (peek selected-tx-ids) through-t)]
+          {:seon.store.wire/since-t since-t
+           :seon.store.wire/through-t through-t
+           :seon.store.wire/continuation-t continuation
+           :seon.store.wire/done? (not more?)
+           :seon.store.wire/events events
+           :seon.store.wire/replayed (count events)})))))
+
+(defn replay-tx-page
+  "Return the next production-sized replay page.
+
+   `since-t` is exclusive. A nil `through-t` captures the current writer head;
+   subsequent calls retain the returned upper watermark. See the response's
+   fully namespaced continuation, done, and event facts."
+  {:malli/schema
+   [:=>
+    [:catn
+     [:conn :any]
+     [:db-name :string]
+     [:since-t :int]
+     [:through-t [:or :nil :int]]]
+    [:map
+     [:seon.store.wire/since-t :int]
+     [:seon.store.wire/through-t :int]
+     [:seon.store.wire/continuation-t :int]
+     [:seon.store.wire/done? :boolean]
+     [:seon.store.wire/events [:vector :map]]
+     [:seon.store.wire/replayed :int]]]}
+  [conn db-name since-t through-t]
+  (replay-tx-page* conn db-name since-t through-t replay-page-size))
 
 ;; ---------- ::raw-broadcast listener (the P1 hook) ----------
 ;;

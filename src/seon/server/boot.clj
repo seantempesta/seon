@@ -85,24 +85,28 @@
       :else (wire/ambient-db-name))))
 
 (defmethod wire/handle-op "replay-tx" [conn req]
-  ;; DE-2 lossless wake: return the missed txs DIRECTLY in the reply. The
-  ;; pod's pub-socket feed calls this on every (re)connect with its
-  ;; last-applied basis-t watermark; the reply's events are applied ahead of
-  ;; buffered live pub frames (overlap deduped by the subscriber's watermark).
-  ;; Also carries the resolved db-name — the pub socket is db-agnostic (every
-  ;; subscriber gets every tagged event), so the client filters by this value.
-  (let [since-t (:seon.store.wire/since-t req)]
+  ;; DE-2 lossless wake: return ONE bounded page of missed txs directly in the
+  ;; reply. The first page captures `through-t`; every continuation retains it,
+  ;; so commits racing the replay remain on the already-open buffered pub
+  ;; socket. Explicit continuation/done facts prevent both truncation and an
+  ;; accidental empty-page loop. The resolved db-name remains the pub demux key.
+  (let [since-t   (:seon.store.wire/since-t req)
+        through-t (:seon.store.wire/through-t req)]
     (if-not (some? since-t)
       {:seon.store.wire/ok false
        :seon.store.wire/error "replay-tx requires :seon.store.wire/since-t"
        :seon.store.wire/error-kind "protocol"}
-      (let [db-name (db-name-for-req req)
-            events  (wire/replay-tx-events conn db-name (long since-t))]
-        {:seon.store.wire/ok       true
-         :seon.store.wire/db-name  db-name
-         :seon.store.wire/since-t  since-t
-         :seon.store.wire/events   events
-         :seon.store.wire/replayed (count events)}))))
+      (try
+        (let [db-name (db-name-for-req req)
+              page    (wire/replay-tx-page conn db-name since-t through-t)]
+          (assoc page
+                 :seon.store.wire/ok true
+                 :seon.store.wire/db-name db-name))
+        (catch clojure.lang.ExceptionInfo error
+          {:seon.store.wire/ok false
+           :seon.store.wire/error (.getMessage error)
+           :seon.store.wire/error-kind
+           (or (:seon.store.wire/error-kind (ex-data error)) "protocol")})))))
 
 ;; ---------------------------------------------------------------------------
 ;; Query subscriptions (the reactive engine) — register/unregister + the

@@ -105,8 +105,8 @@
   5000)
 
 (def replay-timeout-ms
-  "Default `replay-tx` reply budget — a large since-t gap makes the reply
-   big, so [[replay-tx]] also accepts a per-call override via opts."
+  "Default budget for one bounded `replay-tx` page. [[replay-tx]] also accepts
+   a per-call override via opts."
   30000)
 
 (def ping-attempts
@@ -355,18 +355,20 @@
 ;; ---------- tx-feed gap recovery (replay-tx) ----------
 
 (defn replay-tx
-  "Fetch every committed tx event with basis-t > `:since-t` DIRECTLY in one
-   reply. The reply carries `:seon.store.wire/events` (live-shaped `tx`
-   events, ascending commit order), `:seon.store.wire/db-name` (the resolved
-   cluster the caller should filter pub frames by), and
-   `:seon.store.wire/replayed`. Used by the pub-socket feed on every
-   (re)connect (DE-2 lossless wake). `:since-t` is REQUIRED. A large gap can
-   make the reply big, so the timeout accepts an override via `opts`."
+  "Fetch one bounded page of committed tx events after `:since-t`.
+
+   The first request omits `:through-t` and captures the writer's upper
+   watermark. Continuations send the returned upper watermark unchanged. The
+   reply carries ascending live-shaped events plus explicit `continuation-t`
+   and `done?` facts. Used by the pub-socket feed on every (re)connect; callers
+   keep the pub socket open while walking pages. `:since-t` is required."
   ([opts] (replay-tx default-req-sock opts))
-  ([sock {:keys [since-t timeout-ms] :as opts}]
+  ([sock {:keys [since-t through-t timeout-ms] :as opts}]
    (rpc sock
-        (routed {:seon.store.wire/op "replay-tx"
-                 :seon.store.wire/since-t since-t}
+        (routed (cond-> {:seon.store.wire/op "replay-tx"
+                         :seon.store.wire/since-t since-t}
+                  (some? through-t)
+                  (assoc :seon.store.wire/through-t through-t))
                 opts)
         {:timeout-ms (or timeout-ms replay-timeout-ms)})))
 

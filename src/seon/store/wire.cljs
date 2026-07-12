@@ -615,45 +615,190 @@
              (= db-name (:seon.store.wire/db-name ev)))
     (handle-feed-event! conn ev)))
 
+(defn- replay-page-error
+  [message data]
+  (throw (ex-info (str "seon.store.wire: invalid replay page — " message)
+                  (assoc data :seon.error/kind :core-bug))))
+
+(defn- validated-replay-page
+  "Validate one replay page before its cursor is allowed to advance.
+
+   A malformed, stale, repeated-without-progress, or prematurely empty page is
+   a reconnectable feed failure, never permission to skip a range. The first
+   page establishes db-name and through-t; later pages must retain both."
+  [cursor expected-through expected-db-name response]
+  (when-not (:seon.store.wire/ok response)
+    (replay-page-error "writer returned not-ok"
+                       {::response response ::cursor cursor}))
+  (let [response-since (:seon.store.wire/since-t response)
+        through       (:seon.store.wire/through-t response)
+        continuation  (:seon.store.wire/continuation-t response)
+        done?         (:seon.store.wire/done? response)
+        db-name       (:seon.store.wire/db-name response)
+        events        (:seon.store.wire/events response)
+        replayed      (:seon.store.wire/replayed response)
+        basis-ts      (mapv :seon.store.wire/basis-t events)
+        before-ts     (mapv :seon.store.wire/basis-t-before events)
+        expected-before-ts (if (seq basis-ts)
+                             (vec (cons cursor (butlast basis-ts)))
+                             [])]
+    (when-not (= cursor response-since)
+      (replay-page-error "response since-t does not match the requested cursor"
+                         {::cursor cursor ::response response}))
+    (when-not (and (integer? through) (<= cursor through))
+      (replay-page-error "through-t is not an integer at or above the cursor"
+                         {::cursor cursor ::response response}))
+    (when (and (some? expected-through) (not= expected-through through))
+      (replay-page-error "through-t changed between pages"
+                         {::expected-through expected-through
+                          ::response response}))
+    (when-not (and (string? db-name) (not (str/blank? db-name)))
+      (replay-page-error "db-name is missing"
+                         {::response response}))
+    (when (and (some? expected-db-name) (not= expected-db-name db-name))
+      (replay-page-error "db-name changed between pages"
+                         {::expected-db-name expected-db-name
+                          ::response response}))
+    (when-not (vector? events)
+      (replay-page-error "events is not a vector"
+                         {::response response}))
+    (when-not (and (integer? replayed) (= replayed (count events)))
+      (replay-page-error "replayed does not match the event count"
+                         {::response response}))
+    (when-not (boolean? done?)
+      (replay-page-error "done? is not boolean"
+                         {::response response}))
+    (when-not (and (integer? continuation)
+                   (<= cursor continuation through))
+      (replay-page-error "continuation-t is outside the page bounds"
+                         {::cursor cursor ::response response}))
+    (when-not (every? (fn [basis-t]
+                        (and (integer? basis-t)
+                             (< cursor basis-t)
+                             (<= basis-t through)))
+                      basis-ts)
+      (replay-page-error "an event basis-t is stale or outside the watermark"
+                         {::cursor cursor ::response response}))
+    (when-not (apply < cursor basis-ts)
+      (replay-page-error "event basis-ts are not strictly ascending"
+                         {::cursor cursor ::response response}))
+    (when-not (= expected-before-ts before-ts)
+      (replay-page-error "basis-t-before does not form one cursor chain"
+                         {::cursor cursor ::response response}))
+    (when-not (every? (fn [event]
+                        (and (= "tx" (:seon.store.wire/event event))
+                             (= db-name (:seon.store.wire/db-name event))))
+                      events)
+      (replay-page-error "an event is not a tx for the resolved database"
+                         {::response response}))
+    (if done?
+      (do
+        (when-not (= through continuation)
+          (replay-page-error "a final page does not continue at through-t"
+                             {::response response}))
+        (when (and (< cursor through)
+                   (or (empty? basis-ts) (not= through (peek basis-ts))))
+          (replay-page-error "a final page omitted the upper watermark"
+                             {::cursor cursor ::response response})))
+      (when (or (empty? basis-ts)
+                (not= continuation (peek basis-ts))
+                (<= continuation cursor))
+        (replay-page-error "a continuation page made no progress"
+                           {::cursor cursor ::response response})))
+    {::db-name db-name
+     ::through-t through
+     ::continuation-t continuation
+     ::done? done?
+     ::events events
+     ::replayed replayed}))
+
+(defn- throw-if-feed-dropped!
+  [drop-reason]
+  (when-let [reason @drop-reason]
+    (throw (ex-info "seon.store.wire: pub socket dropped during replay"
+                    {::drop-reason reason}))))
+
 (defn ^:async ^:private connect-feed!
-  ;; One pub-socket feed connection: connect, replay the watermark gap over
-  ;; the req socket, drain live frames buffered during the replay, go live.
-  ;; Resolves to {::db-name ::replayed}; throws on connect/replay failure
-  ;; (the caller owns retry). `on-drop` fires ONCE if the connection dies.
+  ;; One pub-socket feed connection: connect, walk bounded replay pages under
+  ;; one fixed upper watermark, drain live frames buffered throughout, go live.
+  ;; Resolves to {::db-name ::replayed}; throws on connect/replay failure (the
+  ;; caller owns retry). Once live, `on-drop` fires ONCE if the connection dies;
+  ;; a drop during replay rejects this connect attempt directly.
   [conn sock-path pub-sock-path on-drop]
-  (let [!buffer  (atom [])
-        !live?   (atom false)
-        !db-name (atom nil)
-        sock     (await (wire/connect-pub
-                         pub-sock-path
-                         {:on-event (fn [ev]
-                                      (if @!live?
-                                        (feed-event-dispatch! conn @!db-name ev)
-                                        (swap! !buffer conj ev)))
-                          :on-close on-drop}))
-        ;; Replay every tx after the watermark: on a fresh boot that covers
-        ;; anything committed since the local snapshot read; on a reconnect,
-        ;; the gap (DE-2). Frames arriving DURING the replay rpc buffer above;
-        ;; the replay↔buffer overlap dedupes on the basis-t watermark.
-        since-t  (:last-applied-t @!adapter)
-        resp     (await (wire/replay-tx sock-path {:since-t since-t
-                                                   :db-name cluster-name}))]
-    (when-not (:seon.store.wire/ok resp)
-      (try (.destroy ^js sock) (catch :default _))
-      (throw (ex-info "seon.store.wire: replay-tx failed" {::resp resp})))
-    (reset! !db-name (:seon.store.wire/db-name resp))
-    (doseq [ev (:seon.store.wire/events resp)]
-      (feed-event-dispatch! conn @!db-name ev))
-    ;; Go live, then drain — one synchronous block (no await between), so no
-    ;; frame can slip between the flip and the drain or be applied twice
-    ;; (watermark idempotency covers the replay↔buffer overlap).
-    (let [buffered @!buffer]
-      (reset! !live? true)
-      (reset! !buffer [])
-      (doseq [ev buffered]
-        (feed-event-dispatch! conn @!db-name ev)))
-    {::db-name  @!db-name
-     ::replayed (:seon.store.wire/replayed resp)}))
+  (let [!buffer      (atom [])
+        !live?       (atom false)
+        !db-name     (atom nil)
+        !drop-reason (atom nil)
+        !closing?    (atom false)
+        !reject-drop (atom nil)
+        drop-promise (js/Promise.
+                      (fn [_resolve reject]
+                        (reset! !reject-drop reject)))
+        sock          (await
+                       (wire/connect-pub
+                        pub-sock-path
+                        {:on-event (fn [event]
+                                     (if @!live?
+                                       (feed-event-dispatch! conn @!db-name event)
+                                       (swap! !buffer conj event)))
+                         :on-close (fn [reason]
+                                     (reset! !drop-reason reason)
+                                     (cond
+                                       @!live?
+                                       (when on-drop (on-drop reason))
+
+                                       (not @!closing?)
+                                       (@!reject-drop
+                                        (ex-info
+                                         "seon.store.wire: pub socket dropped during replay"
+                                         {::drop-reason reason}))))}))]
+    (try
+      ;; Replay every tx after the watermark. Pages are applied as they arrive,
+      ;; so a failed later page reconnects from the advanced adapter watermark.
+      ;; The pub socket remains open and buffers frames for the entire walk.
+      (let [initial-cursor (or (:last-applied-t @!adapter) 0)
+            replay-result
+            (loop [cursor initial-cursor
+                   through nil
+                   db-name nil
+                   replayed 0]
+              (throw-if-feed-dropped! !drop-reason)
+              (let [response (await
+                              (js/Promise.race
+                               #js [(wire/replay-tx
+                                     sock-path
+                                     (cond-> {:since-t cursor
+                                              :db-name cluster-name}
+                                       (some? through)
+                                       (assoc :through-t through)))
+                                    drop-promise]))
+                    _        (throw-if-feed-dropped! !drop-reason)
+                    page     (validated-replay-page cursor through db-name response)
+                    next-db  (::db-name page)
+                    total    (+ replayed (::replayed page))]
+                (reset! !db-name next-db)
+                (doseq [event (::events page)]
+                  (feed-event-dispatch! conn next-db event))
+                (if (::done? page)
+                  {::db-name next-db ::replayed total}
+                  (recur (::continuation-t page)
+                         (::through-t page)
+                         next-db
+                         total))))]
+        (throw-if-feed-dropped! !drop-reason)
+        ;; Go live, then drain — one synchronous block (no await between), so
+        ;; no frame can slip between the flip and drain or be applied twice.
+        ;; Watermark idempotency removes replay/buffer overlap.
+        (let [buffered @!buffer]
+          (reset! !live? true)
+          (reset! !buffer [])
+          (doseq [event buffered]
+            (feed-event-dispatch! conn @!db-name event)))
+        replay-result)
+      (catch :default error
+        (reset! !closing? true)
+        (try (.destroy ^js sock) (catch :default _))
+        (throw error)))))
 
 (defn- schedule-reconnect!
   ;; Consume feed generation `gen` and schedule ONE reconnect after
