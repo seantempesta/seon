@@ -19,6 +19,14 @@
     [seon.ui.header :as header]))
 
 (schema/register! ::changed-attrs [:set :qualified-keyword])
+(schema/register! ::surface-attrs [:set :qualified-keyword])
+(schema/register! ::structural-attrs [:set :qualified-keyword])
+(schema/register! ::header-attrs [:set :qualified-keyword])
+(schema/register! ::dependencies
+  [:map
+   [::surface-attrs ::surface-attrs]
+   [::structural-attrs ::structural-attrs]
+   [::header-attrs ::header-attrs]])
 
 (declare agent-view)
 
@@ -224,6 +232,50 @@
     :seon.ns/source
     :seon.ns/require-edges})
 
+(def ^:private header-attrs
+  "Stored inputs that materially change the fleet status header.
+
+   The datom inventory is intentionally sampled on these meaningful changes,
+   not on every program-graph bookkeeping transaction."
+  #{:seon.agent/id
+    :seon.agent.run/agent
+    :seon.agent.run/closed-at
+    :seon.agent.run/closed-reason
+    :seon.agent.run/paused-at
+    :seon.agent.run/resumed-at
+    :seon.agent.turn/at
+    :seon.agent.turn/status
+    :seon.agent.turn/llm-usage
+    :seon.eval/id
+    :seon.eval/ok?})
+
+(defn agent-view-dependencies
+  "Cached-gradient dependency projection for one live agent feed.
+
+   Values come from the same database-owned context root and analyzer-produced
+   renderer read-sets as rendering. The feed refreshes this projection after a
+   structural change; ordinary transactions can then be classified without
+   rendering or rebuilding the context graph."
+  {:malli/schema [:=> [:catn [:seon.db/db :seon.db/db-val]
+                             [:seon.agent/id :string]]
+                  ::dependencies]}
+  [dbv agent-id]
+  (let [root (agent-ctx/context-root
+               {:seon.db/db dbv :seon.agent/id agent-id})
+        context-attrs
+        (into #{}
+              (comp
+                (filter #(contains? % :seon.render/html))
+                (map #(or (::render-fns/fn-sym %)
+                          (:seon.render/html %)))
+                (mapcat #(renderer-attrs dbv %)))
+              (:seon.agent.ctx/children root))
+        canvas-attrs (renderer-attrs dbv (canvas-renderer dbv agent-id))]
+    {::surface-attrs (into #{:seon.render.canvas/content}
+                           (concat context-attrs canvas-attrs))
+     ::structural-attrs structural-attrs
+     ::header-attrs header-attrs}))
+
 (defn- context-surface-specs
   "Unrendered HTML surface descriptors from the agent's context root."
   [dbv agent-id]
@@ -339,9 +391,10 @@
       ;; on the small, ID-addressed path.
       (if (some nil? affected)
         [(agent-view dbv agent-id)]
-        (into [(header/system-header dbv)
-               (focus-marker (:seon.ui.surface/selection latest)
-                             (:seon.ui.surface/focus-touch latest))]
+        (into (cond-> [(focus-marker (:seon.ui.surface/selection latest)
+                                      (:seon.ui.surface/focus-touch latest))]
+                (seq (set/intersection header-attrs changed-attrs))
+                (conj (header/system-header dbv)))
               (mapcat surface-elements)
               affected)))))
 

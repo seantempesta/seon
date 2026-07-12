@@ -37,6 +37,7 @@
    gzip stream + deregisters the connection."
   (:require
     ["node:zlib" :as zlib]
+    [clojure.set :as set]
     [clojure.string :as str]
     [seon.db :as db]
     [seon.derive :as derive]
@@ -669,13 +670,32 @@
                :seon.web.feed/render-change (constantly [])}))
           (open-feed!
             req res
-            {:seon.web.feed/key [:agent id]
-             :seon.web.feed/live? true
-             :seon.web.feed/render-full
-             #(agent-view/agent-view @db/*conn* id)
-             :seon.web.feed/render-change
-             (fn [{dbv :seon.db/db attrs :seon.db/changed-attrs}]
-               (agent-view/agent-view-changes dbv id attrs))})))
+            (let [!dependencies
+                  (atom (agent-view/agent-view-dependencies @db/*conn* id))]
+              {:seon.web.feed/key [:agent id]
+               :seon.web.feed/live? true
+               :seon.web.feed/render-full
+               #(agent-view/agent-view @db/*conn* id)
+               :seon.web.feed/render-change
+               (fn [{dbv :seon.db/db attrs :seon.db/changed-attrs}]
+                 (let [{surface :seon.ui.agent-view/surface-attrs
+                        structural :seon.ui.agent-view/structural-attrs
+                        header :seon.ui.agent-view/header-attrs}
+                       @!dependencies]
+                   (cond
+                     (seq (set/intersection attrs structural))
+                     (let [elements (agent-view/agent-view-changes dbv id attrs)]
+                       (reset! !dependencies
+                               (agent-view/agent-view-dependencies dbv id))
+                       elements)
+
+                     (seq (set/intersection attrs surface))
+                     (agent-view/agent-view-changes dbv id attrs)
+
+                     (seq (set/intersection attrs header))
+                     [(header/system-header dbv)]
+
+                     :else [])))}))))
       (do (.writeHead res 404 #js {"Content-Type" "text/plain; charset=utf-8"
                                    "Cache-Control" "no-store"})
           (.end res "unknown agent id")))))
