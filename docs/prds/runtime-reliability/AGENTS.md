@@ -157,6 +157,9 @@ target semantics and are not available until Phase 5 lands.
   Konserve branch, simulation, coordinate, and live-restore evidence.
 - [[research/incremental-instrumentation-2026-07-12]] — current global call
   sites, Malli ref/wrapper behavior, exact-data target, and acceptance matrix.
+- [[research/test-runtime-trim-design-2026-07-12]] — measured full-seed test
+  repetition, immutable-DB test seams, behavioral assertion policy, and the
+  ordered fast/runtime/process suite cutover.
 - [[docs/seon/architecture/agent-runtime]], [[docs/seon/architecture/data-model]],
   and [[docs/seon/architecture/ui]] — ideal system docs to keep current.
 - `src/seon/client.cljs`, `src/seon/state.cljs`, `src/seon/db.cljs`,

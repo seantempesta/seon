@@ -141,6 +141,15 @@ coverage passes 20 tests / 75 assertions with no synthetic core-fault or
 data-loss output; the result-var fixture now owns the CLJS root connection for
 its complete asynchronous span.
 
+The test-runtime trim design identifies 24 full cluster seeds in the gym driver
+namespace and two obsolete reconciler seeds. Gym alone accounts for roughly
+half the Node gate. The ordered correction extracts pure predicate/scorecard
+seams in the existing driver, uses immutable Datahike values for read-only
+behavior, retains fresh connections for transactional semantics, and moves only
+true system journeys to runtime/process acceptance. It explicitly preserves
+machine grammar while replacing presentation-text assertions with facts,
+relationships, bounds, and structured errors.
+
 - Capture cold boot, converged restart, five sequential mints, one concurrent
   mint attempt, core reload, and config apply timings.
 - Record transaction/broadcast counts for each transition.
