@@ -5,7 +5,7 @@
    `*print-fn*` / `*print-err-fn*` are process-global. The old eval-form-entry!
    capture did `(set! *print-fn* cap)` BEFORE the eval+auto-await and restored
    it AFTER — a `set!` straddling an `await`. When the captured form yielded
-   (any awaiting verb), a CONCURRENT eval ran with this eval's `cap` still
+   (any awaiting function), a CONCURRENT eval ran with this eval's `cap` still
    installed, so its prints bled into the wrong `:seon.eval/output` bucket.
 
    The fix routes capture through `seon.eval/print-als` (a Node

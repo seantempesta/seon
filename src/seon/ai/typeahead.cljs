@@ -10,7 +10,7 @@
    the worker (via the ONE wire path, [[seon.ai.diffusiongemma/complete]])
    with `{prompt: the rendered context, committed, draft, offers,
    policy, null_render}` — offers/policy derived from the SAME data the
-   rendered menu shows (`seon.agent.ctx.menu/verb-offers` + `/policy`),
+   rendered menu shows (`seon.agent.ctx.menu/function-offers` + `/policy`),
    so glyph N on the wire is glyph N in the prompt, and `null_render`
    ([[null-render]] — the prompt minus its transcript event log) is the
    null-intent baseline the worker calibrates glyph posteriors against
@@ -217,7 +217,7 @@
      `ns=>` cursor stay,
    - the intent-DERIVED section (`plan` — the plan tree the task
      spawned, which restates it) is dropped whole,
-   - every other section (the `recent-verbs` menu, ns cards,
+   - every other section (the `function-menu` menu, ns cards,
      orientation) rides verbatim, so the baseline sees the identical
      offer scaffolding minus the intent.
 
@@ -983,7 +983,7 @@
   (let [db         (some-> db/*conn* deref)
         agent-id   (db/current-agent-id)
         policy     (menu/policy db)
-        offers     (if (and db agent-id) (menu/verb-offers db agent-id) [])
+        offers     (if (and db agent-id) (menu/function-offers db agent-id) [])
         ;; The draft-head prefill affordance (W2): registry+program-graph
         ;; derived, computed ONCE per call (the projection can only change
         ;; after this call's forms eval). UNSCOPED templates ride EVERY

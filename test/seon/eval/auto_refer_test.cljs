@@ -12,7 +12,7 @@
    canonical aliases into its REAL `:require` clause (the ones the agent
    didn't already claim) so the new ns resolves `db/query` exactly as the
    home ns does — no magic injection. `seon.agent` and the lifecycle `:refer`
-   verbs stay home-only; the `my.*` toolkit stays full-qualified.
+   functions stay home-only; the `my.*` toolkit stays full-qualified.
 
    Pins:
    - the pure source rewrite (adds canonical specs, dedupes, no-ops on
@@ -50,7 +50,7 @@
     (is (not (str/includes? out "[seon.agent :as agent]"))
         "seon.agent is HOME-only — NOT added to an authored ns")
     (is (not (str/includes? out "seon.agent.lifecycle"))
-        "lifecycle :refer verbs stay home-only — NOT carried over")
+        "lifecycle :refer functions stay home-only — NOT carried over")
     (is (str/starts-with? out "(ns my.recall")
         "the ns NAME is preserved")))
 

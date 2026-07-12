@@ -6,7 +6,7 @@
    plan-body view. All on a FRESH :memory conn seeded like the pod boots —
    never the live agent conn.
 
-   The verbs are INSTRUMENTED for this ns (the same `register-target!` →
+   The functions are INSTRUMENTED for this ns (the same `register-target!` →
    `mi/instrument!` path the pod boots with) so the declared-key injection
    — omit `:seon.agent/id`, the wrapper fills the calling agent — is
    exercised for real, not stubbed. Teardown unstruments."
@@ -29,8 +29,8 @@
 (def ^:private a-ref [:seon.agent/id a-id])
 (def ^:private b-ref [:seon.agent/id b-id])
 
-(def ^:private verb-schemas
-  "fn-sym → its :malli/schema, for every my.plan public verb."
+(def ^:private function-schemas
+  "fn-sym → its :malli/schema, for every my.plan public function."
   {'step!     (:malli/schema (meta #'plan/step!))
    'plan!     (:malli/schema (meta #'plan/plan!))
    'active!   (:malli/schema (meta #'plan/active!))
@@ -46,15 +46,15 @@
    'status     (:malli/schema (meta #'plan/status))
    'list-open  (:malli/schema (meta #'plan/list-open))})
 
-(defn- instrument-verbs! []
-  (doseq [[fn-sym schema] verb-schemas]
+(defn- instrument-functions! []
+  (doseq [[fn-sym schema] function-schemas]
     (inst/register-target! 'my.plan fn-sym schema false))
   (mi/instrument! {:filters [(fn [n _ _] (= n 'my.plan))]}))
 
-(defn- uninstrument-verbs! []
+(defn- uninstrument-functions! []
   (mi/unstrument! {:filters [(fn [n _ _] (= n 'my.plan))]}))
 
-(use-fixtures :once {:before instrument-verbs! :after uninstrument-verbs!})
+(use-fixtures :once {:before instrument-functions! :after uninstrument-functions!})
 
 (defn- fresh-conn
   "Promise of a fresh :memory conn with the pod's boot schema + the user
@@ -94,7 +94,7 @@
 
 (defn- with-agent-conn
   "Fresh seeded conn as the root *conn*, `body` (a 0-arg fn → Promise) run
-   inside (db/with-agent a-id) so the verbs' ALS scope resolves to agent A."
+   inside (db/with-agent a-id) so the functions' ALS scope resolves to agent A."
   [body]
   (with-conn (fn [_] (db/with-agent a-id body))))
 

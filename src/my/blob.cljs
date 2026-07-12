@@ -196,7 +196,7 @@
      ::lines-returned (- end start)
      ::total-lines    total}))
 
-;;; VERBS — put! is ^:async (it AWAITS the datom write); reads are sync so
+;;; FUNCTIONS — put! is ^:async (it AWAITS the datom write); reads are sync so
 ;;; they compose inside let-bindings without an await.
 
 (declare stat) ; text refuses a binary blob by naming stat's recorded media

@@ -158,9 +158,9 @@
        "; PLAN «the task»\n"
        "; ▶ stepid00000001 [2026-07-11 00:00] the task\n"
        ";;; └─ end plan ─\n\n"
-       ";;; ┌─ recent-verbs ─\n"
+       ";;; ┌─ function-menu ─\n"
        "; ① (db/query [req] …) — Run a Datalog query.\n"
-       ";;; └─ end recent-verbs ─\n\n"
+       ";;; └─ end function-menu ─\n\n"
        ";;; ┌─ transcript ─\n"
        "; seon · my.agent.X · live REPL\n"
        "; The flat, time-ordered log below is this REPL's history.\n\n"
@@ -174,7 +174,7 @@
 
 (deftest null-render-drops-event-log-keeps-scaffolding
   (let [nr (ta/null-render rendered-prompt)]
-    (is (str/includes? nr ";;; ┌─ recent-verbs ─")
+    (is (str/includes? nr ";;; ┌─ function-menu ─")
         "menu section rides verbatim")
     (is (str/includes? nr "; ① (db/query"))
     (is (str/includes? nr "; seon · my.agent.X · live REPL")
@@ -405,7 +405,7 @@
       (-> (with-conn
             (fn [_conn]
               ;; one-menu-entry seed: a public program-graph fn + one eval
-              ;; calling it → menu/verb-offers yields the ① offer
+              ;; calling it → menu/function-offers yields the ① offer
               (-> (db/transact!
                     {:seon.db/tx-data
                      [{:seon.fn/sym      "my.plan/done!"

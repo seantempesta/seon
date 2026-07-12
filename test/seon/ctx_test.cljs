@@ -35,10 +35,8 @@
     [seon.agent.ctx.inventory :as ctx-inventory]
     [seon.agent.ctx.canvas :as ctx-canvas]
     [seon.agent.ctx.namespaces :as ctx-namespaces]
-    [seon.agent.ctx.relevant :as ctx-relevant]
     [seon.agent.ctx.transcript :as transcript]
     [seon.db :as db]
-    [seon.embed.stash :as embed-stash]
     [seon.render :as render]
     [seon.repl.internal :as repl-internal]
     [seon.schema :as schema]
@@ -276,7 +274,7 @@
         "a genuine agent-authored def is still teed")))
 
 ;; ------------------------------------------------------------
-;; Composer: purpose-as-entity-data, merge, verbs.
+;; Composer: purpose-as-entity-data, merge, functions.
 ;; ------------------------------------------------------------
 
 (defn- assemble
@@ -385,7 +383,7 @@
    (db/pull {:seon.db/pull-pattern '[:seon.agent/purpose]
              :seon.db/ref [:seon.agent/id id]})))
 
-(deftest purpose-entity-and-verbs
+(deftest purpose-entity-and-functions
   (async done
     (-> (with-conn
           (fn [_conn]
@@ -768,121 +766,12 @@
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 
-;; ------------------------------------------------------------
-;; relevant-source-block (P2-D) — the embedding-retrieval surface.
-;; PURE reader of the per-turn `seon.embed.stash`; no conn needed.
-;; ------------------------------------------------------------
-
-(deftest relevant-source-block-renders-stashed-hits
-  ;; NO stash active (the default-OFF / no-prefetch path) → "" so the
-  ;; composer drops the section. WITH a stash → the relevant-context
-  ;; header, the hits' syms + source, top-k respected, per-hit char cap
-  ;; with a loud truncation marker, and the over-cap source NEVER leaks.
-  (let [in   {:seon.db/db {} :seon.agent/id "X"}
-        long-src (apply str (repeat (* 3 ctx-relevant/source-char-cap) "z"))
-        hits (vec
-               (for [i (range 8)]
-                 {:seon.embed/eid i :seon.embed/distance (* 0.1 i)
-                  :seon.embed/entity
-                  {:seon.fn/sym    (str "my.ns/fn" i)
-                   :seon.fn/source (if (zero? i) long-src
-                                       (str "(defn fn" i " [] " i ")"))}}))]
-    ;; (1) no stash → reactive blank.
-    (is (= "" (ctx-relevant/relevant-source-block in))
-        "no stash (default-OFF / no prefetch) → \"\" (reactive suppression)")
-    ;; (2) with a stash → full render.
-    (let [txt (embed-stash/with-hits hits
-                #(ctx-relevant/relevant-source-block in))]
-      ;; The `;; ── relevant context ──` header was REMOVED (keystone): the
-      ;; section renderer's bracket demarcates the section now.
-      ;; top-k respected: only the first `top-k` hits render.
-      (is (str/includes? txt "my.ns/fn0") "first hit's sym present")
-      (is (str/includes? txt (str "my.ns/fn" (dec ctx-relevant/top-k)))
-          "the k-th hit's sym present")
-      (is (not (str/includes? txt (str "my.ns/fn" ctx-relevant/top-k)))
-          "the (k+1)-th hit is dropped — top-k respected")
-      (is (str/includes? txt "(defn fn1 [] 1)") "a hit's source renders inline")
-      ;; per-hit char cap with a LOUD marker; the over-cap source is NOT
-      ;; rendered whole.
-      (is (str/includes? txt "TRUNCATED")
-          "over-cap source carries the loud truncation marker")
-      (is (not (str/includes? txt long-src))
-          "the full over-cap source NEVER leaks (capped)"))))
-
-(deftest relevant-source-block-renders-any-kind
-  ;; GENERALITY (P2-D): the section is kind-general + has NO hard-coded attr
-  ;; names — it renders the most relevant embedded ENTITY of ANY kind by a
-  ;; uniform rule (the attribute IS the type; NO :seon/kind enum): header = the
-  ;; entity's identity (its SHORTEST string attr, else :db/id), body = its
-  ;; LONGEST string attr (the embedded text). A fn renders sym + source; a KB
-  ;; row renders its id + body; an unknown kind renders its id + prose — NEVER a
-  ;; blank `<unknown>` for an entity that has any string attr.
-  (let [in        {:seon.db/db {} :seon.agent/id "X"}
-        long-body (apply str (repeat (* 3 ctx-relevant/source-char-cap) "y"))
-        fn-hit    {:seon.embed/eid 17 :seon.embed/distance 0.1
-                   :seon.embed/entity
-                   {:db/id 17
-                    :seon.fn/sym    "seon.math/l2-normalize"
-                    :seon.fn/source "(defn l2-normalize [v] :normalized)"}}
-        kb-hit    {:seon.embed/eid 14 :seon.embed/distance 0.2
-                   :seon.embed/entity
-                   {:db/id 14
-                    :my.kb/id    "kb-wire-server"
-                    :my.kb/title "The wire-server is the sole datahike writer"
-                    :my.kb/body  "The CLJS pod forwards every write over a UDS."}}
-        kb-long   {:seon.embed/eid 15 :seon.embed/distance 0.3
-                   :seon.embed/entity
-                   {:db/id 15 :my.kb/id "kb-long"
-                    :my.kb/title "Long KB" :my.kb/body long-body}}
-        gen-hit   {:seon.embed/eid 99 :seon.embed/distance 0.4
-                   :seon.embed/entity
-                   {:db/id 99 :my.doc/id "doc-42"
-                    :my.doc/prose "the longest string attr is the embedded text here"}}
-        lost-hit  {:seon.embed/eid 7 :seon.embed/distance 0.5}   ; raced retraction → no entity
-        render    (fn [hits] (embed-stash/with-hits hits
-                               #(ctx-relevant/relevant-source-block in)))]
-    ;; KB renders IDENTITY (shortest string attr) + BODY (longest string attr),
-    ;; GENERICALLY — no hard-coded :my.kb/title dispatch (the attribute IS the
-    ;; type). For this row the shortest string is :my.kb/id "kb-wire-server".
-    (let [txt (render [kb-hit])]
-      (is (str/includes? txt "kb-wire-server")
-          "KB hit renders its shortest string attr (the id) as the header")
-      (is (str/includes? txt "The CLJS pod forwards every write over a UDS.")
-          "KB hit renders its body (longest string attr) inline")
-      (is (not (str/includes? txt "<unknown>"))
-          "a KB hit never renders the blank <unknown> placeholder"))
-    ;; fn renders sym + source, as before.
-    (let [txt (render [fn-hit])]
-      (is (str/includes? txt "seon.math/l2-normalize") "fn hit renders its sym")
-      (is (str/includes? txt "(defn l2-normalize [v] :normalized)")
-          "fn hit renders its source"))
-    ;; generic fallback: identity + longest string attr, never blank.
-    (let [txt (render [gen-hit])]
-      (is (str/includes? txt "doc-42") "generic hit renders its */id identity")
-      (is (str/includes? txt "the longest string attr is the embedded text here")
-          "generic hit renders its longest string attr as the body"))
-    ;; MIXED: one section with a fn + a kb + a generic, each rendered right.
-    (let [txt (render [fn-hit kb-hit gen-hit])]
-      (is (str/includes? txt "seon.math/l2-normalize") "mixed: fn present")
-      (is (str/includes? txt "kb-wire-server")
-          "mixed: kb identity (shortest string attr) present")
-      (is (str/includes? txt "doc-42") "mixed: generic identity present"))
-    ;; KB body honours the per-hit char cap with a loud marker; never leaks.
-    (let [txt (render [kb-long])]
-      (is (str/includes? txt "TRUNCATED") "over-cap KB body carries the marker")
-      (is (not (str/includes? txt long-body)) "over-cap KB body never leaks"))
-    ;; entity-less hit (lost eid) → header-only <unknown>, never throws/blank-tag.
-    (let [txt (render [lost-hit])]
-      (is (str/includes? txt "<unknown>")
-          "an entity-less hit renders a header-only <unknown> block"))))
-
-(deftest off-path-is-byte-identical
-  ;; THE SAFETY CONTRACT. With NO retrieval stash active (the default-OFF
-  ;; code path — `run-turn!` never calls `with-hits`), the :relevant-source
-  ;; section renders blank, the composer drops it, and the assembled prompt
-  ;; is byte-identical to a baseline assembled the same way. Prove BOTH:
-  ;; the section is absent from the render order, and assembling twice with
-  ;; no stash yields the identical string (no query-dependent drift).
+(deftest assembly-stable-prefix-is-deterministic
+  ;; THE CACHE CONTRACT. Assembling the same agent's context twice yields a
+  ;; byte-identical STABLE PREFIX — no section pulls query-dependent or
+  ;; wall-clock content above the cache boundary. (Formerly also pinned the
+  ;; retired `:relevant-source` block's default-OFF path; that block +
+  ;; `seon.embed.stash` were deleted 2026-07-12.)
   (async done
     (-> (with-conn
           (fn [_conn]
@@ -891,9 +780,9 @@
                   (fn [_]
                     (let [r1 (assemble "AGTctxrel0001p")
                           r2 (assemble "AGTctxrel0001p")]
-                      ;; byte-identical across two assemblies (the section
-                      ;; is not pulling query-dependent content into the
-                      ;; prompt when off). The byte-stability contract is the
+                      ;; byte-identical across two assemblies (no section
+                      ;; pulls query-dependent content into the prompt).
+                      ;; The byte-stability contract is the
                       ;; CACHEABLE PREFIX (`stable-text`), NOT the full prompt:
                       ;; the volatile tail's readline carries the ONE
                       ;; legitimate live `now` (current-time line, below the
@@ -903,7 +792,7 @@
                       ;; text was a latent flake; the prefix is the contract.
                       (is (= (:seon.render/stable-text r1)
                              (:seon.render/stable-text r2))
-                          "OFF-path cacheable prefix is byte-identical")))))))
+                          "cacheable prefix is byte-identical across assemblies")))))))
         (.then (fn [] (done)))
         (.catch (fn [e] (is (nil? e) (str "unexpected: " e)) (done))))))
 

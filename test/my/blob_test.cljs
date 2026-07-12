@@ -3,7 +3,7 @@
 
      1. put → stat → text/get ROUNDTRIP — the file lands under
         <dir>/<first-2>/<hash>, the datom projection carries
-        hash/tokens/media/at, and both read verbs return the content.
+        hash/tokens/media/at, and both read functions return the content.
      2. IDEMPOTENCE — double-put of identical content yields one file and
         ONE datom row (identity upsert), same hash both times.
      3. PAGING HONESTY — text windows are 1-based with honest

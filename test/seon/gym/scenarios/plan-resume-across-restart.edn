@@ -33,7 +33,7 @@
 ;; rubric/reference are shown only to the post-run judge, never to the
 ;; agent.
 ;;
-;; The verbs to mint/close plan items are NOT named in the message — the
+;; The functions to mint/close plan items are NOT named in the message — the
 ;; agent discovers them from its own always-on context (the standing
 ;; "2+ steps → track it" teaching + the my.plan docstrings). If
 ;; this scenario goes RED on the plan/resume predicates, that is the

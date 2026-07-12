@@ -220,7 +220,10 @@
    not the wrapping fn (see `seon.instrument/wrapper-fault`). The SINGLE
    source of truth for this set — `seon.eval/known-error-kinds` references
    it too (the same 'self-contained agent-fixable error' concept)."
-  #{:user-input :compile :read :seon.eval/repl-parity :seon.eval/repl-verb})
+  ;; `:seon.eval/repl-form` was `:seon.eval/repl-verb` until 2026-07-12
+  ;; (functions-not-verbs); error datoms persisted before then carry the
+  ;; old keyword — historical values, deliberately not migrated.
+  #{:user-input :compile :read :seon.eval/repl-parity :seon.eval/repl-form})
 
 ;; ============================================================
 ;; EDN stack frames — cljs.stacktrace's V8/Node parser (no source maps;

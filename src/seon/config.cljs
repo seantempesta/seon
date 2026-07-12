@@ -426,7 +426,7 @@
    [:seon.config/agent-context {:optional true} :seon.config/agent-context]
    [:seon.config/root-context  {:optional true} :seon.config/root-context]])
 
-;;; Verb arg/return shapes — leaf `[:vector :map]` (full shapes validated
+;;; Function arg/return shapes — leaf `[:vector :map]` (full shapes validated
 ;;; downstream); registered once + referenced so the resolver specs don't
 ;;; re-inline the shape.
 (schema/register! ::agent-id :string)

@@ -42,7 +42,6 @@
    semantic path is the only `^:async` surface (it awaits the wire embed)."
   (:require
     [clojure.string :as str]
-    [seon.agent.turn :as turn]
     [seon.db :as db]
     [seon.diffusion.grammar :as grammar]
     [seon.embed :as embed]
@@ -607,7 +606,7 @@
   {:malli/schema [:=> [:cat ::retrieve-request] :any]}
   [{::keys [code-buffer-text] :as req}]
   (let [base (retrieve-for-code-buffer req)]
-    (if-not (turn/embed-retrieval-on?)
+    (if-not (embed/enabled?)
       base
       (try
         (let [augmented

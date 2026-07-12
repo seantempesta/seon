@@ -15,7 +15,7 @@
      - `open-turn!` / `close-turn!` — the turn bracket (open-tx + close-tx)
      - `ask-and-eval!`  — LLM call + parse + eval-batch
      - `call-llm!`      — `(llm-fn prompt)` with one bounded transport retry
-     - `render-prompt` / `prefetch-and-render-prompt!` — ctx assembly
+     - `render-prompt`   — ctx assembly
      - `turn-index`     — the agent's running turn number (logging)
 
    Dependency direction (acyclic): it references `:seon.agent.run/*` keywords
@@ -23,18 +23,14 @@
    does NOT require `seon.agent` (which would cycle: `seon.agent.loop`
    requires both). It MAY require ctx / eval / message / render."
   (:require
-    [clojure.string :as str]
     [seon.ai :as ai]
     [seon.ai.tokens :as tokens]
     [seon.config :as config]
     [seon.retry :as retry]
     [seon.agent.ctx :as ctx]
-    [seon.agent.ctx.relevant :as ctx-relevant]
     [my.blob :as blob]
     [seon.db :as db]
     [seon.error :as error]
-    [seon.embed :as embed]
-    [seon.embed.stash :as embed-stash]
     [seon.eval :as seval]
     [seon.log :as seon-log]
     [seon.repl.internal :as repl-internal]
@@ -202,7 +198,7 @@
   (count (ctx/agent-turns agent-id nil)))
 
 ;; ============================================================
-;; Prompt assembly (sync, with an optional async embedding prefetch).
+;; Prompt assembly.
 ;; ============================================================
 
 (defn render-prompt
@@ -220,48 +216,6 @@
   ([agent-id] (render-prompt agent-id @db/*conn*))
   ([agent-id db]
    (ctx/render-context {:seon.agent/id agent-id :seon.db/db db})))
-
-(defn embed-retrieval-on?
-  "True when embedding-retrieval is enabled — `SEON_EMBED` is present.
-
-   Present = any value. The SAME single switch the wire-server reads, so one
-   env var gates the feature across both processes. UNSET ⇒ the prefetch
-   never fires and `render-prompt` runs the byte-identical-OFF path."
-  {:malli/schema [:=> [:cat] :boolean]}
-  []
-  (some? (.. js/process -env -SEON_EMBED)))
-
-(defn ^:async prefetch-and-render-prompt!
-  "Render this turn's prompt, optionally prefetching retrieval hits.
-
-   Renders over the frozen `db` value (the basis-t the loop pinned for the turn).
-   DEFAULT-OFF (byte-identical): when [[embed-retrieval-on?]] is false this is
-   exactly `(render-prompt agent-id db)`. When ON: derive the query from the
-   frozen db's latest live inbound, KNN over the WHOLE embedding index
-   (kind-general), stash the hits, then run the SYNC `render-prompt` over the
-   SAME db inside that scope so the `:relevant-source` section reads them
-   without making `assemble-context` async. FAIL-SOFT to nil hits on any error
-   (section renders blank)."
-  {:malli/schema [:=> [:catn [:seon.agent/id :seon.agent/id] [:seon.db/db :any]] :string]}
-  [agent-id db]
-  (if-not (embed-retrieval-on?)
-    (render-prompt agent-id db)
-    (let [query (ctx/retrieval-query {:seon.db/db db :seon.agent/id agent-id})
-          hits  (if (str/blank? query)
-                  nil
-                  (-> (.then
-                        (embed/search-pull
-                          {:seon.embed/query query
-                           :seon.embed/k ctx-relevant/top-k
-                           :seon.embed/db db})
-                        (fn [{:seon.embed/keys [hits]}] hits))
-                      (.catch (fn [e]
-                                (js/console.warn
-                                  "[seon.agent.turn] embed prefetch failed (fail-soft → no hits):"
-                                  (or (.-message e) (str e)))
-                                nil))))
-          hits  (await hits)]
-      (embed-stash/with-hits hits #(render-prompt agent-id db)))))
 
 ;; ============================================================
 ;; The turn bracket — open-turn! folds the prompt projection + the current
@@ -615,7 +569,7 @@
         stream?    (= :stream (ctx/repl-mode db))
         turn-id    (db/new-id!)
         turn-idx   (turn-index id)
-        prompt     (await (prefetch-and-render-prompt! id db))
+        prompt     (render-prompt id db)
         full-prompt (ai/debug-full-prompt {:seon.ai/ctx prompt})
         ;; Always-on observability capture: the frozen db's basis-t (the
         ;; coordinate that makes the context re-derivable via as-of) + the

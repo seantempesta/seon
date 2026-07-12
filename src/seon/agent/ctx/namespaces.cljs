@@ -572,7 +572,7 @@
    (`\"([{:my.kb/keys [a]}])\"`). Single arity → `[args] …`; multi-arity →
    `([a] …) ([a b] …)`. Errors-as-values: an unreadable arglists string
    falls back to its raw text (outer parens stripped) with an elided
-   body. Public: the `:recent-verbs` menu section
+   body. Public: the `:function-menu` menu section
    (`seon.agent.ctx.menu`) renders its glyph entries with the SAME
    arity grammar as these compact cards."
   {:malli/schema [:=> [:catn [::arglists [:maybe :string]]] :string]}

@@ -11,7 +11,7 @@
    BOUNDED, not the old unbounded `pull[*]` dump: capped row count, capped
    per-row content, a loud-truncation footer carrying the read-back query
    when clipped. No relevance/lexical-overlap pointer (that's deferred to
-   embeddings/Proximum — see `seon.agent.ctx.relevant`).
+   embeddings/Proximum — `my.kb` semantic recall via `seon.embed`).
 
    Symbol-wired into the composer layout
    (`config manifest`) as

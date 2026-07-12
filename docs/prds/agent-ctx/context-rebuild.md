@@ -51,13 +51,15 @@ coordinated remainders listed under item 1; item 4 still open.**
    store"-meaning-db → "the db"; "ROOT view"/"fresh view" → "root
    cluster"/"a fresh cluster". D4 landed file-local in `eval.cljs`:
    `dispatch-repl-form!` / `repl-form-heads` / `repl-form-of` /
-   `record-form-result!`. **Coordinated remainders (typeahead lane, do not
-   clobber):** `seon.agent.ctx.menu` strings + identifiers + the
-   `:recent-verbs` block name (seed-copied into live agents — needs a
-   cluster reset/migration when renamed); the diffusion buffer's
-   `canvas-text` rename (D1). Also deliberately kept: the persisted
-   error-kind keyword `:seon.eval/repl-verb` (a stored VALUE — renaming it
-   is a migration unit, not a string sweep).
+   `record-form-result!`. **Coordinated remainders CLOSED 2026-07-12
+   (owner-directed):** `seon.agent.ctx.menu` identifiers + strings renamed
+   (`function-menu-block` / `function-offers` / `ranked-functions` / …),
+   the block name is `:function-menu` (ctx rows seed-copied into agents
+   before the rename are orphaned — a cluster reset re-seeds; no data
+   ported), and the error-kind keyword is `:seon.eval/repl-form` (error
+   datoms persisted before the rename keep `:seon.eval/repl-verb` —
+   historical values, deliberately not migrated). The diffusion buffer's
+   `canvas-text` rename (D1) landed earlier (`code-buffer`, 2026-07-11).
 2. **Milestone naming — DONE**: "rung N" → the milestone names (table
    below); this file RENAMED from `minimal-context-ladder.md` with every
    reference updated; config header comments name milestones; dated src
@@ -67,11 +69,14 @@ coordinated remainders listed under item 1; item 4 still open.**
 3. **Deprecation labeling — DONE**: every legacy block surface NOT in the
    target vision carries docstring line 1 `DEPRECATED — … see
    context-rebuild.`: `jobs-block`, `testrun-block`, `findings-block`,
-   `inventory-block`, `relevant-source-block`, `canvas-block`,
+   `inventory-block`, `canvas-block`,
    `my.skills/catalog-block` + `skill-block`, and the soul/agents surfaces
    `file-block`/`-ai`/`-html` + `config/identity-file-blocks`.
    `seon.agent.ctx.usage` is a live usage extractor, not a block — not
-   labeled.
+   labeled. `relevant-source-block` (+ its `seon.embed.stash` bridge and
+   the `run-turn!` KNN prefetch) was DELETED 2026-07-12 — wired in no
+   manifest; the embedding index + `SEON_EMBED` infra stay (my.kb
+   semantic recall, diffusion retrieval).
 4. **Doc reconciliation** (open): `docs/seon/architecture/context.md` +
    `toolkit.md` updated to name the rebuild as the governing arc; stale
    references to the skills system as load-bearing get the deprecation

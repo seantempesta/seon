@@ -207,7 +207,6 @@
     [seon.agent.ctx.transcript]
     [seon.agent.ctx.inventory]
     [seon.agent.ctx.findings]
-    [seon.agent.ctx.relevant]
     [seon.agent.ctx.jobs]
     [seon.agent.ctx.testrun]
     [seon.agent.ctx.subagents]

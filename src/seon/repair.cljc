@@ -221,13 +221,13 @@
         inserts  (count (filter #(= :insert (:action %)) changes))
         removes  (count (filter #(= :remove (:action %)) changes))
         delims   (->> changes (keep :content) distinct (str/join " "))
-        verb     (cond
+        action   (cond
                    (and (pos? inserts) (pos? removes)) "balanced"
                    (pos? inserts)                      "inserted"
                    (pos? removes)                      "removed"
                    :else                               "adjusted")]
     (str "↻ auto-balanced your unparseable input and evaluated the result: "
-         verb " " n " delimiter" (when (not= n 1) "s")
+         action " " n " delimiter" (when (not= n 1) "s")
          (when (seq delims) (str " (" delims ")"))
          (when (and shape (seq shape)) (str " → " shape))
          ". Verify this is what you intended; re-eval the whole form if not.")))

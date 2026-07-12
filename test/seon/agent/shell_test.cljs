@@ -74,7 +74,7 @@
    on every path."
   [p]
   (.catch p (fn [err]
-              (is false (str "shell verb REJECTED — envelope contract "
+              (is false (str "shell function REJECTED — envelope contract "
                              "violated: " err))
               ::rejected)))
 
@@ -187,7 +187,7 @@
         (settle! done))))
 
 ;; ---------------------------------------------------------------------------
-;; 5. Output is FULL data, no verb-level token cap — display economy is the
+;; 5. Output is FULL data, no function-level token cap — display economy is the
 ;;    render layer's. Only bound = the ~2MB/stream RAM ceiling.
 ;; ---------------------------------------------------------------------------
 
@@ -201,7 +201,7 @@
                      ot     :seon.agent.shell/out-tokens
                      trunc? :seon.agent.shell/truncated?}]
                  (is (true? ok?))
-                 (is (= 40000 (count out)) "the FULL stream is returned — no verb-level clip")
+                 (is (= 40000 (count out)) "the FULL stream is returned — no function-level clip")
                  (is (= 10000 ot) "HONEST full-stdout token size (40000 chars / 4)")
                  (is (false? trunc?) "well under the 2MB RAM ceiling — nothing dropped")))
         (settle! done))))
@@ -375,7 +375,7 @@
                        "the child actually terminated")))
           (settle! done)))))
 
-(deftest job-verbs-on-unknown-id-are-guiding-values
+(deftest job-functions-on-unknown-id-are-guiding-values
   (async done
     (let [bad {:seon.agent.shell/job-id "job-nope"}]
       (doseq [r [(shell/job-status bad) (shell/job-output bad) (shell/job-stop! bad)]]

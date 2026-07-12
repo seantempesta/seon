@@ -124,7 +124,16 @@ grammar; bare `⟹` is real).
 `:plan-ledger` retired (▶/☐/done-dropped folded into
 `my.plan.internal/plan-block`) and acme.edn declares the full
 diffusion-testbed `:seon.agent/ctx` tree (mirrored by hand from
-system.edn + `:recent-verbs` + `:typeahead-steps`).
+system.edn + `:function-menu` + `:typeahead-steps`).
+
+**Renamed 2026-07-12 (owner, functions-not-verbs)**: the menu block is
+`:function-menu` (was `:recent-verbs`) rendered by
+`seon.agent.ctx.menu/function-menu-block`; wire offers come from
+`menu/function-offers` (was `verb-offers`). Stores seeded BEFORE the
+rename carry orphaned `:recent-verbs` ctx rows pointing at the old fn
+symbol — `bin/acme` cluster reset re-seeds. The frozen replay corpus
+(`evals/typeahead_replay.corpus.json` + the src-inspect-ai extractors)
+keeps the historical `recent-verbs` section name for captured data.
 
 **P7 W1 SHIPPED (2026-07-11 late)**: `my.plan/reconcile!` +
 `my.plan/document` landed (whole-plan document round-trip, EDN or
@@ -211,7 +220,7 @@ warmups): [[planner-worker-design]] §"W1 SHIPPED".
   `:plan` is THE plan surface (▶/☐/done-dropped folded into
   `my.plan.internal/plan-block`; `plan-ledger-block` deleted); acme.edn
   now DECLARES the full testbed tree (system.edn rows mirrored BY HAND
-  + `:recent-verbs` 46 + `:typeahead-steps` 95) — a system.edn tree
+  + `:function-menu` 46 + `:typeahead-steps` 95) — a system.edn tree
   change must be copied into acme.edn manually.
 
 ## Settled — do NOT re-litigate (measured; new data required to reopen)

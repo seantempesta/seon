@@ -108,6 +108,17 @@
    own `:seon.embed/pull-pattern` to narrow it."
   '[*])
 
+(defn enabled?
+  "True when embedding features are enabled — `SEON_EMBED` is present.
+
+   Present = any value. The SAME single switch the wire-server reads, so one
+   env var gates the feature across both processes. UNSET ⇒ every semantic
+   surface (`my.kb` recall, diffusion `+semantic`, the header's embed
+   indicator) stays off."
+  {:malli/schema [:=> [:cat] :boolean]}
+  []
+  (some? (.. js/process -env -SEON_EMBED)))
+
 ;; ---------------------------------------------------------------------------
 ;; :where → eids (LOCAL db resolution — the type-scope)
 ;; ---------------------------------------------------------------------------

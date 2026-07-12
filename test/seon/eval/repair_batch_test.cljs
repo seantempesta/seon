@@ -208,7 +208,7 @@
 ;; #27 FALSIFICATION GATE — a REPAIRED form re-enters the SAME per-entry
 ;; dispatch the main loop uses. `(in-ns 'probe.rvp.a` (missing closer) is a
 ;; delimiter failure the repair fixes to `(in-ns 'probe.rvp.a)`; the
-;; repaired form must hit the REPL-verb dispatch (real in-ns semantics —
+;; repaired form must hit the REPL-form dispatch (real in-ns semantics —
 ;; owner rulings 2026-07-10) IDENTICALLY to an already-valid `(in-ns …)`.
 ;; Pre-unification the repair sub-loop called eval-form-entry! directly,
 ;; BYPASSING the per-entry dispatch — so the repaired form eval'd `in-ns`
@@ -217,7 +217,7 @@
 ;; could only fail.
 ;; ===========================================================================
 
-(deftest repaired-verb-form-re-enters-same-dispatch
+(deftest repaired-repl-form-re-enters-same-dispatch
   (async done
     (-> (with-conn
           (fn ^:async run []
@@ -229,18 +229,18 @@
                                     :where [?e :seon.eval/id]
                                            [?e :seon.eval/narration ?n]]
                                   @db/*conn*))]
-              (testing "repaired (in-ns 'probe.rvp.a runs as the REAL movement verb"
+              (testing "repaired (in-ns 'probe.rvp.a runs as the REAL movement form"
                 (is (= 1 (:seon.eval/n-ok rep-res)))
                 (is (= 0 (:seon.eval/n-fail rep-res)))
                 (is (true? (:ok? rep-row)))
                 (is (= :probe.rvp.a (:ns rep-row))
-                    "the accumulator moved — the verb dispatch ran, not a raw eval")
+                    "the accumulator moved — the REPL-form dispatch ran, not a raw eval")
                 (is (re-find #"auto-balanced" (str rep-narr))
                     "the repair diff note still rides on the narration")))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest normal-verb-form-matches-repaired
+(deftest normal-repl-form-matches-repaired
   ;; The other half of the gate: an already-valid (in-ns …) behaves the
   ;; SAME, proving the repaired path is byte-for-byte the same per-entry
   ;; mechanism — one dispatch, no parallel path.
@@ -249,7 +249,7 @@
           (fn ^:async run []
             (let [res (await (run-batch! "(in-ns 'probe.rvp.b)" (db/new-id!)))
                   row (first (eval-rows @db/*conn*))]
-              (testing "normal (in-ns 'probe.rvp.b) also runs as the movement verb"
+              (testing "normal (in-ns 'probe.rvp.b) also runs as the movement form"
                 (is (= 1 (:seon.eval/n-ok res)))
                 (is (= 0 (:seon.eval/n-fail res)))
                 (is (true? (:ok? row)))

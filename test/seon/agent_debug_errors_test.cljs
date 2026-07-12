@@ -1,6 +1,6 @@
 (ns seon.agent-debug-errors-test
   "Tests + worked examples for the `seon.agent.debug` error-triage
-   verbs (`errors` / `error` / `repro`) over persisted
+   functions (`errors` / `error` / `repro`) over persisted
    `seon.error/record!` datoms, and the deepest-cause projection
    message (the `SEON-CORE-FAULT` marker / list rows show the REAL
    cause, never cljs.js's \"ERROR\" wrapper).
@@ -175,7 +175,7 @@
     (is (false? (:seon.agent.debug/ok?
                   (agent-debug/repro {:seon.agent.debug/eid 999999999}))))))
 
-(deftest error-triage-verbs-over-seeded-datoms
+(deftest error-triage-functions-over-seeded-datoms
   (async done
     (with-fresh-conn
       (fn [_conn]

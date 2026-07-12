@@ -30,12 +30,13 @@
                  driver opens a `:message` run then drives ONE `run-turn!`
                  per script entry — deliberately NOT the trigger-driven
                  loop, because a stub script that never emits a terminal
-                 verb would otherwise drive the loop to its run turn-limit.
+                 function call would otherwise drive the loop to its run
+                 turn-limit.
                  Set `:seon.gym.scenario/llm` to `:scripted-replay` to
                  drive the REAL agentic loop with a replaying llm-fn instead
                  (the script's last entry must close the run — e.g.
-                 `(wait …)` — since the loop runs until a bound or verb
-                 closes the run), or `:rejecting` for the
+                 `(wait …)` — since the loop runs until a bound or function
+                 call closes the run), or `:rejecting` for the
                  simulated-provider-failure fixture.
      :paid     — costs real money. The driver wires the ACTIVE
                  provider's agent adapter (`seon.ai/provider` —
@@ -297,8 +298,8 @@
 ;;   :scripted-replay — drive seon.agent.loop/run-loop! (the REAL
 ;;     agentic loop) with an llm-fn replaying the turn's :llm-script
 ;;     entries in order; the script's last entry must close the run (a
-;;     lifecycle verb like `(wait …)`) since the loop runs until a bound
-;;     or verb closes the run.
+;;     lifecycle function like `(wait …)`) since the loop runs until a bound
+;;     or function closes the run.
 ;;   :rejecting — an llm-fn whose Promise REJECTS after 100ms
 ;;     (simulated provider failure; catalog F-llm-reject / S-08).
 ;; Absent on a stub scenario = the one-run-turn!-per-script-entry
@@ -573,8 +574,8 @@
    and including the final dot (\"seon.db\" -> \"seon\\.\", \"my.canvas\" ->
    \"my\\.\", \"my.plan\" -> \"my\\.\"). Used to build the
    per-ns optional-prefix idiom `(?:<prefix>)?<alias>` an alias-tolerant
-   pattern may use — `(?:seon\\.)?db` for a seon verb, `(?:my\\.)?tile` for
-   a toolkit verb — so the guard accepts the correct prefix for EITHER
+   pattern may use — `(?:seon\\.)?db` for a seon function, `(?:my\\.)?tile` for
+   a toolkit function — so the guard accepts the correct prefix for EITHER
    family rather than a hardcoded `seon\\.`."
   [dotted]
   (re-escape-dots (str (str/join "." (butlast (str/split dotted #"\."))) ".")))
@@ -585,7 +586,7 @@
    every agent's home ns is wired). Only the `:as`-aliased `seon.*`
    namespaces — these are the ones an agent writes by the seeded SHORT
    alias (db/, message/, schema/, agent/, plan/) yet a predicate may regex
-   by the long seon.<ns>/ form. `:refer`'d lifecycle verbs (wait, complete,
+   by the long seon.<ns>/ form. `:refer`'d lifecycle functions (wait, complete,
    …) carry no alias and aren't a qualified/alias split, so they're out of
    scope. Derives, never hardcodes — it can't drift from the agent's prompt."
   []
@@ -604,7 +605,7 @@
    the CONVENTION every agent writes the toolkit by (`my.canvas` → `tile`,
    `my.ui` → `ui`, `my.data` → `data`, `my.kb` → `kb`), confirmed by the
    toolkit test nses' `(:require [my.canvas :as tile] …)` heads. These are NOT in
-   [[home-ns-seon-aliases]] (a DIFFERENT wiring than the seon.* verbs in
+   [[home-ns-seon-aliases]] (a DIFFERENT wiring than the seon.* functions in
    home-ns-require-specs), yet the ORIGINAL alias-blind instance was a
    `my.canvas/button` predicate — so without them the guard misses the whole
    toolkit-alias class. Derives from the policy, never hardcodes."
@@ -617,7 +618,7 @@
 
 (defn- home-ns-aliases
   "Map of every agent-home-ns dotted-ns-name -> its short alias, the UNION
-   of the seon.* verbs ([[home-ns-seon-aliases]], from `home-ns-require-specs`)
+   of the seon.* functions ([[home-ns-seon-aliases]], from `home-ns-require-specs`)
    and the my.* toolkit ([[home-ns-toolkit-aliases]], from
    `canonical-full-my-ns`). One map of every dotted/alias pair an agent
    writes through a SHORT prefix — what [[alias-blind-predicate?]] scans
@@ -645,7 +646,7 @@
    aliased ns whose FULLY-QUALIFIED `<long-ns>/` FN-CALL form the pattern
    regexes WITHOUT also accepting the short alias the agent actually writes.
 
-   For each aliased ns ([[home-ns-aliases]] — the seon.* verbs db/message/
+   For each aliased ns ([[home-ns-aliases]] — the seon.* functions db/message/
    schema/agent/plan AND the my.* toolkit canvas/ui/data/kb): if the pattern
    references the qualified FN-CALL form `<long>\\<ns>/` (or `<long>\\b`) —
    [[qualified-fn-ref?]], which ignores un-aliasable `:<long>/…` keyword
@@ -682,7 +683,7 @@
 (defn- check-alias-blind!
   "Crash the load if any of a scenario's predicates is
    [[alias-blind-predicate?]] — a qualified `<long-ns>/` FN-CALL pattern
-   (seon.* verb OR my.* toolkit) that ignores the short alias the agent
+   (seon.* function OR my.* toolkit) that ignores the short alias the agent
    actually writes, which would false-negative every correct read and
    silently suppress the pass-rate. Loud failure naming the scenario,
    predicate, ns + alias, and the fix (accept the alias: the ns's own
@@ -1554,10 +1555,10 @@
    eval/prompt predicates scope on caused runs, distinguishing
    message-driven turns from the bootstrap turn 0 (whose run has no cause).
    Closes the run `:completed` when the scripts are exhausted — unless a
-   lifecycle verb in a script already closed it (a script `(wait …)` /
+   lifecycle function in a script already closed it (a script `(wait …)` /
    `(complete …)` leaves the agent :idle, so `current-run` is nil and we
    skip). Deliberately NOT the trigger-driven loop: a stub script that
-   never emits a terminal verb would otherwise drive the loop to its run
+   never emits a terminal function would otherwise drive the loop to its run
    turn-limit. Fails loud if the run never opened — a scenario whose turns
    were never stamped must not silently score."
   [agent-id compile-state cause scripts]
@@ -1586,9 +1587,9 @@
    freshly OPENED `:message` run (cause = the waking user message), exactly
    as the live `wake-handler` :idle branch does: open the run, then hand
    its run-id to `run-loop!`. The loop's own stop policies (turn-limit /
-   deadline / error / a lifecycle verb closing the run) are the awaits-idle
+   deadline / error / a lifecycle function closing the run) are the awaits-idle
    signal — when the promise resolves the agent is :idle (or :terminated).
-   Because the loop runs until a bound or verb closes the run, a
+   Because the loop runs until a bound or function closes the run, a
    `:scripted-replay` script's last entry must close the run (e.g.
    `(wait …)`). Fails loud if the run never opened."
   [agent-id compile-state cause llm-fn]

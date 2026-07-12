@@ -650,7 +650,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; ALIAS-BLIND PREDICATE LOAD CHECK — a :pattern that regexes a qualified
-;; FN-CALL `<long-ns>/` whose home ns aliases it (the seon.* verbs db/,
+;; FN-CALL `<long-ns>/` whose home ns aliases it (the seon.* functions db/,
 ;; message/, … AND the my.* toolkit canvas/, ui/, data/, kb/) but does NOT
 ;; accept the short alias false-negatives EVERY correct read, silently
 ;; suppressing the pass-rate (bit thrice: my.canvas e6aaf9f0, three seon.db/
@@ -661,7 +661,7 @@
 
 (deftest alias-blind-predicate-detects-the-aliased-qualified-without-alias
   ;; the unit fn: flags an aliased ns's qualified-without-alias FN-CALL
-  ;; pattern (seon.* verb OR my.* toolkit), passes the alias-tolerant
+  ;; pattern (seon.* function OR my.* toolkit), passes the alias-tolerant
   ;; idioms, the legitimately-qualified (non-aliased) namespaces agents DO
   ;; write fully-qualified, and namespaced-keyword data-keys.
   (let [blind? (fn [p] (#'gym/alias-blind-predicate?

@@ -297,7 +297,7 @@
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
 ;; ---------------------------------------------------------------------------
-;; Default detail is :full — signatures are retired. The verb returns the ns's
+;; Default detail is :full — signatures are retired. The function returns the ns's
 ;; WHOLE real source (here test.parent carries its full file source), unclipped.
 ;; ---------------------------------------------------------------------------
 

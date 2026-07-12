@@ -4,7 +4,7 @@
    guard, the derived conversation (`seon.agent/messages` — from = me OR
    to ∋ me), and transcript labels by ref kind. (The `reply!` tests were
    deleted with `reply!` in the agent-fsm redesign U2 — the new
-   `message/user` / `message/agent` verbs are verified live, not here:
+   `message/user` / `message/agent` functions are verified live, not here:
    tests are deferred until the format is proven.)
 
    All tests open a FRESH `:memory` datahike conn seeded with the pod's

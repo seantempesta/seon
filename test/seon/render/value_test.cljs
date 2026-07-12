@@ -201,7 +201,7 @@
       (is (str/includes? out "out-blob")))))
 
 (deftest dominant-string-renders-as-body-not-stub
-  (testing "a map whose payload is ONE dominant string (a read verb's content)
+  (testing "a map whose payload is ONE dominant string (a read function's content)
             renders that string as a bounded BODY BLOCK — many lines, honest
             ⟨N tokens⟩, header keys intact — not a 2-line stub (O1)"
     (let [content (apply str (for [i (range 1 54)]

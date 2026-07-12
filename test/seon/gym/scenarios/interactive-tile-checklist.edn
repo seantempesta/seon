@@ -64,7 +64,7 @@
   ;; reference the my.canvas toolkit at all (button/form/input/…)? Source
   ;; scan over the agent's run-driven evals; this is what lifts
   ;; toolkit-calls{:my.canvas} above 0. ALIAS-TOLERANT: my.canvas is NOT seeded
-  ;; into the home ns (only the seon.* verbs are) — agents call it FULLY
+  ;; into the home ns (only the seon.* functions are) — agents call it FULLY
   ;; QUALIFIED `my.canvas/button` (it renders full + is boot-indexed), OR
   ;; alias it `[my.canvas :as tile]` in a ns they author → `canvas/button`.
   ;; Accept BOTH (test the mechanism, not the alias string). A `my.canvas/`-only

@@ -32,10 +32,10 @@
    rendering its surface on the next morph."
   (:require
     [clojure.string :as str]
-    [seon.agent.turn :as turn]
     [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.derive :as derive]
+    [seon.embed :as embed]
     [seon.render :as render]
     [seon.schema :as schema]))
 
@@ -139,7 +139,7 @@
              ::state-counts (frequencies (map :seon.derive/state agents))
              ::total-turns  (reduce + 0 (map ::turns agents))
              ::total-evals  evals
-             ::embedding?   (turn/embed-retrieval-on?)}
+             ::embedding?   (embed/enabled?)}
       last-at (assoc ::last-activity last-at))))
 
 ;; ============================================================

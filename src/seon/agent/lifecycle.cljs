@@ -44,11 +44,11 @@
 (defn- no-open-run-error
   "The error envelope a function returns when the agent has no OPEN run to act on
    (e.g. `wait` called while already idle)."
-  [verb id]
+  [fn-name id]
   {:seon.db/ok? false
    :seon.db/error
    {:seon.error/message
-    (str verb ": agent " (pr-str id) " has no open run to act on "
+    (str fn-name ": agent " (pr-str id) " has no open run to act on "
          "(it is not currently running).")}})
 
 (defn ^:async wait

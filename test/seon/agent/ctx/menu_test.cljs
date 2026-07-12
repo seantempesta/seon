@@ -3,7 +3,7 @@
    (`seon.agent.ctx.menu` — diffusion-typeahead P3a).
 
    Covers: empty-world suppression (the section returns \"\" and
-   vanishes), the recent-verbs derivation (eval-log ranking, alias
+   vanishes), the function-menu derivation (eval-log ranking, alias
    resolution via stored require-edges, private/failed-eval exclusion,
    glyph numbering), and the `:seon.typeahead/policy` override row
    (menu-cap respected). The former `:plan-ledger` behaviors (▶ active
@@ -58,11 +58,11 @@
   [{ok? :seon.db/ok? err :seon.db/error}]
   (is (true? ok?) (str "seed transacted — " (pr-str err))))
 
-;; The recent-verbs seed: two public program-graph fns + one private one,
+;; The function-menu seed: two public program-graph fns + one private one,
 ;; a home ns whose STORED require-edges alias `plan` → `my.plan`, and
 ;; four eval rows — done! called twice (once aliased), step! once, the
 ;; private fn once, plus a FAILED eval calling drop! (must not rank).
-(defn- seed-verbs!
+(defn- seed-functions!
   []
   (db/transact!
     {:seon.db/tx-data
@@ -114,20 +114,20 @@
     (-> (with-conn
           (fn [conn]
             (let [req {:seon.db/db @conn :seon.agent/id a-id}]
-              (is (= "" (menu/recent-verbs-block req))
-                  "no eval history → no recent-verbs section"))))
+              (is (= "" (menu/function-menu-block req))
+                  "no eval history → no function-menu section"))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
 
-(deftest recent-verbs-ranked-glyph-numbered-and-filtered
+(deftest function-menu-ranked-glyph-numbered-and-filtered
   (async done
     (-> (with-conn
           (fn [conn]
-            (-> (seed-verbs!)
+            (-> (seed-functions!)
                 (.then
                   (fn [env]
                     (ok! env)
-                    (let [out (menu/recent-verbs-block
+                    (let [out (menu/function-menu-block
                                 {:seon.db/db @conn :seon.agent/id a-id})]
                       (is (str/includes? out "select an entry by outputting its glyph")
                           "the optionality teaching is colocated with the block")
@@ -181,22 +181,22 @@
   (async done
     (-> (with-conn
           (fn [conn]
-            (-> (seed-verbs!)
+            (-> (seed-functions!)
                 (.then (fn [env] (ok! env) (seed-toolkit!)))
                 (.then
                   (fn [env]
                     (ok! env)
                     (let [req {:seon.db/db @conn :seon.agent/id a-id}
-                          out (menu/recent-verbs-block req)
-                          offers (menu/verb-offers @conn a-id)]
+                          out (menu/function-menu-block req)
+                          offers (menu/function-offers @conn a-id)]
                       (is (str/includes? out "① (my.plan/done!")
                           "recency group still leads the numbering")
-                      (is (str/includes? out "; toolkit — more verbs")
+                      (is (str/includes? out "; toolkit — more functions")
                           "the toolkit group renders under its divider")
                       (is (str/includes? out "③ (my.plan/plan! [request] …)")
-                          "an uncalled specced toolkit verb gets the NEXT glyph (one numbering)")
+                          "an uncalled specced toolkit function gets the NEXT glyph (one numbering)")
                       (is (= 1 (count (re-seq #"my\.plan/done!" out)))
-                          "a verb already in the recency group is never duplicated")
+                          "a function already in the recency group is never duplicated")
                       (is (not (str/includes? out "no-spec-fn"))
                           "a spec-less public fn is not a toolkit entry")
                       (is (= ["my.plan/done!" "my.plan/step!" "my.plan/plan!"]
@@ -214,7 +214,7 @@
                 (.then
                   (fn [env]
                     (ok! env)
-                    (let [out (menu/recent-verbs-block
+                    (let [out (menu/function-menu-block
                                 {:seon.db/db @conn :seon.agent/id a-id})]
                       (is (not (str/includes? out "toolkit"))
                           "toolkit-cap 0 removes the toolkit group")
@@ -225,11 +225,11 @@
 
 (deftest policy-row-menu-cap-overrides-the-menu
   ;; The [:seon.typeahead/id "policy"] singleton row overrides the code
-  ;; default per knob; menu-cap 1 truncates the verb menu to ONE glyph.
+  ;; default per knob; menu-cap 1 truncates the function menu to ONE glyph.
   (async done
     (-> (with-conn
           (fn [conn]
-            (-> (seed-verbs!)
+            (-> (seed-functions!)
                 (.then (fn [env]
                          (ok! env)
                          (db/transact!
@@ -239,14 +239,14 @@
                 (.then
                   (fn [env]
                     (ok! env)
-                    (let [req   {:seon.db/db @conn :seon.agent/id a-id}
-                          verbs (menu/recent-verbs-block req)]
+                    (let [req  {:seon.db/db @conn :seon.agent/id a-id}
+                          out  (menu/function-menu-block req)]
                       (is (= 1 (:seon.typeahead/menu-cap (menu/policy @conn)))
                           "the policy row overrides the code default")
-                      (is (str/includes? verbs "① (my.plan/done!")
-                          "the top verb still renders")
-                      (is (not (str/includes? verbs "②"))
-                          "menu-cap 1 → no second verb entry"))))))
+                      (is (str/includes? out "① (my.plan/done!")
+                          "the top function still renders")
+                      (is (not (str/includes? out "②"))
+                          "menu-cap 1 → no second menu entry"))))))
           )
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))

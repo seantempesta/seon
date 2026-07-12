@@ -16,7 +16,7 @@
         store has none); skill-block renders the file body (frontmatter
         stripped, `;`-commented) + the derived token-cost footer.
 
-   The verbs read `db/*conn*` AMBIENTLY exactly as the live pod does, so the
+   The functions read `db/*conn*` AMBIENTLY exactly as the live pod does, so the
    test installs the conn on the ROOT `db/*conn*` and RE-PINS it (via `pinned`)
    right before each ambient read — a `binding` would pop at the first async
    hop (CLJS dynamic bindings don't survive `await`)."

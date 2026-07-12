@@ -64,7 +64,7 @@
    ;; judge total. :my.reading/day is not an identity attr, so a re-log mints.
    :seon.gym.predicate/expect [:count 7]}
   ;; AGGREGATION EVIDENCE: the agent reduced the stored rows to a total — via
-  ;; a sum/reduce/apply-+ over the kWh attr, the my.data verb, or a datalog
+  ;; a sum/reduce/apply-+ over the kWh attr, the my.data function, or a datalog
   ;; sum that necessarily names :my.reading/kwh. Behavioral, op-family +
   ;; attr-stem — it rewards COMPUTING without coaching the answer (a correct
   ;; hand-roll still matches). The honest path runs THROUGH this eval; the

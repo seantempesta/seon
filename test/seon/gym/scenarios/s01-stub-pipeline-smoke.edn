@@ -2,7 +2,7 @@
 ;; Proves the harness itself with ZERO spend, through the REAL agentic
 ;; loop (:scripted-replay llm injection): one scripted turn replies and
 ;; PARKS via `(wait …)`, which closes the run :waited so the loop stops
-;; (the run-model loop runs until a bound or a verb closes the run — there
+;; (the run-model loop runs until a bound or a function closes the run — there
 ;; is no zero-forms halt; a scripted-replay script must close its own run).
 ;;
 ;; NOTE: the catalog's "expected RED until §7 item 4" applies to the
@@ -51,7 +51,7 @@
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :terminates
    ;; One productive turn (message/user + wait), then the run is closed by
-   ;; the verb. Bounds the loop well below the 20-turn turn-limit without
+   ;; the function. Bounds the loop well below the 20-turn turn-limit without
    ;; pinning the exact count.
    :seon.gym.predicate/query  [:find ?t
                                :where
@@ -62,7 +62,7 @@
    :seon.gym.predicate/kind   :datalog
    :seon.gym.predicate/axis   :terminates
    ;; State is DERIVED, not stored: idle ⇔ no open run. The caused run was
-   ;; closed by the `(wait …)` verb (status :closed, reason :waited), which
+   ;; closed by the `(wait …)` function (status :closed, reason :waited), which
    ;; retracts the agent's :seon.agent/run pointer → derived :idle.
    :seon.gym.predicate/query  [:find ?r
                                :where

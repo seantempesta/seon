@@ -1,5 +1,5 @@
 (ns seon.agent.web-search-test
-  "Contract tests for `seon.agent.web/search` — the grounded web-search verb.
+  "Contract tests for `seon.agent.web/search` — the grounded web-search function.
 
    Two layers, both hermetic (NO live API, no network):
 
@@ -8,7 +8,7 @@
       (joined from the groundingSupports segments citing that chunk), the
       grounded ::answer, the executed ::queries, and an HONEST pre-cap
       ::result-count that a max-results cap does not lie about.
-   2. The verb envelope — every outcome RESOLVES to a search-response
+   2. The function envelope — every outcome RESOLVES to a search-response
       (errors are values): ungranted (SEON_WEB default-deny), no backend
       key (GEMINI_API_KEY absent), an unwired backend, and the success
       path assembled through the int/!gemini-impl test seam.
@@ -200,7 +200,7 @@
           "no support ⇒ no snippet key (absent, never nil/blank)"))))
 
 ;; ===========================================================================
-;; 2. Verb envelope.
+;; 2. Function envelope.
 ;; ===========================================================================
 
 (deftest search-success-assembles-response
@@ -324,7 +324,7 @@
       done)))
 
 ;; ===========================================================================
-;; 2b. Serper — PURE parse + the verb branch through the !serper-impl seam.
+;; 2b. Serper — PURE parse + the function branch through the !serper-impl seam.
 ;; ===========================================================================
 
 (deftest parse-serper-derives-rows-rank-honest-count

@@ -41,10 +41,9 @@ flag:
   repeated replies free). An errored turn stores WHY instead —
   `:seon.agent.turn/error`, the failure as a bounded data string — so capture
   never depends on turn success.
-- **The volatile prompt inputs, as data** — the `:relevant-source`
-  embedding-hit ids and any `result/<id>` values rendered into the prompt are
-  recorded on the turn, so nothing the model saw came from an unrecorded
-  volatile.
+- **The volatile prompt inputs, as data** — any `result/<id>` values rendered
+  into the prompt are recorded on the turn, so nothing the model saw came
+  from an unrecorded volatile.
 - The existing projections: prompt size (tokens at display), `llm-usage` /
   `llm-meta`, the `:seon.eval` component refs, status, retries.
 

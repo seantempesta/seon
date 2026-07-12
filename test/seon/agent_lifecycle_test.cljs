@@ -2,11 +2,11 @@
   "Agent lifecycle for the RUN MODEL (feature/agent-fsm cutover): state is
    DERIVED from the agent's primitives (terminated-at / open run / paused-at)
    via `seon.derive/derive-state` — there is NO stored `:seon.agent/state`. The
-   lifecycle verbs MUTATE the run; the derived state follows.
+   lifecycle functions MUTATE the run; the derived state follows.
 
    Pins the invariants the boot + loop paths depend on:
 
-     - the lifecycle VERBS — `wait` / `complete` / `pause` / `resume` /
+     - the lifecycle FUNCTIONS — `wait` / `complete` / `pause` / `resume` /
        `terminate`. `wait`/`complete`/`pause`/`resume` are ALS-scoped (default
        to `(db/current-agent-id)`) and act on the agent's OPEN run; `terminate`
        takes an explicit id and sets `:seon.agent/terminated-at`. Each returns
@@ -76,11 +76,11 @@
   (:seon.agent/state (agent/derive-status {:seon.agent/id id})))
 
 ;; ============================================================
-;; Lifecycle verbs — wait / complete / pause / resume / terminate MUTATE the
+;; Lifecycle functions — wait / complete / pause / resume / terminate MUTATE the
 ;; run; the derived state follows. Each returns the new derived state keyword.
 ;; ============================================================
 
-(deftest verbs-mutate-the-run-and-default-to-scoped-agent
+(deftest lifecycle-functions-mutate-the-run-and-default-to-scoped-agent
   (async done
     (-> (with-conn
           (fn ^:async run []

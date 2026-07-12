@@ -84,10 +84,10 @@
 (defn write-result
   "transact! envelope → :my.plan/write-response (tx-report stays
    off this surface)."
-  [verb id env]
+  [fn-name id env]
   (if (:seon.db/ok? env)
     {:my.plan/ok? true :my.plan/id id}
-    (fail (str verb ": db write failed — "
+    (fail (str fn-name ": db write failed — "
                (get-in env [:seon.db/error :seon.error/message])))))
 
 ;; --- Loud unknown-key guard (registry class: silent unknown-key acceptance
@@ -127,7 +127,7 @@
    accepted `my.plan` keys ([[cand/rank-candidates]]) + the full accepted
    set — or nil when every my.plan key is accepted. Foreign-namespace and
    injectable keys pass (the open-map convention stays intact)."
-  [verb request accepted]
+  [fn-name request accepted]
   (when-let [bad (->> (keys request)
                       (filter my-plan-key?)
                       (remove accepted)
@@ -135,7 +135,7 @@
     (let [targets (filterv my-plan-key? accepted)
           sugg    (->> (cand/rank-candidates (name bad) (mapv name targets))
                        (mapv (fn [{to :seon.repair/to}] (str ":my.plan/" to))))]
-      (fail (str verb ": unknown key " bad
+      (fail (str fn-name ": unknown key " bad
                  (when (seq sugg)
                    (str " — did you mean " (str/join " or " sugg) "?"))
                  " Accepted my.plan keys: "
@@ -144,8 +144,8 @@
 (defn check-request-keys
   "Nil, or a fail envelope, when `request` carries an unknown `my.plan` key —
    accepted set DERIVED from the registered `schema-kw` request schema."
-  [verb request schema-kw]
-  (unknown-key-fail verb request (schema-map-keys schema-kw)))
+  [fn-name request schema-kw]
+  (unknown-key-fail fn-name request (schema-map-keys schema-kw)))
 
 (defn check-plan-keys
   "The recursive plan! key guard: the top `request` map against
@@ -153,13 +153,13 @@
    depth) against `:my.plan/plan-node` — first offender → fail envelope,
    else nil. Catches a misspelled key that would otherwise vanish and mint
    a childless plan."
-  [verb request]
+  [fn-name request]
   (let [node-keys (schema-map-keys :my.plan/plan-node)
         check-node (fn check-node [node]
-                     (or (unknown-key-fail verb node node-keys)
+                     (or (unknown-key-fail fn-name node node-keys)
                          (some #(when (map? %) (check-node %))
                                (:my.plan/children node))))]
-    (or (unknown-key-fail verb request (schema-map-keys :my.plan/plan-request))
+    (or (unknown-key-fail fn-name request (schema-map-keys :my.plan/plan-request))
         (some #(when (map? %) (check-node %)) (:my.plan/children request)))))
 
 ;; --- Derived work-queue queries — all pure Datalog over the graph, with
@@ -427,10 +427,10 @@
   "First unknown `my.plan` key anywhere in document `nodes` → fail
    envelope, else nil — the recursive analog of [[check-plan-keys]] with
    the accepted set DERIVED from the registered `:my.plan/doc-node`."
-  [verb nodes]
+  [fn-name nodes]
   (let [ks    (schema-map-keys :my.plan/doc-node)
         check (fn check [node]
-                (or (unknown-key-fail verb node ks)
+                (or (unknown-key-fail fn-name node ks)
                     (some #(when (map? %) (check %)) (doc-children node))))]
     (some #(when (map? %) (check %)) nodes)))
 
@@ -447,7 +447,7 @@
    empty baseline — plan!'s authoring path IS reconcile-against-empty.
    `:after` labels resolve to any node's `:my.plan/ref` (tempid for a
    minted node, lookup-ref for an existing one)."
-  [db verb agent forest]
+  [db fn-name agent forest]
   (let [entries  (vec (map-indexed
                         (fn [i e]
                           (if (:id e)
@@ -464,11 +464,11 @@
       (some (fn [{:keys [node]}]
               (let [t (:my.plan/title node)]
                 (when (or (nil? t) (str/blank? t))
-                  {:error (str verb ": blank :my.plan/title refused — every "
+                  {:error (str fn-name ": blank :my.plan/title refused — every "
                                "step names itself.")})))
             entries)
       (when-let [dup (some (fn [[id n]] (when (< 1 n) id)) (frequencies doc-ids))]
-        {:error (str verb ": " (pr-str dup)
+        {:error (str fn-name ": " (pr-str dup)
                      " appears twice in the document — one node per step.")})
       (some (fn [{:keys [id]}]
               (when id
@@ -477,34 +477,34 @@
                 (let [s (and db (status-in db id))]
                   (cond
                     (nil? s)
-                    {:error (str verb ": no step " (pr-str id) " — keep "
+                    {:error (str fn-name ": no step " (pr-str id) " — keep "
                                  ":my.plan/id only on steps that exist; omit "
                                  "it to mint a new one.")}
                     (= :done s)
-                    {:error (str verb ": " (pr-str id) " is :done — done steps "
+                    {:error (str fn-name ": " (pr-str id) " is :done — done steps "
                                  "are immune (absent from the document by "
                                  "construction); reopen! it first if it truly "
                                  "isn't done.")}
                     (not (contains? baseline id))
-                    {:error (str verb ": step " (pr-str id) " is not in your "
+                    {:error (str fn-name ": step " (pr-str id) " is not in your "
                                  "open tree — reconcile edits only your own "
                                  "open steps.")}))))
             entries)
       (let [unknown (->> entries (mapcat #(:my.plan/after (:node %)))
                          distinct (remove l->t) seq)]
         (when unknown
-          {:error (str verb ": :my.plan/after names unknown label(s) "
+          {:error (str fn-name ": :my.plan/after names unknown label(s) "
                        (str/join ", " (map pr-str unknown))
                        " — each :after must match some node's :my.plan/ref.")}))
       (some (fn [{:keys [node]}]
               (some (fn [nid]
                       (cond
                         (nil? nid)
-                        {:error (str verb ": unrecognizable :my.plan/needs "
+                        {:error (str fn-name ": unrecognizable :my.plan/needs "
                                      "entry on «" (:my.plan/title node)
                                      "» — use {:my.plan/id \"…\"}.")}
                         (and db (nil? (status-in db nid)))
-                        {:error (str verb ": :my.plan/needs names unknown step "
+                        {:error (str fn-name ": :my.plan/needs names unknown step "
                                      (pr-str nid) ".")}))
                     (doc-needs-ids node)))
             entries)

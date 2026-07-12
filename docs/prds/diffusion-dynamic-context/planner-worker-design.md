@@ -559,12 +559,14 @@ One measurement per unit — the bench falsifies; it is not the work.
   (`plan-ledger-block` deleted from `seon.agent.ctx.menu`, its tests
   migrated to `my.plan-test`, `seon.ai.typeahead` strips `plan` only).
   Glyph-alignment finding: the ledger's ① numbering was render-side
-  only — `verb-offers` reads the recent+toolkit fn menu exclusively —
+  only — `function-offers` (`verb-offers` pre-2026-07-12) reads the
+  recent+toolkit fn menu exclusively —
   so plan-step selection glyphs retired WITH the ledger and the
   duplicate-① render ambiguity is gone.
 - **Acme testbed loadout** — **IMPLEMENTED 2026-07-11**: acme.edn
   declares `:seon.agent/ctx` (wholesale replace) — system.edn's tree
-  mirrored by hand (the accepted cost) + `:recent-verbs` 46 +
+  mirrored by hand (the accepted cost) + `:function-menu` 46 (named
+  `:recent-verbs` until 2026-07-12) +
   `:typeahead-steps` 95 (tile on by default on the TESTBED only; the
   default cluster stays minimal).
 - **P7 frontier = BOTH**: DeepSeek (topped up; key verified live) as

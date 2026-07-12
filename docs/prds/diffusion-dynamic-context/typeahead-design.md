@@ -161,7 +161,7 @@ set up." The answer is the existing block system — **the driver consumes
 a RENDER**, and what's configurable is which section fns run, per agent,
 via `install!`/`remove!` on ctx blocks. No new config surface:
 
-- **Menu sources** = section fns (recent-verbs-from-eval-log,
+- **Menu sources** = section fns (the `:function-menu` eval-log menu,
   schema-contracts-for-draft-head, kb-hits; the plan-ledger source
   retired 2026-07-11 — the `:plan` block owns the ▶/☐ step render).
   New source = new section fn. Per-agent loadout = ctx blocks, already durable,
@@ -237,7 +237,8 @@ In-band errors (`gen_error`), same contract as today.
 3. **P3 seon** — menu/plan section fns, `:seon.typeahead/policy` row,
    provider wiring, inspector tile (posterior bars + plan ledger).
    **P3a (section fns + policy row) SHIPPED 2026-07-10**:
-   `seon.agent.ctx.menu` owns `:recent-verbs` (eval-log-derived,
+   `seon.agent.ctx.menu` owns `:function-menu` (named `:recent-verbs`
+   until 2026-07-12; eval-log-derived,
    glyph-numbered fn menu — glyph + compact-card arity hint + docstring
    line 1; aliased calls resolve via each eval ns's STORED
    require-edges) and `:plan-ledger` (▶ active / ☐ open steps, done
@@ -255,7 +256,7 @@ In-band errors (`gen_error`), same contract as today.
    implemented 2026-07-11: `:plan` is THE plan surface —
    `plan-ledger-block` deleted, its ▶/☐/done-dropped contract folded
    into `my.plan.internal/plan-block` (its glyphs were never wire
-   offers, so `verb-offers` alignment was untouched).
+   offers, so `function-offers` alignment was untouched).
    **P3b (provider + inspector tile) SHIPPED 2026-07-10**:
    `seon.ai.typeahead` — the `SEON_AI_PROVIDER=typeahead` step-loop
    provider (OFF by default; endpoint/key config shared with
@@ -263,8 +264,9 @@ In-band errors (`gen_error`), same contract as today.
    now needs NO bearer key). One provider call = the mode=step loop
    through the ONE wire path (`dg/complete`; `::mode :step` +
    committed/draft/offers/policy fields added): offers =
-   `menu/verb-offers` (glyph-aligned with the rendered `:recent-verbs`
-   menu by construction), policy = the P3a row via `policy->wire`
+   `menu/function-offers` (glyph-aligned with the rendered
+   `:function-menu` menu by construction), policy = the P3a row via
+   `policy->wire`
    (worst-token-gate deliberately unmapped — probability vs the
    worker's nats gate), committed/locked + draft threaded per round,
    stop on done / stuck×2 / the new `:seon.typeahead/max-rounds` knob.
@@ -368,7 +370,7 @@ In-band errors (`gen_error`), same contract as today.
    `:namespaces` section renders — computed, no hand list), ranked by
    cross-agent global call frequency (newest-200 eval window), per-ns
    round-robin admission, new `:seon.typeahead/toolkit-cap` knob
-   (default 4); `verb-offers` mirrors the concatenation by
+   (default 4); `function-offers` mirrors the concatenation by
    construction, and the corpus generator captures it unchanged (same
    entry grammar). Regenerated corpus: task-required functions are ON
    the menu for 9/10 samples (k2's world-state picks missed a DB-read

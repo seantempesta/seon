@@ -39,8 +39,8 @@
        `seon.agent.ctx.<name>` nses: :namespaces → `seon.agent.ctx.namespaces`,
        :canvas → `seon.agent.ctx.canvas`, :warnings →
        `seon.agent.ctx.warnings`,
-       :inventory → `seon.agent.ctx.inventory`, :relevant-source →
-       `seon.agent.ctx.relevant`, :transcript → `seon.agent.ctx.transcript`;
+       :inventory → `seon.agent.ctx.inventory`,
+       :transcript → `seon.agent.ctx.transcript`;
        `config/system.edn` wires active blocks by SYMBOL (late lookup-value
        resolution), so this ns does NOT require them — they require this
        ns for the shared read API.
@@ -76,8 +76,7 @@
     [seon.render :as render]
     [seon.repl.internal :as repl-internal]
     [seon.schema :as schema]
-    [seon.ui.markdown :as md]
-    [seon.warn :as warn]))
+    [seon.ui.markdown :as md]))
 
 ;; ============================================================
 ;; Block schemas. A block is a plain map in config and a component entity on
@@ -1275,7 +1274,7 @@
    REPL/eval mechanics, and the universal load-bearing rules every agent
    needs EVERY turn (async-reads-as-synchronous, register!-before-transact,
    every-map-key-namespaced, :malli/schema-is-enforced, entities-are-
-   attributes-not-kinds). Per-VERB usage examples live in the rendered
+   attributes-not-kinds). Per-FUNCTION usage examples live in the rendered
    namespace sources (docstrings + `;;` comments); DEEP reference lives in
    the skill bodies, reachable by (my.skills/load :name). This block is the
    floor, not the depth — a skill only DEEPENS a floor rule.
@@ -2041,61 +2040,6 @@
           {:seon.render/text
            (str/join "\n\n" (for [k order]
                               (render-one-ns-ai k (data-by-kw k))))})))))
-(defn- latest-live-inbound
-  "The latest LIVE inbound message for `my-eid` in db value `db` as
-   [at content] — to ∋ me, from ≠ me, hops < `warn/hop-cap` (the same
-   window the loop's cap policy counts against). nil when none."
-  [db my-eid]
-  (->> (db/query
-         {:seon.db/db db
-          :seon.db/query
-          '[:find ?at ?content
-            :in $ ?me ?cap
-            :where
-            [?m :seon.agent.message/to ?me]
-            [?m :seon.agent.message/from ?f]
-            [(not= ?f ?me)]
-            [(get-else $ ?m :seon.agent.message/hops 0) ?h]
-            [(< ?h ?cap)]
-            [?m :seon.agent.message/at ?at]
-            [?m :seon.agent.message/content ?content]]
-          :seon.db/args [my-eid warn/hop-cap]})
-       (sort-by #(.getTime ^js (first %)))
-       last))
-
-;; `:seon.db/db` (the registered `:any` db-value boundary, seon.render) +
-;; `:string` id — so the schema compiles regardless of cross-ns load order
-;; (referencing `:seon.agent/id`, registered later in seon.agent, would break
-;; a fresh build).
-(schema/register! :seon.agent.ctx/retrieval-query-request
-                  [:map
-                   [:seon.db/db    :seon.db/db]
-                   [:seon.agent/id :string]])
-
-(defn retrieval-query
-  "The text to embed for THIS turn's embedding retrieval.
-
-   The latest
-   LIVE inbound message's content (to ∋ me, from ≠ me, hops < `warn/hop-cap` —
-   the same window the loop's cap policy uses, via [[latest-live-inbound]]),
-   falling back to the most-recent message of MY conversation. Returns \"\"
-   when I have no messages at all (the caller skips the wire call on blank).
-
-   SYNC — reads the live db value the caller threads in. Does NOT add the
-   retrieval-instruction prefix (the wire-server's `knn-search` adds it).
-   Called by `seon.agent/run-turn!` to build the prefetch query."
-  {:malli/schema [:=> [:cat :seon.agent.ctx/retrieval-query-request] :string]}
-  [{:seon.db/keys [db] :seon.agent/keys [id]}]
-  (let [my-eid (:db/id (db/entity-lazy {:seon.db/db db
-                                        :seon.db/ref [:seon.agent/id id]}))
-        live   (when my-eid (latest-live-inbound db my-eid))]
-    (cond
-      (some? live) (second live)
-      :else        (or (some-> (last (messages {:seon.agent/id id
-                                                :seon.agent/n 1
-                                                :seon.db/db db}))
-                               :seon.agent.message/content)
-                       ""))))
 
 ;; The HTML TWIN of a rendered section (debug-view-section-twins-2026-06-18):
 ;; the dormant `:seon.render/html` slot, resolved through
@@ -2122,7 +2066,7 @@
    STABLE prefix (every section through :namespaces — byte-stable
    within a session given the deterministic rendering) and the
    VOLATILE tail (everything after: canvas, warnings,
-   plan, relevant-source, inventory, transcript).
+   plan, inventory, transcript).
 
    In-band because the agent loop hands providers ONE assembled
    string (`llm-fn` is fn-of-ctx-string): [[split-context]] recovers

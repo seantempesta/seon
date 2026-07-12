@@ -68,7 +68,7 @@ so every stored basis-t means the same thing inside the fork. The source's
 `blobs/` (turn prompt/reply content) is copied alongside so turn replay
 works. Boot then follows `cluster create` exactly — the fork pod's own
 `ensure-db` registers the db, so the fork is indistinguishable from a
-normal cluster (feed, replay, inspect verbs all work; the pod's boot-seed
+normal cluster (feed, replay, inspect functions all work; the pod's boot-seed
 appends its usual idempotent txs, moving the head slightly past `t` while
 the world-state at `t` stays intact). The fork store is independent by
 construction: `bin/seon cluster destroy <fork-name>` removes it without
@@ -215,7 +215,7 @@ This should be rare. Normal Ctrl-C and most other signals trigger the trap that 
 
 - **Caddy** (port 3030) — separate process, not currently supervised. Run manually if you need HTTPS proxy.
 - **MCP servers** (`bin/mcp-server`, `bin/mcp-server-cljs`) — launched by Claude Code via the MCP integration, not supervised here.
-- **JVM REPL operations** `[JVM track — paused]` (`(user/reload)`, `(user/reset)`, `(user/restart-db!)`) — these are inside-the-JVM verbs that operate on Integrant components, not on OS processes. They belong to the paused JVM main-app track; the active track is the CLJS pod (`bin/seon ... pod`). Use them for in-process JVM operations when working that track; use `bin/seon restart jvm` only when you actually need a fresh JVM.
+- **JVM REPL operations** `[JVM track — paused]` (`(user/reload)`, `(user/reset)`, `(user/restart-db!)`) — these are inside-the-JVM functions that operate on Integrant components, not on OS processes. They belong to the paused JVM main-app track; the active track is the CLJS pod (`bin/seon ... pod`). Use them for in-process JVM operations when working that track; use `bin/seon restart jvm` only when you actually need a fresh JVM.
 
 ## Cross-references
 

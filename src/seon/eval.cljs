@@ -4442,7 +4442,7 @@
    path a normal form takes.
 
    `::error` (a message string) makes a failed row (errors-as-values,
-   kind `:seon.eval/repl-verb`); otherwise `::value` is stashed + bound
+   kind `:seon.eval/repl-form`); otherwise `::value` is stashed + bound
    at `result/<id>` and an ok row records. `::tee` tx ops ride the same
    tx. Mutates the caller's fold counters like eval-form-entry!."
   [{::keys [compile-state current-ns n-ok n-fail narration source
@@ -4451,7 +4451,7 @@
     turn-id :seon.agent.turn/id-of-turn}]
   (let [result (if error
                  {::ok? false
-                  :seon/error {:seon.error/kind    :seon.eval/repl-verb
+                  :seon/error {:seon.error/kind    :seon.eval/repl-form
                                :seon.error/message error}}
                  {::ok? true ::value value})]
     (when (::ok? result)

@@ -61,7 +61,7 @@
 ;; additive). Value type = the existing `:my.skills/name` handle.
 (schema/register! ::load [:vector {:default [:repl]} :my.skills/name])
 
-;; Verb/render value shapes — map-out results + the derived catalog entry.
+;; Function/render value shapes — map-out results + the derived catalog entry.
 (schema/register! ::loaded? :boolean)
 (schema/register! ::ok?     :boolean)
 (schema/register! ::message :string)
@@ -220,7 +220,7 @@
                   :my.skills/description  d
                   ::loaded?              (contains? loaded n)})))))
 
-;;; VERBS — thin wrappers over install!/remove! + a derived row query. The
+;;; FUNCTIONS — thin wrappers over install!/remove! + a derived row query. The
 ;;; agent gets DATA (the eval path auto-awaits the ^:async ones).
 
 (defn ^:async load

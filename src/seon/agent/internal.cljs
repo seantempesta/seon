@@ -10,11 +10,11 @@
 
 (defn no-agent-error
   "The error envelope returned when a scope-defaulting function runs with no
-   agent in the ALS scope. `verb` is the function name (string) used to build
-   a guiding message that points the caller at `(seon.db/with-agent …)`.
+   agent in the ALS scope. `fn-name` is the function name (string) used to
+   build a guiding message that points the caller at `(seon.db/with-agent …)`.
    Errors are values — this is a value, not a throw."
-  [verb]
+  [fn-name]
   {:seon.db/ok? false
    :seon.db/error {:seon.error/message
-                   (str verb ": no agent in scope — call inside "
+                   (str fn-name ": no agent in scope — call inside "
                         "(seon.db/with-agent …).")}})

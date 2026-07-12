@@ -39,8 +39,8 @@
    ;; override that omits :seon.agent/ctx inherits system.edn's tree).
    ;; ACCEPTED COST: system.edn's tree rows below are a BY-HAND MIRROR — any
    ;; system.edn tree change must be copied here manually or acme drifts.
-   ;; The testbed additions over the mirrored base: :recent-verbs 46 (the
-   ;; glyph verb menu) + :typeahead-steps 95 (the step-loop tile, on by
+   ;; The testbed additions over the mirrored base: :function-menu 46 (the
+   ;; glyph function menu) + :typeahead-steps 95 (the step-loop tile, on by
    ;; default on the TESTBED only; the default cluster stays minimal).
    ;; NO :plan-ledger — retired 2026-07-11 (:plan is THE plan surface).
    :seon.agent/ctx
@@ -51,8 +51,8 @@
     {:seon.agent.ctx/name :plan :seon.agent.ctx/priority 45
      :seon.render/ai my.plan.internal/plan-block
      :seon.render/html my.plan.internal/plan-block-html}
-    {:seon.agent.ctx/name :recent-verbs :seon.agent.ctx/priority 46
-     :seon.render/ai seon.agent.ctx.menu/recent-verbs-block}
+    {:seon.agent.ctx/name :function-menu :seon.agent.ctx/priority 46
+     :seon.render/ai seon.agent.ctx.menu/function-menu-block}
     {:seon.agent.ctx/name :typeahead-steps :seon.agent.ctx/priority 95
      :seon.render/ai seon.agent.ctx.typeahead-steps/steps-ai
      :seon.render/html seon.agent.ctx.typeahead-steps/steps-tile-html}

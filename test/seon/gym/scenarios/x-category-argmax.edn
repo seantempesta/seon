@@ -54,7 +54,7 @@
    ;; doubled judge total.
    :seon.gym.predicate/expect [:count 5]}
   ;; AGGREGATION EVIDENCE: the agent grouped the stored rows by category —
-  ;; either via the my.data verb (group-sum), Clojure group-by, or a datalog
+  ;; either via the my.data function (group-sum), Clojure group-by, or a datalog
   ;; grouping that necessarily names :my.expense/category. The alternation
   ;; rewards using the aggregation surface without coaching the answer (a
   ;; correct hand-roll that groups by category still matches). Behavioral.
