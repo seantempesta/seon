@@ -60,7 +60,6 @@
 (schema/register! :seon.agent.fs/ok?      :boolean)
 (schema/register! :seon.agent.fs/error    :string)
 (schema/register! :seon.agent.fs/entries  [:vector :string])
-(schema/register! :seon.agent.fs/size     :int)
 (schema/register! :seon.agent.fs/dir?     :boolean)
 (schema/register! :seon.agent.fs/file?    :boolean)
 (schema/register! :seon.agent.fs/mtime    :any) ; js/Date — :inst varies across CLJS reader registries
@@ -185,7 +184,6 @@
   [:map
    [:seon.agent.fs/ok?    :boolean]
    [:seon.agent.fs/path   :string]
-   [:seon.agent.fs/size   {:optional true} :int]
    [:seon.agent.fs/dir?   {:optional true} :boolean]
    [:seon.agent.fs/file?  {:optional true} :boolean]
    [:seon.agent.fs/mtime  {:optional true} :any]
@@ -518,7 +516,7 @@
     :wasi (int/wasi-pending path "list-dir")))
 
 (defn stat
-  "Stat a path (sync). Returns size, mtime, dir?/file? booleans."
+  "Stat a path (sync). Returns mtime and dir?/file? booleans."
   {:malli/schema [:=> [:cat :seon.agent.fs/stat-request] :seon.agent.fs/stat-response]}
   [{:seon.agent.fs/keys [path]}]
   (case (platform/host)
@@ -528,7 +526,6 @@
                     (let [s (.statSync fs path)]
                       {:seon.agent.fs/ok?    true
                        :seon.agent.fs/path   path
-                       :seon.agent.fs/size   (.-size s)
                        :seon.agent.fs/dir?   (.isDirectory s)
                        :seon.agent.fs/file?  (.isFile s)
                        :seon.agent.fs/mtime  (.-mtime s)})

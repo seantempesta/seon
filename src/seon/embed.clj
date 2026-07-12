@@ -90,6 +90,7 @@
     ;; exists" the fork's :proximum factory does (committed-index-exists?*).
     [konserve.core :as k]
     [proximum.writing :as pwr]
+    [seon.ai.tokens :as tokens]
     [seon.db.datahike.schema :as dh-schema]
     [seon.schema :as schema]
     ;; The write-path SEAM points THIS way (embed -> wire/registry), never the
@@ -699,23 +700,18 @@
   "Base delay for exponential backoff: retry `n` waits ~`base`*2^n ms + jitter."
   500)
 
-(defn- estimate-tokens
-  "Rough token estimate for `s` — the project chars/4 convention (no tokenizer
-   dep). Slight over-estimate on dense text, the safe direction."
-  [^String s]
-  (quot (count s) 4))
-
 (defn- truncate-to-token-cap
   "Truncate `text` so its estimated tokens never exceed `max-text-tokens` (the
-   per-input model cap). Logs when it truncates. Returns `text` unchanged when
+  per-input model cap). Logs when it truncates. Returns `text` unchanged when
    already within cap."
   [^String text]
-  (let [cap-chars (* max-text-tokens 4)]
+  (let [cap-chars (tokens/estimate-chars max-text-tokens)]
     (if (> (count text) cap-chars)
-      (do (log/warn "embed: truncating oversized input from" (count text)
-                    "chars (~" (estimate-tokens text) "tokens) to" cap-chars
-                    "chars (~" max-text-tokens "tokens) — exceeds per-input cap")
-          (subs text 0 cap-chars))
+      (let [truncated (subs text 0 cap-chars)]
+        (log/warn "embed: truncating oversized input from"
+                  (tokens/estimate text) "tokens to"
+                  (tokens/estimate truncated) "tokens — exceeds per-input cap")
+        truncated)
       text)))
 
 (defn- plan-batches
@@ -727,7 +723,7 @@
   (let [{:keys [batches cur]}
         (reduce
          (fn [{:keys [batches cur cur-tokens]} [_ text :as it]]
-           (let [t (estimate-tokens text)]
+           (let [t (tokens/estimate text)]
              (if (and (seq cur)
                       (or (>= (count cur) max-batch-texts)
                           (> (+ cur-tokens t) max-batch-tokens)))

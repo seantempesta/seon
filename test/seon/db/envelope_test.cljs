@@ -22,6 +22,7 @@
   (:require
     [cljs.test :as t :refer [deftest is testing async]]
     [datahike.api :as d]
+    [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.db.internal :as internal]
     [seon.schema :as schema]
@@ -529,19 +530,20 @@
 
 ;; ---------------------------------------------------------------------------
 ;; 4c. #46 — a FAILED transact! returns ONE concise envelope. The
-;;     downstream report: a trivial type mismatch ballooned to ~3600 chars
+;;     downstream report: a trivial type mismatch ballooned past the display
+;;     budget
 ;;     because the same Malli explanation echoed across :seon.error/message,
 ;;     :seon.error/ex-data, :seon.error/data, and :seon.db/malli-explanation,
-;;     plus a multi-kb :seon.error/stack and the opaque :seon.error/raw —
+;;     plus a large :seon.error/stack and the opaque :seon.error/raw —
 ;;     tripping the agent-display truncation. [[internal/compact-error-map]]
 ;;     keeps the guiding message + a SHORT path/expected/got and drops the
 ;;     redundant copies.
 ;; ---------------------------------------------------------------------------
 
-(def ^:private display-truncation-limit
+(def ^:private display-truncation-token-limit
   "The agent-display truncation the bloated envelope tripped (#46). A
    failure envelope must serialize well under this."
-  1500)
+  (tokens/chars->tokens 1500))
 
 (deftest validation-failure-envelope-is-compact
   (async done
@@ -553,11 +555,11 @@
         (.then (fn [{ok?   :seon.db/ok?
                      error :seon.db/error :as env}]
                  (is (false? ok?) "resolves to ok? false")
-                 (let [total (count (pr-str env))
+                 (let [total (tokens/estimate (pr-str env))
                        data  (:seon.error/data error)]
                    ;; bounded — well under the display truncation limit
-                   (is (< total display-truncation-limit)
-                       (str "envelope must be compact, was " total " chars"))
+                   (is (< total display-truncation-token-limit)
+                       (str "envelope must be compact, was " total " tokens"))
                    ;; the duplicated/verbose keys are GONE
                    (is (not (contains? error :seon.error/ex-data))
                        ":seon.error/ex-data (a dup of :seon.error/data) dropped")
@@ -580,7 +582,7 @@
         (settle! done))))
 
 (deftest huge-bad-value-stays-bounded
-  ;; A multi-kb bad value must NOT balloon the envelope — :seon.db/actual-value
+  ;; A very large bad value must NOT balloon the envelope — :seon.db/actual-value
   ;; is truncated. Pins that the bound holds for arbitrary value size.
   (async done
     (-> (fresh-conn)
@@ -592,8 +594,9 @@
         (.then (fn [{ok?   :seon.db/ok?
                      error :seon.db/error :as env}]
                  (is (false? ok?))
-                 (is (< (count (pr-str env)) display-truncation-limit)
-                     "a 5000-char bad value still yields a compact envelope")
+                 (is (< (tokens/estimate (pr-str env))
+                        display-truncation-token-limit)
+                     "a very large bad value still yields a compact envelope")
                  (is (<= (count (str (:seon.db/actual-value
                                        (:seon.error/data error))))
                          110)
@@ -613,7 +616,7 @@
                         "current schema")
                    {:attribute :seon.nope/x}))]
     (is (false? ok?))
-    (is (< (count (pr-str env)) display-truncation-limit)
+    (is (< (tokens/estimate (pr-str env)) display-truncation-token-limit)
         "translated failure envelope is compact")
     (is (re-find #"seon\.schema/register!" (:seon.error/message error))
         "guiding message survives compaction")

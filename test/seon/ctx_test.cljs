@@ -299,7 +299,7 @@
      :seon.render/sections       (mapv :seon.agent.ctx/name (:seon.agent.ctx/children root))
      :seon.render/section-texts  section-texts
      :seon.render/section-html   section-html
-     :seon.render/token-estimate (quot (count text) 4)}))
+     :seon.render/token-estimate (tokens/estimate text)}))
 
 (defn- section-text
   [id nm]

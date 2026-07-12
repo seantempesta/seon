@@ -88,6 +88,23 @@
       (is (str/includes? (:seon.agent.fs/error out-scope) "allowed-roots")
           "outside the granted root → the allowlist denial"))))
 
+(deftest stat-exposes-file-state-without-a-raw-size
+  (let [root (.cwd js/process)
+        path (.resolve npath root "deps.edn")]
+    (fs/configure! {:seon.agent.fs/allowed-roots [root]
+                    :seon.agent.fs/read-only?    true})
+    (let [result (fs/stat {:seon.agent.fs/path path})]
+      (is (true? (:seon.agent.fs/ok? result)))
+      (is (= #{:seon.agent.fs/ok?
+               :seon.agent.fs/path
+               :seon.agent.fs/dir?
+               :seon.agent.fs/file?
+               :seon.agent.fs/mtime}
+             (set (keys result)))
+          "stat returns path, time, and file-state facts only")
+      (is (true? (:seon.agent.fs/file? result)))
+      (is (false? (:seon.agent.fs/dir? result))))))
+
 ;; ============================================================
 ;; SEON_FS_LOCK — host-immutable grant (consumer ask 8)
 ;; ============================================================

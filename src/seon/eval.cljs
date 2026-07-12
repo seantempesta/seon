@@ -2906,7 +2906,7 @@
 (defn cap-edn
   "Truncate a pr-str'd value string to `store-edn-cap`.
 
-   Appends an elision marker reporting how many chars were dropped.
+   Appends an elision marker reporting the estimated tokens omitted.
    Nil-safe. Mirrors `seon.agent/cap-result` but applies the larger
    store-time cap at the persistence boundary."
   {:malli/schema
@@ -2918,7 +2918,8 @@
    (let [s (str s)
          n (count s)]
      (if (> n limit)
-       (str (subs s 0 limit) " …⟨" (- n limit) " chars elided⟩")
+       (str (subs s 0 limit) " …⟨"
+            (tokens/chars->tokens (- n limit)) " tokens elided⟩")
        s))))
 
 (def ^:private known-error-kinds

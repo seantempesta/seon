@@ -24,7 +24,20 @@
   (:require
     [cljs.test :as t :refer [deftest is testing]]
     [clojure.string :as str]
+    [seon.ai.tokens :as tokens]
     [seon.eval :as seval]))
+
+(defn- reported-elision-tokens
+  "The token estimate carried by a generated cap marker, or nil."
+  [s]
+  (some-> (re-find #"⟨(\d+) tokens elided⟩" s)
+          second
+          (js/parseInt 10)))
+
+(defn- raw-text-size-unit?
+  "True when generated reporting text exposes a numeric raw text-size unit."
+  [s]
+  (boolean (re-find #"(?i)\d+\s*(?:chars?|characters?|bytes?|[kmg]b)\b" s)))
 
 ;; ---------------------------------------------------------------------------
 ;; cap-edn — the store-time chokepoint for eval datoms (record-eval!'s
@@ -39,7 +52,8 @@
 
 (deftest cap-edn-truncates-a-huge-string-with-an-elision-marker
   (let [huge   (apply str (repeat (* 5 1024 1024) "x")) ; 5 MB string
-        capped (seval/cap-edn huge)]
+        capped (seval/cap-edn huge)
+        marker (subs capped seval/store-edn-cap)]
     (testing "stored string is bounded — never the multi-MB original"
       (is (<= (count capped)
               (+ seval/store-edn-cap 64))
@@ -47,12 +61,10 @@
     (testing "the kept prefix is the head of the original value"
       (is (= (subs huge 0 seval/store-edn-cap)
              (subs capped 0 seval/store-edn-cap))))
-    (testing "elision marker reports the dropped count"
-      (is (re-find #"⟨\d+ chars elided⟩" capped))
-      (is (re-find (re-pattern (str "⟨"
-                                    (- (count huge) seval/store-edn-cap)
-                                    " chars elided⟩"))
-                   capped)))))
+    (testing "the generated marker reports the canonical omitted-token estimate"
+      (is (= (tokens/chars->tokens (- (count huge) seval/store-edn-cap))
+             (reported-elision-tokens marker)))
+      (is (false? (raw-text-size-unit? marker))))))
 
 (deftest cap-edn-leaves-a-normal-small-result-verbatim
   ;; Regression: the cap must not truncate ordinary results.
@@ -60,7 +72,7 @@
     (is (< (count small) seval/store-edn-cap))
     (is (= small (seval/cap-edn small))
         "small string passes through unchanged — no marker, no truncation")
-    (is (not (re-find #"chars elided" (seval/cap-edn small))))))
+    (is (nil? (reported-elision-tokens (seval/cap-edn small))))))
 
 (deftest cap-edn-is-nil-safe-and-stringifies
   ;; record-eval!'s pr-str fallback can hand cap-edn non-strings.
@@ -68,7 +80,12 @@
   (is (= "123" (seval/cap-edn 123))))
 
 (deftest cap-edn-honours-an-explicit-limit
-  (is (= "abc …⟨2 chars elided⟩" (seval/cap-edn "abcde" 3)))
+  (let [source "abcdefghijk"
+        capped (seval/cap-edn source 3)]
+    (is (str/starts-with? capped "abc"))
+    (is (= (tokens/chars->tokens (- (count source) 3))
+           (reported-elision-tokens (subs capped 3))))
+    (is (false? (raw-text-size-unit? (subs capped 3)))))
   (is (= "abc" (seval/cap-edn "abc" 3))))
 
 ;; ---------------------------------------------------------------------------

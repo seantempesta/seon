@@ -37,7 +37,27 @@ operational coordinates or internal resource limits. Keep them private. At the
 surface, either omit the internal quantity or expose text size through the one
 canonical estimator in `src/seon/ai/tokens.cljc`.
 
-No production code was changed by this audit.
+The audit itself made no production change. Its required active-path follow-up
+is now implemented on the runtime-reliability branch; the disposition below
+separates that work from intentionally deferred surfaces.
+
+## Implementation disposition (2026-07-12)
+
+| Finding | Disposition |
+|---|---|
+| Persisted eval elision | Marker now reports the canonical omitted-token estimate while retaining the existing internal storage boundary. |
+| Filesystem stat | The unlabeled raw size attribute is removed from registration, response schema, and successful responses. |
+| Web fetch request | The public transport-size dial is removed; the private streaming RAM guard remains fixed inside the transport. |
+| Shell capture guidance | Public docs and generated recovery hints omit the private RAM quantity; output totals remain canonical token estimates. |
+| Gym diagnostics | Transcript predicate details report the canonical transcript token estimate. |
+| Optional embedding writer | Batch planning and truncation logging use `seon.ai.tokens`; the local estimator is deleted. |
+| Active test/report cleanup | The context helper and envelope diagnostics use the canonical estimator; behavioral tests inspect units and shapes instead of replacement prose. |
+| Legacy JVM MCP / paused JVM UI | Deferred to deletion/consolidation; no second estimator was added. |
+| Dormant shared log component | Deferred to the UI-consolidation deletion decision. |
+| ACME-only typeahead tile | Reported only; the separately owned ACME path was not changed. |
+
+Focused CLJS and JVM verification is recorded in the runtime-reliability
+roadmap rather than duplicated in this research artifact.
 
 ## Scope and method
 

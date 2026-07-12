@@ -1042,11 +1042,13 @@
             ;; prompt-blob predicates — see [[normalize-ws]]).
             :transcript-includes
             [(str/includes? (normalize-ws transcript) (normalize-ws text))
-             (str "transcript " (count transcript) " chars; looked for " (pr-str text))]
+             (str "transcript " (tokens/estimate transcript)
+                  " tokens; looked for " (pr-str text))]
 
             :transcript-excludes
             [(not (str/includes? (normalize-ws transcript) (normalize-ws text)))
-             (str "transcript " (count transcript) " chars; must NOT contain " (pr-str text))]
+             (str "transcript " (tokens/estimate transcript)
+                  " tokens; must NOT contain " (pr-str text))]
 
             :first-eval-matches
             (let [src (first-eval-source dbv agent-id)]

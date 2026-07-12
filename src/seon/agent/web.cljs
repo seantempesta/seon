@@ -69,7 +69,6 @@
 
 ;; request dials.
 (schema/register! ::timeout-ms         :int)  ; default 30000
-(schema/register! ::max-bytes          :int)  ; default 2000000
 (schema/register! ::max-preview-tokens :int)  ; default 2000
 (schema/register! ::max-age-ms         :int)  ; default 0 = always refetch
 
@@ -110,7 +109,6 @@
   [:map
    [::url                ::url]
    [::timeout-ms         {:optional true} ::timeout-ms]
-   [::max-bytes          {:optional true} ::max-bytes]
    [::max-preview-tokens {:optional true} ::max-preview-tokens]
    [::max-age-ms         {:optional true} ::max-age-ms]])
 
@@ -291,7 +289,6 @@
    throw.
 
    Dials (all optional): :seon.agent.web/timeout-ms (30000),
-   :seon.agent.web/max-bytes (2000000, streamed cap → :truncated? true),
    :seon.agent.web/max-preview-tokens (2000),
    :seon.agent.web/max-age-ms (0 = always refetch; >0 returns a
    young-enough prior fetch from the DB, :seon.agent.web/cached? true).
@@ -301,9 +298,8 @@
      (await (seon.agent.web/fetch {:seon.agent.web/url \"https://example.com\"}))
      ; ⟹ «map: ::ok? true, ::status 200, ::extractor :readability, ::total-tokens 84, ::blob-hash \"9f86d0…\", ::preview \"# …\"»"
   {:malli/schema [:=> [:cat ::fetch-request] ::fetch-response]}
-  [{::keys [url timeout-ms max-bytes max-preview-tokens max-age-ms]
+  [{::keys [url timeout-ms max-preview-tokens max-age-ms]
     :or {timeout-ms         int/default-timeout-ms
-         max-bytes          int/default-max-bytes
          max-preview-tokens int/default-max-preview-tokens
          max-age-ms         0}}]
   (try
@@ -320,7 +316,8 @@
       :else
       (if-let [cached (and (pos? max-age-ms) (int/fresh-projection url max-age-ms))]
         (projection->response cached max-preview-tokens)
-        (let [res (await (int/transport url timeout-ms max-bytes int/default-max-redirects))]
+        (let [res (await (int/transport url timeout-ms int/default-max-bytes
+                                        int/default-max-redirects))]
           (cond
             (not (::ok? res))
             res

@@ -11,9 +11,9 @@
    4. Gate: SEON_SHELL unset = default-deny envelope; a :seon.agent.shell/cwd
       outside the seon.agent.fs allowlist = denial envelope; an
       allowlisted cwd is honored.
-   5. Output discipline: stdout beyond :seon.agent.shell/max-output-tokens is
-      clipped with HONEST metadata (full-size :seon.agent.shell/out-tokens,
-      :seon.agent.shell/truncated? true, a :seon.agent.shell/hint naming the knobs).
+   5. Output discipline: stdout is returned in full with canonical token
+      metadata; crossing the private RAM guard is marked honestly and the
+      recovery hint points to the background-stream path.
    6. stdin is piped as DATA and always closed (a stdin-reader like
       `cat` sees EOF instead of hanging); `py-run` ships Python source
       via `python3 -` stdin — no shell concatenation, no quoting games.
@@ -35,6 +35,7 @@
     [seon.agent.run :as run]
     [seon.agent.shell :as shell]
     [seon.agent.testrun :as testrun]
+    [seon.ai.tokens :as tokens]
     [seon.client :as client]
     [seon.db :as db]
     [seon.test.async :refer [settle!]]))
@@ -98,7 +99,8 @@
                  (is (= 0 exit))
                  (is (= "hi-out" out))
                  (is (= "hi-err" err))
-                 (is (= 1 ot) "honest full-stdout token estimate (6 chars / 4)")
+                 (is (= (tokens/estimate out) ot)
+                     "stdout metadata uses the canonical token estimator")
                  (is (false? to?))
                  (is (false? trunc?))))
         (settle! done))))
@@ -188,7 +190,7 @@
 
 ;; ---------------------------------------------------------------------------
 ;; 5. Output is FULL data, no function-level token cap — display economy is the
-;;    render layer's. Only bound = the ~2MB/stream RAM ceiling.
+;;    render layer's. A private per-stream RAM guard remains.
 ;; ---------------------------------------------------------------------------
 
 (deftest output-is-returned-in-full-with-honest-tokens
@@ -202,14 +204,15 @@
                      trunc? :seon.agent.shell/truncated?}]
                  (is (true? ok?))
                  (is (= 40000 (count out)) "the FULL stream is returned — no function-level clip")
-                 (is (= 10000 ot) "HONEST full-stdout token size (40000 chars / 4)")
-                 (is (false? trunc?) "well under the 2MB RAM ceiling — nothing dropped")))
+                 (is (= (tokens/estimate out) ot)
+                     "full-stream metadata uses the canonical token estimator")
+                 (is (false? trunc?) "the private RAM guard did not drop output")))
         (settle! done))))
 
 (deftest over-ram-ceiling-truncates-honestly-with-hint
   (async done
-    ;; > 2MB on one stream → Node kills the child at maxBuffer; the captured
-    ;; head is the answer, truncated? true, hint points at run-bg!.
+    ;; Exceed the private maxBuffer guard: the captured head is the answer,
+    ;; truncated? is true, and the hint points at run-bg!.
     (-> (resolves!
           (shell/run {:seon.agent.shell/cmd  node-bin
                       :seon.agent.shell/args ["-e" "process.stdout.write('x'.repeat(2500000))"]}))
@@ -217,8 +220,11 @@
                      trunc? :seon.agent.shell/truncated?
                      hint   :seon.agent.shell/hint}]
                  (is (true? ok?) "the process RAN — the partial head is still the answer")
-                 (is (true? trunc?) "the 2MB capture ceiling was hit")
+                 (is (true? trunc?) "the private capture ceiling was hit")
                  (is (string? hint))
+                 (is (not (re-find #"(?i)\d+\s*(?:chars?|characters?|bytes?|[kmg]b)\b"
+                                   hint))
+                     "the generated recovery hint does not expose raw size units")
                  (is (re-find #"run-bg!" hint) "hint points at the unbounded-stream escape")))
         (settle! done))))
 

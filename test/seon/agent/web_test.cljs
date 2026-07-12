@@ -14,7 +14,8 @@
       (the shell ok?-means-RAN precedent); only a genuine transport
       failure (thrown/rejected fetch) is an error value.
    4. Binary content is a legible refusal naming the content-type.
-   5. An oversized body is read up to the byte cap with :truncated? true.
+   5. The private transport ceiling bounds streamed body reads and marks the
+      result truncated; it is not a caller-controlled public request dial.
 
    Hermetic: the transport (int/!fetch-impl), DNS resolver
    (int/!lookup-impl), and web-access POLICY (int/!policy-override) are
@@ -35,7 +36,8 @@
     [seon.agent.web.internal :as int]
     [seon.ai.tokens :as tokens]
     [seon.client :as client]
-    [seon.db :as db]))
+    [seon.db :as db]
+    [seon.schema :as schema]))
 
 ;; ---------------------------------------------------------------------------
 ;; Fixtures — pid-scoped blob dir, SEON_WEB grant, faked transport/DNS.
@@ -142,7 +144,7 @@
                      (is (= "Hello Title" title) "the <title> rode through extraction")
                      (is (contains? #{:readability :raw} extr) "honest extractor provenance")
                      (is (some? (re-matches #"[0-9a-f]{64}" hash)) "full text lands in a content-addressed blob")
-                     (is (false? trunc?) "body was well under the byte cap")
+                     (is (false? trunc?) "body stayed within the private transport ceiling")
                      ;; honest totals — the preview is a SMALL slice, never the whole
                      (is (> total ptok) "total-tokens exceeds the capped preview")
                      (is (<= ptok 6) "preview honors max-preview-tokens (+ellipsis)")
@@ -312,28 +314,32 @@
       done)))
 
 ;; ---------------------------------------------------------------------------
-;; 5. Oversized body — read up to the byte cap, :truncated? true.
+;; 5. The transport's RAM guard stays private; public callers control only the
+;; token-capped decoded preview.
 ;; ---------------------------------------------------------------------------
 
-(deftest oversized-body-truncates-honestly
+(deftest fetch-request-exposes-only-the-token-content-size-dial
+  (let [request-keys (->> (rest (schema/schema-definition
+                                  :seon.agent.web/fetch-request))
+                          (keep #(when (vector? %) (first %)))
+                          set)]
+    (is (= #{:seon.agent.web/url
+             :seon.agent.web/timeout-ms
+             :seon.agent.web/max-preview-tokens
+             :seon.agent.web/max-age-ms}
+           request-keys)
+        "the fetch request has one public content-size dial, denominated in tokens")))
+
+(deftest private-body-reader-enforces-its-transport-ceiling
   (async done
-    (reset! int/!lookup-impl (public-dns))
-    (reset! int/!fetch-impl
-            (fake-fetch (fn [_] (js/Response. (apply str (repeat 5000 "A"))
-                                              #js {:status 200
-                                                   :headers #js {"content-type" "text/plain"}}))))
-    (run-test
-      (fn [conn]
-        (-> (web/fetch {:seon.agent.web/url       "https://example.com/big.txt"
-                        :seon.agent.web/max-bytes 64})
-            (.then (fn [{ok?    :seon.agent.web/ok?
-                         extr   :seon.agent.web/extractor
-                         trunc? :seon.agent.web/truncated?
-                         hash   :seon.agent.web/blob-hash}]
-                     (set! db/*conn* conn)
-                     (is (true? ok?) "a text/plain body is passthrough-extracted")
-                     (is (= :text extr))
-                     (is (true? trunc?) "the body hit the byte cap")
-                     (is (<= (count (:my.blob/content (blob/get {:my.blob/hash hash}))) 70)
-                         "only the capped bytes were stored")))))
-      done)))
+    (let [private-limit 64
+          response      (js/Response. (apply str (repeat 5000 "A")))]
+      (-> (int/read-body-capped response private-limit)
+          (.then (fn [^js body]
+                   (is (true? (.-truncated body)))
+                   (is (= private-limit (count (.-text body)))
+                       "the internal reader retains only the bounded prefix")
+                   (done)))
+          (.catch (fn [e]
+                    (is false (str "private body reader rejected — " e))
+                    (done)))))))

@@ -23,10 +23,10 @@
 
    ## Output discipline
 
-   stdout/stderr in the envelope are TOKEN-CAPPED (default 2048/stream)
-   with honest metadata: `:seon.agent.shell/out-tokens` / `err-tokens` always
-   carry the FULL captured size, `:seon.agent.shell/truncated?` flags any
-   drop, and `:seon.agent.shell/hint` names how to get more.
+   stdout/stderr in the envelope carry the full captured streams with honest
+   token metadata: `:seon.agent.shell/out-tokens` / `err-tokens` report their
+   size, `:seon.agent.shell/truncated?` flags any RAM-guard drop, and
+   `:seon.agent.shell/hint` names how to get more.
 
    ## Worked examples
 
@@ -66,7 +66,7 @@
 (schema/register! :seon.agent.shell/out-tokens :int)               ; honest FULL stdout size (tokens)
 (schema/register! :seon.agent.shell/err-tokens :int)               ; honest FULL stderr size (tokens)
 (schema/register! :seon.agent.shell/timed-out? :boolean)
-(schema/register! :seon.agent.shell/truncated? :boolean)           ; output overflowed the byte-capture ceiling (RAM guard)
+(schema/register! :seon.agent.shell/truncated? :boolean)           ; output overflowed the private RAM guard
 (schema/register! :seon.agent.shell/hint       :string)
 (schema/register! :seon.agent.shell/granted?   :boolean)
 
@@ -267,9 +267,9 @@
    streams (with honest :seon.agent.shell/out-tokens / err-tokens sizes) —
    display economy is the render layer's, not the function's: a big value stashes
    as result/<id> and renders as a bounded skeleton you re-reference to read
-   in full. The only bound is a ~2MB/stream RAM ceiling: past it Node kills
-   the child and :seon.agent.shell/truncated? is set with a guiding hint (use
-   [[run-bg!]] for an unbounded stream). To PERSIST output durably, that is
+   in full. The only bound is a hard per-stream RAM ceiling: when reached Node
+   kills the child and :seon.agent.shell/truncated? is set with a guiding hint
+   (use [[run-bg!]] for an unbounded stream). To PERSIST output durably, that is
    your explicit choice — (my.blob/put! {:my.blob/content
    (:seon.agent.shell/out r)}) the stashed value; the function never blobs behind
    your back.
@@ -373,8 +373,8 @@
    run — default-deny until SEON_SHELL, a :seon.agent.shell/cwd under the
    seon.agent.fs allowlist. Returns immediately with ok? true + the job-id
    + :seon.agent.shell/state :running; the child's stdout/stderr accumulate
-   in a volatile table (NOT datoms), head-capped per stream at ~2MB (a RAM
-   guard). Poll it with [[job-status]], read its output with [[job-output]]
+   in a volatile table (NOT datoms), head-capped by a private per-stream RAM
+   guard. Poll it with [[job-status]], read its output with [[job-output]]
    (full-so-far or incremental via ::since), and SIGTERM it with
    [[job-stop!]]. The table is lost on a pod restart (and the oldest finished
    jobs are pruned past a cap) — a job is live runtime state, not a persisted
@@ -489,8 +489,8 @@
    so far; pass :seon.agent.shell/since (a char offset — the previous call's
    :seon.agent.shell/next-since) to get ONLY output since then, so polling a
    live job streams incrementally. :seon.agent.shell/tokens is the honest full
-   size; :seon.agent.shell/truncated? true means the stream hit its ~2MB RAM
-   ceiling and later bytes were dropped (head kept). Unknown id → a guiding
+   size; :seon.agent.shell/truncated? true means the stream hit its private RAM
+   ceiling and later output was dropped (head kept). Unknown id → a guiding
    ok?-false value."
   {:malli/schema [:=> [:cat :seon.agent.shell/job-output-request] :seon.agent.shell/job-output-response]}
   [{:seon.agent.shell/keys [job-id stream since]}]

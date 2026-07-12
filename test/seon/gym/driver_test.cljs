@@ -20,6 +20,7 @@
     [seon.agent :as agent]
     [seon.client :as client]
     [seon.agent.ctx.namespaces :as ctx-namespaces]
+    [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.gym.driver :as gym]
     [seon.gym.scorecard :as scard]
@@ -146,6 +147,27 @@
                                        (:seon.gym.scorecard/results card))))
                    (done)))
           (.catch (fn [e] (is false (str "threw — " e)) (done)))))))
+
+(deftest transcript-predicate-diagnostics-report-canonical-tokens
+  (let [transcript (apply str (repeat 40 "abcd"))
+        expected   (tokens/estimate transcript)]
+    (doseq [[kind text] [[:transcript-includes "abcd"]
+                         [:transcript-excludes "absent"]]]
+      (let [result (#'gym/eval-predicate
+                     nil transcript {}
+                     {:seon.gym.predicate/id   :token-report
+                      :seon.gym.predicate/kind kind
+                      :seon.gym.predicate/axis :replies-honestly
+                      :seon.gym.predicate/text text})
+            actual (:seon.gym.result/actual result)
+            reported (some-> (re-find #"\b(\d+)\s+tokens\b" actual)
+                             second
+                             (js/parseInt 10))]
+        (is (= expected reported)
+            "predicate diagnostics use the canonical transcript estimate")
+        (is (not (re-find #"(?i)\d+\s*(?:chars?|characters?|bytes?|[kmg]b)\b"
+                          actual))
+            "predicate diagnostics do not expose raw text-size units")))))
 
 ;; ---------------------------------------------------------------------------
 ;; WORLD-PARITY — the gym scratch world must be THE WORLD A POD BOOTS

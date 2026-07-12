@@ -137,9 +137,9 @@
              ::shell/truncated? (boolean buffer-truncated?)}
       buffer-truncated?
       (assoc ::shell/hint
-             (str "output overflowed the " max-output-bytes "-byte capture "
-                  "ceiling — bytes beyond that were dropped (a RAM guard, not "
-                  "display). For an unbounded or long-running stream use "
+             (str "output reached the hard capture ceiling; later output was "
+                  "dropped (a RAM guard, not display). For an unbounded or "
+                  "long-running stream use "
                   "(seon.agent.shell/run-bg! …) and page it with job-output.")))))
 
 (defn exit-code
