@@ -76,6 +76,18 @@ any training spend. Live status: [[roadmap.md]].
 - Held-out eval turns live in the acme store — acme pod:
   `bin/acme build && bin/acme start wire-server && bin/acme start pod`
   (7980/7981).
+- **PINNED HARNESS (owner, 2026-07-12 — refactor churn in the main
+  tree is expected):** `/Users/sean/src/seon-pin` is a git worktree
+  detached at the pinned sha (currently `93c8d8ad`, post-cleanup,
+  suite-green 1229/5609). Run this lane's builds, suites, drills, and
+  acme from THE PIN, not the main tree — `seon-pin/bin/acme …` is
+  fully self-contained (own bundle/store/ports/logs). Bump the pin
+  deliberately when a needed commit lands:
+  `git -C /Users/sean/src/seon-pin checkout <sha>` + rebuild. The
+  main-tree acme store (`seon/data/clusters/acme`) holds the 224
+  mined turns — copy it into the pin's `data/clusters/acme` if a
+  pinned run needs the historical turns (single-writer: never run two
+  wire-servers on one store).
 - Shared branch: commit with explicit pathspecs only
   (`docs/prds/repl-autosuggest/`, `src-needle/`,
   `src/seon/repl/autocomplete*`, `src/my/plan*`).

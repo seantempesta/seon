@@ -433,6 +433,16 @@ mechanisms:
 - `:suggest` renders with priority in the **volatile** segment (after
   the cache-breakpoint split) — a per-turn block in the stable prefix
   would bust the provider prompt cache every turn.
+- **Whole-index scan (owner, 2026-07-12)**: the server owns a card
+  cache — every fn/schema card encoded individually at boot (~500k
+  tokens ≈ ~4s for the full surface; volatile, rebuilt per boot — NO
+  persisted second index, dissolving that ruling question). Per turn:
+  one situation encode + cosine over all cached vectors (~1ms) —
+  full-surface relevance UNRESTRICTED by ns scoping. Requires the B2
+  contrastive training (pretrained head is zeros); interim brute
+  scan = rotating 16-fn menus through the bridge (~1-3s full sweep).
+  One giant 50-100k-token context is explicitly ruled out (T²
+  attention ≈ 40-160GB peak + 50× out-of-envelope quality).
 - **Second consumer — the diffusion worker**: needle-predicted forms
   drop into the typeahead offer channel as richer offers/prefill seeds
   (clamp/prefill wire segments the worker already understands). At
