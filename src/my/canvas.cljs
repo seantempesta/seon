@@ -50,18 +50,19 @@
 (schema/register! ::view-request
   [:map
    [::content ::content]
-   [::ai ::ai]])
+   [::ai {:optional true} ::ai]])
 
 (defn view
-  "Build the canonical dual render returned by a canvas renderer fn.
+  "Build the canonical render returned by a canvas renderer fn.
 
    The renderer contract is `[:=> [:cat :seon.render/system-input]
    :seon.render/html-response]`; destructure its injected `:seon.db/db` and
-   derive both twins from that frozen value."
+   derive from that frozen value. `::content` is required; `::ai` is an
+   optional model-facing twin and is omitted when the visual needs no prose."
   {:malli/schema [:=> [:cat ::view-request] :seon.render/html-response]}
   [{::keys [content ai]}]
-  {:seon.render/hiccup content
-   :seon.render/ai ai})
+  (cond-> {:seon.render/hiccup content}
+    (some? ai) (assoc :seon.render/ai ai)))
 
 (schema/register! ::show-request
   [:map

@@ -49,3 +49,8 @@
                                :my.canvas/ai "Current status."})]
     (is (= h (:seon.render/hiccup response)))
     (is (= "Current status." (:seon.render/ai response)))))
+
+(deftest view-omits-an-absent-ai-twin
+  (let [h [:section [:h2 "Visual only"]]
+        response (canvas/view {:my.canvas/content h})]
+    (is (= {:seon.render/hiccup h} response))))
