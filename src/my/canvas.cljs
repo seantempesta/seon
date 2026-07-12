@@ -28,6 +28,8 @@
 (schema/register! ::ai :string)
 (schema/register! ::control :seon.render.canvas/hiccup)
 (schema/register! ::controls [:vector ::control])
+(schema/register! ::attributes [:vector :qualified-keyword])
+(schema/register! ::values [:map-of :qualified-keyword :any])
 
 (def ^:private button-class
   "px-2 py-1 rounded border border-base-700 bg-base-850 text-xs text-text-100 cursor-pointer select-none hover:bg-base-800 hover:text-text-50 focus:outline-none focus-visible:border-amber-400 disabled:opacity-50")
@@ -115,6 +117,46 @@
       {::content content}
       {})
     {}))
+
+(schema/register! ::state-request
+  [:map
+   [::attributes ::attributes]
+   [:seon.db/db {:optional true} :seon.db/db]
+   [:seon.agent/id {:optional true} :string]])
+(schema/register! ::state-response ::values)
+
+(defn state
+  "Read qualified canvas/domain attributes from YOUR agent entity.
+
+   `:seon.db/db` and `:seon.agent/id` are injected. Example:
+   `(state {:my.canvas/attributes [:my.agent.example/count]})`.
+   Missing attributes are omitted. Advanced graph queries still belong in
+   `seon.db`; this helper owns the common agent-local state case."
+  {:malli/schema [:=> [:cat ::state-request] ::state-response]}
+  [{::keys [attributes] dbv :seon.db/db agent-id :seon.agent/id}]
+  (or (db/pull {:seon.db/db dbv
+                :seon.db/pull-pattern attributes
+                :seon.db/ref [:seon.agent/id agent-id]})
+      {}))
+
+(schema/register! ::save-request
+  [:map
+   [::values ::values]
+   [:seon.agent/id {:optional true} :string]])
+(schema/register! ::save-response :seon.db/transact-response)
+
+(defn ^:async save!
+  "Merge qualified values onto YOUR agent entity and return the tx envelope.
+
+   `:seon.agent/id` is injected. Every attribute must already have a registered
+   schema. Example:
+   `(save! {:my.canvas/values {:my.agent.example/count 1}})`.
+   Inspect `:seon.db/ok?` before claiming the visible update worked."
+  {:malli/schema [:=> [:cat ::save-request] ::save-response]}
+  [{::keys [values] agent-id :seon.agent/id}]
+  (await
+    (db/transact!
+      {:seon.db/tx-data [(assoc values :seon.agent/id agent-id)]})))
 
 (schema/register! ::button-request
   [:map
