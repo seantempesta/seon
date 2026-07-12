@@ -4,9 +4,11 @@
    work-queue queries (ready leaves, roll-up, blocked/ready), the position
    ANCHOR derivation, the reverse-ref tree pull, the ONE document compiler
    behind plan! AND reconcile! (plus the lenient markdown parse),
-   the drop! subtree walk, and the WINDOWED plan-block context render
-   (anchor + open frontier + recently-completed tail; the completed
-   interior stays in the DB, out of the prompt).
+   the drop! subtree walk, the derived stuck×N → frontier re-plan
+   ESCALATION (flag query + STUCK band + once-per-episode planner
+   consult), and the WINDOWED plan-block context render (anchor + open
+   frontier + recently-completed tail; the completed interior stays in
+   the DB, out of the prompt).
 
    Factored out of the public function surface so the teaching ns shows ONLY the
    functions + their register! schemas (the `*.internal` convention drops these
@@ -19,10 +21,15 @@
    (the render fns need it and the dep is one-way); `my.plan/rules` re-defs
    the same value so an agent can still read and extend it."
   (:require
+    [cljs.reader :as edn]
     [clojure.string :as str]
     [clojure.walk :as walk]
+    [seon.agent.message :as msg]
+    [seon.ai :as ai]
+    [seon.ai.tokens :as tokens]
     [seon.db :as db]
     [seon.repair.candidates :as cand]
+    [seon.repl.internal :as repl-internal]
     [seon.schema :as schema]))
 
 (def rules
@@ -763,6 +770,328 @@
                     [?t :my.plan/id ?id]
                     (not-join [?t] [?t :my.plan/parent _])]})))
 
+;; --- The stuck×N → frontier re-plan ESCALATION (all DERIVED). -------------
+;; --- A wedge = the ▶ :active step under which the SAME failure root has
+;; --- repeated ≥ N times since the step went :active, with no success of
+;; --- that root's own call between. Everything is a query over the eval
+;; --- log + plan datoms — flagged IS "the query returns the step now";
+;; --- nothing is stored, nothing needs clearing. Three faces, one
+;; --- derivation: [[escalation]] (the flag query), [[escalation-section]]
+;; --- (the reactive band in [[plan-body]]), [[maybe-consult!]] (the
+;; --- once-per-episode planner message, fired post-turn by
+;; --- `seon.agent.loop/run-loop!`). Episode identity is the FIRST failing
+;; --- eval's id of the live streak — derived from the query's own inputs,
+;; --- never a stored notified-flag; the consult message embeds it
+;; --- ([[consult-marker]]) so "already consulted" is a message-log read.
+
+(def escalation-stuck-n
+  "The policy knob: same-root failures since the ▶ step went :active that
+   flag the step for a frontier re-plan (the W3 wedge ran 8+ before this
+   existed). [[escalation]] takes an explicit override for tests/tuning."
+  3)
+
+(defn head-sym-str
+  "The head symbol of `source`'s first form, AS THE AGENT TYPED IT
+   (alias-qualified, e.g. \"schema/register!\"), or nil. Structural read
+   (`repl-internal/read-forms` — the ONE whole-source read), never a
+   regex over the text; a broken source yields nil (fails closed)."
+  [source]
+  (let [f (first (repl-internal/read-forms (or source "")))]
+    (when (and (seq? f) (symbol? (first f)))
+      (str (first f)))))
+
+(defn- eval-error-kind
+  "The `:seon.error/kind` of a failed eval row, read from its persisted
+   `:seon.eval/error-data` ENVELOPE projection (structured EDN via
+   `pr-str-readable` — never parsed out of the message string). nil when
+   the row carries no envelope data or it doesn't read back."
+  [row]
+  (when-let [s (:seon.eval/error-data row)]
+    (try (:seon.error/kind (edn/read-string s))
+         (catch :default _ nil))))
+
+(defn- evals-since
+  "The agent's eval rows transacted AFTER tx `since-tx`, oldest first.
+
+   Pulled projections (`id/ok?/source/error/error-data`) ordered by the
+   eval datom's own tx — monotonic tx eids, no wall-clock comparison."
+  [db agent-eid since-tx]
+  (->> (db/query {:seon.db/db db
+                  :seon.db/query
+                  '[:find ?e ?etx
+                    :in $ ?a ?stx
+                    :where
+                    [?e :seon.eval/agent ?a]
+                    [?e :seon.eval/ok? _ ?etx]
+                    [(> ?etx ?stx)]]
+                  :seon.db/args [agent-eid since-tx]})
+       (sort-by second)
+       (mapv (fn [[e _]]
+               (db/pull db [:seon.eval/id :seon.eval/ok? :seon.eval/source
+                            :seon.eval/error :seon.eval/error-data]
+                        e)))))
+
+(defn wedge
+  "The dominant live failure streak in ordered eval `rows`, or nil.
+
+   A row's ROOT is `[head-sym error-kind]` — the call the agent typed +
+   the envelope's kind class. Failures accumulate per root; a SUCCESS of
+   the same head sym is progress on that root and resets every streak
+   under it (a successful defn-redefine or unrelated form is not — the
+   wedge is 'the same broken call keeps failing'). Returns the root with
+   the most live failures when it reaches `n`:
+   `{::root-sym ::root-kind ::fail-count ::episode ::last-error}` —
+   `::episode` = the streak's FIRST failing eval id (stable while the
+   streak grows; a broken-then-reformed wedge is a NEW episode)."
+  [rows n]
+  (let [streaks (reduce
+                  (fn [acc {:seon.eval/keys [ok? source] :as row}]
+                    (let [h (head-sym-str source)]
+                      (cond
+                        (nil? h) acc
+                        ok?      (into {} (remove (fn [[[rh _] _]] (= rh h))) acc)
+                        :else    (update acc [h (eval-error-kind row)]
+                                         (fnil conj []) row))))
+                  {}
+                  rows)
+        [[sym kind] fails]
+        (->> streaks
+             (filter (fn [[_ fs]] (>= (count fs) n)))
+             (sort-by (fn [[_ fs]] (- (count fs))))
+             first)]
+    (when sym
+      (cond-> {:my.plan/root-sym   sym
+               :my.plan/fail-count (count fails)
+               :my.plan/episode    (:seon.eval/id (first fails))
+               :my.plan/last-error (or (:seon.eval/error (peek fails)) "")}
+        kind (assoc :my.plan/root-kind kind)))))
+
+(defn escalation
+  "The `agent-eid`'s escalation-flagged ▶ step, or nil — pure query.
+
+   Flagged = since the current `:active` assertion's tx (the datom's own
+   tx — no history walk, no stored activated-at), the agent's eval log
+   shows a [[wedge]] of ≥ `n` (default [[escalation-stuck-n]]) same-root
+   failures with no same-call success between. Gated on the queried
+   attrs being installed (a fresh cluster with no evals renders no
+   band, never throws)."
+  ([db agent-eid] (escalation db agent-eid escalation-stuck-n))
+  ([db agent-eid n]
+   (let [installed (db/installed-schema db)]
+     (when (every? #(contains? installed %)
+                   [:my.plan/status :seon.eval/agent :seon.eval/ok?])
+       (when-let [[sid title stx]
+                  (->> (db/query {:seon.db/db db
+                                  :seon.db/query
+                                  '[:find ?id ?title ?tx
+                                    :in $ ?a
+                                    :where
+                                    [?t :my.plan/agent ?a]
+                                    [?t :my.plan/status :active ?tx]
+                                    [?t :my.plan/id ?id]
+                                    [?t :my.plan/title ?title]]
+                                  :seon.db/args [agent-eid]})
+                       (sort-by #(nth % 2) >)
+                       first)]
+         (when-let [w (wedge (evals-since db agent-eid stx) n)]
+           (merge w {:my.plan/id sid :my.plan/title title})))))))
+
+(def local-diffusion-providers
+  "The `:seon.ai/provider` values that are the LOCAL diffusion worker
+   family — never the frontier. [[planner-for]] derives the cluster's
+   planner as an agent whose resolved provider is NOT one of these."
+  #{:diffusiongemma :typeahead})
+
+(defn frontier-provider?
+  "True when provider keyword `p` is a frontier LLM provider."
+  [p]
+  (and (some? p) (not (contains? local-diffusion-providers p))))
+
+(defn planner-for
+  "The cluster's PLANNER for a flagged `worker-id`, derived — or nil.
+
+   A live (non-terminated) agent ≠ the worker whose RESOLVED provider
+   (`seon.ai/resolved-config` over this db — agent override → config row
+   → default) is a frontier one. When several qualify, the one whose tx
+   provenance shows it AUTHORED the flagged step wins (the W3 shape: the
+   planner authored the worker's plan); ties break by sorted id."
+  [db worker-id flagged-step-id]
+  (let [cands (->> (db/query {:seon.db/db db
+                              :seon.db/query '[:find [?id ...]
+                                               :where [?a :seon.agent/id ?id]]})
+                   sort
+                   (remove #{worker-id})
+                   (filter (fn [id]
+                             (let [e (db/entity db [:seon.agent/id id])]
+                               (nil? (:seon.agent/terminated-at e)))))
+                   (filter (fn [id]
+                             (frontier-provider?
+                               (get-in (ai/resolved-config
+                                         {:seon.db/db db :seon.agent/id id})
+                                       [:seon.ai/resolved-config
+                                        :seon.ai/provider]))))
+                   vec)
+        authors (when (and flagged-step-id
+                           (contains? (db/installed-schema db)
+                                      :seon.db/agent-id))
+                  (set (db/query {:seon.db/db db
+                                  :seon.db/query
+                                  '[:find [?aid ...]
+                                    :in $ ?sid
+                                    :where
+                                    [?t :my.plan/id ?sid]
+                                    [?t _ _ ?tx]
+                                    [?tx :seon.db/agent-id ?aid]]
+                                  :seon.db/args [flagged-step-id]})))]
+    (or (first (filter (or authors #{}) cands))
+        (first cands))))
+
+(defn consult-marker
+  "The episode-identity line a consult message embeds — derived from the
+   flag query's own inputs (step id + first-fail eval id), so
+   [[consult-sent?]] is a message-log read, never a stored flag."
+  [step-id episode]
+  (str "[escalation :my.plan/step " (pr-str step-id)
+       " :my.plan/episode " (pr-str episode) "]"))
+
+(defn consult-sent?
+  "Whether `agent-eid` already sent a message carrying `marker` — the
+   fired-once-per-episode check, derived from the message log."
+  [db agent-eid marker]
+  (->> (db/query {:seon.db/db db
+                  :seon.db/query
+                  '[:find ?m ?c
+                    :in $ ?from
+                    :where
+                    [?m :seon.agent.message/from ?from]
+                    [?m :seon.agent.message/content ?c]]
+                  :seon.db/args [agent-eid]})
+       (some (fn [[_ c]] (str/includes? c marker)))
+       boolean))
+
+(defn- comment-lines
+  "String `s` as `; `-prefixed comment lines (the context is eval'able
+   Clojure — prose rides `;`)."
+  [s]
+  (->> (str/split-lines (str s))
+       (map #(str ";   " %))
+       (str/join "\n")))
+
+(defn escalation-section
+  "The reactive STUCK band for [[plan-body]] — \"\" unless [[escalation]]
+   flags the ▶ step right now. One factual block: the step, the repeated
+   failure ONCE (root + latest error, clipped), and the consult status —
+   planner consulted (derived from the message log) / consult pending /
+   no frontier planner in this cluster. Vanishes the moment the wedge
+   breaks (a same-call success, a step change, a re-plan)."
+  [db agent-eid agent-id]
+  (if-let [{:my.plan/keys [id title root-sym root-kind fail-count
+                           last-error episode]}
+           (escalation db agent-eid)]
+    (let [planner (planner-for db agent-id id)
+          sent?   (and planner
+                       (consult-sent? db agent-eid
+                                      (consult-marker id episode)))]
+      (str "; STUCK ▶ " id " «" title "» — the same call has failed "
+           fail-count "× since this step went active (root " root-sym
+           (when root-kind (str ", kind " root-kind)) "):\n"
+           (comment-lines (tokens/clip-str last-error 60)) "\n"
+           (cond
+             sent?
+             (str "; The planner (" planner ") has been consulted to "
+                  "revise this subtree; its\n"
+                  "; revision lands in this plan. Do not re-run the "
+                  "failing form — work a\n"
+                  "; different angle or await the revised plan.")
+
+             planner
+             (str "; The planner (" planner ") is being consulted to "
+                  "revise this subtree.")
+
+             :else
+             (str "; No frontier planner agent exists in this cluster — "
+                  "no consult sent.\n"
+                  "; Revise this subtree yourself "
+                  "(my.plan/reconcile!) before retrying the form."))))
+    ""))
+
+(defn- consult-content
+  "The consult message body: the episode marker, the distilled failure
+   envelope (once), the flagged subtree document, and the ask — revise
+   THIS subtree via reconcile!, planner zone only, then `complete` the
+   moment the receipt renders (the W3 turn-economy fix: the ask CARRIES
+   its completion condition, so fulfilling it ends the run instead of
+   leaking idle turns)."
+  [db worker-id {:my.plan/keys [id title root-sym root-kind fail-count
+                                last-error episode]}]
+  (let [doc (prune-done (pull-subtree db id))]
+    (str (consult-marker id episode) "\n"
+         "Worker " worker-id " is stuck on plan step " id " «" title
+         "» — the same root has failed " fail-count
+         "× since the step went :active (root " root-sym
+         (when root-kind (str ", kind " root-kind)) "):\n"
+         (tokens/clip-str last-error 80) "\n"
+         "Flagged subtree (the worker's open document, EDN):\n"
+         (tokens/clip-str (pr-str doc) 400) "\n"
+         "The ask — your zone only: read the worker's full open plan with "
+         "(my.plan/document {:seon.agent/id \"" worker-id "\"}); revise "
+         "ONLY this subtree — split it, sharpen its expects, reroute — and "
+         "write the edited document back with (my.plan/reconcile! "
+         "{:my.plan/tree <edited> :seon.agent/id \"" worker-id "\"}). "
+         "Optionally send the worker ONE line of guidance: (message/agent "
+         "\"" worker-id "\" \"…\"). When the reconcile receipt renders, "
+         "the ask is fulfilled — call (complete \"re-planned " id "\") in "
+         "that SAME turn; further turns add nothing.")))
+
+(defn ^:async maybe-consult!
+  "Fire the once-per-episode planner consult for a flagged agent.
+
+   Called post-turn by the loop. Recomputes [[escalation]] from the
+   current db (a transition is 'flagged now AND no consult message for
+   this episode yet' — both derived); when it fires, ONE message goes
+   from the worker to the derived [[planner-for]] via the existing
+   `message!` path (no new channel). Returns a value envelope:
+   `{:my.plan/consulted? bool :my.plan/consult-reason kw …}` — reasons
+   `:not-flagged` / `:no-planner` / `:already-consulted` / `:sent` /
+   `:send-failed`. Never throws."
+  [{agent-id :seon.agent/id}]
+  (try
+    (let [db  @db/*conn*
+          oe  (agent-eid db [:seon.agent/id agent-id])
+          esc (when oe (escalation db oe))]
+      (if-not esc
+        {:my.plan/consulted? false :my.plan/consult-reason :not-flagged}
+        (let [{:my.plan/keys [id episode]} esc
+              planner (planner-for db agent-id id)
+              marker  (consult-marker id episode)]
+          (cond
+            (nil? planner)
+            {:my.plan/consulted? false :my.plan/consult-reason :no-planner}
+
+            (consult-sent? db oe marker)
+            {:my.plan/consulted? false
+             :my.plan/consult-reason :already-consulted}
+
+            :else
+            (let [env (await (msg/message!
+                               {:seon.agent.message/content
+                                (consult-content db agent-id esc)
+                                :seon.agent.message/from
+                                [:seon.agent/id agent-id]
+                                :seon.agent.message/to
+                                [[:seon.agent/id planner]]}))]
+              (if (:seon.agent.message/ok? env)
+                {:my.plan/consulted?     true
+                 :my.plan/consult-reason :sent
+                 :my.plan/planner        planner
+                 :my.plan/episode        episode}
+                (merge env {:my.plan/consulted?     false
+                            :my.plan/consult-reason :send-failed})))))))
+    (catch :default e
+      (js/console.error "my.plan.internal/maybe-consult! failed:"
+                        (or (.-message e) e))
+      {:my.plan/consulted? false :my.plan/consult-reason :send-failed})))
+
 ;; --- The WINDOWED plan-block render (`:plan` context section). ------------
 ;; --- Constant-size for any plan depth: position anchor + open frontier +
 ;; --- a small recently-completed tail; the completed interior is DROPPED
@@ -924,10 +1253,11 @@
 (defn plan-body
   "Windowed plan text for `agent` in db value `db`.
 
-   Three bands, all DERIVED, nothing stored: (1) the position anchor —
-   where you ARE in which goal, (2) the open frontier — the :active step +
-   the ready queue (capped), (3) a small recently-completed tail (resume
-   grounding). A 1000-step plan renders at constant size: the completed
+   Four bands, all DERIVED, nothing stored: (1) the position anchor —
+   where you ARE in which goal, (2) the STUCK escalation band — present
+   ONLY while [[escalation]] flags the ▶ step (vanishes when the wedge
+   breaks), (3) the open frontier — the :active step + the ready queue
+   (capped), (4) a small recently-completed tail (resume grounding). A 1000-step plan renders at constant size: the completed
    interior is dropped from the prompt but stays queryable (`tree`,
    `status`, `db/query`). Rides as `;` comments so the whole context reads
    as eval'able Clojure. NO plan data ⇒ [[empty-plan-teaching]] — the
@@ -936,6 +1266,7 @@
   (let [body
         (if-let [oe (agent-eid db agent)]
           (let [a          (anchor db oe)
+                aid        (:seon.agent/id (db/entity db agent))
                 actives    (active-steps db oe)
                 active-ids (into #{} (map :my.plan/id) actives)
                 unfinished (open-steps db oe)
@@ -947,6 +1278,7 @@
                                     unfinished)]
             (str/join "\n" (remove str/blank?
                                    [(anchor-section a)
+                                    (escalation-section db oe aid)
                                     (frontier-section actives* readies)
                                     (done-section (recent-done db oe))])))
           "")]

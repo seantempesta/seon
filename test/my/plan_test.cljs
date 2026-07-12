@@ -1174,3 +1174,220 @@
                              "a correctly-keyed plan is unaffected by the guard"))))))
         (.then (fn [_] (done)))
         (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+;; ============================================================
+;; stuck×N → frontier re-plan escalation (all DERIVED — no stored flag).
+;; The wedge fixture mirrors the W3 drive evidence: one broken
+;; schema/register! form re-failed turn after turn on the ▶ step.
+;; ============================================================
+
+(def ^:private wedge-src
+  "(schema/register! :my.exp/rows (map [:string]))")
+
+(defn- eval-tx
+  "One synthetic :seon.eval row for agent A — its OWN tx (ordering =
+   the real per-form record-eval! shape)."
+  [id ok? src]
+  {:seon.db/tx-data
+   [(cond-> {:seon.eval/id id :seon.eval/at (js/Date.)
+             :seon.eval/duration-ms 1 :seon.eval/narration ""
+             :seon.eval/source src :seon.eval/ok? ok?
+             :seon.eval/ns :my.agent.a :seon.eval/agent a-ref}
+      (not ok?) (assoc :seon.eval/error "register!: input invalid"))]})
+
+(defn- transact-rows!
+  "Transact `txs` SEQUENTIALLY (one tx each — tx order is the eval order)."
+  [txs]
+  (reduce (fn [p tx] (.then p (fn [_] (db/transact! tx))))
+          (js/Promise.resolve nil)
+          txs))
+
+(defn- active-wedge-step!
+  "plan! one step, active! it; resolves to the step id."
+  []
+  (-> (plan/plan! {:my.plan/title "wedge plan" :my.plan/goal "g"
+                   :my.plan/children [{:my.plan/title "the step"
+                                       :my.plan/expect "rows exist"}]
+                   :seon.agent/id a-id})
+      (.then (fn [_]
+               (let [sid (:my.plan/id (first (plan/next {:seon.agent/id a-id})))]
+                 (-> (plan/active! {:my.plan/id sid})
+                     (.then (fn [_] sid))))))))
+
+(defn- esc-now
+  "The derived escalation for agent A over the CURRENT db."
+  []
+  (let [db @db/*conn*]
+    (plan-int/escalation db (plan-int/agent-eid db a-ref))))
+
+(deftest escalation-flags-n-same-root-failures-and-not-n-minus-1
+  (async done
+    (-> (with-agent-conn
+          (fn []
+            (-> (active-wedge-step!)
+                (.then (fn [sid]
+                         (-> (transact-rows! [(eval-tx "evalwedge00001" false wedge-src)
+                                              (eval-tx (db/new-id!) false wedge-src)])
+                             (.then (fn [_]
+                                      (is (nil? (esc-now))
+                                          "N-1 same-root failures do NOT flag")
+                                      (db/transact! (eval-tx (db/new-id!) false wedge-src))))
+                             (.then (fn [_]
+                                      (let [esc (esc-now)]
+                                        (is (some? esc) "N same-root failures flag NOW")
+                                        (is (= sid (:my.plan/id esc)) "the ▶ step is the flagged step")
+                                        (is (= 3 (:my.plan/fail-count esc)))
+                                        (is (= "schema/register!" (:my.plan/root-sym esc))
+                                            "root = the head symbol the agent typed, structurally read")
+                                        (is (= "evalwedge00001" (:my.plan/episode esc))
+                                            "episode identity = the streak's FIRST failing eval id"))))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest escalation-same-call-success-breaks-the-wedge
+  (async done
+    (-> (with-agent-conn
+          (fn []
+            (-> (active-wedge-step!)
+                (.then (fn [_]
+                         (transact-rows!
+                           [(eval-tx (db/new-id!) false wedge-src)
+                            (eval-tx (db/new-id!) false wedge-src)
+                            ;; the failing CALL finally succeeds — progress on
+                            ;; this root; every prior failure stops counting
+                            (eval-tx (db/new-id!) true wedge-src)
+                            (eval-tx (db/new-id!) false wedge-src)
+                            (eval-tx (db/new-id!) false wedge-src)])))
+                (.then (fn [_]
+                         (is (nil? (esc-now))
+                             "a same-call success resets the streak (2 live fails < N)")
+                         ;; an UNRELATED success (a defn redefine — the W3 wedge
+                         ;; interleaved these) is NOT progress on the root
+                         (transact-rows!
+                           [(eval-tx (db/new-id!) true "(defn broken-loader [] 1)")
+                            (eval-tx (db/new-id!) false wedge-src)])))
+                (.then (fn [_]
+                         (let [esc (esc-now)]
+                           (is (some? esc)
+                               "an unrelated success does not break the streak")
+                           (is (= 3 (:my.plan/fail-count esc)))))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest escalation-counts-only-failures-since-the-step-went-active
+  (async done
+    (-> (with-agent-conn
+          (fn []
+            ;; failures land BEFORE the step is taken up — a fresh ▶ starts
+            ;; with a clean slate (the window opens at the :active tx)
+            (-> (plan/plan! {:my.plan/title "wedge plan" :my.plan/goal "g"
+                             :my.plan/children [{:my.plan/title "the step"}]
+                             :seon.agent/id a-id})
+                (.then (fn [_]
+                         (transact-rows! [(eval-tx (db/new-id!) false wedge-src)
+                                          (eval-tx (db/new-id!) false wedge-src)])))
+                (.then (fn [_]
+                         (let [sid (:my.plan/id (first (plan/next {:seon.agent/id a-id})))]
+                           (plan/active! {:my.plan/id sid}))))
+                (.then (fn [_] (db/transact! (eval-tx (db/new-id!) false wedge-src))))
+                (.then (fn [_]
+                         (is (nil? (esc-now))
+                             "pre-activation failures do not count toward the wedge"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest escalation-section-renders-reactively-and-vanishes
+  (async done
+    (-> (with-agent-conn
+          (fn []
+            (-> (active-wedge-step!)
+                (.then (fn [_]
+                         (transact-rows! [(eval-tx (db/new-id!) false wedge-src)
+                                          (eval-tx (db/new-id!) false wedge-src)
+                                          (eval-tx (db/new-id!) false wedge-src)])))
+                (.then (fn [_]
+                         (let [body (plan-int/plan-body @db/*conn* a-ref)]
+                           (is (str/includes? body "STUCK ▶")
+                               "flagged ⇒ the STUCK band renders in the plan block")
+                           (is (str/includes? body "schema/register!")
+                               "the band names the failure root")
+                           (is (str/includes? body b-id)
+                               "the derived planner (B — default frontier provider) is named")
+                           ;; break the wedge — the band must VANISH (nothing
+                           ;; stored, nothing to acknowledge)
+                           (db/transact! (eval-tx (db/new-id!) true wedge-src)))))
+                (.then (fn [_]
+                         (is (not (str/includes? (plan-int/plan-body @db/*conn* a-ref)
+                                                 "STUCK"))
+                             "wedge broken ⇒ the band is gone from the render"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest escalation-consult-fires-once-per-episode
+  (async done
+    (-> (with-agent-conn
+          (fn []
+            (-> (active-wedge-step!)
+                (.then (fn [_]
+                         (transact-rows! [(eval-tx (db/new-id!) false wedge-src)
+                                          (eval-tx (db/new-id!) false wedge-src)
+                                          (eval-tx (db/new-id!) false wedge-src)])))
+                (.then (fn [_] (plan-int/maybe-consult! {:seon.agent/id a-id})))
+                (.then (fn [env]
+                         (is (true? (:my.plan/consulted? env)) "flag transition ⇒ consult fires")
+                         (is (= b-id (:my.plan/planner env))
+                             "planner derived: the non-worker agent on a frontier provider")
+                         (plan-int/maybe-consult! {:seon.agent/id a-id})))
+                (.then (fn [env2]
+                         (is (false? (:my.plan/consulted? env2)))
+                         (is (= :already-consulted (:my.plan/consult-reason env2))
+                             "episode identity is derived — no second message, no stored flag")
+                         ;; the wedge deepens WITHIN the episode — still no re-fire
+                         (db/transact! (eval-tx (db/new-id!) false wedge-src))))
+                (.then (fn [_] (plan-int/maybe-consult! {:seon.agent/id a-id})))
+                (.then (fn [env3]
+                         (is (= :already-consulted (:my.plan/consult-reason env3))
+                             "a deeper wedge is the SAME episode (same first-fail eval)")
+                         (let [msgs (db/query {:seon.db/query
+                                               '[:find ?c :in $ ?from
+                                                 :where
+                                                 [?m :seon.agent.message/from ?from]
+                                                 [?m :seon.agent.message/content ?c]]
+                                               :seon.db/args
+                                               [(plan-int/agent-eid @db/*conn* a-ref)]})]
+                           (is (= 1 (count msgs)) "exactly ONE consult message exists")
+                           (is (str/includes? (ffirst msgs) "[escalation :my.plan/step")
+                               "the message embeds the episode marker")
+                           (is (str/includes? (ffirst msgs) "my.plan/reconcile!")
+                               "the ask names reconcile! as the write-back")
+                           (is (str/includes? (ffirst msgs) "(complete \"re-planned")
+                               "the ask CARRIES its completion condition (turn economy)"))
+                         (is (str/includes? (plan-int/plan-body @db/*conn* a-ref)
+                                            "has been consulted")
+                             "the section reflects the consult from the message log"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))
+
+(deftest escalation-no-planner-is-a-no-op-with-a-rendered-note
+  (async done
+    (-> (with-agent-conn
+          (fn []
+            ;; B on a LOCAL diffusion provider ⇒ no frontier agent besides the
+            ;; worker itself ⇒ consult is a no-op; the section says so.
+            (-> (db/transact! {:seon.db/tx-data
+                               [{:seon.agent/id b-id
+                                 :seon.ai/agent-provider :typeahead}]})
+                (.then (fn [_] (active-wedge-step!)))
+                (.then (fn [_]
+                         (transact-rows! [(eval-tx (db/new-id!) false wedge-src)
+                                          (eval-tx (db/new-id!) false wedge-src)
+                                          (eval-tx (db/new-id!) false wedge-src)])))
+                (.then (fn [_] (plan-int/maybe-consult! {:seon.agent/id a-id})))
+                (.then (fn [env]
+                         (is (false? (:my.plan/consulted? env)))
+                         (is (= :no-planner (:my.plan/consult-reason env)))
+                         (is (str/includes? (plan-int/plan-body @db/*conn* a-ref)
+                                            "No frontier planner")
+                             "the section renders the no-planner note"))))))
+        (.then (fn [_] (done)))
+        (.catch (fn [e] (is false (str "threw — " e)) (done))))))

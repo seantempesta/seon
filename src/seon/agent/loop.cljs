@@ -44,6 +44,7 @@
    requires THIS ns to `install-wake-trigger!`."
   (:require
     [clojure.string :as str]
+    [my.plan.internal :as plan-internal]
     [seon.agent :as agent]
     [seon.agent.ctx :as ctx]
     [seon.agent.run :as run]
@@ -303,10 +304,21 @@
                   ;; (next-event halts at the cap). eval-count counts ATTEMPTED
                   ;; forms (ok + failed), so a turn whose forms all ERRORED is
                   ;; NOT empty — it yields a next turn that shows the error.
-                  (recur (transition state :turn-ok)
-                         (if (zero? (or (:seon.agent/eval-count r) 0))
-                           (inc streak)
-                           0))))))
+                  (do
+                    ;; stuck×N → frontier re-plan escalation: the turn's evals
+                    ;; just landed, so the derived flag can only TRANSITION
+                    ;; here. maybe-consult! recomputes the wedge query and
+                    ;; fires the once-per-episode planner message (both sides
+                    ;; derived — see my.plan.internal's escalation section);
+                    ;; errors are values, a failed consult never stops the
+                    ;; loop.
+                    (await (await-bounded
+                             "plan/maybe-consult!"
+                             (plan-internal/maybe-consult! {:seon.agent/id id})))
+                    (recur (transition state :turn-ok)
+                           (if (zero? (or (:seon.agent/eval-count r) 0))
+                             (inc streak)
+                             0)))))))
 
           (= :no-forms event)
           (do (log id "halt"

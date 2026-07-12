@@ -15,6 +15,27 @@ tags: [orchestrator, agent]
 
 ## ▸ Current state (2026-07-12)
 
+**Escalation BUILT + live-proven (2026-07-12, task #20)** — the stuck×N
+→ frontier re-plan gap the W3 drill named is closed as DERIVED state
+(reactive-context, nothing stored): `my.plan.internal/escalation` (▶
+step + ≥N same-root failures since its `:active` tx, root =
+source-head-sym + envelope kind, same-call success breaks the streak),
+a `STUCK ▶` band inside the `:plan` block (renders/vanishes with the
+query; zero new manifest rows), and `maybe-consult!` fired post-turn by
+`run-loop!` — once per EPISODE (identity = the streak's first failing
+eval id, embedded as a message marker; fired-once is a message-log
+read). Planner DERIVED (frontier-provider agent; flagged-step tx-
+provenance author preferred); no planner ⇒ no-op + rendered note. The
+consult ask carries its own completion contract — the W3 planner
+turn-leak root cause (an ask with no stated done-condition). Suite
+1231/5627/0/0 (+6 tests). Live replay-style acceptance on acme: full
+chain flag → band → once-only consult → Muse `reconcile!` (diff
+0/2/1, the flagged step's expect sharpened) → guidance message →
+`complete` in the SAME turn, 0 core faults. Numbers + honest negatives
+(Muse's ~16 pre-fulfillment exploratory turns; the reconcile
+subtree-scoping drop of 2 address steps — the open #16-adjacent design
+question): [[planner-worker-design]] §"Escalation BUILT".
+
 **P7 W3 RUN (2026-07-12): restart-resume PASSES uncoached; goal
 completion FAILS — and the drill named the two binding gaps.** Two
 small builds landed first (`seon.ai.typeahead`, suite 1225/5600/0/0):

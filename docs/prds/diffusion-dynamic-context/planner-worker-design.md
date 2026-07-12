@@ -166,6 +166,78 @@ One tree, one function (`reconcile!`), two editability zones, closure
 by proof. Each side is trusted only with decisions it can be
 mechanically held to.
 
+**Escalation BUILT (2026-07-12, task #20 — the W3-evidenced gap).**
+All derived, nothing stored (reactive-context): the code lives with the
+`:plan` block in `my.plan.internal`.
+
+- *The flag query* (`my.plan.internal/escalation`): the ▶ `:active`
+  step is flagged when, since the tx of its current `:active` assertion
+  (the datom's own tx — no history walk, no stored `activated-at`), the
+  agent's eval log shows ≥ N failures sharing a ROOT with no same-call
+  success between. Root = `[head-sym error-kind]` — the head symbol of
+  the eval's source (structural `read-forms`, never message parsing) +
+  the `:seon.error/kind` read from the persisted `:seon.eval/error-data`
+  envelope EDN. A success of the SAME call breaks the streak (progress
+  on that root); an unrelated success (the W3 wedge's interleaved defn
+  redefinitions) does not. N = `escalation-stuck-n` (default 3; the W3
+  wedge ran 8+).
+- *The section*: a `STUCK ▶` band in the `:plan` block (`plan-body`
+  band 2 — zero new manifest rows, so every existing agent gets it) —
+  the step, the repeated failure envelope ONCE, and the consult status.
+  Vanishes when the wedge breaks.
+- *The consult* (`maybe-consult!`, fired post-turn by
+  `seon.agent.loop/run-loop!`): once per flag EPISODE — episode
+  identity = the streak's first failing eval id, embedded as a marker
+  line in the consult message, so fired-once is a message-log read,
+  never a stored notified-flag. The planner is DERIVED: a live
+  non-worker agent whose `seon.ai/resolved-config` provider is frontier
+  (not `:diffusiongemma`/`:typeahead`); among several, the tx-provenance
+  AUTHOR of the flagged step wins (the W3 shape — the planner authored
+  the plan). No planner ⇒ no-op + a rendered note. The message rides
+  the existing `message!` path (hops/wake/provenance intact).
+- *Planner turn economy* (the W3 4-idle-turn leak): root cause — a
+  message-delivered ask carried no completion condition, so nothing in
+  the planner's context marked the task's end and the run idled to its
+  bounds. Fix is context, not scold: the consult ASK carries its own
+  completion contract ("when the reconcile receipt renders, the ask is
+  fulfilled — `(complete …)` in that same turn").
+- Suite 1231/5627/0/0 (+6 escalation behavior tests in `my.plan-test`:
+  flag at N / not N−1, same-call-success break, since-active window,
+  reactive render/vanish, once-per-episode consult, no-planner no-op).
+- *Live acceptance (acme, as-grown store, 2026-07-12 ~04:39–04:46 UTC,
+  0 core faults, 0 coaching)* — REPLAY-style, stated plainly: the wedge
+  itself was synthetic (3 failed-eval rows with the W3
+  `schema/register!`-misuse signature + `active!` on `XlN-2607112332`,
+  transacted via the wire writer with worker tx provenance onto the
+  goal-A worker `oOF-2607112331`'s real history); everything from the
+  flag onward ran organically. Proven end-to-end: (1) the worker's next
+  turn's byte-exact prompt (blob `fd3b8194…` line 692) carries the
+  `STUCK ▶` band naming root + planner; (2) the flag correctly IGNORED
+  the 7 pre-`:active` W3-era failures (since-active window live);
+  (3) planner derivation picked `IHk-2607112331` — the tx-provenance
+  AUTHOR of the flagged step — over 8 other frontier candidates;
+  (4) post-turn consult fired ONCE (message 04:41:25, marker episode
+  `ew1-2607120450`; still exactly 1 row after 3 more worker turns);
+  (5) the band flipped to "has been consulted" in the very next prompt
+  (blob `79d174e9…` line 701 — derived from the message log);
+  (6) Muse read `document`, wrote back `reconcile!` → receipt
+  `{:diff {:added 0 :dropped 2 :updated 1}}` — the updated node IS the
+  flagged step, its description/expect rewritten to teach the exact
+  `[:map …]`-not-`(map …)` fix; (7) one guidance `message/agent` to the
+  worker; (8) `(complete "re-planned XlN-2607112332")` in the SAME turn
+  as the receipt — `halt function — complete`, ZERO post-fulfillment
+  idle turns (the W3 leak class, gone).
+- *Honest negatives from the drive*: (a) Muse spent ~16 exploratory
+  turns (~4.7 min, document/tree/schema-query loops) BEFORE fulfilling
+  — a pre-fulfillment thoroughness cost, distinct from the
+  post-fulfillment idle leak the contract fixed; if it matters, the
+  consult ask (not scold text) is the lever. (b) The planner's
+  `reconcile!` document was SUBTREE-scoped, so the compile dropped the
+  worker's 2 open parentless "continue" address steps (`:dropped 2`) —
+  the known W3 reconcile-scoping hazard (#16-adjacent) with a second
+  live data point; the basis/scope argument for `reconcile!` remains
+  the open design question, not patched here.
+
 ## The per-step plan pass (owner, 2026-07-11 late — the W2 headline)
 
 **Owner directive: "if planning via diffusion is cheap and high
