@@ -51,7 +51,11 @@
    [::ai ::ai]])
 
 (defn view
-  "Build the canonical dual render returned by a canvas renderer fn."
+  "Build the canonical dual render returned by a canvas renderer fn.
+
+   The renderer contract is `[:=> [:cat :seon.render/system-input]
+   :seon.render/html-response]`; destructure its injected `:seon.db/db` and
+   derive both twins from that frozen value."
   {:malli/schema [:=> [:cat ::view-request] :seon.render/html-response]}
   [{::keys [content ai]}]
   {:seon.render/hiccup content
@@ -121,8 +125,11 @@
 (defn button
   "A button routed to one of YOUR map-in handler fns through the call gate.
 
-   The handler always receives one fully-namespaced data map. Omitted `::data`
-   becomes `{}`; use `::data` to capture a row identity or command parameters."
+   The handler receives the VALUE of `::data` directly, never a
+   `{:my.canvas/data ...}` wrapper. Omitted `::data` therefore invokes the
+   handler with `{}`. A generic handler may use
+   `[:=> [:cat :my.canvas/data] :any]`; domain handlers should use a concrete
+   fully-namespaced map schema for their captured identity or parameters."
   {:malli/schema [:=> [:cat ::button-request] ::control]}
   [{::keys [label handler data]}]
   [:button {:type "button"
@@ -185,7 +192,9 @@
 
 (defn form
   "Stack controls into a form that sends one fully-namespaced field map to
-   YOUR handler fn. Ambient page signals are excluded by the call adapter."
+   YOUR handler fn. The field map is the handler's direct argument, not a
+   `:my.canvas/data` wrapper. Ambient page signals are excluded by the call
+   adapter."
   {:malli/schema [:=> [:cat ::form-request] ::control]}
   [{::keys [handler label controls]}]
   (into [:form {:on-submit handler :class "flex flex-col gap-2"}]
