@@ -308,6 +308,45 @@ Format: JSONL — `{"context": <profile text>, "cards": [...], "target":
 <forms text>, "meta": {turn-id, agent, basis-t, store,
 projection-sha}}`. `src-needle` owns its dataset pipeline.
 
+## Scenario families (owner + orchestrator, 2026-07-12)
+
+The benchmark IDEAS run as seon-grounded scenario families — no full
+harness integration required. Wave one (owner-confirmed #2;
+#1/#3/#4 working set; security family HELD pending owner):
+
+1. **Data work** (we author; no external bench covers it): load →
+   `register!` → `transact!` → `db/query` → report. Exact-answer
+   oracles, pure value-tier. Feeds the v0 form kinds directly.
+2. **Self-hosted code work — "seon-swe" (owner: enthusiastic yes)**:
+   agents fix REAL issues in this repo, grounded in the vendored
+   Clojure exemplars (the `library-grounding.md` read-map — task cards
+   cite `reference-code/…:LINE` before the edit). Task mines, each
+   oracled: the KT2b worst-ingredients leaderboard (oracle: lint score
+   rises), instrumentation coverage-gaps/unspecced fns (oracle: the
+   derived section renders empty), dev-hook/kondo/docstring findings
+   (oracle: hook quiet), reported code smells (oracle: suite + live
+   proof), architecture-doc drift (oracle: doc lint), and TOOL-GAP
+   findings from running the other families (oracle: the blocked
+   scenario passes). Triple yield per completed task: repo fix +
+   verified trajectory + tool improvement. Runs in ephemeral
+   clusters/worktrees — agents never edit the tree they run on.
+3. **Terminal/system** (terminal-bench ideas — pin to the LATEST
+   release, web-verified, owner: "2.1 or whatever the latest";
+   adapter exists; arm64 gate noted).
+4. **File editing + git workflows (owner, 2026-07-12)**: refactors,
+   multi-file edits, rebase/merge/conflict resolution, atomic-commit
+   discipline, bisect. Largely self-authored + swe-bench/aider ideas;
+   git IS the oracle (deterministic tree/history state) and the reset
+   (scratch repos, zero infra). Exercises the edit-protocol fns +
+   `my.shell` git surface.
+5. **Long-horizon research + db memory** (GAIA/BrowseComp-MA ideas,
+   browserless via `my.web-fetch` + subagents) — the standing
+   agent-exercise doctrine, oracled.
+
+Held/later: multi-agent decomposition as its own family (subagents
+exercise rides families 2/4 first), security/exploit (owner call),
+GUI/browser (no surface).
+
 ## Model roles (owner direction, 2026-07-12)
 
 Multiple models at work, each specifiable cleanly — zero new
