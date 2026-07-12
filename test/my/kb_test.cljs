@@ -366,3 +366,93 @@
                          (is (contains? families :my.kb.finding)
                              "the component finding attrs too")))))))
       done)))
+
+;;; ───────────────────────────────────────────────────────────────────────
+;;; Recall — the symmetric ASK: deterministic whole-token match over every
+;;; stored my.kb* string (claims AND domain rows), ranked, honest totals.
+;;; SEON_EMBED is unset in this suite, so the semantic top-up arm stays
+;;; off — recall is purely deterministic here.
+;;; ───────────────────────────────────────────────────────────────────────
+
+(deftest recall-finds-a-remembered-claim
+  (async done
+    (run-test
+      (fn [conn]
+        (-> (kb/build-kb-example!)
+            (.then (pinned conn
+                     (fn [_]
+                       (kb/remember {:my.kb/claim "transact! Malli-validates every entity value before the tx reaches datahike"
+                                     :my.kb/source "src/seon/db/internal.cljs:694"
+                                     :my.kb/confidence :verified}))))
+            (.then (pinned conn
+                     (fn [_] (kb/recall {:my.kb/about "malli transact validation"}))))
+            (.then (pinned conn
+                     (fn [{ok? :seon.result/ok? :as res}]
+                       (is (true? ok?))
+                       (is (= 1 (:seon.items/count res))
+                           "exactly one stored fact mentions malli+transact")
+                       (is (= 1 (:my.kb/matched res)) "honest total = returned")
+                       (let [top (first (:seon.items/items res))]
+                         (is (some? (:my.kb/claim top))
+                             "the item is the FULL pulled row — claim present")
+                         (is (= "src/seon/db/internal.cljs" (:my.kb/source-path top))
+                             "provenance rides the item")
+                         (is (= :text (:my.kb/match top))
+                             "deterministic arm labels ::match :text")
+                         (is (= 2 (:my.kb/matched-tokens top))
+                             "malli + transact matched; validation ≠ validates (no stemming)")))))))
+      done)))
+
+(deftest recall-ranks-by-distinct-matched-tokens-and-caps-honestly
+  (async done
+    (run-test
+      (fn [conn]
+        (-> (kb/build-kb-example!)
+            (.then (pinned conn
+                     (fn [_] (kb/recall {:my.kb/about "recursive symbolic manual"}))))
+            (.then (pinned conn
+                     (fn [res]
+                       (let [items (:seon.items/items res)]
+                         (is (= 2 (:seon.items/count res))
+                             "two sources match — recall reaches DOMAIN rows, not just claims")
+                         (is (= "Recursive Functions of Symbolic Expressions"
+                                (:my.kb.source/title (first items)))
+                             "two matched tokens outrank one")
+                         (is (= 2 (:my.kb/matched-tokens (first items))))
+                         (is (= "LISP 1.5 Programmer's Manual"
+                                (:my.kb.source/title (second items))))
+                         (is (= 1 (:my.kb/matched-tokens (second items))))))))
+            ;; the cap: limit 1 returns ONE item but reports BOTH matches
+            (.then (pinned conn
+                     (fn [_] (kb/recall {:my.kb/about "recursive symbolic manual"
+                                         :my.kb/limit 1}))))
+            (.then (pinned conn
+                     (fn [res]
+                       (is (= 1 (:seon.items/count res)) "limit caps the items")
+                       (is (= 2 (:my.kb/matched res)) "…but the total stays honest")
+                       (is (= "Recursive Functions of Symbolic Expressions"
+                              (:my.kb.source/title (first (:seon.items/items res))))
+                           "the cap keeps the best match"))))))
+      done)))
+
+(deftest recall-no-match-and-empty-store-are-success
+  (async done
+    (run-test
+      (fn [conn]
+        (-> ((pinned conn
+               (fn [_] (kb/recall {:my.kb/about "quantum blockchain"})))
+             nil)
+            (.then (pinned conn
+                     (fn [{ok? :seon.result/ok? :as res}]
+                       (is (true? ok?) "an EMPTY store answers ok — nothing known yet")
+                       (is (= [] (:seon.items/items res)))
+                       (is (= 0 (:my.kb/matched res))))))
+            (.then (pinned conn (fn [_] (kb/build-kb-example!))))
+            (.then (pinned conn
+                     (fn [_] (kb/recall {:my.kb/about "quantum blockchain"}))))
+            (.then (pinned conn
+                     (fn [{ok? :seon.result/ok? :as res}]
+                       (is (true? ok?) "no matches is SUCCESS, not an error")
+                       (is (= 0 (:seon.items/count res)))
+                       (is (= 0 (:my.kb/matched res))))))))
+      done)))

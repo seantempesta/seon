@@ -163,6 +163,10 @@
     ;; a :my.blob/hash ref, never as datoms). Required so it builds +
     ;; indexes at boot and turn-capture/web-fetch can compose on it.
     [my.blob]
+    ;; Program-graph introspection — (my.ns/functions {:my.ns/ns 'x})
+    ;; lists a namespace's fns as the compact one-line cards. Required so
+    ;; it builds + indexes at boot.
+    [my.ns]
     ;; Inert foreign-code values — the `#code` heredoc literal's schemas
     ;; (`:seon.code/lang`/`::text`/`::block`). Required here so register!
     ;; runs before the reader/fs functions hand these maps around.
