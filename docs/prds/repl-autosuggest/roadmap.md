@@ -73,6 +73,24 @@ non-projecting opaque request schemas; fix list in the report,
 owner-gated (context frozen). Probe: `src-needle/…/lint_probe.py`,
 `cases/kt2b_cases.json`, `scripts/dump_fn_index.clj` (`ccf6abba`).
 
+## KT3b — RUN (2026-07-12)
+
+Local coder-model matrix on the same 214 rows/scorer
+([[research/kt3b-coder-models-2026-07-12.md]], `289032ca`).
+**Qwen2.5-Coder-1.5B-Instruct + 3 exemplars TIES the frontier**: .265
+vs DeepSeek .261 (@cov≥.75 .383 vs .366; next-form .319 vs .307) at
+0.92s/$0 — this instantiates the B3 $0-baseline ship gate;
+needle-after-training must beat it while keeping its edges (0.25s,
+parse 1.0, abstention, offer channel). Base-continuation FAILS stock
+(.083-.121, display-grammar mimicry) — finetune required for that
+framing. Coverage gradient reproduces in EVERY arm — third
+confirmation: the projection binds, not the vehicle; context-gap
+fixes are the highest-leverage move. Qwen3.5-0.8B verified real
+(2026-03, GDN, 262k ctx, no FIM): .110 mid-pack. Clojure-pretraining
+verification table in the report (Qwen2.5-Coder/DeepSeek-Coder/Stack
+v1+v2/Granite = YES). Per-kind: 1.5B query .419 / plan .372 above
+frontier; register .100 regresses; defn ~0 (exclusion re-confirmed).
+
 ## Extended-context prep — RUN (2026-07-12)
 
 Prep unit for the 2048-vs-4096 extension decision
