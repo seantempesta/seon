@@ -156,9 +156,11 @@ is a tile. All pages are agent views — one mechanism, a tree of routes:
   omitted. The canvas is NOT a `(slot :canvas)` block — it is the agent's live
   tile projection. Renderer recency is the latest transaction by this agent
   touching the renderer's stored read-set; canvas slot writes share that same
-  coordinate. A click is local inspection state until a newer relevant
-  transaction arrives, when the normal reactive morph follows the newly
-  updated surface. **What the canvas shows is derived by default,
+  coordinate. Content recency orders the rail, while deliberate-focus recency
+  treats an agent-to-human reply as a transcript update and a canvas/domain
+  write as a canvas update; eval bookkeeping alone never steals focus. A human
+  click is sticky browser-local inspection state until the human leaves or the
+  selected surface disappears. **What the canvas shows is derived by default,
   pinnable to override** (the same derive-default/store-override pattern as
   everywhere): by default it is the **last-updated tile** — among the agent's
   own authored tile fns, the one most recently touched (redefined, or a write
@@ -271,23 +273,29 @@ derivation of the DB. The agent only `transact!`s datoms; it never opens or writ
 a stream. The model is hyperlith's `view = f(db)` ported into the Node pod, proven
 in `seon.web.datastar`.
 
-- **view = f(db-as-of t).** ONE render fn produces the WHOLE element (a view =
-  `[:main#app-view …tiles…]`). On every datahike commit the tx-listener re-renders
-  `view = f(db)` and writes ONE `datastar-patch-elements` event (default patch
-  mode `outer`) to every open stream. datastar's **idiomorph** diffs the DOM
-  client-side, so pushing the whole element MORPHS only what changed and preserves
-  in-element state (focus, scroll, selection, the open popover). There is no
-  server-side tree diff, no per-tile `{id, html}` packet, and no slot-tree BFS —
-  one whole-element morph, granularly applied by idiomorph.
+- **view = f(db-as-of t).** Initial paint derives the whole
+  `[:main#app-view …tiles…]`. Later commits carry their changed-attribute set;
+  each live agent feed intersects it with the database/program-graph-derived
+  renderer read-sets and emits only the affected complete, ID-addressed
+  elements in one `datastar-patch-elements` event (default patch mode `outer`).
+  Datastar morphs each target by ID and preserves in-element state. Structural
+  context/program changes fall back to a whole `#app-view` morph so surfaces can
+  appear or disappear honestly. Equivalent tabs share one render per view key;
+  frozen as-of feeds do no current-transaction work.
 - **gzip + immediate flush.** The stream is long-lived and `Content-Encoding:
   gzip`: each event is written then sync-flushed (`Z_SYNC_FLUSH`) so the
   compressed bytes hit the wire at once; the browser transparently gunzips before
   datastar reads. The streamer is crash-proofed — error handlers on the gzip
   stream + the response, a `writableEnded` guard before every write, and
-  `req.on('close')` ends the gzip stream and deregisters the connection.
-- **One throttle.** A drop-latest (coalescing) throttle collapses a tx burst into
-  ONE morph — an agent turn commits many datoms; the human sees a single
-  re-render.
+  `req.on('close')` ends the gzip stream and deregisters the connection. A
+  backpressured connection retains only its newest derived event and resumes on
+  `drain`; stale UI states never form an unbounded write queue.
+- **Dependency cache + adaptive coalescing.** Each feed caches only the cheap
+  dependency projection and refreshes it after structural changes. Unrelated
+  transactions render nothing; header-only changes never rebuild context.
+  Ordinary interactions coalesce for one frame, while program-definition bursts
+  use a short trailing debounce so a multi-form agent build produces one useful
+  structural morph instead of repeated growing-page renders.
 - **Separate GET feed path.** The shim page (`/view`, `/agent/{id}`) and its live
   stream (`/view/feed`, `/agent/{id}/feed`) are two GET URLs; the shim's
   `data-init="@get('…/feed')"` opens the stream. Two distinct URLs sidestep the
@@ -301,14 +309,12 @@ in `seon.web.datastar`.
   travel is `view = f(db-as-of t)` over the bitemporal DB — a different `t`, the
   same render. Reconnect needs no UI-side `since-t` replay: the first paint fires
   immediately on open and repaints the current view. **Status: LIVE** (`/agent/{id}`).
-  `open-agent-feed!` reads an optional `?t=<tx-id>` and binds the view-fn to
-  `view-layout (db/as-of @*conn* t)` — a PAST snapshot that is naturally FROZEN
-  (re-rendering `db-as-of-t` on a later tx yields identical bytes, so the broadcast
-  harmlessly re-pushes the same `#view`); no `?t` ⇒ the current auto-morphing feed,
-  unchanged. The `/agent` shim's time-travel bar (a SIBLING of `#view`, outside the
-  morph) owns the feed via ONE `data-effect` `@get` so datastar's per-attribute
-  auto-cancellation aborts the prior stream → exactly one stream targets `#view`
-  (the shim omits `data-init` on `#view` for that reason). Signals: `$live` /
+  `open-agent-feed!` reads an optional `?t=<tx-id>` and binds the initial view to
+  `db/as-of @*conn* t`; that feed is marked frozen and excluded from current
+  broadcasts. No `?t` means the current dependency-reactive feed. The `/agent`
+  shim's time-travel controls (siblings of `#app-view`) own the feed connection;
+  one `data-effect` `@get` lets Datastar's per-attribute auto-cancellation abort
+  the prior stream, so exactly one stream targets `#app-view`. Signals: `$live` /
   `$t` (scrub position) / `$ct` (committed as-of tx, set on slider release). Domain
   is `[db/origin-t .. db/basis-t]` (tx-ids). Proven server-side: pre-creation `t` →
   empty view, mid `t` → frozen partial view that holds under tx pressure, no-`t` →

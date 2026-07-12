@@ -6,6 +6,28 @@ tags: [prd, agent]
 
 # agent-ctx roadmap — we are here → the target
 
+## Targeted live agent surfaces and canvas controls (2026-07-11)
+
+The agent feed now derives one compact/expanded projection per surface, omits
+the focused face from the visible rail, keeps human selection sticky, follows
+only deliberate agent focus changes, and tails both transcript faces. Live
+updates are changed-attribute-driven: equivalent feeds share a render, frozen
+feeds do no work, unrelated transactions are skipped, structural bursts are
+coalesced, and slow connections retain only the newest patch. Successful
+Datastar actions return an empty 204; their database transaction remains the
+single visible-update path.
+
+`my.canvas` is the one agent-facing control surface. Its fully namespaced API
+now includes agent-scoped `state`/`save!`, direct-map button/form handlers,
+optional AI twins, and explicit contracts for renderer input and pinning. Live
+DeepSeek drives exposed and closed three real contract gaps (button data was
+mistaken for a wrapper, raw `db/pull` was repeatedly miscalled, and HTML-only
+views were rejected). A fresh real agent then produced working Increment/Reset
+controls; the actual capability-gated action returned 204 in 145 ms and the
+feed broadcast followed from the committed domain datom. The remaining
+all-surface invalidation was traced to redundant identity/provenance datoms and
+removed by lookup-ref writes plus dependency-plumbing exclusions.
+
 ## Agent-view and context-render consolidation (2026-07-11)
 
 Shipped in `bb433846`: the old page/debug adapters now share one DB-derived rendered
