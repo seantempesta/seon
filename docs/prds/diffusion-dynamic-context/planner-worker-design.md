@@ -137,9 +137,44 @@ the write-back is one function with three callers.
   no fn list, no mode, no plan knowledge in the driver (same
   registry-driven pattern as the slot masks).
 
+## The per-step plan pass (owner, 2026-07-11 late — the W2 headline)
+
+**Owner directive: "if planning via diffusion is cheap and high
+quality, run it at the beginning of EVERY step — agents are forced to
+use it to think through what they're doing."** The mechanism: before
+working the ▶ step, the driver runs a PLAN PASS — a small code-buffer
+whose template hole is prefilled with the plan document (ids clamped,
+plan grammar gated), with the goal + the frontier model's handed-down
+guidance riding the render as prose. The model EDITS: split a too-big
+step, sharpen the active step's `::expect`, reorder, drop a dead
+branch, take the next `active!`. `reconcile!` writes it back; the `⟹`
+diff receipt + the re-rendered `:plan` block are the confirmation. Then
+the WORK loop runs on the (possibly revised) ▶ step.
+
+- **Cost budget (the affordability gate):** the pass must stay ~2–3 s —
+  a small render (the plan document is a few hundred tokens, NOT the
+  full context) + a handful of decode forwards. Measure the real cost
+  first; if a pass exceeds ~5 s median it is not "every step" material
+  and falls back to on-`stuck`/on-`done!` only.
+- **Why diffusion specifically:** AR regenerates the whole document to
+  change three lines (full output-token cost, no identity guarantees);
+  the code-buffer edits in place with ids unforgeable and structure
+  grammar-gated. This is the diffusion-native operation applied at the
+  highest-leverage point.
+- **No new mechanism:** the pass = the draft-head prefill affordance
+  invoked driver-side with head `my.plan/reconcile!` at step-open. A
+  no-change pass (model leaves the document as-is) is valid and cheap —
+  the diff receipt says `0/0/0` and the loop proceeds.
+- **Measured, not assumed:** the `planner_worker` bench gains an arm —
+  plan-once vs plan-every-step — scored on outcome-at-time-budget and
+  plan-integrity. Kill criterion: if plan-every-step doesn't beat
+  plan-once at the same budget, it demotes to on-stuck re-planning.
+
 Sequencing: `reconcile!` + markdown parse land in W1 (it is W1's
-write-back). The clamped-id whole-buffer edit mode + the draft-head
-prefill affordance are the W2 headline once the focus loop works.
+write-back). W2 = the per-step plan pass (the clamped-id plan-document
+edit + the draft-head prefill affordance, driver-wired at step-open)
+once the focus loop works; the plan-once vs plan-every-step arm rides
+the W4 bench.
 
 ## Win conditions (per the exercising-agents doctrine)
 
