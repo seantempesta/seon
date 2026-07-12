@@ -64,6 +64,7 @@
    the direct compiled call). Default on."
   (:require
     [clojure.string :as str]
+    [clojure.walk :as walk]
     [sci.core :as sci]
     [sci.interrupt :as interrupt]
     [seon.config :as config]
@@ -567,7 +568,17 @@
            (vreset! !input input)
            (vreset! !deadline (+ (js/Date.now) budget-ms))
            (try
-             (let [r (sci/eval-string* c call)]
+             ;; Deep-force the result INSIDE the deadline window. An
+             ;; interpreted fn returning LAZY seqs in its hiccup (`(map …)`
+             ;; is the classic) would otherwise realize its SCI thunks
+             ;; LATER — during html serialization, outside this try, against
+             ;; a stale `!deadline` — and the un-catchable interrupt would
+             ;; escape straight into the feed/router (every push fails).
+             ;; `postwalk identity` realizes every nested seq eagerly here,
+             ;; so an over-budget lazy body becomes the honest
+             ;; `::interrupt` envelope and a healthy one returns realized
+             ;; data that can never throw after we return.
+             (let [r (walk/postwalk identity (sci/eval-string* c call))]
                ;; The valid shape is view-dependent (a String for :ai, a map
                ;; for :html). A wrong-shape result is a broken render fn → a
                ;; :seon/error block in place (fail-loud; the fn is NOT re-run

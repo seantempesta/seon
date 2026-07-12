@@ -2349,13 +2349,18 @@ cluster on the local diffusion surface:
    `SEON_DG_ENDPOINT=http://127.0.0.1:17860` (full URL ⇒ local, no
    bearer key). Optional per-agent mixing via the `::agent-provider`
    overlay (frontier planner + diffusion workers — the P7 shape).
-3. **Optional observability block** `:typeahead-steps` (IN BUILD,
+3. **Optional observability block** `:typeahead-steps` (SHIPPED,
    default-OFF by owner directive): one ctx block, html slot = live
-   step trace tile on /agent/{id}, ai slot = the provider's teaching
+   step trace tile on /agent/{id} (state banner + span-painted code
+   buffer + offers/holes/EOS panels + step history), ai slot = the
+   provider's teaching
    (renders ONLY when the agent's resolved provider is typeahead —
    reactive vanish otherwise). LANDED (fba79486, live-proven on acme:
    SSE morph mid-call, ai section in the byte-exact blob, remove!
-   vanish; suite 1201/5461/0/0). Enabling is CONFIG-DRIVEN at cluster
+   vanish; suite 1201/5461/0/0). The RICH tile is live-proven on the
+   UNIFIED agent view 2026-07-11 PM (92 feed frames across one 8-min
+   call; screenshot docs/prds/diffusion-dynamic-context/research/
+   typeahead-tile-2026-07-11.png). Enabling is CONFIG-DRIVEN at cluster
    scope — paste this row into your overlay's `:seon.agent/ctx` tree:
    `{:seon.agent.ctx/name :typeahead-steps :seon.agent.ctx/priority 95
    :seon.render/ai seon.agent.ctx.typeahead-steps/steps-ai
@@ -2369,8 +2374,13 @@ cluster on the local diffusion surface:
 4. **Render-size caveat**: measured protocol is ≤4k-token renders
    (~1.7 s/step; prefill dominates). The minimal tree keeps renders in
    range; the pre-minimal 36k legacy render made the model collapse
-   (P3b). Until your datahike planner fix lands, long drives run on
-   fresh-ish stores (diffusion PRD CLAUDE.md runbook rule).
+   (P3b). The datahike fix landed and the fresh-store drive rule is
+   RETIRED (acme stays as-grown) — but measured 2026-07-11 PM on the
+   grown 65k-key acme store, renders run ~22k tokens and typeahead
+   steps 21–34 s each (a multi-step call needs
+   `SEON_LLM_ATTEMPT_TIMEOUT_MS` above the 120 s default). Keeping the
+   render inside the ≤4k interactivity target at store scale is open
+   minimal-tree work, not a tile concern.
 
 Spine: docs/prds/diffusion-dynamic-context/CLAUDE.md (runbook + current
 state) · typeahead-design.md (the measured surface) ·

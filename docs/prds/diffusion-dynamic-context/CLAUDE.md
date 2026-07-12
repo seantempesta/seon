@@ -21,6 +21,14 @@ slots (live step-trace tile + provider-gated ai instructions), in
 enabling is opt-in only (manifest overlay row or per-agent
 `ctx/install!` — see [[typeahead-design]] §"The live block"). Live-proven
 on acme (feed morph mid-call, prompt-blob ai section, remove!-vanish).
+The RICH tile (span-painted code buffer + offers/holes/EOS panels) is
+live-proven on the UNIFIED agent view 2026-07-11 PM — screenshot
+`research/typeahead-tile-2026-07-11.png`; the drive also surfaced a
+render-scale finding (grown acme store ⇒ ~22k-token renders, 21–34 s/
+step — the ≤4k protocol needs the minimal tree at scale) and a core
+fix (`seon.render.sci/invoke-bounded` now deep-forces lazy SCI render
+results inside the deadline window; lazy hiccup from a bounded `my.*`
+render fn was interrupting every feed push on the unified view).
 
 P1–P6 shipped + measured — P6 CLOSED 2026-07-11 (full re-run of all
 local arms, worker `c88acc1913c4`; evidence

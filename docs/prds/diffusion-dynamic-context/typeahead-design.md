@@ -435,16 +435,29 @@ transacts the per-step `:seon.typeahead/*` projections; the block ns
 derives everything at render. The P3b self-install is RETIRED: nothing
 installs this block by default, anywhere.
 
-- **`:seon.render/html`** (`steps-tile-html`) — the agent-page tile:
-  the LAST call's step trace (per step: transition dot+text, glyph, the
-  expand outcome `→⊢`/`✗offer`, calibrated margin Δ, locked count +
-  forwards, wall `gen-s`, worst free-entropy `H`, the EOS done-ness
-  bar), a call header (steps · total ⊢ · `ctx ~N tok` render size ·
-  worker sha), and the current draft preview sized in TOKENS. The
-  per-step transacts make it live over the normal datastar SSE morph
-  (live-proven 2026-07-11: continuous `/agent/{id}/feed` frames during
-  a provider call, step rows growing frame-to-frame). No step rows →
-  nil → the tile vanishes.
+- **`:seon.render/html`** (`steps-tile-html`) — the agent-page tile,
+  composed top to bottom (every panel reactive — it vanishes when its
+  rows lack the data): the STATE BANNER (FSM state now as dot+text,
+  provider, step k/N, rounds j/budget, wall so far, `ctx ~N tok`
+  render size, worker sha), THE CODE-BUFFER PANE (the last step's
+  `buffer_text` painted by `buffer_spans` status — locked / clamped /
+  settled / resolving / repaired / frontier — with a legend line so
+  the encoding never needs recall), the OFFERS panel (per-offer
+  fired / suppressed / below-margin + a calibrated-margin mini-bar
+  against the auto-offer threshold tick), the HOLES panel (per-hole
+  worst/mean entropy, CAL-chosen length, accepted/round, snap→candidate
+  after an EXPAND), the DONE-NESS strip (EOS-logprob meter + locked
+  forms + harvested-token totals) and the compact STEP HISTORY (per
+  step: transition dot+text, glyph, `→⊢`/`✗offer` expand outcome,
+  margin Δ, locks + forwards, wall `gen-s`, worst `H`, EOS meter).
+  The per-step transacts make it live over the normal datastar SSE
+  morph (live-proven 2026-07-11 on the UNIFIED agent view: 92
+  `/agent/{id}/feed` frames across one 8-min provider call; the tile
+  renders both as a right-rail card and as the selectable primary
+  panel — screenshot:
+  `research/typeahead-tile-2026-07-11.png`, an 8-step call showing
+  repair + expand + suppressed-offer + settled-hole states at once).
+  No step rows → nil → the tile vanishes.
 - **`:seon.render/ai`** (`steps-ai`) — the provider protocol teaching,
   rendered ONLY when the agent's RESOLVED provider is `:typeahead`
   (`seon.ai/resolved-config` over the render db — global config row
