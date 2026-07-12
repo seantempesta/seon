@@ -57,6 +57,14 @@ contract = copy-heavy form kinds (plan/transact/register).
 7. **B3 serve + `:suggest`** — call-once-then-derive, volatile-segment
    priority, diffusion offer channel; ship gate = $0 baseline loses +
    dead-weight criterion + frontier with/without arm.
+8. **DG finetune (second consumer, owner 2026-07-12)** — the SAME
+   canonical JSONL feeds a DiffusionGemma finetune ((context, forms) ≡
+   (conditioning prefix, denoise region)); per-model formatter in the
+   trainer, no second dataset pipeline. LoRA-on-MLX first (8-bit base
+   + adapters), RunPod CUDA artifacts as fallback; training loop lives
+   in the diffusion-gemma repo (model infra, not seon core); own
+   reachability smoke before any long run. Independent of needle's
+   KT5 outcome — gated only on the data build passing curation.
 
 ## Open questions
 
