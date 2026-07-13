@@ -922,6 +922,19 @@
 ;; Runtime read capture — normalized request/result facts, never db handles.
 ;; ---------------------------------------------------------------------------
 
+(def ^:private read-value-tags
+  #{:seon.db.read.value/instant
+    :seon.db.read.value/uuid
+    :seon.db.read.value/bigint
+    :seon.db.read.value/bytes
+    :seon.db.read.value/literal-vector
+    :seon.db.read.value/literal-keyword})
+
+(def ^:private read-value-sentinels
+  #{:seon.db.read.value/captured-db
+    :seon.db.read.value/foreign-db
+    :seon.db.read.value/opaque})
+
 (defn normalize-read-value
   "Normalize a captured request/result value relative to `captured-db`.
 
@@ -958,7 +971,9 @@
               [{:db/id (:db/id x)} false]
 
               (inst? x)
-              [[:seon.db.read.value/instant (inst-ms x)] true]
+              (let [millis (inst-ms x)]
+                [[:seon.db.read.value/instant millis]
+                 (js/Number.isFinite millis)])
 
               (uuid? x)
               [[:seon.db.read.value/uuid (str x)] true]
@@ -966,31 +981,59 @@
               (= js/BigInt (type x))
               [[:seon.db.read.value/bigint (str x)] true]
 
-              (and (some? x)
-                   (some? (.-buffer x))
-                   (instance? js/ArrayBuffer (.-buffer x))
-                   (number? (.-byteLength x)))
+              ;; Datahike's CLJS bytes value is a Uint8Array. Other typed
+              ;; views have a buffer too, but restoring them as Uint8Array
+              ;; would silently change their element width and semantics.
+              (instance? js/Uint8Array x)
               [[:seon.db.read.value/bytes (vec (array-seq x))] true]
 
               (map? x)
-              (reduce-kv
-                (fn [[m replayable?] k v]
-                  (let [[k' key-replayable?] (normalize k)
-                        [v' value-replayable?] (normalize v)]
-                    [(assoc m k' v')
-                     (and replayable? key-replayable? value-replayable?)]))
-                [{} true]
-                x)
+              (let [[normalized replayable?]
+                    (reduce-kv
+                      (fn [[m replayable?] k v]
+                        (let [[k' key-replayable?] (normalize k)
+                              [v' value-replayable?] (normalize v)]
+                          [(assoc m k' v')
+                           (and replayable?
+                                key-replayable?
+                                value-replayable?)]))
+                      [{} true]
+                      x)]
+                [normalized
+                 (and replayable?
+                      (not (record? x))
+                      (not (sorted? x))
+                      (nil? (meta x))
+                      ;; Distinct host keys can normalize to the same value.
+                      ;; Losing one would make replay claim a false cache hit.
+                      (= (count x) (count normalized)))])
 
               (vector? x)
-              (normalize-coll [] x conj)
+              (let [[items replayable?] (normalize-coll [] x conj)]
+                [(if (contains? read-value-tags (first x))
+                   [:seon.db.read.value/literal-vector items]
+                   items)
+                 (and replayable? (nil? (meta x)))])
 
               (set? x)
-              (normalize-coll #{} x conj)
+              (let [[normalized replayable?] (normalize-coll #{} x conj)]
+                [normalized
+                 (and replayable?
+                      (not (sorted? x))
+                      (nil? (meta x))
+                      ;; Content-equal Dates/bytes are identity-distinct JS
+                      ;; values but share one normalized representation.
+                      (= (count x) (count normalized)))])
 
               (seq? x)
               (let [[items replayable?] (normalize-coll [] x conj)]
-                [(apply list items) replayable?])
+                [(apply list items)
+                 (and replayable? (list? x) (nil? (meta x)))])
+
+              ;; These keywords are otherwise indistinguishable from the
+              ;; sentinels emitted for opaque runtime values and db handles.
+              (contains? read-value-sentinels x)
+              [[:seon.db.read.value/literal-keyword x] true]
 
               ;; Preserve simple immutable EDN scalars exactly. Other CLJS
               ;; collection implementations are normalized to a vector but
@@ -1048,6 +1091,14 @@
                              (every? #(and (int? %) (<= 0 % 255)) payload))
                     [(js/Uint8Array. (clj->js payload)) true])
 
+                  :seon.db.read.value/literal-vector
+                  (when (vector? payload)
+                    (restore-coll [] payload conj))
+
+                  :seon.db.read.value/literal-keyword
+                  (when (contains? read-value-sentinels payload)
+                    [payload true])
+
                   nil))))
           (restore [x]
             (if-let [tagged (owned-tag x)]
@@ -1059,33 +1110,43 @@
                 [nil false]
 
                 (map? x)
-                (reduce-kv
-                  (fn [[m safe?] k v]
-                    (let [[k' key-safe?] (restore k)
-                          [v' value-safe?] (restore v)]
-                      [(assoc m k' v')
-                       (and safe? key-safe? value-safe?)]))
-                  [{} true]
-                  x)
+                (let [[restored safe?]
+                      (reduce-kv
+                        (fn [[m safe?] k v]
+                          (let [[k' key-safe?] (restore k)
+                                [v' value-safe?] (restore v)]
+                            [(assoc m k' v')
+                             (and safe? key-safe? value-safe?)]))
+                        [{} true]
+                        x)]
+                  [restored
+                   (and safe?
+                        (not (record? x))
+                        (not (sorted? x))
+                        (nil? (meta x))
+                        (= (count x) (count restored)))])
 
                 (vector? x)
                 ;; A vector beginning with an observer-owned tag but carrying
                 ;; a malformed payload must not fall through as ordinary query
                 ;; data. It could otherwise invoke Datahike with a value the
                 ;; capture mechanism never emitted.
-                (if (#{:seon.db.read.value/instant
-                       :seon.db.read.value/uuid
-                       :seon.db.read.value/bigint
-                       :seon.db.read.value/bytes} (first x))
+                (if (contains? read-value-tags (first x))
                   [nil false]
                   (restore-coll [] x conj))
 
                 (set? x)
-                (restore-coll #{} x conj)
+                (let [[restored safe?] (restore-coll #{} x conj)]
+                  [restored
+                   (and safe?
+                        (not (sorted? x))
+                        (nil? (meta x))
+                        (= (count x) (count restored)))])
 
                 (seq? x)
                 (let [[items safe?] (restore-coll [] x conj)]
-                  [(apply list items) safe?])
+                  [(apply list items)
+                   (and safe? (list? x) (nil? (meta x)))])
 
                 (or (nil? x) (string? x) (number? x) (boolean? x)
                     (keyword? x) (symbol? x))
@@ -1094,6 +1155,73 @@
                 :else
                 [nil false])))]
     (restore value)))
+
+(defn normalized-read-value?
+  "True when `value` is an unambiguous observer-owned normalized value.
+
+   The predicate validates the normalized representation without rebuilding
+   host values. Reserved tags must have their exact payload shapes; arbitrary
+   vectors beginning with a reserved tag are represented by `literal-vector`.
+   Runtime sentinels are never valid inside a replayable observation."
+  [value]
+  (letfn [(valid-bigint? [payload]
+            (and (string? payload)
+                 (try
+                   (js/BigInt payload)
+                   true
+                   (catch :default _ false))))
+          (valid-tag? [tag payload]
+            (case tag
+              :seon.db.read.value/instant
+              (and (number? payload) (js/Number.isFinite payload))
+
+              :seon.db.read.value/uuid
+              (string? payload)
+
+              :seon.db.read.value/bigint
+              (valid-bigint? payload)
+
+              :seon.db.read.value/bytes
+              (and (vector? payload)
+                   (every? #(and (int? %) (<= 0 % 255)) payload))
+
+              :seon.db.read.value/literal-vector
+              (and (vector? payload) (every? valid? payload))
+
+              :seon.db.read.value/literal-keyword
+              (contains? read-value-sentinels payload)
+
+              false))
+          (valid? [x]
+            (cond
+              (contains? read-value-sentinels x) false
+
+              (map? x)
+              (and (not (record? x))
+                   (not (sorted? x))
+                   (nil? (meta x))
+                   (every? (fn [[k v]] (and (valid? k) (valid? v))) x))
+
+              (vector? x)
+              (if (contains? read-value-tags (first x))
+                (and (= 2 (count x))
+                     (valid-tag? (first x) (second x)))
+                (and (nil? (meta x)) (every? valid? x)))
+
+              (set? x)
+              (and (not (sorted? x))
+                   (nil? (meta x))
+                   (every? valid? x))
+
+              (seq? x)
+              (and (list? x) (nil? (meta x)) (every? valid? x))
+
+              (or (nil? x) (string? x) (number? x) (boolean? x)
+                  (keyword? x) (symbol? x))
+              true
+
+              :else false))]
+    (boolean (valid? value))))
 
 (defn record-read!
   "Append one normalized read fact to every active capture bucket.

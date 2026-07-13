@@ -62,6 +62,7 @@
     [datahike.db :refer [AsOfDB]]
     [datahike.db.interface :as dbi]
     [datahike.impl.entity :as dentity]
+    [malli.core :as m]
     [seon.config :as config]
     [seon.db.id]
     [seon.db.internal :as internal]
@@ -364,7 +365,23 @@
 (schema/register! ::read-operation :qualified-keyword)
 (schema/register! ::read-source
   [:enum :seon.db.read.source/captured :seon.db.read.source/foreign])
+;; `::read-request` stays broad at the observation envelope so a future or
+;; malformed operation reaches `read-observation-changed?` and conservatively
+;; misses instead of throwing at instrumentation. Known operations validate
+;; against the exact closed shapes below before replay.
 (schema/register! ::read-request :map)
+(schema/register! ::query-read-request
+  [:map {:closed true}
+   [::query ::query-form]
+   [::args [:vector :any]]])
+(schema/register! ::pull-read-request
+  [:map {:closed true}
+   [::pull-pattern [:vector :any]]
+   [::ref :any]])
+(schema/register! ::entity-read-request
+  [:map {:closed true}
+   [::ref :any]])
+(schema/register! ::empty-read-request [:map {:closed true}])
 (schema/register! ::read-result :any)
 (schema/register! ::read-replayable? :boolean)
 (schema/register! ::read-observation
@@ -1329,6 +1346,21 @@
     :seon.db.read.operation/entity
     :seon.db.read.operation/basis-t})
 
+(def ^:private replayable-read-request-validators
+  ;; Malli's `validate` rebuilds a validator per call. Replay is a broadcast
+  ;; hot path, so compile each stable registered request shape once here.
+  {:seon.db.read.operation/query (m/validator ::query-read-request)
+   :seon.db.read.operation/installed-schema (m/validator ::empty-read-request)
+   :seon.db.read.operation/pull (m/validator ::pull-read-request)
+   :seon.db.read.operation/entity (m/validator ::entity-read-request)
+   :seon.db.read.operation/basis-t (m/validator ::empty-read-request)})
+
+(defn- valid-replay-request?
+  "True when a known operation carries its exact normalized request shape."
+  [operation request]
+  (when-let [validator (get replayable-read-request-validators operation)]
+    (validator request)))
+
 (defn- replay-read-result
   "Replay one known semantic read without recording another observation."
   [db operation request]
@@ -1368,25 +1400,24 @@
                  read-replayable?]} read-observation]
     (if-not (and read-replayable?
                  (= :seon.db.read.source/captured read-source)
-                 (contains? replayable-read-operations read-operation))
+                 (contains? replayable-read-operations read-operation)
+                 (valid-replay-request? read-operation read-request)
+                 (internal/normalized-read-value? read-request)
+                 (internal/normalized-read-value? read-result))
       true
-      (let [[stored-result stored-result-safe?]
-            (internal/normalize-read-value db read-result)]
-        (if-not (and stored-result-safe? (= stored-result read-result))
+      (let [[request request-safe?]
+            (internal/denormalize-read-value read-request)]
+        (if-not request-safe?
           true
-          (let [[request request-safe?]
-                (internal/denormalize-read-value read-request)]
-            (if-not request-safe?
-              true
-              (try
-                (let [current-result
-                      (replay-read-result db read-operation request)
-                      [normalized-current current-safe?]
-                      (internal/normalize-read-value db current-result)]
-                  (or (not current-safe?)
-                      (not= read-result normalized-current)))
-                (catch :default _
-                  true)))))))))
+          (try
+            (let [current-result
+                  (replay-read-result db read-operation request)
+                  [normalized-current current-safe?]
+                  (internal/normalize-read-value db current-result)]
+              (or (not current-safe?)
+                  (not= read-result normalized-current)))
+            (catch :default _
+              true)))))))
 
 ;; ---------------------------------------------------------------------------
 ;; Listeners

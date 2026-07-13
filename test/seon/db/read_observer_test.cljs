@@ -354,6 +354,121 @@
                   "tag replay does not emit another observation"))))
         (settle! done))))
 
+(deftest reserved-tag-shaped-data-remains-literal-through-replay
+  (async done
+    (-> (fresh-seeded)
+        (.then
+          (fn [{db-value :db}]
+            (let [literal-values
+                  [[:seon.db.read.value/instant 1720000000123]
+                   [:seon.db.read.value/uuid
+                    "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11"]
+                   [:seon.db.read.value/bigint "9007199254740993"]
+                   [:seon.db.read.value/bytes [1 2 255]]]
+                  query-form
+                  '[:find ?input .
+                    :in $ ?input
+                    :where [(= 1 1)]]
+                  event
+                  (capture-event
+                    db-value :seon.db.read.operation/query
+                    #(db/query query-form db-value literal-values))
+                  normalized-result (:seon.db/read-result event)
+                  [restored safe?]
+                  (internal/denormalize-read-value normalized-result)]
+              (is (true? (:seon.db/read-replayable? event)))
+              (is (every? #(= :seon.db.read.value/literal-vector (first %))
+                          normalized-result)
+                  "literal tag-shaped vectors have an unambiguous escape")
+              (is safe?)
+              (is (= literal-values restored))
+              (is (every? vector? restored)
+                  "literal vectors do not become Date, UUID, BigInt, or bytes")
+              (is (false? (changed? db-value event))
+                  "replay reproduces the literal query result"))))
+        (settle! done))))
+
+(deftest normalization-collisions-disable-replay
+  (async done
+    (-> (fresh-seeded)
+        (.then
+          (fn [{db-value :db}]
+            (let [left (js/Date. 1720000000123)
+                  right (js/Date. 1720000000123)
+                  colliding-map (assoc {} left :left right :right)
+                  colliding-set (conj #{} left right)
+                  query-form
+                  '[:find ?input .
+                    :in $ ?input
+                    :where [(= 1 1)]]
+                  map-event
+                  (capture-event
+                    db-value :seon.db.read.operation/query
+                    #(db/query query-form db-value colliding-map))
+                  set-event
+                  (capture-event
+                    db-value :seon.db.read.operation/query
+                    #(db/query query-form db-value colliding-set))]
+              (is (= 2 (count colliding-map)))
+              (is (= 2 (count colliding-set)))
+              (is (false? (:seon.db/read-replayable? map-event))
+                  "normalizing content-equal host keys cannot drop a map row")
+              (is (false? (:seon.db/read-replayable? set-event))
+                  "normalizing content-equal host values cannot drop a set item")
+              (is (true? (changed? db-value map-event)))
+              (is (true? (changed? db-value set-event))))))
+        (settle! done))))
+
+(deftest malformed-known-read-requests-conservatively-change
+  (async done
+    (-> (fresh-seeded)
+        (.then
+          (fn [{db-value :db}]
+            (let [query-event
+                  (capture-event
+                    db-value :seon.db.read.operation/query
+                    #(helper-query db-value "child"))
+                  pull-event
+                  (capture-event
+                    db-value :seon.db.read.operation/pull
+                    #(db/pull db-value [::id ::value] [::id "child"]))
+                  entity-event
+                  (capture-event
+                    db-value :seon.db.read.operation/entity
+                    #(db/entity db-value [::id "child"]))
+                  schema-event
+                  (capture-event
+                    db-value :seon.db.read.operation/installed-schema
+                    #(db/installed-schema db-value))
+                  basis-event
+                  (capture-event
+                    db-value :seon.db.read.operation/basis-t
+                    #(db/basis-t db-value))
+                  malformed
+                  [(update query-event :seon.db/read-request
+                           dissoc :seon.db/args)
+                   (update pull-event :seon.db/read-request
+                           dissoc :seon.db/ref)
+                   (assoc-in entity-event
+                             [:seon.db/read-request :seon.db/args]
+                             [])
+                   (assoc schema-event :seon.db/read-request
+                          {:seon.db/args []})
+                   (assoc basis-event :seon.db/read-request
+                          {:seon.db/args []})
+                   (assoc query-event :seon.db/read-result
+                          [:seon.db.read.value/instant "not-ms"])]
+                  replay
+                  (db/capture-reads
+                    {:seon.db/db db-value
+                     :seon.db/thunk
+                     #(mapv (partial changed? db-value) malformed)})]
+              (is (every? true? (:seon.db/result replay))
+                  "missing, extra, and malformed normalized facts all miss")
+              (is (empty? (:seon.db/read-observations replay))
+                  "rejecting malformed replay facts performs no public reads"))))
+        (settle! done))))
+
 (deftest unsafe-or-unknown-observations-conservatively-change
   (async done
     (-> (fresh-seeded)
